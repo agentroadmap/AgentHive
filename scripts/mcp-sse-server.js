@@ -6,7 +6,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(__dirname, '..');
 
 const serverModule = await import('../src/mcp/server.ts');
-const { createMcpServer } = serverModule.default;
+const createMcpServer = serverModule.createMcpServer || serverModule.default?.createMcpServer;
+
+if (!createMcpServer) {
+  console.error('[MCP] Failed to load createMcpServer from server module');
+  process.exit(1);
+}
 
 const app = express();
 
@@ -56,8 +61,45 @@ app.post('/messages', express.json(), async (req, res) => {
 });
 
 const port = process.env.MCP_PORT || 6421;
-app.listen(port, '0.0.0.0', () => {
+const server = app.listen(port, '0.0.0.0', () => {
   console.log('[MCP] Roadmap.md SSE Server listening on port ' + port);
   console.log('[MCP] SSE Endpoint: http://localhost:' + port + '/sse');
   console.log('[MCP] Message Endpoint: http://localhost:' + port + '/messages');
+});
+
+// Keepalive: prevent Node from exiting when event loop would otherwise be empty
+const keepalive = setInterval(() => {
+  // No-op — just keeps the event loop active
+  server.getConnections((err, count) => {
+    if (!err && count === 0) {
+      // No active connections — normal state, keep running
+    }
+  });
+}, 30000); // Every 30 seconds
+
+// Handle graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('[MCP] SIGTERM received, shutting down gracefully');
+  clearInterval(keepalive);
+  server.close(() => {
+    console.log('[MCP] Server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('[MCP] SIGINT received, shutting down gracefully');
+  clearInterval(keepalive);
+  server.close(() => {
+    console.log('[MCP] Server closed');
+    process.exit(0);
+  });
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[MCP] Uncaught exception:', err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[MCP] Unhandled rejection:', reason);
 });
