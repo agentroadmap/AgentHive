@@ -406,6 +406,11 @@ export async function createMcpServer(projectRoot: string, options: ServerInitOp
 		const rfc = new RfcWorkflowHandlers(server);
 		rfc.register();
 
+		// Proposal CRUD tools (create, get, list, update, search, summary)
+		const { ProposalHandlers } = await import('./tools/proposal/pg-handlers.ts');
+		const proposals = new ProposalHandlers(server);
+		proposals.register();
+
 		console.log('[MCP] Using Postgres backend (agenthive) for proposals, messaging, agents, spending, memory, RFC workflow');
 	} else {
 		// SpacetimeDB-backed tools (fallback)
