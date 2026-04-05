@@ -1490,7 +1490,7 @@ ${description || `Directive: ${title}`}`,
 		let inDatabaseSection = false;
 		let inProposalsSection = false;
 		let inProjectSection = false;
-		config.database = { provider: "markdown" };
+		config.database = { provider: "Postgres" };
 
 		for (const line of lines) {
 			const trimmed = line.trim();
