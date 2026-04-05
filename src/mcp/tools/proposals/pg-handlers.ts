@@ -187,4 +187,31 @@ export class PgProposalHandlers {
       return errorResult("Failed to get versions", err);
     }
   }
+
+  async searchProposals(args: { query: string; limit?: number }): Promise<CallToolResult> {
+    try {
+      const proposals = await pg.searchProposals(args.query, args.limit ?? 10);
+      if (!proposals || proposals.length === 0) {
+        return { content: [{ type: "text", text: `No proposals match "${args.query}".` }] };
+      }
+      const lines = proposals.map((p) => {
+        const did = p.display_id ?? `#${p.id}`;
+        return `[${did}] ${p.title || "(no title)"} — status: ${p.status}, maturity: ${p.maturity_level}\n  ${p.body_markdown ? p.body_markdown.substring(0, 150) : ""}`;
+      });
+      return { content: [{ type: "text", text: `### Search: "${args.query}"\n\n${lines.join("\n\n")}` }] };
+    } catch (err) {
+      return errorResult("Failed to search proposals", err);
+    }
+  }
+
+  async summary(args: Record<string, never>): Promise<CallToolResult> {
+    try {
+      const rows = await pg.proposalSummary();
+      const total = rows.length > 0 ? rows[0].total : 0;
+      const lines = rows.map((r) => `- **${r.status}**: ${r.count}`);
+      return { content: [{ type: "text", text: `### Proposal Summary\n\n**Total**: ${total}\n\n${lines.join("\n")}` }] };
+    } catch (err) {
+      return errorResult("Failed to get proposal summary", err);
+    }
+  }
 }

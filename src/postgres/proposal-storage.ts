@@ -185,6 +185,33 @@ export async function deleteProposal(id: number): Promise<boolean> {
 }
 
 /**
+ * Search proposals by full-text against title + body_markdown.
+ */
+export async function searchProposals(queryText: string, limit?: number): Promise<ProposalRow[]> {
+  const maxResults = limit ?? 10;
+  const { rows } = await query<ProposalRow>(
+    `SELECT * FROM proposal
+     WHERE to_tsvector('english', COALESCE(title, '') || ' ' || COALESCE(body_markdown, ''))
+           @@ plainto_tsquery('english', $1)
+     ORDER BY maturity_level DESC, priority ASC, updated_at DESC
+     LIMIT $2`,
+    [queryText, maxResults],
+  );
+  return rows;
+}
+
+/**
+ * Get proposal counts grouped by status.
+ */
+export async function proposalSummary(): Promise<{ status: string; count: number; total: number }[]> {
+  const { rows } = await query<{ status: string; count: number }>(
+    `SELECT status, COUNT(*)::int as count FROM proposal GROUP BY status ORDER BY status`,
+  );
+  const total = rows.reduce((sum, r) => sum + r.count, 0);
+  return rows.map(r => ({ ...r, total }));
+}
+
+/**
  * Get proposal versions (provenance trail).
  */
 export async function getProposalVersions(proposalId: number): Promise<any[]> {

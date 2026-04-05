@@ -112,7 +112,9 @@ export function workflowToSql(wf: WorkflowDefinition): string {
 
     const rows = wf.transitions.map((t) => {
       const roles = (t.allowed_roles || []).map(r => "'" + esc(r) + "'").join(', ');
-      return `  ('${esc(wf.metadata.name)}', '${esc(t.from)}', '${esc(t.to)}', ARRAY[${roles || 'NULL'}], ${!!t.requires_ac})`;
+      // requires_ac is text CHECK (none/all/critical), not boolean
+      const acVal = t.requires_ac ? 'all' : 'none';
+      return `  ('${esc(wf.metadata.name)}', '${esc(t.from)}', '${esc(t.to)}', ARRAY[${roles || 'NULL'}], '${acVal}')`;
     });
 
     sql.push(rows.join(',\n'));

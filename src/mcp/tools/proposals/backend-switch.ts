@@ -5,8 +5,8 @@
  * This allows gradual migration from SDB → Postgres without breaking existing flows.
  */
 import type { McpServer } from "../server.ts";
-import { PgProposalHandlers } from "./proposals/pg-handlers.ts";
-import { SdbProposalHandlers } from "./proposals/sdb-handlers.ts";
+import { PgProposalHandlers } from "./pg-handlers.ts";
+import { SdbProposalHandlers } from "./sdb-handlers.ts";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";

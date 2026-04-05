@@ -401,15 +401,13 @@ export async function createMcpServer(projectRoot: string, options: ServerInitOp
 			handler: (a: any) => memory.searchMemory(a),
 		});
 
+		// Proposal CRUD tools via backend-switch (prop_list, prop_get, prop_create, prop_update, prop_transition, prop_delete)
+		// Already registered at line 352 via registerProposalTools
+
 		// RFC Workflow tools (state machine, AC, deps, reviews, discussions)
 		const { RfcWorkflowHandlers } = await import('./tools/rfc/pg-handlers.ts');
 		const rfc = new RfcWorkflowHandlers(server);
 		rfc.register();
-
-		// Proposal CRUD tools (create, get, list, update, search, summary)
-		const { ProposalHandlers } = await import('./tools/proposal/pg-handlers.ts');
-		const proposals = new ProposalHandlers(server);
-		proposals.register();
 
 		console.log('[MCP] Using Postgres backend (agenthive) for proposals, messaging, agents, spending, memory, RFC workflow');
 	} else {
