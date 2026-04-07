@@ -1,0 +1,42 @@
+project:
+  name: AgentHive
+  project_root: /data/code/AgentHive
+  date_format: yyyy-mm-dd
+  export_path: export
+database:
+  provider: Postgres
+  name: agenthive
+  schema: roadmap
+  host: 127.0.0.1
+  port: 5432
+mcp:
+  port: 6421
+  transport: sse
+proposals:
+  default_status: Draft
+  statuses:
+    - Draft
+    - Review
+    - Develop
+    - Complete
+    - Rejected
+    - Abandoned
+    - Replaced
+  labels:
+    - feature
+    - bugfix
+    - refactor
+    - docs
+  zero_padded_ids: 3
+  table_name: proposal
+ui:
+  max_column_width: 80
+  auto_open_browser: true
+git:
+  auto_commit: true
+  bypass_git_hooks: false
+  check_active_branches: true
+  active_branch_days: 30
+remote:
+  default_port: 6420
+  operations: true
