@@ -6,7 +6,6 @@
  */
 
 import { query } from "../../../../postgres/pool.ts";
-import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
@@ -21,11 +20,6 @@ function errorResult(msg: string, err: unknown): CallToolResult {
 }
 
 export class PgAgentHandlers {
-	constructor(
-		private readonly core: McpServer,
-		private readonly projectRoot: string,
-	) {}
-
 	async listAgents(args: { status?: string }): Promise<CallToolResult> {
 		try {
 			const where = args.status ? `WHERE status = $1` : "";
@@ -101,7 +95,7 @@ export class PgAgentHandlers {
 		}
 	}
 
-	async listTeams(_args: {}): Promise<CallToolResult> {
+	async listTeams(_args: Record<string, never>): Promise<CallToolResult> {
 		try {
 			const { rows } = await query(`SELECT * FROM team ORDER BY team_name`);
 			if (!rows.length) {

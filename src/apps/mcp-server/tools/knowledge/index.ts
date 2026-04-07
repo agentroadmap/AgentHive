@@ -30,7 +30,7 @@ export function registerKnowledgeTools(server: McpServer): void {
 			inputSchema: knowledgeAddSchema,
 		},
 		knowledgeAddSchema,
-		async (input) => handlers.addEntry(input as any),
+		async (input) => handlers.addEntry(input),
 	);
 
 	const searchTool: McpToolHandler = createSimpleValidatedTool(
@@ -40,7 +40,7 @@ export function registerKnowledgeTools(server: McpServer): void {
 			inputSchema: knowledgeSearchSchema,
 		},
 		knowledgeSearchSchema,
-		async (input) => handlers.search(input as any),
+		async (input) => handlers.search(input),
 	);
 
 	const recordDecisionTool: McpToolHandler = createSimpleValidatedTool(
@@ -51,7 +51,7 @@ export function registerKnowledgeTools(server: McpServer): void {
 			inputSchema: knowledgeRecordDecisionSchema,
 		},
 		knowledgeRecordDecisionSchema,
-		async (input) => handlers.recordDecision(input as any),
+		async (input) => handlers.recordDecision(input),
 	);
 
 	const extractPatternTool: McpToolHandler = createSimpleValidatedTool(
@@ -62,7 +62,7 @@ export function registerKnowledgeTools(server: McpServer): void {
 			inputSchema: knowledgeExtractPatternSchema,
 		},
 		knowledgeExtractPatternSchema,
-		async (input) => handlers.extractPattern(input as any),
+		async (input) => handlers.extractPattern(input),
 	);
 
 	const getDecisionsTool: McpToolHandler = createSimpleValidatedTool(
@@ -73,7 +73,7 @@ export function registerKnowledgeTools(server: McpServer): void {
 			inputSchema: knowledgeGetDecisionsSchema,
 		},
 		knowledgeGetDecisionsSchema,
-		async (input) => handlers.getDecisions(input as any),
+		async (input) => handlers.getDecisions(input),
 	);
 
 	const getStatsTool: McpToolHandler = createSimpleValidatedTool(
@@ -93,7 +93,7 @@ export function registerKnowledgeTools(server: McpServer): void {
 			inputSchema: knowledgeMarkHelpfulSchema,
 		},
 		knowledgeMarkHelpfulSchema,
-		async (input) => handlers.markHelpful(input as any),
+		async (input) => handlers.markHelpful(input),
 	);
 
 	server.addTool(addEntryTool);
