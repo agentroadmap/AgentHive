@@ -1,0 +1,25 @@
+{
+	"$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+	"css": {
+		"parser": {
+			"tailwindDirectives": true
+		}
+	},
+	"overrides": [
+		{
+			"includes": ["src/apps/dashboard-web/styles/source.css"],
+			"formatter": {
+				"enabled": false
+			}
+		},
+		{
+			"includes": ["src/apps/dashboard-web/styles/style.css"],
+			"formatter": {
+				"enabled": false
+			},
+			"linter": {
+				"enabled": false
+			}
+		}
+	]
+}

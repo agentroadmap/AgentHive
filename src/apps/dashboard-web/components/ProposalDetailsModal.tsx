@@ -60,7 +60,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 	onSubmit,
 	onArchive,
 	availableStatuses,
-	availableDirectives,
+	availableDirectives: _availableDirectives,
 	directiveEntities,
 	archivedDirectiveEntities,
 	isDraftMode,
@@ -319,7 +319,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 			.catch(() => setAvailableProposals([]));
 	}, [proposal, isCreateMode, isDraftMode, availableStatuses]);
 
-	const handleCancelEdit = () => {
+	const handleCancelEdit = useCallback(() => {
 		if (isDirty) {
 			const confirmDiscard = window.confirm("Discard unsaved changes?");
 			if (!confirmDiscard) return;
@@ -336,7 +336,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 			setCriteria(proposal?.acceptanceCriteriaItems || []);
 			setMode("preview");
 		}
-	};
+	}, [isCreateMode, isDirty, onClose, proposal]);
 
 	const _normalizeChecklistItems = (
 		items: AcceptanceCriterion[],
@@ -346,7 +346,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 			.filter((item) => item.text.length > 0);
 	};
 
-	const handleSave = async () => {
+	const handleSave = useCallback(async () => {
 		setSaving(true);
 		setError(null);
 
@@ -395,7 +395,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 			if (err instanceof Error) {
 				errorMessage = err.message;
 			} else if (typeof err === "object" && err !== null && "error" in err) {
-				errorMessage = String((err as any).error);
+				errorMessage = String((err as { error?: unknown }).error);
 			} else if (typeof err === "string") {
 				errorMessage = err;
 			}
@@ -404,7 +404,25 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 		} finally {
 			setSaving(false);
 		}
-	};
+	}, [
+		assignee,
+		criteria,
+		dependencies,
+		description,
+		directive,
+		finalSummary,
+		isCreateMode,
+		labels,
+		notes,
+		onClose,
+		onSaved,
+		onSubmit,
+		plan,
+		priority,
+		proposal,
+		status,
+		title,
+	]);
 
 	const handleToggleCriterion = async (index: number, checked: boolean) => {
 		if (!proposal) return; // Can't toggle in create mode
@@ -457,7 +475,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 
 	// labels handled via ChipInput; no textarea parsing
 
-	const handleComplete = async () => {
+	const handleComplete = useCallback(async () => {
 		if (!proposal) return;
 		if (
 			!window.confirm(
@@ -472,7 +490,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
 		}
-	};
+	}, [onClose, onSaved, proposal]);
 
 	const handleArchive = async () => {
 		if (!proposal || !onArchive) return;
@@ -492,6 +510,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 
 	// Intercept Escape to cancel edit (not close modal) when in edit mode
 	useEffect(() => {
+		const keydownListenerOptions = { capture: true };
 		const onKey = (e: KeyboardEvent) => {
 			if (mode === "edit" && e.key === "Escape") {
 				e.preventDefault();
@@ -531,9 +550,9 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 				void handleComplete();
 			}
 		};
-		window.addEventListener("keydown", onKey, { capture: true });
+		window.addEventListener("keydown", onKey, keydownListenerOptions);
 		return () =>
-			window.removeEventListener("keydown", onKey, { capture: true } as any);
+			window.removeEventListener("keydown", onKey, keydownListenerOptions);
 	}, [mode, handleCancelEdit, handleComplete, handleSave, isReachedStatus]);
 
 	const displayId = proposal?.id ?? "";
@@ -565,6 +584,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 						!isCreateMode &&
 						!isFromOtherBranch && (
 							<button
+								type="button"
 								onClick={handleComplete}
 								className="inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium text-white bg-emerald-600 dark:bg-emerald-700 hover:bg-emerald-700 dark:hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:focus:ring-emerald-400 focus:ring-offset-2 dark:focus:ring-offset-gray-900 transition-colors duration-200"
 								title="Move to completed folder (removes from board)"
@@ -574,6 +594,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 						)}
 					{mode === "preview" && !isCreateMode && !isFromOtherBranch ? (
 						<button
+							type="button"
 							onClick={() => setMode("edit")}
 							className="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-offset-2 dark:focus:ring-offset-gray-900 transition-colors duration-200"
 							title="Edit"
@@ -583,6 +604,8 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 								fill="none"
 								stroke="currentColor"
 								viewBox="0 0 24 24"
+								aria-hidden="true"
+								focusable="false"
 							>
 								<path
 									strokeLinecap="round"
@@ -596,6 +619,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 					) : mode === "edit" || mode === "create" ? (
 						<div className="flex items-center gap-2">
 							<button
+								type="button"
 								onClick={handleCancelEdit}
 								className="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-offset-2 dark:focus:ring-offset-gray-900 transition-colors duration-200"
 								title="Cancel"
@@ -617,6 +641,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 								Cancel
 							</button>
 							<button
+								type="button"
 								onClick={() => void handleSave()}
 								disabled={saving}
 								className="inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 dark:bg-blue-700 hover:bg-blue-700 dark:hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-offset-2 dark:focus:ring-offset-gray-900 transition-colors duration-200 disabled:opacity-50"
@@ -657,6 +682,8 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 						fill="none"
 						stroke="currentColor"
 						viewBox="0 0 24 24"
+						aria-hidden="true"
+						focusable="false"
 					>
 						<path
 							strokeLinecap="round"
@@ -725,7 +752,10 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 							{references.length > 0 ? (
 								<ul className="space-y-2">
 									{references.map((ref, idx) => (
-										<li key={idx} className="flex items-center gap-3 group">
+										<li
+											key={`reference:${ref}`}
+											className="flex items-center gap-3 group"
+										>
 											<span className="flex-1 min-w-0">
 												{ref.startsWith("http://") ||
 												ref.startsWith("https://") ? (
@@ -745,6 +775,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 											</span>
 											{!isFromOtherBranch && (
 												<button
+													type="button"
 													onClick={() => {
 														const newRefs = references.filter(
 															(_, i) => i !== idx,
@@ -759,6 +790,8 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 														fill="none"
 														stroke="currentColor"
 														viewBox="0 0 24 24"
+														aria-hidden="true"
+														focusable="false"
 													>
 														<path
 															strokeLinecap="round"
@@ -817,8 +850,11 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 							<SectionHeader title="Documentation" />
 							<div className="space-y-2">
 								<ul className="space-y-2">
-									{documentation.map((doc, idx) => (
-										<li key={idx} className="flex items-center gap-3">
+									{documentation.map((doc) => (
+										<li
+											key={`documentation:${doc}`}
+											className="flex items-center gap-3"
+										>
 											<span className="flex-1 min-w-0">
 												{doc.startsWith("http://") ||
 												doc.startsWith("https://") ? (
@@ -1064,9 +1100,15 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 						<select
 							className={`w-full h-10 px-3 pr-10 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 focus:border-transparent transition-colors duration-200 ${isFromOtherBranch ? "opacity-60 cursor-not-allowed" : ""}`}
 							value={priority}
-							onChange={(e) =>
-								handleInlineMetaUpdate({ priority: e.target.value as any })
-							}
+							onChange={(e) => {
+								const nextPriority = e.target.value;
+								void handleInlineMetaUpdate({
+									priority:
+										nextPriority === ""
+											? undefined
+											: (nextPriority as Proposal["priority"]),
+								});
+							}}
 							disabled={isFromOtherBranch}
 						>
 							<option value="">No Priority</option>
@@ -1124,6 +1166,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 					{proposal && onArchive && !isFromOtherBranch && (
 						<div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
 							<button
+								type="button"
 								onClick={handleArchive}
 								className="w-full inline-flex items-center justify-center px-4 py-2 bg-red-500 dark:bg-red-600 text-white text-sm font-medium rounded-md hover:bg-red-600 dark:hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 focus:ring-red-400 dark:focus:ring-red-500 transition-colors duration-200"
 							>
@@ -1132,6 +1175,8 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 									fill="none"
 									stroke="currentColor"
 									viewBox="0 0 24 24"
+									aria-hidden="true"
+									focusable="false"
 								>
 									<path
 										strokeLinecap="round"

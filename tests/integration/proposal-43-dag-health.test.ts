@@ -274,7 +274,7 @@ describe("proposal-43: Continuous DAG Health Telemetry", () => {
 			const formatted = health.formatForPulse(report);
 
 			// Should have either ✅, ⚠️, or 🔴
-			assert.match(formatted, /[✅⚠️🔴]/);
+			assert.match(formatted, /✅|⚠️|🔴/);
 		});
 	});
 

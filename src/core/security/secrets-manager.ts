@@ -464,7 +464,8 @@ export class SecretsScanner {
 				pattern.lastIndex = 0; // Reset regex proposal
 				let match: RegExpExecArray | null;
 
-				while ((match = pattern.exec(line)) !== null) {
+				match = pattern.exec(line);
+				while (match !== null) {
 					matches.push({
 						pattern: name,
 						line: lineNum + 1,
@@ -473,6 +474,7 @@ export class SecretsScanner {
 							line.trim().substring(0, 50) + (line.length > 50 ? "..." : ""),
 						severity,
 					});
+					match = pattern.exec(line);
 				}
 			}
 		}

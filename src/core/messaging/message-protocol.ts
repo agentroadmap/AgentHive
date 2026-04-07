@@ -96,13 +96,14 @@ export function generateMessageId(): string {
 export function extractMentions(content: string): string[] {
 	const mentionRegex = /@([a-zA-Z0-9_-]+)/g;
 	const mentions: string[] = [];
-	let match;
+	let match: RegExpExecArray | null = mentionRegex.exec(content);
 
-	while ((match = mentionRegex.exec(content)) !== null) {
-		const name = match?.[1]?.toLowerCase();
+	while (match !== null) {
+		const name = match[1].toLowerCase();
 		if (!mentions.includes(name)) {
 			mentions.push(name);
 		}
+		match = mentionRegex.exec(content);
 	}
 
 	return mentions;
@@ -121,9 +122,9 @@ export function parseMessageLine(
 	const basicMatch = line.match(/^\[([^\]]+)\]\s+([^:]+?):\s*(.*)$/);
 	if (!basicMatch) return null;
 
-	const timestamp = basicMatch?.[1]!;
-	const senderAndMeta = basicMatch?.[2]!;
-	const rawContent = basicMatch?.[3]!;
+	const timestamp = basicMatch[1];
+	const senderAndMeta = basicMatch[2];
+	const rawContent = basicMatch[3];
 
 	let priority: MessagePriority = "normal";
 	let threadId: string | undefined;
@@ -134,10 +135,10 @@ export function parseMessageLine(
 	let cleanContent = rawContent;
 
 	const metaRegex = /\[(\w+)=([^\]]+)\]/g;
-	let metaMatch;
-	while ((metaMatch = metaRegex.exec(senderAndMeta)) !== null) {
-		const key = metaMatch[1]?.toLowerCase();
-		const value = metaMatch[2]!;
+	let metaMatch: RegExpExecArray | null = metaRegex.exec(senderAndMeta);
+	while (metaMatch !== null) {
+		const key = metaMatch[1].toLowerCase();
+		const value = metaMatch[2];
 		if (key === "priority") {
 			priority = value.toLowerCase() as MessagePriority;
 			// Remove this metadata from sender
@@ -150,6 +151,7 @@ export function parseMessageLine(
 			replyTo = value;
 			sender = sender.replace(metaMatch[0], "").trim();
 		}
+		metaMatch = metaRegex.exec(senderAndMeta);
 	}
 
 	// Also check inline metadata in content (fallback)

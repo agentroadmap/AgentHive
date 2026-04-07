@@ -296,11 +296,13 @@ export class ProtocolHandlers {
 			// Extract mentions for notification info
 			const mentionRegex = /@([a-zA-Z0-9_-]+)/g;
 			const mentioned: string[] = [];
-			let match;
-			while ((match = mentionRegex.exec(content)) !== null) {
-				if (!mentioned.includes(match[1])) {
-					mentioned.push(match[1]);
+			let match: RegExpExecArray | null = mentionRegex.exec(content);
+			while (match !== null) {
+				const mention = match[1];
+				if (!mentioned.includes(mention)) {
+					mentioned.push(mention);
 				}
+				match = mentionRegex.exec(content);
 			}
 
 			let response = `Message sent to #${args.channel}:\n${line}`;

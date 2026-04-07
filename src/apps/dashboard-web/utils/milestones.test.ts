@@ -5,7 +5,11 @@ import {
 	collectDirectiveIds,
 	validateDirectiveName,
 } from "../../../core/proposal/directives";
-import type { Directive, Proposal } from "../../../shared/types";
+import type {
+	Directive,
+	DirectiveBucket,
+	Proposal,
+} from "../../../shared/types";
 
 const makeProposal = (overrides: Partial<Proposal>): Proposal => ({
 	id: "proposal-1",
@@ -51,12 +55,12 @@ describe("buildDirectiveBuckets", () => {
 			"Complete",
 			"Abandoned",
 		]);
-		const m1 = buckets.find((b: { label: string }) => b.label === "M1");
-		const none = buckets.find(
-			(b: { isNoDirective?: boolean }) => b.isNoDirective,
-		);
-		assert.equal((m1 as any)?.statusCounts.Potential, 1);
-		assert.equal((none as any)?.statusCounts.Reached, 1);
+		const m1 = buckets.find((b: DirectiveBucket) => b.label === "M1");
+		const none = buckets.find((b: DirectiveBucket) => b.isNoDirective);
+		assert.ok(m1);
+		assert.ok(none);
+		assert.equal(m1.statusCounts.Potential, 1);
+		assert.equal(none.statusCounts.Reached, 1);
 	});
 
 	it("marks directives completed when all proposals are done", () => {
@@ -74,8 +78,9 @@ describe("buildDirectiveBuckets", () => {
 			"Complete",
 			"Abandoned",
 		]);
-		const m1 = buckets.find((b: { label: string }) => b.label === "M1");
-		assert.equal((m1 as any)?.isCompleted, true);
+		const m1 = buckets.find((b: DirectiveBucket) => b.label === "M1");
+		assert.ok(m1);
+		assert.equal(m1.isCompleted, true);
 	});
 
 	it("keeps active directives when archived titles are reused", () => {
@@ -95,9 +100,10 @@ describe("buildDirectiveBuckets", () => {
 			},
 		);
 		const active = buckets.find(
-			(bucket: { directive?: string }) => bucket.directive === "m-2",
+			(bucket: DirectiveBucket) => bucket.directive === "m-2",
 		);
-		assert.equal((active as any)?.label, "Release 1");
+		assert.ok(active);
+		assert.equal(active.label, "Release 1");
 	});
 
 	it("canonicalizes reused archived titles to the active directive ID", () => {
@@ -126,14 +132,13 @@ describe("buildDirectiveBuckets", () => {
 			},
 		);
 		const releaseBuckets = buckets.filter(
-			(bucket: { label: string }) => bucket.label === "Release 1",
+			(bucket: DirectiveBucket) => bucket.label === "Release 1",
 		);
 		assert.equal(releaseBuckets.length, 1);
-		assert.equal((releaseBuckets[0] as any)?.directive, "m-2");
+		assert.ok(releaseBuckets[0]);
+		assert.equal(releaseBuckets[0].directive, "m-2");
 		assert.deepEqual(
-			(releaseBuckets[0] as any)?.proposals.map(
-				(proposal: { id: string }) => proposal.id,
-			),
+			releaseBuckets[0].proposals.map((proposal: Proposal) => proposal.id),
 			["proposal-1", "proposal-2"],
 		);
 	});
@@ -150,12 +155,11 @@ describe("buildDirectiveBuckets", () => {
 			"Reached",
 		]);
 		const releaseBucket = buckets.find(
-			(bucket: { directive?: string }) => bucket.directive === "m-1",
+			(bucket: DirectiveBucket) => bucket.directive === "m-1",
 		);
+		assert.ok(releaseBucket);
 		assert.deepEqual(
-			(releaseBucket as any)?.proposals.map(
-				(proposal: { id: string }) => proposal.id,
-			),
+			releaseBucket.proposals.map((proposal: Proposal) => proposal.id),
 			["proposal-1"],
 		);
 	});
@@ -176,12 +180,11 @@ describe("buildDirectiveBuckets", () => {
 			"Reached",
 		]);
 		const releaseBucket = buckets.find(
-			(bucket: { directive?: string }) => bucket.directive === "m-1",
+			(bucket: DirectiveBucket) => bucket.directive === "m-1",
 		);
+		assert.ok(releaseBucket);
 		assert.deepEqual(
-			(releaseBucket as any)?.proposals.map(
-				(proposal: { id: string }) => proposal.id,
-			),
+			releaseBucket.proposals.map((proposal: Proposal) => proposal.id),
 			["proposal-1"],
 		);
 	});
@@ -206,12 +209,11 @@ describe("buildDirectiveBuckets", () => {
 			},
 		);
 		const noDirectiveBucket = buckets.find(
-			(bucket: { isNoDirective?: boolean }) => bucket.isNoDirective,
+			(bucket: DirectiveBucket) => bucket.isNoDirective,
 		);
+		assert.ok(noDirectiveBucket);
 		assert.deepEqual(
-			(noDirectiveBucket as any)?.proposals.map(
-				(proposal: { id: string }) => proposal.id,
-			),
+			noDirectiveBucket.proposals.map((proposal: Proposal) => proposal.id),
 			["proposal-1"],
 		);
 	});
@@ -229,18 +231,18 @@ describe("buildDirectiveBuckets", () => {
 			"Reached",
 		]);
 		const idBucket = buckets.find(
-			(bucket: { directive?: string }) => bucket.directive === "m-1",
+			(bucket: DirectiveBucket) => bucket.directive === "m-1",
 		);
 		const titleBucket = buckets.find(
-			(bucket: { directive?: string }) => bucket.directive === "m-2",
+			(bucket: DirectiveBucket) => bucket.directive === "m-2",
 		);
+		assert.ok(idBucket);
+		assert.ok(titleBucket);
 		assert.deepEqual(
-			(idBucket as any)?.proposals.map(
-				(proposal: { id: string }) => proposal.id,
-			),
+			idBucket.proposals.map((proposal: Proposal) => proposal.id),
 			["proposal-1"],
 		);
-		assert.equal(((titleBucket as any)?.proposals ?? []).length, 0);
+		assert.equal(titleBucket.proposals.length, 0);
 	});
 });
 

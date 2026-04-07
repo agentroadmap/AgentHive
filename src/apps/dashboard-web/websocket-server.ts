@@ -21,6 +21,12 @@ type BoardMessage =
 	| { type: "connected" | "subscribed"; message?: string; channel?: string }
 	| { type: "error"; message: string; code?: string };
 
+type ClientMessage = {
+	type?: unknown;
+	id?: unknown;
+	channel?: unknown;
+};
+
 function safeStringify(data: unknown): string {
 	return JSON.stringify(data, (_key, value) =>
 		typeof value === "bigint" ? value.toString() : value,
@@ -100,7 +106,7 @@ async function broadcastSnapshot(core: Core): Promise<void> {
 
 async function handleMessage(
 	ws: WebSocket,
-	msg: any,
+	msg: ClientMessage,
 	core: Core,
 ): Promise<void> {
 	switch (msg.type) {

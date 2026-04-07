@@ -15,12 +15,7 @@ export class PulseService {
 		console.log(
 			`[PULSE] ${pulseEvent.timestamp} - ${pulseEvent.type}: ${pulseEvent.title}`,
 		);
-
-		try {
-			// Placeholder for actual storage logic
-			// await this.fs.savePulseEvent(pulseEvent);
-		} catch (error) {
-			console.error("Failed to record pulse event:", error);
-		}
+		// Placeholder for actual storage logic
+		// await this.fs.savePulseEvent(pulseEvent);
 	}
 }

@@ -60,6 +60,12 @@ type ServerInitOptions = {
 	debug?: boolean;
 };
 
+type SseTransportResponse = ConstructorParameters<typeof SSEServerTransport>[1];
+type SseTransportRequest = Parameters<
+	SSEServerTransport["handlePostMessage"]
+>[0];
+type SseTransportBody = Parameters<SSEServerTransport["handlePostMessage"]>[2];
+
 export class McpServer extends Core {
 	private readonly server: Server;
 	private transport?: StdioServerTransport;
@@ -292,7 +298,7 @@ export class McpServer extends Core {
 	 */
 	public async createSseTransport(
 		endpoint: string,
-		res?: any,
+		res: SseTransportResponse,
 	): Promise<SSEServerTransport> {
 		const transport = new SSEServerTransport(endpoint, res);
 		await this.server.connect(transport);
@@ -307,9 +313,9 @@ export class McpServer extends Core {
 	 */
 	public async handleSseMessage(
 		transport: SSEServerTransport,
-		req: any,
-		res: any,
-		parsedBody?: any,
+		req: SseTransportRequest,
+		res: SseTransportResponse,
+		parsedBody?: SseTransportBody,
 	): Promise<void> {
 		if (transport.handlePostMessage) {
 			await transport.handlePostMessage(req, res, parsedBody);
@@ -398,6 +404,9 @@ export async function createMcpServer(
 			"./tools/messages/pg-handlers.ts"
 		);
 		const msg = new PgMessagingHandlers(server, projectRoot);
+		type SendMessageArgs = Parameters<typeof msg.sendMessage>[0];
+		type ReadMessagesArgs = Parameters<typeof msg.readMessages>[0];
+		type ListChannelsArgs = Parameters<typeof msg.listChannels>[0];
 		server.addTool({
 			name: "msg_send",
 			description: "Send message via Postgres message_ledger",
@@ -413,7 +422,7 @@ export async function createMcpServer(
 				},
 				required: ["from_agent", "message_content"],
 			},
-			handler: (a: any) => msg.sendMessage(a),
+			handler: (a) => msg.sendMessage(a as SendMessageArgs),
 		});
 		server.addTool({
 			name: "msg_read",
@@ -426,17 +435,23 @@ export async function createMcpServer(
 					limit: { type: "number" },
 				},
 			},
-			handler: (a: any) => msg.readMessages(a),
+			handler: (a) => msg.readMessages(a as ReadMessagesArgs),
 		});
 		server.addTool({
 			name: "chan_list",
 			description: "List channels",
 			inputSchema: { type: "object", properties: {} },
-			handler: (a: any) => msg.listChannels(a),
+			handler: (a) => msg.listChannels(a as ListChannelsArgs),
 		});
 
 		const { PgAgentHandlers } = await import("./tools/agents/pg-handlers.ts");
 		const agents = new PgAgentHandlers(server, projectRoot);
+		type ListPgAgentsArgs = Parameters<typeof agents.listAgents>[0];
+		type GetPgAgentArgs = Parameters<typeof agents.getAgent>[0];
+		type RegisterPgAgentArgs = Parameters<typeof agents.registerAgent>[0];
+		type ListTeamsArgs = Parameters<typeof agents.listTeams>[0];
+		type CreateTeamArgs = Parameters<typeof agents.createTeam>[0];
+		type AddTeamMemberArgs = Parameters<typeof agents.addTeamMember>[0];
 		server.addTool({
 			name: "agent_list",
 			description: "List registered agents",
@@ -444,7 +459,7 @@ export async function createMcpServer(
 				type: "object",
 				properties: { status: { type: "string" } },
 			},
-			handler: (a: any) => agents.listAgents(a),
+			handler: (a) => agents.listAgents(a as ListPgAgentsArgs),
 		});
 		server.addTool({
 			name: "agent_get",
@@ -454,7 +469,7 @@ export async function createMcpServer(
 				properties: { identity: { type: "string" } },
 				required: ["identity"],
 			},
-			handler: (a: any) => agents.getAgent(a),
+			handler: (a) => agents.getAgent(a as GetPgAgentArgs),
 		});
 		server.addTool({
 			name: "agent_register",
@@ -469,13 +484,13 @@ export async function createMcpServer(
 				},
 				required: ["identity"],
 			},
-			handler: (a: any) => agents.registerAgent(a),
+			handler: (a) => agents.registerAgent(a as RegisterPgAgentArgs),
 		});
 		server.addTool({
 			name: "team_list",
 			description: "List teams",
 			inputSchema: { type: "object", properties: {} },
-			handler: (a: any) => agents.listTeams(a),
+			handler: (a) => agents.listTeams(a as ListTeamsArgs),
 		});
 		server.addTool({
 			name: "team_create",
@@ -485,7 +500,7 @@ export async function createMcpServer(
 				properties: { name: { type: "string" }, team_type: { type: "string" } },
 				required: ["name"],
 			},
-			handler: (a: any) => agents.createTeam(a),
+			handler: (a) => agents.createTeam(a as CreateTeamArgs),
 		});
 		server.addTool({
 			name: "team_add_member",
@@ -499,7 +514,7 @@ export async function createMcpServer(
 				},
 				required: ["team_name", "agent_identity"],
 			},
-			handler: (a: any) => agents.addTeamMember(a),
+			handler: (a) => agents.addTeamMember(a as AddTeamMemberArgs),
 		});
 
 		const { PgSpendingHandlers, PgModelHandlers } = await import(
@@ -507,6 +522,13 @@ export async function createMcpServer(
 		);
 		const spending = new PgSpendingHandlers(server, projectRoot);
 		const models = new PgModelHandlers(server, projectRoot);
+		type SetSpendingCapArgs = Parameters<typeof spending.setSpendingCap>[0];
+		type LogSpendingArgs = Parameters<typeof spending.logSpending>[0];
+		type GetSpendingReportArgs = Parameters<
+			typeof spending.getSpendingReport
+		>[0];
+		type ListModelsArgs = Parameters<typeof models.listModels>[0];
+		type AddModelArgs = Parameters<typeof models.addModel>[0];
 		server.addTool({
 			name: "spending_set_cap",
 			description: "Set agent spending cap",
@@ -521,7 +543,7 @@ export async function createMcpServer(
 				},
 				required: ["agent_identity", "daily_limit_usd"],
 			},
-			handler: (a: any) => spending.setSpendingCap(a),
+			handler: (a) => spending.setSpendingCap(a as SetSpendingCapArgs),
 		});
 		server.addTool({
 			name: "spending_log",
@@ -539,7 +561,7 @@ export async function createMcpServer(
 				},
 				required: ["agent_identity", "cost_usd"],
 			},
-			handler: (a: any) => spending.logSpending(a),
+			handler: (a) => spending.logSpending(a as LogSpendingArgs),
 		});
 		server.addTool({
 			name: "spending_report",
@@ -548,13 +570,13 @@ export async function createMcpServer(
 				type: "object",
 				properties: { agent_identity: { type: "string" } },
 			},
-			handler: (a: any) => spending.getSpendingReport(a),
+			handler: (a) => spending.getSpendingReport(a as GetSpendingReportArgs),
 		});
 		server.addTool({
 			name: "model_list",
 			description: "List registered models",
 			inputSchema: { type: "object", properties: {} },
-			handler: (a: any) => models.listModels(a),
+			handler: (a) => models.listModels(a as ListModelsArgs),
 		});
 		server.addTool({
 			name: "model_add",
@@ -572,11 +594,17 @@ export async function createMcpServer(
 				},
 				required: ["model_name"],
 			},
-			handler: (a: any) => models.addModel(a),
+			handler: (a) => models.addModel(a as AddModelArgs),
 		});
 
 		const { PgMemoryHandlers } = await import("./tools/memory/pg-handlers.ts");
 		const memory = new PgMemoryHandlers(server);
+		type SetMemoryArgs = Parameters<typeof memory.setMemory>[0];
+		type GetMemoryArgs = Parameters<typeof memory.getMemory>[0];
+		type DeleteMemoryArgs = Parameters<typeof memory.deleteMemory>[0];
+		type MemoryListArgs = Parameters<typeof memory.memoryList>[0];
+		type MemorySummaryArgs = Parameters<typeof memory.memorySummary>[0];
+		type SearchMemoryArgs = Parameters<typeof memory.searchMemory>[0];
 		server.addTool({
 			name: "memory_set",
 			description:
@@ -596,7 +624,7 @@ export async function createMcpServer(
 				},
 				required: ["agent_identity", "layer", "key", "value"],
 			},
-			handler: (a: any) => memory.setMemory(a),
+			handler: (a) => memory.setMemory(a as SetMemoryArgs),
 		});
 		server.addTool({
 			name: "memory_get",
@@ -610,7 +638,7 @@ export async function createMcpServer(
 				},
 				required: ["agent_identity", "layer"],
 			},
-			handler: (a: any) => memory.getMemory(a),
+			handler: (a) => memory.getMemory(a as GetMemoryArgs),
 		});
 		server.addTool({
 			name: "memory_delete",
@@ -624,7 +652,7 @@ export async function createMcpServer(
 				},
 				required: ["agent_identity", "layer"],
 			},
-			handler: (a: any) => memory.deleteMemory(a),
+			handler: (a) => memory.deleteMemory(a as DeleteMemoryArgs),
 		});
 		server.addTool({
 			name: "memory_list",
@@ -636,7 +664,7 @@ export async function createMcpServer(
 					layer: { type: "string" },
 				},
 			},
-			handler: (a: any) => memory.memoryList(a),
+			handler: (a) => memory.memoryList(a as MemoryListArgs),
 		});
 		server.addTool({
 			name: "memory_summary",
@@ -646,7 +674,7 @@ export async function createMcpServer(
 				properties: { agent_identity: { type: "string" } },
 				required: ["agent_identity"],
 			},
-			handler: (a: any) => memory.memorySummary(a),
+			handler: (a) => memory.memorySummary(a as MemorySummaryArgs),
 		});
 
 		// Semantic memory search (uses `body_vector vector(1536)` + pgvector)
@@ -682,7 +710,7 @@ export async function createMcpServer(
 				},
 				required: ["embedding"],
 			},
-			handler: (a: any) => memory.searchMemory(a),
+			handler: (a) => memory.searchMemory(a as SearchMemoryArgs),
 		});
 
 		// Proposal CRUD tools via backend-switch (prop_list, prop_get, prop_create, prop_update, prop_transition, prop_delete)

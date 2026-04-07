@@ -1,0 +1,8 @@
+[user]
+  name  = Copilot One
+  email = copilot-one@agenthive.local
+
+[agenthive]
+  worktree  = copilot-one
+  db_user   = agent_copilot_one
+  provider  = copilot

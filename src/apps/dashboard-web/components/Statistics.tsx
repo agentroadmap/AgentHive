@@ -19,7 +19,7 @@ interface StatisticsProps {
 }
 
 const Statistics: React.FC<StatisticsProps> = ({
-	proposals,
+	proposals: _proposals,
 	isLoading: externalLoading,
 	onEditProposal,
 	projectName,
@@ -172,16 +172,8 @@ const Statistics: React.FC<StatisticsProps> = ({
 				? proposal.createdDate
 				: proposal.updatedDate || proposal.createdDate;
 
-		return (
-			<div
-				key={proposal.id}
-				className={`flex items-center space-x-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg transition-colors duration-200 ${
-					onClick
-						? "hover:bg-gray-100 dark:hover:bg-gray-600/50 cursor-pointer"
-						: ""
-				}`}
-				onClick={onClick}
-			>
+		const content = (
+			<>
 				<StatusIcon status={proposal.status} />
 				<div className="flex-1 min-w-0">
 					<p className="font-medium text-gray-900 dark:text-gray-100 truncate">
@@ -192,6 +184,28 @@ const Statistics: React.FC<StatisticsProps> = ({
 						{formatDate(displayDate)}
 					</p>
 				</div>
+			</>
+		);
+
+		if (onClick) {
+			return (
+				<button
+					key={proposal.id}
+					type="button"
+					className="flex w-full items-center space-x-3 rounded-lg bg-gray-50 p-3 text-left transition-colors duration-200 hover:bg-gray-100 dark:bg-gray-700/50 dark:hover:bg-gray-600/50"
+					onClick={onClick}
+				>
+					{content}
+				</button>
+			);
+		}
+
+		return (
+			<div
+				key={proposal.id}
+				className="flex items-center space-x-3 rounded-lg bg-gray-50 p-3 transition-colors duration-200 dark:bg-gray-700/50"
+			>
+				{content}
 			</div>
 		);
 	};
@@ -205,6 +219,8 @@ const Statistics: React.FC<StatisticsProps> = ({
 						fill="none"
 						stroke="currentColor"
 						viewBox="0 0 24 24"
+						aria-hidden="true"
+						focusable="false"
 					>
 						<path
 							strokeLinecap="round"
@@ -221,6 +237,8 @@ const Statistics: React.FC<StatisticsProps> = ({
 						fill="none"
 						stroke="currentColor"
 						viewBox="0 0 24 24"
+						aria-hidden="true"
+						focusable="false"
 					>
 						<path
 							strokeLinecap="round"
@@ -236,6 +254,8 @@ const Statistics: React.FC<StatisticsProps> = ({
 						className="w-4 h-4 text-green-500"
 						fill="currentColor"
 						viewBox="0 0 24 24"
+						aria-hidden="true"
+						focusable="false"
 					>
 						<path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
 					</svg>
@@ -247,6 +267,8 @@ const Statistics: React.FC<StatisticsProps> = ({
 						fill="none"
 						stroke="currentColor"
 						viewBox="0 0 24 24"
+						aria-hidden="true"
+						focusable="false"
 					>
 						<path
 							strokeLinecap="round"
@@ -267,6 +289,8 @@ const Statistics: React.FC<StatisticsProps> = ({
 						className="w-4 h-4 text-red-500"
 						fill="currentColor"
 						viewBox="0 0 24 24"
+						aria-hidden="true"
+						focusable="false"
 					>
 						<path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
 					</svg>
@@ -277,6 +301,8 @@ const Statistics: React.FC<StatisticsProps> = ({
 						className="w-4 h-4 text-yellow-500"
 						fill="currentColor"
 						viewBox="0 0 24 24"
+						aria-hidden="true"
+						focusable="false"
 					>
 						<path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
 					</svg>
@@ -287,6 +313,8 @@ const Statistics: React.FC<StatisticsProps> = ({
 						className="w-4 h-4 text-blue-500"
 						fill="currentColor"
 						viewBox="0 0 24 24"
+						aria-hidden="true"
+						focusable="false"
 					>
 						<path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
 					</svg>
@@ -298,6 +326,8 @@ const Statistics: React.FC<StatisticsProps> = ({
 						fill="none"
 						stroke="currentColor"
 						viewBox="0 0 24 24"
+						aria-hidden="true"
+						focusable="false"
 					>
 						<path
 							strokeLinecap="round"
@@ -361,6 +391,8 @@ const Statistics: React.FC<StatisticsProps> = ({
 								fill="none"
 								stroke="currentColor"
 								viewBox="0 0 24 24"
+								aria-hidden="true"
+								focusable="false"
 							>
 								<path
 									strokeLinecap="round"
@@ -389,6 +421,8 @@ const Statistics: React.FC<StatisticsProps> = ({
 								className="w-6 h-6 text-green-600 dark:text-green-400"
 								fill="currentColor"
 								viewBox="0 0 24 24"
+								aria-hidden="true"
+								focusable="false"
 							>
 								<path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
 							</svg>
@@ -413,6 +447,8 @@ const Statistics: React.FC<StatisticsProps> = ({
 								fill="none"
 								stroke="currentColor"
 								viewBox="0 0 24 24"
+								aria-hidden="true"
+								focusable="false"
 							>
 								<path
 									strokeLinecap="round"
@@ -442,6 +478,8 @@ const Statistics: React.FC<StatisticsProps> = ({
 								fill="none"
 								stroke="currentColor"
 								viewBox="0 0 24 24"
+								aria-hidden="true"
+								focusable="false"
 							>
 								<path
 									strokeLinecap="round"
@@ -582,6 +620,7 @@ const Statistics: React.FC<StatisticsProps> = ({
 						<div className="space-y-3">
 							{statistics.recentActivity.created.map((proposal) => (
 								<ProposalPreview
+									key={proposal.id}
 									proposal={proposal}
 									showDate="created"
 									onClick={
@@ -606,6 +645,7 @@ const Statistics: React.FC<StatisticsProps> = ({
 						<div className="space-y-3">
 							{statistics.recentActivity.updated.map((proposal) => (
 								<ProposalPreview
+									key={proposal.id}
 									proposal={proposal}
 									showDate="updated"
 									onClick={

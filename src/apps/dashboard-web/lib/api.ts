@@ -301,9 +301,7 @@ export class ApiClient {
 		}>(`${API_BASE}/proposals/cleanup?age=${age}`);
 	}
 
-	async executeCleanup(
-		age: number,
-	): Promise<{
+	async executeCleanup(age: number): Promise<{
 		success: boolean;
 		movedCount: number;
 		totalCount: number;

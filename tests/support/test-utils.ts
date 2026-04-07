@@ -406,7 +406,10 @@ export function execSync(
  * control characters; otherwise wraps in double quotes if it contains spaces.
  */
 function shellQuoteArg(arg: string): string {
-	if (/[\n\r\t\x00-\x1f]/.test(arg)) {
+	const hasControlCharacters = Array.from(arg).some(
+		(char) => char.charCodeAt(0) <= 0x1f,
+	);
+	if (hasControlCharacters) {
 		return `$'${arg
 			.replace(/\\/g, "\\\\")
 			.replace(/'/g, "\\'")

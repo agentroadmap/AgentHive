@@ -29,22 +29,32 @@ import {
  */
 export function registerAgentTools(server: McpServer): void {
 	const handlers = new AgentPoolHandlers(server);
+	type RegisterAgentArgs = Parameters<AgentPoolHandlers["registerAgent"]>[0];
+	type ListAgentsArgs = Parameters<AgentPoolHandlers["listAgents"]>[0];
+	type AssignWorkArgs = Parameters<AgentPoolHandlers["assignWork"]>[0];
+	type HeartbeatArgs = Parameters<AgentPoolHandlers["heartbeat"]>[0];
+	type SpawnAgentArgs = Parameters<AgentPoolHandlers["spawnAgent"]>[0];
+	type RetireAgentArgs = Parameters<AgentPoolHandlers["retireAgent"]>[0];
+	type UpdateReportingArgs = Parameters<typeof updateReporting>[0];
+	type GrantPrivilegeArgs = Parameters<typeof grantPrivilege>[0];
+	type RevokePrivilegeArgs = Parameters<typeof revokePrivilege>[0];
 
 	// ── agent_register ──────────────────────────────────────────────────────
-	const registerTool: McpToolHandler = createSimpleValidatedTool(
-		{
-			name: "agent_register",
-			description:
-				"Register or update an agent profile in the dynamic multi-model pool. " +
-				"Supports Claude, GPT, Gemini, local models, and custom AI backends.",
-			inputSchema: agentRegisterSchema,
-		},
-		agentRegisterSchema,
-		async (input) => handlers.registerAgent(input as any),
-	);
+	const registerTool: McpToolHandler =
+		createSimpleValidatedTool<RegisterAgentArgs>(
+			{
+				name: "agent_register",
+				description:
+					"Register or update an agent profile in the dynamic multi-model pool. " +
+					"Supports Claude, GPT, Gemini, local models, and custom AI backends.",
+				inputSchema: agentRegisterSchema,
+			},
+			agentRegisterSchema,
+			async (input) => handlers.registerAgent(input),
+		);
 
 	// ── agent_list ──────────────────────────────────────────────────────────
-	const listTool: McpToolHandler = createSimpleValidatedTool(
+	const listTool: McpToolHandler = createSimpleValidatedTool<ListAgentsArgs>(
 		{
 			name: "agent_list",
 			description:
@@ -53,11 +63,11 @@ export function registerAgentTools(server: McpServer): void {
 			inputSchema: agentListSchema,
 		},
 		agentListSchema,
-		async (input) => handlers.listAgents(input as any),
+		async (input) => handlers.listAgents(input),
 	);
 
 	// ── agent_assign ────────────────────────────────────────────────────────
-	const assignTool: McpToolHandler = createSimpleValidatedTool(
+	const assignTool: McpToolHandler = createSimpleValidatedTool<AssignWorkArgs>(
 		{
 			name: "agent_assign",
 			description:
@@ -66,24 +76,25 @@ export function registerAgentTools(server: McpServer): void {
 			inputSchema: agentAssignSchema,
 		},
 		agentAssignSchema,
-		async (input) => handlers.assignWork(input as any),
+		async (input) => handlers.assignWork(input),
 	);
 
 	// ── agent_heartbeat ─────────────────────────────────────────────────────
-	const heartbeatTool: McpToolHandler = createSimpleValidatedTool(
-		{
-			name: "agent_heartbeat",
-			description:
-				"Send a heartbeat from an agent to keep it alive in the pool. " +
-				"AC#5: Used for stale-agent detection after an extended inactivity window.",
-			inputSchema: agentHeartbeatSchema,
-		},
-		agentHeartbeatSchema,
-		async (input) => handlers.heartbeat(input as any),
-	);
+	const heartbeatTool: McpToolHandler =
+		createSimpleValidatedTool<HeartbeatArgs>(
+			{
+				name: "agent_heartbeat",
+				description:
+					"Send a heartbeat from an agent to keep it alive in the pool. " +
+					"AC#5: Used for stale-agent detection after an extended inactivity window.",
+				inputSchema: agentHeartbeatSchema,
+			},
+			agentHeartbeatSchema,
+			async (input) => handlers.heartbeat(input),
+		);
 
 	// ── agent_spawn ─────────────────────────────────────────────────────────
-	const spawnTool: McpToolHandler = createSimpleValidatedTool(
+	const spawnTool: McpToolHandler = createSimpleValidatedTool<SpawnAgentArgs>(
 		{
 			name: "agent_spawn",
 			description:
@@ -92,11 +103,11 @@ export function registerAgentTools(server: McpServer): void {
 			inputSchema: agentSpawnSchema,
 		},
 		agentSpawnSchema,
-		async (input) => handlers.spawnAgent(input as any),
+		async (input) => handlers.spawnAgent(input),
 	);
 
 	// ── agent_retire ────────────────────────────────────────────────────────
-	const retireTool: McpToolHandler = createSimpleValidatedTool(
+	const retireTool: McpToolHandler = createSimpleValidatedTool<RetireAgentArgs>(
 		{
 			name: "agent_retire",
 			description:
@@ -104,7 +115,7 @@ export function registerAgentTools(server: McpServer): void {
 			inputSchema: agentRetireSchema,
 		},
 		agentRetireSchema,
-		async (input) => handlers.retireAgent(input as any),
+		async (input) => handlers.retireAgent(input),
 	);
 
 	// ── agent_zombie_detect ─────────────────────────────────────────────────
@@ -143,7 +154,7 @@ export function registerAgentTools(server: McpServer): void {
 	server.addTool(poolStatsTool);
 
 	// ── agent_update_reporting ──────────────────────────────────────────────
-	const reportingTool = createSimpleValidatedTool(
+	const reportingTool = createSimpleValidatedTool<UpdateReportingArgs>(
 		{
 			name: "agent_update_reporting",
 			description: "Update who an agent reports to in the reporting hierarchy.",
@@ -166,12 +177,11 @@ export function registerAgentTools(server: McpServer): void {
 				managerId: { type: "string" },
 			},
 		},
-		async (input: any) =>
-			updateReporting(input as any) as Promise<CallToolResult>,
+		async (input) => updateReporting(input) as Promise<CallToolResult>,
 	);
 
 	// ── privilege_grant ─────────────────────────────────────────────────────
-	const grantTool = createSimpleValidatedTool(
+	const grantTool = createSimpleValidatedTool<GrantPrivilegeArgs>(
 		{
 			name: "privilege_grant",
 			description:
@@ -197,12 +207,11 @@ export function registerAgentTools(server: McpServer): void {
 				grantedBy: { type: "string" },
 			},
 		},
-		async (input: any) =>
-			grantPrivilege(input as any) as Promise<CallToolResult>,
+		async (input) => grantPrivilege(input) as Promise<CallToolResult>,
 	);
 
 	// ── privilege_revoke ────────────────────────────────────────────────────
-	const revokeTool = createSimpleValidatedTool(
+	const revokeTool = createSimpleValidatedTool<RevokePrivilegeArgs>(
 		{
 			name: "privilege_revoke",
 			description: "Revoke a privilege by ID.",
@@ -213,8 +222,7 @@ export function registerAgentTools(server: McpServer): void {
 			},
 		},
 		{ type: "object", properties: { privilegeId: { type: "number" } } },
-		async (input: any) =>
-			revokePrivilege(input as any) as Promise<CallToolResult>,
+		async (input) => revokePrivilege(input) as Promise<CallToolResult>,
 	);
 
 	server.addTool(reportingTool);

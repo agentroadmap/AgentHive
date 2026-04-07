@@ -30,6 +30,8 @@ const Icons = {
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
 		>
 			<path
 				strokeLinecap="round"
@@ -45,6 +47,8 @@ const Icons = {
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
 		>
 			<path
 				strokeLinecap="round"
@@ -60,6 +64,8 @@ const Icons = {
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
 		>
 			<path
 				strokeLinecap="round"
@@ -75,6 +81,8 @@ const Icons = {
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
 		>
 			<path
 				strokeLinecap="round"
@@ -90,6 +98,8 @@ const Icons = {
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
 		>
 			<path
 				strokeLinecap="round"
@@ -105,6 +115,8 @@ const Icons = {
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
 		>
 			<path
 				strokeLinecap="round"
@@ -120,6 +132,8 @@ const Icons = {
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
 		>
 			<path
 				strokeLinecap="round"
@@ -135,6 +149,8 @@ const Icons = {
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
 		>
 			<path
 				strokeLinecap="round"
@@ -150,6 +166,8 @@ const Icons = {
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
 		>
 			<path
 				strokeLinecap="round"
@@ -165,6 +183,8 @@ const Icons = {
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
 		>
 			<path
 				strokeLinecap="round"
@@ -186,6 +206,8 @@ const Icons = {
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
 		>
 			<path
 				strokeLinecap="round"
@@ -201,6 +223,8 @@ const Icons = {
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
 		>
 			<path
 				strokeLinecap="round"
@@ -216,6 +240,8 @@ const Icons = {
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
 		>
 			<path
 				strokeLinecap="round"
@@ -231,6 +257,8 @@ const Icons = {
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
 		>
 			<path
 				strokeLinecap="round"
@@ -246,6 +274,8 @@ const Icons = {
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
 		>
 			<path
 				strokeLinecap="round"
@@ -261,6 +291,8 @@ const Icons = {
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
 		>
 			<path
 				strokeLinecap="round"
@@ -276,6 +308,8 @@ const Icons = {
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
 		>
 			<path
 				strokeLinecap="round"
@@ -291,6 +325,8 @@ const Icons = {
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
 		>
 			<path
 				strokeLinecap="round"
@@ -306,6 +342,8 @@ const Icons = {
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
 		>
 			<path
 				strokeLinecap="round"
@@ -321,6 +359,8 @@ const Icons = {
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
 		>
 			<path
 				strokeLinecap="round"
@@ -336,6 +376,8 @@ const Icons = {
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
 		>
 			<path
 				strokeLinecap="round"
@@ -351,6 +393,8 @@ const Icons = {
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
 		>
 			<path
 				strokeLinecap="round"
@@ -366,6 +410,8 @@ const Icons = {
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
 		>
 			<path
 				strokeLinecap="round"
@@ -381,6 +427,8 @@ const Icons = {
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
 		>
 			<circle cx="12" cy="12" r="9" strokeWidth={2} />
 			<circle cx="12" cy="12" r="5" strokeWidth={2} />
@@ -576,7 +624,7 @@ const SideNavigation = memo(function SideNavigation({
 	const filteredDecisions = decisions;
 
 	const toggleCollapse = useCallback(() => {
-		setIsCollapsed((prev: any) => !prev);
+		setIsCollapsed((prev: boolean) => !prev);
 	}, []);
 
 	return (
@@ -590,6 +638,7 @@ const SideNavigation = memo(function SideNavigation({
 				>
 					{/* Collapse Toggle Button - Always positioned on the border */}
 					<button
+						type="button"
 						onClick={toggleCollapse}
 						className="absolute -right-3 top-1/2 transform -translate-y-1/2 z-10 flex items-center justify-center w-6 h-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-circle shadow-sm hover:shadow-md text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-all duration-200"
 						aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -614,6 +663,7 @@ const SideNavigation = memo(function SideNavigation({
 								/>
 								{searchQuery && (
 									<button
+										type="button"
 										onClick={() => setSearchQuery("")}
 										className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-200"
 									>
@@ -622,6 +672,8 @@ const SideNavigation = memo(function SideNavigation({
 											fill="none"
 											stroke="currentColor"
 											viewBox="0 0 24 24"
+											aria-hidden="true"
+											focusable="false"
 										>
 											<path
 												strokeLinecap="round"
@@ -637,6 +689,7 @@ const SideNavigation = memo(function SideNavigation({
 					) : (
 						<div className="flex items-center justify-center">
 							<button
+								type="button"
 								onClick={() => setIsCollapsed(false)}
 								className="flex items-center justify-center p-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors duration-200"
 								title="Search (⌘K)"
@@ -756,6 +809,7 @@ const SideNavigation = memo(function SideNavigation({
 								</p>
 								{onRetry && (
 									<button
+										type="button"
 										onClick={onRetry}
 										className="text-xs px-3 py-1 bg-red-600 dark:bg-red-700 text-white rounded hover:bg-red-700 dark:hover:bg-red-600 transition-colors duration-200"
 									>
@@ -885,6 +939,7 @@ const SideNavigation = memo(function SideNavigation({
 								<div className="flex items-center justify-between mb-4">
 									<div className="flex items-center space-x-3">
 										<button
+											type="button"
 											onClick={() => setIsDocsCollapsed(!isDocsCollapsed)}
 											className="p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded transition-colors duration-200"
 											title={
@@ -907,6 +962,7 @@ const SideNavigation = memo(function SideNavigation({
 										</span>
 									</div>
 									<button
+										type="button"
 										onClick={handleCreateDocument}
 										className="p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors duration-200"
 										title="Create new document"
@@ -916,6 +972,8 @@ const SideNavigation = memo(function SideNavigation({
 											fill="none"
 											stroke="currentColor"
 											viewBox="0 0 24 24"
+											aria-hidden="true"
+											focusable="false"
 										>
 											<path
 												strokeLinecap="round"
@@ -967,6 +1025,7 @@ const SideNavigation = memo(function SideNavigation({
 								<div className="flex items-center justify-between mb-4">
 									<div className="flex items-center space-x-3">
 										<button
+											type="button"
 											onClick={() =>
 												setIsDecisionsCollapsed(!isDecisionsCollapsed)
 											}
@@ -1141,6 +1200,7 @@ const SideNavigation = memo(function SideNavigation({
 								</div>
 							</NavLink>
 							<button
+								type="button"
 								onClick={() => {
 									setIsCollapsed(false);
 									setIsDocsCollapsed(false);
@@ -1158,6 +1218,7 @@ const SideNavigation = memo(function SideNavigation({
 								</div>
 							</button>
 							<button
+								type="button"
 								onClick={() => {
 									setIsCollapsed(false);
 									setIsDecisionsCollapsed(false);

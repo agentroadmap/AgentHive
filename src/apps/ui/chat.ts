@@ -40,7 +40,9 @@ export function renderChat(
 	let chatLog: any, sidebar: any, inputField: any;
 
 	if (!container) {
-		screen.children.forEach((child: any) => child.destroy());
+		screen.children.forEach((child: any) => {
+			child.destroy();
+		});
 
 		container = box({
 			top: 0,

@@ -201,10 +201,6 @@ export default function DecisionDetail({
 		}
 	};
 
-	const handleEdit = () => {
-		setIsEditing(true);
-	};
-
 	const handleCancelEdit = () => {
 		if (isNewDecision) {
 			// Navigate back for new decisions
