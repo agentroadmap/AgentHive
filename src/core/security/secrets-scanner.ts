@@ -299,7 +299,8 @@ export class SecretsScanner {
 				config.pattern.lastIndex = 0; // Reset regex proposal
 				let match: RegExpExecArray | null;
 
-				while ((match = config.pattern.exec(line)) !== null) {
+				match = config.pattern.exec(line);
+				while (match !== null) {
 					const matchedText = match[0];
 					const maskedValue = this.maskValue(matchedText);
 
@@ -311,6 +312,7 @@ export class SecretsScanner {
 						severity: config.severity,
 						pattern: `${matchedText.slice(0, 20)}...`,
 					});
+					match = config.pattern.exec(line);
 				}
 			}
 		}

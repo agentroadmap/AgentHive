@@ -365,9 +365,7 @@ export function buildChangelogSection(
 	// Sort by updated_date descending
 	const sorted = [...proposals]
 		.filter((s) => s.updatedDate)
-		.sort((a, b) =>
-			(b.updatedDate ?? "").localeCompare(a.updatedDate ?? ""),
-		)
+		.sort((a, b) => (b.updatedDate ?? "").localeCompare(a.updatedDate ?? ""))
 		.slice(0, maxEntries);
 
 	if (sorted.length === 0) {
@@ -565,12 +563,13 @@ function extractFiles(notes: string): string[] {
 	];
 
 	for (const pattern of patterns) {
-		let match;
-		while ((match = pattern.exec(notes)) !== null) {
+		let match: RegExpExecArray | null = pattern.exec(notes);
+		while (match !== null) {
 			const file = match[1] || match[2];
 			if (file && !files.includes(file)) {
 				files.push(file);
 			}
+			match = pattern.exec(notes);
 		}
 	}
 

@@ -410,7 +410,7 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 		const isArchiving = archivingDirectiveKey === bucket.key;
 
 		return (
-			<div
+			<section
 				key={bucket.key}
 				className={`rounded-lg border-2 transition-all duration-200 ${
 					isDropTarget
@@ -422,6 +422,7 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 				onDragOver={(e) => handleDragOver(e, bucket.key)}
 				onDragLeave={handleDragLeave}
 				onDrop={(e) => handleDrop(e, bucket.directive)}
+				aria-label={`${bucket.label} directive`}
 			>
 				<div className="px-5 py-4">
 					{/* Header row */}
@@ -489,6 +490,8 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 									fill="none"
 									stroke="currentColor"
 									viewBox="0 0 24 24"
+									aria-hidden="true"
+									focusable="false"
 								>
 									<path
 										strokeLinecap="round"
@@ -508,6 +511,8 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 									fill="none"
 									stroke="currentColor"
 									viewBox="0 0 24 24"
+									aria-hidden="true"
+									focusable="false"
 								>
 									<path
 										strokeLinecap="round"
@@ -529,6 +534,8 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 									fill="none"
 									stroke="currentColor"
 									viewBox="0 0 24 24"
+									aria-hidden="true"
+									focusable="false"
 								>
 									<path
 										strokeLinecap="round"
@@ -555,6 +562,8 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 								fill="none"
 								stroke="currentColor"
 								viewBox="0 0 24 24"
+								aria-hidden="true"
+								focusable="false"
 							>
 								<path
 									strokeLinecap="round"
@@ -603,7 +612,7 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 						</div>
 					)}
 				</div>
-			</div>
+			</section>
 		);
 	};
 
@@ -635,6 +644,8 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 								fill="none"
 								stroke="currentColor"
 								viewBox="0 0 24 24"
+								aria-hidden="true"
+								focusable="false"
 							>
 								<path
 									strokeLinecap="round"
@@ -663,6 +674,8 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 								fill="none"
 								stroke="currentColor"
 								viewBox="0 0 24 24"
+								aria-hidden="true"
+								focusable="false"
 							>
 								<path
 									strokeLinecap="round"
@@ -768,6 +781,8 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 								fill="none"
 								stroke="currentColor"
 								viewBox="0 0 24 24"
+								aria-hidden="true"
+								focusable="false"
 							>
 								<path
 									strokeLinecap="round"
@@ -803,6 +818,8 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 									fill="none"
 									stroke="currentColor"
 									viewBox="0 0 24 24"
+									aria-hidden="true"
+									focusable="false"
 								>
 									<path
 										strokeLinecap="round"
@@ -823,6 +840,8 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 								fill="none"
 								stroke="currentColor"
 								viewBox="0 0 24 24"
+								aria-hidden="true"
+								focusable="false"
 							>
 								<path
 									strokeLinecap="round"
@@ -841,6 +860,8 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 								fill="none"
 								stroke="currentColor"
 								viewBox="0 0 24 24"
+								aria-hidden="true"
+								focusable="false"
 							>
 								<path
 									strokeLinecap="round"
@@ -915,6 +936,8 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 								fill="none"
 								stroke="currentColor"
 								viewBox="0 0 24 24"
+								aria-hidden="true"
+								focusable="false"
 							>
 								<path
 									strokeLinecap="round"
@@ -943,6 +966,8 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 						fill="none"
 						stroke="currentColor"
 						viewBox="0 0 24 24"
+						aria-hidden="true"
+						focusable="false"
 					>
 						<path
 							strokeLinecap="round"
@@ -966,10 +991,14 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 			>
 				<form onSubmit={handleAddDirective} className="space-y-4">
 					<div className="space-y-2">
-						<label className="text-sm font-medium text-gray-900 dark:text-gray-100">
+						<label
+							htmlFor="new-directive-name"
+							className="text-sm font-medium text-gray-900 dark:text-gray-100"
+						>
 							Directive name
 						</label>
 						<input
+							id="new-directive-name"
 							type="text"
 							value={newDirective}
 							onChange={(e) => handleNewDirectiveChange(e.target.value)}

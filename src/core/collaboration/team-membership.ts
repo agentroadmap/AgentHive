@@ -543,7 +543,8 @@ Use the MCP tools provided to interact with the roadmap.
 			events = events.filter((e) => e.type === options.type);
 		}
 		if (options?.since) {
-			events = events.filter((e) => e.timestamp >= options?.since!);
+			const since = options.since;
+			events = events.filter((e) => e.timestamp >= since);
 		}
 
 		events.sort((a, b) => b.timestamp.localeCompare(a.timestamp));

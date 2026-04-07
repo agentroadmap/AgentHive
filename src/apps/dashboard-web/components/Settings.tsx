@@ -1,5 +1,5 @@
 import type React from "react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { RoadmapConfig } from "../../../shared/types";
 import { apiClient } from "../lib/api";
 import { SuccessToast } from "./SuccessToast";
@@ -18,12 +18,7 @@ const Settings: React.FC = () => {
 		Record<string, string>
 	>({});
 
-	useEffect(() => {
-		loadConfig();
-		loadStatuses();
-	}, [loadConfig, loadStatuses]);
-
-	async function loadConfig() {
+	const loadConfig = useCallback(async () => {
 		try {
 			setLoading(true);
 			const data = await apiClient.fetchConfig();
@@ -37,18 +32,26 @@ const Settings: React.FC = () => {
 		} finally {
 			setLoading(false);
 		}
-	}
+	}, []);
 
-	async function loadStatuses() {
+	const loadStatuses = useCallback(async () => {
 		try {
 			const data = await apiClient.fetchStatuses();
 			setStatuses(data);
 		} catch (err) {
 			console.error("Failed to load statuses:", err);
 		}
-	}
+	}, []);
 
-	const handleInputChange = (field: keyof RoadmapConfig, value: any) => {
+	useEffect(() => {
+		void loadConfig();
+		void loadStatuses();
+	}, [loadConfig, loadStatuses]);
+
+	const handleInputChange = <K extends keyof RoadmapConfig>(
+		field: K,
+		value: RoadmapConfig[K],
+	) => {
 		if (!config) return;
 
 		setConfig({
@@ -465,13 +468,17 @@ const Settings: React.FC = () => {
 							</div>
 
 							<div>
-								<label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+								<label
+									htmlFor="proposalPrefix"
+									className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+								>
 									Proposal Prefix{" "}
 									<span className="text-gray-400 dark:text-gray-500 font-normal">
 										(read-only)
 									</span>
 								</label>
 								<input
+									id="proposalPrefix"
 									type="text"
 									value={(
 										config.prefixes?.proposal || "proposal"
@@ -490,6 +497,7 @@ const Settings: React.FC = () => {
 					{/* Save/Cancel Buttons */}
 					<div className="flex items-center justify-end space-x-4">
 						<button
+							type="button"
 							onClick={handleCancel}
 							disabled={!hasUnsavedChanges || saving}
 							className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 disabled:opacity-50 transition-colors duration-200"
@@ -497,6 +505,7 @@ const Settings: React.FC = () => {
 							Cancel
 						</button>
 						<button
+							type="button"
 							onClick={handleSave}
 							disabled={!hasUnsavedChanges || saving}
 							className="px-4 py-2 bg-blue-500 dark:bg-blue-600 text-white rounded-lg hover:bg-blue-600 dark:hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:focus:ring-blue-500 disabled:opacity-50 transition-colors duration-200"

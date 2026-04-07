@@ -219,10 +219,12 @@ describe("proposal-63: Agent Team Membership", () => {
 			// Check if SOUL.md was created
 			const profile = membership.getProfile("agent-frank");
 			assert.ok(profile?.workspace?.soulMdPath);
+			const soulMdPath = profile?.workspace?.soulMdPath;
+			assert.ok(soulMdPath);
 
 			// Read the SOUL.md content
 			const soulContent = await import("node:fs/promises").then((fs) =>
-				fs.readFile(profile?.workspace?.soulMdPath!, "utf-8"),
+				fs.readFile(soulMdPath, "utf-8"),
 			);
 
 			assert.ok(soulContent.includes("agent-frank"));

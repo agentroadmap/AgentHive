@@ -29,7 +29,9 @@ export function renderHeadlines(
 	let feedLog: any;
 
 	if (!container) {
-		screen.children.forEach((child: any) => child.destroy());
+		screen.children.forEach((child: any) => {
+			child.destroy();
+		});
 
 		container = box({
 			top: 0,

@@ -549,10 +549,14 @@ const InitializationScreen: React.FC<InitializationScreenProps> = ({
 									</label>
 
 									<div className="ml-6">
-										<label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">
+										<label
+											htmlFor="active-branch-days"
+											className="block text-sm text-gray-700 dark:text-gray-300 mb-1"
+										>
 											Active branch days
 										</label>
 										<input
+											id="active-branch-days"
 											type="number"
 											value={advancedConfig.activeBranchDays}
 											onChange={(e) =>
@@ -652,10 +656,14 @@ const InitializationScreen: React.FC<InitializationScreenProps> = ({
 						</label>
 						{advancedConfig.zeroPaddedIds !== null && (
 							<div className="ml-6 mt-2">
-								<label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">
+								<label
+									htmlFor="zero-padded-digits"
+									className="block text-sm text-gray-700 dark:text-gray-300 mb-1"
+								>
 									Number of digits
 								</label>
 								<input
+									id="zero-padded-digits"
 									type="number"
 									value={advancedConfig.zeroPaddedIds}
 									onChange={(e) =>
@@ -673,10 +681,14 @@ const InitializationScreen: React.FC<InitializationScreenProps> = ({
 
 						{/* Proposal Prefix */}
 						<div className="mt-4">
-							<label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">
+							<label
+								htmlFor="proposal-prefix"
+								className="block text-sm text-gray-700 dark:text-gray-300 mb-1"
+							>
 								Proposal prefix
 							</label>
 							<input
+								id="proposal-prefix"
 								type="text"
 								value={advancedConfig.proposalPrefix}
 								onChange={(e) =>
@@ -724,10 +736,14 @@ const InitializationScreen: React.FC<InitializationScreenProps> = ({
 						</h3>
 						<div className="space-y-3">
 							<div>
-								<label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">
+								<label
+									htmlFor="default-port"
+									className="block text-sm text-gray-700 dark:text-gray-300 mb-1"
+								>
 									Default port
 								</label>
 								<input
+									id="default-port"
 									type="number"
 									value={advancedConfig.defaultPort}
 									onChange={(e) =>
@@ -908,6 +924,8 @@ const InitializationScreen: React.FC<InitializationScreenProps> = ({
 							fill="none"
 							stroke="currentColor"
 							viewBox="0 0 24 24"
+							aria-hidden="true"
+							focusable="false"
 						>
 							<path
 								strokeLinecap="round"
@@ -959,6 +977,8 @@ const InitializationScreen: React.FC<InitializationScreenProps> = ({
 										className="animate-spin -ml-1 mr-2 h-5 w-5 text-white"
 										fill="none"
 										viewBox="0 0 24 24"
+										aria-hidden="true"
+										focusable="false"
 									>
 										<circle
 											className="opacity-25"

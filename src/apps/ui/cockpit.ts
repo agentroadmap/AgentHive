@@ -62,7 +62,9 @@ export function renderCockpit(
 
 	if (!container) {
 		// Clear screen for initial render
-		screen.children.forEach((child: any) => child.destroy());
+		screen.children.forEach((child: any) => {
+			child.destroy();
+		});
 
 		// Create persistent container
 		container = box({

@@ -6,12 +6,9 @@ interface Props {
 	source: string;
 }
 
-const URI_AUTOLINK_PREFIX_REGEX = new RegExp(
-	String.raw`^<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^<>\u0000-\u0020]*>`,
-);
-const EMAIL_AUTOLINK_PREFIX_REGEX = new RegExp(
-	String.raw`^<[A-Za-z0-9.!#$%&'*+/=?^_\`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z0-9-]+>`,
-);
+const URI_AUTOLINK_PREFIX_REGEX = /^<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\s<>]*>/;
+const EMAIL_AUTOLINK_PREFIX_REGEX =
+	/^<[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z0-9-]+>/;
 
 function sanitizeMarkdownSource(source: string): string {
 	return source.replace(/<(?=[A-Za-z])/g, (match, offset, fullText) => {

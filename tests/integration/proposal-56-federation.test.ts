@@ -482,7 +482,8 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 			const req = await pki.registerHost("host1.local", 8080, keys1.publicKey);
 			await pki.approveJoinRequest(req.requestId, "admin");
 
-			const oldCertId = pki.getHost(req.hostId)?.certificateId!;
+			const oldCertId = pki.getHost(req.hostId)?.certificateId;
+			assert.ok(oldCertId);
 
 			// Rotate
 			const keys2 = generateTestKeyPair();

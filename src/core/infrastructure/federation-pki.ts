@@ -847,7 +847,10 @@ export class MTLSValidator {
 		}
 
 		if (!verification.cert) {
-			return { valid: false, error: "Certificate verification returned no certificate" };
+			return {
+				valid: false,
+				error: "Certificate verification returned no certificate",
+			};
 		}
 
 		// Create connection record

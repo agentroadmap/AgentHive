@@ -212,9 +212,9 @@ function validateProperty(
 		}
 	} else if (schema.type === "array" && Array.isArray(value)) {
 		if (schema.items) {
-			value.forEach((item: any, i: number) =>
-				validateProperty(`${path}[${i}]`, item, schema.items, errors),
-			);
+			value.forEach((item: any, i: number) => {
+				validateProperty(`${path}[${i}]`, item, schema.items, errors);
+			});
 		}
 	} else if (schema.type === "string") {
 		if (typeof value !== "string") errors.push(`${path} must be a string`);
@@ -296,9 +296,7 @@ export function loadSMDLFile(filePath: string): SMDLRoot {
  *
  * Returns template id for use in proposal.workflow_name or workflow_id FK.
  */
-export async function materializeWorkflow(
-	smdl: SMDLRoot,
-): Promise<{
+export async function materializeWorkflow(smdl: SMDLRoot): Promise<{
 	templateId: number;
 	stages: number;
 	transitions: number;

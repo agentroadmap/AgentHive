@@ -399,9 +399,7 @@ export async function transitionProposal(
 /**
  * Get valid transitions for a proposal.
  */
-export async function getValidTransitions(
-	proposalId: number,
-): Promise<
+export async function getValidTransitions(proposalId: number): Promise<
 	{
 		from_state: string;
 		to_state: string;

@@ -1,5 +1,5 @@
 import type React from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
 	collectArchivedDirectiveKeys,
@@ -288,33 +288,36 @@ const ProposalList: React.FC<ProposalListProps> = ({
 			),
 		[archivedDirectives, directiveEntities],
 	);
-	const canonicalizeDirective = (value?: string | null): string => {
-		const normalized = (value ?? "").trim();
-		if (!normalized) return "";
-		const key = normalized.toLowerCase();
-		const direct = directiveAliasToCanonical.get(key);
-		if (direct) {
-			return direct;
-		}
-		const idMatch = normalized.match(/^m-(\d+)$/i);
-		if (idMatch?.[1]) {
-			const numericAlias = String(Number.parseInt(idMatch[1], 10));
-			return (
-				directiveAliasToCanonical.get(`m-${numericAlias}`) ??
-				directiveAliasToCanonical.get(numericAlias) ??
-				normalized
-			);
-		}
-		if (/^\d+$/.test(normalized)) {
-			const numericAlias = String(Number.parseInt(normalized, 10));
-			return (
-				directiveAliasToCanonical.get(`m-${numericAlias}`) ??
-				directiveAliasToCanonical.get(numericAlias) ??
-				normalized
-			);
-		}
-		return normalized;
-	};
+	const canonicalizeDirective = useCallback(
+		(value?: string | null): string => {
+			const normalized = (value ?? "").trim();
+			if (!normalized) return "";
+			const key = normalized.toLowerCase();
+			const direct = directiveAliasToCanonical.get(key);
+			if (direct) {
+				return direct;
+			}
+			const idMatch = normalized.match(/^m-(\d+)$/i);
+			if (idMatch?.[1]) {
+				const numericAlias = String(Number.parseInt(idMatch[1], 10));
+				return (
+					directiveAliasToCanonical.get(`m-${numericAlias}`) ??
+					directiveAliasToCanonical.get(numericAlias) ??
+					normalized
+				);
+			}
+			if (/^\d+$/.test(normalized)) {
+				const numericAlias = String(Number.parseInt(normalized, 10));
+				return (
+					directiveAliasToCanonical.get(`m-${numericAlias}`) ??
+					directiveAliasToCanonical.get(numericAlias) ??
+					normalized
+				);
+			}
+			return normalized;
+		},
+		[directiveAliasToCanonical],
+	);
 
 	const sortedBaseProposals = useMemo(
 		() => sortProposalsByIdDescending(proposals),
@@ -766,6 +769,7 @@ const ProposalList: React.FC<ProposalListProps> = ({
 						All Proposals
 					</h1>
 					<button
+						type="button"
 						className="inline-flex items-center px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-400 dark:focus:ring-offset-gray-900 transition-colors duration-200"
 						onClick={onNewProposal}
 					>
@@ -782,6 +786,8 @@ const ProposalList: React.FC<ProposalListProps> = ({
 									fill="none"
 									stroke="currentColor"
 									viewBox="0 0 24 24"
+									aria-hidden="true"
+									focusable="false"
 								>
 									<path
 										strokeLinecap="round"
@@ -809,6 +815,8 @@ const ProposalList: React.FC<ProposalListProps> = ({
 										fill="none"
 										stroke="currentColor"
 										viewBox="0 0 24 24"
+										aria-hidden="true"
+										focusable="false"
 									>
 										<path
 											strokeLinecap="round"
@@ -946,6 +954,8 @@ const ProposalList: React.FC<ProposalListProps> = ({
 									stroke="currentColor"
 									viewBox="0 0 24 24"
 									xmlns="http://www.w3.org/2000/svg"
+									aria-hidden="true"
+									focusable="false"
 								>
 									<path
 										strokeLinecap="round"
@@ -990,6 +1000,8 @@ const ProposalList: React.FC<ProposalListProps> = ({
 						fill="none"
 						stroke="currentColor"
 						viewBox="0 0 24 24"
+						aria-hidden="true"
+						focusable="false"
 					>
 						<path
 							strokeLinecap="round"
@@ -1200,6 +1212,8 @@ const ProposalList: React.FC<ProposalListProps> = ({
 							fill="none"
 							stroke="currentColor"
 							viewBox="0 0 24 24"
+							aria-hidden="true"
+							focusable="false"
 						>
 							<path
 								strokeLinecap="round"

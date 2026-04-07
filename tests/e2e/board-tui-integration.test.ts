@@ -409,7 +409,7 @@ describe("AC#6: Regression - Critical Board Paths", () => {
 		assert.strictEqual(proposal.acceptanceCriteriaItems?.length, 2);
 		assert.strictEqual(proposal.implementationNotes, "Notes");
 		assert.strictEqual(proposal.finalSummary, "Summary");
-		assert.strictEqual(proposal.assignee?.[0]!, "@builder");
+		assert.strictEqual(proposal.assignee?.[0], "@builder");
 	});
 
 	it("handles proposal with minimal fields", () => {

@@ -644,7 +644,8 @@ export class ProposalLeaseManager {
 			entries = entries.filter((e) => e.type === options.type);
 		}
 		if (options?.since) {
-			entries = entries.filter((e) => e.timestamp >= options?.since!);
+			const since = options.since;
+			entries = entries.filter((e) => e.timestamp >= since);
 		}
 
 		entries.sort((a, b) => b.timestamp.localeCompare(a.timestamp));

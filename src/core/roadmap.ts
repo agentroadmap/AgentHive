@@ -5663,10 +5663,7 @@ export class Core {
 	/**
 	 * Read messages from a channel, optionally filtered by a since timestamp (ISO string)
 	 */
-	async readMessages(params: {
-		channel: string;
-		since?: string;
-	}): Promise<{
+	async readMessages(params: { channel: string; since?: string }): Promise<{
 		channel: string;
 		messages: {
 			timestamp: string;
@@ -5753,9 +5750,7 @@ export class Core {
 	/**
 	 * Parse a single log line into a structured message (or null if not a message line)
 	 */
-	static parseLine(
-		line: string,
-	): {
+	static parseLine(line: string): {
 		timestamp: string;
 		from: string;
 		text: string;

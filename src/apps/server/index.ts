@@ -2153,16 +2153,25 @@ export class RoadmapServer {
 
 		// Read body
 		const body = await req.text();
-		let parsedBody;
+		let parsedBody: Parameters<SSEServerTransport["handlePostMessage"]>[2];
 		try {
-			parsedBody = JSON.parse(body);
+			parsedBody = JSON.parse(body) as Parameters<
+				SSEServerTransport["handlePostMessage"]
+			>[2];
 		} catch {
 			return Response.json({ error: "Invalid JSON" }, { status: 400 });
 		}
+		const parsedMethod =
+			typeof parsedBody === "object" &&
+			parsedBody !== null &&
+			"method" in parsedBody &&
+			typeof parsedBody.method === "string"
+				? parsedBody.method
+				: "unknown";
 
 		appendFileSync(
 			"/tmp/mcp-debug.log",
-			`[MCP] POST message: ${parsedBody?.method} sessionId: ${sessionId}\n`,
+			`[MCP] POST message: ${parsedMethod} sessionId: ${sessionId}\n`,
 		);
 
 		// Handle message through SSE transport
