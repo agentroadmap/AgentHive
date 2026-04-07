@@ -52,4 +52,6 @@ Thumbs.db
 /config.yaml
 /config.example.yaml
 /config.yml
+/.env.agent
+/.git-identity
 /scripts/mcp/
