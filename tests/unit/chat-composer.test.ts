@@ -11,7 +11,11 @@ describe("Chat Composer Utils", () => {
 
 	it("should handle text input", () => {
 		let proposal = composer.createChatComposerProposal();
-		const result = composer.applyChatComposerKey(proposal, { sequence: "h" }, "h");
+		const result = composer.applyChatComposerKey(
+			proposal,
+			{ sequence: "h" },
+			"h",
+		);
 		if (result.type === "update") {
 			proposal = result.proposal;
 		}
@@ -20,7 +24,9 @@ describe("Chat Composer Utils", () => {
 
 	it("should handle backspace", () => {
 		let proposal = { lines: ["hi"] };
-		const result = composer.applyChatComposerKey(proposal, { name: "backspace" });
+		const result = composer.applyChatComposerKey(proposal, {
+			name: "backspace",
+		});
 		if (result.type === "update") {
 			proposal = result.proposal;
 		}
@@ -29,7 +35,10 @@ describe("Chat Composer Utils", () => {
 
 	it("should handle multiline input (Shift+Enter)", () => {
 		let proposal = { lines: ["line1"] };
-		const result = composer.applyChatComposerKey(proposal, { name: "return", shift: true });
+		const result = composer.applyChatComposerKey(proposal, {
+			name: "return",
+			shift: true,
+		});
 		if (result.type === "update") {
 			proposal = result.proposal;
 		}
@@ -48,7 +57,10 @@ describe("Chat Composer Utils", () => {
 	it("should normalize mentions", () => {
 		const knownUsers = ["Alice (Senior Agent)", "Bob"];
 		const proposal = { lines: ["Hello @al"] };
-		const suggestions = composer.getChatMentionSuggestions(proposal, knownUsers);
+		const suggestions = composer.getChatMentionSuggestions(
+			proposal,
+			knownUsers,
+		);
 		assert.equal(suggestions.length, 1);
 		assert.equal(suggestions[0].value, "@alice");
 	});
@@ -56,26 +68,26 @@ describe("Chat Composer Utils", () => {
 	it("should cycle mentions with Tab", () => {
 		const knownUsers = ["Alice", "Bob"];
 		let proposal = { lines: ["@"] };
-		
+
 		proposal = composer.cycleChatMention(proposal, knownUsers, 1);
 		assert.equal(composer.getChatComposerText(proposal), "@alice");
-		
+
 		proposal = composer.cycleChatMention(proposal, knownUsers, 1);
 		assert.equal(composer.getChatComposerText(proposal), "@bob");
 	});
 
 	it("should complete paths", () => {
-		const mockList = (dir: string) => [
+		const mockList = (_dir: string) => [
 			{ name: "file.txt", isDirectory: false },
-			{ name: "docs", isDirectory: true }
+			{ name: "docs", isDirectory: true },
 		];
-		
+
 		let proposal = { lines: ["read /tmp/f"] };
-		proposal = composer.completeChatPath(proposal, { 
+		proposal = composer.completeChatPath(proposal, {
 			homeDir: "/home/user",
-			listDirectory: mockList 
+			listDirectory: mockList,
 		});
-		
+
 		assert.equal(composer.getChatComposerText(proposal), "read /tmp/file.txt");
 	});
 });

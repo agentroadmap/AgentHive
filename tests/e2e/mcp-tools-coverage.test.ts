@@ -1,10 +1,13 @@
 import assert from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { McpServer } from "../../src/mcp/server.ts";
-import { registerWorkflowTools } from "../../src/mcp/tools/workflow/index.ts";
-import { registerMessageTools } from "../../src/mcp/tools/messages/index.ts";
 import { registerTeamTools } from "../../src/mcp/tools/teams/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
+import { registerWorkflowTools } from "../../src/mcp/tools/workflow/index.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 const getText = (content: unknown[] | undefined): string => {
 	const item = content?.[0] as { text?: string } | undefined;
@@ -30,7 +33,11 @@ describe("MCP workflow tools — state machine", () => {
 	});
 
 	afterEach(async () => {
-		try { await mcpServer.stop(); } catch { /* */ }
+		try {
+			await mcpServer.stop();
+		} catch {
+			/* */
+		}
 		await safeCleanup(TEST_DIR);
 	});
 
@@ -50,7 +57,10 @@ describe("MCP workflow tools — state machine", () => {
 			"add_discussion",
 		];
 		for (const name of expected) {
-			assert.ok(names.includes(name), `Expected tool "${name}" to be registered`);
+			assert.ok(
+				names.includes(name),
+				`Expected tool "${name}" to be registered`,
+			);
 		}
 	});
 
@@ -63,7 +73,10 @@ describe("MCP workflow tools — state machine", () => {
 		});
 		const text = getText(result.content);
 		// Should return transition rules
-		assert.ok(text.length > 10, `Expected transition rules: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.length > 10,
+			`Expected transition rules: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("adds acceptance criteria to a proposal", async () => {
@@ -78,7 +91,10 @@ describe("MCP workflow tools — state machine", () => {
 		});
 		const text = getText(result.content);
 		// Postgres backend — even if P099 doesn't exist, handler should respond
-		assert.ok(typeof text === "string" && text.length > 0, `Expected response: ${text.slice(0, 200)}`);
+		assert.ok(
+			typeof text === "string" && text.length > 0,
+			`Expected response: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("submits a review", async () => {
@@ -94,7 +110,10 @@ describe("MCP workflow tools — state machine", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(typeof text === "string" && text.length > 0, `Expected review response: ${text.slice(0, 200)}`);
+		assert.ok(
+			typeof text === "string" && text.length > 0,
+			`Expected review response: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("lists reviews for a proposal", async () => {
@@ -105,7 +124,10 @@ describe("MCP workflow tools — state machine", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(typeof text === "string", `Expected reviews list: ${text.slice(0, 200)}`);
+		assert.ok(
+			typeof text === "string",
+			`Expected reviews list: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("adds a dependency", async () => {
@@ -120,7 +142,10 @@ describe("MCP workflow tools — state machine", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(typeof text === "string" && text.length > 0, `Expected dependency response: ${text.slice(0, 200)}`);
+		assert.ok(
+			typeof text === "string" && text.length > 0,
+			`Expected dependency response: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("adds a discussion comment", async () => {
@@ -135,7 +160,10 @@ describe("MCP workflow tools — state machine", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(typeof text === "string" && text.length > 0, `Expected discussion response: ${text.slice(0, 200)}`);
+		assert.ok(
+			typeof text === "string" && text.length > 0,
+			`Expected discussion response: ${text.slice(0, 200)}`,
+		);
 	});
 });
 
@@ -155,7 +183,11 @@ describe("MCP team tools", () => {
 	});
 
 	afterEach(async () => {
-		try { await mcpServer.stop(); } catch { /* */ }
+		try {
+			await mcpServer.stop();
+		} catch {
+			/* */
+		}
 		await safeCleanup(TEST_DIR);
 	});
 
@@ -173,7 +205,10 @@ describe("MCP team tools", () => {
 			"team_register_agent",
 		];
 		for (const name of expected) {
-			assert.ok(names.includes(name), `Expected tool "${name}" to be registered`);
+			assert.ok(
+				names.includes(name),
+				`Expected tool "${name}" to be registered`,
+			);
 		}
 	});
 
@@ -188,7 +223,10 @@ describe("MCP team tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("alpha-squad") || text.includes("Team created"), `Expected team creation: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("alpha-squad") || text.includes("Team created"),
+			`Expected team creation: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("lists teams", async () => {
@@ -226,8 +264,12 @@ describe("MCP team tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("test-agent") || text.includes("added") || text.includes("member"),
-			`Expected member add: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("test-agent") ||
+				text.includes("added") ||
+				text.includes("member"),
+			`Expected member add: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("shows team roster", async () => {
@@ -245,7 +287,10 @@ describe("MCP team tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(typeof text === "string" && text.length > 0, `Expected roster: ${text.slice(0, 200)}`);
+		assert.ok(
+			typeof text === "string" && text.length > 0,
+			`Expected roster: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("registers an agent to a team", async () => {
@@ -267,8 +312,12 @@ describe("MCP team tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("new-agent") || text.includes("registered") || text.includes("agent"),
-			`Expected agent registration: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("new-agent") ||
+				text.includes("registered") ||
+				text.includes("agent"),
+			`Expected agent registration: ${text.slice(0, 200)}`,
+		);
 	});
 });
 
@@ -285,12 +334,18 @@ describe("MCP spending tools", () => {
 		execSync(`git config user.email test@example.com`, { cwd: TEST_DIR });
 		await mcpServer.initializeProject("Test Project");
 		// Import spending tools dynamically
-		const { registerSpendingTools } = await import("../../src/mcp/tools/spending/index.ts");
+		const { registerSpendingTools } = await import(
+			"../../src/mcp/tools/spending/index.ts"
+		);
 		registerSpendingTools(mcpServer);
 	});
 
 	afterEach(async () => {
-		try { await mcpServer.stop(); } catch { /* */ }
+		try {
+			await mcpServer.stop();
+		} catch {
+			/* */
+		}
 		await safeCleanup(TEST_DIR);
 	});
 
@@ -299,7 +354,10 @@ describe("MCP spending tools", () => {
 		const names = tools.tools.map((t) => t.name);
 		const expected = ["spending_set_cap", "spending_log", "spending_report"];
 		for (const name of expected) {
-			assert.ok(names.includes(name), `Expected tool "${name}" to be registered`);
+			assert.ok(
+				names.includes(name),
+				`Expected tool "${name}" to be registered`,
+			);
 		}
 	});
 
@@ -307,12 +365,16 @@ describe("MCP spending tools", () => {
 		const result = await mcpServer.testInterface.callTool({
 			params: {
 				name: "spending_set_cap",
-				arguments: { amount: 1.00, currency: "USD" },
+				arguments: { amount: 1.0, currency: "USD" },
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("1.00") || text.includes("cap") || text.includes("spending"),
-			`Expected spending cap: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("1.00") ||
+				text.includes("cap") ||
+				text.includes("spending"),
+			`Expected spending cap: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("logs a spending event", async () => {
@@ -323,8 +385,12 @@ describe("MCP spending tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("0.05") || text.includes("logged") || text.includes("spending"),
-			`Expected spending log: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("0.05") ||
+				text.includes("logged") ||
+				text.includes("spending"),
+			`Expected spending log: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("generates a spending report", async () => {
@@ -332,7 +398,10 @@ describe("MCP spending tools", () => {
 			params: { name: "spending_report", arguments: {} },
 		});
 		const text = getText(result.content);
-		assert.ok(typeof text === "string" && text.length > 0, `Expected spending report: ${text.slice(0, 200)}`);
+		assert.ok(
+			typeof text === "string" && text.length > 0,
+			`Expected spending report: ${text.slice(0, 200)}`,
+		);
 	});
 });
 
@@ -348,12 +417,18 @@ describe("MCP memory tools", () => {
 		execSync(`git config user.name "Test"`, { cwd: TEST_DIR });
 		execSync(`git config user.email test@example.com`, { cwd: TEST_DIR });
 		await mcpServer.initializeProject("Test Project");
-		const { registerMemoryTools } = await import("../../src/mcp/tools/memory/index.ts");
+		const { registerMemoryTools } = await import(
+			"../../src/mcp/tools/memory/index.ts"
+		);
 		registerMemoryTools(mcpServer);
 	});
 
 	afterEach(async () => {
-		try { await mcpServer.stop(); } catch { /* */ }
+		try {
+			await mcpServer.stop();
+		} catch {
+			/* */
+		}
 		await safeCleanup(TEST_DIR);
 	});
 
@@ -362,7 +437,10 @@ describe("MCP memory tools", () => {
 		const names = tools.tools.map((t) => t.name);
 		const expected = ["memory_set", "memory_get", "memory_search"];
 		for (const name of expected) {
-			assert.ok(names.includes(name), `Expected tool "${name}" to be registered`);
+			assert.ok(
+				names.includes(name),
+				`Expected tool "${name}" to be registered`,
+			);
 		}
 	});
 
@@ -377,8 +455,13 @@ describe("MCP memory tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("test-key") || text.includes("saved") || text.includes("stored") || text.length > 0,
-			`Expected memory set: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("test-key") ||
+				text.includes("saved") ||
+				text.includes("stored") ||
+				text.length > 0,
+			`Expected memory set: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("gets a memory entry", async () => {
@@ -396,8 +479,12 @@ describe("MCP memory tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("get-value") || text.includes("get-test") || text.length > 0,
-			`Expected memory get: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("get-value") ||
+				text.includes("get-test") ||
+				text.length > 0,
+			`Expected memory get: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("searches memory entries", async () => {
@@ -408,7 +495,10 @@ describe("MCP memory tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(typeof text === "string", `Expected memory search: ${text.slice(0, 200)}`);
+		assert.ok(
+			typeof text === "string",
+			`Expected memory search: ${text.slice(0, 200)}`,
+		);
 	});
 });
 
@@ -424,12 +514,18 @@ describe("MCP model tools", () => {
 		execSync(`git config user.name "Test"`, { cwd: TEST_DIR });
 		execSync(`git config user.email test@example.com`, { cwd: TEST_DIR });
 		await mcpServer.initializeProject("Test Project");
-		const { registerModelTools } = await import("../../src/mcp/tools/models/index.ts");
+		const { registerModelTools } = await import(
+			"../../src/mcp/tools/models/index.ts"
+		);
 		registerModelTools(mcpServer);
 	});
 
 	afterEach(async () => {
-		try { await mcpServer.stop(); } catch { /* */ }
+		try {
+			await mcpServer.stop();
+		} catch {
+			/* */
+		}
 		await safeCleanup(TEST_DIR);
 	});
 
@@ -438,7 +534,10 @@ describe("MCP model tools", () => {
 		const names = tools.tools.map((t) => t.name);
 		const expected = ["model_list", "model_add"];
 		for (const name of expected) {
-			assert.ok(names.includes(name), `Expected tool "${name}" to be registered`);
+			assert.ok(
+				names.includes(name),
+				`Expected tool "${name}" to be registered`,
+			);
 		}
 	});
 
@@ -447,7 +546,10 @@ describe("MCP model tools", () => {
 			params: { name: "model_list", arguments: {} },
 		});
 		const text = getText(result.content);
-		assert.ok(typeof text === "string" && text.length > 0, `Expected model list: ${text.slice(0, 200)}`);
+		assert.ok(
+			typeof text === "string" && text.length > 0,
+			`Expected model list: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("adds a model", async () => {
@@ -461,8 +563,12 @@ describe("MCP model tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("test-model") || text.includes("added") || text.includes("model"),
-			`Expected model add: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("test-model") ||
+				text.includes("added") ||
+				text.includes("model"),
+			`Expected model add: ${text.slice(0, 200)}`,
+		);
 	});
 });
 
@@ -478,12 +584,18 @@ describe("MCP agent pool — advanced operations", () => {
 		execSync(`git config user.name "Test"`, { cwd: TEST_DIR });
 		execSync(`git config user.email test@example.com`, { cwd: TEST_DIR });
 		await mcpServer.initializeProject("Test Project");
-		const { registerAgentTools } = await import("../../src/mcp/tools/agents/index.ts");
+		const { registerAgentTools } = await import(
+			"../../src/mcp/tools/agents/index.ts"
+		);
 		registerAgentTools(mcpServer);
 	});
 
 	afterEach(async () => {
-		try { await mcpServer.stop(); } catch { /* */ }
+		try {
+			await mcpServer.stop();
+		} catch {
+			/* */
+		}
 		await safeCleanup(TEST_DIR);
 	});
 
@@ -500,14 +612,22 @@ describe("MCP agent pool — advanced operations", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(typeof text === "string" && text.length > 0, `Expected agent spawn: ${text.slice(0, 200)}`);
+		assert.ok(
+			typeof text === "string" && text.length > 0,
+			`Expected agent spawn: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("retires an agent", async () => {
 		await mcpServer.testInterface.callTool({
 			params: {
 				name: "agent_register",
-				arguments: { name: "retiree", role: "temp", clearance: 1, skills: "cleanup" },
+				arguments: {
+					name: "retiree",
+					role: "temp",
+					clearance: 1,
+					skills: "cleanup",
+				},
 			},
 		});
 
@@ -518,8 +638,12 @@ describe("MCP agent pool — advanced operations", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("retiree") || text.includes("retired") || text.includes("agent"),
-			`Expected agent retire: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("retiree") ||
+				text.includes("retired") ||
+				text.includes("agent"),
+			`Expected agent retire: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("detects zombie agents", async () => {
@@ -527,7 +651,10 @@ describe("MCP agent pool — advanced operations", () => {
 			params: { name: "agent_zombie_detect", arguments: {} },
 		});
 		const text = getText(result.content);
-		assert.ok(typeof text === "string", `Expected zombie detection: ${text.slice(0, 200)}`);
+		assert.ok(
+			typeof text === "string",
+			`Expected zombie detection: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("sends an agent heartbeat", async () => {
@@ -538,7 +665,11 @@ describe("MCP agent pool — advanced operations", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("heartbeat") || text.includes("alive") || text.includes("ok"),
-			`Expected heartbeat: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("heartbeat") ||
+				text.includes("alive") ||
+				text.includes("ok"),
+			`Expected heartbeat: ${text.slice(0, 200)}`,
+		);
 	});
 });

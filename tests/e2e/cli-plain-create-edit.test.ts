@@ -1,9 +1,13 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 let TEST_DIR: string;
 
@@ -34,7 +38,10 @@ describe("CLI --plain for proposal create/edit", () => {
 	});
 
 	it("prints plain details after proposal create --plain", async () => {
-		const result = execSync(`node --experimental-strip-types ${cliPath} proposal create "Example" --desc "Hello" --plain`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${cliPath} proposal create "Example" --desc "Hello" --plain`,
+			{ cwd: TEST_DIR },
+		);
 
 		if (result.exitCode !== 0) {
 			console.error("STDOUT:", result.stdout.toString());
@@ -58,9 +65,15 @@ describe("CLI --plain for proposal create/edit", () => {
 
 	it("prints plain details after proposal edit --plain", async () => {
 		// Create base proposal first (without plain)
-		execSync(`node --experimental-strip-types ${cliPath} proposal create "Edit Me" --desc "First"`, { cwd: TEST_DIR });
+		execSync(
+			`node --experimental-strip-types ${cliPath} proposal create "Edit Me" --desc "First"`,
+			{ cwd: TEST_DIR },
+		);
 
-		const result = execSync(`node --experimental-strip-types ${cliPath} proposal edit 1 -s "Active" --plain`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${cliPath} proposal edit 1 -s "Active" --plain`,
+			{ cwd: TEST_DIR },
+		);
 
 		if (result.exitCode !== 0) {
 			console.error("STDOUT:", result.stdout.toString());

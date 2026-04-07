@@ -1,6 +1,6 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
 	CallToolRequestSchema,
 	GetPromptRequestSchema,
@@ -10,8 +10,8 @@ import {
 	ListToolsRequestSchema,
 	ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { RelayService } from "../../core/messaging/relay.ts";
 import { Core } from "../../core/roadmap.ts";
-import { RelayService } from '../../core/messaging/relay.ts';
 import * as pgPool from "../../postgres/pool.ts";
 import { getPackageName } from "../../shared/utils/app-info.ts";
 import { getVersion } from "../../shared/utils/version.ts";
@@ -26,8 +26,8 @@ import { registerMilestoneTools } from "./tools/milestones/index.ts";
 import { registerNoteTools } from "./tools/notes/index.ts";
 import { registerProposalTools as registerFilesystemProposalTools } from "./tools/proposals/index.ts";
 import { registerProtocolTools } from "./tools/protocol/index.ts";
-import { registerTestingTools } from "./tools/testing/index.ts";
 import { registerTeamTools } from "./tools/teams/index.ts";
+import { registerTestingTools } from "./tools/testing/index.ts";
 import { registerWorkflowTools } from "./tools/workflow/index.ts";
 import type {
 	CallToolResult,
@@ -91,13 +91,28 @@ export class McpServer extends Core {
 	}
 
 	private setupHandlers(): void {
-		this.server.setRequestHandler(ListToolsRequestSchema, async () => this.listTools());
-		this.server.setRequestHandler(CallToolRequestSchema, async (request) => this.callTool(request));
-		this.server.setRequestHandler(ListResourcesRequestSchema, async () => this.listResources());
-		this.server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => this.listResourceTemplates());
-		this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => this.readResource(request));
-		this.server.setRequestHandler(ListPromptsRequestSchema, async () => this.listPrompts());
-		this.server.setRequestHandler(GetPromptRequestSchema, async (request) => this.getPrompt(request));
+		this.server.setRequestHandler(ListToolsRequestSchema, async () =>
+			this.listTools(),
+		);
+		this.server.setRequestHandler(CallToolRequestSchema, async (request) =>
+			this.callTool(request),
+		);
+		this.server.setRequestHandler(ListResourcesRequestSchema, async () =>
+			this.listResources(),
+		);
+		this.server.setRequestHandler(
+			ListResourceTemplatesRequestSchema,
+			async () => this.listResourceTemplates(),
+		);
+		this.server.setRequestHandler(ReadResourceRequestSchema, async (request) =>
+			this.readResource(request),
+		);
+		this.server.setRequestHandler(ListPromptsRequestSchema, async () =>
+			this.listPrompts(),
+		);
+		this.server.setRequestHandler(GetPromptRequestSchema, async (request) =>
+			this.getPrompt(request),
+		);
 	}
 
 	/**
@@ -140,7 +155,9 @@ export class McpServer extends Core {
 	 */
 	public async start(): Promise<void> {
 		if (!this.transport) {
-			throw new Error("MCP server not connected. Call connect() before start().");
+			throw new Error(
+				"MCP server not connected. Call connect() before start().",
+			);
 		}
 	}
 
@@ -226,7 +243,9 @@ export class McpServer extends Core {
 		};
 	}
 
-	protected async readResource(request: { params: { uri: string } }): Promise<ReadResourceResult> {
+	protected async readResource(request: {
+		params: { uri: string };
+	}): Promise<ReadResourceResult> {
 		const { uri } = request.params;
 
 		// Exact match first
@@ -271,7 +290,10 @@ export class McpServer extends Core {
 	/**
 	 * Create a new SSE transport for a connection.
 	 */
-	public async createSseTransport(endpoint: string, res?: any): Promise<SSEServerTransport> {
+	public async createSseTransport(
+		endpoint: string,
+		res?: any,
+	): Promise<SSEServerTransport> {
 		const transport = new SSEServerTransport(endpoint, res);
 		await this.server.connect(transport);
 		return transport;
@@ -283,7 +305,12 @@ export class McpServer extends Core {
 	 * Pass `parsedBody` (already parsed by Express) so the SDK doesn't try
 	 * to re-read the request stream (which would fail with "stream not readable").
 	 */
-	public async handleSseMessage(transport: SSEServerTransport, req: any, res: any, parsedBody?: any): Promise<void> {
+	public async handleSseMessage(
+		transport: SSEServerTransport,
+		req: any,
+		res: any,
+		parsedBody?: any,
+	): Promise<void> {
 		if (transport.handlePostMessage) {
 			await transport.handlePostMessage(req, res, parsedBody);
 		}
@@ -295,13 +322,17 @@ export class McpServer extends Core {
 	public get testInterface() {
 		return {
 			listTools: () => this.listTools(),
-			callTool: (request: { params: { name: string; arguments?: Record<string, unknown> } }) => this.callTool(request),
+			callTool: (request: {
+				params: { name: string; arguments?: Record<string, unknown> };
+			}) => this.callTool(request),
 			listResources: () => this.listResources(),
 			listResourceTemplates: () => this.listResourceTemplates(),
-			readResource: (request: { params: { uri: string } }) => this.readResource(request),
+			readResource: (request: { params: { uri: string } }) =>
+				this.readResource(request),
 			listPrompts: () => this.listPrompts(),
-			getPrompt: (request: { params: { name: string; arguments?: Record<string, unknown> } }) =>
-				this.getPrompt(request),
+			getPrompt: (request: {
+				params: { name: string; arguments?: Record<string, unknown> };
+			}) => this.getPrompt(request),
 		};
 	}
 }
@@ -313,7 +344,10 @@ export class McpServer extends Core {
  * successfully but only provide the roadmap://init-required resource to guide
  * users to run `roadmap init`.
  */
-export async function createMcpServer(projectRoot: string, options: ServerInitOptions = {}): Promise<McpServer> {
+export async function createMcpServer(
+	projectRoot: string,
+	options: ServerInitOptions = {},
+): Promise<McpServer> {
 	// We need to check config first to determine which instructions to use
 	const tempCore = new Core(projectRoot);
 	await tempCore.ensureConfigLoaded();
@@ -328,7 +362,9 @@ export async function createMcpServer(projectRoot: string, options: ServerInitOp
 		registerInitRequiredResource(server);
 
 		if (options.debug) {
-			console.error("MCP server initialised in fallback mode (roadmap not initialized in this directory).");
+			console.error(
+				"MCP server initialised in fallback mode (roadmap not initialized in this directory).",
+			);
 		}
 
 		return server;
@@ -345,7 +381,7 @@ export async function createMcpServer(projectRoot: string, options: ServerInitOp
 	registerCubicTools(server, projectRoot);
 
 	// --- Backend routing: Postgres vs filesystem ---
-	const usePostgres = config.database?.provider === 'Postgres';
+	const usePostgres = config.database?.provider === "Postgres";
 
 	if (usePostgres) {
 		if (config.database) {
@@ -353,55 +389,298 @@ export async function createMcpServer(projectRoot: string, options: ServerInitOp
 		}
 
 		// Postgres-backed tools
-		const { registerProposalTools } = await import('./tools/proposals/backend-switch.ts');
+		const { registerProposalTools } = await import(
+			"./tools/proposals/backend-switch.ts"
+		);
 		registerProposalTools(server, projectRoot);
 
-		const { PgMessagingHandlers } = await import('./tools/messages/pg-handlers.ts');
+		const { PgMessagingHandlers } = await import(
+			"./tools/messages/pg-handlers.ts"
+		);
 		const msg = new PgMessagingHandlers(server, projectRoot);
-		server.addTool({ name: 'msg_send', description: 'Send message via Postgres message_ledger', inputSchema: { type: 'object', properties: { from_agent: { type: 'string' }, to_agent: { type: 'string' }, channel: { type: 'string' }, message_content: { type: 'string' }, message_type: { type: 'string' }, proposal_id: { type: 'string' } }, required: ['from_agent', 'message_content'] }, handler: (a: any) => msg.sendMessage(a) });
-		server.addTool({ name: 'msg_read', description: 'Read messages from Postgres', inputSchema: { type: 'object', properties: { agent: { type: 'string' }, channel: { type: 'string' }, limit: { type: 'number' } } }, handler: (a: any) => msg.readMessages(a) });
-		server.addTool({ name: 'chan_list', description: 'List channels', inputSchema: { type: 'object', properties: {} }, handler: (a: any) => msg.listChannels(a) });
+		server.addTool({
+			name: "msg_send",
+			description: "Send message via Postgres message_ledger",
+			inputSchema: {
+				type: "object",
+				properties: {
+					from_agent: { type: "string" },
+					to_agent: { type: "string" },
+					channel: { type: "string" },
+					message_content: { type: "string" },
+					message_type: { type: "string" },
+					proposal_id: { type: "string" },
+				},
+				required: ["from_agent", "message_content"],
+			},
+			handler: (a: any) => msg.sendMessage(a),
+		});
+		server.addTool({
+			name: "msg_read",
+			description: "Read messages from Postgres",
+			inputSchema: {
+				type: "object",
+				properties: {
+					agent: { type: "string" },
+					channel: { type: "string" },
+					limit: { type: "number" },
+				},
+			},
+			handler: (a: any) => msg.readMessages(a),
+		});
+		server.addTool({
+			name: "chan_list",
+			description: "List channels",
+			inputSchema: { type: "object", properties: {} },
+			handler: (a: any) => msg.listChannels(a),
+		});
 
-		const { PgAgentHandlers } = await import('./tools/agents/pg-handlers.ts');
+		const { PgAgentHandlers } = await import("./tools/agents/pg-handlers.ts");
 		const agents = new PgAgentHandlers(server, projectRoot);
-		server.addTool({ name: 'agent_list', description: 'List registered agents', inputSchema: { type: 'object', properties: { status: { type: 'string' } } }, handler: (a: any) => agents.listAgents(a) });
-		server.addTool({ name: 'agent_get', description: 'Get agent details', inputSchema: { type: 'object', properties: { identity: { type: 'string' } }, required: ['identity'] }, handler: (a: any) => agents.getAgent(a) });
-		server.addTool({ name: 'agent_register', description: 'Register or update an agent', inputSchema: { type: 'object', properties: { identity: { type: 'string' }, agent_type: { type: 'string' }, role: { type: 'string' }, skills: { type: 'string' } }, required: ['identity'] }, handler: (a: any) => agents.registerAgent(a) });
-		server.addTool({ name: 'team_list', description: 'List teams', inputSchema: { type: 'object', properties: {} }, handler: (a: any) => agents.listTeams(a) });
-		server.addTool({ name: 'team_create', description: 'Create a team', inputSchema: { type: 'object', properties: { name: { type: 'string' }, team_type: { type: 'string' } }, required: ['name'] }, handler: (a: any) => agents.createTeam(a) });
-		server.addTool({ name: 'team_add_member', description: 'Add agent to team', inputSchema: { type: 'object', properties: { team_name: { type: 'string' }, agent_identity: { type: 'string' }, role: { type: 'string' } }, required: ['team_name', 'agent_identity'] }, handler: (a: any) => agents.addTeamMember(a) });
+		server.addTool({
+			name: "agent_list",
+			description: "List registered agents",
+			inputSchema: {
+				type: "object",
+				properties: { status: { type: "string" } },
+			},
+			handler: (a: any) => agents.listAgents(a),
+		});
+		server.addTool({
+			name: "agent_get",
+			description: "Get agent details",
+			inputSchema: {
+				type: "object",
+				properties: { identity: { type: "string" } },
+				required: ["identity"],
+			},
+			handler: (a: any) => agents.getAgent(a),
+		});
+		server.addTool({
+			name: "agent_register",
+			description: "Register or update an agent",
+			inputSchema: {
+				type: "object",
+				properties: {
+					identity: { type: "string" },
+					agent_type: { type: "string" },
+					role: { type: "string" },
+					skills: { type: "string" },
+				},
+				required: ["identity"],
+			},
+			handler: (a: any) => agents.registerAgent(a),
+		});
+		server.addTool({
+			name: "team_list",
+			description: "List teams",
+			inputSchema: { type: "object", properties: {} },
+			handler: (a: any) => agents.listTeams(a),
+		});
+		server.addTool({
+			name: "team_create",
+			description: "Create a team",
+			inputSchema: {
+				type: "object",
+				properties: { name: { type: "string" }, team_type: { type: "string" } },
+				required: ["name"],
+			},
+			handler: (a: any) => agents.createTeam(a),
+		});
+		server.addTool({
+			name: "team_add_member",
+			description: "Add agent to team",
+			inputSchema: {
+				type: "object",
+				properties: {
+					team_name: { type: "string" },
+					agent_identity: { type: "string" },
+					role: { type: "string" },
+				},
+				required: ["team_name", "agent_identity"],
+			},
+			handler: (a: any) => agents.addTeamMember(a),
+		});
 
-		const { PgSpendingHandlers, PgModelHandlers } = await import('./tools/spending/pg-handlers.ts');
+		const { PgSpendingHandlers, PgModelHandlers } = await import(
+			"./tools/spending/pg-handlers.ts"
+		);
 		const spending = new PgSpendingHandlers(server, projectRoot);
 		const models = new PgModelHandlers(server, projectRoot);
-		server.addTool({ name: 'spending_set_cap', description: 'Set agent spending cap', inputSchema: { type: 'object', properties: { agent_identity: { type: 'string' }, daily_limit_usd: { type: 'string' }, monthly_limit_usd: { type: 'string' }, is_frozen: { type: 'boolean' }, frozen_reason: { type: 'string' } }, required: ['agent_identity', 'daily_limit_usd'] }, handler: (a: any) => spending.setSpendingCap(a) });
-		server.addTool({ name: 'spending_log', description: 'Log agent spending', inputSchema: { type: 'object', properties: { agent_identity: { type: 'string' }, proposal_id: { type: 'string' }, cost_usd: { type: 'string' }, model_name: { type: 'string' }, token_count: { type: 'string' }, run_id: { type: 'string' }, budget_id: { type: 'string' } }, required: ['agent_identity', 'cost_usd'] }, handler: (a: any) => spending.logSpending(a) });
-		server.addTool({ name: 'spending_report', description: 'Get spending report', inputSchema: { type: 'object', properties: { agent_identity: { type: 'string' } } }, handler: (a: any) => spending.getSpendingReport(a) });
-		server.addTool({ name: 'model_list', description: 'List registered models', inputSchema: { type: 'object', properties: {} }, handler: (a: any) => models.listModels(a) });
-		server.addTool({ name: 'model_add', description: 'Register a model', inputSchema: { type: 'object', properties: { model_name: { type: 'string' }, provider: { type: 'string' }, cost_per_1k_input: { type: 'string' }, cost_per_1k_output: { type: 'string' }, max_tokens: { type: 'string' }, capabilities: { type: 'string' }, rating: { type: 'string' } }, required: ['model_name'] }, handler: (a: any) => models.addModel(a) });
+		server.addTool({
+			name: "spending_set_cap",
+			description: "Set agent spending cap",
+			inputSchema: {
+				type: "object",
+				properties: {
+					agent_identity: { type: "string" },
+					daily_limit_usd: { type: "string" },
+					monthly_limit_usd: { type: "string" },
+					is_frozen: { type: "boolean" },
+					frozen_reason: { type: "string" },
+				},
+				required: ["agent_identity", "daily_limit_usd"],
+			},
+			handler: (a: any) => spending.setSpendingCap(a),
+		});
+		server.addTool({
+			name: "spending_log",
+			description: "Log agent spending",
+			inputSchema: {
+				type: "object",
+				properties: {
+					agent_identity: { type: "string" },
+					proposal_id: { type: "string" },
+					cost_usd: { type: "string" },
+					model_name: { type: "string" },
+					token_count: { type: "string" },
+					run_id: { type: "string" },
+					budget_id: { type: "string" },
+				},
+				required: ["agent_identity", "cost_usd"],
+			},
+			handler: (a: any) => spending.logSpending(a),
+		});
+		server.addTool({
+			name: "spending_report",
+			description: "Get spending report",
+			inputSchema: {
+				type: "object",
+				properties: { agent_identity: { type: "string" } },
+			},
+			handler: (a: any) => spending.getSpendingReport(a),
+		});
+		server.addTool({
+			name: "model_list",
+			description: "List registered models",
+			inputSchema: { type: "object", properties: {} },
+			handler: (a: any) => models.listModels(a),
+		});
+		server.addTool({
+			name: "model_add",
+			description: "Register a model",
+			inputSchema: {
+				type: "object",
+				properties: {
+					model_name: { type: "string" },
+					provider: { type: "string" },
+					cost_per_1k_input: { type: "string" },
+					cost_per_1k_output: { type: "string" },
+					max_tokens: { type: "string" },
+					capabilities: { type: "string" },
+					rating: { type: "string" },
+				},
+				required: ["model_name"],
+			},
+			handler: (a: any) => models.addModel(a),
+		});
 
-		const { PgMemoryHandlers } = await import('./tools/memory/pg-handlers.ts');
+		const { PgMemoryHandlers } = await import("./tools/memory/pg-handlers.ts");
 		const memory = new PgMemoryHandlers(server);
-		server.addTool({ name: 'memory_set', description: 'Set agent memory (layers: episodic, semantic, working, procedural)', inputSchema: { type: 'object', properties: { agent_identity: { type: 'string' }, layer: { type: 'string', enum: ['episodic', 'semantic', 'working', 'procedural'] }, key: { type: 'string' }, value: { type: 'string' }, metadata: { type: 'string' }, ttl_seconds: { type: 'number' } }, required: ['agent_identity', 'layer', 'key', 'value'] }, handler: (a: any) => memory.setMemory(a) });
-		server.addTool({ name: 'memory_get', description: 'Get agent memory', inputSchema: { type: 'object', properties: { agent_identity: { type: 'string' }, layer: { type: 'string' }, key: { type: 'string' } }, required: ['agent_identity', 'layer'] }, handler: (a: any) => memory.getMemory(a) });
-		server.addTool({ name: 'memory_delete', description: 'Delete agent memory', inputSchema: { type: 'object', properties: { agent_identity: { type: 'string' }, layer: { type: 'string' }, key: { type: 'string' } }, required: ['agent_identity', 'layer'] }, handler: (a: any) => memory.deleteMemory(a) });
-		server.addTool({ name: 'memory_list', description: 'List memory summaries', inputSchema: { type: 'object', properties: { agent_identity: { type: 'string' }, layer: { type: 'string' } } }, handler: (a: any) => memory.memoryList(a) });
-		server.addTool({ name: 'memory_summary', description: 'Get agent memory summary', inputSchema: { type: 'object', properties: { agent_identity: { type: 'string' } }, required: ['agent_identity'] }, handler: (a: any) => memory.memorySummary(a) });
+		server.addTool({
+			name: "memory_set",
+			description:
+				"Set agent memory (layers: episodic, semantic, working, procedural)",
+			inputSchema: {
+				type: "object",
+				properties: {
+					agent_identity: { type: "string" },
+					layer: {
+						type: "string",
+						enum: ["episodic", "semantic", "working", "procedural"],
+					},
+					key: { type: "string" },
+					value: { type: "string" },
+					metadata: { type: "string" },
+					ttl_seconds: { type: "number" },
+				},
+				required: ["agent_identity", "layer", "key", "value"],
+			},
+			handler: (a: any) => memory.setMemory(a),
+		});
+		server.addTool({
+			name: "memory_get",
+			description: "Get agent memory",
+			inputSchema: {
+				type: "object",
+				properties: {
+					agent_identity: { type: "string" },
+					layer: { type: "string" },
+					key: { type: "string" },
+				},
+				required: ["agent_identity", "layer"],
+			},
+			handler: (a: any) => memory.getMemory(a),
+		});
+		server.addTool({
+			name: "memory_delete",
+			description: "Delete agent memory",
+			inputSchema: {
+				type: "object",
+				properties: {
+					agent_identity: { type: "string" },
+					layer: { type: "string" },
+					key: { type: "string" },
+				},
+				required: ["agent_identity", "layer"],
+			},
+			handler: (a: any) => memory.deleteMemory(a),
+		});
+		server.addTool({
+			name: "memory_list",
+			description: "List memory summaries",
+			inputSchema: {
+				type: "object",
+				properties: {
+					agent_identity: { type: "string" },
+					layer: { type: "string" },
+				},
+			},
+			handler: (a: any) => memory.memoryList(a),
+		});
+		server.addTool({
+			name: "memory_summary",
+			description: "Get agent memory summary",
+			inputSchema: {
+				type: "object",
+				properties: { agent_identity: { type: "string" } },
+				required: ["agent_identity"],
+			},
+			handler: (a: any) => memory.memorySummary(a),
+		});
 
 		// Semantic memory search (uses `body_vector vector(1536)` + pgvector)
 		server.addTool({
-			name: 'memory_search',
-			description: 'Semantically search agent memory by embedding similarity (pgvector cosine search)',
+			name: "memory_search",
+			description:
+				"Semantically search agent memory by embedding similarity (pgvector cosine search)",
 			inputSchema: {
-				type: 'object',
+				type: "object",
 				properties: {
-					agent_identity: { type: 'string', description: 'Filter by agent identity' },
-					layer: { type: 'string', enum: ['episodic', 'semantic', 'working', 'procedural'], description: 'Filter by memory layer' },
-					embedding: { type: 'array', items: { type: 'number' }, description: '1536-dim query embedding vector' },
-					top_k: { type: 'number', description: 'Max results (default 10, max 100)' },
-					threshold: { type: 'number', description: 'Min cosine similarity (default 0.5)' },
+					agent_identity: {
+						type: "string",
+						description: "Filter by agent identity",
+					},
+					layer: {
+						type: "string",
+						enum: ["episodic", "semantic", "working", "procedural"],
+						description: "Filter by memory layer",
+					},
+					embedding: {
+						type: "array",
+						items: { type: "number" },
+						description: "1536-dim query embedding vector",
+					},
+					top_k: {
+						type: "number",
+						description: "Max results (default 10, max 100)",
+					},
+					threshold: {
+						type: "number",
+						description: "Min cosine similarity (default 0.5)",
+					},
 				},
-				required: ['embedding'],
+				required: ["embedding"],
 			},
 			handler: (a: any) => memory.searchMemory(a),
 		});
@@ -410,22 +689,26 @@ export async function createMcpServer(projectRoot: string, options: ServerInitOp
 		// Already registered at line 352 via registerProposalTools
 
 		// RFC Workflow tools (state machine, AC, deps, reviews, discussions)
-		const { RfcWorkflowHandlers } = await import('./tools/rfc/pg-handlers.ts');
+		const { RfcWorkflowHandlers } = await import("./tools/rfc/pg-handlers.ts");
 		const rfc = new RfcWorkflowHandlers(server);
 		rfc.register();
 
 		// SMDL configurable workflow tools (load YAML, load builtins, list)
-		const { SMDLWorkflowHandlers } = await import('./tools/workflow/smdl-mcp.ts');
+		const { SMDLWorkflowHandlers } = await import(
+			"./tools/workflow/smdl-mcp.ts"
+		);
 		const smdl = new SMDLWorkflowHandlers(server);
 		smdl.register();
 
-		console.log('[MCP] Using Postgres backend (agenthive) for proposals, messaging, agents, spending, memory, RFC workflow, SMDL');
+		console.log(
+			"[MCP] Using Postgres backend (agenthive) for proposals, messaging, agents, spending, memory, RFC workflow, SMDL",
+		);
 	} else {
 		registerFilesystemProposalTools(server, config);
 		registerMessageTools(server);
 		registerAgentTools(server);
 		await registerTeamTools(server);
-		console.log('[MCP] Using legacy filesystem proposal tools');
+		console.log("[MCP] Using legacy filesystem proposal tools");
 	}
 	registerTestingTools(server);
 

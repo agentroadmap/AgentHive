@@ -9,9 +9,9 @@
     <link rel="stylesheet" href="./styles/style.css">
     <script>
         // Prevent flash of wrong theme by applying theme before page renders
-        (function() {
+        (() => {
             const savedTheme = localStorage.getItem('roadmap-theme');
-            const systemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            const systemDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
             const shouldUseDark = savedTheme === 'dark' || (!savedTheme && systemDark);
             
             if (shouldUseDark) {

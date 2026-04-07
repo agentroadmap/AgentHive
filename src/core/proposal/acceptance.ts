@@ -11,9 +11,17 @@
  * Issue blocking: Proposals with open critical/major test issues cannot reach Reached.
  */
 
-import { getBlockingIssues, type IssueStore } from "../pipeline/issue-tracker.ts";
+import {
+	getBlockingIssues,
+	type IssueStore,
+} from "../pipeline/issue-tracker.ts";
 
-export type ProofType = "command-output" | "test-result" | "artifact" | "commit" | "validation-summary";
+export type ProofType =
+	| "command-output"
+	| "test-result"
+	| "artifact"
+	| "commit"
+	| "validation-summary";
 export type Verifier = "builder" | "peer-tester" | "coordinator";
 export type ReviewResult = "pass" | "fail" | "escalated";
 
@@ -78,7 +86,10 @@ const MAX_REVIEW_ATTEMPTS = 3;
 /**
  * Check if a proof reference satisfies a requirement.
  */
-export function proofSatisfiesRequirement(proof: ProofReference, requirement: ProofRequirement): boolean {
+export function proofSatisfiesRequirement(
+	proof: ProofReference,
+	requirement: ProofRequirement,
+): boolean {
 	if (proof.type !== requirement.evidenceType) return false;
 	if (!proof.value || proof.value.trim().length === 0) return false;
 	return true;
@@ -102,7 +113,9 @@ export function validateProof(
 			peerAuditRequired = true;
 		}
 
-		const matchingProof = references.find((p) => proofSatisfiesRequirement(p, req));
+		const matchingProof = references.find((p) =>
+			proofSatisfiesRequirement(p, req),
+		);
 
 		if (!matchingProof) {
 			missingRequirements.push(req.description);
@@ -121,7 +134,10 @@ export function validateProof(
 		}
 	}
 
-	const valid = missingRequirements.length === 0 && invalidProofs.length === 0 && (!peerAuditRequired || peerAuditDone);
+	const valid =
+		missingRequirements.length === 0 &&
+		invalidProofs.length === 0 &&
+		(!peerAuditRequired || peerAuditDone);
 
 	let message: string;
 	if (valid) {
@@ -140,7 +156,14 @@ export function validateProof(
 		message = parts.join("; ");
 	}
 
-	return { valid, missingRequirements, invalidProofs, peerAuditRequired, peerAuditDone, message };
+	return {
+		valid,
+		missingRequirements,
+		invalidProofs,
+		peerAuditRequired,
+		peerAuditDone,
+		message,
+	};
 }
 
 /**
@@ -154,7 +177,11 @@ export function recordReview(
 	claimant: string,
 	issues?: string[],
 	reason?: string,
-): { nextStatus: "Reached" | "Active" | "Blocked"; shouldEscalate: boolean; entry: ReviewEntry } {
+): {
+	nextStatus: "Reached" | "Active" | "Blocked";
+	shouldEscalate: boolean;
+	entry: ReviewEntry;
+} {
 	const entry: ReviewEntry = {
 		timestamp: new Date().toISOString(),
 		reviewer,
@@ -186,7 +213,10 @@ export function recordReview(
  * Check if a proposal should be escalated based on review history.
  */
 export function shouldEscalate(history: ReviewHistory): boolean {
-	return history.reviewCount >= MAX_REVIEW_ATTEMPTS && !history.entries.some((e) => e.result === "pass");
+	return (
+		history.reviewCount >= MAX_REVIEW_ATTEMPTS &&
+		!history.entries.some((e) => e.result === "pass")
+	);
 }
 
 /**
@@ -194,7 +224,7 @@ export function shouldEscalate(history: ReviewHistory): boolean {
  */
 export function getOriginalClaimant(history: ReviewHistory): string | null {
 	if (history.entries.length === 0) return null;
-	return history.entries[0]!.claimant;
+	return history.entries[0]?.claimant;
 }
 
 /**
@@ -204,14 +234,26 @@ export function getOriginalClaimant(history: ReviewHistory): string | null {
  * - [pass] 2026-03-20T12:00:00Z by @Opus (claimant: @Gemini)
  * - [fail] 2026-03-20T13:00:00Z by @Copilot (claimant: @Gemini) — Missing tests
  */
-export function parseReviewHistory(content: string, proposalId: string): ReviewHistory {
-	const history: ReviewHistory = { proposalId, entries: [], reviewCount: 0, isEscalated: false };
-	const section = content.match(/## Review History\n\n([\s\S]*?)(?:\n##|\n---|$)/);
+export function parseReviewHistory(
+	content: string,
+	proposalId: string,
+): ReviewHistory {
+	const history: ReviewHistory = {
+		proposalId,
+		entries: [],
+		reviewCount: 0,
+		isEscalated: false,
+	};
+	const section = content.match(
+		/## Review History\n\n([\s\S]*?)(?:\n##|\n---|$)/,
+	);
 	if (!section) return history;
 
 	const lines = section[1]?.split("\n") || [];
 	for (const line of lines) {
-		const match = line.match(/^- \[(\w+)\] (\S+) by @?(\w[\w-]*)(?: \(claimant: @?(\w[\w-]*)\))?(?:\s*— (.+))?$/);
+		const match = line.match(
+			/^- \[(\w+)\] (\S+) by @?(\w[\w-]*)(?: \(claimant: @?(\w[\w-]*)\))?(?:\s*— (.+))?$/,
+		);
 		if (match) {
 			history.entries.push({
 				result: match[1] as ReviewResult,
@@ -238,7 +280,9 @@ export function serializeReviewHistory(history: ReviewHistory): string {
 	for (const entry of history.entries) {
 		const claimant = entry.claimant ? ` (claimant: @${entry.claimant})` : "";
 		const reason = entry.reason ? ` — ${entry.reason}` : "";
-		lines.push(`- [${entry.result}] ${entry.timestamp} by @${entry.reviewer}${claimant}${reason}`);
+		lines.push(
+			`- [${entry.result}] ${entry.timestamp} by @${entry.reviewer}${claimant}${reason}`,
+		);
 	}
 	return lines.join("\n");
 }
@@ -248,16 +292,20 @@ export function serializeReviewHistory(history: ReviewHistory): string {
  */
 export function parseProofReferences(content: string): ProofReference[] {
 	const references: ProofReference[] = [];
-	const proofSection = content.match(/## Proof References\n\n([\s\S]*?)(?:\n##|\n---|$)/);
+	const proofSection = content.match(
+		/## Proof References\n\n([\s\S]*?)(?:\n##|\n---|$)/,
+	);
 	if (!proofSection) return references;
 
 	const lines = proofSection[1]?.split("\n") || [];
 	for (const line of lines) {
-		const match = line.match(/^- \[[ x]\] (\w+[-\w]*): (.+?)(?: \(verified by (.+?)\))?$/);
+		const match = line.match(
+			/^- \[[ x]\] (\w+[-\w]*): (.+?)(?: \(verified by (.+?)\))?$/,
+		);
 		if (match) {
 			references.push({
 				type: match[1] as ProofType,
-				value: match[2]!.trim(),
+				value: match[2]?.trim(),
 				verifiedBy: match[3]?.trim(),
 			});
 		}
@@ -284,15 +332,19 @@ export function serializeProofReferences(references: ProofReference[]): string {
  */
 export function parseProofRequirements(content: string): ProofRequirement[] {
 	const requirements: ProofRequirement[] = [];
-	const reqSection = content.match(/## Proof Requirements\n\n([\s\S]*?)(?:\n##|\n---|$)/);
+	const reqSection = content.match(
+		/## Proof Requirements\n\n([\s\S]*?)(?:\n##|\n---|$)/,
+	);
 	if (!reqSection) return requirements;
 
 	const lines = reqSection[1]?.split("\n") || [];
 	for (const line of lines) {
-		const match = line.match(/^- \[[ x]\] [\w-]+: (.+?) \(evidence: ([\w-]+), verifier: (\w[\w-]*)\)$/);
+		const match = line.match(
+			/^- \[[ x]\] [\w-]+: (.+?) \(evidence: ([\w-]+), verifier: (\w[\w-]*)\)$/,
+		);
 		if (match) {
 			requirements.push({
-				description: match[1]!.trim(),
+				description: match[1]?.trim(),
 				evidenceType: match[2] as ProofType,
 				verifier: match[3] as Verifier,
 			});
@@ -304,12 +356,16 @@ export function parseProofRequirements(content: string): ProofRequirement[] {
 /**
  * Serialize proof requirements to markdown.
  */
-export function serializeProofRequirements(requirements: ProofRequirement[]): string {
+export function serializeProofRequirements(
+	requirements: ProofRequirement[],
+): string {
 	if (requirements.length === 0) return "";
 
 	const lines = ["## Proof Requirements", ""];
 	for (const req of requirements) {
-		lines.push(`- [ ] req: ${req.description} (evidence: ${req.evidenceType}, verifier: ${req.verifier})`);
+		lines.push(
+			`- [ ] req: ${req.description} (evidence: ${req.evidenceType}, verifier: ${req.verifier})`,
+		);
 	}
 	return lines.join("\n");
 }
@@ -335,7 +391,11 @@ export function formatValidationResult(result: ProofValidationResult): string {
 /**
  * Format review decision for display.
  */
-export function formatReviewDecision(nextStatus: string, shouldEscalate: boolean, claimant: string): string {
+export function formatReviewDecision(
+	nextStatus: string,
+	shouldEscalate: boolean,
+	claimant: string,
+): string {
 	if (nextStatus === "Reached") {
 		return `✅ Accepted — moving to Reached`;
 	}
@@ -349,7 +409,10 @@ export function formatReviewDecision(nextStatus: string, shouldEscalate: boolean
  * Check if a proposal is blocked by open test issues.
  * Critical and major issues block the Reached transition.
  */
-export function validateNoBlockingIssues(issueStore: IssueStore, proposalId: string): { blocked: boolean; issues: string[] } {
+export function validateNoBlockingIssues(
+	issueStore: IssueStore,
+	proposalId: string,
+): { blocked: boolean; issues: string[] } {
 	const blocking = getBlockingIssues(issueStore, proposalId);
 	if (blocking.length === 0) {
 		return { blocked: false, issues: [] };
@@ -382,7 +445,9 @@ export function validateReachedTransition(
 	// Check blocking issues
 	const issueCheck = validateNoBlockingIssues(issueStore, proposalId);
 	if (issueCheck.blocked) {
-		reasons.push(`Blocked by ${issueCheck.issues.length} open issue(s): ${issueCheck.issues.join("; ")}`);
+		reasons.push(
+			`Blocked by ${issueCheck.issues.length} open issue(s): ${issueCheck.issues.join("; ")}`,
+		);
 	}
 
 	return {

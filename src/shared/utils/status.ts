@@ -1,6 +1,6 @@
-import type { Core } from "../../core/roadmap.ts";
-import { type ProposalClaim } from "../types/index.ts";
 import { DEFAULT_STATUSES } from "../../constants/index.ts";
+import type { Core } from "../../core/roadmap.ts";
+import type { ProposalClaim } from "../types/index.ts";
 
 /**
  * Check if a status represents a "done" (successful completion) proposal.
@@ -40,8 +40,8 @@ export function isTodoStatus(status?: string | null): boolean {
 	if (!status) return false;
 	const normalized = status.toLowerCase();
 	return (
-		normalized === "todo" || 
-		normalized === "new" || 
+		normalized === "todo" ||
+		normalized === "new" ||
 		normalized === "draft" ||
 		normalized.includes("todo") ||
 		normalized.includes("new") ||
@@ -74,7 +74,14 @@ export function isInProgressStatus(status?: string | null): boolean {
  * @returns true if the proposal is ready for pickup
  */
 export function isReady(
-	proposal: { status: string; type?: string; assignee?: string[]; dependencies?: string[]; claim?: ProposalClaim; external_injections?: string[] },
+	proposal: {
+		status: string;
+		type?: string;
+		assignee?: string[];
+		dependencies?: string[];
+		claim?: ProposalClaim;
+		external_injections?: string[];
+	},
 	doneIds: Set<string>,
 	allProposals?: Array<{ status: string; type?: string }>,
 ): boolean {
@@ -84,7 +91,9 @@ export function isReady(
 	// 2. High-priority interrupt: if there are any active INCIDENTS, everything else is blocked
 	// unless the current proposal is also an incident.
 	if (allProposals && proposal.type !== "incident") {
-		const activeIncidents = allProposals.filter((s) => s.type === "incident" && !isTerminalStatus(s.status));
+		const activeIncidents = allProposals.filter(
+			(s) => s.type === "incident" && !isTerminalStatus(s.status),
+		);
 		if (activeIncidents.length > 0) return false;
 	}
 
@@ -92,7 +101,7 @@ export function isReady(
 	if (proposal.assignee && proposal.assignee.length > 0) return false;
 
 	// 2.1. Must not have an active claim
-	if (proposal.claim && proposal.claim.expires) {
+	if (proposal.claim?.expires) {
 		const expires = new Date(proposal.claim.expires.replace(" ", "T"));
 		if (expires > new Date()) {
 			return false;
@@ -101,7 +110,8 @@ export function isReady(
 
 	// 3. Must be unblocked: all dependencies must be done/complete
 	// 3. Must not have external injections (3rd party blockers)
-	if (proposal.external_injections && proposal.external_injections.length > 0) return false;
+	if (proposal.external_injections && proposal.external_injections.length > 0)
+		return false;
 
 	const deps = proposal.dependencies || [];
 	if (deps.length > 0) {
@@ -130,10 +140,16 @@ export async function getValidStatuses(core?: Core): Promise<string[]> {
  * - "in progress" matches "Building"
  * - "DONE" matches "Complete"
  */
-export async function getCanonicalStatus(input: string | undefined, core?: Core): Promise<string | null> {
+export async function getCanonicalStatus(
+	input: string | undefined,
+	core?: Core,
+): Promise<string | null> {
 	if (!input) return null;
 	const statuses = await getValidStatuses(core);
-	const normalizedInput = String(input).trim().toLowerCase().replace(/\s+/g, "");
+	const normalizedInput = String(input)
+		.trim()
+		.toLowerCase()
+		.replace(/\s+/g, "");
 	if (!normalizedInput) return null;
 
 	// Direct match
@@ -147,7 +163,11 @@ export async function getCanonicalStatus(input: string | undefined, core?: Core)
 		if (found) return found;
 	}
 
-	if (normalizedInput === "inprogress" || normalizedInput === "active" || normalizedInput === "developing") {
+	if (
+		normalizedInput === "inprogress" ||
+		normalizedInput === "active" ||
+		normalizedInput === "developing"
+	) {
 		const found = statuses.find((s) => {
 			const ns = s.toLowerCase();
 			return ns === "building" || ns === "active";

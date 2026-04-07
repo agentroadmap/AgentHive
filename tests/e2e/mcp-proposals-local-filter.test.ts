@@ -27,7 +27,9 @@ const remoteProposal: Proposal = {
 };
 
 describe("MCP proposal tools local filtering", () => {
-	const mockConfig = { statuses: ["Potential", "Active", "Accepted", "Complete", "Abandoned"] };
+	const mockConfig = {
+		statuses: ["Potential", "Active", "Accepted", "Complete", "Abandoned"],
+	};
 
 	it("filters cross-branch proposals out of proposal_list", async () => {
 		const handlers = new ProposalHandlers({
@@ -68,7 +70,9 @@ describe("MCP proposal tools local filtering", () => {
 			queryProposals: async (options: any) => {
 				let results = [localProposal, remoteProposal];
 				if (options.filters?.assignee) {
-					results = results.filter(s => s.assignee.includes(options.filters.assignee));
+					results = results.filter((s) =>
+						s.assignee.includes(options.filters.assignee),
+					);
 				}
 				return results;
 			},

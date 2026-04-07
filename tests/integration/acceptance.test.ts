@@ -1,41 +1,53 @@
-import { describe, test } from "node:test";
 import assert from "node:assert/strict";
+import { describe, test } from "node:test";
 import {
+	getOriginalClaimant,
 	type ProofReference,
 	type ProofRequirement,
-	type ProofValidationResult,
-	type ReviewHistory,
-	formatValidationResult,
-	getOriginalClaimant,
 	parseProofReferences,
 	parseProofRequirements,
 	parseReviewHistory,
 	proofSatisfiesRequirement,
+	type ReviewHistory,
 	recordReview,
 	serializeProofReferences,
-	serializeProofRequirements,
 	serializeReviewHistory,
 	shouldEscalate,
 	validateProof,
-} from '../../src/core/proposal/acceptance.ts';
+} from "../../src/core/proposal/acceptance.ts";
 
 describe("Acceptance Module", () => {
 	describe("proofSatisfiesRequirement", () => {
 		test("matching type and non-empty value satisfies", () => {
-			const proof: ProofReference = { type: "test-result", value: "All 25 tests passed" };
-			const req: ProofRequirement = { description: "Tests pass", evidenceType: "test-result", verifier: "builder" };
+			const proof: ProofReference = {
+				type: "test-result",
+				value: "All 25 tests passed",
+			};
+			const req: ProofRequirement = {
+				description: "Tests pass",
+				evidenceType: "test-result",
+				verifier: "builder",
+			};
 			assert.equal(proofSatisfiesRequirement(proof, req), true);
 		});
 
 		test("wrong type does not satisfy", () => {
 			const proof: ProofReference = { type: "commit", value: "abc123" };
-			const req: ProofRequirement = { description: "Tests pass", evidenceType: "test-result", verifier: "builder" };
+			const req: ProofRequirement = {
+				description: "Tests pass",
+				evidenceType: "test-result",
+				verifier: "builder",
+			};
 			assert.equal(proofSatisfiesRequirement(proof, req), false);
 		});
 
 		test("empty value does not satisfy", () => {
 			const proof: ProofReference = { type: "test-result", value: "" };
-			const req: ProofRequirement = { description: "Tests pass", evidenceType: "test-result", verifier: "builder" };
+			const req: ProofRequirement = {
+				description: "Tests pass",
+				evidenceType: "test-result",
+				verifier: "builder",
+			};
 			assert.equal(proofSatisfiesRequirement(proof, req), false);
 		});
 	});
@@ -43,8 +55,16 @@ describe("Acceptance Module", () => {
 	describe("validateProof", () => {
 		test("valid when all requirements met", () => {
 			const requirements: ProofRequirement[] = [
-				{ description: "Tests pass", evidenceType: "test-result", verifier: "builder" },
-				{ description: "Build succeeds", evidenceType: "command-output", verifier: "builder" },
+				{
+					description: "Tests pass",
+					evidenceType: "test-result",
+					verifier: "builder",
+				},
+				{
+					description: "Build succeeds",
+					evidenceType: "command-output",
+					verifier: "builder",
+				},
 			];
 			const references: ProofReference[] = [
 				{ type: "test-result", value: "All 25 tests passed" },
@@ -58,8 +78,16 @@ describe("Acceptance Module", () => {
 
 		test("invalid when requirements missing", () => {
 			const requirements: ProofRequirement[] = [
-				{ description: "Tests pass", evidenceType: "test-result", verifier: "builder" },
-				{ description: "Code reviewed", evidenceType: "validation-summary", verifier: "peer-tester" },
+				{
+					description: "Tests pass",
+					evidenceType: "test-result",
+					verifier: "builder",
+				},
+				{
+					description: "Code reviewed",
+					evidenceType: "validation-summary",
+					verifier: "peer-tester",
+				},
 			];
 			const references: ProofReference[] = [
 				{ type: "test-result", value: "All tests passed" },
@@ -73,13 +101,19 @@ describe("Acceptance Module", () => {
 
 		test("peer audit satisfied when verified by different agent", () => {
 			const requirements: ProofRequirement[] = [
-				{ description: "Code reviewed", evidenceType: "validation-summary", verifier: "peer-tester" },
+				{
+					description: "Code reviewed",
+					evidenceType: "validation-summary",
+					verifier: "peer-tester",
+				},
 			];
 			const references: ProofReference[] = [
 				{ type: "validation-summary", value: "LGTM", verifiedBy: "Opus" },
 			];
 
-			const result = validateProof(requirements, references, { auditAgent: "Gemini" });
+			const result = validateProof(requirements, references, {
+				auditAgent: "Gemini",
+			});
 			assert.equal(result.valid, true);
 			assert.equal(result.peerAuditDone, true);
 		});
@@ -92,37 +126,63 @@ describe("Acceptance Module", () => {
 
 	describe("recordReview", () => {
 		test("pass moves to Complete", () => {
-			const history: ReviewHistory = { proposalId: "proposal-9", entries: [], reviewCount: 0, isEscalated: false };
+			const history: ReviewHistory = {
+				proposalId: "proposal-9",
+				entries: [],
+				reviewCount: 0,
+				isEscalated: false,
+			};
 			const result = recordReview(history, "Copilot", "pass", "Gemini");
 
 			assert.equal(result.nextStatus, "Complete");
 			assert.equal(result.shouldEscalate, false);
 			assert.equal(history.reviewCount, 1);
-			assert.equal(history.entries[0]!.result, "pass");
+			assert.equal(history.entries[0]?.result, "pass");
 		});
 
 		test("fail returns to claimant", () => {
-			const history: ReviewHistory = { proposalId: "proposal-9", entries: [], reviewCount: 0, isEscalated: false };
-			const result = recordReview(history, "Copilot", "fail", "Gemini", ["Missing tests"]);
+			const history: ReviewHistory = {
+				proposalId: "proposal-9",
+				entries: [],
+				reviewCount: 0,
+				isEscalated: false,
+			};
+			const result = recordReview(history, "Copilot", "fail", "Gemini", [
+				"Missing tests",
+			]);
 
 			assert.equal(result.nextStatus, "Active");
 			assert.equal(result.shouldEscalate, false);
-			assert.equal(history.entries[0]!.claimant, "Gemini");
-			assert.deepEqual(history.entries[0]!.issues, ["Missing tests"]);
+			assert.equal(history.entries[0]?.claimant, "Gemini");
+			assert.deepEqual(history.entries[0]?.issues, ["Missing tests"]);
 		});
 
 		test("escalates after max attempts", () => {
 			const history: ReviewHistory = {
 				proposalId: "proposal-9",
 				entries: [
-					{ timestamp: "2026-03-20T10:00:00Z", reviewer: "Copilot", result: "fail", claimant: "Gemini", reason: "Missing tests" },
-					{ timestamp: "2026-03-20T11:00:00Z", reviewer: "Opus", result: "fail", claimant: "Gemini", reason: "Still broken" },
+					{
+						timestamp: "2026-03-20T10:00:00Z",
+						reviewer: "Copilot",
+						result: "fail",
+						claimant: "Gemini",
+						reason: "Missing tests",
+					},
+					{
+						timestamp: "2026-03-20T11:00:00Z",
+						reviewer: "Opus",
+						result: "fail",
+						claimant: "Gemini",
+						reason: "Still broken",
+					},
 				],
 				reviewCount: 2,
 				isEscalated: false,
 			};
 
-			const result = recordReview(history, "Copilot", "fail", "Gemini", ["Still failing"]);
+			const result = recordReview(history, "Copilot", "fail", "Gemini", [
+				"Still failing",
+			]);
 
 			assert.equal(result.nextStatus, "Blocked");
 			assert.equal(result.shouldEscalate, true);
@@ -134,7 +194,12 @@ describe("Acceptance Module", () => {
 			const history: ReviewHistory = {
 				proposalId: "proposal-9",
 				entries: [
-					{ timestamp: "2026-03-20T10:00:00Z", reviewer: "Copilot", result: "fail", claimant: "Gemini" },
+					{
+						timestamp: "2026-03-20T10:00:00Z",
+						reviewer: "Copilot",
+						result: "fail",
+						claimant: "Gemini",
+					},
 				],
 				reviewCount: 1,
 				isEscalated: false,
@@ -150,7 +215,12 @@ describe("Acceptance Module", () => {
 			const history: ReviewHistory = {
 				proposalId: "proposal-9",
 				entries: [
-					{ timestamp: "2026-03-20T10:00:00Z", reviewer: "Copilot", result: "fail", claimant: "Gemini" },
+					{
+						timestamp: "2026-03-20T10:00:00Z",
+						reviewer: "Copilot",
+						result: "fail",
+						claimant: "Gemini",
+					},
 				],
 				reviewCount: 1,
 				isEscalated: false,
@@ -162,9 +232,24 @@ describe("Acceptance Module", () => {
 			const history: ReviewHistory = {
 				proposalId: "proposal-9",
 				entries: [
-					{ timestamp: "2026-03-20T10:00:00Z", reviewer: "A", result: "fail", claimant: "Gemini" },
-					{ timestamp: "2026-03-20T11:00:00Z", reviewer: "B", result: "fail", claimant: "Gemini" },
-					{ timestamp: "2026-03-20T12:00:00Z", reviewer: "C", result: "fail", claimant: "Gemini" },
+					{
+						timestamp: "2026-03-20T10:00:00Z",
+						reviewer: "A",
+						result: "fail",
+						claimant: "Gemini",
+					},
+					{
+						timestamp: "2026-03-20T11:00:00Z",
+						reviewer: "B",
+						result: "fail",
+						claimant: "Gemini",
+					},
+					{
+						timestamp: "2026-03-20T12:00:00Z",
+						reviewer: "C",
+						result: "fail",
+						claimant: "Gemini",
+					},
 				],
 				reviewCount: 3,
 				isEscalated: false,
@@ -176,9 +261,24 @@ describe("Acceptance Module", () => {
 			const history: ReviewHistory = {
 				proposalId: "proposal-9",
 				entries: [
-					{ timestamp: "2026-03-20T10:00:00Z", reviewer: "A", result: "fail", claimant: "Gemini" },
-					{ timestamp: "2026-03-20T11:00:00Z", reviewer: "B", result: "pass", claimant: "Gemini" },
-					{ timestamp: "2026-03-20T12:00:00Z", reviewer: "C", result: "fail", claimant: "Gemini" },
+					{
+						timestamp: "2026-03-20T10:00:00Z",
+						reviewer: "A",
+						result: "fail",
+						claimant: "Gemini",
+					},
+					{
+						timestamp: "2026-03-20T11:00:00Z",
+						reviewer: "B",
+						result: "pass",
+						claimant: "Gemini",
+					},
+					{
+						timestamp: "2026-03-20T12:00:00Z",
+						reviewer: "C",
+						result: "fail",
+						claimant: "Gemini",
+					},
 				],
 				reviewCount: 3,
 				isEscalated: false,
@@ -192,8 +292,18 @@ describe("Acceptance Module", () => {
 			const history: ReviewHistory = {
 				proposalId: "proposal-9",
 				entries: [
-					{ timestamp: "2026-03-20T10:00:00Z", reviewer: "A", result: "fail", claimant: "Gemini" },
-					{ timestamp: "2026-03-20T11:00:00Z", reviewer: "B", result: "fail", claimant: "SomeoneElse" },
+					{
+						timestamp: "2026-03-20T10:00:00Z",
+						reviewer: "A",
+						result: "fail",
+						claimant: "Gemini",
+					},
+					{
+						timestamp: "2026-03-20T11:00:00Z",
+						reviewer: "B",
+						result: "fail",
+						claimant: "SomeoneElse",
+					},
 				],
 				reviewCount: 2,
 				isEscalated: false,
@@ -202,7 +312,12 @@ describe("Acceptance Module", () => {
 		});
 
 		test("returns null for empty history", () => {
-			const history: ReviewHistory = { proposalId: "proposal-9", entries: [], reviewCount: 0, isEscalated: false };
+			const history: ReviewHistory = {
+				proposalId: "proposal-9",
+				entries: [],
+				reviewCount: 0,
+				isEscalated: false,
+			};
 			assert.equal(getOriginalClaimant(history), null);
 		});
 	});
@@ -217,9 +332,9 @@ describe("Acceptance Module", () => {
 `;
 			const history = parseReviewHistory(content, "proposal-9");
 			assert.equal(history.entries.length, 2);
-			assert.equal(history.entries[0]!.result, "pass");
-			assert.equal(history.entries[1]!.result, "fail");
-			assert.equal(history.entries[1]!.reason, "Missing tests");
+			assert.equal(history.entries[0]?.result, "pass");
+			assert.equal(history.entries[1]?.result, "fail");
+			assert.equal(history.entries[1]?.reason, "Missing tests");
 		});
 
 		test("returns empty history when no section", () => {
@@ -234,7 +349,13 @@ describe("Acceptance Module", () => {
 			const history: ReviewHistory = {
 				proposalId: "proposal-9",
 				entries: [
-					{ timestamp: "2026-03-20T10:00:00Z", reviewer: "Copilot", result: "fail", claimant: "Gemini", reason: "Missing tests" },
+					{
+						timestamp: "2026-03-20T10:00:00Z",
+						reviewer: "Copilot",
+						result: "fail",
+						claimant: "Gemini",
+						reason: "Missing tests",
+					},
 				],
 				reviewCount: 1,
 				isEscalated: false,
@@ -249,7 +370,12 @@ describe("Acceptance Module", () => {
 		});
 
 		test("returns empty string for empty history", () => {
-			const history: ReviewHistory = { proposalId: "proposal-9", entries: [], reviewCount: 0, isEscalated: false };
+			const history: ReviewHistory = {
+				proposalId: "proposal-9",
+				entries: [],
+				reviewCount: 0,
+				isEscalated: false,
+			};
 			assert.equal(serializeReviewHistory(history), "");
 		});
 	});
@@ -264,8 +390,8 @@ describe("Acceptance Module", () => {
 `;
 			const refs = parseProofReferences(content);
 			assert.equal(refs.length, 2);
-			assert.equal(refs[0]!.type, "command-output");
-			assert.equal(refs[1]!.verifiedBy, "@Opus");
+			assert.equal(refs[0]?.type, "command-output");
+			assert.equal(refs[1]?.verifiedBy, "@Opus");
 		});
 	});
 
@@ -290,7 +416,7 @@ describe("Acceptance Module", () => {
 `;
 			const reqs = parseProofRequirements(content);
 			assert.equal(reqs.length, 1);
-			assert.equal(reqs[0]!.evidenceType, "test-result");
+			assert.equal(reqs[0]?.evidenceType, "test-result");
 		});
 	});
 
@@ -299,8 +425,19 @@ describe("Acceptance Module", () => {
 			const original: ReviewHistory = {
 				proposalId: "proposal-9",
 				entries: [
-					{ timestamp: "2026-03-20T10:00:00Z", reviewer: "Copilot", result: "fail", claimant: "Gemini", reason: "Missing tests" },
-					{ timestamp: "2026-03-20T11:00:00Z", reviewer: "Opus", result: "pass", claimant: "Gemini" },
+					{
+						timestamp: "2026-03-20T10:00:00Z",
+						reviewer: "Copilot",
+						result: "fail",
+						claimant: "Gemini",
+						reason: "Missing tests",
+					},
+					{
+						timestamp: "2026-03-20T11:00:00Z",
+						reviewer: "Opus",
+						result: "pass",
+						claimant: "Gemini",
+					},
 				],
 				reviewCount: 2,
 				isEscalated: false,
@@ -310,8 +447,8 @@ describe("Acceptance Module", () => {
 			const parsed = parseReviewHistory(markdown, "proposal-9");
 
 			assert.equal(parsed.entries.length, 2);
-			assert.equal(parsed.entries[0]!.result, "fail");
-			assert.equal(parsed.entries[1]!.result, "pass");
+			assert.equal(parsed.entries[0]?.result, "fail");
+			assert.equal(parsed.entries[1]?.result, "pass");
 		});
 	});
 });

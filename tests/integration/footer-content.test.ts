@@ -1,11 +1,12 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
-import { expect } from "../support/test-utils.ts";
 import { formatFooterContent } from "../../src/ui/footer-content.ts";
+import { expect } from "../support/test-utils.ts";
 
 describe("formatFooterContent", () => {
 	it("keeps footer on one line when terminal width is sufficient", () => {
-		const content = " {cyan-fg}[Tab]{/} Switch View | {cyan-fg}[/]{/} Search | {cyan-fg}[q/Esc]{/} Quit";
+		const content =
+			" {cyan-fg}[Tab]{/} Switch View | {cyan-fg}[/]{/} Search | {cyan-fg}[q/Esc]{/} Quit";
 
 		const result = formatFooterContent(content, 120);
 

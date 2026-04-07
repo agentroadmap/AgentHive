@@ -1,29 +1,41 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
-import { expect } from "../support/test-utils.ts";
 import {
 	createDirectiveFilterValueResolver,
 	normalizeDirectiveFilterValue,
 	resolveClosestDirectiveFilterValue,
-} from '../../src/utils/milestone-filter.ts';
+} from "../../src/utils/milestone-filter.ts";
+import { expect } from "../support/test-utils.ts";
 
 describe("directive filter matching", () => {
 	it("normalizes punctuation and case", () => {
-		expect(normalizeDirectiveFilterValue("  Release-1 / Alpha ")).toBe("release 1 alpha");
+		expect(normalizeDirectiveFilterValue("  Release-1 / Alpha ")).toBe(
+			"release 1 alpha",
+		);
 	});
 
 	it("returns exact normalized directive when available", () => {
-		const resolved = resolveClosestDirectiveFilterValue("RELEASE-1", ["Release-1", "Roadmap Alpha"]);
+		const resolved = resolveClosestDirectiveFilterValue("RELEASE-1", [
+			"Release-1",
+			"Roadmap Alpha",
+		]);
 		assert.strictEqual(resolved, "release 1");
 	});
 
 	it("returns closest directive for typo input", () => {
-		const resolved = resolveClosestDirectiveFilterValue("releas-1", ["Release-1", "Release-2", "Roadmap Alpha"]);
+		const resolved = resolveClosestDirectiveFilterValue("releas-1", [
+			"Release-1",
+			"Release-2",
+			"Roadmap Alpha",
+		]);
 		assert.strictEqual(resolved, "release 1");
 	});
 
 	it("returns closest directive for partial input", () => {
-		const resolved = resolveClosestDirectiveFilterValue("roadmp", ["Release-1", "Roadmap Alpha"]);
+		const resolved = resolveClosestDirectiveFilterValue("roadmp", [
+			"Release-1",
+			"Roadmap Alpha",
+		]);
 		assert.strictEqual(resolved, "roadmap alpha");
 	});
 

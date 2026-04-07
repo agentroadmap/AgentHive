@@ -18,7 +18,8 @@ export const agentRegisterSchema: JsonSchema = {
 			type: "string",
 			minLength: 1,
 			maxLength: 100,
-			description: "Agent display name (defaults to git user if omitted in CLI)",
+			description:
+				"Agent display name (defaults to git user if omitted in CLI)",
 		},
 		template: {
 			type: "string",
@@ -38,7 +39,8 @@ export const agentRegisterSchema: JsonSchema = {
 			type: "string",
 			minLength: 1,
 			maxLength: 100,
-			description: "AI model identifier (e.g., claude-3-opus, gpt-4o, gemini-pro, local-llama)",
+			description:
+				"AI model identifier (e.g., claude-3-opus, gpt-4o, gemini-pro, local-llama)",
 		},
 		provider: {
 			type: "string",

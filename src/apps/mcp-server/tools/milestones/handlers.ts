@@ -5,8 +5,8 @@ import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
 import {
 	buildDirectiveMatchKeys,
-	keySetsIntersect,
 	directiveKey,
+	keySetsIntersect,
 	normalizeDirectiveName,
 	resolveDirectiveStorageValue,
 } from "../../utils/milestone-resolution.ts";
@@ -32,9 +32,16 @@ export type DirectiveArchiveArgs = {
 	name: string;
 };
 
-function collectArchivedDirectiveKeys(archivedDirectives: Directive[], activeDirectives: Directive[]): string[] {
+function collectArchivedDirectiveKeys(
+	archivedDirectives: Directive[],
+	activeDirectives: Directive[],
+): string[] {
 	const keys = new Set<string>();
-	const activeTitleKeys = new Set(activeDirectives.map((directive) => directiveKey(directive.title)).filter(Boolean));
+	const activeTitleKeys = new Set(
+		activeDirectives
+			.map((directive) => directiveKey(directive.title))
+			.filter(Boolean),
+	);
 
 	for (const directive of archivedDirectives) {
 		const idKey = directiveKey(directive.id);
@@ -60,11 +67,17 @@ function formatListBlock(title: string, items: string[]): string {
 function formatProposalIdList(proposalIds: string[], limit = 20): string {
 	if (proposalIds.length === 0) return "";
 	const shown = proposalIds.slice(0, limit);
-	const suffix = proposalIds.length > limit ? ` (and ${proposalIds.length - limit} more)` : "";
+	const suffix =
+		proposalIds.length > limit
+			? ` (and ${proposalIds.length - limit} more)`
+			: "";
 	return `${shown.join(", ")}${suffix}`;
 }
 
-function findActiveDirectiveByAlias(name: string, directives: Directive[]): Directive | undefined {
+function findActiveDirectiveByAlias(
+	name: string,
+	directives: Directive[],
+): Directive | undefined {
 	const normalized = normalizeDirectiveName(name);
 	const key = directiveKey(normalized);
 	if (!key) {
@@ -72,15 +85,23 @@ function findActiveDirectiveByAlias(name: string, directives: Directive[]): Dire
 	}
 	const resolvedId = resolveDirectiveStorageValue(normalized, directives);
 	const resolvedKey = directiveKey(resolvedId);
-	const idMatch = directives.find((directive) => directiveKey(directive.id) === resolvedKey);
+	const idMatch = directives.find(
+		(directive) => directiveKey(directive.id) === resolvedKey,
+	);
 	if (idMatch) {
 		return idMatch;
 	}
-	const titleMatches = directives.filter((directive) => directiveKey(directive.title) === key);
+	const titleMatches = directives.filter(
+		(directive) => directiveKey(directive.title) === key,
+	);
 	return titleMatches.length === 1 ? titleMatches[0] : undefined;
 }
 
-function buildProposalMatchKeysForDirective(name: string, directive?: Directive, includeTitleMatch = true): Set<string> {
+function buildProposalMatchKeysForDirective(
+	name: string,
+	directive?: Directive,
+	includeTitleMatch = true,
+): Set<string> {
 	if (!directive) {
 		return buildDirectiveMatchKeys(name, []);
 	}
@@ -109,7 +130,10 @@ function buildDirectiveRecordMatchKeys(directive: Directive): Set<string> {
 	return keys;
 }
 
-function hasDirectiveTitleAliasCollision(sourceDirective: Directive, candidates: Directive[]): boolean {
+function hasDirectiveTitleAliasCollision(
+	sourceDirective: Directive,
+	candidates: Directive[],
+): boolean {
 	const sourceDirectiveIdKey = directiveKey(sourceDirective.id);
 	const sourceTitleKey = directiveKey(sourceDirective.title);
 	if (!sourceTitleKey) {
@@ -133,7 +157,8 @@ function resolveDirectiveValueForReporting(
 		return "";
 	}
 	const inputKey = directiveKey(normalized);
-	const looksLikeDirectiveId = /^\d+$/.test(normalized) || /^m-\d+$/i.test(normalized);
+	const looksLikeDirectiveId =
+		/^\d+$/.test(normalized) || /^m-\d+$/i.test(normalized);
 	const canonicalInputId = looksLikeDirectiveId
 		? `m-${String(Number.parseInt(normalized.replace(/^m-/i, ""), 10))}`
 		: null;
@@ -157,24 +182,34 @@ function resolveDirectiveValueForReporting(
 		return aliasKeys.has(`m-${numericAlias}`) || aliasKeys.has(numericAlias);
 	};
 	const findIdMatch = (directives: Directive[]): Directive | undefined => {
-		const rawExactMatch = directives.find((directive) => directiveKey(directive.id) === inputKey);
+		const rawExactMatch = directives.find(
+			(directive) => directiveKey(directive.id) === inputKey,
+		);
 		if (rawExactMatch) {
 			return rawExactMatch;
 		}
 		if (canonicalInputId) {
-			const canonicalRawMatch = directives.find((directive) => directiveKey(directive.id) === canonicalInputId);
+			const canonicalRawMatch = directives.find(
+				(directive) => directiveKey(directive.id) === canonicalInputId,
+			);
 			if (canonicalRawMatch) {
 				return canonicalRawMatch;
 			}
 		}
 		return directives.find((directive) => idMatchesAlias(directive.id));
 	};
-	const findUniqueTitleMatch = (directives: Directive[]): Directive | undefined => {
-		const titleMatches = directives.filter((directive) => directiveKey(directive.title) === inputKey);
+	const findUniqueTitleMatch = (
+		directives: Directive[],
+	): Directive | undefined => {
+		const titleMatches = directives.filter(
+			(directive) => directiveKey(directive.title) === inputKey,
+		);
 		return titleMatches.length === 1 ? titleMatches[0] : undefined;
 	};
 
-	const activeTitleMatches = activeDirectives.filter((directive) => directiveKey(directive.title) === inputKey);
+	const activeTitleMatches = activeDirectives.filter(
+		(directive) => directiveKey(directive.title) === inputKey,
+	);
 	if (looksLikeDirectiveId) {
 		const activeIdMatch = findIdMatch(activeDirectives);
 		if (activeIdMatch) {
@@ -222,11 +257,17 @@ export class DirectiveHandlers {
 		return await this.core.queryProposals({ includeCrossBranch: false });
 	}
 
-	private async rollbackProposalDirectives(previousDirectives: Map<string, string | undefined>): Promise<string[]> {
+	private async rollbackProposalDirectives(
+		previousDirectives: Map<string, string | undefined>,
+	): Promise<string[]> {
 		const failedProposalIds: string[] = [];
 		for (const [proposalId, directive] of previousDirectives.entries()) {
 			try {
-				await this.core.editProposal(proposalId, { directive: directive ?? null }, false);
+				await this.core.editProposal(
+					proposalId,
+					{ directive: directive ?? null },
+					false,
+				);
 			} catch {
 				failedProposalIds.push(proposalId);
 			}
@@ -250,7 +291,10 @@ export class DirectiveHandlers {
 		let repoRoot: string | null = null;
 		const commitPaths: string[] = [];
 		if (options.sourcePath && options.targetPath) {
-			repoRoot = await this.core.git.stageFileMove(options.sourcePath, options.targetPath);
+			repoRoot = await this.core.git.stageFileMove(
+				options.sourcePath,
+				options.targetPath,
+			);
 			commitPaths.push(options.sourcePath, options.targetPath);
 		}
 		for (const filePath of options.proposalFilePaths ?? []) {
@@ -287,7 +331,10 @@ export class DirectiveHandlers {
 		for (const directive of fileDirectives) {
 			const titleKey = directiveKey(directive.title);
 			if (!titleKey) continue;
-			activeTitleCounts.set(titleKey, (activeTitleCounts.get(titleKey) ?? 0) + 1);
+			activeTitleCounts.set(
+				titleKey,
+				(activeTitleCounts.get(titleKey) ?? 0) + 1,
+			);
 		}
 		const fileDirectiveKeys = new Set<string>();
 		for (const directive of fileDirectives) {
@@ -295,11 +342,17 @@ export class DirectiveHandlers {
 				fileDirectiveKeys.add(key);
 			}
 			const titleKey = directiveKey(directive.title);
-			if (titleKey && !reservedIdKeys.has(titleKey) && activeTitleCounts.get(titleKey) === 1) {
+			if (
+				titleKey &&
+				!reservedIdKeys.has(titleKey) &&
+				activeTitleCounts.get(titleKey) === 1
+			) {
 				fileDirectiveKeys.add(titleKey);
 			}
 		}
-		const archivedKeys = new Set<string>(collectArchivedDirectiveKeys(archivedDirectives, fileDirectives));
+		const archivedKeys = new Set<string>(
+			collectArchivedDirectiveKeys(archivedDirectives, fileDirectives),
+		);
 
 		// Get directives discovered from proposals
 		const proposals = await this.listLocalProposals();
@@ -307,7 +360,11 @@ export class DirectiveHandlers {
 		for (const proposal of proposals) {
 			const normalized = normalizeDirectiveName(proposal.directive ?? "");
 			if (!normalized) continue;
-			const canonicalValue = resolveDirectiveValueForReporting(normalized, fileDirectives, archivedDirectives);
+			const canonicalValue = resolveDirectiveValueForReporting(
+				normalized,
+				fileDirectives,
+				archivedDirectives,
+			);
 			const key = directiveKey(canonicalValue);
 			if (!discoveredByKey.has(key)) {
 				discoveredByKey.set(key, canonicalValue);
@@ -325,8 +382,15 @@ export class DirectiveHandlers {
 
 		const blocks: string[] = [];
 		const directiveLines = fileDirectives.map((m) => `${m.id}: ${m.title}`);
-		blocks.push(formatListBlock(`Directives (${fileDirectives.length}):`, directiveLines));
-		blocks.push(formatListBlock(`Directives found on proposals without files (${unconfigured.length}):`, unconfigured));
+		blocks.push(
+			formatListBlock(`Directives (${fileDirectives.length}):`, directiveLines),
+		);
+		blocks.push(
+			formatListBlock(
+				`Directives found on proposals without files (${unconfigured.length}):`,
+				unconfigured,
+			),
+		);
 		blocks.push(
 			formatListBlock(
 				`Archived directive values still on proposals (${archivedProposalValues.length}):`,
@@ -368,7 +432,10 @@ export class DirectiveHandlers {
 		}
 
 		// Create directive file
-		const directive = await this.core.filesystem.createDirective(name, args.description);
+		const directive = await this.core.filesystem.createDirective(
+			name,
+			args.description,
+		);
 
 		return {
 			content: [
@@ -384,12 +451,18 @@ export class DirectiveHandlers {
 		const fromName = normalizeDirectiveName(args.from);
 		const toName = normalizeDirectiveName(args.to);
 		if (!fromName || !toName) {
-			throw new McpError("Both 'from' and 'to' directive names are required.", "VALIDATION_ERROR");
+			throw new McpError(
+				"Both 'from' and 'to' directive names are required.",
+				"VALIDATION_ERROR",
+			);
 		}
 
 		const fileDirectives = await this.listFileDirectives();
 		const archivedDirectives = await this.listArchivedDirectives();
-		const sourceDirective = findActiveDirectiveByAlias(fromName, fileDirectives);
+		const sourceDirective = findActiveDirectiveByAlias(
+			fromName,
+			fileDirectives,
+		);
 		if (!sourceDirective) {
 			throw new McpError(`Directive not found: "${fromName}"`, "NOT_FOUND");
 		}
@@ -423,19 +496,34 @@ export class DirectiveHandlers {
 
 		const targetDirective = sourceDirective.id;
 		const shouldUpdateProposals = args.updateProposals ?? true;
-		const proposals = shouldUpdateProposals ? await this.listLocalProposals() : [];
+		const proposals = shouldUpdateProposals
+			? await this.listLocalProposals()
+			: [];
 		const matchKeys = shouldUpdateProposals
-			? buildProposalMatchKeysForDirective(fromName, sourceDirective, !hasTitleCollision)
+			? buildProposalMatchKeysForDirective(
+					fromName,
+					sourceDirective,
+					!hasTitleCollision,
+				)
 			: new Set<string>();
 		const matches = shouldUpdateProposals
-			? proposals.filter((proposal) => matchKeys.has(directiveKey(proposal.directive ?? "")))
+			? proposals.filter((proposal) =>
+					matchKeys.has(directiveKey(proposal.directive ?? "")),
+				)
 			: [];
 		let updatedProposalIds: string[] = [];
 		const updatedProposalFilePaths = new Set<string>();
 
-		const renameResult = await this.core.renameDirective(sourceDirective.id, toName, false);
+		const renameResult = await this.core.renameDirective(
+			sourceDirective.id,
+			toName,
+			false,
+		);
 		if (!renameResult.success || !renameResult.directive) {
-			throw new McpError(`Failed to rename directive "${sourceDirective.title}".`, "INTERNAL_ERROR");
+			throw new McpError(
+				`Failed to rename directive "${sourceDirective.title}".`,
+				"INTERNAL_ERROR",
+			);
 		}
 
 		const renamedDirective = renameResult.directive;
@@ -444,25 +532,40 @@ export class DirectiveHandlers {
 			try {
 				for (const proposal of matches) {
 					previousDirectives.set(proposal.id, proposal.directive);
-					const updatedProposal = await this.core.editProposal(proposal.id, { directive: targetDirective }, false);
-					const proposalFilePath = updatedProposal.filePath ?? proposal.filePath;
+					const updatedProposal = await this.core.editProposal(
+						proposal.id,
+						{ directive: targetDirective },
+						false,
+					);
+					const proposalFilePath =
+						updatedProposal.filePath ?? proposal.filePath;
 					if (proposalFilePath) {
 						updatedProposalFilePaths.add(proposalFilePath);
 					}
 					updatedProposalIds.push(proposal.id);
 				}
-				updatedProposalIds = updatedProposalIds.sort((a, b) => a.localeCompare(b));
+				updatedProposalIds = updatedProposalIds.sort((a, b) =>
+					a.localeCompare(b),
+				);
 			} catch {
-				const rollbackProposalFailures = await this.rollbackProposalDirectives(previousDirectives);
-				const rollbackRenameResult = await this.core.renameDirective(sourceDirective.id, sourceDirective.title, false);
+				const rollbackProposalFailures =
+					await this.rollbackProposalDirectives(previousDirectives);
+				const rollbackRenameResult = await this.core.renameDirective(
+					sourceDirective.id,
+					sourceDirective.title,
+					false,
+				);
 				const rollbackDetails: string[] = [];
 				if (!rollbackRenameResult.success) {
 					rollbackDetails.push("failed to rollback directive file rename");
 				}
 				if (rollbackProposalFailures.length > 0) {
-					rollbackDetails.push(`failed to rollback proposal directives for: ${rollbackProposalFailures.join(", ")}`);
+					rollbackDetails.push(
+						`failed to rollback proposal directives for: ${rollbackProposalFailures.join(", ")}`,
+					);
 				}
-				const detailSuffix = rollbackDetails.length > 0 ? ` (${rollbackDetails.join("; ")})` : "";
+				const detailSuffix =
+					rollbackDetails.length > 0 ? ` (${rollbackDetails.join("; ")})` : "";
 				throw new McpError(
 					`Failed to update proposal directives after renaming "${sourceDirective.title}"${detailSuffix}.`,
 					"INTERNAL_ERROR",
@@ -470,22 +573,33 @@ export class DirectiveHandlers {
 			}
 		}
 		try {
-			await this.commitDirectiveMutation(`roadmap: Rename directive ${sourceDirective.id}`, {
-				sourcePath: renameResult.sourcePath,
-				targetPath: renameResult.targetPath,
-				proposalFilePaths: updatedProposalFilePaths,
-			});
+			await this.commitDirectiveMutation(
+				`roadmap: Rename directive ${sourceDirective.id}`,
+				{
+					sourcePath: renameResult.sourcePath,
+					targetPath: renameResult.targetPath,
+					proposalFilePaths: updatedProposalFilePaths,
+				},
+			);
 		} catch {
-			const rollbackProposalFailures = await this.rollbackProposalDirectives(previousDirectives);
-			const rollbackRenameResult = await this.core.renameDirective(sourceDirective.id, sourceDirective.title, false);
+			const rollbackProposalFailures =
+				await this.rollbackProposalDirectives(previousDirectives);
+			const rollbackRenameResult = await this.core.renameDirective(
+				sourceDirective.id,
+				sourceDirective.title,
+				false,
+			);
 			const rollbackDetails: string[] = [];
 			if (!rollbackRenameResult.success) {
 				rollbackDetails.push("failed to rollback directive file rename");
 			}
 			if (rollbackProposalFailures.length > 0) {
-				rollbackDetails.push(`failed to rollback proposal directives for: ${rollbackProposalFailures.join(", ")}`);
+				rollbackDetails.push(
+					`failed to rollback proposal directives for: ${rollbackProposalFailures.join(", ")}`,
+				);
 			}
-			const detailSuffix = rollbackDetails.length > 0 ? ` (${rollbackDetails.join("; ")})` : "";
+			const detailSuffix =
+				rollbackDetails.length > 0 ? ` (${rollbackDetails.join("; ")})` : "";
 			throw new McpError(
 				`Failed while finalizing directive rename "${sourceDirective.title}"${detailSuffix}.`,
 				"INTERNAL_ERROR",
@@ -502,8 +616,14 @@ export class DirectiveHandlers {
 		} else {
 			summaryLines.push("Skipped updating proposals (updateProposals=false).");
 		}
-		if (renameResult.sourcePath && renameResult.targetPath && renameResult.sourcePath !== renameResult.targetPath) {
-			summaryLines.push(`Renamed directive file: ${renameResult.sourcePath} -> ${renameResult.targetPath}`);
+		if (
+			renameResult.sourcePath &&
+			renameResult.targetPath &&
+			renameResult.sourcePath !== renameResult.targetPath
+		) {
+			summaryLines.push(
+				`Renamed directive file: ${renameResult.sourcePath} -> ${renameResult.targetPath}`,
+			);
 		}
 
 		return {
@@ -532,28 +652,50 @@ export class DirectiveHandlers {
 			...fileDirectives,
 			...archivedDirectives,
 		]);
-		const removeKeys = buildProposalMatchKeysForDirective(name, sourceDirective, !hasTitleCollision);
+		const removeKeys = buildProposalMatchKeysForDirective(
+			name,
+			sourceDirective,
+			!hasTitleCollision,
+		);
 		const proposalHandling = args.proposalHandling ?? "clear";
 		const reassignTo = normalizeDirectiveName(args.reassignTo ?? "");
 		const targetDirective =
-			proposalHandling === "reassign" ? findActiveDirectiveByAlias(reassignTo, fileDirectives) : undefined;
+			proposalHandling === "reassign"
+				? findActiveDirectiveByAlias(reassignTo, fileDirectives)
+				: undefined;
 		const reassignedDirective = targetDirective?.id ?? "";
 
 		if (proposalHandling === "reassign") {
 			if (!reassignTo) {
-				throw new McpError("reassignTo is required when proposalHandling is reassign.", "VALIDATION_ERROR");
+				throw new McpError(
+					"reassignTo is required when proposalHandling is reassign.",
+					"VALIDATION_ERROR",
+				);
 			}
 			if (!targetDirective) {
-				throw new McpError(`Target directive not found: "${reassignTo}"`, "VALIDATION_ERROR");
+				throw new McpError(
+					`Target directive not found: "${reassignTo}"`,
+					"VALIDATION_ERROR",
+				);
 			}
-			if (directiveKey(targetDirective.id) === directiveKey(sourceDirective.id)) {
-				throw new McpError("reassignTo must be different from the removed directive.", "VALIDATION_ERROR");
+			if (
+				directiveKey(targetDirective.id) === directiveKey(sourceDirective.id)
+			) {
+				throw new McpError(
+					"reassignTo must be different from the removed directive.",
+					"VALIDATION_ERROR",
+				);
 			}
 		}
 
-		const proposals = proposalHandling !== "keep" ? await this.listLocalProposals() : [];
+		const proposals =
+			proposalHandling !== "keep" ? await this.listLocalProposals() : [];
 		const matches =
-			proposalHandling !== "keep" ? proposals.filter((proposal) => removeKeys.has(directiveKey(proposal.directive ?? ""))) : [];
+			proposalHandling !== "keep"
+				? proposals.filter((proposal) =>
+						removeKeys.has(directiveKey(proposal.directive ?? "")),
+					)
+				: [];
 		const previousDirectives = new Map<string, string | undefined>();
 		let updatedProposalIds: string[] = [];
 		const updatedProposalFilePaths = new Set<string>();
@@ -563,20 +705,29 @@ export class DirectiveHandlers {
 					previousDirectives.set(proposal.id, proposal.directive);
 					const updatedProposal = await this.core.editProposal(
 						proposal.id,
-						{ directive: proposalHandling === "reassign" ? reassignedDirective : null },
+						{
+							directive:
+								proposalHandling === "reassign" ? reassignedDirective : null,
+						},
 						false,
 					);
-					const proposalFilePath = updatedProposal.filePath ?? proposal.filePath;
+					const proposalFilePath =
+						updatedProposal.filePath ?? proposal.filePath;
 					if (proposalFilePath) {
 						updatedProposalFilePaths.add(proposalFilePath);
 					}
 					updatedProposalIds.push(proposal.id);
 				}
-				updatedProposalIds = updatedProposalIds.sort((a, b) => a.localeCompare(b));
+				updatedProposalIds = updatedProposalIds.sort((a, b) =>
+					a.localeCompare(b),
+				);
 			} catch {
-				const rollbackFailures = await this.rollbackProposalDirectives(previousDirectives);
+				const rollbackFailures =
+					await this.rollbackProposalDirectives(previousDirectives);
 				const detailSuffix =
-					rollbackFailures.length > 0 ? ` (failed rollback for: ${rollbackFailures.join(", ")})` : "";
+					rollbackFailures.length > 0
+						? ` (failed rollback for: ${rollbackFailures.join(", ")})`
+						: "";
 				throw new McpError(
 					`Failed while updating proposals for directive removal "${sourceDirective.title}"${detailSuffix}.`,
 					"INTERNAL_ERROR",
@@ -584,11 +735,15 @@ export class DirectiveHandlers {
 			}
 		}
 
-		const archiveResult = await this.core.archiveDirective(sourceDirective.id, false);
+		const archiveResult = await this.core.archiveDirective(
+			sourceDirective.id,
+			false,
+		);
 		if (!archiveResult.success) {
 			let detailSuffix = "";
 			if (proposalHandling !== "keep") {
-				const rollbackFailures = await this.rollbackProposalDirectives(previousDirectives);
+				const rollbackFailures =
+					await this.rollbackProposalDirectives(previousDirectives);
 				if (rollbackFailures.length > 0) {
 					detailSuffix = ` (failed rollback for: ${rollbackFailures.join(", ")})`;
 				}
@@ -599,11 +754,14 @@ export class DirectiveHandlers {
 			);
 		}
 		try {
-			await this.commitDirectiveMutation(`roadmap: Remove directive ${sourceDirective.id}`, {
-				sourcePath: archiveResult.sourcePath,
-				targetPath: archiveResult.targetPath,
-				proposalFilePaths: updatedProposalFilePaths,
-			});
+			await this.commitDirectiveMutation(
+				`roadmap: Remove directive ${sourceDirective.id}`,
+				{
+					sourcePath: archiveResult.sourcePath,
+					targetPath: archiveResult.targetPath,
+					proposalFilePaths: updatedProposalFilePaths,
+				},
+			);
 		} catch {
 			const rollbackDetails: string[] = [];
 			if (archiveResult.sourcePath && archiveResult.targetPath) {
@@ -614,21 +772,29 @@ export class DirectiveHandlers {
 				}
 			}
 			if (proposalHandling !== "keep") {
-				const rollbackFailures = await this.rollbackProposalDirectives(previousDirectives);
+				const rollbackFailures =
+					await this.rollbackProposalDirectives(previousDirectives);
 				if (rollbackFailures.length > 0) {
-					rollbackDetails.push(`failed rollback for: ${rollbackFailures.join(", ")}`);
+					rollbackDetails.push(
+						`failed rollback for: ${rollbackFailures.join(", ")}`,
+					);
 				}
 			}
-			const detailSuffix = rollbackDetails.length > 0 ? ` (${rollbackDetails.join("; ")})` : "";
+			const detailSuffix =
+				rollbackDetails.length > 0 ? ` (${rollbackDetails.join("; ")})` : "";
 			throw new McpError(
 				`Failed while finalizing directive removal "${sourceDirective.title}"${detailSuffix}.`,
 				"INTERNAL_ERROR",
 			);
 		}
 
-		const summaryLines: string[] = [`Removed directive "${sourceDirective.title}" (${sourceDirective.id}).`];
+		const summaryLines: string[] = [
+			`Removed directive "${sourceDirective.title}" (${sourceDirective.id}).`,
+		];
 		if (proposalHandling === "keep") {
-			summaryLines.push("Kept proposal directive values unchanged (proposalHandling=keep).");
+			summaryLines.push(
+				"Kept proposal directive values unchanged (proposalHandling=keep).",
+			);
 		} else if (proposalHandling === "reassign") {
 			const targetSummary = `"${targetDirective?.title}" (${reassignedDirective})`;
 			summaryLines.push(

@@ -1,8 +1,7 @@
-import assert from "node:assert";
 import { describe, test } from "node:test";
-import { expect } from "../support/test-utils.ts";
 import type { Proposal } from "../../src/types/index.ts";
 import { createProposalSearchIndex } from "../../src/utils/proposal-search.ts";
+import { expect } from "../support/test-utils.ts";
 
 const proposals: Proposal[] = [
 	{

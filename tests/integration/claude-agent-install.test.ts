@@ -1,13 +1,11 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { existsSync } from "node:fs";
-import { mkdir, rm, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { installClaudeAgent } from "../../src/agent-instructions.ts";
 import { CLAUDE_AGENT_CONTENT } from "../../src/constants/index.ts";
-import { createUniqueTestDir,
-	expect,
-} from "../support/test-utils.ts";
+import { createUniqueTestDir, expect } from "../support/test-utils.ts";
 
 describe("installClaudeAgent", () => {
 	let TEST_PROJECT: string;
@@ -32,22 +30,34 @@ describe("installClaudeAgent", () => {
 	it("writes the project-manager-roadmap.md file with correct content", async () => {
 		await installClaudeAgent(TEST_PROJECT);
 
-		const agentPath = join(TEST_PROJECT, ".claude", "agents", "project-manager-roadmap.md");
+		const agentPath = join(
+			TEST_PROJECT,
+			".claude",
+			"agents",
+			"project-manager-roadmap.md",
+		);
 		const content = await await readFile(agentPath, "utf-8");
 
 		assert.strictEqual(content, CLAUDE_AGENT_CONTENT);
 		assert.ok(content.includes("name: project-manager-roadmap"));
-		assert.ok(content.includes(
-			"You are an expert project manager specializing in the roadmap.md proposal management system",
-		));
+		assert.ok(
+			content.includes(
+				"You are an expert project manager specializing in the roadmap.md proposal management system",
+			),
+		);
 	});
 
 	it("overwrites existing agent file", async () => {
 		const agentDir = join(TEST_PROJECT, ".claude", "agents");
 		await mkdir(agentDir, { recursive: true });
 
-		const agentPath = join(TEST_PROJECT, ".claude", "agents", "project-manager-roadmap.md");
-		await writeFile(agentPath,  "Old content");
+		const agentPath = join(
+			TEST_PROJECT,
+			".claude",
+			"agents",
+			"project-manager-roadmap.md",
+		);
+		await writeFile(agentPath, "Old content");
 
 		await installClaudeAgent(TEST_PROJECT);
 
@@ -62,7 +72,12 @@ describe("installClaudeAgent", () => {
 
 		await installClaudeAgent(subProjectPath);
 
-		const agentPath = join(subProjectPath, ".claude", "agents", "project-manager-roadmap.md");
+		const agentPath = join(
+			subProjectPath,
+			".claude",
+			"agents",
+			"project-manager-roadmap.md",
+		);
 		expect(existsSync(agentPath)).toBe(true);
 	});
 });

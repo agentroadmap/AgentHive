@@ -1,11 +1,20 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
-import { getProposalFilename, getProposalPath, normalizeProposalId, proposalFileExists, proposalIdsEqual } from "../../src/utils/proposal-path.ts";
-import { createUniqueTestDir, safeCleanup, execSync,
+import {
+	getProposalFilename,
+	getProposalPath,
+	normalizeProposalId,
+	proposalFileExists,
+	proposalIdsEqual,
+} from "../../src/utils/proposal-path.ts";
+import {
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 describe("Proposal path utilities", () => {
@@ -27,13 +36,31 @@ describe("Proposal path utilities", () => {
 
 		// Create some test proposal files
 		const proposalsDir = core.filesystem.proposalsDir;
-		await writeFile(join(proposalsDir, "proposal-123 - Test Proposal.md"), "# Test Proposal 123");
-		await writeFile(join(proposalsDir, "proposal-456 - Another Proposal.md"), "# Another Proposal 456");
-		await writeFile(join(proposalsDir, "proposal-789 - Final Proposal.md"), "# Final Proposal 789");
+		await writeFile(
+			join(proposalsDir, "proposal-123 - Test Proposal.md"),
+			"# Test Proposal 123",
+		);
+		await writeFile(
+			join(proposalsDir, "proposal-456 - Another Proposal.md"),
+			"# Another Proposal 456",
+		);
+		await writeFile(
+			join(proposalsDir, "proposal-789 - Final Proposal.md"),
+			"# Final Proposal 789",
+		);
 		// Additional: padded and dotted ids
-		await writeFile(join(proposalsDir, "proposal-0001 - Padded One.md"), "# Padded One");
-		await writeFile(join(proposalsDir, "proposal-3.01 - Subproposal Padded.md"), "# Subproposal Padded 3.01");
-		await writeFile(join(proposalsDir, "RFC-20260401-MESSAGING.md"), "# Messaging RFC");
+		await writeFile(
+			join(proposalsDir, "proposal-0001 - Padded One.md"),
+			"# Padded One",
+		);
+		await writeFile(
+			join(proposalsDir, "proposal-3.01 - Subproposal Padded.md"),
+			"# Subproposal Padded 3.01",
+		);
+		await writeFile(
+			join(proposalsDir, "RFC-20260401-MESSAGING.md"),
+			"# Messaging RFC",
+		);
 	});
 
 	afterEach(async () => {
@@ -215,7 +242,10 @@ describe("Proposal path utilities", () => {
 		});
 
 		it("should return RFC-style filenames without title suffixes", async () => {
-			const filename = await getProposalFilename("RFC-20260401-MESSAGING", core);
+			const filename = await getProposalFilename(
+				"RFC-20260401-MESSAGING",
+				core,
+			);
 			assert.strictEqual(filename, "RFC-20260401-MESSAGING.md");
 		});
 
@@ -262,8 +292,14 @@ describe("Proposal path utilities", () => {
 		beforeEach(async () => {
 			// Create proposals with custom prefix (simulating configured prefix)
 			const proposalsDir = core.filesystem.proposalsDir;
-			await writeFile(join(proposalsDir, "back-358 - Custom Prefix Proposal.md"), "# Custom Prefix Proposal");
-			await writeFile(join(proposalsDir, "back-5.1 - Custom Subproposal.md"), "# Custom Subproposal");
+			await writeFile(
+				join(proposalsDir, "back-358 - Custom Prefix Proposal.md"),
+				"# Custom Prefix Proposal",
+			);
+			await writeFile(
+				join(proposalsDir, "back-5.1 - Custom Subproposal.md"),
+				"# Custom Subproposal",
+			);
 		});
 
 		it("should find proposal by numeric ID when file has custom prefix", async () => {

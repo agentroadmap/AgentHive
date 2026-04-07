@@ -1,5 +1,4 @@
 import type { Core } from "../../core/roadmap.ts";
-import type { AcceptanceCriterion } from "../types/index.ts";
 import { normalizeProposalId, proposalIdsEqual } from "./proposal-path.ts";
 
 /**
@@ -96,7 +95,9 @@ export function processVerificationOptions(options: {
 	verifyRole?: string;
 	verifyEvidence?: string;
 }): string[] {
-	const raw = toStringArray(options.verify).concat(toStringArray(options.addVerify));
+	const raw = toStringArray(options.verify).concat(
+		toStringArray(options.addVerify),
+	);
 	if (raw.length === 0) return [];
 
 	return raw.map((text) => {
@@ -115,9 +116,17 @@ export function processVerificationOptions(options: {
  * Normalize a list of string values by trimming whitespace, dropping empties, and deduplicating.
  * Returns `undefined` when the resulting list is empty so callers can skip optional updates.
  */
-export function normalizeStringList(values: string[] | undefined): string[] | undefined {
+export function normalizeStringList(
+	values: string[] | undefined,
+): string[] | undefined {
 	if (!values) return undefined;
-	const unique = Array.from(new Set(values.map((value) => String(value).trim()).filter((value) => value.length > 0)));
+	const unique = Array.from(
+		new Set(
+			values
+				.map((value) => String(value).trim())
+				.filter((value) => value.length > 0),
+		),
+	);
 	return unique.length > 0 ? unique : undefined;
 }
 
@@ -140,11 +149,17 @@ export function toStringArray(value: unknown): string[] {
  * Throws an Error when any value is invalid so callers can surface CLI-friendly messaging.
  */
 export function parsePositiveIndexList(value: unknown): number[] {
-	const entries = Array.isArray(value) ? value : value !== undefined && value !== null ? [value] : [];
+	const entries = Array.isArray(value)
+		? value
+		: value !== undefined && value !== null
+			? [value]
+			: [];
 	return entries.map((entry) => {
 		const parsed = Number.parseInt(String(entry), 10);
 		if (!Number.isFinite(parsed) || Number.isNaN(parsed) || parsed < 1) {
-			throw new Error(`Invalid index: ${String(entry)}. Index must be a positive number (1-based).`);
+			throw new Error(
+				`Invalid index: ${String(entry)}. Index must be a positive number (1-based).`,
+			);
 		}
 		return parsed;
 	});

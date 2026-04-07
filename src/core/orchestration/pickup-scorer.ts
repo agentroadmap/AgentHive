@@ -55,14 +55,25 @@ export interface ScoredProposal {
 }
 
 const COST_RANK: Record<CostClass, number> = { low: 1, medium: 2, high: 3 };
-const DIFFICULTY_RANK: Record<Difficulty, number> = { easy: 1, medium: 2, hard: 3 };
-const PRIORITY_WEIGHT: Record<Priority, number> = { high: 1.5, medium: 1.0, low: 0.7 };
+const DIFFICULTY_RANK: Record<Difficulty, number> = {
+	easy: 1,
+	medium: 2,
+	hard: 3,
+};
+const PRIORITY_WEIGHT: Record<Priority, number> = {
+	high: 1.5,
+	medium: 1.0,
+	low: 0.7,
+};
 
 /**
  * Compute capability fit score.
  * Ratio of agent capabilities that match proposal requirements.
  */
-export function computeCapabilityFit(agent: AgentProfile, proposal: ScorableProposal): number {
+export function computeCapabilityFit(
+	agent: AgentProfile,
+	proposal: ScorableProposal,
+): number {
 	const requiredCaps = new Set<string>();
 
 	// From requires field
@@ -90,7 +101,10 @@ export function computeCapabilityFit(agent: AgentProfile, proposal: ScorableProp
  * Compute cost efficiency score.
  * High-priority proposals prefer high-cost agents; low-priority prefer cost-efficient.
  */
-export function computeCostEfficiency(agent: AgentProfile, proposal: ScorableProposal): number {
+export function computeCostEfficiency(
+	agent: AgentProfile,
+	proposal: ScorableProposal,
+): number {
 	const agentCost = COST_RANK[agent.costClass];
 	const priority = proposal.priority || "medium";
 
@@ -101,7 +115,7 @@ export function computeCostEfficiency(agent: AgentProfile, proposal: ScorablePro
 	// Agent must meet minimum cost requirement
 	if (agentCost < minCost) return 0;
 
-	const priorityWeight = PRIORITY_WEIGHT[priority];
+	const _priorityWeight = PRIORITY_WEIGHT[priority];
 
 	if (priority === "high") {
 		// High priority: prefer high-cost agents (they're more capable)
@@ -119,7 +133,10 @@ export function computeCostEfficiency(agent: AgentProfile, proposal: ScorablePro
  * Compute difficulty match score.
  * Match agent capability tier to proposal difficulty.
  */
-export function computeDifficultyMatch(agent: AgentProfile, proposal: ScorableProposal): number {
+export function computeDifficultyMatch(
+	agent: AgentProfile,
+	proposal: ScorableProposal,
+): number {
 	// Infer difficulty from proposal properties
 	const difficulty = inferDifficulty(proposal);
 	const diffRank = DIFFICULTY_RANK[difficulty];
@@ -176,7 +193,10 @@ export function computeLoadBalance(agent: AgentProfile): number {
  * Compute performance history bonus.
  * Agents with higher completion rates for similar proposals get a bonus.
  */
-export function computePerformanceBonus(agent: AgentProfile, proposal: ScorableProposal): number {
+export function computePerformanceBonus(
+	agent: AgentProfile,
+	proposal: ScorableProposal,
+): number {
 	if (!agent.completionHistory) return 1.0;
 
 	let totalCompletions = 0;
@@ -192,14 +212,20 @@ export function computePerformanceBonus(agent: AgentProfile, proposal: ScorableP
 	if (totalCompletions === 0) return 1.0; // No history = neutral
 
 	// Bonus for relevant experience
-	const relevanceRatio = proposal.labels.length > 0 ? relevantCompletions / Math.max(1, totalCompletions) : 0;
+	const relevanceRatio =
+		proposal.labels.length > 0
+			? relevantCompletions / Math.max(1, totalCompletions)
+			: 0;
 	return 1 + relevanceRatio * 0.5; // Up to 1.5x bonus
 }
 
 /**
  * Score a single proposal for a given agent.
  */
-export function scoreProposal(agent: AgentProfile, proposal: ScorableProposal): ScoreBreakdown {
+export function scoreProposal(
+	agent: AgentProfile,
+	proposal: ScorableProposal,
+): ScoreBreakdown {
 	const capability_fit = computeCapabilityFit(agent, proposal);
 	const cost_efficiency = computeCostEfficiency(agent, proposal);
 	const difficulty_match = computeDifficultyMatch(agent, proposal);
@@ -207,15 +233,27 @@ export function scoreProposal(agent: AgentProfile, proposal: ScorableProposal): 
 	const load_balance = computeLoadBalance(agent);
 	const perfBonus = computePerformanceBonus(agent, proposal);
 
-	const total = capability_fit * cost_efficiency * difficulty_match * importance_weight * load_balance * perfBonus;
+	const total =
+		capability_fit *
+		cost_efficiency *
+		difficulty_match *
+		importance_weight *
+		load_balance *
+		perfBonus;
 
 	// Build explanation
 	const parts: string[] = [];
-	if (capability_fit < 1) parts.push(`capability fit: ${(capability_fit * 100).toFixed(0)}%`);
+	if (capability_fit < 1)
+		parts.push(`capability fit: ${(capability_fit * 100).toFixed(0)}%`);
 	if (cost_efficiency < 0.5) parts.push(`cost mismatch`);
-	if (difficulty_match < 1) parts.push(`difficulty ${inferDifficulty(proposal)} vs tier ${agent.costClass}`);
-	if (proposal.downstreamCount > 2) parts.push(`blocks ${proposal.downstreamCount} proposals`);
-	if (agent.currentLoad > 0) parts.push(`agent has ${agent.currentLoad} active claims`);
+	if (difficulty_match < 1)
+		parts.push(
+			`difficulty ${inferDifficulty(proposal)} vs tier ${agent.costClass}`,
+		);
+	if (proposal.downstreamCount > 2)
+		parts.push(`blocks ${proposal.downstreamCount} proposals`);
+	if (agent.currentLoad > 0)
+		parts.push(`agent has ${agent.currentLoad} active claims`);
 
 	const explanation = parts.length > 0 ? parts.join("; ") : "good match";
 
@@ -233,7 +271,10 @@ export function scoreProposal(agent: AgentProfile, proposal: ScorableProposal): 
 /**
  * Score all proposals for an agent and return ranked results.
  */
-export function scoreProposals(agent: AgentProfile, proposals: ScorableProposal[]): ScoredProposal[] {
+export function scoreProposals(
+	agent: AgentProfile,
+	proposals: ScorableProposal[],
+): ScoredProposal[] {
 	const results: ScoredProposal[] = [];
 
 	for (const proposal of proposals) {
@@ -251,21 +292,40 @@ export function scoreProposals(agent: AgentProfile, proposals: ScorableProposal[
  * Score proposals for multiple agents and find optimal assignments.
  * Returns assignments where each proposal goes to the best-fit agent.
  */
-export function optimalAssignment(agents: AgentProfile[], proposals: ScorableProposal[]): Map<string, { agent: string; score: ScoreBreakdown }> {
-	const assignments = new Map<string, { agent: string; score: ScoreBreakdown }>();
+export function optimalAssignment(
+	agents: AgentProfile[],
+	proposals: ScorableProposal[],
+): Map<string, { agent: string; score: ScoreBreakdown }> {
+	const assignments = new Map<
+		string,
+		{ agent: string; score: ScoreBreakdown }
+	>();
 	const agentLoads = new Map(agents.map((a) => [a.name, a.currentLoad]));
 
 	// Score all agent-proposal pairs
-	const pairs: Array<{ agent: string; proposal: string; score: number; breakdown: ScoreBreakdown }> = [];
+	const pairs: Array<{
+		agent: string;
+		proposal: string;
+		score: number;
+		breakdown: ScoreBreakdown;
+	}> = [];
 
 	for (const agent of agents) {
 		if (agent.availability === "offline") continue;
 
 		for (const proposal of proposals) {
 			// Temporarily adjust load for scoring
-			const adjustedAgent = { ...agent, currentLoad: agentLoads.get(agent.name) || 0 };
+			const adjustedAgent = {
+				...agent,
+				currentLoad: agentLoads.get(agent.name) || 0,
+			};
 			const breakdown = scoreProposal(adjustedAgent, proposal);
-			pairs.push({ agent: agent.name, proposal: proposal.id, score: breakdown.total, breakdown });
+			pairs.push({
+				agent: agent.name,
+				proposal: proposal.id,
+				score: breakdown.total,
+				breakdown,
+			});
 		}
 	}
 
@@ -280,7 +340,10 @@ export function optimalAssignment(agents: AgentProfile[], proposals: ScorablePro
 		if (assignedProposals.has(pair.proposal)) continue;
 		if (assignedAgents.has(pair.agent)) continue;
 
-		assignments.set(pair.proposal, { agent: pair.agent, score: pair.breakdown });
+		assignments.set(pair.proposal, {
+			agent: pair.agent,
+			score: pair.breakdown,
+		});
 		assignedProposals.add(pair.proposal);
 		assignedAgents.add(pair.agent);
 

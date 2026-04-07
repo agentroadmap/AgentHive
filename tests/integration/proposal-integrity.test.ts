@@ -7,20 +7,19 @@
  * AC#4: Recovery from last known-good version
  */
 
-import { describe, it, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile, readFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { randomUUID } from "node:crypto";
+import { join } from "node:path";
+import { after, before, beforeEach, describe, it } from "node:test";
 import {
-	ProposalIntegrity,
 	computeChecksum,
-	parseFrontmatter,
-	injectChecksum,
 	extractChecksum,
-	verifyChecksum,
 	formatIntegrityReport,
+	injectChecksum,
+	ProposalIntegrity,
+	parseFrontmatter,
+	verifyChecksum,
 } from "../../src/core/proposal/proposal-integrity.ts";
 
 describe("Checksum Utilities (proposal-57)", () => {
@@ -37,7 +36,11 @@ describe("Checksum Utilities (proposal-57)", () => {
 		const hash1 = computeChecksum("content1");
 		const hash2 = computeChecksum("content2");
 
-		assert.notEqual(hash1, hash2, "Different content should produce different checksums");
+		assert.notEqual(
+			hash1,
+			hash2,
+			"Different content should produce different checksums",
+		);
 	});
 
 	it("parseFrontmatter should extract frontmatter and body", () => {
@@ -52,7 +55,10 @@ This is the body content.`;
 		const result = parseFrontmatter(content);
 
 		assert.ok(result.hasFrontmatter, "Should detect frontmatter");
-		assert.ok(result.frontmatter.includes("id: proposal-1"), "Should extract frontmatter");
+		assert.ok(
+			result.frontmatter.includes("id: proposal-1"),
+			"Should extract frontmatter",
+		);
 		assert.ok(result.body.includes("This is the body"), "Should extract body");
 	});
 
@@ -71,17 +77,27 @@ This is the body content.`;
 
 		const result = injectChecksum(frontmatter, checksum);
 
-		assert.ok(result.includes(`roadmap-checksum: "${checksum}"`), "Should include checksum");
-		assert.ok(result.includes("id: proposal-1"), "Should preserve original content");
+		assert.ok(
+			result.includes(`roadmap-checksum: "${checksum}"`),
+			"Should include checksum",
+		);
+		assert.ok(
+			result.includes("id: proposal-1"),
+			"Should preserve original content",
+		);
 	});
 
 	it("injectChecksum should replace existing checksum", () => {
-		const frontmatter = "id: proposal-1\nroadmap-checksum: \"old123\"\ntitle: Test";
+		const frontmatter =
+			'id: proposal-1\nroadmap-checksum: "old123"\ntitle: Test';
 		const newChecksum = "newabcdef456";
 
 		const result = injectChecksum(frontmatter, newChecksum);
 
-		assert.ok(result.includes(`roadmap-checksum: "${newChecksum}"`), "Should have new checksum");
+		assert.ok(
+			result.includes(`roadmap-checksum: "${newChecksum}"`),
+			"Should have new checksum",
+		);
 		assert.ok(!result.includes("old123"), "Should not have old checksum");
 	});
 
@@ -131,7 +147,10 @@ Actual content`;
 		const result = verifyChecksum(content);
 
 		assert.equal(result.valid, false, "Should be invalid");
-		assert.ok(result.stored !== result.computed, "Stored and computed should differ");
+		assert.ok(
+			result.stored !== result.computed,
+			"Stored and computed should differ",
+		);
 	});
 });
 
@@ -171,8 +190,14 @@ Body content here.`;
 
 			const withChecksum = await integrity.addChecksum(content);
 
-			assert.ok(withChecksum.includes("roadmap-checksum:"), "Should include checksum header");
-			assert.ok(withChecksum.includes("---"), "Should preserve frontmatter delimiters");
+			assert.ok(
+				withChecksum.includes("roadmap-checksum:"),
+				"Should include checksum header",
+			);
+			assert.ok(
+				withChecksum.includes("---"),
+				"Should preserve frontmatter delimiters",
+			);
 
 			// Verify the checksum is valid
 			const { valid } = verifyChecksum(withChecksum);
@@ -192,7 +217,10 @@ Test body`;
 			await integrity.writeProposalFile(filePath, content);
 
 			const written = await readFile(filePath, "utf-8");
-			assert.ok(written.includes("roadmap-checksum:"), "Written file should have checksum");
+			assert.ok(
+				written.includes("roadmap-checksum:"),
+				"Written file should have checksum",
+			);
 
 			// Verify file
 			const result = await integrity.verifyFile(filePath);
@@ -222,13 +250,16 @@ Valid content`;
 
 		it("should detect missing checksum", async () => {
 			const filePath = join(proposalsDir, "proposal-no-checksum.md");
-			await writeFile(filePath, `---
+			await writeFile(
+				filePath,
+				`---
 id: proposal-NO-CS
 title: No Checksum
 status: Active
 ---
 
-Content without checksum`);
+Content without checksum`,
+			);
 
 			const result = await integrity.verifyFile(filePath);
 
@@ -238,14 +269,17 @@ Content without checksum`);
 
 		it("should detect checksum mismatch", async () => {
 			const filePath = join(proposalsDir, "proposal-tampered.md");
-			await writeFile(filePath, `---
+			await writeFile(
+				filePath,
+				`---
 id: proposal-TAMPERED
 title: Tampered
 status: Active
 roadmap-checksum: "0000000000000000000000000000000000000000000000000000000000000000"
 ---
 
-Tampered content`);
+Tampered content`,
+			);
 
 			const result = await integrity.verifyFile(filePath);
 
@@ -347,14 +381,17 @@ Second version content`;
 			assert.ok(validResult.isValid, "File should be valid after second write");
 
 			// Corrupt the file
-			await writeFile(filePath, `---
+			await writeFile(
+				filePath,
+				`---
 id: proposal-RECOVER
 title: Recovery Test
 status: Active
 roadmap-checksum: "wrong"
 ---
 
-Corrupted content`);
+Corrupted content`,
+			);
 
 			// Verify it's corrupted
 			const corruptedResult = await integrity.verifyFile(filePath);
@@ -387,22 +424,28 @@ Corrupted content`);
 			const validPath = join(proposalsDir, "proposal-1-valid.md");
 			const corruptedPath = join(proposalsDir, "proposal-2-corrupted.md");
 
-			await integrity.writeProposalFile(validPath, `---
+			await integrity.writeProposalFile(
+				validPath,
+				`---
 id: proposal-1
 title: Valid
 status: Active
 ---
 
-Valid content`);
+Valid content`,
+			);
 
-			await writeFile(corruptedPath, `---
+			await writeFile(
+				corruptedPath,
+				`---
 id: proposal-2
 title: Corrupted
 status: Active
 roadmap-checksum: "bad"
 ---
 
-Bad content`);
+Bad content`,
+			);
 
 			const report = await integrity.scanAll();
 
@@ -412,7 +455,9 @@ Bad content`);
 			const validResult = report.results.find((r) => r.path === validPath);
 			assert.ok(validResult?.isValid, "Valid file should pass");
 
-			const corruptedResult = report.results.find((r) => r.path === corruptedPath);
+			const corruptedResult = report.results.find(
+				(r) => r.path === corruptedPath,
+			);
 			assert.ok(!corruptedResult?.isValid, "Corrupted file should fail");
 		});
 	});
@@ -431,7 +476,13 @@ Bad content`);
 					{
 						path: "proposal-1.md",
 						isValid: true,
-						checksum: { version: "1.0", checksum: "abc123", algorithm: "sha256", createdAt: "", contentLength: 100 },
+						checksum: {
+							version: "1.0",
+							checksum: "abc123",
+							algorithm: "sha256",
+							createdAt: "",
+							contentLength: 100,
+						},
 						expectedChecksum: "abc123",
 						corruptionType: "none" as const,
 						lastKnownGood: null,
@@ -449,9 +500,15 @@ Bad content`);
 
 			const text = formatIntegrityReport(report);
 
-			assert.ok(text.includes("Proposal Integrity Report"), "Should have title");
+			assert.ok(
+				text.includes("Proposal Integrity Report"),
+				"Should have title",
+			);
 			assert.ok(text.includes("Total Files: 2"), "Should show total");
-			assert.ok(text.includes("Corrupted Files: 1"), "Should show corrupted count");
+			assert.ok(
+				text.includes("Corrupted Files: 1"),
+				"Should show corrupted count",
+			);
 			assert.ok(text.includes("proposal-2.md"), "Should list corrupted files");
 		});
 	});

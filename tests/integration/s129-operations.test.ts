@@ -1,9 +1,12 @@
 import assert from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
-import type { Proposal } from "../../src/types/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
 import { proposalIdsEqual } from "../../src/utils/proposal-path.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 let TEST_DIR: string;
 
@@ -23,7 +26,7 @@ describe("S129 Operations", () => {
 	afterEach(async () => {
 		try {
 			await safeCleanup(TEST_DIR);
-		} catch { }
+		} catch {}
 	});
 
 	it("should promote a proposal through statuses", async () => {
@@ -37,12 +40,20 @@ describe("S129 Operations", () => {
 			dependencies: [],
 		};
 		await core.filesystem.saveProposal(proposal);
-		
+
 		// Use lowercase for operations to match filesystem directly
-		const promoted = await core.promoteProposal("proposal-1", "test-agent", false);
+		const promoted = await core.promoteProposal(
+			"proposal-1",
+			"test-agent",
+			false,
+		);
 		assert.strictEqual(promoted.status, "Active");
-		
-		const promotedAgain = await core.promoteProposal("proposal-1", "test-agent", false);
+
+		const promotedAgain = await core.promoteProposal(
+			"proposal-1",
+			"test-agent",
+			false,
+		);
 		assert.strictEqual(promotedAgain.status, "Accepted");
 	});
 
@@ -57,8 +68,12 @@ describe("S129 Operations", () => {
 			dependencies: [],
 		};
 		await core.filesystem.saveProposal(proposal);
-		
-		const demoted = await core.demoteProposalProper("proposal-1", "test-agent", false);
+
+		const demoted = await core.demoteProposalProper(
+			"proposal-1",
+			"test-agent",
+			false,
+		);
 		assert.strictEqual(demoted.status, "Active");
 	});
 
@@ -73,8 +88,13 @@ describe("S129 Operations", () => {
 			dependencies: [],
 		};
 		await core.filesystem.saveProposal(proposal);
-		
-		const updated = await core.updatePriority("proposal-1", "high", "test-agent", false);
+
+		const updated = await core.updatePriority(
+			"proposal-1",
+			"high",
+			"test-agent",
+			false,
+		);
 		assert.strictEqual(updated.priority, "high");
 	});
 
@@ -102,30 +122,57 @@ describe("S129 Operations", () => {
 		};
 		await core.filesystem.saveProposal(s1);
 		await core.filesystem.saveProposal(s2);
-		
-		const merged = await core.mergeProposals("proposal-1", "proposal-2", "test-agent", false);
+
+		const merged = await core.mergeProposals(
+			"proposal-1",
+			"proposal-2",
+			"test-agent",
+			false,
+		);
 		assert.ok(proposalIdsEqual(merged.id, "proposal-2"));
 		assert.ok(merged.implementationNotes?.includes("Source Desc"));
 		assert.ok(merged.implementationNotes?.includes("Source Notes"));
-		
+
 		const sourceExists = await core.getProposal("proposal-1");
 		assert.strictEqual(sourceExists, null);
 	});
 
 	it("should move a proposal within status columns", async () => {
-		const s1: any = { id: "proposal-1", title: "Proposal 1", status: "Active", assignee: [], createdDate: "2026-03-29", labels: [], dependencies: [] };
-		const s2: any = { id: "proposal-2", title: "Proposal 2", status: "Active", assignee: [], createdDate: "2026-03-29", labels: [], dependencies: [] };
+		const s1: any = {
+			id: "proposal-1",
+			title: "Proposal 1",
+			status: "Active",
+			assignee: [],
+			createdDate: "2026-03-29",
+			labels: [],
+			dependencies: [],
+		};
+		const s2: any = {
+			id: "proposal-2",
+			title: "Proposal 2",
+			status: "Active",
+			assignee: [],
+			createdDate: "2026-03-29",
+			labels: [],
+			dependencies: [],
+		};
 		await core.filesystem.saveProposal(s1);
 		await core.filesystem.saveProposal(s2);
-		
+
 		// Move proposal-1 to be after proposal-2 (index 1)
-		const moved = await core.moveProposal("proposal-1", "Active", 1, "test-agent", false);
+		const moved = await core.moveProposal(
+			"proposal-1",
+			"Active",
+			1,
+			"test-agent",
+			false,
+		);
 		assert.ok(proposalIdsEqual(moved.id, "proposal-1"));
-		
+
 		const activeProposals = await core.queryProposals({ status: "Active" });
 		assert.strictEqual(activeProposals.length, 2);
-		const ids = activeProposals.map(s => s.id);
-		assert.ok(ids.some(id => proposalIdsEqual(id, "proposal-1")));
-		assert.ok(ids.some(id => proposalIdsEqual(id, "proposal-2")));
+		const ids = activeProposals.map((s) => s.id);
+		assert.ok(ids.some((id) => proposalIdsEqual(id, "proposal-1")));
+		assert.ok(ids.some((id) => proposalIdsEqual(id, "proposal-2")));
 	});
 });

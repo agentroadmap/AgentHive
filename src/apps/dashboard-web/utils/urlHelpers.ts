@@ -25,7 +25,11 @@ export function sanitizeUrlTitle(title: string): string {
 /**
  * Creates a URL-friendly path for documentation or decision items
  */
-export function createUrlPath(basePath: string, id: string, title: string): string {
+export function createUrlPath(
+	basePath: string,
+	id: string,
+	title: string,
+): string {
 	const sanitizedTitle = sanitizeUrlTitle(title);
 	// Remove prefix from ID for cleaner URLs
 	const cleanId = id.replace(/^(doc-|decision-)/, "");

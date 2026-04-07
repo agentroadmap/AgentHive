@@ -7,17 +7,16 @@
  */
 
 import type {
+	Agent,
+	Decision,
+	Directive,
+	Document,
 	Proposal,
 	ProposalCreateInput,
 	ProposalUpdateInput,
-	ProposalListFilter,
-	SearchResult,
-	Directive,
-	Decision,
-	Document,
-	RoadmapConfig,
-	Agent,
 	PulseEvent,
+	RoadmapConfig,
+	SearchResult,
 } from "../../types/index.ts";
 
 export interface DaemonClientOptions {
@@ -52,7 +51,10 @@ export class DaemonClient {
 	 */
 	async healthCheck(): Promise<DaemonHealthStatus | null> {
 		try {
-			const response = await this.request<DaemonHealthStatus>("GET", "/api/status");
+			const response = await this.request<DaemonHealthStatus>(
+				"GET",
+				"/api/status",
+			);
 			return response;
 		} catch {
 			return null;
@@ -88,7 +90,10 @@ export class DaemonClient {
 			}
 		}
 		const query = params.toString();
-		return this.request<Proposal[]>("GET", `/api/proposals${query ? `?${query}` : ""}`);
+		return this.request<Proposal[]>(
+			"GET",
+			`/api/proposals${query ? `?${query}` : ""}`,
+		);
 	}
 
 	/**
@@ -96,7 +101,10 @@ export class DaemonClient {
 	 */
 	async getProposal(id: string): Promise<Proposal | null> {
 		try {
-			return await this.request<Proposal>("GET", `/api/proposal/${encodeURIComponent(id)}`);
+			return await this.request<Proposal>(
+				"GET",
+				`/api/proposal/${encodeURIComponent(id)}`,
+			);
 		} catch (error: any) {
 			if (error?.status === 404) return null;
 			throw error;
@@ -118,9 +126,12 @@ export class DaemonClient {
 		if (input.dependencies) payload.dependencies = input.dependencies;
 		if (input.references) payload.references = input.references;
 		if (input.directive) payload.directive = input.directive;
-		if (input.parentProposalId) payload.parentProposalId = input.parentProposalId;
-		if (input.implementationPlan) payload.implementationPlan = input.implementationPlan;
-		if (input.implementationNotes) payload.implementationNotes = input.implementationNotes;
+		if (input.parentProposalId)
+			payload.parentProposalId = input.parentProposalId;
+		if (input.implementationPlan)
+			payload.implementationPlan = input.implementationPlan;
+		if (input.implementationNotes)
+			payload.implementationNotes = input.implementationNotes;
 		if (input.acceptanceCriteria) {
 			payload.acceptanceCriteriaItems = input.acceptanceCriteria.map((ac) => ({
 				text: ac.text,
@@ -134,29 +145,45 @@ export class DaemonClient {
 	/**
 	 * Update an existing proposal.
 	 */
-	async updateProposal(id: string, updates: ProposalUpdateInput): Promise<Proposal | null> {
+	async updateProposal(
+		id: string,
+		updates: ProposalUpdateInput,
+	): Promise<Proposal | null> {
 		try {
 			const payload: Record<string, unknown> = {};
 			if (updates.title !== undefined) payload.title = updates.title;
-			if (updates.description !== undefined) payload.description = updates.description;
+			if (updates.description !== undefined)
+				payload.description = updates.description;
 			if (updates.status !== undefined) payload.status = updates.status;
 			if (updates.priority !== undefined) payload.priority = updates.priority;
 			if (updates.labels !== undefined) payload.labels = updates.labels;
 			if (updates.assignee !== undefined) payload.assignee = updates.assignee;
-			if (updates.dependencies !== undefined) payload.dependencies = updates.dependencies;
-			if (updates.references !== undefined) payload.references = updates.references;
-			if (updates.directive !== undefined) payload.directive = updates.directive;
-			if (updates.implementationPlan !== undefined) payload.implementationPlan = updates.implementationPlan;
-			if (updates.implementationNotes !== undefined) payload.implementationNotes = updates.implementationNotes;
-			if (updates.finalSummary !== undefined) payload.finalSummary = updates.finalSummary;
+			if (updates.dependencies !== undefined)
+				payload.dependencies = updates.dependencies;
+			if (updates.references !== undefined)
+				payload.references = updates.references;
+			if (updates.directive !== undefined)
+				payload.directive = updates.directive;
+			if (updates.implementationPlan !== undefined)
+				payload.implementationPlan = updates.implementationPlan;
+			if (updates.implementationNotes !== undefined)
+				payload.implementationNotes = updates.implementationNotes;
+			if (updates.finalSummary !== undefined)
+				payload.finalSummary = updates.finalSummary;
 			if (updates.acceptanceCriteria !== undefined) {
-				payload.acceptanceCriteriaItems = updates.acceptanceCriteria.map((ac) => ({
-					text: ac.text,
-					checked: ac.checked ?? false,
-				}));
+				payload.acceptanceCriteriaItems = updates.acceptanceCriteria.map(
+					(ac) => ({
+						text: ac.text,
+						checked: ac.checked ?? false,
+					}),
+				);
 			}
 
-			return await this.request<Proposal>("PUT", `/api/proposals/${encodeURIComponent(id)}`, payload);
+			return await this.request<Proposal>(
+				"PUT",
+				`/api/proposals/${encodeURIComponent(id)}`,
+				payload,
+			);
 		} catch (error: any) {
 			if (error?.status === 404) return null;
 			throw error;
@@ -168,7 +195,10 @@ export class DaemonClient {
 	 */
 	async deleteProposal(id: string): Promise<boolean> {
 		try {
-			await this.request<{ success: boolean }>("DELETE", `/api/proposals/${encodeURIComponent(id)}`);
+			await this.request<{ success: boolean }>(
+				"DELETE",
+				`/api/proposals/${encodeURIComponent(id)}`,
+			);
 			return true;
 		} catch (error: any) {
 			if (error?.status === 404) return false;
@@ -245,7 +275,10 @@ export class DaemonClient {
 				: [params.filters.labels];
 			for (const l of labels) searchParams.append("label", l);
 		}
-		return this.request<SearchResult[]>("GET", `/api/search?${searchParams.toString()}`);
+		return this.request<SearchResult[]>(
+			"GET",
+			`/api/search?${searchParams.toString()}`,
+		);
 	}
 
 	// ─── Document Operations ─────────────────────────────────────────────
@@ -253,7 +286,9 @@ export class DaemonClient {
 	/**
 	 * List documents.
 	 */
-	async listDocs(): Promise<Array<{ id: string; title: string; type: string }>> {
+	async listDocs(): Promise<
+		Array<{ id: string; title: string; type: string }>
+	> {
 		return this.request("GET", "/api/docs");
 	}
 
@@ -262,7 +297,10 @@ export class DaemonClient {
 	 */
 	async getDoc(id: string): Promise<Document | null> {
 		try {
-			return await this.request<Document>("GET", `/api/doc/${encodeURIComponent(id)}`);
+			return await this.request<Document>(
+				"GET",
+				`/api/doc/${encodeURIComponent(id)}`,
+			);
 		} catch (error: any) {
 			if (error?.status === 404) return null;
 			throw error;
@@ -325,7 +363,10 @@ export class DaemonClient {
 	 * Get the server version.
 	 */
 	async getVersion(): Promise<string> {
-		const result = await this.request<{ version: string }>("GET", "/api/version");
+		const result = await this.request<{ version: string }>(
+			"GET",
+			"/api/version",
+		);
 		return result.version;
 	}
 
@@ -346,15 +387,11 @@ export class DaemonClient {
 		timestamp: string;
 	} | null> {
 		try {
-			return await this.request(
-				"POST",
-				"/api/id-registry/allocate",
-				{
-					sessionId: request.sessionId,
-					count: request.count ?? 1,
-					prefix: request.prefix ?? "STATE",
-				},
-			);
+			return await this.request("POST", "/api/id-registry/allocate", {
+				sessionId: request.sessionId,
+				count: request.count ?? 1,
+				prefix: request.prefix ?? "STATE",
+			});
 		} catch {
 			return null;
 		}
@@ -399,7 +436,9 @@ export class DaemonClient {
 	/**
 	 * Check if a specific ID is already in use.
 	 */
-	async checkIdCollision(id: string): Promise<{ exists: boolean; proposal?: Proposal }> {
+	async checkIdCollision(
+		id: string,
+	): Promise<{ exists: boolean; proposal?: Proposal }> {
 		try {
 			return await this.request(
 				"GET",
@@ -412,7 +451,11 @@ export class DaemonClient {
 
 	// ─── Private Helpers ─────────────────────────────────────────────────
 
-	private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+	private async request<T>(
+		method: string,
+		path: string,
+		body?: unknown,
+	): Promise<T> {
 		const url = `${this.baseUrl}${path}`;
 		const controller = new AbortController();
 		const timeoutId = setTimeout(() => controller.abort(), this.timeout);
@@ -463,7 +506,11 @@ export function resolveDaemonUrl(
 	envUrl?: string,
 ): string | null {
 	// Environment variable takes highest priority
-	const envValue = envUrl ?? (typeof process !== "undefined" ? process.env.ROADMAP_DAEMON_URL : undefined);
+	const envValue =
+		envUrl ??
+		(typeof process !== "undefined"
+			? process.env.ROADMAP_DAEMON_URL
+			: undefined);
 	if (envValue) {
 		return envValue;
 	}

@@ -1,9 +1,13 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 let TEST_DIR: string;
 
@@ -38,17 +42,26 @@ describe("--desc alias functionality", () => {
 	});
 
 	it("should create proposal with --desc alias", async () => {
-		const _result = execSync(`node --experimental-strip-types ${cliPath} proposal create "Test --desc alias" --desc "Created with --desc"`, { cwd: TEST_DIR });
+		const _result = execSync(
+			`node --experimental-strip-types ${cliPath} proposal create "Test --desc alias" --desc "Created with --desc"`,
+			{ cwd: TEST_DIR },
+		);
 
 		// Check that command succeeded (no exception thrown)
-		const output = execSync(`node --experimental-strip-types ${cliPath} proposal 1 --plain`, { cwd: TEST_DIR }).text();
+		const output = execSync(
+			`node --experimental-strip-types ${cliPath} proposal 1 --plain`,
+			{ cwd: TEST_DIR },
+		).text();
 		assert.ok(output.includes("Test --desc alias"));
 		assert.ok(output.includes("Created with --desc"));
 	});
 
 	it("should verify proposal created with --desc has correct description", async () => {
 		// Create proposal with --desc
-		execSync(`node --experimental-strip-types ${cliPath} proposal create "Test proposal" --desc "Description via --desc"`, { cwd: TEST_DIR });
+		execSync(
+			`node --experimental-strip-types ${cliPath} proposal create "Test proposal" --desc "Description via --desc"`,
+			{ cwd: TEST_DIR },
+		);
 
 		// Verify the proposal was created with correct description
 		const core = new Core(TEST_DIR);
@@ -76,7 +89,10 @@ describe("--desc alias functionality", () => {
 		);
 
 		// Edit with --desc
-		execSync(`node --experimental-strip-types ${cliPath} proposal edit 1 --desc "Updated via --desc"`, { cwd: TEST_DIR });
+		execSync(
+			`node --experimental-strip-types ${cliPath} proposal edit 1 --desc "Updated via --desc"`,
+			{ cwd: TEST_DIR },
+		);
 
 		// Command succeeded without throwing
 
@@ -86,14 +102,20 @@ describe("--desc alias functionality", () => {
 	});
 
 	it("should create draft with --desc alias", async () => {
-		execSync(`node --experimental-strip-types ${cliPath} draft create "Draft with --desc" --desc "Draft description"`, { cwd: TEST_DIR });
+		execSync(
+			`node --experimental-strip-types ${cliPath} draft create "Draft with --desc" --desc "Draft description"`,
+			{ cwd: TEST_DIR },
+		);
 
 		// Command succeeded without throwing
 	});
 
 	it("should verify draft created with --desc has correct description", async () => {
 		// Create draft with --desc
-		execSync(`node --experimental-strip-types ${cliPath} draft create "Test draft" --desc "Draft via --desc"`, { cwd: TEST_DIR });
+		execSync(
+			`node --experimental-strip-types ${cliPath} draft create "Test draft" --desc "Draft via --desc"`,
+			{ cwd: TEST_DIR },
+		);
 
 		// Verify the draft was created with correct description
 		const core = new Core(TEST_DIR);
@@ -104,7 +126,10 @@ describe("--desc alias functionality", () => {
 	});
 
 	it("should show --desc in help text", async () => {
-		const result = execSync(`node --experimental-strip-types ${cliPath} proposal create --help`, { cwd: TEST_DIR }).text();
+		const result = execSync(
+			`node --experimental-strip-types ${cliPath} proposal create --help`,
+			{ cwd: TEST_DIR },
+		).text();
 
 		assert.ok(result.includes("-d, --description <text>"));
 		assert.ok(result.includes("--desc <text>"));

@@ -146,7 +146,12 @@ describe("Channel Subscriptions", () => {
 			await core.subscribeToChannel("alice", "project");
 
 			// Register notification callback for alice
-			let receivedMsg: { channel: string; from: string; text: string; timestamp: string } | null = null;
+			let receivedMsg: {
+				channel: string;
+				from: string;
+				text: string;
+				timestamp: string;
+			} | null = null;
 			core.registerNotificationCallback("alice", (msg) => {
 				receivedMsg = msg;
 			});
@@ -160,8 +165,16 @@ describe("Channel Subscriptions", () => {
 			});
 
 			// Verify alice received the notification
-			assert.ok(receivedMsg !== null, "alice should have received a notification");
-			const msg = receivedMsg as { channel: string; from: string; text: string; timestamp: string };
+			assert.ok(
+				receivedMsg !== null,
+				"alice should have received a notification",
+			);
+			const msg = receivedMsg as {
+				channel: string;
+				from: string;
+				text: string;
+				timestamp: string;
+			};
 			assert.equal(msg.channel, "project");
 			assert.equal(msg.from, "bob");
 			assert.ok(msg.text.includes("Hello project!"));
@@ -170,7 +183,12 @@ describe("Channel Subscriptions", () => {
 		it("does not notify the sender", async () => {
 			await core.subscribeToChannel("bob", "project");
 
-			let receivedMsg: { channel: string; from: string; text: string; timestamp: string } | null = null;
+			let receivedMsg: {
+				channel: string;
+				from: string;
+				text: string;
+				timestamp: string;
+			} | null = null;
 			core.registerNotificationCallback("bob", (msg) => {
 				receivedMsg = msg;
 			});
@@ -182,7 +200,11 @@ describe("Channel Subscriptions", () => {
 				group: "project",
 			});
 
-			assert.equal(receivedMsg, null, "sender should not receive their own notification");
+			assert.equal(
+				receivedMsg,
+				null,
+				"sender should not receive their own notification",
+			);
 		});
 
 		it("can unsubscribe from notifications", async () => {
@@ -193,14 +215,28 @@ describe("Channel Subscriptions", () => {
 				callCount++;
 			});
 
-			await core.sendMessage({ from: "bob", message: "msg1", type: "group", group: "project" });
+			await core.sendMessage({
+				from: "bob",
+				message: "msg1",
+				type: "group",
+				group: "project",
+			});
 			assert.equal(callCount, 1);
 
 			// Unregister
 			unsub();
 
-			await core.sendMessage({ from: "bob", message: "msg2", type: "group", group: "project" });
-			assert.equal(callCount, 1, "callback should not be called after unsubscribe");
+			await core.sendMessage({
+				from: "bob",
+				message: "msg2",
+				type: "group",
+				group: "project",
+			});
+			assert.equal(
+				callCount,
+				1,
+				"callback should not be called after unsubscribe",
+			);
 		});
 	});
 });

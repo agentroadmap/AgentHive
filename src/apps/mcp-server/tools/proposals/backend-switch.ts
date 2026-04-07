@@ -7,7 +7,10 @@
 import type { McpServer } from "../../server.ts";
 import { PgProposalHandlers } from "./pg-handlers.ts";
 
-export function registerProposalTools(server: McpServer, projectRoot: string): void {
+export function registerProposalTools(
+	server: McpServer,
+	projectRoot: string,
+): void {
 	const handlers = new PgProposalHandlers(server, projectRoot);
 
 	server.addTool({

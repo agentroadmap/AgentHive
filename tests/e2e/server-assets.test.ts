@@ -1,11 +1,14 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { FileSystem } from "../../src/file-system/operations.ts";
 import { RoadmapServer } from "../../src/server/index.ts";
-import { createUniqueTestDir, retry, safeCleanup,
+import {
+	createUniqueTestDir,
 	expect,
+	retry,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 let TEST_DIR: string;
@@ -36,8 +39,8 @@ describe("RoadmapServer asset serving", () => {
 		await mkdir(join(assetsDir, "docs"), { recursive: true });
 
 		// write a small test asset and a text file
-		await writeFile(join(assetsDir, "images", "test.png"),  "PNGTEST");
-		await writeFile(join(assetsDir, "docs", "readme.txt"),  "Hello assets\n");
+		await writeFile(join(assetsDir, "images", "test.png"), "PNGTEST");
+		await writeFile(join(assetsDir, "docs", "readme.txt"), "Hello assets\n");
 
 		server = new RoadmapServer(TEST_DIR);
 		await server.start(0, false);
@@ -66,7 +69,9 @@ describe("RoadmapServer asset serving", () => {
 	});
 
 	it("serves existing image assets with appropriate Content-Type and body", async () => {
-		const res = await fetch(`http://127.0.0.1:${serverPort}/assets/images/test.png`);
+		const res = await fetch(
+			`http://127.0.0.1:${serverPort}/assets/images/test.png`,
+		);
 		assert.strictEqual(res.status, 200);
 		expect(res.headers.get("content-type")).toBe("image/png");
 		const body = await res.text();
@@ -74,7 +79,9 @@ describe("RoadmapServer asset serving", () => {
 	});
 
 	it("serves text files with text/plain Content-Type", async () => {
-		const res = await fetch(`http://127.0.0.1:${serverPort}/assets/docs/readme.txt`);
+		const res = await fetch(
+			`http://127.0.0.1:${serverPort}/assets/docs/readme.txt`,
+		);
 		assert.strictEqual(res.status, 200);
 		expect(res.headers.get("content-type")).toBe("text/plain");
 		const body = await res.text();
@@ -82,17 +89,23 @@ describe("RoadmapServer asset serving", () => {
 	});
 
 	it("returns 404 for missing files", async () => {
-		const res = await fetch(`http://127.0.0.1:${serverPort}/assets/images/missing.png`);
+		const res = await fetch(
+			`http://127.0.0.1:${serverPort}/assets/images/missing.png`,
+		);
 		assert.strictEqual(res.status, 404);
 	});
 
 	it("rejects path traversal attempts with 404", async () => {
 		// attempt to escape assets via ..
-		const res = await fetch(`http://127.0.0.1:${serverPort}/assets/../config.yml`);
+		const res = await fetch(
+			`http://127.0.0.1:${serverPort}/assets/../config.yml`,
+		);
 		assert.strictEqual(res.status, 404);
 
 		// encoded traversal
-		const res2 = await fetch(`http://127.0.0.1:${serverPort}/assets/%2e%2e/config.yml`);
+		const res2 = await fetch(
+			`http://127.0.0.1:${serverPort}/assets/%2e%2e/config.yml`,
+		);
 		assert.strictEqual(res2.status, 404);
 	});
 });

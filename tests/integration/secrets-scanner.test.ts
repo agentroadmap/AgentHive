@@ -7,17 +7,17 @@
  * AC#4: Key rotation mechanism with zero downtime
  */
 
-import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile, readFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, before, describe, it } from "node:test";
 import {
-	EncryptedVault,
-	SecretsScanner,
-	generatePreCommitHook,
 	containsSecrets,
+	EncryptedVault,
+	generatePreCommitHook,
 	maskSecrets,
+	SecretsScanner,
 } from "../../src/core/security/secrets-scanner.ts";
 
 describe("EncryptedVault (proposal-52 AC#2, AC#4)", () => {
@@ -42,7 +42,9 @@ describe("EncryptedVault (proposal-52 AC#2, AC#4)", () => {
 	});
 
 	it("should store and retrieve secrets", async () => {
-		await vault.setSecret("test-api-key", "sk-abc123def456", { service: "test" });
+		await vault.setSecret("test-api-key", "sk-abc123def456", {
+			service: "test",
+		});
 		const secret = vault.getSecret("test-api-key");
 
 		assert.ok(secret, "Secret should exist");
@@ -58,7 +60,10 @@ describe("EncryptedVault (proposal-52 AC#2, AC#4)", () => {
 		assert.ok(keys.includes("test-api-key"), "Should include first key");
 		assert.ok(keys.includes("another-key"), "Should include second key");
 		// Verify values are not in the keys list
-		assert.ok(!keys.includes("sk-abc123def456"), "Values should not appear in keys list");
+		assert.ok(
+			!keys.includes("sk-abc123def456"),
+			"Values should not appear in keys list",
+		);
 	});
 
 	it("should update secret versions on overwrite", async () => {
@@ -70,7 +75,10 @@ describe("EncryptedVault (proposal-52 AC#2, AC#4)", () => {
 	});
 
 	it("AC#4: should rotate secrets and archive old version", async () => {
-		const rotated = await vault.rotateSecret("test-api-key", "sk-rotated-value");
+		const rotated = await vault.rotateSecret(
+			"test-api-key",
+			"sk-rotated-value",
+		);
 
 		assert.equal(rotated.version, 3, "Version should increment after rotation");
 		assert.equal(rotated.value, "sk-rotated-value");
@@ -78,8 +86,16 @@ describe("EncryptedVault (proposal-52 AC#2, AC#4)", () => {
 		// Check archive file exists
 		const archivePath = join(tempDir, "test-api-key.v2.archive");
 		const archive = JSON.parse(await readFile(archivePath, "utf-8"));
-		assert.equal(archive.version, 2, "Archived version should be previous version");
-		assert.equal(archive.value, "sk-new-value", "Archived should have old value");
+		assert.equal(
+			archive.version,
+			2,
+			"Archived version should be previous version",
+		);
+		assert.equal(
+			archive.value,
+			"sk-new-value",
+			"Archived should have old value",
+		);
 	});
 
 	it("should fail rotation for non-existent secret", async () => {
@@ -92,7 +108,11 @@ describe("EncryptedVault (proposal-52 AC#2, AC#4)", () => {
 	it("should delete secrets", async () => {
 		const deleted = await vault.deleteSecret("another-key");
 		assert.ok(deleted, "Delete should return true");
-		assert.equal(vault.getSecret("another-key"), null, "Deleted secret should not exist");
+		assert.equal(
+			vault.getSecret("another-key"),
+			null,
+			"Deleted secret should not exist",
+		);
 	});
 
 	it("should persist vault across re-initialization", async () => {
@@ -167,7 +187,9 @@ describe("SecretsScanner (proposal-52 AC#1, AC#3)", () => {
 		const content = `const db = { password: "supersecretpassword123" };`;
 		const findings = scanner.scanContent(content, "db.ts");
 
-		const passFinding = findings.find((f: any) => f.type === "password_assignment");
+		const passFinding = findings.find(
+			(f: any) => f.type === "password_assignment",
+		);
 		assert.ok(passFinding, "Should detect password");
 		assert.equal(passFinding?.severity, "high");
 	});
@@ -179,12 +201,19 @@ describe("SecretsScanner (proposal-52 AC#1, AC#3)", () => {
 		const criticalFindings = findings.filter(
 			(f) => f.severity === "critical" || f.severity === "high",
 		);
-		assert.equal(criticalFindings.length, 0, "Clean content should have no high/critical findings");
+		assert.equal(
+			criticalFindings.length,
+			0,
+			"Clean content should have no high/critical findings",
+		);
 	});
 
 	it("should scan files correctly", async () => {
 		const testFile = join(tempDir, "secret-config.ts");
-		await writeFile(testFile, `export const API_KEY = "sk-test1234567890abcdef";`);
+		await writeFile(
+			testFile,
+			`export const API_KEY = "sk-test1234567890abcdef";`,
+		);
 
 		const result = await scanner.scanFile(testFile);
 		assert.equal(result.passed, false, "File with secrets should not pass");
@@ -194,12 +223,21 @@ describe("SecretsScanner (proposal-52 AC#1, AC#3)", () => {
 	it("should scan directories recursively", async () => {
 		const subDir = join(tempDir, "src");
 		await mkdir(subDir, { recursive: true });
-		await writeFile(join(subDir, "config.ts"), `export const TOKEN = "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789";`);
-		await writeFile(join(subDir, "clean.ts"), `export const API_URL = "https://api.example.com";`);
+		await writeFile(
+			join(subDir, "config.ts"),
+			`export const TOKEN = "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789";`,
+		);
+		await writeFile(
+			join(subDir, "clean.ts"),
+			`export const API_URL = "https://api.example.com";`,
+		);
 
 		const results = await scanner.scanDirectory(tempDir, [".ts"]);
 		const findings = results.flatMap((r) => r.findings);
-		assert.ok(findings.some((f) => f.type === "github_token"), "Should find GitHub token");
+		assert.ok(
+			findings.some((f) => f.type === "github_token"),
+			"Should find GitHub token",
+		);
 	});
 });
 
@@ -210,7 +248,10 @@ describe("Pre-commit Hook (proposal-52 AC#3)", () => {
 		assert.ok(hook.includes("#!/usr/bin/env node"), "Should have shebang");
 		assert.ok(hook.includes("SecretsScanner"), "Should import scanner");
 		assert.ok(hook.includes("git diff --cached"), "Should check staged files");
-		assert.ok(hook.includes("process.exit(1)"), "Should exit with error on violations");
+		assert.ok(
+			hook.includes("process.exit(1)"),
+			"Should exit with error on violations",
+		);
 	});
 });
 
@@ -224,7 +265,10 @@ describe("Utility Functions", () => {
 		const content = 'API_KEY = "sk-abcdef1234567890"';
 		const masked = maskSecrets(content);
 
-		assert.ok(!masked.includes("sk-abcdef1234567890"), "Original secret should be masked");
+		assert.ok(
+			!masked.includes("sk-abcdef1234567890"),
+			"Original secret should be masked",
+		);
 		assert.ok(masked.includes("[REDACTED-"), "Should contain redaction marker");
 	});
 });

@@ -1,7 +1,13 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
+import {
+	compareProposalIds,
+	parseProposalId,
+	sortByPriority,
+	sortByProposalId,
+	sortProposals,
+} from "../../src/utils/proposal-sorting.ts";
 import { expect } from "../support/test-utils.ts";
-import { compareProposalIds, parseProposalId, sortByPriority, sortByProposalId, sortProposals } from "../../src/utils/proposal-sorting.ts";
 
 describe("parseProposalId", () => {
 	test("parses simple proposal IDs", () => {
@@ -45,7 +51,9 @@ describe("compareProposalIds", () => {
 	test("sorts decimal proposal IDs correctly", () => {
 		expect(compareProposalIds("proposal-2.1", "proposal-2.2")).toBeLessThan(0);
 		expect(compareProposalIds("proposal-2.2", "proposal-2.10")).toBeLessThan(0);
-		expect(compareProposalIds("proposal-2.10", "proposal-2.2")).toBeGreaterThan(0);
+		expect(compareProposalIds("proposal-2.10", "proposal-2.2")).toBeGreaterThan(
+			0,
+		);
 	});
 
 	test("parent proposals come before subproposals", () => {
@@ -54,14 +62,24 @@ describe("compareProposalIds", () => {
 	});
 
 	test("handles different depth levels", () => {
-		expect(compareProposalIds("proposal-1.1.1", "proposal-1.2")).toBeLessThan(0);
-		expect(compareProposalIds("proposal-1.2", "proposal-1.1.1")).toBeGreaterThan(0);
+		expect(compareProposalIds("proposal-1.1.1", "proposal-1.2")).toBeLessThan(
+			0,
+		);
+		expect(
+			compareProposalIds("proposal-1.2", "proposal-1.1.1"),
+		).toBeGreaterThan(0);
 	});
 
 	test("sorts IDs with trailing numbers", () => {
-		expect(compareProposalIds("proposal-draft", "proposal-draft2")).toBeLessThan(0);
-		expect(compareProposalIds("proposal-draft2", "proposal-draft10")).toBeLessThan(0);
-		expect(compareProposalIds("proposal-draft10", "proposal-draft2")).toBeGreaterThan(0);
+		expect(
+			compareProposalIds("proposal-draft", "proposal-draft2"),
+		).toBeLessThan(0);
+		expect(
+			compareProposalIds("proposal-draft2", "proposal-draft10"),
+		).toBeLessThan(0);
+		expect(
+			compareProposalIds("proposal-draft10", "proposal-draft2"),
+		).toBeGreaterThan(0);
 	});
 });
 
@@ -76,7 +94,13 @@ describe("sortByProposalId", () => {
 		];
 
 		const sorted = sortByProposalId(proposals);
-		expect(sorted.map((t) => t.id)).toEqual(["proposal-1", "proposal-2", "proposal-3", "proposal-10", "proposal-20"]);
+		expect(sorted.map((t) => t.id)).toEqual([
+			"proposal-1",
+			"proposal-2",
+			"proposal-3",
+			"proposal-10",
+			"proposal-20",
+		]);
 	});
 
 	test("sorts proposals with decimal IDs correctly", () => {
@@ -89,7 +113,13 @@ describe("sortByProposalId", () => {
 		];
 
 		const sorted = sortByProposalId(proposals);
-		expect(sorted.map((t) => t.id)).toEqual(["proposal-1", "proposal-2", "proposal-2.1", "proposal-2.2", "proposal-2.10"]);
+		expect(sorted.map((t) => t.id)).toEqual([
+			"proposal-1",
+			"proposal-2",
+			"proposal-2.1",
+			"proposal-2.2",
+			"proposal-2.10",
+		]);
 	});
 
 	test("handles mixed simple and decimal IDs", () => {
@@ -103,7 +133,14 @@ describe("sortByProposalId", () => {
 		];
 
 		const sorted = sortByProposalId(proposals);
-		expect(sorted.map((t) => t.id)).toEqual(["proposal-1", "proposal-2", "proposal-2.1", "proposal-3", "proposal-10", "proposal-10.1"]);
+		expect(sorted.map((t) => t.id)).toEqual([
+			"proposal-1",
+			"proposal-2",
+			"proposal-2.1",
+			"proposal-3",
+			"proposal-10",
+			"proposal-10.1",
+		]);
 	});
 
 	test("preserves original array", () => {
@@ -150,14 +187,27 @@ describe("sortByPriority", () => {
 		];
 
 		const sorted = sortByPriority(proposals);
-		expect(sorted.map((t) => t.id)).toEqual(["proposal-2", "proposal-10", "proposal-1", "proposal-20"]);
+		expect(sorted.map((t) => t.id)).toEqual([
+			"proposal-2",
+			"proposal-10",
+			"proposal-1",
+			"proposal-20",
+		]);
 	});
 
 	test("handles all undefined priorities", () => {
-		const proposals = [{ id: "proposal-3" }, { id: "proposal-1" }, { id: "proposal-2" }];
+		const proposals = [
+			{ id: "proposal-3" },
+			{ id: "proposal-1" },
+			{ id: "proposal-2" },
+		];
 
 		const sorted = sortByPriority(proposals);
-		expect(sorted.map((t) => t.id)).toEqual(["proposal-1", "proposal-2", "proposal-3"]);
+		expect(sorted.map((t) => t.id)).toEqual([
+			"proposal-1",
+			"proposal-2",
+			"proposal-3",
+		]);
 	});
 
 	test("preserves original array", () => {
@@ -194,7 +244,11 @@ describe("sortProposals", () => {
 		];
 
 		const sorted = sortProposals(proposals, "id");
-		expect(sorted.map((t) => t.id)).toEqual(["proposal-1", "proposal-2", "proposal-10"]);
+		expect(sorted.map((t) => t.id)).toEqual([
+			"proposal-1",
+			"proposal-2",
+			"proposal-10",
+		]);
 	});
 
 	test("handles case-insensitive field names", () => {
@@ -208,10 +262,18 @@ describe("sortProposals", () => {
 	});
 
 	test("defaults to ID sorting for unknown fields", () => {
-		const proposals = [{ id: "proposal-10" }, { id: "proposal-2" }, { id: "proposal-1" }];
+		const proposals = [
+			{ id: "proposal-10" },
+			{ id: "proposal-2" },
+			{ id: "proposal-1" },
+		];
 
 		const sorted = sortProposals(proposals, "unknown");
-		expect(sorted.map((t) => t.id)).toEqual(["proposal-1", "proposal-2", "proposal-10"]);
+		expect(sorted.map((t) => t.id)).toEqual([
+			"proposal-1",
+			"proposal-2",
+			"proposal-10",
+		]);
 	});
 
 	test("defaults to ID sorting for empty field", () => {

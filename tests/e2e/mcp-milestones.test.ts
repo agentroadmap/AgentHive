@@ -1,13 +1,16 @@
-import { readFile, writeFile, stat } from "node:fs/promises";
-import { globSync } from "node:fs";
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
+import { globSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { McpServer } from "../../src/mcp/server.ts";
 import { registerMilestoneTools } from "../../src/mcp/tools/milestones/index.ts";
 import { registerProposalTools } from "../../src/mcp/tools/proposals/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync,
+import {
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 const getText = (content: unknown[] | undefined, index = 0): string => {
@@ -47,7 +50,7 @@ title: "${escapedTitle}"
 
 ${description}
 `;
-	await writeFile(join(mcpServer.filesystem.directivesDir, filename),  content);
+	await writeFile(join(mcpServer.filesystem.directivesDir, filename), content);
 }
 
 describe("MCP directive tools", () => {
@@ -157,8 +160,12 @@ describe("MCP directive tools", () => {
 				},
 			},
 		});
-		const createdWithUnconfiguredDirective = await server.getProposal("proposal-3");
-		assert.strictEqual(createdWithUnconfiguredDirective?.directive, "Planned Later");
+		const createdWithUnconfiguredDirective =
+			await server.getProposal("proposal-3");
+		assert.strictEqual(
+			createdWithUnconfiguredDirective?.directive,
+			"Planned Later",
+		);
 	});
 
 	it("supports numeric directive aliases for ID-based operations", async () => {
@@ -194,9 +201,14 @@ describe("MCP directive tools", () => {
 		assert.strictEqual(edited?.directive, "m-0");
 
 		const rename = await server.testInterface.callTool({
-			params: { name: "directive_rename", arguments: { from: "1", to: "Release 2.1" } },
+			params: {
+				name: "directive_rename",
+				arguments: { from: "1", to: "Release 2.1" },
+			},
 		});
-		expect(getText(rename.content)).toContain('Renamed directive "Release 2.0" (m-1)');
+		expect(getText(rename.content)).toContain(
+			'Renamed directive "Release 2.0" (m-1)',
+		);
 		expect(getText(rename.content)).toContain('"Release 2.1"');
 
 		const remove = await server.testInterface.callTool({
@@ -233,7 +245,10 @@ describe("MCP directive tools", () => {
 		assert.strictEqual(updated?.directive, "m-01");
 
 		const renamed = await server.testInterface.callTool({
-			params: { name: "directive_rename", arguments: { from: "1", to: "Legacy Release Prime" } },
+			params: {
+				name: "directive_rename",
+				arguments: { from: "1", to: "Legacy Release Prime" },
+			},
 		});
 		expect(getText(renamed.content)).toContain("(m-01)");
 		expect(getText(renamed.content)).toContain('"Legacy Release Prime"');
@@ -243,7 +258,9 @@ describe("MCP directive tools", () => {
 			params: { name: "directive_remove", arguments: { name: "m-1" } },
 		});
 		expect(getText(removed.content)).toContain("(m-01)");
-		expect(getText(removed.content)).toContain("Cleared directive for 1 local proposal");
+		expect(getText(removed.content)).toContain(
+			"Cleared directive for 1 local proposal",
+		);
 		const cleared = await server.getProposal("proposal-1");
 		assert.strictEqual(cleared?.directive, undefined);
 	});
@@ -283,7 +300,10 @@ describe("MCP directive tools", () => {
 		await server.testInterface.callTool({
 			params: {
 				name: "proposal_create",
-				arguments: { title: "Unconfigured directive proposal", directive: "Unconfigured" },
+				arguments: {
+					title: "Unconfigured directive proposal",
+					directive: "Unconfigured",
+				},
 			},
 		});
 
@@ -293,7 +313,9 @@ describe("MCP directive tools", () => {
 		const text = getText(list.content);
 		assert.ok(text.includes("Directives (1):"));
 		assert.ok(text.includes("m-0: Release 1.0"));
-		assert.ok(text.includes("Directives found on proposals without files (1):"));
+		assert.ok(
+			text.includes("Directives found on proposals without files (1):"),
+		);
 		assert.ok(text.includes("- Unconfigured"));
 	});
 
@@ -304,17 +326,25 @@ describe("MCP directive tools", () => {
 		await server.testInterface.callTool({
 			params: {
 				name: "proposal_create",
-				arguments: { title: "Archived directive proposal", directive: "Release 1.0" },
+				arguments: {
+					title: "Archived directive proposal",
+					directive: "Release 1.0",
+				},
 			},
 		});
 
 		const archived = await server.testInterface.callTool({
 			params: { name: "directive_archive", arguments: { name: "Release 1.0" } },
 		});
-		expect(getText(archived.content)).toContain('Archived directive "Release 1.0"');
+		expect(getText(archived.content)).toContain(
+			'Archived directive "Release 1.0"',
+		);
 
 		await server.testInterface.callTool({
-			params: { name: "proposal_edit", arguments: { id: "proposal-1", directive: "Release 1.0" } },
+			params: {
+				name: "proposal_edit",
+				arguments: { id: "proposal-1", directive: "Release 1.0" },
+			},
 		});
 		const archivedTitleResolved = await server.getProposal("proposal-1");
 		assert.strictEqual(archivedTitleResolved?.directive, "m-0");
@@ -329,8 +359,12 @@ describe("MCP directive tools", () => {
 		});
 		const text = getText(list.content);
 		assert.ok(text.includes("Directives (0):"));
-		assert.ok(text.includes("Directives found on proposals without files (0):"));
-		assert.ok(text.includes("Archived directive values still on proposals (1):"));
+		assert.ok(
+			text.includes("Directives found on proposals without files (0):"),
+		);
+		assert.ok(
+			text.includes("Archived directive values still on proposals (1):"),
+		);
 		assert.ok(text.includes("- m-0"));
 		assert.ok(!text.includes("Release 1.0"));
 	});
@@ -359,10 +393,16 @@ describe("MCP directive tools", () => {
 			params: { name: "directive_add", arguments: { name: "Release 1.0" } },
 		});
 		await server.testInterface.callTool({
-			params: { name: "proposal_create", arguments: { title: "A", directive: "Release 1.0" } },
+			params: {
+				name: "proposal_create",
+				arguments: { title: "A", directive: "Release 1.0" },
+			},
 		});
 		await server.testInterface.callTool({
-			params: { name: "proposal_create", arguments: { title: "B", directive: "Release 1.0" } },
+			params: {
+				name: "proposal_create",
+				arguments: { title: "B", directive: "Release 1.0" },
+			},
 		});
 
 		const rename = await server.testInterface.callTool({
@@ -371,7 +411,9 @@ describe("MCP directive tools", () => {
 				arguments: { from: "Release 1.0", to: "Release 2.0" },
 			},
 		});
-		expect(getText(rename.content)).toContain('Renamed directive "Release 1.0" (m-0) → "Release 2.0" (m-0).');
+		expect(getText(rename.content)).toContain(
+			'Renamed directive "Release 1.0" (m-0) → "Release 2.0" (m-0).',
+		);
 		expect(getText(rename.content)).toContain("Updated 2 local proposals");
 		expect(getText(rename.content)).toContain("Renamed directive file:");
 
@@ -386,7 +428,9 @@ describe("MCP directive tools", () => {
 		const directiveFiles = await Array.fromAsync(
 			globSync("m-*.md", { cwd: server.filesystem.directivesDir }),
 		);
-		const fileNames = directiveFiles.map((d: any) => typeof d === 'string' ? d : d.name);
+		const fileNames = directiveFiles.map((d: any) =>
+			typeof d === "string" ? d : d.name,
+		);
 		assert.ok(fileNames.includes("m-0 - release-2.0.md"));
 		assert.ok(!fileNames.includes("m-0 - release-1.0.md"));
 	});
@@ -406,10 +450,16 @@ describe("MCP directive tools", () => {
 		const rename = await server.testInterface.callTool({
 			params: {
 				name: "directive_rename",
-				arguments: { from: "Release 1.0", to: "Release 2.0", updateProposals: false },
+				arguments: {
+					from: "Release 1.0",
+					to: "Release 2.0",
+					updateProposals: false,
+				},
 			},
 		});
-		expect(getText(rename.content)).toContain('Renamed directive "Release 1.0" (m-0) → "Release 2.0" (m-0).');
+		expect(getText(rename.content)).toContain(
+			'Renamed directive "Release 1.0" (m-0) → "Release 2.0" (m-0).',
+		);
 
 		const status = await server.git.getStatus();
 		expect(status.trim()).toBe("");
@@ -425,26 +475,49 @@ describe("MCP directive tools", () => {
 		const directiveFilesBefore = await Array.fromAsync(
 			globSync("m-*.md", { cwd: server.filesystem.directivesDir }),
 		);
-		const fileNamesBefore = directiveFilesBefore.map((d: any) => typeof d === 'string' ? d : d.name);
+		const fileNamesBefore = directiveFilesBefore.map((d: any) =>
+			typeof d === "string" ? d : d.name,
+		);
 		assert.strictEqual(fileNamesBefore.length, 1);
-		const sourcePath = join(server.filesystem.directivesDir, fileNamesBefore[0]!);
+		const sourcePath = join(
+			server.filesystem.directivesDir,
+			fileNamesBefore[0]!,
+		);
 		const originalContent = await await readFile(sourcePath, "utf-8");
 		const notesLine = "Keep reference Directive: Release 1.0 in notes";
-		await writeFile(sourcePath,  `${originalContent.trimEnd()}\n\n## Notes\n\n${notesLine}\n`);
+		await writeFile(
+			sourcePath,
+			`${originalContent.trimEnd()}\n\n## Notes\n\n${notesLine}\n`,
+		);
 
 		const rename = await server.testInterface.callTool({
 			params: {
 				name: "directive_rename",
-				arguments: { from: "Release 1.0", to: "Release 2.0", updateProposals: false },
+				arguments: {
+					from: "Release 1.0",
+					to: "Release 2.0",
+					updateProposals: false,
+				},
 			},
 		});
-		expect(getText(rename.content)).toContain('Renamed directive "Release 1.0" (m-0) → "Release 2.0" (m-0).');
+		expect(getText(rename.content)).toContain(
+			'Renamed directive "Release 1.0" (m-0) → "Release 2.0" (m-0).',
+		);
 
-		const renamedPath = join(server.filesystem.directivesDir, "m-0 - release-2.0.md");
+		const renamedPath = join(
+			server.filesystem.directivesDir,
+			"m-0 - release-2.0.md",
+		);
 		const updatedContent = await await readFile(renamedPath, "utf-8");
-		assert.ok(updatedContent.includes("## Description\n\nDirective: Release 2.0"));
+		assert.ok(
+			updatedContent.includes("## Description\n\nDirective: Release 2.0"),
+		);
 		assert.ok(updatedContent.includes(`## Notes\n\n${notesLine}`));
-		assert.ok(!updatedContent.includes("## Notes\n\nKeep reference Directive: Release 2.0 in notes"));
+		assert.ok(
+			!updatedContent.includes(
+				"## Notes\n\nKeep reference Directive: Release 2.0 in notes",
+			),
+		);
 	});
 
 	it("treats no-op directive renames as successful without creating commits", async () => {
@@ -462,7 +535,11 @@ describe("MCP directive tools", () => {
 		const rename = await server.testInterface.callTool({
 			params: {
 				name: "directive_rename",
-				arguments: { from: "Release 1.0", to: "Release 1.0", updateProposals: false },
+				arguments: {
+					from: "Release 1.0",
+					to: "Release 1.0",
+					updateProposals: false,
+				},
 			},
 		});
 		expect(getText(rename.content)).toContain("No changes made");
@@ -485,21 +562,30 @@ describe("MCP directive tools", () => {
 		execSync(`git add .`, { cwd: TEST_DIR });
 		execSync(`git commit -m "baseline"`, { cwd: TEST_DIR });
 
-		await writeFile(join(TEST_DIR, "UNRELATED.txt"),  "keep staged\n");
+		await writeFile(join(TEST_DIR, "UNRELATED.txt"), "keep staged\n");
 		execSync(`git add UNRELATED.txt`, { cwd: TEST_DIR });
 
 		const rename = await server.testInterface.callTool({
 			params: {
 				name: "directive_rename",
-				arguments: { from: "Release 1.0", to: "Release 2.0", updateProposals: false },
+				arguments: {
+					from: "Release 1.0",
+					to: "Release 2.0",
+					updateProposals: false,
+				},
 			},
 		});
-		expect(getText(rename.content)).toContain('Renamed directive "Release 1.0" (m-0) → "Release 2.0" (m-0).');
+		expect(getText(rename.content)).toContain(
+			'Renamed directive "Release 1.0" (m-0) → "Release 2.0" (m-0).',
+		);
 
 		const lastCommit = await server.git.getLastCommitMessage();
 		assert.ok(lastCommit.includes("roadmap: Rename directive m-0"));
 
-		const { stdout: committedFiles } = execSync(`git show --name-only --pretty=format:`, { cwd: TEST_DIR });
+		const { stdout: committedFiles } = execSync(
+			`git show --name-only --pretty=format:`,
+			{ cwd: TEST_DIR },
+		);
 		assert.ok(!committedFiles.includes("UNRELATED.txt"));
 		const status = await server.git.getStatus();
 		assert.ok(status.includes("A  UNRELATED.txt"));
@@ -517,18 +603,23 @@ describe("MCP directive tools", () => {
 		execSync(`git add .`, { cwd: TEST_DIR });
 		execSync(`git commit -m "baseline"`, { cwd: TEST_DIR });
 
-		await writeFile(join(TEST_DIR, "UNRELATED.txt"),  "keep staged\n");
+		await writeFile(join(TEST_DIR, "UNRELATED.txt"), "keep staged\n");
 		execSync(`git add UNRELATED.txt`, { cwd: TEST_DIR });
 
 		const archived = await server.testInterface.callTool({
 			params: { name: "directive_archive", arguments: { name: "Release 1.0" } },
 		});
-		expect(getText(archived.content)).toContain('Archived directive "Release 1.0"');
+		expect(getText(archived.content)).toContain(
+			'Archived directive "Release 1.0"',
+		);
 
 		const lastCommit = await server.git.getLastCommitMessage();
 		assert.ok(lastCommit.includes("roadmap: Archive directive m-0"));
 
-		const { stdout: committedFiles } = execSync(`git show --name-only --pretty=format:`, { cwd: TEST_DIR });
+		const { stdout: committedFiles } = execSync(
+			`git show --name-only --pretty=format:`,
+			{ cwd: TEST_DIR },
+		);
 		assert.ok(!committedFiles.includes("UNRELATED.txt"));
 		const status = await server.git.getStatus();
 		assert.ok(status.includes("A  UNRELATED.txt"));
@@ -561,17 +652,26 @@ describe("MCP directive tools", () => {
 			params: { name: "directive_add", arguments: { name: "Release 1.0" } },
 		});
 		await server.testInterface.callTool({
-			params: { name: "proposal_create", arguments: { title: "Legacy proposal", directive: "Release 1.0" } },
+			params: {
+				name: "proposal_create",
+				arguments: { title: "Legacy proposal", directive: "Release 1.0" },
+			},
 		});
 		await server.editProposal("proposal-1", { directive: "Release 1.0" });
 
 		const rename = await server.testInterface.callTool({
 			params: {
 				name: "directive_rename",
-				arguments: { from: "Release 1.0", to: "Release 2.0", updateProposals: false },
+				arguments: {
+					from: "Release 1.0",
+					to: "Release 2.0",
+					updateProposals: false,
+				},
 			},
 		});
-		expect(getText(rename.content)).toContain("Skipped updating proposals (updateProposals=false).");
+		expect(getText(rename.content)).toContain(
+			"Skipped updating proposals (updateProposals=false).",
+		);
 
 		const proposal = await server.getProposal("proposal-1");
 		assert.strictEqual(proposal?.directive, "Release 1.0");
@@ -589,7 +689,10 @@ describe("MCP directive tools", () => {
 		});
 
 		const rename = await server.testInterface.callTool({
-			params: { name: "directive_rename", arguments: { from: "Release A", to: "m-1" } },
+			params: {
+				name: "directive_rename",
+				arguments: { from: "Release A", to: "m-1" },
+			},
 		});
 		assert.strictEqual(rename.isError, true);
 		expect(getText(rename.content)).toContain("Directive alias conflict");
@@ -608,10 +711,15 @@ describe("MCP directive tools", () => {
 			params: { name: "directive_add", arguments: { name: "Release B" } },
 		});
 		const renameCollision = await server.testInterface.callTool({
-			params: { name: "directive_rename", arguments: { from: "Release B", to: "m-1" } },
+			params: {
+				name: "directive_rename",
+				arguments: { from: "Release B", to: "m-1" },
+			},
 		});
 		assert.strictEqual(renameCollision.isError, true);
-		expect(getText(renameCollision.content)).toContain("Directive alias conflict");
+		expect(getText(renameCollision.content)).toContain(
+			"Directive alias conflict",
+		);
 	});
 
 	it("supports directive ID inputs for rename/remove", async () => {
@@ -622,16 +730,27 @@ describe("MCP directive tools", () => {
 			params: { name: "directive_add", arguments: { name: "Release B" } },
 		});
 		await server.testInterface.callTool({
-			params: { name: "proposal_create", arguments: { title: "Proposal A", directive: "Release A" } },
+			params: {
+				name: "proposal_create",
+				arguments: { title: "Proposal A", directive: "Release A" },
+			},
 		});
 		await server.testInterface.callTool({
-			params: { name: "proposal_create", arguments: { title: "Proposal B", directive: "Release B" } },
+			params: {
+				name: "proposal_create",
+				arguments: { title: "Proposal B", directive: "Release B" },
+			},
 		});
 
 		const renamed = await server.testInterface.callTool({
-			params: { name: "directive_rename", arguments: { from: "m-0", to: "Release A Prime" } },
+			params: {
+				name: "directive_rename",
+				arguments: { from: "m-0", to: "Release A Prime" },
+			},
 		});
-		expect(getText(renamed.content)).toContain('Renamed directive "Release A" (m-0) → "Release A Prime" (m-0).');
+		expect(getText(renamed.content)).toContain(
+			'Renamed directive "Release A" (m-0) → "Release A Prime" (m-0).',
+		);
 		expect(getText(renamed.content)).toContain("Updated 1 local proposal");
 
 		const afterRename = await server.getProposal("proposal-1");
@@ -640,8 +759,12 @@ describe("MCP directive tools", () => {
 		const removed = await server.testInterface.callTool({
 			params: { name: "directive_remove", arguments: { name: "m-1" } },
 		});
-		expect(getText(removed.content)).toContain('Removed directive "Release B" (m-1).');
-		expect(getText(removed.content)).toContain("Cleared directive for 1 local proposal");
+		expect(getText(removed.content)).toContain(
+			'Removed directive "Release B" (m-1).',
+		);
+		expect(getText(removed.content)).toContain(
+			"Cleared directive for 1 local proposal",
+		);
 
 		const afterRemove = await server.getProposal("proposal-2");
 		assert.strictEqual(afterRemove?.directive, undefined);
@@ -649,7 +772,9 @@ describe("MCP directive tools", () => {
 		const activeDirectives = await server.filesystem.listDirectives();
 		const archivedDirectives = await server.filesystem.listArchivedDirectives();
 		expect(activeDirectives.map((directive) => directive.id)).toEqual(["m-0"]);
-		expect(archivedDirectives.map((directive) => directive.id)).toContain("m-1");
+		expect(archivedDirectives.map((directive) => directive.id)).toContain(
+			"m-1",
+		);
 	});
 
 	it("updates title-based proposal directive values when renaming by directive ID", async () => {
@@ -657,12 +782,18 @@ describe("MCP directive tools", () => {
 			params: { name: "directive_add", arguments: { name: "Release A" } },
 		});
 		await server.testInterface.callTool({
-			params: { name: "proposal_create", arguments: { title: "Proposal A", directive: "Release A" } },
+			params: {
+				name: "proposal_create",
+				arguments: { title: "Proposal A", directive: "Release A" },
+			},
 		});
 		await server.editProposal("proposal-1", { directive: "Release A" });
 
 		await server.testInterface.callTool({
-			params: { name: "directive_rename", arguments: { from: "m-0", to: "Release A Prime" } },
+			params: {
+				name: "directive_rename",
+				arguments: { from: "m-0", to: "Release A Prime" },
+			},
 		});
 
 		const updatedProposal = await server.getProposal("proposal-1");
@@ -674,12 +805,18 @@ describe("MCP directive tools", () => {
 			params: { name: "directive_add", arguments: { name: "Release A" } },
 		});
 		await server.testInterface.callTool({
-			params: { name: "proposal_create", arguments: { title: "Proposal A", directive: "Release A" } },
+			params: {
+				name: "proposal_create",
+				arguments: { title: "Proposal A", directive: "Release A" },
+			},
 		});
 		await server.editProposal("proposal-1", { directive: "0" });
 
 		await server.testInterface.callTool({
-			params: { name: "directive_rename", arguments: { from: "Release A", to: "Release A Prime" } },
+			params: {
+				name: "directive_rename",
+				arguments: { from: "Release A", to: "Release A Prime" },
+			},
 		});
 
 		const updatedProposal = await server.getProposal("proposal-1");
@@ -691,10 +828,16 @@ describe("MCP directive tools", () => {
 			params: { name: "directive_add", arguments: { name: "Shared" } },
 		});
 		await server.testInterface.callTool({
-			params: { name: "directive_add", arguments: { name: "Keep ID occupied" } },
+			params: {
+				name: "directive_add",
+				arguments: { name: "Keep ID occupied" },
+			},
 		});
 		await server.testInterface.callTool({
-			params: { name: "proposal_create", arguments: { title: "Old proposal", directive: "Shared" } },
+			params: {
+				name: "proposal_create",
+				arguments: { title: "Old proposal", directive: "Shared" },
+			},
 		});
 		await server.editProposal("proposal-1", { directive: "Shared" });
 		await server.testInterface.callTool({
@@ -704,14 +847,21 @@ describe("MCP directive tools", () => {
 			params: { name: "directive_add", arguments: { name: "Shared" } },
 		});
 		await server.testInterface.callTool({
-			params: { name: "proposal_create", arguments: { title: "New proposal", directive: "Shared" } },
+			params: {
+				name: "proposal_create",
+				arguments: { title: "New proposal", directive: "Shared" },
+			},
 		});
 
 		const removeById = await server.testInterface.callTool({
 			params: { name: "directive_remove", arguments: { name: "m-2" } },
 		});
-		expect(getText(removeById.content)).toContain('Removed directive "Shared" (m-2).');
-		expect(getText(removeById.content)).toContain("Cleared directive for 1 local proposal");
+		expect(getText(removeById.content)).toContain(
+			'Removed directive "Shared" (m-2).',
+		);
+		expect(getText(removeById.content)).toContain(
+			"Cleared directive for 1 local proposal",
+		);
 
 		const oldProposal = await server.getProposal("proposal-1");
 		const newProposal = await server.getProposal("proposal-2");
@@ -724,26 +874,40 @@ describe("MCP directive tools", () => {
 			params: { name: "directive_add", arguments: { name: "Archived source" } },
 		});
 		await server.testInterface.callTool({
-			params: { name: "proposal_create", arguments: { title: "Archived proposal", directive: "Archived source" } },
+			params: {
+				name: "proposal_create",
+				arguments: { title: "Archived proposal", directive: "Archived source" },
+			},
 		});
 		await server.testInterface.callTool({
-			params: { name: "directive_archive", arguments: { name: "Archived source" } },
+			params: {
+				name: "directive_archive",
+				arguments: { name: "Archived source" },
+			},
 		});
 		await server.testInterface.callTool({
-			params: { name: "directive_add", arguments: { name: "Keep ID occupied" } },
+			params: {
+				name: "directive_add",
+				arguments: { name: "Keep ID occupied" },
+			},
 		});
 		await server.testInterface.callTool({
 			params: { name: "directive_add", arguments: { name: "m-0" } },
 		});
 		await server.testInterface.callTool({
-			params: { name: "proposal_create", arguments: { title: "Active title proposal", directive: "m-2" } },
+			params: {
+				name: "proposal_create",
+				arguments: { title: "Active title proposal", directive: "m-2" },
+			},
 		});
 		await server.editProposal("proposal-1", { directive: "0" });
 
 		const removeByTitle = await server.testInterface.callTool({
 			params: { name: "directive_remove", arguments: { name: "m-0" } },
 		});
-		expect(getText(removeByTitle.content)).toContain("Cleared directive for 1 local proposal");
+		expect(getText(removeByTitle.content)).toContain(
+			"Cleared directive for 1 local proposal",
+		);
 
 		const archivedProposal = await server.getProposal("proposal-1");
 		const activeProposal = await server.getProposal("proposal-2");
@@ -756,26 +920,43 @@ describe("MCP directive tools", () => {
 			params: { name: "directive_add", arguments: { name: "Archived source" } },
 		});
 		await server.testInterface.callTool({
-			params: { name: "proposal_create", arguments: { title: "Archived proposal", directive: "Archived source" } },
+			params: {
+				name: "proposal_create",
+				arguments: { title: "Archived proposal", directive: "Archived source" },
+			},
 		});
 		await server.testInterface.callTool({
-			params: { name: "directive_archive", arguments: { name: "Archived source" } },
+			params: {
+				name: "directive_archive",
+				arguments: { name: "Archived source" },
+			},
 		});
 		await server.testInterface.callTool({
-			params: { name: "directive_add", arguments: { name: "Keep ID occupied" } },
+			params: {
+				name: "directive_add",
+				arguments: { name: "Keep ID occupied" },
+			},
 		});
 		await server.testInterface.callTool({
 			params: { name: "directive_add", arguments: { name: "m-0" } },
 		});
 		await server.testInterface.callTool({
-			params: { name: "proposal_create", arguments: { title: "Active title proposal", directive: "m-2" } },
+			params: {
+				name: "proposal_create",
+				arguments: { title: "Active title proposal", directive: "m-2" },
+			},
 		});
 		await server.editProposal("proposal-1", { directive: "0" });
 
 		const renameByTitle = await server.testInterface.callTool({
-			params: { name: "directive_rename", arguments: { from: "m-0", to: "ID-like title renamed" } },
+			params: {
+				name: "directive_rename",
+				arguments: { from: "m-0", to: "ID-like title renamed" },
+			},
 		});
-		expect(getText(renameByTitle.content)).toContain("Updated 1 local proposal");
+		expect(getText(renameByTitle.content)).toContain(
+			"Updated 1 local proposal",
+		);
 
 		const archivedProposal = await server.getProposal("proposal-1");
 		const activeProposal = await server.getProposal("proposal-2");
@@ -800,7 +981,10 @@ describe("MCP directive tools", () => {
 		assert.strictEqual(created?.directive, "m-1");
 
 		const renamed = await server.testInterface.callTool({
-			params: { name: "directive_rename", arguments: { from: "1", to: "Canonical ID Prime" } },
+			params: {
+				name: "directive_rename",
+				arguments: { from: "1", to: "Canonical ID Prime" },
+			},
 		});
 		expect(getText(renamed.content)).toContain("(m-1)");
 	});
@@ -810,20 +994,32 @@ describe("MCP directive tools", () => {
 			params: { name: "directive_add", arguments: { name: "Archived source" } },
 		});
 		await server.testInterface.callTool({
-			params: { name: "proposal_create", arguments: { title: "Proposal", directive: "Archived source" } },
+			params: {
+				name: "proposal_create",
+				arguments: { title: "Proposal", directive: "Archived source" },
+			},
 		});
 		await server.testInterface.callTool({
-			params: { name: "directive_archive", arguments: { name: "Archived source" } },
+			params: {
+				name: "directive_archive",
+				arguments: { name: "Archived source" },
+			},
 		});
 		await server.testInterface.callTool({
-			params: { name: "directive_add", arguments: { name: "Keep ID occupied" } },
+			params: {
+				name: "directive_add",
+				arguments: { name: "Keep ID occupied" },
+			},
 		});
 		await server.testInterface.callTool({
 			params: { name: "directive_add", arguments: { name: "m-0" } },
 		});
 
 		await server.testInterface.callTool({
-			params: { name: "proposal_edit", arguments: { id: "proposal-1", directive: "m-0" } },
+			params: {
+				name: "proposal_edit",
+				arguments: { id: "proposal-1", directive: "m-0" },
+			},
 		});
 		const updated = await server.getProposal("proposal-1");
 		assert.strictEqual(updated?.directive, "m-0");
@@ -834,13 +1030,22 @@ describe("MCP directive tools", () => {
 			params: { name: "directive_add", arguments: { name: "Archived source" } },
 		});
 		await server.testInterface.callTool({
-			params: { name: "proposal_create", arguments: { title: "Proposal", directive: "Archived source" } },
+			params: {
+				name: "proposal_create",
+				arguments: { title: "Proposal", directive: "Archived source" },
+			},
 		});
 		await server.testInterface.callTool({
-			params: { name: "directive_archive", arguments: { name: "Archived source" } },
+			params: {
+				name: "directive_archive",
+				arguments: { name: "Archived source" },
+			},
 		});
 		await server.testInterface.callTool({
-			params: { name: "directive_add", arguments: { name: "Keep ID occupied" } },
+			params: {
+				name: "directive_add",
+				arguments: { name: "Keep ID occupied" },
+			},
 		});
 		await server.testInterface.callTool({
 			params: { name: "directive_add", arguments: { name: "m-0" } },
@@ -851,7 +1056,9 @@ describe("MCP directive tools", () => {
 			params: { name: "directive_list", arguments: {} },
 		});
 		const text = getText(listed.content);
-		assert.ok(text.includes("Archived directive values still on proposals (1):"));
+		assert.ok(
+			text.includes("Archived directive values still on proposals (1):"),
+		);
 		assert.ok(text.includes("- m-0"));
 	});
 
@@ -859,21 +1066,29 @@ describe("MCP directive tools", () => {
 		await writeLegacyDirectiveFile(server, "m-0", "Shared");
 		await writeLegacyDirectiveFile(server, "m-1", "Shared");
 		await server.testInterface.callTool({
-			params: { name: "proposal_create", arguments: { title: "Ambiguous title proposal", directive: "Shared" } },
+			params: {
+				name: "proposal_create",
+				arguments: { title: "Ambiguous title proposal", directive: "Shared" },
+			},
 		});
 
 		const listed = await server.testInterface.callTool({
 			params: { name: "directive_list", arguments: {} },
 		});
 		const text = getText(listed.content);
-		assert.ok(text.includes("Directives found on proposals without files (1):"));
+		assert.ok(
+			text.includes("Directives found on proposals without files (1):"),
+		);
 		assert.ok(text.includes("- Shared"));
 	});
 
 	it("allocates new directive IDs from directive frontmatter IDs before filename IDs", async () => {
 		const { writeFileSync } = await import("node:fs");
 		writeFileSync(
-			join(server.filesystem.directivesDir, "m-0 - mismatched-frontmatter-id.md"),
+			join(
+				server.filesystem.directivesDir,
+				"m-0 - mismatched-frontmatter-id.md",
+			),
 			`---
 id: m-7
 title: "Legacy frontmatter ID"
@@ -896,10 +1111,16 @@ Directive: Legacy frontmatter ID
 			params: { name: "directive_add", arguments: { name: "Shared" } },
 		});
 		await server.testInterface.callTool({
-			params: { name: "directive_add", arguments: { name: "Keep ID occupied" } },
+			params: {
+				name: "directive_add",
+				arguments: { name: "Keep ID occupied" },
+			},
 		});
 		await server.testInterface.callTool({
-			params: { name: "proposal_create", arguments: { title: "Archived proposal", directive: "Shared" } },
+			params: {
+				name: "proposal_create",
+				arguments: { title: "Archived proposal", directive: "Shared" },
+			},
 		});
 		await server.testInterface.callTool({
 			params: { name: "directive_archive", arguments: { name: "Shared" } },
@@ -909,7 +1130,10 @@ Directive: Legacy frontmatter ID
 		});
 
 		await server.testInterface.callTool({
-			params: { name: "proposal_create", arguments: { title: "Active proposal", directive: "Shared" } },
+			params: {
+				name: "proposal_create",
+				arguments: { title: "Active proposal", directive: "Shared" },
+			},
 		});
 		const activeProposalBeforeRemove = await server.getProposal("proposal-2");
 		assert.strictEqual(activeProposalBeforeRemove?.directive, "m-2");
@@ -932,16 +1156,25 @@ Directive: Legacy frontmatter ID
 			params: { name: "directive_add", arguments: { name: "Release B" } },
 		});
 		await server.testInterface.callTool({
-			params: { name: "proposal_create", arguments: { title: "A", directive: "Release A" } },
+			params: {
+				name: "proposal_create",
+				arguments: { title: "A", directive: "Release A" },
+			},
 		});
 
 		const reassign = await server.testInterface.callTool({
 			params: {
 				name: "directive_remove",
-				arguments: { name: "Release A", proposalHandling: "reassign", reassignTo: "Release B" },
+				arguments: {
+					name: "Release A",
+					proposalHandling: "reassign",
+					reassignTo: "Release B",
+				},
 			},
 		});
-		expect(getText(reassign.content)).toContain('Removed directive "Release A" (m-0).');
+		expect(getText(reassign.content)).toContain(
+			'Removed directive "Release A" (m-0).',
+		);
 		expect(getText(reassign.content)).toContain("Reassigned 1 local proposal");
 
 		const proposal1 = await server.getProposal("proposal-1");
@@ -949,14 +1182,21 @@ Directive: Legacy frontmatter ID
 
 		// Now test clear behavior
 		await server.testInterface.callTool({
-			params: { name: "proposal_edit", arguments: { id: "proposal-1", directive: "Release B" } },
+			params: {
+				name: "proposal_edit",
+				arguments: { id: "proposal-1", directive: "Release B" },
+			},
 		});
 
 		const clear = await server.testInterface.callTool({
 			params: { name: "directive_remove", arguments: { name: "Release B" } },
 		});
-		expect(getText(clear.content)).toContain('Removed directive "Release B" (m-1).');
-		expect(getText(clear.content)).toContain("Cleared directive for 1 local proposal");
+		expect(getText(clear.content)).toContain(
+			'Removed directive "Release B" (m-1).',
+		);
+		expect(getText(clear.content)).toContain(
+			"Cleared directive for 1 local proposal",
+		);
 
 		const cleared = await server.getProposal("proposal-1");
 		assert.strictEqual(cleared?.directive, undefined);
@@ -967,14 +1207,24 @@ Directive: Legacy frontmatter ID
 			params: { name: "directive_add", arguments: { name: "Keep Value" } },
 		});
 		await server.testInterface.callTool({
-			params: { name: "proposal_create", arguments: { title: "Proposal", directive: "Keep Value" } },
+			params: {
+				name: "proposal_create",
+				arguments: { title: "Proposal", directive: "Keep Value" },
+			},
 		});
 
 		const removeKeep = await server.testInterface.callTool({
-			params: { name: "directive_remove", arguments: { name: "Keep Value", proposalHandling: "keep" } },
+			params: {
+				name: "directive_remove",
+				arguments: { name: "Keep Value", proposalHandling: "keep" },
+			},
 		});
-		expect(getText(removeKeep.content)).toContain('Removed directive "Keep Value" (m-0).');
-		expect(getText(removeKeep.content)).toContain("Kept proposal directive values unchanged (proposalHandling=keep).");
+		expect(getText(removeKeep.content)).toContain(
+			'Removed directive "Keep Value" (m-0).',
+		);
+		expect(getText(removeKeep.content)).toContain(
+			"Kept proposal directive values unchanged (proposalHandling=keep).",
+		);
 
 		const proposal = await server.getProposal("proposal-1");
 		assert.strictEqual(proposal?.directive, "m-0");
@@ -988,8 +1238,12 @@ Directive: Legacy frontmatter ID
 			params: { name: "directive_list", arguments: {} },
 		});
 		const text = getText(list.content);
-		assert.ok(text.includes("Directives found on proposals without files (0):"));
-		assert.ok(text.includes("Archived directive values still on proposals (1):"));
+		assert.ok(
+			text.includes("Directives found on proposals without files (0):"),
+		);
+		assert.ok(
+			text.includes("Archived directive values still on proposals (1):"),
+		);
 		assert.ok(text.includes("- m-0"));
 	});
 });

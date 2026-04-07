@@ -3,7 +3,11 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { McpServer } from "../../src/mcp/server.ts";
 import { registerAgentTools } from "../../src/mcp/tools/agents/index.ts";
 import { registerWorkflowTools } from "../../src/mcp/tools/workflow/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 const getText = (content: unknown[] | undefined): string => {
 	const item = content?.[0] as { text?: string } | undefined;
@@ -29,7 +33,9 @@ describe("MCP agent tools — registration and lifecycle", () => {
 	afterEach(async () => {
 		try {
 			await mcpServer.stop();
-		} catch { /* ignore */ }
+		} catch {
+			/* ignore */
+		}
 		await safeCleanup(TEST_DIR);
 	});
 
@@ -69,7 +75,10 @@ describe("MCP agent tools — registration and lifecycle", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("test-agent") || text.includes("registered"), `Unexpected: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("test-agent") || text.includes("registered"),
+			`Unexpected: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("agent_list shows registered agents", async () => {
@@ -101,7 +110,10 @@ describe("MCP agent tools — registration and lifecycle", () => {
 			params: { name: "agent_list", arguments: {} },
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("alpha") && text.includes("beta"), `Missing agents in list: ${text.slice(0, 300)}`);
+		assert.ok(
+			text.includes("alpha") && text.includes("beta"),
+			`Missing agents in list: ${text.slice(0, 300)}`,
+		);
 	});
 
 	it("agent_pool_stats returns pool information", async () => {
@@ -189,7 +201,10 @@ describe("MCP agent tools — registration and lifecycle", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.length > 5, `Expected assignment output: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.length > 5,
+			`Expected assignment output: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("agent_zombie_detect scans for inactive agents", async () => {
@@ -198,7 +213,10 @@ describe("MCP agent tools — registration and lifecycle", () => {
 		});
 		const text = getText(result.content);
 		// Should return detection results
-		assert.ok(typeof text === "string", `Expected zombie detection: ${text.slice(0, 200)}`);
+		assert.ok(
+			typeof text === "string",
+			`Expected zombie detection: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("agent_heartbeat records a heartbeat", async () => {
@@ -225,7 +243,10 @@ describe("MCP agent tools — registration and lifecycle", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.length > 5, `Expected heartbeat output: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.length > 5,
+			`Expected heartbeat output: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("agent_update_reporting changes reporting structure", async () => {
@@ -251,7 +272,10 @@ describe("MCP agent tools — registration and lifecycle", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.length > 5, `Expected reporting update: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.length > 5,
+			`Expected reporting update: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("privilege_grant grants a privilege to an agent", async () => {
@@ -277,7 +301,10 @@ describe("MCP agent tools — registration and lifecycle", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.length > 5, `Expected privilege grant: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.length > 5,
+			`Expected privilege grant: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("privilege_revoke revokes a privilege from an agent", async () => {
@@ -285,7 +312,12 @@ describe("MCP agent tools — registration and lifecycle", () => {
 		await mcpServer.testInterface.callTool({
 			params: {
 				name: "agent_register",
-				arguments: { name: "revokee", role: "dev", clearance_level: 2, capabilities: "coding" },
+				arguments: {
+					name: "revokee",
+					role: "dev",
+					clearance_level: 2,
+					capabilities: "coding",
+				},
 			},
 		});
 		await mcpServer.testInterface.callTool({
@@ -305,6 +337,9 @@ describe("MCP agent tools — registration and lifecycle", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.length > 5, `Expected privilege revoke: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.length > 5,
+			`Expected privilege revoke: ${text.slice(0, 200)}`,
+		);
 	});
 });

@@ -10,11 +10,11 @@
  * AC#6: PMs forced to enrich definitions when proposals bounce back to research
  */
 
-import { describe, it, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, before, beforeEach, describe, it } from "node:test";
 
 describe("proposal-80: Fluid Proposal Machine", () => {
 	let tempDir: string;
@@ -39,7 +39,7 @@ describe("proposal-80: Fluid Proposal Machine", () => {
 				dependencies: [],
 			},
 			Date.now(),
-			"Test proposal body"
+			"Test proposal body",
 		);
 	});
 
@@ -56,7 +56,7 @@ describe("proposal-80: Fluid Proposal Machine", () => {
 				"Research",
 				"Design",
 				"agent-001",
-				"Research complete, moving to design"
+				"Research complete, moving to design",
 			);
 			assert.ok(id, "Should return transition ID");
 
@@ -67,13 +67,18 @@ describe("proposal-80: Fluid Proposal Machine", () => {
 		});
 
 		it("should allow backward transitions (Design → Research)", () => {
-			store.recordPhaseTransition("proposal-80", "Research", "Design", "agent-001");
+			store.recordPhaseTransition(
+				"proposal-80",
+				"Research",
+				"Design",
+				"agent-001",
+			);
 			const id = store.recordPhaseTransition(
 				"proposal-80",
 				"Design",
 				"Research",
 				"agent-002",
-				"Requirements changed, need more research"
+				"Requirements changed, need more research",
 			);
 			assert.ok(id, "Should allow backward transition");
 
@@ -88,7 +93,7 @@ describe("proposal-80: Fluid Proposal Machine", () => {
 				"Review",
 				"Implementation",
 				"agent-001",
-				"Reviewer requested implementation changes"
+				"Reviewer requested implementation changes",
 			);
 			assert.ok(id, "Should allow non-sequential transition");
 		});
@@ -99,7 +104,7 @@ describe("proposal-80: Fluid Proposal Machine", () => {
 				"Design",
 				"Design",
 				"agent-001",
-				"Design revision"
+				"Design revision",
 			);
 			assert.ok(id, "Should allow same-phase transition");
 		});
@@ -109,14 +114,21 @@ describe("proposal-80: Fluid Proposal Machine", () => {
 
 	describe("AC#2: Test cases in database", () => {
 		it("should store test cases with id, proposal_id, ac_number, description", () => {
-			const id = store.addTestCase("proposal-80", 1, "Verify proposal transitions work correctly");
+			const id = store.addTestCase(
+				"proposal-80",
+				1,
+				"Verify proposal transitions work correctly",
+			);
 			assert.ok(id, "Should return test case ID");
 
 			const tc = store.getTestCase(id);
 			assert.ok(tc, "Should retrieve test case");
 			assert.equal(tc.proposal_id, "proposal-80");
 			assert.equal(tc.ac_number, 1);
-			assert.equal(tc.description, "Verify proposal transitions work correctly");
+			assert.equal(
+				tc.description,
+				"Verify proposal transitions work correctly",
+			);
 		});
 
 		it("should store multiple test cases per proposal", () => {
@@ -144,7 +156,11 @@ describe("proposal-80: Fluid Proposal Machine", () => {
 		it("should delete test case by ID", () => {
 			const id = store.addTestCase("proposal-80", 1, "Test to delete");
 			assert.ok(store.deleteTestCase(id), "Should return true on delete");
-			assert.equal(store.getTestCase(id), null, "Should not find deleted test case");
+			assert.equal(
+				store.getTestCase(id),
+				null,
+				"Should not find deleted test case",
+			);
 		});
 	});
 
@@ -163,7 +179,7 @@ describe("proposal-80: Fluid Proposal Machine", () => {
 				"passed",
 				"agent-001",
 				"CLI output: all checks passed",
-				150
+				150,
 			);
 			assert.ok(id, "Should return result ID");
 
@@ -178,9 +194,21 @@ describe("proposal-80: Fluid Proposal Machine", () => {
 
 		it("should support all status types", () => {
 			store.recordTestResult(testCaseId, "passed", "agent-001");
-			store.recordTestResult(testCaseId, "failed", "agent-002", "Expected 5 got 3");
+			store.recordTestResult(
+				testCaseId,
+				"failed",
+				"agent-002",
+				"Expected 5 got 3",
+			);
 			store.recordTestResult(testCaseId, "skipped", "agent-003");
-			store.recordTestResult(testCaseId, "error", "agent-004", undefined, undefined, "Timeout");
+			store.recordTestResult(
+				testCaseId,
+				"error",
+				"agent-004",
+				undefined,
+				undefined,
+				"Timeout",
+			);
 
 			const results = store.getTestResults(testCaseId);
 			assert.equal(results.length, 4);
@@ -193,9 +221,9 @@ describe("proposal-80: Fluid Proposal Machine", () => {
 
 		it("should return results in reverse chronological order", async () => {
 			store.recordTestResult(testCaseId, "passed", "agent-001");
-			await new Promise(r => setTimeout(r, 10)); // Ensure different timestamps
+			await new Promise((r) => setTimeout(r, 10)); // Ensure different timestamps
 			store.recordTestResult(testCaseId, "failed", "agent-002");
-			await new Promise(r => setTimeout(r, 10));
+			await new Promise((r) => setTimeout(r, 10));
 			store.recordTestResult(testCaseId, "passed", "agent-003");
 
 			const results = store.getTestResults(testCaseId);
@@ -244,7 +272,7 @@ describe("proposal-80: Fluid Proposal Machine", () => {
 				"proposal-80",
 				"senior-developer-49",
 				"claimed",
-				"Started implementation"
+				"Started implementation",
 			);
 			assert.ok(id, "Should return log ID");
 
@@ -268,9 +296,9 @@ describe("proposal-80: Fluid Proposal Machine", () => {
 
 		it("should return claim log in reverse chronological order", async () => {
 			store.logClaimAction("proposal-80", "agent-001", "first");
-			await new Promise(r => setTimeout(r, 10));
+			await new Promise((r) => setTimeout(r, 10));
 			store.logClaimAction("proposal-80", "agent-002", "second");
-			await new Promise(r => setTimeout(r, 10));
+			await new Promise((r) => setTimeout(r, 10));
 			store.logClaimAction("proposal-80", "agent-003", "third");
 
 			const log = store.getClaimLog("proposal-80");
@@ -306,7 +334,7 @@ describe("proposal-80: Fluid Proposal Machine", () => {
 				"Research",
 				"Design",
 				"agent-001",
-				"Research complete"
+				"Research complete",
 			);
 
 			const history = store.getPhaseHistory("proposal-80");
@@ -316,15 +344,25 @@ describe("proposal-80: Fluid Proposal Machine", () => {
 
 		it("should find backward transitions for debugging", () => {
 			// Forward
-			store.recordPhaseTransition("proposal-80", "Research", "Design", "agent-001");
-			store.recordPhaseTransition("proposal-80", "Design", "Implementation", "agent-001");
+			store.recordPhaseTransition(
+				"proposal-80",
+				"Research",
+				"Design",
+				"agent-001",
+			);
+			store.recordPhaseTransition(
+				"proposal-80",
+				"Design",
+				"Implementation",
+				"agent-001",
+			);
 			// Backward - this is what we're debugging
 			store.recordPhaseTransition(
 				"proposal-80",
 				"Implementation",
 				"Design",
 				"agent-002",
-				"AC not properly defined"
+				"AC not properly defined",
 			);
 
 			const backward = store.getBackwardTransitions("proposal-80");
@@ -335,19 +373,29 @@ describe("proposal-80: Fluid Proposal Machine", () => {
 		});
 
 		it("should answer 'Why did proposal-X go back to Research?'", () => {
-			store.recordPhaseTransition("proposal-80", "Research", "Design", "agent-001");
-			store.recordPhaseTransition("proposal-80", "Design", "Review", "agent-002");
+			store.recordPhaseTransition(
+				"proposal-80",
+				"Research",
+				"Design",
+				"agent-001",
+			);
+			store.recordPhaseTransition(
+				"proposal-80",
+				"Design",
+				"Review",
+				"agent-002",
+			);
 			store.recordPhaseTransition(
 				"proposal-80",
 				"Review",
 				"Research",
 				"agent-003",
-				"Stakeholder requested scope change"
+				"Stakeholder requested scope change",
 			);
 
 			const history = store.getPhaseHistory("proposal-80");
 			const researchBounce = history.find(
-				(h: any) => h.to_phase === "Research" && h.from_phase !== "Research"
+				(h: any) => h.to_phase === "Research" && h.from_phase !== "Research",
 			);
 			assert.ok(researchBounce, "Should find the bounce-back to Research");
 			assert.equal(researchBounce.reason, "Stakeholder requested scope change");
@@ -355,7 +403,12 @@ describe("proposal-80: Fluid Proposal Machine", () => {
 
 		it("should find all backward transitions across proposals", () => {
 			// Proposal 80 backward
-			store.recordPhaseTransition("proposal-80", "Design", "Research", "agent-001");
+			store.recordPhaseTransition(
+				"proposal-80",
+				"Design",
+				"Research",
+				"agent-001",
+			);
 
 			// Create another proposal
 			store.upsertProposal(
@@ -368,9 +421,14 @@ describe("proposal-80: Fluid Proposal Machine", () => {
 					dependencies: [],
 				},
 				Date.now(),
-				"Test"
+				"Test",
 			);
-			store.recordPhaseTransition("proposal-81", "Implementation", "Design", "agent-002");
+			store.recordPhaseTransition(
+				"proposal-81",
+				"Implementation",
+				"Design",
+				"agent-002",
+			);
 
 			const allBackward = store.getBackwardTransitions();
 			assert.equal(allBackward.length, 2);
@@ -381,13 +439,18 @@ describe("proposal-80: Fluid Proposal Machine", () => {
 
 	describe("AC#6: Proposals bounced back to research", () => {
 		it("should identify proposals that bounced back to research", () => {
-			store.recordPhaseTransition("proposal-80", "Research", "Design", "agent-001");
+			store.recordPhaseTransition(
+				"proposal-80",
+				"Research",
+				"Design",
+				"agent-001",
+			);
 			store.recordPhaseTransition(
 				"proposal-80",
 				"Design",
 				"Research",
 				"agent-002",
-				"Requirements unclear"
+				"Requirements unclear",
 			);
 
 			const bounced = store.getProposalsBouncedToResearch();
@@ -397,21 +460,31 @@ describe("proposal-80: Fluid Proposal Machine", () => {
 		});
 
 		it("should track multiple bounce reasons", () => {
-			store.recordPhaseTransition("proposal-80", "Research", "Design", "agent-001");
+			store.recordPhaseTransition(
+				"proposal-80",
+				"Research",
+				"Design",
+				"agent-001",
+			);
 			store.recordPhaseTransition(
 				"proposal-80",
 				"Design",
 				"Research",
 				"agent-002",
-				"First reason"
+				"First reason",
 			);
-			store.recordPhaseTransition("proposal-80", "Research", "Design", "agent-001");
+			store.recordPhaseTransition(
+				"proposal-80",
+				"Research",
+				"Design",
+				"agent-001",
+			);
 			store.recordPhaseTransition(
 				"proposal-80",
 				"Design",
 				"Research",
 				"agent-003",
-				"Second reason"
+				"Second reason",
 			);
 
 			const bounced = store.getProposalsBouncedToResearch();
@@ -422,8 +495,19 @@ describe("proposal-80: Fluid Proposal Machine", () => {
 
 		it("should not include proposals that only went forward to research", () => {
 			// Set up proposal-80 with a backward bounce to Research
-			store.recordPhaseTransition("proposal-80", "Research", "Design", "agent-001");
-			store.recordPhaseTransition("proposal-80", "Design", "Research", "agent-002", "Needs rework");
+			store.recordPhaseTransition(
+				"proposal-80",
+				"Research",
+				"Design",
+				"agent-001",
+			);
+			store.recordPhaseTransition(
+				"proposal-80",
+				"Design",
+				"Research",
+				"agent-002",
+				"Needs rework",
+			);
 
 			// Create a new proposal with only forward transition to Research
 			store.upsertProposal(
@@ -436,10 +520,15 @@ describe("proposal-80: Fluid Proposal Machine", () => {
 					dependencies: [],
 				},
 				Date.now(),
-				"Test"
+				"Test",
 			);
 			// Only forward to research (start) - should NOT be counted as bounce
-			store.recordPhaseTransition("proposal-82", "Potential", "Research", "agent-001");
+			store.recordPhaseTransition(
+				"proposal-82",
+				"Potential",
+				"Research",
+				"agent-001",
+			);
 
 			const bounced = store.getProposalsBouncedToResearch();
 			assert.equal(bounced.length, 1); // Only proposal-80 should be here

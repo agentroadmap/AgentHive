@@ -6,4 +6,8 @@
  * This barrel keeps the import path in roadmap.ts valid.
  */
 
-export { computeSequences, planMoveToSequence, planMoveToUnsequenced } from "./proposal/sequences.ts";
+export {
+	computeSequences,
+	planMoveToSequence,
+	planMoveToUnsequenced,
+} from "./proposal/sequences.ts";

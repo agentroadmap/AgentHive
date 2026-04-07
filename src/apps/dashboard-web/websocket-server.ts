@@ -22,7 +22,9 @@ type BoardMessage =
 	| { type: "error"; message: string; code?: string };
 
 function safeStringify(data: unknown): string {
-	return JSON.stringify(data, (_key, value) => (typeof value === "bigint" ? value.toString() : value));
+	return JSON.stringify(data, (_key, value) =>
+		typeof value === "bigint" ? value.toString() : value,
+	);
 }
 
 async function buildSnapshot(core: Core) {
@@ -89,10 +91,18 @@ async function broadcastSnapshot(core: Core): Promise<void> {
 	broadcast({ type: "proposal_snapshot", data: snapshot.proposals });
 	broadcast({ type: "workforce_snapshot", data: snapshot.agents });
 	broadcast({ type: "channels", data: snapshot.channels });
-	broadcast({ type: "message_snapshot", data: snapshot.messages, channel: "public" });
+	broadcast({
+		type: "message_snapshot",
+		data: snapshot.messages,
+		channel: "public",
+	});
 }
 
-async function handleMessage(ws: WebSocket, msg: any, core: Core): Promise<void> {
+async function handleMessage(
+	ws: WebSocket,
+	msg: any,
+	core: Core,
+): Promise<void> {
 	switch (msg.type) {
 		case "getProposals":
 			await sendSnapshot(ws, core);
@@ -104,7 +114,9 @@ async function handleMessage(ws: WebSocket, msg: any, core: Core): Promise<void>
 		}
 		case "getAgents": {
 			const snapshot = await buildSnapshot(core);
-			ws.send(safeStringify({ type: "workforce_snapshot", data: snapshot.agents }));
+			ws.send(
+				safeStringify({ type: "workforce_snapshot", data: snapshot.agents }),
+			);
 			return;
 		}
 		case "getChannels": {
@@ -113,7 +125,10 @@ async function handleMessage(ws: WebSocket, msg: any, core: Core): Promise<void>
 			return;
 		}
 		case "getMessages": {
-			const channel = typeof msg.channel === "string" && msg.channel.trim() ? msg.channel : "public";
+			const channel =
+				typeof msg.channel === "string" && msg.channel.trim()
+					? msg.channel
+					: "public";
 			const result = await core.readMessages({ channel });
 			ws.send(
 				safeStringify({
@@ -131,24 +146,32 @@ async function handleMessage(ws: WebSocket, msg: any, core: Core): Promise<void>
 			return;
 		}
 		case "subscribe":
-			ws.send(safeStringify({ type: "subscribed", channel: msg.channel ?? "public" }));
+			ws.send(
+				safeStringify({ type: "subscribed", channel: msg.channel ?? "public" }),
+			);
 			await sendSnapshot(ws, core);
 			return;
 		case "createProposal":
 			ws.send(
 				safeStringify({
 					type: "error",
-					message: "Creating proposals over the websocket bridge is not supported.",
+					message:
+						"Creating proposals over the websocket bridge is not supported.",
 					code: "UNSUPPORTED",
 				}),
 			);
 			return;
 		default:
-			ws.send(safeStringify({ type: "error", message: "Unknown message type" }));
+			ws.send(
+				safeStringify({ type: "error", message: "Unknown message type" }),
+			);
 	}
 }
 
-export function startWebSocketServer(port = 3001, projectRoot = process.cwd()): void {
+export function startWebSocketServer(
+	port = 3001,
+	projectRoot = process.cwd(),
+): void {
 	const server = createServer();
 	const core = new Core(projectRoot, { enableWatchers: true });
 	let snapshotTimer: NodeJS.Timeout | null = null;
@@ -157,7 +180,9 @@ export function startWebSocketServer(port = 3001, projectRoot = process.cwd()): 
 
 	wss.on("error", (err: NodeJS.ErrnoException) => {
 		if (err.code === "EADDRINUSE") {
-			console.warn(`[WS] Port ${port} already in use, WebSocket server disabled`);
+			console.warn(
+				`[WS] Port ${port} already in use, WebSocket server disabled`,
+			);
 			wss = null;
 			return;
 		}
@@ -166,7 +191,12 @@ export function startWebSocketServer(port = 3001, projectRoot = process.cwd()): 
 
 	wss.on("connection", (ws: WebSocket) => {
 		clients.add(ws);
-		ws.send(safeStringify({ type: "connected", message: "Connected to roadmap bridge" }));
+		ws.send(
+			safeStringify({
+				type: "connected",
+				message: "Connected to roadmap bridge",
+			}),
+		);
 		void sendSnapshot(ws, core);
 
 		ws.on("message", async (data: Buffer) => {
@@ -189,7 +219,9 @@ export function startWebSocketServer(port = 3001, projectRoot = process.cwd()): 
 
 	server.on("error", (err: NodeJS.ErrnoException) => {
 		if (err.code === "EADDRINUSE") {
-			console.warn(`[WS] Port ${port} already in use, WebSocket server disabled`);
+			console.warn(
+				`[WS] Port ${port} already in use, WebSocket server disabled`,
+			);
 			wss = null;
 			return;
 		}

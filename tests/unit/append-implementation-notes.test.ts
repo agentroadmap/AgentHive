@@ -1,11 +1,15 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
 import { extractStructuredSection } from "../../src/markdown/structured-sections.ts";
-import { createUniqueTestDir, safeCleanup, execSync, buildCliCommand,
+import {
+	buildCliCommand,
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 let TEST_DIR: string;
@@ -51,17 +55,27 @@ describe("Append Implementation Notes via proposal edit --append-notes", () => {
 		);
 
 		// Append twice in one call and once again afterwards
-		let res = execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit 1 --append-notes "First addition" --append-notes "Second addition"`, { cwd: TEST_DIR });
+		let res = execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal edit 1 --append-notes "First addition" --append-notes "Second addition"`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(res.exitCode, 0);
 
-		res = execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit 1 --append-notes "Third addition"`, { cwd: TEST_DIR });
+		res = execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal edit 1 --append-notes "Third addition"`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(res.exitCode, 0);
 
 		const updatedBody = await core.getProposalContent("proposal-1");
 		assert.notStrictEqual(updatedBody, null);
 
-		const body = extractStructuredSection(updatedBody ?? "", "implementationNotes") || "";
-		assert.strictEqual(body, "Original notes\n\nFirst addition\n\nSecond addition\n\nThird addition");
+		const body =
+			extractStructuredSection(updatedBody ?? "", "implementationNotes") || "";
+		assert.strictEqual(
+			body,
+			"Original notes\n\nFirst addition\n\nSecond addition\n\nThird addition",
+		);
 	});
 
 	it("creates Implementation Notes at correct position when missing (after Plan)", async () => {
@@ -82,16 +96,22 @@ describe("Append Implementation Notes via proposal edit --append-notes", () => {
 			false,
 		);
 
-		const res = execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit 2 --append-notes "Notes after plan"`, { cwd: TEST_DIR });
+		const res = execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal edit 2 --append-notes "Notes after plan"`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(res.exitCode, 0);
 
 		const content = (await core.getProposalContent("proposal-2")) ?? "";
-		const notesContent = extractStructuredSection(content, "implementationNotes") || "";
+		const notesContent =
+			extractStructuredSection(content, "implementationNotes") || "";
 		assert.strictEqual(notesContent, "Notes after plan");
 		const planMarker = "<!-- SECTION:PLAN:BEGIN -->";
 		const notesMarker = "<!-- SECTION:NOTES:BEGIN -->";
 		expect(content.indexOf(planMarker)).toBeGreaterThan(-1);
-		expect(content.indexOf(notesMarker)).toBeGreaterThan(content.indexOf(planMarker));
+		expect(content.indexOf(notesMarker)).toBeGreaterThan(
+			content.indexOf(planMarker),
+		);
 	});
 
 	it("supports multi-line appended content and preserves literal newlines", async () => {
@@ -112,11 +132,15 @@ describe("Append Implementation Notes via proposal edit --append-notes", () => {
 
 		// Pass a JS string containing real newlines as an argument
 		const multiline = "Line1\nLine2\n\nPara2";
-		const res = execSync(`node --experimental-strip-types ${buildCliCommand([CLI_PATH, "proposal", "edit", "3", "--append-notes", multiline])}`, { cwd: TEST_DIR });
+		const res = execSync(
+			`node --experimental-strip-types ${buildCliCommand([CLI_PATH, "proposal", "edit", "3", "--append-notes", multiline])}`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(res.exitCode, 0);
 
 		const updatedBody = await core.getProposalContent("proposal-3");
-		const body = extractStructuredSection(updatedBody ?? "", "implementationNotes") || "";
+		const body =
+			extractStructuredSection(updatedBody ?? "", "implementationNotes") || "";
 		assert.ok(body.includes("Line1\nLine2\n\nPara2"));
 	});
 
@@ -136,12 +160,16 @@ describe("Append Implementation Notes via proposal edit --append-notes", () => {
 			false,
 		);
 
-		const res = execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit 4 --notes "Replace" --append-notes "Append"`, { cwd: TEST_DIR });
+		const res = execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal edit 4 --notes "Replace" --append-notes "Append"`,
+			{ cwd: TEST_DIR },
+		);
 
 		// Should succeed: --notes replaces existing, then --append-notes appends
 		assert.strictEqual(res.exitCode, 0);
 		const updatedBody = await core.getProposalContent("proposal-4");
-		const body = extractStructuredSection(updatedBody ?? "", "implementationNotes") || "";
+		const body =
+			extractStructuredSection(updatedBody ?? "", "implementationNotes") || "";
 		assert.strictEqual(body, "Replace\n\nAppend");
 	});
 });

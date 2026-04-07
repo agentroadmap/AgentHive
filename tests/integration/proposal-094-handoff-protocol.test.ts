@@ -1,21 +1,19 @@
 /**
  * Tests for proposal-094: Creative Phase Handoff Protocol
  */
-import { describe, it } from "node:test";
+
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 import {
-	HandoffGate,
-	GATE_TRANSITIONS,
-	gateForTransition,
 	createArchitectFeedback,
+	createHandoffLog,
 	createImplementationNarrative,
 	createQualitySignals,
-	createHandoffLog,
+	GATE_TRANSITIONS,
+	gateForTransition,
 	HandoffEngine,
+	HandoffGate,
 	type IntentToShip,
-	type ArchitectFeedback,
-	type ImplementationNarrative,
-	type QualitySignals,
 	type PulseMessage,
 } from "../../src/core/collaboration/handoff-protocol.ts";
 import { CubicPhase } from "../../src/core/orchestration/cubic-architecture.ts";
@@ -46,9 +44,18 @@ describe("proposal-094: Creative Phase Handoff Protocol", () => {
 		});
 
 		it("gateForTransition returns correct gate", () => {
-			assert.equal(gateForTransition(CubicPhase.Design, CubicPhase.Build), HandoffGate.G1);
-			assert.equal(gateForTransition(CubicPhase.Build, CubicPhase.Test), HandoffGate.G2);
-			assert.equal(gateForTransition(CubicPhase.Test, CubicPhase.Ship), HandoffGate.G3);
+			assert.equal(
+				gateForTransition(CubicPhase.Design, CubicPhase.Build),
+				HandoffGate.G1,
+			);
+			assert.equal(
+				gateForTransition(CubicPhase.Build, CubicPhase.Test),
+				HandoffGate.G2,
+			);
+			assert.equal(
+				gateForTransition(CubicPhase.Test, CubicPhase.Ship),
+				HandoffGate.G3,
+			);
 		});
 
 		it("gateForTransition returns null for invalid transition", () => {
@@ -125,15 +132,35 @@ describe("proposal-094: Creative Phase Handoff Protocol", () => {
 			const narrative = createImplementationNarrative(
 				"senior-dev-1",
 				"Built user authentication with JWT tokens and refresh flow",
-				["Chose JWT over session cookies for proposalless scaling", "Used bcrypt for password hashing"],
 				[
-					{ path: "src/auth/jwt.ts", type: "created", description: "JWT utilities" },
-					{ path: "src/auth/middleware.ts", type: "created", description: "Auth middleware" },
-					{ path: "src/routes/auth.ts", type: "modified", description: "Added login/register" },
+					"Chose JWT over session cookies for proposalless scaling",
+					"Used bcrypt for password hashing",
+				],
+				[
+					{
+						path: "src/auth/jwt.ts",
+						type: "created",
+						description: "JWT utilities",
+					},
+					{
+						path: "src/auth/middleware.ts",
+						type: "created",
+						description: "Auth middleware",
+					},
+					{
+						path: "src/routes/auth.ts",
+						type: "modified",
+						description: "Added login/register",
+					},
 				],
 				[
 					{ suite: "auth.test.ts", passed: 24, failed: 0, durationMs: 1200 },
-					{ suite: "middleware.test.ts", passed: 12, failed: 0, durationMs: 450 },
+					{
+						suite: "middleware.test.ts",
+						passed: 12,
+						failed: 0,
+						durationMs: 450,
+					},
 				],
 				"high",
 				["Token expiry edge case"],
@@ -153,7 +180,13 @@ describe("proposal-094: Creative Phase Handoff Protocol", () => {
 				"senior-dev-1",
 				"Experimental approach to caching",
 				["Trying new cache invalidation strategy"],
-				[{ path: "src/cache/index.ts", type: "created", description: "Cache layer" }],
+				[
+					{
+						path: "src/cache/index.ts",
+						type: "created",
+						description: "Cache layer",
+					},
+				],
 				[{ suite: "cache.test.ts", passed: 8, failed: 2, durationMs: 800 }],
 				"low",
 				["Cache invalidation may have race conditions", "Needs load testing"],
@@ -176,9 +209,21 @@ describe("proposal-094: Creative Phase Handoff Protocol", () => {
 					{ suite: "integration", passed: 38, failed: 0, durationMs: 12000 },
 				],
 				[
-					{ category: "performance", severity: "low", description: "Slight slowdown on large datasets", component: "query-engine" },
+					{
+						category: "performance",
+						severity: "low",
+						description: "Slight slowdown on large datasets",
+						component: "query-engine",
+					},
 				],
-				[{ metric: "p95-latency", value: 245, unit: "ms", meetsThreshold: true }],
+				[
+					{
+						metric: "p95-latency",
+						value: 245,
+						unit: "ms",
+						meetsThreshold: true,
+					},
+				],
 				"immediate",
 			);
 
@@ -200,10 +245,28 @@ describe("proposal-094: Creative Phase Handoff Protocol", () => {
 					{ suite: "integration", passed: 20, failed: 8, durationMs: 15000 },
 				],
 				[
-					{ category: "security", severity: "critical", description: "SQL injection vulnerability", component: "user-input", mitigation: "Use parameterized queries" },
-					{ category: "reliability", severity: "high", description: "Race condition in checkout", component: "cart-service" },
+					{
+						category: "security",
+						severity: "critical",
+						description: "SQL injection vulnerability",
+						component: "user-input",
+						mitigation: "Use parameterized queries",
+					},
+					{
+						category: "reliability",
+						severity: "high",
+						description: "Race condition in checkout",
+						component: "cart-service",
+					},
 				],
-				[{ metric: "p95-latency", value: 2500, unit: "ms", meetsThreshold: false }],
+				[
+					{
+						metric: "p95-latency",
+						value: 2500,
+						unit: "ms",
+						meetsThreshold: false,
+					},
+				],
 				"defer",
 			);
 
@@ -459,7 +522,15 @@ describe("proposal-094: Creative Phase Handoff Protocol", () => {
 			engine.submitIntent(intent1);
 
 			// Build → Test
-			const narrative = createImplementationNarrative("dev-1", "Built", [], [], [], "high", []);
+			const narrative = createImplementationNarrative(
+				"dev-1",
+				"Built",
+				[],
+				[],
+				[],
+				"high",
+				[],
+			);
 			engine.submitImplementationNarrative(narrative);
 
 			const designMessages = engine.getMessagesForPhase(CubicPhase.Design);

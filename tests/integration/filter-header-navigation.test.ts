@@ -1,7 +1,6 @@
-import assert from "node:assert";
 import { describe, it } from "node:test";
-import { expect } from "../support/test-utils.ts";
 import { resolveSearchHorizontalNavigation } from "../../src/ui/components/filter-header.ts";
+import { expect } from "../support/test-utils.ts";
 
 describe("resolveSearchHorizontalNavigation", () => {
 	it("cycles immediately when search is empty", () => {

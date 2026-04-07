@@ -1,11 +1,14 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it, test } from "node:test";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it, test } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
 import { AcceptanceCriteriaManager } from "../../src/markdown/structured-sections.ts";
-import { createUniqueTestDir, safeCleanup, execSync,
+import {
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 let TEST_DIR: string;
@@ -34,7 +37,10 @@ describe("Acceptance Criteria CLI", () => {
 
 	describe("proposal create with acceptance criteria", () => {
 		it("should create proposal with single acceptance criterion using -ac", async () => {
-			const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal create "Test Proposal" --ac "Must work correctly"`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal create "Test Proposal" --ac "Must work correctly"`,
+				{ cwd: TEST_DIR },
+			);
 			if (result.exitCode !== 0) {
 				console.error("STDOUT:", result.stdout.toString());
 				console.error("STDERR:", result.stderr.toString());
@@ -49,8 +55,10 @@ describe("Acceptance Criteria CLI", () => {
 		});
 
 		it("should create proposal with multiple criteria using multiple --ac flags", async () => {
-			const result =
-				execSync(`node --experimental-strip-types ${CLI_PATH} proposal create "Test Proposal" --ac "Criterion 1" --ac "Criterion 2" --ac "Criterion 3"`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal create "Test Proposal" --ac "Criterion 1" --ac "Criterion 2" --ac "Criterion 3"`,
+				{ cwd: TEST_DIR },
+			);
 			assert.strictEqual(result.exitCode, 0);
 
 			const core = new Core(TEST_DIR);
@@ -62,20 +70,30 @@ describe("Acceptance Criteria CLI", () => {
 		});
 
 		it("should treat comma-separated text as single criterion", async () => {
-			const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal create "Test Proposal" --ac "Criterion 1, Criterion 2, Criterion 3"`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal create "Test Proposal" --ac "Criterion 1, Criterion 2, Criterion 3"`,
+				{ cwd: TEST_DIR },
+			);
 			assert.strictEqual(result.exitCode, 0);
 
 			const core = new Core(TEST_DIR);
 			const proposal = await core.filesystem.loadProposal("proposal-1");
 			assert.notStrictEqual(proposal, null);
 			// Should create single criterion with commas intact
-			assert.ok(proposal?.rawContent?.includes("- [ ] #1 Criterion 1, Criterion 2, Criterion 3"));
+			assert.ok(
+				proposal?.rawContent?.includes(
+					"- [ ] #1 Criterion 1, Criterion 2, Criterion 3",
+				),
+			);
 			// Should NOT create multiple criteria
 			assert.ok(!proposal?.rawContent?.includes("- [ ] #2"));
 		});
 
 		it("should create proposal with criteria using --acceptance-criteria", async () => {
-			const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal create "Test Proposal" --acceptance-criteria "Full flag test"`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal create "Test Proposal" --acceptance-criteria "Full flag test"`,
+				{ cwd: TEST_DIR },
+			);
 			assert.strictEqual(result.exitCode, 0);
 
 			const core = new Core(TEST_DIR);
@@ -86,8 +104,10 @@ describe("Acceptance Criteria CLI", () => {
 		});
 
 		it("should create proposal with both description and acceptance criteria", async () => {
-			const result =
-				execSync(`node --experimental-strip-types ${CLI_PATH} proposal create "Test Proposal" -d "Proposal description" --ac "Must pass tests" --ac "Must be documented"`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal create "Test Proposal" -d "Proposal description" --ac "Must pass tests" --ac "Must be documented"`,
+				{ cwd: TEST_DIR },
+			);
 			assert.strictEqual(result.exitCode, 0);
 
 			const core = new Core(TEST_DIR);
@@ -120,14 +140,19 @@ describe("Acceptance Criteria CLI", () => {
 		});
 
 		it("should add acceptance criteria to existing proposal", async () => {
-			const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --ac "New criterion 1" --ac "New criterion 2"`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --ac "New criterion 1" --ac "New criterion 2"`,
+				{ cwd: TEST_DIR },
+			);
 			assert.strictEqual(result.exitCode, 0);
 
 			const core = new Core(TEST_DIR);
 			const proposal = await core.filesystem.loadProposal("proposal-1");
 			assert.notStrictEqual(proposal, null);
 			assert.ok(proposal?.rawContent?.includes("## Description"));
-			assert.ok(proposal?.rawContent?.includes("Existing proposal description"));
+			assert.ok(
+				proposal?.rawContent?.includes("Existing proposal description"),
+			);
 			assert.ok(proposal?.rawContent?.includes("## Acceptance Criteria"));
 			assert.ok(proposal?.rawContent?.includes("- [ ] #1 New criterion 1"));
 			assert.ok(proposal?.rawContent?.includes("- [ ] #2 New criterion 2"));
@@ -151,7 +176,10 @@ describe("Acceptance Criteria CLI", () => {
 			);
 
 			// Add a new criterion via CLI; this triggers consolidation
-			const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit 9 --ac "New C"`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal edit 9 --ac "New C"`,
+				{ cwd: TEST_DIR },
+			);
 			assert.strictEqual(result.exitCode, 0);
 
 			const proposal = await core.filesystem.loadProposal("proposal-9");
@@ -184,7 +212,10 @@ describe("Acceptance Criteria CLI", () => {
 				false,
 			);
 
-			const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-10 --ac "Marked 2"`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-10 --ac "Marked 2"`,
+				{ cwd: TEST_DIR },
+			);
 			assert.strictEqual(result.exitCode, 0);
 
 			const proposal = await core.filesystem.loadProposal("proposal-10");
@@ -203,11 +234,17 @@ describe("Acceptance Criteria CLI", () => {
 
 		it("should add to existing acceptance criteria", async () => {
 			// First add some criteria via CLI to avoid direct body mutation
-			const res = execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --ac "Old criterion 1" --ac "Old criterion 2"`, { cwd: TEST_DIR });
+			const res = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --ac "Old criterion 1" --ac "Old criterion 2"`,
+				{ cwd: TEST_DIR },
+			);
 			assert.strictEqual(res.exitCode, 0);
 
 			// Now add new criterion
-			const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --ac "New criterion"`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --ac "New criterion"`,
+				{ cwd: TEST_DIR },
+			);
 			assert.strictEqual(result.exitCode, 0);
 
 			const core = new Core(TEST_DIR);
@@ -220,7 +257,10 @@ describe("Acceptance Criteria CLI", () => {
 		});
 
 		it("should update title and add acceptance criteria together", async () => {
-			const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 -t "Updated Title" --ac "Must be updated" --ac "Must work"`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 -t "Updated Title" --ac "Must be updated" --ac "Must work"`,
+				{ cwd: TEST_DIR },
+			);
 			assert.strictEqual(result.exitCode, 0);
 
 			const core = new Core(TEST_DIR);
@@ -236,7 +276,10 @@ describe("Acceptance Criteria CLI", () => {
 	describe("acceptance criteria parsing", () => {
 		it("should handle empty criteria gracefully", async () => {
 			// Skip the --ac flag entirely when empty, as the shell API doesn't handle empty strings the same way
-			const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal create "Test Proposal"`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal create "Test Proposal"`,
+				{ cwd: TEST_DIR },
+			);
 			assert.strictEqual(result.exitCode, 0);
 
 			const core = new Core(TEST_DIR);
@@ -247,14 +290,18 @@ describe("Acceptance Criteria CLI", () => {
 		});
 
 		it("should trim whitespace from criteria", async () => {
-			const result =
-				execSync(`node --experimental-strip-types ${CLI_PATH} proposal create "Test Proposal" --ac "  Criterion with spaces  " --ac "  Another one  "`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal create "Test Proposal" --ac "  Criterion with spaces  " --ac "  Another one  "`,
+				{ cwd: TEST_DIR },
+			);
 			assert.strictEqual(result.exitCode, 0);
 
 			const core = new Core(TEST_DIR);
 			const proposal = await core.filesystem.loadProposal("proposal-1");
 			assert.notStrictEqual(proposal, null);
-			assert.ok(proposal?.rawContent?.includes("- [ ] #1 Criterion with spaces"));
+			assert.ok(
+				proposal?.rawContent?.includes("- [ ] #1 Criterion with spaces"),
+			);
 			assert.ok(proposal?.rawContent?.includes("- [ ] #2 Another one"));
 		});
 	});
@@ -287,7 +334,10 @@ Test proposal with acceptance criteria
 		});
 
 		it("should add new acceptance criteria with --ac", async () => {
-			const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --ac "Fourth criterion" --ac "Fifth criterion"`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --ac "Fourth criterion" --ac "Fifth criterion"`,
+				{ cwd: TEST_DIR },
+			);
 			assert.strictEqual(result.exitCode, 0);
 
 			const core = new Core(TEST_DIR);
@@ -300,7 +350,10 @@ Test proposal with acceptance criteria
 		});
 
 		it("should remove acceptance criterion by index with --remove-ac", async () => {
-			const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --remove-ac 2`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --remove-ac 2`,
+				{ cwd: TEST_DIR },
+			);
 			assert.strictEqual(result.exitCode, 0);
 
 			const core = new Core(TEST_DIR);
@@ -311,7 +364,10 @@ Test proposal with acceptance criteria
 		});
 
 		it("removes acceptance criteria section after deleting all items", async () => {
-			const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --remove-ac 1 --remove-ac 2 --remove-ac 3`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --remove-ac 1 --remove-ac 2 --remove-ac 3`,
+				{ cwd: TEST_DIR },
+			);
 			assert.strictEqual(result.exitCode, 0);
 
 			const core = new Core(TEST_DIR);
@@ -323,7 +379,10 @@ Test proposal with acceptance criteria
 		});
 
 		it("should check acceptance criterion by index with --check-ac", async () => {
-			const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --check-ac 2`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --check-ac 2`,
+				{ cwd: TEST_DIR },
+			);
 			assert.strictEqual(result.exitCode, 0);
 
 			const core = new Core(TEST_DIR);
@@ -335,10 +394,16 @@ Test proposal with acceptance criteria
 
 		it("should uncheck acceptance criterion by index with --uncheck-ac", async () => {
 			// First check a criterion
-			execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --check-ac 1`, { cwd: TEST_DIR });
+			execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --check-ac 1`,
+				{ cwd: TEST_DIR },
+			);
 
 			// Then uncheck it
-			const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --uncheck-ac 1`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --uncheck-ac 1`,
+				{ cwd: TEST_DIR },
+			);
 			assert.strictEqual(result.exitCode, 0);
 
 			const core = new Core(TEST_DIR);
@@ -347,7 +412,10 @@ Test proposal with acceptance criteria
 		});
 
 		it("should handle multiple operations in one command", async () => {
-			const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --check-ac 1 --remove-ac 2 --ac "New criterion"`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --check-ac 1 --remove-ac 2 --ac "New criterion"`,
+				{ cwd: TEST_DIR },
+			);
 			assert.strictEqual(result.exitCode, 0);
 
 			const core = new Core(TEST_DIR);
@@ -359,33 +427,52 @@ Test proposal with acceptance criteria
 		});
 
 		it("should error on invalid index for --remove-ac", async () => {
-			const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --remove-ac 10`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --remove-ac 10`,
+				{ cwd: TEST_DIR },
+			);
 			assert.notStrictEqual(result.exitCode, 0);
 			const msg = result.stderr.toString();
-			assert.ok(/Acceptance criterion (?:#\d+(?:, #\d+)* )?not found/.test(msg));
+			assert.ok(
+				/Acceptance criterion (?:#\d+(?:, #\d+)* )?not found/.test(msg),
+			);
 		});
 
 		it("should error on invalid index for --check-ac", async () => {
-			const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --check-ac 10`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --check-ac 10`,
+				{ cwd: TEST_DIR },
+			);
 			assert.notStrictEqual(result.exitCode, 0);
 			const msg = result.stderr.toString();
-			assert.ok(/Acceptance criterion (?:#\d+(?:, #\d+)* )?not found/.test(msg));
+			assert.ok(
+				/Acceptance criterion (?:#\d+(?:, #\d+)* )?not found/.test(msg),
+			);
 		});
 
 		it("should error on non-numeric index", async () => {
-			const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --remove-ac abc`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --remove-ac abc`,
+				{ cwd: TEST_DIR },
+			);
 			assert.notStrictEqual(result.exitCode, 0);
 			expect(result.stderr.toString()).toContain("Invalid index");
 		});
 
 		it("should error on zero index", async () => {
-			const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --remove-ac 0`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --remove-ac 0`,
+				{ cwd: TEST_DIR },
+			);
 			assert.notStrictEqual(result.exitCode, 0);
 			expect(result.stderr.toString()).toContain("Invalid index");
 		});
 
 		it("should error on negative index", async () => {
-			const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --remove-ac=-1`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal edit proposal-1 --remove-ac=-1`,
+				{ cwd: TEST_DIR },
+			);
 			assert.notStrictEqual(result.exitCode, 0);
 			expect(result.stderr.toString()).toContain("Invalid index");
 		});
@@ -413,13 +500,20 @@ Test proposal with acceptance criteria
 				false,
 			);
 
-			const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit 2 --ac "New criterion"`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal edit 2 --ac "New criterion"`,
+				{ cwd: TEST_DIR },
+			);
 			assert.strictEqual(result.exitCode, 0);
 
 			const proposal = await core.filesystem.loadProposal("proposal-2");
 			assert.ok(proposal?.rawContent?.includes("<!-- AC:BEGIN -->"));
-			assert.ok(proposal?.rawContent?.includes("- [ ] #1 Old format criterion 1"));
-			assert.ok(proposal?.rawContent?.includes("- [x] #2 Old format criterion 2"));
+			assert.ok(
+				proposal?.rawContent?.includes("- [ ] #1 Old format criterion 1"),
+			);
+			assert.ok(
+				proposal?.rawContent?.includes("- [x] #2 Old format criterion 2"),
+			);
 			assert.ok(proposal?.rawContent?.includes("- [ ] #3 New criterion"));
 			assert.ok(proposal?.rawContent?.includes("<!-- AC:END -->"));
 		});
@@ -460,9 +554,21 @@ describe("AcceptanceCriteriaManager unit tests", () => {
 
 		const criteria = AcceptanceCriteriaManager.parseAcceptanceCriteria(content);
 		assert.strictEqual(criteria.length, 3);
-		assert.deepStrictEqual(criteria[0], { checked: false, text: "First criterion", index: 1 });
-		assert.deepStrictEqual(criteria[1], { checked: true, text: "Second criterion", index: 2 });
-		assert.deepStrictEqual(criteria[2], { checked: false, text: "Third criterion", index: 3 });
+		assert.deepStrictEqual(criteria[0], {
+			checked: false,
+			text: "First criterion",
+			index: 1,
+		});
+		assert.deepStrictEqual(criteria[1], {
+			checked: true,
+			text: "Second criterion",
+			index: 2,
+		});
+		assert.deepStrictEqual(criteria[2], {
+			checked: false,
+			text: "Third criterion",
+			index: 3,
+		});
 	});
 
 	test("should format criteria with proper numbering", () => {
@@ -471,7 +577,8 @@ describe("AcceptanceCriteriaManager unit tests", () => {
 			{ checked: true, text: "Second", index: 2 },
 		];
 
-		const formatted = AcceptanceCriteriaManager.formatAcceptanceCriteria(criteria);
+		const formatted =
+			AcceptanceCriteriaManager.formatAcceptanceCriteria(criteria);
 		assert.ok(formatted.includes("## Acceptance Criteria"));
 		assert.ok(formatted.includes("<!-- AC:BEGIN -->"));
 		assert.ok(formatted.includes("- [ ] #1 First"));
@@ -495,7 +602,9 @@ describe("AcceptanceCriteriaManager unit tests", () => {
 			{ index: 3, text: "Document audit trail", checked: false },
 		]);
 
-		const bodyMatch = updated.match(/<!-- AC:BEGIN -->([\s\S]*?)<!-- AC:END -->/);
+		const bodyMatch = updated.match(
+			/<!-- AC:BEGIN -->([\s\S]*?)<!-- AC:END -->/,
+		);
 		assert.notStrictEqual(bodyMatch, null);
 		const body = bodyMatch?.[1] || "";
 		assert.ok(body.includes("### Critical"));
@@ -509,7 +618,8 @@ describe("AcceptanceCriteriaManager unit tests", () => {
 		const reduced = AcceptanceCriteriaManager.updateContent(updated, [
 			{ index: 1, text: "Must pass authentication", checked: false },
 		]);
-		const reducedBody = reduced.match(/<!-- AC:BEGIN -->([\s\S]*?)<!-- AC:END -->/)?.[1] || "";
+		const reducedBody =
+			reduced.match(/<!-- AC:BEGIN -->([\s\S]*?)<!-- AC:END -->/)?.[1] || "";
 		assert.ok(reducedBody.includes("### Critical"));
 		assert.ok(reducedBody.includes("### Optional"));
 		assert.ok(reducedBody.includes("- [ ] #1 Must pass authentication"));
@@ -518,18 +628,23 @@ describe("AcceptanceCriteriaManager unit tests", () => {
 
 	describe("Multi-value CLI operations", () => {
 		it("should support multiple --ac flags in proposal create", async () => {
-			const result =
-				execSync(`node --experimental-strip-types ${CLI_PATH_UNIT} proposal create "Multi AC Test" --ac "First" --ac "Second" --ac "Third"`, { cwd: 
-					TEST_DIR_UNIT,
-				 });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH_UNIT} proposal create "Multi AC Test" --ac "First" --ac "Second" --ac "Third"`,
+				{ cwd: TEST_DIR_UNIT },
+			);
 			assert.strictEqual(result.exitCode, 0);
 
 			// Parse proposal ID from output
-			const proposalId = result.toString().match(/(?:Created proposal|Proposal)\s+([a-zA-Z0-9.-]+)/)?.[1];
+			const proposalId = result
+				.toString()
+				.match(/(?:Created proposal|Proposal)\s+([a-zA-Z0-9.-]+)/)?.[1];
 			assert.ok(proposalId);
 
 			// Verify ACs were created
-			const proposalResult = execSync(`node --experimental-strip-types ${CLI_PATH_UNIT} proposal ${proposalId} --plain`, { cwd: TEST_DIR_UNIT });
+			const proposalResult = execSync(
+				`node --experimental-strip-types ${CLI_PATH_UNIT} proposal ${proposalId} --plain`,
+				{ cwd: TEST_DIR_UNIT },
+			);
 			expect(proposalResult.stdout.toString()).toContain("- [ ] #1 First");
 			expect(proposalResult.stdout.toString()).toContain("- [ ] #2 Second");
 			expect(proposalResult.stdout.toString()).toContain("- [ ] #3 Third");
@@ -537,20 +652,26 @@ describe("AcceptanceCriteriaManager unit tests", () => {
 
 		it("should support multiple --check-ac flags in single command", async () => {
 			// Create proposal with multiple ACs
-			const createResult =
-				execSync(`node --experimental-strip-types ${CLI_PATH_UNIT} proposal create "Check Test" --ac "First" --ac "Second" --ac "Third" --ac "Fourth"`, { cwd: 
-					TEST_DIR_UNIT,
-				 });
-			const proposalId = createResult.toString().match(/(?:Created proposal|Proposal)\s+([a-zA-Z0-9.-]+)/)?.[1];
+			const createResult = execSync(
+				`node --experimental-strip-types ${CLI_PATH_UNIT} proposal create "Check Test" --ac "First" --ac "Second" --ac "Third" --ac "Fourth"`,
+				{ cwd: TEST_DIR_UNIT },
+			);
+			const proposalId = createResult
+				.toString()
+				.match(/(?:Created proposal|Proposal)\s+([a-zA-Z0-9.-]+)/)?.[1];
 
 			// Check multiple ACs at once
-			const checkResult = execSync(`node --experimental-strip-types ${CLI_PATH_UNIT} proposal edit ${proposalId} --check-ac 1 --check-ac 3`, { cwd: 
-				TEST_DIR_UNIT,
-			 });
+			const checkResult = execSync(
+				`node --experimental-strip-types ${CLI_PATH_UNIT} proposal edit ${proposalId} --check-ac 1 --check-ac 3`,
+				{ cwd: TEST_DIR_UNIT },
+			);
 			assert.strictEqual(checkResult.exitCode, 0);
 
 			// Verify correct ACs were checked
-			const proposalResult = execSync(`node --experimental-strip-types ${CLI_PATH_UNIT} proposal ${proposalId} --plain`, { cwd: TEST_DIR_UNIT });
+			const proposalResult = execSync(
+				`node --experimental-strip-types ${CLI_PATH_UNIT} proposal ${proposalId} --plain`,
+				{ cwd: TEST_DIR_UNIT },
+			);
 			expect(proposalResult.stdout.toString()).toContain("- [x] #1 First");
 			expect(proposalResult.stdout.toString()).toContain("- [ ] #2 Second");
 			expect(proposalResult.stdout.toString()).toContain("- [x] #3 Third");
@@ -559,23 +680,32 @@ describe("AcceptanceCriteriaManager unit tests", () => {
 
 		it("should support mixed AC operations in single command", async () => {
 			// Create proposal with multiple ACs
-			const createResult =
-				execSync(`node --experimental-strip-types ${CLI_PATH_UNIT} proposal create "Mixed Test" --ac "First" --ac "Second" --ac "Third" --ac "Fourth"`, { cwd: 
-					TEST_DIR_UNIT,
-				 });
-			const proposalId = createResult.toString().match(/(?:Created proposal|Proposal)\s+([a-zA-Z0-9.-]+)/)?.[1];
+			const createResult = execSync(
+				`node --experimental-strip-types ${CLI_PATH_UNIT} proposal create "Mixed Test" --ac "First" --ac "Second" --ac "Third" --ac "Fourth"`,
+				{ cwd: TEST_DIR_UNIT },
+			);
+			const proposalId = createResult
+				.toString()
+				.match(/(?:Created proposal|Proposal)\s+([a-zA-Z0-9.-]+)/)?.[1];
 
 			// Check some ACs first
-			execSync(`node --experimental-strip-types ${CLI_PATH_UNIT} proposal edit ${proposalId} --check-ac 1 --check-ac 2 --check-ac 3`, { cwd: TEST_DIR_UNIT });
+			execSync(
+				`node --experimental-strip-types ${CLI_PATH_UNIT} proposal edit ${proposalId} --check-ac 1 --check-ac 2 --check-ac 3`,
+				{ cwd: TEST_DIR_UNIT },
+			);
 
 			// Now do mixed operations: uncheck 1, keep 2 checked, check 4
-			const mixedResult = execSync(`node --experimental-strip-types ${CLI_PATH_UNIT} proposal edit ${proposalId} --uncheck-ac 1 --check-ac 4`, { cwd: 
-				TEST_DIR_UNIT,
-			 });
+			const mixedResult = execSync(
+				`node --experimental-strip-types ${CLI_PATH_UNIT} proposal edit ${proposalId} --uncheck-ac 1 --check-ac 4`,
+				{ cwd: TEST_DIR_UNIT },
+			);
 			assert.strictEqual(mixedResult.exitCode, 0);
 
 			// Verify final proposal
-			const proposalResult = execSync(`node --experimental-strip-types ${CLI_PATH_UNIT} proposal ${proposalId} --plain`, { cwd: TEST_DIR_UNIT });
+			const proposalResult = execSync(
+				`node --experimental-strip-types ${CLI_PATH_UNIT} proposal ${proposalId} --plain`,
+				{ cwd: TEST_DIR_UNIT },
+			);
 			expect(proposalResult.stdout.toString()).toContain("- [ ] #1 First"); // unchecked
 			expect(proposalResult.stdout.toString()).toContain("- [x] #2 Second"); // remained checked
 			expect(proposalResult.stdout.toString()).toContain("- [x] #3 Third"); // remained checked
@@ -584,20 +714,26 @@ describe("AcceptanceCriteriaManager unit tests", () => {
 
 		it("should support multiple --remove-ac flags with proper renumbering", async () => {
 			// Create proposal with 5 ACs
-			const createResult =
-				execSync(`node --experimental-strip-types ${CLI_PATH_UNIT} proposal create "Remove Test" --ac "First" --ac "Second" --ac "Third" --ac "Fourth" --ac "Fifth"`, { cwd: 
-					TEST_DIR_UNIT,
-				 });
-			const proposalId = createResult.toString().match(/(?:Created proposal|Proposal)\s+([a-zA-Z0-9.-]+)/)?.[1];
+			const createResult = execSync(
+				`node --experimental-strip-types ${CLI_PATH_UNIT} proposal create "Remove Test" --ac "First" --ac "Second" --ac "Third" --ac "Fourth" --ac "Fifth"`,
+				{ cwd: TEST_DIR_UNIT },
+			);
+			const proposalId = createResult
+				.toString()
+				.match(/(?:Created proposal|Proposal)\s+([a-zA-Z0-9.-]+)/)?.[1];
 
 			// Remove ACs 2 and 4 (should be processed in descending order to avoid index shifting)
-			const removeResult = execSync(`node --experimental-strip-types ${CLI_PATH_UNIT} proposal edit ${proposalId} --remove-ac 2 --remove-ac 4`, { cwd: 
-				TEST_DIR_UNIT,
-			 });
+			const removeResult = execSync(
+				`node --experimental-strip-types ${CLI_PATH_UNIT} proposal edit ${proposalId} --remove-ac 2 --remove-ac 4`,
+				{ cwd: TEST_DIR_UNIT },
+			);
 			assert.strictEqual(removeResult.exitCode, 0);
 
 			// Verify remaining ACs are properly renumbered
-			const proposalResult = execSync(`node --experimental-strip-types ${CLI_PATH_UNIT} proposal ${proposalId} --plain`, { cwd: TEST_DIR_UNIT });
+			const proposalResult = execSync(
+				`node --experimental-strip-types ${CLI_PATH_UNIT} proposal ${proposalId} --plain`,
+				{ cwd: TEST_DIR_UNIT },
+			);
 			expect(proposalResult.stdout.toString()).toContain("- [ ] #1 First"); // original #1
 			expect(proposalResult.stdout.toString()).toContain("- [ ] #2 Third"); // original #3 -> #2
 			expect(proposalResult.stdout.toString()).toContain("- [ ] #3 Fifth"); // original #5 -> #3
@@ -607,16 +743,23 @@ describe("AcceptanceCriteriaManager unit tests", () => {
 
 		it("should handle invalid indices gracefully in multi-value operations", async () => {
 			// Create proposal with 2 ACs
-			const createResult = execSync(`node --experimental-strip-types ${CLI_PATH_UNIT} proposal create "Invalid Test" --ac "First" --ac "Second"`, { cwd: 
-				TEST_DIR_UNIT,
-			 });
-			const proposalId = createResult.toString().match(/(?:Created proposal|Proposal)\s+([a-zA-Z0-9.-]+)/)?.[1];
+			const createResult = execSync(
+				`node --experimental-strip-types ${CLI_PATH_UNIT} proposal create "Invalid Test" --ac "First" --ac "Second"`,
+				{ cwd: TEST_DIR_UNIT },
+			);
+			const proposalId = createResult
+				.toString()
+				.match(/(?:Created proposal|Proposal)\s+([a-zA-Z0-9.-]+)/)?.[1];
 
 			// Try to check valid and invalid indices
-			const checkResult = execSync(`node --experimental-strip-types ${CLI_PATH_UNIT} proposal edit ${proposalId} --check-ac 1 --check-ac 5`, { cwd: TEST_DIR_UNIT })
-				;
+			const checkResult = execSync(
+				`node --experimental-strip-types ${CLI_PATH_UNIT} proposal edit ${proposalId} --check-ac 1 --check-ac 5`,
+				{ cwd: TEST_DIR_UNIT },
+			);
 			assert.strictEqual(checkResult.exitCode, 1);
-			expect(checkResult.stderr.toString()).toMatch(/Acceptance criterion #\d+ not found/);
+			expect(checkResult.stderr.toString()).toMatch(
+				/Acceptance criterion #\d+ not found/,
+			);
 		});
 	});
 });

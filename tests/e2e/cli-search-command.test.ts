@@ -1,10 +1,13 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync,
+import {
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 let TEST_DIR: string;
@@ -70,7 +73,8 @@ describe("CLI search command", () => {
 			context: "Discussed search consolidation",
 			decision: "Adopt shared Fuse index",
 			consequences: "Unified search paths",
-			rawContent: "## Context\nDiscussed search consolidation\n\n## Decision\nAdopt shared Fuse index",
+			rawContent:
+				"## Context\nDiscussed search consolidation\n\n## Decision\nAdopt shared Fuse index",
 		});
 	});
 
@@ -79,7 +83,10 @@ describe("CLI search command", () => {
 	});
 
 	it("returns matching proposals, documents, and decisions in plain output", async () => {
-		const result = execSync(`node --experimental-strip-types ${cliPath} search central --plain`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${cliPath} search central --plain`,
+			{ cwd: TEST_DIR },
+		);
 
 		assert.strictEqual(result.exitCode, 0);
 		const stdout = result.stdout.toString();
@@ -92,20 +99,31 @@ describe("CLI search command", () => {
 	});
 
 	it("honors status and priority filters for proposal results", async () => {
-		const statusResult = execSync(`node --experimental-strip-types ${cliPath} search follow-up --type proposal --status "Active" --plain`, { cwd: TEST_DIR });
+		const statusResult = execSync(
+			`node --experimental-strip-types ${cliPath} search follow-up --type proposal --status "Active" --plain`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(statusResult.exitCode, 0);
 		const statusStdout = statusResult.stdout.toString();
 		assert.ok(statusStdout.includes("proposal-2 - High priority follow-up"));
-		assert.ok(!statusStdout.includes("proposal-1 - Central search integration"));
+		assert.ok(
+			!statusStdout.includes("proposal-1 - Central search integration"),
+		);
 
-		const priorityResult = execSync(`node --experimental-strip-types ${cliPath} search follow-up --type proposal --priority high --plain`, { cwd: TEST_DIR });
+		const priorityResult = execSync(
+			`node --experimental-strip-types ${cliPath} search follow-up --type proposal --priority high --plain`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(priorityResult.exitCode, 0);
 		const priorityStdout = priorityResult.stdout.toString();
 		assert.ok(priorityStdout.includes("proposal-2 - High priority follow-up"));
 	});
 
 	it("applies result limit", async () => {
-		const result = execSync(`node --experimental-strip-types ${cliPath} search search --plain --limit 1`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${cliPath} search search --plain --limit 1`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(result.exitCode, 0);
 		const stdout = result.stdout.toString();
 		const proposalMatches = stdout.match(/proposal-\d+ -/g) || [];

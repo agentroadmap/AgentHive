@@ -47,7 +47,9 @@ export function parseProposalFile(filePath: string): ProposalInfo | null {
 	const labelsStr = fm.match(/^labels:\s*(.+)$/m)?.[1]?.trim();
 	const unlocksStr = fm.match(/^unlocks:\s*(.+)$/m)?.[1]?.trim();
 	const needsStr = fm.match(/^needs_capabilities:\s*(.+)$/m)?.[1]?.trim();
-	const descMatch = content.match(/## Description\n\n([\s\S]*?)(?:\n##|\n---|$)/);
+	const descMatch = content.match(
+		/## Description\n\n([\s\S]*?)(?:\n##|\n---|$)/,
+	);
 	const description = descMatch?.[1]?.trim();
 
 	// Parse dependencies (multi-line YAML array)
@@ -93,7 +95,17 @@ export function parseProposalFile(filePath: string): ProposalInfo | null {
 		}
 	}
 
-	return { id, title, status, dependencies: deps, labels, directive, unlocks, needs_capabilities: needs, description };
+	return {
+		id,
+		title,
+		status,
+		dependencies: deps,
+		labels,
+		directive,
+		unlocks,
+		needs_capabilities: needs,
+		description,
+	};
 }
 
 /**
@@ -117,7 +129,7 @@ export function loadProposals(proposalsDir: string): ProposalInfo[] {
  */
 export function findGaps(proposals: ProposalInfo[]): string[] {
 	const gaps: string[] = [];
-	const proposalIds = new Set(proposals.map((s) => s.id));
+	const _proposalIds = new Set(proposals.map((s) => s.id));
 	const allUnlocks = new Set<string>();
 	const allCapabilities = new Set<string>();
 
@@ -133,10 +145,14 @@ export function findGaps(proposals: ProposalInfo[]): string[] {
 	// Check if unlocked capabilities have proposals that use them
 	for (const capability of allCapabilities) {
 		const hasImplementation = proposals.some(
-			(s) => s.labels.includes(capability) || s.title.toLowerCase().includes(capability.toLowerCase()),
+			(s) =>
+				s.labels.includes(capability) ||
+				s.title.toLowerCase().includes(capability.toLowerCase()),
 		);
 		if (!hasImplementation) {
-			gaps.push(`Capability "${capability}" is needed but no proposal implements it`);
+			gaps.push(
+				`Capability "${capability}" is needed but no proposal implements it`,
+			);
 		}
 	}
 
@@ -146,7 +162,10 @@ export function findGaps(proposals: ProposalInfo[]): string[] {
 /**
  * Compute suggested directive based on dependency depth.
  */
-export function suggestDirective(proposal: ProposalInfo, allProposals: ProposalInfo[]): string {
+export function suggestDirective(
+	proposal: ProposalInfo,
+	allProposals: ProposalInfo[],
+): string {
 	const depGraph = new Map(allProposals.map((s) => [s.id, s]));
 	const visited = new Set<string>();
 
@@ -171,21 +190,25 @@ export function suggestDirective(proposal: ProposalInfo, allProposals: ProposalI
  */
 export function generateProposals(proposals: ProposalInfo[]): Proposal[] {
 	const generatedProposals: Proposal[] = [];
-	const proposalIds = new Set(proposals.map((s) => s.id));
-	const reachedIds = new Set(proposals.filter((s) => s.status === "Reached").map((s) => s.id));
+	const _proposalIds = new Set(proposals.map((s) => s.id));
+	const _reachedIds = new Set(
+		proposals.filter((s) => s.status === "Reached").map((s) => s.id),
+	);
 
 	// Find proposals with unlocks that aren't implemented
 	const unimplementedUnlocks = new Map<string, string[]>();
 	for (const proposal of proposals) {
 		for (const unlock of proposal.unlocks || []) {
 			const isImplemented = proposals.some(
-				(s) => s.labels.includes(unlock) || s.title.toLowerCase().includes(unlock.toLowerCase()),
+				(s) =>
+					s.labels.includes(unlock) ||
+					s.title.toLowerCase().includes(unlock.toLowerCase()),
 			);
 			if (!isImplemented) {
 				if (!unimplementedUnlocks.has(unlock)) {
 					unimplementedUnlocks.set(unlock, []);
 				}
-				unimplementedUnlocks.get(unlock)!.push(proposal.id);
+				unimplementedUnlocks.get(unlock)?.push(proposal.id);
 			}
 		}
 	}
@@ -244,7 +267,9 @@ export function formatProposal(proposal: Proposal, index: number): string {
 	];
 
 	if (proposal.suggestedDependencies.length > 0) {
-		lines.push(`**Suggested Dependencies:** ${proposal.suggestedDependencies.join(", ")}`);
+		lines.push(
+			`**Suggested Dependencies:** ${proposal.suggestedDependencies.join(", ")}`,
+		);
 	}
 	if (proposal.suggestedDirective) {
 		lines.push(`**Suggested Directive:** ${proposal.suggestedDirective}`);
@@ -276,20 +301,27 @@ export function auditRoadmap(proposals: ProposalInfo[]): AuditResult {
 			if (!descendants.has(dep)) {
 				descendants.set(dep, []);
 			}
-			descendants.get(dep)!.push(proposal.id);
+			descendants.get(dep)?.push(proposal.id);
 		}
 	}
 
 	const orphans: ProposalInfo[] = [];
 	const deadEnds: ProposalInfo[] = [];
-	const brokenDependencies: Array<{ proposalId: string; missingId: string }> = [];
+	const brokenDependencies: Array<{ proposalId: string; missingId: string }> =
+		[];
 
 	for (const proposal of proposals) {
 		const hasDependencies = proposal.dependencies.length > 0;
 		const hasDescendants = (descendants.get(proposal.id)?.length || 0) > 0;
 
 		// Orphan: no dependencies and no descendants (unless it's the very first proposal)
-		if (!hasDependencies && !hasDescendants && proposal.id !== "0" && proposal.id !== "000" && proposal.id !== "STATE-0") {
+		if (
+			!hasDependencies &&
+			!hasDescendants &&
+			proposal.id !== "0" &&
+			proposal.id !== "000" &&
+			proposal.id !== "STATE-0"
+		) {
 			orphans.push(proposal);
 		}
 
@@ -315,12 +347,19 @@ export function auditRoadmap(proposals: ProposalInfo[]): AuditResult {
 	}
 
 	let summary = `Roadmap Audit: ${proposals.length} proposals analyzed.\n`;
-	if (orphans.length === 0 && deadEnds.length === 0 && brokenDependencies.length === 0) {
+	if (
+		orphans.length === 0 &&
+		deadEnds.length === 0 &&
+		brokenDependencies.length === 0
+	) {
 		summary += "✅ No major DAG issues detected.";
 	} else {
-		if (orphans.length > 0) summary += `❌ ${orphans.length} orphan proposals found.\n`;
-		if (deadEnds.length > 0) summary += `⚠️ ${deadEnds.length} dead ends found.\n`;
-		if (brokenDependencies.length > 0) summary += `❌ ${brokenDependencies.length} broken dependencies found.\n`;
+		if (orphans.length > 0)
+			summary += `❌ ${orphans.length} orphan proposals found.\n`;
+		if (deadEnds.length > 0)
+			summary += `⚠️ ${deadEnds.length} dead ends found.\n`;
+		if (brokenDependencies.length > 0)
+			summary += `❌ ${brokenDependencies.length} broken dependencies found.\n`;
 	}
 
 	return { orphans, deadEnds, brokenDependencies, summary };

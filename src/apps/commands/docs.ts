@@ -5,10 +5,14 @@
  * Enhanced for STATE-58.1: Full proposal detail pages and GitHub Pages deployment.
  */
 
-import { resolve } from "node:path";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { generateDocs, watchAndRegenerate, generateGitHubPagesWorkflow } from '../../core/infrastructure/doc-generator.ts';
-import type { DocGeneratorOptions } from '../../core/infrastructure/doc-generator.ts';
+import { resolve } from "node:path";
+import type { DocGeneratorOptions } from "../../core/infrastructure/doc-generator.ts";
+import {
+	generateDocs,
+	generateGitHubPagesWorkflow,
+	watchAndRegenerate,
+} from "../../core/infrastructure/doc-generator.ts";
 
 export interface DocsCommandOptions {
 	output?: string;
@@ -30,7 +34,7 @@ export interface DocsCommandOptions {
  */
 export async function runDocsCommand(
 	projectRoot: string,
-	args: string[]
+	args: string[],
 ): Promise<void> {
 	const subcommand = args[0] || "generate";
 
@@ -103,7 +107,7 @@ export async function runDocsCommand(
 async function handleGenerate(
 	projectRoot: string,
 	options: DocGeneratorOptions,
-	generateWorkflow = false
+	generateWorkflow = false,
 ): Promise<void> {
 	console.log("📚 Generating documentation...");
 
@@ -151,16 +155,20 @@ async function handleGenerateWorkflow(projectRoot: string): Promise<void> {
 
 async function handleWatch(
 	projectRoot: string,
-	options: DocGeneratorOptions
+	options: DocGeneratorOptions,
 ): Promise<void> {
 	console.log("👀 Watching for changes...");
 	console.log("Press Ctrl+C to stop\n");
 
 	const cleanup = await watchAndRegenerate(projectRoot, options, (result) => {
 		if (result.success) {
-			console.log(`[${new Date().toLocaleTimeString()}] ✅ Documentation regenerated (${result.files.length} files)`);
+			console.log(
+				`[${new Date().toLocaleTimeString()}] ✅ Documentation regenerated (${result.files.length} files)`,
+			);
 		} else {
-			console.error(`[${new Date().toLocaleTimeString()}] ❌ Regeneration failed`);
+			console.error(
+				`[${new Date().toLocaleTimeString()}] ❌ Regeneration failed`,
+			);
 		}
 	});
 
@@ -178,7 +186,7 @@ async function handleWatch(
 async function handleServe(
 	projectRoot: string,
 	options: DocGeneratorOptions,
-	port: number
+	port: number,
 ): Promise<void> {
 	// First generate
 	await handleGenerate(projectRoot, options);
@@ -207,7 +215,9 @@ async function handleServe(
 	});
 
 	server.listen(port, () => {
-		console.log(`\n🌐 Documentation server running at http://localhost:${port}`);
+		console.log(
+			`\n🌐 Documentation server running at http://localhost:${port}`,
+		);
 		console.log("Press Ctrl+C to stop");
 	});
 

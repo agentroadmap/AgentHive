@@ -9,9 +9,8 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { readFile, writeFile, mkdir, access, readdir, unlink } from "node:fs/promises";
-import { join, basename } from "node:path";
-import { existsSync } from "node:fs";
+import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -209,7 +208,9 @@ export class AuditTrail {
 	/**
 	 * Log a generic event.
 	 */
-	async logEvent(event: Omit<AuditEvent, "id" | "timestamp">): Promise<AuditEvent> {
+	async logEvent(
+		event: Omit<AuditEvent, "id" | "timestamp">,
+	): Promise<AuditEvent> {
 		const fullEvent: AuditEvent = {
 			...event,
 			id: randomUUID(),
@@ -242,7 +243,7 @@ export class AuditTrail {
 
 		// Append events to current log file
 		const logFile = this.getLogFilePath();
-		const lines = events.map((e) => JSON.stringify(e)).join("\n") + "\n";
+		const lines = `${events.map((e) => JSON.stringify(e)).join("\n")}\n`;
 
 		await writeFile(logFile, lines, { flag: "a" });
 
@@ -344,7 +345,10 @@ export class AuditTrail {
 	private getLogFilePath(): string {
 		if (!this.currentLogFile) {
 			const date = new Date().toISOString().slice(0, 10);
-			this.currentLogFile = join(this.config.auditDir, `${AUDIT_FILE_PREFIX}${date}-${randomUUID().slice(0, 8)}.jsonl`);
+			this.currentLogFile = join(
+				this.config.auditDir,
+				`${AUDIT_FILE_PREFIX}${date}-${randomUUID().slice(0, 8)}.jsonl`,
+			);
 		}
 		return this.currentLogFile;
 	}
@@ -357,7 +361,10 @@ export class AuditTrail {
 			if (stats.length >= this.config.maxFileSize) {
 				// Rotate to new file
 				const date = new Date().toISOString().slice(0, 10);
-				this.currentLogFile = join(this.config.auditDir, `${AUDIT_FILE_PREFIX}${date}-${randomUUID().slice(0, 8)}.jsonl`);
+				this.currentLogFile = join(
+					this.config.auditDir,
+					`${AUDIT_FILE_PREFIX}${date}-${randomUUID().slice(0, 8)}.jsonl`,
+				);
 				await this.cleanupOldFiles();
 			}
 		} catch {
@@ -416,8 +423,15 @@ export class AuditTrail {
 
 	private async updateIndex(events: AuditEvent[]): Promise<void> {
 		const indexPath = join(this.config.auditDir, AUDIT_INDEX_FILE);
-		const lines = events.map((e) => JSON.stringify({ id: e.id, timestamp: e.timestamp, type: e.type, agentId: e.agentId }));
-		await writeFile(indexPath, lines.join("\n") + "\n", { flag: "a" });
+		const lines = events.map((e) =>
+			JSON.stringify({
+				id: e.id,
+				timestamp: e.timestamp,
+				type: e.type,
+				agentId: e.agentId,
+			}),
+		);
+		await writeFile(indexPath, `${lines.join("\n")}\n`, { flag: "a" });
 	}
 
 	private async rewriteLogs(events: AuditEvent[]): Promise<void> {
@@ -430,7 +444,7 @@ export class AuditTrail {
 		// Write all retained events to a single file
 		this.currentLogFile = null;
 		if (events.length > 0) {
-			const lines = events.map((e) => JSON.stringify(e)).join("\n") + "\n";
+			const lines = `${events.map((e) => JSON.stringify(e)).join("\n")}\n`;
 			await writeFile(this.getLogFilePath(), lines);
 		}
 	}
@@ -462,16 +476,21 @@ export function resetAuditTrail(): void {
 /**
  * AC#4: Format audit events for MCP tool output.
  */
-export function formatAuditEvents(events: AuditEvent[], format: "table" | "json" | "text" = "text"): string {
+export function formatAuditEvents(
+	events: AuditEvent[],
+	format: "table" | "json" | "text" = "text",
+): string {
 	if (format === "json") {
 		return JSON.stringify(events, null, 2);
 	}
 
 	if (format === "table") {
-		const header = "TIMESTAMP                  | TYPE                  | AGENT              | ACTION              | SUCCESS";
+		const header =
+			"TIMESTAMP                  | TYPE                  | AGENT              | ACTION              | SUCCESS";
 		const separator = "-".repeat(header.length);
-		const rows = events.map((e) =>
-			`${e.timestamp.slice(0, 26).padEnd(26)} | ${e.type.padEnd(21)} | ${e.agentId.slice(0, 18).padEnd(18)} | ${e.action.slice(0, 19).padEnd(19)} | ${e.success ? "✓" : "✗"}`,
+		const rows = events.map(
+			(e) =>
+				`${e.timestamp.slice(0, 26).padEnd(26)} | ${e.type.padEnd(21)} | ${e.agentId.slice(0, 18).padEnd(18)} | ${e.action.slice(0, 19).padEnd(19)} | ${e.success ? "✓" : "✗"}`,
 		);
 		return [header, separator, ...rows].join("\n");
 	}

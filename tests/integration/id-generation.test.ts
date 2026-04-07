@@ -1,12 +1,12 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect } from "../support/test-utils.ts";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
 import { serializeProposal } from "../../src/markdown/serializer.ts";
 import type { Proposal } from "../../src/types/index.ts";
+import { expect } from "../support/test-utils.ts";
 
 const TEST_DIR = join(tmpdir(), "roadmap-id-gen-test");
 
@@ -48,7 +48,10 @@ describe("Proposal ID Generation with Archives", () => {
 		assert.strictEqual(activeProposals.length, 0);
 
 		// Create new proposal - should be proposal-1 (archived IDs can be reused)
-		const result = await core.createProposalFromInput({ title: "Proposal After Archive" }, false);
+		const result = await core.createProposalFromInput(
+			{ title: "Proposal After Archive" },
+			false,
+		);
 		assert.strictEqual(result.proposal.id, "proposal-1");
 
 		// Verify the proposal was created with correct ID
@@ -59,9 +62,18 @@ describe("Proposal ID Generation with Archives", () => {
 
 	it("should consider completed proposals but not archived proposals for ID generation", async () => {
 		// Create proposals 1-3
-		await core.createProposalFromInput({ title: "Proposal 1", status: "Potential" }, false);
-		await core.createProposalFromInput({ title: "Proposal 2", status: "Potential" }, false);
-		await core.createProposalFromInput({ title: "Proposal 3", status: "Potential" }, false);
+		await core.createProposalFromInput(
+			{ title: "Proposal 1", status: "Potential" },
+			false,
+		);
+		await core.createProposalFromInput(
+			{ title: "Proposal 2", status: "Potential" },
+			false,
+		);
+		await core.createProposalFromInput(
+			{ title: "Proposal 3", status: "Potential" },
+			false,
+		);
 
 		// Archive proposal-1 (its ID can be reused)
 		await core.archiveProposal("proposal-1", false);
@@ -76,7 +88,10 @@ describe("Proposal ID Generation with Archives", () => {
 
 		// Create new proposal - should be proposal-4 (max of active 3 + completed 2 is 3, so next is 4)
 		// Note: archived proposal-1 is NOT considered, so its ID could be reused if 2 and 3 weren't taken
-		const result = await core.createProposalFromInput({ title: "Proposal 4" }, false);
+		const result = await core.createProposalFromInput(
+			{ title: "Proposal 4" },
+			false,
+		);
 		assert.strictEqual(result.proposal.id, "proposal-4");
 
 		// Verify archived proposal still exists
@@ -93,8 +108,14 @@ describe("Proposal ID Generation with Archives", () => {
 		await core.createProposalFromInput({ title: "Parent Proposal" }, false);
 
 		// Create subproposals
-		const subproposal1 = await core.createProposalFromInput({ title: "Subproposal 1", parentProposalId: "proposal-1" }, false);
-		const subproposal2 = await core.createProposalFromInput({ title: "Subproposal 2", parentProposalId: "proposal-1" }, false);
+		const subproposal1 = await core.createProposalFromInput(
+			{ title: "Subproposal 1", parentProposalId: "proposal-1" },
+			false,
+		);
+		const subproposal2 = await core.createProposalFromInput(
+			{ title: "Subproposal 2", parentProposalId: "proposal-1" },
+			false,
+		);
 
 		assert.strictEqual(subproposal1.proposal.id, "proposal-1.1");
 		assert.strictEqual(subproposal2.proposal.id, "proposal-1.2");
@@ -105,11 +126,17 @@ describe("Proposal ID Generation with Archives", () => {
 		await core.archiveProposal("proposal-1.2", false);
 
 		// Create new parent proposal - should be proposal-1 (reusing archived parent ID)
-		const newParent = await core.createProposalFromInput({ title: "New Parent" }, false);
+		const newParent = await core.createProposalFromInput(
+			{ title: "New Parent" },
+			false,
+		);
 		assert.strictEqual(newParent.proposal.id, "proposal-1");
 
 		// Create subproposal of new parent (proposal-1) - should be proposal-1.1 (reusing archived subproposal ID)
-		const newSubproposal = await core.createProposalFromInput({ title: "New Subproposal", parentProposalId: "proposal-1" }, false);
+		const newSubproposal = await core.createProposalFromInput(
+			{ title: "New Subproposal", parentProposalId: "proposal-1" },
+			false,
+		);
 		assert.strictEqual(newSubproposal.proposal.id, "proposal-1.1");
 	});
 
@@ -129,7 +156,10 @@ describe("Proposal ID Generation with Archives", () => {
 		await core.archiveProposal("proposal-001", false);
 
 		// Create new proposal - should reuse archived ID (proposal-001)
-		const result = await core.createProposalFromInput({ title: "Proposal 2" }, false);
+		const result = await core.createProposalFromInput(
+			{ title: "Proposal 2" },
+			false,
+		);
 		assert.strictEqual(result.proposal.id, "proposal-001");
 	});
 
@@ -151,11 +181,17 @@ describe("Proposal ID Generation with Archives", () => {
 			parentProposalId: "proposal-1",
 		};
 		const content = serializeProposal(legacySubproposal);
-		await writeFile(join(proposalsDir, "proposal-1.1 - Legacy Subproposal.md"),  content);
+		await writeFile(
+			join(proposalsDir, "proposal-1.1 - Legacy Subproposal.md"),
+			content,
+		);
 
 		// Create new subproposal via Core - should detect the legacy subproposal and get proposal-1.2
 		// BUG: Currently returns proposal-1.1 due to case-sensitive startsWith() check
-		const newSubproposal = await core.createProposalFromInput({ title: "New Subproposal", parentProposalId: "proposal-1" }, false);
+		const newSubproposal = await core.createProposalFromInput(
+			{ title: "New Subproposal", parentProposalId: "proposal-1" },
+			false,
+		);
 		assert.strictEqual(newSubproposal.proposal.id, "proposal-1.2");
 	});
 });

@@ -48,7 +48,11 @@ export function parseStoredUtcDate(dateStr: string): Date | null {
 		const day = parseIntStrict(d);
 		const date = new Date(Date.UTC(year, month - 1, day, 0, 0, 0));
 
-		if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+		if (
+			date.getUTCFullYear() !== year ||
+			date.getUTCMonth() !== month - 1 ||
+			date.getUTCDate() !== day
+		) {
 			return null;
 		}
 
@@ -72,7 +76,10 @@ export function formatStoredUtcDateForDisplay(dateStr: string): string {
 	return parsed.toLocaleDateString();
 }
 
-export function formatStoredUtcDateForCompactDisplay(dateStr: string, now: Date = new Date()): string {
+export function formatStoredUtcDateForCompactDisplay(
+	dateStr: string,
+	now: Date = new Date(),
+): string {
 	const normalized = dateStr.trim();
 	if (!normalized) return "—";
 

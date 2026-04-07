@@ -8,8 +8,7 @@
  */
 
 import assert from "node:assert";
-import { describe, it, beforeEach, afterEach } from "node:test";
-import { existsSync, readFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
 import { createUniqueTestDir, safeCleanup } from "../support/test-utils.ts";
 
@@ -38,7 +37,10 @@ describe("proposal-20: Gateway Bot - Human-Agent Talk Relay", () => {
 
 			const result = await core.readMessages({ channel: "project" });
 			assert.ok(result.messages.length > 0, "Should have messages");
-			assert.ok(result.messages.some(m => m.from === "alice"), "Should find alice's message");
+			assert.ok(
+				result.messages.some((m) => m.from === "alice"),
+				"Should find alice's message",
+			);
 		});
 	});
 
@@ -54,7 +56,7 @@ describe("proposal-20: Gateway Bot - Human-Agent Talk Relay", () => {
 			// Verify message is in the file
 			const result = await core.readMessages({ channel: "project" });
 			assert.ok(
-				result.messages.some(m => m.text.includes("Discord")),
+				result.messages.some((m) => m.text.includes("Discord")),
 				"External message should be in local files",
 			);
 		});
@@ -77,7 +79,7 @@ describe("proposal-20: Gateway Bot - Human-Agent Talk Relay", () => {
 			});
 
 			const result = await core.readMessages({ channel: "project" });
-			const msg = result.messages.find(m => m.from === "relay-bot");
+			const msg = result.messages.find((m) => m.from === "relay-bot");
 			assert.ok(msg, "Relay message should exist");
 			assert.ok(msg.timestamp, "Message should have timestamp");
 		});

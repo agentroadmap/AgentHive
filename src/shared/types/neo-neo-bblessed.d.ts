@@ -43,7 +43,10 @@ declare module "neo-neo-bblessed" {
 		on(
 			event: string,
 			callback:
-				| ((ch: string, key: { name: string; ctrl?: boolean; meta?: boolean }) => void)
+				| ((
+						ch: string,
+						key: { name: string; ctrl?: boolean; meta?: boolean },
+				  ) => void)
 				| ((...args: unknown[]) => void),
 		): void;
 		destroy(): void;
@@ -95,8 +98,12 @@ declare module "neo-neo-bblessed" {
 	export function box(options?: Record<string, unknown>): BoxInterface;
 	export function line(options?: Record<string, unknown>): LineInterface;
 	export function list(options?: Record<string, unknown>): ListInterface;
-	export function scrollablebox(options?: Record<string, unknown>): ScrollableBoxInterface;
-	export function scrollabletext(options?: Record<string, unknown>): ScrollableTextInterface;
+	export function scrollablebox(
+		options?: Record<string, unknown>,
+	): ScrollableBoxInterface;
+	export function scrollabletext(
+		options?: Record<string, unknown>,
+	): ScrollableTextInterface;
 	export function log(options?: Record<string, unknown>): LogInterface;
 	export function textbox(options?: Record<string, unknown>): TextboxInterface;
 }

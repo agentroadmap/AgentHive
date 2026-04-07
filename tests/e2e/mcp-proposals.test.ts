@@ -2,7 +2,11 @@ import assert from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { McpServer } from "../../src/mcp/server.ts";
 import { registerProposalTools } from "../../src/mcp/tools/proposals/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync, expect } from "../support/test-utils.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 // Helper to extract text from MCP content (handles union types)
 const getText = (content: unknown[] | undefined, index = 0): string => {
@@ -69,10 +73,13 @@ describe("MCP proposal tools (MVP)", () => {
 
 	it("picks up a ready proposal", async () => {
 		// Create proposal via internal API (bypasses MCP tool limitations)
-		const { proposal: created } = await mcpServer.createProposalFromInput({
-			title: "Ready for pickup",
-			status: "Review",
-		}, false);
+		const { proposal: created } = await mcpServer.createProposalFromInput(
+			{
+				title: "Ready for pickup",
+				status: "Review",
+			},
+			false,
+		);
 
 		const proposalId = created.id.toLowerCase();
 		// Verify proposal is ready (unassigned, non-terminal, no deps)
@@ -85,13 +92,17 @@ describe("MCP proposal tools (MVP)", () => {
 
 		const pickupText = getText(pickupResult.content);
 		assert.ok(
-			pickupText.toLowerCase().includes("chosen") || pickupText.toLowerCase().includes("claimed"),
-			`Expected pickup to claim proposal, got: ${pickupText}`
+			pickupText.toLowerCase().includes("chosen") ||
+				pickupText.toLowerCase().includes("claimed"),
+			`Expected pickup to claim proposal, got: ${pickupText}`,
 		);
 
 		// Verify assignment
 		const claimed = await mcpServer.getProposal(proposalId);
-		assert.ok(claimed?.assignee?.includes("test-agent"), "Proposal should be assigned to test-agent");
+		assert.ok(
+			claimed?.assignee?.includes("test-agent"),
+			"Proposal should be assigned to test-agent",
+		);
 	});
 
 	it("calculates impact of a proposal change", async () => {

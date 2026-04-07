@@ -1,10 +1,14 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/index.ts";
 import type { Proposal } from "../../src/types/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 let TEST_DIR: string;
 const CLI_PATH = join(process.cwd(), "src", "cli.ts");
@@ -45,7 +49,10 @@ describe("CLI parent proposal id normalization", () => {
 		};
 		await core.createProposal(parent, true);
 
-		execSync(`node --experimental-strip-types ${CLI_PATH} proposal create Child --parent 4`, { cwd: TEST_DIR });
+		execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal create Child --parent 4`,
+			{ cwd: TEST_DIR },
+		);
 
 		const child = await core.filesystem.loadProposal("proposal-4.1");
 		assert.strictEqual(child?.parentProposalId, "proposal-4");

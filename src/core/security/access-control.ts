@@ -11,17 +11,30 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { readFile, writeFile, mkdir, access } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { existsSync } from "node:fs";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
 export type Role = "admin" | "reviewer" | "developer" | "viewer" | "agent";
 
-export type Resource = "proposal" | "directive" | "config" | "message" | "knowledge" | "audit";
+export type Resource =
+	| "proposal"
+	| "directive"
+	| "config"
+	| "message"
+	| "knowledge"
+	| "audit";
 
-export type Action = "read" | "create" | "edit" | "delete" | "claim" | "review" | "reach" | "admin";
+export type Action =
+	| "read"
+	| "create"
+	| "edit"
+	| "delete"
+	| "claim"
+	| "review"
+	| "reach"
+	| "admin";
 
 export interface RolePermissions {
 	role: Role;
@@ -114,8 +127,23 @@ const DEFAULT_ROLE_PERMISSIONS: RolePermissions[] = [
 	{
 		role: "admin",
 		permissions: [
-			{ resource: "proposal", actions: ["read", "create", "edit", "delete", "claim", "review", "reach", "admin"] },
-			{ resource: "directive", actions: ["read", "create", "edit", "delete", "admin"] },
+			{
+				resource: "proposal",
+				actions: [
+					"read",
+					"create",
+					"edit",
+					"delete",
+					"claim",
+					"review",
+					"reach",
+					"admin",
+				],
+			},
+			{
+				resource: "directive",
+				actions: ["read", "create", "edit", "delete", "admin"],
+			},
 			{ resource: "config", actions: ["read", "edit", "admin"] },
 			{ resource: "message", actions: ["read", "create", "edit", "delete"] },
 			{ resource: "knowledge", actions: ["read", "create", "edit", "delete"] },
@@ -163,10 +191,10 @@ const DEFAULT_ROLE_PERMISSIONS: RolePermissions[] = [
  * Valid proposal transitions (phase-gate rules).
  */
 const VALID_TRANSITIONS: Record<string, string[]> = {
-	"New": ["In Progress"],
+	New: ["In Progress"],
 	"In Progress": ["Review", "New"], // Can demote back
-	"Review": ["Reached", "In Progress"], // Can reject back to progress
-	"Reached": [], // Terminal proposal (use demote for exceptional cases)
+	Review: ["Reached", "In Progress"], // Can reject back to progress
+	Reached: [], // Terminal proposal (use demote for exceptional cases)
 };
 
 // ─── Access Control Implementation ───────────────────────────────────
@@ -206,13 +234,25 @@ export class AccessControl {
 		}
 
 		// Check role-based permissions
-		const hasRolePermission = this.hasPermission(agent, request.resource, request.action);
+		const hasRolePermission = this.hasPermission(
+			agent,
+			request.resource,
+			request.action,
+		);
 		if (!hasRolePermission) {
-			return this.deny(request, `Role ${agent.roles.join(", ")} lacks ${request.action} on ${request.resource}`, "role");
+			return this.deny(
+				request,
+				`Role ${agent.roles.join(", ")} lacks ${request.action} on ${request.resource}`,
+				"role",
+			);
 		}
 
 		// AC#2: Check assignee enforcement (blocks non-assigned, allows bypass)
-		if (this.config.enforceAssignee && request.resource === "proposal" && request.resourceId) {
+		if (
+			this.config.enforceAssignee &&
+			request.resource === "proposal" &&
+			request.resourceId
+		) {
 			const assigneeCheck = this.checkAssigneeEnforcement(agent, request);
 			if (!assigneeCheck.allowed) {
 				return assigneeCheck;
@@ -221,7 +261,11 @@ export class AccessControl {
 		}
 
 		// AC#3: Check phase-gate validation
-		if (this.config.enforcePhaseGate && request.resource === "proposal" && request.proposal) {
+		if (
+			this.config.enforcePhaseGate &&
+			request.resource === "proposal" &&
+			request.proposal
+		) {
 			const phaseCheck = this.checkPhaseGate(request);
 			if (!phaseCheck.allowed) {
 				return phaseCheck;
@@ -248,13 +292,19 @@ export class AccessControl {
 	/**
 	 * Check if an agent has a specific permission based on their roles.
 	 */
-	private hasPermission(agent: Agent, resource: Resource, action: Action): boolean {
+	private hasPermission(
+		agent: Agent,
+		resource: Resource,
+		action: Action,
+	): boolean {
 		for (const role of agent.roles) {
 			const rolePerm = this.rolePermissions.find((rp) => rp.role === role);
 			if (!rolePerm) continue;
 
-			const resourcePerm = rolePerm.permissions.find((p) => p.resource === resource);
-			if (resourcePerm && resourcePerm.actions.includes(action)) {
+			const resourcePerm = rolePerm.permissions.find(
+				(p) => p.resource === resource,
+			);
+			if (resourcePerm?.actions.includes(action)) {
 				return true;
 			}
 		}
@@ -267,7 +317,10 @@ export class AccessControl {
 	 * Check if the agent is assigned to the target proposal.
 	 * Only assigned agents can edit their proposals (unless admin).
 	 */
-	private checkAssigneeEnforcement(agent: Agent, request: AccessRequest): AccessResult {
+	private checkAssigneeEnforcement(
+		agent: Agent,
+		request: AccessRequest,
+	): AccessResult {
 		// Admins bypass assignee check
 		if (agent.roles.includes("admin")) {
 			return { allowed: true, reason: "Admin bypasses assignee check" };
@@ -347,7 +400,10 @@ export class AccessControl {
 		const validNext = VALID_TRANSITIONS[proposal.previousStatus];
 		if (!validNext) {
 			// Unknown previous status, allow (backward compatibility)
-			return { allowed: true, reason: `Unknown previous status: ${proposal.previousStatus}` };
+			return {
+				allowed: true,
+				reason: `Unknown previous status: ${proposal.previousStatus}`,
+			};
 		}
 
 		if (!validNext.includes(proposal.currentStatus)) {
@@ -521,7 +577,11 @@ export class AccessControl {
 	/**
 	 * Get the audit log, optionally filtered.
 	 */
-	getAuditLog(filters?: { agentId?: string; resource?: string; allowed?: boolean }): AuditEntry[] {
+	getAuditLog(filters?: {
+		agentId?: string;
+		resource?: string;
+		allowed?: boolean;
+	}): AuditEntry[] {
 		let entries = [...this.auditLog];
 
 		if (filters?.agentId) {
@@ -545,7 +605,7 @@ export class AccessControl {
 
 		await mkdir(this.config.configDir, { recursive: true });
 		const auditPath = join(this.config.configDir, AUDIT_FILE);
-		const lines = this.auditLog.map((e) => JSON.stringify(e)).join("\n") + "\n";
+		const lines = `${this.auditLog.map((e) => JSON.stringify(e)).join("\n")}\n`;
 		await writeFile(auditPath, lines, { flag: "a" });
 		this.auditLog = [];
 	}
@@ -569,7 +629,11 @@ export class AccessControl {
 
 	// ─── Internal Helpers ─────────────────────────────────────────────
 
-	private deny(request: AccessRequest, reason: string, deniedBy: "role" | "assignee" | "phase-gate"): AccessResult {
+	private deny(
+		request: AccessRequest,
+		reason: string,
+		deniedBy: "role" | "assignee" | "phase-gate",
+	): AccessResult {
 		const auditId = randomUUID();
 		const entry: AuditEntry = {
 			id: auditId,
@@ -683,7 +747,11 @@ export async function hasAccess(
  * Validate a proposal transition without enforcing it.
  * Useful for UI previews.
  */
-export function previewTransition(ac: AccessControl, fromStatus: string, toStatus: string): {
+export function previewTransition(
+	ac: AccessControl,
+	fromStatus: string,
+	toStatus: string,
+): {
 	valid: boolean;
 	validOptions: string[];
 } {

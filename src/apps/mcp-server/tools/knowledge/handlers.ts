@@ -2,18 +2,19 @@
  * MCP tool handlers for knowledge base operations
  */
 
+import {
+	KnowledgeBase,
+	type KnowledgeEntryType,
+	type KnowledgeSearchQuery,
+} from "../../../../core/infrastructure/knowledge-base.ts";
 import { McpError } from "../../errors/mcp-errors.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
-import { KnowledgeBase, type KnowledgeEntryType, type KnowledgeSearchQuery } from '../../../../core/infrastructure/knowledge-base.ts';
 
 export class KnowledgeHandlers {
-	private server: McpServer;
 	private knowledgeBase: KnowledgeBase | null = null;
 
-	constructor(server: McpServer) {
-		this.server = server;
-	}
+	constructor(private readonly server: McpServer) {}
 
 	private getKnowledgeBase(): KnowledgeBase {
 		if (!this.knowledgeBase) {
@@ -36,7 +37,7 @@ export class KnowledgeHandlers {
 	}): Promise<CallToolResult> {
 		try {
 			const kb = this.getKnowledgeBase();
-			const entry = kb.addEntry({
+			const entry = await kb.addEntry({
 				type: args.type,
 				title: args.title,
 				content: args.content,
@@ -84,7 +85,7 @@ export class KnowledgeHandlers {
 				limit: args.limit,
 			};
 
-			const results = kb.search(query);
+			const results = await kb.search(query);
 
 			if (results.length === 0) {
 				return {
@@ -108,9 +109,13 @@ export class KnowledgeHandlers {
 				lines.push(`- Keywords: ${result.entry.keywords.join(", ")}`);
 				lines.push(`- Matched: ${result.matchedKeywords.join(", ")}`);
 				if (result.entry.relatedProposals.length > 0) {
-					lines.push(`- Related Proposals: ${result.entry.relatedProposals.join(", ")}`);
+					lines.push(
+						`- Related Proposals: ${result.entry.relatedProposals.join(", ")}`,
+					);
 				}
-				lines.push(`- Helpful: ${result.entry.helpfulCount} | References: ${result.entry.referenceCount}`);
+				lines.push(
+					`- Helpful: ${result.entry.helpfulCount} | References: ${result.entry.referenceCount}`,
+				);
 			}
 
 			return {
@@ -135,7 +140,7 @@ export class KnowledgeHandlers {
 	}): Promise<CallToolResult> {
 		try {
 			const kb = this.getKnowledgeBase();
-			const entry = kb.recordDecision({
+			const entry = await kb.recordDecision({
 				title: args.title,
 				content: args.content,
 				rationale: args.rationale,
@@ -170,7 +175,7 @@ export class KnowledgeHandlers {
 	}): Promise<CallToolResult> {
 		try {
 			const kb = this.getKnowledgeBase();
-			const pattern = kb.extractPattern({
+			const pattern = await kb.extractPattern({
 				name: args.name,
 				description: args.description,
 				codeExample: args.codeExample,
@@ -194,10 +199,14 @@ export class KnowledgeHandlers {
 		}
 	}
 
-	async getDecisions(args: { relatedProposal?: string }): Promise<CallToolResult> {
+	async getDecisions(args: {
+		relatedProposal?: string;
+	}): Promise<CallToolResult> {
 		try {
 			const kb = this.getKnowledgeBase();
-			const decisions = kb.getDecisions({ relatedProposal: args.relatedProposal });
+			const decisions = await kb.getDecisions({
+				relatedProposal: args.relatedProposal,
+			});
 
 			if (decisions.length === 0) {
 				return {
@@ -229,7 +238,7 @@ export class KnowledgeHandlers {
 	async getStats(): Promise<CallToolResult> {
 		try {
 			const kb = this.getKnowledgeBase();
-			const stats = kb.getStats();
+			const stats = await kb.getStats();
 
 			const lines = [
 				"Knowledge Base Statistics:",
@@ -274,7 +283,7 @@ export class KnowledgeHandlers {
 	async markHelpful(args: { entryId: string }): Promise<CallToolResult> {
 		try {
 			const kb = this.getKnowledgeBase();
-			const marked = kb.markHelpful(args.entryId);
+			const marked = await kb.markHelpful(args.entryId);
 
 			if (!marked) {
 				return {

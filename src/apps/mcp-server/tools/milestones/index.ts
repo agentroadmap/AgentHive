@@ -1,7 +1,12 @@
 import type { McpServer } from "../../server.ts";
 import type { McpToolHandler } from "../../types.ts";
 import { createSimpleValidatedTool } from "../../validation/tool-wrapper.ts";
-import type { DirectiveAddArgs, DirectiveArchiveArgs, DirectiveRemoveArgs, DirectiveRenameArgs } from "./handlers.ts";
+import type {
+	DirectiveAddArgs,
+	DirectiveArchiveArgs,
+	DirectiveRemoveArgs,
+	DirectiveRenameArgs,
+} from "./handlers.ts";
 import { DirectiveHandlers } from "./handlers.ts";
 import {
 	directiveAddSchema,
@@ -17,7 +22,8 @@ export function registerMilestoneTools(server: McpServer): void {
 	const listTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "directive_list",
-			description: "List directives from directive files and proposal-only directive values found on local proposals",
+			description:
+				"List directives from directive files and proposal-only directive values found on local proposals",
 			inputSchema: directiveListSchema,
 		},
 		directiveListSchema,
@@ -37,7 +43,8 @@ export function registerMilestoneTools(server: McpServer): void {
 	const renameTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "directive_rename",
-			description: "Rename a directive file and optionally update local proposals",
+			description:
+				"Rename a directive file and optionally update local proposals",
 			inputSchema: directiveRenameSchema,
 		},
 		directiveRenameSchema,
@@ -47,7 +54,8 @@ export function registerMilestoneTools(server: McpServer): void {
 	const removeTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "directive_remove",
-			description: "Remove an active directive file and optionally clear/reassign proposals",
+			description:
+				"Remove an active directive file and optionally clear/reassign proposals",
 			inputSchema: directiveRemoveSchema,
 		},
 		directiveRemoveSchema,
@@ -57,7 +65,8 @@ export function registerMilestoneTools(server: McpServer): void {
 	const archiveTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "directive_archive",
-			description: "Archive a directive by moving it to roadmap/archive/directives",
+			description:
+				"Archive a directive by moving it to roadmap/archive/directives",
 			inputSchema: directiveArchiveSchema,
 		},
 		directiveArchiveSchema,

@@ -11,12 +11,7 @@
  * AC#4: Team coordination through shared lease or lease chain
  */
 
-import { randomUUID } from "node:crypto";
-import type {
-	AgentProposal,
-	ComplexityEstimate,
-	ProposalStatus,
-} from "./agent-proposals.ts";
+import type { AgentProposal } from "./agent-proposals.ts";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -32,15 +27,18 @@ export type MemberStatus =
 	| "inactive";
 
 /** Lease coordination strategy */
-export type CoordinationStrategy = "shared-lease" | "lease-chain" | "owner-only";
+export type CoordinationStrategy =
+	| "shared-lease"
+	| "lease-chain"
+	| "owner-only";
 
 /** Team status */
 export type TeamStatus =
-	| "forming"     // Accepting invitations
-	| "active"      // Team is actively working
-	| "paused"      // Temporarily paused
-	| "completed"   // Work is done
-	| "dissolved";  // Team disbanded
+	| "forming" // Accepting invitations
+	| "active" // Team is actively working
+	| "paused" // Temporarily paused
+	| "completed" // Work is done
+	| "dissolved"; // Team disbanded
 
 /** A team member with their role and status */
 export interface TeamMember {
@@ -172,7 +170,7 @@ export interface TeamFilter {
 const DEFAULT_MAX_TEAM_SIZE = 5;
 
 /** Minimum similarity score for overlap detection */
-const MIN_OVERLAP_SIMILARITY = 0.3;
+const _MIN_OVERLAP_SIMILARITY = 0.3;
 
 /** Default sync schedule */
 const DEFAULT_SYNC_SCHEDULE = "daily";
@@ -185,8 +183,6 @@ const DEFAULT_SYNC_SCHEDULE = "daily";
 export class DynamicTeamBuilder {
 	private teams: Map<string, Team> = new Map();
 	private events: TeamEvent[] = [];
-
-	constructor() {}
 
 	// ─── AC#1: Proposals Evaluated for Same-Proposal Overlap ──────────
 
@@ -224,7 +220,10 @@ export class DynamicTeamBuilder {
 			);
 
 			// Recommend roles based on proposal approaches
-			const recommendedRoles = this.recommendRoles(proposalProposals, avgComplexity);
+			const recommendedRoles = this.recommendRoles(
+				proposalProposals,
+				avgComplexity,
+			);
 
 			overlaps.push({
 				proposalId,
@@ -256,8 +255,7 @@ export class DynamicTeamBuilder {
 				const b = proposals[j]!;
 
 				// Compare approach types
-				const approachMatch =
-					a.approach.type === b.approach.type ? 1 : 0;
+				const approachMatch = a.approach.type === b.approach.type ? 1 : 0;
 
 				// Compare file overlap
 				const filesA = new Set(a.approach.filesAffected);
@@ -273,7 +271,8 @@ export class DynamicTeamBuilder {
 				const complexityMatch = 1 - complexityDiff / 10;
 
 				// Weighted average
-				const sim = approachMatch * 0.3 + fileOverlap * 0.4 + complexityMatch * 0.3;
+				const sim =
+					approachMatch * 0.3 + fileOverlap * 0.4 + complexityMatch * 0.3;
 				totalSimilarity += sim;
 				pairs++;
 			}
@@ -289,7 +288,11 @@ export class DynamicTeamBuilder {
 		proposals: AgentProposal[],
 		avgComplexity: number,
 	): Array<{ role: TeamRole; skills: string[]; justification: string }> {
-		const roles: Array<{ role: TeamRole; skills: string[]; justification: string }> = [];
+		const roles: Array<{
+			role: TeamRole;
+			skills: string[];
+			justification: string;
+		}> = [];
 
 		// Always need an owner (lead proposer)
 		roles.push({
@@ -351,7 +354,8 @@ export class DynamicTeamBuilder {
 			throw new Error("All proposals must target the same proposal");
 		}
 
-		const strategy = options?.coordinationStrategy ?? this.determineStrategy(proposals);
+		const strategy =
+			options?.coordinationStrategy ?? this.determineStrategy(proposals);
 		const teamId = generateId("TEAM");
 
 		// Determine owner: highest complexity score, then first proposal
@@ -387,7 +391,7 @@ export class DynamicTeamBuilder {
 			proposalId,
 			status: "forming",
 			members,
-			ownerId: ownerProposal!.agentId,
+			ownerId: ownerProposal?.agentId,
 			coordinationStrategy: strategy,
 			leaseChain,
 			proposalIds: proposals.map((p) => p.proposalId),
@@ -400,7 +404,7 @@ export class DynamicTeamBuilder {
 		};
 
 		this.teams.set(teamId, team);
-		this.recordEvent(teamId, "formed", ownerProposal!.agentId, {
+		this.recordEvent(teamId, "formed", ownerProposal?.agentId, {
 			memberCount: members.length,
 			strategy,
 		});
@@ -446,7 +450,9 @@ export class DynamicTeamBuilder {
 	 */
 	getTeamForProposal(proposalId: string): Team | undefined {
 		return Array.from(this.teams.values()).find(
-			(t) => t.proposalId === proposalId && (t.status === "forming" || t.status === "active"),
+			(t) =>
+				t.proposalId === proposalId &&
+				(t.status === "forming" || t.status === "active"),
 		);
 	}
 
@@ -489,10 +495,15 @@ export class DynamicTeamBuilder {
 		team.members.push(member);
 		team.capacity += member.capacity;
 
-		this.recordEvent(teamId, "member-invited", options?.invitedBy ?? team.ownerId, {
-			newMember: agentId,
-			role: member.role,
-		});
+		this.recordEvent(
+			teamId,
+			"member-invited",
+			options?.invitedBy ?? team.ownerId,
+			{
+				newMember: agentId,
+				role: member.role,
+			},
+		);
 
 		return member;
 	}
@@ -627,14 +638,19 @@ export class DynamicTeamBuilder {
 
 		const acceptedMembers = team.members.filter((m) => m.status === "accepted");
 		if (acceptedMembers.length < 2) {
-			throw new Error(`Need at least 2 accepted members to activate, got ${acceptedMembers.length}`);
+			throw new Error(
+				`Need at least 2 accepted members to activate, got ${acceptedMembers.length}`,
+			);
 		}
 
 		team.status = "active";
 		team.activatedAt = new Date().toISOString();
 
 		// Activate first lease chain entry if using that strategy
-		if (team.coordinationStrategy === "lease-chain" && team.leaseChain.length > 0) {
+		if (
+			team.coordinationStrategy === "lease-chain" &&
+			team.leaseChain.length > 0
+		) {
 			team.leaseChain[0]!.status = "active";
 			team.leaseChain[0]!.startedAt = new Date().toISOString();
 		}
@@ -685,7 +701,11 @@ export class DynamicTeamBuilder {
 	/**
 	 * Transfer lease to the next agent in the chain.
 	 */
-	transferLease(teamId: string, fromAgentId: string, completedTask?: string): {
+	transferLease(
+		teamId: string,
+		fromAgentId: string,
+		completedTask?: string,
+	): {
 		success: boolean;
 		newHolder?: string;
 		message: string;
@@ -693,11 +713,16 @@ export class DynamicTeamBuilder {
 		const team = this.teams.get(teamId);
 		if (!team) return { success: false, message: "Team not found" };
 		if (team.coordinationStrategy !== "lease-chain") {
-			return { success: false, message: "Team does not use lease-chain coordination" };
+			return {
+				success: false,
+				message: "Team does not use lease-chain coordination",
+			};
 		}
 
 		// Find current active entry
-		const currentIndex = team.leaseChain.findIndex((e) => e.status === "active");
+		const currentIndex = team.leaseChain.findIndex(
+			(e) => e.status === "active",
+		);
 		if (currentIndex < 0) {
 			return { success: false, message: "No active lease in chain" };
 		}
@@ -774,12 +799,14 @@ export class DynamicTeamBuilder {
 		return {
 			strategy: team.coordinationStrategy,
 			currentHolder: this.getCurrentLeaseHolder(teamId),
-			chainProgress: team.leaseChain.length > 0
-				? {
-						completed: team.leaseChain.filter((e) => e.status === "completed").length,
-						total: team.leaseChain.length,
-					}
-				: undefined,
+			chainProgress:
+				team.leaseChain.length > 0
+					? {
+							completed: team.leaseChain.filter((e) => e.status === "completed")
+								.length,
+							total: team.leaseChain.length,
+						}
+					: undefined,
 			sharedLeaseId: team.sharedLeaseId,
 		};
 	}
@@ -822,9 +849,10 @@ export class DynamicTeamBuilder {
 			activeTeams: teams.filter((t) => t.status === "active").length,
 			completedTeams: teams.filter((t) => t.status === "completed").length,
 			dissolvedTeams: teams.filter((t) => t.status === "dissolved").length,
-			avgTeamSize: teams.length > 0
-				? teams.reduce((sum, t) => sum + t.members.length, 0) / teams.length
-				: 0,
+			avgTeamSize:
+				teams.length > 0
+					? teams.reduce((sum, t) => sum + t.members.length, 0) / teams.length
+					: 0,
 		};
 	}
 
@@ -859,7 +887,7 @@ export class DynamicTeamBuilder {
 
 	private createLeaseChain(
 		members: TeamMember[],
-		proposals: AgentProposal[],
+		_proposals: AgentProposal[],
 	): LeaseChainEntry[] {
 		// Sort members by role priority: owner first, then contributors
 		const sortedMembers = [...members].sort((a, b) => {

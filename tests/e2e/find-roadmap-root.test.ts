@@ -1,9 +1,12 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { clearProjectRootCache, findRoadmapRoot } from "../../src/utils/find-roadmap-root.ts";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import {
+	clearProjectRootCache,
+	findRoadmapRoot,
+} from "../../src/utils/find-roadmap-root.ts";
 import { execSync } from "../support/test-utils.ts";
 
 describe("findRoadmapRoot", () => {
@@ -34,7 +37,10 @@ describe("findRoadmapRoot", () => {
 
 	it("should find root when roadmap.json exists at start dir", async () => {
 		// Create roadmap.json at root
-		await writeFile(join(testDir, "roadmap.json"), JSON.stringify({ name: "Test" }));
+		await writeFile(
+			join(testDir, "roadmap.json"),
+			JSON.stringify({ name: "Test" }),
+		);
 
 		const result = await findRoadmapRoot(testDir);
 		assert.strictEqual(result, testDir);
@@ -54,7 +60,10 @@ describe("findRoadmapRoot", () => {
 
 	it("should find root from deeply nested subfolder", async () => {
 		// Create roadmap.json at root
-		await writeFile(join(testDir, "roadmap.json"), JSON.stringify({ name: "Test" }));
+		await writeFile(
+			join(testDir, "roadmap.json"),
+			JSON.stringify({ name: "Test" }),
+		);
 
 		// Create deeply nested subfolder
 		const deepFolder = join(testDir, "a", "b", "c", "d", "e", "f");
@@ -79,7 +88,9 @@ describe("findRoadmapRoot", () => {
 
 		// Create roadmap in a subfolder (simulating monorepo)
 		const projectFolder = join(testDir, "packages", "my-project");
-		await mkdir(join(projectFolder, "roadmap", "proposals"), { recursive: true });
+		await mkdir(join(projectFolder, "roadmap", "proposals"), {
+			recursive: true,
+		});
 
 		// Search from within the project
 		const searchDir = join(projectFolder, "src");
@@ -123,7 +134,9 @@ describe("findRoadmapRoot", () => {
 		const innerProject = join(testDir, "packages", "inner");
 		await mkdir(innerProject, { recursive: true });
 		execSync(`git init`, { cwd: innerProject });
-		await mkdir(join(innerProject, "roadmap", "proposals"), { recursive: true });
+		await mkdir(join(innerProject, "roadmap", "proposals"), {
+			recursive: true,
+		});
 
 		// Search from within inner project
 		const innerSrc = join(innerProject, "src");

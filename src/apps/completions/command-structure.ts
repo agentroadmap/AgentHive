@@ -58,7 +58,8 @@ function extractArguments(command: Command): ArgumentInfo[] {
 	};
 
 	const commandWithArgs = command as CommandWithArgs;
-	const args = commandWithArgs.registeredArguments || commandWithArgs.args || [];
+	const args =
+		commandWithArgs.registeredArguments || commandWithArgs.args || [];
 
 	return args.map((arg: Argument) => ({
 		name: arg.name(),
@@ -82,20 +83,36 @@ function extractOptionInfo(option: Option): OptionInfo {
 /**
  * Find a command by name (including aliases)
  */
-export function findCommand(info: CommandInfo, commandName: string): CommandInfo | null {
-	return info.subcommands.find((cmd) => cmd.name === commandName || cmd.aliases.includes(commandName)) || null;
+export function findCommand(
+	info: CommandInfo,
+	commandName: string,
+): CommandInfo | null {
+	return (
+		info.subcommands.find(
+			(cmd) => cmd.name === commandName || cmd.aliases.includes(commandName),
+		) || null
+	);
 }
 
 /**
  * Find a subcommand within a command
  */
-export function findSubcommand(info: CommandInfo, commandName: string, subcommandName: string): CommandInfo | null {
+export function findSubcommand(
+	info: CommandInfo,
+	commandName: string,
+	subcommandName: string,
+): CommandInfo | null {
 	const command = findCommand(info, commandName);
 	if (!command) {
 		return null;
 	}
 
-	return command.subcommands.find((sub) => sub.name === subcommandName || sub.aliases.includes(subcommandName)) || null;
+	return (
+		command.subcommands.find(
+			(sub) =>
+				sub.name === subcommandName || sub.aliases.includes(subcommandName),
+		) || null
+	);
 }
 
 /**
@@ -112,7 +129,10 @@ export function getTopLevelCommands(info: CommandInfo): string[] {
 /**
  * Get all subcommand names for a command (including aliases)
  */
-export function getSubcommandNames(info: CommandInfo, commandName: string): string[] {
+export function getSubcommandNames(
+	info: CommandInfo,
+	commandName: string,
+): string[] {
 	const command = findCommand(info, commandName);
 	if (!command) {
 		return [];
@@ -128,7 +148,11 @@ export function getSubcommandNames(info: CommandInfo, commandName: string): stri
 /**
  * Get all option flags for a specific command/subcommand
  */
-export function getOptionFlags(info: CommandInfo, commandName?: string, subcommandName?: string): string[] {
+export function getOptionFlags(
+	info: CommandInfo,
+	commandName?: string,
+	subcommandName?: string,
+): string[] {
 	let targetCommand = info;
 
 	if (commandName) {
@@ -162,7 +186,11 @@ export function getOptionFlags(info: CommandInfo, commandName?: string, subcomma
 /**
  * Get expected arguments for a command/subcommand
  */
-export function getExpectedArguments(info: CommandInfo, commandName?: string, subcommandName?: string): ArgumentInfo[] {
+export function getExpectedArguments(
+	info: CommandInfo,
+	commandName?: string,
+	subcommandName?: string,
+): ArgumentInfo[] {
 	let targetCommand = info;
 
 	if (commandName) {

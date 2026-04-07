@@ -8,7 +8,10 @@ function normalizeLabel(label: string): string {
  * Collect available labels from configuration and proposals, de-duplicated but preserving
  * the first-seen casing so UI surfaces familiar labels.
  */
-export function collectAvailableLabels(proposals: Proposal[], configured: string[] = []): string[] {
+export function collectAvailableLabels(
+	proposals: Proposal[],
+	configured: string[] = [],
+): string[] {
 	const seen = new Set<string>();
 	const ordered: string[] = [];
 

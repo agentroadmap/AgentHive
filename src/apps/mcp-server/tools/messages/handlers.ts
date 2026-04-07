@@ -32,21 +32,38 @@ export class MessageHandlers {
 		this.core = core;
 	}
 
-	async subscribe(args: { channel: string; from: string; subscribe?: boolean }): Promise<CallToolResult> {
+	async subscribe(args: {
+		channel: string;
+		from: string;
+		subscribe?: boolean;
+	}): Promise<CallToolResult> {
 		try {
 			const doSubscribe = args.subscribe ?? true;
 			if (doSubscribe) {
 				await this.core.subscribeToChannel(args.from, args.channel);
 				return {
-					content: [{ type: "text", text: `Subscribed ${args.from} to channel: ${args.channel}` }],
+					content: [
+						{
+							type: "text",
+							text: `Subscribed ${args.from} to channel: ${args.channel}`,
+						},
+					],
 				};
 			}
 			await this.core.unsubscribeFromChannel(args.from, args.channel);
 			return {
-				content: [{ type: "text", text: `Unsubscribed ${args.from} from channel: ${args.channel}` }],
+				content: [
+					{
+						type: "text",
+						text: `Unsubscribed ${args.from} from channel: ${args.channel}`,
+					},
+				],
 			};
 		} catch (error) {
-			throw new McpError(`Failed to subscribe: ${(error as Error).message}`, "OPERATION_FAILED");
+			throw new McpError(
+				`Failed to subscribe: ${(error as Error).message}`,
+				"OPERATION_FAILED",
+			);
 		}
 	}
 
@@ -63,28 +80,48 @@ export class MessageHandlers {
 					],
 				};
 			}
-			const lines = channels.map((c) => `- **${c.name}** (${c.type})`).join("\n");
-			return { content: [{ type: "text", text: `## Available Channels\n\n${lines}` }] };
+			const lines = channels
+				.map((c) => `- **${c.name}** (${c.type})`)
+				.join("\n");
+			return {
+				content: [{ type: "text", text: `## Available Channels\n\n${lines}` }],
+			};
 		} catch (error) {
-			throw new McpError(`Failed to list channels: ${(error as Error).message}`, "OPERATION_FAILED");
+			throw new McpError(
+				`Failed to list channels: ${(error as Error).message}`,
+				"OPERATION_FAILED",
+			);
 		}
 	}
 
 	async readMessages(args: MessageReadArgs): Promise<CallToolResult> {
 		try {
-			const result = await this.core.readMessages({ channel: args.channel, since: args.since });
+			const result = await this.core.readMessages({
+				channel: args.channel,
+				since: args.since,
+			});
 			if (result.messages.length === 0) {
 				const sinceNote = args.since ? ` since ${args.since}` : "";
-				return { content: [{ type: "text", text: `No messages in **#${args.channel}**${sinceNote}.` }] };
+				return {
+					content: [
+						{
+							type: "text",
+							text: `No messages in **#${args.channel}**${sinceNote}.`,
+						},
+					],
+				};
 			}
 
 			const lines: string[] = [];
-			const intents: Array<{ timestamp: string; intent: NegotiationIntent }> = [];
+			const intents: Array<{ timestamp: string; intent: NegotiationIntent }> =
+				[];
 
 			for (const m of result.messages) {
 				const intent = decodeIntent(m.text);
 				const humanText = extractHumanText(m.text);
-				const displayText = intent ? `${formatIntent(intent)}${humanText ? ` — ${humanText}` : ""}` : m.text;
+				const displayText = intent
+					? `${formatIntent(intent)}${humanText ? ` — ${humanText}` : ""}`
+					: m.text;
 				lines.push(`[${m.timestamp}] **${m.from}**: ${displayText}`);
 				if (intent) {
 					intents.push({ timestamp: m.timestamp, intent });
@@ -101,7 +138,10 @@ export class MessageHandlers {
 
 			return { content: [{ type: "text", text: output }] };
 		} catch (error) {
-			throw new McpError(`Failed to read messages: ${(error as Error).message}`, "OPERATION_FAILED");
+			throw new McpError(
+				`Failed to read messages: ${(error as Error).message}`,
+				"OPERATION_FAILED",
+			);
 		}
 	}
 
@@ -132,12 +172,27 @@ export class MessageHandlers {
 				message = `${intentPayload}\n${args.message}`;
 			}
 
-			await this.core.sendMessage({ from: args.from, message, type, group, to });
+			await this.core.sendMessage({
+				from: args.from,
+				message,
+				type,
+				group,
+				to,
+			});
 			const dest = to ? `@${to}` : `#${group ?? "public"}`;
-			const intentNote = args.intent ? ` [intent: ${args.intent.type} on ${args.intent.proposalId}]` : "";
-			return { content: [{ type: "text", text: `Message sent to ${dest}${intentNote}` }] };
+			const intentNote = args.intent
+				? ` [intent: ${args.intent.type} on ${args.intent.proposalId}]`
+				: "";
+			return {
+				content: [
+					{ type: "text", text: `Message sent to ${dest}${intentNote}` },
+				],
+			};
 		} catch (error) {
-			throw new McpError(`Failed to send message: ${(error as Error).message}`, "OPERATION_FAILED");
+			throw new McpError(
+				`Failed to send message: ${(error as Error).message}`,
+				"OPERATION_FAILED",
+			);
 		}
 	}
 }

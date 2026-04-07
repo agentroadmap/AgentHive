@@ -67,7 +67,11 @@ describe("BUN_OPTIONS environment variable handling", () => {
 	});
 
 	it("should preserve BUN_OPTIONS for subsequent command usage", () => {
-		const testValues = ["--bun", "--config=./bunfig.toml --silent", "--env-file=.env.local"];
+		const testValues = [
+			"--bun",
+			"--config=./bunfig.toml --silent",
+			"--env-file=.env.local",
+		];
 
 		for (const value of testValues) {
 			// Set BUN_OPTIONS

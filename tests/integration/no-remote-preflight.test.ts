@@ -1,12 +1,12 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, join as joinPath } from "node:path";
-import { expect, buildCliCommand, execSync } from "../support/test-utils.ts";
-import { loadRemoteProposals } from '../../src/core/storage/proposal-loader.ts';
+import { afterEach, beforeEach, describe, it } from "node:test";
+import { loadRemoteProposals } from "../../src/core/storage/proposal-loader.ts";
 import { GitOperations } from "../../src/git/operations.ts";
 import type { RoadmapConfig } from "../../src/types/index.ts";
+import { buildCliCommand, execSync, expect } from "../support/test-utils.ts";
 
 describe("Missing git remote preflight", () => {
 	let tempDir: string;
@@ -64,17 +64,22 @@ describe("Missing git remote preflight", () => {
 
 		const gitOps = new GitOperations(tempDir, config);
 		const progress: string[] = [];
-		const remoteProposals = await loadRemoteProposals(gitOps as unknown as typeof gitOps, config, (m) => progress.push(m));
+		const remoteProposals = await loadRemoteProposals(
+			gitOps as unknown as typeof gitOps,
+			config,
+			(m) => progress.push(m),
+		);
 		expect(Array.isArray(remoteProposals)).toBe(true);
 		assert.strictEqual(remoteProposals.length, 0);
 	});
 
 	it("CLI init with includeRemote=true in no-remote repo shows a final warning", async () => {
 		const CLI_PATH = joinPath(process.cwd(), "src", "cli.ts");
-		const result =
-			execSync(`node --experimental-strip-types ${buildCliCommand([CLI_PATH, "init", "NoRemoteProj", "--defaults", "--check-branches", "true", "--include-remote", "true", "--auto-open-browser", "false"])}`, { cwd: tempDir })
-				
-				;
+		const result = execSync(
+			`node --experimental-strip-types ${buildCliCommand([CLI_PATH, "init", "NoRemoteProj", "--defaults", "--check-branches", "true", "--include-remote", "true", "--auto-open-browser", "false"])}`,
+			{ cwd: tempDir },
+		);
+
 		assert.strictEqual(result.exitCode, 0);
 		const out = result.stdout.toString() + result.stderr.toString();
 		expect(out.toLowerCase()).toContain("remoteoperations is enabled");

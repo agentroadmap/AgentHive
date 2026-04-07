@@ -1,9 +1,13 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 let TEST_DIR: string;
 
@@ -51,16 +55,28 @@ describe("Proposal edit section preservation", () => {
 		);
 
 		// Add acceptance criteria
-		execSync(`node --experimental-strip-types ${cliPath} proposal edit 1 --ac "Criterion 1,Criterion 2"`, { cwd: TEST_DIR });
+		execSync(
+			`node --experimental-strip-types ${cliPath} proposal edit 1 --ac "Criterion 1,Criterion 2"`,
+			{ cwd: TEST_DIR },
+		);
 
 		// Add implementation plan
-		execSync(`node --experimental-strip-types ${cliPath} proposal edit 1 --plan "Step 1\nStep 2\nStep 3"`, { cwd: TEST_DIR });
+		execSync(
+			`node --experimental-strip-types ${cliPath} proposal edit 1 --plan "Step 1\nStep 2\nStep 3"`,
+			{ cwd: TEST_DIR },
+		);
 
 		// Add implementation notes
-		execSync(`node --experimental-strip-types ${cliPath} proposal edit 1 --notes "Original implementation notes"`, { cwd: TEST_DIR });
+		execSync(
+			`node --experimental-strip-types ${cliPath} proposal edit 1 --notes "Original implementation notes"`,
+			{ cwd: TEST_DIR },
+		);
 
 		// Verify all sections exist
-		let result = execSync(`node --experimental-strip-types ${cliPath} proposal 1 --plain`, { cwd: TEST_DIR }).text();
+		let result = execSync(
+			`node --experimental-strip-types ${cliPath} proposal 1 --plain`,
+			{ cwd: TEST_DIR },
+		).text();
 
 		assert.ok(result.includes("Original description"));
 		assert.ok(result.includes("Criterion 1"));
@@ -71,10 +87,16 @@ describe("Proposal edit section preservation", () => {
 		assert.ok(result.includes("Original implementation notes"));
 
 		// Update just the description
-		execSync(`node --experimental-strip-types ${cliPath} proposal edit 1 -d "UPDATED description"`, { cwd: TEST_DIR });
+		execSync(
+			`node --experimental-strip-types ${cliPath} proposal edit 1 -d "UPDATED description"`,
+			{ cwd: TEST_DIR },
+		);
 
 		// Verify ALL sections are preserved
-		result = execSync(`node --experimental-strip-types ${cliPath} proposal 1 --plain`, { cwd: TEST_DIR }).text();
+		result = execSync(
+			`node --experimental-strip-types ${cliPath} proposal 1 --plain`,
+			{ cwd: TEST_DIR },
+		).text();
 
 		assert.ok(result.includes("UPDATED description"));
 		assert.ok(result.includes("Criterion 1"));
@@ -103,15 +125,30 @@ describe("Proposal edit section preservation", () => {
 		);
 
 		// Add all sections
-		execSync(`node --experimental-strip-types ${cliPath} proposal edit 2 --ac "Original criterion"`, { cwd: TEST_DIR });
-		execSync(`node --experimental-strip-types ${cliPath} proposal edit 2 --plan "Original plan"`, { cwd: TEST_DIR });
-		execSync(`node --experimental-strip-types ${cliPath} proposal edit 2 --notes "Original notes"`, { cwd: TEST_DIR });
+		execSync(
+			`node --experimental-strip-types ${cliPath} proposal edit 2 --ac "Original criterion"`,
+			{ cwd: TEST_DIR },
+		);
+		execSync(
+			`node --experimental-strip-types ${cliPath} proposal edit 2 --plan "Original plan"`,
+			{ cwd: TEST_DIR },
+		);
+		execSync(
+			`node --experimental-strip-types ${cliPath} proposal edit 2 --notes "Original notes"`,
+			{ cwd: TEST_DIR },
+		);
 
 		// Add new acceptance criteria (now adds instead of replacing)
-		execSync(`node --experimental-strip-types ${cliPath} proposal edit 2 --ac "Updated criterion 1" --ac "Updated criterion 2"`, { cwd: TEST_DIR });
+		execSync(
+			`node --experimental-strip-types ${cliPath} proposal edit 2 --ac "Updated criterion 1" --ac "Updated criterion 2"`,
+			{ cwd: TEST_DIR },
+		);
 
 		// Verify all sections are preserved
-		const result = execSync(`node --experimental-strip-types ${cliPath} proposal 2 --plain`, { cwd: TEST_DIR }).text();
+		const result = execSync(
+			`node --experimental-strip-types ${cliPath} proposal 2 --plain`,
+			{ cwd: TEST_DIR },
+		).text();
 
 		assert.ok(result.includes("Test description"));
 		assert.ok(result.includes("Original criterion")); // Now preserved
@@ -139,15 +176,30 @@ describe("Proposal edit section preservation", () => {
 		);
 
 		// Add all sections
-		execSync(`node --experimental-strip-types ${cliPath} proposal edit 3 --ac "Test criterion"`, { cwd: TEST_DIR });
-		execSync(`node --experimental-strip-types ${cliPath} proposal edit 3 --plan "Original plan"`, { cwd: TEST_DIR });
-		execSync(`node --experimental-strip-types ${cliPath} proposal edit 3 --notes "Original notes"`, { cwd: TEST_DIR });
+		execSync(
+			`node --experimental-strip-types ${cliPath} proposal edit 3 --ac "Test criterion"`,
+			{ cwd: TEST_DIR },
+		);
+		execSync(
+			`node --experimental-strip-types ${cliPath} proposal edit 3 --plan "Original plan"`,
+			{ cwd: TEST_DIR },
+		);
+		execSync(
+			`node --experimental-strip-types ${cliPath} proposal edit 3 --notes "Original notes"`,
+			{ cwd: TEST_DIR },
+		);
 
 		// Update implementation plan
-		execSync(`node --experimental-strip-types ${cliPath} proposal edit 3 --plan "Updated plan step 1\nUpdated plan step 2"`, { cwd: TEST_DIR });
+		execSync(
+			`node --experimental-strip-types ${cliPath} proposal edit 3 --plan "Updated plan step 1\nUpdated plan step 2"`,
+			{ cwd: TEST_DIR },
+		);
 
 		// Verify all sections are preserved
-		const result = execSync(`node --experimental-strip-types ${cliPath} proposal 3 --plain`, { cwd: TEST_DIR }).text();
+		const result = execSync(
+			`node --experimental-strip-types ${cliPath} proposal 3 --plain`,
+			{ cwd: TEST_DIR },
+		).text();
 
 		assert.ok(result.includes("Test description"));
 		assert.ok(result.includes("Test criterion"));
@@ -175,15 +227,30 @@ describe("Proposal edit section preservation", () => {
 		);
 
 		// Add all sections
-		execSync(`node --experimental-strip-types ${cliPath} proposal edit 4 --ac "Test criterion"`, { cwd: TEST_DIR });
-		execSync(`node --experimental-strip-types ${cliPath} proposal edit 4 --plan "Test plan"`, { cwd: TEST_DIR });
-		execSync(`node --experimental-strip-types ${cliPath} proposal edit 4 --notes "Original notes"`, { cwd: TEST_DIR });
+		execSync(
+			`node --experimental-strip-types ${cliPath} proposal edit 4 --ac "Test criterion"`,
+			{ cwd: TEST_DIR },
+		);
+		execSync(
+			`node --experimental-strip-types ${cliPath} proposal edit 4 --plan "Test plan"`,
+			{ cwd: TEST_DIR },
+		);
+		execSync(
+			`node --experimental-strip-types ${cliPath} proposal edit 4 --notes "Original notes"`,
+			{ cwd: TEST_DIR },
+		);
 
 		// Update implementation notes (should overwrite existing)
-		execSync(`node --experimental-strip-types ${cliPath} proposal edit 4 --notes "Additional notes"`, { cwd: TEST_DIR });
+		execSync(
+			`node --experimental-strip-types ${cliPath} proposal edit 4 --notes "Additional notes"`,
+			{ cwd: TEST_DIR },
+		);
 
 		// Verify all sections are preserved and notes are appended
-		const result = execSync(`node --experimental-strip-types ${cliPath} proposal 4 --plain`, { cwd: TEST_DIR }).text();
+		const result = execSync(
+			`node --experimental-strip-types ${cliPath} proposal 4 --plain`,
+			{ cwd: TEST_DIR },
+		).text();
 
 		assert.ok(result.includes("Test description"));
 		assert.ok(result.includes("Test criterion"));
@@ -210,10 +277,16 @@ describe("Proposal edit section preservation", () => {
 		);
 
 		// Update description
-		execSync(`node --experimental-strip-types ${cliPath} proposal edit 5 -d "Updated minimal description"`, { cwd: TEST_DIR });
+		execSync(
+			`node --experimental-strip-types ${cliPath} proposal edit 5 -d "Updated minimal description"`,
+			{ cwd: TEST_DIR },
+		);
 
 		// Should have updated description and default AC text
-		const result = execSync(`node --experimental-strip-types ${cliPath} proposal 5 --plain`, { cwd: TEST_DIR }).text();
+		const result = execSync(
+			`node --experimental-strip-types ${cliPath} proposal 5 --plain`,
+			{ cwd: TEST_DIR },
+		).text();
 
 		assert.ok(result.includes("Updated minimal description"));
 		assert.ok(result.includes("No acceptance criteria defined"));

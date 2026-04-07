@@ -1,10 +1,13 @@
-import { globSync } from "node:fs";
 import assert from "node:assert";
+import { globSync } from "node:fs";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { McpServer } from "../../src/mcp/server.ts";
 import { registerProposalTools } from "../../src/mcp/tools/proposals/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync,
+import {
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 const getText = (content: unknown[] | undefined, index = 0): string => {
@@ -75,13 +78,18 @@ describe("MCP proposal_complete", () => {
 			},
 		});
 		assert.strictEqual(complete.isError, undefined);
-		expect(getText(complete.content)).toContain("Completed proposal proposal-1");
+		expect(getText(complete.content)).toContain(
+			"Completed proposal proposal-1",
+		);
 
 		const activeProposal = await server.filesystem.loadProposal("proposal-1");
 		assert.strictEqual(activeProposal, null);
 
 		const completedFiles = await Array.fromAsync(
-			(globSync as any)("proposal-1*.md", { cwd: server.filesystem.completedDir, follow: true }),
+			(globSync as any)("proposal-1*.md", {
+				cwd: server.filesystem.completedDir,
+				follow: true,
+			}),
 		);
 		assert.strictEqual(completedFiles.length, 1);
 	});

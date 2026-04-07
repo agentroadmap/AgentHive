@@ -3,13 +3,16 @@
  * Uses PTY to simulate real terminal
  */
 
-import { describe, it } from "node:test";
 import assert from "node:assert";
 import { spawn } from "node:child_process";
+import { describe, it } from "node:test";
 
 describe("TUI Smoke Tests", () => {
 	it("board process starts and exits cleanly", async () => {
-		const result = await new Promise<{ exitCode: number | null; stderr: string }>((resolve) => {
+		const result = await new Promise<{
+			exitCode: number | null;
+			stderr: string;
+		}>((resolve) => {
 			const proc = spawn("roadmap", ["board"], {
 				cwd: process.cwd(),
 				env: { ...process.env, TERM: "xterm", CI: "true" },
@@ -17,11 +20,17 @@ describe("TUI Smoke Tests", () => {
 			});
 
 			let stderr = "";
-			proc.stderr.on("data", (d) => { stderr += d.toString(); });
+			proc.stderr.on("data", (d) => {
+				stderr += d.toString();
+			});
 
 			// Send 'q' to quit after 1s
-			setTimeout(() => { proc.stdin.write("q"); }, 1000);
-			setTimeout(() => { proc.kill(); }, 5000);
+			setTimeout(() => {
+				proc.stdin.write("q");
+			}, 1000);
+			setTimeout(() => {
+				proc.kill();
+			}, 5000);
 
 			proc.on("close", (code) => {
 				resolve({ exitCode: code, stderr });
@@ -36,7 +45,11 @@ describe("TUI Smoke Tests", () => {
 	});
 
 	it("board with proposals flag works", async () => {
-		const result = await new Promise<{ exitCode: number | null; stdout: string; stderr: string }>((resolve) => {
+		const result = await new Promise<{
+			exitCode: number | null;
+			stdout: string;
+			stderr: string;
+		}>((resolve) => {
 			const proc = spawn("roadmap", ["board"], {
 				cwd: process.cwd(),
 				env: { ...process.env, TERM: "dumb", CI: "true" },
@@ -45,10 +58,16 @@ describe("TUI Smoke Tests", () => {
 
 			let stdout = "";
 			let stderr = "";
-			proc.stdout.on("data", (d) => { stdout += d.toString(); });
-			proc.stderr.on("data", (d) => { stderr += d.toString(); });
+			proc.stdout.on("data", (d) => {
+				stdout += d.toString();
+			});
+			proc.stderr.on("data", (d) => {
+				stderr += d.toString();
+			});
 
-			setTimeout(() => { proc.kill(); }, 3000);
+			setTimeout(() => {
+				proc.kill();
+			}, 3000);
 
 			proc.on("close", (code) => {
 				resolve({ exitCode: code, stdout, stderr });

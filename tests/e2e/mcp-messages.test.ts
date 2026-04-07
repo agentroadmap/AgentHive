@@ -2,7 +2,11 @@ import assert from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { McpServer } from "../../src/mcp/server.ts";
 import { registerMessageTools } from "../../src/mcp/tools/messages/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 const getText = (content: unknown[] | undefined): string => {
 	const item = content?.[0] as { text?: string } | undefined;
@@ -30,7 +34,9 @@ describe("MCP messaging tools", () => {
 	afterEach(async () => {
 		try {
 			await mcpServer.stop();
-		} catch { /* ignore */ }
+		} catch {
+			/* ignore */
+		}
 		await safeCleanup(TEST_DIR);
 	});
 
@@ -40,7 +46,10 @@ describe("MCP messaging tools", () => {
 		assert.ok(names.includes("chan_list"), "chan_list should be registered");
 		assert.ok(names.includes("msg_read"), "msg_read should be registered");
 		assert.ok(names.includes("msg_send"), "msg_send should be registered");
-		assert.ok(names.includes("chan_subscribe"), "chan_subscribe should be registered");
+		assert.ok(
+			names.includes("chan_subscribe"),
+			"chan_subscribe should be registered",
+		);
 	});
 
 	it("lists channels (empty)", async () => {
@@ -48,14 +57,21 @@ describe("MCP messaging tools", () => {
 			params: { name: "chan_list", arguments: {} },
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("No message channels") || text.includes("Available Channels"));
+		assert.ok(
+			text.includes("No message channels") ||
+				text.includes("Available Channels"),
+		);
 	});
 
 	it("sends a message to a group channel", async () => {
 		const result = await mcpServer.testInterface.callTool({
 			params: {
 				name: "msg_send",
-				arguments: { from: "test-agent", message: "Hello team", channel: "project" },
+				arguments: {
+					from: "test-agent",
+					message: "Hello team",
+					channel: "project",
+				},
 			},
 		});
 		const text = getText(result.content);
@@ -67,7 +83,11 @@ describe("MCP messaging tools", () => {
 		const result = await mcpServer.testInterface.callTool({
 			params: {
 				name: "msg_send",
-				arguments: { from: "test-agent", message: "Hello all", channel: "public" },
+				arguments: {
+					from: "test-agent",
+					message: "Hello all",
+					channel: "public",
+				},
 			},
 		});
 		const text = getText(result.content);
@@ -95,7 +115,11 @@ describe("MCP messaging tools", () => {
 					from: "test-agent",
 					message: "Requesting this proposal",
 					channel: "project",
-					intent: { type: "claim_request", proposalId: "proposal-1", reason: "Testing" },
+					intent: {
+						type: "claim_request",
+						proposalId: "proposal-1",
+						reason: "Testing",
+					},
 				},
 			},
 		});
@@ -109,7 +133,11 @@ describe("MCP messaging tools", () => {
 		await mcpServer.testInterface.callTool({
 			params: {
 				name: "msg_send",
-				arguments: { from: "test-agent", message: "Test message", channel: "project" },
+				arguments: {
+					from: "test-agent",
+					message: "Test message",
+					channel: "project",
+				},
 			},
 		});
 
@@ -118,7 +146,10 @@ describe("MCP messaging tools", () => {
 			params: { name: "msg_read", arguments: { channel: "project" } },
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("project") || text.includes("Test message"), `Expected messages, got: ${text}`);
+		assert.ok(
+			text.includes("project") || text.includes("Test message"),
+			`Expected messages, got: ${text}`,
+		);
 	});
 
 	it("reads empty channel", async () => {

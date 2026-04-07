@@ -7,11 +7,11 @@
  * - Global fair-share policy configurable
  */
 
-import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { RateLimiter } from '../../src/core/infrastructure/rate-limiter.ts';
-import { mkdirSync, rmSync, existsSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import { RateLimiter } from "../../src/core/infrastructure/rate-limiter.ts";
 
 const TEST_BASE = join(import.meta.dirname, "../../tmp/test-rate-limiter");
 
@@ -113,13 +113,20 @@ describe("proposal-44: Per-Agent Rate Limiting & Fair Share", () => {
 
 			const retryTime = new Date(result.retryAfter!).getTime();
 			const expectedMin = Date.now() + 14 * 60 * 1000; // ~15 minutes
-			assert.ok(retryTime >= expectedMin, "retryAfter should be ~15 minutes out");
+			assert.ok(
+				retryTime >= expectedMin,
+				"retryAfter should be ~15 minutes out",
+			);
 		});
 	});
 
 	describe("AC#3: Priority boost bypasses limit", () => {
 		it("bypasses limit for high priority proposals", () => {
-			limiter.updateConfig({ maxClaimsPerHour: 1, priorityBypass: true, minBypassPriority: "high" });
+			limiter.updateConfig({
+				maxClaimsPerHour: 1,
+				priorityBypass: true,
+				minBypassPriority: "high",
+			});
 
 			limiter.recordClaim("agent-1", "proposal-1", "medium");
 
@@ -214,7 +221,10 @@ describe("proposal-44: Per-Agent Rate Limiting & Fair Share", () => {
 
 			const resetTime = new Date(status.resetsAt).getTime();
 			const expectedMin = Date.now() + 55 * 60 * 1000; // ~1 hour from now
-			assert.ok(resetTime >= expectedMin, "resetsAt should be ~1 hour after first claim");
+			assert.ok(
+				resetTime >= expectedMin,
+				"resetsAt should be ~1 hour after first claim",
+			);
 		});
 	});
 

@@ -1,10 +1,14 @@
-import { globSync } from "node:fs";
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
+import { globSync } from "node:fs";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
 import type { Document, Proposal } from "../../src/types/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 let TEST_DIR: string;
 
@@ -41,7 +45,13 @@ describe("Core", () => {
 
 			const config = await core.filesystem.loadConfig();
 			assert.strictEqual(config?.projectName, "Test Project");
-			assert.deepStrictEqual(config?.statuses, ["Potential", "Active", "Accepted", "Complete", "Abandoned"]);
+			assert.deepStrictEqual(config?.statuses, [
+				"Potential",
+				"Active",
+				"Accepted",
+				"Complete",
+				"Abandoned",
+			]);
 			assert.strictEqual(config?.defaultStatus, "Potential");
 		});
 	});
@@ -93,7 +103,11 @@ describe("Core", () => {
 			const originalProposal = await core.filesystem.loadProposal("proposal-1");
 			assert.strictEqual(originalProposal?.title, "Test Proposal");
 
-			await core.updateProposalFromInput("proposal-1", { title: "Updated Proposal" }, true);
+			await core.updateProposalFromInput(
+				"proposal-1",
+				{ title: "Updated Proposal" },
+				true,
+			);
 
 			// Check if proposal was updated
 			const loadedProposal = await core.filesystem.loadProposal("proposal-1");
@@ -126,8 +140,16 @@ describe("Core", () => {
 		});
 
 		it("should resolve proposals using flexible ID formats", async () => {
-			const standardProposal: Proposal = { ...sampleProposal, id: "proposal-5", title: "Standard" };
-			const paddedProposal: Proposal = { ...sampleProposal, id: "proposal-007", title: "Padded" };
+			const standardProposal: Proposal = {
+				...sampleProposal,
+				id: "proposal-5",
+				title: "Standard",
+			};
+			const paddedProposal: Proposal = {
+				...sampleProposal,
+				id: "proposal-007",
+				title: "Padded",
+			};
 			await core.createProposal(standardProposal, false);
 			await core.createProposal(paddedProposal, false);
 
@@ -156,8 +178,16 @@ describe("Core", () => {
 			});
 
 			// Create proposals with custom prefix
-			const proposal1: Proposal = { ...sampleProposal, id: "back-358", title: "Custom Prefix Proposal" };
-			const proposal2: Proposal = { ...sampleProposal, id: "back-5.1", title: "Custom Prefix Subproposal" };
+			const proposal1: Proposal = {
+				...sampleProposal,
+				id: "back-358",
+				title: "Custom Prefix Proposal",
+			};
+			const proposal2: Proposal = {
+				...sampleProposal,
+				id: "back-5.1",
+				title: "Custom Prefix Subproposal",
+			};
 			await core.createProposal(proposal1, false);
 			await core.createProposal(proposal2, false);
 
@@ -191,7 +221,11 @@ describe("Core", () => {
 			});
 
 			// Create proposal with custom prefix
-			const proposal: Proposal = { ...sampleProposal, id: "back-358", title: "Custom Prefix Proposal" };
+			const proposal: Proposal = {
+				...sampleProposal,
+				id: "back-358",
+				title: "Custom Prefix Proposal",
+			};
 			await core.createProposal(proposal, false);
 
 			// Typos should NOT match (prevent parseInt coercion bug)
@@ -267,7 +301,8 @@ describe("Core", () => {
 			// This should succeed even without git
 			await nonGitCore.createProposal(sampleProposal, false);
 
-			const loadedProposal = await nonGitCore.filesystem.loadProposal("proposal-1");
+			const loadedProposal =
+				await nonGitCore.filesystem.loadProposal("proposal-1");
 			assert.strictEqual(loadedProposal?.id, "proposal-1");
 		});
 
@@ -296,11 +331,19 @@ describe("Core", () => {
 		it("should normalize assignee when updating proposals", async () => {
 			await core.createProposal(sampleProposal, false);
 
-			await core.updateProposalFromInput("proposal-1", { assignee: ["@carol"] }, false);
+			await core.updateProposalFromInput(
+				"proposal-1",
+				{ assignee: ["@carol"] },
+				false,
+			);
 			let loaded = await core.filesystem.loadProposal("proposal-1");
 			assert.deepStrictEqual(loaded?.assignee, ["@carol"]);
 
-			await core.updateProposalFromInput("proposal-1", { assignee: ["@dave"] }, false);
+			await core.updateProposalFromInput(
+				"proposal-1",
+				{ assignee: ["@dave"] },
+				false,
+			);
 			loaded = await core.filesystem.loadProposal("proposal-1");
 			assert.deepStrictEqual(loaded?.assignee, ["@dave"]);
 		});
@@ -362,7 +405,10 @@ describe("Core", () => {
 				globSync("doc-*.md", { cwd: core.filesystem.docsDir }),
 			);
 			const initialFile = initialFiles[0];
-			const initialFileName = typeof initialFile === 'string' ? initialFile : (initialFile as any)?.name;
+			const initialFileName =
+				typeof initialFile === "string"
+					? initialFile
+					: (initialFile as any)?.name;
 			assert.strictEqual(initialFileName, "doc-1 - Operations-Guide.md");
 
 			const documents = await core.filesystem.listDocuments();
@@ -372,14 +418,23 @@ describe("Core", () => {
 			}
 			assert.strictEqual(existingDoc.title, "Operations Guide");
 
-			await core.updateDocument({ ...existingDoc, title: "Operations Guide Updated" }, "# Updated content", false);
+			await core.updateDocument(
+				{ ...existingDoc, title: "Operations Guide Updated" },
+				"# Updated content",
+				false,
+			);
 
 			const docFiles = await Array.fromAsync(
 				globSync("doc-*.md", { cwd: core.filesystem.docsDir }),
 			);
-			const docFileNames = docFiles.map((d: any) => typeof d === 'string' ? d : d.name);
+			const docFileNames = docFiles.map((d: any) =>
+				typeof d === "string" ? d : d.name,
+			);
 			assert.strictEqual(docFileNames.length, 1);
-			assert.strictEqual(docFileNames[0], "doc-1 - Operations-Guide-Updated.md");
+			assert.strictEqual(
+				docFileNames[0],
+				"doc-1 - Operations-Guide-Updated.md",
+			);
 
 			const updatedDocs = await core.filesystem.listDocuments();
 			assert.strictEqual(updatedDocs[0]?.title, "Operations Guide Updated");
@@ -396,13 +451,19 @@ describe("Core", () => {
 			await core.updateDocument(renamedDoc, "# Ops Guide", false);
 
 			execSync(`git add -A`, { cwd: TEST_DIR });
-			const diffResult = execSync(`git diff --name-status -M HEAD`, { cwd: TEST_DIR });
+			const diffResult = execSync(`git diff --name-status -M HEAD`, {
+				cwd: TEST_DIR,
+			});
 			const diff = diffResult.stdout.toString();
 			const previousPath = "docs/doc-1 - Operations-Guide.md";
 			const renamedPath = "docs/doc-1 - Operations-Guide-Renamed.md";
-			const escapeForRegex = (value: string) => value.replace(/[|\\{}()[\]^$+*?.]/g, "\\$&");
+			const escapeForRegex = (value: string) =>
+				value.replace(/[|\\{}()[\]^$+*?.]/g, "\\$&");
 			assert.ok(
-				new RegExp(`^R\\d*\\t${escapeForRegex(previousPath)}\\t${escapeForRegex(renamedPath)}`, "m").test(diff),
+				new RegExp(
+					`^R\\d*\\t${escapeForRegex(previousPath)}\\t${escapeForRegex(renamedPath)}`,
+					"m",
+				).test(diff),
 			);
 		});
 	});
@@ -510,7 +571,8 @@ describe("Core", () => {
 
 			await core.createProposal(proposalWithoutStatus, false);
 
-			const loadedProposal = await core.filesystem.loadProposal("proposal-custom");
+			const loadedProposal =
+				await core.filesystem.loadProposal("proposal-custom");
 			assert.strictEqual(loadedProposal?.status, "Custom Status");
 		});
 
@@ -538,39 +600,46 @@ describe("Core", () => {
 
 			await core.createProposal(proposalWithoutStatus, false);
 
-			const loadedProposal = await core.filesystem.loadProposal("proposal-fallback");
+			const loadedProposal =
+				await core.filesystem.loadProposal("proposal-fallback");
 			assert.strictEqual(loadedProposal?.status, "Potential");
 		});
 	});
 
 	describe("directory accessor integration", () => {
-		it("should use FileSystem directory accessors for git operations", { timeout: 10000 }, async () => {
-			await core.initializeProject("Accessor Test");
+		it(
+			"should use FileSystem directory accessors for git operations",
+			{ timeout: 10000 },
+			async () => {
+				await core.initializeProject("Accessor Test");
 
-			const proposal: Proposal = {
-				id: "proposal-accessor",
-				title: "Accessor Test Proposal",
-				status: "Potential",
-				assignee: [],
-				createdDate: "2025-06-07",
-				labels: [],
-				dependencies: [],
-				description: "Testing directory accessors",
-			};
+				const proposal: Proposal = {
+					id: "proposal-accessor",
+					title: "Accessor Test Proposal",
+					status: "Potential",
+					assignee: [],
+					createdDate: "2025-06-07",
+					labels: [],
+					dependencies: [],
+					description: "Testing directory accessors",
+				};
 
-			// Create proposal without auto-commit to avoid potential git timing issues
-			await core.createProposal(proposal, false);
+				// Create proposal without auto-commit to avoid potential git timing issues
+				await core.createProposal(proposal, false);
 
-			// Verify the proposal file was created in the correct directory
-			const _proposalsDir = core.filesystem.proposalsDir;
+				// Verify the proposal file was created in the correct directory
+				const _proposalsDir = core.filesystem.proposalsDir;
 
-			// List all files to see what was actually created
-			const allFiles = await core.filesystem.listProposals();
+				// List all files to see what was actually created
+				const allFiles = await core.filesystem.listProposals();
 
-			// Check that a proposal with the expected ID exists
-			const createdProposal = allFiles.find((t) => t.id === "proposal-ACCESSOR");
-			assert.notStrictEqual(createdProposal, undefined);
-			assert.strictEqual(createdProposal?.title, "Accessor Test Proposal");
-		});
+				// Check that a proposal with the expected ID exists
+				const createdProposal = allFiles.find(
+					(t) => t.id === "proposal-ACCESSOR",
+				);
+				assert.notStrictEqual(createdProposal, undefined);
+				assert.strictEqual(createdProposal?.title, "Accessor Test Proposal");
+			},
+		);
 	});
 });

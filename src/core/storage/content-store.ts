@@ -2,11 +2,24 @@ import { type FSWatcher, watch } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, join, relative, sep } from "node:path";
 import type { FileSystem } from "../../file-system/operations.ts";
-import { parseDecision, parseDocument, parseProposal } from "../../markdown/parser.ts";
-import type { Decision, Document, Proposal, ProposalListFilter } from "../../types/index.ts";
-import { normalizeProposalId, normalizeProposalIdentity, proposalIdsEqual } from "../../utils/proposal-path.ts";
+import {
+	parseDecision,
+	parseDocument,
+	parseProposal,
+} from "../../markdown/parser.ts";
+import type {
+	Decision,
+	Document,
+	Proposal,
+	ProposalListFilter,
+} from "../../types/index.ts";
+import {
+	normalizeProposalId,
+	normalizeProposalIdentity,
+	proposalIdsEqual,
+} from "../../utils/proposal-path.ts";
 import { sortByProposalId } from "../../utils/proposal-sorting.ts";
-import { isCompleteStatus, isReady, isTerminalStatus } from "../proposal/directives.ts";
+import { isCompleteStatus, isReady } from "../proposal/directives.ts";
 
 interface ContentSnapshot {
 	proposals: Proposal[];
@@ -18,9 +31,24 @@ type ContentStoreEventType = "ready" | "proposals" | "documents" | "decisions";
 
 export type ContentStoreEvent =
 	| { type: "ready"; snapshot: ContentSnapshot; version: number }
-	| { type: "proposals"; proposals: Proposal[]; snapshot: ContentSnapshot; version: number }
-	| { type: "documents"; documents: Document[]; snapshot: ContentSnapshot; version: number }
-	| { type: "decisions"; decisions: Decision[]; snapshot: ContentSnapshot; version: number };
+	| {
+			type: "proposals";
+			proposals: Proposal[];
+			snapshot: ContentSnapshot;
+			version: number;
+	  }
+	| {
+			type: "documents";
+			documents: Document[];
+			snapshot: ContentSnapshot;
+			version: number;
+	  }
+	| {
+			type: "decisions";
+			decisions: Decision[];
+			snapshot: ContentSnapshot;
+			version: number;
+	  };
 
 export type ContentStoreListener = (event: ContentStoreEvent) => void;
 
@@ -75,7 +103,11 @@ export class ContentStore {
 		this.listeners.add(listener);
 
 		if (this.initialized) {
-			listener({ type: "ready", snapshot: this.getSnapshot(), version: this.version });
+			listener({
+				type: "ready",
+				snapshot: this.getSnapshot(),
+				version: this.version,
+			});
 		} else {
 			void this.ensureInitialized();
 		}
@@ -103,46 +135,68 @@ export class ContentStore {
 
 	getProposals(filter?: ProposalListFilter): Proposal[] {
 		if (!this.initialized) {
-			throw new Error("ContentStore not initialized. Call ensureInitialized() first.");
+			throw new Error(
+				"ContentStore not initialized. Call ensureInitialized() first.",
+			);
 		}
 
 		if (process.env.DEBUG) {
-			console.error("[DEBUG] getProposals: returning", this.proposals.size, "proposals");
+			console.error(
+				"[DEBUG] getProposals: returning",
+				this.proposals.size,
+				"proposals",
+			);
 		}
 		let proposals = this.cachedProposals;
 		if (filter?.status) {
 			const statusLower = filter.status.toLowerCase();
-			proposals = proposals.filter((proposal) => (proposal.status || "").toLowerCase() === statusLower);
+			proposals = proposals.filter(
+				(proposal) => (proposal.status || "").toLowerCase() === statusLower,
+			);
 		}
 		if (filter?.assignee) {
 			const assignee = filter.assignee.toLowerCase();
-			proposals = proposals.filter((proposal) => (proposal.assignee || []).some(a => a.toLowerCase() === assignee));
+			proposals = proposals.filter((proposal) =>
+				(proposal.assignee || []).some((a) => a.toLowerCase() === assignee),
+			);
 		}
 		if (filter?.priority) {
 			const priority = filter.priority.toLowerCase();
-			proposals = proposals.filter((proposal) => (proposal.priority ?? "").toLowerCase() === priority);
+			proposals = proposals.filter(
+				(proposal) => (proposal.priority ?? "").toLowerCase() === priority,
+			);
 		}
 		if (filter?.parentProposalId) {
 			const parentFilter = filter.parentProposalId;
-			proposals = proposals.filter((proposal) => proposal.parentProposalId && proposalIdsEqual(parentFilter, proposal.parentProposalId));
+			proposals = proposals.filter(
+				(proposal) =>
+					proposal.parentProposalId &&
+					proposalIdsEqual(parentFilter, proposal.parentProposalId),
+			);
 		}
 		if (filter?.labels && filter.labels.length > 0) {
-			const requiredLabels = filter.labels.map(l => l.toLowerCase());
-			proposals = proposals.filter(proposal => {
-				const proposalLabels = (proposal.labels || []).map(l => l.toLowerCase());
-				return requiredLabels.every(l => proposalLabels.includes(l));
+			const requiredLabels = filter.labels.map((l) => l.toLowerCase());
+			proposals = proposals.filter((proposal) => {
+				const proposalLabels = (proposal.labels || []).map((l) =>
+					l.toLowerCase(),
+				);
+				return requiredLabels.every((l) => proposalLabels.includes(l));
 			});
 		}
 
 		// Always calculate readiness for consistency
-		const doneIds = new Set(this.cachedProposals.filter(s => isCompleteStatus(s.status)).map(s => s.id));
-		proposals = proposals.map(proposal => ({
+		const doneIds = new Set(
+			this.cachedProposals
+				.filter((s) => isCompleteStatus(s.status))
+				.map((s) => s.id),
+		);
+		proposals = proposals.map((proposal) => ({
 			...proposal,
-			ready: isReady(proposal, doneIds)
+			ready: isReady(proposal, doneIds),
 		}));
 
 		if (filter?.ready) {
-			proposals = proposals.filter(proposal => proposal.ready);
+			proposals = proposals.filter((proposal) => proposal.ready);
 		}
 
 		return proposals.slice();
@@ -153,20 +207,26 @@ export class ContentStore {
 			return;
 		}
 		this.proposals.set(proposal.id, proposal);
-		this.cachedProposals = sortByProposalId(Array.from(this.proposals.values()));
+		this.cachedProposals = sortByProposalId(
+			Array.from(this.proposals.values()),
+		);
 		this.notify("proposals");
 	}
 
 	getDocuments(): Document[] {
 		if (!this.initialized) {
-			throw new Error("ContentStore not initialized. Call ensureInitialized() first.");
+			throw new Error(
+				"ContentStore not initialized. Call ensureInitialized() first.",
+			);
 		}
 		return this.cachedDocuments.slice();
 	}
 
 	getDecisions(): Decision[] {
 		if (!this.initialized) {
-			throw new Error("ContentStore not initialized. Call ensureInitialized() first.");
+			throw new Error(
+				"ContentStore not initialized. Call ensureInitialized() first.",
+			);
 		}
 		return this.cachedDecisions.slice();
 	}
@@ -206,14 +266,19 @@ export class ContentStore {
 		const snapshot = this.getSnapshot();
 
 		if (type === "proposals") {
-			this.emit({ type, proposals: snapshot.proposals, snapshot, version: this.version });
+			this.emit({
+				type,
+				proposals: snapshot.proposals,
+				snapshot,
+				version: this.version,
+			});
 			// Background sync to SQLite
 			this.enqueue(async () => {
 				for (const proposal of snapshot.proposals) {
 					if (proposal.filePath) {
 						const stats = await stat(proposal.filePath).catch(() => null);
 						if (stats) {
-							const body = this.buildProposalBodyText(proposal);
+							const _body = this.buildProposalBodyText(proposal);
 						}
 					}
 				}
@@ -222,7 +287,12 @@ export class ContentStore {
 		}
 
 		if (type === "documents") {
-			this.emit({ type, documents: snapshot.documents, snapshot, version: this.version });
+			this.emit({
+				type,
+				documents: snapshot.documents,
+				snapshot,
+				version: this.version,
+			});
 			this.enqueue(async () => {
 				for (const doc of snapshot.documents) {
 					const fullPath = join(this.filesystem.docsDir, doc.path || "");
@@ -235,7 +305,12 @@ export class ContentStore {
 		}
 
 		if (type === "decisions") {
-			this.emit({ type, decisions: snapshot.decisions, snapshot, version: this.version });
+			this.emit({
+				type,
+				decisions: snapshot.decisions,
+				snapshot,
+				version: this.version,
+			});
 			this.enqueue(async () => {
 				for (const decision of snapshot.decisions) {
 					const decisionsDir = this.filesystem.decisionsDir;
@@ -276,7 +351,15 @@ export class ContentStore {
 		]);
 
 		if (process.env.DEBUG) {
-			console.error("[DEBUG] ContentStore.replaceProposals: count=", proposals.length, "sources=", proposals.slice(0, 3).map(s => s.source).join(","));
+			console.error(
+				"[DEBUG] ContentStore.replaceProposals: count=",
+				proposals.length,
+				"sources=",
+				proposals
+					.slice(0, 3)
+					.map((s) => s.source)
+					.join(","),
+			);
 		}
 		this.replaceProposals(proposals);
 		this.replaceDocuments(documents);
@@ -285,10 +368,18 @@ export class ContentStore {
 		// Sync with SQLite in the background
 		this.enqueue(async () => {
 			for (const proposal of proposals) {
-			if (proposal.status === "Complete" && process.env.DEBUG) console.error("[DEBUG] Complete proposal found:", proposal.id, "source:", proposal.source, "branch:", proposal.branch);
+				if (proposal.status === "Complete" && process.env.DEBUG)
+					console.error(
+						"[DEBUG] Complete proposal found:",
+						proposal.id,
+						"source:",
+						proposal.source,
+						"branch:",
+						proposal.branch,
+					);
 				if (proposal.filePath) {
-					const stats = await stat(proposal.filePath);
-					const body = this.buildProposalBodyText(proposal);
+					const _stats = await stat(proposal.filePath);
+					const _body = this.buildProposalBodyText(proposal);
 				}
 			}
 			for (const doc of documents) {
@@ -308,7 +399,7 @@ export class ContentStore {
 				}
 				if (decisionFiles[0]) {
 					const fullPath = join(decisionsDir, decisionFiles[0]);
-					const stats = await stat(fullPath);
+					const _stats = await stat(fullPath);
 				}
 			}
 		});
@@ -327,10 +418,16 @@ export class ContentStore {
 			parts.push(proposal.description);
 		}
 
-		if (Array.isArray(proposal.acceptanceCriteriaItems) && proposal.acceptanceCriteriaItems.length > 0) {
+		if (
+			Array.isArray(proposal.acceptanceCriteriaItems) &&
+			proposal.acceptanceCriteriaItems.length > 0
+		) {
 			const lines = [...proposal.acceptanceCriteriaItems]
 				.sort((a, b) => a.index - b.index)
-				.map((criterion) => `- [${criterion.checked ? "x" : " "}] ${criterion.text}`);
+				.map(
+					(criterion) =>
+						`- [${criterion.checked ? "x" : " "}] ${criterion.text}`,
+				);
 			parts.push(lines.join("\n"));
 		}
 
@@ -341,7 +438,7 @@ export class ContentStore {
 		if (proposal.implementationNotes) {
 			parts.push(proposal.implementationNotes);
 		}
-		
+
 		if (proposal.dependencies && proposal.dependencies.length > 0) {
 			parts.push(`Dependencies: ${proposal.dependencies.join(", ")}`);
 		}
@@ -445,82 +542,90 @@ export class ContentStore {
 
 	private createProposalWatcher(): WatchHandle {
 		const proposalsDir = this.filesystem.proposalsDir;
-		const watcher: FSWatcher = watch(proposalsDir, { recursive: false }, (eventType, filename) => {
-			const file = this.normalizeFilename(filename);
-			// Accept any prefix pattern (proposal-, jira-, etc.) followed by ID and ending in .md
-			if (!file || !/^[a-zA-Z]+-/.test(file) || !file.endsWith(".md")) {
+		const watcher: FSWatcher = watch(
+			proposalsDir,
+			{ recursive: false },
+			(eventType, filename) => {
+				const file = this.normalizeFilename(filename);
+				// Accept any prefix pattern (proposal-, jira-, etc.) followed by ID and ending in .md
+				if (!file || !/^[a-zA-Z]+-/.test(file) || !file.endsWith(".md")) {
+					this.enqueue(async () => {
+						await this.refreshProposalsFromDisk();
+					});
+					return;
+				}
+
 				this.enqueue(async () => {
-					await this.refreshProposalsFromDisk();
-				});
-				return;
-			}
+					const [proposalId] = file.split(" ");
+					if (!proposalId) return;
+					const normalizedProposalId = normalizeProposalId(proposalId);
 
-			this.enqueue(async () => {
-				const [proposalId] = file.split(" ");
-				if (!proposalId) return;
-				const normalizedProposalId = normalizeProposalId(proposalId);
-
-				const fullPath = join(proposalsDir, file);
-				let exists = false;
-				try {
-					await stat(fullPath);
-					exists = true;
-				} catch {
-					// File doesn't exist
-				}
-
-				if (!exists && eventType === "rename") {
-					if (this.proposals.delete(normalizedProposalId)) {
-						this.cachedProposals = sortByProposalId(Array.from(this.proposals.values()));
-						this.notify("proposals");
+					const fullPath = join(proposalsDir, file);
+					let exists = false;
+					try {
+						await stat(fullPath);
+						exists = true;
+					} catch {
+						// File doesn't exist
 					}
-					return;
-				}
 
-				if (eventType === "rename" && exists) {
-					await this.refreshProposalsFromDisk();
-					return;
-				}
+					if (!exists && eventType === "rename") {
+						if (this.proposals.delete(normalizedProposalId)) {
+							this.cachedProposals = sortByProposalId(
+								Array.from(this.proposals.values()),
+							);
+							this.notify("proposals");
+						}
+						return;
+					}
 
-				const previous = this.proposals.get(normalizedProposalId);
-				const proposal = await this.retryRead(
-					async () => {
-						let stillExists = false;
-						try {
-							await stat(fullPath);
-							stillExists = true;
-						} catch {
-							// File doesn't exist
-						}
-						if (!stillExists) {
-							return null;
-						}
-						const content = await readFile(fullPath, "utf-8");
-						return normalizeProposalIdentity(parseProposal(content));
-					},
-					(result) => {
-						if (!result) {
-							return false;
-						}
-						if (!proposalIdsEqual(result.id, normalizedProposalId)) {
-							return false;
-						}
-						if (!previous) {
-							return true;
-						}
-						return this.hasProposalChanged(previous, result);
-					},
-				);
-				if (!proposal) {
-					await this.refreshProposalsFromDisk(normalizedProposalId, previous);
-					return;
-				}
+					if (eventType === "rename" && exists) {
+						await this.refreshProposalsFromDisk();
+						return;
+					}
 
-				this.proposals.set(proposal.id, proposal);
-				this.cachedProposals = sortByProposalId(Array.from(this.proposals.values()));
-				this.notify("proposals");
-			});
-		});
+					const previous = this.proposals.get(normalizedProposalId);
+					const proposal = await this.retryRead(
+						async () => {
+							let stillExists = false;
+							try {
+								await stat(fullPath);
+								stillExists = true;
+							} catch {
+								// File doesn't exist
+							}
+							if (!stillExists) {
+								return null;
+							}
+							const content = await readFile(fullPath, "utf-8");
+							return normalizeProposalIdentity(parseProposal(content));
+						},
+						(result) => {
+							if (!result) {
+								return false;
+							}
+							if (!proposalIdsEqual(result.id, normalizedProposalId)) {
+								return false;
+							}
+							if (!previous) {
+								return true;
+							}
+							return this.hasProposalChanged(previous, result);
+						},
+					);
+					if (!proposal) {
+						await this.refreshProposalsFromDisk(normalizedProposalId, previous);
+						return;
+					}
+
+					this.proposals.set(proposal.id, proposal);
+					this.cachedProposals = sortByProposalId(
+						Array.from(this.proposals.values()),
+					);
+					this.notify("proposals");
+				});
+			},
+		);
 		this.attachWatcherErrorHandler(watcher, "proposals");
 
 		return {
@@ -532,47 +637,143 @@ export class ContentStore {
 
 	private createDecisionWatcher(): WatchHandle {
 		const decisionsDir = this.filesystem.decisionsDir;
-		const watcher: FSWatcher = watch(decisionsDir, { recursive: false }, (eventType, filename) => {
-			const file = this.normalizeFilename(filename);
-			if (!file || !file.startsWith("decision-") || !file.endsWith(".md")) {
+		const watcher: FSWatcher = watch(
+			decisionsDir,
+			{ recursive: false },
+			(eventType, filename) => {
+				const file = this.normalizeFilename(filename);
+				if (!file || !file.startsWith("decision-") || !file.endsWith(".md")) {
+					this.enqueue(async () => {
+						await this.refreshDecisionsFromDisk();
+					});
+					return;
+				}
+
 				this.enqueue(async () => {
-					await this.refreshDecisionsFromDisk();
+					const [idPart] = file.split(" - ");
+					if (!idPart) return;
+
+					const fullPath = join(decisionsDir, file);
+					let exists = false;
+					try {
+						await stat(fullPath);
+						exists = true;
+					} catch {
+						// File doesn't exist
+					}
+
+					if (!exists && eventType === "rename") {
+						if (this.decisions.delete(idPart)) {
+							this.cachedDecisions = sortByProposalId(
+								Array.from(this.decisions.values()),
+							);
+							this.notify("decisions");
+						}
+						return;
+					}
+
+					if (eventType === "rename" && exists) {
+						await this.refreshDecisionsFromDisk();
+						return;
+					}
+
+					const previous = this.decisions.get(idPart);
+					const decision = await this.retryRead(
+						async () => {
+							try {
+								const content = await readFile(fullPath, "utf-8");
+								return parseDecision(content);
+							} catch {
+								return null;
+							}
+						},
+						(result) => {
+							if (!result) {
+								return false;
+							}
+							if (result.id !== idPart) {
+								return false;
+							}
+							if (!previous) {
+								return true;
+							}
+							return this.hasDecisionChanged(previous, result);
+						},
+					);
+					if (!decision) {
+						await this.refreshDecisionsFromDisk(idPart, previous);
+						return;
+					}
+					this.decisions.set(decision.id, decision);
+					this.cachedDecisions = sortByProposalId(
+						Array.from(this.decisions.values()),
+					);
+					this.notify("decisions");
 				});
-				return;
-			}
+			},
+		);
+		this.attachWatcherErrorHandler(watcher, "decisions");
 
-			this.enqueue(async () => {
-				const [idPart] = file.split(" - ");
-				if (!idPart) return;
+		return {
+			stop() {
+				watcher.close();
+			},
+		};
+	}
 
-				const fullPath = join(decisionsDir, file);
+	private async createDocumentWatcher(): Promise<WatchHandle> {
+		const docsDir = this.filesystem.docsDir;
+		return this.createDirectoryWatcher(
+			docsDir,
+			async (eventType, absolutePath, relativePath) => {
+				const base = basename(absolutePath);
+				if (!base.endsWith(".md")) {
+					if (relativePath === null) {
+						await this.refreshDocumentsFromDisk();
+					}
+					return;
+				}
+
+				if (!base.startsWith("doc-")) {
+					await this.refreshDocumentsFromDisk();
+					return;
+				}
+
+				const [idPart] = base.split(" - ");
+				if (!idPart) {
+					await this.refreshDocumentsFromDisk();
+					return;
+				}
+
 				let exists = false;
 				try {
-					await stat(fullPath);
+					await stat(absolutePath);
 					exists = true;
 				} catch {
 					// File doesn't exist
 				}
 
 				if (!exists && eventType === "rename") {
-					if (this.decisions.delete(idPart)) {
-						this.cachedDecisions = sortByProposalId(Array.from(this.decisions.values()));
-						this.notify("decisions");
+					if (this.documents.delete(idPart)) {
+						this.cachedDocuments = [...this.documents.values()].sort((a, b) =>
+							a.title.localeCompare(b.title),
+						);
+						this.notify("documents");
 					}
 					return;
 				}
 
 				if (eventType === "rename" && exists) {
-					await this.refreshDecisionsFromDisk();
+					await this.refreshDocumentsFromDisk();
 					return;
 				}
 
-				const previous = this.decisions.get(idPart);
-				const decision = await this.retryRead(
+				const previous = this.documents.get(idPart);
+				const document = await this.retryRead(
 					async () => {
 						try {
-							const content = await readFile(fullPath, "utf-8");
-							return parseDecision(content);
+							const content = await readFile(absolutePath, "utf-8");
+							return parseDocument(content);
 						} catch {
 							return null;
 						}
@@ -587,105 +788,26 @@ export class ContentStore {
 						if (!previous) {
 							return true;
 						}
-						return this.hasDecisionChanged(previous, result);
+						return this.hasDocumentChanged(previous, result);
 					},
 				);
-				if (!decision) {
-					await this.refreshDecisionsFromDisk(idPart, previous);
+				if (!document) {
+					await this.refreshDocumentsFromDisk(idPart, previous);
 					return;
 				}
-				this.decisions.set(decision.id, decision);
-				this.cachedDecisions = sortByProposalId(Array.from(this.decisions.values()));
-				this.notify("decisions");
-			});
-		});
-		this.attachWatcherErrorHandler(watcher, "decisions");
 
-		return {
-			stop() {
-				watcher.close();
+				this.documents.set(document.id, document);
+				this.cachedDocuments = [...this.documents.values()].sort((a, b) =>
+					a.title.localeCompare(b.title),
+				);
+				this.notify("documents");
 			},
-		};
+		);
 	}
 
-	private async createDocumentWatcher(): Promise<WatchHandle> {
-		const docsDir = this.filesystem.docsDir;
-		return this.createDirectoryWatcher(docsDir, async (eventType, absolutePath, relativePath) => {
-			const base = basename(absolutePath);
-			if (!base.endsWith(".md")) {
-				if (relativePath === null) {
-					await this.refreshDocumentsFromDisk();
-				}
-				return;
-			}
-
-			if (!base.startsWith("doc-")) {
-				await this.refreshDocumentsFromDisk();
-				return;
-			}
-
-			const [idPart] = base.split(" - ");
-			if (!idPart) {
-				await this.refreshDocumentsFromDisk();
-				return;
-			}
-
-			let exists = false;
-			try {
-				await stat(absolutePath);
-				exists = true;
-			} catch {
-				// File doesn't exist
-			}
-
-			if (!exists && eventType === "rename") {
-				if (this.documents.delete(idPart)) {
-					this.cachedDocuments = [...this.documents.values()].sort((a, b) => a.title.localeCompare(b.title));
-					this.notify("documents");
-				}
-				return;
-			}
-
-			if (eventType === "rename" && exists) {
-				await this.refreshDocumentsFromDisk();
-				return;
-			}
-
-			const previous = this.documents.get(idPart);
-			const document = await this.retryRead(
-				async () => {
-					try {
-						const content = await readFile(absolutePath, "utf-8");
-						return parseDocument(content);
-					} catch {
-						return null;
-					}
-				},
-				(result) => {
-					if (!result) {
-						return false;
-					}
-					if (result.id !== idPart) {
-						return false;
-					}
-					if (!previous) {
-						return true;
-					}
-					return this.hasDocumentChanged(previous, result);
-				},
-			);
-			if (!document) {
-				await this.refreshDocumentsFromDisk(idPart, previous);
-				return;
-			}
-
-			this.documents.set(document.id, document);
-			this.cachedDocuments = [...this.documents.values()].sort((a, b) => a.title.localeCompare(b.title));
-			this.notify("documents");
-		});
-	}
-
-	private normalizeFilename(value: string | Buffer | null | undefined): string | null {
+	private normalizeFilename(
+		value: string | Buffer | null | undefined,
+	): string | null {
 		if (typeof value === "string") {
 			return value;
 		}
@@ -697,17 +819,27 @@ export class ContentStore {
 
 	private async createDirectoryWatcher(
 		rootDir: string,
-		handler: (eventType: string, absolutePath: string, relativePath: string | null) => Promise<void> | void,
+		handler: (
+			eventType: string,
+			absolutePath: string,
+			relativePath: string | null,
+		) => Promise<void> | void,
 	): Promise<WatchHandle> {
 		try {
-			const watcher = watch(rootDir, { recursive: true }, (eventType, filename) => {
-				const relativePath = this.normalizeFilename(filename);
-				const absolutePath = relativePath ? join(rootDir, relativePath) : rootDir;
+			const watcher = watch(
+				rootDir,
+				{ recursive: true },
+				(eventType, filename) => {
+					const relativePath = this.normalizeFilename(filename);
+					const absolutePath = relativePath
+						? join(rootDir, relativePath)
+						: rootDir;
 
-				this.enqueue(async () => {
-					await handler(eventType, absolutePath, relativePath);
-				});
-			});
+					this.enqueue(async () => {
+						await handler(eventType, absolutePath, relativePath);
+					});
+				},
+			);
 			this.attachWatcherErrorHandler(watcher, `dir:${rootDir}`);
 
 			return {
@@ -741,10 +873,20 @@ export class ContentStore {
 	private replaceProposals(proposals: Proposal[]): void {
 		this.proposals.clear();
 		for (const proposal of proposals) {
-			if (proposal.status === "Complete" && process.env.DEBUG) console.error("[DEBUG] Complete proposal found:", proposal.id, "source:", proposal.source, "branch:", proposal.branch);
+			if (proposal.status === "Complete" && process.env.DEBUG)
+				console.error(
+					"[DEBUG] Complete proposal found:",
+					proposal.id,
+					"source:",
+					proposal.source,
+					"branch:",
+					proposal.branch,
+				);
 			this.proposals.set(proposal.id, proposal);
 		}
-		this.cachedProposals = sortByProposalId(Array.from(this.proposals.values()));
+		this.cachedProposals = sortByProposalId(
+			Array.from(this.proposals.values()),
+		);
 	}
 
 	private replaceDocuments(documents: Document[]): void {
@@ -752,7 +894,9 @@ export class ContentStore {
 		for (const document of documents) {
 			this.documents.set(document.id, document);
 		}
-		this.cachedDocuments = [...this.documents.values()].sort((a, b) => a.title.localeCompare(b.title));
+		this.cachedDocuments = [...this.documents.values()].sort((a, b) =>
+			a.title.localeCompare(b.title),
+		);
 	}
 
 	private replaceDecisions(decisions: Decision[]): void {
@@ -760,7 +904,9 @@ export class ContentStore {
 		for (const decision of decisions) {
 			this.decisions.set(decision.id, decision);
 		}
-		this.cachedDecisions = sortByProposalId(Array.from(this.decisions.values()));
+		this.cachedDecisions = sortByProposalId(
+			Array.from(this.decisions.values()),
+		);
 	}
 
 	private patchFilesystem(): void {
@@ -772,19 +918,30 @@ export class ContentStore {
 		const originalSaveDocument = this.filesystem.saveDocument;
 		const originalSaveDecision = this.filesystem.saveDecision;
 
-		this.filesystem.saveProposal = (async (proposal: Proposal): Promise<string> => {
+		this.filesystem.saveProposal = (async (
+			proposal: Proposal,
+		): Promise<string> => {
 			const result = await originalSaveProposal.call(this.filesystem, proposal);
 			await this.handleProposalWrite(proposal.id);
 			return result;
 		}) as FileSystem["saveProposal"];
 
-		this.filesystem.saveDocument = (async (document: Document, subPath = ""): Promise<string> => {
-			const result = await originalSaveDocument.call(this.filesystem, document, subPath);
+		this.filesystem.saveDocument = (async (
+			document: Document,
+			subPath = "",
+		): Promise<string> => {
+			const result = await originalSaveDocument.call(
+				this.filesystem,
+				document,
+				subPath,
+			);
 			await this.handleDocumentWrite(document.id);
 			return result;
 		}) as FileSystem["saveDocument"];
 
-		this.filesystem.saveDecision = (async (decision: Decision): Promise<void> => {
+		this.filesystem.saveDecision = (async (
+			decision: Decision,
+		): Promise<void> => {
 			await originalSaveDecision.call(this.filesystem, decision);
 			await this.handleDecisionWrite(decision.id);
 		}) as FileSystem["saveDecision"];
@@ -807,7 +964,10 @@ export class ContentStore {
 		if (!this.initialized) {
 			return;
 		}
-		await this.refreshDocumentsFromDisk(documentId, this.documents.get(documentId));
+		await this.refreshDocumentsFromDisk(
+			documentId,
+			this.documents.get(documentId),
+		);
 	}
 
 	private hasProposalChanged(previous: Proposal, next: Proposal): boolean {
@@ -822,14 +982,19 @@ export class ContentStore {
 		return JSON.stringify(previous) !== JSON.stringify(next);
 	}
 
-	private async refreshProposalsFromDisk(expectedId?: string, previous?: Proposal): Promise<void> {
+	private async refreshProposalsFromDisk(
+		expectedId?: string,
+		previous?: Proposal,
+	): Promise<void> {
 		const proposals = await this.retryRead(
 			async () => this.loadProposalsWithLoader(),
 			(expected) => {
 				if (!expectedId) {
 					return true;
 				}
-				const match = expected.find((proposal) => proposalIdsEqual(proposal.id, expectedId));
+				const match = expected.find((proposal) =>
+					proposalIdsEqual(proposal.id, expectedId),
+				);
 				if (!match) {
 					return false;
 				}
@@ -843,13 +1008,24 @@ export class ContentStore {
 			return;
 		}
 		if (process.env.DEBUG) {
-			console.error("[DEBUG] ContentStore.replaceProposals: count=", proposals.length, "sources=", proposals.slice(0, 3).map(s => s.source).join(","));
+			console.error(
+				"[DEBUG] ContentStore.replaceProposals: count=",
+				proposals.length,
+				"sources=",
+				proposals
+					.slice(0, 3)
+					.map((s) => s.source)
+					.join(","),
+			);
 		}
 		this.replaceProposals(proposals);
 		this.notify("proposals");
 	}
 
-	private async refreshDocumentsFromDisk(expectedId?: string, previous?: Document): Promise<void> {
+	private async refreshDocumentsFromDisk(
+		expectedId?: string,
+		previous?: Document,
+	): Promise<void> {
 		const documents = await this.retryRead(
 			async () => this.filesystem.listDocuments(),
 			(expected) => {
@@ -873,7 +1049,10 @@ export class ContentStore {
 		this.notify("documents");
 	}
 
-	private async refreshDecisionsFromDisk(expectedId?: string, previous?: Decision): Promise<void> {
+	private async refreshDecisionsFromDisk(
+		expectedId?: string,
+		previous?: Decision,
+	): Promise<void> {
 		const decisions = await this.retryRead(
 			async () => this.filesystem.listDecisions(),
 			(expected) => {
@@ -909,13 +1088,17 @@ export class ContentStore {
 		const previous = this.proposals.get(normalizedProposalId);
 		const proposal = await this.retryRead(
 			async () => this.filesystem.loadProposal(proposalId),
-			(result) => result !== null && (!previous || this.hasProposalChanged(previous, result)),
+			(result) =>
+				result !== null &&
+				(!previous || this.hasProposalChanged(previous, result)),
 		);
 		if (!proposal) {
 			return;
 		}
 		this.proposals.set(proposal.id, proposal);
-		this.cachedProposals = sortByProposalId(Array.from(this.proposals.values()));
+		this.cachedProposals = sortByProposalId(
+			Array.from(this.proposals.values()),
+		);
 		this.notify("proposals");
 	}
 
@@ -923,19 +1106,27 @@ export class ContentStore {
 		const previous = this.decisions.get(decisionId);
 		const decision = await this.retryRead(
 			async () => this.filesystem.loadDecision(decisionId),
-			(result) => result !== null && (!previous || this.hasDecisionChanged(previous, result)),
+			(result) =>
+				result !== null &&
+				(!previous || this.hasDecisionChanged(previous, result)),
 		);
 		if (!decision) {
 			return;
 		}
 		this.decisions.set(decision.id, decision);
-		this.cachedDecisions = sortByProposalId(Array.from(this.decisions.values()));
+		this.cachedDecisions = sortByProposalId(
+			Array.from(this.decisions.values()),
+		);
 		this.notify("decisions");
 	}
 
 	private async createManualRecursiveWatcher(
 		rootDir: string,
-		handler: (eventType: string, absolutePath: string, relativePath: string | null) => Promise<void> | void,
+		handler: (
+			eventType: string,
+			absolutePath: string,
+			relativePath: string | null,
+		) => Promise<void> | void,
 	): Promise<WatchHandle> {
 		const watchers = new Map<string, FSWatcher>();
 		let disposed = false;
@@ -955,29 +1146,35 @@ export class ContentStore {
 				return;
 			}
 
-			const watcher = watch(dir, { recursive: false }, (eventType, filename) => {
-				if (disposed) {
-					return;
-				}
-				const relativePath = this.normalizeFilename(filename);
-				const absolutePath = relativePath ? join(dir, relativePath) : dir;
-				const normalizedRelative = relativePath ? relative(rootDir, absolutePath) : null;
-
-				this.enqueue(async () => {
-					await handler(eventType, absolutePath, normalizedRelative);
-
-					if (eventType === "rename" && relativePath) {
-						try {
-							const stats = await stat(absolutePath);
-							if (stats.isDirectory()) {
-								await addWatcher(absolutePath);
-							}
-						} catch {
-							removeSubtreeWatchers(absolutePath);
-						}
+			const watcher = watch(
+				dir,
+				{ recursive: false },
+				(eventType, filename) => {
+					if (disposed) {
+						return;
 					}
-				});
-			});
+					const relativePath = this.normalizeFilename(filename);
+					const absolutePath = relativePath ? join(dir, relativePath) : dir;
+					const normalizedRelative = relativePath
+						? relative(rootDir, absolutePath)
+						: null;
+
+					this.enqueue(async () => {
+						await handler(eventType, absolutePath, normalizedRelative);
+
+						if (eventType === "rename" && relativePath) {
+							try {
+								const stats = await stat(absolutePath);
+								if (stats.isDirectory()) {
+									await addWatcher(absolutePath);
+								}
+							} catch {
+								removeSubtreeWatchers(absolutePath);
+							}
+						}
+					});
+				},
+			);
 			this.attachWatcherErrorHandler(watcher, `manual:${dir}`);
 
 			watchers.set(dir, watcher);
@@ -1017,7 +1214,8 @@ export class ContentStore {
 
 	private async retryRead<T>(
 		loader: () => Promise<T>,
-		isValid: (result: T) => boolean = (value) => value !== null && value !== undefined,
+		isValid: (result: T) => boolean = (value) =>
+			value !== null && value !== undefined,
 		attempts = 12,
 		delayMs = 75,
 	): Promise<T | null> {

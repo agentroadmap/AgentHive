@@ -1,8 +1,8 @@
 import { stdout as output } from "node:process";
+import type { Core } from "../../index.ts";
+import type { Proposal, Sequence } from "../../shared/types/index.ts";
 import type { BoxInterface } from "./blessed.ts";
 import { box, scrollablebox } from "./blessed.ts";
-import type { Core } from "../../index.ts";
-import type { Sequence, Proposal } from "../../shared/types/index.ts";
 import { createProposalPopup } from "./proposal-viewer-with-search.ts";
 import { createScreen } from "./tui.ts";
 
@@ -31,7 +31,10 @@ export async function runSequencesView(
 	}
 
 	// Headless/CI fallback: when not a TTY or explicitly requested, just print text content
-	const forceHeadless = process.env.ROADMAP_HEADLESS === "1" || process.env.CI === "1" || process.env.CI === "true";
+	const forceHeadless =
+		process.env.ROADMAP_HEADLESS === "1" ||
+		process.env.CI === "1" ||
+		process.env.CI === "true";
 	if (output.isTTY === false || forceHeadless) {
 		console.log(lines.join("\n"));
 		return;
@@ -69,7 +72,12 @@ export async function runSequencesView(
 	};
 	const proposalLines: ProposalLine[] = [];
 	// Keep references to sequence blocks for visual indicator during move mode
-	const seqBlocks: { node: BoxInterface; index: number; top: number; height: number }[] = [];
+	const seqBlocks: {
+		node: BoxInterface;
+		index: number;
+		top: number;
+		height: number;
+	}[] = [];
 	let global = 0;
 	// Unsequenced block first
 	if (data.unsequenced.length > 0) {
@@ -100,7 +108,13 @@ export async function runSequencesView(
 				tags: true,
 				content: `  ${proposal.id} - ${proposal.title}`,
 			});
-			proposalLines.push({ node, globalIndex: global++, seqIdx: -1, proposalIdx: t, absTop: y + lineTop });
+			proposalLines.push({
+				node,
+				globalIndex: global++,
+				seqIdx: -1,
+				proposalIdx: t,
+				absTop: y + lineTop,
+			});
 		}
 		y += h + 1;
 	}
@@ -146,7 +160,13 @@ export async function runSequencesView(
 				tags: true,
 				content: `  ${proposal.id} - ${proposal.title}`,
 			});
-			proposalLines.push({ node, globalIndex: global++, seqIdx: s, proposalIdx: t, absTop: y + lineTop });
+			proposalLines.push({
+				node,
+				globalIndex: global++,
+				seqIdx: s,
+				proposalIdx: t,
+				absTop: y + lineTop,
+			});
 		}
 
 		y += h + 1; // 1 line gap between blocks
@@ -162,7 +182,8 @@ export async function runSequencesView(
 		height: 1,
 		tags: true,
 		style: { bg: "black", fg: "gray" },
-		content: " ↑/↓ navigate · Enter view · m move · q quit · Esc close popup/quit ",
+		content:
+			" ↑/↓ navigate · Enter view · m move · q quit · Esc close popup/quit ",
 	});
 	screen.append(footer);
 
@@ -171,7 +192,10 @@ export async function runSequencesView(
 	let popupOpen = false;
 	let moveMode = false;
 
-	type MoveTarget = { kind: "unsequenced" } | { kind: "sequence"; seqIndex: number } | { kind: "between"; k: number };
+	type MoveTarget =
+		| { kind: "unsequenced" }
+		| { kind: "sequence"; seqIndex: number }
+		| { kind: "between"; k: number };
 
 	// Build move targets: optional Unsequenced, and interleaved sequence + between K and K+1 (no top/bottom)
 	const seqIdxs = data.sequences.map((s) => s.index);
@@ -181,7 +205,8 @@ export async function runSequencesView(
 		const seqIndex = seqIdxs[i] as number;
 		moveTargets.push({ kind: "sequence", seqIndex });
 		// Drop zone only between this sequence and the next
-		if (i < seqIdxs.length - 1) moveTargets.push({ kind: "between", k: seqIndex });
+		if (i < seqIdxs.length - 1)
+			moveTargets.push({ kind: "between", k: seqIndex });
 	}
 	let targetPos = 0;
 
@@ -202,7 +227,9 @@ export async function runSequencesView(
 		hideDropZones();
 		if (!moveMode) return;
 		// Build overlays using sequence blocks only (index > 0)
-		const seqOnly = seqBlocks.filter((b) => b.index > 0).sort((a, b) => a.index - b.index);
+		const seqOnly = seqBlocks
+			.filter((b) => b.index > 0)
+			.sort((a, b) => a.index - b.index);
 		if (seqOnly.length === 0) return;
 		// between each pair (k = index of upper sequence)
 		for (let i = 0; i < seqOnly.length - 1; i++) {
@@ -229,8 +256,10 @@ export async function runSequencesView(
 		let suffix = "";
 		if (tgt) {
 			if (tgt.kind === "unsequenced") suffix = " · Target: Unsequenced";
-			else if (tgt.kind === "sequence") suffix = ` · Target: Sequence ${tgt.seqIndex}`;
-			else if (tgt.kind === "between") suffix = ` · Target: Between Sequence ${tgt.k} and ${tgt.k + 1}`;
+			else if (tgt.kind === "sequence")
+				suffix = ` · Target: Sequence ${tgt.seqIndex}`;
+			else if (tgt.kind === "between")
+				suffix = ` · Target: Between Sequence ${tgt.k} and ${tgt.k + 1}`;
 		}
 		return ` Move mode: ↑/↓ choose target · Enter apply · Esc cancel${suffix} `;
 	}
@@ -238,7 +267,9 @@ export async function runSequencesView(
 		for (const tl of proposalLines) {
 			const seq = data.sequences[tl.seqIdx];
 			const isUnseq = tl.seqIdx === -1;
-			const proposal = isUnseq ? data.unsequenced[tl.proposalIdx] : seq?.proposals[tl.proposalIdx];
+			const proposal = isUnseq
+				? data.unsequenced[tl.proposalIdx]
+				: seq?.proposals[tl.proposalIdx];
 			if (!proposal) continue;
 			const prefix = moveMode && tl.globalIndex === selected ? "->" : "  ";
 			const text = `${prefix} ${proposal.id} - ${proposal.title}`;
@@ -253,7 +284,8 @@ export async function runSequencesView(
 		const tl = proposalLines.find((t) => t.globalIndex === selected);
 		if (tl) {
 			const viewTop = container.getScroll();
-			const viewHeight = typeof container.height === "number" ? (container.height as number) : 0;
+			const viewHeight =
+				typeof container.height === "number" ? (container.height as number) : 0;
 			if (tl.absTop < viewTop + 1) {
 				container.scrollTo(Math.max(0, tl.absTop - 1));
 			} else if (viewHeight && tl.absTop > viewTop + viewHeight - 4) {
@@ -266,10 +298,14 @@ export async function runSequencesView(
 	function refreshMoveIndicators() {
 		// Reset all to default
 		for (const blk of seqBlocks) {
-			blk.node.style = { ...(blk.node.style || {}), border: { fg: "cyan" } } as unknown;
+			blk.node.style = {
+				...(blk.node.style || {}),
+				border: { fg: "cyan" },
+			} as unknown;
 		}
 		// Reset overlays
-		for (const [, dz] of dropZoneBoxes) dz.style = { ...(dz.style || {}), fg: "gray" } as unknown;
+		for (const [, dz] of dropZoneBoxes)
+			dz.style = { ...(dz.style || {}), fg: "gray" } as unknown;
 		if (moveMode) {
 			const tgt = moveTargets[targetPos];
 			if (tgt?.kind === "sequence") {
@@ -294,14 +330,20 @@ export async function runSequencesView(
 	function move(delta: number) {
 		if (popupOpen) return;
 		if (moveMode) {
-			const nextPos = Math.max(0, Math.min(moveTargets.length - 1, targetPos + delta));
+			const nextPos = Math.max(
+				0,
+				Math.min(moveTargets.length - 1, targetPos + delta),
+			);
 			targetPos = nextPos;
 			refreshHighlight();
 			refreshMoveIndicators();
 			return;
 		}
 		if (proposalLines.length === 0) return;
-		selected = Math.max(0, Math.min(proposalLines.length - 1, selected + delta));
+		selected = Math.max(
+			0,
+			Math.min(proposalLines.length - 1, selected + delta),
+		);
 		refreshHighlight();
 	}
 
@@ -310,7 +352,10 @@ export async function runSequencesView(
 		const item = proposalLines.find((t) => t.globalIndex === selected);
 		if (!item) return;
 		const seq = data.sequences[item.seqIdx];
-		const proposal = item.seqIdx === -1 ? data.unsequenced[item.proposalIdx] : seq?.proposals[item.proposalIdx];
+		const proposal =
+			item.seqIdx === -1
+				? data.unsequenced[item.proposalIdx]
+				: seq?.proposals[item.proposalIdx];
 		if (!proposal) return;
 		if (popupOpen) return;
 		popupOpen = true;
@@ -336,7 +381,9 @@ export async function runSequencesView(
 		if (popupOpen) return;
 		if (moveMode) {
 			moveMode = false;
-			footer.setContent(" ↑/↓ navigate · Enter view · m move · q quit · Esc close popup/quit ");
+			footer.setContent(
+				" ↑/↓ navigate · Enter view · m move · q quit · Esc close popup/quit ",
+			);
 			hideDropZones();
 			refreshHighlight();
 			refreshMoveIndicators();
@@ -365,13 +412,17 @@ export async function runSequencesView(
 							);
 			} else {
 				const seqIndex = data.sequences[item.seqIdx]?.index;
-				const pos = moveTargets.findIndex((t) => t.kind === "sequence" && t.seqIndex === seqIndex);
+				const pos = moveTargets.findIndex(
+					(t) => t.kind === "sequence" && t.seqIndex === seqIndex,
+				);
 				targetPos = pos >= 0 ? pos : 0;
 			}
 		}
 		// Update footer to indicate mode and overlays
 		footer.setContent(
-			moveMode ? moveFooterText() : " ↑/↓ navigate · Enter view · m move · q quit · Esc close popup/quit ",
+			moveMode
+				? moveFooterText()
+				: " ↑/↓ navigate · Enter view · m move · q quit · Esc close popup/quit ",
 		);
 		ensureDropZoneOverlays();
 		refreshHighlight();
@@ -386,44 +437,78 @@ export async function runSequencesView(
 		const item = proposalLines.find((t) => t.globalIndex === selected);
 		if (!item) return;
 		const seq2 = data.sequences[item.seqIdx];
-		const proposal = item.seqIdx === -1 ? data.unsequenced[item.proposalIdx] : seq2?.proposals[item.proposalIdx];
+		const proposal =
+			item.seqIdx === -1
+				? data.unsequenced[item.proposalIdx]
+				: seq2?.proposals[item.proposalIdx];
 		if (!proposal) return;
 		// Persist changes based on target
 		const allProposals = await core.queryProposals();
 		const tgt = moveTargets[targetPos];
 		if (tgt?.kind === "unsequenced") {
-			const { planMoveToUnsequenced } = await import('../../core/proposal/sequences.ts');
+			const { planMoveToUnsequenced } = await import(
+				"../../core/proposal/sequences.ts"
+			);
 			const res = planMoveToUnsequenced(allProposals, proposal.id);
 			if (!res.ok) {
 				footer.setContent(` ${res.error} · Esc cancel `);
 				screen.render();
 				return;
 			}
-			await core.updateProposalsBulk(res.changed, `Move ${proposal.id} to Unsequenced`);
+			await core.updateProposalsBulk(
+				res.changed,
+				`Move ${proposal.id} to Unsequenced`,
+			);
 		} else if (tgt?.kind === "sequence") {
-			const { planMoveToSequence } = await import('../../core/proposal/sequences.ts');
-			const changed = planMoveToSequence(allProposals, data.sequences, proposal.id, tgt.seqIndex);
-			if (changed.length > 0) await core.updateProposalsBulk(changed, `Update dependencies/order for move of ${proposal.id}`);
+			const { planMoveToSequence } = await import(
+				"../../core/proposal/sequences.ts"
+			);
+			const changed = planMoveToSequence(
+				allProposals,
+				data.sequences,
+				proposal.id,
+				tgt.seqIndex,
+			);
+			if (changed.length > 0)
+				await core.updateProposalsBulk(
+					changed,
+					`Update dependencies/order for move of ${proposal.id}`,
+				);
 		} else if (tgt?.kind === "between") {
-			const { adjustDependenciesForInsertBetween } = await import('../../core/proposal/sequences.ts');
-			const updated = adjustDependenciesForInsertBetween(allProposals, data.sequences, proposal.id, tgt.k);
+			const { adjustDependenciesForInsertBetween } = await import(
+				"../../core/proposal/sequences.ts"
+			);
+			const updated = adjustDependenciesForInsertBetween(
+				allProposals,
+				data.sequences,
+				proposal.id,
+				tgt.k,
+			);
 			const byIdOrig = new Map(allProposals.map((t) => [t.id, t]));
 			const changed: Proposal[] = [];
 			for (const u of updated) {
 				const orig = byIdOrig.get(u.id);
 				if (!orig) continue;
-				const depsChanged = JSON.stringify(orig.dependencies) !== JSON.stringify(u.dependencies);
+				const depsChanged =
+					JSON.stringify(orig.dependencies) !== JSON.stringify(u.dependencies);
 				const ordChanged = (orig.ordinal ?? null) !== (u.ordinal ?? null);
 				if (depsChanged || ordChanged) changed.push(u);
 			}
 			if (changed.length > 0) {
-				await core.updateProposalsBulk(changed, `Insert new sequence via drop between for ${proposal.id}`);
+				await core.updateProposalsBulk(
+					changed,
+					`Insert new sequence via drop between for ${proposal.id}`,
+				);
 			}
 		}
 		// Reload and rerender
 		const proposalsNew = await core.queryProposals();
-		const active = proposalsNew.filter((t) => (t.status || "").toLowerCase() !== "done");
-		const { computeSequences: recompute } = await import('../../core/proposal/sequences.ts');
+		const active = proposalsNew.filter(
+			(t) => (t.status || "").toLowerCase() !== "done",
+		);
+		const { computeSequences: recompute } = await import(
+			"../../core/proposal/sequences.ts"
+		);
 		const next = recompute(active);
 		screen.destroy();
 		await runSequencesView(next, core);

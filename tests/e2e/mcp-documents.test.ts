@@ -2,7 +2,11 @@ import assert from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { McpServer } from "../../src/mcp/server.ts";
 import { registerDocumentTools } from "../../src/mcp/tools/documents/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 // Helper to extract text from MCP content (handles union types)
 const getText = (content: unknown[] | undefined, index = 0): string => {
@@ -161,7 +165,9 @@ describe("MCP document tools", () => {
 
 		const updateText = getText(updateResult.content);
 		assert.ok(updateText.includes("Document updated successfully."));
-		assert.ok(updateText.includes("Document doc-1 - Incident Response Handbook"));
+		assert.ok(
+			updateText.includes("Document doc-1 - Incident Response Handbook"),
+		);
 		assert.ok(updateText.includes("Updated procedures"));
 
 		const viewResult = await mcpServer.testInterface.callTool({
@@ -194,7 +200,7 @@ describe("MCP document tools", () => {
 
 		const searchText = getText(searchResult.content);
 		assert.ok(searchText.includes("Documents:"));
-		assert.ok((/Architecture Overview/).test(searchText));
-		assert.ok((/\[score [0-1]\.\d{3}]/).test(searchText));
+		assert.ok(/Architecture Overview/.test(searchText));
+		assert.ok(/\[score [0-1]\.\d{3}]/.test(searchText));
 	});
 });

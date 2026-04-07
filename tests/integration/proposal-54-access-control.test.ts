@@ -7,17 +7,16 @@
  * AC#4: Admin override capability with audit logging
  */
 
-import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import {
 	AccessControl,
 	createRBACMiddleware,
 	hasAccess,
 	previewTransition,
-	type Role,
 } from "../../src/core/security/access-control.ts";
 
 describe("proposal-54: Authorization-Access-Control", () => {
@@ -98,7 +97,7 @@ describe("proposal-54: Authorization-Access-Control", () => {
 			});
 			assert.equal(createResult.allowed, true);
 
-			const editResult = await ac.checkPermission({
+			const _editResult = await ac.checkPermission({
 				agentId: "dev-1",
 				action: "edit",
 				resource: "proposal",
@@ -106,7 +105,10 @@ describe("proposal-54: Authorization-Access-Control", () => {
 				timestamp: new Date().toISOString(),
 			});
 			// Will fail assignee check if enforced, but the role allows it
-			assert.ok(createResult.allowed, "Developer should be able to create proposals");
+			assert.ok(
+				createResult.allowed,
+				"Developer should be able to create proposals",
+			);
 		});
 
 		it("reviewer can review proposals", async () => {
@@ -244,7 +246,10 @@ describe("proposal-54: Authorization-Access-Control", () => {
 
 			// Grant dev-1 delete permission temporarily for this test
 			ac.updateRolePermissions("developer", [
-				{ resource: "proposal", actions: ["read", "create", "edit", "claim", "delete"] },
+				{
+					resource: "proposal",
+					actions: ["read", "create", "edit", "claim", "delete"],
+				},
 			]);
 
 			const result = await ac.checkPermission({
@@ -442,8 +447,14 @@ describe("proposal-54: Authorization-Access-Control", () => {
 
 		it("getValidTransitions returns correct options", () => {
 			assert.deepEqual(ac.getValidTransitions("Potential"), ["In Progress"]);
-			assert.deepEqual(ac.getValidTransitions("In Progress"), ["Review", "Potential"]);
-			assert.deepEqual(ac.getValidTransitions("Review"), ["Complete", "In Progress"]);
+			assert.deepEqual(ac.getValidTransitions("In Progress"), [
+				"Review",
+				"Potential",
+			]);
+			assert.deepEqual(ac.getValidTransitions("Review"), [
+				"Complete",
+				"In Progress",
+			]);
 			assert.deepEqual(ac.getValidTransitions("Complete"), []);
 		});
 
@@ -698,10 +709,22 @@ describe("proposal-54: Authorization-Access-Control", () => {
 			ac.registerAgent("admin-1", ["admin"]);
 			ac.registerAgent("viewer-1", ["viewer"]);
 
-			const adminAccess = await hasAccess(ac, "admin-1", "edit", "proposal", "proposal-1");
+			const adminAccess = await hasAccess(
+				ac,
+				"admin-1",
+				"edit",
+				"proposal",
+				"proposal-1",
+			);
 			assert.equal(adminAccess, true);
 
-			const viewerAccess = await hasAccess(ac, "viewer-1", "edit", "proposal", "proposal-1");
+			const viewerAccess = await hasAccess(
+				ac,
+				"viewer-1",
+				"edit",
+				"proposal",
+				"proposal-1",
+			);
 			assert.equal(viewerAccess, false);
 		});
 

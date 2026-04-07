@@ -6,30 +6,28 @@
  * AC#4: Message threading supported
  */
 
-import { readdirSync, existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import {
+	appendMessage,
+	buildThreads,
+	ensureChannelFile,
+	findMentionsForAgent,
+	formatMentionNotification,
+	formatThread,
+	type MentionNotification,
+	type MessagePriority,
+	parseMessagesFromFile,
+	type Thread,
+} from "../../../../core/messaging/message-protocol.ts";
 import { McpError } from "../../errors/mcp-errors.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
-import {
-	parseMessagesFromFile,
-	findMentionsForAgent,
-	formatMentionNotification,
-	buildThreads,
-	formatThread,
-	appendMessage,
-	ensureChannelFile,
-	type MentionNotification,
-	type Thread,
-	type MessagePriority,
-} from '../../../../core/messaging/message-protocol.ts';
 
 export class ProtocolHandlers {
-	private readonly server: McpServer;
 	private readonly messagesDir: string;
 
-	constructor(server: McpServer) {
-		this.server = server;
+	constructor(private readonly server: McpServer) {
 		this.messagesDir = join(process.cwd(), "roadmap", "messages");
 	}
 
@@ -50,25 +48,31 @@ export class ProtocolHandlers {
 				const altPath = join(this.messagesDir, `private-${args.channel}.md`);
 				const publicPath = join(this.messagesDir, "PUBLIC.md");
 
-				const paths = [filePath, altPath, publicPath].filter(p => existsSync(p));
+				const paths = [filePath, altPath, publicPath].filter((p) =>
+					existsSync(p),
+				);
 
 				for (const path of paths) {
 					const messages = parseMessagesFromFile(path, args.channel);
 					const filtered = args.since
-						? messages.filter(m => m.timestamp >= args.since!)
+						? messages.filter((m) => m.timestamp >= args.since!)
 						: messages;
 					allMentions.push(...findMentionsForAgent(filtered, args.agent));
 				}
 			} else {
 				// Search all channels
 				if (existsSync(this.messagesDir)) {
-					const files = readdirSync(this.messagesDir).filter(f => f.endsWith(".md"));
+					const files = readdirSync(this.messagesDir).filter((f) =>
+						f.endsWith(".md"),
+					);
 					for (const file of files) {
-						const channel = file.replace(/^(group|private)-/, "").replace(/\.md$/, "");
+						const channel = file
+							.replace(/^(group|private)-/, "")
+							.replace(/\.md$/, "");
 						const filePath = join(this.messagesDir, file);
 						const messages = parseMessagesFromFile(filePath, channel);
 						const filtered = args.since
-							? messages.filter(m => m.timestamp >= args.since!)
+							? messages.filter((m) => m.timestamp >= args.since!)
 							: messages;
 						allMentions.push(...findMentionsForAgent(filtered, args.agent));
 					}
@@ -77,10 +81,12 @@ export class ProtocolHandlers {
 
 			if (allMentions.length === 0) {
 				return {
-					content: [{
-						type: "text",
-						text: `No mentions found for @${args.agent}${args.channel ? ` in #${args.channel}` : ""}.`,
-					}],
+					content: [
+						{
+							type: "text",
+							text: `No mentions found for @${args.agent}${args.channel ? ` in #${args.channel}` : ""}.`,
+						},
+					],
 				};
 			}
 
@@ -112,20 +118,29 @@ export class ProtocolHandlers {
 			const filePath = join(this.messagesDir, `group-${args.channel}.md`);
 			if (!existsSync(filePath)) {
 				return {
-					content: [{ type: "text", text: `Channel #${args.channel} not found.` }],
+					content: [
+						{ type: "text", text: `Channel #${args.channel} not found.` },
+					],
 				};
 			}
 
 			const messages = parseMessagesFromFile(filePath, args.channel);
 			const threads = buildThreads(messages);
 
-			const thread = threads.find(t => t.id === args.messageId);
+			const thread = threads.find((t) => t.id === args.messageId);
 			if (!thread) {
 				// Check if the message exists but has no replies
-				const parentMsg = messages.find(m => m.id === args.messageId || m.raw.includes(args.messageId));
+				const parentMsg = messages.find(
+					(m) => m.id === args.messageId || m.raw.includes(args.messageId),
+				);
 				if (!parentMsg) {
 					return {
-						content: [{ type: "text", text: `Message ${args.messageId} not found in #${args.channel}.` }],
+						content: [
+							{
+								type: "text",
+								text: `Message ${args.messageId} not found in #${args.channel}.`,
+							},
+						],
 					};
 				}
 
@@ -165,26 +180,36 @@ export class ProtocolHandlers {
 			const filePath = join(this.messagesDir, `group-${args.channel}.md`);
 			if (!existsSync(filePath)) {
 				return {
-					content: [{ type: "text", text: `Channel #${args.channel} not found.` }],
+					content: [
+						{ type: "text", text: `Channel #${args.channel} not found.` },
+					],
 				};
 			}
 
 			const messages = parseMessagesFromFile(filePath, args.channel);
 			const threads = buildThreads(messages);
 
-			const limitedThreads = args.limit ? threads.slice(0, args.limit) : threads;
+			const limitedThreads = args.limit
+				? threads.slice(0, args.limit)
+				: threads;
 
 			if (limitedThreads.length === 0) {
 				return {
-					content: [{ type: "text", text: `No threads found in #${args.channel}.` }],
+					content: [
+						{ type: "text", text: `No threads found in #${args.channel}.` },
+					],
 				};
 			}
 
-			const lines = [`## Threads in #${args.channel} (${threads.length} total)`];
+			const lines = [
+				`## Threads in #${args.channel} (${threads.length} total)`,
+			];
 			for (const thread of limitedThreads) {
 				lines.push("");
 				lines.push(`### ${thread.id}`);
-				lines.push(`- **${thread.parent.from}**: ${thread.parent.content.substring(0, 80)}...`);
+				lines.push(
+					`- **${thread.parent.from}**: ${thread.parent.content.substring(0, 80)}...`,
+				);
 				lines.push(`- Replies: ${thread.replies.length}`);
 				lines.push(`- Participants: ${thread.participants.join(", ")}`);
 				lines.push(`- Last activity: ${thread.lastActivity}`);
@@ -222,10 +247,12 @@ export class ProtocolHandlers {
 			});
 
 			return {
-				content: [{
-					type: "text",
-					text: `Reply sent to thread ${args.threadId} in #${args.channel}:\n${line}`,
-				}],
+				content: [
+					{
+						type: "text",
+						text: `Reply sent to thread ${args.threadId} in #${args.channel}:\n${line}`,
+					},
+				],
 			};
 		} catch (error) {
 			if (error instanceof Error) {
@@ -305,10 +332,14 @@ export class ProtocolHandlers {
 			const allMentions: MentionNotification[] = [];
 
 			if (existsSync(this.messagesDir)) {
-				const files = readdirSync(this.messagesDir).filter(f => f.endsWith(".md"));
+				const files = readdirSync(this.messagesDir).filter((f) =>
+					f.endsWith(".md"),
+				);
 
 				for (const file of files) {
-					const channel = file.replace(/^(group|private)-/, "").replace(/\.md$/, "");
+					const channel = file
+						.replace(/^(group|private)-/, "")
+						.replace(/\.md$/, "");
 
 					// Skip if specific channel requested and this isn't it
 					if (args.channel && channel !== args.channel) continue;
@@ -318,7 +349,7 @@ export class ProtocolHandlers {
 
 					// Filter by since timestamp
 					const filtered = args.since
-						? messages.filter(m => m.timestamp >= args.since!)
+						? messages.filter((m) => m.timestamp >= args.since!)
 						: messages;
 
 					allMentions.push(...findMentionsForAgent(filtered, args.agent));
@@ -327,17 +358,21 @@ export class ProtocolHandlers {
 
 			if (allMentions.length === 0) {
 				return {
-					content: [{
-						type: "text",
-						text: `No notifications for @${args.agent}${args.since ? ` since ${args.since}` : ""}.`,
-					}],
+					content: [
+						{
+							type: "text",
+							text: `No notifications for @${args.agent}${args.since ? ` since ${args.since}` : ""}.`,
+						},
+					],
 				};
 			}
 
 			// Group by priority
-			const urgent = allMentions.filter(n => n.message.priority === "urgent");
-			const high = allMentions.filter(n => n.message.priority === "high");
-			const normal = allMentions.filter(n => n.message.priority === "normal" || n.message.priority === "low");
+			const urgent = allMentions.filter((n) => n.message.priority === "urgent");
+			const high = allMentions.filter((n) => n.message.priority === "high");
+			const normal = allMentions.filter(
+				(n) => n.message.priority === "normal" || n.message.priority === "low",
+			);
 
 			const lines = [`## Notifications for @${args.agent}`];
 			lines.push(`Total: ${allMentions.length} mentions\n`);
@@ -345,7 +380,9 @@ export class ProtocolHandlers {
 			if (urgent.length > 0) {
 				lines.push(`### 🔴 Urgent (${urgent.length})`);
 				for (const n of urgent) {
-					lines.push(`- [${n.message.timestamp}] **${n.message.from}** in #${n.channel}: ${n.message.content}`);
+					lines.push(
+						`- [${n.message.timestamp}] **${n.message.from}** in #${n.channel}: ${n.message.content}`,
+					);
 				}
 				lines.push("");
 			}
@@ -353,7 +390,9 @@ export class ProtocolHandlers {
 			if (high.length > 0) {
 				lines.push(`### 🟡 High Priority (${high.length})`);
 				for (const n of high) {
-					lines.push(`- [${n.message.timestamp}] **${n.message.from}** in #${n.channel}: ${n.message.content}`);
+					lines.push(
+						`- [${n.message.timestamp}] **${n.message.from}** in #${n.channel}: ${n.message.content}`,
+					);
 				}
 				lines.push("");
 			}
@@ -361,7 +400,9 @@ export class ProtocolHandlers {
 			if (normal.length > 0) {
 				lines.push(`### 🟢 Normal (${normal.length})`);
 				for (const n of normal) {
-					lines.push(`- [${n.message.timestamp}] **${n.message.from}** in #${n.channel}: ${n.message.content}`);
+					lines.push(
+						`- [${n.message.timestamp}] **${n.message.from}** in #${n.channel}: ${n.message.content}`,
+					);
 				}
 			}
 

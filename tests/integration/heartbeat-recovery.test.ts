@@ -12,10 +12,10 @@
  */
 
 import assert from "node:assert";
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
-import { createUniqueTestDir, safeCleanup } from "../support/test-utils.ts";
 import { formatLocalDateTime } from "../../src/utils/date-time.ts";
+import { createUniqueTestDir, safeCleanup } from "../support/test-utils.ts";
 
 describe("Heartbeat & Stale Agent Recovery", () => {
 	let projectRoot: string;
@@ -33,16 +33,26 @@ describe("Heartbeat & Stale Agent Recovery", () => {
 
 	describe("AC #4: Heartbeat signal recording", () => {
 		it("should record heartbeat timestamp in claim metadata", async () => {
-			const { proposal } = await core.createProposalFromInput({ title: "Test Proposal" });
-			await core.claimProposal(proposal.id, "@agent-1", { durationMinutes: 30 });
+			const { proposal } = await core.createProposalFromInput({
+				title: "Test Proposal",
+			});
+			await core.claimProposal(proposal.id, "@agent-1", {
+				durationMinutes: 30,
+			});
 
 			// Send heartbeat
 			const result = await core.heartbeat(proposal.id, "@agent-1");
-			assert.ok(result.claim?.lastHeartbeat, "claim should have lastHeartbeat set");
+			assert.ok(
+				result.claim?.lastHeartbeat,
+				"claim should have lastHeartbeat set",
+			);
 
 			// Verify it persisted
 			const reloaded = await core.fs.loadProposal(proposal.id);
-			assert.ok(reloaded?.claim?.lastHeartbeat, "persisted claim should have lastHeartbeat");
+			assert.ok(
+				reloaded?.claim?.lastHeartbeat,
+				"persisted claim should have lastHeartbeat",
+			);
 		});
 	});
 
@@ -55,7 +65,9 @@ describe("Heartbeat & Stale Agent Recovery", () => {
 		});
 
 		it("should validate heartbeat interval against claim expiry", async () => {
-			const { proposal } = await core.createProposalFromInput({ title: "Test Proposal" });
+			const { proposal } = await core.createProposalFromInput({
+				title: "Test Proposal",
+			});
 			// Claim with short duration
 			await core.claimProposal(proposal.id, "@agent-1", { durationMinutes: 1 });
 
@@ -67,7 +79,9 @@ describe("Heartbeat & Stale Agent Recovery", () => {
 
 	describe("AC #6: proposal_prune_claims removes stale claims", () => {
 		it("should prune claims exceeding heartbeat timeout", async () => {
-			const { proposal } = await core.createProposalFromInput({ title: "Test Proposal" });
+			const { proposal } = await core.createProposalFromInput({
+				title: "Test Proposal",
+			});
 
 			// Create a claim with a stale heartbeat (2 hours ago)
 			const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
@@ -86,11 +100,17 @@ describe("Heartbeat & Stale Agent Recovery", () => {
 
 			// Verify claim is gone
 			const reloaded = await core.fs.loadProposal(proposal.id);
-			assert.strictEqual(reloaded?.claim, undefined, "pruned claim should be removed");
+			assert.strictEqual(
+				reloaded?.claim,
+				undefined,
+				"pruned claim should be removed",
+			);
 		});
 
 		it("should keep claims with recent heartbeats", async () => {
-			const { proposal } = await core.createProposalFromInput({ title: "Test Proposal" });
+			const { proposal } = await core.createProposalFromInput({
+				title: "Test Proposal",
+			});
 
 			// Create a claim with a fresh heartbeat (1 minute ago)
 			const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
@@ -106,7 +126,10 @@ describe("Heartbeat & Stale Agent Recovery", () => {
 
 			// Prune with 60-minute timeout
 			const pruned = await core.pruneClaims({ timeoutMinutes: 60 });
-			assert.ok(!pruned.includes(proposal.id), "fresh claim should NOT be pruned");
+			assert.ok(
+				!pruned.includes(proposal.id),
+				"fresh claim should NOT be pruned",
+			);
 
 			// Verify claim still exists
 			const reloaded = await core.fs.loadProposal(proposal.id);
@@ -128,16 +151,23 @@ describe("Heartbeat & Stale Agent Recovery", () => {
 			const claim = {
 				agent: "@stale-agent",
 				created: formatLocalDateTime(new Date(twoHoursAgo.getTime() - 60000)),
-				expires: formatLocalDateTime(thirtyMinFromNow),  // Claim is still VALID
+				expires: formatLocalDateTime(thirtyMinFromNow), // Claim is still VALID
 				lastHeartbeat: formatLocalDateTime(twoHoursAgo), // But heartbeat is STALE
 				heartbeatIntervalMs: 1800000, // 30 min - stale if no heartbeat for 60+ min
 			};
 			await core.updateProposalFromInput(proposal.id, { claim });
 
 			// pickupProposal should skip this proposal because the agent's heartbeat is stale
-			const pickup = await core.pickupProposal({ agent: "@new-agent", dryRun: true });
+			const pickup = await core.pickupProposal({
+				agent: "@new-agent",
+				dryRun: true,
+			});
 			if (pickup) {
-				assert.notStrictEqual(pickup.proposal.id, proposal.id, "should not pick up stale-claimed proposal");
+				assert.notStrictEqual(
+					pickup.proposal.id,
+					proposal.id,
+					"should not pick up stale-claimed proposal",
+				);
 			}
 			// If pickup returns null, that's acceptable (no ready proposals)
 		});
@@ -151,8 +181,10 @@ describe("Heartbeat & Stale Agent Recovery", () => {
 			});
 
 			// Agent claims the proposal
-			await core.claimProposal(proposal.id, "@crashing-agent", { durationMinutes: 30 });
-			let reloaded = await core.fs.loadProposal(proposal.id);
+			await core.claimProposal(proposal.id, "@crashing-agent", {
+				durationMinutes: 30,
+			});
+			const reloaded = await core.fs.loadProposal(proposal.id);
 			assert.strictEqual(reloaded?.claim?.agent, "@crashing-agent");
 
 			// Simulate crash: manually make the claim stale (heartbeat 2+ hours ago)
@@ -168,36 +200,64 @@ describe("Heartbeat & Stale Agent Recovery", () => {
 
 			// Prune the stale claim
 			const pruned = await core.pruneClaims({ timeoutMinutes: 60 });
-			assert.ok(pruned.includes(proposal.id), "crashed agent's claim should be pruned");
+			assert.ok(
+				pruned.includes(proposal.id),
+				"crashed agent's claim should be pruned",
+			);
 
 			// New agent can now pick up the proposal
-			const reClaimed = await core.claimProposal(proposal.id, "@recovery-agent", { durationMinutes: 30 });
-			assert.strictEqual(reClaimed.claim?.agent, "@recovery-agent", "new agent should be able to claim after crash recovery");
+			const reClaimed = await core.claimProposal(
+				proposal.id,
+				"@recovery-agent",
+				{ durationMinutes: 30 },
+			);
+			assert.strictEqual(
+				reClaimed.claim?.agent,
+				"@recovery-agent",
+				"new agent should be able to claim after crash recovery",
+			);
 		});
 	});
 
 	describe("AC #10: proposal_renew resets heartbeat atomically", () => {
 		it("should reset heartbeat timestamp on renewal", async () => {
-			const { proposal } = await core.createProposalFromInput({ title: "Renewal Test" });
-			await core.claimProposal(proposal.id, "@agent-1", { durationMinutes: 30 });
+			const { proposal } = await core.createProposalFromInput({
+				title: "Renewal Test",
+			});
+			await core.claimProposal(proposal.id, "@agent-1", {
+				durationMinutes: 30,
+			});
 
 			// Wait a tiny bit
-			await new Promise(resolve => setTimeout(resolve, 100));
+			await new Promise((resolve) => setTimeout(resolve, 100));
 
 			// Renew the claim
-			const renewed = await core.renewClaim(proposal.id, "@agent-1", { durationMinutes: 60 });
+			const renewed = await core.renewClaim(proposal.id, "@agent-1", {
+				durationMinutes: 60,
+			});
 
-			assert.ok(renewed.claim?.lastHeartbeat, "renewed claim should have lastHeartbeat");
+			assert.ok(
+				renewed.claim?.lastHeartbeat,
+				"renewed claim should have lastHeartbeat",
+			);
 			assert.ok(renewed.claim?.expires, "renewed claim should have new expiry");
 
 			// Verify both heartbeat and expiry were updated
 			const reloaded = await core.fs.loadProposal(proposal.id);
-			assert.ok(reloaded?.claim?.lastHeartbeat, "persisted claim should have lastHeartbeat");
-			assert.ok(reloaded?.claim?.expires, "persisted claim should have new expiry");
+			assert.ok(
+				reloaded?.claim?.lastHeartbeat,
+				"persisted claim should have lastHeartbeat",
+			);
+			assert.ok(
+				reloaded?.claim?.expires,
+				"persisted claim should have new expiry",
+			);
 		});
 
 		it("should extend expiry from NOW, not from original expiry", async () => {
-			const { proposal } = await core.createProposalFromInput({ title: "Renewal Extension Test" });
+			const { proposal } = await core.createProposalFromInput({
+				title: "Renewal Extension Test",
+			});
 
 			// Create an old claim (claimed 30 min ago, expires 1 min ago)
 			const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000);
@@ -212,17 +272,26 @@ describe("Heartbeat & Stale Agent Recovery", () => {
 			await core.updateProposalFromInput(proposal.id, { claim: oldClaim });
 
 			const beforeRenew = new Date();
-			const renewed = await core.renewClaim(proposal.id, "@agent-1", { durationMinutes: 60 });
+			const renewed = await core.renewClaim(proposal.id, "@agent-1", {
+				durationMinutes: 60,
+			});
 			const afterRenew = new Date();
 
-			const newExpiry = new Date(renewed.claim!.expires!.replace(" ", "T"));
+			assert.ok(renewed.claim?.expires);
+			const newExpiry = new Date(renewed.claim.expires.replace(" ", "T"));
 
 			// Expiry should be roughly now + 60 minutes (with some tolerance)
 			const expectedMin = new Date(beforeRenew.getTime() + 59 * 60 * 1000); // 59 min (tolerance)
 			const expectedMax = new Date(afterRenew.getTime() + 61 * 60 * 1000); // 61 min (tolerance)
 
-			assert.ok(newExpiry >= expectedMin, `expiry ${newExpiry.toISOString()} should be >= ${expectedMin.toISOString()}`);
-			assert.ok(newExpiry <= expectedMax, `expiry ${newExpiry.toISOString()} should be <= ${expectedMax.toISOString()}`);
+			assert.ok(
+				newExpiry >= expectedMin,
+				`expiry ${newExpiry.toISOString()} should be >= ${expectedMin.toISOString()}`,
+			);
+			assert.ok(
+				newExpiry <= expectedMax,
+				`expiry ${newExpiry.toISOString()} should be <= ${expectedMax.toISOString()}`,
+			);
 		});
 	});
 });

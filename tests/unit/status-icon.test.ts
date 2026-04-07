@@ -1,7 +1,12 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
+import {
+	formatStatusWithIcon,
+	getStatusColor,
+	getStatusIcon,
+	getStatusStyle,
+} from "../../src/ui/status-icon.ts";
 import { expect } from "../support/test-utils.ts";
-import { formatStatusWithIcon, getStatusColor, getStatusIcon, getStatusStyle } from "../../src/ui/status-icon.ts";
 
 describe("Status Icon Component", () => {
 	describe("getStatusStyle", () => {

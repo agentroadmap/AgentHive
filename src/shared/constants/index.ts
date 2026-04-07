@@ -39,7 +39,16 @@ export const DEFAULT_FILES = {
 /**
  * Default proposal statuses
  */
-export const DEFAULT_STATUSES = ["Draft", "Review", "Building", "Accepted", "Complete", "Rejected", "Abandoned", "Replaced"] as const;
+export const DEFAULT_STATUSES = [
+	"Draft",
+	"Review",
+	"Building",
+	"Accepted",
+	"Complete",
+	"Rejected",
+	"Abandoned",
+	"Replaced",
+] as const;
 
 /**
  * Fallback status when no default is configured

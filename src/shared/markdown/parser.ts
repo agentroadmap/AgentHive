@@ -2,19 +2,17 @@ import matter from "gray-matter";
 import type {
 	AcceptanceCriterion,
 	Decision,
-	Document,
 	Directive,
+	Document,
 	ParsedMarkdown,
 	ProofItem,
 	ProofType,
 	Proposal,
-	ProposalMaturity,
 } from "../../types/index.ts";
 import {
 	AcceptanceCriteriaManager,
-	STRUCTURED_SECTION_KEYS,
-	VerificationProposalmentsManager,
 	extractStructuredSection,
+	VerificationProposalmentsManager,
 } from "./structured-sections.ts";
 
 function normalizeFlowList(prefix: string, rawValue: string): string | null {
@@ -96,7 +94,9 @@ function normalizeDate(value: unknown): string {
 	if (!str) return "";
 
 	// Check for datetime format first (YYYY-MM-DD HH:mm)
-	let match: RegExpMatchArray | null = str.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/);
+	let match: RegExpMatchArray | null = str.match(
+		/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/,
+	);
 	if (match) {
 		// Already in correct format, return as-is
 		return str;
@@ -134,7 +134,10 @@ function normalizeDate(value: unknown): string {
 	return str;
 }
 
-function parseProof(proofSection?: string): { proof: string[]; proofItems: ProofItem[] } {
+function parseProof(proofSection?: string): {
+	proof: string[];
+	proofItems: ProofItem[];
+} {
 	if (!proofSection) return { proof: [], proofItems: [] };
 
 	const lines = proofSection
@@ -149,7 +152,9 @@ function parseProof(proofSection?: string): { proof: string[]; proofItems: Proof
 		proof.push(line);
 
 		// Try to parse structured format: [type] value — summary
-		const structuredMatch = line.match(/^\[(link|test|commit|artifact|observation)\]\s+([^\s—]+)(?:\s+—\s+(.+))?$/i);
+		const structuredMatch = line.match(
+			/^\[(link|test|commit|artifact|observation)\]\s+([^\s—]+)(?:\s+—\s+(.+))?$/i,
+		);
 		if (structuredMatch) {
 			proofItems.push({
 				type: structuredMatch[1].toLowerCase() as ProofType,
@@ -192,28 +197,42 @@ export function parseProposal(content: string): Proposal {
 	const { frontmatter, content: rawContent } = parseMarkdown(content);
 
 	// Validate priority field
-	const priority = frontmatter.priority ? String(frontmatter.priority).toLowerCase() : undefined;
+	const priority = frontmatter.priority
+		? String(frontmatter.priority).toLowerCase()
+		: undefined;
 	const validPriorities = ["high", "medium", "low"];
 	const validatedPriority =
-		priority && validPriorities.includes(priority) ? (priority as "high" | "medium" | "low") : undefined;
+		priority && validPriorities.includes(priority)
+			? (priority as "high" | "medium" | "low")
+			: undefined;
 
 	// Parse structured acceptance criteria (checked/text/index) from all sections
-	const structuredAcceptanceCriteria: AcceptanceCriterion[] = AcceptanceCriteriaManager.parseAllCriteria(rawContent);
+	const structuredAcceptanceCriteria: AcceptanceCriterion[] =
+		AcceptanceCriteriaManager.parseAllCriteria(rawContent);
 	const structuredVerificationProposalments: AcceptanceCriterion[] =
 		VerificationProposalmentsManager.parseAllCriteria(rawContent);
 
-	const descriptionSection = extractStructuredSection(rawContent, "description") || "";
-	const planSection = extractStructuredSection(rawContent, "implementationPlan") || undefined;
-	const notesSection = extractStructuredSection(rawContent, "implementationNotes") || undefined;
-	const auditNotesSection = extractStructuredSection(rawContent, "auditNotes") || undefined;
-	const finalSummarySection = extractStructuredSection(rawContent, "finalSummary") || undefined;
-	const scopeSummarySection = extractStructuredSection(rawContent, "scopeSummary") || undefined;
-	const proofSection = extractStructuredSection(rawContent, "proof") || undefined;
+	const descriptionSection =
+		extractStructuredSection(rawContent, "description") || "";
+	const planSection =
+		extractStructuredSection(rawContent, "implementationPlan") || undefined;
+	const notesSection =
+		extractStructuredSection(rawContent, "implementationNotes") || undefined;
+	const auditNotesSection =
+		extractStructuredSection(rawContent, "auditNotes") || undefined;
+	const finalSummarySection =
+		extractStructuredSection(rawContent, "finalSummary") || undefined;
+	const scopeSummarySection =
+		extractStructuredSection(rawContent, "scopeSummary") || undefined;
+	const proofSection =
+		extractStructuredSection(rawContent, "proof") || undefined;
 	const { proof, proofItems } = parseProof(proofSection);
 
 	return {
 		id: String(frontmatter.id ?? ""),
-		title: String(frontmatter.title || "") || (rawContent.match(/^# (.*)/m)?.[1] || "").trim(),
+		title:
+			String(frontmatter.title || "") ||
+			(rawContent.match(/^# (.*)/m)?.[1] || "").trim(),
 		status: String(frontmatter.status || ""),
 		assignee: Array.isArray(frontmatter.assignee)
 			? frontmatter.assignee.map(String)
@@ -222,15 +241,29 @@ export function parseProposal(content: string): Proposal {
 				: [],
 		reporter: frontmatter.reporter ? String(frontmatter.reporter) : undefined,
 		createdDate: normalizeDate(frontmatter.created_date),
-		updatedDate: frontmatter.updated_date ? normalizeDate(frontmatter.updated_date) : undefined,
-		labels: Array.isArray(frontmatter.labels) ? frontmatter.labels.map(String) : [],
+		updatedDate: frontmatter.updated_date
+			? normalizeDate(frontmatter.updated_date)
+			: undefined,
+		labels: Array.isArray(frontmatter.labels)
+			? frontmatter.labels.map(String)
+			: [],
 		domainId: frontmatter.domain_id ? String(frontmatter.domain_id) : undefined,
-		proposalType: frontmatter.proposal_type ? String(frontmatter.proposal_type) : undefined,
+		proposalType: frontmatter.proposal_type
+			? String(frontmatter.proposal_type)
+			: undefined,
 		category: frontmatter.category ? String(frontmatter.category) : undefined,
-		directive: frontmatter.directive ? String(frontmatter.directive) : undefined,
-		dependencies: Array.isArray(frontmatter.dependencies) ? frontmatter.dependencies.map(String) : [],
-		references: Array.isArray(frontmatter.references) ? frontmatter.references.map(String) : [],
-		documentation: Array.isArray(frontmatter.documentation) ? frontmatter.documentation.map(String) : [],
+		directive: frontmatter.directive
+			? String(frontmatter.directive)
+			: undefined,
+		dependencies: Array.isArray(frontmatter.dependencies)
+			? frontmatter.dependencies.map(String)
+			: [],
+		references: Array.isArray(frontmatter.references)
+			? frontmatter.references.map(String)
+			: [],
+		documentation: Array.isArray(frontmatter.documentation)
+			? frontmatter.documentation.map(String)
+			: [],
 		rawContent,
 		acceptanceCriteriaItems: structuredAcceptanceCriteria,
 		verificationProposalments: structuredVerificationProposalments,
@@ -243,22 +276,48 @@ export function parseProposal(content: string): Proposal {
 		scopeSummary: scopeSummarySection,
 		proof,
 		proofItems,
-		parentProposalId: frontmatter.parent_proposal_id ? String(frontmatter.parent_proposal_id) : undefined,
-		subproposals: Array.isArray(frontmatter.subproposals) ? frontmatter.subproposals.map(String) : undefined,
-		type: frontmatter.type ? String(frontmatter.type).toLowerCase() as "terminal" | "transitional" | "operational" | "spike" | "incident" : undefined,
+		parentProposalId: frontmatter.parent_proposal_id
+			? String(frontmatter.parent_proposal_id)
+			: undefined,
+		subproposals: Array.isArray(frontmatter.subproposals)
+			? frontmatter.subproposals.map(String)
+			: undefined,
+		type: frontmatter.type
+			? (String(frontmatter.type).toLowerCase() as
+					| "terminal"
+					| "transitional"
+					| "operational"
+					| "spike"
+					| "incident")
+			: undefined,
 		hype:
 			extractStructuredSection(rawContent, "hype") ||
 			(frontmatter.hype ? String(frontmatter.hype) : undefined),
-		requires: Array.isArray(frontmatter.requires) ? frontmatter.requires.map(String) : [],
-		unlocks: Array.isArray(frontmatter.unlocks) ? frontmatter.unlocks.map(String) : [],
+		requires: Array.isArray(frontmatter.requires)
+			? frontmatter.requires.map(String)
+			: [],
+		unlocks: Array.isArray(frontmatter.unlocks)
+			? frontmatter.unlocks.map(String)
+			: [],
 		priority: validatedPriority,
-		ordinal: frontmatter.ordinal !== undefined ? Number(frontmatter.ordinal) : undefined,
-		onStatusChange: frontmatter.onStatusChange ? String(frontmatter.onStatusChange) : undefined,
-		rationale: frontmatter.rationale ? String(frontmatter.rationale) : undefined,
-		maturity: frontmatter.maturity ? (String(frontmatter.maturity).toLowerCase() as any) : undefined,
+		ordinal:
+			frontmatter.ordinal !== undefined
+				? Number(frontmatter.ordinal)
+				: undefined,
+		onStatusChange: frontmatter.onStatusChange
+			? String(frontmatter.onStatusChange)
+			: undefined,
+		rationale: frontmatter.rationale
+			? String(frontmatter.rationale)
+			: undefined,
+		maturity: frontmatter.maturity
+			? (String(frontmatter.maturity).toLowerCase() as any)
+			: undefined,
 		builder: frontmatter.builder ? String(frontmatter.builder) : undefined,
 		auditor: frontmatter.auditor ? String(frontmatter.auditor) : undefined,
-		needs_capabilities: Array.isArray(frontmatter.needs_capabilities) ? frontmatter.needs_capabilities.map(String) : [],
+		needs_capabilities: Array.isArray(frontmatter.needs_capabilities)
+			? frontmatter.needs_capabilities.map(String)
+			: [],
 		external_injections: Array.isArray(frontmatter.external_injections)
 			? frontmatter.external_injections.map(String)
 			: [],
@@ -270,7 +329,9 @@ export function parseProposal(content: string): Proposal {
 					lastHeartbeat: (frontmatter.claim as any).last_heartbeat
 						? normalizeDate((frontmatter.claim as any).last_heartbeat)
 						: undefined,
-					message: (frontmatter.claim as any).message ? String((frontmatter.claim as any).message) : undefined,
+					message: (frontmatter.claim as any).message
+						? String((frontmatter.claim as any).message)
+						: undefined,
 				}
 			: undefined,
 	};
@@ -281,7 +342,9 @@ export function parseDecision(content: string): Decision {
 
 	return {
 		id: String(frontmatter.id ?? ""),
-		title: String(frontmatter.title || "") || (rawContent.match(/^# (.*)/m)?.[1] || "").trim(),
+		title:
+			String(frontmatter.title || "") ||
+			(rawContent.match(/^# (.*)/m)?.[1] || "").trim(),
 		date: normalizeDate(frontmatter.date),
 		status: String(frontmatter.status || "proposed") as Decision["status"],
 		context: extractSection(rawContent, "Context") || "",
@@ -297,12 +360,18 @@ export function parseDocument(content: string): Document {
 
 	return {
 		id: String(frontmatter.id ?? ""),
-		title: String(frontmatter.title || "") || (rawContent.match(/^# (.*)/m)?.[1] || "").trim(),
+		title:
+			String(frontmatter.title || "") ||
+			(rawContent.match(/^# (.*)/m)?.[1] || "").trim(),
 		type: String(frontmatter.type || "other") as Document["type"],
 		createdDate: normalizeDate(frontmatter.created_date),
-		updatedDate: frontmatter.updated_date ? normalizeDate(frontmatter.updated_date) : undefined,
+		updatedDate: frontmatter.updated_date
+			? normalizeDate(frontmatter.updated_date)
+			: undefined,
 		rawContent,
-		tags: Array.isArray(frontmatter.tags) ? frontmatter.tags.map(String) : undefined,
+		tags: Array.isArray(frontmatter.tags)
+			? frontmatter.tags.map(String)
+			: undefined,
 	};
 }
 
@@ -311,16 +380,24 @@ export function parseDirective(content: string): Directive {
 
 	return {
 		id: String(frontmatter.id ?? ""),
-		title: String(frontmatter.title || "") || (rawContent.match(/^# (.*)/m)?.[1] || "").trim(),
+		title:
+			String(frontmatter.title || "") ||
+			(rawContent.match(/^# (.*)/m)?.[1] || "").trim(),
 		description: extractSection(rawContent, "Description") || "",
 		rawContent,
 	};
 }
 
-function extractSection(content: string, sectionTitle: string): string | undefined {
+function extractSection(
+	content: string,
+	sectionTitle: string,
+): string | undefined {
 	// Normalize to LF for reliable matching across platforms
 	const src = content.replace(/\r\n/g, "\n");
-	const regex = new RegExp(`## ${sectionTitle}\\s*\\n([\\s\\S]*?)(?=\\n## |$)`, "i");
+	const regex = new RegExp(
+		`## ${sectionTitle}\\s*\\n([\\s\\S]*?)(?=\\n## |$)`,
+		"i",
+	);
 	const match = src.match(regex);
 	return match?.[1]?.trim();
 }

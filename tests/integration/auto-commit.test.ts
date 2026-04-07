@@ -1,10 +1,14 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
-import type { RoadmapConfig, Proposal } from "../../src/types/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
+import type { Proposal, RoadmapConfig } from "../../src/types/index.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 let TEST_DIR: string;
 
@@ -125,7 +129,9 @@ describe("Auto-commit configuration", () => {
 			await core.createProposal(proposal, true);
 
 			// Update the proposal (should not auto-commit)
-			await core.updateProposalFromInput("proposal-3", { title: "Updated Proposal" });
+			await core.updateProposalFromInput("proposal-3", {
+				title: "Updated Proposal",
+			});
 
 			// Check that there are uncommitted changes
 			const git = await core.getGitOps();
@@ -242,7 +248,9 @@ describe("Auto-commit configuration", () => {
 
 			const updatedProposal = await core.filesystem.loadProposal("proposal-8");
 			assert.deepStrictEqual(updatedProposal?.dependencies, []);
-			assert.deepStrictEqual(updatedProposal?.references, ["https://example.com/proposals/proposal-7"]);
+			assert.deepStrictEqual(updatedProposal?.references, [
+				"https://example.com/proposals/proposal-7",
+			]);
 
 			const git = await core.getGitOps();
 			const isClean = await git.isClean();

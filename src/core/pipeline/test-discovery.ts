@@ -44,7 +44,12 @@ export function categorizeTestFile(filename: string): TestCategory {
 
 	if (name.startsWith("regression-")) return "regression";
 	if (name.startsWith("e2e-")) return "e2e";
-	if (name.startsWith("cli-") || name.startsWith("mcp-") || name.startsWith("board-")) return "integration";
+	if (
+		name.startsWith("cli-") ||
+		name.startsWith("mcp-") ||
+		name.startsWith("board-")
+	)
+		return "integration";
 
 	return "unit";
 }
@@ -68,7 +73,8 @@ export async function scanTestDirectory(dirPath: string): Promise<TestFile[]> {
 
 			if (entry.isDirectory()) {
 				// Skip node_modules and hidden directories
-				if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+				if (entry.name === "node_modules" || entry.name.startsWith("."))
+					continue;
 				await scan(fullPath);
 			} else if (entry.name.endsWith(".test.ts")) {
 				const info = await stat(fullPath);
@@ -89,7 +95,9 @@ export async function scanTestDirectory(dirPath: string): Promise<TestFile[]> {
 /**
  * Discover all tests in the project's test directory.
  */
-export async function discoverTests(testDir: string): Promise<TestDiscoveryResult> {
+export async function discoverTests(
+	testDir: string,
+): Promise<TestDiscoveryResult> {
 	const tests = await scanTestDirectory(testDir);
 
 	const byCategory: Record<TestCategory, TestFile[]> = {
@@ -114,7 +122,10 @@ export async function discoverTests(testDir: string): Promise<TestDiscoveryResul
 /**
  * Filter tests by category.
  */
-export function filterByCategory(result: TestDiscoveryResult, category: TestCategory): TestFile[] {
+export function filterByCategory(
+	result: TestDiscoveryResult,
+	category: TestCategory,
+): TestFile[] {
 	return result.byCategory[category] || [];
 }
 

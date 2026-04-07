@@ -1,14 +1,17 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, test } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect } from "../support/test-utils.ts";
+import { afterEach, beforeEach, describe, test } from "node:test";
 import { MCP_INIT_REQUIRED_GUIDE } from "../../src/guidelines/mcp/index.ts";
 import { createMcpServer } from "../../src/mcp/server.ts";
+import { expect } from "../support/test-utils.ts";
 
 // Helper to extract text from MCP contents (handles union types)
-const getContentsText = (contents: unknown[] | undefined, index = 0): string => {
+const getContentsText = (
+	contents: unknown[] | undefined,
+	index = 0,
+): string => {
 	const item = contents?.[index] as { text?: string } | undefined;
 	return item?.text ?? "";
 };
@@ -41,7 +44,10 @@ describe("MCP Server Fallback Mode", () => {
 
 		assert.strictEqual(resources.resources.length, 1);
 		assert.strictEqual(resources.resources[0]?.uri, "roadmap://init-required");
-		assert.strictEqual(resources.resources[0]?.name, "Roadmap.md Not Initialized");
+		assert.strictEqual(
+			resources.resources[0]?.name,
+			"Roadmap.md Not Initialized",
+		);
 	});
 
 	test("should be able to read roadmap://init-required resource", async () => {

@@ -7,10 +7,9 @@
  * AC#4: Key rotation mechanism with zero downtime
  */
 
-import { randomBytes, createCipheriv, createDecipheriv, scryptSync, randomUUID } from "node:crypto";
-import { readFile, writeFile, mkdir, access, readdir } from "node:fs/promises";
-import { join, basename } from "node:path";
-import { existsSync } from "node:fs";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { basename, join } from "node:path";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -61,7 +60,10 @@ const TAG_LENGTH = 16;
 const KEY_LENGTH = 32;
 
 // Patterns for secret detection
-const SECRET_PATTERNS: Record<SecretType, { pattern: RegExp; severity: SecretFinding["severity"] }> = {
+const SECRET_PATTERNS: Record<
+	SecretType,
+	{ pattern: RegExp; severity: SecretFinding["severity"] }
+> = {
 	api_key: {
 		pattern: /(?:api[_-]?key|apikey)\s*[=:]\s*['"`]([^'"`\s]{8,})['"`]/gi,
 		severity: "high",
@@ -98,7 +100,6 @@ export class EncryptedVault {
 	private config: VaultConfig;
 	private encryptionKey: Buffer | null = null;
 	private secrets: Map<string, SecretEntry> = new Map();
-	private masterKeyId: string = "master";
 
 	constructor(config?: Partial<VaultConfig>) {
 		this.config = {
@@ -115,7 +116,10 @@ export class EncryptedVault {
 		await mkdir(this.config.vaultPath, { recursive: true });
 
 		if (this.config.encryptionKey) {
-			this.encryptionKey = Buffer.from(this.config.encryptionKey, "hex").slice(0, KEY_LENGTH);
+			this.encryptionKey = Buffer.from(this.config.encryptionKey, "hex").slice(
+				0,
+				KEY_LENGTH,
+			);
 		} else {
 			const keyPath = join(this.config.vaultPath, ".vault-key");
 			try {
@@ -125,7 +129,9 @@ export class EncryptedVault {
 			} catch {
 				// Generate new key
 				this.encryptionKey = randomBytes(KEY_LENGTH);
-				await writeFile(keyPath, this.encryptionKey.toString("hex"), { mode: 0o600 });
+				await writeFile(keyPath, this.encryptionKey.toString("hex"), {
+					mode: 0o600,
+				});
 			}
 		}
 
@@ -158,7 +164,10 @@ export class EncryptedVault {
 	private encrypt(plaintext: string): Buffer {
 		const iv = randomBytes(IV_LENGTH);
 		const cipher = createCipheriv(ALGORITHM, this.encryptionKey!, iv);
-		const encrypted = Buffer.concat([cipher.update(plaintext, "utf-8"), cipher.final()]);
+		const encrypted = Buffer.concat([
+			cipher.update(plaintext, "utf-8"),
+			cipher.final(),
+		]);
 		const tag = cipher.getAuthTag();
 		// Format: iv + tag + encrypted
 		return Buffer.concat([iv, tag, encrypted]);
@@ -176,7 +185,11 @@ export class EncryptedVault {
 	/**
 	 * AC#2: Store a secret in the encrypted vault.
 	 */
-	async setSecret(key: string, value: string, metadata?: Record<string, string>): Promise<SecretEntry> {
+	async setSecret(
+		key: string,
+		value: string,
+		metadata?: Record<string, string>,
+	): Promise<SecretEntry> {
 		const existing = this.secrets.get(key);
 		const entry: SecretEntry = {
 			key,
@@ -215,7 +228,10 @@ export class EncryptedVault {
 		}
 
 		// Archive old version
-		const archivePath = join(this.config.vaultPath, `${key}.v${existing.version}.archive`);
+		const archivePath = join(
+			this.config.vaultPath,
+			`${key}.v${existing.version}.archive`,
+		);
 		await writeFile(
 			archivePath,
 			JSON.stringify({ ...existing, archivedAt: new Date().toISOString() }),
@@ -241,9 +257,18 @@ export class EncryptedVault {
 
 export class SecretsScanner {
 	private readonly excludePatterns: string[];
-	private readonly customPatterns: Map<SecretType, { pattern: RegExp; severity: SecretFinding["severity"] }>;
+	private readonly customPatterns: Map<
+		SecretType,
+		{ pattern: RegExp; severity: SecretFinding["severity"] }
+	>;
 
-	constructor(options?: { excludePatterns?: string[]; customPatterns?: Map<SecretType, { pattern: RegExp; severity: SecretFinding["severity"] }> }) {
+	constructor(options?: {
+		excludePatterns?: string[];
+		customPatterns?: Map<
+			SecretType,
+			{ pattern: RegExp; severity: SecretFinding["severity"] }
+		>;
+	}) {
 		this.excludePatterns = options?.excludePatterns ?? [
 			"node_modules",
 			".git",
@@ -259,7 +284,7 @@ export class SecretsScanner {
 	 * AC#1: Scan content for secrets before writing.
 	 * Returns findings — empty array means safe to write.
 	 */
-	scanContent(content: string, filename: string): SecretFinding[] {
+	scanContent(content: string, _filename: string): SecretFinding[] {
 		const findings: SecretFinding[] = [];
 		const lines = content.split("\n");
 
@@ -267,7 +292,10 @@ export class SecretsScanner {
 			const line = lines[i]!;
 			const lineNumber = i + 1;
 
-			for (const [type, config] of [...Object.entries(SECRET_PATTERNS), ...this.customPatterns.entries()]) {
+			for (const [type, config] of [
+				...Object.entries(SECRET_PATTERNS),
+				...this.customPatterns.entries(),
+			]) {
 				config.pattern.lastIndex = 0; // Reset regex proposal
 				let match: RegExpExecArray | null;
 
@@ -281,7 +309,7 @@ export class SecretsScanner {
 						column: match.index,
 						value: maskedValue,
 						severity: config.severity,
-						pattern: matchedText.slice(0, 20) + "...",
+						pattern: `${matchedText.slice(0, 20)}...`,
 					});
 				}
 			}
@@ -301,16 +329,31 @@ export class SecretsScanner {
 			file: filePath,
 			findings,
 			scanTime: new Date().toISOString(),
-			passed: findings.filter((f) => f.severity === "critical" || f.severity === "high").length === 0,
+			passed:
+				findings.filter(
+					(f) => f.severity === "critical" || f.severity === "high",
+				).length === 0,
 		};
 	}
 
 	/**
 	 * AC#3: Scan directory for secrets (used by pre-commit hook).
 	 */
-	async scanDirectory(dirPath: string, extensions?: string[]): Promise<ScanResult[]> {
+	async scanDirectory(
+		dirPath: string,
+		extensions?: string[],
+	): Promise<ScanResult[]> {
 		const results: ScanResult[] = [];
-		const exts = extensions ?? [".ts", ".js", ".json", ".md", ".yml", ".yaml", ".env", ".txt"];
+		const exts = extensions ?? [
+			".ts",
+			".js",
+			".json",
+			".md",
+			".yml",
+			".yaml",
+			".env",
+			".txt",
+		];
 
 		const entries = await readdir(dirPath, { recursive: true });
 
@@ -343,7 +386,7 @@ export class SecretsScanner {
 
 	private maskValue(value: string): string {
 		if (value.length <= 8) return "****";
-		return value.slice(0, 4) + "****" + value.slice(-4);
+		return `${value.slice(0, 4)}****${value.slice(-4)}`;
 	}
 }
 
@@ -416,7 +459,9 @@ main().catch((err) => {
 export function containsSecrets(content: string): boolean {
 	const scanner = new SecretsScanner();
 	const findings = scanner.scanContent(content, "inline");
-	return findings.some((f) => f.severity === "critical" || f.severity === "high");
+	return findings.some(
+		(f) => f.severity === "critical" || f.severity === "high",
+	);
 }
 
 /**

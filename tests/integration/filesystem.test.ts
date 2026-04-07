@@ -1,13 +1,20 @@
-import { globSync } from "node:fs";
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
+import { globSync } from "node:fs";
 import { mkdir, readdir, rename, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { FileSystem } from "../../src/file-system/operations.ts";
 import { serializeProposal } from "../../src/markdown/serializer.ts";
-import type { RoadmapConfig, Decision, Document, Proposal } from "../../src/types/index.ts";
-import { createUniqueTestDir, safeCleanup,
+import type {
+	Decision,
+	Document,
+	Proposal,
+	RoadmapConfig,
+} from "../../src/types/index.ts";
+import {
+	createUniqueTestDir,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 let TEST_DIR: string;
@@ -69,7 +76,10 @@ describe("FileSystem", () => {
 			assert.strictEqual(loadedProposal?.id, "proposal-1"); // IDs are normalized to uppercase
 			assert.strictEqual(loadedProposal?.title, sampleProposal.title);
 			assert.strictEqual(loadedProposal?.status, sampleProposal.status);
-			assert.strictEqual(loadedProposal?.description, sampleProposal.description);
+			assert.strictEqual(
+				loadedProposal?.description,
+				sampleProposal.description,
+			);
 		});
 
 		it("should return null for non-existent proposal", async () => {
@@ -98,7 +108,10 @@ describe("FileSystem", () => {
 				title: "Second Proposal",
 			});
 
-			const invalidPath = join(filesystem.proposalsDir, "proposal-99 - invalid.md");
+			const invalidPath = join(
+				filesystem.proposalsDir,
+				"proposal-99 - invalid.md",
+			);
 			await writeFile(
 				invalidPath,
 				`---
@@ -141,12 +154,21 @@ RFC backlog item`,
 			);
 
 			const proposals = await filesystem.listProposals();
-			expect(proposals.map((t) => t.id)).toEqual(["proposal-1", "rfc-20260401-messaging"]);
+			expect(proposals.map((t) => t.id)).toEqual([
+				"proposal-1",
+				"rfc-20260401-messaging",
+			]);
 		});
 
 		it("should sort proposals numerically by ID", async () => {
 			// Create proposals with IDs that would sort incorrectly with string comparison
-			const proposalIds = ["proposal-2", "proposal-10", "proposal-1", "proposal-20", "proposal-3"];
+			const proposalIds = [
+				"proposal-2",
+				"proposal-10",
+				"proposal-1",
+				"proposal-20",
+				"proposal-3",
+			];
 			for (const id of proposalIds) {
 				await filesystem.saveProposal({
 					...sampleProposal,
@@ -156,12 +178,24 @@ RFC backlog item`,
 			}
 
 			const proposals = await filesystem.listProposals();
-			expect(proposals.map((t) => t.id)).toEqual(["proposal-1", "proposal-2", "proposal-3", "proposal-10", "proposal-20"]); // IDs normalized to uppercase
+			expect(proposals.map((t) => t.id)).toEqual([
+				"proposal-1",
+				"proposal-2",
+				"proposal-3",
+				"proposal-10",
+				"proposal-20",
+			]); // IDs normalized to uppercase
 		});
 
 		it("should sort proposals with decimal IDs correctly", async () => {
 			// Create proposals with decimal IDs
-			const proposalIds = ["proposal-2.10", "proposal-2.2", "proposal-2", "proposal-1", "proposal-2.1"];
+			const proposalIds = [
+				"proposal-2.10",
+				"proposal-2.2",
+				"proposal-2",
+				"proposal-1",
+				"proposal-2.1",
+			];
 			for (const id of proposalIds) {
 				await filesystem.saveProposal({
 					...sampleProposal,
@@ -171,7 +205,13 @@ RFC backlog item`,
 			}
 
 			const proposals = await filesystem.listProposals();
-			expect(proposals.map((t) => t.id)).toEqual(["proposal-1", "proposal-2", "proposal-2.1", "proposal-2.2", "proposal-2.10"]); // IDs normalized to uppercase
+			expect(proposals.map((t) => t.id)).toEqual([
+				"proposal-1",
+				"proposal-2",
+				"proposal-2.1",
+				"proposal-2.2",
+				"proposal-2.10",
+			]); // IDs normalized to uppercase
 		});
 
 		it("should filter proposals by status and assignee", async () => {
@@ -197,13 +237,26 @@ RFC backlog item`,
 				title: "Proposal 3",
 			});
 
-			const statusFiltered = await filesystem.listProposals({ status: "potential" });
-			expect(statusFiltered.map((t) => t.id)).toEqual(["proposal-1", "proposal-3"]); // IDs normalized to uppercase
+			const statusFiltered = await filesystem.listProposals({
+				status: "potential",
+			});
+			expect(statusFiltered.map((t) => t.id)).toEqual([
+				"proposal-1",
+				"proposal-3",
+			]); // IDs normalized to uppercase
 
-			const assigneeFiltered = await filesystem.listProposals({ assignee: "bob" });
-			expect(assigneeFiltered.map((t) => t.id)).toEqual(["proposal-2", "proposal-3"]); // IDs normalized to uppercase
+			const assigneeFiltered = await filesystem.listProposals({
+				assignee: "bob",
+			});
+			expect(assigneeFiltered.map((t) => t.id)).toEqual([
+				"proposal-2",
+				"proposal-3",
+			]); // IDs normalized to uppercase
 
-			const combinedFiltered = await filesystem.listProposals({ status: "potential", assignee: "bob" });
+			const combinedFiltered = await filesystem.listProposals({
+				status: "potential",
+				assignee: "bob",
+			});
 			expect(combinedFiltered.map((t) => t.id)).toEqual(["proposal-3"]); // IDs normalized to uppercase
 		});
 
@@ -217,7 +270,9 @@ RFC backlog item`,
 			assert.strictEqual(proposal, null);
 
 			// Check that file exists in archive
-			const archiveFiles = await readdir(join(TEST_DIR, "roadmap", "archive", "proposals"));
+			const archiveFiles = await readdir(
+				join(TEST_DIR, "roadmap", "archive", "proposals"),
+			);
 			expect(archiveFiles.some((f) => f.startsWith("proposal-1"))).toBe(true);
 		});
 
@@ -239,10 +294,14 @@ dependencies: []
 RFC backlog item`,
 			);
 
-			const archived = await filesystem.archiveProposal("RFC-20260401-MESSAGING");
+			const archived = await filesystem.archiveProposal(
+				"RFC-20260401-MESSAGING",
+			);
 			assert.strictEqual(archived, true);
 
-			const archiveFiles = await readdir(join(TEST_DIR, "roadmap", "archive", "proposals"));
+			const archiveFiles = await readdir(
+				join(TEST_DIR, "roadmap", "archive", "proposals"),
+			);
 			expect(archiveFiles.includes("RFC-20260401-MESSAGING.md")).toBe(true);
 		});
 
@@ -253,8 +312,12 @@ RFC backlog item`,
 			assert.strictEqual(demoted, true);
 
 			// Proposal should be removed from proposals directory
-			const proposalsFiles = await readdir(join(TEST_DIR, "roadmap", "proposals"));
-			expect(proposalsFiles.some((f) => f.startsWith("proposal-1"))).toBe(false);
+			const proposalsFiles = await readdir(
+				join(TEST_DIR, "roadmap", "proposals"),
+			);
+			expect(proposalsFiles.some((f) => f.startsWith("proposal-1"))).toBe(
+				false,
+			);
 
 			// Draft should exist with new draft- ID
 			const draftsFiles = await readdir(join(TEST_DIR, "roadmap", "drafts"));
@@ -290,7 +353,11 @@ RFC backlog item`,
 
 		it("should list all drafts", async () => {
 			await filesystem.saveDraft(sampleDraft);
-			await filesystem.saveDraft({ ...sampleDraft, id: "draft-2", title: "Second" });
+			await filesystem.saveDraft({
+				...sampleDraft,
+				id: "draft-2",
+				title: "Second",
+			});
 
 			const drafts = await filesystem.listDrafts();
 			expect(drafts.map((d) => d.id).sort()).toEqual(["draft-1", "draft-2"]);
@@ -307,7 +374,9 @@ RFC backlog item`,
 			expect(draftsFiles.some((f) => f.startsWith("draft-1"))).toBe(false);
 
 			// Proposal should exist with new proposal- ID
-			const proposalsFiles = await readdir(join(TEST_DIR, "roadmap", "proposals"));
+			const proposalsFiles = await readdir(
+				join(TEST_DIR, "roadmap", "proposals"),
+			);
 			expect(proposalsFiles.some((f) => f.startsWith("proposal-1"))).toBe(true);
 
 			// Verify the promoted proposal can be loaded and has correct ID
@@ -339,7 +408,9 @@ RFC backlog item`,
 			expect(draftsFiles.some((f) => f.startsWith("draft-1"))).toBe(false);
 
 			// Proposal should exist with custom JIRA- prefix
-			const proposalsFiles = await readdir(join(TEST_DIR, "roadmap", "proposals"));
+			const proposalsFiles = await readdir(
+				join(TEST_DIR, "roadmap", "proposals"),
+			);
 			expect(proposalsFiles.some((f) => f.startsWith("jira-1"))).toBe(true);
 
 			// Verify the promoted proposal can be loaded with the custom prefix
@@ -364,7 +435,10 @@ RFC backlog item`,
 				dependencies: [],
 			};
 			const content = serializeProposal(completedProposal);
-			await writeFile(join(completedDir, "proposal-1 - Completed Proposal.md"),  content);
+			await writeFile(
+				join(completedDir, "proposal-1 - Completed Proposal.md"),
+				content,
+			);
 
 			// Verify no active proposals exist
 			const activeProposals = await filesystem.listProposals();
@@ -396,7 +470,9 @@ RFC backlog item`,
 			const draft = await filesystem.loadDraft("draft-1");
 			assert.strictEqual(draft, null);
 
-			const files = await readdir(join(TEST_DIR, "roadmap", "archive", "drafts"));
+			const files = await readdir(
+				join(TEST_DIR, "roadmap", "archive", "drafts"),
+			);
 			expect(files.some((f) => f.startsWith("draft-1"))).toBe(true);
 		});
 	});
@@ -458,9 +534,18 @@ RFC backlog item`,
 
 	describe("directory accessors", () => {
 		it("should provide correct directory paths", () => {
-			assert.strictEqual(filesystem.proposalsDir, join(TEST_DIR, "roadmap", "proposals"));
-			assert.strictEqual(filesystem.archiveProposalsDir, join(TEST_DIR, "roadmap", "archive", "proposals"));
-			assert.strictEqual(filesystem.decisionsDir, join(TEST_DIR, "roadmap", "decisions"));
+			assert.strictEqual(
+				filesystem.proposalsDir,
+				join(TEST_DIR, "roadmap", "proposals"),
+			);
+			assert.strictEqual(
+				filesystem.archiveProposalsDir,
+				join(TEST_DIR, "roadmap", "archive", "proposals"),
+			);
+			assert.strictEqual(
+				filesystem.decisionsDir,
+				join(TEST_DIR, "roadmap", "decisions"),
+			);
 			assert.strictEqual(filesystem.docsDir, join(TEST_DIR, "docs"));
 		});
 	});
@@ -528,15 +613,26 @@ RFC backlog item`,
 
 			const files = await readdir(filesystem.decisionsDir);
 			const sanitized = files.find((f) => f.startsWith("decision-legacy -"));
-			assert.strictEqual(sanitized, "decision-legacy - Legacy-Decision-OAuth.md");
+			assert.strictEqual(
+				sanitized,
+				"decision-legacy - Legacy-Decision-OAuth.md",
+			);
 
 			const legacyFilename = "decision-legacy - Legacy-Decision-(OAuth)!.md";
-			await rename(join(filesystem.decisionsDir, sanitized as string), join(filesystem.decisionsDir, legacyFilename));
+			await rename(
+				join(filesystem.decisionsDir, sanitized as string),
+				join(filesystem.decisionsDir, legacyFilename),
+			);
 
-			await filesystem.saveDecision({ ...legacyDecision, decision: "Updated decision" });
+			await filesystem.saveDecision({
+				...legacyDecision,
+				decision: "Updated decision",
+			});
 
 			const finalFiles = await readdir(filesystem.decisionsDir);
-			assert.deepStrictEqual(finalFiles, ["decision-legacy - Legacy-Decision-OAuth.md"]);
+			assert.deepStrictEqual(finalFiles, [
+				"decision-legacy - Legacy-Decision-OAuth.md",
+			]);
 
 			const loaded = await filesystem.loadDecision("decision-legacy");
 			assert.strictEqual(loaded?.decision, "Updated decision");
@@ -630,7 +726,10 @@ RFC backlog item`,
 			const docs = await filesystem.listDocuments();
 			const nested = docs.find((doc) => doc.id === "doc-3");
 			const actualPath = nested?.relativeFilePath?.replace(/\\/g, "/");
-			const expectedPath = join("guides", "doc-3 - Nested-Guide.md").replace(/\\/g, "/");
+			const expectedPath = join("guides", "doc-3 - Nested-Guide.md").replace(
+				/\\/g,
+				"/",
+			);
 			assert.strictEqual(actualPath, expectedPath);
 		});
 
@@ -658,8 +757,12 @@ RFC backlog item`,
 			const canonicalFiles = await Array.fromAsync(
 				globSync("doc-*.md", { cwd: filesystem.docsDir }),
 			);
-			const fileNames = canonicalFiles.map((d: any) => typeof d === 'string' ? d : d.name);
-			expect(fileNames.some((file: string) => file.startsWith("doc-0009"))).toBe(true);
+			const fileNames = canonicalFiles.map((d: any) =>
+				typeof d === "string" ? d : d.name,
+			);
+			expect(
+				fileNames.some((file: string) => file.startsWith("doc-0009")),
+			).toBe(true);
 		});
 	});
 
@@ -809,7 +912,10 @@ RFC backlog item`,
 			// Check that the file exists with preserved case
 			const files = await readdir(filesystem.proposalsDir);
 			const proposalFile = files.find((f) => f.startsWith("proposal-mixed -"));
-			assert.strictEqual(proposalFile, "proposal-mixed - Fix-Proposal-List-Ordering.md");
+			assert.strictEqual(
+				proposalFile,
+				"proposal-mixed - Fix-Proposal-List-Ordering.md",
+			);
 
 			// Verify the proposal can be loaded
 			const loaded = await filesystem.loadProposal("proposal-mixed");
@@ -832,7 +938,10 @@ RFC backlog item`,
 
 			const files = await readdir(filesystem.proposalsDir);
 			const filename = files.find((f) => f.startsWith("proposal-punct -"));
-			assert.strictEqual(filename, "proposal-punct - Fix-the-users-login-OAuth-1.md");
+			assert.strictEqual(
+				filename,
+				"proposal-punct - Fix-the-users-login-OAuth-1.md",
+			);
 		});
 
 		it("should load proposals with legacy filenames containing punctuation", async () => {
@@ -850,11 +959,16 @@ RFC backlog item`,
 			await filesystem.saveProposal(legacyProposal);
 
 			const files = await readdir(filesystem.proposalsDir);
-			const originalFilename = files.find((f) => f.startsWith("proposal-legacy -"));
+			const originalFilename = files.find((f) =>
+				f.startsWith("proposal-legacy -"),
+			);
 			assert.notStrictEqual(originalFilename, undefined);
 
 			const legacyFilename = "proposal-legacy - Legacy-user's-login-(OAuth).md";
-			await rename(join(filesystem.proposalsDir, originalFilename as string), join(filesystem.proposalsDir, legacyFilename));
+			await rename(
+				join(filesystem.proposalsDir, originalFilename as string),
+				join(filesystem.proposalsDir, legacyFilename),
+			);
 
 			const loaded = await filesystem.loadProposal("proposal-legacy");
 			assert.strictEqual(loaded?.title, "Legacy user's login (OAuth)");

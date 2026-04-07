@@ -21,10 +21,14 @@ Some description
 			{ checked: false, text: "Second criterion", index: 2 },
 			{ checked: false, text: "Third criterion", index: 3 },
 		];
-		const result = AcceptanceCriteriaManager.updateContent(existingContent, updatedCriteria);
+		const result = AcceptanceCriteriaManager.updateContent(
+			existingContent,
+			updatedCriteria,
+		);
 
 		// Extract the AC section and verify no blank lines between criteria
-		const acSection = result.match(/<!-- AC:BEGIN -->([\s\S]*?)<!-- AC:END -->/)?.[1] || "";
+		const acSection =
+			result.match(/<!-- AC:BEGIN -->([\s\S]*?)<!-- AC:END -->/)?.[1] || "";
 		const lines = acSection.split("\n").filter((line) => line.trim() !== "");
 
 		assert.strictEqual(lines.length, 3);
@@ -43,7 +47,10 @@ Some description
 			{ checked: false, text: "Third", index: 3 },
 		]);
 		const content = `## Description\n\nSomething\n\n${base}\n\n## Notes\nExtra`;
-		const updated = AcceptanceCriteriaManager.removeCriterionByIndex(content, 2);
+		const updated = AcceptanceCriteriaManager.removeCriterionByIndex(
+			content,
+			2,
+		);
 		assert.ok(updated.includes("- [ ] #1 First"));
 		assert.ok(updated.includes("- [ ] #2 Third"));
 		assert.ok(updated.includes("## Notes"));
@@ -51,8 +58,14 @@ Some description
 	});
 
 	it("toggles a criterion and persists proposal", () => {
-		const base = AcceptanceCriteriaManager.formatAcceptanceCriteria([{ checked: false, text: "Only", index: 1 }]);
-		const updated = AcceptanceCriteriaManager.checkCriterionByIndex(base, 1, true);
+		const base = AcceptanceCriteriaManager.formatAcceptanceCriteria([
+			{ checked: false, text: "Only", index: 1 },
+		]);
+		const updated = AcceptanceCriteriaManager.checkCriterionByIndex(
+			base,
+			1,
+			true,
+		);
 		assert.ok(updated.includes("- [x] #1 Only"));
 	});
 });

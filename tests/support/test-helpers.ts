@@ -1,4 +1,3 @@
-import assert from "node:assert";
 /**
  * Platform-aware test helpers that avoid memory issues on Windows CI
  * by testing Core directly instead of spawning CLI processes
@@ -6,10 +5,13 @@ import assert from "node:assert";
 
 import { join } from "node:path";
 import { Core } from "../../src/core/roadmap.ts";
-import type { ProposalCreateInput, ProposalUpdateInput } from "../../src/types/index.ts";
+import type {
+	ProposalCreateInput,
+	ProposalUpdateInput,
+} from "../../src/types/index.ts";
 import { hasAnyPrefix } from "../../src/utils/prefix-config.ts";
 import { normalizeDependencies } from "../../src/utils/proposal-builders.ts";
-import { execSync, buildCliCommand } from "./test-utils.ts";
+import { buildCliCommand, execSync } from "./test-utils.ts";
 
 const CLI_PATH = join(process.cwd(), "src", "cli.ts");
 const isWindows = process.platform === "win32";
@@ -41,7 +43,12 @@ export interface ProposalCreateOptions {
 export async function createProposalPlatformAware(
 	options: ProposalCreateOptions,
 	testDir: string,
-): Promise<{ exitCode: number; stdout: string; stderr: string; proposalId?: string }> {
+): Promise<{
+	exitCode: number;
+	stdout: string;
+	stderr: string;
+	proposalId?: string;
+}> {
 	// Always use Core API for tests to avoid CLI process spawning issues
 	return createProposalViaCore(options, testDir);
 }
@@ -49,10 +56,17 @@ export async function createProposalPlatformAware(
 async function createProposalViaCore(
 	options: ProposalCreateOptions,
 	testDir: string,
-): Promise<{ exitCode: number; stdout: string; stderr: string; proposalId?: string }> {
+): Promise<{
+	exitCode: number;
+	stdout: string;
+	stderr: string;
+	proposalId?: string;
+}> {
 	const core = new Core(testDir);
 
-	const normalizedPriority = options.priority ? String(options.priority).toLowerCase() : undefined;
+	const normalizedPriority = options.priority
+		? String(options.priority).toLowerCase()
+		: undefined;
 	const createInput: ProposalCreateInput = {
 		title: options.title.trim(),
 		description: options.description,
@@ -65,7 +79,9 @@ async function createProposalViaCore(
 					.filter((label) => label.length > 0)
 			: undefined,
 		assignee: options.assignee ? [options.assignee] : undefined,
-		dependencies: options.dependencies ? normalizeDependencies(options.dependencies) : undefined,
+		dependencies: options.dependencies
+			? normalizeDependencies(options.dependencies)
+			: undefined,
 		parentProposalId: options.parent
 			? hasAnyPrefix(options.parent)
 				? options.parent
@@ -106,7 +122,9 @@ async function createProposalViaCore(
 		const isDraft = (proposal.status ?? "").toLowerCase() === "draft";
 		return {
 			exitCode: 0,
-			stdout: isDraft ? `Created draft ${proposal.id}` : `Created proposal ${proposal.id}`,
+			stdout: isDraft
+				? `Created draft ${proposal.id}`
+				: `Created proposal ${proposal.id}`,
 			stderr: "",
 			proposalId: proposal.id,
 		};
@@ -122,7 +140,12 @@ async function createProposalViaCore(
 async function _createProposalViaCLI(
 	options: ProposalCreateOptions,
 	testDir: string,
-): Promise<{ exitCode: number; stdout: string; stderr: string; proposalId?: string }> {
+): Promise<{
+	exitCode: number;
+	stdout: string;
+	stderr: string;
+	proposalId?: string;
+}> {
 	// Build CLI arguments
 	const args = [CLI_PATH, "proposal", "create", options.title];
 
@@ -146,10 +169,15 @@ async function _createProposalViaCLI(
 	if (options.builder) args.push("--builder", options.builder);
 	if (options.auditor) args.push("--auditor", options.auditor);
 
-	const result = execSync(`node --experimental-strip-types ${buildCliCommand(args)}`, { cwd: testDir });
+	const result = execSync(
+		`node --experimental-strip-types ${buildCliCommand(args)}`,
+		{ cwd: testDir },
+	);
 
 	// Extract proposal ID from stdout
-	const match = result.stdout.toString().match(/Created (?:proposal|draft) (proposal-\d+)/);
+	const match = result.stdout
+		.toString()
+		.match(/Created (?:proposal|draft) (proposal-\d+)/);
 	const proposalId = match ? match[1] : undefined;
 
 	return {
@@ -199,7 +227,9 @@ async function editProposalViaCore(
 		const core = new Core(testDir);
 
 		// Load existing proposal
-		const proposalId = hasAnyPrefix(options.proposalId) ? options.proposalId : `proposal-${options.proposalId}`;
+		const proposalId = hasAnyPrefix(options.proposalId)
+			? options.proposalId
+			: `proposal-${options.proposalId}`;
 		const existingProposal = await core.filesystem.loadProposal(proposalId);
 		if (!existingProposal) {
 			return {
@@ -220,8 +250,12 @@ async function editProposalViaCore(
 					.map((label) => label.trim())
 					.filter((label) => label.length > 0),
 			}),
-			...(options.dependencies && { dependencies: normalizeDependencies(options.dependencies) }),
-			...(options.priority && { priority: options.priority as ProposalUpdateInput["priority"] }),
+			...(options.dependencies && {
+				dependencies: normalizeDependencies(options.dependencies),
+			}),
+			...(options.priority && {
+				priority: options.priority as ProposalUpdateInput["priority"],
+			}),
 			...(options.notes && { implementationNotes: options.notes }),
 			...(options.plan && { implementationPlan: options.plan }),
 			...(options.maturity && { maturity: options.maturity as any }),
@@ -278,7 +312,10 @@ async function _editProposalViaCLI(
 	if (options.builder) args.push("--builder", options.builder);
 	if (options.auditor) args.push("--auditor", options.auditor);
 
-	const result = execSync(`node --experimental-strip-types ${buildCliCommand(args)}`, { cwd: testDir });
+	const result = execSync(
+		`node --experimental-strip-types ${buildCliCommand(args)}`,
+		{ cwd: testDir },
+	);
 
 	return {
 		exitCode: result.exitCode,
@@ -311,7 +348,9 @@ async function viewProposalViaCore(
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
 	try {
 		const core = new Core(testDir);
-		const proposalId = hasAnyPrefix(options.proposalId) ? options.proposalId : `proposal-${options.proposalId}`;
+		const proposalId = hasAnyPrefix(options.proposalId)
+			? options.proposalId
+			: `proposal-${options.proposalId}`;
 
 		const proposal = await core.filesystem.loadProposal(proposalId);
 		if (!proposal) {
@@ -371,7 +410,10 @@ async function _viewProposalViaCLI(
 		args.push("--plain");
 	}
 
-	const result = execSync(`node --experimental-strip-types ${buildCliCommand(args)}`, { cwd: testDir });
+	const result = execSync(
+		`node --experimental-strip-types ${buildCliCommand(args)}`,
+		{ cwd: testDir },
+	);
 
 	return {
 		exitCode: result.exitCode,
@@ -412,7 +454,10 @@ Options:
 	}
 
 	// Test CLI integration on Unix systems
-	const result = execSync(`node --experimental-strip-types ${buildCliCommand([CLI_PATH, ...command])}`, { cwd: testDir });
+	const result = execSync(
+		`node --experimental-strip-types ${buildCliCommand([CLI_PATH, ...command])}`,
+		{ cwd: testDir },
+	);
 
 	return {
 		exitCode: result.exitCode,
@@ -451,13 +496,17 @@ async function listProposalsViaCore(
 		let filteredProposals = proposals;
 		if (options.status) {
 			const statusFilter = options.status.toLowerCase();
-			filteredProposals = proposals.filter((proposal) => proposal.status.toLowerCase() === statusFilter);
+			filteredProposals = proposals.filter(
+				(proposal) => proposal.status.toLowerCase() === statusFilter,
+			);
 		}
 
 		// Filter by assignee if provided
 		if (options.assignee) {
 			filteredProposals = filteredProposals.filter((proposal) =>
-				proposal.assignee.some((a) => a.toLowerCase().includes(options.assignee?.toLowerCase() ?? "")),
+				proposal.assignee.some((a) =>
+					a.toLowerCase().includes(options.assignee?.toLowerCase() ?? ""),
+				),
 			);
 		}
 
@@ -534,7 +583,10 @@ async function _listProposalsViaCLI(
 		args.push("-a", options.assignee);
 	}
 
-	const result = execSync(`node --experimental-strip-types ${buildCliCommand(args)}`, { cwd: testDir });
+	const result = execSync(
+		`node --experimental-strip-types ${buildCliCommand(args)}`,
+		{ cwd: testDir },
+	);
 
 	return {
 		exitCode: result.exitCode,

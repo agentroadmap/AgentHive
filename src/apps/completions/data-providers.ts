@@ -1,5 +1,5 @@
-import { Core } from "../index.ts";
 import type { RoadmapConfig } from "../../types/index.ts";
+import { Core } from "../index.ts";
 
 type CoreCallback<T> = (core: Core) => Promise<T>;
 

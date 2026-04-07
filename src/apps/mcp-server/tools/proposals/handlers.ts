@@ -1,19 +1,22 @@
 import { basename, join } from "node:path";
 import {
-	isLocalEditableProposal,
 	type Directive,
-	type SearchPriorityFilter,
+	isLocalEditableProposal,
 	type Proposal,
 	type ProposalListFilter,
+	type SearchPriorityFilter,
 } from "../../../../shared/types/index.ts";
-import { normalizeProposalId } from "../../../../shared/utils/proposal-path.ts";
-import type { ProposalEditArgs, ProposalEditRequest } from "../../../../shared/types/proposal-edit-args.ts";
+import type {
+	ProposalEditArgs,
+	ProposalEditRequest,
+} from "../../../../shared/types/proposal-edit-args.ts";
 import {
 	createDirectiveFilterValueResolver,
 	normalizeDirectiveFilterValue,
 	resolveClosestDirectiveFilterValue,
-} from '../../../../shared/utils/milestone-filter.ts';
+} from "../../../../shared/utils/milestone-filter.ts";
 import { buildProposalUpdateInput } from "../../../../shared/utils/proposal-edit-builder.ts";
+import { normalizeProposalId } from "../../../../shared/utils/proposal-path.ts";
 import { createProposalSearchIndex } from "../../../../shared/utils/proposal-search.ts";
 import { sortProposals } from "../../../../shared/utils/proposal-sorting.ts";
 import { McpError } from "../../errors/mcp-errors.ts";
@@ -72,7 +75,8 @@ export class ProposalHandlers {
 		const normalized = directive.trim();
 		const inputKey = directiveKey(normalized);
 		const aliasKeys = new Set<string>([inputKey]);
-		const looksLikeDirectiveId = /^\d+$/.test(normalized) || /^m-\d+$/i.test(normalized);
+		const looksLikeDirectiveId =
+			/^\d+$/.test(normalized) || /^m-\d+$/i.test(normalized);
 		const canonicalInputId =
 			/^\d+$/.test(normalized) || /^m-\d+$/i.test(normalized)
 				? `m-${String(Number.parseInt(normalized.replace(/^m-/i, ""), 10))}`
@@ -96,7 +100,9 @@ export class ProposalHandlers {
 			}
 			if (/^\d+$/.test(directiveId.trim())) {
 				const numericAlias = String(Number.parseInt(directiveId.trim(), 10));
-				return aliasKeys.has(numericAlias) || aliasKeys.has(`m-${numericAlias}`);
+				return (
+					aliasKeys.has(numericAlias) || aliasKeys.has(`m-${numericAlias}`)
+				);
 			}
 			const idMatch = directiveId.trim().match(/^m-(\d+)$/i);
 			if (!idMatch?.[1]) {
@@ -106,20 +112,28 @@ export class ProposalHandlers {
 			return aliasKeys.has(numericAlias) || aliasKeys.has(`m-${numericAlias}`);
 		};
 		const findIdMatch = (directives: Directive[]): Directive | undefined => {
-			const rawExactMatch = directives.find((item) => directiveKey(item.id) === inputKey);
+			const rawExactMatch = directives.find(
+				(item) => directiveKey(item.id) === inputKey,
+			);
 			if (rawExactMatch) {
 				return rawExactMatch;
 			}
 			if (canonicalInputId) {
-				const canonicalRawMatch = directives.find((item) => directiveKey(item.id) === canonicalInputId);
+				const canonicalRawMatch = directives.find(
+					(item) => directiveKey(item.id) === canonicalInputId,
+				);
 				if (canonicalRawMatch) {
 					return canonicalRawMatch;
 				}
 			}
 			return directives.find((item) => idMatchesAlias(item.id));
 		};
-		const findUniqueTitleMatch = (directives: Directive[]): Directive | null => {
-			const titleMatches = directives.filter((item) => directiveKey(item.title) === inputKey);
+		const findUniqueTitleMatch = (
+			directives: Directive[],
+		): Directive | null => {
+			const titleMatches = directives.filter(
+				(item) => directiveKey(item.title) === inputKey,
+			);
 			if (titleMatches.length === 1) {
 				return titleMatches[0] ?? null;
 			}
@@ -140,7 +154,9 @@ export class ProposalHandlers {
 			return null;
 		};
 
-		const activeTitleMatches = activeDirectives.filter((item) => directiveKey(item.title) === inputKey);
+		const activeTitleMatches = activeDirectives.filter(
+			(item) => directiveKey(item.title) === inputKey,
+		);
 		const hasAmbiguousActiveTitle = activeTitleMatches.length > 1;
 		if (looksLikeDirectiveId) {
 			const activeIdMatch = findIdMatch(activeDirectives);
@@ -180,10 +196,16 @@ export class ProposalHandlers {
 		return (status ?? "").trim().toLowerCase() === "draft";
 	}
 
-	private formatProposalSummaryLine(proposal: Proposal, options: { includeStatus?: boolean } = {}): string {
-		const priorityIndicator = proposal.priority ? `[${proposal.priority.toUpperCase()}] ` : "";
+	private formatProposalSummaryLine(
+		proposal: Proposal,
+		options: { includeStatus?: boolean } = {},
+	): string {
+		const priorityIndicator = proposal.priority
+			? `[${proposal.priority.toUpperCase()}] `
+			: "";
 		const readyIndicator = proposal.ready ? " [READY]" : "";
-		const status = proposal.status || (proposal.origin === "completed" ? "Complete" : "");
+		const status =
+			proposal.status || (proposal.origin === "completed" ? "Complete" : "");
 		const statusText = options.includeStatus && status ? ` (${status})` : "";
 		return `  ${priorityIndicator}${proposal.id} - ${proposal.title}${readyIndicator}${statusText}`;
 	}
@@ -205,24 +227,27 @@ export class ProposalHandlers {
 					.map((text) => ({ text, checked: false })) ?? undefined;
 
 			const directive =
-				typeof args.directive === "string" ? await this.resolveDirectiveInput(args.directive) : undefined;
+				typeof args.directive === "string"
+					? await this.resolveDirectiveInput(args.directive)
+					: undefined;
 
-			const { proposal: createdProposal } = await this.core.createProposalFromInput({
-				title: args.title,
-				description: args.description,
-				status: args.status,
-				priority: args.priority,
-				directive,
-				labels: args.labels,
-				assignee: args.assignee,
-				dependencies: args.dependencies,
-				references: args.references,
-				documentation: args.documentation,
-				parentProposalId: args.parentProposalId,
-				finalSummary: args.finalSummary,
-				acceptanceCriteria,
-				rationale: args.rationale,
-			});
+			const { proposal: createdProposal } =
+				await this.core.createProposalFromInput({
+					title: args.title,
+					description: args.description,
+					status: args.status,
+					priority: args.priority,
+					directive,
+					labels: args.labels,
+					assignee: args.assignee,
+					dependencies: args.dependencies,
+					references: args.references,
+					documentation: args.documentation,
+					parentProposalId: args.parentProposalId,
+					finalSummary: args.finalSummary,
+					acceptanceCriteria,
+					rationale: args.rationale,
+				});
 
 			return await formatProposalCallResult(createdProposal);
 		} catch (error) {
@@ -237,11 +262,16 @@ export class ProposalHandlers {
 		return this.executeListProposals(args, false);
 	}
 
-	async listProposalsMetadata(args: ProposalListArgs = {}): Promise<CallToolResult> {
+	async listProposalsMetadata(
+		args: ProposalListArgs = {},
+	): Promise<CallToolResult> {
 		return this.executeListProposals(args, true);
 	}
 
-	private async executeListProposals(args: ProposalListArgs, metadataOnly: boolean): Promise<CallToolResult> {
+	private async executeListProposals(
+		args: ProposalListArgs,
+		metadataOnly: boolean,
+	): Promise<CallToolResult> {
 		if (this.isDraftStatus(args.status)) {
 			let drafts = await this.core.filesystem.listDrafts();
 			if (args.search) {
@@ -250,7 +280,9 @@ export class ProposalHandlers {
 			}
 
 			if (args.assignee) {
-				drafts = drafts.filter((draft) => (draft.assignee ?? []).includes(args.assignee ?? ""));
+				drafts = drafts.filter((draft) =>
+					(draft.assignee ?? []).includes(args.assignee ?? ""),
+				);
 			}
 			if (args.directive) {
 				const [activeDirectives, archivedDirectives] = await Promise.all([
@@ -263,11 +295,15 @@ export class ProposalHandlers {
 				]);
 				const directiveFilter = resolveClosestDirectiveFilterValue(
 					args.directive,
-					drafts.map((draft) => resolveDirectiveFilterValue(draft.directive ?? "")),
+					drafts.map((draft) =>
+						resolveDirectiveFilterValue(draft.directive ?? ""),
+					),
 				);
 				drafts = drafts.filter(
 					(draft) =>
-						normalizeDirectiveFilterValue(resolveDirectiveFilterValue(draft.directive ?? "")) === directiveFilter,
+						normalizeDirectiveFilterValue(
+							resolveDirectiveFilterValue(draft.directive ?? ""),
+						) === directiveFilter,
 				);
 			}
 
@@ -333,7 +369,9 @@ export class ProposalHandlers {
 			includeCrossBranch: false,
 		});
 
-		let filteredByLabels = proposals.filter((proposal) => isLocalEditableProposal(proposal));
+		let filteredByLabels = proposals.filter((proposal) =>
+			isLocalEditableProposal(proposal),
+		);
 		const labelFilters = args.labels ?? [];
 		if (labelFilters.length > 0) {
 			filteredByLabels = filteredByLabels.filter((proposal) => {
@@ -354,7 +392,9 @@ export class ProposalHandlers {
 		}
 
 		if (metadataOnly) {
-			const lines = filteredByLabels.map((s) => this.formatProposalSummaryLine(s, { includeStatus: true }));
+			const lines = filteredByLabels.map((s) =>
+				this.formatProposalSummaryLine(s, { includeStatus: true }),
+			);
 			return {
 				content: [{ type: "text", text: lines.join("\n") }],
 			};
@@ -371,7 +411,8 @@ export class ProposalHandlers {
 		const grouped = new Map<string, Proposal[]>();
 		for (const proposal of filteredByLabels) {
 			const rawStatus = (proposal.status ?? "").trim();
-			const canonicalStatus = canonicalByLower.get(rawStatus.toLowerCase()) ?? rawStatus;
+			const canonicalStatus =
+				canonicalByLower.get(rawStatus.toLowerCase()) ?? rawStatus;
 			const bucketKey = canonicalStatus || "";
 			const existing = grouped.get(bucketKey) ?? [];
 			existing.push(proposal);
@@ -380,7 +421,9 @@ export class ProposalHandlers {
 
 		const orderedStatuses = [
 			...statuses.filter((status) => grouped.has(status)),
-			...Array.from(grouped.keys()).filter((status) => !statuses.includes(status)),
+			...Array.from(grouped.keys()).filter(
+				(status) => !statuses.includes(status),
+			),
 		];
 
 		const contentItems: Array<{ type: "text"; text: string }> = [];
@@ -440,7 +483,9 @@ export class ProposalHandlers {
 
 			const lines: string[] = ["Proposals:"];
 			for (const draft of draftMatches) {
-				lines.push(this.formatProposalSummaryLine(draft, { includeStatus: true }));
+				lines.push(
+					this.formatProposalSummaryLine(draft, { includeStatus: true }),
+				);
 			}
 
 			return {
@@ -453,7 +498,9 @@ export class ProposalHandlers {
 			};
 		}
 
-		const proposals = await this.core.loadProposals(undefined, undefined, { includeCompleted: true });
+		const proposals = await this.core.loadProposals(undefined, undefined, {
+			includeCompleted: true,
+		});
 		const searchIndex = createProposalSearchIndex(proposals);
 		let proposalMatches = searchIndex.search({
 			query,
@@ -465,7 +512,9 @@ export class ProposalHandlers {
 			proposalMatches = proposalMatches.slice(0, args.limit);
 		}
 
-		const proposalResults = proposalMatches.filter((proposal) => isLocalEditableProposal(proposal));
+		const proposalResults = proposalMatches.filter((proposal) =>
+			isLocalEditableProposal(proposal),
+		);
 		if (proposalResults.length === 0) {
 			return {
 				content: [
@@ -479,7 +528,9 @@ export class ProposalHandlers {
 
 		const lines: string[] = ["Proposals:"];
 		for (const proposal of proposalResults) {
-			lines.push(this.formatProposalSummaryLine(proposal, { includeStatus: true }));
+			lines.push(
+				this.formatProposalSummaryLine(proposal, { includeStatus: true }),
+			);
 		}
 
 		return {
@@ -510,16 +561,24 @@ export class ProposalHandlers {
 		if (draft) {
 			const success = await this.core.archiveDraft(draft.id);
 			if (!success) {
-				throw new McpError(`Failed to archive proposal: ${args.id}`, "OPERATION_FAILED");
+				throw new McpError(
+					`Failed to archive proposal: ${args.id}`,
+					"OPERATION_FAILED",
+				);
 			}
 
-			return await formatProposalCallResult(draft, [`Archived draft ${draft.id}.`]);
+			return await formatProposalCallResult(draft, [
+				`Archived draft ${draft.id}.`,
+			]);
 		}
 
 		const proposal = await this.loadProposalOrThrow(args.id);
 
 		if (!isLocalEditableProposal(proposal)) {
-			throw new McpError(`Cannot archive proposal from another branch: ${proposal.id}`, "VALIDATION_ERROR");
+			throw new McpError(
+				`Cannot archive proposal from another branch: ${proposal.id}`,
+				"VALIDATION_ERROR",
+			);
 		}
 
 		if (this.isCompleteStatus(proposal.status)) {
@@ -531,7 +590,10 @@ export class ProposalHandlers {
 
 		const success = await this.core.archiveProposal(proposal.id);
 		if (!success) {
-			throw new McpError(`Failed to archive proposal: ${args.id}`, "OPERATION_FAILED");
+			throw new McpError(
+				`Failed to archive proposal: ${args.id}`,
+				"OPERATION_FAILED",
+			);
 		}
 
 		const refreshed = (await this.core.getProposal(proposal.id)) ?? proposal;
@@ -542,7 +604,10 @@ export class ProposalHandlers {
 		const proposal = await this.loadProposalOrThrow(args.id);
 
 		if (!isLocalEditableProposal(proposal)) {
-			throw new McpError(`Cannot complete proposal from another branch: ${proposal.id}`, "VALIDATION_ERROR");
+			throw new McpError(
+				`Cannot complete proposal from another branch: ${proposal.id}`,
+				"VALIDATION_ERROR",
+			);
 		}
 
 		if (!this.isCompleteStatus(proposal.status)) {
@@ -553,23 +618,35 @@ export class ProposalHandlers {
 		}
 
 		const filePath = proposal.filePath ?? null;
-		const completedFilePath = filePath ? join(this.core.filesystem.completedDir, basename(filePath)) : undefined;
+		const completedFilePath = filePath
+			? join(this.core.filesystem.completedDir, basename(filePath))
+			: undefined;
 
 		const success = await this.core.completeProposal(proposal.id);
 		if (!success) {
-			throw new McpError(`Failed to complete proposal: ${args.id}`, "OPERATION_FAILED");
+			throw new McpError(
+				`Failed to complete proposal: ${args.id}`,
+				"OPERATION_FAILED",
+			);
 		}
 
-		return await formatProposalCallResult(proposal, [`Completed proposal ${proposal.id}.`], {
-			filePathOverride: completedFilePath,
-		});
+		return await formatProposalCallResult(
+			proposal,
+			[`Completed proposal ${proposal.id}.`],
+			{
+				filePathOverride: completedFilePath,
+			},
+		);
 	}
 
 	async demoteProposalSimple(args: { id: string }): Promise<CallToolResult> {
 		const proposal = await this.loadProposalOrThrow(args.id);
 		const success = await this.core.demoteProposal(proposal.id, false);
 		if (!success) {
-			throw new McpError(`Failed to demote proposal: ${args.id}`, "OPERATION_FAILED");
+			throw new McpError(
+				`Failed to demote proposal: ${args.id}`,
+				"OPERATION_FAILED",
+			);
 		}
 
 		const refreshed = (await this.core.getProposal(proposal.id)) ?? proposal;
@@ -580,9 +657,14 @@ export class ProposalHandlers {
 		try {
 			const updateInput = buildProposalUpdateInput(args);
 			if (typeof updateInput.directive === "string") {
-				updateInput.directive = await this.resolveDirectiveInput(updateInput.directive);
+				updateInput.directive = await this.resolveDirectiveInput(
+					updateInput.directive,
+				);
 			}
-			const updatedProposal = await this.core.editProposalOrDraft(args.id, updateInput);
+			const updatedProposal = await this.core.editProposalOrDraft(
+				args.id,
+				updateInput,
+			);
 
 			return await formatProposalCallResult(updatedProposal);
 		} catch (error) {
@@ -607,7 +689,9 @@ export class ProposalHandlers {
 				force: args.force,
 				autoCommit: true,
 			});
-			return await formatProposalCallResult(proposal, [`Claimed proposal ${args.id} for ${args.agent}.`]);
+			return await formatProposalCallResult(proposal, [
+				`Claimed proposal ${args.id} for ${args.agent}.`,
+			]);
 		} catch (error) {
 			if (error instanceof Error) {
 				throw new McpError(error.message, "OPERATION_FAILED");
@@ -616,13 +700,19 @@ export class ProposalHandlers {
 		}
 	}
 
-	async releaseProposal(args: { id: string; agent: string; force?: boolean }): Promise<CallToolResult> {
+	async releaseProposal(args: {
+		id: string;
+		agent: string;
+		force?: boolean;
+	}): Promise<CallToolResult> {
 		try {
 			const proposal = await this.core.releaseClaim(args.id, args.agent, {
 				force: args.force,
 				autoCommit: true,
 			});
-			return await formatProposalCallResult(proposal, [`Released claim on proposal ${args.id}.`]);
+			return await formatProposalCallResult(proposal, [
+				`Released claim on proposal ${args.id}.`,
+			]);
 		} catch (error) {
 			if (error instanceof Error) {
 				throw new McpError(error.message, "OPERATION_FAILED");
@@ -631,13 +721,19 @@ export class ProposalHandlers {
 		}
 	}
 
-	async renewProposal(args: { id: string; agent: string; durationMinutes?: number }): Promise<CallToolResult> {
+	async renewProposal(args: {
+		id: string;
+		agent: string;
+		durationMinutes?: number;
+	}): Promise<CallToolResult> {
 		try {
 			const proposal = await this.core.renewClaim(args.id, args.agent, {
 				durationMinutes: args.durationMinutes,
 				autoCommit: true,
 			});
-			return await formatProposalCallResult(proposal, [`Renewed claim on proposal ${args.id} for ${args.agent}.`]);
+			return await formatProposalCallResult(proposal, [
+				`Renewed claim on proposal ${args.id} for ${args.agent}.`,
+			]);
 		} catch (error) {
 			if (error instanceof Error) {
 				throw new McpError(error.message, "OPERATION_FAILED");
@@ -646,7 +742,10 @@ export class ProposalHandlers {
 		}
 	}
 
-	async heartbeatProposal(args: { id: string; agent: string }): Promise<CallToolResult> {
+	async heartbeatProposal(args: {
+		id: string;
+		agent: string;
+	}): Promise<CallToolResult> {
 		try {
 			const proposal = await this.core.heartbeat(args.id, args.agent, true);
 			return await formatProposalCallResult(proposal, [
@@ -660,7 +759,9 @@ export class ProposalHandlers {
 		}
 	}
 
-	async pruneClaims(args: { timeoutMinutes?: number }): Promise<CallToolResult> {
+	async pruneClaims(args: {
+		timeoutMinutes?: number;
+	}): Promise<CallToolResult> {
 		try {
 			const recoveredIds = await this.core.pruneClaims({
 				timeoutMinutes: args.timeoutMinutes,
@@ -695,7 +796,9 @@ export class ProposalHandlers {
 
 			if (!result) {
 				return {
-					content: [{ type: "text", text: "No ready proposals found for pickup." }],
+					content: [
+						{ type: "text", text: "No ready proposals found for pickup." },
+					],
 				};
 			}
 
@@ -724,11 +827,19 @@ export class ProposalHandlers {
 			const impact = await this.core.getImpact(proposalId);
 			if (impact.length === 0) {
 				return {
-					content: [{ type: "text", text: "No downstream proposals are affected by this change." }],
+					content: [
+						{
+							type: "text",
+							text: "No downstream proposals are affected by this change.",
+						},
+					],
 				};
 			}
 
-			const lines = [`Forward Impact Analysis for ${proposalId}:`, `The following ${impact.length} proposals depend on this path:`];
+			const lines = [
+				`Forward Impact Analysis for ${proposalId}:`,
+				`The following ${impact.length} proposals depend on this path:`,
+			];
 			for (const proposal of impact) {
 				lines.push(`- ${proposal.id} - ${proposal.title} [${proposal.status}]`);
 			}
@@ -744,88 +855,174 @@ export class ProposalHandlers {
 		}
 	}
 
-	async promoteProposal(args: { id: string; agent?: string }): Promise<CallToolResult> {
+	async promoteProposal(args: {
+		id: string;
+		agent?: string;
+	}): Promise<CallToolResult> {
 		try {
 			const proposalId = normalizeProposalId(args.id);
-			const proposal = await this.core.promoteProposal(proposalId, args.agent || "agent", true);
-			return await formatProposalCallResult(proposal, [`Promoted proposal ${proposalId} to ${proposal.status}`]);
+			const proposal = await this.core.promoteProposal(
+				proposalId,
+				args.agent || "agent",
+				true,
+			);
+			return await formatProposalCallResult(proposal, [
+				`Promoted proposal ${proposalId} to ${proposal.status}`,
+			]);
 		} catch (error) {
 			throw new McpError(String(error), "OPERATION_FAILED");
 		}
 	}
 
-	async demoteProposal(args: { id: string; agent?: string }): Promise<CallToolResult> {
+	async demoteProposal(args: {
+		id: string;
+		agent?: string;
+	}): Promise<CallToolResult> {
 		try {
 			const proposalId = normalizeProposalId(args.id);
-			const proposal = await this.core.demoteProposalProper(proposalId, args.agent || "agent", true);
-			return await formatProposalCallResult(proposal, [`Demoted proposal ${proposalId} to ${proposal.status}`]);
+			const proposal = await this.core.demoteProposalProper(
+				proposalId,
+				args.agent || "agent",
+				true,
+			);
+			return await formatProposalCallResult(proposal, [
+				`Demoted proposal ${proposalId} to ${proposal.status}`,
+			]);
 		} catch (error) {
 			throw new McpError(String(error), "OPERATION_FAILED");
 		}
 	}
 
-	async priorityUp(args: { id: string; agent?: string; rationale?: string }): Promise<CallToolResult> {
+	async priorityUp(args: {
+		id: string;
+		agent?: string;
+		rationale?: string;
+	}): Promise<CallToolResult> {
 		try {
 			const proposalId = normalizeProposalId(args.id);
 			const proposal = await this.core.getProposal(proposalId);
 			if (!proposal) throw new Error(`Proposal ${proposalId} not found`);
 
-			const priorities: Array<"none" | "low" | "medium" | "high" | "critical"> = ["none", "low", "medium", "high", "critical"];
-			const currentIdx = priorities.indexOf((proposal.priority as any) || "none");
+			const priorities: Array<"none" | "low" | "medium" | "high" | "critical"> =
+				["none", "low", "medium", "high", "critical"];
+			const currentIdx = priorities.indexOf(
+				(proposal.priority as any) || "none",
+			);
 			const nextIdx = Math.min(priorities.length - 1, currentIdx + 1);
-			
-			const updated = await this.core.updatePriority(proposalId, priorities[nextIdx] as any, args.agent || "agent", true);
+
+			const updated = await this.core.updatePriority(
+				proposalId,
+				priorities[nextIdx] as any,
+				args.agent || "agent",
+				true,
+			);
 			if (args.rationale) {
-				await this.core.editProposal(proposalId, { implementationNotes: `Priority increased to ${priorities[nextIdx]}. Rationale: ${args.rationale}` }, true);
+				await this.core.editProposal(
+					proposalId,
+					{
+						implementationNotes: `Priority increased to ${priorities[nextIdx]}. Rationale: ${args.rationale}`,
+					},
+					true,
+				);
 			}
-			return await formatProposalCallResult(updated, [`Increased priority of ${proposalId} to ${updated.priority}`]);
+			return await formatProposalCallResult(updated, [
+				`Increased priority of ${proposalId} to ${updated.priority}`,
+			]);
 		} catch (error) {
 			throw new McpError(String(error), "OPERATION_FAILED");
 		}
 	}
 
-	async priorityDown(args: { id: string; agent?: string; rationale?: string }): Promise<CallToolResult> {
+	async priorityDown(args: {
+		id: string;
+		agent?: string;
+		rationale?: string;
+	}): Promise<CallToolResult> {
 		try {
 			const proposalId = normalizeProposalId(args.id);
 			const proposal = await this.core.getProposal(proposalId);
 			if (!proposal) throw new Error(`Proposal ${proposalId} not found`);
 
-			const priorities: Array<"none" | "low" | "medium" | "high" | "critical"> = ["none", "low", "medium", "high", "critical"];
-			const currentIdx = priorities.indexOf((proposal.priority as any) || "none");
+			const priorities: Array<"none" | "low" | "medium" | "high" | "critical"> =
+				["none", "low", "medium", "high", "critical"];
+			const currentIdx = priorities.indexOf(
+				(proposal.priority as any) || "none",
+			);
 			const nextIdx = Math.max(0, currentIdx - 1);
-			
-			const updated = await this.core.updatePriority(proposalId, priorities[nextIdx] as any, args.agent || "agent", true);
+
+			const updated = await this.core.updatePriority(
+				proposalId,
+				priorities[nextIdx] as any,
+				args.agent || "agent",
+				true,
+			);
 			if (args.rationale) {
-				await this.core.editProposal(proposalId, { implementationNotes: `Priority decreased to ${priorities[nextIdx]}. Rationale: ${args.rationale}` }, true);
+				await this.core.editProposal(
+					proposalId,
+					{
+						implementationNotes: `Priority decreased to ${priorities[nextIdx]}. Rationale: ${args.rationale}`,
+					},
+					true,
+				);
 			}
-			return await formatProposalCallResult(updated, [`Decreased priority of ${proposalId} to ${updated.priority}`]);
+			return await formatProposalCallResult(updated, [
+				`Decreased priority of ${proposalId} to ${updated.priority}`,
+			]);
 		} catch (error) {
 			throw new McpError(String(error), "OPERATION_FAILED");
 		}
 	}
 
-	async mergeProposals(args: { sourceId: string; targetId: string; agent?: string }): Promise<CallToolResult> {
+	async mergeProposals(args: {
+		sourceId: string;
+		targetId: string;
+		agent?: string;
+	}): Promise<CallToolResult> {
 		try {
 			const sourceId = normalizeProposalId(args.sourceId);
 			const targetId = normalizeProposalId(args.targetId);
-			const proposal = await this.core.mergeProposals(sourceId, targetId, args.agent || "agent", true);
-			return await formatProposalCallResult(proposal, [`Merged ${sourceId} into ${targetId}`]);
+			const proposal = await this.core.mergeProposals(
+				sourceId,
+				targetId,
+				args.agent || "agent",
+				true,
+			);
+			return await formatProposalCallResult(proposal, [
+				`Merged ${sourceId} into ${targetId}`,
+			]);
 		} catch (error) {
 			throw new McpError(String(error), "OPERATION_FAILED");
 		}
 	}
 
-	async moveProposal(args: { id: string; targetStatus: string; targetIndex: number; agent?: string }): Promise<CallToolResult> {
+	async moveProposal(args: {
+		id: string;
+		targetStatus: string;
+		targetIndex: number;
+		agent?: string;
+	}): Promise<CallToolResult> {
 		try {
 			const proposalId = normalizeProposalId(args.id);
-			const proposal = await this.core.moveProposal(proposalId, args.targetStatus, args.targetIndex, args.agent || "agent", true);
-			return await formatProposalCallResult(proposal, [`Moved proposal ${proposalId} to ${args.targetStatus} at index ${args.targetIndex}`]);
+			const proposal = await this.core.moveProposal(
+				proposalId,
+				args.targetStatus,
+				args.targetIndex,
+				args.agent || "agent",
+				true,
+			);
+			return await formatProposalCallResult(proposal, [
+				`Moved proposal ${proposalId} to ${args.targetStatus} at index ${args.targetIndex}`,
+			]);
 		} catch (error) {
 			throw new McpError(String(error), "OPERATION_FAILED");
 		}
 	}
 
-	async requestEnrichment(args: { id: string; topic: string; agent?: string }): Promise<CallToolResult> {
+	async requestEnrichment(args: {
+		id: string;
+		topic: string;
+		agent?: string;
+	}): Promise<CallToolResult> {
 		try {
 			const proposalId = normalizeProposalId(args.id);
 			await this.core.emitPulse({
@@ -833,17 +1030,25 @@ export class ProposalHandlers {
 				id: proposalId,
 				title: `Enrichment requested: ${args.topic}`,
 				agent: args.agent || "agent",
-				timestamp: new Date().toISOString()
+				timestamp: new Date().toISOString(),
 			});
 			return {
-				content: [{ type: "text", text: `✅ Enrichment request for ${proposalId} on topic "${args.topic}" has been logged.` }]
+				content: [
+					{
+						type: "text",
+						text: `✅ Enrichment request for ${proposalId} on topic "${args.topic}" has been logged.`,
+					},
+				],
 			};
 		} catch (error) {
 			throw new McpError(String(error), "OPERATION_FAILED");
 		}
 	}
 
-	async proposalExport(args: { id: string; format: "markdown" | "json" }): Promise<CallToolResult> {
+	async proposalExport(args: {
+		id: string;
+		format: "markdown" | "json";
+	}): Promise<CallToolResult> {
 		try {
 			const proposalId = normalizeProposalId(args.id);
 			const proposal = await this.core.getProposal(proposalId);
@@ -853,18 +1058,19 @@ export class ProposalHandlers {
 			if (args.format === "json") {
 				output = JSON.stringify(proposal, null, 2);
 			} else {
-				const { generateProposalMarkdown } = await import("../../../../shared/utils/proposal-markdown-generator.ts");
+				const { generateProposalMarkdown } = await import(
+					"../../../../shared/utils/proposal-markdown-generator.ts"
+				);
 				output = generateProposalMarkdown(proposal);
 			}
 
 			return {
-				content: [{ type: "text", text: output }]
+				content: [{ type: "text", text: output }],
 			};
 		} catch (error) {
 			throw new McpError(String(error), "OPERATION_FAILED");
 		}
 	}
 }
-
 
 export type { ProposalEditArgs, ProposalEditRequest };

@@ -1,7 +1,13 @@
-import fs from "node:fs";
 import { execSync } from "node:child_process";
-import { rename as moveFile, readFile, stat, unlink, writeFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import fs from "node:fs";
+import {
+	rename as moveFile,
+	readFile,
+	stat,
+	unlink,
+	writeFile,
+} from "node:fs/promises";
+import { dirname, join } from "node:path";
 import {
 	DEFAULT_CLAIM_DURATION_MINUTES,
 	DEFAULT_DIRECTORIES,
@@ -10,24 +16,32 @@ import {
 } from "../constants/index.ts";
 import { FileSystem } from "../file-system/operations.ts";
 import { GitOperations } from "../git/operations.ts";
+import * as pgPool from "../postgres/pool.ts";
+import type {
+	ProposalAcceptanceCriterionRow,
+	ProposalDependency,
+	ProposalRow,
+	ProposalSummary,
+} from "../postgres/proposal-storage-v2.ts";
+import * as pg from "../postgres/proposal-storage-v2.ts";
 import {
 	type AcceptanceCriterion,
 	type Agent,
 	type Decision,
+	type Directive,
 	type Document,
 	EntityType,
 	isLocalEditableProposal,
-	type Directive,
-	type PulseEvent,
-	type PulseType,
-	type RoadmapConfig,
-	type SearchFilters,
-	type Sequence,
 	type Proposal,
 	type ProposalClaim,
 	type ProposalCreateInput,
 	type ProposalListFilter,
 	type ProposalUpdateInput,
+	type PulseEvent,
+	type PulseType,
+	type RoadmapConfig,
+	type SearchFilters,
+	type Sequence,
 } from "../types/index.ts";
 import { normalizeAssignee } from "../utils/assignee.ts";
 import { formatLocalDateTime } from "../utils/date-time.ts";
@@ -38,36 +52,64 @@ import {
 	createDirectiveFilterValueResolver,
 	normalizeDirectiveFilterValue,
 	resolveClosestDirectiveFilterValue,
-} from '../utils/milestone-filter.ts';
-import { buildIdRegex, extractAnyPrefix, getPrefixForType, normalizeId } from "../utils/prefix-config.ts";
+} from "../utils/milestone-filter.ts";
+import {
+	buildIdRegex,
+	extractAnyPrefix,
+	getPrefixForType,
+	normalizeId,
+} from "../utils/prefix-config.ts";
 import {
 	normalizeDependencies,
 	normalizeStringList,
 	stringArraysEqual,
 	validateDependencies,
 } from "../utils/proposal-builders.ts";
-import { getProposalFilename, getProposalPath, normalizeProposalId, proposalIdsEqual } from "../utils/proposal-path.ts";
+import {
+	getProposalFilename,
+	getProposalPath,
+	normalizeProposalId,
+	proposalIdsEqual,
+} from "../utils/proposal-path.ts";
 import { compareProposalIds } from "../utils/proposal-sorting.ts";
 import { attachSubproposalSummaries } from "../utils/proposal-subproposals.ts";
 import { upsertProposalUpdatedDate } from "../utils/proposal-updated-date.ts";
-import * as pg from "../postgres/proposal-storage-v2.ts";
-import * as pgPool from "../postgres/pool.ts";
-import { IdRegistry } from "./identity/id-registry.ts";
-import { RateLimiter } from "./infrastructure/rate-limiter.ts";
-import { DaemonClient, createDaemonClientFromConfig } from "./infrastructure/daemon-client.ts";
 import {
 	getCanonicalStatus as resolveCanonicalStatus,
 	getValidStatuses as resolveValidStatuses,
 } from "../utils/status.ts";
 import { executeStatusCallback } from "../utils/status-callback.ts";
-import { migrateConfig, needsMigration } from "./infrastructure/config-migration.ts";
-import { ContentStore } from "./storage/content-store.ts";
-import { getBlockingIssues, loadIssues } from "./pipeline/issue-tracker.ts";
-import { collectArchivedDirectiveKeys, isCompleteStatus, isReady, isTerminalStatus, isReachedStatus } from "./proposal/directives.ts";
-import { migrateDraftPrefixes, needsDraftPrefixMigration } from "./infrastructure/prefix-migration.ts";
-import { calculateNewOrdinal, DEFAULT_ORDINAL_STEP, resolveOrdinalConflicts } from "./proposal/reorder.ts";
+import {
+	migrateConfig,
+	needsMigration,
+} from "./infrastructure/config-migration.ts";
+import {
+	createDaemonClientFromConfig,
+	type DaemonClient,
+} from "./infrastructure/daemon-client.ts";
+import {
+	migrateDraftPrefixes,
+	needsDraftPrefixMigration,
+} from "./infrastructure/prefix-migration.ts";
+import { RateLimiter } from "./infrastructure/rate-limiter.ts";
 import { SearchService } from "./infrastructure/search-service.ts";
-import { computeSequences, planMoveToSequence, planMoveToUnsequenced } from "./proposal/sequences.ts";
+import { getBlockingIssues, loadIssues } from "./pipeline/issue-tracker.ts";
+import {
+	isCompleteStatus,
+	isReachedStatus,
+	isReady,
+} from "./proposal/directives.ts";
+import {
+	calculateNewOrdinal,
+	DEFAULT_ORDINAL_STEP,
+	resolveOrdinalConflicts,
+} from "./proposal/reorder.ts";
+import {
+	computeSequences,
+	planMoveToSequence,
+	planMoveToUnsequenced,
+} from "./proposal/sequences.ts";
+import { ContentStore } from "./storage/content-store.ts";
 import {
 	type BranchProposalProposalEntry,
 	findProposalInLocalBranches,
@@ -77,12 +119,6 @@ import {
 	loadRemoteProposals,
 	resolveProposalConflict,
 } from "./storage/proposal-loader.ts";
-import type {
-	ProposalAcceptanceCriterionRow,
-	ProposalDependency,
-	ProposalRow,
-	ProposalSummary,
-} from "../postgres/proposal-storage-v2.ts";
 
 interface BlessedScreen {
 	program: {
@@ -117,14 +153,20 @@ interface ProposalQueryOptions {
 
 /** Local budget configuration (.roadmap/budget.json) */
 interface BudgetConfig {
-	agents?: Record<string, {
-		dailyLimitUsd: number;
-		totalSpentTodayUsd: number;
-		isFrozen: boolean;
-	}>;
+	agents?: Record<
+		string,
+		{
+			dailyLimitUsd: number;
+			totalSpentTodayUsd: number;
+			isFrozen: boolean;
+		}
+	>;
 }
 
-export type TuiProposalEditFailureReason = "not_found" | "read_only" | "editor_failed";
+export type TuiProposalEditFailureReason =
+	| "not_found"
+	| "read_only"
+	| "editor_failed";
 
 export interface TuiProposalEditResult {
 	changed: boolean;
@@ -134,18 +176,32 @@ export interface TuiProposalEditResult {
 
 function buildLatestProposalMap(
 	proposalEntries: BranchProposalProposalEntry[] = [],
-	localProposals: Array<Proposal & { lastModified?: Date; updatedDate?: string }> = [],
-	localArchivedProposals: Array<Proposal & { lastModified?: Date; updatedDate?: string }> = [],
+	localProposals: Array<
+		Proposal & { lastModified?: Date; updatedDate?: string }
+	> = [],
+	localArchivedProposals: Array<
+		Proposal & { lastModified?: Date; updatedDate?: string }
+	> = [],
 ): Map<string, BranchProposalProposalEntry> {
 	const latest = new Map<string, BranchProposalProposalEntry>();
-	const isAuthoritativeLocalTerminal = (entry?: BranchProposalProposalEntry): boolean =>
-		Boolean(entry && entry.branch === "local" && (entry.type === "archived" || entry.type === "completed"));
+	const isAuthoritativeLocalTerminal = (
+		entry?: BranchProposalProposalEntry,
+	): boolean =>
+		Boolean(
+			entry &&
+				entry.branch === "local" &&
+				(entry.type === "archived" || entry.type === "completed"),
+		);
 	const update = (entry: BranchProposalProposalEntry) => {
 		const existing = latest.get(entry.id);
 		if (isAuthoritativeLocalTerminal(existing)) {
 			return;
 		}
-		if (isAuthoritativeLocalTerminal(entry) || !existing || entry.lastModified > existing.lastModified) {
+		if (
+			isAuthoritativeLocalTerminal(entry) ||
+			!existing ||
+			entry.lastModified > existing.lastModified
+		) {
 			latest.set(entry.id, entry);
 		}
 	};
@@ -156,7 +212,9 @@ function buildLatestProposalMap(
 
 	for (const proposal of localProposals) {
 		if (!proposal.id) continue;
-		const lastModified = proposal.lastModified ?? (proposal.updatedDate ? new Date(proposal.updatedDate) : new Date(0));
+		const lastModified =
+			proposal.lastModified ??
+			(proposal.updatedDate ? new Date(proposal.updatedDate) : new Date(0));
 
 		update({
 			id: proposal.id,
@@ -169,7 +227,9 @@ function buildLatestProposalMap(
 
 	for (const proposal of localArchivedProposals) {
 		if (!proposal.id) continue;
-		const lastModified = proposal.lastModified ?? (proposal.updatedDate ? new Date(proposal.updatedDate) : new Date(0));
+		const lastModified =
+			proposal.lastModified ??
+			(proposal.updatedDate ? new Date(proposal.updatedDate) : new Date(0));
 
 		update({
 			id: proposal.id,
@@ -183,7 +243,10 @@ function buildLatestProposalMap(
 	return latest;
 }
 
-function filterProposalsByProposalSnapshots(proposals: Proposal[], latestProposal: Map<string, BranchProposalProposalEntry>): Proposal[] {
+function filterProposalsByProposalSnapshots(
+	proposals: Proposal[],
+	latestProposal: Map<string, BranchProposalProposalEntry>,
+): Proposal[] {
 	return proposals.filter((proposal) => {
 		const latest = latestProposal.get(proposal.id);
 		if (!latest) return true;
@@ -195,7 +258,9 @@ function filterProposalsByProposalSnapshots(proposals: Proposal[], latestProposa
  * Extract IDs from proposal map where latest proposal is "proposal" or "completed" (not "archived" or "draft")
  * Used for ID generation to determine which IDs are in use.
  */
-function getActiveAndCompletedIdsFromProposalMap(latestProposal: Map<string, BranchProposalProposalEntry>): string[] {
+function getActiveAndCompletedIdsFromProposalMap(
+	latestProposal: Map<string, BranchProposalProposalEntry>,
+): string[] {
 	const ids: string[] = [];
 	for (const [id, entry] of latestProposal) {
 		if (entry.type === "proposal" || entry.type === "completed") {
@@ -219,10 +284,13 @@ export class Core {
 	// Push notification callbacks: agent -> callback for receiving messages
 	private notificationCallbacks: Map<
 		string,
-		(msg: { channel: string; from: string; text: string; timestamp: string }) => void
+		(msg: {
+			channel: string;
+			from: string;
+			text: string;
+			timestamp: string;
+		}) => void
 	> = new Map();
-	// ID Registry (PROPOSAL-55): centralized ID allocation to prevent collisions
-	private idRegistry?: IdRegistry;
 	// Rate Limiter (PROPOSAL-44): per-agent rate limiting with fair share
 	private rateLimiter?: RateLimiter;
 
@@ -274,17 +342,6 @@ export class Core {
 	}
 
 	/**
-	 * Get the ID Registry for centralized ID allocation (PROPOSAL-55).
-	 * Returns null if not available.
-	 */
-	private getIdRegistry(): IdRegistry {
-		if (!this.idRegistry) {
-			this.idRegistry = new IdRegistry(this.fs.rootDir);
-		}
-		return this.idRegistry;
-	}
-
-	/**
 	 * Get the Rate Limiter for per-agent fair share (PROPOSAL-44).
 	 */
 	getRateLimiter(): RateLimiter {
@@ -310,9 +367,13 @@ export class Core {
 
 	async getContentStore(): Promise<ContentStore> {
 		if (!this.contentStore) {
-			this.contentStore = new ContentStore(this.fs, async () => {
-				return await this.loadProposals();
-			}, this.enableWatchers);
+			this.contentStore = new ContentStore(
+				this.fs,
+				async () => {
+					return await this.loadProposals();
+				},
+				this.enableWatchers,
+			);
 		}
 		await this.contentStore.ensureInitialized();
 		return this.contentStore;
@@ -334,45 +395,69 @@ export class Core {
 		allProposals?: Proposal[],
 	): Proposal[] {
 		// Ensure depth and subproposal summaries are attached before filtering (required for depth filtering)
-		const referenceProposals = allProposals && allProposals.length > 0 ? allProposals : proposals;
-		let result = proposals.map((proposal) => attachSubproposalSummaries(proposal, referenceProposals));
+		const referenceProposals =
+			allProposals && allProposals.length > 0 ? allProposals : proposals;
+		let result = proposals.map((proposal) =>
+			attachSubproposalSummaries(proposal, referenceProposals),
+		);
 
 		if (filters) {
 			if (filters.status) {
 				const statusLower = filters.status.toLowerCase();
-				result = result.filter((proposal) => (proposal.status ?? "").toLowerCase() === statusLower);
+				result = result.filter(
+					(proposal) => (proposal.status ?? "").toLowerCase() === statusLower,
+				);
 			}
 			if (filters.assignee) {
 				const assigneeLower = filters.assignee.toLowerCase();
 				result = result.filter((proposal) =>
-					(proposal.assignee ?? []).some((value) => value.toLowerCase() === assigneeLower),
+					(proposal.assignee ?? []).some(
+						(value) => value.toLowerCase() === assigneeLower,
+					),
 				);
 			}
 			if (filters.priority) {
 				const priorityLower = String(filters.priority).toLowerCase();
-				result = result.filter((proposal) => (proposal.priority ?? "").toLowerCase() === priorityLower);
+				result = result.filter(
+					(proposal) =>
+						(proposal.priority ?? "").toLowerCase() === priorityLower,
+				);
 			}
 			if (filters.directive) {
 				const directiveFilter = resolveClosestDirectiveFilterValue(
 					filters.directive,
-					result.map((proposal) => resolveDirectiveFilterValue?.(proposal.directive ?? "") ?? proposal.directive ?? ""),
+					result.map(
+						(proposal) =>
+							resolveDirectiveFilterValue?.(proposal.directive ?? "") ??
+							proposal.directive ??
+							"",
+					),
 				);
 				result = result.filter(
 					(proposal) =>
 						normalizeDirectiveFilterValue(
-							resolveDirectiveFilterValue?.(proposal.directive ?? "") ?? proposal.directive ?? "",
+							resolveDirectiveFilterValue?.(proposal.directive ?? "") ??
+								proposal.directive ??
+								"",
 						) === directiveFilter,
 				);
 			}
 			if (filters.parentProposalId) {
 				const parentFilter = filters.parentProposalId;
-				result = result.filter((proposal) => proposal.parentProposalId && proposalIdsEqual(parentFilter, proposal.parentProposalId));
+				result = result.filter(
+					(proposal) =>
+						proposal.parentProposalId &&
+						proposalIdsEqual(parentFilter, proposal.parentProposalId),
+				);
 			}
 			if (filters.labels && filters.labels.length > 0) {
-				const requiredLabels = filters.labels.map((label) => label.toLowerCase()).filter(Boolean);
+				const requiredLabels = filters.labels
+					.map((label) => label.toLowerCase())
+					.filter(Boolean);
 				if (requiredLabels.length > 0) {
 					result = result.filter((proposal) => {
-						const proposalLabels = proposal.labels?.map((label) => label.toLowerCase()) || [];
+						const proposalLabels =
+							proposal.labels?.map((label) => label.toLowerCase()) || [];
 						if (proposalLabels.length === 0) return false;
 						const labelSet = new Set(proposalLabels);
 						return requiredLabels.some((label) => labelSet.has(label));
@@ -390,9 +475,13 @@ export class Core {
 			}
 		}
 
-		if (allProposals || (filters && filters.ready)) {
+		if (allProposals || filters?.ready) {
 			const referenceProposals = allProposals || proposals;
-			const doneIds = new Set(referenceProposals.filter((t) => isCompleteStatus(t.status)).map((t) => t.id));
+			const doneIds = new Set(
+				referenceProposals
+					.filter((t) => isCompleteStatus(t.status))
+					.map((t) => t.id),
+			);
 
 			result = result.map((proposal) => {
 				const ready = isReady(proposal, doneIds, referenceProposals);
@@ -402,7 +491,7 @@ export class Core {
 				};
 			});
 
-			if (filters && filters.ready) {
+			if (filters?.ready) {
 				result = result.filter((proposal) => proposal.ready);
 			}
 		}
@@ -419,22 +508,31 @@ export class Core {
 			return canonical;
 		}
 		const validStatuses = await resolveValidStatuses(this);
-		throw new Error(`Invalid status: ${status}. Valid statuses are: ${validStatuses.join(", ")}`);
+		throw new Error(
+			`Invalid status: ${status}. Valid statuses are: ${validStatuses.join(", ")}`,
+		);
 	}
 
-	private normalizePriority(value: string | undefined): ("high" | "medium" | "low") | undefined {
+	private normalizePriority(
+		value: string | undefined,
+	): ("high" | "medium" | "low") | undefined {
 		if (value === undefined || value === "") {
 			return undefined;
 		}
 		const normalized = value.toLowerCase();
 		const allowed = ["high", "medium", "low"] as const;
 		if (!allowed.includes(normalized as (typeof allowed)[number])) {
-			throw new Error(`Invalid priority: ${value}. Valid values are: high, medium, low`);
+			throw new Error(
+				`Invalid priority: ${value}. Valid values are: high, medium, low`,
+			);
 		}
 		return normalized as "high" | "medium" | "low";
 	}
 
-	private isExactProposalReference(reference: string, proposalId: string): boolean {
+	private isExactProposalReference(
+		reference: string,
+		proposalId: string,
+	): boolean {
 		const trimmed = reference.trim();
 		if (!trimmed) {
 			return false;
@@ -448,24 +546,37 @@ export class Core {
 			return false;
 		}
 		return (
-			normalizeProposalId(trimmed, proposalPrefix).toLowerCase() === normalizeProposalId(proposalId, proposalPrefix).toLowerCase()
+			normalizeProposalId(trimmed, proposalPrefix).toLowerCase() ===
+			normalizeProposalId(proposalId, proposalPrefix).toLowerCase()
 		);
 	}
 
-	private sanitizeArchivedProposalLinks(proposals: Proposal[], archivedProposalId: string): Proposal[] {
+	private sanitizeArchivedProposalLinks(
+		proposals: Proposal[],
+		archivedProposalId: string,
+	): Proposal[] {
 		const changedProposals: Proposal[] = [];
 
 		for (const proposal of proposals) {
 			const dependencies = proposal.dependencies ?? [];
 			const references = proposal.references ?? [];
 
-			const sanitizedDependencies = dependencies.filter((dependency) => !proposalIdsEqual(dependency, archivedProposalId));
+			const sanitizedDependencies = dependencies.filter(
+				(dependency) => !proposalIdsEqual(dependency, archivedProposalId),
+			);
 			const sanitizedReferences = references.filter(
-				(reference) => !this.isExactProposalReference(reference, archivedProposalId),
+				(reference) =>
+					!this.isExactProposalReference(reference, archivedProposalId),
 			);
 
-			const dependenciesChanged = !stringArraysEqual(dependencies, sanitizedDependencies);
-			const referencesChanged = !stringArraysEqual(references, sanitizedReferences);
+			const dependenciesChanged = !stringArraysEqual(
+				dependencies,
+				sanitizedDependencies,
+			);
+			const referencesChanged = !stringArraysEqual(
+				references,
+				sanitizedReferences,
+			);
 			if (!dependenciesChanged && !referencesChanged) {
 				continue;
 			}
@@ -480,25 +591,37 @@ export class Core {
 		return changedProposals;
 	}
 
-	private async isPostgresProposalBackend(config?: RoadmapConfig | null): Promise<boolean> {
+	private async isPostgresProposalBackend(
+		config?: RoadmapConfig | null,
+	): Promise<boolean> {
 		const resolvedConfig = config ?? (await this.filesystem.loadConfig());
 		return resolvedConfig?.database?.provider === "Postgres";
 	}
 
-	private getPgTagMetadata(tags: ProposalRow["tags"]): Record<string, unknown> | null {
+	private getPgTagMetadata(
+		tags: ProposalRow["tags"],
+	): Record<string, unknown> | null {
 		if (!tags || Array.isArray(tags) || typeof tags !== "object") {
 			return null;
 		}
 		return tags as Record<string, unknown>;
 	}
 
-	private getPgTagString(tags: ProposalRow["tags"], key: string): string | undefined {
+	private getPgTagString(
+		tags: ProposalRow["tags"],
+		key: string,
+	): string | undefined {
 		const metadata = this.getPgTagMetadata(tags);
 		const value = metadata?.[key];
-		return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+		return typeof value === "string" && value.trim().length > 0
+			? value
+			: undefined;
 	}
 
-	private getPgTagStringArray(tags: ProposalRow["tags"], key: string): string[] | undefined {
+	private getPgTagStringArray(
+		tags: ProposalRow["tags"],
+		key: string,
+	): string[] | undefined {
 		const metadata = this.getPgTagMetadata(tags);
 		const value = metadata?.[key];
 		if (!Array.isArray(value)) {
@@ -515,32 +638,49 @@ export class Core {
 		if (proposal.directive?.trim()) tags.directive = proposal.directive.trim();
 		if (proposal.domainId?.trim()) tags.domainId = proposal.domainId.trim();
 		if (proposal.category?.trim()) tags.category = proposal.category.trim();
-		if (proposal.references && proposal.references.length > 0) tags.references = [...proposal.references];
-		if (proposal.documentation && proposal.documentation.length > 0) tags.documentation = [...proposal.documentation];
-		if (proposal.proof && proposal.proof.length > 0) tags.proof = [...proposal.proof];
+		if (proposal.references && proposal.references.length > 0)
+			tags.references = [...proposal.references];
+		if (proposal.documentation && proposal.documentation.length > 0)
+			tags.documentation = [...proposal.documentation];
+		if (proposal.proof && proposal.proof.length > 0)
+			tags.proof = [...proposal.proof];
 		if (proposal.needs_capabilities && proposal.needs_capabilities.length > 0) {
 			tags.needs_capabilities = [...proposal.needs_capabilities];
 		}
-		if (proposal.external_injections && proposal.external_injections.length > 0) {
+		if (
+			proposal.external_injections &&
+			proposal.external_injections.length > 0
+		) {
 			tags.external_injections = [...proposal.external_injections];
 		}
-		if (proposal.unlocks && proposal.unlocks.length > 0) tags.unlocks = [...proposal.unlocks];
+		if (proposal.unlocks && proposal.unlocks.length > 0)
+			tags.unlocks = [...proposal.unlocks];
 		if (proposal.rationale?.trim()) tags.rationale = proposal.rationale.trim();
-		if (proposal.implementationNotes?.trim()) tags.implementationNotes = proposal.implementationNotes.trim();
-		if (proposal.auditNotes?.trim()) tags.auditNotes = proposal.auditNotes.trim();
-		if (proposal.finalSummary?.trim()) tags.finalSummary = proposal.finalSummary.trim();
-		if (proposal.scopeSummary?.trim()) tags.scopeSummary = proposal.scopeSummary.trim();
+		if (proposal.implementationNotes?.trim())
+			tags.implementationNotes = proposal.implementationNotes.trim();
+		if (proposal.auditNotes?.trim())
+			tags.auditNotes = proposal.auditNotes.trim();
+		if (proposal.finalSummary?.trim())
+			tags.finalSummary = proposal.finalSummary.trim();
+		if (proposal.scopeSummary?.trim())
+			tags.scopeSummary = proposal.scopeSummary.trim();
 		if (proposal.builder?.trim()) tags.builder = proposal.builder.trim();
 		if (proposal.auditor?.trim()) tags.auditor = proposal.auditor.trim();
-		if (proposal.rawContent?.trim()) tags.rawContent = proposal.rawContent.trim();
-		if (proposal.verificationProposalments && proposal.verificationProposalments.length > 0) {
-			tags.verificationProposalments = proposal.verificationProposalments.map((item) => ({
-				index: item.index,
-				text: item.text,
-				checked: item.checked,
-				role: item.role,
-				evidence: item.evidence,
-			}));
+		if (proposal.rawContent?.trim())
+			tags.rawContent = proposal.rawContent.trim();
+		if (
+			proposal.verificationProposalments &&
+			proposal.verificationProposalments.length > 0
+		) {
+			tags.verificationProposalments = proposal.verificationProposalments.map(
+				(item) => ({
+					index: item.index,
+					text: item.text,
+					checked: item.checked,
+					role: item.role,
+					evidence: item.evidence,
+				}),
+			);
 		}
 
 		return Object.keys(tags).length > 0 ? tags : null;
@@ -584,15 +724,22 @@ export class Core {
 		const priority = this.mapPgPriority(row.priority);
 		const leaseActive =
 			Boolean(summary?.leased_by) &&
-			(summary?.lease_expires === null || summary?.lease_expires === undefined || new Date(summary.lease_expires) > new Date());
-		const assignee = summary?.leased_by && leaseActive ? [summary.leased_by] : [];
-		const claimCreated = summary?.leased_at ? formatLocalDateTime(new Date(summary.leased_at)) : undefined;
+			(summary?.lease_expires === null ||
+				summary?.lease_expires === undefined ||
+				new Date(summary.lease_expires) > new Date());
+		const assignee =
+			summary?.leased_by && leaseActive ? [summary.leased_by] : [];
+		const claimCreated = summary?.leased_at
+			? formatLocalDateTime(new Date(summary.leased_at))
+			: undefined;
 		const claimExpires = summary?.lease_expires
 			? formatLocalDateTime(new Date(summary.lease_expires))
 			: claimCreated;
 		const parentProposalId =
 			options?.parentProposalId ??
-			(row.parent_id !== null ? (await pg.getProposal(row.parent_id))?.display_id ?? undefined : undefined);
+			(row.parent_id !== null
+				? ((await pg.getProposal(row.parent_id))?.display_id ?? undefined)
+				: undefined);
 
 		return {
 			id,
@@ -608,8 +755,14 @@ export class Core {
 			auditNotes: this.getPgTagString(row.tags, "auditNotes"),
 			finalSummary: this.getPgTagString(row.tags, "finalSummary"),
 			scopeSummary: this.getPgTagString(row.tags, "scopeSummary"),
-			createdDate: new Date(row.created_at).toISOString().slice(0, 16).replace("T", " "),
-			updatedDate: new Date(row.modified_at).toISOString().slice(0, 16).replace("T", " "),
+			createdDate: new Date(row.created_at)
+				.toISOString()
+				.slice(0, 16)
+				.replace("T", " "),
+			updatedDate: new Date(row.modified_at)
+				.toISOString()
+				.slice(0, 16)
+				.replace("T", " "),
 			proposalType: row.type,
 			domainId: this.getPgTagString(row.tags, "domainId"),
 			category: this.getPgTagString(row.tags, "category"),
@@ -617,15 +770,22 @@ export class Core {
 			references: this.getPgTagStringArray(row.tags, "references"),
 			documentation: this.getPgTagStringArray(row.tags, "documentation"),
 			proof: this.getPgTagStringArray(row.tags, "proof"),
-			needs_capabilities: this.getPgTagStringArray(row.tags, "needs_capabilities"),
-			external_injections: this.getPgTagStringArray(row.tags, "external_injections"),
+			needs_capabilities: this.getPgTagStringArray(
+				row.tags,
+				"needs_capabilities",
+			),
+			external_injections: this.getPgTagStringArray(
+				row.tags,
+				"external_injections",
+			),
 			unlocks: this.getPgTagStringArray(row.tags, "unlocks"),
 			rationale: this.getPgTagString(row.tags, "rationale"),
 			builder: this.getPgTagString(row.tags, "builder"),
 			auditor: this.getPgTagString(row.tags, "auditor"),
 			...(parentProposalId && { parentProposalId }),
 			...(acceptanceCriteria.length > 0 && {
-				acceptanceCriteriaItems: this.mapPgAcceptanceCriteria(acceptanceCriteria),
+				acceptanceCriteriaItems:
+					this.mapPgAcceptanceCriteria(acceptanceCriteria),
 			}),
 			...(summary?.leased_by && leaseActive && claimCreated && claimExpires
 				? {
@@ -642,28 +802,40 @@ export class Core {
 			Array.isArray(metadata.verificationProposalments) &&
 			metadata.verificationProposalments.length > 0
 				? {
-						verificationProposalments: metadata.verificationProposalments.map((item, index) => ({
-							index:
-								typeof item === "object" && item !== null && typeof (item as { index?: unknown }).index === "number"
-									? (item as { index: number }).index
-									: index + 1,
-							text:
-								typeof item === "object" && item !== null && typeof (item as { text?: unknown }).text === "string"
-									? String((item as { text: string }).text)
-									: String(item),
-							checked:
-								typeof item === "object" && item !== null && typeof (item as { checked?: unknown }).checked === "boolean"
-									? Boolean((item as { checked: boolean }).checked)
-									: false,
-							role:
-								typeof item === "object" && item !== null && typeof (item as { role?: unknown }).role === "string"
-									? String((item as { role: string }).role)
-									: undefined,
-							evidence:
-								typeof item === "object" && item !== null && typeof (item as { evidence?: unknown }).evidence === "string"
-									? String((item as { evidence: string }).evidence)
-									: undefined,
-						})),
+						verificationProposalments: metadata.verificationProposalments.map(
+							(item, index) => ({
+								index:
+									typeof item === "object" &&
+									item !== null &&
+									typeof (item as { index?: unknown }).index === "number"
+										? (item as { index: number }).index
+										: index + 1,
+								text:
+									typeof item === "object" &&
+									item !== null &&
+									typeof (item as { text?: unknown }).text === "string"
+										? String((item as { text: string }).text)
+										: String(item),
+								checked:
+									typeof item === "object" &&
+									item !== null &&
+									typeof (item as { checked?: unknown }).checked === "boolean"
+										? Boolean((item as { checked: boolean }).checked)
+										: false,
+								role:
+									typeof item === "object" &&
+									item !== null &&
+									typeof (item as { role?: unknown }).role === "string"
+										? String((item as { role: string }).role)
+										: undefined,
+								evidence:
+									typeof item === "object" &&
+									item !== null &&
+									typeof (item as { evidence?: unknown }).evidence === "string"
+										? String((item as { evidence: string }).evidence)
+										: undefined,
+							}),
+						),
 					}
 				: {}),
 		};
@@ -694,7 +866,9 @@ export class Core {
 		const built = sections
 			.map(([heading, value]) => `## ${heading}\n\n${value.trim()}`)
 			.join("\n\n");
-		return rawContent && rawContent.trim().length > 0 ? `${built}\n\n${rawContent.trim()}` : built;
+		return rawContent && rawContent.trim().length > 0
+			? `${built}\n\n${rawContent.trim()}`
+			: built;
 	}
 
 	private mapPgLabels(tags: ProposalRow["tags"]): string[] {
@@ -717,7 +891,11 @@ export class Core {
 					return value.map((item) => String(item));
 				}
 
-				if (value === null || value === undefined || typeof value === "object") {
+				if (
+					value === null ||
+					value === undefined ||
+					typeof value === "object"
+				) {
 					return [];
 				}
 
@@ -733,7 +911,8 @@ export class Core {
 			return undefined;
 		}
 
-		const currentLabel = row.maturity[row.status] ?? Object.values(row.maturity)[0];
+		const currentLabel =
+			row.maturity[row.status] ?? Object.values(row.maturity)[0];
 		switch (String(currentLabel ?? "").toLowerCase()) {
 			case "new":
 				return "new";
@@ -748,7 +927,9 @@ export class Core {
 		}
 	}
 
-	private mapPgPriority(priority: string | null): Proposal["priority"] | undefined {
+	private mapPgPriority(
+		priority: string | null,
+	): Proposal["priority"] | undefined {
 		switch (priority?.toLowerCase()) {
 			case "high":
 			case "medium":
@@ -766,7 +947,7 @@ export class Core {
 			if (config?.database) {
 				pgPool.initPoolFromConfig(config.database);
 			}
-			await pgPool.query('SELECT 1');
+			await pgPool.query("SELECT 1");
 		} catch {
 			// Ignore — fallthrough to query will surface the real error
 		}
@@ -784,7 +965,9 @@ export class Core {
 		return availableTypes[0].type;
 	}
 
-	private async loadPgProposalById(proposalId: string): Promise<Proposal | null> {
+	private async loadPgProposalById(
+		proposalId: string,
+	): Promise<Proposal | null> {
 		await this.ensurePgPool();
 		const row = await pg.getProposal(proposalId);
 		if (!row) {
@@ -832,9 +1015,13 @@ export class Core {
 		}
 	}
 
-	async queryProposals(options: ProposalQueryOptions = {}): Promise<Proposal[]> {
+	async queryProposals(
+		options: ProposalQueryOptions = {},
+	): Promise<Proposal[]> {
 		const { query, limit } = options;
-		const filters = options.filters ?? (options.status ? { status: options.status } : undefined);
+		const filters =
+			options.filters ??
+			(options.status ? { status: options.status } : undefined);
 		const trimmedQuery = query?.trim();
 		const includeCrossBranch = options.includeCrossBranch ?? true;
 		const config = await this.fs.loadConfig();
@@ -842,37 +1029,58 @@ export class Core {
 		if (await this.isPostgresProposalBackend(config)) {
 			await this.ensurePgPool();
 			const directiveResolverPromise = filters?.directive
-				? Promise.all([this.fs.listDirectives(), this.fs.listArchivedDirectives()]).then(
-						([activeDirectives, archivedDirectives]) =>
-							createDirectiveFilterValueResolver([...activeDirectives, ...archivedDirectives]),
+				? Promise.all([
+						this.fs.listDirectives(),
+						this.fs.listArchivedDirectives(),
+					]).then(([activeDirectives, archivedDirectives]) =>
+						createDirectiveFilterValueResolver([
+							...activeDirectives,
+							...archivedDirectives,
+						]),
 					)
 				: undefined;
 			const pgFilters: Parameters<typeof pg.listProposals>[0] = {
 				status: filters?.status,
 			};
 			const rows = trimmedQuery
-				? await pg.searchProposals(trimmedQuery, typeof limit === "number" ? Math.max(limit * 3, limit) : undefined)
+				? await pg.searchProposals(
+						trimmedQuery,
+						typeof limit === "number" ? Math.max(limit * 3, limit) : undefined,
+					)
 				: await pg.listProposals(pgFilters);
 			const summaries = await pg.listProposalSummaries(pgFilters);
-			const dependencyRows = await pg.listDependencies(rows.map((row) => row.id));
-			const summaryById = new Map(summaries.map((summary) => [summary.id, summary]));
+			const dependencyRows = await pg.listDependencies(
+				rows.map((row) => row.id),
+			);
+			const summaryById = new Map(
+				summaries.map((summary) => [summary.id, summary]),
+			);
 			const rowById = new Map(rows.map((row) => [row.id, row]));
 			const proposals = await Promise.all(
 				rows.map(async (row) =>
 					this.hydratePgProposalRow(row, {
 						summary: summaryById.get(row.id),
 						dependencies: dependencyRows,
-						parentProposalId: row.parent_id !== null ? rowById.get(row.parent_id)?.display_id : undefined,
+						parentProposalId:
+							row.parent_id !== null
+								? rowById.get(row.parent_id)?.display_id
+								: undefined,
 					}),
 				),
 			);
 
 			const queue = await pg.getProposalQueue();
-			const queuePositionById = new Map(queue.map((item) => [item.display_id, item.queue_position]));
+			const queuePositionById = new Map(
+				queue.map((item) => [item.display_id, item.queue_position]),
+			);
 			proposals.sort((left, right) => {
 				const leftQueuePosition = queuePositionById.get(left.id);
 				const rightQueuePosition = queuePositionById.get(right.id);
-				if (leftQueuePosition !== undefined && rightQueuePosition !== undefined && leftQueuePosition !== rightQueuePosition) {
+				if (
+					leftQueuePosition !== undefined &&
+					rightQueuePosition !== undefined &&
+					leftQueuePosition !== rightQueuePosition
+				) {
 					return leftQueuePosition - rightQueuePosition;
 				}
 				if (leftQueuePosition !== undefined) return -1;
@@ -880,23 +1088,41 @@ export class Core {
 				return compareProposalIds(left.id, right.id);
 			});
 
-			const resolveDirectiveFilterValue = directiveResolverPromise ? await directiveResolverPromise : undefined;
-			let filtered = this.applyProposalFilters(proposals, filters, resolveDirectiveFilterValue, proposals);
+			const resolveDirectiveFilterValue = directiveResolverPromise
+				? await directiveResolverPromise
+				: undefined;
+			let filtered = this.applyProposalFilters(
+				proposals,
+				filters,
+				resolveDirectiveFilterValue,
+				proposals,
+			);
 			if (!includeCrossBranch) {
 				filtered = this.filterLocalEditableProposals(filtered);
 			}
-			return typeof limit === "number" && limit >= 0 ? filtered.slice(0, limit) : filtered;
+			return typeof limit === "number" && limit >= 0
+				? filtered.slice(0, limit)
+				: filtered;
 		}
 
 		const directiveResolverPromise = filters?.directive
-			? Promise.all([this.fs.listDirectives(), this.fs.listArchivedDirectives()]).then(
-					([activeDirectives, archivedDirectives]) =>
-						createDirectiveFilterValueResolver([...activeDirectives, ...archivedDirectives]),
+			? Promise.all([
+					this.fs.listDirectives(),
+					this.fs.listArchivedDirectives(),
+				]).then(([activeDirectives, archivedDirectives]) =>
+					createDirectiveFilterValueResolver([
+						...activeDirectives,
+						...archivedDirectives,
+					]),
 				)
 			: undefined;
 
-		const applyFiltersAndLimit = async (collection: Proposal[]): Promise<Proposal[]> => {
-			const resolveDirectiveFilterValue = directiveResolverPromise ? await directiveResolverPromise : undefined;
+		const applyFiltersAndLimit = async (
+			collection: Proposal[],
+		): Promise<Proposal[]> => {
+			const resolveDirectiveFilterValue = directiveResolverPromise
+				? await directiveResolverPromise
+				: undefined;
 			const store = await this.getContentStore();
 			await store.ensureInitialized();
 			let allProposals = store.getProposals();
@@ -907,24 +1133,42 @@ export class Core {
 			const pgFilters: Parameters<typeof pg.listProposals>[0] = {
 				status: filters?.status,
 			};
-			const pgProposals = await this.loadProposalsFromPostgres(allProposals, pgFilters);
+			const pgProposals = await this.loadProposalsFromPostgres(
+				allProposals,
+				pgFilters,
+			);
 			const mergedProposals = [...allProposals, ...pgProposals];
 			if (process.env.DEBUG) {
-				console.error(`[DEBUG] queryProposals: ${allProposals.length} from disk, ${pgProposals.length} from Postgres, ${mergedProposals.length} total`);
+				console.error(
+					`[DEBUG] queryProposals: ${allProposals.length} from disk, ${pgProposals.length} from Postgres, ${mergedProposals.length} total`,
+				);
 			}
-			let filtered = this.applyProposalFilters(collection, filters, resolveDirectiveFilterValue, mergedProposals);
+			let filtered = this.applyProposalFilters(
+				collection,
+				filters,
+				resolveDirectiveFilterValue,
+				mergedProposals,
+			);
 			if (!includeCrossBranch) {
 				filtered = this.filterLocalEditableProposals(filtered);
 			}
 			if (typeof limit === "number" && limit >= 0) {
 				if (process.env.DEBUG) {
-					console.error("[DEBUG] queryProposals: returning", filtered.slice(0, limit).length, "proposals (sliced)");
+					console.error(
+						"[DEBUG] queryProposals: returning",
+						filtered.slice(0, limit).length,
+						"proposals (sliced)",
+					);
 				}
 				return filtered.slice(0, limit);
 			}
 
 			if (process.env.DEBUG) {
-				console.error("[DEBUG] queryProposals: returning", filtered.length, "proposals");
+				console.error(
+					"[DEBUG] queryProposals: returning",
+					filtered.length,
+					"proposals",
+				);
 			}
 			return filtered;
 		};
@@ -940,10 +1184,15 @@ export class Core {
 			const pgFilters: Parameters<typeof pg.listProposals>[0] = {
 				status: filters?.status,
 			};
-			const pgProposals = await this.loadProposalsFromPostgres(proposals, pgFilters);
+			const pgProposals = await this.loadProposalsFromPostgres(
+				proposals,
+				pgFilters,
+			);
 			proposals = [...proposals, ...pgProposals];
 			if (process.env.DEBUG) {
-				console.error(`[DEBUG] queryProposals entry: disk=${proposals.length - pgProposals.length}, Postgres=${pgProposals.length}, total=${proposals.length}`);
+				console.error(
+					`[DEBUG] queryProposals entry: disk=${proposals.length - pgProposals.length}, Postgres=${pgProposals.length}, total=${proposals.length}`,
+				);
 			}
 			return await applyFiltersAndLimit(proposals);
 		}
@@ -958,7 +1207,10 @@ export class Core {
 		const searchPgFilters: Parameters<typeof pg.listProposals>[0] = {
 			status: filters?.status,
 		};
-		const searchPgProposals = await this.loadProposalsFromPostgres(diskSearchProposals, searchPgFilters);
+		const searchPgProposals = await this.loadProposalsFromPostgres(
+			diskSearchProposals,
+			searchPgFilters,
+		);
 		diskSearchProposals = [...diskSearchProposals, ...searchPgProposals];
 
 		const searchService = await this.getSearchService();
@@ -980,7 +1232,8 @@ export class Core {
 			query: trimmedQuery,
 			limit,
 			types: ["proposal"],
-			filters: Object.keys(searchFilters).length > 0 ? searchFilters : undefined,
+			filters:
+				Object.keys(searchFilters).length > 0 ? searchFilters : undefined,
 		});
 
 		const seen = new Set<string>();
@@ -1008,7 +1261,9 @@ export class Core {
 		// Prefer the live content store cache, then fall back to direct filesystem reads.
 		const store = await this.getContentStore();
 		const proposals = store.getProposals();
-		const match = proposals.find((proposal) => proposalIdsEqual(proposalId, proposal.id));
+		const match = proposals.find((proposal) =>
+			proposalIdsEqual(proposalId, proposal.id),
+		);
 		if (match) {
 			return match;
 		}
@@ -1017,7 +1272,10 @@ export class Core {
 		return await this.fs.loadProposal(proposalId);
 	}
 
-	async getProposalWithSubproposals(proposalId: string, localProposals?: Proposal[]): Promise<Proposal | null> {
+	async getProposalWithSubproposals(
+		proposalId: string,
+		localProposals?: Proposal[],
+	): Promise<Proposal | null> {
 		const proposal = await this.loadProposalById(proposalId);
 		if (!proposal) {
 			return null;
@@ -1051,9 +1309,10 @@ export class Core {
 
 		// Try ContentStore
 		const store = await this.getContentStore();
-		const storeProposal = store.getProposals().find(s => proposalIdsEqual(s.id, proposalId));
+		const storeProposal = store
+			.getProposals()
+			.find((s) => proposalIdsEqual(s.id, proposalId));
 		if (storeProposal) return await this.fs.loadProposal(storeProposal.id);
-
 
 		// Check if it's a draft
 		const localDraft = await this.fs.loadDraft(proposalId);
@@ -1081,7 +1340,13 @@ export class Core {
 		if (config?.remoteOperations === false) return null;
 
 		// Try remote branches
-		return await findProposalInRemoteBranches(this.git, canonicalId, DEFAULT_DIRECTORIES.ROADMAP, sinceDays, proposalPrefix);
+		return await findProposalInRemoteBranches(
+			this.git,
+			canonicalId,
+			DEFAULT_DIRECTORIES.ROADMAP,
+			sinceDays,
+			proposalPrefix,
+		);
 	}
 
 	async getProposalContent(proposalId: string): Promise<string | null> {
@@ -1273,8 +1538,12 @@ export class Core {
 						const openIndex = combined.indexOf("[");
 						const closeIndex = combined.lastIndexOf("]");
 						if (openIndex !== -1 && closeIndex > openIndex) {
-							const parsed = this.parseLegacyInlineArray(combined.slice(openIndex + 1, closeIndex));
-							return parsed.map((item) => this.parseLegacyYamlValue(item)).filter(Boolean);
+							const parsed = this.parseLegacyInlineArray(
+								combined.slice(openIndex + 1, closeIndex),
+							);
+							return parsed
+								.map((item) => this.parseLegacyYamlValue(item))
+								.filter(Boolean);
 						}
 					}
 				}
@@ -1310,7 +1579,9 @@ export class Core {
 		}
 	}
 
-	private async migrateLegacyConfigDirectivesToFiles(legacyDirectives: string[]): Promise<void> {
+	private async migrateLegacyConfigDirectivesToFiles(
+		legacyDirectives: string[],
+	): Promise<void> {
 		if (legacyDirectives.length === 0) {
 			return;
 		}
@@ -1382,7 +1653,10 @@ export class Core {
 	 * - Document: /documents only
 	 * - Decision: /decisions only
 	 */
-	async generateNextId(type: EntityType = EntityType.Proposal, parent?: string): Promise<string> {
+	async generateNextId(
+		type: EntityType = EntityType.Proposal,
+		parent?: string,
+	): Promise<string> {
 		const config = await this.fs.loadConfig();
 		const prefix = getPrefixForType(type, config ?? undefined);
 
@@ -1391,7 +1665,9 @@ export class Core {
 
 		if (parent) {
 			// Subproposal generation (only applicable for proposals)
-			const normalizedParent = allIds.find((id) => proposalIdsEqual(parent, id)) ?? normalizeProposalId(parent);
+			const normalizedParent =
+				allIds.find((id) => proposalIdsEqual(parent, id)) ??
+				normalizeProposalId(parent);
 			const upperParent = normalizedParent.toUpperCase();
 			let max = 0;
 			for (const id of allIds) {
@@ -1468,7 +1744,9 @@ export class Core {
 		// Add local active proposals to proposal
 		for (const proposal of localProposals) {
 			if (!proposal.id) continue;
-			const lastModified = proposal.lastModified ?? (proposal.updatedDate ? new Date(proposal.updatedDate) : new Date(0));
+			const lastModified =
+				proposal.lastModified ??
+				(proposal.updatedDate ? new Date(proposal.updatedDate) : new Date(0));
 			proposalEntries.push({
 				id: proposal.id,
 				type: "proposal",
@@ -1481,7 +1759,9 @@ export class Core {
 		// Add local completed proposals to proposal
 		for (const proposal of localCompletedProposals) {
 			if (!proposal.id) continue;
-			const lastModified = proposal.updatedDate ? new Date(proposal.updatedDate) : new Date(0);
+			const lastModified = proposal.updatedDate
+				? new Date(proposal.updatedDate)
+				: new Date(0);
 			proposalEntries.push({
 				id: proposal.id,
 				type: "completed",
@@ -1497,8 +1777,20 @@ export class Core {
 
 			// Load proposals from remote and local branches in parallel
 			await Promise.all([
-				loadRemoteProposals(this.git, config, undefined, localProposals, branchProposalEntries),
-				loadLocalBranchProposals(this.git, config, undefined, localProposals, branchProposalEntries),
+				loadRemoteProposals(
+					this.git,
+					config,
+					undefined,
+					localProposals,
+					branchProposalEntries,
+				),
+				loadLocalBranchProposals(
+					this.git,
+					config,
+					undefined,
+					localProposals,
+					branchProposalEntries,
+				),
 			]);
 
 			// Add branch proposal entries
@@ -1564,7 +1856,10 @@ export class Core {
 		// Determine entity type before generating ID - drafts get DRAFT-X, proposals get PROPOSAL-X
 		const isDraft = proposalData.status?.toLowerCase() === "draft";
 		const entityType = isDraft ? EntityType.Draft : EntityType.Proposal;
-		const id = await this.generateNextId(entityType, isDraft ? undefined : proposalData.parentProposalId);
+		const id = await this.generateNextId(
+			entityType,
+			isDraft ? undefined : proposalData.parentProposalId,
+		);
 
 		const proposal: Proposal = {
 			id,
@@ -1575,20 +1870,30 @@ export class Core {
 			dependencies: proposalData.dependencies || [],
 			rawContent: "",
 			createdDate: new Date().toISOString().slice(0, 16).replace("T", " "),
-			...(proposalData.parentProposalId && { parentProposalId: proposalData.parentProposalId }),
+			...(proposalData.parentProposalId && {
+				parentProposalId: proposalData.parentProposalId,
+			}),
 			...(proposalData.priority && { priority: proposalData.priority }),
 			...(typeof proposalData.directive === "string" &&
 				proposalData.directive.trim().length > 0 && {
 					directive: proposalData.directive.trim(),
 				}),
-			...(typeof proposalData.description === "string" && { description: proposalData.description }),
+			...(typeof proposalData.description === "string" && {
+				description: proposalData.description,
+			}),
 			...(Array.isArray(proposalData.acceptanceCriteriaItems) &&
 				proposalData.acceptanceCriteriaItems.length > 0 && {
 					acceptanceCriteriaItems: proposalData.acceptanceCriteriaItems,
 				}),
-			...(typeof proposalData.implementationPlan === "string" && { implementationPlan: proposalData.implementationPlan }),
-			...(typeof proposalData.implementationNotes === "string" && { implementationNotes: proposalData.implementationNotes }),
-			...(typeof proposalData.finalSummary === "string" && { finalSummary: proposalData.finalSummary }),
+			...(typeof proposalData.implementationPlan === "string" && {
+				implementationPlan: proposalData.implementationPlan,
+			}),
+			...(typeof proposalData.implementationNotes === "string" && {
+				implementationNotes: proposalData.implementationNotes,
+			}),
+			...(typeof proposalData.finalSummary === "string" && {
+				finalSummary: proposalData.finalSummary,
+			}),
 		};
 
 		// Save as draft or proposal based on status
@@ -1618,12 +1923,11 @@ export class Core {
 			const normalizedAssignees = normalizeStringList(input.assignee) ?? [];
 			const normalizedDependencies = normalizeDependencies(input.dependencies);
 			const normalizedReferences = normalizeStringList(input.references) ?? [];
-			const normalizedDocumentation = normalizeStringList(input.documentation) ?? [];
+			const normalizedDocumentation =
+				normalizeStringList(input.documentation) ?? [];
 
-			const { valid: validDependencies, invalid: invalidDependencies } = await validateDependencies(
-				normalizedDependencies,
-				this,
-			);
+			const { valid: validDependencies, invalid: invalidDependencies } =
+				await validateDependencies(normalizedDependencies, this);
 			if (invalidDependencies.length > 0) {
 				throw new Error(
 					`The following dependencies do not exist: ${invalidDependencies.join(", ")}. Please create these proposals first or verify the IDs.`,
@@ -1635,7 +1939,10 @@ export class Core {
 				? await this.requireCanonicalStatus(requestedStatus)
 				: config?.defaultStatus || FALLBACK_STATUS;
 			const priority = this.normalizePriority(input.priority);
-			const createdDate = new Date().toISOString().slice(0, 16).replace("T", " ");
+			const createdDate = new Date()
+				.toISOString()
+				.slice(0, 16)
+				.replace("T", " ");
 			const acceptanceCriteriaItems = Array.isArray(input.acceptanceCriteria)
 				? input.acceptanceCriteria
 						.map((criterion, index) => ({
@@ -1645,7 +1952,9 @@ export class Core {
 						}))
 						.filter((criterion) => criterion.text.length > 0)
 				: [];
-			const verificationProposalments = Array.isArray(input.verificationProposalmentsAdd)
+			const verificationProposalments = Array.isArray(
+				input.verificationProposalmentsAdd,
+			)
 				? input.verificationProposalmentsAdd
 						.map((assertion, index) => ({
 							index: index + 1,
@@ -1666,29 +1975,47 @@ export class Core {
 				documentation: normalizedDocumentation,
 				rawContent: input.rawContent ?? "",
 				createdDate,
-				...(input.parentProposalId && { parentProposalId: input.parentProposalId }),
+				...(input.parentProposalId && {
+					parentProposalId: input.parentProposalId,
+				}),
 				...(priority && { priority }),
 				...(typeof input.directive === "string" &&
 					input.directive.trim().length > 0 && {
 						directive: input.directive.trim(),
 					}),
 				...(typeof input.domainId === "string" && { domainId: input.domainId }),
-				...(typeof input.proposalType === "string" && { proposalType: input.proposalType }),
+				...(typeof input.proposalType === "string" && {
+					proposalType: input.proposalType,
+				}),
 				...(typeof input.category === "string" && { category: input.category }),
-				...(typeof input.description === "string" && { description: input.description }),
-				...(typeof input.implementationPlan === "string" && { implementationPlan: input.implementationPlan }),
-				...(typeof input.implementationNotes === "string" && { implementationNotes: input.implementationNotes }),
-				...(typeof input.finalSummary === "string" && { finalSummary: input.finalSummary }),
+				...(typeof input.description === "string" && {
+					description: input.description,
+				}),
+				...(typeof input.implementationPlan === "string" && {
+					implementationPlan: input.implementationPlan,
+				}),
+				...(typeof input.implementationNotes === "string" && {
+					implementationNotes: input.implementationNotes,
+				}),
+				...(typeof input.finalSummary === "string" && {
+					finalSummary: input.finalSummary,
+				}),
 				...(acceptanceCriteriaItems.length > 0 && { acceptanceCriteriaItems }),
 				...(input.scopeSummary && { scopeSummary: input.scopeSummary }),
 				...(input.rationale && { rationale: input.rationale }),
 				...(input.maturity && { maturity: input.maturity }),
-				...(input.needs_capabilities && { needs_capabilities: input.needs_capabilities }),
-				...(input.external_injections && { external_injections: input.external_injections }),
+				...(input.needs_capabilities && {
+					needs_capabilities: input.needs_capabilities,
+				}),
+				...(input.external_injections && {
+					external_injections: input.external_injections,
+				}),
 				...(input.unlocks && { unlocks: input.unlocks }),
 				...(input.builder && { builder: input.builder }),
 				...(input.auditor && { auditor: input.auditor }),
-				...(verificationProposalments.length > 0 && { verificationProposalments }),
+				...(verificationProposalments.length > 0 && {
+					verificationProposalments,
+				}),
 			};
 
 			await this.createProposal(proposal, autoCommit);
@@ -1696,7 +2023,9 @@ export class Core {
 				type: proposal.rationale ? "obstacle_discovered" : "proposal_created",
 				id: proposal.id,
 				title: proposal.title,
-				impact: proposal.rationale ? `Rationale: ${proposal.rationale}` : proposal.description,
+				impact: proposal.rationale
+					? `Rationale: ${proposal.rationale}`
+					: proposal.description,
 			});
 
 			return { proposal };
@@ -1704,18 +2033,20 @@ export class Core {
 
 		// Generate ID with appropriate entity type - drafts get DRAFT-X, proposals get PROPOSAL-X
 		const entityType = isDraft ? EntityType.Draft : EntityType.Proposal;
-		const id = await this.generateNextId(entityType, isDraft ? undefined : input.parentProposalId);
+		const id = await this.generateNextId(
+			entityType,
+			isDraft ? undefined : input.parentProposalId,
+		);
 
 		const normalizedLabels = normalizeStringList(input.labels) ?? [];
 		const normalizedAssignees = normalizeStringList(input.assignee) ?? [];
 		const normalizedDependencies = normalizeDependencies(input.dependencies);
 		const normalizedReferences = normalizeStringList(input.references) ?? [];
-		const normalizedDocumentation = normalizeStringList(input.documentation) ?? [];
+		const normalizedDocumentation =
+			normalizeStringList(input.documentation) ?? [];
 
-		const { valid: validDependencies, invalid: invalidDependencies } = await validateDependencies(
-			normalizedDependencies,
-			this,
-		);
+		const { valid: validDependencies, invalid: invalidDependencies } =
+			await validateDependencies(normalizedDependencies, this);
 		if (invalidDependencies.length > 0) {
 			throw new Error(
 				`The following dependencies do not exist: ${invalidDependencies.join(", ")}. Please create these proposals first or verify the IDs.`,
@@ -1744,7 +2075,9 @@ export class Core {
 					.filter((criterion) => criterion.text.length > 0)
 			: [];
 
-		const verificationProposalments = Array.isArray(input.verificationProposalmentsAdd)
+		const verificationProposalments = Array.isArray(
+			input.verificationProposalmentsAdd,
+		)
 			? input.verificationProposalmentsAdd
 					.map((assertion, index) => ({
 						index: index + 1,
@@ -1765,48 +2098,75 @@ export class Core {
 			documentation: normalizedDocumentation,
 			rawContent: input.rawContent ?? "",
 			createdDate,
-			...(input.parentProposalId && { parentProposalId: input.parentProposalId }),
+			...(input.parentProposalId && {
+				parentProposalId: input.parentProposalId,
+			}),
 			...(priority && { priority }),
 			...(typeof input.directive === "string" &&
 				input.directive.trim().length > 0 && {
 					directive: input.directive.trim(),
 				}),
 			...(typeof input.domainId === "string" && { domainId: input.domainId }),
-			...(typeof input.proposalType === "string" && { proposalType: input.proposalType }),
+			...(typeof input.proposalType === "string" && {
+				proposalType: input.proposalType,
+			}),
 			...(typeof input.category === "string" && { category: input.category }),
-			...(typeof input.description === "string" && { description: input.description }),
-			...(typeof input.implementationPlan === "string" && { implementationPlan: input.implementationPlan }),
-			...(typeof input.implementationNotes === "string" && { implementationNotes: input.implementationNotes }),
-			...(typeof input.finalSummary === "string" && { finalSummary: input.finalSummary }),
+			...(typeof input.description === "string" && {
+				description: input.description,
+			}),
+			...(typeof input.implementationPlan === "string" && {
+				implementationPlan: input.implementationPlan,
+			}),
+			...(typeof input.implementationNotes === "string" && {
+				implementationNotes: input.implementationNotes,
+			}),
+			...(typeof input.finalSummary === "string" && {
+				finalSummary: input.finalSummary,
+			}),
 			...(acceptanceCriteriaItems.length > 0 && { acceptanceCriteriaItems }),
 			...(input.scopeSummary && { scopeSummary: input.scopeSummary }),
 			...(input.rationale && { rationale: input.rationale }),
 			...(input.maturity && { maturity: input.maturity }),
-			...(input.needs_capabilities && { needs_capabilities: input.needs_capabilities }),
-			...(input.external_injections && { external_injections: input.external_injections }),
+			...(input.needs_capabilities && {
+				needs_capabilities: input.needs_capabilities,
+			}),
+			...(input.external_injections && {
+				external_injections: input.external_injections,
+			}),
 			...(input.unlocks && { unlocks: input.unlocks }),
 			...(input.builder && { builder: input.builder }),
 			...(input.auditor && { auditor: input.auditor }),
-			...(verificationProposalments.length > 0 && { verificationProposalments }),
+			...(verificationProposalments.length > 0 && {
+				verificationProposalments,
+			}),
 		};
 
-		const filePath = isDraft ? await this.createDraft(proposal, autoCommit) : await this.createProposal(proposal, autoCommit);
+		const filePath = isDraft
+			? await this.createDraft(proposal, autoCommit)
+			: await this.createProposal(proposal, autoCommit);
 
 		// Load the saved proposal/draft to return updated data
-		const savedProposal = isDraft ? await this.fs.loadDraft(id) : await this.fs.loadProposal(id);
+		const savedProposal = isDraft
+			? await this.fs.loadDraft(id)
+			: await this.fs.loadProposal(id);
 
 		// Record Pulse event
 		await this.recordPulse({
 			type: proposal.rationale ? "obstacle_discovered" : "proposal_created",
 			id: proposal.id,
 			title: proposal.title,
-			impact: proposal.rationale ? `Rationale: ${proposal.rationale}` : proposal.description,
+			impact: proposal.rationale
+				? `Rationale: ${proposal.rationale}`
+				: proposal.description,
 		});
 
 		return { proposal: savedProposal ?? proposal, filePath };
 	}
 
-	async createProposal(proposal: Proposal, autoCommit?: boolean): Promise<string> {
+	async createProposal(
+		proposal: Proposal,
+		autoCommit?: boolean,
+	): Promise<string> {
 		if (await this.isPostgresProposalBackend()) {
 			if (!proposal.status) {
 				const config = await this.fs.loadConfig();
@@ -1816,10 +2176,16 @@ export class Core {
 			normalizeAssignee(proposal);
 			await this.ensurePgPool();
 
-			const proposalType = await this.resolvePgProposalType(proposal.proposalType);
-			const parentId = proposal.parentProposalId ? await pg.resolveProposalId(proposal.parentProposalId) : null;
+			const proposalType = await this.resolvePgProposalType(
+				proposal.proposalType,
+			);
+			const parentId = proposal.parentProposalId
+				? await pg.resolveProposalId(proposal.parentProposalId)
+				: null;
 			if (proposal.parentProposalId && parentId === null) {
-				throw new Error(`Parent proposal not found: ${proposal.parentProposalId}`);
+				throw new Error(
+					`Parent proposal not found: ${proposal.parentProposalId}`,
+				);
 			}
 
 			const created = await pg.createProposal(
@@ -1830,21 +2196,36 @@ export class Core {
 					parent_id: parentId,
 					summary: proposal.description ?? null,
 					design: proposal.implementationPlan ?? null,
-					dependency: proposal.dependencies.length > 0 ? proposal.dependencies.join(", ") : null,
+					dependency:
+						proposal.dependencies.length > 0
+							? proposal.dependencies.join(", ")
+							: null,
 					priority: proposal.priority ?? null,
 					tags: this.buildPgTags(proposal),
 				},
-				proposal.builder ?? proposal.auditor ?? proposal.assignee[0] ?? "system",
+				proposal.builder ??
+					proposal.auditor ??
+					proposal.assignee[0] ??
+					"system",
 			);
 
 			if (proposal.dependencies.length > 0) {
 				const dependencyIds = (
-					await Promise.all(proposal.dependencies.map(async (dependency) => await pg.resolveProposalId(dependency)))
-				).filter((dependencyId): dependencyId is number => dependencyId !== null);
+					await Promise.all(
+						proposal.dependencies.map(
+							async (dependency) => await pg.resolveProposalId(dependency),
+						),
+					)
+				).filter(
+					(dependencyId): dependencyId is number => dependencyId !== null,
+				);
 				await pg.replaceDependencies(created.id, dependencyIds);
 			}
 
-			if (proposal.acceptanceCriteriaItems && proposal.acceptanceCriteriaItems.length > 0) {
+			if (
+				proposal.acceptanceCriteriaItems &&
+				proposal.acceptanceCriteriaItems.length > 0
+			) {
 				await pg.replaceAcceptanceCriteria(
 					created.id,
 					proposal.acceptanceCriteriaItems.map((criterion) => ({
@@ -1864,8 +2245,14 @@ export class Core {
 			}
 
 			proposal.id = created.display_id || `#${created.id}`;
-			proposal.createdDate = new Date(created.created_at).toISOString().slice(0, 16).replace("T", " ");
-			proposal.updatedDate = new Date(created.modified_at).toISOString().slice(0, 16).replace("T", " ");
+			proposal.createdDate = new Date(created.created_at)
+				.toISOString()
+				.slice(0, 16)
+				.replace("T", " ");
+			proposal.updatedDate = new Date(created.modified_at)
+				.toISOString()
+				.slice(0, 16)
+				.replace("T", " ");
 			proposal.proposalType = created.type;
 
 			const savedProposal = await this.loadPgProposalById(proposal.id);
@@ -1913,13 +2300,21 @@ export class Core {
 
 		if (await this.shouldAutoCommit(autoCommit)) {
 			await this.git.addFile(filepath);
-			await this.git.commitProposalChange(proposal.id, `Create draft ${proposal.id}`, filepath);
+			await this.git.commitProposalChange(
+				proposal.id,
+				`Create draft ${proposal.id}`,
+				filepath,
+			);
 		}
 
 		return filepath;
 	}
 
-	async updateProposal(proposal: Proposal, autoCommit?: boolean, activityActor?: string): Promise<void> {
+	async updateProposal(
+		proposal: Proposal,
+		autoCommit?: boolean,
+		activityActor?: string,
+	): Promise<void> {
 		if (await this.isPostgresProposalBackend()) {
 			normalizeAssignee(proposal);
 			await this.ensurePgPool();
@@ -1937,9 +2332,13 @@ export class Core {
 			const oldStatus = originalProposal.status ?? "";
 			const newStatus = proposal.status ?? oldStatus;
 			const statusChanged = oldStatus !== newStatus;
-			const parentId = proposal.parentProposalId ? await pg.resolveProposalId(proposal.parentProposalId) : null;
+			const parentId = proposal.parentProposalId
+				? await pg.resolveProposalId(proposal.parentProposalId)
+				: null;
 			if (proposal.parentProposalId && parentId === null) {
-				throw new Error(`Parent proposal not found: ${proposal.parentProposalId}`);
+				throw new Error(
+					`Parent proposal not found: ${proposal.parentProposalId}`,
+				);
 			}
 
 			await pg.updateProposal(proposalId, {
@@ -1948,13 +2347,20 @@ export class Core {
 				parent_id: parentId,
 				summary: proposal.description ?? null,
 				design: proposal.implementationPlan ?? null,
-				dependency: proposal.dependencies.length > 0 ? proposal.dependencies.join(", ") : null,
+				dependency:
+					proposal.dependencies.length > 0
+						? proposal.dependencies.join(", ")
+						: null,
 				priority: proposal.priority ?? null,
 				tags: this.buildPgTags(proposal),
 			});
 
 			const dependencyIds = (
-				await Promise.all((proposal.dependencies ?? []).map(async (dependency) => await pg.resolveProposalId(dependency)))
+				await Promise.all(
+					(proposal.dependencies ?? []).map(
+						async (dependency) => await pg.resolveProposalId(dependency),
+					),
+				)
 			).filter((dependencyId): dependencyId is number => dependencyId !== null);
 			await pg.replaceDependencies(proposalId, dependencyIds);
 
@@ -1976,16 +2382,22 @@ export class Core {
 			if (!currentLeaseActive && currentSummary?.leased_by) {
 				await pg.releaseLease(proposalId, currentSummary.leased_by, "expired");
 			}
-			const currentLeaseAgent = currentLeaseActive ? currentSummary?.leased_by ?? null : null;
-			const desiredClaim = proposal.claim ?? (proposal.assignee[0]
-				? {
-						agent: proposal.assignee[0],
-						created: proposal.createdDate,
-						expires: formatLocalDateTime(
-							new Date(Date.now() + DEFAULT_CLAIM_DURATION_MINUTES * 60 * 1000),
-						),
-					}
-				: null);
+			const currentLeaseAgent = currentLeaseActive
+				? (currentSummary?.leased_by ?? null)
+				: null;
+			const desiredClaim =
+				proposal.claim ??
+				(proposal.assignee[0]
+					? {
+							agent: proposal.assignee[0],
+							created: proposal.createdDate,
+							expires: formatLocalDateTime(
+								new Date(
+									Date.now() + DEFAULT_CLAIM_DURATION_MINUTES * 60 * 1000,
+								),
+							),
+						}
+					: null);
 
 			if (desiredClaim?.agent) {
 				const desiredExpiry = new Date(desiredClaim.expires.replace(" ", "T"));
@@ -2005,7 +2417,11 @@ export class Core {
 				await pg.transitionProposal(
 					proposalId,
 					newStatus,
-					activityActor ?? proposal.builder ?? proposal.auditor ?? desiredClaim?.agent ?? "system",
+					activityActor ??
+						proposal.builder ??
+						proposal.auditor ??
+						desiredClaim?.agent ??
+						"system",
 					"Updated via core.updateProposal",
 				);
 			}
@@ -2022,7 +2438,10 @@ export class Core {
 				});
 			}
 
-			if (savedProposal.scopeSummary && savedProposal.scopeSummary !== originalProposal.scopeSummary) {
+			if (
+				savedProposal.scopeSummary &&
+				savedProposal.scopeSummary !== originalProposal.scopeSummary
+			) {
 				await this.recordPulse({
 					type: "scope_aggregated",
 					id: savedProposal.id,
@@ -2036,7 +2455,11 @@ export class Core {
 			}
 
 			if (statusChanged) {
-				await this.executeStatusChangeCallback(savedProposal, oldStatus, newStatus);
+				await this.executeStatusChangeCallback(
+					savedProposal,
+					oldStatus,
+					newStatus,
+				);
 			}
 
 			return;
@@ -2051,7 +2474,10 @@ export class Core {
 		const statusChanged = oldStatus !== newStatus;
 
 		// Always set updatedDate when updating a proposal
-		proposal.updatedDate = new Date().toISOString().slice(0, 16).replace("T", " ");
+		proposal.updatedDate = new Date()
+			.toISOString()
+			.slice(0, 16)
+			.replace("T", " ");
 
 		await this.fs.saveProposal(proposal);
 
@@ -2066,7 +2492,10 @@ export class Core {
 		}
 
 		// Record Pulse: Scope Aggregated (Smart summary update)
-		if (proposal.scopeSummary && proposal.scopeSummary !== originalProposal?.scopeSummary) {
+		if (
+			proposal.scopeSummary &&
+			proposal.scopeSummary !== originalProposal?.scopeSummary
+		) {
 			await this.recordPulse({
 				type: "scope_aggregated",
 				id: proposal.id,
@@ -2086,7 +2515,11 @@ export class Core {
 		if (await this.shouldAutoCommit(autoCommit)) {
 			const filePath = await getProposalPath(proposal.id, this);
 			if (filePath) {
-				await this.git.addAndCommitProposalFile(proposal.id, filePath, "update");
+				await this.git.addAndCommitProposalFile(
+					proposal.id,
+					filePath,
+					"update",
+				);
 			}
 		}
 
@@ -2099,7 +2532,12 @@ export class Core {
 	/**
 	 * Add an entry to the proposal's activity log
 	 */
-	private addActivityLog(proposal: Proposal, actor: string, action: string, reason?: string): void {
+	private addActivityLog(
+		proposal: Proposal,
+		actor: string,
+		action: string,
+		reason?: string,
+	): void {
 		if (!proposal.activityLog) {
 			proposal.activityLog = [];
 		}
@@ -2173,39 +2611,63 @@ export class Core {
 
 		// Handle needs_capabilities
 		if (input.needs_capabilities !== undefined) {
-			if (!stringArraysEqual(proposal.needs_capabilities ?? [], input.needs_capabilities)) {
+			if (
+				!stringArraysEqual(
+					proposal.needs_capabilities ?? [],
+					input.needs_capabilities,
+				)
+			) {
 				proposal.needs_capabilities = [...input.needs_capabilities];
 				mutated = true;
 			}
 		}
 		if (input.addNeedsCapabilities && input.addNeedsCapabilities.length > 0) {
 			const current = proposal.needs_capabilities ?? [];
-			proposal.needs_capabilities = [...new Set([...current, ...input.addNeedsCapabilities])];
+			proposal.needs_capabilities = [
+				...new Set([...current, ...input.addNeedsCapabilities]),
+			];
 			mutated = true;
 		}
-		if (input.removeNeedsCapabilities && input.removeNeedsCapabilities.length > 0) {
+		if (
+			input.removeNeedsCapabilities &&
+			input.removeNeedsCapabilities.length > 0
+		) {
 			const current = proposal.needs_capabilities ?? [];
 			const toRemove = new Set(input.removeNeedsCapabilities);
-			proposal.needs_capabilities = current.filter((_, i) => !toRemove.has(i + 1));
+			proposal.needs_capabilities = current.filter(
+				(_, i) => !toRemove.has(i + 1),
+			);
 			mutated = true;
 		}
 
 		// Handle external_injections
 		if (input.external_injections !== undefined) {
-			if (!stringArraysEqual(proposal.external_injections ?? [], input.external_injections)) {
+			if (
+				!stringArraysEqual(
+					proposal.external_injections ?? [],
+					input.external_injections,
+				)
+			) {
 				proposal.external_injections = [...input.external_injections];
 				mutated = true;
 			}
 		}
 		if (input.addExternalInjections && input.addExternalInjections.length > 0) {
 			const current = proposal.external_injections ?? [];
-			proposal.external_injections = [...new Set([...current, ...input.addExternalInjections])];
+			proposal.external_injections = [
+				...new Set([...current, ...input.addExternalInjections]),
+			];
 			mutated = true;
 		}
-		if (input.removeExternalInjections && input.removeExternalInjections.length > 0) {
+		if (
+			input.removeExternalInjections &&
+			input.removeExternalInjections.length > 0
+		) {
 			const current = proposal.external_injections ?? [];
 			const toRemove = new Set(input.removeExternalInjections);
-			proposal.external_injections = current.filter((_, i) => !toRemove.has(i + 1));
+			proposal.external_injections = current.filter(
+				(_, i) => !toRemove.has(i + 1),
+			);
 			mutated = true;
 		}
 
@@ -2260,7 +2722,12 @@ export class Core {
 				mutated = true;
 				// AC#5: Activity log records who marked proposal Complete and when
 				const actor = input.activityActor ?? input.builder ?? "unknown";
-				this.addActivityLog(proposal, actor, "status_change", `Changed to ${canonicalStatus}`);
+				this.addActivityLog(
+					proposal,
+					actor,
+					"status_change",
+					`Changed to ${canonicalStatus}`,
+				);
 			}
 		}
 
@@ -2274,7 +2741,11 @@ export class Core {
 
 		if (input.directive !== undefined) {
 			const normalizedDirective =
-				input.directive === null ? undefined : input.directive.trim().length > 0 ? input.directive.trim() : undefined;
+				input.directive === null
+					? undefined
+					: input.directive.trim().length > 0
+						? input.directive.trim()
+						: undefined;
 			if ((proposal.directive ?? undefined) !== normalizedDirective) {
 				if (normalizedDirective === undefined) {
 					delete proposal.directive;
@@ -2333,7 +2804,9 @@ export class Core {
 
 			const labelsToAdd = normalizeStringList(input.addLabels) ?? [];
 			if (labelsToAdd.length > 0) {
-				const labelSet = new Set(currentLabels.map((label) => label.toLowerCase()));
+				const labelSet = new Set(
+					currentLabels.map((label) => label.toLowerCase()),
+				);
 				for (const label of labelsToAdd) {
 					if (!labelSet.has(label.toLowerCase())) {
 						currentLabels.push(label);
@@ -2346,8 +2819,12 @@ export class Core {
 
 			const labelsToRemove = normalizeStringList(input.removeLabels) ?? [];
 			if (labelsToRemove.length > 0) {
-				const removalSet = new Set(labelsToRemove.map((label) => label.toLowerCase()));
-				const filtered = currentLabels.filter((label) => !removalSet.has(label.toLowerCase()));
+				const removalSet = new Set(
+					labelsToRemove.map((label) => label.toLowerCase()),
+				);
+				const filtered = currentLabels.filter(
+					(label) => !removalSet.has(label.toLowerCase()),
+				);
 				if (!stringArraysEqual(filtered, currentLabels)) {
 					proposal.labels = filtered;
 					mutated = true;
@@ -2393,8 +2870,12 @@ export class Core {
 			}
 
 			if (input.removeDependencies && input.removeDependencies.length > 0) {
-				const removals = new Set(normalizeDependencies(input.removeDependencies));
-				const filtered = currentDependencies.filter((dep) => !removals.has(dep));
+				const removals = new Set(
+					normalizeDependencies(input.removeDependencies),
+				);
+				const filtered = currentDependencies.filter(
+					(dep) => !removals.has(dep),
+				);
 				if (!stringArraysEqual(filtered, currentDependencies)) {
 					currentDependencies = filtered;
 					mutated = true;
@@ -2430,10 +2911,13 @@ export class Core {
 				proposal.references = currentReferences;
 			}
 
-			const referencesToRemove = normalizeStringList(input.removeReferences) ?? [];
+			const referencesToRemove =
+				normalizeStringList(input.removeReferences) ?? [];
 			if (referencesToRemove.length > 0) {
 				const removalSet = new Set(referencesToRemove);
-				const filtered = currentReferences.filter((ref) => !removalSet.has(ref));
+				const filtered = currentReferences.filter(
+					(ref) => !removalSet.has(ref),
+				);
 				if (!stringArraysEqual(filtered, currentReferences)) {
 					proposal.references = filtered;
 					mutated = true;
@@ -2446,7 +2930,8 @@ export class Core {
 		const resolveDocumentation = (): void => {
 			let currentDocumentation = [...(proposal.documentation ?? [])];
 			if (input.documentation !== undefined) {
-				const sanitizedDocumentation = normalizeStringList(input.documentation) ?? [];
+				const sanitizedDocumentation =
+					normalizeStringList(input.documentation) ?? [];
 				if (!stringArraysEqual(sanitizedDocumentation, currentDocumentation)) {
 					proposal.documentation = sanitizedDocumentation;
 					mutated = true;
@@ -2454,7 +2939,8 @@ export class Core {
 				currentDocumentation = sanitizedDocumentation;
 			}
 
-			const documentationToAdd = normalizeStringList(input.addDocumentation) ?? [];
+			const documentationToAdd =
+				normalizeStringList(input.addDocumentation) ?? [];
 			if (documentationToAdd.length > 0) {
 				const docSet = new Set(currentDocumentation);
 				for (const doc of documentationToAdd) {
@@ -2467,10 +2953,13 @@ export class Core {
 				proposal.documentation = currentDocumentation;
 			}
 
-			const documentationToRemove = normalizeStringList(input.removeDocumentation) ?? [];
+			const documentationToRemove =
+				normalizeStringList(input.removeDocumentation) ?? [];
 			if (documentationToRemove.length > 0) {
 				const removalSet = new Set(documentationToRemove);
-				const filtered = currentDocumentation.filter((doc) => !removalSet.has(doc));
+				const filtered = currentDocumentation.filter(
+					(doc) => !removalSet.has(doc),
+				);
 				if (!stringArraysEqual(filtered, currentDocumentation)) {
 					proposal.documentation = filtered;
 					mutated = true;
@@ -2514,7 +3003,9 @@ export class Core {
 
 			const requiresToRemove = input.removeRequires ?? [];
 			if (requiresToRemove.length > 0) {
-				const filtered = currentRequires.filter((_, idx) => !requiresToRemove.includes(idx + 1));
+				const filtered = currentRequires.filter(
+					(_, idx) => !requiresToRemove.includes(idx + 1),
+				);
 				if (!stringArraysEqual(filtered, currentRequires)) {
 					proposal.requires = filtered;
 					mutated = true;
@@ -2526,7 +3017,9 @@ export class Core {
 
 		const sanitizeAppendInput = (values: string[] | undefined): string[] => {
 			if (!values) return [];
-			return values.map((value) => String(value).trim()).filter((value) => value.length > 0);
+			return values
+				.map((value) => String(value).trim())
+				.filter((value) => value.length > 0);
 		};
 
 		const appendBlock = (
@@ -2554,13 +3047,20 @@ export class Core {
 			}
 		}
 
-		applyStringField(input.implementationPlan, proposal.implementationPlan, (next) => {
-			proposal.implementationPlan = next;
-		});
+		applyStringField(
+			input.implementationPlan,
+			proposal.implementationPlan,
+			(next) => {
+				proposal.implementationPlan = next;
+			},
+		);
 
 		const planAppends = sanitizeAppendInput(input.appendImplementationPlan);
 		if (planAppends.length > 0) {
-			const { value, changed } = appendBlock(proposal.implementationPlan, planAppends);
+			const { value, changed } = appendBlock(
+				proposal.implementationPlan,
+				planAppends,
+			);
 			if (changed) {
 				proposal.implementationPlan = value;
 				mutated = true;
@@ -2574,13 +3074,20 @@ export class Core {
 			}
 		}
 
-		applyStringField(input.implementationNotes, proposal.implementationNotes, (next) => {
-			proposal.implementationNotes = next;
-		});
+		applyStringField(
+			input.implementationNotes,
+			proposal.implementationNotes,
+			(next) => {
+				proposal.implementationNotes = next;
+			},
+		);
 
 		const notesAppends = sanitizeAppendInput(input.appendImplementationNotes);
 		if (notesAppends.length > 0) {
-			const { value, changed } = appendBlock(proposal.implementationNotes, notesAppends);
+			const { value, changed } = appendBlock(
+				proposal.implementationNotes,
+				notesAppends,
+			);
 			if (changed) {
 				proposal.implementationNotes = value;
 				mutated = true;
@@ -2620,7 +3127,10 @@ export class Core {
 
 		const finalSummaryAppends = sanitizeAppendInput(input.appendFinalSummary);
 		if (finalSummaryAppends.length > 0) {
-			const { value, changed } = appendBlock(proposal.finalSummary, finalSummaryAppends);
+			const { value, changed } = appendBlock(
+				proposal.finalSummary,
+				finalSummaryAppends,
+			);
 			if (changed) {
 				proposal.finalSummary = value;
 				mutated = true;
@@ -2672,20 +3182,33 @@ export class Core {
 
 		if (input.addAcceptanceCriteria && input.addAcceptanceCriteria.length > 0) {
 			const additions = input.addAcceptanceCriteria
-				.map((criterion) => (typeof criterion === "string" ? criterion.trim() : String(criterion.text ?? "").trim()))
+				.map((criterion) =>
+					typeof criterion === "string"
+						? criterion.trim()
+						: String(criterion.text ?? "").trim(),
+				)
 				.filter((text) => text.length > 0);
 			let index =
-				acceptanceCriteria.length > 0 ? Math.max(...acceptanceCriteria.map((criterion) => criterion.index)) + 1 : 1;
+				acceptanceCriteria.length > 0
+					? Math.max(
+							...acceptanceCriteria.map((criterion) => criterion.index),
+						) + 1
+					: 1;
 			for (const text of additions) {
 				acceptanceCriteria.push({ index: index++, text, checked: false });
 				mutated = true;
 			}
 		}
 
-		if (input.removeAcceptanceCriteria && input.removeAcceptanceCriteria.length > 0) {
+		if (
+			input.removeAcceptanceCriteria &&
+			input.removeAcceptanceCriteria.length > 0
+		) {
 			const removalSet = new Set(input.removeAcceptanceCriteria);
 			const beforeLength = acceptanceCriteria.length;
-			acceptanceCriteria = acceptanceCriteria.filter((criterion) => !removalSet.has(criterion.index));
+			acceptanceCriteria = acceptanceCriteria.filter(
+				(criterion) => !removalSet.has(criterion.index),
+			);
 			if (acceptanceCriteria.length === beforeLength) {
 				throw new Error(
 					`Acceptance criterion ${Array.from(removalSet)
@@ -2697,11 +3220,16 @@ export class Core {
 			rebuildIndices();
 		}
 
-		const toggleCriteria = (indices: number[] | undefined, checked: boolean) => {
+		const toggleCriteria = (
+			indices: number[] | undefined,
+			checked: boolean,
+		) => {
 			if (!indices || indices.length === 0) return;
 			const missing: number[] = [];
 			for (const index of indices) {
-				const criterion = acceptanceCriteria.find((item) => item.index === index);
+				const criterion = acceptanceCriteria.find(
+					(item) => item.index === index,
+				);
 				if (!criterion) {
 					missing.push(index);
 					continue;
@@ -2724,29 +3252,39 @@ export class Core {
 
 		// Handle verificationProposalments
 		if (input.verificationProposalments !== undefined) {
-			if (!stringArraysEqual(
-				(proposal.verificationProposalments ?? []).map(c => c.text),
-				input.verificationProposalments.map(c => c.text),
-			)) {
-				proposal.verificationProposalments = input.verificationProposalments.map((c, i) => ({
-					index: i + 1,
-					text: c.text,
-					checked: !!c.checked,
-					role: c.role,
-					evidence: c.evidence,
-				}));
+			if (
+				!stringArraysEqual(
+					(proposal.verificationProposalments ?? []).map((c) => c.text),
+					input.verificationProposalments.map((c) => c.text),
+				)
+			) {
+				proposal.verificationProposalments =
+					input.verificationProposalments.map((c, i) => ({
+						index: i + 1,
+						text: c.text,
+						checked: !!c.checked,
+						role: c.role,
+						evidence: c.evidence,
+					}));
 				mutated = true;
 			}
 		}
 
 		let verificationProposalments = proposal.verificationProposalments ?? [];
 		const rebuildVerificationIndices = (): void => {
-			verificationProposalments = verificationProposalments.map((c, i) => ({ ...c, index: i + 1 }));
+			verificationProposalments = verificationProposalments.map((c, i) => ({
+				...c,
+				index: i + 1,
+			}));
 		};
 
-		if (input.addVerificationProposalments && input.addVerificationProposalments.length > 0) {
+		if (
+			input.addVerificationProposalments &&
+			input.addVerificationProposalments.length > 0
+		) {
 			const current = verificationProposalments;
-			let nextIndex = current.length > 0 ? Math.max(...current.map((c) => c.index)) + 1 : 1;
+			let nextIndex =
+				current.length > 0 ? Math.max(...current.map((c) => c.index)) + 1 : 1;
 			for (const item of input.addVerificationProposalments) {
 				if (typeof item === "string") {
 					verificationProposalments.push({
@@ -2767,11 +3305,16 @@ export class Core {
 			mutated = true;
 		}
 
-		const toggleVerificationItems = (indices: number[] | undefined, checked: boolean): void => {
+		const toggleVerificationItems = (
+			indices: number[] | undefined,
+			checked: boolean,
+		): void => {
 			if (!indices || indices.length === 0) return;
 			const missing: number[] = [];
 			for (const index of indices) {
-				const criterion = verificationProposalments.find((item) => item.index === index);
+				const criterion = verificationProposalments.find(
+					(item) => item.index === index,
+				);
 				if (!criterion) {
 					missing.push(index);
 					continue;
@@ -2790,10 +3333,15 @@ export class Core {
 		toggleVerificationItems(input.checkVerificationProposalments, true);
 		toggleVerificationItems(input.uncheckVerificationProposalments, false);
 
-		if (input.removeVerificationProposalments && input.removeVerificationProposalments.length > 0) {
+		if (
+			input.removeVerificationProposalments &&
+			input.removeVerificationProposalments.length > 0
+		) {
 			const removalSet = new Set(input.removeVerificationProposalments);
 			const beforeLength = verificationProposalments.length;
-			verificationProposalments = verificationProposalments.filter((criterion) => !removalSet.has(criterion.index));
+			verificationProposalments = verificationProposalments.filter(
+				(criterion) => !removalSet.has(criterion.index),
+			);
 			if (verificationProposalments.length === beforeLength) {
 				throw new Error(
 					`Verification proposalment ${Array.from(removalSet)
@@ -2816,14 +3364,20 @@ export class Core {
 				// Audit Transition Gate: Cannot move to audited without builder, auditor, and checked proposalments
 				if (maturity === "audited") {
 					if (!proposal.builder && !input.builder) {
-						throw new Error(`Verification Gate: Proposal ${proposal.id} cannot be marked as 'audited' without a builder.`);
+						throw new Error(
+							`Verification Gate: Proposal ${proposal.id} cannot be marked as 'audited' without a builder.`,
+						);
 					}
 					if (!proposal.auditor && !input.auditor) {
-						throw new Error(`Verification Gate: Proposal ${proposal.id} cannot be marked as 'audited' without an auditor.`);
+						throw new Error(
+							`Verification Gate: Proposal ${proposal.id} cannot be marked as 'audited' without an auditor.`,
+						);
 					}
 
 					if (!proposal.auditNotes && !input.auditNotes) {
-						throw new Error(`Verification Gate: Proposal ${proposal.id} cannot be marked as 'audited' without audit notes.`);
+						throw new Error(
+							`Verification Gate: Proposal ${proposal.id} cannot be marked as 'audited' without audit notes.`,
+						);
 					}
 
 					const currentAuditor = input.auditor || proposal.auditor;
@@ -2852,8 +3406,12 @@ export class Core {
 		// Automatic maturity transition: skeleton -> contracted
 		// If ACs or Plan are added, move to contracted
 		if (proposal.maturity === "skeleton" || !proposal.maturity) {
-			const hasACs = proposal.acceptanceCriteriaItems && proposal.acceptanceCriteriaItems.length > 0;
-			const hasProposalments = proposal.verificationProposalments && proposal.verificationProposalments.length > 0;
+			const hasACs =
+				proposal.acceptanceCriteriaItems &&
+				proposal.acceptanceCriteriaItems.length > 0;
+			const hasProposalments =
+				proposal.verificationProposalments &&
+				proposal.verificationProposalments.length > 0;
 			const hasPlan = !!proposal.implementationPlan;
 
 			if (hasACs || hasPlan || hasProposalments) {
@@ -2865,20 +3423,31 @@ export class Core {
 		return { proposal, mutated };
 	}
 
-	async updateProposalFromInput(proposalId: string, input: ProposalUpdateInput, autoCommit?: boolean): Promise<Proposal> {
+	async updateProposalFromInput(
+		proposalId: string,
+		input: ProposalUpdateInput,
+		autoCommit?: boolean,
+	): Promise<Proposal> {
 		const proposal = await this.loadProposalById(proposalId);
 		if (!proposal) {
 			throw new Error(`Proposal not found: ${proposalId}`);
 		}
 
-		if ((await this.isPostgresProposalBackend()) && !proposal.id.startsWith("DRAFT-")) {
+		if (
+			(await this.isPostgresProposalBackend()) &&
+			!proposal.id.startsWith("DRAFT-")
+		) {
 			const requestedStatus = input.status?.trim().toLowerCase();
 			if (requestedStatus === "draft") {
-				throw new Error("Postgres-backed proposals cannot be demoted to filesystem drafts.");
+				throw new Error(
+					"Postgres-backed proposals cannot be demoted to filesystem drafts.",
+				);
 			}
 
-			const { mutated } = await this.applyProposalUpdateInput(proposal, input, async (status) =>
-				this.requireCanonicalStatus(status),
+			const { mutated } = await this.applyProposalUpdateInput(
+				proposal,
+				input,
+				async (status) => this.requireCanonicalStatus(status),
 			);
 			if (!mutated) {
 				return proposal;
@@ -2894,8 +3463,10 @@ export class Core {
 			return await this.demoteProposalWithUpdates(proposal, input, autoCommit);
 		}
 
-		const { mutated } = await this.applyProposalUpdateInput(proposal, input, async (status) =>
-			this.requireCanonicalStatus(status),
+		const { mutated } = await this.applyProposalUpdateInput(
+			proposal,
+			input,
+			async (status) => this.requireCanonicalStatus(status),
 		);
 
 		if (!mutated) {
@@ -2915,12 +3486,20 @@ export class Core {
 
 				// Find the promoted proposal
 				const localProposals = await this.fs.listProposals();
-				const promotedProposal = localProposals.find((s) => s.title === proposal.title);
+				const promotedProposal = localProposals.find(
+					(s) => s.title === proposal.title,
+				);
 				if (promotedProposal) {
 					// Apply all original updates to the promoted proposal
-					return await this.updateProposalFromInput(promotedProposal.id, input, autoCommit);
+					return await this.updateProposalFromInput(
+						promotedProposal.id,
+						input,
+						autoCommit,
+					);
 				}
-				throw new Error(`Draft ${draftId} promoted but new proposal not found.`);
+				throw new Error(
+					`Draft ${draftId} promoted but new proposal not found.`,
+				);
 			}
 
 			await this.updateDraft(proposal, autoCommit);
@@ -2937,28 +3516,43 @@ export class Core {
 		// Drafts always keep status Draft
 		proposal.status = "Draft";
 		normalizeAssignee(proposal);
-		proposal.updatedDate = new Date().toISOString().slice(0, 16).replace("T", " ");
+		proposal.updatedDate = new Date()
+			.toISOString()
+			.slice(0, 16)
+			.replace("T", " ");
 
 		const filepath = await this.fs.saveDraft(proposal);
 
 		if (await this.shouldAutoCommit(autoCommit)) {
 			await this.git.addFile(filepath);
-			await this.git.commitProposalChange(proposal.id, `Update draft ${proposal.id}`, filepath);
+			await this.git.commitProposalChange(
+				proposal.id,
+				`Update draft ${proposal.id}`,
+				filepath,
+			);
 		}
 	}
 
-	async updateDraftFromInput(draftId: string, input: ProposalUpdateInput, autoCommit?: boolean): Promise<Proposal> {
+	async updateDraftFromInput(
+		draftId: string,
+		input: ProposalUpdateInput,
+		autoCommit?: boolean,
+	): Promise<Proposal> {
 		const draft = await this.fs.loadDraft(draftId);
 		if (!draft) {
 			throw new Error(`Draft not found: ${draftId}`);
 		}
 
-		const { mutated } = await this.applyProposalUpdateInput(draft, input, async (status) => {
-			if (status.trim().toLowerCase() !== "draft") {
-				throw new Error("Drafts must use status Draft.");
-			}
-			return "Draft";
-		});
+		const { mutated } = await this.applyProposalUpdateInput(
+			draft,
+			input,
+			async (status) => {
+				if (status.trim().toLowerCase() !== "draft") {
+					throw new Error("Drafts must use status Draft.");
+				}
+				return "Draft";
+			},
+		);
 
 		if (!mutated) {
 			return draft;
@@ -2969,7 +3563,11 @@ export class Core {
 		return refreshed ?? draft;
 	}
 
-	async editProposalOrDraft(proposalId: string, input: ProposalUpdateInput, autoCommit?: boolean): Promise<Proposal> {
+	async editProposalOrDraft(
+		proposalId: string,
+		input: ProposalUpdateInput,
+		autoCommit?: boolean,
+	): Promise<Proposal> {
 		const draft = await this.fs.loadDraft(proposalId);
 		if (draft) {
 			const requestedStatus = input.status?.trim();
@@ -2994,21 +3592,32 @@ export class Core {
 		return await this.updateProposalFromInput(proposal.id, input, autoCommit);
 	}
 
-	private async promoteDraftWithUpdates(draft: Proposal, input: ProposalUpdateInput, autoCommit?: boolean): Promise<Proposal> {
+	private async promoteDraftWithUpdates(
+		draft: Proposal,
+		input: ProposalUpdateInput,
+		autoCommit?: boolean,
+	): Promise<Proposal> {
 		const targetStatus = input.status?.trim();
 		if (!targetStatus || targetStatus.toLowerCase() === "draft") {
 			throw new Error("Promoting a draft requires a non-draft status.");
 		}
 
-		const { mutated } = await this.applyProposalUpdateInput(draft, { ...input, status: undefined }, async (status) => {
-			if (status.trim().toLowerCase() !== "draft") {
-				throw new Error("Drafts must use status Draft.");
-			}
-			return "Draft";
-		});
+		const { mutated } = await this.applyProposalUpdateInput(
+			draft,
+			{ ...input, status: undefined },
+			async (status) => {
+				if (status.trim().toLowerCase() !== "draft") {
+					throw new Error("Drafts must use status Draft.");
+				}
+				return "Draft";
+			},
+		);
 
 		const canonicalStatus = await this.requireCanonicalStatus(targetStatus);
-		const newProposalId = await this.generateNextId(EntityType.Proposal, draft.parentProposalId);
+		const newProposalId = await this.generateNextId(
+			EntityType.Proposal,
+			draft.parentProposalId,
+		);
 		const draftPath = draft.filePath;
 
 		const promotedProposal: Proposal = {
@@ -3017,7 +3626,12 @@ export class Core {
 			status: canonicalStatus,
 			filePath: undefined,
 			...(mutated || draft.status !== canonicalStatus
-				? { updatedDate: new Date().toISOString().slice(0, 16).replace("T", " ") }
+				? {
+						updatedDate: new Date()
+							.toISOString()
+							.slice(0, 16)
+							.replace("T", " "),
+					}
 				: {}),
 		};
 
@@ -3038,19 +3652,35 @@ export class Core {
 		if (await this.shouldAutoCommit(autoCommit)) {
 			const roadmapDir = await this.getRoadmapDirectoryName();
 			const repoRoot = await this.git.stageRoadmapDirectory(roadmapDir);
-			await this.git.commitChanges(`roadmap: Promote draft ${normalizeId(draft.id, "draft")}`, repoRoot);
+			await this.git.commitChanges(
+				`roadmap: Promote draft ${normalizeId(draft.id, "draft")}`,
+				repoRoot,
+			);
 		}
 
-		return (await this.fs.loadProposal(promotedProposal.id)) ?? { ...promotedProposal, filePath: savedPath };
+		return (
+			(await this.fs.loadProposal(promotedProposal.id)) ?? {
+				...promotedProposal,
+				filePath: savedPath,
+			}
+		);
 	}
 
-	private async demoteProposalWithUpdates(proposal: Proposal, input: ProposalUpdateInput, autoCommit?: boolean): Promise<Proposal> {
-		const { mutated } = await this.applyProposalUpdateInput(proposal, { ...input, status: undefined }, async (status) => {
-			if (status.trim().toLowerCase() === "draft") {
-				return "Draft";
-			}
-			return this.requireCanonicalStatus(status);
-		});
+	private async demoteProposalWithUpdates(
+		proposal: Proposal,
+		input: ProposalUpdateInput,
+		autoCommit?: boolean,
+	): Promise<Proposal> {
+		const { mutated } = await this.applyProposalUpdateInput(
+			proposal,
+			{ ...input, status: undefined },
+			async (status) => {
+				if (status.trim().toLowerCase() === "draft") {
+					return "Draft";
+				}
+				return this.requireCanonicalStatus(status);
+			},
+		);
 
 		const newDraftId = await this.generateNextId(EntityType.Draft);
 		const proposalPath = proposal.filePath;
@@ -3061,7 +3691,12 @@ export class Core {
 			status: "Draft",
 			filePath: undefined,
 			...(mutated || proposal.status !== "Draft"
-				? { updatedDate: new Date().toISOString().slice(0, 16).replace("T", " ") }
+				? {
+						updatedDate: new Date()
+							.toISOString()
+							.slice(0, 16)
+							.replace("T", " "),
+					}
 				: {}),
 		};
 
@@ -3075,10 +3710,18 @@ export class Core {
 		if (await this.shouldAutoCommit(autoCommit)) {
 			const roadmapDir = await this.getRoadmapDirectoryName();
 			const repoRoot = await this.git.stageRoadmapDirectory(roadmapDir);
-			await this.git.commitChanges(`roadmap: Demote proposal ${normalizeProposalId(proposal.id)}`, repoRoot);
+			await this.git.commitChanges(
+				`roadmap: Demote proposal ${normalizeProposalId(proposal.id)}`,
+				repoRoot,
+			);
 		}
 
-		return (await this.fs.loadDraft(demotedDraft.id)) ?? { ...demotedDraft, filePath: savedPath };
+		return (
+			(await this.fs.loadDraft(demotedDraft.id)) ?? {
+				...demotedDraft,
+				filePath: savedPath,
+			}
+		);
 	}
 
 	/**
@@ -3086,7 +3729,11 @@ export class Core {
 	 * Per-proposal callback takes precedence over global config.
 	 * Failures are logged but don't block the status change.
 	 */
-	private async executeStatusChangeCallback(proposal: Proposal, oldStatus: string, newStatus: string): Promise<void> {
+	private async executeStatusChangeCallback(
+		proposal: Proposal,
+		oldStatus: string,
+		newStatus: string,
+	): Promise<void> {
 		const config = await this.fs.loadConfig();
 
 		// Per-proposal callback takes precedence over global config
@@ -3106,31 +3753,50 @@ export class Core {
 			});
 
 			if (!result.success) {
-				console.error(`Status change callback failed for ${proposal.id}: ${result.error ?? "Unknown error"}`);
+				console.error(
+					`Status change callback failed for ${proposal.id}: ${result.error ?? "Unknown error"}`,
+				);
 				if (result.output) {
 					console.error(`Callback output: ${result.output}`);
 				}
 			} else if (process.env.DEBUG && result.output) {
-				console.log(`Status change callback output for ${proposal.id}: ${result.output}`);
+				console.log(
+					`Status change callback output for ${proposal.id}: ${result.output}`,
+				);
 			}
 		} catch (error) {
-			console.error(`Failed to execute status change callback for ${proposal.id}:`, error);
+			console.error(
+				`Failed to execute status change callback for ${proposal.id}:`,
+				error,
+			);
 		}
 	}
 
-	private assertNoBlockingTestIssues(proposalId: string, action: "mark as Complete" | "complete"): void {
-		const blockingIssues = getBlockingIssues(loadIssues(this.fs.rootDir), proposalId);
+	private assertNoBlockingTestIssues(
+		proposalId: string,
+		action: "mark as Complete" | "complete",
+	): void {
+		const blockingIssues = getBlockingIssues(
+			loadIssues(this.fs.rootDir),
+			proposalId,
+		);
 		if (blockingIssues.length === 0) {
 			return;
 		}
 
-		const details = blockingIssues.map((issue) => `${issue.id}: ${issue.title} (${issue.severity})`).join("; ");
+		const details = blockingIssues
+			.map((issue) => `${issue.id}: ${issue.title} (${issue.severity})`)
+			.join("; ");
 		throw new Error(
 			`Test Issue Gate: Proposal ${proposalId} cannot ${action} because it has ${blockingIssues.length} open blocking issue(s): ${details}`,
 		);
 	}
 
-	async editProposal(proposalId: string, input: ProposalUpdateInput, autoCommit?: boolean): Promise<Proposal> {
+	async editProposal(
+		proposalId: string,
+		input: ProposalUpdateInput,
+		autoCommit?: boolean,
+	): Promise<Proposal> {
 		return await this.updateProposalFromInput(proposalId, input, autoCommit);
 	}
 
@@ -3138,12 +3804,22 @@ export class Core {
 	 * Remove claims that have exceeded their heartbeat timeout.
 	 * Returns the list of recovered proposal IDs.
 	 */
-	async pruneClaims(options?: { timeoutMinutes?: number; autoCommit?: boolean }): Promise<string[]> {
+	async pruneClaims(options?: {
+		timeoutMinutes?: number;
+		autoCommit?: boolean;
+	}): Promise<string[]> {
 		if (await this.isPostgresProposalBackend()) {
 			await this.ensurePgPool();
 			const releasedProposalIds = await pg.releaseExpiredLeases();
 			const recoveredIds = (
-				await Promise.all(releasedProposalIds.map(async (proposalId) => (await pg.getProposal(proposalId))?.display_id))
+				await Promise.all(
+					releasedProposalIds.map(
+						async (proposalId) =>
+							(
+								await pg.getProposal(proposalId)
+							)?.display_id,
+					),
+				)
 			).filter((proposalId): proposalId is string => Boolean(proposalId));
 			return recoveredIds;
 		}
@@ -3166,7 +3842,10 @@ export class Core {
 			const diffMinutes = (now.getTime() - lastHeartbeat.getTime()) / 60000;
 
 			if (diffMinutes > timeout) {
-				await this.releaseClaim(proposal.id, proposal.claim.agent, { force: true, autoCommit: false });
+				await this.releaseClaim(proposal.id, proposal.claim.agent, {
+					force: true,
+					autoCommit: false,
+				});
 				recoveredIds.push(proposal.id);
 
 				await this.recordPulse({
@@ -3180,7 +3859,10 @@ export class Core {
 			}
 		}
 
-		if (recoveredIds.length > 0 && (await this.shouldAutoCommit(options?.autoCommit))) {
+		if (
+			recoveredIds.length > 0 &&
+			(await this.shouldAutoCommit(options?.autoCommit))
+		) {
 			const roadmapDir = await this.getRoadmapDirectoryName();
 			const repoRoot = await this.git.stageRoadmapDirectory(roadmapDir);
 			await this.git.commitChanges(
@@ -3192,7 +3874,11 @@ export class Core {
 		return recoveredIds;
 	}
 
-	async updateProposalsBulk(proposals: Proposal[], commitMessage?: string, autoCommit?: boolean): Promise<void> {
+	async updateProposalsBulk(
+		proposals: Proposal[],
+		commitMessage?: string,
+		autoCommit?: boolean,
+	): Promise<void> {
 		// Update all proposals without committing individually
 		for (const proposal of proposals) {
 			await this.updateProposal(proposal, false); // Don't auto-commit each one
@@ -3202,7 +3888,10 @@ export class Core {
 		if (await this.shouldAutoCommit(autoCommit)) {
 			const roadmapDir = await this.getRoadmapDirectoryName();
 			const repoRoot = await this.git.stageRoadmapDirectory(roadmapDir);
-			await this.git.commitChanges(commitMessage || `Update ${proposals.length} proposals`, repoRoot);
+			await this.git.commitChanges(
+				commitMessage || `Update ${proposals.length} proposals`,
+				repoRoot,
+			);
 		}
 	}
 
@@ -3214,7 +3903,12 @@ export class Core {
 	async claimProposal(
 		proposalId: string,
 		agent: string,
-		options?: { durationMinutes?: number; message?: string; force?: boolean; autoCommit?: boolean },
+		options?: {
+			durationMinutes?: number;
+			message?: string;
+			force?: boolean;
+			autoCommit?: boolean;
+		},
 	): Promise<Proposal> {
 		if (await this.isPostgresProposalBackend()) {
 			const proposal = await this.loadPgProposalById(proposalId);
@@ -3229,7 +3923,8 @@ export class Core {
 
 				if (!check.allowed) {
 					throw new Error(
-						check.reason ?? `Rate limited: too many claims. Retry after ${check.retryAfter}.`,
+						check.reason ??
+							`Rate limited: too many claims. Retry after ${check.retryAfter}.`,
 					);
 				}
 
@@ -3249,26 +3944,45 @@ export class Core {
 					currentSummary?.lease_expires === undefined ||
 					new Date(currentSummary.lease_expires) > new Date());
 			const expiresAt = new Date(
-				Date.now() + (options?.durationMinutes ?? DEFAULT_CLAIM_DURATION_MINUTES) * 60 * 1000,
+				Date.now() +
+					(options?.durationMinutes ?? DEFAULT_CLAIM_DURATION_MINUTES) *
+						60 *
+						1000,
 			);
 
 			if (!activeLeaseHeld && currentSummary?.leased_by) {
-				await pg.releaseLease(resolvedProposalId, currentSummary.leased_by, "expired");
+				await pg.releaseLease(
+					resolvedProposalId,
+					currentSummary.leased_by,
+					"expired",
+				);
 			}
 
-			if (activeLeaseHeld && currentSummary?.leased_by && currentSummary.leased_by !== agent) {
+			if (
+				activeLeaseHeld &&
+				currentSummary?.leased_by &&
+				currentSummary.leased_by !== agent
+			) {
 				if (!options?.force) {
 					throw new Error(
 						`Proposal ${proposalId} is already claimed by ${currentSummary.leased_by}${currentSummary.lease_expires ? ` until ${currentSummary.lease_expires.toISOString()}` : ""}`,
 					);
 				}
-				await pg.releaseLease(resolvedProposalId, currentSummary.leased_by, "reassigned");
+				await pg.releaseLease(
+					resolvedProposalId,
+					currentSummary.leased_by,
+					"reassigned",
+				);
 			}
 
 			if (activeLeaseHeld && currentSummary?.leased_by === agent) {
 				await pg.renewLease(resolvedProposalId, agent, expiresAt);
 			} else {
-				const claimed = await pg.claimLease(resolvedProposalId, agent, expiresAt);
+				const claimed = await pg.claimLease(
+					resolvedProposalId,
+					agent,
+					expiresAt,
+				);
 				if (!claimed) {
 					throw new Error(`Proposal ${proposalId} could not be claimed.`);
 				}
@@ -3292,7 +4006,7 @@ export class Core {
 		// Check budget before claiming (unless force=true)
 		if (!options?.force) {
 			const proposal = await this.fs.loadProposal(proposalId);
-			
+
 			// Budget guard: check if proposal has a budget limit and agent can afford it
 			if (proposal?.budgetLimitUsd && proposal.budgetLimitUsd > 0) {
 				const budgetConfig = await this.loadBudgetConfig();
@@ -3302,7 +4016,8 @@ export class Core {
 						throw new Error(`Budget: Agent '${agent}' spending is frozen`);
 					}
 					if (agentBudget && agentBudget.dailyLimitUsd > 0) {
-						const remaining = agentBudget.dailyLimitUsd - agentBudget.totalSpentTodayUsd;
+						const remaining =
+							agentBudget.dailyLimitUsd - agentBudget.totalSpentTodayUsd;
 						if (proposal.budgetLimitUsd > remaining) {
 							throw new Error(
 								`Budget exceeded for '${agent}': $${agentBudget.totalSpentTodayUsd.toFixed(2)} spent of $${agentBudget.dailyLimitUsd.toFixed(2)} daily limit (need $${proposal.budgetLimitUsd.toFixed(2)})`,
@@ -3319,7 +4034,8 @@ export class Core {
 
 			if (!check.allowed) {
 				throw new Error(
-					check.reason ?? `Rate limited: too many claims. Retry after ${check.retryAfter}.`,
+					check.reason ??
+						`Rate limited: too many claims. Retry after ${check.retryAfter}.`,
 				);
 			}
 
@@ -3327,8 +4043,10 @@ export class Core {
 			rateLimiter.recordClaim(agent, proposalId, priority);
 		}
 
-		return await FileLock.withLock(this.fs.rootDir, "coordination", async () =>
-			await this.executeClaimProposal(proposalId, agent, options),
+		return await FileLock.withLock(
+			this.fs.rootDir,
+			"coordination",
+			async () => await this.executeClaimProposal(proposalId, agent, options),
 		);
 	}
 
@@ -3338,7 +4056,12 @@ export class Core {
 	private async executeClaimProposal(
 		proposalId: string,
 		agent: string,
-		options?: { durationMinutes?: number; message?: string; force?: boolean; autoCommit?: boolean },
+		options?: {
+			durationMinutes?: number;
+			message?: string;
+			force?: boolean;
+			autoCommit?: boolean;
+		},
 	): Promise<Proposal> {
 		const proposal = await this.fs.loadProposal(proposalId);
 		if (!proposal) throw new Error(`Proposal not found: ${proposalId}`);
@@ -3347,7 +4070,9 @@ export class Core {
 		if (!options?.force && proposal.claim && proposal.claim.agent !== agent) {
 			const expires = new Date(proposal.claim.expires.replace(" ", "T"));
 			if (expires > now) {
-				throw new Error(`Proposal ${proposalId} is already claimed by ${proposal.claim.agent} until ${proposal.claim.expires}`);
+				throw new Error(
+					`Proposal ${proposalId} is already claimed by ${proposal.claim.agent} until ${proposal.claim.expires}`,
+				);
 			}
 		}
 
@@ -3364,11 +4089,11 @@ export class Core {
 
 		return await this.updateProposalFromInput(
 			proposalId,
-			{ 
-				claim, 
+			{
+				claim,
 				assignee: [agent],
 			},
-			options?.autoCommit
+			options?.autoCommit,
 		);
 	}
 	/**
@@ -3400,7 +4125,9 @@ export class Core {
 			}
 
 			if (!options?.force && summary.leased_by !== agent) {
-				throw new Error(`Proposal ${proposalId} claim is held by ${summary.leased_by}, not ${agent}`);
+				throw new Error(
+					`Proposal ${proposalId} claim is held by ${summary.leased_by}, not ${agent}`,
+				);
 			}
 
 			const released = await pg.releaseLease(
@@ -3423,10 +4150,16 @@ export class Core {
 		}
 
 		if (!options?.force && proposal.claim.agent !== agent) {
-			throw new Error(`Proposal ${proposalId} claim is held by ${proposal.claim.agent}, not ${agent}`);
+			throw new Error(
+				`Proposal ${proposalId} claim is held by ${proposal.claim.agent}, not ${agent}`,
+			);
 		}
 
-		return await this.updateProposalFromInput(proposalId, { claim: null }, options?.autoCommit);
+		return await this.updateProposalFromInput(
+			proposalId,
+			{ claim: null },
+			options?.autoCommit,
+		);
 	}
 
 	/**
@@ -3456,13 +4189,19 @@ export class Core {
 				throw new Error(`Proposal ${proposalId} has no active claim to renew`);
 			}
 			if (summary.leased_by !== agent) {
-				throw new Error(`Proposal ${proposalId} claim is held by ${summary.leased_by}, not ${agent}`);
+				throw new Error(
+					`Proposal ${proposalId} claim is held by ${summary.leased_by}, not ${agent}`,
+				);
 			}
 
 			const renewed = await pg.renewLease(
 				resolvedProposalId,
 				agent,
-				new Date(Date.now() + (options?.durationMinutes || DEFAULT_CLAIM_DURATION_MINUTES) * 60000),
+				new Date(
+					Date.now() +
+						(options?.durationMinutes || DEFAULT_CLAIM_DURATION_MINUTES) *
+							60000,
+				),
 			);
 			if (!renewed) {
 				throw new Error(`Proposal ${proposalId} claim could not be renewed.`);
@@ -3479,7 +4218,9 @@ export class Core {
 		}
 
 		if (proposal.claim.agent !== agent) {
-			throw new Error(`Proposal ${proposalId} claim is held by ${proposal.claim.agent}, not ${agent}`);
+			throw new Error(
+				`Proposal ${proposalId} claim is held by ${proposal.claim.agent}, not ${agent}`,
+			);
 		}
 
 		const now = new Date();
@@ -3491,7 +4232,11 @@ export class Core {
 			expires: formatLocalDateTime(expiresAt),
 			lastHeartbeat: formatLocalDateTime(now),
 		};
-		return await this.updateProposalFromInput(proposalId, { claim }, options?.autoCommit);
+		return await this.updateProposalFromInput(
+			proposalId,
+			{ claim },
+			options?.autoCommit,
+		);
 	}
 
 	async reorderProposal(params: {
@@ -3505,19 +4250,28 @@ export class Core {
 	}): Promise<{ updatedProposal: Proposal; changedProposals: Proposal[] }> {
 		const rawProposalId = String(params.proposalId || "").trim();
 		const targetStatus = String(params.targetStatus || "").trim();
-		const rawOrderedProposalIds = params.orderedProposalIds.map((id) => String(id || "").trim()).filter(Boolean);
+		const rawOrderedProposalIds = params.orderedProposalIds
+			.map((id) => String(id || "").trim())
+			.filter(Boolean);
 		const usePostgresBackend = await this.isPostgresProposalBackend();
-		const proposalId = usePostgresBackend ? rawProposalId : normalizeProposalId(rawProposalId);
+		const proposalId = usePostgresBackend
+			? rawProposalId
+			: normalizeProposalId(rawProposalId);
 		const orderedProposalIds = usePostgresBackend
 			? rawOrderedProposalIds
-			: rawOrderedProposalIds.map((id) => normalizeProposalId(id)).filter(Boolean);
+			: rawOrderedProposalIds
+					.map((id) => normalizeProposalId(id))
+					.filter(Boolean);
 		const defaultStep = params.defaultStep ?? DEFAULT_ORDINAL_STEP;
 
 		if (!proposalId) throw new Error("proposalId is required");
 		if (!targetStatus) throw new Error("targetStatus is required");
-		if (orderedProposalIds.length === 0) throw new Error("orderedProposalIds must include at least one proposal");
+		if (orderedProposalIds.length === 0)
+			throw new Error("orderedProposalIds must include at least one proposal");
 		if (!orderedProposalIds.includes(proposalId)) {
-			throw new Error("orderedProposalIds must include the proposal being moved");
+			throw new Error(
+				"orderedProposalIds must include the proposal being moved",
+			);
 		}
 
 		if (usePostgresBackend) {
@@ -3531,14 +4285,19 @@ export class Core {
 				updateInput.status = targetStatus;
 			}
 			if (params.targetDirective !== undefined) {
-				updateInput.directive = params.targetDirective === null ? null : params.targetDirective;
+				updateInput.directive =
+					params.targetDirective === null ? null : params.targetDirective;
 			}
 
 			if (Object.keys(updateInput).length === 0) {
 				return { updatedProposal: movedProposal, changedProposals: [] };
 			}
 
-			const updatedProposal = await this.updateProposalFromInput(proposalId, updateInput, params.autoCommit);
+			const updatedProposal = await this.updateProposalFromInput(
+				proposalId,
+				updateInput,
+				params.autoCommit,
+			);
 			return { updatedProposal, changedProposals: [updatedProposal] };
 		}
 
@@ -3559,7 +4318,9 @@ export class Core {
 		);
 
 		// Filter out any proposals that couldn't be loaded (may have been moved/deleted)
-		const validProposals = loadedProposals.filter((t): t is Proposal => t !== null);
+		const validProposals = loadedProposals.filter(
+			(t): t is Proposal => t !== null,
+		);
 
 		// Verify the moved proposal itself exists
 		const movedProposal = validProposals.find((t) => t.id === proposalId);
@@ -3578,23 +4339,35 @@ export class Core {
 		const normalizedTargetDirective =
 			params.targetDirective === null
 				? undefined
-				: typeof params.targetDirective === "string" && params.targetDirective.trim().length > 0
+				: typeof params.targetDirective === "string" &&
+						params.targetDirective.trim().length > 0
 					? params.targetDirective.trim()
 					: undefined;
 
 		// Calculate target index within the valid proposals list
-		const validOrderedIds = orderedProposalIds.filter((id) => validProposals.some((t) => t.id === id));
+		const validOrderedIds = orderedProposalIds.filter((id) =>
+			validProposals.some((t) => t.id === id),
+		);
 		const targetIndex = validOrderedIds.indexOf(proposalId);
 
 		if (targetIndex === -1) {
-			throw new Error("Implementation error: Proposal found in validProposals but index missing");
+			throw new Error(
+				"Implementation error: Proposal found in validProposals but index missing",
+			);
 		}
 
-		const previousProposal = targetIndex > 0 ? validProposals[targetIndex - 1] : null;
-		const nextProposal = targetIndex < validProposals.length - 1 ? validProposals[targetIndex + 1] : null;
+		const previousProposal =
+			targetIndex > 0 ? validProposals[targetIndex - 1] : null;
+		const nextProposal =
+			targetIndex < validProposals.length - 1
+				? validProposals[targetIndex + 1]
+				: null;
 
 		const { ordinal: newOrdinal, requiresRebalance } = calculateNewOrdinal({
-			previous: previousProposal as Pick<Proposal, "id" | "ordinal"> | null | undefined,
+			previous: previousProposal as
+				| Pick<Proposal, "id" | "ordinal">
+				| null
+				| undefined,
 			next: nextProposal as Pick<Proposal, "id" | "ordinal"> | null | undefined,
 			defaultStep,
 		});
@@ -3606,7 +4379,9 @@ export class Core {
 			ordinal: newOrdinal,
 		};
 
-		const proposalsInOrder: Proposal[] = validProposals.map((proposal, index) => (index === targetIndex ? updatedMoved : proposal));
+		const proposalsInOrder: Proposal[] = validProposals.map(
+			(proposal, index) => (index === targetIndex ? updatedMoved : proposal),
+		);
 		const resolutionUpdates = resolveOrdinalConflicts(proposalsInOrder, {
 			defaultStep,
 			startOrdinal: defaultStep,
@@ -3621,16 +4396,20 @@ export class Core {
 			updatesMap.set(updatedMoved.id, updatedMoved);
 		}
 
-		const originalMap = new Map(validProposals.map((proposal) => [proposal.id, proposal]));
-		const changedProposals = Array.from(updatesMap.values()).filter((proposal) => {
-			const original = originalMap.get(proposal.id);
-			if (!original) return true;
-			return (
-				(original.ordinal ?? null) !== (proposal.ordinal ?? null) ||
-				(original.status ?? "") !== (proposal.status ?? "") ||
-				(original.directive ?? "") !== (proposal.directive ?? "")
-			);
-		});
+		const originalMap = new Map(
+			validProposals.map((proposal) => [proposal.id, proposal]),
+		);
+		const changedProposals = Array.from(updatesMap.values()).filter(
+			(proposal) => {
+				const original = originalMap.get(proposal.id);
+				if (!original) return true;
+				return (
+					(original.ordinal ?? null) !== (proposal.ordinal ?? null) ||
+					(original.status ?? "") !== (proposal.status ?? "") ||
+					(original.directive ?? "") !== (proposal.directive ?? "")
+				);
+			},
+		);
 
 		if (changedProposals.length > 0) {
 			await this.updateProposalsBulk(
@@ -3645,7 +4424,10 @@ export class Core {
 	}
 
 	// Sequences operations (business logic lives in core, not server)
-	async listActiveSequences(): Promise<{ unsequenced: Proposal[]; sequences: Sequence[] }> {
+	async listActiveSequences(): Promise<{
+		unsequenced: Proposal[];
+		sequences: Sequence[];
+	}> {
 		const all = await this.fs.listProposals();
 		const active = all.filter((t) => (t.status || "").toLowerCase() !== "done");
 		return computeSequences(active);
@@ -3663,30 +4445,53 @@ export class Core {
 		const exists = allProposals.some((t) => t.id === proposalId);
 		if (!exists) throw new Error(`Proposal ${proposalId} not found`);
 
-		const active = allProposals.filter((t) => (t.status || "").toLowerCase() !== "done");
+		const active = allProposals.filter(
+			(t) => (t.status || "").toLowerCase() !== "done",
+		);
 		const { sequences } = computeSequences(active);
 
 		if (params.unsequenced) {
 			const res = planMoveToUnsequenced(allProposals, proposalId);
 			if (!res.ok) throw new Error(res.error);
-			await this.updateProposalsBulk(res.changed, `Move ${proposalId} to Unsequenced`);
+			await this.updateProposalsBulk(
+				res.changed,
+				`Move ${proposalId} to Unsequenced`,
+			);
 		} else {
 			const targetSequenceIndex = params.targetSequenceIndex;
-			if (targetSequenceIndex === undefined || Number.isNaN(targetSequenceIndex)) {
+			if (
+				targetSequenceIndex === undefined ||
+				Number.isNaN(targetSequenceIndex)
+			) {
 				throw new Error("targetSequenceIndex must be a number");
 			}
-			if (targetSequenceIndex < 1) throw new Error("targetSequenceIndex must be >= 1");
-			const changed = planMoveToSequence(allProposals, sequences, proposalId, targetSequenceIndex);
-			if (changed.length > 0) await this.updateProposalsBulk(changed, `Update deps/order for ${proposalId}`);
+			if (targetSequenceIndex < 1)
+				throw new Error("targetSequenceIndex must be >= 1");
+			const changed = planMoveToSequence(
+				allProposals,
+				sequences,
+				proposalId,
+				targetSequenceIndex,
+			);
+			if (changed.length > 0)
+				await this.updateProposalsBulk(
+					changed,
+					`Update deps/order for ${proposalId}`,
+				);
 		}
 
 		// Return updated sequences
 		const afterAll = await this.fs.listProposals();
-		const afterActive = afterAll.filter((t) => (t.status || "").toLowerCase() !== "done");
+		const afterActive = afterAll.filter(
+			(t) => (t.status || "").toLowerCase() !== "done",
+		);
 		return computeSequences(afterActive);
 	}
 
-	async archiveProposal(proposalId: string, autoCommit?: boolean): Promise<boolean> {
+	async archiveProposal(
+		proposalId: string,
+		autoCommit?: boolean,
+	): Promise<boolean> {
 		const proposalToArchive = await this.fs.loadProposal(proposalId);
 		if (!proposalToArchive) {
 			return false;
@@ -3694,13 +4499,21 @@ export class Core {
 		const normalizedProposalId = proposalToArchive.id;
 
 		// Get paths before moving the file
-		const proposalPath = proposalToArchive.filePath ?? (await getProposalPath(normalizedProposalId, this));
-		const proposalFilename = await getProposalFilename(normalizedProposalId, this);
+		const proposalPath =
+			proposalToArchive.filePath ??
+			(await getProposalPath(normalizedProposalId, this));
+		const proposalFilename = await getProposalFilename(
+			normalizedProposalId,
+			this,
+		);
 
 		if (!proposalPath || !proposalFilename) return false;
 
 		const fromPath = proposalPath;
-		const toPath = join(await this.fs.getArchiveProposalsDir(), proposalFilename);
+		const toPath = join(
+			await this.fs.getArchiveProposalsDir(),
+			proposalFilename,
+		);
 
 		const success = await this.fs.archiveProposal(normalizedProposalId);
 		if (!success) {
@@ -3708,7 +4521,10 @@ export class Core {
 		}
 
 		const activeProposals = await this.fs.listProposals();
-		const sanitizedProposals = this.sanitizeArchivedProposalLinks(activeProposals, normalizedProposalId);
+		const sanitizedProposals = this.sanitizeArchivedProposalLinks(
+			activeProposals,
+			normalizedProposalId,
+		);
 		if (sanitizedProposals.length > 0) {
 			await this.updateProposalsBulk(sanitizedProposals, undefined, false);
 		}
@@ -3721,7 +4537,10 @@ export class Core {
 					await this.git.addFile(sanitizedProposal.filePath);
 				}
 			}
-			await this.git.commitChanges(`roadmap: Archive proposal ${normalizedProposalId}`, repoRoot);
+			await this.git.commitChanges(
+				`roadmap: Archive proposal ${normalizedProposalId}`,
+				repoRoot,
+			);
 		}
 
 		return true;
@@ -3730,15 +4549,32 @@ export class Core {
 	async archiveDirective(
 		identifier: string,
 		autoCommit?: boolean,
-	): Promise<{ success: boolean; sourcePath?: string; targetPath?: string; directive?: Directive }> {
+	): Promise<{
+		success: boolean;
+		sourcePath?: string;
+		targetPath?: string;
+		directive?: Directive;
+	}> {
 		const result = await this.fs.archiveDirective(identifier);
 
-		if (result.success && result.sourcePath && result.targetPath && (await this.shouldAutoCommit(autoCommit))) {
-			const repoRoot = await this.git.stageFileMove(result.sourcePath, result.targetPath);
+		if (
+			result.success &&
+			result.sourcePath &&
+			result.targetPath &&
+			(await this.shouldAutoCommit(autoCommit))
+		) {
+			const repoRoot = await this.git.stageFileMove(
+				result.sourcePath,
+				result.targetPath,
+			);
 			const label = result.directive?.id ? ` ${result.directive.id}` : "";
 			const commitPaths = [result.sourcePath, result.targetPath];
 			try {
-				await this.git.commitFiles(`roadmap: Archive directive${label}`, commitPaths, repoRoot);
+				await this.git.commitFiles(
+					`roadmap: Archive directive${label}`,
+					commitPaths,
+					repoRoot,
+				);
 			} catch (error) {
 				await this.git.resetPaths(commitPaths, repoRoot);
 				try {
@@ -3774,16 +4610,30 @@ export class Core {
 			return result;
 		}
 
-		if (result.sourcePath && result.targetPath && (await this.shouldAutoCommit(autoCommit))) {
-			const repoRoot = await this.git.stageFileMove(result.sourcePath, result.targetPath);
+		if (
+			result.sourcePath &&
+			result.targetPath &&
+			(await this.shouldAutoCommit(autoCommit))
+		) {
+			const repoRoot = await this.git.stageFileMove(
+				result.sourcePath,
+				result.targetPath,
+			);
 			const label = result.directive?.id ? ` ${result.directive.id}` : "";
 			const commitPaths = [result.sourcePath, result.targetPath];
 			try {
-				await this.git.commitFiles(`roadmap: Rename directive${label}`, commitPaths, repoRoot);
+				await this.git.commitFiles(
+					`roadmap: Rename directive${label}`,
+					commitPaths,
+					repoRoot,
+				);
 			} catch (error) {
 				await this.git.resetPaths(commitPaths, repoRoot);
 				const rollbackTitle = result.previousTitle ?? title;
-				await this.fs.renameDirective(result.directive?.id ?? identifier, rollbackTitle);
+				await this.fs.renameDirective(
+					result.directive?.id ?? identifier,
+					rollbackTitle,
+				);
 				throw error;
 			}
 		}
@@ -3791,7 +4641,10 @@ export class Core {
 		return result;
 	}
 
-	async completeProposal(proposalId: string, autoCommit?: boolean): Promise<boolean> {
+	async completeProposal(
+		proposalId: string,
+		autoCommit?: boolean,
+	): Promise<boolean> {
 		const proposal = await this.fs.loadProposal(proposalId);
 
 		// Get paths before moving the file
@@ -3811,7 +4664,10 @@ export class Core {
 		if (success && (await this.shouldAutoCommit(autoCommit))) {
 			// Stage the file move for proper Git tracking
 			const repoRoot = await this.git.stageFileMove(fromPath, toPath);
-			await this.git.commitChanges(`roadmap: Complete proposal ${normalizeProposalId(proposalId)}`, repoRoot);
+			await this.git.commitChanges(
+				`roadmap: Complete proposal ${normalizeProposalId(proposalId)}`,
+				repoRoot,
+			);
 		}
 
 		return success;
@@ -3842,7 +4698,7 @@ export class Core {
 		const proposals = await this.loadProposals();
 		const cutoff = new Date();
 		cutoff.setDate(cutoff.getDate() - ageDays);
-		return proposals.filter(p => {
+		return proposals.filter((p) => {
 			if (!isReachedStatus(p.status)) return false;
 			const dateStr = p.updatedDate || p.createdDate;
 			if (!dateStr) return false;
@@ -3857,7 +4713,10 @@ export class Core {
 		if (success && (await this.shouldAutoCommit(autoCommit))) {
 			const roadmapDir = await this.getRoadmapDirectoryName();
 			const repoRoot = await this.git.stageRoadmapDirectory(roadmapDir);
-			await this.git.commitChanges(`roadmap: Archive draft ${normalizeId(draftId, "draft")}`, repoRoot);
+			await this.git.commitChanges(
+				`roadmap: Archive draft ${normalizeId(draftId, "draft")}`,
+				repoRoot,
+			);
 		}
 
 		return success;
@@ -3869,19 +4728,28 @@ export class Core {
 		if (success && (await this.shouldAutoCommit(autoCommit))) {
 			const roadmapDir = await this.getRoadmapDirectoryName();
 			const repoRoot = await this.git.stageRoadmapDirectory(roadmapDir);
-			await this.git.commitChanges(`roadmap: Promote draft ${normalizeId(draftId, "draft")}`, repoRoot);
+			await this.git.commitChanges(
+				`roadmap: Promote draft ${normalizeId(draftId, "draft")}`,
+				repoRoot,
+			);
 		}
 
 		return success;
 	}
 
-	async demoteProposal(proposalId: string, autoCommit?: boolean): Promise<boolean> {
+	async demoteProposal(
+		proposalId: string,
+		autoCommit?: boolean,
+	): Promise<boolean> {
 		const success = await this.fs.demoteProposal(proposalId);
 
 		if (success && (await this.shouldAutoCommit(autoCommit))) {
 			const roadmapDir = await this.getRoadmapDirectoryName();
 			const repoRoot = await this.git.stageRoadmapDirectory(roadmapDir);
-			await this.git.commitChanges(`roadmap: Demote proposal ${normalizeProposalId(proposalId)}`, repoRoot);
+			await this.git.commitChanges(
+				`roadmap: Demote proposal ${normalizeProposalId(proposalId)}`,
+				repoRoot,
+			);
 		}
 
 		return success;
@@ -3890,20 +4758,31 @@ export class Core {
 	/**
 	 * Add acceptance criteria to a proposal
 	 */
-	async addAcceptanceCriteria(proposalId: string, criteria: string[], autoCommit?: boolean): Promise<void> {
+	async addAcceptanceCriteria(
+		proposalId: string,
+		criteria: string[],
+		autoCommit?: boolean,
+	): Promise<void> {
 		const proposal = await this.fs.loadProposal(proposalId);
 		if (!proposal) {
 			throw new Error(`Proposal not found: ${proposalId}`);
 		}
 
 		// Get existing criteria or initialize empty array
-		const current = Array.isArray(proposal.acceptanceCriteriaItems) ? [...proposal.acceptanceCriteriaItems] : [];
+		const current = Array.isArray(proposal.acceptanceCriteriaItems)
+			? [...proposal.acceptanceCriteriaItems]
+			: [];
 
 		// Calculate next index (1-based)
-		let nextIndex = current.length > 0 ? Math.max(...current.map((c) => c.index)) + 1 : 1;
+		let nextIndex =
+			current.length > 0 ? Math.max(...current.map((c) => c.index)) + 1 : 1;
 
 		// Append new criteria
-		const newCriteria = criteria.map((text) => ({ index: nextIndex++, text, checked: false }));
+		const newCriteria = criteria.map((text) => ({
+			index: nextIndex++,
+			text,
+			checked: false,
+		}));
 		proposal.acceptanceCriteriaItems = [...current, ...newCriteria];
 
 		// Save the proposal
@@ -3914,13 +4793,19 @@ export class Core {
 	 * Remove acceptance criteria by indices (supports batch operations)
 	 * @returns Array of removed indices
 	 */
-	async removeAcceptanceCriteria(proposalId: string, indices: number[], autoCommit?: boolean): Promise<number[]> {
+	async removeAcceptanceCriteria(
+		proposalId: string,
+		indices: number[],
+		autoCommit?: boolean,
+	): Promise<number[]> {
 		const proposal = await this.fs.loadProposal(proposalId);
 		if (!proposal) {
 			throw new Error(`Proposal not found: ${proposalId}`);
 		}
 
-		let list = Array.isArray(proposal.acceptanceCriteriaItems) ? [...proposal.acceptanceCriteriaItems] : [];
+		let list = Array.isArray(proposal.acceptanceCriteriaItems)
+			? [...proposal.acceptanceCriteriaItems]
+			: [];
 		const removed: number[] = [];
 
 		// Sort indices in descending order to avoid index shifting issues
@@ -3935,7 +4820,9 @@ export class Core {
 		}
 
 		if (removed.length === 0) {
-			throw new Error("No criteria were removed. Check that the specified indices exist.");
+			throw new Error(
+				"No criteria were removed. Check that the specified indices exist.",
+			);
 		}
 
 		// Re-index remaining items (1-based)
@@ -3964,7 +4851,9 @@ export class Core {
 			throw new Error(`Proposal not found: ${proposalId}`);
 		}
 
-		let list = Array.isArray(proposal.acceptanceCriteriaItems) ? [...proposal.acceptanceCriteriaItems] : [];
+		let list = Array.isArray(proposal.acceptanceCriteriaItems)
+			? [...proposal.acceptanceCriteriaItems]
+			: [];
 		const updated: number[] = [];
 
 		// Filter to only valid indices and update them
@@ -3995,7 +4884,9 @@ export class Core {
 	/**
 	 * List all acceptance criteria for a proposal
 	 */
-	async listAcceptanceCriteria(proposalId: string): Promise<AcceptanceCriterion[]> {
+	async listAcceptanceCriteria(
+		proposalId: string,
+	): Promise<AcceptanceCriterion[]> {
 		const proposal = await this.fs.loadProposal(proposalId);
 		if (!proposal) {
 			throw new Error(`Proposal not found: ${proposalId}`);
@@ -4004,7 +4895,10 @@ export class Core {
 		return proposal.acceptanceCriteriaItems || [];
 	}
 
-	async createDecision(decision: Decision, autoCommit?: boolean): Promise<void> {
+	async createDecision(
+		decision: Decision,
+		autoCommit?: boolean,
+	): Promise<void> {
 		await this.fs.saveDecision(decision);
 
 		// Record Pulse event
@@ -4018,11 +4912,18 @@ export class Core {
 		if (await this.shouldAutoCommit(autoCommit)) {
 			const roadmapDir = await this.getRoadmapDirectoryName();
 			const repoRoot = await this.git.stageRoadmapDirectory(roadmapDir);
-			await this.git.commitChanges(`roadmap: Add decision ${decision.id}`, repoRoot);
+			await this.git.commitChanges(
+				`roadmap: Add decision ${decision.id}`,
+				repoRoot,
+			);
 		}
 	}
 
-	async updateDecisionFromContent(decisionId: string, content: string, autoCommit?: boolean): Promise<void> {
+	async updateDecisionFromContent(
+		decisionId: string,
+		content: string,
+		autoCommit?: boolean,
+	): Promise<void> {
 		const existingDecision = await this.fs.loadDecision(decisionId);
 		if (!existingDecision) {
 			throw new Error(`Decision ${decisionId} not found`);
@@ -4032,8 +4933,14 @@ export class Core {
 		const matter = await import("gray-matter");
 		const { data } = matter.default(content);
 
-		const extractSection = (content: string, sectionName: string): string | undefined => {
-			const regex = new RegExp(`## ${sectionName}\\s*([\\s\\S]*?)(?=## |$)`, "i");
+		const extractSection = (
+			content: string,
+			sectionName: string,
+		): string | undefined => {
+			const regex = new RegExp(
+				`## ${sectionName}\\s*([\\s\\S]*?)(?=## |$)`,
+				"i",
+			);
 			const match = content.match(regex);
 			return match ? match[1]?.trim() : undefined;
 		};
@@ -4044,15 +4951,23 @@ export class Core {
 			status: data.status || existingDecision.status,
 			date: data.date || existingDecision.date,
 			context: extractSection(content, "Context") || existingDecision.context,
-			decision: extractSection(content, "Decision") || existingDecision.decision,
-			consequences: extractSection(content, "Consequences") || existingDecision.consequences,
-			alternatives: extractSection(content, "Alternatives") || existingDecision.alternatives,
+			decision:
+				extractSection(content, "Decision") || existingDecision.decision,
+			consequences:
+				extractSection(content, "Consequences") ||
+				existingDecision.consequences,
+			alternatives:
+				extractSection(content, "Alternatives") ||
+				existingDecision.alternatives,
 		};
 
 		await this.createDecision(updatedDecision, autoCommit);
 	}
 
-	async createDecisionWithTitle(title: string, autoCommit?: boolean): Promise<Decision> {
+	async createDecisionWithTitle(
+		title: string,
+		autoCommit?: boolean,
+	): Promise<Decision> {
 		// Import the generateNextDecisionId function from CLI
 		const { generateNextDecisionId } = await import("../cli.js");
 		const id = await generateNextDecisionId(this);
@@ -4073,7 +4988,11 @@ export class Core {
 		return decision;
 	}
 
-	async createDocument(doc: Document, autoCommit?: boolean, subPath = ""): Promise<void> {
+	async createDocument(
+		doc: Document,
+		autoCommit?: boolean,
+		subPath = "",
+	): Promise<void> {
 		const relativePath = await this.fs.saveDocument(doc, subPath);
 		doc.path = relativePath;
 
@@ -4084,7 +5003,11 @@ export class Core {
 		}
 	}
 
-	async updateDocument(existingDoc: Document, content: string, autoCommit?: boolean): Promise<void> {
+	async updateDocument(
+		existingDoc: Document,
+		content: string,
+		autoCommit?: boolean,
+	): Promise<void> {
 		const updatedDoc = {
 			...existingDoc,
 			rawContent: content,
@@ -4102,7 +5025,11 @@ export class Core {
 		await this.createDocument(updatedDoc, autoCommit, normalizedSubPath);
 	}
 
-	async createDocumentWithId(title: string, content: string, autoCommit?: boolean): Promise<Document> {
+	async createDocumentWithId(
+		title: string,
+		content: string,
+		autoCommit?: boolean,
+	): Promise<Document> {
 		// Import the generateNextDocId function from CLI
 		const { generateNextDocId } = await import("../cli.js");
 		const id = await generateNextDocId(this);
@@ -4119,7 +5046,10 @@ export class Core {
 		return document;
 	}
 
-	async initializeProject(projectName: string, autoCommit = false): Promise<void> {
+	async initializeProject(
+		projectName: string,
+		autoCommit = false,
+	): Promise<void> {
 		await this.fs.ensureRoadmapStructure();
 
 		const config: RoadmapConfig = {
@@ -4142,7 +5072,10 @@ export class Core {
 		if (autoCommit) {
 			const roadmapDir = await this.getRoadmapDirectoryName();
 			const repoRoot = await this.git.stageRoadmapDirectory(roadmapDir);
-			await this.git.commitChanges(`roadmap: Initialize roadmap project: ${projectName}`, repoRoot);
+			await this.git.commitChanges(
+				`roadmap: Initialize roadmap project: ${projectName}`,
+				repoRoot,
+			);
 		}
 	}
 
@@ -4162,20 +5095,28 @@ export class Core {
 							lastModified: new Date(stats.mtime),
 							// Only include branch if explicitly requested
 							...(includeBranchMeta && {
-								branch: (await this.git.getFileLastModifiedBranch(filePath)) || undefined,
+								branch:
+									(await this.git.getFileLastModifiedBranch(filePath)) ||
+									undefined,
 							}),
 						};
 					}
 					return proposal;
 				} catch (error) {
 					if (process.env.DEBUG) {
-						console.warn(`[Core] Failed to load metadata for proposal ${proposal.id}:`, error);
+						console.warn(
+							`[Core] Failed to load metadata for proposal ${proposal.id}:`,
+							error,
+						);
 					}
 					return proposal; // Return proposal without metadata rather than crashing
 				}
 			}),
 		);
-		return results.filter((s): s is Proposal & { lastModified?: Date; branch?: string } => Boolean(s));
+		return results.filter(
+			(s): s is Proposal & { lastModified?: Date; branch?: string } =>
+				Boolean(s),
+		);
 	}
 
 	/**
@@ -4183,19 +5124,39 @@ export class Core {
 	 * @param filePath - Path to the file to edit
 	 * @param screen - Optional blessed screen to suspend (for TUI contexts)
 	 */
-	async editProposalInTui(proposalId: string, screen: BlessedScreen, selectedProposal?: Proposal): Promise<TuiProposalEditResult> {
-		const contextualProposal = selectedProposal && proposalIdsEqual(selectedProposal.id, proposalId) ? selectedProposal : undefined;
+	async editProposalInTui(
+		proposalId: string,
+		screen: BlessedScreen,
+		selectedProposal?: Proposal,
+	): Promise<TuiProposalEditResult> {
+		const contextualProposal =
+			selectedProposal && proposalIdsEqual(selectedProposal.id, proposalId)
+				? selectedProposal
+				: undefined;
 
-		if (contextualProposal && (!isLocalEditableProposal(contextualProposal) || contextualProposal.branch)) {
-			return { changed: false, proposal: contextualProposal, reason: "read_only" };
+		if (
+			contextualProposal &&
+			(!isLocalEditableProposal(contextualProposal) ||
+				contextualProposal.branch)
+		) {
+			return {
+				changed: false,
+				proposal: contextualProposal,
+				reason: "read_only",
+			};
 		}
 
-		const resolvedProposal = contextualProposal ?? (await this.getProposal(proposalId));
+		const resolvedProposal =
+			contextualProposal ?? (await this.getProposal(proposalId));
 		if (!resolvedProposal) {
 			return { changed: false, reason: "not_found" };
 		}
 		if (!isLocalEditableProposal(resolvedProposal) || resolvedProposal.branch) {
-			return { changed: false, proposal: resolvedProposal, reason: "read_only" };
+			return {
+				changed: false,
+				proposal: resolvedProposal,
+				reason: "read_only",
+			};
 		}
 
 		const localProposal = await this.fs.loadProposal(resolvedProposal.id);
@@ -4203,31 +5164,50 @@ export class Core {
 
 		const filePath = await getProposalPath(editableProposal.id, this);
 		if (!filePath) {
-			return { changed: false, proposal: editableProposal, reason: "not_found" };
+			return {
+				changed: false,
+				proposal: editableProposal,
+				reason: "not_found",
+			};
 		}
 
 		let beforeContent: string;
 		try {
 			beforeContent = await readFile(filePath, "utf-8");
 		} catch {
-			return { changed: false, proposal: editableProposal, reason: "not_found" };
+			return {
+				changed: false,
+				proposal: editableProposal,
+				reason: "not_found",
+			};
 		}
 
 		const opened = await this.openEditor(filePath, screen);
 		if (!opened) {
-			return { changed: false, proposal: editableProposal, reason: "editor_failed" };
+			return {
+				changed: false,
+				proposal: editableProposal,
+				reason: "editor_failed",
+			};
 		}
 
 		let afterContent: string;
 		try {
 			afterContent = await readFile(filePath, "utf-8");
 		} catch {
-			return { changed: false, proposal: editableProposal, reason: "not_found" };
+			return {
+				changed: false,
+				proposal: editableProposal,
+				reason: "not_found",
+			};
 		}
 
 		if (afterContent === beforeContent) {
 			const refreshedProposal = await this.fs.loadProposal(editableProposal.id);
-			return { changed: false, proposal: refreshedProposal ?? editableProposal };
+			return {
+				changed: false,
+				proposal: refreshedProposal ?? editableProposal,
+			};
 		}
 
 		const now = new Date().toISOString().slice(0, 16).replace("T", " ");
@@ -4275,7 +5255,8 @@ export class Core {
 		fs.writeSync(1, "\u001b[0m\u001b[?25h\u001b[?1l\u001b>");
 
 		// Pause the terminal AFTER leaving alt buffer (disables raw mode, releases terminal)
-		const resume = typeof program.pause === "function" ? program.pause() : undefined;
+		const resume =
+			typeof program.pause === "function" ? program.pause() : undefined;
 		try {
 			return await openInEditor(filePath, config);
 		} finally {
@@ -4303,39 +5284,66 @@ export class Core {
 	 */
 	async loadAllProposalsForStatistics(
 		progressCallback?: (msg: string) => void,
-	): Promise<{ proposals: Proposal[]; drafts: Proposal[]; statuses: string[] }> {
+	): Promise<{
+		proposals: Proposal[];
+		drafts: Proposal[];
+		statuses: string[];
+	}> {
 		const config = await this.fs.loadConfig();
 
 		const statuses = (config?.statuses || DEFAULT_STATUSES) as string[];
-		const resolutionStrategy = config?.proposalResolutionStrategy || "most_progressed";
+		const resolutionStrategy =
+			config?.proposalResolutionStrategy || "most_progressed";
 
 		// Load local and completed proposals first
 		progressCallback?.("Loading local proposals...");
-		const [localProposals, completedProposals, archivedProposals] = await Promise.all([
-			this.listProposalsWithMetadata(),
-			this.fs.listCompletedProposals(),
-			this.fs.listArchivedProposals(),
-		]);
+		const [localProposals, completedProposals, archivedProposals] =
+			await Promise.all([
+				this.listProposalsWithMetadata(),
+				this.fs.listCompletedProposals(),
+				this.fs.listArchivedProposals(),
+			]);
 
 		// Load remote proposals and local branch proposals in parallel
 		const branchProposalEntries: BranchProposalProposalEntry[] | undefined =
 			config?.checkActiveBranches === false ? undefined : [];
 		const [remoteProposals, localBranchProposals] = await Promise.all([
-			loadRemoteProposals(this.git, config, progressCallback, localProposals, branchProposalEntries),
-			loadLocalBranchProposals(this.git, config, progressCallback, localProposals, branchProposalEntries),
+			loadRemoteProposals(
+				this.git,
+				config,
+				progressCallback,
+				localProposals,
+				branchProposalEntries,
+			),
+			loadLocalBranchProposals(
+				this.git,
+				config,
+				progressCallback,
+				localProposals,
+				branchProposalEntries,
+			),
 		]);
 		progressCallback?.("Loaded proposals");
 
 		// Create map with local proposals
-		const proposalsById = new Map<string, Proposal>(localProposals.map((t) => [t.id, { ...t, origin: "local" }]));
+		const proposalsById = new Map<string, Proposal>(
+			localProposals.map((t) => [t.id, { ...t, origin: "local" }]),
+		);
 
 		if (process.env.DEBUG) {
-			console.error("[DEBUG] loadProposals: localProposals count=", localProposals.length, "origin set to local");
+			console.error(
+				"[DEBUG] loadProposals: localProposals count=",
+				localProposals.length,
+				"origin set to local",
+			);
 		}
 		// Add completed proposals to the map
 		for (const completedProposal of completedProposals) {
 			if (!proposalsById.has(completedProposal.id)) {
-				proposalsById.set(completedProposal.id, { ...completedProposal, origin: "completed" });
+				proposalsById.set(completedProposal.id, {
+					...completedProposal,
+					origin: "completed",
+				});
 			}
 		}
 
@@ -4346,7 +5354,12 @@ export class Core {
 			if (!existing) {
 				proposalsById.set(branchProposal.id, branchProposal);
 			} else {
-				const resolved = resolveProposalConflict(existing, branchProposal, statuses, resolutionStrategy);
+				const resolved = resolveProposalConflict(
+					existing,
+					branchProposal,
+					statuses,
+					resolutionStrategy,
+				);
 				proposalsById.set(branchProposal.id, resolved);
 			}
 		}
@@ -4357,7 +5370,12 @@ export class Core {
 			if (!existing) {
 				proposalsById.set(remoteProposal.id, remoteProposal);
 			} else {
-				const resolved = resolveProposalConflict(existing, remoteProposal, statuses, resolutionStrategy);
+				const resolved = resolveProposalConflict(
+					existing,
+					remoteProposal,
+					statuses,
+					resolutionStrategy,
+				);
 				proposalsById.set(remoteProposal.id, resolved);
 			}
 		}
@@ -4369,10 +5387,16 @@ export class Core {
 		if (config?.checkActiveBranches === false) {
 			activeProposals = proposals;
 		} else {
-			progressCallback?.("Applying latest proposal proposals from branch scans...");
+			progressCallback?.(
+				"Applying latest proposal proposals from branch scans...",
+			);
 			activeProposals = filterProposalsByProposalSnapshots(
 				proposals,
-				buildLatestProposalMap(branchProposalEntries || [], localProposals, archivedProposals),
+				buildLatestProposalMap(
+					branchProposalEntries || [],
+					localProposals,
+					archivedProposals,
+				),
 			);
 		}
 
@@ -4380,7 +5404,11 @@ export class Core {
 		progressCallback?.("Loading drafts...");
 		const drafts = await this.fs.listDrafts();
 
-		return { proposals: activeProposals, drafts, statuses: statuses as string[] };
+		return {
+			proposals: activeProposals,
+			drafts,
+			statuses: statuses as string[],
+		};
 	}
 
 	/**
@@ -4403,7 +5431,8 @@ export class Core {
 		}
 
 		const statuses = config?.statuses || [...DEFAULT_STATUSES];
-		const resolutionStrategy = config?.proposalResolutionStrategy || "most_progressed";
+		const resolutionStrategy =
+			config?.proposalResolutionStrategy || "most_progressed";
 		const includeCompleted = options?.includeCompleted ?? false;
 
 		// Check for cancellation
@@ -4412,11 +5441,14 @@ export class Core {
 		}
 
 		// Load local filesystem proposals first (needed for optimization)
-		const [localProposals, completedProposals, archivedProposals] = await Promise.all([
-			this.listProposalsWithMetadata(),
-			includeCompleted ? this.fs.listCompletedProposals() : Promise.resolve([]),
-			this.fs.listArchivedProposals(),
-		]);
+		const [localProposals, completedProposals, archivedProposals] =
+			await Promise.all([
+				this.listProposalsWithMetadata(),
+				includeCompleted
+					? this.fs.listCompletedProposals()
+					: Promise.resolve([]),
+				this.fs.listArchivedProposals(),
+			]);
 
 		// Check for cancellation
 		if (abortSignal?.aborted) {
@@ -4429,8 +5461,22 @@ export class Core {
 		const branchProposalEntries: BranchProposalProposalEntry[] | undefined =
 			config?.checkActiveBranches === false ? undefined : [];
 		const [remoteProposals, localBranchProposals] = await Promise.all([
-			loadRemoteProposals(this.git, config, progressCallback, localProposals, branchProposalEntries, includeCompleted),
-			loadLocalBranchProposals(this.git, config, progressCallback, localProposals, branchProposalEntries, includeCompleted),
+			loadRemoteProposals(
+				this.git,
+				config,
+				progressCallback,
+				localProposals,
+				branchProposalEntries,
+				includeCompleted,
+			),
+			loadLocalBranchProposals(
+				this.git,
+				config,
+				progressCallback,
+				localProposals,
+				branchProposalEntries,
+				includeCompleted,
+			),
 		]);
 
 		// Check for cancellation after loading
@@ -4439,12 +5485,17 @@ export class Core {
 		}
 
 		// Create map with local proposals (current branch filesystem)
-		const proposalsById = new Map<string, Proposal>(localProposals.map((t) => [t.id, { ...t, origin: "local" }]));
+		const proposalsById = new Map<string, Proposal>(
+			localProposals.map((t) => [t.id, { ...t, origin: "local" }]),
+		);
 
 		// Add local completed proposals when requested
 		if (includeCompleted) {
 			for (const completedProposal of completedProposals) {
-				proposalsById.set(completedProposal.id, { ...completedProposal, origin: "completed" });
+				proposalsById.set(completedProposal.id, {
+					...completedProposal,
+					origin: "completed",
+				});
 			}
 		}
 
@@ -4458,7 +5509,12 @@ export class Core {
 			if (!existing) {
 				proposalsById.set(branchProposal.id, branchProposal);
 			} else {
-				const resolved = resolveProposalConflict(existing, branchProposal, statuses, resolutionStrategy);
+				const resolved = resolveProposalConflict(
+					existing,
+					branchProposal,
+					statuses,
+					resolutionStrategy,
+				);
 				proposalsById.set(branchProposal.id, resolved);
 			}
 		}
@@ -4474,7 +5530,12 @@ export class Core {
 			if (!existing) {
 				proposalsById.set(remoteProposal.id, remoteProposal);
 			} else {
-				const resolved = resolveProposalConflict(existing, remoteProposal, statuses, resolutionStrategy);
+				const resolved = resolveProposalConflict(
+					existing,
+					remoteProposal,
+					statuses,
+					resolutionStrategy,
+				);
 				proposalsById.set(remoteProposal.id, resolved);
 			}
 		}
@@ -4496,17 +5557,25 @@ export class Core {
 		if (config?.checkActiveBranches === false) {
 			filteredProposals = proposals;
 		} else {
-			progressCallback?.("Applying latest proposal proposals from branch scans...");
+			progressCallback?.(
+				"Applying latest proposal proposals from branch scans...",
+			);
 			if (!includeCompleted) {
 				filteredProposals = filterProposalsByProposalSnapshots(
 					proposals,
-					buildLatestProposalMap(branchProposalEntries || [], localProposals, archivedProposals),
+					buildLatestProposalMap(
+						branchProposalEntries || [],
+						localProposals,
+						archivedProposals,
+					),
 				);
 			} else {
 				const proposalEntries = branchProposalEntries || [];
 				for (const completedProposal of completedProposals) {
 					if (!completedProposal.id) continue;
-					const lastModified = completedProposal.updatedDate ? new Date(completedProposal.updatedDate) : new Date(0);
+					const lastModified = completedProposal.updatedDate
+						? new Date(completedProposal.updatedDate)
+						: new Date(0);
 					proposalEntries.push({
 						id: completedProposal.id,
 						type: "completed",
@@ -4516,7 +5585,11 @@ export class Core {
 					});
 				}
 
-				const latestProposal = buildLatestProposalMap(proposalEntries, localProposals, archivedProposals);
+				const latestProposal = buildLatestProposalMap(
+					proposalEntries,
+					localProposals,
+					archivedProposals,
+				);
 				const completedIds = new Set<string>();
 				for (const [id, entry] of latestProposal) {
 					if (entry.type === "completed") {
@@ -4559,19 +5632,25 @@ export class Core {
 			// Fallback to local project root
 		}
 		const messagesDir = join(sharedRoadmapDir, "messages");
-		if (!fs.existsSync(messagesDir)) fs.mkdirSync(messagesDir, { recursive: true });
+		if (!fs.existsSync(messagesDir))
+			fs.mkdirSync(messagesDir, { recursive: true });
 		return messagesDir;
 	}
 
 	/**
 	 * List available message channels
 	 */
-	async listChannels(): Promise<{ name: string; fileName: string; type: "group" | "private" | "public" }[]> {
+	async listChannels(): Promise<
+		{ name: string; fileName: string; type: "group" | "private" | "public" }[]
+	> {
 		const messagesDir = await this.getMessagesDir();
 		if (!fs.existsSync(messagesDir)) return [];
-		const files: string[] = fs.readdirSync(messagesDir).filter((f: string) => f.endsWith(".md"));
+		const files: string[] = fs
+			.readdirSync(messagesDir)
+			.filter((f: string) => f.endsWith(".md"));
 		return files.map((fileName: string) => {
-			if (fileName === "PUBLIC.md") return { name: "public", fileName, type: "public" as const };
+			if (fileName === "PUBLIC.md")
+				return { name: "public", fileName, type: "public" as const };
 			if (fileName.startsWith("private-")) {
 				const name = fileName.replace("private-", "").replace(".md", "");
 				return { name, fileName, type: "private" as const };
@@ -4587,7 +5666,15 @@ export class Core {
 	async readMessages(params: {
 		channel: string;
 		since?: string;
-	}): Promise<{ channel: string; messages: { timestamp: string; from: string; text: string; mentions: string[] }[] }> {
+	}): Promise<{
+		channel: string;
+		messages: {
+			timestamp: string;
+			from: string;
+			text: string;
+			mentions: string[];
+		}[];
+	}> {
 		const { channel, since } = params;
 		const messagesDir = await this.getMessagesDir();
 
@@ -4608,7 +5695,12 @@ export class Core {
 		const raw: string = fs.readFileSync(filePath, "utf-8");
 		const sinceDate = since ? new Date(since) : null;
 
-		const messages: { timestamp: string; from: string; text: string; mentions: string[] }[] = [];
+		const messages: {
+			timestamp: string;
+			from: string;
+			text: string;
+			mentions: string[];
+		}[] = [];
 		for (const line of raw.split("\n")) {
 			const parsed = Core.parseLine(line);
 			if (!parsed) continue;
@@ -4625,8 +5717,12 @@ export class Core {
 	async resolveChannelFile(channel: string): Promise<string> {
 		const messagesDir = await this.getMessagesDir();
 		if (channel === "public") return join(messagesDir, "PUBLIC.md");
-		if (channel.startsWith("private-")) return join(messagesDir, `${channel}.md`);
-		return join(messagesDir, `group-${channel.toLowerCase().replace(/[^a-z0-9-]/g, "-")}.md`);
+		if (channel.startsWith("private-"))
+			return join(messagesDir, `${channel}.md`);
+		return join(
+			messagesDir,
+			`group-${channel.toLowerCase().replace(/[^a-z0-9-]/g, "-")}.md`,
+		);
 	}
 
 	private static readonly MULTILINE_MESSAGE_PREFIX = "__roadmap_msg_b64__:";
@@ -4637,7 +5733,10 @@ export class Core {
 		}
 
 		try {
-			return Buffer.from(text.slice(Core.MULTILINE_MESSAGE_PREFIX.length), "base64").toString("utf-8");
+			return Buffer.from(
+				text.slice(Core.MULTILINE_MESSAGE_PREFIX.length),
+				"base64",
+			).toString("utf-8");
 		} catch {
 			return text;
 		}
@@ -4654,14 +5753,28 @@ export class Core {
 	/**
 	 * Parse a single log line into a structured message (or null if not a message line)
 	 */
-	static parseLine(line: string): { timestamp: string; from: string; text: string; mentions: string[] } | null {
-		const match = line.match(/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] ([^:]+): (.+)$/);
+	static parseLine(
+		line: string,
+	): {
+		timestamp: string;
+		from: string;
+		text: string;
+		mentions: string[];
+	} | null {
+		const match = line.match(
+			/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] ([^:]+): (.+)$/,
+		);
 		if (!match) return null;
 		const text = Core.decodeStoredMessageText(match[3] as string);
 		const mentions = [...text.matchAll(/@([a-zA-Z0-9_-]+)/g)]
 			.map((match) => match[1]?.toLowerCase())
 			.filter((mention): mention is string => Boolean(mention));
-		return { timestamp: match[1] as string, from: match[2] as string, text, mentions };
+		return {
+			timestamp: match[1] as string,
+			from: match[2] as string,
+			text,
+			mentions,
+		};
 	}
 
 	/**
@@ -4675,14 +5788,21 @@ export class Core {
 		identity?: string;
 		mention?: string;
 		since?: string;
-		onMessage: (msg: { timestamp: string; from: string; text: string; mentions: string[]; channel: string }) => void;
+		onMessage: (msg: {
+			timestamp: string;
+			from: string;
+			text: string;
+			mentions: string[];
+			channel: string;
+		}) => void;
 	}): Promise<() => void> {
 		const { channel, identity, mention, since, onMessage } = params;
 		const filePath = await this.resolveChannelFile(channel);
 		const mentionLower = mention?.toLowerCase();
 
 		const shouldEmit = (parsed: { from: string; mentions: string[] }) => {
-			if (identity && parsed.from.toLowerCase() === identity.toLowerCase()) return false;
+			if (identity && parsed.from.toLowerCase() === identity.toLowerCase())
+				return false;
 			if (mentionLower && !parsed.mentions.includes(mentionLower)) return false;
 			return true;
 		};
@@ -4811,7 +5931,10 @@ export class Core {
 		yesterday.setDate(now.getDate() - 1);
 		const isYesterday = date.toDateString() === yesterday.toDateString();
 
-		const timeStr = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+		const timeStr = date.toLocaleTimeString([], {
+			hour: "numeric",
+			minute: "2-digit",
+		});
 		let dateStr = "";
 		if (isToday) dateStr = "Today";
 		else if (isYesterday) dateStr = "Yesterday";
@@ -4848,7 +5971,11 @@ export class Core {
 	 * Find the best ready proposal and claim it atomically.
 	 * Returns the claimed proposal and a summary of why it was chosen.
 	 */
-	async heartbeat(proposalId: string, agent: string, autoCommit?: boolean): Promise<Proposal> {
+	async heartbeat(
+		proposalId: string,
+		agent: string,
+		autoCommit?: boolean,
+	): Promise<Proposal> {
 		if (await this.isPostgresProposalBackend()) {
 			return await this.renewClaim(proposalId, agent, {
 				durationMinutes: DEFAULT_CLAIM_DURATION_MINUTES,
@@ -4860,11 +5987,15 @@ export class Core {
 		if (!proposal) throw new Error(`Proposal not found: ${proposalId}`);
 
 		if (!proposal.claim) {
-			throw new Error(`Proposal ${proposalId} has no active claim to heartbeat`);
+			throw new Error(
+				`Proposal ${proposalId} has no active claim to heartbeat`,
+			);
 		}
 
 		if (proposal.claim.agent !== agent) {
-			throw new Error(`Proposal ${proposalId} claim is held by ${proposal.claim.agent}, not ${agent}`);
+			throw new Error(
+				`Proposal ${proposalId} claim is held by ${proposal.claim.agent}, not ${agent}`,
+			);
 		}
 
 		const now = new Date();
@@ -4873,7 +6004,11 @@ export class Core {
 			lastHeartbeat: formatLocalDateTime(now),
 		};
 
-		return await this.updateProposalFromInput(proposalId, { claim }, autoCommit);
+		return await this.updateProposalFromInput(
+			proposalId,
+			{ claim },
+			autoCommit,
+		);
 	}
 
 	/**
@@ -4891,7 +6026,11 @@ export class Core {
 					filters: { ready: true },
 					includeCrossBranch: false,
 				})
-			).filter((proposal) => !proposal.external_injections || proposal.external_injections.length === 0);
+			).filter(
+				(proposal) =>
+					!proposal.external_injections ||
+					proposal.external_injections.length === 0,
+			);
 
 			if (readyProposals.length === 0) {
 				return null;
@@ -4903,84 +6042,104 @@ export class Core {
 			}
 
 			const queue = await pg.getProposalQueue();
-			const queueItem = queue.find((item) => item.display_id === bestProposal.id);
+			const queueItem = queue.find(
+				(item) => item.display_id === bestProposal.id,
+			);
 			const explanation = `Chosen ${bestProposal.id} ("${bestProposal.title}") from the Postgres queue${queueItem ? ` at queue position ${queueItem.queue_position}` : ""}.`;
 
 			if (params.dryRun) {
 				return { proposal: bestProposal, explanation };
 			}
 
-			const claimedProposal = await this.claimProposal(bestProposal.id, params.agent, {
-				durationMinutes: params.durationMinutes,
-			});
+			const claimedProposal = await this.claimProposal(
+				bestProposal.id,
+				params.agent,
+				{
+					durationMinutes: params.durationMinutes,
+				},
+			);
 			return {
 				proposal: claimedProposal,
 				explanation,
 			};
 		}
 
-		return await FileLock.withLock(this.fs.rootDir, "coordination", async () => {
-			const { agent, dryRun, durationMinutes } = params;
+		return await FileLock.withLock(
+			this.fs.rootDir,
+			"coordination",
+			async () => {
+				const { agent, dryRun, durationMinutes } = params;
 
-			// 1. Get all ready proposals
-			let readyProposals = (
-				await this.queryProposals({
-					filters: { ready: true },
-					includeCrossBranch: false,
-				})
-			).filter((proposal) => !proposal.external_injections || proposal.external_injections.length === 0);
-		// Consider only proposals that have a file on disk (filesystem-backed) for claim operations.
-		readyProposals = readyProposals.filter(p => !!p.filePath);
+				// 1. Get all ready proposals
+				let readyProposals = (
+					await this.queryProposals({
+						filters: { ready: true },
+						includeCrossBranch: false,
+					})
+				).filter(
+					(proposal) =>
+						!proposal.external_injections ||
+						proposal.external_injections.length === 0,
+				);
+				// Consider only proposals that have a file on disk (filesystem-backed) for claim operations.
+				readyProposals = readyProposals.filter((p) => !!p.filePath);
 
-			if (readyProposals.length === 0) {
-				return null;
-			}
+				if (readyProposals.length === 0) {
+					return null;
+				}
 
-			// 2. Sort by priority (High > Medium > Low) and then by ID
-			const priorityMap = { high: 0, medium: 1, low: 2 };
-			const sorted = readyProposals.sort((a, b) => {
-				const pA = priorityMap[a.priority || "low"];
-				const pB = priorityMap[b.priority || "low"];
-				if (pA !== pB) return pA - pB;
-				return a.id.localeCompare(b.id, undefined, { numeric: true });
-			});
+				// 2. Sort by priority (High > Medium > Low) and then by ID
+				const priorityMap = { high: 0, medium: 1, low: 2 };
+				const sorted = readyProposals.sort((a, b) => {
+					const pA = priorityMap[a.priority || "low"];
+					const pB = priorityMap[b.priority || "low"];
+					if (pA !== pB) return pA - pB;
+					return a.id.localeCompare(b.id, undefined, { numeric: true });
+				});
 
-			const bestProposal = sorted[0];
-			if (!bestProposal) {
-				return null;
-			}
-			const explanation = `Chosen ${bestProposal.id} ("${
-				bestProposal.title
-			}") based on priority '${bestProposal.priority || "low"}' and readiness (unblocked and unassigned).`;
+				const bestProposal = sorted[0];
+				if (!bestProposal) {
+					return null;
+				}
+				const explanation = `Chosen ${bestProposal.id} ("${
+					bestProposal.title
+				}") based on priority '${bestProposal.priority || "low"}' and readiness (unblocked and unassigned).`;
 
-			if (dryRun) {
-				return { proposal: bestProposal, explanation };
-			}
+				if (dryRun) {
+					return { proposal: bestProposal, explanation };
+				}
 
-			// 3. Claim the proposal (calling internal method because we already hold the lock)
-			await this.executeClaimProposal(bestProposal.id, agent, { durationMinutes });
+				// 3. Claim the proposal (calling internal method because we already hold the lock)
+				await this.executeClaimProposal(bestProposal.id, agent, {
+					durationMinutes,
+				});
 
-			// Refresh proposal to include claim metadata
-			const claimedProposal = await this.getProposal(bestProposal.id);
+				// Refresh proposal to include claim metadata
+				const claimedProposal = await this.getProposal(bestProposal.id);
 
-			return {
-				proposal: claimedProposal || bestProposal,
-				explanation,
-			};
-		});
+				return {
+					proposal: claimedProposal || bestProposal,
+					explanation,
+				};
+			},
+		);
 	}
 	/**
 	 * Analyze the forward impact of a proposal change.
 	 * Returns all downstream proposals that depend on this proposal (recursively).
 	 */
 	async getImpact(proposalId: string): Promise<Proposal[]> {
-		const allProposals = await this.queryProposals({ includeCrossBranch: false });
+		const allProposals = await this.queryProposals({
+			includeCrossBranch: false,
+		});
 		const impact = new Set<string>();
 		const queue = [proposalId];
 
 		while (queue.length > 0) {
 			const currentId = queue.shift()!;
-			const dependents = allProposals.filter((s) => s.dependencies?.includes(currentId));
+			const dependents = allProposals.filter((s) =>
+				s.dependencies?.includes(currentId),
+			);
 
 			for (const dep of dependents) {
 				if (!impact.has(dep.id)) {
@@ -4996,7 +6155,10 @@ export class Core {
 	/**
 	 * Scans for stale leases based on heartbeats and automatically reclaims them.
 	 */
-	async checkLeaseHealth(options?: { timeoutMinutes?: number; autoCommit?: boolean }): Promise<string[]> {
+	async checkLeaseHealth(options?: {
+		timeoutMinutes?: number;
+		autoCommit?: boolean;
+	}): Promise<string[]> {
 		const recoveredIds = await this.pruneClaims(options);
 		return recoveredIds;
 	}
@@ -5011,7 +6173,9 @@ export class Core {
 	/**
 	 * Register or update an agent in the registry
 	 */
-	async registerAgent(agent: Omit<Agent, "lastSeen" | "trustScore">): Promise<Agent> {
+	async registerAgent(
+		agent: Omit<Agent, "lastSeen" | "trustScore">,
+	): Promise<Agent> {
 		const agentsPath = await this.getAgentsFilePath();
 		let agents: Agent[] = [];
 
@@ -5029,7 +6193,7 @@ export class Core {
 			name: agent.name,
 			identity: agent.identity,
 			capabilities: agent.capabilities || [],
-			trustScore: existingIndex >= 0 ? agents[existingIndex]!.trustScore : 100, // Default trust
+			trustScore: existingIndex >= 0 ? agents[existingIndex]?.trustScore : 100, // Default trust
 			lastSeen: now,
 			status: agent.status || "idle",
 			availability: agent.availability,
@@ -5049,7 +6213,9 @@ export class Core {
 	/**
 	 * Attempt to load an agent profile from a workspace (worktree) directory
 	 */
-	async getAgentProfileFromWorkspace(agentName: string): Promise<Partial<Agent> | null> {
+	async getAgentProfileFromWorkspace(
+		agentName: string,
+	): Promise<Partial<Agent> | null> {
 		const worktreeDir = join(this.fs.rootDir, "worktrees", agentName);
 		const profilePath = join(worktreeDir, "roadmap-agent.json");
 
@@ -5067,7 +6233,10 @@ export class Core {
 			}
 		} catch (error) {
 			if (process.env.DEBUG) {
-				console.warn(`Failed to load agent profile from ${profilePath}:`, error);
+				console.warn(
+					`Failed to load agent profile from ${profilePath}:`,
+					error,
+				);
 			}
 		}
 		return null;
@@ -5093,22 +6262,28 @@ export class Core {
 				const dirs = await fs.promises.readdir(worktreesDir);
 				for (const dir of dirs) {
 					if ((await fs.promises.stat(join(worktreesDir, dir))).isDirectory()) {
-						const workspaceProfile = await this.getAgentProfileFromWorkspace(dir);
+						const workspaceProfile =
+							await this.getAgentProfileFromWorkspace(dir);
 						if (workspaceProfile) {
-							const existingIndex = registeredAgents.findIndex((a) => a.name === dir || a.name === `@${dir}`);
+							const existingIndex = registeredAgents.findIndex(
+								(a) => a.name === dir || a.name === `@${dir}`,
+							);
 							if (existingIndex >= 0) {
 								// Merge workspace profile into registered agent (workspace takes precedence for dynamic fields)
 								registeredAgents[existingIndex] = {
 									...registeredAgents[existingIndex],
 									...workspaceProfile,
-									name: registeredAgents[existingIndex]!.name, // Keep registered name
+									name: registeredAgents[existingIndex]?.name, // Keep registered name
 								} as Agent;
 							} else {
 								// Add as a new discovered agent
 								registeredAgents.push({
 									name: dir,
 									capabilities: workspaceProfile.capabilities || [],
-									status: workspaceProfile.status || workspaceProfile.availability || "idle",
+									status:
+										workspaceProfile.status ||
+										workspaceProfile.availability ||
+										"idle",
 									availability: workspaceProfile.availability,
 									costClass: workspaceProfile.costClass,
 									trustScore: 100,
@@ -5130,7 +6305,9 @@ export class Core {
 		const allProposals = await this.fs.listProposals();
 		for (const agent of registeredAgents) {
 			const agentNameLower = agent.name.toLowerCase();
-			const agentNameNoAtLower = agentNameLower.startsWith("@") ? agentNameLower.slice(1) : agentNameLower;
+			const agentNameNoAtLower = agentNameLower.startsWith("@")
+				? agentNameLower.slice(1)
+				: agentNameLower;
 
 			agent.claims = allProposals.filter((proposal) => {
 				const assignees = proposal.assignee?.map((a) => a.toLowerCase()) || [];
@@ -5308,16 +6485,25 @@ export class Core {
 		if (config?.autoCommit) {
 			try {
 				await this.git.addFile(filePath);
-				await this.git.commitChanges(`${from} sent a message to ${channelName}`, dirname(filePath));
+				await this.git.commitChanges(
+					`${from} sent a message to ${channelName}`,
+					dirname(filePath),
+				);
 			} catch (_e) {
 				// Ignore if commit fails
 			}
 		}
 
 		// Notify subscribed agents (push notification)
-		const channelIdentifier = type === "group" && group ? group : type === "public" ? "public" : null;
+		const channelIdentifier =
+			type === "group" && group ? group : type === "public" ? "public" : null;
 		if (channelIdentifier) {
-			await this.notifySubscribedAgents(channelIdentifier, from, normalizedMessage, timestamp);
+			await this.notifySubscribedAgents(
+				channelIdentifier,
+				from,
+				normalizedMessage,
+				timestamp,
+			);
 		}
 
 		return filePath;
@@ -5420,7 +6606,12 @@ export class Core {
 	 */
 	registerNotificationCallback(
 		agent: string,
-		callback: (msg: { channel: string; from: string; text: string; timestamp: string }) => void,
+		callback: (msg: {
+			channel: string;
+			from: string;
+			text: string;
+			timestamp: string;
+		}) => void,
 	): () => void {
 		this.notificationCallbacks.set(agent, callback);
 		return () => {
@@ -5431,7 +6622,12 @@ export class Core {
 	/**
 	 * Notify subscribed agents when a new message is sent.
 	 */
-	private async notifySubscribedAgents(channel: string, from: string, text: string, timestamp: string): Promise<void> {
+	private async notifySubscribedAgents(
+		channel: string,
+		from: string,
+		text: string,
+		timestamp: string,
+	): Promise<void> {
 		const agents = await this.getSubscribedAgents(channel);
 		for (const agent of agents) {
 			// Don't notify the sender
@@ -5453,14 +6649,19 @@ export class Core {
 	 */
 	async emitPulse(event: PulseEvent): Promise<void> {
 		const pulsePath = join(this.fs.rootDir, "roadmap", "pulse.log");
-		const line = JSON.stringify(event) + "\n";
+		const line = `${JSON.stringify(event)}\n`;
 		fs.appendFileSync(pulsePath, line);
 	}
 
 	/**
 	 * Record a lightweight event in the pulse log.
 	 */
-	async emitEvent(actor: string, action: string, proposalId?: string, payload?: string): Promise<void> {
+	async emitEvent(
+		actor: string,
+		action: string,
+		proposalId?: string,
+		payload?: string,
+	): Promise<void> {
 		if (action !== "proposal_moved") {
 			return;
 		}
@@ -5479,7 +6680,11 @@ export class Core {
 	/**
 	 * Promote a proposal to the next status level.
 	 */
-	async promoteProposal(idInput: string, agentId = "agent", autoCommit?: boolean): Promise<Proposal> {
+	async promoteProposal(
+		idInput: string,
+		agentId = "agent",
+		autoCommit?: boolean,
+	): Promise<Proposal> {
 		const proposal = await this.loadProposalById(idInput);
 		if (!proposal) throw new Error(`Proposal ${idInput} not found`);
 
@@ -5488,17 +6693,27 @@ export class Core {
 		const currentIndex = statuses.indexOf(proposal.status as any);
 
 		if (currentIndex === -1 || currentIndex === statuses.length - 1) {
-			throw new Error(`Cannot promote proposal ${proposal.id} from status ${proposal.status}`);
+			throw new Error(
+				`Cannot promote proposal ${proposal.id} from status ${proposal.status}`,
+			);
 		}
 
 		const newStatus = statuses[currentIndex + 1];
-		return await this.updateProposalFromInput(proposal.id, { status: newStatus, activityActor: agentId }, autoCommit);
+		return await this.updateProposalFromInput(
+			proposal.id,
+			{ status: newStatus, activityActor: agentId },
+			autoCommit,
+		);
 	}
 
 	/**
 	 * Demote a proposal to the previous status level.
 	 */
-	async demoteProposalProper(idInput: string, agentId = "agent", autoCommit?: boolean): Promise<Proposal> {
+	async demoteProposalProper(
+		idInput: string,
+		agentId = "agent",
+		autoCommit?: boolean,
+	): Promise<Proposal> {
 		const proposal = await this.loadProposalById(idInput);
 		if (!proposal) throw new Error(`Proposal ${idInput} not found`);
 
@@ -5507,48 +6722,73 @@ export class Core {
 		const currentIndex = statuses.indexOf(proposal.status as any);
 
 		if (currentIndex <= 0) {
-			throw new Error(`Cannot demote proposal ${proposal.id} from status ${proposal.status}`);
+			throw new Error(
+				`Cannot demote proposal ${proposal.id} from status ${proposal.status}`,
+			);
 		}
 
 		const newStatus = statuses[currentIndex - 1];
-		return await this.updateProposalFromInput(proposal.id, { status: newStatus, activityActor: agentId }, autoCommit);
+		return await this.updateProposalFromInput(
+			proposal.id,
+			{ status: newStatus, activityActor: agentId },
+			autoCommit,
+		);
 	}
 
 	/**
 	 * Update proposal priority.
 	 */
-	async updatePriority(idInput: string, priority: "high" | "medium" | "low" | "none", agentId = "agent", autoCommit?: boolean): Promise<Proposal> {
+	async updatePriority(
+		idInput: string,
+		priority: "high" | "medium" | "low" | "none",
+		agentId = "agent",
+		autoCommit?: boolean,
+	): Promise<Proposal> {
 		const proposal = await this.loadProposalById(idInput);
 		if (!proposal) throw new Error(`Proposal ${idInput} not found`);
-		return await this.updateProposalFromInput(proposal.id, { priority: priority as any, activityActor: agentId }, autoCommit);
+		return await this.updateProposalFromInput(
+			proposal.id,
+			{ priority: priority as any, activityActor: agentId },
+			autoCommit,
+		);
 	}
 
 	/**
 	 * Merge one proposal into another.
 	 */
-	async mergeProposals(sourceInput: string, targetInput: string, agentId = "agent", autoCommit?: boolean): Promise<Proposal> {
+	async mergeProposals(
+		sourceInput: string,
+		targetInput: string,
+		agentId = "agent",
+		autoCommit?: boolean,
+	): Promise<Proposal> {
 		const source = await this.loadProposalById(sourceInput);
 		const target = await this.loadProposalById(targetInput);
 
-		if (!source || !target) throw new Error("Source or target proposal not found");
+		if (!source || !target)
+			throw new Error("Source or target proposal not found");
 
 		// Append source content to target notes
 		const mergedNotes = `${target.implementationNotes || ""}\n\n--- MERGED FROM ${source.id} ---\n${source.description || ""}\n${source.implementationNotes || ""}`;
-		
-		const updatedTarget = await this.updateProposalFromInput(target.id, { 
-			implementationNotes: mergedNotes,
-			activityActor: agentId
-		}, autoCommit);
+
+		const updatedTarget = await this.updateProposalFromInput(
+			target.id,
+			{
+				implementationNotes: mergedNotes,
+				activityActor: agentId,
+			},
+			autoCommit,
+		);
 
 		// Archive/Delete source
 		await this.fs.archiveProposal(source.id);
-		
+
 		await this.emitPulse({
 			type: "proposal_complete", // Using complete as a proxy for 'merged'
 			id: target.id,
 			title: `Merged ${source.id} into ${target.id}`,
 			agent: agentId,
-			timestamp: new Date().toISOString()
+			timestamp: new Date().toISOString(),
 		});
 
 		return updatedTarget;
@@ -5557,7 +6797,13 @@ export class Core {
 	/**
 	 * Move a proposal within its column or to a different column.
 	 */
-	async moveProposal(idInput: string, targetStatus: string, targetIndex: number, agentId = "agent", autoCommit?: boolean): Promise<Proposal> {
+	async moveProposal(
+		idInput: string,
+		targetStatus: string,
+		targetIndex: number,
+		agentId = "agent",
+		autoCommit?: boolean,
+	): Promise<Proposal> {
 		const proposal = await this.loadProposalById(idInput);
 		if (!proposal) throw new Error(`Proposal ${idInput} not found`);
 
@@ -5570,13 +6816,18 @@ export class Core {
 				{ status: targetStatus, activityActor: agentId },
 				autoCommit,
 			);
-			await this.emitEvent(agentId, "proposal_moved", proposal.id, `Moved to ${targetStatus} (queue ordering is database-derived)`);
+			await this.emitEvent(
+				agentId,
+				"proposal_moved",
+				proposal.id,
+				`Moved to ${targetStatus} (queue ordering is database-derived)`,
+			);
 			return updatedProposal;
 		}
 
 		const proposals = await this.queryProposals({ status: targetStatus });
-		const orderedIds = proposals.map(s => s.id);
-		
+		const orderedIds = proposals.map((s) => s.id);
+
 		// Insert at target index
 		const existingIdx = orderedIds.indexOf(proposal.id);
 		if (existingIdx !== -1) orderedIds.splice(existingIdx, 1);
@@ -5586,15 +6837,16 @@ export class Core {
 			proposalId: proposal.id,
 			targetStatus,
 			orderedProposalIds: orderedIds,
-			autoCommit
+			autoCommit,
 		});
 
-		await this.emitEvent(agentId, "proposal_moved", proposal.id, `Moved to ${targetStatus} at index ${targetIndex}`);
-		
+		await this.emitEvent(
+			agentId,
+			"proposal_moved",
+			proposal.id,
+			`Moved to ${targetStatus} at index ${targetIndex}`,
+		);
+
 		return result.updatedProposal;
 	}
-
-
-
-
 }

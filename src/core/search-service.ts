@@ -5,13 +5,13 @@
  * Used by roadmap.ts for `search` command — indexes proposals from ContentStore.
  */
 
-import type { Proposal } from "../types/index.ts";
 import type {
+	Proposal,
+	ProposalSearchResult,
 	SearchFilters,
 	SearchMatch,
 	SearchOptions,
 	SearchResult,
-	ProposalSearchResult,
 } from "../types/index.ts";
 
 type ProposalProvider = { getProposals(): Proposal[] };
@@ -31,6 +31,9 @@ export class SearchService {
 	 * Ensure the search index is ready. Currently a no-op (lazy).
 	 */
 	async ensureInitialized(): Promise<void> {
+		if (this.initialized) {
+			return;
+		}
 		this.initialized = true;
 	}
 
@@ -58,12 +61,14 @@ export class SearchService {
 			const scored = this.scoreProposals(proposals, query.trim());
 			proposals = scored.map((s) => s.proposal);
 
-			const results: ProposalSearchResult[] = scored.map(({ proposal, score, matches }) => ({
-				type: "proposal" as const,
-				score,
-				proposal,
-				matches,
-			}));
+			const results: ProposalSearchResult[] = scored.map(
+				({ proposal, score, matches }) => ({
+					type: "proposal" as const,
+					score,
+					proposal,
+					matches,
+				}),
+			);
 
 			return limit ? results.slice(0, limit) : results;
 		}
@@ -81,30 +86,54 @@ export class SearchService {
 	/**
 	 * Apply field-level filters to a proposal list.
 	 */
-	private applyFilters(proposals: Proposal[], filters?: SearchFilters): Proposal[] {
+	private applyFilters(
+		proposals: Proposal[],
+		filters?: SearchFilters,
+	): Proposal[] {
 		if (!filters) return proposals;
 
 		return proposals.filter((p) => {
 			if (filters.status) {
-				const statuses = Array.isArray(filters.status) ? filters.status : [filters.status];
-				if (!statuses.some((s) => p.status?.toLowerCase() === s.toLowerCase())) return false;
+				const statuses = Array.isArray(filters.status)
+					? filters.status
+					: [filters.status];
+				if (!statuses.some((s) => p.status?.toLowerCase() === s.toLowerCase()))
+					return false;
 			}
 
 			if (filters.priority) {
-				const priorities = (Array.isArray(filters.priority) ? filters.priority : [filters.priority]).map((p) => p.toLowerCase());
-				if (!priorities.includes((p.priority ?? "").toLowerCase())) return false;
+				const priorities = (
+					Array.isArray(filters.priority)
+						? filters.priority
+						: [filters.priority]
+				).map((p) => p.toLowerCase());
+				if (!priorities.includes((p.priority ?? "").toLowerCase()))
+					return false;
 			}
 
 			if (filters.assignee) {
-				const assignees = (Array.isArray(filters.assignee) ? filters.assignee : [filters.assignee]).map((a) => a.toLowerCase());
-				const proposalAssignees = (p.assignee ?? []).map((a) => a.toLowerCase());
+				const assignees = (
+					Array.isArray(filters.assignee)
+						? filters.assignee
+						: [filters.assignee]
+				).map((a) => a.toLowerCase());
+				const proposalAssignees = (p.assignee ?? []).map((a) =>
+					a.toLowerCase(),
+				);
 				if (!assignees.some((a) => proposalAssignees.includes(a))) return false;
 			}
 
 			if (filters.labels) {
-				const requiredLabels = Array.isArray(filters.labels) ? filters.labels : [filters.labels];
+				const requiredLabels = Array.isArray(filters.labels)
+					? filters.labels
+					: [filters.labels];
 				const proposalLabels = (p.labels ?? []).map((l) => l.toLowerCase());
-				if (!requiredLabels.every((rl) => proposalLabels.includes(rl.toLowerCase()))) return false;
+				if (
+					!requiredLabels.every((rl) =>
+						proposalLabels.includes(rl.toLowerCase()),
+					)
+				)
+					return false;
 			}
 
 			return true;
@@ -120,7 +149,11 @@ export class SearchService {
 		query: string,
 	): Array<{ proposal: Proposal; score: number; matches: SearchMatch[] }> {
 		const q = query.toLowerCase();
-		const results: Array<{ proposal: Proposal; score: number; matches: SearchMatch[] }> = [];
+		const results: Array<{
+			proposal: Proposal;
+			score: number;
+			matches: SearchMatch[];
+		}> = [];
 
 		for (const proposal of proposals) {
 			const matches: SearchMatch[] = [];
@@ -130,27 +163,43 @@ export class SearchService {
 			const titleIdx = proposal.title?.toLowerCase().indexOf(q) ?? -1;
 			if (titleIdx >= 0) {
 				score += 100;
-				matches.push({ key: "title", indices: [[titleIdx, titleIdx + q.length]], value: proposal.title });
+				matches.push({
+					key: "title",
+					indices: [[titleIdx, titleIdx + q.length]],
+					value: proposal.title,
+				});
 			}
 
 			// ID exact match
 			if (proposal.id?.toLowerCase().includes(q)) {
 				score += 80;
-				matches.push({ key: "id", indices: [[0, proposal.id.length]], value: proposal.id });
+				matches.push({
+					key: "id",
+					indices: [[0, proposal.id.length]],
+					value: proposal.id,
+				});
 			}
 
 			// Description match
 			const descIdx = proposal.description?.toLowerCase().indexOf(q) ?? -1;
 			if (descIdx >= 0) {
 				score += 30;
-				matches.push({ key: "description", indices: [[descIdx, descIdx + q.length]], value: proposal.description });
+				matches.push({
+					key: "description",
+					indices: [[descIdx, descIdx + q.length]],
+					value: proposal.description,
+				});
 			}
 
 			// Label match
 			for (const label of proposal.labels ?? []) {
 				if (label.toLowerCase().includes(q)) {
 					score += 50;
-					matches.push({ key: "labels", indices: [[0, label.length]], value: label });
+					matches.push({
+						key: "labels",
+						indices: [[0, label.length]],
+						value: label,
+					});
 				}
 			}
 
@@ -158,7 +207,11 @@ export class SearchService {
 			for (const assignee of proposal.assignee ?? []) {
 				if (assignee.toLowerCase().includes(q)) {
 					score += 40;
-					matches.push({ key: "assignee", indices: [[0, assignee.length]], value: assignee });
+					matches.push({
+						key: "assignee",
+						indices: [[0, assignee.length]],
+						value: assignee,
+					});
 				}
 			}
 
@@ -176,6 +229,9 @@ export class SearchService {
 	 * Dispose of resources.
 	 */
 	dispose(): void {
+		if (!this.initialized) {
+			return;
+		}
 		this.initialized = false;
 	}
 }

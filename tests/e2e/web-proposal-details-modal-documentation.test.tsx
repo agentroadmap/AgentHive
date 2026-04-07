@@ -1,14 +1,15 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
 import { JSDOM } from "jsdom";
-import React from "react";
 import { renderToString } from "react-dom/server";
 import type { Proposal } from "../../src/types/index.ts";
-import { ThemeProvider } from "../../src/web/contexts/ThemeContext";
 import { ProposalDetailsModal } from "../../src/web/components/ProposalDetailsModal";
+import { ThemeProvider } from "../../src/web/contexts/ThemeContext";
 
 const setupDom = () => {
-	const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost" });
+	const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+		url: "http://localhost",
+	});
 	globalThis.window = dom.window as unknown as Window & typeof globalThis;
 	globalThis.document = dom.window.document as Document;
 	globalThis.navigator = dom.window.navigator as Navigator;
@@ -46,7 +47,11 @@ describe("Web proposal popup documentation display", () => {
 
 		const html = renderToString(
 			<ThemeProvider>
-				<ProposalDetailsModal proposal={proposal} isOpen={true} onClose={() => {}} />
+				<ProposalDetailsModal
+					proposal={proposal}
+					isOpen={true}
+					onClose={() => {}}
+				/>
 			</ThemeProvider>,
 		);
 
@@ -71,7 +76,11 @@ describe("Web proposal popup documentation display", () => {
 
 		const html = renderToString(
 			<ThemeProvider>
-				<ProposalDetailsModal proposal={proposal} isOpen={true} onClose={() => {}} />
+				<ProposalDetailsModal
+					proposal={proposal}
+					isOpen={true}
+					onClose={() => {}}
+				/>
 			</ThemeProvider>,
 		);
 

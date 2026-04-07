@@ -1,9 +1,12 @@
 import assert from "node:assert";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
-import type { RoadmapConfig, Proposal } from "../../src/types/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync,
+import type { Proposal, RoadmapConfig } from "../../src/types/index.ts";
+import {
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 let TEST_DIR: string;
@@ -34,7 +37,10 @@ describe("Board Loading with checkActiveBranches", () => {
 	});
 
 	describe("Core.loadProposals()", () => {
-		const createTestProposal = (id: string, status = "Potential"): Proposal => ({
+		const createTestProposal = (
+			id: string,
+			status = "Potential",
+		): Proposal => ({
 			id,
 			title: `Test Proposal ${id}`,
 			status,
@@ -47,9 +53,18 @@ describe("Board Loading with checkActiveBranches", () => {
 
 		beforeEach(async () => {
 			// Create some test proposals
-			await core.createProposal(createTestProposal("proposal-1", "Potential"), false);
-			await core.createProposal(createTestProposal("proposal-2", "Active"), false);
-			await core.createProposal(createTestProposal("proposal-3", "Complete"), false);
+			await core.createProposal(
+				createTestProposal("proposal-1", "Potential"),
+				false,
+			);
+			await core.createProposal(
+				createTestProposal("proposal-2", "Active"),
+				false,
+			);
+			await core.createProposal(
+				createTestProposal("proposal-3", "Complete"),
+				false,
+			);
 
 			// Commit them to have a clean proposal
 			execSync(`git add .`, { cwd: TEST_DIR });
@@ -121,14 +136,20 @@ describe("Board Loading with checkActiveBranches", () => {
 		it("should respect activeBranchDays configuration", async () => {
 			// Create a new branch with an old commit date
 			execSync(`git checkout -b old-branch`, { cwd: TEST_DIR });
-			await core.createProposal(createTestProposal("proposal-4", "Potential"), false);
+			await core.createProposal(
+				createTestProposal("proposal-4", "Potential"),
+				false,
+			);
 			execSync(`git add .`, { cwd: TEST_DIR });
 
 			// Commit with an old date (40 days ago)
 			const oldDate = new Date();
 			oldDate.setDate(oldDate.getDate() - 40);
 			const dateStr = oldDate.toISOString();
-			execSync(`GIT_AUTHOR_DATE="${dateStr}" GIT_COMMITTER_DATE="${dateStr}" git commit -m "Old proposal"`, { cwd: TEST_DIR });
+			execSync(
+				`GIT_AUTHOR_DATE="${dateStr}" GIT_COMMITTER_DATE="${dateStr}" git commit -m "Old proposal"`,
+				{ cwd: TEST_DIR },
+			);
 
 			execSync(`git checkout main`, { cwd: TEST_DIR });
 
@@ -155,10 +176,14 @@ describe("Board Loading with checkActiveBranches", () => {
 
 			// Check that branch checking happened with the right days
 			const _branchCheckMessage = progressMessages.find(
-				(msg) => msg.includes("branches") && (msg.includes("30 days") || msg.includes("from 30 days")),
+				(msg) =>
+					msg.includes("branches") &&
+					(msg.includes("30 days") || msg.includes("from 30 days")),
 			);
 			// The message format might vary, so we just check that some branch-related message exists
-			const anyBranchMessage = progressMessages.find((msg) => msg.includes("branch"));
+			const anyBranchMessage = progressMessages.find((msg) =>
+				msg.includes("branch"),
+			);
 			assert.notStrictEqual(anyBranchMessage, undefined);
 		});
 
@@ -169,7 +194,9 @@ describe("Board Loading with checkActiveBranches", () => {
 			controller.abort();
 
 			// Should throw an error
-			await expect(core.loadProposals(undefined, controller.signal)).rejects.toThrow("Loading cancelled");
+			await expect(
+				core.loadProposals(undefined, controller.signal),
+			).rejects.toThrow("Loading cancelled");
 		});
 
 		it("should handle empty proposal list gracefully", async () => {
@@ -194,7 +221,10 @@ describe("Board Loading with checkActiveBranches", () => {
 
 			// Should have some expected messages
 			const hasLoadingMessage = progressMessages.some(
-				(msg) => msg.includes("Loading") || msg.includes("Checking") || msg.includes("Skipping"),
+				(msg) =>
+					msg.includes("Loading") ||
+					msg.includes("Checking") ||
+					msg.includes("Skipping"),
 			);
 			assert.strictEqual(hasLoadingMessage, true);
 		});

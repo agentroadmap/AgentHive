@@ -11,7 +11,9 @@ export interface RuntimeCwdResolution {
 	sourceLabel: string;
 }
 
-function resolveOverrideCandidate(cwdOption?: string): RuntimeCwdResolution | null {
+function resolveOverrideCandidate(
+	cwdOption?: string,
+): RuntimeCwdResolution | null {
 	const fromOption = cwdOption?.trim();
 	if (fromOption) {
 		return {
@@ -33,21 +35,29 @@ function resolveOverrideCandidate(cwdOption?: string): RuntimeCwdResolution | nu
 	return null;
 }
 
-async function validateDirectory(path: string, sourceLabel: string): Promise<void> {
+async function validateDirectory(
+	path: string,
+	sourceLabel: string,
+): Promise<void> {
 	try {
 		const pathStat = await stat(path);
 		if (!pathStat.isDirectory()) {
 			throw new Error(`Invalid directory from ${sourceLabel}: ${path}`);
 		}
 	} catch (error) {
-		if (error instanceof Error && error.message.startsWith("Invalid directory")) {
+		if (
+			error instanceof Error &&
+			error.message.startsWith("Invalid directory")
+		) {
 			throw error;
 		}
 		throw new Error(`Invalid directory from ${sourceLabel}: ${path}`);
 	}
 }
 
-export async function resolveRuntimeCwd(options?: { cwd?: string }): Promise<RuntimeCwdResolution> {
+export async function resolveRuntimeCwd(options?: {
+	cwd?: string;
+}): Promise<RuntimeCwdResolution> {
 	const override = resolveOverrideCandidate(options?.cwd);
 	if (!override) {
 		return {

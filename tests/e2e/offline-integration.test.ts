@@ -1,8 +1,8 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
 import type { RoadmapConfig } from "../../src/types/index.ts";
 import { execSync } from "../support/test-utils.ts";
@@ -159,7 +159,10 @@ remote_operations: false
 
 		// Simulate config set command
 		if (!initialConfig) throw new Error("Config not loaded");
-		const updatedConfig: RoadmapConfig = { ...initialConfig, remoteOperations: true };
+		const updatedConfig: RoadmapConfig = {
+			...initialConfig,
+			remoteOperations: true,
+		};
 		await core.filesystem.saveConfig(updatedConfig);
 
 		// Verify config was updated
@@ -168,7 +171,10 @@ remote_operations: false
 
 		// Test changing it back
 		if (!newConfig) throw new Error("Config not loaded");
-		const finalConfig: RoadmapConfig = { ...newConfig, remoteOperations: false };
+		const finalConfig: RoadmapConfig = {
+			...newConfig,
+			remoteOperations: false,
+		};
 		await core.filesystem.saveConfig(finalConfig);
 
 		const verifyConfig = await core.filesystem.loadConfig();
@@ -204,13 +210,23 @@ roadmap_directory: "roadmap"
 		assert.strictEqual(config?.remoteOperations, false);
 
 		// Import loadRemoteProposals
-		const { loadRemoteProposals } = await import('../../src/core/storage/proposal-loader.ts');
+		const { loadRemoteProposals } = await import(
+			"../../src/core/storage/proposal-loader.ts"
+		);
 
 		const progressMessages: string[] = [];
-		const remoteProposals = await loadRemoteProposals(core.gitOps, config, (msg: string) => progressMessages.push(msg));
+		const remoteProposals = await loadRemoteProposals(
+			core.gitOps,
+			config,
+			(msg: string) => progressMessages.push(msg),
+		);
 
 		// Should return empty array and skip remote operations
 		assert.deepStrictEqual(remoteProposals, []);
-		assert.ok(progressMessages.includes("Remote operations disabled - skipping remote proposals"));
+		assert.ok(
+			progressMessages.includes(
+				"Remote operations disabled - skipping remote proposals",
+			),
+		);
 	});
 });

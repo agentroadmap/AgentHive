@@ -3,14 +3,19 @@
  * Dynamic multi-model agent pool management backed by in-memory state.
  */
 
+import type { AgentStatus } from "../../../../shared/types/index.ts";
 import { McpError } from "../../errors/mcp-errors.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
-import type { AgentStatus } from "../../../../shared/types/index.ts";
 
 export type McpAgentStatus = AgentStatus | "online" | "busy" | "error";
 
-export type AgentProvider = "anthropic" | "openai" | "google" | "local" | "custom";
+export type AgentProvider =
+	| "anthropic"
+	| "openai"
+	| "google"
+	| "local"
+	| "custom";
 
 export interface AgentConfig {
 	baseUrl?: string;
@@ -178,17 +183,21 @@ export class AgentPoolHandlers {
 
 			// Apply filters
 			if (args.status) {
-				filteredAgents = filteredAgents.filter(a => a.status === args.status);
+				filteredAgents = filteredAgents.filter((a) => a.status === args.status);
 			}
 			if (args.provider) {
-				filteredAgents = filteredAgents.filter(a => a.provider === args.provider);
+				filteredAgents = filteredAgents.filter(
+					(a) => a.provider === args.provider,
+				);
 			}
 			if (args.template) {
-				filteredAgents = filteredAgents.filter(a => a.template === args.template);
+				filteredAgents = filteredAgents.filter(
+					(a) => a.template === args.template,
+				);
 			}
 			if (args.capabilities?.length) {
-				filteredAgents = filteredAgents.filter(a =>
-					args.capabilities!.every(cap => a.capabilities.includes(cap)),
+				filteredAgents = filteredAgents.filter((a) =>
+					args.capabilities?.every((cap) => a.capabilities.includes(cap)),
 				);
 			}
 
@@ -223,9 +232,9 @@ export class AgentPoolHandlers {
 				"🤖 Agent Pool Status",
 				`${"─".repeat(40)}`,
 				`Total: ${filteredAgents.length} agents`,
-				`Idle: ${filteredAgents.filter(a => a.status === "idle").length} | ` +
-					`Busy: ${filteredAgents.filter(a => a.status === "busy").length} | ` +
-					`Online: ${filteredAgents.filter(a => a.status === "online").length}`,
+				`Idle: ${filteredAgents.filter((a) => a.status === "idle").length} | ` +
+					`Busy: ${filteredAgents.filter((a) => a.status === "busy").length} | ` +
+					`Online: ${filteredAgents.filter((a) => a.status === "online").length}`,
 				"",
 			];
 
@@ -358,10 +367,7 @@ export class AgentPoolHandlers {
 		try {
 			const agent = this.agents.get(args.agentId);
 			if (!agent) {
-				throw new McpError(
-					`Agent ${args.agentId} not registered`,
-					"NOT_FOUND",
-				);
+				throw new McpError(`Agent ${args.agentId} not registered`, "NOT_FOUND");
 			}
 
 			const now = new Date().toISOString();
@@ -462,10 +468,7 @@ export class AgentPoolHandlers {
 		try {
 			const agent = this.agents.get(args.agentId);
 			if (!agent) {
-				throw new McpError(
-					`Agent ${args.agentId} not found`,
-					"NOT_FOUND",
-				);
+				throw new McpError(`Agent ${args.agentId} not found`, "NOT_FOUND");
 			}
 
 			// Release claims if requested
@@ -541,7 +544,7 @@ export class AgentPoolHandlers {
 								? [
 										"💀 Zombie Detection Complete",
 										`Found ${zombies.length} zombie agent(s):`,
-										...zombies.map(z => `  - ${z}`),
+										...zombies.map((z) => `  - ${z}`),
 										"",
 										"All zombie claims have been released.",
 									].join("\n")
@@ -567,18 +570,18 @@ export class AgentPoolHandlers {
 			const stats = {
 				totalAgents: agents.length,
 				byStatus: {
-					online: agents.filter(a => a.status === "online").length,
-					idle: agents.filter(a => a.status === "idle").length,
-					busy: agents.filter(a => a.status === "busy").length,
-					offline: agents.filter(a => a.status === "offline").length,
-					error: agents.filter(a => a.status === "error").length,
+					online: agents.filter((a) => a.status === "online").length,
+					idle: agents.filter((a) => a.status === "idle").length,
+					busy: agents.filter((a) => a.status === "busy").length,
+					offline: agents.filter((a) => a.status === "offline").length,
+					error: agents.filter((a) => a.status === "error").length,
 				},
 				byProvider: {
-					anthropic: agents.filter(a => a.provider === "anthropic").length,
-					openai: agents.filter(a => a.provider === "openai").length,
-					google: agents.filter(a => a.provider === "google").length,
-					local: agents.filter(a => a.provider === "local").length,
-					custom: agents.filter(a => a.provider === "custom").length,
+					anthropic: agents.filter((a) => a.provider === "anthropic").length,
+					openai: agents.filter((a) => a.provider === "openai").length,
+					google: agents.filter((a) => a.provider === "google").length,
+					local: agents.filter((a) => a.provider === "local").length,
+					custom: agents.filter((a) => a.provider === "custom").length,
 				},
 				totalClaims: Array.from(this.claims.values()).length,
 				avgTrustScore:
@@ -683,28 +686,62 @@ export class AgentPoolHandlers {
 
 // ── S100: Reporting & Privilege ─────────────────────────────────────────
 const reportingHierarchy = new Map<string, string | null>();
-const grantedPrivileges = new Map<number, { agentId: string; permission: string; grantedBy: string }>();
+const grantedPrivileges = new Map<
+	number,
+	{ agentId: string; permission: string; grantedBy: string }
+>();
 let nextPrivilegeId = 1;
 
-export async function updateReporting(args: { agentId: string; managerId?: string | null }) {
-  const managerId = args.managerId || null;
-  reportingHierarchy.set(args.agentId, managerId);
-  return {
-    content: [{ type: "text", text: JSON.stringify({ success: true, agentId: args.agentId, reportsTo: managerId }) }],
-  };
+export async function updateReporting(args: {
+	agentId: string;
+	managerId?: string | null;
+}) {
+	const managerId = args.managerId || null;
+	reportingHierarchy.set(args.agentId, managerId);
+	return {
+		content: [
+			{
+				type: "text",
+				text: JSON.stringify({
+					success: true,
+					agentId: args.agentId,
+					reportsTo: managerId,
+				}),
+			},
+		],
+	};
 }
 
-export async function grantPrivilege(args: { agentId: string; permission: string; grantedBy: string }) {
-  const privilegeId = nextPrivilegeId++;
-  grantedPrivileges.set(privilegeId, { ...args });
-  return {
-    content: [{ type: "text", text: JSON.stringify({ success: true, id: privilegeId, agentId: args.agentId, permission: args.permission }) }],
-  };
+export async function grantPrivilege(args: {
+	agentId: string;
+	permission: string;
+	grantedBy: string;
+}) {
+	const privilegeId = nextPrivilegeId++;
+	grantedPrivileges.set(privilegeId, { ...args });
+	return {
+		content: [
+			{
+				type: "text",
+				text: JSON.stringify({
+					success: true,
+					id: privilegeId,
+					agentId: args.agentId,
+					permission: args.permission,
+				}),
+			},
+		],
+	};
 }
 
 export async function revokePrivilege(args: { privilegeId: number }) {
-  grantedPrivileges.delete(args.privilegeId);
-  return {
-    content: [{ type: "text", text: JSON.stringify({ success: true, revoked: args.privilegeId }) }],
-  };
+	grantedPrivileges.delete(args.privilegeId);
+	return {
+		content: [
+			{
+				type: "text",
+				text: JSON.stringify({ success: true, revoked: args.privilegeId }),
+			},
+		],
+	};
 }

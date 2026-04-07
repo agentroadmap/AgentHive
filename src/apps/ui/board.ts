@@ -1,38 +1,59 @@
-import type { BoxInterface, ListInterface } from "./blessed.ts";
-import { box, list } from "./blessed.ts";
 import {
 	type BoardLayout,
 	buildKanbanStatusGroups,
-	generateKanbanBoardWithMetadata,
 	generateDirectiveGroupedBoard,
+	generateKanbanBoardWithMetadata,
 } from "../../board.ts";
+import {
+	getRecentEvents,
+	type StreamEvent,
+} from "../../core/messaging/event-stream.ts";
 import { Core } from "../../core/roadmap.ts";
 import type { Directive, Proposal } from "../../shared/types/index.ts";
 import { collectAvailableLabels } from "../../shared/utils/label-filter.ts";
-import { applySharedProposalFilters, createProposalSearchIndex } from "../../shared/utils/proposal-search.ts";
+import {
+	applySharedProposalFilters,
+	createProposalSearchIndex,
+} from "../../shared/utils/proposal-search.ts";
 import { compareProposalIds } from "../../shared/utils/proposal-sorting.ts";
-import { createFilterHeader, type FilterHeader, type FilterProposal } from "./components/filter-header.ts";
-import { openMultiSelectFilterPopup, openSingleSelectFilterPopup } from "./components/filter-popup.ts";
+import {
+	formatVersionLabel,
+	getVersionInfo,
+} from "../../shared/utils/version.ts";
+import type { BoxInterface, ListInterface } from "./blessed.ts";
+import { box, list } from "./blessed.ts";
+import {
+	createFilterHeader,
+	type FilterHeader,
+	type FilterProposal,
+} from "./components/filter-header.ts";
+import {
+	openMultiSelectFilterPopup,
+	openSingleSelectFilterPopup,
+} from "./components/filter-popup.ts";
 import { formatFooterContent } from "./footer-content.ts";
 import {
 	createProposalPopup,
 	resolveSearchExitTargetIndex,
 	shouldMoveFromListBoundaryToSearch,
 } from "./proposal-viewer-with-search.ts";
-import { getStatusIcon, getStatusStyle, getMaturityColor, getMaturityIcon } from "./status-icon.ts";
+import {
+	getMaturityColor,
+	getMaturityIcon,
+	getStatusIcon,
+	getStatusStyle,
+} from "./status-icon.ts";
 import { createScreen } from "./tui.ts";
-import { getVersionInfo, formatVersionLabel } from "../../shared/utils/version.ts";
-import { getRecentEvents, type StreamEvent } from '../../core/messaging/event-stream.ts';
 
 // Stub implementations for move/undo (to be fully implemented later)
-function pushUndo(fn: () => Promise<void>): void {
-  // TODO: implement undo stack
+function _pushUndo(_fn: () => Promise<void>): void {
+	// TODO: implement undo stack
 }
-function performProposalMove(): void {
-  // TODO: implement proposal move
+function _performProposalMove(): void {
+	// TODO: implement proposal move
 }
-function cancelMove(): void {
-  // TODO: cancel move operation
+function _cancelMove(): void {
+	// TODO: cancel move operation
 }
 
 export type ColumnData = {
@@ -49,10 +70,18 @@ type ColumnView = {
 
 function isCompleteStatus(status: string): boolean {
 	const normalized = status.trim().toLowerCase();
-	return normalized === "done" || normalized === "completed" || normalized === "complete";
+	return (
+		normalized === "done" ||
+		normalized === "completed" ||
+		normalized === "complete"
+	);
 }
 
-function buildColumnProposals(status: string, items: Proposal[], byId: Map<string, Proposal>): Proposal[] {
+function buildColumnProposals(
+	status: string,
+	items: Proposal[],
+	byId: Map<string, Proposal>,
+): Proposal[] {
 	const topLevel: Proposal[] = [];
 	const childrenByParent = new Map<string, Proposal[]>();
 	const sorted = items.slice().sort((a, b) => {
@@ -80,7 +109,9 @@ function buildColumnProposals(status: string, items: Proposal[], byId: Map<strin
 	});
 
 	for (const proposal of sorted) {
-		const parent = proposal.parentProposalId ? byId.get(proposal.parentProposalId) : undefined;
+		const parent = proposal.parentProposalId
+			? byId.get(proposal.parentProposalId)
+			: undefined;
 		if (parent && parent.status === proposal.status) {
 			const existing = childrenByParent.get(parent.id) ?? [];
 			existing.push(proposal);
@@ -101,9 +132,17 @@ function buildColumnProposals(status: string, items: Proposal[], byId: Map<strin
 	return ordered;
 }
 
-function prepareBoardColumns(proposals: Proposal[], statuses: string[]): ColumnData[] {
-	const { orderedStatuses, groupedProposals } = buildKanbanStatusGroups(proposals, statuses);
-	const byId = new Map<string, Proposal>(proposals.map((proposal) => [proposal.id, proposal]));
+function prepareBoardColumns(
+	proposals: Proposal[],
+	statuses: string[],
+): ColumnData[] {
+	const { orderedStatuses, groupedProposals } = buildKanbanStatusGroups(
+		proposals,
+		statuses,
+	);
+	const byId = new Map<string, Proposal>(
+		proposals.map((proposal) => [proposal.id, proposal]),
+	);
 
 	return orderedStatuses.map((status) => {
 		const items = groupedProposals.get(status) ?? [];
@@ -131,13 +170,22 @@ export function filterBoardColumns(
 	});
 }
 
-export function formatProposalListItem(proposal: Proposal, isMoving = false): string {
+export function formatProposalListItem(
+	proposal: Proposal,
+	isMoving = false,
+): string {
 	const assignee = proposal.assignee?.[0]
 		? ` {cyan-fg}${proposal.assignee[0].startsWith("@") ? proposal.assignee[0] : `@${proposal.assignee[0]}`}{/}`
 		: "";
-	const labels = proposal.labels?.length ? ` {yellow-fg}[${proposal.labels.join(", ")}]{/}` : "";
-	const isCrossBranch = Boolean((proposal as Proposal & { branch?: string }).branch);
-	const branch = isCrossBranch ? ` {green-fg}(${(proposal as Proposal & { branch?: string }).branch}){/}` : "";
+	const labels = proposal.labels?.length
+		? ` {yellow-fg}[${proposal.labels.join(", ")}]{/}`
+		: "";
+	const isCrossBranch = Boolean(
+		(proposal as Proposal & { branch?: string }).branch,
+	);
+	const branch = isCrossBranch
+		? ` {green-fg}(${(proposal as Proposal & { branch?: string }).branch}){/}`
+		: "";
 
 	// Status-based color coding
 	const status = proposal.status || "";
@@ -185,7 +233,6 @@ function formatColumnLabel(status: string, count: number): string {
 const DEFAULT_FOOTER_CONTENT =
 	" {cyan-fg}[Tab]{/} Switch View | {cyan-fg}[/]{/} Search | {cyan-fg}[P]{/} Priority | {cyan-fg}[F]{/} Labels | {cyan-fg}[~]{/} Hide Empty | {cyan-fg}[=]{/} Hide Archive | {cyan-fg}[←→]{/} Columns | {cyan-fg}[↑↓]{/} Proposals | {cyan-fg}[PgUp/PgDn]{/} Page | {cyan-fg}[Home/End]{/} First/Last | {cyan-fg}[Enter]{/} View | {cyan-fg}[X]{/} Export | {cyan-fg}[q/Esc]{/} Quit";
 
-
 function _arraysEqual(left: string[], right: string[]): boolean {
 	if (left.length !== right.length) return false;
 	for (let index = 0; index < left.length; index += 1) {
@@ -194,7 +241,10 @@ function _arraysEqual(left: string[], right: string[]): boolean {
 	return true;
 }
 
-export function shouldRebuildColumns(current: ColumnData[], next: ColumnData[]): boolean {
+export function shouldRebuildColumns(
+	current: ColumnData[],
+	next: ColumnData[],
+): boolean {
 	if (current.length !== next.length) {
 		return true;
 	}
@@ -204,8 +254,13 @@ export function shouldRebuildColumns(current: ColumnData[], next: ColumnData[]):
 		const prevColumn = current[index];
 		if (!prevColumn) return true;
 		if (prevColumn.status !== nextColumn.status) return true;
-		if (prevColumn.proposals.length !== nextColumn.proposals.length) return true;
-		for (let proposalIdx = 0; proposalIdx < nextColumn.proposals.length; proposalIdx += 1) {
+		if (prevColumn.proposals.length !== nextColumn.proposals.length)
+			return true;
+		for (
+			let proposalIdx = 0;
+			proposalIdx < nextColumn.proposals.length;
+			proposalIdx += 1
+		) {
 			const prevProposal = prevColumn.proposals[proposalIdx];
 			const nextProposal = nextColumn.proposals[proposalIdx];
 			if (!prevProposal || !nextProposal) {
@@ -233,7 +288,9 @@ export async function renderBoardTui(
 		viewSwitcher?: import("./view-switcher.ts").ViewSwitcher;
 		onProposalSelect?: (proposal: Proposal) => void;
 		onTabPress?: () => Promise<void>;
-		subscribeUpdates?: (update: (nextProposals: Proposal[], nextStatuses: string[]) => void) => void;
+		subscribeUpdates?: (
+			update: (nextProposals: Proposal[], nextStatuses: string[]) => void,
+		) => void;
 		filters?: {
 			searchQuery: string;
 			priorityFilter: string;
@@ -254,9 +311,18 @@ export async function renderBoardTui(
 ): Promise<void> {
 	if (!process.stdout.isTTY) {
 		if (options?.directiveMode) {
-			console.log(generateDirectiveGroupedBoard(initialProposals, statuses, options.directiveEntities ?? [], "Project"));
+			console.log(
+				generateDirectiveGroupedBoard(
+					initialProposals,
+					statuses,
+					options.directiveEntities ?? [],
+					"Project",
+				),
+			);
 		} else {
-			console.log(generateKanbanBoardWithMetadata(initialProposals, statuses, "Project"));
+			console.log(
+				generateKanbanBoardWithMetadata(initialProposals, statuses, "Project"),
+			);
 		}
 		return;
 	}
@@ -267,11 +333,15 @@ export async function renderBoardTui(
 	const versionInfo = await getVersionInfo();
 	const versionLabel = formatVersionLabel(versionInfo);
 
-	const hiddenStatusesFromConfig = (config as any)?.hidden_statuses || ["Rejected", "Abandoned", "Replaced"];
-	
+	const hiddenStatusesFromConfig = (config as any)?.hidden_statuses || [
+		"Rejected",
+		"Abandoned",
+		"Replaced",
+	];
+
 	let initialColumns = prepareBoardColumns(initialProposals, statuses);
 	initialColumns = filterBoardColumns(initialColumns, {
-		hiddenStatuses: hiddenStatusesFromConfig
+		hiddenStatuses: hiddenStatusesFromConfig,
 	});
 
 	if (initialColumns.length === 0) {
@@ -339,7 +409,10 @@ export async function renderBoardTui(
 			labelFilter: [...(options?.filters?.labelFilter ?? [])],
 			directiveFilter: options?.filters?.directiveFilter ?? "",
 		};
-		let configuredLabels = collectAvailableLabels(initialProposals, options?.availableLabels ?? []);
+		let configuredLabels = collectAvailableLabels(
+			initialProposals,
+			options?.availableLabels ?? [],
+		);
 		let availableDirectives = [...(options?.availableDirectives ?? [])];
 		const directiveLabelByKey = new Map<string, string>();
 		for (const directive of options?.directiveEntities ?? []) {
@@ -365,14 +438,20 @@ export async function renderBoardTui(
 				...availableDirectives,
 				...initialProposals
 					.map((proposal) => proposal.directive?.trim())
-					.filter((directive): directive is string => Boolean(directive && directive.length > 0))
+					.filter((directive): directive is string =>
+						Boolean(directive && directive.length > 0),
+					)
 					.map((directive) => resolveDirectiveLabel(directive)),
 			]),
 		).sort((a, b) => a.localeCompare(b));
 
 		let filterHeader: FilterHeader | null = null;
 		let hideEmptyColumns = false;
-		const hiddenStatusesFromConfig = (config as any)?.hidden_statuses || ["Rejected", "Abandoned", "Replaced"];
+		const hiddenStatusesFromConfig = (config as any)?.hidden_statuses || [
+			"Rejected",
+			"Abandoned",
+			"Replaced",
+		];
 		let hiddenStatuses = [...hiddenStatusesFromConfig];
 		let hiddenStatusesToggle = true;
 		const hasActiveSharedFilters = () =>
@@ -399,7 +478,11 @@ export async function renderBoardTui(
 				currentProposals,
 				{
 					query: sharedFilters.searchQuery,
-					priority: sharedFilters.priorityFilter as "high" | "medium" | "low" | undefined,
+					priority: sharedFilters.priorityFilter as
+						| "high"
+						| "medium"
+						| "low"
+						| undefined,
 					labels: sharedFilters.labelFilter,
 					directive: sharedFilters.directiveFilter || undefined,
 					resolveDirectiveLabel,
@@ -468,12 +551,18 @@ export async function renderBoardTui(
 				currentProposals = currentProposals.map((proposal) =>
 					proposal.id === updatedProposal.id ? updatedProposal : proposal,
 				);
-				currentProposals = await core.queryProposals({ includeCrossBranch: false });
-				showTransientFooter(` {green-fg}Moved ${updatedProposal.id} to ${operation.targetStatus}{/}`);
+				currentProposals = await core.queryProposals({
+					includeCrossBranch: false,
+				});
+				showTransientFooter(
+					` {green-fg}Moved ${updatedProposal.id} to ${operation.targetStatus}{/}`,
+				);
 				renderView();
 			} catch (error) {
 				moveOp = operation;
-				showTransientFooter(` {red-fg}Failed to move ${operation.proposalId}: ${String(error)}{/}`);
+				showTransientFooter(
+					` {red-fg}Failed to move ${operation.proposalId}: ${String(error)}{/}`,
+				);
 				renderView();
 			}
 		};
@@ -495,8 +584,10 @@ export async function renderBoardTui(
 			clearTimeout(footerRestoreTimer);
 			footerRestoreTimer = null;
 		};
-		const getTerminalWidth = () => (typeof screen.width === "number" ? screen.width : 80);
-		const getFooterHeight = () => (typeof footerBox.height === "number" ? footerBox.height : 1);
+		const getTerminalWidth = () =>
+			typeof screen.width === "number" ? screen.width : 80;
+		const getFooterHeight = () =>
+			typeof footerBox.height === "number" ? footerBox.height : 1;
 		const setFooterContent = (content: string) => {
 			const formatted = formatFooterContent(content, getTerminalWidth());
 			footerBox.height = formatted.height;
@@ -510,10 +601,13 @@ export async function renderBoardTui(
 			columns = [];
 		};
 
-		const columnWidthFor = (count: number) => Math.max(1, Math.floor(100 / Math.max(1, count)));
+		const columnWidthFor = (count: number) =>
+			Math.max(1, Math.floor(100 / Math.max(1, count)));
 
 		const getFormattedItems = (proposals: Proposal[]) => {
-			return proposals.map((proposal) => formatProposalListItem(proposal, moveOp?.proposalId === proposal.id));
+			return proposals.map((proposal) =>
+				formatProposalListItem(proposal, moveOp?.proposalId === proposal.id),
+			);
 		};
 
 		const createColumnViews = (data: ColumnData[]) => {
@@ -522,7 +616,9 @@ export async function renderBoardTui(
 			data.forEach((columnData, idx) => {
 				const left = idx * widthPercent;
 				const isLast = idx === data.length - 1;
-				const width = isLast ? `${Math.max(0, 100 - left)}%` : `${widthPercent}%`;
+				const width = isLast
+					? `${Math.max(0, 100 - left)}%`
+					: `${widthPercent}%`;
 				const columnBox = box({
 					parent: boardArea,
 					left: `${left}%`,
@@ -531,7 +627,10 @@ export async function renderBoardTui(
 					height: "100%",
 					border: { type: "line" },
 					style: { border: { fg: "gray" } },
-					label: formatColumnLabel(columnData.status, columnData.proposals.length),
+					label: formatColumnLabel(
+						columnData.status,
+						columnData.proposals.length,
+					),
 				});
 
 				const proposalList = list({
@@ -548,7 +647,12 @@ export async function renderBoardTui(
 				});
 
 				proposalList.setItems(getFormattedItems(columnData.proposals));
-				columns.push({ status: columnData.status, proposals: columnData.proposals, list: proposalList, box: columnBox });
+				columns.push({
+					status: columnData.status,
+					proposals: columnData.proposals,
+					list: proposalList,
+					box: columnBox,
+				});
 
 				proposalList.on("focus", () => {
 					if (popupOpen || filterPopupOpen) return;
@@ -565,11 +669,16 @@ export async function renderBoardTui(
 			});
 		};
 
-		const setColumnActiveProposal = (column: ColumnView | undefined, active: boolean) => {
+		const setColumnActiveProposal = (
+			column: ColumnView | undefined,
+			active: boolean,
+		) => {
 			if (!column) return;
 			const listStyle = column.list.style as { selected?: { bg?: string } };
 			// In move mode, use green highlight for the moving proposal
-			if (listStyle.selected) listStyle.selected.bg = moveOp && active ? "green" : active ? "blue" : undefined;
+			if (listStyle.selected)
+				listStyle.selected.bg =
+					moveOp && active ? "green" : active ? "blue" : undefined;
 			const boxStyle = column.box.style as { border?: { fg?: string } };
 			if (boxStyle.border) boxStyle.border.fg = active ? "yellow" : "gray";
 		};
@@ -581,7 +690,11 @@ export async function renderBoardTui(
 			return column.proposals[selectedIndex]?.id;
 		};
 
-		const focusColumn = (idx: number, preferredRow?: number, activate = true) => {
+		const focusColumn = (
+			idx: number,
+			preferredRow?: number,
+			activate = true,
+		) => {
 			if (popupOpen) return;
 			if (idx < 0 || idx >= columns.length) return;
 			const previous = columns[currentCol];
@@ -593,8 +706,14 @@ export async function renderBoardTui(
 
 			const total = current.proposals.length;
 			if (total > 0) {
-				const previousSelected = typeof previous?.list.selected === "number" ? previous.list.selected : 0;
-				const target = preferredRow !== undefined ? preferredRow : Math.min(previousSelected, total - 1);
+				const previousSelected =
+					typeof previous?.list.selected === "number"
+						? previous.list.selected
+						: 0;
+				const target =
+					preferredRow !== undefined
+						? preferredRow
+						: Math.min(previousSelected, total - 1);
 				current.list.select(Math.max(0, target));
 			}
 
@@ -615,7 +734,9 @@ export async function renderBoardTui(
 				for (let colIdx = 0; colIdx < columns.length; colIdx += 1) {
 					const column = columns[colIdx];
 					if (!column) continue;
-					const proposalIndex = column.proposals.findIndex((proposal) => proposal.id === proposalId);
+					const proposalIndex = column.proposals.findIndex(
+						(proposal) => proposal.id === proposalId,
+					);
 					if (proposalIndex !== -1) {
 						focusColumn(colIdx, proposalIndex, activate);
 						return;
@@ -626,7 +747,10 @@ export async function renderBoardTui(
 			focusColumn(safeIndex, undefined, activate);
 		};
 
-		const applyColumnData = (data: ColumnData[], selectedProposalId?: string) => {
+		const applyColumnData = (
+			data: ColumnData[],
+			selectedProposalId?: string,
+		) => {
 			currentColumnsData = data;
 			data.forEach((columnData, idx) => {
 				const column = columns[idx];
@@ -634,12 +758,17 @@ export async function renderBoardTui(
 				column.status = columnData.status;
 				column.proposals = columnData.proposals;
 				column.list.setItems(getFormattedItems(columnData.proposals));
-				column.box.setLabel?.(formatColumnLabel(columnData.status, columnData.proposals.length));
+				column.box.setLabel?.(
+					formatColumnLabel(columnData.status, columnData.proposals.length),
+				);
 			});
 			restoreSelection(selectedProposalId);
 		};
 
-		const rebuildColumns = (data: ColumnData[], selectedProposalId?: string) => {
+		const rebuildColumns = (
+			data: ColumnData[],
+			selectedProposalId?: string,
+		) => {
 			currentColumnsData = data;
 			currentStatuses = data.map((column) => column.status);
 			createColumnViews(data);
@@ -647,37 +776,57 @@ export async function renderBoardTui(
 		};
 
 		// Pure function to calculate the projected board proposal
-		const getProjectedColumns = (allProposals: Proposal[], operation: MoveOperation | null): ColumnData[] => {
+		const getProjectedColumns = (
+			allProposals: Proposal[],
+			operation: MoveOperation | null,
+		): ColumnData[] => {
 			if (!operation) {
 				return prepareBoardColumns(allProposals, currentStatuses);
 			}
 
 			// 1. Filter out the moving proposal from the source
-			const proposalsWithoutMoving = allProposals.filter((t) => t.id !== operation.proposalId);
-			const movingProposal = allProposals.find((t) => t.id === operation.proposalId);
+			const proposalsWithoutMoving = allProposals.filter(
+				(t) => t.id !== operation.proposalId,
+			);
+			const movingProposal = allProposals.find(
+				(t) => t.id === operation.proposalId,
+			);
 
 			if (!movingProposal) {
 				return prepareBoardColumns(allProposals, currentStatuses);
 			}
 
 			// 2. Prepare columns without the moving proposal
-			const columns = prepareBoardColumns(proposalsWithoutMoving, currentStatuses);
+			const columns = prepareBoardColumns(
+				proposalsWithoutMoving,
+				currentStatuses,
+			);
 
 			// 3. Insert the moving proposal into the target column at the target index
-			const targetColumn = columns.find((c) => c.status === operation.targetStatus);
+			const targetColumn = columns.find(
+				(c) => c.status === operation.targetStatus,
+			);
 			if (targetColumn) {
 				// Create a "ghost" proposal with updated status
-				const ghostProposal = { ...movingProposal, status: operation.targetStatus };
+				const ghostProposal = {
+					...movingProposal,
+					status: operation.targetStatus,
+				};
 
 				// Clamp index to valid bounds
-				const safeIndex = Math.max(0, Math.min(operation.targetIndex, targetColumn.proposals.length));
+				const safeIndex = Math.max(
+					0,
+					Math.min(operation.targetIndex, targetColumn.proposals.length),
+				);
 				targetColumn.proposals.splice(safeIndex, 0, ghostProposal);
 			}
 
 			return columns;
 		};
 
-		const focusFilterControl = (filterId: "search" | "priority" | "directive" | "labels") => {
+		const focusFilterControl = (
+			filterId: "search" | "priority" | "directive" | "labels",
+		) => {
 			if (!filterHeader) return;
 			switch (filterId) {
 				case "search":
@@ -695,7 +844,9 @@ export async function renderBoardTui(
 			}
 		};
 
-		const openFilterPicker = async (filterId: "priority" | "directive" | "labels") => {
+		const openFilterPicker = async (
+			filterId: "priority" | "directive" | "labels",
+		) => {
 			if (filterPopupOpen || moveOp || !filterHeader) {
 				return;
 			}
@@ -725,7 +876,10 @@ export async function renderBoardTui(
 						selectedValue: sharedFilters.priorityFilter,
 						choices: [
 							{ label: "All", value: "" },
-							...priorities.map((priority) => ({ label: priority, value: priority })),
+							...priorities.map((priority) => ({
+								label: priority,
+								value: priority,
+							})),
 						],
 					});
 					if (selected !== null) {
@@ -741,7 +895,10 @@ export async function renderBoardTui(
 					screen,
 					title: "Directive Filter",
 					selectedValue: sharedFilters.directiveFilter,
-					choices: [{ label: "All", value: "" }, ...availableDirectives.map((value) => ({ label: value, value }))],
+					choices: [
+						{ label: "All", value: "" },
+						...availableDirectives.map((value) => ({ label: value, value })),
+					],
 				});
 				if (selected !== null) {
 					sharedFilters.directiveFilter = selected;
@@ -796,7 +953,12 @@ export async function renderBoardTui(
 			const selected = currentColumn?.list.selected;
 			const currentIndex = typeof selected === "number" ? selected : undefined;
 			const totalProposals = currentColumn?.proposals.length ?? 0;
-			const targetIndex = resolveSearchExitTargetIndex(direction, pendingSearchWrap, totalProposals, currentIndex);
+			const targetIndex = resolveSearchExitTargetIndex(
+				direction,
+				pendingSearchWrap,
+				totalProposals,
+				currentIndex,
+			);
 			pendingSearchWrap = null;
 			focusColumn(currentCol, targetIndex);
 			updateFooter();
@@ -847,11 +1009,15 @@ export async function renderBoardTui(
 				const base = DEFAULT_FOOTER_CONTENT;
 				const posIndicator = getScrollPositionIndicator();
 				const filterIndicators = [];
-				if (hasActiveSharedFilters()) filterIndicators.push("{yellow-fg}Filtered{/}");
+				if (hasActiveSharedFilters())
+					filterIndicators.push("{yellow-fg}Filtered{/}");
 				if (hideEmptyColumns) filterIndicators.push("{yellow-fg}~Empty{/}");
-				if (hiddenStatuses.length > 0) filterIndicators.push(`{yellow-fg}~${hiddenStatuses.join(",")}{/}`);
+				if (hiddenStatuses.length > 0)
+					filterIndicators.push(`{yellow-fg}~${hiddenStatuses.join(",")}{/}`);
 				const indicators = [posIndicator, ...filterIndicators].filter(Boolean);
-				setFooterContent(indicators.length > 0 ? `${indicators.join(" | ")} ${base}` : base);
+				setFooterContent(
+					indicators.length > 0 ? `${indicators.join(" | ")} ${base}` : base,
+				);
 			}
 			syncBoardAreaLayout();
 		};
@@ -910,13 +1076,18 @@ export async function renderBoardTui(
 			currentProposals = nextProposals;
 			// Only update statuses if they changed (rare in TUI)
 			if (nextStatuses.length > 0) currentStatuses = nextStatuses;
-			configuredLabels = collectAvailableLabels(currentProposals, options?.availableLabels ?? []);
+			configuredLabels = collectAvailableLabels(
+				currentProposals,
+				options?.availableLabels ?? [],
+			);
 			availableDirectives = Array.from(
 				new Set([
 					...(options?.availableDirectives ?? []),
 					...currentProposals
 						.map((proposal) => proposal.directive?.trim())
-						.filter((directive): directive is string => Boolean(directive && directive.length > 0))
+						.filter((directive): directive is string =>
+							Boolean(directive && directive.length > 0),
+						)
 						.map((directive) => resolveDirectiveLabel(directive)),
 				]),
 			).sort((a, b) => a.localeCompare(b));
@@ -1004,7 +1175,9 @@ export async function renderBoardTui(
 			previousVisibility = [...currentStatuses]; // Save current proposal
 			hiddenColumns.clear();
 			applyColumnVisibility();
-			showTransientFooter(" {green-fg}All columns shown{/} (V again to restore previous)");
+			showTransientFooter(
+				" {green-fg}All columns shown{/} (V again to restore previous)",
+			);
 		});
 
 		// Press V again to restore previous visibility
@@ -1016,10 +1189,12 @@ export async function renderBoardTui(
 				// Restore previous proposal
 				hiddenColumns.clear();
 				statuses.forEach((s) => {
-					if (!previousVisibility!.includes(s)) hiddenColumns.add(s);
+					if (!previousVisibility?.includes(s)) hiddenColumns.add(s);
 				});
 				applyColumnVisibility();
-				showTransientFooter(" {green-fg}Previous column visibility restored{/}");
+				showTransientFooter(
+					" {green-fg}Previous column visibility restored{/}",
+				);
 			}
 		});
 
@@ -1033,10 +1208,15 @@ export async function renderBoardTui(
 			hiddenColumns.add(focusedCol);
 			// Ensure current column index is valid after hiding
 			if (currentCol >= statuses.filter((s) => !hiddenColumns.has(s)).length) {
-				currentCol = Math.max(0, statuses.filter((s) => !hiddenColumns.has(s)).length - 1);
+				currentCol = Math.max(
+					0,
+					statuses.filter((s) => !hiddenColumns.has(s)).length - 1,
+				);
 			}
 			applyColumnVisibility();
-			showTransientFooter(` {red-fg}${focusedCol} column hidden{/} | press V to restore all`);
+			showTransientFooter(
+				` {red-fg}${focusedCol} column hidden{/} | press V to restore all`,
+			);
 		});
 
 		// O = show only current column
@@ -1050,7 +1230,9 @@ export async function renderBoardTui(
 				if (s !== focusedCol) hiddenColumns.add(s);
 			});
 			applyColumnVisibility();
-			showTransientFooter(` {green-fg}Showing only: ${focusedCol}{/} | press V to restore all`);
+			showTransientFooter(
+				` {green-fg}Showing only: ${focusedCol}{/} | press V to restore all`,
+			);
 		});
 
 		// Number keys toggle individual columns
@@ -1192,7 +1374,13 @@ export async function renderBoardTui(
 			const idx = column.list.selected ?? 0;
 			if (idx > 0) {
 				const targetStatus = column.status;
-				await core.moveProposal(proposalId, targetStatus, idx - 1, "user", true);
+				await core.moveProposal(
+					proposalId,
+					targetStatus,
+					idx - 1,
+					"user",
+					true,
+				);
 				renderView();
 			}
 		});
@@ -1206,7 +1394,13 @@ export async function renderBoardTui(
 			const idx = column.list.selected ?? 0;
 			if (idx < column.proposals.length - 1) {
 				const targetStatus = column.status;
-				await core.moveProposal(proposalId, targetStatus, idx + 1, "user", true);
+				await core.moveProposal(
+					proposalId,
+					targetStatus,
+					idx + 1,
+					"user",
+					true,
+				);
 				renderView();
 			}
 		});
@@ -1220,9 +1414,17 @@ export async function renderBoardTui(
 				if (!proposal) return;
 				const oldStatus = proposal.status;
 				await core.demoteProposalProper(proposalId, "user", true);
-				pushUndo(async () => { await core.updateProposalFromInput(proposalId, { status: oldStatus }, true); });
+				pushUndo(async () => {
+					await core.updateProposalFromInput(
+						proposalId,
+						{ status: oldStatus },
+						true,
+					);
+				});
 				renderView();
-			} catch (e) { /* ignore */ }
+			} catch (_e) {
+				/* ignore */
+			}
 		});
 
 		screen.key(["C-right"], async () => {
@@ -1234,9 +1436,17 @@ export async function renderBoardTui(
 				if (!proposal) return;
 				const oldStatus = proposal.status;
 				await core.promoteProposal(proposalId, "user", true);
-				pushUndo(async () => { await core.updateProposalFromInput(proposalId, { status: oldStatus }, true); });
+				pushUndo(async () => {
+					await core.updateProposalFromInput(
+						proposalId,
+						{ status: oldStatus },
+						true,
+					);
+				});
 				renderView();
-			} catch (e) { /* ignore */ }
+			} catch (_e) {
+				/* ignore */
+			}
 		});
 
 		// S129: Alt+Arrows for Hierarchy Management
@@ -1250,8 +1460,14 @@ export async function renderBoardTui(
 			if (idx > 0) {
 				const parentCandidate = column.proposals[idx - 1];
 				if (parentCandidate) {
-					await core.updateProposalFromInput(proposalId, { parentProposalId: parentCandidate.id }, true);
-					showTransientFooter(` {green-fg}Set parent of ${proposalId} to ${parentCandidate.id}{/}`);
+					await core.updateProposalFromInput(
+						proposalId,
+						{ parentProposalId: parentCandidate.id },
+						true,
+					);
+					showTransientFooter(
+						` {green-fg}Set parent of ${proposalId} to ${parentCandidate.id}{/}`,
+					);
 					renderView();
 				}
 			}
@@ -1261,12 +1477,14 @@ export async function renderBoardTui(
 			if (popupOpen || filterPopupOpen || moveOp) return;
 			const proposalId = getSelectedProposalId();
 			if (!proposalId) return;
-			await core.updateProposalFromInput(proposalId, { parentProposalId: null as any }, true);
+			await core.updateProposalFromInput(
+				proposalId,
+				{ parentProposalId: null as any },
+				true,
+			);
 			showTransientFooter(` {yellow-fg}Released parent of ${proposalId}{/}`);
 			renderView();
 		});
-
-
 
 		// Helper to get the visible page size (number of items that fit on screen)
 		const getPageSize = (): number => {
@@ -1345,38 +1563,54 @@ export async function renderBoardTui(
 			screen.render();
 		});
 
-		const openProposalEditor = async (proposal: Proposal) => {
+		const _openProposalEditor = async (proposal: Proposal) => {
 			try {
 				const core = new Core(process.cwd(), { enableWatchers: true });
-				const result = await core.editProposalInTui(proposal.id, screen, proposal);
+				const result = await core.editProposalInTui(
+					proposal.id,
+					screen,
+					proposal,
+				);
 				if (result.reason === "read_only") {
-					const branchInfo = result.proposal?.branch ? ` from branch "${result.proposal.branch}"` : "";
+					const branchInfo = result.proposal?.branch
+						? ` from branch "${result.proposal.branch}"`
+						: "";
 					showTransientFooter(` {red-fg}Cannot edit proposal${branchInfo}.{/}`);
 					return;
 				}
 				if (result.reason === "editor_failed") {
-					showTransientFooter(" {red-fg}Editor exited with an error; proposal was not modified.{/}");
+					showTransientFooter(
+						" {red-fg}Editor exited with an error; proposal was not modified.{/}",
+					);
 					return;
 				}
 				if (result.reason === "not_found") {
-					showTransientFooter(` {red-fg}Proposal ${proposal.id} not found on this branch.{/}`);
+					showTransientFooter(
+						` {red-fg}Proposal ${proposal.id} not found on this branch.{/}`,
+					);
 					return;
 				}
 
 				if (result.proposal) {
 					currentProposals = currentProposals.map((existingProposal) =>
-						existingProposal.id === proposal.id ? result.proposal || existingProposal : existingProposal,
+						existingProposal.id === proposal.id
+							? result.proposal || existingProposal
+							: existingProposal,
 					);
 				}
 
 				if (result.changed) {
 					renderView();
-					showTransientFooter(` {green-fg}Proposal ${result.proposal?.id ?? proposal.id} marked modified.{/}`);
+					showTransientFooter(
+						` {green-fg}Proposal ${result.proposal?.id ?? proposal.id} marked modified.{/}`,
+					);
 					return;
 				}
 
 				renderView();
-				showTransientFooter(` {gray-fg}No changes detected for ${result.proposal?.id ?? proposal.id}.{/}`);
+				showTransientFooter(
+					` {gray-fg}No changes detected for ${result.proposal?.id ?? proposal.id}.{/}`,
+				);
 			} catch (_error) {
 				showTransientFooter(" {red-fg}Failed to open editor.{/}");
 			}
@@ -1399,7 +1633,11 @@ export async function renderBoardTui(
 			if (!proposal) return;
 			popupOpen = true;
 
-			const popup = await createProposalPopup(screen, proposal, resolveDirectiveLabel);
+			const popup = await createProposalPopup(
+				screen,
+				proposal,
+				resolveDirectiveLabel,
+			);
 			if (!popup) {
 				popupOpen = false;
 				return;
@@ -1416,8 +1654,12 @@ export async function renderBoardTui(
 			screen.render();
 		});
 
-		const openQuickEdit = async (proposal: Proposal, field: "title" | "assignee" | "labels") => {
-			if (popupOpen || filterPopupOpen || currentFocus === "filters" || moveOp) return;
+		const openQuickEdit = async (
+			proposal: Proposal,
+			field: "title" | "assignee" | "labels",
+		) => {
+			if (popupOpen || filterPopupOpen || currentFocus === "filters" || moveOp)
+				return;
 
 			const { promptText } = await import("./tui.ts");
 			let message = "";
@@ -1460,8 +1702,12 @@ export async function renderBoardTui(
 						.filter(Boolean);
 
 				const updated = await core.editProposal(proposal.id, updateInput);
-				currentProposals = currentProposals.map((s) => (s.id === proposal.id ? updated : s));
-				showTransientFooter(` {green-fg}Updated ${field} for ${proposal.id}{/}`);
+				currentProposals = currentProposals.map((s) =>
+					s.id === proposal.id ? updated : s,
+				);
+				showTransientFooter(
+					` {green-fg}Updated ${field} for ${proposal.id}{/}`,
+				);
 				renderView();
 			} catch (error) {
 				showTransientFooter(` {red-fg}Failed to update ${field}: ${error}{/}`);
@@ -1486,12 +1732,15 @@ export async function renderBoardTui(
 		});
 
 		screen.key(["x", "X"], async () => {
-			if (popupOpen || filterPopupOpen || currentFocus === "filters" || moveOp) return;
+			if (popupOpen || filterPopupOpen || currentFocus === "filters" || moveOp)
+				return;
 			const proposalId = getSelectedProposalId();
 			if (!proposalId) return;
 			const proposal = await core.getProposal(proposalId);
 			if (!proposal) return;
-			const { generateProposalMarkdown } = await import("../../shared/utils/proposal-markdown-generator.ts");
+			const { generateProposalMarkdown } = await import(
+				"../../shared/utils/proposal-markdown-generator.ts"
+			);
 			const md = generateProposalMarkdown(proposal);
 			const { join } = await import("node:path");
 			const fs = await import("node:fs");
@@ -1532,7 +1781,8 @@ export async function renderBoardTui(
 		});
 
 		screen.key(["m"], () => {
-			if (popupOpen || filterPopupOpen || currentFocus === "filters" || moveOp) return;
+			if (popupOpen || filterPopupOpen || currentFocus === "filters" || moveOp)
+				return;
 			startMove();
 		});
 
@@ -1564,17 +1814,40 @@ export async function renderBoardTui(
 		});
 
 		// Poll for new events and update event panel
-		let currentEvents: StreamEvent[] = [];
+		let _currentEvents: StreamEvent[] = [];
 		const updateEventPanel = () => {
 			const events = getRecentEvents(30);
 			if (events.length > 0) {
-				currentEvents = events;
-				const lines = events.map(e => {
-					const time = new Date(e.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-					const icon = { proposal_accepted: '📋', proposal_claimed: '✋', proposal_coding: '💻', review_requested: '👀', proposal_reviewing: '🔍', review_passed: '✅', review_failed: '❌', proposal_complete: '🎉', proposal_merged: '🔀', proposal_pushed: '🚀', agent_online: '🟢', agent_offline: '🔴', handoff: '🤝', heartbeat: '💓', cubic_phase_change: '🔄', custom: '📌', message: '💬' }[e.type] || '📌';
+				_currentEvents = events;
+				const lines = events.map((e) => {
+					const time = new Date(e.timestamp).toLocaleTimeString("en-US", {
+						hour: "2-digit",
+						minute: "2-digit",
+						second: "2-digit",
+					});
+					const icon =
+						{
+							proposal_accepted: "📋",
+							proposal_claimed: "✋",
+							proposal_coding: "💻",
+							review_requested: "👀",
+							proposal_reviewing: "🔍",
+							review_passed: "✅",
+							review_failed: "❌",
+							proposal_complete: "🎉",
+							proposal_merged: "🔀",
+							proposal_pushed: "🚀",
+							agent_online: "🟢",
+							agent_offline: "🔴",
+							handoff: "🤝",
+							heartbeat: "💓",
+							cubic_phase_change: "🔄",
+							custom: "📌",
+							message: "💬",
+						}[e.type] || "📌";
 					return `{cyan-fg}${time}{/} ${icon} ${e.message}`;
 				});
-				eventPanel.setContent(lines.join('\n'));
+				eventPanel.setContent(lines.join("\n"));
 			}
 			screen.render();
 		};

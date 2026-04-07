@@ -10,10 +10,21 @@
  * AC#4: Test history tracked per proposal
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { discoverTests, type TestFile } from "./test-discovery.ts";
-import { runTests, runTestFile, type TestRunReport, type TestResult } from "./test-runner.ts";
+import {
+	runTests,
+	type TestResult,
+	type TestRunReport,
+} from "./test-runner.ts";
 
 /** Test history entry for a single run */
 export interface TestHistoryEntry {
@@ -156,7 +167,9 @@ export class RegressionSuite {
 		agent: string;
 		automatic?: boolean;
 		testFiles?: string[];
-	}): Promise<TestRunReport & { blocked: boolean; pulseEvent?: PulseTestEvent }> {
+	}): Promise<
+		TestRunReport & { blocked: boolean; pulseEvent?: PulseTestEvent }
+	> {
 		if (!this.config.enabled) {
 			throw new Error("Regression suite is disabled");
 		}
@@ -170,7 +183,9 @@ export class RegressionSuite {
 
 		// Override with specific files if provided
 		if (options.testFiles && options.testFiles.length > 0) {
-			testsToRun = testsToRun.filter((t) => options.testFiles!.includes(t.path));
+			testsToRun = testsToRun.filter((t) =>
+				options.testFiles?.includes(t.path),
+			);
 		}
 
 		if (testsToRun.length === 0) {
@@ -216,7 +231,9 @@ export class RegressionSuite {
 					passed: this.allPassed(report),
 					duration: report.totalDuration,
 					timestamp: report.completedAt,
-					failedTests: report.results.filter((r) => !r.passed).map((r) => r.file),
+					failedTests: report.results
+						.filter((r) => !r.passed)
+						.map((r) => r.file),
 				}
 			: undefined;
 
@@ -226,7 +243,7 @@ export class RegressionSuite {
 	/**
 	 * Filter tests based on configuration and proposal.
 	 */
-	private filterTests(tests: TestFile[], proposalId: string): TestFile[] {
+	private filterTests(tests: TestFile[], _proposalId: string): TestFile[] {
 		let filtered = tests;
 
 		// Exclude always-excluded
@@ -241,14 +258,21 @@ export class RegressionSuite {
 			const included = filtered.map((t) => t.path);
 			for (const include of this.config.alwaysInclude) {
 				if (!included.includes(include)) {
-					filtered.push({ path: include, category: "integration", name: include, size: 0 });
+					filtered.push({
+						path: include,
+						category: "integration",
+						name: include,
+						size: 0,
+					});
 				}
 			}
 		}
 
 		// Filter by categories if specified
 		if (this.config.categories.length > 0) {
-			filtered = filtered.filter((t) => this.config.categories.includes(t.category));
+			filtered = filtered.filter((t) =>
+				this.config.categories.includes(t.category),
+			);
 		}
 
 		return filtered;
@@ -258,7 +282,9 @@ export class RegressionSuite {
 	 * Check if all tests passed.
 	 */
 	private allPassed(report: TestRunReport): boolean {
-		return report.summary.total > 0 && report.summary.passed === report.summary.total;
+		return (
+			report.summary.total > 0 && report.summary.passed === report.summary.total
+		);
 	}
 
 	/**
@@ -301,7 +327,9 @@ export class RegressionSuite {
 		}
 
 		try {
-			const history: TestHistoryEntry[] = JSON.parse(readFileSync(historyPath, "utf-8"));
+			const history: TestHistoryEntry[] = JSON.parse(
+				readFileSync(historyPath, "utf-8"),
+			);
 			return limit ? history.slice(-limit) : history;
 		} catch {
 			return [];
@@ -362,7 +390,9 @@ export class RegressionSuite {
 			};
 		}
 
-		const passedRuns = history.filter((h) => h.summary.passed === h.summary.total).length;
+		const passedRuns = history.filter(
+			(h) => h.summary.passed === h.summary.total,
+		).length;
 
 		return {
 			totalRuns: history.length,

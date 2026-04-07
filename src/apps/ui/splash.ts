@@ -29,12 +29,54 @@ function getWideLogoLines(color: boolean | undefined): string[] {
 	// 65 columns wide banner using block characters
 	const letters = [
 		["██████╗ ", "██╔══██╗", "██████╔╝", "██╔══██╗", "██║  ██║", "╚═╝  ╚═╝"], // R
-		[" ██████╗ ", "██╔═══██╗", "██║   ██║", "██║   ██║", "╚██████╔╝", " ╚═════╝ "], // O
-		["  █████╗ ", " ██╔══██╗", " ███████║", " ██╔══██║", " ██║  ██║", " ╚═╝  ╚═╝"], // A
-		[" ██████╗ ", " ██╔══██╗", " ██║  ██║", " ██╔══██╗", " ██████╔╝", " ╚═════╝ "], // D
-		[" ███╗   ███╗", " ████╗ ████║", " ██╔████╔██║", " ██║╚██╔╝██║", " ██║ ╚═╝ ██║", " ╚═╝     ╚═╝"], // M
-		["  █████╗ ", " ██╔══██╗", " ███████║", " ██╔══██║", " ██║  ██║", " ╚═╝  ╚═╝"], // A
-		[" ██████╗ ", " ██╔══██╗", " ██████╔╝", " ██╔═══╝ ", " ██║     ", " ╚═╝     "], // P
+		[
+			" ██████╗ ",
+			"██╔═══██╗",
+			"██║   ██║",
+			"██║   ██║",
+			"╚██████╔╝",
+			" ╚═════╝ ",
+		], // O
+		[
+			"  █████╗ ",
+			" ██╔══██╗",
+			" ███████║",
+			" ██╔══██║",
+			" ██║  ██║",
+			" ╚═╝  ╚═╝",
+		], // A
+		[
+			" ██████╗ ",
+			" ██╔══██╗",
+			" ██║  ██║",
+			" ██╔══██╗",
+			" ██████╔╝",
+			" ╚═════╝ ",
+		], // D
+		[
+			" ███╗   ███╗",
+			" ████╗ ████║",
+			" ██╔████╔██║",
+			" ██║╚██╔╝██║",
+			" ██║ ╚═╝ ██║",
+			" ╚═╝     ╚═╝",
+		], // M
+		[
+			"  █████╗ ",
+			" ██╔══██╗",
+			" ███████║",
+			" ██╔══██║",
+			" ██║  ██║",
+			" ╚═╝  ╚═╝",
+		], // A
+		[
+			" ██████╗ ",
+			" ██╔══██╗",
+			" ██████╔╝",
+			" ██╔═══╝ ",
+			" ██║     ",
+			" ╚═╝     ",
+		], // P
 	];
 
 	const colors = [red, yellow, green, cyan, blue, _magenta, red];
@@ -65,7 +107,9 @@ function osc8(text: string, url: string, enabled: boolean): string {
 
 export async function printSplash(opts: SplashOptions): Promise<void> {
 	const { version, revision, initialized, plain, color } = opts;
-	const versionLabel = revision ? `v${version} • rev ${revision}` : `v${version}`;
+	const versionLabel = revision
+		? `v${version} • rev ${revision}`
+		: `v${version}`;
 
 	const width = Math.max(0, Number(process.stdout.columns || 0));
 	// Fixed accent color; no terminal theme detection
@@ -95,16 +139,26 @@ export async function printSplash(opts: SplashOptions): Promise<void> {
 
 	if (!initialized) {
 		lines.push(bold(color, "Not initialized"));
-		lines.push(`  ${green(color, "roadmap init")}  ${dim(color, "Initialize Roadmap.md in this repo")}`);
+		lines.push(
+			`  ${green(color, "roadmap init")}  ${dim(color, "Initialize Roadmap.md in this repo")}`,
+		);
 	} else {
 		lines.push(bold(color, "Quickstart"));
 		lines.push(
 			`  ${accent(color, 'roadmap proposal create "Title" -d "Description"')}  ${dim(color, "Create a new proposal")}`,
 		);
-		lines.push(`  ${accent(color, "roadmap proposal list --plain")}  ${dim(color, "List proposals (plain text)")}`);
-		lines.push(`  ${accent(color, "roadmap board")}  ${dim(color, "Open the TUI Kanban board")}`);
-		lines.push(`  ${accent(color, "roadmap browser")}  ${dim(color, "Start the web UI")}`);
-		lines.push(`  ${accent(color, "roadmap overview")}  ${dim(color, "Show project statistics")}`);
+		lines.push(
+			`  ${accent(color, "roadmap proposal list --plain")}  ${dim(color, "List proposals (plain text)")}`,
+		);
+		lines.push(
+			`  ${accent(color, "roadmap board")}  ${dim(color, "Open the TUI Kanban board")}`,
+		);
+		lines.push(
+			`  ${accent(color, "roadmap browser")}  ${dim(color, "Start the web UI")}`,
+		);
+		lines.push(
+			`  ${accent(color, "roadmap overview")}  ${dim(color, "Show project statistics")}`,
+		);
 	}
 
 	lines.push("");

@@ -1,4 +1,7 @@
-import type { Document, DocumentSearchResult } from "../../../../shared/types/index.ts";
+import type {
+	Document,
+	DocumentSearchResult,
+} from "../../../../shared/types/index.ts";
 import { McpError } from "../../errors/mcp-errors.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
@@ -36,7 +39,10 @@ export class DocumentHandlers {
 	}
 
 	private formatDocumentSummaryLine(document: Document): string {
-		const metadata: string[] = [`type: ${document.type}`, `created: ${document.createdDate}`];
+		const metadata: string[] = [
+			`type: ${document.type}`,
+			`created: ${document.createdDate}`,
+		];
 		if (document.updatedDate) {
 			metadata.push(`updated: ${document.updatedDate}`);
 		}
@@ -72,7 +78,9 @@ export class DocumentHandlers {
 			search && search.length > 0
 				? documents.filter((document) => {
 						const haystacks = [document.id, document.title];
-						return haystacks.some((value) => value.toLowerCase().includes(search));
+						return haystacks.some((value) =>
+							value.toLowerCase().includes(search),
+						);
 					})
 				: documents;
 
@@ -109,13 +117,19 @@ export class DocumentHandlers {
 
 	async createDocument(args: DocumentCreateArgs): Promise<CallToolResult> {
 		try {
-			const document = await this.core.createDocumentWithId(args.title, args.content);
+			const document = await this.core.createDocumentWithId(
+				args.title,
+				args.content,
+			);
 			return await formatDocumentCallResult(document, {
 				summaryLines: ["Document created successfully."],
 			});
 		} catch (error) {
 			if (error instanceof Error) {
-				throw new McpError(`Failed to create document: ${error.message}`, "OPERATION_FAILED");
+				throw new McpError(
+					`Failed to create document: ${error.message}`,
+					"OPERATION_FAILED",
+				);
 			}
 			throw new McpError("Failed to create document.", "OPERATION_FAILED");
 		}
@@ -123,20 +137,28 @@ export class DocumentHandlers {
 
 	async updateDocument(args: DocumentUpdateArgs): Promise<CallToolResult> {
 		const existing = await this.loadDocumentOrThrow(args.id);
-		const nextDocument = args.title ? { ...existing, title: args.title } : existing;
+		const nextDocument = args.title
+			? { ...existing, title: args.title }
+			: existing;
 
 		try {
 			await this.core.updateDocument(nextDocument, args.content);
 			const refreshed = await this.core.getDocument(existing.id);
 			if (!refreshed) {
-				throw new McpError(`Document not found: ${args.id}`, "DOCUMENT_NOT_FOUND");
+				throw new McpError(
+					`Document not found: ${args.id}`,
+					"DOCUMENT_NOT_FOUND",
+				);
 			}
 			return await formatDocumentCallResult(refreshed, {
 				summaryLines: ["Document updated successfully."],
 			});
 		} catch (error) {
 			if (error instanceof Error) {
-				throw new McpError(`Failed to update document: ${error.message}`, "OPERATION_FAILED");
+				throw new McpError(
+					`Failed to update document: ${error.message}`,
+					"OPERATION_FAILED",
+				);
 			}
 			throw new McpError("Failed to update document.", "OPERATION_FAILED");
 		}
@@ -150,7 +172,9 @@ export class DocumentHandlers {
 			types: ["document"],
 		});
 
-		const documents = results.filter((result): result is DocumentSearchResult => result.type === "document");
+		const documents = results.filter(
+			(result): result is DocumentSearchResult => result.type === "document",
+		);
 		if (documents.length === 0) {
 			return {
 				content: [

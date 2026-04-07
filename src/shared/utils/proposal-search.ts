@@ -82,7 +82,9 @@ function parseProposalIdSegments(value: string): number[] | null {
 	if (!/^[0-9]+(?:\.[0-9]+)*$/.test(withoutPrefix)) {
 		return null;
 	}
-	return withoutPrefix.split(".").map((segment) => Number.parseInt(segment, 10));
+	return withoutPrefix
+		.split(".")
+		.map((segment) => Number.parseInt(segment, 10));
 }
 
 interface SearchableProposal {
@@ -100,14 +102,20 @@ interface SearchableProposal {
 function buildSearchableProposal(proposal: Proposal): SearchableProposal {
 	const bodyParts: string[] = [];
 	if (proposal.description) bodyParts.push(proposal.description);
-	if (Array.isArray(proposal.acceptanceCriteriaItems) && proposal.acceptanceCriteriaItems.length > 0) {
+	if (
+		Array.isArray(proposal.acceptanceCriteriaItems) &&
+		proposal.acceptanceCriteriaItems.length > 0
+	) {
 		const lines = [...proposal.acceptanceCriteriaItems]
 			.sort((a, b) => a.index - b.index)
-			.map((criterion) => `- [${criterion.checked ? "x" : " "}] ${criterion.text}`);
+			.map(
+				(criterion) => `- [${criterion.checked ? "x" : " "}] ${criterion.text}`,
+			);
 		bodyParts.push(lines.join("\n"));
 	}
 	if (proposal.implementationPlan) bodyParts.push(proposal.implementationPlan);
-	if (proposal.implementationNotes) bodyParts.push(proposal.implementationNotes);
+	if (proposal.implementationNotes)
+		bodyParts.push(proposal.implementationNotes);
 	if (proposal.labels?.length) bodyParts.push(proposal.labels.join(" "));
 	if (proposal.assignee?.length) bodyParts.push(proposal.assignee.join(" "));
 
@@ -117,7 +125,9 @@ function buildSearchableProposal(proposal: Proposal): SearchableProposal {
 		bodyText: bodyParts.join(" "),
 		id: proposal.id,
 		idVariants: createProposalIdVariants(proposal.id),
-		dependencyIds: (proposal.dependencies ?? []).flatMap((dependency) => createProposalIdVariants(dependency)),
+		dependencyIds: (proposal.dependencies ?? []).flatMap((dependency) =>
+			createProposalIdVariants(dependency),
+		),
 		statusLower: (proposal.status || "").toLowerCase(),
 		priorityLower: proposal.priority?.toLowerCase(),
 		labelsLower: (proposal.labels || []).map((label) => label.toLowerCase()),
@@ -127,7 +137,9 @@ function buildSearchableProposal(proposal: Proposal): SearchableProposal {
 /**
  * Create an in-memory search index for proposals
  */
-export function createProposalSearchIndex(proposals: Proposal[]): ProposalSearchIndex {
+export function createProposalSearchIndex(
+	proposals: Proposal[],
+): ProposalSearchIndex {
 	const searchableProposals = proposals.map(buildSearchableProposal);
 
 	const fuse = new Fuse(searchableProposals, {
@@ -183,7 +195,11 @@ export function createProposalSearchIndex(proposals: Proposal[]): ProposalSearch
 
 			// Apply ready filter
 			if (options.ready) {
-				const doneIds = new Set(searchableProposals.filter((t) => isCompleteStatus(t.proposal.status)).map((t) => t.id));
+				const doneIds = new Set(
+					searchableProposals
+						.filter((t) => isCompleteStatus(t.proposal.status))
+						.map((t) => t.id),
+				);
 				results = results.filter((t) => {
 					const proposal = t.proposal;
 					if (isTerminalStatus(proposal.status)) return false;
@@ -215,15 +231,25 @@ function applyDirectiveFilter(
 		if (!proposal.directive) {
 			return false;
 		}
-		const value = resolveDirectiveLabel ? resolveDirectiveLabel(proposal.directive) : proposal.directive;
+		const value = resolveDirectiveLabel
+			? resolveDirectiveLabel(proposal.directive)
+			: proposal.directive;
 		return value.trim().toLowerCase() === normalizedDirective;
 	});
 }
 
-export function applyProposalFilters(proposals: Proposal[], options: ProposalFilterOptions, index?: ProposalSearchIndex): Proposal[] {
+export function applyProposalFilters(
+	proposals: Proposal[],
+	options: ProposalFilterOptions,
+	index?: ProposalSearchIndex,
+): Proposal[] {
 	const query = options.query?.trim() ?? "";
 	const hasBaseFilters = Boolean(
-		query || options.status || options.priority || (options.labels && options.labels.length > 0) || options.ready,
+		query ||
+			options.status ||
+			options.priority ||
+			(options.labels && options.labels.length > 0) ||
+			options.ready,
 	);
 
 	let results = hasBaseFilters
@@ -237,7 +263,11 @@ export function applyProposalFilters(proposals: Proposal[], options: ProposalFil
 		: [...proposals];
 
 	if (options.directive) {
-		results = applyDirectiveFilter(results, options.directive, options.resolveDirectiveLabel);
+		results = applyDirectiveFilter(
+			results,
+			options.directive,
+			options.resolveDirectiveLabel,
+		);
 	}
 
 	return results;

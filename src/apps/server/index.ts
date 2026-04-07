@@ -1,19 +1,28 @@
 import { execSync } from "node:child_process";
-import { createReadStream, readFileSync, appendFileSync } from "node:fs";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { appendFileSync, createReadStream, readFileSync } from "node:fs";
+import {
+	createServer,
+	type IncomingMessage,
+	type ServerResponse,
+} from "node:http";
 import { join } from "node:path";
-import { type WebSocket, WebSocketServer } from "ws";
 import type { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
-import type { ContentStore } from '../../core/storage/content-store.ts';
-import { initializeProject } from '../../core/infrastructure/init.ts';
+import { type WebSocket, WebSocketServer } from "ws";
+import { initializeProject } from "../../core/infrastructure/init.ts";
+import type { SearchService } from "../../core/infrastructure/search-service.ts";
+import { getProposalStatistics } from "../../core/infrastructure/statistics.ts";
+import { RelayService } from "../../core/messaging/relay.ts";
 import { Core } from "../../core/roadmap.ts";
-import { RelayService } from '../../core/messaging/relay.ts';
-import { McpServer, createMcpServer } from "../../mcp/server.ts";
-import type { SearchService } from '../../core/infrastructure/search-service.ts';
-import { getProposalStatistics } from '../../core/infrastructure/statistics.ts';
-import type { SearchPriorityFilter, SearchResultType, Proposal, ProposalUpdateInput } from "../../types/index.ts";
+import type { ContentStore } from "../../core/storage/content-store.ts";
+import { createMcpServer, type McpServer } from "../../mcp/server.ts";
+import type {
+	Proposal,
+	ProposalUpdateInput,
+	SearchPriorityFilter,
+	SearchResultType,
+} from "../../types/index.ts";
 import { watchConfig } from "../../utils/config-watcher.ts";
-import { getVersionInfo, formatVersionLabel } from "../../utils/version.ts";
+import { formatVersionLabel, getVersionInfo } from "../../utils/version.ts";
 
 // Regex pattern to match any prefix (letters followed by dash)
 const PREFIX_PATTERN = /^[a-zA-Z]+-/i;
@@ -42,13 +51,20 @@ function parseProposalIdSegments(value: string): number[] | null {
 	if (!/^[0-9]+(?:\.[0-9]+)*$/.test(withoutPrefix)) {
 		return null;
 	}
-	return withoutPrefix.split(".").map((segment) => Number.parseInt(segment, 10));
+	return withoutPrefix
+		.split(".")
+		.map((segment) => Number.parseInt(segment, 10));
 }
 
-function findProposalByLooseId(proposals: Proposal[], inputId: string): Proposal | undefined {
+function findProposalByLooseId(
+	proposals: Proposal[],
+	inputId: string,
+): Proposal | undefined {
 	// First try exact match (case-insensitive)
 	const lowerInputId = inputId.toLowerCase();
-	const exact = proposals.find((proposal) => proposal.id.toLowerCase() === lowerInputId);
+	const exact = proposals.find(
+		(proposal) => proposal.id.toLowerCase() === lowerInputId,
+	);
 	if (exact) {
 		return exact;
 	}
@@ -61,7 +77,10 @@ function findProposalByLooseId(proposals: Proposal[], inputId: string): Proposal
 
 	return proposals.find((proposal) => {
 		const candidateSegments = parseProposalIdSegments(proposal.id);
-		if (!candidateSegments || candidateSegments.length !== inputSegments.length) {
+		if (
+			!candidateSegments ||
+			candidateSegments.length !== inputSegments.length
+		) {
 			return false;
 		}
 		for (let index = 0; index < candidateSegments.length; index += 1) {
@@ -111,7 +130,8 @@ export class RoadmapServer {
 
 		const key = normalized.toLowerCase();
 		const aliasKeys = new Set<string>([key]);
-		const looksLikeDirectiveId = /^\d+$/.test(normalized) || /^d-\d+$/i.test(normalized);
+		const looksLikeDirectiveId =
+			/^\d+$/.test(normalized) || /^d-\d+$/i.test(normalized);
 		const canonicalInputId =
 			/^\d+$/.test(normalized) || /^d-\d+$/i.test(normalized)
 				? `d-${String(Number.parseInt(normalized.replace(/^d-/i, ""), 10))}`
@@ -151,12 +171,16 @@ export class RoadmapServer {
 		const findIdMatch = (
 			directives: Array<{ id: string; title: string }>,
 		): { id: string; title: string } | undefined => {
-			const rawExactMatch = directives.find((item) => item.id.trim().toLowerCase() === key);
+			const rawExactMatch = directives.find(
+				(item) => item.id.trim().toLowerCase() === key,
+			);
 			if (rawExactMatch) {
 				return rawExactMatch;
 			}
 			if (canonicalInputId) {
-				const canonicalRawMatch = directives.find((item) => item.id.trim().toLowerCase() === canonicalInputId);
+				const canonicalRawMatch = directives.find(
+					(item) => item.id.trim().toLowerCase() === canonicalInputId,
+				);
 				if (canonicalRawMatch) {
 					return canonicalRawMatch;
 				}
@@ -166,14 +190,18 @@ export class RoadmapServer {
 		const findUniqueTitleMatch = (
 			directives: Array<{ id: string; title: string }>,
 		): { id: string; title: string } | null => {
-			const titleMatches = directives.filter((item) => item.title.trim().toLowerCase() === key);
+			const titleMatches = directives.filter(
+				(item) => item.title.trim().toLowerCase() === key,
+			);
 			if (titleMatches.length === 1) {
 				return titleMatches[0] ?? null;
 			}
 			return null;
 		};
 
-		const matchByAlias = (directives: Array<{ id: string; title: string }>): string | null => {
+		const matchByAlias = (
+			directives: Array<{ id: string; title: string }>,
+		): string | null => {
 			const idMatch = findIdMatch(directives);
 			const titleMatch = findUniqueTitleMatch(directives);
 			if (looksLikeDirectiveId) {
@@ -188,7 +216,9 @@ export class RoadmapServer {
 			return null;
 		};
 
-		const activeTitleMatches = activeDirectives.filter((item) => item.title.trim().toLowerCase() === key);
+		const activeTitleMatches = activeDirectives.filter(
+			(item) => item.title.trim().toLowerCase() === key,
+		);
 		const hasAmbiguousActiveTitle = activeTitleMatches.length > 1;
 		if (looksLikeDirectiveId) {
 			const activeIdMatch = findIdMatch(activeDirectives);
@@ -305,7 +335,9 @@ export class RoadmapServer {
 			channel,
 			onMessage: (msg) => {
 				try {
-					ws.send(JSON.stringify({ type: "channel-message", channel, message: msg }));
+					ws.send(
+						JSON.stringify({ type: "channel-message", channel, message: msg }),
+					);
 				} catch {}
 			},
 		});
@@ -407,7 +439,9 @@ export class RoadmapServer {
 			const url = `http://localhost:${finalPort}`;
 			const versionInfo = await getVersionInfo();
 			const versionLabel = formatVersionLabel(versionInfo);
-			console.log(`🚀 Roadmap.md browser interface ${versionLabel} running at ${url}`);
+			console.log(
+				`🚀 Roadmap.md browser interface ${versionLabel} running at ${url}`,
+			);
 			console.log(`📊 Project: ${this.projectName}`);
 			const stopKey = process.platform === "darwin" ? "Cmd+C" : "Ctrl+C";
 			console.log(`⏹️  Press ${stopKey} to stop the server`);
@@ -422,10 +456,15 @@ export class RoadmapServer {
 			// Handle port already in use error
 			const errorCode = (error as { code?: string })?.code;
 			const errorMessage = (error as Error)?.message;
-			if (errorCode === "EADDRINUSE" || errorMessage?.includes("address already in use")) {
+			if (
+				errorCode === "EADDRINUSE" ||
+				errorMessage?.includes("address already in use")
+			) {
 				console.error(`\n❌ Error: Port ${finalPort} is already in use.\n`);
 				console.log("💡 Suggestions:");
-				console.log(`   1. Try a different port: roadmap browser --port ${finalPort + 1}`);
+				console.log(
+					`   1. Try a different port: roadmap browser --port ${finalPort + 1}`,
+				);
 				console.log(`   2. Find what's using port ${finalPort}:`);
 				if (process.platform === "darwin" || process.platform === "linux") {
 					console.log(`      Run: lsof -i :${finalPort}`);
@@ -510,13 +549,21 @@ export class RoadmapServer {
 			execSync(cmd, { stdio: "ignore" });
 		} catch (error) {
 			console.warn("⚠️  Failed to open browser automatically:", error);
-			console.log("💡 Please open your browser manually and navigate to the URL above");
+			console.log(
+				"💡 Please open your browser manually and navigate to the URL above",
+			);
 		}
 	}
 
-	private async handleHttpRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-		const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
-		appendFileSync("/tmp/mcp-debug.log", "[HTTP] " + req.method + " " + req.url + "\n");
+	private async handleHttpRequest(
+		req: IncomingMessage,
+		res: ServerResponse,
+	): Promise<void> {
+		const url = new URL(
+			req.url || "/",
+			`http://${req.headers.host || "localhost"}`,
+		);
+		appendFileSync("/tmp/mcp-debug.log", `[HTTP] ${req.method} ${req.url}\n`);
 		const _pathname = url.pathname;
 		const method = req.method || "GET";
 
@@ -534,12 +581,18 @@ export class RoadmapServer {
 
 			// Disable caching for GET/HEAD so browser always fetches latest content
 			if (method === "GET" || method === "HEAD") {
-				response.headers.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+				response.headers.set(
+					"Cache-Control",
+					"no-store, max-age=0, must-revalidate",
+				);
 				response.headers.set("Pragma", "no-cache");
 				response.headers.set("Expires", "0");
 			}
 
-			res.writeHead(response.status, Object.fromEntries(response.headers.entries()));
+			res.writeHead(
+				response.status,
+				Object.fromEntries(response.headers.entries()),
+			);
 			if (response.body) {
 				const reader = response.body.getReader();
 				while (true) {
@@ -576,7 +629,9 @@ export class RoadmapServer {
 					"/dashboard",
 				].some((p) => pathname === p || pathname.startsWith(`${p}/`)))
 		) {
-			return new Response(indexHtml, { headers: { "Content-Type": "text/html" } });
+			return new Response(indexHtml, {
+				headers: { "Content-Type": "text/html" },
+			});
 		}
 
 		// API Routes
@@ -586,17 +641,21 @@ export class RoadmapServer {
 				if (method === "POST") return await this.handleCreateProposal(req);
 			}
 
-			if (pathname === "/api/agents" && method === "GET") return await this.handleListAgents();
-			if (pathname === "/api/pulse" && method === "GET") return await this.handleListPulse(req);
-			if (pathname === "/api/channels" && method === "GET") return await this.handleListChannels();
-			if (pathname === "/api/messages" && method === "GET") return await this.handleListMessages(req);
+			if (pathname === "/api/agents" && method === "GET")
+				return await this.handleListAgents();
+			if (pathname === "/api/pulse" && method === "GET")
+				return await this.handleListPulse(req);
+			if (pathname === "/api/channels" && method === "GET")
+				return await this.handleListChannels();
+			if (pathname === "/api/messages" && method === "GET")
+				return await this.handleListMessages(req);
 
 			if (pathname === "/api/mcp/sse" && method === "GET") {
-				appendFileSync('/tmp/mcp-debug.log', '[Server] MCP SSE request\n');
+				appendFileSync("/tmp/mcp-debug.log", "[Server] MCP SSE request\n");
 				return await this.handleMcpSse(req);
 			}
 			if (pathname === "/api/mcp/message" && method === "POST") {
-				appendFileSync('/tmp/mcp-debug.log', '[Server] MCP POST request\n');
+				appendFileSync("/tmp/mcp-debug.log", "[Server] MCP POST request\n");
 				return await this.handleMcpMessage(req);
 			}
 
@@ -625,13 +684,17 @@ export class RoadmapServer {
 			}
 
 			// GET /api/proposals/:id/notes - Discussion notes for a proposal
-			if (pathname.startsWith("/api/proposals/") && pathname.endsWith("/notes")) {
+			if (
+				pathname.startsWith("/api/proposals/") &&
+				pathname.endsWith("/notes")
+			) {
 				const parts = pathname.split("/");
 				const id = parts[3]!; // /api/proposals/{id}/notes
 				if (method === "GET") return await this.handleGetProposalNotes(id, req);
 			}
 
-			if (pathname === "/api/statuses" && method === "GET") return await this.handleGetStatuses();
+			if (pathname === "/api/statuses" && method === "GET")
+				return await this.handleGetStatuses();
 
 			if (pathname === "/api/config") {
 				if (method === "GET") return await this.handleGetConfig();
@@ -670,8 +733,13 @@ export class RoadmapServer {
 				if (method === "PUT") return await this.handleUpdateDecision(req, id);
 			}
 
-			if (pathname === "/api/drafts" && method === "GET") return await this.handleListDrafts();
-			if (pathname.startsWith("/api/drafts/") && pathname.endsWith("/promote") && method === "POST") {
+			if (pathname === "/api/drafts" && method === "GET")
+				return await this.handleListDrafts();
+			if (
+				pathname.startsWith("/api/drafts/") &&
+				pathname.endsWith("/promote") &&
+				method === "POST"
+			) {
 				const id = pathname.split("/")[3]!;
 				return await this.handlePromoteDraft(id);
 			}
@@ -681,7 +749,8 @@ export class RoadmapServer {
 				if (method === "POST") return await this.handleCreateDirective(req);
 			}
 
-			if (pathname === "/api/directives/archived" && method === "GET") return await this.handleListArchivedDirectives();
+			if (pathname === "/api/directives/archived" && method === "GET")
+				return await this.handleListArchivedDirectives();
 
 			if (pathname.startsWith("/api/directives/")) {
 				const parts = pathname.split("/");
@@ -694,23 +763,35 @@ export class RoadmapServer {
 				}
 			}
 
-			if (pathname === "/api/proposals/reorder" && method === "POST") return await this.handleReorderProposal(req);
-			if (pathname === "/api/proposals/cleanup" && method === "GET") return await this.handleCleanupPreview(req);
-			if (pathname === "/api/proposals/cleanup/execute" && method === "POST") return await this.handleCleanupExecute(req);
+			if (pathname === "/api/proposals/reorder" && method === "POST")
+				return await this.handleReorderProposal(req);
+			if (pathname === "/api/proposals/cleanup" && method === "GET")
+				return await this.handleCleanupPreview(req);
+			if (pathname === "/api/proposals/cleanup/execute" && method === "POST")
+				return await this.handleCleanupExecute(req);
 
-			if (pathname === "/api/version" && method === "GET") return await this.handleGetVersion();
-			if (pathname === "/api/statistics" && method === "GET") return await this.handleGetStatistics();
-			if (pathname === "/api/status" && method === "GET") return await this.handleGetStatus();
-			if (pathname === "/api/init" && method === "POST") return await this.handleInit(req);
-			if (pathname === "/api/search" && method === "GET") return await this.handleSearch(req);
+			if (pathname === "/api/version" && method === "GET")
+				return await this.handleGetVersion();
+			if (pathname === "/api/statistics" && method === "GET")
+				return await this.handleGetStatistics();
+			if (pathname === "/api/status" && method === "GET")
+				return await this.handleGetStatus();
+			if (pathname === "/api/init" && method === "POST")
+				return await this.handleInit(req);
+			if (pathname === "/api/search" && method === "GET")
+				return await this.handleSearch(req);
 
-			if (pathname === "/api/sequences" && method === "GET") return await this.handleGetSequences();
-			if (pathname === "/api/sequences/move" && method === "POST") return await this.handleMoveSequence(req);
+			if (pathname === "/api/sequences" && method === "GET")
+				return await this.handleGetSequences();
+			if (pathname === "/api/sequences/move" && method === "POST")
+				return await this.handleMoveSequence(req);
 		}
 
 		// Legacy/Duplicate routes
-		if (pathname === "/sequences" && method === "GET") return await this.handleGetSequences();
-		if (pathname === "/sequences/move" && method === "POST") return await this.handleMoveSequence(req);
+		if (pathname === "/sequences" && method === "GET")
+			return await this.handleGetSequences();
+		if (pathname === "/sequences/move" && method === "POST")
+			return await this.handleMoveSequence(req);
 
 		// Assets (not implemented - return 404)
 		if (pathname.startsWith("/assets/")) {
@@ -744,19 +825,27 @@ export class RoadmapServer {
 		const parent = url.searchParams.get("parent") || undefined;
 		const priorityParam = url.searchParams.get("priority") || undefined;
 		const crossBranch = url.searchParams.get("crossBranch") === "true";
-		const labelParams = [...url.searchParams.getAll("label"), ...url.searchParams.getAll("labels")];
+		const labelParams = [
+			...url.searchParams.getAll("label"),
+			...url.searchParams.getAll("labels"),
+		];
 		const labelsCsv = url.searchParams.get("labels");
 		if (labelsCsv) {
 			labelParams.push(...labelsCsv.split(","));
 		}
-		const labels = labelParams.map((label) => label.trim()).filter((label) => label.length > 0);
+		const labels = labelParams
+			.map((label) => label.trim())
+			.filter((label) => label.length > 0);
 
 		let priority: "high" | "medium" | "low" | undefined;
 		if (priorityParam) {
 			const normalizedPriority = priorityParam.toLowerCase();
 			const allowed = ["high", "medium", "low"];
 			if (!allowed.includes(normalizedPriority)) {
-				return Response.json({ error: "Invalid priority filter" }, { status: 400 });
+				return Response.json(
+					{ error: "Invalid priority filter" },
+					{ status: 400 },
+				);
 			}
 			priority = normalizedPriority as "high" | "medium" | "low";
 		}
@@ -777,14 +866,23 @@ export class RoadmapServer {
 			}
 			if (!parentProposal) {
 				const normalizedParent = ensurePrefix(parent);
-				return Response.json({ error: `Parent proposal ${normalizedParent} not found` }, { status: 404 });
+				return Response.json(
+					{ error: `Parent proposal ${normalizedParent} not found` },
+					{ status: 404 },
+				);
 			}
 			parentProposalId = parentProposal.id;
 		}
 
 		// Use Core.queryProposals which handles all filtering and cross-branch logic
 		const proposals = await this.core.queryProposals({
-			filters: { status, assignee, priority, parentProposalId, labels: labels.length > 0 ? labels : undefined },
+			filters: {
+				status,
+				assignee,
+				priority,
+				parentProposalId,
+				labels: labels.length > 0 ? labels : undefined,
+			},
 			includeCrossBranch: crossBranch,
 		});
 
@@ -797,10 +895,16 @@ export class RoadmapServer {
 			const url = new URL(req.url);
 			const query = url.searchParams.get("query") ?? undefined;
 			const limitParam = url.searchParams.get("limit");
-			const typeParams = [...url.searchParams.getAll("type"), ...url.searchParams.getAll("types")];
+			const typeParams = [
+				...url.searchParams.getAll("type"),
+				...url.searchParams.getAll("types"),
+			];
 			const statusParams = url.searchParams.getAll("status");
 			const priorityParamsRaw = url.searchParams.getAll("priority");
-			const labelParamsRaw = [...url.searchParams.getAll("label"), ...url.searchParams.getAll("labels")];
+			const labelParamsRaw = [
+				...url.searchParams.getAll("label"),
+				...url.searchParams.getAll("labels"),
+			];
 			const labelsCsv = url.searchParams.get("labels");
 			if (labelsCsv) {
 				labelParamsRaw.push(...labelsCsv.split(","));
@@ -810,21 +914,31 @@ export class RoadmapServer {
 			if (limitParam) {
 				const parsed = Number.parseInt(limitParam, 10);
 				if (Number.isNaN(parsed) || parsed <= 0) {
-					return Response.json({ error: "limit must be a positive integer" }, { status: 400 });
+					return Response.json(
+						{ error: "limit must be a positive integer" },
+						{ status: 400 },
+					);
 				}
 				limit = parsed;
 			}
 
 			let types: SearchResultType[] | undefined;
 			if (typeParams.length > 0) {
-				const allowed: SearchResultType[] = ["proposal", "document", "decision"];
+				const allowed: SearchResultType[] = [
+					"proposal",
+					"document",
+					"decision",
+				];
 				const normalizedTypes = typeParams
 					.map((value) => value.toLowerCase())
 					.filter((value): value is SearchResultType => {
 						return allowed.includes(value as SearchResultType);
 					});
 				if (normalizedTypes.length === 0) {
-					return Response.json({ error: "type must be proposal, document, or decision" }, { status: 400 });
+					return Response.json(
+						{ error: "type must be proposal, document, or decision" },
+						{ status: 400 },
+					);
 				}
 				types = normalizedTypes;
 			}
@@ -842,14 +956,22 @@ export class RoadmapServer {
 			}
 
 			if (priorityParamsRaw.length > 0) {
-				const allowedPriorities: SearchPriorityFilter[] = ["high", "medium", "low"];
-				const normalizedPriorities = priorityParamsRaw.map((value) => value.toLowerCase());
+				const allowedPriorities: SearchPriorityFilter[] = [
+					"high",
+					"medium",
+					"low",
+				];
+				const normalizedPriorities = priorityParamsRaw.map((value) =>
+					value.toLowerCase(),
+				);
 				const invalidPriority = normalizedPriorities.find(
 					(value) => !allowedPriorities.includes(value as SearchPriorityFilter),
 				);
 				if (invalidPriority) {
 					return Response.json(
-						{ error: `Unsupported priority '${invalidPriority}'. Use high, medium, or low.` },
+						{
+							error: `Unsupported priority '${invalidPriority}'. Use high, medium, or low.`,
+						},
 						{ status: 400 },
 					);
 				}
@@ -858,9 +980,14 @@ export class RoadmapServer {
 			}
 
 			if (labelParamsRaw.length > 0) {
-				const normalizedLabels = labelParamsRaw.map((value) => value.trim()).filter((value) => value.length > 0);
+				const normalizedLabels = labelParamsRaw
+					.map((value) => value.trim())
+					.filter((value) => value.length > 0);
 				if (normalizedLabels.length > 0) {
-					filters.labels = normalizedLabels.length === 1 ? normalizedLabels[0] : normalizedLabels;
+					filters.labels =
+						normalizedLabels.length === 1
+							? normalizedLabels[0]
+							: normalizedLabels;
 				}
 			}
 
@@ -875,7 +1002,11 @@ export class RoadmapServer {
 	private async handleCreateProposal(req: Request): Promise<Response> {
 		const payload = await req.json();
 
-		if (!payload || typeof payload.title !== "string" || payload.title.trim().length === 0) {
+		if (
+			!payload ||
+			typeof payload.title !== "string" ||
+			payload.title.trim().length === 0
+		) {
 			return Response.json({ error: "Title is required" }, { status: 400 });
 		}
 
@@ -890,27 +1021,31 @@ export class RoadmapServer {
 
 		try {
 			const directive =
-				typeof payload.directive === "string" ? await this.resolveDirectiveInput(payload.directive) : undefined;
+				typeof payload.directive === "string"
+					? await this.resolveDirectiveInput(payload.directive)
+					: undefined;
 
-			const { proposal: createdProposal } = await this.core.createProposalFromInput({
-				title: payload.title,
-				description: payload.description,
-				status: payload.status,
-				priority: payload.priority,
-				directive,
-				labels: payload.labels,
-				assignee: payload.assignee,
-				dependencies: payload.dependencies,
-				references: payload.references,
-				parentProposalId: payload.parentProposalId,
-				implementationPlan: payload.implementationPlan,
-				implementationNotes: payload.implementationNotes,
-				finalSummary: payload.finalSummary,
-				acceptanceCriteria,
-			});
+			const { proposal: createdProposal } =
+				await this.core.createProposalFromInput({
+					title: payload.title,
+					description: payload.description,
+					status: payload.status,
+					priority: payload.priority,
+					directive,
+					labels: payload.labels,
+					assignee: payload.assignee,
+					dependencies: payload.dependencies,
+					references: payload.references,
+					parentProposalId: payload.parentProposalId,
+					implementationPlan: payload.implementationPlan,
+					implementationNotes: payload.implementationNotes,
+					finalSummary: payload.finalSummary,
+					acceptanceCriteria,
+				});
 			return Response.json(createdProposal, { status: 201 });
 		} catch (error) {
-			const message = error instanceof Error ? error.message : "Failed to create proposal";
+			const message =
+				error instanceof Error ? error.message : "Failed to create proposal";
 			return Response.json({ error: message }, { status: 400 });
 		}
 	}
@@ -931,7 +1066,10 @@ export class RoadmapServer {
 		return Response.json(proposal);
 	}
 
-	private async handleGetProposalNotes(proposalId: string, req: Request): Promise<Response> {
+	private async handleGetProposalNotes(
+		proposalId: string,
+		req: Request,
+	): Promise<Response> {
 		try {
 			const url = new URL(req.url);
 			const noteType = url.searchParams.get("type");
@@ -952,9 +1090,13 @@ export class RoadmapServer {
 		}
 	}
 
-	private async handleUpdateProposal(req: Request, proposalId: string): Promise<Response> {
+	private async handleUpdateProposal(
+		req: Request,
+		proposalId: string,
+	): Promise<Response> {
 		const updates = await req.json();
-		const existingProposal = await this.core.filesystem.loadProposal(proposalId);
+		const existingProposal =
+			await this.core.filesystem.loadProposal(proposalId);
 		if (!existingProposal) {
 			return Response.json({ error: "Proposal not found" }, { status: 404 });
 		}
@@ -977,9 +1119,14 @@ export class RoadmapServer {
 			updateInput.priority = updates.priority;
 		}
 
-		if ("directive" in updates && (typeof updates.directive === "string" || updates.directive === null)) {
+		if (
+			"directive" in updates &&
+			(typeof updates.directive === "string" || updates.directive === null)
+		) {
 			if (typeof updates.directive === "string") {
-				updateInput.directive = await this.resolveDirectiveInput(updates.directive);
+				updateInput.directive = await this.resolveDirectiveInput(
+					updates.directive,
+				);
 			} else {
 				updateInput.directive = updates.directive;
 			}
@@ -1001,11 +1148,17 @@ export class RoadmapServer {
 			updateInput.references = updates.references;
 		}
 
-		if ("implementationPlan" in updates && typeof updates.implementationPlan === "string") {
+		if (
+			"implementationPlan" in updates &&
+			typeof updates.implementationPlan === "string"
+		) {
 			updateInput.implementationPlan = updates.implementationPlan;
 		}
 
-		if ("implementationNotes" in updates && typeof updates.implementationNotes === "string") {
+		if (
+			"implementationNotes" in updates &&
+			typeof updates.implementationNotes === "string"
+		) {
 			updateInput.implementationNotes = updates.implementationNotes;
 		}
 
@@ -1013,7 +1166,10 @@ export class RoadmapServer {
 			updateInput.finalSummary = updates.finalSummary;
 		}
 
-		if ("acceptanceCriteriaItems" in updates && Array.isArray(updates.acceptanceCriteriaItems)) {
+		if (
+			"acceptanceCriteriaItems" in updates &&
+			Array.isArray(updates.acceptanceCriteriaItems)
+		) {
 			updateInput.acceptanceCriteria = updates.acceptanceCriteriaItems
 				.map((item: { text?: string; checked?: boolean }) => ({
 					text: String(item?.text ?? "").trim(),
@@ -1023,10 +1179,14 @@ export class RoadmapServer {
 		}
 
 		try {
-			const updatedProposal = await this.core.updateProposalFromInput(proposalId, updateInput);
+			const updatedProposal = await this.core.updateProposalFromInput(
+				proposalId,
+				updateInput,
+			);
 			return Response.json(updatedProposal);
 		} catch (error) {
-			const message = error instanceof Error ? error.message : "Failed to update proposal";
+			const message =
+				error instanceof Error ? error.message : "Failed to update proposal";
 			return Response.json({ error: message }, { status: 400 });
 		}
 	}
@@ -1048,14 +1208,18 @@ export class RoadmapServer {
 
 			const success = await this.core.completeProposal(proposalId);
 			if (!success) {
-				return Response.json({ error: "Failed to complete proposal" }, { status: 500 });
+				return Response.json(
+					{ error: "Failed to complete proposal" },
+					{ status: 500 },
+				);
 			}
 
 			// Notify listeners to refresh
 			this.broadcastProposalsUpdated();
 			return Response.json({ success: true });
 		} catch (error) {
-			const message = error instanceof Error ? error.message : "Failed to complete proposal";
+			const message =
+				error instanceof Error ? error.message : "Failed to complete proposal";
 			console.error("Error completing proposal:", error);
 			return Response.json({ error: message }, { status: 500 });
 		}
@@ -1076,7 +1240,8 @@ export class RoadmapServer {
 			this.broadcastProposalsUpdated();
 			return Response.json({ success: true });
 		} catch (error) {
-			const message = error instanceof Error ? error.message : "Failed to release proposal";
+			const message =
+				error instanceof Error ? error.message : "Failed to release proposal";
 			console.error("Error releasing proposal:", error);
 			return Response.json({ error: message }, { status: 500 });
 		}
@@ -1089,12 +1254,17 @@ export class RoadmapServer {
 				return Response.json({ error: "Proposal not found" }, { status: 404 });
 			}
 
-			const result = await this.core.demoteProposalProper(proposalId, "user", true);
+			const result = await this.core.demoteProposalProper(
+				proposalId,
+				"user",
+				true,
+			);
 			// Notify listeners to refresh
 			this.broadcastProposalsUpdated();
 			return Response.json({ success: true, status: result.status });
 		} catch (error) {
-			const message = error instanceof Error ? error.message : "Failed to demote proposal";
+			const message =
+				error instanceof Error ? error.message : "Failed to demote proposal";
 			console.error("Error demoting proposal:", error);
 			return Response.json({ error: message }, { status: 500 });
 		}
@@ -1102,7 +1272,13 @@ export class RoadmapServer {
 
 	private async handleGetStatuses(): Promise<Response> {
 		const config = await this.core.filesystem.loadConfig();
-		const statuses = config?.statuses || ["New", "Active", "Accepted", "Complete", "Abandoned"];
+		const statuses = config?.statuses || [
+			"New",
+			"Active",
+			"Accepted",
+			"Complete",
+			"Abandoned",
+		];
 		return Response.json(statuses);
 	}
 
@@ -1150,18 +1326,28 @@ export class RoadmapServer {
 			return Response.json({ success: true, id: document.id }, { status: 201 });
 		} catch (error) {
 			console.error("Error creating document:", error);
-			return Response.json({ error: "Failed to create document" }, { status: 500 });
+			return Response.json(
+				{ error: "Failed to create document" },
+				{ status: 500 },
+			);
 		}
 	}
 
-	private async handleUpdateDoc(req: Request, docId: string): Promise<Response> {
+	private async handleUpdateDoc(
+		req: Request,
+		docId: string,
+	): Promise<Response> {
 		try {
 			const body = await req.json();
-			const content = typeof body?.content === "string" ? body.content : undefined;
+			const content =
+				typeof body?.content === "string" ? body.content : undefined;
 			const title = typeof body?.title === "string" ? body.title : undefined;
 
 			if (typeof content !== "string") {
-				return Response.json({ error: "Document content is required" }, { status: 400 });
+				return Response.json(
+					{ error: "Document content is required" },
+					{ status: 400 },
+				);
 			}
 
 			let normalizedTitle: string | undefined;
@@ -1169,7 +1355,10 @@ export class RoadmapServer {
 			if (typeof title === "string") {
 				normalizedTitle = title.trim();
 				if (normalizedTitle.length === 0) {
-					return Response.json({ error: "Document title cannot be empty" }, { status: 400 });
+					return Response.json(
+						{ error: "Document title cannot be empty" },
+						{ status: 400 },
+					);
 				}
 			}
 
@@ -1178,16 +1367,24 @@ export class RoadmapServer {
 				return Response.json({ error: "Document not found" }, { status: 404 });
 			}
 
-			const nextDoc = normalizedTitle ? { ...existingDoc, title: normalizedTitle } : { ...existingDoc };
+			const nextDoc = normalizedTitle
+				? { ...existingDoc, title: normalizedTitle }
+				: { ...existingDoc };
 
 			await this.core.updateDocument(nextDoc, content);
 			return Response.json({ success: true });
 		} catch (error) {
 			console.error("Error updating document:", error);
 			if (error instanceof SyntaxError) {
-				return Response.json({ error: "Invalid request payload" }, { status: 400 });
+				return Response.json(
+					{ error: "Invalid request payload" },
+					{ status: 400 },
+				);
 			}
-			return Response.json({ error: "Failed to update document" }, { status: 500 });
+			return Response.json(
+				{ error: "Failed to update document" },
+				{ status: 500 },
+			);
 		}
 	}
 
@@ -1216,8 +1413,12 @@ export class RoadmapServer {
 	private async handleGetDecision(decisionId: string): Promise<Response> {
 		try {
 			const store = await this.getContentStoreInstance();
-			const normalizedId = decisionId.startsWith("decision-") ? decisionId : `decision-${decisionId}`;
-			const decision = store.getDecisions().find((item) => item.id === normalizedId || item.id === decisionId);
+			const normalizedId = decisionId.startsWith("decision-")
+				? decisionId
+				: `decision-${decisionId}`;
+			const decision = store
+				.getDecisions()
+				.find((item) => item.id === normalizedId || item.id === decisionId);
 
 			if (!decision) {
 				return Response.json({ error: "Decision not found" }, { status: 404 });
@@ -1238,11 +1439,17 @@ export class RoadmapServer {
 			return Response.json(decision, { status: 201 });
 		} catch (error) {
 			console.error("Error creating decision:", error);
-			return Response.json({ error: "Failed to create decision" }, { status: 500 });
+			return Response.json(
+				{ error: "Failed to create decision" },
+				{ status: 500 },
+			);
 		}
 	}
 
-	private async handleUpdateDecision(req: Request, decisionId: string): Promise<Response> {
+	private async handleUpdateDecision(
+		req: Request,
+		decisionId: string,
+	): Promise<Response> {
 		const content = await req.text();
 
 		try {
@@ -1253,7 +1460,10 @@ export class RoadmapServer {
 				return Response.json({ error: "Decision not found" }, { status: 404 });
 			}
 			console.error("Error updating decision:", error);
-			return Response.json({ error: "Failed to update decision" }, { status: 500 });
+			return Response.json(
+				{ error: "Failed to update decision" },
+				{ status: 500 },
+			);
 		}
 	}
 
@@ -1261,12 +1471,18 @@ export class RoadmapServer {
 		try {
 			const config = await this.core.filesystem.loadConfig();
 			if (!config) {
-				return Response.json({ error: "Configuration not found" }, { status: 404 });
+				return Response.json(
+					{ error: "Configuration not found" },
+					{ status: 404 },
+				);
 			}
 			return Response.json(config);
 		} catch (error) {
 			console.error("Error loading config:", error);
-			return Response.json({ error: "Failed to load configuration" }, { status: 500 });
+			return Response.json(
+				{ error: "Failed to load configuration" },
+				{ status: 500 },
+			);
 		}
 	}
 
@@ -1276,11 +1492,20 @@ export class RoadmapServer {
 
 			// Validate configuration
 			if (!updatedConfig.projectName?.trim()) {
-				return Response.json({ error: "Project name is required" }, { status: 400 });
+				return Response.json(
+					{ error: "Project name is required" },
+					{ status: 400 },
+				);
 			}
 
-			if (updatedConfig.defaultPort && (updatedConfig.defaultPort < 1 || updatedConfig.defaultPort > 65535)) {
-				return Response.json({ error: "Port must be between 1 and 65535" }, { status: 400 });
+			if (
+				updatedConfig.defaultPort &&
+				(updatedConfig.defaultPort < 1 || updatedConfig.defaultPort > 65535)
+			) {
+				return Response.json(
+					{ error: "Port must be between 1 and 65535" },
+					{ status: 400 },
+				);
 			}
 
 			// Save configuration
@@ -1297,7 +1522,10 @@ export class RoadmapServer {
 			return Response.json(updatedConfig);
 		} catch (error) {
 			console.error("Error updating config:", error);
-			return Response.json({ error: "Failed to update configuration" }, { status: 500 });
+			return Response.json(
+				{ error: "Failed to update configuration" },
+				{ status: 500 },
+			);
 		}
 	}
 
@@ -1326,7 +1554,10 @@ export class RoadmapServer {
 			return Response.json({ success: true });
 		} catch (error) {
 			console.error("Error promoting draft:", error);
-			return Response.json({ error: "Failed to promote draft" }, { status: 500 });
+			return Response.json(
+				{ error: "Failed to promote draft" },
+				{ status: 500 },
+			);
 		}
 	}
 
@@ -1366,11 +1597,17 @@ export class RoadmapServer {
 
 	private async handleCreateDirective(req: Request): Promise<Response> {
 		try {
-			const body = (await req.json()) as { title?: string; description?: string };
+			const body = (await req.json()) as {
+				title?: string;
+				description?: string;
+			};
 			const title = body.title?.trim();
 
 			if (!title) {
-				return Response.json({ error: "Directive title is required" }, { status: 400 });
+				return Response.json(
+					{ error: "Directive title is required" },
+					{ status: 400 },
+				);
 			}
 
 			// Check for duplicates
@@ -1398,7 +1635,10 @@ export class RoadmapServer {
 			};
 			const requestedKeys = buildAliasKeys(title);
 			const duplicate = existingDirectives.find((directive) => {
-				const directiveKeys = new Set<string>([...buildAliasKeys(directive.id), ...buildAliasKeys(directive.title)]);
+				const directiveKeys = new Set<string>([
+					...buildAliasKeys(directive.id),
+					...buildAliasKeys(directive.title),
+				]);
 				for (const key of requestedKeys) {
 					if (directiveKeys.has(key)) {
 						return true;
@@ -1407,14 +1647,23 @@ export class RoadmapServer {
 				return false;
 			});
 			if (duplicate) {
-				return Response.json({ error: "A directive with this title or ID already exists" }, { status: 400 });
+				return Response.json(
+					{ error: "A directive with this title or ID already exists" },
+					{ status: 400 },
+				);
 			}
 
-			const directive = await this.core.filesystem.createDirective(title, body.description);
+			const directive = await this.core.filesystem.createDirective(
+				title,
+				body.description,
+			);
 			return Response.json(directive, { status: 201 });
 		} catch (error) {
 			console.error("Error creating directive:", error);
-			return Response.json({ error: "Failed to create directive" }, { status: 500 });
+			return Response.json(
+				{ error: "Failed to create directive" },
+				{ status: 500 },
+			);
 		}
 	}
 
@@ -1425,9 +1674,13 @@ export class RoadmapServer {
 				return Response.json({ error: "Directive not found" }, { status: 404 });
 			}
 			this.broadcastProposalsUpdated();
-			return Response.json({ success: true, directive: result.directive ?? null });
+			return Response.json({
+				success: true,
+				directive: result.directive ?? null,
+			});
 		} catch (error) {
-			const message = error instanceof Error ? error.message : "Failed to archive directive";
+			const message =
+				error instanceof Error ? error.message : "Failed to archive directive";
 			console.error("Error archiving directive:", error);
 			return Response.json({ error: message }, { status: 500 });
 		}
@@ -1447,19 +1700,36 @@ export class RoadmapServer {
 	private async handleReorderProposal(req: Request): Promise<Response> {
 		try {
 			const body = await req.json();
-			const proposalId = typeof body.proposalId === "string" ? body.proposalId : (typeof body.proposalId === "string" ? body.proposalId : "");
-			const targetStatus = typeof body.targetStatus === "string" ? body.targetStatus : "";
-			const orderedProposalIds = Array.isArray(body.orderedProposalIds) ? body.orderedProposalIds : (Array.isArray(body.orderedProposalIds) ? body.orderedProposalIds : []);
+			const proposalId =
+				typeof body.proposalId === "string"
+					? body.proposalId
+					: typeof body.proposalId === "string"
+						? body.proposalId
+						: "";
+			const targetStatus =
+				typeof body.targetStatus === "string" ? body.targetStatus : "";
+			const orderedProposalIds = Array.isArray(body.orderedProposalIds)
+				? body.orderedProposalIds
+				: Array.isArray(body.orderedProposalIds)
+					? body.orderedProposalIds
+					: [];
 			const targetDirective =
 				typeof body.targetDirective === "string"
 					? body.targetDirective
 					: body.targetDirective === null
 						? null
-						: (typeof body.targetDirective === "string" ? body.targetDirective : (body.targetDirective === null ? null : undefined));
+						: typeof body.targetDirective === "string"
+							? body.targetDirective
+							: body.targetDirective === null
+								? null
+								: undefined;
 
 			if (!proposalId || !targetStatus || orderedProposalIds.length === 0) {
 				return Response.json(
-					{ error: "Missing required fields: proposalId, targetStatus, and orderedProposalIds" },
+					{
+						error:
+							"Missing required fields: proposalId, targetStatus, and orderedProposalIds",
+					},
 					{ status: 400 },
 				);
 			}
@@ -1474,10 +1744,12 @@ export class RoadmapServer {
 
 			return Response.json({ success: true, proposal: updatedProposal });
 		} catch (error) {
-			const message = error instanceof Error ? error.message : "Failed to reorder proposal";
+			const message =
+				error instanceof Error ? error.message : "Failed to reorder proposal";
 			// Cross-branch and validation errors are client errors (400), not server errors (500)
 			const isCrossBranchError = message.includes("exists in branch");
-			const isValidationError = message.includes("not found") || message.includes("Missing required");
+			const isValidationError =
+				message.includes("not found") || message.includes("Missing required");
 			const status = isCrossBranchError || isValidationError ? 400 : 500;
 			if (status === 500) {
 				console.error("Error reordering proposal:", error);
@@ -1492,12 +1764,18 @@ export class RoadmapServer {
 			const ageParam = url.searchParams.get("age");
 
 			if (!ageParam) {
-				return Response.json({ error: "Missing age parameter" }, { status: 400 });
+				return Response.json(
+					{ error: "Missing age parameter" },
+					{ status: 400 },
+				);
 			}
 
 			const age = Number.parseInt(ageParam, 10);
 			if (Number.isNaN(age) || age < 0) {
-				return Response.json({ error: "Invalid age parameter" }, { status: 400 });
+				return Response.json(
+					{ error: "Invalid age parameter" },
+					{ status: 400 },
+				);
 			}
 
 			// Get Reached proposals older than specified days
@@ -1517,7 +1795,10 @@ export class RoadmapServer {
 			});
 		} catch (error) {
 			console.error("Error getting cleanup preview:", error);
-			return Response.json({ error: "Failed to get cleanup preview" }, { status: 500 });
+			return Response.json(
+				{ error: "Failed to get cleanup preview" },
+				{ status: 500 },
+			);
 		}
 	}
 
@@ -1526,16 +1807,23 @@ export class RoadmapServer {
 			const { age } = await req.json();
 
 			if (age === undefined || age === null) {
-				return Response.json({ error: "Missing age parameter" }, { status: 400 });
+				return Response.json(
+					{ error: "Missing age parameter" },
+					{ status: 400 },
+				);
 			}
 
 			const ageInDays = Number.parseInt(age, 10);
 			if (Number.isNaN(ageInDays) || ageInDays < 0) {
-				return Response.json({ error: "Invalid age parameter" }, { status: 400 });
+				return Response.json(
+					{ error: "Invalid age parameter" },
+					{ status: 400 },
+				);
 			}
 
 			// Get Reached proposals older than specified days
-			const proposalsToCleanup = await this.core.getReachedProposalsByAge(ageInDays);
+			const proposalsToCleanup =
+				await this.core.getReachedProposalsByAge(ageInDays);
 
 			if (proposalsToCleanup.length === 0) {
 				return Response.json({
@@ -1570,12 +1858,16 @@ export class RoadmapServer {
 				success: true,
 				movedCount: successCount,
 				totalCount: proposalsToCleanup.length,
-				failedProposals: failedProposals.length > 0 ? failedProposals : undefined,
+				failedProposals:
+					failedProposals.length > 0 ? failedProposals : undefined,
 				message: `Moved ${successCount} of ${proposalsToCleanup.length} proposals to completed folder`,
 			});
 		} catch (error) {
 			console.error("Error executing cleanup:", error);
-			return Response.json({ error: "Failed to execute cleanup" }, { status: 500 });
+			return Response.json(
+				{ error: "Failed to execute cleanup" },
+				{ status: 500 },
+			);
 		}
 	}
 
@@ -1588,11 +1880,20 @@ export class RoadmapServer {
 	private async handleMoveSequence(req: Request): Promise<Response> {
 		try {
 			const body = await req.json();
-			const proposalId = String(body.proposalId || body.proposalId || "").trim();
+			const proposalId = String(
+				body.proposalId || body.proposalId || "",
+			).trim();
 			const moveToUnsequenced = Boolean(body.unsequenced === true);
-			const targetSequenceIndex = body.targetSequenceIndex !== undefined ? Number(body.targetSequenceIndex) : undefined;
+			const targetSequenceIndex =
+				body.targetSequenceIndex !== undefined
+					? Number(body.targetSequenceIndex)
+					: undefined;
 
-			if (!proposalId) return Response.json({ error: "proposalId is required" }, { status: 400 });
+			if (!proposalId)
+				return Response.json(
+					{ error: "proposalId is required" },
+					{ status: 400 },
+				);
 
 			const next = await this.core.moveProposalInSequences({
 				proposalId,
@@ -1609,7 +1910,8 @@ export class RoadmapServer {
 	private async handleGetStatistics(): Promise<Response> {
 		try {
 			// Load proposals using the same logic as CLI overview
-			const { proposals, drafts, statuses } = await this.core.loadAllProposalsForStatistics();
+			const { proposals, drafts, statuses } =
+				await this.core.loadAllProposalsForStatistics();
 
 			// Calculate statistics using the exact same function as CLI
 			const statistics = getProposalStatistics(proposals, drafts, statuses);
@@ -1624,7 +1926,10 @@ export class RoadmapServer {
 			return Response.json(response);
 		} catch (error) {
 			console.error("Error getting statistics:", error);
-			return Response.json({ error: "Failed to get statistics" }, { status: 500 });
+			return Response.json(
+				{ error: "Failed to get statistics" },
+				{ status: 500 },
+			);
 		}
 	}
 
@@ -1647,22 +1952,35 @@ export class RoadmapServer {
 	private async handleInit(req: Request): Promise<Response> {
 		try {
 			const body = await req.json();
-			const projectName = typeof body.projectName === "string" ? body.projectName.trim() : "";
-			const integrationMode = body.integrationMode as "mcp" | "cli" | "none" | undefined;
+			const projectName =
+				typeof body.projectName === "string" ? body.projectName.trim() : "";
+			const integrationMode = body.integrationMode as
+				| "mcp"
+				| "cli"
+				| "none"
+				| undefined;
 			const mcpClients = Array.isArray(body.mcpClients) ? body.mcpClients : [];
-			const agentInstructions = Array.isArray(body.agentInstructions) ? body.agentInstructions : [];
+			const agentInstructions = Array.isArray(body.agentInstructions)
+				? body.agentInstructions
+				: [];
 			const installClaudeAgentFlag = Boolean(body.installClaudeAgent);
 			const advancedConfig = body.advancedConfig || {};
 
 			// Input validation (browser layer responsibility)
 			if (!projectName) {
-				return Response.json({ error: "Project name is required" }, { status: 400 });
+				return Response.json(
+					{ error: "Project name is required" },
+					{ status: 400 },
+				);
 			}
 
 			// Check if already initialized (for browser, we don't allow re-init)
 			const existingConfig = await this.core.filesystem.loadConfig();
 			if (existingConfig) {
-				return Response.json({ error: "Project is already initialized" }, { status: 400 });
+				return Response.json(
+					{ error: "Project is already initialized" },
+					{ status: 400 },
+				);
 			}
 
 			// Call shared core init function
@@ -1691,7 +2009,8 @@ export class RoadmapServer {
 			});
 		} catch (error) {
 			console.error("Error initializing project:", error);
-			const message = error instanceof Error ? error.message : "Failed to initialize project";
+			const message =
+				error instanceof Error ? error.message : "Failed to initialize project";
 			return Response.json({ error: message }, { status: 500 });
 		}
 	}
@@ -1716,7 +2035,10 @@ export class RoadmapServer {
 			return Response.json(events);
 		} catch (error) {
 			console.error("Error listing pulse events:", error);
-			return Response.json({ error: "Failed to list pulse events" }, { status: 500 });
+			return Response.json(
+				{ error: "Failed to list pulse events" },
+				{ status: 500 },
+			);
 		}
 	}
 
@@ -1726,7 +2048,10 @@ export class RoadmapServer {
 			return Response.json(channels);
 		} catch (error) {
 			console.error("Error listing channels:", error);
-			return Response.json({ error: "Failed to list channels" }, { status: 500 });
+			return Response.json(
+				{ error: "Failed to list channels" },
+				{ status: 500 },
+			);
 		}
 	}
 
@@ -1735,14 +2060,20 @@ export class RoadmapServer {
 			const url = new URL(req.url);
 			const channel = url.searchParams.get("channel");
 			if (!channel) {
-				return Response.json({ error: "channel parameter is required" }, { status: 400 });
+				return Response.json(
+					{ error: "channel parameter is required" },
+					{ status: 400 },
+				);
 			}
 			const since = url.searchParams.get("since") || undefined;
 			const messages = await this.core.readMessages({ channel, since });
 			return Response.json(messages);
 		} catch (error) {
 			console.error("Error listing messages:", error);
-			return Response.json({ error: "Failed to list messages" }, { status: 500 });
+			return Response.json(
+				{ error: "Failed to list messages" },
+				{ status: 500 },
+			);
 		}
 	}
 
@@ -1754,7 +2085,10 @@ export class RoadmapServer {
 	/**
 	 * Handle SSE with raw Node.js ServerResponse (required by SSEServerTransport)
 	 */
-	private async handleMcpSseRaw(req: IncomingMessage, res: ServerResponse): Promise<void> {
+	private async handleMcpSseRaw(
+		req: IncomingMessage,
+		res: ServerResponse,
+	): Promise<void> {
 		await this.ensureServicesReady();
 		if (!this.mcpServer) {
 			res.writeHead(500).end("MCP server not available");
@@ -1762,12 +2096,14 @@ export class RoadmapServer {
 		}
 
 		// Create SSE transport with raw response
-		const { SSEServerTransport } = await import("@modelcontextprotocol/sdk/server/sse.js");
+		const { SSEServerTransport } = await import(
+			"@modelcontextprotocol/sdk/server/sse.js"
+		);
 		const transport = new SSEServerTransport("/api/mcp/message", res);
-		
+
 		const sessionId = transport.sessionId;
 		this.sseTransports.set(sessionId, transport);
-		
+
 		console.log(`[MCP] SSE connection: ${sessionId}`);
 
 		// Connect MCP server's underlying Server to transport
@@ -1783,7 +2119,7 @@ export class RoadmapServer {
 				throw e;
 			}
 		}
-		
+
 		// Clean up on close
 		req.on("close", async () => {
 			console.log(`[MCP] SSE closed: ${sessionId}`);
@@ -1795,10 +2131,13 @@ export class RoadmapServer {
 	}
 
 	private async handleMcpMessage(req: Request): Promise<Response> {
-		appendFileSync('/tmp/mcp-debug.log', '[MCP] handleMcpMessage called\n');
+		appendFileSync("/tmp/mcp-debug.log", "[MCP] handleMcpMessage called\n");
 		await this.ensureServicesReady();
 		if (!this.mcpServer) {
-			return Response.json({ error: "MCP server not available" }, { status: 500 });
+			return Response.json(
+				{ error: "MCP server not available" },
+				{ status: 500 },
+			);
 		}
 
 		const url = new URL(req.url);
@@ -1821,35 +2160,53 @@ export class RoadmapServer {
 			return Response.json({ error: "Invalid JSON" }, { status: 400 });
 		}
 
-		appendFileSync('/tmp/mcp-debug.log', '[MCP] POST message: ' + parsedBody?.method + ' sessionId: ' + sessionId + '\n');
+		appendFileSync(
+			"/tmp/mcp-debug.log",
+			`[MCP] POST message: ${parsedBody?.method} sessionId: ${sessionId}\n`,
+		);
 
 		// Handle message through SSE transport
 		try {
-			appendFileSync('/tmp/mcp-debug.log', '[MCP] Calling transport.handlePostMessage\n');
-			
+			appendFileSync(
+				"/tmp/mcp-debug.log",
+				"[MCP] Calling transport.handlePostMessage\n",
+			);
+
 			// Create mock response that captures status
 			let responseStatus = 202;
-			let responseBody = '';
+			let responseBody = "";
 			const mockRes = {
-				writeHead: (status: number) => { responseStatus = status; return mockRes; },
-				write: (chunk: any) => { responseBody += Buffer.from(chunk).toString(); return true; },
-				end: (chunk?: any) => { 
+				writeHead: (status: number) => {
+					responseStatus = status;
+					return mockRes;
+				},
+				write: (chunk: any) => {
+					responseBody += Buffer.from(chunk).toString();
+					return true;
+				},
+				end: (chunk?: any) => {
 					if (chunk) responseBody += Buffer.from(chunk).toString();
-					appendFileSync('/tmp/mcp-debug.log', '[MCP] Response status: ' + responseStatus + ' body: ' + responseBody.slice(0, 100) + '\n');
+					appendFileSync(
+						"/tmp/mcp-debug.log",
+						`[MCP] Response status: ${responseStatus} body: ${responseBody.slice(0, 100)}\n`,
+					);
 					return mockRes;
 				},
 				flushHeaders: () => {},
 				headersSent: false,
 				setHeader: () => {},
 			};
-			
+
 			// Call transport's handlePostMessage which handles the message internally
 			await transport.handlePostMessage(
-				{ headers: Object.fromEntries(new Headers(req.headers as any)), auth: undefined } as any,
+				{
+					headers: Object.fromEntries(new Headers(req.headers as any)),
+					auth: undefined,
+				} as any,
 				mockRes as any,
-				parsedBody
+				parsedBody,
 			);
-			
+
 			// Return the actual captured response
 			if (responseBody) {
 				try {
@@ -1860,7 +2217,7 @@ export class RoadmapServer {
 			}
 			return Response.json({ ok: true });
 		} catch (e) {
-			appendFileSync('/tmp/mcp-debug.log', '[MCP] POST error: ' + String(e) + '\n');
+			appendFileSync("/tmp/mcp-debug.log", `[MCP] POST error: ${String(e)}\n`);
 			return Response.json({ error: String(e) }, { status: 500 });
 		}
 	}

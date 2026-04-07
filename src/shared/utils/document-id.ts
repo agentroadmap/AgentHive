@@ -21,5 +21,8 @@ export function documentIdsEqual(left: string, right: string): boolean {
 	if (leftNumber !== null && rightNumber !== null) {
 		return leftNumber === rightNumber;
 	}
-	return normalizeDocumentId(left).toLowerCase() === normalizeDocumentId(right).toLowerCase();
+	return (
+		normalizeDocumentId(left).toLowerCase() ===
+		normalizeDocumentId(right).toLowerCase()
+	);
 }

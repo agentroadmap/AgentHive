@@ -23,18 +23,25 @@ export function registerTestingTools(server: McpServer): void {
 	const testDiscoverTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "test_discover",
-			description: "Discover test files in the project and categorize by type (unit, integration, e2e, regression)",
+			description:
+				"Discover test files in the project and categorize by type (unit, integration, e2e, regression)",
 			inputSchema: testDiscoverSchema,
 		},
 		testDiscoverSchema,
 		async (input) =>
-			handlers.discoverTests(input as { testDir?: string; category?: "unit" | "integration" | "e2e" | "regression" }),
+			handlers.discoverTests(
+				input as {
+					testDir?: string;
+					category?: "unit" | "integration" | "e2e" | "regression";
+				},
+			),
 	);
 
 	const testRunTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "test_run",
-			description: "Run discovered tests with optional filtering by category or specific files",
+			description:
+				"Run discovered tests with optional filtering by category or specific files",
 			inputSchema: testRunSchema,
 		},
 		testRunSchema,
@@ -52,11 +59,15 @@ export function registerTestingTools(server: McpServer): void {
 	const testIssuesTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "test_issues",
-			description: "List test issues (bugs/regressions) tracked against proposals",
+			description:
+				"List test issues (bugs/regressions) tracked against proposals",
 			inputSchema: testIssuesSchema,
 		},
 		testIssuesSchema,
-		async (input) => handlers.listIssues(input as { proposalId?: string; status?: string; severity?: string }),
+		async (input) =>
+			handlers.listIssues(
+				input as { proposalId?: string; status?: string; severity?: string },
+			),
 	);
 
 	const testIssueCreateTool: McpToolHandler = createSimpleValidatedTool(
@@ -85,13 +96,15 @@ export function registerTestingTools(server: McpServer): void {
 			inputSchema: testIssueResolveSchema,
 		},
 		testIssueResolveSchema,
-		async (input) => handlers.resolveIssue(input as { issueId: string; resolution: string }),
+		async (input) =>
+			handlers.resolveIssue(input as { issueId: string; resolution: string }),
 	);
 
 	const testCheckBlockedTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "test_check_blocked",
-			description: "Check if a proposal is blocked by open critical/major test issues",
+			description:
+				"Check if a proposal is blocked by open critical/major test issues",
 			inputSchema: {
 				properties: {
 					proposalId: {
@@ -102,7 +115,10 @@ export function registerTestingTools(server: McpServer): void {
 				required: ["proposalId"],
 			},
 		},
-		{ properties: { proposalId: { type: "string" } }, required: ["proposalId"] },
+		{
+			properties: { proposalId: { type: "string" } },
+			required: ["proposalId"],
+		},
 		async (input) => handlers.checkBlocked(input as { proposalId: string }),
 	);
 

@@ -12,7 +12,9 @@ describe("CLI wrapper launch config", () => {
 			execPath: "/usr/bin/node",
 			platform: "linux",
 			rawArgs: ["--version", "/repo/dist/roadmap"],
-			existsSync: (entryPath: string) => entryPath === "/repo/src/apps/cli.ts" || entryPath === "/repo/dist/roadmap",
+			existsSync: (entryPath: string) =>
+				entryPath === "/repo/src/apps/cli.ts" ||
+				entryPath === "/repo/dist/roadmap",
 			resolveBinary: () => {
 				throw new Error("should not resolve platform binary");
 			},
@@ -48,7 +50,8 @@ describe("CLI wrapper launch config", () => {
 			arch: "x64",
 			rawArgs: ["/repo/node_modules/agent-roadmap-linux-x64/roadmap", "--help"],
 			existsSync: () => false,
-			resolveBinary: (platform: string, arch: string) => `/pkg/${platform}-${arch}/roadmap`,
+			resolveBinary: (platform: string, arch: string) =>
+				`/pkg/${platform}-${arch}/roadmap`,
 		});
 
 		assert.strictEqual(result.command, "/pkg/linux-x64/roadmap");

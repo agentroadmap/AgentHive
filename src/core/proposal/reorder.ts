@@ -14,7 +14,9 @@ export interface CalculateNewOrdinalResult {
 	requiresRebalance: boolean;
 }
 
-export function calculateNewOrdinal(options: CalculateNewOrdinalOptions): CalculateNewOrdinalResult {
+export function calculateNewOrdinal(
+	options: CalculateNewOrdinalOptions,
+): CalculateNewOrdinalResult {
 	const { previous, next, defaultStep = DEFAULT_ORDINAL_STEP } = options;
 	const prevOrdinal = previous?.ordinal;
 	const nextOrdinal = next?.ordinal;
@@ -28,7 +30,10 @@ export function calculateNewOrdinal(options: CalculateNewOrdinalOptions): Calcul
 			return { ordinal: defaultStep, requiresRebalance: false };
 		}
 		const candidate = nextOrdinal / 2;
-		const requiresRebalance = !Number.isFinite(candidate) || candidate <= 0 || candidate >= nextOrdinal - EPSILON;
+		const requiresRebalance =
+			!Number.isFinite(candidate) ||
+			candidate <= 0 ||
+			candidate >= nextOrdinal - EPSILON;
 		return { ordinal: candidate, requiresRebalance };
 	}
 
@@ -44,7 +49,8 @@ export function calculateNewOrdinal(options: CalculateNewOrdinalOptions): Calcul
 	}
 
 	const candidate = prevOrdinal + gap / 2;
-	const requiresRebalance = candidate <= prevOrdinal + EPSILON || candidate >= nextOrdinal - EPSILON;
+	const requiresRebalance =
+		candidate <= prevOrdinal + EPSILON || candidate >= nextOrdinal - EPSILON;
 	return { ordinal: candidate, requiresRebalance };
 }
 
@@ -54,10 +60,9 @@ export interface ResolveOrdinalConflictsOptions {
 	forceSequential?: boolean;
 }
 
-export function resolveOrdinalConflicts<T extends { id: string; ordinal?: number }>(
-	proposals: T[],
-	options: ResolveOrdinalConflictsOptions = {},
-): T[] {
+export function resolveOrdinalConflicts<
+	T extends { id: string; ordinal?: number },
+>(proposals: T[], options: ResolveOrdinalConflictsOptions = {}): T[] {
 	const defaultStep = options.defaultStep ?? DEFAULT_ORDINAL_STEP;
 	const startOrdinal = options.startOrdinal ?? defaultStep;
 	const forceSequential = options.forceSequential ?? false;
@@ -73,9 +78,15 @@ export function resolveOrdinalConflicts<T extends { id: string; ordinal?: number
 		let assigned: number;
 
 		if (forceSequential) {
-			assigned = index === 0 ? startOrdinal : (lastOrdinal ?? startOrdinal) + defaultStep;
+			assigned =
+				index === 0
+					? startOrdinal
+					: (lastOrdinal ?? startOrdinal) + defaultStep;
 		} else if (proposal.ordinal === undefined) {
-			assigned = index === 0 ? startOrdinal : (lastOrdinal ?? startOrdinal) + defaultStep;
+			assigned =
+				index === 0
+					? startOrdinal
+					: (lastOrdinal ?? startOrdinal) + defaultStep;
 		} else if (lastOrdinal !== undefined && proposal.ordinal <= lastOrdinal) {
 			assigned = lastOrdinal + defaultStep;
 		} else {

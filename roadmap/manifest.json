@@ -1,41 +1,107 @@
 {
-  "project_name": "agentRoadmap",
-  "version": "2.0.0-alpha-full",
-  "visionary": "Gary_Toronto",
-  "timestamp": "2026-03-31T15:15:00Z",
-  "architecture": {
-    "state_engine": "Postgres_2.0",
-    "artifact_store": "Git_Local_First",
-    "execution_layer": "OpenClaw_CLI_ACP",
-    "interface_protocol": "MCP_v1.2"
-  },
-  "domains": [
-    { "id": "product", "status": "INITIALIZING", "description": "RFC Lifecycle, Decisions, DAG & NNL Snapshots" },
-    { "id": "project", "status": "ACTIVE", "description": "Task & Issue Orchestration, Who/What/When" },
-    { "id": "workforce", "status": "ACTIVE", "description": "Identity, Registration, Profiles, & Pulse Events" },
-    { "id": "business", "status": "ALIGNED", "description": "Business Architecture & Process Maps" },
-    { "id": "messaging", "status": "STANDBY", "description": "Event-driven Protocols & Relay Configs" },
-    { "id": "context", "status": "ACTIVE", "description": "Postgres-managed Memory & Context Partitioning" },
-    { "id": "model", "status": "GUARDED", "description": "Model Ratings, Costs, API Keys & Allocation" },
-    { "id": "spending", "status": "GUARDED", "description": "Real-time Tracking, Capping & Rate Limiting" },
-    { "id": "mcp", "status": "ACTIVE", "description": "Major Interface for Agents (Tools & Resources)" },
-    { "id": "pipeline", "status": "STANDBY", "description": "Testing, Regression, & Promotion Workflows" },
-    { "id": "infrastructure", "status": "INITIALIZING", "description": "Dependencies, Containers, & Protocols" },
-    { "id": "tui", "status": "ACTIVE", "description": "Local Rust-based Human Console" },
-    { "id": "websash", "status": "INITIALIZING", "description": "Web-based Management Dashboard" },
-    { "id": "mobile", "status": "STANDBY", "description": "Remote Visionary Interface (Approvals/Alerts)" }
-  ],
-  "governance": {
-    "rfc_states": ["New", "Draft", "Review", "Active", "Accepted", "Complete", "Rejected", "Abandoned", "Replaced"],
-    "approval_gates": {
-      "budget_threshold_auto": 5.00,
-      "require_human_signoff": true,
-      "adversarial_review_mandatory": true
-    }
-  },
-  "infrastructure": {
-    "sync_frequency_minutes": 10,
-    "local_gateway_port": 18789,
-    "mobile_alert_enabled": true
-  }
+	"project_name": "agentRoadmap",
+	"version": "2.0.0-alpha-full",
+	"visionary": "Gary_Toronto",
+	"timestamp": "2026-03-31T15:15:00Z",
+	"architecture": {
+		"state_engine": "Postgres_2.0",
+		"artifact_store": "Git_Local_First",
+		"execution_layer": "OpenClaw_CLI_ACP",
+		"interface_protocol": "MCP_v1.2"
+	},
+	"domains": [
+		{
+			"id": "product",
+			"status": "INITIALIZING",
+			"description": "RFC Lifecycle, Decisions, DAG & NNL Snapshots"
+		},
+		{
+			"id": "project",
+			"status": "ACTIVE",
+			"description": "Task & Issue Orchestration, Who/What/When"
+		},
+		{
+			"id": "workforce",
+			"status": "ACTIVE",
+			"description": "Identity, Registration, Profiles, & Pulse Events"
+		},
+		{
+			"id": "business",
+			"status": "ALIGNED",
+			"description": "Business Architecture & Process Maps"
+		},
+		{
+			"id": "messaging",
+			"status": "STANDBY",
+			"description": "Event-driven Protocols & Relay Configs"
+		},
+		{
+			"id": "context",
+			"status": "ACTIVE",
+			"description": "Postgres-managed Memory & Context Partitioning"
+		},
+		{
+			"id": "model",
+			"status": "GUARDED",
+			"description": "Model Ratings, Costs, API Keys & Allocation"
+		},
+		{
+			"id": "spending",
+			"status": "GUARDED",
+			"description": "Real-time Tracking, Capping & Rate Limiting"
+		},
+		{
+			"id": "mcp",
+			"status": "ACTIVE",
+			"description": "Major Interface for Agents (Tools & Resources)"
+		},
+		{
+			"id": "pipeline",
+			"status": "STANDBY",
+			"description": "Testing, Regression, & Promotion Workflows"
+		},
+		{
+			"id": "infrastructure",
+			"status": "INITIALIZING",
+			"description": "Dependencies, Containers, & Protocols"
+		},
+		{
+			"id": "tui",
+			"status": "ACTIVE",
+			"description": "Local Rust-based Human Console"
+		},
+		{
+			"id": "websash",
+			"status": "INITIALIZING",
+			"description": "Web-based Management Dashboard"
+		},
+		{
+			"id": "mobile",
+			"status": "STANDBY",
+			"description": "Remote Visionary Interface (Approvals/Alerts)"
+		}
+	],
+	"governance": {
+		"rfc_states": [
+			"New",
+			"Draft",
+			"Review",
+			"Active",
+			"Accepted",
+			"Complete",
+			"Rejected",
+			"Abandoned",
+			"Replaced"
+		],
+		"approval_gates": {
+			"budget_threshold_auto": 5.0,
+			"require_human_signoff": true,
+			"adversarial_review_mandatory": true
+		}
+	},
+	"infrastructure": {
+		"sync_frequency_minutes": 10,
+		"local_gateway_port": 18789,
+		"mobile_alert_enabled": true
+	}
 }

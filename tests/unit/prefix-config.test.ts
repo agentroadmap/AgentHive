@@ -1,7 +1,6 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
-import { expect } from "../support/test-utils.ts";
-import { type RoadmapConfig, EntityType } from "../../src/types/index.ts";
+import { EntityType, type RoadmapConfig } from "../../src/types/index.ts";
 import {
 	buildFilenameIdRegex,
 	buildGlobPattern,
@@ -19,6 +18,7 @@ import {
 	mergePrefixConfig,
 	normalizeId,
 } from "../../src/utils/prefix-config.ts";
+import { expect } from "../support/test-utils.ts";
 
 describe("prefix-config", () => {
 	describe("getDefaultPrefixConfig", () => {
@@ -124,7 +124,9 @@ describe("prefix-config", () => {
 
 		test("extracts hierarchical numbers", () => {
 			expect(extractIdNumbers("proposal-5.2.1", "proposal")).toEqual([5, 2, 1]);
-			expect(extractIdNumbers("proposal-10.20.30", "proposal")).toEqual([10, 20, 30]);
+			expect(extractIdNumbers("proposal-10.20.30", "proposal")).toEqual([
+				10, 20, 30,
+			]);
 		});
 
 		test("handles non-numeric body", () => {
@@ -133,7 +135,9 @@ describe("prefix-config", () => {
 
 		test("handles mixed numeric/non-numeric", () => {
 			// Each segment is parsed independently
-			expect(extractIdNumbers("proposal-5.abc.3", "proposal")).toEqual([5, 0, 3]);
+			expect(extractIdNumbers("proposal-5.abc.3", "proposal")).toEqual([
+				5, 0, 3,
+			]);
 		});
 
 		test("works with custom prefixes", () => {
@@ -240,11 +244,15 @@ describe("prefix-config", () => {
 
 	describe("generateNextId", () => {
 		test("generates next ID in sequence (uppercase)", () => {
-			expect(generateNextId(["proposal-1", "proposal-2", "proposal-3"], "proposal")).toBe("proposal-4");
+			expect(
+				generateNextId(["proposal-1", "proposal-2", "proposal-3"], "proposal"),
+			).toBe("proposal-4");
 		});
 
 		test("handles gaps in sequence", () => {
-			expect(generateNextId(["proposal-1", "proposal-5", "proposal-10"], "proposal")).toBe("proposal-11");
+			expect(
+				generateNextId(["proposal-1", "proposal-5", "proposal-10"], "proposal"),
+			).toBe("proposal-11");
 		});
 
 		test("returns proposal-1 for empty list", () => {
@@ -252,11 +260,18 @@ describe("prefix-config", () => {
 		});
 
 		test("ignores subproposals when finding max", () => {
-			expect(generateNextId(["proposal-1", "proposal-1.1", "proposal-1.2", "proposal-2"], "proposal")).toBe("proposal-3");
+			expect(
+				generateNextId(
+					["proposal-1", "proposal-1.1", "proposal-1.2", "proposal-2"],
+					"proposal",
+				),
+			).toBe("proposal-3");
 		});
 
 		test("handles zero padding", () => {
-			expect(generateNextId(["proposal-001", "proposal-002"], "proposal", 3)).toBe("proposal-003");
+			expect(
+				generateNextId(["proposal-001", "proposal-002"], "proposal", 3),
+			).toBe("proposal-003");
 		});
 
 		test("works with custom prefixes (uppercase)", () => {
@@ -264,33 +279,68 @@ describe("prefix-config", () => {
 		});
 
 		test("ignores IDs with wrong prefix", () => {
-			expect(generateNextId(["proposal-5", "draft-10", "proposal-3"], "proposal")).toBe("proposal-6");
+			expect(
+				generateNextId(["proposal-5", "draft-10", "proposal-3"], "proposal"),
+			).toBe("proposal-6");
 		});
 	});
 
 	describe("generateNextSubproposalId", () => {
 		test("generates next subproposal ID (uppercase)", () => {
-			expect(generateNextSubproposalId(["proposal-5", "proposal-5.1", "proposal-5.2"], "proposal-5", "proposal")).toBe("proposal-5.3");
+			expect(
+				generateNextSubproposalId(
+					["proposal-5", "proposal-5.1", "proposal-5.2"],
+					"proposal-5",
+					"proposal",
+				),
+			).toBe("proposal-5.3");
 		});
 
 		test("returns .1 for first subproposal", () => {
-			expect(generateNextSubproposalId(["proposal-5"], "proposal-5", "proposal")).toBe("proposal-5.1");
+			expect(
+				generateNextSubproposalId(["proposal-5"], "proposal-5", "proposal"),
+			).toBe("proposal-5.1");
 		});
 
 		test("handles gaps in subproposal sequence", () => {
-			expect(generateNextSubproposalId(["proposal-5", "proposal-5.1", "proposal-5.5"], "proposal-5", "proposal")).toBe("proposal-5.6");
+			expect(
+				generateNextSubproposalId(
+					["proposal-5", "proposal-5.1", "proposal-5.5"],
+					"proposal-5",
+					"proposal",
+				),
+			).toBe("proposal-5.6");
 		});
 
 		test("handles zero padding", () => {
-			expect(generateNextSubproposalId(["proposal-5", "proposal-5.01"], "proposal-5", "proposal", 2)).toBe("proposal-5.02");
+			expect(
+				generateNextSubproposalId(
+					["proposal-5", "proposal-5.01"],
+					"proposal-5",
+					"proposal",
+					2,
+				),
+			).toBe("proposal-5.02");
 		});
 
 		test("works with custom prefixes", () => {
-			expect(generateNextSubproposalId(["JIRA-100", "JIRA-100.1"], "JIRA-100", "JIRA")).toBe("JIRA-100.2");
+			expect(
+				generateNextSubproposalId(
+					["JIRA-100", "JIRA-100.1"],
+					"JIRA-100",
+					"JIRA",
+				),
+			).toBe("JIRA-100.2");
 		});
 
 		test("handles unnormalized parent ID", () => {
-			expect(generateNextSubproposalId(["proposal-5", "proposal-5.1"], "5", "proposal")).toBe("proposal-5.2");
+			expect(
+				generateNextSubproposalId(
+					["proposal-5", "proposal-5.1"],
+					"5",
+					"proposal",
+				),
+			).toBe("proposal-5.2");
 		});
 	});
 

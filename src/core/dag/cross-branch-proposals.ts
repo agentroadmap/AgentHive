@@ -12,7 +12,11 @@ import { buildPathIdRegex, normalizeId } from "../../utils/prefix-config.ts";
 /** Default prefix for proposals */
 const DEFAULT_STATE_PREFIX = "proposal";
 
-export type ProposalDirectoryType = "proposal" | "draft" | "archived" | "completed";
+export type ProposalDirectoryType =
+	| "proposal"
+	| "draft"
+	| "archived"
+	| "completed";
 
 export interface ProposalDirectoryInfo {
 	proposalId: string;
@@ -46,7 +50,9 @@ export async function getLatestProposalProposalsForIds(
 		const useRecentOnly = options?.recentBranchesOnly ?? true;
 		const daysAgo = options?.daysAgo ?? 30; // Default to 30 days if not specified
 
-		let branches = useRecentOnly ? await gitOps.listRecentBranches(daysAgo) : await gitOps.listAllBranches();
+		let branches = useRecentOnly
+			? await gitOps.listRecentBranches(daysAgo)
+			: await gitOps.listAllBranches();
 
 		if (branches.length === 0) {
 			return proposalDirectories;
@@ -81,10 +87,15 @@ export async function getLatestProposalProposalsForIds(
 		const branchMsg = useRecentOnly
 			? `${branches.length} branches with roadmap (from ${daysAgo} days, ${localBranches.length} local, ${remoteBranches.length} remote)`
 			: `${branches.length} branches with roadmap (${localBranches.length} local, ${remoteBranches.length} remote)`;
-		onProgress?.(`Checking ${proposalIds.length} proposals across ${branchMsg}...`);
+		onProgress?.(
+			`Checking ${proposalIds.length} proposals across ${branchMsg}...`,
+		);
 
 		// Create all file path combinations we need to check
-		const directoryChecks: Array<{ path: string; type: ProposalDirectoryType }> = [
+		const directoryChecks: Array<{
+			path: string;
+			type: ProposalDirectoryType;
+		}> = [
 			{ path: `${roadmapDir}/proposals`, type: "proposal" },
 			{ path: `${roadmapDir}/drafts`, type: "draft" },
 			{ path: `${roadmapDir}/archive/proposals`, type: "archived" },
@@ -155,18 +166,24 @@ export async function getLatestProposalProposalsForIds(
 
 		// If we found all proposals in priority branches, we can skip other branches
 		if (proposalDirectories.size === proposalIds.length) {
-			onProgress?.(`Found all ${proposalIds.length} proposals in priority branches`);
+			onProgress?.(
+				`Found all ${proposalIds.length} proposals in priority branches`,
+			);
 			return proposalDirectories;
 		}
 
 		// For remaining proposals, check other branches
-		const remainingProposalIds = proposalIds.filter((id) => !proposalDirectories.has(id));
+		const remainingProposalIds = proposalIds.filter(
+			(id) => !proposalDirectories.has(id),
+		);
 		if (remainingProposalIds.length === 0 || branches.length === 0) {
 			onProgress?.(`Checked ${proposalIds.length} proposals`);
 			return proposalDirectories;
 		}
 
-		onProgress?.(`Checking ${remainingProposalIds.length} remaining proposals across ${branches.length} branches...`);
+		onProgress?.(
+			`Checking ${remainingProposalIds.length} remaining proposals across ${branches.length} branches...`,
+		);
 
 		// Check remaining branches in parallel batches
 		const BRANCH_BATCH_SIZE = 5; // Process 5 branches at a time for better performance
@@ -182,7 +199,10 @@ export async function getLatestProposalProposalsForIds(
 							if (files.length === 0) continue;
 
 							// Get all modification times in one pass
-							const modTimes = await gitOps.getBranchLastModifiedMap(branch, path);
+							const modTimes = await gitOps.getBranchLastModifiedMap(
+								branch,
+								path,
+							);
 
 							// Build file->id map for O(1) lookup
 							const fileToId = new Map<string, string>();

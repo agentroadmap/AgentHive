@@ -4,24 +4,28 @@
  * Tests for full proposal detail page generation and GitHub Pages workflow.
  */
 
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { writeFileSync, mkdirSync, existsSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import {
-	parseFrontmatter,
-	parseProposalFile,
-	parseProposalFileFullDetail,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, it } from "node:test";
+import {
+	buildStatusSummary,
+	generateDocs,
 	generateFullProposalDetail,
+	generateGitHubPagesWorkflow,
 	generateProposalDetailPages,
 	generateProposalIndex,
 	generateStatusIndexPages,
-	generateGitHubPagesWorkflow,
-	generateDocs,
 	loadProposals,
-	buildStatusSummary,
-} from '../../src/core/infrastructure/doc-generator.ts';
+	parseProposalFileFullDetail,
+} from "../../src/core/infrastructure/doc-generator.ts";
 
 const TEST_STATES_DIR = join(tmpdir(), `roadmap-test-proposals-${Date.now()}`);
 const TEST_OUTPUT_DIR = join(tmpdir(), `roadmap-test-docs-${Date.now()}`);
@@ -127,8 +131,14 @@ describe("proposal-58.1: Enhanced Product Documentation", () => {
 			mkdirSync(TEST_OUTPUT_DIR, { recursive: true });
 		}
 
-		writeFileSync(join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"), SAMPLE_STATE_FULL);
-		writeFileSync(join(TEST_STATES_DIR, "proposal-test-2-minimal.md"), SAMPLE_STATE_MINIMAL);
+		writeFileSync(
+			join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"),
+			SAMPLE_STATE_FULL,
+		);
+		writeFileSync(
+			join(TEST_STATES_DIR, "proposal-test-2-minimal.md"),
+			SAMPLE_STATE_MINIMAL,
+		);
 	});
 
 	// Cleanup: Remove test files
@@ -143,7 +153,9 @@ describe("proposal-58.1: Enhanced Product Documentation", () => {
 
 	describe("AC#1: Full description and structured data extraction", () => {
 		it("should extract all frontmatter fields", () => {
-			const detail = parseProposalFileFullDetail(join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"));
+			const detail = parseProposalFileFullDetail(
+				join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"),
+			);
 
 			assert.ok(detail, "Should parse proposal file");
 			assert.equal(detail.id, "proposal-TEST-1");
@@ -162,7 +174,9 @@ describe("proposal-58.1: Enhanced Product Documentation", () => {
 		});
 
 		it("should extract description section", () => {
-			const detail = parseProposalFileFullDetail(join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"));
+			const detail = parseProposalFileFullDetail(
+				join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"),
+			);
 
 			assert.ok(detail, "Should parse proposal file");
 			assert.ok(detail.description.includes("test proposal with full detail"));
@@ -170,18 +184,22 @@ describe("proposal-58.1: Enhanced Product Documentation", () => {
 		});
 
 		it("should parse acceptance criteria with status", () => {
-			const detail = parseProposalFileFullDetail(join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"));
+			const detail = parseProposalFileFullDetail(
+				join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"),
+			);
 
 			assert.ok(detail, "Should parse proposal file");
 			assert.equal(detail.acceptanceCriteria.length, 3);
-			assert.equal(detail.acceptanceCriteria[0]!.number, 1);
-			assert.equal(detail.acceptanceCriteria[0]!.passed, true);
-			assert.equal(detail.acceptanceCriteria[1]!.passed, false);
-			assert.equal(detail.acceptanceCriteria[2]!.passed, true);
+			assert.equal(detail.acceptanceCriteria[0]?.number, 1);
+			assert.equal(detail.acceptanceCriteria[0]?.passed, true);
+			assert.equal(detail.acceptanceCriteria[1]?.passed, false);
+			assert.equal(detail.acceptanceCriteria[2]?.passed, true);
 		});
 
 		it("should handle minimal proposal with missing optional fields", () => {
-			const detail = parseProposalFileFullDetail(join(TEST_STATES_DIR, "proposal-test-2-minimal.md"));
+			const detail = parseProposalFileFullDetail(
+				join(TEST_STATES_DIR, "proposal-test-2-minimal.md"),
+			);
 
 			assert.ok(detail, "Should parse proposal file");
 			assert.equal(detail.id, "proposal-TEST-2");
@@ -196,23 +214,38 @@ describe("proposal-58.1: Enhanced Product Documentation", () => {
 
 	describe("AC#2: Implementation notes and files created", () => {
 		it("should extract implementation notes", () => {
-			const detail = parseProposalFileFullDetail(join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"));
+			const detail = parseProposalFileFullDetail(
+				join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"),
+			);
 
 			assert.ok(detail, "Should parse proposal file");
 			assert.ok(detail.implementationNotes.includes("Implementation complete"));
 		});
 
 		it("should extract file references from notes", () => {
-			const detail = parseProposalFileFullDetail(join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"));
+			const detail = parseProposalFileFullDetail(
+				join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"),
+			);
 
 			assert.ok(detail, "Should parse proposal file");
-			assert.ok(detail.files.includes("src/core/test-module.ts"), "Should find src files");
-			assert.ok(detail.files.includes("docs/guide.md"), "Should find docs files");
-			assert.ok(detail.files.includes("roadmap/config.yml"), "Should find roadmap files");
+			assert.ok(
+				detail.files.includes("src/core/test-module.ts"),
+				"Should find src files",
+			);
+			assert.ok(
+				detail.files.includes("docs/guide.md"),
+				"Should find docs files",
+			);
+			assert.ok(
+				detail.files.includes("roadmap/config.yml"),
+				"Should find roadmap files",
+			);
 		});
 
 		it("should extract implementation plan", () => {
-			const detail = parseProposalFileFullDetail(join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"));
+			const detail = parseProposalFileFullDetail(
+				join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"),
+			);
 
 			assert.ok(detail, "Should parse proposal file");
 			assert.ok(detail.implementationPlan.includes("First step"));
@@ -222,14 +255,18 @@ describe("proposal-58.1: Enhanced Product Documentation", () => {
 
 	describe("AC#3: Dependencies and blockers", () => {
 		it("should extract dependencies list", () => {
-			const detail = parseProposalFileFullDetail(join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"));
+			const detail = parseProposalFileFullDetail(
+				join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"),
+			);
 
 			assert.ok(detail, "Should parse proposal file");
 			assert.deepEqual(detail.dependencies, ["proposal-10", "proposal-20"]);
 		});
 
 		it("should extract parent proposal reference", () => {
-			const detail = parseProposalFileFullDetail(join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"));
+			const detail = parseProposalFileFullDetail(
+				join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"),
+			);
 
 			assert.ok(detail, "Should parse proposal file");
 			assert.equal(detail.parent_proposal_id, "proposal-58");
@@ -238,7 +275,9 @@ describe("proposal-58.1: Enhanced Product Documentation", () => {
 
 	describe("AC#4: Test results and proof of arrival", () => {
 		it("should extract audit notes", () => {
-			const detail = parseProposalFileFullDetail(join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"));
+			const detail = parseProposalFileFullDetail(
+				join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"),
+			);
 
 			assert.ok(detail, "Should parse proposal file");
 			assert.ok(detail.auditNotes.includes("All criteria verified"));
@@ -246,15 +285,21 @@ describe("proposal-58.1: Enhanced Product Documentation", () => {
 		});
 
 		it("should extract proof of arrival", () => {
-			const detail = parseProposalFileFullDetail(join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"));
+			const detail = parseProposalFileFullDetail(
+				join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"),
+			);
 
 			assert.ok(detail, "Should parse proposal file");
-			assert.ok(detail.proofOfArrival.includes("3/3 acceptance criteria passed"));
+			assert.ok(
+				detail.proofOfArrival.includes("3/3 acceptance criteria passed"),
+			);
 			assert.ok(detail.proofOfArrival.includes("Tests passing: 10/10"));
 		});
 
 		it("should extract final summary", () => {
-			const detail = parseProposalFileFullDetail(join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"));
+			const detail = parseProposalFileFullDetail(
+				join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"),
+			);
 
 			assert.ok(detail, "Should parse proposal file");
 			assert.ok(detail.finalSummary.includes("fully implemented and verified"));
@@ -263,14 +308,18 @@ describe("proposal-58.1: Enhanced Product Documentation", () => {
 
 	describe("AC#5: Assignee and timeline", () => {
 		it("should extract assignee information", () => {
-			const detail = parseProposalFileFullDetail(join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"));
+			const detail = parseProposalFileFullDetail(
+				join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"),
+			);
 
 			assert.ok(detail, "Should parse proposal file");
 			assert.deepEqual(detail.assignee, ["@testuser"]);
 		});
 
 		it("should extract timeline information", () => {
-			const detail = parseProposalFileFullDetail(join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"));
+			const detail = parseProposalFileFullDetail(
+				join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"),
+			);
 
 			assert.ok(detail, "Should parse proposal file");
 			assert.equal(detail.created_date, "2026-03-24 10:00");
@@ -280,13 +329,17 @@ describe("proposal-58.1: Enhanced Product Documentation", () => {
 
 	describe("AC#6: Full proposal detail markdown generation", () => {
 		it("should generate complete markdown page", () => {
-			const detail = parseProposalFileFullDetail(join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"));
+			const detail = parseProposalFileFullDetail(
+				join(TEST_STATES_DIR, "proposal-test-1-full-detail.md"),
+			);
 			assert.ok(detail, "Should parse proposal file");
 
 			const markdown = generateFullProposalDetail(detail);
 
 			// Header
-			assert.ok(markdown.includes("# proposal-TEST-1 - Test Proposal Full Detail"));
+			assert.ok(
+				markdown.includes("# proposal-TEST-1 - Test Proposal Full Detail"),
+			);
 
 			// Metadata table
 			assert.ok(markdown.includes("## 📋 Metadata"));
@@ -324,7 +377,9 @@ describe("proposal-58.1: Enhanced Product Documentation", () => {
 		});
 
 		it("should generate compact page for minimal proposal", () => {
-			const detail = parseProposalFileFullDetail(join(TEST_STATES_DIR, "proposal-test-2-minimal.md"));
+			const detail = parseProposalFileFullDetail(
+				join(TEST_STATES_DIR, "proposal-test-2-minimal.md"),
+			);
 			assert.ok(detail, "Should parse proposal file");
 
 			const markdown = generateFullProposalDetail(detail);
@@ -337,9 +392,15 @@ describe("proposal-58.1: Enhanced Product Documentation", () => {
 
 	describe("AC#7: Per-proposal detail page generation", () => {
 		it("should generate detail pages for all proposals", () => {
-			const docs = generateProposalDetailPages(TEST_STATES_DIR, TEST_OUTPUT_DIR);
+			const docs = generateProposalDetailPages(
+				TEST_STATES_DIR,
+				TEST_OUTPUT_DIR,
+			);
 
-			assert.ok(docs.length >= 2, "Should generate pages for both test proposals");
+			assert.ok(
+				docs.length >= 2,
+				"Should generate pages for both test proposals",
+			);
 
 			// Check that files were written
 			const proposalsOutputDir = join(TEST_OUTPUT_DIR, "proposals");
@@ -347,7 +408,10 @@ describe("proposal-58.1: Enhanced Product Documentation", () => {
 			assert.ok(existsSync(join(proposalsOutputDir, "proposal-TEST-2.md")));
 
 			// Verify content
-			const proposal1Content = readFileSync(join(proposalsOutputDir, "proposal-TEST-1.md"), "utf-8");
+			const proposal1Content = readFileSync(
+				join(proposalsOutputDir, "proposal-TEST-1.md"),
+				"utf-8",
+			);
 			assert.ok(proposal1Content.includes("Test Proposal Full Detail"));
 			assert.ok(proposal1Content.includes("@testuser"));
 		});
@@ -383,7 +447,7 @@ describe("proposal-58.1: Enhanced Product Documentation", () => {
 			const proposals = loadProposals(TEST_STATES_DIR);
 			const summary = buildStatusSummary(proposals);
 
-			const docs = generateStatusIndexPages(summary, TEST_OUTPUT_DIR);
+			const _docs = generateStatusIndexPages(summary, TEST_OUTPUT_DIR);
 
 			// Should generate pages for each status
 			const statusDir = join(TEST_OUTPUT_DIR, "status");
@@ -396,7 +460,10 @@ describe("proposal-58.1: Enhanced Product Documentation", () => {
 			assert.ok(activeContent.includes("proposal-TEST-1"));
 
 			// Check potential page content
-			const potentialContent = readFileSync(join(statusDir, "potential.md"), "utf-8");
+			const potentialContent = readFileSync(
+				join(statusDir, "potential.md"),
+				"utf-8",
+			);
 			assert.ok(potentialContent.includes("# ⚪ Potential Proposals"));
 			assert.ok(potentialContent.includes("proposal-TEST-2"));
 		});
@@ -427,13 +494,19 @@ describe("proposal-58.1: Enhanced Product Documentation", () => {
 			// Create a temporary project structure
 			const projectRoot = join(tmpdir(), `roadmap-project-${Date.now()}`);
 			const proposalsDir = join(projectRoot, "roadmap", "proposals");
-			const outputDir = join(projectRoot, "docs");
+			const _outputDir = join(projectRoot, "docs");
 
 			mkdirSync(proposalsDir, { recursive: true });
 
 			// Copy test proposals
-			writeFileSync(join(proposalsDir, "proposal-test-1.md"), SAMPLE_STATE_FULL);
-			writeFileSync(join(proposalsDir, "proposal-test-2.md"), SAMPLE_STATE_MINIMAL);
+			writeFileSync(
+				join(proposalsDir, "proposal-test-1.md"),
+				SAMPLE_STATE_FULL,
+			);
+			writeFileSync(
+				join(proposalsDir, "proposal-test-2.md"),
+				SAMPLE_STATE_MINIMAL,
+			);
 
 			// Run the full doc generator
 			const result = await generateDocs(projectRoot, {
@@ -450,14 +523,26 @@ describe("proposal-58.1: Enhanced Product Documentation", () => {
 			assert.ok(readmeFile, "Should generate README.md");
 
 			// Should include new per-proposal pages
-			const proposal1Page = result.files.find((f) => f.path.includes("proposal-TEST-1.md"));
-			assert.ok(proposal1Page, "Should generate per-proposal detail page for proposal-TEST-1");
+			const proposal1Page = result.files.find((f) =>
+				f.path.includes("proposal-TEST-1.md"),
+			);
+			assert.ok(
+				proposal1Page,
+				"Should generate per-proposal detail page for proposal-TEST-1",
+			);
 
-			const proposal2Page = result.files.find((f) => f.path.includes("proposal-TEST-2.md"));
-			assert.ok(proposal2Page, "Should generate per-proposal detail page for proposal-TEST-2");
+			const proposal2Page = result.files.find((f) =>
+				f.path.includes("proposal-TEST-2.md"),
+			);
+			assert.ok(
+				proposal2Page,
+				"Should generate per-proposal detail page for proposal-TEST-2",
+			);
 
 			// Should include status index pages
-			const activePage = result.files.find((f) => f.path.includes("status/active.md"));
+			const activePage = result.files.find((f) =>
+				f.path.includes("status/active.md"),
+			);
 			assert.ok(activePage, "Should generate active status page");
 
 			// Cleanup

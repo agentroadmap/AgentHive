@@ -11,12 +11,12 @@ import { createSimpleValidatedTool } from "../../validation/tool-wrapper.ts";
 import { KnowledgeHandlers } from "./handlers.ts";
 import {
 	knowledgeAddSchema,
-	knowledgeSearchSchema,
-	knowledgeRecordDecisionSchema,
 	knowledgeExtractPatternSchema,
 	knowledgeGetDecisionsSchema,
 	knowledgeGetStatsSchema,
 	knowledgeMarkHelpfulSchema,
+	knowledgeRecordDecisionSchema,
+	knowledgeSearchSchema,
 } from "./schemas.ts";
 
 export function registerKnowledgeTools(server: McpServer): void {
@@ -25,7 +25,8 @@ export function registerKnowledgeTools(server: McpServer): void {
 	const addEntryTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "knowledge_add",
-			description: "Add a knowledge entry (solution, pattern, decision, obstacle, or learned lesson)",
+			description:
+				"Add a knowledge entry (solution, pattern, decision, obstacle, or learned lesson)",
 			inputSchema: knowledgeAddSchema,
 		},
 		knowledgeAddSchema,
@@ -45,7 +46,8 @@ export function registerKnowledgeTools(server: McpServer): void {
 	const recordDecisionTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "knowledge_record_decision",
-			description: "Record an architectural or technical decision with rationale and alternatives",
+			description:
+				"Record an architectural or technical decision with rationale and alternatives",
 			inputSchema: knowledgeRecordDecisionSchema,
 		},
 		knowledgeRecordDecisionSchema,
@@ -55,7 +57,8 @@ export function registerKnowledgeTools(server: McpServer): void {
 	const extractPatternTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "knowledge_extract_pattern",
-			description: "Extract and index a common pattern from successful solutions",
+			description:
+				"Extract and index a common pattern from successful solutions",
 			inputSchema: knowledgeExtractPatternSchema,
 		},
 		knowledgeExtractPatternSchema,
@@ -65,7 +68,8 @@ export function registerKnowledgeTools(server: McpServer): void {
 	const getDecisionsTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "knowledge_get_decisions",
-			description: "Get all recorded decisions, optionally filtered by related proposal",
+			description:
+				"Get all recorded decisions, optionally filtered by related proposal",
 			inputSchema: knowledgeGetDecisionsSchema,
 		},
 		knowledgeGetDecisionsSchema,

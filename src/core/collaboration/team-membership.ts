@@ -15,15 +15,24 @@
  * AC#7: Team roster queryable: who's on the team, what roles, which pools
  */
 
-import { randomUUID, randomBytes, createHash } from "node:crypto";
-import { readFile, writeFile, access, mkdir, rm as removeDir } from "node:fs/promises";
-import { join } from "node:path";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
-export type RegistrationStatus = "pending" | "active" | "suspended" | "deregistered";
-export type WorkspaceStatus = "provisioning" | "ready" | "in-use" | "released" | "failed";
+export type RegistrationStatus =
+	| "pending"
+	| "active"
+	| "suspended"
+	| "deregistered";
+export type WorkspaceStatus =
+	| "provisioning"
+	| "ready"
+	| "in-use"
+	| "released"
+	| "failed";
 
 export interface AgentRegistration {
 	registrationId: string;
@@ -86,7 +95,13 @@ export interface TeamRoster {
 
 export interface RegistrationEvent {
 	eventId: string;
-	type: "registered" | "activated" | "workspace_provisioned" | "deregistered" | "suspended" | "reactivated";
+	type:
+		| "registered"
+		| "activated"
+		| "workspace_provisioned"
+		| "deregistered"
+		| "suspended"
+		| "reactivated";
 	agentId: string;
 	registrationId: string;
 	timestamp: string;
@@ -124,7 +139,10 @@ export class AgentTeamMembership {
 	private config: WorkspaceConfig;
 	private configDir: string;
 
-	constructor(configDir: string = ".roadmap/team-membership", options?: Partial<WorkspaceConfig>) {
+	constructor(
+		configDir: string = ".roadmap/team-membership",
+		options?: Partial<WorkspaceConfig>,
+	) {
 		this.configDir = configDir;
 		this.config = { ...DEFAULT_WORKSPACE_CONFIG, ...options };
 	}
@@ -150,9 +168,14 @@ export class AgentTeamMembership {
 		metadata?: Record<string, string>;
 	}): Promise<AgentRegistration> {
 		// Check if already registered
-		const existing = this.getRegistrationByAgentId(options.agentId, options.poolAssignment);
+		const existing = this.getRegistrationByAgentId(
+			options.agentId,
+			options.poolAssignment,
+		);
 		if (existing && existing.status !== "deregistered") {
-			throw new Error(`Agent ${options.agentId} already registered for pool ${options.poolAssignment}`);
+			throw new Error(
+				`Agent ${options.agentId} already registered for pool ${options.poolAssignment}`,
+			);
 		}
 
 		// Generate authentication token
@@ -202,14 +225,18 @@ export class AgentTeamMembership {
 	/**
 	 * Activate a registration (after verification).
 	 */
-	async activateRegistration(registrationId: string): Promise<AgentRegistration> {
+	async activateRegistration(
+		registrationId: string,
+	): Promise<AgentRegistration> {
 		const registration = this.registrations.get(registrationId);
 		if (!registration) {
 			throw new Error(`Registration not found: ${registrationId}`);
 		}
 
 		if (registration.status !== "pending") {
-			throw new Error(`Cannot activate registration in status: ${registration.status}`);
+			throw new Error(
+				`Cannot activate registration in status: ${registration.status}`,
+			);
 		}
 
 		registration.status = "active";
@@ -279,18 +306,25 @@ export class AgentTeamMembership {
 	 * Get registration by agent ID.
 	 */
 	getRegistrationByAgent(agentId: string): AgentRegistration | null {
-		return Array.from(this.registrations.values()).find(
-			(r) => r.agentId === agentId && r.status !== "deregistered",
-		) ?? null;
+		return (
+			Array.from(this.registrations.values()).find(
+				(r) => r.agentId === agentId && r.status !== "deregistered",
+			) ?? null
+		);
 	}
 
 	/**
 	 * Get registration by agent ID and pool.
 	 */
-	getRegistrationByAgentId(agentId: string, pool: string): AgentRegistration | null {
-		return Array.from(this.registrations.values()).find(
-			(r) => r.agentId === agentId && r.poolAssignment === pool,
-		) ?? null;
+	getRegistrationByAgentId(
+		agentId: string,
+		pool: string,
+	): AgentRegistration | null {
+		return (
+			Array.from(this.registrations.values()).find(
+				(r) => r.agentId === agentId && r.poolAssignment === pool,
+			) ?? null
+		);
 	}
 
 	/**
@@ -317,12 +351,16 @@ export class AgentTeamMembership {
 		}
 
 		if (profile.status !== "active") {
-			throw new Error(`Agent ${agentId} is not active (status: ${profile.status})`);
+			throw new Error(
+				`Agent ${agentId} is not active (status: ${profile.status})`,
+			);
 		}
 
 		// Check if already has a workspace
 		if (profile.workspace && profile.workspace.status !== "released") {
-			throw new Error(`Agent ${agentId} already has workspace: ${profile.workspace.assignmentId}`);
+			throw new Error(
+				`Agent ${agentId} already has workspace: ${profile.workspace.assignmentId}`,
+			);
 		}
 
 		// Generate workspace paths
@@ -367,7 +405,9 @@ export class AgentTeamMembership {
 		}
 
 		if (workspace.status !== "provisioning") {
-			throw new Error(`Workspace already provisioned or in status: ${workspace.status}`);
+			throw new Error(
+				`Workspace already provisioned or in status: ${workspace.status}`,
+			);
 		}
 
 		try {
@@ -396,7 +436,8 @@ export class AgentTeamMembership {
 			if (this.config.autoCreateSoulMd) {
 				const soulMdPath = join(worktreeDir, "SOUL.md");
 				const profile = this.getProfileByWorkspace(assignmentId);
-				const soulContent = options?.soulContent || this.generateSoulContent(profile);
+				const soulContent =
+					options?.soulContent || this.generateSoulContent(profile);
 				await writeFile(soulMdPath, soulContent);
 				workspace.soulMdPath = soulMdPath;
 			}
@@ -426,9 +467,11 @@ export class AgentTeamMembership {
 	 * Get profile by workspace assignment ID.
 	 */
 	private getProfileByWorkspace(assignmentId: string): AgentProfile | null {
-		return Array.from(this.profiles.values()).find(
-			(p) => p.workspace?.assignmentId === assignmentId,
-		) ?? null;
+		return (
+			Array.from(this.profiles.values()).find(
+				(p) => p.workspace?.assignmentId === assignmentId,
+			) ?? null
+		);
 	}
 
 	/**
@@ -500,7 +543,7 @@ Use the MCP tools provided to interact with the roadmap.
 			events = events.filter((e) => e.type === options.type);
 		}
 		if (options?.since) {
-			events = events.filter((e) => e.timestamp >= options!.since!);
+			events = events.filter((e) => e.timestamp >= options?.since!);
 		}
 
 		events.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
@@ -520,7 +563,10 @@ Use the MCP tools provided to interact with the roadmap.
 	async deregisterAgent(
 		agentId: string,
 		reason?: string,
-	): Promise<{ registration: AgentRegistration; workspace?: WorkspaceAssignment }> {
+	): Promise<{
+		registration: AgentRegistration;
+		workspace?: WorkspaceAssignment;
+	}> {
 		const registration = this.getRegistrationByAgent(agentId);
 		if (!registration) {
 			throw new Error(`No active registration found for agent: ${agentId}`);
@@ -537,7 +583,9 @@ Use the MCP tools provided to interact with the roadmap.
 		let releasedWorkspace: WorkspaceAssignment | undefined;
 		const profile = this.profiles.get(agentId);
 		if (profile?.workspace && profile.workspace.status !== "released") {
-			releasedWorkspace = await this.releaseWorkspace(profile.workspace.assignmentId);
+			releasedWorkspace = await this.releaseWorkspace(
+				profile.workspace.assignmentId,
+			);
 		}
 
 		// Update profile status
@@ -730,9 +778,13 @@ Use the MCP tools provided to interact with the roadmap.
 			totalRegistrations: registrations.length,
 			activeAgents: registrations.filter((r) => r.status === "active").length,
 			pendingAgents: registrations.filter((r) => r.status === "pending").length,
-			deregisteredAgents: registrations.filter((r) => r.status === "deregistered").length,
+			deregisteredAgents: registrations.filter(
+				(r) => r.status === "deregistered",
+			).length,
 			totalWorkspaces: workspaces.length,
-			activeWorkspaces: workspaces.filter((w) => w.status === "ready" || w.status === "in-use").length,
+			activeWorkspaces: workspaces.filter(
+				(w) => w.status === "ready" || w.status === "in-use",
+			).length,
 			totalTeams: this.teamRosters.size,
 			totalEvents: this.events.length,
 		};
@@ -782,7 +834,10 @@ Use the MCP tools provided to interact with the roadmap.
 /**
  * Parse pool assignment string.
  */
-export function parsePoolAssignment(pool: string): { pool: string; subpool?: string } {
+export function parsePoolAssignment(pool: string): {
+	pool: string;
+	subpool?: string;
+} {
 	const parts = pool.split("/");
 	return {
 		pool: parts[0],
@@ -802,5 +857,8 @@ export function formatTokenDisplay(token: string): string {
  * Generate a team ID from a name.
  */
 export function generateTeamId(name: string): string {
-	return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+	return name
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-|-$/g, "");
 }

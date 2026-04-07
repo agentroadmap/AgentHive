@@ -6,11 +6,11 @@
  * - Audit trail logging
  */
 
-import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { IdRegistry } from '../../src/core/identity/id-registry.ts';
-import { mkdirSync, rmSync, existsSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import { IdRegistry } from "../../src/core/identity/id-registry.ts";
 
 const TEST_BASE = join(import.meta.dirname, "../../tmp/test-id-registry");
 
@@ -69,7 +69,13 @@ describe("proposal-55: Proposal ID Registry", () => {
 			});
 
 			assert.equal(result.ids.length, 5);
-			assert.deepEqual(result.ids, ["proposal-1", "proposal-2", "proposal-3", "proposal-4", "proposal-5"]);
+			assert.deepEqual(result.ids, [
+				"proposal-1",
+				"proposal-2",
+				"proposal-3",
+				"proposal-4",
+				"proposal-5",
+			]);
 			assert.equal(result.rangeStart, 1);
 			assert.equal(result.rangeEnd, 5);
 		});
@@ -102,8 +108,8 @@ describe("proposal-55: Proposal ID Registry", () => {
 
 			const status = registry.getStatus();
 			assert.equal(status.reservedRanges.length, 1);
-			assert.equal(status.reservedRanges[0]!.sessionId, "session-1");
-			assert.ok(status.reservedRanges[0]!.expiresAt);
+			assert.equal(status.reservedRanges[0]?.sessionId, "session-1");
+			assert.ok(status.reservedRanges[0]?.expiresAt);
 		});
 
 		it("releases reservations for a session", async () => {
@@ -209,9 +215,9 @@ describe("proposal-55: Proposal ID Registry", () => {
 
 			const log = registry.getAuditLog();
 			assert.equal(log.length, 2);
-			assert.equal(log[0]!.id, "proposal-1");
-			assert.equal(log[0]!.sessionId, "agent-1");
-			assert.equal(log[1]!.id, "proposal-2");
+			assert.equal(log[0]?.id, "proposal-1");
+			assert.equal(log[0]?.sessionId, "agent-1");
+			assert.equal(log[1]?.id, "proposal-2");
 			assert.equal(log[1].sessionId, "agent-2");
 		});
 
@@ -224,7 +230,10 @@ describe("proposal-55: Proposal ID Registry", () => {
 
 			const log = registry.getAuditLog();
 			assert.equal(log.length, 3);
-			assert.deepEqual(log.map((e) => e.id), ["proposal-1", "proposal-2", "proposal-3"]);
+			assert.deepEqual(
+				log.map((e) => e.id),
+				["proposal-1", "proposal-2", "proposal-3"],
+			);
 		});
 
 		it("respects log limit", async () => {

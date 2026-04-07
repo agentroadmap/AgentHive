@@ -9,11 +9,12 @@ import {
 } from "../../agent-instructions.ts";
 import { DEFAULT_INIT_CONFIG } from "../../constants/index.ts";
 import type { RoadmapConfig } from "../../types/index.ts";
-import { BLUEPRINTS, type BlueprintType } from "./blueprints.ts";
 import type { Core } from "../roadmap.ts";
+import { BLUEPRINTS, type BlueprintType } from "./blueprints.ts";
 
 export const MCP_SERVER_NAME = "roadmap";
-export const MCP_GUIDE_URL = "https://github.com/agentroadmap/agentRoadmap#-mcp-integration-model-context-protocol";
+export const MCP_GUIDE_URL =
+	"https://github.com/agentroadmap/agentRoadmap#-mcp-integration-model-context-protocol";
 
 export type IntegrationMode = "mcp" | "cli" | "none";
 export type McpClient = "claude" | "codex" | "gemini" | "kiro" | "guide";
@@ -69,7 +70,11 @@ export interface InitializeProjectResult {
 	}[];
 }
 
-async function runMcpClientCommand(label: string, command: string, args: string[]): Promise<string> {
+async function runMcpClientCommand(
+	label: string,
+	command: string,
+	args: string[],
+): Promise<string> {
 	try {
 		const child = spawn(command, args, {
 			stdio: "pipe",
@@ -119,15 +124,31 @@ export async function initializeProject(
 
 	const isReInitialization = !!existingConfig;
 	const projectRoot = core.filesystem.rootDir;
-	const hasDefaultEditorOverride = Object.hasOwn(advancedConfig, "defaultEditor");
-	const hasZeroPaddedIdsOverride = Object.hasOwn(advancedConfig, "zeroPaddedIds");
+	const hasDefaultEditorOverride = Object.hasOwn(
+		advancedConfig,
+		"defaultEditor",
+	);
+	const hasZeroPaddedIdsOverride = Object.hasOwn(
+		advancedConfig,
+		"zeroPaddedIds",
+	);
 
 	// Build config, preserving existing values for re-initialization.
 	// Re-init should be idempotent for fields that init does not explicitly manage.
 	const _d = DEFAULT_INIT_CONFIG;
 	const baseConfig: RoadmapConfig = {
 		projectName,
-		statuses: ["New", "Draft", "Review", "Active", "Accepted", "Complete", "Rejected", "Abandoned", "Replaced"],
+		statuses: [
+			"New",
+			"Draft",
+			"Review",
+			"Active",
+			"Accepted",
+			"Complete",
+			"Rejected",
+			"Abandoned",
+			"Replaced",
+		],
 		labels: [],
 		defaultStatus: "New",
 		dateFormat: "yyyy-mm-dd",
@@ -139,7 +160,8 @@ export async function initializeProject(
 		activeBranchDays: 30,
 		defaultPort: 6420,
 		autoOpenBrowser: true,
-		proposalResolutionStrategy: existingConfig?.proposalResolutionStrategy || "most_recent",
+		proposalResolutionStrategy:
+			existingConfig?.proposalResolutionStrategy || "most_recent",
 		// Preserve existing prefixes on re-init, or use custom prefix if provided during first init
 		prefixes: existingConfig?.prefixes || {
 			proposal: advancedConfig.proposalPrefix || "proposal",
@@ -154,13 +176,20 @@ export async function initializeProject(
 	};
 
 	// Explicitly apply advancedConfig overrides if provided
-	if (advancedConfig.autoCommit !== undefined) config.autoCommit = advancedConfig.autoCommit;
-	if (advancedConfig.remoteOperations !== undefined) config.remoteOperations = advancedConfig.remoteOperations;
-	if (advancedConfig.bypassGitHooks !== undefined) config.bypassGitHooks = advancedConfig.bypassGitHooks;
-	if (advancedConfig.checkActiveBranches !== undefined) config.checkActiveBranches = advancedConfig.checkActiveBranches;
-	if (advancedConfig.activeBranchDays !== undefined) config.activeBranchDays = advancedConfig.activeBranchDays;
-	if (advancedConfig.defaultPort !== undefined) config.defaultPort = advancedConfig.defaultPort;
-	if (advancedConfig.autoOpenBrowser !== undefined) config.autoOpenBrowser = advancedConfig.autoOpenBrowser;
+	if (advancedConfig.autoCommit !== undefined)
+		config.autoCommit = advancedConfig.autoCommit;
+	if (advancedConfig.remoteOperations !== undefined)
+		config.remoteOperations = advancedConfig.remoteOperations;
+	if (advancedConfig.bypassGitHooks !== undefined)
+		config.bypassGitHooks = advancedConfig.bypassGitHooks;
+	if (advancedConfig.checkActiveBranches !== undefined)
+		config.checkActiveBranches = advancedConfig.checkActiveBranches;
+	if (advancedConfig.activeBranchDays !== undefined)
+		config.activeBranchDays = advancedConfig.activeBranchDays;
+	if (advancedConfig.defaultPort !== undefined)
+		config.defaultPort = advancedConfig.defaultPort;
+	if (advancedConfig.autoOpenBrowser !== undefined)
+		config.autoOpenBrowser = advancedConfig.autoOpenBrowser;
 
 	if (hasDefaultEditorOverride && advancedConfig.defaultEditor) {
 		config.defaultEditor = advancedConfig.defaultEditor;
@@ -179,7 +208,10 @@ export async function initializeProject(
 	}
 	if (
 		hasZeroPaddedIdsOverride &&
-		!(typeof advancedConfig.zeroPaddedIds === "number" && advancedConfig.zeroPaddedIds > 0)
+		!(
+			typeof advancedConfig.zeroPaddedIds === "number" &&
+			advancedConfig.zeroPaddedIds > 0
+		)
 	) {
 		delete config.zeroPaddedIds;
 	}
@@ -236,7 +268,9 @@ ${description || "A new project managed with Roadmap.md."}
 			// Create proposals
 			for (const bs of blueprint.proposals) {
 				const canonicalId = idMap.get(bs.id)!;
-				const dependsOn = (bs.dependsOnIds ?? []).map((id) => idMap.get(id)).filter(Boolean) as string[];
+				const dependsOn = (bs.dependsOnIds ?? [])
+					.map((id) => idMap.get(id))
+					.filter(Boolean) as string[];
 
 				let finalDescription = bs.description;
 
@@ -278,7 +312,9 @@ ${description || "A new project managed with Roadmap.md."}
 			await writeFile(join(projectRoot, "roadmap", "MAP.md"), mapContent);
 		} else if (description) {
 			// Single baseline fallback
-			const id = config.zeroPaddedIds ? `${proposalPrefix}-${"0".repeat(config.zeroPaddedIds - 1)}0` : `${proposalPrefix}-0`;
+			const id = config.zeroPaddedIds
+				? `${proposalPrefix}-${"0".repeat(config.zeroPaddedIds - 1)}0`
+				: `${proposalPrefix}-0`;
 			await core.createProposal(
 				{
 					id,

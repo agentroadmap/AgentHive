@@ -1,8 +1,8 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, test } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, test } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
 import type { Proposal } from "../../src/types/index.ts";
 import { execSync } from "../support/test-utils.ts";
@@ -75,7 +75,10 @@ describe("Proposal Dependencies", () => {
 		// Verify the proposal was created with dependencies
 		const savedProposal = await core.filesystem.loadProposal("proposal-3");
 		assert.notStrictEqual(savedProposal, null);
-		assert.deepStrictEqual(savedProposal?.dependencies, ["proposal-1", "proposal-2"]);
+		assert.deepStrictEqual(savedProposal?.dependencies, [
+			"proposal-1",
+			"proposal-2",
+		]);
 	});
 
 	test("should update proposal dependencies", async () => {
@@ -118,12 +121,19 @@ describe("Proposal Dependencies", () => {
 		await core.createProposal(proposal3, false);
 
 		// Update proposal to add dependencies
-		await core.updateProposalFromInput(proposal3.id, { dependencies: ["proposal-1", "proposal-2"] }, false);
+		await core.updateProposalFromInput(
+			proposal3.id,
+			{ dependencies: ["proposal-1", "proposal-2"] },
+			false,
+		);
 
 		// Verify the dependencies were updated
 		const savedProposal = await core.filesystem.loadProposal("proposal-3");
 		assert.notStrictEqual(savedProposal, null);
-		assert.deepStrictEqual(savedProposal?.dependencies, ["proposal-1", "proposal-2"]);
+		assert.deepStrictEqual(savedProposal?.dependencies, [
+			"proposal-1",
+			"proposal-2",
+		]);
 	});
 
 	test("should handle proposals with dependencies in drafts", async () => {
@@ -194,11 +204,18 @@ describe("Proposal Dependencies", () => {
 		const loadedProposal = await core.filesystem.loadProposal("proposal-1");
 		assert.notStrictEqual(loadedProposal, null);
 		assert.strictEqual(loadedProposal?.id, "proposal-1");
-		assert.strictEqual(loadedProposal?.title, "Proposal with multiple dependencies");
+		assert.strictEqual(
+			loadedProposal?.title,
+			"Proposal with multiple dependencies",
+		);
 		assert.strictEqual(loadedProposal?.status, "Active");
 		assert.deepStrictEqual(loadedProposal?.assignee, ["@developer"]);
 		assert.deepStrictEqual(loadedProposal?.labels, ["feature", "backend"]);
-		assert.deepStrictEqual(loadedProposal?.dependencies, ["proposal-2", "proposal-3", "proposal-4"]);
+		assert.deepStrictEqual(loadedProposal?.dependencies, [
+			"proposal-2",
+			"proposal-3",
+			"proposal-4",
+		]);
 	});
 
 	test("should handle empty dependencies array", async () => {
@@ -263,7 +280,8 @@ describe("Proposal Dependencies", () => {
 			labels: [],
 			dependencies: ["proposal-1"],
 			parentProposalId: "proposal-1",
-			description: "Parent relationship is out of scope for archive sanitization",
+			description:
+				"Parent relationship is out of scope for archive sanitization",
 		};
 
 		await core.createProposal(archivedTarget, false);
@@ -278,7 +296,9 @@ describe("Proposal Dependencies", () => {
 		const updatedActive = await core.filesystem.loadProposal("proposal-2");
 		const updatedChild = await core.filesystem.loadProposal("proposal-4");
 		const completedProposals = await core.filesystem.listCompletedProposals();
-		const completed = completedProposals.find((proposal) => proposal.id === "proposal-3");
+		const completed = completedProposals.find(
+			(proposal) => proposal.id === "proposal-3",
+		);
 
 		assert.deepStrictEqual(updatedActive?.dependencies, []);
 		assert.deepStrictEqual(updatedChild?.dependencies, []);
@@ -306,7 +326,9 @@ describe("Proposal Dependencies", () => {
 		const archived = await core.archiveProposal("1", false);
 		assert.strictEqual(archived, true);
 
-		const updatedDependent = await core.filesystem.loadProposal(dependentProposal.id);
+		const updatedDependent = await core.filesystem.loadProposal(
+			dependentProposal.id,
+		);
 		assert.deepStrictEqual(updatedDependent?.dependencies, []);
 	});
 

@@ -1,10 +1,14 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, test } from "node:test";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, test } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
 import { GitOperations } from "../../src/git/operations.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 const CLI_PATH = join(process.cwd(), "src/cli.ts");
 
@@ -59,7 +63,10 @@ describe("CLI Auto-Commit Behavior with autoCommit: false", () => {
 	test("should not commit when creating a proposal if autoCommit is false", async () => {
 		const initialCommitCount = await getCommitCountInTest(TEST_DIR);
 
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal create "No-commit Proposal"`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal create "No-commit Proposal"`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(result.exitCode, 0);
 
 		const finalCommitCount = await getCommitCountInTest(TEST_DIR);
@@ -72,7 +79,10 @@ describe("CLI Auto-Commit Behavior with autoCommit: false", () => {
 	test("should not commit when creating a document if autoCommit is false", async () => {
 		const initialCommitCount = await getCommitCountInTest(TEST_DIR);
 
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} doc create "No-commit Doc"`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} doc create "No-commit Doc"`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(result.exitCode, 0);
 
 		const finalCommitCount = await getCommitCountInTest(TEST_DIR);
@@ -85,7 +95,10 @@ describe("CLI Auto-Commit Behavior with autoCommit: false", () => {
 	test("should not commit when creating a decision if autoCommit is false", async () => {
 		const initialCommitCount = await getCommitCountInTest(TEST_DIR);
 
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} decision create "No-commit Decision"`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} decision create "No-commit Decision"`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(result.exitCode, 0);
 
 		const finalCommitCount = await getCommitCountInTest(TEST_DIR);
@@ -138,7 +151,10 @@ describe("CLI Auto-Commit Behavior with autoCommit: true", () => {
 	test("should commit when creating a proposal if autoCommit is true", async () => {
 		const initialCommitCount = await getCommitCountInTest(TEST_DIR);
 
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal create "Auto-commit Proposal"`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal create "Auto-commit Proposal"`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(result.exitCode, 0);
 
 		// Note: isClean() is omitted as createProposal's commit strategy can leave the repo dirty.
@@ -149,7 +165,10 @@ describe("CLI Auto-Commit Behavior with autoCommit: true", () => {
 	test("should commit when creating a document if autoCommit is true", async () => {
 		const initialCommitCount = await getCommitCountInTest(TEST_DIR);
 
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} doc create "Auto-commit Doc"`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} doc create "Auto-commit Doc"`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(result.exitCode, 0);
 
 		const finalCommitCount = await getCommitCountInTest(TEST_DIR);
@@ -162,7 +181,10 @@ describe("CLI Auto-Commit Behavior with autoCommit: true", () => {
 	test("should commit when creating a decision if autoCommit is true", async () => {
 		const initialCommitCount = await getCommitCountInTest(TEST_DIR);
 
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} decision create "Auto-commit Decision"`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} decision create "Auto-commit Decision"`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(result.exitCode, 0);
 
 		const finalCommitCount = await getCommitCountInTest(TEST_DIR);

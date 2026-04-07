@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it, beforeEach, afterEach, mock } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import * as editor from "../../src/utils/editor.ts";
 
 describe("Editor Utils", () => {
@@ -25,7 +25,7 @@ describe("Editor Utils", () => {
 
 	it("should fallback to platform default", () => {
 		const result = editor.resolveEditor();
-		assert.ok(["nano", "notepad", "vi", "vim"].some(e => result.includes(e)));
+		assert.ok(["nano", "notepad", "vi", "vim"].some((e) => result.includes(e)));
 	});
 
 	it("should check if editor is available", async () => {

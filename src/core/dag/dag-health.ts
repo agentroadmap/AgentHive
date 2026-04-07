@@ -127,7 +127,7 @@ export class DAGHealth {
 		for (const [id, deps] of adjList) {
 			for (const dep of deps) {
 				if (reverseAdj.has(dep)) {
-					reverseAdj.get(dep)!.push(id);
+					reverseAdj.get(dep)?.push(id);
 				}
 			}
 		}
@@ -151,7 +151,9 @@ export class DAGHealth {
 			for (const [id, proposal] of proposalMap) {
 				const deps = adjList.get(id) ?? [];
 				const dependents = reverseAdj.get(id) ?? [];
-				const hasReachedStatus = ["Complete", "Abandoned"].includes(proposal.status ?? "");
+				const hasReachedStatus = ["Complete", "Abandoned"].includes(
+					proposal.status ?? "",
+				);
 
 				if (deps.length === 0 && dependents.length === 0 && !hasReachedStatus) {
 					issues.push({
@@ -159,7 +161,8 @@ export class DAGHealth {
 						severity: "warning",
 						proposalIds: [id],
 						message: `Orphan proposal: ${id} (${proposal.title}) has no dependencies or dependents`,
-						suggestion: "Link to related proposals or mark as Complete/Abandoned",
+						suggestion:
+							"Link to related proposals or mark as Complete/Abandoned",
 					});
 				}
 			}
@@ -189,7 +192,8 @@ export class DAGHealth {
 						severity: "error",
 						proposalIds: [id],
 						message: `${id} depends on non-existent proposal ${dep}`,
-						suggestion: "Remove invalid dependency or create the missing proposal",
+						suggestion:
+							"Remove invalid dependency or create the missing proposal",
 					});
 				}
 			}
@@ -280,7 +284,7 @@ export class DAGHealth {
 	 */
 	private calculateDepths(
 		adjList: Map<string, string[]>,
-		proposalMap: Map<string, Proposal>,
+		_proposalMap: Map<string, Proposal>,
 	): Map<string, number> {
 		const depths = new Map<string, number>();
 		const visited = new Set<string>();
@@ -319,7 +323,7 @@ export class DAGHealth {
 	private getDependencyChain(
 		id: string,
 		adjList: Map<string, string[]>,
-		proposalMap: Map<string, Proposal>,
+		_proposalMap: Map<string, Proposal>,
 	): string[] {
 		const chain: string[] = [id];
 		let current = id;
@@ -333,8 +337,8 @@ export class DAGHealth {
 			if (deps.length === 0) break;
 
 			// Follow the longest path
-			let maxDepth = -1;
-			let nextId = deps[0];
+			const _maxDepth = -1;
+			const _nextId = deps[0];
 
 			for (const dep of deps) {
 				if (!visited.has(dep)) {
@@ -374,7 +378,10 @@ export class DAGHealth {
 		}
 
 		const proposalCount = adjList.size;
-		const avgDepth = proposalCount > 0 ? Math.round((totalDepth / proposalCount) * 10) / 10 : 0;
+		const avgDepth =
+			proposalCount > 0
+				? Math.round((totalDepth / proposalCount) * 10) / 10
+				: 0;
 
 		// Count connected components
 		const visited = new Set<string>();
@@ -418,7 +425,12 @@ export class DAGHealth {
 	 * AC#5: Format report for pulse notification.
 	 */
 	formatForPulse(report: DAGHealthReport): string {
-		const icon = report.status === "healthy" ? "✅" : report.status === "warning" ? "⚠️" : "🔴";
+		const icon =
+			report.status === "healthy"
+				? "✅"
+				: report.status === "warning"
+					? "⚠️"
+					: "🔴";
 
 		const lines = [
 			`${icon} DAG Health: ${report.status.toUpperCase()}`,
@@ -427,7 +439,9 @@ export class DAGHealth {
 
 		if (report.summary.errors > 0) {
 			lines.push(`   ❌ Errors: ${report.summary.errors}`);
-			const errors = report.issues.filter((i) => i.severity === "error").slice(0, 3);
+			const errors = report.issues
+				.filter((i) => i.severity === "error")
+				.slice(0, 3);
 			for (const err of errors) {
 				lines.push(`      - ${err.message}`);
 			}
@@ -437,7 +451,9 @@ export class DAGHealth {
 			lines.push(`   ⚠️ Warnings: ${report.summary.warnings}`);
 		}
 
-		lines.push(`   Depth: ${report.stats.maxDepth} max, ${report.stats.avgDepth} avg`);
+		lines.push(
+			`   Depth: ${report.stats.maxDepth} max, ${report.stats.avgDepth} avg`,
+		);
 
 		return lines.join("\n");
 	}
@@ -455,7 +471,7 @@ export class DAGHealth {
 
 		for (const proposal of allProposals) {
 			if (proposal.id) {
-				let deps = [...(proposal.dependencies ?? [])];
+				const deps = [...(proposal.dependencies ?? [])];
 				// Add the proposed dependency
 				if (proposal.id === proposalId && !deps.includes(newDependency)) {
 					deps.push(newDependency);

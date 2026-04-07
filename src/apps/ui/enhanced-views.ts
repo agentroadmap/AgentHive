@@ -6,7 +6,11 @@ import type { Core } from "../../core/roadmap.ts";
 import type { Proposal } from "../../shared/types/index.ts";
 import { renderBoardTui } from "./board.ts";
 import { createLoadingScreen } from "./loading.ts";
-import { type ViewProposal, ViewSwitcher, type ViewType } from "./view-switcher.ts";
+import {
+	type ViewProposal,
+	ViewSwitcher,
+	type ViewType,
+} from "./view-switcher.ts";
 
 export interface EnhancedViewOptions {
 	core: Core;
@@ -24,7 +28,9 @@ export interface EnhancedViewOptions {
 /**
  * Main enhanced view controller that handles Tab switching between views
  */
-export async function runEnhancedViews(options: EnhancedViewOptions): Promise<void> {
+export async function runEnhancedViews(
+	options: EnhancedViewOptions,
+): Promise<void> {
 	const initialProposal: ViewProposal = {
 		type: options.initialView,
 		selectedProposal: options.selectedProposal,
@@ -59,7 +65,9 @@ export async function runEnhancedViews(options: EnhancedViewOptions): Promise<vo
 	};
 
 	// Function to handle switching to proposal view
-	const switchToProposalView = async (proposal: ViewProposal): Promise<void> => {
+	const switchToProposalView = async (
+		proposal: ViewProposal,
+	): Promise<void> => {
 		if (!proposal.proposals || proposal.proposals.length === 0) {
 			console.log("No proposals available.");
 			return;
@@ -116,17 +124,24 @@ export async function runEnhancedViews(options: EnhancedViewOptions): Promise<vo
 				console.error("Failed to load kanban data:", error);
 			}
 		} else if (proposal.kanbanData.loadError) {
-			console.error("Error loading kanban board:", proposal.kanbanData.loadError);
+			console.error(
+				"Error loading kanban board:",
+				proposal.kanbanData.loadError,
+			);
 		} else {
 			// Data is ready, show kanban board immediately
-			await renderBoardTuiWithSwitching(proposal.kanbanData.proposals, proposal.kanbanData.statuses, {
-				viewSwitcher,
-				onProposalSelect: (proposal) => {
-					viewSwitcher?.updateProposal({
-						selectedProposal: proposal,
-					});
+			await renderBoardTuiWithSwitching(
+				proposal.kanbanData.proposals,
+				proposal.kanbanData.statuses,
+				{
+					viewSwitcher,
+					onProposalSelect: (proposal) => {
+						viewSwitcher?.updateProposal({
+							selectedProposal: proposal,
+						});
+					},
 				},
-			});
+			);
 		}
 	};
 
@@ -150,7 +165,9 @@ async function viewProposalEnhancedWithSwitching(
 	},
 ): Promise<void> {
 	// Import the original viewProposalEnhanced function
-	const { viewProposalEnhanced } = await import("./proposal-viewer-with-search.ts");
+	const { viewProposalEnhanced } = await import(
+		"./proposal-viewer-with-search.ts"
+	);
 
 	// For now, use the original function but we'll need to modify it to support Tab switching
 	// This is a placeholder - we'll need to modify the actual proposal-viewer-with-search.ts
@@ -189,6 +206,10 @@ async function renderBoardTuiWithSwitching(
 }
 
 // Re-export for convenience
-export { type ViewProposal, ViewSwitcher, type ViewType } from "./view-switcher.ts";
+export {
+	type ViewProposal,
+	ViewSwitcher,
+	type ViewType,
+} from "./view-switcher.ts";
 
 // Helper function import

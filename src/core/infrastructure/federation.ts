@@ -12,20 +12,25 @@
  */
 
 import {
-	generateKeyPairSync,
+	createHash,
 	createSign,
 	createVerify,
-	createHash,
-	randomUUID,
+	generateKeyPairSync,
 	randomBytes,
+	randomUUID,
 } from "node:crypto";
-import { readFile, writeFile, mkdir, access, readdir, unlink } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { existsSync, readFileSync } from "node:fs";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
-export type HostStatus = "pending" | "approved" | "active" | "quarantined" | "revoked";
+export type HostStatus =
+	| "pending"
+	| "approved"
+	| "active"
+	| "quarantined"
+	| "revoked";
 
 export type CertificateType = "ca" | "server" | "client";
 
@@ -124,7 +129,7 @@ const CERTS_DIR = "certs";
 const JOIN_REQUESTS_FILE = "join-requests.json";
 const CONNECTIONS_FILE = "connections.json";
 
-const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+const _YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
 // ─── Federation PKI Implementation ──────────────────────────────────
 
@@ -159,7 +164,9 @@ export class FederationPKI {
 	 * Initialize the internal Certificate Authority.
 	 * Creates a new CA key pair if one doesn't exist.
 	 */
-	async initializeCA(subject: string = "Roadmap Federation CA"): Promise<CACertificate> {
+	async initializeCA(
+		subject: string = "Roadmap Federation CA",
+	): Promise<CACertificate> {
 		const caPath = join(this.config.configDir, CA_FILE);
 
 		// Check if CA already exists
@@ -169,7 +176,9 @@ export class FederationPKI {
 		}
 
 		const now = new Date();
-		const notAfter = new Date(now.getTime() + this.config.caExpiryDays * 24 * 60 * 60 * 1000);
+		const notAfter = new Date(
+			now.getTime() + this.config.caExpiryDays * 24 * 60 * 60 * 1000,
+		);
 
 		// Generate CA key pair (RSA 2048 for compatibility)
 		const { publicKey, privateKey } = generateKeyPairSync("rsa", {
@@ -196,7 +205,12 @@ export class FederationPKI {
 	/**
 	 * Get the CA certificate (public info only).
 	 */
-	getCA(): { certId: string; subject: string; publicKey: string; notAfter: string } | null {
+	getCA(): {
+		certId: string;
+		subject: string;
+		publicKey: string;
+		notAfter: string;
+	} | null {
 		if (!this.ca) return null;
 		return {
 			certId: this.ca.certId,
@@ -306,7 +320,11 @@ export class FederationPKI {
 		try {
 			const verify = createVerify("SHA256");
 			verify.update(JSON.stringify(certData));
-			const isValid = verify.verify(this.ca.keyPair.publicKey, cert.signature, "base64");
+			const isValid = verify.verify(
+				this.ca.keyPair.publicKey,
+				cert.signature,
+				"base64",
+			);
 
 			return isValid
 				? { valid: true }
@@ -444,7 +462,9 @@ export class FederationPKI {
 		}
 
 		if (existing && existing.status === "quarantined") {
-			throw new Error(`Host ${hostId} is quarantined. Admin must lift quarantine first.`);
+			throw new Error(
+				`Host ${hostId} is quarantined. Admin must lift quarantine first.`,
+			);
 		}
 
 		const joinRequest: JoinRequest = {
@@ -474,7 +494,10 @@ export class FederationPKI {
 	/**
 	 * Approve a join request.
 	 */
-	async approveJoinRequest(requestId: string, reviewerId: string): Promise<Host> {
+	async approveJoinRequest(
+		requestId: string,
+		reviewerId: string,
+	): Promise<Host> {
 		const request = this.joinRequests.find((r) => r.requestId === requestId);
 		if (!request) {
 			throw new Error(`Join request ${requestId} not found`);
@@ -501,7 +524,11 @@ export class FederationPKI {
 		};
 
 		// Issue certificate
-		const cert = await this.issueCertificate(request.hostId, request.publicKey, "client");
+		const cert = await this.issueCertificate(
+			request.hostId,
+			request.publicKey,
+			"client",
+		);
 		host.certificateId = cert.certId;
 		host.status = "active";
 
@@ -515,7 +542,11 @@ export class FederationPKI {
 	/**
 	 * Deny a join request.
 	 */
-	denyJoinRequest(requestId: string, reviewerId: string, reason: string): boolean {
+	denyJoinRequest(
+		requestId: string,
+		reviewerId: string,
+		reason: string,
+	): boolean {
 		const request = this.joinRequests.find((r) => r.requestId === requestId);
 		if (!request || request.status !== "pending") {
 			return false;
@@ -570,7 +601,10 @@ export class FederationPKI {
 	 * Rotate a host's certificate.
 	 * Old certificate is revoked, new one is issued.
 	 */
-	async rotateCertificate(hostId: string, newPublicKey: string): Promise<Certificate> {
+	async rotateCertificate(
+		hostId: string,
+		newPublicKey: string,
+	): Promise<Certificate> {
 		const host = this.hosts.get(hostId);
 		if (!host) {
 			throw new Error(`Host ${hostId} not found`);
@@ -603,7 +637,9 @@ export class FederationPKI {
 
 		return Array.from(this.certificates.values()).filter(
 			(cert) =>
-				!cert.revoked && new Date(cert.notAfter) <= threshold && new Date(cert.notAfter) > new Date(),
+				!cert.revoked &&
+				new Date(cert.notAfter) <= threshold &&
+				new Date(cert.notAfter) > new Date(),
 		);
 	}
 
@@ -642,7 +678,9 @@ export class FederationPKI {
 	 * Get certificates for a host.
 	 */
 	getHostCertificates(hostId: string): Certificate[] {
-		return Array.from(this.certificates.values()).filter((c) => c.hostId === hostId);
+		return Array.from(this.certificates.values()).filter(
+			(c) => c.hostId === hostId,
+		);
 	}
 
 	// ─── AC#5: Rogue Host Quarantine ───────────────────────────────
@@ -686,7 +724,9 @@ export class FederationPKI {
 	 * Get quarantined hosts.
 	 */
 	getQuarantinedHosts(): Host[] {
-		return Array.from(this.hosts.values()).filter((h) => h.status === "quarantined");
+		return Array.from(this.hosts.values()).filter(
+			(h) => h.status === "quarantined",
+		);
 	}
 
 	/**
@@ -860,13 +900,6 @@ export class FederationPKI {
 			// No connections yet
 		}
 	}
-
-	private async saveConnections(): Promise<void> {
-		const path = join(this.config.configDir, CONNECTIONS_FILE);
-		// Keep only last 1000 connections to prevent unbounded growth
-		const recent = this.connections.slice(-1000);
-		await writeFile(path, JSON.stringify(recent, null, 2));
-	}
 }
 
 // ─── Convenience Functions ──────────────────────────────────────────
@@ -874,7 +907,9 @@ export class FederationPKI {
 /**
  * Quick setup: Initialize CA and federation in one call.
  */
-export async function initializeFederation(configDir: string): Promise<FederationPKI> {
+export async function initializeFederation(
+	configDir: string,
+): Promise<FederationPKI> {
 	const pki = new FederationPKI({ configDir });
 	await pki.initialize();
 	await pki.initializeCA();

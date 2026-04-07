@@ -12,7 +12,10 @@ describe("TUI documentation display", () => {
 
 		try {
 			if (process.stdout.isTTY === false) {
-				Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+				Object.defineProperty(process.stdout, "isTTY", {
+					value: true,
+					configurable: true,
+				});
 				patchedTTY = true;
 			}
 
@@ -36,7 +39,9 @@ describe("TUI documentation display", () => {
 						content?: string;
 				  }
 				| undefined;
-			const content = contentArea?.getContent ? contentArea.getContent() : (contentArea?.content ?? "");
+			const content = contentArea?.getContent
+				? contentArea.getContent()
+				: (contentArea?.content ?? "");
 			const contentText = String(content);
 			assert.ok(contentText.includes("Documentation"));
 			assert.ok(contentText.includes("README.md"));
@@ -45,7 +50,10 @@ describe("TUI documentation display", () => {
 			popup?.close();
 		} finally {
 			if (patchedTTY) {
-				Object.defineProperty(process.stdout, "isTTY", { value: originalIsTTY, configurable: true });
+				Object.defineProperty(process.stdout, "isTTY", {
+					value: originalIsTTY,
+					configurable: true,
+				});
 			}
 			screen.destroy();
 		}

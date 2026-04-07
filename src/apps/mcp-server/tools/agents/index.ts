@@ -5,18 +5,22 @@
  * Supports: Claude, GPT, Gemini, local models, and custom AI backends.
  */
 
-import { updateReporting, grantPrivilege, revokePrivilege } from "./handlers.ts";
 import type { McpServer } from "../../server.ts";
-import type { McpToolHandler, CallToolResult } from "../../types.ts";
+import type { CallToolResult, McpToolHandler } from "../../types.ts";
 import { createSimpleValidatedTool } from "../../validation/tool-wrapper.ts";
-import { AgentPoolHandlers } from "./handlers.ts";
 import {
-	agentRegisterSchema,
-	agentListSchema,
+	AgentPoolHandlers,
+	grantPrivilege,
+	revokePrivilege,
+	updateReporting,
+} from "./handlers.ts";
+import {
 	agentAssignSchema,
 	agentHeartbeatSchema,
-	agentSpawnSchema,
+	agentListSchema,
+	agentRegisterSchema,
 	agentRetireSchema,
+	agentSpawnSchema,
 } from "./schemas.ts";
 
 /**
@@ -147,32 +151,54 @@ export function registerAgentTools(server: McpServer): void {
 				type: "object",
 				properties: {
 					agentId: { type: "string", description: "Agent ID" },
-					managerId: { type: "string", description: "Manager ID (null for top-level)" }
+					managerId: {
+						type: "string",
+						description: "Manager ID (null for top-level)",
+					},
 				},
-				required: ["agentId"]
+				required: ["agentId"],
 			},
 		},
-		{ type: "object", properties: { agentId: { type: "string" }, managerId: { type: "string" } } },
-		async (input: any) => updateReporting(input as any) as Promise<CallToolResult>,
+		{
+			type: "object",
+			properties: {
+				agentId: { type: "string" },
+				managerId: { type: "string" },
+			},
+		},
+		async (input: any) =>
+			updateReporting(input as any) as Promise<CallToolResult>,
 	);
 
 	// ── privilege_grant ─────────────────────────────────────────────────────
 	const grantTool = createSimpleValidatedTool(
 		{
 			name: "privilege_grant",
-			description: "Grant a privilege (read/edit/claim/review/admin/budget) to an agent.",
+			description:
+				"Grant a privilege (read/edit/claim/review/admin/budget) to an agent.",
 			inputSchema: {
 				type: "object",
 				properties: {
 					agentId: { type: "string", description: "Agent ID" },
-					permission: { type: "string", enum: ["read", "edit", "claim", "review", "admin", "budget"] },
-					grantedBy: { type: "string", description: "Who granted" }
+					permission: {
+						type: "string",
+						enum: ["read", "edit", "claim", "review", "admin", "budget"],
+					},
+					grantedBy: { type: "string", description: "Who granted" },
 				},
-				required: ["agentId", "permission", "grantedBy"]
+				required: ["agentId", "permission", "grantedBy"],
 			},
 		},
-		{ type: "object", properties: { agentId: { type: "string" }, permission: { type: "string" }, grantedBy: { type: "string" } } },
-		async (input: any) => grantPrivilege(input as any) as Promise<CallToolResult>,
+		{
+			type: "object",
+			properties: {
+				agentId: { type: "string" },
+				permission: { type: "string" },
+				grantedBy: { type: "string" },
+			},
+		},
+		async (input: any) =>
+			grantPrivilege(input as any) as Promise<CallToolResult>,
 	);
 
 	// ── privilege_revoke ────────────────────────────────────────────────────
@@ -183,11 +209,12 @@ export function registerAgentTools(server: McpServer): void {
 			inputSchema: {
 				type: "object",
 				properties: { privilegeId: { type: "number" } },
-				required: ["privilegeId"]
+				required: ["privilegeId"],
 			},
 		},
 		{ type: "object", properties: { privilegeId: { type: "number" } } },
-		async (input: any) => revokePrivilege(input as any) as Promise<CallToolResult>,
+		async (input: any) =>
+			revokePrivilege(input as any) as Promise<CallToolResult>,
 	);
 
 	server.addTool(reportingTool);

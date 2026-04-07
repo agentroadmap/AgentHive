@@ -1,12 +1,16 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { spawn } from "node:child_process";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/index.ts";
 import { formatLocalDateTime } from "../../src/utils/date-time.ts";
-import { createUniqueTestDir, safeCleanup, sleep, execSync,
+import {
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
+	sleep,
 } from "../support/test-utils.ts";
 
 const CLI_PATH = join(process.cwd(), "src", "cli.ts");
@@ -14,7 +18,10 @@ const CLI_PATH = join(process.cwd(), "src", "cli.ts");
 let TEST_DIR: string;
 let core: Core;
 
-async function waitFor(condition: () => boolean | Promise<boolean>, timeoutMs = 4000): Promise<void> {
+async function waitFor(
+	condition: () => boolean | Promise<boolean>,
+	timeoutMs = 4000,
+): Promise<void> {
 	const startedAt = Date.now();
 	while (Date.now() - startedAt < timeoutMs) {
 		if (await condition()) return;
@@ -23,7 +30,9 @@ async function waitFor(condition: () => boolean | Promise<boolean>, timeoutMs = 
 	throw new Error(`Timed out after ${timeoutMs}ms`);
 }
 
-function captureStream(stream: NodeJS.ReadableStream | null | undefined): Promise<string> {
+function captureStream(
+	stream: NodeJS.ReadableStream | null | undefined,
+): Promise<string> {
 	return new Promise((resolve) => {
 		if (!stream) {
 			resolve("");
@@ -45,7 +54,12 @@ function groupLogPath(group = "chat-test") {
 }
 
 function privateLogPath(left: string, right: string) {
-	return join(TEST_DIR, "roadmap", "messages", `private-${[left, right].sort().join("-")}.md`);
+	return join(
+		TEST_DIR,
+		"roadmap",
+		"messages",
+		`private-${[left, right].sort().join("-")}.md`,
+	);
 }
 
 describe("chat features", () => {
@@ -82,7 +96,11 @@ describe("chat features", () => {
 			text: "Line one\nLine two for @bob",
 			mentions: ["bob"],
 		});
-		assert.ok([beforeSendMinute, afterSendMinute].includes(result.messages[0]?.timestamp.slice(0, 16)));
+		assert.ok(
+			[beforeSendMinute, afterSendMinute].includes(
+				result.messages[0]?.timestamp.slice(0, 16),
+			),
+		);
 
 		const raw = await readFile(groupLogPath(), "utf8");
 		assert.ok(raw.includes("__roadmap_msg_b64__:"));
@@ -99,7 +117,10 @@ describe("chat features", () => {
 		});
 
 		const users = await core.getKnownUsers();
-		assert.deepStrictEqual(users, expect.arrayContaining(["Gary", "andy", "bob"]));
+		assert.deepStrictEqual(
+			users,
+			expect.arrayContaining(["Gary", "andy", "bob"]),
+		);
 	});
 
 	it("replays and streams mention-filtered messages", async () => {
@@ -143,13 +164,22 @@ describe("chat features", () => {
 		});
 
 		await waitFor(() => seen.length === 2);
-		assert.deepStrictEqual(seen, ["Checking in with @bob", "Following up for @bob"]);
+		assert.deepStrictEqual(seen, [
+			"Checking in with @bob",
+			"Following up for @bob",
+		]);
 		stopWatching();
 	});
 
 	it("routes talk messages to group and private logs", async () => {
-		execSync(`node --experimental-strip-types ${CLI_PATH} talk ${"Hello @bob"} --as ${"Gary"}`, { cwd: TEST_DIR });
-		execSync(`node --experimental-strip-types ${CLI_PATH} talk ${"Private hello"} ${"@bob"} --as ${"Gary"}`, { cwd: TEST_DIR });
+		execSync(
+			`node --experimental-strip-types ${CLI_PATH} talk ${"Hello @bob"} --as ${"Gary"}`,
+			{ cwd: TEST_DIR },
+		);
+		execSync(
+			`node --experimental-strip-types ${CLI_PATH} talk ${"Private hello"} ${"@bob"} --as ${"Gary"}`,
+			{ cwd: TEST_DIR },
+		);
 
 		const groupMessages = await core.readMessages({ channel: "chat-test" });
 		expect(groupMessages.messages.at(-1)).toMatchObject({
@@ -172,7 +202,17 @@ describe("chat features", () => {
 
 		const child = spawn(
 			"bun",
-			[CLI_PATH, "listen", "chat-test", "--mention", "bob", "--since", "2000-01-01 00:00:00", "--all", "--markdown"],
+			[
+				CLI_PATH,
+				"listen",
+				"chat-test",
+				"--mention",
+				"bob",
+				"--since",
+				"2000-01-01 00:00:00",
+				"--all",
+				"--markdown",
+			],
 			{
 				cwd: TEST_DIR,
 				stdio: ["ignore", "pipe", "pipe"],
@@ -205,7 +245,15 @@ describe("chat features", () => {
 
 		const child = spawn(
 			"bun",
-			[CLI_PATH, "listen", "chat-test", "--since", "2000-01-01 00:00:00", "--all", "--markdown"],
+			[
+				CLI_PATH,
+				"listen",
+				"chat-test",
+				"--since",
+				"2000-01-01 00:00:00",
+				"--all",
+				"--markdown",
+			],
 			{
 				cwd: TEST_DIR,
 				stdio: ["ignore", "pipe", "pipe"],
@@ -222,7 +270,10 @@ describe("chat features", () => {
 	});
 
 	it("shows revision in splash and sends chat input lines", async () => {
-		const splash = execSync(`node --experimental-strip-types ${CLI_PATH} --plain`, { cwd: TEST_DIR });
+		const splash = execSync(
+			`node --experimental-strip-types ${CLI_PATH} --plain`,
+			{ cwd: TEST_DIR },
+		);
 		expect(splash.stdout.toString()).toContain("rev ");
 
 		const child = spawn("bun", [CLI_PATH, "chat"], {

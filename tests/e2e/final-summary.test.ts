@@ -1,11 +1,14 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir } from "node:fs/promises";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
 import { extractStructuredSection } from "../../src/markdown/structured-sections.ts";
 import type { Proposal } from "../../src/types/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync,
+import {
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 let TEST_DIR: string;
@@ -34,9 +37,15 @@ describe("Final Summary", () => {
 		});
 
 		assert.ok(proposal.rawContent?.includes("## Final Summary"));
-		assert.ok(proposal.rawContent?.includes("<!-- SECTION:FINAL_SUMMARY:BEGIN -->"));
-		assert.ok(proposal.rawContent?.includes("<!-- SECTION:FINAL_SUMMARY:END -->"));
-		expect(extractStructuredSection(proposal.rawContent ?? "", "finalSummary")).toBe("Completed the core workflow");
+		assert.ok(
+			proposal.rawContent?.includes("<!-- SECTION:FINAL_SUMMARY:BEGIN -->"),
+		);
+		assert.ok(
+			proposal.rawContent?.includes("<!-- SECTION:FINAL_SUMMARY:END -->"),
+		);
+		expect(
+			extractStructuredSection(proposal.rawContent ?? "", "finalSummary"),
+		).toBe("Completed the core workflow");
 	});
 
 	it("sets, appends, and clears Final Summary via proposal edit operations", async () => {
@@ -53,17 +62,35 @@ describe("Final Summary", () => {
 		};
 		await core.createProposal(base, false);
 
-		await core.updateProposalFromInput("proposal-1", { finalSummary: "Initial summary" }, false);
+		await core.updateProposalFromInput(
+			"proposal-1",
+			{ finalSummary: "Initial summary" },
+			false,
+		);
 		let body = await core.getProposalContent("proposal-1");
-		expect(extractStructuredSection(body ?? "", "finalSummary")).toBe("Initial summary");
+		expect(extractStructuredSection(body ?? "", "finalSummary")).toBe(
+			"Initial summary",
+		);
 
-		await core.updateProposalFromInput("proposal-1", { appendFinalSummary: ["Second", "Third"] }, false);
+		await core.updateProposalFromInput(
+			"proposal-1",
+			{ appendFinalSummary: ["Second", "Third"] },
+			false,
+		);
 		body = await core.getProposalContent("proposal-1");
-		expect(extractStructuredSection(body ?? "", "finalSummary")).toBe("Initial summary\n\nSecond\n\nThird");
+		expect(extractStructuredSection(body ?? "", "finalSummary")).toBe(
+			"Initial summary\n\nSecond\n\nThird",
+		);
 
-		await core.updateProposalFromInput("proposal-1", { clearFinalSummary: true }, false);
+		await core.updateProposalFromInput(
+			"proposal-1",
+			{ clearFinalSummary: true },
+			false,
+		);
 		body = await core.getProposalContent("proposal-1");
-		expect(extractStructuredSection(body ?? "", "finalSummary")).toBeUndefined();
+		expect(
+			extractStructuredSection(body ?? "", "finalSummary"),
+		).toBeUndefined();
 		assert.ok(!body?.includes("## Final Summary"));
 	});
 
@@ -123,6 +150,8 @@ describe("Final Summary", () => {
 			"",
 		].join("\n");
 
-		expect(extractStructuredSection(content, "finalSummary")).toBe("Real summary content");
+		expect(extractStructuredSection(content, "finalSummary")).toBe(
+			"Real summary content",
+		);
 	});
 });

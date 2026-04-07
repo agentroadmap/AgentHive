@@ -7,10 +7,16 @@ import type { JsonSchema } from "../validation/validators.ts";
  */
 export function generateStatusFieldSchema(config: RoadmapConfig): JsonSchema {
 	const configuredStatuses =
-		config.statuses && config.statuses.length > 0 ? [...config.statuses] : [...DEFAULT_STATUSES];
+		config.statuses && config.statuses.length > 0
+			? [...config.statuses]
+			: [...DEFAULT_STATUSES];
 	const normalizedStatuses = configuredStatuses.map((status) => status.trim());
-	const hasDraft = normalizedStatuses.some((status) => status.toLowerCase() === "draft");
-	const enumStatuses = hasDraft ? normalizedStatuses : ["Draft", ...normalizedStatuses];
+	const hasDraft = normalizedStatuses.some(
+		(status) => status.toLowerCase() === "draft",
+	);
+	const enumStatuses = hasDraft
+		? normalizedStatuses
+		: ["Draft", ...normalizedStatuses];
 	const defaultStatus = normalizedStatuses[0] ?? DEFAULT_STATUSES[0];
 
 	return {
@@ -27,7 +33,9 @@ export function generateStatusFieldSchema(config: RoadmapConfig): JsonSchema {
 /**
  * Generates the proposal_create input schema with dynamic status enum
  */
-export function generateProposalCreateSchema(config: RoadmapConfig): JsonSchema {
+export function generateProposalCreateSchema(
+	config: RoadmapConfig,
+): JsonSchema {
 	return {
 		type: "object",
 		properties: {
@@ -101,12 +109,14 @@ export function generateProposalCreateSchema(config: RoadmapConfig): JsonSchema 
 					type: "string",
 					maxLength: 500,
 				},
-				description: "Documentation URLs or file paths for understanding this proposal",
+				description:
+					"Documentation URLs or file paths for understanding this proposal",
 			},
 			finalSummary: {
 				type: "string",
 				maxLength: 20000,
-				description: "Final summary for PR-style completion notes. Write this only when the proposal is complete.",
+				description:
+					"Final summary for PR-style completion notes. Write this only when the proposal is complete.",
 			},
 			acceptanceCriteria: {
 				type: "array",
@@ -122,7 +132,8 @@ export function generateProposalCreateSchema(config: RoadmapConfig): JsonSchema 
 			rationale: {
 				type: "string",
 				maxLength: 1000,
-				description: "The rationale or nature of the proposal (e.g. 'external' constraint, 'decision' consequence)",
+				description:
+					"The rationale or nature of the proposal (e.g. 'external' constraint, 'decision' consequence)",
 			},
 		},
 		required: ["title"],
@@ -257,7 +268,8 @@ export function generateProposalEditSchema(config: RoadmapConfig): JsonSchema {
 			finalSummary: {
 				type: "string",
 				maxLength: 20000,
-				description: "Final summary for PR-style completion notes. Write this only when the proposal is complete.",
+				description:
+					"Final summary for PR-style completion notes. Write this only when the proposal is complete.",
 			},
 			finalSummaryAppend: {
 				type: "array",
@@ -354,7 +366,8 @@ export function generateProposalEditSchema(config: RoadmapConfig): JsonSchema {
 			rationale: {
 				type: "string",
 				maxLength: 1000,
-				description: "The rationale or nature of the proposal (e.g. 'external' constraint, 'decision' consequence)",
+				description:
+					"The rationale or nature of the proposal (e.g. 'external' constraint, 'decision' consequence)",
 			},
 		},
 		required: ["id"],

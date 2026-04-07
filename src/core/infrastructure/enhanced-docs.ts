@@ -5,15 +5,8 @@
  * with all structured data, cross-referencing navigation, and GitHub Pages deployment.
  */
 
-import { readdirSync, writeFileSync, mkdirSync, existsSync, readFileSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
-import type {
-	DocGeneratorOptions,
-	GeneratedDoc,
-	GenerationResult,
-	StatusSummary,
-} from "./doc-generator.ts";
-import { parseFrontmatter } from "./doc-generator.ts";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 // ──────────────────────────────────────────
 // AC#1: Full Proposal Detail Page Content
@@ -69,8 +62,12 @@ export function generateFullProposalDetail(proposal: ProposalDocData): string {
 
 	// Header card
 	const statusBadge = getStatusBadge(proposal.status);
-	const priorityBadge = proposal.priority ? getPriorityBadge(proposal.priority) : "";
-	const maturityBadge = proposal.maturity ? getMaturityBadge(proposal.maturity) : "";
+	const priorityBadge = proposal.priority
+		? getPriorityBadge(proposal.priority)
+		: "";
+	const maturityBadge = proposal.maturity
+		? getMaturityBadge(proposal.maturity)
+		: "";
 
 	lines.push(`# ${proposal.id}: ${proposal.title}`);
 	lines.push("");
@@ -80,13 +77,19 @@ export function generateFullProposalDetail(proposal: ProposalDocData): string {
 	// Metadata row
 	lines.push("## Metadata");
 	lines.push("");
-	const assigneeStr = Array.isArray(proposal.assignee) ? proposal.assignee.join(", ") : (proposal.assignee || "Unassigned");
+	const assigneeStr = Array.isArray(proposal.assignee)
+		? proposal.assignee.join(", ")
+		: proposal.assignee || "Unassigned";
 	lines.push(`- **Assignee:** ${assigneeStr}`);
 	if (proposal.builder) lines.push(`- **Builder:** ${proposal.builder}`);
 	if (proposal.auditor) lines.push(`- **Auditor:** ${proposal.auditor}`);
 	lines.push(`- **Created:** ${proposal.createdDate}`);
-	if (proposal.updatedDate) lines.push(`- **Updated:** ${proposal.updatedDate}`);
-	if (proposal.labels.length > 0) lines.push(`- **Labels:** ${proposal.labels.map((l) => `\`${l}\``).join(", ")}`);
+	if (proposal.updatedDate)
+		lines.push(`- **Updated:** ${proposal.updatedDate}`);
+	if (proposal.labels.length > 0)
+		lines.push(
+			`- **Labels:** ${proposal.labels.map((l) => `\`${l}\``).join(", ")}`,
+		);
 	lines.push("");
 
 	// Dependencies
@@ -119,9 +122,13 @@ export function generateFullProposalDetail(proposal: ProposalDocData): string {
 		}
 		lines.push("");
 
-		const passed = proposal.acceptanceCriteria.filter((a) => a.status === "checked").length;
+		const passed = proposal.acceptanceCriteria.filter(
+			(a) => a.status === "checked",
+		).length;
 		const total = proposal.acceptanceCriteria.length;
-		lines.push(`**Progress:** ${passed}/${total} ACs complete (${Math.round((passed / total) * 100)}%)`);
+		lines.push(
+			`**Progress:** ${passed}/${total} ACs complete (${Math.round((passed / total) * 100)}%)`,
+		);
 		lines.push("");
 	}
 
@@ -139,9 +146,13 @@ export function generateFullProposalDetail(proposal: ProposalDocData): string {
 		lines.push("");
 		lines.push(`- **Total:** ${proposal.testResults.total}`);
 		lines.push(`- **Passing:** ${proposal.testResults.passing} ✅`);
-		lines.push(`- **Failing:** ${proposal.testResults.failing} ${proposal.testResults.failing > 0 ? "❌" : ""}`);
-		if (proposal.testResults.skipped > 0) lines.push(`- **Skipped:** ${proposal.testResults.skipped} ⏭️`);
-		if (proposal.testResults.duration) lines.push(`- **Duration:** ${proposal.testResults.duration}`);
+		lines.push(
+			`- **Failing:** ${proposal.testResults.failing} ${proposal.testResults.failing > 0 ? "❌" : ""}`,
+		);
+		if (proposal.testResults.skipped > 0)
+			lines.push(`- **Skipped:** ${proposal.testResults.skipped} ⏭️`);
+		if (proposal.testResults.duration)
+			lines.push(`- **Duration:** ${proposal.testResults.duration}`);
 		lines.push("");
 	}
 
@@ -194,7 +205,9 @@ export function generateDashboard(proposals: ProposalDocData[]): string {
 	const summary = buildStatusSummary(proposals);
 	lines.push("# 📊 agentRoadmap.md Dashboard");
 	lines.push("");
-	lines.push(`> **${summary.total} proposals** | ${summary.complete} Complete | ${summary.active} Active | ${summary.accepted} Accepted | ${summary.abandoned} Abandoned`);
+	lines.push(
+		`> **${summary.total} proposals** | ${summary.complete} Complete | ${summary.active} Active | ${summary.accepted} Accepted | ${summary.abandoned} Abandoned`,
+	);
 	lines.push("");
 
 	// Status overview with badges
@@ -212,10 +225,15 @@ export function generateDashboard(proposals: ProposalDocData[]): string {
 	const byStatus = groupByStatus(proposals);
 	for (const [status, group] of Object.entries(byStatus)) {
 		if (group.length === 0) continue;
-		lines.push(`## ${getStatusEmoji(status)} ${capitalize(status)} (${group.length})`);
+		lines.push(
+			`## ${getStatusEmoji(status)} ${capitalize(status)} (${group.length})`,
+		);
 		lines.push("");
 		for (const proposal of group) {
-			const dep = proposal.dependencies.length > 0 ? ` — deps: ${proposal.dependencies.join(", ")}` : "";
+			const dep =
+				proposal.dependencies.length > 0
+					? ` — deps: ${proposal.dependencies.join(", ")}`
+					: "";
 			lines.push(`- **${proposal.id}**: ${proposal.title}${dep}`);
 		}
 		lines.push("");
@@ -226,7 +244,9 @@ export function generateDashboard(proposals: ProposalDocData[]): string {
 	if (Object.keys(byLabel).length > 0) {
 		lines.push("## By Label");
 		lines.push("");
-		for (const [label, group] of Object.entries(byLabel).sort((a, b) => b[1].length - a[1].length)) {
+		for (const [label, group] of Object.entries(byLabel).sort(
+			(a, b) => b[1].length - a[1].length,
+		)) {
 			lines.push(`- **\`${label}\`**: ${group.length} proposals`);
 		}
 		lines.push("");
@@ -256,7 +276,9 @@ export function buildStatusSummary(proposals: ProposalDocData[]): {
 } {
 	return {
 		total: proposals.length,
-		complete: proposals.filter((s) => s.status === "Complete" || s.status === "Reached").length,
+		complete: proposals.filter(
+			(s) => s.status === "Complete" || s.status === "Reached",
+		).length,
 		active: proposals.filter((s) => s.status === "Active").length,
 		accepted: proposals.filter((s) => s.status === "Accepted").length,
 		abandoned: proposals.filter((s) => s.status === "Abandoned").length,
@@ -264,7 +286,9 @@ export function buildStatusSummary(proposals: ProposalDocData[]): {
 }
 
 /** Group proposals by status */
-export function groupByStatus(proposals: ProposalDocData[]): Record<string, ProposalDocData[]> {
+export function groupByStatus(
+	proposals: ProposalDocData[],
+): Record<string, ProposalDocData[]> {
 	const groups: Record<string, ProposalDocData[]> = {};
 	for (const proposal of proposals) {
 		const key = proposal.status.toLowerCase();
@@ -275,7 +299,9 @@ export function groupByStatus(proposals: ProposalDocData[]): Record<string, Prop
 }
 
 /** Group proposals by labels */
-export function groupByLabel(proposals: ProposalDocData[]): Record<string, ProposalDocData[]> {
+export function groupByLabel(
+	proposals: ProposalDocData[],
+): Record<string, ProposalDocData[]> {
 	const groups: Record<string, ProposalDocData[]> = {};
 	for (const proposal of proposals) {
 		for (const label of proposal.labels) {
@@ -287,7 +313,9 @@ export function groupByLabel(proposals: ProposalDocData[]): Record<string, Propo
 }
 
 /** Group proposals by priority */
-export function groupByPriority(proposals: ProposalDocData[]): Record<string, ProposalDocData[]> {
+export function groupByPriority(
+	proposals: ProposalDocData[],
+): Record<string, ProposalDocData[]> {
 	const groups: Record<string, ProposalDocData[]> = {};
 	for (const proposal of proposals) {
 		const p = proposal.priority || "none";
@@ -403,7 +431,9 @@ markdown_extensions:
 // ──────────────────────────────────────────
 
 /** Build cross-reference links between proposals */
-export function buildCrossReferences(proposals: ProposalDocData[]): Map<string, string[]> {
+export function buildCrossReferences(
+	proposals: ProposalDocData[],
+): Map<string, string[]> {
 	const refs = new Map<string, string[]>();
 
 	for (const proposal of proposals) {
@@ -442,10 +472,10 @@ export interface SidebarEntry {
 	children?: SidebarEntry[];
 }
 
-export function generateNavigation(proposals: ProposalDocData[]): SidebarEntry[] {
-	const nav: SidebarEntry[] = [
-		{ title: "Dashboard", path: "index.md" },
-	];
+export function generateNavigation(
+	proposals: ProposalDocData[],
+): SidebarEntry[] {
+	const nav: SidebarEntry[] = [{ title: "Dashboard", path: "index.md" }];
 
 	// Proposals by status
 	const statusGroups = groupByStatus(proposals);

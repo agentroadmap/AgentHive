@@ -165,7 +165,9 @@ export class AuditTrail {
 	/**
 	 * Log an audit event. Replaces git log as the authoritative audit source.
 	 */
-	logEvent(event: Omit<MigrationAuditEvent, "id" | "timestamp">): MigrationAuditEvent {
+	logEvent(
+		event: Omit<MigrationAuditEvent, "id" | "timestamp">,
+	): MigrationAuditEvent {
 		const full: MigrationAuditEvent = {
 			id: randomUUID(),
 			timestamp: new Date().toISOString(),
@@ -266,8 +268,12 @@ export class AuditTrail {
 	 * Purge audit events older than retention period.
 	 */
 	purgeOldEvents(retentionDays: number): number {
-		const cutoff = new Date(Date.now() - retentionDays * 86400000).toISOString();
-		const stmt = this.db.prepare("DELETE FROM audit_events WHERE timestamp < ?");
+		const cutoff = new Date(
+			Date.now() - retentionDays * 86400000,
+		).toISOString();
+		const stmt = this.db.prepare(
+			"DELETE FROM audit_events WHERE timestamp < ?",
+		);
 		const result = stmt.run(cutoff);
 		return Number(result.changes);
 	}
@@ -327,7 +333,9 @@ export class AccessControl {
 			AND revoked_at IS NULL
 		`);
 
-		const result = stmt.get(agentId, resourceType, resourceId, permission) as { cnt: number };
+		const result = stmt.get(agentId, resourceType, resourceId, permission) as {
+			cnt: number;
+		};
 		return result.cnt > 0;
 	}
 
@@ -367,11 +375,13 @@ export class AccessControl {
 	 * List all active permissions for an agent.
 	 */
 	listPermissions(agentId: string): AccessControlEntry[] {
-		const rows = this.db.prepare(`
+		const rows = this.db
+			.prepare(`
 			SELECT * FROM access_control
 			WHERE agent_id = ? AND revoked_at IS NULL
 			ORDER BY granted_at DESC
-		`).all(agentId) as Array<{
+		`)
+			.all(agentId) as Array<{
 			agent_id: string;
 			resource_type: string;
 			resource_id: string;
@@ -451,9 +461,11 @@ export class DataIntegrity {
 	 * Get all integrity mismatches.
 	 */
 	getMismatches(): DataIntegrityCheck[] {
-		const rows = this.db.prepare(`
+		const rows = this.db
+			.prepare(`
 			SELECT * FROM integrity_checks WHERE match = 0 ORDER BY checked_at DESC
-		`).all() as Array<{
+		`)
+			.all() as Array<{
 			id: string;
 			resource_type: string;
 			resource_id: string;
@@ -478,7 +490,9 @@ export class DataIntegrity {
 	 * Verify all proposals in DB match their file counterparts.
 	 * Returns count of verified, mismatched, and missing.
 	 */
-	verifyAll(proposals: Array<{ id: string; fileContent: string; dbContent: string }>): {
+	verifyAll(
+		proposals: Array<{ id: string; fileContent: string; dbContent: string }>,
+	): {
 		verified: number;
 		mismatched: number;
 		missing: number;
@@ -493,7 +507,12 @@ export class DataIntegrity {
 				continue;
 			}
 
-			const check = this.recordCheck("proposal", proposal.id, proposal.fileContent, proposal.dbContent);
+			const check = this.recordCheck(
+				"proposal",
+				proposal.id,
+				proposal.fileContent,
+				proposal.dbContent,
+			);
 			if (check.match) {
 				verified++;
 			} else {
@@ -517,7 +536,12 @@ export class AgentTokenStore {
 	/**
 	 * Store a token hash (never store plaintext tokens in DB).
 	 */
-	storeToken(agentId: string, tokenHash: string, expiresAt: string, keyVersion: number): void {
+	storeToken(
+		agentId: string,
+		tokenHash: string,
+		expiresAt: string,
+		keyVersion: number,
+	): void {
 		const stmt = this.db.prepare(`
 			INSERT OR REPLACE INTO agent_tokens (token_hash, agent_id, issued_at, expires_at, key_version)
 			VALUES (?, ?, ?, ?, ?)
@@ -535,17 +559,23 @@ export class AgentTokenStore {
 	/**
 	 * Verify a token hash exists and is not expired/revoked.
 	 */
-	verifyTokenHash(tokenHash: string): { agentId: string; keyVersion: number } | null {
-		const row = this.db.prepare(`
+	verifyTokenHash(
+		tokenHash: string,
+	): { agentId: string; keyVersion: number } | null {
+		const row = this.db
+			.prepare(`
 			SELECT agent_id, key_version, expires_at, revoked
 			FROM agent_tokens
 			WHERE token_hash = ?
-		`).get(tokenHash) as {
-			agent_id: string;
-			key_version: number;
-			expires_at: string;
-			revoked: number;
-		} | undefined;
+		`)
+			.get(tokenHash) as
+			| {
+					agent_id: string;
+					key_version: number;
+					expires_at: string;
+					revoked: number;
+			  }
+			| undefined;
 
 		if (!row) return null;
 		if (row.revoked) return null;

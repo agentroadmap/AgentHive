@@ -1,8 +1,12 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
-import { expect } from "../support/test-utils.ts";
 import type { Proposal } from "../../src/types/index.ts";
-import { type ColumnData, shouldRebuildColumns, filterBoardColumns } from "../../src/ui/board.ts";
+import {
+	type ColumnData,
+	filterBoardColumns,
+	shouldRebuildColumns,
+} from "../../src/ui/board.ts";
+import { expect } from "../support/test-utils.ts";
 
 function createProposal(id: string, status: string): Proposal {
 	return {
@@ -82,11 +86,16 @@ describe("filterBoardColumns", () => {
 	it("filters out abandoned columns when hideAbandoned is true", () => {
 		const columns: ColumnData[] = [
 			{ status: "Active", proposals: [createProposal("proposal-1", "Active")] },
-			{ status: "Abandoned", proposals: [createProposal("proposal-2", "Abandoned")] },
+			{
+				status: "Abandoned",
+				proposals: [createProposal("proposal-2", "Abandoned")],
+			},
 			{ status: "Done", proposals: [createProposal("proposal-3", "Done")] },
 		];
 
-		const result = filterBoardColumns(columns, { hiddenStatuses: ["Abandoned"] });
+		const result = filterBoardColumns(columns, {
+			hiddenStatuses: ["Abandoned"],
+		});
 		assert.strictEqual(result.length, 2);
 		assert.strictEqual(result[0]?.status, "Active");
 		assert.strictEqual(result[1]?.status, "Done");
@@ -109,7 +118,10 @@ describe("filterBoardColumns", () => {
 	it("keeps abandoned columns with proposals when hideEmpty is true", () => {
 		const columns: ColumnData[] = [
 			{ status: "Active", proposals: [createProposal("proposal-1", "Active")] },
-			{ status: "Abandoned", proposals: [createProposal("proposal-2", "Abandoned")] },
+			{
+				status: "Abandoned",
+				proposals: [createProposal("proposal-2", "Abandoned")],
+			},
 			{ status: "Potential", proposals: [] },
 		];
 

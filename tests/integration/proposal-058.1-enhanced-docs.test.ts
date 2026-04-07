@@ -1,31 +1,32 @@
 /**
  * Tests for proposal-058.1: Enhanced Product Documentation
  */
-import { describe, it } from "node:test";
+
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { describe, it } from "node:test";
 import {
-	generateFullProposalDetail,
-	generateDashboard,
-	generateGitHubPagesWorkflow,
-	generateDocsConfig,
 	buildCrossReferences,
-	generateNavigation,
-	contentHash,
-	hasProposalChanged,
-	saveContentHash,
 	buildStatusSummary,
-	groupByStatus,
+	contentHash,
+	generateDashboard,
+	generateDocsConfig,
+	generateFullProposalDetail,
+	generateGitHubPagesWorkflow,
+	generateNavigation,
 	groupByLabel,
 	groupByPriority,
+	groupByStatus,
+	hasProposalChanged,
 	type ProposalDocData,
-	type AcceptanceCriterionDoc,
-	type SidebarEntry,
-} from '../../src/core/infrastructure/enhanced-docs.ts';
+	saveContentHash,
+} from "../../src/core/infrastructure/enhanced-docs.ts";
 
 // Helper to create test proposal data
-function makeProposal(overrides: Partial<ProposalDocData> = {}): ProposalDocData {
+function makeProposal(
+	overrides: Partial<ProposalDocData> = {},
+): ProposalDocData {
 	return {
 		id: "proposal-042",
 		title: "Test Proposal",
@@ -58,7 +59,10 @@ describe("proposal-058.1: Enhanced Product Documentation", () => {
 		});
 
 		it("includes metadata section", () => {
-			const proposal = makeProposal({ assignee: ["dev-1", "dev-2"], builder: "dev-1" });
+			const proposal = makeProposal({
+				assignee: ["dev-1", "dev-2"],
+				builder: "dev-1",
+			});
 			const md = generateFullProposalDetail(proposal);
 			assert.ok(md.includes("**Assignee:** dev-1, dev-2"));
 			assert.ok(md.includes("**Builder:** dev-1"));
@@ -80,7 +84,9 @@ describe("proposal-058.1: Enhanced Product Documentation", () => {
 		});
 
 		it("includes dependencies with links", () => {
-			const proposal = makeProposal({ dependencies: ["proposal-040", "proposal-041"] });
+			const proposal = makeProposal({
+				dependencies: ["proposal-040", "proposal-041"],
+			});
 			const md = generateFullProposalDetail(proposal);
 			assert.ok(md.includes("[proposal-040](./proposal-proposal-040.md)"));
 			assert.ok(md.includes("[proposal-041](./proposal-proposal-041.md)"));
@@ -88,7 +94,13 @@ describe("proposal-058.1: Enhanced Product Documentation", () => {
 
 		it("includes test results section", () => {
 			const proposal = makeProposal({
-				testResults: { total: 26, passing: 26, failing: 0, skipped: 0, duration: "1.2s" },
+				testResults: {
+					total: 26,
+					passing: 26,
+					failing: 0,
+					skipped: 0,
+					duration: "1.2s",
+				},
 			});
 			const md = generateFullProposalDetail(proposal);
 			assert.ok(md.includes("**Total:** 26"));
@@ -174,8 +186,8 @@ describe("proposal-058.1: Enhanced Product Documentation", () => {
 				makeProposal({ status: "Complete" }),
 			];
 			const groups = groupByStatus(proposals);
-			assert.equal(groups["complete"].length, 2);
-			assert.equal(groups["active"].length, 1);
+			assert.equal(groups.complete.length, 2);
+			assert.equal(groups.active.length, 1);
 		});
 
 		it("groupByLabel works", () => {
@@ -184,8 +196,8 @@ describe("proposal-058.1: Enhanced Product Documentation", () => {
 				makeProposal({ labels: ["core"] }),
 			];
 			const groups = groupByLabel(proposals);
-			assert.equal(groups["core"].length, 2);
-			assert.equal(groups["test"].length, 1);
+			assert.equal(groups.core.length, 2);
+			assert.equal(groups.test.length, 1);
 		});
 
 		it("groupByPriority works", () => {
@@ -195,8 +207,8 @@ describe("proposal-058.1: Enhanced Product Documentation", () => {
 				makeProposal({ priority: "low" }),
 			];
 			const groups = groupByPriority(proposals);
-			assert.equal(groups["high"].length, 2);
-			assert.equal(groups["low"].length, 1);
+			assert.equal(groups.high.length, 2);
+			assert.equal(groups.low.length, 1);
 		});
 	});
 
@@ -218,7 +230,9 @@ describe("proposal-058.1: Enhanced Product Documentation", () => {
 
 		it("generates docs config", () => {
 			const config = generateDocsConfig("agentRoadmap.md");
-			assert.ok(config.includes('site_name: "agentRoadmap.md - Documentation"'));
+			assert.ok(
+				config.includes('site_name: "agentRoadmap.md - Documentation"'),
+			);
 			assert.ok(config.includes("material"));
 			assert.ok(config.includes("search"));
 			assert.ok(config.includes("index.md"));
@@ -234,23 +248,30 @@ describe("proposal-058.1: Enhanced Product Documentation", () => {
 			];
 			const refs = buildCrossReferences(proposals);
 
-			assert.ok(refs.get("proposal-001")!.includes("depends-on:proposal-002"));
-			assert.ok(refs.get("proposal-002")!.includes("depended-by:proposal-001"));
+			assert.ok(refs.get("proposal-001")?.includes("depends-on:proposal-002"));
+			assert.ok(refs.get("proposal-002")?.includes("depended-by:proposal-001"));
 		});
 
 		it("builds parent-child links", () => {
 			const proposals = [
 				makeProposal({ id: "proposal-058", parentProposalId: undefined }),
-				makeProposal({ id: "proposal-058.1", parentProposalId: "proposal-058" }),
+				makeProposal({
+					id: "proposal-058.1",
+					parentProposalId: "proposal-058",
+				}),
 			];
 			const refs = buildCrossReferences(proposals);
 
-			assert.ok(refs.get("proposal-058.1")!.includes("child-of:proposal-058"));
+			assert.ok(refs.get("proposal-058.1")?.includes("child-of:proposal-058"));
 		});
 
 		it("generates navigation sidebar", () => {
 			const proposals = [
-				makeProposal({ id: "proposal-001", title: "First", status: "Complete" }),
+				makeProposal({
+					id: "proposal-001",
+					title: "First",
+					status: "Complete",
+				}),
 				makeProposal({ id: "proposal-002", title: "Second", status: "Active" }),
 			];
 			const nav = generateNavigation(proposals);
@@ -262,7 +283,7 @@ describe("proposal-058.1: Enhanced Product Documentation", () => {
 			// Should have status groups
 			const completeSection = nav.find((n) => n.title.includes("Complete"));
 			assert.ok(completeSection);
-			assert.ok(completeSection!.children!.length >= 1);
+			assert.ok((completeSection?.children?.length ?? 0) >= 1);
 		});
 	});
 
@@ -285,13 +306,22 @@ describe("proposal-058.1: Enhanced Product Documentation", () => {
 				saveContentHash("proposal-001", content, cacheDir);
 
 				// Same content should not be changed
-				assert.equal(hasProposalChanged("proposal-001", content, cacheDir), false);
+				assert.equal(
+					hasProposalChanged("proposal-001", content, cacheDir),
+					false,
+				);
 
 				// Different content should be changed
-				assert.equal(hasProposalChanged("proposal-001", "test content v2", cacheDir), true);
+				assert.equal(
+					hasProposalChanged("proposal-001", "test content v2", cacheDir),
+					true,
+				);
 
 				// New proposal should always be changed
-				assert.equal(hasProposalChanged("proposal-999", "new proposal", cacheDir), true);
+				assert.equal(
+					hasProposalChanged("proposal-999", "new proposal", cacheDir),
+					true,
+				);
 			} finally {
 				rmSync(cacheDir, { recursive: true, force: true });
 			}
@@ -303,7 +333,10 @@ describe("proposal-058.1: Enhanced Product Documentation", () => {
 			try {
 				const content = "test content";
 				saveContentHash("proposal-001", content, cacheDir);
-				const hash = readFileSync(`${cacheDir}/proposal-001.hash`, "utf-8").trim();
+				const hash = readFileSync(
+					`${cacheDir}/proposal-001.hash`,
+					"utf-8",
+				).trim();
 				assert.equal(hash, contentHash(content));
 			} finally {
 				rmSync(cacheDir, { recursive: true, force: true });

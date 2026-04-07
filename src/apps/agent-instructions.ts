@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { GitOperations } from "../infra/git/operations.ts";
 import {
 	AGENT_GUIDELINES,
 	CLAUDE_AGENT_CONTENT,
@@ -11,7 +12,6 @@ import {
 	MCP_AGENT_NUDGE,
 	README_GUIDELINES,
 } from "../shared/constants/index.ts";
-import type { GitOperations } from "../infra/git/operations.ts";
 
 export type AgentInstructionFile =
 	| "AGENTS.md"
@@ -25,7 +25,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 async function loadContent(textOrPath: string): Promise<string> {
 	if (textOrPath.includes("\n")) return textOrPath;
 	try {
-		const path = isAbsolute(textOrPath) ? textOrPath : join(__dirname, textOrPath);
+		const path = isAbsolute(textOrPath)
+			? textOrPath
+			: join(__dirname, textOrPath);
 		return await readFile(path, "utf-8");
 	} catch {
 		return textOrPath;
@@ -37,8 +39,12 @@ type GuidelineMarkerKind = "default" | "mcp";
 /**
  * Gets the appropriate markers for a given file type
  */
-function getMarkers(fileName: string, kind: GuidelineMarkerKind = "default"): { start: string; end: string } {
-	const label = kind === "mcp" ? "ROADMAP.MD MCP GUIDELINES" : "ROADMAP.MD GUIDELINES";
+function getMarkers(
+	fileName: string,
+	kind: GuidelineMarkerKind = "default",
+): { start: string; end: string } {
+	const label =
+		kind === "mcp" ? "ROADMAP.MD MCP GUIDELINES" : "ROADMAP.MD GUIDELINES";
 	if (fileName === ".cursorrules") {
 		// .cursorrules doesn't support HTML comments, use markdown-style comments
 		return {
@@ -64,7 +70,11 @@ function hasRoadmapGuidelines(content: string, fileName: string): boolean {
 /**
  * Wraps the Roadmap.md guidelines with appropriate markers
  */
-function wrapWithMarkers(content: string, fileName: string, kind: GuidelineMarkerKind = "default"): string {
+function wrapWithMarkers(
+	content: string,
+	fileName: string,
+	kind: GuidelineMarkerKind = "default",
+): string {
 	const { start, end } = getMarkers(fileName, kind);
 	return `\n${start}\n${content}\n${end}\n`;
 }
@@ -91,7 +101,10 @@ function stripGuidelineSection(
 		}
 
 		let removalStart = startIndex;
-		while (removalStart > 0 && (result[removalStart - 1] === " " || result[removalStart - 1] === "\t")) {
+		while (
+			removalStart > 0 &&
+			(result[removalStart - 1] === " " || result[removalStart - 1] === "\t")
+		) {
 			removalStart -= 1;
 		}
 		if (removalStart > 0 && result[removalStart - 1] === "\n") {
@@ -124,7 +137,12 @@ function stripGuidelineSection(
 export async function addAgentInstructions(
 	projectRoot: string,
 	git?: GitOperations,
-	files: AgentInstructionFile[] = ["AGENTS.md", "CLAUDE.md", "GEMINI.md", ".github/copilot-instructions.md"],
+	files: AgentInstructionFile[] = [
+		"AGENTS.md",
+		"CLAUDE.md",
+		"GEMINI.md",
+		".github/copilot-instructions.md",
+	],
 	autoCommit = false,
 ): Promise<void> {
 	const mapping: Record<AgentInstructionFile, string> = {
@@ -233,7 +251,10 @@ export async function ensureMcpGuidelines(
 	let nextContent: string;
 	if (insertIndex !== null) {
 		const normalizedIndex = Math.max(0, Math.min(insertIndex, existing.length));
-		nextContent = existing.slice(0, normalizedIndex) + nudgeBlock + existing.slice(normalizedIndex);
+		nextContent =
+			existing.slice(0, normalizedIndex) +
+			nudgeBlock +
+			existing.slice(normalizedIndex);
 	} else {
 		nextContent = existing;
 		if (nextContent && !nextContent.endsWith("\n")) {

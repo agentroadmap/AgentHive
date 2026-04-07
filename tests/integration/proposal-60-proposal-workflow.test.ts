@@ -8,29 +8,29 @@
  * AC#5: Only Approved components can be claimed for Active work
  */
 
-import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import {
-	submitProposal,
-	getProposal,
-	getProposalByProposalId,
 	addReview,
 	approveProposal,
-	rejectProposal,
-	getProposalsByStatus,
-	claimApprovedProposal,
 	canClaimProposal,
-	getAllProposals,
+	claimApprovedProposal,
 	generateProposalTemplate,
-	hasReviewType,
+	getAllProposals,
+	getProposal,
+	getProposalByProposalId,
 	getProposalReviews,
 	getProposalSummary,
-	saveProposals,
-	resetProposals,
+	getProposalsByStatus,
+	hasReviewType,
 	type Proposal,
+	rejectProposal,
+	resetProposals,
+	saveProposals,
+	submitProposal,
 } from "../../src/core/collaboration/proposal-workflow.ts";
 
 describe("proposal-60: Proposal Workflow - Mature Potential Through Research & Approval", () => {
@@ -44,7 +44,7 @@ describe("proposal-60: Proposal Workflow - Mature Potential Through Research & A
 	afterEach(() => {
 		try {
 			rmSync(testDir, { recursive: true, force: true });
-		} catch (e) {
+		} catch (_e) {
 			// Ignore cleanup errors
 		}
 	});
@@ -244,8 +244,14 @@ describe("proposal-60: Proposal Workflow - Mature Potential Through Research & A
 				comments: "Good",
 			});
 
-			assert.strictEqual(hasReviewType(proposal.id, "technical-feasibility"), true);
-			assert.strictEqual(hasReviewType(proposal.id, "product-market-fit"), false);
+			assert.strictEqual(
+				hasReviewType(proposal.id, "technical-feasibility"),
+				true,
+			);
+			assert.strictEqual(
+				hasReviewType(proposal.id, "product-market-fit"),
+				false,
+			);
 		});
 
 		it("should not approve with only technical review", () => {
@@ -350,7 +356,10 @@ describe("proposal-60: Proposal Workflow - Mature Potential Through Research & A
 
 			assert.strictEqual(rejected.status, "rejected");
 			assert.strictEqual(rejected.reviews.length, 1);
-			assert.strictEqual(rejected.reviews[0].comments, "Not aligned with roadmap");
+			assert.strictEqual(
+				rejected.reviews[0].comments,
+				"Not aligned with roadmap",
+			);
 		});
 	});
 
@@ -393,14 +402,20 @@ describe("proposal-60: Proposal Workflow - Mature Potential Through Research & A
 				submittedBy: "alice",
 			});
 
-			const result = claimApprovedProposal("proposal-UNAPPROVED", "developer-carol");
+			const result = claimApprovedProposal(
+				"proposal-UNAPPROVED",
+				"developer-carol",
+			);
 
 			assert.strictEqual(result.success, false);
 			assert.ok(result.message.includes("not approved"));
 		});
 
 		it("should reject claiming proposal without proposal", () => {
-			const result = claimApprovedProposal("proposal-NONEXISTENT", "developer-carol");
+			const result = claimApprovedProposal(
+				"proposal-NONEXISTENT",
+				"developer-carol",
+			);
 
 			assert.strictEqual(result.success, false);
 			assert.ok(result.message.includes("No proposal found"));
@@ -423,16 +438,36 @@ describe("proposal-60: Proposal Workflow - Mature Potential Through Research & A
 
 	describe("Querying and persistence", () => {
 		it("should get all proposals", () => {
-			submitProposal("proposal-A", { title: "A", description: "", research: "R", submittedBy: "x" });
-			submitProposal("proposal-B", { title: "B", description: "", research: "R", submittedBy: "y" });
+			submitProposal("proposal-A", {
+				title: "A",
+				description: "",
+				research: "R",
+				submittedBy: "x",
+			});
+			submitProposal("proposal-B", {
+				title: "B",
+				description: "",
+				research: "R",
+				submittedBy: "y",
+			});
 
 			const all = getAllProposals();
 			assert.ok(all.length >= 2);
 		});
 
 		it("should filter proposals by status", () => {
-			const p1 = submitProposal("proposal-STATUS1", { title: "A", description: "", research: "R", submittedBy: "x" });
-			submitProposal("proposal-STATUS2", { title: "B", description: "", research: "R", submittedBy: "y" });
+			const p1 = submitProposal("proposal-STATUS1", {
+				title: "A",
+				description: "",
+				research: "R",
+				submittedBy: "x",
+			});
+			submitProposal("proposal-STATUS2", {
+				title: "B",
+				description: "",
+				research: "R",
+				submittedBy: "y",
+			});
 			approveProposal(p1.id);
 
 			const proposed = getProposalsByStatus("proposed");
@@ -463,7 +498,10 @@ describe("proposal-60: Proposal Workflow - Mature Potential Through Research & A
 			assert.ok(Object.hasOwn(summary, "approved"));
 			assert.ok(Object.hasOwn(summary, "rejected"));
 			assert.ok(Object.hasOwn(summary, "total"));
-			assert.strictEqual(summary.total, summary.proposed + summary.approved + summary.rejected);
+			assert.strictEqual(
+				summary.total,
+				summary.proposed + summary.approved + summary.rejected,
+			);
 		});
 	});
 });

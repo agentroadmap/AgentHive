@@ -89,7 +89,8 @@ export const teamRosterSchema = {
 	properties: {
 		teamId: {
 			type: "string",
-			description: "Team ID to query roster for (optional, returns all if omitted)",
+			description:
+				"Team ID to query roster for (optional, returns all if omitted)",
 		},
 		role: {
 			type: "string",
@@ -190,7 +191,14 @@ export const proposalReviewSchema = {
 			description: "Review comments",
 		},
 	},
-	required: ["proposalId", "reviewerId", "role", "recommendation", "score", "comments"],
+	required: [
+		"proposalId",
+		"reviewerId",
+		"role",
+		"recommendation",
+		"score",
+		"comments",
+	],
 };
 
 export const leaseAcquireSchema = {

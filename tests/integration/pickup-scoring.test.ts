@@ -1,8 +1,7 @@
-import { describe, test } from "node:test";
 import assert from "node:assert/strict";
+import { describe, test } from "node:test";
 import {
 	type AgentProfile,
-	type ScorableProposal,
 	computeCapabilityFit,
 	computeCostEfficiency,
 	computeDifficultyMatch,
@@ -11,6 +10,7 @@ import {
 	computePerformanceBonus,
 	inferDifficulty,
 	optimalAssignment,
+	type ScorableProposal,
 	scoreProposal,
 	scoreProposals,
 } from "../../src/core/orchestration/pickup-scorer.ts";
@@ -18,7 +18,13 @@ import {
 // Test fixtures
 const opusAgent: AgentProfile = {
 	name: "Opus",
-	capabilities: ["typescript", "testing", "code-review", "mcp", "high-reasoning"],
+	capabilities: [
+		"typescript",
+		"testing",
+		"code-review",
+		"mcp",
+		"high-reasoning",
+	],
 	costClass: "high",
 	availability: "active",
 	currentLoad: 0,
@@ -32,7 +38,7 @@ const haikuAgent: AgentProfile = {
 	currentLoad: 0,
 };
 
-const midAgent: AgentProfile = {
+const _midAgent: AgentProfile = {
 	name: "Mid",
 	capabilities: ["typescript", "mcp", "cli"],
 	costClass: "medium",
@@ -45,7 +51,9 @@ const hardProposal: ScorableProposal = {
 	title: "Resource-Aware Pickup Scoring",
 	priority: "high",
 	labels: ["core"],
-	requires: [{ cost_class: "medium", capability: "high-reasoning", difficulty: "hard" }],
+	requires: [
+		{ cost_class: "medium", capability: "high-reasoning", difficulty: "hard" },
+	],
 	acceptanceCriteriaCount: 10,
 	dependencyDepth: 3,
 	downstreamCount: 5,
@@ -76,7 +84,11 @@ const lowPriorityProposal: ScorableProposal = {
 describe("Pickup Scorer", () => {
 	describe("computeCapabilityFit", () => {
 		test("returns 1.0 when no requirements", () => {
-			const proposal: ScorableProposal = { ...easyProposal, requires: [], needs_capabilities: [] };
+			const proposal: ScorableProposal = {
+				...easyProposal,
+				requires: [],
+				needs_capabilities: [],
+			};
 			assert.equal(computeCapabilityFit(haikuAgent, proposal), 1.0);
 		});
 
@@ -109,13 +121,19 @@ describe("Pickup Scorer", () => {
 		test("high-priority proposal prefers high-cost agent", () => {
 			const highScore = computeCostEfficiency(opusAgent, hardProposal);
 			const lowScore = computeCostEfficiency(haikuAgent, hardProposal);
-			assert.ok(highScore > lowScore, "high-cost agent should score higher for high-priority");
+			assert.ok(
+				highScore > lowScore,
+				"high-cost agent should score higher for high-priority",
+			);
 		});
 
 		test("low-priority proposal prefers cost-efficient agent", () => {
 			const highScore = computeCostEfficiency(opusAgent, lowPriorityProposal);
 			const lowScore = computeCostEfficiency(haikuAgent, lowPriorityProposal);
-			assert.ok(lowScore > highScore, "low-cost agent should score higher for low-priority");
+			assert.ok(
+				lowScore > highScore,
+				"low-cost agent should score higher for low-priority",
+			);
 		});
 
 		test("returns 0 when agent below minimum cost requirement", () => {
@@ -140,7 +158,10 @@ describe("Pickup Scorer", () => {
 
 		test("mismatched difficulty reduces score", () => {
 			const score = computeDifficultyMatch(haikuAgent, hardProposal);
-			assert.ok(score < 0.6, "low-cost agent should not match hard difficulty well");
+			assert.ok(
+				score < 0.6,
+				"low-cost agent should not match hard difficulty well",
+			);
 		});
 	});
 
@@ -148,13 +169,24 @@ describe("Pickup Scorer", () => {
 		test("high-priority proposals get higher weight", () => {
 			const highWeight = computeImportanceWeight(hardProposal);
 			const lowWeight = computeImportanceWeight(lowPriorityProposal);
-			assert.ok(highWeight > lowWeight, "high-priority should have higher weight");
+			assert.ok(
+				highWeight > lowWeight,
+				"high-priority should have higher weight",
+			);
 		});
 
 		test("proposals with more dependents get higher weight", () => {
-			const proposal1: ScorableProposal = { ...easyProposal, downstreamCount: 0 };
-			const proposal2: ScorableProposal = { ...easyProposal, downstreamCount: 10 };
-			assert.ok(computeImportanceWeight(proposal2) > computeImportanceWeight(proposal1));
+			const proposal1: ScorableProposal = {
+				...easyProposal,
+				downstreamCount: 0,
+			};
+			const proposal2: ScorableProposal = {
+				...easyProposal,
+				downstreamCount: 10,
+			};
+			assert.ok(
+				computeImportanceWeight(proposal2) > computeImportanceWeight(proposal1),
+			);
 		});
 	});
 
@@ -172,7 +204,10 @@ describe("Pickup Scorer", () => {
 
 	describe("computePerformanceBonus", () => {
 		test("no history returns 1.0", () => {
-			const agent: AgentProfile = { ...haikuAgent, completionHistory: undefined };
+			const agent: AgentProfile = {
+				...haikuAgent,
+				completionHistory: undefined,
+			};
 			assert.equal(computePerformanceBonus(agent, easyProposal), 1.0);
 		});
 
@@ -191,8 +226,12 @@ describe("Pickup Scorer", () => {
 		test("returns valid breakdown with all axes", () => {
 			const breakdown = scoreProposal(opusAgent, hardProposal);
 			assert.ok(breakdown.capability_fit >= 0 && breakdown.capability_fit <= 1);
-			assert.ok(breakdown.cost_efficiency >= 0 && breakdown.cost_efficiency <= 1);
-			assert.ok(breakdown.difficulty_match >= 0 && breakdown.difficulty_match <= 1);
+			assert.ok(
+				breakdown.cost_efficiency >= 0 && breakdown.cost_efficiency <= 1,
+			);
+			assert.ok(
+				breakdown.difficulty_match >= 0 && breakdown.difficulty_match <= 1,
+			);
 			assert.ok(breakdown.importance_weight > 0);
 			assert.ok(breakdown.load_balance > 0);
 			assert.ok(breakdown.total > 0);
@@ -209,11 +248,18 @@ describe("Pickup Scorer", () => {
 
 	describe("scoreProposals", () => {
 		test("returns sorted results by score", () => {
-			const results = scoreProposals(opusAgent, [easyProposal, hardProposal, lowPriorityProposal]);
+			const results = scoreProposals(opusAgent, [
+				easyProposal,
+				hardProposal,
+				lowPriorityProposal,
+			]);
 			assert.equal(results.length, 3);
 			// Scores should be descending
 			for (let i = 1; i < results.length; i++) {
-				assert.ok(results[i - 1]!.score.total >= results[i]!.score.total, "should be sorted descending");
+				assert.ok(
+					results[i - 1]?.score.total >= results[i]?.score.total,
+					"should be sorted descending",
+				);
 			}
 		});
 	});
@@ -226,16 +272,23 @@ describe("Pickup Scorer", () => {
 
 			assert.equal(assignments.size, 2);
 			const assignedAgents = [...assignments.values()].map((a) => a.agent);
-			assert.equal(new Set(assignedAgents).size, 2, "each agent should get one proposal");
+			assert.equal(
+				new Set(assignedAgents).size,
+				2,
+				"each agent should get one proposal",
+			);
 		});
 
 		test("skips offline agents", () => {
-			const agents = [{ ...opusAgent, availability: "offline" as const }, haikuAgent];
+			const agents = [
+				{ ...opusAgent, availability: "offline" as const },
+				haikuAgent,
+			];
 			const proposals = [hardProposal];
 			const assignments = optimalAssignment(agents, proposals);
 
 			assert.equal(assignments.size, 1);
-			assert.equal([...assignments.values()][0]!.agent, "Haiku");
+			assert.equal([...assignments.values()][0]?.agent, "Haiku");
 		});
 
 		test("high-difficulty proposal goes to capable agent", () => {
@@ -244,7 +297,7 @@ describe("Pickup Scorer", () => {
 			const assignments = optimalAssignment(agents, proposals);
 
 			// Opus should get the hard proposal
-			assert.equal([...assignments.values()][0]!.agent, "Opus");
+			assert.equal([...assignments.values()][0]?.agent, "Opus");
 		});
 
 		test("easy proposal goes to best overall match", () => {
@@ -253,9 +306,15 @@ describe("Pickup Scorer", () => {
 			const assignments = optimalAssignment(agents, proposals);
 
 			// Should assign to best scoring agent (both fit, but Opus has higher overall score)
-			assert.ok(assignments.has("proposal-32"), "should assign the easy proposal");
+			assert.ok(
+				assignments.has("proposal-32"),
+				"should assign the easy proposal",
+			);
 			const assignment = [...assignments.values()][0]!;
-			assert.ok(["Opus", "Haiku"].includes(assignment.agent), "should assign to a capable agent");
+			assert.ok(
+				["Opus", "Haiku"].includes(assignment.agent),
+				"should assign to a capable agent",
+			);
 			assert.ok(assignment.score.total > 0, "should have positive score");
 		});
 	});
@@ -270,8 +329,16 @@ describe("Pickup Scorer", () => {
 		});
 
 		test("infers from AC count and depth", () => {
-			const easy: ScorableProposal = { ...easyProposal, acceptanceCriteriaCount: 1, dependencyDepth: 0 };
-			const hard: ScorableProposal = { ...easyProposal, acceptanceCriteriaCount: 10, dependencyDepth: 5 };
+			const easy: ScorableProposal = {
+				...easyProposal,
+				acceptanceCriteriaCount: 1,
+				dependencyDepth: 0,
+			};
+			const hard: ScorableProposal = {
+				...easyProposal,
+				acceptanceCriteriaCount: 10,
+				dependencyDepth: 5,
+			};
 
 			assert.equal(inferDifficulty(easy), "easy");
 			assert.equal(inferDifficulty(hard), "hard");

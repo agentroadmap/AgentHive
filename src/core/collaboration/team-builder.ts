@@ -14,14 +14,31 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { readFile, writeFile, access, mkdir } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
-export type TeamStatus = "forming" | "active" | "paused" | "completed" | "dissolved";
-export type AgentTeamStatus = "invited" | "accepted" | "declined" | "active" | "removed";
-export type TeamRole = "lead" | "developer" | "reviewer" | "tester" | "architect" | "coordinator" | string;
+export type TeamStatus =
+	| "forming"
+	| "active"
+	| "paused"
+	| "completed"
+	| "dissolved";
+export type AgentTeamStatus =
+	| "invited"
+	| "accepted"
+	| "declined"
+	| "active"
+	| "removed";
+export type TeamRole =
+	| "lead"
+	| "developer"
+	| "reviewer"
+	| "tester"
+	| "architect"
+	| "coordinator"
+	| string;
 
 export interface AgentProfile {
 	agentId: string;
@@ -172,7 +189,8 @@ export class DynamicTeamBuilder {
 	 */
 	getAvailableAgents(): AgentProfile[] {
 		return Array.from(this.agents.values()).filter(
-			(agent) => agent.availability === "available" && agent.currentWorkload < 80,
+			(agent) =>
+				agent.availability === "available" && agent.currentWorkload < 80,
 		);
 	}
 
@@ -188,7 +206,11 @@ export class DynamicTeamBuilder {
 
 		// For each requirement, find best matching agents
 		for (const req of requirements.requirements) {
-			const matches = this.findAgentsForRequirement(req, availableAgents, usedAgentIds);
+			const matches = this.findAgentsForRequirement(
+				req,
+				availableAgents,
+				usedAgentIds,
+			);
 			for (const match of matches) {
 				selectedAgents.push(match);
 				usedAgentIds.add(match.agentId);
@@ -198,14 +220,17 @@ export class DynamicTeamBuilder {
 		// Calculate overall skill coverage
 		const skillCoverage = this.calculateSkillCoverage(
 			requirements.skillsCoverage,
-			selectedAgents.map((a) => {
+			selectedAgents.flatMap((a) => {
 				const agent = this.agents.get(a.agentId);
 				return agent?.capabilities || [];
-			}).flat(),
+			}),
 		);
 
 		// Calculate overall score
-		const overallScore = this.calculateOverallScore(selectedAgents, skillCoverage);
+		const overallScore = this.calculateOverallScore(
+			selectedAgents,
+			skillCoverage,
+		);
 
 		return {
 			suggestionId: `SUGG-${randomUUID().slice(0, 8)}`,
@@ -213,7 +238,8 @@ export class DynamicTeamBuilder {
 			agents: selectedAgents,
 			overallScore,
 			skillCoverage,
-			estimatedFormTime: selectedAgents.length > 0 ? "1-2 hours" : "Unable to form",
+			estimatedFormTime:
+				selectedAgents.length > 0 ? "1-2 hours" : "Unable to form",
 		};
 	}
 
@@ -238,7 +264,8 @@ export class DynamicTeamBuilder {
 					skillMatch: skillMatch * 100,
 					roleFit: req.role,
 					availabilityScore,
-					combinedScore: skillMatch * 0.5 + roleFit * 0.3 + availabilityScore * 0.2,
+					combinedScore:
+						skillMatch * 0.5 + roleFit * 0.3 + availabilityScore * 0.2,
 				};
 			})
 			.sort((a, b) => b.combinedScore - a.combinedScore)
@@ -250,13 +277,17 @@ export class DynamicTeamBuilder {
 	/**
 	 * Calculate how well an agent's skills match required skills.
 	 */
-	private calculateSkillMatch(agent: AgentProfile, requiredSkills: string[]): number {
+	private calculateSkillMatch(
+		agent: AgentProfile,
+		requiredSkills: string[],
+	): number {
 		if (requiredSkills.length === 0) return 1;
 
 		const matched = requiredSkills.filter((skill) =>
-			agent.capabilities.some((cap) =>
-				cap.toLowerCase().includes(skill.toLowerCase()) ||
-				skill.toLowerCase().includes(cap.toLowerCase()),
+			agent.capabilities.some(
+				(cap) =>
+					cap.toLowerCase().includes(skill.toLowerCase()) ||
+					skill.toLowerCase().includes(cap.toLowerCase()),
 			),
 		);
 
@@ -287,7 +318,9 @@ export class DynamicTeamBuilder {
 		requiredSkills: string[],
 		agentSkills: string[],
 	): SkillCoverage {
-		const normalizedRequired = new Set(requiredSkills.map((s) => s.toLowerCase()));
+		const normalizedRequired = new Set(
+			requiredSkills.map((s) => s.toLowerCase()),
+		);
 		const normalizedCovered = new Set(
 			agentSkills.filter((s) => normalizedRequired.has(s.toLowerCase())),
 		);
@@ -296,9 +329,10 @@ export class DynamicTeamBuilder {
 			(s) => !normalizedCovered.has(s.toLowerCase()),
 		);
 
-		const coveragePercent = normalizedRequired.size > 0
-			? Math.round((normalizedCovered.size / normalizedRequired.size) * 100)
-			: 100;
+		const coveragePercent =
+			normalizedRequired.size > 0
+				? Math.round((normalizedCovered.size / normalizedRequired.size) * 100)
+				: 100;
 
 		return {
 			requiredSkills: Array.from(normalizedRequired),
@@ -317,13 +351,15 @@ export class DynamicTeamBuilder {
 	): number {
 		if (agents.length === 0) return 0;
 
-		const avgSkillMatch = agents.reduce((sum, a) => sum + a.skillMatch, 0) / agents.length;
-		const avgAvailability = agents.reduce((sum, a) => sum + a.availabilityScore, 0) / agents.length;
+		const avgSkillMatch =
+			agents.reduce((sum, a) => sum + a.skillMatch, 0) / agents.length;
+		const avgAvailability =
+			agents.reduce((sum, a) => sum + a.availabilityScore, 0) / agents.length;
 
 		return Math.round(
 			avgSkillMatch * 0.4 +
-			coverage.coveragePercent * 0.4 +
-			avgAvailability * 0.2,
+				coverage.coveragePercent * 0.4 +
+				avgAvailability * 0.2,
 		);
 	}
 
@@ -448,7 +484,11 @@ export class DynamicTeamBuilder {
 	/**
 	 * Agent declines team invitation.
 	 */
-	declineInvitation(teamId: string, agentId: string, reason?: string): TeamMember {
+	declineInvitation(
+		teamId: string,
+		agentId: string,
+		_reason?: string,
+	): TeamMember {
 		const team = this.teams.get(teamId);
 		if (!team) {
 			throw new Error(`Team not found: ${teamId}`);
@@ -739,9 +779,7 @@ export function calculateSimpleSkillMatch(
 	if (requiredSkills.length === 0) return 1;
 
 	const matched = requiredSkills.filter((req) =>
-		agentSkills.some((skill) =>
-			skill.toLowerCase() === req.toLowerCase(),
-		),
+		agentSkills.some((skill) => skill.toLowerCase() === req.toLowerCase()),
 	);
 
 	return matched.length / requiredSkills.length;

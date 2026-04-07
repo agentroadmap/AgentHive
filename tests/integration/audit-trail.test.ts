@@ -8,17 +8,17 @@
  * AC#5: Logs retained for configurable period (default 90 days)
  */
 
-import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, afterEach, before, beforeEach, describe, it } from "node:test";
+import type { AuditEvent } from "../../src/core/infrastructure/audit-trail.ts";
 import {
 	AuditTrail,
 	formatAuditEvents,
 	resetAuditTrail,
-} from '../../src/core/infrastructure/audit-trail.ts';
-import type { AuditEvent } from '../../src/core/infrastructure/audit-trail.ts';
+} from "../../src/core/infrastructure/audit-trail.ts";
 
 describe("AuditTrail (proposal-53)", () => {
 	let tempDir: string;
@@ -135,14 +135,27 @@ describe("AuditTrail (proposal-53)", () => {
 		it("should query events and support filtering", async () => {
 			// Use fresh audit instance for isolation
 			const testAudit = new AuditTrail({
-				auditDir: join(tempDir, `audit-query-test-${Date.now()}-${Math.random()}`),
+				auditDir: join(
+					tempDir,
+					`audit-query-test-${Date.now()}-${Math.random()}`,
+				),
 				retentionDays: 1,
 			});
 			await testAudit.initialize();
 
 			// Add test events
-			await testAudit.logProposalTransition("agent-A", "proposal-1", "Potential", "Active");
-			await testAudit.logProposalTransition("agent-B", "proposal-2", "Active", "Review");
+			await testAudit.logProposalTransition(
+				"agent-A",
+				"proposal-1",
+				"Potential",
+				"Active",
+			);
+			await testAudit.logProposalTransition(
+				"agent-B",
+				"proposal-2",
+				"Active",
+				"Review",
+			);
 			await testAudit.logAuthSuccess("agent-A", "token");
 			await testAudit.logAuthFailure("agent-B", "invalid_token");
 			await testAudit.logRateLimitViolation("agent-A", "/api/test", 10, 15);
@@ -156,28 +169,49 @@ describe("AuditTrail (proposal-53)", () => {
 
 		it("should filter by event type", async () => {
 			const testAudit = new AuditTrail({
-				auditDir: join(tempDir, `audit-filter-type-${Date.now()}-${Math.random()}`),
+				auditDir: join(
+					tempDir,
+					`audit-filter-type-${Date.now()}-${Math.random()}`,
+				),
 				retentionDays: 1,
 			});
 			await testAudit.initialize();
 
-			await testAudit.logProposalTransition("agent-A", "proposal-1", "Potential", "Active");
+			await testAudit.logProposalTransition(
+				"agent-A",
+				"proposal-1",
+				"Potential",
+				"Active",
+			);
 			await testAudit.logAuthSuccess("agent-A", "token");
 
-			const result = await testAudit.query({ eventType: "proposal_transition" });
-			assert.ok(result.total >= 1, "Should have at least one proposal_transition");
+			const result = await testAudit.query({
+				eventType: "proposal_transition",
+			});
+			assert.ok(
+				result.total >= 1,
+				"Should have at least one proposal_transition",
+			);
 			assert.ok(result.events.every((e) => e.type === "proposal_transition"));
 			await testAudit.shutdown();
 		});
 
 		it("should filter by agent ID", async () => {
 			const testAudit = new AuditTrail({
-				auditDir: join(tempDir, `audit-filter-agent-${Date.now()}-${Math.random()}`),
+				auditDir: join(
+					tempDir,
+					`audit-filter-agent-${Date.now()}-${Math.random()}`,
+				),
 				retentionDays: 1,
 			});
 			await testAudit.initialize();
 
-			await testAudit.logProposalTransition("agent-A", "proposal-1", "Potential", "Active");
+			await testAudit.logProposalTransition(
+				"agent-A",
+				"proposal-1",
+				"Potential",
+				"Active",
+			);
 			await testAudit.logAuthSuccess("agent-A", "token");
 			await testAudit.logAuthFailure("agent-B", "invalid_token");
 
@@ -189,7 +223,10 @@ describe("AuditTrail (proposal-53)", () => {
 
 		it("should filter by success status", async () => {
 			const testAudit = new AuditTrail({
-				auditDir: join(tempDir, `audit-filter-success-${Date.now()}-${Math.random()}`),
+				auditDir: join(
+					tempDir,
+					`audit-filter-success-${Date.now()}-${Math.random()}`,
+				),
 				retentionDays: 1,
 			});
 			await testAudit.initialize();
@@ -204,14 +241,22 @@ describe("AuditTrail (proposal-53)", () => {
 
 		it("should support pagination", async () => {
 			const testAudit = new AuditTrail({
-				auditDir: join(tempDir, `audit-pagination-${Date.now()}-${Math.random()}`),
+				auditDir: join(
+					tempDir,
+					`audit-pagination-${Date.now()}-${Math.random()}`,
+				),
 				retentionDays: 1,
 			});
 			await testAudit.initialize();
 
 			// Add 5 events
 			for (let i = 0; i < 5; i++) {
-				await testAudit.logProposalTransition("agent-A", `proposal-${i}`, "Potential", "Active");
+				await testAudit.logProposalTransition(
+					"agent-A",
+					`proposal-${i}`,
+					"Potential",
+					"Active",
+				);
 			}
 
 			const page1 = await testAudit.query({ limit: 2, offset: 0 });
@@ -229,15 +274,28 @@ describe("AuditTrail (proposal-53)", () => {
 			});
 			await testAudit.initialize();
 
-			await testAudit.logProposalTransition("agent-A", "proposal-1", "Potential", "Active");
+			await testAudit.logProposalTransition(
+				"agent-A",
+				"proposal-1",
+				"Potential",
+				"Active",
+			);
 			await new Promise((r) => setTimeout(r, 5)); // Small delay
-			await testAudit.logProposalTransition("agent-A", "proposal-2", "Potential", "Active");
+			await testAudit.logProposalTransition(
+				"agent-A",
+				"proposal-2",
+				"Potential",
+				"Active",
+			);
 
 			const result = await testAudit.query({ limit: 2 });
 			if (result.events.length >= 2) {
 				const timestamps = result.events.map((e) => e.timestamp);
 				// First event should be newer or same
-				assert.ok(timestamps[0] >= timestamps[1], "Events should be sorted newest first");
+				assert.ok(
+					timestamps[0] >= timestamps[1],
+					"Events should be sorted newest first",
+				);
 			}
 			await testAudit.shutdown();
 		});
@@ -258,7 +316,12 @@ describe("AuditTrail (proposal-53)", () => {
 			});
 			await testAudit.initialize();
 
-			await testAudit.logProposalTransition("agent-001", "proposal-1", "Potential", "Active");
+			await testAudit.logProposalTransition(
+				"agent-001",
+				"proposal-1",
+				"Potential",
+				"Active",
+			);
 
 			const stats = await testAudit.getStats();
 			assert.ok(stats.totalEvents >= 1, "Should have at least 1 event");
@@ -270,7 +333,12 @@ describe("AuditTrail (proposal-53)", () => {
 		});
 
 		it("should report log file count in stats", async () => {
-			await audit.logProposalTransition("agent-001", "proposal-1", "Potential", "Active");
+			await audit.logProposalTransition(
+				"agent-001",
+				"proposal-1",
+				"Potential",
+				"Active",
+			);
 			await audit.flush();
 
 			const stats = await audit.getStats();
@@ -314,7 +382,10 @@ describe("AuditTrail (proposal-53)", () => {
 
 		it("should format as text", () => {
 			const output = formatAuditEvents(testEvents, "text");
-			assert.ok(output.includes("proposal_transition"), "Should include event type");
+			assert.ok(
+				output.includes("proposal_transition"),
+				"Should include event type",
+			);
 			assert.ok(output.includes("2026-03-24"), "Should include timestamp");
 		});
 	});

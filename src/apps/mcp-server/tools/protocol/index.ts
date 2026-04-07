@@ -12,11 +12,11 @@ import { createSimpleValidatedTool } from "../../validation/tool-wrapper.ts";
 import { ProtocolHandlers } from "./handlers.ts";
 import {
 	protocolMentionSearchSchema,
+	protocolNotificationsSchema,
+	protocolSendWithMentionSchema,
 	protocolThreadGetSchema,
 	protocolThreadListSchema,
 	protocolThreadReplySchema,
-	protocolSendWithMentionSchema,
-	protocolNotificationsSchema,
 } from "./schemas.ts";
 
 export function registerProtocolTools(server: McpServer): void {
@@ -70,7 +70,8 @@ export function registerProtocolTools(server: McpServer): void {
 	const sendWithMentionTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "protocol_send_mention",
-			description: "Send a message with agent mentions (triggers notifications)",
+			description:
+				"Send a message with agent mentions (triggers notifications)",
 			inputSchema: protocolSendWithMentionSchema,
 		},
 		protocolSendWithMentionSchema,

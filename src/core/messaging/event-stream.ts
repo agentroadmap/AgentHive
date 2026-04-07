@@ -73,65 +73,172 @@ export function getRecentEvents(limit = 50): StreamEvent[] {
 }
 
 export function emitProposalAccepted(proposalId: string, title: string): void {
-	insertEvent("proposal_accepted", proposalId, undefined, `${proposalId} is accepted`, { title });
+	insertEvent(
+		"proposal_accepted",
+		proposalId,
+		undefined,
+		`${proposalId} is accepted`,
+		{ title },
+	);
 }
 
-export function emitProposalClaimed(proposalId: string, agentId: string, agentName: string): void {
-	insertEvent("proposal_claimed", proposalId, agentId, `${proposalId} claimed by ${agentName}`, { agentName });
+export function emitProposalClaimed(
+	proposalId: string,
+	agentId: string,
+	agentName: string,
+): void {
+	insertEvent(
+		"proposal_claimed",
+		proposalId,
+		agentId,
+		`${proposalId} claimed by ${agentName}`,
+		{ agentName },
+	);
 }
 
 export function emitCodingStarted(proposalId: string, agentId: string): void {
-	insertEvent("proposal_coding", proposalId, agentId, `${proposalId} coding started`);
+	insertEvent(
+		"proposal_coding",
+		proposalId,
+		agentId,
+		`${proposalId} coding started`,
+	);
 }
 
-export function emitReviewRequested(proposalId: string, fromAgent: string, toAgent: string): void {
-	insertEvent("review_requested", proposalId, fromAgent, `${proposalId} review requested by ${fromAgent}`, { reviewer: toAgent });
+export function emitReviewRequested(
+	proposalId: string,
+	fromAgent: string,
+	toAgent: string,
+): void {
+	insertEvent(
+		"review_requested",
+		proposalId,
+		fromAgent,
+		`${proposalId} review requested by ${fromAgent}`,
+		{ reviewer: toAgent },
+	);
 }
 
-export function emitReviewing(proposalId: string, reviewerId: string, reviewerName: string): void {
-	insertEvent("proposal_reviewing", proposalId, reviewerId, `${proposalId} being reviewed by ${reviewerName}`, { reviewerName });
+export function emitReviewing(
+	proposalId: string,
+	reviewerId: string,
+	reviewerName: string,
+): void {
+	insertEvent(
+		"proposal_reviewing",
+		proposalId,
+		reviewerId,
+		`${proposalId} being reviewed by ${reviewerName}`,
+		{ reviewerName },
+	);
 }
 
 export function emitReviewPassed(proposalId: string, reviewerId: string): void {
-	insertEvent("review_passed", proposalId, reviewerId, `${proposalId} review passed`);
+	insertEvent(
+		"review_passed",
+		proposalId,
+		reviewerId,
+		`${proposalId} review passed`,
+	);
 }
 
-export function emitReviewFailed(proposalId: string, reviewerId: string, reason: string): void {
-	insertEvent("review_failed", proposalId, reviewerId, `${proposalId} review failed: ${reason}`, { reason });
+export function emitReviewFailed(
+	proposalId: string,
+	reviewerId: string,
+	reason: string,
+): void {
+	insertEvent(
+		"review_failed",
+		proposalId,
+		reviewerId,
+		`${proposalId} review failed: ${reason}`,
+		{ reason },
+	);
 }
 
-export function emitProposalComplete(proposalId: string, agentId: string): void {
-	insertEvent("proposal_complete", proposalId, agentId, `${proposalId} is complete`);
+export function emitProposalComplete(
+	proposalId: string,
+	agentId: string,
+): void {
+	insertEvent(
+		"proposal_complete",
+		proposalId,
+		agentId,
+		`${proposalId} is complete`,
+	);
 }
 
 export function emitMergedToMain(proposalId: string): void {
-	insertEvent("proposal_merged", proposalId, undefined, `${proposalId} merged to local main`);
+	insertEvent(
+		"proposal_merged",
+		proposalId,
+		undefined,
+		`${proposalId} merged to local main`,
+	);
 }
 
 export function emitPushedToGitLab(proposalId: string): void {
-	insertEvent("proposal_pushed", proposalId, undefined, `${proposalId} pushed to remote`);
+	insertEvent(
+		"proposal_pushed",
+		proposalId,
+		undefined,
+		`${proposalId} pushed to remote`,
+	);
 }
 
 export function emitAgentOnline(agentId: string, agentName: string): void {
-	insertEvent("agent_online", undefined, agentId, `${agentName} is online`, { agentName });
+	insertEvent("agent_online", undefined, agentId, `${agentName} is online`, {
+		agentName,
+	});
 }
 
 export function emitAgentOffline(agentId: string, agentName: string): void {
-	insertEvent("agent_offline", undefined, agentId, `${agentName} went offline`, { agentName });
+	insertEvent(
+		"agent_offline",
+		undefined,
+		agentId,
+		`${agentName} went offline`,
+		{ agentName },
+	);
 }
 
-export function emitHandoff(proposalId: string, fromPhase: string, toPhase: string, agentId: string): void {
-	insertEvent("handoff", proposalId, agentId, `${proposalId} handed off: ${fromPhase} → ${toPhase}`, { fromPhase, toPhase });
+export function emitHandoff(
+	proposalId: string,
+	fromPhase: string,
+	toPhase: string,
+	agentId: string,
+): void {
+	insertEvent(
+		"handoff",
+		proposalId,
+		agentId,
+		`${proposalId} handed off: ${fromPhase} → ${toPhase}`,
+		{ fromPhase, toPhase },
+	);
 }
 
-export function emitMessage(fromAgent: string, channel: string, preview: string): void {
+export function emitMessage(
+	fromAgent: string,
+	channel: string,
+	preview: string,
+): void {
 	insertEvent("message", undefined, fromAgent, preview, { channel });
 }
 
-export function emitCubicPhaseChange(cubicId: string, fromPhase: string, toPhase: string): void {
-	insertEvent("cubic_phase_change", undefined, undefined, `Cubic ${cubicId}: ${fromPhase} → ${toPhase}`, {
-		cubicId,
-		fromPhase,
-		toPhase,
-	});
+export function emitCubicPhaseChange(
+	cubicId: string,
+	fromPhase: string,
+	toPhase: string,
+): void {
+	insertEvent(
+		"cubic_phase_change",
+		undefined,
+		undefined,
+		`Cubic ${cubicId}: ${fromPhase} → ${toPhase}`,
+		{
+			cubicId,
+			fromPhase,
+			toPhase,
+		},
+	);
 }

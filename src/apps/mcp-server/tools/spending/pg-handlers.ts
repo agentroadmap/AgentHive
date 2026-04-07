@@ -4,34 +4,39 @@
  * Handles budget guardrails and LLM model metadata.
  * All handler methods catch errors and return MCP text responses instead of throwing.
  */
-import type { McpServer } from "../../server.ts";
-import type { CallToolResult } from "../../types.ts";
+
 import { query } from "../../../../postgres/pool.ts";
 import { resolveProposalId } from "../../../../postgres/proposal-storage-v2.ts";
+import type { McpServer } from "../../server.ts";
+import type { CallToolResult } from "../../types.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
-  return { content: [{ type: "text", text: `⚠️ ${msg}: ${err instanceof Error ? err.message : String(err)}` }] };
+	return {
+		content: [
+			{
+				type: "text",
+				text: `⚠️ ${msg}: ${err instanceof Error ? err.message : String(err)}`,
+			},
+		],
+	};
 }
 
 export class PgSpendingHandlers {
-  private core: McpServer;
-  private projectRoot: string;
+	constructor(
+		private readonly core: McpServer,
+		private readonly projectRoot: string,
+	) {}
 
-  constructor(core: McpServer, projectRoot: string) {
-    this.core = core;
-    this.projectRoot = projectRoot;
-  }
-
-  async setSpendingCap(args: {
-    agent_identity: string;
-    daily_limit_usd: string;
-    monthly_limit_usd?: string;
-    is_frozen?: boolean;
-    frozen_reason?: string;
-  }): Promise<CallToolResult> {
-    try {
-      const { rows } = await query(
-        `INSERT INTO spending_caps (agent_identity, daily_limit_usd, monthly_limit_usd, is_frozen, frozen_reason)
+	async setSpendingCap(args: {
+		agent_identity: string;
+		daily_limit_usd: string;
+		monthly_limit_usd?: string;
+		is_frozen?: boolean;
+		frozen_reason?: string;
+	}): Promise<CallToolResult> {
+		try {
+			const { rows } = await query(
+				`INSERT INTO spending_caps (agent_identity, daily_limit_usd, monthly_limit_usd, is_frozen, frozen_reason)
          VALUES ($1, $2, $3, COALESCE($4, false), $5)
          ON CONFLICT ON CONSTRAINT spending_caps_pkey
          DO UPDATE SET
@@ -44,147 +49,186 @@ export class PgSpendingHandlers {
            END,
            updated_at = NOW()
          RETURNING *`,
-        [
-          args.agent_identity,
-          parseFloat(args.daily_limit_usd),
-          args.monthly_limit_usd ? parseFloat(args.monthly_limit_usd) : null,
-          args.is_frozen ?? null,
-          args.frozen_reason ?? null,
-        ],
-      );
-      return {
-        content: [{
-          type: "text",
-          text: `Cap set for ${rows[0].agent_identity}: $${rows[0].daily_limit_usd ?? "∞"}/day, $${rows[0].monthly_limit_usd ?? "∞"}/month${rows[0].is_frozen ? " (frozen)" : ""}`,
-        }],
-      };
-    } catch (err) {
-      if (err instanceof Error && err.message.includes('record "new" has no field "id"')) {
-        return {
-          content: [{
-            type: "text",
-            text: "⚠️ Failed to set spending cap: roadmap.audit trigger on spending_caps expects an id column, so cap rows cannot be written until the database trigger is fixed.",
-          }],
-        };
-      }
-      return errorResult("Failed to set spending cap", err);
-    }
-  }
+				[
+					args.agent_identity,
+					parseFloat(args.daily_limit_usd),
+					args.monthly_limit_usd ? parseFloat(args.monthly_limit_usd) : null,
+					args.is_frozen ?? null,
+					args.frozen_reason ?? null,
+				],
+			);
+			return {
+				content: [
+					{
+						type: "text",
+						text: `Cap set for ${rows[0].agent_identity}: $${rows[0].daily_limit_usd ?? "∞"}/day, $${rows[0].monthly_limit_usd ?? "∞"}/month${rows[0].is_frozen ? " (frozen)" : ""}`,
+					},
+				],
+			};
+		} catch (err) {
+			if (
+				err instanceof Error &&
+				err.message.includes('record "new" has no field "id"')
+			) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: "⚠️ Failed to set spending cap: roadmap.audit trigger on spending_caps expects an id column, so cap rows cannot be written until the database trigger is fixed.",
+						},
+					],
+				};
+			}
+			return errorResult("Failed to set spending cap", err);
+		}
+	}
 
-  async logSpending(args: {
-    agent_identity: string;
-    proposal_id?: string;
-    cost_usd: string;
-    model_name?: string;
-    token_count?: string;
-    run_id?: string;
-    budget_id?: string;
-  }): Promise<CallToolResult> {
-    try {
-      const { rows: capRows } = await query<{ is_frozen: boolean; frozen_reason: string | null }>(
-        `SELECT is_frozen, frozen_reason
+	async logSpending(args: {
+		agent_identity: string;
+		proposal_id?: string;
+		cost_usd: string;
+		model_name?: string;
+		token_count?: string;
+		run_id?: string;
+		budget_id?: string;
+	}): Promise<CallToolResult> {
+		try {
+			const { rows: capRows } = await query<{
+				is_frozen: boolean;
+				frozen_reason: string | null;
+			}>(
+				`SELECT is_frozen, frozen_reason
          FROM spending_caps
          WHERE agent_identity = $1`,
-        [args.agent_identity],
-      );
+				[args.agent_identity],
+			);
 
-      if (capRows[0]?.is_frozen) {
-        return {
-          content: [{
-            type: "text",
-            text: `⚠️ ${args.agent_identity} is frozen${capRows[0].frozen_reason ? `: ${capRows[0].frozen_reason}` : ""}`,
-          }],
-        };
-      }
+			if (capRows[0]?.is_frozen) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `⚠️ ${args.agent_identity} is frozen${capRows[0].frozen_reason ? `: ${capRows[0].frozen_reason}` : ""}`,
+						},
+					],
+				};
+			}
 
-      const proposalId = args.proposal_id ? await resolveProposalId(args.proposal_id) : null;
-      if (args.proposal_id && proposalId === null) {
-        return { content: [{ type: "text", text: `Proposal ${args.proposal_id} not found.` }] };
-      }
+			const proposalId = args.proposal_id
+				? await resolveProposalId(args.proposal_id)
+				: null;
+			if (args.proposal_id && proposalId === null) {
+				return {
+					content: [
+						{ type: "text", text: `Proposal ${args.proposal_id} not found.` },
+					],
+				};
+			}
 
-      if (args.run_id) {
-        const { rows: runRows } = await query<{ run_id: string }>(
-          `SELECT run_id
+			if (args.run_id) {
+				const { rows: runRows } = await query<{ run_id: string }>(
+					`SELECT run_id
            FROM run_log
            WHERE run_id = $1
            LIMIT 1`,
-          [args.run_id],
-        );
-        if (!runRows[0]) {
-          return { content: [{ type: "text", text: `Run ${args.run_id} not found. Insert into run_log before recording spend.` }] };
-        }
-      }
+					[args.run_id],
+				);
+				if (!runRows[0]) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Run ${args.run_id} not found. Insert into run_log before recording spend.`,
+							},
+						],
+					};
+				}
+			}
 
-      await query(
-        `INSERT INTO spending_log (agent_identity, proposal_id, model_name, cost_usd, token_count, run_id, budget_id)
+			await query(
+				`INSERT INTO spending_log (agent_identity, proposal_id, model_name, cost_usd, token_count, run_id, budget_id)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [
-          args.agent_identity,
-          proposalId,
-          args.model_name ?? null,
-          parseFloat(args.cost_usd),
-          args.token_count ? parseInt(args.token_count, 10) : null,
-          args.run_id ?? null,
-          args.budget_id ? parseInt(args.budget_id, 10) : null,
-        ],
-      );
+				[
+					args.agent_identity,
+					proposalId,
+					args.model_name ?? null,
+					parseFloat(args.cost_usd),
+					args.token_count ? parseInt(args.token_count, 10) : null,
+					args.run_id ?? null,
+					args.budget_id ? parseInt(args.budget_id, 10) : null,
+				],
+			);
 
-      const snapshot = await this.getSpendingSnapshot(args.agent_identity);
-      if (!snapshot) {
-        return { content: [{ type: "text", text: `Logged $${args.cost_usd} for ${args.agent_identity}.` }] };
-      }
+			const snapshot = await this.getSpendingSnapshot(args.agent_identity);
+			if (!snapshot) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Logged $${args.cost_usd} for ${args.agent_identity}.`,
+						},
+					],
+				};
+			}
 
-      if (snapshot.is_frozen) {
-        return {
-          content: [{
-            type: "text",
-            text: `⚠️ Spending cap exceeded! ${args.agent_identity} frozen at $${snapshot.total_spent_today_usd}/$${snapshot.daily_limit_usd ?? "∞"} today`,
-          }],
-        };
-      }
-      return {
-        content: [{
-          type: "text",
-          text: `Logged $${args.cost_usd} for ${args.agent_identity} ($${snapshot.total_spent_today_usd}/$${snapshot.daily_limit_usd ?? "∞"} today, $${snapshot.total_spent_month_usd}/$${snapshot.monthly_limit_usd ?? "∞"} month)`,
-        }],
-      };
-    } catch (err) {
-      return errorResult("Failed to log spending", err);
-    }
-  }
+			if (snapshot.is_frozen) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `⚠️ Spending cap exceeded! ${args.agent_identity} frozen at $${snapshot.total_spent_today_usd}/$${snapshot.daily_limit_usd ?? "∞"} today`,
+						},
+					],
+				};
+			}
+			return {
+				content: [
+					{
+						type: "text",
+						text: `Logged $${args.cost_usd} for ${args.agent_identity} ($${snapshot.total_spent_today_usd}/$${snapshot.daily_limit_usd ?? "∞"} today, $${snapshot.total_spent_month_usd}/$${snapshot.monthly_limit_usd ?? "∞"} month)`,
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to log spending", err);
+		}
+	}
 
-  async getSpendingReport(args: { agent_identity?: string }): Promise<CallToolResult> {
-    try {
-      const rows = await this.getSpendingSnapshots(args.agent_identity);
-      if (!rows.length) {
-        return { content: [{ type: "text", text: "No spending data found." }] };
-      }
-      const lines = rows.map((r) =>
-        `${r.agent_identity}: today $${r.total_spent_today_usd}/$${r.daily_limit_usd ?? '∞'}, month $${r.total_spent_month_usd}/$${r.monthly_limit_usd ?? '∞'}${r.is_frozen ? ` 🔒 FROZEN${r.frozen_reason ? ` (${r.frozen_reason})` : ''}` : ' ✅ OK'}`,
-      );
-      return { content: [{ type: "text", text: lines.join("\n") }] };
-    } catch (err) {
-      return errorResult("Failed to get spending report", err);
-    }
-  }
+	async getSpendingReport(args: {
+		agent_identity?: string;
+	}): Promise<CallToolResult> {
+		try {
+			const rows = await this.getSpendingSnapshots(args.agent_identity);
+			if (!rows.length) {
+				return { content: [{ type: "text", text: "No spending data found." }] };
+			}
+			const lines = rows.map(
+				(r) =>
+					`${r.agent_identity}: today $${r.total_spent_today_usd}/$${r.daily_limit_usd ?? "∞"}, month $${r.total_spent_month_usd}/$${r.monthly_limit_usd ?? "∞"}${r.is_frozen ? ` 🔒 FROZEN${r.frozen_reason ? ` (${r.frozen_reason})` : ""}` : " ✅ OK"}`,
+			);
+			return { content: [{ type: "text", text: lines.join("\n") }] };
+		} catch (err) {
+			return errorResult("Failed to get spending report", err);
+		}
+	}
 
-  private async getSpendingSnapshot(agentIdentity: string) {
-    const rows = await this.getSpendingSnapshots(agentIdentity);
-    return rows[0] ?? null;
-  }
+	private async getSpendingSnapshot(agentIdentity: string) {
+		const rows = await this.getSpendingSnapshots(agentIdentity);
+		return rows[0] ?? null;
+	}
 
-  private async getSpendingSnapshots(agentIdentity?: string) {
-    const { rows } = await query<{
-      agent_identity: string;
-      daily_limit_usd: string | null;
-      monthly_limit_usd: string | null;
-      is_frozen: boolean | null;
-      frozen_reason: string | null;
-      total_spent_today_usd: string;
-      event_count_today: number;
-      total_spent_month_usd: string;
-    }>(
-      `WITH agents AS (
+	private async getSpendingSnapshots(agentIdentity?: string) {
+		const { rows } = await query<{
+			agent_identity: string;
+			daily_limit_usd: string | null;
+			monthly_limit_usd: string | null;
+			is_frozen: boolean | null;
+			frozen_reason: string | null;
+			total_spent_today_usd: string;
+			event_count_today: number;
+			total_spent_month_usd: string;
+		}>(
+			`WITH agents AS (
          SELECT agent_identity FROM spending_caps
          UNION
          SELECT agent_identity FROM spending_log
@@ -215,68 +259,73 @@ export class PgSpendingHandlers {
        LEFT JOIN monthly m ON m.agent_identity = a.agent_identity
        WHERE $1::text IS NULL OR a.agent_identity = $1
        ORDER BY a.agent_identity`,
-      [agentIdentity ?? null],
-    );
-    return rows;
-  }
+			[agentIdentity ?? null],
+		);
+		return rows;
+	}
 }
 
 export class PgModelHandlers {
-  private core: McpServer;
-  private projectRoot: string;
+	constructor(
+		private readonly core: McpServer,
+		private readonly projectRoot: string,
+	) {}
 
-  constructor(core: McpServer, projectRoot: string) {
-    this.core = core;
-    this.projectRoot = projectRoot;
-  }
-
-  async listModels(args: {}): Promise<CallToolResult> {
-    try {
-      const { rows } = await query(
-        `SELECT model_name, provider, cost_per_1k_input, cost_per_1k_output, max_tokens, rating
+	async listModels(_args: {}): Promise<CallToolResult> {
+		try {
+			const { rows } = await query(
+				`SELECT model_name, provider, cost_per_1k_input, cost_per_1k_output, max_tokens, rating
          FROM model_metadata ORDER BY rating DESC`,
-      );
-      if (!rows.length) {
-        return { content: [{ type: "text", text: "No models configured." }] };
-      }
-      const lines = rows.map((r) =>
-        `${r.model_name} (${r.provider}) — rating: ${r.rating}/10, input: $${r.cost_per_1k_input || '?'}/1k, output: $${r.cost_per_1k_output || '?'}/1k, max: ${r.max_tokens || 'unknown'}`,
-      );
-      return { content: [{ type: "text", text: lines.join("\n") }] };
-    } catch (err) {
-      return errorResult("Failed to list models", err);
-    }
-  }
+			);
+			if (!rows.length) {
+				return { content: [{ type: "text", text: "No models configured." }] };
+			}
+			const lines = rows.map(
+				(r) =>
+					`${r.model_name} (${r.provider}) — rating: ${r.rating}/10, input: $${r.cost_per_1k_input || "?"}/1k, output: $${r.cost_per_1k_output || "?"}/1k, max: ${r.max_tokens || "unknown"}`,
+			);
+			return { content: [{ type: "text", text: lines.join("\n") }] };
+		} catch (err) {
+			return errorResult("Failed to list models", err);
+		}
+	}
 
-  async addModel(args: {
-    model_name: string;
-    provider?: string;
-    cost_per_1k_input?: string;
-    cost_per_1k_output?: string;
-    max_tokens?: string;
-    capabilities?: string;
-    rating?: string;
-  }): Promise<CallToolResult> {
-    try {
-      const { rows } = await query(
-        `INSERT INTO model_metadata (model_name, provider, cost_per_1k_input, cost_per_1k_output, max_tokens, capabilities, rating)
+	async addModel(args: {
+		model_name: string;
+		provider?: string;
+		cost_per_1k_input?: string;
+		cost_per_1k_output?: string;
+		max_tokens?: string;
+		capabilities?: string;
+		rating?: string;
+	}): Promise<CallToolResult> {
+		try {
+			const { rows } = await query(
+				`INSERT INTO model_metadata (model_name, provider, cost_per_1k_input, cost_per_1k_output, max_tokens, capabilities, rating)
          VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
          ON CONFLICT ON CONSTRAINT model_metadata_model_name_key
          DO UPDATE SET provider = EXCLUDED.provider, rating = EXCLUDED.rating
          RETURNING model_name, rating`,
-        [
-          args.model_name,
-          args.provider || null,
-          args.cost_per_1k_input ? parseFloat(args.cost_per_1k_input) : null,
-          args.cost_per_1k_output ? parseFloat(args.cost_per_1k_output) : null,
-          args.max_tokens ? parseInt(args.max_tokens, 10) : null,
-          args.capabilities ? JSON.parse(args.capabilities) : null,
-          args.rating ? parseInt(args.rating, 10) : null,
-        ],
-      );
-      return { content: [{ type: "text", text: `Model added: ${rows[0].model_name} (rating: ${rows[0].rating})` }] };
-    } catch (err) {
-      return errorResult("Failed to add model", err);
-    }
-  }
+				[
+					args.model_name,
+					args.provider || null,
+					args.cost_per_1k_input ? parseFloat(args.cost_per_1k_input) : null,
+					args.cost_per_1k_output ? parseFloat(args.cost_per_1k_output) : null,
+					args.max_tokens ? parseInt(args.max_tokens, 10) : null,
+					args.capabilities ? JSON.parse(args.capabilities) : null,
+					args.rating ? parseInt(args.rating, 10) : null,
+				],
+			);
+			return {
+				content: [
+					{
+						type: "text",
+						text: `Model added: ${rows[0].model_name} (rating: ${rows[0].rating})`,
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to add model", err);
+		}
+	}
 }

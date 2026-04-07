@@ -11,7 +11,8 @@ export const protocolMentionSearchSchema = {
 		},
 		channel: {
 			type: "string",
-			description: "Channel to search in (optional, searches all if not specified)",
+			description:
+				"Channel to search in (optional, searches all if not specified)",
 		},
 		since: {
 			type: "string",

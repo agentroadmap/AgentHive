@@ -2,19 +2,16 @@
  * Tests for proposal-61: Agent Proposal & Lease-Based Backlog System
  */
 
-import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, before, describe, it } from "node:test";
 import {
-	ProposalLeaseManager,
 	createHeartbeatProof,
-	isValidProposalTitle,
 	generateProposalTemplate,
-	type Proposal,
-	type Lease,
-	type BacklogItem,
+	isValidProposalTitle,
+	ProposalLeaseManager,
 } from "../../src/core/collaboration/proposal-lease.ts";
 
 describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
@@ -54,24 +51,21 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 		});
 
 		it("should reject duplicate proposals for the same proposal", () => {
-			assert.throws(
-				() => {
-					manager.submitProposal({
-						proposalId: "proposal-100",
-						title: "Duplicate Proposal",
-						description: "This should fail",
-						proposedBy: "agent-bob",
-					});
-				},
-				/Active proposal already exists/,
-			);
+			assert.throws(() => {
+				manager.submitProposal({
+					proposalId: "proposal-100",
+					title: "Duplicate Proposal",
+					description: "This should fail",
+					proposedBy: "agent-bob",
+				});
+			}, /Active proposal already exists/);
 		});
 
 		it("AC#1: should track proposals in group pulse", () => {
 			const pulse = manager.getGroupPulse({ type: "proposal" });
 			assert.ok(pulse.length >= 1);
-			assert.equal(pulse[0]!.agentId, "agent-alice");
-			assert.ok(pulse[0]!.content.includes("New Feature Proposal"));
+			assert.equal(pulse[0]?.agentId, "agent-alice");
+			assert.ok(pulse[0]?.content.includes("New Feature Proposal"));
 		});
 	});
 
@@ -140,19 +134,16 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 		});
 
 		it("should prevent duplicate reviews from same role", () => {
-			assert.throws(
-				() => {
-					manager.submitReview({
-						proposalId,
-						reviewerId: "pm-frank",
-						reviewerRole: "pm",
-						recommendation: "approve",
-						score: 7,
-						comments: "Another PM review",
-					});
-				},
-				/pm review already exists/,
-			);
+			assert.throws(() => {
+				manager.submitReview({
+					proposalId,
+					reviewerId: "pm-frank",
+					reviewerRole: "pm",
+					recommendation: "approve",
+					score: 7,
+					comments: "Another PM review",
+				});
+			}, /pm review already exists/);
 		});
 
 		it("should track reviews in group pulse", () => {
@@ -232,12 +223,9 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 				comments: "PM approved",
 			});
 
-			assert.throws(
-				() => {
-					manager.approveProposal(proposal.proposalId, "lead-mike");
-				},
-				/requires both PM and Architect approval/,
-			);
+			assert.throws(() => {
+				manager.approveProposal(proposal.proposalId, "lead-mike");
+			}, /requires both PM and Architect approval/);
 		});
 
 		it("should add approved items to backlog", () => {
@@ -253,7 +241,7 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 		before(() => {
 			// Find an available backlog item
 			const available = manager.getAvailableBacklog();
-			backlogItemId = available[0]!.itemId;
+			backlogItemId = available[0]?.itemId;
 		});
 
 		it("AC#4: should allow leasing a backlog item for 48h default", () => {
@@ -273,18 +261,15 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 		});
 
 		it("should prevent leasing an already leased item", () => {
-			assert.throws(
-				() => {
-					manager.leaseItem(backlogItemId, "agent-oliver");
-				},
-				/already leased/,
-			);
+			assert.throws(() => {
+				manager.leaseItem(backlogItemId, "agent-oliver");
+			}, /already leased/);
 		});
 
 		it("AC#4: should allow leasing with custom duration", () => {
 			// First release the lease
 			const leases = manager.getAgentLeases("agent-nancy");
-			manager.releaseLease(leases[0]!.leaseId, "agent-nancy");
+			manager.releaseLease(leases[0]?.leaseId, "agent-nancy");
 
 			// Now lease with custom duration (1 hour)
 			const oneHour = 60 * 60 * 1000;
@@ -334,14 +319,14 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 
 	describe("Heartbeat Renewal (AC#6)", () => {
 		let leaseId: string;
-		let heartbeatToken: string;
+		let _heartbeatToken: string;
 
 		before(() => {
 			const available = manager.getAvailableBacklog();
 			if (available.length > 0) {
-				const lease = manager.leaseItem(available[0]!.itemId, "agent-quincy");
+				const lease = manager.leaseItem(available[0]?.itemId, "agent-quincy");
 				leaseId = lease.leaseId;
-				heartbeatToken = lease.heartbeatToken || "";
+				_heartbeatToken = lease.heartbeatToken || "";
 			}
 		});
 
@@ -372,12 +357,9 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 
 			// Already at max (3), should fail
 			const proof = createHeartbeatProof(leaseId, "agent-quincy");
-			assert.throws(
-				() => {
-					manager.renewLease(proof);
-				},
-				/Maximum renewals/,
-			);
+			assert.throws(() => {
+				manager.renewLease(proof);
+			}, /Maximum renewals/);
 		});
 
 		it("should allow direct heartbeat submission", () => {
@@ -393,7 +375,10 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 			const pulse = manager.getGroupPulse({ type: "proposal" });
 
 			for (const entry of pulse) {
-				assert.ok(entry.agentId, "Each pulse entry should have agent attribution");
+				assert.ok(
+					entry.agentId,
+					"Each pulse entry should have agent attribution",
+				);
 				assert.ok(entry.timestamp);
 				assert.ok(entry.content);
 			}

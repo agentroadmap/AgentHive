@@ -337,7 +337,11 @@ export class DockerSandboxService {
 	/**
 	 * Update container status.
 	 */
-	updateStatus(containerId: string, status: ContainerStatus, exitCode?: number): boolean {
+	updateStatus(
+		containerId: string,
+		status: ContainerStatus,
+		exitCode?: number,
+	): boolean {
 		const container = this.containers.get(containerId);
 		if (!container) return false;
 
@@ -360,9 +364,7 @@ export class DockerSandboxService {
 		workspacePath: string,
 		additionalMounts?: VolumeMount[],
 	): VolumeMount[] {
-		const mounts: VolumeMount[] = [
-			createWorkspaceMount(workspacePath),
-		];
+		const mounts: VolumeMount[] = [createWorkspaceMount(workspacePath)];
 
 		if (additionalMounts) {
 			mounts.push(...additionalMounts);
@@ -469,7 +471,11 @@ export function createProvisionOptions(
 	overrides?: Partial<ProvisionOptions>,
 ): ProvisionOptions {
 	return {
-		image: { name: imageName.split(":")[0], tag: imageName.split(":")[1] || "latest", fullRef: imageName },
+		image: {
+			name: imageName.split(":")[0],
+			tag: imageName.split(":")[1] || "latest",
+			fullRef: imageName,
+		},
 		agentId,
 		phase,
 		workspacePath,

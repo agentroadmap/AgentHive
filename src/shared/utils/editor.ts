@@ -76,7 +76,10 @@ export async function isEditorAvailable(editor: string): Promise<boolean> {
 /**
  * Open a file in the editor
  */
-export async function openInEditor(filePath: string, config?: RoadmapConfig | null): Promise<boolean> {
+export async function openInEditor(
+	filePath: string,
+	config?: RoadmapConfig | null,
+): Promise<boolean> {
 	const editor = resolveEditor(config);
 
 	try {

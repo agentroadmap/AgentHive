@@ -1,8 +1,8 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
-import { expect } from "../support/test-utils.ts";
-import { getProposalStatistics } from '../../src/core/infrastructure/statistics.ts';
+import { getProposalStatistics } from "../../src/core/infrastructure/statistics.ts";
 import type { Proposal } from "../../src/types/index.ts";
+import { expect } from "../support/test-utils.ts";
 
 describe("getProposalStatistics", () => {
 	const statuses = ["Potential", "Active", "Accepted", "Complete", "Abandoned"];
@@ -34,11 +34,31 @@ describe("getProposalStatistics", () => {
 
 	test("counts proposals by status correctly", () => {
 		const proposals: Proposal[] = [
-			createProposal({ id: "proposal-1", title: "Proposal 1", status: "Potential" }),
-			createProposal({ id: "proposal-2", title: "Proposal 2", status: "Potential" }),
-			createProposal({ id: "proposal-3", title: "Proposal 3", status: "Active" }),
-			createProposal({ id: "proposal-4", title: "Proposal 4", status: "Complete" }),
-			createProposal({ id: "proposal-5", title: "Proposal 5", status: "Complete" }),
+			createProposal({
+				id: "proposal-1",
+				title: "Proposal 1",
+				status: "Potential",
+			}),
+			createProposal({
+				id: "proposal-2",
+				title: "Proposal 2",
+				status: "Potential",
+			}),
+			createProposal({
+				id: "proposal-3",
+				title: "Proposal 3",
+				status: "Active",
+			}),
+			createProposal({
+				id: "proposal-4",
+				title: "Proposal 4",
+				status: "Complete",
+			}),
+			createProposal({
+				id: "proposal-5",
+				title: "Proposal 5",
+				status: "Complete",
+			}),
 		];
 
 		const stats = getProposalStatistics(proposals, [], statuses);
@@ -53,11 +73,35 @@ describe("getProposalStatistics", () => {
 
 	test("counts proposals by priority correctly", () => {
 		const proposals: Proposal[] = [
-			createProposal({ id: "proposal-1", title: "Proposal 1", status: "Potential", priority: "high" }),
-			createProposal({ id: "proposal-2", title: "Proposal 2", status: "Potential", priority: "high" }),
-			createProposal({ id: "proposal-3", title: "Proposal 3", status: "Active", priority: "medium" }),
-			createProposal({ id: "proposal-4", title: "Proposal 4", status: "Complete", priority: "low" }),
-			createProposal({ id: "proposal-5", title: "Proposal 5", status: "Complete" }), // No priority
+			createProposal({
+				id: "proposal-1",
+				title: "Proposal 1",
+				status: "Potential",
+				priority: "high",
+			}),
+			createProposal({
+				id: "proposal-2",
+				title: "Proposal 2",
+				status: "Potential",
+				priority: "high",
+			}),
+			createProposal({
+				id: "proposal-3",
+				title: "Proposal 3",
+				status: "Active",
+				priority: "medium",
+			}),
+			createProposal({
+				id: "proposal-4",
+				title: "Proposal 4",
+				status: "Complete",
+				priority: "low",
+			}),
+			createProposal({
+				id: "proposal-5",
+				title: "Proposal 5",
+				status: "Complete",
+			}), // No priority
 		];
 
 		const stats = getProposalStatistics(proposals, [], statuses);
@@ -69,7 +113,13 @@ describe("getProposalStatistics", () => {
 	});
 
 	test("counts drafts correctly", () => {
-		const proposals: Proposal[] = [createProposal({ id: "proposal-1", title: "Proposal 1", status: "Potential" })];
+		const proposals: Proposal[] = [
+			createProposal({
+				id: "proposal-1",
+				title: "Proposal 1",
+				status: "Potential",
+			}),
+		];
 		const drafts: Proposal[] = [
 			createProposal({ id: "proposal-2", title: "Draft 1", status: "" }),
 			createProposal({ id: "proposal-3", title: "Draft 2", status: "" }),
@@ -174,16 +224,37 @@ describe("getProposalStatistics", () => {
 
 	test("identifies blocked proposals correctly", () => {
 		const proposals: Proposal[] = [
-			createProposal({ id: "proposal-1", title: "Blocking Proposal", status: "Active" }),
-			createProposal({ id: "proposal-2", title: "Blocked Proposal", status: "Potential", dependencies: ["proposal-1"] }), // Depends on proposal-1 which is not complete
-			createProposal({ id: "proposal-3", title: "Not Blocked", status: "Potential", dependencies: ["proposal-4"] }), // Depends on proposal-4 which is complete
-			createProposal({ id: "proposal-4", title: "Complete Proposal", status: "Complete" }),
+			createProposal({
+				id: "proposal-1",
+				title: "Blocking Proposal",
+				status: "Active",
+			}),
+			createProposal({
+				id: "proposal-2",
+				title: "Blocked Proposal",
+				status: "Potential",
+				dependencies: ["proposal-1"],
+			}), // Depends on proposal-1 which is not complete
+			createProposal({
+				id: "proposal-3",
+				title: "Not Blocked",
+				status: "Potential",
+				dependencies: ["proposal-4"],
+			}), // Depends on proposal-4 which is complete
+			createProposal({
+				id: "proposal-4",
+				title: "Complete Proposal",
+				status: "Complete",
+			}),
 		];
 
 		const stats = getProposalStatistics(proposals, [], statuses);
 
 		assert.strictEqual(stats.projectHealth.blockedProposals.length, 1);
-		assert.strictEqual(stats.projectHealth.blockedProposals[0]?.id, "proposal-2");
+		assert.strictEqual(
+			stats.projectHealth.blockedProposals[0]?.id,
+			"proposal-2",
+		);
 	});
 
 	test("calculates average proposal age correctly", () => {
@@ -239,9 +310,21 @@ describe("getProposalStatistics", () => {
 
 	test("handles 100% completion correctly", () => {
 		const proposals: Proposal[] = [
-			createProposal({ id: "proposal-1", title: "Proposal 1", status: "Complete" }),
-			createProposal({ id: "proposal-2", title: "Proposal 2", status: "Complete" }),
-			createProposal({ id: "proposal-3", title: "Proposal 3", status: "Complete" }),
+			createProposal({
+				id: "proposal-1",
+				title: "Proposal 1",
+				status: "Complete",
+			}),
+			createProposal({
+				id: "proposal-2",
+				title: "Proposal 2",
+				status: "Complete",
+			}),
+			createProposal({
+				id: "proposal-3",
+				title: "Proposal 3",
+				status: "Complete",
+			}),
 		];
 
 		const stats = getProposalStatistics(proposals, [], statuses);

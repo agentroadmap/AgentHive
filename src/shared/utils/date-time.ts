@@ -1,4 +1,7 @@
-export function formatLocalDateTime(date = new Date(), includeSeconds = false): string {
+export function formatLocalDateTime(
+	date = new Date(),
+	includeSeconds = false,
+): string {
 	const year = date.getFullYear();
 	const month = `${date.getMonth() + 1}`.padStart(2, "0");
 	const day = `${date.getDate()}`.padStart(2, "0");

@@ -7,21 +7,15 @@
  * AC#4: Team coordination through shared lease or lease chain
  */
 
-import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { beforeEach, describe, it } from "node:test";
 import {
-	DynamicTeamBuilder,
-	type ProposalOverlap,
-	type Team,
-} from "../../src/core/collaboration/dynamic-team-builder.ts";
-import {
+	type AgentProposal,
 	AgentProposalSystem,
 	createApproach,
 	createComplexityEstimate,
-	type AgentProposal,
-	type ImplementationApproach,
-	type ComplexityEstimate,
 } from "../../src/core/collaboration/agent-proposals.ts";
+import { DynamicTeamBuilder } from "../../src/core/collaboration/dynamic-team-builder.ts";
 
 describe("proposal-62: Dynamic Team Building", () => {
 	let builder: DynamicTeamBuilder;
@@ -33,7 +27,10 @@ describe("proposal-62: Dynamic Team Building", () => {
 	});
 
 	// Helper to create proposals for testing (creates proposals directly)
-	function createTestProposals(proposalId: string, count: number): AgentProposal[] {
+	function createTestProposals(
+		proposalId: string,
+		count: number,
+	): AgentProposal[] {
 		const proposals: AgentProposal[] = [];
 
 		for (let i = 0; i < count; i++) {
@@ -48,14 +45,17 @@ describe("proposal-62: Dynamic Team Building", () => {
 					i === 0 ? "new-feature" : "incremental",
 					`Approach ${i + 1} for ${proposalId}`,
 					{
-						filesAffected: [`src/core/${proposalId}.ts`, `src/test/${proposalId}.test.ts`],
+						filesAffected: [
+							`src/core/${proposalId}.ts`,
+							`src/test/${proposalId}.test.ts`,
+						],
 						estimatedTimeline: `${i + 1} days`,
 					},
 				),
-				complexity: createComplexityEstimate(
-					i === 0 ? "high" : "medium",
-					{ estimatedHours: 8 * (i + 1), confidence: 0.7 },
-				),
+				complexity: createComplexityEstimate(i === 0 ? "high" : "medium", {
+					estimatedHours: 8 * (i + 1),
+					confidence: 0.7,
+				}),
 				status: "approved" as const,
 				submittedAt: new Date().toISOString(),
 				updatedAt: new Date().toISOString(),
@@ -83,13 +83,15 @@ describe("proposal-62: Dynamic Team Building", () => {
 
 		it("returns empty for no overlap", () => {
 			const p1 = proposalSystem.submitProposal("proposal-1", "agent-a", {
-				title: "P1", summary: "S1",
+				title: "P1",
+				summary: "S1",
 				approach: createApproach("new-feature", "A1"),
 				complexity: createComplexityEstimate("low"),
 			});
 
 			const p2 = proposalSystem.submitProposal("proposal-2", "agent-b", {
-				title: "P2", summary: "S2",
+				title: "P2",
+				summary: "S2",
 				approach: createApproach("incremental", "A2"),
 				complexity: createComplexityEstimate("low"),
 			});
@@ -178,7 +180,11 @@ describe("proposal-62: Dynamic Team Building", () => {
 			const team = builder.formTeam("proposal-42", proposals);
 
 			assert.ok(team.coordinationStrategy);
-			assert.ok(["owner-only", "lease-chain", "shared-lease"].includes(team.coordinationStrategy));
+			assert.ok(
+				["owner-only", "lease-chain", "shared-lease"].includes(
+					team.coordinationStrategy,
+				),
+			);
 		});
 
 		it("creates lease chain for multi-member teams", () => {
@@ -204,14 +210,16 @@ describe("proposal-62: Dynamic Team Building", () => {
 
 		it("requires all proposals to target the same proposal", () => {
 			const p1 = proposalSystem.submitProposal("proposal-1", "agent-a", {
-				title: "P1", summary: "S1",
+				title: "P1",
+				summary: "S1",
 				approach: createApproach("new-feature", "A1"),
 				complexity: createComplexityEstimate("medium"),
 			});
 			proposalSystem.approveProposal(p1.proposalId, "reviewer-1");
 
 			const p2 = proposalSystem.submitProposal("proposal-2", "agent-b", {
-				title: "P2", summary: "S2",
+				title: "P2",
+				summary: "S2",
 				approach: createApproach("incremental", "A2"),
 				complexity: createComplexityEstimate("medium"),
 			});
@@ -293,7 +301,11 @@ describe("proposal-62: Dynamic Team Building", () => {
 
 			builder.inviteMember(team.teamId, "agent-c", { role: "contributor" });
 
-			const updated = builder.declineInvitation(team.teamId, "agent-c", "Too busy");
+			const updated = builder.declineInvitation(
+				team.teamId,
+				"agent-c",
+				"Too busy",
+			);
 
 			const member = updated.members.find((m) => m.memberId === "agent-c");
 			assert.ok(member);
@@ -330,7 +342,11 @@ describe("proposal-62: Dynamic Team Building", () => {
 			builder.inviteMember(team.teamId, "agent-c");
 			builder.acceptInvitation(team.teamId, "agent-c");
 
-			const updated = builder.removeMember(team.teamId, "agent-c", team.ownerId);
+			const updated = builder.removeMember(
+				team.teamId,
+				"agent-c",
+				team.ownerId,
+			);
 
 			const member = updated.members.find((m) => m.memberId === "agent-c");
 			assert.ok(member);
@@ -341,7 +357,12 @@ describe("proposal-62: Dynamic Team Building", () => {
 			const proposals = createTestProposals("proposal-42", 2);
 			const team = builder.formTeam("proposal-42", proposals);
 
-			const updated = builder.changeRole(team.teamId, "agent-b", "advisor", team.ownerId);
+			const updated = builder.changeRole(
+				team.teamId,
+				"agent-b",
+				"advisor",
+				team.ownerId,
+			);
 
 			const member = updated.members.find((m) => m.memberId === "agent-b");
 			assert.ok(member);
@@ -446,7 +467,7 @@ describe("proposal-62: Dynamic Team Building", () => {
 			assert.ok(result.success);
 			assert.equal(result.newHolder, "agent-b");
 
-			const updated = builder.getTeam(team.teamId);
+			const _updated = builder.getTeam(team.teamId);
 			const currentHolder = builder.getCurrentLeaseHolder(team.teamId);
 			assert.equal(currentHolder, "agent-b");
 		});

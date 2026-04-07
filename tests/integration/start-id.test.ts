@@ -1,9 +1,13 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 let TEST_DIR: string;
 const CLI_PATH = join(process.cwd(), "src", "cli.ts");
@@ -33,7 +37,10 @@ describe("proposal id generation", () => {
 	});
 
 	it("starts numbering proposals at 1", async () => {
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal create First`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal create First`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(result.exitCode, 0);
 
 		const files = await readdir(join(TEST_DIR, "roadmap", "proposals"));

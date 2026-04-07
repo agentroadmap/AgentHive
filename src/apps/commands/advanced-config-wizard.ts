@@ -51,7 +51,10 @@ function withHint(message: string, hint?: string): string {
 	return hint ? `${message} (${hint})` : message;
 }
 
-async function runSinglePrompt(question: PromptQuestion, options?: PromptOptions): Promise<Record<string, unknown>> {
+async function runSinglePrompt(
+	question: PromptQuestion,
+	options?: PromptOptions,
+): Promise<Record<string, unknown>> {
 	const onCancel = options?.onCancel;
 	const message = withHint(question.message, question.hint);
 
@@ -68,7 +71,8 @@ async function runSinglePrompt(question: PromptQuestion, options?: PromptOptions
 	}
 
 	if (question.type === "text") {
-		const initialText = typeof question.initial === "string" ? question.initial : undefined;
+		const initialText =
+			typeof question.initial === "string" ? question.initial : undefined;
 		const result = await clack.text({
 			message,
 			initialValue: initialText,
@@ -82,10 +86,12 @@ async function runSinglePrompt(question: PromptQuestion, options?: PromptOptions
 	}
 
 	if (question.type === "number") {
-		const initialNumber = typeof question.initial === "number" ? question.initial : undefined;
+		const initialNumber =
+			typeof question.initial === "number" ? question.initial : undefined;
 		const result = await clack.text({
 			message,
-			initialValue: initialNumber !== undefined ? String(initialNumber) : undefined,
+			initialValue:
+				initialNumber !== undefined ? String(initialNumber) : undefined,
 			validate: (value) => {
 				const normalized = String(value ?? "").trim();
 				if (!normalized) {
@@ -196,7 +202,10 @@ export async function runAdvancedConfigWizard({
 	let autoCommit = config?.autoCommit ?? false;
 	let zeroPaddedIds = config?.zeroPaddedIds;
 	let defaultEditor: string | undefined =
-		config?.defaultEditor ?? process.env.EDITOR ?? process.env.VISUAL ?? resolveEditor(null);
+		config?.defaultEditor ??
+		process.env.EDITOR ??
+		process.env.VISUAL ??
+		resolveEditor(null);
 	let defaultPort = config?.defaultPort ?? 6420;
 	let autoOpenBrowser = config?.autoOpenBrowser ?? true;
 	let installClaudeAgent = false;
@@ -237,7 +246,9 @@ export async function runAdvancedConfigWizard({
 			},
 			{ onCancel },
 		);
-		remoteOperations = Boolean(remotePrompt.remoteOperations ?? remoteOperations);
+		remoteOperations = Boolean(
+			remotePrompt.remoteOperations ?? remoteOperations,
+		);
 
 		const daysPrompt = await promptImpl(
 			{
@@ -251,7 +262,10 @@ export async function runAdvancedConfigWizard({
 			},
 			{ onCancel },
 		);
-		if (typeof daysPrompt.activeBranchDays === "number" && !Number.isNaN(daysPrompt.activeBranchDays)) {
+		if (
+			typeof daysPrompt.activeBranchDays === "number" &&
+			!Number.isNaN(daysPrompt.activeBranchDays)
+		) {
 			activeBranchDays = daysPrompt.activeBranchDays;
 		}
 	} else {
@@ -322,7 +336,10 @@ export async function runAdvancedConfigWizard({
 			continue;
 		}
 
-		if (typeof paddingPrompt?.paddingWidth === "number" && !Number.isNaN(paddingPrompt.paddingWidth)) {
+		if (
+			typeof paddingPrompt?.paddingWidth === "number" &&
+			!Number.isNaN(paddingPrompt.paddingWidth)
+		) {
 			zeroPaddedIds = paddingPrompt.paddingWidth;
 			break;
 		}
@@ -343,7 +360,9 @@ export async function runAdvancedConfigWizard({
 	if (editorResult.length > 0) {
 		const isAvailable = await isEditorAvailable(editorResult);
 		if (!isAvailable) {
-			console.warn(`Warning: Editor command '${editorResult}' not found in PATH`);
+			console.warn(
+				`Warning: Editor command '${editorResult}' not found in PATH`,
+			);
 			const confirmAnyway = await promptImpl(
 				{
 					type: "confirm",
@@ -407,7 +426,10 @@ export async function runAdvancedConfigWizard({
 			continue;
 		}
 
-		if (typeof webUIValues?.defaultPort === "number" && !Number.isNaN(webUIValues.defaultPort)) {
+		if (
+			typeof webUIValues?.defaultPort === "number" &&
+			!Number.isNaN(webUIValues.defaultPort)
+		) {
 			defaultPort = webUIValues.defaultPort;
 		}
 		autoOpenBrowser = Boolean(webUIValues?.autoOpenBrowser ?? autoOpenBrowser);

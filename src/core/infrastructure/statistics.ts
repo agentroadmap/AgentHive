@@ -22,7 +22,11 @@ export interface ProposalStatistics {
 /**
  * Calculate comprehensive proposal statistics for the overview
  */
-export function getProposalStatistics(proposals: Proposal[], drafts: Proposal[], statuses: string[]): ProposalStatistics {
+export function getProposalStatistics(
+	proposals: Proposal[],
+	drafts: Proposal[],
+	statuses: string[],
+): ProposalStatistics {
 	const statusCounts = new Map<string, number>();
 	const priorityCounts = new Map<string, number>();
 
@@ -85,9 +89,14 @@ export function getProposalStatistics(proposals: Proposal[], drafts: Proposal[],
 			let ageInDays: number;
 			if (isReached && proposal.updatedDate) {
 				const updatedDate = new Date(proposal.updatedDate);
-				ageInDays = Math.floor((updatedDate.getTime() - createdDate.getTime()) / (24 * 60 * 60 * 1000));
+				ageInDays = Math.floor(
+					(updatedDate.getTime() - createdDate.getTime()) /
+						(24 * 60 * 60 * 1000),
+				);
 			} else {
-				ageInDays = Math.floor((now.getTime() - createdDate.getTime()) / (24 * 60 * 60 * 1000));
+				ageInDays = Math.floor(
+					(now.getTime() - createdDate.getTime()) / (24 * 60 * 60 * 1000),
+				);
 			}
 			totalAge += ageInDays;
 			proposalCount++;
@@ -112,7 +121,11 @@ export function getProposalStatistics(proposals: Proposal[], drafts: Proposal[],
 		}
 
 		// Identify blocked proposals (has dependencies that are not done)
-		if (proposal.dependencies && proposal.dependencies.length > 0 && !isReached) {
+		if (
+			proposal.dependencies &&
+			proposal.dependencies.length > 0 &&
+			!isReached
+		) {
 			// Check if any dependency is not done
 			const hasBlockingDependency = proposal.dependencies.some((depId) => {
 				const dep = proposals.find((t) => t.id === depId);
@@ -139,11 +152,18 @@ export function getProposalStatistics(proposals: Proposal[], drafts: Proposal[],
 	});
 
 	// Calculate average proposal age
-	const averageProposalAge = proposalCount > 0 ? Math.round(totalAge / proposalCount) : 0;
+	const averageProposalAge =
+		proposalCount > 0 ? Math.round(totalAge / proposalCount) : 0;
 
 	// Calculate completion percentage (only count proposals with valid status)
-	const totalProposals = Array.from(statusCounts.values()).reduce((sum, count) => sum + count, 0);
-	const completionPercentage = totalProposals > 0 ? Math.round((completedProposals / totalProposals) * 100) : 0;
+	const totalProposals = Array.from(statusCounts.values()).reduce(
+		(sum, count) => sum + count,
+		0,
+	);
+	const completionPercentage =
+		totalProposals > 0
+			? Math.round((completedProposals / totalProposals) * 100)
+			: 0;
 
 	return {
 		statusCounts,

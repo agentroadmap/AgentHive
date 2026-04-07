@@ -11,7 +11,9 @@ const emptyInputSchema: JsonSchema = {
 	additionalProperties: false,
 };
 
-function createWorkflowTool(guide: (typeof WORKFLOW_GUIDES)[number]): McpToolHandler {
+function createWorkflowTool(
+	guide: (typeof WORKFLOW_GUIDES)[number],
+): McpToolHandler {
 	const toolText = guide.toolText ?? guide.resourceText;
 	return createSimpleValidatedTool(
 		{

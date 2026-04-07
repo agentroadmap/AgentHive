@@ -1,19 +1,23 @@
 import assert from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { ContentStore } from '../../src/core/storage/content-store.ts';
-import { SearchService } from '../../src/core/infrastructure/search-service.ts';
+import { SearchService } from "../../src/core/infrastructure/search-service.ts";
+import { ContentStore } from "../../src/core/storage/content-store.ts";
 import { FileSystem } from "../../src/file-system/operations.ts";
 import type {
 	Decision,
 	DecisionSearchResult,
 	Document,
 	DocumentSearchResult,
-	SearchResult,
 	Proposal,
 	ProposalSearchResult,
+	SearchResult,
 } from "../../src/types/index.ts";
-import { createUniqueTestDir, getPlatformTimeout, safeCleanup, sleep,
+import {
+	createUniqueTestDir,
 	expect,
+	getPlatformTimeout,
+	safeCleanup,
+	sleep,
 } from "../support/test-utils.ts";
 
 let TEST_DIR: string;
@@ -53,7 +57,8 @@ describe("SearchService", () => {
 		context: "Need consistent search",
 		decision: "Use Fuse.js with centralized store",
 		consequences: "Shared search path",
-		rawContent: "## Context\nNeed consistent search\n\n## Decision\nUse Fuse.js with centralized store",
+		rawContent:
+			"## Context\nNeed consistent search\n\n## Decision\nUse Fuse.js with centralized store",
 	};
 
 	beforeEach(async () => {
@@ -125,7 +130,10 @@ describe("SearchService", () => {
 				filters: { status: "Active" },
 			})
 			.filter(isProposalResult);
-		expect(statusFiltered.map((result) => result.proposal.id)).toStrictEqual(["proposal-1", "proposal-3"]);
+		expect(statusFiltered.map((result) => result.proposal.id)).toStrictEqual([
+			"proposal-1",
+			"proposal-3",
+		]);
 
 		const priorityFiltered = search
 			.search({
@@ -142,7 +150,9 @@ describe("SearchService", () => {
 				filters: { status: ["Active"], priority: ["medium"] },
 			})
 			.filter(isProposalResult);
-		expect(combinedFiltered.map((result) => result.proposal.id)).toStrictEqual(["proposal-3"]);
+		expect(combinedFiltered.map((result) => result.proposal.id)).toStrictEqual([
+			"proposal-3",
+		]);
 	});
 
 	it("filters proposals by labels (requiring all selected labels)", async () => {
@@ -176,7 +186,9 @@ describe("SearchService", () => {
 				filters: { labels: ["ui"] },
 			})
 			.filter(isProposalResult);
-		expect(uiFiltered.map((result) => result.proposal.id)).toStrictEqual(["proposal-2"]);
+		expect(uiFiltered.map((result) => result.proposal.id)).toStrictEqual([
+			"proposal-2",
+		]);
 
 		const anyFiltered = search
 			.search({
@@ -184,14 +196,18 @@ describe("SearchService", () => {
 				filters: { labels: ["ui", "frontend"] },
 			})
 			.filter(isProposalResult);
-		expect(anyFiltered.map((result) => result.proposal.id)).toStrictEqual(["proposal-2"]);
+		expect(anyFiltered.map((result) => result.proposal.id)).toStrictEqual([
+			"proposal-2",
+		]);
 	});
 
 	it("refreshes the index when content changes", async () => {
 		await filesystem.saveProposal(baseProposal);
 		await search.ensureInitialized();
 
-		const initialResults = search.search({ query: "Fuse", types: ["proposal"] }).filter(isProposalResult);
+		const initialResults = search
+			.search({ query: "Fuse", types: ["proposal"] })
+			.filter(isProposalResult);
 		assert.strictEqual(initialResults.length, 1);
 
 		await filesystem.saveProposal({
@@ -201,26 +217,40 @@ describe("SearchService", () => {
 		});
 
 		await waitForSearch(
-			async () => search.search({ query: "Reindexed", types: ["proposal"] }).filter(isProposalResult),
+			async () =>
+				search
+					.search({ query: "Reindexed", types: ["proposal"] })
+					.filter(isProposalResult),
 			(results) => {
-				return results.length === 1 && results[0]?.proposal.title === "Centralized service updated";
+				return (
+					results.length === 1 &&
+					results[0]?.proposal.title === "Centralized service updated"
+				);
 			},
 		);
 
-		const staleResults = search.search({ query: "Fuse", types: ["proposal"] }).filter(isProposalResult);
+		const staleResults = search
+			.search({ query: "Fuse", types: ["proposal"] })
+			.filter(isProposalResult);
 		assert.strictEqual(staleResults.length, 0);
 	});
 });
 
-function isProposalResult(result: SearchResult): result is ProposalSearchResult {
+function isProposalResult(
+	result: SearchResult,
+): result is ProposalSearchResult {
 	return result.type === "proposal";
 }
 
-function isDocumentResult(result: SearchResult): result is DocumentSearchResult {
+function isDocumentResult(
+	result: SearchResult,
+): result is DocumentSearchResult {
 	return result.type === "document";
 }
 
-function isDecisionResult(result: SearchResult): result is DecisionSearchResult {
+function isDecisionResult(
+	result: SearchResult,
+): result is DecisionSearchResult {
 	return result.type === "decision";
 }
 

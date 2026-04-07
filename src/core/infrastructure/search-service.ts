@@ -2,16 +2,19 @@ import Fuse, { type FuseResult, type FuseResultMatch } from "fuse.js";
 import type {
 	Decision,
 	Document,
+	Proposal,
 	SearchFilters,
 	SearchMatch,
 	SearchOptions,
 	SearchPriorityFilter,
 	SearchResult,
 	SearchResultType,
-	Proposal,
 } from "../../types/index.ts";
 import { isCompleteStatus, isTerminalStatus } from "../proposal/directives.ts";
-import type { ContentStore, ContentStoreEvent } from "../storage/content-store.ts";
+import type {
+	ContentStore,
+	ContentStoreEvent,
+} from "../storage/content-store.ts";
 
 interface BaseSearchEntity {
 	readonly id: string;
@@ -41,7 +44,10 @@ interface DecisionSearchEntity extends BaseSearchEntity {
 	readonly decision: Decision;
 }
 
-type SearchEntity = ProposalSearchEntity | DocumentSearchEntity | DecisionSearchEntity;
+type SearchEntity =
+	| ProposalSearchEntity
+	| DocumentSearchEntity
+	| DecisionSearchEntity;
 
 type NormalizedFilters = {
 	statuses?: string[];
@@ -74,7 +80,9 @@ function parseProposalIdSegments(value: string): number[] | null {
 	if (!/^[0-9]+(?:\.[0-9]+)*$/.test(withoutPrefix)) {
 		return null;
 	}
-	return withoutPrefix.split(".").map((segment) => Number.parseInt(segment, 10));
+	return withoutPrefix
+		.split(".")
+		.map((segment) => Number.parseInt(segment, 10));
 }
 
 function createProposalIdVariants(id: string): string[] {
@@ -156,7 +164,9 @@ export class SearchService {
 
 	search(options: SearchOptions = {}): SearchResult[] {
 		if (!this.initialized) {
-			throw new Error("SearchService not initialized. Call ensureInitialized() first.");
+			throw new Error(
+				"SearchService not initialized. Call ensureInitialized() first.",
+			);
 		}
 
 		const { query = "", limit, types, filters } = options;
@@ -178,7 +188,11 @@ export class SearchService {
 		}
 
 		const doneIds = normalizedFilters.ready
-			? new Set(this.proposals.filter((t) => isCompleteStatus(t.proposal.status)).map((t) => t.id))
+			? new Set(
+					this.proposals
+						.filter((t) => isCompleteStatus(t.proposal.status))
+						.map((t) => t.id),
+				)
 			: undefined;
 
 		const fuseResults = fuse.search(trimmedQuery);
@@ -190,7 +204,10 @@ export class SearchService {
 				continue;
 			}
 
-			if (entity.type === "proposal" && !this.matchesProposalFilters(entity, normalizedFilters, doneIds)) {
+			if (
+				entity.type === "proposal" &&
+				!this.matchesProposalFilters(entity, normalizedFilters, doneIds)
+			) {
 				continue;
 			}
 
@@ -205,7 +222,11 @@ export class SearchService {
 
 	private async initialize(): Promise<void> {
 		const snapshot = await this.store.ensureInitialized();
-		this.applySnapshot(snapshot.proposals, snapshot.documents, snapshot.decisions);
+		this.applySnapshot(
+			snapshot.proposals,
+			snapshot.documents,
+			snapshot.decisions,
+		);
 
 		if (!this.unsubscribe) {
 			this.unsubscribe = this.store.subscribe((event) => {
@@ -222,10 +243,18 @@ export class SearchService {
 			return;
 		}
 		this.version = event.version;
-		this.applySnapshot(event.snapshot.proposals, event.snapshot.documents, event.snapshot.decisions);
+		this.applySnapshot(
+			event.snapshot.proposals,
+			event.snapshot.documents,
+			event.snapshot.decisions,
+		);
 	}
 
-	private applySnapshot(proposals: Proposal[], documents: Document[], decisions: Decision[]): void {
+	private applySnapshot(
+		proposals: Proposal[],
+		documents: Document[],
+		decisions: Decision[],
+	): void {
 		this.proposals = proposals.map((proposal) => ({
 			id: proposal.id,
 			type: "proposal",
@@ -233,10 +262,14 @@ export class SearchService {
 			bodyText: buildProposalBodyText(proposal),
 			proposal,
 			statusLower: proposal.status.toLowerCase(),
-			priorityLower: proposal.priority ? (proposal.priority.toLowerCase() as SearchPriorityFilter) : undefined,
+			priorityLower: proposal.priority
+				? (proposal.priority.toLowerCase() as SearchPriorityFilter)
+				: undefined,
 			labelsLower: (proposal.labels || []).map((label) => label.toLowerCase()),
 			idVariants: createProposalIdVariants(proposal.id),
-			dependencyIds: (proposal.dependencies ?? []).flatMap((dependency) => createProposalIdVariants(dependency)),
+			dependencyIds: (proposal.dependencies ?? []).flatMap((dependency) =>
+				createProposalIdVariants(dependency),
+			),
 			rationaleLower: proposal.rationale?.toLowerCase(),
 		}));
 
@@ -320,11 +353,16 @@ export class SearchService {
 		return results;
 	}
 
-	private applyProposalFilters(proposals: ProposalSearchEntity[], filters: NormalizedFilters): ProposalSearchEntity[] {
+	private applyProposalFilters(
+		proposals: ProposalSearchEntity[],
+		filters: NormalizedFilters,
+	): ProposalSearchEntity[] {
 		let filtered = proposals;
 		if (filters.statuses && filters.statuses.length > 0) {
 			const allowedStatuses = new Set(filters.statuses);
-			filtered = filtered.filter((proposal) => allowedStatuses.has(proposal.statusLower));
+			filtered = filtered.filter((proposal) =>
+				allowedStatuses.has(proposal.statusLower),
+			);
 		}
 		if (filters.priorities && filters.priorities.length > 0) {
 			const allowedPriorities = new Set(filters.priorities);
@@ -352,7 +390,11 @@ export class SearchService {
 			});
 		}
 		if (filters.ready) {
-			const doneIds = new Set(proposals.filter((t) => isCompleteStatus(t.proposal.status)).map((t) => t.id));
+			const doneIds = new Set(
+				proposals
+					.filter((t) => isCompleteStatus(t.proposal.status))
+					.map((t) => t.id),
+			);
 
 			filtered = filtered.filter((entity) => {
 				const proposal = entity.proposal;
@@ -360,7 +402,9 @@ export class SearchService {
 				if (proposal.assignee && proposal.assignee.length > 0) return false;
 				const deps = proposal.dependencies || [];
 				if (deps.length > 0) {
-					const hasBlockingDependency = deps.some((depId) => !doneIds.has(depId));
+					const hasBlockingDependency = deps.some(
+						(depId) => !doneIds.has(depId),
+					);
 					if (hasBlockingDependency) return false;
 				}
 				return true;
@@ -381,7 +425,10 @@ export class SearchService {
 		}
 
 		if (filters.priorities && filters.priorities.length > 0) {
-			if (!proposal.priorityLower || !filters.priorities.includes(proposal.priorityLower)) {
+			if (
+				!proposal.priorityLower ||
+				!filters.priorities.includes(proposal.priorityLower)
+			) {
 				return false;
 			}
 		}
@@ -398,7 +445,10 @@ export class SearchService {
 		}
 
 		if (filters.rationale && filters.rationale.length > 0) {
-			if (!proposal.rationaleLower || !filters.rationale.includes(proposal.rationaleLower)) {
+			if (
+				!proposal.rationaleLower ||
+				!filters.rationale.includes(proposal.rationaleLower)
+			) {
 				return false;
 			}
 		}
@@ -408,7 +458,8 @@ export class SearchService {
 			if (isTerminalStatus(proposal.proposal.status)) return false;
 
 			// 2. Must be unassigned
-			if (proposal.proposal.assignee && proposal.proposal.assignee.length > 0) return false;
+			if (proposal.proposal.assignee && proposal.proposal.assignee.length > 0)
+				return false;
 
 			// 3. Dependencies must be done
 			const deps = proposal.proposal.dependencies || [];
@@ -443,24 +494,32 @@ export class SearchService {
 		};
 	}
 
-	private normalizeStringArray(value?: string | string[]): string[] | undefined {
+	private normalizeStringArray(
+		value?: string | string[],
+	): string[] | undefined {
 		if (!value) {
 			return undefined;
 		}
 
 		const values = Array.isArray(value) ? value : [value];
-		const normalized = values.map((item) => item.trim().toLowerCase()).filter((item) => item.length > 0);
+		const normalized = values
+			.map((item) => item.trim().toLowerCase())
+			.filter((item) => item.length > 0);
 
 		return normalized.length > 0 ? normalized : undefined;
 	}
 
-	private normalizeLabelsArray(value?: string | string[]): string[] | undefined {
+	private normalizeLabelsArray(
+		value?: string | string[],
+	): string[] | undefined {
 		if (!value) {
 			return undefined;
 		}
 
 		const values = Array.isArray(value) ? value : [value];
-		const normalized = values.map((item) => item.trim().toLowerCase()).filter((item) => item.length > 0);
+		const normalized = values
+			.map((item) => item.trim().toLowerCase())
+			.filter((item) => item.length > 0);
 
 		return normalized.length > 0 ? normalized : undefined;
 	}
@@ -482,7 +541,10 @@ export class SearchService {
 		return normalized.length > 0 ? normalized : undefined;
 	}
 
-	private mapEntityToResult(entity: SearchEntity, result?: FuseResult<SearchEntity>): SearchResult {
+	private mapEntityToResult(
+		entity: SearchEntity,
+		result?: FuseResult<SearchEntity>,
+	): SearchResult {
 		const score = result?.score ?? null;
 		const matches = this.mapMatches(result?.matches);
 
@@ -512,14 +574,18 @@ export class SearchService {
 		};
 	}
 
-	private mapMatches(matches?: readonly FuseResultMatch[]): SearchMatch[] | undefined {
+	private mapMatches(
+		matches?: readonly FuseResultMatch[],
+	): SearchMatch[] | undefined {
 		if (!matches || matches.length === 0) {
 			return undefined;
 		}
 
 		return matches.map((match) => ({
 			key: match.key,
-			indices: match.indices.map(([start, end]) => [start, end] as [number, number]),
+			indices: match.indices.map(
+				([start, end]) => [start, end] as [number, number],
+			),
 			value: match.value,
 		}));
 	}
@@ -531,10 +597,15 @@ function buildProposalBodyText(proposal: Proposal): string {
 		parts.push(proposal.description);
 	}
 
-	if (Array.isArray(proposal.acceptanceCriteriaItems) && proposal.acceptanceCriteriaItems.length > 0) {
+	if (
+		Array.isArray(proposal.acceptanceCriteriaItems) &&
+		proposal.acceptanceCriteriaItems.length > 0
+	) {
 		const lines = [...proposal.acceptanceCriteriaItems]
 			.sort((a, b) => a.index - b.index)
-			.map((criterion) => `- [${criterion.checked ? "x" : " "}] ${criterion.text}`);
+			.map(
+				(criterion) => `- [${criterion.checked ? "x" : " "}] ${criterion.text}`,
+			);
 		parts.push(lines.join("\n"));
 	}
 

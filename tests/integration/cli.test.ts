@@ -1,14 +1,21 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
-import { mkdir, rm, stat, readFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core, isGitRepository } from "../../src/index.ts";
 import { parseProposal } from "../../src/markdown/parser.ts";
 import { extractStructuredSection } from "../../src/markdown/structured-sections.ts";
 import type { Decision, Document, Proposal } from "../../src/types/index.ts";
-import { listProposalsPlatformAware, viewProposalPlatformAware } from "../support/test-helpers.ts";
-import { createUniqueTestDir, safeCleanup, execSync, buildCliCommand,
+import {
+	listProposalsPlatformAware,
+	viewProposalPlatformAware,
+} from "../support/test-helpers.ts";
+import {
+	buildCliCommand,
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 let TEST_DIR: string;
@@ -45,18 +52,28 @@ describe("CLI Integration", () => {
 			await core.initializeProject("CLI Test Project", true);
 
 			// Verify directory structure was created
-			const configExists = await stat(join(TEST_DIR, "roadmap", "config.yml")).then(() => true).catch(() => false);
+			const configExists = await stat(join(TEST_DIR, "roadmap", "config.yml"))
+				.then(() => true)
+				.catch(() => false);
 			assert.strictEqual(configExists, true);
 
 			// Verify config content
 			const config = await core.filesystem.loadConfig();
 			assert.strictEqual(config?.projectName, "CLI Test Project");
-			assert.deepStrictEqual(config?.statuses, ["Potential", "Active", "Accepted", "Complete", "Abandoned"]);
+			assert.deepStrictEqual(config?.statuses, [
+				"Potential",
+				"Active",
+				"Accepted",
+				"Complete",
+				"Abandoned",
+			]);
 			assert.strictEqual(config?.defaultStatus, "Potential");
 
 			// Verify git commit was created
 			const lastCommit = await core.gitOps.getLastCommitMessage();
-			assert.ok(lastCommit.includes("Initialize roadmap project: CLI Test Project"));
+			assert.ok(
+				lastCommit.includes("Initialize roadmap project: CLI Test Project"),
+			);
 		});
 
 		it("should create all required directories", async () => {
@@ -151,11 +168,21 @@ describe("CLI Integration", () => {
 			await addAgentInstructions(TEST_DIR, core.gitOps);
 
 			// Verify agent files were created
-			const agentsFile = await stat(join(TEST_DIR, "AGENTS.md")).then(() => true).catch(() => false);
-			const claudeFile = await stat(join(TEST_DIR, "CLAUDE.md")).then(() => true).catch(() => false);
+			const agentsFile = await stat(join(TEST_DIR, "AGENTS.md"))
+				.then(() => true)
+				.catch(() => false);
+			const claudeFile = await stat(join(TEST_DIR, "CLAUDE.md"))
+				.then(() => true)
+				.catch(() => false);
 			// .cursorrules removed; Cursor now uses AGENTS.md
-			const geminiFile = await stat(join(TEST_DIR, "GEMINI.md")).then(() => true).catch(() => false);
-			const copilotFile = await stat(join(TEST_DIR, ".github/copilot-instructions.md")).then(() => true).catch(() => false);
+			const geminiFile = await stat(join(TEST_DIR, "GEMINI.md"))
+				.then(() => true)
+				.catch(() => false);
+			const copilotFile = await stat(
+				join(TEST_DIR, ".github/copilot-instructions.md"),
+			)
+				.then(() => true)
+				.catch(() => false);
 
 			assert.strictEqual(agentsFile, true);
 			assert.strictEqual(claudeFile, true);
@@ -163,10 +190,22 @@ describe("CLI Integration", () => {
 			assert.strictEqual(copilotFile, true);
 
 			// Verify content
-			const agentsContent = await await readFile(join(TEST_DIR, "AGENTS.md"), "utf-8");
-			const claudeContent = await await readFile(join(TEST_DIR, "CLAUDE.md"), "utf-8");
-			const geminiContent = await await readFile(join(TEST_DIR, "GEMINI.md"), "utf-8");
-			const copilotContent = await await readFile(join(TEST_DIR, ".github/copilot-instructions.md"), "utf-8");
+			const agentsContent = await await readFile(
+				join(TEST_DIR, "AGENTS.md"),
+				"utf-8",
+			);
+			const claudeContent = await await readFile(
+				join(TEST_DIR, "CLAUDE.md"),
+				"utf-8",
+			);
+			const geminiContent = await await readFile(
+				join(TEST_DIR, "GEMINI.md"),
+				"utf-8",
+			);
+			const copilotContent = await await readFile(
+				join(TEST_DIR, ".github/copilot-instructions.md"),
+				"utf-8",
+			);
 			assert.ok(agentsContent.length > 0);
 			assert.ok(claudeContent.length > 0);
 			assert.ok(geminiContent.length > 0);
@@ -178,14 +217,23 @@ describe("CLI Integration", () => {
 			execSync(`git config user.name "Test User"`, { cwd: TEST_DIR });
 			execSync(`git config user.email test@example.com`, { cwd: TEST_DIR });
 
-			const output = execSync(`node --experimental-strip-types ${CLI_PATH} init TestProj --defaults --agent-instructions none`, { cwd: TEST_DIR }).text();
+			const output = execSync(
+				`node --experimental-strip-types ${CLI_PATH} init TestProj --defaults --agent-instructions none`,
+				{ cwd: TEST_DIR },
+			).text();
 
-			const agentsFile = await stat(join(TEST_DIR, "AGENTS.md")).then(() => true).catch(() => false);
-			const claudeFile = await stat(join(TEST_DIR, "CLAUDE.md")).then(() => true).catch(() => false);
+			const agentsFile = await stat(join(TEST_DIR, "AGENTS.md"))
+				.then(() => true)
+				.catch(() => false);
+			const claudeFile = await stat(join(TEST_DIR, "CLAUDE.md"))
+				.then(() => true)
+				.catch(() => false);
 			assert.strictEqual(agentsFile, false);
 			assert.strictEqual(claudeFile, false);
 			assert.ok(output.includes("AI Integration: CLI commands (legacy)"));
-			assert.ok(output.includes("Skipping agent instruction files per selection."));
+			assert.ok(
+				output.includes("Skipping agent instruction files per selection."),
+			);
 		});
 
 		it("should print minimal summary when advanced settings are skipped", async () => {
@@ -193,8 +241,10 @@ describe("CLI Integration", () => {
 			execSync(`git config user.name "Test User"`, { cwd: TEST_DIR });
 			execSync(`git config user.email test@example.com`, { cwd: TEST_DIR });
 
-			const output = execSync(`node --experimental-strip-types ${CLI_PATH} init SummaryProj --defaults --agent-instructions none`, { cwd: TEST_DIR })
-				.text();
+			const output = execSync(
+				`node --experimental-strip-types ${CLI_PATH} init SummaryProj --defaults --agent-instructions none`,
+				{ cwd: TEST_DIR },
+			).text();
 
 			assert.ok(output.includes("Initialization Summary"));
 			assert.ok(output.includes("Project Name: SummaryProj"));
@@ -209,14 +259,25 @@ describe("CLI Integration", () => {
 			execSync(`git config user.name "Test User"`, { cwd: TEST_DIR });
 			execSync(`git config user.email test@example.com`, { cwd: TEST_DIR });
 
-			const output = execSync(`node --experimental-strip-types ${CLI_PATH} init McpProj --defaults --integration-mode mcp`, { cwd: TEST_DIR }).text();
+			const output = execSync(
+				`node --experimental-strip-types ${CLI_PATH} init McpProj --defaults --integration-mode mcp`,
+				{ cwd: TEST_DIR },
+			).text();
 
 			assert.ok(output.includes("AI Integration: MCP connector"));
-			assert.ok(output.includes("Agent instruction files: guidance is provided through the MCP connector."));
+			assert.ok(
+				output.includes(
+					"Agent instruction files: guidance is provided through the MCP connector.",
+				),
+			);
 			assert.ok(output.includes("MCP server name: roadmap"));
 			assert.ok(output.includes("MCP client setup: skipped (non-interactive)"));
-			const agentsFile = await stat(join(TEST_DIR, "AGENTS.md")).then(() => true).catch(() => false);
-			const claudeFile = await stat(join(TEST_DIR, "CLAUDE.md")).then(() => true).catch(() => false);
+			const agentsFile = await stat(join(TEST_DIR, "AGENTS.md"))
+				.then(() => true)
+				.catch(() => false);
+			const claudeFile = await stat(join(TEST_DIR, "CLAUDE.md"))
+				.then(() => true)
+				.catch(() => false);
 			assert.strictEqual(agentsFile, false);
 			assert.strictEqual(claudeFile, false);
 		});
@@ -226,7 +287,10 @@ describe("CLI Integration", () => {
 			execSync(`git config user.name "Test User"`, { cwd: TEST_DIR });
 			execSync(`git config user.email test@example.com`, { cwd: TEST_DIR });
 
-			const output = execSync(`node --experimental-strip-types ${CLI_PATH} init DefaultMcpProj --defaults`, { cwd: TEST_DIR }).text();
+			const output = execSync(
+				`node --experimental-strip-types ${CLI_PATH} init DefaultMcpProj --defaults`,
+				{ cwd: TEST_DIR },
+			).text();
 
 			assert.ok(output.includes("AI Integration: MCP connector"));
 			assert.ok(output.includes("MCP server name: roadmap"));
@@ -238,12 +302,19 @@ describe("CLI Integration", () => {
 			execSync(`git config user.name "Test User"`, { cwd: TEST_DIR });
 			execSync(`git config user.email test@example.com`, { cwd: TEST_DIR });
 
-			const output = execSync(`node --experimental-strip-types ${CLI_PATH} init SkipProj --defaults --integration-mode none`, { cwd: TEST_DIR }).text();
+			const output = execSync(
+				`node --experimental-strip-types ${CLI_PATH} init SkipProj --defaults --integration-mode none`,
+				{ cwd: TEST_DIR },
+			).text();
 
 			assert.ok(!output.includes("AI Integration:"));
 			assert.ok(output.includes("AI integration: skipped"));
-			const agentsFile = await stat(join(TEST_DIR, "AGENTS.md")).then(() => true).catch(() => false);
-			const claudeFile = await stat(join(TEST_DIR, "CLAUDE.md")).then(() => true).catch(() => false);
+			const agentsFile = await stat(join(TEST_DIR, "AGENTS.md"))
+				.then(() => true)
+				.catch(() => false);
+			const claudeFile = await stat(join(TEST_DIR, "CLAUDE.md"))
+				.then(() => true)
+				.catch(() => false);
 			assert.strictEqual(agentsFile, false);
 			assert.strictEqual(claudeFile, false);
 		});
@@ -256,8 +327,10 @@ describe("CLI Integration", () => {
 			let failed = false;
 			let combinedOutput = "";
 			try {
-				execSync(`node --experimental-strip-types ${CLI_PATH} init ConflictProj --defaults --integration-mode mcp --agent-instructions claude`, { cwd: TEST_DIR })
-					.text();
+				execSync(
+					`node --experimental-strip-types ${CLI_PATH} init ConflictProj --defaults --integration-mode mcp --agent-instructions claude`,
+					{ cwd: TEST_DIR },
+				).text();
 			} catch (err) {
 				failed = true;
 				const e = err as { stdout?: unknown; stderr?: unknown };
@@ -273,9 +346,14 @@ describe("CLI Integration", () => {
 			execSync(`git config user.name "Test User"`, { cwd: TEST_DIR });
 			execSync(`git config user.email test@example.com`, { cwd: TEST_DIR });
 
-			execSync(`node --experimental-strip-types ${CLI_PATH} init TestProj --defaults --agent-instructions agents,none`, { cwd: TEST_DIR });
+			execSync(
+				`node --experimental-strip-types ${CLI_PATH} init TestProj --defaults --agent-instructions agents,none`,
+				{ cwd: TEST_DIR },
+			);
 
-			const agentsFile = await stat(join(TEST_DIR, "AGENTS.md")).then(() => true).catch(() => false);
+			const agentsFile = await stat(join(TEST_DIR, "AGENTS.md"))
+				.then(() => true)
+				.catch(() => false);
 			assert.strictEqual(agentsFile, true);
 		});
 
@@ -286,13 +364,20 @@ describe("CLI Integration", () => {
 
 			let failed = false;
 			try {
-				execSync(`node --experimental-strip-types ${CLI_PATH} init InvalidProj --defaults --agent-instructions notreal`, { cwd: TEST_DIR });
+				execSync(
+					`node --experimental-strip-types ${CLI_PATH} init InvalidProj --defaults --agent-instructions notreal`,
+					{ cwd: TEST_DIR },
+				);
 			} catch (e) {
 				failed = true;
 				const err = e as { stdout?: unknown; stderr?: unknown };
 				const out = String(err.stdout ?? "") + String(err.stderr ?? "");
 				assert.ok(out.includes("Invalid agent instruction: notreal"));
-				assert.ok(out.includes("Valid options are: cursor, claude, agents, gemini, copilot, none"));
+				assert.ok(
+					out.includes(
+						"Valid options are: cursor, claude, agents, gemini, copilot, none",
+					),
+				);
 			}
 
 			assert.strictEqual(failed, true);
@@ -312,7 +397,10 @@ describe("CLI Integration", () => {
 			await core.initializeProject("Git Integration Test", true);
 
 			const lastCommit = await core.gitOps.getLastCommitMessage();
-			assert.strictEqual(lastCommit, "roadmap: Initialize roadmap project: Git Integration Test");
+			assert.strictEqual(
+				lastCommit,
+				"roadmap: Initialize roadmap project: Git Integration Test",
+			);
 
 			// Verify git status is clean after initialization
 			const isClean = await core.gitOps.isClean();
@@ -388,11 +476,16 @@ describe("CLI Integration", () => {
 
 			// Verify proposals are grouped correctly by status
 			const todoProposals = proposals.filter((t) => t.status === "Potential");
-			const completeProposals = proposals.filter((t) => t.status === "Complete");
+			const completeProposals = proposals.filter(
+				(t) => t.status === "Complete",
+			);
 
 			assert.strictEqual(todoProposals.length, 2);
 			assert.strictEqual(completeProposals.length, 1);
-			expect(todoProposals.map((t) => t.id)).toEqual(["proposal-1", "proposal-3"]); // IDs normalized to uppercase
+			expect(todoProposals.map((t) => t.id)).toEqual([
+				"proposal-1",
+				"proposal-3",
+			]); // IDs normalized to uppercase
 			expect(completeProposals.map((t) => t.id)).toEqual(["proposal-2"]); // IDs normalized to uppercase
 		});
 
@@ -401,7 +494,13 @@ describe("CLI Integration", () => {
 
 			// Load and verify default config status order
 			const config = await core.filesystem.loadConfig();
-			assert.deepStrictEqual(config?.statuses, ["Potential", "Active", "Accepted", "Complete", "Abandoned"]);
+			assert.deepStrictEqual(config?.statuses, [
+				"Potential",
+				"Active",
+				"Accepted",
+				"Complete",
+				"Abandoned",
+			]);
 		});
 
 		it("should filter proposals by status", async () => {
@@ -434,7 +533,10 @@ describe("CLI Integration", () => {
 				false,
 			);
 
-			const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal list --plain --status Complete`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal list --plain --status Complete`,
+				{ cwd: TEST_DIR },
+			);
 			const out = result.stdout.toString();
 			assert.ok(out.includes("Complete:"));
 			assert.ok(out.includes("proposal-2 - Second Proposal")); // IDs normalized to uppercase
@@ -474,7 +576,10 @@ describe("CLI Integration", () => {
 			const testCases = ["complete", "complete", "complete"];
 
 			for (const status of testCases) {
-				const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal list --plain --status ${status}`, { cwd: TEST_DIR });
+				const result = execSync(
+					`node --experimental-strip-types ${CLI_PATH} proposal list --plain --status ${status}`,
+					{ cwd: TEST_DIR },
+				);
 				const out = result.stdout.toString();
 				assert.ok(out.includes("Complete:"));
 				assert.ok(out.includes("proposal-2 - Second Proposal")); // IDs normalized to uppercase
@@ -482,7 +587,10 @@ describe("CLI Integration", () => {
 			}
 
 			// Test with -s flag
-			const resultShort = await listProposalsPlatformAware({ plain: true, status: "complete" }, TEST_DIR);
+			const resultShort = await listProposalsPlatformAware(
+				{ plain: true, status: "complete" },
+				TEST_DIR,
+			);
 			const outShort = resultShort.stdout;
 			assert.ok(outShort.includes("Complete:"));
 			assert.ok(outShort.includes("proposal-2 - Second Proposal")); // IDs normalized to uppercase
@@ -519,7 +627,10 @@ describe("CLI Integration", () => {
 				false,
 			);
 
-			const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal list --plain --assignee alice`, { cwd: TEST_DIR });
+			const result = execSync(
+				`node --experimental-strip-types ${CLI_PATH} proposal list --plain --assignee alice`,
+				{ cwd: TEST_DIR },
+			);
 			const out = result.stdout.toString();
 			assert.ok(out.includes("proposal-1 - Assigned Proposal")); // IDs normalized to uppercase
 			assert.ok(!out.includes("proposal-2 - Unassigned Proposal"));
@@ -562,7 +673,10 @@ describe("CLI Integration", () => {
 			assert.strictEqual(loadedProposal?.status, "Potential");
 			assert.deepStrictEqual(loadedProposal?.assignee, ["testuser"]);
 			assert.deepStrictEqual(loadedProposal?.labels, ["test", "cli"]);
-			assert.strictEqual(loadedProposal?.rawContent, "This is a test proposal for view command");
+			assert.strictEqual(
+				loadedProposal?.rawContent,
+				"This is a test proposal for view command",
+			);
 		});
 
 		it("should handle proposal IDs with and without 'proposal-' prefix", async () => {
@@ -584,7 +698,8 @@ describe("CLI Integration", () => {
 			);
 
 			// Test loading with full proposal-5 ID
-			const proposalWithPrefix = await core.filesystem.loadProposal("proposal-5");
+			const proposalWithPrefix =
+				await core.filesystem.loadProposal("proposal-5");
 			assert.strictEqual(proposalWithPrefix?.id, "proposal-5"); // IDs normalized to uppercase
 
 			// Test loading with just numeric ID (5)
@@ -596,7 +711,8 @@ describe("CLI Integration", () => {
 		it("should return null for non-existent proposals", async () => {
 			const core = new Core(TEST_DIR);
 
-			const nonExistentProposal = await core.filesystem.loadProposal("proposal-999");
+			const nonExistentProposal =
+				await core.filesystem.loadProposal("proposal-999");
 			assert.strictEqual(nonExistentProposal, null);
 		});
 
@@ -656,14 +772,22 @@ describe("CLI Integration", () => {
 				false,
 			);
 
-			const resultShortcut = await viewProposalPlatformAware({ proposalId: "1", plain: true }, TEST_DIR);
-			const resultView = await viewProposalPlatformAware({ proposalId: "1", plain: true, useViewCommand: true }, TEST_DIR);
+			const resultShortcut = await viewProposalPlatformAware(
+				{ proposalId: "1", plain: true },
+				TEST_DIR,
+			);
+			const resultView = await viewProposalPlatformAware(
+				{ proposalId: "1", plain: true, useViewCommand: true },
+				TEST_DIR,
+			);
 
 			const outShortcut = resultShortcut.stdout;
 			const outView = resultView.stdout;
 
 			assert.strictEqual(outShortcut, outView);
-			assert.ok(outShortcut.includes("Proposal proposal-1 - Shortcut Proposal"));
+			assert.ok(
+				outShortcut.includes("Proposal proposal-1 - Shortcut Proposal"),
+			);
 		});
 	});
 
@@ -713,7 +837,12 @@ describe("CLI Integration", () => {
 			// Verify changes were persisted
 			const updatedProposal = await core.filesystem.loadProposal("proposal-1");
 			assert.strictEqual(updatedProposal?.title, "Updated Title");
-			expect(extractStructuredSection(updatedProposal?.rawContent || "", "description")).toBe("Updated description");
+			expect(
+				extractStructuredSection(
+					updatedProposal?.rawContent || "",
+					"description",
+				),
+			).toBe("Updated description");
 			assert.strictEqual(updatedProposal?.status, "Active");
 			const today = new Date().toISOString().slice(0, 16).replace("T", " ");
 			assert.strictEqual(updatedProposal?.updatedDate, today);
@@ -738,11 +867,17 @@ describe("CLI Integration", () => {
 			);
 
 			// Update assignee
-			await core.updateProposalFromInput("proposal-2", { assignee: ["newuser@example.com"] }, false);
+			await core.updateProposalFromInput(
+				"proposal-2",
+				{ assignee: ["newuser@example.com"] },
+				false,
+			);
 
 			// Verify assignee was updated
 			const updatedProposal = await core.filesystem.loadProposal("proposal-2");
-			assert.deepStrictEqual(updatedProposal?.assignee, ["newuser@example.com"]);
+			assert.deepStrictEqual(updatedProposal?.assignee, [
+				"newuser@example.com",
+			]);
 		});
 
 		it("should replace all labels with new labels", async () => {
@@ -764,7 +899,11 @@ describe("CLI Integration", () => {
 			);
 
 			// Replace all labels
-			await core.updateProposalFromInput("proposal-3", { labels: ["new1", "new2", "new3"] }, false);
+			await core.updateProposalFromInput(
+				"proposal-3",
+				{ labels: ["new1", "new2", "new3"] },
+				false,
+			);
 
 			// Verify labels were replaced
 			const updatedProposal = await core.filesystem.loadProposal("proposal-3");
@@ -790,11 +929,19 @@ describe("CLI Integration", () => {
 			);
 
 			// Add new labels
-			await core.updateProposalFromInput("proposal-4", { addLabels: ["added1", "added2"] }, false);
+			await core.updateProposalFromInput(
+				"proposal-4",
+				{ addLabels: ["added1", "added2"] },
+				false,
+			);
 
 			// Verify labels were added
 			const updatedProposal = await core.filesystem.loadProposal("proposal-4");
-			assert.deepStrictEqual(updatedProposal?.labels, ["existing", "added1", "added2"]);
+			assert.deepStrictEqual(updatedProposal?.labels, [
+				"existing",
+				"added1",
+				"added2",
+			]);
 		});
 
 		it("should remove specific labels", async () => {
@@ -816,7 +963,11 @@ describe("CLI Integration", () => {
 			);
 
 			// Remove specific label
-			await core.updateProposalFromInput("proposal-5", { removeLabels: ["remove"] }, false);
+			await core.updateProposalFromInput(
+				"proposal-5",
+				{ removeLabels: ["remove"] },
+				false,
+			);
 
 			// Verify label was removed
 			const updatedProposal = await core.filesystem.loadProposal("proposal-5");
@@ -826,7 +977,8 @@ describe("CLI Integration", () => {
 		it("should handle non-existent proposal gracefully", async () => {
 			const core = new Core(TEST_DIR);
 
-			const nonExistentProposal = await core.filesystem.loadProposal("proposal-999");
+			const nonExistentProposal =
+				await core.filesystem.loadProposal("proposal-999");
 			assert.strictEqual(nonExistentProposal, null);
 		});
 
@@ -849,7 +1001,11 @@ describe("CLI Integration", () => {
 			);
 
 			// Edit the proposal (without manually setting updatedDate)
-			await core.updateProposalFromInput("proposal-6", { title: "Updated Title" }, false);
+			await core.updateProposalFromInput(
+				"proposal-6",
+				{ title: "Updated Title" },
+				false,
+			);
 
 			// Verify updated_date was automatically set to today's date
 			const updatedProposal = await core.filesystem.loadProposal("proposal-6");
@@ -877,7 +1033,11 @@ describe("CLI Integration", () => {
 			);
 
 			// Edit the proposal with auto-commit enabled
-			await core.updateProposalFromInput("proposal-7", { title: "Updated for Commit" }, true);
+			await core.updateProposalFromInput(
+				"proposal-7",
+				{ title: "Updated for Commit" },
+				true,
+			);
 
 			// Verify the proposal was updated (this confirms the update functionality works)
 			const updatedProposal = await core.filesystem.loadProposal("proposal-7");
@@ -926,7 +1086,10 @@ describe("CLI Integration", () => {
 			assert.strictEqual(updatedProposal?.updatedDate, today);
 			assert.deepStrictEqual(updatedProposal?.labels, ["yaml", "test"]);
 			assert.deepStrictEqual(updatedProposal?.dependencies, ["proposal-1"]);
-			assert.strictEqual(updatedProposal?.rawContent, "Testing YAML preservation");
+			assert.strictEqual(
+				updatedProposal?.rawContent,
+				"Testing YAML preservation",
+			);
 		});
 	});
 
@@ -969,7 +1132,9 @@ describe("CLI Integration", () => {
 
 			// Verify proposal exists in archive
 			const { readdir } = await import("node:fs/promises");
-			const archiveFiles = await readdir(join(TEST_DIR, "roadmap", "archive", "proposals"));
+			const archiveFiles = await readdir(
+				join(TEST_DIR, "roadmap", "archive", "proposals"),
+			);
 			expect(archiveFiles.some((f) => f.startsWith("proposal-1"))).toBe(true);
 		});
 
@@ -1044,7 +1209,9 @@ describe("CLI Integration", () => {
 
 			// Verify promoted proposal has new proposal- ID
 			const { readdir } = await import("node:fs/promises");
-			const proposalsFiles = await readdir(join(TEST_DIR, "roadmap", "proposals"));
+			const proposalsFiles = await readdir(
+				join(TEST_DIR, "roadmap", "proposals"),
+			);
 			expect(proposalsFiles.some((f) => f.startsWith("proposal-"))).toBe(true);
 
 			// Verify proposal can be loaded with proposal- ID
@@ -1080,7 +1247,9 @@ describe("CLI Integration", () => {
 
 			// Verify draft exists in archive
 			const { readdir } = await import("node:fs/promises");
-			const archiveFiles = await readdir(join(TEST_DIR, "roadmap", "archive", "drafts"));
+			const archiveFiles = await readdir(
+				join(TEST_DIR, "roadmap", "archive", "drafts"),
+			);
 			expect(archiveFiles.some((f) => f.startsWith("draft-4"))).toBe(true);
 		});
 
@@ -1143,7 +1312,8 @@ describe("CLI Integration", () => {
 				createdDate: "2025-06-08",
 				labels: ["important", "preservation-test"],
 				dependencies: ["proposal-1", "proposal-2"],
-				rawContent: "This proposal has rich metadata that should be preserved through transitions",
+				rawContent:
+					"This proposal has rich metadata that should be preserved through transitions",
 			};
 
 			await core.createProposal(originalProposal, false);
@@ -1158,7 +1328,10 @@ describe("CLI Integration", () => {
 			assert.strictEqual(asDraft?.title, originalProposal.title);
 			assert.deepStrictEqual(asDraft?.assignee, originalProposal.assignee);
 			assert.deepStrictEqual(asDraft?.labels, originalProposal.labels);
-			assert.deepStrictEqual(asDraft?.dependencies, originalProposal.dependencies);
+			assert.deepStrictEqual(
+				asDraft?.dependencies,
+				originalProposal.dependencies,
+			);
 			assert.ok(asDraft?.rawContent?.includes(originalProposal.rawContent));
 
 			// Promote back to proposal - use the draft's new ID
@@ -1170,13 +1343,23 @@ describe("CLI Integration", () => {
 
 			// Find the promoted proposal (it will have a new proposal- ID)
 			const proposals = await core.filesystem.listProposals();
-			const backToProposal = proposals.find((t) => t.title === originalProposal.title);
+			const backToProposal = proposals.find(
+				(t) => t.title === originalProposal.title,
+			);
 
 			assert.strictEqual(backToProposal?.title, originalProposal.title);
-			assert.deepStrictEqual(backToProposal?.assignee, originalProposal.assignee);
+			assert.deepStrictEqual(
+				backToProposal?.assignee,
+				originalProposal.assignee,
+			);
 			assert.deepStrictEqual(backToProposal?.labels, originalProposal.labels);
-			assert.deepStrictEqual(backToProposal?.dependencies, originalProposal.dependencies);
-			assert.ok(backToProposal?.rawContent?.includes(originalProposal.rawContent));
+			assert.deepStrictEqual(
+				backToProposal?.dependencies,
+				originalProposal.dependencies,
+			);
+			assert.ok(
+				backToProposal?.rawContent?.includes(originalProposal.rawContent),
+			);
 		});
 	});
 
@@ -1286,11 +1469,23 @@ describe("CLI Integration", () => {
 
 			const config = await core.filesystem.loadConfig();
 			const statuses = config?.statuses || [];
-			assert.deepStrictEqual(statuses, ["Potential", "Active", "Accepted", "Complete", "Abandoned"]);
+			assert.deepStrictEqual(statuses, [
+				"Potential",
+				"Active",
+				"Accepted",
+				"Complete",
+				"Abandoned",
+			]);
 
 			// Test the kanban board generation
-			const { generateKanbanBoardWithMetadata } = await import("../../src/board.ts");
-			const board = generateKanbanBoardWithMetadata(proposals, statuses, "Test Project");
+			const { generateKanbanBoardWithMetadata } = await import(
+				"../../src/board.ts"
+			);
+			const board = generateKanbanBoardWithMetadata(
+				proposals,
+				statuses,
+				"Test Project",
+			);
 
 			// Verify board contains all statuses and proposals (now on separate lines)
 			assert.ok(board.includes("Potential"));
@@ -1322,8 +1517,14 @@ describe("CLI Integration", () => {
 			const config = await core.filesystem.loadConfig();
 			const statuses = config?.statuses || [];
 
-			const { generateKanbanBoardWithMetadata } = await import("../../src/board.ts");
-			const board = generateKanbanBoardWithMetadata(proposals, statuses, "Test Project");
+			const { generateKanbanBoardWithMetadata } = await import(
+				"../../src/board.ts"
+			);
+			const board = generateKanbanBoardWithMetadata(
+				proposals,
+				statuses,
+				"Test Project",
+			);
 
 			// Should return board with metadata, configured status columns, and empty-proposal message
 			assert.ok(board.includes("# Kanban Board Export"));
@@ -1352,8 +1553,14 @@ describe("CLI Integration", () => {
 			const config = await core.filesystem.loadConfig();
 			const statuses = config?.statuses || [];
 
-			const { generateKanbanBoardWithMetadata } = await import("../../src/board.ts");
-			const board = generateKanbanBoardWithMetadata(proposals, statuses, "Test Project");
+			const { generateKanbanBoardWithMetadata } = await import(
+				"../../src/board.ts"
+			);
+			const board = generateKanbanBoardWithMetadata(
+				proposals,
+				statuses,
+				"Test Project",
+			);
 
 			// Should contain proper board structure
 			assert.ok(board.includes("# Kanban Board Export"));
@@ -1384,8 +1591,14 @@ describe("CLI Integration", () => {
 			const statuses = config?.statuses || [];
 
 			// Test that --vertical flag produces vertical layout
-			const { generateKanbanBoardWithMetadata } = await import("../../src/board.ts");
-			const board = generateKanbanBoardWithMetadata(proposals, statuses, "Test Project");
+			const { generateKanbanBoardWithMetadata } = await import(
+				"../../src/board.ts"
+			);
+			const board = generateKanbanBoardWithMetadata(
+				proposals,
+				statuses,
+				"Test Project",
+			);
 
 			// Should contain proper board structure
 			assert.ok(board.includes("# Kanban Board Export"));
@@ -1418,7 +1631,11 @@ describe("CLI Integration", () => {
 
 			// create branch with updated status
 			execSync(`git checkout -b feature`, { cwd: TEST_DIR });
-			await core.updateProposalFromInput("proposal-1", { status: "Complete" }, true);
+			await core.updateProposalFromInput(
+				"proposal-1",
+				{ status: "Complete" },
+				true,
+			);
 			execSync(`git push -u origin feature`, { cwd: TEST_DIR });
 
 			// Update remote-tracking branches to ensure they are recognized
@@ -1437,14 +1654,22 @@ describe("CLI Integration", () => {
 
 			for (const branch of branches) {
 				const ref = `origin/${branch}`;
-				const files = await core.gitOps.listFilesInTree(ref, "roadmap/proposals");
+				const files = await core.gitOps.listFilesInTree(
+					ref,
+					"roadmap/proposals",
+				);
 				for (const file of files) {
 					const content = await core.gitOps.showFile(ref, file);
 					const remoteProposal = parseProposal(content);
 					const existing = proposalsById.get(remoteProposal.id);
 					const currentIdx = existing ? statuses.indexOf(existing.status) : -1;
 					const newIdx = statuses.indexOf(remoteProposal.status);
-					if (!existing || newIdx > currentIdx || currentIdx === -1 || newIdx === currentIdx) {
+					if (
+						!existing ||
+						newIdx > currentIdx ||
+						currentIdx === -1 ||
+						newIdx === currentIdx
+					) {
 						proposalsById.set(remoteProposal.id, remoteProposal);
 					}
 				}
@@ -1471,10 +1696,18 @@ describe("CLI Integration", () => {
 				false,
 			);
 
-			const resultDefault = execSync(`node --experimental-strip-types ${buildCliCommand(["src/cli.ts", "board"])}`, { cwd: TEST_DIR });
-			const resultView = execSync(`node --experimental-strip-types ${buildCliCommand(["src/cli.ts", "board", "view"])}`, { cwd: TEST_DIR });
+			const resultDefault = execSync(
+				`node --experimental-strip-types ${buildCliCommand(["src/cli.ts", "board"])}`,
+				{ cwd: TEST_DIR },
+			);
+			const resultView = execSync(
+				`node --experimental-strip-types ${buildCliCommand(["src/cli.ts", "board", "view"])}`,
+				{ cwd: TEST_DIR },
+			);
 
-			expect(resultDefault.stdout.toString()).toBe(resultView.stdout.toString());
+			expect(resultDefault.stdout.toString()).toBe(
+				resultView.stdout.toString(),
+			);
 		});
 
 		it("should export kanban board to file", async () => {
@@ -1501,18 +1734,30 @@ describe("CLI Integration", () => {
 			const config = await core.filesystem.loadConfig();
 			const statuses = config?.statuses || [];
 
-			await exportKanbanBoardToFile(proposals, statuses, outputPath, "TestProject");
+			await exportKanbanBoardToFile(
+				proposals,
+				statuses,
+				outputPath,
+				"TestProject",
+			);
 
 			// Verify file was created and contains expected content
 			const content = await await readFile(outputPath, "utf-8");
 			assert.ok(content.includes("Potential"));
 			assert.ok(content.includes("proposal-1"));
 			assert.ok(content.includes("Export Test Proposal"));
-			assert.ok(content.includes("# Kanban Board Export (powered by Roadmap.md)"));
+			assert.ok(
+				content.includes("# Kanban Board Export (powered by Roadmap.md)"),
+			);
 			assert.ok(content.includes("Project: TestProject"));
 
 			// Test overwrite behavior
-			await exportKanbanBoardToFile(proposals, statuses, outputPath, "TestProject");
+			await exportKanbanBoardToFile(
+				proposals,
+				statuses,
+				outputPath,
+				"TestProject",
+			);
 			const overwrittenContent = await await readFile(outputPath, "utf-8");
 			const occurrences = overwrittenContent.split("proposal-1").length - 1;
 			assert.strictEqual(occurrences, 1); // Should appear once after overwrite

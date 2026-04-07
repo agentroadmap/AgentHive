@@ -2,7 +2,11 @@ import assert from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { McpServer } from "../../src/mcp/server.ts";
 import { registerDocumentTools } from "../../src/mcp/tools/documents/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 const getText = (content: unknown[] | undefined): string => {
 	const item = content?.[0] as { text?: string } | undefined;
@@ -25,14 +29,23 @@ describe("MCP document tools", () => {
 	});
 
 	afterEach(async () => {
-		try { await mcpServer.stop(); } catch { /* */ }
+		try {
+			await mcpServer.stop();
+		} catch {
+			/* */
+		}
 		await safeCleanup(TEST_DIR);
 	});
 
 	it("registers all document tools", async () => {
 		const tools = await mcpServer.testInterface.listTools();
 		const names = tools.tools.map((t) => t.name);
-		const expected = ["document_list", "document_view", "document_create", "document_update"];
+		const expected = [
+			"document_list",
+			"document_view",
+			"document_create",
+			"document_update",
+		];
 		for (const name of expected) {
 			assert.ok(names.includes(name), `Missing tool: ${name}`);
 		}
@@ -50,41 +63,62 @@ describe("MCP document tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("Architecture Decision Record") || text.includes("created") || text.includes("Document"),
-			`Expected document creation: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("Architecture Decision Record") ||
+				text.includes("created") ||
+				text.includes("Document"),
+			`Expected document creation: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("lists all documents", async () => {
 		await mcpServer.testInterface.callTool({
-			params: { name: "document_create", arguments: { title: "Doc A", content: "Content A" } },
+			params: {
+				name: "document_create",
+				arguments: { title: "Doc A", content: "Content A" },
+			},
 		});
 		await mcpServer.testInterface.callTool({
-			params: { name: "document_create", arguments: { title: "Doc B", content: "Content B" } },
+			params: {
+				name: "document_create",
+				arguments: { title: "Doc B", content: "Content B" },
+			},
 		});
 
 		const result = await mcpServer.testInterface.callTool({
 			params: { name: "document_list", arguments: {} },
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("Doc A") && text.includes("Doc B"), `Missing documents: ${text.slice(0, 300)}`);
+		assert.ok(
+			text.includes("Doc A") && text.includes("Doc B"),
+			`Missing documents: ${text.slice(0, 300)}`,
+		);
 	});
 
 	it("views a specific document", async () => {
 		await mcpServer.testInterface.callTool({
-			params: { name: "document_create", arguments: { title: "View test", content: "Full content here" } },
+			params: {
+				name: "document_create",
+				arguments: { title: "View test", content: "Full content here" },
+			},
 		});
 
 		const result = await mcpServer.testInterface.callTool({
 			params: { name: "document_view", arguments: { title: "View test" } },
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("Full content here") || text.includes("View test"),
-			`Expected document view: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("Full content here") || text.includes("View test"),
+			`Expected document view: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("updates an existing document", async () => {
 		await mcpServer.testInterface.callTool({
-			params: { name: "document_create", arguments: { title: "Update test", content: "Original" } },
+			params: {
+				name: "document_create",
+				arguments: { title: "Update test", content: "Original" },
+			},
 		});
 
 		const result = await mcpServer.testInterface.callTool({
@@ -97,21 +131,36 @@ describe("MCP document tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("Update test") || text.includes("updated") || text.includes("Updated content"),
-			`Expected document update: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("Update test") ||
+				text.includes("updated") ||
+				text.includes("Updated content"),
+			`Expected document update: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("lists documents filtered by tag", async () => {
 		await mcpServer.testInterface.callTool({
-			params: { name: "document_create", arguments: { title: "Tagged doc", content: "Tagged content", tags: "database,ADR" } },
+			params: {
+				name: "document_create",
+				arguments: {
+					title: "Tagged doc",
+					content: "Tagged content",
+					tags: "database,ADR",
+				},
+			},
 		});
 
 		const result = await mcpServer.testInterface.callTool({
 			params: { name: "document_list", arguments: { tag: "database" } },
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("Tagged doc") || text.includes("database") || text.length > 5,
-			`Expected filtered list: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("Tagged doc") ||
+				text.includes("database") ||
+				text.length > 5,
+			`Expected filtered list: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("creates an empty document directory", async () => {
@@ -119,7 +168,10 @@ describe("MCP document tools", () => {
 			params: { name: "document_list", arguments: {} },
 		});
 		const text = getText(result.content);
-		assert.ok(typeof text === "string", `Expected document list: ${text.slice(0, 200)}`);
+		assert.ok(
+			typeof text === "string",
+			`Expected document list: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("views a non-existent document gracefully", async () => {

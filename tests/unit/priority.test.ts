@@ -153,7 +153,11 @@ This proposal has mixed case priority.`;
 		});
 
 		it("should round-trip priority values correctly", () => {
-			const priorities: Array<"high" | "medium" | "low"> = ["high", "medium", "low"];
+			const priorities: Array<"high" | "medium" | "low"> = [
+				"high",
+				"medium",
+				"low",
+			];
 
 			for (const priority of priorities) {
 				const originalProposal: Proposal = {

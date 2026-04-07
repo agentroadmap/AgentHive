@@ -3,7 +3,11 @@ import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/index.ts";
-import { createUniqueTestDir, execSync, safeCleanup } from "../support/test-utils.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 const CLI_PATH = join(process.cwd(), "src", "cli.ts");
 
@@ -72,25 +76,46 @@ describe("CLI proposal list --compact", () => {
 	});
 
 	it("prints one compact line per proposal", async () => {
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal list --compact`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal list --compact`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(result.exitCode, 0);
 
-		const lines = result.stdout.toString().trim().split(/\r?\n/).filter(Boolean);
+		const lines = result.stdout
+			.toString()
+			.trim()
+			.split(/\r?\n/)
+			.filter(Boolean);
 
 		assert.strictEqual(lines.length, 3);
-		assert.ok(lines.includes("proposal-1 | Potential | low | Low Priority Potential"));
-		assert.ok(lines.includes("proposal-2 | Complete | high | High Priority Complete"));
+		assert.ok(
+			lines.includes("proposal-1 | Potential | low | Low Priority Potential"),
+		);
+		assert.ok(
+			lines.includes("proposal-2 | Complete | high | High Priority Complete"),
+		);
 		assert.ok(lines.includes("proposal-3 | Active | - | Unprioritized Active"));
-		assert.ok(lines[0]?.startsWith("proposal-2 | Complete | high | High Priority Complete"));
+		assert.ok(
+			lines[0]?.startsWith(
+				"proposal-2 | Complete | high | High Priority Complete",
+			),
+		);
 		assert.ok(!result.stdout.toString().includes("Potential:"));
 		assert.ok(!result.stdout.toString().includes("Complete:"));
 	});
 
 	it("preserves existing filters in compact mode", async () => {
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal list --compact --status Complete`, {
-			cwd: TEST_DIR,
-		});
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal list --compact --status Complete`,
+			{
+				cwd: TEST_DIR,
+			},
+		);
 		assert.strictEqual(result.exitCode, 0);
-		assert.strictEqual(result.stdout.toString().trim(), "proposal-2 | Complete | high | High Priority Complete");
+		assert.strictEqual(
+			result.stdout.toString().trim(),
+			"proposal-2 | Complete | high | High Priority Complete",
+		);
 	});
 });

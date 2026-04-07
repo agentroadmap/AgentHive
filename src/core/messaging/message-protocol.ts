@@ -10,14 +10,25 @@
  * AC#4: Message threading supported (this file)
  */
 
-import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from "node:fs";
-import { join, basename } from "node:path";
+import {
+	appendFileSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
+import { join } from "node:path";
 
 /** Message priority levels */
 export type MessagePriority = "low" | "normal" | "high" | "urgent";
 
 /** Message types */
-export type MessageType = "text" | "mention" | "thread_reply" | "intent" | "system";
+export type MessageType =
+	| "text"
+	| "mention"
+	| "thread_reply"
+	| "intent"
+	| "system";
 
 /** Parsed message with metadata */
 export interface ParsedMessage {
@@ -88,7 +99,7 @@ export function extractMentions(content: string): string[] {
 	let match;
 
 	while ((match = mentionRegex.exec(content)) !== null) {
-		const name = match![1]!.toLowerCase();
+		const name = match?.[1]?.toLowerCase();
 		if (!mentions.includes(name)) {
 			mentions.push(name);
 		}
@@ -102,14 +113,17 @@ export function extractMentions(content: string): string[] {
  * Format: [timestamp] sender: content
  * With optional metadata: [timestamp] sender [priority=high] [thread=MSG-xxx]: content
  */
-export function parseMessageLine(line: string, channel: string): ParsedMessage | null {
+export function parseMessageLine(
+	line: string,
+	channel: string,
+): ParsedMessage | null {
 	// Match format: [timestamp] sender [metadata...]: content
 	const basicMatch = line.match(/^\[([^\]]+)\]\s+([^:]+?):\s*(.*)$/);
 	if (!basicMatch) return null;
 
-	const timestamp = basicMatch![1]!;
-	const senderAndMeta = basicMatch![2]!;
-	const rawContent = basicMatch![3]!;
+	const timestamp = basicMatch?.[1]!;
+	const senderAndMeta = basicMatch?.[2]!;
+	const rawContent = basicMatch?.[3]!;
 
 	let priority: MessagePriority = "normal";
 	let threadId: string | undefined;
@@ -122,7 +136,7 @@ export function parseMessageLine(line: string, channel: string): ParsedMessage |
 	const metaRegex = /\[(\w+)=([^\]]+)\]/g;
 	let metaMatch;
 	while ((metaMatch = metaRegex.exec(senderAndMeta)) !== null) {
-		const key = metaMatch[1]!.toLowerCase();
+		const key = metaMatch[1]?.toLowerCase();
 		const value = metaMatch[2]!;
 		if (key === "priority") {
 			priority = value.toLowerCase() as MessagePriority;
@@ -141,7 +155,7 @@ export function parseMessageLine(line: string, channel: string): ParsedMessage |
 	// Also check inline metadata in content (fallback)
 	const priorityMatch = cleanContent.match(/\[priority=(\w+)\]\s*/);
 	if (priorityMatch && priority === "normal") {
-		priority = priorityMatch[1]!.toLowerCase() as MessagePriority;
+		priority = priorityMatch[1]?.toLowerCase() as MessagePriority;
 		cleanContent = cleanContent.replace(priorityMatch[0], "");
 	}
 
@@ -185,7 +199,10 @@ export function parseMessageLine(line: string, channel: string): ParsedMessage |
 /**
  * Parse all messages from a markdown file.
  */
-export function parseMessagesFromFile(filePath: string, channel: string): ParsedMessage[] {
+export function parseMessagesFromFile(
+	filePath: string,
+	channel: string,
+): ParsedMessage[] {
 	if (!existsSync(filePath)) return [];
 
 	const content = readFileSync(filePath, "utf-8");
@@ -289,7 +306,7 @@ export function buildThreads(messages: ParsedMessage[]): Thread[] {
  */
 export function findMentionsForAgent(
 	messages: ParsedMessage[],
-	agentName: string
+	agentName: string,
 ): MentionNotification[] {
 	const notifications: MentionNotification[] = [];
 	const normalizedAgent = agentName.toLowerCase().replace(/^@/, "");
@@ -313,12 +330,14 @@ export function findMentionsForAgent(
 /**
  * AC#3: Format a notification for a mention.
  */
-export function formatMentionNotification(notification: MentionNotification): string {
+export function formatMentionNotification(
+	notification: MentionNotification,
+): string {
 	const lines = [
-		"Mention in #" + notification.channel,
-		"From: " + notification.message.from,
-		"Time: " + notification.message.timestamp,
-		"Message: " + notification.message.content,
+		`Mention in #${notification.channel}`,
+		`From: ${notification.message.from}`,
+		`Time: ${notification.message.timestamp}`,
+		`Message: ${notification.message.content}`,
 	];
 
 	if (notification.message.replyTo) {
@@ -332,23 +351,23 @@ export function formatMentionNotification(notification: MentionNotification): st
  * AC#4: Format a thread for display.
  */
 export function formatThread(thread: Thread): string {
-	const header = "## Thread: " + thread.id;
-	const parentLine = "**" + thread.parent.from + "** (" + thread.parent.timestamp + "):";
+	const header = `## Thread: ${thread.id}`;
+	const parentLine = `**${thread.parent.from}** (${thread.parent.timestamp}):`;
 	const lines: string[] = [header, "", parentLine, thread.parent.content, ""];
 
 	if (thread.replies.length > 0) {
-		const divider = "--- " + thread.replies.length + " replies ---";
+		const divider = `--- ${thread.replies.length} replies ---`;
 		lines.push(divider);
 		lines.push("");
 		for (const reply of thread.replies) {
-			const replyLine = "**" + reply.from + "** (" + reply.timestamp + "):";
+			const replyLine = `**${reply.from}** (${reply.timestamp}):`;
 			lines.push(replyLine);
 			lines.push(reply.content);
 			lines.push("");
 		}
 	}
 
-	const participants = "Participants: " + thread.participants.join(", ");
+	const participants = `Participants: ${thread.participants.join(", ")}`;
 	lines.push(participants);
 	return lines.join("\n");
 }
@@ -365,7 +384,7 @@ export function appendMessage(
 		priority?: MessagePriority;
 		threadId?: string;
 		replyTo?: string;
-	}
+	},
 ): string {
 	const channelFile = getChannelFilePath(messagesDir, channel);
 	const formattedLine = formatMessage(options);
@@ -378,7 +397,10 @@ export function appendMessage(
 /**
  * Get the file path for a channel.
  */
-export function getChannelFilePath(messagesDir: string, channel: string): string {
+export function getChannelFilePath(
+	messagesDir: string,
+	channel: string,
+): string {
 	// Normalize channel name
 	const normalizedName = channel.toLowerCase().replace(/\s+/g, "-");
 
@@ -411,8 +433,12 @@ export function ensureChannelFile(messagesDir: string, channel: string): void {
 	const filePath = getChannelFilePath(messagesDir, channel);
 
 	if (!existsSync(filePath)) {
-		const channelType = channel === "public" ? "Public" :
-			channel.includes("-") ? "Private DM" : "Group Chat";
+		const channelType =
+			channel === "public"
+				? "Public"
+				: channel.includes("-")
+					? "Private DM"
+					: "Group Chat";
 		const header = `# ${channelType}: #${channel}\n\n`;
 		writeFileSync(filePath, header);
 	}
@@ -421,7 +447,9 @@ export function ensureChannelFile(messagesDir: string, channel: string): void {
 /**
  * Get all mentioned agents from a batch of messages.
  */
-export function getAllMentions(messages: ParsedMessage[]): Map<string, ParsedMessage[]> {
+export function getAllMentions(
+	messages: ParsedMessage[],
+): Map<string, ParsedMessage[]> {
 	const mentionsByAgent = new Map<string, ParsedMessage[]>();
 
 	for (const message of messages) {
@@ -440,7 +468,7 @@ export function getAllMentions(messages: ParsedMessage[]): Map<string, ParsedMes
  */
 export function shouldNotify(
 	message: ParsedMessage,
-	agentName: string
+	agentName: string,
 ): boolean {
 	const normalizedAgent = agentName.toLowerCase().replace(/^@/, "");
 

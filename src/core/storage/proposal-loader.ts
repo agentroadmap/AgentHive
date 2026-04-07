@@ -9,13 +9,16 @@
  */
 
 import { DEFAULT_DIRECTORIES } from "../../constants/index.ts";
-import type { ProposalDirectoryType } from "../dag/cross-branch-proposals.ts";
 import type { GitOperations } from "../../git/operations.ts";
 import { parseProposal } from "../../markdown/parser.ts";
-import type { RoadmapConfig, Proposal } from "../../types/index.ts";
+import type { Proposal, RoadmapConfig } from "../../types/index.ts";
 import { normalizeId } from "../../utils/prefix-config.ts";
-import { normalizeProposalId, normalizeProposalIdentity, extractProposalIdFromFilePath } from "../../utils/proposal-path.ts";
-import { sortByProposalId } from "../../utils/proposal-sorting.ts";
+import {
+	extractProposalIdFromFilePath,
+	normalizeProposalId,
+	normalizeProposalIdentity,
+} from "../../utils/proposal-path.ts";
+import type { ProposalDirectoryType } from "../dag/cross-branch-proposals.ts";
 
 /** Default prefix for proposals */
 const DEFAULT_STATE_PREFIX = "proposal";
@@ -28,15 +31,21 @@ export interface BranchProposalProposalEntry {
 	path: string;
 }
 
-const STATE_DIRECTORIES: Array<{ path: string; type: ProposalDirectoryType }> = [
-	{ path: "proposals", type: "proposal" },
-	{ path: "drafts", type: "draft" },
-	{ path: "archive/proposals", type: "archived" },
-	{ path: "completed", type: "completed" },
-];
+const STATE_DIRECTORIES: Array<{ path: string; type: ProposalDirectoryType }> =
+	[
+		{ path: "proposals", type: "proposal" },
+		{ path: "drafts", type: "draft" },
+		{ path: "archive/proposals", type: "archived" },
+		{ path: "completed", type: "completed" },
+	];
 
-function getProposalTypeFromPath(path: string, roadmapDir: string): ProposalDirectoryType | null {
-	const normalized = path.startsWith(`${roadmapDir}/`) ? path.slice(roadmapDir.length + 1) : path;
+function getProposalTypeFromPath(
+	path: string,
+	roadmapDir: string,
+): ProposalDirectoryType | null {
+	const normalized = path.startsWith(`${roadmapDir}/`)
+		? path.slice(roadmapDir.length + 1)
+		: path;
 
 	for (const { path: dir, type } of STATE_DIRECTORIES) {
 		if (normalized.startsWith(`${dir}/`)) {
@@ -50,7 +59,9 @@ function getProposalTypeFromPath(path: string, roadmapDir: string): ProposalDire
 /**
  * Get the appropriate loading message based on remote operations configuration
  */
-export function getProposalLoadingMessage(config: RoadmapConfig | null): string {
+export function getProposalLoadingMessage(
+	config: RoadmapConfig | null,
+): string {
 	return config?.remoteOperations === false
 		? "Loading proposals from local branches..."
 		: "Loading proposals from local and remote branches...";
@@ -77,7 +88,10 @@ function normalizeRemoteBranch(branch: string): string | null {
 /**
  * Normalize a local branch name, filtering out invalid entries
  */
-function normalizeLocalBranch(branch: string, currentBranch: string): string | null {
+function normalizeLocalBranch(
+	branch: string,
+	currentBranch: string,
+): string | null {
 	const br = branch.trim();
 	if (!br) return null;
 	// Skip HEAD, origin refs, and current branch
@@ -99,71 +113,90 @@ export async function buildRemoteProposalIndex(
 	roadmapDir = "roadmap",
 	sinceDays?: number,
 	proposalCollector?: BranchProposalProposalEntry[],
-	prefix = DEFAULT_STATE_PREFIX,
+	_prefix = DEFAULT_STATE_PREFIX,
 	includeCompleted = false,
 ): Promise<Map<string, RemoteIndexEntry[]>> {
 	const out = new Map<string, RemoteIndexEntry[]>();
 
-	const normalized = branches.map(normalizeRemoteBranch).filter((b): b is string => Boolean(b));
+	const normalized = branches
+		.map(normalizeRemoteBranch)
+		.filter((b): b is string => Boolean(b));
 
 	// Do branches in parallel but not unbounded
 	const CONCURRENCY = 4;
 	const queue = [...normalized];
 
-	const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
-		while (queue.length) {
-			const br = queue.pop();
-			if (!br) break;
+	const workers = Array.from(
+		{ length: Math.min(CONCURRENCY, queue.length) },
+		async () => {
+			while (queue.length) {
+				const br = queue.pop();
+				if (!br) break;
 
-			const ref = `origin/${br}`;
+				const ref = `origin/${br}`;
 
-			try {
-				const listPath = proposalCollector ? roadmapDir : `${roadmapDir}/proposals`;
+				try {
+					const listPath = proposalCollector
+						? roadmapDir
+						: `${roadmapDir}/proposals`;
 
-				// Get roadmap files for this branch
-				const files = await git.listFilesInTree(ref, listPath);
-				if (files.length === 0) continue;
+					// Get roadmap files for this branch
+					const files = await git.listFilesInTree(ref, listPath);
+					if (files.length === 0) continue;
 
-				// Get last modified times for all files in one pass
-				const lm = await git.getBranchLastModifiedMap(ref, listPath, sinceDays);
+					// Get last modified times for all files in one pass
+					const lm = await git.getBranchLastModifiedMap(
+						ref,
+						listPath,
+						sinceDays,
+					);
 
-				for (const f of files) {
-					const id = extractProposalIdFromFilePath(f);
-					if (!id) continue;
-					const lastModified = lm.get(f) ?? new Date(0);
-					const entry: RemoteIndexEntry = { id, branch: br, path: f, lastModified };
-
-					// Collect full proposal info when requested
-					const type = getProposalTypeFromPath(f, roadmapDir);
-					if (!proposalCollector && type !== "proposal") {
-						continue;
-					}
-					if (type && proposalCollector) {
-						proposalCollector.push({
+					for (const f of files) {
+						const id = extractProposalIdFromFilePath(f);
+						if (!id) continue;
+						const lastModified = lm.get(f) ?? new Date(0);
+						const entry: RemoteIndexEntry = {
 							id,
-							type,
 							branch: br,
 							path: f,
 							lastModified,
-						});
-					}
+						};
 
-					// Only index active proposals for hydration selection (optionally include completed)
-					if (type === "proposal" || (includeCompleted && type === "completed")) {
-						const arr = out.get(id);
-						if (arr) {
-							arr.push(entry);
-						} else {
-							out.set(id, [entry]);
+						// Collect full proposal info when requested
+						const type = getProposalTypeFromPath(f, roadmapDir);
+						if (!proposalCollector && type !== "proposal") {
+							continue;
+						}
+						if (type && proposalCollector) {
+							proposalCollector.push({
+								id,
+								type,
+								branch: br,
+								path: f,
+								lastModified,
+							});
+						}
+
+						// Only index active proposals for hydration selection (optionally include completed)
+						if (
+							type === "proposal" ||
+							(includeCompleted && type === "completed")
+						) {
+							const arr = out.get(id);
+							if (arr) {
+								arr.push(entry);
+							} else {
+								out.set(id, [entry]);
+							}
 						}
 					}
+				} catch (error) {
+					// Branch might not have roadmap directory, skip it
+					console.debug(`Skipping branch ${br}: ${error}`);
 				}
-			} catch (error) {
-				// Branch might not have roadmap directory, skip it
-				console.debug(`Skipping branch ${br}: ${error}`);
 			}
-		}
-	});
+		},
+	);
 
 	await Promise.all(workers);
 	return out;
@@ -200,12 +233,17 @@ async function hydrateProposals(
 					result.push(proposal);
 				}
 			} catch (error) {
-				console.error(`Failed to hydrate proposal ${w.id} from ${w.ref}:${w.path}`, error);
+				console.error(
+					`Failed to hydrate proposal ${w.id} from ${w.ref}:${w.path}`,
+					error,
+				);
 			}
 		}
 	}
 
-	await Promise.all(Array.from({ length: Math.min(CONCURRENCY, winners.length) }, worker));
+	await Promise.all(
+		Array.from({ length: Math.min(CONCURRENCY, winners.length) }, worker),
+	);
 	return result;
 }
 
@@ -220,12 +258,14 @@ export async function buildLocalBranchProposalIndex(
 	roadmapDir = "roadmap",
 	sinceDays?: number,
 	proposalCollector?: BranchProposalProposalEntry[],
-	prefix = DEFAULT_STATE_PREFIX,
+	_prefix = DEFAULT_STATE_PREFIX,
 	includeCompleted = false,
 ): Promise<Map<string, RemoteIndexEntry[]>> {
 	const out = new Map<string, RemoteIndexEntry[]>();
 
-	const normalized = branches.map((b) => normalizeLocalBranch(b, currentBranch)).filter((b): b is string => Boolean(b));
+	const normalized = branches
+		.map((b) => normalizeLocalBranch(b, currentBranch))
+		.filter((b): b is string => Boolean(b));
 
 	if (normalized.length === 0) {
 		return out;
@@ -235,60 +275,77 @@ export async function buildLocalBranchProposalIndex(
 	const CONCURRENCY = 4;
 	const queue = [...normalized];
 
-	const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
-		while (queue.length) {
-			const br = queue.pop();
-			if (!br) break;
+	const workers = Array.from(
+		{ length: Math.min(CONCURRENCY, queue.length) },
+		async () => {
+			while (queue.length) {
+				const br = queue.pop();
+				if (!br) break;
 
-			try {
-				const listPath = proposalCollector ? roadmapDir : `${roadmapDir}/proposals`;
+				try {
+					const listPath = proposalCollector
+						? roadmapDir
+						: `${roadmapDir}/proposals`;
 
-				// Get roadmap files in this branch
-				const files = await git.listFilesInTree(br, listPath);
-				if (files.length === 0) continue;
+					// Get roadmap files in this branch
+					const files = await git.listFilesInTree(br, listPath);
+					if (files.length === 0) continue;
 
-				// Get last modified times for all files in one pass
-				const lm = await git.getBranchLastModifiedMap(br, listPath, sinceDays);
+					// Get last modified times for all files in one pass
+					const lm = await git.getBranchLastModifiedMap(
+						br,
+						listPath,
+						sinceDays,
+					);
 
-				for (const f of files) {
-					const id = extractProposalIdFromFilePath(f);
-					if (!id) continue;
-					const lastModified = lm.get(f) ?? new Date(0);
-					const entry: RemoteIndexEntry = { id, branch: br, path: f, lastModified };
-
-					// Collect full proposal info when requested
-					const type = getProposalTypeFromPath(f, roadmapDir);
-					if (!proposalCollector && type !== "proposal") {
-						continue;
-					}
-					if (type && proposalCollector) {
-						proposalCollector.push({
+					for (const f of files) {
+						const id = extractProposalIdFromFilePath(f);
+						if (!id) continue;
+						const lastModified = lm.get(f) ?? new Date(0);
+						const entry: RemoteIndexEntry = {
 							id,
-							type,
 							branch: br,
 							path: f,
 							lastModified,
-						});
-					}
+						};
 
-					// Only index active proposals for hydration selection (optionally include completed)
-					if (type === "proposal" || (includeCompleted && type === "completed")) {
-						const arr = out.get(id);
-						if (arr) {
-							arr.push(entry);
-						} else {
-							out.set(id, [entry]);
+						// Collect full proposal info when requested
+						const type = getProposalTypeFromPath(f, roadmapDir);
+						if (!proposalCollector && type !== "proposal") {
+							continue;
+						}
+						if (type && proposalCollector) {
+							proposalCollector.push({
+								id,
+								type,
+								branch: br,
+								path: f,
+								lastModified,
+							});
+						}
+
+						// Only index active proposals for hydration selection (optionally include completed)
+						if (
+							type === "proposal" ||
+							(includeCompleted && type === "completed")
+						) {
+							const arr = out.get(id);
+							if (arr) {
+								arr.push(entry);
+							} else {
+								out.set(id, [entry]);
+							}
 						}
 					}
-				}
-			} catch (error) {
-				// Branch might not have roadmap directory, skip it
-				if (process.env.DEBUG) {
-					console.debug(`Skipping local branch ${br}: ${error}`);
+				} catch (error) {
+					// Branch might not have roadmap directory, skip it
+					if (process.env.DEBUG) {
+						console.debug(`Skipping local branch ${br}: ${error}`);
+					}
 				}
 			}
-		}
-	});
+		},
+	);
 
 	await Promise.all(workers);
 	return out;
@@ -310,15 +367,21 @@ function chooseWinners(
 
 		if (!local) {
 			// No local version - take the newest remote
-			const best = entries.reduce((a, b) => (a.lastModified >= b.lastModified ? a : b));
+			const best = entries.reduce((a, b) =>
+				a.lastModified >= b.lastModified ? a : b,
+			);
 			winners.push({ id, ref: `origin/${best.branch}`, path: best.path });
 			continue;
 		}
 
 		// If strategy is "most_recent", only hydrate if any remote is newer
 		if (strategy === "most_recent") {
-			const localTs = local.updatedDate ? new Date(local.updatedDate).getTime() : 0;
-			const newestRemote = entries.reduce((a, b) => (a.lastModified >= b.lastModified ? a : b));
+			const localTs = local.updatedDate
+				? new Date(local.updatedDate).getTime()
+				: 0;
+			const newestRemote = entries.reduce((a, b) =>
+				a.lastModified >= b.lastModified ? a : b,
+			);
 
 			if (newestRemote.lastModified.getTime() > localTs) {
 				winners.push({
@@ -332,12 +395,16 @@ function chooseWinners(
 
 		// For "most_progressed", we might need to check if remote is newer
 		// to potentially have a more progressed status
-		const localTs = local.updatedDate ? new Date(local.updatedDate).getTime() : 0;
+		const localTs = local.updatedDate
+			? new Date(local.updatedDate).getTime()
+			: 0;
 		const maybeNewer = entries.some((e) => e.lastModified.getTime() > localTs);
 
 		if (maybeNewer) {
 			// Only hydrate the newest remote to check if it's more progressed
-			const newestRemote = entries.reduce((a, b) => (a.lastModified >= b.lastModified ? a : b));
+			const newestRemote = entries.reduce((a, b) =>
+				a.lastModified >= b.lastModified ? a : b,
+			);
 			winners.push({
 				id,
 				ref: `origin/${newestRemote.branch}`,
@@ -369,7 +436,14 @@ export async function findProposalInRemoteBranches(
 		if (branches.length === 0) return null;
 
 		// Build proposal index for remote branches
-		const remoteIndex = await buildRemoteProposalIndex(git, branches, roadmapDir, sinceDays, undefined, prefix);
+		const remoteIndex = await buildRemoteProposalIndex(
+			git,
+			branches,
+			roadmapDir,
+			sinceDays,
+			undefined,
+			prefix,
+		);
 
 		const normalizedId = normalizeId(proposalId, prefix);
 
@@ -378,7 +452,9 @@ export async function findProposalInRemoteBranches(
 		if (!entries || entries.length === 0) return null;
 
 		// Get the newest version
-		const best = entries.reduce((a, b) => (a.lastModified >= b.lastModified ? a : b));
+		const best = entries.reduce((a, b) =>
+			a.lastModified >= b.lastModified ? a : b,
+		);
 
 		// Hydrate the proposal
 		const ref = `origin/${best.branch}`;
@@ -391,7 +467,10 @@ export async function findProposalInRemoteBranches(
 		return proposal;
 	} catch (error) {
 		if (process.env.DEBUG) {
-			console.error(`Failed to find proposal ${proposalId} in remote branches:`, error);
+			console.error(
+				`Failed to find proposal ${proposalId} in remote branches:`,
+				error,
+			);
 		}
 		return null;
 	}
@@ -415,7 +494,10 @@ export async function findProposalInLocalBranches(
 		// Get recent local branches
 		const allBranches = await git.listRecentBranches(sinceDays);
 		const localBranches = allBranches.filter(
-			(b) => !b.startsWith("origin/") && !b.startsWith("refs/remotes/") && b !== "origin",
+			(b) =>
+				!b.startsWith("origin/") &&
+				!b.startsWith("refs/remotes/") &&
+				b !== "origin",
 		);
 
 		if (localBranches.length <= 1) return null; // Only current branch
@@ -438,7 +520,9 @@ export async function findProposalInLocalBranches(
 		if (!entries || entries.length === 0) return null;
 
 		// Get the newest version
-		const best = entries.reduce((a, b) => (a.lastModified >= b.lastModified ? a : b));
+		const best = entries.reduce((a, b) =>
+			a.lastModified >= b.lastModified ? a : b,
+		);
 
 		// Hydrate the proposal
 		const content = await git.showFile(best.branch, best.path);
@@ -450,7 +534,10 @@ export async function findProposalInLocalBranches(
 		return proposal;
 	} catch (error) {
 		if (process.env.DEBUG) {
-			console.error(`Failed to find proposal ${proposalId} in local branches:`, error);
+			console.error(
+				`Failed to find proposal ${proposalId} in local branches:`,
+				error,
+			);
 		}
 		return null;
 	}
@@ -470,13 +557,28 @@ export async function loadRemoteProposals(
 ): Promise<Proposal[]> {
 	try {
 		if (process.env.DEBUG) {
-			console.error("[DEBUG] loadRemoteProposals: remoteOperations=", userConfig?.remoteOperations, ", checkActiveBranches=", userConfig?.checkActiveBranches);
-			console.error("[DEBUG] Checking if remote operations should be skipped...");
+			console.error(
+				"[DEBUG] loadRemoteProposals: remoteOperations=",
+				userConfig?.remoteOperations,
+				", checkActiveBranches=",
+				userConfig?.checkActiveBranches,
+			);
+			console.error(
+				"[DEBUG] Checking if remote operations should be skipped...",
+			);
 		}
 		// Skip remote operations if disabled
-		if (userConfig?.remoteOperations === false || userConfig?.checkActiveBranches === false) {
+		if (
+			userConfig?.remoteOperations === false ||
+			userConfig?.checkActiveBranches === false
+		) {
 			if (process.env.DEBUG) {
-				console.error("[DEBUG] Skipping remote proposals - remoteOperations=", userConfig?.remoteOperations, ", checkActiveBranches=", userConfig?.checkActiveBranches);
+				console.error(
+					"[DEBUG] Skipping remote proposals - remoteOperations=",
+					userConfig?.remoteOperations,
+					", checkActiveBranches=",
+					userConfig?.checkActiveBranches,
+				);
 			}
 			onProgress?.("Remote operations disabled - skipping remote proposals");
 			return [];
@@ -495,11 +597,14 @@ export async function loadRemoteProposals(
 			return [];
 		}
 
-		onProgress?.(`Indexing ${branches.length} recent remote branches (last ${days} days)...`);
+		onProgress?.(
+			`Indexing ${branches.length} recent remote branches (last ${days} days)...`,
+		);
 
 		// Build a cheap index without fetching content
 		const roadmapDir = DEFAULT_DIRECTORIES.ROADMAP;
-		const proposalPrefix = userConfig?.prefixes?.proposal ?? DEFAULT_STATE_PREFIX;
+		const proposalPrefix =
+			userConfig?.prefixes?.proposal ?? DEFAULT_STATE_PREFIX;
 		const remoteIndex = await buildRemoteProposalIndex(
 			gitOps,
 			branches,
@@ -515,14 +620,19 @@ export async function loadRemoteProposals(
 			return [];
 		}
 
-		onProgress?.(`Found ${remoteIndex.size} unique proposals across remote branches`);
+		onProgress?.(
+			`Found ${remoteIndex.size} unique proposals across remote branches`,
+		);
 
 		// If we have local proposals, use them to determine which remote proposals to hydrate
 		let winners: Array<{ id: string; ref: string; path: string }>;
 
 		if (localProposals && localProposals.length > 0) {
-			const localById = new Map(localProposals.map((t) => [normalizeProposalId(t.id), t]));
-			const strategy = userConfig?.proposalResolutionStrategy || "most_progressed";
+			const localById = new Map(
+				localProposals.map((t) => [normalizeProposalId(t.id), t]),
+			);
+			const strategy =
+				userConfig?.proposalResolutionStrategy || "most_progressed";
 
 			// Only hydrate remote proposals that are newer or missing locally
 			winners = chooseWinners(localById, remoteIndex, strategy);
@@ -531,7 +641,9 @@ export async function loadRemoteProposals(
 			// No local proposals, need to hydrate all remote proposals (take newest of each)
 			winners = [];
 			for (const [id, entries] of remoteIndex) {
-				const best = entries.reduce((a, b) => (a.lastModified >= b.lastModified ? a : b));
+				const best = entries.reduce((a, b) =>
+					a.lastModified >= b.lastModified ? a : b,
+				);
 				winners.push({ id, ref: `origin/${best.branch}`, path: best.path });
 			}
 			onProgress?.(`Hydrating ${winners.length} remote proposals...`);
@@ -613,12 +725,17 @@ export async function loadLocalBranchProposals(
 ): Promise<Proposal[]> {
 	try {
 		if (process.env.DEBUG) {
-			console.error("[DEBUG] loadLocalBranchProposals: checkActiveBranches=", userConfig?.checkActiveBranches);
+			console.error(
+				"[DEBUG] loadLocalBranchProposals: checkActiveBranches=",
+				userConfig?.checkActiveBranches,
+			);
 		}
 		// Skip local branch loading if checkActiveBranches is false
 		if (userConfig?.checkActiveBranches === false) {
 			if (process.env.DEBUG) {
-				console.error("[DEBUG] Skipping local branch proposals - checkActiveBranches=false");
+				console.error(
+					"[DEBUG] Skipping local branch proposals - checkActiveBranches=false",
+				);
 			}
 			return [];
 		}
@@ -634,7 +751,10 @@ export async function loadLocalBranchProposals(
 
 		// Filter to only local branches (not origin/*)
 		const localBranches = allBranches.filter(
-			(b) => !b.startsWith("origin/") && !b.startsWith("refs/remotes/") && b !== "origin",
+			(b) =>
+				!b.startsWith("origin/") &&
+				!b.startsWith("refs/remotes/") &&
+				b !== "origin",
 		);
 
 		if (localBranches.length <= 1) {
@@ -642,11 +762,14 @@ export async function loadLocalBranchProposals(
 			return [];
 		}
 
-		onProgress?.(`Indexing ${localBranches.length - 1} other local branches...`);
+		onProgress?.(
+			`Indexing ${localBranches.length - 1} other local branches...`,
+		);
 
 		// Build index of proposals from other local branches
 		const roadmapDir = DEFAULT_DIRECTORIES.ROADMAP;
-		const proposalPrefix = userConfig?.prefixes?.proposal ?? DEFAULT_STATE_PREFIX;
+		const proposalPrefix =
+			userConfig?.prefixes?.proposal ?? DEFAULT_STATE_PREFIX;
 		const localBranchIndex = await buildLocalBranchProposalIndex(
 			gitOps,
 			localBranches,
@@ -662,14 +785,19 @@ export async function loadLocalBranchProposals(
 			return [];
 		}
 
-		onProgress?.(`Found ${localBranchIndex.size} unique proposals in other local branches`);
+		onProgress?.(
+			`Found ${localBranchIndex.size} unique proposals in other local branches`,
+		);
 
 		// Determine which proposals to hydrate
 		let winners: Array<{ id: string; ref: string; path: string }>;
 
 		if (localProposals && localProposals.length > 0) {
-			const localById = new Map(localProposals.map((t) => [normalizeProposalId(t.id), t]));
-			const strategy = userConfig?.proposalResolutionStrategy || "most_progressed";
+			const localById = new Map(
+				localProposals.map((t) => [normalizeProposalId(t.id), t]),
+			);
+			const strategy =
+				userConfig?.proposalResolutionStrategy || "most_progressed";
 
 			// Only hydrate proposals that are missing locally or potentially newer
 			winners = [];
@@ -678,27 +806,47 @@ export async function loadLocalBranchProposals(
 
 				if (!local) {
 					// Proposal doesn't exist locally - take the newest from other branches
-					const best = entries.reduce((a, b) => (a.lastModified >= b.lastModified ? a : b));
+					const best = entries.reduce((a, b) =>
+						a.lastModified >= b.lastModified ? a : b,
+					);
 					winners.push({ id, ref: best.branch, path: best.path });
 					continue;
 				}
 
 				// For existing proposals, check if any other branch version is newer
 				if (strategy === "most_recent") {
-					const localTs = local.updatedDate ? new Date(local.updatedDate).getTime() : 0;
-					const newestOther = entries.reduce((a, b) => (a.lastModified >= b.lastModified ? a : b));
+					const localTs = local.updatedDate
+						? new Date(local.updatedDate).getTime()
+						: 0;
+					const newestOther = entries.reduce((a, b) =>
+						a.lastModified >= b.lastModified ? a : b,
+					);
 
 					if (newestOther.lastModified.getTime() > localTs) {
-						winners.push({ id, ref: newestOther.branch, path: newestOther.path });
+						winners.push({
+							id,
+							ref: newestOther.branch,
+							path: newestOther.path,
+						});
 					}
 				} else {
 					// For most_progressed, we need to hydrate to check status
-					const localTs = local.updatedDate ? new Date(local.updatedDate).getTime() : 0;
-					const maybeNewer = entries.some((e) => e.lastModified.getTime() > localTs);
+					const localTs = local.updatedDate
+						? new Date(local.updatedDate).getTime()
+						: 0;
+					const maybeNewer = entries.some(
+						(e) => e.lastModified.getTime() > localTs,
+					);
 
 					if (maybeNewer) {
-						const newestOther = entries.reduce((a, b) => (a.lastModified >= b.lastModified ? a : b));
-						winners.push({ id, ref: newestOther.branch, path: newestOther.path });
+						const newestOther = entries.reduce((a, b) =>
+							a.lastModified >= b.lastModified ? a : b,
+						);
+						winners.push({
+							id,
+							ref: newestOther.branch,
+							path: newestOther.path,
+						});
 					}
 				}
 			}
@@ -706,7 +854,9 @@ export async function loadLocalBranchProposals(
 			// No local proposals, hydrate all from other branches (take newest of each)
 			winners = [];
 			for (const [id, entries] of localBranchIndex) {
-				const best = entries.reduce((a, b) => (a.lastModified >= b.lastModified ? a : b));
+				const best = entries.reduce((a, b) =>
+					a.lastModified >= b.lastModified ? a : b,
+				);
 				winners.push({ id, ref: best.branch, path: best.path });
 			}
 		}
@@ -715,7 +865,9 @@ export async function loadLocalBranchProposals(
 			return [];
 		}
 
-		onProgress?.(`Hydrating ${winners.length} proposals from other local branches...`);
+		onProgress?.(
+			`Hydrating ${winners.length} proposals from other local branches...`,
+		);
 
 		// Hydrate the proposals - note: ref is the branch name directly (not origin/)
 		const hydratedProposals = await hydrateProposals(gitOps, winners);
@@ -725,7 +877,9 @@ export async function loadLocalBranchProposals(
 			proposal.source = "local-branch";
 		}
 
-		onProgress?.(`Loaded ${hydratedProposals.length} proposals from other local branches`);
+		onProgress?.(
+			`Loaded ${hydratedProposals.length} proposals from other local branches`,
+		);
 		return hydratedProposals;
 	} catch (error) {
 		if (process.env.DEBUG) {

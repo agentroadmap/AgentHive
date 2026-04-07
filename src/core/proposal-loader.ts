@@ -6,9 +6,9 @@
  * active across the repository.
  */
 
+import type { GitOperations } from "../git/operations.ts";
 import { parseProposal } from "../markdown/parser.ts";
 import type { Proposal } from "../types/index.ts";
-import type { GitOperations } from "../git/operations.ts";
 
 /** A proposal entry discovered on a branch */
 export interface BranchProposalProposalEntry {
@@ -74,7 +74,7 @@ async function loadProposalFromBranch(
 	git: GitOperations,
 	branch: string,
 	filePath: string,
-	proposalPrefix: string,
+	_proposalPrefix: string,
 ): Promise<BranchProposalProposalEntry | null> {
 	const content = await getFileFromBranch(git, branch, filePath);
 	if (!content) return null;
@@ -86,7 +86,11 @@ async function loadProposalFromBranch(
 		// Determine type from status
 		const status = proposal.status?.toLowerCase() ?? "";
 		let type: BranchProposalProposalEntry["type"] = "proposal";
-		if (status === "reached" || status === "complete" || status === "completed") {
+		if (
+			status === "reached" ||
+			status === "complete" ||
+			status === "completed"
+		) {
 			type = "completed";
 		} else if (status === "draft" || status === "potential") {
 			type = "draft";
@@ -130,7 +134,12 @@ export async function findProposalInLocalBranches(
 	for (const branch of branches) {
 		const files = await listFilesOnBranch(git, branch, roadmapDir);
 		for (const filePath of files) {
-			const entry = await loadProposalFromBranch(git, branch, filePath, proposalPrefix);
+			const entry = await loadProposalFromBranch(
+				git,
+				branch,
+				filePath,
+				proposalPrefix,
+			);
 			if (entry && entry.id === proposalId) {
 				return entry;
 			}
@@ -155,7 +164,12 @@ export async function findProposalInRemoteBranches(
 	for (const branch of branches) {
 		const files = await listFilesOnBranch(git, branch, roadmapDir);
 		for (const filePath of files) {
-			const entry = await loadProposalFromBranch(git, branch, filePath, proposalPrefix);
+			const entry = await loadProposalFromBranch(
+				git,
+				branch,
+				filePath,
+				proposalPrefix,
+			);
 			if (entry && entry.id === proposalId) {
 				return entry;
 			}
@@ -184,7 +198,12 @@ export async function loadLocalBranchProposals(
 	for (const branch of branches) {
 		const files = await listFilesOnBranch(git, branch, roadmapDir);
 		for (const filePath of files) {
-			const entry = await loadProposalFromBranch(git, branch, filePath, proposalPrefix);
+			const entry = await loadProposalFromBranch(
+				git,
+				branch,
+				filePath,
+				proposalPrefix,
+			);
 			if (entry) {
 				entries.push(entry);
 			}
@@ -213,7 +232,12 @@ export async function loadRemoteProposals(
 	for (const branch of branches) {
 		const files = await listFilesOnBranch(git, branch, roadmapDir);
 		for (const filePath of files) {
-			const entry = await loadProposalFromBranch(git, branch, filePath, proposalPrefix);
+			const entry = await loadProposalFromBranch(
+				git,
+				branch,
+				filePath,
+				proposalPrefix,
+			);
 			if (entry) {
 				entries.push(entry);
 			}

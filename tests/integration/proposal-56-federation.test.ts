@@ -8,17 +8,17 @@
  * AC#5: Rogue host quarantine capability
  */
 
-import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { generateKeyPairSync } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import {
 	FederationPKI,
 	initializeFederation,
 	isValidPublicKey,
-} from '../../src/core/infrastructure/federation.ts';
+} from "../../src/core/infrastructure/federation.ts";
 
 /**
  * Generate a test RSA key pair.
@@ -72,8 +72,14 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 				const ca = await freshPki.initializeCA();
 
 				assert.ok(ca.certId, "CA should have cert ID");
-				assert.ok(ca.keyPair.publicKey.includes("BEGIN PUBLIC KEY"), "CA should have PEM public key");
-				assert.ok(ca.keyPair.privateKey.includes("BEGIN PRIVATE KEY"), "CA should have PEM private key");
+				assert.ok(
+					ca.keyPair.publicKey.includes("BEGIN PUBLIC KEY"),
+					"CA should have PEM public key",
+				);
+				assert.ok(
+					ca.keyPair.privateKey.includes("BEGIN PRIVATE KEY"),
+					"CA should have PEM private key",
+				);
 				assert.equal(ca.subject, "Roadmap Federation CA");
 				assert.ok(ca.notBefore, "CA should have notBefore");
 				assert.ok(ca.notAfter, "CA should have notAfter");
@@ -103,7 +109,8 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 
 				const notAfter = new Date(ca.notAfter);
 				const notBefore = new Date(ca.notBefore);
-				const daysDiff = (notAfter.getTime() - notBefore.getTime()) / (24 * 60 * 60 * 1000);
+				const daysDiff =
+					(notAfter.getTime() - notBefore.getTime()) / (24 * 60 * 60 * 1000);
 
 				assert.ok(Math.abs(daysDiff - 30) <= 1, "CA should expire in ~30 days");
 			});
@@ -113,7 +120,11 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 			await pki.initializeCA();
 			const keys = generateTestKeyPair();
 
-			const cert = await pki.issueCertificate("host-001", keys.publicKey, "client");
+			const cert = await pki.issueCertificate(
+				"host-001",
+				keys.publicKey,
+				"client",
+			);
 
 			assert.ok(cert.certId, "Certificate should have ID");
 			assert.equal(cert.hostId, "host-001");
@@ -127,7 +138,11 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 			await pki.initializeCA();
 			const keys = generateTestKeyPair();
 
-			const cert = await pki.issueCertificate("server-001", keys.publicKey, "server");
+			const cert = await pki.issueCertificate(
+				"server-001",
+				keys.publicKey,
+				"server",
+			);
 
 			assert.equal(cert.type, "server");
 		});
@@ -177,7 +192,10 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 			assert.ok(caInfo);
 			assert.equal(caInfo.subject, "Roadmap Federation CA");
 			assert.ok(caInfo.publicKey);
-			assert.ok(!caInfo.publicKey.includes("PRIVATE"), "Should not expose private key");
+			assert.ok(
+				!caInfo.publicKey.includes("PRIVATE"),
+				"Should not expose private key",
+			);
 		});
 	});
 
@@ -201,8 +219,10 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 
 			// Test mTLS connection
 			const conn = pki.validateMTLSConnection(
-				host1.hostId, host1.certificateId!,
-				host2.hostId, host2.certificateId!,
+				host1.hostId,
+				host1.certificateId!,
+				host2.hostId,
+				host2.certificateId!,
 			);
 
 			assert.equal(conn.mtlsVerified, true);
@@ -226,8 +246,10 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 
 			// Use a fake cert ID
 			const conn = pki.validateMTLSConnection(
-				host1.hostId, "fake-cert-id",
-				host2.hostId, host2.certificateId!,
+				host1.hostId,
+				"fake-cert-id",
+				host2.hostId,
+				host2.certificateId!,
 			);
 
 			assert.equal(conn.mtlsVerified, false);
@@ -252,8 +274,10 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 			const host2 = pki.getHost(req2.hostId)!;
 
 			const conn = pki.validateMTLSConnection(
-				host1.hostId, host1.certificateId!,
-				host2.hostId, host2.certificateId!,
+				host1.hostId,
+				host1.certificateId!,
+				host2.hostId,
+				host2.certificateId!,
 			);
 
 			assert.equal(conn.mtlsVerified, false);
@@ -273,11 +297,16 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 			const host1 = pki.getHost(req1.hostId)!;
 			const host2 = pki.getHost(req2.hostId)!;
 
-			pki.validateMTLSConnection(host1.hostId, host1.certificateId!, host2.hostId, host2.certificateId!);
+			pki.validateMTLSConnection(
+				host1.hostId,
+				host1.certificateId!,
+				host2.hostId,
+				host2.certificateId!,
+			);
 
 			const connections = pki.getHostConnections(host1.hostId);
 			assert.equal(connections.length, 1);
-			assert.equal(connections[0]!.mtlsVerified, true);
+			assert.equal(connections[0]?.mtlsVerified, true);
 		});
 
 		it("tracks failed connections", async () => {
@@ -294,11 +323,16 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 			const host2 = pki.getHost(req2.hostId)!;
 
 			// Failed connection
-			pki.validateMTLSConnection(host1.hostId, "bad-cert", host2.hostId, host2.certificateId!);
+			pki.validateMTLSConnection(
+				host1.hostId,
+				"bad-cert",
+				host2.hostId,
+				host2.certificateId!,
+			);
 
 			const failed = pki.getFailedConnections();
 			assert.equal(failed.length, 1);
-			assert.ok(failed[0]!.error);
+			assert.ok(failed[0]?.error);
 		});
 	});
 
@@ -308,7 +342,11 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 		it("creates pending join request", async () => {
 			const keys = generateTestKeyPair();
 
-			const req = await pki.registerHost("new-host.local", 9000, keys.publicKey);
+			const req = await pki.registerHost(
+				"new-host.local",
+				9000,
+				keys.publicKey,
+			);
 
 			assert.ok(req.requestId);
 			assert.equal(req.status, "pending");
@@ -330,7 +368,11 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 
 		it("approves join request and creates active host", async () => {
 			const keys = generateTestKeyPair();
-			const req = await pki.registerHost("new-host.local", 9000, keys.publicKey);
+			const req = await pki.registerHost(
+				"new-host.local",
+				9000,
+				keys.publicKey,
+			);
 
 			const host = await pki.approveJoinRequest(req.requestId, "admin-1");
 
@@ -343,9 +385,17 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 
 		it("denies join request", async () => {
 			const keys = generateTestKeyPair();
-			const req = await pki.registerHost("new-host.local", 9000, keys.publicKey);
+			const req = await pki.registerHost(
+				"new-host.local",
+				9000,
+				keys.publicKey,
+			);
 
-			const result = pki.denyJoinRequest(req.requestId, "admin-1", "Not authorized");
+			const result = pki.denyJoinRequest(
+				req.requestId,
+				"admin-1",
+				"Not authorized",
+			);
 			assert.equal(result, true);
 
 			const pending = pki.getPendingRequests();
@@ -361,7 +411,11 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 			await autoPki.initializeCA();
 
 			const keys = generateTestKeyPair();
-			const req = await autoPki.registerHost("auto-host.local", 8080, keys.publicKey);
+			const req = await autoPki.registerHost(
+				"auto-host.local",
+				8080,
+				keys.publicKey,
+			);
 
 			assert.equal(req.status, "approved");
 			assert.equal(req.reviewedBy, "auto");
@@ -374,8 +428,8 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 		it("rejects duplicate active host registration", async () => {
 			const keys = generateTestKeyPair();
 			await pki.registerHost("dup-host.local", 8080, keys.publicKey);
-			const req = await pki.approveJoinRequest(
-				pki.getPendingRequests()[0]!.requestId,
+			const _req = await pki.approveJoinRequest(
+				pki.getPendingRequests()[0]?.requestId,
 				"admin",
 			);
 
@@ -395,8 +449,8 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 
 			// Approve both hosts
 			const pending = pki.getPendingRequests();
-			await pki.approveJoinRequest(pending[0]!.requestId, "admin");
-			await pki.approveJoinRequest(pending[1]!.requestId, "admin");
+			await pki.approveJoinRequest(pending[0]?.requestId, "admin");
+			await pki.approveJoinRequest(pending[1]?.requestId, "admin");
 
 			const hosts = pki.getAllHosts();
 			assert.equal(hosts.length, 2);
@@ -411,11 +465,11 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 
 			// Approve only host1
 			const pending = pki.getPendingRequests();
-			await pki.approveJoinRequest(pending[0]!.requestId, "admin");
+			await pki.approveJoinRequest(pending[0]?.requestId, "admin");
 
 			const active = pki.getActiveHosts();
 			assert.equal(active.length, 1);
-			assert.equal(active[0]!.hostname, "host1.local");
+			assert.equal(active[0]?.hostname, "host1.local");
 		});
 	});
 
@@ -428,7 +482,7 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 			const req = await pki.registerHost("host1.local", 8080, keys1.publicKey);
 			await pki.approveJoinRequest(req.requestId, "admin");
 
-			const oldCertId = pki.getHost(req.hostId)!.certificateId!;
+			const oldCertId = pki.getHost(req.hostId)?.certificateId!;
 
 			// Rotate
 			const keys2 = generateTestKeyPair();
@@ -469,7 +523,7 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 			const keys = generateTestKeyPair();
 			await shortPki.registerHost("host1.local", 8080, keys.publicKey);
 			const pending = shortPki.getPendingRequests();
-			await shortPki.approveJoinRequest(pending[0]!.requestId, "admin");
+			await shortPki.approveJoinRequest(pending[0]?.requestId, "admin");
 
 			// Check for certs expiring in 30 days (should include our 30-day cert)
 			const expiring = shortPki.getExpiringCertificates(30);
@@ -481,10 +535,12 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 			const keys = generateTestKeyPair();
 			await pki.registerHost("host1.local", 8080, keys.publicKey);
 			const pending = pki.getPendingRequests();
-			await pki.approveJoinRequest(pending[0]!.requestId, "admin");
+			await pki.approveJoinRequest(pending[0]?.requestId, "admin");
 
 			// Manually expire the certificate for testing
-			const certs = pki.getHostCertificates(pki.getHost(pending[0]!.hostId)!.hostId);
+			const approvedHostId = pending[0]?.hostId;
+			assert.ok(approvedHostId);
+			const _certs = pki.getHostCertificates(approvedHostId);
 			// No way to manually expire in this implementation, but cleanup works
 			const expired = pki.cleanupExpiredCertificates();
 			assert.ok(Array.isArray(expired));
@@ -497,9 +553,13 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 
 			const notAfter = new Date(cert.notAfter);
 			const notBefore = new Date(cert.notBefore);
-			const daysDiff = (notAfter.getTime() - notBefore.getTime()) / (24 * 60 * 60 * 1000);
+			const daysDiff =
+				(notAfter.getTime() - notBefore.getTime()) / (24 * 60 * 60 * 1000);
 
-			assert.ok(Math.abs(daysDiff - 90) <= 1, "Default cert expiry should be ~90 days");
+			assert.ok(
+				Math.abs(daysDiff - 90) <= 1,
+				"Default cert expiry should be ~90 days",
+			);
 		});
 	});
 
@@ -511,7 +571,10 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 			const req = await pki.registerHost("host1.local", 8080, keys.publicKey);
 			await pki.approveJoinRequest(req.requestId, "admin");
 
-			const result = pki.quarantineHost(req.hostId, "Suspicious network activity");
+			const result = pki.quarantineHost(
+				req.hostId,
+				"Suspicious network activity",
+			);
 
 			assert.equal(result, true);
 
@@ -544,14 +607,14 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 			await pki.registerHost("host2.local", 8080, keys2.publicKey);
 
 			const pending = pki.getPendingRequests();
-			await pki.approveJoinRequest(pending[0]!.requestId, "admin");
-			await pki.approveJoinRequest(pending[1]!.requestId, "admin");
+			await pki.approveJoinRequest(pending[0]?.requestId, "admin");
+			await pki.approveJoinRequest(pending[1]?.requestId, "admin");
 
-			pki.quarantineHost(pending[0]!.hostId, "Malicious behavior");
+			pki.quarantineHost(pending[0]?.hostId, "Malicious behavior");
 
 			const quarantined = pki.getQuarantinedHosts();
 			assert.equal(quarantined.length, 1);
-			assert.equal(quarantined[0]!.hostId, pending[0]!.hostId);
+			assert.equal(quarantined[0]?.hostId, pending[0]?.hostId);
 		});
 
 		it("lifts quarantine", async () => {
@@ -607,12 +670,12 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 
 			// Approve both hosts first
 			const pending = pki.getPendingRequests();
-			await pki.approveJoinRequest(pending[0]!.requestId, "admin");
-			await pki.approveJoinRequest(pending[1]!.requestId, "admin");
+			await pki.approveJoinRequest(pending[0]?.requestId, "admin");
+			await pki.approveJoinRequest(pending[1]?.requestId, "admin");
 
 			// Then quarantine one
 			const hosts = pki.getAllHosts();
-			pki.quarantineHost(hosts[1]!.hostId, "Test quarantine");
+			pki.quarantineHost(hosts[1]?.hostId, "Test quarantine");
 
 			const stats = pki.getStats();
 
@@ -641,7 +704,9 @@ describe("proposal-56: Federation-PKI-Host-Authentication", () => {
 
 	describe("Convenience functions", () => {
 		it("initializeFederation creates ready PKI", async () => {
-			const federation = await initializeFederation(join(tempDir, "federation-init"));
+			const federation = await initializeFederation(
+				join(tempDir, "federation-init"),
+			);
 
 			const ca = federation.getCA();
 			assert.ok(ca, "Should have initialized CA");

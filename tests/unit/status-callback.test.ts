@@ -1,11 +1,11 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, test } from "node:test";
-import { mkdir, rm, writeFile, readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect } from "../support/test-utils.ts";
+import { afterEach, beforeEach, describe, test } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
 import { executeStatusCallback } from "../../src/utils/status-callback.ts";
+import { expect } from "../support/test-utils.ts";
 
 describe("Status Change Callbacks", () => {
 	describe("executeStatusCallback", () => {
@@ -13,7 +13,8 @@ describe("Status Change Callbacks", () => {
 
 		test("executes command with environment variables", async () => {
 			const result = await executeStatusCallback({
-				command: 'echo "Proposal: $STATE_ID, Old: $OLD_STATUS, New: $NEW_STATUS, Title: $STATE_TITLE"',
+				command:
+					'echo "Proposal: $STATE_ID, Old: $OLD_STATUS, New: $NEW_STATUS, Title: $STATE_TITLE"',
 				proposalId: "proposal-123",
 				oldStatus: "Potential",
 				newStatus: "Active",
@@ -81,7 +82,9 @@ describe("Status Change Callbacks", () => {
 			});
 
 			assert.strictEqual(result.success, true);
-			assert.ok(result.output?.includes('Proposal with "quotes" and $pecial chars'));
+			assert.ok(
+				result.output?.includes('Proposal with "quotes" and $pecial chars'),
+			);
 		});
 	});
 
@@ -123,7 +126,10 @@ onStatusChange: 'echo "$STATE_ID:$OLD_STATUS->$NEW_STATUS" > ${callbackOutputFil
 			await writeFile(join(testDir, "roadmap", "config.yml"), configContent);
 
 			// Verify config was written correctly
-			const writtenConfig = await await readFile(join(testDir, "roadmap", "config.yml"), "utf-8");
+			const writtenConfig = await await readFile(
+				join(testDir, "roadmap", "config.yml"),
+				"utf-8",
+			);
 			assert.ok(writtenConfig.includes("onStatusChange"));
 
 			// Create a proposal
@@ -172,7 +178,15 @@ dependencies: []
 onStatusChange: 'echo "per-proposal:$NEW_STATUS" > ${callbackOutputFile}'
 ---
 `;
-			await writeFile(join(testDir, "roadmap", "proposals", "proposal-1 - Proposal with custom callback.md"), proposalContent);
+			await writeFile(
+				join(
+					testDir,
+					"roadmap",
+					"proposals",
+					"proposal-1 - Proposal with custom callback.md",
+				),
+				proposalContent,
+			);
 
 			// Update status
 			await core.updateProposalFromInput("proposal-1", { status: "Complete" });
@@ -206,13 +220,17 @@ onStatusChange: 'echo "callback-ran" > ${callbackOutputFile}'
 			});
 
 			// Update something other than status
-			await core.updateProposalFromInput(proposal.id, { title: "Updated Title" });
+			await core.updateProposalFromInput(proposal.id, {
+				title: "Updated Title",
+			});
 
 			// Wait a bit
 			await new Promise((resolve) => setTimeout(resolve, 100));
 
 			// Check callback was NOT executed
-			const exists = stat(callbackOutputFile).then(() => true).catch(() => false);
+			const exists = stat(callbackOutputFile)
+				.then(() => true)
+				.catch(() => false);
 			assert.strictEqual(exists, false);
 		});
 
@@ -236,7 +254,9 @@ dateFormat: yyyy-mm-dd
 			});
 
 			// Update status - should not fail even without callback
-			const result = await core.updateProposalFromInput(proposal.id, { status: "Active" });
+			const result = await core.updateProposalFromInput(proposal.id, {
+				status: "Active",
+			});
 			assert.strictEqual(result.status, "Active");
 		});
 
@@ -261,7 +281,9 @@ onStatusChange: 'exit 1'
 			});
 
 			// Update status - should succeed even if callback fails
-			const result = await core.updateProposalFromInput(proposal.id, { status: "Complete" });
+			const result = await core.updateProposalFromInput(proposal.id, {
+				status: "Complete",
+			});
 			assert.strictEqual(result.status, "Complete");
 		});
 

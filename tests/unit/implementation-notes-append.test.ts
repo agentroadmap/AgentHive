@@ -1,12 +1,16 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
 import { extractStructuredSection } from "../../src/markdown/structured-sections.ts";
 import type { Proposal } from "../../src/types/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync, buildCliCommand,
+import {
+	buildCliCommand,
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 const CLI_PATH = join(process.cwd(), "src", "cli.ts");
@@ -43,11 +47,16 @@ describe("Implementation Notes - append", () => {
 		};
 		await core.createProposal(proposal, false);
 
-		const result = execSync(`node --experimental-strip-types ${buildCliCommand([CLI_PATH, "proposal", "edit", "1", "--append-notes", "Second block"])}`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${buildCliCommand([CLI_PATH, "proposal", "edit", "1", "--append-notes", "Second block"])}`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(result.exitCode, 0);
 
 		const updatedBody = await core.getProposalContent("proposal-1");
-		expect(extractStructuredSection(updatedBody ?? "", "implementationNotes")).toBe("First block\n\nSecond block");
+		expect(
+			extractStructuredSection(updatedBody ?? "", "implementationNotes"),
+		).toBe("First block\n\nSecond block");
 	});
 
 	it("creates Implementation Notes at correct position when missing (after plan, else AC, else Description)", async () => {
@@ -66,12 +75,16 @@ describe("Implementation Notes - append", () => {
 		};
 		await core.createProposal(t, false);
 
-		const res = execSync(`node --experimental-strip-types ${buildCliCommand([CLI_PATH, "proposal", "edit", "1", "--append-notes", "Followed plan"])}`, { cwd: TEST_DIR });
+		const res = execSync(
+			`node --experimental-strip-types ${buildCliCommand([CLI_PATH, "proposal", "edit", "1", "--append-notes", "Followed plan"])}`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(res.exitCode, 0);
 
 		const body = (await core.getProposalContent("proposal-1")) ?? "";
 		const planIdx = body.indexOf("## Implementation Plan");
-		const notesContent = extractStructuredSection(body, "implementationNotes") || "";
+		const notesContent =
+			extractStructuredSection(body, "implementationNotes") || "";
 		assert.ok(planIdx > 0);
 		assert.ok(notesContent.includes("Followed plan"));
 	});
@@ -90,29 +103,47 @@ describe("Implementation Notes - append", () => {
 		};
 		await core.createProposal(proposal, false);
 
-		const res = execSync(`node --experimental-strip-types ${buildCliCommand([CLI_PATH, "proposal", "edit", "1", "--append-notes", "First", "--append-notes", "Second"])}`, { cwd: TEST_DIR });
+		const res = execSync(
+			`node --experimental-strip-types ${buildCliCommand([CLI_PATH, "proposal", "edit", "1", "--append-notes", "First", "--append-notes", "Second"])}`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(res.exitCode, 0);
 
 		const updatedBody = await core.getProposalContent("proposal-1");
-		expect(extractStructuredSection(updatedBody ?? "", "implementationNotes")).toBe("First\n\nSecond");
+		expect(
+			extractStructuredSection(updatedBody ?? "", "implementationNotes"),
+		).toBe("First\n\nSecond");
 	});
 
 	it("edit --append-notes works and allows combining with --notes", async () => {
-		const resOk = execSync(`node --experimental-strip-types ${buildCliCommand([CLI_PATH, "proposal", "create", "T", "--plan", "1. A\n2. B"])}`, { cwd: TEST_DIR });
+		const resOk = execSync(
+			`node --experimental-strip-types ${buildCliCommand([CLI_PATH, "proposal", "create", "T", "--plan", "1. A\n2. B"])}`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(resOk.exitCode, 0);
 
-		const res1 = execSync(`node --experimental-strip-types ${buildCliCommand([CLI_PATH, "proposal", "edit", "1", "--append-notes", "Alpha", "--append-notes", "Beta"])}`, { cwd: TEST_DIR });
+		const res1 = execSync(
+			`node --experimental-strip-types ${buildCliCommand([CLI_PATH, "proposal", "edit", "1", "--append-notes", "Alpha", "--append-notes", "Beta"])}`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(res1.exitCode, 0);
 
 		const core = new Core(TEST_DIR);
 		let proposalBody = await core.getProposalContent("proposal-1");
-		expect(extractStructuredSection(proposalBody ?? "", "implementationNotes")).toBe("Alpha\n\nBeta");
+		expect(
+			extractStructuredSection(proposalBody ?? "", "implementationNotes"),
+		).toBe("Alpha\n\nBeta");
 
 		// Combining --notes (replace) with --append-notes (append) should work
-		const combined = execSync(`node --experimental-strip-types ${buildCliCommand([CLI_PATH, "proposal", "edit", "1", "--notes", "Y", "--append-notes", "X"])}`, { cwd: TEST_DIR });
+		const combined = execSync(
+			`node --experimental-strip-types ${buildCliCommand([CLI_PATH, "proposal", "edit", "1", "--notes", "Y", "--append-notes", "X"])}`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(combined.exitCode, 0);
 
 		proposalBody = await core.getProposalContent("proposal-1");
-		expect(extractStructuredSection(proposalBody ?? "", "implementationNotes")).toBe("Y\n\nX");
+		expect(
+			extractStructuredSection(proposalBody ?? "", "implementationNotes"),
+		).toBe("Y\n\nX");
 	});
 });

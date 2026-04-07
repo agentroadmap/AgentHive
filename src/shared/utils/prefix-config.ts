@@ -1,4 +1,8 @@
-import { EntityType, type PrefixConfig, type RoadmapConfig } from "../types/index.ts";
+import {
+	EntityType,
+	type PrefixConfig,
+	type RoadmapConfig,
+} from "../types/index.ts";
 
 /**
  * Default prefix configuration for proposals.
@@ -27,7 +31,9 @@ export function getDefaultPrefixConfig(): PrefixConfig {
  * @param config - Partial prefix config from user
  * @returns Complete prefix config with defaults applied
  */
-export function mergePrefixConfig(config?: Partial<PrefixConfig>): PrefixConfig {
+export function mergePrefixConfig(
+	config?: Partial<PrefixConfig>,
+): PrefixConfig {
 	return {
 		proposal: config?.proposal ?? DEFAULT_PREFIX_CONFIG.proposal,
 	};
@@ -117,7 +123,7 @@ export function extractIdNumbers(id: string, prefix: string): number[] {
  * buildGlobPattern("proposal") // => "proposal-*.md"
  * buildGlobPattern("JIRA") // => "JIRA-*.md"
  */
-export function buildGlobPattern(prefix: string): string {
+export function buildGlobPattern(_prefix: string): string {
 	return "*.md";
 }
 
@@ -203,7 +209,7 @@ export function hasPrefix(id: string, prefix: string): boolean {
  */
 export function hasAnyPrefix(id: string): boolean {
 	if (!id || typeof id !== "string") return false;
-	// Accepts either letters followed by a hyphen and then anything, 
+	// Accepts either letters followed by a hyphen and then anything,
 	// OR letters followed immediately by a digit (short ID format)
 	return /^[a-zA-Z]+-?\d+/.test(id.trim());
 }
@@ -257,7 +263,10 @@ export function extractAnyPrefix(id: string): string | null {
  * idsEqual("proposal-1", "proposal-01", "proposal") // => false (different body)
  */
 export function idsEqual(id1: string, id2: string, prefix: string): boolean {
-	return normalizeId(id1, prefix).toLowerCase() === normalizeId(id2, prefix).toLowerCase();
+	return (
+		normalizeId(id1, prefix).toLowerCase() ===
+		normalizeId(id2, prefix).toLowerCase()
+	);
 }
 
 /**
@@ -272,7 +281,11 @@ export function idsEqual(id1: string, id2: string, prefix: string): boolean {
  * generateNextId(["proposal-1", "proposal-2", "proposal-5"], "proposal") // => "proposal-6"
  * generateNextId(["proposal-001", "proposal-002"], "proposal", 3) // => "proposal-003"
  */
-export function generateNextId(existingIds: string[], prefix: string, zeroPadding?: number): string {
+export function generateNextId(
+	existingIds: string[],
+	prefix: string,
+	zeroPadding?: number,
+): string {
 	const regex = buildIdRegex(prefix);
 	const upperPrefix = prefix.toUpperCase();
 	let max = 0;
@@ -391,7 +404,10 @@ export function escapeRegex(str: string): string {
  * getPrefixForType(EntityType.Document) // => "doc"
  * getPrefixForType(EntityType.Decision) // => "decision"
  */
-export function getPrefixForType(type: EntityType, config?: RoadmapConfig): string {
+export function getPrefixForType(
+	type: EntityType,
+	config?: RoadmapConfig,
+): string {
 	switch (type) {
 		case EntityType.Proposal:
 			return config?.prefixes?.proposal ?? DEFAULT_PREFIX_CONFIG.proposal;

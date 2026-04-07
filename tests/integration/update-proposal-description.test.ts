@@ -1,8 +1,8 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
-import { expect } from "../support/test-utils.ts";
 import { updateProposalDescription } from "../../src/markdown/serializer.ts";
 import { extractStructuredSection } from "../../src/markdown/structured-sections.ts";
+import { expect } from "../support/test-utils.ts";
 
 describe("updateProposalDescription", () => {
 	it("should replace existing description section", () => {
@@ -26,8 +26,12 @@ Test plan`;
 		const result = updateProposalDescription(content, "New description");
 
 		assert.ok(result.includes("<!-- SECTION:DESCRIPTION:BEGIN -->"));
-		expect(extractStructuredSection(result, "description")).toBe("New description");
-		expect(extractStructuredSection(result, "implementationPlan")).toBe("Test plan");
+		expect(extractStructuredSection(result, "description")).toBe(
+			"New description",
+		);
+		expect(extractStructuredSection(result, "implementationPlan")).toBe(
+			"Test plan",
+		);
 		assert.ok(!result.includes("Old description"));
 	});
 
@@ -43,10 +47,14 @@ title: Test proposal
 
 		const result = updateProposalDescription(content, "New description");
 
-		expect(extractStructuredSection(result, "description")).toBe("New description");
+		expect(extractStructuredSection(result, "description")).toBe(
+			"New description",
+		);
 		assert.ok(result.includes("## Acceptance Criteria"));
 		// Description should come before acceptance criteria
-		expect(result.indexOf("## Description")).toBeLessThan(result.indexOf("## Acceptance Criteria"));
+		expect(result.indexOf("## Description")).toBeLessThan(
+			result.indexOf("## Acceptance Criteria"),
+		);
 	});
 
 	it("should handle content without frontmatter and preserve other sections", () => {
@@ -56,10 +64,14 @@ title: Test proposal
 
 		const result = updateProposalDescription(content, "New description");
 
-		expect(extractStructuredSection(result, "description")).toBe("New description");
+		expect(extractStructuredSection(result, "description")).toBe(
+			"New description",
+		);
 		assert.ok(result.includes("## Acceptance Criteria"));
 		// Description should come first
-		expect(result.indexOf("## Description")).toBeLessThan(result.indexOf("## Acceptance Criteria"));
+		expect(result.indexOf("## Description")).toBeLessThan(
+			result.indexOf("## Acceptance Criteria"),
+		);
 	});
 
 	it("should handle empty content", () => {
@@ -72,7 +84,9 @@ title: Test proposal
 
 		const result = updateProposalDescription(content, "New description");
 
-		expect(extractStructuredSection(result, "description")).toBe("New description");
+		expect(extractStructuredSection(result, "description")).toBe(
+			"New description",
+		);
 	});
 
 	it("should preserve complex sections", () => {
@@ -105,13 +119,23 @@ More detailed notes.`;
 
 		const result = updateProposalDescription(content, "Updated description");
 
-		expect(extractStructuredSection(result, "description")).toBe("Updated description");
+		expect(extractStructuredSection(result, "description")).toBe(
+			"Updated description",
+		);
 		assert.ok(result.includes("- [x] Completed criterion"));
 		assert.ok(result.includes("- [ ] Pending criterion"));
-		expect(extractStructuredSection(result, "implementationPlan")).toContain("1. Step one");
-		expect(extractStructuredSection(result, "implementationPlan")).toContain("2. Step two");
-		expect(extractStructuredSection(result, "implementationNotes")).toContain("**bold** and *italic*");
-		expect(extractStructuredSection(result, "implementationNotes")).toContain("### Subsection");
+		expect(extractStructuredSection(result, "implementationPlan")).toContain(
+			"1. Step one",
+		);
+		expect(extractStructuredSection(result, "implementationPlan")).toContain(
+			"2. Step two",
+		);
+		expect(extractStructuredSection(result, "implementationNotes")).toContain(
+			"**bold** and *italic*",
+		);
+		expect(extractStructuredSection(result, "implementationNotes")).toContain(
+			"### Subsection",
+		);
 		assert.ok(!result.includes("Old description"));
 	});
 });

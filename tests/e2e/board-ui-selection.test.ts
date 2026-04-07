@@ -48,7 +48,9 @@ describe("board UI proposal selection", () => {
 			},
 		];
 
-		const sorted = [...proposals].sort((a, b) => compareProposalIds(a.id, b.id));
+		const sorted = [...proposals].sort((a, b) =>
+			compareProposalIds(a.id, b.id),
+		);
 		assert.strictEqual(sorted[0]?.id, "proposal-1");
 		assert.strictEqual(sorted[1]?.id, "proposal-2");
 		assert.strictEqual(sorted[2]?.id, "proposal-10");
@@ -89,7 +91,9 @@ describe("board UI proposal selection", () => {
 			},
 		];
 
-		const sorted = [...proposals].sort((a, b) => compareProposalIds(a.id, b.id));
+		const sorted = [...proposals].sort((a, b) =>
+			compareProposalIds(a.id, b.id),
+		);
 		assert.strictEqual(sorted[0]?.id, "proposal-1.1");
 		assert.strictEqual(sorted[1]?.id, "proposal-1.2");
 		assert.strictEqual(sorted[2]?.id, "proposal-1.10");
@@ -132,7 +136,9 @@ describe("board UI proposal selection", () => {
 		];
 
 		// Simulate the display order (sorted)
-		const sortedProposals = [...unsortedProposals].sort((a, b) => compareProposalIds(a.id, b.id));
+		const sortedProposals = [...unsortedProposals].sort((a, b) =>
+			compareProposalIds(a.id, b.id),
+		);
 		const _displayItems = sortedProposals.map((t) => `${t.id} - ${t.title}`);
 
 		// User clicks on index 0 (expects proposal-1)
@@ -202,7 +208,9 @@ describe("board UI proposal selection", () => {
 		];
 
 		// Both display and selection should use the same sorted array
-		const sortedProposals = [...proposals].sort((a, b) => compareProposalIds(a.id, b.id));
+		const sortedProposals = [...proposals].sort((a, b) =>
+			compareProposalIds(a.id, b.id),
+		);
 
 		// Verify each index maps to the correct proposal
 		for (let i = 0; i < sortedProposals.length; i++) {

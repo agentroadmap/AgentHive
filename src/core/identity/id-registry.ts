@@ -11,7 +11,7 @@
  * from the registry instead of computing max(existing) + 1 locally.
  */
 
-import { writeFileSync, existsSync, readFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export interface IdRangeReservation {
@@ -64,7 +64,12 @@ export class IdRegistry {
 
 	constructor(projectPath: string) {
 		this.projectPath = projectPath;
-		this.proposalPath = join(projectPath, "roadmap", ".cache", "id-registry.json");
+		this.proposalPath = join(
+			projectPath,
+			"roadmap",
+			".cache",
+			"id-registry.json",
+		);
 		this.proposal = this.loadProposal();
 	}
 
@@ -133,19 +138,6 @@ export class IdRegistry {
 	}
 
 	/**
-	 * Check if a specific ID number is already allocated (existing proposal or reserved).
-	 */
-	private isIdAllocated(idNum: number): boolean {
-		// Check reservations
-		for (const r of this.proposal.reservations) {
-			if (idNum >= r.rangeStart && idNum <= r.rangeEnd) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	/**
 	 * Allocate ID(s) for a session.
 	 * Returns guaranteed-unique IDs.
 	 */
@@ -174,7 +166,9 @@ export class IdRegistry {
 
 			const rangeEnd = rangeStart + rangeSize - 1;
 			const now = new Date();
-			const expiresAt = new Date(now.getTime() + RESERVATION_TTL_MS).toISOString();
+			const expiresAt = new Date(
+				now.getTime() + RESERVATION_TTL_MS,
+			).toISOString();
 
 			// Reserve the range
 			const reservation: IdRangeReservation = {
@@ -204,7 +198,9 @@ export class IdRegistry {
 
 			// Trim log if too large
 			if (this.proposal.allocationLog.length > MAX_LOG_SIZE) {
-				this.proposal.allocationLog = this.proposal.allocationLog.slice(-MAX_LOG_SIZE);
+				this.proposal.allocationLog = this.proposal.allocationLog.slice(
+					-MAX_LOG_SIZE,
+				);
 			}
 
 			// Update nextId pointer

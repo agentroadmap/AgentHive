@@ -1,17 +1,58 @@
-import { mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import {
+	mkdir,
+	readdir,
+	readFile,
+	rename,
+	stat,
+	unlink,
+	writeFile,
+} from "node:fs/promises";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, join, relative } from "node:path";
-import { existsSync, readFileSync } from "node:fs";
-import { execSync } from "node:child_process";
-import { DEFAULT_DIRECTORIES, DEFAULT_FILES, DEFAULT_STATUSES } from "../../shared/constants/index.ts";
-import { parseDecision, parseDocument, parseDirective, parseProposal } from "../../shared/markdown/parser.ts";
-import { serializeDecision, serializeDocument, serializeProposal } from "../../shared/markdown/serializer.ts";
-import type { Decision, Document, Directive, RoadmapConfig, Proposal, ProposalListFilter, ProposalMaturity } from "../../types/index.ts";
-import { documentIdsEqual, normalizeDocumentId } from "../../utils/document-id.ts";
-import { buildGlobPattern, escapeRegex, extractAnyPrefix, generateNextId, hasAnyPrefix, idForFilename, normalizeId } from "../../utils/prefix-config.ts";
-import { getProposalFilename, getProposalPath, normalizeProposalIdentity, proposalIdsEqual } from "../../utils/proposal-path.ts";
+import {
+	DEFAULT_DIRECTORIES,
+	DEFAULT_FILES,
+	DEFAULT_STATUSES,
+} from "../../shared/constants/index.ts";
+import {
+	parseDecision,
+	parseDirective,
+	parseDocument,
+	parseProposal,
+} from "../../shared/markdown/parser.ts";
+import {
+	serializeDecision,
+	serializeDocument,
+	serializeProposal,
+} from "../../shared/markdown/serializer.ts";
+import type {
+	Decision,
+	Directive,
+	Document,
+	Proposal,
+	ProposalListFilter,
+	RoadmapConfig,
+} from "../../types/index.ts";
+import {
+	documentIdsEqual,
+	normalizeDocumentId,
+} from "../../utils/document-id.ts";
+import {
+	extractAnyPrefix,
+	generateNextId,
+	hasAnyPrefix,
+	idForFilename,
+	normalizeId,
+} from "../../utils/prefix-config.ts";
+import {
+	getProposalFilename,
+	getProposalPath,
+	normalizeProposalIdentity,
+	proposalIdsEqual,
+} from "../../utils/proposal-path.ts";
 import { sortByProposalId } from "../../utils/proposal-sorting.ts";
-import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 
@@ -79,7 +120,10 @@ export class FileSystem {
 
 				if (legacyExists) {
 					// Migrate legacy .roadmap directory to roadmap
-					const newRoadmapDir = join(this.projectRoot, DEFAULT_DIRECTORIES.ROADMAP);
+					const newRoadmapDir = join(
+						this.projectRoot,
+						DEFAULT_DIRECTORIES.ROADMAP,
+					);
 					await rename(legacyRoadmapDir, newRoadmapDir);
 
 					// Update paths to use the new location
@@ -133,7 +177,11 @@ export class FileSystem {
 	}
 
 	get configFilePath(): string {
-		return this.currentConfigPath || this.resolveExistingConfigPath() || join(this.roadmapDir, DEFAULT_FILES.CONFIG);
+		return (
+			this.currentConfigPath ||
+			this.resolveExistingConfigPath() ||
+			join(this.roadmapDir, DEFAULT_FILES.CONFIG)
+		);
 	}
 
 	/** Get the project root directory */
@@ -168,8 +216,12 @@ export class FileSystem {
 						"Your branch CLI expects schema v2 ('roadmap/proposals/') but the shared roadmap hub is at v1 ('roadmap/nodes/').",
 					);
 				}
-				console.warn("Please rebase your worktree, run 'roadmap init', or migrate the shared hub.");
-				console.warn("Continuing in legacy compatibility mode for this session.\n");
+				console.warn(
+					"Please rebase your worktree, run 'roadmap init', or migrate the shared hub.",
+				);
+				console.warn(
+					"Continuing in legacy compatibility mode for this session.\n",
+				);
 				return nodesPath; // Fallback to nodes for read-only compatibility
 			} catch {
 				// Neither exists, will be created by ensureRoadmapStructure
@@ -221,7 +273,10 @@ export class FileSystem {
 
 	private async getArchiveDirectivesDir(): Promise<string> {
 		const roadmapDir = await this.getRoadmapDir();
-		const directivesPath = join(roadmapDir, DEFAULT_DIRECTORIES.ARCHIVE_MILESTONES);
+		const directivesPath = join(
+			roadmapDir,
+			DEFAULT_DIRECTORIES.ARCHIVE_MILESTONES,
+		);
 
 		// STATE-26: Compatibility check for legacy 'archive/directives/' location
 		try {
@@ -280,25 +335,29 @@ export class FileSystem {
 	private async findMarkdownFiles(dir: string): Promise<string[]> {
 		try {
 			const entries = await readdir(dir, { withFileTypes: true });
-			const files = await Promise.all(entries.map(async (entry) => {
-				const entryPath = join(dir, entry.name);
-				if (entry.isDirectory()) {
-					return await this.findMarkdownFiles(entryPath);
-				}
-				if (entry.isSymbolicLink()) {
-					try {
-						const entryStat = await stat(entryPath);
-						if (entryStat.isDirectory()) {
-							return await this.findMarkdownFiles(entryPath);
-						}
-					} catch {
-						return [];
+			const files = await Promise.all(
+				entries.map(async (entry) => {
+					const entryPath = join(dir, entry.name);
+					if (entry.isDirectory()) {
+						return await this.findMarkdownFiles(entryPath);
 					}
-				}
-				return entryPath;
-			}));
+					if (entry.isSymbolicLink()) {
+						try {
+							const entryStat = await stat(entryPath);
+							if (entryStat.isDirectory()) {
+								return await this.findMarkdownFiles(entryPath);
+							}
+						} catch {
+							return [];
+						}
+					}
+					return entryPath;
+				}),
+			);
 
-			return files.flat().filter((file): file is string => file.toLowerCase().endsWith(".md"));
+			return files
+				.flat()
+				.filter((file): file is string => file.toLowerCase().endsWith(".md"));
 		} catch {
 			return [];
 		}
@@ -321,7 +380,10 @@ export class FileSystem {
 			...proposal,
 			id: proposalId,
 			parentProposalId: proposal.parentProposalId
-				? normalizeId(proposal.parentProposalId, extractAnyPrefix(proposal.parentProposalId) ?? prefix)
+				? normalizeId(
+						proposal.parentProposalId,
+						extractAnyPrefix(proposal.parentProposalId) ?? prefix,
+					)
 				: undefined,
 		};
 		const content = serializeProposal(normalizedProposal);
@@ -329,7 +391,10 @@ export class FileSystem {
 		// Delete any existing proposal files with the same ID but different filenames
 		try {
 			const core = { filesystem: { proposalsDir } };
-			const existingPath = await getProposalPath(proposalId, core as ProposalPathContext);
+			const existingPath = await getProposalPath(
+				proposalId,
+				core as ProposalPathContext,
+			);
 			if (existingPath && !existingPath.endsWith(filename)) {
 				await unlink(existingPath);
 			}
@@ -345,13 +410,13 @@ export class FileSystem {
 	async loadProposal(proposalId: string): Promise<Proposal | null> {
 		try {
 			const proposals = await this.listProposals();
-			const match = proposals.find(p => proposalIdsEqual(proposalId, p.id));
+			const match = proposals.find((p) => proposalIdsEqual(proposalId, p.id));
 			if (match) {
 				return { ...match };
 			}
 			return null;
 		} catch (error) {
-			console.error('loadProposal error for', proposalId, error);
+			console.error("loadProposal error for", proposalId, error);
 			return null;
 		}
 	}
@@ -388,22 +453,30 @@ export class FileSystem {
 
 		if (filter?.status) {
 			const statusLower = filter.status.toLowerCase();
-			proposals = proposals.filter((t) => (t.status || "").toLowerCase() === statusLower);
+			proposals = proposals.filter(
+				(t) => (t.status || "").toLowerCase() === statusLower,
+			);
 		}
 
 		if (filter?.assignee) {
 			const assignee = filter.assignee.toLowerCase();
-			proposals = proposals.filter((t) => (t.assignee || []).some((a) => a.toLowerCase() === assignee));
+			proposals = proposals.filter((t) =>
+				(t.assignee || []).some((a) => a.toLowerCase() === assignee),
+			);
 		}
 
 		if (filter?.rationale) {
 			const rationaleLower = filter.rationale.toLowerCase();
-			proposals = proposals.filter((t) => (t.rationale ?? "").toLowerCase() === rationaleLower);
+			proposals = proposals.filter(
+				(t) => (t.rationale ?? "").toLowerCase() === rationaleLower,
+			);
 		}
 
 		if (filter?.maturity) {
 			const maturityLower = filter.maturity.toLowerCase();
-			proposals = proposals.filter((t) => (t.maturity ?? "").toLowerCase() === maturityLower);
+			proposals = proposals.filter(
+				(t) => (t.maturity ?? "").toLowerCase() === maturityLower,
+			);
 		}
 
 		return sortByProposalId(proposals);
@@ -434,7 +507,10 @@ export class FileSystem {
 				proposals.push({ ...proposal, filePath: filepath });
 			} catch (error) {
 				if (process.env.DEBUG) {
-					console.error(`Failed to parse completed proposal file ${filepath}:`, error);
+					console.error(
+						`Failed to parse completed proposal file ${filepath}:`,
+						error,
+					);
 				}
 			}
 		}
@@ -467,7 +543,10 @@ export class FileSystem {
 				proposals.push({ ...proposal, filePath: filepath });
 			} catch (error) {
 				if (process.env.DEBUG) {
-					console.error(`Failed to parse archived proposal file ${filepath}:`, error);
+					console.error(
+						`Failed to parse archived proposal file ${filepath}:`,
+						error,
+					);
 				}
 			}
 		}
@@ -480,8 +559,14 @@ export class FileSystem {
 			const proposalsDir = await this.getProposalsDir();
 			const archiveProposalsDir = await this.getArchiveProposalsDir();
 			const core = { filesystem: { proposalsDir } };
-			const sourcePath = await getProposalPath(proposalId, core as ProposalPathContext);
-			const proposalFile = await getProposalFilename(proposalId, core as ProposalPathContext);
+			const sourcePath = await getProposalPath(
+				proposalId,
+				core as ProposalPathContext,
+			);
+			const proposalFile = await getProposalFilename(
+				proposalId,
+				core as ProposalPathContext,
+			);
 
 			if (!sourcePath || !proposalFile) return false;
 
@@ -504,8 +589,14 @@ export class FileSystem {
 			const proposalsDir = await this.getProposalsDir();
 			const completedDir = await this.getCompletedDir();
 			const core = { filesystem: { proposalsDir } };
-			const sourcePath = await getProposalPath(proposalId, core as ProposalPathContext);
-			const proposalFile = await getProposalFilename(proposalId, core as ProposalPathContext);
+			const sourcePath = await getProposalPath(
+				proposalId,
+				core as ProposalPathContext,
+			);
+			const proposalFile = await getProposalFilename(
+				proposalId,
+				core as ProposalPathContext,
+			);
 
 			if (!sourcePath || !proposalFile) return false;
 
@@ -531,11 +622,14 @@ export class FileSystem {
 			// Find draft file with draft- prefix
 			const files = await readdir(draftsDir);
 			const pattern = /^draft-.*\.md$/i;
-			const draftFiles = files.filter(f => pattern.test(f));
+			const draftFiles = files.filter((f) => pattern.test(f));
 
 			const normalizedId = normalizeId(draftId, "draft");
 			const filenameId = idForFilename(normalizedId);
-			const draftFile = draftFiles.find((f) => f.startsWith(`${filenameId} -`) || f.startsWith(`${filenameId}-`));
+			const draftFile = draftFiles.find(
+				(f) =>
+					f.startsWith(`${filenameId} -`) || f.startsWith(`${filenameId}-`),
+			);
 
 			if (!draftFile) return false;
 
@@ -573,10 +667,16 @@ export class FileSystem {
 			// Include both active and completed proposals to prevent ID collisions
 			const existingProposals = await this.listProposals();
 			const completedProposals = await this.listCompletedProposals();
-			const existingIds = [...existingProposals, ...completedProposals].map((t) => t.id);
+			const existingIds = [...existingProposals, ...completedProposals].map(
+				(t) => t.id,
+			);
 
 			// Generate new proposal ID
-			const newProposalId = generateNextId(existingIds, proposalPrefix, config?.zeroPaddedIds);
+			const newProposalId = generateNextId(
+				existingIds,
+				proposalPrefix,
+				config?.zeroPaddedIds,
+			);
 
 			// Update draft with new proposal ID and save as proposal
 			const promotedProposal: Proposal = {
@@ -591,7 +691,7 @@ export class FileSystem {
 			await this.saveProposal(promotedProposal);
 
 			return true;
-		} catch (e) {
+		} catch (_e) {
 			return false;
 		}
 	}
@@ -609,7 +709,11 @@ export class FileSystem {
 
 			// Generate new draft ID
 			const config = await this.loadConfig();
-			const newDraftId = generateNextId(existingIds, "draft", config?.zeroPaddedIds);
+			const newDraftId = generateNextId(
+				existingIds,
+				"draft",
+				config?.zeroPaddedIds,
+			);
 
 			// Update proposal with new draft ID and save as draft
 			const demotedDraft: Proposal = {
@@ -644,8 +748,12 @@ export class FileSystem {
 			const filenameId = idForFilename(draftId);
 			const files = await readdir(draftsDir);
 			const pattern = /^draft-.*\.md$/i;
-			const existingFile = files.find((f) => pattern.test(f) && (f.startsWith(`${filenameId} -`) || f.startsWith(`${filenameId}-`)));
-			
+			const existingFile = files.find(
+				(f) =>
+					pattern.test(f) &&
+					(f.startsWith(`${filenameId} -`) || f.startsWith(`${filenameId}-`)),
+			);
+
 			if (existingFile && existingFile !== filename) {
 				await unlink(join(draftsDir, existingFile));
 			}
@@ -664,13 +772,16 @@ export class FileSystem {
 			// Search for draft files with draft- prefix
 			const files = await readdir(draftsDir);
 			const pattern = /^draft-.*\.md$/i;
-			const draftFiles = files.filter(f => pattern.test(f));
+			const draftFiles = files.filter((f) => pattern.test(f));
 
 			const normalizedId = normalizeId(draftId, "draft");
 			const filenameId = idForFilename(normalizedId);
 
 			// Find matching draft file
-			const draftFile = draftFiles.find((f) => f.startsWith(`${filenameId} -`) || f.startsWith(`${filenameId}-`));
+			const draftFile = draftFiles.find(
+				(f) =>
+					f.startsWith(`${filenameId} -`) || f.startsWith(`${filenameId}-`),
+			);
 			if (!draftFile) return null;
 
 			const filepath = join(draftsDir, draftFile);
@@ -687,7 +798,7 @@ export class FileSystem {
 			const draftsDir = await this.getDraftsDir();
 			const files = await readdir(draftsDir);
 			const pattern = /^draft-.*\.md$/i;
-			const proposalFiles = files.filter(f => pattern.test(f));
+			const proposalFiles = files.filter((f) => pattern.test(f));
 
 			const proposals: Proposal[] = [];
 			for (const file of proposalFiles) {
@@ -713,7 +824,9 @@ export class FileSystem {
 		const content = serializeDecision(decision);
 
 		const files = await readdir(decisionsDir);
-		const matches = files.filter(f => f.startsWith(`decision-${normalizedId} -`) && f !== filename);
+		const matches = files.filter(
+			(f) => f.startsWith(`decision-${normalizedId} -`) && f !== filename,
+		);
 
 		for (const match of matches) {
 			try {
@@ -731,10 +844,12 @@ export class FileSystem {
 		try {
 			const decisionsDir = await this.getDecisionsDir();
 			const files = await readdir(decisionsDir);
-			
+
 			// Normalize ID - remove "decision-" prefix if present
 			const normalizedId = decisionId.replace(/^decision-/, "");
-			const decisionFile = files.find((file) => file.startsWith(`decision-${normalizedId} -`));
+			const decisionFile = files.find((file) =>
+				file.startsWith(`decision-${normalizedId} -`),
+			);
 
 			if (!decisionFile) return null;
 
@@ -755,8 +870,13 @@ export class FileSystem {
 		const subPathSegments = subPath
 			.split(/[\\/]+/)
 			.map((segment) => segment.trim())
-			.filter((segment) => segment.length > 0 && segment !== "." && segment !== "..");
-		const relativePath = subPathSegments.length > 0 ? join(...subPathSegments, filename) : filename;
+			.filter(
+				(segment) => segment.length > 0 && segment !== "." && segment !== "..",
+			);
+		const relativePath =
+			subPathSegments.length > 0
+				? join(...subPathSegments, filename)
+				: filename;
 		const filepath = join(docsDir, relativePath);
 		const content = serializeDocument(document);
 
@@ -765,11 +885,16 @@ export class FileSystem {
 		// Find existing matches recursively
 		const findMarkdownFiles = async (dir: string): Promise<string[]> => {
 			const entries = await readdir(dir, { withFileTypes: true });
-			const files = await Promise.all(entries.map((entry) => {
-				const res = join(dir, entry.name);
-				return entry.isDirectory() ? findMarkdownFiles(res) : res;
-			}));
-			return files.flat().filter(f => f.endsWith(".md")).map(f => relative(docsDir, f));
+			const files = await Promise.all(
+				entries.map((entry) => {
+					const res = join(dir, entry.name);
+					return entry.isDirectory() ? findMarkdownFiles(res) : res;
+				}),
+			);
+			return files
+				.flat()
+				.filter((f) => f.endsWith(".md"))
+				.map((f) => relative(docsDir, f));
 		};
 
 		const existingMatches = await findMarkdownFiles(docsDir);
@@ -821,7 +946,9 @@ export class FileSystem {
 		try {
 			const decisionsDir = await this.getDecisionsDir();
 			const files = await readdir(decisionsDir);
-			const decisionFiles = files.filter(f => f.startsWith("decision-") && f.endsWith(".md"));
+			const decisionFiles = files.filter(
+				(f) => f.startsWith("decision-") && f.endsWith(".md"),
+			);
 
 			const decisions: Decision[] = [];
 			for (const file of decisionFiles) {
@@ -842,33 +969,35 @@ export class FileSystem {
 	async listDocuments(): Promise<Document[]> {
 		try {
 			const docsDir = await this.getDocsDir();
-			
+
 			const findMarkdownFiles = async (dir: string): Promise<string[]> => {
 				const entries = await readdir(dir, { withFileTypes: true });
-				const files = await Promise.all(entries.map(async (entry) => {
-					const res = join(dir, entry.name);
-					if (entry.isDirectory()) {
-						return await findMarkdownFiles(res);
-					}
-					if (entry.isSymbolicLink()) {
-						try {
-							const s = await stat(res);
-							if (s.isDirectory()) {
-								return await findMarkdownFiles(res);
-							}
-						} catch {
-							// Link points to non-existent location
+				const files = await Promise.all(
+					entries.map(async (entry) => {
+						const res = join(dir, entry.name);
+						if (entry.isDirectory()) {
+							return await findMarkdownFiles(res);
 						}
-					}
-					return res;
-				}));
+						if (entry.isSymbolicLink()) {
+							try {
+								const s = await stat(res);
+								if (s.isDirectory()) {
+									return await findMarkdownFiles(res);
+								}
+							} catch {
+								// Link points to non-existent location
+							}
+						}
+						return res;
+					}),
+				);
 				return files.flat();
 			};
 
 			const absoluteFiles = await findMarkdownFiles(docsDir);
 			const docFiles = absoluteFiles
-				.filter(f => f.endsWith(".md"))
-				.map(f => relative(docsDir, f));
+				.filter((f) => f.endsWith(".md"))
+				.map((f) => relative(docsDir, f));
 
 			const docs: Document[] = [];
 			for (const file of docFiles) {
@@ -941,7 +1070,11 @@ export class FileSystem {
 		return `${id} - ${safeTitle}.md`;
 	}
 
-	private serializeDirectiveContent(id: string, title: string, rawContent: string): string {
+	private serializeDirectiveContent(
+		id: string,
+		title: string,
+		rawContent: string,
+	): string {
 		return `---
 id: ${id}
 title: "${title.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"
@@ -951,17 +1084,25 @@ ${rawContent.trim()}
 `;
 	}
 
-	private rewriteDefaultDirectiveDescription(rawContent: string, previousTitle: string, nextTitle: string): string {
+	private rewriteDefaultDirectiveDescription(
+		rawContent: string,
+		previousTitle: string,
+		nextTitle: string,
+	): string {
 		const defaultDescription = `Directive: ${previousTitle}`;
-		const descriptionSectionPattern = /(##\s+Description\s*(?:\r?\n)+)([\s\S]*?)(?=(?:\r?\n)##\s+|$)/i;
+		const descriptionSectionPattern =
+			/(##\s+Description\s*(?:\r?\n)+)([\s\S]*?)(?=(?:\r?\n)##\s+|$)/i;
 
-		return rawContent.replace(descriptionSectionPattern, (fullSection, heading: string, body: string) => {
-			if (body.trim() !== defaultDescription) {
-				return fullSection;
-			}
-			const trailingWhitespace = body.match(/\s*$/)?.[0] ?? "";
-			return `${heading}Directive: ${nextTitle}${trailingWhitespace}`;
-		});
+		return rawContent.replace(
+			descriptionSectionPattern,
+			(fullSection, heading: string, body: string) => {
+				if (body.trim() !== defaultDescription) {
+					return fullSection;
+				}
+				const trailingWhitespace = body.match(/\s*$/)?.[0] ?? "";
+				return `${heading}Directive: ${nextTitle}${trailingWhitespace}`;
+			},
+		);
 	}
 
 	private async findDirectiveFile(
@@ -985,16 +1126,51 @@ ${rawContent.trim()}
 				? `m-${String(Number.parseInt(normalizedInput.replace(/^m-/, ""), 10))}`
 				: null;
 
-		const directivesDir = scope === "archived" ? await this.getArchiveDirectivesDir() : await this.getDirectivesDir();
+		const directivesDir =
+			scope === "archived"
+				? await this.getArchiveDirectivesDir()
+				: await this.getDirectivesDir();
 		const files = await readdir(directivesDir);
-		const directiveFiles = files.filter(f => f.startsWith("m-") && f.endsWith(".md"));
+		const directiveFiles = files.filter(
+			(f) => f.startsWith("m-") && f.endsWith(".md"),
+		);
 
-		const rawExactIdMatches: Array<{ file: string; filepath: string; content: string; directive: Directive }> = [];
-		const canonicalRawIdMatches: Array<{ file: string; filepath: string; content: string; directive: Directive }> = [];
-		const exactAliasIdMatches: Array<{ file: string; filepath: string; content: string; directive: Directive }> = [];
-		const exactTitleMatches: Array<{ file: string; filepath: string; content: string; directive: Directive }> = [];
-		const variantIdMatches: Array<{ file: string; filepath: string; content: string; directive: Directive }> = [];
-		const variantTitleMatches: Array<{ file: string; filepath: string; content: string; directive: Directive }> = [];
+		const rawExactIdMatches: Array<{
+			file: string;
+			filepath: string;
+			content: string;
+			directive: Directive;
+		}> = [];
+		const canonicalRawIdMatches: Array<{
+			file: string;
+			filepath: string;
+			content: string;
+			directive: Directive;
+		}> = [];
+		const exactAliasIdMatches: Array<{
+			file: string;
+			filepath: string;
+			content: string;
+			directive: Directive;
+		}> = [];
+		const exactTitleMatches: Array<{
+			file: string;
+			filepath: string;
+			content: string;
+			directive: Directive;
+		}> = [];
+		const variantIdMatches: Array<{
+			file: string;
+			filepath: string;
+			content: string;
+			directive: Directive;
+		}> = [];
+		const variantTitleMatches: Array<{
+			file: string;
+			filepath: string;
+			content: string;
+			directive: Directive;
+		}> = [];
 
 		for (const file of directiveFiles) {
 			if (file.toLowerCase() === "readme.md") {
@@ -1037,11 +1213,16 @@ ${rawContent.trim()}
 			}
 		}
 
-		const preferIdMatches = /^\d+$/.test(normalizedInput) || /^m-\d+$/.test(normalizedInput);
-		const exactTitleMatch = exactTitleMatches.length === 1 ? exactTitleMatches[0] : null;
-		const variantTitleMatch = variantTitleMatches.length === 1 ? variantTitleMatches[0] : null;
-		const exactAliasIdMatch = exactAliasIdMatches.length === 1 ? exactAliasIdMatches[0] : null;
-		const variantIdMatch = variantIdMatches.length === 1 ? variantIdMatches[0] : null;
+		const preferIdMatches =
+			/^\d+$/.test(normalizedInput) || /^m-\d+$/.test(normalizedInput);
+		const exactTitleMatch =
+			exactTitleMatches.length === 1 ? exactTitleMatches[0] : null;
+		const variantTitleMatch =
+			variantTitleMatches.length === 1 ? variantTitleMatches[0] : null;
+		const exactAliasIdMatch =
+			exactAliasIdMatches.length === 1 ? exactAliasIdMatches[0] : null;
+		const variantIdMatch =
+			variantIdMatches.length === 1 ? variantIdMatches[0] : null;
 		if (preferIdMatches) {
 			return (
 				rawExactIdMatches[0] ??
@@ -1054,7 +1235,12 @@ ${rawContent.trim()}
 			);
 		}
 		return (
-			rawExactIdMatches[0] ?? exactTitleMatch ?? canonicalRawIdMatches[0] ?? variantIdMatch ?? variantTitleMatch ?? null
+			rawExactIdMatches[0] ??
+			exactTitleMatch ??
+			canonicalRawIdMatches[0] ??
+			variantIdMatch ??
+			variantTitleMatch ??
+			null
 		);
 	}
 
@@ -1063,7 +1249,9 @@ ${rawContent.trim()}
 		try {
 			const directivesDir = await this.getDirectivesDir();
 			const files = await readdir(directivesDir);
-			const directiveFiles = files.filter(f => f.startsWith("m-") && f.endsWith(".md"));
+			const directiveFiles = files.filter(
+				(f) => f.startsWith("m-") && f.endsWith(".md"),
+			);
 			const directives: Directive[] = [];
 			for (const file of directiveFiles) {
 				// Filter out README files
@@ -1075,7 +1263,9 @@ ${rawContent.trim()}
 				directives.push(parseDirective(content));
 			}
 			// Sort by ID for consistent ordering
-			return directives.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+			return directives.sort((a, b) =>
+				a.id.localeCompare(b.id, undefined, { numeric: true }),
+			);
 		} catch {
 			return [];
 		}
@@ -1085,7 +1275,9 @@ ${rawContent.trim()}
 		try {
 			const directivesDir = await this.getArchiveDirectivesDir();
 			const files = await readdir(directivesDir);
-			const directiveFiles = files.filter(f => f.startsWith("m-") && f.endsWith(".md"));
+			const directiveFiles = files.filter(
+				(f) => f.startsWith("m-") && f.endsWith(".md"),
+			);
 			const directives: Directive[] = [];
 			for (const file of directiveFiles) {
 				if (file.toLowerCase() === "readme.md") {
@@ -1095,7 +1287,9 @@ ${rawContent.trim()}
 				const content = await readFile(filepath, "utf-8");
 				directives.push(parseDirective(content));
 			}
-			return directives.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+			return directives.sort((a, b) =>
+				a.id.localeCompare(b.id, undefined, { numeric: true }),
+			);
 		} catch {
 			return [];
 		}
@@ -1110,7 +1304,10 @@ ${rawContent.trim()}
 		}
 	}
 
-	async createDirective(title: string, description?: string): Promise<Directive> {
+	async createDirective(
+		title: string,
+		description?: string,
+	): Promise<Directive> {
 		const directivesDir = await this.getDirectivesDir();
 
 		// Ensure directives directory exists
@@ -1121,12 +1318,19 @@ ${rawContent.trim()}
 		await mkdir(archiveDirectivesDir, { recursive: true });
 
 		const mFiles = await readdir(directivesDir);
-		const existingFiles = mFiles.filter(f => f.startsWith("m-") && f.endsWith(".md"));
-		
-		const amFiles = await readdir(archiveDirectivesDir);
-		const archivedFiles = amFiles.filter(f => f.startsWith("m-") && f.endsWith(".md"));
+		const existingFiles = mFiles.filter(
+			(f) => f.startsWith("m-") && f.endsWith(".md"),
+		);
 
-		const parseDirectiveId = async (dir: string, file: string): Promise<number | null> => {
+		const amFiles = await readdir(archiveDirectivesDir);
+		const archivedFiles = amFiles.filter(
+			(f) => f.startsWith("m-") && f.endsWith(".md"),
+		);
+
+		const parseDirectiveId = async (
+			dir: string,
+			file: string,
+		): Promise<number | null> => {
 			if (file.toLowerCase() === "readme.md") {
 				return null;
 			}
@@ -1150,7 +1354,9 @@ ${rawContent.trim()}
 		const existingIds = (
 			await Promise.all([
 				...existingFiles.map((file) => parseDirectiveId(directivesDir, file)),
-				...archivedFiles.map((file) => parseDirectiveId(archiveDirectivesDir, file)),
+				...archivedFiles.map((file) =>
+					parseDirectiveId(archiveDirectivesDir, file),
+				),
 			])
 		).filter((id): id is number => typeof id === "number" && id >= 0);
 
@@ -1205,7 +1411,10 @@ ${description || `Directive: ${title}`}`,
 
 			const { directive } = directiveMatch;
 			const directivesDir = await this.getDirectivesDir();
-			const targetFilename = this.buildDirectiveFilename(directive.id, normalizedTitle);
+			const targetFilename = this.buildDirectiveFilename(
+				directive.id,
+				normalizedTitle,
+			);
 			targetPath = join(directivesDir, targetFilename);
 			sourcePath = directiveMatch.filepath;
 			originalContent = directiveMatch.content;
@@ -1214,7 +1423,11 @@ ${description || `Directive: ${title}`}`,
 				directive.title,
 				normalizedTitle,
 			);
-			const updatedContent = this.serializeDirectiveContent(directive.id, normalizedTitle, nextRawContent);
+			const updatedContent = this.serializeDirectiveContent(
+				directive.id,
+				normalizedTitle,
+				nextRawContent,
+			);
 
 			if (sourcePath !== targetPath) {
 				let exists = false;
@@ -1241,7 +1454,12 @@ ${description || `Directive: ${title}`}`,
 			};
 		} catch {
 			try {
-				if (movedFile && sourcePath && targetPath && sourcePath !== targetPath) {
+				if (
+					movedFile &&
+					sourcePath &&
+					targetPath &&
+					sourcePath !== targetPath
+				) {
 					await rename(targetPath, sourcePath);
 					if (originalContent) {
 						await writeFile(sourcePath, originalContent, "utf-8");
@@ -1311,7 +1529,7 @@ ${description || `Directive: ${title}`}`,
 
 			// Cache the loaded config
 			this.cachedConfig = config;
-			
+
 			// Clean up undefined keys for test compatibility (strict deep equal)
 			// Return a fresh object from JSON stringify/parse to be absolutely sure
 			return JSON.parse(JSON.stringify(config));
@@ -1322,28 +1540,40 @@ ${description || `Directive: ${title}`}`,
 
 	async saveConfig(config: RoadmapConfig): Promise<void> {
 		const roadmapDir = await this.getRoadmapDir();
-		const configPath = this.currentConfigPath || join(roadmapDir, DEFAULT_FILES.CONFIG);
+		const configPath =
+			this.currentConfigPath || join(roadmapDir, DEFAULT_FILES.CONFIG);
 		const content = this.serializeConfig(config);
 		await writeFile(configPath, content, "utf-8");
 		this.cachedConfig = config;
 	}
 
-	async getUserSetting(key: string, global = false): Promise<string | undefined> {
+	async getUserSetting(
+		key: string,
+		global = false,
+	): Promise<string | undefined> {
 		const settings = await this.loadUserSettings(global);
 		return settings ? settings[key] : undefined;
 	}
 
-	async setUserSetting(key: string, value: string, global = false): Promise<void> {
+	async setUserSetting(
+		key: string,
+		value: string,
+		global = false,
+	): Promise<void> {
 		const settings = (await this.loadUserSettings(global)) || {};
 		settings[key] = value;
 		await this.saveUserSettings(settings, global);
 	}
 
-	private async loadUserSettings(global = false): Promise<Record<string, string> | null> {
+	private async loadUserSettings(
+		global = false,
+	): Promise<Record<string, string> | null> {
 		const primaryPath = global
 			? join(homedir(), "roadmap", DEFAULT_FILES.USER)
 			: join(this.projectRoot, DEFAULT_FILES.USER);
-		const fallbackPath = global ? join(this.projectRoot, "roadmap", DEFAULT_FILES.USER) : undefined;
+		const fallbackPath = global
+			? join(this.projectRoot, "roadmap", DEFAULT_FILES.USER)
+			: undefined;
 		const tryPaths = fallbackPath ? [primaryPath, fallbackPath] : [primaryPath];
 		for (const filePath of tryPaths) {
 			try {
@@ -1368,11 +1598,16 @@ ${description || `Directive: ${title}`}`,
 		return null;
 	}
 
-	private async saveUserSettings(settings: Record<string, string>, global = false): Promise<void> {
+	private async saveUserSettings(
+		settings: Record<string, string>,
+		global = false,
+	): Promise<void> {
 		const primaryPath = global
 			? join(homedir(), "roadmap", DEFAULT_FILES.USER)
 			: join(this.projectRoot, DEFAULT_FILES.USER);
-		const fallbackPath = global ? join(this.projectRoot, "roadmap", DEFAULT_FILES.USER) : undefined;
+		const fallbackPath = global
+			? join(this.projectRoot, "roadmap", DEFAULT_FILES.USER)
+			: undefined;
 
 		const lines = Object.entries(settings).map(([k, v]) => `${k}: ${v}`);
 		const data = `${lines.join("\n")}\n`;
@@ -1415,55 +1650,78 @@ ${description || `Directive: ${title}`}`,
 
 	private parseConfig(content: string): RoadmapConfig {
 		try {
-			// @ts-ignore
 			const yaml = require("js-yaml");
 			const cfg = yaml.load(content) as any;
-			
+
 			if (cfg) {
 				this.rawConfig = JSON.parse(JSON.stringify(cfg));
 				const config: Partial<RoadmapConfig> = {};
-				
+
 				// Handle nested format (roadmap.yaml)
 				if (cfg.project) {
 					config.projectName = cfg.project.name;
 					config.dateFormat = cfg.project.date_format;
 					config.exportPath = cfg.project.export_path;
 				}
-				
+
 				if (cfg.proposals) {
 					config.defaultStatus = cfg.proposals.default_status;
 					config.statuses = cfg.proposals.statuses;
 					config.labels = cfg.proposals.labels;
 					config.zeroPaddedIds = cfg.proposals.zero_padded_ids;
 				}
-				
+
 				if (cfg.database) {
 					config.database = cfg.database;
 				}
-				
+
 				if (cfg.ui) {
 					config.maxColumnWidth = cfg.ui.max_column_width;
 					config.autoOpenBrowser = cfg.ui.auto_open_browser;
 				}
-				
+
 				// Handle flat format (config.yml) and overrides
 				config.projectName = config.projectName || cfg.project_name || "";
-				config.statuses = config.statuses || cfg.statuses || ["New", "Draft", "Review", "Active", "Accepted", "Complete", "Rejected", "Abandoned", "Replaced"];
+				config.statuses = config.statuses ||
+					cfg.statuses || [
+						"New",
+						"Draft",
+						"Review",
+						"Active",
+						"Accepted",
+						"Complete",
+						"Rejected",
+						"Abandoned",
+						"Replaced",
+					];
 				config.labels = config.labels || cfg.labels || [];
-				config.dateFormat = config.dateFormat || cfg.date_format || "yyyy-mm-dd";
-				config.maxColumnWidth = config.maxColumnWidth || cfg.max_column_width || 20;
-				config.autoOpenBrowser = config.autoOpenBrowser !== undefined ? config.autoOpenBrowser : (cfg.auto_open_browser !== undefined ? cfg.auto_open_browser : true);
+				config.dateFormat =
+					config.dateFormat || cfg.date_format || "yyyy-mm-dd";
+				config.maxColumnWidth =
+					config.maxColumnWidth || cfg.max_column_width || 20;
+				config.autoOpenBrowser =
+					config.autoOpenBrowser !== undefined
+						? config.autoOpenBrowser
+						: cfg.auto_open_browser !== undefined
+							? cfg.auto_open_browser
+							: true;
 				config.defaultPort = cfg.default_port || 6420;
-				config.remoteOperations = cfg.remote_operations !== undefined ? cfg.remote_operations : true;
-				config.autoCommit = cfg.auto_commit !== undefined ? cfg.auto_commit : true;
+				config.remoteOperations =
+					cfg.remote_operations !== undefined ? cfg.remote_operations : true;
+				config.autoCommit =
+					cfg.auto_commit !== undefined ? cfg.auto_commit : true;
 				config.zeroPaddedIds = config.zeroPaddedIds || cfg.zero_padded_ids;
-				config.bypassGitHooks = cfg.bypass_git_hooks !== undefined ? cfg.bypass_git_hooks : false;
-				config.checkActiveBranches = cfg.check_active_branches !== undefined ? cfg.check_active_branches : true;
+				config.bypassGitHooks =
+					cfg.bypass_git_hooks !== undefined ? cfg.bypass_git_hooks : false;
+				config.checkActiveBranches =
+					cfg.check_active_branches !== undefined
+						? cfg.check_active_branches
+						: true;
 				config.activeBranchDays = cfg.active_branch_days || 30;
-				
+
 				return config as RoadmapConfig;
 			}
-		} catch (e) {
+		} catch (_e) {
 			// Fallback to manual parsing if js-yaml fails or is missing
 		}
 
@@ -1639,11 +1897,12 @@ ${description || `Directive: ${title}`}`,
 					// Remove surrounding quotes if present, but preserve inner content
 					config.onStatusChange = value.replace(/^['"]|['"]$/g, "");
 					break;
-				case "proposal":
+				case "proposal": {
 					const prefixVal = value.replace(/['"]/g, "");
 					if (!config.prefixes) config.prefixes = { proposal: "proposal" };
 					config.prefixes.proposal = prefixVal;
 					break;
+				}
 			}
 		}
 
@@ -1654,21 +1913,34 @@ ${description || `Directive: ${title}`}`,
 			dateFormat: config.dateFormat || "yyyy-mm-dd",
 		};
 
-		if (config.defaultAssignee !== undefined) result.defaultAssignee = config.defaultAssignee;
-		if (config.defaultReporter !== undefined) result.defaultReporter = config.defaultReporter;
-		if (config.defaultStatus !== undefined) result.defaultStatus = config.defaultStatus;
+		if (config.defaultAssignee !== undefined)
+			result.defaultAssignee = config.defaultAssignee;
+		if (config.defaultReporter !== undefined)
+			result.defaultReporter = config.defaultReporter;
+		if (config.defaultStatus !== undefined)
+			result.defaultStatus = config.defaultStatus;
 		if (config.exportPath !== undefined) result.exportPath = config.exportPath;
-		if (config.maxColumnWidth !== undefined) result.maxColumnWidth = config.maxColumnWidth;
-		if (config.defaultEditor !== undefined) result.defaultEditor = config.defaultEditor;
-		if (config.autoOpenBrowser !== undefined) result.autoOpenBrowser = config.autoOpenBrowser;
-		if (config.defaultPort !== undefined) result.defaultPort = config.defaultPort;
-		if (config.remoteOperations !== undefined) result.remoteOperations = config.remoteOperations;
+		if (config.maxColumnWidth !== undefined)
+			result.maxColumnWidth = config.maxColumnWidth;
+		if (config.defaultEditor !== undefined)
+			result.defaultEditor = config.defaultEditor;
+		if (config.autoOpenBrowser !== undefined)
+			result.autoOpenBrowser = config.autoOpenBrowser;
+		if (config.defaultPort !== undefined)
+			result.defaultPort = config.defaultPort;
+		if (config.remoteOperations !== undefined)
+			result.remoteOperations = config.remoteOperations;
 		if (config.autoCommit !== undefined) result.autoCommit = config.autoCommit;
-		if (config.zeroPaddedIds !== undefined) result.zeroPaddedIds = config.zeroPaddedIds;
-		if (config.bypassGitHooks !== undefined) result.bypassGitHooks = config.bypassGitHooks;
-		if (config.checkActiveBranches !== undefined) result.checkActiveBranches = config.checkActiveBranches;
-		if (config.activeBranchDays !== undefined) result.activeBranchDays = config.activeBranchDays;
-		if (config.onStatusChange !== undefined) result.onStatusChange = config.onStatusChange;
+		if (config.zeroPaddedIds !== undefined)
+			result.zeroPaddedIds = config.zeroPaddedIds;
+		if (config.bypassGitHooks !== undefined)
+			result.bypassGitHooks = config.bypassGitHooks;
+		if (config.checkActiveBranches !== undefined)
+			result.checkActiveBranches = config.checkActiveBranches;
+		if (config.activeBranchDays !== undefined)
+			result.activeBranchDays = config.activeBranchDays;
+		if (config.onStatusChange !== undefined)
+			result.onStatusChange = config.onStatusChange;
 		if (config.prefixes !== undefined) result.prefixes = config.prefixes;
 		if (config.database !== undefined) result.database = config.database;
 
@@ -1677,13 +1949,12 @@ ${description || `Directive: ${title}`}`,
 
 	private serializeConfig(config: RoadmapConfig): string {
 		try {
-			// @ts-ignore
 			const yaml = require("js-yaml");
-			
+
 			// If we have rawConfig (nested structure), update it with flat config values
 			if (this.rawConfig) {
 				const cfg = this.rawConfig;
-				
+
 				// Update nested project section
 				if (cfg.project) {
 					cfg.project.name = config.projectName;
@@ -1693,7 +1964,7 @@ ${description || `Directive: ${title}`}`,
 					// If neither nested nor flat project name exists, add it as flat for backward compat
 					cfg.project_name = config.projectName;
 				}
-				
+
 				// Update nested proposals section
 				if (cfg.proposals) {
 					cfg.proposals.default_status = config.defaultStatus;
@@ -1705,29 +1976,38 @@ ${description || `Directive: ${title}`}`,
 					cfg.labels = config.labels;
 					cfg.default_status = config.defaultStatus;
 				}
-				
+
 				// Update nested ui section
 				if (cfg.ui) {
 					cfg.ui.max_column_width = config.maxColumnWidth;
 					cfg.ui.auto_open_browser = config.autoOpenBrowser;
 				}
-				
+
 				// Update other flat fields
-				if (cfg.project_name !== undefined) cfg.project_name = config.projectName;
+				if (cfg.project_name !== undefined)
+					cfg.project_name = config.projectName;
 				if (cfg.date_format !== undefined) cfg.date_format = config.dateFormat;
-				if (cfg.max_column_width !== undefined) cfg.max_column_width = config.maxColumnWidth;
-				if (cfg.auto_open_browser !== undefined) cfg.auto_open_browser = config.autoOpenBrowser;
-				if (cfg.default_port !== undefined) cfg.default_port = config.defaultPort;
-				if (cfg.remote_operations !== undefined) cfg.remote_operations = config.remoteOperations;
+				if (cfg.max_column_width !== undefined)
+					cfg.max_column_width = config.maxColumnWidth;
+				if (cfg.auto_open_browser !== undefined)
+					cfg.auto_open_browser = config.autoOpenBrowser;
+				if (cfg.default_port !== undefined)
+					cfg.default_port = config.defaultPort;
+				if (cfg.remote_operations !== undefined)
+					cfg.remote_operations = config.remoteOperations;
 				if (cfg.auto_commit !== undefined) cfg.auto_commit = config.autoCommit;
-				if (cfg.zero_padded_ids !== undefined) cfg.zero_padded_ids = config.zeroPaddedIds;
-				if (cfg.bypass_git_hooks !== undefined) cfg.bypass_git_hooks = config.bypassGitHooks;
-				if (cfg.check_active_branches !== undefined) cfg.check_active_branches = config.checkActiveBranches;
-				if (cfg.active_branch_days !== undefined) cfg.active_branch_days = config.activeBranchDays;
-				
+				if (cfg.zero_padded_ids !== undefined)
+					cfg.zero_padded_ids = config.zeroPaddedIds;
+				if (cfg.bypass_git_hooks !== undefined)
+					cfg.bypass_git_hooks = config.bypassGitHooks;
+				if (cfg.check_active_branches !== undefined)
+					cfg.check_active_branches = config.checkActiveBranches;
+				if (cfg.active_branch_days !== undefined)
+					cfg.active_branch_days = config.activeBranchDays;
+
 				return yaml.dump(cfg, { indent: 2, lineWidth: -1 });
 			}
-			
+
 			// Fallback: create a clean object and dump it
 			const cleanObj: any = {
 				project_name: config.projectName,
@@ -1746,37 +2026,65 @@ ${description || `Directive: ${title}`}`,
 				check_active_branches: config.checkActiveBranches,
 				active_branch_days: config.activeBranchDays,
 			};
-			
+
 			if (config.database) cleanObj.database = config.database;
-			if (config.onStatusChange) cleanObj.on_status_change = config.onStatusChange;
-			if (config.prefixes?.proposal) cleanObj.proposal = config.prefixes.proposal;
-			
+			if (config.onStatusChange)
+				cleanObj.on_status_change = config.onStatusChange;
+			if (config.prefixes?.proposal)
+				cleanObj.proposal = config.prefixes.proposal;
+
 			return yaml.dump(cleanObj, { indent: 2, lineWidth: -1 });
-		} catch (e) {
+		} catch (_e) {
 			// Critical fallback: original manual serialization
 			const lines = [
 				`project_name: "${config.projectName}"`,
-				...(config.defaultAssignee ? [`default_assignee: "${config.defaultAssignee}"`] : []),
-				...(config.defaultReporter ? [`default_reporter: "${config.defaultReporter}"`] : []),
-				...(config.defaultStatus ? [`default_status: "${config.defaultStatus}"`] : []),
+				...(config.defaultAssignee
+					? [`default_assignee: "${config.defaultAssignee}"`]
+					: []),
+				...(config.defaultReporter
+					? [`default_reporter: "${config.defaultReporter}"`]
+					: []),
+				...(config.defaultStatus
+					? [`default_status: "${config.defaultStatus}"`]
+					: []),
 				`statuses: [${config.statuses.map((s) => `"${s}"`).join(", ")}]`,
 				`labels: [${config.labels.map((l) => `"${l}"`).join(", ")}]`,
 				`date_format: ${config.dateFormat}`,
 				...(config.exportPath ? [`export_path: ${config.exportPath}`] : []),
-				...(config.maxColumnWidth ? [`max_column_width: ${config.maxColumnWidth}`] : []),
-				...(config.defaultEditor ? [`default_editor: "${config.defaultEditor}"`] : []),
-				...(typeof config.autoOpenBrowser === "boolean" ? [`auto_open_browser: ${config.autoOpenBrowser}`] : []),
+				...(config.maxColumnWidth
+					? [`max_column_width: ${config.maxColumnWidth}`]
+					: []),
+				...(config.defaultEditor
+					? [`default_editor: "${config.defaultEditor}"`]
+					: []),
+				...(typeof config.autoOpenBrowser === "boolean"
+					? [`auto_open_browser: ${config.autoOpenBrowser}`]
+					: []),
 				...(config.defaultPort ? [`default_port: ${config.defaultPort}`] : []),
-				...(typeof config.remoteOperations === "boolean" ? [`remote_operations: ${config.remoteOperations}`] : []),
-				...(typeof config.autoCommit === "boolean" ? [`auto_commit: ${config.autoCommit}`] : []),
-				...(typeof config.zeroPaddedIds === "number" ? [`zero_padded_ids: ${config.zeroPaddedIds}`] : []),
-				...(typeof config.bypassGitHooks === "boolean" ? [`bypass_git_hooks: ${config.bypassGitHooks}`] : []),
+				...(typeof config.remoteOperations === "boolean"
+					? [`remote_operations: ${config.remoteOperations}`]
+					: []),
+				...(typeof config.autoCommit === "boolean"
+					? [`auto_commit: ${config.autoCommit}`]
+					: []),
+				...(typeof config.zeroPaddedIds === "number"
+					? [`zero_padded_ids: ${config.zeroPaddedIds}`]
+					: []),
+				...(typeof config.bypassGitHooks === "boolean"
+					? [`bypass_git_hooks: ${config.bypassGitHooks}`]
+					: []),
 				...(typeof config.checkActiveBranches === "boolean"
 					? [`check_active_branches: ${config.checkActiveBranches}`]
 					: []),
-				...(typeof config.activeBranchDays === "number" ? [`active_branch_days: ${config.activeBranchDays}`] : []),
-				...(config.onStatusChange ? [`onStatusChange: '${config.onStatusChange}'`] : []),
-				...(config.prefixes?.proposal ? [`proposal: "${config.prefixes.proposal}"`] : []),
+				...(typeof config.activeBranchDays === "number"
+					? [`active_branch_days: ${config.activeBranchDays}`]
+					: []),
+				...(config.onStatusChange
+					? [`onStatusChange: '${config.onStatusChange}'`]
+					: []),
+				...(config.prefixes?.proposal
+					? [`proposal: "${config.prefixes.proposal}"`]
+					: []),
 			];
 
 			return `${lines.join("\n")}\n`;

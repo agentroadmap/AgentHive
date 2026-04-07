@@ -6,12 +6,18 @@
  * - Historical MAP.md versions archived
  */
 
-import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { MapProjection } from "../../src/core/dag/map-projection.ts";
-import { mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import { MapProjection } from "../../src/core/dag/map-projection.ts";
 
 const TEST_BASE = join(import.meta.dirname, "../../tmp/test-map-projection");
 
@@ -43,13 +49,34 @@ describe("proposal-45: MAP.md as Daemon Projection", () => {
 
 		// Insert test data
 		db.prepare("INSERT INTO proposals VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
-			"proposal-1", "Test Proposal 1", "Potential", null, "high", null, null, null
+			"proposal-1",
+			"Test Proposal 1",
+			"Potential",
+			null,
+			"high",
+			null,
+			null,
+			null,
 		);
 		db.prepare("INSERT INTO proposals VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
-			"proposal-2", "Test Proposal 2", "Active", "agent-1", "medium", null, null, "proposal-1"
+			"proposal-2",
+			"Test Proposal 2",
+			"Active",
+			"agent-1",
+			"medium",
+			null,
+			null,
+			"proposal-1",
 		);
 		db.prepare("INSERT INTO proposals VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
-			"proposal-3", "Test Proposal 3", "Complete", null, null, null, null, null
+			"proposal-3",
+			"Test Proposal 3",
+			"Complete",
+			null,
+			null,
+			null,
+			null,
+			null,
 		);
 		db.close();
 
@@ -87,7 +114,11 @@ describe("proposal-45: MAP.md as Daemon Projection", () => {
 			projection.generateMap();
 
 			const content = readFileSync(join(testDir, "roadmap", "MAP.md"), "utf-8");
-			assert.ok(content.includes("| Potential | Active | Review | Complete | Abandoned |"));
+			assert.ok(
+				content.includes(
+					"| Potential | Active | Review | Complete | Abandoned |",
+				),
+			);
 			assert.ok(content.includes("proposal-1"));
 			assert.ok(content.includes("proposal-2"));
 			assert.ok(content.includes("proposal-3"));
@@ -173,13 +204,19 @@ describe("proposal-45: MAP.md as Daemon Projection", () => {
 
 			// Modify the generated file
 			const mapPath = join(testDir, "roadmap", "MAP.md");
-			writeFileSync(mapPath, readFileSync(mapPath, "utf-8") + "\n<!-- Modification -->");
+			writeFileSync(
+				mapPath,
+				`${readFileSync(mapPath, "utf-8")}\n<!-- Modification -->`,
+			);
 
 			// Second generation should archive first
 			projection.generateMap();
 
 			const versions = projection.getArchivedVersions();
-			assert.ok(versions.length >= 1, "Should have at least one archived version");
+			assert.ok(
+				versions.length >= 1,
+				"Should have at least one archived version",
+			);
 		});
 
 		it("archives maintain timestamp in filename", () => {
@@ -201,7 +238,7 @@ describe("proposal-45: MAP.md as Daemon Projection", () => {
 			if (versions.length > 0) {
 				const content = projection.getArchivedVersion(versions[0]);
 				assert.ok(content !== null);
-				assert.ok(content!.includes("AUTO-GENERATED"));
+				assert.ok(content?.includes("AUTO-GENERATED"));
 			}
 		});
 
@@ -212,13 +249,16 @@ describe("proposal-45: MAP.md as Daemon Projection", () => {
 			for (let i = 0; i < 5; i++) {
 				const mapPath = join(testDir, "roadmap", "MAP.md");
 				if (existsSync(mapPath)) {
-					writeFileSync(mapPath, readFileSync(mapPath, "utf-8") + " ");
+					writeFileSync(mapPath, `${readFileSync(mapPath, "utf-8")} `);
 				}
 				projection.generateMap();
 			}
 
 			const versions = projection.getArchivedVersions();
-			assert.ok(versions.length <= 3, `Should keep at most 3 versions, got ${versions.length}`);
+			assert.ok(
+				versions.length <= 3,
+				`Should keep at most 3 versions, got ${versions.length}`,
+			);
 		});
 	});
 

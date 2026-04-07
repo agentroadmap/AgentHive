@@ -1,9 +1,14 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync, buildCliCommand } from "../support/test-utils.ts";
+import {
+	buildCliCommand,
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 let TEST_DIR: string;
 
@@ -33,7 +38,10 @@ describe("CLI description newline handling", () => {
 
 	it("should preserve literal newlines when creating proposal", async () => {
 		const desc = "First line\nSecond line\n\nThird paragraph";
-		execSync(`node --experimental-strip-types ${buildCliCommand([cliPath, "proposal", "create", "Multi-line", "--desc", desc])}`, { cwd: TEST_DIR });
+		execSync(
+			`node --experimental-strip-types ${buildCliCommand([cliPath, "proposal", "create", "Multi-line", "--desc", desc])}`,
+			{ cwd: TEST_DIR },
+		);
 
 		const core = new Core(TEST_DIR);
 		const body = await core.getProposalContent("proposal-1");
@@ -57,7 +65,10 @@ describe("CLI description newline handling", () => {
 		);
 
 		const desc = "First line\nSecond line\n\nThird paragraph";
-		execSync(`node --experimental-strip-types ${buildCliCommand([cliPath, "proposal", "edit", "1", "--desc", desc])}`, { cwd: TEST_DIR });
+		execSync(
+			`node --experimental-strip-types ${buildCliCommand([cliPath, "proposal", "edit", "1", "--desc", desc])}`,
+			{ cwd: TEST_DIR },
+		);
 
 		const updatedBody = await core.getProposalContent("proposal-1");
 		assert.ok(updatedBody?.includes(desc));
@@ -65,7 +76,10 @@ describe("CLI description newline handling", () => {
 
 	it("should not interpret \\n sequences as newlines", async () => {
 		const literal = "First line\\nSecond line";
-		execSync(`node --experimental-strip-types ${buildCliCommand([cliPath, "proposal", "create", "Literal", "--desc", literal])}`, { cwd: TEST_DIR });
+		execSync(
+			`node --experimental-strip-types ${buildCliCommand([cliPath, "proposal", "create", "Literal", "--desc", literal])}`,
+			{ cwd: TEST_DIR },
+		);
 
 		const core = new Core(TEST_DIR);
 		const body = await core.getProposalContent("proposal-1");

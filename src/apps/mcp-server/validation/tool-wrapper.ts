@@ -24,12 +24,18 @@ export type ValidatedToolHandler<T = Record<string, unknown>> = (
  */
 export function createValidatedTool<T extends Record<string, unknown>>(
 	toolDefinition: Omit<McpToolHandler, "handler">,
-	validator: (input: unknown, context?: ValidationContext) => Promise<ValidationResult> | ValidationResult,
+	validator: (
+		input: unknown,
+		context?: ValidationContext,
+	) => Promise<ValidationResult> | ValidationResult,
 	handler: ValidatedToolHandler<T>,
 ): McpToolHandler {
 	return {
 		...toolDefinition,
-		async handler(request: Record<string, unknown>, clientId?: string): Promise<CallToolResult> {
+		async handler(
+			request: Record<string, unknown>,
+			clientId?: string,
+		): Promise<CallToolResult> {
 			const context: ValidationContext = {
 				clientId,
 				timestamp: Date.now(),
@@ -47,7 +53,10 @@ export function createValidatedTool<T extends Record<string, unknown>>(
 				}
 
 				// Execute handler directly
-				const result = await handler(validationResult.sanitizedData as T, context);
+				const result = await handler(
+					validationResult.sanitizedData as T,
+					context,
+				);
 
 				return result;
 			} catch (error) {
@@ -69,7 +78,9 @@ export function createValidatedTool<T extends Record<string, unknown>>(
 /**
  * Creates a simple validator from a JSON Schema
  */
-export function createSchemaValidator(schema: JsonSchema): (input: unknown) => ValidationResult {
+export function createSchemaValidator(
+	schema: JsonSchema,
+): (input: unknown) => ValidationResult {
 	return (input: unknown) => validateInput(input, schema);
 }
 
@@ -78,7 +89,10 @@ export function createSchemaValidator(schema: JsonSchema): (input: unknown) => V
  */
 export function createAsyncValidator(
 	schema: JsonSchema,
-	customValidator?: (input: Record<string, unknown>, context?: ValidationContext) => Promise<string[]>,
+	customValidator?: (
+		input: Record<string, unknown>,
+		context?: ValidationContext,
+	) => Promise<string[]>,
 ): (input: unknown, context?: ValidationContext) => Promise<ValidationResult> {
 	return async (input: unknown, context?: ValidationContext) => {
 		// Basic schema validation
@@ -91,7 +105,10 @@ export function createAsyncValidator(
 		// Custom async validation
 		if (customValidator && baseResult.sanitizedData) {
 			try {
-				const customErrors = await customValidator(baseResult.sanitizedData, context);
+				const customErrors = await customValidator(
+					baseResult.sanitizedData,
+					context,
+				);
 				if (customErrors.length > 0) {
 					return {
 						isValid: false,
@@ -101,7 +118,9 @@ export function createAsyncValidator(
 			} catch (error) {
 				return {
 					isValid: false,
-					errors: [`Validation error: ${error instanceof Error ? error.message : String(error)}`],
+					errors: [
+						`Validation error: ${error instanceof Error ? error.message : String(error)}`,
+					],
 				};
 			}
 		}
@@ -113,7 +132,9 @@ export function createAsyncValidator(
 /**
  * Validates that all strings in the input are properly sanitized
  */
-export function validateSanitizedStrings(data: Record<string, unknown>): string[] {
+export function validateSanitizedStrings(
+	data: Record<string, unknown>,
+): string[] {
 	const errors: string[] = [];
 
 	function checkValue(key: string, value: unknown): void {
@@ -152,7 +173,11 @@ export function createSimpleValidatedTool<T extends Record<string, unknown>>(
 	schema: JsonSchema,
 	handler: ValidatedToolHandler<T>,
 ): McpToolHandler {
-	return createValidatedTool(toolDefinition, createSchemaValidator(schema), handler);
+	return createValidatedTool(
+		toolDefinition,
+		createSchemaValidator(schema),
+		handler,
+	);
 }
 
 /**
@@ -161,8 +186,15 @@ export function createSimpleValidatedTool<T extends Record<string, unknown>>(
 export function createAsyncValidatedTool<T extends Record<string, unknown>>(
 	toolDefinition: Omit<McpToolHandler, "handler">,
 	schema: JsonSchema,
-	customValidator: (input: Record<string, unknown>, context?: ValidationContext) => Promise<string[]>,
+	customValidator: (
+		input: Record<string, unknown>,
+		context?: ValidationContext,
+	) => Promise<string[]>,
 	handler: ValidatedToolHandler<T>,
 ): McpToolHandler {
-	return createValidatedTool(toolDefinition, createAsyncValidator(schema, customValidator), handler);
+	return createValidatedTool(
+		toolDefinition,
+		createAsyncValidator(schema, customValidator),
+		handler,
+	);
 }

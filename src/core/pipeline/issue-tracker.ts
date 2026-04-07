@@ -75,8 +75,13 @@ export function saveIssues(roadmapDir: string, store: IssueStore): void {
 /**
  * Generate next issue ID for a proposal.
  */
-export function generateIssueId(proposalId: string, existingIssues: TestIssue[]): string {
-	const proposalIssues = existingIssues.filter((i) => i.proposalId === proposalId);
+export function generateIssueId(
+	proposalId: string,
+	existingIssues: TestIssue[],
+): string {
+	const proposalIssues = existingIssues.filter(
+		(i) => i.proposalId === proposalId,
+	);
 	const nextNum = proposalIssues.length + 1;
 	return `ISSUE-${proposalId}-${nextNum}`;
 }
@@ -118,12 +123,21 @@ export function addIssue(store: IssueStore, issue: TestIssue): IssueStore {
 /**
  * Resolve an issue.
  */
-export function resolveIssue(store: IssueStore, issueId: string, resolution: string): IssueStore {
+export function resolveIssue(
+	store: IssueStore,
+	issueId: string,
+	resolution: string,
+): IssueStore {
 	return {
 		...store,
 		issues: store.issues.map((i) =>
 			i.id === issueId
-				? { ...i, status: "resolved" as IssueStatus, resolvedAt: new Date().toISOString(), resolution }
+				? {
+						...i,
+						status: "resolved" as IssueStatus,
+						resolvedAt: new Date().toISOString(),
+						resolution,
+					}
 				: i,
 		),
 	};
@@ -132,12 +146,21 @@ export function resolveIssue(store: IssueStore, issueId: string, resolution: str
 /**
  * Mark an issue as won't fix.
  */
-export function wontFixIssue(store: IssueStore, issueId: string, reason: string): IssueStore {
+export function wontFixIssue(
+	store: IssueStore,
+	issueId: string,
+	reason: string,
+): IssueStore {
 	return {
 		...store,
 		issues: store.issues.map((i) =>
 			i.id === issueId
-				? { ...i, status: "wontfix" as IssueStatus, resolvedAt: new Date().toISOString(), resolution: reason }
+				? {
+						...i,
+						status: "wontfix" as IssueStatus,
+						resolvedAt: new Date().toISOString(),
+						resolution: reason,
+					}
 				: i,
 		),
 	};
@@ -146,23 +169,37 @@ export function wontFixIssue(store: IssueStore, issueId: string, reason: string)
 /**
  * Get open issues for a specific proposal.
  */
-export function getProposalIssues(store: IssueStore, proposalId: string): TestIssue[] {
-	return store.issues.filter((i) => i.proposalId === proposalId && i.status === "open");
+export function getProposalIssues(
+	store: IssueStore,
+	proposalId: string,
+): TestIssue[] {
+	return store.issues.filter(
+		(i) => i.proposalId === proposalId && i.status === "open",
+	);
 }
 
 /**
  * Get open critical or major issues for a proposal (those that block Reached).
  */
-export function getBlockingIssues(store: IssueStore, proposalId: string): TestIssue[] {
+export function getBlockingIssues(
+	store: IssueStore,
+	proposalId: string,
+): TestIssue[] {
 	return store.issues.filter(
-		(i) => i.proposalId === proposalId && i.status === "open" && (i.severity === "critical" || i.severity === "major"),
+		(i) =>
+			i.proposalId === proposalId &&
+			i.status === "open" &&
+			(i.severity === "critical" || i.severity === "major"),
 	);
 }
 
 /**
  * Check if a proposal is blocked by open issues.
  */
-export function isBlockedByIssues(store: IssueStore, proposalId: string): boolean {
+export function isBlockedByIssues(
+	store: IssueStore,
+	proposalId: string,
+): boolean {
 	return getBlockingIssues(store, proposalId).length > 0;
 }
 
@@ -174,9 +211,16 @@ export function formatIssues(issues: TestIssue[]): string {
 
 	const lines: string[] = [];
 	for (const issue of issues) {
-		const icon = issue.severity === "critical" ? "🔴" : issue.severity === "major" ? "🟡" : "⚪";
+		const icon =
+			issue.severity === "critical"
+				? "🔴"
+				: issue.severity === "major"
+					? "🟡"
+					: "⚪";
 		lines.push(`${icon} ${issue.id}: ${issue.title}`);
-		lines.push(`   Severity: ${issue.severity} | Status: ${issue.status} | Found: ${issue.testFile}`);
+		lines.push(
+			`   Severity: ${issue.severity} | Status: ${issue.status} | Found: ${issue.testFile}`,
+		);
 		if (issue.description) {
 			lines.push(`   ${issue.description}`);
 		}

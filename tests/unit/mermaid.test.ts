@@ -1,8 +1,8 @@
 import assert from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { expect } from "../support/test-utils.ts";
 import type { JSDOM } from "jsdom";
 import { renderMermaidIn } from "../../src/web/utils/mermaid";
+import { expect } from "../support/test-utils.ts";
 
 let dom: JSDOM;
 
@@ -49,7 +49,8 @@ describe("renderMermaidIn", () => {
 			default: {
 				// biome-ignore lint/suspicious/noExplicitAny: Mock signature flexibility
 				run: async ({ proposals }: any) => {
-					const el = proposals?.[0] || dom.window.document.querySelector(".mermaid");
+					const el =
+						proposals?.[0] || dom.window.document.querySelector(".mermaid");
 					if (el) {
 						el.innerHTML = "<svg><text>mock-run</text></svg>";
 					}
@@ -87,7 +88,9 @@ describe("renderMermaidIn", () => {
 
 	it("does not throw when mermaid is missing", async () => {
 		const { container } = createContainerWithMermaid();
-		await expect(renderMermaidIn(container as HTMLElement)).resolves.toBeUndefined();
+		await expect(
+			renderMermaidIn(container as HTMLElement),
+		).resolves.toBeUndefined();
 		const mermaidDiv = container.querySelector(".mermaid");
 		assert.ok(mermaidDiv);
 	});

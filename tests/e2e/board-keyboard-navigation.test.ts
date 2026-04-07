@@ -1,8 +1,12 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 
 // Test helper: simulate page navigation logic
-function calculatePageDownIndex(currentIndex: number, totalItems: number, pageSize: number): number {
+function calculatePageDownIndex(
+	currentIndex: number,
+	totalItems: number,
+	pageSize: number,
+): number {
 	return Math.min(currentIndex + pageSize, totalItems - 1);
 }
 
@@ -107,7 +111,8 @@ describe("board keyboard navigation", () => {
 
 		it("should use default for undefined height", () => {
 			const height = undefined;
-			const pageSize = typeof height === "number" ? Math.max(1, height - 1) : 10;
+			const pageSize =
+				typeof height === "number" ? Math.max(1, height - 1) : 10;
 			assert.equal(pageSize, 10);
 		});
 	});

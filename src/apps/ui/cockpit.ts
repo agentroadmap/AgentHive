@@ -4,9 +4,9 @@
  * The "Engineer's Cockpit" for real-time monitoring and control of the agent workforce.
  */
 
-// @ts-ignore - blessed types may not be installed
+// @ts-expect-error - blessed types may not be installed
 import type blessed from "blessed";
-import { box, log } from "./blessed.ts";
+import { box } from "./blessed.ts";
 
 export interface WorkforceAgent {
 	id: string;
@@ -54,7 +54,11 @@ export function renderCockpit(
 
 	// Check if we already have a persistent cockpit container
 	let container = (screen as any)._cockpitContainer;
-	let workforceBox: any, pipelineBox: any, ledgerBox: any, terminalLog: any, headerBox: any;
+	let workforceBox: any,
+		pipelineBox: any,
+		ledgerBox: any,
+		terminalLog: any,
+		headerBox: any;
 
 	if (!container) {
 		// Clear screen for initial render
@@ -140,7 +144,7 @@ export function renderCockpit(
 			tags: true,
 			style: { border: { fg: "cyan" } },
 			scrollback: 100,
-			scrollbar: { ch: " ", track: { bg: "cyan" }, style: { inverse: true } }
+			scrollbar: { ch: " ", track: { bg: "cyan" }, style: { inverse: true } },
 		});
 		container._terminalLog = terminalLog;
 
@@ -153,16 +157,25 @@ export function renderCockpit(
 			height: 1,
 			tags: true,
 			style: { bg: "black" },
-			content: " {white-fg}Tab: Switch View | Q: Exit | Live Updates Active {/}"
+			content:
+				" {white-fg}Tab: Switch View | Q: Exit | Live Updates Active {/}",
 		});
-		
-		// Initial terminal populate
-		messages.slice().reverse().forEach(m => {
-			const time = new Date(Number(m.timestamp) / 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-			terminalLog.add(`[{gray-fg}${time}{/}] {bold}${m.sender_identity}{/}: ${m.content}`);
-		});
-		container._lastMsgTimestamp = messages.length > 0 ? messages[0].timestamp : 0;
 
+		// Initial terminal populate
+		messages
+			.slice()
+			.reverse()
+			.forEach((m) => {
+				const time = new Date(Number(m.timestamp) / 1000).toLocaleTimeString(
+					[],
+					{ hour: "2-digit", minute: "2-digit" },
+				);
+				terminalLog.add(
+					`[{gray-fg}${time}{/}] {bold}${m.sender_identity}{/}: ${m.content}`,
+				);
+			});
+		container._lastMsgTimestamp =
+			messages.length > 0 ? messages[0].timestamp : 0;
 	} else {
 		headerBox = container._headerBox;
 		workforceBox = container._workforceBox;
@@ -172,15 +185,20 @@ export function renderCockpit(
 	}
 
 	// Update Dynamic Content
-	headerBox.setContent(`{bold}{cyan-fg}🚀 ENGINEER'S COCKPIT{/} | Agents: ${agents.length} | Pipeline: ${proposals.length} | Status: {green-fg}LIVE{/}`);
+	headerBox.setContent(
+		`{bold}{cyan-fg}🚀 ENGINEER'S COCKPIT{/} | Agents: ${agents.length} | Pipeline: ${proposals.length} | Status: {green-fg}LIVE{/}`,
+	);
 
 	// Update Workforce
 	if (agents.length === 0) {
 		workforceBox.setContent("  {gray-fg}No agents registered{/}");
 	} else {
-		const lines = agents.map(a => {
-			const icon = a.status === "active" ? "🟢" : a.status === "zombie" ? "🧟" : "⚪";
-			const proposal = a.currentProposal ? ` {yellow-fg}[${a.currentProposal}]{/}` : "";
+		const lines = agents.map((a) => {
+			const icon =
+				a.status === "active" ? "🟢" : a.status === "zombie" ? "🧟" : "⚪";
+			const proposal = a.currentProposal
+				? ` {yellow-fg}[${a.currentProposal}]{/}`
+				: "";
 			return `${icon} {bold}${a.id}{/bold} (${a.role})${proposal}\n   └─ ${a.statusMessage}`;
 		});
 		workforceBox.setContent(lines.join("\n"));
@@ -188,27 +206,31 @@ export function renderCockpit(
 
 	// Update Pipeline
 	const statusCounts: Record<string, number> = {};
-	proposals.forEach(p => {
+	proposals.forEach((p) => {
 		statusCounts[p.status] = (statusCounts[p.status] || 0) + 1;
 	});
 	const pipelineLines: string[] = [];
 	const statuses = ["New", "Draft", "Active", "Review", "Accepted", "Complete"];
-	statuses.forEach(s => {
+	statuses.forEach((s) => {
 		const count = statusCounts[s] || 0;
-		const color = s === "Active" ? "yellow-fg" : s === "Complete" ? "green-fg" : "gray-fg";
+		const color =
+			s === "Active" ? "yellow-fg" : s === "Complete" ? "green-fg" : "gray-fg";
 		pipelineLines.push(`{${color}}${s.padEnd(10)}{/} : ${count}`);
 	});
 	pipelineLines.push("\n{bold}Recent Activity:{/}");
-	proposals.slice(-5).reverse().forEach(p => {
-		pipelineLines.push(`• ${p.display_id}: ${p.title.substring(0, 30)}...`);
-	});
+	proposals
+		.slice(-5)
+		.reverse()
+		.forEach((p) => {
+			pipelineLines.push(`• ${p.display_id}: ${p.title.substring(0, 30)}...`);
+		});
 	pipelineBox.setContent(pipelineLines.join("\n"));
 
 	// Update Ledger
 	if (ledger.length === 0) {
 		ledgerBox.setContent("  {gray-fg}No spending data{/}");
 	} else {
-		const ledgerLines = ledger.map(l => {
+		const ledgerLines = ledger.map((l) => {
 			const status = l.isFrozen ? "{red-fg}FROZEN{/}" : "{green-fg}ACTIVE{/}";
 			const percent = ((l.spentToday / l.dailyLimit) * 100).toFixed(0);
 			return `{bold}${l.agent.padEnd(10)}{/} | ${status} | $${l.spentToday.toFixed(2)} / $${l.dailyLimit.toFixed(0)} (${percent}%)`;
@@ -217,11 +239,18 @@ export function renderCockpit(
 	}
 
 	// Reactive Terminal Update (only add new messages)
-	const newMessages = messages.filter(m => m.timestamp > container._lastMsgTimestamp).reverse();
+	const newMessages = messages
+		.filter((m) => m.timestamp > container._lastMsgTimestamp)
+		.reverse();
 	if (newMessages.length > 0) {
-		newMessages.forEach(m => {
-			const time = new Date(Number(m.timestamp) / 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-			terminalLog.add(`[{gray-fg}${time}{/}] {bold}${m.sender_identity}{/}: ${m.content}`);
+		newMessages.forEach((m) => {
+			const time = new Date(Number(m.timestamp) / 1000).toLocaleTimeString([], {
+				hour: "2-digit",
+				minute: "2-digit",
+			});
+			terminalLog.add(
+				`[{gray-fg}${time}{/}] {bold}${m.sender_identity}{/}: ${m.content}`,
+			);
 		});
 		container._lastMsgTimestamp = messages[0].timestamp;
 	}

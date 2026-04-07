@@ -1,6 +1,10 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
-import { formatHeading, getHeadingStyle, type HeadingLevel } from "../../src/ui/heading.ts";
+import {
+	formatHeading,
+	getHeadingStyle,
+	type HeadingLevel,
+} from "../../src/ui/heading.ts";
 
 describe("Heading component", () => {
 	describe("getHeadingStyle", () => {
@@ -26,7 +30,10 @@ describe("Heading component", () => {
 	describe("formatHeading", () => {
 		test("should format level 1 heading with bold and bright-white", () => {
 			const formatted = formatHeading("Main Title", 1);
-			assert.strictEqual(formatted, "{bold}{brightwhite-fg}Main Title{/brightwhite-fg}{/bold}");
+			assert.strictEqual(
+				formatted,
+				"{bold}{brightwhite-fg}Main Title{/brightwhite-fg}{/bold}",
+			);
 		});
 
 		test("should format level 2 heading with cyan", () => {
@@ -41,7 +48,10 @@ describe("Heading component", () => {
 
 		test("should handle empty text", () => {
 			const formatted = formatHeading("", 1);
-			assert.strictEqual(formatted, "{bold}{brightwhite-fg}{/brightwhite-fg}{/bold}");
+			assert.strictEqual(
+				formatted,
+				"{bold}{brightwhite-fg}{/brightwhite-fg}{/bold}",
+			);
 		});
 
 		test("should handle special characters", () => {
@@ -86,9 +96,9 @@ describe("Heading component", () => {
 			const level3 = formatHeading("Test", 3);
 
 			// Should contain valid blessed tag syntax
-			assert.ok((/^\{.*\}.*\{\/.*\}$/).test(level1));
-			assert.ok((/^\{.*\}.*\{\/.*\}$/).test(level2));
-			assert.ok((/^\{.*\}.*\{\/.*\}$/).test(level3));
+			assert.ok(/^\{.*\}.*\{\/.*\}$/.test(level1));
+			assert.ok(/^\{.*\}.*\{\/.*\}$/.test(level2));
+			assert.ok(/^\{.*\}.*\{\/.*\}$/.test(level3));
 
 			// Level 1 should have both bold and color tags
 			assert.ok(level1.includes("{bold}"));

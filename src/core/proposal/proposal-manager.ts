@@ -1,36 +1,23 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-import {
-	DEFAULT_DIRECTORIES,
-	FALLBACK_STATUS,
-} from "../../constants/index.ts";
-import { FileSystem } from "../../file-system/operations.ts";
-import { GitOperations } from "../../git/operations.ts";
+import { FALLBACK_STATUS } from "../../constants/index.ts";
+import type { FileSystem } from "../../file-system/operations.ts";
+import type { GitOperations } from "../../git/operations.ts";
 import {
 	EntityType,
 	isLocalEditableProposal,
 	type Proposal,
 	type ProposalCreateInput,
 	type ProposalListFilter,
-	type ProposalUpdateInput,
 } from "../../types/index.ts";
-import { normalizeAssignee } from "../../utils/assignee.ts";
 import {
 	normalizeDependencies,
 	normalizeStringList,
-	stringArraysEqual,
-	validateDependencies,
 } from "../../utils/proposal-builders.ts";
-import { getProposalPath, normalizeProposalId, proposalIdsEqual } from "../../utils/proposal-path.ts";
+import { proposalIdsEqual } from "../../utils/proposal-path.ts";
 import { attachSubproposalSummaries } from "../../utils/proposal-subproposals.ts";
-import { ContentStore } from "../storage/content-store.ts";
-import {
-	getCanonicalStatus as resolveCanonicalStatus,
-	getValidStatuses as resolveValidStatuses,
-} from "../../utils/status.ts";
+import type { IdRegistry } from "../identity/id-registry.ts";
+import type { DaemonClient } from "../infrastructure/daemon-client.ts";
+import type { ContentStore } from "../storage/content-store.ts";
 import { isReachedStatus, isReady } from "./directives.ts";
-import { IdRegistry } from "../identity/id-registry.ts";
-import { DaemonClient } from "../infrastructure/daemon-client.ts";
 
 export interface ProposalQueryOptions {
 	filters?: ProposalListFilter;
@@ -46,10 +33,12 @@ export class ProposalManager {
 		private idRegistry: IdRegistry,
 		private getContentStore: () => Promise<ContentStore>,
 		private getDaemonClient: () => Promise<DaemonClient | null>,
-		private recordPulse: (event: any) => Promise<void>
+		private recordPulse: (event: any) => Promise<void>,
 	) {}
 
-	async queryProposals(options: ProposalQueryOptions = {}): Promise<Proposal[]> {
+	async queryProposals(
+		options: ProposalQueryOptions = {},
+	): Promise<Proposal[]> {
 		const { filters, query, limit } = options;
 		const trimmedQuery = query?.trim();
 		const includeCrossBranch = options.includeCrossBranch ?? true;
@@ -68,14 +57,25 @@ export class ProposalManager {
 					Object.keys(daemonFilters).length > 0 ? daemonFilters : undefined,
 				);
 
-				let filtered = await this.applyProposalFilters(
+				const filtered = await this.applyProposalFilters(
 					proposals,
-					{ ...filters, directive: undefined, parentProposalId: undefined, ready: undefined },
+					{
+						...filters,
+						directive: undefined,
+						parentProposalId: undefined,
+						ready: undefined,
+					},
 					proposals,
 				);
 
-				if (!filters?.directive && !filters?.parentProposalId && !filters?.ready) {
-					return typeof limit === "number" && limit >= 0 ? filtered.slice(0, limit) : filtered;
+				if (
+					!filters?.directive &&
+					!filters?.parentProposalId &&
+					!filters?.ready
+				) {
+					return typeof limit === "number" && limit >= 0
+						? filtered.slice(0, limit)
+						: filtered;
 				}
 			} catch (error) {
 				console.warn(`Daemon query failed, falling back to local: ${error}`);
@@ -88,20 +88,27 @@ export class ProposalManager {
 			proposals = await this.fs.listProposals();
 		}
 
-		let filtered = await this.applyProposalFilters(proposals, filters, proposals);
+		let filtered = await this.applyProposalFilters(
+			proposals,
+			filters,
+			proposals,
+		);
 		if (!includeCrossBranch) {
 			filtered = filtered.filter(isLocalEditableProposal);
 		}
 
 		if (trimmedQuery) {
 			// Search logic would go here, simplified for now to use local filter
-			filtered = filtered.filter(s => 
-				s.title.toLowerCase().includes(trimmedQuery.toLowerCase()) || 
-				s.description?.toLowerCase().includes(trimmedQuery.toLowerCase())
+			filtered = filtered.filter(
+				(s) =>
+					s.title.toLowerCase().includes(trimmedQuery.toLowerCase()) ||
+					s.description?.toLowerCase().includes(trimmedQuery.toLowerCase()),
 			);
 		}
 
-		return typeof limit === "number" && limit >= 0 ? filtered.slice(0, limit) : filtered;
+		return typeof limit === "number" && limit >= 0
+			? filtered.slice(0, limit)
+			: filtered;
 	}
 
 	private async applyProposalFilters(
@@ -109,40 +116,63 @@ export class ProposalManager {
 		filters?: ProposalListFilter,
 		allProposals?: Proposal[],
 	): Promise<Proposal[]> {
-		const referenceProposals = allProposals && allProposals.length > 0 ? allProposals : proposals;
-		let result = proposals.map((proposal) => attachSubproposalSummaries(proposal, referenceProposals));
+		const referenceProposals =
+			allProposals && allProposals.length > 0 ? allProposals : proposals;
+		let result = proposals.map((proposal) =>
+			attachSubproposalSummaries(proposal, referenceProposals),
+		);
 
 		if (filters) {
 			if (filters.status) {
 				const statusLower = filters.status.toLowerCase();
-				result = result.filter((proposal) => (proposal.status ?? "").toLowerCase() === statusLower);
+				result = result.filter(
+					(proposal) => (proposal.status ?? "").toLowerCase() === statusLower,
+				);
 			}
 			if (filters.assignee) {
 				const assigneeLower = filters.assignee.toLowerCase();
 				result = result.filter((proposal) =>
-					(proposal.assignee ?? []).some((value) => value.toLowerCase() === assigneeLower),
+					(proposal.assignee ?? []).some(
+						(value) => value.toLowerCase() === assigneeLower,
+					),
 				);
 			}
 			if (filters.priority) {
 				const priorityLower = String(filters.priority).toLowerCase();
-				result = result.filter((proposal) => (proposal.priority ?? "").toLowerCase() === priorityLower);
+				result = result.filter(
+					(proposal) =>
+						(proposal.priority ?? "").toLowerCase() === priorityLower,
+				);
 			}
 			if (filters.parentProposalId) {
 				const parentFilter = filters.parentProposalId;
-				result = result.filter((proposal) => proposal.parentProposalId && proposalIdsEqual(parentFilter, proposal.parentProposalId));
+				result = result.filter(
+					(proposal) =>
+						proposal.parentProposalId &&
+						proposalIdsEqual(parentFilter, proposal.parentProposalId),
+				);
 			}
 			if (filters.labels && filters.labels.length > 0) {
-				const requiredLabels = filters.labels.map((label) => label.toLowerCase()).filter(Boolean);
+				const requiredLabels = filters.labels
+					.map((label) => label.toLowerCase())
+					.filter(Boolean);
 				result = result.filter((proposal) => {
-					const proposalLabels = proposal.labels?.map((label) => label.toLowerCase()) || [];
+					const proposalLabels =
+						proposal.labels?.map((label) => label.toLowerCase()) || [];
 					return requiredLabels.some((label) => proposalLabels.includes(label));
 				});
 			}
 		}
 
 		if (filters?.ready) {
-			const doneIds = new Set(referenceProposals.filter((t) => isReachedStatus(t.status)).map((t) => t.id));
-			result = result.filter((proposal) => isReady(proposal, doneIds, referenceProposals));
+			const doneIds = new Set(
+				referenceProposals
+					.filter((t) => isReachedStatus(t.status))
+					.map((t) => t.id),
+			);
+			result = result.filter((proposal) =>
+				isReady(proposal, doneIds, referenceProposals),
+			);
 		}
 
 		return result;
@@ -158,23 +188,30 @@ export class ProposalManager {
 		}
 
 		const store = await this.getContentStore();
-		const match = store.getProposals().find((proposal) => proposalIdsEqual(proposalId, proposal.id));
+		const match = store
+			.getProposals()
+			.find((proposal) => proposalIdsEqual(proposalId, proposal.id));
 		if (match) return match;
 
 		return await this.fs.loadProposal(proposalId);
 	}
 
-	async createProposal(input: ProposalCreateInput, autoCommit?: boolean): Promise<Proposal> {
+	async createProposal(
+		input: ProposalCreateInput,
+		autoCommit?: boolean,
+	): Promise<Proposal> {
 		const isDraft = input.status?.toLowerCase() === "draft";
 		const entityType = isDraft ? EntityType.Draft : EntityType.Proposal;
-		
-		const allocatedId = await this.idRegistry.allocateId({ sessionId: entityType });
+
+		const allocatedId = await this.idRegistry.allocateId({
+			sessionId: entityType,
+		});
 		const id = allocatedId.ids[0];
 
 		const proposal: Proposal = {
 			id,
 			title: input.title.trim(),
-			status: isDraft ? "Draft" : (input.status || FALLBACK_STATUS),
+			status: isDraft ? "Draft" : input.status || FALLBACK_STATUS,
 			assignee: normalizeStringList(input.assignee) ?? [],
 			labels: normalizeStringList(input.labels) ?? [],
 			dependencies: normalizeDependencies(input.dependencies),
@@ -186,7 +223,9 @@ export class ProposalManager {
 			directive: input.directive,
 		};
 
-		const filepath = isDraft ? await this.fs.saveDraft(proposal) : await this.fs.saveProposal(proposal);
+		const filepath = isDraft
+			? await this.fs.saveDraft(proposal)
+			: await this.fs.saveProposal(proposal);
 
 		if (autoCommit) {
 			await this.git.addAndCommitProposalFile(proposal.id, filepath, "create");

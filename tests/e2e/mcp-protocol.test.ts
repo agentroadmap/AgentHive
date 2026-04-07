@@ -2,7 +2,11 @@ import assert from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { McpServer } from "../../src/mcp/server.ts";
 import { registerProtocolTools } from "../../src/mcp/tools/protocol/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 const getText = (content: unknown[] | undefined): string => {
 	const item = content?.[0] as { text?: string } | undefined;
@@ -25,7 +29,11 @@ describe("MCP protocol tools", () => {
 	});
 
 	afterEach(async () => {
-		try { await mcpServer.stop(); } catch { /* */ }
+		try {
+			await mcpServer.stop();
+		} catch {
+			/* */
+		}
 		await safeCleanup(TEST_DIR);
 	});
 
@@ -76,7 +84,10 @@ describe("MCP protocol tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.length > 5, `Expected reply confirmation: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.length > 5,
+			`Expected reply confirmation: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("sends a protocol mention", async () => {
@@ -102,7 +113,10 @@ describe("MCP protocol tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.length > 0, `Expected mention search: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.length > 0,
+			`Expected mention search: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("checks protocol notifications", async () => {

@@ -21,7 +21,8 @@ export const proposalListSchema: JsonSchema = {
 		},
 		ready: {
 			type: "boolean",
-			description: "Filter for proposals that are ready for pickup (unblocked and unassigned)",
+			description:
+				"Filter for proposals that are ready for pickup (unblocked and unassigned)",
 		},
 		search: {
 			type: "string",
@@ -63,7 +64,8 @@ export const proposalSearchSchema: JsonSchema = {
 		},
 		ready: {
 			type: "boolean",
-			description: "Filter for proposals that are ready for pickup (unblocked and unassigned)",
+			description:
+				"Filter for proposals that are ready for pickup (unblocked and unassigned)",
 		},
 		limit: {
 			type: "number",
@@ -212,7 +214,8 @@ export const proposalPickupSchema: JsonSchema = {
 		},
 		dryRun: {
 			type: "boolean",
-			description: "If true, only explain what would be picked up without creating a claim",
+			description:
+				"If true, only explain what would be picked up without creating a claim",
 		},
 		durationMinutes: {
 			type: "number",
@@ -337,4 +340,3 @@ export const proposalExportSchema: JsonSchema = {
 	required: ["id", "format"],
 	additionalProperties: false,
 };
-

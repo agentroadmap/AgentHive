@@ -12,7 +12,10 @@ describe("TUI Final Summary display", () => {
 
 		try {
 			if (process.stdout.isTTY === false) {
-				Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+				Object.defineProperty(process.stdout, "isTTY", {
+					value: true,
+					configurable: true,
+				});
 				patchedTTY = true;
 			}
 
@@ -36,7 +39,9 @@ describe("TUI Final Summary display", () => {
 						content?: string;
 				  }
 				| undefined;
-			const content = contentArea?.getContent ? contentArea.getContent() : (contentArea?.content ?? "");
+			const content = contentArea?.getContent
+				? contentArea.getContent()
+				: (contentArea?.content ?? "");
 			const contentText = String(content);
 			assert.ok(contentText.includes("Final Summary"));
 			assert.ok(contentText.includes("PR-style summary"));
@@ -44,7 +49,10 @@ describe("TUI Final Summary display", () => {
 			popup?.close();
 		} finally {
 			if (patchedTTY) {
-				Object.defineProperty(process.stdout, "isTTY", { value: originalIsTTY, configurable: true });
+				Object.defineProperty(process.stdout, "isTTY", {
+					value: originalIsTTY,
+					configurable: true,
+				});
 			}
 			screen.destroy();
 		}
@@ -57,7 +65,10 @@ describe("TUI Final Summary display", () => {
 
 		try {
 			if (process.stdout.isTTY === false) {
-				Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+				Object.defineProperty(process.stdout, "isTTY", {
+					value: true,
+					configurable: true,
+				});
 				patchedTTY = true;
 			}
 
@@ -80,14 +91,19 @@ describe("TUI Final Summary display", () => {
 						content?: string;
 				  }
 				| undefined;
-			const content = contentArea?.getContent ? contentArea.getContent() : (contentArea?.content ?? "");
+			const content = contentArea?.getContent
+				? contentArea.getContent()
+				: (contentArea?.content ?? "");
 			const contentText = String(content);
 			assert.ok(!contentText.includes("Final Summary"));
 
 			popup?.close();
 		} finally {
 			if (patchedTTY) {
-				Object.defineProperty(process.stdout, "isTTY", { value: originalIsTTY, configurable: true });
+				Object.defineProperty(process.stdout, "isTTY", {
+					value: originalIsTTY,
+					configurable: true,
+				});
 			}
 			screen.destroy();
 		}

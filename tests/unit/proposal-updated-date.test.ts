@@ -35,7 +35,11 @@ labels: []
 Body`;
 		const output = upsertProposalUpdatedDate(input, "2026-02-11 22:15");
 
-		assert.ok(output.includes("created_date: '2026-01-01 10:00'\nupdated_date: '2026-02-11 22:15'\nlabels: []"));
+		assert.ok(
+			output.includes(
+				"created_date: '2026-01-01 10:00'\nupdated_date: '2026-02-11 22:15'\nlabels: []",
+			),
+		);
 	});
 
 	it("inserts updated_date before frontmatter close when created_date is absent", () => {
@@ -50,7 +54,9 @@ labels: []
 Body`;
 		const output = upsertProposalUpdatedDate(input, "2026-02-11 22:15");
 
-		assert.ok(output.includes("labels: []\nupdated_date: '2026-02-11 22:15'\n---"));
+		assert.ok(
+			output.includes("labels: []\nupdated_date: '2026-02-11 22:15'\n---"),
+		);
 	});
 
 	it("preserves CRLF line endings", () => {

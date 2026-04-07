@@ -1,8 +1,8 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
-import { expect } from "../support/test-utils.ts";
 import type { Directive } from "../../src/types/index.ts";
 import { buildProposalViewerDirectiveFilterModel } from "../../src/ui/proposal-viewer-with-search.ts";
+import { expect } from "../support/test-utils.ts";
 
 describe("proposal viewer directive filter model", () => {
 	it("builds filter options from active directives", () => {
@@ -12,11 +12,16 @@ describe("proposal viewer directive filter model", () => {
 		];
 
 		const model = buildProposalViewerDirectiveFilterModel(directives);
-		assert.deepStrictEqual(model.availableDirectiveTitles, ["Release 1", "Release 2"]);
+		assert.deepStrictEqual(model.availableDirectiveTitles, [
+			"Release 1",
+			"Release 2",
+		]);
 	});
 
 	it("resolves only configured directive aliases and leaves unknown directive ids unchanged", () => {
-		const directives: Directive[] = [{ id: "m-3", title: "Sprint 3", description: "", rawContent: "" }];
+		const directives: Directive[] = [
+			{ id: "m-3", title: "Sprint 3", description: "", rawContent: "" },
+		];
 		const model = buildProposalViewerDirectiveFilterModel(directives);
 
 		expect(model.resolveDirectiveLabel("m-3")).toBe("Sprint 3");

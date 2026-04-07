@@ -1,11 +1,14 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, test } from "node:test";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, test } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
 import type { Decision, Document, Proposal } from "../../src/types";
-import { createUniqueTestDir, safeCleanup, execSync,
+import {
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 const CLI_PATH = join(process.cwd(), "src", "cli.ts");
@@ -49,7 +52,10 @@ describe("CLI ID Incrementing Behavior", () => {
 		};
 		await core.createProposal(proposal1);
 
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal create "Second Proposal"`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal create "Second Proposal"`,
+			{ cwd: TEST_DIR },
+		);
 
 		assert.strictEqual(result.exitCode, 0);
 		expect(result.stdout.toString()).toContain("Created proposal proposal-2");
@@ -69,7 +75,10 @@ describe("CLI ID Incrementing Behavior", () => {
 		};
 		await core.createDocument(doc1);
 
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} doc create "Second Doc"`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} doc create "Second Doc"`,
+			{ cwd: TEST_DIR },
+		);
 
 		assert.strictEqual(result.exitCode, 0);
 		expect(result.stdout.toString()).toContain("Created document doc-2");
@@ -93,7 +102,10 @@ describe("CLI ID Incrementing Behavior", () => {
 		};
 		await core.createDecision(decision1);
 
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} decision create "Second Decision"`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} decision create "Second Decision"`,
+			{ cwd: TEST_DIR },
+		);
 
 		assert.strictEqual(result.exitCode, 0);
 		expect(result.stdout.toString()).toContain("Created decision decision-2");

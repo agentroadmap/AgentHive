@@ -1,11 +1,14 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, test } from "node:test";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, test } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
 import type { Proposal } from "../../src/types";
-import { createUniqueTestDir, safeCleanup, execSync,
+import {
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 const CLI_PATH = join(process.cwd(), "src", "cli.ts");
@@ -48,7 +51,10 @@ describe("CLI auto-plain behavior in non-TTY runs", () => {
 	});
 
 	test("proposal list falls back to plain output without --plain", async () => {
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal list`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal list`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(result.exitCode, 0);
 
 		const out = result.stdout.toString();
@@ -58,7 +64,10 @@ describe("CLI auto-plain behavior in non-TTY runs", () => {
 	});
 
 	test("proposal view falls back to plain output without --plain", async () => {
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal view 1`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal view 1`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(result.exitCode, 0);
 
 		const out = result.stdout.toString();
@@ -69,7 +78,10 @@ describe("CLI auto-plain behavior in non-TTY runs", () => {
 	});
 
 	test("proposal create preserves legacy concise output without --plain", async () => {
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal create "Second Proposal"`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal create "Second Proposal"`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(result.exitCode, 0);
 
 		const out = result.stdout.toString();
@@ -79,7 +91,10 @@ describe("CLI auto-plain behavior in non-TTY runs", () => {
 	});
 
 	test("proposal edit preserves legacy concise output without --plain", async () => {
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit 1 -s "Active"`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal edit 1 -s "Active"`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(result.exitCode, 0);
 		expect(result.stdout.toString()).toContain("Updated proposal proposal-1");
 	});

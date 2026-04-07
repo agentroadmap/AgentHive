@@ -1,7 +1,11 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
-import { expect } from "../support/test-utils.ts";
-import { parseDecision, parseDocument, parseMarkdown, parseProposal } from "../../src/markdown/parser.ts";
+import {
+	parseDecision,
+	parseDocument,
+	parseMarkdown,
+	parseProposal,
+} from "../../src/markdown/parser.ts";
 import {
 	serializeDecision,
 	serializeDocument,
@@ -9,6 +13,7 @@ import {
 	updateProposalAcceptanceCriteria,
 } from "../../src/markdown/serializer.ts";
 import type { Decision, Document, Proposal } from "../../src/types/index.ts";
+import { expect } from "../support/test-utils.ts";
 
 describe("Markdown Parser", () => {
 	describe("parseMarkdown", () => {
@@ -88,8 +93,13 @@ Fix the login bug that prevents users from signing in.
 			assert.strictEqual(proposal.directive, "v1.0");
 			assert.deepStrictEqual(proposal.dependencies, ["proposal-0"]);
 			assert.strictEqual(proposal.parentProposalId, "proposal-parent");
-			assert.deepStrictEqual(proposal.subproposals, ["proposal-1.1", "proposal-1.2"]);
-			expect(proposal.acceptanceCriteriaItems?.map((item) => item.text)).toEqual([
+			assert.deepStrictEqual(proposal.subproposals, [
+				"proposal-1.1",
+				"proposal-1.2",
+			]);
+			expect(
+				proposal.acceptanceCriteriaItems?.map((item) => item.text),
+			).toEqual([
 				"Login form validates correctly",
 				"Error messages are displayed properly",
 			]);
@@ -174,7 +184,10 @@ Proposal body.`;
 			const proposal = parseProposal(content);
 
 			assert.strictEqual(proposal.id, "proposal-112.11");
-			assert.strictEqual(proposal.title, "Build ~$15,000 System (Magnepan 1.7x)");
+			assert.strictEqual(
+				proposal.title,
+				"Build ~$15,000 System (Magnepan 1.7x)",
+			);
 			assert.strictEqual(proposal.status, "Potential");
 			assert.strictEqual(proposal.createdDate, "2026-02-10 18:24");
 			assert.deepStrictEqual(proposal.labels, ["TLR"]);
@@ -195,11 +208,9 @@ title: "Test with mixed criteria"
 
 			const proposal = parseProposal(content);
 
-			expect(proposal.acceptanceCriteriaItems?.map((item) => item.text)).toEqual([
-				"Todo item",
-				"Complete item",
-				"Another todo",
-			]);
+			expect(
+				proposal.acceptanceCriteriaItems?.map((item) => item.text),
+			).toEqual(["Todo item", "Complete item", "Another todo"]);
 		});
 
 		it("should parse unquoted assignee names starting with @", () => {
@@ -291,9 +302,18 @@ Better development experience but steeper learning curve.`;
 			assert.strictEqual(decision.id, "decision-1");
 			assert.strictEqual(decision.title, "Use TypeScript for backend");
 			assert.strictEqual(decision.status, "accepted");
-			assert.strictEqual(decision.context, "We need to choose a language for the backend.");
-			assert.strictEqual(decision.decision, "We will use TypeScript for better type safety.");
-			assert.strictEqual(decision.consequences, "Better development experience but steeper learning curve.");
+			assert.strictEqual(
+				decision.context,
+				"We need to choose a language for the backend.",
+			);
+			assert.strictEqual(
+				decision.decision,
+				"We will use TypeScript for better type safety.",
+			);
+			assert.strictEqual(
+				decision.consequences,
+				"Better development experience but steeper learning curve.",
+			);
 		});
 
 		it("should parse decision log with alternatives", () => {
@@ -322,7 +342,10 @@ Considered MongoDB and MySQL.`;
 
 			const decision = parseDecision(content);
 
-			assert.strictEqual(decision.alternatives, "Considered MongoDB and MySQL.");
+			assert.strictEqual(
+				decision.alternatives,
+				"Considered MongoDB and MySQL.",
+			);
 		});
 
 		it("should handle missing sections", () => {
@@ -489,7 +512,9 @@ describe("Markdown Serializer", () => {
 				labels: [],
 				dependencies: [],
 				description: "Some details",
-				acceptanceCriteriaItems: [{ index: 1, text: "Criterion A", checked: false }],
+				acceptanceCriteriaItems: [
+					{ index: 1, text: "Criterion A", checked: false },
+				],
 			};
 
 			const result = serializeProposal(proposal);

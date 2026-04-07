@@ -161,7 +161,7 @@ export const LOW_TIER_LABELS = new Set([
 ]);
 
 /** Default cost budget per task (USD) */
-export const DEFAULT_COST_BUDGET_USD = 0.10;
+export const DEFAULT_COST_BUDGET_USD = 0.1;
 
 /** Maximum context tokens for cost estimation */
 export const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
@@ -253,7 +253,10 @@ export class MultiLLMRouter {
 	private costRecords: CostRecord[] = [];
 	private costBudgetUsd: number;
 
-	constructor(models: ModelConfig[] = DEFAULT_MODELS, costBudgetUsd: number = DEFAULT_COST_BUDGET_USD) {
+	constructor(
+		models: ModelConfig[] = DEFAULT_MODELS,
+		costBudgetUsd: number = DEFAULT_COST_BUDGET_USD,
+	) {
 		for (const model of models) {
 			this.models.set(model.modelId, model);
 		}
@@ -282,8 +285,10 @@ export class MultiLLMRouter {
 		tier = this._promoteTierIfHigher(tier, labelTier);
 
 		// If task requires premium capabilities, ensure premium tier
-		if (task.requiredCapabilities.includes("critical-thinking") ||
-			task.requiredCapabilities.includes("risk-assessment")) {
+		if (
+			task.requiredCapabilities.includes("critical-thinking") ||
+			task.requiredCapabilities.includes("risk-assessment")
+		) {
 			tier = this._promoteTierIfHigher(tier, "premium");
 		}
 
@@ -315,8 +320,16 @@ export class MultiLLMRouter {
 	/**
 	 * Promote tier if the new tier is higher.
 	 */
-	private _promoteTierIfHigher(current: ReasoningTier, candidate: ReasoningTier): ReasoningTier {
-		const rank: Record<ReasoningTier, number> = { basic: 0, standard: 1, advanced: 2, premium: 3 };
+	private _promoteTierIfHigher(
+		current: ReasoningTier,
+		candidate: ReasoningTier,
+	): ReasoningTier {
+		const rank: Record<ReasoningTier, number> = {
+			basic: 0,
+			standard: 1,
+			advanced: 2,
+			premium: 3,
+		};
 		return rank[candidate] > rank[current] ? candidate : current;
 	}
 
@@ -333,25 +346,34 @@ export class MultiLLMRouter {
 		const tier = this.determineTier(task);
 
 		// Find models matching tier and capabilities
-		const candidates = this._findCandidateModels(tier, task.requiredCapabilities);
+		const candidates = this._findCandidateModels(
+			tier,
+			task.requiredCapabilities,
+		);
 
 		// Apply provider preference if specified
 		const filtered = task.preferredProvider
-			? candidates.filter(m => m.provider === task.preferredProvider)
+			? candidates.filter((m) => m.provider === task.preferredProvider)
 			: candidates;
 
 		// Use preferred provider candidates, or fall back to all candidates
 		const selection = filtered.length > 0 ? filtered : candidates;
 
 		if (selection.length === 0) {
-			throw new Error(`No available models for tier ${tier} with capabilities: ${task.requiredCapabilities.join(", ")}`);
+			throw new Error(
+				`No available models for tier ${tier} with capabilities: ${task.requiredCapabilities.join(", ")}`,
+			);
 		}
 
 		// Select best model (prefer lower cost within same tier)
 		const selected = this._selectBestModel(selection, task);
 
 		// Build fallback chain (other models in tier, then lower tiers)
-		const fallbacks = this._buildFallbackChain(tier, task.requiredCapabilities, selected.modelId);
+		const fallbacks = this._buildFallbackChain(
+			tier,
+			task.requiredCapabilities,
+			selected.modelId,
+		);
 
 		// Estimate cost
 		const estimatedCost = this._estimateCost(task, selected);
@@ -373,11 +395,14 @@ export class MultiLLMRouter {
 	 * Route task with team builder integration.
 	 * Provides a routing decision suitable for team builder consumption.
 	 */
-	routeForTeam(task: TaskDefinition, teamContext?: {
-		projectId: string;
-		teamId: string;
-		agentRoles: string[];
-	}): RoutingDecision {
+	routeForTeam(
+		task: TaskDefinition,
+		teamContext?: {
+			projectId: string;
+			teamId: string;
+			agentRoles: string[];
+		},
+	): RoutingDecision {
 		const decision = this.route(task);
 
 		// Log with team context if provided
@@ -404,13 +429,19 @@ export class MultiLLMRouter {
 	 * @param inputTokens - Actual input tokens consumed
 	 * @param outputTokens - Actual output tokens consumed
 	 */
-	trackCost(taskId: string, modelId: string, inputTokens: number, outputTokens: number): CostRecord {
+	trackCost(
+		taskId: string,
+		modelId: string,
+		inputTokens: number,
+		outputTokens: number,
+	): CostRecord {
 		const model = this.models.get(modelId);
 		if (!model) {
 			throw new Error(`Unknown model: ${modelId}`);
 		}
 
-		const costUsd = (inputTokens / 1000) * model.inputCostPer1k +
+		const costUsd =
+			(inputTokens / 1000) * model.inputCostPer1k +
 			(outputTokens / 1000) * model.outputCostPer1k;
 
 		const record: CostRecord = {
@@ -427,7 +458,9 @@ export class MultiLLMRouter {
 		this.costRecords.push(record);
 
 		// Update routing history if exists
-		const historyEntry = this.routingHistory.find(h => h.decision.taskId === taskId);
+		const historyEntry = this.routingHistory.find(
+			(h) => h.decision.taskId === taskId,
+		);
 		if (historyEntry) {
 			historyEntry.costRecord = record;
 		}
@@ -467,7 +500,8 @@ export class MultiLLMRouter {
 		const breakdown: Record<string, number> = {};
 
 		for (const record of this.costRecords) {
-			breakdown[record.modelId] = (breakdown[record.modelId] || 0) + record.costUsd;
+			breakdown[record.modelId] =
+				(breakdown[record.modelId] || 0) + record.costUsd;
 		}
 
 		return breakdown;
@@ -516,7 +550,9 @@ export class MultiLLMRouter {
 					decision,
 					costRecord: null,
 					usedFallback,
-					fallbackReason: usedFallback ? `Primary model failed: ${lastError?.message}` : null,
+					fallbackReason: usedFallback
+						? `Primary model failed: ${lastError?.message}`
+						: null,
 				});
 
 				return { result, model, usedFallback };
@@ -527,7 +563,9 @@ export class MultiLLMRouter {
 		}
 
 		// All models failed
-		throw new Error(`All models failed for task ${task.taskId}. Last error: ${lastError?.message}`);
+		throw new Error(
+			`All models failed for task ${task.taskId}. Last error: ${lastError?.message}`,
+		);
 	}
 
 	// ===================== Internal Helpers =====================
@@ -535,8 +573,16 @@ export class MultiLLMRouter {
 	/**
 	 * Find candidate models matching tier and capabilities.
 	 */
-	private _findCandidateModels(tier: ReasoningTier, requiredCapabilities: string[]): ModelConfig[] {
-		const tierRank: Record<ReasoningTier, number> = { basic: 0, standard: 1, advanced: 2, premium: 3 };
+	private _findCandidateModels(
+		tier: ReasoningTier,
+		requiredCapabilities: string[],
+	): ModelConfig[] {
+		const tierRank: Record<ReasoningTier, number> = {
+			basic: 0,
+			standard: 1,
+			advanced: 2,
+			premium: 3,
+		};
 		const targetRank = tierRank[tier];
 
 		const candidates: ModelConfig[] = [];
@@ -547,7 +593,9 @@ export class MultiLLMRouter {
 
 			// Check capability coverage
 			const modelCaps = new Set(model.capabilities);
-			const hasAllCaps = requiredCapabilities.every(cap => modelCaps.has(cap));
+			const hasAllCaps = requiredCapabilities.every((cap) =>
+				modelCaps.has(cap),
+			);
 
 			if (hasAllCaps || requiredCapabilities.length === 0) {
 				candidates.push(model);
@@ -561,7 +609,9 @@ export class MultiLLMRouter {
 				if (tierRank[model.tier] <= targetRank) continue;
 
 				const modelCaps = new Set(model.capabilities);
-				const hasAllCaps = requiredCapabilities.every(cap => modelCaps.has(cap));
+				const hasAllCaps = requiredCapabilities.every((cap) =>
+					modelCaps.has(cap),
+				);
 
 				if (hasAllCaps || requiredCapabilities.length === 0) {
 					candidates.push(model);
@@ -575,10 +625,18 @@ export class MultiLLMRouter {
 	/**
 	 * Select the best model from candidates (prefer lower cost).
 	 */
-	private _selectBestModel(candidates: ModelConfig[], task: TaskDefinition): ModelConfig {
+	private _selectBestModel(
+		candidates: ModelConfig[],
+		task: TaskDefinition,
+	): ModelConfig {
 		// Sort by cost (ascending), then by tier match (closer to required is better)
 		const tier = this.determineTier(task);
-		const tierRank: Record<ReasoningTier, number> = { basic: 0, standard: 1, advanced: 2, premium: 3 };
+		const tierRank: Record<ReasoningTier, number> = {
+			basic: 0,
+			standard: 1,
+			advanced: 2,
+			premium: 3,
+		};
 		const targetRank = tierRank[tier];
 
 		candidates.sort((a, b) => {
@@ -599,8 +657,17 @@ export class MultiLLMRouter {
 	/**
 	 * Build fallback chain of models.
 	 */
-	private _buildFallbackChain(tier: ReasoningTier, requiredCapabilities: string[], excludeModelId: string): ModelConfig[] {
-		const tierRank: Record<ReasoningTier, number> = { basic: 0, standard: 1, advanced: 2, premium: 3 };
+	private _buildFallbackChain(
+		tier: ReasoningTier,
+		requiredCapabilities: string[],
+		excludeModelId: string,
+	): ModelConfig[] {
+		const tierRank: Record<ReasoningTier, number> = {
+			basic: 0,
+			standard: 1,
+			advanced: 2,
+			premium: 3,
+		};
 		const targetRank = tierRank[tier];
 
 		const fallbacks: ModelConfig[] = [];
@@ -612,7 +679,9 @@ export class MultiLLMRouter {
 			if (tierRank[model.tier] !== targetRank) continue;
 
 			const modelCaps = new Set(model.capabilities);
-			const hasAllCaps = requiredCapabilities.every(cap => modelCaps.has(cap));
+			const hasAllCaps = requiredCapabilities.every((cap) =>
+				modelCaps.has(cap),
+			);
 			if (hasAllCaps || requiredCapabilities.length === 0) {
 				fallbacks.push(model);
 			}
@@ -620,7 +689,7 @@ export class MultiLLMRouter {
 
 		// Second: models at higher tiers (more capable)
 		const higherTiers = (Object.keys(tierRank) as ReasoningTier[])
-			.filter(t => tierRank[t] > targetRank)
+			.filter((t) => tierRank[t] > targetRank)
 			.sort((a, b) => tierRank[a] - tierRank[b]);
 
 		for (const higherTier of higherTiers) {
@@ -630,7 +699,9 @@ export class MultiLLMRouter {
 				if (model.tier !== higherTier) continue;
 
 				const modelCaps = new Set(model.capabilities);
-				const hasAllCaps = requiredCapabilities.every(cap => modelCaps.has(cap));
+				const hasAllCaps = requiredCapabilities.every((cap) =>
+					modelCaps.has(cap),
+				);
 				if (hasAllCaps || requiredCapabilities.length === 0) {
 					fallbacks.push(model);
 				}
@@ -652,7 +723,10 @@ export class MultiLLMRouter {
 	/**
 	 * Estimate cost for a task given a model.
 	 */
-	private _estimateCost(task: TaskDefinition, model: ModelConfig): EstimatedCost {
+	private _estimateCost(
+		task: TaskDefinition,
+		model: ModelConfig,
+	): EstimatedCost {
 		// Rough estimation based on task complexity
 		const complexityMultiplier: Record<string, number> = {
 			trivial: 0.5,
@@ -664,9 +738,13 @@ export class MultiLLMRouter {
 
 		const multiplier = complexityMultiplier[task.complexity] || 2;
 		const estimatedInputTokens = 1000 * multiplier;
-		const estimatedOutputTokens = Math.min(DEFAULT_MAX_OUTPUT_TOKENS, 500 * multiplier);
+		const estimatedOutputTokens = Math.min(
+			DEFAULT_MAX_OUTPUT_TOKENS,
+			500 * multiplier,
+		);
 
-		const estimatedCostUsd = (estimatedInputTokens / 1000) * model.inputCostPer1k +
+		const estimatedCostUsd =
+			(estimatedInputTokens / 1000) * model.inputCostPer1k +
 			(estimatedOutputTokens / 1000) * model.outputCostPer1k;
 
 		return {
@@ -681,13 +759,19 @@ export class MultiLLMRouter {
 	/**
 	 * Build human-readable reason for routing decision.
 	 */
-	private _buildReason(task: TaskDefinition, tier: ReasoningTier, model: ModelConfig): string {
+	private _buildReason(
+		task: TaskDefinition,
+		tier: ReasoningTier,
+		model: ModelConfig,
+	): string {
 		const reasons: string[] = [];
 
-		reasons.push(`tier ${tier} (priority: ${task.priority}, complexity: ${task.complexity})`);
+		reasons.push(
+			`tier ${tier} (priority: ${task.priority}, complexity: ${task.complexity})`,
+		);
 
-		if (task.labels.some(l => HIGH_TIER_LABELS.has(l))) {
-			const highLabels = task.labels.filter(l => HIGH_TIER_LABELS.has(l));
+		if (task.labels.some((l) => HIGH_TIER_LABELS.has(l))) {
+			const highLabels = task.labels.filter((l) => HIGH_TIER_LABELS.has(l));
 			reasons.push(`high-tier labels: ${highLabels.join(", ")}`);
 		}
 
@@ -695,7 +779,9 @@ export class MultiLLMRouter {
 			reasons.push(`requires: ${task.requiredCapabilities.join(", ")}`);
 		}
 
-		reasons.push(`selected: ${model.displayName} ($${model.inputCostPer1k}/1k in, $${model.outputCostPer1k}/1k out)`);
+		reasons.push(
+			`selected: ${model.displayName} ($${model.inputCostPer1k}/1k in, $${model.outputCostPer1k}/1k out)`,
+		);
 
 		return reasons.join("; ");
 	}
@@ -737,14 +823,16 @@ export class MultiLLMRouter {
 	 * Get models by tier.
 	 */
 	getModelsByTier(tier: ReasoningTier): ModelConfig[] {
-		return Array.from(this.models.values()).filter(m => m.tier === tier);
+		return Array.from(this.models.values()).filter((m) => m.tier === tier);
 	}
 
 	/**
 	 * Get models by provider.
 	 */
 	getModelsByProvider(provider: ModelProvider): ModelConfig[] {
-		return Array.from(this.models.values()).filter(m => m.provider === provider);
+		return Array.from(this.models.values()).filter(
+			(m) => m.provider === provider,
+		);
 	}
 
 	/**

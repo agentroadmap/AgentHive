@@ -29,7 +29,11 @@ function resolveDimension(value: string | number, total: number): number {
 	return Number.isNaN(parsed) ? total : parsed;
 }
 
-function resolvePosition(value: string | number, total: number, size: number): number {
+function resolvePosition(
+	value: string | number,
+	total: number,
+	size: number,
+): number {
 	if (typeof value === "number") {
 		return value;
 	}
@@ -66,12 +70,22 @@ function createPopupChrome(options: PopupChromeOptions): {
 		label: ` ${options.title} `,
 	});
 
-	const screenWidth = typeof options.screen.width === "number" ? options.screen.width : 120;
-	const screenHeight = typeof options.screen.height === "number" ? options.screen.height : 40;
+	const screenWidth =
+		typeof options.screen.width === "number" ? options.screen.width : 120;
+	const screenHeight =
+		typeof options.screen.height === "number" ? options.screen.height : 40;
 	const popupWidth = resolveDimension(popup.width ?? width, screenWidth);
 	const popupHeight = resolveDimension(popup.height ?? height, screenHeight);
-	const popupTop = resolvePosition(popup.top ?? "center", screenHeight, popupHeight);
-	const popupLeft = resolvePosition(popup.left ?? "center", screenWidth, popupWidth);
+	const popupTop = resolvePosition(
+		popup.top ?? "center",
+		screenHeight,
+		popupHeight,
+	);
+	const popupLeft = resolvePosition(
+		popup.left ?? "center",
+		screenWidth,
+		popupWidth,
+	);
 
 	const backdrop = box({
 		parent: options.screen,
@@ -133,7 +147,8 @@ export async function openSingleSelectFilterPopup(options: {
 			screen: options.screen,
 			title: options.title,
 			helpText:
-				options.helpText ?? " {cyan-fg}[↑↓]{/} Navigate | {cyan-fg}[Enter]{/} Select | {cyan-fg}[Esc]{/} Cancel",
+				options.helpText ??
+				" {cyan-fg}[↑↓]{/} Navigate | {cyan-fg}[Enter]{/} Select | {cyan-fg}[Esc]{/} Cancel",
 			width: "48%",
 			height: "60%",
 		});
@@ -148,7 +163,9 @@ export async function openSingleSelectFilterPopup(options: {
 
 		const selectedIndex = Math.max(
 			0,
-			options.choices.findIndex((choice) => choice.value === options.selectedValue),
+			options.choices.findIndex(
+				(choice) => choice.value === options.selectedValue,
+			),
 		);
 
 		const picker = list({
@@ -200,7 +217,11 @@ export async function openSingleSelectFilterPopup(options: {
 
 		picker.on("select", (...args: unknown[]) => {
 			const index =
-				typeof args[1] === "number" ? args[1] : typeof args[0] === "number" ? args[0] : (picker.selected ?? 0);
+				typeof args[1] === "number"
+					? args[1]
+					: typeof args[0] === "number"
+						? args[0]
+						: (picker.selected ?? 0);
 			const choice = options.choices[index];
 			finish(choice?.value ?? null);
 		});
@@ -243,10 +264,17 @@ export async function openMultiSelectFilterPopup(options: {
 			style: { bg: "default" },
 		});
 
-		const selectedSet = new Set(options.selectedItems.map((item) => item.toLowerCase()));
-		const selectableItems = options.items.map((label) => ({ id: label, title: label }));
+		const selectedSet = new Set(
+			options.selectedItems.map((item) => item.toLowerCase()),
+		);
+		const selectableItems = options.items.map((label) => ({
+			id: label,
+			title: label,
+		}));
 		const selectedIndices = selectableItems
-			.map((item, index) => (selectedSet.has(item.id.toLowerCase()) ? index : -1))
+			.map((item, index) =>
+				selectedSet.has(item.id.toLowerCase()) ? index : -1,
+			)
 			.filter((index) => index >= 0);
 
 		const picker = createGenericList({
@@ -270,7 +298,9 @@ export async function openMultiSelectFilterPopup(options: {
 				cancel: ["C-]"],
 			},
 			onSelect: (selected) => {
-				const chosen = Array.isArray(selected) ? selected.map((item) => item.id) : [];
+				const chosen = Array.isArray(selected)
+					? selected.map((item) => item.id)
+					: [];
 				finish(chosen);
 			},
 		});

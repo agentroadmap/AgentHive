@@ -1,4 +1,3 @@
-import assert from "node:assert";
 /**
  * Helper functions for parsing markdown responses in MCP tests
  */
@@ -41,7 +40,10 @@ export function parseSequenceCreateMarkdown(markdown: string) {
 	}
 
 	// Extract sequences
-	const sequences: Array<{ index: number; proposals: Array<{ id: string; title: string; status: string }> }> = [];
+	const sequences: Array<{
+		index: number;
+		proposals: Array<{ id: string; title: string; status: string }>;
+	}> = [];
 	interface SequenceType {
 		index: number;
 		proposals: Array<{ id: string; title: string; status: string }>;
@@ -101,7 +103,12 @@ export function parseSequenceCreateMarkdown(markdown: string) {
 				}
 			}
 		}
-		if (inUnsequenced && line && line.startsWith("## ") && line !== "## Unsequenced Proposals") {
+		if (
+			inUnsequenced &&
+			line &&
+			line.startsWith("## ") &&
+			line !== "## Unsequenced Proposals"
+		) {
 			inUnsequenced = false;
 		}
 	}
@@ -152,14 +159,26 @@ export function parseSequencePlanMarkdown(markdown: string) {
 	const phases: Array<{
 		phase: number;
 		name: string;
-		proposals: Array<{ id: string; title: string; status: string; assignee?: string[]; dependencies?: string[] }>;
+		proposals: Array<{
+			id: string;
+			title: string;
+			status: string;
+			assignee?: string[];
+			dependencies?: string[];
+		}>;
 		dependsOn?: number[];
 	}> = [];
 
 	interface PhaseType {
 		phase: number;
 		name: string;
-		proposals: Array<{ id: string; title: string; status: string; assignee?: string[]; dependencies?: string[] }>;
+		proposals: Array<{
+			id: string;
+			title: string;
+			status: string;
+			assignee?: string[];
+			dependencies?: string[];
+		}>;
 		dependsOn?: number[];
 	}
 	let currentPhase: PhaseType | null = null;
@@ -192,7 +211,9 @@ export function parseSequencePlanMarkdown(markdown: string) {
 		if (currentPhase && line.match(/^\*\*Depends on:\*\* (.+)$/)) {
 			const dependsMatch = line.match(/^\*\*Depends on:\*\* Phase (.+)$/);
 			if (dependsMatch?.[1]) {
-				const deps = dependsMatch[1].split(", Phase ").map((n) => Number.parseInt(n, 10));
+				const deps = dependsMatch[1]
+					.split(", Phase ")
+					.map((n) => Number.parseInt(n, 10));
 				currentPhase.dependsOn = deps;
 			}
 		}
@@ -204,12 +225,25 @@ export function parseSequencePlanMarkdown(markdown: string) {
 		}
 
 		// Match proposal lines like "- **proposal-1** - Foundation Proposal (Potential)"
-		if (currentPhase && inPhaseProposals && line && line.match(/^- \*\*(.+?)\*\* - (.+?) \((.+?)\)(.*)$/)) {
-			const proposalMatch = line.match(/^- \*\*(.+?)\*\* - (.+?) \((.+?)\)(.*)$/);
+		if (
+			currentPhase &&
+			inPhaseProposals &&
+			line &&
+			line.match(/^- \*\*(.+?)\*\* - (.+?) \((.+?)\)(.*)$/)
+		) {
+			const proposalMatch = line.match(
+				/^- \*\*(.+?)\*\* - (.+?) \((.+?)\)(.*)$/,
+			);
 			if (proposalMatch) {
 				const [, id, title, status, extra] = proposalMatch;
 				if (!id || !title || !status) continue;
-				const proposal: { id: string; title: string; status: string; assignee?: string[]; dependencies?: string[] } = {
+				const proposal: {
+					id: string;
+					title: string;
+					status: string;
+					assignee?: string[];
+					dependencies?: string[];
+				} = {
 					id,
 					title,
 					status,
@@ -228,10 +262,16 @@ export function parseSequencePlanMarkdown(markdown: string) {
 		}
 
 		// Check for dependency lines
-		if (currentPhase && inPhaseProposals && line && line.match(/^\s+- Dependencies: (.+)$/)) {
+		if (
+			currentPhase &&
+			inPhaseProposals &&
+			line &&
+			line.match(/^\s+- Dependencies: (.+)$/)
+		) {
 			const depMatch = line.match(/^\s+- Dependencies: (.+)$/);
 			if (depMatch?.[1] && currentPhase.proposals.length > 0) {
-				const lastProposal = currentPhase.proposals[currentPhase.proposals.length - 1];
+				const lastProposal =
+					currentPhase.proposals[currentPhase.proposals.length - 1];
 				if (lastProposal) {
 					lastProposal.dependencies = depMatch[1].split(", ");
 				}
@@ -244,7 +284,12 @@ export function parseSequencePlanMarkdown(markdown: string) {
 	}
 
 	// Extract unsequenced proposals
-	const unsequenced: Array<{ id: string; title: string; status: string; reason: string }> = [];
+	const unsequenced: Array<{
+		id: string;
+		title: string;
+		status: string;
+		reason: string;
+	}> = [];
 	let inUnsequenced = false;
 
 	for (let i = 0; i < lines.length; i++) {
@@ -271,7 +316,12 @@ export function parseSequencePlanMarkdown(markdown: string) {
 				unsequenced.push({ id, title, status, reason });
 			}
 		}
-		if (inUnsequenced && line && line.startsWith("## ") && line !== "## Unsequenced Proposals") {
+		if (
+			inUnsequenced &&
+			line &&
+			line.startsWith("## ") &&
+			line !== "## Unsequenced Proposals"
+		) {
 			inUnsequenced = false;
 		}
 	}
@@ -308,7 +358,11 @@ export function parseProjectOverviewMarkdown(markdown: string) {
 
 	// Extract recent activity and project health data
 	const recentActivity = { created: [], updated: [] };
-	const projectHealth = { averageProposalAge: 0, staleProposals: [], blockedProposals: [] };
+	const projectHealth = {
+		averageProposalAge: 0,
+		staleProposals: [],
+		blockedProposals: [],
+	};
 
 	for (const line of lines) {
 		// Project Statistics section
@@ -338,7 +392,11 @@ export function parseProjectOverviewMarkdown(markdown: string) {
 		// Reset flags on other sections
 		if (
 			line.startsWith("## ") &&
-			!["## Project Statistics", "## Status Breakdown", "## Priority Breakdown"].includes(line.trim())
+			![
+				"## Project Statistics",
+				"## Status Breakdown",
+				"## Priority Breakdown",
+			].includes(line.trim())
 		) {
 			inProjectStats = false;
 			inStatusBreakdown = false;
@@ -490,7 +548,9 @@ export function parseConfigMarkdown(markdown: string): unknown {
 		if (keyMatch && keyMatch[1] !== undefined) {
 			const key = keyMatch[1];
 			// Look for the value in the next non-empty line
-			const nextLineIndex = lines.findIndex((l, i) => i > lines.indexOf(line) && l.trim().length > 0);
+			const nextLineIndex = lines.findIndex(
+				(l, i) => i > lines.indexOf(line) && l.trim().length > 0,
+			);
 			if (nextLineIndex !== -1) {
 				const valueLine = lines[nextLineIndex];
 				if (valueLine) {
@@ -500,7 +560,8 @@ export function parseConfigMarkdown(markdown: string): unknown {
 						if (value === "null") config[key] = null;
 						else if (value === "true") config[key] = true;
 						else if (value === "false") config[key] = false;
-						else if (!Number.isNaN(Number(value)) && value !== "") config[key] = Number(value);
+						else if (!Number.isNaN(Number(value)) && value !== "")
+							config[key] = Number(value);
 						else config[key] = value;
 					}
 				}

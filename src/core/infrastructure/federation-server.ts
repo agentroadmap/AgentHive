@@ -12,7 +12,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { Proposal } from "../../types/index.ts";
-import { FederationPKI, type Host, type Certificate } from "./federation.ts";
+import type { FederationPKI } from "./federation.ts";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -81,7 +81,11 @@ export interface FederatedConnection {
 }
 
 /** Conflict resolution strategies */
-export type ConflictStrategy = "latest-wins" | "manual" | "merge" | "source-wins";
+export type ConflictStrategy =
+	| "latest-wins"
+	| "manual"
+	| "merge"
+	| "source-wins";
 
 /** Edit conflict between two hosts */
 export interface EditConflict {
@@ -188,7 +192,8 @@ export class FederationServer {
 		this.hostname = options.hostname;
 		this.port = options.port;
 		this.pki = options.pki;
-		this.conflictStrategy = options.conflictStrategy ?? DEFAULT_CONFLICT_STRATEGY;
+		this.conflictStrategy =
+			options.conflictStrategy ?? DEFAULT_CONFLICT_STRATEGY;
 		this.stats = this.createInitialStats();
 	}
 
@@ -203,7 +208,10 @@ export class FederationServer {
 		}
 
 		this.startedAt = Date.now();
-		this.heartbeatTimer = setInterval(() => this.heartbeatTick(), HEARTBEAT_INTERVAL_MS);
+		this.heartbeatTimer = setInterval(
+			() => this.heartbeatTick(),
+			HEARTBEAT_INTERVAL_MS,
+		);
 	}
 
 	/**
@@ -344,7 +352,10 @@ export class FederationServer {
 	/**
 	 * Create a proposal-update message for broadcasting a proposal change.
 	 */
-	createProposalUpdateMessage(proposal: Proposal, targetHostId: string | null): FederationMessage {
+	createProposalUpdateMessage(
+		proposal: Proposal,
+		targetHostId: string | null,
+	): FederationMessage {
 		const version = (this.proposalVersions.get(proposal.id) ?? 0) + 1;
 		this.proposalVersions.set(proposal.id, version);
 		this.proposalTimestamps.set(proposal.id, new Date().toISOString());
@@ -360,7 +371,10 @@ export class FederationServer {
 	/**
 	 * Create a proposal-create message for a new proposal.
 	 */
-	createProposalCreateMessage(proposal: Proposal, targetHostId: string | null): FederationMessage {
+	createProposalCreateMessage(
+		proposal: Proposal,
+		targetHostId: string | null,
+	): FederationMessage {
 		this.proposalVersions.set(proposal.id, 1);
 		this.proposalTimestamps.set(proposal.id, new Date().toISOString());
 
@@ -374,7 +388,10 @@ export class FederationServer {
 	/**
 	 * Create a proposal-delete message.
 	 */
-	createProposalDeleteMessage(proposalId: string, targetHostId: string | null): FederationMessage {
+	createProposalDeleteMessage(
+		proposalId: string,
+		targetHostId: string | null,
+	): FederationMessage {
 		return this.createMessage(targetHostId, "proposal-delete", {
 			proposalId,
 			sourceHostId: this.hostId,
@@ -463,13 +480,19 @@ export class FederationServer {
 		// Check if both have been modified since last sync
 		const localVersion = this.proposalVersions.get(proposalId) ?? 0;
 		const remoteVersion =
-			(remoteProposal as unknown as Record<string, unknown>)._federationVersion as number | undefined ?? 0;
+			((remoteProposal as unknown as Record<string, unknown>)
+				._federationVersion as number | undefined) ?? 0;
 
 		// If both have been modified, we have a conflict
-		if (localVersion > 0 && remoteVersion > 0 && localTimestamp !== remoteTimestamp) {
+		if (
+			localVersion > 0 &&
+			remoteVersion > 0 &&
+			localTimestamp !== remoteTimestamp
+		) {
 			// Check if the timestamps are close enough to indicate concurrent edits
 			const timeDiff = Math.abs(
-				new Date(localTimestamp).getTime() - new Date(remoteTimestamp).getTime(),
+				new Date(localTimestamp).getTime() -
+					new Date(remoteTimestamp).getTime(),
 			);
 
 			// If both were modified within a reasonable window, treat as conflict
@@ -490,7 +513,11 @@ export class FederationServer {
 				this.stats.conflictsDetected++;
 
 				// Auto-resolve based on strategy
-				this.resolveConflict(conflict.conflictId, this.conflictStrategy, "system");
+				this.resolveConflict(
+					conflict.conflictId,
+					this.conflictStrategy,
+					"system",
+				);
 
 				return conflict;
 			}
@@ -516,7 +543,10 @@ export class FederationServer {
 		switch (strategy) {
 			case "latest-wins":
 				// Compare timestamps
-				if (new Date(conflict.localTimestamp) >= new Date(conflict.remoteTimestamp)) {
+				if (
+					new Date(conflict.localTimestamp) >=
+					new Date(conflict.remoteTimestamp)
+				) {
 					winner = conflict.localProposal;
 					resolution = "local-wins: local timestamp is later or equal";
 				} else {
@@ -544,7 +574,8 @@ export class FederationServer {
 							? conflict.localProposal.acceptanceCriteriaItems
 							: conflict.remoteProposal.acceptanceCriteriaItems,
 				};
-				resolution = "merge: remote proposal with local acceptance criteria preserved";
+				resolution =
+					"merge: remote proposal with local acceptance criteria preserved";
 				break;
 
 			default:
@@ -642,7 +673,7 @@ export class FederationServer {
 		// Schedule reconnection with exponential backoff
 		if (conn.reconnectAttempts <= MAX_RECONNECT_ATTEMPTS) {
 			const delay = Math.min(
-				RECONNECT_BASE_DELAY_MS * Math.pow(2, conn.reconnectAttempts - 1),
+				RECONNECT_BASE_DELAY_MS * 2 ** (conn.reconnectAttempts - 1),
 				MAX_RECONNECT_DELAY_MS,
 			);
 
@@ -694,7 +725,10 @@ export class FederationServer {
 	/**
 	 * Register a connection to a remote host.
 	 */
-	registerConnection(hostId: string, certificateId?: string): FederatedConnection {
+	registerConnection(
+		hostId: string,
+		certificateId?: string,
+	): FederatedConnection {
 		const existing = this.connections.get(hostId);
 		if (existing) {
 			// Update existing connection
@@ -750,7 +784,10 @@ export class FederationServer {
 	/**
 	 * Create a heartbeat acknowledgment.
 	 */
-	createHeartbeatAck(targetHostId: string, originalMessageId: string): FederationMessage {
+	createHeartbeatAck(
+		targetHostId: string,
+		originalMessageId: string,
+	): FederationMessage {
 		return this.createMessage(targetHostId, "heartbeat-ack", {
 			hostId: this.hostId,
 			timestamp: new Date().toISOString(),
@@ -787,7 +824,8 @@ export class FederationServer {
 		if (handler.proposalCreate) this.onProposalCreate = handler.proposalCreate;
 		if (handler.proposalDelete) this.onProposalDelete = handler.proposalDelete;
 		if (handler.conflict) this.onConflict = handler.conflict;
-		if (handler.connectionChange) this.onConnectionChange = handler.connectionChange;
+		if (handler.connectionChange)
+			this.onConnectionChange = handler.connectionChange;
 	}
 
 	/**
@@ -844,11 +882,14 @@ export class FederationServer {
 	}
 
 	private handleJoin(message: FederationMessage): FederationMessage {
-		const { hostId, hostname, port, certificateId, capabilities } = message.payload;
+		const { hostId, hostname, port, certificateId, capabilities } =
+			message.payload;
 
 		// Verify certificate if provided
 		if (certificateId) {
-			const certVerification = this.pki.verifyCertificate(certificateId as string);
+			const certVerification = this.pki.verifyCertificate(
+				certificateId as string,
+			);
 			if (!certVerification.valid) {
 				return this.createMessage(message.sourceHostId, "join-reject", {
 					reason: `Certificate invalid: ${certVerification.reason}`,
@@ -930,8 +971,7 @@ export class FederationServer {
 				(message.payload.replyTo as string) ?? "",
 			);
 			if (sentTime) {
-				conn.latency =
-					Date.now() - new Date(sentTime.timestamp).getTime();
+				conn.latency = Date.now() - new Date(sentTime.timestamp).getTime();
 				this.pendingMessages.delete(message.payload.replyTo as string);
 			}
 
@@ -994,7 +1034,9 @@ export class FederationServer {
 		return null;
 	}
 
-	private handleProposalUpdate(message: FederationMessage): FederationMessage | null {
+	private handleProposalUpdate(
+		message: FederationMessage,
+	): FederationMessage | null {
 		const { proposal, version, sourceHostId } = message.payload;
 		const proposalData = proposal as Proposal;
 
@@ -1019,7 +1061,10 @@ export class FederationServer {
 
 		// No conflict, apply update
 		this.updateLocalProposal(proposalData);
-		this.onProposalUpdate?.(proposalData, (sourceHostId as string) ?? message.sourceHostId);
+		this.onProposalUpdate?.(
+			proposalData,
+			(sourceHostId as string) ?? message.sourceHostId,
+		);
 
 		// Clean up pending message
 		this.pendingMessages.delete(message.messageId);
@@ -1035,7 +1080,10 @@ export class FederationServer {
 		this.proposalVersions.set(proposalData.id, 1);
 		this.proposalTimestamps.set(proposalData.id, message.timestamp);
 
-		this.onProposalCreate?.(proposalData, (sourceHostId as string) ?? message.sourceHostId);
+		this.onProposalCreate?.(
+			proposalData,
+			(sourceHostId as string) ?? message.sourceHostId,
+		);
 		return null;
 	}
 
@@ -1043,11 +1091,16 @@ export class FederationServer {
 		const { proposalId, sourceHostId } = message.payload;
 
 		this.removeLocalProposal(proposalId as string);
-		this.onProposalDelete?.(proposalId as string, (sourceHostId as string) ?? message.sourceHostId);
+		this.onProposalDelete?.(
+			proposalId as string,
+			(sourceHostId as string) ?? message.sourceHostId,
+		);
 		return null;
 	}
 
-	private handleConflictDetected(message: FederationMessage): FederationMessage | null {
+	private handleConflictDetected(
+		message: FederationMessage,
+	): FederationMessage | null {
 		// The other host detected a conflict. If we have a newer local version,
 		// send our resolution.
 		const { conflictId, proposalId, remoteTimestamp } = message.payload;
@@ -1070,7 +1123,8 @@ export class FederationServer {
 	}
 
 	private handleConflictResolve(message: FederationMessage): null {
-		const { conflictId, resolvedProposal, strategy, resolvedBy } = message.payload;
+		const { conflictId, resolvedProposal, strategy, resolvedBy } =
+			message.payload;
 
 		const conflict = this.conflicts.get(conflictId as string);
 		if (conflict && !conflict.resolved) {
@@ -1083,7 +1137,7 @@ export class FederationServer {
 
 			// Apply the resolved proposal
 			this.localProposals.set(
-				(conflict.proposalId),
+				conflict.proposalId,
 				resolvedProposal as Proposal,
 			);
 		}
@@ -1102,7 +1156,7 @@ export class FederationServer {
 	}
 
 	private verifyMessageSignature(
-		message: FederationMessage,
+		_message: FederationMessage,
 		sourceCertId: string,
 	): { valid: boolean; reason?: string } {
 		return this.pki.verifyCertificate(sourceCertId);
@@ -1164,7 +1218,8 @@ export class FederationServer {
 			if (conn.proposal === "connected" || conn.proposal === "syncing") {
 				// Check if heartbeat has timed out
 				if (conn.lastHeartbeat) {
-					const timeSinceHeartbeat = now - new Date(conn.lastHeartbeat).getTime();
+					const timeSinceHeartbeat =
+						now - new Date(conn.lastHeartbeat).getTime();
 					if (timeSinceHeartbeat > HEARTBEAT_TIMEOUT_MS) {
 						// Connection timed out
 						this.markConnectionFailed(conn.hostId, "heartbeat-timeout");
@@ -1248,7 +1303,9 @@ export function deserializeMessage(data: string): FederationMessage | null {
 /**
  * Validate a federation message structure.
  */
-export function validateMessage(message: unknown): message is FederationMessage {
+export function validateMessage(
+	message: unknown,
+): message is FederationMessage {
 	if (typeof message !== "object" || message === null) return false;
 
 	const msg = message as Record<string, unknown>;

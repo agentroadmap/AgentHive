@@ -7,24 +7,27 @@
  * STATE-46: Multi-Host Federation
  */
 
+import {
+	createHeartbeatProof,
+	ProposalLeaseManager,
+} from "../../../../core/collaboration/proposal-lease.ts";
+import {
+	createRequirement,
+	DynamicTeamBuilder,
+} from "../../../../core/collaboration/team-builder.ts";
+import { AgentTeamMembership } from "../../../../core/collaboration/team-membership.ts";
+import type { FederationServer } from "../../../../core/infrastructure/federation-server.ts";
 import { McpError } from "../../errors/mcp-errors.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
-import { DynamicTeamBuilder } from "../../../../core/collaboration/team-builder.ts";
-import { createRequirement } from "../../../../core/collaboration/team-builder.ts";
-import { AgentTeamMembership } from "../../../../core/collaboration/team-membership.ts";
-import { ProposalLeaseManager, createHeartbeatProof } from "../../../../core/collaboration/proposal-lease.ts";
-import { FederationServer } from '../../../../core/infrastructure/federation-server.ts';
 
 export class TeamHandlers {
-	private server: McpServer;
 	private teamBuilder: DynamicTeamBuilder;
 	private membership: AgentTeamMembership;
 	private proposalManager: ProposalLeaseManager;
 	private federation: FederationServer | null = null;
 
-	constructor(server: McpServer) {
-		this.server = server;
+	constructor(private readonly server: McpServer) {
 		this.teamBuilder = new DynamicTeamBuilder();
 		this.membership = new AgentTeamMembership();
 		this.proposalManager = new ProposalLeaseManager();
@@ -54,7 +57,12 @@ export class TeamHandlers {
 	async createTeam(args: {
 		projectName: string;
 		description: string;
-		requirements: Array<{ role: string; skills: string[]; count?: number; priority?: string }>;
+		requirements: Array<{
+			role: string;
+			skills: string[];
+			count?: number;
+			priority?: string;
+		}>;
 		skills: string[];
 	}): Promise<CallToolResult> {
 		try {
@@ -87,15 +95,18 @@ export class TeamHandlers {
 			const updatedTeam = this.teamBuilder.getTeam(team.teamId);
 
 			return {
-				content: [{
-					type: "text",
-					text: `Team created: ${updatedTeam?.teamId}\n` +
-						`Project: ${args.projectName}\n` +
-						`Members: ${updatedTeam?.members.length || 0}\n` +
-						`Lead: ${updatedTeam?.leadAgentId || "none"}\n` +
-						`Skill Coverage: ${suggestion.skillCoverage.coveragePercent}%\n` +
-						`Overall Score: ${suggestion.overallScore}`,
-				}],
+				content: [
+					{
+						type: "text",
+						text:
+							`Team created: ${updatedTeam?.teamId}\n` +
+							`Project: ${args.projectName}\n` +
+							`Members: ${updatedTeam?.members.length || 0}\n` +
+							`Lead: ${updatedTeam?.leadAgentId || "none"}\n` +
+							`Skill Coverage: ${suggestion.skillCoverage.coveragePercent}%\n` +
+							`Overall Score: ${suggestion.overallScore}`,
+					},
+				],
 			};
 		} catch (error) {
 			if (error instanceof Error) {
@@ -108,17 +119,26 @@ export class TeamHandlers {
 	/**
 	 * AC#4: Agent accepts team invitation.
 	 */
-	async acceptInvitation(args: { teamId: string; agentId: string }): Promise<CallToolResult> {
+	async acceptInvitation(args: {
+		teamId: string;
+		agentId: string;
+	}): Promise<CallToolResult> {
 		try {
-			const member = this.teamBuilder.acceptInvitation(args.teamId, args.agentId);
+			const member = this.teamBuilder.acceptInvitation(
+				args.teamId,
+				args.agentId,
+			);
 
 			return {
-				content: [{
-					type: "text",
-					text: `Agent ${args.agentId} accepted invitation to team ${args.teamId}\n` +
-						`Role: ${member.role}\n` +
-						`Status: ${member.status}`,
-				}],
+				content: [
+					{
+						type: "text",
+						text:
+							`Agent ${args.agentId} accepted invitation to team ${args.teamId}\n` +
+							`Role: ${member.role}\n` +
+							`Status: ${member.status}`,
+					},
+				],
 			};
 		} catch (error) {
 			if (error instanceof Error) {
@@ -131,17 +151,28 @@ export class TeamHandlers {
 	/**
 	 * AC#4: Agent declines team invitation.
 	 */
-	async declineInvitation(args: { teamId: string; agentId: string; reason?: string }): Promise<CallToolResult> {
+	async declineInvitation(args: {
+		teamId: string;
+		agentId: string;
+		reason?: string;
+	}): Promise<CallToolResult> {
 		try {
-			const member = this.teamBuilder.declineInvitation(args.teamId, args.agentId, args.reason);
+			const member = this.teamBuilder.declineInvitation(
+				args.teamId,
+				args.agentId,
+				args.reason,
+			);
 
 			return {
-				content: [{
-					type: "text",
-					text: `Agent ${args.agentId} declined invitation to team ${args.teamId}\n` +
-						`Reason: ${args.reason || "No reason provided"}\n` +
-						`Status: ${member.status}`,
-				}],
+				content: [
+					{
+						type: "text",
+						text:
+							`Agent ${args.agentId} declined invitation to team ${args.teamId}\n` +
+							`Reason: ${args.reason || "No reason provided"}\n` +
+							`Status: ${member.status}`,
+					},
+				],
 			};
 		} catch (error) {
 			if (error instanceof Error) {
@@ -154,17 +185,23 @@ export class TeamHandlers {
 	/**
 	 * AC#7: Dissolve a team.
 	 */
-	async dissolveTeam(args: { teamId: string; reason: string }): Promise<CallToolResult> {
+	async dissolveTeam(args: {
+		teamId: string;
+		reason: string;
+	}): Promise<CallToolResult> {
 		try {
 			const team = this.teamBuilder.dissolveTeam(args.teamId, args.reason);
 
 			return {
-				content: [{
-					type: "text",
-					text: `Team ${args.teamId} dissolved\n` +
-						`Reason: ${args.reason}\n` +
-						`Status: ${team.status}`,
-				}],
+				content: [
+					{
+						type: "text",
+						text:
+							`Team ${args.teamId} dissolved\n` +
+							`Reason: ${args.reason}\n` +
+							`Status: ${team.status}`,
+					},
+				],
 			};
 		} catch (error) {
 			if (error instanceof Error) {
@@ -177,19 +214,27 @@ export class TeamHandlers {
 	/**
 	 * AC#7: Query team roster.
 	 */
-	async queryRoster(args: { teamId?: string; role?: string; pool?: string }): Promise<CallToolResult> {
+	async queryRoster(args: {
+		teamId?: string;
+		role?: string;
+		pool?: string;
+	}): Promise<CallToolResult> {
 		try {
 			const entries = this.membership.queryRoster(args);
 
 			if (entries.length === 0) {
 				return {
-					content: [{ type: "text", text: "No team members found matching criteria." }],
+					content: [
+						{ type: "text", text: "No team members found matching criteria." },
+					],
 				};
 			}
 
 			const lines = [`Team Roster (${entries.length} members):`];
 			for (const entry of entries) {
-				lines.push(`- ${entry.agentId} | Role: ${entry.role} | Pool: ${entry.pool}`);
+				lines.push(
+					`- ${entry.agentId} | Role: ${entry.role} | Pool: ${entry.pool}`,
+				);
 				lines.push(`  Skills: ${entry.skills.join(", ")}`);
 				lines.push(`  Status: ${entry.status}`);
 			}
@@ -228,14 +273,17 @@ export class TeamHandlers {
 			await this.membership.activateRegistration(registration.registrationId);
 
 			return {
-				content: [{
-					type: "text",
-					text: `Agent ${args.agentId} registered successfully\n` +
-						`Registration ID: ${registration.registrationId}\n` +
-						`Role: ${args.role}\n` +
-						`Pool: ${args.pool}\n` +
-						`Status: active`,
-				}],
+				content: [
+					{
+						type: "text",
+						text:
+							`Agent ${args.agentId} registered successfully\n` +
+							`Registration ID: ${registration.registrationId}\n` +
+							`Role: ${args.role}\n` +
+							`Pool: ${args.pool}\n` +
+							`Status: active`,
+					},
+				],
 			};
 		} catch (error) {
 			if (error instanceof Error) {
@@ -269,13 +317,16 @@ export class TeamHandlers {
 			});
 
 			return {
-				content: [{
-					type: "text",
-					text: `Proposal submitted: ${proposal.proposalId}\n` +
-						`Proposal: ${args.proposalId}\n` +
-						`Title: ${args.title}\n` +
-						`Status: ${proposal.status}`,
-				}],
+				content: [
+					{
+						type: "text",
+						text:
+							`Proposal submitted: ${proposal.proposalId}\n` +
+							`Proposal: ${args.proposalId}\n` +
+							`Title: ${args.title}\n` +
+							`Status: ${proposal.status}`,
+					},
+				],
 			};
 		} catch (error) {
 			if (error instanceof Error) {
@@ -301,19 +352,25 @@ export class TeamHandlers {
 				proposalId: args.proposalId,
 				reviewerId: args.reviewerId,
 				reviewerRole: args.role as "pm" | "architect" | "lead" | "peer",
-				recommendation: args.recommendation as "approve" | "reject" | "needs-revision",
+				recommendation: args.recommendation as
+					| "approve"
+					| "reject"
+					| "needs-revision",
 				score: args.score,
 				comments: args.comments,
 			});
 
 			return {
-				content: [{
-					type: "text",
-					text: `Review submitted: ${review.reviewId}\n` +
-						`Proposal: ${args.proposalId}\n` +
-						`Recommendation: ${args.recommendation}\n` +
-						`Score: ${args.score}/10`,
-				}],
+				content: [
+					{
+						type: "text",
+						text:
+							`Review submitted: ${review.reviewId}\n` +
+							`Proposal: ${args.proposalId}\n` +
+							`Recommendation: ${args.recommendation}\n` +
+							`Score: ${args.score}/10`,
+					},
+				],
 			};
 		} catch (error) {
 			if (error instanceof Error) {
@@ -340,14 +397,17 @@ export class TeamHandlers {
 			});
 
 			return {
-				content: [{
-					type: "text",
-					text: `Lease acquired: ${lease.leaseId}\n` +
-						`Item: ${args.itemId}\n` +
-						`Agent: ${args.agentId}\n` +
-						`Expires: ${lease.expiresAt}\n` +
-						`Renewals: ${lease.renewalCount}/${lease.maxRenewals}`,
-				}],
+				content: [
+					{
+						type: "text",
+						text:
+							`Lease acquired: ${lease.leaseId}\n` +
+							`Item: ${args.itemId}\n` +
+							`Agent: ${args.agentId}\n` +
+							`Expires: ${lease.expiresAt}\n` +
+							`Renewals: ${lease.renewalCount}/${lease.maxRenewals}`,
+					},
+				],
 			};
 		} catch (error) {
 			if (error instanceof Error) {
@@ -360,18 +420,24 @@ export class TeamHandlers {
 	/**
 	 * AC#6: Renew a lease using heartbeat.
 	 */
-	async renewLease(args: { leaseId: string; agentId: string }): Promise<CallToolResult> {
+	async renewLease(args: {
+		leaseId: string;
+		agentId: string;
+	}): Promise<CallToolResult> {
 		try {
 			const proof = createHeartbeatProof(args.leaseId, args.agentId);
 			const lease = this.proposalManager.renewLease(proof);
 
 			return {
-				content: [{
-					type: "text",
-					text: `Lease renewed: ${lease.leaseId}\n` +
-						`New expiry: ${lease.expiresAt}\n` +
-						`Renewals: ${lease.renewalCount}/${lease.maxRenewals}`,
-				}],
+				content: [
+					{
+						type: "text",
+						text:
+							`Lease renewed: ${lease.leaseId}\n` +
+							`New expiry: ${lease.expiresAt}\n` +
+							`Renewals: ${lease.renewalCount}/${lease.maxRenewals}`,
+					},
+				],
 			};
 		} catch (error) {
 			if (error instanceof Error) {
@@ -390,7 +456,9 @@ export class TeamHandlers {
 		try {
 			if (!this.federation) {
 				return {
-					content: [{ type: "text", text: "Federation server not initialized." }],
+					content: [
+						{ type: "text", text: "Federation server not initialized." },
+					],
 				};
 			}
 
@@ -398,16 +466,19 @@ export class TeamHandlers {
 
 			const stats = status as any;
 			return {
-				content: [{
-					type: "text",
-					text: `Federation Status:\n` +
-						`Host ID: ${stats.hostId}\n` +
-						`Port: ${stats.port}\n` +
-						`Connected Agents: ${stats.connectedAgents}\n` +
-						`Pending Changes: ${stats.pendingChanges}\n` +
-						`Pending Conflicts: ${stats.conflicts}\n` +
-						`Connections: ${stats.connectionStats?.alive}/${stats.connectionStats?.total} alive`,
-				}],
+				content: [
+					{
+						type: "text",
+						text:
+							`Federation Status:\n` +
+							`Host ID: ${stats.hostId}\n` +
+							`Port: ${stats.port}\n` +
+							`Connected Agents: ${stats.connectedAgents}\n` +
+							`Pending Changes: ${stats.pendingChanges}\n` +
+							`Pending Conflicts: ${stats.conflicts}\n` +
+							`Connections: ${stats.connectionStats?.alive}/${stats.connectionStats?.total} alive`,
+					},
+				],
 			};
 		} catch (error) {
 			if (error instanceof Error) {

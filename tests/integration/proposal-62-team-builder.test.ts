@@ -2,16 +2,16 @@
  * Tests for proposal-62: Dynamic Team Building
  */
 
-import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, before, describe, it } from "node:test";
 import {
-	DynamicTeamBuilder,
-	createRequirement,
-	createAgentProfile,
 	calculateSimpleSkillMatch,
+	createAgentProfile,
+	createRequirement,
+	DynamicTeamBuilder,
 	type ProjectRequirements,
 	type Team,
 } from "../../src/core/collaboration/team-builder.ts";
@@ -26,40 +26,70 @@ describe("proposal-62: Dynamic Team Building", () => {
 		await builder.initialize();
 
 		// Register some test agents
-		builder.registerAgent(createAgentProfile("agent-1", "Alice", ["typescript", "react", "api-design"], {
-			availability: "available",
-			trustScore: 90,
-			currentWorkload: 20,
-			preferredRoles: ["developer", "lead"],
-		}));
+		builder.registerAgent(
+			createAgentProfile(
+				"agent-1",
+				"Alice",
+				["typescript", "react", "api-design"],
+				{
+					availability: "available",
+					trustScore: 90,
+					currentWorkload: 20,
+					preferredRoles: ["developer", "lead"],
+				},
+			),
+		);
 
-		builder.registerAgent(createAgentProfile("agent-2", "Bob", ["python", "testing", "ci-cd"], {
-			availability: "available",
-			trustScore: 85,
-			currentWorkload: 30,
-			preferredRoles: ["tester", "developer"],
-		}));
+		builder.registerAgent(
+			createAgentProfile("agent-2", "Bob", ["python", "testing", "ci-cd"], {
+				availability: "available",
+				trustScore: 85,
+				currentWorkload: 30,
+				preferredRoles: ["tester", "developer"],
+			}),
+		);
 
-		builder.registerAgent(createAgentProfile("agent-3", "Charlie", ["typescript", "architecture", "security"], {
-			availability: "available",
-			trustScore: 95,
-			currentWorkload: 40,
-			preferredRoles: ["architect", "lead"],
-		}));
+		builder.registerAgent(
+			createAgentProfile(
+				"agent-3",
+				"Charlie",
+				["typescript", "architecture", "security"],
+				{
+					availability: "available",
+					trustScore: 95,
+					currentWorkload: 40,
+					preferredRoles: ["architect", "lead"],
+				},
+			),
+		);
 
-		builder.registerAgent(createAgentProfile("agent-4", "Diana", ["react", "testing", "documentation"], {
-			availability: "busy",
-			trustScore: 80,
-			currentWorkload: 70,
-			preferredRoles: ["reviewer", "tester"],
-		}));
+		builder.registerAgent(
+			createAgentProfile(
+				"agent-4",
+				"Diana",
+				["react", "testing", "documentation"],
+				{
+					availability: "busy",
+					trustScore: 80,
+					currentWorkload: 70,
+					preferredRoles: ["reviewer", "tester"],
+				},
+			),
+		);
 
-		builder.registerAgent(createAgentProfile("agent-5", "Eve", ["typescript", "nodejs", "api-design"], {
-			availability: "offline",
-			trustScore: 75,
-			currentWorkload: 0,
-			preferredRoles: ["developer"],
-		}));
+		builder.registerAgent(
+			createAgentProfile(
+				"agent-5",
+				"Eve",
+				["typescript", "nodejs", "api-design"],
+				{
+					availability: "offline",
+					trustScore: 75,
+					currentWorkload: 0,
+					preferredRoles: ["developer"],
+				},
+			),
+		);
 	});
 
 	after(async () => {
@@ -71,7 +101,11 @@ describe("proposal-62: Dynamic Team Building", () => {
 			const agent = builder.getAgent("agent-1");
 			assert.ok(agent);
 			assert.equal(agent.name, "Alice");
-			assert.deepEqual(agent.capabilities, ["typescript", "react", "api-design"]);
+			assert.deepEqual(agent.capabilities, [
+				"typescript",
+				"react",
+				"api-design",
+			]);
 		});
 
 		it("should query agents by capability", () => {
@@ -139,9 +173,7 @@ describe("proposal-62: Dynamic Team Building", () => {
 				projectId: "PROJ-003",
 				projectName: "Testing Project",
 				description: "Focus on testing",
-				requirements: [
-					createRequirement("tester", ["testing", "ci-cd"], 1),
-				],
+				requirements: [createRequirement("tester", ["testing", "ci-cd"], 1)],
 				totalCapacityNeeded: 50,
 				skillsCoverage: ["testing", "ci-cd"],
 			};
@@ -161,7 +193,11 @@ describe("proposal-62: Dynamic Team Building", () => {
 
 			assert.equal(coverage.coveragePercent, 100);
 			assert.equal(coverage.missingSkills.length, 0);
-			assert.deepEqual(coverage.coveredSkills.sort(), ["react", "testing", "typescript"]);
+			assert.deepEqual(coverage.coveredSkills.sort(), [
+				"react",
+				"testing",
+				"typescript",
+			]);
 		});
 
 		it("should identify missing skills", () => {
@@ -201,9 +237,7 @@ describe("proposal-62: Dynamic Team Building", () => {
 				projectId: "PROJ-005",
 				projectName: "Accept Decline Test",
 				description: "Testing accept/decline",
-				requirements: [
-					createRequirement("developer", ["typescript"], 1),
-				],
+				requirements: [createRequirement("developer", ["typescript"], 1)],
 				totalCapacityNeeded: 50,
 				skillsCoverage: ["typescript"],
 			};
@@ -226,9 +260,7 @@ describe("proposal-62: Dynamic Team Building", () => {
 				projectId: "PROJ-006",
 				projectName: "Decline Test",
 				description: "Testing decline",
-				requirements: [
-					createRequirement("developer", ["typescript"], 1),
-				],
+				requirements: [createRequirement("developer", ["typescript"], 1)],
 				totalCapacityNeeded: 50,
 				skillsCoverage: ["typescript"],
 			};
@@ -237,7 +269,11 @@ describe("proposal-62: Dynamic Team Building", () => {
 			const declineTeam = builder.createTeam(requirements, suggestion);
 			const member = declineTeam.members[0];
 
-			const result = builder.declineInvitation(declineTeam.teamId, member.agentId, "Too busy");
+			const result = builder.declineInvitation(
+				declineTeam.teamId,
+				member.agentId,
+				"Too busy",
+			);
 
 			assert.equal(result.status, "declined");
 			assert.ok(result.respondedAt);
@@ -277,9 +313,7 @@ describe("proposal-62: Dynamic Team Building", () => {
 				projectId: "PROJ-008",
 				projectName: "Lead Assignment Test",
 				description: "Testing lead assignment",
-				requirements: [
-					createRequirement("developer", ["typescript"], 2),
-				],
+				requirements: [createRequirement("developer", ["typescript"], 2)],
 				totalCapacityNeeded: 80,
 				skillsCoverage: ["typescript"],
 			};
@@ -289,7 +323,10 @@ describe("proposal-62: Dynamic Team Building", () => {
 		});
 
 		it("AC#5: should manually assign team lead", () => {
-			const updated = builder.assignTeamLead(team.teamId, team.members[0].agentId);
+			const updated = builder.assignTeamLead(
+				team.teamId,
+				team.members[0].agentId,
+			);
 
 			assert.equal(updated.leadAgentId, team.members[0].agentId);
 			assert.equal(updated.members[0].role, "lead");
@@ -301,9 +338,7 @@ describe("proposal-62: Dynamic Team Building", () => {
 				projectId: "PROJ-009",
 				projectName: "Auto Lead Test",
 				description: "Testing auto lead selection",
-				requirements: [
-					createRequirement("developer", ["typescript"], 2),
-				],
+				requirements: [createRequirement("developer", ["typescript"], 2)],
 				totalCapacityNeeded: 80,
 				skillsCoverage: ["typescript"],
 			};
@@ -315,18 +350,17 @@ describe("proposal-62: Dynamic Team Building", () => {
 
 			assert.ok(updated.leadAgentId);
 			// Charlie (agent-3) has highest trust score (95)
-			const leadMember = updated.members.find((m) => m.agentId === updated.leadAgentId);
+			const leadMember = updated.members.find(
+				(m) => m.agentId === updated.leadAgentId,
+			);
 			assert.ok(leadMember);
 			assert.equal(leadMember.role, "lead");
 		});
 
 		it("should reject lead assignment for non-member", () => {
-			assert.throws(
-				() => {
-					builder.assignTeamLead(team.teamId, "non-existent-agent");
-				},
-				/not a team member/,
-			);
+			assert.throws(() => {
+				builder.assignTeamLead(team.teamId, "non-existent-agent");
+			}, /not a team member/);
 		});
 	});
 
@@ -338,9 +372,7 @@ describe("proposal-62: Dynamic Team Building", () => {
 				projectId: "PROJ-010",
 				projectName: "Channel Test",
 				description: "Testing channel creation",
-				requirements: [
-					createRequirement("developer", ["typescript"], 1),
-				],
+				requirements: [createRequirement("developer", ["typescript"], 1)],
 				totalCapacityNeeded: 50,
 				skillsCoverage: ["typescript"],
 			};
@@ -367,12 +399,9 @@ describe("proposal-62: Dynamic Team Building", () => {
 		});
 
 		it("should prevent duplicate channel creation", () => {
-			assert.throws(
-				() => {
-					builder.createTeamChannel(team.teamId);
-				},
-				/already has a channel/,
-			);
+			assert.throws(() => {
+				builder.createTeamChannel(team.teamId);
+			}, /already has a channel/);
 		});
 	});
 
@@ -384,9 +413,7 @@ describe("proposal-62: Dynamic Team Building", () => {
 				projectId: "PROJ-011",
 				projectName: "Dissolution Test",
 				description: "Testing dissolution",
-				requirements: [
-					createRequirement("developer", ["typescript"], 1),
-				],
+				requirements: [createRequirement("developer", ["typescript"], 1)],
 				totalCapacityNeeded: 50,
 				skillsCoverage: ["typescript"],
 			};
@@ -422,9 +449,7 @@ describe("proposal-62: Dynamic Team Building", () => {
 				projectId: "PROJ-012",
 				projectName: "Completion Test",
 				description: "Testing completion",
-				requirements: [
-					createRequirement("developer", ["typescript"], 1),
-				],
+				requirements: [createRequirement("developer", ["typescript"], 1)],
 				totalCapacityNeeded: 50,
 				skillsCoverage: ["typescript"],
 			};
@@ -476,7 +501,12 @@ describe("proposal-62: Dynamic Team Building", () => {
 
 	describe("Helpers", () => {
 		it("should create requirements", () => {
-			const req = createRequirement("developer", ["typescript", "react"], 2, "required");
+			const req = createRequirement(
+				"developer",
+				["typescript", "react"],
+				2,
+				"required",
+			);
 
 			assert.equal(req.role, "developer");
 			assert.deepEqual(req.skillRequired, ["typescript", "react"]);
@@ -485,10 +515,15 @@ describe("proposal-62: Dynamic Team Building", () => {
 		});
 
 		it("should create agent profiles", () => {
-			const agent = createAgentProfile("test-agent", "Test Agent", ["testing"], {
-				availability: "available",
-				trustScore: 85,
-			});
+			const agent = createAgentProfile(
+				"test-agent",
+				"Test Agent",
+				["testing"],
+				{
+					availability: "available",
+					trustScore: 85,
+				},
+			);
 
 			assert.equal(agent.agentId, "test-agent");
 			assert.equal(agent.name, "Test Agent");
@@ -498,8 +533,14 @@ describe("proposal-62: Dynamic Team Building", () => {
 		});
 
 		it("should calculate simple skill match", () => {
-			assert.equal(calculateSimpleSkillMatch(["typescript", "react"], ["typescript"]), 1);
-			assert.equal(calculateSimpleSkillMatch(["typescript"], ["typescript", "react"]), 0.5);
+			assert.equal(
+				calculateSimpleSkillMatch(["typescript", "react"], ["typescript"]),
+				1,
+			);
+			assert.equal(
+				calculateSimpleSkillMatch(["typescript"], ["typescript", "react"]),
+				0.5,
+			);
 			assert.equal(calculateSimpleSkillMatch(["python"], ["typescript"]), 0);
 		});
 	});

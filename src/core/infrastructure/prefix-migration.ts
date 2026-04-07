@@ -10,14 +10,16 @@ import { glob, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { FileSystem } from "../../file-system/operations.ts";
 import { parseProposal } from "../../markdown/parser.ts";
-import type { RoadmapConfig, Proposal } from "../../types/index.ts";
+import type { Proposal, RoadmapConfig } from "../../types/index.ts";
 import { generateNextId } from "../../utils/prefix-config.ts";
 
 /**
  * Check if the config needs draft prefix migration.
  * Migration is needed when the prefixes section is missing.
  */
-export function needsDraftPrefixMigration(config: RoadmapConfig | null): boolean {
+export function needsDraftPrefixMigration(
+	config: RoadmapConfig | null,
+): boolean {
 	if (!config) return false;
 	return config.prefixes === undefined;
 }
@@ -35,7 +37,9 @@ export async function migrateDraftPrefixes(fs: FileSystem): Promise<void> {
 	// Find all proposal-*.md files in drafts folder
 	let proposalFiles: string[];
 	try {
-		proposalFiles = await Array.fromAsync(glob("proposal-*.md", { cwd: draftsDir }));
+		proposalFiles = await Array.fromAsync(
+			glob("proposal-*.md", { cwd: draftsDir }),
+		);
 	} catch {
 		// Drafts directory doesn't exist or other error - nothing to migrate
 		proposalFiles = [];

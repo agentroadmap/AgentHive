@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { Directive, Proposal } from "../types/index.ts";
-import { getStatusStyle, getMaturityIcon } from "../ui/status-icon.ts";
+import { getMaturityIcon, getStatusStyle } from "../ui/status-icon.ts";
 
 export interface BoardOptions {
 	statuses?: string[];
@@ -65,16 +65,23 @@ export function buildKanbanStatusGroups(
 	return { orderedStatuses, groupedProposals };
 }
 
-export function generateKanbanBoardWithMetadata(proposals: Proposal[], statuses: string[], projectName: string): string {
+export function generateKanbanBoardWithMetadata(
+	proposals: Proposal[],
+	statuses: string[],
+	projectName: string,
+): string {
 	// Generate timestamp
 	const now = new Date();
 	const timestamp = now.toISOString().replace("T", " ").substring(0, 19);
 
-	const { orderedStatuses: allStatuses, groupedProposals } = buildKanbanStatusGroups(proposals, statuses);
+	const { orderedStatuses: allStatuses, groupedProposals } =
+		buildKanbanStatusGroups(proposals, statuses);
 
 	// Hide archive statuses by default in the export
 	const archiveStatuses = ["rejected", "abandoned", "replaced"];
-	const orderedStatuses = allStatuses.filter(s => !archiveStatuses.includes(s.toLowerCase()));
+	const orderedStatuses = allStatuses.filter(
+		(s) => !archiveStatuses.includes(s.toLowerCase()),
+	);
 
 	// Create header
 	const header = `# Kanban Board Export (powered by Roadmap.md)
@@ -104,8 +111,12 @@ Project: ${projectName}
 		// Sort items: All columns by updatedDate descending (fallback to createdDate), then by ID as secondary
 		const sortedItems = items.sort((a, b) => {
 			// Primary sort: updatedDate (newest first), fallback to createdDate if updatedDate is missing
-			const dateA = a.updatedDate ? new Date(a.updatedDate).getTime() : new Date(a.createdDate).getTime();
-			const dateB = b.updatedDate ? new Date(b.updatedDate).getTime() : new Date(b.createdDate).getTime();
+			const dateA = a.updatedDate
+				? new Date(a.updatedDate).getTime()
+				: new Date(a.createdDate).getTime();
+			const dateB = b.updatedDate
+				? new Date(b.updatedDate).getTime()
+				: new Date(b.createdDate).getTime();
 			if (dateB !== dateA) {
 				return dateB - dateA; // Newest first
 			}
@@ -117,7 +128,9 @@ Project: ${projectName}
 
 		// Separate top-level proposals from subproposals
 		for (const t of sortedItems) {
-			const parent = t.parentProposalId ? byId.get(t.parentProposalId) : undefined;
+			const parent = t.parentProposalId
+				? byId.get(t.parentProposalId)
+				: undefined;
 			if (parent && parent.status === t.status) {
 				// Subproposal with same status as parent - group under parent
 				const list = children.get(parent.id) || [];
@@ -167,7 +180,9 @@ Project: ${projectName}
 
 			// Format labels with # prefix and italic or empty string if none
 			const labelsText =
-				proposal.labels && proposal.labels.length > 0 ? `<br>*${proposal.labels.map((label) => `#${label}`).join(" ")}*` : "";
+				proposal.labels && proposal.labels.length > 0
+					? `<br>*${proposal.labels.map((label) => `#${label}`).join(" ")}*`
+					: "";
 
 			return `${proposalIdPrefix}**${proposalIdUpper}** - ${proposal.title}${assigneesText}${labelsText}`;
 		});
@@ -230,7 +245,10 @@ export function generateDirectiveGroupedBoard(
 				aliasToDirective.set(titleKey, normalizedId || normalizedTitle);
 			}
 			directiveLabelsByKey.set(idKey, normalizedTitle);
-			if (titleCounts.get(titleKey) === 1 && !directiveLabelsByKey.has(titleKey)) {
+			if (
+				titleCounts.get(titleKey) === 1 &&
+				!directiveLabelsByKey.has(titleKey)
+			) {
 				directiveLabelsByKey.set(titleKey, normalizedTitle);
 			}
 		}
@@ -246,18 +264,29 @@ export function generateDirectiveGroupedBoard(
 		const idMatch = normalized.match(/^m-(\d+)$/i);
 		if (idMatch?.[1]) {
 			const numericAlias = String(Number.parseInt(idMatch[1], 10));
-			return aliasToDirective.get(`m-${numericAlias}`) ?? aliasToDirective.get(numericAlias) ?? normalized;
+			return (
+				aliasToDirective.get(`m-${numericAlias}`) ??
+				aliasToDirective.get(numericAlias) ??
+				normalized
+			);
 		}
 		if (/^\d+$/.test(normalized)) {
 			const numericAlias = String(Number.parseInt(normalized, 10));
-			return aliasToDirective.get(`m-${numericAlias}`) ?? aliasToDirective.get(numericAlias) ?? normalized;
+			return (
+				aliasToDirective.get(`m-${numericAlias}`) ??
+				aliasToDirective.get(numericAlias) ??
+				normalized
+			);
 		}
 		return normalized;
 	};
 
 	for (const proposal of proposals) {
 		const canonicalDirective = canonicalizeDirective(proposal.directive);
-		if (canonicalDirective && !directiveSeen.has(canonicalDirective.toLowerCase())) {
+		if (
+			canonicalDirective &&
+			!directiveSeen.has(canonicalDirective.toLowerCase())
+		) {
 			directiveSeen.add(canonicalDirective.toLowerCase());
 			allDirectives.push(canonicalDirective);
 		}
@@ -274,17 +303,24 @@ Project: ${projectName}
 	// No directive section
 	const noDirectiveProposals = proposals.filter((t) => !t.directive?.trim());
 	if (noDirectiveProposals.length > 0) {
-		sections.push(generateDirectiveSection("No Directive", noDirectiveProposals, statuses));
+		sections.push(
+			generateDirectiveSection("No Directive", noDirectiveProposals, statuses),
+		);
 	}
 
 	// Each directive section
 	for (const directive of allDirectives) {
 		const directiveProposals = proposals.filter(
-			(proposal) => canonicalizeDirective(proposal.directive).toLowerCase() === directive.toLowerCase(),
+			(proposal) =>
+				canonicalizeDirective(proposal.directive).toLowerCase() ===
+				directive.toLowerCase(),
 		);
 		if (directiveProposals.length > 0) {
-			const directiveLabel = directiveLabelsByKey.get(directive.toLowerCase()) ?? directive;
-			sections.push(generateDirectiveSection(directiveLabel, directiveProposals, statuses));
+			const directiveLabel =
+				directiveLabelsByKey.get(directive.toLowerCase()) ?? directive;
+			sections.push(
+				generateDirectiveSection(directiveLabel, directiveProposals, statuses),
+			);
 		}
 	}
 
@@ -295,8 +331,15 @@ Project: ${projectName}
 	return `${header}${sections.join("\n\n")}\n`;
 }
 
-function generateDirectiveSection(directive: string, proposals: Proposal[], statuses: string[]): string {
-	const { orderedStatuses, groupedProposals } = buildKanbanStatusGroups(proposals, statuses);
+function generateDirectiveSection(
+	directive: string,
+	proposals: Proposal[],
+	statuses: string[],
+): string {
+	const { orderedStatuses, groupedProposals } = buildKanbanStatusGroups(
+		proposals,
+		statuses,
+	);
 
 	const sectionHeader = `## ${directive} (${proposals.length} proposals)\n`;
 
@@ -308,10 +351,12 @@ function generateDirectiveSection(directive: string, proposals: Proposal[], stat
 		const statusProposals = groupedProposals.get(status) || [];
 		const statusStyle = getStatusStyle(status);
 		const statusIcon = statusStyle.icon;
-		
+
 		const proposalLines = statusProposals.map((t) => {
 			const id = t.id.toUpperCase();
-			const assignees = t.assignee?.length ? ` [@${t.assignee.join(", @")}]` : "";
+			const assignees = t.assignee?.length
+				? ` [@${t.assignee.join(", @")}]`
+				: "";
 			const maturity = (t as any).maturity;
 			const maturityIcon = getMaturityIcon(maturity);
 			return `  - ${maturityIcon}${statusIcon} **${id}** - ${t.title}${assignees}`;
@@ -329,7 +374,11 @@ export async function exportKanbanBoardToFile(
 	projectName: string,
 	_overwrite = false,
 ): Promise<void> {
-	const board = generateKanbanBoardWithMetadata(proposals, statuses, projectName);
+	const board = generateKanbanBoardWithMetadata(
+		proposals,
+		statuses,
+		projectName,
+	);
 
 	// Ensure directory exists
 	try {

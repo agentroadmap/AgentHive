@@ -1,10 +1,13 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import {
+	ROADMAP_CWD_ENV,
+	resolveRuntimeCwd,
+} from "../../src/utils/runtime-cwd.ts";
 import { expect } from "../support/test-utils.ts";
-import { ROADMAP_CWD_ENV, resolveRuntimeCwd } from "../../src/utils/runtime-cwd.ts";
 
 describe("resolveRuntimeCwd", () => {
 	let testDir: string;
@@ -29,8 +32,14 @@ describe("resolveRuntimeCwd", () => {
 		await rm(testDir, { recursive: true, force: true });
 	});
 
-	async function expectCanonicalPath(actualPath: string, expectedPath: string): Promise<void> {
-		const [actualCanonical, expectedCanonical] = await Promise.all([realpath(actualPath), realpath(expectedPath)]);
+	async function expectCanonicalPath(
+		actualPath: string,
+		expectedPath: string,
+	): Promise<void> {
+		const [actualCanonical, expectedCanonical] = await Promise.all([
+			realpath(actualPath),
+			realpath(expectedPath),
+		]);
 		assert.strictEqual(actualCanonical, expectedCanonical);
 	}
 
@@ -79,6 +88,8 @@ describe("resolveRuntimeCwd", () => {
 	it("throws when override path is invalid", async () => {
 		process.env[ROADMAP_CWD_ENV] = join(testDir, "missing");
 
-		await expect(resolveRuntimeCwd()).rejects.toThrow(`Invalid directory from ${ROADMAP_CWD_ENV}`);
+		await expect(resolveRuntimeCwd()).rejects.toThrow(
+			`Invalid directory from ${ROADMAP_CWD_ENV}`,
+		);
 	});
 });

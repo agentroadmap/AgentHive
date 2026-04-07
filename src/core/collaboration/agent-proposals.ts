@@ -13,20 +13,34 @@
  * AC#6: Proposal history preserved for retrospective analysis
  */
 
-import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
 /** Proposal workflow status */
-export type ProposalStatus = "pending" | "approved" | "rejected" | "withdrawn" | "expired";
+export type ProposalStatus =
+	| "pending"
+	| "approved"
+	| "rejected"
+	| "withdrawn"
+	| "expired";
 
 /** Complexity levels for effort estimation */
-export type ComplexityLevel = "trivial" | "low" | "medium" | "high" | "very-high";
+export type ComplexityLevel =
+	| "trivial"
+	| "low"
+	| "medium"
+	| "high"
+	| "very-high";
 
 /** Implementation approach types */
-export type ApproachType = "incremental" | "rewrite" | "new-feature" | "refactor" | "fix";
+export type ApproachType =
+	| "incremental"
+	| "rewrite"
+	| "new-feature"
+	| "refactor"
+	| "fix";
 
 /** Individual feedback item from review */
 export interface ProposalFeedbackItem {
@@ -147,7 +161,13 @@ export interface ProposalHistoryEntry {
 	/** Entry ID */
 	entryId: string;
 	/** What happened */
-	event: "submitted" | "approved" | "rejected" | "withdrawn" | "claimed" | "expired";
+	event:
+		| "submitted"
+		| "approved"
+		| "rejected"
+		| "withdrawn"
+		| "claimed"
+		| "expired";
 	/** Which proposal */
 	proposalId: string;
 	/** Agent involved */
@@ -178,7 +198,7 @@ export type LeaseHeartbeatResult =
 const DEFAULT_LEASE_TTL_MS = 30 * 60 * 1000;
 
 /** Lease heartbeat interval (5 minutes) */
-const LEASE_HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
+const _LEASE_HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
 
 /** Complexity score mapping */
 const COMPLEXITY_SCORES: Record<ComplexityLevel, number> = {
@@ -226,7 +246,12 @@ export class AgentProposalSystem {
 	): AgentProposal {
 		// Check for existing pending proposal or unclaimed approved proposal for this proposal
 		const existing = this.getActiveProposalsForProposal(proposalId);
-		if (existing.some((p) => p.status === "pending" || (p.status === "approved" && !p.claimed))) {
+		if (
+			existing.some(
+				(p) =>
+					p.status === "pending" || (p.status === "approved" && !p.claimed),
+			)
+		) {
 			throw new Error(
 				`Proposal ${proposalId} already has an active proposal: ${existing[0]?.proposalId}`,
 			);
@@ -234,8 +259,14 @@ export class AgentProposalSystem {
 
 		// Check if there's an active lease
 		const lease = this.leases.get(proposalId);
-		if (lease && lease.status === "active" && new Date(lease.expiresAt) > new Date()) {
-			throw new Error(`Proposal ${proposalId} is already leased to ${lease.agentId}`);
+		if (
+			lease &&
+			lease.status === "active" &&
+			new Date(lease.expiresAt) > new Date()
+		) {
+			throw new Error(
+				`Proposal ${proposalId} is already leased to ${lease.agentId}`,
+			);
 		}
 
 		const now = new Date().toISOString();
@@ -329,8 +360,10 @@ export class AgentProposalSystem {
 	): AgentProposal {
 		const proposal = this.proposals.get(proposalId);
 		if (!proposal) throw new Error(`Proposal not found: ${proposalId}`);
-		if (proposal.agentId !== agentId) throw new Error("Only the proposing agent can update");
-		if (proposal.status !== "pending") throw new Error(`Cannot update proposal in status: ${proposal.status}`);
+		if (proposal.agentId !== agentId)
+			throw new Error("Only the proposing agent can update");
+		if (proposal.status !== "pending")
+			throw new Error(`Cannot update proposal in status: ${proposal.status}`);
 
 		proposal.approach = approach;
 		proposal.updatedAt = new Date().toISOString();
@@ -349,8 +382,10 @@ export class AgentProposalSystem {
 	): AgentProposal {
 		const proposal = this.proposals.get(proposalId);
 		if (!proposal) throw new Error(`Proposal not found: ${proposalId}`);
-		if (proposal.agentId !== agentId) throw new Error("Only the proposing agent can update");
-		if (proposal.status !== "pending") throw new Error(`Cannot update proposal in status: ${proposal.status}`);
+		if (proposal.agentId !== agentId)
+			throw new Error("Only the proposing agent can update");
+		if (proposal.status !== "pending")
+			throw new Error(`Cannot update proposal in status: ${proposal.status}`);
 
 		proposal.complexity = complexity;
 		proposal.updatedAt = new Date().toISOString();
@@ -377,7 +412,9 @@ export class AgentProposalSystem {
 			level: proposal.complexity.level,
 			score: proposal.complexity.score,
 			taskCount: proposal.complexity.tasks.length,
-			blockedTaskCount: proposal.complexity.tasks.filter((t) => t.dependsOn.length > 0).length,
+			blockedTaskCount: proposal.complexity.tasks.filter(
+				(t) => t.dependsOn.length > 0,
+			).length,
 			estimatedHours: proposal.complexity.estimatedHours,
 			confidence: proposal.complexity.confidence,
 		};
@@ -413,8 +450,10 @@ export class AgentProposalSystem {
 	withdrawProposal(proposalId: string, agentId: string): AgentProposal {
 		const proposal = this.proposals.get(proposalId);
 		if (!proposal) throw new Error(`Proposal not found: ${proposalId}`);
-		if (proposal.agentId !== agentId) throw new Error("Only the proposing agent can withdraw");
-		if (proposal.status !== "pending") throw new Error(`Cannot withdraw proposal in status: ${proposal.status}`);
+		if (proposal.agentId !== agentId)
+			throw new Error("Only the proposing agent can withdraw");
+		if (proposal.status !== "pending")
+			throw new Error(`Cannot withdraw proposal in status: ${proposal.status}`);
 
 		proposal.status = "withdrawn";
 		proposal.updatedAt = new Date().toISOString();
@@ -456,7 +495,9 @@ export class AgentProposalSystem {
 			avgReviewTime = totalMs / reviewed.length;
 		}
 
-		const decided = all.filter((p) => p.status === "approved" || p.status === "rejected");
+		const decided = all.filter(
+			(p) => p.status === "approved" || p.status === "rejected",
+		);
 
 		return {
 			pending: all.filter((p) => p.status === "pending").length,
@@ -465,9 +506,10 @@ export class AgentProposalSystem {
 			withdrawn: all.filter((p) => p.status === "withdrawn").length,
 			expired: all.filter((p) => p.status === "expired").length,
 			avgReviewTimeMs: avgReviewTime,
-			approvalRate: decided.length > 0
-				? all.filter((p) => p.status === "approved").length / decided.length
-				: 0,
+			approvalRate:
+				decided.length > 0
+					? all.filter((p) => p.status === "approved").length / decided.length
+					: 0,
 		};
 	}
 
@@ -480,17 +522,23 @@ export class AgentProposalSystem {
 		const proposal = this.proposals.get(proposalId);
 		if (!proposal) throw new Error(`Proposal not found: ${proposalId}`);
 		if (proposal.status !== "approved") {
-			throw new Error(`Proposal must be approved before claiming. Current status: ${proposal.status}`);
+			throw new Error(
+				`Proposal must be approved before claiming. Current status: ${proposal.status}`,
+			);
 		}
 		if (proposal.claimed) {
-			throw new Error(`Proposal ${proposalId} has already been used to claim proposal ${proposal.proposalId}`);
+			throw new Error(
+				`Proposal ${proposalId} has already been used to claim proposal ${proposal.proposalId}`,
+			);
 		}
 
 		// Check if proposal already has an active lease
 		const existingLease = this.leases.get(proposal.proposalId);
 		if (existingLease && existingLease.status === "active") {
 			if (new Date(existingLease.expiresAt) > new Date()) {
-				throw new Error(`Proposal ${proposal.proposalId} already leased to ${existingLease.agentId}`);
+				throw new Error(
+					`Proposal ${proposal.proposalId} already leased to ${existingLease.agentId}`,
+				);
 			}
 			// Lease expired, release it
 			existingLease.status = "expired";
@@ -615,7 +663,9 @@ export class AgentProposalSystem {
 	 * Get leases held by a specific agent.
 	 */
 	getAgentLeases(agentId: string): ProposalLease[] {
-		return Array.from(this.leases.values()).filter((l) => l.agentId === agentId);
+		return Array.from(this.leases.values()).filter(
+			(l) => l.agentId === agentId,
+		);
 	}
 
 	/**
@@ -655,7 +705,9 @@ export class AgentProposalSystem {
 		status: ProposalStatus;
 	}> {
 		return Array.from(this.proposals.values())
-			.filter((p) => p.targetProposalId === targetProposalId && p.feedback.length > 0)
+			.filter(
+				(p) => p.targetProposalId === targetProposalId && p.feedback.length > 0,
+			)
 			.map((p) => ({
 				proposalId: p.proposalId,
 				agentId: p.agentId,
@@ -682,7 +734,10 @@ export class AgentProposalSystem {
 
 		for (const proposal of this.proposals.values()) {
 			for (const fb of proposal.feedback) {
-				categoryCounts.set(fb.category, (categoryCounts.get(fb.category) ?? 0) + 1);
+				categoryCounts.set(
+					fb.category,
+					(categoryCounts.get(fb.category) ?? 0) + 1,
+				);
 				if (fb.severity === "blocker") blockerCount++;
 				else if (fb.severity === "warning") warningCount++;
 				else infoCount++;
@@ -730,9 +785,12 @@ export class AgentProposalSystem {
 		let results = [...this.history];
 
 		if (filter) {
-			if (filter.proposalId) results = results.filter((h) => h.proposalId === filter.proposalId);
-			if (filter.agentId) results = results.filter((h) => h.agentId === filter.agentId);
-			if (filter.event) results = results.filter((h) => h.event === filter.event);
+			if (filter.proposalId)
+				results = results.filter((h) => h.proposalId === filter.proposalId);
+			if (filter.agentId)
+				results = results.filter((h) => h.agentId === filter.agentId);
+			if (filter.event)
+				results = results.filter((h) => h.event === filter.event);
 			if (filter.since) {
 				const since = new Date(filter.since);
 				results = results.filter((h) => new Date(h.timestamp) >= since);
@@ -746,15 +804,23 @@ export class AgentProposalSystem {
 	/**
 	 * Get retrospective summary for a time period.
 	 */
-	getRetrospective(since: string, until?: string): {
+	getRetrospective(
+		since: string,
+		until?: string,
+	): {
 		totalProposals: number;
 		approvedCount: number;
 		rejectedCount: number;
 		avgComplexityScore: number;
-		agentActivity: Map<string, { submitted: number; approved: number; rejected: number }>;
+		agentActivity: Map<
+			string,
+			{ submitted: number; approved: number; rejected: number }
+		>;
 		proposalQuality: number; // ratio of approved/(total-rejected-withdrawn)
 	} {
-		let entries = this.history.filter((h) => new Date(h.timestamp) >= new Date(since));
+		let entries = this.history.filter(
+			(h) => new Date(h.timestamp) >= new Date(since),
+		);
 		if (until) {
 			entries = entries.filter((h) => new Date(h.timestamp) <= new Date(until));
 		}
@@ -763,37 +829,56 @@ export class AgentProposalSystem {
 		const approvedProposals = entries.filter((h) => h.event === "approved");
 		const rejectedProposals = entries.filter((h) => h.event === "rejected");
 
-		const agentActivity = new Map<string, { submitted: number; approved: number; rejected: number }>();
+		const agentActivity = new Map<
+			string,
+			{ submitted: number; approved: number; rejected: number }
+		>();
 
 		for (const entry of submittedProposals) {
-			const existing = agentActivity.get(entry.agentId) ?? { submitted: 0, approved: 0, rejected: 0 };
+			const existing = agentActivity.get(entry.agentId) ?? {
+				submitted: 0,
+				approved: 0,
+				rejected: 0,
+			};
 			existing.submitted++;
 			agentActivity.set(entry.agentId, existing);
 		}
 
 		for (const entry of approvedProposals) {
-			const existing = agentActivity.get(entry.agentId) ?? { submitted: 0, approved: 0, rejected: 0 };
+			const existing = agentActivity.get(entry.agentId) ?? {
+				submitted: 0,
+				approved: 0,
+				rejected: 0,
+			};
 			existing.approved++;
 			agentActivity.set(entry.agentId, existing);
 		}
 
 		for (const entry of rejectedProposals) {
-			const existing = agentActivity.get(entry.agentId) ?? { submitted: 0, approved: 0, rejected: 0 };
+			const existing = agentActivity.get(entry.agentId) ?? {
+				submitted: 0,
+				approved: 0,
+				rejected: 0,
+			};
 			existing.rejected++;
 			agentActivity.set(entry.agentId, existing);
 		}
 
 		// Calculate average complexity
 		const complexityScores = Array.from(this.proposals.values())
-			.filter((p) => submittedProposals.some((e) => e.proposalId === p.proposalId))
+			.filter((p) =>
+				submittedProposals.some((e) => e.proposalId === p.proposalId),
+			)
 			.map((p) => p.complexity.score);
 
-		const avgComplexity = complexityScores.length > 0
-			? complexityScores.reduce((a, b) => a + b, 0) / complexityScores.length
-			: 0;
+		const avgComplexity =
+			complexityScores.length > 0
+				? complexityScores.reduce((a, b) => a + b, 0) / complexityScores.length
+				: 0;
 
 		const totalDecided = approvedProposals.length + rejectedProposals.length;
-		const quality = totalDecided > 0 ? approvedProposals.length / totalDecided : 0;
+		const quality =
+			totalDecided > 0 ? approvedProposals.length / totalDecided : 0;
 
 		return {
 			totalProposals: submittedProposals.length,
@@ -950,7 +1035,8 @@ export function createApproach(
 		filesAffected: options?.filesAffected ?? [],
 		dependencies: options?.dependencies ?? [],
 		estimatedTimeline: options?.estimatedTimeline ?? "TBD",
-		testingStrategy: options?.testingStrategy ?? "Unit tests + integration tests",
+		testingStrategy:
+			options?.testingStrategy ?? "Unit tests + integration tests",
 		risks: options?.risks ?? [],
 		rollbackPlan: options?.rollbackPlan,
 	};

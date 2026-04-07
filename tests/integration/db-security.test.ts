@@ -7,18 +7,18 @@
  * AC#5d: Secret/credential handling in DB context
  */
 
-import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { after, before, describe, it } from "node:test";
 import {
-	initializeSecurity,
-	AuditTrail,
 	AccessControl,
-	DataIntegrity,
 	AgentTokenStore,
+	AuditTrail,
+	DataIntegrity,
+	initializeSecurity,
 } from "../../src/core/security/db-security.ts";
 
 describe("Database Migration Security (proposal-095 AC#5)", () => {
@@ -126,7 +126,11 @@ describe("Database Migration Security (proposal-095 AC#5)", () => {
 		it("should purge old events by retention period", () => {
 			// This tests the purge mechanism — all events are recent so nothing purged
 			const purged = audit.purgeOldEvents(365);
-			assert.equal(typeof purged, "number", "Should return count of purged events");
+			assert.equal(
+				typeof purged,
+				"number",
+				"Should return count of purged events",
+			);
 		});
 	});
 
@@ -140,7 +144,13 @@ describe("Database Migration Security (proposal-095 AC#5)", () => {
 		});
 
 		it("should grant read permission to an agent", () => {
-			acl.grant("agent-reader", "proposal", "proposal-51", "read", "admin-agent");
+			acl.grant(
+				"agent-reader",
+				"proposal",
+				"proposal-51",
+				"read",
+				"admin-agent",
+			);
 			assert.ok(
 				acl.hasPermission("agent-reader", "proposal", "proposal-51", "read"),
 				"Should have read permission",
@@ -175,16 +185,35 @@ describe("Database Migration Security (proposal-095 AC#5)", () => {
 		});
 
 		it("should revoke permissions", () => {
-			acl.grant("agent-temp", "proposal", "proposal-51", "write", "admin-agent");
-			assert.ok(acl.hasPermission("agent-temp", "proposal", "proposal-51", "write"));
+			acl.grant(
+				"agent-temp",
+				"proposal",
+				"proposal-51",
+				"write",
+				"admin-agent",
+			);
+			assert.ok(
+				acl.hasPermission("agent-temp", "proposal", "proposal-51", "write"),
+			);
 
-			acl.revoke("agent-temp", "proposal", "proposal-51", "write", "admin-agent");
-			assert.ok(!acl.hasPermission("agent-temp", "proposal", "proposal-51", "write"));
+			acl.revoke(
+				"agent-temp",
+				"proposal",
+				"proposal-51",
+				"write",
+				"admin-agent",
+			);
+			assert.ok(
+				!acl.hasPermission("agent-temp", "proposal", "proposal-51", "write"),
+			);
 		});
 
 		it("should list all permissions for an agent", () => {
 			const perms = acl.listPermissions("agent-reader");
-			assert.ok(perms.length > 0, "Should have at least the granted permission");
+			assert.ok(
+				perms.length > 0,
+				"Should have at least the granted permission",
+			);
 			assert.equal(perms[0]?.agentId, "agent-reader");
 		});
 	});
@@ -206,7 +235,12 @@ describe("Database Migration Security (proposal-095 AC#5)", () => {
 
 		it("should detect matching file and DB content", () => {
 			const content = "# proposal-51\nStatus: Active";
-			const check = integrity.recordCheck("proposal", "proposal-51", content, content);
+			const check = integrity.recordCheck(
+				"proposal",
+				"proposal-51",
+				content,
+				content,
+			);
 
 			assert.ok(check.match, "Same content should match");
 			assert.equal(check.fileHash, check.dbHash);
@@ -215,7 +249,12 @@ describe("Database Migration Security (proposal-095 AC#5)", () => {
 		it("should detect mismatched file and DB content", () => {
 			const fileContent = "# proposal-51\nStatus: Active";
 			const dbContent = "# proposal-51\nStatus: Complete";
-			const check = integrity.recordCheck("proposal", "proposal-52", fileContent, dbContent);
+			const check = integrity.recordCheck(
+				"proposal",
+				"proposal-52",
+				fileContent,
+				dbContent,
+			);
 
 			assert.ok(!check.match, "Different content should not match");
 			assert.notEqual(check.fileHash, check.dbHash);
@@ -223,7 +262,10 @@ describe("Database Migration Security (proposal-095 AC#5)", () => {
 
 		it("should list all mismatches", () => {
 			const mismatches = integrity.getMismatches();
-			assert.ok(mismatches.length > 0, "Should have at least the mismatch we just created");
+			assert.ok(
+				mismatches.length > 0,
+				"Should have at least the mismatch we just created",
+			);
 			assert.ok(mismatches.every((m) => !m.match));
 		});
 
@@ -253,7 +295,12 @@ describe("Database Migration Security (proposal-095 AC#5)", () => {
 
 		it("should store and verify a token hash", () => {
 			const expiresAt = new Date(Date.now() + 3600000).toISOString();
-			tokenStore.storeToken("agent-test", "sha256-of-token-value", expiresAt, 1);
+			tokenStore.storeToken(
+				"agent-test",
+				"sha256-of-token-value",
+				expiresAt,
+				1,
+			);
 
 			const result = tokenStore.verifyTokenHash("sha256-of-token-value");
 			assert.ok(result, "Token hash should verify");
@@ -268,7 +315,12 @@ describe("Database Migration Security (proposal-095 AC#5)", () => {
 
 		it("should reject expired tokens", () => {
 			const pastExpiry = new Date(Date.now() - 1000).toISOString();
-			tokenStore.storeToken("agent-expired", "expired-token-hash", pastExpiry, 1);
+			tokenStore.storeToken(
+				"agent-expired",
+				"expired-token-hash",
+				pastExpiry,
+				1,
+			);
 
 			const result = tokenStore.verifyTokenHash("expired-token-hash");
 			assert.equal(result, null, "Expired token should return null");
@@ -288,7 +340,11 @@ describe("Database Migration Security (proposal-095 AC#5)", () => {
 
 		it("should purge expired tokens", () => {
 			const purged = tokenStore.purgeExpired();
-			assert.equal(typeof purged, "number", "Should return count of purged tokens");
+			assert.equal(
+				typeof purged,
+				"number",
+				"Should return count of purged tokens",
+			);
 		});
 
 		it("CRITICAL: should never store plaintext tokens", () => {
@@ -299,7 +355,12 @@ describe("Database Migration Security (proposal-095 AC#5)", () => {
 			// The caller is responsible for hashing — storeToken stores whatever is passed
 			// The security assumption: callers pass sha256(token), not token itself
 			// This test verifies the convention is followed
-			tokenStore.storeToken("agent-hash-check", "sha256:abc123def456", expiresAt, 1);
+			tokenStore.storeToken(
+				"agent-hash-check",
+				"sha256:abc123def456",
+				expiresAt,
+				1,
+			);
 
 			const row = db
 				.prepare("SELECT token_hash FROM agent_tokens WHERE agent_id = ?")

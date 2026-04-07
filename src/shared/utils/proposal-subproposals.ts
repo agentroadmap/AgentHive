@@ -2,11 +2,16 @@ import type { Proposal } from "../types/index.ts";
 import { proposalIdsEqual } from "./proposal-path.ts";
 import { sortByProposalId } from "./proposal-sorting.ts";
 
-export function attachSubproposalSummaries(proposal: Proposal, proposals: Proposal[]): Proposal {
+export function attachSubproposalSummaries(
+	proposal: Proposal,
+	proposals: Proposal[],
+): Proposal {
 	// Recursive depth calculation
 	const calculateDepth = (s: Proposal): number => {
 		if (!s.parentProposalId) return 0;
-		const parent = proposals.find((candidate) => proposalIdsEqual(s.parentProposalId ?? "", candidate.id));
+		const parent = proposals.find((candidate) =>
+			proposalIdsEqual(s.parentProposalId ?? "", candidate.id),
+		);
 		if (!parent) {
 			return 0;
 		}
@@ -17,7 +22,9 @@ export function attachSubproposalSummaries(proposal: Proposal, proposals: Propos
 
 	let parentTitle: string | undefined;
 	if (proposal.parentProposalId) {
-		const parent = proposals.find((candidate) => proposalIdsEqual(proposal.parentProposalId ?? "", candidate.id));
+		const parent = proposals.find((candidate) =>
+			proposalIdsEqual(proposal.parentProposalId ?? "", candidate.id),
+		);
 		if (parent) {
 			parentTitle = parent.title;
 		}
@@ -44,7 +51,9 @@ export function attachSubproposalSummaries(proposal: Proposal, proposals: Propos
 	return {
 		...proposal,
 		depth,
-		...(parentTitle && parentTitle !== proposal.parentProposalTitle ? { parentProposalTitle: parentTitle } : {}),
+		...(parentTitle && parentTitle !== proposal.parentProposalTitle
+			? { parentProposalTitle: parentTitle }
+			: {}),
 		subproposals: sortedSummaries.map((summary) => summary.id),
 		subproposalSummaries: sortedSummaries,
 	};

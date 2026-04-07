@@ -1,13 +1,20 @@
-import { globSync } from "node:fs";
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
+import { globSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { join } from "node:path";
-import { ContentStore, type ContentStoreEvent } from '../../src/core/storage/content-store.ts';
+import { afterEach, beforeEach, describe, it } from "node:test";
+import {
+	ContentStore,
+	type ContentStoreEvent,
+} from "../../src/core/storage/content-store.ts";
 import { FileSystem } from "../../src/file-system/operations.ts";
 import type { Decision, Document, Proposal } from "../../src/types/index.ts";
-import { createUniqueTestDir, getPlatformTimeout, safeCleanup, sleep,
+import {
+	createUniqueTestDir,
 	expect,
+	getPlatformTimeout,
+	safeCleanup,
+	sleep,
 } from "../support/test-utils.ts";
 
 let TEST_DIR: string;
@@ -35,7 +42,8 @@ describe("ContentStore", () => {
 		context: "Context",
 		decision: "Decision text",
 		consequences: "Consequences",
-		rawContent: "## Context\nContext\n\n## Decision\nDecision text\n\n## Consequences\nConsequences",
+		rawContent:
+			"## Context\nContext\n\n## Decision\nDecision text\n\n## Consequences\nConsequences",
 	};
 
 	const sampleDocument: Document = {
@@ -72,7 +80,9 @@ describe("ContentStore", () => {
 		assert.strictEqual(snapshot.proposals.length, 1);
 		assert.strictEqual(snapshot.documents.length, 1);
 		assert.strictEqual(snapshot.decisions.length, 1);
-		expect(snapshot.proposals.map((proposal) => proposal.id)).toContain("proposal-1");
+		expect(snapshot.proposals.map((proposal) => proposal.id)).toContain(
+			"proposal-1",
+		);
 	});
 
 	it("emits proposal updates when underlying files change", async () => {
@@ -80,21 +90,34 @@ describe("ContentStore", () => {
 		await store.ensureInitialized();
 
 		const waitForUpdate = waitForEventWithTimeout(store, (event) => {
-			return event.type === "proposals" && event.proposals.some((proposal) => proposal.title === "Updated Proposal");
+			return (
+				event.type === "proposals" &&
+				event.proposals.some(
+					(proposal) => proposal.title === "Updated Proposal",
+				)
+			);
 		});
 
-		await filesystem.saveProposal({ ...sampleProposal, title: "Updated Proposal" });
+		await filesystem.saveProposal({
+			...sampleProposal,
+			title: "Updated Proposal",
+		});
 		await waitForUpdate;
 
 		const proposals = store.getProposals();
-		expect(proposals.map((proposal) => proposal.title)).toContain("Updated Proposal");
+		expect(proposals.map((proposal) => proposal.title)).toContain(
+			"Updated Proposal",
+		);
 	});
 
 	it("updates documents when new files are added", async () => {
 		await store.ensureInitialized();
 
 		const waitForDocument = waitForEventWithTimeout(store, (event) => {
-			return event.type === "documents" && event.documents.some((doc) => doc.id === "doc-2");
+			return (
+				event.type === "documents" &&
+				event.documents.some((doc) => doc.id === "doc-2")
+			);
 		});
 
 		await filesystem.saveDocument(
@@ -137,12 +160,18 @@ describe("ContentStore", () => {
 		});
 
 		await store.ensureInitialized();
-		expect(store.getProposals().map((proposal) => proposal.id)).toContain("proposal-remote");
+		expect(store.getProposals().map((proposal) => proposal.id)).toContain(
+			"proposal-remote",
+		);
 
-		await (store as unknown as { refreshProposalsFromDisk: () => Promise<void> }).refreshProposalsFromDisk();
+		await (
+			store as unknown as { refreshProposalsFromDisk: () => Promise<void> }
+		).refreshProposalsFromDisk();
 
 		const refreshedProposals = store.getProposals();
-		expect(refreshedProposals.map((proposal) => proposal.id)).toContain("proposal-remote");
+		expect(refreshedProposals.map((proposal) => proposal.id)).toContain(
+			"proposal-remote",
+		);
 		expect(loaderCalls).toBeGreaterThanOrEqual(2);
 	});
 
@@ -155,22 +184,29 @@ describe("ContentStore", () => {
 		const decisionsDir = filesystem.decisionsDir;
 		const decisionFiles: string[] = [];
 		for await (const file of globSync("decision-*.md", { cwd: decisionsDir })) {
-			decisionFiles.push(typeof file === 'string' ? file : (file as any).name);
+			decisionFiles.push(typeof file === "string" ? file : (file as any).name);
 		}
-		const decisionFile = decisionFiles.find((file) => file.startsWith("decision-1"));
+		const decisionFile = decisionFiles.find((file) =>
+			file.startsWith("decision-1"),
+		);
 		if (!decisionFile) {
 			throw new Error("Expected decision file was not created");
 		}
 
 		const waitForRemoval = waitForEventWithTimeout(store, (event) => {
-			return event.type === "decisions" && event.decisions.every((decision) => decision.id !== "decision-1");
+			return (
+				event.type === "decisions" &&
+				event.decisions.every((decision) => decision.id !== "decision-1")
+			);
 		});
 
 		await unlink(join(decisionsDir, decisionFile));
 		await waitForRemoval;
 
 		const decisions = store.getDecisions();
-		expect(decisions.find((decision) => decision.id === "decision-1")).toBeUndefined();
+		expect(
+			decisions.find((decision) => decision.id === "decision-1"),
+		).toBeUndefined();
 	});
 });
 

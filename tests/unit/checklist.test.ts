@@ -1,6 +1,5 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
-import { expect } from "../support/test-utils.ts";
 import {
 	alignAcceptanceCriteria,
 	CHECKBOX_PATTERNS,
@@ -11,6 +10,7 @@ import {
 	parseCheckboxLine,
 	parseCheckboxLines,
 } from "../../src/ui/checklist.ts";
+import { expect } from "../support/test-utils.ts";
 
 describe("Checklist utilities", () => {
 	describe("CHECKBOX_PATTERNS", () => {
@@ -171,7 +171,11 @@ Regular text
 			];
 
 			const result = formatChecklist(items);
-			assert.deepStrictEqual(result, [" [x] First item", " [ ] Second item", " [x] Third item"]);
+			assert.deepStrictEqual(result, [
+				" [x] First item",
+				" [ ] Second item",
+				" [x] Third item",
+			]);
 		});
 	});
 
@@ -182,7 +186,11 @@ Regular text
 - [x] Third criterion`;
 
 			const result = alignAcceptanceCriteria(criteriaSection);
-			assert.deepStrictEqual(result, [" [x] First criterion", " [ ] Second criterion", " [x] Third criterion"]);
+			assert.deepStrictEqual(result, [
+				" [x] First criterion",
+				" [ ] Second criterion",
+				" [x] Third criterion",
+			]);
 		});
 
 		test("should handle mixed content with consistent padding", () => {
@@ -191,7 +199,11 @@ Regular note
 - [ ] Another checkbox`;
 
 			const result = alignAcceptanceCriteria(criteriaSection);
-			assert.deepStrictEqual(result, [" [x] Checkbox item", " Regular note", " [ ] Another checkbox"]);
+			assert.deepStrictEqual(result, [
+				" [x] Checkbox item",
+				" Regular note",
+				" [ ] Another checkbox",
+			]);
 		});
 
 		test("should handle empty or whitespace-only lines", () => {
@@ -202,7 +214,11 @@ Regular note
 - [x] Third item`;
 
 			const result = alignAcceptanceCriteria(criteriaSection);
-			assert.deepStrictEqual(result, [" [x] First item", " [ ] Second item", " [x] Third item"]);
+			assert.deepStrictEqual(result, [
+				" [x] First item",
+				" [ ] Second item",
+				" [x] Third item",
+			]);
 		});
 	});
 

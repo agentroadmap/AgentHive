@@ -1,16 +1,27 @@
 import assert from "node:assert";
-import { describe, it } from "node:test";
+import { execSync as execSyncChild, spawn } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { execSync as execSyncChild, spawn } from "node:child_process";
+import { describe, it } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
-import type { RoadmapConfig, Proposal } from "../../src/types/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
+import type { Proposal, RoadmapConfig } from "../../src/types/index.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
-const CLI_PATH = process.env.TUI_TEST_CLI_PATH?.trim() || join(process.cwd(), "src", "cli.ts");
+const CLI_PATH =
+	process.env.TUI_TEST_CLI_PATH?.trim() || join(process.cwd(), "src", "cli.ts");
 const CLI_RUNTIME = process.env.TUI_TEST_CLI_RUNTIME?.trim() ?? "bun";
-const TRANSCRIPT_DIR = join(process.cwd(), "tmp", "tui-interactive-transcripts");
-const EXPECT_PATH = execSyncChild("which expect || echo ''", { encoding: "utf-8" }).trim() || null;
+const TRANSCRIPT_DIR = join(
+	process.cwd(),
+	"tmp",
+	"tui-interactive-transcripts",
+);
+const EXPECT_PATH =
+	execSyncChild("which expect || echo ''", { encoding: "utf-8" }).trim() ||
+	null;
 const RUN_INTERACTIVE_TUI_TESTS = process.env.RUN_INTERACTIVE_TUI_TESTS === "1";
 
 function getSkipReason(): string | null {
@@ -28,7 +39,9 @@ function getSkipReason(): string | null {
 
 const skipReason = getSkipReason();
 if (skipReason) {
-	console.warn(`[tui-interactive] Skipping interactive editor handoff tests: ${skipReason}`);
+	console.warn(
+		`[tui-interactive] Skipping interactive editor handoff tests: ${skipReason}`,
+	);
 }
 const itInteractive = skipReason ? it.skip : it;
 
@@ -54,13 +67,23 @@ function buildSpawnCommand(cliArgs: string[]): string {
 	return `spawn {${CLI_RUNTIME}} {${CLI_PATH}} ${argsSegment}`;
 }
 
-async function runInteractiveEditScenario(options: InteractiveEditRunOptions): Promise<InteractiveEditRunResult> {
-	const testDir = createUniqueTestDir(`test-tui-interactive-${options.scenario}`);
+async function runInteractiveEditScenario(
+	options: InteractiveEditRunOptions,
+): Promise<InteractiveEditRunResult> {
+	const testDir = createUniqueTestDir(
+		`test-tui-interactive-${options.scenario}`,
+	);
 	await mkdir(testDir, { recursive: true });
 	await mkdir(TRANSCRIPT_DIR, { recursive: true });
 
-	const transcriptPath = join(TRANSCRIPT_DIR, `${options.scenario}-${Date.now()}.log`);
-	const editorMarkerPath = join(testDir, `${options.scenario}-editor-marker.txt`);
+	const transcriptPath = join(
+		TRANSCRIPT_DIR,
+		`${options.scenario}-${Date.now()}.log`,
+	);
+	const editorMarkerPath = join(
+		testDir,
+		`${options.scenario}-editor-marker.txt`,
+	);
 	const editorInputPath = join(testDir, `${options.scenario}-editor-input.log`);
 	const editorScriptPath = join(testDir, `${options.scenario}-editor.cjs`);
 	const expectScriptPath = join(testDir, `${options.scenario}.expect`);
@@ -184,7 +207,9 @@ exit $exit_code
 	const exitCode = await new Promise<number>((resolve) => {
 		child.on("close", (code) => resolve(code ?? 1));
 	});
-	const transcript = await readFile(transcriptPath, "utf-8").catch(() => "(no transcript captured)");
+	const transcript = await readFile(transcriptPath, "utf-8").catch(
+		() => "(no transcript captured)",
+	);
 
 	try {
 		assert.ok([0, 130].includes(exitCode));
@@ -199,8 +224,12 @@ exit $exit_code
 		);
 	}
 
-	const markerContent = await readFile(editorMarkerPath, "utf8").catch(() => "");
-	const editorInputLog = await readFile(editorInputPath, "utf8").catch(() => "");
+	const markerContent = await readFile(editorMarkerPath, "utf8").catch(
+		() => "",
+	);
+	const editorInputLog = await readFile(editorInputPath, "utf8").catch(
+		() => "",
+	);
 	const proposalContent = await core.getProposalContent("proposal-1");
 
 	await safeCleanup(testDir);
@@ -213,31 +242,41 @@ exit $exit_code
 }
 
 describe("interactive TUI editor handoff", () => {
-	itInteractive("launches terminal editor from board view and marks proposal updated", async () => {
-		const result = await runInteractiveEditScenario({
-			scenario: "board",
-			cliArgs: ["board"],
-			proposalTitle: "Board interactive editor proposal",
-			readyPattern: "Roadmap Board",
-		});
+	itInteractive(
+		"launches terminal editor from board view and marks proposal updated",
+		async () => {
+			const result = await runInteractiveEditScenario({
+				scenario: "board",
+				cliArgs: ["board"],
+				proposalTitle: "Board interactive editor proposal",
+				readyPattern: "Roadmap Board",
+			});
 
-		assert.ok(result.editorMarker.includes("started"));
-		assert.ok(result.editorInputLog.includes("DATA:27,91,65"));
-		assert.ok(result.proposalContent.includes("Edited in interactive TUI test"));
-		assert.ok(result.transcriptPath.includes("tui-interactive-transcripts"));
-	});
+			assert.ok(result.editorMarker.includes("started"));
+			assert.ok(result.editorInputLog.includes("DATA:27,91,65"));
+			assert.ok(
+				result.proposalContent.includes("Edited in interactive TUI test"),
+			);
+			assert.ok(result.transcriptPath.includes("tui-interactive-transcripts"));
+		},
+	);
 
-	itInteractive("launches terminal editor from proposal list view and marks proposal updated", async () => {
-		const result = await runInteractiveEditScenario({
-			scenario: "proposal-list",
-			cliArgs: ["proposal", "list"],
-			proposalTitle: "Proposal list interactive editor proposal",
-			readyPattern: "Proposals",
-		});
+	itInteractive(
+		"launches terminal editor from proposal list view and marks proposal updated",
+		async () => {
+			const result = await runInteractiveEditScenario({
+				scenario: "proposal-list",
+				cliArgs: ["proposal", "list"],
+				proposalTitle: "Proposal list interactive editor proposal",
+				readyPattern: "Proposals",
+			});
 
-		assert.ok(result.editorMarker.includes("started"));
-		assert.ok(result.editorInputLog.includes("DATA:27,91,65"));
-		assert.ok(result.proposalContent.includes("Edited in interactive TUI test"));
-		assert.ok(result.transcriptPath.includes("tui-interactive-transcripts"));
-	});
+			assert.ok(result.editorMarker.includes("started"));
+			assert.ok(result.editorInputLog.includes("DATA:27,91,65"));
+			assert.ok(
+				result.proposalContent.includes("Edited in interactive TUI test"),
+			);
+			assert.ok(result.transcriptPath.includes("tui-interactive-transcripts"));
+		},
+	);
 });

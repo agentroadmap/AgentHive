@@ -20,19 +20,24 @@ const MATURITY_ICONS: Record<string, string> = {
 	Obsolete: "🗑️",
 };
 
-function getMaturityIcon(maturity: Record<string, string> | null, status: string): string {
+function getMaturityIcon(
+	maturity: Record<string, string> | null,
+	status: string,
+): string {
 	if (!maturity || typeof maturity !== "object") {
 		return "📋";
 	}
 	const label = maturity[status] ?? Object.values(maturity)[0];
-	return label ? MATURITY_ICONS[label] ?? "📋" : "📋";
+	return label ? (MATURITY_ICONS[label] ?? "📋") : "📋";
 }
 
 async function main() {
 	const fs = new FileSystem(process.cwd());
 	const config = await fs.loadConfig();
 	if (config?.database?.provider !== "Postgres" || !config.database) {
-		throw new Error("Roadmap board requires database.provider=Postgres in roadmap.yaml.");
+		throw new Error(
+			"Roadmap board requires database.provider=Postgres in roadmap.yaml.",
+		);
 	}
 
 	initPoolFromConfig(config.database);
@@ -64,8 +69,12 @@ async function main() {
 	);
 
 	const configuredStatuses = config.statuses ?? [];
-	const statuses = Array.from(new Set([...configuredStatuses, ...rows.map((row) => row.status)])).filter(Boolean);
-	const groups = new Map<string, BoardRow[]>(statuses.map((status) => [status, []]));
+	const statuses = Array.from(
+		new Set([...configuredStatuses, ...rows.map((row) => row.status)]),
+	).filter(Boolean);
+	const groups = new Map<string, BoardRow[]>(
+		statuses.map((status) => [status, []]),
+	);
 	for (const row of rows) {
 		if (!groups.has(row.status)) {
 			groups.set(row.status, []);
@@ -89,23 +98,37 @@ async function main() {
 
 		for (const row of items) {
 			const maturityIcon = getMaturityIcon(row.maturity, row.status);
-			const queueText = row.queue_position ? ` queue:${row.queue_position}` : "";
-			const acText = row.ac_total > 0 ? ` AC:${row.ac_pass}/${row.ac_total}` : "";
-			console.log(`  ${maturityIcon} ${row.display_id} [${row.type}]${queueText}${acText} — ${row.title}`);
+			const queueText = row.queue_position
+				? ` queue:${row.queue_position}`
+				: "";
+			const acText =
+				row.ac_total > 0 ? ` AC:${row.ac_pass}/${row.ac_total}` : "";
+			console.log(
+				`  ${maturityIcon} ${row.display_id} [${row.type}]${queueText}${acText} — ${row.title}`,
+			);
 		}
 		console.log("");
 	}
 
 	const total = rows.length;
 	const totalAC = rows.reduce((sum, row) => sum + Number(row.ac_total || 0), 0);
-	const totalPassAC = rows.reduce((sum, row) => sum + Number(row.ac_pass || 0), 0);
-	const completion = totalAC > 0 ? Math.round((totalPassAC / totalAC) * 100) : 0;
+	const totalPassAC = rows.reduce(
+		(sum, row) => sum + Number(row.ac_pass || 0),
+		0,
+	);
+	const completion =
+		totalAC > 0 ? Math.round((totalPassAC / totalAC) * 100) : 0;
 	console.log("─".repeat(72));
-	console.log(`Total proposals: ${total} | Acceptance criteria passed: ${totalPassAC}/${totalAC} (${completion}%)`);
+	console.log(
+		`Total proposals: ${total} | Acceptance criteria passed: ${totalPassAC}/${totalAC} (${completion}%)`,
+	);
 	console.log("");
 }
 
 main().catch((error) => {
-	console.error("Failed to generate board:", error instanceof Error ? error.message : String(error));
+	console.error(
+		"Failed to generate board:",
+		error instanceof Error ? error.message : String(error),
+	);
 	process.exit(1);
 });

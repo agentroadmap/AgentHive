@@ -1,19 +1,35 @@
 /* Proposal viewer with search/filter header UI */
 
 import { stdout as output } from "node:process";
-import type { BoxInterface, LineInterface, ScreenInterface, ScrollableTextInterface } from "./blessed.ts";
-import { box, line, scrollabletext } from "./blessed.ts";
 import { Core } from "../../core/roadmap.ts";
 import {
 	buildAcceptanceCriteriaItems,
 	formatDateForDisplay,
 	formatProposalPlainText,
 } from "../../formatters/proposal-plain-text.ts";
-import type { Directive, Proposal, ProposalSearchResult } from "../../shared/types/index.ts";
+import type {
+	Directive,
+	Proposal,
+	ProposalSearchResult,
+} from "../../shared/types/index.ts";
 import { collectAvailableLabels } from "../../shared/utils/label-filter.ts";
 import { hasAnyPrefix } from "../../shared/utils/prefix-config.ts";
-import { applyProposalFilters, createProposalSearchIndex } from "../../shared/utils/proposal-search.ts";
+import {
+	applyProposalFilters,
+	createProposalSearchIndex,
+} from "../../shared/utils/proposal-search.ts";
 import { attachSubproposalSummaries } from "../../shared/utils/proposal-subproposals.ts";
+import {
+	formatVersionLabel,
+	getVersionInfo,
+} from "../../shared/utils/version.ts";
+import type {
+	BoxInterface,
+	LineInterface,
+	ScreenInterface,
+	ScrollableTextInterface,
+} from "./blessed.ts";
+import { box, line, scrollabletext } from "./blessed.ts";
 import { formatChecklistItem } from "./checklist.ts";
 import { transformCodePaths } from "./code-path.ts";
 import {
@@ -22,14 +38,24 @@ import {
 	type FilterHeader,
 	type FilterProposal,
 } from "./components/filter-header.ts";
-import { openMultiSelectFilterPopup, openSingleSelectFilterPopup } from "./components/filter-popup.ts";
-import { createGenericList, type GenericList } from "./components/generic-list.ts";
+import {
+	openMultiSelectFilterPopup,
+	openSingleSelectFilterPopup,
+} from "./components/filter-popup.ts";
+import {
+	createGenericList,
+	type GenericList,
+} from "./components/generic-list.ts";
 import { formatFooterContent } from "./footer-content.ts";
 import { formatHeading } from "./heading.ts";
 import { createLoadingScreen } from "./loading.ts";
-import { formatStatusWithIcon, getStatusColor, getMaturityColor, getMaturityIcon } from "./status-icon.ts";
+import {
+	formatStatusWithIcon,
+	getMaturityColor,
+	getMaturityIcon,
+	getStatusColor,
+} from "./status-icon.ts";
 import { createScreen } from "./tui.ts";
-import { getVersionInfo, formatVersionLabel } from "../../shared/utils/version.ts";
 
 function getPriorityDisplay(priority?: "high" | "medium" | "low"): string {
 	switch (priority) {
@@ -44,7 +70,9 @@ function getPriorityDisplay(priority?: "high" | "medium" | "low"): string {
 	}
 }
 
-function createDirectiveLabelResolver(directives: Directive[]): (directive: string) => string {
+function createDirectiveLabelResolver(
+	directives: Directive[],
+): (directive: string) => string {
 	const directiveLabelsByKey = new Map<string, string>();
 	for (const directive of directives) {
 		const normalizedId = directive.id.trim();
@@ -67,12 +95,16 @@ function createDirectiveLabelResolver(directives: Directive[]): (directive: stri
 	};
 }
 
-export function buildProposalViewerDirectiveFilterModel(activeDirectives: Directive[]): {
+export function buildProposalViewerDirectiveFilterModel(
+	activeDirectives: Directive[],
+): {
 	availableDirectiveTitles: string[];
 	resolveDirectiveLabel: (directive: string) => string;
 } {
 	return {
-		availableDirectiveTitles: activeDirectives.map((directive) => directive.title),
+		availableDirectiveTitles: activeDirectives.map(
+			(directive) => directive.title,
+		),
 		resolveDirectiveLabel: createDirectiveLabelResolver(activeDirectives),
 	};
 }
@@ -184,17 +216,33 @@ export async function viewProposalEnhanced(
 	let labels: string[];
 	let availableLabels: string[] = [];
 	// When proposals are provided, use in-memory search; otherwise use ContentStore-backed search
-	let proposalSearchIndex: ReturnType<typeof createProposalSearchIndex> | null = null;
-	let searchService: Awaited<ReturnType<typeof core.getSearchService>> | null = null;
-	let contentStore: Awaited<ReturnType<typeof core.getContentStore>> | null = null;
+	let proposalSearchIndex: ReturnType<typeof createProposalSearchIndex> | null =
+		null;
+	let searchService: Awaited<ReturnType<typeof core.getSearchService>> | null =
+		null;
+	let contentStore: Awaited<ReturnType<typeof core.getContentStore>> | null =
+		null;
 	const directiveEntities = await core.filesystem.listDirectives();
-	const { availableDirectiveTitles, resolveDirectiveLabel } = buildProposalViewerDirectiveFilterModel(directiveEntities);
+	const { availableDirectiveTitles, resolveDirectiveLabel } =
+		buildProposalViewerDirectiveFilterModel(directiveEntities);
 
 	if (options.proposals) {
 		// Proposals already provided - use in-memory search (no ContentStore loading)
-		allProposals = options.proposals.filter((t) => t.id && t.id.trim() !== "" && hasAnyPrefix(t.id));
+		allProposals = options.proposals.filter(
+			(t) => t.id && t.id.trim() !== "" && hasAnyPrefix(t.id),
+		);
 		const config = await core.filesystem.loadConfig();
-		statuses = config?.statuses || ["New", "Draft", "Review", "Active", "Accepted", "Complete", "Rejected", "Abandoned", "Replaced"];
+		statuses = config?.statuses || [
+			"New",
+			"Draft",
+			"Review",
+			"Active",
+			"Accepted",
+			"Complete",
+			"Rejected",
+			"Abandoned",
+			"Replaced",
+		];
 		labels = config?.labels || [];
 		proposalSearchIndex = createProposalSearchIndex(allProposals);
 	} else {
@@ -203,7 +251,17 @@ export async function viewProposalEnhanced(
 		try {
 			loadingScreen?.update("Loading configuration...");
 			const config = await core.filesystem.loadConfig();
-			statuses = config?.statuses || ["New", "Draft", "Review", "Active", "Accepted", "Complete", "Rejected", "Abandoned", "Replaced"];
+			statuses = config?.statuses || [
+				"New",
+				"Draft",
+				"Review",
+				"Active",
+				"Accepted",
+				"Complete",
+				"Rejected",
+				"Abandoned",
+				"Replaced",
+			];
 			labels = config?.labels || [];
 
 			loadingScreen?.update("Loading proposals from branches...");
@@ -212,7 +270,9 @@ export async function viewProposalEnhanced(
 
 			loadingScreen?.update("Preparing proposal list...");
 			const proposals = await core.queryProposals();
-			allProposals = proposals.filter((t) => t.id && t.id.trim() !== "" && hasAnyPrefix(t.id));
+			allProposals = proposals.filter(
+				(t) => t.id && t.id.trim() !== "" && hasAnyPrefix(t.id),
+			);
 		} finally {
 			await loadingScreen?.close();
 		}
@@ -239,15 +299,23 @@ export async function viewProposalEnhanced(
 	let filteredProposals = [...allProposals];
 
 	if (options.labelFilter && options.labelFilter.length > 0) {
-		const availableSet = new Set(availableLabels.map((label) => label.toLowerCase()));
-		labelFilter = options.labelFilter.filter((label) => availableSet.has(label.toLowerCase()));
+		const availableSet = new Set(
+			availableLabels.map((label) => label.toLowerCase()),
+		);
+		labelFilter = options.labelFilter.filter((label) =>
+			availableSet.has(label.toLowerCase()),
+		);
 	}
 
 	const versionInfo = await getVersionInfo();
 	const versionLabel = formatVersionLabel(versionInfo);
 
 	const filtersActive = Boolean(
-		searchQuery || statusFilter || priorityFilter || labelFilter.length > 0 || directiveFilter,
+		searchQuery ||
+			statusFilter ||
+			priorityFilter ||
+			labelFilter.length > 0 ||
+			directiveFilter,
 	);
 	let requireInitialFilterSelection = filtersActive;
 
@@ -261,7 +329,9 @@ export async function viewProposalEnhanced(
 	let selectionRequestId = 0;
 	let noResultsMessage: string | null = null;
 
-	const screen = createScreen({ title: `${options.title || "Roadmap Proposals"} - ${versionLabel}` });
+	const screen = createScreen({
+		title: `${options.title || "Roadmap Proposals"} - ${versionLabel}`,
+	});
 
 	// Main container
 	const container = box({
@@ -311,7 +381,9 @@ export async function viewProposalEnhanced(
 		}
 	};
 
-	const openFilterPicker = async (filterId: Exclude<FilterControlId, "search">) => {
+	const openFilterPicker = async (
+		filterId: Exclude<FilterControlId, "search">,
+	) => {
 		if (filterPopupOpen) {
 			return;
 		}
@@ -339,7 +411,10 @@ export async function viewProposalEnhanced(
 					screen,
 					title: "Status Filter",
 					selectedValue: statusFilter,
-					choices: [{ label: "All", value: "" }, ...statuses.map((status) => ({ label: status, value: status }))],
+					choices: [
+						{ label: "All", value: "" },
+						...statuses.map((status) => ({ label: status, value: status })),
+					],
 				});
 				if (selected !== null) {
 					statusFilter = selected;
@@ -358,7 +433,10 @@ export async function viewProposalEnhanced(
 					selectedValue: priorityFilter,
 					choices: [
 						{ label: "All", value: "" },
-						...priorities.map((priority) => ({ label: priority, value: priority })),
+						...priorities.map((priority) => ({
+							label: priority,
+							value: priority,
+						})),
 					],
 				});
 				if (selected !== null) {
@@ -376,7 +454,10 @@ export async function viewProposalEnhanced(
 				selectedValue: directiveFilter,
 				choices: [
 					{ label: "All", value: "" },
-					...availableDirectiveTitles.map((directive) => ({ label: directive, value: directive })),
+					...availableDirectiveTitles.map((directive) => ({
+						label: directive,
+						value: directive,
+					})),
 				],
 			});
 			if (selected !== null) {
@@ -431,7 +512,11 @@ export async function viewProposalEnhanced(
 	});
 	filterHeader.setExitRequestHandler((direction) => {
 		filterHeader.setBorderColor("cyan");
-		const targetPane = resolveFilterExitPane(filterExitPane, Boolean(proposalList), Boolean(descriptionBox));
+		const targetPane = resolveFilterExitPane(
+			filterExitPane,
+			Boolean(proposalList),
+			Boolean(descriptionBox),
+		);
 		if (targetPane === "list" && proposalList) {
 			const selected = proposalList.getSelectedIndex();
 			const currentIndex = Array.isArray(selected) ? selected[0] : selected;
@@ -509,7 +594,8 @@ export async function viewProposalEnhanced(
 
 	function syncPaneLayout() {
 		const headerHeight = filterHeader.getHeight();
-		const footerHeight = typeof helpBar.height === "number" ? helpBar.height : 1;
+		const footerHeight =
+			typeof helpBar.height === "number" ? helpBar.height : 1;
 		proposalListPane.top = headerHeight;
 		proposalListPane.height = `100%-${headerHeight + footerHeight}`;
 		detailPane.top = headerHeight;
@@ -526,8 +612,10 @@ export async function viewProposalEnhanced(
 	function setActivePane(active: "list" | "detail" | "none") {
 		const listBorder = proposalListPane.style as { border?: { fg?: string } };
 		const detailBorder = detailPane.style as { border?: { fg?: string } };
-		if (listBorder.border) listBorder.border.fg = active === "list" ? "yellow" : "gray";
-		if (detailBorder.border) detailBorder.border.fg = active === "detail" ? "yellow" : "gray";
+		if (listBorder.border)
+			listBorder.border.fg = active === "list" ? "yellow" : "gray";
+		if (detailBorder.border)
+			detailBorder.border.fg = active === "detail" ? "yellow" : "gray";
 	}
 
 	function focusProposalList(targetIndex?: number): void {
@@ -576,7 +664,11 @@ export async function viewProposalEnhanced(
 	// Function to apply filters and refresh the proposal list
 	function applyFilters() {
 		const hasActiveFilters = Boolean(
-			searchQuery.trim() || statusFilter || priorityFilter || labelFilter.length > 0 || directiveFilter,
+			searchQuery.trim() ||
+				statusFilter ||
+				priorityFilter ||
+				labelFilter.length > 0 ||
+				directiveFilter,
 		);
 		if (!hasActiveFilters) {
 			filteredProposals = [...allProposals];
@@ -603,12 +695,19 @@ export async function viewProposalEnhanced(
 				},
 				types: ["proposal"],
 			});
-			filteredProposals = searchResults.filter((r): r is ProposalSearchResult => r.type === "proposal").map((r) => r.proposal);
+			filteredProposals = searchResults
+				.filter((r): r is ProposalSearchResult => r.type === "proposal")
+				.map((r) => r.proposal);
 			if (directiveFilter) {
 				filteredProposals = filteredProposals.filter((proposal) => {
 					if (!proposal.directive) return false;
-					const proposalDirectiveTitle = resolveDirectiveLabel(proposal.directive);
-					return proposalDirectiveTitle.toLowerCase() === directiveFilter.toLowerCase();
+					const proposalDirectiveTitle = resolveDirectiveLabel(
+						proposal.directive,
+					);
+					return (
+						proposalDirectiveTitle.toLowerCase() ===
+						directiveFilter.toLowerCase()
+					);
 				});
 			}
 		} else {
@@ -617,7 +716,9 @@ export async function viewProposalEnhanced(
 
 		// Update the proposal list label
 		if (proposalListPane.setLabel) {
-			proposalListPane.setLabel(`\u00A0Proposals (${filteredProposals.length})\u00A0`);
+			proposalListPane.setLabel(
+				`\u00A0Proposals (${filteredProposals.length})\u00A0`,
+			);
 		}
 
 		if (filteredProposals.length === 0) {
@@ -668,12 +769,16 @@ export async function viewProposalEnhanced(
 		proposalList = listController;
 		if (listController) {
 			const forceFirst = requireInitialFilterSelection;
-			let desiredIndex = filteredProposals.findIndex((t) => t.id === currentSelectedProposal.id);
+			let desiredIndex = filteredProposals.findIndex(
+				(t) => t.id === currentSelectedProposal.id,
+			);
 			if (forceFirst || desiredIndex < 0) {
 				desiredIndex = 0;
 			}
 			const currentIndexRaw = listController.getSelectedIndex();
-			const currentIndex = Array.isArray(currentIndexRaw) ? (currentIndexRaw[0] ?? 0) : currentIndexRaw;
+			const currentIndex = Array.isArray(currentIndexRaw)
+				? (currentIndexRaw[0] ?? 0)
+				: currentIndexRaw;
 			if (forceFirst || currentIndex !== desiredIndex) {
 				listController.setSelectedIndex(desiredIndex);
 			}
@@ -714,7 +819,10 @@ export async function viewProposalEnhanced(
 
 	async function applySelection(selectedProposal: Proposal | null) {
 		if (!selectedProposal) return;
-		if (currentSelectedProposal && selectedProposal.id === currentSelectedProposal.id) {
+		if (
+			currentSelectedProposal &&
+			selectedProposal.id === currentSelectedProposal.id
+		) {
 			return;
 		}
 		const enriched = enrichProposal(selectedProposal);
@@ -723,7 +831,10 @@ export async function viewProposalEnhanced(
 		const requestId = ++selectionRequestId;
 		refreshDetailPane();
 		screen.render();
-		const refreshed = await core.getProposalWithSubproposals(selectedProposal.id, allProposals);
+		const refreshed = await core.getProposalWithSubproposals(
+			selectedProposal.id,
+			allProposals,
+		);
 		if (requestId !== selectionRequestId) {
 			return;
 		}
@@ -760,10 +871,16 @@ export async function viewProposalEnhanced(
 				const assigneeText = proposal.assignee?.length
 					? ` {cyan-fg}${proposal.assignee[0]?.startsWith("@") ? proposal.assignee[0] : `@${proposal.assignee[0]}`}{/}`
 					: "";
-				const labelsText = proposal.labels?.length ? ` {yellow-fg}[${proposal.labels.join(", ")}]{/}` : "";
+				const labelsText = proposal.labels?.length
+					? ` {yellow-fg}[${proposal.labels.join(", ")}]{/}`
+					: "";
 				const priorityText = getPriorityDisplay(proposal.priority);
-				const isCrossBranch = Boolean((proposal as Proposal & { branch?: string }).branch);
-				const branchText = isCrossBranch ? ` {green-fg}(${(proposal as Proposal & { branch?: string }).branch}){/}` : "";
+				const isCrossBranch = Boolean(
+					(proposal as Proposal & { branch?: string }).branch,
+				);
+				const branchText = isCrossBranch
+					? ` {green-fg}(${(proposal as Proposal & { branch?: string }).branch}){/}`
+					: "";
 
 				const displayId = proposal.id.replace(/^STATE-/, "STEP-");
 				const content = `{${maturityColor}-fg}${maturityIcon}{/}{${statusColor}-fg}${statusIcon}{/} {bold}${displayId}{/bold} - ${proposal.title}${priorityText}${assigneeText}${labelsText}${branchText}`;
@@ -771,14 +888,18 @@ export async function viewProposalEnhanced(
 				return isCrossBranch ? `{gray-fg}${content}{/}` : content;
 			},
 			onSelect: (selected: Proposal | Proposal[]) => {
-				const selectedProposal = Array.isArray(selected) ? selected[0] : selected;
+				const selectedProposal = Array.isArray(selected)
+					? selected[0]
+					: selected;
 				void applySelection(selectedProposal || null);
 			},
 			onHighlight: (selected: Proposal | null) => {
 				void applySelection(selected);
 			},
 			onBoundaryNavigation: (direction, selectedIndex, total) => {
-				if (!shouldMoveFromListBoundaryToSearch(direction, selectedIndex, total)) {
+				if (
+					!shouldMoveFromListBoundaryToSearch(direction, selectedIndex, total)
+				) {
 					return false;
 				}
 				pendingSearchWrap = direction === "up" ? "to-last" : "to-first";
@@ -831,12 +952,17 @@ export async function viewProposalEnhanced(
 
 			const pageAmount = () => {
 				const h = boxInstance.height;
-				const height = typeof h === "number" ? h : (parseInt(String(h)) || 0);
+				const height = typeof h === "number" ? h : parseInt(String(h), 10) || 0;
 				return height > 0 ? Math.max(1, height - 3) : 20; // fallback to 20 rows
 			};
 
 			boxInstance.key(["up", "k"], () => {
-				if (!shouldMoveFromDetailBoundaryToSearch("up", scrollable.getScroll?.() ?? 0)) {
+				if (
+					!shouldMoveFromDetailBoundaryToSearch(
+						"up",
+						scrollable.getScroll?.() ?? 0,
+					)
+				) {
 					return true;
 				}
 				pendingSearchWrap = null;
@@ -915,7 +1041,10 @@ export async function viewProposalEnhanced(
 			divider = undefined;
 			const messageBox = scrollabletext({
 				parent: detailPane,
-				top: (typeof headerDetailBox.bottom === "number" ? headerDetailBox.bottom : 0) + 1,
+				top:
+					(typeof headerDetailBox.bottom === "number"
+						? headerDetailBox.bottom
+						: 0) + 1,
 				left: 1,
 				right: 1,
 				bottom: 1,
@@ -935,16 +1064,23 @@ export async function viewProposalEnhanced(
 
 		screen.title = `Proposal ${currentSelectedProposal.id} - ${currentSelectedProposal.title}`;
 
-		const detailContent = generateDetailContent(currentSelectedProposal, resolveDirectiveLabel);
+		const detailContent = generateDetailContent(
+			currentSelectedProposal,
+			resolveDirectiveLabel,
+		);
 
 		// Calculate header height based on content and available width
-		const detailPaneWidth = typeof detailPane.width === "number" ? detailPane.width : 60;
+		const detailPaneWidth =
+			typeof detailPane.width === "number" ? detailPane.width : 60;
 		const availableWidth = detailPaneWidth - 6; // 2 for border, 2 for box padding, 2 for header padding
 
 		let headerLineCount = 0;
 		for (const detailLine of detailContent.headerContent) {
 			const plainText = detailLine.replace(/\{[^}]+\}/g, "");
-			const lineCount = Math.max(1, Math.ceil(plainText.length / availableWidth));
+			const lineCount = Math.max(
+				1,
+				Math.ceil(plainText.length / availableWidth),
+			);
 			headerLineCount += lineCount;
 		}
 
@@ -1004,7 +1140,8 @@ export async function viewProposalEnhanced(
 				content =
 					" {cyan-fg}[←/→]{/} Cursor (edge=Prev/Next) | {cyan-fg}[↑/↓]{/} Back to Proposals | {cyan-fg}[Esc]{/} Cancel | {gray-fg}(Live search){/}";
 			} else {
-				content = " {cyan-fg}[Enter/Space]{/} Open Picker | {cyan-fg}[←/→]{/} Prev/Next | {cyan-fg}[Esc]{/} Back";
+				content =
+					" {cyan-fg}[Enter/Space]{/} Open Picker | {cyan-fg}[←/→]{/} Prev/Next | {cyan-fg}[Esc]{/} Back";
 			}
 		} else if (currentFocus === "detail") {
 			content =
@@ -1019,34 +1156,47 @@ export async function viewProposalEnhanced(
 		screen.render();
 	}
 
-	const openCurrentProposalInEditor = async () => {
+	const _openCurrentProposalInEditor = async () => {
 		if (filterPopupOpen || currentFocus === "filters" || noResultsMessage) {
 			return;
 		}
 		const selectedProposal = currentSelectedProposal;
 
 		try {
-			const result = await core.editProposalInTui(selectedProposal.id, screen, selectedProposal);
+			const result = await core.editProposalInTui(
+				selectedProposal.id,
+				screen,
+				selectedProposal,
+			);
 			if (result.reason === "read_only") {
-				const branchInfo = result.proposal?.branch ? ` in branch ${result.proposal.branch}` : "";
+				const branchInfo = result.proposal?.branch
+					? ` in branch ${result.proposal.branch}`
+					: "";
 				showTransientHelp(` {red-fg}Proposal is read-only${branchInfo}.{/}`);
 				return;
 			}
 			if (result.reason === "editor_failed") {
-				showTransientHelp(" {red-fg}Editor exited with an error; proposal was not modified.{/}");
+				showTransientHelp(
+					" {red-fg}Editor exited with an error; proposal was not modified.{/}",
+				);
 				return;
 			}
 			if (result.reason === "not_found") {
-				showTransientHelp(` {red-fg}Proposal ${selectedProposal.id} was not found on this branch.{/}`);
+				showTransientHelp(
+					` {red-fg}Proposal ${selectedProposal.id} was not found on this branch.{/}`,
+				);
 				return;
 			}
 
 			if (result.proposal) {
-				const index = allProposals.findIndex((proposalItem) => proposalItem.id === selectedProposal.id);
+				const index = allProposals.findIndex(
+					(proposalItem) => proposalItem.id === selectedProposal.id,
+				);
 				if (index >= 0) {
 					allProposals[index] = result.proposal;
 				}
-				const enhancedProposal = enrichProposal(result.proposal) ?? result.proposal;
+				const enhancedProposal =
+					enrichProposal(result.proposal) ?? result.proposal;
 				currentSelectedProposal = enhancedProposal;
 				options.onProposalChange?.(enhancedProposal);
 				if (proposalSearchIndex) {
@@ -1056,10 +1206,14 @@ export async function viewProposalEnhanced(
 
 			applyFilters();
 			if (result.changed) {
-				showTransientHelp(` {green-fg}Proposal ${result.proposal?.id ?? selectedProposal.id} marked modified.{/}`);
+				showTransientHelp(
+					` {green-fg}Proposal ${result.proposal?.id ?? selectedProposal.id} marked modified.{/}`,
+				);
 				return;
 			}
-			showTransientHelp(` {gray-fg}No changes detected for ${result.proposal?.id ?? selectedProposal.id}.{/}`);
+			showTransientHelp(
+				` {gray-fg}No changes detected for ${result.proposal?.id ?? selectedProposal.id}.{/}`,
+			);
 		} catch (_error) {
 			showTransientHelp(" {red-fg}Failed to open editor.{/}");
 		}
@@ -1100,7 +1254,11 @@ export async function viewProposalEnhanced(
 		}
 		if (currentFocus === "filters") {
 			filterHeader.setBorderColor("cyan");
-			const targetPane = resolveFilterExitPane(filterExitPane, Boolean(proposalList), Boolean(descriptionBox));
+			const targetPane = resolveFilterExitPane(
+				filterExitPane,
+				Boolean(proposalList),
+				Boolean(descriptionBox),
+			);
 			if (targetPane === "list" && proposalList) {
 				focusProposalList();
 			} else if (targetPane === "detail" && descriptionBox) {
@@ -1198,13 +1356,15 @@ function generateDetailContent(
 	const statusColor = getStatusColor(proposal.status);
 	const maturityColor = getMaturityColor((proposal as any).maturity);
 	const maturityIcon = getMaturityIcon((proposal as any).maturity);
-	
+
 	const headerContent = [
 		` {${maturityColor}-fg}${maturityIcon}{/}${statusColor ? `{${statusColor}-fg}` : ""}${formatStatusWithIcon(proposal.status)}{/} {bold}{blue-fg}${dvId}{/blue-fg}{/bold} - ${proposal.title}`,
 	];
 
 	// Add cross-branch indicator if proposal is from another branch
-	const isCrossBranch = Boolean((proposal as Proposal & { branch?: string }).branch);
+	const isCrossBranch = Boolean(
+		(proposal as Proposal & { branch?: string }).branch,
+	);
 	if (isCrossBranch) {
 		const branchName = (proposal as Proposal & { branch?: string }).branch;
 		headerContent.push(
@@ -1216,32 +1376,49 @@ function generateDetailContent(
 	bodyContent.push(formatHeading("Details", 2));
 
 	const metadata: string[] = [];
-	metadata.push(`{bold}Created:{/bold} ${formatDateForDisplay(proposal.createdDate)}`);
+	metadata.push(
+		`{bold}Created:{/bold} ${formatDateForDisplay(proposal.createdDate)}`,
+	);
 	if (proposal.updatedDate && proposal.updatedDate !== proposal.createdDate) {
-		metadata.push(`{bold}Updated:{/bold} ${formatDateForDisplay(proposal.updatedDate)}`);
+		metadata.push(
+			`{bold}Updated:{/bold} ${formatDateForDisplay(proposal.updatedDate)}`,
+		);
 	}
 	if (proposal.priority) {
 		const priorityDisplay = getPriorityDisplay(proposal.priority);
-		const priorityText = proposal.priority.charAt(0).toUpperCase() + proposal.priority.slice(1);
+		const priorityText =
+			proposal.priority.charAt(0).toUpperCase() + proposal.priority.slice(1);
 		metadata.push(`{bold}Priority:{/bold} ${priorityText}${priorityDisplay}`);
 	}
 	if ((proposal as any).maturity) {
-		const maturityText = (proposal as any).maturity.charAt(0).toUpperCase() + (proposal as any).maturity.slice(1);
-		metadata.push(`{bold}Maturity:{/bold} {${getMaturityColor((proposal as any).maturity)}-fg}${maturityText}{/}`);
+		const maturityText =
+			(proposal as any).maturity.charAt(0).toUpperCase() +
+			(proposal as any).maturity.slice(1);
+		metadata.push(
+			`{bold}Maturity:{/bold} {${getMaturityColor((proposal as any).maturity)}-fg}${maturityText}{/}`,
+		);
 	}
 	if (proposal.assignee?.length) {
-		const assigneeList = proposal.assignee.map((a) => (a.startsWith("@") ? a : `@${a}`)).join(", ");
+		const assigneeList = proposal.assignee
+			.map((a) => (a.startsWith("@") ? a : `@${a}`))
+			.join(", ");
 		metadata.push(`{bold}Assignee:{/bold} {cyan-fg}${assigneeList}{/}`);
 	}
 	if (proposal.labels?.length) {
-		metadata.push(`{bold}Labels:{/bold} ${proposal.labels.map((l) => `{yellow-fg}[${l}]{/}`).join(" ")}`);
+		metadata.push(
+			`{bold}Labels:{/bold} ${proposal.labels.map((l) => `{yellow-fg}[${l}]{/}`).join(" ")}`,
+		);
 	}
 	if (proposal.reporter) {
-		const reporterText = proposal.reporter.startsWith("@") ? proposal.reporter : `@${proposal.reporter}`;
+		const reporterText = proposal.reporter.startsWith("@")
+			? proposal.reporter
+			: `@${proposal.reporter}`;
 		metadata.push(`{bold}Reporter:{/bold} {cyan-fg}${reporterText}{/}`);
 	}
 	if (proposal.directive) {
-		const directiveLabel = resolveDirectiveLabel ? resolveDirectiveLabel(proposal.directive) : proposal.directive;
+		const directiveLabel = resolveDirectiveLabel
+			? resolveDirectiveLabel(proposal.directive)
+			: proposal.directive;
 		metadata.push(`{bold}Directive:{/bold} {magenta-fg}${directiveLabel}{/}`);
 	}
 	if (proposal.parentProposalId) {
@@ -1251,10 +1428,14 @@ function generateDetailContent(
 		metadata.push(`{bold}Parent:{/bold} {blue-fg}${parentLabel}{/}`);
 	}
 	if (proposal.subproposals?.length) {
-		metadata.push(`{bold}Subproposals:{/bold} ${proposal.subproposals.length} proposal${proposal.subproposals.length > 1 ? "s" : ""}`);
+		metadata.push(
+			`{bold}Subproposals:{/bold} ${proposal.subproposals.length} proposal${proposal.subproposals.length > 1 ? "s" : ""}`,
+		);
 	}
 	if (proposal.dependencies?.length) {
-		metadata.push(`{bold}Dependencies:{/bold} ${proposal.dependencies.join(", ")}`);
+		metadata.push(
+			`{bold}Dependencies:{/bold} ${proposal.dependencies.join(", ")}`,
+		);
 	}
 
 	bodyContent.push(metadata.join("\n"));
@@ -1379,7 +1560,10 @@ export async function createProposalPopup(
 
 	popup.setFront?.();
 
-	const { headerContent, bodyContent } = generateDetailContent(proposal, resolveDirectiveLabel);
+	const { headerContent, bodyContent } = generateDetailContent(
+		proposal,
+		resolveDirectiveLabel,
+	);
 
 	// Calculate header height based on content and available width
 	const popupWidth = typeof popup.width === "number" ? popup.width : 80;

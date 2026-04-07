@@ -1,5 +1,5 @@
-import { describe, test } from "node:test";
 import assert from "node:assert/strict";
+import { describe, test } from "node:test";
 import { parseCompletionContext } from "./helper.ts";
 
 describe("parseCompletionContext", () => {
@@ -39,14 +39,20 @@ describe("parseCompletionContext", () => {
 	});
 
 	test("parses partial argument", () => {
-		const context = parseCompletionContext("roadmap proposal edit proposal-", 23);
+		const context = parseCompletionContext(
+			"roadmap proposal edit proposal-",
+			23,
+		);
 		assert.equal(context.command, "proposal");
 		assert.equal(context.subcommand, "edit");
 		assert.equal(context.partial, "proposal-");
 	});
 
 	test("parses flag", () => {
-		const context = parseCompletionContext("roadmap proposal create --status ", 29);
+		const context = parseCompletionContext(
+			"roadmap proposal create --status ",
+			29,
+		);
 		assert.equal(context.command, "proposal");
 		assert.equal(context.subcommand, "create");
 		assert.equal(context.lastFlag, "--status");
@@ -54,7 +60,10 @@ describe("parseCompletionContext", () => {
 	});
 
 	test("parses partial flag value", () => {
-		const context = parseCompletionContext("roadmap proposal create --status In", 31);
+		const context = parseCompletionContext(
+			"roadmap proposal create --status In",
+			31,
+		);
 		assert.equal(context.command, "proposal");
 		assert.equal(context.subcommand, "create");
 		assert.equal(context.lastFlag, "--status");
@@ -62,7 +71,10 @@ describe("parseCompletionContext", () => {
 	});
 
 	test("handles quoted strings", () => {
-		const context = parseCompletionContext('roadmap proposal create "test proposal" --status ', 41);
+		const context = parseCompletionContext(
+			'roadmap proposal create "test proposal" --status ',
+			41,
+		);
 		assert.equal(context.command, "proposal");
 		assert.equal(context.subcommand, "create");
 		assert.equal(context.lastFlag, "--status");
@@ -70,7 +82,10 @@ describe("parseCompletionContext", () => {
 	});
 
 	test("handles multiple flags", () => {
-		const context = parseCompletionContext("roadmap proposal create --priority high --status ", 46);
+		const context = parseCompletionContext(
+			"roadmap proposal create --priority high --status ",
+			46,
+		);
 		assert.equal(context.command, "proposal");
 		assert.equal(context.subcommand, "create");
 		assert.equal(context.lastFlag, "--status");
@@ -93,14 +108,20 @@ describe("parseCompletionContext", () => {
 	});
 
 	test("counts argument position correctly", () => {
-		const context = parseCompletionContext("roadmap proposal edit proposal-1 ", 25);
+		const context = parseCompletionContext(
+			"roadmap proposal edit proposal-1 ",
+			25,
+		);
 		assert.equal(context.command, "proposal");
 		assert.equal(context.subcommand, "edit");
 		assert.equal(context.argPosition, 1);
 	});
 
 	test("does not count flag values as arguments", () => {
-		const context = parseCompletionContext("roadmap proposal create --status Reached ", 34);
+		const context = parseCompletionContext(
+			"roadmap proposal create --status Reached ",
+			34,
+		);
 		assert.equal(context.command, "proposal");
 		assert.equal(context.subcommand, "create");
 		assert.equal(context.argPosition, 0);

@@ -1,8 +1,12 @@
 import assert from "node:assert";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { mkdir, rm, readFile } from "node:fs/promises";
 import { Core } from "../../src/core/roadmap.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 let TEST_DIR: string;
 
@@ -37,11 +41,17 @@ describe("Proposal Documentation", () => {
 				documentation: ["https://docs.example.com/api", "docs/architecture.md"],
 			});
 
-			assert.deepStrictEqual(proposal.documentation, ["https://docs.example.com/api", "docs/architecture.md"]);
+			assert.deepStrictEqual(proposal.documentation, [
+				"https://docs.example.com/api",
+				"docs/architecture.md",
+			]);
 
 			// Verify persistence
 			const loaded = await core.loadProposalById(proposal.id);
-			assert.deepStrictEqual(loaded?.documentation, ["https://docs.example.com/api", "docs/architecture.md"]);
+			assert.deepStrictEqual(loaded?.documentation, [
+				"https://docs.example.com/api",
+				"docs/architecture.md",
+			]);
 		});
 
 		it("should create a proposal without documentation", async () => {
@@ -72,7 +82,10 @@ describe("Proposal Documentation", () => {
 				documentation: ["https://design-docs.example.com", "README.md"],
 			});
 
-			assert.deepStrictEqual(updated.documentation, ["https://design-docs.example.com", "README.md"]);
+			assert.deepStrictEqual(updated.documentation, [
+				"https://design-docs.example.com",
+				"README.md",
+			]);
 		});
 
 		it("should add documentation to existing proposal", async () => {
@@ -85,7 +98,11 @@ describe("Proposal Documentation", () => {
 				addDocumentation: ["doc2.md", "doc3.md"],
 			});
 
-			assert.deepStrictEqual(updated.documentation, ["doc1.md", "doc2.md", "doc3.md"]);
+			assert.deepStrictEqual(updated.documentation, [
+				"doc1.md",
+				"doc2.md",
+				"doc3.md",
+			]);
 		});
 
 		it("should not add duplicate documentation", async () => {
@@ -98,7 +115,11 @@ describe("Proposal Documentation", () => {
 				addDocumentation: ["doc2.md", "doc3.md"],
 			});
 
-			assert.deepStrictEqual(updated.documentation, ["doc1.md", "doc2.md", "doc3.md"]);
+			assert.deepStrictEqual(updated.documentation, [
+				"doc1.md",
+				"doc2.md",
+				"doc3.md",
+			]);
 		});
 
 		it("should remove documentation from existing proposal", async () => {

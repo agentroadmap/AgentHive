@@ -1,12 +1,12 @@
-import { describe, test } from "node:test";
 import assert from "node:assert/strict";
+import { describe, test } from "node:test";
 import {
-	type NegotiationIntent,
 	decodeIntent,
 	encodeIntent,
 	extractHumanText,
 	formatIntent,
 	INTENT_PREFIX,
+	type NegotiationIntent,
 } from "../../src/types/intents.ts";
 
 describe("Negotiation Intents", () => {
@@ -20,9 +20,18 @@ describe("Negotiation Intents", () => {
 		};
 
 		const encoded = encodeIntent(intent);
-		assert.ok(encoded.startsWith(INTENT_PREFIX), "should start with intent prefix");
-		assert.ok(encoded.includes('"type":"claim_request"'), "should contain type");
-		assert.ok(encoded.includes('"proposalId":"proposal-9"'), "should contain proposalId");
+		assert.ok(
+			encoded.startsWith(INTENT_PREFIX),
+			"should start with intent prefix",
+		);
+		assert.ok(
+			encoded.includes('"type":"claim_request"'),
+			"should contain type",
+		);
+		assert.ok(
+			encoded.includes('"proposalId":"proposal-9"'),
+			"should contain proposalId",
+		);
 		assert.ok(encoded.includes('"from":"Opus"'), "should contain from");
 		assert.ok(encoded.includes('"to":"Gemini"'), "should contain to");
 	});

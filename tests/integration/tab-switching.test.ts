@@ -1,10 +1,13 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
-import { createUniqueTestDir, safeCleanup, execSync,
+import {
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 let TEST_DIR: string;
@@ -98,8 +101,17 @@ Test proposal for tab switching.`,
 					initialView: "kanban" as const,
 					proposals,
 					preloadedKanbanData: {
-						proposals: proposals.map((t) => ({ ...t, origin: "local" as const })),
-						statuses: ["Potential", "Active", "Accepted", "Complete", "Abandoned"],
+						proposals: proposals.map((t) => ({
+							...t,
+							origin: "local" as const,
+						})),
+						statuses: [
+							"Potential",
+							"Active",
+							"Accepted",
+							"Complete",
+							"Abandoned",
+						],
 					},
 				};
 

@@ -1,8 +1,8 @@
 import assert from "node:assert";
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
-import { createUniqueTestDir, safeCleanup } from "../support/test-utils.ts";
 import { formatLocalDateTime } from "../../src/utils/date-time.ts";
+import { createUniqueTestDir, safeCleanup } from "../support/test-utils.ts";
 
 describe("Proposal Claiming", () => {
 	let projectRoot: string;
@@ -19,8 +19,12 @@ describe("Proposal Claiming", () => {
 	});
 
 	it("should claim a proposal", async () => {
-		const { proposal } = await core.createProposalFromInput({ title: "Test Proposal" });
-		const claimed = await core.claimProposal(proposal.id, "@agent-1", { durationMinutes: 30 });
+		const { proposal } = await core.createProposalFromInput({
+			title: "Test Proposal",
+		});
+		const claimed = await core.claimProposal(proposal.id, "@agent-1", {
+			durationMinutes: 30,
+		});
 
 		assert.strictEqual(claimed.claim?.agent, "@agent-1");
 		assert.ok(claimed.claim.expires);
@@ -32,11 +36,15 @@ describe("Proposal Claiming", () => {
 	});
 
 	it("should not allow claiming an already claimed proposal by another agent", async () => {
-		const { proposal } = await core.createProposalFromInput({ title: "Test Proposal" });
+		const { proposal } = await core.createProposalFromInput({
+			title: "Test Proposal",
+		});
 		await core.claimProposal(proposal.id, "@agent-1", { durationMinutes: 30 });
 
 		try {
-			await core.claimProposal(proposal.id, "@agent-2", { durationMinutes: 30 });
+			await core.claimProposal(proposal.id, "@agent-2", {
+				durationMinutes: 30,
+			});
 			assert.fail("Should have thrown error");
 		} catch (err) {
 			assert.ok((err as Error).message.includes("already claimed by @agent-1"));
@@ -44,16 +52,23 @@ describe("Proposal Claiming", () => {
 	});
 
 	it("should allow claiming if force is used", async () => {
-		const { proposal } = await core.createProposalFromInput({ title: "Test Proposal" });
+		const { proposal } = await core.createProposalFromInput({
+			title: "Test Proposal",
+		});
 		await core.claimProposal(proposal.id, "@agent-1", { durationMinutes: 30 });
 
-		const claimed = await core.claimProposal(proposal.id, "@agent-2", { durationMinutes: 30, force: true });
+		const claimed = await core.claimProposal(proposal.id, "@agent-2", {
+			durationMinutes: 30,
+			force: true,
+		});
 		assert.strictEqual(claimed.claim?.agent, "@agent-2");
 	});
 
 	it("should allow claiming if previous claim expired", async () => {
-		const { proposal } = await core.createProposalFromInput({ title: "Test Proposal" });
-		
+		const { proposal } = await core.createProposalFromInput({
+			title: "Test Proposal",
+		});
+
 		// Manually create an expired claim
 		const past = new Date(Date.now() - 3600000); // 1 hour ago
 		const claim = {
@@ -63,14 +78,18 @@ describe("Proposal Claiming", () => {
 		};
 		await core.updateProposalFromInput(proposal.id, { claim });
 
-		const claimed = await core.claimProposal(proposal.id, "@agent-2", { durationMinutes: 30 });
+		const claimed = await core.claimProposal(proposal.id, "@agent-2", {
+			durationMinutes: 30,
+		});
 		assert.strictEqual(claimed.claim?.agent, "@agent-2");
 	});
 
 	it("should release a claim", async () => {
-		const { proposal } = await core.createProposalFromInput({ title: "Test Proposal" });
+		const { proposal } = await core.createProposalFromInput({
+			title: "Test Proposal",
+		});
 		await core.claimProposal(proposal.id, "@agent-1", { durationMinutes: 30 });
-		
+
 		const released = await core.releaseClaim(proposal.id, "@agent-1");
 		assert.strictEqual(released.claim, undefined);
 
@@ -79,28 +98,41 @@ describe("Proposal Claiming", () => {
 	});
 
 	it("should renew a claim", async () => {
-		const { proposal } = await core.createProposalFromInput({ title: "Test Proposal" });
-		const claimed = await core.claimProposal(proposal.id, "@agent-1", { durationMinutes: 30 });
+		const { proposal } = await core.createProposalFromInput({
+			title: "Test Proposal",
+		});
+		const claimed = await core.claimProposal(proposal.id, "@agent-1", {
+			durationMinutes: 30,
+		});
 		const originalExpires = claimed.claim?.expires;
 
 		// Renew extends from NOW
-		const renewed = await core.renewClaim(proposal.id, "@agent-1", { durationMinutes: 60 });
+		const renewed = await core.renewClaim(proposal.id, "@agent-1", {
+			durationMinutes: 60,
+		});
 		assert.strictEqual(renewed.claim?.agent, "@agent-1");
 		assert.notStrictEqual(renewed.claim?.expires, originalExpires);
 	});
 
-    it("should consider claimed proposals as not ready for pickup", async () => {
-        const { proposal } = await core.createProposalFromInput({ title: "Test Proposal", status: "Potential" });
-        
-        // Initially ready
-        const readyProposalsBefore = await core.queryProposals({ filters: { ready: true } });
-        assert.ok(readyProposalsBefore.some(s => s.id === proposal.id));
+	it("should consider claimed proposals as not ready for pickup", async () => {
+		const { proposal } = await core.createProposalFromInput({
+			title: "Test Proposal",
+			status: "Potential",
+		});
 
-        // Claim it
-        await core.claimProposal(proposal.id, "@agent-1", { durationMinutes: 30 });
+		// Initially ready
+		const readyProposalsBefore = await core.queryProposals({
+			filters: { ready: true },
+		});
+		assert.ok(readyProposalsBefore.some((s) => s.id === proposal.id));
 
-        // Now not ready
-        const readyProposalsAfter = await core.queryProposals({ filters: { ready: true } });
-        assert.ok(!readyProposalsAfter.some(s => s.id === proposal.id));
-    });
+		// Claim it
+		await core.claimProposal(proposal.id, "@agent-1", { durationMinutes: 30 });
+
+		// Now not ready
+		const readyProposalsAfter = await core.queryProposals({
+			filters: { ready: true },
+		});
+		assert.ok(!readyProposalsAfter.some((s) => s.id === proposal.id));
+	});
 });

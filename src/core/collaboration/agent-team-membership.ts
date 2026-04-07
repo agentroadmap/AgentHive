@@ -11,24 +11,23 @@
  * AC#4: Agents can query their team memberships across all proposals
  */
 
-import { randomUUID } from "node:crypto";
-import type { Team, TeamMember, TeamRole } from "./dynamic-team-builder.ts";
+import type { Team, TeamRole } from "./dynamic-team-builder.ts";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
 /** Agent's membership status in a team */
 export type MembershipStatus =
-	| "active"     // Currently participating
-	| "inactive"   // Temporarily not participating
-	| "retired"    // Left or removed
-	| "pending";   // Waiting to join
+	| "active" // Currently participating
+	| "inactive" // Temporarily not participating
+	| "retired" // Left or removed
+	| "pending"; // Waiting to join
 
 /** Agent's availability status */
 export type AgentAvailability =
-	| "available"   // Can take new work
-	| "busy"        // At capacity
+	| "available" // Can take new work
+	| "busy" // At capacity
 	| "unavailable" // Offline or out of office
-	| "degraded";   // Reduced capacity
+	| "degraded"; // Reduced capacity
 
 /** Team discovery result */
 export interface TeamDiscovery {
@@ -142,7 +141,12 @@ export interface MembershipEvent {
 	eventId: string;
 	agentId: string;
 	teamId: string;
-	event: "joined" | "left" | "status-changed" | "role-changed" | "capacity-changed";
+	event:
+		| "joined"
+		| "left"
+		| "status-changed"
+		| "role-changed"
+		| "capacity-changed";
 	timestamp: string;
 	metadata?: Record<string, unknown>;
 }
@@ -151,7 +155,7 @@ export interface MembershipEvent {
 
 const DEFAULT_MAX_TEAMS_PER_AGENT = 10;
 const DEFAULT_CAPACITY_PER_TEAM = 25; // 4 teams = 100%
-const ACTIVITY_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+const _ACTIVITY_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
 // ─── Agent Team Membership Manager ──────────────────────────────────────
 
@@ -166,7 +170,8 @@ export class AgentTeamMembership {
 	private maxTeamsPerAgent: number;
 
 	constructor(options?: { maxTeamsPerAgent?: number }) {
-		this.maxTeamsPerAgent = options?.maxTeamsPerAgent ?? DEFAULT_MAX_TEAMS_PER_AGENT;
+		this.maxTeamsPerAgent =
+			options?.maxTeamsPerAgent ?? DEFAULT_MAX_TEAMS_PER_AGENT;
 	}
 
 	// ─── AC#1: Discover Teams for a Given Proposal ────────────────────
@@ -200,7 +205,12 @@ export class AgentTeamMembership {
 			const capacityUtilization = team.capacity / 100;
 
 			// Determine reason for suggestion
-			const reason = this.determineSuggestionReason(agent, team, relevance, availableRoles);
+			const reason = this.determineSuggestionReason(
+				agent,
+				team,
+				relevance,
+				availableRoles,
+			);
 
 			discoveries.push({
 				team,
@@ -283,7 +293,9 @@ export class AgentTeamMembership {
 		// Check if already a member
 		const existing = this.getMembership(agentId, teamId);
 		if (existing && existing.status !== "retired") {
-			throw new Error(`${agentId} is already a member of team ${teamId} with status ${existing.status}`);
+			throw new Error(
+				`${agentId} is already a member of team ${teamId} with status ${existing.status}`,
+			);
 		}
 
 		// Check capacity
@@ -348,15 +360,13 @@ export class AgentTeamMembership {
 	/**
 	 * Leave a team.
 	 */
-	leaveTeam(
-		agentId: string,
-		teamId: string,
-		reason?: string,
-	): AgentMembership {
+	leaveTeam(agentId: string, teamId: string, reason?: string): AgentMembership {
 		// Find any membership including retired ones
 		const membership = this.findMembershipIncludingRetired(agentId, teamId);
-		if (!membership) throw new Error(`${agentId} is not a member of team ${teamId}`);
-		if (membership.status === "retired") throw new Error(`${agentId} has already left team ${teamId}`);
+		if (!membership)
+			throw new Error(`${agentId} is not a member of team ${teamId}`);
+		if (membership.status === "retired")
+			throw new Error(`${agentId} has already left team ${teamId}`);
 
 		membership.status = "retired";
 		membership.lastStatusChange = new Date().toISOString();
@@ -366,7 +376,10 @@ export class AgentTeamMembership {
 		// Update agent's used capacity
 		const agent = this.agents.get(agentId);
 		if (agent) {
-			agent.usedCapacity = Math.max(0, agent.usedCapacity - membership.capacity);
+			agent.usedCapacity = Math.max(
+				0,
+				agent.usedCapacity - membership.capacity,
+			);
 			agent.activeTeamCount = Math.max(0, agent.activeTeamCount - 1);
 		}
 
@@ -383,10 +396,16 @@ export class AgentTeamMembership {
 		if (!membership) {
 			// Check if the agent has left (retired) the team
 			const retired = this.findMembershipIncludingRetired(agentId, teamId);
-			if (retired) throw new Error(`Cannot set inactive: ${agentId} has left team ${teamId}`);
+			if (retired)
+				throw new Error(
+					`Cannot set inactive: ${agentId} has left team ${teamId}`,
+				);
 			throw new Error(`${agentId} is not a member of team ${teamId}`);
 		}
-		if (membership.status !== "active") throw new Error(`Cannot set inactive: current status is ${membership.status}`);
+		if (membership.status !== "active")
+			throw new Error(
+				`Cannot set inactive: current status is ${membership.status}`,
+			);
 
 		membership.status = "inactive";
 		membership.lastStatusChange = new Date().toISOString();
@@ -394,11 +413,17 @@ export class AgentTeamMembership {
 		// Free up capacity temporarily
 		const agent = this.agents.get(agentId);
 		if (agent) {
-			agent.usedCapacity = Math.max(0, agent.usedCapacity - membership.capacity);
+			agent.usedCapacity = Math.max(
+				0,
+				agent.usedCapacity - membership.capacity,
+			);
 			agent.activeTeamCount = Math.max(0, agent.activeTeamCount - 1);
 		}
 
-		this.recordEvent(agentId, teamId, "status-changed", { from: "active", to: "inactive" });
+		this.recordEvent(agentId, teamId, "status-changed", {
+			from: "active",
+			to: "inactive",
+		});
 
 		return membership;
 	}
@@ -408,8 +433,12 @@ export class AgentTeamMembership {
 	 */
 	setActive(agentId: string, teamId: string): AgentMembership {
 		const membership = this.findMembership(agentId, teamId);
-		if (!membership) throw new Error(`${agentId} is not a member of team ${teamId}`);
-		if (membership.status !== "inactive") throw new Error(`Cannot set active: current status is ${membership.status}`);
+		if (!membership)
+			throw new Error(`${agentId} is not a member of team ${teamId}`);
+		if (membership.status !== "inactive")
+			throw new Error(
+				`Cannot set active: current status is ${membership.status}`,
+			);
 
 		// Check capacity
 		const agent = this.agents.get(agentId);
@@ -427,7 +456,10 @@ export class AgentTeamMembership {
 		membership.status = "active";
 		membership.lastStatusChange = new Date().toISOString();
 
-		this.recordEvent(agentId, teamId, "status-changed", { from: "inactive", to: "active" });
+		this.recordEvent(agentId, teamId, "status-changed", {
+			from: "inactive",
+			to: "active",
+		});
 
 		return membership;
 	}
@@ -441,7 +473,8 @@ export class AgentTeamMembership {
 		newCapacity: number,
 	): AgentMembership {
 		const membership = this.findMembership(agentId, teamId);
-		if (!membership) throw new Error(`${agentId} is not a member of team ${teamId}`);
+		if (!membership)
+			throw new Error(`${agentId} is not a member of team ${teamId}`);
 
 		const agent = this.agents.get(agentId);
 		if (agent) {
@@ -489,10 +522,14 @@ export class AgentTeamMembership {
 		let results = Array.from(this.memberships.values());
 
 		if (filter) {
-			if (filter.agentId) results = results.filter((m) => m.agentId === filter.agentId);
-			if (filter.teamId) results = results.filter((m) => m.teamId === filter.teamId);
-			if (filter.proposalId) results = results.filter((m) => m.proposalId === filter.proposalId);
-			if (filter.status) results = results.filter((m) => m.status === filter.status);
+			if (filter.agentId)
+				results = results.filter((m) => m.agentId === filter.agentId);
+			if (filter.teamId)
+				results = results.filter((m) => m.teamId === filter.teamId);
+			if (filter.proposalId)
+				results = results.filter((m) => m.proposalId === filter.proposalId);
+			if (filter.status)
+				results = results.filter((m) => m.status === filter.status);
 			if (filter.role) results = results.filter((m) => m.role === filter.role);
 		}
 
@@ -520,7 +557,12 @@ export class AgentTeamMembership {
 		}
 
 		// Find missing roles
-		const allRoles: TeamRole[] = ["owner", "contributor", "advisor", "observer"];
+		const allRoles: TeamRole[] = [
+			"owner",
+			"contributor",
+			"advisor",
+			"observer",
+		];
 		const missingRoles = allRoles.filter((r) => !(roles[r] > 0));
 
 		return {
@@ -529,7 +571,8 @@ export class AgentTeamMembership {
 			activeCount,
 			totalCount: teamMembers.length,
 			roles: roles as Record<TeamRole, number>,
-			avgCapacity: teamMembers.length > 0 ? totalCapacity / teamMembers.length : 0,
+			avgCapacity:
+				teamMembers.length > 0 ? totalCapacity / teamMembers.length : 0,
 			missingRoles,
 			capacityAvailable: 100 - totalCapacity,
 		};
@@ -544,7 +587,8 @@ export class AgentTeamMembership {
 		updates: Partial<ContributionMetrics>,
 	): AgentMembership {
 		const membership = this.findMembership(agentId, teamId);
-		if (!membership) throw new Error(`${agentId} is not a member of team ${teamId}`);
+		if (!membership)
+			throw new Error(`${agentId} is not a member of team ${teamId}`);
 
 		Object.assign(membership.contributions, updates, {
 			lastUpdated: new Date().toISOString(),
@@ -556,10 +600,7 @@ export class AgentTeamMembership {
 	/**
 	 * Get membership history events.
 	 */
-	getMembershipHistory(
-		agentId?: string,
-		teamId?: string,
-	): MembershipEvent[] {
+	getMembershipHistory(agentId?: string, teamId?: string): MembershipEvent[] {
 		let results = [...this.events];
 
 		if (agentId) results = results.filter((e) => e.agentId === agentId);
@@ -583,7 +624,9 @@ export class AgentTeamMembership {
 	 * Get only active team memberships for an agent.
 	 */
 	getAgentActiveMemberships(agentId: string): AgentMembership[] {
-		return this.getAgentMemberships(agentId).filter((m) => m.status === "active");
+		return this.getAgentMemberships(agentId).filter(
+			(m) => m.status === "active",
+		);
 	}
 
 	/**
@@ -613,7 +656,8 @@ export class AgentTeamMembership {
 			activeTeams: activeMemberships.length,
 			totalCapacityUsed: agent?.usedCapacity ?? 0,
 			maxCapacity: agent?.maxCapacity ?? 100,
-			availableCapacity: (agent?.maxCapacity ?? 100) - (agent?.usedCapacity ?? 0),
+			availableCapacity:
+				(agent?.maxCapacity ?? 100) - (agent?.usedCapacity ?? 0),
 			teams: activeMemberships.map((m) => ({
 				teamId: m.teamId,
 				proposalId: m.proposalId,
@@ -667,42 +711,52 @@ export class AgentTeamMembership {
 		return {
 			totalMemberships: allMemberships.length,
 			activeMemberships: active.length,
-			inactiveMemberships: allMemberships.filter((m) => m.status === "inactive").length,
-			retiredMemberships: allMemberships.filter((m) => m.status === "retired").length,
+			inactiveMemberships: allMemberships.filter((m) => m.status === "inactive")
+				.length,
+			retiredMemberships: allMemberships.filter((m) => m.status === "retired")
+				.length,
 			totalAgents: uniqueAgents.size,
 			totalTeams: uniqueTeams.size,
-			avgTeamsPerAgent: uniqueAgents.size > 0 ? active.length / uniqueAgents.size : 0,
-			avgMembersPerTeam: uniqueTeams.size > 0 ? active.length / uniqueTeams.size : 0,
+			avgTeamsPerAgent:
+				uniqueAgents.size > 0 ? active.length / uniqueAgents.size : 0,
+			avgMembersPerTeam:
+				uniqueTeams.size > 0 ? active.length / uniqueTeams.size : 0,
 		};
 	}
 
 	/**
 	 * Find agents with available capacity.
 	 */
-	findAvailableAgents(
-		options?: {
-			requiredSkills?: string[];
-			minCapacity?: number;
-			maxTeams?: number;
-		},
-	): AgentProfile[] {
+	findAvailableAgents(options?: {
+		requiredSkills?: string[];
+		minCapacity?: number;
+		maxTeams?: number;
+	}): AgentProfile[] {
 		const results: AgentProfile[] = [];
 
 		for (const agent of this.agents.values()) {
 			// Check availability
-			if (agent.availability !== "available" && agent.availability !== "degraded") continue;
+			if (
+				agent.availability !== "available" &&
+				agent.availability !== "degraded"
+			)
+				continue;
 
 			// Check capacity
 			const availableCapacity = agent.maxCapacity - agent.usedCapacity;
-			if (options?.minCapacity && availableCapacity < options.minCapacity) continue;
+			if (options?.minCapacity && availableCapacity < options.minCapacity)
+				continue;
 
 			// Check max teams
-			if (options?.maxTeams && agent.activeTeamCount >= options.maxTeams) continue;
+			if (options?.maxTeams && agent.activeTeamCount >= options.maxTeams)
+				continue;
 
 			// Check skills
 			if (options?.requiredSkills) {
 				const hasSkills = options.requiredSkills.every((skill) =>
-					agent.skills.some((s) => s.toLowerCase().includes(skill.toLowerCase())),
+					agent.skills.some((s) =>
+						s.toLowerCase().includes(skill.toLowerCase()),
+					),
 				);
 				if (!hasSkills) continue;
 			}
@@ -715,13 +769,20 @@ export class AgentTeamMembership {
 
 	// ─── Internal Methods ───────────────────────────────────────────
 
-	private findMembership(agentId: string, teamId: string): AgentMembership | undefined {
+	private findMembership(
+		agentId: string,
+		teamId: string,
+	): AgentMembership | undefined {
 		return Array.from(this.memberships.values()).find(
-			(m) => m.agentId === agentId && m.teamId === teamId && m.status !== "retired",
+			(m) =>
+				m.agentId === agentId && m.teamId === teamId && m.status !== "retired",
 		);
 	}
 
-	private findMembershipIncludingRetired(agentId: string, teamId: string): AgentMembership | undefined {
+	private findMembershipIncludingRetired(
+		agentId: string,
+		teamId: string,
+	): AgentMembership | undefined {
 		return Array.from(this.memberships.values()).find(
 			(m) => m.agentId === agentId && m.teamId === teamId,
 		);
@@ -746,7 +807,8 @@ export class AgentTeamMembership {
 			const matchingSkills = (skills || agent.skills).filter((s) =>
 				teamSkills.some((ts) => ts.toLowerCase().includes(s.toLowerCase())),
 			);
-			const skillMatch = matchingSkills.length / Math.max((skills || agent.skills).length, 1);
+			const skillMatch =
+				matchingSkills.length / Math.max((skills || agent.skills).length, 1);
 			score += skillMatch * 0.3;
 		}
 
@@ -763,24 +825,30 @@ export class AgentTeamMembership {
 
 	private getAvailableRoles(team: Team): TeamRole[] {
 		const presentRoles = new Set(team.members.map((m) => m.role));
-		const allRoles: TeamRole[] = ["owner", "contributor", "advisor", "observer"];
+		const allRoles: TeamRole[] = [
+			"owner",
+			"contributor",
+			"advisor",
+			"observer",
+		];
 		return allRoles.filter((r) => !presentRoles.has(r));
 	}
 
 	private determineSuggestionReason(
 		agent: AgentProfile | undefined,
-		team: Team,
+		_team: Team,
 		relevance: number,
 		availableRoles: TeamRole[],
 	): string {
 		if (!agent) return "New agent available for team";
-		if (availableRoles.includes("contributor")) return "Team needs contributors";
+		if (availableRoles.includes("contributor"))
+			return "Team needs contributors";
 		if (relevance > 0.7) return "High skill and capacity match";
 		if (agent.activeTeamCount < 2) return "Agent has available capacity";
 		return "Potential match based on skills";
 	}
 
-	private determineRole(team: Team, agentId: string): TeamRole {
+	private determineRole(team: Team, _agentId: string): TeamRole {
 		// Check if team has an owner
 		const hasOwner = team.members.some((m) => m.role === "owner");
 		if (!hasOwner) return "owner";

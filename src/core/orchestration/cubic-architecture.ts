@@ -66,27 +66,9 @@ export const DEFAULT_PHASE_CAPABILITIES: Record<CubicPhase, string[]> = {
 		"diagram",
 		"review-specs",
 	],
-	[CubicPhase.Build]: [
-		"code",
-		"edit",
-		"refactor",
-		"implement",
-		"create-files",
-	],
-	[CubicPhase.Test]: [
-		"test",
-		"lint",
-		"benchmark",
-		"validate",
-		"run-tests",
-	],
-	[CubicPhase.Ship]: [
-		"deploy",
-		"release",
-		"tag",
-		"publish",
-		"notify",
-	],
+	[CubicPhase.Build]: ["code", "edit", "refactor", "implement", "create-files"],
+	[CubicPhase.Test]: ["test", "lint", "benchmark", "validate", "run-tests"],
+	[CubicPhase.Ship]: ["deploy", "release", "tag", "publish", "notify"],
 };
 
 // ──────────────────────────────────────────
@@ -122,7 +104,10 @@ export interface CubicAgent {
 }
 
 /** Returns true if the agent has the given skill active in its current phase */
-export function agentHasCapability(agent: CubicAgent, capability: string): boolean {
+export function agentHasCapability(
+	agent: CubicAgent,
+	capability: string,
+): boolean {
 	return agent.skills.some(
 		(s) => s.skillId === capability && s.activePhases.includes(agent.phase),
 	);
@@ -176,8 +161,8 @@ export interface CubicHealth {
 export class CubicSandbox {
 	private config: CubicConfig;
 	private agents: Map<string, CubicAgent> = new Map();
+	private readonly createdAt: number;
 	private lastHeartbeat: number;
-	private createdAt: number;
 
 	constructor(config: CubicConfig) {
 		this.config = config;
@@ -198,6 +183,11 @@ export class CubicSandbox {
 	/** Get cubic ID */
 	getId(): string {
 		return this.config.cubicId;
+	}
+
+	/** Get cubic creation time */
+	getCreatedAt(): number {
+		return this.createdAt;
 	}
 
 	// ──────────────────────────────────────────
@@ -300,25 +290,36 @@ export class CubicSandbox {
 	 * Validate a handoff payload for correctness.
 	 * Checks: source matches current phase, target is next phase, agent is in this cubic.
 	 */
-	validateHandoff(payload: HandoffPayload): { valid: boolean; errors: string[] } {
+	validateHandoff(payload: HandoffPayload): {
+		valid: boolean;
+		errors: string[];
+	} {
 		const errors: string[] = [];
 
 		if (payload.fromPhase !== this.config.phase) {
-			errors.push(`Handoff from '${payload.fromPhase}' doesn't match cubic phase '${this.config.phase}'`);
+			errors.push(
+				`Handoff from '${payload.fromPhase}' doesn't match cubic phase '${this.config.phase}'`,
+			);
 		}
 
 		const expectedNext = nextPhase(this.config.phase);
 		if (!expectedNext || payload.toPhase !== expectedNext) {
-			errors.push(`Invalid handoff target '${payload.toPhase}'. Expected next phase after '${this.config.phase}'`);
+			errors.push(
+				`Invalid handoff target '${payload.toPhase}'. Expected next phase after '${this.config.phase}'`,
+			);
 		}
 
 		if (!this.config.canHandoff) {
-			errors.push(`Cubic '${this.config.cubicId}' is not allowed to hand off (canHandoff=false)`);
+			errors.push(
+				`Cubic '${this.config.cubicId}' is not allowed to hand off (canHandoff=false)`,
+			);
 		}
 
 		const agent = this.agents.get(payload.initiatorAgentId);
 		if (!agent) {
-			errors.push(`Agent '${payload.initiatorAgentId}' not found in cubic '${this.config.cubicId}'`);
+			errors.push(
+				`Agent '${payload.initiatorAgentId}' not found in cubic '${this.config.cubicId}'`,
+			);
 		}
 
 		return { valid: errors.length === 0, errors };
@@ -328,7 +329,10 @@ export class CubicSandbox {
 	 * Execute a handoff, marking the initiating agent as in handoff proposal.
 	 * Returns the validated payload if successful, or errors.
 	 */
-	executeHandoff(payload: HandoffPayload): { success: boolean; errors?: string[] } {
+	executeHandoff(payload: HandoffPayload): {
+		success: boolean;
+		errors?: string[];
+	} {
 		const validation = this.validateHandoff(payload);
 		if (!validation.valid) {
 			return { success: false, errors: validation.errors };
@@ -358,7 +362,10 @@ export class CubicSandbox {
 // ──────────────────────────────────────────
 
 /** Create a default cubic configuration for a given phase */
-export function createDefaultCubicConfig(phase: CubicPhase, cubicId?: string): CubicConfig {
+export function createDefaultCubicConfig(
+	phase: CubicPhase,
+	cubicId?: string,
+): CubicConfig {
 	return {
 		cubicId: cubicId || `cubic-${phase}-${Date.now()}`,
 		phase,

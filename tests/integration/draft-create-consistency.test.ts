@@ -1,10 +1,13 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync,
+import {
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 let TEST_DIR: string;
@@ -37,8 +40,14 @@ describe("Draft creation consistency", () => {
 	});
 
 	it("keeps IDs and filenames consistent between draft create and proposal create --draft", async () => {
-		const first = execSync(`node --experimental-strip-types ${CLI_PATH} draft create "Hallo"`, { cwd: TEST_DIR });
-		const second = execSync(`node --experimental-strip-types ${CLI_PATH} proposal create --draft "Goodbye"`, { cwd: TEST_DIR });
+		const first = execSync(
+			`node --experimental-strip-types ${CLI_PATH} draft create "Hallo"`,
+			{ cwd: TEST_DIR },
+		);
+		const second = execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal create --draft "Goodbye"`,
+			{ cwd: TEST_DIR },
+		);
 
 		expect(first.combined).toContain("Created draft draft-1");
 		expect(second.combined).toContain("Created draft draft-2");
@@ -48,7 +57,9 @@ describe("Draft creation consistency", () => {
 		const draftFiles = await readdir(join(TEST_DIR, "roadmap", "drafts"));
 		assert.ok(draftFiles.includes("draft-1 - Hallo.md"));
 		assert.ok(draftFiles.includes("draft-2 - Goodbye.md"));
-		expect(draftFiles.some((file) => file.startsWith("draft-proposal-"))).toBe(false);
+		expect(draftFiles.some((file) => file.startsWith("draft-proposal-"))).toBe(
+			false,
+		);
 
 		const core = new Core(TEST_DIR);
 		const secondDraft = await core.filesystem.loadDraft("draft-2");
@@ -57,7 +68,10 @@ describe("Draft creation consistency", () => {
 	});
 
 	it("uses DRAFT IDs in plain output for proposal create --draft", async () => {
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal create --draft "Plain sample" --plain`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal create --draft "Plain sample" --plain`,
+			{ cwd: TEST_DIR },
+		);
 		const output = result.stdout.toString();
 
 		assert.ok(output.includes("draft-1 - Plain-sample.md"));

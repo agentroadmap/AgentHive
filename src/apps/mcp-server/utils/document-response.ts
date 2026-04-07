@@ -8,7 +8,10 @@ function formatTags(tags?: string[]): string {
 	return `Tags: ${tags.join(", ")}`;
 }
 
-function buildDocumentText(document: Document, options?: { includeContent?: boolean }): string {
+function buildDocumentText(
+	document: Document,
+	options?: { includeContent?: boolean },
+): string {
 	const lines: string[] = [
 		`Document ${document.id} - ${document.title}`,
 		`Type: ${document.type}`,
@@ -23,7 +26,11 @@ function buildDocumentText(document: Document, options?: { includeContent?: bool
 
 	if (options?.includeContent !== false) {
 		lines.push("");
-		lines.push(document.rawContent && document.rawContent.trim().length > 0 ? document.rawContent : "(empty document)");
+		lines.push(
+			document.rawContent && document.rawContent.trim().length > 0
+				? document.rawContent
+				: "(empty document)",
+		);
 	}
 
 	return lines.join("\n");
@@ -33,8 +40,12 @@ export async function formatDocumentCallResult(
 	document: Document,
 	options: { includeContent?: boolean; summaryLines?: string[] } = {},
 ): Promise<CallToolResult> {
-	const summary = options.summaryLines?.filter((line) => line.trim().length > 0).join("\n");
-	const documentText = buildDocumentText(document, { includeContent: options.includeContent });
+	const summary = options.summaryLines
+		?.filter((line) => line.trim().length > 0)
+		.join("\n");
+	const documentText = buildDocumentText(document, {
+		includeContent: options.includeContent,
+	});
 	const text = summary ? `${summary}\n\n${documentText}` : documentText;
 
 	return {

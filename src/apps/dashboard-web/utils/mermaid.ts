@@ -70,7 +70,9 @@ async function initializeMermaid(mermaid: MermaidAPI): Promise<void> {
 
 export async function renderMermaidIn(element: HTMLElement): Promise<void> {
 	// Check for mermaid blocks before touching the heavy library so plain markdown stays fast.
-	const codeBlocks = Array.from(element.querySelectorAll("pre > code.language-mermaid")) as HTMLElement[];
+	const codeBlocks = Array.from(
+		element.querySelectorAll("pre > code.language-mermaid"),
+	) as HTMLElement[];
 	if (codeBlocks.length === 0) {
 		return;
 	}
@@ -126,7 +128,9 @@ export async function renderMermaidIn(element: HTMLElement): Promise<void> {
 				}
 
 				// If none of the above worked, log warning
-				console.warn("mermaid: no compatible render method found, leaving raw code block");
+				console.warn(
+					"mermaid: no compatible render method found, leaving raw code block",
+				);
 			} catch (err) {
 				console.warn("mermaid render failed", err);
 			}

@@ -31,7 +31,9 @@ export interface SimpleUnifiedViewOptions {
 /**
  * Simple unified view that handles Tab switching without multiple screens
  */
-export async function runSimpleUnifiedView(options: SimpleUnifiedViewOptions): Promise<void> {
+export async function runSimpleUnifiedView(
+	options: SimpleUnifiedViewOptions,
+): Promise<void> {
 	let currentView = options.initialView;
 	let selectedProposal = options.selectedProposal;
 	let isRunning = true;
@@ -57,7 +59,9 @@ export async function runSimpleUnifiedView(options: SimpleUnifiedViewOptions): P
 
 	const showProposalView = async (): Promise<void> => {
 		// Extra safeguard: filter out any proposals without proper IDs
-		const validProposals = (options.proposals || []).filter((t) => t.id && t.id.trim() !== "" && hasAnyPrefix(t.id));
+		const validProposals = (options.proposals || []).filter(
+			(t) => t.id && t.id.trim() !== "" && hasAnyPrefix(t.id),
+		);
 
 		if (!validProposals || validProposals.length === 0) {
 			console.log("No proposals available.");
@@ -98,12 +102,19 @@ export async function runSimpleUnifiedView(options: SimpleUnifiedViewOptions): P
 
 		if (options.preloadedKanbanData) {
 			// Use preloaded data but filter for valid proposals
-			kanbanProposals = options.preloadedKanbanData.proposals.filter((t) => t.id && t.id.trim() !== "" && hasAnyPrefix(t.id));
+			kanbanProposals = options.preloadedKanbanData.proposals.filter(
+				(t) => t.id && t.id.trim() !== "" && hasAnyPrefix(t.id),
+			);
 			statuses = options.preloadedKanbanData.statuses;
 		} else {
 			// This shouldn't happen in practice since CLI preloads, but fallback
-			const validKanbanProposals = (options.proposals || []).filter((t) => t.id && t.id.trim() !== "" && hasAnyPrefix(t.id));
-			kanbanProposals = validKanbanProposals.map((t) => ({ ...t, source: "local" as const }));
+			const validKanbanProposals = (options.proposals || []).filter(
+				(t) => t.id && t.id.trim() !== "" && hasAnyPrefix(t.id),
+			);
+			kanbanProposals = validKanbanProposals.map((t) => ({
+				...t,
+				source: "local" as const,
+			}));
 			const config = await options.core.filesystem.loadConfig();
 			statuses = config?.statuses || [];
 		}

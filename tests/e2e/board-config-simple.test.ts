@@ -1,9 +1,9 @@
 import assert from "node:assert";
-import { describe, it } from "node:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describe, it } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
-import type { RoadmapConfig, Proposal } from "../../src/types/index.ts";
+import type { Proposal, RoadmapConfig } from "../../src/types/index.ts";
 
 describe("Board loading with checkActiveBranches config", () => {
 	const createTestProposal = (id: string, status = "Potential"): Proposal => ({
@@ -23,7 +23,13 @@ describe("Board loading with checkActiveBranches config", () => {
 			loadConfig: async () =>
 				({
 					projectName: "Test",
-					statuses: ["Potential", "Active", "Accepted", "Complete", "Abandoned"],
+					statuses: [
+						"Potential",
+						"Active",
+						"Accepted",
+						"Complete",
+						"Abandoned",
+					],
 					defaultStatus: "Potential",
 					checkActiveBranches: false,
 					activeBranchDays: 30,
@@ -48,7 +54,10 @@ describe("Board loading with checkActiveBranches config", () => {
 		const progressMessages: string[] = [];
 
 		// Create a Core instance (we'll use a temporary directory)
-		const tempDir = join(tmpdir(), `test-board-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		const tempDir = join(
+			tmpdir(),
+			`test-board-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+		);
 		const core = new Core(tempDir);
 
 		// Override the filesystem and git operations
@@ -68,7 +77,9 @@ describe("Board loading with checkActiveBranches config", () => {
 			assert.notStrictEqual(skipMessage, undefined);
 
 			// Should NOT have complete cross-branch checking
-			const crossBranchMessage = progressMessages.find((msg) => msg.includes("Resolving proposal proposals across branches"));
+			const crossBranchMessage = progressMessages.find((msg) =>
+				msg.includes("Resolving proposal proposals across branches"),
+			);
 			assert.strictEqual(crossBranchMessage, undefined);
 		} catch (_error) {
 			// Expected since we're using mocked operations
@@ -82,7 +93,13 @@ describe("Board loading with checkActiveBranches config", () => {
 			loadConfig: async () =>
 				({
 					projectName: "Test",
-					statuses: ["Potential", "Active", "Accepted", "Complete", "Abandoned"],
+					statuses: [
+						"Potential",
+						"Active",
+						"Accepted",
+						"Complete",
+						"Abandoned",
+					],
 					defaultStatus: "Potential",
 					checkActiveBranches: true,
 					activeBranchDays: 30,
@@ -107,7 +124,10 @@ describe("Board loading with checkActiveBranches config", () => {
 		const progressMessages: string[] = [];
 
 		// Create a Core instance
-		const tempDir = join(tmpdir(), `test-board-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		const tempDir = join(
+			tmpdir(),
+			`test-board-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+		);
 		const core = new Core(tempDir);
 
 		// Override the filesystem and git operations
@@ -121,7 +141,9 @@ describe("Board loading with checkActiveBranches config", () => {
 			});
 
 			// Should have complete cross-branch checking
-			const crossBranchMessage = progressMessages.find((msg) => msg.includes("Resolving proposal proposals across branches"));
+			const crossBranchMessage = progressMessages.find((msg) =>
+				msg.includes("Resolving proposal proposals across branches"),
+			);
 			assert.notStrictEqual(crossBranchMessage, undefined);
 
 			// Should NOT have skipped
@@ -141,7 +163,13 @@ describe("Board loading with checkActiveBranches config", () => {
 			loadConfig: async () =>
 				({
 					projectName: "Test",
-					statuses: ["Potential", "Active", "Accepted", "Complete", "Abandoned"],
+					statuses: [
+						"Potential",
+						"Active",
+						"Accepted",
+						"Complete",
+						"Abandoned",
+					],
 					defaultStatus: "Potential",
 					// checkActiveBranches is undefined - should default to true
 				}) as RoadmapConfig,
@@ -165,7 +193,10 @@ describe("Board loading with checkActiveBranches config", () => {
 		const progressMessages: string[] = [];
 
 		// Create a Core instance
-		const tempDir = join(tmpdir(), `test-board-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		const tempDir = join(
+			tmpdir(),
+			`test-board-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+		);
 		const core = new Core(tempDir);
 
 		// Override the filesystem and git operations
@@ -179,7 +210,9 @@ describe("Board loading with checkActiveBranches config", () => {
 			});
 
 			// Should default to performing cross-branch checking
-			const crossBranchMessage = progressMessages.find((msg) => msg.includes("Resolving proposal proposals across branches"));
+			const crossBranchMessage = progressMessages.find((msg) =>
+				msg.includes("Resolving proposal proposals across branches"),
+			);
 			assert.notStrictEqual(crossBranchMessage, undefined);
 		} catch (_error) {
 			// Expected since we're using mocked operations

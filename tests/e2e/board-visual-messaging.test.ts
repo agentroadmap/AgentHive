@@ -10,15 +10,19 @@
  *   - Chat channels
  */
 
-import { describe, it } from "node:test";
 import assert from "node:assert";
+import { describe, it } from "node:test";
 import type { Proposal } from "../../src/types/index.ts";
 
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
 
-function createProposal(id: string, status: string, overrides: Partial<Proposal> = {}): Proposal {
+function createProposal(
+	id: string,
+	status: string,
+	overrides: Partial<Proposal> = {},
+): Proposal {
 	return {
 		id,
 		title: `Title for ${id}`,
@@ -51,24 +55,28 @@ describe("Board - Step Colors", () => {
 	it("assigns correct color to each status", () => {
 		for (const [status, expectedColor] of Object.entries(STATUS_COLORS)) {
 			const color = STATUS_COLORS[status];
-			assert.strictEqual(color, expectedColor, `Status ${status} should be ${expectedColor}`);
+			assert.strictEqual(
+				color,
+				expectedColor,
+				`Status ${status} should be ${expectedColor}`,
+			);
 		}
 	});
 
 	it("Proposal proposals are yellow", () => {
-		assert.strictEqual(STATUS_COLORS["Proposal"], "yellow");
+		assert.strictEqual(STATUS_COLORS.Proposal, "yellow");
 	});
 
 	it("Active proposals are green", () => {
-		assert.strictEqual(STATUS_COLORS["Active"], "green");
+		assert.strictEqual(STATUS_COLORS.Active, "green");
 	});
 
 	it("Complete proposals are gray", () => {
-		assert.strictEqual(STATUS_COLORS["Complete"], "gray");
+		assert.strictEqual(STATUS_COLORS.Complete, "gray");
 	});
 
 	it("Rejected proposals are red", () => {
-		assert.strictEqual(STATUS_COLORS["Rejected"], "red");
+		assert.strictEqual(STATUS_COLORS.Rejected, "red");
 	});
 
 	it("unknown status gets default color", () => {
@@ -96,7 +104,9 @@ describe("Board - Step Colors", () => {
 			low: "green",
 		};
 
-		const proposal = createProposal("proposal-001", "Active", { priority: "high" });
+		const proposal = createProposal("proposal-001", "Active", {
+			priority: "high",
+		});
 		const highlight = priorityColors[proposal.priority || "medium"];
 
 		assert.strictEqual(highlight, "red");
@@ -108,7 +118,14 @@ describe("Board - Step Colors", () => {
 // ---------------------------------------------------------------------------
 
 describe("Board - Column Ordering", () => {
-	const DEFAULT_ORDER = ["Proposal", "Draft", "Accepted", "Active", "Review", "Complete"];
+	const DEFAULT_ORDER = [
+		"Proposal",
+		"Draft",
+		"Accepted",
+		"Active",
+		"Review",
+		"Complete",
+	];
 
 	it("follows configured status order", () => {
 		const statuses = DEFAULT_ORDER;
@@ -128,12 +145,12 @@ describe("Board - Column Ordering", () => {
 			proposals: proposals.filter((s) => s.status === status),
 		}));
 
-		assert.strictEqual(columns[0]!.status, "Proposal");
-		assert.strictEqual(columns[1]!.status, "Draft");
-		assert.strictEqual(columns[2]!.status, "Accepted");
-		assert.strictEqual(columns[3]!.status, "Active");
-		assert.strictEqual(columns[4]!.status, "Review");
-		assert.strictEqual(columns[5]!.status, "Complete");
+		assert.strictEqual(columns[0]?.status, "Proposal");
+		assert.strictEqual(columns[1]?.status, "Draft");
+		assert.strictEqual(columns[2]?.status, "Accepted");
+		assert.strictEqual(columns[3]?.status, "Active");
+		assert.strictEqual(columns[4]?.status, "Review");
+		assert.strictEqual(columns[5]?.status, "Complete");
 	});
 
 	it("column order preserved after proposal move", () => {
@@ -178,7 +195,9 @@ describe("Board - Column Ordering", () => {
 
 describe("Board - Detail Editing", () => {
 	it("can edit proposal title", () => {
-		const proposal = createProposal("proposal-001", "Active", { title: "Original" });
+		const proposal = createProposal("proposal-001", "Active", {
+			title: "Original",
+		});
 
 		// Edit
 		proposal.title = "Updated Title";
@@ -187,11 +206,16 @@ describe("Board - Detail Editing", () => {
 	});
 
 	it("can edit proposal description", () => {
-		const proposal = createProposal("proposal-001", "Active", { description: "Original desc" });
+		const proposal = createProposal("proposal-001", "Active", {
+			description: "Original desc",
+		});
 
 		proposal.description = "New description with more details";
 
-		assert.strictEqual(proposal.description, "New description with more details");
+		assert.strictEqual(
+			proposal.description,
+			"New description with more details",
+		);
 	});
 
 	it("can edit proposal status", () => {
@@ -203,7 +227,9 @@ describe("Board - Detail Editing", () => {
 	});
 
 	it("can edit proposal priority", () => {
-		const proposal = createProposal("proposal-001", "Active", { priority: "low" });
+		const proposal = createProposal("proposal-001", "Active", {
+			priority: "low",
+		});
 
 		proposal.priority = "high";
 
@@ -211,12 +237,14 @@ describe("Board - Detail Editing", () => {
 	});
 
 	it("can add labels", () => {
-		const proposal = createProposal("proposal-001", "Active", { labels: ["feature"] });
+		const proposal = createProposal("proposal-001", "Active", {
+			labels: ["feature"],
+		});
 
-		proposal.labels!.push("urgent", "backend");
+		proposal.labels?.push("urgent", "backend");
 
-		assert.strictEqual(proposal.labels!.length, 3);
-		assert.ok(proposal.labels!.includes("urgent"));
+		assert.strictEqual(proposal.labels?.length, 3);
+		assert.ok(proposal.labels?.includes("urgent"));
 	});
 
 	it("can remove labels", () => {
@@ -224,7 +252,7 @@ describe("Board - Detail Editing", () => {
 			labels: ["feature", "bugfix", "docs"],
 		});
 
-		proposal.labels = proposal.labels!.filter((l) => l !== "bugfix");
+		proposal.labels = proposal.labels?.filter((l) => l !== "bugfix");
 
 		assert.strictEqual(proposal.labels.length, 2);
 		assert.ok(!proposal.labels.includes("bugfix"));
@@ -238,25 +266,25 @@ describe("Board - Detail Editing", () => {
 		});
 
 		// Mark as checked
-		proposal.acceptanceCriteriaItems![0].checked = true;
+		const firstCriterion = proposal.acceptanceCriteriaItems?.[0];
+		assert.ok(firstCriterion);
+		firstCriterion.checked = true;
 
-		assert.strictEqual(proposal.acceptanceCriteriaItems![0].checked, true);
+		assert.strictEqual(firstCriterion.checked, true);
 	});
 
 	it("can add new acceptance criteria", () => {
 		const proposal = createProposal("proposal-001", "Active", {
-			acceptanceCriteriaItems: [
-				{ index: 1, text: "AC#1", checked: false },
-			],
+			acceptanceCriteriaItems: [{ index: 1, text: "AC#1", checked: false }],
 		});
 
-		proposal.acceptanceCriteriaItems!.push({
+		proposal.acceptanceCriteriaItems?.push({
 			index: 2,
 			text: "AC#2: New criterion",
 			checked: false,
 		});
 
-		assert.strictEqual(proposal.acceptanceCriteriaItems!.length, 2);
+		assert.strictEqual(proposal.acceptanceCriteriaItems?.length, 2);
 	});
 
 	it("edit mode requires save or cancel", () => {
@@ -389,9 +417,27 @@ describe("Board - Team Activity Feed", () => {
 
 	it("events are timestamped chronologically", () => {
 		const events: ActivityEvent[] = [
-			{ type: "proposal_transition", agentId: "a1", proposalId: "S1", message: "First", timestamp: 1000 },
-			{ type: "proposal_transition", agentId: "a2", proposalId: "S2", message: "Second", timestamp: 2000 },
-			{ type: "proposal_transition", agentId: "a3", proposalId: "S3", message: "Third", timestamp: 3000 },
+			{
+				type: "proposal_transition",
+				agentId: "a1",
+				proposalId: "S1",
+				message: "First",
+				timestamp: 1000,
+			},
+			{
+				type: "proposal_transition",
+				agentId: "a2",
+				proposalId: "S2",
+				message: "Second",
+				timestamp: 2000,
+			},
+			{
+				type: "proposal_transition",
+				agentId: "a3",
+				proposalId: "S3",
+				message: "Third",
+				timestamp: 3000,
+			},
 		];
 
 		for (let i = 1; i < events.length; i++) {
@@ -461,7 +507,12 @@ describe("Board - MCP Messaging", () => {
 	});
 
 	it("supports project-specific channels", () => {
-		const channels = ["project-general", "project-updates", "project-alerts", "agent-coordination"];
+		const channels = [
+			"project-general",
+			"project-updates",
+			"project-alerts",
+			"agent-coordination",
+		];
 
 		for (const channel of channels) {
 			const msg: McpMessage = {
@@ -568,7 +619,7 @@ describe("Board - Chat Channels", () => {
 	});
 
 	it("channel shows unread count", () => {
-		const channel: ChatChannel = {
+		const _channel: ChatChannel = {
 			id: "ch-001",
 			name: "project-general",
 			type: "project",

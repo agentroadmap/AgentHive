@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
-import { describe, it, beforeEach, afterEach, mock } from "node:test";
-import { rmSync, mkdirSync, existsSync, writeFileSync, appendFileSync } from "node:fs";
+import {
+	appendFileSync,
+	existsSync,
+	mkdirSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
-import { RelayService } from '../../src/core/messaging/relay.ts';
-import type { Core } from "../../src/core/roadmap.ts";
+import { afterEach, beforeEach, describe, it, mock } from "node:test";
+import { RelayService } from "../../src/core/messaging/relay.ts";
 import type { RelayConfig } from "../../src/types/index.ts";
 
 const TEST_DIR = join(process.cwd(), "tmp", "test-relay");
@@ -45,29 +50,29 @@ describe("Relay Service Module", () => {
 		const config: RelayConfig = { enabled: false };
 		relay = new RelayService(mockCore as any, config);
 		await relay.start();
-		// @ts-ignore - accessing private for test
+		// @ts-expect-error - accessing private for test
 		assert.equal(relay.isRunning, false);
 	});
 
 	it("should parse new lines and push to webhook", async () => {
-		const config: RelayConfig = { 
-			enabled: true, 
+		const config: RelayConfig = {
+			enabled: true,
 			webhook_url: "https://discord.local/webhook",
-			ignored_agents: ["noisy-bot"]
+			ignored_agents: ["noisy-bot"],
 		};
 		relay = new RelayService(mockCore as any, config);
-		
+
 		const chatFile = join(MESSAGES_DIR, "general.md");
 		writeFileSync(chatFile, "[2026-03-24 00:00] system: Init\n");
-		
+
 		await relay.start();
-		
+
 		// Append new content
 		appendFileSync(chatFile, "[2026-03-24 00:01] user1: Hello world\n");
 		appendFileSync(chatFile, "[2026-03-24 00:02] noisy-bot: Beep boop\n");
 
 		// Trigger manual handle (since fs.watch is async/finicky in tests)
-		// @ts-ignore
+		// @ts-expect-error
 		await relay.handleFileChange("general.md");
 
 		// Should have called fetch for user1, but NOT for noisy-bot
@@ -79,27 +84,27 @@ describe("Relay Service Module", () => {
 	});
 
 	it("should fetch external messages and write to local chat", async () => {
-		const config: RelayConfig = { 
-			enabled: true, 
-			bot_token: "secret", 
+		const config: RelayConfig = {
+			enabled: true,
+			bot_token: "secret",
 			channel_id: "123",
-			interval_ms: 10000
+			interval_ms: 10000,
 		};
-		
+
 		const externalMsg = {
 			id: "msg-100",
 			author: { username: "ext-user", bot: false },
-			content: "From Discord"
+			content: "From Discord",
 		};
 
 		mockFetch.mock.mockImplementation(async () => ({
 			ok: true,
-			json: async () => [externalMsg]
+			json: async () => [externalMsg],
 		}));
 
 		relay = new RelayService(mockCore as any, config);
-		
-		// @ts-ignore
+
+		// @ts-expect-error
 		await relay.fetchExternalMessages();
 
 		assert.equal(mockCore.sendMessage.mock.callCount(), 1);
@@ -109,26 +114,26 @@ describe("Relay Service Module", () => {
 	});
 
 	it("should avoid infinite loops from its own relayed messages", async () => {
-		const config: RelayConfig = { 
-			enabled: true, 
-			bot_token: "secret", 
-			channel_id: "123"
+		const config: RelayConfig = {
+			enabled: true,
+			bot_token: "secret",
+			channel_id: "123",
 		};
-		
+
 		const selfMsg = {
 			id: "msg-101",
 			author: { username: "agent-1 (Relay)", bot: true },
-			content: "I relayed this"
+			content: "I relayed this",
 		};
 
 		mockFetch.mock.mockImplementation(async () => ({
 			ok: true,
-			json: async () => [selfMsg]
+			json: async () => [selfMsg],
 		}));
 
 		relay = new RelayService(mockCore as any, config);
-		
-		// @ts-ignore
+
+		// @ts-expect-error
 		await relay.fetchExternalMessages();
 
 		// Should NOT have sent message to core

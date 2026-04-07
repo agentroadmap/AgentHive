@@ -1,4 +1,4 @@
-import type { Sequence, Proposal } from "../../types/index.ts";
+import type { Proposal, Sequence } from "../../types/index.ts";
 import { sortByProposalId } from "../../utils/proposal-sorting.ts";
 
 /**
@@ -9,7 +9,10 @@ import { sortByProposalId } from "../../utils/proposal-sorting.ts";
  * - If cycles exist, any remaining proposals are emitted in a final sequence to ensure each proposal
  *   appears exactly once (consumers may choose to surface a warning in that case).
  */
-export function computeSequences(proposals: Proposal[]): { unsequenced: Proposal[]; sequences: Sequence[] } {
+export function computeSequences(proposals: Proposal[]): {
+	unsequenced: Proposal[];
+	sequences: Sequence[];
+} {
 	// Map proposal id -> proposal for fast lookups
 	const byId = new Map<string, Proposal>();
 	for (const t of proposals) byId.set(t.id, t);
@@ -37,11 +40,15 @@ export function computeSequences(proposals: Proposal[]): { unsequenced: Proposal
 	const hasDependents = (id: string) => (successors.get(id) || []).length > 0;
 
 	const unsequenced = sortByProposalId(
-		proposals.filter((t) => !hasAnyDeps(t) && !hasDependents(t.id) && t.ordinal === undefined),
+		proposals.filter(
+			(t) => !hasAnyDeps(t) && !hasDependents(t.id) && t.ordinal === undefined,
+		),
 	);
 
 	// Build layering set by excluding unsequenced proposals
-	const layeringIds = new Set(Array.from(allIds).filter((id) => !unsequenced.some((t) => t.id === id)));
+	const layeringIds = new Set(
+		Array.from(allIds).filter((id) => !unsequenced.some((t) => t.id === id)),
+	);
 
 	// Kahn-style layered topological grouping on the remainder
 	const sequences: Sequence[] = [];
@@ -71,11 +78,18 @@ export function computeSequences(proposals: Proposal[]): { unsequenced: Proposal
 					.map((id) => byId.get(id))
 					.filter((t): t is Proposal => Boolean(t)),
 			);
-			sequences.push({ index: sequences.length + 1, proposals: finalProposals });
+			sequences.push({
+				index: sequences.length + 1,
+				proposals: finalProposals,
+			});
 			break;
 		}
 
-		const layerProposals = sortByProposalId(layerIds.map((id) => byId.get(id)).filter((t): t is Proposal => Boolean(t)));
+		const layerProposals = sortByProposalId(
+			layerIds
+				.map((id) => byId.get(id))
+				.filter((t): t is Proposal => Boolean(t)),
+		);
 		sequences.push({ index: sequences.length + 1, proposals: layerProposals });
 
 		for (const id of layerIds) {
@@ -94,14 +108,19 @@ export function computeSequences(proposals: Proposal[]): { unsequenced: Proposal
  * Return true if the proposal has no dependencies and no dependents among the provided set.
  * Note: Ordinal is intentionally ignored here; computeSequences handles ordinal when grouping.
  */
-export function canMoveToUnsequenced(proposals: Proposal[], proposalId: string): boolean {
+export function canMoveToUnsequenced(
+	proposals: Proposal[],
+	proposalId: string,
+): boolean {
 	const byId = new Map<string, Proposal>(proposals.map((t) => [t.id, t]));
 	const t = byId.get(proposalId);
 	if (!t) return false;
 	const allIds = new Set(byId.keys());
 	const hasDeps = (t.dependencies || []).some((d) => allIds.has(d));
 	if (hasDeps) return false;
-	const hasDependents = proposals.some((x) => (x.dependencies || []).includes(proposalId));
+	const hasDependents = proposals.some((x) =>
+		(x.dependencies || []).includes(proposalId),
+	);
 	return !hasDependents;
 }
 
@@ -123,13 +142,17 @@ export function adjustDependenciesForMove(
 ): Proposal[] {
 	// Join semantics: set moved.dependencies to previous sequence proposals (if any),
 	// do NOT add moved as a dependency to next-sequence proposals, and do not touch others.
-	const byId = new Map<string, Proposal>(proposals.map((t) => [t.id, { ...t }]));
+	const byId = new Map<string, Proposal>(
+		proposals.map((t) => [t.id, { ...t }]),
+	);
 	const moved = byId.get(movedProposalId);
 	if (!moved) return proposals;
 
 	const prevSeq = sequences.find((s) => s.index === targetSequenceIndex - 1);
 	// Exclude the moved proposal itself to avoid creating a self-dependency when moving from seq N to N+1
-	const prevIds = prevSeq ? prevSeq.proposals.map((t) => t.id).filter((id) => id !== movedProposalId) : [];
+	const prevIds = prevSeq
+		? prevSeq.proposals.map((t) => t.id).filter((id) => id !== movedProposalId)
+		: [];
 
 	moved.dependencies = [...prevIds];
 	byId.set(moved.id, moved);
@@ -156,7 +179,9 @@ export function adjustDependenciesForInsertBetween(
 	movedProposalId: string,
 	betweenK: number,
 ): Proposal[] {
-	const byId = new Map<string, Proposal>(proposals.map((t) => [t.id, { ...t }]));
+	const byId = new Map<string, Proposal>(
+		proposals.map((t) => [t.id, { ...t }]),
+	);
 	const moved = byId.get(movedProposalId);
 	if (!moved) return proposals;
 
@@ -167,7 +192,9 @@ export function adjustDependenciesForInsertBetween(
 	const prevSeq = sequences.find((s) => s.index === K);
 	const nextSeq = sequences.find((s) => s.index === K + 1);
 
-	const prevIds = prevSeq ? prevSeq.proposals.map((t) => t.id).filter((id) => id !== movedProposalId) : [];
+	const prevIds = prevSeq
+		? prevSeq.proposals.map((t) => t.id).filter((id) => id !== movedProposalId)
+		: [];
 	moved.dependencies = [...prevIds];
 
 	// Update next sequence proposals to depend on moved proposal
@@ -176,7 +203,8 @@ export function adjustDependenciesForInsertBetween(
 			const orig = byId.get(t.id);
 			if (!orig) continue;
 			const deps = Array.isArray(orig.dependencies) ? orig.dependencies : [];
-			if (!deps.includes(movedProposalId)) orig.dependencies = [...deps, movedProposalId];
+			if (!deps.includes(movedProposalId))
+				orig.dependencies = [...deps, movedProposalId];
 			byId.set(orig.id, orig);
 		}
 	} else {
@@ -200,12 +228,20 @@ export function reorderWithinSequence(
 	movedProposalId: string,
 	newIndex: number,
 ): Proposal[] {
-	const seqIds = sequenceProposalIds.filter((id) => id && proposals.some((t) => t.id === id));
+	const seqIds = sequenceProposalIds.filter(
+		(id) => id && proposals.some((t) => t.id === id),
+	);
 	const withoutMoved = seqIds.filter((id) => id !== movedProposalId);
 	const clampedIndex = Math.max(0, Math.min(withoutMoved.length, newIndex));
-	const newOrder = [...withoutMoved.slice(0, clampedIndex), movedProposalId, ...withoutMoved.slice(clampedIndex)];
+	const newOrder = [
+		...withoutMoved.slice(0, clampedIndex),
+		movedProposalId,
+		...withoutMoved.slice(clampedIndex),
+	];
 
-	const byId = new Map<string, Proposal>(proposals.map((t) => [t.id, { ...t }]));
+	const byId = new Map<string, Proposal>(
+		proposals.map((t) => [t.id, { ...t }]),
+	);
 	newOrder.forEach((id, idx) => {
 		const t = byId.get(id);
 		if (t) {
@@ -226,7 +262,12 @@ export function planMoveToSequence(
 	movedProposalId: string,
 	targetSequenceIndex: number,
 ): Proposal[] {
-	const updated = adjustDependenciesForMove(allProposals, sequences, movedProposalId, targetSequenceIndex);
+	const updated = adjustDependenciesForMove(
+		allProposals,
+		sequences,
+		movedProposalId,
+		targetSequenceIndex,
+	);
 	// If moving to Sequence 1 and resulting deps are empty, anchor with ordinal 0
 	if (targetSequenceIndex === 1) {
 		const movedU = updated.find((x) => x.id === movedProposalId);
@@ -239,7 +280,8 @@ export function planMoveToSequence(
 	for (const u of updated) {
 		const orig = byIdOrig.get(u.id);
 		if (!orig) continue;
-		const depsChanged = JSON.stringify(orig.dependencies) !== JSON.stringify(u.dependencies);
+		const depsChanged =
+			JSON.stringify(orig.dependencies) !== JSON.stringify(u.dependencies);
 		const ordChanged = (orig.ordinal ?? null) !== (u.ordinal ?? null);
 		if (depsChanged || ordChanged) changed.push(u);
 	}
@@ -254,7 +296,11 @@ export function planMoveToUnsequenced(
 	movedProposalId: string,
 ): { ok: true; changed: Proposal[] } | { ok: false; error: string } {
 	if (!canMoveToUnsequenced(allProposals, movedProposalId)) {
-		return { ok: false, error: "Cannot move to Unsequenced: proposal has dependencies or dependents" };
+		return {
+			ok: false,
+			error:
+				"Cannot move to Unsequenced: proposal has dependencies or dependents",
+		};
 	}
 	const byId = new Map(allProposals.map((t) => [t.id, { ...t }]));
 	const moved = byId.get(movedProposalId);

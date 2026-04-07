@@ -6,7 +6,10 @@ export interface ConfigWatcherCallbacks {
 	onConfigChanged?: (config: RoadmapConfig | null) => void | Promise<void>;
 }
 
-export function watchConfig(core: Core, callbacks: ConfigWatcherCallbacks): { stop: () => void } {
+export function watchConfig(
+	core: Core,
+	callbacks: ConfigWatcherCallbacks,
+): { stop: () => void } {
 	const configPath = core.filesystem.configFilePath;
 	let watcher: FSWatcher | null = null;
 

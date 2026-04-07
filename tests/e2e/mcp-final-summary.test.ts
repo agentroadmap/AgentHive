@@ -2,7 +2,11 @@ import assert from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { McpServer } from "../../src/mcp/server.ts";
 import { registerProposalTools } from "../../src/mcp/tools/proposals/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 const getText = (content: unknown[] | undefined, index = 0): string => {
 	const item = content?.[index] as { text?: string } | undefined;
@@ -96,7 +100,10 @@ describe("MCP final summary", () => {
 		await mcpServer.testInterface.callTool({
 			params: {
 				name: "proposal_edit",
-				arguments: { id: "proposal-1", finalSummaryAppend: ["Second", "Third"] },
+				arguments: {
+					id: "proposal-1",
+					finalSummaryAppend: ["Second", "Third"],
+				},
 			},
 		});
 

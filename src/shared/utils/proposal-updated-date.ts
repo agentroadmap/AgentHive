@@ -1,7 +1,10 @@
 /**
  * Upsert the proposal updated_date field in markdown frontmatter while preserving body content.
  */
-export function upsertProposalUpdatedDate(content: string, updatedDate: string): string {
+export function upsertProposalUpdatedDate(
+	content: string,
+	updatedDate: string,
+): string {
 	if (!content || !updatedDate) {
 		return content;
 	}
@@ -31,8 +34,11 @@ export function upsertProposalUpdatedDate(content: string, updatedDate: string):
 	}
 
 	if (!replaced) {
-		const createdDateIndex = lines.findIndex((line) => /^\s*created_date\s*:/.test(line));
-		const insertIndex = createdDateIndex >= 0 ? createdDateIndex + 1 : lines.length;
+		const createdDateIndex = lines.findIndex((line) =>
+			/^\s*created_date\s*:/.test(line),
+		);
+		const insertIndex =
+			createdDateIndex >= 0 ? createdDateIndex + 1 : lines.length;
 		lines.splice(insertIndex, 0, `updated_date: '${updatedDate}'`);
 	}
 

@@ -1,13 +1,20 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import {
+	calculateNewOrdinal,
+	DEFAULT_ORDINAL_STEP,
+	resolveOrdinalConflicts,
+} from "../../src/core/proposal/reorder.ts";
 import { Core } from "../../src/core/roadmap.ts";
-import { calculateNewOrdinal, DEFAULT_ORDINAL_STEP, resolveOrdinalConflicts } from '../../src/core/proposal/reorder.ts';
 import { serializeProposal } from "../../src/markdown/serializer.ts";
 import type { Proposal } from "../../src/types/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync,
+import {
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 const item = (id: string, ordinal?: number) => ({ id, ordinal });
@@ -17,7 +24,11 @@ let core: Core;
 
 const FIXED_DATE = "2025-01-01 00:00";
 
-const buildProposal = (id: string, status: string, ordinal?: number): Proposal => ({
+const buildProposal = (
+	id: string,
+	status: string,
+	ordinal?: number,
+): Proposal => ({
 	id,
 	title: `Proposal ${id}`,
 	status,
@@ -77,29 +88,53 @@ describe("calculateNewOrdinal", () => {
 
 describe("resolveOrdinalConflicts", () => {
 	it("returns empty array when ordinals are already increasing", () => {
-		const updates = resolveOrdinalConflicts([item("a", 1000), item("b", 2000), item("c", 3000)]);
+		const updates = resolveOrdinalConflicts([
+			item("a", 1000),
+			item("b", 2000),
+			item("c", 3000),
+		]);
 		assert.strictEqual(updates.length, 0);
 	});
 
 	it("reassigns duplicate or descending ordinals", () => {
-		const updates = resolveOrdinalConflicts([item("a", 1000), item("b", 1000), item("c", 2000)]);
+		const updates = resolveOrdinalConflicts([
+			item("a", 1000),
+			item("b", 1000),
+			item("c", 2000),
+		]);
 		assert.strictEqual(updates.length, 2);
 		assert.deepStrictEqual(updates[0], { id: "b", ordinal: 2000 });
 		assert.deepStrictEqual(updates[1], { id: "c", ordinal: 3000 });
 	});
 
 	it("fills in missing ordinals with default spacing", () => {
-		const updates = resolveOrdinalConflicts([item("a"), item("b"), item("c", 1500)]);
+		const updates = resolveOrdinalConflicts([
+			item("a"),
+			item("b"),
+			item("c", 1500),
+		]);
 		assert.strictEqual(updates.length, 3);
-		assert.deepStrictEqual(updates[0], { id: "a", ordinal: DEFAULT_ORDINAL_STEP });
-		assert.deepStrictEqual(updates[1], { id: "b", ordinal: DEFAULT_ORDINAL_STEP * 2 });
-		assert.deepStrictEqual(updates[2], { id: "c", ordinal: DEFAULT_ORDINAL_STEP * 3 });
+		assert.deepStrictEqual(updates[0], {
+			id: "a",
+			ordinal: DEFAULT_ORDINAL_STEP,
+		});
+		assert.deepStrictEqual(updates[1], {
+			id: "b",
+			ordinal: DEFAULT_ORDINAL_STEP * 2,
+		});
+		assert.deepStrictEqual(updates[2], {
+			id: "c",
+			ordinal: DEFAULT_ORDINAL_STEP * 3,
+		});
 	});
 
 	it("can force sequential reassignment when requested", () => {
-		const updates = resolveOrdinalConflicts([item("a", 1000), item("b", 2500), item("c", 4500)], {
-			forceSequential: true,
-		});
+		const updates = resolveOrdinalConflicts(
+			[item("a", 1000), item("b", 2500), item("c", 4500)],
+			{
+				forceSequential: true,
+			},
+		);
 		assert.strictEqual(updates.length, 2);
 		assert.deepStrictEqual(updates[0], { id: "b", ordinal: 2000 });
 		assert.deepStrictEqual(updates[1], { id: "c", ordinal: 3000 });
@@ -107,7 +142,9 @@ describe("resolveOrdinalConflicts", () => {
 });
 
 describe("Core.reorderProposal", () => {
-	const createProposals = async (proposals: Array<[string, string, number?]>) => {
+	const createProposals = async (
+		proposals: Array<[string, string, number?]>,
+	) => {
 		for (const [id, status, ordinal] of proposals) {
 			await core.createProposal(buildProposal(id, status, ordinal), false);
 		}
@@ -129,7 +166,9 @@ describe("Core.reorderProposal", () => {
 		assert.strictEqual(result.updatedProposal.id, "proposal-3");
 		assert.ok((result.updatedProposal.ordinal ?? 0) > 1000);
 		assert.ok((result.updatedProposal.ordinal ?? 0) < 2000);
-		expect(result.changedProposals.map((proposal) => proposal.id)).toEqual(["proposal-3"]);
+		expect(result.changedProposals.map((proposal) => proposal.id)).toEqual([
+			"proposal-3",
+		]);
 
 		const proposal2 = await core.filesystem.loadProposal("proposal-2");
 		assert.strictEqual(proposal2?.ordinal, 2000);
@@ -148,7 +187,9 @@ describe("Core.reorderProposal", () => {
 			orderedProposalIds: ["proposal-1", "proposal-3", "proposal-2"],
 		});
 
-		expect(result.changedProposals.map((proposal) => proposal.id).sort()).toEqual(["proposal-2", "proposal-3"]);
+		expect(
+			result.changedProposals.map((proposal) => proposal.id).sort(),
+		).toEqual(["proposal-2", "proposal-3"]);
 
 		const proposal1 = await core.filesystem.loadProposal("proposal-1");
 		const proposal2 = await core.filesystem.loadProposal("proposal-2");
@@ -173,7 +214,9 @@ describe("Core.reorderProposal", () => {
 
 		assert.strictEqual(result.updatedProposal.status, "Active");
 		assert.ok((result.updatedProposal.ordinal ?? 0) > 0);
-		expect(result.changedProposals.map((proposal) => proposal.id)).toContain("proposal-1");
+		expect(result.changedProposals.map((proposal) => proposal.id)).toContain(
+			"proposal-1",
+		);
 
 		const proposal2 = await core.filesystem.loadProposal("proposal-2");
 		const proposal3 = await core.filesystem.loadProposal("proposal-3");
@@ -188,8 +231,11 @@ describe("Core.reorderProposal", () => {
 		]);
 
 		const legacyProposal = buildProposal("proposal-3", "Potential", 3000);
-		const legacyPath = join(core.filesystem.proposalsDir, "proposal-3 - Legacy Proposal.md");
-		await writeFile(legacyPath,  serializeProposal(legacyProposal));
+		const legacyPath = join(
+			core.filesystem.proposalsDir,
+			"proposal-3 - Legacy Proposal.md",
+		);
+		await writeFile(legacyPath, serializeProposal(legacyProposal));
 
 		const result = await core.reorderProposal({
 			proposalId: "proposal-3",

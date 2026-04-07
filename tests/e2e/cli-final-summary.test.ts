@@ -1,12 +1,16 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
 import { extractStructuredSection } from "../../src/markdown/structured-sections.ts";
 import type { Proposal } from "../../src/types/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync, buildCliCommand,
+import {
+	buildCliCommand,
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 let TEST_DIR: string;
@@ -29,14 +33,19 @@ describe("Final Summary CLI", () => {
 	});
 
 	it("supports --final-summary on proposal create", async () => {
-		const result = execSync(`node --experimental-strip-types ${buildCliCommand([CLI_PATH, "proposal", "create", "Proposal A", "--final-summary", "PR-ready summary"])}`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${buildCliCommand([CLI_PATH, "proposal", "create", "Proposal A", "--final-summary", "PR-ready summary"])}`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(result.exitCode, 0);
 
 		const core = new Core(TEST_DIR);
 		const proposal = await core.filesystem.loadProposal("proposal-1");
 		assert.notStrictEqual(proposal, null);
 		assert.ok(proposal?.rawContent?.includes("## Final Summary"));
-		expect(extractStructuredSection(proposal?.rawContent ?? "", "finalSummary")).toBe("PR-ready summary");
+		expect(
+			extractStructuredSection(proposal?.rawContent ?? "", "finalSummary"),
+		).toBe("PR-ready summary");
 	});
 
 	it("supports set/append/clear flags on proposal edit", async () => {
@@ -53,32 +62,47 @@ describe("Final Summary CLI", () => {
 		};
 		await core.createProposal(base, false);
 
-		let res = execSync(`node --experimental-strip-types ${buildCliCommand([CLI_PATH, "proposal", "edit", "1", "--final-summary", "Initial summary"])}`, { cwd: TEST_DIR });
+		let res = execSync(
+			`node --experimental-strip-types ${buildCliCommand([CLI_PATH, "proposal", "edit", "1", "--final-summary", "Initial summary"])}`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(res.exitCode, 0);
 
 		let body = await core.getProposalContent("proposal-1");
-		expect(extractStructuredSection(body ?? "", "finalSummary")).toBe("Initial summary");
+		expect(extractStructuredSection(body ?? "", "finalSummary")).toBe(
+			"Initial summary",
+		);
 
-		res = execSync(`node --experimental-strip-types ${buildCliCommand([
-			CLI_PATH,
-			"proposal",
-			"edit",
-			"1",
-			"--append-final-summary",
-			"Second",
-			"--append-final-summary",
-			"Third",
-		])}`, { cwd: TEST_DIR });
+		res = execSync(
+			`node --experimental-strip-types ${buildCliCommand([
+				CLI_PATH,
+				"proposal",
+				"edit",
+				"1",
+				"--append-final-summary",
+				"Second",
+				"--append-final-summary",
+				"Third",
+			])}`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(res.exitCode, 0);
 
 		body = await core.getProposalContent("proposal-1");
-		expect(extractStructuredSection(body ?? "", "finalSummary")).toBe("Initial summary\n\nSecond\n\nThird");
+		expect(extractStructuredSection(body ?? "", "finalSummary")).toBe(
+			"Initial summary\n\nSecond\n\nThird",
+		);
 
-		res = execSync(`node --experimental-strip-types ${buildCliCommand([CLI_PATH, "proposal", "edit", "1", "--clear-final-summary"])}`, { cwd: TEST_DIR });
+		res = execSync(
+			`node --experimental-strip-types ${buildCliCommand([CLI_PATH, "proposal", "edit", "1", "--clear-final-summary"])}`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(res.exitCode, 0);
 
 		body = await core.getProposalContent("proposal-1");
-		expect(extractStructuredSection(body ?? "", "finalSummary")).toBeUndefined();
+		expect(
+			extractStructuredSection(body ?? "", "finalSummary"),
+		).toBeUndefined();
 		assert.ok(!body?.includes("## Final Summary"));
 	});
 
@@ -100,12 +124,17 @@ describe("Final Summary CLI", () => {
 			false,
 		);
 
-		const result = execSync(`node --experimental-strip-types ${buildCliCommand([CLI_PATH, "proposal", "view", "1", "--plain"])}`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${buildCliCommand([CLI_PATH, "proposal", "view", "1", "--plain"])}`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(result.exitCode, 0);
 
 		const output = result.stdout.toString();
 		assert.ok(output.includes("Implementation Notes:"));
 		assert.ok(output.includes("Final Summary:"));
-		expect(output.indexOf("Final Summary:")).toBeGreaterThan(output.indexOf("Implementation Notes:"));
+		expect(output.indexOf("Final Summary:")).toBeGreaterThan(
+			output.indexOf("Implementation Notes:"),
+		);
 	});
 });

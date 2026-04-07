@@ -45,25 +45,33 @@ export function getChatComposerText(proposal: ChatComposerProposal): string {
 	return proposal.lines.join("\n");
 }
 
-export function renderChatComposerLines(proposal: ChatComposerProposal): string[] {
+export function renderChatComposerLines(
+	proposal: ChatComposerProposal,
+): string[] {
 	const lines = proposal.lines.length > 0 ? proposal.lines : [""];
 	return lines.map((line, index) => `${index === 0 ? "> " : "| "}${line}`);
 }
 
-function appendText(proposal: ChatComposerProposal, text: string): ChatComposerProposal {
+function appendText(
+	proposal: ChatComposerProposal,
+	text: string,
+): ChatComposerProposal {
 	const normalized = text.replace(/\r\n?/g, "\n");
 	if (normalized.length === 0) return proposal;
 
 	const parts = normalized.split("\n");
 	const nextLines = [...proposal.lines];
-	nextLines[nextLines.length - 1] = `${nextLines[nextLines.length - 1] ?? ""}${parts[0] ?? ""}`;
+	nextLines[nextLines.length - 1] =
+		`${nextLines[nextLines.length - 1] ?? ""}${parts[0] ?? ""}`;
 	for (let index = 1; index < parts.length; index++) {
 		nextLines.push(parts[index] ?? "");
 	}
 	return { lines: nextLines };
 }
 
-function removeLastCharacter(proposal: ChatComposerProposal): ChatComposerProposal {
+function removeLastCharacter(
+	proposal: ChatComposerProposal,
+): ChatComposerProposal {
 	const nextLines = [...proposal.lines];
 	const lastIndex = nextLines.length - 1;
 	const currentLine = nextLines[lastIndex] ?? "";
@@ -75,7 +83,8 @@ function removeLastCharacter(proposal: ChatComposerProposal): ChatComposerPropos
 
 	if (nextLines.length > 1) {
 		const removed = nextLines.pop() ?? "";
-		nextLines[nextLines.length - 1] = `${nextLines[nextLines.length - 1] ?? ""}${removed}`;
+		nextLines[nextLines.length - 1] =
+			`${nextLines[nextLines.length - 1] ?? ""}${removed}`;
 	}
 
 	return { lines: nextLines };
@@ -90,7 +99,10 @@ function normalizeDraftForSend(proposal: ChatComposerProposal): string | null {
 	return trimmedEnd;
 }
 
-export function completeChatMention(proposal: ChatComposerProposal, knownUsers: string[]): ChatComposerProposal {
+export function completeChatMention(
+	proposal: ChatComposerProposal,
+	knownUsers: string[],
+): ChatComposerProposal {
 	return cycleChatMention(proposal, knownUsers, 1);
 }
 
@@ -118,9 +130,13 @@ function normalizeChatMentionHandle(user: string): string {
 }
 
 function getChatMentionCandidates(knownUsers: string[]): string[] {
-	return [...new Set(knownUsers.map(normalizeChatMentionHandle).filter((user) => user.length > 0))].sort(
-		(left, right) => left.localeCompare(right),
-	);
+	return [
+		...new Set(
+			knownUsers
+				.map(normalizeChatMentionHandle)
+				.filter((user) => user.length > 0),
+		),
+	].sort((left, right) => left.localeCompare(right));
 }
 
 function getActiveMentionContext(
@@ -141,7 +157,8 @@ function getActiveMentionContext(
 
 	const token = (mentionMatch[2] ?? "").toLowerCase();
 	const candidates = getChatMentionCandidates(knownUsers);
-	const getMatches = (query: string) => candidates.filter((user) => user.startsWith(query)).slice(0, limit);
+	const getMatches = (query: string) =>
+		candidates.filter((user) => user.startsWith(query)).slice(0, limit);
 	const fallbackMatches = getMatches(token);
 
 	let query = token;
@@ -153,7 +170,10 @@ function getActiveMentionContext(
 		const savedQuery = proposal.mentionSelection.query.toLowerCase();
 		const savedMatches = getMatches(savedQuery);
 		if (savedMatches.length > 0) {
-			const boundedIndex = Math.max(0, Math.min(proposal.mentionSelection.index, savedMatches.length - 1));
+			const boundedIndex = Math.max(
+				0,
+				Math.min(proposal.mentionSelection.index, savedMatches.length - 1),
+			);
 			const selectedValue = savedMatches[boundedIndex] ?? "";
 			if (token === savedQuery || token === selectedValue) {
 				query = savedQuery;
@@ -180,20 +200,29 @@ function getActiveMentionContext(
 	};
 }
 
-export function cycleChatMention(proposal: ChatComposerProposal, knownUsers: string[], direction = 1): ChatComposerProposal {
+export function cycleChatMention(
+	proposal: ChatComposerProposal,
+	knownUsers: string[],
+	direction = 1,
+): ChatComposerProposal {
 	const context = getActiveMentionContext(proposal, knownUsers);
 	if (!context) return proposal;
 
 	let nextIndex = context.selectedIndex;
 	if (context.selectionApplied) {
-		nextIndex = (context.selectedIndex + (direction >= 0 ? 1 : -1) + context.matches.length) % context.matches.length;
+		nextIndex =
+			(context.selectedIndex +
+				(direction >= 0 ? 1 : -1) +
+				context.matches.length) %
+			context.matches.length;
 	} else if (direction < 0) {
 		nextIndex = context.matches.length - 1;
 	}
 
 	const nextLines = [...proposal.lines];
 	const lastIndex = nextLines.length - 1;
-	nextLines[lastIndex] = `${context.currentLine.slice(0, context.replaceStart)}@${context.matches[nextIndex] ?? ""}`;
+	nextLines[lastIndex] =
+		`${context.currentLine.slice(0, context.replaceStart)}@${context.matches[nextIndex] ?? ""}`;
 
 	return {
 		lines: nextLines,
@@ -204,7 +233,10 @@ export function cycleChatMention(proposal: ChatComposerProposal, knownUsers: str
 	};
 }
 
-export function acceptChatMention(proposal: ChatComposerProposal, knownUsers: string[]): ChatComposerProposal {
+export function acceptChatMention(
+	proposal: ChatComposerProposal,
+	knownUsers: string[],
+): ChatComposerProposal {
 	const context = getActiveMentionContext(proposal, knownUsers);
 	if (!context) return proposal;
 
@@ -228,7 +260,11 @@ function longestCommonPrefix(values: string[]): string {
 	for (let index = 1; index < values.length; index += 1) {
 		const value = values[index] ?? "";
 		let shared = 0;
-		while (shared < prefix.length && shared < value.length && prefix[shared] === value[shared]) {
+		while (
+			shared < prefix.length &&
+			shared < value.length &&
+			prefix[shared] === value[shared]
+		) {
 			shared += 1;
 		}
 		prefix = prefix.slice(0, shared);
@@ -237,7 +273,10 @@ function longestCommonPrefix(values: string[]): string {
 	return prefix;
 }
 
-export function completeChatPath(proposal: ChatComposerProposal, options: ChatPathCompletionOptions = {}): ChatComposerProposal {
+export function completeChatPath(
+	proposal: ChatComposerProposal,
+	options: ChatPathCompletionOptions = {},
+): ChatComposerProposal {
 	const homeDir = options.homeDir ?? process.env.HOME;
 	const listDirectory = options.listDirectory ?? listDirectoryEntries;
 	const nextLines = [...proposal.lines];
@@ -249,10 +288,14 @@ export function completeChatPath(proposal: ChatComposerProposal, options: ChatPa
 	const rawToken = pathMatch[1] ?? "";
 	if (rawToken.startsWith("~/") && !homeDir) return proposal;
 
-	const expandedToken = rawToken.startsWith("~/") ? `${homeDir}/${rawToken.slice(2)}` : rawToken;
+	const expandedToken = rawToken.startsWith("~/")
+		? `${homeDir}/${rawToken.slice(2)}`
+		: rawToken;
 	const resolvedHomeDir = homeDir ?? "";
 	const tokenEndsInSlash = rawToken.endsWith("/");
-	const searchDirectory = tokenEndsInSlash ? expandedToken : dirname(expandedToken);
+	const searchDirectory = tokenEndsInSlash
+		? expandedToken
+		: dirname(expandedToken);
 	const namePrefix = tokenEndsInSlash ? "" : basename(expandedToken);
 
 	let entries: ChatPathEntry[];
@@ -263,13 +306,17 @@ export function completeChatPath(proposal: ChatComposerProposal, options: ChatPa
 	}
 
 	const visibleEntries = entries
-		.filter((entry) => namePrefix.startsWith(".") || !entry.name.startsWith("."))
+		.filter(
+			(entry) => namePrefix.startsWith(".") || !entry.name.startsWith("."),
+		)
 		.filter((entry) => entry.name.startsWith(namePrefix))
 		.sort((left, right) => left.name.localeCompare(right.name));
 	if (visibleEntries.length === 0) return proposal;
 
 	const displayCandidates = visibleEntries.map((entry) => {
-		const expandedCandidate = tokenEndsInSlash ? `${expandedToken}${entry.name}` : join(searchDirectory, entry.name);
+		const expandedCandidate = tokenEndsInSlash
+			? `${expandedToken}${entry.name}`
+			: join(searchDirectory, entry.name);
 		const displayCandidate = rawToken.startsWith("~/")
 			? `~/${relative(resolvedHomeDir, expandedCandidate).replace(/\\/g, "/")}`
 			: expandedCandidate;
@@ -277,7 +324,9 @@ export function completeChatPath(proposal: ChatComposerProposal, options: ChatPa
 	});
 
 	const replacement =
-		displayCandidates.length === 1 ? (displayCandidates[0] ?? rawToken) : longestCommonPrefix(displayCandidates);
+		displayCandidates.length === 1
+			? (displayCandidates[0] ?? rawToken)
+			: longestCommonPrefix(displayCandidates);
 	if (!replacement || replacement === rawToken) return proposal;
 
 	const replaceStart = currentLine.length - rawToken.length;
@@ -285,7 +334,11 @@ export function completeChatPath(proposal: ChatComposerProposal, options: ChatPa
 	return { lines: nextLines };
 }
 
-export function applyChatComposerKey(proposal: ChatComposerProposal, key: ChatComposerKey, chunk = ""): ChatComposerResult {
+export function applyChatComposerKey(
+	proposal: ChatComposerProposal,
+	key: ChatComposerKey,
+	chunk = "",
+): ChatComposerResult {
 	if (key.ctrl && key.name === "c") {
 		return { type: "exit", proposal };
 	}
@@ -311,7 +364,11 @@ export function applyChatComposerKey(proposal: ChatComposerProposal, key: ChatCo
 		return { type: "update", proposal };
 	}
 
-	if (["up", "down", "left", "right", "escape", "home", "end", "delete"].includes(key.name ?? "")) {
+	if (
+		["up", "down", "left", "right", "escape", "home", "end", "delete"].includes(
+			key.name ?? "",
+		)
+	) {
 		return { type: "update", proposal };
 	}
 

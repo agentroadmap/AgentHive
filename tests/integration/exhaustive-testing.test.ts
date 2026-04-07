@@ -8,9 +8,6 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-// Acceptance integration
-import { validateNoBlockingIssues, validateReachedTransition } from '../../src/core/proposal/acceptance.ts';
-import { Core } from "../../src/core/roadmap.ts";
 // Issue tracker
 import {
 	addIssue,
@@ -33,15 +30,32 @@ import {
 	scanTestDirectory,
 } from "../../src/core/pipeline/test-discovery.ts";
 // Test runner
-import { allTestsPassed, formatTestReport, runTestFile } from "../../src/core/pipeline/test-runner.ts";
-import { createUniqueTestDir, execSync, safeCleanup } from "../support/test-utils.ts";
+import {
+	allTestsPassed,
+	formatTestReport,
+	runTestFile,
+} from "../../src/core/pipeline/test-runner.ts";
+// Acceptance integration
+import {
+	validateNoBlockingIssues,
+	validateReachedTransition,
+} from "../../src/core/proposal/acceptance.ts";
+import { Core } from "../../src/core/roadmap.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 // --- Test Discovery Tests ---
 
 describe("Test Discovery", () => {
 	describe("categorizeTestFile", () => {
 		it("categorizes regression tests", () => {
-			assert.equal(categorizeTestFile("regression-issue-123.test.ts"), "regression");
+			assert.equal(
+				categorizeTestFile("regression-issue-123.test.ts"),
+				"regression",
+			);
 		});
 
 		it("categorizes e2e tests", () => {
@@ -66,7 +80,10 @@ describe("Test Discovery", () => {
 		});
 
 		it("handles paths with directories", () => {
-			assert.equal(categorizeTestFile("/some/path/cli-foo.test.ts"), "integration");
+			assert.equal(
+				categorizeTestFile("/some/path/cli-foo.test.ts"),
+				"integration",
+			);
 		});
 	});
 
@@ -96,7 +113,9 @@ describe("Test Discovery", () => {
 
 			const results = await scanTestDirectory(testDir);
 			const unit = results.find((r) => r.name === "unit.test.ts");
-			const integration = results.find((r) => r.name === "cli-integration.test.ts");
+			const integration = results.find(
+				(r) => r.name === "cli-integration.test.ts",
+			);
 
 			assert.equal(unit?.category, "unit");
 			assert.equal(integration?.category, "integration");
@@ -280,7 +299,16 @@ describe("simple", () => {
 	describe("formatTestReport", () => {
 		it("formats passing report", () => {
 			const report = {
-				results: [{ file: "test1.test.ts", passed: true, exitCode: 0, stdout: "", stderr: "", duration: 100 }],
+				results: [
+					{
+						file: "test1.test.ts",
+						passed: true,
+						exitCode: 0,
+						stdout: "",
+						stderr: "",
+						duration: 100,
+					},
+				],
 				summary: { total: 1, passed: 1, failed: 0, errors: 0 },
 				totalDuration: 100,
 				startedAt: "2026-03-21T00:00:00Z",
@@ -319,7 +347,16 @@ describe("simple", () => {
 	describe("allTestsPassed", () => {
 		it("returns true when all pass", () => {
 			const report = {
-				results: [{ file: "test1.test.ts", passed: true, exitCode: 0, stdout: "", stderr: "", duration: 100 }],
+				results: [
+					{
+						file: "test1.test.ts",
+						passed: true,
+						exitCode: 0,
+						stdout: "",
+						stderr: "",
+						duration: 100,
+					},
+				],
 				summary: { total: 1, passed: 1, failed: 0, errors: 0 },
 				totalDuration: 100,
 				startedAt: "",
@@ -331,8 +368,22 @@ describe("simple", () => {
 		it("returns false when any fail", () => {
 			const report = {
 				results: [
-					{ file: "test1.test.ts", passed: true, exitCode: 0, stdout: "", stderr: "", duration: 100 },
-					{ file: "test2.test.ts", passed: false, exitCode: 1, stdout: "", stderr: "", duration: 100 },
+					{
+						file: "test1.test.ts",
+						passed: true,
+						exitCode: 0,
+						stdout: "",
+						stderr: "",
+						duration: 100,
+					},
+					{
+						file: "test2.test.ts",
+						passed: false,
+						exitCode: 1,
+						stdout: "",
+						stderr: "",
+						duration: 100,
+					},
 				],
 				summary: { total: 2, passed: 1, failed: 1, errors: 0 },
 				totalDuration: 200,
@@ -380,7 +431,15 @@ describe("Complete issue enforcement", () => {
 		);
 
 		let store = loadIssues(projectDir);
-		store = addIssue(store, createIssue("proposal-1", "Critical integration regression", "critical", "critical.test.ts"));
+		store = addIssue(
+			store,
+			createIssue(
+				"proposal-1",
+				"Critical integration regression",
+				"critical",
+				"critical.test.ts",
+			),
+		);
 		saveIssues(projectDir, store);
 
 		await assert.rejects(
@@ -417,10 +476,21 @@ describe("Complete issue enforcement", () => {
 		);
 
 		let store = loadIssues(projectDir);
-		store = addIssue(store, createIssue("proposal-1", "Major regression remains open", "major", "major.test.ts"));
+		store = addIssue(
+			store,
+			createIssue(
+				"proposal-1",
+				"Major regression remains open",
+				"major",
+				"major.test.ts",
+			),
+		);
 		saveIssues(projectDir, store);
 
-		await assert.rejects(core.completeProposal("proposal-1", false), /blocking issue/i);
+		await assert.rejects(
+			core.completeProposal("proposal-1", false),
+			/blocking issue/i,
+		);
 	});
 });
 
@@ -446,7 +516,10 @@ describe("Issue Tracker", () => {
 
 		it("persists issues to disk", () => {
 			let store = loadIssues(testDir);
-			store = addIssue(store, createIssue("proposal-1", "Bug found", "critical", "test.test.ts"));
+			store = addIssue(
+				store,
+				createIssue("proposal-1", "Bug found", "critical", "test.test.ts"),
+			);
 			saveIssues(testDir, store);
 
 			const reloaded = loadIssues(testDir);
@@ -458,8 +531,14 @@ describe("Issue Tracker", () => {
 	describe("addIssue", () => {
 		it("assigns unique IDs", () => {
 			let store = loadIssues(testDir);
-			store = addIssue(store, createIssue("proposal-1", "Bug 1", "critical", "test.test.ts"));
-			store = addIssue(store, createIssue("proposal-1", "Bug 2", "major", "test.test.ts"));
+			store = addIssue(
+				store,
+				createIssue("proposal-1", "Bug 1", "critical", "test.test.ts"),
+			);
+			store = addIssue(
+				store,
+				createIssue("proposal-1", "Bug 2", "major", "test.test.ts"),
+			);
 
 			assert.equal(store.issues[0]?.id, "ISSUE-proposal-1-1");
 			assert.equal(store.issues[1]?.id, "ISSUE-proposal-1-2");
@@ -467,7 +546,10 @@ describe("Issue Tracker", () => {
 
 		it("sets initial status to open", () => {
 			let store = loadIssues(testDir);
-			store = addIssue(store, createIssue("proposal-1", "Bug", "critical", "test.test.ts"));
+			store = addIssue(
+				store,
+				createIssue("proposal-1", "Bug", "critical", "test.test.ts"),
+			);
 
 			assert.equal(store.issues[0]?.status, "open");
 		});
@@ -476,7 +558,10 @@ describe("Issue Tracker", () => {
 	describe("resolveIssue", () => {
 		it("marks issue as resolved", () => {
 			let store = loadIssues(testDir);
-			store = addIssue(store, createIssue("proposal-1", "Bug", "critical", "test.test.ts"));
+			store = addIssue(
+				store,
+				createIssue("proposal-1", "Bug", "critical", "test.test.ts"),
+			);
 			const first = store.issues[0];
 			assert.ok(first);
 			const issueId = first.id;
@@ -492,7 +577,10 @@ describe("Issue Tracker", () => {
 	describe("wontFixIssue", () => {
 		it("marks issue as wontfix", () => {
 			let store = loadIssues(testDir);
-			store = addIssue(store, createIssue("proposal-1", "Bug", "minor", "test.test.ts"));
+			store = addIssue(
+				store,
+				createIssue("proposal-1", "Bug", "minor", "test.test.ts"),
+			);
 			const first = store.issues[0];
 			assert.ok(first);
 			const issueId = first.id;
@@ -506,8 +594,14 @@ describe("Issue Tracker", () => {
 	describe("getProposalIssues", () => {
 		it("filters by proposal and open status", () => {
 			let store = loadIssues(testDir);
-			store = addIssue(store, createIssue("proposal-1", "Bug 1", "critical", "test.test.ts"));
-			store = addIssue(store, createIssue("proposal-2", "Bug 2", "critical", "test.test.ts"));
+			store = addIssue(
+				store,
+				createIssue("proposal-1", "Bug 1", "critical", "test.test.ts"),
+			);
+			store = addIssue(
+				store,
+				createIssue("proposal-2", "Bug 2", "critical", "test.test.ts"),
+			);
 			const first = store.issues[0];
 			assert.ok(first);
 			store = resolveIssue(store, first.id, "Fixed");
@@ -523,9 +617,18 @@ describe("Issue Tracker", () => {
 	describe("getBlockingIssues", () => {
 		it("returns only critical and major open issues", () => {
 			let store = loadIssues(testDir);
-			store = addIssue(store, createIssue("proposal-1", "Critical", "critical", "test.test.ts"));
-			store = addIssue(store, createIssue("proposal-1", "Major", "major", "test.test.ts"));
-			store = addIssue(store, createIssue("proposal-1", "Minor", "minor", "test.test.ts"));
+			store = addIssue(
+				store,
+				createIssue("proposal-1", "Critical", "critical", "test.test.ts"),
+			);
+			store = addIssue(
+				store,
+				createIssue("proposal-1", "Major", "major", "test.test.ts"),
+			);
+			store = addIssue(
+				store,
+				createIssue("proposal-1", "Minor", "minor", "test.test.ts"),
+			);
 
 			const blocking = getBlockingIssues(store, "proposal-1");
 			assert.equal(blocking.length, 2);
@@ -533,7 +636,10 @@ describe("Issue Tracker", () => {
 
 		it("excludes resolved issues", () => {
 			let store = loadIssues(testDir);
-			store = addIssue(store, createIssue("proposal-1", "Critical", "critical", "test.test.ts"));
+			store = addIssue(
+				store,
+				createIssue("proposal-1", "Critical", "critical", "test.test.ts"),
+			);
 			const first = store.issues[0];
 			assert.ok(first);
 			store = resolveIssue(store, first.id, "Fixed");
@@ -546,14 +652,20 @@ describe("Issue Tracker", () => {
 	describe("isBlockedByIssues", () => {
 		it("returns true when critical issues exist", () => {
 			let store = loadIssues(testDir);
-			store = addIssue(store, createIssue("proposal-1", "Critical", "critical", "test.test.ts"));
+			store = addIssue(
+				store,
+				createIssue("proposal-1", "Critical", "critical", "test.test.ts"),
+			);
 
 			assert.equal(isBlockedByIssues(store, "proposal-1"), true);
 		});
 
 		it("returns false when no blocking issues", () => {
 			let store = loadIssues(testDir);
-			store = addIssue(store, createIssue("proposal-1", "Minor", "minor", "test.test.ts"));
+			store = addIssue(
+				store,
+				createIssue("proposal-1", "Minor", "minor", "test.test.ts"),
+			);
 
 			assert.equal(isBlockedByIssues(store, "proposal-1"), false);
 		});
@@ -561,8 +673,18 @@ describe("Issue Tracker", () => {
 
 	describe("formatIssues", () => {
 		it("formats issues with severity icons", () => {
-			const issue0 = createIssue("proposal-1", "Critical bug", "critical", "test.test.ts");
-			const issue1 = createIssue("proposal-1", "Major bug", "major", "test.test.ts");
+			const issue0 = createIssue(
+				"proposal-1",
+				"Critical bug",
+				"critical",
+				"test.test.ts",
+			);
+			const issue1 = createIssue(
+				"proposal-1",
+				"Major bug",
+				"major",
+				"test.test.ts",
+			);
 			issue0.id = "ISSUE-1";
 			issue1.id = "ISSUE-2";
 

@@ -7,22 +7,36 @@ import type { Directive, Proposal } from "../../shared/types/index.ts";
 import { watchConfig } from "../../shared/utils/config-watcher.ts";
 import { collectAvailableLabels } from "../../shared/utils/label-filter.ts";
 import { hasAnyPrefix } from "../../shared/utils/prefix-config.ts";
-import { applySharedProposalFilters, createProposalSearchIndex } from "../../shared/utils/proposal-search.ts";
+import {
+	applySharedProposalFilters,
+	createProposalSearchIndex,
+} from "../../shared/utils/proposal-search.ts";
 import { watchProposals } from "../../shared/utils/proposal-watcher.ts";
 import { renderBoardTui } from "./board.ts";
-import { createLoadingScreen } from "./loading.ts";
-import { createScreen } from "./tui.ts";
-import { buildProposalViewerDirectiveFilterModel, viewProposalEnhanced } from "./proposal-viewer-with-search.ts";
-import { type ViewProposal, ViewSwitcher, type ViewType } from "./view-switcher.ts";
 import type { WorkforceAgent } from "./cockpit.ts";
+import { createLoadingScreen } from "./loading.ts";
+import {
+	buildProposalViewerDirectiveFilterModel,
+	viewProposalEnhanced,
+} from "./proposal-viewer-with-search.ts";
+import { createScreen } from "./tui.ts";
+import {
+	type ViewProposal,
+	ViewSwitcher,
+	type ViewType,
+} from "./view-switcher.ts";
 
 export interface UnifiedViewOptions {
 	core: Core;
 	initialView: ViewType;
 	selectedProposal?: Proposal;
 	proposals?: Proposal[];
-	proposalsLoader?: (updateProgress: (message: string) => void) => Promise<{ proposals: Proposal[]; statuses: string[] }>;
-	loadingScreenFactory?: (initialMessage: string) => Promise<LoadingScreen | null>;
+	proposalsLoader?: (
+		updateProgress: (message: string) => void,
+	) => Promise<{ proposals: Proposal[]; statuses: string[] }>;
+	loadingScreenFactory?: (
+		initialMessage: string,
+	) => Promise<LoadingScreen | null>;
 	title?: string;
 	filter?: {
 		status?: string;
@@ -70,7 +84,9 @@ export interface KanbanSharedFilters {
 	directiveFilter: string;
 }
 
-export function createKanbanSharedFilters(filters: UnifiedViewFilters): KanbanSharedFilters {
+export function createKanbanSharedFilters(
+	filters: UnifiedViewFilters,
+): KanbanSharedFilters {
 	return {
 		searchQuery: filters.searchQuery,
 		priorityFilter: filters.priorityFilter,
@@ -107,7 +123,9 @@ export function filterProposalsForKanban(
 	);
 }
 
-export function createUnifiedViewFilters(filter: UnifiedViewOptions["filter"] | undefined): UnifiedViewFilters {
+export function createUnifiedViewFilters(
+	filter: UnifiedViewOptions["filter"] | undefined,
+): UnifiedViewFilters {
 	return {
 		searchQuery: filter?.searchQuery || "",
 		statusFilter: filter?.status || "",
@@ -117,7 +135,10 @@ export function createUnifiedViewFilters(filter: UnifiedViewOptions["filter"] | 
 	};
 }
 
-export function mergeUnifiedViewFilters(current: UnifiedViewFilters, update: UnifiedViewFilters): UnifiedViewFilters {
+export function mergeUnifiedViewFilters(
+	current: UnifiedViewFilters,
+	update: UnifiedViewFilters,
+): UnifiedViewFilters {
 	return {
 		...current,
 		searchQuery: update.searchQuery,
@@ -130,28 +151,52 @@ export function mergeUnifiedViewFilters(current: UnifiedViewFilters, update: Uni
 
 export async function loadProposalsForUnifiedView(
 	core: Core,
-	options: Pick<UnifiedViewOptions, "proposals" | "proposalsLoader" | "loadingScreenFactory">,
+	options: Pick<
+		UnifiedViewOptions,
+		"proposals" | "proposalsLoader" | "loadingScreenFactory"
+	>,
 ): Promise<UnifiedViewLoadResult> {
 	if (options.proposals && options.proposals.length > 0) {
 		const config = await core.filesystem.loadConfig();
 		return {
 			proposals: options.proposals,
-			statuses: config?.statuses || ["Draft", "Review", "Building", "Accepted", "Complete", "Rejected", "Abandoned", "Replaced"],
+			statuses: config?.statuses || [
+				"Draft",
+				"Review",
+				"Building",
+				"Accepted",
+				"Complete",
+				"Rejected",
+				"Abandoned",
+				"Replaced",
+			],
 		};
 	}
 
 	const loader =
 		options.proposalsLoader ||
-		(async (updateProgress: (message: string) => void): Promise<{ proposals: Proposal[]; statuses: string[] }> => {
+		(async (
+			updateProgress: (message: string) => void,
+		): Promise<{ proposals: Proposal[]; statuses: string[] }> => {
 			const proposals = await core.loadProposals(updateProgress);
 			const config = await core.filesystem.loadConfig();
 			return {
 				proposals,
-				statuses: config?.statuses || ["Draft", "Review", "Building", "Accepted", "Complete", "Rejected", "Abandoned", "Replaced"],
+				statuses: config?.statuses || [
+					"Draft",
+					"Review",
+					"Building",
+					"Accepted",
+					"Complete",
+					"Rejected",
+					"Abandoned",
+					"Replaced",
+				],
 			};
 		});
 
-	const loadingScreenFactory = options.loadingScreenFactory || createLoadingScreen;
+	const loadingScreenFactory =
+		options.loadingScreenFactory || createLoadingScreen;
 	const loadingScreen = await loadingScreenFactory("Loading proposals");
 
 	try {
@@ -173,18 +218,25 @@ type ViewResult = "switch" | "exit";
 /**
  * Main unified view controller that handles Tab switching between views
  */
-export async function runUnifiedView(options: UnifiedViewOptions): Promise<void> {
+export async function runUnifiedView(
+	options: UnifiedViewOptions,
+): Promise<void> {
 	try {
-		const { proposals: loadedProposals, statuses: loadedStatuses } = await loadProposalsForUnifiedView(options.core, {
-			proposals: options.proposals,
-			proposalsLoader: options.proposalsLoader,
-			loadingScreenFactory: options.loadingScreenFactory,
-		});
+		const { proposals: loadedProposals, statuses: loadedStatuses } =
+			await loadProposalsForUnifiedView(options.core, {
+				proposals: options.proposals,
+				proposalsLoader: options.proposalsLoader,
+				loadingScreenFactory: options.loadingScreenFactory,
+			});
 
-		const baseProposals = (loadedProposals || []).filter((t) => t.id && t.id.trim() !== "" && hasAnyPrefix(t.id));
+		const baseProposals = (loadedProposals || []).filter(
+			(t) => t.id && t.id.trim() !== "" && hasAnyPrefix(t.id),
+		);
 		if (baseProposals.length === 0) {
 			if (options.filter?.parentProposalId) {
-				console.log(`No child proposals found for parent proposal ${options.filter.parentProposalId}.`);
+				console.log(
+					`No child proposals found for parent proposal ${options.filter.parentProposalId}.`,
+				);
 			} else {
 				console.log("No proposals found.");
 			}
@@ -193,7 +245,8 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 		const initialConfig = await options.core.filesystem.loadConfig();
 		let configuredLabels = initialConfig?.labels ?? [];
 		let directiveEntities = await options.core.filesystem.listDirectives();
-		let directiveFilterModel = buildProposalViewerDirectiveFilterModel(directiveEntities);
+		let directiveFilterModel =
+			buildProposalViewerDirectiveFilterModel(directiveEntities);
 		let currentFilters = createUnifiedViewFilters(options.filter);
 		const initialProposal: ViewProposal = {
 			type: options.initialView,
@@ -217,12 +270,20 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 		let selectedProposal: Proposal | undefined = options.selectedProposal;
 		let proposals = baseProposals;
 		let kanbanStatuses = loadedStatuses ?? [];
-		let boardUpdater: ((nextProposals: Proposal[], nextStatuses: string[]) => void) | null = null;
+		let boardUpdater:
+			| ((nextProposals: Proposal[], nextStatuses: string[]) => void)
+			| null = null;
 
 		const getRenderableProposals = () =>
-			proposals.filter((proposal) => proposal.id && proposal.id.trim() !== "" && hasAnyPrefix(proposal.id));
-		const getBoardAvailableLabels = () => collectAvailableLabels(getRenderableProposals(), configuredLabels);
-		const getBoardAvailableDirectives = () => [...directiveFilterModel.availableDirectiveTitles];
+			proposals.filter(
+				(proposal) =>
+					proposal.id && proposal.id.trim() !== "" && hasAnyPrefix(proposal.id),
+			);
+		const getBoardAvailableLabels = () =>
+			collectAvailableLabels(getRenderableProposals(), configuredLabels);
+		const getBoardAvailableDirectives = () => [
+			...directiveFilterModel.availableDirectiveTitles,
+		];
 
 		const emitBoardUpdate = () => {
 			if (!boardUpdater) return;
@@ -242,7 +303,9 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 				const viewProposal = viewSwitcher?.getProposal();
 				viewSwitcher?.updateProposal({
 					proposals,
-					kanbanData: viewProposal?.kanbanData ? { ...viewProposal.kanbanData, proposals } : undefined,
+					kanbanData: viewProposal?.kanbanData
+						? { ...viewProposal.kanbanData, proposals }
+						: undefined,
 				});
 				emitBoardUpdate();
 			},
@@ -256,7 +319,9 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 				const viewProposal = viewSwitcher?.getProposal();
 				viewSwitcher?.updateProposal({
 					proposals,
-					kanbanData: viewProposal?.kanbanData ? { ...viewProposal.kanbanData, proposals } : undefined,
+					kanbanData: viewProposal?.kanbanData
+						? { ...viewProposal.kanbanData, proposals }
+						: undefined,
 				});
 				emitBoardUpdate();
 			},
@@ -268,7 +333,9 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 				const proposal = viewSwitcher?.getProposal();
 				viewSwitcher?.updateProposal({
 					proposals,
-					kanbanData: proposal?.kanbanData ? { ...proposal.kanbanData, proposals } : undefined,
+					kanbanData: proposal?.kanbanData
+						? { ...proposal.kanbanData, proposals }
+						: undefined,
 				});
 				emitBoardUpdate();
 			},
@@ -286,7 +353,9 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 
 		// Function to show proposal view
 		const showProposalView = async (): Promise<ViewResult> => {
-			const availableProposals = proposals.filter((t) => t.id && t.id.trim() !== "" && hasAnyPrefix(t.id));
+			const availableProposals = proposals.filter(
+				(t) => t.id && t.id.trim() !== "" && hasAnyPrefix(t.id),
+			);
 
 			if (availableProposals.length === 0) {
 				console.log("No proposals available.");
@@ -296,7 +365,9 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 			// Find the proposal to view - if selectedProposal has an ID, find it in available proposals
 			let proposalToView: Proposal | undefined;
 			if (selectedProposal?.id) {
-				const foundProposal = availableProposals.find((t) => t.id === selectedProposal?.id);
+				const foundProposal = availableProposals.find(
+					(t) => t.id === selectedProposal?.id,
+				);
 				proposalToView = foundProposal || availableProposals[0];
 			} else {
 				proposalToView = availableProposals[0];
@@ -319,7 +390,9 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 				// - If we have a search query on initial load, focus search
 				// - If currentView is proposal-detail, focus detail
 				// - Otherwise (including when coming from kanban), focus proposal list
-				const hasSearchQuery = options.filter ? "searchQuery" in options.filter : false;
+				const hasSearchQuery = options.filter
+					? "searchQuery" in options.filter
+					: false;
 				const shouldFocusSearch = isInitialLoad && hasSearchQuery;
 
 				viewProposalEnhanced(proposalToView, {
@@ -359,7 +432,8 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 			const layout = "horizontal" as const;
 			const maxColumnWidth = config?.maxColumnWidth || 20;
 			directiveEntities = await options.core.filesystem.listDirectives();
-			directiveFilterModel = buildProposalViewerDirectiveFilterModel(directiveEntities);
+			directiveFilterModel =
+				buildProposalViewerDirectiveFilterModel(directiveEntities);
 			const kanbanProposals = getRenderableProposals();
 			const statuses = kanbanStatuses;
 
@@ -411,10 +485,10 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 			const screen = createScreen({ title: "Engineer's Cockpit" });
 
 			return new Promise<ViewResult>((resolve) => {
-				let result: ViewResult = "exit";
+				let _result: ViewResult = "exit";
 
 				const onTabPress = () => {
-					result = "switch";
+					_result = "switch";
 				};
 
 				const refresh = async () => {
@@ -434,11 +508,13 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 						lastSeen: Date.parse(agent.lastSeen || new Date().toISOString()),
 					}));
 
-					const cockpitMessages = pulseMessages.messages.slice(-30).map((message) => ({
-						sender_identity: message.from,
-						content: message.text,
-						timestamp: Date.parse(message.timestamp) * 1000,
-					}));
+					const cockpitMessages = pulseMessages.messages
+						.slice(-30)
+						.map((message) => ({
+							sender_identity: message.from,
+							content: message.text,
+							timestamp: Date.parse(message.timestamp) * 1000,
+						}));
 
 					renderCockpit(screen, {
 						agents: agentData,
@@ -487,10 +563,10 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 			const screen = createScreen({ title: "System Feed" });
 
 			return new Promise<ViewResult>((resolve) => {
-				let result: ViewResult = "exit";
+				let _result: ViewResult = "exit";
 
 				const onTabPress = () => {
-					result = "switch";
+					_result = "switch";
 				};
 
 				const refresh = async () => {
@@ -503,7 +579,7 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 					}));
 					renderHeadlines(screen, {
 						messages: messages as any[],
-						projectName: config?.projectName || "Roadmap.md"
+						projectName: config?.projectName || "Roadmap.md",
 					});
 				};
 
@@ -536,10 +612,10 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 			const screen = createScreen({ title: "Project Chat" });
 
 			return new Promise<ViewResult>((resolve) => {
-				let result: ViewResult = "exit";
+				let _result: ViewResult = "exit";
 
 				const onTabPress = () => {
-					result = "switch";
+					_result = "switch";
 				};
 
 				const currentChannel = "public";

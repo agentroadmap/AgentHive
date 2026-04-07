@@ -7,25 +7,31 @@
  * AC#4: Message threading supported
  */
 
-import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import {
-	extractMentions,
-	parseMessageLine,
-	parseMessagesFromFile,
+	existsSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import {
+	appendMessage,
 	buildThreads,
+	ensureChannelFile,
+	extractMentions,
 	findMentionsForAgent,
 	formatMentionNotification,
-	formatThread,
-	appendMessage,
-	ensureChannelFile,
 	formatMessage,
-	shouldNotify,
+	formatThread,
 	type ParsedMessage,
-} from '../../src/core/messaging/message-protocol.ts';
+	parseMessageLine,
+	parseMessagesFromFile,
+	shouldNotify,
+} from "../../src/core/messaging/message-protocol.ts";
 
 describe("proposal-49: Inter-Agent Communication Protocol", () => {
 	let testDir: string;
@@ -42,11 +48,18 @@ describe("proposal-49: Inter-Agent Communication Protocol", () => {
 
 	describe("AC#3: Agent mentions trigger notifications", () => {
 		it("should extract mentions from message content", () => {
-			assert.deepEqual(extractMentions("Hello @alice and @bob"), ["alice", "bob"]);
+			assert.deepEqual(extractMentions("Hello @alice and @bob"), [
+				"alice",
+				"bob",
+			]);
 			assert.deepEqual(extractMentions("No mentions here"), []);
 			assert.deepEqual(extractMentions("@alice @alice duplicate"), ["alice"]);
-			assert.deepEqual(extractMentions("Use @agent-name format"), ["agent-name"]);
-			assert.deepEqual(extractMentions("Use @agent_name format"), ["agent_name"]);
+			assert.deepEqual(extractMentions("Use @agent-name format"), [
+				"agent-name",
+			]);
+			assert.deepEqual(extractMentions("Use @agent_name format"), [
+				"agent_name",
+			]);
 		});
 
 		it("should parse messages with mentions", () => {
@@ -54,9 +67,9 @@ describe("proposal-49: Inter-Agent Communication Protocol", () => {
 			const message = parseMessageLine(line, "project");
 
 			assert.notEqual(message, null);
-			assert.equal(message!.type, "mention");
-			assert.ok(message!.mentions.includes("alice"));
-			assert.equal(message!.from, "bob");
+			assert.equal(message?.type, "mention");
+			assert.ok(message?.mentions.includes("alice"));
+			assert.equal(message?.from, "bob");
 		});
 
 		it("should find mentions for a specific agent", () => {
@@ -98,12 +111,17 @@ describe("proposal-49: Inter-Agent Communication Protocol", () => {
 
 			const aliceMentions = findMentionsForAgent(messages, "alice");
 			assert.equal(aliceMentions.length, 2);
-			assert.equal(aliceMentions[0]!.message.from, "bob");
-			assert.equal(aliceMentions[1]!.message.from, "carol");
+			assert.equal(aliceMentions[0]?.message.from, "bob");
+			assert.equal(aliceMentions[1]?.message.from, "carol");
 
 			// Should not include self-mentions
-			const aliceMentionsIncludingSelf = findMentionsForAgent(messages, "alice");
-			const selfMentions = aliceMentionsIncludingSelf.filter(n => n.message.from === "alice");
+			const aliceMentionsIncludingSelf = findMentionsForAgent(
+				messages,
+				"alice",
+			);
+			const selfMentions = aliceMentionsIncludingSelf.filter(
+				(n) => n.message.from === "alice",
+			);
 			assert.equal(selfMentions.length, 0); // Self-mentions filtered out
 		});
 
@@ -175,13 +193,14 @@ describe("proposal-49: Inter-Agent Communication Protocol", () => {
 
 	describe("AC#4: Message threading supported", () => {
 		it("should parse messages with thread markers", () => {
-			const line = "[2026-03-24 10:05:00] alice [thread=MSG-abc123]: I agree with this approach";
+			const line =
+				"[2026-03-24 10:05:00] alice [thread=MSG-abc123]: I agree with this approach";
 			const message = parseMessageLine(line, "project");
 
 			assert.notEqual(message, null);
-			assert.equal(message!.type, "thread_reply");
-			assert.equal(message!.threadId, "MSG-abc123");
-			assert.equal(message!.replyTo, "MSG-abc123");
+			assert.equal(message?.type, "thread_reply");
+			assert.equal(message?.threadId, "MSG-abc123");
+			assert.equal(message?.replyTo, "MSG-abc123");
 		});
 
 		it("should parse messages with reply markers", () => {
@@ -189,8 +208,8 @@ describe("proposal-49: Inter-Agent Communication Protocol", () => {
 			const message = parseMessageLine(line, "project");
 
 			assert.notEqual(message, null);
-			assert.equal(message!.replyTo, "MSG-abc123");
-			assert.equal(message!.threadId, undefined);
+			assert.equal(message?.replyTo, "MSG-abc123");
+			assert.equal(message?.threadId, undefined);
 		});
 
 		it("should build threads from messages", () => {
@@ -248,11 +267,11 @@ describe("proposal-49: Inter-Agent Communication Protocol", () => {
 			const threads = buildThreads(messages);
 
 			assert.equal(threads.length, 1);
-			assert.equal(threads[0]!.id, "MSG-001");
-			assert.equal(threads[0]!.replies.length, 2);
-			assert.ok(threads[0]!.participants.includes("bob"));
-			assert.ok(threads[0]!.participants.includes("alice"));
-			assert.ok(threads[0]!.participants.includes("carol"));
+			assert.equal(threads[0]?.id, "MSG-001");
+			assert.equal(threads[0]?.replies.length, 2);
+			assert.ok(threads[0]?.participants.includes("bob"));
+			assert.ok(threads[0]?.participants.includes("alice"));
+			assert.ok(threads[0]?.participants.includes("carol"));
 		});
 
 		it("should format thread for display", () => {
@@ -305,7 +324,10 @@ describe("proposal-49: Inter-Agent Communication Protocol", () => {
 				content: "Hello everyone!",
 			});
 
-			assert.match(formatted, /^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] alice:/);
+			assert.match(
+				formatted,
+				/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] alice:/,
+			);
 			assert.ok(formatted.includes("Hello everyone!"));
 		});
 
@@ -373,9 +395,9 @@ describe("proposal-49: Inter-Agent Communication Protocol", () => {
 			const messages = parseMessagesFromFile(filePath, "project");
 
 			assert.equal(messages.length, 3);
-			assert.equal(messages[0]!.from, "bob");
-			assert.ok(messages[1]!.mentions.includes("bob"));
-			assert.equal(messages[2]!.from, "carol");
+			assert.equal(messages[0]?.from, "bob");
+			assert.ok(messages[1]?.mentions.includes("bob"));
+			assert.equal(messages[2]?.from, "carol");
 		});
 
 		it("should handle missing files", () => {

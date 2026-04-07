@@ -94,7 +94,9 @@ const ActivityFeed: React.FC = () => {
 		<div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col h-full overflow-hidden">
 			<div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-gray-50 dark:bg-gray-800/50">
 				<div className="flex items-center space-x-4">
-					<h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Activity Feed</h2>
+					<h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+						Activity Feed
+					</h2>
 					<select
 						value={timeRange}
 						onChange={(e) => setTimeRange(e.target.value)}
@@ -117,22 +119,31 @@ const ActivityFeed: React.FC = () => {
 				</div>
 			) : filteredEvents.length === 0 ? (
 				<div className="p-8 text-center">
-					<p className="text-sm text-gray-500 dark:text-gray-400">No activity in this time range</p>
+					<p className="text-sm text-gray-500 dark:text-gray-400">
+						No activity in this time range
+					</p>
 				</div>
 			) : (
-				<div ref={feedRef} className="divide-y divide-gray-100 dark:divide-gray-700 overflow-y-auto flex-1">
+				<div
+					ref={feedRef}
+					className="divide-y divide-gray-100 dark:divide-gray-700 overflow-y-auto flex-1"
+				>
 					{filteredEvents.map((event, i) => (
 						<div
 							key={`${event.id}-${event.timestamp}-${i}`}
 							className="px-4 py-3 flex items-start gap-3 hover:bg-gray-50 dark:hover:bg-gray-700/20 transition-colors"
 						>
-							<span className={`text-lg mt-0.5 font-bold ${pulseColor[event.type] || "text-gray-400"}`}>
+							<span
+								className={`text-lg mt-0.5 font-bold ${pulseColor[event.type] || "text-gray-400"}`}
+							>
 								{pulseIcon[event.type] || "•"}
 							</span>
 							<div className="flex-1 min-w-0">
 								<div className="text-sm text-gray-900 dark:text-gray-100">
 									<span className="font-semibold">{event.agent}</span>{" "}
-									<span className="text-gray-500 dark:text-gray-400 text-xs">{formatEventType(event.type)}</span>
+									<span className="text-gray-500 dark:text-gray-400 text-xs">
+										{formatEventType(event.type)}
+									</span>
 								</div>
 								<div className="text-sm text-gray-700 dark:text-gray-300 truncate font-medium">
 									{event.id} — {event.title}

@@ -7,14 +7,16 @@
  * AC#4: Agents can query their team memberships across all proposals
  */
 
-import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { beforeEach, describe, it } from "node:test";
 import {
-	AgentTeamMembership,
 	type AgentProfile,
-	type MembershipEvent,
+	AgentTeamMembership,
 } from "../../src/core/collaboration/agent-team-membership.ts";
-import type { Team, TeamMember } from "../../src/core/collaboration/dynamic-team-builder.ts";
+import type {
+	Team,
+	TeamMember,
+} from "../../src/core/collaboration/dynamic-team-builder.ts";
 
 describe("proposal-63: Agent Team Membership", () => {
 	let manager: AgentTeamMembership;
@@ -24,7 +26,11 @@ describe("proposal-63: Agent Team Membership", () => {
 	});
 
 	// Helper to create a mock team
-	function createMockTeam(teamId: string, proposalId: string, members?: TeamMember[]): Team {
+	function createMockTeam(
+		teamId: string,
+		proposalId: string,
+		members?: TeamMember[],
+	): Team {
 		return {
 			teamId,
 			proposalId,
@@ -71,9 +77,9 @@ describe("proposal-63: Agent Team Membership", () => {
 			const discoveries = manager.discoverTeams("agent-alpha", "proposal-42");
 
 			assert.equal(discoveries.length, 1);
-			assert.equal(discoveries[0]!.team.teamId, "team-1");
-			assert.ok(discoveries[0]!.relevance >= 0);
-			assert.ok(discoveries[0]!.relevance <= 1);
+			assert.equal(discoveries[0]?.team.teamId, "team-1");
+			assert.ok(discoveries[0]?.relevance >= 0);
+			assert.ok(discoveries[0]?.relevance <= 1);
 		});
 
 		it("returns empty for unknown proposal", () => {
@@ -91,15 +97,17 @@ describe("proposal-63: Agent Team Membership", () => {
 			manager.registerTeam(team1);
 			manager.registerTeam(team2);
 
-			manager.registerAgent(createAgentProfile("agent-alpha", {
-				skills: ["typescript"],
-			}));
+			manager.registerAgent(
+				createAgentProfile("agent-alpha", {
+					skills: ["typescript"],
+				}),
+			);
 
 			const discoveries = manager.discoverTeams("agent-alpha", "proposal-42");
 
 			assert.ok(discoveries.length >= 2);
 			// First should have higher relevance
-			assert.ok(discoveries[0]!.relevance >= discoveries[1].relevance);
+			assert.ok(discoveries[0]?.relevance >= discoveries[1].relevance);
 		});
 
 		it("filters by minimum relevance", () => {
@@ -131,7 +139,7 @@ describe("proposal-63: Agent Team Membership", () => {
 
 			const discoveries = manager.discoverTeams("agent-alpha", "proposal-42");
 
-			assert.ok(discoveries[0]!.availableRoles.includes("contributor"));
+			assert.ok(discoveries[0]?.availableRoles.includes("contributor"));
 		});
 
 		it("registers and unregisters teams", () => {
@@ -185,10 +193,12 @@ describe("proposal-63: Agent Team Membership", () => {
 			manager.registerTeam(team);
 
 			// Register agent with low capacity
-			manager.registerAgent(createAgentProfile("agent-alpha", {
-				usedCapacity: 90,
-				maxCapacity: 100,
-			}));
+			manager.registerAgent(
+				createAgentProfile("agent-alpha", {
+					usedCapacity: 90,
+					maxCapacity: 100,
+				}),
+			);
 
 			assert.throws(
 				() => manager.joinTeam("agent-alpha", "team-1", { capacity: 20 }),
@@ -256,7 +266,9 @@ describe("proposal-63: Agent Team Membership", () => {
 			const team = createMockTeam("team-1", "proposal-42");
 			manager.registerTeam(team);
 
-			const membership = manager.joinTeam("agent-alpha", "team-1", { capacity: 50 });
+			const membership = manager.joinTeam("agent-alpha", "team-1", {
+				capacity: 50,
+			});
 
 			assert.equal(membership.capacity, 50);
 		});
@@ -265,7 +277,9 @@ describe("proposal-63: Agent Team Membership", () => {
 			const team = createMockTeam("team-1", "proposal-42");
 			manager.registerTeam(team);
 
-			const membership = manager.joinTeam("agent-alpha", "team-1", { role: "advisor" });
+			const membership = manager.joinTeam("agent-alpha", "team-1", {
+				role: "advisor",
+			});
 
 			assert.equal(membership.role, "advisor");
 		});
@@ -414,8 +428,8 @@ describe("proposal-63: Agent Team Membership", () => {
 			assert.ok(composition);
 			assert.equal(composition.activeCount, 3);
 			assert.equal(composition.totalCount, 3);
-			assert.equal(composition.roles["owner"], 1);
-			assert.equal(composition.roles["contributor"], 2);
+			assert.equal(composition.roles.owner, 1);
+			assert.equal(composition.roles.contributor, 2);
 		});
 	});
 
@@ -491,7 +505,9 @@ describe("proposal-63: Agent Team Membership", () => {
 			manager.joinTeam("agent-alpha", "team-1");
 			manager.joinTeam("agent-beta", "team-2");
 
-			const proposalMemberships = manager.getMemberships({ proposalId: "proposal-42" });
+			const proposalMemberships = manager.getMemberships({
+				proposalId: "proposal-42",
+			});
 			assert.equal(proposalMemberships.length, 2);
 		});
 
@@ -509,23 +525,29 @@ describe("proposal-63: Agent Team Membership", () => {
 		});
 
 		it("finds agents with available capacity", () => {
-			manager.registerAgent(createAgentProfile("agent-alpha", {
-				usedCapacity: 20,
-				maxCapacity: 100,
-				availability: "available",
-			}));
+			manager.registerAgent(
+				createAgentProfile("agent-alpha", {
+					usedCapacity: 20,
+					maxCapacity: 100,
+					availability: "available",
+				}),
+			);
 
-			manager.registerAgent(createAgentProfile("agent-beta", {
-				usedCapacity: 90,
-				maxCapacity: 100,
-				availability: "available",
-			}));
+			manager.registerAgent(
+				createAgentProfile("agent-beta", {
+					usedCapacity: 90,
+					maxCapacity: 100,
+					availability: "available",
+				}),
+			);
 
-			manager.registerAgent(createAgentProfile("agent-gamma", {
-				usedCapacity: 50,
-				maxCapacity: 100,
-				availability: "unavailable",
-			}));
+			manager.registerAgent(
+				createAgentProfile("agent-gamma", {
+					usedCapacity: 50,
+					maxCapacity: 100,
+					availability: "unavailable",
+				}),
+			);
 
 			const available = manager.findAvailableAgents({ minCapacity: 50 });
 
@@ -534,15 +556,19 @@ describe("proposal-63: Agent Team Membership", () => {
 		});
 
 		it("finds agents by skills", () => {
-			manager.registerAgent(createAgentProfile("agent-alpha", {
-				skills: ["typescript", "react", "testing"],
-				availability: "available",
-			}));
+			manager.registerAgent(
+				createAgentProfile("agent-alpha", {
+					skills: ["typescript", "react", "testing"],
+					availability: "available",
+				}),
+			);
 
-			manager.registerAgent(createAgentProfile("agent-beta", {
-				skills: ["python", "django"],
-				availability: "available",
-			}));
+			manager.registerAgent(
+				createAgentProfile("agent-beta", {
+					skills: ["python", "django"],
+					availability: "available",
+				}),
+			);
 
 			const found = manager.findAvailableAgents({
 				requiredSkills: ["typescript"],

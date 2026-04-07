@@ -1,9 +1,9 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
-import type { RoadmapConfig, Proposal } from "../../src/types/index.ts";
+import type { Proposal, RoadmapConfig } from "../../src/types/index.ts";
 import { createUniqueTestDir, safeCleanup } from "../support/test-utils.ts";
 
 function createMockScreen(): Parameters<Core["editProposalInTui"]>[1] {
@@ -50,7 +50,10 @@ describe("Core.editProposalInTui", () => {
 		await core.filesystem.saveConfig(updated);
 	};
 
-	const createEditorScript = async (name: string, source: string): Promise<string> => {
+	const createEditorScript = async (
+		name: string,
+		source: string,
+	): Promise<string> => {
 		const scriptPath = join(testDir, name);
 		await writeFile(scriptPath, source);
 		return scriptPath;
@@ -89,7 +92,10 @@ describe("Core.editProposalInTui", () => {
 	});
 
 	it("returns unchanged result when editor makes no file modifications", async () => {
-		const noopScript = await createEditorScript("noop-editor.js", "process.exit(0);\n");
+		const noopScript = await createEditorScript(
+			"noop-editor.js",
+			"process.exit(0);\n",
+		);
 		await setEditor(`node ${noopScript}`);
 
 		const result = await core.editProposalInTui(proposalId, screen);
@@ -125,7 +131,10 @@ process.exit(0);
 	});
 
 	it("returns editor_failed without mutating metadata when editor exits non-zero", async () => {
-		const failScript = await createEditorScript("fail-editor.js", "process.exit(2);\n");
+		const failScript = await createEditorScript(
+			"fail-editor.js",
+			"process.exit(2);\n",
+		);
 		await setEditor(`node ${failScript}`);
 
 		const beforeContent = await core.getProposalContent(proposalId);

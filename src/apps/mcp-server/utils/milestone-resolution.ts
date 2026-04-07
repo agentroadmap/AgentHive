@@ -39,7 +39,10 @@ function buildDirectiveLookupKeys(name: string): string[] {
 	return keys;
 }
 
-function directiveIdMatchesLookupKeys(directiveId: string, lookupKeys: Set<string>): boolean {
+function directiveIdMatchesLookupKeys(
+	directiveId: string,
+	lookupKeys: Set<string>,
+): boolean {
 	for (const key of buildDirectiveLookupKeys(directiveId)) {
 		if (lookupKeys.has(key)) {
 			return true;
@@ -65,25 +68,37 @@ function canonicalDirectiveId(value: string): string | null {
 	return null;
 }
 
-function findMatchingDirectiveId(name: string, directives: Directive[]): Directive | undefined {
+function findMatchingDirectiveId(
+	name: string,
+	directives: Directive[],
+): Directive | undefined {
 	const normalized = normalizeDirectiveName(name);
 	const inputKey = directiveKey(normalized);
-	const rawExactMatch = directives.find((directive) => directiveKey(directive.id) === inputKey);
+	const rawExactMatch = directives.find(
+		(directive) => directiveKey(directive.id) === inputKey,
+	);
 	if (rawExactMatch) {
 		return rawExactMatch;
 	}
 	const canonicalInputId = canonicalDirectiveId(normalized);
 	if (canonicalInputId) {
-		const canonicalRawMatch = directives.find((directive) => directiveKey(directive.id) === canonicalInputId);
+		const canonicalRawMatch = directives.find(
+			(directive) => directiveKey(directive.id) === canonicalInputId,
+		);
 		if (canonicalRawMatch) {
 			return canonicalRawMatch;
 		}
 	}
 	const lookupKeys = new Set(buildDirectiveLookupKeys(normalized));
-	return directives.find((directive) => directiveIdMatchesLookupKeys(directive.id, lookupKeys));
+	return directives.find((directive) =>
+		directiveIdMatchesLookupKeys(directive.id, lookupKeys),
+	);
 }
 
-function findMatchingDirective(name: string, directives: Directive[]): Directive | undefined {
+function findMatchingDirective(
+	name: string,
+	directives: Directive[],
+): Directive | undefined {
 	const normalized = normalizeDirectiveName(name);
 	const lookupKeys = buildDirectiveLookupKeys(normalized);
 	if (lookupKeys.length === 0) {
@@ -93,17 +108,24 @@ function findMatchingDirective(name: string, directives: Directive[]): Directive
 	if (!inputKey) {
 		return undefined;
 	}
-	const looksLikeDirectiveId = /^m-\d+$/i.test(normalized) || /^\d+$/.test(normalized);
+	const looksLikeDirectiveId =
+		/^m-\d+$/i.test(normalized) || /^\d+$/.test(normalized);
 	const idMatch = findMatchingDirectiveId(normalized, directives);
-	const titleMatches = directives.filter((directive) => directiveKey(directive.title) === inputKey);
-	const uniqueTitleMatch = titleMatches.length === 1 ? titleMatches[0] : undefined;
+	const titleMatches = directives.filter(
+		(directive) => directiveKey(directive.title) === inputKey,
+	);
+	const uniqueTitleMatch =
+		titleMatches.length === 1 ? titleMatches[0] : undefined;
 	if (looksLikeDirectiveId) {
 		return idMatch ?? uniqueTitleMatch;
 	}
 	return uniqueTitleMatch ?? idMatch;
 }
 
-export function resolveDirectiveStorageValue(name: string, directives: Directive[]): string {
+export function resolveDirectiveStorageValue(
+	name: string,
+	directives: Directive[],
+): string {
 	const normalized = normalizeDirectiveName(name);
 	if (!normalized) {
 		return normalized;
@@ -111,7 +133,10 @@ export function resolveDirectiveStorageValue(name: string, directives: Directive
 	return findMatchingDirective(normalized, directives)?.id ?? normalized;
 }
 
-export function buildDirectiveMatchKeys(name: string, directives: Directive[]): Set<string> {
+export function buildDirectiveMatchKeys(
+	name: string,
+	directives: Directive[],
+): Set<string> {
 	const normalized = normalizeDirectiveName(name);
 	const keys = new Set<string>();
 	const lookupKeys = buildDirectiveLookupKeys(normalized);
@@ -129,7 +154,9 @@ export function buildDirectiveMatchKeys(name: string, directives: Directive[]): 
 		return keys;
 	}
 
-	const titleMatches = directives.filter((directive) => directiveKey(directive.title) === inputKey);
+	const titleMatches = directives.filter(
+		(directive) => directiveKey(directive.title) === inputKey,
+	);
 	const titleMatch = titleMatches.length === 1 ? titleMatches[0] : undefined;
 	if (titleMatch) {
 		for (const key of buildDirectiveLookupKeys(titleMatch.id)) {
@@ -140,7 +167,10 @@ export function buildDirectiveMatchKeys(name: string, directives: Directive[]): 
 	return keys;
 }
 
-export function keySetsIntersect(left: Set<string>, right: Set<string>): boolean {
+export function keySetsIntersect(
+	left: Set<string>,
+	right: Set<string>,
+): boolean {
 	for (const key of left) {
 		if (right.has(key)) {
 			return true;

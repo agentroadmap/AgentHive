@@ -12,15 +12,15 @@ export interface StatusStyle {
  */
 export function getStatusStyle(status: string): StatusStyle {
 	const statusMap: Record<string, StatusStyle> = {
-		"Draft": { icon: "○", color: "white" },
-		"Review": { icon: "◆", color: "blue" },
-		"Building": { icon: "◒", color: "yellow" },
-		"Accepted": { icon: "▣", color: "cyan" },
-		"Complete": { icon: "✅", color: "green" },
-		"Rejected": { icon: "✖", color: "red" },
-		"Abandoned": { icon: "●", color: "red" },
-		"Replaced": { icon: "⇄", color: "magenta" },
-		"Blocked": { icon: "●", color: "red" },
+		Draft: { icon: "○", color: "white" },
+		Review: { icon: "◆", color: "blue" },
+		Building: { icon: "◒", color: "yellow" },
+		Accepted: { icon: "▣", color: "cyan" },
+		Complete: { icon: "✅", color: "green" },
+		Rejected: { icon: "✖", color: "red" },
+		Abandoned: { icon: "●", color: "red" },
+		Replaced: { icon: "⇄", color: "magenta" },
+		Blocked: { icon: "●", color: "red" },
 	};
 
 	// Return the mapped style or default for unknown statuses
@@ -94,4 +94,3 @@ export function formatStatusWithIcon(status: string): string {
 	const style = getStatusStyle(status);
 	return `${style.icon} ${status}`;
 }
-

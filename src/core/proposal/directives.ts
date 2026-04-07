@@ -1,5 +1,14 @@
-import type { Directive, DirectiveBucket, DirectiveSummary, Proposal } from "../../types/index.ts";
-import { isCompleteStatus, isReady, isTerminalStatus } from "../../utils/status.ts";
+import type {
+	Directive,
+	DirectiveBucket,
+	DirectiveSummary,
+	Proposal,
+} from "../../types/index.ts";
+import {
+	isCompleteStatus,
+	isReady,
+	isTerminalStatus,
+} from "../../utils/status.ts";
 
 const NO_DIRECTIVE_KEY = "__none";
 
@@ -20,9 +29,16 @@ export function directiveKey(name?: string | null): string {
 /**
  * Collect archived directive keys, excluding archived titles that are reused by active directives.
  */
-export function collectArchivedDirectiveKeys(archivedDirectives: Directive[], activeDirectives: Directive[]): string[] {
+export function collectArchivedDirectiveKeys(
+	archivedDirectives: Directive[],
+	activeDirectives: Directive[],
+): string[] {
 	const keys = new Set<string>();
-	const activeTitleKeys = new Set(activeDirectives.map((directive) => directiveKey(directive.title)).filter(Boolean));
+	const activeTitleKeys = new Set(
+		activeDirectives
+			.map((directive) => directiveKey(directive.title))
+			.filter(Boolean),
+	);
 
 	for (const directive of archivedDirectives) {
 		const idKey = directiveKey(directive.id);
@@ -41,13 +57,18 @@ export function collectArchivedDirectiveKeys(archivedDirectives: Directive[], ac
 /**
  * Validate a directive name for creation
  */
-export function validateDirectiveName(name: string, existingDirectives: string[]): string | null {
+export function validateDirectiveName(
+	name: string,
+	existingDirectives: string[],
+): string | null {
 	const normalizedName = normalizeDirectiveName(name);
 	if (!normalizedName) {
 		return "Directive name cannot be empty.";
 	}
 
-	const normalizedExisting = existingDirectives.map((directive) => directiveKey(directive)).filter(Boolean);
+	const normalizedExisting = existingDirectives
+		.map((directive) => directiveKey(directive))
+		.filter(Boolean);
 
 	if (normalizedExisting.includes(directiveKey(normalizedName))) {
 		return "Directive already exists.";
@@ -85,7 +106,11 @@ function buildDirectiveAliasMap(
 			reservedIdKeys.add(key);
 		}
 	}
-	const setAlias = (aliasKey: string, normalizedId: string, allowOverwrite: boolean): void => {
+	const setAlias = (
+		aliasKey: string,
+		normalizedId: string,
+		allowOverwrite: boolean,
+	): void => {
 		const existing = aliasMap.get(aliasKey);
 		if (!existing) {
 			aliasMap.set(aliasKey, normalizedId);
@@ -96,7 +121,11 @@ function buildDirectiveAliasMap(
 		}
 		const existingKey = existing.toLowerCase();
 		const nextKey = normalizedId.toLowerCase();
-		const preferredRawId = /^\d+$/.test(aliasKey) ? `d-${aliasKey}` : /^d-\d+$/.test(aliasKey) ? aliasKey : null;
+		const preferredRawId = /^\d+$/.test(aliasKey)
+			? `d-${aliasKey}`
+			: /^d-\d+$/.test(aliasKey)
+				? aliasKey
+				: null;
 		if (preferredRawId) {
 			const existingIsPreferred = existingKey === preferredRawId;
 			const nextIsPreferred = nextKey === preferredRawId;
@@ -110,7 +139,10 @@ function buildDirectiveAliasMap(
 		}
 		aliasMap.set(aliasKey, normalizedId);
 	};
-	const addIdAliases = (normalizedId: string, options?: { allowOverwrite?: boolean }) => {
+	const addIdAliases = (
+		normalizedId: string,
+		options?: { allowOverwrite?: boolean },
+	) => {
 		const allowOverwrite = options?.allowOverwrite ?? true;
 		const idKey = directiveKey(normalizedId);
 		if (idKey) {
@@ -143,7 +175,11 @@ function buildDirectiveAliasMap(
 		if (!normalizedId) continue;
 		addIdAliases(normalizedId);
 		const titleKey = directiveKey(normalizedTitle);
-		if (titleKey && !reservedIdKeys.has(titleKey) && activeTitleCounts.get(titleKey) === 1) {
+		if (
+			titleKey &&
+			!reservedIdKeys.has(titleKey) &&
+			activeTitleCounts.get(titleKey) === 1
+		) {
 			if (!aliasMap.has(titleKey)) {
 				aliasMap.set(titleKey, normalizedId);
 			}
@@ -154,7 +190,10 @@ function buildDirectiveAliasMap(
 	for (const directive of archivedDirectives) {
 		const titleKey = directiveKey(directive.title);
 		if (!titleKey || activeTitleKeys.has(titleKey)) continue;
-		archivedTitleCounts.set(titleKey, (archivedTitleCounts.get(titleKey) ?? 0) + 1);
+		archivedTitleCounts.set(
+			titleKey,
+			(archivedTitleCounts.get(titleKey) ?? 0) + 1,
+		);
 	}
 
 	for (const directive of archivedDirectives) {
@@ -163,7 +202,12 @@ function buildDirectiveAliasMap(
 		if (!normalizedId) continue;
 		addIdAliases(normalizedId, { allowOverwrite: false });
 		const titleKey = directiveKey(normalizedTitle);
-		if (!titleKey || activeTitleKeys.has(titleKey) || reservedIdKeys.has(titleKey)) continue;
+		if (
+			!titleKey ||
+			activeTitleKeys.has(titleKey) ||
+			reservedIdKeys.has(titleKey)
+		)
+			continue;
 		if (archivedTitleCounts.get(titleKey) === 1) {
 			if (!aliasMap.has(titleKey)) {
 				aliasMap.set(titleKey, normalizedId);
@@ -174,7 +218,10 @@ function buildDirectiveAliasMap(
 	return aliasMap;
 }
 
-function canonicalizeDirectiveValue(value: string | null | undefined, aliasMap: Map<string, string>): string {
+function canonicalizeDirectiveValue(
+	value: string | null | undefined,
+	aliasMap: Map<string, string>,
+): string {
 	const normalized = normalizeDirectiveName(value ?? "");
 	if (!normalized) return "";
 	const normalizedKey = directiveKey(normalized);
@@ -185,11 +232,19 @@ function canonicalizeDirectiveValue(value: string | null | undefined, aliasMap: 
 	const idMatch = normalized.match(/^d-(\d+)$/i);
 	if (idMatch?.[1]) {
 		const numericAlias = String(Number.parseInt(idMatch[1], 10));
-		return aliasMap.get(`d-${numericAlias}`) ?? aliasMap.get(numericAlias) ?? normalized;
+		return (
+			aliasMap.get(`d-${numericAlias}`) ??
+			aliasMap.get(numericAlias) ??
+			normalized
+		);
 	}
 	if (/^\d+$/.test(normalized)) {
 		const numericAlias = String(Number.parseInt(normalized, 10));
-		return aliasMap.get(`d-${numericAlias}`) ?? aliasMap.get(numericAlias) ?? normalized;
+		return (
+			aliasMap.get(`d-${numericAlias}`) ??
+			aliasMap.get(numericAlias) ??
+			normalized
+		);
 	}
 	return normalized;
 }
@@ -199,9 +254,15 @@ function canonicalizeProposalDirectives(
 	directiveEntities: Directive[],
 	archivedDirectives: Directive[] = [],
 ): Proposal[] {
-	const aliasMap = buildDirectiveAliasMap(directiveEntities, archivedDirectives);
+	const aliasMap = buildDirectiveAliasMap(
+		directiveEntities,
+		archivedDirectives,
+	);
 	return proposals.map((proposal) => {
-		const canonicalDirective = canonicalizeDirectiveValue(proposal.directive, aliasMap);
+		const canonicalDirective = canonicalizeDirectiveValue(
+			proposal.directive,
+			aliasMap,
+		);
 		if (proposal.directive === canonicalDirective) {
 			return proposal;
 		}
@@ -222,7 +283,10 @@ export function collectDirectiveIds(
 ): string[] {
 	const merged: string[] = [];
 	const seen = new Set<string>();
-	const aliasMap = buildDirectiveAliasMap(directiveEntities, archivedDirectives);
+	const aliasMap = buildDirectiveAliasMap(
+		directiveEntities,
+		archivedDirectives,
+	);
 
 	const addDirective = (value: string) => {
 		const normalized = normalizeDirectiveName(value);
@@ -250,16 +314,26 @@ export function collectDirectiveIds(
  * Get the display label for a directive
  * Uses the directive entity title if available, otherwise returns the ID
  */
-export function getDirectiveLabel(directiveId: string | undefined, directiveEntities: Directive[]): string {
+export function getDirectiveLabel(
+	directiveId: string | undefined,
+	directiveEntities: Directive[],
+): string {
 	if (!directiveId) {
 		return "Proposals without directive";
 	}
-	const entity = directiveEntities.find((m) => directiveKey(m.id) === directiveKey(directiveId));
+	const entity = directiveEntities.find(
+		(m) => directiveKey(m.id) === directiveKey(directiveId),
+	);
 	return entity?.title || directiveId;
 }
 
 /** Re-exported for consumers */
-export { isCompleteStatus, isReady, isTerminalStatus, isTerminalStatus as isReachedStatus };
+export {
+	isCompleteStatus,
+	isReady,
+	isTerminalStatus,
+	isTerminalStatus as isReachedStatus,
+};
 
 /**
  * Create a directive bucket for a given directive
@@ -274,7 +348,9 @@ function createBucket(
 	const bucketDirectiveKey = directiveKey(directiveId);
 	const bucketProposals = proposals.filter((proposal) => {
 		const proposalDirectiveKey = directiveKey(proposal.directive);
-		return bucketDirectiveKey ? proposalDirectiveKey === bucketDirectiveKey : !proposalDirectiveKey;
+		return bucketDirectiveKey
+			? proposalDirectiveKey === bucketDirectiveKey
+			: !proposalDirectiveKey;
 	});
 
 	const counts: Record<string, number> = {};
@@ -286,9 +362,15 @@ function createBucket(
 		counts[status] = (counts[status] ?? 0) + 1;
 	}
 
-	const doneCount = bucketProposals.filter((t) => isCompleteStatus(t.status)).length;
-	const progress = bucketProposals.length > 0 ? Math.round((doneCount / bucketProposals.length) * 100) : 0;
-	const isCompleted = bucketProposals.length > 0 && doneCount === bucketProposals.length;
+	const doneCount = bucketProposals.filter((t) =>
+		isCompleteStatus(t.status),
+	).length;
+	const progress =
+		bucketProposals.length > 0
+			? Math.round((doneCount / bucketProposals.length) * 100)
+			: 0;
+	const isCompleted =
+		bucketProposals.length > 0 && doneCount === bucketProposals.length;
 
 	const key = bucketDirectiveKey ? bucketDirectiveKey : NO_DIRECTIVE_KEY;
 	const label = getDirectiveLabel(directiveId, directiveEntities);
@@ -314,10 +396,19 @@ export function buildDirectiveBuckets(
 	proposals: Proposal[],
 	directiveEntities: Directive[],
 	statuses: string[],
-	options?: { archivedDirectiveIds?: string[]; archivedDirectives?: Directive[] },
+	options?: {
+		archivedDirectiveIds?: string[];
+		archivedDirectives?: Directive[];
+	},
 ): DirectiveBucket[] {
-	const archivedKeys = new Set((options?.archivedDirectiveIds ?? []).map((id) => directiveKey(id)));
-	const canonicalProposals = canonicalizeProposalDirectives(proposals, directiveEntities, options?.archivedDirectives ?? []);
+	const archivedKeys = new Set(
+		(options?.archivedDirectiveIds ?? []).map((id) => directiveKey(id)),
+	);
+	const canonicalProposals = canonicalizeProposalDirectives(
+		proposals,
+		directiveEntities,
+		options?.archivedDirectives ?? [],
+	);
 	const normalizedProposals =
 		archivedKeys.size > 0
 			? canonicalProposals.map((proposal) => {
@@ -330,14 +421,27 @@ export function buildDirectiveBuckets(
 			: canonicalProposals;
 	const filteredDirectives =
 		archivedKeys.size > 0
-			? directiveEntities.filter((directive) => !archivedKeys.has(directiveKey(directive.id)))
+			? directiveEntities.filter(
+					(directive) => !archivedKeys.has(directiveKey(directive.id)),
+				)
 			: directiveEntities;
 
-	const allDirectiveIds = collectDirectiveIds(normalizedProposals, filteredDirectives);
+	const allDirectiveIds = collectDirectiveIds(
+		normalizedProposals,
+		filteredDirectives,
+	);
 
 	const buckets: DirectiveBucket[] = [
-		createBucket(undefined, normalizedProposals, statuses, filteredDirectives, true),
-		...allDirectiveIds.map((m) => createBucket(m, normalizedProposals, statuses, filteredDirectives, false)),
+		createBucket(
+			undefined,
+			normalizedProposals,
+			statuses,
+			filteredDirectives,
+			true,
+		),
+		...allDirectiveIds.map((m) =>
+			createBucket(m, normalizedProposals, statuses, filteredDirectives, false),
+		),
 	];
 
 	return buckets;
@@ -350,10 +454,19 @@ export function buildDirectiveSummary(
 	proposals: Proposal[],
 	directiveEntities: Directive[],
 	statuses: string[],
-	options?: { archivedDirectiveIds?: string[]; archivedDirectives?: Directive[] },
+	options?: {
+		archivedDirectiveIds?: string[];
+		archivedDirectives?: Directive[];
+	},
 ): DirectiveSummary {
-	const archivedKeys = new Set((options?.archivedDirectiveIds ?? []).map((id) => directiveKey(id)));
-	const canonicalProposals = canonicalizeProposalDirectives(proposals, directiveEntities, options?.archivedDirectives ?? []);
+	const archivedKeys = new Set(
+		(options?.archivedDirectiveIds ?? []).map((id) => directiveKey(id)),
+	);
+	const canonicalProposals = canonicalizeProposalDirectives(
+		proposals,
+		directiveEntities,
+		options?.archivedDirectives ?? [],
+	);
 	const normalizedProposals =
 		archivedKeys.size > 0
 			? canonicalProposals.map((proposal) => {
@@ -366,10 +479,21 @@ export function buildDirectiveSummary(
 			: canonicalProposals;
 	const filteredDirectives =
 		archivedKeys.size > 0
-			? directiveEntities.filter((directive) => !archivedKeys.has(directiveKey(directive.id)))
+			? directiveEntities.filter(
+					(directive) => !archivedKeys.has(directiveKey(directive.id)),
+				)
 			: directiveEntities;
-	const directives = collectDirectiveIds(normalizedProposals, filteredDirectives, options?.archivedDirectives ?? []);
-	const buckets = buildDirectiveBuckets(normalizedProposals, filteredDirectives, statuses, options);
+	const directives = collectDirectiveIds(
+		normalizedProposals,
+		filteredDirectives,
+		options?.archivedDirectives ?? [],
+	);
+	const buckets = buildDirectiveBuckets(
+		normalizedProposals,
+		filteredDirectives,
+		statuses,
+		options,
+	);
 
 	return {
 		directives,

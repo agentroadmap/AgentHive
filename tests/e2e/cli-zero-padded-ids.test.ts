@@ -1,10 +1,13 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, test } from "node:test";
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, test } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
-import { createUniqueTestDir, safeCleanup, execSync,
+import {
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 const CLI_PATH = join(process.cwd(), "src/cli.ts");
@@ -47,7 +50,10 @@ describe("CLI Zero Padded IDs Feature", () => {
 	});
 
 	test("should create a proposal with a zero-padded ID", async () => {
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal create "Padded Proposal"`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal create "Padded Proposal"`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(result.exitCode, 0);
 
 		const proposalsDir = join(TEST_DIR, "roadmap", "proposals");
@@ -57,7 +63,10 @@ describe("CLI Zero Padded IDs Feature", () => {
 	});
 
 	test("should create a document with a zero-padded ID", async () => {
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} doc create "Padded Doc"`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} doc create "Padded Doc"`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(result.exitCode, 0);
 
 		const docsDir = join(TEST_DIR, "docs");
@@ -67,7 +76,10 @@ describe("CLI Zero Padded IDs Feature", () => {
 	});
 
 	test("should create a decision with a zero-padded ID", async () => {
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} decision create "Padded Decision"`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} decision create "Padded Decision"`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(result.exitCode, 0);
 
 		const decisionsDir = join(TEST_DIR, "roadmap", "decisions");
@@ -77,8 +89,14 @@ describe("CLI Zero Padded IDs Feature", () => {
 	});
 
 	test("should correctly increment a padded proposal ID", async () => {
-		execSync(`node --experimental-strip-types ${CLI_PATH} proposal create "First Padded Proposal"`, { cwd: TEST_DIR });
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal create "Second Padded Proposal"`, { cwd: TEST_DIR });
+		execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal create "First Padded Proposal"`,
+			{ cwd: TEST_DIR },
+		);
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal create "Second Padded Proposal"`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(result.exitCode, 0);
 
 		const proposalsDir = join(TEST_DIR, "roadmap", "proposals");
@@ -89,10 +107,16 @@ describe("CLI Zero Padded IDs Feature", () => {
 
 	test("should create a sub-proposal with a zero-padded ID", async () => {
 		// Create parent proposal first
-		execSync(`node --experimental-strip-types ${CLI_PATH} proposal create "Parent Proposal"`, { cwd: TEST_DIR });
+		execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal create "Parent Proposal"`,
+			{ cwd: TEST_DIR },
+		);
 
 		// Create sub-proposal
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal create "Padded Sub-proposal" -p proposal-001`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal create "Padded Sub-proposal" -p proposal-001`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(result.exitCode, 0);
 
 		const proposalsDir = join(TEST_DIR, "roadmap", "proposals");

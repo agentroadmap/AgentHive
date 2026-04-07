@@ -8,9 +8,16 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import { readFile, writeFile, mkdir, access, rename, unlink, readdir } from "node:fs/promises";
-import { join, basename, dirname } from "node:path";
-import { existsSync } from "node:fs";
+import {
+	access,
+	mkdir,
+	readdir,
+	readFile,
+	rename,
+	unlink,
+	writeFile,
+} from "node:fs/promises";
+import { basename, join } from "node:path";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -27,7 +34,12 @@ export interface ProposalFileIntegrity {
 	isValid: boolean;
 	checksum: ProposalChecksum | null;
 	expectedChecksum: string | null;
-	corruptionType: "none" | "missing_checksum" | "checksum_mismatch" | "malformed_frontmatter" | "file_not_found";
+	corruptionType:
+		| "none"
+		| "missing_checksum"
+		| "checksum_mismatch"
+		| "malformed_frontmatter"
+		| "file_not_found";
 	lastKnownGood: string | null;
 }
 
@@ -58,7 +70,7 @@ export interface IntegrityConfig {
 
 const CHECKSUM_HEADER = "roadmap-checksum";
 const CHECKSUM_ALGORITHM = "sha256";
-const BACKUP_DIR = ".checksum-backups";
+const _BACKUP_DIR = ".checksum-backups";
 const MAX_BACKUPS = 10;
 
 // ─── Checksum Utilities ──────────────────────────────────────────────
@@ -83,7 +95,13 @@ export function parseFrontmatter(content: string): {
 } {
 	const match = content.match(/^---\n([\s\S]*?)\n---/);
 	if (!match) {
-		return { frontmatter: "", body: content, hasFrontmatter: false, startIndex: -1, endIndex: -1 };
+		return {
+			frontmatter: "",
+			body: content,
+			hasFrontmatter: false,
+			startIndex: -1,
+			endIndex: -1,
+		};
 	}
 
 	return {
@@ -110,7 +128,9 @@ export function injectChecksum(frontmatter: string, checksum: string): string {
  * Extract checksum from frontmatter.
  */
 export function extractChecksum(frontmatter: string): string | null {
-	const match = frontmatter.match(new RegExp(`${CHECKSUM_HEADER}:\\s*["']?([a-f0-9]+)["']?`));
+	const match = frontmatter.match(
+		new RegExp(`${CHECKSUM_HEADER}:\\s*["']?([a-f0-9]+)["']?`),
+	);
 	return match?.[1] ?? null;
 }
 
@@ -121,8 +141,11 @@ export class ProposalIntegrity {
 
 	constructor(config?: Partial<IntegrityConfig>) {
 		this.config = {
-			proposalsDir: config?.proposalsDir ?? join(process.cwd(), "roadmap", "proposals"),
-			backupDir: config?.backupDir ?? join(process.cwd(), "roadmap", ".checksum-backups"),
+			proposalsDir:
+				config?.proposalsDir ?? join(process.cwd(), "roadmap", "proposals"),
+			backupDir:
+				config?.backupDir ??
+				join(process.cwd(), "roadmap", ".checksum-backups"),
 			enableBackups: config?.enableBackups ?? true,
 			maxBackups: config?.maxBackups ?? MAX_BACKUPS,
 		};
@@ -296,7 +319,8 @@ export class ProposalIntegrity {
 
 		// Read and verify the backup
 		const backupContent = await readFile(backupPath, "utf-8");
-		const { frontmatter, body, hasFrontmatter } = parseFrontmatter(backupContent);
+		const { frontmatter, body, hasFrontmatter } =
+			parseFrontmatter(backupContent);
 
 		if (!hasFrontmatter) {
 			return null;
@@ -413,7 +437,10 @@ export class ProposalIntegrity {
 		}
 
 		const files = await readdir(backupSubDir);
-		const sorted = files.filter((f) => f.endsWith(".bak")).sort().reverse();
+		const sorted = files
+			.filter((f) => f.endsWith(".bak"))
+			.sort()
+			.reverse();
 
 		for (const file of sorted) {
 			const backupPath = join(backupSubDir, file);
@@ -430,9 +457,7 @@ export class ProposalIntegrity {
 				if (storedChecksum === computedChecksum) {
 					return backupPath;
 				}
-			} catch {
-				continue;
-			}
+			} catch {}
 		}
 
 		return null;
@@ -444,7 +469,11 @@ export class ProposalIntegrity {
 /**
  * Verify content has valid checksum.
  */
-export function verifyChecksum(content: string): { valid: boolean; stored: string | null; computed: string } {
+export function verifyChecksum(content: string): {
+	valid: boolean;
+	stored: string | null;
+	computed: string;
+} {
 	const { frontmatter, body, hasFrontmatter } = parseFrontmatter(content);
 
 	if (!hasFrontmatter) {

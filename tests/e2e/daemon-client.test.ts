@@ -1,13 +1,25 @@
 import { strict as assert } from "node:assert";
 import { after, before, describe, it, mock } from "node:test";
-import { DaemonClient, resolveDaemonUrl } from '../../src/core/infrastructure/daemon-client.ts';
-import type { Proposal, ProposalCreateInput, ProposalUpdateInput } from "../../src/types/index.ts";
+import {
+	DaemonClient,
+	resolveDaemonUrl,
+} from "../../src/core/infrastructure/daemon-client.ts";
+import type {
+	Proposal,
+	ProposalCreateInput,
+	ProposalUpdateInput,
+} from "../../src/types/index.ts";
 
 // Mock fetch for testing
 const originalFetch = globalThis.fetch;
 let mockFetch: ReturnType<typeof mock.fn>;
 
-function setupMockFetch(handler: (url: string | URL | Request, init?: RequestInit) => Promise<Response>) {
+function setupMockFetch(
+	handler: (
+		url: string | URL | Request,
+		init?: RequestInit,
+	) => Promise<Response>,
+) {
 	mockFetch = mock.fn(handler);
 	globalThis.fetch = mockFetch as unknown as typeof fetch;
 }
@@ -19,7 +31,9 @@ function restoreFetch() {
 describe("DaemonClient", () => {
 	before(() => {
 		// Mock fetch before tests
-		setupMockFetch(async () => new Response(JSON.stringify({}), { status: 200 }));
+		setupMockFetch(
+			async () => new Response(JSON.stringify({}), { status: 200 }),
+		);
 	});
 
 	after(() => {
@@ -80,7 +94,10 @@ describe("DaemonClient", () => {
 
 			setupMockFetch(async (url) => {
 				const urlStr = url.toString();
-				assert.ok(urlStr.includes("/api/proposals"), `Expected /api/proposals in ${urlStr}`);
+				assert.ok(
+					urlStr.includes("/api/proposals"),
+					`Expected /api/proposals in ${urlStr}`,
+				);
 				return Response.json(mockProposals);
 			});
 
@@ -94,8 +111,14 @@ describe("DaemonClient", () => {
 		it("lists proposals with filters", async () => {
 			setupMockFetch(async (url) => {
 				const urlStr = url.toString();
-				assert.ok(urlStr.includes("status=Active"), `Expected status filter in ${urlStr}`);
-				assert.ok(urlStr.includes("priority=high"), `Expected priority filter in ${urlStr}`);
+				assert.ok(
+					urlStr.includes("status=Active"),
+					`Expected status filter in ${urlStr}`,
+				);
+				assert.ok(
+					urlStr.includes("priority=high"),
+					`Expected priority filter in ${urlStr}`,
+				);
 				return Response.json([]);
 			});
 
@@ -106,7 +129,11 @@ describe("DaemonClient", () => {
 
 	describe("getProposal", () => {
 		it("returns proposal when found", async () => {
-			const mockProposal = { id: "proposal-37", title: "Test", status: "Potential" };
+			const mockProposal = {
+				id: "proposal-37",
+				title: "Test",
+				status: "Potential",
+			};
 
 			setupMockFetch(async (url) => {
 				assert.ok(url.toString().includes("/api/proposal/37"));
@@ -120,8 +147,11 @@ describe("DaemonClient", () => {
 		});
 
 		it("returns null when proposal not found (404)", async () => {
-			setupMockFetch(async () =>
-				new Response(JSON.stringify({ error: "Proposal not found" }), { status: 404 }),
+			setupMockFetch(
+				async () =>
+					new Response(JSON.stringify({ error: "Proposal not found" }), {
+						status: 404,
+					}),
 			);
 
 			const client = new DaemonClient({ baseUrl: "http://localhost:6420" });
@@ -135,7 +165,7 @@ describe("DaemonClient", () => {
 		it("sends correct payload to daemon", async () => {
 			let receivedBody: any;
 
-			setupMockFetch(async (url, init) => {
+			setupMockFetch(async (_url, init) => {
 				if (init?.body) {
 					receivedBody = JSON.parse(init.body as string);
 				}
@@ -164,11 +194,15 @@ describe("DaemonClient", () => {
 		it("sends correct update payload", async () => {
 			let receivedBody: any;
 
-			setupMockFetch(async (url, init) => {
+			setupMockFetch(async (_url, init) => {
 				if (init?.method === "PUT" && init?.body) {
 					receivedBody = JSON.parse(init.body as string);
 				}
-				return Response.json({ id: "proposal-1", title: "Updated", status: "Active" });
+				return Response.json({
+					id: "proposal-1",
+					title: "Updated",
+					status: "Active",
+				});
 			});
 
 			const client = new DaemonClient({ baseUrl: "http://localhost:6420" });
@@ -186,7 +220,7 @@ describe("DaemonClient", () => {
 
 	describe("deleteProposal", () => {
 		it("returns true on successful delete", async () => {
-			setupMockFetch(async (url, init) => {
+			setupMockFetch(async (_url, init) => {
 				assert.equal(init?.method, "DELETE");
 				return Response.json({ success: true });
 			});
@@ -198,8 +232,9 @@ describe("DaemonClient", () => {
 		});
 
 		it("returns false on 404", async () => {
-			setupMockFetch(async () =>
-				new Response(JSON.stringify({ error: "not found" }), { status: 404 }),
+			setupMockFetch(
+				async () =>
+					new Response(JSON.stringify({ error: "not found" }), { status: 404 }),
 			);
 
 			const client = new DaemonClient({ baseUrl: "http://localhost:6420" });
@@ -216,7 +251,9 @@ describe("DaemonClient", () => {
 				assert.ok(urlStr.includes("query=test"));
 				assert.ok(urlStr.includes("type=proposal"));
 				assert.ok(urlStr.includes("status=Active"));
-				return Response.json([{ type: "proposal", proposal: { id: "proposal-1" } }]);
+				return Response.json([
+					{ type: "proposal", proposal: { id: "proposal-1" } },
+				]);
 			});
 
 			const client = new DaemonClient({ baseUrl: "http://localhost:6420" });

@@ -1,11 +1,9 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/index.ts";
-import { isWindows,
-	expect,
-} from "../support/test-utils.ts";
+import { expect, isWindows } from "../support/test-utils.ts";
 
 let TEST_DIR: string;
 
@@ -13,7 +11,10 @@ describe("Docs recursive listing and ID generation", () => {
 	const itIfSymlinks = isWindows() ? it.skip : it;
 
 	beforeEach(async () => {
-		TEST_DIR = join(process.cwd(), `.tmp-test-docs-${Math.random().toString(36).slice(2)}`);
+		TEST_DIR = join(
+			process.cwd(),
+			`.tmp-test-docs-${Math.random().toString(36).slice(2)}`,
+		);
 		await rm(TEST_DIR, { recursive: true, force: true });
 		await mkdir(TEST_DIR, { recursive: true });
 
@@ -38,17 +39,35 @@ describe("Docs recursive listing and ID generation", () => {
 
 		// Create docs in nested paths using Core API directly
 		await core.createDocument(
-			{ id: "doc-1", title: "Top", type: "other", createdDate: "2020-01-01", rawContent: "Top level doc" },
+			{
+				id: "doc-1",
+				title: "Top",
+				type: "other",
+				createdDate: "2020-01-01",
+				rawContent: "Top level doc",
+			},
 			false,
 			"",
 		);
 		await core.createDocument(
-			{ id: "doc-2", title: "Nested A", type: "other", createdDate: "2020-01-02", rawContent: "Nested A content" },
+			{
+				id: "doc-2",
+				title: "Nested A",
+				type: "other",
+				createdDate: "2020-01-02",
+				rawContent: "Nested A content",
+			},
 			false,
 			"guides",
 		);
 		await core.createDocument(
-			{ id: "doc-3", title: "Nested B", type: "other", createdDate: "2020-01-03", rawContent: "Nested B content" },
+			{
+				id: "doc-3",
+				title: "Nested B",
+				type: "other",
+				createdDate: "2020-01-03",
+				rawContent: "Nested B content",
+			},
 			false,
 			"guides/sub",
 		);
@@ -68,7 +87,13 @@ describe("Docs recursive listing and ID generation", () => {
 		// Create doc-4 directly to test that IDs 1-3 are recognized
 		// (This verifies that listing works correctly for ID generation purposes)
 		await core.createDocument(
-			{ id: "doc-4", title: "Another", type: "other", createdDate: "2020-01-04", rawContent: "New doc content" },
+			{
+				id: "doc-4",
+				title: "Another",
+				type: "other",
+				createdDate: "2020-01-04",
+				rawContent: "New doc content",
+			},
 			false,
 			"guides",
 		);

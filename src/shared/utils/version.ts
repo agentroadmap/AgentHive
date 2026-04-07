@@ -46,10 +46,13 @@ export async function getRevision(): Promise<string | null> {
 	}
 
 	try {
-		const revision = execSync(`git -C "${PACKAGE_ROOT}" rev-parse --short HEAD`, {
-			stdio: ["ignore", "pipe", "ignore"],
-			encoding: "utf-8",
-		}).trim();
+		const revision = execSync(
+			`git -C "${PACKAGE_ROOT}" rev-parse --short HEAD`,
+			{
+				stdio: ["ignore", "pipe", "ignore"],
+				encoding: "utf-8",
+			},
+		).trim();
 		return revision.length > 0 ? revision : null;
 	} catch {
 		return null;

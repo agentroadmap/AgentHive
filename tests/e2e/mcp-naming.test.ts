@@ -1,7 +1,11 @@
 import assert from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { McpServer } from "../../src/mcp/server.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 const getText = (content: unknown[] | undefined): string => {
 	const item = content?.[0] as { text?: string } | undefined;
@@ -21,19 +25,29 @@ describe("MCP naming tools", () => {
 		execSync(`git config user.email test@example.com`, { cwd: TEST_DIR });
 		await mcpServer.initializeProject("Test Project");
 		// Naming tools are registered in the proposal system
-		const { registerNamingTools } = await import("../../src/mcp/tools/naming/index.ts");
+		const { registerNamingTools } = await import(
+			"../../src/mcp/tools/naming/index.ts"
+		);
 		registerNamingTools(mcpServer);
 	});
 
 	afterEach(async () => {
-		try { await mcpServer.stop(); } catch { /* */ }
+		try {
+			await mcpServer.stop();
+		} catch {
+			/* */
+		}
 		await safeCleanup(TEST_DIR);
 	});
 
 	it("registers naming tools", async () => {
 		const tools = await mcpServer.testInterface.listTools();
 		const names = tools.tools.map((t) => t.name);
-		const expected = ["proposal_naming_convention", "proposal_validate_name", "proposal_generate_name"];
+		const expected = [
+			"proposal_naming_convention",
+			"proposal_validate_name",
+			"proposal_generate_name",
+		];
 		for (const name of expected) {
 			assert.ok(names.includes(name), `Missing tool: ${name}`);
 		}
@@ -44,7 +58,10 @@ describe("MCP naming tools", () => {
 			params: { name: "proposal_naming_convention", arguments: {} },
 		});
 		const text = getText(result.content);
-		assert.ok(text.length > 10, `Expected naming conventions: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.length > 10,
+			`Expected naming conventions: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("validates a proposal name", async () => {
@@ -55,7 +72,10 @@ describe("MCP naming tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.length > 0, `Expected validation result: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.length > 0,
+			`Expected validation result: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("generates a proposal name", async () => {
@@ -66,7 +86,10 @@ describe("MCP naming tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.length > 0, `Expected generated name: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.length > 0,
+			`Expected generated name: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("validates a name with special characters", async () => {
@@ -77,6 +100,9 @@ describe("MCP naming tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.length > 0, `Expected validation failure: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.length > 0,
+			`Expected validation failure: ${text.slice(0, 200)}`,
+		);
 	});
 });

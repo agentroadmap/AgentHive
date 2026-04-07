@@ -1,11 +1,11 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
-import { mkdir, rm, writeFile, readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { expect } from "../support/test-utils.ts";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
 import { FileSystem } from "../../src/file-system/operations.ts";
 import type { RoadmapConfig } from "../../src/types/index.ts";
+import { expect } from "../support/test-utils.ts";
 
 describe("Config Loading & Migration", () => {
 	const testRoot = "/tmp/test-config-migration";
@@ -37,10 +37,19 @@ auto_commit: false`;
 
 		// This should complete without hanging
 		const timeoutPromise = new Promise((_, reject) => {
-			setTimeout(() => reject(new Error("Config loading timed out - infinite loop detected!")), 5000);
+			setTimeout(
+				() =>
+					reject(
+						new Error("Config loading timed out - infinite loop detected!"),
+					),
+				5000,
+			);
 		});
 
-		const loadedConfig = (await Promise.race([fs.loadConfig(), timeoutPromise])) as RoadmapConfig | null;
+		const loadedConfig = (await Promise.race([
+			fs.loadConfig(),
+			timeoutPromise,
+		])) as RoadmapConfig | null;
 
 		assert.ok(loadedConfig);
 		assert.strictEqual(loadedConfig?.projectName, "Test Project");
@@ -73,8 +82,12 @@ auto_commit: false`;
 		assert.strictEqual(config?.projectName, "Legacy Project");
 
 		// Check that the directory was renamed
-		const newRoadmapExists = stat(join(testRoot, "roadmap", "config.yml")).then(() => true).catch(() => false);
-		const oldRoadmapExists = stat(join(testRoot, ".roadmap", "config.yml")).then(() => true).catch(() => false);
+		const newRoadmapExists = stat(join(testRoot, "roadmap", "config.yml"))
+			.then(() => true)
+			.catch(() => false);
+		const oldRoadmapExists = stat(join(testRoot, ".roadmap", "config.yml"))
+			.then(() => true)
+			.catch(() => false);
 
 		assert.strictEqual(newRoadmapExists, true);
 		assert.strictEqual(oldRoadmapExists, false);
@@ -95,7 +108,9 @@ auto_commit: false`;
 		await core.ensureConfigMigrated();
 
 		const migratedDirectives = await core.filesystem.listDirectives();
-		expect(migratedDirectives.map((directive) => directive.title).sort()).toEqual(["Release 1", "Release 2"]);
+		expect(
+			migratedDirectives.map((directive) => directive.title).sort(),
+		).toEqual(["Release 1", "Release 2"]);
 
 		const rewrittenConfig = await await readFile(configPath, "utf-8");
 		assert.ok(!rewrittenConfig.includes("directives:"));
@@ -116,7 +131,9 @@ auto_commit: false`;
 		await core.ensureConfigMigrated();
 
 		const migratedDirectives = await core.filesystem.listDirectives();
-		expect(migratedDirectives.map((directive) => directive.title).sort()).toEqual(["Release 2", "Release, Part 1"]);
+		expect(
+			migratedDirectives.map((directive) => directive.title).sort(),
+		).toEqual(["Release 2", "Release, Part 1"]);
 	});
 
 	it("migrates multiline legacy directive list values with comments", async () => {
@@ -137,11 +154,9 @@ auto_commit: false`;
 		await core.ensureConfigMigrated();
 
 		const migratedDirectives = await core.filesystem.listDirectives();
-		expect(migratedDirectives.map((directive) => directive.title).sort()).toEqual([
-			"Release #3",
-			"Release 1",
-			"Release 2",
-		]);
+		expect(
+			migratedDirectives.map((directive) => directive.title).sort(),
+		).toEqual(["Release #3", "Release 1", "Release 2"]);
 
 		const rewrittenConfig = await await readFile(configPath, "utf-8");
 		assert.ok(!rewrittenConfig.includes("directives:"));
@@ -165,7 +180,9 @@ auto_commit: false`;
 		await core.ensureConfigMigrated();
 
 		const migratedDirectives = await core.filesystem.listDirectives();
-		expect(migratedDirectives.map((directive) => directive.title).sort()).toEqual(["Release 1", "Release 2"]);
+		expect(
+			migratedDirectives.map((directive) => directive.title).sort(),
+		).toEqual(["Release 1", "Release 2"]);
 	});
 
 	it("migrates single-quoted legacy directives with escaped apostrophes", async () => {
@@ -184,6 +201,8 @@ auto_commit: false`;
 		await core.ensureConfigMigrated();
 
 		const migratedDirectives = await core.filesystem.listDirectives();
-		expect(migratedDirectives.map((directive) => directive.title)).toEqual(["Release 'Alpha'"]);
+		expect(migratedDirectives.map((directive) => directive.title)).toEqual([
+			"Release 'Alpha'",
+		]);
 	});
 });

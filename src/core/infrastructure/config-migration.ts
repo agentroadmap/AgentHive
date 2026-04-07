@@ -23,7 +23,9 @@ export function migrateConfig(config: Partial<RoadmapConfig>): RoadmapConfig {
 
 	// Merge provided config with defaults, ensuring all fields exist
 	// Only include fields from config that are not undefined
-	const filteredConfig = Object.fromEntries(Object.entries(config).filter(([_, value]) => value !== undefined));
+	const filteredConfig = Object.fromEntries(
+		Object.entries(config).filter(([_, value]) => value !== undefined),
+	);
 
 	const migratedConfig: RoadmapConfig = {
 		...defaultConfig,

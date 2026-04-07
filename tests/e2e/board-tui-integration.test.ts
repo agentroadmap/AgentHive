@@ -9,9 +9,8 @@
  *   AC#6: Regression test suite covers critical board paths
  */
 
-import { describe, it, before, after } from "node:test";
 import assert from "node:assert";
-import { expect } from "../support/test-utils.ts";
+import { describe, it } from "node:test";
 import type { Proposal } from "../../src/types/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -66,7 +65,13 @@ describe("AC#2: TUI Board Rendering", () => {
 	});
 
 	it("respects configured status order for column layout", () => {
-		const configuredStatuses = ["Proposal", "Draft", "Active", "Review", "Complete"];
+		const configuredStatuses = [
+			"Proposal",
+			"Draft",
+			"Active",
+			"Review",
+			"Complete",
+		];
 		const proposals = [
 			createTestProposal({ id: "proposal-100", status: "Complete" }),
 			createTestProposal({ id: "proposal-101", status: "Active" }),
@@ -79,12 +84,12 @@ describe("AC#2: TUI Board Rendering", () => {
 			proposals: proposals.filter((s) => s.status === status),
 		}));
 
-		assert.strictEqual(columns[0]!.status, "Proposal");
-		assert.strictEqual(columns[0]!.proposals.length, 1);
-		assert.strictEqual(columns[1]!.status, "Draft");
-		assert.strictEqual(columns[1]!.proposals.length, 0); // empty
-		assert.strictEqual(columns[2]!.status, "Active");
-		assert.strictEqual(columns[2]!.proposals.length, 1);
+		assert.strictEqual(columns[0]?.status, "Proposal");
+		assert.strictEqual(columns[0]?.proposals.length, 1);
+		assert.strictEqual(columns[1]?.status, "Draft");
+		assert.strictEqual(columns[1]?.proposals.length, 0); // empty
+		assert.strictEqual(columns[2]?.status, "Active");
+		assert.strictEqual(columns[2]?.proposals.length, 1);
 	});
 
 	it("handles empty proposal list gracefully", () => {
@@ -119,9 +124,20 @@ describe("AC#2: TUI Board Rendering", () => {
 // ---------------------------------------------------------------------------
 
 describe("AC#3: Tab Navigation", () => {
-	type ViewProposal = "proposal-list" | "kanban" | "cockpit" | "headlines" | "chat";
+	type ViewProposal =
+		| "proposal-list"
+		| "kanban"
+		| "cockpit"
+		| "headlines"
+		| "chat";
 
-	const viewOrder: ViewProposal[] = ["proposal-list", "kanban", "cockpit", "headlines", "chat"];
+	const viewOrder: ViewProposal[] = [
+		"proposal-list",
+		"kanban",
+		"cockpit",
+		"headlines",
+		"chat",
+	];
 
 	it("cycles through views in correct order", () => {
 		let currentViewIndex = 0;
@@ -257,7 +273,7 @@ describe("AC#4: Keyboard Shortcuts", () => {
 		const proposal = createTestProposal();
 		let detailOpen = false;
 
-		function openDetail(s: Proposal): boolean {
+		function openDetail(_s: Proposal): boolean {
 			detailOpen = true;
 			return detailOpen;
 		}
@@ -299,8 +315,10 @@ describe("AC#5: Proposal Detail Content", () => {
 	});
 
 	it("displays description", () => {
-		const proposal = createTestProposal({ description: "This is the description" });
-		assert.ok(proposal.description!.includes("description"));
+		const proposal = createTestProposal({
+			description: "This is the description",
+		});
+		assert.ok(proposal.description?.includes("description"));
 	});
 
 	it("displays acceptance criteria with check status", () => {
@@ -311,31 +329,31 @@ describe("AC#5: Proposal Detail Content", () => {
 			],
 		});
 
-		assert.strictEqual(proposal.acceptanceCriteriaItems!.length, 2);
-		assert.strictEqual(proposal.acceptanceCriteriaItems![0]!.checked, true);
-		assert.strictEqual(proposal.acceptanceCriteriaItems![1]!.checked, false);
+		assert.strictEqual(proposal.acceptanceCriteriaItems?.length, 2);
+		assert.strictEqual(proposal.acceptanceCriteriaItems?.[0]?.checked, true);
+		assert.strictEqual(proposal.acceptanceCriteriaItems?.[1]?.checked, false);
 	});
 
 	it("displays implementation notes", () => {
 		const proposal = createTestProposal({
 			implementationNotes: "These are the implementation notes",
 		});
-		assert.ok(proposal.implementationNotes!.includes("implementation notes"));
+		assert.ok(proposal.implementationNotes?.includes("implementation notes"));
 	});
 
 	it("displays final summary", () => {
 		const proposal = createTestProposal({
 			finalSummary: "This is the final summary",
 		});
-		assert.ok(proposal.finalSummary!.includes("final summary"));
+		assert.ok(proposal.finalSummary?.includes("final summary"));
 	});
 
 	it("displays labels", () => {
 		const proposal = createTestProposal({
 			labels: ["feature", "priority", "backend"],
 		});
-		assert.strictEqual(proposal.labels!.length, 3);
-		assert.ok(proposal.labels!.includes("feature"));
+		assert.strictEqual(proposal.labels?.length, 3);
+		assert.ok(proposal.labels?.includes("feature"));
 	});
 
 	it("displays priority", () => {
@@ -345,7 +363,7 @@ describe("AC#5: Proposal Detail Content", () => {
 
 	it("displays assignee", () => {
 		const proposal = createTestProposal({ assignee: ["@alice"] });
-		assert.ok(proposal.assignee![0]!.includes("alice"));
+		assert.ok(proposal.assignee?.[0]?.includes("alice"));
 	});
 
 	it("handles missing description gracefully", () => {
@@ -387,11 +405,11 @@ describe("AC#6: Regression - Critical Board Paths", () => {
 		assert.strictEqual(proposal.status, "Active");
 		assert.strictEqual(proposal.description, "Full description");
 		assert.strictEqual(proposal.priority, "high");
-		assert.strictEqual(proposal.labels!.length, 2);
-		assert.strictEqual(proposal.acceptanceCriteriaItems!.length, 2);
+		assert.strictEqual(proposal.labels?.length, 2);
+		assert.strictEqual(proposal.acceptanceCriteriaItems?.length, 2);
 		assert.strictEqual(proposal.implementationNotes, "Notes");
 		assert.strictEqual(proposal.finalSummary, "Summary");
-		assert.strictEqual(proposal.assignee![0]!, "@builder");
+		assert.strictEqual(proposal.assignee?.[0]!, "@builder");
 	});
 
 	it("handles proposal with minimal fields", () => {
@@ -416,16 +434,19 @@ describe("AC#6: Regression - Critical Board Paths", () => {
 		];
 
 		const filtered = proposals.filter((s) => s.status === "Active");
-		assert.strictEqual(filtered[0]!.id, "proposal-100");
-		assert.strictEqual(filtered[1]!.id, "proposal-101");
-		assert.strictEqual(filtered[2]!.id, "proposal-102");
+		assert.strictEqual(filtered[0]?.id, "proposal-100");
+		assert.strictEqual(filtered[1]?.id, "proposal-101");
+		assert.strictEqual(filtered[2]?.id, "proposal-102");
 	});
 
 	it("proposal priority ordering works correctly", () => {
 		const priorities = ["high", "medium", "low"];
 		const priorityOrder = (a: string, b: string): number => {
 			const order = { high: 0, medium: 1, low: 2 };
-			return (order[a as keyof typeof order] ?? 3) - (order[b as keyof typeof order] ?? 3);
+			return (
+				(order[a as keyof typeof order] ?? 3) -
+				(order[b as keyof typeof order] ?? 3)
+			);
 		};
 
 		const sorted = [...priorities].sort(priorityOrder);
@@ -440,11 +461,11 @@ describe("AC#6: Regression - Critical Board Paths", () => {
 			{ index: 2, text: "Not done", checked: false },
 		];
 
-		const checkedIcon = "{green-fg}✓{/}";
-		const uncheckedIcon = "{gray-fg}○{/}";
+		const _checkedIcon = "{green-fg}✓{/}";
+		const _uncheckedIcon = "{gray-fg}○{/}";
 
-		assert.strictEqual(acItems[0]!.checked, true); // should show ✓
-		assert.strictEqual(acItems[1]!.checked, false); // should show ○
+		assert.strictEqual(acItems[0]?.checked, true); // should show ✓
+		assert.strictEqual(acItems[1]?.checked, false); // should show ○
 	});
 
 	it("hidden statuses are filtered from board", () => {
@@ -460,6 +481,6 @@ describe("AC#6: Regression - Critical Board Paths", () => {
 		);
 
 		assert.strictEqual(visible.length, 1);
-		assert.strictEqual(visible[0]!.id, "proposal-100");
+		assert.strictEqual(visible[0]?.id, "proposal-100");
 	});
 });

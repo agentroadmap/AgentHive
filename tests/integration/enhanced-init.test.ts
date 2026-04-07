@@ -1,9 +1,9 @@
-import { readFile, writeFile, stat } from "node:fs/promises";
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, test } from "node:test";
+import { stat } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, test } from "node:test";
+import { initializeProject } from "../../src/core/infrastructure/init.ts";
 import { Core } from "../../src/core/roadmap.ts";
-import { initializeProject } from '../../src/core/infrastructure/init.ts';
 import type { RoadmapConfig } from "../../src/types/index.ts";
 import { createUniqueTestDir, safeCleanup } from "../support/test-utils.ts";
 
@@ -54,7 +54,9 @@ describe("Enhanced init command", () => {
 		assert.strictEqual(existingConfig?.defaultPort, 8080);
 
 		// Verify roadmap structure exists
-		const configExists = await stat(join(tmpDir, "roadmap", "config.yml")).then(() => true).catch(() => false);
+		const configExists = await stat(join(tmpDir, "roadmap", "config.yml"))
+			.then(() => true)
+			.catch(() => false);
 		assert.strictEqual(configExists, true);
 	});
 
@@ -73,7 +75,13 @@ describe("Enhanced init command", () => {
 		assert.ok(config);
 		assert.strictEqual(config?.projectName, "New Project");
 		assert.strictEqual(config?.autoCommit, false); // Default value
-		assert.deepStrictEqual(config?.statuses, ["Potential", "Active", "Accepted", "Complete", "Abandoned"]);
+		assert.deepStrictEqual(config?.statuses, [
+			"Potential",
+			"Active",
+			"Accepted",
+			"Complete",
+			"Abandoned",
+		]);
 		assert.strictEqual(config?.dateFormat, "yyyy-mm-dd");
 	});
 
@@ -147,8 +155,17 @@ describe("Enhanced init command", () => {
 		// Simulate re-initialization by loading existing config
 		const existingConfig = await core.filesystem.loadConfig();
 		assert.ok(existingConfig);
-		assert.deepStrictEqual(existingConfig?.statuses, ["Roadmap", "Active", "Review", "Complete"]);
-		assert.deepStrictEqual(existingConfig?.labels, ["bug", "feature", "enhancement"]);
+		assert.deepStrictEqual(existingConfig?.statuses, [
+			"Roadmap",
+			"Active",
+			"Review",
+			"Complete",
+		]);
+		assert.deepStrictEqual(existingConfig?.labels, [
+			"bug",
+			"feature",
+			"enhancement",
+		]);
 		assert.strictEqual(existingConfig?.dateFormat, "dd/mm/yyyy");
 		assert.strictEqual(existingConfig?.maxColumnWidth, 30);
 	});
@@ -188,7 +205,10 @@ describe("Enhanced init command", () => {
 		});
 
 		const reloaded = await core.filesystem.loadConfig();
-		assert.strictEqual(reloaded?.projectName, "Preserve Fields Project Updated");
+		assert.strictEqual(
+			reloaded?.projectName,
+			"Preserve Fields Project Updated",
+		);
 		assert.strictEqual(reloaded?.defaultAssignee, "@alex");
 		assert.strictEqual(reloaded?.defaultReporter, "@bot");
 		assert.strictEqual(reloaded?.includeDateTimeInDates, true);

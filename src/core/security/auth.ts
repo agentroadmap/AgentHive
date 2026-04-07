@@ -9,8 +9,13 @@
  * - AC#5: Key rotation supported without downtime
  */
 
-import { randomBytes, generateKeyPairSync, sign as cryptoSign, verify as cryptoVerify } from "node:crypto";
-import { readFile, writeFile, mkdir, access } from "node:fs/promises";
+import {
+	sign as cryptoSign,
+	verify as cryptoVerify,
+	generateKeyPairSync,
+	randomBytes,
+} from "node:crypto";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 // ─── Types ───────────────────────────────────────────────────────────
@@ -73,7 +78,8 @@ export class AgentAuth {
 
 	constructor(config?: Partial<AuthConfig>) {
 		this.config = {
-			identityDir: config?.identityDir ?? join(process.cwd(), ".roadmap", "auth"),
+			identityDir:
+				config?.identityDir ?? join(process.cwd(), ".roadmap", "auth"),
 			tokenTtlMs: config?.tokenTtlMs ?? DEFAULT_TOKEN_TTL_MS,
 			maxKeyVersions: config?.maxKeyVersions ?? DEFAULT_MAX_KEY_VERSIONS,
 		};
@@ -112,7 +118,9 @@ export class AgentAuth {
 			keyVersion: 1,
 		};
 
-		await writeFile(identityPath, JSON.stringify(identity, null, 2), { mode: 0o600 });
+		await writeFile(identityPath, JSON.stringify(identity, null, 2), {
+			mode: 0o600,
+		});
 		this.identity = identity;
 		return identity;
 	}
@@ -132,11 +140,15 @@ export class AgentAuth {
 	 */
 	async issueToken(agentId: string): Promise<AgentToken> {
 		if (!this.identity) {
-			throw new Error("Identity not initialized. Call initializeIdentity first.");
+			throw new Error(
+				"Identity not initialized. Call initializeIdentity first.",
+			);
 		}
 
 		if (this.identity.agentId !== agentId) {
-			throw new Error(`Cannot issue token for ${agentId} — identity is for ${this.identity.agentId}`);
+			throw new Error(
+				`Cannot issue token for ${agentId} — identity is for ${this.identity.agentId}`,
+			);
 		}
 
 		const now = Date.now();
@@ -148,7 +160,9 @@ export class AgentAuth {
 			nonce: randomBytes(16).toString("hex"),
 		};
 
-		const payloadB64 = Buffer.from(JSON.stringify(payload)).toString("base64url");
+		const payloadB64 = Buffer.from(JSON.stringify(payload)).toString(
+			"base64url",
+		);
 		const signature = this.signPayload(payloadB64);
 		const token = `${TOKEN_PREFIX}${payloadB64}.${signature}`;
 
@@ -178,7 +192,9 @@ export class AgentAuth {
 	 * Verify a token and return the authenticated agent ID.
 	 * Returns null if verification fails.
 	 */
-	async verifyToken(token: string): Promise<{ agentId: string; keyVersion: number } | null> {
+	async verifyToken(
+		token: string,
+	): Promise<{ agentId: string; keyVersion: number } | null> {
 		if (!token.startsWith(TOKEN_PREFIX)) {
 			return null;
 		}
@@ -250,7 +266,9 @@ export class AgentAuth {
 	 */
 	async rotateKeys(): Promise<AgentKeyPair> {
 		if (!this.identity) {
-			throw new Error("Identity not initialized. Call initializeIdentity first.");
+			throw new Error(
+				"Identity not initialized. Call initializeIdentity first.",
+			);
 		}
 
 		const identityPath = join(this.config.identityDir, IDENTITY_FILE);
@@ -260,7 +278,9 @@ export class AgentAuth {
 		);
 
 		// Archive current keys
-		await writeFile(archivePath, JSON.stringify(this.identity, null, 2), { mode: 0o600 });
+		await writeFile(archivePath, JSON.stringify(this.identity, null, 2), {
+			mode: 0o600,
+		});
 
 		// Generate new keys
 		const { publicKey, privateKey } = generateKeyPairSync("ed25519", {
@@ -276,7 +296,9 @@ export class AgentAuth {
 			keyVersion: this.identity.keyVersion + 1,
 		};
 
-		await writeFile(identityPath, JSON.stringify(newIdentity, null, 2), { mode: 0o600 });
+		await writeFile(identityPath, JSON.stringify(newIdentity, null, 2), {
+			mode: 0o600,
+		});
 
 		this.logAudit({
 			timestamp: new Date().toISOString(),
@@ -319,7 +341,7 @@ export class AgentAuth {
 
 		await mkdir(this.config.identityDir, { recursive: true });
 		const auditPath = join(this.config.identityDir, AUDIT_LOG_FILE);
-		const lines = this.auditLog.map((e) => JSON.stringify(e)).join("\n") + "\n";
+		const lines = `${this.auditLog.map((e) => JSON.stringify(e)).join("\n")}\n`;
 
 		const { appendFile } = await import("node:fs/promises");
 		await appendFile(auditPath, lines, { mode: 0o644 });
@@ -362,7 +384,10 @@ export class AgentAuth {
 		if (dotIndex === -1) return null;
 
 		try {
-			const json = Buffer.from(withoutPrefix.slice(0, dotIndex), "base64url").toString("utf-8");
+			const json = Buffer.from(
+				withoutPrefix.slice(0, dotIndex),
+				"base64url",
+			).toString("utf-8");
 			const payload = JSON.parse(json) as TokenPayload;
 			return payload.agentId ?? null;
 		} catch {
@@ -382,8 +407,10 @@ export interface AuthenticatedRequest {
 /**
  * Extract Bearer token from Authorization header.
  */
-export function extractBearerToken(headers: Record<string, string | string[] | undefined>): string | null {
-	const auth = headers["authorization"];
+export function extractBearerToken(
+	headers: Record<string, string | string[] | undefined>,
+): string | null {
+	const auth = headers.authorization;
 	if (!auth) return null;
 
 	const value = Array.isArray(auth) ? auth[0] : auth;

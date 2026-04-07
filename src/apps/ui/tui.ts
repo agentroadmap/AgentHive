@@ -6,8 +6,16 @@
  */
 
 import { stdin as input, stdout as output } from "node:process";
-import type { ProgramInterface, ScreenInterface, ScreenOptions } from "./blessed.ts";
-import { box, program as createProgram, screen as blessedScreen } from "./blessed.ts";
+import type {
+	ProgramInterface,
+	ScreenInterface,
+	ScreenOptions,
+} from "./blessed.ts";
+import {
+	screen as blessedScreen,
+	box,
+	program as createProgram,
+} from "./blessed.ts";
 
 type ErrorConstructor = new () => unknown;
 
@@ -37,9 +45,16 @@ function normalizeToError(value: unknown): Error {
 	return new Error(String(value ?? "Unknown screen error"));
 }
 
-export function createScreen(options: Partial<ScreenOptions> = {}): ScreenInterface {
+export function createScreen(
+	options: Partial<ScreenOptions> = {},
+): ScreenInterface {
 	const program: ProgramInterface = createProgram({ tput: false });
-	const screen = blessedScreen({ smartCSR: true, program, fullUnicode: true, ...options });
+	const screen = blessedScreen({
+		smartCSR: true,
+		program,
+		fullUnicode: true,
+		...options,
+	});
 
 	// Windows runners occasionally surface file system watcher errors as plain objects
 	// (rather than Error instances). Blessed rethrows unhandled "error" events by
@@ -57,7 +72,10 @@ export function createScreen(options: Partial<ScreenOptions> = {}): ScreenInterf
 }
 
 // Ask the user for a single line of input.  Falls back to readline.
-export async function promptText(message: string, defaultValue = ""): Promise<string> {
+export async function promptText(
+	message: string,
+	defaultValue = "",
+): Promise<string> {
 	// Always use readline for simple text input to avoid blessed rendering quirks
 	const { createInterface } = await import("node:readline/promises");
 	const rl = createInterface({ input, output });

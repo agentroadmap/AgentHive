@@ -1,8 +1,12 @@
 import assert from "node:assert";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { mkdir, rm, readFile } from "node:fs/promises";
 import { Core } from "../../src/core/roadmap.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 let TEST_DIR: string;
 
@@ -34,14 +38,23 @@ describe("Proposal References", () => {
 		it("should create a proposal with references", async () => {
 			const { proposal } = await core.createProposalFromInput({
 				title: "Proposal with refs",
-				references: ["https://github.com/example/issue/123", "src/components/Button.tsx"],
+				references: [
+					"https://github.com/example/issue/123",
+					"src/components/Button.tsx",
+				],
 			});
 
-			assert.deepStrictEqual(proposal.references, ["https://github.com/example/issue/123", "src/components/Button.tsx"]);
+			assert.deepStrictEqual(proposal.references, [
+				"https://github.com/example/issue/123",
+				"src/components/Button.tsx",
+			]);
 
 			// Verify persistence
 			const loaded = await core.loadProposalById(proposal.id);
-			assert.deepStrictEqual(loaded?.references, ["https://github.com/example/issue/123", "src/components/Button.tsx"]);
+			assert.deepStrictEqual(loaded?.references, [
+				"https://github.com/example/issue/123",
+				"src/components/Button.tsx",
+			]);
 		});
 
 		it("should create a proposal without references", async () => {
@@ -72,7 +85,10 @@ describe("Proposal References", () => {
 				references: ["https://docs.example.com/api", "README.md"],
 			});
 
-			assert.deepStrictEqual(updated.references, ["https://docs.example.com/api", "README.md"]);
+			assert.deepStrictEqual(updated.references, [
+				"https://docs.example.com/api",
+				"README.md",
+			]);
 		});
 
 		it("should add references to existing proposal", async () => {
@@ -85,7 +101,11 @@ describe("Proposal References", () => {
 				addReferences: ["file2.ts", "file3.ts"],
 			});
 
-			assert.deepStrictEqual(updated.references, ["file1.ts", "file2.ts", "file3.ts"]);
+			assert.deepStrictEqual(updated.references, [
+				"file1.ts",
+				"file2.ts",
+				"file3.ts",
+			]);
 		});
 
 		it("should not add duplicate references", async () => {
@@ -98,7 +118,11 @@ describe("Proposal References", () => {
 				addReferences: ["file2.ts", "file3.ts"],
 			});
 
-			assert.deepStrictEqual(updated.references, ["file1.ts", "file2.ts", "file3.ts"]);
+			assert.deepStrictEqual(updated.references, [
+				"file1.ts",
+				"file2.ts",
+				"file3.ts",
+			]);
 		});
 
 		it("should remove references from existing proposal", async () => {
@@ -174,10 +198,14 @@ describe("Proposal References", () => {
 				],
 			});
 
-			const { proposal: completedProposal } = await core.createProposalFromInput({
-				title: "Completed referencing proposal",
-				references: ["proposal-1", "https://example.com/proposals/proposal-1"],
-			});
+			const { proposal: completedProposal } =
+				await core.createProposalFromInput({
+					title: "Completed referencing proposal",
+					references: [
+						"proposal-1",
+						"https://example.com/proposals/proposal-1",
+					],
+				});
 			await core.completeProposal(completedProposal.id, false);
 
 			const archived = await core.archiveProposal(archiveTarget.id, false);
@@ -185,7 +213,9 @@ describe("Proposal References", () => {
 
 			const updatedActive = await core.loadProposalById(activeProposal.id);
 			const completedProposals = await core.filesystem.listCompletedProposals();
-			const updatedCompleted = completedProposals.find((proposal) => proposal.id === completedProposal.id);
+			const updatedCompleted = completedProposals.find(
+				(proposal) => proposal.id === completedProposal.id,
+			);
 
 			assert.deepStrictEqual(updatedActive?.references, [
 				"https://example.com/proposals/proposal-1",
@@ -195,7 +225,10 @@ describe("Proposal References", () => {
 				"JIRA-1",
 				"proposal-12",
 			]);
-			assert.deepStrictEqual(updatedCompleted?.references, ["proposal-1", "https://example.com/proposals/proposal-1"]);
+			assert.deepStrictEqual(updatedCompleted?.references, [
+				"proposal-1",
+				"https://example.com/proposals/proposal-1",
+			]);
 		});
 	});
 });

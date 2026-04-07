@@ -14,7 +14,8 @@ export const directiveAddSchema: JsonSchema = {
 			type: "string",
 			minLength: 1,
 			maxLength: 100,
-			description: "Directive name/title (trimmed; case-insensitive uniqueness)",
+			description:
+				"Directive name/title (trimmed; case-insensitive uniqueness)",
 		},
 		description: {
 			type: "string",
@@ -43,7 +44,8 @@ export const directiveRenameSchema: JsonSchema = {
 		},
 		updateProposals: {
 			type: "boolean",
-			description: "Whether to update local proposals that reference the directive (default: true)",
+			description:
+				"Whether to update local proposals that reference the directive (default: true)",
 			default: true,
 		},
 	},
@@ -63,13 +65,15 @@ export const directiveRemoveSchema: JsonSchema = {
 		proposalHandling: {
 			type: "string",
 			enum: ["clear", "keep", "reassign"],
-			description: "What to do with local proposals currently set to this directive: clear (default), keep, or reassign",
+			description:
+				"What to do with local proposals currently set to this directive: clear (default), keep, or reassign",
 			default: "clear",
 		},
 		reassignTo: {
 			type: "string",
 			maxLength: 100,
-			description: "Target directive name when proposalHandling is reassign (must exist as an active directive file)",
+			description:
+				"Target directive name when proposalHandling is reassign (must exist as an active directive file)",
 		},
 	},
 	required: ["name"],

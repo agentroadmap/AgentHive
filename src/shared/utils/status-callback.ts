@@ -23,8 +23,11 @@ export interface StatusCallbackResult {
  * @param options - The callback options including command and proposal details
  * @returns The result of the callback execution
  */
-export async function executeStatusCallback(options: StatusCallbackOptions): Promise<StatusCallbackResult> {
-	const { command, proposalId, oldStatus, newStatus, proposalTitle, cwd } = options;
+export async function executeStatusCallback(
+	options: StatusCallbackOptions,
+): Promise<StatusCallbackResult> {
+	const { command, proposalId, oldStatus, newStatus, proposalTitle, cwd } =
+		options;
 
 	if (!command || command.trim().length === 0) {
 		return { success: false, error: "Empty command" };
@@ -43,19 +46,23 @@ export async function executeStatusCallback(options: StatusCallbackOptions): Pro
 
 		const [stdout, stderr] = await Promise.all([
 			new Promise<string>((resolve) => {
-				let data = '';
-				proc.stdout?.on('data', (chunk: Buffer) => { data += chunk.toString(); });
-				proc.stdout?.on('end', () => resolve(data));
+				let data = "";
+				proc.stdout?.on("data", (chunk: Buffer) => {
+					data += chunk.toString();
+				});
+				proc.stdout?.on("end", () => resolve(data));
 			}),
 			new Promise<string>((resolve) => {
-				let data = '';
-				proc.stderr?.on('data', (chunk: Buffer) => { data += chunk.toString(); });
-				proc.stderr?.on('end', () => resolve(data));
-			})
+				let data = "";
+				proc.stderr?.on("data", (chunk: Buffer) => {
+					data += chunk.toString();
+				});
+				proc.stderr?.on("end", () => resolve(data));
+			}),
 		]);
 
 		const exitCode = await new Promise<number>((resolve) => {
-			proc.on('close', (code: number) => resolve(code ?? 1));
+			proc.on("close", (code: number) => resolve(code ?? 1));
 		});
 		const success = exitCode === 0;
 

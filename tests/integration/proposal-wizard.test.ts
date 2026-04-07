@@ -1,18 +1,20 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
-import { expect } from "../support/test-utils.ts";
 import {
+	ProposalWizardCancelledError,
+	type ProposalWizardPromptRunner,
 	pickProposalForEditWizard,
 	runProposalCreateWizard,
 	runProposalEditWizard,
-	ProposalWizardCancelledError,
-	type ProposalWizardPromptRunner,
 } from "../../src/commands/proposal-wizard.ts";
 import type { Proposal } from "../../src/types/index.ts";
+import { expect } from "../support/test-utils.ts";
 
 type PromptResponses = Record<string, string | string[]>;
 
-function createPromptRunner(responses: PromptResponses): ProposalWizardPromptRunner {
+function createPromptRunner(
+	responses: PromptResponses,
+): ProposalWizardPromptRunner {
 	const proposal = new Map<string, string[]>();
 	for (const [key, value] of Object.entries(responses)) {
 		proposal.set(key, Array.isArray(value) ? [...value] : [value]);
@@ -124,8 +126,14 @@ describe("proposal wizard", () => {
 		assert.strictEqual(updateInput?.priority, "high");
 		assert.deepStrictEqual(updateInput?.assignee, ["alice", "bob"]);
 		assert.deepStrictEqual(updateInput?.labels, ["existing", "cli"]);
-		assert.deepStrictEqual(updateInput?.dependencies, ["proposal-2", "proposal-3"]);
-		assert.deepStrictEqual(updateInput?.references, ["docs/new.md", "src/cli.ts"]);
+		assert.deepStrictEqual(updateInput?.dependencies, [
+			"proposal-2",
+			"proposal-3",
+		]);
+		assert.deepStrictEqual(updateInput?.references, [
+			"docs/new.md",
+			"src/cli.ts",
+		]);
 		assert.deepStrictEqual(updateInput?.documentation, ["docs/spec.md"]);
 		assert.strictEqual(updateInput?.implementationPlan, "New plan");
 		assert.strictEqual(updateInput?.implementationNotes, "New notes");
@@ -171,7 +179,9 @@ describe("proposal wizard", () => {
 			asked.push(question.name);
 			if (question.name === "title") {
 				titleAttempts += 1;
-				return { title: titleAttempts === 1 ? "Initial title" : "Updated title" };
+				return {
+					title: titleAttempts === 1 ? "Initial title" : "Updated title",
+				};
 			}
 			if (question.name === "description") {
 				descriptionAttempts += 1;
@@ -191,7 +201,12 @@ describe("proposal wizard", () => {
 		assert.notStrictEqual(input, null);
 		assert.strictEqual(input?.title, "Updated title");
 		assert.strictEqual(input?.description, "Updated description");
-		expect(asked.slice(0, 4)).toEqual(["title", "description", "title", "description"]);
+		expect(asked.slice(0, 4)).toEqual([
+			"title",
+			"description",
+			"title",
+			"description",
+		]);
 	});
 
 	it("treats first-step backspace-empty navigation signal as a no-op", async () => {
@@ -248,7 +263,13 @@ describe("proposal wizard", () => {
 	it("uses select prompts for status and priority with create defaults", async () => {
 		const questions: Record<
 			string,
-			{ type: string; message: string; initial?: string; optionsCount: number; optionValues: string[] }
+			{
+				type: string;
+				message: string;
+				initial?: string;
+				optionsCount: number;
+				optionValues: string[];
+			}
 		> = {};
 		const prompt: ProposalWizardPromptRunner = async (question) => {
 			questions[question.name] = {
@@ -262,7 +283,14 @@ describe("proposal wizard", () => {
 		};
 
 		const input = await runProposalCreateWizard({
-			statuses: ["Roadmap", "Potential", "Active", "Accepted", "Complete", "Abandoned"],
+			statuses: [
+				"Roadmap",
+				"Potential",
+				"Active",
+				"Accepted",
+				"Complete",
+				"Abandoned",
+			],
 			promptImpl: prompt,
 		});
 
@@ -271,7 +299,15 @@ describe("proposal wizard", () => {
 		assert.strictEqual(input?.priority, undefined);
 		assert.strictEqual(questions.status?.type, "select");
 		assert.strictEqual(questions.status?.initial, "Potential");
-		assert.deepStrictEqual(questions.status?.optionValues, ["Draft", "Roadmap", "Potential", "Active", "Accepted", "Complete", "Abandoned"]);
+		assert.deepStrictEqual(questions.status?.optionValues, [
+			"Draft",
+			"Roadmap",
+			"Potential",
+			"Active",
+			"Accepted",
+			"Complete",
+			"Abandoned",
+		]);
 		expect((questions.status?.optionsCount ?? 0) > 0).toBe(true);
 		assert.strictEqual(questions.priority?.type, "select");
 		assert.strictEqual(questions.priority?.initial, "");
@@ -279,7 +315,10 @@ describe("proposal wizard", () => {
 	});
 
 	it("falls back to default statuses and keeps create default on Potential", async () => {
-		const promptQuestions: Record<string, { initial?: string; optionValues: string[] }> = {};
+		const promptQuestions: Record<
+			string,
+			{ initial?: string; optionValues: string[] }
+		> = {};
 		const prompt: ProposalWizardPromptRunner = async (question) => {
 			promptQuestions[question.name] = {
 				initial: question.initial,
@@ -296,6 +335,13 @@ describe("proposal wizard", () => {
 		assert.notStrictEqual(input, null);
 		assert.strictEqual(input?.status, "Potential");
 		assert.strictEqual(promptQuestions.status?.initial, "Potential");
-		assert.deepStrictEqual(promptQuestions.status?.optionValues, ["Draft", "Potential", "Active", "Accepted", "Complete", "Abandoned"]);
+		assert.deepStrictEqual(promptQuestions.status?.optionValues, [
+			"Draft",
+			"Potential",
+			"Active",
+			"Accepted",
+			"Complete",
+			"Abandoned",
+		]);
 	});
 });

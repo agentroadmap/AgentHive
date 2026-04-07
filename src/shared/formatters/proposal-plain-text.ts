@@ -19,7 +19,9 @@ export function formatDateForDisplay(dateStr: string): string {
 	return hasTime ? dateStr : dateStr;
 }
 
-function buildChecklistItems(items: Proposal["acceptanceCriteriaItems"]): ChecklistItem[] {
+function buildChecklistItems(
+	items: Proposal["acceptanceCriteriaItems"],
+): ChecklistItem[] {
 	const criteria = items ?? [];
 	return criteria
 		.slice()
@@ -33,11 +35,15 @@ function buildChecklistItems(items: Proposal["acceptanceCriteriaItems"]): Checkl
 		}));
 }
 
-export function buildAcceptanceCriteriaItems(proposal: Proposal): ChecklistItem[] {
+export function buildAcceptanceCriteriaItems(
+	proposal: Proposal,
+): ChecklistItem[] {
 	return buildChecklistItems(proposal.acceptanceCriteriaItems);
 }
 
-export function buildVerificationProposalments(proposal: Proposal): ChecklistItem[] {
+export function buildVerificationProposalments(
+	proposal: Proposal,
+): ChecklistItem[] {
 	return buildChecklistItems(proposal.verificationProposalments);
 }
 
@@ -45,7 +51,9 @@ export function formatAcceptanceCriteriaLines(
 	items: ChecklistItem[],
 	options: ChecklistFormattingOptions = {},
 ): string[] {
-	const visibleItems = options.hideChecked ? items.filter((item) => !item.checked) : items;
+	const visibleItems = options.hideChecked
+		? items.filter((item) => !item.checked)
+		: items;
 	if (visibleItems.length === 0) return [];
 	return visibleItems.map((item) => {
 		const prefix = item.checked ? "- [x]" : "- [ ]";
@@ -75,13 +83,20 @@ function formatAssignees(assignee?: string[]): string | null {
 	return assignee.map((a) => (a.startsWith("@") ? a : `@${a}`)).join(", ");
 }
 
-function formatSubproposalLines(subproposals: Array<{ id: string; title: string }>): string[] {
+function formatSubproposalLines(
+	subproposals: Array<{ id: string; title: string }>,
+): string[] {
 	if (subproposals.length === 0) return [];
 	const sorted = sortByProposalId(subproposals);
-	return sorted.map((subproposal) => `- ${subproposal.id} - ${subproposal.title}`);
+	return sorted.map(
+		(subproposal) => `- ${subproposal.id} - ${subproposal.title}`,
+	);
 }
 
-export function formatProposalPlainText(proposal: Proposal, options: ProposalPlainTextOptions = {}): string {
+export function formatProposalPlainText(
+	proposal: Proposal,
+	options: ProposalPlainTextOptions = {},
+): string {
 	const lines: string[] = [];
 	const filePath = options.filePathOverride ?? proposal.filePath;
 	const reachedProposal = isCompleteStatus(proposal.status);
@@ -91,7 +106,8 @@ export function formatProposalPlainText(proposal: Proposal, options: ProposalPla
 		lines.push("");
 	}
 
-	const displayId = proposal.status === "Draft" ? proposal.id : proposal.id.toUpperCase();
+	const displayId =
+		proposal.status === "Draft" ? proposal.id : proposal.id.toUpperCase();
 	lines.push(`Proposal ${displayId} - ${proposal.title}`);
 	if (proposal.type) lines.push(`Type: ${proposal.type.toUpperCase()}`);
 	lines.push("=".repeat(50));
@@ -109,7 +125,9 @@ export function formatProposalPlainText(proposal: Proposal, options: ProposalPla
 	}
 
 	if (proposal.reporter) {
-		const reporter = proposal.reporter.startsWith("@") ? proposal.reporter : `@${proposal.reporter}`;
+		const reporter = proposal.reporter.startsWith("@")
+			? proposal.reporter
+			: `@${proposal.reporter}`;
 		lines.push(`Reporter: ${reporter}`);
 	}
 
@@ -136,12 +154,16 @@ export function formatProposalPlainText(proposal: Proposal, options: ProposalPla
 	}
 
 	if (proposal.builder) {
-		const builder = proposal.builder.startsWith("@") ? proposal.builder : `@${proposal.builder}`;
+		const builder = proposal.builder.startsWith("@")
+			? proposal.builder
+			: `@${proposal.builder}`;
 		lines.push(`Builder: ${builder}`);
 	}
 
 	if (proposal.auditor) {
-		const auditor = proposal.auditor.startsWith("@") ? proposal.auditor : `@${proposal.auditor}`;
+		const auditor = proposal.auditor.startsWith("@")
+			? proposal.auditor
+			: `@${proposal.auditor}`;
 		lines.push(`Auditor: ${auditor}`);
 	}
 
@@ -150,7 +172,9 @@ export function formatProposalPlainText(proposal: Proposal, options: ProposalPla
 	}
 
 	if (proposal.external_injections?.length) {
-		lines.push(`External Injections: ${proposal.external_injections.join(", ")}`);
+		lines.push(
+			`External Injections: ${proposal.external_injections.join(", ")}`,
+		);
 	}
 
 	if (proposal.unlocks?.length) {
@@ -178,7 +202,10 @@ export function formatProposalPlainText(proposal: Proposal, options: ProposalPla
 	}
 
 	const subproposalSummaries = proposal.subproposalSummaries ?? [];
-	const subproposalCount = subproposalSummaries.length > 0 ? subproposalSummaries.length : (proposal.subproposals?.length ?? 0);
+	const subproposalCount =
+		subproposalSummaries.length > 0
+			? subproposalSummaries.length
+			: (proposal.subproposals?.length ?? 0);
 	if (subproposalCount > 0) {
 		const subproposalLines = formatSubproposalLines(subproposalSummaries);
 		if (subproposalLines.length > 0) {
@@ -214,7 +241,13 @@ export function formatProposalPlainText(proposal: Proposal, options: ProposalPla
 	lines.push("Description:");
 	lines.push("-".repeat(50));
 	const description = proposal.description?.trim();
-	lines.push(transformCodePathsPlain(description && description.length > 0 ? description : "No description provided"));
+	lines.push(
+		transformCodePathsPlain(
+			description && description.length > 0
+				? description
+				: "No description provided",
+		),
+	);
 	lines.push("");
 
 	const criteriaItems = buildAcceptanceCriteriaItems(proposal);
@@ -281,7 +314,9 @@ export function formatProposalPlainText(proposal: Proposal, options: ProposalPla
 		lines.push("-".repeat(50));
 		for (const entry of activityLog) {
 			const reasonPart = entry.reason ? ` (${entry.reason})` : "";
-			lines.push(`  ${entry.timestamp} | ${entry.actor} | ${entry.action}${reasonPart}`);
+			lines.push(
+				`  ${entry.timestamp} | ${entry.actor} | ${entry.action}${reasonPart}`,
+			);
 		}
 		lines.push("");
 	}

@@ -32,7 +32,10 @@ export interface ValidationResult {
 /**
  * Validates input against a JSON Schema
  */
-export function validateInput(input: unknown, schema: JsonSchema): ValidationResult {
+export function validateInput(
+	input: unknown,
+	schema: JsonSchema,
+): ValidationResult {
 	const errors: string[] = [];
 	const sanitizedData: Record<string, unknown> = {};
 
@@ -47,7 +50,11 @@ export function validateInput(input: unknown, schema: JsonSchema): ValidationRes
 
 	if (schema.required) {
 		for (const field of schema.required) {
-			if (!(field in data) || data[field] === undefined || data[field] === null) {
+			if (
+				!(field in data) ||
+				data[field] === undefined ||
+				data[field] === null
+			) {
 				errors.push(`Required field '${field}' is missing or null`);
 			}
 		}
@@ -108,17 +115,26 @@ function validateField(
 
 			// Sanitize string input
 			// Preserve whitespace for separator fields and when explicitly requested
-			const shouldPreserveWhitespace = schema.preserveWhitespace || fieldName === "separator";
+			const shouldPreserveWhitespace =
+				schema.preserveWhitespace || fieldName === "separator";
 			const sanitizedString = shouldPreserveWhitespace
 				? sanitizeStringPreserveWhitespace(value)
 				: sanitizeString(value);
 			let sanitizedResult = sanitizedString;
 
 			// Length validation
-			if (schema.minLength !== undefined && sanitizedString.length < schema.minLength) {
-				errors.push(`Field '${fieldName}' must be at least ${schema.minLength} characters long`);
+			if (
+				schema.minLength !== undefined &&
+				sanitizedString.length < schema.minLength
+			) {
+				errors.push(
+					`Field '${fieldName}' must be at least ${schema.minLength} characters long`,
+				);
 			}
-			if (schema.maxLength !== undefined && sanitizedString.length > schema.maxLength) {
+			if (
+				schema.maxLength !== undefined &&
+				sanitizedString.length > schema.maxLength
+			) {
 				errors.push(
 					`Field '${fieldName}' exceeds maximum length of ${schema.maxLength} characters (${sanitizedString.length} characters)`,
 				);
@@ -127,8 +143,12 @@ function validateField(
 			// Enum validation
 			if (schema.enum) {
 				const normalizeValue = (inputValue: string): string => {
-					const withoutWhitespace = schema.enumNormalizeWhitespace ? inputValue.replace(/\s+/g, "") : inputValue;
-					return schema.enumCaseInsensitive ? withoutWhitespace.toLowerCase() : withoutWhitespace;
+					const withoutWhitespace = schema.enumNormalizeWhitespace
+						? inputValue.replace(/\s+/g, "")
+						: inputValue;
+					return schema.enumCaseInsensitive
+						? withoutWhitespace.toLowerCase()
+						: withoutWhitespace;
 				};
 
 				const normalizedCandidate = normalizeValue(sanitizedString);
@@ -142,17 +162,24 @@ function validateField(
 				}
 
 				if (!canonicalMatch) {
-					errors.push(`Field '${fieldName}' must be one of: ${schema.enum.join(", ")}`);
+					errors.push(
+						`Field '${fieldName}' must be one of: ${schema.enum.join(", ")}`,
+					);
 				} else {
 					sanitizedResult = canonicalMatch;
 				}
 			}
 
-			return { isValid: errors.length === 0, errors, sanitizedValue: sanitizedResult };
+			return {
+				isValid: errors.length === 0,
+				errors,
+				sanitizedValue: sanitizedResult,
+			};
 		}
 
 		case "number": {
-			const numValue = typeof value === "string" ? Number.parseFloat(value) : value;
+			const numValue =
+				typeof value === "string" ? Number.parseFloat(value) : value;
 			if (typeof numValue !== "number" || Number.isNaN(numValue)) {
 				errors.push(`Field '${fieldName}' must be a number`);
 				break;
@@ -177,7 +204,9 @@ function validateField(
 
 			// Validate maxItems
 			if (schema.maxItems !== undefined && value.length > schema.maxItems) {
-				errors.push(`Field '${fieldName}' must have at most ${schema.maxItems} items`);
+				errors.push(
+					`Field '${fieldName}' must have at most ${schema.maxItems} items`,
+				);
 			}
 
 			const sanitizedArray: unknown[] = [];
@@ -185,7 +214,11 @@ function validateField(
 			// Validate array items
 			if (schema.items) {
 				for (let i = 0; i < value.length; i++) {
-					const itemResult = validateField(`${fieldName}[${i}]`, value[i], schema.items);
+					const itemResult = validateField(
+						`${fieldName}[${i}]`,
+						value[i],
+						schema.items,
+					);
 					if (!itemResult.isValid) {
 						errors.push(...itemResult.errors);
 					} else if (itemResult.sanitizedValue !== undefined) {
@@ -194,16 +227,25 @@ function validateField(
 				}
 			}
 
-			return { isValid: errors.length === 0, errors, sanitizedValue: sanitizedArray };
+			return {
+				isValid: errors.length === 0,
+				errors,
+				sanitizedValue: sanitizedArray,
+			};
 		}
 
 		case "boolean": {
-			const boolValue = typeof value === "string" ? value.toLowerCase() === "true" : Boolean(value);
+			const boolValue =
+				typeof value === "string"
+					? value.toLowerCase() === "true"
+					: Boolean(value);
 			return { isValid: true, errors: [], sanitizedValue: boolValue };
 		}
 
 		default: {
-			errors.push(`Unknown schema type '${schema.type}' for field '${fieldName}'`);
+			errors.push(
+				`Unknown schema type '${schema.type}' for field '${fieldName}'`,
+			);
 		}
 	}
 

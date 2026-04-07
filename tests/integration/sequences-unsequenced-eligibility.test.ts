@@ -1,10 +1,13 @@
-import assert from "node:assert";
 import { describe, it } from "node:test";
-import { expect } from "../support/test-utils.ts";
-import { canMoveToUnsequenced } from '../../src/core/proposal/sequences.ts';
+import { canMoveToUnsequenced } from "../../src/core/proposal/sequences.ts";
 import type { Proposal } from "../../src/types/index.ts";
+import { expect } from "../support/test-utils.ts";
 
-function t(id: string, deps: string[] = [], extra: Partial<Proposal> = {}): Proposal {
+function t(
+	id: string,
+	deps: string[] = [],
+	extra: Partial<Proposal> = {},
+): Proposal {
 	return {
 		id,
 		title: id,

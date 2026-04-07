@@ -13,8 +13,18 @@ import {
 	saveIssues,
 } from "../../../../core/pipeline/issue-tracker.ts";
 import type { TestFile } from "../../../../core/pipeline/test-discovery.ts";
-import { discoverTests, filterByCategory, getTestStats, type TestCategory } from "../../../../core/pipeline/test-discovery.ts";
-import { allTestsPassed, formatTestReport, runTests, type TestRunOptions } from "../../../../core/pipeline/test-runner.ts";
+import {
+	discoverTests,
+	filterByCategory,
+	getTestStats,
+	type TestCategory,
+} from "../../../../core/pipeline/test-discovery.ts";
+import {
+	allTestsPassed,
+	formatTestReport,
+	runTests,
+	type TestRunOptions,
+} from "../../../../core/pipeline/test-runner.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
 
@@ -77,7 +87,9 @@ export class TestHandlers {
 		}
 
 		const stats = getTestStats(result);
-		const testList = tests.map((t: TestFile) => `  ${t.category}: ${t.name}`).join("\n");
+		const testList = tests
+			.map((t: TestFile) => `  ${t.category}: ${t.name}`)
+			.join("\n");
 
 		return {
 			content: [
@@ -137,7 +149,8 @@ export class TestHandlers {
 			issues = issues.filter((i) => i.severity === args.severity);
 		}
 
-		const output = issues.length > 0 ? formatIssues(issues) : "No issues found.";
+		const output =
+			issues.length > 0 ? formatIssues(issues) : "No issues found.";
 
 		return {
 			content: [

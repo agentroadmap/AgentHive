@@ -118,7 +118,11 @@ describe("unified view filter proposal", () => {
 			directiveFilter: "Sprint 1",
 		};
 
-		const kanbanResults = filterProposalsForKanban(proposals, sharedFilters, resolveDirectiveLabel).map((proposal) => proposal.id);
+		const kanbanResults = filterProposalsForKanban(
+			proposals,
+			sharedFilters,
+			resolveDirectiveLabel,
+		).map((proposal) => proposal.id);
 		const listSharedResults = applyProposalFilters(proposals, {
 			priority: "high",
 			labels: ["ui"],

@@ -1,10 +1,13 @@
 import assert from "node:assert";
-import { after, before, describe, it } from "node:test";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { after, before, describe, it } from "node:test";
 import { Core } from "../../src/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync,
+import {
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 let TEST_DIR: string;
@@ -62,7 +65,10 @@ describe("next id across remote branches", () => {
 	});
 
 	it("uses id after highest remote proposal", async () => {
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal create "Local Proposal"`, { cwd: LOCAL_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal create "Local Proposal"`,
+			{ cwd: LOCAL_DIR },
+		);
 		expect(result.stdout.toString()).toContain("Created proposal proposal-2");
 		const core = new Core(LOCAL_DIR);
 		const proposal = await core.filesystem.loadProposal("proposal-2");

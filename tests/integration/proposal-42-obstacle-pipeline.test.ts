@@ -6,12 +6,11 @@
  * - Agent who created obstacle notified when promoted proposal is resolved
  */
 
-import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { ObstaclePipeline } from "../../src/core/pipeline/obstacle-pipeline.ts";
-import type { Obstacle } from "../../src/core/pipeline/obstacle-pipeline.ts";
-import { mkdirSync, rmSync, existsSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import { ObstaclePipeline } from "../../src/core/pipeline/obstacle-pipeline.ts";
 
 const TEST_BASE = join(import.meta.dirname, "../../tmp/test-obstacle-pipeline");
 
@@ -33,10 +32,13 @@ describe("proposal-42: Obstacle-to-Proposal Pipeline", () => {
 		}
 	});
 
-	const createTestObstacle = (overrides?: Partial<Parameters<typeof pipeline.createObstacle>[0]>) =>
+	const createTestObstacle = (
+		overrides?: Partial<Parameters<typeof pipeline.createObstacle>[0]>,
+	) =>
 		pipeline.createObstacle({
 			title: "TypeScript compilation error",
-			description: "Cannot find module '@types/node' after upgrade to Node.js 24",
+			description:
+				"Cannot find module '@types/node' after upgrade to Node.js 24",
 			blockingProposalIds: ["proposal-1", "proposal-2"],
 			reportedBy: "agent-1",
 			severity: "high",
@@ -172,7 +174,9 @@ describe("proposal-42: Obstacle-to-Proposal Pipeline", () => {
 			});
 			const result = pipeline.promoteToProposal(obstacle.id);
 
-			assert.deepEqual(result.proposal.metadata.blockingProposalIds, ["proposal-5"]);
+			assert.deepEqual(result.proposal.metadata.blockingProposalIds, [
+				"proposal-5",
+			]);
 		});
 	});
 

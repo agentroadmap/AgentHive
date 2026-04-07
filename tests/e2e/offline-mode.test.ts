@@ -1,13 +1,13 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect } from "../support/test-utils.ts";
-import { loadRemoteProposals } from '../../src/core/storage/proposal-loader.ts';
+import { afterEach, beforeEach, describe, it } from "node:test";
+import { loadRemoteProposals } from "../../src/core/storage/proposal-loader.ts";
 import type { FileSystem } from "../../src/file-system/operations.ts";
 import { GitOperations } from "../../src/git/operations.ts";
 import type { RoadmapConfig } from "../../src/types/index.ts";
+import { expect } from "../support/test-utils.ts";
 
 describe("Offline Mode Configuration", () => {
 	let tempDir: string;
@@ -56,7 +56,11 @@ describe("Offline Mode Configuration", () => {
 			await gitOps.fetch();
 
 			// Verify debug message was logged
-			assert.ok(warnMessages.includes("Remote operations are disabled in config. Skipping fetch."));
+			assert.ok(
+				warnMessages.includes(
+					"Remote operations are disabled in config. Skipping fetch.",
+				),
+			);
 
 			// Restore
 			process.env.DEBUG = originalDebug;
@@ -105,9 +109,16 @@ describe("Offline Mode Configuration", () => {
 			};
 
 			// Mock execGit to simulate network error
-			type GitOperationsWithExecGit = { execGit: (args: string[]) => Promise<{ stdout: string; stderr: string }> };
-			const originalExecGit = (gitOps as unknown as GitOperationsWithExecGit).execGit;
-			(gitOps as unknown as GitOperationsWithExecGit).execGit = async (args: string[]) => {
+			type GitOperationsWithExecGit = {
+				execGit: (
+					args: string[],
+				) => Promise<{ stdout: string; stderr: string }>;
+			};
+			const originalExecGit = (gitOps as unknown as GitOperationsWithExecGit)
+				.execGit;
+			(gitOps as unknown as GitOperationsWithExecGit).execGit = async (
+				args: string[],
+			) => {
 				if (args[0] === "fetch") {
 					throw new Error("could not resolve host github.com");
 				}
@@ -149,19 +160,23 @@ describe("Offline Mode Configuration", () => {
 			];
 
 			for (const errorMessage of networkErrors) {
-				const isNetworkError = (gitOps as unknown as { isNetworkError: (error: unknown) => boolean }).isNetworkError(
-					new Error(errorMessage),
-				);
+				const isNetworkError = (
+					gitOps as unknown as { isNetworkError: (error: unknown) => boolean }
+				).isNetworkError(new Error(errorMessage));
 				assert.strictEqual(isNetworkError, true);
 			}
 
 			// Non-network errors should not be detected as network errors
-			const nonNetworkErrors = ["Permission denied", "Repository not found", "Authentication failed"];
+			const nonNetworkErrors = [
+				"Permission denied",
+				"Repository not found",
+				"Authentication failed",
+			];
 
 			for (const errorMessage of nonNetworkErrors) {
-				const isNetworkError = (gitOps as unknown as { isNetworkError: (error: unknown) => boolean }).isNetworkError(
-					new Error(errorMessage),
-				);
+				const isNetworkError = (
+					gitOps as unknown as { isNetworkError: (error: unknown) => boolean }
+				).isNetworkError(new Error(errorMessage));
 				assert.strictEqual(isNetworkError, false);
 			}
 		});
@@ -189,10 +204,18 @@ describe("Offline Mode Configuration", () => {
 				listRecentRemoteBranches: async (_daysAgo: number) => [],
 			} as unknown as GitOperations;
 
-			const remoteProposals = await loadRemoteProposals(mockGitOperations, config, onProgress);
+			const remoteProposals = await loadRemoteProposals(
+				mockGitOperations,
+				config,
+				onProgress,
+			);
 
 			assert.deepStrictEqual(remoteProposals, []);
-			assert.ok(progressMessages.includes("Remote operations disabled - skipping remote proposals"));
+			assert.ok(
+				progressMessages.includes(
+					"Remote operations disabled - skipping remote proposals",
+				),
+			);
 		});
 
 		it("should proceed with remote operations when remoteOperations is true", async () => {
@@ -217,7 +240,11 @@ describe("Offline Mode Configuration", () => {
 				listRecentRemoteBranches: async (_daysAgo: number) => [],
 			} as unknown as GitOperations;
 
-			const remoteProposals = await loadRemoteProposals(mockGitOperations, config, onProgress);
+			const remoteProposals = await loadRemoteProposals(
+				mockGitOperations,
+				config,
+				onProgress,
+			);
 
 			assert.strictEqual(fetchCalled, true);
 			assert.deepStrictEqual(remoteProposals, []);
@@ -237,7 +264,11 @@ describe("Offline Mode Configuration", () => {
 				listRecentRemoteBranches: async (_daysAgo: number) => [],
 			} as unknown as GitOperations;
 
-			const remoteProposals = await loadRemoteProposals(mockGitOperations, null, onProgress);
+			const remoteProposals = await loadRemoteProposals(
+				mockGitOperations,
+				null,
+				onProgress,
+			);
 
 			assert.strictEqual(fetchCalled, true);
 			assert.deepStrictEqual(remoteProposals, []);

@@ -1,11 +1,15 @@
+import { parseStructuredText } from "../../markdown/structured-sections.ts";
 import type { ProposalUpdateInput } from "../types/index.ts";
 import type { ProposalEditArgs } from "../types/proposal-edit-args.ts";
 import { normalizeStringList } from "./proposal-builders.ts";
-import { parseStructuredText } from "../../markdown/structured-sections.ts";
 
-function sanitizeStringArray(values: string[] | undefined): string[] | undefined {
+function sanitizeStringArray(
+	values: string[] | undefined,
+): string[] | undefined {
 	if (!values) return undefined;
-	const trimmed = values.map((value) => String(value).trim()).filter((value) => value.length > 0);
+	const trimmed = values
+		.map((value) => String(value).trim())
+		.filter((value) => value.length > 0);
 	return trimmed.length > 0 ? trimmed : undefined;
 }
 
@@ -19,7 +23,9 @@ function sanitizeAppend(values: string[] | undefined): string[] | undefined {
 
 function toAcceptanceCriteriaEntries(values: string[] | undefined) {
 	if (!values) return undefined;
-	const trimmed = values.map((value) => String(value).trim()).filter((value) => value.length > 0);
+	const trimmed = values
+		.map((value) => String(value).trim())
+		.filter((value) => value.length > 0);
 	if (trimmed.length === 0) {
 		return undefined;
 	}
@@ -35,7 +41,9 @@ function toAcceptanceCriteriaEntries(values: string[] | undefined) {
 	});
 }
 
-export function buildProposalUpdateInput(args: ProposalEditArgs): ProposalUpdateInput {
+export function buildProposalUpdateInput(
+	args: ProposalEditArgs,
+): ProposalUpdateInput {
 	const updateInput: ProposalUpdateInput = {};
 
 	if (typeof args.title === "string") {
@@ -204,7 +212,10 @@ export function buildProposalUpdateInput(args: ProposalEditArgs): ProposalUpdate
 		updateInput.acceptanceCriteria = criteriaSet;
 	}
 
-	if (Array.isArray(args.acceptanceCriteriaAdd) && args.acceptanceCriteriaAdd.length > 0) {
+	if (
+		Array.isArray(args.acceptanceCriteriaAdd) &&
+		args.acceptanceCriteriaAdd.length > 0
+	) {
 		const additions = args.acceptanceCriteriaAdd
 			.map((text) => String(text).trim())
 			.filter((text) => text.length > 0)
@@ -214,23 +225,40 @@ export function buildProposalUpdateInput(args: ProposalEditArgs): ProposalUpdate
 		}
 	}
 
-	if (Array.isArray(args.acceptanceCriteriaRemove) && args.acceptanceCriteriaRemove.length > 0) {
+	if (
+		Array.isArray(args.acceptanceCriteriaRemove) &&
+		args.acceptanceCriteriaRemove.length > 0
+	) {
 		updateInput.removeAcceptanceCriteria = [...args.acceptanceCriteriaRemove];
 	}
 
-	if (Array.isArray(args.acceptanceCriteriaCheck) && args.acceptanceCriteriaCheck.length > 0) {
+	if (
+		Array.isArray(args.acceptanceCriteriaCheck) &&
+		args.acceptanceCriteriaCheck.length > 0
+	) {
 		updateInput.checkAcceptanceCriteria = [...args.acceptanceCriteriaCheck];
 	}
 
-	if (Array.isArray(args.acceptanceCriteriaUncheck) && args.acceptanceCriteriaUncheck.length > 0) {
+	if (
+		Array.isArray(args.acceptanceCriteriaUncheck) &&
+		args.acceptanceCriteriaUncheck.length > 0
+	) {
 		updateInput.uncheckAcceptanceCriteria = [...args.acceptanceCriteriaUncheck];
 	}
 
-	if (Array.isArray(args.verificationProposalmentsSet) && args.verificationProposalmentsSet.length > 0) {
-		updateInput.verificationProposalments = toAcceptanceCriteriaEntries(args.verificationProposalmentsSet);
+	if (
+		Array.isArray(args.verificationProposalmentsSet) &&
+		args.verificationProposalmentsSet.length > 0
+	) {
+		updateInput.verificationProposalments = toAcceptanceCriteriaEntries(
+			args.verificationProposalmentsSet,
+		);
 	}
 
-	if (Array.isArray(args.verificationProposalmentsAdd) && args.verificationProposalmentsAdd.length > 0) {
+	if (
+		Array.isArray(args.verificationProposalmentsAdd) &&
+		args.verificationProposalmentsAdd.length > 0
+	) {
 		const additions = args.verificationProposalmentsAdd
 			.map((text) => String(text).trim())
 			.filter((text) => text.length > 0)
@@ -248,16 +276,31 @@ export function buildProposalUpdateInput(args: ProposalEditArgs): ProposalUpdate
 		}
 	}
 
-	if (Array.isArray(args.verificationProposalmentsRemove) && args.verificationProposalmentsRemove.length > 0) {
-		updateInput.removeVerificationProposalments = [...args.verificationProposalmentsRemove];
+	if (
+		Array.isArray(args.verificationProposalmentsRemove) &&
+		args.verificationProposalmentsRemove.length > 0
+	) {
+		updateInput.removeVerificationProposalments = [
+			...args.verificationProposalmentsRemove,
+		];
 	}
 
-	if (Array.isArray(args.verificationProposalmentsCheck) && args.verificationProposalmentsCheck.length > 0) {
-		updateInput.checkVerificationProposalments = [...args.verificationProposalmentsCheck];
+	if (
+		Array.isArray(args.verificationProposalmentsCheck) &&
+		args.verificationProposalmentsCheck.length > 0
+	) {
+		updateInput.checkVerificationProposalments = [
+			...args.verificationProposalmentsCheck,
+		];
 	}
 
-	if (Array.isArray(args.verificationProposalmentsUncheck) && args.verificationProposalmentsUncheck.length > 0) {
-		updateInput.uncheckVerificationProposalments = [...args.verificationProposalmentsUncheck];
+	if (
+		Array.isArray(args.verificationProposalmentsUncheck) &&
+		args.verificationProposalmentsUncheck.length > 0
+	) {
+		updateInput.uncheckVerificationProposalments = [
+			...args.verificationProposalmentsUncheck,
+		];
 	}
 
 	const requires = sanitizeStringArray(args.requires);
@@ -290,7 +333,10 @@ export function buildProposalUpdateInput(args: ProposalEditArgs): ProposalUpdate
 	if (addNeeds) {
 		updateInput.addNeedsCapabilities = addNeeds;
 	}
-	if (Array.isArray(args.removeNeedsCapabilities) && args.removeNeedsCapabilities.length > 0) {
+	if (
+		Array.isArray(args.removeNeedsCapabilities) &&
+		args.removeNeedsCapabilities.length > 0
+	) {
 		updateInput.removeNeedsCapabilities = [...args.removeNeedsCapabilities];
 	}
 
@@ -302,7 +348,10 @@ export function buildProposalUpdateInput(args: ProposalEditArgs): ProposalUpdate
 	if (addExternal) {
 		updateInput.addExternalInjections = addExternal;
 	}
-	if (Array.isArray(args.removeExternalInjections) && args.removeExternalInjections.length > 0) {
+	if (
+		Array.isArray(args.removeExternalInjections) &&
+		args.removeExternalInjections.length > 0
+	) {
 		updateInput.removeExternalInjections = [...args.removeExternalInjections];
 	}
 

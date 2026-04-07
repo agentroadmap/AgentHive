@@ -2,7 +2,11 @@ import assert from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { McpServer } from "../../src/mcp/server.ts";
 import { registerCubicTools } from "../../src/mcp/tools/cubic/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 const getText = (content: unknown[] | undefined): string => {
 	const item = content?.[0] as { text?: string } | undefined;
@@ -25,7 +29,11 @@ describe("MCP cubic tools", () => {
 	});
 
 	afterEach(async () => {
-		try { await mcpServer.stop(); } catch { /* */ }
+		try {
+			await mcpServer.stop();
+		} catch {
+			/* */
+		}
 		await safeCleanup(TEST_DIR);
 	});
 
@@ -56,8 +64,12 @@ describe("MCP cubic tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("test-cubic") || text.includes("created") || text.includes("cubic"),
-			`Expected cubic creation: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("test-cubic") ||
+				text.includes("created") ||
+				text.includes("cubic"),
+			`Expected cubic creation: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("creates a minimal cubic with just a name", async () => {
@@ -68,23 +80,34 @@ describe("MCP cubic tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("minimal-cubic") || text.includes("created"),
-			`Expected minimal cubic: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("minimal-cubic") || text.includes("created"),
+			`Expected minimal cubic: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("lists all cubics", async () => {
 		await mcpServer.testInterface.callTool({
-			params: { name: "cubic_create", arguments: { name: "first", agents: [], proposals: [] } },
+			params: {
+				name: "cubic_create",
+				arguments: { name: "first", agents: [], proposals: [] },
+			},
 		});
 		await mcpServer.testInterface.callTool({
-			params: { name: "cubic_create", arguments: { name: "second", agents: [], proposals: [] } },
+			params: {
+				name: "cubic_create",
+				arguments: { name: "second", agents: [], proposals: [] },
+			},
 		});
 
 		const result = await mcpServer.testInterface.callTool({
 			params: { name: "cubic_list", arguments: {} },
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("first") && text.includes("second"), `Missing cubics: ${text.slice(0, 300)}`);
+		assert.ok(
+			text.includes("first") && text.includes("second"),
+			`Missing cubics: ${text.slice(0, 300)}`,
+		);
 	});
 
 	it("focuses on a cubic", async () => {
@@ -99,8 +122,12 @@ describe("MCP cubic tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("focus-cubic") || text.includes("focused") || text.includes("lock"),
-			`Expected focus result: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("focus-cubic") ||
+				text.includes("focused") ||
+				text.includes("lock"),
+			`Expected focus result: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("transitions cubic phase", async () => {
@@ -115,8 +142,12 @@ describe("MCP cubic tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("phase-cubic") || text.includes("transition") || text.includes("build"),
-			`Expected transition result: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("phase-cubic") ||
+				text.includes("transition") ||
+				text.includes("build"),
+			`Expected transition result: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("recycles a cubic for new task", async () => {
@@ -131,8 +162,10 @@ describe("MCP cubic tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("recycle-cubic") || text.includes("recycled"),
-			`Expected recycle result: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("recycle-cubic") || text.includes("recycled"),
+			`Expected recycle result: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("shows empty cubic list initially", async () => {
@@ -141,7 +174,10 @@ describe("MCP cubic tools", () => {
 		});
 		const text = getText(result.content);
 		// Should handle empty state gracefully
-		assert.ok(typeof text === "string", `Expected cubic list: ${text.slice(0, 200)}`);
+		assert.ok(
+			typeof text === "string",
+			`Expected cubic list: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("creates cubic with associated proposals", async () => {
@@ -156,8 +192,12 @@ describe("MCP cubic tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("proposal-cubic") || text.includes("P001") || text.length > 0,
-			`Expected proposal-attached cubic: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("proposal-cubic") ||
+				text.includes("P001") ||
+				text.length > 0,
+			`Expected proposal-attached cubic: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("transitions through multiple phases", async () => {
@@ -167,15 +207,25 @@ describe("MCP cubic tools", () => {
 
 		// Design -> Build
 		await mcpServer.testInterface.callTool({
-			params: { name: "cubic_transition", arguments: { name: "multi-phase", newPhase: "build" } },
+			params: {
+				name: "cubic_transition",
+				arguments: { name: "multi-phase", newPhase: "build" },
+			},
 		});
 
 		// Build -> Review
 		const result = await mcpServer.testInterface.callTool({
-			params: { name: "cubic_transition", arguments: { name: "multi-phase", newPhase: "review" } },
+			params: {
+				name: "cubic_transition",
+				arguments: { name: "multi-phase", newPhase: "review" },
+			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("multi-phase") || text.includes("review") || text.length > 0,
-			`Expected multi-phase transition: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("multi-phase") ||
+				text.includes("review") ||
+				text.length > 0,
+			`Expected multi-phase transition: ${text.slice(0, 200)}`,
+		);
 	});
 });

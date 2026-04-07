@@ -1,5 +1,5 @@
 import type React from "react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Agent, Proposal } from "../../../shared/types";
 import { apiClient } from "../lib/api";
 import LoadingSpinner from "./LoadingSpinner";
@@ -23,7 +23,7 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ proposals }) => {
 	const [error, setError] = useState<string | null>(null);
 	const [releasingId, setReleasingId] = useState<string | null>(null);
 
-	const fetchData = async () => {
+	const fetchData = useCallback(async () => {
 		try {
 			setError(null);
 			const agentsData = await apiClient.fetchAgents();
@@ -32,7 +32,7 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ proposals }) => {
 			console.error("Failed to fetch agent data:", err);
 			setError("Failed to load agent dashboard");
 		}
-	};
+	}, []);
 
 	useEffect(() => {
 		let isMounted = true;
@@ -47,7 +47,7 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ proposals }) => {
 		return () => {
 			isMounted = false;
 		};
-	}, []);
+	}, [fetchData]);
 
 	const handleReleaseLease = async (proposalId: string) => {
 		try {
@@ -56,7 +56,9 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ proposals }) => {
 			await fetchData();
 		} catch (err) {
 			console.error("Failed to release lease:", err);
-			alert(`Failed to release lease: ${err instanceof Error ? err.message : String(err)}`);
+			alert(
+				`Failed to release lease: ${err instanceof Error ? err.message : String(err)}`,
+			);
 		} finally {
 			setReleasingId(null);
 		}
@@ -66,7 +68,9 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ proposals }) => {
 		return (
 			<div className="flex flex-col justify-center items-center h-64 space-y-4">
 				<LoadingSpinner size="lg" text="" />
-				<p className="text-lg font-medium text-gray-900 dark:text-gray-100">Loading agent dashboard...</p>
+				<p className="text-lg font-medium text-gray-900 dark:text-gray-100">
+					Loading agent dashboard...
+				</p>
 			</div>
 		);
 	}
@@ -75,7 +79,9 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ proposals }) => {
 		return (
 			<div className="p-8 text-center">
 				<div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6">
-					<p className="text-red-600 dark:text-red-400 font-medium">Error loading dashboard</p>
+					<p className="text-red-600 dark:text-red-400 font-medium">
+						Error loading dashboard
+					</p>
 					<p className="text-red-500 dark:text-red-300 text-sm mt-1">{error}</p>
 				</div>
 			</div>
@@ -139,7 +145,13 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ proposals }) => {
 	// Compute directive progress from proposals if available
 	const directiveProgress = new Map<
 		string,
-		{ total: number; reached: number; active: number; ready: number; blocked: number }
+		{
+			total: number;
+			reached: number;
+			active: number;
+			ready: number;
+			blocked: number;
+		}
 	>();
 	if (proposals) {
 		for (const proposal of proposals) {
@@ -209,7 +221,9 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ proposals }) => {
 
 	return (
 		<div className="space-y-6">
-			<h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Agent Dashboard</h1>
+			<h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+				Agent Dashboard
+			</h1>
 
 			{/* Overview Cards */}
 			<div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
@@ -217,12 +231,20 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ proposals }) => {
 					<p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
 						Total Agents
 					</p>
-					<p className="text-3xl font-bold text-gray-900 dark:text-gray-100 mt-1">{agents.length}</p>
+					<p className="text-3xl font-bold text-gray-900 dark:text-gray-100 mt-1">
+						{agents.length}
+					</p>
 				</div>
 				<div className="bg-white dark:bg-gray-800 rounded-lg border border-green-200 dark:border-green-800/50 p-4 shadow-sm">
-					<p className="text-xs font-semibold text-green-600 dark:text-green-400 uppercase tracking-wider">Healthy</p>
+					<p className="text-xs font-semibold text-green-600 dark:text-green-400 uppercase tracking-wider">
+						Healthy
+					</p>
 					<p className="text-3xl font-bold text-green-700 dark:text-green-300 mt-1">
-						{claims.filter((c) => getHealthStatus(c.lastHeartbeat) === "healthy").length}
+						{
+							claims.filter(
+								(c) => getHealthStatus(c.lastHeartbeat) === "healthy",
+							).length
+						}
 					</p>
 				</div>
 				<div className="bg-white dark:bg-gray-800 rounded-lg border border-yellow-200 dark:border-yellow-800/50 p-4 shadow-sm">
@@ -230,13 +252,23 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ proposals }) => {
 						Degraded
 					</p>
 					<p className="text-3xl font-bold text-yellow-700 dark:text-yellow-300 mt-1">
-						{claims.filter((c) => getHealthStatus(c.lastHeartbeat) === "degraded").length}
+						{
+							claims.filter(
+								(c) => getHealthStatus(c.lastHeartbeat) === "degraded",
+							).length
+						}
 					</p>
 				</div>
 				<div className="bg-white dark:bg-gray-800 rounded-lg border border-red-200 dark:border-red-800/50 p-4 shadow-sm">
-					<p className="text-xs font-semibold text-red-600 dark:text-red-400 uppercase tracking-wider">Offline/Stale</p>
+					<p className="text-xs font-semibold text-red-600 dark:text-red-400 uppercase tracking-wider">
+						Offline/Stale
+					</p>
 					<p className="text-3xl font-bold text-red-700 dark:text-red-300 mt-1">
-						{claims.filter((c) => getHealthStatus(c.lastHeartbeat) === "offline").length}
+						{
+							claims.filter(
+								(c) => getHealthStatus(c.lastHeartbeat) === "offline",
+							).length
+						}
 					</p>
 				</div>
 				<div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 shadow-sm hidden lg:block">
@@ -244,7 +276,7 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ proposals }) => {
 						Active Proposal
 					</p>
 					<p className="text-xl font-bold text-gray-600 dark:text-gray-300 mt-2 truncate">
-						{claims.length > 0 ? claims[0]!.proposalId : "None"}
+						{claims.length > 0 ? claims[0]?.proposalId : "None"}
 					</p>
 				</div>
 			</div>
@@ -260,22 +292,35 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ proposals }) => {
 					</h2>
 					<div className="space-y-3">
 						{staleClaims.map((c) => (
-							<div key={`${c.agent}-${c.proposalId}`} className="flex items-center justify-between text-sm">
+							<div
+								key={`${c.agent}-${c.proposalId}`}
+								className="flex items-center justify-between text-sm"
+							>
 								<span className="text-red-700 dark:text-red-300">
-									Stale claim: <strong>{c.agent}</strong> on <strong>{c.proposalId}</strong> — {c.proposalTitle}
+									Stale claim: <strong>{c.agent}</strong> on{" "}
+									<strong>{c.proposalId}</strong> — {c.proposalTitle}
 								</span>
 								<span className="text-red-500 dark:text-red-400 text-xs">
-									{c.lastHeartbeat ? `last heartbeat ${formatTimeAgo(c.lastHeartbeat)}` : "no heartbeat"}
+									{c.lastHeartbeat
+										? `last heartbeat ${formatTimeAgo(c.lastHeartbeat)}`
+										: "no heartbeat"}
 								</span>
 							</div>
 						))}
 						{agingProposals.map((s) => (
-							<div key={s.id} className="flex items-center justify-between text-sm">
+							<div
+								key={s.id}
+								className="flex items-center justify-between text-sm"
+							>
 								<span className="text-red-700 dark:text-red-300">
 									Aging proposal: <strong>{s.id}</strong> — {s.title}
 								</span>
 								<span className="text-red-500 dark:text-red-400 text-xs">
-									active for {formatTimeAgo(s.updatedDate || s.createdDate).replace(" ago", "")}
+									active for{" "}
+									{formatTimeAgo(s.updatedDate || s.createdDate).replace(
+										" ago",
+										"",
+									)}
 								</span>
 							</div>
 						))}
@@ -298,7 +343,10 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ proposals }) => {
 							);
 						})}
 						{missingProofProposals.map((s) => (
-							<div key={`missing-proof-${s.id}`} className="flex items-center justify-between text-sm">
+							<div
+								key={`missing-proof-${s.id}`}
+								className="flex items-center justify-between text-sm"
+							>
 								<span className="text-orange-700 dark:text-orange-400">
 									Missing proof: <strong>{s.id}</strong> — {s.title} (Complete)
 								</span>
@@ -311,10 +359,14 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ proposals }) => {
 			{/* Active Claims */}
 			<div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
 				<div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-					<h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Active Claims</h2>
+					<h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+						Active Claims
+					</h2>
 				</div>
 				{claims.length === 0 ? (
-					<p className="p-4 text-sm text-gray-500 dark:text-gray-400">No active claims</p>
+					<p className="p-4 text-sm text-gray-500 dark:text-gray-400">
+						No active claims
+					</p>
 				) : (
 					<div className="divide-y divide-gray-200 dark:divide-gray-700">
 						{claims.map((c) => {
@@ -343,12 +395,20 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ proposals }) => {
 										</span>
 									</div>
 									<div className="flex flex-col items-end space-y-1">
-										<div className={`text-[10px] font-semibold uppercase tracking-wider ${healthTextColor(health)}`}>
+										<div
+											className={`text-[10px] font-semibold uppercase tracking-wider ${healthTextColor(health)}`}
+										>
 											{health}
 										</div>
 										<div className="flex items-center space-x-3 text-xs text-gray-500 dark:text-gray-400 font-mono">
-											<span>{c.lastHeartbeat ? `HB: ${formatTimeAgo(c.lastHeartbeat)}` : "No Heartbeat"}</span>
-											{c.expires && <span>EXP: {formatTimeAgo(c.expires)}</span>}
+											<span>
+												{c.lastHeartbeat
+													? `HB: ${formatTimeAgo(c.lastHeartbeat)}`
+													: "No Heartbeat"}
+											</span>
+											{c.expires && (
+												<span>EXP: {formatTimeAgo(c.expires)}</span>
+											)}
 										</div>
 										<button
 											type="button"
@@ -356,7 +416,9 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ proposals }) => {
 											disabled={releasingId === c.proposalId}
 											className="mt-1 text-[10px] px-2 py-0.5 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors disabled:opacity-50"
 										>
-											{releasingId === c.proposalId ? "Releasing..." : "Release Lease"}
+											{releasingId === c.proposalId
+												? "Releasing..."
+												: "Release Lease"}
 										</button>
 									</div>
 								</div>
@@ -369,19 +431,30 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ proposals }) => {
 			{/* Agent Cards */}
 			<div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
 				<div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-					<h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Registered Agents</h2>
+					<h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+						Registered Agents
+					</h2>
 				</div>
 				{agents.length === 0 ? (
-					<p className="p-4 text-sm text-gray-500 dark:text-gray-400">No agents registered</p>
+					<p className="p-4 text-sm text-gray-500 dark:text-gray-400">
+						No agents registered
+					</p>
 				) : (
 					<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
 						{agents.map((agent) => {
 							const agentClaims = claims.filter((c) => c.agent === agent.name);
 							return (
-								<div key={agent.name} className="border border-gray-200 dark:border-gray-600 rounded-lg p-4 space-y-2">
+								<div
+									key={agent.name}
+									className="border border-gray-200 dark:border-gray-600 rounded-lg p-4 space-y-2"
+								>
 									<div className="flex items-center justify-between">
-										<h3 className="font-semibold text-gray-900 dark:text-gray-100">{agent.name}</h3>
-										<span className={`px-2 py-0.5 rounded text-xs font-medium ${statusColor(agent.status)}`}>
+										<h3 className="font-semibold text-gray-900 dark:text-gray-100">
+											{agent.name}
+										</h3>
+										<span
+											className={`px-2 py-0.5 rounded text-xs font-medium ${statusColor(agent.status)}`}
+										>
 											{agent.status}
 										</span>
 									</div>
@@ -405,9 +478,14 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ proposals }) => {
 										</div>
 										{agentClaims.length > 0 && (
 											<div className="mt-1 pt-1 border-t border-gray-200 dark:border-gray-600">
-												<span className="text-gray-600 dark:text-gray-300">Working on: </span>
+												<span className="text-gray-600 dark:text-gray-300">
+													Working on:{" "}
+												</span>
 												{agentClaims.map((c) => (
-													<span key={c.proposalId} className="text-gray-900 dark:text-gray-100 font-medium">
+													<span
+														key={c.proposalId}
+														className="text-gray-900 dark:text-gray-100 font-medium"
+													>
 														{c.proposalId}{" "}
 													</span>
 												))}
@@ -425,13 +503,17 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ proposals }) => {
 			{directiveProgress.size > 0 && (
 				<div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
 					<div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-						<h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Directive Progress</h2>
+						<h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+							Directive Progress
+						</h2>
 					</div>
 					<div className="divide-y divide-gray-200 dark:divide-gray-700">
 						{[...directiveProgress.entries()].map(([name, counts]) => (
 							<div key={name} className="px-4 py-3">
 								<div className="flex items-center justify-between mb-1">
-									<span className="text-sm font-medium text-gray-900 dark:text-gray-100">{name}</span>
+									<span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+										{name}
+									</span>
 									<span className="text-xs text-gray-500 dark:text-gray-400">
 										{counts.reached}/{counts.total} reached
 									</span>
@@ -439,13 +521,19 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ proposals }) => {
 								<div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
 									<div
 										className="bg-green-500 h-2 rounded-full"
-										style={{ width: `${counts.total > 0 ? (counts.reached / counts.total) * 100 : 0}%` }}
+										style={{
+											width: `${counts.total > 0 ? (counts.reached / counts.total) * 100 : 0}%`,
+										}}
 									/>
 								</div>
 								<div className="flex gap-3 mt-1 text-xs text-gray-500 dark:text-gray-400">
 									<span>Active: {counts.active}</span>
 									<span>Ready: {counts.ready}</span>
-									{counts.blocked > 0 && <span className="text-red-500">Blocked: {counts.blocked}</span>}
+									{counts.blocked > 0 && (
+										<span className="text-red-500">
+											Blocked: {counts.blocked}
+										</span>
+									)}
 								</div>
 							</div>
 						))}

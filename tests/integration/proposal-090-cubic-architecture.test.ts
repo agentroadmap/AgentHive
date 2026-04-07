@@ -1,21 +1,21 @@
 /**
  * Tests for proposal-090: Cubic Architecture - Isolated Sandbox for Expert Agents
  */
-import { describe, it } from "node:test";
+
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 import {
-	CubicPhase,
-	PHASE_ORDER,
-	nextPhase,
-	prevPhase,
-	createDefaultCubicConfig,
-	createCubicAgent,
-	CubicSandbox,
 	agentHasCapability,
+	CubicPhase,
+	CubicSandbox,
+	createCubicAgent,
+	createDefaultCubicConfig,
 	DEFAULT_PHASE_CAPABILITIES,
-	type CubicAgent,
-	type PhaseSkill,
 	type HandoffPayload,
+	nextPhase,
+	PHASE_ORDER,
+	type PhaseSkill,
+	prevPhase,
 } from "../../src/core/orchestration/cubic-architecture.ts";
 
 describe("proposal-090: Cubic Architecture", () => {
@@ -56,7 +56,10 @@ describe("proposal-090: Cubic Architecture", () => {
 			assert.equal(config.phase, CubicPhase.Build);
 			assert.equal(config.maxAgents, 5);
 			assert.equal(config.idleTimeoutMs, 30 * 60 * 1000);
-			assert.deepStrictEqual(config.allowedCapabilities, DEFAULT_PHASE_CAPABILITIES[CubicPhase.Build]);
+			assert.deepStrictEqual(
+				config.allowedCapabilities,
+				DEFAULT_PHASE_CAPABILITIES[CubicPhase.Build],
+			);
 			assert.equal(config.canHandoff, true);
 		});
 
@@ -70,7 +73,11 @@ describe("proposal-090: Cubic Architecture", () => {
 			for (let i = 0; i < allCaps.length; i++) {
 				for (let j = i + 1; j < allCaps.length; j++) {
 					const overlap = allCaps[i].filter((c) => allCaps[j].includes(c));
-					assert.deepStrictEqual(overlap, [], `Overlap between phases ${i} and ${j}: ${overlap}`);
+					assert.deepStrictEqual(
+						overlap,
+						[],
+						`Overlap between phases ${i} and ${j}: ${overlap}`,
+					);
 				}
 			}
 		});
@@ -79,7 +86,11 @@ describe("proposal-090: Cubic Architecture", () => {
 	// AC#2: CubicAgent interface
 	describe("AC#2: CubicAgent interface", () => {
 		it("createCubicAgent creates agent with defaults", () => {
-			const agent = createCubicAgent("agent-1", "Builder Bot", CubicPhase.Build);
+			const agent = createCubicAgent(
+				"agent-1",
+				"Builder Bot",
+				CubicPhase.Build,
+			);
 			assert.equal(agent.agentId, "agent-1");
 			assert.equal(agent.name, "Builder Bot");
 			assert.equal(agent.phase, CubicPhase.Build);
@@ -91,7 +102,11 @@ describe("proposal-090: Cubic Architecture", () => {
 		it("agentHasCapability checks skill in current phase", () => {
 			const skills: PhaseSkill[] = [
 				{ skillId: "code", level: "expert", activePhases: [CubicPhase.Build] },
-				{ skillId: "test", level: "competent", activePhases: [CubicPhase.Test] },
+				{
+					skillId: "test",
+					level: "competent",
+					activePhases: [CubicPhase.Test],
+				},
 			];
 			const agent = createCubicAgent("a1", "Dev", CubicPhase.Build, skills);
 
@@ -125,7 +140,9 @@ describe("proposal-090: Cubic Architecture", () => {
 		});
 
 		it("joinAgent adds agent and sets cubicId", () => {
-			const sandbox = new CubicSandbox(createDefaultCubicConfig(CubicPhase.Build, "b1"));
+			const sandbox = new CubicSandbox(
+				createDefaultCubicConfig(CubicPhase.Build, "b1"),
+			);
 			const agent = createCubicAgent("a1", "Builder", CubicPhase.Build);
 
 			assert.equal(sandbox.joinAgent(agent), true);
@@ -140,12 +157,17 @@ describe("proposal-090: Cubic Architecture", () => {
 
 			sandbox.joinAgent(createCubicAgent("a1", "A1", CubicPhase.Test));
 			sandbox.joinAgent(createCubicAgent("a2", "A2", CubicPhase.Test));
-			assert.equal(sandbox.joinAgent(createCubicAgent("a3", "A3", CubicPhase.Test)), false);
+			assert.equal(
+				sandbox.joinAgent(createCubicAgent("a3", "A3", CubicPhase.Test)),
+				false,
+			);
 			assert.equal(sandbox.getAgentCount(), 2);
 		});
 
 		it("leaveAgent removes agent and clears cubicId", () => {
-			const sandbox = new CubicSandbox(createDefaultCubicConfig(CubicPhase.Build, "b1"));
+			const sandbox = new CubicSandbox(
+				createDefaultCubicConfig(CubicPhase.Build, "b1"),
+			);
 			const agent = createCubicAgent("a1", "Builder", CubicPhase.Build);
 			sandbox.joinAgent(agent);
 
@@ -155,12 +177,16 @@ describe("proposal-090: Cubic Architecture", () => {
 		});
 
 		it("leaveAgent returns false for unknown agent", () => {
-			const sandbox = new CubicSandbox(createDefaultCubicConfig(CubicPhase.Build, "b1"));
+			const sandbox = new CubicSandbox(
+				createDefaultCubicConfig(CubicPhase.Build, "b1"),
+			);
 			assert.equal(sandbox.leaveAgent("ghost"), false);
 		});
 
 		it("getAgents returns all agents", () => {
-			const sandbox = new CubicSandbox(createDefaultCubicConfig(CubicPhase.Design, "d1"));
+			const sandbox = new CubicSandbox(
+				createDefaultCubicConfig(CubicPhase.Design, "d1"),
+			);
 			sandbox.joinAgent(createCubicAgent("a1", "A1", CubicPhase.Design));
 			sandbox.joinAgent(createCubicAgent("a2", "A2", CubicPhase.Design));
 
@@ -173,21 +199,27 @@ describe("proposal-090: Cubic Architecture", () => {
 	// AC#4: Phase capability gating
 	describe("AC#4: Phase capability gating", () => {
 		it("allows capabilities in the allowed list", () => {
-			const sandbox = new CubicSandbox(createDefaultCubicConfig(CubicPhase.Build, "b1"));
+			const sandbox = new CubicSandbox(
+				createDefaultCubicConfig(CubicPhase.Build, "b1"),
+			);
 			assert.equal(sandbox.isCapabilityAllowed("code"), true);
 			assert.equal(sandbox.isCapabilityAllowed("edit"), true);
 			assert.equal(sandbox.isCapabilityAllowed("deploy"), false);
 		});
 
 		it("useCapability returns allowed for valid capability", () => {
-			const sandbox = new CubicSandbox(createDefaultCubicConfig(CubicPhase.Test, "t1"));
+			const sandbox = new CubicSandbox(
+				createDefaultCubicConfig(CubicPhase.Test, "t1"),
+			);
 			const result = sandbox.useCapability("run-tests");
 			assert.equal(result.allowed, true);
 			assert.equal(result.reason, undefined);
 		});
 
 		it("useCapability rejects with descriptive error", () => {
-			const sandbox = new CubicSandbox(createDefaultCubicConfig(CubicPhase.Design, "d1"));
+			const sandbox = new CubicSandbox(
+				createDefaultCubicConfig(CubicPhase.Design, "d1"),
+			);
 			const result = sandbox.useCapability("deploy");
 			assert.equal(result.allowed, false);
 			assert.ok(result.reason?.includes("deploy"));
@@ -195,9 +227,15 @@ describe("proposal-090: Cubic Architecture", () => {
 		});
 
 		it("each phase gates different capabilities", () => {
-			const design = new CubicSandbox(createDefaultCubicConfig(CubicPhase.Design, "d"));
-			const build = new CubicSandbox(createDefaultCubicConfig(CubicPhase.Build, "b"));
-			const ship = new CubicSandbox(createDefaultCubicConfig(CubicPhase.Ship, "s"));
+			const design = new CubicSandbox(
+				createDefaultCubicConfig(CubicPhase.Design, "d"),
+			);
+			const build = new CubicSandbox(
+				createDefaultCubicConfig(CubicPhase.Build, "b"),
+			);
+			const ship = new CubicSandbox(
+				createDefaultCubicConfig(CubicPhase.Ship, "s"),
+			);
 
 			assert.equal(design.useCapability("research").allowed, true);
 			assert.equal(build.useCapability("research").allowed, false);
@@ -209,7 +247,9 @@ describe("proposal-090: Cubic Architecture", () => {
 	// AC#5: Health monitoring
 	describe("AC#5: Health monitoring", () => {
 		it("heartbeat updates lastHeartbeat", () => {
-			const sandbox = new CubicSandbox(createDefaultCubicConfig(CubicPhase.Build, "b1"));
+			const sandbox = new CubicSandbox(
+				createDefaultCubicConfig(CubicPhase.Build, "b1"),
+			);
 			const before = Date.now();
 			sandbox.heartbeat();
 			const after = Date.now();
@@ -220,7 +260,9 @@ describe("proposal-090: Cubic Architecture", () => {
 		});
 
 		it("getHealth reports alive when recently active", () => {
-			const sandbox = new CubicSandbox(createDefaultCubicConfig(CubicPhase.Build, "b1"));
+			const sandbox = new CubicSandbox(
+				createDefaultCubicConfig(CubicPhase.Build, "b1"),
+			);
 			sandbox.heartbeat();
 
 			const health = sandbox.getHealth();
@@ -237,7 +279,9 @@ describe("proposal-090: Cubic Architecture", () => {
 		});
 
 		it("getHealth includes agent count", () => {
-			const sandbox = new CubicSandbox(createDefaultCubicConfig(CubicPhase.Build, "b1"));
+			const sandbox = new CubicSandbox(
+				createDefaultCubicConfig(CubicPhase.Build, "b1"),
+			);
 			sandbox.joinAgent(createCubicAgent("a1", "A1", CubicPhase.Build));
 			sandbox.joinAgent(createCubicAgent("a2", "A2", CubicPhase.Build));
 
@@ -250,7 +294,9 @@ describe("proposal-090: Cubic Architecture", () => {
 	// AC#6: Handoff contract
 	describe("AC#6: Handoff contract", () => {
 		it("validates correct handoff", () => {
-			const sandbox = new CubicSandbox(createDefaultCubicConfig(CubicPhase.Build, "b1"));
+			const sandbox = new CubicSandbox(
+				createDefaultCubicConfig(CubicPhase.Build, "b1"),
+			);
 			const agent = createCubicAgent("a1", "Builder", CubicPhase.Build);
 			sandbox.joinAgent(agent);
 
@@ -260,8 +306,16 @@ describe("proposal-090: Cubic Architecture", () => {
 				initiatorAgentId: "a1",
 				readySignal: "all tests passing locally",
 				artifacts: [
-					{ type: "code", reference: "src/", description: "Implementation code" },
-					{ type: "test-report", reference: "test-results.json", description: "Local test results" },
+					{
+						type: "code",
+						reference: "src/",
+						description: "Implementation code",
+					},
+					{
+						type: "test-report",
+						reference: "test-results.json",
+						description: "Local test results",
+					},
 				],
 				timestamp: Date.now(),
 			};
@@ -272,7 +326,9 @@ describe("proposal-090: Cubic Architecture", () => {
 		});
 
 		it("rejects handoff from wrong phase", () => {
-			const sandbox = new CubicSandbox(createDefaultCubicConfig(CubicPhase.Test, "t1"));
+			const sandbox = new CubicSandbox(
+				createDefaultCubicConfig(CubicPhase.Test, "t1"),
+			);
 			const agent = createCubicAgent("a1", "Tester", CubicPhase.Test);
 			sandbox.joinAgent(agent);
 
@@ -291,7 +347,9 @@ describe("proposal-090: Cubic Architecture", () => {
 		});
 
 		it("rejects handoff to wrong target phase", () => {
-			const sandbox = new CubicSandbox(createDefaultCubicConfig(CubicPhase.Build, "b1"));
+			const sandbox = new CubicSandbox(
+				createDefaultCubicConfig(CubicPhase.Build, "b1"),
+			);
 			const agent = createCubicAgent("a1", "Builder", CubicPhase.Build);
 			sandbox.joinAgent(agent);
 
@@ -306,7 +364,9 @@ describe("proposal-090: Cubic Architecture", () => {
 
 			const validation = sandbox.validateHandoff(payload);
 			assert.equal(validation.valid, false);
-			assert.ok(validation.errors.some((e) => e.includes("Invalid handoff target")));
+			assert.ok(
+				validation.errors.some((e) => e.includes("Invalid handoff target")),
+			);
 		});
 
 		it("rejects handoff from cubic with canHandoff=false", () => {
@@ -331,7 +391,9 @@ describe("proposal-090: Cubic Architecture", () => {
 		});
 
 		it("rejects handoff from agent not in cubic", () => {
-			const sandbox = new CubicSandbox(createDefaultCubicConfig(CubicPhase.Build, "b1"));
+			const sandbox = new CubicSandbox(
+				createDefaultCubicConfig(CubicPhase.Build, "b1"),
+			);
 
 			const payload: HandoffPayload = {
 				fromPhase: CubicPhase.Build,
@@ -348,7 +410,9 @@ describe("proposal-090: Cubic Architecture", () => {
 		});
 
 		it("executeHandoff sets agent to handoff proposal", () => {
-			const sandbox = new CubicSandbox(createDefaultCubicConfig(CubicPhase.Build, "b1"));
+			const sandbox = new CubicSandbox(
+				createDefaultCubicConfig(CubicPhase.Build, "b1"),
+			);
 			const agent = createCubicAgent("a1", "Builder", CubicPhase.Build);
 			sandbox.joinAgent(agent);
 
@@ -367,7 +431,9 @@ describe("proposal-090: Cubic Architecture", () => {
 		});
 
 		it("executeHandoff fails for invalid payload", () => {
-			const sandbox = new CubicSandbox(createDefaultCubicConfig(CubicPhase.Build, "b1"));
+			const sandbox = new CubicSandbox(
+				createDefaultCubicConfig(CubicPhase.Build, "b1"),
+			);
 			const agent = createCubicAgent("a1", "Builder", CubicPhase.Build);
 			sandbox.joinAgent(agent);
 
@@ -386,7 +452,9 @@ describe("proposal-090: Cubic Architecture", () => {
 		});
 
 		it("completeHandoff resets handoff agents to idle", () => {
-			const sandbox = new CubicSandbox(createDefaultCubicConfig(CubicPhase.Build, "b1"));
+			const sandbox = new CubicSandbox(
+				createDefaultCubicConfig(CubicPhase.Build, "b1"),
+			);
 			const agent = createCubicAgent("a1", "Builder", CubicPhase.Build);
 			sandbox.joinAgent(agent);
 

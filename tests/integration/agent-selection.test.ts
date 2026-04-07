@@ -1,6 +1,10 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
-import { type AgentSelectionValue, PLACEHOLDER_AGENT_VALUE, processAgentSelection } from "../../src/utils/agent-selection.ts";
+import {
+	type AgentSelectionValue,
+	PLACEHOLDER_AGENT_VALUE,
+	processAgentSelection,
+} from "../../src/utils/agent-selection.ts";
 
 const AGENTS_MD = "AGENTS.md" as const;
 const CLAUDE_MD = "CLAUDE.md" as const;
@@ -15,14 +19,21 @@ describe("processAgentSelection", () => {
 	});
 
 	it("auto-selects highlighted item when none selected and fallback enabled", () => {
-		const result = processAgentSelection({ selected: [], highlighted: GEMINI_MD, useHighlightFallback: true });
+		const result = processAgentSelection({
+			selected: [],
+			highlighted: GEMINI_MD,
+			useHighlightFallback: true,
+		});
 		assert.strictEqual(result.needsRetry, false);
 		assert.deepStrictEqual(result.files, [GEMINI_MD]);
 		assert.strictEqual(result.skipped, false);
 	});
 
 	it("does not auto-select highlight when fallback disabled", () => {
-		const result = processAgentSelection({ selected: [], highlighted: CLAUDE_MD });
+		const result = processAgentSelection({
+			selected: [],
+			highlighted: CLAUDE_MD,
+		});
 		assert.strictEqual(result.needsRetry, true);
 		assert.deepStrictEqual(result.files, []);
 		assert.strictEqual(result.skipped, false);
@@ -47,7 +58,9 @@ describe("processAgentSelection", () => {
 	});
 
 	it("filters out 'none' when combined with other selections", () => {
-		const result = processAgentSelection({ selected: ["none", AGENTS_MD] as AgentSelectionValue[] });
+		const result = processAgentSelection({
+			selected: ["none", AGENTS_MD] as AgentSelectionValue[],
+		});
 		assert.strictEqual(result.needsRetry, false);
 		assert.deepStrictEqual(result.files, [AGENTS_MD]);
 		assert.strictEqual(result.skipped, false);

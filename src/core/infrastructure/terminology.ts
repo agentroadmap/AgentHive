@@ -9,7 +9,7 @@
  * AC#5: Migration path for existing proposals
  */
 
-import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -29,7 +29,16 @@ export type StatusValue =
 /**
  * Canonical status values (new terminology)
  */
-export type CanonicalStatus = "New" | "Draft" | "Review" | "Active" | "Accepted" | "Complete" | "Rejected" | "Abandoned" | "Replaced";
+export type CanonicalStatus =
+	| "New"
+	| "Draft"
+	| "Review"
+	| "Active"
+	| "Accepted"
+	| "Complete"
+	| "Rejected"
+	| "Abandoned"
+	| "Replaced";
 
 /**
  * Status mapping from legacy to canonical
@@ -122,7 +131,8 @@ export const CLI_MESSAGES = {
 	componentArchived: (id: string) => `${formatComponentId(id)} archived`,
 	listHeader: (count: number) => `Components (${count})`,
 	noComponents: "No components found",
-	statusLabel: (status: CanonicalStatus) => `${STATUS_EMOJI[status]} ${STATUS_DISPLAY[status]}`,
+	statusLabel: (status: CanonicalStatus) =>
+		`${STATUS_EMOJI[status]} ${STATUS_DISPLAY[status]}`,
 };
 
 /**
@@ -204,7 +214,7 @@ export function applyTerminology(text: string): string {
 
 	// Sort by length (longest first) to avoid partial replacements
 	const sortedMappings = Object.entries(TERMINOLOGY_MAP).sort(
-		(a, b) => b[0].length - a[0].length
+		(a, b) => b[0].length - a[0].length,
 	);
 
 	for (const [legacy, modern] of sortedMappings) {
@@ -288,7 +298,7 @@ export function migrateProposalFile(filePath: string): {
 	// Apply terminology to user-facing content (not frontmatter)
 	const parts = migrated.split("---");
 	if (parts.length >= 3) {
-		const frontmatter = parts[0] + "---" + parts[1] + "---";
+		const frontmatter = `${parts[0]}---${parts[1]}---`;
 		const body = parts.slice(2).join("---");
 
 		// Apply terminology only to body

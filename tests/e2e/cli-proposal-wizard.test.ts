@@ -1,10 +1,13 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
-import { createUniqueTestDir, safeCleanup, execSync,
+import {
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 let TEST_DIR: string;
@@ -32,20 +35,36 @@ describe("CLI proposal wizard integration compatibility", () => {
 	});
 
 	it("preserves non-interactive missing title error for proposal create", async () => {
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal create`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal create`,
+			{ cwd: TEST_DIR },
+		);
 		assert.notStrictEqual(result.exitCode, 0);
-		expect(result.stderr.toString()).toContain("error: missing required argument 'title'");
+		expect(result.stderr.toString()).toContain(
+			"error: missing required argument 'title'",
+		);
 	});
 
 	it("preserves non-interactive missing proposalId error for proposal edit", async () => {
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal edit`,
+			{ cwd: TEST_DIR },
+		);
 		assert.notStrictEqual(result.exitCode, 0);
-		expect(result.stderr.toString()).toContain("error: missing required argument 'proposalId'");
+		expect(result.stderr.toString()).toContain(
+			"error: missing required argument 'proposalId'",
+		);
 	});
 
 	it("keeps legacy non-interactive edit behavior when proposalId is provided", async () => {
-		execSync(`node --experimental-strip-types ${CLI_PATH} proposal create "Edit target" --desc "Before edit"`, { cwd: TEST_DIR });
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} proposal edit 1`, { cwd: TEST_DIR });
+		execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal create "Edit target" --desc "Before edit"`,
+			{ cwd: TEST_DIR },
+		);
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} proposal edit 1`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(result.exitCode, 0);
 		expect(result.stdout.toString()).toContain("Updated proposal");
 	});

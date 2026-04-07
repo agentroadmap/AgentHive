@@ -1,6 +1,5 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
-import { expect } from "../support/test-utils.ts";
 import {
 	CODE_PATH_PATTERNS,
 	extractCodePaths,
@@ -9,6 +8,7 @@ import {
 	transformCodePaths,
 	transformCodePathsPlain,
 } from "../../src/ui/code-path.ts";
+import { expect } from "../support/test-utils.ts";
 
 describe("Code path utilities", () => {
 	describe("CODE_PATH_PATTERNS", () => {
@@ -30,7 +30,12 @@ describe("Code path utilities", () => {
 		});
 
 		test("should not match non-path backticks", () => {
-			const testCases = ["`just code`", "`function name`", "`variable`", "`123`"];
+			const testCases = [
+				"`just code`",
+				"`function name`",
+				"`variable`",
+				"`123`",
+			];
 
 			for (const testCase of testCases) {
 				// Reset regex lastIndex
@@ -87,9 +92,14 @@ describe("Code path utilities", () => {
 		});
 
 		test("should handle complex paths", () => {
-			const text = "Files: `/absolute/path/file.ts`, `./relative/file.js`, `../parent/file.md`";
+			const text =
+				"Files: `/absolute/path/file.ts`, `./relative/file.js`, `../parent/file.md`";
 			const result = extractCodePaths(text);
-			assert.deepStrictEqual(result, ["/absolute/path/file.ts", "./relative/file.js", "../parent/file.md"]);
+			assert.deepStrictEqual(result, [
+				"/absolute/path/file.ts",
+				"./relative/file.js",
+				"../parent/file.md",
+			]);
 		});
 	});
 
@@ -101,7 +111,10 @@ describe("Code path utilities", () => {
 
 		test("should handle paths with special characters", () => {
 			const result = styleCodePath("/path/with-dashes_and.underscores.ts");
-			assert.strictEqual(result, "{gray-fg}`/path/with-dashes_and.underscores.ts`{/gray-fg}");
+			assert.strictEqual(
+				result,
+				"{gray-fg}`/path/with-dashes_and.underscores.ts`{/gray-fg}",
+			);
 		});
 	});
 
@@ -109,13 +122,18 @@ describe("Code path utilities", () => {
 		test("should style isolated code paths", () => {
 			const text = "Check this file: `src/cli.ts`";
 			const result = transformCodePaths(text);
-			assert.strictEqual(result, "Check this file:\n{gray-fg}`src/cli.ts`{/gray-fg}");
+			assert.strictEqual(
+				result,
+				"Check this file:\n{gray-fg}`src/cli.ts`{/gray-fg}",
+			);
 		});
 
 		test("should extract and separate multiple paths in prose", () => {
-			const text = "Modify `src/cli.ts` and `src/ui/board.ts` to implement the feature.";
+			const text =
+				"Modify `src/cli.ts` and `src/ui/board.ts` to implement the feature.";
 			const result = transformCodePaths(text);
-			assert.strictEqual(result, 
+			assert.strictEqual(
+				result,
 				"Modify and to implement the feature.\n{gray-fg}`src/cli.ts`{/gray-fg}\n{gray-fg}`src/ui/board.ts`{/gray-fg}",
 			);
 		});
@@ -123,12 +141,17 @@ describe("Code path utilities", () => {
 		test("should preserve line breaks", () => {
 			const text = "First line with `file1.ts`\nSecond line with `file2.js`";
 			const result = transformCodePaths(text);
-			assert.ok(result.includes("First line with\n{gray-fg}`file1.ts`{/gray-fg}"));
-			assert.ok(result.includes("Second line with\n{gray-fg}`file2.js`{/gray-fg}"));
+			assert.ok(
+				result.includes("First line with\n{gray-fg}`file1.ts`{/gray-fg}"),
+			);
+			assert.ok(
+				result.includes("Second line with\n{gray-fg}`file2.js`{/gray-fg}"),
+			);
 		});
 
 		test("should handle text without code paths", () => {
-			const text = "This is just regular text with `variables` and `functions`.";
+			const text =
+				"This is just regular text with `variables` and `functions`.";
 			const result = transformCodePaths(text);
 			assert.strictEqual(result, text);
 		});
@@ -152,7 +175,10 @@ describe("Code path utilities", () => {
 		test("should preserve code paths in plain text", () => {
 			const text = "Check `src/cli.ts` and `package.json` files.";
 			const result = transformCodePathsPlain(text);
-			assert.strictEqual(result, "Check `src/cli.ts` and `package.json` files.");
+			assert.strictEqual(
+				result,
+				"Check `src/cli.ts` and `package.json` files.",
+			);
 		});
 
 		test("should ignore non-path backticks", () => {

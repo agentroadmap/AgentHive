@@ -7,13 +7,7 @@
  * engine facilitates the semantic transition between expert cubics.
  */
 
-import {
-	CubicPhase,
-	nextPhase,
-	type CubicAgent,
-	type HandoffPayload,
-	type HandoffArtifact,
-} from "../orchestration/cubic-architecture.ts";
+import { CubicPhase, nextPhase } from "../orchestration/cubic-architecture.ts";
 
 // ──────────────────────────────────────────
 // AC#1: G1-G4 Handoff Points
@@ -34,7 +28,10 @@ export const HandoffGate = {
 export type HandoffGate = (typeof HandoffGate)[keyof typeof HandoffGate];
 
 /** Gate ordering and phase transitions */
-export const GATE_TRANSITIONS: Record<HandoffGate, { from: CubicPhase; to: CubicPhase }> = {
+export const GATE_TRANSITIONS: Record<
+	HandoffGate,
+	{ from: CubicPhase; to: CubicPhase }
+> = {
 	[HandoffGate.G1]: { from: CubicPhase.Design, to: CubicPhase.Build },
 	[HandoffGate.G2]: { from: CubicPhase.Build, to: CubicPhase.Test },
 	[HandoffGate.G3]: { from: CubicPhase.Test, to: CubicPhase.Ship },
@@ -42,7 +39,10 @@ export const GATE_TRANSITIONS: Record<HandoffGate, { from: CubicPhase; to: Cubic
 };
 
 /** Determine which gate applies to a phase transition */
-export function gateForTransition(from: CubicPhase, to: CubicPhase): HandoffGate | null {
+export function gateForTransition(
+	from: CubicPhase,
+	to: CubicPhase,
+): HandoffGate | null {
 	for (const [gate, trans] of Object.entries(GATE_TRANSITIONS)) {
 		if (trans.from === from && trans.to === to) {
 			return gate as HandoffGate;
@@ -289,7 +289,11 @@ export interface PulseMessage {
 	/** Message type */
 	type: "intent" | "feedback" | "narrative" | "quality" | "acknowledgment";
 	/** Payload content (structured) */
-	content: IntentToShip | ArchitectFeedback | ImplementationNarrative | QualitySignals;
+	content:
+		| IntentToShip
+		| ArchitectFeedback
+		| ImplementationNarrative
+		| QualitySignals;
 	/** Priority level */
 	priority: "normal" | "urgent" | "blocking";
 	/** Timestamp */
@@ -315,7 +319,7 @@ export class HandoffEngine {
 		if (!this.subscribers.has(phase)) {
 			this.subscribers.set(phase, []);
 		}
-		this.subscribers.get(phase)!.push(callback);
+		this.subscribers.get(phase)?.push(callback);
 
 		// Return unsubscribe function
 		return () => {
@@ -381,7 +385,9 @@ export class HandoffEngine {
 	}
 
 	/** Submit implementation narrative and route to QA team */
-	submitImplementationNarrative(narrative: ImplementationNarrative): PulseMessage {
+	submitImplementationNarrative(
+		narrative: ImplementationNarrative,
+	): PulseMessage {
 		const message: PulseMessage = {
 			messageId: `pulse-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
 			fromPhase: CubicPhase.Build,

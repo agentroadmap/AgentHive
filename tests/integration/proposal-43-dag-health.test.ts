@@ -7,19 +7,24 @@
  * - Alerts posted to group-pulse channel
  */
 
-import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { beforeEach, describe, it } from "node:test";
 import { DAGHealth } from "../../src/core/dag/dag-health.ts";
 import type { Proposal } from "../../src/types/index.ts";
 
-const createProposal = (id: string, deps: string[] = [], status = "Potential"): Proposal => ({
-	id,
-	title: `Proposal ${id}`,
-	status: status as any,
-	dependencies: deps,
-	createdDate: "2024-01-01",
-	updatedDate: "2024-01-01",
-} as Proposal);
+const createProposal = (
+	id: string,
+	deps: string[] = [],
+	status = "Potential",
+): Proposal =>
+	({
+		id,
+		title: `Proposal ${id}`,
+		status: status as any,
+		dependencies: deps,
+		createdDate: "2024-01-01",
+		updatedDate: "2024-01-01",
+	}) as Proposal;
 
 describe("proposal-43: Continuous DAG Health Telemetry", () => {
 	let health: DAGHealth;
@@ -51,7 +56,7 @@ describe("proposal-43: Continuous DAG Health Telemetry", () => {
 			const cycles = report.issues.filter((i) => i.type === "cycle");
 
 			assert.ok(cycles.length >= 1);
-			assert.equal(cycles[0]!.severity, "error");
+			assert.equal(cycles[0]?.severity, "error");
 		});
 
 		it("detects longer cycles", () => {
@@ -85,7 +90,7 @@ describe("proposal-43: Continuous DAG Health Telemetry", () => {
 			];
 
 			const report = health.analyzeHealth(proposals);
-			const orphans = report.issues.filter((i) => i.type === "orphan");
+			const _orphans = report.issues.filter((i) => i.type === "orphan");
 
 			// proposal-1 has no deps but has a dependent (proposal-2), so not orphan
 			// proposal-2 has a dep but no dependents
@@ -94,9 +99,7 @@ describe("proposal-43: Continuous DAG Health Telemetry", () => {
 		});
 
 		it("does not flag complete proposals as orphans", () => {
-			const proposals = [
-				createProposal("proposal-1", [], "Complete"),
-			];
+			const proposals = [createProposal("proposal-1", [], "Complete")];
 
 			const report = health.analyzeHealth(proposals);
 			const orphans = report.issues.filter((i) => i.type === "orphan");
@@ -113,7 +116,7 @@ describe("proposal-43: Continuous DAG Health Telemetry", () => {
 			const report = health.analyzeHealth(proposals);
 			// proposal-1 has no dependents (nothing depends on it)
 			// but we need to check that nothing depends on it
-			const orphans = report.issues.filter((i) => i.type === "orphan");
+			const _orphans = report.issues.filter((i) => i.type === "orphan");
 
 			// Depends on implementation: proposal-1 has no deps and nothing depends on it
 			// But proposal-2 doesn't depend on proposal-1
@@ -232,18 +235,18 @@ describe("proposal-43: Continuous DAG Health Telemetry", () => {
 			];
 
 			const report = health.analyzeHealth(proposals);
-			const missing = report.issues.filter((i) => i.type === "missing-dependency");
+			const missing = report.issues.filter(
+				(i) => i.type === "missing-dependency",
+			);
 
 			assert.equal(missing.length, 1);
-			assert.equal(missing[0]!.severity, "error");
+			assert.equal(missing[0]?.severity, "error");
 		});
 	});
 
 	describe("AC#5: Pulse formatting", () => {
 		it("formats healthy report for pulse", () => {
-			const proposals = [
-				createProposal("proposal-1", []),
-			];
+			const proposals = [createProposal("proposal-1", [])];
 
 			const report = health.analyzeHealth(proposals);
 			const formatted = health.formatForPulse(report);
@@ -283,7 +286,11 @@ describe("proposal-43: Continuous DAG Health Telemetry", () => {
 			];
 
 			// Adding proposal-1 as dep of proposal-2 would create cycle
-			const wouldCycle = health.wouldCreateCycle("proposal-2", "proposal-1", proposals);
+			const wouldCycle = health.wouldCreateCycle(
+				"proposal-2",
+				"proposal-1",
+				proposals,
+			);
 
 			assert.equal(wouldCycle, true);
 		});
@@ -294,7 +301,11 @@ describe("proposal-43: Continuous DAG Health Telemetry", () => {
 				createProposal("proposal-2", []),
 			];
 
-			const wouldCycle = health.wouldCreateCycle("proposal-2", "proposal-1", proposals);
+			const wouldCycle = health.wouldCreateCycle(
+				"proposal-2",
+				"proposal-1",
+				proposals,
+			);
 
 			assert.equal(wouldCycle, false);
 		});
@@ -307,7 +318,11 @@ describe("proposal-43: Continuous DAG Health Telemetry", () => {
 			];
 
 			// Adding proposal-1 as dep of proposal-3 would create: 3 → 1 → 2 → 3
-			const wouldCycle = health.wouldCreateCycle("proposal-3", "proposal-1", proposals);
+			const wouldCycle = health.wouldCreateCycle(
+				"proposal-3",
+				"proposal-1",
+				proposals,
+			);
 
 			assert.equal(wouldCycle, true);
 		});

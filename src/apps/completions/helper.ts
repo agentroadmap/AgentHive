@@ -6,7 +6,14 @@ import {
 	getSubcommandNames,
 	getTopLevelCommands,
 } from "./command-structure.ts";
-import { getAssignees, getDocumentIds, getLabels, getPriorities, getProposalIds, getStatuses } from "./data-providers.ts";
+import {
+	getAssignees,
+	getDocumentIds,
+	getLabels,
+	getPriorities,
+	getProposalIds,
+	getStatuses,
+} from "./data-providers.ts";
 
 export interface CompletionContext {
 	words: string[];
@@ -20,7 +27,10 @@ export interface CompletionContext {
 /**
  * Parse the command line to determine completion context
  */
-export function parseCompletionContext(line: string, point: number): CompletionContext {
+export function parseCompletionContext(
+	line: string,
+	point: number,
+): CompletionContext {
 	// Extract the portion up to the cursor
 	const textBeforeCursor = line.slice(0, point);
 
@@ -80,7 +90,9 @@ function filterCompletions(completions: string[], partial: string): string[] {
 	if (!partial) {
 		return completions;
 	}
-	return completions.filter((c) => c.toLowerCase().startsWith(partial.toLowerCase()));
+	return completions.filter((c) =>
+		c.toLowerCase().startsWith(partial.toLowerCase()),
+	);
 }
 
 /**
@@ -129,7 +141,11 @@ async function getFlagValueCompletions(flagName: string): Promise<string[]> {
 /**
  * Generate completions based on context
  */
-export async function getCompletions(program: Command, line: string, point: number): Promise<string[]> {
+export async function getCompletions(
+	program: Command,
+	line: string,
+	point: number,
+): Promise<string[]> {
 	const context = parseCompletionContext(line, point);
 	const cmdInfo = extractCommandStructure(program);
 
@@ -152,7 +168,11 @@ export async function getCompletions(program: Command, line: string, point: numb
 	}
 
 	// We have command and subcommand - check what arguments are expected
-	const expectedArgs = getExpectedArguments(cmdInfo, context.command, context.subcommand);
+	const expectedArgs = getExpectedArguments(
+		cmdInfo,
+		context.command,
+		context.subcommand,
+	);
 
 	// If we're at a position where an argument is expected
 	if (expectedArgs.length > context.argPosition) {
@@ -161,7 +181,11 @@ export async function getCompletions(program: Command, line: string, point: numb
 			const argCompletions = await getArgumentCompletions(expectedArg.name);
 
 			// Also include flags
-			const flags = getOptionFlags(cmdInfo, context.command, context.subcommand);
+			const flags = getOptionFlags(
+				cmdInfo,
+				context.command,
+				context.subcommand,
+			);
 			return filterCompletions([...argCompletions, ...flags], context.partial);
 		}
 	}

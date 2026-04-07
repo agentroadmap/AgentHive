@@ -68,11 +68,15 @@ export async function runTestFile(
 	const timeout = options.timeout || 30000;
 
 	try {
-		const { stdout, stderr } = await execFileAsync("node", ["--test", ...(options.extraArgs || []), filePath], {
-			cwd: options.cwd || process.cwd(),
-			timeout,
-			encoding: "utf-8",
-		});
+		const { stdout, stderr } = await execFileAsync(
+			"node",
+			["--test", ...(options.extraArgs || []), filePath],
+			{
+				cwd: options.cwd || process.cwd(),
+				timeout,
+				encoding: "utf-8",
+			},
+		);
 
 		return {
 			file: filePath,
@@ -83,7 +87,12 @@ export async function runTestFile(
 			duration: Date.now() - startTime,
 		};
 	} catch (err: unknown) {
-		const error = err as { stdout?: string; stderr?: string; code?: number; message?: string };
+		const error = err as {
+			stdout?: string;
+			stderr?: string;
+			code?: number;
+			message?: string;
+		};
 		return {
 			file: filePath,
 			passed: false,
@@ -99,7 +108,10 @@ export async function runTestFile(
 /**
  * Run multiple test files sequentially.
  */
-export async function runTests(testFiles: TestFile[], options: TestRunOptions = {}): Promise<TestRunReport> {
+export async function runTests(
+	testFiles: TestFile[],
+	options: TestRunOptions = {},
+): Promise<TestRunReport> {
 	const startedAt = new Date().toISOString();
 	const startTime = Date.now();
 	const results: TestResult[] = [];

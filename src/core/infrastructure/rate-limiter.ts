@@ -11,7 +11,7 @@
  * AC#5: Global fair-share policy configurable
  */
 
-import { writeFileSync, existsSync, readFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export interface RateLimitConfig {
@@ -116,7 +116,12 @@ export class RateLimiter {
 		this.projectPath = projectPath;
 		this.config = { ...DEFAULT_CONFIG, ...config };
 		this.fairShare = { ...DEFAULT_FAIR_SHARE, ...fairShare };
-		this.proposalPath = join(projectPath, "roadmap", ".cache", "rate-limiter.json");
+		this.proposalPath = join(
+			projectPath,
+			"roadmap",
+			".cache",
+			"rate-limiter.json",
+		);
 		this.loadProposal();
 	}
 
@@ -173,11 +178,19 @@ export class RateLimiter {
 	private cleanExpired(agentProposal: AgentProposal): void {
 		const now = Date.now();
 		const hourAgo = new Date(now - HOUR_MS).toISOString();
-		const burstAgo = new Date(now - this.config.burstWindowMinutes * MINUTE_MS).toISOString();
+		const burstAgo = new Date(
+			now - this.config.burstWindowMinutes * MINUTE_MS,
+		).toISOString();
 
-		agentProposal.claims = agentProposal.claims.filter((c) => c.timestamp > hourAgo);
-		agentProposal.burstClaims = agentProposal.burstClaims.filter((c) => c.timestamp > burstAgo);
-		agentProposal.queue = agentProposal.queue.filter((q) => q.expiresAt > new Date().toISOString());
+		agentProposal.claims = agentProposal.claims.filter(
+			(c) => c.timestamp > hourAgo,
+		);
+		agentProposal.burstClaims = agentProposal.burstClaims.filter(
+			(c) => c.timestamp > burstAgo,
+		);
+		agentProposal.queue = agentProposal.queue.filter(
+			(q) => q.expiresAt > new Date().toISOString(),
+		);
 	}
 
 	/**
@@ -199,7 +212,7 @@ export class RateLimiter {
 	 */
 	canClaim(
 		agentId: string,
-		proposalId: string,
+		_proposalId: string,
 		proposalPriority: string = "medium",
 	): {
 		allowed: boolean;
@@ -224,7 +237,9 @@ export class RateLimiter {
 				agentId,
 				proposalPriority,
 				enqueuedAt: new Date().toISOString(),
-				expiresAt: new Date(Date.now() + this.config.coolDownMinutes * MINUTE_MS).toISOString(),
+				expiresAt: new Date(
+					Date.now() + this.config.coolDownMinutes * MINUTE_MS,
+				).toISOString(),
 			};
 			agentProposal.queue.push(queueEntry);
 			this.saveProposal();
@@ -247,7 +262,8 @@ export class RateLimiter {
 			const oldestBurst = agentProposal.burstClaims[0];
 			if (oldestBurst) {
 				const burstResetTime = new Date(
-					new Date(oldestBurst.timestamp).getTime() + this.config.burstWindowMinutes * MINUTE_MS,
+					new Date(oldestBurst.timestamp).getTime() +
+						this.config.burstWindowMinutes * MINUTE_MS,
 				);
 				if (Date.now() < burstResetTime.getTime()) {
 					return {
@@ -266,7 +282,11 @@ export class RateLimiter {
 	/**
 	 * Record a claim for rate limiting purposes.
 	 */
-	recordClaim(agentId: string, proposalId: string, proposalPriority: string = "medium"): void {
+	recordClaim(
+		agentId: string,
+		proposalId: string,
+		proposalPriority: string = "medium",
+	): void {
 		const agentProposal = this.getAgentProposal(agentId);
 		const bypassed = this.shouldBypass(proposalPriority);
 
@@ -301,7 +321,9 @@ export class RateLimiter {
 
 		const burstUsed = agentProposal.burstClaims.length;
 		const resetsAt = agentProposal.claims[0]
-			? new Date(new Date(agentProposal.claims[0].timestamp).getTime() + HOUR_MS).toISOString()
+			? new Date(
+					new Date(agentProposal.claims[0].timestamp).getTime() + HOUR_MS,
+				).toISOString()
 			: new Date().toISOString();
 
 		return {
@@ -312,7 +334,8 @@ export class RateLimiter {
 			burstRemaining: Math.max(0, this.config.burstAllowance - burstUsed),
 			isLimited: claimsInWindow >= this.config.maxClaimsPerHour,
 			resetsAt,
-			queuePosition: agentProposal.queue.length > 0 ? agentProposal.queue.length : 0,
+			queuePosition:
+				agentProposal.queue.length > 0 ? agentProposal.queue.length : 0,
 		};
 	}
 

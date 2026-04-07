@@ -52,7 +52,13 @@ function createLoadingScreenBase(config: LoadingScreenConfig): {
 	update: (message: string) => void;
 	close: () => void;
 } {
-	const { title = "Loading...", message, height = 7, showSpinner = true, allowScrolling = false } = config;
+	const {
+		title = "Loading...",
+		message,
+		height = 7,
+		showSpinner = true,
+		allowScrolling = false,
+	} = config;
 
 	// Non-TTY fallback
 	if (!process.stdout.isTTY) {
@@ -162,7 +168,10 @@ function createLoadingScreenBase(config: LoadingScreenConfig): {
  *   return await fetchDataFromAPI();
  * });
  */
-export async function withLoadingScreen<T>(message: string, operation: () => Promise<T>): Promise<T> {
+export async function withLoadingScreen<T>(
+	message: string,
+	operation: () => Promise<T>,
+): Promise<T> {
 	const base = createLoadingScreenBase({
 		message,
 		width: 60, // Larger width to prevent wrapping
@@ -222,7 +231,9 @@ export async function withLoadingScreen<T>(message: string, operation: () => Pro
  * // ... more operations ...
  * loader?.close();
  */
-export async function createLoadingScreen(initialMessage: string): Promise<LoadingScreen | null> {
+export async function createLoadingScreen(
+	initialMessage: string,
+): Promise<LoadingScreen | null> {
 	const base = createLoadingScreenBase({
 		message: initialMessage,
 		width: 70, // Larger width to prevent wrapping

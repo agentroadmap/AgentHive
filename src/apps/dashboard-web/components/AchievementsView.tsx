@@ -8,8 +8,12 @@ interface AchievementsViewProps {
 	proposals?: Proposal[];
 }
 
-const AchievementsView: React.FC<AchievementsViewProps> = ({ proposals: initialProposals }) => {
-	const [proposals, setProposals] = useState<Proposal[]>(initialProposals || []);
+const AchievementsView: React.FC<AchievementsViewProps> = ({
+	proposals: initialProposals,
+}) => {
+	const [proposals, setProposals] = useState<Proposal[]>(
+		initialProposals || [],
+	);
 	const [loading, setLoading] = useState(!initialProposals);
 	const [error, setError] = useState<string | null>(null);
 
@@ -24,7 +28,9 @@ const AchievementsView: React.FC<AchievementsViewProps> = ({ proposals: initialP
 		const fetchData = async () => {
 			try {
 				setLoading(true);
-				const reachedProposals = await apiClient.fetchProposals({ status: "Complete" });
+				const reachedProposals = await apiClient.fetchProposals({
+					status: "Complete",
+				});
 				if (isMounted) {
 					setProposals(reachedProposals);
 				}
@@ -50,11 +56,15 @@ const AchievementsView: React.FC<AchievementsViewProps> = ({ proposals: initialP
 	return (
 		<div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
 			<div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
-				<h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Recent Achievements</h2>
+				<h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+					Recent Achievements
+				</h2>
 			</div>
 			<div className="divide-y divide-gray-200 dark:divide-gray-700 max-h-[400px] overflow-y-auto">
 				{proposals.length === 0 ? (
-					<p className="p-4 text-sm text-gray-500 dark:text-gray-400">No achievements recorded yet.</p>
+					<p className="p-4 text-sm text-gray-500 dark:text-gray-400">
+						No achievements recorded yet.
+					</p>
 				) : (
 					proposals
 						.sort((a, b) => {
@@ -75,12 +85,16 @@ const AchievementsView: React.FC<AchievementsViewProps> = ({ proposals: initialP
 										</h3>
 									</div>
 									<span className="text-xs text-gray-500 dark:text-gray-400">
-										{new Date(proposal.updatedDate || proposal.createdDate).toLocaleDateString()}
+										{new Date(
+											proposal.updatedDate || proposal.createdDate,
+										).toLocaleDateString()}
 									</span>
 								</div>
 
 								{proposal.finalSummary && (
-									<p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2 italic">"{proposal.finalSummary}"</p>
+									<p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2 italic">
+										"{proposal.finalSummary}"
+									</p>
 								)}
 
 								{proposal.proof && proposal.proof.length > 0 && (
@@ -97,7 +111,9 @@ const AchievementsView: React.FC<AchievementsViewProps> = ({ proposals: initialP
 								)}
 
 								{proposal.directive && (
-									<div className="text-xs text-gray-400 dark:text-gray-500">Directive: {proposal.directive}</div>
+									<div className="text-xs text-gray-400 dark:text-gray-500">
+										Directive: {proposal.directive}
+									</div>
 								)}
 							</div>
 						))

@@ -1,16 +1,34 @@
 import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const chatSkill = readFileSync(join(__dirname, "./chat-skill.md"), "utf-8");
-const initRequired = readFileSync(join(__dirname, "./init-required.md"), "utf-8");
-const overviewResources = readFileSync(join(__dirname, "./overview.md"), "utf-8");
-const overviewTools = readFileSync(join(__dirname, "./overview-tools.md"), "utf-8");
-const proposalCreation = readFileSync(join(__dirname, "./proposal-creation.md"), "utf-8");
-const proposalExecution = readFileSync(join(__dirname, "./proposal-execution.md"), "utf-8");
-const proposalFinalization = readFileSync(join(__dirname, "./proposal-finalization.md"), "utf-8");
+const initRequired = readFileSync(
+	join(__dirname, "./init-required.md"),
+	"utf-8",
+);
+const overviewResources = readFileSync(
+	join(__dirname, "./overview.md"),
+	"utf-8",
+);
+const overviewTools = readFileSync(
+	join(__dirname, "./overview-tools.md"),
+	"utf-8",
+);
+const proposalCreation = readFileSync(
+	join(__dirname, "./proposal-creation.md"),
+	"utf-8",
+);
+const proposalExecution = readFileSync(
+	join(__dirname, "./proposal-execution.md"),
+	"utf-8",
+);
+const proposalFinalization = readFileSync(
+	join(__dirname, "./proposal-finalization.md"),
+	"utf-8",
+);
 
 export const MCP_WORKFLOW_OVERVIEW = overviewResources.trim();
 export const MCP_WORKFLOW_OVERVIEW_TOOLS = overviewTools.trim();

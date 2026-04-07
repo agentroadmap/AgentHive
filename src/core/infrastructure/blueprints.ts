@@ -1,6 +1,11 @@
 import type { Proposal } from "../../types/index.ts";
 
-export type BlueprintType = "software" | "research" | "content" | "versatile" | "evolution";
+export type BlueprintType =
+	| "software"
+	| "research"
+	| "content"
+	| "versatile"
+	| "evolution";
 
 export interface BlueprintProposal extends Partial<Proposal> {
 	id: string;
@@ -27,7 +32,8 @@ export const BLUEPRINTS: Record<BlueprintType, Blueprint> = {
 	software: {
 		type: "software",
 		name: "Software Product Journey",
-		description: "From a raw vision to a realized product through continuous discovery and engineering.",
+		description:
+			"From a raw vision to a realized product through continuous discovery and engineering.",
 		proposals: [
 			{
 				id: "0",
@@ -52,7 +58,8 @@ export const BLUEPRINTS: Record<BlueprintType, Blueprint> = {
 			{
 				id: "2",
 				title: "Foundational Engineering (Backend/Infra)",
-				description: "Establish the core technical foundations required to realize the vision.",
+				description:
+					"Establish the core technical foundations required to realize the vision.",
 				dependsOnIds: ["1"],
 				assignee: ["@backend"],
 				labels: ["engineering"],
@@ -61,7 +68,8 @@ export const BLUEPRINTS: Record<BlueprintType, Blueprint> = {
 			{
 				id: "3",
 				title: "Experience Implementation (Frontend/UI)",
-				description: "Build the user-facing interface, ensuring it aligns with the discovered user needs.",
+				description:
+					"Build the user-facing interface, ensuring it aligns with the discovered user needs.",
 				dependsOnIds: ["1", "2"],
 				assignee: ["@frontend", "@designer"],
 				labels: ["engineering"],
@@ -80,7 +88,8 @@ export const BLUEPRINTS: Record<BlueprintType, Blueprint> = {
 			{
 				id: "5",
 				title: "Project Vision: Realized Product",
-				description: "The guiding vision has been achieved through this iterative process of discovery and creation.",
+				description:
+					"The guiding vision has been achieved through this iterative process of discovery and creation.",
 				dependsOnIds: ["3", "4"],
 				assignee: ["@manager"],
 				labels: ["vision", "goal"],
@@ -92,12 +101,14 @@ export const BLUEPRINTS: Record<BlueprintType, Blueprint> = {
 	research: {
 		type: "research",
 		name: "Scientific Discovery",
-		description: "A path from a guiding question to proven findings through rigorous exploration.",
+		description:
+			"A path from a guiding question to proven findings through rigorous exploration.",
 		proposals: [
 			{
 				id: "0",
 				title: "Initial Hypothesis & Prior Art Search",
-				description: "We have a guiding question. Explore the existing landscape and formalize the initial hypothesis.",
+				description:
+					"We have a guiding question. Explore the existing landscape and formalize the initial hypothesis.",
 				assignee: ["@researcher"],
 				labels: ["discovery"],
 				requires: ["capability:research"],
@@ -106,7 +117,8 @@ export const BLUEPRINTS: Record<BlueprintType, Blueprint> = {
 			{
 				id: "1",
 				title: "Methodological Prototyping",
-				description: "Experiment with different research methodologies to find the most effective path forward.",
+				description:
+					"Experiment with different research methodologies to find the most effective path forward.",
 				dependsOnIds: ["0"],
 				assignee: ["@methodologist"],
 				labels: ["planning"],
@@ -115,7 +127,8 @@ export const BLUEPRINTS: Record<BlueprintType, Blueprint> = {
 			{
 				id: "2",
 				title: "Core Execution & Data Harvesting",
-				description: "The main process of gathering evidence and running the discovery process.",
+				description:
+					"The main process of gathering evidence and running the discovery process.",
 				dependsOnIds: ["1"],
 				assignee: ["@operator"],
 				labels: ["execution"],
@@ -124,7 +137,8 @@ export const BLUEPRINTS: Record<BlueprintType, Blueprint> = {
 			{
 				id: "3",
 				title: "Deep Analysis & Critical Review",
-				description: "Synthesize the findings and subject them to rigorous analysis or peer feedback.",
+				description:
+					"Synthesize the findings and subject them to rigorous analysis or peer feedback.",
 				dependsOnIds: ["2"],
 				assignee: ["@analyst"],
 				labels: ["analysis"],
@@ -133,7 +147,8 @@ export const BLUEPRINTS: Record<BlueprintType, Blueprint> = {
 			{
 				id: "4",
 				title: "Project Vision: Proven Conclusion",
-				description: "The initial guiding question has been answered and the findings are finalized.",
+				description:
+					"The initial guiding question has been answered and the findings are finalized.",
 				dependsOnIds: ["3"],
 				assignee: ["@writer"],
 				labels: ["vision", "goal"],
@@ -150,7 +165,8 @@ export const BLUEPRINTS: Record<BlueprintType, Blueprint> = {
 			{
 				id: "0",
 				title: "Creative Spark & Audience Research",
-				description: "Start with the seed idea. Explore who this is for and what will resonate most.",
+				description:
+					"Start with the seed idea. Explore who this is for and what will resonate most.",
 				assignee: ["@strategist"],
 				labels: ["discovery"],
 				requires: ["capability:audience-analysis"],
@@ -159,7 +175,8 @@ export const BLUEPRINTS: Record<BlueprintType, Blueprint> = {
 			{
 				id: "1",
 				title: "Narrative & Outlining",
-				description: "Develop the core message and structure the journey for the audience.",
+				description:
+					"Develop the core message and structure the journey for the audience.",
 				dependsOnIds: ["0"],
 				assignee: ["@writer"],
 				labels: ["drafting"],
@@ -168,7 +185,8 @@ export const BLUEPRINTS: Record<BlueprintType, Blueprint> = {
 			{
 				id: "2",
 				title: "Production & Aesthetic Development",
-				description: "Create the visual and auditory elements that bring the vision to life.",
+				description:
+					"Create the visual and auditory elements that bring the vision to life.",
 				dependsOnIds: ["1"],
 				assignee: ["@producer", "@designer"],
 				labels: ["production"],
@@ -177,7 +195,8 @@ export const BLUEPRINTS: Record<BlueprintType, Blueprint> = {
 			{
 				id: "3",
 				title: "Launch & Audience Engagement",
-				description: "Go live and interact with the audience to gather feedback for future iterations.",
+				description:
+					"Go live and interact with the audience to gather feedback for future iterations.",
 				dependsOnIds: ["2"],
 				assignee: ["@promoter"],
 				labels: ["marketing"],
@@ -199,7 +218,8 @@ export const BLUEPRINTS: Record<BlueprintType, Blueprint> = {
 	evolution: {
 		type: "evolution",
 		name: "Improvement & Evolution",
-		description: "For existing projects: Analyze current proposal -> Identify Gaps -> Assess Risks -> Implement & Evolve.",
+		description:
+			"For existing projects: Analyze current proposal -> Identify Gaps -> Assess Risks -> Implement & Evolve.",
 		proposals: [
 			{
 				id: "0",
@@ -234,7 +254,8 @@ export const BLUEPRINTS: Record<BlueprintType, Blueprint> = {
 			{
 				id: "3",
 				title: "Implementation: Core Improvements",
-				description: "Execute the planned improvements and evolutionary changes.",
+				description:
+					"Execute the planned improvements and evolutionary changes.",
 				dependsOnIds: ["2"],
 				assignee: ["@builder", "@backend", "@frontend"],
 				labels: ["engineering", "evolution"],
@@ -253,7 +274,8 @@ export const BLUEPRINTS: Record<BlueprintType, Blueprint> = {
 			{
 				id: "5",
 				title: "Project Vision: Evolved Proposal",
-				description: "The project has been successfully evolved to the new improved proposal as described in the vision.",
+				description:
+					"The project has been successfully evolved to the new improved proposal as described in the vision.",
 				dependsOnIds: ["4"],
 				assignee: ["@manager"],
 				labels: ["vision", "goal"],
@@ -270,7 +292,8 @@ export const BLUEPRINTS: Record<BlueprintType, Blueprint> = {
 			{
 				id: "0",
 				title: "Initial Proposal: Discovery",
-				description: "We have a seed. Time to explore the possibilities and map the first steps.",
+				description:
+					"We have a seed. Time to explore the possibilities and map the first steps.",
 				assignee: ["@planner"],
 				labels: ["discovery"],
 				requires: ["capability:research"],
@@ -279,7 +302,8 @@ export const BLUEPRINTS: Record<BlueprintType, Blueprint> = {
 			{
 				id: "1",
 				title: "Core Implementation",
-				description: "Execute the primary work required to move toward the vision.",
+				description:
+					"Execute the primary work required to move toward the vision.",
 				dependsOnIds: ["0"],
 				assignee: ["@builder"],
 				labels: ["execution"],
@@ -297,7 +321,8 @@ export const BLUEPRINTS: Record<BlueprintType, Blueprint> = {
 			{
 				id: "3",
 				title: "Project Vision: Goal Realized",
-				description: "The initial vision has been successfully brought to life.",
+				description:
+					"The initial vision has been successfully brought to life.",
 				dependsOnIds: ["2"],
 				assignee: ["@manager"],
 				labels: ["vision", "goal"],

@@ -1,5 +1,5 @@
+import { getProposalStatistics } from "../../core/infrastructure/statistics.ts";
 import type { Core } from "../../core/roadmap.ts";
-import { getProposalStatistics } from '../../core/infrastructure/statistics.ts';
 import { createLoadingScreen } from "../../ui/loading.ts";
 import { renderOverviewTui } from "../../ui/overview-tui.ts";
 
@@ -16,8 +16,14 @@ export async function runOverviewCommand(core: Core): Promise<void> {
 
 	try {
 		const loadStart = performance.now();
-		const { proposals: activeProposals, drafts, statuses } = await core.loadAllProposalsForStatistics();
-		loadingScreen?.update(`Loaded roadmap data in ${formatTime(performance.now() - loadStart)}`);
+		const {
+			proposals: activeProposals,
+			drafts,
+			statuses,
+		} = await core.loadAllProposalsForStatistics();
+		loadingScreen?.update(
+			`Loaded roadmap data in ${formatTime(performance.now() - loadStart)}`,
+		);
 
 		loadingScreen?.close();
 
@@ -28,7 +34,9 @@ export async function runOverviewCommand(core: Core): Promise<void> {
 
 		// Display the TUI
 		const totalTime = Math.round(performance.now() - startTime);
-		console.log(`\nPerformance summary: Total time ${totalTime}ms (stats calculation: ${statsTime}ms)`);
+		console.log(
+			`\nPerformance summary: Total time ${totalTime}ms (stats calculation: ${statsTime}ms)`,
+		);
 
 		const config = await core.fs.loadConfig();
 		await renderOverviewTui(statistics, config?.projectName || "Project");

@@ -1,6 +1,5 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
-import React from "react";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import type { Directive, Proposal } from "../../src/types/index.ts";
@@ -9,7 +8,9 @@ import { expect } from "../support/test-utils.ts";
 
 const statuses = ["Potential", "Active", "Complete"];
 
-const directives: Directive[] = [{ id: "m-1", title: "Release 1", description: "", rawContent: "" }];
+const directives: Directive[] = [
+	{ id: "m-1", title: "Release 1", description: "", rawContent: "" },
+];
 
 const makeProposal = (overrides: Partial<Proposal>): Proposal => ({
 	id: "proposal-1",
@@ -44,9 +45,22 @@ const getUnassignedCount = (html: string): string | undefined => {
 describe("DirectivesPage unassigned filtering", () => {
 	it("hides done unassigned proposals and counts only non-done unassigned proposals", () => {
 		const html = renderDirectivesPage([
-			makeProposal({ id: "proposal-1", title: "Unassigned active", status: "Potential" }),
-			makeProposal({ id: "proposal-2", title: "Unassigned done", status: "Complete" }),
-			makeProposal({ id: "proposal-3", title: "Directive active", directive: "m-1", status: "Potential" }),
+			makeProposal({
+				id: "proposal-1",
+				title: "Unassigned active",
+				status: "Potential",
+			}),
+			makeProposal({
+				id: "proposal-2",
+				title: "Unassigned done",
+				status: "Complete",
+			}),
+			makeProposal({
+				id: "proposal-3",
+				title: "Directive active",
+				directive: "m-1",
+				status: "Potential",
+			}),
 		]);
 
 		assert.ok(html.includes("Unassigned active"));
@@ -57,11 +71,23 @@ describe("DirectivesPage unassigned filtering", () => {
 
 	it("shows an empty proposal when all unassigned proposals are done", () => {
 		const html = renderDirectivesPage([
-			makeProposal({ id: "proposal-1", title: "Complete unassigned", status: "Complete" }),
-			makeProposal({ id: "proposal-2", title: "Complete unassigned", status: "Complete" }),
+			makeProposal({
+				id: "proposal-1",
+				title: "Complete unassigned",
+				status: "Complete",
+			}),
+			makeProposal({
+				id: "proposal-2",
+				title: "Complete unassigned",
+				status: "Complete",
+			}),
 		]);
 
-		assert.ok(html.includes("No active unassigned proposals. Completed proposals are hidden."));
+		assert.ok(
+			html.includes(
+				"No active unassigned proposals. Completed proposals are hidden.",
+			),
+		);
 		assert.ok(!html.includes("Complete unassigned"));
 		assert.ok(!html.includes("Complete unassigned"));
 		expect(getUnassignedCount(html)).toBe("0");
@@ -69,8 +95,17 @@ describe("DirectivesPage unassigned filtering", () => {
 
 	it("keeps directive-assigned groups rendering with existing behavior", () => {
 		const html = renderDirectivesPage([
-			makeProposal({ id: "proposal-1", title: "Unassigned done", status: "Complete" }),
-			makeProposal({ id: "proposal-2", title: "Directive proposal", directive: "m-1", status: "Active" }),
+			makeProposal({
+				id: "proposal-1",
+				title: "Unassigned done",
+				status: "Complete",
+			}),
+			makeProposal({
+				id: "proposal-2",
+				title: "Directive proposal",
+				directive: "m-1",
+				status: "Active",
+			}),
 		]);
 
 		assert.ok(html.includes("Release 1"));

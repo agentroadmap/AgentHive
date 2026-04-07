@@ -3,10 +3,19 @@
  * Filter items flow left-to-right and wrap to new rows when they don't fit.
  */
 
-import type { BoxInterface, ScreenInterface, TextboxInterface } from "../blessed.ts";
+import type {
+	BoxInterface,
+	ScreenInterface,
+	TextboxInterface,
+} from "../blessed.ts";
 import { box, textbox } from "../blessed.ts";
 
-export type FilterControlId = "search" | "status" | "priority" | "labels" | "directive";
+export type FilterControlId =
+	| "search"
+	| "status"
+	| "priority"
+	| "labels"
+	| "directive";
 
 export interface FilterProposal {
 	search: string;
@@ -46,11 +55,41 @@ interface LayoutResult {
 }
 
 const ALL_FILTER_ITEMS: FilterItem[] = [
-	{ id: "search", labelText: "Search:", labelWidth: 8, minWidth: 28, flexGrow: true },
-	{ id: "status", labelText: "Status:", labelWidth: 8, minWidth: 22, flexGrow: false },
-	{ id: "priority", labelText: "Priority:", labelWidth: 9, minWidth: 20, flexGrow: false },
-	{ id: "directive", labelText: "Directive:", labelWidth: 10, minWidth: 22, flexGrow: false },
-	{ id: "labels", labelText: "Labels:", labelWidth: 8, minWidth: 18, flexGrow: false },
+	{
+		id: "search",
+		labelText: "Search:",
+		labelWidth: 8,
+		minWidth: 28,
+		flexGrow: true,
+	},
+	{
+		id: "status",
+		labelText: "Status:",
+		labelWidth: 8,
+		minWidth: 22,
+		flexGrow: false,
+	},
+	{
+		id: "priority",
+		labelText: "Priority:",
+		labelWidth: 9,
+		minWidth: 20,
+		flexGrow: false,
+	},
+	{
+		id: "directive",
+		labelText: "Directive:",
+		labelWidth: 10,
+		minWidth: 22,
+		flexGrow: false,
+	},
+	{
+		id: "labels",
+		labelText: "Labels:",
+		labelWidth: 8,
+		minWidth: 18,
+		flexGrow: false,
+	},
 ];
 
 const PADDING = 1; // Left padding inside header box
@@ -73,12 +112,16 @@ export function resolveSearchHorizontalNavigation(
 	return "stay";
 }
 
-function normalizeVisibleFilters(visible: FilterControlId[] | undefined): FilterControlId[] {
+function normalizeVisibleFilters(
+	visible: FilterControlId[] | undefined,
+): FilterControlId[] {
 	if (!visible || visible.length === 0) {
 		return ALL_FILTER_ITEMS.map((item) => item.id);
 	}
 	const allowed = new Set(visible);
-	const ordered = ALL_FILTER_ITEMS.map((item) => item.id).filter((id) => allowed.has(id));
+	const ordered = ALL_FILTER_ITEMS.map((item) => item.id).filter((id) =>
+		allowed.has(id),
+	);
 	return ordered.length > 0 ? ordered : ALL_FILTER_ITEMS.map((item) => item.id);
 }
 
@@ -90,7 +133,10 @@ function visibleFilterItems(ids: FilterControlId[]): FilterItem[] {
 /**
  * Compute row layout using flex-wrap algorithm
  */
-function computeLayout(items: FilterItem[], availableWidth: number): LayoutResult {
+function computeLayout(
+	items: FilterItem[],
+	availableWidth: number,
+): LayoutResult {
 	const rows: LayoutRow[] = [];
 	let currentRow: FilterItem[] = [];
 	let currentRowWidth = 0;
@@ -99,7 +145,10 @@ function computeLayout(items: FilterItem[], availableWidth: number): LayoutResul
 		const itemWidth = item.minWidth;
 		const widthWithGap = currentRow.length > 0 ? itemWidth + GAP : itemWidth;
 
-		if (currentRowWidth + widthWithGap > availableWidth && currentRow.length > 0) {
+		if (
+			currentRowWidth + widthWithGap > availableWidth &&
+			currentRow.length > 0
+		) {
 			rows.push({ items: currentRow, y: rows.length });
 			currentRow = [item];
 			currentRowWidth = itemWidth;
@@ -151,9 +200,13 @@ export class FilterHeader {
 			directive: options.initialFilters?.directive ?? "",
 		};
 
-		const parentWidth = typeof this.parent.width === "number" ? this.parent.width : 80;
+		const parentWidth =
+			typeof this.parent.width === "number" ? this.parent.width : 80;
 		const availableWidth = parentWidth - 2 - PADDING * 2;
-		this.currentLayout = computeLayout(visibleFilterItems(this.visibleFilterIds), availableWidth);
+		this.currentLayout = computeLayout(
+			visibleFilterItems(this.visibleFilterIds),
+			availableWidth,
+		);
 
 		this.container = box({
 			parent: this.parent,
@@ -213,11 +266,18 @@ export class FilterHeader {
 	 * Rebuild layout on resize
 	 */
 	rebuild(): void {
-		const parentWidth = typeof this.parent.width === "number" ? this.parent.width : 80;
+		const parentWidth =
+			typeof this.parent.width === "number" ? this.parent.width : 80;
 		const availableWidth = parentWidth - 2 - PADDING * 2;
-		const newLayout = computeLayout(visibleFilterItems(this.visibleFilterIds), availableWidth);
+		const newLayout = computeLayout(
+			visibleFilterItems(this.visibleFilterIds),
+			availableWidth,
+		);
 
-		if (newLayout.height !== this.currentLayout.height || newLayout.rows.length !== this.currentLayout.rows.length) {
+		if (
+			newLayout.height !== this.currentLayout.height ||
+			newLayout.rows.length !== this.currentLayout.rows.length
+		) {
 			this.currentLayout = newLayout;
 			this.container.height = newLayout.height;
 			this.destroyElements();
@@ -247,11 +307,15 @@ export class FilterHeader {
 		this.labelsButton?.focus();
 	}
 
-	setFocusChangeHandler(handler: (focus: FilterControlId | null) => void): void {
+	setFocusChangeHandler(
+		handler: (focus: FilterControlId | null) => void,
+	): void {
 		this.onFocusChange = handler;
 	}
 
-	setExitRequestHandler(handler: (direction: "up" | "down" | "escape") => void): void {
+	setExitRequestHandler(
+		handler: (direction: "up" | "down" | "escape") => void,
+	): void {
 		this.onExitRequest = handler;
 	}
 
@@ -270,7 +334,9 @@ export class FilterHeader {
 
 	cycleNext(): void {
 		const order = this.visibleFilterIds;
-		const currentIndex = this.currentFocus ? order.indexOf(this.currentFocus) : -1;
+		const currentIndex = this.currentFocus
+			? order.indexOf(this.currentFocus)
+			: -1;
 		const nextIndex = (currentIndex + 1) % order.length;
 		const nextFocus = order[nextIndex];
 		if (nextFocus) {
@@ -280,7 +346,9 @@ export class FilterHeader {
 
 	cyclePrev(): void {
 		const order = this.visibleFilterIds;
-		const currentIndex = this.currentFocus ? order.indexOf(this.currentFocus) : 0;
+		const currentIndex = this.currentFocus
+			? order.indexOf(this.currentFocus)
+			: 0;
 		const prevIndex = (currentIndex - 1 + order.length) % order.length;
 		const prevFocus = order[prevIndex];
 		if (prevFocus) {
@@ -313,12 +381,16 @@ export class FilterHeader {
 	}
 
 	private getSearchCursorX(): number {
-		const searchInput = this.searchInput as unknown as { getCursor?: () => { x: number; y: number } };
+		const searchInput = this.searchInput as unknown as {
+			getCursor?: () => { x: number; y: number };
+		};
 		return searchInput.getCursor?.().x ?? 0;
 	}
 
 	private getSearchTextWidth(value: string): number {
-		const searchInput = this.searchInput as unknown as { strWidth?: (input: string) => number };
+		const searchInput = this.searchInput as unknown as {
+			strWidth?: (input: string) => number;
+		};
 		return searchInput.strWidth?.(value) ?? value.length;
 	}
 
@@ -362,7 +434,8 @@ export class FilterHeader {
 	}
 
 	private buildElements(): void {
-		const parentWidth = typeof this.parent.width === "number" ? this.parent.width : 80;
+		const parentWidth =
+			typeof this.parent.width === "number" ? this.parent.width : 80;
 		const availableWidth = parentWidth - 2 - PADDING * 2;
 
 		for (const row of this.currentLayout.rows) {
@@ -392,7 +465,12 @@ export class FilterHeader {
 		}
 	}
 
-	private buildFilterItem(item: FilterItem, x: number, y: number, width: number): void {
+	private buildFilterItem(
+		item: FilterItem,
+		x: number,
+		y: number,
+		width: number,
+	): void {
 		const label = box({
 			parent: this.container,
 			content: item.labelText,
@@ -472,7 +550,9 @@ export class FilterHeader {
 		});
 
 		this.searchInput.key(["right"], () => {
-			const value = String(this.searchInput?.getValue?.() ?? this.proposal.search);
+			const value = String(
+				this.searchInput?.getValue?.() ?? this.proposal.search,
+			);
 			const behavior = resolveSearchHorizontalNavigation(
 				this.getSearchTextWidth(value),
 				this.getSearchCursorX(),
@@ -523,7 +603,12 @@ export class FilterHeader {
 		});
 	}
 
-	private buildPopupButton(field: Exclude<FilterControlId, "search">, x: number, y: number, width: number): void {
+	private buildPopupButton(
+		field: Exclude<FilterControlId, "search">,
+		x: number,
+		y: number,
+		width: number,
+	): void {
 		const button = box({
 			parent: this.container,
 			content: this.getPopupButtonContent(field),
@@ -598,14 +683,18 @@ export class FilterHeader {
 		});
 	}
 
-	private getPopupButtonContent(field: Exclude<FilterControlId, "search">): string {
+	private getPopupButtonContent(
+		field: Exclude<FilterControlId, "search">,
+	): string {
 		switch (field) {
 			case "status":
 				return this.proposal.status ? `${this.proposal.status} ▼` : "All ▼";
 			case "priority":
 				return this.proposal.priority ? `${this.proposal.priority} ▼` : "All ▼";
 			case "directive":
-				return this.proposal.directive ? `${this.proposal.directive} ▼` : "All ▼";
+				return this.proposal.directive
+					? `${this.proposal.directive} ▼`
+					: "All ▼";
 			case "labels": {
 				const count = this.proposal.labels.length;
 				return count === 0 ? "All ▼" : `(${count}) ▼`;

@@ -1,9 +1,18 @@
-import React, { useMemo, useState, useCallback } from "react";
-import { Link } from "react-router-dom";
 import Fuse from "fuse.js";
+import type React from "react";
+import { useCallback, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import {
+	buildDirectiveBuckets,
+	collectArchivedDirectiveKeys,
+	isReachedStatus,
+} from "../../../core/proposal/directives.ts";
+import type {
+	Directive,
+	DirectiveBucket,
+	Proposal,
+} from "../../../shared/types";
 import { apiClient } from "../lib/api";
-import { buildDirectiveBuckets, collectArchivedDirectiveKeys, isReachedStatus } from '../../../core/proposal/directives.ts';
-import { type Directive, type DirectiveBucket, type Proposal } from "../../../shared/types";
 import DirectiveProposalRow from "./DirectiveProposalRow";
 import Modal from "./Modal";
 
@@ -26,8 +35,13 @@ const rebuildFilteredBucket = (
 		counts[status] = (counts[status] ?? 0) + 1;
 	}
 
-	const doneCount = filteredProposals.filter((proposal) => isReachedStatus(proposal.status)).length;
-	const progress = filteredProposals.length > 0 ? Math.round((doneCount / filteredProposals.length) * 100) : 0;
+	const doneCount = filteredProposals.filter((proposal) =>
+		isReachedStatus(proposal.status),
+	).length;
+	const progress =
+		filteredProposals.length > 0
+			? Math.round((doneCount / filteredProposals.length) * 100)
+			: 0;
 
 	return {
 		...bucket,
@@ -61,12 +75,16 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 	const [success, setSuccess] = useState<string | null>(null);
 	const [isSaving, setIsSaving] = useState(false);
 	const [showAddModal, setShowAddModal] = useState(false);
-	const [expandedBuckets, setExpandedBuckets] = useState<Record<string, boolean>>({});
+	const [expandedBuckets, setExpandedBuckets] = useState<
+		Record<string, boolean>
+	>({});
 	const [draggedProposal, setDraggedProposal] = useState<Proposal | null>(null);
 	const [dropTargetKey, setDropTargetKey] = useState<string | null>(null);
 	const [showAllUnassigned, setShowAllUnassigned] = useState(false);
 	const [showCompleted, setShowCompleted] = useState(false);
-	const [archivingDirectiveKey, setArchivingDirectiveKey] = useState<string | null>(null);
+	const [archivingDirectiveKey, setArchivingDirectiveKey] = useState<
+		string | null
+	>(null);
 	const [searchQuery, setSearchQuery] = useState("");
 
 	const archivedDirectiveIds = useMemo(
@@ -74,8 +92,18 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 		[archivedDirectives, directiveEntities],
 	);
 	const buckets = useMemo(
-		() => buildDirectiveBuckets(proposals, directiveEntities, statuses, { archivedDirectiveIds, archivedDirectives }),
-		[proposals, directiveEntities, statuses, archivedDirectiveIds, archivedDirectives],
+		() =>
+			buildDirectiveBuckets(proposals, directiveEntities, statuses, {
+				archivedDirectiveIds,
+				archivedDirectives,
+			}),
+		[
+			proposals,
+			directiveEntities,
+			statuses,
+			archivedDirectiveIds,
+			archivedDirectives,
+		],
 	);
 	const searchQueryTrimmed = searchQuery.trim();
 	const isSearchActive = searchQueryTrimmed.length > 0;
@@ -91,17 +119,22 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 			return buckets;
 		}
 
-		const searchableProposals: DirectiveSearchEntry[] = buckets.flatMap((bucket) =>
-			bucket.proposals.map((proposal) => ({
-				id: proposal.id,
-				title: proposal.title,
-			})),
+		const searchableProposals: DirectiveSearchEntry[] = buckets.flatMap(
+			(bucket) =>
+				bucket.proposals.map((proposal) => ({
+					id: proposal.id,
+					title: proposal.title,
+				})),
 		);
 		if (searchableProposals.length === 0) {
-			return buckets.map((bucket) => rebuildFilteredBucket(bucket, [], statuses));
+			return buckets.map((bucket) =>
+				rebuildFilteredBucket(bucket, [], statuses),
+			);
 		}
 		const normalizedQuery = searchQueryTrimmed.toLowerCase();
-		const exactIdMatches = searchableProposals.filter((proposal) => proposal.id.toLowerCase() === normalizedQuery);
+		const exactIdMatches = searchableProposals.filter(
+			(proposal) => proposal.id.toLowerCase() === normalizedQuery,
+		);
 		const matchedProposalIds =
 			exactIdMatches.length > 0
 				? new Set(exactIdMatches.map((proposal) => proposal.id))
@@ -120,51 +153,63 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 					})();
 
 		return buckets.map((bucket) => {
-			const filteredProposals = bucket.proposals.filter((proposal) => matchedProposalIds.has(proposal.id));
+			const filteredProposals = bucket.proposals.filter((proposal) =>
+				matchedProposalIds.has(proposal.id),
+			);
 			return rebuildFilteredBucket(bucket, filteredProposals, statuses);
 		});
 	}, [buckets, isSearchActive, searchQueryTrimmed, statuses]);
 
 	// Separate buckets into categories and sort by ID descending
-	const { unassignedBucket, activeDirectives, completedDirectives } = useMemo(() => {
-		// Sort directives by ID descending (newest first - IDs are sequential m-0, m-1, etc.)
-		const sortByIdDesc = (a: DirectiveBucket, b: DirectiveBucket) => {
-			const aDirective = a.directive ?? "";
-			const bDirective = b.directive ?? "";
-			const aMatch = aDirective.match(/^m-(\d+)/);
-			const bMatch = bDirective.match(/^m-(\d+)/);
-			const aNum = aMatch?.[1] ? Number.parseInt(aMatch[1], 10) : -1;
-			const bNum = bMatch?.[1] ? Number.parseInt(bMatch[1], 10) : -1;
-			return bNum - aNum;
-		};
+	const { unassignedBucket, activeDirectives, completedDirectives } =
+		useMemo(() => {
+			// Sort directives by ID descending (newest first - IDs are sequential m-0, m-1, etc.)
+			const sortByIdDesc = (a: DirectiveBucket, b: DirectiveBucket) => {
+				const aDirective = a.directive ?? "";
+				const bDirective = b.directive ?? "";
+				const aMatch = aDirective.match(/^m-(\d+)/);
+				const bMatch = bDirective.match(/^m-(\d+)/);
+				const aNum = aMatch?.[1] ? Number.parseInt(aMatch[1], 10) : -1;
+				const bNum = bMatch?.[1] ? Number.parseInt(bMatch[1], 10) : -1;
+				return bNum - aNum;
+			};
 
-		const unassigned = visibleBuckets.find((b) => b.isNoDirective);
-		const activeWithProposals = visibleBuckets.filter((b) => !b.isNoDirective && !b.isCompleted && b.total > 0);
-		const empty = visibleBuckets.filter((b) => !b.isNoDirective && !b.isCompleted && b.total === 0);
-		const completed = visibleBuckets.filter((b) => !b.isNoDirective && b.isCompleted);
+			const unassigned = visibleBuckets.find((b) => b.isNoDirective);
+			const activeWithProposals = visibleBuckets.filter(
+				(b) => !b.isNoDirective && !b.isCompleted && b.total > 0,
+			);
+			const empty = visibleBuckets.filter(
+				(b) => !b.isNoDirective && !b.isCompleted && b.total === 0,
+			);
+			const completed = visibleBuckets.filter(
+				(b) => !b.isNoDirective && b.isCompleted,
+			);
 
-		// Sort each group by ID descending, then combine (active with proposals first, then empty)
-		const sortedActive = [...activeWithProposals].sort(sortByIdDesc);
-		const sortedEmpty = [...empty].sort(sortByIdDesc);
-		const sortedCompleted = [...completed].sort(sortByIdDesc);
+			// Sort each group by ID descending, then combine (active with proposals first, then empty)
+			const sortedActive = [...activeWithProposals].sort(sortByIdDesc);
+			const sortedEmpty = [...empty].sort(sortByIdDesc);
+			const sortedCompleted = [...completed].sort(sortByIdDesc);
 
-		return {
-			unassignedBucket: unassigned,
-			activeDirectives: [...sortedActive, ...sortedEmpty],
-			completedDirectives: sortedCompleted,
-		};
-	}, [visibleBuckets]);
+			return {
+				unassignedBucket: unassigned,
+				activeDirectives: [...sortedActive, ...sortedEmpty],
+				completedDirectives: sortedCompleted,
+			};
+		}, [visibleBuckets]);
 
 	// Drag and drop handlers
-	const handleDragStart = useCallback((e: React.DragEvent, proposal: Proposal) => {
-		setDraggedProposal(proposal);
-		e.dataTransfer.effectAllowed = "move";
-		e.dataTransfer.setData("text/plain", proposal.id);
-		// Add dragging class for visual feedback
-		if (e.currentTarget instanceof HTMLElement) {
-			e.currentTarget.style.opacity = "0.5";
-		}
-	}, []);
+	const handleDragStart = useCallback(
+		(e: React.DragEvent, proposal: Proposal) => {
+			setDraggedProposal(proposal);
+			e.dataTransfer.effectAllowed = "move";
+			e.dataTransfer.setData("text/plain", proposal.id);
+			// Add dragging class for visual feedback
+			if (e.currentTarget instanceof HTMLElement) {
+				e.currentTarget.style.opacity = "0.5";
+			}
+		},
+		[],
+	);
 
 	const handleDragEnd = useCallback((e: React.DragEvent) => {
 		setDraggedProposal(null);
@@ -174,39 +219,47 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 		}
 	}, []);
 
-	const handleDragOver = useCallback((e: React.DragEvent, bucketKey: string) => {
-		e.preventDefault();
-		e.dataTransfer.dropEffect = "move";
-		setDropTargetKey(bucketKey);
-	}, []);
+	const handleDragOver = useCallback(
+		(e: React.DragEvent, bucketKey: string) => {
+			e.preventDefault();
+			e.dataTransfer.dropEffect = "move";
+			setDropTargetKey(bucketKey);
+		},
+		[],
+	);
 
 	const handleDragLeave = useCallback(() => {
 		setDropTargetKey(null);
 	}, []);
 
-	const handleDrop = useCallback(async (e: React.DragEvent, targetDirective: string | undefined) => {
-		e.preventDefault();
-		setDropTargetKey(null);
+	const handleDrop = useCallback(
+		async (e: React.DragEvent, targetDirective: string | undefined) => {
+			e.preventDefault();
+			setDropTargetKey(null);
 
-		if (!draggedProposal) return;
+			if (!draggedProposal) return;
 
-		// Don't do anything if dropping on same directive
-		if (draggedProposal.directive === targetDirective) {
-			setDraggedProposal(null);
-			return;
-		}
-
-		try {
-			await apiClient.updateProposal(draggedProposal.id, { directive: targetDirective });
-			if (onRefreshData) {
-				await onRefreshData();
+			// Don't do anything if dropping on same directive
+			if (draggedProposal.directive === targetDirective) {
+				setDraggedProposal(null);
+				return;
 			}
-		} catch (err) {
-			console.error("Failed to update proposal directive:", err);
-		}
 
-		setDraggedProposal(null);
-	}, [draggedProposal, onRefreshData]);
+			try {
+				await apiClient.updateProposal(draggedProposal.id, {
+					directive: targetDirective,
+				});
+				if (onRefreshData) {
+					await onRefreshData();
+				}
+			} catch (err) {
+				console.error("Failed to update proposal directive:", err);
+			}
+
+			setDraggedProposal(null);
+		},
+		[draggedProposal, onRefreshData],
+	);
 
 	const handleNewDirectiveChange = (value: string) => {
 		setNewDirective(value);
@@ -220,7 +273,9 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 		setError(null);
 	};
 
-	const handleAddDirective = async (event?: React.FormEvent<HTMLFormElement>) => {
+	const handleAddDirective = async (
+		event?: React.FormEvent<HTMLFormElement>,
+	) => {
 		event?.preventDefault();
 		const value = newDirective.trim();
 		if (!value) {
@@ -271,7 +326,9 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 				setTimeout(() => setSuccess(null), 3000);
 			} catch (err) {
 				console.error("Failed to archive directive:", err);
-				setError(err instanceof Error ? err.message : "Failed to archive directive.");
+				setError(
+					err instanceof Error ? err.message : "Failed to archive directive.",
+				);
 			} finally {
 				setArchivingDirectiveKey(null);
 			}
@@ -305,15 +362,18 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 
 	const getStatusDotColor = (status?: string | null) => {
 		const normalized = (status ?? "").toLowerCase();
-		if (normalized.includes("done") || normalized.includes("complete")) return "#10b981";
+		if (normalized.includes("done") || normalized.includes("complete"))
+			return "#10b981";
 		if (normalized.includes("progress")) return "#3b82f6";
 		return "#6b7280";
 	};
 
 	const getInlineStatusClass = (status: string) => {
 		const normalized = status.toLowerCase();
-		if (normalized.includes("done") || normalized.includes("complete")) return "text-emerald-700 dark:text-emerald-300";
-		if (normalized.includes("progress")) return "text-blue-700 dark:text-blue-300";
+		if (normalized.includes("done") || normalized.includes("complete"))
+			return "text-emerald-700 dark:text-emerald-300";
+		if (normalized.includes("progress"))
+			return "text-blue-700 dark:text-blue-300";
 		return "text-gray-600 dark:text-gray-400";
 	};
 
@@ -330,12 +390,18 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 		});
 	};
 
-	const safeIdSegment = (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, "-");
+	const safeIdSegment = (value: string) =>
+		value.replace(/[^a-zA-Z0-9_-]/g, "-");
 
 	// Render a directive card (drop target)
 	const renderDirectiveCard = (bucket: DirectiveBucket, isEmpty: boolean) => {
-		const progress = bucket.total > 0 ? Math.round((bucket.doneCount / bucket.total) * 100) : 0;
-		const defaultExpanded = defaultExpandedByBucketKey[bucket.key] ?? (bucket.total > 0 && bucket.total <= 8);
+		const progress =
+			bucket.total > 0
+				? Math.round((bucket.doneCount / bucket.total) * 100)
+				: 0;
+		const defaultExpanded =
+			defaultExpandedByBucketKey[bucket.key] ??
+			(bucket.total > 0 && bucket.total <= 8);
 		const isExpanded = expandedBuckets[bucket.key] ?? defaultExpanded;
 		const listId = `directive-${safeIdSegment(bucket.key)}`;
 		const sortedProposals = getSortedProposals(bucket.proposals);
@@ -350,8 +416,8 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 					isDropTarget
 						? "border-blue-400 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/20 scale-[1.01]"
 						: isDragging
-						? "border-dashed border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
-						: "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
+							? "border-dashed border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
+							: "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
 				}`}
 				onDragOver={(e) => handleDragOver(e, bucket.key)}
 				onDragLeave={handleDragLeave}
@@ -382,7 +448,10 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 					{/* Progress bar - only for non-empty */}
 					{!isEmpty && (
 						<div className="mt-3 w-full h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
-							<div className="h-full bg-emerald-500 transition-all duration-300" style={{ width: `${progress}%` }} />
+							<div
+								className="h-full bg-emerald-500 transition-all duration-300"
+								style={{ width: `${progress}%` }}
+							/>
 						</div>
 					)}
 
@@ -393,8 +462,14 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 								const count = bucket.statusCounts[status] ?? 0;
 								if (count === 0) return null;
 								return (
-									<span key={status} className={`inline-flex items-center gap-1.5 ${getInlineStatusClass(status)}`}>
-										<span className="h-2 w-2 rounded-full" style={{ backgroundColor: getStatusDotColor(status) }} />
+									<span
+										key={status}
+										className={`inline-flex items-center gap-1.5 ${getInlineStatusClass(status)}`}
+									>
+										<span
+											className="h-2 w-2 rounded-full"
+											style={{ backgroundColor: getStatusDotColor(status) }}
+										/>
 										{count} {status}
 									</span>
 								);
@@ -409,8 +484,18 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 								to={`/?lane=directive&directive=${encodeURIComponent(bucket.directive ?? "")}`}
 								className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
 							>
-								<svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+								<svg
+									className="w-3.5 h-3.5"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										strokeLinecap="round"
+										strokeLinejoin="round"
+										strokeWidth={2}
+										d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"
+									/>
 								</svg>
 								Board
 							</Link>
@@ -418,8 +503,18 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 								to={`/proposals?directive=${encodeURIComponent(bucket.directive ?? "")}`}
 								className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
 							>
-								<svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+								<svg
+									className="w-3.5 h-3.5"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										strokeLinecap="round"
+										strokeLinejoin="round"
+										strokeWidth={2}
+										d="M4 6h16M4 10h16M4 14h16M4 18h16"
+									/>
 								</svg>
 								List
 							</Link>
@@ -429,8 +524,18 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 								disabled={isArchiving}
 								className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-red-200 dark:border-red-800 text-red-600 dark:text-red-300 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors disabled:opacity-60"
 							>
-								<svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+								<svg
+									className="w-3.5 h-3.5"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										strokeLinecap="round"
+										strokeLinejoin="round"
+										strokeWidth={2}
+										d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
+									/>
 								</svg>
 								{isArchiving ? "Archiving..." : "Archive"}
 							</button>
@@ -439,19 +544,34 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 							type="button"
 							aria-expanded={isExpanded}
 							aria-controls={listId}
-							onClick={() => setExpandedBuckets((c) => ({ ...c, [bucket.key]: !isExpanded }))}
+							onClick={() =>
+								setExpandedBuckets((c) => ({ ...c, [bucket.key]: !isExpanded }))
+							}
 							className="inline-flex items-center gap-1 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
 						>
 							{isExpanded ? "Hide" : "Show"} proposals
-							<svg className={`w-4 h-4 transition-transform ${isExpanded ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+							<svg
+								className={`w-4 h-4 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+							>
+								<path
+									strokeLinecap="round"
+									strokeLinejoin="round"
+									strokeWidth={2}
+									d="M19 9l-7 7-7-7"
+								/>
 							</svg>
 						</button>
 					</div>
 
 					{/* Proposal list */}
 					{isExpanded && !isEmpty && (
-						<div id={listId} className="mt-4 rounded-md border border-gray-200 dark:border-gray-700 overflow-hidden">
+						<div
+							id={listId}
+							className="mt-4 rounded-md border border-gray-200 dark:border-gray-700 overflow-hidden"
+						>
 							<div className="divide-y divide-gray-200 dark:divide-gray-700">
 								{sortedProposals.slice(0, 10).map((proposal) => {
 									return (
@@ -460,7 +580,9 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 											proposal={proposal}
 											isReached={isReachedStatus(proposal.status)}
 											statusBadgeClass={getStatusBadgeClass(proposal.status)}
-											priorityBadgeClass={getPriorityBadgeClass(proposal.priority)}
+											priorityBadgeClass={getPriorityBadgeClass(
+												proposal.priority,
+											)}
 											onEditProposal={onEditProposal}
 											onDragStart={handleDragStart}
 											onDragEnd={handleDragEnd}
@@ -470,7 +592,10 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 							</div>
 							{sortedProposals.length > 10 && (
 								<div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 border-t border-gray-200 dark:border-gray-700">
-									<Link to={`/proposals?directive=${encodeURIComponent(bucket.directive ?? "")}`} className="text-blue-600 dark:text-blue-400 hover:underline">
+									<Link
+										to={`/proposals?directive=${encodeURIComponent(bucket.directive ?? "")}`}
+										className="text-blue-600 dark:text-blue-400 hover:underline"
+									>
 										View all {sortedProposals.length} proposals →
 									</Link>
 								</div>
@@ -484,11 +609,18 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 
 	// Render unassigned proposals section with table layout
 	const renderUnassignedSection = () => {
-		if (!unassignedBucket || (!isSearchActive && unassignedBucket.total === 0)) return null;
+		if (!unassignedBucket || (!isSearchActive && unassignedBucket.total === 0))
+			return null;
 
-		const sortedActiveProposals = getSortedProposals(unassignedBucket.proposals.filter((proposal) => !isReachedStatus(proposal.status)));
-		const isExpanded = expandedBuckets["__unassigned"] ?? true;
-		const displayProposals = showAllUnassigned ? sortedActiveProposals : sortedActiveProposals.slice(0, 12);
+		const sortedActiveProposals = getSortedProposals(
+			unassignedBucket.proposals.filter(
+				(proposal) => !isReachedStatus(proposal.status),
+			),
+		);
+		const isExpanded = expandedBuckets.__unassigned ?? true;
+		const displayProposals = showAllUnassigned
+			? sortedActiveProposals
+			: sortedActiveProposals.slice(0, 12);
 		const hasMore = sortedActiveProposals.length > 12;
 		const hasActiveUnassignedProposals = sortedActiveProposals.length > 0;
 
@@ -498,8 +630,18 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 					{/* Header */}
 					<div className="flex items-center justify-between gap-4">
 						<div className="flex items-center gap-2">
-							<svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+							<svg
+								className="w-4 h-4 text-gray-400"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+							>
+								<path
+									strokeLinecap="round"
+									strokeLinejoin="round"
+									strokeWidth={2}
+									d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+								/>
 							</svg>
 							<h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
 								Unassigned proposals
@@ -510,12 +652,24 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 						</div>
 						<button
 							type="button"
-							onClick={() => setExpandedBuckets((c) => ({ ...c, "__unassigned": !isExpanded }))}
+							onClick={() =>
+								setExpandedBuckets((c) => ({ ...c, __unassigned: !isExpanded }))
+							}
 							className="inline-flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
 						>
 							{isExpanded ? "Collapse" : "Expand"}
-							<svg className={`w-4 h-4 transition-transform ${isExpanded ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+							<svg
+								className={`w-4 h-4 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+							>
+								<path
+									strokeLinecap="round"
+									strokeLinejoin="round"
+									strokeWidth={2}
+									d="M19 9l-7 7-7-7"
+								/>
 							</svg>
 						</button>
 					</div>
@@ -542,8 +696,12 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 													key={proposal.id}
 													proposal={proposal}
 													isReached={isReachedStatus(proposal.status)}
-													statusBadgeClass={getStatusBadgeClass(proposal.status)}
-													priorityBadgeClass={getPriorityBadgeClass(proposal.priority)}
+													statusBadgeClass={getStatusBadgeClass(
+														proposal.status,
+													)}
+													priorityBadgeClass={getPriorityBadgeClass(
+														proposal.priority,
+													)}
 													onEditProposal={onEditProposal}
 													onDragStart={handleDragStart}
 													onDragEnd={handleDragEnd}
@@ -556,7 +714,9 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 											<div className="px-3 py-2 text-xs border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/30">
 												<button
 													type="button"
-													onClick={() => setShowAllUnassigned(!showAllUnassigned)}
+													onClick={() =>
+														setShowAllUnassigned(!showAllUnassigned)
+													}
 													className="text-blue-600 dark:text-blue-400 hover:underline"
 												>
 													{showAllUnassigned
@@ -588,18 +748,33 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 
 	const hasSearchMatches = visibleBuckets.some((bucket) => bucket.total > 0);
 	const showSearchNoMatchHint = isSearchActive && !hasSearchMatches;
-	const noDirectives = !isSearchActive && activeDirectives.length === 0 && completedDirectives.length === 0;
+	const noDirectives =
+		!isSearchActive &&
+		activeDirectives.length === 0 &&
+		completedDirectives.length === 0;
 
 	return (
 		<div className="container mx-auto px-4 py-8 transition-colors duration-200">
 			{/* Header */}
 			<div className="flex flex-wrap items-center justify-between gap-4 mb-6">
 				<div className="flex flex-wrap items-center gap-4">
-					<h1 className="text-2xl font-bold text-gray-900 dark:text-white">Directives</h1>
+					<h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+						Directives
+					</h1>
 					<div className="relative w-full min-w-[240px] max-w-[420px]">
 						<span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400 dark:text-gray-500">
-							<svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+							<svg
+								className="h-4 w-4"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+							>
+								<path
+									strokeLinecap="round"
+									strokeLinejoin="round"
+									strokeWidth={2}
+									d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+								/>
 							</svg>
 						</span>
 						<label htmlFor="directives-search" className="sr-only">
@@ -609,7 +784,9 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 							id="directives-search"
 							type="text"
 							value={searchQuery}
-							onInput={(event) => setSearchQuery((event.target as HTMLInputElement).value)}
+							onInput={(event) =>
+								setSearchQuery((event.target as HTMLInputElement).value)
+							}
 							placeholder="Search by proposal ID or title"
 							aria-label="Search directives"
 							className="w-full pl-10 pr-10 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 focus:border-transparent transition-colors duration-200"
@@ -621,8 +798,18 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 								aria-label="Clear directive search"
 								className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
 							>
-								<svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+								<svg
+									className="h-4 w-4"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										strokeLinecap="round"
+										strokeLinejoin="round"
+										strokeWidth={2}
+										d="M6 18L18 6M6 6l12 12"
+									/>
 								</svg>
 							</button>
 						)}
@@ -631,16 +818,36 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 				<div className="flex items-center gap-3">
 					{success && (
 						<span className="inline-flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400">
-							<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+							<svg
+								className="w-4 h-4"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+							>
+								<path
+									strokeLinecap="round"
+									strokeLinejoin="round"
+									strokeWidth={2}
+									d="M5 13l4 4L19 7"
+								/>
 							</svg>
 							{success}
 						</span>
 					)}
 					{error && (
 						<span className="inline-flex items-center gap-1.5 text-sm text-red-600 dark:text-red-400">
-							<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v4m0 4h.01M5.07 19h13.86a2 2 0 001.74-3L13.74 4a2 2 0 00-3.48 0L3.33 16a2 2 0 001.74 3z" />
+							<svg
+								className="w-4 h-4"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+							>
+								<path
+									strokeLinecap="round"
+									strokeLinejoin="round"
+									strokeWidth={2}
+									d="M12 9v4m0 4h.01M5.07 19h13.86a2 2 0 001.74-3L13.74 4a2 2 0 00-3.48 0L3.33 16a2 2 0 001.74 3z"
+								/>
 							</svg>
 							{error}
 						</span>
@@ -677,7 +884,9 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 			{/* Active directives */}
 			{activeDirectives.length > 0 && (
 				<div className="space-y-4">
-					{activeDirectives.map((bucket) => renderDirectiveCard(bucket, bucket.total === 0))}
+					{activeDirectives.map((bucket) =>
+						renderDirectiveCard(bucket, bucket.total === 0),
+					)}
 				</div>
 			)}
 
@@ -687,7 +896,9 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 					{isSearchActive ? (
 						<div className="inline-flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300">
 							<span>Completed directives</span>
-							<span className="text-xs text-gray-400 dark:text-gray-500">({completedDirectives.length})</span>
+							<span className="text-xs text-gray-400 dark:text-gray-500">
+								({completedDirectives.length})
+							</span>
 						</div>
 					) : (
 						<button
@@ -696,20 +907,29 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 							className="inline-flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
 						>
 							<span>Completed directives</span>
-							<span className="text-xs text-gray-400 dark:text-gray-500">({completedDirectives.length})</span>
+							<span className="text-xs text-gray-400 dark:text-gray-500">
+								({completedDirectives.length})
+							</span>
 							<svg
 								className={`w-4 h-4 transition-transform ${showCompleted ? "rotate-180" : ""}`}
 								fill="none"
 								stroke="currentColor"
 								viewBox="0 0 24 24"
 							>
-								<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+								<path
+									strokeLinecap="round"
+									strokeLinejoin="round"
+									strokeWidth={2}
+									d="M19 9l-7 7-7-7"
+								/>
 							</svg>
 						</button>
 					)}
 					{(isSearchActive || showCompleted) && (
 						<div className="mt-4 space-y-4">
-							{completedDirectives.map((bucket) => renderDirectiveCard(bucket, false))}
+							{completedDirectives.map((bucket) =>
+								renderDirectiveCard(bucket, false),
+							)}
 						</div>
 					)}
 				</div>
@@ -718,27 +938,47 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({
 			{/* Empty proposal */}
 			{noDirectives && !unassignedBucket?.total && (
 				<div className="flex flex-col items-center justify-center py-16 text-center">
-					<svg className="w-12 h-12 text-gray-300 dark:text-gray-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+					<svg
+						className="w-12 h-12 text-gray-300 dark:text-gray-600 mb-4"
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
+					>
+						<path
+							strokeLinecap="round"
+							strokeLinejoin="round"
+							strokeWidth={1.5}
+							d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+						/>
 					</svg>
-					<p className="text-gray-500 dark:text-gray-400">No directives yet. Create one to start organizing your proposals.</p>
+					<p className="text-gray-500 dark:text-gray-400">
+						No directives yet. Create one to start organizing your proposals.
+					</p>
 				</div>
 			)}
 
 			{/* Add modal */}
-			<Modal isOpen={showAddModal} onClose={closeAddModal} title="Add directive" maxWidthClass="max-w-md">
+			<Modal
+				isOpen={showAddModal}
+				onClose={closeAddModal}
+				title="Add directive"
+				maxWidthClass="max-w-md"
+			>
 				<form onSubmit={handleAddDirective} className="space-y-4">
 					<div className="space-y-2">
-						<label className="text-sm font-medium text-gray-900 dark:text-gray-100">Directive name</label>
+						<label className="text-sm font-medium text-gray-900 dark:text-gray-100">
+							Directive name
+						</label>
 						<input
 							type="text"
 							value={newDirective}
 							onChange={(e) => handleNewDirectiveChange(e.target.value)}
 							placeholder="e.g. Release 1.0"
-							autoFocus
 							className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
 						/>
-						{error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+						{error && (
+							<p className="text-xs text-red-600 dark:text-red-400">{error}</p>
+						)}
 					</div>
 					<div className="flex justify-end gap-2">
 						<button

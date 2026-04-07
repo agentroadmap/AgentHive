@@ -7,22 +7,21 @@
  * AC#4: Connection recovery after network interruption
  */
 
-import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { generateKeyPairSync } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import { FederationPKI } from "../../src/core/infrastructure/federation.ts";
 import {
-	FederationServer,
 	createFederationServer,
-	serializeMessage,
 	deserializeMessage,
-	validateMessage,
-	type FederationMessage,
 	type EditConflict,
-} from '../../src/core/infrastructure/federation-server.ts';
-import { FederationPKI } from '../../src/core/infrastructure/federation.ts';
+	type FederationMessage,
+	serializeMessage,
+	validateMessage,
+} from "../../src/core/infrastructure/federation-server.ts";
 import type { Proposal } from "../../src/types/index.ts";
 
 /**
@@ -68,13 +67,19 @@ describe("proposal-46: Multi-Host Federation Server", () => {
 
 		// Set up PKI for host A
 		const hostAConfigDir = join(tempDir, "host-a");
-		hostAPki = new FederationPKI({ configDir: hostAConfigDir, requireApproval: false });
+		hostAPki = new FederationPKI({
+			configDir: hostAConfigDir,
+			requireApproval: false,
+		});
 		await hostAPki.initialize();
 		await hostAPki.initializeCA("Host A CA");
 
 		// Set up PKI for host B
 		const hostBConfigDir = join(tempDir, "host-b");
-		hostBPki = new FederationPKI({ configDir: hostBConfigDir, requireApproval: false });
+		hostBPki = new FederationPKI({
+			configDir: hostBConfigDir,
+			requireApproval: false,
+		});
 		await hostBPki.initialize();
 		await hostBPki.initializeCA("Host B CA");
 
@@ -132,7 +137,10 @@ describe("proposal-46: Multi-Host Federation Server", () => {
 			assert.equal(response.type, "join-ack");
 			assert.equal(response.sourceHostId, "host-b");
 			assert.equal(response.targetHostId, "host-a");
-			assert.ok(response.payload.connectionId, "Join-ack should have connectionId");
+			assert.ok(
+				response.payload.connectionId,
+				"Join-ack should have connectionId",
+			);
 		});
 
 		it("rejects join with invalid certificate", async () => {
@@ -145,7 +153,11 @@ describe("proposal-46: Multi-Host Federation Server", () => {
 
 			// Create a join message with a certificate from host A's CA
 			const { publicKey } = generateTestKeyPair();
-			const cert = await hostAPki.issueCertificate("fake-host", publicKey, "client");
+			const cert = await hostAPki.issueCertificate(
+				"fake-host",
+				publicKey,
+				"client",
+			);
 
 			const joinMsg: FederationMessage = {
 				messageId: "test-join",
@@ -301,7 +313,10 @@ describe("proposal-46: Multi-Host Federation Server", () => {
 				pki,
 			});
 
-			const proposal = createMockProposal({ id: "proposal-42", title: "Multi-Host Federation" });
+			const proposal = createMockProposal({
+				id: "proposal-42",
+				title: "Multi-Host Federation",
+			});
 			server.updateLocalProposal(proposal);
 
 			const updateMsg = server.createProposalUpdateMessage(proposal, "host-b");
@@ -322,12 +337,18 @@ describe("proposal-46: Multi-Host Federation Server", () => {
 				pki,
 			});
 
-			const proposal = createMockProposal({ id: "proposal-99", title: "New Feature" });
+			const proposal = createMockProposal({
+				id: "proposal-99",
+				title: "New Feature",
+			});
 			const createMsg = server.createProposalCreateMessage(proposal, "host-b");
 
 			assert.equal(createMsg.type, "proposal-create");
 			assert.ok(createMsg.payload.proposal);
-			assert.equal((createMsg.payload.proposal as Proposal).title, "New Feature");
+			assert.equal(
+				(createMsg.payload.proposal as Proposal).title,
+				"New Feature",
+			);
 		});
 
 		it("creates proposal-delete message", () => {
@@ -400,7 +421,10 @@ describe("proposal-46: Multi-Host Federation Server", () => {
 			});
 
 			// Set up initial proposals
-			const proposal = createMockProposal({ id: "proposal-1", title: "Original" });
+			const proposal = createMockProposal({
+				id: "proposal-1",
+				title: "Original",
+			});
 			serverA.setLocalProposals([proposal]);
 			serverB.setLocalProposals([proposal]);
 
@@ -419,7 +443,10 @@ describe("proposal-46: Multi-Host Federation Server", () => {
 			// A updates a proposal and sends the update
 			const updatedProposal = { ...proposal, title: "Updated Title" };
 			serverA.updateLocalProposal(updatedProposal);
-			const updateMsg = serverA.createProposalUpdateMessage(updatedProposal, "host-b");
+			const updateMsg = serverA.createProposalUpdateMessage(
+				updatedProposal,
+				"host-b",
+			);
 
 			// B receives and processes
 			serverB.processMessage(updateMsg);
@@ -453,7 +480,11 @@ describe("proposal-46: Multi-Host Federation Server", () => {
 
 			assert.equal(snapshot.hostId, "host-a");
 			assert.equal(snapshot.proposalCount, 3);
-			assert.deepEqual(snapshot.proposalIds, ["proposal-1", "proposal-2", "proposal-3"]);
+			assert.deepEqual(snapshot.proposalIds, [
+				"proposal-1",
+				"proposal-2",
+				"proposal-3",
+			]);
 			assert.ok(snapshot.checksum);
 		});
 	});
@@ -469,11 +500,17 @@ describe("proposal-46: Multi-Host Federation Server", () => {
 				pki,
 			});
 
-			const proposal = createMockProposal({ id: "proposal-1", title: "Original" });
+			const proposal = createMockProposal({
+				id: "proposal-1",
+				title: "Original",
+			});
 			server.updateLocalProposal(proposal);
 
 			// Simulate a remote edit with a slightly different timestamp
-			const remoteProposal = createMockProposal({ id: "proposal-1", title: "Remote Edit" });
+			const remoteProposal = createMockProposal({
+				id: "proposal-1",
+				title: "Remote Edit",
+			});
 			const remoteTimestamp = new Date().toISOString();
 
 			// Small delay to ensure different timestamps
@@ -505,15 +542,21 @@ describe("proposal-46: Multi-Host Federation Server", () => {
 				conflictStrategy: "latest-wins",
 			});
 
-			const localProposal = createMockProposal({ id: "proposal-1", title: "Local Edit" });
+			const localProposal = createMockProposal({
+				id: "proposal-1",
+				title: "Local Edit",
+			});
 			server.updateLocalProposal(localProposal);
 
 			// Wait a moment to ensure different timestamps
 			await new Promise((resolve) => setTimeout(resolve, 10));
 
 			// Create a conflict manually
-			const remoteProposal = createMockProposal({ id: "proposal-1", title: "Remote Edit" });
-			const conflict: EditConflict = {
+			const remoteProposal = createMockProposal({
+				id: "proposal-1",
+				title: "Remote Edit",
+			});
+			const _conflict: EditConflict = {
 				conflictId: "conflict-1",
 				proposalId: "proposal-1",
 				localHostId: "host-a",
@@ -559,10 +602,16 @@ describe("proposal-46: Multi-Host Federation Server", () => {
 				conflictStrategy: "source-wins",
 			});
 
-			const localProposal = createMockProposal({ id: "proposal-1", title: "Local Edit" });
+			const localProposal = createMockProposal({
+				id: "proposal-1",
+				title: "Local Edit",
+			});
 			server.updateLocalProposal(localProposal);
 
-			const remoteProposal = createMockProposal({ id: "proposal-1", title: "Remote Edit" });
+			const remoteProposal = createMockProposal({
+				id: "proposal-1",
+				title: "Remote Edit",
+			});
 
 			const detectedConflict = server.detectConflict(
 				"proposal-1",
@@ -595,18 +644,14 @@ describe("proposal-46: Multi-Host Federation Server", () => {
 			const localProposal = createMockProposal({
 				id: "proposal-1",
 				title: "Local Edit",
-				acceptanceCriteriaItems: [
-					{ text: "Local AC", checked: true },
-				] as any,
+				acceptanceCriteriaItems: [{ text: "Local AC", checked: true }] as any,
 			});
 			server.updateLocalProposal(localProposal);
 
 			const remoteProposal = createMockProposal({
 				id: "proposal-1",
 				title: "Remote Edit",
-				acceptanceCriteriaItems: [
-					{ text: "Remote AC", checked: false },
-				] as any,
+				acceptanceCriteriaItems: [{ text: "Remote AC", checked: false }] as any,
 			});
 
 			const detectedConflict = server.detectConflict(
@@ -664,7 +709,10 @@ describe("proposal-46: Multi-Host Federation Server", () => {
 			const proposal = createMockProposal({ id: "proposal-1" });
 			server.updateLocalProposal(proposal);
 
-			const remoteProposal = createMockProposal({ id: "proposal-1", title: "Remote" });
+			const remoteProposal = createMockProposal({
+				id: "proposal-1",
+				title: "Remote",
+			});
 			const conflict = server.detectConflict(
 				"proposal-1",
 				remoteProposal,
@@ -695,7 +743,10 @@ describe("proposal-46: Multi-Host Federation Server", () => {
 			const proposal = createMockProposal({ id: "proposal-1" });
 			server.updateLocalProposal(proposal);
 
-			const remoteProposal = createMockProposal({ id: "proposal-1", title: "Remote" });
+			const remoteProposal = createMockProposal({
+				id: "proposal-1",
+				title: "Remote",
+			});
 			const conflict = server.detectConflict(
 				"proposal-1",
 				remoteProposal,
@@ -894,7 +945,11 @@ describe("proposal-46: Multi-Host Federation Server", () => {
 
 			const active = server.getActiveConnections();
 			assert.ok(active.length >= 2);
-			assert.ok(active.every((c) => c.proposal === "connected" || c.proposal === "syncing"));
+			assert.ok(
+				active.every(
+					(c) => c.proposal === "connected" || c.proposal === "syncing",
+				),
+			);
 		});
 
 		it("handles heartbeat timeout detection", () => {
@@ -1038,8 +1093,8 @@ describe("proposal-46: Multi-Host Federation Server", () => {
 			]);
 
 			// Track events on server B
-			let receivedProposals: Proposal[] = [];
-			let receivedCreates: Proposal[] = [];
+			const receivedProposals: Proposal[] = [];
+			const receivedCreates: Proposal[] = [];
 			serverB.on({
 				proposalUpdate: (proposal) => receivedProposals.push(proposal),
 				proposalCreate: (proposal) => receivedCreates.push(proposal),
@@ -1070,7 +1125,10 @@ describe("proposal-46: Multi-Host Federation Server", () => {
 				title: "Feature A - Updated",
 			});
 			serverA.updateLocalProposal(updatedProposal);
-			const updateMsg = serverA.createProposalUpdateMessage(updatedProposal, "host-b");
+			const updateMsg = serverA.createProposalUpdateMessage(
+				updatedProposal,
+				"host-b",
+			);
 			serverB.processMessage(updateMsg);
 
 			// Verify B received the update

@@ -1,13 +1,18 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { migrateDraftPrefixes, needsDraftPrefixMigration } from '../../src/core/infrastructure/prefix-migration.ts';
+import { afterEach, beforeEach, describe, it } from "node:test";
+import {
+	migrateDraftPrefixes,
+	needsDraftPrefixMigration,
+} from "../../src/core/infrastructure/prefix-migration.ts";
 import { FileSystem } from "../../src/file-system/operations.ts";
 import { serializeProposal } from "../../src/markdown/serializer.ts";
-import type { RoadmapConfig, Proposal } from "../../src/types/index.ts";
-import { createUniqueTestDir, safeCleanup,
+import type { Proposal, RoadmapConfig } from "../../src/types/index.ts";
+import {
+	createUniqueTestDir,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 let TEST_DIR: string;
@@ -105,7 +110,7 @@ describe("Draft Prefix Migration", () => {
 				description: "This is an old draft with proposal- prefix",
 			};
 			const content = serializeProposal(oldProposal);
-			await writeFile(join(draftsDir, "proposal-1 - Old Draft.md"),  content);
+			await writeFile(join(draftsDir, "proposal-1 - Old Draft.md"), content);
 
 			// Run migration
 			await migrateDraftPrefixes(filesystem);
@@ -147,7 +152,10 @@ describe("Draft Prefix Migration", () => {
 				description: "Test draft",
 			};
 			const content = serializeProposal(oldProposal);
-			await writeFile(join(draftsDir, "proposal-5 - Draft with Proposal ID.md"),  content);
+			await writeFile(
+				join(draftsDir, "proposal-5 - Draft with Proposal ID.md"),
+				content,
+			);
 
 			// Run migration
 			await migrateDraftPrefixes(filesystem);
@@ -188,7 +196,7 @@ describe("Draft Prefix Migration", () => {
 					dependencies: [],
 				};
 				const content = serializeProposal(proposal);
-				await writeFile(join(draftsDir, `${t.id} - ${t.title}.md`),  content);
+				await writeFile(join(draftsDir, `${t.id} - ${t.title}.md`), content);
 			}
 
 			// Run migration
@@ -227,7 +235,7 @@ describe("Draft Prefix Migration", () => {
 				dependencies: [],
 			};
 			const content = serializeProposal(oldProposal);
-			await writeFile(join(draftsDir, "proposal-1 - Draft.md"),  content);
+			await writeFile(join(draftsDir, "proposal-1 - Draft.md"), content);
 
 			// Run migration first time
 			await migrateDraftPrefixes(filesystem);
@@ -244,7 +252,10 @@ describe("Draft Prefix Migration", () => {
 			const configAfterSecond = await filesystem.loadConfig();
 
 			assert.deepStrictEqual(filesAfterSecond, filesAfterFirst);
-			assert.deepStrictEqual(configAfterSecond?.prefixes, configAfterFirst?.prefixes);
+			assert.deepStrictEqual(
+				configAfterSecond?.prefixes,
+				configAfterFirst?.prefixes,
+			);
 		});
 
 		it("should not affect existing draft-*.md files", async () => {
@@ -282,7 +293,10 @@ describe("Draft Prefix Migration", () => {
 				dependencies: [],
 			};
 			const content = serializeProposal(oldProposal);
-			await writeFile(join(draftsDir, "proposal-5 - Old Format Draft.md"),  content);
+			await writeFile(
+				join(draftsDir, "proposal-5 - Old Format Draft.md"),
+				content,
+			);
 
 			// Run migration
 			await migrateDraftPrefixes(filesystem);

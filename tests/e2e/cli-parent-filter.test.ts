@@ -1,10 +1,13 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync,
+import {
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 let TEST_DIR: string;
@@ -101,7 +104,10 @@ describe("CLI parent proposal filtering", () => {
 	});
 
 	it("should filter proposals by parent with full proposal ID", async () => {
-		const result = execSync(`node --experimental-strip-types ${cliPath} proposal list --parent proposal-1 --plain`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${cliPath} proposal list --parent proposal-1 --plain`,
+			{ cwd: TEST_DIR },
+		);
 
 		const exitCode = result.exitCode;
 
@@ -112,15 +118,26 @@ describe("CLI parent proposal filtering", () => {
 
 		assert.strictEqual(exitCode, 0);
 		// Should contain only child proposals
-		expect(result.stdout.toString()).toContain("proposal-1.1 - Child proposal 1");
-		expect(result.stdout.toString()).toContain("proposal-1.2 - Child proposal 2");
+		expect(result.stdout.toString()).toContain(
+			"proposal-1.1 - Child proposal 1",
+		);
+		expect(result.stdout.toString()).toContain(
+			"proposal-1.2 - Child proposal 2",
+		);
 		// Should not contain parent or standalone proposals
-		expect(result.stdout.toString()).not.toContain("proposal-1 - Parent proposal");
-		expect(result.stdout.toString()).not.toContain("proposal-2 - Standalone proposal");
+		expect(result.stdout.toString()).not.toContain(
+			"proposal-1 - Parent proposal",
+		);
+		expect(result.stdout.toString()).not.toContain(
+			"proposal-2 - Standalone proposal",
+		);
 	});
 
 	it("should filter proposals by parent with short proposal ID", async () => {
-		const result = execSync(`node --experimental-strip-types ${cliPath} proposal list --parent 1 --plain`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${cliPath} proposal list --parent 1 --plain`,
+			{ cwd: TEST_DIR },
+		);
 
 		const exitCode = result.exitCode;
 
@@ -131,24 +148,40 @@ describe("CLI parent proposal filtering", () => {
 
 		assert.strictEqual(exitCode, 0);
 		// Should contain only child proposals
-		expect(result.stdout.toString()).toContain("proposal-1.1 - Child proposal 1");
-		expect(result.stdout.toString()).toContain("proposal-1.2 - Child proposal 2");
+		expect(result.stdout.toString()).toContain(
+			"proposal-1.1 - Child proposal 1",
+		);
+		expect(result.stdout.toString()).toContain(
+			"proposal-1.2 - Child proposal 2",
+		);
 		// Should not contain parent or standalone proposals
-		expect(result.stdout.toString()).not.toContain("proposal-1 - Parent proposal");
-		expect(result.stdout.toString()).not.toContain("proposal-2 - Standalone proposal");
+		expect(result.stdout.toString()).not.toContain(
+			"proposal-1 - Parent proposal",
+		);
+		expect(result.stdout.toString()).not.toContain(
+			"proposal-2 - Standalone proposal",
+		);
 	});
 
 	it("should show error for non-existent parent proposal", async () => {
-		const result = execSync(`node --experimental-strip-types ${cliPath} proposal list --parent proposal-999 --plain`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${cliPath} proposal list --parent proposal-999 --plain`,
+			{ cwd: TEST_DIR },
+		);
 
 		const exitCode = result.exitCode;
 
 		assert.strictEqual(exitCode, 1); // CLI exits with error for non-existent parent
-		expect(result.stderr.toString()).toContain("Parent proposal proposal-999 not found.");
+		expect(result.stderr.toString()).toContain(
+			"Parent proposal proposal-999 not found.",
+		);
 	});
 
 	it("should show message when parent has no children", async () => {
-		const result = execSync(`node --experimental-strip-types ${cliPath} proposal list --parent proposal-2 --plain`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${cliPath} proposal list --parent proposal-2 --plain`,
+			{ cwd: TEST_DIR },
+		);
 
 		const exitCode = result.exitCode;
 
@@ -158,11 +191,16 @@ describe("CLI parent proposal filtering", () => {
 		}
 
 		assert.strictEqual(exitCode, 0);
-		expect(result.stdout.toString()).toContain("No child proposals found for parent proposal proposal-2.");
+		expect(result.stdout.toString()).toContain(
+			"No child proposals found for parent proposal proposal-2.",
+		);
 	});
 
 	it("should work with -p shorthand flag", async () => {
-		const result = execSync(`node --experimental-strip-types ${cliPath} proposal list -p proposal-1 --plain`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${cliPath} proposal list -p proposal-1 --plain`,
+			{ cwd: TEST_DIR },
+		);
 
 		const exitCode = result.exitCode;
 
@@ -173,12 +211,19 @@ describe("CLI parent proposal filtering", () => {
 
 		assert.strictEqual(exitCode, 0);
 		// Should contain only child proposals
-		expect(result.stdout.toString()).toContain("proposal-1.1 - Child proposal 1");
-		expect(result.stdout.toString()).toContain("proposal-1.2 - Child proposal 2");
+		expect(result.stdout.toString()).toContain(
+			"proposal-1.1 - Child proposal 1",
+		);
+		expect(result.stdout.toString()).toContain(
+			"proposal-1.2 - Child proposal 2",
+		);
 	});
 
 	it("should combine parent filter with status filter", async () => {
-		const result = execSync(`node --experimental-strip-types ${cliPath} proposal list --parent proposal-1 --status "Potential" --plain`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${cliPath} proposal list --parent proposal-1 --status "Potential" --plain`,
+			{ cwd: TEST_DIR },
+		);
 
 		const exitCode = result.exitCode;
 
@@ -189,8 +234,12 @@ describe("CLI parent proposal filtering", () => {
 
 		assert.strictEqual(exitCode, 0);
 		// Should contain only child proposal with "Potential" status
-		expect(result.stdout.toString()).toContain("proposal-1.1 - Child proposal 1");
+		expect(result.stdout.toString()).toContain(
+			"proposal-1.1 - Child proposal 1",
+		);
 		// Should not contain child proposal with "Active" status
-		expect(result.stdout.toString()).not.toContain("proposal-1.2 - Child proposal 2");
+		expect(result.stdout.toString()).not.toContain(
+			"proposal-1.2 - Child proposal 2",
+		);
 	});
 });

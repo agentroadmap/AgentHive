@@ -2,7 +2,11 @@ import assert from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { McpServer } from "../../src/mcp/server.ts";
 import { registerProposalTools } from "../../src/mcp/tools/proposals/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 const getText = (content: unknown[] | undefined, index = 0): string => {
 	const item = content?.[index] as { text?: string } | undefined;
@@ -59,7 +63,9 @@ describe("MCP proposal references and documentation", () => {
 
 			const text = getText(result.content);
 			assert.ok(text.includes("Proposal proposal-1 - Feature with refs"));
-			assert.ok(text.includes("References: https://github.com/issue/123, src/api.ts"));
+			assert.ok(
+				text.includes("References: https://github.com/issue/123, src/api.ts"),
+			);
 		});
 
 		it("creates proposal without references", async () => {
@@ -92,7 +98,11 @@ describe("MCP proposal references and documentation", () => {
 
 			const text = getText(result.content);
 			assert.ok(text.includes("Proposal proposal-1 - Feature with docs"));
-			assert.ok(text.includes("Documentation: https://design-docs.example.com, docs/spec.md"));
+			assert.ok(
+				text.includes(
+					"Documentation: https://design-docs.example.com, docs/spec.md",
+				),
+			);
 		});
 
 		it("creates proposal without documentation", async () => {
@@ -127,7 +137,9 @@ describe("MCP proposal references and documentation", () => {
 			const text = getText(result.content);
 			assert.ok(text.includes("Proposal proposal-1 - Feature with both"));
 			assert.ok(text.includes("References: https://github.com/issue/123"));
-			assert.ok(text.includes("Documentation: https://design-docs.example.com"));
+			assert.ok(
+				text.includes("Documentation: https://design-docs.example.com"),
+			);
 		});
 	});
 
@@ -226,7 +238,9 @@ describe("MCP proposal references and documentation", () => {
 			});
 
 			const text = getText(result.content);
-			assert.ok(text.includes("Documentation: https://docs.example.com, README.md"));
+			assert.ok(
+				text.includes("Documentation: https://docs.example.com, README.md"),
+			);
 		});
 
 		it("adds documentation to existing proposal", async () => {

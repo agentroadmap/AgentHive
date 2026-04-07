@@ -9,18 +9,17 @@
  * AC#4: Support for fallback routing
  */
 
-import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { beforeEach, describe, it } from "node:test";
 import {
-	MultiLLMRouter,
 	COMPLEXITY_TO_TIER,
-	PRIORITY_TO_TIER,
+	DEFAULT_MODELS,
 	HIGH_TIER_LABELS,
 	LOW_TIER_LABELS,
-	DEFAULT_MODELS,
 	type ModelConfig,
+	MultiLLMRouter,
+	PRIORITY_TO_TIER,
 	type TaskDefinition,
-	type ReasoningTier,
 } from "../../src/core/orchestration/multi-llm-router.ts";
 
 // ===================== Test Helpers =====================
@@ -65,7 +64,10 @@ describe("AC#1: Router determines reasoning tier from priority and labels", () =
 		const lowTask = createTask({ priority: "low", complexity: "trivial" });
 		const medTask = createTask({ priority: "medium", complexity: "trivial" });
 		const highTask = createTask({ priority: "high", complexity: "trivial" });
-		const critTask = createTask({ priority: "critical", complexity: "trivial" });
+		const critTask = createTask({
+			priority: "critical",
+			complexity: "trivial",
+		});
 
 		assert.equal(router.determineTier(lowTask), "basic");
 		assert.equal(router.determineTier(medTask), "standard");
@@ -105,7 +107,11 @@ describe("AC#1: Router determines reasoning tier from priority and labels", () =
 		});
 
 		const tier = router.determineTier(securityTask);
-		assert.equal(tier, "advanced", "Security label should promote to advanced tier");
+		assert.equal(
+			tier,
+			"advanced",
+			"Security label should promote to advanced tier",
+		);
 	});
 
 	it("keeps low-tier labels at basic for simple tasks", () => {
@@ -116,7 +122,11 @@ describe("AC#1: Router determines reasoning tier from priority and labels", () =
 		});
 
 		const tier = router.determineTier(docsTask);
-		assert.equal(tier, "basic", "Docs/routine labels should stay at basic tier");
+		assert.equal(
+			tier,
+			"basic",
+			"Docs/routine labels should stay at basic tier",
+		);
 	});
 
 	it("handles multiple high-tier labels", () => {
@@ -138,7 +148,11 @@ describe("AC#1: Router determines reasoning tier from priority and labels", () =
 		});
 
 		const tier = router.determineTier(task);
-		assert.equal(tier, "premium", "critical-thinking capability should promote to premium");
+		assert.equal(
+			tier,
+			"premium",
+			"critical-thinking capability should promote to premium",
+		);
 	});
 
 	it("promotes for risk-assessment capability requirement", () => {
@@ -149,7 +163,11 @@ describe("AC#1: Router determines reasoning tier from priority and labels", () =
 		});
 
 		const tier = router.determineTier(task);
-		assert.equal(tier, "premium", "risk-assessment capability should promote to premium");
+		assert.equal(
+			tier,
+			"premium",
+			"risk-assessment capability should promote to premium",
+		);
 	});
 
 	it("uses highest tier when both priority and labels suggest promotion", () => {
@@ -212,14 +230,18 @@ describe("AC#2: Dynamic team builder uses the router to select agents", () => {
 
 		assert.ok(
 			decision.selectedModel.capabilities.includes("multimodal"),
-			"Selected model should have multimodal capability"
+			"Selected model should have multimodal capability",
 		);
 	});
 
 	it("selects higher-tier model when no exact tier match", () => {
 		// Create router with only premium models
 		const premiumOnly = new MultiLLMRouter([
-			createModel({ modelId: "premium-1", tier: "premium", capabilities: ["code", "analysis", "reasoning", "creative"] }),
+			createModel({
+				modelId: "premium-1",
+				tier: "premium",
+				capabilities: ["code", "analysis", "reasoning", "creative"],
+			}),
 		]);
 
 		const task = createTask({ priority: "low", complexity: "simple" });
@@ -282,7 +304,7 @@ describe("AC#3: Cost tracking per task based on model usage", () => {
 	it("throws on unknown model", () => {
 		assert.throws(
 			() => router.trackCost("task-1", "unknown-model", 1000, 500),
-			/Unknown model/
+			/Unknown model/,
 		);
 	});
 
@@ -320,7 +342,7 @@ describe("AC#3: Cost tracking per task based on model usage", () => {
 
 		assert.ok(
 			decision.estimatedCost.withinBudget,
-			"Simple task should be within budget"
+			"Simple task should be within budget",
 		);
 	});
 
@@ -329,7 +351,7 @@ describe("AC#3: Cost tracking per task based on model usage", () => {
 
 		const records = router.getCostRecords();
 		assert.equal(records.length, 1);
-		assert.equal(records[0]!.taskId, "task-1");
+		assert.equal(records[0]?.taskId, "task-1");
 	});
 
 	it("clears cost history", () => {
@@ -348,8 +370,9 @@ describe("AC#3: Cost tracking per task based on model usage", () => {
 		const complexDecision = router.route(complexTask);
 
 		assert.ok(
-			complexDecision.estimatedCost.estimatedCostUsd > simpleDecision.estimatedCost.estimatedCostUsd,
-			"Complex tasks should have higher estimated cost"
+			complexDecision.estimatedCost.estimatedCostUsd >
+				simpleDecision.estimatedCost.estimatedCostUsd,
+			"Complex tasks should have higher estimated cost",
 		);
 	});
 });
@@ -374,10 +397,10 @@ describe("AC#4: Support for fallback routing", () => {
 		const task = createTask({ priority: "high" });
 		const decision = router.route(task);
 
-		const fallbackIds = decision.fallbackModels.map(m => m.modelId);
+		const fallbackIds = decision.fallbackModels.map((m) => m.modelId);
 		assert.ok(
 			!fallbackIds.includes(decision.selectedModel.modelId),
-			"Fallbacks should not include the selected model"
+			"Fallbacks should not include the selected model",
 		);
 	});
 
@@ -417,14 +440,11 @@ describe("AC#4: Support for fallback routing", () => {
 	it("throws when all models fail", async () => {
 		const task = createTask({ priority: "low" });
 
-		await assert.rejects(
-			async () => {
-				await router.routeWithFallback(task, async () => {
-					throw new Error("Model failure");
-				});
-			},
-			/All models failed/
-		);
+		await assert.rejects(async () => {
+			await router.routeWithFallback(task, async () => {
+				throw new Error("Model failure");
+			});
+		}, /All models failed/);
 	});
 
 	it("records fallback usage in routing history", async () => {
@@ -435,7 +455,7 @@ describe("AC#4: Support for fallback routing", () => {
 
 		// Then execute with fallback that succeeds on second try
 		let attemptCount = 0;
-		await router.routeWithFallback(task, async (model) => {
+		await router.routeWithFallback(task, async (_model) => {
 			attemptCount++;
 			if (attemptCount === 1) throw new Error("fail");
 			return { ok: true };
@@ -450,7 +470,7 @@ describe("AC#4: Support for fallback routing", () => {
 		const decision = router.route(task);
 
 		// Fallbacks can include higher-tier models
-		const tiers = decision.fallbackModels.map(m => m.tier);
+		const _tiers = decision.fallbackModels.map((m) => m.tier);
 		// At minimum, should have some fallbacks
 		assert.ok(decision.fallbackModels.length >= 0);
 	});
@@ -472,12 +492,12 @@ describe("Model Management", () => {
 
 	it("filters models by tier", () => {
 		const advancedModels = router.getModelsByTier("advanced");
-		assert.ok(advancedModels.every(m => m.tier === "advanced"));
+		assert.ok(advancedModels.every((m) => m.tier === "advanced"));
 	});
 
 	it("filters models by provider", () => {
 		const anthropicModels = router.getModelsByProvider("anthropic");
-		assert.ok(anthropicModels.every(m => m.provider === "anthropic"));
+		assert.ok(anthropicModels.every((m) => m.provider === "anthropic"));
 	});
 
 	it("registers new model", () => {
@@ -485,7 +505,7 @@ describe("Model Management", () => {
 		router.registerModel(newModel);
 
 		const models = router.getModels();
-		assert.ok(models.some(m => m.modelId === "custom-model"));
+		assert.ok(models.some((m) => m.modelId === "custom-model"));
 	});
 
 	it("deregisters model", () => {
@@ -493,14 +513,14 @@ describe("Model Management", () => {
 		assert.equal(result, true);
 
 		const models = router.getModels();
-		assert.ok(!models.some(m => m.modelId === "local-fast"));
+		assert.ok(!models.some((m) => m.modelId === "local-fast"));
 	});
 
 	it("sets model availability", () => {
 		router.setModelAvailable("claude-sonnet-4", false);
 
 		const models = router.getModelsByTier("advanced");
-		const sonnet = models.find(m => m.modelId === "claude-sonnet-4");
+		const sonnet = models.find((m) => m.modelId === "claude-sonnet-4");
 		if (sonnet) {
 			assert.equal(sonnet.available, false);
 		}
@@ -549,11 +569,11 @@ describe("Constants", () => {
 
 	it("has default models configured", () => {
 		assert.ok(DEFAULT_MODELS.length >= 5);
-		assert.ok(DEFAULT_MODELS.some(m => m.tier === "premium"));
-		assert.ok(DEFAULT_MODELS.some(m => m.tier === "basic"));
-		assert.ok(DEFAULT_MODELS.some(m => m.provider === "anthropic"));
-		assert.ok(DEFAULT_MODELS.some(m => m.provider === "openai"));
-		assert.ok(DEFAULT_MODELS.some(m => m.provider === "local"));
+		assert.ok(DEFAULT_MODELS.some((m) => m.tier === "premium"));
+		assert.ok(DEFAULT_MODELS.some((m) => m.tier === "basic"));
+		assert.ok(DEFAULT_MODELS.some((m) => m.provider === "anthropic"));
+		assert.ok(DEFAULT_MODELS.some((m) => m.provider === "openai"));
+		assert.ok(DEFAULT_MODELS.some((m) => m.provider === "local"));
 	});
 });
 
@@ -575,7 +595,11 @@ describe("Integration: Full routing flow", () => {
 		const decision = router.route(task);
 
 		// Verify tier is appropriate
-		assert.equal(decision.tier, "advanced", "Security+high priority should be advanced");
+		assert.equal(
+			decision.tier,
+			"advanced",
+			"Security+high priority should be advanced",
+		);
 
 		// Verify selected model has required capabilities
 		assert.ok(decision.selectedModel.capabilities.includes("code"));
@@ -586,7 +610,7 @@ describe("Integration: Full routing flow", () => {
 			task,
 			async (model) => {
 				return { output: "task completed", model: model.modelId };
-			}
+			},
 		);
 
 		assert.ok(result.output);
@@ -630,10 +654,7 @@ describe("Edge Cases", () => {
 
 		const task = createTask();
 
-		assert.throws(
-			() => router.route(task),
-			/No available models/
-		);
+		assert.throws(() => router.route(task), /No available models/);
 	});
 
 	it("handles task with preferred provider", () => {

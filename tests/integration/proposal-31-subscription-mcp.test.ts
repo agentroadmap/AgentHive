@@ -5,7 +5,7 @@
  */
 
 import assert from "node:assert";
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
 import { createUniqueTestDir, safeCleanup } from "../support/test-utils.ts";
 
@@ -67,7 +67,10 @@ describe("proposal-31: Channel Subscription MCP Integration", () => {
 			const subs = await core2.getSubscriptions("alice");
 
 			assert.ok(subs.includes("public"), "Should persist public subscription");
-			assert.ok(subs.includes("project"), "Should persist project subscription");
+			assert.ok(
+				subs.includes("project"),
+				"Should persist project subscription",
+			);
 		});
 	});
 

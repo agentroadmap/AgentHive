@@ -1,11 +1,15 @@
 import assert from "node:assert";
-import { describe, it } from "node:test";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect } from "../support/test-utils.ts";
-import { buildKanbanStatusGroups, exportKanbanBoardToFile, generateDirectiveGroupedBoard } from "../../src/board.ts";
+import { describe, it } from "node:test";
+import {
+	buildKanbanStatusGroups,
+	exportKanbanBoardToFile,
+	generateDirectiveGroupedBoard,
+} from "../../src/board.ts";
 import type { Directive, Proposal } from "../../src/types/index.ts";
+import { expect } from "../support/test-utils.ts";
 
 describe("exportKanbanBoardToFile", () => {
 	it("creates file and overwrites board content", async () => {
@@ -23,13 +27,25 @@ describe("exportKanbanBoardToFile", () => {
 			},
 		];
 
-		await exportKanbanBoardToFile(proposals, ["Potential"], file, "TestProject");
+		await exportKanbanBoardToFile(
+			proposals,
+			["Potential"],
+			file,
+			"TestProject",
+		);
 		const initial = await await readFile(file, "utf-8");
 		assert.ok(initial.includes("proposal-1"));
-		assert.ok(initial.includes("# Kanban Board Export (powered by Roadmap.md)"));
+		assert.ok(
+			initial.includes("# Kanban Board Export (powered by Roadmap.md)"),
+		);
 		assert.ok(initial.includes("Project: TestProject"));
 
-		await exportKanbanBoardToFile(proposals, ["Potential"], file, "TestProject");
+		await exportKanbanBoardToFile(
+			proposals,
+			["Potential"],
+			file,
+			"TestProject",
+		);
 		const second = await await readFile(file, "utf-8");
 		const occurrences = second.split("proposal-1").length - 1;
 		assert.strictEqual(occurrences, 1); // Should overwrite, not append
@@ -93,7 +109,12 @@ describe("exportKanbanBoardToFile", () => {
 			},
 		];
 
-		await exportKanbanBoardToFile(proposals, ["Potential", "Complete"], file, "TestProject");
+		await exportKanbanBoardToFile(
+			proposals,
+			["Potential", "Complete"],
+			file,
+			"TestProject",
+		);
 		const content = await await readFile(file, "utf-8");
 
 		// Split content into lines for easier testing
@@ -106,8 +127,16 @@ describe("exportKanbanBoardToFile", () => {
 		const proposal4Row = lines.find((line) => line.includes("proposal-4"));
 		const proposal5Row = lines.find((line) => line.includes("proposal-5"));
 
-		if (!proposal1Row || !proposal2Row || !proposal3Row || !proposal4Row || !proposal5Row) {
-			throw new Error("Expected proposal rows not found in exported board content");
+		if (
+			!proposal1Row ||
+			!proposal2Row ||
+			!proposal3Row ||
+			!proposal4Row ||
+			!proposal5Row
+		) {
+			throw new Error(
+				"Expected proposal rows not found in exported board content",
+			);
 		}
 
 		// Check that Potential proposals are ordered by updatedDate (proposal-3 has newer date than proposal-1)
@@ -150,7 +179,12 @@ describe("exportKanbanBoardToFile", () => {
 			},
 		];
 
-		await exportKanbanBoardToFile(proposals, ["Potential"], file, "TestProject");
+		await exportKanbanBoardToFile(
+			proposals,
+			["Potential"],
+			file,
+			"TestProject",
+		);
 		const content = await await readFile(file, "utf-8");
 
 		// Check uppercase proposal IDs
@@ -185,7 +219,12 @@ describe("exportKanbanBoardToFile", () => {
 			},
 		];
 
-		await exportKanbanBoardToFile(proposals, ["Potential"], file, "TestProject");
+		await exportKanbanBoardToFile(
+			proposals,
+			["Potential"],
+			file,
+			"TestProject",
+		);
 		const content = await await readFile(file, "utf-8");
 
 		// Check that we don't get double @ symbols
@@ -199,8 +238,17 @@ describe("exportKanbanBoardToFile", () => {
 
 describe("buildKanbanStatusGroups", () => {
 	it("returns configured statuses even when there are no proposals", () => {
-		const { orderedStatuses, groupedProposals } = buildKanbanStatusGroups([], ["Potential", "Active", "Accepted", "Complete", "Abandoned"]);
-		assert.deepStrictEqual(orderedStatuses, ["Potential", "Active", "Accepted", "Complete", "Abandoned"]);
+		const { orderedStatuses, groupedProposals } = buildKanbanStatusGroups(
+			[],
+			["Potential", "Active", "Accepted", "Complete", "Abandoned"],
+		);
+		assert.deepStrictEqual(orderedStatuses, [
+			"Potential",
+			"Active",
+			"Accepted",
+			"Complete",
+			"Abandoned",
+		]);
 		assert.deepStrictEqual(groupedProposals.get("Potential"), []);
 		assert.deepStrictEqual(groupedProposals.get("Active"), []);
 		assert.deepStrictEqual(groupedProposals.get("Complete"), []);
@@ -228,10 +276,17 @@ describe("buildKanbanStatusGroups", () => {
 			},
 		];
 
-		const { orderedStatuses, groupedProposals } = buildKanbanStatusGroups(proposals, ["Potential"]);
+		const { orderedStatuses, groupedProposals } = buildKanbanStatusGroups(
+			proposals,
+			["Potential"],
+		);
 		assert.deepStrictEqual(orderedStatuses, ["Potential", "Blocked"]);
-		expect(groupedProposals.get("Potential")?.map((t) => t.id)).toEqual(["proposal-2"]);
-		expect(groupedProposals.get("Blocked")?.map((t) => t.id)).toEqual(["proposal-1"]);
+		expect(groupedProposals.get("Potential")?.map((t) => t.id)).toEqual([
+			"proposal-2",
+		]);
+		expect(groupedProposals.get("Blocked")?.map((t) => t.id)).toEqual([
+			"proposal-1",
+		]);
 	});
 });
 
@@ -268,7 +323,12 @@ describe("generateDirectiveGroupedBoard", () => {
 			},
 		];
 
-		const board = generateDirectiveGroupedBoard(proposals, ["Potential"], directives, "Test Project");
+		const board = generateDirectiveGroupedBoard(
+			proposals,
+			["Potential"],
+			directives,
+			"Test Project",
+		);
 		expect(board.match(/## Release 1\.0 \(\d+ proposals\)/g)?.length).toBe(1);
 		assert.ok(board.includes("**proposal-1** - By ID"));
 		assert.ok(board.includes("**proposal-2** - By title"));
@@ -312,7 +372,12 @@ describe("generateDirectiveGroupedBoard", () => {
 			},
 		];
 
-		const board = generateDirectiveGroupedBoard(proposals, ["Potential"], directives, "Test Project");
+		const board = generateDirectiveGroupedBoard(
+			proposals,
+			["Potential"],
+			directives,
+			"Test Project",
+		);
 		expect(board.match(/## Shared \(\d+ proposals\)/g)?.length).toBe(2);
 	});
 });

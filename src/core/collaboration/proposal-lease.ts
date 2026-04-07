@@ -13,14 +13,18 @@
  * AC#7: All proposals tracked in group-pulse.md with agent attribution
  */
 
-import { randomUUID, createHash } from "node:crypto";
-import { readFile, writeFile, access, mkdir, readdir } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { existsSync, readFileSync } from "node:fs";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
-export type ProposalStatus = "proposed" | "in-review" | "approved" | "rejected" | "implemented";
+export type ProposalStatus =
+	| "proposed"
+	| "in-review"
+	| "approved"
+	| "rejected"
+	| "implemented";
 export type LeaseStatus = "active" | "expired" | "released" | "revoked";
 
 export interface Proposal {
@@ -105,7 +109,7 @@ export interface GroupPulseEntry {
 
 const DEFAULT_LEASE_DURATION_MS = 48 * 60 * 60 * 1000; // 48 hours
 const DEFAULT_MAX_RENEWALS = 3;
-const DEFAULT_HEARTBEAT_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+const _DEFAULT_HEARTBEAT_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 const LEASE_EXPIRY_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 // ─── Proposal & Lease Manager ───────────────────────────────────────
@@ -161,7 +165,9 @@ export class ProposalLeaseManager {
 		// Check if there's already a proposal for this proposal
 		const existing = this.getProposalByProposal(options.proposalId);
 		if (existing && existing.status !== "rejected") {
-			throw new Error(`Active proposal already exists for ${options.proposalId}`);
+			throw new Error(
+				`Active proposal already exists for ${options.proposalId}`,
+			);
 		}
 
 		const proposal: Proposal = {
@@ -248,7 +254,9 @@ export class ProposalLeaseManager {
 			(r) => r.reviewerRole === options.reviewerRole,
 		);
 		if (existingRoleReview) {
-			throw new Error(`A ${options.reviewerRole} review already exists (by ${existingRoleReview.reviewerId})`);
+			throw new Error(
+				`A ${options.reviewerRole} review already exists (by ${existingRoleReview.reviewerId})`,
+			);
 		}
 
 		const review: ProposalReview = {
@@ -301,7 +309,7 @@ export class ProposalLeaseManager {
 		if (!pmReview || !archReview) {
 			throw new Error(
 				`Cannot approve: requires both PM and Architect approval. ` +
-				`PM: ${pmReview ? "approved" : "pending"}, Architect: ${archReview ? "approved" : "pending"}`,
+					`PM: ${pmReview ? "approved" : "pending"}, Architect: ${archReview ? "approved" : "pending"}`,
 			);
 		}
 
@@ -412,7 +420,8 @@ export class ProposalLeaseManager {
 			grantedAt: now.toISOString(),
 			expiresAt: new Date(now.getTime() + durationMs).toISOString(),
 			status: "active",
-			heartbeatToken: options?.heartbeatToken || this.generateHeartbeatToken(agentId),
+			heartbeatToken:
+				options?.heartbeatToken || this.generateHeartbeatToken(agentId),
 			renewalCount: 0,
 			maxRenewals: DEFAULT_MAX_RENEWALS,
 			leaseReason: options?.reason,
@@ -500,11 +509,15 @@ export class ProposalLeaseManager {
 		}
 
 		if (lease.agentId !== proof.agentId) {
-			throw new Error(`Agent ${proof.agentId} does not own lease ${proof.leaseId}`);
+			throw new Error(
+				`Agent ${proof.agentId} does not own lease ${proof.leaseId}`,
+			);
 		}
 
 		if (lease.renewalCount >= lease.maxRenewals) {
-			throw new Error(`Maximum renewals (${lease.maxRenewals}) reached for lease ${proof.leaseId}`);
+			throw new Error(
+				`Maximum renewals (${lease.maxRenewals}) reached for lease ${proof.leaseId}`,
+			);
 		}
 
 		// Validate heartbeat proof
@@ -514,7 +527,9 @@ export class ProposalLeaseManager {
 
 		// Renew: extend expiry by another default duration
 		const now = new Date();
-		lease.expiresAt = new Date(now.getTime() + DEFAULT_LEASE_DURATION_MS).toISOString();
+		lease.expiresAt = new Date(
+			now.getTime() + DEFAULT_LEASE_DURATION_MS,
+		).toISOString();
 		lease.lastHeartbeat = now.toISOString();
 		lease.renewalCount++;
 
@@ -545,7 +560,10 @@ export class ProposalLeaseManager {
 	/**
 	 * Validate a heartbeat proof.
 	 */
-	private validateHeartbeatProof(lease: Lease, proof: LeaseRenewalProof): boolean {
+	private validateHeartbeatProof(
+		lease: Lease,
+		proof: LeaseRenewalProof,
+	): boolean {
 		// Basic validation: agent ID matches and timestamp is recent
 		if (proof.agentId !== lease.agentId) return false;
 
@@ -626,7 +644,7 @@ export class ProposalLeaseManager {
 			entries = entries.filter((e) => e.type === options.type);
 		}
 		if (options?.since) {
-			entries = entries.filter((e) => e.timestamp >= options!.since!);
+			entries = entries.filter((e) => e.timestamp >= options?.since!);
 		}
 
 		entries.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
@@ -675,7 +693,7 @@ export class ProposalLeaseManager {
 
 		if (options?.tags) {
 			items = items.filter((i) =>
-				options.tags!.some((t) => i.tags.includes(t)),
+				options.tags?.some((t) => i.tags.includes(t)),
 			);
 		}
 		if (options?.priority) {
@@ -685,7 +703,8 @@ export class ProposalLeaseManager {
 		// Sort by priority then date
 		const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
 		items.sort((a, b) => {
-			const pDiff = (priorityOrder[a.priority] || 4) - (priorityOrder[b.priority] || 4);
+			const pDiff =
+				(priorityOrder[a.priority] || 4) - (priorityOrder[b.priority] || 4);
 			if (pDiff !== 0) return pDiff;
 			return a.addedAt.localeCompare(b.addedAt);
 		});
@@ -753,14 +772,20 @@ export class ProposalLeaseManager {
 	 * Get a proposal by proposal ID.
 	 */
 	getProposalByProposal(proposalId: string): Proposal | null {
-		return Array.from(this.proposals.values()).find((p) => p.proposalId === proposalId) ?? null;
+		return (
+			Array.from(this.proposals.values()).find(
+				(p) => p.proposalId === proposalId,
+			) ?? null
+		);
 	}
 
 	/**
 	 * Get proposals by status.
 	 */
 	getProposalsByStatus(status: ProposalStatus): Proposal[] {
-		return Array.from(this.proposals.values()).filter((p) => p.status === status);
+		return Array.from(this.proposals.values()).filter(
+			(p) => p.status === status,
+		);
 	}
 
 	/**
@@ -797,7 +822,9 @@ export class ProposalLeaseManager {
 	 * Get all active leases.
 	 */
 	getActiveLeases(): Lease[] {
-		return Array.from(this.leases.values()).filter((l) => l.status === "active");
+		return Array.from(this.leases.values()).filter(
+			(l) => l.status === "active",
+		);
 	}
 
 	/**
@@ -882,8 +909,8 @@ export function createHeartbeatProof(
 	const timestamp = new Date().toISOString();
 	const nonce = randomUUID();
 	const heartbeatHash = createHash("sha256")
-	.update(`${agentId}:${timestamp}:${nonce}`)
-	.digest("hex");
+		.update(`${agentId}:${timestamp}:${nonce}`)
+		.digest("hex");
 
 	return {
 		leaseId,

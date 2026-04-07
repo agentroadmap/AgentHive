@@ -4,7 +4,17 @@ import type * as Blessed from "neo-neo-bblessed";
 const require = createRequire(import.meta.url);
 const blessed = require("neo-neo-bblessed") as typeof Blessed;
 
-export const { box, line, list, log, program, screen, scrollablebox, scrollabletext, textbox } = blessed;
+export const {
+	box,
+	line,
+	list,
+	log,
+	program,
+	screen,
+	scrollablebox,
+	scrollabletext,
+	textbox,
+} = blessed;
 
 export type {
 	BoxInterface,

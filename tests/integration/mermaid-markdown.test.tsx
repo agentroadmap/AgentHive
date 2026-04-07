@@ -1,7 +1,6 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
-import React from "react";
 import MermaidMarkdown from "../../src/web/components/MermaidMarkdown.tsx";
 
 describe("MermaidMarkdown", () => {
@@ -9,7 +8,9 @@ describe("MermaidMarkdown", () => {
 		const source =
 			"Implemented contracts: getDishesByMenu(String menuId) -> Result<List<MenuItem>>";
 
-		assert.doesNotThrow(() => renderToString(<MermaidMarkdown source={source} />));
+		assert.doesNotThrow(() =>
+			renderToString(<MermaidMarkdown source={source} />),
+		);
 
 		const html = renderToString(<MermaidMarkdown source={source} />);
 		assert.ok(html.includes("Result&lt;List&lt;MenuItem&gt;&gt;"));

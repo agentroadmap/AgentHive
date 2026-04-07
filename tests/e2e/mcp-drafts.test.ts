@@ -1,11 +1,14 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { McpServer } from "../../src/mcp/server.ts";
 import { registerProposalTools } from "../../src/mcp/tools/proposals/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync,
+import {
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 const getText = (content: unknown[] | undefined, index = 0): string => {
@@ -60,7 +63,9 @@ describe("MCP draft support via proposal tools", () => {
 			},
 		});
 
-		expect(getText(createResult.content)).toContain("Proposal draft-1 - Draft proposal");
+		expect(getText(createResult.content)).toContain(
+			"Proposal draft-1 - Draft proposal",
+		);
 
 		const draft = await mcpServer.filesystem.loadDraft("draft-1");
 		assert.notStrictEqual(draft, null);
@@ -110,13 +115,18 @@ describe("MCP draft support via proposal tools", () => {
 			},
 		});
 
-		console.log('PROMOTE_TEXT:', getText(promoteResult.content));
-	expect(getText(promoteResult.content)).toContain("Proposal PROPOSAL-1 - Promoted proposal");
+		console.log("PROMOTE_TEXT:", getText(promoteResult.content));
+		expect(getText(promoteResult.content)).toContain(
+			"Proposal PROPOSAL-1 - Promoted proposal",
+		);
 
 		const promoted = await mcpServer.getProposal("proposal-1");
 		assert.strictEqual(promoted?.status, "Review");
 		const allProposals = await mcpServer.filesystem.listProposals();
-		console.log('PROPOSALS AFTER PROMOTION:', allProposals.map(p => p.id + ':' + p.title));
+		console.log(
+			"PROPOSALS AFTER PROMOTION:",
+			allProposals.map((p) => `${p.id}:${p.title}`),
+		);
 
 		const removedDraft = await mcpServer.filesystem.loadDraft("draft-1");
 		assert.strictEqual(removedDraft, null);
@@ -133,7 +143,7 @@ describe("MCP draft support via proposal tools", () => {
 		});
 
 		const demoteText = getText(demoteResult.content);
-	console.log('DEMOTE_TEXT:', demoteText);
+		console.log("DEMOTE_TEXT:", demoteText);
 		const match = demoteText.match(/Proposal (draft-\d+)/);
 		assert.notStrictEqual(match, null);
 		const draftId = match?.[1] ?? "";

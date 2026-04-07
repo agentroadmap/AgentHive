@@ -12,17 +12,17 @@ import type { McpToolHandler } from "../../types.ts";
 import { createSimpleValidatedTool } from "../../validation/tool-wrapper.ts";
 import { TeamHandlers } from "./handlers.ts";
 import {
-	teamCreateSchema,
-	teamAcceptSchema,
-	teamDeclineSchema,
-	teamDissolveSchema,
-	teamRosterSchema,
-	teamRegisterAgentSchema,
-	proposalSubmitSchema,
-	proposalReviewSchema,
+	federationStatusSchema,
 	leaseAcquireSchema,
 	leaseRenewSchema,
-	federationStatusSchema,
+	proposalReviewSchema,
+	proposalSubmitSchema,
+	teamAcceptSchema,
+	teamCreateSchema,
+	teamDeclineSchema,
+	teamDissolveSchema,
+	teamRegisterAgentSchema,
+	teamRosterSchema,
 } from "./schemas.ts";
 
 export async function registerTeamTools(server: McpServer): Promise<void> {
@@ -33,7 +33,8 @@ export async function registerTeamTools(server: McpServer): Promise<void> {
 	const teamCreateTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "team_create",
-			description: "Create a team based on project requirements and agent capabilities",
+			description:
+				"Create a team based on project requirements and agent capabilities",
 			inputSchema: teamCreateSchema,
 		},
 		teamCreateSchema,
@@ -88,7 +89,8 @@ export async function registerTeamTools(server: McpServer): Promise<void> {
 	const teamRegisterTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "team_register_agent",
-			description: "Register an agent for team membership with skills, role, and pool",
+			description:
+				"Register an agent for team membership with skills, role, and pool",
 			inputSchema: teamRegisterAgentSchema,
 		},
 		teamRegisterAgentSchema,

@@ -1,9 +1,13 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 let TEST_DIR: string;
 
@@ -25,7 +29,8 @@ describe("CLI directive filtering", () => {
 
 		const core = new Core(TEST_DIR);
 		await core.initializeProject("Directive Filter Test Project");
-		const newDirective = await core.filesystem.createDirective("New Directives UI");
+		const newDirective =
+			await core.filesystem.createDirective("New Directives UI");
 
 		await core.createProposal(
 			{
@@ -126,7 +131,10 @@ describe("CLI directive filtering", () => {
 	});
 
 	it("filters by directive with case-insensitive matching", async () => {
-		const result = execSync(`node --experimental-strip-types ${cliPath} proposal list --directive RELEASE-1 --plain`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${cliPath} proposal list --directive RELEASE-1 --plain`,
+			{ cwd: TEST_DIR },
+		);
 
 		assert.strictEqual(result.exitCode, 0);
 		const output = result.stdout.toString();
@@ -140,7 +148,10 @@ describe("CLI directive filtering", () => {
 	});
 
 	it("supports -m shorthand and combines directive with status filter", async () => {
-		const result = execSync(`node --experimental-strip-types ${cliPath} proposal list -m release-1 --status "Potential" --plain`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${cliPath} proposal list -m release-1 --status "Potential" --plain`,
+			{ cwd: TEST_DIR },
+		);
 
 		assert.strictEqual(result.exitCode, 0);
 		const output = result.stdout.toString();
@@ -154,7 +165,10 @@ describe("CLI directive filtering", () => {
 	});
 
 	it("matches closest directive for partial and typo inputs", async () => {
-		const typoResult = execSync(`node --experimental-strip-types ${cliPath} proposal list --directive releas-1 --plain`, { cwd: TEST_DIR });
+		const typoResult = execSync(
+			`node --experimental-strip-types ${cliPath} proposal list --directive releas-1 --plain`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(typoResult.exitCode, 0);
 		const typoOutput = typoResult.stdout.toString();
 
@@ -164,11 +178,16 @@ describe("CLI directive filtering", () => {
 		assert.ok(!typoOutput.includes("proposal-4 - No directive proposal"));
 		assert.ok(!typoOutput.includes("proposal-5 - Roadmap directive proposal"));
 
-		const partialResult = execSync(`node --experimental-strip-types ${cliPath} proposal list --directive roadmp --plain`, { cwd: TEST_DIR });
+		const partialResult = execSync(
+			`node --experimental-strip-types ${cliPath} proposal list --directive roadmp --plain`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(partialResult.exitCode, 0);
 		const partialOutput = partialResult.stdout.toString();
 
-		assert.ok(partialOutput.includes("proposal-5 - Roadmap directive proposal"));
+		assert.ok(
+			partialOutput.includes("proposal-5 - Roadmap directive proposal"),
+		);
 		assert.ok(!partialOutput.includes("proposal-1 - Directive proposal one"));
 		assert.ok(!partialOutput.includes("proposal-2 - Directive proposal two"));
 		assert.ok(!partialOutput.includes("proposal-3 - Other directive proposal"));
@@ -177,7 +196,10 @@ describe("CLI directive filtering", () => {
 	});
 
 	it("matches directive title when proposals store directive IDs", async () => {
-		const result = execSync(`node --experimental-strip-types ${cliPath} proposal list -m new --plain`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${cliPath} proposal list -m new --plain`,
+			{ cwd: TEST_DIR },
+		);
 		assert.strictEqual(result.exitCode, 0);
 		const output = result.stdout.toString();
 
@@ -190,7 +212,10 @@ describe("CLI directive filtering", () => {
 	});
 
 	it("preserves existing listing behavior when directive filter is omitted", async () => {
-		const result = execSync(`node --experimental-strip-types ${cliPath} proposal list --plain`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${cliPath} proposal list --plain`,
+			{ cwd: TEST_DIR },
+		);
 
 		assert.strictEqual(result.exitCode, 0);
 		const output = result.stdout.toString();

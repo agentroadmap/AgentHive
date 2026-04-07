@@ -5,8 +5,8 @@
  * Uses mock objects instead of real blessed screens to avoid TTY issues.
  */
 
-import { describe, it } from "node:test";
 import assert from "node:assert";
+import { describe, it } from "node:test";
 import type { Proposal } from "../../src/types/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -80,8 +80,16 @@ describe("TUI Content Generation", () => {
 
 	it("generates headlines content", () => {
 		const events = [
-			{ type: "proposal_transition", message: "proposal-001: Active → Review", timestamp: Date.now() },
-			{ type: "proposal_complete", message: "proposal-002 completed", timestamp: Date.now() },
+			{
+				type: "proposal_transition",
+				message: "proposal-001: Active → Review",
+				timestamp: Date.now(),
+			},
+			{
+				type: "proposal_complete",
+				message: "proposal-002 completed",
+				timestamp: Date.now(),
+			},
 		];
 
 		const content = events
@@ -154,8 +162,8 @@ describe("TUI Key Bindings", () => {
 			i: "directive_filter",
 		};
 
-		assert.strictEqual(keyActions["tab"], "switch_view");
-		assert.strictEqual(keyActions["q"], "quit");
+		assert.strictEqual(keyActions.tab, "switch_view");
+		assert.strictEqual(keyActions.q, "quit");
 		assert.strictEqual(keyActions["~"], "toggle_empty");
 		assert.strictEqual(keyActions["="], "toggle_abandoned");
 	});
@@ -207,7 +215,8 @@ describe("TUI Filter UI", () => {
 		}
 
 		filters.push("feature");
-		const indicator = filters.length > 0 ? `{yellow-fg}Filters: ${filters.join(", ")}{/}` : "";
+		const indicator =
+			filters.length > 0 ? `{yellow-fg}Filters: ${filters.join(", ")}{/}` : "";
 		assert.ok(indicator.includes("feature"));
 	});
 
@@ -259,15 +268,15 @@ describe("TUI Status Colors", () => {
 	});
 
 	it("Active is green", () => {
-		assert.strictEqual(STATUS_COLORS["Active"], "green");
+		assert.strictEqual(STATUS_COLORS.Active, "green");
 	});
 
 	it("Complete is gray", () => {
-		assert.strictEqual(STATUS_COLORS["Complete"], "gray");
+		assert.strictEqual(STATUS_COLORS.Complete, "gray");
 	});
 
 	it("Rejected is red", () => {
-		assert.strictEqual(STATUS_COLORS["Rejected"], "red");
+		assert.strictEqual(STATUS_COLORS.Rejected, "red");
 	});
 
 	it("priority affects highlight", () => {
@@ -277,8 +286,8 @@ describe("TUI Status Colors", () => {
 			low: "green",
 		};
 
-		assert.strictEqual(priorityHighlights["high"], "red");
-		assert.strictEqual(priorityHighlights["medium"], "yellow");
-		assert.strictEqual(priorityHighlights["low"], "green");
+		assert.strictEqual(priorityHighlights.high, "red");
+		assert.strictEqual(priorityHighlights.medium, "yellow");
+		assert.strictEqual(priorityHighlights.low, "green");
 	});
 });

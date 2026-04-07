@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import '../core/infrastructure/ws-polyfill.ts';
+import "../core/infrastructure/ws-polyfill.ts";
 import { execSync, spawn } from "node:child_process";
 import { glob, readFile, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
@@ -8,49 +8,41 @@ import { stdin as input } from "node:process";
 import { createInterface } from "node:readline/promises";
 import * as clack from "@clack/prompts";
 import { Command } from "commander";
-import { type CompletionInstallResult, installCompletion, registerCompletionCommand } from "./commands/completion.ts";
-import { runDocsCommand } from "./commands/docs.ts";
-import { configureAdvancedSettings } from "./commands/configure-advanced-settings.ts";
-import { registerMcpCommand } from "./commands/mcp.ts";
-import { pickProposalForEditWizard, runProposalCreateWizard, runProposalEditWizard } from "./commands/proposal-wizard.ts";
-import { sandboxCommand } from "./commands/sandbox.ts";
-import { registerCubicCommand } from "./commands/cubic-cli.ts";
-import { DEFAULT_CLAIM_DURATION_MINUTES, DEFAULT_DIRECTORIES } from "../shared/constants/index.ts";
-import { initializeProject } from '../core/infrastructure/init.ts';
-import { buildDirectiveBuckets, collectArchivedDirectiveKeys, directiveKey } from '../core/proposal/directives.ts';
-import { computeSequences } from '../core/proposal/sequences.ts';
+import { initializeProject } from "../core/infrastructure/init.ts";
+import {
+	buildDirectiveBuckets,
+	collectArchivedDirectiveKeys,
+	directiveKey,
+} from "../core/proposal/directives.ts";
+import { computeSequences } from "../core/proposal/sequences.ts";
+import {
+	DEFAULT_CLAIM_DURATION_MINUTES,
+	DEFAULT_DIRECTORIES,
+} from "../shared/constants/index.ts";
 import { formatCompactProposalListLine } from "../shared/formatters/proposal-list-plain-text.ts";
 import { formatProposalPlainText } from "../shared/formatters/proposal-plain-text.ts";
-import {
-	type AgentInstructionFile,
-	addAgentInstructions,
-	Core,
-	type EnsureMcpGuidelinesResult,
-	ensureMcpGuidelines,
-	initializeGitRepository,
-	installClaudeAgent,
-	isGitRepository,
-	updateReadmeWithBoard,
-} from "./index.ts";
 import {
 	type AgentStatus,
 	type Decision,
 	type DecisionSearchResult,
+	type Directive,
 	type Document as DocType,
 	type DocumentSearchResult,
 	EntityType,
 	isLocalEditableProposal,
-	type Directive,
+	type Proposal,
+	type ProposalListFilter,
+	type ProposalSearchResult,
 	type RoadmapConfig,
 	type SearchPriorityFilter,
 	type SearchResult,
 	type SearchResultType,
-	type Proposal,
-	type ProposalListFilter,
-	type ProposalSearchResult,
 } from "../types/index.ts";
 import type { ProposalEditArgs } from "../types/proposal-edit-args.ts";
-import { type AgentSelectionValue, processAgentSelection } from "../utils/agent-selection.ts";
+import {
+	type AgentSelectionValue,
+	processAgentSelection,
+} from "../utils/agent-selection.ts";
 import {
 	acceptChatMention,
 	applyChatComposerKey,
@@ -62,9 +54,11 @@ import {
 	renderChatComposerLines,
 } from "../utils/chat-composer.ts";
 import { findRoadmapRoot } from "../utils/find-roadmap-root.ts";
-import { createDirectiveFilterValueResolver, resolveClosestDirectiveFilterValue } from '../utils/milestone-filter.ts';
+import {
+	createDirectiveFilterValueResolver,
+	resolveClosestDirectiveFilterValue,
+} from "../utils/milestone-filter.ts";
 import { hasAnyPrefix } from "../utils/prefix-config.ts";
-import { type RuntimeCwdResolution, resolveRuntimeCwd } from "../utils/runtime-cwd.ts";
 import {
 	normalizeStringList,
 	parsePositiveIndexList,
@@ -73,10 +67,47 @@ import {
 	toStringArray,
 } from "../utils/proposal-builders.ts";
 import { buildProposalUpdateInput } from "../utils/proposal-edit-builder.ts";
-import { normalizeProposalId, proposalIdsEqual } from "../utils/proposal-path.ts";
+import {
+	normalizeProposalId,
+	proposalIdsEqual,
+} from "../utils/proposal-path.ts";
 import { sortProposals } from "../utils/proposal-sorting.ts";
-import { formatValidStatuses, getCanonicalStatus, getValidStatuses } from "../utils/status.ts";
+import {
+	type RuntimeCwdResolution,
+	resolveRuntimeCwd,
+} from "../utils/runtime-cwd.ts";
+import {
+	formatValidStatuses,
+	getCanonicalStatus,
+	getValidStatuses,
+} from "../utils/status.ts";
 import { formatVersionLabel, getVersionInfo } from "../utils/version.ts";
+import {
+	type CompletionInstallResult,
+	installCompletion,
+	registerCompletionCommand,
+} from "./commands/completion.ts";
+import { configureAdvancedSettings } from "./commands/configure-advanced-settings.ts";
+import { registerCubicCommand } from "./commands/cubic-cli.ts";
+import { runDocsCommand } from "./commands/docs.ts";
+import { registerMcpCommand } from "./commands/mcp.ts";
+import {
+	pickProposalForEditWizard,
+	runProposalCreateWizard,
+	runProposalEditWizard,
+} from "./commands/proposal-wizard.ts";
+import { sandboxCommand } from "./commands/sandbox.ts";
+import {
+	type AgentInstructionFile,
+	addAgentInstructions,
+	Core,
+	type EnsureMcpGuidelinesResult,
+	ensureMcpGuidelines,
+	initializeGitRepository,
+	installClaudeAgent,
+	isGitRepository,
+	updateReadmeWithBoard,
+} from "./index.ts";
 
 type IntegrationMode = "mcp" | "cli" | "none";
 
@@ -150,11 +181,17 @@ async function openUrlInBrowser(url: string): Promise<void> {
 		});
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
-		console.warn(`  ⚠️  Unable to open browser automatically (${message}). Please visit ${url}`);
+		console.warn(
+			`  ⚠️  Unable to open browser automatically (${message}). Please visit ${url}`,
+		);
 	}
 }
 
-async function runMcpClientCommand(label: string, command: string, args: string[]): Promise<string> {
+async function runMcpClientCommand(
+	label: string,
+	command: string,
+	args: string[],
+): Promise<string> {
 	console.log(`    Configuring ${label}...`);
 	try {
 		await new Promise<void>((resolve, reject) => {
@@ -169,7 +206,9 @@ async function runMcpClientCommand(label: string, command: string, args: string[
 		return label;
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
-		console.warn(`    ⚠️ Unable to configure ${label} automatically (${message}).`);
+		console.warn(
+			`    ⚠️ Unable to configure ${label} automatically (${message}).`,
+		);
 		console.warn(`       Run manually: ${command} ${args.join(" ")}`);
 		return `${label} (manual setup required)`;
 	}
@@ -178,7 +217,11 @@ async function runMcpClientCommand(label: string, command: string, args: string[
 // Helper function for accumulating multiple CLI option values
 function createMultiValueAccumulator() {
 	return (value: string, previous: string | string[]) => {
-		const soFar = Array.isArray(previous) ? previous : previous ? [previous] : [];
+		const soFar = Array.isArray(previous)
+			? previous
+			: previous
+				? [previous]
+				: [];
 		return [...soFar, value];
 	};
 }
@@ -294,7 +337,9 @@ function hasEditFieldFlags(options: Record<string, unknown>): boolean {
  * Processes --ac and --acceptance-criteria options to extract acceptance criteria
  * Handles both single values and arrays from multi-value accumulators
  */
-function getDefaultAdvancedConfig(existingConfig?: RoadmapConfig | null): Partial<RoadmapConfig> {
+function getDefaultAdvancedConfig(
+	existingConfig?: RoadmapConfig | null,
+): Partial<RoadmapConfig> {
 	return {
 		checkActiveBranches: existingConfig?.checkActiveBranches ?? true,
 		remoteOperations: existingConfig?.remoteOperations ?? true,
@@ -325,7 +370,9 @@ async function requireProjectRoot(): Promise<string> {
 
 	const root = await findRoadmapRoot(runtimeCwd.cwd);
 	if (!root) {
-		console.error("No Roadmap.md project found. Run `roadmap init` to initialize.");
+		console.error(
+			"No Roadmap.md project found. Run `roadmap init` to initialize.",
+		);
 		process.exit(1);
 	}
 	return root;
@@ -370,7 +417,9 @@ try {
 		const first = rawArgs[0];
 		if (
 			typeof first === "string" &&
-			/node_modules[\\/]+roadmap\.md-(darwin|linux|windows)-[^\\/]+[\\/]+roadmap(\.exe)?$/.test(first)
+			/node_modules[\\/]+roadmap\.md-(darwin|linux|windows)-[^\\/]+[\\/]+roadmap(\.exe)?$/.test(
+				first,
+			)
 		) {
 			rawArgs = rawArgs.slice(1);
 		}
@@ -415,7 +464,9 @@ try {
 	// Fall through to normal CLI parsing on any splash error
 }
 
-function getMcpStartCwdOverrideFromArgv(argv = process.argv): string | undefined {
+function getMcpStartCwdOverrideFromArgv(
+	argv = process.argv,
+): string | undefined {
 	const args = argv.slice(2);
 	const mcpIndex = args.indexOf("mcp");
 	if (mcpIndex < 0 || args[mcpIndex + 1] !== "start") {
@@ -452,7 +503,9 @@ const shouldRunMigration =
 
 if (shouldRunMigration) {
 	try {
-		const runtimeCwd = await resolveRuntimeCwd({ cwd: getMcpStartCwdOverrideFromArgv() });
+		const runtimeCwd = await resolveRuntimeCwd({
+			cwd: getMcpStartCwdOverrideFromArgv(),
+		});
 		const projectRoot = await findRoadmapRoot(runtimeCwd.cwd);
 		if (projectRoot) {
 			const core = new Core(projectRoot);
@@ -477,16 +530,22 @@ program
 	.version(versionLabel, "-v, --version", "display version number")
 	.addHelpText("before", `\x1b[1mRoadmap.md\x1b[0m ${versionLabel}\n`);
 
-program.hook("preAction", (thisCommand, actionCommand) => {
+program.hook("preAction", (_thisCommand, actionCommand) => {
 	// Don't print version header for help/version commands as they handle it themselves
 	if (actionCommand.name() === "help") return;
 
 	// Check if plain output is requested for this command
 	const options = actionCommand.opts();
-	const usePlain = !!(options.compact || isPlainRequested(options) || shouldAutoPlain);
+	const usePlain = !!(
+		options.compact ||
+		isPlainRequested(options) ||
+		shouldAutoPlain
+	);
 
 	// Avoid printing header for TUI-heavy commands that will immediately clear/redraw the screen
-	const isTuiCommand = ["board", "browser", "chat", "overview"].includes(actionCommand.name());
+	const isTuiCommand = ["board", "browser", "chat", "overview"].includes(
+		actionCommand.name(),
+	);
 
 	if (!usePlain && !isTuiCommand && !process.env.ROADMAP_QUIET) {
 		process.stdout.write(`\x1b[2mRoadmap.md ${versionLabel}\x1b[0m\n\n`);
@@ -495,23 +554,55 @@ program.hook("preAction", (thisCommand, actionCommand) => {
 
 program
 	.command("init [projectName] [description]")
-	.description("initialize roadmap project in the current repository (or use 'npx agent-roadmap init' to bootstrap)")
-	.option("-b, --blueprint <type>", "project blueprint (software, research, content, versatile)")
+	.description(
+		"initialize roadmap project in the current repository (or use 'npx agent-roadmap init' to bootstrap)",
+	)
+	.option(
+		"-b, --blueprint <type>",
+		"project blueprint (software, research, content, versatile)",
+	)
 	.option(
 		"--agent-instructions <instructions>",
 		"comma-separated agent instructions to create. Valid: claude, agents, gemini, copilot, cursor (alias of agents), none. Use 'none' to skip; when combined with others, 'none' is ignored.",
 	)
-	.option("--check-branches <boolean>", "check proposal proposals across active branches (default: true)")
-	.option("--include-remote <boolean>", "include remote branches when checking (default: true)")
-	.option("--branch-days <number>", "days to consider branch active (default: 30)")
-	.option("--bypass-git-hooks <boolean>", "bypass git hooks when committing (default: false)")
-	.option("--zero-padded-ids <number>", "number of digits for zero-padding IDs (0 to disable)")
+	.option(
+		"--check-branches <boolean>",
+		"check proposal proposals across active branches (default: true)",
+	)
+	.option(
+		"--include-remote <boolean>",
+		"include remote branches when checking (default: true)",
+	)
+	.option(
+		"--branch-days <number>",
+		"days to consider branch active (default: 30)",
+	)
+	.option(
+		"--bypass-git-hooks <boolean>",
+		"bypass git hooks when committing (default: false)",
+	)
+	.option(
+		"--zero-padded-ids <number>",
+		"number of digits for zero-padding IDs (0 to disable)",
+	)
 	.option("--default-editor <editor>", "default editor command")
 	.option("--web-port <number>", "default web UI port (default: 6420)")
-	.option("--auto-open-browser <boolean>", "auto-open browser for web UI (default: true)")
-	.option("--install-claude-agent <boolean>", "install Claude Code agent (default: false)")
-	.option("--integration-mode <mode>", "choose how AI tools connect to Roadmap.md (mcp, cli, or none)")
-	.option("--proposal-prefix <prefix>", "custom proposal prefix, letters only (default: proposal)")
+	.option(
+		"--auto-open-browser <boolean>",
+		"auto-open browser for web UI (default: true)",
+	)
+	.option(
+		"--install-claude-agent <boolean>",
+		"install Claude Code agent (default: false)",
+	)
+	.option(
+		"--integration-mode <mode>",
+		"choose how AI tools connect to Roadmap.md (mcp, cli, or none)",
+	)
+	.option(
+		"--proposal-prefix <prefix>",
+		"custom proposal prefix, letters only (default: proposal)",
+	)
 	.option("--defaults", "use default values for all prompts")
 	.action(
 		async (
@@ -570,13 +661,19 @@ program
 				}
 
 				// Helper function to parse boolean strings
-				const parseBoolean = (value: string | undefined, defaultValue: boolean): boolean => {
+				const parseBoolean = (
+					value: string | undefined,
+					defaultValue: boolean,
+				): boolean => {
 					if (value === undefined) return defaultValue;
 					return value.toLowerCase() === "true" || value === "1";
 				};
 
 				// Helper function to parse number strings
-				const parseNumber = (value: string | undefined, defaultValue: number): number => {
+				const parseNumber = (
+					value: string | undefined,
+					defaultValue: number,
+				): number => {
 					if (value === undefined) return defaultValue;
 					const parsed = Number.parseInt(value, 10);
 					return Number.isNaN(parsed) ? defaultValue : parsed;
@@ -611,10 +708,14 @@ program
 				let name = projectName;
 				if (!name) {
 					const defaultName = existingConfig?.projectName || "";
-					const promptMessage = isReInitialization && defaultName ? `Project name (${defaultName}):` : "Project name:";
+					const promptMessage =
+						isReInitialization && defaultName
+							? `Project name (${defaultName}):`
+							: "Project name:";
 					const enteredName = await clack.text({
 						message: promptMessage,
-						defaultValue: isReInitialization && defaultName ? defaultName : undefined,
+						defaultValue:
+							isReInitialization && defaultName ? defaultName : undefined,
 						validate: (value) => {
 							if (!isReInitialization || !defaultName) {
 								if (!String(value ?? "").trim()) {
@@ -644,7 +745,8 @@ program
 				if (!desc && !isNonInteractive && !isReInitialization) {
 					const enteredDesc = await clack.text({
 						message: "Project description (seed inspiration):",
-						placeholder: "e.g., Build a modern blog platform with React and Bun",
+						placeholder:
+							"e.g., Build a modern blog platform with React and Bun",
 					});
 					if (clack.isCancel(enteredDesc)) {
 						abortInitialization();
@@ -654,7 +756,9 @@ program
 				}
 
 				// Get project blueprint
-				const { BLUEPRINTS } = await import('../core/infrastructure/blueprints.ts');
+				const { BLUEPRINTS } = await import(
+					"../core/infrastructure/blueprints.ts"
+				);
 				let blueprintType = options.blueprint as any;
 				if (!blueprintType && !isNonInteractive && !isReInitialization) {
 					const selectedBlueprint = await clack.select({
@@ -683,22 +787,39 @@ program
 				const proposalPrefix = options.proposalPrefix || "proposal";
 				// Validate proposal prefix if provided
 				if (proposalPrefix && !/^[a-zA-Z]+$/.test(proposalPrefix)) {
-					console.error("Proposal prefix must contain only letters (a-z, A-Z).");
+					console.error(
+						"Proposal prefix must contain only letters (a-z, A-Z).",
+					);
 					process.exit(1);
 				}
 
 				const defaultAdvancedConfig = getDefaultAdvancedConfig(existingConfig);
 				const applyAdvancedOptionOverrides = () => {
 					const result: Partial<RoadmapConfig> = { ...defaultAdvancedConfig };
-					result.checkActiveBranches = parseBoolean(options.checkBranches, result.checkActiveBranches ?? true);
+					result.checkActiveBranches = parseBoolean(
+						options.checkBranches,
+						result.checkActiveBranches ?? true,
+					);
 					if (result.checkActiveBranches) {
-						result.remoteOperations = parseBoolean(options.includeRemote, result.remoteOperations ?? true);
-						result.activeBranchDays = parseNumber(options.branchDays, result.activeBranchDays ?? 30);
+						result.remoteOperations = parseBoolean(
+							options.includeRemote,
+							result.remoteOperations ?? true,
+						);
+						result.activeBranchDays = parseNumber(
+							options.branchDays,
+							result.activeBranchDays ?? 30,
+						);
 					} else {
 						result.remoteOperations = false;
 					}
-					result.bypassGitHooks = parseBoolean(options.bypassGitHooks, result.bypassGitHooks ?? false);
-					const paddingValue = parseNumber(options.zeroPaddedIds, result.zeroPaddedIds ?? 0);
+					result.bypassGitHooks = parseBoolean(
+						options.bypassGitHooks,
+						result.bypassGitHooks ?? false,
+					);
+					const paddingValue = parseNumber(
+						options.zeroPaddedIds,
+						result.zeroPaddedIds ?? 0,
+					);
 					result.zeroPaddedIds = paddingValue > 0 ? paddingValue : undefined;
 					result.defaultEditor =
 						options.defaultEditor ||
@@ -706,9 +827,18 @@ program
 						process.env.EDITOR ||
 						process.env.VISUAL ||
 						undefined;
-					result.autoCommit = parseBoolean(String((options as Record<string, unknown>).autoCommit ?? ""), result.autoCommit ?? true);
-					result.defaultPort = parseNumber(options.webPort, result.defaultPort ?? 6420);
-					result.autoOpenBrowser = parseBoolean(options.autoOpenBrowser, result.autoOpenBrowser ?? true);
+					result.autoCommit = parseBoolean(
+						String((options as Record<string, unknown>).autoCommit ?? ""),
+						result.autoCommit ?? true,
+					);
+					result.defaultPort = parseNumber(
+						options.webPort,
+						result.defaultPort ?? 6420,
+					);
+					result.autoOpenBrowser = parseBoolean(
+						options.autoOpenBrowser,
+						result.autoOpenBrowser ?? true,
+					);
 					return result;
 				};
 
@@ -716,17 +846,21 @@ program
 					? normalizeIntegrationOption(options.integrationMode)
 					: undefined;
 				if (options.integrationMode && !integrationOption) {
-					console.error(`Invalid integration mode: ${options.integrationMode}. Valid options are: mcp, cli, none`);
+					console.error(
+						`Invalid integration mode: ${options.integrationMode}. Valid options are: mcp, cli, none`,
+					);
 					process.exit(1);
 				}
 
-				let integrationMode: IntegrationMode | null = integrationOption ?? (isNonInteractive ? "mcp" : null);
+				let integrationMode: IntegrationMode | null =
+					integrationOption ?? (isNonInteractive ? "mcp" : null);
 				const mcpServerName = MCP_SERVER_NAME;
 				type AgentSelection = AgentSelectionValue;
 				let agentFiles: AgentInstructionFile[] = [];
 				let agentInstructionsSkipped = false;
 				let mcpClientSetupSummary: string | undefined;
-				const mcpGuideUrl = "https://github.com/agentroadmap/agentRoadmap#-mcp-integration-model-context-protocol";
+				const mcpGuideUrl =
+					"https://github.com/agentroadmap/agentRoadmap#-mcp-integration-model-context-protocol";
 
 				if (
 					!integrationOption &&
@@ -736,14 +870,20 @@ program
 					integrationMode = "cli";
 				}
 
-				if (integrationMode === "mcp" && (options.agentInstructions || options.installClaudeAgent)) {
+				if (
+					integrationMode === "mcp" &&
+					(options.agentInstructions || options.installClaudeAgent)
+				) {
 					console.error(
 						"The MCP connector option cannot be combined with --agent-instructions or --install-claude-agent.",
 					);
 					process.exit(1);
 				}
 
-				if (integrationMode === "none" && (options.agentInstructions || options.installClaudeAgent)) {
+				if (
+					integrationMode === "none" &&
+					(options.agentInstructions || options.installClaudeAgent)
+				) {
 					console.error(
 						"Skipping AI integration cannot be combined with --agent-instructions or --install-claude-agent.",
 					);
@@ -754,15 +894,20 @@ program
 				mainSelection: while (true) {
 					if (integrationMode === null) {
 						if (!integrationTipShown) {
-							clack.note("MCP connector is recommended for AI tool integration.", "AI setup tip");
+							clack.note(
+								"MCP connector is recommended for AI tool integration.",
+								"AI setup tip",
+							);
 							integrationTipShown = true;
 						}
 						const integrationPrompt = await clack.select({
-							message: "How would you like your AI tools to connect to Roadmap.md?",
+							message:
+								"How would you like your AI tools to connect to Roadmap.md?",
 							initialValue: "mcp",
 							options: [
 								{
-									label: "via MCP connector (recommended for Claude Code, Codex, Gemini CLI, Kiro, Cursor, etc.)",
+									label:
+										"via MCP connector (recommended for Claude Code, Codex, Gemini CLI, Kiro, Cursor, etc.)",
 									value: "mcp",
 								},
 								{
@@ -770,7 +915,8 @@ program
 									value: "cli",
 								},
 								{
-									label: "Skip for now (I am not using Roadmap.md with AI tools)",
+									label:
+										"Skip for now (I am not using Roadmap.md with AI tools)",
 									value: "none",
 								},
 							],
@@ -781,7 +927,9 @@ program
 							return;
 						}
 
-						const selectedMode = integrationPrompt ? normalizeIntegrationOption(String(integrationPrompt)) : null;
+						const selectedMode = integrationPrompt
+							? normalizeIntegrationOption(String(integrationPrompt))
+							: null;
 						integrationMode = selectedMode ?? "mcp";
 						console.log("");
 					}
@@ -798,25 +946,34 @@ program
 								"CLAUDE.md": "CLAUDE.md",
 								"AGENTS.md": "AGENTS.md",
 								"GEMINI.md": "GEMINI.md",
-								".github/copilot-instructions.md": ".github/copilot-instructions.md",
+								".github/copilot-instructions.md":
+									".github/copilot-instructions.md",
 							};
 
-							const requestedInstructions = options.agentInstructions.split(",").map((f) => f.trim().toLowerCase());
+							const requestedInstructions = options.agentInstructions
+								.split(",")
+								.map((f) => f.trim().toLowerCase());
 							const mappedFiles: AgentSelection[] = [];
 
 							for (const instruction of requestedInstructions) {
 								const mappedFile = nameMap[instruction];
 								if (!mappedFile) {
 									console.error(`Invalid agent instruction: ${instruction}`);
-									console.error("Valid options are: cursor, claude, agents, gemini, copilot, none");
+									console.error(
+										"Valid options are: cursor, claude, agents, gemini, copilot, none",
+									);
 									process.exit(1);
 								}
 								mappedFiles.push(mappedFile);
 							}
 
-							const { files, needsRetry, skipped } = processAgentSelection({ selected: mappedFiles });
+							const { files, needsRetry, skipped } = processAgentSelection({
+								selected: mappedFiles,
+							});
 							if (needsRetry) {
-								console.error("Please select at least one agent instruction file before continuing.");
+								console.error(
+									"Please select at least one agent instruction file before continuing.",
+								);
 								process.exit(1);
 							}
 							agentFiles = files;
@@ -826,14 +983,19 @@ program
 						} else {
 							while (true) {
 								const response = await clack.multiselect({
-									message: "Select instruction files for CLI-based AI tools (space toggles selections; enter accepts)",
+									message:
+										"Select instruction files for CLI-based AI tools (space toggles selections; enter accepts)",
 									options: [
 										{ label: "CLAUDE.md — Claude Code", value: "CLAUDE.md" },
 										{
-											label: "AGENTS.md — Codex, Cursor, Zed, Warp, Aider, RooCode, etc.",
+											label:
+												"AGENTS.md — Codex, Cursor, Zed, Warp, Aider, RooCode, etc.",
 											value: "AGENTS.md",
 										},
-										{ label: "GEMINI.md — Google Gemini Code Assist CLI", value: "GEMINI.md" },
+										{
+											label: "GEMINI.md — Google Gemini Code Assist CLI",
+											value: "GEMINI.md",
+										},
 										{
 											label: "Copilot instructions — GitHub Copilot",
 											value: ".github/copilot-instructions.md",
@@ -848,10 +1010,16 @@ program
 									continue mainSelection;
 								}
 
-								const selected = Array.isArray(response) ? (response as AgentSelection[]) : [];
-								const { files, needsRetry, skipped } = processAgentSelection({ selected });
+								const selected = Array.isArray(response)
+									? (response as AgentSelection[])
+									: [];
+								const { files, needsRetry, skipped } = processAgentSelection({
+									selected,
+								});
 								if (needsRetry) {
-									console.log("Please select at least one agent instruction file before continuing.");
+									console.log(
+										"Please select at least one agent instruction file before continuing.",
+									);
 									continue;
 								}
 								agentFiles = files;
@@ -872,7 +1040,8 @@ program
 						console.log(`  MCP server name: ${mcpServerName}`);
 						while (true) {
 							const clientResponse = await clack.multiselect({
-								message: "Which AI tools should we configure right now? (space toggles items; enter confirms)",
+								message:
+									"Which AI tools should we configure right now? (space toggles items; enter confirms)",
 								options: [
 									{ label: "Claude Code", value: "claude" },
 									{ label: "OpenAI Codex", value: "codex" },
@@ -889,9 +1058,13 @@ program
 								continue mainSelection;
 							}
 
-							const selectedClients = Array.isArray(clientResponse) ? clientResponse : [];
+							const selectedClients = Array.isArray(clientResponse)
+								? clientResponse
+								: [];
 							if (selectedClients.length === 0) {
-								console.log("Please select at least one AI tool before continuing.");
+								console.log(
+									"Please select at least one AI tool before continuing.",
+								);
 								continue;
 							}
 
@@ -902,7 +1075,10 @@ program
 								if (!instructionFile) {
 									return;
 								}
-								const nudgeResult = await ensureMcpGuidelines(cwd, instructionFile);
+								const nudgeResult = await ensureMcpGuidelines(
+									cwd,
+									instructionFile,
+								);
 								if (nudgeResult.changed) {
 									mcpGuidelineUpdates.push(nudgeResult);
 								}
@@ -911,45 +1087,50 @@ program
 
 							for (const client of selectedClients) {
 								if (client === "claude") {
-									const result = await runMcpClientCommand("Claude Code", "claude", [
-										"mcp",
-										"add",
-										"-s",
-										"user",
-										mcpServerName,
-										"--",
-										"roadmap",
-										"mcp",
-										"start",
-									]);
+									const result = await runMcpClientCommand(
+										"Claude Code",
+										"claude",
+										[
+											"mcp",
+											"add",
+											"-s",
+											"user",
+											mcpServerName,
+											"--",
+											"roadmap",
+											"mcp",
+											"start",
+										],
+									);
 									results.push(result);
 									await recordGuidelinesForClient(client);
 									continue;
 								}
 								if (client === "codex") {
-									const result = await runMcpClientCommand("OpenAI Codex", "codex", [
-										"mcp",
-										"add",
-										mcpServerName,
-										"roadmap",
-										"mcp",
-										"start",
-									]);
+									const result = await runMcpClientCommand(
+										"OpenAI Codex",
+										"codex",
+										["mcp", "add", mcpServerName, "roadmap", "mcp", "start"],
+									);
 									results.push(result);
 									await recordGuidelinesForClient(client);
 									continue;
 								}
 								if (client === "gemini") {
-									const result = await runMcpClientCommand("Gemini CLI", "gemini", [
-										"mcp",
-										"add",
-										"-s",
-										"user",
-										mcpServerName,
-										"roadmap",
-										"mcp",
-										"start",
-									]);
+									const result = await runMcpClientCommand(
+										"Gemini CLI",
+										"gemini",
+										[
+											"mcp",
+											"add",
+											"-s",
+											"user",
+											mcpServerName,
+											"roadmap",
+											"mcp",
+											"start",
+										],
+									);
 									results.push(result);
 									await recordGuidelinesForClient(client);
 									continue;
@@ -981,16 +1162,24 @@ program
 
 							if (mcpGuidelineUpdates.length > 0) {
 								const createdFiles = uniq(
-									mcpGuidelineUpdates.filter((entry) => entry.created).map((entry) => entry.fileName),
+									mcpGuidelineUpdates
+										.filter((entry) => entry.created)
+										.map((entry) => entry.fileName),
 								);
 								const updatedFiles = uniq(
-									mcpGuidelineUpdates.filter((entry) => !entry.created).map((entry) => entry.fileName),
+									mcpGuidelineUpdates
+										.filter((entry) => !entry.created)
+										.map((entry) => entry.fileName),
 								);
 								if (createdFiles.length > 0) {
-									console.log(`    Created MCP reminder file(s): ${createdFiles.join(", ")}`);
+									console.log(
+										`    Created MCP reminder file(s): ${createdFiles.join(", ")}`,
+									);
 								}
 								if (updatedFiles.length > 0) {
-									console.log(`    Added MCP reminder to ${updatedFiles.join(", ")}`);
+									console.log(
+										`    Added MCP reminder to ${updatedFiles.join(", ")}`,
+									);
 								}
 							}
 
@@ -1008,17 +1197,21 @@ program
 					}
 				}
 
-				let advancedConfig: Partial<RoadmapConfig> = { ...defaultAdvancedConfig };
+				let advancedConfig: Partial<RoadmapConfig> = {
+					...defaultAdvancedConfig,
+				};
 				const advancedConfigured = false;
 				let installClaudeAgentSelection = false;
 				const installShellCompletionsSelection = false;
-				let completionInstallResult: CompletionInstallResult | null = null;
-				let completionInstallError: string | null = null;
+				const completionInstallResult: CompletionInstallResult | null = null;
+				const completionInstallError: string | null = null;
 
 				if (isNonInteractive) {
 					advancedConfig = applyAdvancedOptionOverrides();
 					installClaudeAgentSelection =
-						integrationMode === "cli" ? parseBoolean(options.installClaudeAgent, false) : false;
+						integrationMode === "cli"
+							? parseBoolean(options.installClaudeAgent, false)
+							: false;
 				} else {
 					// User explicitly wants advanced config if they used the flags, otherwise skip to keep init fast.
 					const hasAdvancedFlags = Boolean(
@@ -1035,7 +1228,9 @@ program
 					if (hasAdvancedFlags) {
 						advancedConfig = applyAdvancedOptionOverrides();
 						installClaudeAgentSelection =
-							integrationMode === "cli" ? parseBoolean(options.installClaudeAgent, false) : false;
+							integrationMode === "cli"
+								? parseBoolean(options.installClaudeAgent, false)
+								: false;
 					} else {
 						// Skip advanced wizard to keep init simple and fast ("log default").
 						advancedConfig = { ...defaultAdvancedConfig };
@@ -1069,14 +1264,16 @@ program
 				const config = initResult.config;
 
 				// Show configuration summary
-				const supportsColor = Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+				const supportsColor =
+					Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
 				const colorize = (code: string, value: string): string =>
 					supportsColor ? `\u001B[${code}m${value}\u001B[0m` : value;
 				const label = (value: string): string => colorize("1;36", value);
 				const good = (value: string): string => colorize("32", value);
 				const bad = (value: string): string => colorize("31", value);
 				const muted = (value: string): string => colorize("2", value);
-				const boolValue = (value: boolean): string => (value ? good("true") : bad("false"));
+				const boolValue = (value: boolean): string =>
+					value ? good("true") : bad("false");
 				const formatCompletionInstructions = (instructions: string): string =>
 					instructions
 						.split("\n")
@@ -1098,37 +1295,58 @@ program
 							return line;
 						})
 						.join("\n");
-				const summaryLines: string[] = [`${label("Project Name:")} ${colorize("1", config.projectName)}`];
+				const summaryLines: string[] = [
+					`${label("Project Name:")} ${colorize("1", config.projectName)}`,
+				];
 				if (initResult.description) {
-					summaryLines.push(`${label("Description:")} ${initResult.description}`);
+					summaryLines.push(
+						`${label("Description:")} ${initResult.description}`,
+					);
 				}
 				if (initResult.blueprint) {
 					summaryLines.push(`${label("Blueprint:")} ${initResult.blueprint}`);
 				}
-				if (initResult.initialProposals && initResult.initialProposals.length > 0) {
+				if (
+					initResult.initialProposals &&
+					initResult.initialProposals.length > 0
+				) {
 					summaryLines.push(label("Initial Roadmap:"));
 					for (const proposal of initResult.initialProposals) {
 						summaryLines.push(`  - ${good(proposal.id)}: ${proposal.title}`);
 					}
 				}
 				if (integrationMode === "cli") {
-					summaryLines.push(`${label("AI Integration:")} ${muted("CLI commands (legacy)")}`);
+					summaryLines.push(
+						`${label("AI Integration:")} ${muted("CLI commands (legacy)")}`,
+					);
 					if (agentFiles.length > 0) {
-						summaryLines.push(`${label("Agent instructions:")} ${agentFiles.join(", ")}`);
+						summaryLines.push(
+							`${label("Agent instructions:")} ${agentFiles.join(", ")}`,
+						);
 					} else if (agentInstructionsSkipped) {
-						summaryLines.push(`${label("Agent instructions:")} ${muted("skipped")}`);
+						summaryLines.push(
+							`${label("Agent instructions:")} ${muted("skipped")}`,
+						);
 					} else {
-						summaryLines.push(`${label("Agent instructions:")} ${muted("none")}`);
+						summaryLines.push(
+							`${label("Agent instructions:")} ${muted("none")}`,
+						);
 					}
 				} else if (integrationMode === "mcp") {
-					summaryLines.push(`${label("AI Integration:")} ${good("MCP connector")}`);
+					summaryLines.push(
+						`${label("AI Integration:")} ${good("MCP connector")}`,
+					);
 					summaryLines.push(
 						`${label("Agent instruction files:")} ${muted("guidance is provided through the MCP connector.")}`,
 					);
 					summaryLines.push(`${label("MCP server name:")} ${mcpServerName}`);
-					summaryLines.push(`${label("MCP client setup:")} ${mcpClientSetupSummary ?? muted("skipped")}`);
+					summaryLines.push(
+						`${label("MCP client setup:")} ${mcpClientSetupSummary ?? muted("skipped")}`,
+					);
 				} else {
-					summaryLines.push(`${label("AI integration:")} ${muted("skipped (configure later via `roadmap init`)")}`);
+					summaryLines.push(
+						`${label("AI integration:")} ${muted("skipped (configure later via `roadmap init`)")}`,
+					);
 				}
 				let completionSummary: string;
 				if (completionInstallResult) {
@@ -1140,26 +1358,48 @@ program
 				} else {
 					completionSummary = muted("not configured");
 				}
-				summaryLines.push(`${label("Shell completions:")} ${completionSummary}`);
+				summaryLines.push(
+					`${label("Shell completions:")} ${completionSummary}`,
+				);
 				if (advancedConfigured) {
 					summaryLines.push(label("Advanced settings:"));
-					summaryLines.push(`  ${label("Check active branches:")} ${boolValue(Boolean(config.checkActiveBranches))}`);
-					summaryLines.push(`  ${label("Remote operations:")} ${boolValue(Boolean(config.remoteOperations))}`);
-					summaryLines.push(`  ${label("Active branch days:")} ${String(config.activeBranchDays)}`);
-					summaryLines.push(`  ${label("Bypass git hooks:")} ${boolValue(Boolean(config.bypassGitHooks))}`);
-					summaryLines.push(`  ${label("Auto commit:")} ${boolValue(Boolean(config.autoCommit))}`);
+					summaryLines.push(
+						`  ${label("Check active branches:")} ${boolValue(Boolean(config.checkActiveBranches))}`,
+					);
+					summaryLines.push(
+						`  ${label("Remote operations:")} ${boolValue(Boolean(config.remoteOperations))}`,
+					);
+					summaryLines.push(
+						`  ${label("Active branch days:")} ${String(config.activeBranchDays)}`,
+					);
+					summaryLines.push(
+						`  ${label("Bypass git hooks:")} ${boolValue(Boolean(config.bypassGitHooks))}`,
+					);
+					summaryLines.push(
+						`  ${label("Auto commit:")} ${boolValue(Boolean(config.autoCommit))}`,
+					);
 					summaryLines.push(
 						`  ${label("Zero-padded IDs:")} ${
-							config.zeroPaddedIds ? `${String(config.zeroPaddedIds)} digits` : muted("disabled")
+							config.zeroPaddedIds
+								? `${String(config.zeroPaddedIds)} digits`
+								: muted("disabled")
 						}`,
 					);
-					summaryLines.push(`  ${label("Web UI port:")} ${String(config.defaultPort)}`);
-					summaryLines.push(`  ${label("Auto open browser:")} ${boolValue(Boolean(config.autoOpenBrowser))}`);
+					summaryLines.push(
+						`  ${label("Web UI port:")} ${String(config.defaultPort)}`,
+					);
+					summaryLines.push(
+						`  ${label("Auto open browser:")} ${boolValue(Boolean(config.autoOpenBrowser))}`,
+					);
 					if (config.defaultEditor) {
-						summaryLines.push(`  ${label("Default editor:")} ${config.defaultEditor}`);
+						summaryLines.push(
+							`  ${label("Default editor:")} ${config.defaultEditor}`,
+						);
 					}
 				} else {
-					summaryLines.push(`${label("Advanced settings:")} ${muted("unchanged (run `roadmap config` to customize)")}`);
+					summaryLines.push(
+						`${label("Advanced settings:")} ${muted("unchanged (run `roadmap config` to customize)")}`,
+					);
 				}
 				clack.note(summaryLines.join("\n"), "Initialization Summary");
 
@@ -1201,7 +1441,9 @@ program
 
 				// Log Claude agent result from shared init
 				if (integrationMode === "cli" && initResult.mcpResults?.claudeAgent) {
-					clack.log.info(`Claude Code Roadmap.md agent ${initResult.mcpResults.claudeAgent}`);
+					clack.log.info(
+						`Claude Code Roadmap.md agent ${initResult.mcpResults.claudeAgent}`,
+					);
 				}
 
 				// Final warning if remote operations were enabled but no git remotes are configured
@@ -1241,7 +1483,9 @@ export async function generateNextDocId(core: Core): Promise<string> {
 		// Skip remote operations if disabled
 		if (config?.remoteOperations === false) {
 			if (process.env.DEBUG) {
-				console.log("Remote operations disabled - generating ID from local documents only");
+				console.log(
+					"Remote operations disabled - generating ID from local documents only",
+				);
 			}
 		} else {
 			await core.gitOps.fetch();
@@ -1251,7 +1495,10 @@ export async function generateNextDocId(core: Core): Promise<string> {
 
 		// Load files from all branches in parallel
 		const branchFilePromises = branches.map(async (branch) => {
-			const files = await core.gitOps.listFilesInTree(branch, `${roadmapDir}/docs`);
+			const files = await core.gitOps.listFilesInTree(
+				branch,
+				`${roadmapDir}/docs`,
+			);
 			return files
 				.map((file) => {
 					const match = file.match(/doc-(\d+)/);
@@ -1309,7 +1556,9 @@ export async function generateNextDecisionId(core: Core): Promise<string> {
 		// Skip remote operations if disabled
 		if (config?.remoteOperations === false) {
 			if (process.env.DEBUG) {
-				console.log("Remote operations disabled - generating ID from local decisions only");
+				console.log(
+					"Remote operations disabled - generating ID from local decisions only",
+				);
 			}
 		} else {
 			await core.gitOps.fetch();
@@ -1319,7 +1568,10 @@ export async function generateNextDecisionId(core: Core): Promise<string> {
 
 		// Load files from all branches in parallel
 		const branchFilePromises = branches.map(async (branch) => {
-			const files = await core.gitOps.listFilesInTree(branch, `${roadmapDir}/decisions`);
+			const files = await core.gitOps.listFilesInTree(
+				branch,
+				`${roadmapDir}/decisions`,
+			);
 			return files
 				.map((file) => {
 					const match = file.match(/decision-(\d+)/);
@@ -1399,9 +1651,15 @@ async function validateDependencies(
 	}
 
 	// Load both proposals and drafts to validate dependencies
-	const [proposals, drafts] = await Promise.all([core.queryProposals(), core.fs.listDrafts()]);
+	const [proposals, drafts] = await Promise.all([
+		core.queryProposals(),
+		core.fs.listDrafts(),
+	]);
 
-	const knownIds = [...proposals.map((proposal) => proposal.id), ...drafts.map((draft) => draft.id)];
+	const knownIds = [
+		...proposals.map((proposal) => proposal.id),
+		...drafts.map((draft) => draft.id),
+	];
 	for (const dep of dependencies) {
 		const match = knownIds.find((id) => proposalIdsEqual(dep, id));
 		if (match) {
@@ -1414,9 +1672,15 @@ async function validateDependencies(
 	return { valid, invalid };
 }
 
-function buildProposalFromOptions(id: string, title: string, options: Record<string, unknown>): Proposal {
+function buildProposalFromOptions(
+	id: string,
+	title: string,
+	options: Record<string, unknown>,
+): Proposal {
 	const parentInput = options.parent ? String(options.parent) : undefined;
-	const normalizedParent = parentInput ? normalizeProposalId(parentInput) : undefined;
+	const normalizedParent = parentInput
+		? normalizeProposalId(parentInput)
+		: undefined;
 
 	const createdDate = new Date().toISOString().slice(0, 16).replace("T", " ");
 
@@ -1469,10 +1733,14 @@ function buildProposalFromOptions(id: string, title: string, options: Record<str
 	);
 
 	// Validate priority option
-	const priority = options.priority ? String(options.priority).toLowerCase() : undefined;
+	const priority = options.priority
+		? String(options.priority).toLowerCase()
+		: undefined;
 	const validPriorities = ["high", "medium", "low"];
 	const validatedPriority =
-		priority && validPriorities.includes(priority) ? (priority as "high" | "medium" | "low") : undefined;
+		priority && validPriorities.includes(priority)
+			? (priority as "high" | "medium" | "low")
+			: undefined;
 
 	return {
 		id,
@@ -1491,16 +1759,28 @@ function buildProposalFromOptions(id: string, title: string, options: Record<str
 		documentation,
 		requires,
 		rawContent: "",
-		...(options.description || options.desc ? { description: String(options.description || options.desc) } : {}),
+		...(options.description || options.desc
+			? { description: String(options.description || options.desc) }
+			: {}),
 		...(normalizedParent ? { parentProposalId: normalizedParent } : {}),
 		...(validatedPriority ? { priority: validatedPriority } : {}),
 		...(options.rationale ? { rationale: String(options.rationale) } : {}),
-		...(options.maturity ? { maturity: String(options.maturity).toLowerCase() as any } : {}),
-		...(options.type ? { proposalType: String(options.type).toUpperCase() } : {}),
-		...(options.domain ? { domainId: String(options.domain).toUpperCase() } : {}),
-		...(options.category ? { category: String(options.category).toUpperCase() } : {}),
+		...(options.maturity
+			? { maturity: String(options.maturity).toLowerCase() as any }
+			: {}),
+		...(options.type
+			? { proposalType: String(options.type).toUpperCase() }
+			: {}),
+		...(options.domain
+			? { domainId: String(options.domain).toUpperCase() }
+			: {}),
+		...(options.category
+			? { category: String(options.category).toUpperCase() }
+			: {}),
 		...(options.needs ? { needs_capabilities: options.needs as string[] } : {}),
-		...(options.external ? { external_injections: options.external as string[] } : {}),
+		...(options.external
+			? { external_injections: options.external as string[] }
+			: {}),
 		...(options.unlocks ? { unlocks: options.unlocks as string[] } : {}),
 		...(options.builder ? { builder: String(options.builder) } : {}),
 		...(options.auditor ? { auditor: String(options.auditor) } : {}),
@@ -1526,16 +1806,32 @@ proposalCmd
 	)
 	.option("--desc <text>", "alias for --description")
 	.option("-a, --assignee <assignee>")
-	.option("--builder <agent>", "the agent primarily responsible for implementation")
-	.option("--auditor <agent>", "the agent responsible for peer review and audit")
+	.option(
+		"--builder <agent>",
+		"the agent primarily responsible for implementation",
+	)
+	.option(
+		"--auditor <agent>",
+		"the agent responsible for peer review and audit",
+	)
 	.option("-s, --status <status>")
-	.option("-t, --type <type>", "proposal type (DIRECTIVE, CAPABILITY, TECHNICAL, COMPONENT, OPS_ISSUE)")
+	.option(
+		"-t, --type <type>",
+		"proposal type (DIRECTIVE, CAPABILITY, TECHNICAL, COMPONENT, OPS_ISSUE)",
+	)
 	.option("--domain <domainId>", "domain ID (e.g. CORE, INFRA)")
-	.option("--category <category>", "category (FEATURE, BUG, RESEARCH, SECURITY, INFRA)")
+	.option(
+		"--category <category>",
+		"category (FEATURE, BUG, RESEARCH, SECURITY, INFRA)",
+	)
 	.option("-l, --labels <labels>")
 	.option("--priority <priority>", "set proposal priority (high, medium, low)")
 	.option("--plain", "use plain text output after creating")
-	.option("--ac <criteria>", "add acceptance criteria (can be used multiple times)", createMultiValueAccumulator())
+	.option(
+		"--ac <criteria>",
+		"add acceptance criteria (can be used multiple times)",
+		createMultiValueAccumulator(),
+	)
 	.option(
 		"--acceptance-criteria <criteria>",
 		"add acceptance criteria (can be used multiple times)",
@@ -1550,7 +1846,10 @@ proposalCmd
 		"--verify-role <role>",
 		"specify the role responsible for the next verification proposalment added (builder|peer-tester)",
 	)
-	.option("--verify-evidence <type>", "specify the expected evidence for the next verification proposalment added")
+	.option(
+		"--verify-evidence <type>",
+		"specify the expected evidence for the next verification proposalment added",
+	)
 	.option("--plan <text>", "add implementation plan")
 	.option("--notes <text>", "add implementation notes")
 	.option("--final-summary <text>", "add final summary")
@@ -1560,23 +1859,47 @@ proposalCmd
 		"--depends-on <proposalIds>",
 		"specify proposal dependencies (comma-separated or use multiple times)",
 		(value, previous) => {
-			const soFar = Array.isArray(previous) ? previous : previous ? [previous] : [];
+			const soFar = Array.isArray(previous)
+				? previous
+				: previous
+					? [previous]
+					: [];
 			return [...soFar, value];
 		},
 	)
-	.option("--dep <proposalIds>", "specify proposal dependencies (shortcut for --depends-on)", (value, previous) => {
-		const soFar = Array.isArray(previous) ? previous : previous ? [previous] : [];
-		return [...soFar, value];
-	})
-	.option("--ref <reference>", "add reference URL or file path (can be used multiple times)", (value, previous) => {
-		const soFar = Array.isArray(previous) ? previous : previous ? [previous] : [];
-		return [...soFar, value];
-	})
+	.option(
+		"--dep <proposalIds>",
+		"specify proposal dependencies (shortcut for --depends-on)",
+		(value, previous) => {
+			const soFar = Array.isArray(previous)
+				? previous
+				: previous
+					? [previous]
+					: [];
+			return [...soFar, value];
+		},
+	)
+	.option(
+		"--ref <reference>",
+		"add reference URL or file path (can be used multiple times)",
+		(value, previous) => {
+			const soFar = Array.isArray(previous)
+				? previous
+				: previous
+					? [previous]
+					: [];
+			return [...soFar, value];
+		},
+	)
 	.option(
 		"--doc <documentation>",
 		"add documentation URL or file path (can be used multiple times)",
 		(value, previous) => {
-			const soFar = Array.isArray(previous) ? previous : previous ? [previous] : [];
+			const soFar = Array.isArray(previous)
+				? previous
+				: previous
+					? [previous]
+					: [];
 			return [...soFar, value];
 		},
 	)
@@ -1584,12 +1907,22 @@ proposalCmd
 		"--requires <requirement>",
 		"add resource requirement (e.g. capability:high-reasoning) (can be used multiple times)",
 		(value, previous) => {
-			const soFar = Array.isArray(previous) ? previous : previous ? [previous] : [];
+			const soFar = Array.isArray(previous)
+				? previous
+				: previous
+					? [previous]
+					: [];
 			return [...soFar, value];
 		},
 	)
-	.option("--rationale <text>", "proposal rationale or constraint type (e.g. external, decision, technical)")
-	.option("--maturity <level>", "proposal maturity level (skeleton, contracted, audited)")
+	.option(
+		"--rationale <text>",
+		"proposal rationale or constraint type (e.g. external, decision, technical)",
+	)
+	.option(
+		"--maturity <level>",
+		"proposal maturity level (skeleton, contracted, audited)",
+	)
 	.option(
 		"--needs <capability>",
 		"add agent capability requirement (can be used multiple times)",
@@ -1606,8 +1939,12 @@ proposalCmd
 		createMultiValueAccumulator(),
 	)
 	.action(async (title: string | undefined, options) => {
-		const shouldUseWizard = hasInteractiveTTY && title === undefined && !hasCreateFieldFlags(options);
-		if (!shouldUseWizard && (title === undefined || title.trim().length === 0)) {
+		const shouldUseWizard =
+			hasInteractiveTTY && title === undefined && !hasCreateFieldFlags(options);
+		if (
+			!shouldUseWizard &&
+			(title === undefined || title.trim().length === 0)
+		) {
 			printMissingRequiredArgument("title");
 			return;
 		}
@@ -1624,8 +1961,9 @@ proposalCmd
 				return;
 			}
 			try {
-				const { proposal, filePath } = await core.createProposalFromInput(wizardInput);
-				process.stdout.write(`Created proposal ${proposal.id}` + "\n");
+				const { proposal, filePath } =
+					await core.createProposalFromInput(wizardInput);
+				process.stdout.write(`Created proposal ${proposal.id}\n`);
 				if (filePath) {
 					console.log(`File: ${filePath}`);
 				}
@@ -1659,10 +1997,17 @@ proposalCmd
 
 		// Validate dependencies if provided
 		if (proposal.dependencies.length > 0) {
-			const { valid, invalid } = await validateDependencies(proposal.dependencies, core);
+			const { valid, invalid } = await validateDependencies(
+				proposal.dependencies,
+				core,
+			);
 			if (invalid.length > 0) {
-				console.error(`Error: The following dependencies do not exist: ${invalid.join(", ")}`);
-				console.error("Please create these proposals first or check the proposal IDs.");
+				console.error(
+					`Error: The following dependencies do not exist: ${invalid.join(", ")}`,
+				);
+				console.error(
+					"Please create these proposals first or check the proposal IDs.",
+				);
 				process.exitCode = 1;
 				return;
 			}
@@ -1673,17 +2018,23 @@ proposalCmd
 		const criteria = processAcceptanceCriteriaOptions(options);
 		if (criteria.length > 0) {
 			let idx = 1;
-			proposal.acceptanceCriteriaItems = criteria.map((text) => ({ index: idx++, text, checked: false }));
+			proposal.acceptanceCriteriaItems = criteria.map((text) => ({
+				index: idx++,
+				text,
+				checked: false,
+			}));
 		}
 
 		const verificationAdditions = processVerificationOptions(options);
 		if (verificationAdditions.length > 0) {
 			let idx = 1;
-			proposal.verificationProposalments = verificationAdditions.map((text) => ({
-				index: idx++,
-				text,
-				checked: false,
-			}));
+			proposal.verificationProposalments = verificationAdditions.map(
+				(text) => ({
+					index: idx++,
+					text,
+					checked: false,
+				}),
+			);
 		}
 
 		// Handle implementation plan
@@ -1707,7 +2058,9 @@ proposalCmd
 			const filepath = await core.createDraft(proposal);
 			if (usePlainOutput) {
 				process.stdout.write(`Created draft ${proposal.id}\n`);
-				console.log(formatProposalPlainText(proposal, { filePathOverride: filepath }));
+				console.log(
+					formatProposalPlainText(proposal, { filePathOverride: filepath }),
+				);
 				return;
 			}
 			console.error(`Created draft ${proposal.id}`);
@@ -1716,7 +2069,9 @@ proposalCmd
 			const filepath = await core.createProposal(proposal);
 			if (usePlainOutput) {
 				process.stdout.write(`Created proposal ${proposal.id}\n`);
-				console.log(formatProposalPlainText(proposal, { filePathOverride: filepath }));
+				console.log(
+					formatProposalPlainText(proposal, { filePathOverride: filepath }),
+				);
 				return;
 			}
 			console.error(`Created proposal ${proposal.id}`);
@@ -1726,12 +2081,24 @@ proposalCmd
 
 program
 	.command("search [query]")
-	.description("search proposals, documents, and decisions using the shared index")
-	.option("--type <type>", "limit results to type (proposal, document, decision)", createMultiValueAccumulator())
+	.description(
+		"search proposals, documents, and decisions using the shared index",
+	)
+	.option(
+		"--type <type>",
+		"limit results to type (proposal, document, decision)",
+		createMultiValueAccumulator(),
+	)
 	.option("--status <status>", "filter proposal results by status")
-	.option("--priority <priority>", "filter proposal results by priority (high, medium, low)")
+	.option(
+		"--priority <priority>",
+		"filter proposal results by priority (high, medium, low)",
+	)
 	.option("--rationale <text>", "filter proposal results by rationale")
-	.option("--ready", "filter for proposals that are ready for pickup (unblocked and unassigned)")
+	.option(
+		"--ready",
+		"filter for proposals that are ready for pickup (unblocked and unassigned)",
+	)
 	.option("--limit <number>", "limit total results returned")
 	.option("--plain", "print plain text output instead of interactive UI")
 	.action(async (query: string | undefined, options) => {
@@ -1744,21 +2111,36 @@ program
 			contentStore.dispose();
 		};
 
-		const rawTypes = options.type ? (Array.isArray(options.type) ? options.type : [options.type]) : undefined;
-		const allowedTypes: SearchResultType[] = ["proposal", "document", "decision"];
+		const rawTypes = options.type
+			? Array.isArray(options.type)
+				? options.type
+				: [options.type]
+			: undefined;
+		const allowedTypes: SearchResultType[] = [
+			"proposal",
+			"document",
+			"decision",
+		];
 		const types = rawTypes
 			? rawTypes
 					.map((value: string) => value.toLowerCase())
 					.filter((value: string): value is SearchResultType => {
 						if (!allowedTypes.includes(value as SearchResultType)) {
-							console.warn(`Ignoring unsupported type '${value}'. Supported: proposal, document, decision`);
+							console.warn(
+								`Ignoring unsupported type '${value}'. Supported: proposal, document, decision`,
+							);
 							return false;
 						}
 						return true;
 					})
 			: allowedTypes;
 
-		const filters: { status?: string; priority?: SearchPriorityFilter; ready?: boolean; rationale?: string } = {};
+		const filters: {
+			status?: string;
+			priority?: SearchPriorityFilter;
+			ready?: boolean;
+			rationale?: string;
+		} = {};
 		if (options.status) {
 			filters.status = options.status;
 		}
@@ -1807,10 +2189,13 @@ program
 		}
 
 		const proposalResults = searchResults.filter(isProposalSearchResult);
-		const searchResultProposals = proposalResults.map((result) => result.proposal);
+		const searchResultProposals = proposalResults.map(
+			(result) => result.proposal,
+		);
 
 		const allProposals = (await core.queryProposals()).filter(
-			(proposal) => proposal.id && proposal.id.trim() !== "" && hasAnyPrefix(proposal.id),
+			(proposal) =>
+				proposal.id && proposal.id.trim() !== "" && hasAnyPrefix(proposal.id),
 		);
 
 		// If no proposals exist at all, show plain text results
@@ -1886,7 +2271,9 @@ function printSearchResults(results: SearchResult[]): void {
 		decisions.push(result);
 	}
 
-	const localProposals = proposals.filter((t) => isLocalEditableProposal(t.proposal));
+	const localProposals = proposals.filter((t) =>
+		isLocalEditableProposal(t.proposal),
+	);
 
 	let printed = false;
 
@@ -1896,8 +2283,12 @@ function printSearchResults(results: SearchResult[]): void {
 			const { proposal } = proposalResult;
 			const scoreText = formatScore(proposalResult.score);
 			const statusText = proposal.status ? ` (${proposal.status})` : "";
-			const priorityText = proposal.priority ? ` [${proposal.priority.toUpperCase()}]` : "";
-			console.log(`  ${proposal.id} - ${proposal.title}${statusText}${priorityText}${scoreText}`);
+			const priorityText = proposal.priority
+				? ` [${proposal.priority.toUpperCase()}]`
+				: "";
+			console.log(
+				`  ${proposal.id} - ${proposal.title}${statusText}${priorityText}${scoreText}`,
+			);
 		}
 		printed = true;
 	}
@@ -1942,14 +2333,20 @@ function formatScore(score: number | null): string {
 	return ` [score ${invertedScore.toFixed(3)}]`;
 }
 
-function isProposalSearchResult(result: SearchResult): result is ProposalSearchResult {
+function isProposalSearchResult(
+	result: SearchResult,
+): result is ProposalSearchResult {
 	return result.type === "proposal";
 }
 
 proposalCmd
 	.command("claim <proposalId> <agent>")
 	.description("claim a proposal with a short-lived lease")
-	.option("-d, --duration <minutes>", "lease duration in minutes", String(DEFAULT_CLAIM_DURATION_MINUTES))
+	.option(
+		"-d, --duration <minutes>",
+		"lease duration in minutes",
+		String(DEFAULT_CLAIM_DURATION_MINUTES),
+	)
 	.option("-m, --message <text>", "optional message for the claim")
 	.option("-f, --force", "force claim even if already claimed by another agent")
 	.action(async (proposalId, agent, options) => {
@@ -1958,14 +2355,18 @@ proposalCmd
 		const core = new Core(cwd);
 		try {
 			const proposal = await core.claimProposal(proposalId, agent, {
-				durationMinutes: Number.parseInt(options.duration),
+				durationMinutes: Number.parseInt(options.duration, 10),
 				message: options.message,
 				force: options.force,
 				autoCommit: true,
 			});
-			console.log(`Claimed proposal ${proposalId} for ${agent} until ${proposal.claim?.expires}`);
+			console.log(
+				`Claimed proposal ${proposalId} for ${agent} until ${proposal.claim?.expires}`,
+			);
 		} catch (err) {
-			console.error(`Failed to claim proposal ${proposalId}: ${(err as Error).message}`);
+			console.error(
+				`Failed to claim proposal ${proposalId}: ${(err as Error).message}`,
+			);
 			process.exit(1);
 		}
 	});
@@ -1985,7 +2386,9 @@ proposalCmd
 			});
 			console.log(`Released claim on proposal ${proposalId}`);
 		} catch (err) {
-			console.error(`Failed to release claim on proposal ${proposalId}: ${(err as Error).message}`);
+			console.error(
+				`Failed to release claim on proposal ${proposalId}: ${(err as Error).message}`,
+			);
 			process.exit(1);
 		}
 	});
@@ -1995,7 +2398,11 @@ proposalCmd
 	.command("note-add <proposalId> <agent>")
 	.description("add a note to a proposal")
 	.option("-c, --content <text>", "note content (required)")
-	.option("-t, --type <type>", "note type: discussion|review|decision|question", "discussion")
+	.option(
+		"-t, --type <type>",
+		"note type: discussion|review|decision|question",
+		"discussion",
+	)
 	.action(async (proposalId, agent, options) => {
 		if (!options.content) {
 			console.error("Error: --content is required");
@@ -2011,9 +2418,19 @@ proposalCmd
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
-					jsonrpc: "2.0", id: 1, method: "tools/call",
-					params: { name: "create_note", arguments: { step_id: proposalId, agent_id: agent, content: options.content, note_type: options.type } }
-				})
+					jsonrpc: "2.0",
+					id: 1,
+					method: "tools/call",
+					params: {
+						name: "create_note",
+						arguments: {
+							step_id: proposalId,
+							agent_id: agent,
+							content: options.content,
+							note_type: options.type,
+						},
+					},
+				}),
 			});
 			const data = await resp.json();
 			console.log(data.result?.content?.[0]?.text || JSON.stringify(data));
@@ -2034,9 +2451,18 @@ proposalCmd
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
-					jsonrpc: "2.0", id: 1, method: "tools/call",
-					params: { name: "list_notes", arguments: { step_id: proposalId, note_type: options.type, limit: options.limit ? parseInt(options.limit) : undefined } }
-				})
+					jsonrpc: "2.0",
+					id: 1,
+					method: "tools/call",
+					params: {
+						name: "list_notes",
+						arguments: {
+							step_id: proposalId,
+							note_type: options.type,
+							limit: options.limit ? parseInt(options.limit, 10) : undefined,
+						},
+					},
+				}),
 			});
 			const data = await resp.json();
 			console.log(data.result?.content?.[0]?.text || "No notes found");
@@ -2055,9 +2481,14 @@ proposalCmd
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
-					jsonrpc: "2.0", id: 1, method: "tools/call",
-					params: { name: "delete_note", arguments: { note_id: parseInt(noteId), agent_id: agent } }
-				})
+					jsonrpc: "2.0",
+					id: 1,
+					method: "tools/call",
+					params: {
+						name: "delete_note",
+						arguments: { note_id: parseInt(noteId, 10), agent_id: agent },
+					},
+				}),
 			});
 			const data = await resp.json();
 			console.log(data.result?.content?.[0]?.text || JSON.stringify(data));
@@ -2070,35 +2501,49 @@ proposalCmd
 proposalCmd
 	.command("renew <proposalId> <agent>")
 	.description("renew an existing claim")
-	.option("-d, --duration <minutes>", "lease duration in minutes", String(DEFAULT_CLAIM_DURATION_MINUTES))
+	.option(
+		"-d, --duration <minutes>",
+		"lease duration in minutes",
+		String(DEFAULT_CLAIM_DURATION_MINUTES),
+	)
 	.action(async (proposalId, agent, options) => {
 		const { requireProjectRoot } = await import("../utils/project-root.ts");
 		const cwd = await requireProjectRoot();
 		const core = new Core(cwd);
 		try {
 			const proposal = await core.renewClaim(proposalId, agent, {
-				durationMinutes: Number.parseInt(options.duration),
+				durationMinutes: Number.parseInt(options.duration, 10),
 				autoCommit: true,
 			});
-			console.log(`Renewed claim on proposal ${proposalId} for ${agent} until ${proposal.claim?.expires}`);
+			console.log(
+				`Renewed claim on proposal ${proposalId} for ${agent} until ${proposal.claim?.expires}`,
+			);
 		} catch (err) {
-			console.error(`Failed to renew claim on proposal ${proposalId}: ${(err as Error).message}`);
+			console.error(
+				`Failed to renew claim on proposal ${proposalId}: ${(err as Error).message}`,
+			);
 			process.exit(1);
 		}
 	});
 
 proposalCmd
 	.command("heartbeat <proposalId> <agent>")
-	.description("signal that the agent is still actively working on the proposal")
+	.description(
+		"signal that the agent is still actively working on the proposal",
+	)
 	.action(async (proposalId, agent) => {
 		const { requireProjectRoot } = await import("../utils/project-root.ts");
 		const cwd = await requireProjectRoot();
 		const core = new Core(cwd);
 		try {
 			const proposal = await core.heartbeat(proposalId, agent, true);
-			console.log(`Heartbeat recorded for proposal ${proposalId} (Claim valid until ${proposal.claim?.expires})`);
+			console.log(
+				`Heartbeat recorded for proposal ${proposalId} (Claim valid until ${proposal.claim?.expires})`,
+			);
 		} catch (err) {
-			console.error(`Failed to record heartbeat for proposal ${proposalId}: ${(err as Error).message}`);
+			console.error(
+				`Failed to record heartbeat for proposal ${proposalId}: ${(err as Error).message}`,
+			);
 			process.exit(1);
 		}
 	});
@@ -2113,11 +2558,15 @@ proposalCmd
 		const core = new Core(cwd);
 		try {
 			const recoveredIds = await core.pruneClaims({
-				timeoutMinutes: options.timeout ? Number.parseInt(options.timeout) : undefined,
+				timeoutMinutes: options.timeout
+					? Number.parseInt(options.timeout, 10)
+					: undefined,
 				autoCommit: true,
 			});
 			if (recoveredIds.length > 0) {
-				console.log(`Recovered ${recoveredIds.length} stale leases: ${recoveredIds.join(", ")}`);
+				console.log(
+					`Recovered ${recoveredIds.length} stale leases: ${recoveredIds.join(", ")}`,
+				);
 			} else {
 				console.log("No stale leases found.");
 			}
@@ -2129,7 +2578,9 @@ proposalCmd
 
 proposalCmd
 	.command("impact <proposalId>")
-	.description("analyze the forward impact of a proposal change (what breaks if this changes?)")
+	.description(
+		"analyze the forward impact of a proposal change (what breaks if this changes?)",
+	)
 	.action(async (proposalId) => {
 		const { requireProjectRoot } = await import("../utils/project-root.ts");
 		const cwd = await requireProjectRoot();
@@ -2141,9 +2592,13 @@ proposalCmd
 				return;
 			}
 			console.log(`Forward Impact Analysis for ${proposalId}:`);
-			console.log(`The following ${impact.length} proposals depend on this path:`);
+			console.log(
+				`The following ${impact.length} proposals depend on this path:`,
+			);
 			for (const proposal of impact) {
-				console.log(`- ${proposal.id} - ${proposal.title} [${proposal.status}]`);
+				console.log(
+					`- ${proposal.id} - ${proposal.title} [${proposal.status}]`,
+				);
 			}
 		} catch (err) {
 			console.error(`Failed to analyze impact: ${(err as Error).message}`);
@@ -2154,13 +2609,28 @@ proposalCmd
 proposalCmd
 	.command("list")
 	.description("list proposals grouped by status")
-	.option("-s, --status <status>", "filter proposals by status (case-insensitive)")
+	.option(
+		"-s, --status <status>",
+		"filter proposals by status (case-insensitive)",
+	)
 	.option("-a, --assignee <assignee>", "filter proposals by assignee")
-	.option("-m, --directive <directive>", "filter proposals by directive (closest match, case-insensitive)")
+	.option(
+		"-m, --directive <directive>",
+		"filter proposals by directive (closest match, case-insensitive)",
+	)
 	.option("-p, --parent <proposalId>", "filter proposals by parent proposal ID")
-	.option("-l, --labels <labels>", "filter proposals by labels (comma-separated)")
-	.option("--priority <priority>", "filter proposals by priority (high, medium, low)")
-	.option("--ready", "filter for proposals that are ready for pickup (unblocked and unassigned)")
+	.option(
+		"-l, --labels <labels>",
+		"filter proposals by labels (comma-separated)",
+	)
+	.option(
+		"--priority <priority>",
+		"filter proposals by priority (high, medium, low)",
+	)
+	.option(
+		"--ready",
+		"filter for proposals that are ready for pickup (unblocked and unassigned)",
+	)
 	.option("--sort <field>", "sort proposals by field (priority, id)")
 	.option("--rationale <text>", "filter proposals by rationale")
 	.option("--depth <number>", "filter proposals by depth level (0 = top-level)")
@@ -2192,8 +2662,14 @@ proposalCmd
 		if (options.priority) {
 			const priorityLower = options.priority.toLowerCase();
 			const validPriorities = ["high", "medium", "low"] as const;
-			if (!validPriorities.includes(priorityLower as (typeof validPriorities)[number])) {
-				console.error(`Invalid priority: ${options.priority}. Valid values are: high, medium, low`);
+			if (
+				!validPriorities.includes(
+					priorityLower as (typeof validPriorities)[number],
+				)
+			) {
+				console.error(
+					`Invalid priority: ${options.priority}. Valid values are: high, medium, low`,
+				);
 				process.exitCode = 1;
 				cleanup();
 				return;
@@ -2224,22 +2700,28 @@ proposalCmd
 			const validSortFields = ["priority", "id"];
 			const sortField = options.sort.toLowerCase();
 			if (!validSortFields.includes(sortField)) {
-				console.error(`Invalid sort field: ${options.sort}. Valid values are: priority, id`);
+				console.error(
+					`Invalid sort field: ${options.sort}. Valid values are: priority, id`,
+				);
 				process.exitCode = 1;
 				cleanup();
 				return;
 			}
 		}
 
-		const usePlainOutput = options.compact || isPlainRequested(options) || shouldAutoPlain;
+		const usePlainOutput =
+			options.compact || isPlainRequested(options) || shouldAutoPlain;
 		if (usePlainOutput) {
-			const proposals = await core.queryProposals({ filters: baseFilters, includeCrossBranch: false });
+			const proposals = await core.queryProposals({
+				filters: baseFilters,
+				includeCrossBranch: false,
+			});
 			const config = await core.filesystem.loadConfig();
 
 			if (parentId) {
-				const parentExists = (await core.queryProposals({ includeCrossBranch: false })).some((proposal) =>
-					proposalIdsEqual(parentId, proposal.id),
-				);
+				const parentExists = (
+					await core.queryProposals({ includeCrossBranch: false })
+				).some((proposal) => proposalIdsEqual(parentId, proposal.id));
 				if (!parentExists) {
 					console.error(`Parent proposal ${parentId} not found.`);
 					process.exitCode = 1;
@@ -2253,7 +2735,9 @@ proposalCmd
 				const validSortFields = ["priority", "id"];
 				const sortField = options.sort.toLowerCase();
 				if (!validSortFields.includes(sortField)) {
-					console.error(`Invalid sort field: ${options.sort}. Valid values are: priority, id`);
+					console.error(
+						`Invalid sort field: ${options.sort}. Valid values are: priority, id`,
+					);
 					process.exitCode = 1;
 					cleanup();
 					return;
@@ -2265,25 +2749,39 @@ proposalCmd
 
 			let filtered = sortedProposals;
 			if (parentId) {
-				filtered = filtered.filter((proposal) => proposal.parentProposalId && proposalIdsEqual(parentId, proposal.parentProposalId));
+				filtered = filtered.filter(
+					(proposal) =>
+						proposal.parentProposalId &&
+						proposalIdsEqual(parentId, proposal.parentProposalId),
+				);
 			}
 			if (options.rationale) {
 				const rationaleLower = String(options.rationale).toLowerCase();
-				filtered = filtered.filter((proposal) => (proposal.rationale ?? "").toLowerCase() === rationaleLower);
+				filtered = filtered.filter(
+					(proposal) =>
+						(proposal.rationale ?? "").toLowerCase() === rationaleLower,
+				);
 			}
 			if (options.depth !== undefined) {
 				const targetDepth = Number.parseInt(String(options.depth), 10);
-				filtered = filtered.filter((proposal) => proposal.depth === targetDepth);
+				filtered = filtered.filter(
+					(proposal) => proposal.depth === targetDepth,
+				);
 			}
 			if (options.maturity) {
 				const maturityLower = String(options.maturity).toLowerCase();
-				filtered = filtered.filter((proposal) => (proposal.maturity ?? "").toLowerCase() === maturityLower);
+				filtered = filtered.filter(
+					(proposal) =>
+						(proposal.maturity ?? "").toLowerCase() === maturityLower,
+				);
 			}
 
 			if (filtered.length === 0) {
 				if (options.parent) {
 					const canonicalParent = normalizeProposalId(String(options.parent));
-					console.log(`No child proposals found for parent proposal ${canonicalParent}.`);
+					console.log(
+						`No child proposals found for parent proposal ${canonicalParent}.`,
+					);
 				} else {
 					console.log("No proposals found.");
 				}
@@ -2303,9 +2801,13 @@ proposalCmd
 				const sortedByPriority = sortProposals(filtered, "priority");
 				console.log("Proposals (sorted by priority):");
 				for (const t of sortedByPriority) {
-					const priorityIndicator = t.priority ? `[${t.priority.toUpperCase()}] ` : "";
+					const priorityIndicator = t.priority
+						? `[${t.priority.toUpperCase()}] `
+						: "";
 					const statusIndicator = t.status ? ` (${t.status})` : "";
-					console.log(`  ${priorityIndicator}${t.id} - ${t.title}${statusIndicator}`);
+					console.log(
+						`  ${priorityIndicator}${t.id} - ${t.title}${statusIndicator}`,
+					);
 				}
 				cleanup();
 				return;
@@ -2320,7 +2822,8 @@ proposalCmd
 			const groups = new Map<string, Proposal[]>();
 			for (const proposal of filtered) {
 				const rawStatus = (proposal.status || "").trim();
-				const canonicalStatus = canonicalByLower.get(rawStatus.toLowerCase()) || rawStatus;
+				const canonicalStatus =
+					canonicalByLower.get(rawStatus.toLowerCase()) || rawStatus;
 				const list = groups.get(canonicalStatus) || [];
 				list.push(proposal);
 				groups.set(canonicalStatus, list);
@@ -2328,7 +2831,9 @@ proposalCmd
 
 			const orderedStatuses = [
 				...statuses.filter((status) => groups.has(status)),
-				...Array.from(groups.keys()).filter((status) => !statuses.includes(status)),
+				...Array.from(groups.keys()).filter(
+					(status) => !statuses.includes(status),
+				),
 			];
 
 			for (const status of orderedStatuses) {
@@ -2340,10 +2845,14 @@ proposalCmd
 				}
 				console.log(`${status || "No Status"}:`);
 				sortedList.forEach((proposal) => {
-					const priorityIndicator = proposal.priority ? `[${proposal.priority.toUpperCase()}] ` : "";
+					const priorityIndicator = proposal.priority
+						? `[${proposal.priority.toUpperCase()}] `
+						: "";
 					const readyIndicator = proposal.ready ? " [READY]" : "";
 					const indent = "  ".repeat(proposal.depth || 0);
-					console.log(`${indent}  ${priorityIndicator}${proposal.id} - ${proposal.title}${readyIndicator}`);
+					console.log(
+						`${indent}  ${priorityIndicator}${proposal.id} - ${proposal.title}${readyIndicator}`,
+					);
 				});
 				console.log();
 			}
@@ -2357,9 +2866,12 @@ proposalCmd
 		if (options.status) activeFilters.push(`Status: ${options.status}`);
 		if (options.assignee) activeFilters.push(`Assignee: ${options.assignee}`);
 		if (options.parent) {
-			activeFilters.push(`Parent: ${normalizeProposalId(String(options.parent))}`);
+			activeFilters.push(
+				`Parent: ${normalizeProposalId(String(options.parent))}`,
+			);
 		}
-		if (options.directive) activeFilters.push(`Directive: ${options.directive}`);
+		if (options.directive)
+			activeFilters.push(`Directive: ${options.directive}`);
 		if (options.labels) activeFilters.push(`Labels: ${options.labels}`);
 		if (options.priority) activeFilters.push(`Priority: ${options.priority}`);
 		if (options.ready) activeFilters.push("Ready for pickup");
@@ -2417,10 +2929,15 @@ proposalCmd
 			interactiveLoaderFilters.rationale = options.rationale;
 		}
 		if (options.depth !== undefined) {
-			interactiveLoaderFilters.depth = Number.parseInt(String(options.depth), 10);
+			interactiveLoaderFilters.depth = Number.parseInt(
+				String(options.depth),
+				10,
+			);
 		}
 		if (options.maturity) {
-			interactiveLoaderFilters.maturity = String(options.maturity).toLowerCase() as any;
+			interactiveLoaderFilters.maturity = String(
+				options.maturity,
+			).toLowerCase() as any;
 		}
 		await runUnifiedView({
 			core,
@@ -2439,13 +2956,18 @@ proposalCmd
 				updateProgress("Applying filters...");
 				const [proposals, allProposalsForParentCheck] = await Promise.all([
 					core.queryProposals({
-						filters: Object.keys(interactiveLoaderFilters).length > 0 ? interactiveLoaderFilters : undefined,
+						filters:
+							Object.keys(interactiveLoaderFilters).length > 0
+								? interactiveLoaderFilters
+								: undefined,
 					}),
 					parentId ? core.queryProposals() : Promise.resolve(undefined),
 				]);
 
 				if (parentId && allProposalsForParentCheck) {
-					const parentExists = allProposalsForParentCheck.some((proposal) => proposalIdsEqual(parentId, proposal.id));
+					const parentExists = allProposalsForParentCheck.some((proposal) =>
+						proposalIdsEqual(parentId, proposal.id),
+					);
 					if (!parentExists) {
 						throw new Error(`Parent proposal ${parentId} not found.`);
 					}
@@ -2456,7 +2978,9 @@ proposalCmd
 					const validSortFields = ["priority", "id"];
 					const sortField = options.sort.toLowerCase();
 					if (!validSortFields.includes(sortField)) {
-						throw new Error(`Invalid sort field: ${options.sort}. Valid values are: priority, id`);
+						throw new Error(
+							`Invalid sort field: ${options.sort}. Valid values are: priority, id`,
+						);
 					}
 					sortedProposals = sortProposals(proposals, sortField);
 				} else {
@@ -2465,7 +2989,11 @@ proposalCmd
 
 				let filtered = sortedProposals;
 				if (parentId) {
-					filtered = filtered.filter((proposal) => proposal.parentProposalId && proposalIdsEqual(parentId, proposal.parentProposalId));
+					filtered = filtered.filter(
+						(proposal) =>
+							proposal.parentProposalId &&
+							proposalIdsEqual(parentId, proposal.parentProposalId),
+					);
 				}
 
 				if (options.directive && filtered.length > 0) {
@@ -2473,13 +3001,16 @@ proposalCmd
 						core.filesystem.listDirectives(),
 						core.filesystem.listArchivedDirectives(),
 					]);
-					const resolveDirectiveFilterValue = createDirectiveFilterValueResolver([
-						...activeDirectives,
-						...archivedDirectives,
-					]);
+					const resolveDirectiveFilterValue =
+						createDirectiveFilterValueResolver([
+							...activeDirectives,
+							...archivedDirectives,
+						]);
 					const resolvedDirective = resolveClosestDirectiveFilterValue(
 						options.directive,
-						filtered.map((proposal) => resolveDirectiveFilterValue(proposal.directive ?? "")),
+						filtered.map((proposal) =>
+							resolveDirectiveFilterValue(proposal.directive ?? ""),
+						),
 					);
 					if (resolvedDirective) {
 						initialUnifiedFilter.directive = resolvedDirective;
@@ -2507,18 +3038,34 @@ proposalCmd
 	.option("--desc <text>", "alias for --description")
 	.option("-a, --assignee <assignee>")
 	.option("-s, --status <status>", "set proposal status")
-	.option("--request-audit", "set status to Review and signal readiness for peer audit")
-	.option("-T, --type <type>", "proposal type (DIRECTIVE, CAPABILITY, TECHNICAL, COMPONENT, OPS_ISSUE)")
+	.option(
+		"--request-audit",
+		"set status to Review and signal readiness for peer audit",
+	)
+	.option(
+		"-T, --type <type>",
+		"proposal type (DIRECTIVE, CAPABILITY, TECHNICAL, COMPONENT, OPS_ISSUE)",
+	)
 	.option("--domain <domainId>", "domain ID (e.g. CORE, INFRA)")
-	.option("--category <category>", "category (FEATURE, BUG, RESEARCH, SECURITY, INFRA)")
-	.option("-m, --directive <directive>", "set proposal directive (closest match, case-insensitive)")
+	.option(
+		"--category <category>",
+		"category (FEATURE, BUG, RESEARCH, SECURITY, INFRA)",
+	)
+	.option(
+		"-m, --directive <directive>",
+		"set proposal directive (closest match, case-insensitive)",
+	)
 	.option("-l, --label <labels>")
 	.option("--priority <priority>", "set proposal priority (high, medium, low)")
 	.option("--ordinal <number>", "set proposal ordinal for custom ordering")
 	.option("--plain", "use plain text output after editing")
 	.option("--add-label <label>")
 	.option("--remove-label <label>")
-	.option("--ac <criteria>", "add acceptance criteria (can be used multiple times)", createMultiValueAccumulator())
+	.option(
+		"--ac <criteria>",
+		"add acceptance criteria (can be used multiple times)",
+		createMultiValueAccumulator(),
+	)
 	.option(
 		"--remove-ac <index>",
 		"remove acceptance criterion by index (1-based, can be used multiple times)",
@@ -2534,12 +3081,18 @@ proposalCmd
 		"uncheck acceptance criterion by index (1-based, can be used multiple times)",
 		createMultiValueAccumulator(),
 	)
-	.option("--acceptance-criteria <criteria>", "set acceptance criteria (comma-separated or use multiple times)")
+	.option(
+		"--acceptance-criteria <criteria>",
+		"set acceptance criteria (comma-separated or use multiple times)",
+	)
 	.option("--plan <text>", "set implementation plan")
 	.option("--notes <text>", "set implementation notes (replaces existing)")
 	.option("--audit-notes <text>", "set audit notes (replaces existing)")
 	.option("--final-summary <text>", "set final summary (replaces existing)")
-	.option("--scope-summary <text>", "set high-level synthesis of sub-roadmap progress and insights")
+	.option(
+		"--scope-summary <text>",
+		"set high-level synthesis of sub-roadmap progress and insights",
+	)
 	.option(
 		"--append-notes <text>",
 		"append to implementation notes (can be used multiple times)",
@@ -2562,36 +3115,84 @@ proposalCmd
 		"--depends-on <proposalIds>",
 		"set proposal dependencies (comma-separated or use multiple times)",
 		(value, previous) => {
-			const soFar = Array.isArray(previous) ? previous : previous ? [previous] : [];
+			const soFar = Array.isArray(previous)
+				? previous
+				: previous
+					? [previous]
+					: [];
 			return [...soFar, value];
 		},
 	)
-	.option("--dep <proposalIds>", "set proposal dependencies (shortcut for --depends-on)", (value, previous) => {
-		const soFar = Array.isArray(previous) ? previous : previous ? [previous] : [];
-		return [...soFar, value];
-	})
-	.option("--ref <reference>", "set references (can be used multiple times)", (value, previous) => {
-		const soFar = Array.isArray(previous) ? previous : previous ? [previous] : [];
-		return [...soFar, value];
-	})
-	.option("--doc <documentation>", "set documentation (can be used multiple times)", (value, previous) => {
-		const soFar = Array.isArray(previous) ? previous : previous ? [previous] : [];
-		return [...soFar, value];
-	})
-	.option("--requires <requirement>", "add resource requirement (can be used multiple times)", (value, previous) => {
-		const soFar = Array.isArray(previous) ? previous : previous ? [previous] : [];
-		return [...soFar, value];
-	})
+	.option(
+		"--dep <proposalIds>",
+		"set proposal dependencies (shortcut for --depends-on)",
+		(value, previous) => {
+			const soFar = Array.isArray(previous)
+				? previous
+				: previous
+					? [previous]
+					: [];
+			return [...soFar, value];
+		},
+	)
+	.option(
+		"--ref <reference>",
+		"set references (can be used multiple times)",
+		(value, previous) => {
+			const soFar = Array.isArray(previous)
+				? previous
+				: previous
+					? [previous]
+					: [];
+			return [...soFar, value];
+		},
+	)
+	.option(
+		"--doc <documentation>",
+		"set documentation (can be used multiple times)",
+		(value, previous) => {
+			const soFar = Array.isArray(previous)
+				? previous
+				: previous
+					? [previous]
+					: [];
+			return [...soFar, value];
+		},
+	)
+	.option(
+		"--requires <requirement>",
+		"add resource requirement (can be used multiple times)",
+		(value, previous) => {
+			const soFar = Array.isArray(previous)
+				? previous
+				: previous
+					? [previous]
+					: [];
+			return [...soFar, value];
+		},
+	)
 	.option(
 		"--remove-requires <index>",
 		"remove resource requirement by index (1-based, can be used multiple times)",
 		createMultiValueAccumulator(),
 	)
 	.option("--clear-requires", "remove all resource requirements")
-	.option("--rationale <text>", "proposal rationale or constraint type (e.g. external, decision, technical)")
-	.option("--maturity <level>", "proposal maturity level (skeleton, contracted, audited)")
-	.option("--builder <agent>", "the agent primarily responsible for implementation")
-	.option("--auditor <agent>", "the agent responsible for peer review and audit")
+	.option(
+		"--rationale <text>",
+		"proposal rationale or constraint type (e.g. external, decision, technical)",
+	)
+	.option(
+		"--maturity <level>",
+		"proposal maturity level (skeleton, contracted, audited)",
+	)
+	.option(
+		"--builder <agent>",
+		"the agent primarily responsible for implementation",
+	)
+	.option(
+		"--auditor <agent>",
+		"the agent responsible for peer review and audit",
+	)
 	.option(
 		"--verify <assertion>",
 		"set verification proposalments (can be used multiple times)",
@@ -2621,7 +3222,10 @@ proposalCmd
 		"--verify-role <role>",
 		"specify the role responsible for the next verification proposalment added (builder|peer-tester)",
 	)
-	.option("--verify-evidence <type>", "specify the expected evidence for the next verification proposalment added")
+	.option(
+		"--verify-evidence <type>",
+		"specify the expected evidence for the next verification proposalment added",
+	)
 	.option(
 		"--needs <capability>",
 		"set agent capability requirements (comma-separated or use multiple times)",
@@ -2693,9 +3297,13 @@ proposalCmd
 		const core = new Core(cwd);
 
 		if (shouldUseWizard) {
-			let selectedProposalId = proposalId ? normalizeProposalId(proposalId) : undefined;
+			let selectedProposalId = proposalId
+				? normalizeProposalId(proposalId)
+				: undefined;
 			if (!selectedProposalId) {
-				const localProposals = await core.queryProposals({ includeCrossBranch: false });
+				const localProposals = await core.queryProposals({
+					includeCrossBranch: false,
+				});
 				const proposalOptions = localProposals.map((candidate) => ({
 					id: candidate.id,
 					title: candidate.title,
@@ -2704,14 +3312,17 @@ proposalCmd
 					console.log("No proposals found.");
 					return;
 				}
-				selectedProposalId = await pickProposalForEditWizard({ proposals: proposalOptions });
+				selectedProposalId = await pickProposalForEditWizard({
+					proposals: proposalOptions,
+				});
 				if (!selectedProposalId) {
 					clack.cancel("Proposal edit cancelled.");
 					return;
 				}
 			}
 
-			const existingProposalForWizard = await core.loadProposalById(selectedProposalId);
+			const existingProposalForWizard =
+				await core.loadProposalById(selectedProposalId);
 			if (!existingProposalForWizard) {
 				console.error(`Proposal ${selectedProposalId} not found.`);
 				process.exitCode = 1;
@@ -2719,14 +3330,20 @@ proposalCmd
 			}
 
 			const statuses = await getValidStatuses(core);
-			const wizardInput = await runProposalEditWizard({ proposal: existingProposalForWizard, statuses });
+			const wizardInput = await runProposalEditWizard({
+				proposal: existingProposalForWizard,
+				statuses,
+			});
 			if (!wizardInput) {
 				clack.cancel("Proposal edit cancelled.");
 				return;
 			}
 
 			try {
-				const updatedProposal = await core.editProposal(existingProposalForWizard.id, wizardInput);
+				const updatedProposal = await core.editProposal(
+					existingProposalForWizard.id,
+					wizardInput,
+				);
 				console.error(`Updated proposal ${updatedProposal.id}`);
 			} catch (error) {
 				console.error(error instanceof Error ? error.message : String(error));
@@ -2776,8 +3393,12 @@ proposalCmd
 		if (options.priority) {
 			const priority = String(options.priority).toLowerCase();
 			const validPriorities = ["high", "medium", "low"] as const;
-			if (!validPriorities.includes(priority as (typeof validPriorities)[number])) {
-				console.error(`Invalid priority: ${priority}. Valid values are: high, medium, low`);
+			if (
+				!validPriorities.includes(priority as (typeof validPriorities)[number])
+			) {
+				console.error(
+					`Invalid priority: ${priority}. Valid values are: high, medium, low`,
+				);
 				process.exitCode = 1;
 				return;
 			}
@@ -2804,7 +3425,9 @@ proposalCmd
 		if (options.ordinal !== undefined) {
 			const parsed = Number(options.ordinal);
 			if (Number.isNaN(parsed) || parsed < 0) {
-				console.error(`Invalid ordinal: ${options.ordinal}. Must be a non-negative number.`);
+				console.error(
+					`Invalid ordinal: ${options.ordinal}. Must be a non-negative number.`,
+				);
 				process.exitCode = 1;
 				return;
 			}
@@ -2840,8 +3463,14 @@ proposalCmd
 		const assigneeValues = parseCommaSeparated(options.assignee);
 		const acceptanceAdditions = processAcceptanceCriteriaOptions(options);
 
-		const combinedDependencies = [...toStringArray(options.dependsOn), ...toStringArray(options.dep)];
-		const dependencyValues = combinedDependencies.length > 0 ? normalizeDependencies(combinedDependencies) : undefined;
+		const combinedDependencies = [
+			...toStringArray(options.dependsOn),
+			...toStringArray(options.dep),
+		];
+		const dependencyValues =
+			combinedDependencies.length > 0
+				? normalizeDependencies(combinedDependencies)
+				: undefined;
 
 		const referenceValues = toStringArray(options.ref);
 		const normalizedReferences =
@@ -2960,7 +3589,9 @@ proposalCmd
 		if (requiresAddValues.length > 0) {
 			editArgs.requiresAdd = requiresAddValues;
 		}
-		const requiresRemoveIndices = parsePositiveIndexList(options.removeRequires);
+		const requiresRemoveIndices = parsePositiveIndexList(
+			options.removeRequires,
+		);
 		if (requiresRemoveIndices.length > 0) {
 			editArgs.requiresRemove = requiresRemoveIndices;
 		}
@@ -3041,7 +3672,9 @@ proposalCmd
 		if (options.addExternal !== undefined) {
 			editArgs.addExternalInjections = normalizeStringList(options.addExternal);
 		}
-		const removeExternalIndices = parsePositiveIndexList(options.removeExternal);
+		const removeExternalIndices = parsePositiveIndexList(
+			options.removeExternal,
+		);
 		if (removeExternalIndices.length > 0) {
 			editArgs.removeExternalInjections = removeExternalIndices;
 		}
@@ -3070,7 +3703,6 @@ proposalCmd
 		try {
 			const updateInput = buildProposalUpdateInput(editArgs);
 			updatedProposal = await core.editProposal(canonicalId, updateInput);
-
 		} catch (error) {
 			console.error(error instanceof Error ? error.message : String(error));
 			process.exitCode = 1;
@@ -3096,13 +3728,18 @@ proposalCmd
 		const cwd = await requireProjectRoot();
 		const core = new Core(cwd);
 		const localProposals = await core.fs.listProposals();
-		const proposal = await core.getProposalWithSubproposals(proposalId, localProposals);
+		const proposal = await core.getProposalWithSubproposals(
+			proposalId,
+			localProposals,
+		);
 		if (!proposal) {
 			console.error(`Proposal ${proposalId} not found.`);
 			return;
 		}
 
-		const allProposals = localProposals.some((candidate) => proposalIdsEqual(proposal.id, candidate.id))
+		const allProposals = localProposals.some((candidate) =>
+			proposalIdsEqual(proposal.id, candidate.id),
+		)
 			? localProposals
 			: [...localProposals, proposal];
 
@@ -3114,8 +3751,14 @@ proposalCmd
 		}
 
 		// Use enhanced proposal viewer with detail focus
-		const { viewProposalEnhanced } = await import("../ui/proposal-viewer-with-search.ts");
-		await viewProposalEnhanced(proposal, { startWithDetailFocus: true, core, proposals: allProposals });
+		const { viewProposalEnhanced } = await import(
+			"../ui/proposal-viewer-with-search.ts"
+		);
+		await viewProposalEnhanced(proposal, {
+			startWithDetailFocus: true,
+			core,
+			proposals: allProposals,
+		});
 	});
 
 proposalCmd
@@ -3162,7 +3805,12 @@ proposalCmd
 	.action(async (sourceId: string, targetId: string) => {
 		const cwd = await requireProjectRoot();
 		const core = new Core(cwd);
-		const proposal = await core.mergeProposals(sourceId, targetId, "cli", true);
+		const _proposal = await core.mergeProposals(
+			sourceId,
+			targetId,
+			"cli",
+			true,
+		);
 		console.log(`Merged ${sourceId} into ${targetId}`);
 	});
 
@@ -3177,7 +3825,7 @@ proposalCmd
 			id: normalizeProposalId(proposalId),
 			title: `Enrichment requested: ${topic}`,
 			agent: "cli",
-			timestamp: new Date().toISOString()
+			timestamp: new Date().toISOString(),
 		});
 		console.log(`Enrichment request logged for ${proposalId}`);
 	});
@@ -3188,7 +3836,12 @@ proposalCmd
 	.action(async (proposalId: string, level: string) => {
 		const cwd = await requireProjectRoot();
 		const core = new Core(cwd);
-		const proposal = await core.updatePriority(proposalId, level as any, "cli", true);
+		const proposal = await core.updatePriority(
+			proposalId,
+			level as any,
+			"cli",
+			true,
+		);
 		console.log(`Updated priority of ${proposalId} to ${proposal.priority}`);
 	});
 
@@ -3207,60 +3860,75 @@ proposalCmd
 		if (options.json) {
 			console.log(JSON.stringify(proposal, null, 2));
 		} else {
-			const { generateProposalMarkdown } = await import("../utils/proposal-markdown-generator.ts");
+			const { generateProposalMarkdown } = await import(
+				"../utils/proposal-markdown-generator.ts"
+			);
 			console.log(generateProposalMarkdown(proposal));
 		}
 	});
 
-
 proposalCmd
 	.argument("[proposalId]")
 	.option("--plain", "use plain text output")
-	.action(async (proposalId: string | undefined, options: { plain?: boolean }) => {
-		const cwd = await requireProjectRoot();
-		const core = new Core(cwd);
+	.action(
+		async (proposalId: string | undefined, options: { plain?: boolean }) => {
+			const cwd = await requireProjectRoot();
+			const core = new Core(cwd);
 
-		// Don't handle commands that should be handled by specific command handlers
-		const reservedCommands = ["create", "list", "edit", "view", "archive", "demote"];
-		if (proposalId && reservedCommands.includes(proposalId)) {
-			console.error(`Unknown command: ${proposalId}`);
-			proposalCmd.help();
-			return;
-		}
+			// Don't handle commands that should be handled by specific command handlers
+			const reservedCommands = [
+				"create",
+				"list",
+				"edit",
+				"view",
+				"archive",
+				"demote",
+			];
+			if (proposalId && reservedCommands.includes(proposalId)) {
+				console.error(`Unknown command: ${proposalId}`);
+				proposalCmd.help();
+				return;
+			}
 
-		// Handle single proposal view only
-		if (!proposalId) {
-			proposalCmd.help();
-			return;
-		}
+			// Handle single proposal view only
+			if (!proposalId) {
+				proposalCmd.help();
+				return;
+			}
 
-		const localProposals = await core.fs.listProposals();
-		const proposal = await core.getProposalWithSubproposals(proposalId, localProposals);
-		if (!proposal) {
-			console.error(`Proposal ${proposalId} not found.`);
-			return;
-		}
+			const localProposals = await core.fs.listProposals();
+			const proposal = await core.getProposalWithSubproposals(
+				proposalId,
+				localProposals,
+			);
+			if (!proposal) {
+				console.error(`Proposal ${proposalId} not found.`);
+				return;
+			}
 
-		const allProposals = localProposals.some((candidate) => proposalIdsEqual(proposal.id, candidate.id))
-			? localProposals
-			: [...localProposals, proposal];
+			const allProposals = localProposals.some((candidate) =>
+				proposalIdsEqual(proposal.id, candidate.id),
+			)
+				? localProposals
+				: [...localProposals, proposal];
 
-		// Plain text output for non-interactive environments
-		const usePlainOutput = isPlainRequested(options) || shouldAutoPlain;
-		if (usePlainOutput) {
-			console.log(formatProposalPlainText(proposal));
-			return;
-		}
+			// Plain text output for non-interactive environments
+			const usePlainOutput = isPlainRequested(options) || shouldAutoPlain;
+			if (usePlainOutput) {
+				console.log(formatProposalPlainText(proposal));
+				return;
+			}
 
-		// Use unified view with detail focus and Tab switching support
-		const { runUnifiedView } = await import("../ui/unified-view.ts");
-		await runUnifiedView({
-			core,
-			initialView: "proposal-detail",
-			selectedProposal: proposal,
-			proposals: allProposals,
-		});
-	});
+			// Use unified view with detail focus and Tab switching support
+			const { runUnifiedView } = await import("../ui/unified-view.ts");
+			await runUnifiedView({
+				core,
+				initialView: "proposal-detail",
+				selectedProposal: proposal,
+				proposals: allProposals,
+			});
+		},
+	);
 
 proposalCmd
 	.command("pickup")
@@ -3279,7 +3947,9 @@ proposalCmd
 		const result = await core.pickupProposal({
 			agent,
 			dryRun: options.dryRun,
-			durationMinutes: options.duration ? Number.parseInt(options.duration, 10) : undefined,
+			durationMinutes: options.duration
+				? Number.parseInt(options.duration, 10)
+				: undefined,
 		});
 
 		if (!result) {
@@ -3293,9 +3963,13 @@ proposalCmd
 			console.log("\nProposal details:");
 			console.log(formatProposalPlainText(result.proposal));
 		} else {
-			console.log(`✅ Successfully picked up and claimed proposal ${result.proposal.id}`);
+			console.log(
+				`✅ Successfully picked up and claimed proposal ${result.proposal.id}`,
+			);
 			console.log(result.explanation);
-			console.log(`\nUse 'roadmap proposal ${result.proposal.id}' to view details.`);
+			console.log(
+				`\nUse 'roadmap proposal ${result.proposal.id}' to view details.`,
+			);
 		}
 	});
 
@@ -3325,7 +3999,9 @@ draftCmd
 			const validSortFields = ["priority", "id"];
 			const sortField = options.sort.toLowerCase();
 			if (!validSortFields.includes(sortField)) {
-				console.error(`Invalid sort field: ${options.sort}. Valid values are: priority, id`);
+				console.error(
+					`Invalid sort field: ${options.sort}. Valid values are: priority, id`,
+				);
 				process.exitCode = 1;
 				return;
 			}
@@ -3340,7 +4016,9 @@ draftCmd
 			// Plain text output for non-interactive environments
 			console.log("Drafts:");
 			for (const draft of sortedDrafts) {
-				const priorityIndicator = draft.priority ? `[${draft.priority.toUpperCase()}] ` : "";
+				const priorityIndicator = draft.priority
+					? `[${draft.priority.toUpperCase()}] `
+					: "";
 				console.log(`  ${priorityIndicator}${draft.id} - ${draft.title}`);
 			}
 		} else {
@@ -3440,46 +4118,54 @@ draftCmd
 		}
 
 		// Use enhanced proposal viewer with detail focus
-		const { viewProposalEnhanced } = await import("../ui/proposal-viewer-with-search.ts");
+		const { viewProposalEnhanced } = await import(
+			"../ui/proposal-viewer-with-search.ts"
+		);
 		await viewProposalEnhanced(draft, { startWithDetailFocus: true, core });
 	});
 
 draftCmd
 	.argument("[proposalId]")
 	.option("--plain", "use plain text output")
-	.action(async (proposalId: string | undefined, options: { plain?: boolean }) => {
-		if (!proposalId) {
-			draftCmd.help();
-			return;
-		}
+	.action(
+		async (proposalId: string | undefined, options: { plain?: boolean }) => {
+			if (!proposalId) {
+				draftCmd.help();
+				return;
+			}
 
-		const cwd = await requireProjectRoot();
-		const core = new Core(cwd);
-		const { getDraftPath } = await import("../utils/proposal-path.ts");
-		const filePath = await getDraftPath(proposalId, core);
+			const cwd = await requireProjectRoot();
+			const core = new Core(cwd);
+			const { getDraftPath } = await import("../utils/proposal-path.ts");
+			const filePath = await getDraftPath(proposalId, core);
 
-		if (!filePath) {
-			console.error(`Draft ${proposalId} not found.`);
-			return;
-		}
-		const draft = await core.filesystem.loadDraft(proposalId);
+			if (!filePath) {
+				console.error(`Draft ${proposalId} not found.`);
+				return;
+			}
+			const draft = await core.filesystem.loadDraft(proposalId);
 
-		if (!draft) {
-			console.error(`Draft ${proposalId} not found.`);
-			return;
-		}
+			if (!draft) {
+				console.error(`Draft ${proposalId} not found.`);
+				return;
+			}
 
-		// Plain text output for non-interactive environments
-		const usePlainOutput = isPlainRequested(options) || shouldAutoPlain;
-		if (usePlainOutput) {
-			console.log(formatProposalPlainText(draft, { filePathOverride: filePath }));
-			return;
-		}
+			// Plain text output for non-interactive environments
+			const usePlainOutput = isPlainRequested(options) || shouldAutoPlain;
+			if (usePlainOutput) {
+				console.log(
+					formatProposalPlainText(draft, { filePathOverride: filePath }),
+				);
+				return;
+			}
 
-		// Use enhanced proposal viewer with detail focus
-		const { viewProposalEnhanced } = await import("../ui/proposal-viewer-with-search.ts");
-		await viewProposalEnhanced(draft, { startWithDetailFocus: true, core });
-	});
+			// Use enhanced proposal viewer with detail focus
+			const { viewProposalEnhanced } = await import(
+				"../ui/proposal-viewer-with-search.ts"
+			);
+			await viewProposalEnhanced(draft, { startWithDetailFocus: true, core });
+		},
+	);
 
 const directiveCmd = program.command("directive").aliases(["directives"]);
 
@@ -3493,17 +4179,39 @@ directiveCmd
 		const core = new Core(cwd);
 		await core.ensureConfigLoaded();
 
-		const [proposals, directives, archivedDirectives, config] = await Promise.all([
-			core.queryProposals({ includeCrossBranch: false }),
-			core.filesystem.listDirectives(),
-			core.filesystem.listArchivedDirectives(),
-			core.filesystem.loadConfig(),
-		]);
+		const [proposals, directives, archivedDirectives, config] =
+			await Promise.all([
+				core.queryProposals({ includeCrossBranch: false }),
+				core.filesystem.listDirectives(),
+				core.filesystem.listArchivedDirectives(),
+				core.filesystem.loadConfig(),
+			]);
 
-		const statuses = config?.statuses ?? ["New", "Draft", "Review", "Active", "Accepted", "Complete", "Rejected", "Abandoned", "Replaced"];		const archivedDirectiveIds = collectArchivedDirectiveKeys(archivedDirectives, directives);
-		const buckets = buildDirectiveBuckets(proposals, directives, statuses, { archivedDirectiveIds, archivedDirectives });
-		const active = buckets.filter((bucket) => !bucket.isNoDirective && !bucket.isCompleted);
-		const completed = buckets.filter((bucket) => !bucket.isNoDirective && bucket.isCompleted);
+		const statuses = config?.statuses ?? [
+			"New",
+			"Draft",
+			"Review",
+			"Active",
+			"Accepted",
+			"Complete",
+			"Rejected",
+			"Abandoned",
+			"Replaced",
+		];
+		const archivedDirectiveIds = collectArchivedDirectiveKeys(
+			archivedDirectives,
+			directives,
+		);
+		const buckets = buildDirectiveBuckets(proposals, directives, statuses, {
+			archivedDirectiveIds,
+			archivedDirectives,
+		});
+		const active = buckets.filter(
+			(bucket) => !bucket.isNoDirective && !bucket.isCompleted,
+		);
+		const completed = buckets.filter(
+			(bucket) => !bucket.isNoDirective && bucket.isCompleted,
+		);
 
 		const formatBucket = (bucket: (typeof buckets)[number]) => {
 			const id = bucket.directive ?? bucket.label;
@@ -3523,7 +4231,10 @@ directiveCmd
 		console.log(`\nCompleted directives (${completed.length}):`);
 		if (completed.length === 0) {
 			console.log("  (none)");
-		} else if (options.showCompleted || process.argv.includes("--show-completed")) {
+		} else if (
+			options.showCompleted ||
+			process.argv.includes("--show-completed")
+		) {
 			for (const bucket of completed) {
 				console.log(formatBucket(bucket));
 			}
@@ -3555,17 +4266,27 @@ const boardCmd = program.command("board");
 
 function addBoardOptions(cmd: Command) {
 	return cmd
-		.option("-l, --layout <layout>", "board layout (horizontal|vertical)", "horizontal")
-		.option("--vertical", "use vertical layout (shortcut for --layout vertical)")
+		.option(
+			"-l, --layout <layout>",
+			"board layout (horizontal|vertical)",
+			"horizontal",
+		)
+		.option(
+			"--vertical",
+			"use vertical layout (shortcut for --layout vertical)",
+		)
 		.option("-m, --directives", "group proposals by directive")
 		.option("-s, --source <source>", "data source (file|postgres)", "file")
-		.option("-n, --namespace <name>", "reserved for compatibility with older remote backends")
+		.option(
+			"-n, --namespace <name>",
+			"reserved for compatibility with older remote backends",
+		)
 		.option("--plain", "use plain text output instead of interactive UI");
 }
 
-async function handleBoardView(options: { 
-	layout?: string; 
-	vertical?: boolean; 
+async function handleBoardView(options: {
+	layout?: string;
+	vertical?: boolean;
 	directives?: boolean;
 	source?: string;
 	namespace?: string;
@@ -3575,12 +4296,15 @@ async function handleBoardView(options: {
 	const core = new Core(cwd);
 	const config = await core.filesystem.loadConfig();
 
-	const _layout = options.vertical ? "vertical" : (options.layout as "horizontal" | "vertical") || "horizontal";
+	const _layout = options.vertical
+		? "vertical"
+		: (options.layout as "horizontal" | "vertical") || "horizontal";
 	const _maxColumnWidth = config?.maxColumnWidth || 20; // Default for terminal display
 	const statuses = config?.statuses || [];
 
 	const source =
-		options.source === "postgres" || (!options.source && config?.database?.provider === "Postgres")
+		options.source === "postgres" ||
+		(!options.source && config?.database?.provider === "Postgres")
 			? "postgres"
 			: "file";
 
@@ -3594,10 +4318,23 @@ async function handleBoardView(options: {
 		if (options.directives) {
 			const { generateDirectiveGroupedBoard } = await import("./board.ts");
 			const directives = await core.filesystem.listDirectives();
-			console.log(generateDirectiveGroupedBoard(proposals, statuses, directives, config?.projectName || "Project"));
+			console.log(
+				generateDirectiveGroupedBoard(
+					proposals,
+					statuses,
+					directives,
+					config?.projectName || "Project",
+				),
+			);
 		} else {
 			const { generateKanbanBoardWithMetadata } = await import("./board.ts");
-			console.log(generateKanbanBoardWithMetadata(proposals, statuses, config?.projectName || "Project"));
+			console.log(
+				generateKanbanBoardWithMetadata(
+					proposals,
+					statuses,
+					config?.projectName || "Project",
+				),
+			);
 		}
 		return;
 	}
@@ -3626,14 +4363,15 @@ async function handleBoardView(options: {
 			const [archivedDirectives] = await Promise.all([
 				core.filesystem.listArchivedDirectives(),
 			]);
-			
+
 			const resolveDirectiveAlias = (value?: string): string => {
 				const normalized = (value ?? "").trim();
 				if (!normalized) {
 					return "";
 				}
 				const key = normalized.toLowerCase();
-				const looksLikeDirectiveId = /^\d+$/.test(normalized) || /^m-\d+$/i.test(normalized);
+				const looksLikeDirectiveId =
+					/^\d+$/.test(normalized) || /^m-\d+$/i.test(normalized);
 				const canonicalInputId = looksLikeDirectiveId
 					? `m-${String(Number.parseInt(normalized.replace(/^m-/i, ""), 10))}`
 					: null;
@@ -3660,16 +4398,23 @@ async function handleBoardView(options: {
 						return false;
 					}
 					const numericAlias = String(Number.parseInt(idMatch[1], 10));
-					return aliasKeys.has(numericAlias) || aliasKeys.has(`m-${numericAlias}`);
+					return (
+						aliasKeys.has(numericAlias) || aliasKeys.has(`m-${numericAlias}`)
+					);
 				};
-				const findIdMatch = (directives: Directive[]): Directive | undefined => {
-					const rawExactMatch = directives.find((directive) => directive.id.trim().toLowerCase() === key);
+				const findIdMatch = (
+					directives: Directive[],
+				): Directive | undefined => {
+					const rawExactMatch = directives.find(
+						(directive) => directive.id.trim().toLowerCase() === key,
+					);
 					if (rawExactMatch) {
 						return rawExactMatch;
 					}
 					if (canonicalInputId) {
 						const canonicalRawMatch = directives.find(
-							(directive) => directive.id.trim().toLowerCase() === canonicalInputId,
+							(directive) =>
+								directive.id.trim().toLowerCase() === canonicalInputId,
 						);
 						if (canonicalRawMatch) {
 							return canonicalRawMatch;
@@ -3709,11 +4454,15 @@ async function handleBoardView(options: {
 				}
 				return normalized;
 			};
-			const archivedKeys = new Set(collectArchivedDirectiveKeys(archivedDirectives, directiveEntities));
+			const archivedKeys = new Set(
+				collectArchivedDirectiveKeys(archivedDirectives, directiveEntities),
+			);
 			const normalizedProposals =
 				archivedKeys.size > 0
 					? proposals.map((proposal) => {
-							const key = directiveKey(resolveDirectiveAlias(proposal.directive));
+							const key = directiveKey(
+								resolveDirectiveAlias(proposal.directive),
+							);
 							if (!key || !archivedKeys.has(key)) {
 								return proposal;
 							}
@@ -3721,16 +4470,23 @@ async function handleBoardView(options: {
 						})
 					: proposals;
 			return {
-				proposals: normalizedProposals.map((t) => ({ ...t, status: t.status || "" })),
+				proposals: normalizedProposals.map((t) => ({
+					...t,
+					status: t.status || "",
+				})),
 				statuses,
 			};
 		},
 	});
 }
 
-addBoardOptions(boardCmd).description("display proposals in a Kanban board").action(handleBoardView);
+addBoardOptions(boardCmd)
+	.description("display proposals in a Kanban board")
+	.action(handleBoardView);
 
-addBoardOptions(boardCmd.command("view").description("display proposals in a Kanban board")).action(handleBoardView);
+addBoardOptions(
+	boardCmd.command("view").description("display proposals in a Kanban board"),
+).action(handleBoardView);
 
 boardCmd
 	.command("export [filename]")
@@ -3746,7 +4502,9 @@ boardCmd
 
 		// Load proposals with progress tracking
 		const { createLoadingScreen } = await import("../ui/loading.ts");
-		const loadingScreen = await createLoadingScreen("Loading proposals for export");
+		const loadingScreen = await createLoadingScreen(
+			"Loading proposals for export",
+		);
 
 		let finalProposals: Proposal[];
 		try {
@@ -3767,16 +4525,23 @@ boardCmd
 			if (options.readme) {
 				// Use version from option if provided, otherwise use the CLI version
 				const exportVersion = options.exportVersion || version;
-				await updateReadmeWithBoard(finalProposals, statuses, projectName, exportVersion);
+				await updateReadmeWithBoard(
+					finalProposals,
+					statuses,
+					projectName,
+					exportVersion,
+				);
 				console.log("Updated README.md with Kanban board.");
 			} else {
 				// Use filename argument or default to config.exportPath/Roadmap.md
-				const exportDir = config?.exportPath ? join(cwd, config.exportPath) : cwd;
-				
+				const exportDir = config?.exportPath
+					? join(cwd, config.exportPath)
+					: cwd;
+
 				// Ensure export directory exists
 				const { mkdir } = await import("node:fs/promises");
 				await mkdir(exportDir, { recursive: true });
-				
+
 				const outputFile = filename || "Roadmap.md";
 				const outputPath = join(exportDir, outputFile as string);
 
@@ -3787,7 +4552,9 @@ boardCmd
 				if (fileExists && !options.force) {
 					const rl = createInterface({ input });
 					try {
-						const answer = await rl.question(`File "${outputPath}" already exists. Overwrite? (y/N): `);
+						const answer = await rl.question(
+							`File "${outputPath}" already exists. Overwrite? (y/N): `,
+						);
 						if (!answer.toLowerCase().startsWith("y")) {
 							console.log("Export cancelled.");
 							return;
@@ -3798,7 +4565,13 @@ boardCmd
 				}
 
 				const { exportKanbanBoardToFile } = await import("./board.ts");
-				await exportKanbanBoardToFile(finalProposals, statuses, outputPath, projectName, options.force || !fileExists);
+				await exportKanbanBoardToFile(
+					finalProposals,
+					statuses,
+					outputPath,
+					projectName,
+					options.force || !fileExists,
+				);
 				console.log(`Exported board to ${outputPath}`);
 			}
 		} catch (error) {
@@ -3884,13 +4657,20 @@ docCmd
 		}
 
 		// Interactive UI
-		const { genericSelectList } = await import("../ui/components/generic-list.ts");
+		const { genericSelectList } = await import(
+			"../ui/components/generic-list.ts"
+		);
 		const selected = await genericSelectList("Select a document", docs);
 		if (selected) {
 			// Show document details (recursive search)
-			const files = await Array.fromAsync(glob("**/*.md", { cwd: core.filesystem.docsDir }));
+			const files = await Array.fromAsync(
+				glob("**/*.md", { cwd: core.filesystem.docsDir }),
+			);
 			const docFile = files.find(
-				(f) => f.startsWith(`${selected.id} -`) || f.endsWith(`/${selected.id}.md`) || f === `${selected.id}.md`,
+				(f) =>
+					f.startsWith(`${selected.id} -`) ||
+					f.endsWith(`/${selected.id}.md`) ||
+					f === `${selected.id}.md`,
 			);
 			if (docFile) {
 				const filePath = join(core.filesystem.docsDir, docFile);
@@ -3925,7 +4705,10 @@ const decisionCmd = program.command("decision");
 
 decisionCmd
 	.command("create <title>")
-	.option("-s, --status <status>", "decision status (proposed, accepted, rejected, superseded)")
+	.option(
+		"-s, --status <status>",
+		"decision status (proposed, accepted, rejected, superseded)",
+	)
 	.option("--context <text>", "background/problem proposalment")
 	.option("--decision <text>", "the chosen path")
 	.option("--consequences <text>", "trade-offs and impact")
@@ -3939,10 +4722,14 @@ decisionCmd
 			title: title as string,
 			date: new Date().toISOString().slice(0, 16).replace("T", " "),
 			status: (options.status || "proposed") as Decision["status"],
-			context: options.context || "[Describe the context and problem that needs to be addressed]",
+			context:
+				options.context ||
+				"[Describe the context and problem that needs to be addressed]",
 			decision: options.decision || "[Describe the decision that was made]",
-			consequences: options.consequences || "[Describe the consequences of this decision]",
-			alternatives: options.alternatives || "[Describe the alternatives considered]",
+			consequences:
+				options.consequences || "[Describe the consequences of this decision]",
+			alternatives:
+				options.alternatives || "[Describe the alternatives considered]",
 			rawContent: "",
 		};
 		await core.createDecision(decision);
@@ -3980,7 +4767,11 @@ program
 			let from = options.as;
 			if (!from) {
 				try {
-					const nameResult = execSync("git config user.name", { cwd, encoding: "utf-8", stdio: "pipe" });
+					const nameResult = execSync("git config user.name", {
+						cwd,
+						encoding: "utf-8",
+						stdio: "pipe",
+					});
 					from = nameResult.trim() || "agent";
 				} catch {
 					from = "agent";
@@ -4006,18 +4797,22 @@ program
 			const config = await core.filesystem.loadConfig();
 			const { join } = await import("node:path");
 			const { existsSync, mkdirSync, writeFileSync } = await import("node:fs");
-			const { createInterface: createLineInterface, emitKeypressEvents } = await import("node:readline");
+			const { createInterface: createLineInterface, emitKeypressEvents } =
+				await import("node:readline");
 			const versionLabel = formatVersionLabel(versionInfo);
 
 			let group = "project";
-			if (config?.projectName) group = config.projectName.toLowerCase().replace(/[^a-z0-9]/g, "-");
+			if (config?.projectName)
+				group = config.projectName.toLowerCase().replace(/[^a-z0-9]/g, "-");
 			let fileName = `group-${group}.md`;
 			let type: "public" | "group" | "private" = "group";
 			let to: string | undefined;
 
 			if (target) {
 				if (target.startsWith("@")) {
-					const nameResult = execSync("git config user.name", { encoding: "utf8" });
+					const nameResult = execSync("git config user.name", {
+						encoding: "utf8",
+					});
 					const from =
 						nameResult
 							.trim()
@@ -4039,7 +4834,9 @@ program
 
 			let sharedRoadmapDir = join(cwd, "roadmap");
 			try {
-				const gitRoot = execSync("git rev-parse --show-toplevel", { encoding: "utf8" }).trim();
+				const gitRoot = execSync("git rev-parse --show-toplevel", {
+					encoding: "utf8",
+				}).trim();
 				if (gitRoot) sharedRoadmapDir = join(gitRoot, "roadmap");
 			} catch {}
 
@@ -4055,7 +4852,11 @@ program
 			let from = options.as;
 			if (!from) {
 				try {
-					const nameResult = execSync("git config user.name", { cwd, encoding: "utf-8", stdio: "pipe" });
+					const nameResult = execSync("git config user.name", {
+						cwd,
+						encoding: "utf-8",
+						stdio: "pipe",
+					});
 					from = nameResult.trim() || "agent";
 				} catch {
 					from = "agent";
@@ -4076,7 +4877,8 @@ program
 			const knownUsers = await core.getKnownUsers();
 			let draft: ChatComposerProposal = createChatComposerProposal();
 			const interactiveInput =
-				Boolean(process.stdin.isTTY && process.stdout.isTTY) && typeof process.stdin.setRawMode === "function";
+				Boolean(process.stdin.isTTY && process.stdout.isTTY) &&
+				typeof process.stdin.setRawMode === "function";
 			let stopWatchingMessages: (() => void) | undefined;
 			let shuttingDown = false;
 			let isSending = false;
@@ -4108,11 +4910,16 @@ program
 						? [
 								"  mentions:",
 								...suggestions.map((suggestion) =>
-									suggestion.selected ? `  \x1b[1;36m> ${suggestion.value}\x1b[0m` : `    ${suggestion.value}`,
+									suggestion.selected
+										? `  \x1b[1;36m> ${suggestion.value}\x1b[0m`
+										: `    ${suggestion.value}`,
 								),
 							]
 						: [];
-				const composerLines = [...suggestionLines, ...renderChatComposerLines(draft)];
+				const composerLines = [
+					...suggestionLines,
+					...renderChatComposerLines(draft),
+				];
 
 				clearComposer();
 				process.stdout.write(composerLines.join("\n"));
@@ -4172,7 +4979,13 @@ program
 
 			const handleKeypress = (
 				chunk: string,
-				key: { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean; sequence?: string },
+				key: {
+					name?: string;
+					ctrl?: boolean;
+					meta?: boolean;
+					shift?: boolean;
+					sequence?: string;
+				},
 			) => {
 				void (async () => {
 					const acceptMentionSelection = () => {
@@ -4186,7 +4999,11 @@ program
 						return true;
 					};
 
-					if ((key.name === "return" || key.name === "enter") && !key.meta && !key.shift) {
+					if (
+						(key.name === "return" || key.name === "enter") &&
+						!key.meta &&
+						!key.shift
+					) {
 						if (acceptMentionSelection()) {
 							return;
 						}
@@ -4198,15 +5015,25 @@ program
 					}
 
 					if (key.name === "tab") {
-						const mentionCompleted = cycleChatMention(draft, knownUsers, key.shift ? -1 : 1);
+						const mentionCompleted = cycleChatMention(
+							draft,
+							knownUsers,
+							key.shift ? -1 : 1,
+						);
 						draft =
-							mentionCompleted !== draft ? mentionCompleted : completeChatPath(draft, { homeDir: process.env.HOME });
+							mentionCompleted !== draft
+								? mentionCompleted
+								: completeChatPath(draft, { homeDir: process.env.HOME });
 						renderComposer();
 						return;
 					}
 
 					if (key.name === "up" || key.name === "down") {
-						const mentionCompleted = cycleChatMention(draft, knownUsers, key.name === "up" ? -1 : 1);
+						const mentionCompleted = cycleChatMention(
+							draft,
+							knownUsers,
+							key.name === "up" ? -1 : 1,
+						);
 						if (mentionCompleted !== draft) {
 							draft = mentionCompleted;
 							renderComposer();
@@ -4225,7 +5052,13 @@ program
 						draft = result.proposal;
 						renderComposer();
 						try {
-							await core.sendMessage({ from, message: result.message, type, group, to });
+							await core.sendMessage({
+								from,
+								message: result.message,
+								type,
+								group,
+								to,
+							});
 						} finally {
 							isSending = false;
 							renderComposer();
@@ -4300,11 +5133,14 @@ program
 
 			let fileName = "PUBLIC.md";
 			let group = "project";
-			if (config?.projectName) group = config.projectName.toLowerCase().replace(/[^a-z0-9]/g, "-");
+			if (config?.projectName)
+				group = config.projectName.toLowerCase().replace(/[^a-z0-9]/g, "-");
 
 			if (target) {
 				if (target.startsWith("@")) {
-					const nameResult = execSync("git config user.name", { encoding: "utf8" });
+					const nameResult = execSync("git config user.name", {
+						encoding: "utf8",
+					});
 					const from =
 						nameResult
 							.trim()
@@ -4324,7 +5160,9 @@ program
 			// Resolve shared roadmap dir (handling worktrees)
 			let sharedRoadmapDir = join(cwd, "roadmap");
 			try {
-				const gitRoot = execSync("git rev-parse --show-toplevel", { encoding: "utf8" }).trim();
+				const gitRoot = execSync("git rev-parse --show-toplevel", {
+					encoding: "utf8",
+				}).trim();
 				if (gitRoot) sharedRoadmapDir = join(gitRoot, "roadmap");
 			} catch {}
 
@@ -4362,25 +5200,43 @@ program
 
 program
 	.command("listen [channel]")
-	.description("watch a chat channel and stream new messages as JSONL (like a Discord gateway)")
+	.description(
+		"watch a chat channel and stream new messages as JSONL (like a Discord gateway)",
+	)
 	.option("--as <name>", "your identity — messages from you are skipped")
 	.option("--mention <name>", "only emit messages that @mention this name")
-	.option("--since <timestamp>", "replay messages after this ISO timestamp before streaming live")
+	.option(
+		"--since <timestamp>",
+		"replay messages after this ISO timestamp before streaming live",
+	)
 	.option("--all", "include your own messages (don't filter by identity)")
-	.option("--pretty", "output messages in a human-friendly Discord-style format")
-	.option("--markdown", "output messages in Discord-style markdown (without ANSI colors)")
+	.option(
+		"--pretty",
+		"output messages in a human-friendly Discord-style format",
+	)
+	.option(
+		"--markdown",
+		"output messages in Discord-style markdown (without ANSI colors)",
+	)
 	.action(async (channel, options) => {
 		try {
 			const cwd = await requireProjectRoot();
 			const core = new Core(cwd);
 			const config = await core.filesystem.loadConfig();
 			const resolvedChannel =
-				channel ?? (config?.projectName ? config.projectName.toLowerCase().replace(/[^a-z0-9]/g, "-") : "project");
+				channel ??
+				(config?.projectName
+					? config.projectName.toLowerCase().replace(/[^a-z0-9]/g, "-")
+					: "project");
 
 			let identity = options.as;
 			if (!identity && !options.all) {
 				try {
-					const nameResult = execSync("git config user.name", { cwd, encoding: "utf-8", stdio: "pipe" });
+					const nameResult = execSync("git config user.name", {
+						cwd,
+						encoding: "utf-8",
+						stdio: "pipe",
+					});
 					identity = nameResult.trim() || undefined;
 				} catch {
 					// no identity filtering
@@ -4403,7 +5259,9 @@ program
 			if (options.mention) label.push(`filtering @${options.mention}`);
 
 			if (!options.pretty && !options.markdown) {
-				process.stderr.write(`Listening on ${label.join(" ")} (Ctrl+C to stop)\n`);
+				process.stderr.write(
+					`Listening on ${label.join(" ")} (Ctrl+C to stop)\n`,
+				);
 			}
 
 			await core.watchMessages({
@@ -4434,7 +5292,9 @@ program
 	});
 
 // Agents command group
-const agentsCmd = program.command("agents").description("manage the agent registry and communication");
+const agentsCmd = program
+	.command("agents")
+	.description("manage the agent registry and communication");
 
 agentsCmd
 	.command("register")
@@ -4467,7 +5327,9 @@ agentsCmd
 					: [],
 				status: options.status as AgentStatus,
 			});
-			console.log(`Registered agent ${agent.name} with skills: ${agent.capabilities.join(", ")}`);
+			console.log(
+				`Registered agent ${agent.name} with skills: ${agent.capabilities.join(", ")}`,
+			);
 		} catch (err) {
 			console.error(`Failed to register agent: ${(err as Error).message}`);
 			process.exit(1);
@@ -4503,7 +5365,10 @@ agentsCmd
 agentsCmd
 	.command("join <name>")
 	.description("initialize a new agent workspace with a ghost identity")
-	.option("-r, --role <role>", "specify the agent's role (e.g., 'Tester', 'UI-Expert')")
+	.option(
+		"-r, --role <role>",
+		"specify the agent's role (e.g., 'Tester', 'UI-Expert')",
+	)
 	.action(async (name, options) => {
 		try {
 			const cwd = await requireProjectRoot();
@@ -4522,7 +5387,10 @@ agentsCmd
 	.option("--public", "send to public announcement channel")
 	.option("--group <name>", "send to a specific group chat channel")
 	.option("--to <agent>", "send a private message to a specific agent")
-	.option("--from <name>", "specify sender name (defaults to git user or 'agent')")
+	.option(
+		"--from <name>",
+		"specify sender name (defaults to git user or 'agent')",
+	)
 	.action(async (message, options) => {
 		try {
 			const cwd = await requireProjectRoot();
@@ -4535,7 +5403,11 @@ agentsCmd
 			let from = options.from;
 			if (!from) {
 				try {
-					const nameResult = execSync("git config user.name", { cwd, encoding: "utf-8", stdio: "pipe" });
+					const nameResult = execSync("git config user.name", {
+						cwd,
+						encoding: "utf-8",
+						stdio: "pipe",
+					});
 					from = nameResult.trim() || "agent";
 				} catch {
 					from = "agent";
@@ -4573,11 +5445,17 @@ agentsCmd
 			const { existsSync, readFileSync } = await import("node:fs");
 
 			let fileName = "PUBLIC.md";
-			if (options.group) fileName = `group-${options.group.toLowerCase().replace(/[^a-z0-9]/g, "-")}.md`;
+			if (options.group)
+				fileName = `group-${options.group.toLowerCase().replace(/[^a-z0-9]/g, "-")}.md`;
 			else if (options.to) {
-				const nameResult = execSync("git config user.name", { encoding: "utf8" });
+				const nameResult = execSync("git config user.name", {
+					encoding: "utf8",
+				});
 				const from = nameResult.trim() || "agent";
-				const agents = [from.replace("@", "").toLowerCase(), options.to.replace("@", "").toLowerCase()].sort();
+				const agents = [
+					from.replace("@", "").toLowerCase(),
+					options.to.replace("@", "").toLowerCase(),
+				].sort();
 				fileName = `private-${agents[0]}-${agents[1]}.md`;
 			}
 
@@ -4631,7 +5509,11 @@ agentsCmd
 			let agent = options.as;
 			if (!agent) {
 				try {
-					const nameResult = execSync("git config user.name", { cwd, encoding: "utf-8", stdio: "pipe" });
+					const nameResult = execSync("git config user.name", {
+						cwd,
+						encoding: "utf-8",
+						stdio: "pipe",
+					});
 					agent = nameResult.trim() || "agent";
 				} catch {
 					agent = "agent";
@@ -4658,7 +5540,11 @@ agentsCmd
 			let agent = options.as;
 			if (!agent) {
 				try {
-					const nameResult = execSync("git config user.name", { cwd, encoding: "utf-8", stdio: "pipe" });
+					const nameResult = execSync("git config user.name", {
+						cwd,
+						encoding: "utf-8",
+						stdio: "pipe",
+					});
 					agent = nameResult.trim() || "agent";
 				} catch {
 					agent = "agent";
@@ -4700,7 +5586,11 @@ agentsCmd
 			let agent = options.as;
 			if (!agent && !options.all) {
 				try {
-					const nameResult = execSync("git config user.name", { cwd, encoding: "utf-8", stdio: "pipe" });
+					const nameResult = execSync("git config user.name", {
+						cwd,
+						encoding: "utf-8",
+						stdio: "pipe",
+					});
 					agent = nameResult.trim() || "agent";
 				} catch {
 					agent = "agent";
@@ -4756,23 +5646,35 @@ agentsCmd
 			// Check if roadmap project is initialized
 			const config = await core.filesystem.loadConfig();
 			if (!config) {
-				console.error("No roadmap project found. Initialize one first with: roadmap init");
+				console.error(
+					"No roadmap project found. Initialize one first with: roadmap init",
+				);
 				process.exit(1);
 			}
 
-			const _agentOptions = ["CLAUDE.md", "AGENTS.md", "GEMINI.md", ".github/copilot-instructions.md"] as const;
+			const _agentOptions = [
+				"CLAUDE.md",
+				"AGENTS.md",
+				"GEMINI.md",
+				".github/copilot-instructions.md",
+			] as const;
 
 			const selected = await clack.multiselect({
-				message: "Select agent instruction files to update (space toggles selections; enter confirms)",
+				message:
+					"Select agent instruction files to update (space toggles selections; enter confirms)",
 				required: false,
 				options: [
 					{ label: "CLAUDE.md (Claude Code)", value: "CLAUDE.md" },
 					{
-						label: "AGENTS.md (Codex, Jules, Amp, Cursor, Zed, Warp, Aider, GitHub, RooCode)",
+						label:
+							"AGENTS.md (Codex, Jules, Amp, Cursor, Zed, Warp, Aider, GitHub, RooCode)",
 						value: "AGENTS.md",
 					},
 					{ label: "GEMINI.md (Google CLI)", value: "GEMINI.md" },
-					{ label: "Copilot (GitHub Copilot)", value: ".github/copilot-instructions.md" },
+					{
+						label: "Copilot (GitHub Copilot)",
+						value: ".github/copilot-instructions.md",
+					},
 				],
 			});
 			const files: AgentInstructionFile[] = clack.isCancel(selected)
@@ -4786,7 +5688,9 @@ agentsCmd
 				const config = await core.filesystem.loadConfig();
 				const shouldAutoCommit = config?.autoCommit ?? false;
 				await addAgentInstructions(cwd, core.gitOps, files, shouldAutoCommit);
-				console.log(`Updated ${files.length} agent instruction file(s): ${files.join(", ")}`);
+				console.log(
+					`Updated ${files.length} agent instruction file(s): ${files.join(", ")}`,
+				);
 			} else {
 				console.log("No files selected for update.");
 			}
@@ -4798,13 +5702,17 @@ agentsCmd
 
 program
 	.command("orchestrate")
-	.description("setup the Multi-Agent Orchestration environment (Coordinator + Executors)")
+	.description(
+		"setup the Multi-Agent Orchestration environment (Coordinator + Executors)",
+	)
 	.option("-a, --agents <count>", "number of executor agents to initialize")
 	.action(async (options) => {
 		try {
 			const cwd = await requireProjectRoot();
 			const core = new Core(cwd);
-			const { runOrchestrateCommand } = await import("./commands/orchestrate.ts");
+			const { runOrchestrateCommand } = await import(
+				"./commands/orchestrate.ts"
+			);
 			await runOrchestrateCommand(core, options.agents);
 		} catch (err) {
 			console.error("Failed to orchestrate workspace:", err);
@@ -4823,7 +5731,9 @@ const configCmd = program
 			const existingConfig = await core.filesystem.loadConfig();
 
 			if (!existingConfig) {
-				console.error("No roadmap project found. Initialize one first with: roadmap init");
+				console.error(
+					"No roadmap project found. Initialize one first with: roadmap init",
+				);
 				process.exit(1);
 			}
 
@@ -4839,26 +5749,41 @@ const configCmd = program
 				try {
 					completionResult = await installCompletion();
 				} catch (error) {
-					completionError = error instanceof Error ? error.message : String(error);
+					completionError =
+						error instanceof Error ? error.message : String(error);
 				}
 			}
 
 			console.log("\nAdvanced configuration updated.");
-			console.log(`  Check active branches: ${mergedConfig.checkActiveBranches ?? true}`);
-			console.log(`  Remote operations: ${mergedConfig.remoteOperations ?? true}`);
+			console.log(
+				`  Check active branches: ${mergedConfig.checkActiveBranches ?? true}`,
+			);
+			console.log(
+				`  Remote operations: ${mergedConfig.remoteOperations ?? true}`,
+			);
 			console.log(
 				`  Zero-padded IDs: ${
-					typeof mergedConfig.zeroPaddedIds === "number" ? `${mergedConfig.zeroPaddedIds} digits` : "disabled"
+					typeof mergedConfig.zeroPaddedIds === "number"
+						? `${mergedConfig.zeroPaddedIds} digits`
+						: "disabled"
 				}`,
 			);
 			console.log(`  Web UI port: ${mergedConfig.defaultPort ?? 6420}`);
-			console.log(`  Auto open browser: ${mergedConfig.autoOpenBrowser ?? true}`);
-			console.log(`  Bypass git hooks: ${mergedConfig.bypassGitHooks ?? false}`);
+			console.log(
+				`  Auto open browser: ${mergedConfig.autoOpenBrowser ?? true}`,
+			);
+			console.log(
+				`  Bypass git hooks: ${mergedConfig.bypassGitHooks ?? false}`,
+			);
 			console.log(`  Auto commit: ${mergedConfig.autoCommit ?? false}`);
 			if (completionResult) {
-				console.log(`  Shell completions: installed to ${completionResult.installPath}`);
+				console.log(
+					`  Shell completions: installed to ${completionResult.installPath}`,
+				);
 			} else if (completionError) {
-				console.log("  Shell completions: installation failed (see warning below)");
+				console.log(
+					"  Shell completions: installation failed (see warning below)",
+				);
 			} else {
 				console.log("  Shell completions: skipped");
 			}
@@ -4867,7 +5792,9 @@ const configCmd = program
 			}
 			if (shouldInstallClaude) {
 				await installClaudeAgent(cwd);
-				console.log("✓ Claude Code Roadmap.md agent installed to .claude/agents/");
+				console.log(
+					"✓ Claude Code Roadmap.md agent installed to .claude/agents/",
+				);
 			}
 			if (completionResult) {
 				const instructions = completionResult.instructions.trim();
@@ -4889,7 +5816,9 @@ const configCmd = program
 					`⚠️  Shell completion installation failed:\n${indentedError}\n  Run \`roadmap completion install\` later to retry.\n`,
 				);
 			}
-			console.log("\nUse `roadmap config list` to review all configuration values.");
+			console.log(
+				"\nUse `roadmap config list` to review all configuration values.",
+			);
 		} catch (err) {
 			console.error("Failed to update configuration", err);
 			process.exitCode = 1;
@@ -4900,16 +5829,22 @@ const configCmd = program
 const sequenceCmd = program.command("sequence");
 
 sequenceCmd
-	.description("list and inspect execution sequences computed from proposal dependencies")
+	.description(
+		"list and inspect execution sequences computed from proposal dependencies",
+	)
 	.command("list")
-	.description("list sequences (interactive by default; use --plain for text output)")
+	.description(
+		"list sequences (interactive by default; use --plain for text output)",
+	)
 	.option("--plain", "use plain text output instead of interactive UI")
 	.action(async (options) => {
 		const cwd = await requireProjectRoot();
 		const core = new Core(cwd);
 		const proposals = await core.queryProposals();
 		// Exclude proposals marked as Reached from sequences (case-insensitive)
-		const activeProposals = proposals.filter((t) => (t.status || "").toLowerCase() !== "done");
+		const activeProposals = proposals.filter(
+			(t) => (t.status || "").toLowerCase() !== "done",
+		);
 		const { unsequenced, sequences } = computeSequences(activeProposals);
 
 		const usePlainOutput = isPlainRequested(options) || shouldAutoPlain;
@@ -4946,7 +5881,9 @@ configCmd
 			const config = await core.filesystem.loadConfig();
 
 			if (!config) {
-				console.error("No roadmap project found. Initialize one first with: roadmap init");
+				console.error(
+					"No roadmap project found. Initialize one first with: roadmap init",
+				);
 				process.exit(1);
 			}
 
@@ -5030,7 +5967,9 @@ configCmd
 			const config = await core.filesystem.loadConfig();
 
 			if (!config) {
-				console.error("No roadmap project found. Initialize one first with: roadmap init");
+				console.error(
+					"No roadmap project found. Initialize one first with: roadmap init",
+				);
 				process.exit(1);
 			}
 
@@ -5042,7 +5981,9 @@ configCmd
 					const isAvailable = await isEditorAvailable(value);
 					if (!isAvailable) {
 						console.error(`Editor command not found: ${value}`);
-						console.error("Please ensure the editor is installed and available in your PATH");
+						console.error(
+							"Please ensure the editor is installed and available in your PATH",
+						);
 						process.exit(1);
 					}
 					config.defaultEditor = value;
@@ -5068,9 +6009,17 @@ configCmd
 				}
 				case "autoOpenBrowser": {
 					const boolValue = value.toLowerCase();
-					if (boolValue === "true" || boolValue === "1" || boolValue === "yes") {
+					if (
+						boolValue === "true" ||
+						boolValue === "1" ||
+						boolValue === "yes"
+					) {
 						config.autoOpenBrowser = true;
-					} else if (boolValue === "false" || boolValue === "0" || boolValue === "no") {
+					} else if (
+						boolValue === "false" ||
+						boolValue === "0" ||
+						boolValue === "no"
+					) {
 						config.autoOpenBrowser = false;
 					} else {
 						console.error("autoOpenBrowser must be true or false");
@@ -5089,9 +6038,17 @@ configCmd
 				}
 				case "remoteOperations": {
 					const boolValue = value.toLowerCase();
-					if (boolValue === "true" || boolValue === "1" || boolValue === "yes") {
+					if (
+						boolValue === "true" ||
+						boolValue === "1" ||
+						boolValue === "yes"
+					) {
 						config.remoteOperations = true;
-					} else if (boolValue === "false" || boolValue === "0" || boolValue === "no") {
+					} else if (
+						boolValue === "false" ||
+						boolValue === "0" ||
+						boolValue === "no"
+					) {
 						config.remoteOperations = false;
 					} else {
 						console.error("remoteOperations must be true or false");
@@ -5101,9 +6058,17 @@ configCmd
 				}
 				case "autoCommit": {
 					const boolValue = value.toLowerCase();
-					if (boolValue === "true" || boolValue === "1" || boolValue === "yes") {
+					if (
+						boolValue === "true" ||
+						boolValue === "1" ||
+						boolValue === "yes"
+					) {
 						config.autoCommit = true;
-					} else if (boolValue === "false" || boolValue === "0" || boolValue === "no") {
+					} else if (
+						boolValue === "false" ||
+						boolValue === "0" ||
+						boolValue === "no"
+					) {
 						config.autoCommit = false;
 					} else {
 						console.error("autoCommit must be true or false");
@@ -5113,9 +6078,17 @@ configCmd
 				}
 				case "bypassGitHooks": {
 					const boolValue = value.toLowerCase();
-					if (boolValue === "true" || boolValue === "1" || boolValue === "yes") {
+					if (
+						boolValue === "true" ||
+						boolValue === "1" ||
+						boolValue === "yes"
+					) {
 						config.bypassGitHooks = true;
-					} else if (boolValue === "false" || boolValue === "0" || boolValue === "no") {
+					} else if (
+						boolValue === "false" ||
+						boolValue === "0" ||
+						boolValue === "no"
+					) {
 						config.bypassGitHooks = false;
 					} else {
 						console.error("bypassGitHooks must be true or false");
@@ -5135,9 +6108,17 @@ configCmd
 				}
 				case "checkActiveBranches": {
 					const boolValue = value.toLowerCase();
-					if (boolValue === "true" || boolValue === "1" || boolValue === "yes") {
+					if (
+						boolValue === "true" ||
+						boolValue === "1" ||
+						boolValue === "yes"
+					) {
 						config.checkActiveBranches = true;
-					} else if (boolValue === "false" || boolValue === "0" || boolValue === "no") {
+					} else if (
+						boolValue === "false" ||
+						boolValue === "0" ||
+						boolValue === "no"
+					) {
 						config.checkActiveBranches = false;
 					} else {
 						console.error("checkActiveBranches must be true or false");
@@ -5163,14 +6144,20 @@ configCmd
 							"Use directive files via directive commands (e.g. `roadmap directive list`, `roadmap directive add`).",
 						);
 					} else {
-						console.error(`${key} cannot be set directly. Use 'roadmap config list-${key}' to view current values.`);
-						console.error("Array values should be edited in the config file directly.");
+						console.error(
+							`${key} cannot be set directly. Use 'roadmap config list-${key}' to view current values.`,
+						);
+						console.error(
+							"Array values should be edited in the config file directly.",
+						);
 					}
 					process.exit(1);
 					break;
 				case "proposalPrefix":
 				case "prefixes":
-					console.error("Proposal prefix cannot be changed after initialization.");
+					console.error(
+						"Proposal prefix cannot be changed after initialization.",
+					);
 					console.error(
 						"The prefix is set during 'roadmap init' and is permanent to avoid breaking existing proposal IDs.",
 					);
@@ -5202,7 +6189,9 @@ configCmd
 			const config = await core.filesystem.loadConfig();
 
 			if (!config) {
-				console.error("No roadmap project found. Initialize one first with: roadmap init");
+				console.error(
+					"No roadmap project found. Initialize one first with: roadmap init",
+				);
 				process.exit(1);
 			}
 
@@ -5217,14 +6206,22 @@ configCmd
 			console.log(`  dateFormat: ${config.dateFormat}`);
 
 			console.log(`  maxColumnWidth: ${config.maxColumnWidth || "(not set)"}`);
-			console.log(`  autoOpenBrowser: ${config.autoOpenBrowser ?? "(not set)"}`);
+			console.log(
+				`  autoOpenBrowser: ${config.autoOpenBrowser ?? "(not set)"}`,
+			);
 			console.log(`  defaultPort: ${config.defaultPort ?? "(not set)"}`);
-			console.log(`  remoteOperations: ${config.remoteOperations ?? "(not set)"}`);
+			console.log(
+				`  remoteOperations: ${config.remoteOperations ?? "(not set)"}`,
+			);
 			console.log(`  autoCommit: ${config.autoCommit ?? "(not set)"}`);
 			console.log(`  bypassGitHooks: ${config.bypassGitHooks ?? "(not set)"}`);
 			console.log(`  zeroPaddedIds: ${config.zeroPaddedIds ?? "(disabled)"}`);
-			console.log(`  proposalPrefix: ${config.prefixes?.proposal || "proposal"} (read-only)`);
-			console.log(`  checkActiveBranches: ${config.checkActiveBranches ?? "true"}`);
+			console.log(
+				`  proposalPrefix: ${config.prefixes?.proposal || "proposal"} (read-only)`,
+			);
+			console.log(
+				`  checkActiveBranches: ${config.checkActiveBranches ?? "true"}`,
+			);
 			console.log(`  activeBranchDays: ${config.activeBranchDays ?? "30"}`);
 		} catch (err) {
 			console.error("Failed to list config values", err);
@@ -5244,13 +6241,17 @@ program
 			// Check if roadmap project is initialized
 			const config = await core.filesystem.loadConfig();
 			if (!config) {
-				console.error("No roadmap project found. Initialize one first with: roadmap init");
+				console.error(
+					"No roadmap project found. Initialize one first with: roadmap init",
+				);
 				process.exit(1);
 			}
 
 			// Get all Reached proposals
 			const proposals = await core.queryProposals();
-			const doneProposals = proposals.filter((proposal) => proposal.status === "Reached");
+			const doneProposals = proposals.filter(
+				(proposal) => proposal.status === "Reached",
+			);
 
 			if (doneProposals.length === 0) {
 				console.log("No completed proposals found to clean up.");
@@ -5271,9 +6272,14 @@ program
 
 			const selectedAgePrompt = await clack.select({
 				message: "Move proposals to completed folder if they are older than:",
-				options: ageOptions.map((option) => ({ label: option.title, value: option.value })),
+				options: ageOptions.map((option) => ({
+					label: option.title,
+					value: option.value,
+				})),
 			});
-			const selectedAge = clack.isCancel(selectedAgePrompt) ? undefined : selectedAgePrompt;
+			const selectedAge = clack.isCancel(selectedAgePrompt)
+				? undefined
+				: selectedAgePrompt;
 
 			if (selectedAge === undefined) {
 				console.log("Cleanup cancelled.");
@@ -5284,7 +6290,9 @@ program
 			const proposalsToMove = await core.getReachedProposalsByAge(selectedAge);
 
 			if (proposalsToMove.length === 0) {
-				console.log(`No proposals found that are older than ${ageOptions.find((o) => o.value === selectedAge)?.title}.`);
+				console.log(
+					`No proposals found that are older than ${ageOptions.find((o) => o.value === selectedAge)?.title}.`,
+				);
 				return;
 			}
 
@@ -5303,7 +6311,9 @@ program
 				message: `Move ${proposalsToMove.length} proposals to completed folder?`,
 				initialValue: false,
 			});
-			const confirmed = clack.isCancel(confirmedPrompt) ? false : confirmedPrompt;
+			const confirmed = clack.isCancel(confirmedPrompt)
+				? false
+				: confirmedPrompt;
 
 			if (!confirmed) {
 				console.log("Cleanup cancelled.");
@@ -5315,10 +6325,17 @@ program
 			const shouldAutoCommit = config.autoCommit ?? false;
 
 			console.log("Moving proposals...");
-			const movedProposals: Array<{ fromPath: string; toPath: string; proposalId: string }> = [];
+			const movedProposals: Array<{
+				fromPath: string;
+				toPath: string;
+				proposalId: string;
+			}> = [];
 
 			for (const proposal of proposalsToMove) {
-				const fromPath = proposal.filePath ?? (await core.getProposal(proposal.id))?.filePath ?? null;
+				const fromPath =
+					proposal.filePath ??
+					(await core.getProposal(proposal.id))?.filePath ??
+					null;
 
 				if (!fromPath) {
 					console.error(`Failed to locate file for proposal ${proposal.id}`);
@@ -5349,9 +6366,13 @@ program
 				}
 			}
 
-			console.log(`Successfully moved ${successCount} of ${proposalsToMove.length} proposals to completed folder.`);
+			console.log(
+				`Successfully moved ${successCount} of ${proposalsToMove.length} proposals to completed folder.`,
+			);
 			if (successCount > 0 && !shouldAutoCommit) {
-				console.log("Files have been staged. To commit: git commit -m 'cleanup: Move completed proposals'");
+				console.log(
+					"Files have been staged. To commit: git commit -m 'cleanup: Move completed proposals'",
+				);
 			}
 		} catch (err) {
 			console.error("Failed to run cleanup", err);
@@ -5362,7 +6383,9 @@ program
 // Browser command for web UI
 program
 	.command("browser")
-	.description("open browser interface for proposal management (press Ctrl+C or Cmd+C to stop)")
+	.description(
+		"open browser interface for proposal management (press Ctrl+C or Cmd+C to stop)",
+	)
 	.option("-p, --port <port>", "port to run server on")
 	.option("--no-open", "don't automatically open browser")
 	.action(async (options) => {
@@ -5392,7 +6415,9 @@ program
 				console.log(`\nReceived ${signal}. Shutting down server...`);
 				try {
 					const stopPromise = server.stop();
-					const timeout = new Promise<void>((resolve) => setTimeout(resolve, 1500));
+					const timeout = new Promise<void>((resolve) =>
+						setTimeout(resolve, 1500),
+					);
 					await Promise.race([stopPromise, timeout]);
 				} finally {
 					process.exit(0);
@@ -5437,11 +6462,15 @@ serviceCmd
 		const port = options.port || "6420";
 
 		// Use the scripts/cli.cjs to start browser in background without opening it
-		const child = spawn(process.execPath, [join(cwd, "scripts/cli.cjs"), "browser", "--no-open", "--port", port], {
-			detached: true,
-			stdio: "ignore",
-			cwd,
-		});
+		const child = spawn(
+			process.execPath,
+			[join(cwd, "scripts/cli.cjs"), "browser", "--no-open", "--port", port],
+			{
+				detached: true,
+				stdio: "ignore",
+				cwd,
+			},
+		);
 
 		if (child.pid) {
 			writeFileSync(pidFile, child.pid.toString());
@@ -5470,7 +6499,9 @@ serviceCmd
 			console.log(`Sent shutdown signal to service (PID: ${pid})`);
 			unlinkSync(pidFile);
 		} catch (err) {
-			console.error(`Failed to stop service: ${err instanceof Error ? err.message : String(err)}`);
+			console.error(
+				`Failed to stop service: ${err instanceof Error ? err.message : String(err)}`,
+			);
 		}
 	});
 
@@ -5507,7 +6538,9 @@ program
 			const config = await core.filesystem.loadConfig();
 
 			if (!config) {
-				console.error("No roadmap project found. Initialize one first with: roadmap init");
+				console.error(
+					"No roadmap project found. Initialize one first with: roadmap init",
+				);
 				process.exit(1);
 			}
 

@@ -1,7 +1,7 @@
 import assert from "node:assert";
-import { describe, it } from "node:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { describe, it } from "node:test";
 
 describe("package bin wrapper", () => {
 	it("points to scripts/cli.cjs to own .bin/roadmap", async () => {

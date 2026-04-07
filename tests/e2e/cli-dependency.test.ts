@@ -1,9 +1,17 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, test } from "node:test";
 import { mkdir, rm } from "node:fs/promises";
+import { afterEach, beforeEach, describe, test } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
-import { createProposalPlatformAware, editProposalPlatformAware, viewProposalPlatformAware } from "../support/test-helpers.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
+import {
+	createProposalPlatformAware,
+	editProposalPlatformAware,
+	viewProposalPlatformAware,
+} from "../support/test-helpers.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 describe("CLI Dependency Support", () => {
 	let TEST_DIR: string;
@@ -37,11 +45,17 @@ describe("CLI Dependency Support", () => {
 
 	test("should create proposal with single dependency using --dep", async () => {
 		// Create base proposal first
-		const result1 = await createProposalPlatformAware({ title: "Base Proposal" }, TEST_DIR);
+		const result1 = await createProposalPlatformAware(
+			{ title: "Base Proposal" },
+			TEST_DIR,
+		);
 		assert.strictEqual(result1.exitCode, 0);
 
 		// Create proposal with dependency
-		const result2 = await createProposalPlatformAware({ title: "Dependent Proposal", dependencies: "proposal-1" }, TEST_DIR);
+		const result2 = await createProposalPlatformAware(
+			{ title: "Dependent Proposal", dependencies: "proposal-1" },
+			TEST_DIR,
+		);
 		assert.strictEqual(result2.exitCode, 0);
 		assert.ok(result2.stdout.includes("Created proposal proposal-2"));
 
@@ -53,11 +67,17 @@ describe("CLI Dependency Support", () => {
 
 	test("should create proposal with single dependency using --depends-on", async () => {
 		// Create base proposal first
-		const result1 = await createProposalPlatformAware({ title: "Base Proposal" }, TEST_DIR);
+		const result1 = await createProposalPlatformAware(
+			{ title: "Base Proposal" },
+			TEST_DIR,
+		);
 		assert.strictEqual(result1.exitCode, 0);
 
 		// Create proposal with dependency
-		const result2 = await createProposalPlatformAware({ title: "Dependent Proposal", dependencies: "proposal-1" }, TEST_DIR);
+		const result2 = await createProposalPlatformAware(
+			{ title: "Dependent Proposal", dependencies: "proposal-1" },
+			TEST_DIR,
+		);
 		assert.strictEqual(result2.exitCode, 0);
 		assert.ok(result2.stdout.includes("Created proposal proposal-2"));
 
@@ -69,47 +89,77 @@ describe("CLI Dependency Support", () => {
 
 	test("should create proposal with multiple dependencies (comma-separated)", async () => {
 		// Create base proposals first
-		const result1 = await createProposalPlatformAware({ title: "Base Proposal 1" }, TEST_DIR);
+		const result1 = await createProposalPlatformAware(
+			{ title: "Base Proposal 1" },
+			TEST_DIR,
+		);
 		assert.strictEqual(result1.exitCode, 0);
-		const result2 = await createProposalPlatformAware({ title: "Base Proposal 2" }, TEST_DIR);
+		const result2 = await createProposalPlatformAware(
+			{ title: "Base Proposal 2" },
+			TEST_DIR,
+		);
 		assert.strictEqual(result2.exitCode, 0);
 
 		// Create proposal with multiple dependencies
-		const result3 = await createProposalPlatformAware({ title: "Dependent Proposal", dependencies: "proposal-1,proposal-2" }, TEST_DIR);
+		const result3 = await createProposalPlatformAware(
+			{ title: "Dependent Proposal", dependencies: "proposal-1,proposal-2" },
+			TEST_DIR,
+		);
 		assert.strictEqual(result3.exitCode, 0);
 		assert.ok(result3.stdout.includes("Created proposal proposal-3"));
 
 		// Verify dependencies were set
 		const proposal = await core.filesystem.loadProposal("proposal-3");
 		assert.notStrictEqual(proposal, null);
-		assert.deepStrictEqual(proposal?.dependencies, ["proposal-1", "proposal-2"]);
+		assert.deepStrictEqual(proposal?.dependencies, [
+			"proposal-1",
+			"proposal-2",
+		]);
 	});
 
 	test("should create proposal with multiple dependencies (multiple flags)", async () => {
 		// Create base proposals first
-		const result1 = await createProposalPlatformAware({ title: "Base Proposal 1" }, TEST_DIR);
+		const result1 = await createProposalPlatformAware(
+			{ title: "Base Proposal 1" },
+			TEST_DIR,
+		);
 		assert.strictEqual(result1.exitCode, 0);
-		const result2 = await createProposalPlatformAware({ title: "Base Proposal 2" }, TEST_DIR);
+		const result2 = await createProposalPlatformAware(
+			{ title: "Base Proposal 2" },
+			TEST_DIR,
+		);
 		assert.strictEqual(result2.exitCode, 0);
 
 		// Create proposal with multiple dependencies using multiple flags (simulated as comma-separated)
-		const result3 = await createProposalPlatformAware({ title: "Dependent Proposal", dependencies: "proposal-1,proposal-2" }, TEST_DIR);
+		const result3 = await createProposalPlatformAware(
+			{ title: "Dependent Proposal", dependencies: "proposal-1,proposal-2" },
+			TEST_DIR,
+		);
 		assert.strictEqual(result3.exitCode, 0);
 		assert.ok(result3.stdout.includes("Created proposal proposal-3"));
 
 		// Verify dependencies were set
 		const proposal = await core.filesystem.loadProposal("proposal-3");
 		assert.notStrictEqual(proposal, null);
-		assert.deepStrictEqual(proposal?.dependencies, ["proposal-1", "proposal-2"]);
+		assert.deepStrictEqual(proposal?.dependencies, [
+			"proposal-1",
+			"proposal-2",
+		]);
 	});
 
 	test("should normalize proposal IDs in dependencies", async () => {
 		// Create base proposal first
-		const result1 = await createProposalPlatformAware({ title: "Base Proposal" }, TEST_DIR);
+		const result1 = await createProposalPlatformAware(
+			{ title: "Base Proposal" },
+			TEST_DIR,
+		);
 		assert.strictEqual(result1.exitCode, 0);
 
 		// Create proposal with dependency using numeric ID (should be normalized to proposal-X)
-		const result2 = await createProposalPlatformAware({ title: "Dependent Proposal", dependencies: "1" }, TEST_DIR);
+		const result2 = await createProposalPlatformAware(
+			{ title: "Dependent Proposal", dependencies: "1" },
+			TEST_DIR,
+		);
 		assert.strictEqual(result2.exitCode, 0);
 		assert.ok(result2.stdout.includes("Created proposal proposal-2"));
 
@@ -121,38 +171,69 @@ describe("CLI Dependency Support", () => {
 
 	test("should fail when dependency proposal does not exist", async () => {
 		// Try to create proposal with non-existent dependency
-		const result = await createProposalPlatformAware({ title: "Dependent Proposal", dependencies: "proposal-999" }, TEST_DIR);
+		const result = await createProposalPlatformAware(
+			{ title: "Dependent Proposal", dependencies: "proposal-999" },
+			TEST_DIR,
+		);
 		assert.strictEqual(result.exitCode, 1);
-		assert.ok(result.stderr.includes("The following dependencies do not exist: proposal-999"));
+		assert.ok(
+			result.stderr.includes(
+				"The following dependencies do not exist: proposal-999",
+			),
+		);
 	});
 
 	test("should edit proposal to add dependencies", async () => {
 		// Create base proposals first
-		const result1 = await createProposalPlatformAware({ title: "Base Proposal 1" }, TEST_DIR);
+		const result1 = await createProposalPlatformAware(
+			{ title: "Base Proposal 1" },
+			TEST_DIR,
+		);
 		assert.strictEqual(result1.exitCode, 0);
-		const result2 = await createProposalPlatformAware({ title: "Base Proposal 2" }, TEST_DIR);
+		const result2 = await createProposalPlatformAware(
+			{ title: "Base Proposal 2" },
+			TEST_DIR,
+		);
 		assert.strictEqual(result2.exitCode, 0);
-		const result3 = await createProposalPlatformAware({ title: "Proposal to Edit" }, TEST_DIR);
+		const result3 = await createProposalPlatformAware(
+			{ title: "Proposal to Edit" },
+			TEST_DIR,
+		);
 		assert.strictEqual(result3.exitCode, 0);
 
 		// Edit proposal to add dependencies
-		const result4 = await editProposalPlatformAware({ proposalId: "proposal-3", dependencies: "proposal-1,proposal-2" }, TEST_DIR);
+		const result4 = await editProposalPlatformAware(
+			{ proposalId: "proposal-3", dependencies: "proposal-1,proposal-2" },
+			TEST_DIR,
+		);
 		assert.strictEqual(result4.exitCode, 0);
 		assert.ok(result4.stdout.includes("Updated proposal proposal-3"));
 
 		// Verify dependencies were added
 		const proposal = await core.filesystem.loadProposal("proposal-3");
 		assert.notStrictEqual(proposal, null);
-		assert.deepStrictEqual(proposal?.dependencies, ["proposal-1", "proposal-2"]);
+		assert.deepStrictEqual(proposal?.dependencies, [
+			"proposal-1",
+			"proposal-2",
+		]);
 	});
 
 	test("should edit proposal to update dependencies", async () => {
 		// Create base proposals using platform-aware helper
-		const result1 = await createProposalPlatformAware({ title: "Base Proposal 1" }, TEST_DIR);
+		const result1 = await createProposalPlatformAware(
+			{ title: "Base Proposal 1" },
+			TEST_DIR,
+		);
 		assert.strictEqual(result1.exitCode, 0);
-		const result2 = await createProposalPlatformAware({ title: "Base Proposal 2" }, TEST_DIR);
+		const result2 = await createProposalPlatformAware(
+			{ title: "Base Proposal 2" },
+			TEST_DIR,
+		);
 		assert.strictEqual(result2.exitCode, 0);
-		const result3 = await createProposalPlatformAware({ title: "Base Proposal 3" }, TEST_DIR);
+		const result3 = await createProposalPlatformAware(
+			{ title: "Base Proposal 3" },
+			TEST_DIR,
+		);
 		assert.strictEqual(result3.exitCode, 0);
 
 		// Create proposal with initial dependency
@@ -178,7 +259,10 @@ describe("CLI Dependency Support", () => {
 		// Verify dependencies were updated (should replace, not append)
 		const proposal = await core.filesystem.loadProposal("proposal-4");
 		assert.notStrictEqual(proposal, null);
-		assert.deepStrictEqual(proposal?.dependencies, ["proposal-2", "proposal-3"]);
+		assert.deepStrictEqual(proposal?.dependencies, [
+			"proposal-2",
+			"proposal-3",
+		]);
 	});
 
 	test("should handle dependencies on draft proposals", async () => {
@@ -214,15 +298,24 @@ describe("CLI Dependency Support", () => {
 
 	test("should display dependencies in plain text view", async () => {
 		// Create base proposal
-		const result1 = await createProposalPlatformAware({ title: "Base Proposal" }, TEST_DIR);
+		const result1 = await createProposalPlatformAware(
+			{ title: "Base Proposal" },
+			TEST_DIR,
+		);
 		assert.strictEqual(result1.exitCode, 0);
 
 		// Create proposal with dependency
-		const result2 = await createProposalPlatformAware({ title: "Dependent Proposal", dependencies: "proposal-1" }, TEST_DIR);
+		const result2 = await createProposalPlatformAware(
+			{ title: "Dependent Proposal", dependencies: "proposal-1" },
+			TEST_DIR,
+		);
 		assert.strictEqual(result2.exitCode, 0);
 
 		// View proposal in plain text mode
-		const result3 = await viewProposalPlatformAware({ proposalId: "proposal-2", plain: true }, TEST_DIR);
+		const result3 = await viewProposalPlatformAware(
+			{ proposalId: "proposal-2", plain: true },
+			TEST_DIR,
+		);
 		assert.strictEqual(result3.exitCode, 0);
 		assert.ok(result3.stdout.includes("Dependencies: proposal-1"));
 	});

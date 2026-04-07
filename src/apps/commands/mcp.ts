@@ -34,22 +34,30 @@ function registerStartCommand(mcpCmd: Command): void {
 		.command("start")
 		.description("Start the MCP server using stdio transport")
 		.option("-d, --debug", "Enable debug logging", false)
-		.option("--cwd <path>", "Directory to resolve Roadmap root from (overrides ROADMAP_CWD)")
+		.option(
+			"--cwd <path>",
+			"Directory to resolve Roadmap root from (overrides ROADMAP_CWD)",
+		)
 		.action(async (options: StartOptions) => {
 			try {
 				const runtimeCwd = await resolveRuntimeCwd({ cwd: options.cwd });
-				const projectRoot = (await findRoadmapRoot(runtimeCwd.cwd)) ?? runtimeCwd.cwd;
-				const server = await createMcpServer(projectRoot, { debug: options.debug });
+				const projectRoot =
+					(await findRoadmapRoot(runtimeCwd.cwd)) ?? runtimeCwd.cwd;
+				const server = await createMcpServer(projectRoot, {
+					debug: options.debug,
+				});
 
 				await server.connect();
 				await server.start();
 
-			// Start WebSocket server for board
-			startWebSocketServer(3001, projectRoot);
+				// Start WebSocket server for board
+				startWebSocketServer(3001, projectRoot);
 
 				if (options.debug) {
 					if (runtimeCwd.source !== "process") {
-						console.error(`Using MCP start directory from ${runtimeCwd.sourceLabel}: ${runtimeCwd.cwd}`);
+						console.error(
+							`Using MCP start directory from ${runtimeCwd.sourceLabel}: ${runtimeCwd.cwd}`,
+						);
 					}
 					console.error("Roadmap.md MCP server started (stdio transport)");
 				}

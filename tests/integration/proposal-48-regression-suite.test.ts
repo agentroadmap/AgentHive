@@ -6,11 +6,11 @@
  * - Test history tracked per proposal
  */
 
-import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { RegressionSuite } from "../../src/core/pipeline/regression-suite.ts";
-import { mkdirSync, rmSync, existsSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import { RegressionSuite } from "../../src/core/pipeline/regression-suite.ts";
 
 const TEST_BASE = join(import.meta.dirname, "../../tmp/test-regression");
 
@@ -76,7 +76,7 @@ describe("Sample Test", () => {
 		});
 
 		it("tracks automatic vs manual runs", async () => {
-			const result = await suite.runRegression({
+			const _result = await suite.runRegression({
 				proposalId: "proposal-1",
 				proposalStatus: "Active",
 				agent: "test-agent",

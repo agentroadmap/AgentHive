@@ -5,8 +5,8 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { Core } from "../roadmap.ts";
 import type { RelayConfig } from "../../types/index.ts";
+import type { Core } from "../roadmap.ts";
 
 export class RelayService {
 	private readonly core: Core;
@@ -43,8 +43,8 @@ export class RelayService {
 			}
 		}
 
-		this.watcher = fs.watch(messagesDir, (eventType, filename) => {
-			if (filename && filename.endsWith(".md")) {
+		this.watcher = fs.watch(messagesDir, (_eventType, filename) => {
+			if (filename?.endsWith(".md")) {
 				this.handleFileChange(filename);
 			}
 		});
@@ -52,7 +52,10 @@ export class RelayService {
 		// Start polling external channel if configured
 		if (this.config.bot_token && this.config.channel_id) {
 			const interval = this.config.interval_ms || 30000; // Default 30s
-			this.pollInterval = setInterval(() => this.fetchExternalMessages(), interval);
+			this.pollInterval = setInterval(
+				() => this.fetchExternalMessages(),
+				interval,
+			);
 			// Run once immediately
 			void this.fetchExternalMessages();
 		}
@@ -100,7 +103,10 @@ export class RelayService {
 		}
 	}
 
-	private async processNewContent(filename: string, content: string): Promise<void> {
+	private async processNewContent(
+		filename: string,
+		content: string,
+	): Promise<void> {
 		const lines = content.split("\n").filter((l) => l.trim().length > 0);
 		for (const line of lines) {
 			// Parse log entry: [timestamp] agent: message
@@ -116,11 +122,15 @@ export class RelayService {
 		}
 	}
 
-	private async pushToExternal(filename: string, agent: string, message: string): Promise<void> {
+	private async pushToExternal(
+		filename: string,
+		agent: string,
+		message: string,
+	): Promise<void> {
 		if (!this.config.webhook_url) return;
 
 		const channelName = filename.replace(".md", "").toUpperCase();
-		
+
 		// Basic Discord Webhook format
 		const payload = {
 			username: `${agent} (Relay)`,
@@ -135,10 +145,14 @@ export class RelayService {
 			});
 
 			if (!response.ok) {
-				console.error(`Relay failed to push to webhook: ${response.statusText}`);
+				console.error(
+					`Relay failed to push to webhook: ${response.statusText}`,
+				);
 			}
 		} catch (error) {
-			console.error(`Relay error: ${error instanceof Error ? error.message : String(error)}`);
+			console.error(
+				`Relay error: ${error instanceof Error ? error.message : String(error)}`,
+			);
 		}
 	}
 
@@ -154,11 +168,13 @@ export class RelayService {
 			});
 
 			if (!response.ok) {
-				console.error(`Relay failed to fetch external messages: ${response.statusText}`);
+				console.error(
+					`Relay failed to fetch external messages: ${response.statusText}`,
+				);
 				return;
 			}
 
-			const messages = await response.json() as any[];
+			const messages = (await response.json()) as any[];
 			if (messages.length === 0) return;
 
 			// Sort by ID (chronological)
@@ -182,7 +198,9 @@ export class RelayService {
 				});
 			}
 		} catch (error) {
-			console.error(`Relay fetch error: ${error instanceof Error ? error.message : String(error)}`);
+			console.error(
+				`Relay fetch error: ${error instanceof Error ? error.message : String(error)}`,
+			);
 		}
 	}
 }

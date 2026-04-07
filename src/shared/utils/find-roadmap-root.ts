@@ -1,6 +1,6 @@
+import { execSync } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { execSync } from "node:child_process";
 
 /**
  * Check if a path exists and is a directory
@@ -37,7 +37,9 @@ async function fileExists(path: string): Promise<boolean> {
  * @param startDir - The directory to start searching from (typically process.cwd())
  * @returns The project root path, or null if no agentRoadmap.md project found
  */
-export async function findRoadmapRoot(startDir: string): Promise<string | null> {
+export async function findRoadmapRoot(
+	startDir: string,
+): Promise<string | null> {
 	let current = startDir;
 
 	// Walk up the directory tree looking for roadmap/ or roadmap.json
@@ -59,7 +61,11 @@ export async function findRoadmapRoot(startDir: string): Promise<string | null> 
 
 	// Fallback: try git repository root
 	try {
-		const gitRoot = execSync("git rev-parse --show-toplevel", { cwd: startDir, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+		const gitRoot = execSync("git rev-parse --show-toplevel", {
+			cwd: startDir,
+			encoding: "utf-8",
+			stdio: ["ignore", "pipe", "ignore"],
+		}).trim();
 
 		if (gitRoot) {
 			// Verify the git root has a roadmap setup

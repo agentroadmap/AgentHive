@@ -135,7 +135,14 @@ export interface Proposal {
 	budgetLimitUsd?: number;
 }
 
-export type ProposalMaturity = "new" | "active" | "mature" | "obsolete" | "skeleton" | "contracted" | "audited";
+export type ProposalMaturity =
+	| "new"
+	| "active"
+	| "mature"
+	| "obsolete"
+	| "skeleton"
+	| "contracted"
+	| "audited";
 
 export type PulseType =
 	| "proposal_created"
@@ -192,7 +199,11 @@ export interface DirectiveSummary {
  * Check if a proposal is locally editable (not from a remote or other local branch)
  */
 export function isLocalEditableProposal(proposal: Proposal): boolean {
-	return proposal.origin === undefined || proposal.origin === "local" || proposal.origin === "completed";
+	return (
+		proposal.origin === undefined ||
+		proposal.origin === "local" ||
+		proposal.origin === "completed"
+	);
 }
 
 export interface ProposalCreateInput {
@@ -397,7 +408,10 @@ export interface DecisionSearchResult {
 	matches?: SearchMatch[];
 }
 
-export type SearchResult = ProposalSearchResult | DocumentSearchResult | DecisionSearchResult;
+export type SearchResult =
+	| ProposalSearchResult
+	| DocumentSearchResult
+	| DecisionSearchResult;
 
 export interface Channel {
 	name: string;

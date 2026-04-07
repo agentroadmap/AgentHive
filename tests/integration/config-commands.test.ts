@@ -1,12 +1,15 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import type { PromptRunner } from "../../src/commands/advanced-config-wizard.ts";
 import { configureAdvancedSettings } from "../../src/commands/configure-advanced-settings.ts";
 import { Core } from "../../src/core/roadmap.ts";
-import { createUniqueTestDir, safeCleanup, execSync,
+import {
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 let TEST_DIR: string;
@@ -29,7 +32,9 @@ describe("Config commands", () => {
 		await core.initializeProject("Test Config Project");
 	});
 
-	function createPromptStub(sequence: Array<Record<string, unknown>>): PromptRunner {
+	function createPromptStub(
+		sequence: Array<Record<string, unknown>>,
+	): PromptRunner {
 		const stub: PromptRunner = async () => {
 			return sequence.shift() ?? {};
 		};
@@ -50,9 +55,10 @@ describe("Config commands", () => {
 			{ installClaudeAgent: false },
 		]);
 
-		const { mergedConfig, installClaudeAgent, installShellCompletions } = await configureAdvancedSettings(core, {
-			promptImpl: promptStub,
-		});
+		const { mergedConfig, installClaudeAgent, installShellCompletions } =
+			await configureAdvancedSettings(core, {
+				promptImpl: promptStub,
+			});
 
 		assert.strictEqual(installClaudeAgent, false);
 		assert.strictEqual(installShellCompletions, false);
@@ -87,9 +93,10 @@ describe("Config commands", () => {
 			{ installClaudeAgent: true },
 		]);
 
-		const { mergedConfig, installClaudeAgent, installShellCompletions } = await configureAdvancedSettings(core, {
-			promptImpl: promptStub,
-		});
+		const { mergedConfig, installClaudeAgent, installShellCompletions } =
+			await configureAdvancedSettings(core, {
+				promptImpl: promptStub,
+			});
 
 		assert.strictEqual(installClaudeAgent, true);
 		assert.strictEqual(installShellCompletions, true);
@@ -113,22 +120,37 @@ describe("Config commands", () => {
 	});
 
 	it("exposes config list/get/set subcommands", async () => {
-		const listOutput = execSync(`node --experimental-strip-types ${CLI_PATH} config list`, { cwd: TEST_DIR }).text();
+		const listOutput = execSync(
+			`node --experimental-strip-types ${CLI_PATH} config list`,
+			{ cwd: TEST_DIR },
+		).text();
 		assert.ok(listOutput.includes("Configuration:"));
 
-		execSync(`node --experimental-strip-types ${CLI_PATH} config set defaultPort 7001`, { cwd: TEST_DIR });
+		execSync(
+			`node --experimental-strip-types ${CLI_PATH} config set defaultPort 7001`,
+			{ cwd: TEST_DIR },
+		);
 
-		const portOutput = execSync(`node --experimental-strip-types ${CLI_PATH} config get defaultPort`, { cwd: TEST_DIR }).text();
+		const portOutput = execSync(
+			`node --experimental-strip-types ${CLI_PATH} config get defaultPort`,
+			{ cwd: TEST_DIR },
+		).text();
 		expect(portOutput.trim()).toBe("7001");
 	});
 
 	it("surfaces directives in config get/list from directive files", async () => {
 		await core.filesystem.createDirective("Release 1");
 
-		const directivesOutput = execSync(`node --experimental-strip-types ${CLI_PATH} config get directives`, { cwd: TEST_DIR }).text();
+		const directivesOutput = execSync(
+			`node --experimental-strip-types ${CLI_PATH} config get directives`,
+			{ cwd: TEST_DIR },
+		).text();
 		expect(directivesOutput.trim()).toBe("m-0");
 
-		const listOutput = execSync(`node --experimental-strip-types ${CLI_PATH} config list`, { cwd: TEST_DIR }).text();
+		const listOutput = execSync(
+			`node --experimental-strip-types ${CLI_PATH} config list`,
+			{ cwd: TEST_DIR },
+		).text();
 		assert.ok(listOutput.includes("directives: [m-0]"));
 	});
 

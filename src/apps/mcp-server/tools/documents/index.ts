@@ -18,13 +18,17 @@ import {
 	documentViewSchema,
 } from "./schemas.ts";
 
-export function registerDocumentTools(server: McpServer, _config?: RoadmapConfig): void {
+export function registerDocumentTools(
+	server: McpServer,
+	_config?: RoadmapConfig,
+): void {
 	const handlers = new DocumentHandlers(server);
 
 	const listDocumentsTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "document_list",
-			description: "List Roadmap.md documents with optional substring filtering",
+			description:
+				"List Roadmap.md documents with optional substring filtering",
 			inputSchema: documentListSchema,
 		},
 		documentListSchema,
@@ -34,7 +38,8 @@ export function registerDocumentTools(server: McpServer, _config?: RoadmapConfig
 	const viewDocumentTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "document_view",
-			description: "View a Roadmap.md document including metadata and markdown content",
+			description:
+				"View a Roadmap.md document including metadata and markdown content",
 			inputSchema: documentViewSchema,
 		},
 		documentViewSchema,
@@ -54,7 +59,8 @@ export function registerDocumentTools(server: McpServer, _config?: RoadmapConfig
 	const updateDocumentTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "document_update",
-			description: "Update an existing Roadmap.md document's content and optional title",
+			description:
+				"Update an existing Roadmap.md document's content and optional title",
 			inputSchema: documentUpdateSchema,
 		},
 		documentUpdateSchema,

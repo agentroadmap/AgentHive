@@ -1,10 +1,13 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
-import { createUniqueTestDir, safeCleanup, execSync,
+import {
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 let TEST_DIR: string;
@@ -81,20 +84,28 @@ Test proposal for board CLI integration.`,
 		assert.ok(statuses.includes("Potential"));
 
 		// Test that we can create the proposal map
-		const proposalsById = new Map(localProposals.map((t) => [t.id, { ...t, origin: "local" as const }]));
+		const proposalsById = new Map(
+			localProposals.map((t) => [t.id, { ...t, origin: "local" as const }]),
+		);
 		assert.strictEqual(proposalsById.size, 1);
 		expect(proposalsById.get("proposal-1")?.title).toBe("Board Test Proposal");
 	});
 
 	it("should properly handle cross-branch proposal resolution", async () => {
 		// Test the function that was missing filesystem parameter
-		const { getLatestProposalProposalsForIds } = await import("../../src/core/dag/cross-branch-proposals.ts");
+		const { getLatestProposalProposalsForIds } = await import(
+			"../../src/core/dag/cross-branch-proposals.ts"
+		);
 
 		const proposals = await core.filesystem.listProposals();
 		const proposalIds = proposals.map((t) => t.id);
 
 		// This should not throw "fs is not defined" or parameter errors
-		const result = await getLatestProposalProposalsForIds(core.gitOps, core.filesystem, proposalIds);
+		const result = await getLatestProposalProposalsForIds(
+			core.gitOps,
+			core.filesystem,
+			proposalIds,
+		);
 
 		expect(result).toBeInstanceOf(Map);
 		// The result may be empty in test environment without branches, but it shouldn't crash

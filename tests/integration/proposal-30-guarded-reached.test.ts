@@ -12,7 +12,7 @@
  */
 
 import assert from "node:assert";
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
 import { createUniqueTestDir, safeCleanup } from "../support/test-utils.ts";
 
@@ -32,7 +32,10 @@ describe("proposal-30/37: Guarded Complete Transition (Gates Removed)", () => {
 
 	// Helper to set up a proposal ready for Complete (builder + auditor + auditNotes)
 	async function setupAuditedProposal(title: string) {
-		const { proposal } = await core.createProposalFromInput({ title, status: "Potential" });
+		const { proposal } = await core.createProposalFromInput({
+			title,
+			status: "Potential",
+		});
 		await core.updateProposalFromInput(proposal.id, {
 			builder: "@builder",
 			auditor: "@peer-tester",
@@ -96,7 +99,10 @@ describe("proposal-30/37: Guarded Complete Transition (Gates Removed)", () => {
 
 	describe("Maturity=audited validation still exists for integrity", () => {
 		it("should still validate peer audit when setting maturity=audited", async () => {
-			const { proposal } = await core.createProposalFromInput({ title: "Test", status: "Potential" });
+			const { proposal } = await core.createProposalFromInput({
+				title: "Test",
+				status: "Potential",
+			});
 
 			// This should still reject - setting maturity=audited requires distinct builder/auditor
 			await assert.rejects(
@@ -112,7 +118,10 @@ describe("proposal-30/37: Guarded Complete Transition (Gates Removed)", () => {
 		});
 
 		it("should accept audited maturity with distinct builder and auditor", async () => {
-			const { proposal } = await core.createProposalFromInput({ title: "Test", status: "Potential" });
+			const { proposal } = await core.createProposalFromInput({
+				title: "Test",
+				status: "Potential",
+			});
 
 			const result = await core.updateProposalFromInput(proposal.id, {
 				builder: "@builder",
@@ -147,7 +156,10 @@ describe("proposal-30/37: Guarded Complete Transition (Gates Removed)", () => {
 
 	describe("Audit notes requirement for maturity=audited", () => {
 		it("should reject audited maturity without audit notes", async () => {
-			const { proposal } = await core.createProposalFromInput({ title: "Test", status: "Potential" });
+			const { proposal } = await core.createProposalFromInput({
+				title: "Test",
+				status: "Potential",
+			});
 
 			await assert.rejects(
 				() =>

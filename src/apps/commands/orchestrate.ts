@@ -3,9 +3,11 @@ import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import * as clack from "@clack/prompts";
 import type { Core } from "../../core/roadmap.ts";
-import type { RoadmapConfig } from "../../types/index.ts";
 
-export async function runOrchestrateCommand(core: Core, numAgentsStr: string | undefined): Promise<void> {
+export async function runOrchestrateCommand(
+	core: Core,
+	numAgentsStr: string | undefined,
+): Promise<void> {
 	clack.intro("🤖 Multi-Agent Orchestration Setup");
 
 	const rootDir = core.filesystem.rootDir;
@@ -17,7 +19,10 @@ export async function runOrchestrateCommand(core: Core, numAgentsStr: string | u
 	const daemonMode = !!daemonUrl;
 
 	if (daemonMode) {
-		clack.note(`Daemon mode active (${daemonUrl}). Agents will use HTTP API instead of symlinks.`, "🔗 Daemon Mode");
+		clack.note(
+			`Daemon mode active (${daemonUrl}). Agents will use HTTP API instead of symlinks.`,
+			"🔗 Daemon Mode",
+		);
 	}
 
 	let numAgents = 3;
@@ -48,9 +53,14 @@ export async function runOrchestrateCommand(core: Core, numAgentsStr: string | u
 	// Add worktrees to gitignore
 	try {
 		const gitignorePath = join(rootDir, ".gitignore");
-		const ignoreContent = await readFile(gitignorePath, "utf-8").catch(() => "");
+		const ignoreContent = await readFile(gitignorePath, "utf-8").catch(
+			() => "",
+		);
 		if (!ignoreContent.includes("worktrees/")) {
-			await writeFile(gitignorePath, `${ignoreContent}\n# Agent worktrees\nworktrees/\n`);
+			await writeFile(
+				gitignorePath,
+				`${ignoreContent}\n# Agent worktrees\nworktrees/\n`,
+			);
 		}
 	} catch (_e) {
 		// Ignore if gitignore manipulation fails
@@ -60,13 +70,19 @@ export async function runOrchestrateCommand(core: Core, numAgentsStr: string | u
 
 	// Ensure coordinator/tester identity is set on main if not already configured
 	try {
-		const currentName = execSync("git config user.name", { stdio: "pipe" }).toString().trim();
+		const currentName = execSync("git config user.name", { stdio: "pipe" })
+			.toString()
+			.trim();
 		if (!currentName) {
-			execSync('git config user.name "Coordinator (Human/Agent)"', { stdio: "ignore" });
+			execSync('git config user.name "Coordinator (Human/Agent)"', {
+				stdio: "ignore",
+			});
 		}
 	} catch {
 		try {
-			execSync('git config user.name "Coordinator (Human/Agent)"', { stdio: "ignore" });
+			execSync('git config user.name "Coordinator (Human/Agent)"', {
+				stdio: "ignore",
+			});
 		} catch {}
 	}
 
@@ -75,7 +91,10 @@ export async function runOrchestrateCommand(core: Core, numAgentsStr: string | u
 	for (let i = 1; i <= numAgents; i++) {
 		const agentName = `agent-${i}`;
 		const role = `Feature-Executor-${i}`;
-		await setupAgentWorktree(rootDir, worktreesDir, agentName, role, { daemonMode, daemonUrl });
+		await setupAgentWorktree(rootDir, worktreesDir, agentName, role, {
+			daemonMode,
+			daemonUrl,
+		});
 	}
 
 	clack.outro(`✅ Successfully initialized ${numAgents} agent workspaces in ./worktrees/
@@ -86,7 +105,11 @@ To interact as an agent, cd into the worktree:
 Each workspace has its own git identity pre-configured for auditability.`);
 }
 
-export async function runAgentJoinCommand(core: Core, agentName: string, role?: string): Promise<void> {
+export async function runAgentJoinCommand(
+	core: Core,
+	agentName: string,
+	role?: string,
+): Promise<void> {
 	clack.intro(`🤖 Adding Agent: ${agentName}`);
 	const rootDir = core.filesystem.rootDir;
 	const worktreesDir = join(rootDir, "worktrees");
@@ -99,7 +122,10 @@ export async function runAgentJoinCommand(core: Core, agentName: string, role?: 
 	const daemonMode = !!daemonUrl;
 
 	await mkdir(worktreesDir, { recursive: true });
-	await setupAgentWorktree(rootDir, worktreesDir, agentName, finalRole, { daemonMode, daemonUrl });
+	await setupAgentWorktree(rootDir, worktreesDir, agentName, finalRole, {
+		daemonMode,
+		daemonUrl,
+	});
 
 	clack.outro(`✅ Agent ${agentName} joined successfully.
 Workspace: ./worktrees/${agentName}`);
@@ -127,7 +153,10 @@ async function setupAgentWorktree(
 
 	try {
 		// Check if worktree already exists
-		const worktreeList = execSync("git worktree list", { cwd: rootDir, stdio: "pipe" }).toString();
+		const worktreeList = execSync("git worktree list", {
+			cwd: rootDir,
+			stdio: "pipe",
+		}).toString();
 		if (worktreeList.includes(agentDir)) {
 			spin.stop(`Workspace for ${agentName} already exists.`);
 			return;
@@ -140,7 +169,10 @@ async function setupAgentWorktree(
 			// Branch might already exist
 		}
 
-		execSync(`git worktree add "${agentDir}" ${branchName}`, { cwd: rootDir, stdio: "ignore" });
+		execSync(`git worktree add "${agentDir}" ${branchName}`, {
+			cwd: rootDir,
+			stdio: "ignore",
+		});
 
 		// AC#2: Skip symlink creation when daemon mode is active
 		if (useDaemon) {
@@ -154,7 +186,11 @@ async function setupAgentWorktree(
 			await rm(agentRoadmapDir, { recursive: true, force: true });
 
 			try {
-				await symlink(sharedRoadmapDir, agentRoadmapDir, process.platform === "win32" ? "junction" : "dir");
+				await symlink(
+					sharedRoadmapDir,
+					agentRoadmapDir,
+					process.platform === "win32" ? "junction" : "dir",
+				);
 			} catch (error) {
 				throw new Error(
 					`Failed to create shared roadmap symlink for ${agentName}: ${error instanceof Error ? error.message : String(error)}`,
@@ -163,10 +199,13 @@ async function setupAgentWorktree(
 
 			// Suppress git noise for the symlinked roadmap directory in the worktree
 			try {
-				execSync("git ls-files -z roadmap | xargs -0 git update-index --skip-worktree", {
-					cwd: agentDir,
-					stdio: "ignore",
-				});
+				execSync(
+					"git ls-files -z roadmap | xargs -0 git update-index --skip-worktree",
+					{
+						cwd: agentDir,
+						stdio: "ignore",
+					},
+				);
 			} catch (_e) {
 				// Ignore if skip-worktree fails
 			}
@@ -177,11 +216,20 @@ async function setupAgentWorktree(
 		const gitUserEmail = `${agentName}@agent-roadmap.local`;
 
 		// Enable worktree-specific configuration
-		execSync("git config extensions.worktreeConfig true", { cwd: rootDir, stdio: "ignore" });
+		execSync("git config extensions.worktreeConfig true", {
+			cwd: rootDir,
+			stdio: "ignore",
+		});
 
 		// Set identity only for this specific worktree
-		execSync(`git config --worktree user.name "${gitUserName}"`, { cwd: agentDir, stdio: "ignore" });
-		execSync(`git config --worktree user.email "${gitUserEmail}"`, { cwd: agentDir, stdio: "ignore" });
+		execSync(`git config --worktree user.name "${gitUserName}"`, {
+			cwd: agentDir,
+			stdio: "ignore",
+		});
+		execSync(`git config --worktree user.email "${gitUserEmail}"`, {
+			cwd: agentDir,
+			stdio: "ignore",
+		});
 
 		// AC#6: In daemon mode, write a local roadmap config pointing to the daemon
 		// This allows CLI commands to route through the daemon API instead of symlinks
@@ -192,17 +240,34 @@ async function setupAgentWorktree(
 				projectName: `Agent Worktree (${agentName})`,
 				daemonUrl,
 				daemonMode: true,
-				statuses: ["New", "Draft", "Review", "Active", "Accepted", "Complete", "Rejected", "Abandoned", "Replaced"],
+				statuses: [
+					"New",
+					"Draft",
+					"Review",
+					"Active",
+					"Accepted",
+					"Complete",
+					"Rejected",
+					"Abandoned",
+					"Replaced",
+				],
 				labels: [],
 				dateFormat: "yyyy-mm-dd",
 			};
-			await writeFile(join(agentRoadmapDir, "config.yml"), Object.entries(agentRoadmapConfig)
-				.map(([k, v]) => `${k}: ${typeof v === "string" ? `"${v}"` : JSON.stringify(v)}`)
-				.join("\n"));
+			await writeFile(
+				join(agentRoadmapDir, "config.yml"),
+				Object.entries(agentRoadmapConfig)
+					.map(
+						([k, v]) =>
+							`${k}: ${typeof v === "string" ? `"${v}"` : JSON.stringify(v)}`,
+					)
+					.join("\n"),
+			);
 		}
 
 		// 1. Configure OpenClaw (Identity, Soul, Heartbeat, Memory)
-		const heartbeatSyncEndpoint = useDaemon && daemonUrl
+		const heartbeatSyncEndpoint =
+			useDaemon && daemonUrl
 				? `${daemonUrl}/api/heartbeat`
 				: "http://localhost:6420/api/heartbeat";
 		const openClawConfig = {
@@ -212,8 +277,13 @@ async function setupAgentWorktree(
 				type: "executor",
 			},
 			soul: {
-				alignment: "You are an autonomous agent contributing to a shared project roadmap.",
-				directives: ["Scout local roadmap proposal", "Map new objectives", "Reach active targets"],
+				alignment:
+					"You are an autonomous agent contributing to a shared project roadmap.",
+				directives: [
+					"Scout local roadmap proposal",
+					"Map new objectives",
+					"Reach active targets",
+				],
 			},
 			heartbeat: {
 				intervalMs: 60000,
@@ -224,7 +294,10 @@ async function setupAgentWorktree(
 				sharedStore: useDaemon ? undefined : "../roadmap/shared",
 			},
 		};
-		await writeFile(join(agentDir, "openclaw.json"), JSON.stringify(openClawConfig, null, 2));
+		await writeFile(
+			join(agentDir, "openclaw.json"),
+			JSON.stringify(openClawConfig, null, 2),
+		);
 
 		// 2. Configure Claude Code (CLAUDE.md for local context)
 		const claudeContext = `# Claude Code Configuration

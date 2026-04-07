@@ -4,7 +4,11 @@
  */
 
 import { stdout as output } from "node:process";
-import type { ElementInterface, ListInterface, ScreenInterface } from "../blessed.ts";
+import type {
+	ElementInterface,
+	ListInterface,
+	ScreenInterface,
+} from "../blessed.ts";
 import { list } from "../blessed.ts";
 import { formatHeading } from "../heading.ts";
 import { createScreen } from "../tui.ts";
@@ -27,7 +31,11 @@ export interface GenericListOptions<T extends GenericListItem> {
 	// Called whenever the highlighted item changes (live navigation)
 	onHighlight?: (selected: T | null, index: number) => void;
 	// Called before wrapping at list boundaries. Return true to consume navigation.
-	onBoundaryNavigation?: (direction: "up" | "down", selectedIndex: number, total: number) => boolean;
+	onBoundaryNavigation?: (
+		direction: "up" | "down",
+		selectedIndex: number,
+		total: number,
+	) => boolean;
 	width?: string | number;
 	height?: string | number;
 	top?: string | number;
@@ -61,7 +69,9 @@ export interface GenericListController<T extends GenericListItem> {
 	destroy(): void;
 }
 
-export class GenericList<T extends GenericListItem> implements GenericListController<T> {
+export class GenericList<T extends GenericListItem>
+	implements GenericListController<T>
+{
 	private listBox!: ListInterface;
 	private screen?: ScreenInterface;
 	private items: T[];
@@ -143,7 +153,9 @@ export class GenericList<T extends GenericListItem> implements GenericListContro
 
 		this.listBox = list({
 			parent,
-			label: this.options.title ? `\u00A0${this.options.title}\u00A0` : undefined,
+			label: this.options.title
+				? `\u00A0${this.options.title}\u00A0`
+				: undefined,
 			top: this.options.top || 0,
 			left: this.options.left || 0,
 			width: this.options.width || (parent === this.screen ? "90%" : "100%"),
@@ -171,7 +183,11 @@ export class GenericList<T extends GenericListItem> implements GenericListContro
 
 		// Apply search filter
 		this.filteredItems = this.searchTerm
-			? this.items.filter((item) => JSON.stringify(item).toLowerCase().includes(this.searchTerm.toLowerCase()))
+			? this.items.filter((item) =>
+					JSON.stringify(item)
+						.toLowerCase()
+						.includes(this.searchTerm.toLowerCase()),
+				)
 			: [...this.items];
 
 		// Build display items
@@ -198,9 +214,15 @@ export class GenericList<T extends GenericListItem> implements GenericListContro
 				displayItems.push(formatHeading(group || "No Group", 2));
 				itemMap.set(index++, null); // Group header
 				for (const item of groupItems) {
-					const isSelected = this.isMultiSelect ? this.selectedIndices.has(index) : false;
+					const isSelected = this.isMultiSelect
+						? this.selectedIndices.has(index)
+						: false;
 					const rendered = this.itemRenderer(item, index, isSelected);
-					const prefix = this.isMultiSelect ? (isSelected ? "[✓] " : "[ ] ") : "  ";
+					const prefix = this.isMultiSelect
+						? isSelected
+							? "[✓] "
+							: "[ ] "
+						: "  ";
 					displayItems.push(prefix + rendered);
 					itemMap.set(index++, item);
 				}
@@ -210,7 +232,9 @@ export class GenericList<T extends GenericListItem> implements GenericListContro
 			for (let i = 0; i < this.filteredItems.length; i++) {
 				const item = this.filteredItems[i];
 				if (!item) continue;
-				const isSelected = this.isMultiSelect ? this.selectedIndices.has(i) : false;
+				const isSelected = this.isMultiSelect
+					? this.selectedIndices.has(i)
+					: false;
 				const rendered = this.itemRenderer(item, i, isSelected);
 				const prefix = this.isMultiSelect ? (isSelected ? "[✓] " : "[ ] ") : "";
 				displayItems.push(prefix + rendered);
@@ -263,7 +287,8 @@ export class GenericList<T extends GenericListItem> implements GenericListContro
 		const moveUp = () => {
 			const total = this.filteredItems.length;
 			if (total === 0) return;
-			const sel = typeof this.selectedIndex === "number" ? this.selectedIndex : 0;
+			const sel =
+				typeof this.selectedIndex === "number" ? this.selectedIndex : 0;
 			if (sel <= 0 && this.options.onBoundaryNavigation?.("up", sel, total)) {
 				return;
 			}
@@ -277,8 +302,12 @@ export class GenericList<T extends GenericListItem> implements GenericListContro
 		const moveDown = () => {
 			const total = this.filteredItems.length;
 			if (total === 0) return;
-			const sel = typeof this.selectedIndex === "number" ? this.selectedIndex : 0;
-			if (sel >= total - 1 && this.options.onBoundaryNavigation?.("down", sel, total)) {
+			const sel =
+				typeof this.selectedIndex === "number" ? this.selectedIndex : 0;
+			if (
+				sel >= total - 1 &&
+				this.options.onBoundaryNavigation?.("down", sel, total)
+			) {
 				return;
 			}
 			const nextIndex = sel < total - 1 ? sel + 1 : 0;
@@ -329,22 +358,32 @@ export class GenericList<T extends GenericListItem> implements GenericListContro
 
 		// Handle search input
 		if (this.options.searchable) {
-			this.listBox.on("keypress", (ch: string, key: { name: string; ctrl?: boolean; meta?: boolean }) => {
-				if (this.isSearchMode && key.name !== "escape" && key.name !== "enter") {
-					if (key.name === "backspace") {
-						this.searchTerm = this.searchTerm.slice(0, -1);
-					} else if (ch && ch.length === 1 && !key.ctrl && !key.meta) {
-						this.searchTerm += ch;
+			this.listBox.on(
+				"keypress",
+				(ch: string, key: { name: string; ctrl?: boolean; meta?: boolean }) => {
+					if (
+						this.isSearchMode &&
+						key.name !== "escape" &&
+						key.name !== "enter"
+					) {
+						if (key.name === "backspace") {
+							this.searchTerm = this.searchTerm.slice(0, -1);
+						} else if (ch && ch.length === 1 && !key.ctrl && !key.meta) {
+							this.searchTerm += ch;
+						}
+						this.refreshList();
 					}
-					this.refreshList();
-				}
-			});
+				},
+			);
 		}
 	}
 
 	private selectInitialItem(): void {
 		if (this.filteredItems.length > 0) {
-			const validIndex = Math.min(this.selectedIndex, this.filteredItems.length - 1);
+			const validIndex = Math.min(
+				this.selectedIndex,
+				this.filteredItems.length - 1,
+			);
 			this.listBox.select(validIndex);
 			this.selectedIndex = validIndex;
 			// Emit initial highlight so hosts can synchronize detail panes
@@ -365,7 +404,9 @@ export class GenericList<T extends GenericListItem> implements GenericListContro
 			const isSelected = this.selectedIndices.has(index);
 			const rendered = this.itemRenderer(item, index, isSelected);
 			const prefix = isSelected ? "[✓] " : "[ ] ";
-			(this.listBox as { setItem?: (i: number, content: string) => void }).setItem?.(index, prefix + rendered);
+			(
+				this.listBox as { setItem?: (i: number, content: string) => void }
+			).setItem?.(index, prefix + rendered);
 			this.getScreen()?.render?.();
 		}
 	}
@@ -380,7 +421,10 @@ export class GenericList<T extends GenericListItem> implements GenericListContro
 	}
 
 	private triggerSelection(): void {
-		if (this.selectedIndex >= 0 && this.selectedIndex < this.filteredItems.length) {
+		if (
+			this.selectedIndex >= 0 &&
+			this.selectedIndex < this.filteredItems.length
+		) {
 			const selected = this.filteredItems[this.selectedIndex];
 			if (selected) {
 				this.onSelect?.(selected, this.selectedIndex);
@@ -415,13 +459,16 @@ export class GenericList<T extends GenericListItem> implements GenericListContro
 				.map((i) => this.filteredItems[i])
 				.filter((item): item is T => Boolean(item));
 		}
-		return this.selectedIndex >= 0 && this.selectedIndex < this.filteredItems.length
+		return this.selectedIndex >= 0 &&
+			this.selectedIndex < this.filteredItems.length
 			? (this.filteredItems[this.selectedIndex] ?? null)
 			: null;
 	}
 
 	public getSelectedIndex(): number | number[] {
-		return this.isMultiSelect ? Array.from(this.selectedIndices) : this.selectedIndex;
+		return this.isMultiSelect
+			? Array.from(this.selectedIndices)
+			: this.selectedIndex;
 	}
 
 	public setSelectedIndex(index: number): void {
@@ -436,7 +483,9 @@ export class GenericList<T extends GenericListItem> implements GenericListContro
 		}
 		this.selectedIndex = clamped;
 		this.listBox.select(clamped);
-		const listWithSelected = this.listBox as ListInterface & { selected?: number };
+		const listWithSelected = this.listBox as ListInterface & {
+			selected?: number;
+		};
 		listWithSelected.selected = clamped;
 		this.onHighlight?.(this.filteredItems[clamped] ?? null, clamped);
 		this.getScreen()?.render?.();
@@ -469,13 +518,17 @@ export class GenericList<T extends GenericListItem> implements GenericListContro
 
 	private getScreen(): ScreenInterface | undefined {
 		if (this.screen) return this.screen;
-		const maybeHasScreen = this.listBox as unknown as { screen?: ScreenInterface };
+		const maybeHasScreen = this.listBox as unknown as {
+			screen?: ScreenInterface;
+		};
 		return maybeHasScreen?.screen;
 	}
 }
 
 // Factory function for easier usage
-export function createGenericList<T extends GenericListItem>(options: GenericListOptions<T>): GenericList<T> {
+export function createGenericList<T extends GenericListItem>(
+	options: GenericListOptions<T>,
+): GenericList<T> {
 	return new GenericList<T>(options);
 }
 

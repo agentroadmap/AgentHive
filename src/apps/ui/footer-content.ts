@@ -19,7 +19,9 @@ export function formatFooterContent(
 		return { content: "", height: 1 };
 	}
 
-	const segments = trimmed.split(/\s+\|\s+/).filter((segment) => segment.length > 0);
+	const segments = trimmed
+		.split(/\s+\|\s+/)
+		.filter((segment) => segment.length > 0);
 	if (segments.length <= 1) {
 		return { content, height: 1 };
 	}

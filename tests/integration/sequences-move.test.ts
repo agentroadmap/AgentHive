@@ -1,8 +1,10 @@
-import assert from "node:assert";
 import { describe, it } from "node:test";
-import { expect } from "../support/test-utils.ts";
-import { adjustDependenciesForMove, computeSequences } from '../../src/core/proposal/sequences.ts';
+import {
+	adjustDependenciesForMove,
+	computeSequences,
+} from "../../src/core/proposal/sequences.ts";
 import type { Proposal } from "../../src/types/index.ts";
+import { expect } from "../support/test-utils.ts";
 
 function t(id: string, deps: string[] = []): Proposal {
 	return {
@@ -20,7 +22,12 @@ function t(id: string, deps: string[] = []): Proposal {
 describe("adjustDependenciesForMove (join semantics)", () => {
 	it("sets moved proposal deps to previous sequence proposals and does not modify next sequence", () => {
 		// seq1: 1,2 ; seq2: 3(dep:1,2) ; seq3: 4(dep:3)
-		const proposals = [t("proposal-1"), t("proposal-2"), t("proposal-3", ["proposal-1", "proposal-2"]), t("proposal-4", ["proposal-3"])];
+		const proposals = [
+			t("proposal-1"),
+			t("proposal-2"),
+			t("proposal-3", ["proposal-1", "proposal-2"]),
+			t("proposal-4", ["proposal-3"]),
+		];
 		const res = computeSequences(proposals);
 		const seqs = res.sequences;
 
@@ -37,7 +44,12 @@ describe("adjustDependenciesForMove (join semantics)", () => {
 
 	it("keeps deps and does not add duplicates to next sequence", () => {
 		// seq1: 1 ; seq2: 2(dep:1), 3(dep:1) ; seq3: 4(dep:2,3)
-		const proposals = [t("proposal-1"), t("proposal-2", ["proposal-1"]), t("proposal-3", ["proposal-1"]), t("proposal-4", ["proposal-2", "proposal-3"])];
+		const proposals = [
+			t("proposal-1"),
+			t("proposal-2", ["proposal-1"]),
+			t("proposal-3", ["proposal-1"]),
+			t("proposal-4", ["proposal-2", "proposal-3"]),
+		];
 		const res = computeSequences(proposals);
 		const seqs = res.sequences;
 
@@ -46,6 +58,9 @@ describe("adjustDependenciesForMove (join semantics)", () => {
 		const byId = new Map(updated.map((x) => [x.id, x]));
 		expect(byId.get("proposal-2")?.dependencies).toEqual(["proposal-1"]);
 		// proposal-4 unchanged
-		expect(byId.get("proposal-4")?.dependencies).toEqual(["proposal-2", "proposal-3"]);
+		expect(byId.get("proposal-4")?.dependencies).toEqual([
+			"proposal-2",
+			"proposal-3",
+		]);
 	});
 });

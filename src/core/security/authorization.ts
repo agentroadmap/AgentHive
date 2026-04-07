@@ -35,7 +35,13 @@ export type Permission =
 	| "audit:read";
 
 /** Phase types for proposal transitions */
-export type Phase = "explore" | "research" | "implement" | "review" | "certify" | "complete";
+export type Phase =
+	| "explore"
+	| "research"
+	| "implement"
+	| "review"
+	| "certify"
+	| "complete";
 
 /** Role configuration */
 export interface RoleConfig {
@@ -116,7 +122,12 @@ export interface ViolationRecord {
 const DEFAULT_ROLES: Record<AgentRole, RoleConfig> = {
 	agent: {
 		role: "agent",
-		permissions: ["proposal:read", "proposal:claim", "proposal:edit", "proposal:complete"],
+		permissions: [
+			"proposal:read",
+			"proposal:claim",
+			"proposal:edit",
+			"proposal:complete",
+		],
 		phaseAccess: ["explore", "research", "implement", "complete"],
 		description: "Standard agent - can work on assigned proposals",
 	},
@@ -149,7 +160,14 @@ const DEFAULT_ROLES: Record<AgentRole, RoleConfig> = {
 			"admin:override",
 			"audit:read",
 		],
-		phaseAccess: ["explore", "research", "implement", "review", "certify", "complete"],
+		phaseAccess: [
+			"explore",
+			"research",
+			"implement",
+			"review",
+			"certify",
+			"complete",
+		],
 		description: "Full system access with override capability",
 	},
 };
@@ -192,7 +210,8 @@ export class AuthorizationService {
 	private roleAssignments: Map<string, AgentRoleAssignment> = new Map();
 	private auditLog: AccessAuditEvent[] = [];
 	private violations: Map<string, ViolationRecord[]> = new Map();
-	private overrideCounts: Map<string, { count: number; windowStart: number }> = new Map();
+	private overrideCounts: Map<string, { count: number; windowStart: number }> =
+		new Map();
 	private storageDir: string;
 	private suspendedAgents: Map<string, string> = new Map(); // agentId -> suspendedUntil ISO
 
@@ -220,7 +239,13 @@ export class AuthorizationService {
 
 		// Check if agent is suspended
 		if (this.isSuspended(agentId)) {
-			return this.denyAccess(agentId, permission, "Agent is suspended", timestamp, false);
+			return this.denyAccess(
+				agentId,
+				permission,
+				"Agent is suspended",
+				timestamp,
+				false,
+			);
 		}
 
 		// Get agent's role (defaults to 'agent' if not assigned)
@@ -241,7 +266,12 @@ export class AuthorizationService {
 			};
 		}
 
-		const result = this.denyAccess(agentId, permission, `Role '${role}' lacks permission '${permission}'`, timestamp);
+		const result = this.denyAccess(
+			agentId,
+			permission,
+			`Role '${role}' lacks permission '${permission}'`,
+			timestamp,
+		);
 		this.recordViolation(agentId, `permission:${permission}`);
 		return result;
 	}
@@ -249,12 +279,21 @@ export class AuthorizationService {
 	/**
 	 * Check if an agent can edit a specific proposal (assignee enforcement).
 	 */
-	checkProposalEdit(agentId: string, proposalAssignee: string | null, proposalId: number): AccessCheckResult {
+	checkProposalEdit(
+		agentId: string,
+		proposalAssignee: string | null,
+		proposalId: number,
+	): AccessCheckResult {
 		const timestamp = new Date().toISOString();
 
 		// Check if agent is suspended
 		if (this.isSuspended(agentId)) {
-			return this.denyAccess(agentId, "proposal:edit", "Agent is suspended", timestamp);
+			return this.denyAccess(
+				agentId,
+				"proposal:edit",
+				"Agent is suspended",
+				timestamp,
+			);
 		}
 
 		const assignment = this.roleAssignments.get(agentId);
@@ -262,40 +301,78 @@ export class AuthorizationService {
 
 		// Admins can edit any proposal
 		if (role === "admin") {
-			return this.allowAccess(agentId, "proposal:edit", role, timestamp, "Admin override");
+			return this.allowAccess(
+				agentId,
+				"proposal:edit",
+				role,
+				timestamp,
+				"Admin override",
+			);
 		}
 
 		// Unclaimed proposal (null assignee) - agent with edit permission can claim it
 		if (proposalAssignee === null) {
-			return this.allowAccess(agentId, "proposal:edit", role, timestamp, "Unclaimed proposal - agent can claim");
+			return this.allowAccess(
+				agentId,
+				"proposal:edit",
+				role,
+				timestamp,
+				"Unclaimed proposal - agent can claim",
+			);
 		}
 
 		// Assignee enforcement - only assigned agent can edit
 		if (proposalAssignee === agentId) {
-			return this.allowAccess(agentId, "proposal:edit", role, timestamp, "Agent is assigned to this proposal");
+			return this.allowAccess(
+				agentId,
+				"proposal:edit",
+				role,
+				timestamp,
+				"Agent is assigned to this proposal",
+			);
 		}
 
 		// Check if agent has override permission and hasn't exceeded limit
 		if (this.policy.override.enabled && role === "reviewer") {
 			if (this.canUseOverride(agentId)) {
 				this.incrementOverrideCount(agentId);
-				return this.allowAccess(agentId, "proposal:edit", role, timestamp, "Reviewer override used");
+				return this.allowAccess(
+					agentId,
+					"proposal:edit",
+					role,
+					timestamp,
+					"Reviewer override used",
+				);
 			}
 		}
 
 		this.recordViolation(agentId, `proposal:edit:${proposalId}`);
-		return this.denyAccess(agentId, "proposal:edit", `Agent '${agentId}' is not assigned to proposal ${proposalId}`, timestamp);
+		return this.denyAccess(
+			agentId,
+			"proposal:edit",
+			`Agent '${agentId}' is not assigned to proposal ${proposalId}`,
+			timestamp,
+		);
 	}
 
 	/**
 	 * Check if an agent can transition a proposal to a specific phase (phase-gate validation).
 	 */
-	checkPhaseTransition(agentId: string, currentPhase: Phase, targetPhase: Phase): AccessCheckResult {
+	checkPhaseTransition(
+		agentId: string,
+		currentPhase: Phase,
+		targetPhase: Phase,
+	): AccessCheckResult {
 		const timestamp = new Date().toISOString();
 
 		// Check if agent is suspended
 		if (this.isSuspended(agentId)) {
-			return this.denyAccess(agentId, "phase:transition", "Agent is suspended", timestamp);
+			return this.denyAccess(
+				agentId,
+				"phase:transition",
+				"Agent is suspended",
+				timestamp,
+			);
 		}
 
 		const assignment = this.roleAssignments.get(agentId);
@@ -314,7 +391,14 @@ export class AuthorizationService {
 		}
 
 		// Validate phase sequence (cannot skip phases)
-		const phaseOrder: Phase[] = ["explore", "research", "implement", "review", "certify", "complete"];
+		const phaseOrder: Phase[] = [
+			"explore",
+			"research",
+			"implement",
+			"review",
+			"certify",
+			"complete",
+		];
 		const currentIndex = phaseOrder.indexOf(currentPhase);
 		const targetIndex = phaseOrder.indexOf(targetPhase);
 
@@ -330,7 +414,13 @@ export class AuthorizationService {
 		// Validate skip-allowed transitions
 		if (currentPhase === "implement" && targetPhase === "complete") {
 			// Direct to complete is allowed (skipping review/certify for non-critical proposals)
-			return this.allowAccess(agentId, "phase:transition", role, timestamp, "Direct completion allowed");
+			return this.allowAccess(
+				agentId,
+				"phase:transition",
+				role,
+				timestamp,
+				"Direct completion allowed",
+			);
 		}
 
 		return this.allowAccess(
@@ -345,13 +435,23 @@ export class AuthorizationService {
 	/**
 	 * Admin override with audit logging.
 	 */
-	adminOverride(adminId: string, targetAgentId: string, action: string, reason: string): AccessCheckResult {
+	adminOverride(
+		adminId: string,
+		targetAgentId: string,
+		action: string,
+		reason: string,
+	): AccessCheckResult {
 		const timestamp = new Date().toISOString();
 
 		// Verify admin has override permission
 		const adminCheck = this.checkPermission(adminId, "admin:override");
 		if (!adminCheck.allowed) {
-			return this.denyAccess(adminId, "admin:override", "Admin override requires admin role", timestamp);
+			return this.denyAccess(
+				adminId,
+				"admin:override",
+				"Admin override requires admin role",
+				timestamp,
+			);
 		}
 
 		// Log the override
@@ -386,7 +486,12 @@ export class AuthorizationService {
 	/**
 	 * Assign a role to an agent.
 	 */
-	assignRole(agentId: string, role: AgentRole, assignedBy: string, notes?: string): AgentRoleAssignment {
+	assignRole(
+		agentId: string,
+		role: AgentRole,
+		assignedBy: string,
+		notes?: string,
+	): AgentRoleAssignment {
 		const assignment: AgentRoleAssignment = {
 			agentId,
 			role,
@@ -457,9 +562,17 @@ export class AuthorizationService {
 	/**
 	 * Suspend an agent.
 	 */
-	suspendAgent(agentId: string, suspendedBy: string, reason: string, durationMinutes?: number): void {
-		const duration = durationMinutes ?? this.policy.autoEscalate.suspensionDurationMinutes;
-		const suspendedUntil = new Date(Date.now() + duration * 60 * 1000).toISOString();
+	suspendAgent(
+		agentId: string,
+		suspendedBy: string,
+		reason: string,
+		durationMinutes?: number,
+	): void {
+		const duration =
+			durationMinutes ?? this.policy.autoEscalate.suspensionDurationMinutes;
+		const suspendedUntil = new Date(
+			Date.now() + duration * 60 * 1000,
+		).toISOString();
 		this.suspendedAgents.set(agentId, suspendedUntil);
 		this.saveProposal();
 
@@ -588,7 +701,9 @@ export class AuthorizationService {
 		}
 		if (filters.startTime) {
 			const start = new Date(filters.startTime).getTime();
-			filtered = filtered.filter((e) => new Date(e.timestamp).getTime() >= start);
+			filtered = filtered.filter(
+				(e) => new Date(e.timestamp).getTime() >= start,
+			);
 		}
 		if (filters.endTime) {
 			const end = new Date(filters.endTime).getTime();
@@ -609,7 +724,9 @@ export class AuthorizationService {
 		if (!sinceMinutes) return violations.reduce((sum, v) => sum + v.count, 0);
 
 		const cutoff = Date.now() - sinceMinutes * 60 * 1000;
-		return violations.filter((v) => new Date(v.timestamp).getTime() > cutoff).reduce((sum, v) => sum + v.count, 0);
+		return violations
+			.filter((v) => new Date(v.timestamp).getTime() > cutoff)
+			.reduce((sum, v) => sum + v.count, 0);
 	}
 
 	/**
@@ -748,7 +865,10 @@ export class AuthorizationService {
 				const data = JSON.parse(readFileSync(rolesFile, "utf-8"));
 				if (data.roles) {
 					for (const [agentId, assignment] of Object.entries(data.roles)) {
-						this.roleAssignments.set(agentId, assignment as AgentRoleAssignment);
+						this.roleAssignments.set(
+							agentId,
+							assignment as AgentRoleAssignment,
+						);
 					}
 				}
 			} catch {
@@ -795,17 +915,26 @@ export class AuthorizationService {
 		for (const [agentId, assignment] of this.roleAssignments) {
 			rolesData[agentId] = assignment;
 		}
-		writeFileSync(join(this.storageDir, "roles.json"), JSON.stringify({ roles: rolesData }, null, 2));
+		writeFileSync(
+			join(this.storageDir, "roles.json"),
+			JSON.stringify({ roles: rolesData }, null, 2),
+		);
 
 		const suspendedData: Record<string, string> = {};
 		for (const [agentId, until] of this.suspendedAgents) {
 			suspendedData[agentId] = until;
 		}
-		writeFileSync(join(this.storageDir, "suspended.json"), JSON.stringify(suspendedData, null, 2));
+		writeFileSync(
+			join(this.storageDir, "suspended.json"),
+			JSON.stringify(suspendedData, null, 2),
+		);
 	}
 
 	private saveAuditLog(): void {
-		writeFileSync(join(this.storageDir, "audit.json"), JSON.stringify(this.auditLog, null, 2));
+		writeFileSync(
+			join(this.storageDir, "audit.json"),
+			JSON.stringify(this.auditLog, null, 2),
+		);
 	}
 
 	private saveViolations(): void {
@@ -813,6 +942,9 @@ export class AuthorizationService {
 		for (const [agentId, records] of this.violations) {
 			data[agentId] = records;
 		}
-		writeFileSync(join(this.storageDir, "violations.json"), JSON.stringify(data, null, 2));
+		writeFileSync(
+			join(this.storageDir, "violations.json"),
+			JSON.stringify(data, null, 2),
+		);
 	}
 }

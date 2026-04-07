@@ -31,7 +31,8 @@ export function registerMemoryTools(server: McpServer): void {
 				key: String(args.key),
 				value: String(args.value),
 				metadata: typeof args.metadata === "string" ? args.metadata : undefined,
-				ttl_seconds: typeof args.ttl_seconds === "number" ? args.ttl_seconds : undefined,
+				ttl_seconds:
+					typeof args.ttl_seconds === "number" ? args.ttl_seconds : undefined,
 			}),
 	});
 
@@ -72,14 +73,20 @@ export function registerMemoryTools(server: McpServer): void {
 		},
 		handler: async (args: any) => {
 			if (!Array.isArray(args.embedding)) {
-				return textResult("Memory search requires an embedding vector in Postgres mode.");
+				return textResult(
+					"Memory search requires an embedding vector in Postgres mode.",
+				);
 			}
 			return await handlers.searchMemory({
-				agent_identity: typeof args.agent_identity === "string" ? args.agent_identity : undefined,
+				agent_identity:
+					typeof args.agent_identity === "string"
+						? args.agent_identity
+						: undefined,
 				layer: typeof args.layer === "string" ? args.layer : undefined,
 				embedding: args.embedding.map((value: unknown) => Number(value)),
 				top_k: typeof args.top_k === "number" ? args.top_k : undefined,
-				threshold: typeof args.threshold === "number" ? args.threshold : undefined,
+				threshold:
+					typeof args.threshold === "number" ? args.threshold : undefined,
 			});
 		},
 	});

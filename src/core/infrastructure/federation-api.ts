@@ -10,12 +10,18 @@
  * AC#4: Connection recovery after network interruption
  */
 
-import { createServer, request, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { createHash, randomUUID } from "node:crypto";
-import { readFile, writeFile, access, mkdir } from "node:fs/promises";
-import { join } from "node:path";
 import { existsSync } from "node:fs";
-import { FederationPKI, type Host, type Certificate } from "./federation.ts";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import {
+	createServer,
+	type IncomingMessage,
+	request,
+	type Server,
+	type ServerResponse,
+} from "node:http";
+import { join } from "node:path";
+import { FederationPKI } from "./federation.ts";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -130,9 +136,9 @@ const DEFAULT_CONFIG: Partial<FederationConfig> = {
 	retryDelayMs: 1000,
 };
 
-const FEDERATION_DIR = ".roadmap/federation";
-const SYNC_STATE_FILE = "sync-proposal.json";
-const PENDING_CHANGES_FILE = "pending-changes.json";
+const _FEDERATION_DIR = ".roadmap/federation";
+const _SYNC_STATE_FILE = "sync-proposal.json";
+const _PENDING_CHANGES_FILE = "pending-changes.json";
 
 // ─── Message Helpers ─────────────────────────────────────────────────
 
@@ -192,7 +198,9 @@ export class ConflictResolver {
 			status: "pending",
 			strategy: this.strategy,
 			createdAt: new Date().toISOString(),
-			versions: [version1, version2].sort((a, b) => a.timestamp.localeCompare(b.timestamp)),
+			versions: [version1, version2].sort((a, b) =>
+				a.timestamp.localeCompare(b.timestamp),
+			),
 		};
 		this.conflicts.set(conflictId, conflict);
 		return conflict;
@@ -201,7 +209,10 @@ export class ConflictResolver {
 	/**
 	 * AC#3: Resolve a conflict using the configured strategy.
 	 */
-	resolveConflict(conflictId: string, resolverHostId: string): {
+	resolveConflict(
+		conflictId: string,
+		resolverHostId: string,
+	): {
 		resolved: boolean;
 		winningVersion?: ConflictVersion;
 		resolution: string;
@@ -259,14 +270,18 @@ export class ConflictResolver {
 	 * Get all pending conflicts.
 	 */
 	getPendingConflicts(): ConflictEntry[] {
-		return Array.from(this.conflicts.values()).filter((c) => c.status === "pending");
+		return Array.from(this.conflicts.values()).filter(
+			(c) => c.status === "pending",
+		);
 	}
 
 	/**
 	 * Get conflicts for a specific proposal.
 	 */
 	getProposalConflicts(proposalId: string): ConflictEntry[] {
-		return Array.from(this.conflicts.values()).filter((c) => c.proposalId === proposalId);
+		return Array.from(this.conflicts.values()).filter(
+			(c) => c.proposalId === proposalId,
+		);
 	}
 
 	/**
@@ -281,7 +296,6 @@ export class ConflictResolver {
 
 export class ConnectionManager {
 	private connections: Map<string, WebSocketConnection> = new Map();
-	private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 	private reconnectAttempts: Map<string, number> = new Map();
 	private maxRetries: number;
 	private retryDelayMs: number;
@@ -329,7 +343,10 @@ export class ConnectionManager {
 	 * Get connection by host ID.
 	 */
 	getConnectionByHost(hostId: string): WebSocketConnection | null {
-		return Array.from(this.connections.values()).find((c) => c.hostId === hostId) ?? null;
+		return (
+			Array.from(this.connections.values()).find((c) => c.hostId === hostId) ??
+			null
+		);
 	}
 
 	/**
@@ -354,7 +371,7 @@ export class ConnectionManager {
 	 */
 	getRetryDelay(hostId: string): number {
 		const attempts = this.reconnectAttempts.get(hostId) ?? 0;
-		return this.retryDelayMs * Math.pow(2, attempts);
+		return this.retryDelayMs * 2 ** attempts;
 	}
 
 	/**
@@ -395,7 +412,10 @@ export class ConnectionManager {
 			total: all.length,
 			alive: all.filter((c) => c.isAlive).length,
 			dead: all.filter((c) => !c.isAlive).length,
-			pendingMessages: all.reduce((sum, c) => sum + c.pendingMessages.length, 0),
+			pendingMessages: all.reduce(
+				(sum, c) => sum + c.pendingMessages.length,
+				0,
+			),
 		};
 	}
 }
@@ -409,15 +429,20 @@ export class FederationServer {
 	private conflictResolver: ConflictResolver;
 	private connectionManager: ConnectionManager;
 	private connectedAgents: Map<string, ConnectedAgent> = new Map();
-	private messageHandlers: Map<MessageType, (msg: FederationMessage) => Promise<FederationMessage | null>> = new Map();
-	private pendingRequests: Map<string, { resolve: (msg: FederationMessage) => void; reject: (err: Error) => void; timeout: ReturnType<typeof setTimeout> }> = new Map();
+	private messageHandlers: Map<
+		MessageType,
+		(msg: FederationMessage) => Promise<FederationMessage | null>
+	> = new Map();
 	private pendingChanges: Map<string, ProposalChangePayload> = new Map();
-	private syncProposal: SyncProposal | null = null;
 
-	constructor(config: Partial<FederationConfig> & { hostId: string; secretKey: string }) {
+	constructor(
+		config: Partial<FederationConfig> & { hostId: string; secretKey: string },
+	) {
 		this.config = { ...DEFAULT_CONFIG, ...config } as FederationConfig;
 		this.pki = new FederationPKI();
-		this.conflictResolver = new ConflictResolver(this.config.conflictResolution);
+		this.conflictResolver = new ConflictResolver(
+			this.config.conflictResolution,
+		);
 		this.connectionManager = new ConnectionManager({
 			maxRetries: this.config.maxRetries,
 			retryDelayMs: this.config.retryDelayMs,
@@ -431,7 +456,7 @@ export class FederationServer {
 	async start(): Promise<void> {
 		this.server = createServer(this.handleRequest.bind(this));
 		await new Promise<void>((resolve) => {
-			this.server!.listen(this.config.port, () => {
+			this.server?.listen(this.config.port, () => {
 				console.log(`Federation server listening on port ${this.config.port}`);
 				resolve();
 			});
@@ -444,7 +469,7 @@ export class FederationServer {
 	async stop(): Promise<void> {
 		if (this.server) {
 			await new Promise<void>((resolve) => {
-				this.server!.close(() => resolve());
+				this.server?.close(() => resolve());
 			});
 			this.server = null;
 		}
@@ -453,7 +478,10 @@ export class FederationServer {
 	/**
 	 * AC#1: Handle incoming HTTP requests.
 	 */
-	private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+	private async handleRequest(
+		req: IncomingMessage,
+		res: ServerResponse,
+	): Promise<void> {
 		let body = "";
 		req.on("data", (chunk) => {
 			body += chunk;
@@ -465,7 +493,14 @@ export class FederationServer {
 					const message = deserializeMessage(body);
 					const response = await this.processMessage(message);
 					res.writeHead(200, { "Content-Type": "application/json" });
-					res.end(serializeMessage(response ?? createMessage("error", this.config.hostId, { error: "No response" })));
+					res.end(
+						serializeMessage(
+							response ??
+								createMessage("error", this.config.hostId, {
+									error: "No response",
+								}),
+						),
+					);
 				} else if (req.method === "POST" && req.url === "/federation/sync") {
 					const syncData = JSON.parse(body);
 					const result = await this.handleSyncRequest(syncData);
@@ -474,9 +509,17 @@ export class FederationServer {
 				} else if (req.method === "GET" && req.url === "/federation/status") {
 					res.writeHead(200, { "Content-Type": "application/json" });
 					res.end(JSON.stringify(this.getStatus()));
-				} else if (req.method === "POST" && req.url === "/federation/heartbeat") {
+				} else if (
+					req.method === "POST" &&
+					req.url === "/federation/heartbeat"
+				) {
 					const msg = deserializeMessage(body);
-					const ack = createMessage("heartbeat_ack", this.config.hostId, { receivedAt: new Date().toISOString() }, { correlationId: msg.id });
+					const ack = createMessage(
+						"heartbeat_ack",
+						this.config.hostId,
+						{ receivedAt: new Date().toISOString() },
+						{ correlationId: msg.id },
+					);
 					res.writeHead(200, { "Content-Type": "application/json" });
 					res.end(serializeMessage(ack));
 				} else {
@@ -498,7 +541,12 @@ export class FederationServer {
 		this.messageHandlers.set("proposal_update", async (msg) => {
 			const payload = msg.payload as unknown as ProposalChangePayload;
 			await this.applyProposalChange(payload);
-			return createMessage("heartbeat_ack", this.config.hostId, { applied: true }, { correlationId: msg.id });
+			return createMessage(
+				"heartbeat_ack",
+				this.config.hostId,
+				{ applied: true },
+				{ correlationId: msg.id },
+			);
 		});
 
 		// AC#2: Handle proposal requests
@@ -517,7 +565,11 @@ export class FederationServer {
 		this.messageHandlers.set("conflict_notify", async (msg) => {
 			const versions = msg.payload.versions as ConflictVersion[];
 			const proposalId = msg.payload.proposalId as string;
-			const conflict = this.conflictResolver.detectConflict(proposalId, versions[0], versions[1]);
+			const conflict = this.conflictResolver.detectConflict(
+				proposalId,
+				versions[0],
+				versions[1],
+			);
 			return createMessage(
 				"conflict_resolve",
 				this.config.hostId,
@@ -535,7 +587,12 @@ export class FederationServer {
 					agent.lastHeartbeat = new Date().toISOString();
 				}
 			}
-			return createMessage("heartbeat_ack", this.config.hostId, { timestamp: new Date().toISOString() }, { correlationId: msg.id });
+			return createMessage(
+				"heartbeat_ack",
+				this.config.hostId,
+				{ timestamp: new Date().toISOString() },
+				{ correlationId: msg.id },
+			);
 		});
 
 		// AC#2: Handle sync requests
@@ -554,40 +611,59 @@ export class FederationServer {
 	/**
 	 * Process an incoming message.
 	 */
-	async processMessage(message: FederationMessage): Promise<FederationMessage | null> {
+	async processMessage(
+		message: FederationMessage,
+	): Promise<FederationMessage | null> {
 		const handler = this.messageHandlers.get(message.type);
 		if (handler) {
 			return await handler(message);
 		}
-		return createMessage("error", this.config.hostId, { error: `Unknown message type: ${message.type}` }, { correlationId: message.id });
+		return createMessage(
+			"error",
+			this.config.hostId,
+			{ error: `Unknown message type: ${message.type}` },
+			{ correlationId: message.id },
+		);
 	}
 
 	/**
 	 * AC#2: Apply a proposal change from another host.
 	 */
-	private async applyProposalChange(payload: ProposalChangePayload): Promise<void> {
+	private async applyProposalChange(
+		payload: ProposalChangePayload,
+	): Promise<void> {
 		// Check for conflicts
 		const currentProposalHash = await this.getProposalHash(payload.proposalId);
 		if (currentProposalHash && currentProposalHash !== payload.previousHash) {
 			// Conflict detected - the previous hash doesn't match
-			const conflict = this.conflictResolver.detectConflict(payload.proposalId, {
-				hostId: this.config.hostId,
-				contentHash: currentProposalHash,
-				content: await this.getProposalContent(payload.proposalId) ?? "",
-				timestamp: new Date().toISOString(),
-				author: "local",
-			}, {
-				hostId: payload.author,
-				contentHash: payload.currentHash,
-				content: payload.content,
-				timestamp: payload.timestamp,
-				author: payload.author,
-			});
+			const conflict = this.conflictResolver.detectConflict(
+				payload.proposalId,
+				{
+					hostId: this.config.hostId,
+					contentHash: currentProposalHash,
+					content: (await this.getProposalContent(payload.proposalId)) ?? "",
+					timestamp: new Date().toISOString(),
+					author: "local",
+				},
+				{
+					hostId: payload.author,
+					contentHash: payload.currentHash,
+					content: payload.content,
+					timestamp: payload.timestamp,
+					author: payload.author,
+				},
+			);
 
 			// Auto-resolve if possible
-			const resolution = this.conflictResolver.resolveConflict(conflict.conflictId, this.config.hostId);
+			const resolution = this.conflictResolver.resolveConflict(
+				conflict.conflictId,
+				this.config.hostId,
+			);
 			if (resolution.resolved && resolution.winningVersion) {
-				await this.saveProposalContent(payload.proposalId, resolution.winningVersion.content);
+				await this.saveProposalContent(
+					payload.proposalId,
+					resolution.winningVersion.content,
+				);
 			}
 		} else {
 			// No conflict - apply directly
@@ -651,13 +727,20 @@ export class FederationServer {
 	 * AC#2: Broadcast a proposal change to all connected hosts.
 	 */
 	async broadcastProposalChange(payload: ProposalChangePayload): Promise<void> {
-		const message = createMessage("proposal_update", this.config.hostId, payload as unknown as Record<string, unknown>);
+		const message = createMessage(
+			"proposal_update",
+			this.config.hostId,
+			payload as unknown as Record<string, unknown>,
+		);
 
 		for (const host of this.config.knownHosts) {
 			try {
 				await this.sendMessage(host.hostname, host.port, message);
 			} catch (error) {
-				console.error(`Failed to broadcast to ${host.hostname}:${host.port}:`, error);
+				console.error(
+					`Failed to broadcast to ${host.hostname}:${host.port}:`,
+					error,
+				);
 			}
 		}
 	}
@@ -670,11 +753,9 @@ export class FederationServer {
 		port: number,
 		since?: string,
 	): Promise<SyncProposal | null> {
-		const message = createMessage(
-			"sync_request",
-			this.config.hostId,
-			{ since: since ?? new Date(0).toISOString() },
-		);
+		const message = createMessage("sync_request", this.config.hostId, {
+			since: since ?? new Date(0).toISOString(),
+		});
 
 		try {
 			const response = await this.sendMessage(hostname, port, message);
@@ -700,7 +781,9 @@ export class FederationServer {
 	/**
 	 * AC#3: Handle sync request and return changes.
 	 */
-	private async handleSyncRequest(data: { since: string }): Promise<{ changes: ProposalChangePayload[] }> {
+	private async handleSyncRequest(data: {
+		since: string;
+	}): Promise<{ changes: ProposalChangePayload[] }> {
 		const changes = await this.getChangesSince(data.since);
 		return { changes };
 	}
@@ -708,7 +791,9 @@ export class FederationServer {
 	/**
 	 * Get all changes since a timestamp.
 	 */
-	private async getChangesSince(since: string): Promise<ProposalChangePayload[]> {
+	private async getChangesSince(
+		since: string,
+	): Promise<ProposalChangePayload[]> {
 		const changes: ProposalChangePayload[] = [];
 		for (const [, change] of this.pendingChanges) {
 			if (change.timestamp > since) {
@@ -731,7 +816,12 @@ export class FederationServer {
 	 */
 	private async getProposalContent(proposalId: string): Promise<string | null> {
 		try {
-			const proposalPath = join(process.cwd(), "roadmap", "proposals", `${proposalId}.md`);
+			const proposalPath = join(
+				process.cwd(),
+				"roadmap",
+				"proposals",
+				`${proposalId}.md`,
+			);
 			await access(proposalPath);
 			return await readFile(proposalPath, "utf-8");
 		} catch {
@@ -742,8 +832,16 @@ export class FederationServer {
 	/**
 	 * Save content for a proposal.
 	 */
-	private async saveProposalContent(proposalId: string, content: string): Promise<void> {
-		const proposalPath = join(process.cwd(), "roadmap", "proposals", `${proposalId}.md`);
+	private async saveProposalContent(
+		proposalId: string,
+		content: string,
+	): Promise<void> {
+		const proposalPath = join(
+			process.cwd(),
+			"roadmap",
+			"proposals",
+			`${proposalId}.md`,
+		);
 		const dir = join(process.cwd(), "roadmap", "proposals");
 		if (!existsSync(dir)) {
 			await mkdir(dir, { recursive: true });
@@ -843,7 +941,10 @@ export function createProposalUpdateMessage(
 /**
  * Create a heartbeat message.
  */
-export function createHeartbeatMessage(sourceHostId: string, agentId: string): FederationMessage {
+export function createHeartbeatMessage(
+	sourceHostId: string,
+	agentId: string,
+): FederationMessage {
 	return createMessage("heartbeat", sourceHostId, {
 		agentId,
 		timestamp: new Date().toISOString(),

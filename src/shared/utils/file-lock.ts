@@ -28,11 +28,11 @@ export class FileLock {
 			try {
 				// 'wx' flag: open for writing, fails if file exists (atomic)
 				const handle = await open(this.lockPath, "wx");
-				
+
 				// Write current PID to the lock file for debugging
 				await handle.writeFile(process.pid.toString());
 				await handle.close();
-				
+
 				return true;
 			} catch (error: any) {
 				if (error.code === "EEXIST") {
@@ -58,7 +58,7 @@ export class FileLock {
 	async release(): Promise<void> {
 		try {
 			await rm(this.lockPath, { force: true });
-		} catch (error) {
+		} catch (_error) {
 			// Ignore if already gone
 		}
 	}
@@ -83,13 +83,15 @@ export class FileLock {
 		projectRoot: string,
 		lockName: string,
 		fn: () => Promise<T>,
-		options?: { timeoutMs?: number }
+		options?: { timeoutMs?: number },
 	): Promise<T> {
 		const lock = new FileLock(projectRoot, lockName);
 		const acquired = await lock.acquire(options?.timeoutMs);
-		
+
 		if (!acquired) {
-			throw new Error(`Failed to acquire lock: ${lockName} after ${options?.timeoutMs || 5000}ms`);
+			throw new Error(
+				`Failed to acquire lock: ${lockName} after ${options?.timeoutMs || 5000}ms`,
+			);
 		}
 
 		try {

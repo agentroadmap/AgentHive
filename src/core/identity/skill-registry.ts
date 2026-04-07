@@ -12,7 +12,7 @@
  * AC#5: Skill match scoring ranks agents by capability fit
  */
 
-import { mkdirSync, existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 // SQLite removed
 
@@ -173,7 +173,8 @@ export class SkillRegistry {
 		const now = new Date().toISOString();
 
 		// Upsert agent
-		this.db.prepare(`
+		this.db
+			.prepare(`
 			INSERT INTO agents (agent_id, name, available, created_at, updated_at, metadata)
 			VALUES (?, ?, ?, ?, ?, ?)
 			ON CONFLICT(agent_id) DO UPDATE SET
@@ -181,17 +182,20 @@ export class SkillRegistry {
 				available = excluded.available,
 				updated_at = excluded.updated_at,
 				metadata = excluded.metadata
-		`).run(
-			profile.agentId,
-			profile.name,
-			profile.available ? 1 : 0,
-			profile.createdAt || now,
-			now,
-			profile.metadata ? JSON.stringify(profile.metadata) : null,
-		);
+		`)
+			.run(
+				profile.agentId,
+				profile.name,
+				profile.available ? 1 : 0,
+				profile.createdAt || now,
+				now,
+				profile.metadata ? JSON.stringify(profile.metadata) : null,
+			);
 
 		// Replace skills
-		this.db.prepare("DELETE FROM agent_skills WHERE agent_id = ?").run(profile.agentId);
+		this.db
+			.prepare("DELETE FROM agent_skills WHERE agent_id = ?")
+			.run(profile.agentId);
 
 		const insertSkill = this.db.prepare(`
 			INSERT INTO agent_skills (agent_id, skill_id, name, category, level, description, related_skills)
@@ -211,9 +215,13 @@ export class SkillRegistry {
 		}
 
 		// Replace tools
-		this.db.prepare("DELETE FROM agent_tools WHERE agent_id = ?").run(profile.agentId);
+		this.db
+			.prepare("DELETE FROM agent_tools WHERE agent_id = ?")
+			.run(profile.agentId);
 
-		const insertTool = this.db.prepare("INSERT INTO agent_tools (agent_id, tool_name) VALUES (?, ?)");
+		const insertTool = this.db.prepare(
+			"INSERT INTO agent_tools (agent_id, tool_name) VALUES (?, ?)",
+		);
 		for (const tool of profile.tools || []) {
 			insertTool.run(profile.agentId, tool);
 		}
@@ -226,7 +234,9 @@ export class SkillRegistry {
 		this.ensureInitialized();
 		if (!this.db) throw new Error("Database not initialized");
 
-		const agentRow = this.db.prepare("SELECT * FROM agents WHERE agent_id = ?").get(agentId) as any;
+		const agentRow = this.db
+			.prepare("SELECT * FROM agents WHERE agent_id = ?")
+			.get(agentId) as any;
 		if (!agentRow) return null;
 
 		return this.hydrateAgent(agentRow);
@@ -251,13 +261,13 @@ export class SkillRegistry {
 	 * Hydrate an agent row into a full profile.
 	 */
 	private hydrateAgent(row: any): AgentProfile {
-		const skillRows = this.db!.prepare(
-			"SELECT * FROM agent_skills WHERE agent_id = ?"
-		).all(row.agent_id) as any[];
+		const skillRows = this.db
+			?.prepare("SELECT * FROM agent_skills WHERE agent_id = ?")
+			.all(row.agent_id) as any[];
 
-		const toolRows = this.db!.prepare(
-			"SELECT tool_name FROM agent_tools WHERE agent_id = ?"
-		).all(row.agent_id) as any[];
+		const toolRows = this.db
+			?.prepare("SELECT tool_name FROM agent_tools WHERE agent_id = ?")
+			.all(row.agent_id) as any[];
 
 		return {
 			agentId: row.agent_id,
@@ -272,7 +282,9 @@ export class SkillRegistry {
 				category: sr.category as SkillCategory,
 				level: sr.level as SkillLevel,
 				description: sr.description || undefined,
-				relatedSkills: sr.related_skills ? JSON.parse(sr.related_skills) : undefined,
+				relatedSkills: sr.related_skills
+					? JSON.parse(sr.related_skills)
+					: undefined,
 			})),
 			tools: toolRows.map((tr) => tr.tool_name),
 		};
@@ -300,23 +312,27 @@ export class SkillRegistry {
 		if (query.categories?.length) {
 			// Filter by category - get agents who have skills in those categories
 			const placeholders = query.categories.map(() => "?").join(",");
-			const rows = this.db.prepare(`
+			const rows = this.db
+				.prepare(`
 				SELECT DISTINCT agent_id FROM agent_skills WHERE category IN (${placeholders})
-			`).all(...query.categories) as any[];
-			agentIds = rows.map(r => r.agent_id);
+			`)
+				.all(...query.categories) as any[];
+			agentIds = rows.map((r) => r.agent_id);
 		} else {
 			// Get all agents
-			const rows = this.db.prepare("SELECT agent_id FROM agents").all() as any[];
-			agentIds = rows.map(r => r.agent_id);
+			const rows = this.db
+				.prepare("SELECT agent_id FROM agents")
+				.all() as any[];
+			agentIds = rows.map((r) => r.agent_id);
 		}
 
 		// Filter by availability
 		if (query.availableOnly) {
-			const availableRows = this.db.prepare(
-				"SELECT agent_id FROM agents WHERE available = 1"
-			).all() as any[];
-			const availableIds = new Set(availableRows.map(r => r.agent_id));
-			agentIds = agentIds.filter(id => availableIds.has(id));
+			const availableRows = this.db
+				.prepare("SELECT agent_id FROM agents WHERE available = 1")
+				.all() as any[];
+			const availableIds = new Set(availableRows.map((r) => r.agent_id));
+			agentIds = agentIds.filter((id) => availableIds.has(id));
 		}
 
 		// Hydrate and score candidates
@@ -406,16 +422,23 @@ export class SkillRegistry {
 	/**
 	 * Get all unique skill IDs registered in the system.
 	 */
-	getAllSkills(): Array<{ skillId: string; name: string; category: SkillCategory; agentCount: number }> {
+	getAllSkills(): Array<{
+		skillId: string;
+		name: string;
+		category: SkillCategory;
+		agentCount: number;
+	}> {
 		this.ensureInitialized();
 		if (!this.db) throw new Error("Database not initialized");
 
-		const rows = this.db.prepare(`
+		const rows = this.db
+			.prepare(`
 			SELECT skill_id, name, category, COUNT(*) as agent_count
 			FROM agent_skills
 			GROUP BY skill_id, name, category
 			ORDER BY agent_count DESC
-		`).all() as any[];
+		`)
+			.all() as any[];
 
 		return rows.map((r) => ({
 			skillId: r.skill_id,
@@ -432,7 +455,9 @@ export class SkillRegistry {
 		this.ensureInitialized();
 		if (!this.db) throw new Error("Database not initialized");
 
-		const result = this.db.prepare("DELETE FROM agents WHERE agent_id = ?").run(agentId);
+		const result = this.db
+			.prepare("DELETE FROM agents WHERE agent_id = ?")
+			.run(agentId);
 		return result.changes > 0;
 	}
 
@@ -443,9 +468,11 @@ export class SkillRegistry {
 		this.ensureInitialized();
 		if (!this.db) throw new Error("Database not initialized");
 
-		const result = this.db.prepare(
-			"UPDATE agents SET available = ?, updated_at = ? WHERE agent_id = ?"
-		).run(available ? 1 : 0, new Date().toISOString(), agentId);
+		const result = this.db
+			.prepare(
+				"UPDATE agents SET available = ?, updated_at = ? WHERE agent_id = ?",
+			)
+			.run(available ? 1 : 0, new Date().toISOString(), agentId);
 
 		return result.changes > 0;
 	}
@@ -463,17 +490,30 @@ export class SkillRegistry {
 		this.ensureInitialized();
 		if (!this.db) throw new Error("Database not initialized");
 
-		const agentCount = (this.db.prepare("SELECT COUNT(*) as c FROM agents").get() as any).c;
-		const availableCount = (this.db.prepare("SELECT COUNT(*) as c FROM agents WHERE available = 1").get() as any).c;
-		const skillCount = (this.db.prepare("SELECT COUNT(*) as c FROM agent_skills").get() as any).c;
-		const uniqueSkills = (this.db.prepare("SELECT COUNT(DISTINCT skill_id) as c FROM agent_skills").get() as any).c;
+		const agentCount = (
+			this.db.prepare("SELECT COUNT(*) as c FROM agents").get() as any
+		).c;
+		const availableCount = (
+			this.db
+				.prepare("SELECT COUNT(*) as c FROM agents WHERE available = 1")
+				.get() as any
+		).c;
+		const skillCount = (
+			this.db.prepare("SELECT COUNT(*) as c FROM agent_skills").get() as any
+		).c;
+		const uniqueSkills = (
+			this.db
+				.prepare("SELECT COUNT(DISTINCT skill_id) as c FROM agent_skills")
+				.get() as any
+		).c;
 
 		return {
 			totalAgents: agentCount,
 			availableAgents: availableCount,
 			totalSkills: skillCount,
 			uniqueSkillTypes: uniqueSkills,
-			averageSkillsPerAgent: agentCount > 0 ? Math.round(skillCount / agentCount * 10) / 10 : 0,
+			averageSkillsPerAgent:
+				agentCount > 0 ? Math.round((skillCount / agentCount) * 10) / 10 : 0,
 		};
 	}
 

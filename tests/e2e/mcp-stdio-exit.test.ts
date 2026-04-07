@@ -1,9 +1,15 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { createUniqueTestDir, getPlatformTimeout, isWindows, safeCleanup, sleep } from "../support/test-utils.ts";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import {
+	createUniqueTestDir,
+	getPlatformTimeout,
+	isWindows,
+	safeCleanup,
+	sleep,
+} from "../support/test-utils.ts";
 
 const CLI_PATH = join(process.cwd(), "src", "cli.ts");
 const START_MESSAGE = "Roadmap.md MCP server started (stdio transport)";
@@ -12,7 +18,11 @@ let TEST_DIR: string;
 
 type ExitResult = { code: number | null; signal: NodeJS.Signals | null };
 
-function waitForSubstring(stream: NodeJS.ReadableStream, substring: string, timeoutMs: number): Promise<void> {
+function waitForSubstring(
+	stream: NodeJS.ReadableStream,
+	substring: string,
+	timeoutMs: number,
+): Promise<void> {
 	return new Promise((resolve, reject) => {
 		let buffer = "";
 		const timer = setTimeout(() => {
@@ -51,7 +61,10 @@ function waitForSubstring(stream: NodeJS.ReadableStream, substring: string, time
 	});
 }
 
-function waitForExit(child: ReturnType<typeof spawn>, timeoutMs: number): Promise<ExitResult> {
+function waitForExit(
+	child: ReturnType<typeof spawn>,
+	timeoutMs: number,
+): Promise<ExitResult> {
 	return new Promise((resolve, reject) => {
 		const timer = setTimeout(() => {
 			child.kill("SIGKILL");

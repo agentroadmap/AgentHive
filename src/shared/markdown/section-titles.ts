@@ -12,7 +12,11 @@ const BASE_SECTION_TITLES = [
 const SECTION_TITLE_VARIANTS: Record<string, string[]> = {
 	"Acceptance Criteria": ["Acceptance Criteria (Optional)"],
 	"Implementation Plan": ["Implementation Plan (Optional)"],
-	"Implementation Notes": ["Implementation Notes (Optional)", "Notes", "Notes & Comments (Optional)"],
+	"Implementation Notes": [
+		"Implementation Notes (Optional)",
+		"Notes",
+		"Notes & Comments (Optional)",
+	],
 };
 
 export function getStructuredSectionTitles(): string[] {

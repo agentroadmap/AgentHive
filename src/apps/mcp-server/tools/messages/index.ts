@@ -2,7 +2,11 @@ import type { McpServer } from "../../server.ts";
 import type { McpToolHandler } from "../../types.ts";
 import { createSimpleValidatedTool } from "../../validation/tool-wrapper.ts";
 import type { JsonSchema } from "../../validation/validators.ts";
-import type { MessageChannelsArgs, MessageReadArgs, MessageSendArgs } from "./handlers.ts";
+import type {
+	MessageChannelsArgs,
+	MessageReadArgs,
+	MessageSendArgs,
+} from "./handlers.ts";
 import { MessageHandlers } from "./handlers.ts";
 
 const messageChannelsSchema: JsonSchema = {
@@ -33,7 +37,8 @@ const messageSendSchema: JsonSchema = {
 	properties: {
 		from: {
 			type: "string",
-			description: "Your agent name or identity (e.g. 'Gemini', 'Copilot', 'Alice').",
+			description:
+				"Your agent name or identity (e.g. 'Gemini', 'Copilot', 'Alice').",
 		},
 		message: {
 			type: "string",
@@ -41,15 +46,18 @@ const messageSendSchema: JsonSchema = {
 		},
 		channel: {
 			type: "string",
-			description: "Group channel name (e.g. 'project') or 'public'. Ignored when 'to' is set.",
+			description:
+				"Group channel name (e.g. 'project') or 'public'. Ignored when 'to' is set.",
 		},
 		to: {
 			type: "string",
-			description: "Agent name for a private DM (e.g. 'alice' or '@alice'). When set, sends a private message.",
+			description:
+				"Agent name for a private DM (e.g. 'alice' or '@alice'). When set, sends a private message.",
 		},
 		intent: {
 			type: "object",
-			description: "Structured negotiation intent (claim_request, handoff, reject, accept, block).",
+			description:
+				"Structured negotiation intent (claim_request, handoff, reject, accept, block).",
 			properties: {
 				type: {
 					type: "string",
@@ -100,7 +108,8 @@ export function registerMessageTools(server: McpServer): void {
 	const channelsTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "chan_list",
-			description: "List all available chat channels (group chats and private DMs) in this project.",
+			description:
+				"List all available chat channels (group chats and private DMs) in this project.",
 			inputSchema: messageChannelsSchema,
 		},
 		messageChannelsSchema,
@@ -121,7 +130,8 @@ export function registerMessageTools(server: McpServer): void {
 	const sendTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "msg_send",
-			description: "Send a message to a group chat channel or a private DM with another agent.",
+			description:
+				"Send a message to a group chat channel or a private DM with another agent.",
 			inputSchema: messageSendSchema,
 		},
 		messageSendSchema,
@@ -136,7 +146,10 @@ export function registerMessageTools(server: McpServer): void {
 			inputSchema: messageSubscribeSchema,
 		},
 		messageSubscribeSchema,
-		async (input) => handlers.subscribe(input as { channel: string; from: string; subscribe?: boolean }),
+		async (input) =>
+			handlers.subscribe(
+				input as { channel: string; from: string; subscribe?: boolean },
+			),
 	);
 
 	server.addTool(channelsTool);

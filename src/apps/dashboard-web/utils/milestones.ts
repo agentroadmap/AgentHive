@@ -7,12 +7,15 @@ export {
 	buildDirectiveSummary,
 	collectArchivedDirectiveKeys,
 	collectDirectiveIds,
+	directiveKey,
 	getDirectiveLabel,
 	isReachedStatus,
-	directiveKey,
 	normalizeDirectiveName,
 	validateDirectiveName,
-} from '../../../core/proposal/directives.ts';
+} from "../../../core/proposal/directives.ts";
 
 // Re-export types from core types
-export type { DirectiveBucket, DirectiveSummary } from "../../../shared/types/index.ts";
+export type {
+	DirectiveBucket,
+	DirectiveSummary,
+} from "../../../shared/types/index.ts";

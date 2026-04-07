@@ -1,8 +1,8 @@
-import { readFile, readdir } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { glob } from "glob";
 import { Core } from "../../core/roadmap.ts";
 import type { Proposal } from "../types/index.ts";
-import { glob } from "glob";
 import {
 	buildFilenameIdRegex,
 	buildGlobPattern,
@@ -37,12 +37,18 @@ const DEFAULT_STATE_PREFIX = "proposal";
  * normalizeProposalId("STATE-123") // => "STATE-123"
  * normalizeProposalId("JIRA-456") // => "JIRA-456"
  */
-export function normalizeProposalId(proposalId: string, prefix: string = DEFAULT_STATE_PREFIX): string {
+export function normalizeProposalId(
+	proposalId: string,
+	prefix: string = DEFAULT_STATE_PREFIX,
+): string {
 	const inferredPrefix = extractAnyPrefix(proposalId);
 	if (inferredPrefix) {
 		const body = proposalId.slice(inferredPrefix.length).replace(/^-/, "");
 		// Treat single-letter "s" as shorthand for "proposal"
-		const effectivePrefix = inferredPrefix.length === 1 && inferredPrefix === "s" ? prefix : inferredPrefix;
+		const effectivePrefix =
+			inferredPrefix.length === 1 && inferredPrefix === "s"
+				? prefix
+				: inferredPrefix;
 		return `${effectivePrefix.toLowerCase()}-${body.toLowerCase()}`;
 	}
 	return `${prefix.toLowerCase()}-${proposalId.toLowerCase()}`;
@@ -50,7 +56,9 @@ export function normalizeProposalId(proposalId: string, prefix: string = DEFAULT
 
 export function normalizeProposalIdentity(proposal: Proposal): Proposal {
 	const normalizedId = normalizeProposalId(String(proposal.id));
-	const normalizedParent = proposal.parentProposalId ? normalizeProposalId(String(proposal.parentProposalId)) : undefined;
+	const normalizedParent = proposal.parentProposalId
+		? normalizeProposalId(String(proposal.parentProposalId))
+		: undefined;
 
 	return {
 		...proposal,
@@ -88,11 +96,17 @@ export function extractProposalIdFromFilePath(filePath: string): string | null {
  * extractProposalBody("proposal-5.2.1") // => "5.2.1"
  * extractProposalBody("JIRA-456", "JIRA") // => "456"
  */
-function extractProposalBody(value: string, prefix: string = DEFAULT_STATE_PREFIX): string | null {
+function extractProposalBody(
+	value: string,
+	prefix: string = DEFAULT_STATE_PREFIX,
+): string | null {
 	const trimmed = value.trim();
 	if (trimmed === "") return "";
 	// Build a pattern that optionally matches the prefix (with or without hyphen)
-	const prefixPattern = new RegExp(`^(?:${escapeRegex(prefix)}-?)?([0-9]+(?:\\.[0-9]+)*)$`, "i");
+	const prefixPattern = new RegExp(
+		`^(?:${escapeRegex(prefix)}-?)?([0-9]+(?:\\.[0-9]+)*)$`,
+		"i",
+	);
 	const match = trimmed.match(prefixPattern);
 	return match?.[1] ?? null;
 }
@@ -108,7 +122,10 @@ function extractProposalBody(value: string, prefix: string = DEFAULT_STATE_PREFI
  * extractProposalIdFromFilename("proposal-123 - Title.md") // => "proposal-123"
  * extractProposalIdFromFilename("JIRA-456 - Title.md", "JIRA") // => "JIRA-456"
  */
-function extractProposalIdFromFilename(filename: string, prefix: string = DEFAULT_STATE_PREFIX): string | null {
+function extractProposalIdFromFilename(
+	filename: string,
+	prefix: string = DEFAULT_STATE_PREFIX,
+): string | null {
 	const extracted = extractProposalIdFromFilePath(filename);
 	if (extracted) {
 		return extracted;
@@ -136,7 +153,11 @@ function extractProposalIdFromFilename(filename: string, prefix: string = DEFAUL
  * proposalIdsEqual("proposal-1.2", "proposal-1.2") // => true
  * proposalIdsEqual("358", "BACK-358") // => true (detects prefix from right)
  */
-export function proposalIdsEqual(left: string | number, right: string | number, prefix: string = DEFAULT_STATE_PREFIX): boolean {
+export function proposalIdsEqual(
+	left: string | number,
+	right: string | number,
+	prefix: string = DEFAULT_STATE_PREFIX,
+): boolean {
 	const leftStr = String(left);
 	const rightStr = String(right);
 
@@ -150,7 +171,9 @@ export function proposalIdsEqual(left: string | number, right: string | number, 
 
 	if (leftBody && rightBody) {
 		const leftSegs = leftBody.split(".").map((seg) => Number.parseInt(seg, 10));
-		const rightSegs = rightBody.split(".").map((seg) => Number.parseInt(seg, 10));
+		const rightSegs = rightBody
+			.split(".")
+			.map((seg) => Number.parseInt(seg, 10));
 		if (leftSegs.length !== rightSegs.length) {
 			return false;
 		}
@@ -158,14 +181,19 @@ export function proposalIdsEqual(left: string | number, right: string | number, 
 	}
 
 	return (
-		normalizeProposalId(leftStr, effectivePrefix).toLowerCase() === normalizeProposalId(rightStr, effectivePrefix).toLowerCase()
+		normalizeProposalId(leftStr, effectivePrefix).toLowerCase() ===
+		normalizeProposalId(rightStr, effectivePrefix).toLowerCase()
 	);
 }
 
 /**
  * Checks if an input ID matches a filename loosely (ignoring leading zeros).
  */
-function idsMatchLoosely(inputId: string, filename: string, prefix: string = DEFAULT_STATE_PREFIX): boolean {
+function idsMatchLoosely(
+	inputId: string,
+	filename: string,
+	prefix: string = DEFAULT_STATE_PREFIX,
+): boolean {
 	const candidate = extractProposalIdFromFilename(filename, prefix);
 	if (!candidate) return false;
 	return proposalIdsEqual(inputId, candidate, prefix);
@@ -175,7 +203,10 @@ function idsMatchLoosely(inputId: string, filename: string, prefix: string = DEF
  * Get the file path for a proposal by ID.
  * For numeric-only IDs, automatically detects the prefix from existing files.
  */
-export async function getProposalPath(proposalId: string, core?: Core | ProposalPathContext): Promise<string | null> {
+export async function getProposalPath(
+	proposalId: string,
+	core?: Core | ProposalPathContext,
+): Promise<string | null> {
 	const coreInstance = core || new Core(process.cwd());
 	const detectedPrefix = extractAnyPrefix(proposalId);
 
@@ -183,7 +214,7 @@ export async function getProposalPath(proposalId: string, core?: Core | Proposal
 	const listMdFiles = async () => {
 		const dirPath = coreInstance.filesystem.proposalsDir;
 		const entries = await readdir(dirPath);
-		return entries.filter(f => f.toLowerCase().endsWith('.md'));
+		return entries.filter((f) => f.toLowerCase().endsWith(".md"));
 	};
 
 	// If prefix is detected, search only for that prefix
@@ -206,7 +237,8 @@ export async function getProposalPath(proposalId: string, core?: Core | Proposal
 		const numericPart = proposalId.trim();
 		for (const file of allFiles) {
 			const filePrefix = extractAnyPrefix(file);
-			if (filePrefix && filePrefix !== "draft") { // Don't match drafts when looking for proposals
+			if (filePrefix && filePrefix !== "draft") {
+				// Don't match drafts when looking for proposals
 				const fileBody = extractProposalBodyFromFilename(file, filePrefix);
 				if (fileBody && numericPartsEqual(numericPart, fileBody)) {
 					return join(coreInstance.filesystem.proposalsDir, file);
@@ -218,7 +250,11 @@ export async function getProposalPath(proposalId: string, core?: Core | Proposal
 		const fs = coreInstance.filesystem as any;
 		const config = await fs.loadConfig?.();
 		const configuredPrefix = config?.prefixes?.proposal || DEFAULT_STATE_PREFIX;
-		const fallbackFile = findMatchingFile(allFiles, proposalId, configuredPrefix);
+		const fallbackFile = findMatchingFile(
+			allFiles,
+			proposalId,
+			configuredPrefix,
+		);
 		if (fallbackFile) {
 			return join(coreInstance.filesystem.proposalsDir, fallbackFile);
 		}
@@ -232,14 +268,22 @@ export async function getProposalPath(proposalId: string, core?: Core | Proposal
 /**
  * Helper to find a matching file from a list of files
  */
-function findMatchingFile(files: string[], proposalId: string, prefix: string): string | undefined {
+function findMatchingFile(
+	files: string[],
+	proposalId: string,
+	prefix: string,
+): string | undefined {
 	const normalizedId = normalizeProposalId(proposalId, prefix);
 	const filenameId = idForFilename(normalizedId);
 
 	// First try exact prefix match for speed
 	let proposalFile = files.find((f) => {
 		const lower = f.toLowerCase();
-		return lower === `${filenameId}.md` || lower.startsWith(`${filenameId} -`) || lower.startsWith(`${filenameId}-`);
+		return (
+			lower === `${filenameId}.md` ||
+			lower.startsWith(`${filenameId} -`) ||
+			lower.startsWith(`${filenameId}-`)
+		);
 	});
 
 	// If not found, try loose numeric match ignoring leading zeros
@@ -259,7 +303,10 @@ function findMatchingFile(files: string[], proposalId: string, prefix: string): 
 /**
  * Extract the numeric body from a filename given a prefix
  */
-function extractProposalBodyFromFilename(filename: string, prefix: string): string | null {
+function extractProposalBodyFromFilename(
+	filename: string,
+	prefix: string,
+): string | null {
 	// Pattern: <prefix>-<number> - <title>.md or <prefix><number> - <title>.md
 	// We want to be greedy with digits but stop before the " - " title separator
 	const regex = new RegExp(`^${escapeRegex(prefix)}-?([^\\s-]+)`, "i");
@@ -326,14 +373,19 @@ function draftIdsEqual(left: string, right: string): boolean {
 
 	if (leftBody && rightBody) {
 		const leftSegs = leftBody.split(".").map((seg) => Number.parseInt(seg, 10));
-		const rightSegs = rightBody.split(".").map((seg) => Number.parseInt(seg, 10));
+		const rightSegs = rightBody
+			.split(".")
+			.map((seg) => Number.parseInt(seg, 10));
 		if (leftSegs.length !== rightSegs.length) {
 			return false;
 		}
 		return leftSegs.every((value, index) => value === rightSegs[index]);
 	}
 
-	return normalizeDraftId(left).toLowerCase() === normalizeDraftId(right).toLowerCase();
+	return (
+		normalizeDraftId(left).toLowerCase() ===
+		normalizeDraftId(right).toLowerCase()
+	);
 }
 
 /**
@@ -342,7 +394,10 @@ function draftIdsEqual(left: string, right: string): boolean {
 function extractDraftBody(value: string): string | null {
 	const trimmed = value.trim();
 	if (trimmed === "") return "";
-	const prefixPattern = new RegExp(`^(?:${escapeRegex(DEFAULT_DRAFT_PREFIX)}-)?([0-9]+(?:\\.[0-9]+)*)$`, "i");
+	const prefixPattern = new RegExp(
+		`^(?:${escapeRegex(DEFAULT_DRAFT_PREFIX)}-)?([0-9]+(?:\\.[0-9]+)*)$`,
+		"i",
+	);
 	const match = trimmed.match(prefixPattern);
 	return match?.[1] ?? null;
 }
@@ -350,7 +405,10 @@ function extractDraftBody(value: string): string | null {
 /**
  * Get the file path for a draft by ID
  */
-export async function getDraftPath(draftId: string, core: Core): Promise<string | null> {
+export async function getDraftPath(
+	draftId: string,
+	core: Core,
+): Promise<string | null> {
 	try {
 		const draftsDir = await core.filesystem.getDraftsDir();
 		const files = await glob(buildGlobPattern("draft"), { cwd: draftsDir });
@@ -358,7 +416,9 @@ export async function getDraftPath(draftId: string, core: Core): Promise<string 
 		// Use lowercase ID for filename matching (filenames use lowercase prefix)
 		const filenameId = idForFilename(normalizedId);
 		// First exact match
-		let draftFile = files.find((f) => f.startsWith(`${filenameId} -`) || f.startsWith(`${filenameId}-`));
+		let draftFile = files.find(
+			(f) => f.startsWith(`${filenameId} -`) || f.startsWith(`${filenameId}-`),
+		);
 		// Fallback to loose numeric match ignoring leading zeros
 		if (!draftFile) {
 			draftFile = files.find((f) => draftIdsMatchLoosely(draftId, f));
@@ -378,7 +438,10 @@ export async function getDraftPath(draftId: string, core: Core): Promise<string 
  * Get the filename (without directory) for a proposal by ID.
  * For numeric-only IDs, automatically detects the prefix from existing files.
  */
-export async function getProposalFilename(proposalId: string, core?: Core | ProposalPathContext): Promise<string | null> {
+export async function getProposalFilename(
+	proposalId: string,
+	core?: Core | ProposalPathContext,
+): Promise<string | null> {
 	const coreInstance = core || new Core(process.cwd());
 
 	// Extract prefix from the proposalId
@@ -388,7 +451,9 @@ export async function getProposalFilename(proposalId: string, core?: Core | Prop
 	if (detectedPrefix) {
 		const globPattern = buildGlobPattern(detectedPrefix);
 		try {
-			const files = await glob(globPattern, { cwd: coreInstance.filesystem.proposalsDir });
+			const files = await glob(globPattern, {
+				cwd: coreInstance.filesystem.proposalsDir,
+			});
 			return findMatchingFile(files, proposalId, detectedPrefix) ?? null;
 		} catch {
 			return null;
@@ -397,7 +462,9 @@ export async function getProposalFilename(proposalId: string, core?: Core | Prop
 
 	// For numeric-only IDs, scan all .md files and find one matching the number
 	try {
-		const allFiles = await glob("*.md", { cwd: coreInstance.filesystem.proposalsDir });
+		const allFiles = await glob("*.md", {
+			cwd: coreInstance.filesystem.proposalsDir,
+		});
 
 		const numericPart = proposalId.trim();
 		for (const file of allFiles) {
@@ -419,7 +486,10 @@ export async function getProposalFilename(proposalId: string, core?: Core | Prop
 /**
  * Check if a proposal file exists
  */
-export async function proposalFileExists(proposalId: string, core?: Core | ProposalPathContext): Promise<boolean> {
+export async function proposalFileExists(
+	proposalId: string,
+	core?: Core | ProposalPathContext,
+): Promise<boolean> {
 	const path = await getProposalPath(proposalId, core);
 	return path !== null;
 }

@@ -1,10 +1,13 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
-import { createUniqueTestDir, safeCleanup, execSync,
+import {
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 let TEST_DIR: string;
@@ -106,8 +109,12 @@ This is another test proposal for board testing.`,
 		it("should handle empty proposal list gracefully", async () => {
 			// Remove test proposals
 			const proposalsDir = core.filesystem.proposalsDir;
-			await rm(join(proposalsDir, "proposal-1 - Test Proposal One.md")).catch(() => {});
-			await rm(join(proposalsDir, "proposal-2 - Test Proposal Two.md")).catch(() => {});
+			await rm(join(proposalsDir, "proposal-1 - Test Proposal One.md")).catch(
+				() => {},
+			);
+			await rm(join(proposalsDir, "proposal-2 - Test Proposal Two.md")).catch(
+				() => {},
+			);
 
 			const proposals = await core.filesystem.listProposals();
 			assert.strictEqual(proposals.length, 0);
@@ -201,14 +208,20 @@ This is another test proposal for board testing.`,
 	describe("Cross-branch proposal resolution", () => {
 		it("should handle getLatestProposalProposalsForIds with proper parameters", async () => {
 			// Test the function that was missing the filesystem parameter
-			const { getLatestProposalProposalsForIds } = await import("../../src/core/dag/cross-branch-proposals.ts");
+			const { getLatestProposalProposalsForIds } = await import(
+				"../../src/core/dag/cross-branch-proposals.ts"
+			);
 
 			const proposals = await core.filesystem.listProposals();
 			const proposalIds = proposals.map((t) => t.id);
 
 			// This should not throw "fs is not defined"
 			await expect(async () => {
-				const result = await getLatestProposalProposalsForIds(core.gitOps, core.filesystem, proposalIds);
+				const result = await getLatestProposalProposalsForIds(
+					core.gitOps,
+					core.filesystem,
+					proposalIds,
+				);
 				expect(result).toBeInstanceOf(Map);
 			}).not.toThrow();
 		});

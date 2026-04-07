@@ -49,11 +49,15 @@ const SECTION_INSERTION_ORDER: StructuredSectionKey[] = [
 ];
 
 const ACCEPTANCE_CRITERIA_SECTION_HEADER = "## Acceptance Criteria";
-const ACCEPTANCE_CRITERIA_TITLE = ACCEPTANCE_CRITERIA_SECTION_HEADER.replace(/^##\s*/, "");
+const ACCEPTANCE_CRITERIA_TITLE = ACCEPTANCE_CRITERIA_SECTION_HEADER.replace(
+	/^##\s*/,
+	"",
+);
 const ACCEPTANCE_CRITERIA_BEGIN_MARKER = "<!-- AC:BEGIN -->";
 const ACCEPTANCE_CRITERIA_END_MARKER = "<!-- AC:END -->";
 const VERIFICATION_STATEMENTS_SECTION_HEADER = "## Verification Proposalments";
-const VERIFICATION_STATEMENTS_TITLE = VERIFICATION_STATEMENTS_SECTION_HEADER.replace(/^##\s*/, "");
+const VERIFICATION_STATEMENTS_TITLE =
+	VERIFICATION_STATEMENTS_SECTION_HEADER.replace(/^##\s*/, "");
 const VERIFICATION_STATEMENTS_BEGIN_MARKER = "<!-- VERIFY:BEGIN -->";
 const VERIFICATION_STATEMENTS_END_MARKER = "<!-- VERIFY:END -->";
 const KNOWN_SECTION_TITLES = new Set<string>([
@@ -129,17 +133,29 @@ function structuredSectionLookahead(currentTitle: string): string {
 
 function sectionHeaderRegex(key: StructuredSectionKey): RegExp {
 	const { title } = getConfig(key);
-	return new RegExp(`## ${escapeForRegex(title)}[^\\n]*\\n([\\s\\S]*?)${structuredSectionLookahead(title)}`, "i");
+	return new RegExp(
+		`## ${escapeForRegex(title)}[^\\n]*\\n([\\s\\S]*?)${structuredSectionLookahead(title)}`,
+		"i",
+	);
 }
 
-function checklistSentinelRegex(definition: ChecklistSectionDefinition, flags = "i"): RegExp {
+function checklistSentinelRegex(
+	definition: ChecklistSectionDefinition,
+	flags = "i",
+): RegExp {
 	const header = escapeForRegex(definition.sectionHeader);
 	const begin = escapeForRegex(definition.beginMarker);
 	const end = escapeForRegex(definition.endMarker);
-	return new RegExp(`(\\n|^)${header}\\s*\\n${begin}\\s*\\n([\\s\\S]*?)${end}`, flags);
+	return new RegExp(
+		`(\\n|^)${header}\\s*\\n${begin}\\s*\\n([\\s\\S]*?)${end}`,
+		flags,
+	);
 }
 
-function checklistLegacyRegex(definition: ChecklistSectionDefinition, flags: string): RegExp {
+function checklistLegacyRegex(
+	definition: ChecklistSectionDefinition,
+	flags: string,
+): RegExp {
 	return new RegExp(
 		`(\\n|^)${escapeForRegex(definition.sectionHeader)}\\s*\\n([\\s\\S]*?)${structuredSectionLookahead(definition.title)}`,
 		flags,
@@ -151,17 +167,26 @@ function acceptanceCriteriaSentinelRegex(flags = "i"): RegExp {
 }
 
 function legacySectionRegex(title: string, flags: string): RegExp {
-	return new RegExp(`(\\n|^)## ${escapeForRegex(title)}\\s*\\n([\\s\\S]*?)${structuredSectionLookahead(title)}`, flags);
+	return new RegExp(
+		`(\\n|^)## ${escapeForRegex(title)}\\s*\\n([\\s\\S]*?)${structuredSectionLookahead(title)}`,
+		flags,
+	);
 }
 
-function findSectionEndIndex(content: string, title: string): number | undefined {
+function findSectionEndIndex(
+	content: string,
+	title: string,
+): number | undefined {
 	const normalizedTitle = title.trim();
 	let sentinelMatch: RegExpExecArray | null = null;
-	if (normalizedTitle.toLowerCase() === ACCEPTANCE_CRITERIA_TITLE.toLowerCase()) {
+	if (
+		normalizedTitle.toLowerCase() === ACCEPTANCE_CRITERIA_TITLE.toLowerCase()
+	) {
 		sentinelMatch = acceptanceCriteriaSentinelRegex().exec(content);
 	} else {
 		const keyEntry = Object.entries(SECTION_CONFIG).find(
-			([, config]) => config.title.toLowerCase() === normalizedTitle.toLowerCase(),
+			([, config]) =>
+				config.title.toLowerCase() === normalizedTitle.toLowerCase(),
 		);
 		if (keyEntry) {
 			const key = keyEntry[0] as StructuredSectionKey;
@@ -187,7 +212,10 @@ function sentinelBlockRegex(key: StructuredSectionKey): RegExp {
 	const { title } = getConfig(key);
 	const begin = escapeForRegex(getBeginMarker(key));
 	const end = escapeForRegex(getEndMarker(key));
-	return new RegExp(`## ${escapeForRegex(title)}\\s*\\n\\s*${begin}\\s*\\n([\\s\\S]*?)${end}`, "i");
+	return new RegExp(
+		`## ${escapeForRegex(title)}\\s*\\n\\s*${begin}\\s*\\n([\\s\\S]*?)${end}`,
+		"i",
+	);
 }
 
 interface SectionRange {
@@ -197,7 +225,12 @@ interface SectionRange {
 	kind: "sentinel" | "legacy";
 }
 
-function rangesOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
+function rangesOverlap(
+	aStart: number,
+	aEnd: number,
+	bStart: number,
+	bEnd: number,
+): boolean {
 	return aStart < bEnd && bStart < aEnd;
 }
 
@@ -205,7 +238,11 @@ function isIndexWithinRanges(index: number, ranges: SectionRange[]): boolean {
 	return ranges.some((range) => index >= range.start && index < range.end);
 }
 
-function findMatchOutsideRanges(regex: RegExp, content: string, ranges: SectionRange[]): RegExpExecArray | undefined {
+function findMatchOutsideRanges(
+	regex: RegExp,
+	content: string,
+	ranges: SectionRange[],
+): RegExpExecArray | undefined {
 	const flags = regex.flags.includes("g") ? regex.flags : `${regex.flags}g`;
 	const globalRegex = new RegExp(regex.source, flags);
 	for (const match of content.matchAll(globalRegex)) {
@@ -222,7 +259,12 @@ function getStructuredSectionRanges(content: string): SectionRange[] {
 		const sentinelRegex = new RegExp(sentinelBlockRegex(key).source, "gi");
 		for (const match of content.matchAll(sentinelRegex)) {
 			const index = match.index ?? 0;
-			ranges.push({ key, start: index, end: index + match[0].length, kind: "sentinel" });
+			ranges.push({
+				key,
+				start: index,
+				end: index + match[0].length,
+				kind: "sentinel",
+			});
 		}
 	}
 
@@ -232,14 +274,22 @@ function getStructuredSectionRanges(content: string): SectionRange[] {
 		for (const match of content.matchAll(legacyRegex)) {
 			const index = match.index ?? 0;
 			const end = index + match[0].length;
-			if (ranges.some((range) => rangesOverlap(range.start, range.end, index, end))) continue;
+			if (
+				ranges.some((range) =>
+					rangesOverlap(range.start, range.end, index, end),
+				)
+			)
+				continue;
 			ranges.push({ key, start: index, end, kind: "legacy" });
 		}
 	}
 	return ranges;
 }
 
-function stripSectionInstances(content: string, key: StructuredSectionKey): string {
+function stripSectionInstances(
+	content: string,
+	key: StructuredSectionKey,
+): string {
 	const beginEsc = escapeForRegex(getBeginMarker(key));
 	const endEsc = escapeForRegex(getEndMarker(key));
 	const { title } = getConfig(key);
@@ -257,7 +307,11 @@ function stripSectionInstances(content: string, key: StructuredSectionKey): stri
 	return stripped.replace(/\n{3,}/g, "\n\n").trimEnd();
 }
 
-function insertAfterSection(content: string, title: string, block: string): { inserted: boolean; content: string } {
+function insertAfterSection(
+	content: string,
+	title: string,
+	block: string,
+): { inserted: boolean; content: string } {
 	if (!block.trim()) return { inserted: false, content };
 	const insertPos = findSectionEndIndex(content, title);
 	if (insertPos === undefined) return { inserted: false, content };
@@ -283,14 +337,27 @@ function appendBlock(content: string, block: string): string {
 	return `${trimmedContent}\n\n${trimmedBlock}`;
 }
 
-export function extractStructuredSection(content: string, key: StructuredSectionKey): string | undefined {
+export function extractStructuredSection(
+	content: string,
+	key: StructuredSectionKey,
+): string | undefined {
 	const src = content.replace(/\r\n/g, "\n");
-	const otherRanges = getStructuredSectionRanges(src).filter((range) => range.key !== key);
-	const sentinelMatch = findMatchOutsideRanges(sentinelBlockRegex(key), src, otherRanges);
+	const otherRanges = getStructuredSectionRanges(src).filter(
+		(range) => range.key !== key,
+	);
+	const sentinelMatch = findMatchOutsideRanges(
+		sentinelBlockRegex(key),
+		src,
+		otherRanges,
+	);
 	if (sentinelMatch) {
 		return sentinelMatch[1]?.trim() || "";
 	}
-	const legacyMatch = findMatchOutsideRanges(sectionHeaderRegex(key), src, otherRanges);
+	const legacyMatch = findMatchOutsideRanges(
+		sectionHeaderRegex(key),
+		src,
+		otherRanges,
+	);
 	return legacyMatch?.[1]?.trim() || "";
 }
 
@@ -306,7 +373,10 @@ export interface StructuredSectionValues {
 
 interface SectionValues extends StructuredSectionValues {}
 
-export function updateStructuredSections(content: string, sections: SectionValues): string {
+export function updateStructuredSections(
+	content: string,
+	sections: SectionValues,
+): string {
 	const { text: src, useCRLF } = normalizeToLF(content);
 
 	// Get all existing sections to preserve them unless overridden
@@ -337,7 +407,11 @@ export function updateStructuredSections(content: string, sections: SectionValue
 	// Insert implementation plan
 	if (plan) {
 		const planBlock = buildSectionBlock("implementationPlan", plan);
-		let res = insertAfterSection(tail, getConfig("description").title, planBlock);
+		let res = insertAfterSection(
+			tail,
+			getConfig("description").title,
+			planBlock,
+		);
 		if (!res.inserted) {
 			res = insertAfterSection(tail, ACCEPTANCE_CRITERIA_TITLE, planBlock);
 		}
@@ -354,7 +428,11 @@ export function updateStructuredSections(content: string, sections: SectionValue
 	// Insert implementation notes
 	if (notes) {
 		const notesBlock = buildSectionBlock("implementationNotes", notes);
-		let res = insertAfterSection(tail, getConfig("implementationPlan").title, notesBlock);
+		let res = insertAfterSection(
+			tail,
+			getConfig("implementationPlan").title,
+			notesBlock,
+		);
 		if (!res.inserted) {
 			res = insertAfterSection(tail, ACCEPTANCE_CRITERIA_TITLE, notesBlock);
 		}
@@ -368,12 +446,24 @@ export function updateStructuredSections(content: string, sections: SectionValue
 	// Insert audit notes
 	if (auditNotes) {
 		const auditNotesBlock = buildSectionBlock("auditNotes", auditNotes);
-		let res = insertAfterSection(tail, getConfig("implementationNotes").title, auditNotesBlock);
+		let res = insertAfterSection(
+			tail,
+			getConfig("implementationNotes").title,
+			auditNotesBlock,
+		);
 		if (!res.inserted) {
-			res = insertAfterSection(tail, getConfig("implementationPlan").title, auditNotesBlock);
+			res = insertAfterSection(
+				tail,
+				getConfig("implementationPlan").title,
+				auditNotesBlock,
+			);
 		}
 		if (!res.inserted) {
-			res = insertAfterSection(tail, ACCEPTANCE_CRITERIA_TITLE, auditNotesBlock);
+			res = insertAfterSection(
+				tail,
+				ACCEPTANCE_CRITERIA_TITLE,
+				auditNotesBlock,
+			);
 		}
 		if (!res.inserted) {
 			tail = appendBlock(tail, auditNotesBlock);
@@ -385,12 +475,24 @@ export function updateStructuredSections(content: string, sections: SectionValue
 	// Insert final summary
 	if (finalSummary) {
 		const finalBlock = buildSectionBlock("finalSummary", finalSummary);
-		let res = insertAfterSection(tail, getConfig("auditNotes").title, finalBlock);
+		let res = insertAfterSection(
+			tail,
+			getConfig("auditNotes").title,
+			finalBlock,
+		);
 		if (!res.inserted) {
-			res = insertAfterSection(tail, getConfig("implementationNotes").title, finalBlock);
+			res = insertAfterSection(
+				tail,
+				getConfig("implementationNotes").title,
+				finalBlock,
+			);
 		}
 		if (!res.inserted) {
-			res = insertAfterSection(tail, getConfig("implementationPlan").title, finalBlock);
+			res = insertAfterSection(
+				tail,
+				getConfig("implementationPlan").title,
+				finalBlock,
+			);
 		}
 		if (!res.inserted) {
 			res = insertAfterSection(tail, ACCEPTANCE_CRITERIA_TITLE, finalBlock);
@@ -405,7 +507,11 @@ export function updateStructuredSections(content: string, sections: SectionValue
 	// Insert scope summary
 	if (scopeSummary) {
 		const scopeBlock = buildSectionBlock("scopeSummary", scopeSummary);
-		const res = insertAfterSection(tail, getConfig("finalSummary").title, scopeBlock);
+		const res = insertAfterSection(
+			tail,
+			getConfig("finalSummary").title,
+			scopeBlock,
+		);
 		if (!res.inserted) {
 			tail = appendBlock(tail, scopeBlock);
 		} else {
@@ -416,7 +522,11 @@ export function updateStructuredSections(content: string, sections: SectionValue
 	// Insert proof
 	if (proof) {
 		const proofBlock = buildSectionBlock("proof", proof);
-		const res = insertAfterSection(tail, getConfig("scopeSummary").title, proofBlock);
+		const res = insertAfterSection(
+			tail,
+			getConfig("scopeSummary").title,
+			proofBlock,
+		);
 		if (!res.inserted) {
 			tail = appendBlock(tail, proofBlock);
 		} else {
@@ -435,14 +545,20 @@ export function updateStructuredSections(content: string, sections: SectionValue
 	return restoreLineEndings(finalOutput, useCRLF);
 }
 
-export function getStructuredSections(content: string): StructuredSectionValues {
+export function getStructuredSections(
+	content: string,
+): StructuredSectionValues {
 	return {
 		description: extractStructuredSection(content, "description") || undefined,
-		implementationPlan: extractStructuredSection(content, "implementationPlan") || undefined,
-		implementationNotes: extractStructuredSection(content, "implementationNotes") || undefined,
+		implementationPlan:
+			extractStructuredSection(content, "implementationPlan") || undefined,
+		implementationNotes:
+			extractStructuredSection(content, "implementationNotes") || undefined,
 		auditNotes: extractStructuredSection(content, "auditNotes") || undefined,
-		finalSummary: extractStructuredSection(content, "finalSummary") || undefined,
-		scopeSummary: extractStructuredSection(content, "scopeSummary") || undefined,
+		finalSummary:
+			extractStructuredSection(content, "finalSummary") || undefined,
+		scopeSummary:
+			extractStructuredSection(content, "scopeSummary") || undefined,
 		proof: extractStructuredSection(content, "proof") || undefined,
 	};
 }
@@ -463,9 +579,15 @@ function extractExistingChecklistBody(
 	return undefined;
 }
 
-function parseOldChecklistFormat(content: string, definition: ChecklistSectionDefinition): AcceptanceCriterion[] {
+function parseOldChecklistFormat(
+	content: string,
+	definition: ChecklistSectionDefinition,
+): AcceptanceCriterion[] {
 	const src = content.replace(/\r\n/g, "\n");
-	const criteriaRegex = new RegExp(`${escapeForRegex(definition.sectionHeader)}\\s*\\n([\\s\\S]*?)(?=\\n## |$)`, "i");
+	const criteriaRegex = new RegExp(
+		`${escapeForRegex(definition.sectionHeader)}\\s*\\n([\\s\\S]*?)(?=\\n## |$)`,
+		"i",
+	);
 	const match = src.match(criteriaRegex);
 	if (!match || !match[1]) {
 		return [];
@@ -489,14 +611,20 @@ function parseOldChecklistFormat(content: string, definition: ChecklistSectionDe
 	return criteria;
 }
 
-function parseChecklist(content: string, definition: ChecklistSectionDefinition): AcceptanceCriterion[] {
+function parseChecklist(
+	content: string,
+	definition: ChecklistSectionDefinition,
+): AcceptanceCriterion[] {
 	const src = content.replace(/\r\n/g, "\n");
 	const beginIndex = src.indexOf(definition.beginMarker);
 	const endIndex = src.indexOf(definition.endMarker);
 	if (beginIndex === -1 || endIndex === -1) {
 		return parseOldChecklistFormat(src, definition);
 	}
-	const checklistContent = src.substring(beginIndex + definition.beginMarker.length, endIndex);
+	const checklistContent = src.substring(
+		beginIndex + definition.beginMarker.length,
+		endIndex,
+	);
 	const lines = checklistContent.split("\n").filter((line) => line.trim());
 	const criteria: AcceptanceCriterion[] = [];
 	for (const line of lines) {
@@ -526,7 +654,10 @@ function formatCriterionText(criterion: AcceptanceCriterion): string {
 	return text;
 }
 
-function composeChecklistBody(criteria: AcceptanceCriterion[], existingBody?: string): string {
+function composeChecklistBody(
+	criteria: AcceptanceCriterion[],
+	existingBody?: string,
+): string {
 	const sorted = [...criteria].sort((a, b) => a.index - b.index);
 	if (sorted.length === 0) {
 		return "";
@@ -535,7 +666,9 @@ function composeChecklistBody(criteria: AcceptanceCriterion[], existingBody?: st
 	const lines: string[] = [];
 	let nextNumber = 1;
 	// trimEnd() removes trailing newlines from regex capture that would create empty sourceLines entries
-	const sourceLines = existingBody ? existingBody.replace(/\r\n/g, "\n").trimEnd().split("\n") : [];
+	const sourceLines = existingBody
+		? existingBody.replace(/\r\n/g, "\n").trimEnd().split("\n")
+		: [];
 
 	if (sourceLines.length > 0) {
 		for (const line of sourceLines) {
@@ -559,10 +692,16 @@ function composeChecklistBody(criteria: AcceptanceCriterion[], existingBody?: st
 		const criterion = queue.shift();
 		if (!criterion) continue;
 		const lastLine = lines.length > 0 ? lines[lines.length - 1] : undefined;
-		if (lastLine && lastLine.trim() !== "" && !lastLine.trim().startsWith("- [")) {
+		if (
+			lastLine &&
+			lastLine.trim() !== "" &&
+			!lastLine.trim().startsWith("- [")
+		) {
 			lines.push("");
 		}
-		lines.push(`- [${criterion.checked ? "x" : " "}] #${nextNumber++} ${formatCriterionText(criterion)}`);
+		lines.push(
+			`- [${criterion.checked ? "x" : " "}] #${nextNumber++} ${formatCriterionText(criterion)}`,
+		);
 	}
 
 	while (lines.length > 0) {
@@ -603,7 +742,11 @@ function updateChecklistContent(
 	const useCRLF = /\r\n/.test(content);
 	const src = content.replace(/\r\n/g, "\n");
 	const existingBodyInfo = extractExistingChecklistBody(src, definition);
-	const newSection = formatChecklistSection(criteria, definition, existingBodyInfo?.body);
+	const newSection = formatChecklistSection(
+		criteria,
+		definition,
+		existingBodyInfo?.body,
+	);
 
 	// Remove ALL existing checklist sections (legacy header blocks)
 	const legacyBlockRegex = checklistLegacyRegex(definition, "gi");
@@ -642,7 +785,11 @@ function updateChecklistContent(
 	}
 }
 
-export function parseStructuredText(fullText: string): { text: string; role?: string; evidence?: string } {
+export function parseStructuredText(fullText: string): {
+	text: string;
+	role?: string;
+	evidence?: string;
+} {
 	let text = fullText;
 	let role: string | undefined;
 	let evidence: string | undefined;
@@ -664,7 +811,10 @@ export function parseStructuredText(fullText: string): { text: string; role?: st
 	return { text, role, evidence };
 }
 
-function parseAllChecklistItems(content: string, definition: ChecklistSectionDefinition): AcceptanceCriterion[] {
+function parseAllChecklistItems(
+	content: string,
+	definition: ChecklistSectionDefinition,
+): AcceptanceCriterion[] {
 	const marked: AcceptanceCriterion[] = [];
 	const legacy: AcceptanceCriterion[] = [];
 	// Normalize to LF to make matching platform-agnostic
@@ -674,7 +824,10 @@ function parseAllChecklistItems(content: string, definition: ChecklistSectionDef
 	let m: RegExpExecArray | null = blockRegex.exec(src);
 	while (m !== null) {
 		const block = m[2] || "";
-		if (block.includes(definition.beginMarker) && block.includes(definition.endMarker)) {
+		if (
+			block.includes(definition.beginMarker) &&
+			block.includes(definition.endMarker)
+		) {
 			// Capture lines within each marked pair
 			const markedBlockRegex = new RegExp(
 				`${escapeForRegex(definition.beginMarker)}([\\s\\S]*?)${escapeForRegex(definition.endMarker)}`,
@@ -686,7 +839,9 @@ function parseAllChecklistItems(content: string, definition: ChecklistSectionDef
 				const lineRegex = /^- \[([ x])\] (?:#\d+ )?(.+)$/gm;
 				let lm: RegExpExecArray | null = lineRegex.exec(inside);
 				while (lm !== null) {
-					const { text, role, evidence } = parseStructuredText(String(lm?.[2] ?? ""));
+					const { text, role, evidence } = parseStructuredText(
+						String(lm?.[2] ?? ""),
+					);
 					marked.push({
 						checked: lm[1] === "x",
 						text,
@@ -703,7 +858,9 @@ function parseAllChecklistItems(content: string, definition: ChecklistSectionDef
 			const lineRegex = /^- \[([ x])\] (.+)$/gm;
 			let lm: RegExpExecArray | null = lineRegex.exec(block);
 			while (lm !== null) {
-				const { text, role, evidence } = parseStructuredText(String(lm?.[2] ?? ""));
+				const { text, role, evidence } = parseStructuredText(
+					String(lm?.[2] ?? ""),
+				);
 				legacy.push({
 					checked: lm[1] === "x",
 					text,
@@ -730,22 +887,40 @@ export class AcceptanceCriteriaManager {
 		return parseChecklist(content, ACCEPTANCE_CRITERIA_DEFINITION);
 	}
 
-	static formatAcceptanceCriteria(criteria: AcceptanceCriterion[], existingBody?: string): string {
-		return formatChecklistSection(criteria, ACCEPTANCE_CRITERIA_DEFINITION, existingBody);
+	static formatAcceptanceCriteria(
+		criteria: AcceptanceCriterion[],
+		existingBody?: string,
+	): string {
+		return formatChecklistSection(
+			criteria,
+			ACCEPTANCE_CRITERIA_DEFINITION,
+			existingBody,
+		);
 	}
 
-	static updateContent(content: string, criteria: AcceptanceCriterion[]): string {
-		return updateChecklistContent(content, criteria, ACCEPTANCE_CRITERIA_DEFINITION);
+	static updateContent(
+		content: string,
+		criteria: AcceptanceCriterion[],
+	): string {
+		return updateChecklistContent(
+			content,
+			criteria,
+			ACCEPTANCE_CRITERIA_DEFINITION,
+		);
 	}
 
 	static parseAllCriteria(content: string): AcceptanceCriterion[] {
-		const list = parseAllChecklistItems(content, ACCEPTANCE_CRITERIA_DEFINITION);
+		const list = parseAllChecklistItems(
+			content,
+			ACCEPTANCE_CRITERIA_DEFINITION,
+		);
 		return list.map((c, i) => ({ ...c, index: i + 1 }));
 	}
 
 	static addCriteria(content: string, newCriteria: string[]): string {
 		const existing = AcceptanceCriteriaManager.parseAllCriteria(content);
-		let nextIndex = existing.length > 0 ? Math.max(...existing.map((c) => c.index)) + 1 : 1;
+		let nextIndex =
+			existing.length > 0 ? Math.max(...existing.map((c) => c.index)) + 1 : 1;
 		for (const text of newCriteria) {
 			existing.push({ checked: false, text: text.trim(), index: nextIndex++ });
 		}
@@ -762,7 +937,11 @@ export class AcceptanceCriteriaManager {
 		return AcceptanceCriteriaManager.updateContent(content, renumbered);
 	}
 
-	static checkCriterionByIndex(content: string, index: number, checked: boolean): string {
+	static checkCriterionByIndex(
+		content: string,
+		index: number,
+		checked: boolean,
+	): string {
 		const criteria = AcceptanceCriteriaManager.parseAllCriteria(content);
 		const criterion = criteria.find((c) => c.index === index);
 		if (!criterion) {
@@ -793,26 +972,46 @@ export class VerificationProposalmentsManager {
 	static readonly END_MARKER = VERIFICATION_STATEMENTS_END_MARKER;
 	static readonly SECTION_HEADER = VERIFICATION_STATEMENTS_SECTION_HEADER;
 
-	static parseVerificationProposalments(content: string): AcceptanceCriterion[] {
+	static parseVerificationProposalments(
+		content: string,
+	): AcceptanceCriterion[] {
 		return parseChecklist(content, VERIFICATION_STATEMENTS_DEFINITION);
 	}
 
-	static formatVerificationProposalments(criteria: AcceptanceCriterion[], existingBody?: string): string {
-		return formatChecklistSection(criteria, VERIFICATION_STATEMENTS_DEFINITION, existingBody);
+	static formatVerificationProposalments(
+		criteria: AcceptanceCriterion[],
+		existingBody?: string,
+	): string {
+		return formatChecklistSection(
+			criteria,
+			VERIFICATION_STATEMENTS_DEFINITION,
+			existingBody,
+		);
 	}
 
-	static updateContent(content: string, criteria: AcceptanceCriterion[]): string {
-		return updateChecklistContent(content, criteria, VERIFICATION_STATEMENTS_DEFINITION);
+	static updateContent(
+		content: string,
+		criteria: AcceptanceCriterion[],
+	): string {
+		return updateChecklistContent(
+			content,
+			criteria,
+			VERIFICATION_STATEMENTS_DEFINITION,
+		);
 	}
 
 	static parseAllCriteria(content: string): AcceptanceCriterion[] {
-		const list = parseAllChecklistItems(content, VERIFICATION_STATEMENTS_DEFINITION);
+		const list = parseAllChecklistItems(
+			content,
+			VERIFICATION_STATEMENTS_DEFINITION,
+		);
 		return list.map((c, i) => ({ ...c, index: i + 1 }));
 	}
 
 	static addCriteria(content: string, newCriteria: string[]): string {
 		const existing = VerificationProposalmentsManager.parseAllCriteria(content);
-		let nextIndex = existing.length > 0 ? Math.max(...existing.map((c) => c.index)) + 1 : 1;
+		let nextIndex =
+			existing.length > 0 ? Math.max(...existing.map((c) => c.index)) + 1 : 1;
 		for (const text of newCriteria) {
 			const parsed = parseStructuredText(text.trim());
 			existing.push({
@@ -836,7 +1035,11 @@ export class VerificationProposalmentsManager {
 		return VerificationProposalmentsManager.updateContent(content, renumbered);
 	}
 
-	static checkCriterionByIndex(content: string, index: number, checked: boolean): string {
+	static checkCriterionByIndex(
+		content: string,
+		index: number,
+		checked: boolean,
+	): string {
 		const criteria = VerificationProposalmentsManager.parseAllCriteria(content);
 		const criterion = criteria.find((c) => c.index === index);
 		if (!criterion) {

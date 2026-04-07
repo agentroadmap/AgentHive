@@ -6,7 +6,9 @@ interface DirectiveCandidate {
 	compact: string;
 }
 
-export function createDirectiveFilterValueResolver(directives: Directive[]): (directiveValue: string) => string {
+export function createDirectiveFilterValueResolver(
+	directives: Directive[],
+): (directiveValue: string) => string {
 	const directiveLabelsByKey = new Map<string, string>();
 	for (const directive of directives) {
 		const normalizedId = directive.id.trim();
@@ -42,14 +44,21 @@ function compactDirectiveFilterValue(value: string): string {
 	return value.replace(/\s+/g, "");
 }
 
-export function resolveClosestDirectiveFilterValue(query: string, directiveValues: string[]): string {
+export function resolveClosestDirectiveFilterValue(
+	query: string,
+	directiveValues: string[],
+): string {
 	const normalizedQuery = normalizeDirectiveFilterValue(query);
 	if (!normalizedQuery) {
 		return normalizedQuery;
 	}
 
 	const normalizedCandidates = Array.from(
-		new Set(directiveValues.map((value) => normalizeDirectiveFilterValue(value)).filter(Boolean)),
+		new Set(
+			directiveValues
+				.map((value) => normalizeDirectiveFilterValue(value))
+				.filter(Boolean),
+		),
 	).sort((left, right) => left.localeCompare(right));
 
 	if (normalizedCandidates.length === 0) {
@@ -60,10 +69,12 @@ export function resolveClosestDirectiveFilterValue(query: string, directiveValue
 		return normalizedQuery;
 	}
 
-	const candidates: DirectiveCandidate[] = normalizedCandidates.map((value) => ({
-		value,
-		compact: compactDirectiveFilterValue(value),
-	}));
+	const candidates: DirectiveCandidate[] = normalizedCandidates.map(
+		(value) => ({
+			value,
+			compact: compactDirectiveFilterValue(value),
+		}),
+	);
 
 	const fuse = new Fuse(candidates, {
 		includeScore: true,

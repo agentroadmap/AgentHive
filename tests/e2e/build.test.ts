@@ -2,7 +2,11 @@ import assert from "node:assert";
 import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { createUniqueTestDir, execSync, safeCleanup } from "../support/test-utils.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 let TEST_DIR: string;
 
@@ -22,9 +26,14 @@ describe("CLI packaging", () => {
 	});
 
 	it("should build and run the local executable wrapper", async () => {
-		const OUTFILE = join(TEST_DIR, process.platform === "win32" ? "roadmap.cmd" : "roadmap");
+		const OUTFILE = join(
+			TEST_DIR,
+			process.platform === "win32" ? "roadmap.cmd" : "roadmap",
+		);
 
-		const packageJson = await JSON.parse(await readFile("package.json", "utf-8"));
+		const packageJson = await JSON.parse(
+			await readFile("package.json", "utf-8"),
+		);
 		const version = packageJson.version;
 		const revision = execSync("git rev-parse --short HEAD").text().trim();
 

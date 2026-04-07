@@ -2,7 +2,11 @@ import assert from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { McpServer } from "../../src/mcp/server.ts";
 import { registerKnowledgeTools } from "../../src/mcp/tools/knowledge/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 const getText = (content: unknown[] | undefined): string => {
 	const item = content?.[0] as { text?: string } | undefined;
@@ -25,7 +29,11 @@ describe("MCP knowledge tools", () => {
 	});
 
 	afterEach(async () => {
-		try { await mcpServer.stop(); } catch { /* */ }
+		try {
+			await mcpServer.stop();
+		} catch {
+			/* */
+		}
 		await safeCleanup(TEST_DIR);
 	});
 
@@ -58,8 +66,10 @@ describe("MCP knowledge tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("added") || text.includes("knowledge") || text.length > 0,
-			`Expected knowledge add result: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("added") || text.includes("knowledge") || text.length > 0,
+			`Expected knowledge add result: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("searches knowledge base", async () => {
@@ -81,7 +91,10 @@ describe("MCP knowledge tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.length > 5, `Expected search results: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.length > 5,
+			`Expected search results: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("records a decision", async () => {
@@ -96,8 +109,10 @@ describe("MCP knowledge tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("recorded") || text.includes("decision") || text.length > 0,
-			`Expected decision record: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("recorded") || text.includes("decision") || text.length > 0,
+			`Expected decision record: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("extracts a reusable pattern", async () => {
@@ -111,7 +126,10 @@ describe("MCP knowledge tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.length > 0, `Expected pattern extraction: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.length > 0,
+			`Expected pattern extraction: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("gets all recorded decisions", async () => {
@@ -129,8 +147,12 @@ describe("MCP knowledge tools", () => {
 			params: { name: "knowledge_get_decisions", arguments: {} },
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("TypeScript") || text.includes("No decisions") || text.length > 0,
-			`Expected decisions list: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("TypeScript") ||
+				text.includes("No decisions") ||
+				text.length > 0,
+			`Expected decisions list: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("gets knowledge stats", async () => {
@@ -146,7 +168,10 @@ describe("MCP knowledge tools", () => {
 		await mcpServer.testInterface.callTool({
 			params: {
 				name: "knowledge_add",
-				arguments: { content: "Server-Sent Events for MCP transport", category: "technical" },
+				arguments: {
+					content: "Server-Sent Events for MCP transport",
+					category: "technical",
+				},
 			},
 		});
 
@@ -158,7 +183,10 @@ describe("MCP knowledge tools", () => {
 		});
 		const text = getText(result.content);
 		// Should succeed or give a useful error
-		assert.ok(text.length > 0, `Expected helpful marking: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.length > 0,
+			`Expected helpful marking: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("searches with no results", async () => {
@@ -170,8 +198,12 @@ describe("MCP knowledge tools", () => {
 		});
 		const text = getText(result.content);
 		// Should return empty results, not crash
-		assert.ok(text.includes("No results") || text.includes("0 results") || text.length > 0,
-			`Expected no results: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("No results") ||
+				text.includes("0 results") ||
+				text.length > 0,
+			`Expected no results: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("adds knowledge with all fields", async () => {
@@ -179,7 +211,8 @@ describe("MCP knowledge tools", () => {
 			params: {
 				name: "knowledge_add",
 				arguments: {
-					content: "Use agent coordination protocol: check first, announce, then act",
+					content:
+						"Use agent coordination protocol: check first, announce, then act",
 					category: "best_practice",
 					tags: "coordination,protocol",
 					proposal_link: "P001",
@@ -187,7 +220,11 @@ describe("MCP knowledge tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("coordination") || text.includes("added") || text.length > 0,
-			`Expected full add: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("coordination") ||
+				text.includes("added") ||
+				text.length > 0,
+			`Expected full add: ${text.slice(0, 200)}`,
+		);
 	});
 });

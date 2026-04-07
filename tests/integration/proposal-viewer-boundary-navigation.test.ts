@@ -1,6 +1,4 @@
-import assert from "node:assert";
 import { describe, it } from "node:test";
-import { expect } from "../support/test-utils.ts";
 import {
 	type PendingSearchWrap,
 	resolveFilterExitPane,
@@ -8,6 +6,7 @@ import {
 	shouldMoveFromDetailBoundaryToSearch,
 	shouldMoveFromListBoundaryToSearch,
 } from "../../src/ui/proposal-viewer-with-search.ts";
+import { expect } from "../support/test-utils.ts";
 
 describe("proposal viewer boundary navigation", () => {
 	it("moves from first list row to search on up", () => {

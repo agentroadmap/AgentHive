@@ -18,7 +18,9 @@ export async function generateNextDocId(core: Core): Promise<string> {
 		// Skip remote operations if disabled
 		if (config?.remoteOperations === false) {
 			if (process.env.DEBUG) {
-				console.log("Remote operations disabled - generating ID from local documents only");
+				console.log(
+					"Remote operations disabled - generating ID from local documents only",
+				);
 			}
 		} else {
 			await core.gitOps.fetch();
@@ -28,7 +30,10 @@ export async function generateNextDocId(core: Core): Promise<string> {
 
 		// Load files from all branches in parallel
 		const branchFilePromises = branches.map(async (branch) => {
-			const files = await core.gitOps.listFilesInTree(branch, `${roadmapDir}/docs`);
+			const files = await core.gitOps.listFilesInTree(
+				branch,
+				`${roadmapDir}/docs`,
+			);
 			return files
 				.map((file) => {
 					const match = file.match(/doc-(\d+)/);
@@ -91,7 +96,9 @@ export async function generateNextDecisionId(core: Core): Promise<string> {
 		// Skip remote operations if disabled
 		if (config?.remoteOperations === false) {
 			if (process.env.DEBUG) {
-				console.log("Remote operations disabled - generating ID from local decisions only");
+				console.log(
+					"Remote operations disabled - generating ID from local decisions only",
+				);
 			}
 		} else {
 			await core.gitOps.fetch();
@@ -101,7 +108,10 @@ export async function generateNextDecisionId(core: Core): Promise<string> {
 
 		// Load files from all branches in parallel
 		const branchFilePromises = branches.map(async (branch) => {
-			const files = await core.gitOps.listFilesInTree(branch, `${roadmapDir}/decisions`);
+			const files = await core.gitOps.listFilesInTree(
+				branch,
+				`${roadmapDir}/decisions`,
+			);
 			return files
 				.map((file) => {
 					const match = file.match(/decision-(\d+)/);

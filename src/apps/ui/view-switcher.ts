@@ -6,7 +6,13 @@
 import type { Core } from "../../core/roadmap.ts";
 import type { Proposal } from "../../shared/types/index.ts";
 
-export type ViewType = "proposal-list" | "proposal-detail" | "kanban" | "cockpit" | "headlines" | "chat";
+export type ViewType =
+	| "proposal-list"
+	| "proposal-detail"
+	| "kanban"
+	| "cockpit"
+	| "headlines"
+	| "chat";
 
 export interface ViewProposal {
 	type: ViewType;
@@ -73,7 +79,10 @@ class BackgroundLoader {
 	/**
 	 * Get kanban data - either from cache or by waiting for loading
 	 */
-	async getKanbanData(): Promise<{ proposals: Proposal[]; statuses: string[] }> {
+	async getKanbanData(): Promise<{
+		proposals: Proposal[];
+		statuses: string[];
+	}> {
 		// Return cached data if fresh
 		if (this.isCacheFresh() && this.cachedProposals) {
 			const config = await this.core.filesystem.loadConfig();
@@ -134,7 +143,10 @@ class BackgroundLoader {
 			};
 
 			// Use the shared Core method for loading board proposals
-			const filteredProposals = await this.core.loadProposals(progressWrapper, this.abortController?.signal);
+			const filteredProposals = await this.core.loadProposals(
+				progressWrapper,
+				this.abortController?.signal,
+			);
 
 			// Cache the results
 			this.cachedProposals = filteredProposals;
@@ -199,7 +211,11 @@ export class ViewSwitcher {
 		this.onViewChange = options.onViewChange;
 
 		// If starting with kanban view and we already have loaded proposals, seed the cache
-		if (this.proposal.type === "kanban" && this.proposal.kanbanData?.proposals && !this.proposal.kanbanData.isLoading) {
+		if (
+			this.proposal.type === "kanban" &&
+			this.proposal.kanbanData?.proposals &&
+			!this.proposal.kanbanData.isLoading
+		) {
 			this.backgroundLoader.seedCache(this.proposal.kanbanData.proposals);
 		}
 		// Note: We no longer auto-start background loading - proposals are loaded once
@@ -241,7 +257,8 @@ export class ViewSwitcher {
 		try {
 			if (this.backgroundLoader.isReady()) {
 				// Data is ready, switch instantly
-				const { proposals, statuses } = await this.backgroundLoader.getKanbanData();
+				const { proposals, statuses } =
+					await this.backgroundLoader.getKanbanData();
 				this.proposal = {
 					...this.proposal,
 					type: "kanban",
@@ -275,7 +292,10 @@ export class ViewSwitcher {
 					proposals: [],
 					statuses: [],
 					isLoading: false,
-					loadError: error instanceof Error ? error.message : "Failed to load kanban data",
+					loadError:
+						error instanceof Error
+							? error.message
+							: "Failed to load kanban data",
 				},
 			};
 
@@ -325,7 +345,9 @@ export class ViewSwitcher {
 	 */
 	private switchToProposalView(): ViewProposal {
 		// Default to proposal-list if no previous proposal view
-		const viewType = this.proposal.selectedProposal ? "proposal-detail" : "proposal-list";
+		const viewType = this.proposal.selectedProposal
+			? "proposal-detail"
+			: "proposal-list";
 
 		this.proposal = {
 			...this.proposal,
@@ -346,7 +368,10 @@ export class ViewSwitcher {
 		this.proposal = { ...this.proposal, ...updates };
 
 		// Start background loading if switching to proposal views
-		if (this.proposal.type === "proposal-list" || this.proposal.type === "proposal-detail") {
+		if (
+			this.proposal.type === "proposal-list" ||
+			this.proposal.type === "proposal-detail"
+		) {
 			this.backgroundLoader.startLoading();
 		}
 
@@ -371,7 +396,10 @@ export class ViewSwitcher {
 	/**
 	 * Get kanban data - delegates to background loader
 	 */
-	async getKanbanData(): Promise<{ proposals: Proposal[]; statuses: string[] }> {
+	async getKanbanData(): Promise<{
+		proposals: Proposal[];
+		statuses: string[];
+	}> {
 		return await this.backgroundLoader.getKanbanData();
 	}
 

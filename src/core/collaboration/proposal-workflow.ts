@@ -11,8 +11,7 @@
  * AC#5: Only Approved components can be claimed for Active work
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 /**
  * Review type - either product-market-fit or technical-feasibility
@@ -136,12 +135,14 @@ export function submitProposal(
 		description: string;
 		research: string;
 		submittedBy: string;
-	}
+	},
 ): Proposal {
 	// Check if proposal already exists for this proposal
 	const existing = getProposalByProposalId(proposalId);
 	if (existing) {
-		throw new Error(`Proposal already exists for ${proposalId}: ${existing.id}`);
+		throw new Error(
+			`Proposal already exists for ${proposalId}: ${existing.id}`,
+		);
 	}
 
 	const proposal: Proposal = {
@@ -170,8 +171,12 @@ export function getProposal(id: string): Proposal | undefined {
 /**
  * Get proposal by proposal ID
  */
-export function getProposalByProposalId(proposalId: string): Proposal | undefined {
-	return Array.from(proposals.values()).find((p) => p.proposalId === proposalId);
+export function getProposalByProposalId(
+	proposalId: string,
+): Proposal | undefined {
+	return Array.from(proposals.values()).find(
+		(p) => p.proposalId === proposalId,
+	);
 }
 
 /**
@@ -187,7 +192,7 @@ export function addReview(
 		approved: boolean;
 		score: number;
 		comments: string;
-	}
+	},
 ): ProposalReview {
 	const proposal = proposals.get(proposalId);
 	if (!proposal) {
@@ -229,8 +234,12 @@ export function addReview(
  * AC#4: Both PM + Architect approval required before 'Approved' status
  */
 function autoApproveIfNeeded(proposal: Proposal): void {
-	const pmReview = proposal.reviews.find((r) => r.type === "product-market-fit");
-	const archReview = proposal.reviews.find((r) => r.type === "technical-feasibility");
+	const pmReview = proposal.reviews.find(
+		(r) => r.type === "product-market-fit",
+	);
+	const archReview = proposal.reviews.find(
+		(r) => r.type === "technical-feasibility",
+	);
 
 	if (pmReview && archReview && pmReview.approved && archReview.approved) {
 		proposal.status = "approved";
@@ -241,7 +250,10 @@ function autoApproveIfNeeded(proposal: Proposal): void {
 /**
  * Manually approve a proposal (overrides auto-approval)
  */
-export function approveProposal(proposalId: string, approvedBy: string = "system"): Proposal {
+export function approveProposal(
+	proposalId: string,
+	approvedBy: string = "system",
+): Proposal {
 	const proposal = proposals.get(proposalId);
 	if (!proposal) {
 		throw new Error(`Proposal not found: ${proposalId}`);
@@ -297,7 +309,10 @@ export function getProposalsByStatus(status: ProposalStatus): Proposal[] {
  * Claim an approved proposal for Active work
  * AC#5: Only Approved components can be claimed for Active work
  */
-export function claimApprovedProposal(proposalId: string, claimedBy: string): ClaimResult {
+export function claimApprovedProposal(
+	proposalId: string,
+	claimedBy: string,
+): ClaimResult {
 	const proposal = getProposalByProposalId(proposalId);
 
 	if (!proposal) {
@@ -344,7 +359,10 @@ export function getAllProposals(): Proposal[] {
 /**
  * Generate research document template
  */
-export function generateProposalTemplate(proposalId: string, title: string): string {
+export function generateProposalTemplate(
+	proposalId: string,
+	title: string,
+): string {
 	return `# Proposal: ${title}
 
 ## Proposal Reference

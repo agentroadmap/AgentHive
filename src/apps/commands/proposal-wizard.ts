@@ -3,8 +3,16 @@ import * as clack from "@clack/prompts";
 import picocolors from "picocolors";
 import { DEFAULT_STATUSES } from "../../shared/constants/index.ts";
 import { parseStructuredText } from "../../shared/markdown/structured-sections.ts";
-import type { AcceptanceCriterion, Proposal, ProposalCreateInput, ProposalUpdateInput } from "../../types/index.ts";
-import { normalizeDependencies, normalizeStringList } from "../../utils/proposal-builders.ts";
+import type {
+	AcceptanceCriterion,
+	Proposal,
+	ProposalCreateInput,
+	ProposalUpdateInput,
+} from "../../types/index.ts";
+import {
+	normalizeDependencies,
+	normalizeStringList,
+} from "../../utils/proposal-builders.ts";
 
 type WizardPriority = "high" | "medium" | "low";
 
@@ -49,11 +57,14 @@ interface ProposalWizardQuestion {
 	allowBackspaceNavigation?: boolean;
 }
 
-interface ProposalWizardValueQuestion extends Omit<ProposalWizardQuestion, "name"> {
+interface ProposalWizardValueQuestion
+	extends Omit<ProposalWizardQuestion, "name"> {
 	name: keyof ProposalWizardValues;
 }
 
-export type ProposalWizardPromptRunner = (question: ProposalWizardQuestion) => Promise<Record<string, unknown>>;
+export type ProposalWizardPromptRunner = (
+	question: ProposalWizardQuestion,
+) => Promise<Record<string, unknown>>;
 
 export class ProposalWizardCancelledError extends Error {
 	constructor() {
@@ -71,10 +82,13 @@ interface WizardOptions {
 	promptImpl?: ProposalWizardPromptRunner;
 }
 
-const SINGLE_LINE_PROMPT_GUIDANCE = "single-line prompt; Shift+Enter not supported";
+const SINGLE_LINE_PROMPT_GUIDANCE =
+	"single-line prompt; Shift+Enter not supported";
 const WIZARD_NAVIGATION_KEY = "__wizardNavigation";
 const WIZARD_NAVIGATION_PREVIOUS = "previous";
-const WIZARD_BACKSPACE_NAVIGATION = Symbol("proposal-wizard-backspace-navigation");
+const WIZARD_BACKSPACE_NAVIGATION = Symbol(
+	"proposal-wizard-backspace-navigation",
+);
 
 function normalizeStatusKey(status: string): string {
 	return status.trim().toLowerCase().replace(/\s+/g, "");
@@ -129,14 +143,24 @@ function getDefaultCreateStatus(statuses: string[]): string {
 	return firstStatus ?? "New";
 }
 
-function buildStatusPromptValues(params: { statuses: string[]; mode: "create" | "edit"; initialStatus: string }): {
+function buildStatusPromptValues(params: {
+	statuses: string[];
+	mode: "create" | "edit";
+	initialStatus: string;
+}): {
 	options: PromptChoice[];
 	initial: string;
 } {
-	const configuredStatuses = normalizeStringList(params.statuses.map((status) => status.trim())) ?? [];
-	const baseStatuses = configuredStatuses.length > 0 ? configuredStatuses : [...DEFAULT_STATUSES];
-	const hasDraftStatus = baseStatuses.some((status) => normalizeStatusKey(status) === normalizeStatusKey("Draft"));
-	const selectableStatuses = hasDraftStatus ? baseStatuses : ["Draft", ...baseStatuses];
+	const configuredStatuses =
+		normalizeStringList(params.statuses.map((status) => status.trim())) ?? [];
+	const baseStatuses =
+		configuredStatuses.length > 0 ? configuredStatuses : [...DEFAULT_STATUSES];
+	const hasDraftStatus = baseStatuses.some(
+		(status) => normalizeStatusKey(status) === normalizeStatusKey("Draft"),
+	);
+	const selectableStatuses = hasDraftStatus
+		? baseStatuses
+		: ["Draft", ...baseStatuses];
 	const options: PromptChoice[] = selectableStatuses.map((status) => ({
 		label: status,
 		value: status,
@@ -158,7 +182,10 @@ function buildStatusPromptValues(params: { statuses: string[]; mode: "create" | 
 		};
 	}
 
-	const canonicalInitial = findCanonicalStatus(initialStatus, selectableStatuses);
+	const canonicalInitial = findCanonicalStatus(
+		initialStatus,
+		selectableStatuses,
+	);
 	if (canonicalInitial) {
 		return {
 			options,
@@ -167,7 +194,13 @@ function buildStatusPromptValues(params: { statuses: string[]; mode: "create" | 
 	}
 
 	return {
-		options: [{ label: `${params.initialStatus} (current)`, value: params.initialStatus }, ...options],
+		options: [
+			{
+				label: `${params.initialStatus} (current)`,
+				value: params.initialStatus,
+			},
+			...options,
+		],
 		initial: params.initialStatus,
 	};
 }
@@ -186,11 +219,18 @@ function buildPriorityPromptValues(initialPriority: string): {
 	if (!normalizedInitial) {
 		return { options, initial: "" };
 	}
-	if (normalizedInitial === "high" || normalizedInitial === "medium" || normalizedInitial === "low") {
+	if (
+		normalizedInitial === "high" ||
+		normalizedInitial === "medium" ||
+		normalizedInitial === "low"
+	) {
 		return { options, initial: normalizedInitial };
 	}
 	return {
-		options: [{ label: `${initialPriority} (current)`, value: normalizedInitial }, ...options],
+		options: [
+			{ label: `${initialPriority} (current)`, value: normalizedInitial },
+			...options,
+		],
 		initial: normalizedInitial,
 	};
 }
@@ -222,7 +262,10 @@ function areStringArraysEqual(a: string[], b: string[]): boolean {
 	return a.every((value, index) => value === b[index]);
 }
 
-function areChecklistEntriesEqual(existing: ChecklistEntry[], next: ChecklistEntry[]): boolean {
+function areChecklistEntriesEqual(
+	existing: ChecklistEntry[],
+	next: ChecklistEntry[],
+): boolean {
 	if (existing.length !== next.length) return false;
 	return existing.every((entry, index) => {
 		const candidate = next[index];
@@ -240,29 +283,40 @@ const clackPromptRunner: ProposalWizardPromptRunner = async (question) => {
 				const withGuide = clack.settings.withGuide;
 				const header = `${withGuide ? `${picocolors.gray(clack.S_BAR)}\n` : ""}${clack.symbol(this.state)}  ${question.message}\n`;
 				const placeholder = picocolors.inverse(picocolors.hidden("_"));
-				const inputValue = this.userInput.length > 0 ? this.userInputWithCursor : placeholder;
+				const inputValue =
+					this.userInput.length > 0 ? this.userInputWithCursor : placeholder;
 				const submittedValue = String(this.value ?? "");
 
 				switch (this.state) {
 					case "error": {
-						const linePrefix = withGuide ? `${picocolors.yellow(clack.S_BAR)}  ` : "";
+						const linePrefix = withGuide
+							? `${picocolors.yellow(clack.S_BAR)}  `
+							: "";
 						const footer = withGuide ? picocolors.yellow(clack.S_BAR_END) : "";
-						const errorMessage = this.error.length > 0 ? `  ${picocolors.yellow(this.error)}` : "";
+						const errorMessage =
+							this.error.length > 0 ? `  ${picocolors.yellow(this.error)}` : "";
 						return `${header.trimEnd()}\n${linePrefix}${inputValue}\n${footer}${errorMessage}\n`;
 					}
 					case "submit": {
 						const linePrefix = withGuide ? picocolors.gray(clack.S_BAR) : "";
-						const value = submittedValue.length > 0 ? `  ${picocolors.dim(submittedValue)}` : "";
+						const value =
+							submittedValue.length > 0
+								? `  ${picocolors.dim(submittedValue)}`
+								: "";
 						return `${header}${linePrefix}${value}`;
 					}
 					case "cancel": {
 						const linePrefix = withGuide ? picocolors.gray(clack.S_BAR) : "";
 						const value =
-							submittedValue.length > 0 ? `  ${picocolors.strikethrough(picocolors.dim(submittedValue))}` : "";
+							submittedValue.length > 0
+								? `  ${picocolors.strikethrough(picocolors.dim(submittedValue))}`
+								: "";
 						return `${header}${linePrefix}${value}${submittedValue.trim().length > 0 ? `\n${linePrefix}` : ""}`;
 					}
 					default: {
-						const linePrefix = withGuide ? `${picocolors.cyan(clack.S_BAR)}  ` : "";
+						const linePrefix = withGuide
+							? `${picocolors.cyan(clack.S_BAR)}  `
+							: "";
 						const footer = withGuide ? picocolors.cyan(clack.S_BAR_END) : "";
 						return `${header}${linePrefix}${inputValue}\n${footer}\n`;
 					}
@@ -277,7 +331,11 @@ const clackPromptRunner: ProposalWizardPromptRunner = async (question) => {
 			}
 			const wasEmptyBeforeKeypress = previousInput.length === 0;
 			const isEmptyAfterKeypress = textPrompt.userInput.length === 0;
-			if (question.allowBackspaceNavigation && wasEmptyBeforeKeypress && isEmptyAfterKeypress) {
+			if (
+				question.allowBackspaceNavigation &&
+				wasEmptyBeforeKeypress &&
+				isEmptyAfterKeypress
+			) {
 				textPrompt.state = "submit";
 				textPrompt.value = WIZARD_BACKSPACE_NAVIGATION as unknown as string;
 				return;
@@ -296,7 +354,9 @@ const clackPromptRunner: ProposalWizardPromptRunner = async (question) => {
 
 	const options = question.options ?? [];
 	if (options.length === 0) {
-		throw new Error(`No options provided for select prompt '${question.name}'.`);
+		throw new Error(
+			`No options provided for select prompt '${question.name}'.`,
+		);
 	}
 	const result = await clack.select({
 		message: question.message,
@@ -449,12 +509,15 @@ async function runProposalWizardValues(params: {
 				type: "text",
 				name: "labels",
 				message:
-					params.mode === "create" ? "Labels (comma-separated)" : "Labels (comma-separated; blank keeps current value)",
+					params.mode === "create"
+						? "Labels (comma-separated)"
+						: "Labels (comma-separated; blank keeps current value)",
 			},
 			{
 				type: "text",
 				name: "acceptanceCriteria",
-				message: "Acceptance Criteria (comma/newline-separated; optional [x]/[ ] prefix per item)",
+				message:
+					"Acceptance Criteria (comma/newline-separated; optional [x]/[ ] prefix per item)",
 			},
 			{
 				type: "text",
@@ -536,7 +599,9 @@ async function runProposalWizardValues(params: {
 		}
 
 		const canonicalStatus =
-			values.status.trim().length > 0 ? (findCanonicalStatus(values.status, statuses) ?? values.status.trim()) : "";
+			values.status.trim().length > 0
+				? (findCanonicalStatus(values.status, statuses) ?? values.status.trim())
+				: "";
 
 		return {
 			title: values.title.trim(),
@@ -569,7 +634,9 @@ export async function pickProposalForEditWizard(params: {
 	promptImpl?: ProposalWizardPromptRunner;
 }): Promise<string | undefined> {
 	const prompt = params.promptImpl ?? clackPromptRunner;
-	const proposals = [...params.proposals].sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+	const proposals = [...params.proposals].sort((a, b) =>
+		a.id.localeCompare(b.id, undefined, { numeric: true }),
+	);
 	if (proposals.length === 0) {
 		return undefined;
 	}
@@ -594,7 +661,9 @@ export async function pickProposalForEditWizard(params: {
 	}
 }
 
-function toInitialWizardValues(input: { title?: string } & Partial<Proposal>): ProposalWizardValues {
+function toInitialWizardValues(
+	input: { title?: string } & Partial<Proposal>,
+): ProposalWizardValues {
 	return {
 		title: input.title ?? "",
 		description: input.description ?? "",
@@ -611,7 +680,9 @@ function toInitialWizardValues(input: { title?: string } & Partial<Proposal>): P
 		references: formatListInput(input.references),
 		documentation: formatListInput(input.documentation),
 		dependencies: formatListInput(input.dependencies),
-		verificationProposalments: formatChecklistInput(input.verificationProposalments),
+		verificationProposalments: formatChecklistInput(
+			input.verificationProposalments,
+		),
 	};
 }
 
@@ -620,7 +691,9 @@ export async function runProposalCreateWizard(
 		initialTitle?: string;
 	} & WizardOptions,
 ): Promise<ProposalCreateInput | null> {
-	const initialValues = toInitialWizardValues({ title: options.initialTitle ?? "" });
+	const initialValues = toInitialWizardValues({
+		title: options.initialTitle ?? "",
+	});
 	const values = await runProposalWizardValues({
 		mode: "create",
 		statuses: options.statuses,
@@ -632,17 +705,24 @@ export async function runProposalCreateWizard(
 	}
 
 	const priority = values.priority.trim();
-	const parsedPriority = priority.length > 0 ? (priority as WizardPriority) : undefined;
+	const parsedPriority =
+		priority.length > 0 ? (priority as WizardPriority) : undefined;
 	const assignee = parseListInput(values.assignee);
 	const labels = parseListInput(values.labels);
 	const references = parseListInput(values.references);
 	const documentation = parseListInput(values.documentation);
-	const dependencies = normalizeDependencies(parseListInput(values.dependencies));
-	const acceptanceCriteria = parseChecklistInput(values.acceptanceCriteria).map((entry) => ({
-		text: entry.text,
-		checked: false,
-	}));
-	const verificationProposalments = parseChecklistInput(values.verificationProposalments).map((entry) => {
+	const dependencies = normalizeDependencies(
+		parseListInput(values.dependencies),
+	);
+	const acceptanceCriteria = parseChecklistInput(values.acceptanceCriteria).map(
+		(entry) => ({
+			text: entry.text,
+			checked: false,
+		}),
+	);
+	const verificationProposalments = parseChecklistInput(
+		values.verificationProposalments,
+	).map((entry) => {
 		const parsed = parseStructuredText(entry.text);
 		return {
 			text: parsed.text,
@@ -654,9 +734,13 @@ export async function runProposalCreateWizard(
 
 	const input: ProposalCreateInput = {
 		title: values.title,
-		...(values.description.trim().length > 0 && { description: values.description }),
+		...(values.description.trim().length > 0 && {
+			description: values.description,
+		}),
 		...(values.domainId.trim().length > 0 && { domainId: values.domainId }),
-		...(values.proposalType.trim().length > 0 && { proposalType: values.proposalType }),
+		...(values.proposalType.trim().length > 0 && {
+			proposalType: values.proposalType,
+		}),
 		...(values.category.trim().length > 0 && { category: values.category }),
 		...(values.status.trim().length > 0 && { status: values.status }),
 		...(parsedPriority && { priority: parsedPriority }),
@@ -667,8 +751,12 @@ export async function runProposalCreateWizard(
 		...(documentation.length > 0 && { documentation }),
 		...(acceptanceCriteria.length > 0 && { acceptanceCriteria }),
 		...(verificationProposalments.length > 0 && { verificationProposalments }),
-		...(values.implementationPlan.trim().length > 0 && { implementationPlan: values.implementationPlan }),
-		...(values.implementationNotes.trim().length > 0 && { implementationNotes: values.implementationNotes }),
+		...(values.implementationPlan.trim().length > 0 && {
+			implementationPlan: values.implementationPlan,
+		}),
+		...(values.implementationNotes.trim().length > 0 && {
+			implementationNotes: values.implementationNotes,
+		}),
 	};
 	return input;
 }
@@ -708,7 +796,10 @@ export async function runProposalEditWizard(
 	if (values.status !== initial.status && values.status.trim().length > 0) {
 		updateInput.status = values.status;
 	}
-	if (values.priority !== initial.priority && values.priority.trim().length > 0) {
+	if (
+		values.priority !== initial.priority &&
+		values.priority.trim().length > 0
+	) {
 		updateInput.priority = values.priority as WizardPriority;
 	}
 
@@ -724,8 +815,12 @@ export async function runProposalEditWizard(
 		updateInput.labels = nextLabels;
 	}
 
-	const initialDependencies = normalizeDependencies(parseListInput(initial.dependencies));
-	const nextDependencies = normalizeDependencies(parseListInput(values.dependencies));
+	const initialDependencies = normalizeDependencies(
+		parseListInput(initial.dependencies),
+	);
+	const nextDependencies = normalizeDependencies(
+		parseListInput(values.dependencies),
+	);
 	if (!areStringArraysEqual(initialDependencies, nextDependencies)) {
 		updateInput.dependencies = nextDependencies;
 	}
@@ -770,7 +865,9 @@ export async function runProposalEditWizard(
 			role: entry.role,
 			evidence: entry.evidence,
 		}));
-	const targetVerify = parseChecklistInput(values.verificationProposalments).map((entry) => {
+	const targetVerify = parseChecklistInput(
+		values.verificationProposalments,
+	).map((entry) => {
 		const parsed = parseStructuredText(entry.text);
 		return {
 			text: parsed.text,

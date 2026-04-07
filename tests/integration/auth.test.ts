@@ -8,11 +8,11 @@
  * AC#5: Key rotation supported without downtime
  */
 
-import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, before, describe, it } from "node:test";
 import { AgentAuth, extractBearerToken } from "../../src/core/security/auth.ts";
 
 describe("AgentAuth (proposal-51)", () => {
@@ -37,8 +37,14 @@ describe("AgentAuth (proposal-51)", () => {
 		it("should generate Ed25519 key pair on first initialization", async () => {
 			const identity = await auth.initializeIdentity("agent-test-001");
 
-			assert.ok(identity.publicKey.includes("BEGIN PUBLIC KEY"), "Public key should be PEM format");
-			assert.ok(identity.privateKey.includes("BEGIN PRIVATE KEY"), "Private key should be PEM format");
+			assert.ok(
+				identity.publicKey.includes("BEGIN PUBLIC KEY"),
+				"Public key should be PEM format",
+			);
+			assert.ok(
+				identity.privateKey.includes("BEGIN PRIVATE KEY"),
+				"Private key should be PEM format",
+			);
 			assert.equal(identity.agentId, "agent-test-001");
 			assert.equal(identity.keyVersion, 1);
 			assert.ok(identity.createdAt, "Should have creation timestamp");
@@ -58,7 +64,11 @@ describe("AgentAuth (proposal-51)", () => {
 			const auth2 = new AgentAuth({ identityDir: tempDir });
 			const identity = await auth2.initializeIdentity("agent-test-001");
 
-			assert.equal(identity.keyVersion, 1, "Should load existing v1, not create v2");
+			assert.equal(
+				identity.keyVersion,
+				1,
+				"Should load existing v1, not create v2",
+			);
 			assert.equal(identity.agentId, "agent-test-001");
 		});
 
@@ -75,7 +85,10 @@ describe("AgentAuth (proposal-51)", () => {
 		it("should issue a token with correct structure", async () => {
 			const token = await auth.issueToken("agent-test-001");
 
-			assert.ok(token.token.startsWith("rmk_"), "Token should have rmk_ prefix");
+			assert.ok(
+				token.token.startsWith("rmk_"),
+				"Token should have rmk_ prefix",
+			);
 			assert.equal(token.agentId, "agent-test-001");
 			assert.ok(token.expiresAt, "Token should have expiry");
 			assert.ok(token.issuedAt, "Token should have issue time");
@@ -95,11 +108,16 @@ describe("AgentAuth (proposal-51)", () => {
 			const withoutPrefix = token.token.slice(4); // remove "rmk_"
 			const dotIndex = withoutPrefix.lastIndexOf(".");
 			const payloadB64 = withoutPrefix.slice(0, dotIndex);
-			const payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf-8"));
+			const payload = JSON.parse(
+				Buffer.from(payloadB64, "base64url").toString("utf-8"),
+			);
 
 			assert.equal(payload.agentId, "agent-test-001");
 			assert.ok(payload.issuedAt > 0, "Should have issuedAt timestamp");
-			assert.ok(payload.expiresAt > payload.issuedAt, "expiresAt should be after issuedAt");
+			assert.ok(
+				payload.expiresAt > payload.issuedAt,
+				"expiresAt should be after issuedAt",
+			);
 			assert.equal(payload.keyVersion, 1);
 			assert.ok(payload.nonce, "Should have a nonce for replay protection");
 		});
@@ -129,7 +147,7 @@ describe("AgentAuth (proposal-51)", () => {
 
 		it("should reject a tampered token", async () => {
 			const token = await auth.issueToken("agent-test-001");
-			const tampered = token.token + "tampered";
+			const tampered = `${token.token}tampered`;
 			const result = await auth.verifyToken(tampered);
 			assert.equal(result, null, "Tampered token should fail verification");
 		});
@@ -213,8 +231,16 @@ describe("AgentAuth (proposal-51)", () => {
 			const newIdentity = await auth.rotateKeys();
 
 			assert.equal(newIdentity.keyVersion, 2, "Key version should increment");
-			assert.notEqual(newIdentity.publicKey, oldPublicKey, "Public key should change");
-			assert.equal(newIdentity.agentId, "agent-test-001", "Agent ID should be preserved");
+			assert.notEqual(
+				newIdentity.publicKey,
+				oldPublicKey,
+				"Public key should change",
+			);
+			assert.equal(
+				newIdentity.agentId,
+				"agent-test-001",
+				"Agent ID should be preserved",
+			);
 		});
 
 		it("should issue tokens with new key version after rotation", async () => {
@@ -243,14 +269,19 @@ describe("AgentAuth (proposal-51)", () => {
 			const log = auth.getAuditLog("agent-test-001");
 			const rotateEvent = log.find((e) => e.action === "key_rotation");
 			assert.ok(rotateEvent, "Should have key_rotation audit event");
-			assert.ok(rotateEvent?.details?.includes("v1 to v2"), "Should mention version change");
+			assert.ok(
+				rotateEvent?.details?.includes("v1 to v2"),
+				"Should mention version change",
+			);
 		});
 	});
 });
 
 describe("extractBearerToken", () => {
 	it("should extract token from valid Authorization header", () => {
-		const token = extractBearerToken({ authorization: "Bearer rmk_test.token" });
+		const token = extractBearerToken({
+			authorization: "Bearer rmk_test.token",
+		});
 		assert.equal(token, "rmk_test.token");
 	});
 
@@ -265,7 +296,9 @@ describe("extractBearerToken", () => {
 	});
 
 	it("should handle array-valued headers", () => {
-		const token = extractBearerToken({ authorization: ["Bearer rmk_test.token"] });
+		const token = extractBearerToken({
+			authorization: ["Bearer rmk_test.token"],
+		});
 		assert.equal(token, "rmk_test.token");
 	});
 });

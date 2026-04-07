@@ -8,8 +8,12 @@ export async function formatProposalCallResult(
 	options: Parameters<typeof formatProposalPlainText>[1] = {},
 ): Promise<CallToolResult> {
 	const formattedProposal = formatProposalPlainText(proposal, options);
-	const summary = summaryLines.filter((line) => line.trim().length > 0).join("\n");
-	const text = summary ? `${summary}\n\n${formattedProposal}` : formattedProposal;
+	const summary = summaryLines
+		.filter((line) => line.trim().length > 0)
+		.join("\n");
+	const text = summary
+		? `${summary}\n\n${formattedProposal}`
+		: formattedProposal;
 
 	return {
 		content: [

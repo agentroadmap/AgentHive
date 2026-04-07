@@ -2,16 +2,16 @@
  * Tests for proposal-63: Agent Team Membership
  */
 
-import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, before, describe, it } from "node:test";
 import {
 	AgentTeamMembership,
-	parsePoolAssignment,
 	formatTokenDisplay,
 	generateTeamId,
+	parsePoolAssignment,
 } from "../../src/core/collaboration/team-membership.ts";
 
 describe("proposal-63: Agent Team Membership", () => {
@@ -51,17 +51,14 @@ describe("proposal-63: Agent Team Membership", () => {
 		});
 
 		it("should reject duplicate registrations for same agent and pool", async () => {
-			await assert.rejects(
-				async () => {
-					await membership.registerAgent({
-						agentId: "agent-alice",
-						skills: ["typescript"],
-						roleAssignment: "developer",
-						poolAssignment: "frontend",
-					});
-				},
-				/already registered/,
-			);
+			await assert.rejects(async () => {
+				await membership.registerAgent({
+					agentId: "agent-alice",
+					skills: ["typescript"],
+					roleAssignment: "developer",
+					poolAssignment: "frontend",
+				});
+			}, /already registered/);
 		});
 
 		it("should allow same agent in different pools", async () => {
@@ -84,7 +81,9 @@ describe("proposal-63: Agent Team Membership", () => {
 				poolAssignment: "qa",
 			});
 
-			const activated = await membership.activateRegistration(registration.registrationId);
+			const activated = await membership.activateRegistration(
+				registration.registrationId,
+			);
 
 			assert.equal(activated.status, "active");
 			assert.ok(activated.activatedAt);
@@ -129,7 +128,9 @@ describe("proposal-63: Agent Team Membership", () => {
 			const registration = membership.getRegistrationByAgent("agent-charlie");
 			assert.ok(registration);
 
-			const newToken = await membership.regenerateToken(registration.registrationId);
+			const newToken = await membership.regenerateToken(
+				registration.registrationId,
+			);
 			assert.ok(newToken);
 			assert.notEqual(newToken, agentToken);
 
@@ -165,12 +166,9 @@ describe("proposal-63: Agent Team Membership", () => {
 		});
 
 		it("should prevent duplicate workspace assignment", async () => {
-			await assert.rejects(
-				async () => {
-					await membership.assignWorkspace("agent-diana");
-				},
-				/already has workspace/,
-			);
+			await assert.rejects(async () => {
+				await membership.assignWorkspace("agent-diana");
+			}, /already has workspace/);
 		});
 
 		it("should include git remote when specified", async () => {
@@ -223,8 +221,8 @@ describe("proposal-63: Agent Team Membership", () => {
 			assert.ok(profile?.workspace?.soulMdPath);
 
 			// Read the SOUL.md content
-			const soulContent = await import("node:fs/promises").then(fs =>
-				fs.readFile(profile!.workspace!.soulMdPath!, "utf-8"),
+			const soulContent = await import("node:fs/promises").then((fs) =>
+				fs.readFile(profile?.workspace?.soulMdPath!, "utf-8"),
 			);
 
 			assert.ok(soulContent.includes("agent-frank"));
@@ -243,9 +241,12 @@ describe("proposal-63: Agent Team Membership", () => {
 			await membership.activateRegistration(registration.registrationId);
 
 			const workspace = await membership.assignWorkspace("agent-grace");
-			const provisioned = await membership.provisionWorkspace(workspace.assignmentId, {
-				soulContent: "# Custom Soul\n\nThis is a custom workspace.",
-			});
+			const provisioned = await membership.provisionWorkspace(
+				workspace.assignmentId,
+				{
+					soulContent: "# Custom Soul\n\nThis is a custom workspace.",
+				},
+			);
 
 			assert.equal(provisioned.status, "ready");
 		});
@@ -318,11 +319,17 @@ describe("proposal-63: Agent Team Membership", () => {
 			await membership.provisionWorkspace(workspace.assignmentId);
 
 			// Deregister
-			const result = await membership.deregisterAgent("agent-henry", "Project completed");
+			const result = await membership.deregisterAgent(
+				"agent-henry",
+				"Project completed",
+			);
 
 			assert.equal(result.registration.status, "deregistered");
 			assert.ok(result.registration.deregisteredAt);
-			assert.equal(result.registration.metadata.deregisterReason, "Project completed");
+			assert.equal(
+				result.registration.metadata.deregisterReason,
+				"Project completed",
+			);
 
 			// Workspace should be released
 			assert.equal(result.workspace?.status, "released");
@@ -339,16 +346,13 @@ describe("proposal-63: Agent Team Membership", () => {
 				type: "deregistered",
 			});
 			assert.ok(events.length >= 1);
-			assert.ok(events[0]!.details.includes("Project completed"));
+			assert.ok(events[0]?.details.includes("Project completed"));
 		});
 
 		it("should reject deregistration of non-existent agent", async () => {
-			await assert.rejects(
-				async () => {
-					await membership.deregisterAgent("non-existent");
-				},
-				/No active registration found/,
-			);
+			await assert.rejects(async () => {
+				await membership.deregisterAgent("non-existent");
+			}, /No active registration found/);
 		});
 	});
 
@@ -389,12 +393,9 @@ describe("proposal-63: Agent Team Membership", () => {
 		});
 
 		it("should prevent duplicate roster entries", () => {
-			assert.throws(
-				() => {
-					membership.addToRoster("team-alpha", "agent-i1");
-				},
-				/already in roster/,
-			);
+			assert.throws(() => {
+				membership.addToRoster("team-alpha", "agent-i1");
+			}, /already in roster/);
 		});
 
 		it("should query roster by role", () => {

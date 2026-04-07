@@ -1,20 +1,18 @@
 /**
  * Tests for proposal-092: Docker Sandbox Provisioning Service
  */
-import { describe, it } from "node:test";
+
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 import {
-	DockerSandboxService,
-	createWorkspaceMount,
-	createProvisionOptions,
-	DEFAULT_RESOURCE_LIMITS,
-	DEFAULT_NETWORK_ISOLATION,
-	DEFAULT_CLEANUP_POLICY,
-	type ProvisionOptions,
-	type ResourceLimits,
 	type CleanupPolicy,
-} from '../../src/core/infrastructure/docker-sandbox.ts';
-import type { DockerImage } from '../../src/core/infrastructure/docker-sandbox.ts';
+	createProvisionOptions,
+	createWorkspaceMount,
+	DEFAULT_CLEANUP_POLICY,
+	DEFAULT_NETWORK_ISOLATION,
+	DEFAULT_RESOURCE_LIMITS,
+	DockerSandboxService,
+} from "../../src/core/infrastructure/docker-sandbox.ts";
 
 describe("proposal-092: Docker Sandbox Provisioning Service", () => {
 	// AC#1: Container Provisioning
@@ -65,8 +63,14 @@ describe("proposal-092: Docker Sandbox Provisioning Service", () => {
 
 			const container = service.provision(options);
 
-			assert.equal(container.resources.cpuMillicores, DEFAULT_RESOURCE_LIMITS.cpuMillicores);
-			assert.equal(container.resources.memoryMB, DEFAULT_RESOURCE_LIMITS.memoryMB);
+			assert.equal(
+				container.resources.cpuMillicores,
+				DEFAULT_RESOURCE_LIMITS.cpuMillicores,
+			);
+			assert.equal(
+				container.resources.memoryMB,
+				DEFAULT_RESOURCE_LIMITS.memoryMB,
+			);
 		});
 
 		it("can get container by ID", () => {
@@ -77,13 +81,17 @@ describe("proposal-092: Docker Sandbox Provisioning Service", () => {
 
 			const found = service.getContainer(container.containerId);
 			assert.ok(found);
-			assert.equal(found!.containerId, container.containerId);
+			assert.equal(found?.containerId, container.containerId);
 		});
 
 		it("lists all containers", () => {
 			const service = new DockerSandboxService();
-			service.provision(createProvisionOptions("node:20-alpine", "a1", "build", "/tmp/1"));
-			service.provision(createProvisionOptions("python:3.12", "a2", "test", "/tmp/2"));
+			service.provision(
+				createProvisionOptions("node:20-alpine", "a1", "build", "/tmp/1"),
+			);
+			service.provision(
+				createProvisionOptions("python:3.12", "a2", "test", "/tmp/2"),
+			);
 
 			const all = service.listContainers();
 			assert.equal(all.length, 2);
@@ -91,9 +99,15 @@ describe("proposal-092: Docker Sandbox Provisioning Service", () => {
 
 		it("filters containers by agent", () => {
 			const service = new DockerSandboxService();
-			service.provision(createProvisionOptions("node:20-alpine", "agent-1", "build", "/tmp/1"));
-			service.provision(createProvisionOptions("node:20-alpine", "agent-2", "build", "/tmp/2"));
-			service.provision(createProvisionOptions("node:20-alpine", "agent-1", "test", "/tmp/3"));
+			service.provision(
+				createProvisionOptions("node:20-alpine", "agent-1", "build", "/tmp/1"),
+			);
+			service.provision(
+				createProvisionOptions("node:20-alpine", "agent-2", "build", "/tmp/2"),
+			);
+			service.provision(
+				createProvisionOptions("node:20-alpine", "agent-1", "test", "/tmp/3"),
+			);
 
 			const agent1 = service.getAgentContainers("agent-1");
 			assert.equal(agent1.length, 2);
@@ -110,8 +124,12 @@ describe("proposal-092: Docker Sandbox Provisioning Service", () => {
 
 		it("tracks resource usage", () => {
 			const service = new DockerSandboxService();
-			service.provision(createProvisionOptions("node:20-alpine", "a1", "build", "/tmp/1"));
-			service.provision(createProvisionOptions("node:20-alpine", "a2", "build", "/tmp/2"));
+			service.provision(
+				createProvisionOptions("node:20-alpine", "a1", "build", "/tmp/1"),
+			);
+			service.provision(
+				createProvisionOptions("node:20-alpine", "a2", "build", "/tmp/2"),
+			);
 
 			const usage = service.getResourceUsage();
 			assert.equal(usage.runningCount, 2);
@@ -121,8 +139,12 @@ describe("proposal-092: Docker Sandbox Provisioning Service", () => {
 
 		it("resource usage excludes stopped containers", () => {
 			const service = new DockerSandboxService();
-			const c1 = service.provision(createProvisionOptions("node:20-alpine", "a1", "build", "/tmp/1"));
-			service.provision(createProvisionOptions("node:20-alpine", "a2", "build", "/tmp/2"));
+			const c1 = service.provision(
+				createProvisionOptions("node:20-alpine", "a1", "build", "/tmp/1"),
+			);
+			service.provision(
+				createProvisionOptions("node:20-alpine", "a2", "build", "/tmp/2"),
+			);
 
 			service.stopContainer(c1.containerId);
 
@@ -146,7 +168,10 @@ describe("proposal-092: Docker Sandbox Provisioning Service", () => {
 
 			const updated = service.updateStatus(container.containerId, "paused");
 			assert.equal(updated, true);
-			assert.equal(service.getContainer(container.containerId)!.status, "paused");
+			assert.equal(
+				service.getContainer(container.containerId)?.status,
+				"paused",
+			);
 		});
 
 		it("returns false for unknown container", () => {
@@ -283,8 +308,12 @@ describe("proposal-092: Docker Sandbox Provisioning Service", () => {
 			};
 			const service = new DockerSandboxService(shortPolicy);
 
-			service.provision(createProvisionOptions("node:20-alpine", "a1", "build", "/tmp/1"));
-			service.provision(createProvisionOptions("node:20-alpine", "a2", "build", "/tmp/2"));
+			service.provision(
+				createProvisionOptions("node:20-alpine", "a1", "build", "/tmp/1"),
+			);
+			service.provision(
+				createProvisionOptions("node:20-alpine", "a2", "build", "/tmp/2"),
+			);
 
 			assert.equal(service.listContainers().length, 2);
 
@@ -309,7 +338,7 @@ describe("proposal-092: Docker Sandbox Provisioning Service", () => {
 			};
 			const service = new DockerSandboxService(shortPolicy);
 
-			const c1 = service.provision(
+			const _c1 = service.provision(
 				createProvisionOptions("node:20-alpine", "a1", "build", "/tmp/1"),
 			);
 

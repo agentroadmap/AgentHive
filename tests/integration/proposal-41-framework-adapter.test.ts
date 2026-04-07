@@ -7,11 +7,14 @@
  * - Adapter contract versioned for compatibility
  */
 
-import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { FrameworkAdapterImpl, FRAMEWORK_ADAPTER_VERSION } from '../../src/core/identity/framework-adapter.ts';
-import { mkdirSync, rmSync, existsSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import {
+	FRAMEWORK_ADAPTER_VERSION,
+	FrameworkAdapterImpl,
+} from "../../src/core/identity/framework-adapter.ts";
 
 const TEST_BASE = join(import.meta.dirname, "../../tmp/test-framework-adapter");
 
@@ -118,7 +121,10 @@ describe("proposal-41: Framework Adapter Contract", () => {
 
 		it("detects NestJS project", () => {
 			writePackageJson({
-				dependencies: { "@nestjs/core": "^10.0.0", "@nestjs/common": "^10.0.0" },
+				dependencies: {
+					"@nestjs/core": "^10.0.0",
+					"@nestjs/common": "^10.0.0",
+				},
 			});
 
 			const result = adapter.getAdapter();
@@ -170,7 +176,10 @@ describe("proposal-41: Framework Adapter Contract", () => {
 
 		it("detects monorepo from pnpm-workspace.yaml", () => {
 			writePackageJson({ name: "test" });
-			writeFileSync(join(testDir, "pnpm-workspace.yaml"), "packages:\n  - packages/*");
+			writeFileSync(
+				join(testDir, "pnpm-workspace.yaml"),
+				"packages:\n  - packages/*",
+			);
 
 			const result = adapter.getAdapter();
 			assert.equal(result.detection.isMonorepo, true);

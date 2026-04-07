@@ -1,7 +1,6 @@
 import assert from "node:assert";
 import { afterEach, describe, it } from "node:test";
 import { JSDOM } from "jsdom";
-import React from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
@@ -35,17 +34,41 @@ const directiveEntities: Directive[] = [
 ];
 
 const baseProposals: Proposal[] = [
-	createProposal({ id: "proposal-101", title: "Setup authentication flow", status: "Active", directive: "m-1" }),
-	createProposal({ id: "proposal-202", title: "Deploy pipeline", status: "Potential", directive: "m-1" }),
-	createProposal({ id: "proposal-404", title: "Ship docs site", status: "Potential", directive: "m-2" }),
-	createProposal({ id: "proposal-303", title: "Draft release notes", status: "Potential" }),
+	createProposal({
+		id: "proposal-101",
+		title: "Setup authentication flow",
+		status: "Active",
+		directive: "m-1",
+	}),
+	createProposal({
+		id: "proposal-202",
+		title: "Deploy pipeline",
+		status: "Potential",
+		directive: "m-1",
+	}),
+	createProposal({
+		id: "proposal-404",
+		title: "Ship docs site",
+		status: "Potential",
+		directive: "m-2",
+	}),
+	createProposal({
+		id: "proposal-303",
+		title: "Draft release notes",
+		status: "Potential",
+	}),
 ];
 
 let activeRoot: Root | null = null;
 
 const setupDom = () => {
-	const dom = new JSDOM("<!doctype html><html><body><div id='root'></div></body></html>", { url: "http://localhost" });
-	(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+	const dom = new JSDOM(
+		"<!doctype html><html><body><div id='root'></div></body></html>",
+		{ url: "http://localhost" },
+	);
+	(
+		globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+	).IS_REACT_ACT_ENVIRONMENT = true;
 	globalThis.window = dom.window as unknown as Window & typeof globalThis;
 	globalThis.document = dom.window.document as unknown as Document;
 	globalThis.navigator = dom.window.navigator as unknown as Navigator;
@@ -99,7 +122,9 @@ const renderPage = (proposals: Proposal[] = baseProposals): HTMLElement => {
 };
 
 const getSearchInput = (container: HTMLElement): HTMLInputElement => {
-	const input = container.querySelector("input[aria-label='Search directives']");
+	const input = container.querySelector(
+		"input[aria-label='Search directives']",
+	);
 	assert.ok(input);
 	return input as HTMLInputElement;
 };
@@ -168,7 +193,9 @@ describe("Web directives page search", () => {
 		assert.ok(filteredText.includes("No matching unassigned proposals."));
 		assert.ok(!filteredText.includes("Draft release notes"));
 
-		const clearSearchButton = container.querySelector("button[aria-label='Clear directive search']");
+		const clearSearchButton = container.querySelector(
+			"button[aria-label='Clear directive search']",
+		);
 		assert.ok(clearSearchButton);
 		clickElement(clearSearchButton as HTMLButtonElement);
 
@@ -183,7 +210,9 @@ describe("Web directives page search", () => {
 
 		setSearchValue(container, "zzzz-no-match");
 		const noMatchText = container.textContent ?? "";
-		assert.ok(noMatchText.includes('No directives or proposals match "zzzz-no-match".'));
+		assert.ok(
+			noMatchText.includes('No directives or proposals match "zzzz-no-match".'),
+		);
 		assert.ok(noMatchText.includes("Release 1"));
 		assert.ok(noMatchText.includes("Release 2"));
 		assert.ok(noMatchText.includes("Unassigned proposals"));

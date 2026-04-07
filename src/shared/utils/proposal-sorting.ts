@@ -74,7 +74,9 @@ export function sortByProposalId<T extends { id: string }>(items: T[]): T[] {
  * Priority order: high > medium > low > undefined
  * Proposals with the same priority are sorted by proposal ID.
  */
-export function sortByPriority<T extends { id: string; priority?: "high" | "medium" | "low" }>(items: T[]): T[] {
+export function sortByPriority<
+	T extends { id: string; priority?: "high" | "medium" | "low" },
+>(items: T[]): T[] {
 	const priorityWeight = {
 		high: 3,
 		medium: 2,
@@ -100,7 +102,9 @@ export function sortByPriority<T extends { id: string; priority?: "high" | "medi
  * Proposals with ordinal values come before proposals without.
  * Proposals with the same ordinal (or both undefined) are sorted by proposal ID.
  */
-export function sortByOrdinal<T extends { id: string; ordinal?: number }>(items: T[]): T[] {
+export function sortByOrdinal<T extends { id: string; ordinal?: number }>(
+	items: T[],
+): T[] {
 	return [...items].sort((a, b) => {
 		// Proposals with ordinal come before proposals without
 		if (a.ordinal !== undefined && b.ordinal === undefined) {
@@ -127,7 +131,11 @@ export function sortByOrdinal<T extends { id: string; ordinal?: number }>(items:
  * This is the default sorting for the board view.
  */
 export function sortByOrdinalAndPriority<
-	T extends { id: string; ordinal?: number; priority?: "high" | "medium" | "low" },
+	T extends {
+		id: string;
+		ordinal?: number;
+		priority?: "high" | "medium" | "low";
+	},
 >(items: T[]): T[] {
 	const priorityWeight = {
 		high: 3,
@@ -168,10 +176,13 @@ export function sortByOrdinalAndPriority<
  * Sort proposals by a specified field with fallback to proposal ID sorting.
  * Supported fields: 'priority', 'id', 'ordinal'
  */
-export function sortProposals<T extends { id: string; priority?: "high" | "medium" | "low"; ordinal?: number }>(
-	items: T[],
-	sortField: string,
-): T[] {
+export function sortProposals<
+	T extends {
+		id: string;
+		priority?: "high" | "medium" | "low";
+		ordinal?: number;
+	},
+>(items: T[], sortField: string): T[] {
 	switch (sortField?.toLowerCase()) {
 		case "priority":
 			return sortByPriority(items);

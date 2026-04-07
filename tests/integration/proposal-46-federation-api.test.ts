@@ -2,21 +2,20 @@
  * Tests for proposal-46: Multi-Host Federation
  */
 
-import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { after, before, describe, it } from "node:test";
 import {
-	FederationServer,
 	ConflictResolver,
-	ConnectionManager,
-	createProposalUpdateMessage,
-	createHeartbeatMessage,
-	hasConflict,
-	computeHash,
 	type ConflictVersion,
-	type WebSocketConnection,
-	type ProposalChangePayload,
 	type ConnectedAgent,
-} from '../../src/core/infrastructure/federation-api.ts';
+	ConnectionManager,
+	computeHash,
+	createHeartbeatMessage,
+	createProposalUpdateMessage,
+	FederationServer,
+	hasConflict,
+	type WebSocketConnection,
+} from "../../src/core/infrastructure/federation-api.ts";
 
 describe("proposal-46: Multi-Host Federation", () => {
 	describe("ConflictResolver", () => {
@@ -162,7 +161,8 @@ describe("proposal-46: Multi-Host Federation", () => {
 			resolver.detectConflict("proposal-specific", v1, v2);
 			resolver.detectConflict("other-proposal", v1, v2);
 
-			const proposalConflicts = resolver.getProposalConflicts("proposal-specific");
+			const proposalConflicts =
+				resolver.getProposalConflicts("proposal-specific");
 			assert.equal(proposalConflicts.length, 1);
 			assert.equal(proposalConflicts[0].proposalId, "proposal-specific");
 		});
@@ -310,7 +310,12 @@ describe("proposal-46: Multi-Host Federation", () => {
 
 	describe("Message Helpers", () => {
 		it("should create proposal update message", () => {
-			const msg = createProposalUpdateMessage("host-1", "proposal-1", "content", "alice");
+			const msg = createProposalUpdateMessage(
+				"host-1",
+				"proposal-1",
+				"content",
+				"alice",
+			);
 
 			assert.equal(msg.type, "proposal_update");
 			assert.equal(msg.sourceHostId, "host-1");

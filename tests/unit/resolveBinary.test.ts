@@ -1,6 +1,5 @@
-import assert from "node:assert";
-import { describe, it } from "node:test";
 import { createRequire } from "node:module";
+import { describe, it } from "node:test";
 import { expect } from "../support/test-utils.ts";
 
 const require = createRequire(import.meta.url);

@@ -1,10 +1,13 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
-import { mkdir, rm, readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync,
+import {
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 let TEST_DIR: string;
@@ -36,13 +39,19 @@ describe("CLI agents command", () => {
 	});
 
 	it("should show help when no options are provided", async () => {
-		const result = execSync(`node --experimental-strip-types ${cliPath} agents`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${cliPath} agents`,
+			{ cwd: TEST_DIR },
+		);
 
 		assert.strictEqual(result.exitCode, 0);
 	});
 
 	it("should show help text with agents --help", async () => {
-		const result = execSync(`node --experimental-strip-types ${cliPath} agents --help`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${cliPath} agents --help`,
+			{ cwd: TEST_DIR },
+		);
 
 		assert.strictEqual(result.exitCode, 0);
 	});
@@ -59,7 +68,9 @@ describe("CLI agents command", () => {
 
 		// Verify the file was created
 		const agentsPath = join(TEST_DIR, "AGENTS.md");
-		const exists = await stat(agentsPath).then(() => true).catch(() => false);
+		const exists = await stat(agentsPath)
+			.then(() => true)
+			.catch(() => false);
 		expect(exists).toBe(true);
 		const content = await readFile(agentsPath, "utf-8");
 		assert.ok(content.includes("Roadmap.md"));
@@ -77,14 +88,19 @@ describe("CLI agents command", () => {
 
 		// No files should be created when selection is empty
 		const agentsPath = join(TEST_DIR, "AGENTS.md");
-		const exists = await stat(agentsPath).then(() => true).catch(() => false);
+		const exists = await stat(agentsPath)
+			.then(() => true)
+			.catch(() => false);
 		expect(exists).toBe(false);
 	});
 
 	it("should fail when not in a roadmap project", async () => {
 		// Use OS temp directory to ensure complete isolation from project
 		const tempDir = await import("node:os").then((os) => os.tmpdir());
-		const nonRoadmapDir = join(tempDir, `test-non-roadmap-${Date.now()}-${Math.random().toString(36).substring(7)}`);
+		const nonRoadmapDir = join(
+			tempDir,
+			`test-non-roadmap-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+		);
 
 		// Ensure clean proposal first
 		await rm(nonRoadmapDir, { recursive: true, force: true }).catch(() => {});
@@ -97,7 +113,10 @@ describe("CLI agents command", () => {
 		execSync(`git config user.name "Test User"`, { cwd: nonRoadmapDir });
 		execSync(`git config user.email test@example.com`, { cwd: nonRoadmapDir });
 
-		const result = execSync(`node --experimental-strip-types ${cliPath} agents --update-instructions`, { cwd: nonRoadmapDir });
+		const result = execSync(
+			`node --experimental-strip-types ${cliPath} agents --update-instructions`,
+			{ cwd: nonRoadmapDir },
+		);
 
 		assert.strictEqual(result.exitCode, 1);
 
@@ -112,15 +131,22 @@ describe("CLI agents command", () => {
 
 		// Test updating multiple files
 		await expect(async () => {
-			await addAgentInstructions(TEST_DIR, core.gitOps, ["AGENTS.md", "CLAUDE.md"]);
+			await addAgentInstructions(TEST_DIR, core.gitOps, [
+				"AGENTS.md",
+				"CLAUDE.md",
+			]);
 		}).not.toThrow();
 
 		// Verify both files were created
 		const agentsPath = join(TEST_DIR, "AGENTS.md");
 		const claudePath = join(TEST_DIR, "CLAUDE.md");
 
-		const agentsExists = await stat(agentsPath).then(() => true).catch(() => false);
-		const claudeExists = await stat(claudePath).then(() => true).catch(() => false);
+		const agentsExists = await stat(agentsPath)
+			.then(() => true)
+			.catch(() => false);
+		const claudeExists = await stat(claudePath)
+			.then(() => true)
+			.catch(() => false);
 
 		expect(agentsExists).toBe(true);
 		expect(claudeExists).toBe(true);
@@ -141,7 +167,9 @@ describe("CLI agents command", () => {
 		await addAgentInstructions(TEST_DIR, core.gitOps, ["AGENTS.md"]);
 
 		const agentsPath = join(TEST_DIR, "AGENTS.md");
-		const exists = await stat(agentsPath).then(() => true).catch(() => false);
+		const exists = await stat(agentsPath)
+			.then(() => true)
+			.catch(() => false);
 		expect(exists).toBe(true);
 		const _originalContent = await readFile(agentsPath, "utf-8");
 
@@ -151,7 +179,9 @@ describe("CLI agents command", () => {
 		}).not.toThrow();
 
 		// File should still exist and have consistent content
-		const existsAfter = await stat(agentsPath).then(() => true).catch(() => false);
+		const existsAfter = await stat(agentsPath)
+			.then(() => true)
+			.catch(() => false);
 		expect(existsAfter).toBe(true);
 		const updatedContent = await readFile(agentsPath, "utf-8");
 		assert.ok(updatedContent.includes("Roadmap.md"));

@@ -1,18 +1,18 @@
-import type { ProposalStatistics } from '../../../core/infrastructure/statistics.ts';
+import type { ProposalStatistics } from "../../../core/infrastructure/statistics.ts";
 import type {
 	Agent,
 	Channel,
 	Decision,
+	Directive,
 	Document,
 	Message,
-	Directive,
+	Proposal,
+	ProposalStatus,
 	PulseEvent,
 	RoadmapConfig,
 	SearchPriorityFilter,
 	SearchResult,
 	SearchResultType,
-	Proposal,
-	ProposalStatus,
 } from "../../../shared/types/index.ts";
 
 const API_BASE = "/api";
@@ -70,7 +70,10 @@ export class ApiClient {
 	}
 
 	// Enhanced fetch with retry logic and better error handling
-	private async fetchWithRetry(url: string, options: RequestInit = {}): Promise<Response> {
+	private async fetchWithRetry(
+		url: string,
+		options: RequestInit = {},
+	): Promise<Response> {
 		const { retries = 3, timeout = 10000 } = this.config;
 		let lastError: Error | undefined;
 
@@ -106,7 +109,12 @@ export class ApiClient {
 				lastError = error as Error;
 
 				// Don't retry on client errors (4xx) or specific cases
-				if (error instanceof ApiError && error.status && error.status >= 400 && error.status < 500) {
+				if (
+					error instanceof ApiError &&
+					error.status &&
+					error.status >= 400 &&
+					error.status < 500
+				) {
 					throw error;
 				}
 
@@ -122,11 +130,16 @@ export class ApiClient {
 		if (lastError instanceof ApiError) {
 			throw lastError;
 		}
-		throw new NetworkError(`Request failed after ${retries + 1} attempts: ${lastError?.message}`);
+		throw new NetworkError(
+			`Request failed after ${retries + 1} attempts: ${lastError?.message}`,
+		);
 	}
 
 	// Helper method for JSON responses
-	private async fetchJson<T>(url: string, options: RequestInit = {}): Promise<T> {
+	private async fetchJson<T>(
+		url: string,
+		options: RequestInit = {},
+	): Promise<T> {
 		const response = await this.fetchWithRetry(url, options);
 		return response.json();
 	}
@@ -177,13 +190,17 @@ export class ApiClient {
 			}
 		}
 		if (options.status) {
-			const statuses = Array.isArray(options.status) ? options.status : [options.status];
+			const statuses = Array.isArray(options.status)
+				? options.status
+				: [options.status];
 			for (const status of statuses) {
 				params.append("status", status);
 			}
 		}
 		if (options.priority) {
-			const priorities = Array.isArray(options.priority) ? options.priority : [options.priority];
+			const priorities = Array.isArray(options.priority)
+				? options.priority
+				: [options.priority];
 			for (const priority of priorities) {
 				params.append("priority", priority);
 			}
@@ -207,7 +224,9 @@ export class ApiClient {
 		return this.fetchJson<Proposal>(`${API_BASE}/proposal/${id}`);
 	}
 
-	async createProposal(proposal: Omit<Proposal, "id" | "createdDate">): Promise<Proposal> {
+	async createProposal(
+		proposal: Omit<Proposal, "id" | "createdDate">,
+	): Promise<Proposal> {
 		return this.fetchJson<Proposal>(`${API_BASE}/proposals`, {
 			method: "POST",
 			body: JSON.stringify(proposal),
@@ -216,7 +235,9 @@ export class ApiClient {
 
 	async updateProposal(
 		id: string,
-		updates: Omit<Partial<Proposal>, "directive"> & { directive?: string | null },
+		updates: Omit<Partial<Proposal>, "directive"> & {
+			directive?: string | null;
+		},
 	): Promise<Proposal> {
 		return this.fetchJson<Proposal>(`${API_BASE}/proposals/${id}`, {
 			method: "PUT",
@@ -224,11 +245,16 @@ export class ApiClient {
 		});
 	}
 
-	async reorderProposal(payload: ReorderProposalPayload): Promise<{ success: boolean; proposal: Proposal }> {
-		return this.fetchJson<{ success: boolean; proposal: Proposal }>(`${API_BASE}/proposals/reorder`, {
-			method: "POST",
-			body: JSON.stringify(payload),
-		});
+	async reorderProposal(
+		payload: ReorderProposalPayload,
+	): Promise<{ success: boolean; proposal: Proposal }> {
+		return this.fetchJson<{ success: boolean; proposal: Proposal }>(
+			`${API_BASE}/proposals/reorder`,
+			{
+				method: "POST",
+				body: JSON.stringify(payload),
+			},
+		);
 	}
 
 	async archiveProposal(id: string): Promise<void> {
@@ -257,17 +283,33 @@ export class ApiClient {
 
 	async getCleanupPreview(age: number): Promise<{
 		count: number;
-		proposals: Array<{ id: string; title: string; updatedDate?: string; createdDate: string }>;
+		proposals: Array<{
+			id: string;
+			title: string;
+			updatedDate?: string;
+			createdDate: string;
+		}>;
 	}> {
 		return this.fetchJson<{
 			count: number;
-			proposals: Array<{ id: string; title: string; updatedDate?: string; createdDate: string }>;
+			proposals: Array<{
+				id: string;
+				title: string;
+				updatedDate?: string;
+				createdDate: string;
+			}>;
 		}>(`${API_BASE}/proposals/cleanup?age=${age}`);
 	}
 
 	async executeCleanup(
 		age: number,
-	): Promise<{ success: boolean; movedCount: number; totalCount: number; message: string; failedProposals?: string[] }> {
+	): Promise<{
+		success: boolean;
+		movedCount: number;
+		totalCount: number;
+		message: string;
+		failedProposals?: string[];
+	}> {
 		return this.fetchJson<{
 			success: boolean;
 			movedCount: number;
@@ -280,7 +322,10 @@ export class ApiClient {
 		});
 	}
 
-	async updateProposalStatus(id: string, status: ProposalStatus): Promise<Proposal> {
+	async updateProposalStatus(
+		id: string,
+		status: ProposalStatus,
+	): Promise<Proposal> {
 		return this.updateProposal(id, { status });
 	}
 
@@ -323,7 +368,9 @@ export class ApiClient {
 	}
 
 	async fetchDoc(filename: string): Promise<Document> {
-		const response = await fetch(`${API_BASE}/docs/${encodeURIComponent(filename)}`);
+		const response = await fetch(
+			`${API_BASE}/docs/${encodeURIComponent(filename)}`,
+		);
 		if (!response.ok) {
 			throw new Error("Failed to fetch document");
 		}
@@ -338,19 +385,26 @@ export class ApiClient {
 		return response.json();
 	}
 
-	async updateDoc(filename: string, content: string, title?: string): Promise<void> {
+	async updateDoc(
+		filename: string,
+		content: string,
+		title?: string,
+	): Promise<void> {
 		const payload: Record<string, unknown> = { content };
 		if (typeof title === "string") {
 			payload.title = title;
 		}
 
-		const response = await fetch(`${API_BASE}/docs/${encodeURIComponent(filename)}`, {
-			method: "PUT",
-			headers: {
-				"Content-Type": "application/json",
+		const response = await fetch(
+			`${API_BASE}/docs/${encodeURIComponent(filename)}`,
+			{
+				method: "PUT",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify(payload),
 			},
-			body: JSON.stringify(payload),
-		});
+		);
 		if (!response.ok) {
 			throw new Error("Failed to update document");
 		}
@@ -379,7 +433,9 @@ export class ApiClient {
 	}
 
 	async fetchDecision(id: string): Promise<Decision> {
-		const response = await fetch(`${API_BASE}/decisions/${encodeURIComponent(id)}`);
+		const response = await fetch(
+			`${API_BASE}/decisions/${encodeURIComponent(id)}`,
+		);
 		if (!response.ok) {
 			throw new Error("Failed to fetch decision");
 		}
@@ -387,7 +443,9 @@ export class ApiClient {
 	}
 
 	async fetchDecisionData(id: string): Promise<Decision> {
-		const response = await fetch(`${API_BASE}/decision/${encodeURIComponent(id)}`);
+		const response = await fetch(
+			`${API_BASE}/decision/${encodeURIComponent(id)}`,
+		);
 		if (!response.ok) {
 			throw new Error("Failed to fetch decision");
 		}
@@ -395,13 +453,16 @@ export class ApiClient {
 	}
 
 	async updateDecision(id: string, content: string): Promise<void> {
-		const response = await fetch(`${API_BASE}/decisions/${encodeURIComponent(id)}`, {
-			method: "PUT",
-			headers: {
-				"Content-Type": "text/plain",
+		const response = await fetch(
+			`${API_BASE}/decisions/${encodeURIComponent(id)}`,
+			{
+				method: "PUT",
+				headers: {
+					"Content-Type": "text/plain",
+				},
+				body: content,
 			},
-			body: content,
-		});
+		);
 		if (!response.ok) {
 			throw new Error("Failed to update decision");
 		}
@@ -438,14 +499,19 @@ export class ApiClient {
 	}
 
 	async fetchDirective(id: string): Promise<Directive> {
-		const response = await fetch(`${API_BASE}/directives/${encodeURIComponent(id)}`);
+		const response = await fetch(
+			`${API_BASE}/directives/${encodeURIComponent(id)}`,
+		);
 		if (!response.ok) {
 			throw new Error("Failed to fetch directive");
 		}
 		return response.json();
 	}
 
-	async createDirective(title: string, description?: string): Promise<Directive> {
+	async createDirective(
+		title: string,
+		description?: string,
+	): Promise<Directive> {
 		const response = await fetch(`${API_BASE}/directives`, {
 			method: "POST",
 			headers: {
@@ -460,10 +526,15 @@ export class ApiClient {
 		return response.json();
 	}
 
-	async archiveDirective(id: string): Promise<{ success: boolean; directive?: Directive | null }> {
-		const response = await fetch(`${API_BASE}/directives/${encodeURIComponent(id)}/archive`, {
-			method: "POST",
-		});
+	async archiveDirective(
+		id: string,
+	): Promise<{ success: boolean; directive?: Directive | null }> {
+		const response = await fetch(
+			`${API_BASE}/directives/${encodeURIComponent(id)}/archive`,
+			{
+				method: "POST",
+			},
+		);
 		if (!response.ok) {
 			const data = await response.json().catch(() => ({}));
 			throw new Error(data.error || "Failed to archive directive");
@@ -472,22 +543,35 @@ export class ApiClient {
 	}
 
 	async fetchStatistics(): Promise<
-		ProposalStatistics & { statusCounts: Record<string, number>; priorityCounts: Record<string, number> }
+		ProposalStatistics & {
+			statusCounts: Record<string, number>;
+			priorityCounts: Record<string, number>;
+		}
 	> {
 		return this.fetchJson<
-			ProposalStatistics & { statusCounts: Record<string, number>; priorityCounts: Record<string, number> }
+			ProposalStatistics & {
+				statusCounts: Record<string, number>;
+				priorityCounts: Record<string, number>;
+			}
 		>(`${API_BASE}/statistics`);
 	}
 
 	async checkStatus(): Promise<{ initialized: boolean; projectPath: string }> {
-		return this.fetchJson<{ initialized: boolean; projectPath: string }>(`${API_BASE}/status`);
+		return this.fetchJson<{ initialized: boolean; projectPath: string }>(
+			`${API_BASE}/status`,
+		);
 	}
 
 	async initializeProject(options: {
 		projectName: string;
 		integrationMode: "mcp" | "cli" | "none";
 		mcpClients?: ("claude" | "codex" | "gemini" | "kiro" | "guide")[];
-		agentInstructions?: ("CLAUDE.md" | "AGENTS.md" | "GEMINI.md" | ".github/copilot-instructions.md")[];
+		agentInstructions?: (
+			| "CLAUDE.md"
+			| "AGENTS.md"
+			| "GEMINI.md"
+			| ".github/copilot-instructions.md"
+		)[];
 		installClaudeAgent?: boolean;
 		advancedConfig?: {
 			checkActiveBranches?: boolean;
@@ -501,14 +585,19 @@ export class ApiClient {
 			defaultPort?: number;
 			autoOpenBrowser?: boolean;
 		};
-	}): Promise<{ success: boolean; projectName: string; mcpResults?: Record<string, string> }> {
-		return this.fetchJson<{ success: boolean; projectName: string; mcpResults?: Record<string, string> }>(
-			`${API_BASE}/init`,
-			{
-				method: "POST",
-				body: JSON.stringify(options),
-			},
-		);
+	}): Promise<{
+		success: boolean;
+		projectName: string;
+		mcpResults?: Record<string, string>;
+	}> {
+		return this.fetchJson<{
+			success: boolean;
+			projectName: string;
+			mcpResults?: Record<string, string>;
+		}>(`${API_BASE}/init`, {
+			method: "POST",
+			body: JSON.stringify(options),
+		});
 	}
 
 	async fetchAgents(): Promise<Agent[]> {
@@ -527,7 +616,10 @@ export class ApiClient {
 	async fetchMessages(channel: string, since?: string): Promise<Message[]> {
 		const params = new URLSearchParams({ channel });
 		if (since) params.set("since", since);
-		const result = await this.fetchJson<{ channel: string; messages: Message[] }>(`${API_BASE}/messages?${params}`);
+		const result = await this.fetchJson<{
+			channel: string;
+			messages: Message[];
+		}>(`${API_BASE}/messages?${params}`);
 		return result.messages;
 	}
 }

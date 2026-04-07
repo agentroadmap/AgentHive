@@ -3,7 +3,12 @@
  * Ties chat messages to concrete proposal operations.
  */
 
-export type IntentType = "claim_request" | "handoff" | "reject" | "accept" | "block";
+export type IntentType =
+	| "claim_request"
+	| "handoff"
+	| "reject"
+	| "accept"
+	| "block";
 
 export interface NegotiationIntent {
 	/** Intent type */
@@ -49,7 +54,11 @@ export function encodeIntent(intent: NegotiationIntent): string {
 export function decodeIntent(text: string): NegotiationIntent | null {
 	if (!text.includes(INTENT_PREFIX)) return null;
 
-	const match = text.match(new RegExp(`${INTENT_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(.+?)(?:\\n|$)`));
+	const match = text.match(
+		new RegExp(
+			`${INTENT_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(.+?)(?:\\n|$)`,
+		),
+	);
 	if (!match || !match[1]) return null;
 
 	try {
@@ -72,7 +81,14 @@ export function decodeIntent(text: string): NegotiationIntent | null {
  */
 export function extractHumanText(text: string): string {
 	if (!text.includes(INTENT_PREFIX)) return text;
-	return text.replace(new RegExp(`${INTENT_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}.+?(?:\\n|$)`), "").trim();
+	return text
+		.replace(
+			new RegExp(
+				`${INTENT_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}.+?(?:\\n|$)`,
+			),
+			"",
+		)
+		.trim();
 }
 
 /**

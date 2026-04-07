@@ -1,7 +1,7 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
-import { mkdir, rm, readFile, writeFile, stat } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import {
 	_loadAgentGuideline,
 	AGENT_GUIDELINES,
@@ -12,8 +12,10 @@ import {
 	GEMINI_GUIDELINES,
 	README_GUIDELINES,
 } from "../../src/index.ts";
-import { createUniqueTestDir, safeCleanup,
+import {
+	createUniqueTestDir,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 let TEST_DIR: string;
@@ -38,7 +40,10 @@ describe("addAgentInstructions", () => {
 		const agents = await await readFile(join(TEST_DIR, "AGENTS.md"), "utf-8");
 		const claude = await await readFile(join(TEST_DIR, "CLAUDE.md"), "utf-8");
 		const gemini = await await readFile(join(TEST_DIR, "GEMINI.md"), "utf-8");
-		const copilot = await await readFile(join(TEST_DIR, ".github/copilot-instructions.md"), "utf-8");
+		const copilot = await await readFile(
+			join(TEST_DIR, ".github/copilot-instructions.md"),
+			"utf-8",
+		);
 
 		// Check that files contain the markers and content
 		assert.ok(agents.includes("<!-- ROADMAP.MD GUIDELINES START -->"));
@@ -59,7 +64,7 @@ describe("addAgentInstructions", () => {
 	});
 
 	it("appends guideline files when they already exist", async () => {
-		await writeFile(join(TEST_DIR, "AGENTS.md"),  "Existing\n");
+		await writeFile(join(TEST_DIR, "AGENTS.md"), "Existing\n");
 		await addAgentInstructions(TEST_DIR);
 		const agents = await await readFile(join(TEST_DIR, "AGENTS.md"), "utf-8");
 		expect(agents.startsWith("Existing\n")).toBe(true);
@@ -71,10 +76,20 @@ describe("addAgentInstructions", () => {
 	it("creates only selected files", async () => {
 		await addAgentInstructions(TEST_DIR, undefined, ["AGENTS.md", "README.md"]);
 
-		const agentsExists = await stat(join(TEST_DIR, "AGENTS.md")).then(() => true).catch(() => false);
-		const claudeExists = await stat(join(TEST_DIR, "CLAUDE.md")).then(() => true).catch(() => false);
-		const geminiExists = await stat(join(TEST_DIR, "GEMINI.md")).then(() => true).catch(() => false);
-		const copilotExists = await stat(join(TEST_DIR, ".github/copilot-instructions.md")).then(() => true).catch(() => false);
+		const agentsExists = await stat(join(TEST_DIR, "AGENTS.md"))
+			.then(() => true)
+			.catch(() => false);
+		const claudeExists = await stat(join(TEST_DIR, "CLAUDE.md"))
+			.then(() => true)
+			.catch(() => false);
+		const geminiExists = await stat(join(TEST_DIR, "GEMINI.md"))
+			.then(() => true)
+			.catch(() => false);
+		const copilotExists = await stat(
+			join(TEST_DIR, ".github/copilot-instructions.md"),
+		)
+			.then(() => true)
+			.catch(() => false);
 		const readme = await readFile(join(TEST_DIR, "README.md"), "utf-8");
 
 		assert.strictEqual(agentsExists, true);
@@ -87,9 +102,16 @@ describe("addAgentInstructions", () => {
 	});
 
 	it("loads guideline content from file paths", async () => {
-		const pathGuideline = join(process.cwd(), "src/apps/guidelines/agent-guidelines.md");
+		const pathGuideline = join(
+			process.cwd(),
+			"src/apps/guidelines/agent-guidelines.md",
+		);
 		const content = await _loadAgentGuideline(pathGuideline);
-		assert.ok(content.includes("# Instructions for the usage of agentRoadmap.md CLI Tool"));
+		assert.ok(
+			content.includes(
+				"# Instructions for the usage of agentRoadmap.md CLI Tool",
+			),
+		);
 	});
 
 	it("does not duplicate content when run multiple times (idempotent)", async () => {
@@ -105,8 +127,9 @@ describe("addAgentInstructions", () => {
 	});
 
 	it("preserves existing content and adds Roadmap.md content only once", async () => {
-		const existingContent = "# My Existing Claude Instructions\n\nThis is my custom content.\n";
-		await writeFile(join(TEST_DIR, "CLAUDE.md"),  existingContent);
+		const existingContent =
+			"# My Existing Claude Instructions\n\nThis is my custom content.\n";
+		await writeFile(join(TEST_DIR, "CLAUDE.md"), existingContent);
 
 		// First run
 		await addAgentInstructions(TEST_DIR, undefined, ["CLAUDE.md"]);
@@ -122,8 +145,12 @@ describe("addAgentInstructions", () => {
 		assert.ok(firstRun.includes("<!-- ROADMAP.MD GUIDELINES END -->"));
 
 		// Count occurrences of the marker to ensure it's only there once
-		const startMarkerCount = (firstRun.match(/<!-- ROADMAP\.MD GUIDELINES START -->/g) || []).length;
-		const endMarkerCount = (firstRun.match(/<!-- ROADMAP\.MD GUIDELINES END -->/g) || []).length;
+		const startMarkerCount = (
+			firstRun.match(/<!-- ROADMAP\.MD GUIDELINES START -->/g) || []
+		).length;
+		const endMarkerCount = (
+			firstRun.match(/<!-- ROADMAP\.MD GUIDELINES END -->/g) || []
+		).length;
 		assert.strictEqual(startMarkerCount, 1);
 		assert.strictEqual(endMarkerCount, 1);
 	});
@@ -132,9 +159,12 @@ describe("addAgentInstructions", () => {
 		const existingContent = "existing content\n";
 
 		// Test AGENTS.md (markdown with HTML comments)
-		await writeFile(join(TEST_DIR, "AGENTS.md"),  existingContent);
+		await writeFile(join(TEST_DIR, "AGENTS.md"), existingContent);
 		await addAgentInstructions(TEST_DIR, undefined, ["AGENTS.md"]);
-		const agentsContent = await await readFile(join(TEST_DIR, "AGENTS.md"), "utf-8");
+		const agentsContent = await await readFile(
+			join(TEST_DIR, "AGENTS.md"),
+			"utf-8",
+		);
 		assert.ok(agentsContent.includes("<!-- ROADMAP.MD GUIDELINES START -->"));
 		assert.ok(agentsContent.includes("<!-- ROADMAP.MD GUIDELINES END -->"));
 	});
@@ -149,7 +179,7 @@ describe("addAgentInstructions", () => {
 			"Footer line",
 			"",
 		].join("\n");
-		await writeFile(agentsPath,  cliBlock);
+		await writeFile(agentsPath, cliBlock);
 
 		await ensureMcpGuidelines(TEST_DIR, "AGENTS.md");
 		const updated = await await readFile(agentsPath, "utf-8");
@@ -171,7 +201,7 @@ describe("addAgentInstructions", () => {
 			"<!-- ROADMAP.MD MCP GUIDELINES END -->",
 			"",
 		].join("\n");
-		await writeFile(agentsPath,  mcpBlock);
+		await writeFile(agentsPath, mcpBlock);
 
 		await addAgentInstructions(TEST_DIR, undefined, ["AGENTS.md"]);
 		const updated = await await readFile(agentsPath, "utf-8");

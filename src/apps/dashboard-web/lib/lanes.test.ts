@@ -1,12 +1,12 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 import type { Proposal } from "../hooks/useWebSocket";
 import {
 	buildLanes,
 	DEFAULT_LANE_KEY,
 	groupProposalsByLaneAndStatus,
-	laneKeyFromType,
 	laneKeyFromDomain,
+	laneKeyFromType,
 	sortProposals,
 } from "./lanes";
 
@@ -76,14 +76,27 @@ describe("buildLanes", () => {
 
 describe("groupProposalsByLaneAndStatus", () => {
 	const proposals = [
-		makeProposal({ id: "proposal-1", status: "Potential", proposalType: "Feature" }),
+		makeProposal({
+			id: "proposal-1",
+			status: "Potential",
+			proposalType: "Feature",
+		}),
 		makeProposal({ id: "proposal-2", status: "Active", proposalType: "Bug" }),
-		makeProposal({ id: "proposal-3", status: "Potential", proposalType: "Feature" }),
+		makeProposal({
+			id: "proposal-3",
+			status: "Potential",
+			proposalType: "Feature",
+		}),
 	];
 
 	it("groups proposals under their type lanes", () => {
 		const lanes = buildLanes("type", proposals);
-		const grouped = groupProposalsByLaneAndStatus("type", lanes, ["Potential", "Active"], proposals);
+		const grouped = groupProposalsByLaneAndStatus(
+			"type",
+			lanes,
+			["Potential", "Active"],
+			proposals,
+		);
 
 		const featureLane = grouped.get(laneKeyFromType("Feature"));
 		const bugLane = grouped.get(laneKeyFromType("Bug"));
@@ -100,7 +113,12 @@ describe("groupProposalsByLaneAndStatus", () => {
 
 	it("places all proposals into the default lane when lane mode is none", () => {
 		const lanes = buildLanes("none", proposals);
-		const grouped = groupProposalsByLaneAndStatus("none", lanes, ["Potential", "Active"], proposals);
+		const grouped = groupProposalsByLaneAndStatus(
+			"none",
+			lanes,
+			["Potential", "Active"],
+			proposals,
+		);
 		const defaultLaneProposals = grouped.get(DEFAULT_LANE_KEY);
 
 		assert.ok(defaultLaneProposals);
@@ -110,11 +128,20 @@ describe("groupProposalsByLaneAndStatus", () => {
 
 	it("groups proposals by domain lanes", () => {
 		const domainProposals = [
-			makeProposal({ id: "proposal-1", status: "Potential", domainId: "frontend" }),
+			makeProposal({
+				id: "proposal-1",
+				status: "Potential",
+				domainId: "frontend",
+			}),
 			makeProposal({ id: "proposal-2", status: "Active", domainId: "backend" }),
 		];
 		const lanes = buildLanes("domain", domainProposals);
-		const grouped = groupProposalsByLaneAndStatus("domain", lanes, ["Potential", "Active"], domainProposals);
+		const grouped = groupProposalsByLaneAndStatus(
+			"domain",
+			lanes,
+			["Potential", "Active"],
+			domainProposals,
+		);
 
 		const frontendLane = grouped.get(laneKeyFromDomain("frontend"));
 		assert.deepEqual(
@@ -127,9 +154,21 @@ describe("groupProposalsByLaneAndStatus", () => {
 describe("sortProposals", () => {
 	it("sorts by priority and falls back to updatedAt", () => {
 		const proposals = [
-			makeProposal({ id: "proposal-1", priority: "Low", updatedAt: "2024-01-03T00:00:00Z" }),
-			makeProposal({ id: "proposal-2", priority: "High", updatedAt: "2024-01-01T00:00:00Z" }),
-			makeProposal({ id: "proposal-3", priority: "High", updatedAt: "2024-01-02T00:00:00Z" }),
+			makeProposal({
+				id: "proposal-1",
+				priority: "Low",
+				updatedAt: "2024-01-03T00:00:00Z",
+			}),
+			makeProposal({
+				id: "proposal-2",
+				priority: "High",
+				updatedAt: "2024-01-01T00:00:00Z",
+			}),
+			makeProposal({
+				id: "proposal-3",
+				priority: "High",
+				updatedAt: "2024-01-02T00:00:00Z",
+			}),
 		];
 
 		const sorted = sortProposals(proposals).map((t) => t.id);

@@ -13,7 +13,12 @@
 import { query } from "../../infra/postgres/pool.ts";
 
 /** Types of knowledge entries */
-export type KnowledgeEntryType = "solution" | "pattern" | "decision" | "obstacle" | "learned";
+export type KnowledgeEntryType =
+	| "solution"
+	| "pattern"
+	| "decision"
+	| "obstacle"
+	| "learned";
 
 /** A knowledge base entry */
 export interface KnowledgeEntry {
@@ -100,12 +105,7 @@ export interface ExtractedPattern {
  * Backed by Postgres — tables are created by a separate migration.
  */
 export class KnowledgeBase {
-	// projectRoot kept for backwards-compatible constructor signature; not used with Postgres
-	private projectRoot: string;
-
-	constructor(projectRoot: string) {
-		this.projectRoot = projectRoot;
-	}
+	constructor(private readonly projectRoot: string) {}
 
 	/**
 	 * Generate a unique entry ID.
@@ -120,7 +120,10 @@ export class KnowledgeBase {
 	 * AC#1: Add a knowledge entry (solution, pattern, decision, etc.)
 	 */
 	async addEntry(
-		entry: Omit<KnowledgeEntry, "id" | "createdAt" | "updatedAt" | "helpfulCount" | "referenceCount">,
+		entry: Omit<
+			KnowledgeEntry,
+			"id" | "createdAt" | "updatedAt" | "helpfulCount" | "referenceCount"
+		>,
 	): Promise<KnowledgeEntry> {
 		const now = new Date().toISOString();
 		const id = this.generateId();
@@ -165,11 +168,16 @@ export class KnowledgeBase {
 	 * AC#1: Search knowledge base by keywords.
 	 * Uses ILIKE for broad compatibility; a later migration can add a tsvector column.
 	 */
-	async search(searchQuery: KnowledgeSearchQuery): Promise<KnowledgeSearchResult[]> {
+	async search(
+		searchQuery: KnowledgeSearchQuery,
+	): Promise<KnowledgeSearchResult[]> {
 		const likeTerms = searchQuery.keywords.map((k) => `%${k}%`);
 		// Build an OR condition across all keyword terms
 		const likeClause = likeTerms
-			.map((_, i) => `(title ILIKE $${i + 1} OR content ILIKE $${i + 1} OR keywords::text ILIKE $${i + 1})`)
+			.map(
+				(_, i) =>
+					`(title ILIKE $${i + 1} OR content ILIKE $${i + 1} OR keywords::text ILIKE $${i + 1})`,
+			)
 			.join(" OR ");
 
 		let paramIndex = likeTerms.length + 1;
@@ -204,12 +212,17 @@ export class KnowledgeBase {
 			const entry = this.hydrateEntry(row);
 			const matchedKeywords = searchQuery.keywords.filter(
 				(k) =>
-					entry.keywords.some((ek) => ek.toLowerCase().includes(k.toLowerCase())) ||
+					entry.keywords.some((ek) =>
+						ek.toLowerCase().includes(k.toLowerCase()),
+					) ||
 					entry.title.toLowerCase().includes(k.toLowerCase()) ||
 					entry.content.toLowerCase().includes(k.toLowerCase()),
 			);
 
-			const relevanceScore = Math.min(100, Math.max(0, 50 + matchedKeywords.length * 10 + entry.confidence / 5));
+			const relevanceScore = Math.min(
+				100,
+				Math.max(0, 50 + matchedKeywords.length * 10 + entry.confidence / 5),
+			);
 
 			return { entry, relevanceScore, matchedKeywords };
 		});
@@ -261,7 +274,10 @@ export class KnowledgeBase {
 	/**
 	 * AC#2: Get all extracted patterns.
 	 */
-	async getPatterns(options?: { minUsageCount?: number; minSuccessRate?: number }): Promise<ExtractedPattern[]> {
+	async getPatterns(options?: {
+		minUsageCount?: number;
+		minSuccessRate?: number;
+	}): Promise<ExtractedPattern[]> {
 		let paramIndex = 1;
 		const params: unknown[] = [];
 		let sql = `SELECT * FROM extracted_patterns WHERE 1=1`;
@@ -298,8 +314,13 @@ export class KnowledgeBase {
 			type: "decision",
 			title: decision.title,
 			content: `## Rationale\n${decision.rationale}\n\n## Decision\n${decision.content}\n\n## Alternatives Considered\n${decision.alternatives.map((a, i) => `${i + 1}. ${a}`).join("\n")}`,
-			keywords: [decision.title.toLowerCase(), ...decision.title.split(/\s+/).map((w) => w.toLowerCase())],
-			relatedProposals: decision.relatedProposalId ? [decision.relatedProposalId] : [],
+			keywords: [
+				decision.title.toLowerCase(),
+				...decision.title.split(/\s+/).map((w) => w.toLowerCase()),
+			],
+			relatedProposals: decision.relatedProposalId
+				? [decision.relatedProposalId]
+				: [],
 			sourceProposalId: decision.relatedProposalId,
 			author: decision.author,
 			confidence: 80,
@@ -310,7 +331,9 @@ export class KnowledgeBase {
 	/**
 	 * AC#3: Get all decisions.
 	 */
-	async getDecisions(options?: { relatedProposal?: string }): Promise<KnowledgeEntry[]> {
+	async getDecisions(options?: {
+		relatedProposal?: string;
+	}): Promise<KnowledgeEntry[]> {
 		let paramIndex = 1;
 		const params: unknown[] = [];
 		let sql = `SELECT * FROM knowledge_entries WHERE type = 'decision'`;
@@ -357,13 +380,20 @@ export class KnowledgeBase {
 	/**
 	 * Update pattern usage stats.
 	 */
-	async updatePatternUsage(patternId: string, successful: boolean): Promise<void> {
-		const patResult = await query(`SELECT * FROM extracted_patterns WHERE id = $1`, [patternId]);
+	async updatePatternUsage(
+		patternId: string,
+		successful: boolean,
+	): Promise<void> {
+		const patResult = await query(
+			`SELECT * FROM extracted_patterns WHERE id = $1`,
+			[patternId],
+		);
 		if (patResult.rows.length === 0) return;
 
 		const pattern = patResult.rows[0] as any;
 		const newUsageCount = pattern.usage_count + 1;
-		const currentSuccessTotal = (pattern.success_rate * pattern.usage_count) / 100;
+		const currentSuccessTotal =
+			(pattern.success_rate * pattern.usage_count) / 100;
 		const newSuccessTotal = currentSuccessTotal + (successful ? 1 : 0);
 		const newSuccessRate = Math.round((newSuccessTotal / newUsageCount) * 100);
 
@@ -377,7 +407,10 @@ export class KnowledgeBase {
 	 * Get an entry by ID.
 	 */
 	async getEntry(entryId: string): Promise<KnowledgeEntry | null> {
-		const result = await query(`SELECT * FROM knowledge_entries WHERE id = $1`, [entryId]);
+		const result = await query(
+			`SELECT * FROM knowledge_entries WHERE id = $1`,
+			[entryId],
+		);
 		return result.rows.length > 0 ? this.hydrateEntry(result.rows[0]) : null;
 	}
 
@@ -451,18 +484,21 @@ export class KnowledgeBase {
 		topContributors: Array<{ author: string; count: number }>;
 		mostHelpful: Array<{ id: string; title: string; helpfulCount: number }>;
 	}> {
-		const [totalRes, patternRes, avgRes, typeRes, contribRes, helpfulRes] = await Promise.all([
-			query(`SELECT COUNT(*) AS c FROM knowledge_entries`),
-			query(`SELECT COUNT(*) AS c FROM extracted_patterns`),
-			query(`SELECT AVG(confidence) AS avg FROM knowledge_entries`),
-			query(`SELECT type, COUNT(*) AS count FROM knowledge_entries GROUP BY type`),
-			query(
-				`SELECT author, COUNT(*) AS count FROM knowledge_entries GROUP BY author ORDER BY count DESC LIMIT 5`,
-			),
-			query(
-				`SELECT id, title, helpful_count FROM knowledge_entries ORDER BY helpful_count DESC LIMIT 5`,
-			),
-		]);
+		const [totalRes, patternRes, avgRes, typeRes, contribRes, helpfulRes] =
+			await Promise.all([
+				query(`SELECT COUNT(*) AS c FROM knowledge_entries`),
+				query(`SELECT COUNT(*) AS c FROM extracted_patterns`),
+				query(`SELECT AVG(confidence) AS avg FROM knowledge_entries`),
+				query(
+					`SELECT type, COUNT(*) AS count FROM knowledge_entries GROUP BY type`,
+				),
+				query(
+					`SELECT author, COUNT(*) AS count FROM knowledge_entries GROUP BY author ORDER BY count DESC LIMIT 5`,
+				),
+				query(
+					`SELECT id, title, helpful_count FROM knowledge_entries ORDER BY helpful_count DESC LIMIT 5`,
+				),
+			]);
 
 		const entriesByType: Record<string, number> = {};
 		for (const row of typeRes.rows as any[]) {
@@ -474,7 +510,10 @@ export class KnowledgeBase {
 			entriesByType: entriesByType as Record<KnowledgeEntryType, number>,
 			totalPatterns: Number(patternRes.rows[0].c),
 			averageConfidence: Math.round(Number(avgRes.rows[0].avg) || 0),
-			topContributors: (contribRes.rows as any[]).map((r) => ({ author: r.author, count: Number(r.count) })),
+			topContributors: (contribRes.rows as any[]).map((r) => ({
+				author: r.author,
+				count: Number(r.count),
+			})),
 			mostHelpful: (helpfulRes.rows as any[]).map((r) => ({
 				id: r.id,
 				title: r.title,
@@ -523,7 +562,9 @@ export class KnowledgeBase {
 			tags: this.parseJsonField(row.tags, []),
 			createdAt: row.created_at,
 			updatedAt: row.updated_at,
-			metadata: row.metadata ? this.parseJsonField(row.metadata, undefined) : undefined,
+			metadata: row.metadata
+				? this.parseJsonField(row.metadata, undefined)
+				: undefined,
 		};
 	}
 

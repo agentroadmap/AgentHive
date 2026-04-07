@@ -33,7 +33,9 @@ function argMatches(actual: unknown, expected: unknown): boolean {
 	}
 }
 
-type MockFn = { mock: { calls: { arguments: unknown[] }[]; callCount(): number } };
+type MockFn = {
+	mock: { calls: { arguments: unknown[] }[]; callCount(): number };
+};
 
 interface Matchers {
 	toBe(expected: unknown): void;
@@ -74,7 +76,10 @@ function makeMatchers(actual: unknown, negated: boolean): Matchers {
 
 	const matchers: Matchers = {
 		toBe(expected) {
-			pass(Object.is(actual, expected), `Expected ${JSON.stringify(actual)} to be ${JSON.stringify(expected)}`);
+			pass(
+				Object.is(actual, expected),
+				`Expected ${JSON.stringify(actual)} to be ${JSON.stringify(expected)}`,
+			);
 		},
 		toEqual(expected) {
 			if (negated) {
@@ -84,7 +89,12 @@ function makeMatchers(actual: unknown, negated: boolean): Matchers {
 				} catch {
 					equal = false;
 				}
-				if (equal) throw new assert.AssertionError({ message: "Expected values NOT to be equal", actual, operator: "toEqual" });
+				if (equal)
+					throw new assert.AssertionError({
+						message: "Expected values NOT to be equal",
+						actual,
+						operator: "toEqual",
+					});
 			} else {
 				assert.deepStrictEqual(actual, expected);
 			}
@@ -102,25 +112,42 @@ function makeMatchers(actual: unknown, negated: boolean): Matchers {
 			pass(actual === null, `Expected ${JSON.stringify(actual)} to be null`);
 		},
 		toBeUndefined() {
-			pass(actual === undefined, `Expected ${JSON.stringify(actual)} to be undefined`);
+			pass(
+				actual === undefined,
+				`Expected ${JSON.stringify(actual)} to be undefined`,
+			);
 		},
 		toBeDefined() {
 			pass(actual !== undefined, `Expected value to be defined`);
 		},
 		toContain(expected) {
 			if (typeof actual === "string") {
-				pass((actual as string).includes(expected as string), `Expected string to contain ${JSON.stringify(expected)}`);
+				pass(
+					(actual as string).includes(expected as string),
+					`Expected string to contain ${JSON.stringify(expected)}`,
+				);
 			} else if (Array.isArray(actual)) {
-				pass((actual as unknown[]).includes(expected), `Expected array to contain ${JSON.stringify(expected)}`);
+				pass(
+					(actual as unknown[]).includes(expected),
+					`Expected array to contain ${JSON.stringify(expected)}`,
+				);
 			} else {
-				throw new Error(`toContain requires a string or array, got ${typeof actual}`);
+				throw new Error(
+					`toContain requires a string or array, got ${typeof actual}`,
+				);
 			}
 		},
 		toHaveLength(length) {
-			pass((actual as { length: number }).length === length, `Expected length ${(actual as { length: number }).length} to equal ${length}`);
+			pass(
+				(actual as { length: number }).length === length,
+				`Expected length ${(actual as { length: number }).length} to equal ${length}`,
+			);
 		},
 		toBeGreaterThan(n) {
-			pass((actual as number) > n, `Expected ${actual} to be greater than ${n}`);
+			pass(
+				(actual as number) > n,
+				`Expected ${actual} to be greater than ${n}`,
+			);
 		},
 		toBeGreaterThanOrEqual(n) {
 			pass((actual as number) >= n, `Expected ${actual} to be >= ${n}`);
@@ -140,22 +167,35 @@ function makeMatchers(actual: unknown, negated: boolean): Matchers {
 			}
 		},
 		toStartWith(prefix) {
-			pass((actual as string).startsWith(prefix), `Expected ${JSON.stringify(actual)} to start with ${JSON.stringify(prefix)}`);
+			pass(
+				(actual as string).startsWith(prefix),
+				`Expected ${JSON.stringify(actual)} to start with ${JSON.stringify(prefix)}`,
+			);
 		},
 		toBeInstanceOf(ctor) {
-			pass(actual instanceof ctor, `Expected value to be instance of ${ctor.name}`);
+			pass(
+				actual instanceof ctor,
+				`Expected value to be instance of ${ctor.name}`,
+			);
 		},
 		toMatchObject(subset) {
 			if (negated) {
 				let matches = true;
 				try {
-					for (const [k, v] of Object.entries(subset)) assert.deepStrictEqual((actual as Record<string, unknown>)[k], v);
+					for (const [k, v] of Object.entries(subset))
+						assert.deepStrictEqual((actual as Record<string, unknown>)[k], v);
 				} catch {
 					matches = false;
 				}
-				if (matches) throw new assert.AssertionError({ message: "Expected object NOT to match subset", actual, operator: "toMatchObject" });
+				if (matches)
+					throw new assert.AssertionError({
+						message: "Expected object NOT to match subset",
+						actual,
+						operator: "toMatchObject",
+					});
 			} else {
-				for (const [k, v] of Object.entries(subset)) assert.deepStrictEqual((actual as Record<string, unknown>)[k], v);
+				for (const [k, v] of Object.entries(subset))
+					assert.deepStrictEqual((actual as Record<string, unknown>)[k], v);
 			}
 		},
 		toThrow(msgOrErr) {
@@ -179,13 +219,23 @@ function makeMatchers(actual: unknown, negated: boolean): Matchers {
 		toHaveBeenCalledTimes(n) {
 			const spy = actual as MockFn;
 			const count = spy.mock?.callCount?.() ?? spy.mock?.calls?.length ?? 0;
-			pass(count === n, `Expected function to have been called ${n} times, but was called ${count} times`);
+			pass(
+				count === n,
+				`Expected function to have been called ${n} times, but was called ${count} times`,
+			);
 		},
 		toHaveBeenCalledWith(...args) {
 			const spy = actual as MockFn;
 			const calls = spy.mock?.calls ?? [];
-			const matched = calls.some((call) => call.arguments.length === args.length && args.every((a, i) => argMatches(call.arguments[i], a)));
-			pass(matched, `Expected function to have been called with ${JSON.stringify(args)}`);
+			const matched = calls.some(
+				(call) =>
+					call.arguments.length === args.length &&
+					args.every((a, i) => argMatches(call.arguments[i], a)),
+			);
+			pass(
+				matched,
+				`Expected function to have been called with ${JSON.stringify(args)}`,
+			);
 		},
 		get not(): Matchers {
 			return makeMatchers(actual, !negated);
@@ -212,26 +262,46 @@ function makeAsyncRejectsMatchers(actual: unknown): AsyncMatchers {
 		async toThrow(msgOrErr) {
 			try {
 				await (actual as Promise<unknown>);
-				throw new assert.AssertionError({ message: "Expected promise to reject but it resolved", operator: "expect" });
+				throw new assert.AssertionError({
+					message: "Expected promise to reject but it resolved",
+					operator: "expect",
+				});
 			} catch (err) {
-				if (err instanceof assert.AssertionError && err.message.includes("but it resolved")) throw err;
+				if (
+					err instanceof assert.AssertionError &&
+					err.message.includes("but it resolved")
+				)
+					throw err;
 				if (msgOrErr !== undefined) {
 					const errMsg = err instanceof Error ? err.message : String(err);
 					if (typeof msgOrErr === "string") {
-						assert.ok(errMsg.includes(msgOrErr), `Expected error "${errMsg}" to include "${msgOrErr}"`);
+						assert.ok(
+							errMsg.includes(msgOrErr),
+							`Expected error "${errMsg}" to include "${msgOrErr}"`,
+						);
 					} else if (msgOrErr instanceof RegExp) {
-						assert.ok(msgOrErr.test(errMsg), `Expected error "${errMsg}" to match ${msgOrErr}`);
+						assert.ok(
+							msgOrErr.test(errMsg),
+							`Expected error "${errMsg}" to match ${msgOrErr}`,
+						);
 					}
 				}
 			}
 		},
 		async toBeUndefined() {
 			const result = await (actual as Promise<unknown>);
-			assert.strictEqual(result, undefined, `Expected resolved value to be undefined, got ${result}`);
+			assert.strictEqual(
+				result,
+				undefined,
+				`Expected resolved value to be undefined, got ${result}`,
+			);
 		},
 		async toBe(expected) {
 			const result = await (actual as Promise<unknown>);
-			assert.ok(Object.is(result, expected), `Expected resolved ${JSON.stringify(result)} to be ${JSON.stringify(expected)}`);
+			assert.ok(
+				Object.is(result, expected),
+				`Expected resolved ${JSON.stringify(result)} to be ${JSON.stringify(expected)}`,
+			);
 		},
 		async toEqual(expected) {
 			const result = await (actual as Promise<unknown>);
@@ -243,15 +313,25 @@ function makeAsyncRejectsMatchers(actual: unknown): AsyncMatchers {
 function makeAsyncResolvesMatchers(actual: unknown): AsyncMatchers {
 	return {
 		async toThrow() {
-			throw new assert.AssertionError({ message: "resolves.toThrow() is not meaningful", operator: "expect" });
+			throw new assert.AssertionError({
+				message: "resolves.toThrow() is not meaningful",
+				operator: "expect",
+			});
 		},
 		async toBeUndefined() {
 			const result = await (actual as Promise<unknown>);
-			assert.strictEqual(result, undefined, `Expected resolved value to be undefined, got ${result}`);
+			assert.strictEqual(
+				result,
+				undefined,
+				`Expected resolved value to be undefined, got ${result}`,
+			);
 		},
 		async toBe(expected) {
 			const result = await (actual as Promise<unknown>);
-			assert.ok(Object.is(result, expected), `Expected resolved ${JSON.stringify(result)} to be ${JSON.stringify(expected)}`);
+			assert.ok(
+				Object.is(result, expected),
+				`Expected resolved ${JSON.stringify(result)} to be ${JSON.stringify(expected)}`,
+			);
 		},
 		async toEqual(expected) {
 			const result = await (actual as Promise<unknown>);
@@ -274,36 +354,50 @@ export const expect: ExpectFn = Object.assign(
 		return matchers;
 	},
 	{
-		any: (ctor: Function): ExpectAnyMatcher => ({ [EXPECT_ANY_MARKER]: true, constructor: ctor }),
+		any: (ctor: Function): ExpectAnyMatcher => ({
+			[EXPECT_ANY_MARKER]: true,
+			constructor: ctor,
+		}),
 		arrayContaining: (arr: unknown[]): unknown => arr,
 	},
 );
+
 import { spawnSync } from "node:child_process";
 
 /**
  * A wrapper around node's spawnSync that captures both stdout and stderr
  * and returns an object mimicking Bun's $ result, but also supports toString() for backward compatibility.
  */
-export function execSync(command: string, options: any = {}): { stdout: string, stderr: string, combined: string, exitCode: number, text(): string, toString(): string } {
-    const result = spawnSync("bash", ["-c", command], {
-        ...options,
-        encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'pipe']
-    });
+export function execSync(
+	command: string,
+	options: any = {},
+): {
+	stdout: string;
+	stderr: string;
+	combined: string;
+	exitCode: number;
+	text(): string;
+	toString(): string;
+} {
+	const result = spawnSync("bash", ["-c", command], {
+		...options,
+		encoding: "utf-8",
+		stdio: ["ignore", "pipe", "pipe"],
+	});
 
-    const stdout = result.stdout || "";
-    const stderr = result.stderr || "";
-    const combined = stdout + stderr;
-    const exitCode = result.status ?? (result.error ? 1 : 0);
+	const stdout = result.stdout || "";
+	const stderr = result.stderr || "";
+	const combined = stdout + stderr;
+	const exitCode = result.status ?? (result.error ? 1 : 0);
 
-    return {
-        stdout,
-        stderr,
-        combined,
-        exitCode,
-        text: () => stdout.trim(),
-        toString: () => combined
-    };
+	return {
+		stdout,
+		stderr,
+		combined,
+		exitCode,
+		text: () => stdout.trim(),
+		toString: () => combined,
+	};
 }
 
 /**
@@ -312,18 +406,18 @@ export function execSync(command: string, options: any = {}): { stdout: string, 
  * control characters; otherwise wraps in double quotes if it contains spaces.
  */
 function shellQuoteArg(arg: string): string {
-    if (/[\n\r\t\x00-\x1f]/.test(arg)) {
-        return "$'" + arg
-            .replace(/\\/g, '\\\\')
-            .replace(/'/g, "\\'")
-            .replace(/\n/g, '\\n')
-            .replace(/\r/g, '\\r')
-            .replace(/\t/g, '\\t') + "'";
-    }
-    if (/[ "']/.test(arg)) {
-        return '"' + arg.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
-    }
-    return arg;
+	if (/[\n\r\t\x00-\x1f]/.test(arg)) {
+		return `$'${arg
+			.replace(/\\/g, "\\\\")
+			.replace(/'/g, "\\'")
+			.replace(/\n/g, "\\n")
+			.replace(/\r/g, "\\r")
+			.replace(/\t/g, "\\t")}'`;
+	}
+	if (/[ "']/.test(arg)) {
+		return `"${arg.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+	}
+	return arg;
 }
 
 /**
@@ -334,10 +428,10 @@ function shellQuoteArg(arg: string): string {
  *   execSync(`node --experimental-strip-types ${buildCliCommand([CLI_PATH, "proposal", "create", title])}`, opts)
  */
 export function buildCliCommand(args: (string | undefined | null)[]): string {
-    return args
-        .filter((a): a is string => a !== null && a !== undefined)
-        .map(shellQuoteArg)
-        .join(' ');
+	return args
+		.filter((a): a is string => a !== null && a !== undefined)
+		.map(shellQuoteArg)
+		.join(" ");
 }
 
 /**
@@ -362,7 +456,11 @@ export function sleep(ms: number): Promise<void> {
  * Retry utility for operations that might fail intermittently
  * Particularly useful for Windows file operations
  */
-export async function retry<T>(fn: () => Promise<T>, maxAttempts = 3, delay = 100): Promise<T> {
+export async function retry<T>(
+	fn: () => Promise<T>,
+	maxAttempts = 3,
+	delay = 100,
+): Promise<T> {
 	let lastError: Error | undefined;
 
 	for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -412,6 +510,9 @@ export function getPlatformTimeout(baseTimeout = 5000): number {
  * Gets the exit code from a spawnSync result, handling Windows quirks
  * On Windows, result.status can be undefined even for successful processes
  */
-export function getExitCode(result: { status: number | null; error?: Error }): number {
+export function getExitCode(result: {
+	status: number | null;
+	error?: Error;
+}): number {
 	return result.status ?? (result.error ? 1 : 0);
 }

@@ -11,8 +11,11 @@ import { registerWorkflowResources } from "../../src/mcp/resources/workflow/inde
 import { createMcpServer, McpServer } from "../../src/mcp/server.ts";
 import { registerProposalTools } from "../../src/mcp/tools/proposals/index.ts";
 import { registerWorkflowTools } from "../../src/mcp/tools/workflow/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync,
+import {
+	createUniqueTestDir,
+	execSync,
 	expect,
+	safeCleanup,
 } from "../support/test-utils.ts";
 
 // Helpers to extract text from MCP responses (handles union types)
@@ -20,7 +23,10 @@ const getText = (content: unknown[] | undefined, index = 0): string => {
 	const item = content?.[index] as { text?: string } | undefined;
 	return item?.text ?? "";
 };
-const getContentsText = (contents: unknown[] | undefined, index = 0): string => {
+const getContentsText = (
+	contents: unknown[] | undefined,
+	index = 0,
+): string => {
 	const item = contents?.[index] as { text?: string } | undefined;
 	return item?.text ?? "";
 };
@@ -75,7 +81,8 @@ describe("McpServer bootstrap", () => {
 		const prompts = await server.testInterface.listPrompts();
 		assert.deepStrictEqual(prompts.prompts, []);
 
-		const resourceTemplates = await server.testInterface.listResourceTemplates();
+		const resourceTemplates =
+			await server.testInterface.listResourceTemplates();
 		assert.deepStrictEqual(resourceTemplates.resourceTemplates, []);
 
 		await server.stop();
@@ -188,9 +195,12 @@ describe("McpServer bootstrap", () => {
 			"roadmap://workflow/proposal-finalization",
 			"roadmap://skills/chat",
 		]);
-		assert.ok(MCP_WORKFLOW_OVERVIEW.includes("## agentRoadmap.md Overview (MCP)"));
+		assert.ok(
+			MCP_WORKFLOW_OVERVIEW.includes("## agentRoadmap.md Overview (MCP)"),
+		);
 
-		const resourceTemplates = await server.testInterface.listResourceTemplates();
+		const resourceTemplates =
+			await server.testInterface.listResourceTemplates();
 		assert.deepStrictEqual(resourceTemplates.resourceTemplates, []);
 
 		await server.stop();
@@ -250,9 +260,12 @@ describe("McpServer bootstrap", () => {
 			"roadmap://workflow/proposal-finalization",
 			"roadmap://skills/chat",
 		]);
-		assert.ok(MCP_WORKFLOW_OVERVIEW.includes("## agentRoadmap.md Overview (MCP)"));
+		assert.ok(
+			MCP_WORKFLOW_OVERVIEW.includes("## agentRoadmap.md Overview (MCP)"),
+		);
 
-		const resourceTemplates = await server.testInterface.listResourceTemplates();
+		const resourceTemplates =
+			await server.testInterface.listResourceTemplates();
 		assert.deepStrictEqual(resourceTemplates.resourceTemplates, []);
 
 		await server.connect();

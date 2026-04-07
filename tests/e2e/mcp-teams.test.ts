@@ -2,7 +2,11 @@ import assert from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { McpServer } from "../../src/mcp/server.ts";
 import { registerTeamTools } from "../../src/mcp/tools/teams/index.ts";
-import { createUniqueTestDir, safeCleanup, execSync } from "../support/test-utils.ts";
+import {
+	createUniqueTestDir,
+	execSync,
+	safeCleanup,
+} from "../support/test-utils.ts";
 
 const getText = (content: unknown[] | undefined): string => {
 	const item = content?.[0] as { text?: string } | undefined;
@@ -25,7 +29,11 @@ describe("MCP team tools", () => {
 	});
 
 	afterEach(async () => {
-		try { await mcpServer.stop(); } catch { /* */ }
+		try {
+			await mcpServer.stop();
+		} catch {
+			/* */
+		}
 		await safeCleanup(TEST_DIR);
 	});
 
@@ -57,15 +65,24 @@ describe("MCP team tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("engineering") || text.includes("created"), `Unexpected: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("engineering") || text.includes("created"),
+			`Unexpected: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("creates multiple teams and lists them", async () => {
 		await mcpServer.testInterface.callTool({
-			params: { name: "team_create", arguments: { name: "frontend", description: "Frontend squad" } },
+			params: {
+				name: "team_create",
+				arguments: { name: "frontend", description: "Frontend squad" },
+			},
 		});
 		await mcpServer.testInterface.callTool({
-			params: { name: "team_create", arguments: { name: "backend", description: "Backend squad" } },
+			params: {
+				name: "team_create",
+				arguments: { name: "backend", description: "Backend squad" },
+			},
 		});
 
 		const result = await mcpServer.testInterface.callTool({
@@ -78,7 +95,10 @@ describe("MCP team tools", () => {
 
 	it("registers an agent to a team", async () => {
 		await mcpServer.testInterface.callTool({
-			params: { name: "team_create", arguments: { name: "alpha", description: "Alpha team" } },
+			params: {
+				name: "team_create",
+				arguments: { name: "alpha", description: "Alpha team" },
+			},
 		});
 
 		const result = await mcpServer.testInterface.callTool({
@@ -92,31 +112,50 @@ describe("MCP team tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("alpha") || text.includes("dev-agent") || text.includes("registered"),
-			`Unexpected: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("alpha") ||
+				text.includes("dev-agent") ||
+				text.includes("registered"),
+			`Unexpected: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("shows team roster with members", async () => {
 		await mcpServer.testInterface.callTool({
-			params: { name: "team_create", arguments: { name: "bravo", description: "Bravo team" } },
+			params: {
+				name: "team_create",
+				arguments: { name: "bravo", description: "Bravo team" },
+			},
 		});
 		await mcpServer.testInterface.callTool({
-			params: { name: "team_register_agent", arguments: { team: "bravo", agent_name: "member-1", role: "qa" } },
+			params: {
+				name: "team_register_agent",
+				arguments: { team: "bravo", agent_name: "member-1", role: "qa" },
+			},
 		});
 		await mcpServer.testInterface.callTool({
-			params: { name: "team_register_agent", arguments: { team: "bravo", agent_name: "member-2", role: "dev" } },
+			params: {
+				name: "team_register_agent",
+				arguments: { team: "bravo", agent_name: "member-2", role: "dev" },
+			},
 		});
 
 		const result = await mcpServer.testInterface.callTool({
 			params: { name: "team_roster", arguments: { team: "bravo" } },
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("member-1") && text.includes("member-2"), `Missing members: ${text.slice(0, 300)}`);
+		assert.ok(
+			text.includes("member-1") && text.includes("member-2"),
+			`Missing members: ${text.slice(0, 300)}`,
+		);
 	});
 
 	it("declines a team membership", async () => {
 		await mcpServer.testInterface.callTool({
-			params: { name: "team_create", arguments: { name: "optional-team", description: "Optional" } },
+			params: {
+				name: "team_create",
+				arguments: { name: "optional-team", description: "Optional" },
+			},
 		});
 
 		const result = await mcpServer.testInterface.callTool({
@@ -129,12 +168,18 @@ describe("MCP team tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.length > 5, `Expected decline output: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.length > 5,
+			`Expected decline output: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("dissolves a team", async () => {
 		await mcpServer.testInterface.callTool({
-			params: { name: "team_create", arguments: { name: "temp-team", description: "Temporary" } },
+			params: {
+				name: "team_create",
+				arguments: { name: "temp-team", description: "Temporary" },
+			},
 		});
 
 		const result = await mcpServer.testInterface.callTool({
@@ -144,13 +189,20 @@ describe("MCP team tools", () => {
 			},
 		});
 		const text = getText(result.content);
-		assert.ok(text.includes("temp-team") || text.includes("dissolved") || text.includes("deleted"),
-			`Unexpected: ${text.slice(0, 200)}`);
+		assert.ok(
+			text.includes("temp-team") ||
+				text.includes("dissolved") ||
+				text.includes("deleted"),
+			`Unexpected: ${text.slice(0, 200)}`,
+		);
 	});
 
 	it("accepts a team membership invitation", async () => {
 		await mcpServer.testInterface.callTool({
-			params: { name: "team_create", arguments: { name: "accept-team", description: "Accept test" } },
+			params: {
+				name: "team_create",
+				arguments: { name: "accept-team", description: "Accept test" },
+			},
 		});
 
 		const result = await mcpServer.testInterface.callTool({

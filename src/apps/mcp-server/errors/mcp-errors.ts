@@ -7,11 +7,7 @@ export class McpError extends Error {
 	public code: string;
 	public details?: unknown;
 
-	constructor(
-		message: string,
-		code: string,
-		details?: unknown,
-	) {
+	constructor(message: string, code: string, details?: unknown) {
 		super(message);
 		this.code = code;
 		this.details = details;
@@ -58,7 +54,11 @@ export class McpInternalError extends McpError {
 /**
  * Formats MCP errors into standardized tool responses
  */
-function buildErrorResult(code: string, message: string, details?: unknown): CallToolResult {
+function buildErrorResult(
+	code: string,
+	message: string,
+	details?: unknown,
+): CallToolResult {
 	const includeDetails = !!process.env.DEBUG;
 	const structured = details !== undefined ? { code, details } : { code };
 	return {
@@ -84,7 +84,12 @@ export function handleMcpError(error: unknown): CallToolResult {
 		content: [
 			{
 				type: "text",
-				text: formatErrorMarkdown("INTERNAL_ERROR", "An unexpected error occurred", error, !!process.env.DEBUG),
+				text: formatErrorMarkdown(
+					"INTERNAL_ERROR",
+					"An unexpected error occurred",
+					error,
+					!!process.env.DEBUG,
+				),
 			},
 		],
 		isError: true,
@@ -116,12 +121,18 @@ export function handleMcpSuccess(data: unknown): CallToolResult {
 /**
  * Format error messages in markdown for consistent MCP error responses
  */
-export function formatErrorMarkdown(code: string, message: string, details?: unknown, includeDetails = false): string {
+export function formatErrorMarkdown(
+	code: string,
+	message: string,
+	details?: unknown,
+	includeDetails = false,
+): string {
 	// Include details only when explicitly requested (e.g., debug mode)
 	if (includeDetails && details) {
 		let result = `${code}: ${message}`;
 
-		const detailsText = typeof details === "string" ? details : JSON.stringify(details, null, 2);
+		const detailsText =
+			typeof details === "string" ? details : JSON.stringify(details, null, 2);
 		result += `\n  ${detailsText}`;
 
 		return result;

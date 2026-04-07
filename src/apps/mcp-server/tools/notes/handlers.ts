@@ -1,6 +1,5 @@
-import type { McpServer } from "../../server.ts";
-import type { CallToolResult } from "../../types.ts";
 import { query } from "../../../../postgres/pool.ts";
+import type { CallToolResult } from "../../types.ts";
 
 type NoteType = "discussion" | "review" | "decision" | "question" | "general";
 
@@ -53,7 +52,9 @@ function inferNoteType(contextPrefix: string | null): NoteType {
 		return "general";
 	}
 
-	const match = CONTEXT_TO_NOTE_TYPE.find((entry) => contextPrefix.startsWith(entry.prefix));
+	const match = CONTEXT_TO_NOTE_TYPE.find((entry) =>
+		contextPrefix.startsWith(entry.prefix),
+	);
 	return match?.type ?? "general";
 }
 
@@ -63,9 +64,9 @@ function formatTimestamp(value: string | Date): string {
 }
 
 export class NoteHandlers {
-	constructor(_core: McpServer, _projectRoot: string) {}
-
-	private async resolveProposalRowId(proposalId: string): Promise<number | null> {
+	private async resolveProposalRowId(
+		proposalId: string,
+	): Promise<number | null> {
 		const { rows } = await query<ProposalIdRow>(
 			`SELECT id
 			 FROM proposal
@@ -87,13 +88,16 @@ export class NoteHandlers {
 			const proposalRowId = await this.resolveProposalRowId(args.proposal_id);
 			if (!proposalRowId) {
 				return {
-					content: [{ type: "text", text: `Proposal ${args.proposal_id} not found.` }],
+					content: [
+						{ type: "text", text: `Proposal ${args.proposal_id} not found.` },
+					],
 				};
 			}
 
 			const author = args.author || "system";
 			const noteType = (args.note_type as NoteType | undefined) ?? "general";
-			const contextPrefix = NOTE_TYPE_TO_CONTEXT[noteType] ?? NOTE_TYPE_TO_CONTEXT.general;
+			const contextPrefix =
+				NOTE_TYPE_TO_CONTEXT[noteType] ?? NOTE_TYPE_TO_CONTEXT.general;
 			const { rows } = await query<{ id: number }>(
 				`INSERT INTO proposal_discussions (proposal_id, author_identity, body, context_prefix)
 				 VALUES ($1, $2, $3, $4)
@@ -123,7 +127,9 @@ export class NoteHandlers {
 			const proposalRowId = await this.resolveProposalRowId(args.proposal_id);
 			if (!proposalRowId) {
 				return {
-					content: [{ type: "text", text: `Proposal ${args.proposal_id} not found.` }],
+					content: [
+						{ type: "text", text: `Proposal ${args.proposal_id} not found.` },
+					],
 				};
 			}
 
@@ -133,7 +139,10 @@ export class NoteHandlers {
 			           WHERE proposal_id = $1`;
 
 			if (args.note_type) {
-				params.push(NOTE_TYPE_TO_CONTEXT[(args.note_type as NoteType) ?? "general"] ?? NOTE_TYPE_TO_CONTEXT.general);
+				params.push(
+					NOTE_TYPE_TO_CONTEXT[(args.note_type as NoteType) ?? "general"] ??
+						NOTE_TYPE_TO_CONTEXT.general,
+				);
 				sql += ` AND context_prefix = $${params.length}`;
 			}
 
@@ -143,7 +152,12 @@ export class NoteHandlers {
 			const { rows } = await query<DiscussionRow>(sql, params);
 			if (!rows.length) {
 				return {
-					content: [{ type: "text", text: `📝 No discussions found for ${args.proposal_id}` }],
+					content: [
+						{
+							type: "text",
+							text: `📝 No discussions found for ${args.proposal_id}`,
+						},
+					],
 				};
 			}
 
@@ -183,7 +197,9 @@ export class NoteHandlers {
 			}
 
 			return {
-				content: [{ type: "text", text: `✅ Discussion ${args.note_id} deleted` }],
+				content: [
+					{ type: "text", text: `✅ Discussion ${args.note_id} deleted` },
+				],
 			};
 		} catch (error) {
 			return errorResult("Failed to delete discussion", error);
@@ -198,7 +214,9 @@ export class NoteHandlers {
 			const proposalRowId = await this.resolveProposalRowId(args.proposal_id);
 			if (!proposalRowId) {
 				return {
-					content: [{ type: "text", text: `Proposal ${args.proposal_id} not found.` }],
+					content: [
+						{ type: "text", text: `Proposal ${args.proposal_id} not found.` },
+					],
 				};
 			}
 
@@ -208,7 +226,10 @@ export class NoteHandlers {
 			           WHERE proposal_id = $1`;
 
 			if (args.note_type) {
-				params.push(NOTE_TYPE_TO_CONTEXT[(args.note_type as NoteType) ?? "general"] ?? NOTE_TYPE_TO_CONTEXT.general);
+				params.push(
+					NOTE_TYPE_TO_CONTEXT[(args.note_type as NoteType) ?? "general"] ??
+						NOTE_TYPE_TO_CONTEXT.general,
+				);
 				sql += ` AND context_prefix = $${params.length}`;
 			}
 
@@ -217,11 +238,18 @@ export class NoteHandlers {
 			const { rows } = await query<DiscussionRow>(sql, params);
 			if (!rows.length) {
 				return {
-					content: [{ type: "text", text: `📝 No discussion notes for ${args.proposal_id}` }],
+					content: [
+						{
+							type: "text",
+							text: `📝 No discussion notes for ${args.proposal_id}`,
+						},
+					],
 				};
 			}
 
-			const lines = [`## 💬 Discussion: ${args.proposal_id} (${rows.length} notes)\n`];
+			const lines = [
+				`## 💬 Discussion: ${args.proposal_id} (${rows.length} notes)\n`,
+			];
 			for (const note of rows) {
 				const noteType = inferNoteType(note.context_prefix);
 				lines.push(

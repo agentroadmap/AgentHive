@@ -46,7 +46,13 @@ async function getCompletionScript(shell: Shell): Promise<string> {
 		fish: "roadmap.fish",
 	};
 
-	const scriptPath = join(__dirname, "..", "..", "completions", scriptFiles[shell]);
+	const scriptPath = join(
+		__dirname,
+		"..",
+		"..",
+		"completions",
+		scriptFiles[shell],
+	);
 
 	try {
 		if (existsSync(scriptPath)) {
@@ -258,7 +264,9 @@ exec fish
 /**
  * Install completion script
  */
-export async function installCompletion(shell?: string): Promise<CompletionInstallResult> {
+export async function installCompletion(
+	shell?: string,
+): Promise<CompletionInstallResult> {
 	// Detect shell if not provided
 	const targetShell = shell as Shell | undefined;
 	const detectedShell = targetShell || detectShell();
@@ -275,7 +283,9 @@ export async function installCompletion(shell?: string): Promise<CompletionInsta
 	}
 
 	if (!["bash", "zsh", "fish"].includes(detectedShell)) {
-		throw new Error(`Unsupported shell: ${detectedShell}\nSupported shells: bash, zsh, fish`);
+		throw new Error(
+			`Unsupported shell: ${detectedShell}\nSupported shells: bash, zsh, fish`,
+		);
 	}
 
 	// Get completion script content
@@ -328,7 +338,9 @@ export async function installCompletion(shell?: string): Promise<CompletionInsta
  * Register the completion command and subcommands
  */
 export function registerCompletionCommand(program: Command): void {
-	const completionCmd = program.command("completion").description("manage shell completion scripts");
+	const completionCmd = program
+		.command("completion")
+		.description("manage shell completion scripts");
 
 	// Hidden command used by shell completion scripts
 	completionCmd

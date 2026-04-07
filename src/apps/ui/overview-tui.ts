@@ -1,13 +1,19 @@
+import type { ProposalStatistics } from "../../core/infrastructure/statistics.ts";
+import {
+	formatVersionLabel,
+	getVersionInfo,
+} from "../../shared/utils/version.ts";
 import { box } from "./blessed.ts";
-import type { ProposalStatistics } from '../../core/infrastructure/statistics.ts';
 import { getStatusIcon } from "./status-icon.ts";
 import { createScreen } from "./tui.ts";
-import { getVersionInfo, formatVersionLabel } from "../../shared/utils/version.ts";
 
 /**
  * Render the project overview in an interactive TUI
  */
-export async function renderOverviewTui(statistics: ProposalStatistics, projectName: string): Promise<void> {
+export async function renderOverviewTui(
+	statistics: ProposalStatistics,
+	projectName: string,
+): Promise<void> {
 	const versionInfo = await getVersionInfo();
 	const versionLabel = formatVersionLabel(versionInfo);
 
@@ -64,7 +70,10 @@ export async function renderOverviewTui(statistics: ProposalStatistics, projectN
 		let statusContent = "";
 		for (const [status, count] of statistics.statusCounts) {
 			const icon = getStatusIcon(status);
-			const percentage = statistics.totalProposals > 0 ? Math.round((count / statistics.totalProposals) * 100) : 0;
+			const percentage =
+				statistics.totalProposals > 0
+					? Math.round((count / statistics.totalProposals) * 100)
+					: 0;
 			statusContent += `  ${icon} {bold}${status}:{/bold} ${count} proposals (${percentage}%)\n`;
 		}
 		statusContent += `\n  {cyan-fg}Total Proposals:{/cyan-fg} ${statistics.totalProposals}\n`;
@@ -103,10 +112,16 @@ export async function renderOverviewTui(statistics: ProposalStatistics, projectN
 		};
 		for (const [priority, count] of statistics.priorityCounts) {
 			if (count > 0) {
-				const color = priorityColors[priority as keyof typeof priorityColors] || "white";
-				const percentage = statistics.totalProposals > 0 ? Math.round((count / statistics.totalProposals) * 100) : 0;
+				const color =
+					priorityColors[priority as keyof typeof priorityColors] || "white";
+				const percentage =
+					statistics.totalProposals > 0
+						? Math.round((count / statistics.totalProposals) * 100)
+						: 0;
 				const displayPriority =
-					priority === "none" ? "No Priority" : priority.charAt(0).toUpperCase() + priority.slice(1);
+					priority === "none"
+						? "No Priority"
+						: priority.charAt(0).toUpperCase() + priority.slice(1);
 				priorityContent += `  {${color}-fg}${displayPriority}:{/${color}-fg} ${count} proposals (${percentage}%)\n`;
 			}
 		}
@@ -138,7 +153,8 @@ export async function renderOverviewTui(statistics: ProposalStatistics, projectN
 				activityContent += `  ${proposal.id} - ${proposal.title.substring(0, 40)}${proposal.title.length > 40 ? "..." : ""}\n`;
 			}
 		} else {
-			activityContent += "  {gray-fg}No proposals created in the last 7 days{/gray-fg}\n";
+			activityContent +=
+				"  {gray-fg}No proposals created in the last 7 days{/gray-fg}\n";
 		}
 
 		activityContent += "\n{bold}Recently Updated:{/bold}\n";
@@ -147,7 +163,8 @@ export async function renderOverviewTui(statistics: ProposalStatistics, projectN
 				activityContent += `  ${proposal.id} - ${proposal.title.substring(0, 40)}${proposal.title.length > 40 ? "..." : ""}\n`;
 			}
 		} else {
-			activityContent += "  {gray-fg}No proposals updated in the last 7 days{/gray-fg}\n";
+			activityContent +=
+				"  {gray-fg}No proposals updated in the last 7 days{/gray-fg}\n";
 		}
 		activityBox.setContent(activityContent);
 
@@ -173,7 +190,8 @@ export async function renderOverviewTui(statistics: ProposalStatistics, projectN
 
 		let healthContent = `{bold}Average Proposal Age:{/bold} ${statistics.projectHealth.averageProposalAge} days\n\n`;
 
-		healthContent += "{bold}Stale Proposals:{/bold} {gray-fg}(>30 days without updates){/gray-fg}\n";
+		healthContent +=
+			"{bold}Stale Proposals:{/bold} {gray-fg}(>30 days without updates){/gray-fg}\n";
 		if (statistics.projectHealth.staleProposals.length > 0) {
 			for (const proposal of statistics.projectHealth.staleProposals) {
 				healthContent += `  {yellow-fg}${proposal.id}{/yellow-fg} - ${proposal.title.substring(0, 35)}${proposal.title.length > 35 ? "..." : ""}\n`;
@@ -182,7 +200,8 @@ export async function renderOverviewTui(statistics: ProposalStatistics, projectN
 			healthContent += "  {green-fg}No stale proposals{/green-fg}\n";
 		}
 
-		healthContent += "\n{bold}Blocked Proposals:{/bold} {gray-fg}(waiting on dependencies){/gray-fg}\n";
+		healthContent +=
+			"\n{bold}Blocked Proposals:{/bold} {gray-fg}(waiting on dependencies){/gray-fg}\n";
 		if (statistics.projectHealth.blockedProposals.length > 0) {
 			for (const proposal of statistics.projectHealth.blockedProposals) {
 				healthContent += `  {red-fg}${proposal.id}{/red-fg} - ${proposal.title.substring(0, 35)}${proposal.title.length > 35 ? "..." : ""}\n`;
@@ -222,14 +241,21 @@ export async function renderOverviewTui(statistics: ProposalStatistics, projectN
 /**
  * Render plain text overview for non-TTY environments
  */
-function renderPlainTextOverview(statistics: ProposalStatistics, projectName: string, versionLabel: string): void {
+function renderPlainTextOverview(
+	statistics: ProposalStatistics,
+	projectName: string,
+	versionLabel: string,
+): void {
 	console.log(`\n${projectName} - Project Overview`);
 	console.log(`Roadmap.md ${versionLabel}`);
 	console.log(`${"=".repeat(40)}\n`);
 
 	console.log("Status Overview:");
 	for (const [status, count] of statistics.statusCounts) {
-		const percentage = statistics.totalProposals > 0 ? Math.round((count / statistics.totalProposals) * 100) : 0;
+		const percentage =
+			statistics.totalProposals > 0
+				? Math.round((count / statistics.totalProposals) * 100)
+				: 0;
 		console.log(`  ${status}: ${count} proposals (${percentage}%)`);
 	}
 	console.log(`\n  Total Proposals: ${statistics.totalProposals}`);
@@ -241,9 +267,14 @@ function renderPlainTextOverview(statistics: ProposalStatistics, projectName: st
 	console.log("\nPriority Breakdown:");
 	for (const [priority, count] of statistics.priorityCounts) {
 		if (count > 0) {
-			const percentage = statistics.totalProposals > 0 ? Math.round((count / statistics.totalProposals) * 100) : 0;
+			const percentage =
+				statistics.totalProposals > 0
+					? Math.round((count / statistics.totalProposals) * 100)
+					: 0;
 			const displayPriority =
-				priority === "none" ? "No Priority" : priority.charAt(0).toUpperCase() + priority.slice(1);
+				priority === "none"
+					? "No Priority"
+					: priority.charAt(0).toUpperCase() + priority.slice(1);
 			console.log(`  ${displayPriority}: ${count} proposals (${percentage}%)`);
 		}
 	}
@@ -268,7 +299,9 @@ function renderPlainTextOverview(statistics: ProposalStatistics, projectName: st
 	}
 
 	console.log("\nProject Health:");
-	console.log(`  Average Proposal Age: ${statistics.projectHealth.averageProposalAge} days`);
+	console.log(
+		`  Average Proposal Age: ${statistics.projectHealth.averageProposalAge} days`,
+	);
 
 	console.log("\n  Stale Proposals (>30 days without updates):");
 	if (statistics.projectHealth.staleProposals.length > 0) {

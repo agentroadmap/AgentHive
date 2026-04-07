@@ -9,15 +9,19 @@
  *   - Error recovery
  */
 
-import { describe, it } from "node:test";
 import assert from "node:assert";
+import { describe, it } from "node:test";
 import type { Proposal } from "../../src/types/index.ts";
 
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
 
-function createProposal(id: string, status: string, overrides: Partial<Proposal> = {}): Proposal {
+function createProposal(
+	id: string,
+	status: string,
+	overrides: Partial<Proposal> = {},
+): Proposal {
 	return {
 		id,
 		title: `Title for ${id}`,
@@ -40,7 +44,12 @@ describe("Board - Large Proposal Lists", () => {
 		const proposals: Proposal[] = [];
 		for (let i = 0; i < 150; i++) {
 			const statuses = ["Proposal", "Draft", "Active", "Review", "Complete"];
-			proposals.push(createProposal(`proposal-${String(i).padStart(3, "0")}`, statuses[i % 5]));
+			proposals.push(
+				createProposal(
+					`proposal-${String(i).padStart(3, "0")}`,
+					statuses[i % 5],
+				),
+			);
 		}
 
 		// Group by status
@@ -59,7 +68,9 @@ describe("Board - Large Proposal Lists", () => {
 	it("handles 500 proposals efficiently", () => {
 		const proposals: Proposal[] = [];
 		for (let i = 0; i < 500; i++) {
-			proposals.push(createProposal(`proposal-${String(i).padStart(3, "0")}`, "Active"));
+			proposals.push(
+				createProposal(`proposal-${String(i).padStart(3, "0")}`, "Active"),
+			);
 		}
 
 		const start = Date.now();
@@ -114,16 +125,16 @@ describe("Board - Unicode & Special Characters", () => {
 			description: "Line 1\nLine 2\nLine 3",
 		});
 
-		assert.ok(proposal.description!.includes("\n"));
+		assert.ok(proposal.description?.includes("\n"));
 	});
 
 	it("handles special HTML-like characters", () => {
 		const proposal = createProposal("proposal-001", "Active", {
 			description: "<script>alert('xss')</script>",
-			title: "Proposal with <tags> & \"quotes\"",
+			title: 'Proposal with <tags> & "quotes"',
 		});
 
-		assert.ok(proposal.description!.includes("<script>"));
+		assert.ok(proposal.description?.includes("<script>"));
 		assert.ok(proposal.title.includes("<tags>"));
 		assert.ok(proposal.title.includes("&"));
 	});
@@ -159,12 +170,19 @@ describe("Board - Boundary Conditions", () => {
 
 	it("handles proposals with circular dependencies", () => {
 		const proposals = [
-			createProposal("proposal-001", "Active", { dependencies: ["proposal-002"] }),
-			createProposal("proposal-002", "Active", { dependencies: ["proposal-001"] }),
+			createProposal("proposal-001", "Active", {
+				dependencies: ["proposal-002"],
+			}),
+			createProposal("proposal-002", "Active", {
+				dependencies: ["proposal-001"],
+			}),
 		];
 
 		// Detect circular dependency
-		const hasCircular = (startId: string, visited = new Set<string>()): boolean => {
+		const hasCircular = (
+			startId: string,
+			visited = new Set<string>(),
+		): boolean => {
 			if (visited.has(startId)) return true;
 			visited.add(startId);
 			const proposal = proposals.find((s) => s.id === startId);
@@ -179,17 +197,22 @@ describe("Board - Boundary Conditions", () => {
 	});
 
 	it("handles proposals with many dependencies", () => {
-		const deps = Array.from({ length: 20 }, (_, i) => `proposal-${String(i).padStart(3, "0")}`);
-		const proposal = createProposal("proposal-100", "Active", { dependencies: deps });
+		const deps = Array.from(
+			{ length: 20 },
+			(_, i) => `proposal-${String(i).padStart(3, "0")}`,
+		);
+		const proposal = createProposal("proposal-100", "Active", {
+			dependencies: deps,
+		});
 
-		assert.strictEqual(proposal.dependencies!.length, 20);
+		assert.strictEqual(proposal.dependencies?.length, 20);
 	});
 
 	it("handles proposals with many labels", () => {
 		const labels = Array.from({ length: 50 }, (_, i) => `label-${i}`);
 		const proposal = createProposal("proposal-100", "Active", { labels });
 
-		assert.strictEqual(proposal.labels!.length, 50);
+		assert.strictEqual(proposal.labels?.length, 50);
 	});
 
 	it("handles proposals with empty arrays", () => {
@@ -240,7 +263,13 @@ describe("Board - Column Operations", () => {
 	});
 
 	it("preserves column order after proposal moves", () => {
-		const orderedStatuses = ["Proposal", "Draft", "Active", "Review", "Complete"];
+		const orderedStatuses = [
+			"Proposal",
+			"Draft",
+			"Active",
+			"Review",
+			"Complete",
+		];
 
 		// Move proposal from Active to Complete
 		const proposals: Proposal[] = [
@@ -306,7 +335,9 @@ describe("Board - Filter Edge Cases", () => {
 
 	it("search matches title partial", () => {
 		const proposals = [
-			createProposal("proposal-001", "Active", { title: "Fix authentication bug" }),
+			createProposal("proposal-001", "Active", {
+				title: "Fix authentication bug",
+			}),
 			createProposal("proposal-002", "Active", { title: "Add login feature" }),
 			createProposal("proposal-003", "Active", { title: "Update docs" }),
 		];
@@ -353,7 +384,9 @@ describe("Board - Concurrent Operations", () => {
 	it("handles bulk status update", () => {
 		const proposals: Proposal[] = [];
 		for (let i = 0; i < 100; i++) {
-			proposals.push(createProposal(`proposal-${String(i).padStart(3, "0")}`, "Active"));
+			proposals.push(
+				createProposal(`proposal-${String(i).padStart(3, "0")}`, "Active"),
+			);
 		}
 
 		// Bulk update all to Complete

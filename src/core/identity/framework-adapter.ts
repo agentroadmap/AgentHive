@@ -74,7 +74,14 @@ export interface CodingStandards {
 /** Testing pattern configuration */
 export interface TestingPatterns {
 	/** Test runner */
-	runner: "jest" | "vitest" | "mocha" | "playwright" | "cypress" | "node-test" | "none";
+	runner:
+		| "jest"
+		| "vitest"
+		| "mocha"
+		| "playwright"
+		| "cypress"
+		| "node-test"
+		| "none";
 	/** Test file patterns */
 	filePatterns: string[];
 	/** Test directory */
@@ -118,11 +125,19 @@ const FRAMEWORK_RULES: Array<{
 	{ framework: "nextjs", deps: ["next"], score: 10 },
 	{ framework: "nuxt", deps: ["nuxt", "@nuxt/kit"], score: 10 },
 	{ framework: "astro", deps: ["astro"], score: 10 },
-	{ framework: "remix", deps: ["@remix-run/react", "@remix-run/node"], score: 10 },
+	{
+		framework: "remix",
+		deps: ["@remix-run/react", "@remix-run/node"],
+		score: 10,
+	},
 	{ framework: "angular", deps: ["@angular/core", "@angular/cli"], score: 10 },
 	{ framework: "svelte", deps: ["svelte", "@sveltejs/kit"], score: 9 },
 	{ framework: "vue", deps: ["vue", "vue-router", "vuex", "pinia"], score: 8 },
-	{ framework: "react", deps: ["react", "react-dom", "react-router"], score: 8 },
+	{
+		framework: "react",
+		deps: ["react", "react-dom", "react-router"],
+		score: 8,
+	},
 	{ framework: "nest", deps: ["@nestjs/core", "@nestjs/common"], score: 10 },
 	{ framework: "fastify", deps: ["fastify", "@fastify/*"], score: 9 },
 	{ framework: "express", deps: ["express"], score: 8 },
@@ -178,7 +193,9 @@ export class FrameworkAdapterImpl {
 				if (dep.includes("*")) {
 					// Wildcard match (e.g., @fastify/*)
 					const prefix = dep.replace("/*", "");
-					const wildcardMatches = Object.keys(allDeps).filter((d) => d.startsWith(prefix));
+					const wildcardMatches = Object.keys(allDeps).filter((d) =>
+						d.startsWith(prefix),
+					);
 					if (wildcardMatches.length > 0) {
 						score += rule.score / rule.deps.length;
 						matches.push(...wildcardMatches);
@@ -199,18 +216,24 @@ export class FrameworkAdapterImpl {
 
 		// Detect TypeScript
 		const typescript = !!(
-			allDeps["typescript"] ||
+			allDeps.typescript ||
 			existsSync(join(this.projectRoot, "tsconfig.json")) ||
 			existsSync(join(this.projectRoot, "tsconfig.json"))
 		);
 
 		// Detect package manager
 		let packageManager: ProjectDetection["packageManager"] = "unknown";
-		if (existsSync(join(this.projectRoot, "pnpm-lock.yaml"))) packageManager = "pnpm";
-		else if (existsSync(join(this.projectRoot, "yarn.lock"))) packageManager = "yarn";
-		else if (existsSync(join(this.projectRoot, "bun.lockb")) || existsSync(join(this.projectRoot, "bun.lock")))
+		if (existsSync(join(this.projectRoot, "pnpm-lock.yaml")))
+			packageManager = "pnpm";
+		else if (existsSync(join(this.projectRoot, "yarn.lock")))
+			packageManager = "yarn";
+		else if (
+			existsSync(join(this.projectRoot, "bun.lockb")) ||
+			existsSync(join(this.projectRoot, "bun.lock"))
+		)
 			packageManager = "bun";
-		else if (existsSync(join(this.projectRoot, "package-lock.json"))) packageManager = "npm";
+		else if (existsSync(join(this.projectRoot, "package-lock.json")))
+			packageManager = "npm";
 
 		// Detect monorepo
 		const isMonorepo = !!(
@@ -257,8 +280,10 @@ export class FrameworkAdapterImpl {
 				standards.sourceConfig = biome;
 
 				if (biome.format?.indentStyle === "tab") standards.indentation = "tabs";
-				if (biome.format?.indentSize) standards.indentSize = biome.format.indentSize;
-				if (biome.format?.lineWidth) standards.lineLength = biome.format.lineWidth;
+				if (biome.format?.indentSize)
+					standards.indentSize = biome.format.indentSize;
+				if (biome.format?.lineWidth)
+					standards.lineLength = biome.format.lineWidth;
 				// Biome defaults match our defaults, so we're good
 			} catch {}
 		}
@@ -282,7 +307,8 @@ export class FrameworkAdapterImpl {
 						if (prettier.singleQuote) standards.quotes = "single";
 						if (prettier.tabWidth) standards.indentSize = prettier.tabWidth;
 						if (prettier.useTabs) standards.indentation = "tabs";
-						if (prettier.trailingComma === "none") standards.trailingComma = "none";
+						if (prettier.trailingComma === "none")
+							standards.trailingComma = "none";
 						if (prettier.printWidth) standards.lineLength = prettier.printWidth;
 					}
 				} catch {}
@@ -326,8 +352,12 @@ export class FrameworkAdapterImpl {
 	 * AC#4: Testing patterns adapt to project setup
 	 */
 	loadTestingPatterns(detection: ProjectDetection): TestingPatterns {
-		const deps = detection.packageJson.dependencies as Record<string, string> | undefined;
-		const devDeps = detection.packageJson.devDependencies as Record<string, string> | undefined;
+		const deps = detection.packageJson.dependencies as
+			| Record<string, string>
+			| undefined;
+		const devDeps = detection.packageJson.devDependencies as
+			| Record<string, string>
+			| undefined;
 		const allDeps: Record<string, string> = {
 			...(deps ?? {}),
 			...(devDeps ?? {}),
@@ -343,15 +373,25 @@ export class FrameworkAdapterImpl {
 		};
 
 		// Detect test runner (priority order)
-		if (allDeps["vitest"]) {
+		if (allDeps.vitest) {
 			patterns.runner = "vitest";
-			patterns.filePatterns = ["**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/*.spec.tsx"];
+			patterns.filePatterns = [
+				"**/*.test.ts",
+				"**/*.test.tsx",
+				"**/*.spec.ts",
+				"**/*.spec.tsx",
+			];
 			patterns.snapshots = true;
 			patterns.mocking = true;
 			patterns.coverage = "v8";
-		} else if (allDeps["jest"]) {
+		} else if (allDeps.jest) {
 			patterns.runner = "jest";
-			patterns.filePatterns = ["**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/*.spec.tsx"];
+			patterns.filePatterns = [
+				"**/*.test.ts",
+				"**/*.test.tsx",
+				"**/*.spec.ts",
+				"**/*.spec.tsx",
+			];
 			patterns.snapshots = true;
 			patterns.mocking = true;
 			patterns.coverage = "jest";
@@ -359,11 +399,11 @@ export class FrameworkAdapterImpl {
 			patterns.runner = "playwright";
 			patterns.filePatterns = ["**/*.spec.ts", "**/*.e2e.ts"];
 			patterns.testDir = "e2e";
-		} else if (allDeps["cypress"]) {
+		} else if (allDeps.cypress) {
 			patterns.runner = "cypress";
 			patterns.filePatterns = ["**/*.cy.ts", "**/*.cy.js"];
 			patterns.testDir = "cypress/e2e";
-		} else if (allDeps["mocha"]) {
+		} else if (allDeps.mocha) {
 			patterns.runner = "mocha";
 			patterns.filePatterns = ["**/*.test.ts", "**/*.spec.ts"];
 			patterns.mocking = true;
@@ -372,7 +412,10 @@ export class FrameworkAdapterImpl {
 		// Check if node:test is used (no external dep needed for Node.js)
 		if (patterns.runner === "none" && detection.typescript) {
 			// Check for test scripts
-			const scripts = (detection.packageJson.scripts ?? {}) as Record<string, string>;
+			const scripts = (detection.packageJson.scripts ?? {}) as Record<
+				string,
+				string
+			>;
 			if (scripts.test?.includes("node --test")) {
 				patterns.runner = "node-test";
 				patterns.filePatterns = ["**/*.test.ts", "**/*.test.js"];
@@ -380,7 +423,13 @@ export class FrameworkAdapterImpl {
 		}
 
 		// Check for test directory existence
-		const possibleTestDirs = ["test", "tests", "__tests__", "spec", "__mocks__"];
+		const possibleTestDirs = [
+			"test",
+			"tests",
+			"__tests__",
+			"spec",
+			"__mocks__",
+		];
 		for (const dir of possibleTestDirs) {
 			if (existsSync(join(this.projectRoot, dir))) {
 				patterns.testDir = dir;
@@ -400,9 +449,15 @@ export class FrameworkAdapterImpl {
 		const jsxExt = isTS ? ".tsx" : ".jsx";
 
 		// Frontend frameworks use JSX/TSX
-		const isFrontend = ["react", "vue", "svelte", "nextjs", "nuxt", "astro", "remix"].includes(
-			detection.framework,
-		);
+		const isFrontend = [
+			"react",
+			"vue",
+			"svelte",
+			"nextjs",
+			"nuxt",
+			"astro",
+			"remix",
+		].includes(detection.framework);
 
 		const source = isFrontend ? [jsxExt, ext] : [ext];
 		const test = [`.test${ext}`, `.spec${ext}`];
@@ -429,7 +484,10 @@ export class FrameworkAdapterImpl {
 		const extensions = this.getExtensions(detection);
 
 		// Extract scripts from package.json
-		const scripts = (detection.packageJson.scripts ?? {}) as Record<string, string>;
+		const scripts = (detection.packageJson.scripts ?? {}) as Record<
+			string,
+			string
+		>;
 
 		this.cachedAdapter = {
 			version: FRAMEWORK_ADAPTER_VERSION,
@@ -464,6 +522,8 @@ export class FrameworkAdapterImpl {
 /**
  * Create a framework adapter for a project.
  */
-export function createFrameworkAdapter(projectRoot: string): FrameworkAdapterImpl {
+export function createFrameworkAdapter(
+	projectRoot: string,
+): FrameworkAdapterImpl {
 	return new FrameworkAdapterImpl(projectRoot);
 }

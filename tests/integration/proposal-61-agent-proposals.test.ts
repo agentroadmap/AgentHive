@@ -9,17 +9,17 @@
  * AC#6: Proposal history preserved for retrospective analysis
  */
 
-import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { beforeEach, describe, it } from "node:test";
 import {
 	AgentProposalSystem,
+	type ComplexityEstimate,
 	createApproach,
 	createComplexityEstimate,
 	type ImplementationApproach,
-	type ComplexityEstimate,
 } from "../../src/core/collaboration/agent-proposals.ts";
 
 describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
@@ -33,12 +33,16 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 
 	// Helper functions
 	function createTestApproach(): ImplementationApproach {
-		return createApproach("new-feature", "Build the feature using a new module", {
-			filesAffected: ["src/core/feature.ts", "src/test/feature.test.ts"],
-			dependencies: [],
-			estimatedTimeline: "2 days",
-			risks: ["Integration issues"],
-		});
+		return createApproach(
+			"new-feature",
+			"Build the feature using a new module",
+			{
+				filesAffected: ["src/core/feature.ts", "src/test/feature.test.ts"],
+				dependencies: [],
+				estimatedTimeline: "2 days",
+				risks: ["Integration issues"],
+			},
+		);
 	}
 
 	function createTestComplexity(): ComplexityEstimate {
@@ -163,7 +167,7 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 			// Filter by agent
 			const alphaProposals = system.getProposals({ agentId: "agent-alpha" });
 			assert.equal(alphaProposals.length, 1);
-			assert.equal(alphaProposals[0]!.agentId, "agent-alpha");
+			assert.equal(alphaProposals[0]?.agentId, "agent-alpha");
 
 			// Filter by status
 			const pendingProposals = system.getProposals({ status: "pending" });
@@ -175,14 +179,18 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 
 	describe("AC#2: Proposal includes implementation approach + estimated complexity", () => {
 		it("stores approach with all fields", () => {
-			const approach = createApproach("new-feature", "Build federation protocol", {
-				filesAffected: ["src/core/federation.ts"],
-				dependencies: ["ws", "node-forge"],
-				estimatedTimeline: "3 days",
-				testingStrategy: "Integration tests with mock hosts",
-				risks: ["Network partition handling"],
-				rollbackPlan: "Revert to file-based sharing",
-			});
+			const approach = createApproach(
+				"new-feature",
+				"Build federation protocol",
+				{
+					filesAffected: ["src/core/federation.ts"],
+					dependencies: ["ws", "node-forge"],
+					estimatedTimeline: "3 days",
+					testingStrategy: "Integration tests with mock hosts",
+					risks: ["Network partition handling"],
+					rollbackPlan: "Revert to file-based sharing",
+				},
+			);
 
 			const proposal = system.submitProposal("proposal-42", "agent-alpha", {
 				title: "Federation",
@@ -237,7 +245,11 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 			});
 
 			const newApproach = createApproach("refactor", "Refactor existing code");
-			const updated = system.updateApproach(proposal.proposalId, "agent-alpha", newApproach);
+			const updated = system.updateApproach(
+				proposal.proposalId,
+				"agent-alpha",
+				newApproach,
+			);
 
 			assert.equal(updated.approach.type, "refactor");
 			assert.ok(updated.version > 1);
@@ -251,8 +263,14 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 				complexity: createTestComplexity(),
 			});
 
-			const newComplexity = createComplexityEstimate("very-high", { estimatedHours: 80 });
-			const updated = system.updateComplexity(proposal.proposalId, "agent-alpha", newComplexity);
+			const newComplexity = createComplexityEstimate("very-high", {
+				estimatedHours: 80,
+			});
+			const updated = system.updateComplexity(
+				proposal.proposalId,
+				"agent-alpha",
+				newComplexity,
+			);
 
 			assert.equal(updated.complexity.level, "very-high");
 			assert.equal(updated.complexity.score, 10);
@@ -293,7 +311,11 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 
 			assert.throws(
 				() =>
-					system.updateApproach(proposal.proposalId, "agent-alpha", createTestApproach()),
+					system.updateApproach(
+						proposal.proposalId,
+						"agent-alpha",
+						createTestApproach(),
+					),
 				/Cannot update proposal in status/,
 			);
 		});
@@ -312,9 +334,13 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 
 			assert.equal(proposal.status, "pending");
 
-			const approved = system.approveProposal(proposal.proposalId, "reviewer-1", {
-				notes: "Well thought out approach",
-			});
+			const approved = system.approveProposal(
+				proposal.proposalId,
+				"reviewer-1",
+				{
+					notes: "Well thought out approach",
+				},
+			);
 
 			assert.equal(approved.status, "approved");
 			assert.equal(approved.reviewedBy, "reviewer-1");
@@ -330,21 +356,25 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 				complexity: createTestComplexity(),
 			});
 
-			const rejected = system.rejectProposal(proposal.proposalId, "reviewer-1", {
-				notes: "Needs more research on edge cases",
-				feedback: [
-					{
-						category: "approach",
-						content: "Missing error handling for network failures",
-						suggestion: "Add retry logic with exponential backoff",
-						severity: "blocker",
-					},
-				],
-			});
+			const rejected = system.rejectProposal(
+				proposal.proposalId,
+				"reviewer-1",
+				{
+					notes: "Needs more research on edge cases",
+					feedback: [
+						{
+							category: "approach",
+							content: "Missing error handling for network failures",
+							suggestion: "Add retry logic with exponential backoff",
+							severity: "blocker",
+						},
+					],
+				},
+			);
 
 			assert.equal(rejected.status, "rejected");
 			assert.equal(rejected.feedback.length, 1);
-			assert.equal(rejected.feedback[0]!.severity, "blocker");
+			assert.equal(rejected.feedback[0]?.severity, "blocker");
 		});
 
 		it("prevents reviewing already reviewed proposal", () => {
@@ -371,7 +401,10 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 				complexity: createTestComplexity(),
 			});
 
-			const withdrawn = system.withdrawProposal(proposal.proposalId, "agent-alpha");
+			const withdrawn = system.withdrawProposal(
+				proposal.proposalId,
+				"agent-alpha",
+			);
 			assert.equal(withdrawn.status, "withdrawn");
 		});
 
@@ -408,23 +441,29 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 
 			const pending = system.getPendingProposals();
 			assert.equal(pending.length, 1);
-			assert.equal(pending[0]!.proposalId, "proposal-1");
+			assert.equal(pending[0]?.proposalId, "proposal-1");
 		});
 
 		it("computes review statistics", () => {
 			const p1 = system.submitProposal("proposal-1", "agent-alpha", {
-				title: "F1", summary: "S1",
-				approach: createTestApproach(), complexity: createTestComplexity(),
+				title: "F1",
+				summary: "S1",
+				approach: createTestApproach(),
+				complexity: createTestComplexity(),
 			});
 
 			const p2 = system.submitProposal("proposal-2", "agent-alpha", {
-				title: "F2", summary: "S2",
-				approach: createTestApproach(), complexity: createTestComplexity(),
+				title: "F2",
+				summary: "S2",
+				approach: createTestApproach(),
+				complexity: createTestComplexity(),
 			});
 
-			const p3 = system.submitProposal("proposal-3", "agent-beta", {
-				title: "F3", summary: "S3",
-				approach: createTestApproach(), complexity: createTestComplexity(),
+			const _p3 = system.submitProposal("proposal-3", "agent-beta", {
+				title: "F3",
+				summary: "S3",
+				approach: createTestApproach(),
+				complexity: createTestComplexity(),
 			});
 
 			system.approveProposal(p1.proposalId, "reviewer-1");
@@ -574,7 +613,11 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 			system.approveProposal(proposal.proposalId, "reviewer-1");
 			system.claimProposal(proposal.proposalId);
 
-			const revoked = system.revokeLease("proposal-42", "admin", "Policy violation");
+			const revoked = system.revokeLease(
+				"proposal-42",
+				"admin",
+				"Policy violation",
+			);
 			assert.ok(revoked);
 			assert.ok(!system.isProposalLeased("proposal-42"));
 		});
@@ -582,12 +625,16 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 		it("cleans up expired leases", () => {
 			const shortTtlSystem = new AgentProposalSystem({ leaseTtlMs: 10 });
 
-			const proposal = shortTtlSystem.submitProposal("proposal-42", "agent-alpha", {
-				title: "Feature",
-				summary: "Summary",
-				approach: createTestApproach(),
-				complexity: createTestComplexity(),
-			});
+			const proposal = shortTtlSystem.submitProposal(
+				"proposal-42",
+				"agent-alpha",
+				{
+					title: "Feature",
+					summary: "Summary",
+					approach: createTestApproach(),
+					complexity: createTestComplexity(),
+				},
+			);
 
 			shortTtlSystem.approveProposal(proposal.proposalId, "reviewer-1");
 			shortTtlSystem.claimProposal(proposal.proposalId);
@@ -604,15 +651,19 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 
 		it("gets active leases", () => {
 			const p1 = system.submitProposal("proposal-1", "agent-alpha", {
-				title: "F1", summary: "S1",
-				approach: createTestApproach(), complexity: createTestComplexity(),
+				title: "F1",
+				summary: "S1",
+				approach: createTestApproach(),
+				complexity: createTestComplexity(),
 			});
 			system.approveProposal(p1.proposalId, "reviewer-1");
 			system.claimProposal(p1.proposalId);
 
 			const p2 = system.submitProposal("proposal-2", "agent-beta", {
-				title: "F2", summary: "S2",
-				approach: createTestApproach(), complexity: createTestComplexity(),
+				title: "F2",
+				summary: "S2",
+				approach: createTestApproach(),
+				complexity: createTestComplexity(),
 			});
 			system.approveProposal(p2.proposalId, "reviewer-1");
 			system.claimProposal(p2.proposalId);
@@ -623,22 +674,26 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 
 		it("gets leases for specific agent", () => {
 			const p1 = system.submitProposal("proposal-1", "agent-alpha", {
-				title: "F1", summary: "S1",
-				approach: createTestApproach(), complexity: createTestComplexity(),
+				title: "F1",
+				summary: "S1",
+				approach: createTestApproach(),
+				complexity: createTestComplexity(),
 			});
 			system.approveProposal(p1.proposalId, "reviewer-1");
 			system.claimProposal(p1.proposalId);
 
 			const p2 = system.submitProposal("proposal-2", "agent-beta", {
-				title: "F2", summary: "S2",
-				approach: createTestApproach(), complexity: createTestComplexity(),
+				title: "F2",
+				summary: "S2",
+				approach: createTestApproach(),
+				complexity: createTestComplexity(),
 			});
 			system.approveProposal(p2.proposalId, "reviewer-1");
 			system.claimProposal(p2.proposalId);
 
 			const alphaLeases = system.getAgentLeases("agent-alpha");
 			assert.equal(alphaLeases.length, 1);
-			assert.equal(alphaLeases[0]!.proposalId, "proposal-1");
+			assert.equal(alphaLeases[0]?.proposalId, "proposal-1");
 		});
 	});
 
@@ -671,27 +726,39 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 
 			const feedback = system.getProposalFeedback(proposal.proposalId);
 			assert.equal(feedback.length, 2);
-			assert.equal(feedback[0]!.category, "approach");
-			assert.equal(feedback[0]!.severity, "blocker");
-			assert.ok(feedback[0]!.suggestion);
+			assert.equal(feedback[0]?.category, "approach");
+			assert.equal(feedback[0]?.severity, "blocker");
+			assert.ok(feedback[0]?.suggestion);
 		});
 
 		it("gets feedback across proposals for a proposal", () => {
 			const p1 = system.submitProposal("proposal-42", "agent-alpha", {
-				title: "F1", summary: "S1",
-				approach: createTestApproach(), complexity: createTestComplexity(),
+				title: "F1",
+				summary: "S1",
+				approach: createTestApproach(),
+				complexity: createTestComplexity(),
 			});
 			system.rejectProposal(p1.proposalId, "reviewer-1", {
-				feedback: [{ category: "approach", content: "Missing security", severity: "blocker" }],
+				feedback: [
+					{
+						category: "approach",
+						content: "Missing security",
+						severity: "blocker",
+					},
+				],
 			});
 
 			// After rejection, new proposal can be submitted
 			const p2 = system.submitProposal("proposal-42", "agent-beta", {
-				title: "F2", summary: "S2",
-				approach: createTestApproach(), complexity: createTestComplexity(),
+				title: "F2",
+				summary: "S2",
+				approach: createTestApproach(),
+				complexity: createTestComplexity(),
 			});
 			system.approveProposal(p2.proposalId, "reviewer-1", {
-				feedback: [{ category: "general", content: "Good approach", severity: "info" }],
+				feedback: [
+					{ category: "general", content: "Good approach", severity: "info" },
+				],
 			});
 
 			const proposalFeedback = system.getProposalFeedback("proposal-42");
@@ -700,19 +767,31 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 
 		it("provides learning signal summary", () => {
 			const p1 = system.submitProposal("proposal-1", "agent-alpha", {
-				title: "F1", summary: "S1",
-				approach: createTestApproach(), complexity: createTestComplexity(),
+				title: "F1",
+				summary: "S1",
+				approach: createTestApproach(),
+				complexity: createTestComplexity(),
 			});
 			system.rejectProposal(p1.proposalId, "reviewer-1", {
 				feedback: [
-					{ category: "approach", content: "Bad approach", severity: "blocker" },
-					{ category: "approach", content: "Missing tests", severity: "warning" },
+					{
+						category: "approach",
+						content: "Bad approach",
+						severity: "blocker",
+					},
+					{
+						category: "approach",
+						content: "Missing tests",
+						severity: "warning",
+					},
 				],
 			});
 
 			const p2 = system.submitProposal("proposal-2", "agent-beta", {
-				title: "F2", summary: "S2",
-				approach: createTestApproach(), complexity: createTestComplexity(),
+				title: "F2",
+				summary: "S2",
+				approach: createTestApproach(),
+				complexity: createTestComplexity(),
 			});
 			system.rejectProposal(p2.proposalId, "reviewer-1", {
 				feedback: [
@@ -753,14 +832,18 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 
 		it("gets agent-specific history", () => {
 			const p1 = system.submitProposal("proposal-1", "agent-alpha", {
-				title: "F1", summary: "S1",
-				approach: createTestApproach(), complexity: createTestComplexity(),
+				title: "F1",
+				summary: "S1",
+				approach: createTestApproach(),
+				complexity: createTestComplexity(),
 			});
 			system.approveProposal(p1.proposalId, "reviewer-1");
 
 			const p2 = system.submitProposal("proposal-2", "agent-alpha", {
-				title: "F2", summary: "S2",
-				approach: createTestApproach(), complexity: createTestComplexity(),
+				title: "F2",
+				summary: "S2",
+				approach: createTestApproach(),
+				complexity: createTestComplexity(),
 			});
 			system.rejectProposal(p2.proposalId, "reviewer-1");
 
@@ -772,14 +855,16 @@ describe("proposal-61: Agent Proposal & Lease-Based Backlog System", () => {
 
 		it("generates retrospective summary", () => {
 			const p1 = system.submitProposal("proposal-1", "agent-alpha", {
-				title: "F1", summary: "S1",
+				title: "F1",
+				summary: "S1",
 				approach: createTestApproach(),
 				complexity: createComplexityEstimate("low", { estimatedHours: 8 }),
 			});
 			system.approveProposal(p1.proposalId, "reviewer-1");
 
 			const p2 = system.submitProposal("proposal-2", "agent-beta", {
-				title: "F2", summary: "S2",
+				title: "F2",
+				summary: "S2",
 				approach: createTestApproach(),
 				complexity: createComplexityEstimate("high", { estimatedHours: 40 }),
 			});

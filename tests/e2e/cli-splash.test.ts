@@ -1,8 +1,8 @@
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/index.ts";
 import { execSync } from "../support/test-utils.ts";
 
@@ -20,7 +20,9 @@ describe("CLI Splash (bare run)", () => {
 	});
 
 	it("prints minimal splash in non-initialized repo (non-TTY)", async () => {
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH}`, { cwd: TEST_DIR });
+		const result = execSync(`node --experimental-strip-types ${CLI_PATH}`, {
+			cwd: TEST_DIR,
+		});
 		const out = result.stdout.toString();
 		assert.strictEqual(result.exitCode, 0);
 		assert.ok(out.includes("Roadmap.md v"));
@@ -36,7 +38,9 @@ describe("CLI Splash (bare run)", () => {
 		const core = new Core(TEST_DIR);
 		await core.initializeProject("Splash Test");
 
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH}`, { cwd: TEST_DIR });
+		const result = execSync(`node --experimental-strip-types ${CLI_PATH}`, {
+			cwd: TEST_DIR,
+		});
 		const out = result.stdout.toString();
 		assert.strictEqual(result.exitCode, 0);
 		assert.ok(out.includes("Quickstart"));
@@ -46,14 +50,20 @@ describe("CLI Splash (bare run)", () => {
 	});
 
 	it("--help shows commander help, not splash", async () => {
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} --help`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} --help`,
+			{ cwd: TEST_DIR },
+		);
 		const out = result.stdout.toString();
 		assert.strictEqual(result.exitCode, 0);
-		assert.ok((/Usage: .*roadmap/).test(out));
+		assert.ok(/Usage: .*roadmap/.test(out));
 	});
 
 	it("--plain forces minimal splash", async () => {
-		const result = execSync(`node --experimental-strip-types ${CLI_PATH} --plain`, { cwd: TEST_DIR });
+		const result = execSync(
+			`node --experimental-strip-types ${CLI_PATH} --plain`,
+			{ cwd: TEST_DIR },
+		);
 		const out = result.stdout.toString();
 		assert.strictEqual(result.exitCode, 0);
 		assert.ok(out.includes("Roadmap.md v"));

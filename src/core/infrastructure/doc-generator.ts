@@ -9,11 +9,17 @@
  * AC#5: No manual maintenance required — source of truth is roadmap
  */
 
-import { readdirSync, writeFileSync, mkdirSync, existsSync, readFileSync, statSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
-import { execSync } from "node:child_process";
-import type { Proposal, RoadmapConfig } from "../../types/index.ts";
 import { FileSystem } from "../../infra/file-system/operations.ts";
+import type { Proposal } from "../../types/index.ts";
 
 export interface DocGeneratorOptions {
 	outputDir: string;
@@ -73,15 +79,15 @@ export function parseFrontmatter(content: string): Record<string, unknown> {
 	let currentKey: string | null = null;
 	let inArray = false;
 	let currentArray: string[] = [];
-	let inMultilineString = false;
-	let multilineContent = "";
-	let indentLevel = 0;
+	const _inMultilineString = false;
+	const _multilineContent = "";
+	const _indentLevel = 0;
 
-	const lines = yaml!.split("\n");
+	const lines = yaml?.split("\n");
 
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i];
-		const trimmed = line!.trim();
+		const trimmed = line?.trim();
 
 		// Skip empty lines
 		if (!trimmed) {
@@ -107,7 +113,7 @@ export function parseFrontmatter(content: string): Record<string, unknown> {
 		}
 
 		// Check for key-value pair
-		const colonIndex = line!.indexOf(":");
+		const colonIndex = line?.indexOf(":");
 		if (colonIndex > 0) {
 			// Save previous array if exists
 			if (inArray && currentKey) {
@@ -116,14 +122,14 @@ export function parseFrontmatter(content: string): Record<string, unknown> {
 				currentArray = [];
 			}
 
-			const key = line!.slice(0, colonIndex).trim();
-			let value: unknown = line!.slice(colonIndex + 1).trim();
+			const key = line?.slice(0, colonIndex).trim();
+			let value: unknown = line?.slice(colonIndex + 1).trim();
 
 			// Handle empty value (may be followed by array or multiline)
 			if (!value) {
 				currentKey = key;
 				// Check if next line is an array
-				if (i + 1 < lines.length && lines[i + 1]!.trim().startsWith("- ")) {
+				if (i + 1 < lines.length && lines[i + 1]?.trim().startsWith("- ")) {
 					currentArray = [];
 					inArray = true;
 					continue;
@@ -136,12 +142,18 @@ export function parseFrontmatter(content: string): Record<string, unknown> {
 
 			// Remove surrounding quotes
 			if (typeof value === "string") {
-				if ((value.startsWith("'") && value.endsWith("'")) || (value.startsWith('"') && value.endsWith('"'))) {
+				if (
+					(value.startsWith("'") && value.endsWith("'")) ||
+					(value.startsWith('"') && value.endsWith('"'))
+				) {
 					value = value.slice(1, -1);
 				}
 
 				// Handle JSON arrays inline
-				if ((value as string).startsWith("[") && (value as string).endsWith("]")) {
+				if (
+					(value as string).startsWith("[") &&
+					(value as string).endsWith("]")
+				) {
 					try {
 						value = JSON.parse(value as string);
 					} catch {
@@ -178,14 +190,19 @@ export function parseProposalFile(filePath: string): Proposal | null {
 		// Extract title from filename or frontmatter
 		const filename = filePath.split("/").pop() || "";
 		const titleMatch = filename.match(/proposal-[\d.]+\s*-\s*(.+?)\.md$/);
-		const title = (frontmatter.title as string) || (titleMatch ? titleMatch[1]!.replace(/-/g, " ") : "Unknown");
+		const title =
+			(frontmatter.title as string) ||
+			(titleMatch ? titleMatch[1]?.replace(/-/g, " ") : "Unknown");
 
 		return {
 			id: frontmatter.id as string,
 			title,
 			status: (frontmatter.status as string) || "New",
 			assignee: (frontmatter.assignee as string[] | undefined) ?? [],
-			priority: ((frontmatter.priority as string) || "medium") as "high" | "medium" | "low",
+			priority: ((frontmatter.priority as string) || "medium") as
+				| "high"
+				| "medium"
+				| "low",
 			dependencies: (frontmatter.dependencies as string[]) || [],
 			labels: (frontmatter.labels as string[]) || [],
 			createdDate: (frontmatter.created_date as string) || "",
@@ -289,7 +306,8 @@ export function buildArchitectureSection(proposals: Proposal[]): string {
 	// Generate proposal nodes
 	for (const node of nodes) {
 		const status = node.status.toLowerCase();
-		const stereotype = status === "reached" || status === "complete" ? "reached" : status;
+		const stereotype =
+			status === "reached" || status === "complete" ? "reached" : status;
 		plantuml += `proposal "${node.id}\\n${node.title}" as ${node.id.replace(/[-.]/g, "_")} <<${stereotype}>>\n`;
 	}
 
@@ -312,7 +330,11 @@ export function buildArchitectureSection(proposals: Proposal[]): string {
 /**
  * Format a status section
  */
-export function formatStatusSection(title: string, proposals: Proposal[], emoji: string): string {
+export function formatStatusSection(
+	title: string,
+	proposals: Proposal[],
+	emoji: string,
+): string {
 	if (proposals.length === 0) {
 		return `## ${emoji} ${title} (0)\n\n_No proposals in this category._\n`;
 	}
@@ -322,23 +344,30 @@ export function formatStatusSection(title: string, proposals: Proposal[], emoji:
 	for (const proposal of proposals) {
 		section += `- **${proposal.id}**: ${proposal.title}`;
 		if (proposal.assignee) {
-			const assignees = Array.isArray(proposal.assignee) ? proposal.assignee.join(", ") : proposal.assignee;
+			const assignees = Array.isArray(proposal.assignee)
+				? proposal.assignee.join(", ")
+				: proposal.assignee;
 			section += ` (${assignees})`;
 		}
 		section += "\n";
 	}
 
-	return section + "\n";
+	return `${section}\n`;
 }
 
 /**
  * Build changelog section from recent proposal changes
  */
-export function buildChangelogSection(proposals: Proposal[], maxEntries: number = 20): string {
+export function buildChangelogSection(
+	proposals: Proposal[],
+	maxEntries: number = 20,
+): string {
 	// Sort by updated_date descending
 	const sorted = [...proposals]
 		.filter((s) => s.updatedDate)
-		.sort((a, b) => b.updatedDate!.localeCompare(a.updatedDate!))
+		.sort((a, b) =>
+			(b.updatedDate ?? "").localeCompare(a.updatedDate ?? ""),
+		)
 		.slice(0, maxEntries);
 
 	if (sorted.length === 0) {
@@ -351,13 +380,13 @@ export function buildChangelogSection(proposals: Proposal[], maxEntries: number 
 		section += `- **${proposal.updatedDate}**: ${proposal.id} - ${proposal.title} (${proposal.status})\n`;
 	}
 
-	return section + "\n";
+	return `${section}\n`;
 }
 
 /**
  * Generate quick start section
  */
-export function buildQuickStartSection(projectName: string): string {
+export function buildQuickStartSection(_projectName: string): string {
 	return `## 🚀 Quick Start
 
 \`\`\`bash
@@ -396,7 +425,7 @@ export function formatMarkdown(
 	summary: StatusSummary,
 	projectName: string,
 	options: DocGeneratorOptions,
-	proposals: Proposal[]
+	proposals: Proposal[],
 ): string {
 	const timestamp = new Date().toISOString();
 
@@ -479,9 +508,15 @@ export interface ProposalFullDetail {
 function extractSection(content: string, sectionName: string): string {
 	const patterns = [
 		// Format: <!-- SECTION:NAME:BEGIN --> ... <!-- SECTION:NAME:END -->
-		new RegExp(`<!-- SECTION:${sectionName}:BEGIN -->\\s*([\\s\\S]*?)\\s*<!-- SECTION:${sectionName}:END -->`, "i"),
+		new RegExp(
+			`<!-- SECTION:${sectionName}:BEGIN -->\\s*([\\s\\S]*?)\\s*<!-- SECTION:${sectionName}:END -->`,
+			"i",
+		),
 		// Format: <!-- NAME:BEGIN --> ... <!-- NAME:END --> (without SECTION prefix)
-		new RegExp(`<!-- ${sectionName}:BEGIN -->\\s*([\\s\\S]*?)\\s*<!-- ${sectionName}:END -->`, "i"),
+		new RegExp(
+			`<!-- ${sectionName}:BEGIN -->\\s*([\\s\\S]*?)\\s*<!-- ${sectionName}:END -->`,
+			"i",
+		),
 		// Format: ## Name followed by content until next ##
 		new RegExp(`## ${sectionName}\\s*\\n\\n([\\s\\S]*?)(?=\\n## |$)`, "i"),
 	];
@@ -489,7 +524,7 @@ function extractSection(content: string, sectionName: string): string {
 	for (const pattern of patterns) {
 		const match = content.match(pattern);
 		if (match) {
-			return match[1]!.trim();
+			return match[1]?.trim();
 		}
 	}
 	return "";
@@ -498,7 +533,9 @@ function extractSection(content: string, sectionName: string): string {
 /**
  * Parse acceptance criteria from proposal content
  */
-function parseAcceptanceCriteria(content: string): Array<{ number: number; text: string; passed: boolean }> {
+function parseAcceptanceCriteria(
+	content: string,
+): Array<{ number: number; text: string; passed: boolean }> {
 	const acSection = extractSection(content, "AC");
 	const criteria: Array<{ number: number; text: string; passed: boolean }> = [];
 
@@ -508,7 +545,7 @@ function parseAcceptanceCriteria(content: string): Array<{ number: number; text:
 		if (match) {
 			criteria.push({
 				number: Number.parseInt(match[2]!, 10),
-				text: match[3]!.trim(),
+				text: match[3]?.trim(),
 				passed: match[1] === "x",
 			});
 		}
@@ -543,7 +580,9 @@ function extractFiles(notes: string): string[] {
 /**
  * Parse a proposal file for full detail
  */
-export function parseProposalFileFullDetail(filePath: string): ProposalFullDetail | null {
+export function parseProposalFileFullDetail(
+	filePath: string,
+): ProposalFullDetail | null {
 	try {
 		const content = readFileSync(filePath, "utf-8");
 		const frontmatter = parseFrontmatter(content);
@@ -554,7 +593,9 @@ export function parseProposalFileFullDetail(filePath: string): ProposalFullDetai
 
 		const filename = filePath.split("/").pop() || "";
 		const titleMatch = filename.match(/proposal-[\d.]+\s*-\s*(.+?)\.md$/);
-		const title = (frontmatter.title as string) || (titleMatch ? titleMatch[1]!.replace(/-/g, " ") : "Unknown");
+		const title =
+			(frontmatter.title as string) ||
+			(titleMatch ? titleMatch[1]?.replace(/-/g, " ") : "Unknown");
 
 		const description = extractSection(content, "DESCRIPTION");
 		const implementationNotes = extractSection(content, "NOTES");
@@ -595,7 +636,9 @@ export function parseProposalFileFullDetail(filePath: string): ProposalFullDetai
 /**
  * Build reverse dependency map (which proposals depend on each proposal)
  */
-export function buildReverseDependencies(proposals: ProposalFullDetail[]): Map<string, string[]> {
+export function buildReverseDependencies(
+	proposals: ProposalFullDetail[],
+): Map<string, string[]> {
 	const reverseDeps = new Map<string, string[]>();
 
 	// Initialize all proposals
@@ -624,8 +667,11 @@ export function buildReverseDependencies(proposals: ProposalFullDetail[]): Map<s
 /**
  * Generate dependency chain visualization
  */
-export function generateDependencyChain(proposalId: string, allProposals: ProposalFullDetail[]): string {
-	const proposalMap = new Map(allProposals.map(s => [s.id, s]));
+export function generateDependencyChain(
+	proposalId: string,
+	allProposals: ProposalFullDetail[],
+): string {
+	const proposalMap = new Map(allProposals.map((s) => [s.id, s]));
 	const visited = new Set<string>();
 	const chains: string[] = [];
 
@@ -651,7 +697,11 @@ export function generateDependencyChain(proposalId: string, allProposals: Propos
 /**
  * Generate full proposal detail markdown page
  */
-export function generateFullProposalDetail(proposal: ProposalFullDetail, reverseDeps?: Map<string, string[]>, allProposals?: ProposalFullDetail[]): string {
+export function generateFullProposalDetail(
+	proposal: ProposalFullDetail,
+	reverseDeps?: Map<string, string[]>,
+	allProposals?: ProposalFullDetail[],
+): string {
 	const timestamp = new Date().toISOString();
 
 	let page = `# ${proposal.id} - ${proposal.title}\n\n`;
@@ -679,7 +729,9 @@ export function generateFullProposalDetail(proposal: ProposalFullDetail, reverse
 	page += "## 📋 Metadata\n\n";
 	page += `| Field | Value |\n|-------|-------|\n`;
 
-	const assignees = Array.isArray(proposal.assignee) ? proposal.assignee.join(", ") : proposal.assignee;
+	const assignees = Array.isArray(proposal.assignee)
+		? proposal.assignee.join(", ")
+		: proposal.assignee;
 	if (assignees) {
 		page += `| **Assignee** | ${assignees} |\n`;
 	}
@@ -709,12 +761,19 @@ export function generateFullProposalDetail(proposal: ProposalFullDetail, reverse
 	// Dependencies (prerequisites)
 	if (proposal.dependencies.length > 0) {
 		page += "## 🔗 Dependencies (Prerequisites)\n\n";
-		page += "_This proposal depends on the following proposals being completed first:_\n\n";
+		page +=
+			"_This proposal depends on the following proposals being completed first:_\n\n";
 		for (const dep of proposal.dependencies) {
-			const depProposal = allProposals?.find(s => s.id === dep);
-			const statusEmoji = depProposal ? {
-				'reached': '✅', 'active': '🔵', 'review': '🟡', 'new': '⚪', 'abandoned': '❌'
-			}[depProposal.status.toLowerCase()] || '⚪' : '⚪';
+			const depProposal = allProposals?.find((s) => s.id === dep);
+			const statusEmoji = depProposal
+				? {
+						reached: "✅",
+						active: "🔵",
+						review: "🟡",
+						new: "⚪",
+						abandoned: "❌",
+					}[depProposal.status.toLowerCase()] || "⚪"
+				: "⚪";
 			page += `- ${statusEmoji} [${dep}](../${dep}.md)\n`;
 		}
 		page += "\n";
@@ -727,10 +786,16 @@ export function generateFullProposalDetail(proposal: ProposalFullDetail, reverse
 			page += "## ⬇️ Dependents (Proposals that depend on this)\n\n";
 			page += "_The following proposals depend on this proposal:_\n\n";
 			for (const dependent of dependents) {
-				const depProposal = allProposals?.find(s => s.id === dependent);
-				const statusEmoji = depProposal ? {
-					'reached': '✅', 'active': '🔵', 'review': '🟡', 'new': '⚪', 'abandoned': '❌'
-				}[depProposal.status.toLowerCase()] || '⚪' : '⚪';
+				const depProposal = allProposals?.find((s) => s.id === dependent);
+				const statusEmoji = depProposal
+					? {
+							reached: "✅",
+							active: "🔵",
+							review: "🟡",
+							new: "⚪",
+							abandoned: "❌",
+						}[depProposal.status.toLowerCase()] || "⚪"
+					: "⚪";
 				page += `- ${statusEmoji} [${dependent}](../${dependent}.md)\n`;
 			}
 			page += "\n";
@@ -813,7 +878,11 @@ function capitalize(str: string): string {
  * Generate all per-proposal detail pages with cross-referencing navigation
  * Supports incremental mode: only regenerates pages for proposals that changed since last run
  */
-export function generateProposalDetailPages(proposalsDir: string, outputDir: string, incremental = false): GeneratedDoc[] {
+export function generateProposalDetailPages(
+	proposalsDir: string,
+	outputDir: string,
+	incremental = false,
+): GeneratedDoc[] {
 	const docs: GeneratedDoc[] = [];
 
 	if (!existsSync(proposalsDir)) {
@@ -854,7 +923,12 @@ export function generateProposalDetailPages(proposalsDir: string, outputDir: str
 	// Determine which proposals need regeneration
 	const newCache: Record<string, number> = {};
 	for (const proposal of allProposals) {
-		const file = files.find(f => f.replace(/-/g, '').includes(proposal.id.replace(/[-.]/g, '').toLowerCase())) || "";
+		const file =
+			files.find((f) =>
+				f
+					.replace(/-/g, "")
+					.includes(proposal.id.replace(/[-.]/g, "").toLowerCase()),
+			) || "";
 		const filePath = join(proposalsDir, file);
 
 		let needsRegeneration = !incremental; // Always regenerate if not incremental
@@ -865,7 +939,11 @@ export function generateProposalDetailPages(proposalsDir: string, outputDir: str
 		}
 
 		if (needsRegeneration || !incremental) {
-			const content = generateFullProposalDetail(proposal, reverseDeps, allProposals);
+			const content = generateFullProposalDetail(
+				proposal,
+				reverseDeps,
+				allProposals,
+			);
 			const proposalPath = join(proposalDir, `${proposal.id}.md`);
 			writeFileSync(proposalPath, content, "utf-8");
 
@@ -894,7 +972,10 @@ export function generateProposalDetailPages(proposalsDir: string, outputDir: str
 /**
  * Generate index page with links to all proposal detail pages
  */
-export function generateProposalIndex(summary: StatusSummary, projectName: string): string {
+export function generateProposalIndex(
+	summary: StatusSummary,
+	projectName: string,
+): string {
 	const timestamp = new Date().toISOString();
 
 	let page = `# ${projectName} - Documentation\n\n`;
@@ -938,7 +1019,10 @@ export function generateProposalIndex(summary: StatusSummary, projectName: strin
 /**
  * Generate per-status index pages
  */
-export function generateStatusIndexPages(summary: StatusSummary, outputDir: string): GeneratedDoc[] {
+export function generateStatusIndexPages(
+	summary: StatusSummary,
+	outputDir: string,
+): GeneratedDoc[] {
 	const docs: GeneratedDoc[] = [];
 	const statusDir = join(outputDir, "status");
 
@@ -946,7 +1030,11 @@ export function generateStatusIndexPages(summary: StatusSummary, outputDir: stri
 		mkdirSync(statusDir, { recursive: true });
 	}
 
-	const statuses: Array<{ name: string; emoji: string; proposals: Proposal[] }> = [
+	const statuses: Array<{
+		name: string;
+		emoji: string;
+		proposals: Proposal[];
+	}> = [
 		{ name: "reached", emoji: "✅", proposals: summary.reached },
 		{ name: "active", emoji: "🔵", proposals: summary.active },
 		{ name: "review", emoji: "🟡", proposals: summary.review },
@@ -984,7 +1072,10 @@ export function generateStatusIndexPages(summary: StatusSummary, outputDir: stri
 /**
  * Generate GitHub Actions workflow for Pages deployment
  */
-export function generateGitHubPagesWorkflow(): { path: string; content: string } {
+export function generateGitHubPagesWorkflow(): {
+	path: string;
+	content: string;
+} {
 	const content = `name: Deploy Documentation to GitHub Pages
 
 on:
@@ -1049,7 +1140,7 @@ jobs:
  */
 export async function generateDocs(
 	projectRoot: string,
-	options: DocGeneratorOptions
+	options: DocGeneratorOptions,
 ): Promise<GenerationResult> {
 	const result: GenerationResult = {
 		success: true,
@@ -1061,7 +1152,7 @@ export async function generateDocs(
 	try {
 		const filesystem = new FileSystem(projectRoot);
 		const config = await filesystem.loadConfig();
-		let projectName = options.projectName || config?.projectName || "Project";
+		const projectName = options.projectName || config?.projectName || "Project";
 
 		// Load proposals
 		const proposalsDir = filesystem.proposalsDir;
@@ -1161,7 +1252,11 @@ ${buildArchitectureSection(proposals)}
 
 		// STATE-58.1: Generate per-proposal detail pages (if fullDetail mode enabled)
 		if (options.fullDetail !== false) {
-			const proposalDetailPages = generateProposalDetailPages(proposalsDir, outputDir, options.incremental || false);
+			const proposalDetailPages = generateProposalDetailPages(
+				proposalsDir,
+				outputDir,
+				options.incremental || false,
+			);
 			result.files.push(...proposalDetailPages);
 		}
 
@@ -1192,7 +1287,7 @@ ${buildArchitectureSection(proposals)}
 export async function watchAndRegenerate(
 	projectRoot: string,
 	options: DocGeneratorOptions,
-	callback?: (result: GenerationResult) => void
+	callback?: (result: GenerationResult) => void,
 ): Promise<() => void> {
 	const filesystem = new FileSystem(projectRoot);
 	const proposalsDir = filesystem.proposalsDir;
@@ -1208,7 +1303,9 @@ export async function watchAndRegenerate(
 		try {
 			// Check for changes
 			const files = [
-				...readdirSync(proposalsDir).filter((f) => f.endsWith(".md")).map((f) => join(proposalsDir, f)),
+				...readdirSync(proposalsDir)
+					.filter((f) => f.endsWith(".md"))
+					.map((f) => join(proposalsDir, f)),
 				configPath,
 			].filter((f) => existsSync(f));
 

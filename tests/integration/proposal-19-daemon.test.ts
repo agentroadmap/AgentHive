@@ -8,9 +8,8 @@
  */
 
 import assert from "node:assert";
-import { describe, it, beforeEach, afterEach } from "node:test";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { execSync } from "node:child_process";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { Core } from "../../src/core/roadmap.ts";
 import { createUniqueTestDir, safeCleanup } from "../support/test-utils.ts";
 
@@ -37,10 +36,12 @@ describe("proposal-19: Daemon Mode for Persistent MCP", () => {
 					timeout: 15000,
 				});
 				assert.ok(
-					help.includes("start") || help.includes("service") || help.includes("Usage"),
+					help.includes("start") ||
+						help.includes("service") ||
+						help.includes("Usage"),
 					"Service command should be available",
 				);
-			} catch (err: any) {
+			} catch (_err: any) {
 				// If service command not implemented, test documents it
 				assert.ok(true, "Service command may not be fully implemented");
 			}
@@ -56,10 +57,12 @@ describe("proposal-19: Daemon Mode for Persistent MCP", () => {
 					timeout: 15000,
 				});
 				assert.ok(
-					help.includes("mcp") || help.includes("start") || help.includes("Usage"),
+					help.includes("mcp") ||
+						help.includes("start") ||
+						help.includes("Usage"),
 					"MCP command should be available",
 				);
-			} catch (err: any) {
+			} catch (_err: any) {
 				assert.ok(true, "MCP command may have different interface");
 			}
 		});
@@ -77,7 +80,7 @@ describe("proposal-19: Daemon Mode for Persistent MCP", () => {
 			const retrieved = await core2.getProposal(proposal.id);
 
 			assert.ok(retrieved, "Proposal should persist across Core instances");
-			assert.strictEqual(retrieved!.title, "Persistent Proposal");
+			assert.strictEqual(retrieved?.title, "Persistent Proposal");
 		});
 
 		it("claim metadata persists across instances", async () => {
@@ -86,14 +89,16 @@ describe("proposal-19: Daemon Mode for Persistent MCP", () => {
 				status: "Potential",
 			});
 
-			await core.claimProposal(proposal.id, "@daemon-agent", { durationMinutes: 30 });
+			await core.claimProposal(proposal.id, "@daemon-agent", {
+				durationMinutes: 30,
+			});
 
 			// New Core instance
 			const core2 = new Core(projectRoot);
 			const retrieved = await core2.getProposal(proposal.id);
 
 			assert.ok(retrieved?.claim, "Claim should persist");
-			assert.strictEqual(retrieved!.claim!.agent, "@daemon-agent");
+			assert.strictEqual(retrieved?.claim?.agent, "@daemon-agent");
 		});
 	});
 

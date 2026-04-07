@@ -195,7 +195,10 @@ export class ObstaclePipeline {
 			assignee: [obstacle.reportedBy],
 			labels: ["obstacle", "blocking", obstacle.severity],
 			// AC#3: Preserve blocking relationship in dependencies
-			dependencies: [...obstacle.blockingProposalIds, ...(options?.extraDeps || [])],
+			dependencies: [
+				...obstacle.blockingProposalIds,
+				...(options?.extraDeps || []),
+			],
 			implementationPlan: this.buildImplementationPlan(obstacle),
 			metadata: {
 				originalObstacleId: obstacle.id,
@@ -271,7 +274,9 @@ export class ObstaclePipeline {
 		];
 
 		if (obstacle.suggestedApproach) {
-			lines.push(`3. Implement suggested approach: ${obstacle.suggestedApproach}`);
+			lines.push(
+				`3. Implement suggested approach: ${obstacle.suggestedApproach}`,
+			);
 			lines.push(`4. Verify resolution unblocks dependent proposals`);
 		} else {
 			lines.push(`3. Determine and implement solution`);
@@ -298,10 +303,14 @@ export class ObstaclePipeline {
 	 * AC#4: Check if a resolved proposal should notify obstacle reporter.
 	 */
 	getNotificationTarget(newProposalId: string): string | null {
-		const promotion = this.store.promotions.find((p) => p.newProposalId === newProposalId);
+		const promotion = this.store.promotions.find(
+			(p) => p.newProposalId === newProposalId,
+		);
 		if (!promotion) return null;
 
-		const obstacle = this.store.obstacles.find((o) => o.id === promotion.obstacleId);
+		const obstacle = this.store.obstacles.find(
+			(o) => o.id === promotion.obstacleId,
+		);
 		return obstacle?.reportedBy || null;
 	}
 
@@ -330,7 +339,8 @@ export class ObstaclePipeline {
 		}
 
 		return obstacles.sort(
-			(a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+			(a, b) =>
+				new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
 		);
 	}
 
@@ -353,7 +363,8 @@ export class ObstaclePipeline {
 	 */
 	getBlockingObstacles(proposalId: string): Obstacle[] {
 		return this.store.obstacles.filter(
-			(o) => o.blockingProposalIds.includes(proposalId) && !(o as any).resolvedAt,
+			(o) =>
+				o.blockingProposalIds.includes(proposalId) && !(o as any).resolvedAt,
 		);
 	}
 
@@ -361,7 +372,9 @@ export class ObstaclePipeline {
 	 * Delete an obstacle (if not promoted).
 	 */
 	deleteObstacle(obstacleId: string): boolean {
-		const promoted = this.store.promotions.some((p) => p.obstacleId === obstacleId);
+		const promoted = this.store.promotions.some(
+			(p) => p.obstacleId === obstacleId,
+		);
 		if (promoted) return false;
 
 		const idx = this.store.obstacles.findIndex((o) => o.id === obstacleId);
@@ -381,7 +394,9 @@ export class ObstaclePipeline {
 		promoted: number;
 		blockingCount: number;
 	} {
-		const unresolved = this.store.obstacles.filter((o) => !(o as any).resolvedAt);
+		const unresolved = this.store.obstacles.filter(
+			(o) => !(o as any).resolvedAt,
+		);
 		const blocking = unresolved.filter((o) => o.blockingProposalIds.length > 0);
 
 		return {

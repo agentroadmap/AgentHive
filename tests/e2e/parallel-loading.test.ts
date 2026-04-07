@@ -1,9 +1,12 @@
 import assert from "node:assert";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
-import { expect } from "../support/test-utils.ts";
-import { loadRemoteProposals, resolveProposalConflict } from '../../src/core/storage/proposal-loader.ts';
+import {
+	loadRemoteProposals,
+	resolveProposalConflict,
+} from "../../src/core/storage/proposal-loader.ts";
 import type { GitOperations } from "../../src/git/operations.ts";
 import type { Proposal } from "../../src/types/index.ts";
+import { expect } from "../support/test-utils.ts";
 
 // Mock GitOperations for testing
 class MockGitOperations implements Partial<GitOperations> {
@@ -19,12 +22,24 @@ class MockGitOperations implements Partial<GitOperations> {
 		return ["main", "feature", "feature2"];
 	}
 
-	async getBranchLastModifiedMap(_ref: string, _dir: string): Promise<Map<string, Date>> {
+	async getBranchLastModifiedMap(
+		_ref: string,
+		_dir: string,
+	): Promise<Map<string, Date>> {
 		const map = new Map<string, Date>();
 		// Add all files with the same date for simplicity
-		map.set("roadmap/proposals/proposal-1 - Main Proposal.md", new Date("2025-06-13"));
-		map.set("roadmap/proposals/proposal-2 - Feature Proposal.md", new Date("2025-06-13"));
-		map.set("roadmap/proposals/proposal-3 - Feature2 Proposal.md", new Date("2025-06-13"));
+		map.set(
+			"roadmap/proposals/proposal-1 - Main Proposal.md",
+			new Date("2025-06-13"),
+		);
+		map.set(
+			"roadmap/proposals/proposal-2 - Feature Proposal.md",
+			new Date("2025-06-13"),
+		);
+		map.set(
+			"roadmap/proposals/proposal-3 - Feature2 Proposal.md",
+			new Date("2025-06-13"),
+		);
 		return map;
 	}
 
@@ -78,7 +93,10 @@ dependencies: []
 		return "";
 	}
 
-	async getFileLastModifiedTime(_ref: string, _file: string): Promise<Date | null> {
+	async getFileLastModifiedTime(
+		_ref: string,
+		_file: string,
+	): Promise<Date | null> {
 		return new Date("2025-06-13");
 	}
 }
@@ -95,13 +113,18 @@ describe("Parallel remote proposal loading", () => {
 	});
 
 	it("should load proposals from multiple branches in parallel", async () => {
-		const mockGitOperations = new MockGitOperations() as unknown as GitOperations;
+		const mockGitOperations =
+			new MockGitOperations() as unknown as GitOperations;
 
 		// Track progress messages
 		const progressMessages: string[] = [];
-		const remoteProposals = await loadRemoteProposals(mockGitOperations, null, (msg: string) => {
-			progressMessages.push(msg);
-		});
+		const remoteProposals = await loadRemoteProposals(
+			mockGitOperations,
+			null,
+			(msg: string) => {
+				progressMessages.push(msg);
+			},
+		);
 
 		// Verify results - we should have proposals from all remote branches
 		assert.strictEqual(remoteProposals.length, 3);
@@ -117,9 +140,17 @@ describe("Parallel remote proposal loading", () => {
 		assert.strictEqual(proposal1?.status, "Potential");
 
 		// Verify progress reporting
-		expect(progressMessages.some((msg) => msg.includes("Fetching remote branches"))).toBe(true);
-		expect(progressMessages.some((msg) => msg.includes("Found 3 unique proposals across remote branches"))).toBe(true);
-		expect(progressMessages.some((msg) => msg.includes("Loaded 3 remote proposals"))).toBe(true);
+		expect(
+			progressMessages.some((msg) => msg.includes("Fetching remote branches")),
+		).toBe(true);
+		expect(
+			progressMessages.some((msg) =>
+				msg.includes("Found 3 unique proposals across remote branches"),
+			),
+		).toBe(true);
+		expect(
+			progressMessages.some((msg) => msg.includes("Loaded 3 remote proposals")),
+		).toBe(true);
 	});
 
 	it("should handle errors gracefully", async () => {
@@ -139,11 +170,20 @@ describe("Parallel remote proposal loading", () => {
 
 		// Verify error was logged
 		expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
-		expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to fetch remote proposals:", expect.any(Error));
+		expect(consoleErrorSpy).toHaveBeenCalledWith(
+			"Failed to fetch remote proposals:",
+			expect.any(Error),
+		);
 	});
 
 	it("should resolve proposal conflicts correctly", async () => {
-		const statuses = ["Potential", "Active", "Accepted", "Complete", "Abandoned"];
+		const statuses = [
+			"Potential",
+			"Active",
+			"Accepted",
+			"Complete",
+			"Abandoned",
+		];
 
 		const localProposal: Proposal = {
 			id: "proposal-1",
@@ -173,13 +213,26 @@ describe("Parallel remote proposal loading", () => {
 		};
 
 		// Test most_progressed strategy - should pick Complete over Potential
-		const resolved1 = resolveProposalConflict(localProposal, remoteProposal, statuses, "most_progressed");
+		const resolved1 = resolveProposalConflict(
+			localProposal,
+			remoteProposal,
+			statuses,
+			"most_progressed",
+		);
 		assert.strictEqual(resolved1.status, "Complete");
 		assert.strictEqual(resolved1.title, "Remote Proposal");
 
 		// Test most_recent strategy - should pick the more recent one
-		const resolved2 = resolveProposalConflict(localProposal, remoteProposal, statuses, "most_recent");
-		assert.deepStrictEqual(resolved2.lastModified, new Date("2025-06-13T12:00:00Z"));
+		const resolved2 = resolveProposalConflict(
+			localProposal,
+			remoteProposal,
+			statuses,
+			"most_recent",
+		);
+		assert.deepStrictEqual(
+			resolved2.lastModified,
+			new Date("2025-06-13T12:00:00Z"),
+		);
 		assert.strictEqual(resolved2.title, "Remote Proposal");
 	});
 });

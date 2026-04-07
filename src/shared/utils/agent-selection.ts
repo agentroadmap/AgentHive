@@ -1,8 +1,12 @@
 import type { AgentInstructionFile } from "../../agent-instructions.ts";
 
-export const PLACEHOLDER_AGENT_VALUE = "__agent_selection_placeholder__" as const;
+export const PLACEHOLDER_AGENT_VALUE =
+	"__agent_selection_placeholder__" as const;
 
-export type AgentSelectionValue = AgentInstructionFile | "none" | typeof PLACEHOLDER_AGENT_VALUE;
+export type AgentSelectionValue =
+	| AgentInstructionFile
+	| "none"
+	| typeof PLACEHOLDER_AGENT_VALUE;
 
 export interface AgentSelectionInput {
 	selected?: AgentSelectionValue[] | null;
@@ -47,7 +51,8 @@ export function processAgentSelection({
 
 	const ordered = uniqueOrder(normalizedSelected);
 	const agentFiles = ordered.filter(
-		(value): value is AgentInstructionFile => value !== "none" && value !== PLACEHOLDER_AGENT_VALUE,
+		(value): value is AgentInstructionFile =>
+			value !== "none" && value !== PLACEHOLDER_AGENT_VALUE,
 	);
 	const skipSelected = ordered.includes("none") && agentFiles.length === 0;
 

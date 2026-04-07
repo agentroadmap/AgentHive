@@ -69,7 +69,10 @@ describe("Line Wrapping", () => {
 				const firstChar = nextLine[0];
 
 				// Basic check: if both characters are letters, it might be mid-word
-				if (/[a-zA-Z]/.test(String(lastChar)) && /[a-zA-Z]/.test(String(firstChar))) {
+				if (
+					/[a-zA-Z]/.test(String(lastChar)) &&
+					/[a-zA-Z]/.test(String(firstChar))
+				) {
 					// This is acceptable for blessed as it handles word wrapping internally
 					// We're mainly checking that wrap:true is set
 					assert.strictEqual(b2.options.wrap, true);
@@ -89,7 +92,8 @@ describe("Line Wrapping", () => {
 				name: "header",
 				box: box({
 					parent: screen,
-					content: "Proposal-123 - This is a very long proposal title that should wrap properly",
+					content:
+						"Proposal-123 - This is a very long proposal title that should wrap properly",
 					wrap: true,
 				}),
 			},
@@ -97,7 +101,8 @@ describe("Line Wrapping", () => {
 				name: "tagBox",
 				box: box({
 					parent: screen,
-					content: "[label1] [label2] [label3] [label4] [label5] [label6] [label7] [label8]",
+					content:
+						"[label1] [label2] [label3] [label4] [label5] [label6] [label7] [label8]",
 					wrap: true,
 				}),
 			},
@@ -105,7 +110,8 @@ describe("Line Wrapping", () => {
 				name: "metadata",
 				box: box({
 					parent: screen,
-					content: "Status: Active\nAssignee: @user1, @user2, @user3\nCreated: 2024-01-01",
+					content:
+						"Status: Active\nAssignee: @user1, @user2, @user3\nCreated: 2024-01-01",
 					wrap: true,
 				}),
 			},
@@ -153,7 +159,9 @@ describe("Line Wrapping", () => {
 		screen.render();
 
 		// The list should be constrained by its parent width
-		assert.ok(proposalList.width != null && Number(proposalList.width) < screen.width);
+		assert.ok(
+			proposalList.width != null && Number(proposalList.width) < screen.width,
+		);
 
 		screen.destroy();
 	});
@@ -176,7 +184,8 @@ describe("Line Wrapping", () => {
 
 		const contentArea = box({
 			parent: screen,
-			content: "Proposal content goes here with descriptions and acceptance criteria",
+			content:
+				"Proposal content goes here with descriptions and acceptance criteria",
 			wrap: true,
 		});
 
