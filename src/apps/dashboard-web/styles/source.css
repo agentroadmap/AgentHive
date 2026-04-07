@@ -1,204 +1,204 @@
 @import "tailwindcss";
-@import '@uiw/react-md-editor/markdown-editor.css';
-@import '@uiw/react-markdown-preview/markdown.css';
+@import "@uiw/react-md-editor/markdown-editor.css";
+@import "@uiw/react-markdown-preview/markdown.css";
 
 @source not inline("{rounded-full}");
 
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-    --radius-circle: 9999px;
+	--radius-circle: 9999px;
 }
 
 @layer base {
-    button {
-        cursor: pointer;
-    }
+	button {
+		cursor: pointer;
+	}
 
-    button:disabled {
-        cursor: not-allowed;
-    }
+	button:disabled {
+		cursor: not-allowed;
+	}
 }
 
 @layer utilities {
-    .rounded-circle {
-        border-radius: var(--radius-circle);
-    }
+	.rounded-circle {
+		border-radius: var(--radius-circle);
+	}
 
-    /* Custom Blue-Dark Theme for MDEditor - moved to utilities for higher precedence */
-    .wmde-markdown-var[data-color-mode*="dark"],
-    .wmde-markdown[data-color-mode*="dark"],
-    [data-color-mode*="dark"] .wmde-markdown,
-    [data-color-mode*="dark"] .wmde-markdown-var,
-    div[data-color-mode*="dark"] .wmde-markdown-var,
-    div[data-color-mode*="dark"] .wmde-markdown {
-        /* Base canvas and text colors */
-        --color-canvas-default: #1e293b;
-        /* slate-800 - main background */
-        --color-canvas-subtle: #334155;
-        /* slate-700 - subtle background */
-        --color-fg-default: #f1f5f9;
-        /* slate-100 - primary text */
-        --color-fg-muted: #94a3b8;
-        /* slate-400 - muted text */
-        --color-fg-subtle: #64748b;
-        /* slate-500 - subtle text */
+	/* Custom Blue-Dark Theme for MDEditor - moved to utilities for higher precedence */
+	.wmde-markdown-var[data-color-mode*="dark"],
+	.wmde-markdown[data-color-mode*="dark"],
+	[data-color-mode*="dark"] .wmde-markdown,
+	[data-color-mode*="dark"] .wmde-markdown-var,
+	div[data-color-mode*="dark"] .wmde-markdown-var,
+	div[data-color-mode*="dark"] .wmde-markdown {
+		/* Base canvas and text colors */
+		--color-canvas-default: #1e293b;
+		/* slate-800 - main background */
+		--color-canvas-subtle: #334155;
+		/* slate-700 - subtle background */
+		--color-fg-default: #f1f5f9;
+		/* slate-100 - primary text */
+		--color-fg-muted: #94a3b8;
+		/* slate-400 - muted text */
+		--color-fg-subtle: #64748b;
+		/* slate-500 - subtle text */
 
-        /* Borders */
-        --color-border-default: #475569;
-        /* slate-600 - borders */
-        --color-border-muted: #334155;
-        /* slate-700 - muted borders */
+		/* Borders */
+		--color-border-default: #475569;
+		/* slate-600 - borders */
+		--color-border-muted: #334155;
+		/* slate-700 - muted borders */
 
-        /* Syntax highlighting with blue theme */
-        --color-prettylights-syntax-comment: #94a3b8;
-        --color-prettylights-syntax-constant: #60a5fa;
-        --color-prettylights-syntax-string: #10b981;
-        --color-prettylights-syntax-keyword: #f59e0b;
-        --color-prettylights-syntax-entity: #a855f7;
-        --color-prettylights-syntax-variable: #06b6d4;
+		/* Syntax highlighting with blue theme */
+		--color-prettylights-syntax-comment: #94a3b8;
+		--color-prettylights-syntax-constant: #60a5fa;
+		--color-prettylights-syntax-string: #10b981;
+		--color-prettylights-syntax-keyword: #f59e0b;
+		--color-prettylights-syntax-entity: #a855f7;
+		--color-prettylights-syntax-variable: #06b6d4;
 
-        /* Accent colors */
-        --color-accent-fg: #3b82f6;
-        --color-accent-emphasis: #2563eb;
+		/* Accent colors */
+		--color-accent-fg: #3b82f6;
+		--color-accent-emphasis: #2563eb;
 
-        /* Additional variables for preview mode */
-        --color-prettylights-syntax-markup-heading: #3b82f6;
-        --color-prettylights-syntax-markup-bold: #f1f5f9;
-        --color-prettylights-syntax-markup-italic: #cbd5e1;
-        --color-prettylights-syntax-markup-list: #fbbf24;
-        --color-prettylights-syntax-markup-code-bg: #334155;
-    }
+		/* Additional variables for preview mode */
+		--color-prettylights-syntax-markup-heading: #3b82f6;
+		--color-prettylights-syntax-markup-bold: #f1f5f9;
+		--color-prettylights-syntax-markup-italic: #cbd5e1;
+		--color-prettylights-syntax-markup-list: #fbbf24;
+		--color-prettylights-syntax-markup-code-bg: #334155;
+	}
 }
 
 @layer components {
-    /* Custom styles that can't be done with Tailwind utilities */
-    /* Line clamp utilities for text truncation */
-    .line-clamp-2 {
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-    }
+	/* Custom styles that can't be done with Tailwind utilities */
+	/* Line clamp utilities for text truncation */
+	.line-clamp-2 {
+		display: -webkit-box;
+		-webkit-line-clamp: 2;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+	}
 
-    .line-clamp-3 {
-        display: -webkit-box;
-        -webkit-line-clamp: 3;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-    }
+	.line-clamp-3 {
+		display: -webkit-box;
+		-webkit-line-clamp: 3;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+	}
 
-    /* Hide scrollbar for chip input */
-    .scrollbar-hide {
-        -ms-overflow-style: none;
-        /* IE and Edge */
-        scrollbar-width: none;
-        /* Firefox */
-    }
+	/* Hide scrollbar for chip input */
+	.scrollbar-hide {
+		-ms-overflow-style: none;
+		/* IE and Edge */
+		scrollbar-width: none;
+		/* Firefox */
+	}
 
-    .scrollbar-hide::-webkit-scrollbar {
-        display: none;
-        /* Chrome, Safari and Opera */
-    }
+	.scrollbar-hide::-webkit-scrollbar {
+		display: none;
+		/* Chrome, Safari and Opera */
+	}
 
-    /* Health check notification animations */
-    @keyframes slide-in-right {
-        from {
-            transform: translateX(100%);
-            opacity: 0;
-        }
+	/* Health check notification animations */
+	@keyframes slide-in-right {
+		from {
+			transform: translateX(100%);
+			opacity: 0;
+		}
 
-        to {
-            transform: translateX(0);
-            opacity: 1;
-        }
-    }
+		to {
+			transform: translateX(0);
+			opacity: 1;
+		}
+	}
 
-    @keyframes slide-in-down {
-        from {
-            transform: translateY(-100%);
-            opacity: 0;
-        }
+	@keyframes slide-in-down {
+		from {
+			transform: translateY(-100%);
+			opacity: 0;
+		}
 
-        to {
-            transform: translateY(0);
-            opacity: 1;
-        }
-    }
+		to {
+			transform: translateY(0);
+			opacity: 1;
+		}
+	}
 
-    .animate-slide-in-right {
-        animation: slide-in-right 0.3s ease-out;
-    }
+	.animate-slide-in-right {
+		animation: slide-in-right 0.3s ease-out;
+	}
 
-    .animate-slide-in-down {
-        animation: slide-in-down 0.3s ease-out;
-    }
+	.animate-slide-in-down {
+		animation: slide-in-down 0.3s ease-out;
+	}
 
-    /* Avoid forcing internal editor heights; use component props instead */
+	/* Avoid forcing internal editor heights; use component props instead */
 
-    /* Fix for long content in markdown preview - scope to preview containers only */
-    .wmde-markdown pre,
-    .wmde-markdown .wmde-markdown pre {
-        white-space: pre-wrap;
-        word-break: break-word;
-        overflow-wrap: break-word;
-        overflow-x: auto;
-        max-width: 100%;
-    }
+	/* Fix for long content in markdown preview - scope to preview containers only */
+	.wmde-markdown pre,
+	.wmde-markdown .wmde-markdown pre {
+		white-space: pre-wrap;
+		word-break: break-word;
+		overflow-wrap: break-word;
+		overflow-x: auto;
+		max-width: 100%;
+	}
 
-    /* Ensure code blocks don't overflow in preview */
-    .wmde-markdown pre code,
-    .wmde-markdown code.code-highlight {
-        white-space: pre-wrap;
-        word-break: break-word;
-        overflow-wrap: break-word;
-        display: block;
-        max-width: 100%;
-    }
+	/* Ensure code blocks don't overflow in preview */
+	.wmde-markdown pre code,
+	.wmde-markdown code.code-highlight {
+		white-space: pre-wrap;
+		word-break: break-word;
+		overflow-wrap: break-word;
+		display: block;
+		max-width: 100%;
+	}
 
-    /* Ensure the markdown container itself doesn't overflow */
-    .wmde-markdown,
-    .wmde-markdown-color {
-        max-width: 100%;
-        overflow-x: hidden;
-    }
+	/* Ensure the markdown container itself doesn't overflow */
+	.wmde-markdown,
+	.wmde-markdown-color {
+		max-width: 100%;
+		overflow-x: hidden;
+	}
 
-    /* Restore list styles inside markdown preview (Tailwind preflight resets list-style) */
-    .wmde-markdown ul {
-        list-style: disc;
-        padding-left: 1.5rem;
-        margin: 0 0 1rem;
-    }
-    .wmde-markdown ol {
-        list-style: decimal;
-        padding-left: 1.5rem;
-        margin: 0 0 1rem;
-    }
-    .wmde-markdown li {
-        margin: 0.25rem 0;
-    }
-    .wmde-markdown ul ul {
-        list-style: circle;
-    }
-    .wmde-markdown ul ul ul {
-        list-style: square;
-    }
+	/* Restore list styles inside markdown preview (Tailwind preflight resets list-style) */
+	.wmde-markdown ul {
+		list-style: disc;
+		padding-left: 1.5rem;
+		margin: 0 0 1rem;
+	}
+	.wmde-markdown ol {
+		list-style: decimal;
+		padding-left: 1.5rem;
+		margin: 0 0 1rem;
+	}
+	.wmde-markdown li {
+		margin: 0.25rem 0;
+	}
+	.wmde-markdown ul ul {
+		list-style: circle;
+	}
+	.wmde-markdown ul ul ul {
+		list-style: square;
+	}
 
-    /* Fix for inline code that might be too long */
-    .wmde-markdown code {
-        word-break: break-word;
-        overflow-wrap: break-word;
-    }
+	/* Fix for inline code that might be too long */
+	.wmde-markdown code {
+		word-break: break-word;
+		overflow-wrap: break-word;
+	}
 
-    /* Ensure code lines wrap properly */
-    .wmde-markdown .code-line {
-        white-space: pre-wrap;
-        word-break: break-word;
-        overflow-wrap: break-word;
-    }
+	/* Ensure code lines wrap properly */
+	.wmde-markdown .code-line {
+		white-space: pre-wrap;
+		word-break: break-word;
+		overflow-wrap: break-word;
+	}
 
-    /* Prevent resizing of the editor's textarea to avoid overlay misalignment */
-    .w-md-editor textarea {
-        resize: none;
-    }
+	/* Prevent resizing of the editor's textarea to avoid overlay misalignment */
+	.w-md-editor textarea {
+		resize: none;
+	}
 }

@@ -180,12 +180,19 @@ const ProposalColumn: React.FC<ProposalColumnProps> = ({
 
 			<div className="space-y-3">
 				{proposals.map((proposal, index) => (
-					<div
+					<button
+						type="button"
 						key={proposal.id}
-						className={`relative ${selectedProposalId === proposal.id ? "ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-gray-800 rounded-md" : ""}`}
+						className={`relative block w-full text-left ${selectedProposalId === proposal.id ? "ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-gray-800 rounded-md" : ""}`}
 						onClick={(e) => {
 							e.stopPropagation();
 							onSelectProposal?.(proposal.id);
+						}}
+						onKeyDown={(e) => {
+							if (e.key === "Enter" || e.key === " ") {
+								e.stopPropagation();
+								onSelectProposal?.(proposal.id);
+							}
 						}}
 						onDragOver={(e) => {
 							if (
@@ -236,7 +243,7 @@ const ProposalColumn: React.FC<ProposalColumnProps> = ({
 							dropPosition.position === "after" && (
 								<div className="h-1 bg-blue-500 rounded-full mt-2 animate-pulse" />
 							)}
-					</div>
+					</button>
 				))}
 
 				{/* Drop zone indicator - only show in different columns */}

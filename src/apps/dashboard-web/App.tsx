@@ -32,7 +32,7 @@ const STATUSES = [
 ];
 
 export default function App() {
-	const { connected, proposals, agents, channels } = useWebSocket();
+	const { proposals, agents, channels } = useWebSocket();
 	const [activeFeature, setActiveFeature] = useState<string | null>(null);
 
 	const handleProposalClick = (proposal: Proposal) => {

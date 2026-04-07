@@ -54,10 +54,7 @@ function postAndListen(sessionId, res, data, timeoutMs = 15000) {
 				},
 			},
 			(pr) => {
-				let d = "";
-				pr.on("data", (c) => {
-					d += c;
-				});
+				pr.on("data", (_c) => {});
 				pr.on("end", () => {});
 			},
 		);

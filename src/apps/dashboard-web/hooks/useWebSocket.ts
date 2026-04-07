@@ -9,8 +9,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface WebSocketMessage {
 	type: string;
-	data?: any;
-	[key: string]: any;
+	data?: unknown;
+	[key: string]: unknown;
 }
 
 export interface Proposal {

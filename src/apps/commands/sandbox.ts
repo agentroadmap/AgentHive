@@ -56,10 +56,16 @@ sandboxCommand
 			await fs.mkdir(geminiDir, { recursive: true });
 
 			// 3. Write/Update settings.json
-			let settings: any = {};
+			interface SandboxSettings {
+				tools?: {
+					sandbox?: string;
+				};
+				[key: string]: unknown;
+			}
+			let settings: SandboxSettings = {};
 			try {
 				const existing = await fs.readFile(settingsPath, "utf-8");
-				settings = JSON.parse(existing);
+				settings = JSON.parse(existing) as SandboxSettings;
 			} catch {
 				// File doesn't exist or is invalid JSON, start fresh
 			}

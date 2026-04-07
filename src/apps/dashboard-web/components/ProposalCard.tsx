@@ -118,7 +118,10 @@ const ProposalCard: React.FC<ProposalCardProps> = ({
 							fill="none"
 							stroke="currentColor"
 							viewBox="0 0 24 24"
+							role="img"
+							aria-labelledby="branch-warning-title"
 						>
+							<title id="branch-warning-title">Branch Warning</title>
 							<path
 								strokeLinecap="round"
 								strokeLinejoin="round"
@@ -136,8 +139,9 @@ const ProposalCard: React.FC<ProposalCardProps> = ({
 				</div>
 			)}
 
-			<div
-				className={`bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md p-3 mb-2 transition-all duration-200 ${
+			<button
+				type="button"
+				className={`bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md p-3 mb-2 transition-all duration-200 text-left w-full ${
 					isFromOtherBranch
 						? "opacity-75 cursor-not-allowed border-dashed"
 						: "cursor-pointer hover:shadow-md dark:hover:shadow-lg hover:border-stone-500 dark:hover:border-stone-400"
@@ -148,6 +152,11 @@ const ProposalCard: React.FC<ProposalCardProps> = ({
 				onDragStart={handleDragStart}
 				onDragEnd={handleDragEnd}
 				onClick={() => onEdit(proposal)}
+				onKeyDown={(e) => {
+					if (e.key === "Enter" || e.key === " ") {
+						onEdit(proposal);
+					}
+				}}
 			>
 				{/* Cross-branch indicator banner */}
 				{isFromOtherBranch && (
@@ -157,7 +166,10 @@ const ProposalCard: React.FC<ProposalCardProps> = ({
 							fill="none"
 							stroke="currentColor"
 							viewBox="0 0 24 24"
+							role="img"
+							aria-labelledby="branch-warning-banner-title"
 						>
+							<title id="branch-warning-banner-title">Branch Warning</title>
 							<path
 								strokeLinecap="round"
 								strokeLinejoin="round"
@@ -231,7 +243,7 @@ const ProposalCard: React.FC<ProposalCardProps> = ({
 						</span>
 					)}
 				</div>
-			</div>
+			</button>
 		</div>
 	);
 };

@@ -164,7 +164,7 @@ Project: ${projectName}
 	for (let proposalIdx = 0; proposalIdx < maxProposals; proposalIdx++) {
 		const row = orderedStatuses.map((_, cIdx) => {
 			const proposal = columns[cIdx]?.[proposalIdx];
-			if (!proposal || !proposal.id || !proposal.title) return "";
+			if (!proposal?.id || !proposal.title) return "";
 
 			// Check if this is a subproposal
 			const isSubproposal = proposal.parentProposalId;
@@ -357,7 +357,7 @@ function generateDirectiveSection(
 			const assignees = t.assignee?.length
 				? ` [@${t.assignee.join(", @")}]`
 				: "";
-			const maturity = (t as any).maturity;
+			const maturity = t.maturity;
 			const maturityIcon = getMaturityIcon(maturity);
 			return `  - ${maturityIcon}${statusIcon} **${id}** - ${t.title}${assignees}`;
 		});
