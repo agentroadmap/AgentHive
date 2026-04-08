@@ -227,29 +227,28 @@ const BUILTIN_SMDLS: SMDLWorkflow[] = [
 			{ name: "Skeptic", description: "QA & adversarial review", clearance: 2 },
 		],
 		stages: [
-			{ name: "PROPOSAL", order: 1, description: "Initial idea submitted" },
-			{ name: "DRAFT", order: 2, description: "AI research and enhancement" },
+			{ name: "DRAFT", order: 1, description: "AI research and enhancement" },
 			{
 				name: "REVIEW",
-				order: 3,
+				order: 2,
 				description: "Formal review, define acceptance criteria",
 				requires_ac: true,
 			},
 			{
 				name: "DEVELOP",
-				order: 4,
+				order: 3,
 				description: "Design, build, test",
 				requires_ac: true,
 			},
 			{
 				name: "MERGE",
-				order: 5,
+				order: 4,
 				description: "Code review, regression, E2E testing",
 				requires_ac: true,
 			},
 			{
 				name: "COMPLETE",
-				order: 6,
+				order: 5,
 				description: "Released and dependencies resolved",
 			},
 			{
@@ -260,12 +259,6 @@ const BUILTIN_SMDLS: SMDLWorkflow[] = [
 			{ name: "DISCARDED", order: 98, description: "Deprecated or abandoned" },
 		],
 		transitions: [
-			{
-				from: "PROPOSAL",
-				to: "DRAFT",
-				labels: ["mature", "submit"],
-				allowed_roles: ["any"],
-			},
 			{
 				from: "DRAFT",
 				to: "REVIEW",
