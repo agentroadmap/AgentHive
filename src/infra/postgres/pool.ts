@@ -27,6 +27,7 @@ import {
 	if (process.env.PG_PASSWORD) return;
 	const candidates = [
 		resolve(process.cwd(), ".env"),
+		resolve(process.cwd(), ".env.agent"),
 		join(process.env.HOME || "", ".agenthive.env"),
 	];
 	for (const envPath of candidates) {

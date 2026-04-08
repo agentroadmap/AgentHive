@@ -230,6 +230,26 @@ export async function createProposal(
 	input: ProposalCreateInput,
 	authorIdentity: string,
 ): Promise<ProposalRow> {
+	// Resolve the workflow's start_stage for this proposal type so the initial
+	// status matches the workflow (e.g. Quick Fix starts at TRIAGE, not Draft).
+	// Falls back to "Draft" if no workflow is configured for this type.
+	let initialStatus = input.status ?? "Draft";
+	if (!input.status) {
+		const { rows: wfRows } = await query<{ start_stage: string | null }>(
+			`SELECT ws.stage_name AS start_stage
+       FROM roadmap.proposal_type_config ptc
+       JOIN roadmap.workflow_templates wt ON wt.name = ptc.workflow_name
+       JOIN roadmap.workflow_stages ws ON ws.template_id = wt.id
+       WHERE ptc.type = $1
+       ORDER BY ws.stage_order ASC
+       LIMIT 1`,
+			[input.type],
+		);
+		if (wfRows[0]?.start_stage) {
+			initialStatus = wfRows[0].start_stage;
+		}
+	}
+
 	const { rows } = await query<ProposalRow>(
 		`INSERT INTO proposal (
       display_id, type, status, title, parent_id, summary, motivation, design,
@@ -239,7 +259,7 @@ export async function createProposal(
 		[
 			input.display_id ?? null,
 			input.type,
-			input.status ?? "Draft",
+			initialStatus,
 			input.title,
 			input.parent_id ?? null,
 			input.summary ?? null,
@@ -354,6 +374,15 @@ export async function transitionProposal(
 			`Transition ${fromState} → ${toState} not allowed for this proposal's workflow`,
 		);
 	}
+
+	// Ensure the author exists in agent_registry so the FK on
+	// proposal_state_transitions.transitioned_by doesn't reject the trigger insert.
+	await query(
+		`INSERT INTO agent_registry (agent_identity, agent_type, status)
+     VALUES ($1, 'llm', 'active')
+     ON CONFLICT (agent_identity) DO NOTHING`,
+		[transitionedBy],
+	);
 
 	// DB trigger will handle state_transitions + outbox + audit
 	const { rows } = await query<ProposalRow>(
