@@ -12,16 +12,16 @@ skinparam ArrowFontColor #888780
 
 title Vision & Directive Driven RFC State Machine
 
-[*] --> Draft : Proposal — identifies need
+[*] --> Draft :  🌱 Proposal — identifies need
 
 state Draft {
   Draft : AI research & enhance\nSummary · Motivation · Design · Tradeoffs
 }
 
-state "Decision" as D1 <<choice>>
-state "Decision" as D2 <<choice>>
-state "Decision" as D3 <<choice>>
-state "Decision" as D4 <<choice>>
+state "Decision" as D1 <<choice>> : ✔️ Mature decision — advance
+state "Decision" as D2 <<choice>> : ✔️ Mature decision — advance
+state "Decision" as D3 <<choice>> : ✔️ Mature decision — advance
+state "Decision" as D4 <<choice>> : ✔️ Mature decision — advance
 
 state Review {
   Review : [GATE] AI feedback & debate\nDefine acceptance criteria
@@ -39,12 +39,6 @@ state Complete {
   Complete : Release dependency resolved
 }
 
-' Local wait states (self-contained, no spaghetti)
-state "⏳ wait" as W1
-state "⏳ wait" as W2
-state "⏳ wait" as W3
-state "⏳ wait" as W4
-
 ' Local terminal stubs for discard/reject
 state "🗑" as X1 <<end>>
 state "🗑" as X2 <<end>>
@@ -52,38 +46,33 @@ state "🗑" as X3 <<end>>
 state "🗑" as X4 <<end>>
 
 ' --- Draft → D1 ---
-Draft -down-> D1
-D1 -down->  Review : ⚖ mature
+Draft -down-> D1 : mature
+D1 -down->  Review : 🌿 advance
 D1 -left->  Draft  : 🔄 revise/split
-D1 -right-> W1     : ⏳ depend
 D1 -->      X1     : 🗑 discard
 
 ' --- Review → D2 ---
-Review -down-> D2
-D2 -down->  Develop : ⚖ mature
+Review -down-> D2 : mature
+D2 -down->  Develop :  🌳 advance
 D2 -left->  Review   : 🔄 revise/split
-D2 -right-> W2      : ⏳ depend
 D2 -->      X2      : 🗑 reject
 
 ' --- Develop → D3 ---
-Develop -down-> D3
-D3 -down->  Merge  : ⚖ mature
+Develop -down-> D3 : mature
+D3 -down->  Merge  : 𓀅 advance
 D3 -left->  Develop : 🔄 revise/split
-D3 -right-> W3     : ⏳ depend
 D3 -->      X3     : 🗑 reject
 
 ' --- Merge → D4 ---
-Merge -down-> D4
-D4 -down->  Complete : ⚖ approved
+Merge -down-> D4 : mature
+D4 -down->  Complete : 🎉 merged
 D4 -left->  Merge  : 🔄 revise/split
-D4 -right-> W4       : ⏳ depend
 D4 -->      X4       : 🗑 reject
 
 ' --- Complete ---
 Complete -down-> [*]
 
 legend right
-  **[GATE]**  Human approval required
   **⚖**       Mature decision — advance
   **🔄**       Revise or split (one level up)
   **⏳**       Blocked — wait for dependency
@@ -92,8 +81,12 @@ legend right
   All states support:
   · Escalation to frontier model or human
   · Circuit breaker on runaway loop
+  · All D* gating decisions need proposal decision records for auditability
+  · All D* gating decisions need proposal decision records for auditability
+
+
 endlegend
 
-footer agentRoadmap v2.5 Architecture
+footer agentHive v2.5 Architecture
 @enduml
 
