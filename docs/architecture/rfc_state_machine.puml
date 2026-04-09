@@ -18,10 +18,10 @@ state Draft {
   Draft : AI research & enhance\nSummary · Motivation · Design · Tradeoffs
 }
 
-state "Decision" as D1 <<choice>> : ✔️ Mature decision — advance
-state "Decision" as D2 <<choice>> : ✔️ Mature decision — advance
-state "Decision" as D3 <<choice>> : ✔️ Mature decision — advance
-state "Decision" as D4 <<choice>> : ✔️ Mature decision — advance
+state "Decision" as D1 <<choice>>
+state "Decision" as D2 <<choice>>
+state "Decision" as D3 <<choice>>
+state "Decision" as D4 <<choice>>
 
 state Review {
   Review : [GATE] AI feedback & debate\nDefine acceptance criteria
@@ -58,8 +58,8 @@ D2 -left->  Review   : 🔄 revise/split
 D2 -->      X2      : 🗑 reject
 
 ' --- Develop → D3 ---
-Develop -down-> D3 : mature
-D3 -down->  Merge  : 𓀅 advance
+Develop -down-> D3 :  mature
+D3 -down->  Merge  : 🧩 advance
 D3 -left->  Develop : 🔄 revise/split
 D3 -->      X3     : 🗑 reject
 
@@ -73,16 +73,19 @@ D4 -->      X4       : 🗑 reject
 Complete -down-> [*]
 
 legend right
-  **⚖**       Mature decision — advance
+  **✍️**       Mature decision — advance
   **🔄**       Revise or split (one level up)
-  **⏳**       Blocked — wait for dependency
-  **🗑**        Discard / reject (local terminal)
+  **🗑**       Discard / reject (local terminal)
   ---
   All states support:
-  · Escalation to frontier model or human
+  · Escalation to frontier model or USER
   · Circuit breaker on runaway loop
-  · All D* gating decisions need proposal decision records for auditability
-  · All D* gating decisions need proposal decision records for auditability
+  · States are Draft -> Review -> Develop -> Merge -> Compete; there are archived states as: Rejected, Discard, Replaced - dependencies shall be carefully re-evaluated
+  . With each state, there is universal maturity: New -> Active -> Mature -> Obsolete (natual finality)
+  . Do not intruduce state or maturity in this workflow
+  · Once researcher, designer, developer self claim mature, it's on queue to be evaluated
+  · All D* gating decisions need proposal decision record for auditability
+  . When a proposal has dependency, it naturally orders behind dependencies
 
 
 endlegend
