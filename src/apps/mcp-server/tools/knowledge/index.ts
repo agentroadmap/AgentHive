@@ -19,10 +19,57 @@ import {
 	knowledgeSearchSchema,
 } from "./schemas.ts";
 
+type KnowledgeAddInput = {
+	type: "solution" | "pattern" | "decision" | "obstacle" | "learned";
+	title: string;
+	content: string;
+	keywords?: string[];
+	relatedProposals?: string[];
+	sourceProposalId?: string;
+	author: string;
+	confidence?: number;
+	tags?: string[];
+};
+
+type KnowledgeSearchInput = {
+	keywords: string[];
+	type?: "solution" | "pattern" | "decision" | "obstacle" | "learned";
+	tags?: string[];
+	minConfidence?: number;
+	relatedProposal?: string;
+	limit?: number;
+};
+
+type KnowledgeRecordDecisionInput = {
+	title: string;
+	content: string;
+	rationale: string;
+	alternatives?: string[];
+	author: string;
+	relatedProposalId?: string;
+	tags?: string[];
+};
+
+type KnowledgeExtractPatternInput = {
+	name: string;
+	description: string;
+	codeExample?: string;
+	firstSeenAt: string;
+	relatedEntries?: string[];
+};
+
+type KnowledgeGetDecisionsInput = {
+	relatedProposal?: string;
+};
+
+type KnowledgeMarkHelpfulInput = {
+	entryId: string;
+};
+
 export function registerKnowledgeTools(server: McpServer): void {
 	const handlers = new KnowledgeHandlers(server);
 
-	const addEntryTool: McpToolHandler = createSimpleValidatedTool(
+	const addEntryTool: McpToolHandler = createSimpleValidatedTool<KnowledgeAddInput>(
 		{
 			name: "knowledge_add",
 			description:
@@ -33,7 +80,8 @@ export function registerKnowledgeTools(server: McpServer): void {
 		async (input) => handlers.addEntry(input),
 	);
 
-	const searchTool: McpToolHandler = createSimpleValidatedTool(
+	const searchTool: McpToolHandler =
+		createSimpleValidatedTool<KnowledgeSearchInput>(
 		{
 			name: "knowledge_search",
 			description: "Search the knowledge base by keywords with fuzzy matching",
@@ -43,7 +91,8 @@ export function registerKnowledgeTools(server: McpServer): void {
 		async (input) => handlers.search(input),
 	);
 
-	const recordDecisionTool: McpToolHandler = createSimpleValidatedTool(
+	const recordDecisionTool: McpToolHandler =
+		createSimpleValidatedTool<KnowledgeRecordDecisionInput>(
 		{
 			name: "knowledge_record_decision",
 			description:
@@ -54,7 +103,8 @@ export function registerKnowledgeTools(server: McpServer): void {
 		async (input) => handlers.recordDecision(input),
 	);
 
-	const extractPatternTool: McpToolHandler = createSimpleValidatedTool(
+	const extractPatternTool: McpToolHandler =
+		createSimpleValidatedTool<KnowledgeExtractPatternInput>(
 		{
 			name: "knowledge_extract_pattern",
 			description:
@@ -65,7 +115,8 @@ export function registerKnowledgeTools(server: McpServer): void {
 		async (input) => handlers.extractPattern(input),
 	);
 
-	const getDecisionsTool: McpToolHandler = createSimpleValidatedTool(
+	const getDecisionsTool: McpToolHandler =
+		createSimpleValidatedTool<KnowledgeGetDecisionsInput>(
 		{
 			name: "knowledge_get_decisions",
 			description:
@@ -86,7 +137,8 @@ export function registerKnowledgeTools(server: McpServer): void {
 		async () => handlers.getStats(),
 	);
 
-	const markHelpfulTool: McpToolHandler = createSimpleValidatedTool(
+	const markHelpfulTool: McpToolHandler =
+		createSimpleValidatedTool<KnowledgeMarkHelpfulInput>(
 		{
 			name: "knowledge_mark_helpful",
 			description: "Mark a knowledge entry as helpful (upvote)",

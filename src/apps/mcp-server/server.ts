@@ -527,6 +527,9 @@ export async function createMcpServer(
 		type GetSpendingReportArgs = Parameters<
 			typeof spending.getSpendingReport
 		>[0];
+		type GetTokenEfficiencyReportArgs = Parameters<
+			typeof spending.getTokenEfficiencyReport
+		>[0];
 		type ListModelsArgs = Parameters<typeof models.listModels>[0];
 		type AddModelArgs = Parameters<typeof models.addModel>[0];
 		server.addTool({
@@ -558,6 +561,13 @@ export async function createMcpServer(
 					token_count: { type: "string" },
 					run_id: { type: "string" },
 					budget_id: { type: "string" },
+					session_id: { type: "string" },
+					agent_role: { type: "string" },
+					task_type: { type: "string" },
+					input_tokens: { type: "string" },
+					output_tokens: { type: "string" },
+					cache_write_tokens: { type: "string" },
+					cache_read_tokens: { type: "string" },
 				},
 				required: ["agent_identity", "cost_usd"],
 			},
@@ -571,6 +581,19 @@ export async function createMcpServer(
 				properties: { agent_identity: { type: "string" } },
 			},
 			handler: (a) => spending.getSpendingReport(a as GetSpendingReportArgs),
+		});
+		server.addTool({
+			name: "spending_efficiency_report",
+			description: "Get token efficiency report",
+			inputSchema: {
+				type: "object",
+				properties: {
+					agent_role: { type: "string" },
+					model: { type: "string" },
+				},
+			},
+			handler: (a) =>
+				spending.getTokenEfficiencyReport(a as GetTokenEfficiencyReportArgs),
 		});
 		server.addTool({
 			name: "model_list",

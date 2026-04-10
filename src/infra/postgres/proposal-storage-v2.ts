@@ -454,49 +454,6 @@ export async function transitionProposal(
 }
 
 /**
- * Set the maturity_state of a proposal.
- * When set to 'mature', the DB trigger trg_gate_ready fires pg_notify
- * which enqueues a gate task in transition_queue.
- */
-export async function setMaturity(
-	proposalId: number,
-	maturityState: 'new' | 'active' | 'mature' | 'obsolete',
-	agentIdentity: string,
-): Promise<ProposalRow | null> {
-	const { rows } = await query<ProposalRow>(
-		`WITH _actor AS (
-	       SELECT set_config('app.agent_identity', $1, true) AS agent_identity
-	     )
-	     UPDATE proposal
-	     SET maturity_state = $2, modified_at = NOW()
-	     FROM _actor
-	     WHERE id = $3
-	     RETURNING ${PROPOSAL_COLUMNS}`,
-		[agentIdentity, maturityState, proposalId],
-	);
-
-	if (!rows[0]) return null;
-
-	// Also append to audit
-	await query(
-		`UPDATE proposal
-	     SET audit = audit || $1::jsonb
-	     WHERE id = $2`,
-		[
-			JSON.stringify({
-				TS: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
-				Agent: agentIdentity,
-				Activity: 'MaturityChange',
-				To: maturityState,
-			}),
-			proposalId,
-		],
-	);
-
-	return rows[0];
-}
-
-/**
  * Get valid transitions for a proposal.
  */
 export async function getValidTransitions(proposalId: number): Promise<
@@ -531,7 +488,7 @@ export async function getValidTransitions(proposalId: number): Promise<
 export async function setMaturity(
 	proposalId: number,
 	maturityState: "new" | "active" | "mature" | "obsolete",
-	agentId: string,
+	agentIdentity: string,
 	reason?: string,
 ): Promise<ProposalRow | null> {
 	const valid = new Set(["new", "active", "mature", "obsolete"]);
@@ -542,15 +499,34 @@ export async function setMaturity(
 	}
 
 	const { rows } = await query<ProposalRow>(
-		`UPDATE proposal
-     SET maturity_state = $1,
+		`WITH _actor AS (
+       SELECT set_config('app.agent_identity', $1, true) AS agent_identity
+     )
+     UPDATE proposal
+     SET maturity_state = $2,
          modified_at    = NOW()
-     WHERE id = $2
+     FROM _actor
+     WHERE id = $3
      RETURNING ${PROPOSAL_COLUMNS}`,
-		[maturityState, proposalId],
+		[agentIdentity, maturityState, proposalId],
 	);
 
 	if (!rows[0]) return null;
+
+	await query(
+		`UPDATE proposal
+     SET audit = audit || $1::jsonb
+     WHERE id = $2`,
+		[
+			JSON.stringify({
+				TS: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+				Agent: agentIdentity,
+				Activity: "MaturityChange",
+				To: maturityState,
+			}),
+			proposalId,
+		],
+	);
 
 	// Record an audit note when self-declaring mature (the gate-ready event)
 	if (maturityState === "mature") {
@@ -560,7 +536,7 @@ export async function setMaturity(
        VALUES ($1, $2, 'general:', $3)`,
 			[
 				proposalId,
-				agentId,
+				agentIdentity,
 				reason
 					? `Declared mature: ${reason}`
 					: `Agent self-declared proposal ready for gate review (maturity → mature)`,

@@ -10,6 +10,23 @@ import { resolveProposalId } from "../../../../postgres/proposal-storage-v2.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
 
+function hasMissingRelation(err: unknown, relationName: string): boolean {
+	return (
+		err instanceof Error &&
+		(err.message.includes(`relation "${relationName}" does not exist`) ||
+			err.message.includes(`relation "metrics.${relationName}" does not exist`))
+	);
+}
+
+function isTokenEfficiencyUnavailable(err: unknown): boolean {
+	return (
+		hasMissingRelation(err, "token_efficiency") ||
+		hasMissingRelation(err, "v_weekly_efficiency") ||
+		(err instanceof Error &&
+			err.message.includes("permission denied for schema metrics"))
+	);
+}
+
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
 		content: [
@@ -91,6 +108,13 @@ export class PgSpendingHandlers {
 		token_count?: string;
 		run_id?: string;
 		budget_id?: string;
+		session_id?: string;
+		agent_role?: string;
+		task_type?: string;
+		input_tokens?: string;
+		output_tokens?: string;
+		cache_write_tokens?: string;
+		cache_read_tokens?: string;
 	}): Promise<CallToolResult> {
 		try {
 			const { rows: capRows } = await query<{
@@ -159,13 +183,28 @@ export class PgSpendingHandlers {
 				],
 			);
 
+			let efficiencyNote = "";
+			if (this.hasTokenEfficiencyPayload(args)) {
+				try {
+					await this.recordTokenEfficiency(args);
+					efficiencyNote = " Token efficiency metrics recorded.";
+				} catch (err) {
+					if (isTokenEfficiencyUnavailable(err)) {
+						efficiencyNote =
+							" Token efficiency metrics skipped; apply migration 014 first.";
+					} else {
+						throw err;
+					}
+				}
+			}
+
 			const snapshot = await this.getSpendingSnapshot(args.agent_identity);
 			if (!snapshot) {
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Logged $${args.cost_usd} for ${args.agent_identity}.`,
+							text: `Logged $${args.cost_usd} for ${args.agent_identity}.${efficiencyNote}`,
 						},
 					],
 				};
@@ -174,18 +213,18 @@ export class PgSpendingHandlers {
 			if (snapshot.is_frozen) {
 				return {
 					content: [
-						{
-							type: "text",
-							text: `⚠️ Spending cap exceeded! ${args.agent_identity} frozen at $${snapshot.total_spent_today_usd}/$${snapshot.daily_limit_usd ?? "∞"} today`,
-						},
-					],
-				};
+					{
+						type: "text",
+						text: `⚠️ Spending cap exceeded! ${args.agent_identity} frozen at $${snapshot.total_spent_today_usd}/$${snapshot.daily_limit_usd ?? "∞"} today.${efficiencyNote}`,
+					},
+				],
+			};
 			}
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Logged $${args.cost_usd} for ${args.agent_identity} ($${snapshot.total_spent_today_usd}/$${snapshot.daily_limit_usd ?? "∞"} today, $${snapshot.total_spent_month_usd}/$${snapshot.monthly_limit_usd ?? "∞"} month)`,
+						text: `Logged $${args.cost_usd} for ${args.agent_identity} ($${snapshot.total_spent_today_usd}/$${snapshot.daily_limit_usd ?? "∞"} today, $${snapshot.total_spent_month_usd}/$${snapshot.monthly_limit_usd ?? "∞"} month).${efficiencyNote}`,
 					},
 				],
 			};
@@ -209,6 +248,66 @@ export class PgSpendingHandlers {
 			return { content: [{ type: "text", text: lines.join("\n") }] };
 		} catch (err) {
 			return errorResult("Failed to get spending report", err);
+		}
+	}
+
+	async getTokenEfficiencyReport(args: {
+		agent_role?: string;
+		model?: string;
+	}): Promise<CallToolResult> {
+		try {
+			const { rows } = await query<{
+				week_start: string;
+				agent_role: string | null;
+				model: string;
+				invocations: number;
+				total_input_tokens: string;
+				total_output_tokens: string;
+				total_cache_read_tokens: string;
+				avg_cache_hit_rate: string;
+				total_cost_microdollars: string | null;
+			}>(
+				`SELECT
+           week_start::text,
+           agent_role,
+           model,
+           invocations,
+           total_input_tokens::text,
+           total_output_tokens::text,
+           total_cache_read_tokens::text,
+           avg_cache_hit_rate::text,
+           total_cost_microdollars::text
+         FROM metrics.v_weekly_efficiency
+         WHERE ($1::text IS NULL OR agent_role = $1)
+           AND ($2::text IS NULL OR model = $2)
+         ORDER BY week_start DESC, invocations DESC
+         LIMIT 20`,
+				[args.agent_role ?? null, args.model ?? null],
+			);
+			if (!rows.length) {
+				return {
+					content: [
+						{ type: "text", text: "No token efficiency data found." },
+					],
+				};
+			}
+			const lines = rows.map(
+				(row) =>
+					`${row.week_start} | ${row.agent_role ?? "unknown"} | ${row.model} | invocations=${row.invocations} | in=${row.total_input_tokens} | out=${row.total_output_tokens} | cache_read=${row.total_cache_read_tokens} | cache_hit=${row.avg_cache_hit_rate} | cost_microdollars=${row.total_cost_microdollars ?? "0"}`,
+			);
+			return { content: [{ type: "text", text: lines.join("\n") }] };
+		} catch (err) {
+			if (isTokenEfficiencyUnavailable(err)) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Token efficiency metrics are unavailable. Apply migration 014 first.",
+						},
+					],
+				};
+			}
+			return errorResult("Failed to get token efficiency report", err);
 		}
 	}
 
@@ -262,6 +361,70 @@ export class PgSpendingHandlers {
 			[agentIdentity ?? null],
 		);
 		return rows;
+	}
+
+	private hasTokenEfficiencyPayload(args: {
+		session_id?: string;
+		agent_role?: string;
+		task_type?: string;
+		input_tokens?: string;
+		output_tokens?: string;
+		cache_write_tokens?: string;
+		cache_read_tokens?: string;
+		model_name?: string;
+	}): boolean {
+		return [
+			args.session_id,
+			args.agent_role,
+			args.task_type,
+			args.input_tokens,
+			args.output_tokens,
+			args.cache_write_tokens,
+			args.cache_read_tokens,
+			args.model_name,
+		].some((value) => typeof value === "string" && value.length > 0);
+	}
+
+	private async recordTokenEfficiency(args: {
+		agent_identity: string;
+		proposal_id?: string;
+		cost_usd: string;
+		model_name?: string;
+		session_id?: string;
+		agent_role?: string;
+		task_type?: string;
+		input_tokens?: string;
+		output_tokens?: string;
+		cache_write_tokens?: string;
+		cache_read_tokens?: string;
+	}): Promise<void> {
+		const costMicrodollars = Math.round(parseFloat(args.cost_usd) * 1_000_000);
+		await query(
+			`INSERT INTO metrics.token_efficiency (
+         session_id,
+         agent_role,
+         model,
+         task_type,
+         proposal_id,
+         input_tokens,
+         output_tokens,
+         cache_write_tokens,
+         cache_read_tokens,
+         cost_microdollars
+       ) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+			[
+				args.session_id ?? null,
+				args.agent_role ?? args.agent_identity,
+				args.model_name ?? "unknown",
+				args.task_type ?? null,
+				args.proposal_id ?? null,
+				args.input_tokens ? parseInt(args.input_tokens, 10) : 0,
+				args.output_tokens ? parseInt(args.output_tokens, 10) : 0,
+				args.cache_write_tokens ? parseInt(args.cache_write_tokens, 10) : 0,
+				args.cache_read_tokens ? parseInt(args.cache_read_tokens, 10) : 0,
+				costMicrodollars,
+			],
+		);
 	}
 }
 

@@ -232,12 +232,12 @@ export class PgProposalHandlers {
 			if (current) {
 				const allowedTargets = gateTransitions[current.status];
 				if (allowedTargets?.includes(args.status)) {
-					if (!args.summary || args.summary.trim().length === 0) {
+					if (!args.notes || args.notes.trim().length === 0) {
 						return {
 							content: [
 								{
 									type: "text",
-									text: `Gate transition ${current.status} → ${args.status} requires decision notes. Please provide a summary with your reasoning.`,
+									text: `Gate transition ${current.status} → ${args.status} requires decision notes. Please provide notes with your reasoning.`,
 								},
 							],
 						};
