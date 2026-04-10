@@ -751,8 +751,281 @@ export async function createMcpServer(
 		const smdl = new SMDLWorkflowHandlers(server);
 		smdl.register();
 
+		// Cubic Orchestration tools (P058) — Postgres-backed
+		const { PgCubicHandlers } = await import(
+			"./tools/cubic/pg-handlers.ts"
+		);
+		const cubic = new PgCubicHandlers(server);
+		type CreateCubicArgs = Parameters<typeof cubic.createCubic>[0];
+		type ListCubicsArgs = Parameters<typeof cubic.listCubics>[0];
+		type FocusCubicArgs = Parameters<typeof cubic.focusCubic>[0];
+		type TransitionCubicArgs = Parameters<typeof cubic.transitionCubic>[0];
+		type RecycleCubicArgs = Parameters<typeof cubic.recycleCubic>[0];
+		server.addTool({
+			name: "cubic_create",
+			description: "Create a new cubic workspace",
+			inputSchema: {
+				type: "object",
+				properties: {
+					name: { type: "string" },
+					agents: { type: "array", items: { type: "string" } },
+					proposals: { type: "array", items: { type: "string" } },
+				},
+				required: ["name"],
+			},
+			handler: (a) => cubic.createCubic(a as CreateCubicArgs),
+		});
+		server.addTool({
+			name: "cubic_list",
+			description: "List all cubics",
+			inputSchema: {
+				type: "object",
+				properties: {
+					status: { type: "string" },
+					agent: { type: "string" },
+				},
+			},
+			handler: (a) => cubic.listCubics(a as ListCubicsArgs),
+		});
+		server.addTool({
+			name: "cubic_focus",
+			description: "Update cubic focus and acquire lock",
+			inputSchema: {
+				type: "object",
+				properties: {
+					cubicId: { type: "string" },
+					agent: { type: "string" },
+					task: { type: "string" },
+					phase: { type: "string" },
+				},
+				required: ["cubicId", "agent", "task"],
+			},
+			handler: (a) => cubic.focusCubic(a as FocusCubicArgs),
+		});
+		server.addTool({
+			name: "cubic_transition",
+			description: "Transition cubic phase and release lock",
+			inputSchema: {
+				type: "object",
+				properties: {
+					cubicId: { type: "string" },
+					toPhase: { type: "string" },
+				},
+				required: ["cubicId", "toPhase"],
+			},
+			handler: (a) => cubic.transitionCubic(a as TransitionCubicArgs),
+		});
+		server.addTool({
+			name: "cubic_recycle",
+			description: "Recycle cubic for new task",
+			inputSchema: {
+				type: "object",
+				properties: {
+					cubicId: { type: "string" },
+					resetCode: { type: "boolean" },
+				},
+				required: ["cubicId"],
+			},
+			handler: (a) => cubic.recycleCubic(a as RecycleCubicArgs),
+		});
+
+		// Pulse Fleet Observability tools (P063) — Postgres-backed
+		const { PgPulseHandlers } = await import(
+			"./tools/pulse/pg-handlers.ts"
+		);
+		const pulse = new PgPulseHandlers(server);
+		type RecordHeartbeatArgs = Parameters<typeof pulse.recordHeartbeat>[0];
+		type GetAgentHealthArgs = Parameters<typeof pulse.getAgentHealth>[0];
+		type GetHeartbeatHistoryArgs = Parameters<
+			typeof pulse.getHeartbeatHistory
+		>[0];
+		server.addTool({
+			name: "pulse_heartbeat",
+			description: "Record an agent heartbeat for fleet observability",
+			inputSchema: {
+				type: "object",
+				properties: {
+					agent_identity: { type: "string" },
+					current_task: { type: "string" },
+					current_proposal: { type: "string" },
+					current_cubic: { type: "string" },
+					cpu_percent: { type: "number" },
+					memory_mb: { type: "number" },
+					active_model: { type: "string" },
+					uptime_seconds: { type: "number" },
+					metadata: { type: "string" },
+				},
+				required: ["agent_identity"],
+			},
+			handler: (a) => pulse.recordHeartbeat(a as RecordHeartbeatArgs),
+		});
+		server.addTool({
+			name: "pulse_health",
+			description:
+				"Get health status for agents (single or all) with inferred status from heartbeat cadence",
+			inputSchema: {
+				type: "object",
+				properties: {
+					agent_identity: { type: "string" },
+				},
+			},
+			handler: (a) => pulse.getAgentHealth(a as GetAgentHealthArgs),
+		});
+		server.addTool({
+			name: "pulse_fleet",
+			description:
+				"Get fleet-wide health metrics: status counts, uptime, CPU, heartbeat rate",
+			inputSchema: { type: "object", properties: {} },
+			handler: () => pulse.getFleetStatus(),
+		});
+		server.addTool({
+			name: "pulse_history",
+			description: "Get heartbeat history for an agent (trend analysis)",
+			inputSchema: {
+				type: "object",
+				properties: {
+					agent_identity: { type: "string" },
+					limit: { type: "number" },
+				},
+				required: ["agent_identity"],
+			},
+			handler: (a) =>
+				pulse.getHeartbeatHistory(a as GetHeartbeatHistoryArgs),
+		});
+		server.addTool({
+			name: "pulse_refresh",
+			description:
+				"Refresh agent statuses: mark stale/offline/crashed based on heartbeat age, prune old logs",
+			inputSchema: { type: "object", properties: {} },
+			handler: () => pulse.refreshAgentStatuses(),
+		});
+
+		// Federation tools (P068) — filesystem-backed PKI
+		const { FederationHandlers } = await import(
+			"./tools/federation/handlers.ts"
+		);
+		const fed = new FederationHandlers(server);
+		type FedListHostsArgs = Parameters<typeof fed.listHosts>[0];
+		type FedListJoinArgs = Parameters<typeof fed.listJoinRequests>[0];
+		type FedApproveArgs = Parameters<typeof fed.approveJoin>[0];
+		type FedDenyArgs = Parameters<typeof fed.denyJoin>[0];
+		type FedQuarantineArgs = Parameters<typeof fed.quarantineHost>[0];
+		type FedLiftArgs = Parameters<typeof fed.liftQuarantine>[0];
+		type FedListCertsArgs = Parameters<typeof fed.listCertificates>[0];
+		type FedFailedConnArgs = Parameters<typeof fed.getFailedConnections>[0];
+		type FedRemoveHostArgs = Parameters<typeof fed.removeHost>[0];
+		server.addTool({
+			name: "federation_stats",
+			description: "Get federation statistics: hosts, certs, connections, CA",
+			inputSchema: { type: "object", properties: {} },
+			handler: () => fed.getStats(),
+		});
+		server.addTool({
+			name: "federation_list_hosts",
+			description: "List registered federation hosts",
+			inputSchema: {
+				type: "object",
+				properties: { status: { type: "string" } },
+			},
+			handler: (a) => fed.listHosts(a as FedListHostsArgs),
+		});
+		server.addTool({
+			name: "federation_list_join_requests",
+			description: "List join requests (pending or all)",
+			inputSchema: {
+				type: "object",
+				properties: { all: { type: "boolean" } },
+			},
+			handler: (a) => fed.listJoinRequests(a as FedListJoinArgs),
+		});
+		server.addTool({
+			name: "federation_approve_join",
+			description: "Approve a pending join request",
+			inputSchema: {
+				type: "object",
+				properties: {
+					requestId: { type: "string" },
+					reviewerId: { type: "string" },
+				},
+				required: ["requestId", "reviewerId"],
+			},
+			handler: (a) => fed.approveJoin(a as FedApproveArgs),
+		});
+		server.addTool({
+			name: "federation_deny_join",
+			description: "Deny a pending join request",
+			inputSchema: {
+				type: "object",
+				properties: {
+					requestId: { type: "string" },
+					reviewerId: { type: "string" },
+					reason: { type: "string" },
+				},
+				required: ["requestId", "reviewerId", "reason"],
+			},
+			handler: (a) => fed.denyJoin(a as FedDenyArgs),
+		});
+		server.addTool({
+			name: "federation_quarantine",
+			description: "Quarantine a host (block connections)",
+			inputSchema: {
+				type: "object",
+				properties: {
+					hostId: { type: "string" },
+					reason: { type: "string" },
+				},
+				required: ["hostId", "reason"],
+			},
+			handler: (a) => fed.quarantineHost(a as FedQuarantineArgs),
+		});
+		server.addTool({
+			name: "federation_lift_quarantine",
+			description: "Lift quarantine on a host",
+			inputSchema: {
+				type: "object",
+				properties: {
+					hostId: { type: "string" },
+					reviewerId: { type: "string" },
+				},
+				required: ["hostId", "reviewerId"],
+			},
+			handler: (a) => fed.liftQuarantine(a as FedLiftArgs),
+		});
+		server.addTool({
+			name: "federation_list_certificates",
+			description:
+				"List certificates for a host or expiring certificates",
+			inputSchema: {
+				type: "object",
+				properties: {
+					hostId: { type: "string" },
+					expiringDays: { type: "number" },
+				},
+			},
+			handler: (a) => fed.listCertificates(a as FedListCertsArgs),
+		});
+		server.addTool({
+			name: "federation_failed_connections",
+			description: "Get failed mTLS connections for monitoring",
+			inputSchema: {
+				type: "object",
+				properties: { limit: { type: "number" } },
+			},
+			handler: (a) => fed.getFailedConnections(a as FedFailedConnArgs),
+		});
+		server.addTool({
+			name: "federation_remove_host",
+			description: "Remove a host (revoke cert + delete)",
+			inputSchema: {
+				type: "object",
+				properties: { hostId: { type: "string" } },
+				required: ["hostId"],
+			},
+			handler: (a) => fed.removeHost(a as FedRemoveHostArgs),
+		});
+
 		console.log(
-			"[MCP] Using Postgres backend (agenthive) for proposals, messaging, agents, spending, memory, RFC workflow, SMDL",
+			"[MCP] Using Postgres backend (agenthive) for proposals, messaging, agents, spending, memory, RFC workflow, SMDL, cubics, pulse, federation",
 		);
 	} else {
 		registerFilesystemProposalTools(server, config);
