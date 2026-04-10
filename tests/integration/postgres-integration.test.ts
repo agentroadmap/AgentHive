@@ -7,8 +7,9 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { after, before, describe, it } from "node:test";
+import { join } from "node:path";
 import { Pool } from "pg";
 import { PgMemoryHandlers } from "../../src/mcp/tools/memory/pg-handlers.ts";
 import { transitionProposal as transitionProposalRfc } from "../../src/mcp/tools/rfc/pg-handlers.ts";
@@ -26,19 +27,17 @@ const TEST_TYPE = `${TEST_PREFIX}_type`;
 const DEFAULT_AGENT = `${TEST_PREFIX}_builder`;
 const DEFAULT_REVIEWER = `${TEST_PREFIX}_reviewer`;
 
-function loadPassword(): string {
-	if (process.env.PG_PASSWORD) {
-		return process.env.PG_PASSWORD;
+function loadEnvFilePassword(): string | undefined {
+	for (const candidate of [".env", ".env.agent"]) {
+		if (!existsSync(candidate)) continue;
+		const env = readFileSync(candidate, "utf8");
+		const match = env.match(/^PG_PASSWORD=(.+)$/m);
+		if (match) {
+			process.env.PG_PASSWORD = match[1].trim();
+			return process.env.PG_PASSWORD;
+		}
 	}
-
-	const env = readFileSync(".env", "utf8");
-	const match = env.match(/^PG_PASSWORD=(.+)$/m);
-	if (!match) {
-		throw new Error("PG_PASSWORD is required for postgres-integration.test.ts");
-	}
-
-	process.env.PG_PASSWORD = match[1].trim();
-	return process.env.PG_PASSWORD;
+	return undefined;
 }
 
 function textContent(result: {
@@ -50,15 +49,48 @@ function textContent(result: {
 		.join("\n");
 }
 
-const PG_PASSWORD = loadPassword();
-const PG_CONFIG = {
-	host: "127.0.0.1",
-	port: 5432,
-	user: "admin",
-	password: PG_PASSWORD,
-	database: "agenthive",
-	options: "-c search_path=roadmap,public",
-};
+function parseDatabaseUrl(value?: string): {
+	host?: string;
+	port?: number;
+	user?: string;
+	password?: string;
+	database?: string;
+} {
+	if (!value) return {};
+	const url = new URL(value);
+	return {
+		host: url.hostname || undefined,
+		port: url.port ? Number(url.port) : undefined,
+		user: url.username || undefined,
+		password: url.password || undefined,
+		database: url.pathname.replace(/^\/+/, "") || undefined,
+	};
+}
+
+function resolvePgConfig() {
+	const databaseUrlConfig = parseDatabaseUrl(process.env.DATABASE_URL);
+	const password =
+		process.env.PG_PASSWORD ??
+		databaseUrlConfig.password ??
+		loadEnvFilePassword();
+
+	if (!password) {
+		throw new Error(
+			"PG_PASSWORD or DATABASE_URL is required for postgres-integration.test.ts",
+		);
+	}
+
+	return {
+		host: process.env.PG_HOST ?? databaseUrlConfig.host ?? "127.0.0.1",
+		port: Number(process.env.PG_PORT ?? databaseUrlConfig.port) || 5432,
+		user: process.env.PG_USER ?? databaseUrlConfig.user ?? "admin",
+		password,
+		database: process.env.PG_DATABASE ?? databaseUrlConfig.database ?? "agenthive",
+		options: "-c search_path=roadmap,public",
+	};
+}
+
+const PG_CONFIG = resolvePgConfig();
 
 let pool: Pool;
 
@@ -117,6 +149,31 @@ async function seedWorkflowFixture(): Promise<void> {
 			["motivation"],
 		],
 	);
+}
+
+async function ensureTokenEfficiencySchema(): Promise<boolean> {
+	const { rows: existingRows } = await pool.query<{ exists: boolean }>(
+		`SELECT EXISTS (
+       SELECT 1
+       FROM information_schema.tables
+       WHERE table_schema = 'metrics' AND table_name = 'token_efficiency'
+     ) AS exists`,
+	);
+	if (existingRows[0]?.exists) {
+		return true;
+	}
+
+	const migrationPath = join(
+		process.cwd(),
+		"scripts/migrations/014-token-efficiency-metrics.sql",
+	);
+	const sql = readFileSync(migrationPath, "utf8");
+	try {
+		await pool.query(sql);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 async function cleanupFixture(): Promise<void> {
@@ -462,6 +519,102 @@ describe("Roadmap Postgres integration", () => {
 			agent_identity: agentIdentity,
 		});
 		assert.match(textContent(report), /today \$6\.000000\/\$∞/);
+
+		await deleteProposal(proposal.id);
+	});
+
+	it("records token efficiency metrics and reports weekly aggregates", async () => {
+		const spending = new PgSpendingHandlers({} as never, process.cwd());
+		const agentIdentity = `${TEST_PREFIX}_efficiency`;
+		await ensureAgent(agentIdentity);
+		const hasMetricsSchema = await ensureTokenEfficiencySchema();
+
+		const proposal = await createProposal(
+			{
+				type: TEST_TYPE,
+				title: `${TEST_PREFIX} efficiency`,
+				summary: "Efficiency summary",
+				design: "Efficiency design",
+			},
+			agentIdentity,
+		);
+
+		await pool.query(
+			`INSERT INTO run_log (run_id, agent_identity, proposal_id, status, input_summary)
+       VALUES ($1, $2, $3, 'running', $4)`,
+			[
+				`${TEST_PREFIX}_run_efficiency`,
+				agentIdentity,
+				proposal.id,
+				"Integration token efficiency test",
+			],
+		);
+
+		await pool.query(
+			`INSERT INTO model_metadata (model_name, provider)
+       VALUES ($1, $2)
+       ON CONFLICT ON CONSTRAINT model_metadata_model_name_key
+       DO NOTHING`,
+			["claude-sonnet-4", "anthropic"],
+		);
+
+		const sessionId = "11111111-1111-4111-8111-111111111111";
+		const logResult = await spending.logSpending({
+			agent_identity: agentIdentity,
+			proposal_id: proposal.display_id,
+			cost_usd: "0.75",
+			model_name: "claude-sonnet-4",
+			run_id: `${TEST_PREFIX}_run_efficiency`,
+			session_id: sessionId,
+			agent_role: "implementer",
+			task_type: "code_review",
+			input_tokens: "1000",
+			output_tokens: "200",
+			cache_write_tokens: "50",
+			cache_read_tokens: "700",
+		});
+		if (hasMetricsSchema) {
+			assert.match(textContent(logResult), /Token efficiency metrics recorded/);
+
+			const { rows: metricRows } = await pool.query<{
+				model: string;
+				agent_role: string | null;
+				cache_hit_rate: string;
+				cost_microdollars: string | null;
+			}>(
+				`SELECT model, agent_role, cache_hit_rate::text, cost_microdollars::text
+         FROM metrics.token_efficiency
+         WHERE proposal_id = $1
+         ORDER BY recorded_at DESC
+         LIMIT 1`,
+				[proposal.display_id],
+			);
+			assert.equal(metricRows[0].model, "claude-sonnet-4");
+			assert.equal(metricRows[0].agent_role, "implementer");
+			assert.equal(metricRows[0].cache_hit_rate, "0.70000000000000000000");
+			assert.equal(metricRows[0].cost_microdollars, "750000");
+
+			const report = await spending.getTokenEfficiencyReport({
+				agent_role: "implementer",
+				model: "claude-sonnet-4",
+			});
+			assert.match(textContent(report), /claude-sonnet-4/);
+			assert.match(textContent(report), /cache_hit=0\.700/);
+		} else {
+			assert.match(
+				textContent(logResult),
+				/Token efficiency metrics skipped; apply migration 014 first/,
+			);
+
+			const report = await spending.getTokenEfficiencyReport({
+				agent_role: "implementer",
+				model: "claude-sonnet-4",
+			});
+			assert.match(
+				textContent(report),
+				/Token efficiency metrics are unavailable\. Apply migration 014 first/,
+			);
+		}
 
 		await deleteProposal(proposal.id);
 	});

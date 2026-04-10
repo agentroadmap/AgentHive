@@ -25,4 +25,11 @@ export function registerSpendingTools(server: McpServer): void {
 		inputSchema: {},
 		handler: async (args) => handlers.getSpendingReport(args as any),
 	});
+
+	server.addTool({
+		name: "spending_efficiency_report",
+		description: "Generate token efficiency report",
+		inputSchema: {},
+		handler: async (args) => handlers.getTokenEfficiencyReport(args as any),
+	});
 }
