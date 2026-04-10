@@ -1,4 +1,5 @@
 import type { RoadmapConfig } from "../../types/index.ts";
+import { DEFAULT_STATUSES } from "../../shared/constants/index.ts";
 import { Core } from "../index.ts";
 
 type CoreCallback<T> = (core: Core) => Promise<T>;
@@ -23,7 +24,7 @@ async function withCore<T>(callback: CoreCallback<T>, fallback: T): Promise<T> {
 }
 
 function getDefaultStatuses(): string[] {
-	return ["New", "Active", "Accepted", "Complete", "Abandoned"];
+	return [...DEFAULT_STATUSES];
 }
 
 /**

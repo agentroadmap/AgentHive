@@ -163,7 +163,7 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ proposals }) => {
 			}
 			entry.total++;
 			if (proposal.status === "Complete") entry.reached++;
-			else if (proposal.status === "Active") entry.active++;
+			else if (proposal.status === "Develop") entry.active++;
 			else if (proposal.ready) entry.ready++;
 			const hasUnmetDeps = proposal.dependencies.some((depId) => {
 				const dep = proposals?.find((s) => s.id === depId);
@@ -176,7 +176,7 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ proposals }) => {
 	// Aging active proposals (active for more than 7 days)
 	const AGING_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
 	const agingProposals = (proposals || []).filter((s) => {
-		if (s.status !== "Active") return false;
+		if (s.status !== "Develop") return false;
 		const updated = s.updatedDate || s.createdDate;
 		return now - new Date(updated).getTime() > AGING_THRESHOLD_MS;
 	});
@@ -186,9 +186,9 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({ proposals }) => {
 		return s.status === "Complete" && (!s.proof || s.proof.length === 0);
 	});
 
-	// Blocked active proposals (Active but dependencies not Reached)
+	// Blocked in-flight proposals (Develop but dependencies not complete)
 	const blockedActiveProposals = (proposals || []).filter((s) => {
-		if (s.status !== "Active") return false;
+		if (s.status !== "Develop") return false;
 		return s.dependencies.some((depId) => {
 			const dep = proposals?.find((st) => st.id === depId);
 			return dep && dep.status !== "Complete";

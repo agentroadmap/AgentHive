@@ -1,6 +1,6 @@
-# agentRoadmap.md Not Initialized
+# AgentHive Roadmap Not Initialized
 
-This directory does not have agentRoadmap.md initialized.
+This directory does not have the roadmap workspace initialized for AgentHive operations.
 
 **To set up state management for this project, run:**
 
@@ -22,10 +22,10 @@ If the user is asking you to start a new project from a text prompt (e.g., "Buil
 3. **Refine the DAG (Directed Acyclic Graph):** The blueprint creates a skeleton DAG. You should refine it by using the `state_edit` or `state_create` tools:
    - Fleshing out the intermediate states with specific acceptance criteria based on the final goal.
    - Ensuring dependencies flow correctly from the initial research to the final launch.
-4. **Report:** Provide the user with a summary of the bootstrapped DAG and ask if they are ready to begin the first state.
+4. **Report:** Provide the user with a summary of the bootstrapped DAG and ask if they are ready to begin the first proposal.
 
-## What is agentRoadmap.md?
+## What is the roadmap workspace?
 
-agentRoadmap.md is a state management system that uses markdown files to track features, bugs, and structured work. It integrates with AI coding agents to help you manage your project states effectively.
+The roadmap workspace is the operational surface used by AgentHive to track proposals, directives, documents, and structured work. It integrates with AI coding agents and MCP clients so workflow state remains queryable and auditable.
 
 For more information, visit: https://roadmap.md

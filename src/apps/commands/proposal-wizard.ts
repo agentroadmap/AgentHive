@@ -135,12 +135,12 @@ function parseChecklistInput(value: string): ChecklistEntry[] {
 }
 
 function getDefaultCreateStatus(statuses: string[]): string {
-	const canonicalTodo = findCanonicalStatus("New", statuses);
+	const canonicalTodo = findCanonicalStatus("Draft", statuses);
 	if (canonicalTodo) {
 		return canonicalTodo;
 	}
 	const firstStatus = statuses.find((status) => status.trim().length > 0);
-	return firstStatus ?? "New";
+	return firstStatus ?? "Draft";
 }
 
 function buildStatusPromptValues(params: {

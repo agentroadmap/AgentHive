@@ -6,7 +6,6 @@
  */
 
 import { query } from "../../../../postgres/pool.ts";
-import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
@@ -21,11 +20,6 @@ function errorResult(msg: string, err: unknown): CallToolResult {
 }
 
 export class PgAgentHandlers {
-	constructor(
-		private readonly core: McpServer,
-		private readonly projectRoot: string,
-	) {}
-
 	async listAgents(args: { status?: string }): Promise<CallToolResult> {
 		try {
 			const where = args.status ? `WHERE status = $1` : "";
@@ -78,14 +72,20 @@ export class PgAgentHandlers {
 		try {
 			const { rows } = await query(
 				`INSERT INTO agent_registry (agent_identity, agent_type, role, skills)
-         VALUES ($1, $2, $3, $4) ON CONFLICT ON CONSTRAINT agent_registry_agent_identity_key
+         VALUES ($1, $2, $3, $4::jsonb) ON CONFLICT ON CONSTRAINT agent_registry_agent_identity_key
          DO UPDATE SET agent_type = EXCLUDED.agent_type, role = EXCLUDED.role, skills = EXCLUDED.skills
          RETURNING agent_identity, role, status`,
 				[
 					args.identity,
 					args.agent_type || null,
 					args.role || null,
-					args.skills ? JSON.parse(args.skills) : null,
+					args.skills
+						? typeof args.skills === "string"
+							? args.skills.trim().startsWith("[") || args.skills.trim().startsWith("{")
+								? args.skills
+								: JSON.stringify(args.skills.split(",").map((s) => s.trim()).filter(Boolean))
+							: JSON.stringify(args.skills)
+						: null,
 				],
 			);
 			return {
@@ -101,7 +101,7 @@ export class PgAgentHandlers {
 		}
 	}
 
-	async listTeams(_args: {}): Promise<CallToolResult> {
+	async listTeams(_args: Record<string, never>): Promise<CallToolResult> {
 		try {
 			const { rows } = await query(`SELECT * FROM team ORDER BY team_name`);
 			if (!rows.length) {

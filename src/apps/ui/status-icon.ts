@@ -14,12 +14,16 @@ export function getStatusStyle(status: string): StatusStyle {
 	const statusMap: Record<string, StatusStyle> = {
 		Draft: { icon: "○", color: "white" },
 		Review: { icon: "◆", color: "blue" },
-		Building: { icon: "◒", color: "yellow" },
-		Accepted: { icon: "▣", color: "cyan" },
+		Develop: { icon: "◒", color: "yellow" },
+		Merge: { icon: "▣", color: "cyan" },
 		Complete: { icon: "✅", color: "green" },
 		Rejected: { icon: "✖", color: "red" },
-		Abandoned: { icon: "●", color: "red" },
+		Discard: { icon: "●", color: "red" },
 		Replaced: { icon: "⇄", color: "magenta" },
+		Building: { icon: "◒", color: "yellow" },
+		Accepted: { icon: "▣", color: "cyan" },
+		Abandoned: { icon: "●", color: "red" },
+		Obsolete: { icon: "✖", color: "gray" },
 		Blocked: { icon: "●", color: "red" },
 	};
 

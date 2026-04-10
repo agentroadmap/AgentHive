@@ -24,7 +24,7 @@ export function registerMemoryTools(server: McpServer): void {
 			},
 			required: ["key", "value"],
 		},
-		handler: async (args: any) =>
+		handler: async (args: Record<string, unknown>) =>
 			await handlers.setMemory({
 				agent_identity: String(args.agent_identity ?? "system"),
 				layer: String(args.layer ?? "working"),
@@ -48,7 +48,7 @@ export function registerMemoryTools(server: McpServer): void {
 			},
 			required: [],
 		},
-		handler: async (args: any) =>
+		handler: async (args: Record<string, unknown>) =>
 			await handlers.getMemory({
 				agent_identity: String(args.agent_identity ?? "system"),
 				layer: String(args.layer ?? "working"),
@@ -71,7 +71,7 @@ export function registerMemoryTools(server: McpServer): void {
 			},
 			required: [],
 		},
-		handler: async (args: any) => {
+		handler: async (args: Record<string, unknown>) => {
 			if (!Array.isArray(args.embedding)) {
 				return textResult(
 					"Memory search requires an embedding vector in Postgres mode.",

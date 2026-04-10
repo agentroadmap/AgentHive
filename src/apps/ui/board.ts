@@ -335,7 +335,7 @@ export async function renderBoardTui(
 
 	const hiddenStatusesFromConfig = (config as any)?.hidden_statuses || [
 		"Rejected",
-		"Abandoned",
+		"Discard",
 		"Replaced",
 	];
 
@@ -449,7 +449,7 @@ export async function renderBoardTui(
 		let hideEmptyColumns = false;
 		const hiddenStatusesFromConfig = (config as any)?.hidden_statuses || [
 			"Rejected",
-			"Abandoned",
+			"Discard",
 			"Replaced",
 		];
 		let hiddenStatuses = [...hiddenStatusesFromConfig];
@@ -1145,15 +1145,15 @@ export async function renderBoardTui(
 			renderView();
 		});
 
-		// Toggle hide abandoned columns
+		// Toggle hidden terminal columns
 		screen.key(["="], () => {
 			if (popupOpen || filterPopupOpen || moveOp) return;
 			hiddenStatusesToggle = !hiddenStatusesToggle;
 			hiddenStatuses = hiddenStatusesToggle ? hiddenStatusesFromConfig : [];
 			showTransientFooter(
 				hiddenStatusesToggle
-					? " {green-fg}Abandoned columns hidden{/}"
-					: " {green-fg}Abandoned columns shown{/}",
+					? " {green-fg}Terminal columns hidden{/}"
+					: " {green-fg}Terminal columns shown{/}",
 			);
 			renderView();
 		});

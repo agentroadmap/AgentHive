@@ -19,13 +19,14 @@ export function isCompleteStatus(status?: string | null): boolean {
 }
 
 /**
- * Check if a status represents a terminal proposal (either successful or abandoned/archived).
+ * Check if a status represents a terminal proposal.
  */
 export function isTerminalStatus(status?: string | null): boolean {
 	if (isCompleteStatus(status)) return true;
 	const normalized = (status ?? "").toLowerCase();
 	return (
-		normalized.includes("abandoned") ||
+		normalized.includes("obsolete") ||
+		normalized.includes("discard") ||
 		normalized.includes("archived") ||
 		normalized.includes("rejected") ||
 		normalized.includes("replaced")
@@ -51,18 +52,24 @@ export function isTodoStatus(status?: string | null): boolean {
 
 /**
  * Check if a status represents an "in progress" proposal.
- * Matches "active", "building", "developing", or "review" (case-insensitive).
+ * Matches "develop", "merge", "review", legacy "building"/"accepted", or maturity-driven aliases like "active".
  */
 export function isInProgressStatus(status?: string | null): boolean {
 	if (!status) return false;
 	const normalized = status.toLowerCase();
 	return (
+		normalized === "develop" ||
+		normalized === "merge" ||
 		normalized === "active" ||
 		normalized === "building" ||
 		normalized === "developing" ||
+		normalized === "accepted" ||
 		normalized === "review" ||
+		normalized.includes("develop") ||
+		normalized.includes("merge") ||
 		normalized.includes("active") ||
 		normalized.includes("building") ||
+		normalized.includes("accepted") ||
 		normalized.includes("review")
 	);
 }
@@ -137,7 +144,8 @@ export async function getValidStatuses(core?: Core): Promise<string[]> {
  *
  * Examples:
  * - "todo" matches "Draft"
- * - "in progress" matches "Building"
+ * - "in progress" matches "Develop"
+ * - "accepted" matches "Merge"
  * - "DONE" matches "Complete"
  */
 export async function getCanonicalStatus(
@@ -166,11 +174,21 @@ export async function getCanonicalStatus(
 	if (
 		normalizedInput === "inprogress" ||
 		normalizedInput === "active" ||
-		normalizedInput === "developing"
+		normalizedInput === "developing" ||
+		normalizedInput === "building" ||
+		normalizedInput === "develop"
 	) {
 		const found = statuses.find((s) => {
 			const ns = s.toLowerCase();
-			return ns === "building" || ns === "active";
+			return ns === "develop" || ns === "building" || ns === "active";
+		});
+		if (found) return found;
+	}
+
+	if (normalizedInput === "accepted" || normalizedInput === "merge") {
+		const found = statuses.find((s) => {
+			const ns = s.toLowerCase();
+			return ns === "merge" || ns === "accepted";
 		});
 		if (found) return found;
 	}

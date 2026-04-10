@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "agenthive": {
+      "type": "sse",
+      "url": "http://localhost:6421/sse"
+    }
+  }
+}

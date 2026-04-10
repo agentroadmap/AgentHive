@@ -374,7 +374,10 @@ export async function materializeWorkflow(smdl: SMDLRoot): Promise<{
 		stagesCount++;
 	}
 
-	// 3. Materialize workflow_transitions
+	// 3. Materialize workflow_transitions + proposal_valid_transitions
+	// proposal_valid_transitions is the table read by prop_transition validation
+	// (case-insensitive match via LOWER()). We sync it here so that loading a
+	// workflow template immediately unblocks transition calls.
 	for (const t of wf.transitions) {
 		await query(
 			`INSERT INTO workflow_transitions (template_id, from_stage, to_stage, labels, allowed_roles, requires_ac, gating_rules)
@@ -394,6 +397,28 @@ export async function materializeWorkflow(smdl: SMDLRoot): Promise<{
 				t.gating ? JSON.stringify(t.gating) : null,
 			],
 		);
+
+		// Mirror into proposal_valid_transitions so transitionProposal() can
+		// validate without joining workflow_transitions (which uses a different
+		// column schema). requires_ac bool → 'all'|'none' text enum.
+		await query(
+			`INSERT INTO proposal_valid_transitions
+         (workflow_name, from_state, to_state, allowed_reasons, allowed_roles, requires_ac)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (workflow_name, from_state, to_state) DO UPDATE SET
+         allowed_reasons = EXCLUDED.allowed_reasons,
+         allowed_roles   = EXCLUDED.allowed_roles,
+         requires_ac     = EXCLUDED.requires_ac`,
+			[
+				wfName,
+				t.from,
+				t.to,
+				t.labels ?? [],
+				t.allowed_roles ?? [],
+				t.requires_ac ? "all" : "none",
+			],
+		);
+
 		transitionsCount++;
 	}
 

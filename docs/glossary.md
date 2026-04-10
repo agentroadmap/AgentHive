@@ -37,8 +37,11 @@ An isolated Git working tree provisioned for a single agent. Each agent gets its
 **Proposal (RFC)**
 The primary unit of work. Moves through a defined workflow (default: Draft → Review → Develop → Merge → Complete). Contains: summary, motivation, acceptance criteria, dependencies, and decision history.
 
+**Proposal Type**
+The classification that determines which workflow template applies to a proposal. Type is not decorative metadata; it is the workflow-selection key used by MCP and the control plane.
+
 **Stage**
-A named phase within a proposal's workflow (e.g., DRAFT, REVIEW, DEVELOP, MERGE). Each stage has a working agent, a decision gate, and four possible outcomes.
+A named phase within a proposal's workflow. The current authoritative RFC-style flow is `Draft`, `Review`, `Develop`, `Merge`, `Complete`.
 
 **Maturity**
 The lifecycle state of a proposal *within* a stage. Four values:
@@ -47,10 +50,10 @@ The lifecycle state of a proposal *within* a stage. Four values:
 |---|---|
 | `new` | Just entered this stage; no agent has claimed it |
 | `active` | A working agent holds the lease and is executing |
-| `mature` | Decision gate approved advance to next stage |
+| `mature` | The work in the current stage is ready for gate evaluation |
 | `obsolete` | Superseded by architecture change, branch revision, or scope pivot — regardless of stage |
 
-`mature` is conferred by the **Decision Gate**, not self-declared by the working agent.
+In the current authoritative model, a working agent may self-claim `mature` to request gate evaluation; advancement still requires the gate decision record.
 
 **Obsolete**
 A cross-cutting lifecycle event. A proposal becomes obsolete when it is superseded — by a competing implementation, an architecture change, or a strategic pivot — regardless of its current stage or maturity. Not the same as rejected (which is a gate outcome) or discarded (which is explicit abandonment).
@@ -61,9 +64,9 @@ The evaluator that runs after a working agent signals readiness. Produces exactl
 | Outcome | Meaning | Effect |
 |---|---|---|
 | `mature` | Work is complete; advance | Proposal transitions to next stage |
-| `revise` | Work needs rework; go back | Proposal returns to `active` in same stage |
+| `revise` | Work needs rework; go back | Proposal remains in the same stage for revision or split |
 | `depend` | Advance conditionally; blocked by external dependency | Proposal carries dependency into next stage (see: Blocking Dependency) |
-| `discard` | Abandoned or fatally flawed | Proposal archived |
+| `discard` | Abandoned or fatally flawed | Proposal is discarded or rejected from the active flow |
 
 Gates are configurable: `auto`, `ai`, or `user`. Default model is `auto`, which escalates to `user` when cost or impact thresholds are exceeded.
 
@@ -211,7 +214,7 @@ A review step where a Skeptic Agent actively attempts to find flaws, security ri
 The automatic routing of a decision to a higher-authority evaluator (higher-tier AI or USER) when: confidence is below threshold, cost/impact exceeds configured limits, or an agent signals uncertainty.
 
 **Audit Trail**
-The immutable log of all state transitions, gate decisions, agent actions, and budget debits for a proposal. Stored in `proposal_audit_events`. Queryable via MCP.
+The immutable log of all stage transitions, gate decisions, agent actions, and budget debits for a proposal. Stored in `proposal_audit_events`. Queryable via MCP.
 
 **Veto Window**
 A configurable time window (default: 0 in autopilot, 30 min in supervised mode) during which a USER can reject an approved gate decision before the transition executes. After the window, the transition proceeds automatically.

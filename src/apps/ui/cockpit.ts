@@ -212,11 +212,15 @@ export function renderCockpit(
 		statusCounts[p.status] = (statusCounts[p.status] || 0) + 1;
 	});
 	const pipelineLines: string[] = [];
-	const statuses = ["New", "Draft", "Active", "Review", "Accepted", "Complete"];
+	const statuses = ["Draft", "Review", "Develop", "Merge", "Complete"];
 	statuses.forEach((s) => {
 		const count = statusCounts[s] || 0;
 		const color =
-			s === "Active" ? "yellow-fg" : s === "Complete" ? "green-fg" : "gray-fg";
+			s === "Develop"
+				? "yellow-fg"
+				: s === "Complete"
+					? "green-fg"
+					: "gray-fg";
 		pipelineLines.push(`{${color}}${s.padEnd(10)}{/} : ${count}`);
 	});
 	pipelineLines.push("\n{bold}Recent Activity:{/}");

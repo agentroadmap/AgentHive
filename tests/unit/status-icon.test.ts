@@ -16,8 +16,8 @@ describe("Status Icon Component", () => {
 			assert.strictEqual(style.color, "green");
 		});
 
-		test("returns correct style for Building status", () => {
-			const style = getStatusStyle("Building");
+		test("returns correct style for Develop status", () => {
+			const style = getStatusStyle("Develop");
 			assert.strictEqual(style.icon, "◒");
 			assert.strictEqual(style.color, "yellow");
 		});
@@ -40,8 +40,8 @@ describe("Status Icon Component", () => {
 			assert.strictEqual(style.color, "blue");
 		});
 
-		test("returns correct style for Accepted status", () => {
-			const style = getStatusStyle("Accepted");
+		test("returns correct style for Merge status", () => {
+			const style = getStatusStyle("Merge");
 			assert.strictEqual(style.icon, "▣");
 			assert.strictEqual(style.color, "cyan");
 		});
@@ -56,11 +56,11 @@ describe("Status Icon Component", () => {
 	describe("getStatusColor", () => {
 		test("returns correct color for each status", () => {
 			expect(getStatusColor("Complete")).toBe("green");
-			expect(getStatusColor("Building")).toBe("yellow");
+			expect(getStatusColor("Develop")).toBe("yellow");
 			expect(getStatusColor("Blocked")).toBe("red");
 			expect(getStatusColor("Draft")).toBe("white");
 			expect(getStatusColor("Review")).toBe("blue");
-			expect(getStatusColor("Accepted")).toBe("cyan");
+			expect(getStatusColor("Merge")).toBe("cyan");
 		});
 
 		test("returns default color for unknown status", () => {
@@ -71,11 +71,11 @@ describe("Status Icon Component", () => {
 	describe("getStatusIcon", () => {
 		test("returns correct icon for each status", () => {
 			expect(getStatusIcon("Complete")).toBe("✅");
-			expect(getStatusIcon("Building")).toBe("◒");
+			expect(getStatusIcon("Develop")).toBe("◒");
 			expect(getStatusIcon("Blocked")).toBe("●");
 			expect(getStatusIcon("Draft")).toBe("○");
 			expect(getStatusIcon("Review")).toBe("◆");
-			expect(getStatusIcon("Accepted")).toBe("▣");
+			expect(getStatusIcon("Merge")).toBe("▣");
 		});
 
 		test("returns default icon for unknown status", () => {
@@ -86,11 +86,11 @@ describe("Status Icon Component", () => {
 	describe("formatStatusWithIcon", () => {
 		test("formats status with correct icon", () => {
 			expect(formatStatusWithIcon("Complete")).toBe("✅ Complete");
-			expect(formatStatusWithIcon("Building")).toBe("◒ Building");
+			expect(formatStatusWithIcon("Develop")).toBe("◒ Develop");
 			expect(formatStatusWithIcon("Blocked")).toBe("● Blocked");
 			expect(formatStatusWithIcon("Draft")).toBe("○ Draft");
 			expect(formatStatusWithIcon("Review")).toBe("◆ Review");
-			expect(formatStatusWithIcon("Accepted")).toBe("▣ Accepted");
+			expect(formatStatusWithIcon("Merge")).toBe("▣ Merge");
 		});
 
 		test("formats unknown status with default icon", () => {
