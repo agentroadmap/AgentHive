@@ -1,0 +1,55 @@
+{
+  "issues": [
+    {
+      "id": "ISSUE-P049-1",
+      "proposalId": "P049",
+      "title": "AC-3 uses incorrect error-format terminology: \"HTTP 422\" does not apply to MCP tool responses",
+      "description": "AC-3 specifies: \"returning HTTP 422 with an error code of INVALID_TRANSITION\". MCP tools communicate via the Model Context Protocol, not HTTP. A tool call that fails returns a CallToolResult with isError=true and a structured content payload — there is no HTTP status code at the tool level. The correct specification should read: \"returns a structured MCP error response with code INVALID_TRANSITION and a message identifying the illegal from→to pair\". The intended behavior (reject invalid transitions with a machine-readable error code) is correct — only the error-format terminology is wrong. Fix required before AC-3 can be marked pass. Workaround: implementation team should interpret \"HTTP 422\" as \"structured MCP error with equivalent semantics\".",
+      "severity": "minor",
+      "testFile": "review/P049-ac3-terminology",
+      "discoveredAt": "2026-04-08T10:41:28.428Z",
+      "status": "open"
+    },
+    {
+      "id": "ISSUE-P052-1",
+      "proposalId": "P052",
+      "title": "AC-2: \"HTTP 404\" wrong for MCP context — must be structured MCP error with CRITERION_NOT_FOUND code",
+      "description": "AC-2 specifies verify_ac returns \"HTTP 404\" for a non-existent item_number. MCP tools do not return HTTP status codes. Must be: \"returns a structured MCP error response with code CRITERION_NOT_FOUND\". Same class of error as ISSUE-P049-1. Design should document the full error code table for all verify_ac failure modes (CRITERION_NOT_FOUND, INVALID_STATUS_TRANSITION, etc.).",
+      "severity": "minor",
+      "testFile": "review/P052-ac2-terminology",
+      "discoveredAt": "2026-04-08T10:48:45.942Z",
+      "status": "open"
+    },
+    {
+      "id": "ISSUE-P052-2",
+      "proposalId": "P052",
+      "title": "AC-3: \"critical-tier\" criteria undefined — no tier/is_critical field in proposal_acceptance_criteria schema",
+      "description": "AC-3 blocks prop_transition when \"at least one criterion marked as critical-tier\" fails. The proposal_acceptance_criteria schema (item_number, criterion_text, status, verified_by, verification_notes, verified_at) has no tier or is_critical field. Critical-tier criteria cannot be distinguished from standard criteria. Design must add: (1) an is_critical boolean or tier enum field to proposal_acceptance_criteria, (2) update add_acceptance_criteria to accept a critical flag per criterion, (3) update list_ac to return the tier. This is a blocking schema gap — the requires_ac='critical' gate mode cannot be implemented without it.",
+      "severity": "major",
+      "testFile": "review/P052-ac3-critical-tier",
+      "discoveredAt": "2026-04-08T10:48:49.811Z",
+      "status": "open"
+    },
+    {
+      "id": "ISSUE-P052-3",
+      "proposalId": "P052",
+      "title": "AC-6 vs AC-7 design tension: idempotent overwrite destroys criterion status history needed by AC-7",
+      "description": "AC-6 specifies verify_ac \"overwrites the previous verification record\". AC-7 requires \"the prior fail record is preserved in the audit trail\". A single-row overwrite destroys the prior status unless a separate history mechanism exists. Resolution options: (a) criterion_status_history table logging each status transition, or (b) rely on proposal_version ledger capturing the full row delta on each verify_ac call (P053 dependency). Option (b) is preferred as it reuses the existing audit infrastructure. Design must explicitly document which mechanism is used and confirm P053 (Proposal Storage/Audit) as a dependency of P052.",
+      "severity": "major",
+      "testFile": "review/P052-ac67-tension",
+      "discoveredAt": "2026-04-08T10:48:53.966Z",
+      "status": "open"
+    },
+    {
+      "id": "ISSUE-P053-1",
+      "proposalId": "P053",
+      "title": "AC-6: \"HTTP 422\" wrong for MCP context + \"BUILDING\" state name may not match Standard RFC workflow definition",
+      "description": "AC-6 has two issues: (1) \"HTTP 422\" — MCP tools return structured errors (CallToolResult isError=true + SEQUENCE_BLOCKED code), not HTTP status codes. Same class as ISSUE-P049-1 and ISSUE-P052-1. (2) \"BUILDING\" — the observed workflow state from get_valid_transitions is DEVELOP, not BUILDING. If Standard RFC workflow defines stages with different names, AC-6 references the wrong state name. Design must: (a) document the canonical state names of the Standard RFC workflow, (b) update AC-6 to use the correct state name, (c) replace HTTP 422 with structured MCP error. Note: AC-9 (new) provides a corrected version of the sequence enforcement contract.",
+      "severity": "major",
+      "testFile": "review/P053-ac6-state-names",
+      "discoveredAt": "2026-04-08T10:54:01.155Z",
+      "status": "open"
+    }
+  ],
+  "updatedAt": "2026-04-08T10:54:01.155Z"
+}

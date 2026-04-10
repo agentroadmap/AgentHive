@@ -37,7 +37,7 @@
 		"gray-matter": "4.0.3",
 		"install": "0.13.0",
 		"jsdom": "27.4.0",
-		"mermaid": "11.12.2",
+		"mermaid": "^11.14.0",
 		"neo-neo-bblessed": "1.0.9",
 		"picocolors": "1.1.1",
 		"react": "19.2.3",
