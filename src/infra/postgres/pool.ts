@@ -4,6 +4,7 @@
  * Config precedence (highest first):
  * 1. Explicit PoolConfig passed to getPool()
  * 2. Environment variables (PG_HOST, PG_PORT, PG_USER, PG_PASSWORD, PG_DATABASE)
+ * 3. DATABASE_URL
  *
  * For CLI contexts (no systemd env), PG_PASSWORD is loaded from:
  *   - Project root `.env` file
@@ -67,6 +68,14 @@ type ResolvedPoolConfig = {
 	schema: string | null;
 };
 
+type ParsedDatabaseUrl = {
+	host?: string;
+	port?: number;
+	user?: string;
+	password?: string;
+	database?: string;
+};
+
 function normalizeSchemaName(schema?: string | null): string | null {
 	if (!schema) return null;
 	const trimmed = schema.trim();
@@ -88,13 +97,31 @@ function buildSearchPathOptions(
 	return parts.length > 0 ? parts.join(" ") : undefined;
 }
 
+function parseDatabaseUrl(value?: string): ParsedDatabaseUrl {
+	if (!value) return {};
+	try {
+		const url = new URL(value);
+		return {
+			host: url.hostname || undefined,
+			port: url.port ? Number(url.port) : undefined,
+			user: url.username || undefined,
+			password: url.password || undefined,
+			database: url.pathname.replace(/^\/+/, "") || undefined,
+		};
+	} catch {
+		return {};
+	}
+}
+
 function resolvePoolConfig(config?: AgentHivePoolConfig): ResolvedPoolConfig {
+	const databaseUrlConfig = parseDatabaseUrl(process.env.DATABASE_URL);
 	const configuredPassword =
 		typeof config?.password === "function" ? undefined : config?.password;
 
 	const resolvedPassword =
 		configuredPassword ??
 		process.env.PG_PASSWORD ??
+		databaseUrlConfig.password ??
 		process.env.__PG_PASSWORD_FROM_CONFIG;
 
 	if (!resolvedPassword) {
@@ -109,11 +136,21 @@ function resolvePoolConfig(config?: AgentHivePoolConfig): ResolvedPoolConfig {
 	);
 
 	return {
-		host: config?.host ?? process.env.PG_HOST ?? "127.0.0.1",
-		port: Number(config?.port ?? process.env.PG_PORT) || 5432,
-		user: config?.user ?? process.env.PG_USER ?? "admin",
+		host:
+			config?.host ??
+			process.env.PG_HOST ??
+			databaseUrlConfig.host ??
+			"127.0.0.1",
+		port:
+			Number(config?.port ?? process.env.PG_PORT ?? databaseUrlConfig.port) ||
+			5432,
+		user: config?.user ?? process.env.PG_USER ?? databaseUrlConfig.user ?? "admin",
 		password: resolvedPassword,
-		database: config?.database ?? process.env.PG_DATABASE ?? "agenthive",
+		database:
+			config?.database ??
+			process.env.PG_DATABASE ??
+			databaseUrlConfig.database ??
+			"agenthive",
 		options: buildSearchPathOptions(
 			config?.options ?? process.env.PG_OPTIONS,
 			schema,

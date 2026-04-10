@@ -66,6 +66,33 @@ export interface UseWebSocketReturn {
 	reconnect: () => void;
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+function isProposal(value: unknown): value is Proposal {
+	return isObject(value) && typeof value.id === "string";
+}
+
+function isAgent(value: unknown): value is Agent {
+	return isObject(value) && typeof value.identity === "string";
+}
+
+function isChannel(value: unknown): value is Channel {
+	return isObject(value) && typeof value.channelName === "string";
+}
+
+function isMessage(value: unknown): value is Message {
+	return isObject(value) && typeof value.id === "string";
+}
+
+function asArrayOf<T>(
+	value: unknown,
+	guard: (entry: unknown) => entry is T,
+): T[] {
+	return Array.isArray(value) ? value.filter(guard) : [];
+}
+
 export function useWebSocket(
 	url: string = "ws://localhost:3001",
 ): UseWebSocketReturn {
@@ -112,59 +139,81 @@ export function useWebSocket(
 				switch (msg.type) {
 					case "proposals":
 					case "proposal_snapshot":
-						setProposals(msg.data || []);
+						setProposals(asArrayOf(msg.data, isProposal));
 						break;
 
 					case "proposal_insert":
 					case "proposal_update":
-						setProposals((prev) => {
+						if (!isProposal(msg.data)) {
+							break;
+						}
+						{
 							const updated = msg.data;
-							const idx = prev.findIndex((p) => p.id === updated.id);
-							if (idx >= 0) {
-								const next = [...prev];
-								next[idx] = updated;
-								return next;
-							}
-							return [...prev, updated];
-						});
+							setProposals((prev) => {
+								const idx = prev.findIndex((p) => p.id === updated.id);
+								if (idx >= 0) {
+									const next = [...prev];
+									next[idx] = updated;
+									return next;
+								}
+								return [...prev, updated];
+							});
+						}
 						break;
 
 					case "proposal_delete":
-						setProposals((prev) => prev.filter((p) => p.id !== msg.data?.id));
+						if (!isObject(msg.data) || typeof msg.data.id !== "string") {
+							break;
+						}
+						{
+							const deletedId = msg.data.id;
+							setProposals((prev) => prev.filter((p) => p.id !== deletedId));
+						}
 						break;
 
 					case "agents":
 					case "workforce_snapshot":
-						setAgents(msg.data || []);
+						setAgents(asArrayOf(msg.data, isAgent));
 						break;
 
 					case "workforce_insert":
 					case "workforce_update":
-						setAgents((prev) => {
+						if (!isAgent(msg.data)) {
+							break;
+						}
+						{
 							const updated = msg.data;
-							const idx = prev.findIndex(
-								(a) => a.identity === updated.identity,
-							);
-							if (idx >= 0) {
-								const next = [...prev];
-								next[idx] = { ...next[idx], ...updated };
-								return next;
-							}
-							return [...prev, updated];
-						});
+							setAgents((prev) => {
+								const idx = prev.findIndex(
+									(a) => a.identity === updated.identity,
+								);
+								if (idx >= 0) {
+									const next = [...prev];
+									next[idx] = { ...next[idx], ...updated };
+									return next;
+								}
+								return [...prev, updated];
+							});
+						}
 						break;
 
 					case "channels":
-						setChannels(msg.data || []);
+						setChannels(asArrayOf(msg.data, isChannel));
 						break;
 
 					case "messages":
 					case "message_snapshot":
-						setMessages(msg.data || []);
+						setMessages(asArrayOf(msg.data, isMessage));
 						break;
 
 					case "message_insert":
-						setMessages((prev) => [...prev, msg.data].slice(-200));
+						if (!isMessage(msg.data)) {
+							break;
+						}
+						{
+							const message = msg.data;
+							setMessages((prev) => [...prev, message].slice(-200));
+						}
 						break;
 
 					case "sync":
