@@ -28,12 +28,14 @@ export function registerProposalTools(
 				},
 				proposal_type: {
 					type: "string",
-					description: "Alias for type. Proposal type determines workflow selection.",
+					description:
+						"Alias for type. Proposal type determines workflow selection.",
 				},
 				domain_id: { type: "string", description: "Filter by domain" },
 				maturity_min: {
 					type: "number",
-					description: "Minimum maturity gate level when supported by the backend query",
+					description:
+						"Minimum maturity gate level when supported by the backend query",
 				},
 			},
 		},
@@ -153,16 +155,19 @@ export function registerProposalTools(
 				id: { type: "string" },
 				status: {
 					type: "string",
-					description: "Target workflow stage, for example Draft, Review, Develop, Merge, or Complete",
+					description:
+						"Target workflow stage, for example Draft, Review, Develop, Merge, or Complete",
 				},
 				author: { type: "string" },
 				reason: {
 					type: "string",
-					description: "Transition reason: mature | decision | iteration | depend | discard | rejected | research | division | submit",
+					description:
+						"Transition reason: mature | decision | iteration | depend | discard | rejected | research | division | submit",
 				},
 				notes: {
 					type: "string",
-					description: "Required for gate decision transitions — record what was decided and why",
+					description:
+						"Required for gate decision transitions — record what was decided and why",
 				},
 			},
 			required: ["id", "status"],
@@ -179,18 +184,108 @@ export function registerProposalTools(
 		inputSchema: {
 			type: "object",
 			properties: {
-				id:       { type: "string", description: "Proposal display_id (e.g. P048)" },
+				id: { type: "string", description: "Proposal display_id (e.g. P048)" },
 				maturity: {
 					type: "string",
 					enum: ["new", "active", "mature", "obsolete"],
 					description: "Target maturity level",
 				},
-				agent:  { type: "string", description: "Agent making the declaration" },
-				reason: { type: "string", description: "Optional note explaining the maturity declaration" },
+				agent: { type: "string", description: "Agent making the declaration" },
+				reason: {
+					type: "string",
+					description: "Optional note explaining the maturity declaration",
+				},
 			},
 			required: ["id", "maturity"],
 		},
 		handler: (args: any) => handlers.setMaturity(args),
+	});
+	server.addTool({
+		name: "prop_claim",
+		description: "Claim an AgentHive proposal by creating a Postgres lease",
+		inputSchema: {
+			type: "object",
+			properties: {
+				id: {
+					type: "string",
+					description: "Proposal display_id or numeric id, for example P056",
+				},
+				agent: {
+					type: "string",
+					description: "Agent identity claiming the proposal",
+				},
+				durationMinutes: {
+					type: "number",
+					description: "Lease duration in minutes; defaults to 120",
+				},
+				force: {
+					type: "boolean",
+					description: "Release any active lease before claiming",
+				},
+			},
+			required: ["id", "agent"],
+		},
+		handler: (args: any) => handlers.claimProposal(args),
+	});
+	server.addTool({
+		name: "prop_release",
+		description: "Release an active AgentHive proposal lease",
+		inputSchema: {
+			type: "object",
+			properties: {
+				id: {
+					type: "string",
+					description: "Proposal display_id or numeric id, for example P056",
+				},
+				agent: {
+					type: "string",
+					description: "Agent identity releasing the proposal",
+				},
+				reason: {
+					type: "string",
+					description: "Optional release reason",
+				},
+			},
+			required: ["id", "agent"],
+		},
+		handler: (args: any) => handlers.releaseProposal(args),
+	});
+	server.addTool({
+		name: "prop_renew",
+		description: "Renew an active AgentHive proposal lease",
+		inputSchema: {
+			type: "object",
+			properties: {
+				id: {
+					type: "string",
+					description: "Proposal display_id or numeric id, for example P056",
+				},
+				agent: {
+					type: "string",
+					description: "Agent identity renewing the proposal",
+				},
+				durationMinutes: {
+					type: "number",
+					description: "Lease duration in minutes from now; defaults to 120",
+				},
+			},
+			required: ["id", "agent"],
+		},
+		handler: (args: any) => handlers.renewProposal(args),
+	});
+	server.addTool({
+		name: "prop_leases",
+		description: "List active AgentHive proposal leases",
+		inputSchema: {
+			type: "object",
+			properties: {
+				id: {
+					type: "string",
+					description: "Optional proposal display_id or numeric id",
+				},
+			},
+		},
+		handler: (args: any) => handlers.listLeases(args),
 	});
 	server.addTool({
 		name: "prop_delete",

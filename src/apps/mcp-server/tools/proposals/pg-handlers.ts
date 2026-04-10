@@ -6,6 +6,7 @@
  * preventing tool call crashes.
  */
 
+import { query } from "../../../../postgres/pool.ts";
 import type { ProposalRow } from "../../../../postgres/proposal-storage-v2.ts";
 import * as pg from "../../../../postgres/proposal-storage-v2.ts";
 import type { McpServer } from "../../server.ts";
@@ -221,10 +222,10 @@ export class PgProposalHandlers {
 
 			// Gate transitions require decision notes
 			const gateTransitions: Record<string, string[]> = {
-				"Draft": ["Review"],
-				"Review": ["Develop"],
-				"Develop": ["Merge"],
-				"Merge": ["Complete"],
+				Draft: ["Review"],
+				Review: ["Develop"],
+				Develop: ["Merge"],
+				Merge: ["Complete"],
 			};
 
 			// Get current status to check if this is a gate transition
@@ -287,10 +288,12 @@ export class PgProposalHandlers {
 			const valid = ["new", "active", "mature", "obsolete"];
 			if (!valid.includes(args.maturity)) {
 				return {
-					content: [{
-						type: "text",
-						text: `Invalid maturity '${args.maturity}'. Must be one of: ${valid.join(", ")}`,
-					}],
+					content: [
+						{
+							type: "text",
+							text: `Invalid maturity '${args.maturity}'. Must be one of: ${valid.join(", ")}`,
+						},
+					],
 				};
 			}
 
@@ -306,19 +309,202 @@ export class PgProposalHandlers {
 				};
 			}
 
-			const gateNote = args.maturity === "mature"
-				? ` — gate-ready event fired (D${
-						{ DRAFT: "1", REVIEW: "2", DEVELOP: "3", MERGE: "4" }[updated.status] ?? "?"
-					} queue)`
-				: "";
+			const gateNote =
+				args.maturity === "mature"
+					? ` — gate-ready event fired (D${
+							{ DRAFT: "1", REVIEW: "2", DEVELOP: "3", MERGE: "4" }[
+								updated.status
+							] ?? "?"
+						} queue)`
+					: "";
 			return {
-				content: [{
-					type: "text",
-					text: `[${updated.display_id}] maturity set to '${args.maturity}'${gateNote}`,
-				}],
+				content: [
+					{
+						type: "text",
+						text: `[${updated.display_id}] maturity set to '${args.maturity}'${gateNote}`,
+					},
+				],
 			};
 		} catch (err) {
 			return errorResult("Failed to set maturity", err);
+		}
+	}
+
+	async claimProposal(args: {
+		id: string;
+		agent: string;
+		durationMinutes?: number;
+		force?: boolean;
+	}): Promise<CallToolResult> {
+		try {
+			const id = await pg.resolveProposalId(args.id);
+			if (id === null) {
+				return {
+					content: [{ type: "text", text: `Proposal ${args.id} not found.` }],
+				};
+			}
+
+			await query(
+				`INSERT INTO agent_registry (agent_identity, agent_type, role)
+         VALUES ($1, $2, $3)
+         ON CONFLICT ON CONSTRAINT agent_registry_agent_identity_key
+         DO UPDATE SET role = EXCLUDED.role`,
+				[args.agent, "llm", "developer"],
+			);
+
+			const activeLeases = await pg.getActiveLeases(id);
+			if (activeLeases.length > 0 && !args.force) {
+				const lease = activeLeases[0];
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Proposal ${args.id} is already claimed by ${lease.agent_identity} until ${lease.expires_at ?? "no expiry"}. Pass force=true to replace the lease.`,
+						},
+					],
+				};
+			}
+
+			if (args.force) {
+				for (const lease of activeLeases) {
+					await pg.releaseLease(id, lease.agent_identity, "force-reclaimed");
+				}
+			}
+
+			const durationMinutes = args.durationMinutes ?? 120;
+			const expiresAt = new Date(Date.now() + durationMinutes * 60 * 1000);
+			const claimed = await pg.claimLease(id, args.agent, expiresAt);
+			if (!claimed) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Proposal ${args.id} could not be claimed; another active lease exists.`,
+						},
+					],
+				};
+			}
+
+			return {
+				content: [
+					{
+						type: "text",
+						text: `Claimed proposal ${args.id} for ${args.agent} until ${expiresAt.toISOString()}.`,
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to claim proposal", err);
+		}
+	}
+
+	async releaseProposal(args: {
+		id: string;
+		agent: string;
+		reason?: string;
+	}): Promise<CallToolResult> {
+		try {
+			const id = await pg.resolveProposalId(args.id);
+			if (id === null) {
+				return {
+					content: [{ type: "text", text: `Proposal ${args.id} not found.` }],
+				};
+			}
+
+			const released = await pg.releaseLease(
+				id,
+				args.agent,
+				args.reason ?? "released",
+			);
+			if (!released) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `No active lease on ${args.id} for ${args.agent}.`,
+						},
+					],
+				};
+			}
+
+			return {
+				content: [
+					{
+						type: "text",
+						text: `Released proposal ${args.id} lease for ${args.agent}.`,
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to release proposal", err);
+		}
+	}
+
+	async renewProposal(args: {
+		id: string;
+		agent: string;
+		durationMinutes?: number;
+	}): Promise<CallToolResult> {
+		try {
+			const id = await pg.resolveProposalId(args.id);
+			if (id === null) {
+				return {
+					content: [{ type: "text", text: `Proposal ${args.id} not found.` }],
+				};
+			}
+
+			const durationMinutes = args.durationMinutes ?? 120;
+			const expiresAt = new Date(Date.now() + durationMinutes * 60 * 1000);
+			const renewed = await pg.renewLease(id, args.agent, expiresAt);
+			if (!renewed) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `No active lease on ${args.id} for ${args.agent}.`,
+						},
+					],
+				};
+			}
+
+			return {
+				content: [
+					{
+						type: "text",
+						text: `Renewed proposal ${args.id} lease for ${args.agent} until ${expiresAt.toISOString()}.`,
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to renew proposal lease", err);
+		}
+	}
+
+	async listLeases(args: { id?: string }): Promise<CallToolResult> {
+		try {
+			let proposalId: number | undefined;
+			if (args.id) {
+				const resolvedId = await pg.resolveProposalId(args.id);
+				if (resolvedId === null) {
+					return {
+						content: [{ type: "text", text: `Proposal ${args.id} not found.` }],
+					};
+				}
+				proposalId = resolvedId;
+			}
+
+			const leases = await pg.getActiveLeases(proposalId);
+			if (!leases.length) {
+				return { content: [{ type: "text", text: "No active leases." }] };
+			}
+
+			const lines = leases.map(
+				(lease) =>
+					`[${lease.display_id}] ${lease.agent_identity} — ${lease.lease_status}, claimed ${lease.claimed_at}, expires ${lease.expires_at ?? "never"}`,
+			);
+			return { content: [{ type: "text", text: lines.join("\n") }] };
+		} catch (err) {
+			return errorResult("Failed to list proposal leases", err);
 		}
 	}
 
@@ -337,7 +523,6 @@ export class PgProposalHandlers {
 			return errorResult("Failed to delete proposal", err);
 		}
 	}
-
 
 	async getVersions(args: { id: string }): Promise<CallToolResult> {
 		try {
@@ -416,5 +601,4 @@ export class PgProposalHandlers {
 			proposal.summary ?? proposal.motivation ?? proposal.design ?? "";
 		return source ? source.substring(0, 150) : "";
 	}
-
 }

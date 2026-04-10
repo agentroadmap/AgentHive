@@ -8,10 +8,11 @@
 
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { after, before, describe, it } from "node:test";
 import { join } from "node:path";
+import { after, before, describe, it } from "node:test";
 import { Pool } from "pg";
 import { PgMemoryHandlers } from "../../src/mcp/tools/memory/pg-handlers.ts";
+import { PgProposalHandlers } from "../../src/mcp/tools/proposals/pg-handlers.ts";
 import { transitionProposal as transitionProposalRfc } from "../../src/mcp/tools/rfc/pg-handlers.ts";
 import { PgSpendingHandlers } from "../../src/mcp/tools/spending/pg-handlers.ts";
 import { closePool, initPoolFromConfig } from "../../src/postgres/pool.ts";
@@ -85,7 +86,8 @@ function resolvePgConfig() {
 		port: Number(process.env.PG_PORT ?? databaseUrlConfig.port) || 5432,
 		user: process.env.PG_USER ?? databaseUrlConfig.user ?? "admin",
 		password,
-		database: process.env.PG_DATABASE ?? databaseUrlConfig.database ?? "agenthive",
+		database:
+			process.env.PG_DATABASE ?? databaseUrlConfig.database ?? "agenthive",
 		options: "-c search_path=roadmap,public",
 	};
 }
@@ -183,6 +185,9 @@ async function cleanupFixture(): Promise<void> {
 		`DELETE FROM spending_log WHERE agent_identity LIKE $1 OR run_id LIKE $1`,
 		[prefixPattern],
 	);
+	await pool.query(`DELETE FROM proposal_lease WHERE agent_identity LIKE $1`, [
+		prefixPattern,
+	]);
 	await pool.query(`DELETE FROM run_log WHERE run_id LIKE $1`, [prefixPattern]);
 	await pool.query(`DELETE FROM spending_caps WHERE agent_identity LIKE $1`, [
 		prefixPattern,
@@ -615,6 +620,80 @@ describe("Roadmap Postgres integration", () => {
 				/Token efficiency metrics are unavailable\. Apply migration 014 first/,
 			);
 		}
+
+		await deleteProposal(proposal.id);
+	});
+
+	it("claims proposals through the Postgres MCP proposal handler", async () => {
+		const proposals = new PgProposalHandlers({} as never, process.cwd());
+		const agentIdentity = `${TEST_PREFIX}_claimer`;
+		await ensureAgent(agentIdentity);
+
+		const proposal = await createProposal(
+			{
+				type: TEST_TYPE,
+				title: `${TEST_PREFIX} claim`,
+				summary: "Claim summary",
+				design: "Claim design",
+			},
+			agentIdentity,
+		);
+
+		const claimResult = await proposals.claimProposal({
+			id: proposal.display_id,
+			agent: agentIdentity,
+			durationMinutes: 30,
+		});
+		assert.match(textContent(claimResult), /Claimed proposal/);
+
+		const activeLeases = await pool.query<{
+			agent_identity: string;
+			expires_at: Date | null;
+		}>(
+			`SELECT agent_identity, expires_at
+       FROM proposal_lease
+       WHERE proposal_id = $1 AND released_at IS NULL`,
+			[proposal.id],
+		);
+		assert.equal(activeLeases.rows[0].agent_identity, agentIdentity);
+		assert.ok(activeLeases.rows[0].expires_at);
+
+		const secondClaim = await proposals.claimProposal({
+			id: proposal.display_id,
+			agent: `${agentIdentity}_other`,
+			durationMinutes: 30,
+		});
+		assert.match(textContent(secondClaim), /already claimed/);
+
+		const forceClaim = await proposals.claimProposal({
+			id: proposal.display_id,
+			agent: `${agentIdentity}_other`,
+			durationMinutes: 30,
+			force: true,
+		});
+		assert.match(textContent(forceClaim), /Claimed proposal/);
+
+		const leaseList = await proposals.listLeases({ id: proposal.display_id });
+		assert.match(textContent(leaseList), new RegExp(`${agentIdentity}_other`));
+
+		const renewResult = await proposals.renewProposal({
+			id: proposal.display_id,
+			agent: `${agentIdentity}_other`,
+			durationMinutes: 45,
+		});
+		assert.match(textContent(renewResult), /Renewed proposal/);
+
+		const releaseResult = await proposals.releaseProposal({
+			id: proposal.display_id,
+			agent: `${agentIdentity}_other`,
+			reason: "integration-test-complete",
+		});
+		assert.match(textContent(releaseResult), /Released proposal/);
+
+		const emptyLeaseList = await proposals.listLeases({
+			id: proposal.display_id,
+		});
+		assert.match(textContent(emptyLeaseList), /No active leases/);
 
 		await deleteProposal(proposal.id);
 	});
