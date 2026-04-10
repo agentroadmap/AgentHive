@@ -43,7 +43,7 @@ export class PgProposalHandlers {
 			}
 			const lines = proposals.map((p) => {
 				const did = p.display_id ?? `#${p.id}`;
-				return `[${did}] ${p.title || "(no title)"} — status: ${p.status}, type: ${p.type}, maturity: ${this.formatMaturity(p.maturity, p.status)}`;
+				return `[${did}] ${p.title || "(no title)"} — status: ${p.status}, type: ${p.type}, maturity: ${this.formatMaturity(p.maturity, p.status, p.maturity_state)}`;
 			});
 			return { content: [{ type: "text", text: lines.join("\n") }] };
 		} catch (err) {
@@ -208,7 +208,8 @@ export class PgProposalHandlers {
 		id: string;
 		status: string;
 		author?: string;
-		summary?: string;
+		reason?: string;
+		notes?: string;
 	}): Promise<CallToolResult> {
 		try {
 			const id = await pg.resolveProposalId(args.id);
@@ -222,7 +223,8 @@ export class PgProposalHandlers {
 				id,
 				args.status,
 				args.author ?? "system",
-				args.summary,
+				args.reason,
+				args.notes,
 			);
 			if (!updated) {
 				return {
@@ -239,6 +241,58 @@ export class PgProposalHandlers {
 			};
 		} catch (err) {
 			return errorResult("Failed to transition proposal", err);
+		}
+	}
+
+	async setMaturity(args: {
+		id: string;
+		maturity: string;
+		agent?: string;
+		reason?: string;
+	}): Promise<CallToolResult> {
+		try {
+			const id = await pg.resolveProposalId(args.id);
+			if (id === null) {
+				return {
+					content: [{ type: "text", text: `Proposal ${args.id} not found.` }],
+				};
+			}
+
+			const valid = ["new", "active", "mature", "obsolete"];
+			if (!valid.includes(args.maturity)) {
+				return {
+					content: [{
+						type: "text",
+						text: `Invalid maturity '${args.maturity}'. Must be one of: ${valid.join(", ")}`,
+					}],
+				};
+			}
+
+			const updated = await pg.setMaturity(
+				id,
+				args.maturity as "new" | "active" | "mature" | "obsolete",
+				args.agent ?? "system",
+				args.reason,
+			);
+			if (!updated) {
+				return {
+					content: [{ type: "text", text: `Proposal ${args.id} not found.` }],
+				};
+			}
+
+			const gateNote = args.maturity === "mature"
+				? ` — gate-ready event fired (D${
+						{ DRAFT: "1", REVIEW: "2", DEVELOP: "3", MERGE: "4" }[updated.status] ?? "?"
+					} queue)`
+				: "";
+			return {
+				content: [{
+					type: "text",
+					text: `[${updated.display_id}] maturity set to '${args.maturity}'${gateNote}`,
+				}],
+			};
+		} catch (err) {
+			return errorResult("Failed to set maturity", err);
 		}
 	}
 
@@ -297,7 +351,7 @@ export class PgProposalHandlers {
 			const lines = proposals.map((p) => {
 				const did = p.display_id ?? `#${p.id}`;
 				const preview = this.buildPreview(p);
-				return `[${did}] ${p.title || "(no title)"} — status: ${p.status}, type: ${p.type}, maturity: ${this.formatMaturity(p.maturity, p.status)}\n  ${preview}`;
+				return `[${did}] ${p.title || "(no title)"} — status: ${p.status}, type: ${p.type}, maturity: ${this.formatMaturity(p.maturity, p.status, p.maturity_state)}\n  ${preview}`;
 			});
 			return {
 				content: [
@@ -339,10 +393,12 @@ export class PgProposalHandlers {
 	private formatMaturity(
 		maturity: Record<string, string> | null | undefined,
 		status: string,
+		maturityState?: string,
 	): string {
-		if (!maturity || typeof maturity !== "object") {
-			return "unknown";
-		}
+		// Prefer the new canonical maturity_state column when available
+		if (maturityState) return maturityState;
+		// Fall back to legacy JSONB map
+		if (!maturity || typeof maturity !== "object") return "unknown";
 		return maturity[status] ?? Object.values(maturity)[0] ?? "unknown";
 	}
 }

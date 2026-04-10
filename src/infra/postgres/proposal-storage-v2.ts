@@ -6,7 +6,7 @@
 import { getPool, query } from "./pool.ts";
 
 const PROPOSAL_COLUMNS = `
-  id, display_id, parent_id, type, status, maturity, title,
+  id, display_id, parent_id, type, status, maturity, maturity_state, title,
   summary, motivation, design, drawbacks, alternatives,
   dependency, priority, tags, audit, created_at, modified_at
 `;
@@ -17,7 +17,8 @@ export type ProposalRow = {
 	parent_id: number | null;
 	type: string;
 	status: string;
-	maturity: Record<string, string>; // jsonb map of stage → maturity label
+	maturity: Record<string, string>; // legacy jsonb map (kept for transition period)
+	maturity_state: "new" | "active" | "mature" | "obsolete"; // canonical per-proposal maturity
 	title: string;
 	summary: string | null;
 	motivation: string | null;
@@ -341,11 +342,20 @@ export async function updateProposal(
  *
  * caller should validate the transition is allowed before calling.
  */
+// Gate transitions that require a recorded decision when reason = 'decision'.
+const GATE_TRANSITIONS = new Set([
+	"DRAFT→REVIEW",
+	"REVIEW→DEVELOP",
+	"DEVELOP→MERGE",
+	"MERGE→COMPLETE",
+]);
+
 export async function transitionProposal(
 	proposalId: number,
 	toState: string,
 	transitionedBy: string,
 	reason?: string,
+	notes?: string,
 ): Promise<ProposalRow | null> {
 	// Get current status
 	const current = await query<{ status: string }>(
@@ -354,6 +364,23 @@ export async function transitionProposal(
 	);
 	if (current.rows.length === 0) return null;
 	const fromState = current.rows[0].status;
+
+	// Gate guard: decision transitions require an explicit notes record
+	const gateKey = `${fromState.toUpperCase()}→${toState.toUpperCase()}`;
+	if (GATE_TRANSITIONS.has(gateKey) && reason === "decision") {
+		if (!notes?.trim()) {
+			throw new Error(
+				`Gate transition ${gateKey} requires a decision record in 'notes' — ` +
+				`record what was decided and why (required for D* auditability)`,
+			);
+		}
+		if (!transitionedBy?.trim()) {
+			throw new Error(
+				`Gate transition ${gateKey} requires 'transitionedBy' — ` +
+				`record which agent or human made the gating decision`,
+			);
+		}
+	}
 
 	// Validate transition exists
 	const { rowCount } = await query(
@@ -408,18 +435,20 @@ export async function transitionProposal(
 		[toState, proposalId],
 	);
 
-	// Also log in state_transitions with metadata (the trigger inserts a minimal entry)
+	// Backfill the trigger's minimal entry with full metadata
 	await query(
 		`UPDATE proposal_state_transitions
-     SET transition_reason = $1, transitioned_by = $2
+     SET transition_reason = $1,
+         transitioned_by   = $2,
+         notes             = COALESCE($3, notes)
      WHERE id = (
        SELECT id
        FROM proposal_state_transitions
-       WHERE proposal_id = $3 AND LOWER(to_state) = LOWER($4)
+       WHERE proposal_id = $4 AND LOWER(to_state) = LOWER($5)
        ORDER BY id DESC
        LIMIT 1
      )`,
-		[reason ?? "system", transitionedBy, proposalId, toState],
+		[reason ?? "submit", transitionedBy, notes ?? null, proposalId, toState],
 	);
 
 	return rows[0];
@@ -446,6 +475,58 @@ export async function getValidTransitions(proposalId: number): Promise<
 		[proposalId],
 	);
 	return rows;
+}
+
+/**
+ * Set maturity_state on a proposal.
+ *
+ * This is the canonical way for agents to declare readiness within a state:
+ *   new → active → mature → obsolete
+ *
+ * When maturity_state reaches 'mature', the DB trigger fn_notify_gate_ready fires
+ * pg_notify('proposal_gate_ready', ...) to queue a D* gating review.
+ */
+export async function setMaturity(
+	proposalId: number,
+	maturityState: "new" | "active" | "mature" | "obsolete",
+	agentId: string,
+	reason?: string,
+): Promise<ProposalRow | null> {
+	const valid = new Set(["new", "active", "mature", "obsolete"]);
+	if (!valid.has(maturityState)) {
+		throw new Error(
+			`Invalid maturity_state '${maturityState}'. Must be one of: new, active, mature, obsolete`,
+		);
+	}
+
+	const { rows } = await query<ProposalRow>(
+		`UPDATE proposal
+     SET maturity_state = $1,
+         modified_at    = NOW()
+     WHERE id = $2
+     RETURNING ${PROPOSAL_COLUMNS}`,
+		[maturityState, proposalId],
+	);
+
+	if (!rows[0]) return null;
+
+	// Record an audit note when self-declaring mature (the gate-ready event)
+	if (maturityState === "mature") {
+		await query(
+			`INSERT INTO proposal_discussions
+         (proposal_id, author_identity, context_prefix, body)
+       VALUES ($1, $2, 'general:', $3)`,
+			[
+				proposalId,
+				agentId,
+				reason
+					? `Declared mature: ${reason}`
+					: `Agent self-declared proposal ready for gate review (maturity → mature)`,
+			],
+		);
+	}
+
+	return rows[0];
 }
 
 /**
