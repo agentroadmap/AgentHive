@@ -156,11 +156,41 @@ export function registerProposalTools(
 					description: "Target workflow stage, for example Draft, Review, Develop, Merge, or Complete",
 				},
 				author: { type: "string" },
-				summary: { type: "string" },
+				reason: {
+					type: "string",
+					description: "Transition reason: mature | decision | iteration | depend | discard | rejected | research | division | submit",
+				},
+				notes: {
+					type: "string",
+					description: "Required for gate decision transitions — record what was decided and why",
+				},
 			},
 			required: ["id", "status"],
 		},
 		handler: (args: any) => handlers.transitionProposal(args),
+	});
+	server.addTool({
+		name: "prop_set_maturity",
+		description:
+			"Set the maturity of a proposal within its current state. " +
+			"Maturity flows: new → active → mature → obsolete. " +
+			"Setting 'mature' fires a gate-ready event (pg_notify proposal_gate_ready) " +
+			"to queue the appropriate D* gating review without changing the proposal status.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				id:       { type: "string", description: "Proposal display_id (e.g. P048)" },
+				maturity: {
+					type: "string",
+					enum: ["new", "active", "mature", "obsolete"],
+					description: "Target maturity level",
+				},
+				agent:  { type: "string", description: "Agent making the declaration" },
+				reason: { type: "string", description: "Optional note explaining the maturity declaration" },
+			},
+			required: ["id", "maturity"],
+		},
+		handler: (args: any) => handlers.setMaturity(args),
 	});
 	server.addTool({
 		name: "prop_delete",
@@ -172,25 +202,5 @@ export function registerProposalTools(
 		},
 		handler: (args: any) => handlers.deleteProposal(args),
 	});
-	server.addTool({
-		name: "prop_set_maturity",
-		description:
-			"Set proposal maturity inside the current workflow stage (new/active/mature/obsolete). Setting to 'mature' triggers the gate pipeline.",
-		inputSchema: {
-			type: "object",
-			properties: {
-				id: { type: "string", description: "Proposal ID (display_id like P048 or numeric)" },
-				maturity: {
-					type: "string",
-					description: "Maturity state: new, active, mature, or obsolete",
-					enum: ["new", "active", "mature", "obsolete"],
-				},
-				agent: { type: "string", description: "Agent identity making the change" },
-			},
-			required: ["id", "maturity"],
-		},
-		handler: (args: any) => handlers.setMaturity(args),
-	});
-
 	console.log("[MCP] Using Postgres proposal handlers (AgentHive)");
 }
