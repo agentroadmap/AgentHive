@@ -15,6 +15,7 @@ import {
 
 const MATURITY_CHANGED_CHANNEL = "proposal_maturity_changed";
 const TRANSITION_QUEUED_CHANNEL = "transition_queued";
+const GATE_READY_CHANNEL = "proposal_gate_ready";
 const DEFAULT_POLL_INTERVAL_MS = 30_000;
 const DEFAULT_BATCH_SIZE = 10;
 const WORKTREE_PREFIXES = ["claude", "gemini", "copilot", "openclaw"] as const;
@@ -209,7 +210,8 @@ export class PipelineCron {
 	): void => {
 		if (
 			message.channel !== MATURITY_CHANGED_CHANNEL &&
-			message.channel !== TRANSITION_QUEUED_CHANNEL
+			message.channel !== TRANSITION_QUEUED_CHANNEL &&
+			message.channel !== GATE_READY_CHANNEL
 		) {
 			return;
 		}
@@ -270,6 +272,7 @@ export class PipelineCron {
 			try {
 				await listener.query(`UNLISTEN ${MATURITY_CHANGED_CHANNEL}`);
 				await listener.query(`UNLISTEN ${TRANSITION_QUEUED_CHANNEL}`);
+				await listener.query(`UNLISTEN ${GATE_READY_CHANNEL}`);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				this.logger.warn(
@@ -296,6 +299,7 @@ export class PipelineCron {
 
 		await listener.query(`LISTEN ${MATURITY_CHANGED_CHANNEL}`);
 		await listener.query(`LISTEN ${TRANSITION_QUEUED_CHANNEL}`);
+		await listener.query(`LISTEN ${GATE_READY_CHANNEL}`);
 	}
 
 	private async scheduleDrain(reason: string): Promise<void> {
@@ -327,6 +331,21 @@ export class PipelineCron {
 	}
 
 	private async drainReadyTransitions(reason: string): Promise<void> {
+		// Pull scan: enqueue any mature proposals not yet in transition_queue.
+		// This is the fallback for push-missed events (crash, pre-migration backlog).
+		try {
+			await this.queryFn(
+				`SELECT roadmap.fn_enqueue_mature_proposals()`,
+				[],
+			);
+		} catch (err) {
+			// fn_enqueue_mature_proposals may not exist in older deployments — non-fatal
+			const msg = err instanceof Error ? err.message : String(err);
+			if (!msg.includes("does not exist")) {
+				this.logger.warn(`[PipelineCron] fn_enqueue_mature_proposals: ${msg}`);
+			}
+		}
+
 		while (true) {
 			const transitions = await this.claimPendingTransitions();
 			if (transitions.length === 0) {
