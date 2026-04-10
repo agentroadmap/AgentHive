@@ -1675,6 +1675,33 @@ ${description || `Directive: ${title}`}`,
 					config.database = cfg.database;
 				}
 
+				if (cfg.mcp) {
+					config.mcp = {
+						url: cfg.mcp.url,
+						healthEndpoint: cfg.mcp.health_endpoint,
+						toolsCount: cfg.mcp.tools_count,
+						port: cfg.mcp.port,
+						transport: cfg.mcp.transport,
+						http: cfg.mcp.http,
+					};
+				}
+
+				if (cfg.git) {
+					config.git = {
+						remote: cfg.git.remote,
+						defaultBranch: cfg.git.default_branch,
+						worktreePath: cfg.git.worktree_path,
+					};
+				}
+
+				if (cfg.paths) {
+					config.paths = cfg.paths;
+				}
+
+				if (cfg.components) {
+					config.components = cfg.components;
+				}
+
 				if (cfg.ui) {
 					config.maxColumnWidth = cfg.ui.max_column_width;
 					config.autoOpenBrowser = cfg.ui.auto_open_browser;
@@ -1732,6 +1759,9 @@ ${description || `Directive: ${title}`}`,
 		let inDatabaseSection = false;
 		let inProposalsSection = false;
 		let inProjectSection = false;
+		let inMcpSection = false;
+		let inGitSection = false;
+		let inPathsSection = false;
 		config.database = { provider: "Postgres" };
 
 		for (const line of lines) {
@@ -1743,16 +1773,52 @@ ${description || `Directive: ${title}`}`,
 				inDatabaseSection = true;
 				inProposalsSection = false;
 				inProjectSection = false;
+				inMcpSection = false;
+				inGitSection = false;
+				inPathsSection = false;
 				continue;
 			}
 			if (trimmed === "proposals:") {
 				inProposalsSection = true;
 				inDatabaseSection = false;
 				inProjectSection = false;
+				inMcpSection = false;
+				inGitSection = false;
+				inPathsSection = false;
 				continue;
 			}
 			if (trimmed === "project:") {
 				inProjectSection = true;
+				inDatabaseSection = false;
+				inProposalsSection = false;
+				inMcpSection = false;
+				inGitSection = false;
+				inPathsSection = false;
+				continue;
+			}
+			if (trimmed === "mcp:") {
+				inMcpSection = true;
+				inProjectSection = false;
+				inDatabaseSection = false;
+				inProposalsSection = false;
+				inGitSection = false;
+				inPathsSection = false;
+				continue;
+			}
+			if (trimmed === "git:") {
+				inGitSection = true;
+				inMcpSection = false;
+				inProjectSection = false;
+				inDatabaseSection = false;
+				inProposalsSection = false;
+				inPathsSection = false;
+				continue;
+			}
+			if (trimmed === "paths:") {
+				inPathsSection = true;
+				inGitSection = false;
+				inMcpSection = false;
+				inProjectSection = false;
 				inDatabaseSection = false;
 				inProposalsSection = false;
 				continue;
@@ -1763,6 +1829,9 @@ ${description || `Directive: ${title}`}`,
 				inDatabaseSection = false;
 				inProposalsSection = false;
 				inProjectSection = false;
+				inMcpSection = false;
+				inGitSection = false;
+				inPathsSection = false;
 			}
 
 			const colonIndex = trimmed.indexOf(":");
@@ -1806,6 +1875,60 @@ ${description || `Directive: ${title}`}`,
 						break;
 					case "uri":
 						config.database.uri = value.replace(/['"]/g, "");
+						break;
+				}
+				continue;
+			}
+
+			if (inMcpSection) {
+				if (!config.mcp) config.mcp = {};
+				switch (key) {
+					case "url":
+						config.mcp.url = value.replace(/['"]/g, "");
+						break;
+					case "health_endpoint":
+						config.mcp.healthEndpoint = value.replace(/['"]/g, "");
+						break;
+					case "tools_count":
+						config.mcp.toolsCount = Number.parseInt(value, 10);
+						break;
+					case "port":
+						config.mcp.port = Number.parseInt(value, 10);
+						break;
+					case "transport":
+						config.mcp.transport = value.replace(/['"]/g, "");
+						break;
+				}
+				continue;
+			}
+
+			if (inGitSection) {
+				if (!config.git) config.git = {};
+				switch (key) {
+					case "remote":
+						config.git.remote = value.replace(/['"]/g, "");
+						break;
+					case "default_branch":
+						config.git.defaultBranch = value.replace(/['"]/g, "");
+						break;
+					case "worktree_path":
+						config.git.worktreePath = value.replace(/['"]/g, "");
+						break;
+				}
+				continue;
+			}
+
+			if (inPathsSection) {
+				if (!config.paths) config.paths = {};
+				switch (key) {
+					case "proposals":
+						config.paths.proposals = value.replace(/['"]/g, "");
+						break;
+					case "archive":
+						config.paths.archive = value.replace(/['"]/g, "");
+						break;
+					case "docs":
+						config.paths.docs = value.replace(/['"]/g, "");
 						break;
 				}
 				continue;
@@ -1943,6 +2066,10 @@ ${description || `Directive: ${title}`}`,
 			result.onStatusChange = config.onStatusChange;
 		if (config.prefixes !== undefined) result.prefixes = config.prefixes;
 		if (config.database !== undefined) result.database = config.database;
+		if (config.mcp !== undefined) result.mcp = config.mcp;
+		if (config.git !== undefined) result.git = config.git;
+		if (config.paths !== undefined) result.paths = config.paths;
+		if (config.components !== undefined) result.components = config.components;
 
 		return result as RoadmapConfig;
 	}
@@ -2004,6 +2131,29 @@ ${description || `Directive: ${title}`}`,
 					cfg.check_active_branches = config.checkActiveBranches;
 				if (cfg.active_branch_days !== undefined)
 					cfg.active_branch_days = config.activeBranchDays;
+				if (config.mcp) {
+					cfg.mcp = cfg.mcp || {};
+					if (config.mcp.url !== undefined) cfg.mcp.url = config.mcp.url;
+					if (config.mcp.healthEndpoint !== undefined)
+						cfg.mcp.health_endpoint = config.mcp.healthEndpoint;
+					if (config.mcp.toolsCount !== undefined)
+						cfg.mcp.tools_count = config.mcp.toolsCount;
+					if (config.mcp.port !== undefined) cfg.mcp.port = config.mcp.port;
+					if (config.mcp.transport !== undefined)
+						cfg.mcp.transport = config.mcp.transport;
+					if (config.mcp.http !== undefined) cfg.mcp.http = config.mcp.http;
+				}
+				if (config.git) {
+					cfg.git = cfg.git || {};
+					if (config.git.remote !== undefined)
+						cfg.git.remote = config.git.remote;
+					if (config.git.defaultBranch !== undefined)
+						cfg.git.default_branch = config.git.defaultBranch;
+					if (config.git.worktreePath !== undefined)
+						cfg.git.worktree_path = config.git.worktreePath;
+				}
+				if (config.paths) cfg.paths = config.paths;
+				if (config.components) cfg.components = config.components;
 
 				return yaml.dump(cfg, { indent: 2, lineWidth: -1 });
 			}
@@ -2028,6 +2178,37 @@ ${description || `Directive: ${title}`}`,
 			};
 
 			if (config.database) cleanObj.database = config.database;
+			if (config.mcp) {
+				cleanObj.mcp = {
+					...(config.mcp.url !== undefined ? { url: config.mcp.url } : {}),
+					...(config.mcp.healthEndpoint !== undefined
+						? { health_endpoint: config.mcp.healthEndpoint }
+						: {}),
+					...(config.mcp.toolsCount !== undefined
+						? { tools_count: config.mcp.toolsCount }
+						: {}),
+					...(config.mcp.port !== undefined ? { port: config.mcp.port } : {}),
+					...(config.mcp.transport !== undefined
+						? { transport: config.mcp.transport }
+						: {}),
+					...(config.mcp.http !== undefined ? { http: config.mcp.http } : {}),
+				};
+			}
+			if (config.git) {
+				cleanObj.git = {
+					...(config.git.remote !== undefined
+						? { remote: config.git.remote }
+						: {}),
+					...(config.git.defaultBranch !== undefined
+						? { default_branch: config.git.defaultBranch }
+						: {}),
+					...(config.git.worktreePath !== undefined
+						? { worktree_path: config.git.worktreePath }
+						: {}),
+				};
+			}
+			if (config.paths) cleanObj.paths = config.paths;
+			if (config.components) cleanObj.components = config.components;
 			if (config.onStatusChange)
 				cleanObj.on_status_change = config.onStatusChange;
 			if (config.prefixes?.proposal)

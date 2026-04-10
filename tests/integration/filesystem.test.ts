@@ -517,6 +517,80 @@ RFC backlog item`,
 			const loaded = await filesystem.loadConfig();
 			assert.strictEqual(loaded?.defaultReporter, "@author");
 		});
+
+		it("should load and preserve infrastructure config sections", async () => {
+			const configPath = join(TEST_DIR, "roadmap.yaml");
+			await writeFile(
+				configPath,
+				`project_name: "AgentRoadmap"
+database:
+  provider: "postgres"
+  name: "agenthive"
+  host: "127.0.0.1"
+  port: 5432
+mcp:
+  url: "http://localhost:6421"
+  health_endpoint: "/health"
+  tools_count: 40
+git:
+  remote: "gitlab.local:agentRoadmap/agentRoadmap.git"
+  default_branch: "main"
+  worktree_path: "/data/code/agentRoadmap-carter"
+paths:
+  proposals: "roadmap/proposals"
+  archive: "roadmap/archive"
+  docs: "roadmap/docs"
+components:
+  mcp_tools:
+    enabled: true
+    maturity: 2
+    port: 6421
+    url: "http://localhost:6421"
+    description: "Agent interface for tools and resources"
+statuses: ["New", "Draft", "Review", "Active", "Complete"]
+labels: ["feature", "docs"]
+date_format: yyyy-mm-dd
+`,
+			);
+
+			const loaded = await filesystem.loadConfig();
+			assert.strictEqual(loaded?.projectName, "AgentRoadmap");
+			assert.strictEqual(loaded?.database?.name, "agenthive");
+			assert.strictEqual(loaded?.mcp?.url, "http://localhost:6421");
+			assert.strictEqual(loaded?.mcp?.healthEndpoint, "/health");
+			assert.strictEqual(loaded?.mcp?.toolsCount, 40);
+			assert.strictEqual(
+				loaded?.git?.remote,
+				"gitlab.local:agentRoadmap/agentRoadmap.git",
+			);
+			assert.strictEqual(loaded?.git?.defaultBranch, "main");
+			assert.strictEqual(
+				loaded?.git?.worktreePath,
+				"/data/code/agentRoadmap-carter",
+			);
+			assert.strictEqual(loaded?.paths?.proposals, "roadmap/proposals");
+			assert.strictEqual(loaded?.components?.mcp_tools?.enabled, true);
+			assert.strictEqual(loaded?.components?.mcp_tools?.maturity, 2);
+			assert.strictEqual(loaded?.components?.mcp_tools?.port, 6421);
+
+			if (!loaded) throw new Error("Expected config to load");
+			await filesystem.saveConfig({
+				...loaded,
+				mcp: { ...loaded.mcp, toolsCount: 41 },
+			});
+
+			const reloaded = new FileSystem(TEST_DIR);
+			const saved = await reloaded.loadConfig();
+			assert.strictEqual(saved?.mcp?.toolsCount, 41);
+			assert.strictEqual(
+				saved?.git?.remote,
+				"gitlab.local:agentRoadmap/agentRoadmap.git",
+			);
+			assert.strictEqual(
+				saved?.components?.mcp_tools?.url,
+				"http://localhost:6421",
+			);
+		});
 	});
 
 	describe("user config operations", () => {

@@ -480,6 +480,11 @@ export interface RoadmapConfig {
 	/** Default export path (relative to project root). Defaults to "export" */
 	exportPath?: string;
 	mcp?: {
+		url?: string;
+		healthEndpoint?: string;
+		toolsCount?: number;
+		port?: number;
+		transport?: string;
 		http?: {
 			host?: string;
 			port?: number;
@@ -498,6 +503,27 @@ export interface RoadmapConfig {
 			allowedOrigins?: string[];
 		};
 	};
+	git?: {
+		remote?: string;
+		defaultBranch?: string;
+		worktreePath?: string;
+	};
+	paths?: {
+		proposals?: string;
+		archive?: string;
+		docs?: string;
+	};
+	components?: Record<
+		string,
+		{
+			enabled?: boolean;
+			maturity?: number;
+			description?: string;
+			port?: number;
+			url?: string;
+			[key: string]: unknown;
+		}
+	>;
 	relay?: RelayConfig;
 	coordination?: {
 		heartbeatIntervalMs?: number;
