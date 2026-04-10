@@ -111,6 +111,16 @@ ORDER BY 1 DESC, 5 DESC;
 COMMENT ON VIEW metrics.v_weekly_efficiency IS
   'Rolling weekly token efficiency summary. Track avg_cache_hit_rate toward 0.70 target.';
 
+-- ── Grants ──────────────────────────────────────────────────────────────────
+-- Allow the application role to write and read metrics data.
+
+GRANT USAGE ON SCHEMA metrics TO roadmap_agent;
+GRANT USAGE ON SCHEMA token_cache TO roadmap_agent;
+GRANT INSERT ON metrics.token_efficiency TO roadmap_agent;
+GRANT SELECT ON metrics.token_efficiency TO roadmap_agent;
+GRANT SELECT ON metrics.v_weekly_efficiency TO roadmap_agent;
+GRANT SELECT, INSERT, UPDATE, DELETE ON token_cache.semantic_responses TO roadmap_agent;
+
 -- ── Verification queries ───────────────────────────────────────────────────
 -- After applying this migration, confirm with:
 --   SELECT schema_name FROM information_schema.schemata WHERE schema_name IN ('metrics','token_cache');

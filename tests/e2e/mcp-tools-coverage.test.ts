@@ -352,7 +352,12 @@ describe("MCP spending tools", () => {
 	it("registers spending tools", async () => {
 		const tools = await mcpServer.testInterface.listTools();
 		const names = tools.tools.map((t) => t.name);
-		const expected = ["spending_set_cap", "spending_log", "spending_report"];
+		const expected = [
+			"spending_set_cap",
+			"spending_log",
+			"spending_report",
+			"spending_efficiency_report",
+		];
 		for (const name of expected) {
 			assert.ok(
 				names.includes(name),
@@ -401,6 +406,17 @@ describe("MCP spending tools", () => {
 		assert.ok(
 			typeof text === "string" && text.length > 0,
 			`Expected spending report: ${text.slice(0, 200)}`,
+		);
+	});
+
+	it("generates a token efficiency report", async () => {
+		const result = await mcpServer.testInterface.callTool({
+			params: { name: "spending_efficiency_report", arguments: {} },
+		});
+		const text = getText(result.content);
+		assert.ok(
+			typeof text === "string" && text.length > 0,
+			`Expected efficiency report: ${text.slice(0, 200)}`,
 		);
 	});
 });
