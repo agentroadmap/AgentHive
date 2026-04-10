@@ -1,247 +1,167 @@
 /**
- * STATE-59: Rethink Roadmap as Product Design & Project Management
+ * Centralized terminology helpers for AgentHive proposal workflow language.
  *
- * Centralized terminology management for the roadmap.
- * AC#1: 'Reached' status renamed to 'Complete'
- * AC#2: 'Proposal' terminology updated to 'Component'
- * AC#3: MAP.md reflects new terminology
- * AC#4: Documentation uses product design language
- * AC#5: Migration path for existing proposals
+ * This module preserves compatibility with older status labels while exposing
+ * the canonical AgentHive proposal stages.
  */
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-/**
- * Status values
- */
-export type StatusValue =
-	| "New"
-	| "Draft"
-	| "Review"
-	| "Active"
-	| "Accepted"
-	| "Complete"
-	| "Rejected"
-	| "Abandoned"
-	| "Replaced";
-
-/**
- * Canonical status values (new terminology)
- */
 export type CanonicalStatus =
-	| "New"
 	| "Draft"
 	| "Review"
-	| "Active"
-	| "Accepted"
+	| "Develop"
+	| "Merge"
 	| "Complete"
 	| "Rejected"
-	| "Abandoned"
+	| "Discard"
 	| "Replaced";
 
+export type StatusValue = CanonicalStatus;
+
 /**
- * Status mapping from legacy to canonical
+ * Legacy aliases remain accepted so older roadmap configs and docs can still
+ * be interpreted during migration.
  */
 export const STATUS_MAP: Record<string, CanonicalStatus> = {
-	complete: "Complete",
-	new: "New",
 	draft: "Draft",
-	potential: "New",
-	active: "Active",
+	new: "Draft",
+	potential: "Draft",
 	review: "Review",
-	accepted: "Accepted",
+	develop: "Develop",
+	developing: "Develop",
+	building: "Develop",
+	active: "Develop",
+	merge: "Merge",
+	accepted: "Merge",
+	complete: "Complete",
+	completed: "Complete",
+	reached: "Complete",
+	done: "Complete",
 	rejected: "Rejected",
-	abandoned: "Abandoned",
+	discard: "Discard",
+	discarded: "Discard",
+	abandoned: "Discard",
+	obsolete: "Discard",
 	replaced: "Replaced",
 };
 
-/**
- * Display names for statuses
- */
 export const STATUS_DISPLAY: Record<CanonicalStatus, string> = {
-	New: "New",
 	Draft: "Draft",
-	Review: "In Review",
-	Active: "In Progress",
-	Accepted: "Accepted",
+	Review: "Review",
+	Develop: "Develop",
+	Merge: "Merge",
 	Complete: "Complete",
 	Rejected: "Rejected",
-	Abandoned: "Abandoned",
+	Discard: "Discard",
 	Replaced: "Replaced",
 };
 
-/**
- * Status emoji for TUI
- */
 export const STATUS_EMOJI: Record<CanonicalStatus, string> = {
-	New: "★",
 	Draft: "⚪",
 	Review: "🟡",
-	Active: "🔵",
-	Accepted: "▣",
+	Develop: "🔵",
+	Merge: "🧩",
 	Complete: "✅",
 	Rejected: "✖",
-	Abandoned: "❌",
+	Discard: "🗑",
 	Replaced: "⇄",
 };
 
 /**
- * Terminology mappings
+ * AgentHive remains proposal-centric. Keep this identity mapping so older
+ * helpers that expect a terminology table continue to work without forcing a
+ * proposal→component rewrite.
  */
 export const TERMINOLOGY_MAP: Record<string, string> = {
-	proposal: "component",
-	Proposal: "Component",
-	proposals: "components",
-	Proposals: "Components",
-	"proposal create": "component create",
-	"proposal list": "component list",
-	"proposal edit": "component edit",
-	"proposal view": "component view",
-	"proposal claim": "component claim",
-	"proposal archive": "component archive",
+	proposal: "proposal",
+	Proposal: "Proposal",
+	proposals: "proposals",
+	Proposals: "Proposals",
 };
 
-/**
- * TUI labels using new terminology
- */
 export const TUI_LABELS = {
-	boardTitle: "Component Board",
-	overviewTitle: "Product Overview",
-	backlog: "Backlog",
-	inProgress: "In Progress",
-	inReview: "In Review",
+	boardTitle: "Proposal Board",
+	overviewTitle: "Proposal Overview",
+	backlog: "Draft",
+	inProgress: "Develop",
+	inReview: "Review",
 	complete: "Complete",
-	abandoned: "Abandoned",
-	componentCount: (n: number) => `${n} component${n !== 1 ? "s" : ""}`,
-	noComponents: "No components found",
-	claimComponent: "Claim Component",
+	discard: "Discard",
+	proposalCount: (n: number) => `${n} proposal${n !== 1 ? "s" : ""}`,
+	noProposals: "No proposals found",
+	claimProposal: "Claim Proposal",
 	startWork: "Start Work",
 	submitReview: "Submit for Review",
 	markComplete: "Mark Complete",
 };
 
-/**
- * CLI messages using new terminology
- */
 export const CLI_MESSAGES = {
-	componentCreated: (id: string) => `${formatComponentId(id)} created`,
-	componentUpdated: (id: string) => `${formatComponentId(id)} updated`,
-	componentClaimed: (id: string) => `${formatComponentId(id)} claimed by`,
-	componentArchived: (id: string) => `${formatComponentId(id)} archived`,
-	listHeader: (count: number) => `Components (${count})`,
-	noComponents: "No components found",
+	proposalCreated: (id: string) => `${formatProposalId(id)} created`,
+	proposalUpdated: (id: string) => `${formatProposalId(id)} updated`,
+	proposalClaimed: (id: string) => `${formatProposalId(id)} claimed by`,
+	proposalArchived: (id: string) => `${formatProposalId(id)} archived`,
+	listHeader: (count: number) => `Proposals (${count})`,
+	noProposals: "No proposals found",
 	statusLabel: (status: CanonicalStatus) =>
 		`${STATUS_EMOJI[status]} ${STATUS_DISPLAY[status]}`,
 };
 
-/**
- * MCP tool labels
- */
 export const MCP_LABELS = {
-	proposalList: "component_list",
-	proposalCreate: "component_create",
-	proposalEdit: "component_edit",
-	proposalView: "component_view",
-	proposalClaim: "component_claim",
+	proposalList: "proposal_list",
+	proposalCreate: "proposal_create",
+	proposalEdit: "proposal_edit",
+	proposalView: "proposal_view",
+	proposalClaim: "proposal_claim",
 };
 
-/**
- * Normalize a status to canonical form
- */
 export function normalizeStatus(status: string): CanonicalStatus {
 	const normalized = status.toLowerCase().trim();
-	return STATUS_MAP[normalized] || "New";
+	return STATUS_MAP[normalized] || "Draft";
 }
 
-/**
- * Check if a status is a "complete" status (either Reached or Complete)
- */
 export function isCompleteStatus(status: string): boolean {
-	const canonical = normalizeStatus(status);
-	return canonical === "Complete";
+	return normalizeStatus(status) === "Complete";
 }
 
-/**
- * Check if a status is "active" status
- */
 export function isActiveStatus(status: string): boolean {
-	return normalizeStatus(status) === "Active";
+	return normalizeStatus(status) === "Develop";
 }
 
-/**
- * Check if a status is "review" status
- */
 export function isReviewStatus(status: string): boolean {
 	return normalizeStatus(status) === "Review";
 }
 
-/**
- * Check if a status is "new" status
- */
 export function isNewStatus(status: string): boolean {
-	return normalizeStatus(status) === "New";
+	return normalizeStatus(status) === "Draft";
 }
 
-/**
- * Format status for display
- */
 export function formatStatus(status: string): string {
 	const canonical = normalizeStatus(status);
 	return `${STATUS_EMOJI[canonical]} ${STATUS_DISPLAY[canonical]}`;
 }
 
-/**
- * Format component ID for display
- * "STATE-1" → "Component 1"
- */
+export function formatProposalId(id: string): string {
+	return id.replace(/^proposal-(\d+(?:\.\d+)?)/i, "Proposal $1");
+}
+
 export function formatComponentId(id: string): string {
-	return id.replace(/^STATE-(\d+)/, "Component $1");
+	return formatProposalId(id);
 }
 
-/**
- * Format component reference
- */
+export function formatProposalRef(id: string, title: string): string {
+	return `${formatProposalId(id)}: ${title}`;
+}
+
 export function formatComponentRef(id: string, title: string): string {
-	return `${formatComponentId(id)}: ${title}`;
+	return formatProposalRef(id, title);
 }
 
-/**
- * Apply terminology replacements in text
- */
 export function applyTerminology(text: string): string {
-	let result = text;
-
-	// Sort by length (longest first) to avoid partial replacements
-	const sortedMappings = Object.entries(TERMINOLOGY_MAP).sort(
-		(a, b) => b[0].length - a[0].length,
-	);
-
-	for (const [legacy, modern] of sortedMappings) {
-		// Use word boundary-aware replacement with case preservation for first char
-		const regex = new RegExp(`\\b${escapeRegex(legacy)}\\b`, "g");
-		result = result.replace(regex, (match) => {
-			// If original starts with uppercase, use uppercase replacement
-			if (match[0] === match[0].toUpperCase()) {
-				return modern.charAt(0).toUpperCase() + modern.slice(1);
-			}
-			return modern;
-		});
-	}
-
-	return result;
+	return text;
 }
 
-/**
- * Escape special regex characters
- */
-function escapeRegex(str: string): string {
-	return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/**
- * Parse proposal file frontmatter
- */
 export function parseFrontmatter(content: string): Record<string, unknown> {
 	const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---/;
 	const match = content.match(frontmatterRegex);
@@ -259,6 +179,10 @@ export function parseFrontmatter(content: string): Record<string, unknown> {
 			const key = line.slice(0, colonIndex).trim();
 			let value: unknown = line.slice(colonIndex + 1).trim();
 
+			if (typeof value === "string" && key === "status") {
+				value = normalizeStatus(value);
+			}
+
 			if (typeof value === "string" && value.startsWith("[")) {
 				try {
 					value = JSON.parse(value);
@@ -274,9 +198,6 @@ export function parseFrontmatter(content: string): Record<string, unknown> {
 	return result;
 }
 
-/**
- * Migrate a single proposal file to new terminology
- */
 export function migrateProposalFile(filePath: string): {
 	original: string;
 	migrated: string;
@@ -284,28 +205,19 @@ export function migrateProposalFile(filePath: string): {
 } {
 	const content = readFileSync(filePath, "utf-8");
 	const changes: string[] = [];
-
-	// Normalize status in frontmatter
 	let migrated = content;
 
-	// Replace legacy "status: Reached" with "status: Complete"
-	const statusRegex = /status:\s*Reached/gi;
-	if (statusRegex.test(content)) {
-		migrated = migrated.replace(statusRegex, "status: Complete");
-		changes.push("Legacy status: Reached → Complete");
-	}
+	const replacements: Array<[RegExp, string, string]> = [
+		[/status:\s*Reached/gi, "status: Complete", "Legacy status: Reached → Complete"],
+		[/status:\s*Building/gi, "status: Develop", "Legacy status: Building → Develop"],
+		[/status:\s*Accepted/gi, "status: Merge", "Legacy status: Accepted → Merge"],
+		[/status:\s*Abandoned/gi, "status: Discard", "Legacy status: Abandoned → Discard"],
+	];
 
-	// Apply terminology to user-facing content (not frontmatter)
-	const parts = migrated.split("---");
-	if (parts.length >= 3) {
-		const frontmatter = `${parts[0]}---${parts[1]}---`;
-		const body = parts.slice(2).join("---");
-
-		// Apply terminology only to body
-		const migratedBody = applyTerminology(body);
-		if (migratedBody !== body) {
-			changes.push("Applied terminology to body content");
-			migrated = frontmatter + migratedBody;
+	for (const [pattern, replacement, label] of replacements) {
+		if (pattern.test(migrated)) {
+			migrated = migrated.replace(pattern, replacement);
+			changes.push(label);
 		}
 	}
 
@@ -316,9 +228,6 @@ export function migrateProposalFile(filePath: string): {
 	};
 }
 
-/**
- * Migrate all proposals in a directory
- */
 export function migrateAllProposals(proposalsDir: string): {
 	totalFiles: number;
 	changedFiles: number;
@@ -351,64 +260,23 @@ export function migrateAllProposals(proposalsDir: string): {
 	};
 }
 
-/**
- * Generate migration guide
- */
 export function generateMigrationGuide(): string {
-	return `# Migration Guide: Proposal → Component Terminology
+	return `# Migration Guide: AgentHive Proposal Workflow
 
-## Overview
+## Canonical Stages
 
-This guide helps you transition from the legacy terminology to the new product design language.
+| Legacy Status | Canonical Stage |
+|---------------|-----------------|
+| New / Potential | Draft |
+| Building / Active | Develop |
+| Accepted | Merge |
+| Reached | Complete |
+| Abandoned / Obsolete | Discard |
 
-## Status Changes
+## Notes
 
-| Legacy Status | New Status | Display |
-|---------------|------------|---------|
-| Reached | Complete | ✅ Complete |
-| Active | Active | 🔵 In Progress |
-| Review | Review | 🟡 In Review |
-| New | New | ⚪ Backlog |
-| Abandoned | Abandoned | ❌ Abandoned |
-
-## Terminology Changes
-
-| Legacy | New | Example |
-|--------|-----|---------|
-| Proposal | Component | "STATE-1" → "Component 1" |
-| proposal create | component create | CLI command |
-| proposal list | component list | CLI command |
-
-## Backward Compatibility
-
-Both old and new terminology are supported during the transition period:
-
-- Status: Both "Reached" and "Complete" work
-- CLI: Both "proposal" and "component" commands work
-- Files: Old proposal files work without modification
-
-## Automatic Migration
-
-To migrate all proposal files to the new terminology:
-
-\`\`\`bash
-roadmap migrate --terminology
-\`\`\`
-
-## Code Changes
-
-For developers using the API:
-
-\`\`\`typescript
-// Legacy (still works)
-import { normalizeStatus } from './core/infrastructure/terminology.ts';
-const status = normalizeStatus("Reached");  // → "Complete"
-
-// New terminology
-import { isCompleteStatus, formatComponentId } from './core/infrastructure/terminology.ts';
-if (isCompleteStatus(proposal.status)) {
-  console.log(formatComponentId(proposal.id));  // "Component 1"
-}
-\`\`\`
+- AgentHive remains proposal-centric. Do not rewrite proposal language to "component".
+- Proposal type determines which workflow template applies.
+- The default RFC-style workflow is Draft -> Review -> Develop -> Merge -> Complete.
 `;
 }

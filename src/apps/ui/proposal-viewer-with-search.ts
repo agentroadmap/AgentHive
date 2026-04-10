@@ -2,6 +2,7 @@
 
 import { stdout as output } from "node:process";
 import { Core } from "../../core/roadmap.ts";
+import { DEFAULT_STATUSES } from "../../shared/constants/index.ts";
 import {
 	buildAcceptanceCriteriaItems,
 	formatDateForDisplay,
@@ -232,17 +233,7 @@ export async function viewProposalEnhanced(
 			(t) => t.id && t.id.trim() !== "" && hasAnyPrefix(t.id),
 		);
 		const config = await core.filesystem.loadConfig();
-		statuses = config?.statuses || [
-			"New",
-			"Draft",
-			"Review",
-			"Active",
-			"Accepted",
-			"Complete",
-			"Rejected",
-			"Abandoned",
-			"Replaced",
-		];
+		statuses = config?.statuses || [...DEFAULT_STATUSES];
 		labels = config?.labels || [];
 		proposalSearchIndex = createProposalSearchIndex(allProposals);
 	} else {
@@ -251,17 +242,7 @@ export async function viewProposalEnhanced(
 		try {
 			loadingScreen?.update("Loading configuration...");
 			const config = await core.filesystem.loadConfig();
-			statuses = config?.statuses || [
-				"New",
-				"Draft",
-				"Review",
-				"Active",
-				"Accepted",
-				"Complete",
-				"Rejected",
-				"Abandoned",
-				"Replaced",
-			];
+			statuses = config?.statuses || [...DEFAULT_STATUSES];
 			labels = config?.labels || [];
 
 			loadingScreen?.update("Loading proposals from branches...");

@@ -52,9 +52,9 @@ import type {
 const APP_NAME = getPackageName();
 const APP_VERSION = await getVersion();
 const INSTRUCTIONS_NORMAL =
-	"At the beginning of each session, read the roadmap://workflow/overview resource to understand when and how to use Roadmap.md for proposal management. Additional detailed guides are available as resources when needed.";
+	"At the beginning of each session, read the roadmap://workflow/overview resource to understand how AgentHive proposals, workflow stages, and maturity are managed through the roadmap MCP surface. Additional detailed guides are available as resources when needed.";
 const INSTRUCTIONS_FALLBACK =
-	"Roadmap.md is not initialized in this directory. Read the roadmap://init-required resource for setup instructions.";
+	"The roadmap workspace is not initialized in this directory. Read the roadmap://init-required resource for setup instructions.";
 
 type ServerInitOptions = {
 	debug?: boolean;

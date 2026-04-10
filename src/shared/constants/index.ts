@@ -42,12 +42,9 @@ export const DEFAULT_FILES = {
 export const DEFAULT_STATUSES = [
 	"Draft",
 	"Review",
-	"Building",
-	"Accepted",
+	"Develop",
+	"Merge",
 	"Complete",
-	"Rejected",
-	"Abandoned",
-	"Replaced",
 ] as const;
 
 /**

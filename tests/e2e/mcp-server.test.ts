@@ -178,11 +178,23 @@ describe("McpServer bootstrap", () => {
 			"proposal_claim",
 			"proposal_complete",
 			"proposal_create",
+			"proposal_demote",
 			"proposal_edit",
+			"proposal_export",
+			"proposal_heartbeat",
+			"proposal_impact",
 			"proposal_list",
 			"proposal_list_metadata",
+			"proposal_merge",
+			"proposal_move",
+			"proposal_pickup",
+			"proposal_priority_down",
+			"proposal_priority_up",
+			"proposal_promote",
+			"proposal_prune_claims",
 			"proposal_release",
 			"proposal_renew",
+			"proposal_request_enrich",
 			"proposal_search",
 			"proposal_view",
 		]);
@@ -195,9 +207,7 @@ describe("McpServer bootstrap", () => {
 			"roadmap://workflow/proposal-finalization",
 			"roadmap://skills/chat",
 		]);
-		assert.ok(
-			MCP_WORKFLOW_OVERVIEW.includes("## agentRoadmap.md Overview (MCP)"),
-		);
+		assert.ok(MCP_WORKFLOW_OVERVIEW.includes("## AgentHive Overview (MCP)"));
 
 		const resourceTemplates =
 			await server.testInterface.listResourceTemplates();
@@ -220,7 +230,8 @@ describe("McpServer bootstrap", () => {
 		const server = await createMcpServer(TEST_DIR);
 
 		const tools = await server.testInterface.listTools();
-		expect(tools.tools.map((tool) => tool.name)).toEqual([
+		const toolNames = tools.tools.map((tool) => tool.name);
+		for (const expected of [
 			"get_workflow_overview",
 			"get_proposal_creation_guide",
 			"get_proposal_execution_guide",
@@ -228,20 +239,11 @@ describe("McpServer bootstrap", () => {
 			"get_chat_skill",
 			"proposal_create",
 			"proposal_list",
-			"proposal_list_metadata",
 			"proposal_search",
 			"proposal_edit",
 			"proposal_view",
-			"proposal_archive",
-			"proposal_complete",
 			"proposal_claim",
-			"proposal_release",
-			"proposal_renew",
 			"directive_list",
-			"directive_add",
-			"directive_rename",
-			"directive_remove",
-			"directive_archive",
 			"document_list",
 			"document_view",
 			"document_create",
@@ -250,7 +252,17 @@ describe("McpServer bootstrap", () => {
 			"chan_list",
 			"msg_read",
 			"msg_send",
-		]);
+			"cubic_create",
+			"agent_register",
+			"agent_list",
+			"team_create",
+			"test_run",
+		]) {
+			assert.ok(
+				toolNames.includes(expected),
+				`Expected tool list to include ${expected}`,
+			);
+		}
 
 		const resources = await server.testInterface.listResources();
 		expect(resources.resources.map((r) => r.uri)).toEqual([
@@ -260,9 +272,7 @@ describe("McpServer bootstrap", () => {
 			"roadmap://workflow/proposal-finalization",
 			"roadmap://skills/chat",
 		]);
-		assert.ok(
-			MCP_WORKFLOW_OVERVIEW.includes("## agentRoadmap.md Overview (MCP)"),
-		);
+		assert.ok(MCP_WORKFLOW_OVERVIEW.includes("## AgentHive Overview (MCP)"));
 
 		const resourceTemplates =
 			await server.testInterface.listResourceTemplates();

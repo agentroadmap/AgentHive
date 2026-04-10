@@ -21,14 +21,11 @@ import TeamsPage from "./components/TeamsPage";
 import { useWebSocket } from "./hooks/useWebSocket";
 
 const STATUSES = [
-	"New",
 	"Draft",
 	"Review",
-	"Active",
-	"Accepted",
+	"Develop",
+	"Merge",
 	"Complete",
-	"Rejected",
-	"Abandoned",
 ];
 
 export default function App() {

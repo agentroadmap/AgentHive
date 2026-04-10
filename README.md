@@ -1,4 +1,4 @@
-# 🗺️ AgentRoadmap
+# 🐝 AgentHive
 
 **Autonomous AI Agent-Native Product Development Platform.**
 
@@ -6,14 +6,14 @@ Build your AI agent team. Turn your vision into your dream product — through c
 
 ---
 
-# 🚀 agentRoadmap V2 0.5.0: The Agentic Enterprise
+# 🚀 AgentHive: The Agentic Enterprise
 
 **Visionary:** Gary  
 **Core Stack:** Postgres | OpenClaw CLI | TypeScript | Git  
 **Architecture:** Universal Entity Lifecycle (v2.5)
 
 ## 📌 Project Vision
-`agentRoadmap` is an agent-native product development engine. The system treats every business idea, technical RFC, and code component as a **Universal Proposal** managed through a shared roadmap workflow.
+`AgentHive` is an agent-native product development engine. The system treats every business idea, technical RFC, and code component as a **Proposal** managed through shared workflow state, MCP tooling, and roadmap operations.
 
 ### **The "Roadmap-First" Doctrine**
 * **Source of Truth:** Roadmap markdown plus the active Postgres workflow tables.
@@ -45,7 +45,7 @@ To boot the system after a fresh start:
 The project is structured to isolate the **Strategic Brain** from the **Nervous System** and **Execution Body**.
 
 ```text
-agentRoadmap/
+AgentHive/
 ├── roadmap/                 # THE BRAIN: Strategic & Business Layer
 │   ├── business/            # Business Design, Strategy, and Financials
 │   ├── product/             # State Machine definitions & RFC Templates
@@ -74,21 +74,21 @@ The enterprise is powered by a specialized workforce divided into **Squads**.
 ---
 
 ## 🏛️ Governance: The Refined Lifecycle
-Every entity progresses through a simplified state machine:
+Every proposal progresses through the authoritative state machine:
 
-1.  **Draft:** Initial entry, research, and enrichment of proposal development. Define acceptance criteria.
-2.  **Review:** Peer and Skeptic analysis.
-3.  **Building:** AI agents coding and unit testing phase.
-4.  **Accepted:** Passes all `proposal_criteria` and regression tests.
-5.  **Complete:** Merged into the main, job delivered.
+1.  **Draft:** Initial idea, research, enrichment, and decomposition. Split proposals if scope is too broad.
+2.  **Review:** Gating review for feasibility, coherence, architectural fit, and acceptance criteria.
+3.  **Develop:** AI agents design, build, and test.
+4.  **Merge:** Integration gate for review, regression, and end-to-end stability.
+5.  **Complete:** Stable merged outcome until the next evolution cycle.
 
 **Universal Maturity Model:** Within each state, entities track fine-grained progress:
-*   **new**: Freshly entered state (White).
-*   **active**: Work in progress (Yellow).
-*   **mature**: Ready to move to the next state (Green, indicated with `✓`).
-*   **obsolete**: No longer relevant (Grey, indicated with `✖`).
+*   **new**: Freshly entered state, waiting on dependency resolution or claim/lease.
+*   **active**: Under active lease and being worked.
+*   **mature**: Ready for a decision gate to evaluate advancement.
+*   **obsolete**: No longer relevant due to structural change.
 
-**Archives:** Rejected, Abandoned, and Replaced items are moved to historical archives and hidden from the main board by default.
+**Workflow Selection:** Proposal type determines which workflow template applies. The 5-stage flow above is the current authoritative baseline for RFC-style proposals.
 
 ---
 

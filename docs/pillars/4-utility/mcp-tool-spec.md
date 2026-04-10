@@ -25,7 +25,7 @@ The archive surfaced a few MCP design principles that are still valid after the 
 
 | Tool | Description | Key Inputs | Writes to |
 |------|-------------|-----------|-----------|
-| `prop_create` | Create a new proposal (any type) | `title`, `proposal_type`, `domain_id`, `category`, `body_markdown`, `priority`, `budget_limit_usd`, `parent_id?`, `tags?` | `proposal` |
+| `prop_create` | Create a new proposal and bind it to a workflow via proposal type | `title`, `proposal_type`, `domain_id`, `category`, `body_markdown`, `priority`, `budget_limit_usd`, `parent_id?`, `tags?` | `proposal` |
 | `prop_get` | Get proposal by ID (includes criteria, latest version) | `id` | — (read) |
 | `prop_list` | List proposals with filters | `proposal_type?`, `status?`, `domain_id?`, `category?`, `assigned_identity?` | — (read) |
 | `prop_update` | Update proposal fields (auto-creates version entry) | `id`, `title?`, `body_markdown?`, `priority?`, `tags?`, `change_summary` | `proposal`, `proposal_version` |
@@ -41,8 +41,11 @@ The archive surfaced a few MCP design principles that are still valid after the 
 | `prop_attachments` | List attachments for a proposal | `proposal_id` | — (read, `attachment_registry`) |
 
 **Proposal types:** `DIRECTIVE`, `CAPABILITY`, `TECHNICAL`, `COMPONENT`, `OPS_ISSUE`
-**Proposal statuses:** `New`, `Draft`, `Review`, `Active`, `Accepted`, `Complete`, `Rejected`
+**Proposal workflow stages:** `Draft`, `Review`, `Develop`, `Merge`, `Complete`
+**Proposal maturity:** `New`, `Active`, `Mature`, `Obsolete`
 **Proposal categories:** `FEATURE`, `BUG`, `RESEARCH`, `SECURITY`, `INFRA`
+
+Proposal type determines which workflow template applies. The 5-stage flow above is the current authoritative baseline for RFC-style proposals.
 
 ---
 

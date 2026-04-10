@@ -27,15 +27,15 @@ async function fileExists(path: string): Promise<boolean> {
 }
 
 /**
- * Finds the agentRoadmap.md project root by walking up the directory tree.
+ * Finds the roadmap workspace root by walking up the directory tree.
  *
  * Search order:
  * 1. Walk up from startDir looking for `roadmap/` directory or `roadmap.json` file
  * 2. If not found, fall back to git repository root (via `git rev-parse --show-toplevel`)
- * 3. Return null if no agentRoadmap.md project found
+ * 3. Return null if no roadmap workspace is found
  *
  * @param startDir - The directory to start searching from (typically process.cwd())
- * @returns The project root path, or null if no agentRoadmap.md project found
+ * @returns The project root path, or null if no roadmap workspace is found
  */
 export async function findRoadmapRoot(
 	startDir: string,
@@ -87,7 +87,7 @@ export async function findRoadmapRoot(
 let cachedProjectRoot: string | null | undefined;
 
 /**
- * Gets the agentRoadmap.md project root, with caching for performance.
+ * Gets the roadmap workspace root, with caching for performance.
  * Call clearProjectRootCache() to reset the cache if needed.
  */
 export async function getProjectRoot(startDir: string): Promise<string | null> {

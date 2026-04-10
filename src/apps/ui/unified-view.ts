@@ -3,6 +3,7 @@
  */
 
 import type { Core } from "../../core/roadmap.ts";
+import { DEFAULT_STATUSES } from "../../shared/constants/index.ts";
 import type { Directive, Proposal } from "../../shared/types/index.ts";
 import { watchConfig } from "../../shared/utils/config-watcher.ts";
 import { collectAvailableLabels } from "../../shared/utils/label-filter.ts";
@@ -160,16 +161,7 @@ export async function loadProposalsForUnifiedView(
 		const config = await core.filesystem.loadConfig();
 		return {
 			proposals: options.proposals,
-			statuses: config?.statuses || [
-				"Draft",
-				"Review",
-				"Building",
-				"Accepted",
-				"Complete",
-				"Rejected",
-				"Abandoned",
-				"Replaced",
-			],
+			statuses: config?.statuses || [...DEFAULT_STATUSES],
 		};
 	}
 
@@ -182,16 +174,7 @@ export async function loadProposalsForUnifiedView(
 			const config = await core.filesystem.loadConfig();
 			return {
 				proposals,
-				statuses: config?.statuses || [
-					"Draft",
-					"Review",
-					"Building",
-					"Accepted",
-					"Complete",
-					"Rejected",
-					"Abandoned",
-					"Replaced",
-				],
+				statuses: config?.statuses || [...DEFAULT_STATUSES],
 			};
 		});
 

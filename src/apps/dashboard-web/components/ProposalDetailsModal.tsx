@@ -250,7 +250,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 	// Sidebar metadata (inline edit)
 	const [status, setStatus] = useState(
 		proposal?.status ||
-			(isDraftMode ? "Draft" : availableStatuses?.[0] || "New"),
+			(isDraftMode ? "Draft" : availableStatuses?.[0] || "Draft"),
 	);
 	const [assignee, setAssignee] = useState<string[]>(proposal?.assignee || []);
 	const [labels, setLabels] = useState<string[]>(proposal?.labels || []);
@@ -302,7 +302,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 		setCriteria(proposal?.acceptanceCriteriaItems || []);
 		setStatus(
 			proposal?.status ||
-				(isDraftMode ? "Draft" : availableStatuses?.[0] || "New"),
+				(isDraftMode ? "Draft" : availableStatuses?.[0] || "Draft"),
 		);
 		setAssignee(proposal?.assignee || []);
 		setLabels(proposal?.labels || []);
@@ -1206,7 +1206,7 @@ const StatusSelect: React.FC<{
 			.fetchStatuses()
 			.then(setStatuses)
 			.catch(() =>
-				setStatuses(["New", "Active", "Accepted", "Complete", "Abandoned"]),
+				setStatuses(["Draft", "Review", "Develop", "Merge", "Complete"]),
 			);
 	}, []);
 	return (

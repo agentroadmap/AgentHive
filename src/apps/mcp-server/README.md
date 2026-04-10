@@ -1,18 +1,17 @@
-# agentRoadmap.md MCP Implementation (MVP)
+# AgentHive MCP Implementation (MVP)
 
-This directory exposes a minimal stdio MCP surface so local agents can work with roadmap.md without duplicating business
-logic.
+This directory exposes a minimal stdio MCP surface so local agents can work with the AgentHive roadmap workflow without duplicating business logic.
 
 ## What’s included
 
-- `server.ts` / `createMcpServer()` – bootstraps a stdio-only server that extends `Core` and registers proposal, directive, and document tools (`proposal_*`, `directive_*`, `document_*`) for MCP clients.
+- `server.ts` / `createMcpServer()` – bootstraps a stdio-only server that extends `Core` and registers filesystem-backed `proposal_*` tools plus AgentHive Postgres `prop_*` tools depending on backend configuration.
 - `proposals/` – consolidated proposal tooling that delegates to shared Core helpers (including plan/notes/AC editing).
 - `documents/` – document tooling layered on `Core`’s document helpers for list/view/create/update/search flows.
 - `tools/dependency-tools.ts` – dependency helpers reusing shared builders.
 - `resources/` – lightweight resource adapters for agents.
 - `guidelines/mcp/` – proposal workflow content surfaced via MCP.
 
-Everything routes through existing Core APIs so the MCP layer stays a protocol wrapper.
+Everything routes through existing Core APIs so the MCP layer stays a protocol wrapper while AgentHive proposal workflows remain centralized.
 
 ## Development workflow
 
