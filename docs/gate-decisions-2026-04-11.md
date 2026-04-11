@@ -1,57 +1,60 @@
 # Gate Decisions — 2026-04-11
 
-## AgentHive RFC Gate Evaluator Run — 04:15 UTC
-
-### TRIAGE → FIX
-No proposals in TRIAGE state.
-
-### DRAFT → REVIEW
-No proposals in DRAFT state.
-
-### REVIEW → DEVELOP
-
-| Proposal | Decision | Reason |
-|----------|----------|--------|
-| P162 | ⏸️ HOLD | Solid description with detailed spec, but NO acceptance criteria registered. Must add structural AC before advancing to DEVELOP. |
-
-### FIX → DEPLOYED
-
-| Proposal | Decision | Reason |
-|----------|----------|--------|
-| P079 | ⏸️ HOLD | No evidence of fix in codebase. Federation sync conflict resolution not implemented. |
-| P086 | ⏸️ HOLD | Partial work (migration 012-013), but TS code still references `maturity_state` extensively. |
-| P087 | ⏸️ HOLD | Depends on P086. Multiple TS files still reference old `maturity_state` column. |
-| P089 | ⏸️ HOLD | No commits or code changes found. Schema review not complete. |
-| P091 | ⏸️ HOLD | Naming discrepancy P068/MCP/Web Dashboard not resolved. |
-| P147 | ⏸️ HOLD | Blocked by P087. ~12 code files still reference old column. |
-| P154 | ⏸️ HOLD | Roadmap board TUI hang not fixed. No commits found. |
-| P155 | ⏸️ HOLD | Roadmap overview schema mismatch not fixed. No commits found. |
-| P159 | ⏸️ HOLD | Migration 018 exists but no TS code uses `public_key` yet. Partial. |
-| P160 | ⏸️ HOLD | 13 dashboard-web page stubs still unimplemented. |
-| P161 | ⏸️ HOLD | Duplicate scripts in worktree not cleaned up. |
-
-### DEVELOP → MERGE
-
-| Proposal | Decision | Reason |
-|----------|----------|--------|
-| P044 (mature) | ⏸️ HOLD | Core product — still in active development. Premature to advance. |
-| P051 (mature) | ⏸️ HOLD | Autonomous pipeline — active development. |
-| P054 (mature) | ⏸️ HOLD | Agent identity — active development. |
-| P056 (mature) | ⏸️ HOLD | Lease protocol — active development. |
-| P057 (mature) | ⏸️ HOLD | Zero-trust ACL — active development. |
-| P060 (mature) | ⏸️ HOLD | Financial governance — active development. |
-| P064 (mature) | ⏸️ HOLD | OpenClaw CLI — active development. |
-| P065 (mature) | ⏸️ HOLD | MCP server tools — active development. |
-| P045-P048 (active) | ⏸️ HOLD | Pillar components — active development. |
-| P066-P068 (active) | ⏸️ HOLD | Dashboard/document/federation — active development. |
-
-### MERGE → COMPLETE
-
-| Proposal | Decision | Reason |
-|----------|----------|--------|
-| P149 | ✅ ADVANCE | Code merged to main (commit 3bfd5ed). Feature fully implemented: `channel_subscription` table, `fn_message_notify` trigger, `msg_subscribe` tool, pg_notify push notifications. AC verified (all pass). Transitioned MERGE → COMPLETE. |
+Reviewed by: rfc-gate-evaluator (cron)
+Timestamp: 2026-04-11T09:04:17 UTC
 
 ## Summary
-- **Advanced:** 1 (P149 MERGE → COMPLETE)
-- **Held:** 11 FIX + 1 REVIEW + 15 DEVELOP = 27 held
-- **No action:** 37 (COMPLETE/DEPLOYED terminal states)
+
+| Proposal | State | Decision | Reason |
+|----------|-------|----------|--------|
+| P162 | REVIEW | HOLD | No acceptance criteria defined |
+| P044 | DEVELOP | HOLD | 17 ACs all pending — not verified |
+| P051 | DEVELOP | HOLD | 8 ACs all pending — not verified |
+| P054 | DEVELOP | HOLD | 8 ACs all pending — not verified |
+| P056 | DEVELOP | HOLD | 8 ACs all pending — not verified |
+| P057 | DEVELOP | HOLD | 8 ACs all pending — not verified |
+| P060 | DEVELOP | HOLD | 8 ACs all pending — not verified |
+| P064 | DEVELOP | HOLD | 8 ACs all pending — not verified |
+| P065 | DEVELOP | HOLD | 8 ACs all pending — not verified |
+| P045 | DEVELOP | HOLD | Active maturity — not yet mature |
+| P046 | DEVELOP | HOLD | Active maturity — not yet mature |
+| P047 | DEVELOP | HOLD | Active maturity — not yet mature |
+| P048 | DEVELOP | HOLD | Active maturity — not yet mature |
+| P066 | DEVELOP | HOLD | Active maturity — not yet mature |
+| P067 | DEVELOP | HOLD | Active maturity — not yet mature |
+| P068 | DEVELOP | HOLD | Active maturity — not yet mature |
+| P079 | FIX | HOLD | Obsolete maturity, AC pending |
+| P086 | FIX | HOLD | New maturity, no AC |
+| P087 | FIX | HOLD | Mature but no AC defined |
+| P089 | FIX | HOLD | Mature but no AC defined |
+| P091 | FIX | HOLD | Mature but no AC defined |
+| P147 | FIX | HOLD | Mature but no AC defined |
+| P154 | FIX | HOLD | New maturity, no AC |
+| P155 | FIX | HOLD | New maturity, no AC |
+| P159 | FIX | HOLD | New maturity, no AC |
+| P160 | FIX | HOLD | New maturity, no AC |
+| P161 | FIX | HOLD | New maturity, no AC |
+
+## Statistics
+
+- **Total proposals evaluated:** 66
+- **Proposals advanced:** 0
+- **Proposals held:** 27 (across REVIEW, DEVELOP, FIX)
+- **Terminal states:** 23 COMPLETE, 16 DEPLOYED
+
+## Gate Analysis
+
+### REVIEW → DEVELOP (1 proposal)
+- **P162** — CLI proposal list grouping feature. Coherent and well-scoped but has zero acceptance criteria. Already flagged by skeptic-agent. HOLD until ACs are added.
+
+### DEVELOP → MERGE (15 proposals)
+- **8 mature proposals** (P044, P051, P054, P056, P057, P060, P064, P065): All have ACs defined but every single one is in `⏳ pending` status. The gate requires all ACs to be verified (`✅ pass`) before allowing DEVELOP → MERGE. These are large pillar-level proposals — AC verification requires active development agents to run tests and confirm functionality.
+- **7 active-maturity proposals** (P045, P046, P047, P048, P066, P067, P068): Still in `active` maturity. These are the 6 remaining pillar/feature proposals being actively developed.
+
+### FIX → DEPLOYED (11 proposals)
+- **P079**: Obsolete maturity — should be reviewed for archival, not advancement.
+- **P086, P087, P089, P091, P147**: Mature but have no AC defined. FIX → DEPLOYED gate requires all ACs verified. These schema/renaming issues need ACs before they can be deployed.
+- **P154, P155, P159, P160, P161**: New maturity — newly created issues still awaiting triage/acceptance.
+
+### Bottleneck: AC Verification
+The primary bottleneck is AC verification for mature DEVELOP proposals. With 17 pending ACs on P044 alone and 8 each on P051–P065, the gate system is functioning correctly — it's blocking proposals that haven't been tested. Development agents need to run test suites and call `verify_ac` for each criterion.
