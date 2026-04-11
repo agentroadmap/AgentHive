@@ -406,7 +406,7 @@ export async function transitionProposal(args: {
 
 export async function addAcceptanceCriteria(args: {
 	proposal_id: string;
-	criteria: string[];
+	criteria: string[] | string;
 }): Promise<CallToolResult> {
 	try {
 		const proposalId = await resolveProposalId(args.proposal_id);
@@ -418,13 +418,32 @@ export async function addAcceptanceCriteria(args: {
 			};
 		}
 
+		// P156 fix: normalize criteria to always be an array.
+		// If a single string is passed, wrap it so for...of doesn't iterate characters.
+		const criteriaList: string[] = typeof args.criteria === "string"
+			? [args.criteria]
+			: Array.isArray(args.criteria)
+				? args.criteria
+				: [];
+
+		if (criteriaList.length === 0) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `⚠️ No acceptance criteria provided. Pass an array of strings.`,
+					},
+				],
+			};
+		}
+
 		const { rows: maxRow } = await query(
 			"SELECT COALESCE(MAX(item_number), 0) as max_idx FROM proposal_acceptance_criteria WHERE proposal_id = $1",
 			[proposalId],
 		);
 		let idx = maxRow[0].max_idx + 1;
 
-		for (const criterion of args.criteria) {
+		for (const criterion of criteriaList) {
 			await query(
 				`INSERT INTO proposal_acceptance_criteria (proposal_id, criterion_text, item_number)
          VALUES ($1, $2, $3)`,
@@ -436,7 +455,7 @@ export async function addAcceptanceCriteria(args: {
 			content: [
 				{
 					type: "text",
-					text: `✅ Added ${args.criteria.length} AC items to ${args.proposal_id}`,
+					text: `✅ Added ${criteriaList.length} AC items to ${args.proposal_id}`,
 				},
 			],
 		};
@@ -453,6 +472,18 @@ export async function verifyAC(args: {
 	verification_notes?: string;
 }): Promise<CallToolResult> {
 	try {
+		// P157 fix: validate required fields and provide clear error messages
+		if (!args || !args.proposal_id || args.item_number == null || !args.status || !args.verified_by) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `❌ verify_ac requires: proposal_id, item_number, status, verified_by. Got: ${JSON.stringify(args)}`,
+					},
+				],
+			};
+		}
+
 		const proposalId = await resolveProposalId(args.proposal_id);
 		if (proposalId === null) {
 			return {
@@ -461,6 +492,31 @@ export async function verifyAC(args: {
 				],
 			};
 		}
+
+		// Coerce item_number to integer (handles string input from MCP)
+		const itemNum = typeof args.item_number === "string"
+			? parseInt(args.item_number, 10)
+			: args.item_number;
+
+		// Fetch the AC first to confirm it exists and get its text
+		const { rows: acRows } = await query(
+			`SELECT item_number, criterion_text, status FROM proposal_acceptance_criteria
+			 WHERE proposal_id = $1 AND item_number = $2`,
+			[proposalId, itemNum],
+		);
+
+		if (acRows.length === 0) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `❌ AC #${itemNum} not found for ${args.proposal_id}. Use list_ac to see available criteria.`,
+					},
+				],
+			};
+		}
+
+		const ac = acRows[0];
 
 		await query(
 			`UPDATE proposal_acceptance_criteria SET status = $1, verified_by = $2,
@@ -471,19 +527,120 @@ export async function verifyAC(args: {
 				args.verified_by,
 				args.verification_notes || null,
 				proposalId,
-				args.item_number,
+				itemNum,
 			],
 		);
+
+		const statusEmoji: Record<string, string> = {
+			pass: "✅",
+			fail: "❌",
+			blocked: "🔒",
+			waived: "⚪",
+		};
+		const emoji = statusEmoji[args.status] || "•";
+
 		return {
 			content: [
 				{
 					type: "text",
-					text: `✅ AC #${args.item_number}: ${args.status} (verified by ${args.verified_by})`,
+					text: `${emoji} AC #${itemNum}: "${ac.criterion_text}" → ${args.status} (verified by ${args.verified_by})`,
 				},
 			],
 		};
 	} catch (err) {
 		return errorResult("Failed to verify AC", err);
+	}
+}
+
+export async function deleteAC(args: {
+	proposal_id: string;
+	item_number?: number;
+	cleanup_singles?: boolean;
+}): Promise<CallToolResult> {
+	try {
+		const proposalId = await resolveProposalId(args.proposal_id);
+		if (proposalId === null) {
+			return {
+				content: [
+					{ type: "text", text: `Proposal ${args.proposal_id} not found.` },
+				],
+			};
+		}
+
+		// Cleanup mode: delete all single-character AC entries (corrupted by P156)
+		if (args.cleanup_singles) {
+			const { rowCount } = await query(
+				`DELETE FROM proposal_acceptance_criteria
+				 WHERE proposal_id = $1 AND LENGTH(criterion_text) = 1`,
+				[proposalId],
+			);
+			return {
+				content: [
+					{
+						type: "text",
+						text: `🧹 Cleaned up ${rowCount ?? 0} corrupted single-character AC entries from ${args.proposal_id}`,
+					},
+				],
+			};
+		}
+
+		// Delete by item_number
+		if (args.item_number == null) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `❌ delete_ac requires either item_number or cleanup_singles=true. Got: ${JSON.stringify(args)}`,
+					},
+				],
+			};
+		}
+
+		const itemNum = typeof args.item_number === "string"
+			? parseInt(args.item_number, 10)
+			: args.item_number;
+
+		const { rowCount } = await query(
+			`DELETE FROM proposal_acceptance_criteria
+			 WHERE proposal_id = $1 AND item_number = $2`,
+			[proposalId, itemNum],
+		);
+
+		if ((rowCount ?? 0) === 0) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `❌ AC #${itemNum} not found for ${args.proposal_id}. Use list_ac to see available criteria.`,
+					},
+				],
+			};
+		}
+
+		// Renumber remaining ACs to keep item_number sequential
+		await query(
+			`WITH renumbered AS (
+				SELECT id, ROW_NUMBER() OVER (ORDER BY item_number) AS new_num
+				FROM proposal_acceptance_criteria
+				WHERE proposal_id = $1
+			)
+			UPDATE proposal_acceptance_criteria pac
+			SET item_number = r.new_num
+			FROM renumbered r
+			WHERE pac.id = r.id AND pac.item_number != r.new_num`,
+			[proposalId],
+		);
+
+		return {
+			content: [
+				{
+					type: "text",
+					text: `🗑️ Deleted AC #${itemNum} from ${args.proposal_id} and renumbered remaining criteria`,
+				},
+			],
+		};
+	} catch (err) {
+		return errorResult("Failed to delete acceptance criteria", err);
 	}
 }
 
@@ -539,6 +696,62 @@ export async function listAC(args: {
 		};
 	} catch (err) {
 		return errorResult("Failed to list AC", err);
+	}
+}
+
+/**
+ * P158: Delete all acceptance criteria for a proposal (cleanup for corrupted data
+ * from the character-splitting bug). Optionally delete by specific item_number.
+ */
+export async function deleteAC(args: {
+	proposal_id: string;
+	item_number?: number;
+}): Promise<CallToolResult> {
+	try {
+		const proposalId = await resolveProposalId(args.proposal_id);
+		if (proposalId === null) {
+			return {
+				content: [
+					{ type: "text", text: `Proposal ${args.proposal_id} not found.` },
+				],
+			};
+		}
+
+		if (args.item_number != null) {
+			const itemNum = typeof args.item_number === "string"
+				? parseInt(args.item_number, 10)
+				: args.item_number;
+			const { rowCount } = await query(
+				`DELETE FROM proposal_acceptance_criteria WHERE proposal_id = $1 AND item_number = $2`,
+				[proposalId, itemNum],
+			);
+			return {
+				content: [
+					{
+						type: "text",
+						text: rowCount && rowCount > 0
+							? `🗑️ Deleted AC #${itemNum} from ${args.proposal_id}`
+							: `AC #${itemNum} not found for ${args.proposal_id}`,
+					},
+				],
+			};
+		}
+
+		// Delete all ACs for the proposal
+		const { rowCount } = await query(
+			`DELETE FROM proposal_acceptance_criteria WHERE proposal_id = $1`,
+			[proposalId],
+		);
+		return {
+			content: [
+				{
+					type: "text",
+					text: `🗑️ Deleted ${rowCount || 0} AC items from ${args.proposal_id}`,
+				},
+			],
+		};
+	} catch (err) {
+		return errorResult("Failed to delete AC", err);
 	}
 }
 
@@ -932,6 +1145,26 @@ export class RfcWorkflowHandlers {
 			handler: (args: any) => listAC(args),
 		});
 
+		this.server.addTool({
+			name: "delete_ac",
+			description:
+				"Delete acceptance criteria by item number, or cleanup corrupted single-character entries (P156 fix)",
+			inputSchema: {
+				type: "object",
+				properties: {
+					proposal_id: { type: "string" },
+					item_number: { type: "number" },
+					cleanup_singles: {
+						type: "boolean",
+						description:
+							"When true, deletes all single-character AC entries corrupted by P156",
+					},
+				},
+				required: ["proposal_id"],
+			},
+			handler: (args: any) => deleteAC(args),
+		});
+
 		// Dependencies
 		this.server.addTool({
 			name: "add_dependency",
@@ -1026,7 +1259,7 @@ export class RfcWorkflowHandlers {
 
 		// eslint-disable-next-line no-console
 		console.log(
-			"[MCP] Registered 11 RFC workflow tools (state machine, AC, deps, reviews, discussions)",
+			"[MCP] Registered 12 RFC workflow tools (state machine, AC, deps, reviews, discussions)",
 		);
 	}
 }
