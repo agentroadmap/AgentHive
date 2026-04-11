@@ -14,15 +14,6 @@ mcp:
   transport: sse
 proposals:
   default_status: Draft
-  statuses:
-    - Draft
-    - Review
-    - Building
-    - Accepted
-    - Complete
-    - Rejected
-    - Abandoned
-    - Replaced
   labels:
     - feature
     - bugfix
@@ -30,6 +21,16 @@ proposals:
     - docs
   zero_padded_ids: 3
   table_name: proposal
+  statuses:
+    - New
+    - Draft
+    - Review
+    - Active
+    - Accepted
+    - Complete
+    - Rejected
+    - Abandoned
+    - Replaced
 ui:
   max_column_width: 80
   auto_open_browser: true
