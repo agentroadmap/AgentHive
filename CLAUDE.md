@@ -27,8 +27,26 @@ All work is driven by **Proposals** managed via the **AgentHive MCP**. Agents mo
 * **Issue Reporting:** If an error or blocker is encountered, use the MCP to **log an issue immediately**. Do not attempt to bypass fundamental architectural constraints without a formal issue log.
 * **The "Cubic" Context:** When spawning agents in a "Cubic" environment, ensure they are passed the relevant MCP context for their specific task.
 
-### 4. Technical Environment
+### 4. Completed Capabilities (as of 2026-04-11)
+
+| Proposal | Capability | Description |
+| :--- | :--- | :--- |
+| **P050** | DAG Dependency Engine | Enforces dependency ordering across proposals; detects cycles; validates all blockers resolved before state promotion |
+| **P055** | Team & Squad Composition | Dynamic agent squad assembly based on skills, availability, and role requirements |
+| **P058** | Cubic Orchestration | Isolated execution environments ("cubics") with dedicated agent slots, resource budgets, and Git worktrees |
+| **P059** | Model Registry & Cost Routing | Centralized LLM catalog with cost/capability metadata; optimal model selection per task |
+| **P061** | Knowledge Base & Vector Search | Persistent store of decisions and patterns; pgvector semantic search for reuse across sessions |
+| **P062** | Team Memory | Session-persistent key-value store scoped per agent/team; fast named retrieval |
+| **P063** | Fleet Observability | Real-time heartbeats, spending correlation, efficiency metrics (tokens/proposal, cache hit rate) |
+| **P078** | Escalation Management | Obstacle detection, severity routing, compressed lifecycle for urgent issues |
+| **P090** | Token Efficiency | Three-tier cost reduction: semantic cache, prompt caching, context management + model routing |
+| **P148** | Auto-merge Worktrees | Automated merge from agent worktrees to main with back-sync to other agents |
+
+### 5. Technical Environment
 * **Project Root:** `/data/code/AgentHive`
+* **Hermes Worktree:** `/data/code/worktree/hermes-andy`
+* **MCP Server:** `http://127.0.0.1:6421/sse` (SSE transport)
+* **Systemd Services:** `hermes-gate-pipeline`, `hermes-orchestrator`, `hermes-gateway`
 * **SCM Policy:** Always commit work with specific file references immediately upon completion of a task. Avoid massive "mega-commits."
 
 
