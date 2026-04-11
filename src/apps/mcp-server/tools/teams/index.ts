@@ -18,9 +18,11 @@ import {
 	proposalReviewSchema,
 	proposalSubmitSchema,
 	teamAcceptSchema,
+	teamAddMemberSchema,
 	teamCreateSchema,
 	teamDeclineSchema,
 	teamDissolveSchema,
+	teamListSchema,
 	teamRegisterAgentSchema,
 	teamRosterSchema,
 } from "./schemas.ts";
@@ -70,12 +72,38 @@ export async function registerTeamTools(server: McpServer): Promise<void> {
 			description: "Dissolve a team when project is complete",
 			inputSchema: teamDissolveSchema,
 		},
-		teamDissolveSchema,
-		async (input) => handlers.dissolveTeam(input as any),
-	);
+	teamDissolveSchema,
+	async (input) => handlers.dissolveTeam(input as any),
+);
 
-	// STATE-62/63: Query Roster
-	const teamRosterTool: McpToolHandler = createSimpleValidatedTool(
+// P055: List Teams
+const teamListTool: McpToolHandler = createSimpleValidatedTool(
+	{
+		name: "team_list",
+		description:
+			"List all teams with optional filtering by status (active/archived/all) " +
+			"and team type (feature/ops/research/admin). P055: Team & Squad Composition.",
+		inputSchema: teamListSchema,
+	},
+	teamListSchema,
+	async (input) => handlers.listTeams(input as any),
+);
+
+// P055: Add Member to Team
+const teamAddMemberTool: McpToolHandler = createSimpleValidatedTool(
+	{
+		name: "team_add_member",
+		description:
+			"Add an agent as a member to an existing team with a specified role. " +
+			"P055: Team & Squad Composition. Enforces squad size limits.",
+		inputSchema: teamAddMemberSchema,
+	},
+	teamAddMemberSchema,
+	async (input) => handlers.addTeamMember(input as any),
+);
+
+// STATE-62/63: Query Roster
+const teamRosterTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "team_roster",
 			description: "Query team roster (who's on the team, roles, pools)",
@@ -156,6 +184,8 @@ export async function registerTeamTools(server: McpServer): Promise<void> {
 	server.addTool(teamAcceptTool);
 	server.addTool(teamDeclineTool);
 	server.addTool(teamDissolveTool);
+	server.addTool(teamListTool);
+	server.addTool(teamAddMemberTool);
 	server.addTool(teamRosterTool);
 	server.addTool(teamRegisterTool);
 	server.addTool(proposalSubmitTool);
