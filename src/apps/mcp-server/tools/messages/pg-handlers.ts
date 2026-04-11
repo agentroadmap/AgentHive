@@ -272,6 +272,71 @@ export class PgMessagingHandlers {
 	}
 
 	/**
+	 * Mark a message as read (AC-7).
+	 */
+	async markRead(args: {
+		message_id: number;
+		agent: string;
+	}): Promise<CallToolResult> {
+		try {
+			const { rows } = await query(
+				`UPDATE roadmap.message_ledger
+				 SET read_at = now()
+				 WHERE id = $1 AND (to_agent = $2 OR to_agent IS NULL) AND read_at IS NULL
+				 RETURNING id, read_at`,
+				[args.message_id, args.agent],
+			);
+
+			if (rows.length === 0) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Message ${args.message_id} not found or already read.`,
+						},
+					],
+				};
+			}
+
+			return {
+				content: [
+					{
+						type: "text",
+						text: `Message ${args.message_id} marked as read at ${rows[0].read_at}`,
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to mark message as read", err);
+		}
+	}
+
+	/**
+	 * Get unread count for an agent (AC-7).
+	 */
+	async unreadCount(args: { agent: string }): Promise<CallToolResult> {
+		try {
+			const { rows } = await query<{ count: string }>(
+				`SELECT COUNT(*) as count
+				 FROM roadmap.message_ledger
+				 WHERE to_agent = $1 AND read_at IS NULL`,
+				[args.agent],
+			);
+
+			return {
+				content: [
+					{
+						type: "text",
+						text: `Unread messages for ${args.agent}: ${rows[0]?.count ?? 0}`,
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to get unread count", err);
+		}
+	}
+
+	/**
 	 * Read messages with optional wait_ms for blocking until new messages arrive (AC-4).
 	 * When wait_ms > 0, uses pg_notify to block until a notification arrives or timeout.
 	 */

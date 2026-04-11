@@ -8,6 +8,7 @@ import type {
 	MessageSendArgs,
 } from "./handlers.ts";
 import { MessageHandlers } from "./handlers.ts";
+import { PgMessagingHandlers } from "./pg-handlers.ts";
 
 const messageChannelsSchema: JsonSchema = {
 	type: "object",
@@ -102,9 +103,37 @@ const messageSubscribeSchema: JsonSchema = {
 	required: ["channel", "from"],
 };
 
+const msgMarkReadSchema: JsonSchema = {
+	type: "object",
+	properties: {
+		message_id: {
+			type: "number",
+			description: "Message ID to mark as read",
+		},
+		agent: {
+			type: "string",
+			description: "Agent identity (recipient)",
+		},
+	},
+	required: ["message_id", "agent"],
+};
+
+const msgUnreadCountSchema: JsonSchema = {
+	type: "object",
+	properties: {
+		agent: {
+			type: "string",
+			description: "Agent identity to check unread count for",
+		},
+	},
+	required: ["agent"],
+};
+
 export function registerMessageTools(server: McpServer): void {
 	const handlers = new MessageHandlers(server);
+	const pgHandlers = new PgMessagingHandlers(server, process.cwd());
 
+	// ─── Filesystem-backed tools ─────────────────────────────────────────
 	const channelsTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "chan_list",
@@ -156,4 +185,111 @@ export function registerMessageTools(server: McpServer): void {
 	server.addTool(readTool);
 	server.addTool(sendTool);
 	server.addTool(subscribeTool);
+
+	// ─── Postgres-backed tools (P067) ────────────────────────────────────
+	const pgSendTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "msg_pg_send",
+			description:
+				"Send a message to Postgres message_ledger with typed message_type, channel, and optional proposal link",
+			inputSchema: {
+				type: "object",
+				properties: {
+					from_agent: { type: "string" },
+					to_agent: { type: "string" },
+					channel: { type: "string" },
+					message_content: { type: "string" },
+					message_type: {
+						type: "string",
+						enum: ["task", "notify", "ack", "error", "event"],
+					},
+					proposal_id: { type: "string" },
+				},
+				required: ["from_agent", "message_content"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				from_agent: { type: "string" },
+				to_agent: { type: "string" },
+				channel: { type: "string" },
+				message_content: { type: "string" },
+				message_type: { type: "string" },
+				proposal_id: { type: "string" },
+			},
+			required: ["from_agent", "message_content"],
+		} as JsonSchema,
+		async (input) =>
+			pgHandlers.sendMessage(input as {
+				from_agent: string;
+				to_agent?: string;
+				channel?: string;
+				message_content: string;
+				message_type?: string;
+				proposal_id?: string;
+			}),
+	);
+
+	const pgReadTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "msg_pg_read",
+			description:
+				"Read messages from Postgres message_ledger. Supports wait_ms for blocking reads via pg_notify.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					agent: { type: "string" },
+					channel: { type: "string" },
+					limit: { type: "number" },
+					wait_ms: { type: "number" },
+				},
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				agent: { type: "string" },
+				channel: { type: "string" },
+				limit: { type: "number" },
+				wait_ms: { type: "number" },
+			},
+		} as JsonSchema,
+		async (input) =>
+			pgHandlers.readMessages(input as {
+				agent?: string;
+				channel?: string;
+				limit?: number;
+				wait_ms?: number;
+			}),
+	);
+
+	const pgMarkReadTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "msg_pg_mark_read",
+			description:
+				"Mark a Postgres message as read (AC-7). Sets read_at timestamp and decreases unread count.",
+			inputSchema: msgMarkReadSchema,
+		},
+		msgMarkReadSchema,
+		async (input) =>
+			pgHandlers.markRead(input as { message_id: number; agent: string }),
+	);
+
+	const pgUnreadCountTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "msg_pg_unread_count",
+			description:
+				"Get unread message count for an agent from Postgres message_ledger (AC-7)",
+			inputSchema: msgUnreadCountSchema,
+		},
+		msgUnreadCountSchema,
+		async (input) =>
+			pgHandlers.unreadCount(input as { agent: string }),
+	);
+
+	server.addTool(pgSendTool);
+	server.addTool(pgReadTool);
+	server.addTool(pgMarkReadTool);
+	server.addTool(pgUnreadCountTool);
 }
