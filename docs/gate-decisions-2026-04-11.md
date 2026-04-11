@@ -1,31 +1,57 @@
 # Gate Decisions — 2026-04-11
 
-## TRIAGE Proposals (Quick Fix)
+## AgentHive RFC Gate Evaluator Run — 04:15 UTC
+
+### TRIAGE → FIX
+No proposals in TRIAGE state.
+
+### DRAFT → REVIEW
+No proposals in DRAFT state.
+
+### REVIEW → DEVELOP
 
 | Proposal | Decision | Reason |
 |----------|----------|--------|
-| P087 | **LEAVE IN TRIAGE** | Real issue — ~12 code files still use `maturity_state` instead of `maturity`. But blocked on P086 (DDL rename) which is still in FIX/new. Cannot proceed until P086 deploys the column rename. |
-| P089 | **LEAVE IN TRIAGE** | Not a quick fix — this is an architecture review/research proposal masquerading as an issue. Should be converted to RFC workflow (DRAFT) or handled as a research task. No concrete bug to fix. |
-| P091 | **LEAVE IN TRIAGE — needs investigation** | The file-based roadmap (docs/pillars/1-proposal/product-roadmap.md) is stale. P068 in DB is "Federation & Cross-Instance Sync" not "Web Dashboard & TUI Board" or "Risk Alert & Mitigation". The entire roadmap file is out of sync with Postgres — P066, P067, P068, P069 all have wrong titles in the file. Needs a comprehensive sync, not just P068 fix. Issue description is also inaccurate about what MCP shows. |
-| P147 | **LEAVE IN TRIAGE** | Duplicate/related to P087. Same root cause — P086 DDL not deployed. ~12 files still reference `maturity_state`. Blocked on P086. Additionally, P087 itself has ACs in its summary but none stored in the AC system (likely hit the character-splitting bug from P156). |
+| P162 | ⏸️ HOLD | Solid description with detailed spec, but NO acceptance criteria registered. Must add structural AC before advancing to DEVELOP. |
 
-## REVIEW Proposals (RFC)
+### FIX → DEPLOYED
 
 | Proposal | Decision | Reason |
 |----------|----------|--------|
-| P149 | **ADVANCE REVIEW → DEVELOP** | ✅ Coherent: Clear design reusing proven pg_notify pattern from gate pipeline. ✅ Economically optimized: pg_notify adds zero infrastructure cost vs WebSocket or Redis alternatives. ✅ Has ACs: 5 well-defined ACs in summary (AC system hit char-split bug but ACs are solid in proposal text). Design is thorough with table schema, trigger, fallback strategy, and tool interface. |
-| P162 | **LEAVE IN REVIEW** | Coherent and useful UX improvement. ❌ No acceptance criteria defined. Needs ACs before advancing. Also should consider: is this a standalone feature or part of P064 (OpenClaw CLI)? |
+| P079 | ⏸️ HOLD | No evidence of fix in codebase. Federation sync conflict resolution not implemented. |
+| P086 | ⏸️ HOLD | Partial work (migration 012-013), but TS code still references `maturity_state` extensively. |
+| P087 | ⏸️ HOLD | Depends on P086. Multiple TS files still reference old `maturity_state` column. |
+| P089 | ⏸️ HOLD | No commits or code changes found. Schema review not complete. |
+| P091 | ⏸️ HOLD | Naming discrepancy P068/MCP/Web Dashboard not resolved. |
+| P147 | ⏸️ HOLD | Blocked by P087. ~12 code files still reference old column. |
+| P154 | ⏸️ HOLD | Roadmap board TUI hang not fixed. No commits found. |
+| P155 | ⏸️ HOLD | Roadmap overview schema mismatch not fixed. No commits found. |
+| P159 | ⏸️ HOLD | Migration 018 exists but no TS code uses `public_key` yet. Partial. |
+| P160 | ⏸️ HOLD | 13 dashboard-web page stubs still unimplemented. |
+| P161 | ⏸️ HOLD | Duplicate scripts in worktree not cleaned up. |
+
+### DEVELOP → MERGE
+
+| Proposal | Decision | Reason |
+|----------|----------|--------|
+| P044 (mature) | ⏸️ HOLD | Core product — still in active development. Premature to advance. |
+| P051 (mature) | ⏸️ HOLD | Autonomous pipeline — active development. |
+| P054 (mature) | ⏸️ HOLD | Agent identity — active development. |
+| P056 (mature) | ⏸️ HOLD | Lease protocol — active development. |
+| P057 (mature) | ⏸️ HOLD | Zero-trust ACL — active development. |
+| P060 (mature) | ⏸️ HOLD | Financial governance — active development. |
+| P064 (mature) | ⏸️ HOLD | OpenClaw CLI — active development. |
+| P065 (mature) | ⏸️ HOLD | MCP server tools — active development. |
+| P045-P048 (active) | ⏸️ HOLD | Pillar components — active development. |
+| P066-P068 (active) | ⏸️ HOLD | Dashboard/document/federation — active development. |
+
+### MERGE → COMPLETE
+
+| Proposal | Decision | Reason |
+|----------|----------|--------|
+| P149 | ✅ ADVANCE | Code merged to main (commit 3bfd5ed). Feature fully implemented: `channel_subscription` table, `fn_message_notify` trigger, `msg_subscribe` tool, pg_notify push notifications. AC verified (all pass). Transitioned MERGE → COMPLETE. |
 
 ## Summary
-
-- **2 proposals advanced**: P149 → DEVELOP (mature)
-- **4 proposals kept in TRIAGE**: P087, P089, P091, P147 (blocked or need more info)
-- **1 proposal kept in REVIEW**: P162 (missing ACs)
-
-## Blocking Chain
-
-```
-P086 (FIX/new) ──blocks──→ P087 (TRIAGE) ──related──→ P147 (TRIAGE)
-```
-
-P086 deploys the DDL rename. Until it completes, P087 and P147 cannot proceed.
+- **Advanced:** 1 (P149 MERGE → COMPLETE)
+- **Held:** 11 FIX + 1 REVIEW + 15 DEVELOP = 27 held
+- **No action:** 37 (COMPLETE/DEPLOYED terminal states)
