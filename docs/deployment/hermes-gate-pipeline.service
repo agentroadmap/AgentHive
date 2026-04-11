@@ -1,0 +1,24 @@
+[Unit]
+Description=AgentHive PipelineCron Gate Worker
+Documentation=https://github.com/agentroadmap/agentRoadmap
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/data/code/AgentHive
+ExecStart=/usr/bin/env node --import jiti/register scripts/start-gate-pipeline.ts
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hermes-gate-pipeline
+
+# Environment file for database credentials (optional)
+EnvironmentFile=-%h/.agenthive.env
+
+# Security hardening
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

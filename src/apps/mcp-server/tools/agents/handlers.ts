@@ -267,6 +267,60 @@ export class AgentPoolHandlers {
 	}
 
 	/**
+	 * P054: Get details for a specific agent by ID.
+	 */
+	async getAgent(args: { agentId: string }): Promise<CallToolResult> {
+		try {
+			const agent = this.agents.get(args.agentId);
+
+			if (!agent) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Agent "${args.agentId}" not found in registry.\n\nUse agent_list to see all registered agents, or agent_register to add a new agent.`,
+						},
+					],
+					isError: true,
+				};
+			}
+
+			const statusIcon = this.statusEmoji(agent.status);
+			const providerIcon = this.providerEmoji(agent.provider);
+
+			const lines = [
+				`${statusIcon} Agent: ${agent.id}`,
+				`${"─".repeat(40)}`,
+				`Template: ${agent.template}`,
+				`Model: ${providerIcon} ${agent.model} (${agent.provider})`,
+				`Status: ${agent.status}`,
+				`Capabilities: ${agent.capabilities.join(", ") || "none"}`,
+				`Trust Score: ${agent.trustScore}/100`,
+				``,
+				`📊 Activity:`,
+				`   Claims: ${agent.claimsCount}`,
+				`   Completed: ${agent.completedCount}`,
+				`   Errors: ${agent.errorCount}`,
+				agent.lastError ? `   ⚠️  Last Error: ${agent.lastError}` : "",
+				``,
+				`📅 Timeline:`,
+				`   Created: ${agent.createdAt}`,
+				`   Last Heartbeat: ${agent.heartbeatAt}`,
+				`   Updated: ${agent.updatedAt}`,
+			].filter((l) => l !== "");
+
+			return {
+				content: [{ type: "text", text: lines.join("\n") }],
+			};
+		} catch (error) {
+			if (error instanceof Error) {
+				throw new McpError(error.message, "OPERATION_FAILED");
+			}
+			throw new McpError(String(error), "OPERATION_FAILED");
+		}
+	}
+
+	/**
 	 * AC#6: MCP command for agent assign (claim work)
 	 */
 	async assignWork(args: {

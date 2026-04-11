@@ -1,5 +1,5 @@
 #!/bin/bash
-# Pre-commit hook to catch hardcoded instance names and service URLs
+# Pre-commit hook to catch hardcoded database names and URLs
 # Usage: ./scripts/check-hardcoded.sh
 
 set -e
@@ -11,14 +11,14 @@ NC='\033[0m' # No Color
 
 echo "🔍 Checking for hardcoded values..."
 
-# Patterns to detect (legacy instance names, URLs, IDs)
+# Patterns to detect (database names, URLs, IDs)
 PATTERNS=(
-  "agent-roadmap-v2"  # Legacy instance name
-  "roadmap2"          # Legacy local instance name
-  "roadmap"           # Service name (should be in config)
-  "127.0.0.1:3000"    # Local service URL (should be in config)
-  "localhost:3000"    # Local service URL (should be in config)
-  "c200[0-9a-f]"      # Legacy instance IDs (should be in config)
+  "agent-roadmap-v2"  # Old database name
+  "roadmap2"          # Current database name (should be in config)
+  "roadmap"           # MCP server name (should be in config)
+  "127.0.0.1:3000"    # SpacetimeDB URL (should be in config)
+  "localhost:3000"    # SpacetimeDB URL (should be in config)
+  "c200[0-9a-f]"      # Database IDs (should be in config)
 )
 
 # Files to check (exclude node_modules, config, tests, and migration files)

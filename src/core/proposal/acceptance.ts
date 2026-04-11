@@ -9,6 +9,10 @@
  * Loop detection: If proposal fails review N times, escalate to coordinator.
  *
  * Issue blocking: Proposals with open critical/major test issues cannot reach Reached.
+ *
+ * AC-19: DB-backed acceptance criteria validation blocks the Accepted transition
+ * when any non-waived proposal_acceptance_criteria row has status pending or fail.
+ * The structured error identifies the blocking criterion item_number(s).
  */
 
 import {
@@ -453,5 +457,107 @@ export function validateReachedTransition(
 	return {
 		canReach: reasons.length === 0,
 		reasons,
+	};
+}
+
+// ────────────────────────────────────────────────────────────────────
+// AC-19: DB-backed Acceptance Criteria Validation
+// ────────────────────────────────────────────────────────────────────
+
+import { query } from "../../infra/postgres/pool.ts";
+
+export type ACCriterionStatus = "pending" | "pass" | "fail" | "blocked" | "waived";
+
+export interface ACCriterionRow {
+	item_number: number;
+	criterion_text: string;
+	status: ACCriterionStatus;
+	verified_by: string | null;
+	verification_notes: string | null;
+	verified_at: string | null;
+}
+
+export interface ACValidationResult {
+	/** Whether all criteria are satisfied (pass or waived) */
+	allSatisfied: boolean;
+	/** Criteria that are blocking the transition */
+	blockingCriteria: ACCriterionRow[];
+	/** Total criteria count */
+	totalCriteria: number;
+	/** Count of satisfied criteria (pass + waived) */
+	satisfiedCount: number;
+	/** Human-readable summary */
+	summary: string;
+}
+
+/**
+ * AC-19: Validate that all acceptance criteria for a proposal are satisfied.
+ * Queries proposal_acceptance_criteria from DB.
+ * Returns blocking criteria (status is pending, fail, or blocked — not pass or waived).
+ *
+ * Use this before allowing transitions to Accepted/Complete states.
+ */
+export async function validateACFromDB(
+	proposalId: number | string,
+): Promise<ACValidationResult> {
+	const { rows: allRows } = await query<ACCriterionRow>(
+		`SELECT item_number, criterion_text, status, verified_by, verification_notes,
+        TO_CHAR(verified_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS verified_at
+     FROM proposal_acceptance_criteria
+     WHERE proposal_id = $1
+     ORDER BY item_number ASC`,
+		[proposalId],
+	);
+
+	const totalCriteria = allRows.length;
+	const blockingCriteria = allRows.filter(
+		(r) => r.status !== "pass" && r.status !== "waived",
+	);
+	const satisfiedCount = allRows.filter(
+		(r) => r.status === "pass" || r.status === "waived",
+	).length;
+
+	const allSatisfied = blockingCriteria.length === 0;
+
+	let summary: string;
+	if (totalCriteria === 0) {
+		summary = "No acceptance criteria defined";
+	} else if (allSatisfied) {
+		summary = `All ${totalCriteria} acceptance criteria satisfied (${satisfiedCount} pass/waived)`;
+	} else {
+		const pending = blockingCriteria.filter((c) => c.status === "pending").length;
+		const failed = blockingCriteria.filter((c) => c.status === "fail").length;
+		const blocked = blockingCriteria.filter((c) => c.status === "blocked").length;
+		const parts: string[] = [];
+		if (pending > 0) parts.push(`${pending} pending`);
+		if (failed > 0) parts.push(`${failed} failed`);
+		if (blocked > 0) parts.push(`${blocked} blocked`);
+		summary = `${satisfiedCount}/${totalCriteria} criteria satisfied — blocking: ${parts.join(", ")}`;
+	}
+
+	return {
+		allSatisfied,
+		blockingCriteria,
+		totalCriteria,
+		satisfiedCount,
+		summary,
+	};
+}
+
+/**
+ * AC-19: Format an ACValidationResult as a structured error context.
+ * Use this to build the context object for an AC_GATE_FAILED error.
+ */
+export function formatACBlockingError(
+	result: ACValidationResult,
+): Record<string, unknown> {
+	return {
+		totalCriteria: result.totalCriteria,
+		satisfiedCount: result.satisfiedCount,
+		blockingItemNumbers: result.blockingCriteria.map((c) => c.item_number),
+		blockingDetails: result.blockingCriteria.map(
+			(c) => `#${c.item_number} (${c.status}): ${c.criterion_text}`,
+		),
+		summary: result.summary,
 	};
 }

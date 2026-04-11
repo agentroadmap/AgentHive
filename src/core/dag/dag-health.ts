@@ -520,3 +520,200 @@ export class DAGHealth {
 export function createDAGHealth(config?: Partial<DAGHealthConfig>): DAGHealth {
 	return new DAGHealth(config);
 }
+
+// ────────────────────────────────────────────────────────────────────
+// AC-7: Oscillation Detection for Review↔Building Transitions
+// ────────────────────────────────────────────────────────────────────
+
+import { query } from "../../infra/postgres/pool.ts";
+
+/** Result of oscillation check for a single proposal */
+export interface ProposalOscillationResult {
+	proposalId: number;
+	displayId: string | null;
+	oscillationCount: number;
+	isOscillating: boolean;
+	/** The sequence of transitions that form the oscillation pattern */
+	transitionPattern: string[];
+	/** Timestamps of the oscillating transitions */
+	timestamps: string[];
+	/** Number of Review↔Building cycles detected */
+	cycleCount: number;
+}
+
+/** Alert raised when oscillation is detected */
+export interface OscillationAlert {
+	severity: "warning" | "critical";
+	message: string;
+	proposalId: number;
+	displayId: string | null;
+	cycleCount: number;
+	threshold: number;
+}
+
+/**
+ * AC-7: Detect Review↔Building oscillation for a specific proposal.
+ * Raises an alert when a proposal oscillates between Review↔Building
+ * more than `threshold` times without an intervening Accepted or Rejected transition.
+ *
+ * Queries proposal_state_transitions from DB.
+ *
+ * @param proposalId - The proposal ID to check
+ * @param threshold - Number of oscillations before alerting (default: 3)
+ */
+export async function detectOscillationFromDB(
+	proposalId: number,
+	threshold: number = 3,
+): Promise<ProposalOscillationResult> {
+	// Get all transitions for this proposal in chronological order
+	const { rows } = await query<{
+		id: number;
+		from_state: string;
+		to_state: string;
+		transitioned_at: string;
+	}>(
+		`SELECT id, from_state, to_state,
+        TO_CHAR(transitioned_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS transitioned_at
+     FROM proposal_state_transitions
+     WHERE proposal_id = $1
+     ORDER BY transitioned_at ASC`,
+		[proposalId],
+	);
+
+	const oscillationPairs: string[] = [];
+	const timestamps: string[] = [];
+	let cycleCount = 0;
+	let lastOscillationEnd: string | null = null;
+
+	// Detect Review↔Building oscillation pattern
+	for (let i = 0; i < rows.length - 1; i++) {
+		const current = rows[i];
+		const next = rows[i + 1];
+
+		const isReviewToBuilding =
+			current.from_state.toLowerCase() === "review" &&
+			current.to_state.toLowerCase() === "develop";
+		const isBuildingToReview =
+			current.from_state.toLowerCase() === "develop" &&
+			current.to_state.toLowerCase() === "review";
+
+		if (isReviewToBuilding || isBuildingToReview) {
+			oscillationPairs.push(`${current.from_state}→${current.to_state}`);
+			timestamps.push(current.transitioned_at);
+		}
+
+		// Count complete cycles (Review→Building followed by Building→Review)
+		if (isReviewToBuilding && i + 1 < rows.length) {
+			const nextIsBuildingToReview =
+				next.from_state.toLowerCase() === "develop" &&
+				next.to_state.toLowerCase() === "review";
+			if (nextIsBuildingToReview) {
+				// Check if there was an Accepted/Rejected since last cycle
+				const hasInterveningAcceptance = rows.some(
+					(r, idx) =>
+						idx > 0 &&
+						idx < i &&
+						(r.to_state.toLowerCase() === "accepted" ||
+							r.to_state.toLowerCase() === "rejected") &&
+						(!lastOscillationEnd ||
+							r.transitioned_at > lastOscillationEnd),
+				);
+
+				if (!hasInterveningAcceptance) {
+					cycleCount++;
+					lastOscillationEnd = next.transitioned_at;
+				}
+			}
+		}
+	}
+
+	const isOscillating = cycleCount >= threshold;
+
+	return {
+		proposalId,
+		displayId: null, // Will be filled by caller if needed
+		oscillationCount: oscillationPairs.length,
+		isOscillating,
+		transitionPattern: oscillationPairs,
+		timestamps,
+		cycleCount,
+	};
+}
+
+/**
+ * AC-7: Scan all proposals for Review↔Building oscillation.
+ * Returns alerts for proposals that exceed the threshold.
+ *
+ * @param threshold - Number of oscillations before alerting (default: 3)
+ * @param limit - Max proposals to check (default: 100)
+ */
+export async function scanForOscillation(
+	threshold: number = 3,
+	limit: number = 100,
+): Promise<OscillationAlert[]> {
+	// Find proposals that have had Review↔Develop transitions
+	const { rows: candidateRows } = await query<{
+		proposal_id: number;
+		display_id: string;
+		oscillation_count: number;
+	}>(
+		`SELECT
+       pst.proposal_id,
+       p.display_id,
+       COUNT(*) FILTER (
+         WHERE (LOWER(pst.from_state) = 'review' AND LOWER(pst.to_state) = 'develop')
+            OR (LOWER(pst.from_state) = 'develop' AND LOWER(pst.to_state) = 'review')
+       ) AS oscillation_count
+     FROM proposal_state_transitions pst
+     JOIN proposal p ON p.id = pst.proposal_id
+     GROUP BY pst.proposal_id, p.display_id
+     HAVING COUNT(*) FILTER (
+       WHERE (LOWER(pst.from_state) = 'review' AND LOWER(pst.to_state) = 'develop')
+          OR (LOWER(pst.from_state) = 'develop' AND LOWER(pst.to_state) = 'review')
+     ) >= $1 * 2  -- Each cycle is 2 transitions
+     ORDER BY oscillation_count DESC
+     LIMIT $2`,
+		[threshold, limit],
+	);
+
+	const alerts: OscillationAlert[] = [];
+
+	for (const row of candidateRows) {
+		const result = await detectOscillationFromDB(row.proposal_id, threshold);
+		if (result.isOscillating) {
+			alerts.push({
+				severity: result.cycleCount >= threshold * 2 ? "critical" : "warning",
+				message: `Proposal ${row.display_id} oscillates between Review↔Building (${result.cycleCount} cycles, threshold: ${threshold})`,
+				proposalId: row.proposal_id,
+				displayId: row.display_id,
+				cycleCount: result.cycleCount,
+				threshold,
+			});
+		}
+	}
+
+	return alerts;
+}
+
+/**
+ * AC-7: Format oscillation alerts for display.
+ */
+export function formatOscillationAlerts(alerts: OscillationAlert[]): string {
+	if (alerts.length === 0) {
+		return "✅ No Review↔Building oscillation detected";
+	}
+
+	const lines = [
+		`⚠️ Oscillation Alert: ${alerts.length} proposal(s) with Review↔Building oscillation`,
+		"",
+	];
+
+	for (const alert of alerts) {
+		const icon = alert.severity === "critical" ? "🔴" : "🟡";
+		lines.push(
+			`${icon} ${alert.displayId ?? alert.proposalId}: ${alert.cycleCount} cycles (threshold: ${alert.threshold})`,
+		);
+	}
+
+	return lines.join("\n");
+}

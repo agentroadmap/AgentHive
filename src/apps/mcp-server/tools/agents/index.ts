@@ -16,6 +16,7 @@ import {
 } from "./handlers.ts";
 import {
 	agentAssignSchema,
+	agentGetSchema,
 	agentHeartbeatSchema,
 	agentListSchema,
 	agentRegisterSchema,
@@ -30,6 +31,7 @@ import {
 export function registerAgentTools(server: McpServer): void {
 	const handlers = new AgentPoolHandlers(server);
 	type RegisterAgentArgs = Parameters<AgentPoolHandlers["registerAgent"]>[0];
+	type GetAgentArgs = Parameters<AgentPoolHandlers["getAgent"]>[0];
 	type ListAgentsArgs = Parameters<AgentPoolHandlers["listAgents"]>[0];
 	type AssignWorkArgs = Parameters<AgentPoolHandlers["assignWork"]>[0];
 	type HeartbeatArgs = Parameters<AgentPoolHandlers["heartbeat"]>[0];
@@ -52,6 +54,19 @@ export function registerAgentTools(server: McpServer): void {
 			agentRegisterSchema,
 			async (input) => handlers.registerAgent(input),
 		);
+
+	// ── agent_get ────────────────────────────────────────────────────────────
+	const getTool: McpToolHandler = createSimpleValidatedTool<GetAgentArgs>(
+		{
+			name: "agent_get",
+			description:
+				"Get detailed information about a specific agent by ID. " +
+				"P054: Returns agent status, capabilities, activity metrics, and timeline.",
+			inputSchema: agentGetSchema,
+		},
+		agentGetSchema,
+		async (input) => handlers.getAgent(input),
+	);
 
 	// ── agent_list ──────────────────────────────────────────────────────────
 	const listTool: McpToolHandler = createSimpleValidatedTool<ListAgentsArgs>(
@@ -145,6 +160,7 @@ export function registerAgentTools(server: McpServer): void {
 
 	// Register all tools
 	server.addTool(registerTool);
+	server.addTool(getTool);
 	server.addTool(listTool);
 	server.addTool(assignTool);
 	server.addTool(heartbeatTool);

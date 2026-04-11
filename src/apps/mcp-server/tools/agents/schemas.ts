@@ -109,6 +109,18 @@ export const agentRegisterSchema: JsonSchema = {
 	additionalProperties: false,
 };
 
+export const agentGetSchema: JsonSchema = {
+	type: "object",
+	properties: {
+		agentId: {
+			type: "string",
+			description: "Agent ID to retrieve details for",
+		},
+	},
+	required: ["agentId"],
+	additionalProperties: false,
+};
+
 export const agentListSchema: JsonSchema = {
 	type: "object",
 	properties: {

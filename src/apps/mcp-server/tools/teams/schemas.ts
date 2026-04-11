@@ -235,6 +235,42 @@ export const leaseRenewSchema = {
 	required: ["leaseId", "agentId"],
 };
 
+export const teamListSchema = {
+	type: "object",
+	properties: {
+		status: {
+			type: "string",
+			enum: ["active", "archived", "all"],
+			description: "Filter by team status (default: active)",
+		},
+		teamType: {
+			type: "string",
+			enum: ["feature", "ops", "research", "admin"],
+			description: "Filter by team type",
+		},
+	},
+	required: [],
+};
+
+export const teamAddMemberSchema = {
+	type: "object",
+	properties: {
+		teamId: {
+			type: "string",
+			description: "Team ID to add member to",
+		},
+		agentId: {
+			type: "string",
+			description: "Agent ID to add as member",
+		},
+		role: {
+			type: "string",
+			description: "Role for the new member (e.g., lead, member, observer)",
+		},
+	},
+	required: ["teamId", "agentId", "role"],
+};
+
 export const federationStatusSchema = {
 	type: "object",
 	properties: {},

@@ -233,21 +233,37 @@ export async function createProposal(
 	// Resolve the workflow's start_stage for this proposal type so the initial
 	// status matches the workflow (e.g. Quick Fix starts at TRIAGE, not Draft).
 	// Falls back to "Draft" if no workflow is configured for this type.
-	let initialStatus = input.status ?? "Draft";
-	if (!input.status) {
-		const { rows: wfRows } = await query<{ start_stage: string | null }>(
-			`SELECT ws.stage_name AS start_stage
+	// If input.status is provided, validate it exists in the workflow's stages;
+	// if not, silently use the workflow's start stage instead.
+	let initialStatus = "Draft";
+	const { rows: wfRows } = await query<{
+		start_stage: string | null;
+		valid_stages: string[];
+	}>(
+		`SELECT MIN(ws.stage_name) FILTER (WHERE ws.stage_order = MIN(ws.stage_order) OVER ()) AS start_stage,
+		        ARRAY_AGG(DISTINCT ws.stage_name) AS valid_stages
        FROM roadmap.proposal_type_config ptc
        JOIN roadmap.workflow_templates wt ON wt.name = ptc.workflow_name
        JOIN roadmap.workflow_stages ws ON ws.template_id = wt.id
        WHERE ptc.type = $1
-       ORDER BY ws.stage_order ASC
-       LIMIT 1`,
-			[input.type],
+       GROUP BY ptc.type`,
+		[input.type],
+	);
+	const startStage = wfRows[0]?.start_stage ?? null;
+	const validStages: string[] = wfRows[0]?.valid_stages ?? [];
+
+	if (input.status && validStages.length > 0) {
+		// Validate provided status exists in workflow stages (case-insensitive)
+		const matchStage = validStages.find(
+			(s) => s.toLowerCase() === input.status!.toLowerCase(),
 		);
-		if (wfRows[0]?.start_stage) {
-			initialStatus = wfRows[0].start_stage;
-		}
+		initialStatus = matchStage ?? startStage ?? "Draft";
+	} else if (input.status) {
+		// No workflow configured — accept provided status as-is
+		initialStatus = input.status;
+	} else {
+		// No status provided — use workflow start stage or default
+		initialStatus = startStage ?? "Draft";
 	}
 
 	const { rows } = await query<ProposalRow>(

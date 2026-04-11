@@ -1,0 +1,31 @@
+{
+  "config": {
+    "maxClaimsPerHour": 10,
+    "burstAllowance": 3,
+    "burstWindowMinutes": 5,
+    "priorityBypass": true,
+    "minBypassPriority": "high",
+    "coolDownMinutes": 15
+  },
+  "fairShare": {
+    "enabled": true,
+    "minClaimsPerHour": 2,
+    "rebalanceIntervalMinutes": 30,
+    "activityWindowHours": 4
+  },
+  "agents": {
+    "hermes-architect": {
+      "claims": [
+        {
+          "agentId": "hermes-architect",
+          "timestamp": "2026-04-11T02:17:45.840Z",
+          "proposalId": "P149",
+          "proposalPriority": "high",
+          "bypassed": true
+        }
+      ],
+      "burstClaims": [],
+      "queue": []
+    }
+  }
+}

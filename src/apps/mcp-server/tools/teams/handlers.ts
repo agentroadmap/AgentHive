@@ -250,6 +250,89 @@ export class TeamHandlers {
 		}
 	}
 
+	/**
+	 * P055: List all teams with optional filtering.
+	 */
+	async listTeams(args: {
+		status?: "active" | "archived" | "all";
+		teamType?: string;
+	}): Promise<CallToolResult> {
+		try {
+			const teams = this.teamBuilder.listTeams({
+				status: args.status ?? "active",
+				teamType: args.teamType,
+			});
+
+			if (teams.length === 0) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: "No teams found matching criteria.\n\nUse team_create to create a new team.",
+						},
+					],
+				};
+			}
+
+			const lines = [`Teams (${teams.length}):`, ""];
+
+			for (const team of teams) {
+				lines.push(`📋 ${team.name || team.teamId}`);
+				lines.push(`   ID: ${team.teamId}`);
+				lines.push(`   Type: ${team.teamType || "general"}`);
+				lines.push(`   Status: ${team.status || "active"}`);
+				lines.push(`   Members: ${team.members?.length || 0}`);
+				if (team.description) {
+					lines.push(`   Description: ${team.description}`);
+				}
+				lines.push("");
+			}
+
+			return {
+				content: [{ type: "text", text: lines.join("\n") }],
+			};
+		} catch (error) {
+			if (error instanceof Error) {
+				throw new McpError(error.message, "OPERATION_FAILED");
+			}
+			throw new McpError(String(error), "OPERATION_FAILED");
+		}
+	}
+
+	/**
+	 * P055: Add a member to a team.
+	 */
+	async addTeamMember(args: {
+		teamId: string;
+		agentId: string;
+		role: string;
+	}): Promise<CallToolResult> {
+		try {
+			const result = await this.membership.addMember({
+				teamId: args.teamId,
+				agentId: args.agentId,
+				role: args.role,
+			});
+
+			return {
+				content: [
+					{
+						type: "text",
+						text:
+							`Agent ${args.agentId} added to team ${args.teamId}\n` +
+							`Role: ${args.role}\n` +
+							`Status: active`,
+					},
+				],
+			};
+		} catch (error) {
+			if (error instanceof Error) {
+				throw new McpError(error.message, "OPERATION_FAILED");
+			}
+			throw new McpError(String(error), "OPERATION_FAILED");
+		}
+	}
+
 	// ─── Membership Operations (STATE-63) ──────────────────────────
 
 	/**
