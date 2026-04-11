@@ -199,3 +199,49 @@ The MERGE→COMPLETE gate requires all ACs to pass. With corrupted ACs, `transit
 1. **CRITICAL:** Re-create ACs for P163, P164, P165, P166 with proper text (not character-split). The P156 fix (`394982f`) addressed the root cause but did not clean up existing corrupted ACs.
 2. P167, P168, P169 need ACs and implementation before they can move to DEPLOYED.
 3. P066 has recent commits on main (`a53cbe3`) — may be ready for MERGE once ACs are verified.
+
+
+---
+
+# Gate Decisions — 2026-04-11
+
+**Reviewer:** proposal-reviewer (cron)
+**Generated:** 2026-04-11T10:37:23.726262
+
+## Summary
+
+No proposals in TRIAGE or REVIEW states to evaluate.
+
+## TRIAGE Queue
+| Proposal | Decision | Reason |
+| :--- | :--- | :--- |
+| — | — | No proposals in TRIAGE state |
+
+## REVIEW Queue
+| Proposal | Decision | Reason |
+| :--- | :--- | :--- |
+| — | — | No proposals in REVIEW state |
+
+## FIX Queue (Observation Only)
+
+Three proposals recently moved TRIAGE→FIX (by rfc-gate-evaluator, 2026-04-11):
+
+| Proposal | Title | Status | ACs | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| P167 | Gate pipeline rubber-stamps transitions without decision rationale | FIX, new | None | Real bug — audit entries show '(no summary)'. Not yet fixed in codebase. Needs ACs and implementation. |
+| P168 | Skeptic gate decisions fail to record — column 'actor' missing from audit_log | FIX, new | None | Real bug — orchestrator INSERT uses `actor` column but DDL defines `changed_by`. Verified unfixed in `scripts/orchestrator.ts:146`. Needs ACs and implementation. |
+| P169 | Gate pipeline spawnAgent fails — 'Not logged in' on every transition attempt | FIX, new | None | Real bug — critical priority. Agent spawning auth failure blocks all gate transitions. Needs ACs and implementation. |
+
+**Note:** P167-P169 are genuine bugs (not feature requests). All three are unfixed in the codebase and have no acceptance criteria. They cannot advance FIX→DEPLOYED without ACs. These need to be worked on before gate review can proceed.
+
+## MERGE Queue (Observation Only)
+
+| Proposal | Title | Status | Maturity | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| P163 | Effective blocking protocol | MERGE | mature | Awaiting merge |
+| P164 | Briefing assembler | MERGE | mature | Awaiting merge |
+| P165 | Cycle resolution protocol | MERGE | mature | Awaiting merge |
+| P166 | Terminal state protocol | MERGE | mature | Awaiting merge |
+
+---
+*Next review scheduled per cron cadence.*
