@@ -1,78 +1,57 @@
 # Gate Decisions — 2026-04-11
 
-Reviewed by: hermes-agent (cron - RFC Gate Evaluator)
-Timestamp: 2026-04-11T10:47:20.770813+00:00
+Reviewed by: rfc-gate-evaluator (cron)
+Timestamp: 2026-04-11T11:01 UTC
 
 ## Summary
 
 | Proposal | Decision | Reason |
 |----------|----------|--------|
-| P159 | HOLD | FIX maturity=new, no AC defined, no notes — not ready for DEPLOYED |
-| P160 | HOLD | FIX maturity=new, no AC defined, no notes — not ready for DEPLOYED |
-| P161 | HOLD | FIX maturity=new, no AC defined, no notes — not ready for DEPLOYED |
-| P048 | HOLD | DEVELOP maturity=active, AC all pending — not ready for MERGE |
+| P079 | HOLD | maturity=obsolete, AC pending — not ready |
+| P086 | HOLD | maturity=new, no AC defined — not ready |
+| P154 | HOLD | maturity=new, no AC defined — not ready |
+| P155 | HOLD | maturity=new, no AC defined — not ready |
+| P159 | HOLD | maturity=new, no AC defined — not ready |
+| P160 | HOLD | maturity=new, no AC defined — not ready |
+| P161 | HOLD | maturity=new, no AC defined — not ready |
+| P162 | HOLD | No acceptance criteria defined |
+| P045 | HOLD | maturity=active, AC pending — not ready |
+| P046 | HOLD | maturity=active, AC pending — not ready |
+| P047 | HOLD | maturity=active, AC pending — not ready |
+| P048 | HOLD | maturity=active, AC pending — not ready |
+| P066 | HOLD | maturity=active, AC pending — not ready |
+| P067 | HOLD | maturity=active, AC pending — not ready |
+| P068 | HOLD | maturity=active, AC pending — not ready |
 
-## Quick Fix Workflow
+## Gate Check Results
 
-### TRIAGE → FIX
-No proposals in TRIAGE state.
+### QUICK FIX WORKFLOW
 
-### FIX → DEPLOYED
+**TRIAGE → FIX**: No proposals in TRIAGE state.
 
-#### P159 — crypto identity not linked to DB
-- **State:** FIX
-- **Type:** issue
-- **Maturity:** new
-- **Acceptance Criteria:** None defined
-- **Decision:** HOLD
+**FIX → DEPLOYED**: 7 proposals in FIX state.
+- All have maturity=new or obsolete (gate requires mature)
+- Most have no AC or AC items pending verification (gate requires all AC pass)
+- None eligible for advancement
 
-**Rationale:** Proposal maturity is "new" and no acceptance criteria are defined. Cannot advance to DEPLOYED without AC and maturity=mature.
+### RFC WORKFLOW
 
-#### P160 — dead code since 2026-04-01
-- **State:** FIX
-- **Type:** issue
-- **Maturity:** new
-- **Acceptance Criteria:** None defined
-- **Decision:** HOLD
+**DRAFT → REVIEW**: No proposals in DRAFT state.
 
-**Rationale:** Proposal maturity is "new" and no acceptance criteria are defined. Cannot advance to DEPLOYED without AC and maturity=mature.
+**REVIEW → DEVELOP**: 1 proposal (P162).
+- P162: Well-structured proposal with clear description, motivation, and design. However, **no acceptance criteria defined**. Per gate rules, AC must be present before advancing to DEVELOP. HOLD until ACs are added.
 
-#### P161 — seed-proposals, cli, ws-bridge variants
-- **State:** FIX
-- **Type:** issue
-- **Maturity:** new
-- **Acceptance Criteria:** None defined
-- **Decision:** HOLD
+**DEVELOP → MERGE**: 7 proposals in DEVELOP state.
+- All 7 pillar/feature proposals (P045-P048, P066-P068) have maturity=active
+- All AC items show ⏳ pending status
+- Gate requires maturity=mature AND all AC verified (pass)
+- None eligible for advancement
 
-**Rationale:** Proposal maturity is "new" and no acceptance criteria are defined. Cannot advance to DEPLOYED without AC and maturity=mature.
-
-## RFC Workflow
-
-### DRAFT → REVIEW
-No proposals in DRAFT state.
-
-### REVIEW → DEVELOP
-No proposals in REVIEW state.
-
-### DEVELOP → MERGE
-
-#### P048 — CLI, MCP Server & Federation
-- **State:** DEVELOP
-- **Type:** component
-- **Maturity:** active
-- **Acceptance Criteria:** Defined (10+ AC items) — ALL ⏳ pending (none verified)
-- **Decision:** HOLD
-
-**Rationale:** Acceptance criteria are defined but all are pending verification. Maturity is "active" (not yet "mature"). Gate requires maturity=mature AND all AC verified before advancing to MERGE.
-
-### MERGE → COMPLETE
-No proposals in MERGE state.
-
----
+**MERGE → COMPLETE**: No proposals in MERGE state.
 
 ## Notes
 
-- 17 total proposals in system: 9 COMPLETE, 4 DEPLOYED, 1 DEVELOP, 3 FIX
-- No DRAFT, REVIEW, or MERGE proposals pending
-- FIX proposals (P159-P161) need AC definitions and work before they can advance
-- P048 needs AC verification and maturity advancement before MERGE gate
+- The pipeline is healthy — proposals are flowing through the system
+- FIX proposals (P159-P161) were recently created and need agent work before they can advance
+- DEVELOP proposals are large pillar/component items — expected to be long-running
+- P162 is the closest candidate for advancement — needs ACs added to proceed
