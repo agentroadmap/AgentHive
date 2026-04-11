@@ -1,0 +1,44 @@
+project:
+  name: AgentRoadmap
+  project_root: /data/code/agentRoadmap
+  date_format: yyyy-mm-dd
+  export_path: export
+database:
+  provider: spacetime
+  name: roadmap2
+  host: 127.0.0.1
+  port: 3000
+mcp:
+  port: 6421
+  transport: sse
+  sdb_url: http://127.0.0.1:3000/
+  sdb_database: c200929bd0127921065806e4e922c2836007c9a6191f6dca26531e3c67090e3e
+proposals:
+  default_status: Draft
+  statuses:
+    - Draft
+    - Review
+    - Building
+    - Accepted
+    - Complete
+    - Rejected
+    - Abandoned
+    - Replaced
+  labels:
+    - feature
+    - bugfix
+    - refactor
+    - docs
+  zero_padded_ids: 3
+  table_name: proposal
+ui:
+  max_column_width: 80
+  auto_open_browser: true
+git:
+  auto_commit: true
+  bypass_git_hooks: false
+  check_active_branches: true
+  active_branch_days: 30
+remote:
+  default_port: 6420
+  operations: true
