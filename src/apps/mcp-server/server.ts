@@ -30,6 +30,7 @@ import { registerTeamTools } from "./tools/teams/index.ts";
 import { registerTestingTools } from "./tools/testing/index.ts";
 import { registerWorkflowTools } from "./tools/workflow/index.ts";
 import { registerDependencyTools } from "./tools/dependencies/index.ts";
+import { registerWorktreeMergeTools } from "./tools/worktree-merge/index.ts";
 import type {
 	CallToolResult,
 	GetPromptResult,
@@ -386,6 +387,7 @@ export async function createMcpServer(
 	registerKnowledgeTools(server);
 	registerProtocolTools(server);
 	registerCubicTools(server, projectRoot);
+	registerWorktreeMergeTools(server, projectRoot);
 
 	// --- Backend routing: Postgres vs filesystem ---
 	const usePostgres = config.database?.provider === "Postgres";
