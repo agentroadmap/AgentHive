@@ -1,99 +1,78 @@
 # Gate Decisions — 2026-04-11
 
-Reviewed by: rfc-gate-evaluator (cron)
-Timestamp: 2026-04-11T09:47 UTC
+Reviewed by: hermes-agent (cron - RFC Gate Evaluator)
+Timestamp: 2026-04-11T10:47:20.770813+00:00
 
 ## Summary
 
 | Proposal | Decision | Reason |
 |----------|----------|--------|
-| P079 | SKIP | Obsolete maturity — marked irrelevant |
-| P086 | HOLD | maturity=new, no AC, DDL not deployed |
-| P154 | HOLD | maturity=new, no AC, bug still present |
-| P155 | HOLD | maturity=new, no AC, no fix evidence |
-| P159 | HOLD | maturity=new, no AC, no fix evidence |
-| P160 | HOLD | maturity=new, no AC, no fix evidence |
-| P161 | HOLD | maturity=new, no AC, no fix evidence |
-| P162 | HOLD | No acceptance criteria defined |
+| P159 | HOLD | FIX maturity=new, no AC defined, no notes — not ready for DEPLOYED |
+| P160 | HOLD | FIX maturity=new, no AC defined, no notes — not ready for DEPLOYED |
+| P161 | HOLD | FIX maturity=new, no AC defined, no notes — not ready for DEPLOYED |
+| P048 | HOLD | DEVELOP maturity=active, AC all pending — not ready for MERGE |
 
 ## Quick Fix Workflow
 
-### No TRIAGE issues found
+### TRIAGE → FIX
+No proposals in TRIAGE state.
 
-### FIX Issues (7 total)
+### FIX → DEPLOYED
 
-**P079** — Federation sync conflicts with cross-branch DAG resolution
-- **Status:** FIX, **maturity:** obsolete
-- **Decision:** SKIP — proposal marked obsolete, not relevant to current work
+#### P159 — crypto identity not linked to DB
+- **State:** FIX
+- **Type:** issue
+- **Maturity:** new
+- **Acceptance Criteria:** None defined
+- **Decision:** HOLD
 
-**P086** — Rename proposal.maturity_state and dependency in live Postgres schema
-- **Status:** FIX, **maturity:** new
-- **Ac:** None defined
-- **Decision:** HOLD — DDL deployment not evidenced, depends on P085, no AC
-- **Rationale:** This is a DDL migration task. Without evidence the migration was applied or AC defining done-criteria, cannot advance.
+**Rationale:** Proposal maturity is "new" and no acceptance criteria are defined. Cannot advance to DEPLOYED without AC and maturity=mature.
 
-**P154** — Roadmap board TUI hangs after loading Postgres data
-- **Status:** FIX, **maturity:** new
-- **Ac:** None defined
-- **Decision:** HOLD — prior gate review confirmed "bug still present"
-- **Rationale:** Prior review by hermes-agent confirmed the TUI rendering hang persists. No fix commits found.
+#### P160 — dead code since 2026-04-01
+- **State:** FIX
+- **Type:** issue
+- **Maturity:** new
+- **Acceptance Criteria:** None defined
+- **Decision:** HOLD
 
-**P155** — Roadmap overview reading wrong database or schema
-- **Status:** FIX, **maturity:** new
-- **Ac:** None defined
-- **Decision:** HOLD — no code changes, no investigation notes
+**Rationale:** Proposal maturity is "new" and no acceptance criteria are defined. Cannot advance to DEPLOYED without AC and maturity=mature.
 
-**P159** — agent_registry missing public_key column
-- **Status:** FIX, **maturity:** new
-- **Ac:** None defined
-- **Decision:** HOLD — migration not applied, no code evidence
+#### P161 — seed-proposals, cli, ws-bridge variants
+- **State:** FIX
+- **Type:** issue
+- **Maturity:** new
+- **Acceptance Criteria:** None defined
+- **Decision:** HOLD
 
-**P160** — 13 unimplemented dashboard-web page stubs
-- **Status:** FIX, **maturity:** new
-- **Ac:** None defined
-- **Decision:** HOLD — low priority cleanup, no work started
-
-**P161** — Duplicate scripts in worktree
-- **Status:** FIX, **maturity:** new
-- **Ac:** None defined
-- **Decision:** HOLD — low priority cleanup, no work started
+**Rationale:** Proposal maturity is "new" and no acceptance criteria are defined. Cannot advance to DEPLOYED without AC and maturity=mature.
 
 ## RFC Workflow
 
-### No DRAFT proposals found
+### DRAFT → REVIEW
+No proposals in DRAFT state.
 
-### REVIEW Proposals (1 total)
+### REVIEW → DEVELOP
+No proposals in REVIEW state.
 
-**P162** — CLI proposal list should group by type then show states in natural workflow order
-- **Status:** REVIEW, **maturity:** new
-- **Coherent:** ✅ Well-structured with clear current/desired behavior and example output
-- **Economically Optimized:** ✅ Reasonable CLI UX improvement, no over-engineering
-- **Acceptance Criteria:** ❌ None defined
-- **Decision:** HOLD — cannot advance to DEVELOP without AC
-- **Rationale:** Proposal is coherent and well-motivated, but gate requires AC before REVIEW→DEVELOP. Agent should add acceptance criteria (e.g., "proposal list --plain groups by type", "states appear in workflow order within each group", etc.) then re-evaluate.
+### DEVELOP → MERGE
 
-### DEVELOP Proposals (7 total — all components)
+#### P048 — CLI, MCP Server & Federation
+- **State:** DEVELOP
+- **Type:** component
+- **Maturity:** active
+- **Acceptance Criteria:** Defined (10+ AC items) — ALL ⏳ pending (none verified)
+- **Decision:** HOLD
 
-**P045, P046, P047, P048, P066, P067, P068**
-- All are component-level "pillar" proposals with maturity=active
-- **Decision:** HOLD — maturity must be `mature` to trigger gate pipeline
-- **Rationale:** These are parent components whose child features drive progress. They should advance when their child features are substantially complete and an agent explicitly claims maturity.
+**Rationale:** Acceptance criteria are defined but all are pending verification. Maturity is "active" (not yet "mature"). Gate requires maturity=mature AND all AC verified before advancing to MERGE.
 
-### No MERGE proposals found
-
-## Gate Actions Taken
-
-None — no proposals met advancement criteria this cycle.
-
+### MERGE → COMPLETE
+No proposals in MERGE state.
 
 ---
 
-## RFC Gate Evaluator Run — 2026-04-11T10:02 UTC
+## Notes
 
-**0 proposals advanced.** See full evaluation above.
-
-### Quick Fix
-- P159, P160, P161: HOLD (no work, no AC)
-
-### RFC
-- P048: HOLD (AC pending, maturity=active)
+- 17 total proposals in system: 9 COMPLETE, 4 DEPLOYED, 1 DEVELOP, 3 FIX
+- No DRAFT, REVIEW, or MERGE proposals pending
+- FIX proposals (P159-P161) need AC definitions and work before they can advance
+- P048 needs AC verification and maturity advancement before MERGE gate
