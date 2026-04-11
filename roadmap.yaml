@@ -17,8 +17,8 @@ proposals:
   statuses:
     - Draft
     - Review
-    - Building
-    - Accepted
+    - Develop
+    - Merge
     - Complete
     - Rejected
     - Abandoned
