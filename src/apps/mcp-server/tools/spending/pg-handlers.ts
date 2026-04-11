@@ -434,18 +434,57 @@ export class PgModelHandlers {
 		private readonly projectRoot: string,
 	) {}
 
-	async listModels(_args: {}): Promise<CallToolResult> {
+	// P059: Enhanced model listing with capability filtering and is_active support
+	async listModels(args: {
+		capability?: string;
+		max_cost_per_1k_input?: string;
+		active_only?: boolean;
+	}): Promise<CallToolResult> {
 		try {
+			const conditions: string[] = [];
+			const params: unknown[] = [];
+			let paramIdx = 1;
+
+			// Filter by active status (default: active only)
+			if (args.active_only !== false) {
+				conditions.push(`COALESCE(is_active, true) = true`);
+			}
+
+			// Filter by capability (e.g. "tool_use=true")
+			if (args.capability) {
+				const [key, value] = args.capability.split("=");
+				if (key) {
+					conditions.push(`capabilities->>$${paramIdx} = $${paramIdx + 1}`);
+					params.push(key.trim(), value?.trim() ?? "true");
+					paramIdx += 2;
+				}
+			}
+
+			// Filter by max input cost
+			if (args.max_cost_per_1k_input) {
+				conditions.push(`cost_per_1k_input <= $${paramIdx}`);
+				params.push(parseFloat(args.max_cost_per_1k_input));
+				paramIdx += 1;
+			}
+
+			const whereClause =
+				conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
 			const { rows } = await query(
-				`SELECT model_name, provider, cost_per_1k_input, cost_per_1k_output, max_tokens, rating
-         FROM model_metadata ORDER BY rating DESC`,
+				`SELECT model_name, provider, cost_per_1k_input, cost_per_1k_output,
+				        max_tokens, context_window, capabilities, rating, is_active
+				 FROM model_metadata ${whereClause}
+				 ORDER BY rating DESC, cost_per_1k_input ASC`,
+				params,
 			);
 			if (!rows.length) {
-				return { content: [{ type: "text", text: "No models configured." }] };
+				return { content: [{ type: "text", text: "No models found matching criteria." }] };
 			}
 			const lines = rows.map(
-				(r) =>
-					`${r.model_name} (${r.provider}) — rating: ${r.rating}/10, input: $${r.cost_per_1k_input || "?"}/1k, output: $${r.cost_per_1k_output || "?"}/1k, max: ${r.max_tokens || "unknown"}`,
+				(r: any) => {
+					const caps = r.capabilities ? Object.keys(r.capabilities).filter((k: string) => r.capabilities[k]).join(", ") : "none";
+					return `${r.model_name} (${r.provider}) — rating: ${r.rating}/5, input: $${r.cost_per_1k_input || "?"}/1k, output: $${r.cost_per_1k_output || "?"}/1k, ctx: ${r.context_window || "?"}, caps: [${caps}]${r.is_active === false ? " [INACTIVE]" : ""}`;
+				},
 			);
 			return { content: [{ type: "text", text: lines.join("\n") }] };
 		} catch (err) {
@@ -453,37 +492,52 @@ export class PgModelHandlers {
 		}
 	}
 
+	// P059: Enhanced addModel with is_active support and full upsert
 	async addModel(args: {
 		model_name: string;
 		provider?: string;
 		cost_per_1k_input?: string;
 		cost_per_1k_output?: string;
 		max_tokens?: string;
+		context_window?: string;
 		capabilities?: string;
 		rating?: string;
+		is_active?: string;
 	}): Promise<CallToolResult> {
 		try {
 			const { rows } = await query(
-				`INSERT INTO model_metadata (model_name, provider, cost_per_1k_input, cost_per_1k_output, max_tokens, capabilities, rating)
-         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+				`INSERT INTO model_metadata (model_name, provider, cost_per_1k_input, cost_per_1k_output,
+				                              max_tokens, context_window, capabilities, rating, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)
          ON CONFLICT ON CONSTRAINT model_metadata_model_name_key
-         DO UPDATE SET provider = EXCLUDED.provider, rating = EXCLUDED.rating
-         RETURNING model_name, rating`,
+         DO UPDATE SET
+           provider = EXCLUDED.provider,
+           cost_per_1k_input = COALESCE(EXCLUDED.cost_per_1k_input, model_metadata.cost_per_1k_input),
+           cost_per_1k_output = COALESCE(EXCLUDED.cost_per_1k_output, model_metadata.cost_per_1k_output),
+           max_tokens = COALESCE(EXCLUDED.max_tokens, model_metadata.max_tokens),
+           context_window = COALESCE(EXCLUDED.context_window, model_metadata.context_window),
+           capabilities = COALESCE(EXCLUDED.capabilities, model_metadata.capabilities),
+           rating = COALESCE(EXCLUDED.rating, model_metadata.rating),
+           is_active = COALESCE(EXCLUDED.is_active, model_metadata.is_active)
+         RETURNING model_name, rating, COALESCE(is_active, true) AS is_active`,
 				[
 					args.model_name,
 					args.provider || null,
 					args.cost_per_1k_input ? parseFloat(args.cost_per_1k_input) : null,
 					args.cost_per_1k_output ? parseFloat(args.cost_per_1k_output) : null,
 					args.max_tokens ? parseInt(args.max_tokens, 10) : null,
+					args.context_window ? parseInt(args.context_window, 10) : null,
 					args.capabilities ? JSON.parse(args.capabilities) : null,
 					args.rating ? parseInt(args.rating, 10) : null,
+					args.is_active !== undefined ? args.is_active === "true" : null,
 				],
 			);
+			const r = rows[0];
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Model added: ${rows[0].model_name} (rating: ${rows[0].rating})`,
+						text: `Model ${r.is_active ? "added" : "deactivated"}: ${r.model_name} (rating: ${r.rating}, active: ${r.is_active})`,
 					},
 				],
 			};
