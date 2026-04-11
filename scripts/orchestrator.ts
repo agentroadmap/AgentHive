@@ -1,13 +1,16 @@
 /**
- * AgentHive Orchestrator — Event-driven agent dispatcher with dynamic agent deployment.
+ * AgentHive Orchestrator — Event-driven agent dispatcher with UNLIMITED resources.
  * 
- * When state machine calls:
- *   - DRAFT → dispatch Architect to enhance
- *   - REVIEW → dispatch Reviewer + Skeptic to evaluate
- *   - DEVELOP → dispatch Developer to implement
- *   - MERGE → dispatch Git Specialist to integrate
+ * Dispatches agents immediately when state machine calls.
+ * No cron schedules, no resource limits.
+ * Multiple agents can run simultaneously.
  * 
- * Research & Architecture agents run on-demand when proposals need them.
+ * When state changes:
+ *   - DRAFT → Architect + Researcher
+ *   - REVIEW → Reviewer + Skeptic Alpha + Skeptic Beta + Architecture Reviewer
+ *   - DEVELOP → Developer + Skeptic Beta + Token Tracker
+ *   - MERGE → Git Specialist + Messaging Tester
+ *   - COMPLETE → Documenter + Pillar Researcher
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -22,100 +25,74 @@ const logger = {
   error: (...args: unknown[]) => console.error("[Orchestrator]", ...args),
 };
 
-// Agent dispatch map: state → agents to call
+// UNLIMITED agent dispatch - no limits on how many agents can run
 const AGENT_DISPATCH: Record<string, string[]> = {
-  DRAFT: ["architect", "researcher"],
-  TRIAGE: ["triage-agent", "system-monitor"],
-  REVIEW: ["reviewer", "skeptic-alpha", "skeptic-beta", "architecture-reviewer"],
-  FIX: ["fix-agent", "developer"],
-  DEVELOP: ["developer", "skeptic-beta", "token-tracker"],
-  MERGE: ["merge-agent", "git-specialist", "messaging-tester"],
-  COMPLETE: ["documenter", "pillar-researcher"],
-  DEPLOYED: ["system-monitor", "token-tracker"],
+  DRAFT: ["architect", "researcher", "system-monitor"],
+  TRIAGE: ["triage-agent", "system-monitor", "researcher"],
+  REVIEW: ["reviewer", "skeptic-alpha", "skeptic-beta", "architecture-reviewer", "pillar-researcher"],
+  FIX: ["fix-agent", "developer", "token-tracker"],
+  DEVELOP: ["developer", "skeptic-beta", "token-tracker", "messaging-tester"],
+  MERGE: ["merge-agent", "git-specialist", "messaging-tester", "system-monitor"],
+  COMPLETE: ["documenter", "pillar-researcher", "token-tracker"],
+  DEPLOYED: ["system-monitor", "token-tracker", "pillar-researcher"],
 };
 
-// Agent prompts
-const AGENT_PROMPTS: Record<string, string> = {
-  architect: "You are an Architecture Agent. Enhance this DRAFT proposal with acceptance criteria, design rationale, and implementation plan.",
-  reviewer: "You are an RFC Reviewer. Evaluate this proposal for coherence, economic optimization, and structural soundness.",
-  "skeptic-alpha": "You are SKEPTIC ALPHA. Challenge this proposal's design decisions. Demand evidence. Question assumptions.",
-  "skeptic-beta": "You are SKEPTIC BETA. Review implementation quality. Check test coverage. Validate error handling.",
-  "architecture-reviewer": "You are the Architecture Reviewer. Analyze design completeness, scalability, and integration constraints.",
-  developer: "You are a Senior Developer. Implement all acceptance criteria. Write production code and tests.",
-  "git-specialist": "You are a Git Specialist. Integrate branches, resolve conflicts, run tests.",
-  "token-tracker": "You are the Token Efficiency Agent. Track usage, calculate costs, suggest optimizations.",
-  "messaging-tester": "You are the Messaging Tester. Test A2A communication. Verify channel subscriptions.",
-  "system-monitor": "You are the System Monitor. Spot inconsistencies. Make proposals for rectifications.",
-  "pillar-researcher": "You are the Pillar Researcher. Research complementary components. Propose refinements.",
-  documenter: "You are a Documenter. Write documentation for completed proposals.",
-  researcher: "You are a Researcher. Gather context for proposals that need investigation.",
-  "triage-agent": "You are a Triage Agent. Evaluate issues and decide what to work on.",
-  "fix-agent": "You are a Fix Agent. Implement code changes to resolve issues.",
-};
+// Track active agents (for monitoring, not limiting)
+const activeAgents = new Map<string, Set<string>>();
 
-// Dispatch agent to cubic
-async function dispatchAgent(agent: string, proposalId: string, task: string): Promise<string | null> {
+// Dispatch agent to cubic (UNLIMITED)
+async function dispatchAgent(agent: string, proposalId: string, task: string): Promise<void> {
   const client = new Client({ name: "orchestrator", version: "1.0.0" });
   const transport = new SSEClientTransport(new URL(MCP_URL));
   
   try {
     await client.connect(transport);
     
-    // Find or create cubic for this agent
-    const existing = await client.callTool({ name: "cubic_list", arguments: {} });
-    const data = JSON.parse(existing.content?.[0]?.text || "{}");
+    // Create new cubic for this agent (no reuse - unlimited)
+    const created = await client.callTool({
+      name: "cubic_create",
+      arguments: {
+        name: `${agent} — ${proposalId} — ${Date.now()}`,
+        agents: [agent, "reviewer"],
+        proposals: [proposalId],
+      },
+    });
     
-    let cubicId: string | null = null;
-    
-    // Look for existing cubic for this agent
-    for (const cubic of data.cubics || []) {
-      if (cubic.name?.toLowerCase().includes(agent.toLowerCase()) && !cubic.lock) {
-        cubicId = cubic.id;
-        break;
-      }
-    }
-    
-    // Create new cubic if needed
-    if (!cubicId) {
-      const created = await client.callTool({
-        name: "cubic_create",
-        arguments: {
-          name: `${agent} — Working on ${proposalId}`,
-          agents: [agent, "reviewer"],
-          proposals: [proposalId],
-        },
-      });
-      const createdData = JSON.parse(created.content?.[0]?.text || "{}");
-      if (createdData.success && createdData.cubic) {
-        cubicId = createdData.cubic.id;
-      }
-    }
-    
-    if (!cubicId) {
+    const data = JSON.parse(created.content?.[0]?.text || "{}");
+    if (!data.success || !data.cubic) {
       logger.error(`Failed to create cubic for ${agent}`);
-      return null;
+      return;
     }
+    
+    const cubicId = data.cubic.id;
     
     // Focus cubic (acquire lock)
-    const focused = await client.callTool({
+    await client.callTool({
       name: "cubic_focus",
       arguments: {
         cubicId,
         agent,
-        task: `${AGENT_PROMPTS[agent] || ""} Working on: ${proposalId}. ${task}`,
+        task: `Working on ${proposalId}: ${task}`,
         phase: "design",
       },
     });
     
-    logger.log(`🚀 Dispatched ${agent} to ${cubicId} for ${proposalId}`);
-    return cubicId;
+    // Track active agent
+    if (!activeAgents.has(proposalId)) {
+      activeAgents.set(proposalId, new Set());
+    }
+    activeAgents.get(proposalId)?.add(agent);
     
+    logger.log(`🚀 Dispatched ${agent} → ${cubicId} for ${proposalId}`);
+    
+  } catch (e) {
+    logger.error(`Failed to dispatch ${agent}:`, e);
   } finally {
     await client.close();
   }
 }
 
-// Handle state change and dispatch agents
+// Handle state change - dispatch ALL agents for this state
 async function handleStateChange(proposalId: string, newState: string) {
   const agents = AGENT_DISPATCH[newState];
   
@@ -125,30 +102,38 @@ async function handleStateChange(proposalId: string, newState: string) {
   }
   
   logger.log(`📢 State change: ${proposalId} → ${newState}`);
-  logger.log(`   Dispatching: ${agents.join(", ")}`);
+  logger.log(`   Dispatching ${agents.length} agents: ${agents.join(", ")}`);
   
-  // Dispatch all agents for this state
-  for (const agent of agents) {
-    const task = `Handle ${newState} for ${proposalId}`;
-    await dispatchAgent(agent, proposalId, task);
-  }
+  // Dispatch ALL agents in parallel (no limits)
+  const promises = agents.map(agent => 
+    dispatchAgent(agent, proposalId, `Handle ${newState}`)
+  );
+  
+  await Promise.all(promises);
+  
+  logger.log(`✅ Dispatched ${agents.length} agents for ${proposalId}`);
 }
 
 // Main orchestrator
 async function main() {
-  logger.log("Starting Orchestrator with dynamic agent deployment...");
+  logger.log("Starting Orchestrator with UNLIMITED agent dispatch...");
   
   const pool = getPool();
   const pgClient = await pool.connect();
   
-  // Listen for state changes
+  // Listen for ALL state changes
   await pgClient.query("LISTEN proposal_gate_ready");
   await pgClient.query("LISTEN proposal_maturity_changed");
   await pgClient.query("LISTEN transition_queued");
+  await pgClient.query("LISTEN new_message");
   
-  logger.log("Listening for state changes to dispatch agents...");
+  logger.log("Listening for state changes (unlimited agent dispatch)...");
+  logger.log("Agent dispatch map:");
+  for (const [state, agents] of Object.entries(AGENT_DISPATCH)) {
+    logger.log(`  ${state}: ${agents.join(", ")}`);
+  }
   
-  // Handle notifications
+  // Handle notifications IMMEDIATELY (no batching)
   pgClient.on("notification", async (msg: { channel: string; payload?: string }) => {
     if (!msg.payload) return;
     
@@ -166,33 +151,40 @@ async function main() {
       
       if (result.rows.length > 0) {
         const proposal = result.rows[0];
-        await handleStateChange(proposalId, proposal.status);
+        // Dispatch immediately - no waiting
+        handleStateChange(proposalId, proposal.status);
       }
     } catch (e) {
       logger.error("Error handling notification:", e);
     }
   });
   
-  // Poll for proposals needing agents (every 2 minutes)
+  // Poll every 30 seconds for proposals needing agents
   setInterval(async () => {
     try {
       const result = await query(
-        `SELECT id, display_id, status, maturity_state 
+        `SELECT id, display_id, status 
          FROM roadmap.proposal 
          WHERE maturity_state = 'new' 
          ORDER BY priority DESC NULLS LAST 
-         LIMIT 5`
+         LIMIT 10`
       );
       
       for (const proposal of result.rows) {
-        await handleStateChange(proposal.id, proposal.status);
+        handleStateChange(proposal.id, proposal.status);
       }
     } catch (e) {
       logger.error("Polling error:", e);
     }
-  }, 2 * 60 * 1000); // Every 2 minutes
+  }, 30 * 1000); // Every 30 seconds
   
-  logger.log("Orchestrator running with dynamic agent deployment...");
+  // Log active agents every 5 minutes
+  setInterval(() => {
+    const totalAgents = Array.from(activeAgents.values()).reduce((sum, set) => sum + set.size, 0);
+    logger.log(`📊 Active agents: ${totalAgents} across ${activeAgents.size} proposals`);
+  }, 5 * 60 * 1000);
+  
+  logger.log("Orchestrator running with UNLIMITED agent dispatch...");
   
   // Graceful shutdown
   const shutdown = async (signal: string) => {
