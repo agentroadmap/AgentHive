@@ -22,6 +22,26 @@ const logger = {
   error: (...args: unknown[]) => console.error("[Orchestrator]", ...args),
 };
 
+// State → cubic phase mapping
+const STATE_TO_PHASE: Record<string, string> = {
+  DRAFT: "design",
+  TRIAGE: "design",
+  REVIEW: "design",
+  FIX: "build",
+  DEVELOP: "build",
+  MERGE: "test",
+  COMPLETE: "ship",
+  DEPLOYED: "ship",
+};
+
+// Phase → model mapping (capability + cost optimized)
+const PHASE_TO_MODEL: Record<string, string> = {
+  design: "claude-opus-4-6",    // Deep reasoning for architecture, review, triage
+  build: "claude-sonnet-4-6",   // Balanced code generation
+  test: "gpt-4o",               // Integration testing
+  ship: "claude-haiku-4-5",     // Low-cost documentation/finalization
+};
+
 // Agent dispatch map: state → agents to call
 const AGENT_DISPATCH: Record<string, string[]> = {
   DRAFT: ["architect", "researcher"],
@@ -53,63 +73,95 @@ const AGENT_PROMPTS: Record<string, string> = {
   "fix-agent": "You are a Fix Agent. Implement code changes to resolve issues.",
 };
 
-// Dispatch agent to cubic
-async function dispatchAgent(agent: string, proposalId: string, task: string): Promise<string | null> {
+// Parse MCP tool response safely — returns null if response is error text
+function safeParseMcpResponse(text: string | undefined): any {
+  if (!text) return null;
+  // "No cubics found." is a valid empty result, not an error
+  if (text.startsWith("No ") && text.endsWith("found.")) return { cubics: [] };
+  if (text.startsWith("⚠️") || text.startsWith("Error") || text.startsWith("Failed")) {
+    logger.warn(`MCP tool returned error: ${text.substring(0, 120)}`);
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    logger.warn(`MCP tool returned non-JSON: ${text.substring(0, 120)}`);
+    return null;
+  }
+}
+
+// Dispatch agent to cubic — ONE cubic per agent type, reused across proposals
+async function dispatchAgent(agent: string, proposalId: string, task: string, phase: string): Promise<string | null> {
   const client = new Client({ name: "orchestrator", version: "1.0.0" });
   const transport = new SSEClientTransport(new URL(MCP_URL));
-  
+
   try {
     await client.connect(transport);
-    
-    // Find or create cubic for this agent
-    const existing = await client.callTool({ name: "cubic_list", arguments: {} });
-    const data = JSON.parse(existing.content?.[0]?.text || "{}");
-    
+
+    // Step 1: Find existing cubic for this agent (locked OR idle)
     let cubicId: string | null = null;
-    
-    // Look for existing cubic for this agent
-    for (const cubic of data.cubics || []) {
-      if (cubic.name?.toLowerCase().includes(agent.toLowerCase()) && !cubic.lock) {
-        cubicId = cubic.id;
-        break;
+    const existing = await client.callTool({ name: "cubic_list", arguments: {} });
+    const data = safeParseMcpResponse(existing.content?.[0]?.text);
+
+    if (data?.cubics) {
+      for (const cubic of data.cubics) {
+        const agents = cubic.agents || [];
+        if (agents.includes(agent)) {
+          cubicId = cubic.id;
+          break;
+        }
       }
     }
-    
-    // Create new cubic if needed
+
+    // Step 2: If cubic exists, release its lock first (may be working on old proposal)
+    if (cubicId) {
+      await client.callTool({
+        name: "cubic_recycle",
+        arguments: { cubicId, resetCode: false },
+      });
+      logger.log(`♻️ Recycled ${agent} cubic ${cubicId.substring(0, 8)}`);
+    }
+
+    // Step 3: Create new only if no cubic exists for this agent
     if (!cubicId) {
       const created = await client.callTool({
         name: "cubic_create",
         arguments: {
-          name: `${agent} — Working on ${proposalId}`,
-          agents: [agent, "reviewer"],
+          name: `${agent}`,
+          agents: [agent],
           proposals: [proposalId],
         },
       });
-      const createdData = JSON.parse(created.content?.[0]?.text || "{}");
-      if (createdData.success && createdData.cubic) {
+      const createdData = safeParseMcpResponse(created.content?.[0]?.text);
+      if (createdData?.success && createdData?.cubic) {
         cubicId = createdData.cubic.id;
+        logger.log(`📦 New cubic ${cubicId.substring(0, 8)} for ${agent}`);
       }
     }
-    
+
     if (!cubicId) {
-      logger.error(`Failed to create cubic for ${agent}`);
+      logger.warn(`No cubic for ${agent} on P${proposalId}`);
       return null;
     }
-    
-    // Focus cubic (acquire lock)
-    const focused = await client.callTool({
+
+    // Step 4: Focus with correct phase and model
+    const model = PHASE_TO_MODEL[phase] || "claude-sonnet-4-6";
+    await client.callTool({
       name: "cubic_focus",
       arguments: {
         cubicId,
         agent,
-        task: `${AGENT_PROMPTS[agent] || ""} Working on: ${proposalId}. ${task}`,
-        phase: "design",
+        task: `${AGENT_PROMPTS[agent] || ""} Proposal ${proposalId}: ${task}`,
+        phase,
       },
     });
-    
-    logger.log(`🚀 Dispatched ${agent} to ${cubicId} for ${proposalId}`);
+
+    logger.log(`🚀 ${agent} → ${cubicId.substring(0, 8)} | ${phase} | ${model} | P${proposalId}`);
     return cubicId;
-    
+
+  } catch (err) {
+    logger.error(`Dispatch failed for ${agent} on P${proposalId}:`, err);
+    return null;
   } finally {
     await client.close();
   }
@@ -118,19 +170,52 @@ async function dispatchAgent(agent: string, proposalId: string, task: string): P
 // Handle state change and dispatch agents
 async function handleStateChange(proposalId: string, newState: string) {
   const agents = AGENT_DISPATCH[newState];
-  
+
   if (!agents || agents.length === 0) {
     logger.log(`No agents for state: ${newState}`);
     return;
   }
-  
-  logger.log(`📢 State change: ${proposalId} → ${newState}`);
-  logger.log(`   Dispatching: ${agents.join(", ")}`);
-  
-  // Dispatch all agents for this state
-  for (const agent of agents) {
-    const task = `Handle ${newState} for ${proposalId}`;
-    await dispatchAgent(agent, proposalId, task);
+
+  const phase = STATE_TO_PHASE[newState] || "design";
+
+  logger.log(`📢 P${proposalId} → ${newState} (${phase})`);
+  logger.log(`   Squad: ${agents.join(", ")}`);
+
+  // Release any locked cubics for this proposal from previous phases
+  await releaseStaleCubics(proposalId);
+
+  // Dispatch all agents for this state (parallel, tolerate individual failures)
+  const results = await Promise.allSettled(
+    agents.map(agent => dispatchAgent(agent, proposalId, `Handle ${newState}`, phase))
+  );
+  const dispatched = results.filter(r => r.status === "fulfilled" && r.value).length;
+  logger.log(`   ${dispatched}/${agents.length} dispatched`);
+}
+
+// Release cubics that are still locked for a proposal that moved on
+async function releaseStaleCubics(proposalId: string) {
+  const client = new Client({ name: "orchestrator-cleanup", version: "1.0.0" });
+  const transport = new SSEClientTransport(new URL(MCP_URL));
+  try {
+    await client.connect(transport);
+    const existing = await client.callTool({ name: "cubic_list", arguments: {} });
+    const data = safeParseMcpResponse(existing.content?.[0]?.text);
+    if (!data?.cubics) return;
+
+    for (const cubic of data.cubics) {
+      const proposals = cubic.proposals || [];
+      if (proposals.includes(Number(proposalId)) && cubic.lock) {
+        await client.callTool({
+          name: "cubic_transition",
+          arguments: { cubicId: cubic.id, toPhase: "complete" },
+        });
+        logger.log(`🔓 Released ${cubic.name?.substring(0, 30)} (was locked for P${proposalId})`);
+      }
+    }
+  } catch (err) {
+    logger.warn("Cleanup error:", err);
+  } finally {
+    await client.close();
   }
 }
 

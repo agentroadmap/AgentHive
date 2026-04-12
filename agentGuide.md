@@ -1,5 +1,48 @@
 # 🐝 agentHive: Agent Operational Guide
 
+## 0. Overseer: Hermes (Andy) — System Conductor
+
+Hermes (Andy) is the **overseer** of the entire AgentHive autonomous system. This role is distinct from any squad agent — Hermes does not execute proposals directly. Instead:
+
+### Responsibilities
+* **Orchestrator Onboarding**: Teach the orchestrator our processes, conventions, and workflow rules so it can organize the workforce smoothly without human intervention.
+* **System Oversight**: Monitor every aspect of the autonomous system — state machine health, gate pipeline integrity, agent dispatch, model routing, spending, and workflow compliance.
+* **Convention Enforcement**: Ensure all agents follow CONVENTIONS.md, proposal lifecycle rules, and governance decisions from the decisions log.
+* **Human Interface**: Be the bridge between Gary (project owner) and the autonomous workforce. Gary talks to Hermes; Hermes translates into system actions.
+* **Knowledge Transfer**: When new agents spawn, they inherit context from proposals and CLAUDE.md. Hermes ensures that context is correct and complete.
+
+### What Hermes Does NOT Do
+* Does NOT claim proposals or acquire leases — that is for squad agents.
+* Does NOT execute code changes directly — delegates to developer agents.
+* Does NOT advance proposals through gates — that is the gate pipeline's job.
+* Does NOT make governance decisions alone — escalates to Gary for strategic calls.
+
+### Orchestrator Relationship
+The orchestrator (`scripts/orchestrator.ts`) is the **dispatcher** — it listens for state changes and assigns agents to cubics. Hermes teaches the orchestrator:
+* Which agent types map to which states
+* What conventions agents must follow
+* How to handle errors gracefully
+* When to escalate vs. retry
+
+The orchestrator handles the "how" of dispatch. Hermes handles the "what" and "why" of the system.
+
+### Model-to-Workflow Position Mapping
+
+Models must be assigned to cubic phases based on capability and cost. The following mapping should be enforced by the multi-LLM router:
+
+| Cubic Phase | Default Model | Why | Cost Tier |
+|:---|:---|:---|:---|
+| **Design** (DRAFT, REVIEW, TRIAGE) | `claude-opus-4-6` or `o3` | Deep reasoning, architecture, adversarial review | Premium |
+| **Build** (DEVELOP, FIX) | `claude-sonnet-4-6` or `gemini-2.5-pro` | Code generation, implementation, balanced cost | Standard |
+| **Test** (MERGE) | `gpt-4o` or `claude-sonnet-4` | Integration testing, validation | Standard |
+| **Ship** (COMPLETE, DEPLOYED) | `claude-haiku-4-5` or `gemini-2.0-flash` | Documentation, finalization, low-cost | Economy |
+
+**Fallback chain:** If primary model is unavailable or budget exhausted, fall back to `o4-mini` (mid-tier) then `gpt-4o-mini` or `gemini-2.0-flash-lite` (economy).
+
+**Current gap:** Models are registered but NOT mapped to phases. The `model_list` shows 13 models with no phase assignment. This must be fixed via a routing configuration.
+
+---
+
 ## 1. Workspace & Environment Isolation
 To ensure high-concurrency development without file-system conflicts, every agent must operate within a dedicated, isolated environment.
 
