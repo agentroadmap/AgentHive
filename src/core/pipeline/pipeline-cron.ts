@@ -6,12 +6,11 @@
  */
 
 import { basename } from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { getPool, query } from "../../infra/postgres/pool.ts";
-import {
-	type SpawnRequest,
-	type SpawnResult,
-	spawnAgent,
-} from "../orchestration/agent-spawner.ts";
+
+const MCP_URL = process.env.MCP_URL || "http://127.0.0.1:6421/sse";
 
 const MATURITY_CHANGED_CHANNEL = "proposal_maturity_changed";
 const TRANSITION_QUEUED_CHANNEL = "transition_queued";
@@ -55,7 +54,7 @@ interface TransitionQueueRow {
 export interface PipelineCronDeps {
 	queryFn?: typeof query;
 	connectListener?: () => Promise<ListenerClient>;
-	spawnAgentFn?: typeof spawnAgent;
+	mcpUrl?: string;
 	logger?: Logger;
 	defaultWorktree?: string;
 	pollIntervalMs?: number;
@@ -128,38 +127,11 @@ function looksLikeWorktreeName(
 ): value is string {
 	if (!value) return false;
 	return WORKTREE_PREFIXES.some(
-		(prefix) => value.startsWith(`${prefix}-`) || value.startsWith(`${prefix}/`) || value === prefix,
+		(prefix) => value.startsWith(`${prefix}-`) || value === prefix,
 	);
 }
 
-function coerceProposalId(value: number | string): number {
-	const parsed = typeof value === "number" ? value : Number(value);
-	if (!Number.isInteger(parsed)) {
-		throw new Error(`Invalid transition_queue.proposal_id value: ${value}`);
-	}
-	return parsed;
-}
 
-function buildFailureMessage(result: SpawnResult): string {
-	const parts: string[] = [];
-
-	if (result.exitCode !== null) {
-		parts.push(`spawnAgent exited with code ${result.exitCode}`);
-	} else {
-		parts.push("spawnAgent exited without a process exit code");
-	}
-
-	const stderr = result.stderr.trim();
-	const stdout = result.stdout.trim();
-
-	if (stderr.length > 0) {
-		parts.push(stderr.slice(0, 1000));
-	} else if (stdout.length > 0) {
-		parts.push(stdout.slice(0, 1000));
-	}
-
-	return parts.join("\n");
-}
 
 function buildDefaultTask(transition: TransitionQueueRow): string {
 	const lines = [
@@ -191,7 +163,7 @@ function buildDefaultTask(transition: TransitionQueueRow): string {
 export class PipelineCron {
 	private readonly queryFn: typeof query;
 	private readonly connectListener: () => Promise<ListenerClient>;
-	private readonly spawnAgentFn: typeof spawnAgent;
+	private readonly mcpUrl: string;
 	private readonly logger: Logger;
 	private readonly defaultWorktree: string;
 	private readonly pollIntervalMs: number;
@@ -228,7 +200,7 @@ export class PipelineCron {
 		this.queryFn = deps.queryFn ?? query;
 		this.connectListener =
 			deps.connectListener ?? (async () => getPool().connect());
-		this.spawnAgentFn = deps.spawnAgentFn ?? spawnAgent;
+		this.mcpUrl = deps.mcpUrl ?? MCP_URL;
 		this.logger = deps.logger ?? console;
 		this.defaultWorktree = deps.defaultWorktree ?? basename(process.cwd());
 		this.pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
@@ -397,83 +369,85 @@ export class PipelineCron {
 		}));
 	}
 
+	/**
+	 * Dispatch a transition via MCP cubic tools instead of subprocess.
+	 * Uses the same pattern as the orchestrator: create cubic, focus with task.
+	 * The agent picks up the work asynchronously through the MCP/Hermes subscription model.
+	 */
 	private async processTransition(
 		transition: TransitionQueueRow,
 	): Promise<void> {
-		try {
-			const request = this.buildSpawnRequest(transition);
-			const result = await this.spawnAgentFn(request);
+		const client = new Client({ name: "gate-pipeline", version: "1.0.0" });
+		const transport = new SSEClientTransport(new URL(this.mcpUrl));
 
-			if (result.exitCode === 0) {
-				await this.markTransitionDone(transition.id);
-				this.logger.log(
-					`[PipelineCron] Completed transition ${transition.id} for proposal ${transition.proposal_id}`,
+		try {
+			await client.connect(transport);
+
+			const proposalId = String(transition.proposal_id);
+			const task = buildDefaultTask(transition);
+			const agentName =
+				readString(transition.metadata, "agent") ??
+				(looksLikeWorktreeName(transition.triggered_by)
+					? transition.triggered_by
+					: null) ??
+				"architect";
+
+			// 1. Create cubic for this proposal
+			const cubicResult = await client.callTool({
+				name: "cubic_create",
+				arguments: {
+					name: `gate-${proposalId}-${transition.to_stage}`,
+					agents: [agentName],
+					proposals: [proposalId],
+				},
+			});
+			const cubicData = JSON.parse(
+				cubicResult.content?.[0]?.text || "{}",
+			);
+
+			if (!cubicData.success || !cubicData.cubic?.id) {
+				throw new Error(
+					`Failed to create cubic: ${JSON.stringify(cubicData)}`,
 				);
-				return;
 			}
 
-			await this.handleTransitionFailure(
-				transition,
-				buildFailureMessage(result),
+			const cubicId = cubicData.cubic.id;
+
+			// 2. Focus cubic with the transition task
+			await client.callTool({
+				name: "cubic_focus",
+				arguments: {
+					cubicId,
+					agent: agentName,
+					task,
+					phase: transition.to_stage?.toLowerCase() ?? "build",
+				},
+			});
+
+			// 3. Mark transition dispatched — agent will complete asynchronously
+			await this.markTransitionDispatched(transition.id);
+			this.logger.log(
+				`[PipelineCron] Dispatched transition ${transition.id} for proposal ${proposalId} via MCP cubic ${cubicId}`,
 			);
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
+			const message =
+				error instanceof Error ? error.message : String(error);
 			await this.handleTransitionFailure(transition, message);
+		} finally {
+			await client.close();
 		}
 	}
 
-	private buildSpawnRequest(transition: TransitionQueueRow): SpawnRequest {
-		const metadata = transition.metadata;
-		const spawnConfig = normalizeMetadata(metadata?.spawn);
-		const worktree = this.resolveWorktree(transition, metadata, spawnConfig);
-		const task = this.resolveTask(transition, metadata, spawnConfig);
-		const model =
-			readString(spawnConfig, "model") ?? readString(metadata, "model");
-		const timeoutMs =
-			readNumber(spawnConfig, "timeoutMs", "timeout_ms") ??
-			readNumber(metadata, "timeoutMs", "timeout_ms");
-
-		return {
-			worktree,
-			task,
-			proposalId: coerceProposalId(transition.proposal_id),
-			stage: transition.to_stage,
-			model: model ?? undefined,
-			timeoutMs: timeoutMs ?? undefined,
-		};
-	}
-
-	private resolveWorktree(
-		transition: TransitionQueueRow,
-		metadata: JsonRecord | null,
-		spawnConfig: JsonRecord | null,
-	): string {
-		const worktree =
-			readString(spawnConfig, "worktree") ??
-			readString(metadata, "worktree") ??
-			(looksLikeWorktreeName(transition.triggered_by)
-				? transition.triggered_by
-				: null) ??
-			this.defaultWorktree;
-
-	if (!looksLikeWorktreeName(worktree)) {
-		throw new Error(
-			`No valid worktree available for transition ${transition.id}`,
-		);
-	}
-
-	return worktree.replace("/", "-");
-	}
-
-	private resolveTask(
-		transition: TransitionQueueRow,
-		metadata: JsonRecord | null,
-		spawnConfig: JsonRecord | null,
-	): string {
-		return (
-			readString(spawnConfig, "task", "prompt") ??
-			readString(metadata, "task", "prompt") ??
-			buildDefaultTask(transition)
+	private async markTransitionDispatched(
+		id: TransitionQueueId,
+	): Promise<void> {
+		await this.queryFn(
+			`UPDATE roadmap.transition_queue
+       SET status = 'processing',
+           processing_at = now(),
+           last_error = NULL
+       WHERE id = $1`,
+			[id],
 		);
 	}
 
