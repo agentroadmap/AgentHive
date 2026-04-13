@@ -143,20 +143,33 @@ async function canAdvance(proposalId: string, fromState: string, toState: string
     
     // Log blocker to audit
     await query(
-      `INSERT INTO roadmap.audit_log (actor, action, resource_type, resource_id, details, created_at)
+      `INSERT INTO roadmap.audit_log (entity_type, entity_id, action, changed_by, before_json, changed_at)
        VALUES ($1, $2, $3, $4, $5, NOW())`,
       [
-        "skeptic",
-        "gate_blocked",
         "proposal",
         proposalId,
-        JSON.stringify({ from: fromState, to: toState, blockers: verdict.blockers })
+        "update",
+        "skeptic",
+        JSON.stringify({ verdict: "REJECT", from: fromState, to: toState, blockers: verdict.blockers })
       ]
     );
-    
+
     return false;
   }
-  
+
+  // Log approved decision to audit
+  await query(
+    `INSERT INTO roadmap.audit_log (entity_type, entity_id, action, changed_by, after_json, changed_at)
+     VALUES ($1, $2, $3, $4, $5, NOW())`,
+    [
+      "proposal",
+      proposalId,
+      "update",
+      "skeptic",
+      JSON.stringify({ verdict: "APPROVE", from: fromState, to: toState, challenges: verdict.challenges, alternatives: verdict.alternatives })
+    ]
+  );
+
   return true;
 }
 
