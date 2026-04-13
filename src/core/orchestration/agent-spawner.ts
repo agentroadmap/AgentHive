@@ -236,9 +236,10 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		...extraEnv,
 	};
 
-	// Insert agent_runs row (status = running)
+	// Insert agent_runs row (status = running) — use explicit schema to avoid
+	// routing through the roadmap.agent_runs view which caused sequence desyncs.
 	const { rows } = await query(
-		`INSERT INTO agent_runs
+		`INSERT INTO roadmap_workforce.agent_runs
        (proposal_id, display_id, agent_identity, stage, model_used, status, started_at)
      VALUES ($1, $2, $3, $4, $5, 'running', now())
      RETURNING id`,
@@ -260,7 +261,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	// Update agent_runs on completion
 	const status = exitCode === 0 ? "completed" : "failed";
 	await query(
-		`UPDATE agent_runs
+		`UPDATE roadmap_workforce.agent_runs
      SET status = $1, duration_ms = $2, output_summary = $3, completed_at = now()
      WHERE id = $4`,
 		[status, durationMs, stdout.slice(0, 500), agentRunId],
