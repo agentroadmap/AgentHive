@@ -303,11 +303,11 @@ describe("PipelineCron", () => {
 			call.text.includes("SET status = 'pending'"),
 		);
 		assert.ok(retryUpdate);
-		assert.deepEqual(retryUpdate.params, [
-			7,
-			1,
-			"spawnAgent exited with code 1\nboom",
-		]);
+	assert.deepEqual(retryUpdate.params, [
+		7,
+		1,
+		"Agent exit code 1: boom",
+	]);
 
 		await cron.stop();
 		intervals.dispose();
@@ -348,10 +348,10 @@ describe("PipelineCron", () => {
 			call.text.includes("SET status = 'failed'"),
 		);
 		assert.ok(failedUpdate);
-		assert.deepEqual(failedUpdate.params, [
-			9,
-			"spawnAgent exited with code 2\nstill failing",
-		]);
+	assert.deepEqual(failedUpdate.params, [
+		9,
+		"Agent exit code 2: still failing",
+	]);
 
 		await cron.stop();
 		intervals.dispose();

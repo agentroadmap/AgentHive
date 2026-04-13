@@ -9,7 +9,7 @@ import { basename } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { getPool, query } from "../../infra/postgres/pool.ts";
-import { spawnAgent, type SpawnRequest, type SpawnResult } from "../../core/orchestration/agent-spawner.ts";
+import { spawnAgent as defaultSpawnAgent, type SpawnRequest, type SpawnResult } from "../../core/orchestration/agent-spawner.ts";
 
 const MCP_URL = process.env.MCP_URL || "http://127.0.0.1:6421/sse";
 
@@ -62,6 +62,7 @@ export interface PipelineCronDeps {
 	batchSize?: number;
 	setIntervalFn?: typeof setInterval;
 	clearIntervalFn?: typeof clearInterval;
+	spawnAgentFn?: (req: SpawnRequest) => Promise<SpawnResult>;
 }
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -171,6 +172,7 @@ export class PipelineCron {
 	private readonly batchSize: number;
 	private readonly setIntervalFn: typeof setInterval;
 	private readonly clearIntervalFn: typeof clearInterval;
+	private readonly spawnAgentFn: (req: SpawnRequest) => Promise<SpawnResult>;
 
 	private listenerClient: ListenerClient | null = null;
 	private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -208,6 +210,7 @@ export class PipelineCron {
 		this.batchSize = deps.batchSize ?? DEFAULT_BATCH_SIZE;
 		this.setIntervalFn = deps.setIntervalFn ?? setInterval;
 		this.clearIntervalFn = deps.clearIntervalFn ?? clearInterval;
+		this.spawnAgentFn = deps.spawnAgentFn ?? defaultSpawnAgent;
 	}
 
 	async run(): Promise<void> {
@@ -381,11 +384,12 @@ export class PipelineCron {
 		const client = new Client({ name: "gate-pipeline", version: "1.0.0" });
 		const transport = new SSEClientTransport(new URL(this.mcpUrl));
 
-		try {
-			await client.connect(transport);
+	try {
+		await client.connect(transport);
 
-			const proposalId = String(transition.proposal_id);
-			const task = buildDefaultTask(transition);
+		const spawnMeta = isRecord(transition.metadata?.spawn) ? transition.metadata!.spawn as JsonRecord : null;
+		const proposalId = String(transition.proposal_id);
+		const task = (spawnMeta ? readString(spawnMeta, "task") : null) ?? buildDefaultTask(transition);
 			const agentName =
 				readString(transition.metadata, "agent") ??
 				(looksLikeWorktreeName(transition.triggered_by)
@@ -425,20 +429,22 @@ export class PipelineCron {
 				},
 			});
 
-		// 3. Spawn the agent process inside its worktree
-		// Normalize worktree name: metadata may use 'claude/one', filesystem uses 'claude-one'
-		const rawWorktree =
-			readString(transition.metadata, "spawn.worktree") ??
-			agentName;
+	// 3. Spawn the agent process inside its worktree
+	// Normalize worktree name: metadata may use 'claude/one', filesystem uses 'claude-one'
+	const rawWorktree =
+			(spawnMeta ? readString(spawnMeta, "worktree") : null) ??
+			this.defaultWorktree;
 		const worktreeName = rawWorktree.replace("/", "-");
 		const timeoutMs =
-			readNumber(transition.metadata, "spawn.timeoutMs") ?? 300_000;
+			(spawnMeta ? readNumber(spawnMeta, "timeoutMs") : null) ?? 300_000;
+		const model = spawnMeta ? readString(spawnMeta, "model") ?? undefined : undefined;
 
 		const spawnReq: SpawnRequest = {
 			worktree: worktreeName,
 			task,
 			proposalId: Number(proposalId),
 			stage: transition.to_stage,
+			model,
 			timeoutMs,
 		};
 
@@ -446,7 +452,7 @@ export class PipelineCron {
 			`[PipelineCron] Spawning agent in worktree=${worktreeName} for proposal=${proposalId} gate=${readString(transition.metadata, "gate") ?? "?"}`,
 		);
 
-		const result: SpawnResult = await spawnAgent(spawnReq);
+		const result: SpawnResult = await this.spawnAgentFn(spawnReq);
 
 		if (result.exitCode === 0) {
 			// Agent completed successfully — mark transition done
