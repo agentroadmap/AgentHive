@@ -154,6 +154,20 @@ async function canAdvance(proposalId: string, fromState: string, toState: string
       ]
     );
 
+    // Log gate decision with structured rationale
+    const gateMap: Record<string, string> = { "DRAFT→REVIEW": "D1", "REVIEW→DEVELOP": "D2", "DEVELOP→MERGE": "D3", "MERGE→COMPLETE": "D4" };
+    await query(
+      `INSERT INTO roadmap_proposal.gate_decision_log (proposal_id, from_state, to_state, maturity, gate, decided_by, decision, rationale)
+       VALUES ($1, $2, $3, 'mature', $4, 'skeptic', 'reject', $5)`,
+      [
+        Number(proposalId),
+        fromState,
+        toState,
+        gateMap[transitionKey] ?? null,
+        JSON.stringify({ blockers: verdict.blockers, challenges: verdict.challenges, alternatives: verdict.alternatives })
+      ]
+    );
+
     return false;
   }
 
@@ -167,6 +181,20 @@ async function canAdvance(proposalId: string, fromState: string, toState: string
       "update",
       "skeptic",
       JSON.stringify({ verdict: "APPROVE", from: fromState, to: toState, challenges: verdict.challenges, alternatives: verdict.alternatives })
+    ]
+  );
+
+  // Log gate advance decision
+  const gateMap2: Record<string, string> = { "DRAFT→REVIEW": "D1", "REVIEW→DEVELOP": "D2", "DEVELOP→MERGE": "D3", "MERGE→COMPLETE": "D4" };
+  await query(
+    `INSERT INTO roadmap_proposal.gate_decision_log (proposal_id, from_state, to_state, maturity, gate, decided_by, decision, rationale)
+     VALUES ($1, $2, $3, 'mature', $4, 'skeptic', 'advance', $5)`,
+    [
+      Number(proposalId),
+      fromState,
+      toState,
+      gateMap2[transitionKey] ?? null,
+      JSON.stringify({ challenges: verdict.challenges, alternatives: verdict.alternatives, approved: true })
     ]
   );
 
