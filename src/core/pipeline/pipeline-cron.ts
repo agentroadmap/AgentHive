@@ -283,16 +283,20 @@ export class PipelineCron {
 	private async drainReadyTransitions(reason: string): Promise<void> {
 		// Pull scan: enqueue any mature proposals not yet in transition_queue.
 		// This is the fallback for push-missed events (crash, pre-migration backlog).
-		try {
-			await this.queryFn(
-				`SELECT roadmap.fn_enqueue_mature_proposals()`,
-				[],
-			);
-		} catch (err) {
-			// fn_enqueue_mature_proposals may not exist in older deployments — non-fatal
-			const msg = err instanceof Error ? err.message : String(err);
-			if (!msg.includes("does not exist")) {
-				this.logger.warn(`[PipelineCron] fn_enqueue_mature_proposals: ${msg}`);
+		// Only run on initial drains (not coalesced re-drains) to avoid infinite
+		// re-enqueue loops where processing a transition creates a new one.
+		if (reason !== "coalesced") {
+			try {
+				await this.queryFn(
+					`SELECT roadmap.fn_enqueue_mature_proposals()`,
+					[],
+				);
+			} catch (err) {
+				// fn_enqueue_mature_proposals may not exist in older deployments — non-fatal
+				const msg = err instanceof Error ? err.message : String(err);
+				if (!msg.includes("does not exist")) {
+					this.logger.warn(`[PipelineCron] fn_enqueue_mature_proposals: ${msg}`);
+				}
 			}
 		}
 
