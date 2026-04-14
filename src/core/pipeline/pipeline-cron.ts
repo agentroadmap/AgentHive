@@ -5,11 +5,9 @@
  * transitions are still processed if notifications are missed.
  */
 
-import { basename } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { getPool, query } from "../../infra/postgres/pool.ts";
-import { spawnAgent as defaultSpawnAgent, type SpawnRequest, type SpawnResult } from "../../core/orchestration/agent-spawner.ts";
 
 const MCP_URL = process.env.MCP_URL || "http://127.0.0.1:6421/sse";
 
@@ -57,12 +55,12 @@ export interface PipelineCronDeps {
 	connectListener?: () => Promise<ListenerClient>;
 	mcpUrl?: string;
 	logger?: Logger;
-	defaultWorktree?: string;
 	pollIntervalMs?: number;
 	batchSize?: number;
 	setIntervalFn?: typeof setInterval;
 	clearIntervalFn?: typeof clearInterval;
-	spawnAgentFn?: (req: SpawnRequest) => Promise<SpawnResult>;
+	/** Injectable MCP client factory — override in tests to avoid real SSE connections. */
+	mcpClientFactory?: (mcpUrl: string) => { callTool(args: { name: string; arguments: Record<string, unknown> }): Promise<{ content?: Array<{ text?: string }> }>; close(): Promise<void>; };
 }
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -96,28 +94,6 @@ function readString(
 		const value = source[key];
 		if (typeof value === "string" && value.trim().length > 0) {
 			return value.trim();
-		}
-	}
-
-	return null;
-}
-
-function readNumber(
-	source: JsonRecord | null,
-	...keys: string[]
-): number | null {
-	if (!source) return null;
-
-	for (const key of keys) {
-		const value = source[key];
-		if (typeof value === "number" && Number.isFinite(value)) {
-			return value;
-		}
-		if (typeof value === "string" && value.trim().length > 0) {
-			const parsed = Number(value);
-			if (Number.isFinite(parsed)) {
-				return parsed;
-			}
 		}
 	}
 
@@ -167,12 +143,11 @@ export class PipelineCron {
 	private readonly connectListener: () => Promise<ListenerClient>;
 	private readonly mcpUrl: string;
 	private readonly logger: Logger;
-	private readonly defaultWorktree: string;
 	private readonly pollIntervalMs: number;
 	private readonly batchSize: number;
 	private readonly setIntervalFn: typeof setInterval;
 	private readonly clearIntervalFn: typeof clearInterval;
-	private readonly spawnAgentFn: (req: SpawnRequest) => Promise<SpawnResult>;
+	private readonly mcpClientFactory: NonNullable<PipelineCronDeps["mcpClientFactory"]>;
 
 	private listenerClient: ListenerClient | null = null;
 	private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -205,12 +180,27 @@ export class PipelineCron {
 			deps.connectListener ?? (async () => getPool().connect());
 		this.mcpUrl = deps.mcpUrl ?? MCP_URL;
 		this.logger = deps.logger ?? console;
-		this.defaultWorktree = deps.defaultWorktree ?? basename(process.cwd());
 		this.pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
 		this.batchSize = deps.batchSize ?? DEFAULT_BATCH_SIZE;
 		this.setIntervalFn = deps.setIntervalFn ?? setInterval;
 		this.clearIntervalFn = deps.clearIntervalFn ?? clearInterval;
-		this.spawnAgentFn = deps.spawnAgentFn ?? defaultSpawnAgent;
+		this.mcpClientFactory = deps.mcpClientFactory ?? ((url: string) => {
+			const client = new Client({ name: "gate-pipeline", version: "1.0.0" });
+			const transport = new SSEClientTransport(new URL(url));
+			let connected = false;
+			return {
+				async callTool(args: { name: string; arguments: Record<string, unknown> }) {
+					if (!connected) {
+						await client.connect(transport);
+						connected = true;
+					}
+					return client.callTool(args);
+				},
+				async close() {
+					await client.close();
+				},
+			};
+		});
 	}
 
 	async run(): Promise<void> {
@@ -377,20 +367,12 @@ export class PipelineCron {
 		}));
 	}
 
-	/**
-	 * Dispatch a transition via MCP cubic tools instead of subprocess.
-	 * Uses the same pattern as the orchestrator: create cubic, focus with task.
-	 * The agent picks up the work asynchronously through the MCP/Hermes subscription model.
-	 */
 	private async processTransition(
 		transition: TransitionQueueRow,
 	): Promise<void> {
-		const client = new Client({ name: "gate-pipeline", version: "1.0.0" });
-		const transport = new SSEClientTransport(new URL(this.mcpUrl));
+		const mcpClient = this.mcpClientFactory(this.mcpUrl);
 
 	try {
-		await client.connect(transport);
-
 		const spawnMeta = isRecord(transition.metadata?.spawn) ? transition.metadata!.spawn as JsonRecord : null;
 		const proposalId = String(transition.proposal_id);
 		const task = (spawnMeta ? readString(spawnMeta, "task") : null) ?? buildDefaultTask(transition);
@@ -402,7 +384,7 @@ export class PipelineCron {
 				"architect";
 
 			// 1. Create cubic for this proposal
-			const cubicResult = await client.callTool({
+			const cubicResult = await mcpClient.callTool({
 				name: "cubic_create",
 				arguments: {
 					name: `gate-${proposalId}-${transition.to_stage}`,
@@ -422,59 +404,29 @@ export class PipelineCron {
 
 			const cubicId = cubicData.cubic.id;
 
-			// 2. Focus cubic with the transition task
-			await client.callTool({
-				name: "cubic_focus",
-				arguments: {
-					cubicId,
-					agent: agentName,
-					task,
-					phase: transition.to_stage?.toLowerCase() ?? "build",
-				},
-			});
+		// 2. Focus cubic with the transition task — agent picks up work via MCP/Hermes subscription
+		await mcpClient.callTool({
+			name: "cubic_focus",
+			arguments: {
+				cubicId,
+				agent: agentName,
+				task,
+				phase: transition.to_stage?.toLowerCase() ?? "build",
+			},
+		});
 
-	// 3. Spawn the agent process inside its worktree
-	// Normalize worktree name: metadata may use 'claude/one', filesystem uses 'claude-one'
-	const rawWorktree =
-			(spawnMeta ? readString(spawnMeta, "worktree") : null) ??
-			this.defaultWorktree;
-		const worktreeName = rawWorktree.replace("/", "-");
-		const timeoutMs =
-			(spawnMeta ? readNumber(spawnMeta, "timeoutMs") : null) ?? 300_000;
-		const model = spawnMeta ? readString(spawnMeta, "model") ?? undefined : undefined;
-
-		const spawnReq: SpawnRequest = {
-			worktree: worktreeName,
-			task,
-			proposalId: Number(proposalId),
-			stage: transition.to_stage,
-			model,
-			timeoutMs,
-		};
-
+		// Cubic dispatch is fire-and-forget: mark the queue row done so it isn't retried.
+		// The agent running inside the cubic is responsible for advancing the proposal state.
+		await this.markTransitionDone(transition.id);
 		this.logger.log(
-			`[PipelineCron] Spawning agent in worktree=${worktreeName} for proposal=${proposalId} gate=${readString(transition.metadata, "gate") ?? "?"}`,
+			`[PipelineCron] Cubic dispatched for proposal=${proposalId} gate=${readString(transition.metadata, "gate") ?? "?"} cubic=${cubicId}`,
 		);
-
-		const result: SpawnResult = await this.spawnAgentFn(spawnReq);
-
-		if (result.exitCode === 0) {
-			await this.markTransitionDone(transition.id);
-			this.logger.log(
-				`[PipelineCron] Agent completed OK (run=${result.agentRunId}) for proposal=${proposalId}`,
-			);
-		} else {
-			await this.handleTransitionFailure(
-				transition,
-				`Agent exit code ${result.exitCode}: ${result.stderr.slice(0, 500)}`,
-			);
-		}
 } catch (error) {
 	const message =
 		error instanceof Error ? error.message : String(error);
 	await this.handleTransitionFailure(transition, message);
 } finally {
-	await client.close();
+	await mcpClient.close();
 }
 }
 
@@ -518,8 +470,20 @@ export class PipelineCron {
 				[transition.id, errorMessage],
 			);
 
+			// AC-3: escalate via notification_queue when all retries are exhausted
+			const proposalId = transition.proposal_id != null ? Number(transition.proposal_id) : null;
+			await this.queryFn(
+				`INSERT INTO roadmap.notification_queue (proposal_id, severity, channel, title, body)
+         VALUES ($1, 'CRITICAL', 'discord', $2, $3)`,
+				[
+					proposalId,
+					`Gate pipeline: transition ${transition.id} failed permanently`,
+					`Proposal: ${transition.proposal_id} | From: ${transition.from_stage} → To: ${transition.to_stage} | Attempts: ${transition.attempt_count}/${transition.max_attempts}\nError: ${errorMessage.slice(0, 400)}`,
+				],
+			);
+
 			this.logger.error(
-				`[PipelineCron] Transition ${transition.id} failed permanently: ${errorMessage}`,
+				`[PipelineCron] Transition ${transition.id} failed permanently — escalated to notification_queue: ${errorMessage}`,
 			);
 			return;
 		}
