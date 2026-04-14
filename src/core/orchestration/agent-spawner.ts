@@ -220,7 +220,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 
 	// Assemble process environment — Hermes reads auth from ~/.hermes/auth.json
 	const processEnv: Record<string, string> = {
-		PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
+		PATH: "/home/andy/.local/bin:" + (process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin"),
 		HOME: process.env.HOME ?? "/home/andy",
 		// Agent-specific overrides from .env.agent
 		DATABASE_URL: agentEnv.DATABASE_URL ?? "",
