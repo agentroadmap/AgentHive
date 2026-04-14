@@ -144,11 +144,12 @@ ${Object.keys(AGENT_MENTIONS).join(", ")}`;
 async function getPipelineStatus(): Promise<string> {
   try {
     const result = await query(
-      `SELECT status, COUNT(*) as count 
-       FROM roadmap.proposal 
-       GROUP BY status 
-       ORDER BY 
-         CASE status 
+      `SELECT current_stage, COUNT(*) as count
+       FROM roadmap.workflows
+       WHERE completed_at IS NULL
+       GROUP BY current_stage
+       ORDER BY
+         CASE current_stage
            WHEN 'DRAFT' THEN 1
            WHEN 'REVIEW' THEN 2
            WHEN 'TRIAGE' THEN 3
@@ -163,7 +164,7 @@ async function getPipelineStatus(): Promise<string> {
 
     let status = "**AgentHive Pipeline Status:**\n";
     for (const row of result.rows) {
-      status += `• ${row.status}: ${row.count} proposals\n`;
+      status += `• ${row.current_stage}: ${row.count} workflows\n`;
     }
     return status;
   } catch (error) {
@@ -175,20 +176,32 @@ async function getPipelineStatus(): Promise<string> {
 function formatNotification(channel: string, payload: string): string {
   try {
     const data = JSON.parse(payload);
-    
+
     if (channel === "proposal_gate_ready") {
       return `🚪 **GATE READY** — Proposal ${data.proposal_id || data.id} is ready for gate evaluation`;
     }
-    
+
     if (channel === "proposal_maturity_changed") {
       const maturity = data.maturity_state || data.maturity;
       return `📊 **MATURITY CHANGE** — ${data.display_id || data.proposal_id} → ${maturity}`;
     }
-    
+
     if (channel === "transition_queued") {
       return `🔄 **TRANSITION QUEUED** — ${data.enqueued || 1} transitions queued for processing`;
     }
-    
+
+    if (channel === "discord_send") {
+      const LEVEL_ICONS: Record<string, string> = {
+        info: "💬",
+        success: "✅",
+        warning: "⚠️",
+        error: "❌",
+      };
+      const icon = LEVEL_ICONS[data.level ?? "info"] ?? "💬";
+      const from = data.from ?? "agent";
+      return `${icon} **[${from}]** ${data.message ?? payload}`;
+    }
+
     return `📢 **${channel}** — ${JSON.stringify(data).substring(0, 200)}`;
   } catch {
     return `📢 **${channel}** — ${payload.substring(0, 200)}`;
@@ -252,6 +265,8 @@ async function main() {
   await pgClient.query("LISTEN proposal_gate_ready");
   await pgClient.query("LISTEN proposal_maturity_changed");
   await pgClient.query("LISTEN transition_queued");
+  // Listen for outbound messages from agents → Discord
+  await pgClient.query("LISTEN discord_send");
 
   logger.log("Listening for pg_notify events");
 
