@@ -205,7 +205,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		proposalId,
 		stage,
 		model: modelHint,
-		timeoutMs = 300_000,
+		timeoutMs = 600_000,
 	} = req;
 
 	const provider = detectProvider(worktree);
