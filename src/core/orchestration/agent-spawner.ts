@@ -15,7 +15,7 @@
  * are captured and stored in agent_runs.
  */
 
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execSync, spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { query } from "../../infra/postgres/pool.ts";
@@ -86,6 +86,28 @@ function buildClaudeArgs(
 		req.task,
 	];
 	return { argv, env: { ANTHROPIC_MODEL: model } };
+}
+
+/**
+ * Build the argv for a Hermes CLI invocation (Nous subscription).
+ * Fallback runtime when claude/codex aren't authenticated.
+ */
+function buildHermesArgs(
+	req: SpawnRequest,
+	model: string,
+): { argv: string[]; env: Record<string, string> } {
+	const argv = [
+		"hermes",
+		"chat",
+		"-q", req.task,
+		"-Q",
+		"--provider", "nous",
+		"--yolo",
+	];
+	if (model && model !== "xiaomi/mimo-v2-pro") {
+		argv.push("-m", model);
+	}
+	return { argv, env: {} };
 }
 
 /**
@@ -173,6 +195,34 @@ function resolveModel(provider: AgentProvider, hint?: string): string {
 	}
 }
 
+/**
+ * Check if a CLI provider is authenticated and available.
+ * Falls back to "hermes" (always available via Nous subscription).
+ */
+async function resolveAvailableProvider(preferred: AgentProvider): Promise<string> {
+	try {
+		switch (preferred) {
+			case "claude": {
+				const out = execSync("claude auth status 2>&1", { timeout: 5000, encoding: "utf8" });
+				if (out.includes('"loggedIn": true')) return "claude";
+				break;
+			}
+			case "gemini":
+			case "copilot":
+			case "openclaw":
+				// Check if the CLI exists on PATH
+				try {
+					execSync(`which ${preferred} 2>/dev/null`, { timeout: 3000 });
+					return preferred;
+				} catch { /* not available */ }
+				break;
+		}
+	} catch { /* auth check failed */ }
+
+	// Fallback to hermes — always available (Nous subscription)
+	return "hermes";
+}
+
 // ─── Core spawn logic ─────────────────────────────────────────────────────────
 
 /**
@@ -193,11 +243,13 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	const model = resolveModel(provider, modelHint);
 	const agentEnv = await loadEnvAgent(worktree);
 
-	// Build provider-specific argv and additional env
+	// Build provider-specific argv and additional env.
+	// Fall back to hermes if the preferred CLI isn't authenticated.
 	let argv: string[];
 	let extraEnv: Record<string, string>;
 
-	switch (provider) {
+	const effectiveProvider = await resolveAvailableProvider(provider);
+	switch (effectiveProvider) {
 		case "claude":
 			({ argv, env: extraEnv } = buildClaudeArgs(req, model));
 			break;
@@ -207,6 +259,10 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		case "copilot":
 		case "openclaw":
 			({ argv, env: extraEnv } = buildOpenAICompatArgs(req, model));
+			break;
+		default:
+			// hermes fallback — always available (Nous subscription)
+			({ argv, env: extraEnv } = buildHermesArgs(req, model));
 			break;
 	}
 
