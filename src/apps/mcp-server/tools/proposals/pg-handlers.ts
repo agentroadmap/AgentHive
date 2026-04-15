@@ -345,7 +345,7 @@ export class PgProposalHandlers {
 			}
 
 			await query(
-				`INSERT INTO agent_registry (agent_identity, agent_type, role)
+				`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, role)
          VALUES ($1, $2, $3)
          ON CONFLICT ON CONSTRAINT agent_registry_agent_identity_key
          DO UPDATE SET role = EXCLUDED.role`,
