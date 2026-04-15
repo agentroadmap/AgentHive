@@ -429,6 +429,7 @@ export async function runUnifiedView(
 				};
 
 				renderBoardTui(kanbanProposals, statuses, layout, maxColumnWidth, {
+					projectRoot: options.core.getProjectRoot(),
 					onProposalSelect: (proposal) => {
 						selectedProposal = proposal;
 					},

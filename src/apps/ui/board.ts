@@ -307,6 +307,7 @@ export async function renderBoardTui(
 		}) => void;
 		directiveMode?: boolean;
 		directiveEntities?: Directive[];
+		projectRoot?: string;
 	},
 ): Promise<void> {
 	if (!process.stdout.isTTY) {
@@ -327,7 +328,7 @@ export async function renderBoardTui(
 		return;
 	}
 
-	const core = new Core(process.cwd());
+	const core = new Core(options?.projectRoot ?? process.cwd());
 	const config = await core.filesystem.loadConfig();
 
 	const versionInfo = await getVersionInfo();
