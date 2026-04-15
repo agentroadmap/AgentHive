@@ -256,8 +256,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	await query(
 		`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, status)
      VALUES ($1, 'llm', 'active')
-     ON CONFLICT ON CONSTRAINT agent_registry_agent_identity_key DO UPDATE
-     SET status = 'active'`,
+     ON CONFLICT (agent_identity) DO UPDATE SET status = 'active'`,
 		[worktree],
 	);
 

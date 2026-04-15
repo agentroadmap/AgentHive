@@ -72,7 +72,7 @@ export class PgAgentHandlers {
 		try {
 			const { rows } = await query(
 				`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, role, skills)
-         VALUES ($1, $2, $3, $4::jsonb) ON CONFLICT ON CONSTRAINT agent_registry_agent_identity_key
+         VALUES ($1, $2, $3, $4::jsonb) ON CONFLICT (agent_identity)
          DO UPDATE SET agent_type = EXCLUDED.agent_type, role = EXCLUDED.role, skills = EXCLUDED.skills
          RETURNING agent_identity, role, status`,
 				[

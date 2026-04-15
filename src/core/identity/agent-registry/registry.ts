@@ -88,8 +88,7 @@ export async function registerAgent(
 	await query(
 		`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, role, skills, status)
      VALUES ($1, $2, $3, $4::jsonb, 'online')
-     ON CONFLICT ON CONSTRAINT agent_registry_agent_identity_key
-     DO UPDATE SET
+     ON CONFLICT (agent_identity) DO UPDATE SET
        agent_type = EXCLUDED.agent_type,
        role       = EXCLUDED.role,
        skills     = agent_registry.skills || EXCLUDED.skills,
