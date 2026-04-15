@@ -12,13 +12,12 @@
  *   5. 'known' | 'trusted' | 'authority' → accept all
  *
  * Delivery:
- *   - Worktree agents (claude/*, gemini/*, etc.) → spawned via agent-spawner
+ *   - Worktree agents (claude/*, gemini/*, etc.) → pg_notify to agent:<identity> channel
  *   - Virtual agents (gate-agent, skeptic-*, etc.) → queued to transition_queue
  *   - Broadcast/system → logged and queued for next orchestrator cycle
  */
 
 import { getPool, query } from "../src/infra/postgres/pool.ts";
-import { spawnAgent } from "../src/core/orchestration/agent-spawner.ts";
 
 const POLL_INTERVAL_MS = 10_000; // fallback poll every 10s
 const DISPATCH_BATCH = 20;       // max messages per cycle
@@ -69,8 +68,8 @@ async function trustGate(
 		return false;
 	}
 	if (level === "restricted") {
-		// Restricted: only accept task/command from authority senders
-		const authoritative = ["system", "claude/one", "claude/andy", "gary"];
+		// Restricted: only accept task/command from non-agent authority senders
+		const authoritative = ["system", "gary"];
 		if (!authoritative.includes(sender) && !["task", "command", "gate"].includes(messageType)) {
 			logger.log(`[trust] RESTRICTED: ${sender} → ${recipient} (${messageType})`);
 			return false;
@@ -151,28 +150,23 @@ async function deliverToAgent(
 	const worktree = identityToWorktree(recipient);
 
 	if (worktree && worktreeExists(worktree)) {
-		// Worktree agent — spawn with message as task
-		const task = `[A2A MESSAGE from ${msg.from_agent}]
-Type: ${msg.message_type}
-${msg.proposal_id ? `Proposal: P${String(msg.proposal_id).padStart(3, "0")}` : ""}
----
-${msg.message_content}
-
-Read the message above and take appropriate action based on your role. If it is a task or command, execute it. If informational, acknowledge and update your state.`;
-
+		// Worktree agent — notify via pg_notify; agent reads its inbox via msg_read MCP
 		try {
-			const result = await spawnAgent({
-				worktree,
-				task,
-				proposalId: msg.proposal_id ?? undefined,
-				stage: "a2a-dispatch",
-				timeoutMs: 120_000,
-			});
+			await query(`SELECT pg_notify($1, $2)`, [
+				`agent:${recipient}`,
+				JSON.stringify({
+					type: "new_message",
+					message_id: msg.id,
+					from: msg.from_agent,
+					message_type: msg.message_type,
+					...(msg.proposal_id ? { proposal_id: msg.proposal_id } : {}),
+				}),
+			]);
 			logger.log(
-				`[deliver] ${msg.from_agent} → ${recipient} (worktree: ${worktree}) exit=${result.exitCode}`,
+				`[deliver] ${msg.from_agent} → ${recipient} (worktree: ${worktree}) — notified via pg_notify`,
 			);
 		} catch (err) {
-			logger.error(`[deliver] spawn failed for ${recipient}:`, err);
+			logger.error(`[deliver] pg_notify failed for ${recipient}:`, err);
 		}
 	} else {
 		// Virtual agent — queue to transition_queue for next orchestrator cycle
