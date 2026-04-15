@@ -293,6 +293,8 @@ export class Core {
 	> = new Map();
 	// Rate Limiter (PROPOSAL-44): per-agent rate limiting with fair share
 	private rateLimiter?: RateLimiter;
+	// Preloaded proposals for listAgents() to avoid deadlock in buildSnapshot()
+	private _preloadedProposalsForAgents?: Proposal[];
 
 	constructor(projectRoot: string, options?: { enableWatchers?: boolean }) {
 		this.fs = new FileSystem(projectRoot);
@@ -301,6 +303,14 @@ export class Core {
 		// Interactive modes (TUI, browser, MCP) should explicitly pass enableWatchers: true
 		this.enableWatchers = options?.enableWatchers ?? false;
 		// Note: Config is loaded lazily when needed since constructor can't be async
+	}
+
+	/**
+	 * Preload proposals for listAgents() to avoid deadlock when called
+	 * in parallel with loadProposals() (e.g., in buildSnapshot).
+	 */
+	setPreloadedProposalsForAgents(proposals: Proposal[]): void {
+		this._preloadedProposalsForAgents = proposals;
 	}
 
 	/**
@@ -6302,8 +6312,15 @@ export class Core {
 			}
 		}
 
-		// Attach current claims to agents
-		const allProposals = await this.fs.listProposals();
+		// Attach current claims to agents — use preloaded proposals when
+		// available (set by buildSnapshot) to avoid deadlock from re-loading
+		// all proposals in parallel with loadProposals().
+		let allProposals = this._preloadedProposalsForAgents;
+		if (allProposals) {
+			this._preloadedProposalsForAgents = undefined;
+		} else {
+			allProposals = await this.fs.listProposals();
+		}
 		for (const agent of registeredAgents) {
 			const agentNameLower = agent.name.toLowerCase();
 			const agentNameNoAtLower = agentNameLower.startsWith("@")
