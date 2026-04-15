@@ -202,7 +202,9 @@ async function renderBoardTuiWithSwitching(
 
 	// For now, use the original function but we'll need to modify it to support Tab switching
 	// This is a placeholder - we'll need to modify the actual board.ts
-	return renderBoardTui(proposals, statuses, layout, maxColumnWidth);
+	return renderBoardTui(proposals, statuses, layout, maxColumnWidth, {
+		projectRoot: core.getProjectRoot(),
+	});
 }
 
 // Re-export for convenience

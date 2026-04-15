@@ -125,6 +125,7 @@ export async function runSimpleUnifiedView(
 
 		// Show kanban board with simple view switching
 		await renderBoardTui(kanbanProposals, statuses, layout, maxColumnWidth, {
+			projectRoot: options.core.getProjectRoot(),
 			onProposalSelect: (proposal) => {
 				selectedProposal = proposal;
 			},
