@@ -221,9 +221,10 @@ async function canAdvance(proposalId: string, fromState: string, toState: string
     logger.warn(`   Reasons: ${verdict.blockers.join("; ")}`);
 
     // Log to gate_decision_log with complete structured rationale
+    // Insert into base table directly (roadmap.gate_decision_log is a read-only view)
     try {
       await query(
-        `INSERT INTO roadmap.gate_decision_log (proposal_id, from_state, to_state, gate_level, decision, decided_by, ac_verification, dependency_check, rationale, challenges, blockers)
+        `INSERT INTO roadmap_proposal.gate_decision_log (proposal_id, from_state, to_state, gate_level, decision, decided_by, ac_verification, dependency_check, rationale, challenges, blockers)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
         [
           Number(proposalId),
@@ -231,7 +232,7 @@ async function canAdvance(proposalId: string, fromState: string, toState: string
           toState,
           gateLevel,
           "reject",
-          "skeptic",
+          "gate-agent",
           JSON.stringify(acVerification),
           JSON.stringify(depCheck),
           rationale,
@@ -262,7 +263,7 @@ async function canAdvance(proposalId: string, fromState: string, toState: string
         "proposal",
         proposalId,
         "delete",
-        "skeptic",
+        "gate-agent",
         JSON.stringify(blockerDecision)
       ]
     );
@@ -271,17 +272,18 @@ async function canAdvance(proposalId: string, fromState: string, toState: string
   }
 
   // Log approved decision to gate_decision_log with complete structured rationale
+  // decision='advance' matches CHECK constraint; insert into base table not view
   try {
     await query(
-      `INSERT INTO roadmap.gate_decision_log (proposal_id, from_state, to_state, gate_level, decision, decided_by, ac_verification, dependency_check, rationale, challenges)
+      `INSERT INTO roadmap_proposal.gate_decision_log (proposal_id, from_state, to_state, gate_level, decision, decided_by, ac_verification, dependency_check, rationale, challenges)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
       [
         Number(proposalId),
         fromState,
         toState,
         gateLevel,
-        "approve",
-        "skeptic",
+        "advance",
+        "gate-agent",
         JSON.stringify(acVerification),
         JSON.stringify(depCheck),
         rationale,
@@ -311,7 +313,7 @@ async function canAdvance(proposalId: string, fromState: string, toState: string
       "proposal",
       proposalId,
       "insert",
-      "skeptic",
+      "gate-agent",
       JSON.stringify(approvalDecision)
     ]
   );
