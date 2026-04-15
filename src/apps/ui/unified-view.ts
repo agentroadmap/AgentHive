@@ -475,9 +475,11 @@ export async function runUnifiedView(
 				};
 
 				const refresh = async () => {
-					const [agents, pipelineProposals, pulseMessages] = await Promise.all([
+					// Load proposals first, then pass to listAgents to avoid deadlock
+					const pipelineProposals = await options.core.loadProposals();
+					options.core.setPreloadedProposalsForAgents(pipelineProposals);
+					const [agents, pulseMessages] = await Promise.all([
 						options.core.listAgents(),
-						options.core.loadProposals(),
 						options.core.readMessages({ channel: "public" }),
 					]);
 

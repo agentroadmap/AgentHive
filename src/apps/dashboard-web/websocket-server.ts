@@ -34,8 +34,12 @@ function safeStringify(data: unknown): string {
 }
 
 async function buildSnapshot(core: Core) {
-	const [proposals, agents, channels, publicMessages] = await Promise.all([
-		core.loadProposals(),
+	// Load proposals first, then pass them to listAgents to avoid deadlock
+	// (listAgents used to re-load all proposals internally, causing a
+	// circular dependency when called in parallel with loadProposals).
+	const proposals = await core.loadProposals();
+	core.setPreloadedProposalsForAgents(proposals);
+	const [agents, channels, publicMessages] = await Promise.all([
 		core.listAgents(),
 		core.listChannels(),
 		core.readMessages({ channel: "public" }),

@@ -1024,8 +1024,53 @@ export async function createMcpServer(
 			handler: (a) => fed.removeHost(a as FedRemoveHostArgs),
 		});
 
+		// Discord outbound tool (P233) — pg_notify('discord_send')
+		const { discordSend } = await import(
+			"../../infra/discord/notify.ts"
+		);
+		server.addTool({
+			name: "discord_send",
+			description:
+				"Send a message to Discord via pg_notify (zero-cost, handled by discord-bridge)",
+			inputSchema: {
+				type: "object",
+				properties: {
+					from: {
+						type: "string",
+						description: "Agent or sender identity",
+					},
+					message: {
+						type: "string",
+						description: "Message content to send",
+					},
+					level: {
+						type: "string",
+						enum: ["info", "success", "warning", "error"],
+						description:
+							"Message level (determines icon in Discord)",
+					},
+				},
+				required: ["from", "message"],
+			},
+			handler: async (a: Record<string, unknown>) => {
+				await discordSend(
+					a.from as string,
+					a.message as string,
+					(a.level as "info" | "success" | "warning" | "error") ?? "info",
+				);
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Discord message sent from ${a.from}`,
+						},
+					],
+				};
+			},
+		});
+
 		console.log(
-			"[MCP] Using Postgres backend (agenthive) for proposals, messaging, agents, spending, memory, RFC workflow, SMDL, cubics, pulse, federation",
+			"[MCP] Using Postgres backend (agenthive) for proposals, messaging, agents, spending, memory, RFC workflow, SMDL, cubics, pulse, federation, discord",
 		);
 	} else {
 		registerFilesystemProposalTools(server, config);
