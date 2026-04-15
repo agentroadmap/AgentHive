@@ -150,8 +150,7 @@ async function validateMaturityGate(
 	proposalId: number,
 	currentState: string,
 ): Promise<TransitionValidationResult> {
-	const { rows } = await query<{ maturity_state: string }>(
-		`SELECT maturity_state FROM proposal WHERE id = $1 LIMIT 1`,
+	const { rows } = await query<{ maturity: string }>(`SELECT maturity FROM proposal WHERE id = $1 LIMIT 1`,
 		[proposalId],
 	);
 
@@ -166,7 +165,7 @@ async function validateMaturityGate(
 		};
 	}
 
-	const maturityState = rows[0].maturity_state;
+	const maturityState = rows[0].maturity;
 
 	if (maturityState !== "mature") {
 		return {
@@ -444,14 +443,14 @@ export async function checkACStatus(
 export async function getMaturityState(
 	proposalId: number,
 ): Promise<{ currentState: string; maturityState: string } | null> {
-	const { rows } = await query<{ status: string; maturity_state: string }>(
-		`SELECT status, maturity_state FROM proposal WHERE id = $1 LIMIT 1`,
+	const { rows } = await query<{ status: string; maturity: string }>(
+		`SELECT status, maturity FROM proposal WHERE id = $1 LIMIT 1`,
 		[proposalId],
 	);
 
 	if (rows.length === 0) return null;
 	return {
 		currentState: rows[0].status,
-		maturityState: rows[0].maturity_state,
+		maturityState: rows[0].maturity,
 	};
 }

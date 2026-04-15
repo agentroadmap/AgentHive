@@ -13,6 +13,7 @@ type QueryResultLike = Awaited<ReturnType<QueryFn>>;
 type ConnectListener = NonNullable<PipelineCronDeps["connectListener"]>;
 type SetIntervalFn = NonNullable<PipelineCronDeps["setIntervalFn"]>;
 type ClearIntervalFn = NonNullable<PipelineCronDeps["clearIntervalFn"]>;
+type McpClientFactory = NonNullable<PipelineCronDeps["mcpClientFactory"]>;
 
 type SqlCall = {
 	text: string;
@@ -155,12 +156,30 @@ function createIntervalFns(
 	};
 }
 
+/** Create a mock MCP client factory that records tool calls and returns configurable responses. */
+function createMcpClientFactory(
+	toolResponses: Record<string, unknown> = {},
+	toolCalls: Array<{ name: string; arguments: Record<string, unknown> }> = [],
+): McpClientFactory {
+	return (_url: string) => ({
+		async callTool(args: { name: string; arguments: Record<string, unknown> }) {
+			toolCalls.push(args);
+			const response = toolResponses[args.name] ?? {
+				success: true,
+				cubic: { id: "cubic-test-1" },
+			};
+			return { content: [{ text: JSON.stringify(response) }] };
+		},
+		async close() {},
+	});
+}
+
 describe("PipelineCron", () => {
-	it("listens on the pipeline channels, schedules the 30s poll, and drains ready transitions", async () => {
+	it("listens on the pipeline channels, schedules the 30s poll, and dispatches via cubic", async () => {
 		const listener = createListener();
 		const sqlCalls: SqlCall[] = [];
 		const claimResponses = [[createTransition()], []];
-		const spawnCalls: Array<Record<string, unknown>> = [];
+		const toolCalls: Array<{ name: string; arguments: Record<string, unknown> }> = [];
 		let pollDelay = 0;
 
 		const queryFn = createQueryFn(claimResponses, sqlCalls);
@@ -172,19 +191,8 @@ describe("PipelineCron", () => {
 		const cron = new PipelineCron({
 			queryFn,
 			connectListener,
-			spawnAgentFn: async (request) => {
-				spawnCalls.push(request as unknown as Record<string, unknown>);
-				return {
-					agentRunId: "run-1",
-					worktree: request.worktree,
-					exitCode: 0,
-					stdout: "ok",
-					stderr: "",
-					durationMs: 12,
-				};
-			},
+			mcpClientFactory: createMcpClientFactory({}, toolCalls),
 			logger: createLogger(),
-			defaultWorktree: "copilot-one",
 			setIntervalFn: intervals.setIntervalFn,
 			clearIntervalFn: intervals.clearIntervalFn,
 		});
@@ -196,13 +204,19 @@ describe("PipelineCron", () => {
 			"LISTEN transition_queued",
 		]);
 		assert.equal(pollDelay, 30_000);
-		assert.equal(spawnCalls.length, 1);
-		assert.equal(spawnCalls[0].worktree, "copilot-one");
-		assert.equal(spawnCalls[0].proposalId, 42);
-		assert.equal(spawnCalls[0].stage, "Review");
-		assert.match(String(spawnCalls[0].task), /Transition queue row: 1/);
+
+		// Dispatched via cubic_create + cubic_focus — NOT spawnAgent
+		assert.ok(toolCalls.some((c) => c.name === "cubic_create"), "cubic_create should be called");
+		assert.ok(toolCalls.some((c) => c.name === "cubic_focus"), "cubic_focus should be called");
+
+		// Task content should include transition context
+		const focusCall = toolCalls.find((c) => c.name === "cubic_focus")!;
+		assert.match(String(focusCall.arguments.task), /Transition queue row: 1/);
+
+		// After cubic dispatch, transition should be marked done
 		assert.ok(
 			sqlCalls.some((call) => call.text.includes("SET status = 'done'")),
+			"transition should be marked done after cubic dispatch",
 		);
 
 		await cron.stop();
@@ -210,16 +224,17 @@ describe("PipelineCron", () => {
 		assert.equal(listener.releaseCalled(), true);
 	});
 
-	it("prefers explicit spawn metadata when building spawnAgent requests", async () => {
+	it("uses gate task from spawn metadata when provided", async () => {
 		const listener = createListener();
 		const claimResponses = [
 			[
 				createTransition({
 					metadata: {
+						gate: "D3",
+						task: "You are an AgentHive gate reviewer (D3: Code Review Gate).",
 						spawn: {
 							worktree: "claude-andy",
-							task: "Review this transition with the architect worktree.",
-							model: "claude-sonnet-4-6",
+							task: "Explicit task from spawn metadata.",
 							timeoutMs: 45_000,
 						},
 					},
@@ -227,7 +242,7 @@ describe("PipelineCron", () => {
 			],
 			[],
 		];
-		const spawnCalls: Array<Record<string, unknown>> = [];
+		const toolCalls: Array<{ name: string; arguments: Record<string, unknown> }> = [];
 
 		const queryFn = createQueryFn(claimResponses);
 		const connectListener: ConnectListener = async () => listener.client;
@@ -236,33 +251,18 @@ describe("PipelineCron", () => {
 		const cron = new PipelineCron({
 			queryFn,
 			connectListener,
-			spawnAgentFn: async (request) => {
-				spawnCalls.push(request as unknown as Record<string, unknown>);
-				return {
-					agentRunId: "run-2",
-					worktree: request.worktree,
-					exitCode: 0,
-					stdout: "ok",
-					stderr: "",
-					durationMs: 10,
-				};
-			},
+			mcpClientFactory: createMcpClientFactory({}, toolCalls),
 			logger: createLogger(),
-			defaultWorktree: "copilot-one",
 			setIntervalFn: intervals.setIntervalFn,
 			clearIntervalFn: intervals.clearIntervalFn,
 		});
 
 		await cron.run();
 
-		assert.deepEqual(spawnCalls[0], {
-			worktree: "claude-andy",
-			task: "Review this transition with the architect worktree.",
-			proposalId: 42,
-			stage: "Review",
-			model: "claude-sonnet-4-6",
-			timeoutMs: 45_000,
-		});
+		const focusCall = toolCalls.find((c) => c.name === "cubic_focus")!;
+		assert.ok(focusCall, "cubic_focus should be called");
+		// Spawn metadata task takes precedence
+		assert.equal(focusCall.arguments.task, "Explicit task from spawn metadata.");
 
 		await cron.stop();
 		intervals.dispose();
@@ -280,19 +280,17 @@ describe("PipelineCron", () => {
 		const connectListener: ConnectListener = async () => listener.client;
 		const intervals = createIntervalFns();
 
+		// MCP client that always throws (simulates cubic dispatch failure)
+		const failingFactory: McpClientFactory = (_url) => ({
+			async callTool() { throw new Error("cubic_create failed: MCP error"); },
+			async close() {},
+		});
+
 		const cron = new PipelineCron({
 			queryFn,
 			connectListener,
-			spawnAgentFn: async (request) => ({
-				agentRunId: "run-3",
-				worktree: request.worktree,
-				exitCode: 1,
-				stdout: "",
-				stderr: "boom",
-				durationMs: 11,
-			}),
+			mcpClientFactory: failingFactory,
 			logger: createLogger(),
-			defaultWorktree: "copilot-one",
 			setIntervalFn: intervals.setIntervalFn,
 			clearIntervalFn: intervals.clearIntervalFn,
 		});
@@ -302,22 +300,19 @@ describe("PipelineCron", () => {
 		const retryUpdate = sqlCalls.find((call) =>
 			call.text.includes("SET status = 'pending'"),
 		);
-		assert.ok(retryUpdate);
-	assert.deepEqual(retryUpdate.params, [
-		7,
-		1,
-		"Agent exit code 1: boom",
-	]);
+		assert.ok(retryUpdate, "should requeue on failure when attempts remain");
+		assert.equal(retryUpdate.params?.[0], 7);
+		assert.match(String(retryUpdate.params?.[2]), /cubic_create failed/);
 
 		await cron.stop();
 		intervals.dispose();
 	});
 
-	it("marks transitions failed when the final attempt fails", async () => {
+	it("marks transitions failed and inserts notification_queue when the final attempt fails (AC-3)", async () => {
 		const listener = createListener();
 		const sqlCalls: SqlCall[] = [];
 		const claimResponses = [
-			[createTransition({ id: 9, attempt_count: 3, max_attempts: 3 })],
+			[createTransition({ id: 9, proposal_id: "42", from_stage: "DEVELOP", to_stage: "MERGE", attempt_count: 3, max_attempts: 3 })],
 			[],
 		];
 
@@ -325,33 +320,38 @@ describe("PipelineCron", () => {
 		const connectListener: ConnectListener = async () => listener.client;
 		const intervals = createIntervalFns();
 
+		const failingFactory: McpClientFactory = (_url) => ({
+			async callTool() { throw new Error("still failing: auth error"); },
+			async close() {},
+		});
+
 		const cron = new PipelineCron({
 			queryFn,
 			connectListener,
-			spawnAgentFn: async (request) => ({
-				agentRunId: "run-4",
-				worktree: request.worktree,
-				exitCode: 2,
-				stdout: "",
-				stderr: "still failing",
-				durationMs: 11,
-			}),
+			mcpClientFactory: failingFactory,
 			logger: createLogger(),
-			defaultWorktree: "copilot-one",
 			setIntervalFn: intervals.setIntervalFn,
 			clearIntervalFn: intervals.clearIntervalFn,
 		});
 
 		await cron.run();
 
+		// Transition should be marked failed
 		const failedUpdate = sqlCalls.find((call) =>
 			call.text.includes("SET status = 'failed'"),
 		);
-		assert.ok(failedUpdate);
-	assert.deepEqual(failedUpdate.params, [
-		9,
-		"Agent exit code 2: still failing",
-	]);
+		assert.ok(failedUpdate, "transition should be marked failed on final attempt");
+		assert.equal(failedUpdate.params?.[0], 9);
+		assert.match(String(failedUpdate.params?.[1]), /still failing/);
+
+		// AC-3: notification_queue INSERT should be present (escalation)
+		const notificationInsert = sqlCalls.find((call) =>
+			call.text.includes("notification_queue") && call.text.includes("'CRITICAL'"),
+		);
+		assert.ok(notificationInsert, "AC-3: notification_queue should be inserted on exhausted failure");
+		assert.equal(notificationInsert.params?.[0], 42); // proposal_id
+		assert.match(String(notificationInsert.params?.[1]), /failed permanently/);
+		assert.match(String(notificationInsert.params?.[2]), /DEVELOP.*MERGE|still failing/);
 
 		await cron.stop();
 		intervals.dispose();
@@ -364,7 +364,7 @@ describe("PipelineCron", () => {
 			[createTransition({ id: "11", proposal_id: "77", to_stage: "Build" })],
 			[],
 		];
-		const spawnCalls: Array<Record<string, unknown>> = [];
+		const toolCalls: Array<{ name: string; arguments: Record<string, unknown> }> = [];
 
 		const queryFn = createQueryFn(claimResponses);
 		const connectListener: ConnectListener = async () => listener.client;
@@ -373,32 +373,25 @@ describe("PipelineCron", () => {
 		const cron = new PipelineCron({
 			queryFn,
 			connectListener,
-			spawnAgentFn: async (request) => {
-				spawnCalls.push(request as unknown as Record<string, unknown>);
-				return {
-					agentRunId: "run-5",
-					worktree: request.worktree,
-					exitCode: 0,
-					stdout: "ok",
-					stderr: "",
-					durationMs: 8,
-				};
-			},
+			mcpClientFactory: createMcpClientFactory({}, toolCalls),
 			logger: createLogger(),
-			defaultWorktree: "copilot-one",
 			setIntervalFn: intervals.setIntervalFn,
 			clearIntervalFn: intervals.clearIntervalFn,
 		});
 
 		await cron.run();
-		assert.equal(spawnCalls.length, 0);
+		assert.equal(toolCalls.length, 0, "no cubic calls before notification");
 
 		listener.emit("transition_queued", JSON.stringify({ proposal_id: 77 }));
 		await cron.waitForIdle();
 
-		assert.equal(spawnCalls.length, 1);
-		assert.equal(spawnCalls[0].proposalId, 77);
-		assert.equal(spawnCalls[0].stage, "Build");
+		const createCalls = toolCalls.filter((c) => c.name === "cubic_create");
+		assert.equal(createCalls.length, 1, "one cubic_create after notification");
+		assert.match(String(createCalls[0].arguments.name), /77/);
+
+		const focusCalls = toolCalls.filter((c) => c.name === "cubic_focus");
+		assert.equal(focusCalls.length, 1, "one cubic_focus after notification");
+		assert.match(String(focusCalls[0].arguments.phase), /build/);
 
 		await cron.stop();
 		intervals.dispose();

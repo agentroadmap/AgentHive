@@ -1,0 +1,25 @@
+[Unit]
+Description=AgentHive Discord Bridge — Two-way A2A messaging
+Documentation=https://github.com/agentroadmap/agentRoadmap
+After=network-online.target postgresql.service agenthive-mcp.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/data/code/AgentHive
+ExecStart=/usr/bin/env node --import jiti/register scripts/discord-bridge.ts
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hermes-discord-bridge
+
+# Load DB credentials and Discord token
+EnvironmentFile=-%h/.agenthive.env
+EnvironmentFile=-%h/.hermes/.env
+
+# Security hardening
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

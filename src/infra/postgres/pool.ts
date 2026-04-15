@@ -92,7 +92,11 @@ function buildSearchPathOptions(
 ): string | undefined {
 	const parts = [options?.trim()].filter(Boolean) as string[];
 	if (schema) {
-		parts.push(`-c search_path=${schema},public`);
+		// Always include roadmap_proposal — proposal tables moved there in the
+		// schema refactor.  Unqualified refs like "FROM proposal" resolve
+		// against the first match in search_path.
+		const extra = schema === "roadmap" ? ",roadmap_proposal" : "";
+		parts.push(`-c search_path=${schema}${extra},public`);
 	}
 	return parts.length > 0 ? parts.join(" ") : undefined;
 }

@@ -124,14 +124,9 @@ function fetchAllProposals(): Proposal[] {
   }));
 }
 
-function fetchCriteria(proposalId: bigint): Criteria[] {
-  const rows = sdbSql(`SELECT * FROM proposal_criteria WHERE proposal_id = ${proposalId}`);
-  return rows.map(r => ({
-    id: BigInt(r[0]),
-    proposalId: BigInt(r[1]),
-    description: r[2],
-    isVerified: Boolean(r[3]),
-  }));
+function fetchCriteria(_proposalId: bigint): Criteria[] {
+  // proposal_criteria table was removed in favor of proposal_acceptance_criteria
+  return [];
 }
 
 function fetchDecisions(proposalId: bigint): Decision[] {

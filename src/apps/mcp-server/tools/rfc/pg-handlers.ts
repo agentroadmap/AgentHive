@@ -23,7 +23,7 @@ type ResolvedProposal = {
 	type: string;
 	title: string;
 	status: string;
-	maturity_state: 'new' | 'active' | 'mature' | 'obsolete';
+	maturity: 'new' | 'active' | 'mature' | 'obsolete';
 	summary: string | null;
 	motivation: string | null;
 	design: string | null;
@@ -88,7 +88,7 @@ async function resolveProposalRecord(
        p.type,
        p.title,
        p.status,
-       p.maturity_state,
+       p.maturity,
        p.summary,
        p.motivation,
        p.design,
@@ -252,7 +252,7 @@ function deriveMaturityLabel(
 	_fromState: string,
 	_toState: string,
 ): string {
-	return proposal.maturity_state ?? "new";
+	return proposal.maturity ?? "new";
 }
 
 // ─── State Transitions ──────────────────────────────────────────────────────
@@ -699,61 +699,7 @@ export async function listAC(args: {
 	}
 }
 
-/**
- * P158: Delete all acceptance criteria for a proposal (cleanup for corrupted data
- * from the character-splitting bug). Optionally delete by specific item_number.
- */
-export async function deleteAC(args: {
-	proposal_id: string;
-	item_number?: number;
-}): Promise<CallToolResult> {
-	try {
-		const proposalId = await resolveProposalId(args.proposal_id);
-		if (proposalId === null) {
-			return {
-				content: [
-					{ type: "text", text: `Proposal ${args.proposal_id} not found.` },
-				],
-			};
-		}
-
-		if (args.item_number != null) {
-			const itemNum = typeof args.item_number === "string"
-				? parseInt(args.item_number, 10)
-				: args.item_number;
-			const { rowCount } = await query(
-				`DELETE FROM proposal_acceptance_criteria WHERE proposal_id = $1 AND item_number = $2`,
-				[proposalId, itemNum],
-			);
-			return {
-				content: [
-					{
-						type: "text",
-						text: rowCount && rowCount > 0
-							? `🗑️ Deleted AC #${itemNum} from ${args.proposal_id}`
-							: `AC #${itemNum} not found for ${args.proposal_id}`,
-					},
-				],
-			};
-		}
-
-		// Delete all ACs for the proposal
-		const { rowCount } = await query(
-			`DELETE FROM proposal_acceptance_criteria WHERE proposal_id = $1`,
-			[proposalId],
-		);
-		return {
-			content: [
-				{
-					type: "text",
-					text: `🗑️ Deleted ${rowCount || 0} AC items from ${args.proposal_id}`,
-				},
-			],
-		};
-	} catch (err) {
-		return errorResult("Failed to delete AC", err);
-	}
-}
+// deleteAC is defined above at line 555 (with cleanup_singles support)
 
 // ─── Dependencies ───────────────────────────────────────────────────────────
 
@@ -836,10 +782,10 @@ export async function getDependencies(args: {
 			// View doesn't exist yet — fall back to raw query
 			const result = await query(
 				`SELECT p.display_id AS related_display_id, p.title AS related_title,
-				        p.status AS related_status, p.maturity_state AS related_maturity,
-				        d.dependency_type, d.resolved_at,
-				        CASE WHEN d.dependency_type = 'blocks'
-				              AND p.maturity_state NOT IN ('mature', 'obsolete')
+		        p.status AS related_status, p.maturity AS related_maturity,
+		        d.dependency_type, d.resolved_at,
+		        CASE WHEN d.dependency_type = 'blocks'
+		              AND p.maturity NOT IN ('mature', 'obsolete')
 				              AND d.resolved_at IS NULL
 				         THEN true ELSE false END AS is_effective_blocker
 				 FROM proposal_dependencies d

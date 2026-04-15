@@ -13,6 +13,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { getPool, query } from "../src/infra/postgres/pool.ts";
+import { spawnAgent } from "../src/core/orchestration/agent-spawner.ts";
 
 const MCP_URL = "http://127.0.0.1:6421/sse";
 
@@ -157,6 +158,24 @@ async function dispatchAgent(agent: string, proposalId: string, task: string, ph
     });
 
     logger.log(`🚀 ${agent} → ${cubicId.substring(0, 8)} | ${phase} | ${model} | P${proposalId}`);
+
+    // Step 5: Actually spawn the agent process
+    const taskPrompt = `${AGENT_PROMPTS[agent] || ""}\n\nProposal P${proposalId}: ${task}\n\nUse the MCP tools to do your work. Connect to http://127.0.0.1:6421/sse for proposal management.`;
+    const result = await spawnAgent({
+      worktree: "claude-one",
+      task: taskPrompt,
+      proposalId: Number(proposalId),
+      stage: phase,
+      model: model !== "claude-sonnet-4-6" ? model : undefined,
+      timeoutMs: 600_000,
+    });
+
+    if (result.exitCode === 0) {
+      logger.log(`✅ ${agent} completed (run=${result.agentRunId}) for P${proposalId}`);
+    } else {
+      logger.warn(`⚠️ ${agent} exited ${result.exitCode} (run=${result.agentRunId}) for P${proposalId}`);
+    }
+
     return cubicId;
 
   } catch (err) {
@@ -243,15 +262,24 @@ async function main() {
       
       if (!proposalId) return;
       
-      // Get current state
+      // Get current state from workflows table
       const result = await query(
-        "SELECT id, display_id, status FROM roadmap.proposal WHERE id = $1",
+        "SELECT id, proposal_id, current_stage FROM roadmap.workflows WHERE proposal_id = $1 ORDER BY started_at DESC LIMIT 1",
         [proposalId]
       );
-      
+
       if (result.rows.length > 0) {
-        const proposal = result.rows[0];
-        await handleStateChange(proposalId, proposal.status);
+        const wf = result.rows[0];
+        await handleStateChange(String(wf.proposal_id), wf.current_stage);
+      } else {
+        // Fallback: check transition_queue for the latest stage info
+        const tq = await query(
+          "SELECT proposal_id, to_stage FROM roadmap.transition_queue WHERE proposal_id = $1 ORDER BY created_at DESC LIMIT 1",
+          [proposalId]
+        );
+        if (tq.rows.length > 0) {
+          await handleStateChange(String(tq.rows[0].proposal_id), tq.rows[0].to_stage);
+        }
       }
     } catch (e) {
       logger.error("Error handling notification:", e);
@@ -261,16 +289,23 @@ async function main() {
   // Poll for proposals needing agents (every 2 minutes)
   setInterval(async () => {
     try {
+      // Find workflows in NEW states that haven't had agents dispatched yet
+      // (workflows with no recent agent activity, ordered by recency)
       const result = await query(
-        `SELECT id, display_id, status, maturity_state 
-         FROM roadmap.proposal 
-         WHERE maturity_state = 'new' 
-         ORDER BY priority DESC NULLS LAST 
+        `SELECT w.id, w.proposal_id, w.current_stage
+         FROM roadmap.workflows w
+         WHERE w.completed_at IS NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM roadmap.transition_queue tq
+             WHERE tq.proposal_id = w.proposal_id
+               AND tq.status IN ('pending', 'processing')
+           )
+         ORDER BY w.started_at DESC
          LIMIT 5`
       );
-      
-      for (const proposal of result.rows) {
-        await handleStateChange(proposal.id, proposal.status);
+
+      for (const wf of result.rows) {
+        await handleStateChange(String(wf.proposal_id), wf.current_stage);
       }
     } catch (e) {
       logger.error("Polling error:", e);

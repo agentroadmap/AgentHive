@@ -75,7 +75,7 @@ export class PgProtocolHandlers {
 			let proposalId: number | null = null;
 			if (args.proposal_id) {
 				const { rows } = await query<{ id: number }>(
-					`SELECT id FROM roadmap.proposal WHERE display_id = $1 OR CAST(id AS text) = $1 LIMIT 1`,
+					`SELECT id FROM roadmap_proposal.proposal WHERE display_id = $1 OR CAST(id AS text) = $1 LIMIT 1`,
 					[args.proposal_id],
 				);
 				if (rows.length > 0) {
@@ -303,7 +303,7 @@ export class PgProtocolHandlers {
 			let proposalId: number | null = null;
 			if (args.proposal_id) {
 				const { rows } = await query<{ id: number }>(
-					`SELECT id FROM roadmap.proposal WHERE display_id = $1 OR CAST(id AS text) = $1 LIMIT 1`,
+					`SELECT id FROM roadmap_proposal.proposal WHERE display_id = $1 OR CAST(id AS text) = $1 LIMIT 1`,
 					[args.proposal_id],
 				);
 				if (rows.length > 0) {

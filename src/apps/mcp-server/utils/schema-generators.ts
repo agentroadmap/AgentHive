@@ -85,8 +85,8 @@ export function generateProposalCreateSchema(
 			},
 			maturity: {
 				type: "string",
-				enum: ["skeleton", "contracted", "audited"],
-				description: "Level of completeness/validation",
+				enum: ["new", "active", "mature", "obsolete"],
+				description: "Maturity within current state (new → active → mature → obsolete)",
 			},
 			dependencies: {
 				type: "array",
@@ -203,8 +203,8 @@ export function generateProposalEditSchema(config: RoadmapConfig): JsonSchema {
 			},
 			maturity: {
 				type: "string",
-				enum: ["skeleton", "contracted", "audited"],
-				description: "Level of completeness/validation",
+				enum: ["new", "active", "mature", "obsolete"],
+				description: "Maturity within current state (new → active → mature → obsolete)",
 			},
 			dependencies: {
 				type: "array",

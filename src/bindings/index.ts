@@ -64,7 +64,6 @@ import AgentMemoryRow from "./agent_memory_table.ts";
 import AttachmentRegistryRow from "./attachment_registry_table.ts";
 import MessageLedgerRow from "./message_ledger_table.ts";
 import ProposalRow from "./proposal_table.ts";
-import ProposalCriteriaRow from "./proposal_criteria_table.ts";
 import ProposalDecisionRow from "./proposal_decision_table.ts";
 import ProposalVersionRow from "./proposal_version_table.ts";
 import SecurityAclRow from "./security_acl_table.ts";
@@ -123,17 +122,6 @@ const tablesSchema = __schema({
       { name: 'proposal_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ProposalRow),
-  proposal_criteria: __table({
-    name: 'proposal_criteria',
-    indexes: [
-      { accessor: 'id', name: 'proposal_criteria_id_idx_btree', algorithm: 'btree', columns: [
-        'id',
-      ] },
-    ],
-    constraints: [
-      { name: 'proposal_criteria_id_key', constraint: 'unique', columns: ['id'] },
-    ],
-  }, ProposalCriteriaRow),
   proposal_decision: __table({
     name: 'proposal_decision',
     indexes: [

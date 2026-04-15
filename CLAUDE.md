@@ -4,7 +4,19 @@
 **AgentHive** is an autonomous, AI Agent-Native Product Development Platform. It is **self-evolving**, meaning it uses its own completed components to build, enhance, and refactor its next generation.
 
 ### 2. Operational Workflow (The Proposal Life-Cycle)
-All work is driven by **Proposals** managed via the **AgentHive MCP**. Agents move proposals through state machine and progressive maturity within state. State machine is linked to proposal type
+All work is driven by **Proposals** managed via the **AgentHive MCP**. Agents move proposals through state machine and progressive maturity within state. State machine is linked to proposal type.
+
+### Proposal Types
+
+| Type | Category | Workflow | Description |
+| :--- | :--- | :--- | :--- |
+| **product** | Type A (Design) | Standard RFC | Top-level product vision, pillars, constraints |
+| **component** | Type A (Design) | Standard RFC | Major subsystem or architectural pillar |
+| **feature** | Type B (Impl) | Standard RFC | Concrete capability to build |
+| **issue** | Type B (Impl) | Standard RFC | Problem in the product requiring code changes |
+| **hotfix** | Type C (Ops) | Hotfix | Localized operational fix to running instance |
+
+### Standard RFC Workflow (product, component, feature, issue)
 
 | State | Phase | Description |
 | :--- | :--- | :--- |
@@ -20,6 +32,17 @@ All work is driven by **Proposals** managed via the **AgentHive MCP**. Agents mo
 | **Active** | Under lease, so the lesser/s can quickly build it Fast iterations (AI-POC style). |
 | **Mature** | AI agent self-claims "Mature" once they finish enhancement or development, calling for gating agent to make decision to advance |
 | **Obsolete** | A proposal become irrelevant due to structural change, regardless what state it's in|
+
+### Hotfix Workflow (hotfix)
+
+| State | Phase | Description |
+| :--- | :--- | :--- |
+| **Triage** | Confirm | Confirm the problem exists and is a localized operational fix |
+| **Fixing** | Apply | Specialist/ops claims and applies the fix (often higher privilege) |
+| **Done** | Verified | Fix applied and verified working |
+
+**Terminal states:** Done, Wont_fix, Non_issue
+**Escape:** Escalate → creates a new issue proposal (Standard RFC)
 
 ### 3. Agent Responsibilities & Rules
 * **The Leasing Model:** Use the MCP to **Claim/Lease** a proposal before starting work (Enhance, Review, Develop, or Merge).

@@ -44,7 +44,7 @@ export class PgProposalHandlers {
 			}
 			const lines = proposals.map((p) => {
 				const did = p.display_id ?? `#${p.id}`;
-				return `[${did}] ${p.title || "(no title)"} — status: ${p.status}, type: ${p.type}, maturity: ${p.maturity_state ?? "unknown"}`;
+				return `[${did}] ${p.title || "(no title)"} — status: ${p.status}, type: ${p.type}, maturity: ${p.maturity ?? "unknown"}`;
 			});
 			return { content: [{ type: "text", text: lines.join("\n") }] };
 		} catch (err) {
@@ -563,7 +563,7 @@ export class PgProposalHandlers {
 			const lines = proposals.map((p) => {
 				const did = p.display_id ?? `#${p.id}`;
 				const preview = this.buildPreview(p);
-				return `[${did}] ${p.title || "(no title)"} — status: ${p.status}, type: ${p.type}, maturity: ${p.maturity_state ?? "unknown"}\n  ${preview}`;
+				return `[${did}] ${p.title || "(no title)"} — status: ${p.status}, type: ${p.type}, maturity: ${p.maturity ?? "unknown"}\n  ${preview}`;
 			});
 			return {
 				content: [
@@ -593,6 +593,137 @@ export class PgProposalHandlers {
 			};
 		} catch (err) {
 			return errorResult("Failed to get proposal summary", err);
+		}
+	}
+
+	async getProposalProjection(args: { id: string }): Promise<CallToolResult> {
+		try {
+			// 1. Fetch the proposal
+			const proposal = await pg.getProposal(args.id);
+			if (!proposal) {
+				return {
+					content: [{ type: "text", text: `Proposal ${args.id} not found.` }],
+				};
+			}
+
+			// 2. Fetch acceptance criteria
+			const acResult = await query(
+				`SELECT item_number, criterion_text, status, verified_by, verified_at
+				 FROM roadmap_proposal.proposal_acceptance_criteria
+				 WHERE proposal_id = $1
+				 ORDER BY item_number`,
+				[proposal.id],
+			);
+
+			// 3. Fetch active lease
+			const leaseResult = await query(
+				`SELECT agent_identity, claimed_at, expires_at, released_at
+				 FROM roadmap_proposal.proposal_lease
+				 WHERE proposal_id = $1 AND released_at IS NULL
+				 ORDER BY claimed_at DESC LIMIT 1`,
+				[proposal.id],
+			);
+
+			// 4. Fetch latest decision
+			const decisionResult = await query(
+				`SELECT decision, authority, rationale, decided_at
+				 FROM roadmap_proposal.proposal_decision
+				 WHERE proposal_id = $1
+				 ORDER BY decided_at DESC LIMIT 1`,
+				[proposal.id],
+			);
+
+			// 5. Fetch dependencies
+			const depResult = await query(
+				`SELECT d.to_proposal_id, p.display_id, d.dependency_type, d.resolved
+				 FROM roadmap_proposal.proposal_dependencies d
+				 JOIN roadmap_proposal.proposal p ON p.id = d.to_proposal_id
+				 WHERE d.from_proposal_id = $1
+				 ORDER BY d.created_at`,
+				[proposal.id],
+			);
+
+			// 6. Build YAML+MD projection
+			const did = proposal.display_id ?? `#${proposal.id}`;
+			const lease = leaseResult.rows[0] ?? null;
+			const decision = decisionResult.rows[0] ?? null;
+			const deps = depResult.rows;
+
+			let md = `---\n`;
+			md += `id: ${did}\n`;
+			md += `title: "${proposal.title}"\n`;
+			md += `type: ${proposal.type}\n`;
+			md += `status: ${proposal.status}\n`;
+			md += `maturity: ${proposal.maturity ?? "new"}\n`;
+			if (proposal.priority) md += `priority: ${proposal.priority}\n`;
+			if (lease) {
+				md += `lease:\n`;
+				md += `  agent: "${lease.agent_identity}"\n`;
+				md += `  claimed_at: ${lease.claimed_at}\n`;
+				if (lease.expires_at) md += `  expires_at: ${lease.expires_at}\n`;
+			}
+			if (decision) {
+				md += `decision:\n`;
+				md += `  verdict: "${decision.decision}"\n`;
+				md += `  authority: "${decision.authority}"\n`;
+				md += `  decided_at: ${decision.decided_at}\n`;
+			}
+			if (proposal.workflow_name) md += `workflow: ${proposal.workflow_name}\n`;
+			md += `---\n\n`;
+
+			// Narrative sections
+			if (proposal.motivation) {
+				md += `## Motivation\n\n${proposal.motivation}\n\n`;
+			}
+			if (proposal.summary) {
+				md += `## Summary\n\n${proposal.summary}\n\n`;
+			}
+			if (proposal.design) {
+				md += `## Design\n\n${proposal.design}\n\n`;
+			}
+			if (proposal.drawbacks) {
+				md += `## Drawbacks\n\n${proposal.drawbacks}\n\n`;
+			}
+			if (proposal.alternatives) {
+				md += `## Alternatives\n\n${proposal.alternatives}\n\n`;
+			}
+			if (proposal.dependency) {
+				md += `## Dependencies (Free Text)\n\n${proposal.dependency}\n\n`;
+			}
+			if (decision?.rationale) {
+				md += `## Decision Rationale\n\n${decision.rationale}\n\n`;
+			}
+
+			// Acceptance criteria
+			if (acResult.rows.length > 0) {
+				md += `## Acceptance Criteria\n\n`;
+				for (const ac of acResult.rows) {
+					const icon = ac.status === "pass" ? "✅" :
+						ac.status === "fail" ? "❌" :
+						ac.status === "blocked" ? "🚫" :
+						ac.status === "waived" ? "⏭️" : "⏳";
+					md += `${icon} **AC-${ac.item_number}**: ${ac.criterion_text}`;
+					if (ac.verified_by) md += ` (verified by ${ac.verified_by})`;
+					md += `\n`;
+				}
+				md += `\n`;
+			}
+
+			// DAG dependencies
+			if (deps.length > 0) {
+				md += `## DAG Dependencies\n\n`;
+				for (const d of deps) {
+					const status = d.resolved ? "resolved" : "active";
+					md += `- ${d.display_id} (${d.dependency_type}) [${status}]\n`;
+				}
+				md += `\n`;
+			}
+
+			return {
+				content: [{ type: "text", text: md }],
+			};
+		} catch (err) {
+			return errorResult("Failed to get proposal projection", err);
 		}
 	}
 

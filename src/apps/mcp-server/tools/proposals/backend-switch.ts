@@ -298,4 +298,20 @@ export function registerProposalTools(
 		handler: (args: any) => handlers.deleteProposal(args),
 	});
 	console.log("[MCP] Using Postgres proposal handlers (AgentHive)");
+	server.addTool({
+		name: "prop_get_projection",
+		description:
+			"Get a proposal as a YAML+MD projection — assembles metadata (id, type, status, maturity, lease, decision) and narrative (summary, design, ACs, deps) into a single prompt-ready block.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				id: {
+					type: "string",
+					description: "Proposal display_id or numeric id (e.g. P190)",
+				},
+			},
+			required: ["id"],
+		},
+		handler: (args: any) => handlers.getProposalProjection(args),
+	});
 }
