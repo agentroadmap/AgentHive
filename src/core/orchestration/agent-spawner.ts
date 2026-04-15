@@ -261,12 +261,24 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		[worktree],
 	);
 
+	// Build context package first so the enriched task is used when assembling argv.
+	let assembledTask = task;
+	let contextPackage = "";
+
+	if (proposalId !== undefined) {
+		contextPackage = await buildProposalContextPackage({
+			proposalId,
+			taskType: stage ?? "unknown",
+			agentIdentity: worktree,
+			maxTokens: 2000,
+		});
+		assembledTask = `${contextPackage}\n\n## Task\n${task}`;
+	}
+
 	// Build provider-specific argv and additional env.
 	// Fall back to hermes if the preferred CLI isn't authenticated.
 	let argv: string[];
 	let extraEnv: Record<string, string>;
-	let assembledTask = task;
-	let contextPackage = "";
 	const spawnReq = () => ({ ...req, task: assembledTask });
 
 	const effectiveProvider = await resolveAvailableProvider(provider);
@@ -285,16 +297,6 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 			// hermes fallback — always available (Nous subscription)
 			({ argv, env: extraEnv } = buildHermesArgs(spawnReq(), model));
 			break;
-	}
-
-	if (proposalId !== undefined) {
-		contextPackage = await buildProposalContextPackage({
-			proposalId,
-			taskType: stage ?? "unknown",
-			agentIdentity: worktree,
-			maxTokens: 2000,
-		});
-		assembledTask = `${contextPackage}\n\n## Task\n${task}`;
 	}
 
 	// Assemble process environment — host auth inheritance.
@@ -524,7 +526,7 @@ export async function escalateOrNotify(
 	proposalId?: number,
 ): Promise<SpawnResult | null> {
 	const LADDER: Array<{ provider: AgentProvider; model: string }> = [
-		{ provider: "claude", model: "claude-haiku-4-5-20251001" },
+		{ provider: "claude", model: "claude-haiku-4-5" },
 		{ provider: "claude", model: "claude-sonnet-4-6" },
 		{ provider: "claude", model: "claude-opus-4-6" },
 	];

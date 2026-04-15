@@ -838,11 +838,11 @@ export async function replaceAcceptanceCriteria(
 					criterion.criterion_text,
 					criterion.status ?? "pending",
 				],
-	);
-	invalidateProposalCaches();
-}
+			);
+		}
 
 		await client.query("COMMIT");
+		invalidateProposalCaches();
 	} catch (error) {
 		await client.query("ROLLBACK");
 		throw error;
