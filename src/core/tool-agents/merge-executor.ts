@@ -45,22 +45,18 @@ export class MergeExecutor implements ToolAgent {
 			};
 		}
 
-		// Find the worktree for this proposal
-		const { rows: propRows } = await query<{ display_id: string }>(
-			`SELECT display_id FROM roadmap.proposal WHERE id = $1`,
-			[proposalId],
-		);
-
-		if (propRows.length === 0) {
+		// Worktree must be provided via task payload or transition metadata
+		const worktree = task.payload.worktree as string | undefined;
+		if (!worktree) {
 			return {
 				success: false,
-				output: `Proposal ${proposalId} not found`,
+				output: "Missing worktree in task payload — cannot run merge without a target worktree",
 				tokensUsed: 0,
 			};
 		}
 
 		// Run git merge — attempt merge into main
-		const worktreePath = `${WORKTREE_ROOT}/xiaomi-one`;
+		const worktreePath = `${WORKTREE_ROOT}/${worktree}`;
 		const result = await runGitCommand(
 			["merge", "--no-edit", "HEAD"],
 			worktreePath,

@@ -96,13 +96,9 @@ function identityToWorktree(identity: string): string | null {
 		if (!KNOWN_PROVIDERS.has(provider)) return null;
 		return `${provider}-${name}`;
 	}
-	// Single-name agents like "xiaomi" → "xiaomi-one"
-	const single: Record<string, string> = {
-		xiaomi: "xiaomi-one",
-		hermes: "hermes-andy",
-		"hermes-agent": "hermes-andy",
-	};
-	return single[identity] ?? null;
+	// Single-word identities with no slash are not resolvable to a worktree
+	// without a DB lookup — callers should use the canonical "provider/name" form.
+	return null;
 }
 
 /** Returns true if the worktree directory and .env.agent both exist. */

@@ -35,13 +35,20 @@ export class TestRunner implements ToolAgent {
 
 	async invoke(task: ToolTask): Promise<ToolResult> {
 		const proposalId = task.proposalId;
-		const worktree =
-			(task.payload.worktree as string) ?? "xiaomi-one";
+		const worktree = task.payload.worktree as string | undefined;
 
 		if (!proposalId) {
 			return {
 				success: false,
 				output: "No proposal_id provided",
+				tokensUsed: 0,
+			};
+		}
+
+		if (!worktree) {
+			return {
+				success: false,
+				output: "Missing worktree in task payload — cannot run tests without a target worktree",
 				tokensUsed: 0,
 			};
 		}

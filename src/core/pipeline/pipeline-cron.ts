@@ -382,7 +382,13 @@ export class PipelineCron {
 				(looksLikeWorktreeName(transition.triggered_by)
 					? transition.triggered_by
 					: null) ??
-				"claude-one"; // default: primary orchestrator worktree
+				process.env.DEFAULT_AGENT_WORKTREE ?? null; // set DEFAULT_AGENT_WORKTREE env var to enable fallback dispatch
+
+			if (!agentName) {
+				throw new Error(
+					`No agent resolved for transition ${transition.id} — set DEFAULT_AGENT_WORKTREE or include agent in transition metadata`,
+				);
+			}
 
 			// 1. Create cubic for this proposal
 			const cubicResult = await mcpClient.callTool({
