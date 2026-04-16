@@ -273,6 +273,7 @@ function getActiveAndCompletedIdsFromProposalMap(
 export class Core {
 	public fs: FileSystem;
 	public git: GitOperations;
+	private readonly projectRoot: string;
 	private contentStore?: ContentStore;
 	private searchService?: SearchService;
 	private daemonClient?: DaemonClient | null;
@@ -295,12 +296,17 @@ export class Core {
 	private rateLimiter?: RateLimiter;
 
 	constructor(projectRoot: string, options?: { enableWatchers?: boolean }) {
+		this.projectRoot = projectRoot;
 		this.fs = new FileSystem(projectRoot);
 		this.git = new GitOperations(projectRoot);
 		// Disable watchers by default for CLI commands (non-interactive)
 		// Interactive modes (TUI, browser, MCP) should explicitly pass enableWatchers: true
 		this.enableWatchers = options?.enableWatchers ?? false;
 		// Note: Config is loaded lazily when needed since constructor can't be async
+	}
+
+	getProjectRoot(): string {
+		return this.projectRoot;
 	}
 
 	/**
