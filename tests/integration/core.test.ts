@@ -38,6 +38,7 @@ describe("Core", () => {
 		it("should have filesystem and git operations available", () => {
 			assert.notStrictEqual(core.filesystem, undefined);
 			assert.notStrictEqual(core.gitOps, undefined);
+			assert.strictEqual(core.getProjectRoot(), TEST_DIR);
 		});
 
 		it("should initialize project with default config", async () => {
