@@ -23,21 +23,43 @@ Build your AI agent team. Turn your vision into your dream product — through c
 ---
 
 ## 🛠️ Get Started
-To boot the system after a fresh start:
 
-1.  **Install & Initialize:**
-    ```bash
-    npm install -g agentRoadmap
-    roadmap init
-    ```
-2.  **Launch the Dashboard:**
-    ```bash
-    roadmap board
-    ```
-3.  **Issue First Directive:**
-    ```bash
-    roadmap proposal create "Define Core Architecture" --domain CORE --type DIRECTIVE
-    ```
+### Prerequisites
+- Node.js 24+
+- PostgreSQL available for the `agenthive` database
+- A `roadmap.yaml` config in the repo root
+
+### Run locally from this repo
+
+1. Install dependencies:
+   ```bash
+   npm install
+   ```
+2. Build the distributable:
+   ```bash
+   npm run build
+   ```
+3. Open the board:
+   ```bash
+   npm run board
+   ```
+4. Start the full CLI if you want the complete command surface:
+   ```bash
+   npm run cli -- board
+   ```
+5. Run the MCP server when integrating with agents:
+   ```bash
+   npm run mcp
+   ```
+
+### Bootstrap a new project
+
+If you want the installed `roadmap` command in another repository, install the package globally and initialize that project there:
+
+```bash
+npm install -g .
+roadmap init
+```
 
 ---
 
