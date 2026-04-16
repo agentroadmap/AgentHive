@@ -131,4 +131,47 @@ describe("board workflow helpers", () => {
 			"Blocked",
 		]);
 	});
+
+	it("normalizes quick-fix legacy states into canonical columns", () => {
+		const proposals: Proposal[] = [
+			{
+				id: "p1",
+				title: "Fix",
+				status: "FIXING",
+				proposalType: "issue",
+				assignee: [],
+				createdDate: "",
+				labels: [],
+				dependencies: [],
+			},
+			{
+				id: "p2",
+				title: "Done",
+				status: "COMPLETE",
+				proposalType: "issue",
+				assignee: [],
+				createdDate: "",
+				labels: [],
+				dependencies: [],
+			},
+			{
+				id: "p3",
+				title: "Start",
+				status: "DRAFT",
+				proposalType: "issue",
+				assignee: [],
+				createdDate: "",
+				labels: [],
+				dependencies: [],
+			},
+		];
+
+		expect(resolveWorkflowStatuses(proposals, "quick-fix")).toEqual([
+			"TRIAGE",
+			"FIX",
+			"DEPLOYED",
+			"ESCALATE",
+			"WONT_FIX",
+		]);
+	});
 });

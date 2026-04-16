@@ -91,7 +91,7 @@ const WORKFLOW_VIEWS: WorkflowViewDefinition[] = [
 		label: "Quick Fix",
 		description: "Rapid fix workflow",
 		proposalTypes: ["issue"],
-		statuses: ["TRIAGE", "FIXING", "DONE", "FIX", "DEPLOYED"],
+		statuses: ["TRIAGE", "FIX", "DEPLOYED", "ESCALATE", "WONT_FIX"],
 	},
 	{
 		key: "hotfix",
@@ -109,12 +109,82 @@ const RFC_TYPES = new Set(["product", "component", "feature"]);
 const QUICK_FIX_TYPES = new Set(["issue"]);
 const HOTFIX_TYPES = new Set(["hotfix"]);
 const RFC_STATUSES = new Set(["draft", "review", "develop", "merge", "complete"]);
+const RFC_STATUS_ALIASES = new Map<string, string>([
+	["todo", "Draft"],
+	["new", "Draft"],
+	["open", "Draft"],
+	["proposal", "Draft"],
+	["reviewing", "Review"],
+	["accepted", "Develop"],
+	["building", "Develop"],
+	["active", "Develop"],
+	["developing", "Develop"],
+	["done", "Complete"],
+	["completed", "Complete"],
+	["closed", "Complete"],
+]);
+const QUICK_FIX_STATUS_ALIASES = new Map<string, string>([
+	["draft", "TRIAGE"],
+	["todo", "TRIAGE"],
+	["new", "TRIAGE"],
+	["open", "TRIAGE"],
+	["proposal", "TRIAGE"],
+	["triage", "TRIAGE"],
+	["review", "FIX"],
+	["reviewing", "FIX"],
+	["develop", "FIX"],
+	["developing", "FIX"],
+	["merge", "FIX"],
+	["accepted", "FIX"],
+	["active", "FIX"],
+	["building", "FIX"],
+	["fix", "FIX"],
+	["fixing", "FIX"],
+	["done", "DEPLOYED"],
+	["completed", "DEPLOYED"],
+	["complete", "DEPLOYED"],
+	["deployed", "DEPLOYED"],
+	["closed", "DEPLOYED"],
+	["wont_fix", "WONT_FIX"],
+	["non_issue", "WONT_FIX"],
+	["escalate", "ESCALATE"],
+]);
+const HOTFIX_STATUS_ALIASES = new Map<string, string>([
+	["draft", "TRIAGE"],
+	["todo", "TRIAGE"],
+	["new", "TRIAGE"],
+	["open", "TRIAGE"],
+	["proposal", "TRIAGE"],
+	["triage", "TRIAGE"],
+	["review", "FIXING"],
+	["reviewing", "FIXING"],
+	["develop", "FIXING"],
+	["developing", "FIXING"],
+	["merge", "FIXING"],
+	["accepted", "FIXING"],
+	["active", "FIXING"],
+	["building", "FIXING"],
+	["fix", "FIXING"],
+	["fixing", "FIXING"],
+	["done", "DONE"],
+	["completed", "DONE"],
+	["complete", "DONE"],
+	["deployed", "DONE"],
+	["closed", "DONE"],
+]);
+const STATUS_ALIASES_BY_WORKFLOW: Record<WorkflowViewKey, Map<string, string>> = {
+	rfc: RFC_STATUS_ALIASES,
+	"quick-fix": QUICK_FIX_STATUS_ALIASES,
+	hotfix: HOTFIX_STATUS_ALIASES,
+};
 const QUICK_FIX_STATUSES = new Set([
 	"triage",
-	"fixing",
-	"done",
 	"fix",
 	"deployed",
+	"escalate",
+	"wont_fix",
+	"fixing",
+	"done",
 ]);
 const HOTFIX_STATUSES = new Set(["triage", "fixing", "done"]);
 
@@ -133,7 +203,8 @@ function normalizeWorkflowStatus(
 	const canonical = workflow.statuses.find(
 		(candidate) => candidate.toLowerCase() === trimmed.toLowerCase(),
 	);
-	return canonical ?? trimmed;
+	if (canonical) return canonical;
+	return STATUS_ALIASES_BY_WORKFLOW[workflowKey].get(trimmed.toLowerCase()) ?? trimmed;
 }
 
 export function getWorkflowViewForProposal(

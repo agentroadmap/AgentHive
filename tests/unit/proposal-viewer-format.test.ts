@@ -14,7 +14,7 @@ describe("proposal viewer formatting", () => {
 			createdDate: "2025-01-01",
 			labels: [],
 			dependencies: [],
-			description: "Body",
+			description: "Body\n\n```sql\nSELECT 1;\n```",
 			implementationPlan: "Plan",
 		};
 
@@ -26,5 +26,7 @@ describe("proposal viewer formatting", () => {
 		expect(body).toContain("{cyan-fg}▍ Details");
 		expect(body).toContain("{green-fg}▍ Description");
 		expect(body).toContain("{cyan-fg}▍ Implementation Plan");
+		expect(body).toContain("┌─ sql ─");
+		expect(body).toContain("{cyan-fg}│{/} SELECT 1;");
 	});
 });

@@ -75,6 +75,42 @@ function formatSectionHeading(title: string, color: string): string {
 	return `{bold}{${color}-fg}▍ ${title}{/${color}-fg}{/bold}`;
 }
 
+function escapeCodeBlockText(text: string): string {
+	return text.replace(/[{}]/g, (ch) => (ch === "{" ? "{open}" : "{close}"));
+}
+
+function formatMarkdownBody(text: string): string {
+	if (!text) return "";
+
+	const rendered: string[] = [];
+	let inCodeBlock = false;
+	let codeLanguage = "code";
+
+	for (const line of text.split("\n")) {
+		const fenceMatch = line.match(/^\s*```([\w-]+)?\s*$/);
+		if (fenceMatch) {
+			if (!inCodeBlock) {
+				inCodeBlock = true;
+				codeLanguage = fenceMatch[1] || "code";
+				rendered.push(`{gray-fg}┌─ ${codeLanguage} ─{/}`);
+			} else {
+				inCodeBlock = false;
+				rendered.push("{gray-fg}└───────────────{/}");
+			}
+			continue;
+		}
+
+		if (inCodeBlock) {
+			rendered.push(`{cyan-fg}│{/} ${escapeCodeBlockText(line)}`);
+			continue;
+		}
+
+		rendered.push(transformCodePaths(line));
+	}
+
+	return rendered.join("\n");
+}
+
 function createDirectiveLabelResolver(
 	directives: Directive[],
 ): (directive: string) => string {
@@ -1433,7 +1469,7 @@ export function generateDetailContent(
 	bodyContent.push(formatSectionHeading("Description", "green"));
 	const descriptionText = proposal.description?.trim();
 	const descriptionContent = descriptionText
-		? transformCodePaths(descriptionText)
+		? formatMarkdownBody(descriptionText)
 		: "{gray-fg}No description provided{/}";
 	bodyContent.push(descriptionContent);
 	bodyContent.push("");
@@ -1488,21 +1524,21 @@ export function generateDetailContent(
 	const implementationPlan = proposal.implementationPlan?.trim();
 	if (implementationPlan) {
 		bodyContent.push(formatSectionHeading("Implementation Plan", "cyan"));
-		bodyContent.push(transformCodePaths(implementationPlan));
+		bodyContent.push(formatMarkdownBody(implementationPlan));
 		bodyContent.push("");
 	}
 
 	const implementationNotes = proposal.implementationNotes?.trim();
 	if (implementationNotes) {
 		bodyContent.push(formatSectionHeading("Implementation Notes", "magenta"));
-		bodyContent.push(transformCodePaths(implementationNotes));
+		bodyContent.push(formatMarkdownBody(implementationNotes));
 		bodyContent.push("");
 	}
 
 	const finalSummary = proposal.finalSummary?.trim();
 	if (finalSummary) {
 		bodyContent.push(formatSectionHeading("Final Summary", "green"));
-		bodyContent.push(transformCodePaths(finalSummary));
+		bodyContent.push(formatMarkdownBody(finalSummary));
 		bodyContent.push("");
 	}
 
