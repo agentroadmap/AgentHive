@@ -28,8 +28,15 @@ export function registerSpendingTools(server: McpServer): void {
 
 	server.addTool({
 		name: "spending_efficiency_report",
-		description: "Generate token efficiency report",
-		inputSchema: {},
+		description: "Generate token efficiency report. Use granularity='daily' for per-day breakdown (AC-7), default is weekly.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				agent_identity: { type: "string", description: "Filter by agent identity (e.g. 'claude/one')" },
+				model_name: { type: "string", description: "Filter by model name" },
+				granularity: { type: "string", enum: ["daily", "weekly"], description: "Report granularity (default: weekly)" },
+			},
+		},
 		handler: async (args) => handlers.getTokenEfficiencyReport(args as any),
 	});
 }

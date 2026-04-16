@@ -253,36 +253,88 @@ export class PgSpendingHandlers {
 
 	async getTokenEfficiencyReport(args: {
 		agent_role?: string;
+		agent_identity?: string;
 		model?: string;
+		model_name?: string;
+		granularity?: "daily" | "weekly";
 	}): Promise<CallToolResult> {
 		try {
+			// AC-7: support daily granularity; default weekly for backward compat
+			const granularity = args.granularity ?? "weekly";
+			const agentFilter = args.agent_identity ?? args.agent_role ?? null;
+			const modelFilter = args.model_name ?? args.model ?? null;
+
+			if (granularity === "daily") {
+				const { rows } = await query<{
+					day: string;
+					agent_identity: string | null;
+					model_name: string;
+					invocations: number;
+					total_input_tokens: string;
+					total_output_tokens: string;
+					total_cache_read_tokens: string;
+					cache_hit_rate_pct: string;
+					total_cost_usd: string;
+					cost_per_1k_tokens: string;
+				}>(
+					`SELECT
+             day::text,
+             agent_identity,
+             model_name,
+             invocations,
+             total_input_tokens::text,
+             total_output_tokens::text,
+             total_cache_read_tokens::text,
+             cache_hit_rate_pct::text,
+             total_cost_usd::text,
+             cost_per_1k_tokens::text
+           FROM metrics.v_daily_efficiency
+           WHERE ($1::text IS NULL OR agent_identity = $1)
+             AND ($2::text IS NULL OR model_name = $2)
+           ORDER BY day DESC, invocations DESC
+           LIMIT 30`,
+					[agentFilter, modelFilter],
+				);
+				if (!rows.length) {
+					return { content: [{ type: "text", text: "No daily token efficiency data found." }] };
+				}
+				const lines = rows.map(
+					(row) =>
+						`${row.day} | ${row.agent_identity ?? "unknown"} | ${row.model_name} | invocations=${row.invocations} | in=${row.total_input_tokens} | out=${row.total_output_tokens} | cache_read=${row.total_cache_read_tokens} | cache_hit_pct=${row.cache_hit_rate_pct}% | cost_usd=${row.total_cost_usd} | cost_per_1k=${row.cost_per_1k_tokens}`,
+				);
+				return { content: [{ type: "text", text: lines.join("\n") }] };
+			}
+
+			// weekly (default)
 			const { rows } = await query<{
 				week_start: string;
-				agent_role: string | null;
-				model: string;
+				agent_identity: string | null;
+				model_name: string;
 				invocations: number;
 				total_input_tokens: string;
 				total_output_tokens: string;
 				total_cache_read_tokens: string;
-				avg_cache_hit_rate: string;
-				total_cost_microdollars: string | null;
+				cache_hit_rate_pct: string;
+				total_cost_usd: string;
+				cost_per_1k_tokens: string;
 			}>(
 				`SELECT
            week_start::text,
-           agent_role,
-           model,
+           agent_identity,
+           model_name,
            invocations,
            total_input_tokens::text,
            total_output_tokens::text,
            total_cache_read_tokens::text,
-           avg_cache_hit_rate::text,
-           total_cost_microdollars::text
+           cache_hit_rate_pct::text,
+           total_cost_usd::text,
+           cost_per_1k_tokens::text
          FROM metrics.v_weekly_efficiency
-         WHERE ($1::text IS NULL OR agent_role = $1)
-           AND ($2::text IS NULL OR model = $2)
+         WHERE ($1::text IS NULL OR agent_identity = $1)
+           AND ($2::text IS NULL OR model_name = $2)
          ORDER BY week_start DESC, invocations DESC
          LIMIT 20`,
-				[args.agent_role ?? null, args.model ?? null],
+				[agentFilter, modelFilter],
 			);
 			if (!rows.length) {
 				return {
@@ -293,7 +345,7 @@ export class PgSpendingHandlers {
 			}
 			const lines = rows.map(
 				(row) =>
-					`${row.week_start} | ${row.agent_role ?? "unknown"} | ${row.model} | invocations=${row.invocations} | in=${row.total_input_tokens} | out=${row.total_output_tokens} | cache_read=${row.total_cache_read_tokens} | cache_hit=${row.avg_cache_hit_rate} | cost_microdollars=${row.total_cost_microdollars ?? "0"}`,
+					`${row.week_start} | ${row.agent_identity ?? "unknown"} | ${row.model_name} | invocations=${row.invocations} | in=${row.total_input_tokens} | out=${row.total_output_tokens} | cache_read=${row.total_cache_read_tokens} | cache_hit_pct=${row.cache_hit_rate_pct}% | cost_usd=${row.total_cost_usd} | cost_per_1k=${row.cost_per_1k_tokens}`,
 			);
 			return { content: [{ type: "text", text: lines.join("\n") }] };
 		} catch (err) {
