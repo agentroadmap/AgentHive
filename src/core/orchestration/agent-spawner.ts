@@ -27,7 +27,7 @@ const GITCONFIG_ROOT = "/data/code/AgentHive/.git/worktrees-config";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type AgentProvider = "claude" | "gemini" | "copilot" | "openclaw";
+export type AgentProvider = "claude" | "gemini" | "copilot" | "openclaw" | "codex";
 
 export interface WorktreeConfig {
 	/** Worktree directory name (e.g. "claude-andy") */
@@ -108,8 +108,32 @@ function buildClaudeArgs(
 }
 
 /**
+ * Build argv + env for the OpenAI Codex CLI.
+ * Used when agent_provider = 'codex' (openai spec, `codex` terminal tool).
+ * https://github.com/openai/codex
+ */
+function buildCodexArgs(
+	req: SpawnRequest,
+	route: ModelRoute,
+): { argv: string[]; env: Record<string, string> } {
+	const argv = [
+		"codex",
+		"--model",
+		route.modelName,
+		"--quiet", // non-interactive
+		req.task,
+	];
+	const env: Record<string, string> = {};
+	// Allow overriding base URL if needed (e.g. enterprise proxy)
+	if (route.baseUrl !== "https://api.openai.com/v1") {
+		env.OPENAI_BASE_URL = route.baseUrl;
+	}
+	return { argv, env };
+}
+
+/**
  * Build argv + env for any OpenAI-compatible endpoint.
- * Used when api_spec = 'openai' (Nous, Xiaomi, OpenAI, etc.).
+ * Used when api_spec = 'openai' (Nous, Xiaomi, OpenAI, GitHub Copilot, etc.).
  * Uses the `llm` CLI (https://llm.datasette.io).
  */
 function buildOpenAICompatArgs(
@@ -135,11 +159,13 @@ function buildGeminiArgs(
 	return { argv, env: {} };
 }
 
-/** Dispatch to the correct builder based on route.apiSpec. */
+/** Dispatch to the correct builder based on route.apiSpec and agent_provider. */
 function buildArgsBySpec(
 	req: SpawnRequest,
 	route: ModelRoute,
 ): { argv: string[]; env: Record<string, string> } {
+	// Codex CLI gets its own builder regardless of api_spec (always openai spec)
+	if (route.agentProvider === "codex") return buildCodexArgs(req, route);
 	switch (route.apiSpec) {
 		case "anthropic":
 			return buildClaudeArgs(req, route);
@@ -189,6 +215,7 @@ function detectProvider(worktreeName: string): AgentProvider {
 	if (worktreeName.startsWith("gemini")) return "gemini";
 	if (worktreeName.startsWith("copilot")) return "copilot";
 	if (worktreeName.startsWith("openclaw")) return "openclaw";
+	if (worktreeName.startsWith("codex")) return "codex";
 	throw new Error(`Unknown provider prefix for worktree "${worktreeName}"`);
 }
 
@@ -200,6 +227,7 @@ const PROVIDER_DEFAULTS: Record<AgentProvider, string> = {
 	gemini: "gemini-2.0-flash",
 	copilot: "gpt-4o",
 	openclaw: "xiaomi/mimo-v2-pro",
+	codex: "codex-mini-latest",
 };
 
 /**
@@ -277,17 +305,20 @@ async function resolveModelRoute(
 	// No DB routes at all — synthesize a hard-coded fallback
 	const fallbackModel = PROVIDER_DEFAULTS[provider];
 	console.warn(`[P235] No routes in DB for agent_provider "${provider}". Using hard-coded default "${fallbackModel}".`);
+	const fallbackApiSpec: ModelRoute["apiSpec"] =
+		provider === "gemini" ? "google" : provider === "claude" ? "anthropic" : "openai";
+	const fallbackBaseUrl =
+		provider === "claude"
+			? "https://api.anthropic.com"
+			: provider === "gemini"
+				? "https://generativelanguage.googleapis.com/v1beta"
+				: "https://api.openai.com/v1";
 	return {
 		modelName: fallbackModel,
 		routeProvider: provider,
 		agentProvider: provider,
-		apiSpec: provider === "gemini" ? "google" : provider === "claude" ? "anthropic" : "openai",
-		baseUrl:
-			provider === "claude"
-				? "https://api.anthropic.com"
-				: provider === "gemini"
-					? "https://generativelanguage.googleapis.com/v1beta"
-					: "https://api.openai.com/v1",
+		apiSpec: fallbackApiSpec,
+		baseUrl: fallbackBaseUrl,
 		planType: null,
 		costPer1kInput: 0,
 	};
@@ -407,6 +438,9 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		}),
 		...(process.env.NOUS_API_KEY && {
 			NOUS_API_KEY: process.env.NOUS_API_KEY,
+		}),
+		...(process.env.GITHUB_TOKEN && {
+			GITHUB_TOKEN: process.env.GITHUB_TOKEN,
 		}),
 		// Route-specific env from argv builder (OPENAI_BASE_URL, ANTHROPIC_BASE_URL, etc.)
 		...extraEnv,
