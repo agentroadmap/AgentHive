@@ -97,9 +97,16 @@ function buildClaudeArgs(
 	return { argv, env: { ANTHROPIC_MODEL: model } };
 }
 
+/** Model prefixes that must NOT be passed to the Hermes CLI.
+ *  Hermes routes to Nous/Xiaomi; passing Anthropic/Google/OpenAI model names
+ *  causes it to call those providers' APIs at much higher cost.
+ */
+const HERMES_FOREIGN_PREFIXES = ["claude-", "gemini-", "gpt-", "o1-", "o3-", "o4-", "openclaw-"];
+
 /**
  * Build the argv for a Hermes CLI invocation (Nous subscription).
  * Fallback runtime when claude/codex aren't authenticated.
+ * Cross-provider model hints are stripped — Hermes only accepts Nous/Xiaomi model names.
  */
 function buildHermesArgs(
 	req: SpawnRequest,
@@ -113,7 +120,10 @@ function buildHermesArgs(
 		"--provider", "nous",
 		"--yolo",
 	];
-	if (model && model !== "xiaomi/mimo-v2-pro") {
+	// Only forward the model hint if it belongs to the Hermes/Nous/Xiaomi namespace.
+	// Drop any foreign-provider model name to prevent cross-platform API calls.
+	const isForeign = HERMES_FOREIGN_PREFIXES.some((p) => model.toLowerCase().startsWith(p));
+	if (model && !isForeign) {
 		argv.push("-m", model);
 	}
 	return { argv, env: {} };
@@ -189,9 +199,30 @@ function detectProvider(worktreeName: string): AgentProvider {
 	throw new Error(`Unknown provider prefix for worktree "${worktreeName}"`);
 }
 
-/** Pick default model based on provider and optional hint. */
+/**
+ * Model name prefixes that belong exclusively to each provider.
+ * A hint from a different provider's namespace is silently dropped
+ * and the provider default is used instead.
+ */
+const PROVIDER_MODEL_PREFIXES: Record<AgentProvider, string[]> = {
+	claude:    ["claude-"],
+	gemini:    ["gemini-"],
+	copilot:   ["gpt-", "o1-", "o3-", "o4-"],
+	openclaw:  ["openclaw-"],
+};
+
+/** Pick default model based on provider and optional hint.
+ *  Cross-provider hints (e.g. "claude-sonnet-4-6" passed to a gemini worktree)
+ *  are rejected and the provider default is used instead.
+ */
 function resolveModel(provider: AgentProvider, hint?: string): string {
-	if (hint) return hint;
+	if (hint) {
+		const validPrefixes = PROVIDER_MODEL_PREFIXES[provider];
+		if (validPrefixes.some((p) => hint.toLowerCase().startsWith(p))) {
+			return hint; // hint belongs to this provider's model family
+		}
+		// hint is from a foreign provider's namespace — ignore it
+	}
 	switch (provider) {
 		case "claude":
 			return "claude-sonnet-4-6";
