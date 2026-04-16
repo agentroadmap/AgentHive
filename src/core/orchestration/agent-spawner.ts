@@ -173,6 +173,54 @@ function resolveModel(provider: AgentProvider, hint?: string): string {
 	}
 }
 
+async function buildProposalContextPackage(input: {
+	proposalId: number;
+	taskType: string;
+	agentIdentity: string;
+	maxTokens: number;
+}): Promise<string> {
+	const { rows } = await query<{
+		display_id: string | null;
+		title: string;
+		status: string;
+		summary: string | null;
+		design: string | null;
+	}>(
+		`SELECT display_id, title, status, summary, design
+     FROM roadmap_proposal.proposal
+     WHERE id = $1
+     LIMIT 1`,
+		[input.proposalId],
+	);
+	const proposal = rows[0];
+	if (!proposal) {
+		return [
+			"## Proposal Context",
+			`- Proposal: #${input.proposalId}`,
+			`- Task type: ${input.taskType}`,
+			`- Agent: ${input.agentIdentity}`,
+			"- Source: proposal not found",
+		].join("\n");
+	}
+
+	const context = [
+		"## Proposal Context",
+		`- Proposal: ${proposal.display_id ?? `#${input.proposalId}`}`,
+		`- Title: ${proposal.title}`,
+		`- Status: ${proposal.status}`,
+		`- Task type: ${input.taskType}`,
+		`- Agent: ${input.agentIdentity}`,
+		proposal.summary ? `\n### Summary\n${proposal.summary}` : "",
+		proposal.design ? `\n### Design\n${proposal.design}` : "",
+	]
+		.filter(Boolean)
+		.join("\n");
+	const maxChars = Math.max(1000, input.maxTokens * 4);
+	return context.length > maxChars
+		? `${context.slice(0, maxChars)}\n...`
+		: context;
+}
+
 // ─── Core spawn logic ─────────────────────────────────────────────────────────
 
 /**

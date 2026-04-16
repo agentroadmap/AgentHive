@@ -77,6 +77,9 @@ type ResolvedPoolConfig = {
 	database: string;
 	options?: string;
 	schema: string | null;
+	connectionTimeoutMillis: number;
+	queryTimeoutMillis: number;
+	statementTimeoutMillis: number;
 };
 
 type ParsedDatabaseUrl = {
@@ -125,6 +128,11 @@ function parseDatabaseUrl(value?: string): ParsedDatabaseUrl {
 	}
 }
 
+function parsePositiveInteger(value: unknown, fallback: number): number {
+	const parsed = Number(value);
+	return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : fallback;
+}
+
 function resolvePoolConfig(config?: AgentHivePoolConfig): ResolvedPoolConfig {
 	const databaseUrlConfig = parseDatabaseUrl(process.env.DATABASE_URL);
 	const configuredPassword =
@@ -156,7 +164,8 @@ function resolvePoolConfig(config?: AgentHivePoolConfig): ResolvedPoolConfig {
 		port:
 			Number(config?.port ?? process.env.PG_PORT ?? databaseUrlConfig.port) ||
 			5432,
-		user: config?.user ?? process.env.PG_USER ?? databaseUrlConfig.user ?? "admin",
+		user:
+			config?.user ?? process.env.PG_USER ?? databaseUrlConfig.user ?? "admin",
 		password: resolvedPassword,
 		database:
 			config?.database ??
@@ -168,6 +177,21 @@ function resolvePoolConfig(config?: AgentHivePoolConfig): ResolvedPoolConfig {
 			schema,
 		),
 		schema,
+		connectionTimeoutMillis: parsePositiveInteger(
+			(config as PoolConfig | undefined)?.connectionTimeoutMillis ??
+				process.env.PG_CONNECTION_TIMEOUT_MS,
+			5000,
+		),
+		queryTimeoutMillis: parsePositiveInteger(
+			(config as PoolConfig | undefined)?.query_timeout ??
+				process.env.PG_QUERY_TIMEOUT_MS,
+			30000,
+		),
+		statementTimeoutMillis: parsePositiveInteger(
+			(config as PoolConfig | undefined)?.statement_timeout ??
+				process.env.PG_STATEMENT_TIMEOUT_MS,
+			30000,
+		),
 	};
 }
 
@@ -179,6 +203,9 @@ function getPoolSignature(config: ResolvedPoolConfig): string {
 		database: config.database,
 		options: config.options ?? null,
 		schema: config.schema,
+		connectionTimeoutMillis: config.connectionTimeoutMillis,
+		queryTimeoutMillis: config.queryTimeoutMillis,
+		statementTimeoutMillis: config.statementTimeoutMillis,
 	});
 }
 
@@ -200,6 +227,11 @@ export function getPool(config?: AgentHivePoolConfig): Pool {
 	}
 
 	if (!pool) {
+		if (process.env.DEBUG_PG) {
+			console.error(
+				`[PG] Opening pool ${resolvedConfig.user}@${resolvedConfig.host}:${resolvedConfig.port}/${resolvedConfig.database} schema=${resolvedConfig.schema ?? "(default)"}`,
+			);
+		}
 		pool = new Pool({
 			host: resolvedConfig.host,
 			port: resolvedConfig.port,
@@ -207,6 +239,10 @@ export function getPool(config?: AgentHivePoolConfig): Pool {
 			password: resolvedConfig.password,
 			database: resolvedConfig.database,
 			options: resolvedConfig.options,
+			connectionTimeoutMillis: resolvedConfig.connectionTimeoutMillis,
+			query_timeout: resolvedConfig.queryTimeoutMillis,
+			statement_timeout: resolvedConfig.statementTimeoutMillis,
+			allowExitOnIdle: true,
 		});
 		poolSignature = nextSignature;
 

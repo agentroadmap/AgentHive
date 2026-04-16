@@ -158,7 +158,7 @@ export async function loadProposalsForUnifiedView(
 		"proposals" | "proposalsLoader" | "loadingScreenFactory"
 	>,
 ): Promise<UnifiedViewLoadResult> {
-	if (options.proposals && options.proposals.length > 0) {
+	if (options.proposals !== undefined) {
 		const config = await core.filesystem.loadConfig();
 		return {
 			proposals: options.proposals,
