@@ -4384,180 +4384,47 @@ async function handleBoardView(options: {
 		return;
 	}
 
-	let preloadedProposals: Proposal[] | undefined;
-	if (source === "postgres") {
-		try {
-			preloadedProposals = (
-				await withBoardLoadTimeout(
-					core.queryProposals({ includeCrossBranch: false }),
-					source,
-				)
-			).map((proposal) => ({
-				...proposal,
-				status: proposal.status || "",
-			}));
-		} catch (error) {
-			console.error(error instanceof Error ? error.message : error);
-			process.exitCode = 1;
-			return;
-		}
+	try {
+		const proposals =
+			source === "postgres"
+				? (
+						await withBoardLoadTimeout(
+							core.queryProposals({ includeCrossBranch: false }),
+							source,
+						)
+					).map((proposal) => ({
+						...proposal,
+						status: proposal.status || "",
+					}))
+				: await core.loadProposals();
+
+		const [directiveEntities, archivedDirectives] = await Promise.all([
+			core.filesystem.listDirectives(),
+			core.filesystem.listArchivedDirectives(),
+		]);
+
+		const availableDirectives = [...directiveEntities, ...archivedDirectives]
+			.map((directive) => directive.title.trim())
+			.filter(Boolean);
+
+		const { renderBoardTui } = await import("../ui/board.ts");
+		await renderBoardTui(
+			proposals,
+			statuses,
+			_layout,
+			_maxColumnWidth,
+			{
+				projectRoot: core.getProjectRoot(),
+				directiveMode: options.directives,
+				directiveEntities,
+				availableLabels: config?.labels || [],
+				availableDirectives,
+			},
+		);
+	} catch (error) {
+		console.error(error instanceof Error ? error.message : error);
+		process.exitCode = 1;
 	}
-	// Import the TUI after Postgres preloading. Importing the blessed stack before
-	// opening a pg connection can stall fresh connects in some terminals.
-	const { runUnifiedView } = await import("../ui/unified-view.ts");
-
-	await runUnifiedView({
-		core,
-		initialView: "kanban",
-		directiveMode: options.directives,
-		source,
-		proposals: preloadedProposals,
-		proposalsLoader: preloadedProposals
-			? undefined
-				: async (updateProgress) => {
-						let proposals: Proposal[];
-						let directiveEntities: Directive[];
-
-					updateProgress(
-						source === "postgres"
-							? "Loading roadmap data from Postgres..."
-							: "Loading roadmap data from files...",
-					);
-					const { debugLog } = await import("./ui/debug-log.ts");
-					debugLog("proposalsLoader: about to query proposals, source=" + source);
-					proposals = await withBoardLoadTimeout(
-						source === "postgres"
-							? core.queryProposals({ includeCrossBranch: false })
-							: core.loadProposals((msg) => {
-									updateProgress(msg);
-								}),
-						source,
-					);
-					debugLog("proposalsLoader: got " + proposals.length + " proposals");
-					updateProgress("Loading directive metadata...");
-					directiveEntities = await core.filesystem.listDirectives();
-
-					const [archivedDirectives] = await Promise.all([
-						core.filesystem.listArchivedDirectives(),
-					]);
-
-					const resolveDirectiveAlias = (value?: string): string => {
-						const normalized = (value ?? "").trim();
-						if (!normalized) {
-							return "";
-						}
-						const key = normalized.toLowerCase();
-						const looksLikeDirectiveId =
-							/^\d+$/.test(normalized) || /^m-\d+$/i.test(normalized);
-						const canonicalInputId = looksLikeDirectiveId
-							? `m-${String(Number.parseInt(normalized.replace(/^m-/i, ""), 10))}`
-							: null;
-						const aliasKeys = new Set<string>([key]);
-						if (/^\d+$/.test(normalized)) {
-							const numericAlias = String(Number.parseInt(normalized, 10));
-							aliasKeys.add(numericAlias);
-							aliasKeys.add(`m-${numericAlias}`);
-						} else {
-							const idMatch = normalized.match(/^m-(\d+)$/i);
-							if (idMatch?.[1]) {
-								const numericAlias = String(Number.parseInt(idMatch[1], 10));
-								aliasKeys.add(numericAlias);
-								aliasKeys.add(`m-${numericAlias}`);
-							}
-						}
-						const idMatchesAlias = (directiveId: string): boolean => {
-							const idKey = directiveId.trim().toLowerCase();
-							if (aliasKeys.has(idKey)) {
-								return true;
-							}
-							const idMatch = directiveId.trim().match(/^m-(\d+)$/i);
-							if (!idMatch?.[1]) {
-								return false;
-							}
-							const numericAlias = String(Number.parseInt(idMatch[1], 10));
-							return (
-								aliasKeys.has(numericAlias) ||
-								aliasKeys.has(`m-${numericAlias}`)
-							);
-						};
-						const findIdMatch = (
-							directives: Directive[],
-						): Directive | undefined => {
-							const rawExactMatch = directives.find(
-								(directive) => directive.id.trim().toLowerCase() === key,
-							);
-							if (rawExactMatch) {
-								return rawExactMatch;
-							}
-							if (canonicalInputId) {
-								const canonicalRawMatch = directives.find(
-									(directive) =>
-										directive.id.trim().toLowerCase() === canonicalInputId,
-								);
-								if (canonicalRawMatch) {
-									return canonicalRawMatch;
-								}
-							}
-							return directives.find((directive) =>
-								idMatchesAlias(directive.id),
-							);
-						};
-
-						const activeIdMatch = findIdMatch(directiveEntities);
-						if (activeIdMatch) {
-							return activeIdMatch.id;
-						}
-						if (looksLikeDirectiveId) {
-							const archivedIdMatch = findIdMatch(archivedDirectives);
-							if (archivedIdMatch) {
-								return archivedIdMatch.id;
-							}
-						}
-						const activeTitleMatches = directiveEntities.filter(
-							(directive) => directive.title.trim().toLowerCase() === key,
-						);
-						if (activeTitleMatches.length === 1) {
-							return activeTitleMatches[0]?.id ?? normalized;
-						}
-						if (activeTitleMatches.length > 1) {
-							return normalized;
-						}
-						const archivedIdMatch = findIdMatch(archivedDirectives);
-						if (archivedIdMatch) {
-							return archivedIdMatch.id;
-						}
-						const archivedTitleMatches = archivedDirectives.filter(
-							(directive) => directive.title.trim().toLowerCase() === key,
-						);
-						if (archivedTitleMatches.length === 1) {
-							return archivedTitleMatches[0]?.id ?? normalized;
-						}
-						return normalized;
-					};
-					const archivedKeys = new Set(
-						collectArchivedDirectiveKeys(archivedDirectives, directiveEntities),
-					);
-					const normalizedProposals =
-						archivedKeys.size > 0
-							? proposals.map((proposal) => {
-									const key = directiveKey(
-										resolveDirectiveAlias(proposal.directive),
-									);
-									if (!key || !archivedKeys.has(key)) {
-										return proposal;
-									}
-									return { ...proposal, directive: undefined };
-								})
-							: proposals;
-					return {
-						proposals: normalizedProposals.map((t) => ({
-							...t,
-							status: t.status || "",
-						})),
-						statuses,
-					};
-				},
-	});
 }
 
 addBoardOptions(boardCmd)

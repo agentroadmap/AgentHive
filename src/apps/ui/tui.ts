@@ -48,11 +48,12 @@ function normalizeToError(value: unknown): Error {
 export function createScreen(
 	options: Partial<ScreenOptions> = {},
 ): ScreenInterface {
-	const program: ProgramInterface = createProgram({ tput: false });
+	const program: ProgramInterface = createProgram({ tput: true });
+	const fullUnicode = Boolean((program as { terminal?: { unicode?: boolean } }).terminal?.unicode);
 	const screen = blessedScreen({
 		smartCSR: true,
 		program,
-		fullUnicode: true,
+		fullUnicode,
 		...options,
 	});
 
