@@ -6,6 +6,7 @@ const blessed = require("neo-neo-bblessed") as typeof Blessed;
 
 export const {
 	box,
+	escape,
 	line,
 	list,
 	log,
