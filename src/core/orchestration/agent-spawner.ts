@@ -158,19 +158,71 @@ function detectProvider(worktreeName: string): AgentProvider {
 	throw new Error(`Unknown provider prefix for worktree "${worktreeName}"`);
 }
 
-/** Pick default model based on provider and optional hint. */
-function resolveModel(provider: AgentProvider, hint?: string): string {
-	if (hint) return hint;
-	switch (provider) {
-		case "claude":
-			return "claude-sonnet-4-6";
-		case "gemini":
-			return "gemini-2.0-flash";
-		case "copilot":
-			return "gpt-4o";
-		case "openclaw":
-			return "openclaw-v1";
+// ─── P235: Platform-Aware Model Constraints ──────────────────────────────────
+
+/**
+ * Maps AgentProvider enum to DB provider string(s) in model_metadata.
+ * openclaw covers both openai-compatible and nous (Hermes/xiaomi mimo models).
+ */
+const PROVIDER_DB_KEYS: Record<AgentProvider, string[]> = {
+	claude: ["anthropic"],
+	gemini: ["google"],
+	copilot: ["openai"],
+	openclaw: ["openai", "nous"],
+};
+
+/** Hard-coded platform defaults used when hint validation fails. */
+const PROVIDER_DEFAULTS: Record<AgentProvider, string> = {
+	claude: "claude-sonnet-4-6",
+	gemini: "gemini-2.0-flash",
+	copilot: "gpt-4o",
+	openclaw: "openclaw-v1",
+};
+
+/**
+ * P235: Resolve and validate model hint against platform constraints.
+ *
+ * If a hint is provided, queries model_metadata to confirm the model's
+ * provider is allowed for this AgentProvider platform. If it is not found
+ * or belongs to a different platform, logs a warning and falls back to the
+ * platform default — preventing cross-platform model leakage (e.g., a claude
+ * model hint reaching a gemini or openclaw worktree).
+ */
+async function resolveModel(
+	provider: AgentProvider,
+	hint?: string,
+): Promise<string> {
+	const defaultModel = PROVIDER_DEFAULTS[provider];
+
+	if (!hint) return defaultModel;
+
+	// Validate hint against model_metadata
+	const { rows } = await query<{ provider: string }>(
+		`SELECT provider FROM roadmap.model_metadata WHERE model_name = $1 AND is_active = true LIMIT 1`,
+		[hint],
+	);
+
+	if (rows.length === 0) {
+		// Model not in registry — allow it (custom/local models) but log
+		console.warn(
+			`[P235] Model "${hint}" not found in model_metadata — using as-is for provider "${provider}"`,
+		);
+		return hint;
 	}
+
+	const dbProvider = rows[0].provider;
+	const allowedKeys = PROVIDER_DB_KEYS[provider];
+
+	if (!allowedKeys.includes(dbProvider)) {
+		// Cross-platform leak detected — fall back to default
+		console.warn(
+			`[P235] Model hint "${hint}" (provider=${dbProvider}) is not allowed for agent provider "${provider}" ` +
+				`(allowed: ${allowedKeys.join(", ")}). Falling back to "${defaultModel}".`,
+		);
+		return defaultModel;
+	}
+
+	return hint;
 }
 
 async function buildProposalContextPackage(input: {
@@ -238,7 +290,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	} = req;
 
 	const provider = detectProvider(worktree);
-	const model = resolveModel(provider, modelHint);
+	const model = await resolveModel(provider, modelHint); // P235: async platform validation
 	const agentEnv = await loadEnvAgent(worktree);
 	let assembledTask = task;
 
@@ -397,20 +449,46 @@ export async function escalateOrNotify(
 	result: SpawnResult,
 	proposalId?: number,
 ): Promise<SpawnResult | null> {
-	const LADDER: Array<{ provider: AgentProvider; model: string }> = [
-		{ provider: "claude", model: "claude-haiku-4-5" },
-		{ provider: "claude", model: "claude-sonnet-4-6" },
-		{ provider: "claude", model: "claude-opus-4-6" },
-	];
+	const provider = detectProvider(req.worktree);
+	const allowedKeys = PROVIDER_DB_KEYS[provider];
 
-	// Find current position in ladder
-	const currentModel = result.stdout.match(/model=(\S+)/)?.[1] ?? "";
-	const currentIdx = LADDER.findIndex((l) => l.model === currentModel);
+	// P235: build ladder from model_metadata, filtered to this provider's platform
+	// Ordered by cost_per_1k_input ASC (cheap → expensive = escalation order)
+	const { rows: ladderRows } = await query<{ model_name: string }>(
+		`SELECT model_name
+     FROM roadmap.model_metadata
+     WHERE provider = ANY($1::text[]) AND is_active = true
+     ORDER BY cost_per_1k_input ASC`,
+		[allowedKeys],
+	);
+
+	const ladder = ladderRows.map((r) => r.model_name);
+
+	if (ladder.length === 0) {
+		// No models in registry for this provider — skip escalation, notify
+		await query(
+			`INSERT INTO notification_queue (proposal_id, severity, channel, title, body)
+       VALUES ($1, 'CRITICAL', 'discord', $2, $3)`,
+			[
+				proposalId ?? null,
+				`Agent task failed — no escalation ladder for provider "${provider}"`,
+				`Worktree: ${result.worktree}\nExit: ${result.exitCode}\nStderr: ${result.stderr.slice(0, 400)}`,
+			],
+		);
+		return null;
+	}
+
+	// Find current position (req.model is the model used for this run)
+	const currentModel = req.model ?? PROVIDER_DEFAULTS[provider];
+	const currentIdx = ladder.indexOf(currentModel);
 	const nextIdx = currentIdx + 1;
 
-	if (nextIdx < LADDER.length) {
-		const next = LADDER[nextIdx];
-		return spawnAgent({ ...req, model: next.model });
+	if (nextIdx < ladder.length) {
+		const nextModel = ladder[nextIdx];
+		console.log(
+			`[escalate] ${provider} ladder: "${currentModel}" → "${nextModel}" (step ${nextIdx}/${ladder.length - 1})`,
+		);
+		return spawnAgent({ ...req, model: nextModel });
 	}
 
 	// All escalations exhausted — notify USER
