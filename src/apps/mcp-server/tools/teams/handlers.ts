@@ -258,9 +258,12 @@ export class TeamHandlers {
 		teamType?: string;
 	}): Promise<CallToolResult> {
 		try {
-			const teams = this.teamBuilder.listTeams({
-				status: args.status ?? "active",
-				teamType: args.teamType,
+			const teams = this.teamBuilder.getAllTeams().filter((team) => {
+				const status = args.status ?? "active";
+				const matchesStatus = status === "all" || team.status === status;
+				const matchesType =
+					!args.teamType || team.metadata.teamType === args.teamType;
+				return matchesStatus && matchesType;
 			});
 
 			if (teams.length === 0) {
@@ -277,13 +280,13 @@ export class TeamHandlers {
 			const lines = [`Teams (${teams.length}):`, ""];
 
 			for (const team of teams) {
-				lines.push(`📋 ${team.name || team.teamId}`);
+				lines.push(`📋 ${team.projectName || team.teamId}`);
 				lines.push(`   ID: ${team.teamId}`);
-				lines.push(`   Type: ${team.teamType || "general"}`);
-				lines.push(`   Status: ${team.status || "active"}`);
-				lines.push(`   Members: ${team.members?.length || 0}`);
-				if (team.description) {
-					lines.push(`   Description: ${team.description}`);
+				lines.push(`   Type: ${team.metadata.teamType || "general"}`);
+				lines.push(`   Status: ${team.status}`);
+				lines.push(`   Members: ${team.members.length}`);
+				if (team.metadata.description) {
+					lines.push(`   Description: ${team.metadata.description}`);
 				}
 				lines.push("");
 			}
@@ -308,11 +311,7 @@ export class TeamHandlers {
 		role: string;
 	}): Promise<CallToolResult> {
 		try {
-			const result = await this.membership.addMember({
-				teamId: args.teamId,
-				agentId: args.agentId,
-				role: args.role,
-			});
+			this.membership.addToRoster(args.teamId, args.agentId);
 
 			return {
 				content: [

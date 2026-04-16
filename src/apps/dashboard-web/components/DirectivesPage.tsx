@@ -6,6 +6,11 @@ import LoadingSpinner from "./LoadingSpinner";
 
 interface DirectivesPageProps {
 	proposals?: Proposal[];
+	statuses?: string[];
+	directiveEntities?: Directive[];
+	archivedDirectives?: Directive[];
+	onEditProposal?: (proposal: Proposal) => void;
+	onRefreshData?: () => Promise<void>;
 }
 
 const _statusColor = (status: string) => {
@@ -25,9 +30,12 @@ const _statusColor = (status: string) => {
 	}
 };
 
-const DirectivesPage: React.FC<DirectivesPageProps> = ({ proposals = [] }) => {
-	const [directives, setDirectives] = useState<Directive[]>([]);
-	const [loading, setLoading] = useState(true);
+const DirectivesPage: React.FC<DirectivesPageProps> = ({
+	proposals = [],
+	directiveEntities,
+}) => {
+	const [directives, setDirectives] = useState<Directive[]>(directiveEntities ?? []);
+	const [loading, setLoading] = useState(!directiveEntities);
 	const [error, setError] = useState<string | null>(null);
 	const [_showArchived, _setShowArchived] = useState(false);
 
@@ -45,8 +53,13 @@ const DirectivesPage: React.FC<DirectivesPageProps> = ({ proposals = [] }) => {
 	}, []);
 
 	useEffect(() => {
+		if (directiveEntities) {
+			setDirectives(directiveEntities);
+			setLoading(false);
+			return;
+		}
 		fetchData();
-	}, [fetchData]);
+	}, [directiveEntities, fetchData]);
 
 	const directiveStats = useMemo(() => {
 		const stats = new Map<

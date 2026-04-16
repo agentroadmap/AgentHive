@@ -13,8 +13,6 @@ database:
 mcp:
   port: 6421
   transport: sse
-  sdb_url: 'http://127.0.0.1:3000/'
-  sdb_database: c200929bd0127921065806e4e922c2836007c9a6191f6dca26531e3c67090e3e
 proposals:
   default_status: Draft
   statuses:

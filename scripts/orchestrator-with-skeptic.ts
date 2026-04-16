@@ -11,6 +11,7 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { mcpText, parseMcpJson } from "./mcp-result.ts";
 import { getPool, query } from "../src/infra/postgres/pool.ts";
 
 const MCP_URL = "http://127.0.0.1:6421/sse";
@@ -113,7 +114,7 @@ async function skepticReview(proposalId: string, fromState: string, toState: str
       name: "prop_get",
       arguments: { id: proposalId }
     });
-    const data = JSON.parse(result.content?.[0]?.text || "{}");
+    const data = JSON.parse(mcpText(result) || "{}");
     
     const verdict: SkepticVerdict = {
       approved: true,

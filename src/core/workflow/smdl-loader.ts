@@ -402,7 +402,7 @@ export async function materializeWorkflow(smdl: SMDLRoot): Promise<{
 		// validate without joining workflow_transitions (which uses a different
 		// column schema). requires_ac bool → 'all'|'none' text enum.
 		await query(
-			`INSERT INTO proposal_valid_transitions
+			`INSERT INTO roadmap_proposal.proposal_valid_transitions
          (workflow_name, from_state, to_state, allowed_reasons, allowed_roles, requires_ac)
        VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (workflow_name, from_state, to_state) DO UPDATE SET

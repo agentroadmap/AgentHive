@@ -503,7 +503,7 @@ export async function validateACFromDB(
 	const { rows: allRows } = await query<ACCriterionRow>(
 		`SELECT item_number, criterion_text, status, verified_by, verification_notes,
         TO_CHAR(verified_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS verified_at
-     FROM proposal_acceptance_criteria
+     FROM roadmap_proposal.proposal_acceptance_criteria
      WHERE proposal_id = $1
      ORDER BY item_number ASC`,
 		[proposalId],

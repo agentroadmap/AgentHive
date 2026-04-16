@@ -12,13 +12,13 @@ import {
 	removeDependency,
 	resolveDependency,
 	createStore,
-	type CycleCheckResult,
-	type DependencyResolutionSummary,
-	type ProposalDependency,
 } from "../../../../core/dag/dependency-engine.ts";
 import type {
 	CreateDependencyInput,
+	CycleCheckResult,
 	DependencyQueryFilters,
+	DependencyResolutionSummary,
+	ProposalDependency,
 	ResolveDependencyInput,
 } from "../../../../core/dag/dependency-types.ts";
 

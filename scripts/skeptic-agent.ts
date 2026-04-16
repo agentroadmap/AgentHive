@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { mcpText, parseMcpJson } from "./mcp-result.ts";
 
 const transport = new SSEClientTransport(new URL("http://127.0.0.1:6421/sse"));
 const client = new Client({ name: "skeptic-agent", version: "1.0.0" });
@@ -16,7 +17,7 @@ const cubic = await client.callTool({
     proposals: ["P149", "P050", "P054", "P059", "P061", "P062"]
   }
 });
-console.log("Skeptic cubic created:", cubic.content?.[0]?.text?.substring(0, 150));
+console.log("Skeptic cubic created:", mcpText(cubic).substring(0, 150));
 
 // Focus the cubic
 const focus = await client.callTool({
@@ -28,7 +29,7 @@ const focus = await client.callTool({
     phase: "design"
   }
 });
-console.log("\nCubic focused:", focus.content?.[0]?.text?.substring(0, 100));
+console.log("\nCubic focused:", mcpText(focus).substring(0, 100));
 
 // Review recent gate decisions
 console.log("\n=== SKEPTIC REVIEW — Questioning Recent Decisions ===\n");
@@ -38,7 +39,7 @@ const p149 = await client.callTool({
   name: "prop_get",
   arguments: { id: "P149" }
 });
-const p149Data = JSON.parse(p149.content?.[0]?.text || "{}");
+const p149Data = JSON.parse(mcpText(p149) || "{}");
 console.log("P149 Challenge:");
 console.log("  Status:", p149Data.status);
 console.log("  Has ACs:", p149Data.acceptance_criteria?.length > 0 ? "Yes" : "NO — BLOCKED");

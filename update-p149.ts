@@ -1,6 +1,7 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { mcpText, parseMcpJson } from "./scripts/mcp-result.ts";
 
 const transport = new SSEClientTransport(new URL("http://127.0.0.1:6421/sse"));
 const client = new Client({ name: "hermes-architect", version: "1.0.0" });
@@ -11,7 +12,7 @@ const current = await client.callTool({
   name: "prop_get",
   arguments: { proposalId: "P149" }
 });
-console.log("Current:", current.content?.[0]?.text?.substring(0, 500));
+console.log("Current:", mcpText(current).substring(0, 500));
 
 // Update with enhanced description, ACs, and verification
 const result = await client.callTool({
@@ -49,7 +50,7 @@ ARCHITECTURE DECISION: Build on existing pg_notify pattern (trigger + listener) 
     ]
   }
 });
-console.log("\nUpdate result:", result.content?.[0]?.text);
+console.log("\nUpdate result:", mcpText(result));
 
 await client.close();
 

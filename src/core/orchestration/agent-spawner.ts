@@ -15,16 +15,10 @@
  * are captured and stored in agent_runs.
  */
 
-import { randomUUID, createHash } from "node:crypto";
-import { type ChildProcess, execSync, spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { query } from "../../infra/postgres/pool.ts";
-import { buildProposalContextPackage } from "./context-builder.ts";
-import {
-	createDriftMonitor,
-	estimateTokenCount,
-} from "./token-efficiency.ts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -84,49 +78,14 @@ function buildClaudeArgs(
 	req: SpawnRequest,
 	model: string,
 ): { argv: string[]; env: Record<string, string> } {
-	const mcpConfigPath = join(WORKTREE_ROOT, req.worktree, ".mcp.json");
 	const argv = [
 		"claude",
 		"--print", // non-interactive: print response and exit
-		"--mcp-config", mcpConfigPath,
-		"--allowedTools", "mcp__agenthive__*,mcp__roadmap__*,Read,Write,Edit,Bash,Glob,Grep",
 		"--model",
 		model,
 		req.task,
 	];
 	return { argv, env: { ANTHROPIC_MODEL: model } };
-}
-
-/** Model prefixes that must NOT be passed to the Hermes CLI.
- *  Hermes routes to Nous/Xiaomi; passing Anthropic/Google/OpenAI model names
- *  causes it to call those providers' APIs at much higher cost.
- */
-const HERMES_FOREIGN_PREFIXES = ["claude-", "gemini-", "gpt-", "o1-", "o3-", "o4-", "openclaw-"];
-
-/**
- * Build the argv for a Hermes CLI invocation (Nous subscription).
- * Fallback runtime when claude/codex aren't authenticated.
- * Cross-provider model hints are stripped — Hermes only accepts Nous/Xiaomi model names.
- */
-function buildHermesArgs(
-	req: SpawnRequest,
-	model: string,
-): { argv: string[]; env: Record<string, string> } {
-	const argv = [
-		"hermes",
-		"chat",
-		"-q", req.task,
-		"-Q",
-		"--provider", "nous",
-		"--yolo",
-	];
-	// Only forward the model hint if it belongs to the Hermes/Nous/Xiaomi namespace.
-	// Drop any foreign-provider model name to prevent cross-platform API calls.
-	const isForeign = HERMES_FOREIGN_PREFIXES.some((p) => model.toLowerCase().startsWith(p));
-	if (model && !isForeign) {
-		argv.push("-m", model);
-	}
-	return { argv, env: {} };
 }
 
 /**
@@ -199,30 +158,9 @@ function detectProvider(worktreeName: string): AgentProvider {
 	throw new Error(`Unknown provider prefix for worktree "${worktreeName}"`);
 }
 
-/**
- * Model name prefixes that belong exclusively to each provider.
- * A hint from a different provider's namespace is silently dropped
- * and the provider default is used instead.
- */
-const PROVIDER_MODEL_PREFIXES: Record<AgentProvider, string[]> = {
-	claude:    ["claude-"],
-	gemini:    ["gemini-"],
-	copilot:   ["gpt-", "o1-", "o3-", "o4-"],
-	openclaw:  ["openclaw-"],
-};
-
-/** Pick default model based on provider and optional hint.
- *  Cross-provider hints (e.g. "claude-sonnet-4-6" passed to a gemini worktree)
- *  are rejected and the provider default is used instead.
- */
+/** Pick default model based on provider and optional hint. */
 function resolveModel(provider: AgentProvider, hint?: string): string {
-	if (hint) {
-		const validPrefixes = PROVIDER_MODEL_PREFIXES[provider];
-		if (validPrefixes.some((p) => hint.toLowerCase().startsWith(p))) {
-			return hint; // hint belongs to this provider's model family
-		}
-		// hint is from a foreign provider's namespace — ignore it
-	}
+	if (hint) return hint;
 	switch (provider) {
 		case "claude":
 			return "claude-sonnet-4-6";
@@ -233,34 +171,6 @@ function resolveModel(provider: AgentProvider, hint?: string): string {
 		case "openclaw":
 			return "openclaw-v1";
 	}
-}
-
-/**
- * Check if a CLI provider is authenticated and available.
- * Falls back to "hermes" (always available via Nous subscription).
- */
-async function resolveAvailableProvider(preferred: AgentProvider): Promise<string> {
-	try {
-		switch (preferred) {
-			case "claude": {
-				const out = execSync("claude auth status 2>&1", { timeout: 5000, encoding: "utf8" });
-				if (out.includes('"loggedIn": true')) return "claude";
-				break;
-			}
-			case "gemini":
-			case "copilot":
-			case "openclaw":
-				// Check if the CLI exists on PATH
-				try {
-					execSync(`which ${preferred} 2>/dev/null`, { timeout: 3000 });
-					return preferred;
-				} catch { /* not available */ }
-				break;
-		}
-	} catch { /* auth check failed */ }
-
-	// Fallback to hermes — always available (Nous subscription)
-	return "hermes";
 }
 
 // ─── Core spawn logic ─────────────────────────────────────────────────────────
@@ -282,21 +192,10 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	const provider = detectProvider(worktree);
 	const model = resolveModel(provider, modelHint);
 	const agentEnv = await loadEnvAgent(worktree);
-	const runId = randomUUID();
-
-	await query(
-		`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, status)
-     VALUES ($1, 'llm', 'active')
-     ON CONFLICT (agent_identity) DO UPDATE SET status = 'active'`,
-		[worktree],
-	);
-
-	// Build context package first so the enriched task is used when assembling argv.
 	let assembledTask = task;
-	let contextPackage = "";
 
 	if (proposalId !== undefined) {
-		contextPackage = await buildProposalContextPackage({
+		const contextPackage = await buildProposalContextPackage({
 			proposalId,
 			taskType: stage ?? "unknown",
 			agentIdentity: worktree,
@@ -305,35 +204,30 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		assembledTask = `${contextPackage}\n\n## Task\n${task}`;
 	}
 
-	// Build provider-specific argv and additional env.
-	// Fall back to hermes if the preferred CLI isn't authenticated.
+	const spawnReq = { ...req, task: assembledTask };
+
+	// Build provider-specific argv and additional env
 	let argv: string[];
 	let extraEnv: Record<string, string>;
-	const spawnReq = () => ({ ...req, task: assembledTask });
 
-	const effectiveProvider = await resolveAvailableProvider(provider);
-	switch (effectiveProvider) {
+	switch (provider) {
 		case "claude":
-			({ argv, env: extraEnv } = buildClaudeArgs(spawnReq(), model));
+			({ argv, env: extraEnv } = buildClaudeArgs(spawnReq, model));
 			break;
 		case "gemini":
-			({ argv, env: extraEnv } = buildGeminiArgs(spawnReq(), model));
+			({ argv, env: extraEnv } = buildGeminiArgs(spawnReq, model));
 			break;
 		case "copilot":
 		case "openclaw":
-			({ argv, env: extraEnv } = buildOpenAICompatArgs(spawnReq(), model));
-			break;
-		default:
-			// hermes fallback — always available (Nous subscription)
-			({ argv, env: extraEnv } = buildHermesArgs(spawnReq(), model));
+			({ argv, env: extraEnv } = buildOpenAICompatArgs(spawnReq, model));
 			break;
 	}
 
-	// Assemble process environment — host auth inheritance.
-	// Each CLI reads auth from its own config in HOME. The agent does NOT manage credentials.
+	// Assemble process environment (agent-scoped, not inheriting secrets from host)
 	const processEnv: Record<string, string> = {
-		PATH: "/home/andy/.local/bin:" + (process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin"),
-		HOME: process.env.HOME ?? "/home/andy",
+		// Carry through essential PATH
+		PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
+		HOME: process.env.HOME ?? "/root",
 		// Agent-specific overrides from .env.agent
 		DATABASE_URL: agentEnv.DATABASE_URL ?? "",
 		AGENT_WORKTREE: worktree,
@@ -341,77 +235,27 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		// Git identity isolation
 		GIT_CONFIG_GLOBAL: `${GITCONFIG_ROOT}/${worktree}.gitconfig`,
 		GIT_CONFIG_NOSYSTEM: "1",
+		// API keys: pass through from host environment (agents need them)
+		...(process.env.ANTHROPIC_API_KEY && {
+			ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+		}),
+		...(process.env.GEMINI_API_KEY && {
+			GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+		}),
+		...(process.env.OPENAI_API_KEY && {
+			OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+		}),
 		// Provider-specific overrides from argv builder
 		...extraEnv,
 	};
 
-	const estimatedInputTokens = estimateTokenCount(assembledTask);
-	const inputHash = createHash("sha256")
-		.update(assembledTask)
-		.digest("hex");
-
-	const { rows: modelRows } = await query<{ model_name: string }>(
-		`SELECT model_name FROM model_metadata WHERE model_name = $1 LIMIT 1`,
-		[model],
-	);
-	const modelNameForLogs = modelRows[0]?.model_name ?? null;
-
-	await query(
-		`INSERT INTO run_log
-       (run_id, agent_identity, proposal_id, model_name, pipeline_stage, input_summary, status)
-     VALUES ($1, $2, $3, $4, $5, $6, 'running')
-     ON CONFLICT (run_id) DO UPDATE
-     SET agent_identity = EXCLUDED.agent_identity,
-         proposal_id = EXCLUDED.proposal_id,
-         model_name = EXCLUDED.model_name,
-         pipeline_stage = EXCLUDED.pipeline_stage,
-         input_summary = EXCLUDED.input_summary,
-         status = 'running'`,
-		[
-			runId,
-			worktree,
-			proposalId ?? null,
-			modelNameForLogs,
-			stage ?? "unknown",
-			task.slice(0, 500),
-		],
-	);
-
-	if (modelNameForLogs) {
-		await query(
-			`INSERT INTO context_window_log
-         (agent_identity, proposal_id, model_name, input_tokens, output_tokens, context_limit, was_truncated, truncation_note, run_id)
-       VALUES ($1, $2, $3, $4, 0, $5, $6, $7, $8)`,
-			[
-				worktree,
-				proposalId ?? null,
-				modelNameForLogs,
-				estimatedInputTokens,
-				2000,
-				estimatedInputTokens > 2000,
-				estimatedInputTokens > 2000
-					? "Context trimmed to target budget by token-efficiency builder"
-					: null,
-				runId,
-			],
-		);
-	}
-
 	// Insert agent_runs row (status = running)
 	const { rows } = await query(
 		`INSERT INTO agent_runs
-       (proposal_id, display_id, agent_identity, stage, model_used, status, started_at, tokens_in, input_hash)
-     VALUES ($1, $2, $3, $4, $5, 'running', now(), $6, $7)
+       (proposal_id, display_id, agent_identity, stage, model_used, status, started_at)
+     VALUES ($1, $2, $3, $4, $5, 'running', now())
      RETURNING id`,
-		[
-			proposalId ?? null,
-			`wt:${worktree}`,
-			worktree,
-			stage ?? "unknown",
-			model,
-			estimatedInputTokens,
-			inputHash,
-		],
+		[proposalId ?? null, `wt:${worktree}`, worktree, stage ?? "unknown", model],
 	);
 	const agentRunId = String(rows[0].id);
 
@@ -423,39 +267,16 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		cwd,
 		processEnv,
 		timeoutMs,
-		createDriftMonitor(task, {}),
 	);
 	const durationMs = Date.now() - startMs;
 
 	// Update agent_runs on completion
-	const driftKilled = stderr.includes("critical drift");
-	const status = driftKilled
-		? "cancelled"
-		: exitCode === 0
-			? "completed"
-			: "failed";
+	const status = exitCode === 0 ? "completed" : "failed";
 	await query(
 		`UPDATE agent_runs
-     SET status = $1, duration_ms = $2, output_summary = $3, completed_at = now(),
-         tokens_out = $4, cost_usd = $5
-     WHERE id = $6`,
-		[
-			status,
-			durationMs,
-			stdout.slice(0, 500),
-			estimateTokenCount(stdout),
-			0,
-			agentRunId,
-		],
-	);
-	await query(
-		`UPDATE run_log
-       SET status = $1, finished_at = now()
-     WHERE run_id = $2`,
-		[
-			status === "completed" ? "success" : status === "cancelled" ? "cancelled" : "error",
-			runId,
-		],
+     SET status = $1, duration_ms = $2, output_summary = $3, completed_at = now()
+     WHERE id = $4`,
+		[status, durationMs, stdout.slice(0, 500), agentRunId],
 	);
 
 	return { agentRunId, worktree, exitCode, stdout, stderr, durationMs };
@@ -474,7 +295,6 @@ function runProcess(
 	cwd: string,
 	env: Record<string, string>,
 	timeoutMs: number,
-	driftMonitor?: ReturnType<typeof createDriftMonitor>,
 ): Promise<ProcessResult> {
 	return new Promise((resolve) => {
 		const [cmd, ...args] = argv;
@@ -486,52 +306,26 @@ function runProcess(
 
 		let stdout = "";
 		let stderr = "";
-		let lastActivityMs = Date.now();
-
-		// Rolling liveness: reset on any output. Kill if silent for 2 minutes.
-		const SILENCE_KILL_MS = 120_000; // no output for 2 min = dead
-		const ABSOLUTE_MAX_MS = timeoutMs; // hard cap from config
-
-		const livenessCheck = setInterval(() => {
-			const silentMs = Date.now() - lastActivityMs;
-			if (silentMs > SILENCE_KILL_MS) {
-				child.kill("SIGTERM");
-				stderr += `\n[agent-spawner] Killed — no output for ${Math.round(silentMs / 1000)}s`;
-				clearInterval(livenessCheck);
-			}
-		}, 15_000); // check every 15s
-
-		// Absolute safety timeout
-		const absoluteTimer = setTimeout(() => {
-			child.kill("SIGTERM");
-			stderr += "\n[agent-spawner] Killed after absolute timeout";
-			clearInterval(livenessCheck);
-		}, ABSOLUTE_MAX_MS);
 
 		child.stdout?.on("data", (d: Buffer) => {
-			const chunk = d.toString();
-			stdout += chunk;
-			lastActivityMs = Date.now(); // agent is alive
-			const drift = driftMonitor?.record(chunk);
-			if (drift?.level === "critical") {
-				child.kill("SIGTERM");
-				stderr += `\n[agent-spawner] Killed for critical drift (${drift.score.toFixed(2)})`;
-			}
+			stdout += d.toString();
 		});
 		child.stderr?.on("data", (d: Buffer) => {
 			stderr += d.toString();
-			lastActivityMs = Date.now(); // agent is alive
 		});
 
+		const timer = setTimeout(() => {
+			child.kill("SIGTERM");
+			stderr += "\n[agent-spawner] Killed after timeout";
+		}, timeoutMs);
+
 		child.on("close", (code) => {
-			clearInterval(livenessCheck);
-			clearTimeout(absoluteTimer);
+			clearTimeout(timer);
 			resolve({ stdout, stderr, exitCode: code });
 		});
 
 		child.on("error", (err) => {
-			clearInterval(livenessCheck);
-			clearTimeout(absoluteTimer);
+			clearTimeout(timer);
 			resolve({
 				stdout,
 				stderr: `${stderr}\n[agent-spawner] spawn error: ${err.message}`,

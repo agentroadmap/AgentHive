@@ -32,7 +32,7 @@ Define the **Postgres** table that handles the "Sync Loop." This table tracks wh
 pub struct SyncLedger {
     #[primarykey]
     pub artifact_path: String, // e.g., "product/RFC-001.md"
-    pub last_sdb_hash: String,  // Hash of the data in Postgres
+    pub last_source_hash: String,  // Hash of the data in Postgres
     pub last_git_commit: String, // The Git SHA for auditability
     pub sync_status: SyncStatus, // Enum: Synced, Pending, Error
 }
@@ -50,4 +50,3 @@ pub struct SyncLedger {
 
 ### **Architect’s Final Note for 2026**
 You are building more than a coding tool; you are building an **Agentic OS**. By separating the "Live State" (Postgres) from the "Permanent Record" (Git), you've solved the biggest problem in AI development: **Traceability.** If an agent makes a mistake on Agent #99, you can look at the Git history in `product/` and see exactly which "Visionary Command" started the chain of events.
-

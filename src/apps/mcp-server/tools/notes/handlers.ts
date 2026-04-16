@@ -69,7 +69,7 @@ export class NoteHandlers {
 	): Promise<number | null> {
 		const { rows } = await query<ProposalIdRow>(
 			`SELECT id
-			 FROM proposal
+			 FROM roadmap_proposal.proposal
 			 WHERE display_id = $1 OR CAST(id AS text) = $1
 			 LIMIT 1`,
 			[proposalId],
@@ -99,7 +99,7 @@ export class NoteHandlers {
 			const contextPrefix =
 				NOTE_TYPE_TO_CONTEXT[noteType] ?? NOTE_TYPE_TO_CONTEXT.general;
 			const { rows } = await query<{ id: number }>(
-				`INSERT INTO proposal_discussions (proposal_id, author_identity, body, context_prefix)
+				`INSERT INTO roadmap_proposal.proposal_discussions (proposal_id, author_identity, body, context_prefix)
 				 VALUES ($1, $2, $3, $4)
 				 RETURNING id`,
 				[proposalRowId, author, args.content, contextPrefix],
@@ -135,7 +135,7 @@ export class NoteHandlers {
 
 			const params: Array<number | string> = [proposalRowId];
 			let sql = `SELECT id, author_identity, body, context_prefix, created_at
-			           FROM proposal_discussions
+			           FROM roadmap_proposal.proposal_discussions
 			           WHERE proposal_id = $1`;
 
 			if (args.note_type) {
@@ -185,7 +185,7 @@ export class NoteHandlers {
 	}): Promise<CallToolResult> {
 		try {
 			const { rowCount } = await query(
-				`DELETE FROM proposal_discussions
+				`DELETE FROM roadmap_proposal.proposal_discussions
 				 WHERE id = $1`,
 				[args.note_id],
 			);
@@ -222,7 +222,7 @@ export class NoteHandlers {
 
 			const params: Array<number | string> = [proposalRowId];
 			let sql = `SELECT id, author_identity, body, context_prefix, created_at
-			           FROM proposal_discussions
+			           FROM roadmap_proposal.proposal_discussions
 			           WHERE proposal_id = $1`;
 
 			if (args.note_type) {

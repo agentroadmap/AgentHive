@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { mcpText, parseMcpJson } from "./mcp-result.ts";
 
 const transport = new SSEClientTransport(new URL("http://127.0.0.1:6421/sse"));
 const client = new Client({ name: "skeptic-gate", version: "1.0.0" });
@@ -21,7 +22,7 @@ console.log("");
 
 // Check P149
 const p149 = await client.callTool({ name: "prop_get", arguments: { id: "P149" } });
-const p149Data = JSON.parse(p149.content?.[0]?.text || "{}");
+const p149Data = JSON.parse(mcpText(p149) || "{}");
 
 console.log("P149 — Channel subscription and push notifications");
 console.log("  Status: " + p149Data.status);
@@ -64,7 +65,7 @@ const developIds = ["P045", "P046", "P047", "P048", "P066", "P067", "P068", "P05
 for (const id of developIds) {
   try {
     const result = await client.callTool({ name: "prop_get", arguments: { id } });
-    const data = JSON.parse(result.content?.[0]?.text || "{}");
+    const data = JSON.parse(mcpText(result) || "{}");
     
     if (data.status === "DEVELOP" && data.maturity_state === "mature") {
       console.log(`${id} — ${data.title?.substring(0, 50)}`);

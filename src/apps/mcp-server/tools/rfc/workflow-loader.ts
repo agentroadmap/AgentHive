@@ -102,7 +102,7 @@ export function workflowToSql(wf: WorkflowDefinition): string {
 	// Live schema columns: from_state, to_state, allowed_reasons, allowed_roles, requires_ac, workflow_name
 	if (wf.transitions.length > 0) {
 		sql.push(`\n-- Transitions for ${wf.metadata.name}`);
-		sql.push(`INSERT INTO proposal_valid_transitions `);
+		sql.push(`INSERT INTO roadmap_proposal.proposal_valid_transitions `);
 		sql.push(
 			`  (workflow_name, from_state, to_state, allowed_roles, requires_ac)`,
 		);
@@ -126,7 +126,7 @@ export function workflowToSql(wf: WorkflowDefinition): string {
 	// Insert acceptance criteria
 	if (wf.acceptance.length > 0) {
 		sql.push(`\n-- Acceptance criteria for ${wf.metadata.name}`);
-		sql.push(`INSERT INTO proposal_acceptance_criteria`);
+		sql.push(`INSERT INTO roadmap_proposal.proposal_acceptance_criteria`);
 		sql.push(`  (workflow_name, key, label, description, applies_to_states)`);
 		sql.push(`VALUES`);
 

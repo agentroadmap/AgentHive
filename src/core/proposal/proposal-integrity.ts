@@ -117,10 +117,10 @@ async function validateTransitionRule(
 ): Promise<TransitionValidationResult> {
 	const { rows } = await query<TransitionRuleRow>(
 		`SELECT pvt.from_state, pvt.to_state, pvt.allowed_reasons, pvt.allowed_roles, pvt.requires_ac
-     FROM proposal_valid_transitions pvt
-     JOIN workflows w ON w.proposal_id = $1
-     JOIN workflow_templates wt ON wt.id = w.template_id
-     JOIN proposal_type_config ptc ON ptc.workflow_name = wt.name
+     FROM roadmap_proposal.proposal_valid_transitions pvt
+     JOIN roadmap.workflows w ON w.proposal_id = $1
+     JOIN roadmap.workflow_templates wt ON wt.id = w.template_id
+     JOIN roadmap_proposal.proposal_type_config ptc ON ptc.workflow_name = wt.name
      WHERE pvt.workflow_name = ptc.workflow_name
        AND LOWER(pvt.from_state) = LOWER($2)
        AND LOWER(pvt.to_state) = LOWER($3)
@@ -150,7 +150,8 @@ async function validateMaturityGate(
 	proposalId: number,
 	currentState: string,
 ): Promise<TransitionValidationResult> {
-	const { rows } = await query<{ maturity: string }>(`SELECT maturity FROM proposal WHERE id = $1 LIMIT 1`,
+	const { rows } = await query<{ maturity: string }>(
+		`SELECT maturity FROM roadmap_proposal.proposal WHERE id = $1 LIMIT 1`,
 		[proposalId],
 	);
 
@@ -203,7 +204,7 @@ async function validateACGate(
 
 	const { rows } = await query<ProposalAcceptanceCriterionRow>(
 		`SELECT item_number, criterion_text, status
-     FROM proposal_acceptance_criteria
+     FROM roadmap_proposal.proposal_acceptance_criteria
      WHERE proposal_id = $1
        AND status NOT IN ('pass', 'waived')
      ORDER BY item_number ASC`,
@@ -244,7 +245,7 @@ async function validateLease(
 ): Promise<TransitionValidationResult> {
 	const { rows } = await query<LeaseRow>(
 		`SELECT agent_identity, expires_at, released_at
-     FROM proposal_lease
+     FROM roadmap_proposal.proposal_lease
      WHERE proposal_id = $1 AND released_at IS NULL
      ORDER BY claimed_at DESC
      LIMIT 1`,
@@ -302,14 +303,14 @@ async function validateNoCycles(
 		`WITH RECURSIVE dep_graph AS (
        -- Start from this proposal's dependencies
        SELECT from_proposal_id, to_proposal_id, ARRAY[from_proposal_id] AS path
-       FROM proposal_dependencies
+       FROM roadmap_proposal.proposal_dependencies
        WHERE from_proposal_id = $1 AND NOT resolved
 
        UNION ALL
 
        -- Follow the chain
        SELECT pd.from_proposal_id, pd.to_proposal_id, dg.path || pd.from_proposal_id
-       FROM proposal_dependencies pd
+       FROM roadmap_proposal.proposal_dependencies pd
        JOIN dep_graph dg ON pd.from_proposal_id = dg.to_proposal_id
        WHERE NOT pd.resolved
          AND pd.from_proposal_id != ALL(dg.path)  -- prevent infinite loops
@@ -357,10 +358,10 @@ export async function validateRole(
 ): Promise<TransitionValidationResult> {
 	const { rows } = await query<{ allowed_roles: string[] | null }>(
 		`SELECT pvt.allowed_roles
-     FROM proposal_valid_transitions pvt
-     JOIN workflows w ON w.proposal_id = $1
-     JOIN workflow_templates wt ON wt.id = w.template_id
-     JOIN proposal_type_config ptc ON ptc.workflow_name = wt.name
+     FROM roadmap_proposal.proposal_valid_transitions pvt
+     JOIN roadmap.workflows w ON w.proposal_id = $1
+     JOIN roadmap.workflow_templates wt ON wt.id = w.template_id
+     JOIN roadmap_proposal.proposal_type_config ptc ON ptc.workflow_name = wt.name
      WHERE pvt.workflow_name = ptc.workflow_name
        AND LOWER(pvt.from_state) = LOWER($2)
        AND LOWER(pvt.to_state) = LOWER($3)
@@ -424,7 +425,7 @@ export async function checkACStatus(
 ): Promise<{ allPassed: boolean; blockingCriteria: ProposalAcceptanceCriterionRow[] }> {
 	const { rows } = await query<ProposalAcceptanceCriterionRow>(
 		`SELECT item_number, criterion_text, status, verified_by, verification_notes, verified_at
-     FROM proposal_acceptance_criteria
+     FROM roadmap_proposal.proposal_acceptance_criteria
      WHERE proposal_id = $1
        AND status NOT IN ('pass', 'waived')
      ORDER BY item_number ASC`,
@@ -444,7 +445,7 @@ export async function getMaturityState(
 	proposalId: number,
 ): Promise<{ currentState: string; maturityState: string } | null> {
 	const { rows } = await query<{ status: string; maturity: string }>(
-		`SELECT status, maturity FROM proposal WHERE id = $1 LIMIT 1`,
+		`SELECT status, maturity FROM roadmap_proposal.proposal WHERE id = $1 LIMIT 1`,
 		[proposalId],
 	);
 

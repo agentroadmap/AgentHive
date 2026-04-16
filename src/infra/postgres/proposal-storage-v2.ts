@@ -4,52 +4,12 @@
  * Targets the active schema selected by the connection pool search_path.
  */
 import { getPool, query } from "./pool.ts";
-import { makeCacheKey } from "../../core/orchestration/token-efficiency.ts";
 
 const PROPOSAL_COLUMNS = `
   id, display_id, parent_id, type, status, maturity, title,
   summary, motivation, design, drawbacks, alternatives,
   dependency, priority, tags, audit, created_at, modified_at
 `;
-
-const CACHE_TTL_MS = 60 * 60 * 1000;
-
-type CacheEntry<T> = {
-	value: T;
-	expiresAt: number;
-};
-
-const proposalCache = new Map<string, CacheEntry<ProposalRow | null>>();
-const acceptanceCriteriaCache = new Map<
-	string,
-	CacheEntry<ProposalAcceptanceCriterionRow[]>
->();
-
-function readCache<T>(cache: Map<string, CacheEntry<T>>, key: string): T | null {
-	const entry = cache.get(key);
-	if (!entry) return null;
-	if (entry.expiresAt <= Date.now()) {
-		cache.delete(key);
-		return null;
-	}
-	return entry.value;
-}
-
-function writeCache<T>(
-	cache: Map<string, CacheEntry<T>>,
-	key: string,
-	value: T,
-): void {
-	cache.set(key, {
-		value,
-		expiresAt: Date.now() + CACHE_TTL_MS,
-	});
-}
-
-function invalidateProposalCaches(): void {
-	proposalCache.clear();
-	acceptanceCriteriaCache.clear();
-}
 
 export type ProposalRow = {
 	id: number;
@@ -150,7 +110,7 @@ export type ProposalTypeConfigRow = {
 
 /**
  * List proposals with optional filters.
- * Uses roadmap.proposal v2 table.
+ * Uses roadmap_proposal.proposal v2 table.
  */
 export async function listProposals(filters?: {
 	status?: string;
@@ -173,7 +133,7 @@ export async function listProposals(filters?: {
 	const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
 	const { rows } = await query<ProposalRow>(
 		`SELECT ${PROPOSAL_COLUMNS}
-     FROM proposal
+     FROM roadmap_proposal.proposal
      ${where}
      ORDER BY id ASC`,
 		params,
@@ -187,45 +147,22 @@ export async function listProposals(filters?: {
 export async function getProposal(
 	identifier: string | number,
 ): Promise<ProposalRow | null> {
-	const cacheKey = makeCacheKey("proposal", identifier);
-	const cached = readCache(proposalCache, cacheKey);
-	if (cached !== null) return cached;
-
 	const numId =
 		typeof identifier === "number" ? identifier : parseInt(identifier, 10);
 	if (!Number.isNaN(numId) && numId > 0) {
 		const { rows } = await query<ProposalRow>(
 			`SELECT ${PROPOSAL_COLUMNS}
-       FROM proposal WHERE id = $1 LIMIT 1`,
+       FROM roadmap_proposal.proposal WHERE id = $1 LIMIT 1`,
 			[numId],
 		);
-		if (rows[0]) {
-			writeCache(proposalCache, cacheKey, rows[0]);
-			writeCache(proposalCache, makeCacheKey("proposal", rows[0].id), rows[0]);
-			writeCache(
-				proposalCache,
-				makeCacheKey("proposal", rows[0].display_id),
-				rows[0],
-			);
-			return rows[0];
-		}
+		if (rows[0]) return rows[0];
 	}
 	const { rows } = await query<ProposalRow>(
 		`SELECT ${PROPOSAL_COLUMNS}
-     FROM proposal WHERE display_id = $1 LIMIT 1`,
+     FROM roadmap_proposal.proposal WHERE display_id = $1 LIMIT 1`,
 		[String(identifier)],
 	);
-	const proposal = rows[0] ?? null;
-	writeCache(proposalCache, cacheKey, proposal);
-	if (proposal) {
-		writeCache(proposalCache, makeCacheKey("proposal", proposal.id), proposal);
-		writeCache(
-			proposalCache,
-			makeCacheKey("proposal", proposal.display_id),
-			proposal,
-		);
-	}
-	return proposal;
+	return rows[0] ?? null;
 }
 
 export async function resolveProposalId(
@@ -303,16 +240,13 @@ export async function createProposal(
 		start_stage: string | null;
 		valid_stages: string[];
 	}>(
-	`WITH stage_info AS (
-         SELECT ws.stage_name, ws.stage_order
-         FROM roadmap_proposal.proposal_type_config ptc
-         JOIN roadmap.workflow_templates wt ON wt.name = ptc.workflow_name
-         JOIN roadmap.workflow_stages ws ON ws.template_id = wt.id
-         WHERE ptc.type = $1
-       )
-       SELECT (ARRAY_AGG(stage_name ORDER BY stage_order))[1] AS start_stage,
-              ARRAY_AGG(DISTINCT stage_name) AS valid_stages
-       FROM stage_info`,
+		`SELECT MIN(ws.stage_name) FILTER (WHERE ws.stage_order = MIN(ws.stage_order) OVER ()) AS start_stage,
+		        ARRAY_AGG(DISTINCT ws.stage_name) AS valid_stages
+       FROM roadmap_proposal.proposal_type_config ptc
+       JOIN roadmap.workflow_templates wt ON wt.name = ptc.workflow_name
+       JOIN roadmap.workflow_stages ws ON ws.template_id = wt.id
+       WHERE ptc.type = $1
+       GROUP BY ptc.type`,
 		[input.type],
 	);
 	const startStage = wfRows[0]?.start_stage ?? null;
@@ -333,7 +267,7 @@ export async function createProposal(
 	}
 
 	const { rows } = await query<ProposalRow>(
-		`INSERT INTO proposal (
+		`INSERT INTO roadmap_proposal.proposal (
       display_id, type, status, title, parent_id, summary, motivation, design,
       drawbacks, alternatives, dependency, priority, tags, audit
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb)
@@ -361,7 +295,6 @@ export async function createProposal(
 			]),
 		],
 	);
-	invalidateProposalCaches();
 	return rows[0];
 }
 
@@ -405,12 +338,11 @@ export async function updateProposal(
 	params.push(id);
 
 	const { rows } = await query<ProposalRow>(
-		`UPDATE proposal SET ${setClauses.join(", ")}
+		`UPDATE roadmap_proposal.proposal SET ${setClauses.join(", ")}
      WHERE id = $${idx}
      RETURNING ${PROPOSAL_COLUMNS}`,
 		params,
 	);
-	invalidateProposalCaches();
 	return rows[0] ?? null;
 }
 
@@ -442,7 +374,7 @@ export async function transitionProposal(
 ): Promise<ProposalRow | null> {
 	// Get current status
 	const current = await query<{ status: string }>(
-		`SELECT status FROM proposal WHERE id = $1 LIMIT 1`,
+		`SELECT status FROM roadmap_proposal.proposal WHERE id = $1 LIMIT 1`,
 		[proposalId],
 	);
 	if (current.rows.length === 0) return null;
@@ -468,10 +400,10 @@ export async function transitionProposal(
 	// Validate transition exists
 	const { rowCount } = await query(
 		`SELECT 1
-     FROM proposal_valid_transitions pvt
+     FROM roadmap_proposal.proposal_valid_transitions pvt
      JOIN workflows w ON w.proposal_id = $1
      JOIN workflow_templates wt ON wt.id = w.template_id
-     JOIN proposal_type_config ptc ON ptc.workflow_name = wt.name
+     JOIN roadmap_proposal.proposal_type_config ptc ON ptc.workflow_name = wt.name
      WHERE pvt.workflow_name = ptc.workflow_name
        AND LOWER(pvt.from_state) = LOWER($2)
        AND LOWER(pvt.to_state) = LOWER($3)
@@ -488,7 +420,7 @@ export async function transitionProposal(
 	// Ensure the author exists in agent_registry so the FK on
 	// proposal_state_transitions.transitioned_by doesn't reject the trigger insert.
 	await query(
-		`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, status)
+		`INSERT INTO agent_registry (agent_identity, agent_type, status)
      VALUES ($1, 'llm', 'active')
      ON CONFLICT (agent_identity) DO NOTHING`,
 		[transitionedBy],
@@ -499,7 +431,7 @@ export async function transitionProposal(
 		`WITH _actor AS (
        SELECT set_config('app.agent_identity', $1, true) AS agent_identity
      )
-     UPDATE proposal
+     UPDATE roadmap_proposal.proposal
      SET status = $2, modified_at = NOW()
      FROM _actor
      WHERE id = $3
@@ -520,20 +452,19 @@ export async function transitionProposal(
 
 	// Backfill the trigger's minimal entry with full metadata
 	await query(
-		`UPDATE proposal_state_transitions
+		`UPDATE roadmap_proposal.proposal_state_transitions
      SET transition_reason = $1,
          transitioned_by   = $2,
          notes             = COALESCE($3, notes)
      WHERE id = (
        SELECT id
-       FROM proposal_state_transitions
+       FROM roadmap_proposal.proposal_state_transitions
        WHERE proposal_id = $4 AND LOWER(to_state) = LOWER($5)
        ORDER BY id DESC
        LIMIT 1
      )`,
 		[reason ?? "submit", transitionedBy, notes ?? null, proposalId, toState],
 	);
-	invalidateProposalCaches();
 
 	return rows[0];
 }
@@ -551,10 +482,10 @@ export async function getValidTransitions(proposalId: number): Promise<
 > {
 	const { rows } = await query(
 		`SELECT pvt.from_state, pvt.to_state, pvt.allowed_reasons AS labels, pvt.allowed_roles
-     FROM proposal_valid_transitions pvt
+     FROM roadmap_proposal.proposal_valid_transitions pvt
      JOIN workflows w ON w.proposal_id = $1
      JOIN workflow_templates wt ON wt.id = w.template_id
-     JOIN proposal_type_config ptc ON ptc.workflow_name = wt.name
+     JOIN roadmap_proposal.proposal_type_config ptc ON ptc.workflow_name = wt.name
      WHERE pvt.workflow_name = ptc.workflow_name`,
 		[proposalId],
 	);
@@ -572,14 +503,14 @@ export async function getValidTransitions(proposalId: number): Promise<
  */
 export async function setMaturity(
 	proposalId: number,
-	maturityState: "new" | "active" | "mature" | "obsolete",
+	maturity: "new" | "active" | "mature" | "obsolete",
 	agentIdentity: string,
 	reason?: string,
 ): Promise<ProposalRow | null> {
 	const valid = new Set(["new", "active", "mature", "obsolete"]);
-	if (!valid.has(maturityState)) {
+	if (!valid.has(maturity)) {
 		throw new Error(
-			`Invalid maturity '${maturityState}'. Must be one of: new, active, mature, obsolete`,
+			`Invalid maturity '${maturity}'. Must be one of: new, active, mature, obsolete`,
 		);
 	}
 
@@ -587,19 +518,19 @@ export async function setMaturity(
 		`WITH _actor AS (
        SELECT set_config('app.agent_identity', $1, true) AS agent_identity
      )
-     UPDATE proposal
-     SET maturity      = $2,
+     UPDATE roadmap_proposal.proposal
+     SET maturity = $2,
          modified_at    = NOW()
      FROM _actor
      WHERE id = $3
      RETURNING ${PROPOSAL_COLUMNS}`,
-		[agentIdentity, maturityState, proposalId],
+		[agentIdentity, maturity, proposalId],
 	);
 
 	if (!rows[0]) return null;
 
 	await query(
-		`UPDATE proposal
+		`UPDATE roadmap_proposal.proposal
      SET audit = audit || $1::jsonb
      WHERE id = $2`,
 		[
@@ -607,16 +538,16 @@ export async function setMaturity(
 				TS: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
 				Agent: agentIdentity,
 				Activity: "MaturityChange",
-				To: maturityState,
+				To: maturity,
 			}),
 			proposalId,
 		],
 	);
 
 	// Record an audit note when self-declaring mature (the gate-ready event)
-	if (maturityState === "mature") {
+	if (maturity === "mature") {
 		await query(
-			`INSERT INTO proposal_discussions
+			`INSERT INTO roadmap_proposal.proposal_discussions
          (proposal_id, author_identity, context_prefix, body)
        VALUES ($1, $2, 'general:', $3)`,
 			[
@@ -644,11 +575,10 @@ export async function claimLease(
 ): Promise<boolean> {
 	try {
 		await query(
-			`INSERT INTO proposal_lease (proposal_id, agent_identity, expires_at)
+			`INSERT INTO roadmap_proposal.proposal_lease (proposal_id, agent_identity, expires_at)
        VALUES ($1, $2, $3)`,
 			[proposalId, agentIdentity, expiresAt ?? null],
 		);
-		invalidateProposalCaches();
 		return true;
 	} catch {
 		return false; // Already leased
@@ -664,14 +594,13 @@ export async function releaseLease(
 	reason?: string,
 ): Promise<boolean> {
 	const { rowCount } = await query(
-		`UPDATE proposal_lease
+		`UPDATE roadmap_proposal.proposal_lease
      SET released_at = now(), release_reason = $1
      WHERE proposal_id = $2
        AND agent_identity = $3
        AND released_at IS NULL`,
 		[reason ?? "completed", proposalId, agentIdentity],
 	);
-	if ((rowCount ?? 0) > 0) invalidateProposalCaches();
 	return (rowCount ?? 0) > 0;
 }
 
@@ -688,7 +617,6 @@ export async function renewLease(
        AND released_at IS NULL`,
 		[expiresAt ?? null, proposalId, agentIdentity],
 	);
-	if ((rowCount ?? 0) > 0) invalidateProposalCaches();
 	return (rowCount ?? 0) > 0;
 }
 
@@ -795,10 +723,6 @@ export async function replaceDependencies(
 export async function listAcceptanceCriteria(
 	proposalId: number,
 ): Promise<ProposalAcceptanceCriterionRow[]> {
-	const cacheKey = makeCacheKey("acceptance-criteria", proposalId);
-	const cached = readCache(acceptanceCriteriaCache, cacheKey);
-	if (cached !== null) return cached;
-
 	const { rows } = await query<ProposalAcceptanceCriterionRow>(
 		`SELECT item_number, criterion_text, status, verified_by, verification_notes, verified_at
      FROM roadmap_proposal.proposal_acceptance_criteria
@@ -806,7 +730,6 @@ export async function listAcceptanceCriteria(
      ORDER BY item_number ASC`,
 		[proposalId],
 	);
-	writeCache(acceptanceCriteriaCache, cacheKey, rows);
 	return rows;
 }
 
@@ -842,7 +765,6 @@ export async function replaceAcceptanceCriteria(
 		}
 
 		await client.query("COMMIT");
-		invalidateProposalCaches();
 	} catch (error) {
 		await client.query("ROLLBACK");
 		throw error;
@@ -876,7 +798,7 @@ export async function searchProposals(
 	const maxResults = limit ?? 10;
 	const { rows } = await query<ProposalRow>(
 		`SELECT ${PROPOSAL_COLUMNS}
-     FROM proposal
+     FROM roadmap_proposal.proposal
      WHERE to_tsvector(
              'english',
              CONCAT_WS(
@@ -906,7 +828,7 @@ export async function proposalSummary(): Promise<
 > {
 	const { rows } = await query<{ status: string; count: number }>(
 		`SELECT status, COUNT(*)::int as count
-     FROM proposal
+     FROM roadmap_proposal.proposal
      GROUP BY status
      ORDER BY status`,
 	);
@@ -923,7 +845,7 @@ export async function getProposalVersions(identifier: string | number) {
 	}
 
 	const { rows } = await query(
-		`SELECT * FROM proposal_version
+		`SELECT * FROM roadmap_proposal.proposal_version
      WHERE proposal_id = $1
      ORDER BY version_number ASC`,
 		[proposalId],
@@ -940,7 +862,7 @@ export async function deleteProposal(
 	}
 
 	const { rowCount } = await query(
-		`DELETE FROM proposal
+		`DELETE FROM roadmap_proposal.proposal
      WHERE id = $1`,
 		[proposalId],
 	);

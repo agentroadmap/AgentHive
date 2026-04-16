@@ -51,6 +51,39 @@ export function registerProposalTools(
 		},
 		handler: (args: any) => handlers.getProposal(args),
 	});
+	server.addTool({
+		name: "mcp_get_proposal_projection",
+		description:
+			"Get a projection of one proposal as YAML metadata plus Markdown narrative. Accepts fields or a compact projection string such as `roadmap proposal detail {id:P190, title, maturity, design, acceptance_criteria}`.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				id: {
+					type: "string",
+					description: "Proposal display_id or numeric id",
+				},
+				projection: {
+					type: "string",
+					description:
+						"Optional compact projection expression, e.g. roadmap proposal detail {id:P190, title, maturity, design}",
+				},
+				fields: {
+					oneOf: [
+						{ type: "array", items: { type: "string" } },
+						{ type: "string" },
+					],
+					description:
+						"Fields to include. Supported: title, type, status, maturity, priority, summary, motivation, design, drawbacks, alternatives, dependency, dependencies, acceptance_criteria, lease, workflow, latest_decision, tags.",
+				},
+				format: {
+					type: "string",
+					enum: ["yaml_md", "json"],
+					description: "Output format. Defaults to yaml_md.",
+				},
+			},
+		},
+		handler: (args: any) => handlers.getProposalProjection(args),
+	});
 	server.addTool(
 		createAsyncValidatedTool(
 			{

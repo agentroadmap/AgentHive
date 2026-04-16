@@ -5,6 +5,7 @@
  * transitions are still processed if notifications are missed.
  */
 
+import { basename } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { getPool, query } from "../../infra/postgres/pool.ts";
@@ -21,6 +22,22 @@ const WORKTREE_PREFIXES = ["claude", "gemini", "copilot", "openclaw"] as const;
 type TransitionQueueId = number | string;
 type JsonRecord = Record<string, unknown>;
 type Logger = Pick<Console, "log" | "warn" | "error">;
+type SpawnAgentRequest = {
+	worktree: string;
+	task: string;
+	proposalId: number | string;
+	stage: string;
+	model?: string;
+	timeoutMs?: number;
+};
+type SpawnAgentResult = {
+	agentRunId: string;
+	worktree: string;
+	exitCode: number;
+	stdout: string;
+	stderr: string;
+	durationMs: number;
+};
 
 export interface NotificationMessage {
 	channel: string;
@@ -53,14 +70,23 @@ interface TransitionQueueRow {
 export interface PipelineCronDeps {
 	queryFn?: typeof query;
 	connectListener?: () => Promise<ListenerClient>;
+	spawnAgentFn?: (request: SpawnAgentRequest) => Promise<SpawnAgentResult>;
 	mcpUrl?: string;
 	logger?: Logger;
+	defaultWorktree?: string;
 	pollIntervalMs?: number;
 	batchSize?: number;
 	setIntervalFn?: typeof setInterval;
 	clearIntervalFn?: typeof clearInterval;
-	/** Injectable MCP client factory — override in tests to avoid real SSE connections. */
-	mcpClientFactory?: (mcpUrl: string) => { callTool(args: { name: string; arguments: Record<string, unknown> }): Promise<{ content?: Array<{ text?: string }> }>; close(): Promise<void>; };
+}
+
+function mcpResultText(result: unknown): string {
+	const content = (result as { content?: Array<{ type?: string; text?: string }> })
+		.content;
+	const first = content?.[0];
+	return first?.type === "text" && typeof first.text === "string"
+		? first.text
+		: "";
 }
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -94,6 +120,28 @@ function readString(
 		const value = source[key];
 		if (typeof value === "string" && value.trim().length > 0) {
 			return value.trim();
+		}
+	}
+
+	return null;
+}
+
+function readNumber(
+	source: JsonRecord | null,
+	...keys: string[]
+): number | null {
+	if (!source) return null;
+
+	for (const key of keys) {
+		const value = source[key];
+		if (typeof value === "number" && Number.isFinite(value)) {
+			return value;
+		}
+		if (typeof value === "string" && value.trim().length > 0) {
+			const parsed = Number(value);
+			if (Number.isFinite(parsed)) {
+				return parsed;
+			}
 		}
 	}
 
@@ -143,11 +191,12 @@ export class PipelineCron {
 	private readonly connectListener: () => Promise<ListenerClient>;
 	private readonly mcpUrl: string;
 	private readonly logger: Logger;
+	private readonly defaultWorktree: string;
 	private readonly pollIntervalMs: number;
 	private readonly batchSize: number;
 	private readonly setIntervalFn: typeof setInterval;
 	private readonly clearIntervalFn: typeof clearInterval;
-	private readonly mcpClientFactory: NonNullable<PipelineCronDeps["mcpClientFactory"]>;
+	private readonly spawnAgentFn?: (request: SpawnAgentRequest) => Promise<SpawnAgentResult>;
 
 	private listenerClient: ListenerClient | null = null;
 	private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -180,27 +229,12 @@ export class PipelineCron {
 			deps.connectListener ?? (async () => getPool().connect());
 		this.mcpUrl = deps.mcpUrl ?? MCP_URL;
 		this.logger = deps.logger ?? console;
+		this.defaultWorktree = deps.defaultWorktree ?? basename(process.cwd());
 		this.pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
 		this.batchSize = deps.batchSize ?? DEFAULT_BATCH_SIZE;
 		this.setIntervalFn = deps.setIntervalFn ?? setInterval;
 		this.clearIntervalFn = deps.clearIntervalFn ?? clearInterval;
-		this.mcpClientFactory = deps.mcpClientFactory ?? ((url: string) => {
-			const client = new Client({ name: "gate-pipeline", version: "1.0.0" });
-			const transport = new SSEClientTransport(new URL(url));
-			let connected = false;
-			return {
-				async callTool(args: { name: string; arguments: Record<string, unknown> }) {
-					if (!connected) {
-						await client.connect(transport);
-						connected = true;
-					}
-					return client.callTool(args);
-				},
-				async close() {
-					await client.close();
-				},
-			};
-		});
+		this.spawnAgentFn = deps.spawnAgentFn;
 	}
 
 	async run(): Promise<void> {
@@ -299,20 +333,16 @@ export class PipelineCron {
 	private async drainReadyTransitions(reason: string): Promise<void> {
 		// Pull scan: enqueue any mature proposals not yet in transition_queue.
 		// This is the fallback for push-missed events (crash, pre-migration backlog).
-		// Only run on initial drains (not coalesced re-drains) to avoid infinite
-		// re-enqueue loops where processing a transition creates a new one.
-		if (reason !== "coalesced") {
-			try {
-				await this.queryFn(
-					`SELECT roadmap.fn_enqueue_mature_proposals()`,
-					[],
-				);
-			} catch (err) {
-				// fn_enqueue_mature_proposals may not exist in older deployments — non-fatal
-				const msg = err instanceof Error ? err.message : String(err);
-				if (!msg.includes("does not exist")) {
-					this.logger.warn(`[PipelineCron] fn_enqueue_mature_proposals: ${msg}`);
-				}
+		try {
+			await this.queryFn(
+				`SELECT roadmap.fn_enqueue_mature_proposals()`,
+				[],
+			);
+		} catch (err) {
+			// fn_enqueue_mature_proposals may not exist in older deployments — non-fatal
+			const msg = err instanceof Error ? err.message : String(err);
+			if (!msg.includes("does not exist")) {
+				this.logger.warn(`[PipelineCron] fn_enqueue_mature_proposals: ${msg}`);
 			}
 		}
 
@@ -367,31 +397,36 @@ export class PipelineCron {
 		}));
 	}
 
+	/**
+	 * Dispatch a transition via MCP cubic tools instead of subprocess.
+	 * Uses the same pattern as the orchestrator: create cubic, focus with task.
+	 * The agent picks up the work asynchronously through the MCP/Hermes subscription model.
+	 */
 	private async processTransition(
 		transition: TransitionQueueRow,
 	): Promise<void> {
-		const mcpClient = this.mcpClientFactory(this.mcpUrl);
+		if (this.spawnAgentFn) {
+			await this.processTransitionWithSpawnAgent(transition);
+			return;
+		}
 
-	try {
-		const spawnMeta = isRecord(transition.metadata?.spawn) ? transition.metadata!.spawn as JsonRecord : null;
-		const proposalId = String(transition.proposal_id);
-		const task = (spawnMeta ? readString(spawnMeta, "task") : null) ?? buildDefaultTask(transition);
+		const client = new Client({ name: "gate-pipeline", version: "1.0.0" });
+		const transport = new SSEClientTransport(new URL(this.mcpUrl));
+
+		try {
+			await client.connect(transport);
+
+			const proposalId = String(transition.proposal_id);
+			const task = buildDefaultTask(transition);
 			const agentName =
 				readString(transition.metadata, "agent") ??
-				readString(spawnMeta, "worktree") ??        // fn_enqueue_mature_proposals sets spawn.worktree
 				(looksLikeWorktreeName(transition.triggered_by)
 					? transition.triggered_by
 					: null) ??
-				process.env.DEFAULT_AGENT_WORKTREE ?? null; // set DEFAULT_AGENT_WORKTREE env var to enable fallback dispatch
-
-			if (!agentName) {
-				throw new Error(
-					`No agent resolved for transition ${transition.id} — set DEFAULT_AGENT_WORKTREE or include agent in transition metadata`,
-				);
-			}
+				"architect";
 
 			// 1. Create cubic for this proposal
-			const cubicResult = await mcpClient.callTool({
+			const cubicResult = await client.callTool({
 				name: "cubic_create",
 				arguments: {
 					name: `gate-${proposalId}-${transition.to_stage}`,
@@ -399,9 +434,7 @@ export class PipelineCron {
 					proposals: [proposalId],
 				},
 			});
-			const cubicData = JSON.parse(
-				cubicResult.content?.[0]?.text || "{}",
-			);
+				const cubicData = JSON.parse(mcpResultText(cubicResult) || "{}");
 
 			if (!cubicData.success || !cubicData.cubic?.id) {
 				throw new Error(
@@ -411,60 +444,70 @@ export class PipelineCron {
 
 			const cubicId = cubicData.cubic.id;
 
-		// 2. Focus cubic with the transition task — agent picks up work via MCP/Hermes subscription
-		await mcpClient.callTool({
-			name: "cubic_focus",
-			arguments: {
-				cubicId,
-				agent: agentName,
-				task,
-				phase: transition.to_stage?.toLowerCase() ?? "build",
-			},
-		});
+			// 2. Focus cubic with the transition task
+			await client.callTool({
+				name: "cubic_focus",
+				arguments: {
+					cubicId,
+					agent: agentName,
+					task,
+					phase: transition.to_stage?.toLowerCase() ?? "build",
+				},
+			});
 
-		// Cubic dispatch: mark the queue row done, then send a real A2A message
-		// so the A2A dispatcher actually spawns the agent subprocess.
-		await this.markTransitionDone(transition.id);
-
-		// Resolve agent identity (slash-form) for message_ledger routing.
-		// Worktree names use dashes ("claude-one"); identities use slashes ("claude/one").
-		const agentIdentity = agentName.includes("/")
-			? agentName
-			: agentName.replace("-", "/");
-
-		// Only dispatch to known worktree agents — virtual agents (e.g. "architect") are skipped.
-		const isWorktreeAgent = WORKTREE_PREFIXES.some((p) =>
-			agentName.startsWith(p + "-") || agentName.startsWith(p + "/"),
-		);
-		if (isWorktreeAgent) {
-			try {
-				// Insert triggers fn_notify_new_message() automatically — no explicit pg_notify needed.
-				await this.queryFn(
-					`INSERT INTO roadmap.message_ledger
-					 (from_agent, to_agent, channel, message_content, message_type, proposal_id)
-					 VALUES ('system', $1, 'direct', $2, 'task', $3)`,
-					[agentIdentity, task, Number(proposalId)],
-				);
-				this.logger.log(
-					`[PipelineCron] A2A dispatched: system → ${agentIdentity} proposal=${proposalId} gate=${readString(transition.metadata, "gate") ?? "?"} cubic=${cubicId}`,
-				);
-			} catch (dispatchErr) {
-				const dispatchMsg = dispatchErr instanceof Error ? dispatchErr.message : String(dispatchErr);
-				this.logger.warn(`[PipelineCron] A2A dispatch failed for ${agentIdentity}: ${dispatchMsg}`);
-			}
-		} else {
+			// 3. Mark transition dispatched — agent will complete asynchronously
+			await this.markTransitionDispatched(transition.id);
 			this.logger.log(
-				`[PipelineCron] Cubic reserved for virtual agent "${agentName}" proposal=${proposalId} — no A2A spawn (no worktree)`,
+				`[PipelineCron] Dispatched transition ${transition.id} for proposal ${proposalId} via MCP cubic ${cubicId}`,
 			);
+		} catch (error) {
+			const message =
+				error instanceof Error ? error.message : String(error);
+			await this.handleTransitionFailure(transition, message);
+		} finally {
+			await client.close();
 		}
-} catch (error) {
-	const message =
-		error instanceof Error ? error.message : String(error);
-	await this.handleTransitionFailure(transition, message);
-} finally {
-	await mcpClient.close();
-}
-}
+	}
+
+	private async processTransitionWithSpawnAgent(
+		transition: TransitionQueueRow,
+	): Promise<void> {
+		if (!this.spawnAgentFn) return;
+		const spawnMetadata = isRecord(transition.metadata?.spawn)
+			? transition.metadata.spawn
+			: null;
+		const proposalId =
+			readNumber(transition.metadata, "proposalId", "proposal_id") ??
+			(typeof transition.proposal_id === "number"
+				? transition.proposal_id
+				: Number.isFinite(Number(transition.proposal_id))
+					? Number(transition.proposal_id)
+					: transition.proposal_id);
+		const request: SpawnAgentRequest = {
+			worktree:
+				readString(spawnMetadata, "worktree") ??
+				readString(transition.metadata, "worktree") ??
+				this.defaultWorktree,
+			task: readString(spawnMetadata, "task") ?? buildDefaultTask(transition),
+			proposalId,
+			stage: transition.to_stage,
+		};
+		const model = readString(spawnMetadata, "model");
+		if (model) request.model = model;
+		const timeoutMs = readNumber(spawnMetadata, "timeoutMs", "timeout_ms");
+		if (timeoutMs !== null) request.timeoutMs = timeoutMs;
+
+		const result = await this.spawnAgentFn(request);
+		if (result.exitCode !== 0) {
+			const details = [result.stderr, result.stdout].filter(Boolean).join("\n");
+			await this.handleTransitionFailure(
+				transition,
+				`spawnAgent exited with code ${result.exitCode}${details ? `\n${details}` : ""}`,
+			);
+			return;
+		}
+		await this.markTransitionDone(transition.id);
+	}
 
 	private async markTransitionDispatched(
 		id: TransitionQueueId,
@@ -506,20 +549,8 @@ export class PipelineCron {
 				[transition.id, errorMessage],
 			);
 
-			// AC-3: escalate via notification_queue when all retries are exhausted
-			const proposalId = transition.proposal_id != null ? Number(transition.proposal_id) : null;
-			await this.queryFn(
-				`INSERT INTO roadmap.notification_queue (proposal_id, severity, channel, title, body)
-         VALUES ($1, 'CRITICAL', 'discord', $2, $3)`,
-				[
-					proposalId,
-					`Gate pipeline: transition ${transition.id} failed permanently`,
-					`Proposal: ${transition.proposal_id} | From: ${transition.from_stage} → To: ${transition.to_stage} | Attempts: ${transition.attempt_count}/${transition.max_attempts}\nError: ${errorMessage.slice(0, 400)}`,
-				],
-			);
-
 			this.logger.error(
-				`[PipelineCron] Transition ${transition.id} failed permanently — escalated to notification_queue: ${errorMessage}`,
+				`[PipelineCron] Transition ${transition.id} failed permanently: ${errorMessage}`,
 			);
 			return;
 		}

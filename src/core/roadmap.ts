@@ -16,7 +16,6 @@ import {
 } from "../constants/index.ts";
 import { FileSystem } from "../file-system/operations.ts";
 import { GitOperations } from "../git/operations.ts";
-import { debugLog } from "../apps/ui/debug-log.ts";
 import * as pgPool from "../postgres/pool.ts";
 import type {
 	ProposalAcceptanceCriterionRow,
@@ -274,7 +273,6 @@ function getActiveAndCompletedIdsFromProposalMap(
 export class Core {
 	public fs: FileSystem;
 	public git: GitOperations;
-	private readonly projectRoot: string;
 	private contentStore?: ContentStore;
 	private searchService?: SearchService;
 	private daemonClient?: DaemonClient | null;
@@ -295,30 +293,14 @@ export class Core {
 	> = new Map();
 	// Rate Limiter (PROPOSAL-44): per-agent rate limiting with fair share
 	private rateLimiter?: RateLimiter;
-	// Preloaded proposals for listAgents() to avoid deadlock in buildSnapshot()
-	private _preloadedProposalsForAgents?: Proposal[];
 
 	constructor(projectRoot: string, options?: { enableWatchers?: boolean }) {
-		this.projectRoot = projectRoot;
 		this.fs = new FileSystem(projectRoot);
 		this.git = new GitOperations(projectRoot);
 		// Disable watchers by default for CLI commands (non-interactive)
 		// Interactive modes (TUI, browser, MCP) should explicitly pass enableWatchers: true
 		this.enableWatchers = options?.enableWatchers ?? false;
 		// Note: Config is loaded lazily when needed since constructor can't be async
-	}
-
-	/** Returns the project root directory this Core instance was initialized with. */
-	getProjectRoot(): string {
-		return this.projectRoot;
-	}
-
-	/**
-	 * Preload proposals for listAgents() to avoid deadlock when called
-	 * in parallel with loadProposals() (e.g., in buildSnapshot).
-	 */
-	setPreloadedProposalsForAgents(proposals: Proposal[]): void {
-		this._preloadedProposalsForAgents = proposals;
 	}
 
 	/**
@@ -925,7 +907,7 @@ export class Core {
 	}
 
 	private mapPgMaturity(row: ProposalRow): Proposal["maturity"] | undefined {
-		// maturity is a direct TEXT column — no JSONB parsing needed
+		// maturity is now a direct TEXT column — no JSONB parsing needed
 		const state = row.maturity;
 		if (!state) return undefined;
 		switch (state) {
@@ -997,28 +979,6 @@ export class Core {
 		});
 	}
 
-	/** Run async tasks with bounded concurrency to avoid Postgres pool exhaustion. */
-	private static async batchMap<T, R>(
-		items: T[],
-		fn: (item: T, index: number) => Promise<R>,
-		concurrency = 10,
-	): Promise<R[]> {
-		const results: R[] = new Array(items.length);
-		let nextIdx = 0;
-		async function worker() {
-			while (nextIdx < items.length) {
-				const i = nextIdx++;
-				results[i] = await fn(items[i], i);
-			}
-		}
-		const workers = Array.from(
-			{ length: Math.min(concurrency, items.length) },
-			() => worker(),
-		);
-		await Promise.all(workers);
-		return results;
-	}
-
 	/** Load proposals from Postgres, excluding any already present in the disk set. */
 	private async loadProposalsFromPostgres(
 		existing: Proposal[],
@@ -1029,14 +989,17 @@ export class Core {
 			const rows = await pg.listProposals(pgFilters);
 			// Build a set of display_ids already present from disk to avoid duplicates
 			const diskIds = new Set(existing.map((p) => p.id));
-			const batchResults = await Core.batchMap(rows, async (row) => {
-					const pgId = row.display_id || `#${row.id}`;
-					if (diskIds.has(pgId)) {
-						return null;
-					}
-					return await this.hydratePgProposalRow(row);
-				});
-			const pgProposals = batchResults.filter((proposal): proposal is Proposal => proposal !== null);
+			const pgProposals = (
+				await Promise.all(
+					rows.map(async (row) => {
+						const pgId = row.display_id || `#${row.id}`;
+						if (diskIds.has(pgId)) {
+							return null;
+						}
+						return await this.hydratePgProposalRow(row);
+					}),
+				)
+			).filter((proposal): proposal is Proposal => proposal !== null);
 			return pgProposals;
 		} catch (err) {
 			if (process.env.DEBUG) {
@@ -1058,9 +1021,7 @@ export class Core {
 		const config = await this.fs.loadConfig();
 
 		if (await this.isPostgresProposalBackend(config)) {
-			debugLog("queryProposals: Postgres path, about to ensurePgPool");
 			await this.ensurePgPool();
-			debugLog("queryProposals: pool ready, about to listProposals");
 			const directiveResolverPromise = filters?.directive
 				? Promise.all([
 						this.fs.listDirectives(),
@@ -1081,31 +1042,28 @@ export class Core {
 						typeof limit === "number" ? Math.max(limit * 3, limit) : undefined,
 					)
 				: await pg.listProposals(pgFilters);
-			debugLog("queryProposals: got " + rows.length + " rows");
 			const summaries = await pg.listProposalSummaries(pgFilters);
-			debugLog("queryProposals: got " + summaries.length + " summaries");
 			const dependencyRows = await pg.listDependencies(
 				rows.map((row) => row.id),
 			);
-			debugLog("queryProposals: got " + dependencyRows.length + " dependency rows");
 			const summaryById = new Map(
 				summaries.map((summary) => [summary.id, summary]),
 			);
 			const rowById = new Map(rows.map((row) => [row.id, row]));
-			const proposals = await Core.batchMap(rows, (row) =>
-				this.hydratePgProposalRow(row, {
-					summary: summaryById.get(row.id),
-					dependencies: dependencyRows,
-					parentProposalId:
-						row.parent_id !== null
-							? rowById.get(row.parent_id)?.display_id
-							: undefined,
-				}),
+			const proposals = await Promise.all(
+				rows.map(async (row) =>
+					this.hydratePgProposalRow(row, {
+						summary: summaryById.get(row.id),
+						dependencies: dependencyRows,
+						parentProposalId:
+							row.parent_id !== null
+								? rowById.get(row.parent_id)?.display_id
+								: undefined,
+					}),
+				),
 			);
-			debugLog("queryProposals: batchMap done, " + proposals.length + " proposals");
 
 			const queue = await pg.getProposalQueue();
-			debugLog("queryProposals: got queue, " + queue.length + " items");
 			const queuePositionById = new Map(
 				queue.map((item) => [item.display_id, item.queue_position]),
 			);
@@ -5327,6 +5285,18 @@ export class Core {
 	}> {
 		const config = await this.fs.loadConfig();
 
+		// When Postgres is the proposal backend, query it directly so the
+		// overview reflects live state instead of stale filesystem data.
+		if (await this.isPostgresProposalBackend(config)) {
+			progressCallback?.("Loading roadmap data from Postgres...");
+			const proposals = await this.queryProposals({
+				includeCrossBranch: false,
+			});
+			const statuses = (config?.statuses || DEFAULT_STATUSES) as string[];
+			const drafts = await this.fs.listDrafts();
+			return { proposals, drafts, statuses };
+		}
+
 		const statuses = (config?.statuses || DEFAULT_STATUSES) as string[];
 		const resolutionStrategy =
 			config?.proposalResolutionStrategy || "most_progressed";
@@ -6332,15 +6302,8 @@ export class Core {
 			}
 		}
 
-		// Attach current claims to agents — use preloaded proposals when
-		// available (set by buildSnapshot) to avoid deadlock from re-loading
-		// all proposals in parallel with loadProposals().
-		let allProposals = this._preloadedProposalsForAgents;
-		if (allProposals) {
-			this._preloadedProposalsForAgents = undefined;
-		} else {
-			allProposals = await this.fs.listProposals();
-		}
+		// Attach current claims to agents
+		const allProposals = await this.fs.listProposals();
 		for (const agent of registeredAgents) {
 			const agentNameLower = agent.name.toLowerCase();
 			const agentNameNoAtLower = agentNameLower.startsWith("@")

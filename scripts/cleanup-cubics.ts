@@ -1,5 +1,18 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { mcpText, parseMcpJson } from "./mcp-result.ts";
+
+type Cubic = {
+	id: string;
+	name?: string;
+	phase?: string;
+	lock?: unknown;
+};
+
+type CubicList = {
+	total?: number;
+	cubics: Cubic[];
+};
 
 const transport = new SSEClientTransport(new URL("http://127.0.0.1:6421/sse"));
 const client = new Client({ name: "hermes", version: "1.0.0" });
@@ -7,15 +20,15 @@ await client.connect(transport);
 
 // List all cubics
 const list = await client.callTool({ name: "cubic_list", arguments: {} });
-const data = JSON.parse(list.content?.[0]?.text || "{}");
+const data = parseMcpJson<CubicList>(list, { cubics: [] });
 
 console.log("Total cubics: " + data.total);
 
 // Categorize
-const active = data.cubics.filter(c => c.lock);
-const complete = data.cubics.filter(c => c.phase === "complete");
-const design = data.cubics.filter(c => c.phase === "design" && !c.lock);
-const other = data.cubics.filter(c => !c.lock && c.phase !== "complete" && c.phase !== "design");
+const active = data.cubics.filter((c) => c.lock);
+const complete = data.cubics.filter((c) => c.phase === "complete");
+const design = data.cubics.filter((c) => c.phase === "design" && !c.lock);
+const other = data.cubics.filter((c) => !c.lock && c.phase !== "complete" && c.phase !== "design");
 
 console.log("Active (locked): " + active.length);
 console.log("Complete: " + complete.length);
@@ -63,9 +76,9 @@ console.log("  ... deleted " + staleDeleted + " stale cubics");
 
 // Final count
 const finalList = await client.callTool({ name: "cubic_list", arguments: {} });
-const finalData = JSON.parse(finalList.content?.[0]?.text || "{}");
+const finalData = parseMcpJson<CubicList>(finalList, { cubics: [] });
 console.log("\n=== FINAL STATUS ===");
 console.log("Remaining cubics: " + finalData.total);
-console.log("Active (locked): " + finalData.cubics.filter(c => c.lock).length);
+console.log("Active (locked): " + finalData.cubics.filter((c) => c.lock).length);
 
 await client.close();

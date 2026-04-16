@@ -1,5 +1,10 @@
+import { execFile } from "node:child_process";
+import { stat } from "node:fs/promises";
+import { promisify } from "node:util";
 import { query } from "../../../../postgres/pool.ts";
 import type { CallToolResult } from "../../types.ts";
+
+const execFileAsync = promisify(execFile);
 
 type ProposalRow = {
 	id: number;
@@ -42,18 +47,29 @@ async function execCommand(
 	cmd: string[],
 	cwd?: string,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-	const proc = new Deno.Command(cmd[0], {
-		args: cmd.slice(1),
-		cwd,
-		stdout: "piped",
-		stderr: "piped",
-	});
-	const result = await proc.output();
-	return {
-		stdout: new TextDecoder().decode(result.stdout).trim(),
-		stderr: new TextDecoder().decode(result.stderr).trim(),
-		exitCode: result.code,
-	};
+	const [file, ...args] = cmd;
+	if (!file) {
+		return { stdout: "", stderr: "Missing command", exitCode: 1 };
+	}
+	try {
+		const result = await execFileAsync(file, args, { cwd });
+		return {
+			stdout: result.stdout.trim(),
+			stderr: result.stderr.trim(),
+			exitCode: 0,
+		};
+	} catch (error) {
+		const err = error as {
+			stdout?: string;
+			stderr?: string;
+			code?: number;
+		};
+		return {
+			stdout: err.stdout?.trim() ?? "",
+			stderr: err.stderr?.trim() ?? String(error),
+			exitCode: typeof err.code === "number" ? err.code : 1,
+		};
+	}
 }
 
 /**
@@ -204,7 +220,7 @@ export class WorktreeMergeHandlers {
 	): Promise<ProposalRow | null> {
 		const { rows } = await query<ProposalRow>(
 			`SELECT id, display_id, status, audit
-			 FROM proposal
+			 FROM roadmap_proposal.proposal
 			 WHERE display_id = $1 OR CAST(id AS text) = $1
 			 LIMIT 1`,
 			[proposalId],
@@ -248,8 +264,8 @@ export class WorktreeMergeHandlers {
 
 			// Verify worktree path exists
 			try {
-				const stat = await Deno.stat(args.worktree_path);
-				if (!stat.isDirectory) {
+				const pathStat = await stat(args.worktree_path);
+				if (!pathStat.isDirectory()) {
 					return {
 						content: [
 							{
@@ -417,7 +433,7 @@ export class WorktreeMergeHandlers {
 			};
 
 			await query(
-				`UPDATE proposal
+				`UPDATE roadmap_proposal.proposal
 				 SET audit = audit || $2::jsonb
 				 WHERE id = $1`,
 				[proposal.id, JSON.stringify([auditEntry])],

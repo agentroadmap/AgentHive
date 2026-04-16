@@ -12,6 +12,7 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { mcpText, parseMcpJson } from "./mcp-result.ts";
 import { getPool, query } from "../src/infra/postgres/pool.ts";
 import { spawnAgent } from "../src/core/orchestration/agent-spawner.ts";
 
@@ -102,7 +103,7 @@ async function dispatchAgent(agent: string, proposalId: string, task: string, ph
     // Step 1: Find existing cubic for this agent (locked OR idle)
     let cubicId: string | null = null;
     const existing = await client.callTool({ name: "cubic_list", arguments: {} });
-    const data = safeParseMcpResponse(existing.content?.[0]?.text);
+    const data = safeParseMcpResponse(mcpText(existing));
 
     if (data?.cubics) {
       for (const cubic of data.cubics) {
@@ -133,10 +134,11 @@ async function dispatchAgent(agent: string, proposalId: string, task: string, ph
           proposals: [proposalId],
         },
       });
-      const createdData = safeParseMcpResponse(created.content?.[0]?.text);
-      if (createdData?.success && createdData?.cubic) {
-        cubicId = createdData.cubic.id;
-        logger.log(`📦 New cubic ${cubicId.substring(0, 8)} for ${agent}`);
+      const createdData = safeParseMcpResponse(mcpText(created));
+      if (createdData?.success && createdData?.cubic?.id) {
+        const newCubicId = String(createdData.cubic.id);
+        cubicId = newCubicId;
+        logger.log(`📦 New cubic ${newCubicId.substring(0, 8)} for ${agent}`);
       }
     }
 
@@ -218,7 +220,7 @@ async function releaseStaleCubics(proposalId: string) {
   try {
     await client.connect(transport);
     const existing = await client.callTool({ name: "cubic_list", arguments: {} });
-    const data = safeParseMcpResponse(existing.content?.[0]?.text);
+    const data = safeParseMcpResponse(mcpText(existing));
     if (!data?.cubics) return;
 
     for (const cubic of data.cubics) {
