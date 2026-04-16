@@ -752,8 +752,31 @@ export async function renderBoardTui(
 			columns = [];
 		};
 
-		const columnWidthFor = (count: number) =>
-			Math.max(1, Math.floor(100 / Math.max(1, count)));
+		const getBoardAreaWidth = () => {
+			const rawWidth =
+				typeof boardArea.width === "number"
+					? boardArea.width
+					: Math.floor(getTerminalWidth() * 0.75);
+			return Math.max(1, rawWidth);
+		};
+
+		const getColumnLayout = (count: number) => {
+			const totalWidth = getBoardAreaWidth();
+			const safeCount = Math.max(1, count);
+			const baseWidth = Math.floor(totalWidth / safeCount);
+			const extraWidth = totalWidth % safeCount;
+			let left = 0;
+
+			return Array.from({ length: safeCount }, (_, idx) => {
+				const width = baseWidth + (idx < extraWidth ? 1 : 0);
+				const layout = {
+					left,
+					width: Math.max(1, width),
+				};
+				left += layout.width;
+				return layout;
+			});
+		};
 
 		const getFormattedItems = (proposals: Proposal[]) => {
 			return proposals.map((proposal) =>
@@ -763,18 +786,15 @@ export async function renderBoardTui(
 
 		const createColumnViews = (data: ColumnData[]) => {
 			clearColumns();
-			const widthPercent = columnWidthFor(data.length);
+			const layouts = getColumnLayout(data.length);
 			data.forEach((columnData, idx) => {
-				const left = idx * widthPercent;
-				const isLast = idx === data.length - 1;
-				const width = isLast
-					? `${Math.max(0, 100 - left)}%`
-					: `${widthPercent}%`;
+				const layout = layouts[idx];
+				if (!layout) return;
 				const columnBox = box({
 					parent: boardArea,
-					left: `${left}%`,
+					left: layout.left,
 					top: 0,
-					width,
+					width: layout.width,
 					height: "100%",
 					border: { type: "line" },
 					style: { border: { fg: "gray" } },
