@@ -26,6 +26,19 @@
       ],
       "burstClaims": [],
       "queue": []
+    },
+    "codex": {
+      "claims": [
+        {
+          "agentId": "codex",
+          "timestamp": "2026-04-15T12:27:07.789Z",
+          "proposalId": "P234",
+          "proposalPriority": "high",
+          "bypassed": true
+        }
+      ],
+      "burstClaims": [],
+      "queue": []
     }
   }
 }
