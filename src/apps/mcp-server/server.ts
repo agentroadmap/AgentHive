@@ -32,6 +32,7 @@ import { registerTestingTools } from "./tools/testing/index.ts";
 import { registerWorkflowTools } from "./tools/workflow/index.ts";
 import { registerDependencyTools } from "./tools/dependencies/index.ts";
 import { registerWorktreeMergeTools } from "./tools/worktree-merge/index.ts";
+import { registerConsolidatedTools } from "./tools/consolidated.ts";
 import type {
 	CallToolResult,
 	GetPromptResult,
@@ -58,6 +59,16 @@ const INSTRUCTIONS_NORMAL =
 	"At the beginning of each session, read the roadmap://workflow/overview resource to understand how AgentHive proposals, workflow stages, and maturity are managed through the roadmap MCP surface. Additional detailed guides are available as resources when needed.";
 const INSTRUCTIONS_FALLBACK =
 	"The roadmap workspace is not initialized in this directory. Read the roadmap://init-required resource for setup instructions.";
+const SHOW_LEGACY_TOOLS = process.env.MCP_LEGACY_TOOLS === "1";
+const CONSOLIDATED_TOOL_NAMES = new Set([
+	"mcp_project",
+	"mcp_proposal",
+	"mcp_message",
+	"mcp_agent",
+	"mcp_memory",
+	"mcp_document",
+	"mcp_ops",
+]);
 
 // Track whether gate pipeline (PipelineCron) has already been started to avoid duplicates
 let gatePipelineStarted = false;
@@ -76,6 +87,7 @@ export class McpServer extends Core {
 	private readonly server: Server;
 	private transport?: StdioServerTransport;
 	private stopping = false;
+	private consolidatedToolSurface = false;
 
 	private readonly tools = new Map<string, McpToolHandler>();
 	private readonly resources = new Map<string, McpResourceHandler>();
@@ -132,6 +144,10 @@ export class McpServer extends Core {
 	 */
 	public addTool(tool: McpToolHandler): void {
 		this.tools.set(tool.name, tool);
+	}
+
+	public setConsolidatedToolSurface(enabled: boolean): void {
+		this.consolidatedToolSurface = enabled;
 	}
 
 	/**
@@ -197,8 +213,14 @@ export class McpServer extends Core {
 	// -- Internal handlers --------------------------------------------------
 
 	protected async listTools(): Promise<ListToolsResult> {
+		const tools = Array.from(this.tools.values()).filter(
+			(tool) =>
+				SHOW_LEGACY_TOOLS ||
+				!this.consolidatedToolSurface ||
+				CONSOLIDATED_TOOL_NAMES.has(tool.name),
+		);
 		return {
-			tools: Array.from(this.tools.values()).map((tool) => ({
+			tools: tools.map((tool) => ({
 				name: tool.name,
 				description: tool.description,
 				inputSchema: {
@@ -207,6 +229,17 @@ export class McpServer extends Core {
 				},
 			})),
 		};
+	}
+
+	public async invokeTool(
+		name: string,
+		args: Record<string, unknown> = {},
+	): Promise<CallToolResult> {
+		const tool = this.tools.get(name);
+		if (!tool) {
+			throw new Error(`Tool not found: ${name}`);
+		}
+		return tool.handler(args);
 	}
 
 	protected async callTool(request: {
@@ -1111,6 +1144,10 @@ export async function createMcpServer(
 	}
 	registerTestingTools(server);
 	registerDependencyTools(server);
+	if (usePostgres) {
+		registerConsolidatedTools(server);
+		server.setConsolidatedToolSurface(true);
+	}
 
 	// Start background maintenance tasks
 	const MAINTENANCE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes

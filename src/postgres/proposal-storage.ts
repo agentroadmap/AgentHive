@@ -1,8 +1,7 @@
 /**
  * Postgres proposal storage adapter for AgentHive.
  *
- * Mirrors the SDB proposal loader API but operates on the `proposal` and
- * `proposal_version` tables in the `agenthive` Postgres database.
+ * Operates on the proposal tables in the `agenthive` Postgres database.
  */
 import { query } from './pool.ts';
 
@@ -147,7 +146,7 @@ export async function transitionProposal(
   authorIdentity?: string,
   changeSummary?: string,
 ): Promise<ProposalRow | null> {
-  return await query('BEGIN');
+  await query('BEGIN');
   try {
     const updated = await updateProposal(id, { status: newStatus });
 

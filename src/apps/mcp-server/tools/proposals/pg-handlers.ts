@@ -6,11 +6,68 @@
  * preventing tool call crashes.
  */
 
+import type { QueryResultRow } from "pg";
 import { query } from "../../../../postgres/pool.ts";
 import type { ProposalRow } from "../../../../postgres/proposal-storage-v2.ts";
 import * as pg from "../../../../postgres/proposal-storage-v2.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
+
+type ProjectionFormat = "yaml_md" | "json";
+
+type ProjectionField =
+	| "id"
+	| "display_id"
+	| "title"
+	| "type"
+	| "status"
+	| "maturity"
+	| "priority"
+	| "summary"
+	| "motivation"
+	| "design"
+	| "drawbacks"
+	| "alternatives"
+	| "dependency"
+	| "dependencies"
+	| "acceptance_criteria"
+	| "criteria"
+	| "lease"
+	| "workflow"
+	| "latest_decision"
+	| "tags";
+
+type ProposalProjectionArgs = {
+	id?: string;
+	projection?: string;
+	fields?: string[] | string;
+	format?: ProjectionFormat;
+};
+
+type ProposalProjectionRow = QueryResultRow & {
+	id: number;
+	display_id: string | null;
+	title: string;
+	type: string;
+	status: string;
+	maturity: string;
+	priority: string | null;
+	summary: string | null;
+	motivation: string | null;
+	design: string | null;
+	drawbacks: string | null;
+	alternatives: string | null;
+	dependency: string | null;
+	dependencies: unknown;
+	acceptance_criteria: unknown;
+	latest_decision: string | null;
+	decision_at: Date | string | null;
+	leased_by: string | null;
+	lease_expires: Date | string | null;
+	workflow_name: string | null;
+	current_stage: string | null;
+	tags: unknown;
+};
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
@@ -21,6 +78,135 @@ function errorResult(msg: string, err: unknown): CallToolResult {
 			},
 		],
 	};
+}
+
+const PROJECTION_FIELD_ALIASES: Record<string, ProjectionField> = {
+	acceptance: "acceptance_criteria",
+	acceptance_criteria: "acceptance_criteria",
+	criteria: "acceptance_criteria",
+	dependency_link: "dependencies",
+	id: "id",
+	display_id: "display_id",
+	title: "title",
+	type: "type",
+	status: "status",
+	state: "status",
+	maturity: "maturity",
+	priority: "priority",
+	summary: "summary",
+	motivation: "motivation",
+	design: "design",
+	drawbacks: "drawbacks",
+	alternatives: "alternatives",
+	dependency: "dependency",
+	dependencies: "dependencies",
+	lease: "lease",
+	workflow: "workflow",
+	latest_decision: "latest_decision",
+	decision: "latest_decision",
+	tags: "tags",
+};
+
+const DEFAULT_PROJECTION_FIELDS: ProjectionField[] = [
+	"id",
+	"display_id",
+	"title",
+	"type",
+	"status",
+	"maturity",
+	"priority",
+	"lease",
+	"motivation",
+	"design",
+	"acceptance_criteria",
+];
+
+function normalizeProjectionField(field: string): ProjectionField | null {
+	const key = field.trim().toLowerCase();
+	return PROJECTION_FIELD_ALIASES[key] ?? null;
+}
+
+function parseProjectionArgs(args: ProposalProjectionArgs): {
+	id: string | null;
+	fields: ProjectionField[];
+} {
+	let id = args.id?.trim() || null;
+	const rawFields: string[] = [];
+
+	if (args.projection?.trim()) {
+		const projection = args.projection.trim();
+		const match = projection.match(/\{\s*([^,}\s]+)\s*:\s*([^,}]+)(.*)\}/);
+		if (match) {
+			if (!id && match[1].trim() === "id") {
+				id = match[2].trim().replace(/^['"]|['"]$/g, "");
+			}
+			rawFields.push(
+				...match[3]
+					.split(",")
+					.map((part) => part.trim())
+					.filter(Boolean),
+			);
+		} else {
+			rawFields.push(...projection.split(","));
+		}
+	}
+
+	if (Array.isArray(args.fields)) {
+		rawFields.push(...args.fields);
+	} else if (typeof args.fields === "string") {
+		rawFields.push(...args.fields.split(","));
+	}
+
+	const fields = rawFields
+		.map(normalizeProjectionField)
+		.filter((field): field is ProjectionField => Boolean(field));
+
+	return {
+		id,
+		fields: fields.length > 0 ? Array.from(new Set(fields)) : DEFAULT_PROJECTION_FIELDS,
+	};
+}
+
+function formatScalar(value: unknown): string {
+	if (value instanceof Date) return value.toISOString();
+	if (typeof value === "string") return value;
+	if (value === null || value === undefined) return "";
+	return String(value);
+}
+
+function yamlValue(value: unknown): string {
+	if (value === null || value === undefined || value === "") return "null";
+	if (typeof value === "number" || typeof value === "boolean") return String(value);
+	const text = formatScalar(value).replace(/"/g, '\\"');
+	return `"${text}"`;
+}
+
+function normalizeJsonArray(value: unknown): unknown[] {
+	if (!value) return [];
+	if (Array.isArray(value)) return value;
+	if (typeof value === "string") {
+		try {
+			const parsed = JSON.parse(value);
+			return Array.isArray(parsed) ? parsed : [];
+		} catch {
+			return [];
+		}
+	}
+	return [];
+}
+
+function markdownList(items: unknown[], textKey: string): string {
+	if (items.length === 0) return "None recorded.";
+	return items
+		.map((item, index) => {
+			if (item && typeof item === "object" && textKey in item) {
+				const record = item as Record<string, unknown>;
+				const status = record.status ? ` [${formatScalar(record.status)}]` : "";
+				return `${index + 1}. ${formatScalar(record[textKey])}${status}`;
+			}
+			return `${index + 1}. ${formatScalar(item)}`;
+		})
+		.join("\n");
 }
 
 export class PgProposalHandlers {
@@ -44,7 +230,7 @@ export class PgProposalHandlers {
 			}
 			const lines = proposals.map((p) => {
 				const did = p.display_id ?? `#${p.id}`;
-				return `[${did}] ${p.title || "(no title)"} — status: ${p.status}, type: ${p.type}, maturity: ${p.maturity_state ?? "unknown"}`;
+				return `[${did}] ${p.title || "(no title)"} — status: ${p.status}, type: ${p.type}, maturity: ${p.maturity ?? "unknown"}`;
 			});
 			return { content: [{ type: "text", text: lines.join("\n") }] };
 		} catch (err) {
@@ -73,6 +259,52 @@ export class PgProposalHandlers {
 			};
 		} catch (err) {
 			return errorResult("Failed to get proposal", err);
+		}
+	}
+
+	async getProposalProjection(args: ProposalProjectionArgs): Promise<CallToolResult> {
+		try {
+			const projection = parseProjectionArgs(args);
+			if (!projection.id) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Projection requires an id, either as { id } or inside projection, e.g. roadmap proposal detail {id:P190, title, maturity, design}.",
+						},
+					],
+				};
+			}
+
+			const numericId = Number.parseInt(projection.id, 10);
+			const { rows } = await query<ProposalProjectionRow>(
+				`SELECT *
+				 FROM roadmap_proposal.v_proposal_full
+				 WHERE display_id = $1 OR id = $2
+				 LIMIT 1`,
+				[projection.id, Number.isNaN(numericId) ? null : numericId],
+			);
+			const row = rows[0];
+			if (!row) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Proposal ${projection.id} not found.`,
+						},
+					],
+				};
+			}
+
+			const object = this.buildProjectionObject(row, projection.fields);
+			const text =
+				args.format === "json"
+					? JSON.stringify(object, null, 2)
+					: this.formatProjectionYamlMarkdown(object, projection.fields);
+
+			return { content: [{ type: "text", text }] };
+		} catch (err) {
+			return errorResult("Failed to get proposal projection", err);
 		}
 	}
 
@@ -563,7 +795,7 @@ export class PgProposalHandlers {
 			const lines = proposals.map((p) => {
 				const did = p.display_id ?? `#${p.id}`;
 				const preview = this.buildPreview(p);
-				return `[${did}] ${p.title || "(no title)"} — status: ${p.status}, type: ${p.type}, maturity: ${p.maturity_state ?? "unknown"}\n  ${preview}`;
+				return `[${did}] ${p.title || "(no title)"} — status: ${p.status}, type: ${p.type}, maturity: ${p.maturity ?? "unknown"}\n  ${preview}`;
 			});
 			return {
 				content: [
@@ -600,5 +832,115 @@ export class PgProposalHandlers {
 		const source =
 			proposal.summary ?? proposal.motivation ?? proposal.design ?? "";
 		return source ? source.substring(0, 150) : "";
+	}
+
+	private buildProjectionObject(
+		row: ProposalProjectionRow,
+		fields: ProjectionField[],
+	): Record<string, unknown> {
+		const object: Record<string, unknown> = {};
+		for (const field of fields) {
+			switch (field) {
+				case "maturity":
+					object.maturity = row.maturity;
+					break;
+				case "criteria":
+				case "acceptance_criteria":
+					object.acceptance_criteria = normalizeJsonArray(row.acceptance_criteria);
+					break;
+				case "lease":
+					object.lease = row.leased_by
+						? { agent: row.leased_by, expires: row.lease_expires }
+						: null;
+					break;
+				case "workflow":
+					object.workflow = {
+						name: row.workflow_name,
+						current_stage: row.current_stage,
+					};
+					break;
+				case "dependencies":
+					object.dependencies = normalizeJsonArray(row.dependencies);
+					break;
+				case "latest_decision":
+					object.latest_decision = row.latest_decision
+						? { decision: row.latest_decision, decided_at: row.decision_at }
+						: null;
+					break;
+				default:
+					object[field] = row[field];
+					break;
+			}
+		}
+		return object;
+	}
+
+	private formatProjectionYamlMarkdown(
+		object: Record<string, unknown>,
+		fields: ProjectionField[],
+	): string {
+		const metadataKeys = [
+			"id",
+			"display_id",
+			"title",
+			"type",
+			"status",
+			"maturity",
+			"priority",
+			"lease",
+			"workflow",
+			"latest_decision",
+			"tags",
+		];
+		const metadata = metadataKeys
+			.filter((key) => Object.hasOwn(object, key))
+			.map((key) => {
+				const value = object[key];
+				if (value && typeof value === "object") {
+					return `${key}: ${JSON.stringify(value)}`;
+				}
+				return `${key}: ${yamlValue(value)}`;
+			})
+			.join("\n");
+
+		const sections: string[] = [];
+		for (const field of fields) {
+			switch (field) {
+				case "summary":
+				case "motivation":
+				case "design":
+				case "drawbacks":
+				case "alternatives":
+				case "dependency": {
+					const value = object[field];
+					if (value) {
+						sections.push(`## ${field.replace(/_/g, " ")}\n${formatScalar(value)}`);
+					}
+					break;
+				}
+				case "dependencies": {
+					if (Object.hasOwn(object, "dependencies")) {
+						sections.push(
+							`## Dependencies\n${markdownList(normalizeJsonArray(object.dependencies), "to_display_id")}`,
+						);
+					}
+					break;
+				}
+				case "criteria":
+				case "acceptance_criteria": {
+					if (Object.hasOwn(object, "acceptance_criteria")) {
+						sections.push(
+							`## Acceptance Criteria\n${markdownList(
+								normalizeJsonArray(object.acceptance_criteria),
+								"criterion_text",
+							)}`,
+						);
+					}
+					break;
+				}
+			}
+		}
+
+		return `# --- METADATA (YAML) ---\n${metadata}\n# -----------------------\n\n# --- NARRATIVE (Markdown) ---\n${sections.join("\n\n") || "No narrative fields requested."}`;
 	}
 }

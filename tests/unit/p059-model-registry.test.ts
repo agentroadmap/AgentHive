@@ -50,7 +50,7 @@ describe("P059: Model Registry", () => {
 		});
 
 		it("should accept is_active=false for deactivation", () => {
-			const isActive = "false";
+			const isActive: string = "false";
 			const parsed = isActive === "true";
 			assert.equal(parsed, false);
 		});

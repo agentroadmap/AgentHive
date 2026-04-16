@@ -16,6 +16,12 @@ import { resolve } from "node:path";
 
 const ROOT = resolve(process.cwd());
 
+function firstText(result: { content: Array<{ type: string; text?: string }> }): string {
+	const first = result.content[0];
+	assert.equal(first?.type, "text");
+	return first.text ?? "";
+}
+
 // ---------------------------------------------------------------------------
 // AC-1: channel_subscription table schema validation
 // ---------------------------------------------------------------------------
@@ -23,23 +29,23 @@ describe("AC-1: channel_subscription table", () => {
 	let sql: string;
 
 	beforeEach(() => {
-		sql = readFileSync(resolve(ROOT, "database/ddl/016-channel-subscriptions.sql"), "utf-8");
+		sql = readFileSync(resolve(ROOT, "database/ddl/roadmap-baseline-2026-04-13.sql"), "utf-8");
 	});
 
 	it("migration SQL defines correct columns", () => {
 		assert.ok(
-			sql.includes("CREATE TABLE IF NOT EXISTS roadmap.channel_subscription"),
+			sql.includes("CREATE TABLE roadmap.channel_subscription"),
 			"Should create channel_subscription table",
 		);
 		assert.ok(sql.includes("agent_identity"), "Should have agent_identity column");
 		assert.ok(sql.includes("channel"), "Should have channel column");
 		assert.ok(sql.includes("subscribed_at"), "Should have subscribed_at column");
 		assert.ok(
-			sql.includes("PRIMARY KEY (agent_identity, channel)"),
-			"Should have composite primary key",
+			sql.includes("channel_subscription_unique UNIQUE (agent_identity, channel)"),
+			"Should enforce one subscription per agent/channel",
 		);
 		assert.ok(
-			sql.includes("REFERENCES roadmap.agent_registry"),
+			sql.includes("REFERENCES roadmap_workforce.agent_registry"),
 			"Should have FK to agent_registry",
 		);
 		assert.ok(
@@ -90,12 +96,12 @@ describe("AC-2: chan_subscribe MCP tool", () => {
 		assert.ok(result.content, "Should return content array");
 		assert.ok(Array.isArray(result.content), "Content should be an array");
 		assert.ok(result.content[0].type === "text", "Should be text content");
-		assert.ok(typeof result.content[0].text === "string", "Text should be a string");
+		assert.ok(typeof firstText(result) === "string", "Text should be a string");
 		// Either "Subscribed" (success) or "⚠️" (error from missing table) is valid
 		assert.ok(
-			result.content[0].text.includes("Subscribed") ||
-				result.content[0].text.includes("⚠️"),
-			`Should indicate subscription result, got: ${result.content[0].text.substring(0, 80)}`,
+			firstText(result).includes("Subscribed") ||
+				firstText(result).includes("⚠️"),
+			`Should indicate subscription result, got: ${firstText(result).substring(0, 80)}`,
 		);
 	});
 
@@ -114,9 +120,9 @@ describe("AC-2: chan_subscribe MCP tool", () => {
 
 		assert.ok(result.content[0].type === "text");
 		assert.ok(
-			result.content[0].text.includes("Unsubscribed") ||
-				result.content[0].text.includes("⚠️"),
-			`Should indicate unsubscribe result, got: ${result.content[0].text.substring(0, 80)}`,
+			firstText(result).includes("Unsubscribed") ||
+				firstText(result).includes("⚠️"),
+			`Should indicate unsubscribe result, got: ${firstText(result).substring(0, 80)}`,
 		);
 	});
 
@@ -135,8 +141,8 @@ describe("AC-2: chan_subscribe MCP tool", () => {
 
 		// Invalid channel should be caught before DB call
 		assert.ok(
-			result.content[0].text.includes("Invalid channel format"),
-			`Should reject invalid channel, got: ${result.content[0].text.substring(0, 80)}`,
+			firstText(result).includes("Invalid channel format"),
+			`Should reject invalid channel, got: ${firstText(result).substring(0, 80)}`,
 		);
 	});
 
@@ -155,9 +161,9 @@ describe("AC-2: chan_subscribe MCP tool", () => {
 		assert.ok(result.content[0].type === "text");
 		// Default is subscribe (true)
 		assert.ok(
-			result.content[0].text.includes("Subscribed") ||
-				result.content[0].text.includes("⚠️"),
-			`Default action should be subscribe, got: ${result.content[0].text.substring(0, 80)}`,
+			firstText(result).includes("Subscribed") ||
+				firstText(result).includes("⚠️"),
+			`Default action should be subscribe, got: ${firstText(result).substring(0, 80)}`,
 		);
 	});
 
@@ -176,8 +182,8 @@ describe("AC-2: chan_subscribe MCP tool", () => {
 			});
 			// Should not get "Invalid channel format" for valid channels
 			assert.ok(
-				!result.content[0].text.includes("Invalid channel format"),
-				`Should accept channel '${channel}', got: ${result.content[0].text.substring(0, 80)}`,
+				!firstText(result).includes("Invalid channel format"),
+				`Should accept channel '${channel}', got: ${firstText(result).substring(0, 80)}`,
 			);
 		}
 	});
@@ -194,7 +200,7 @@ describe("AC-2: chan_subscribe MCP tool", () => {
 		});
 
 		assert.ok(result.content[0].type === "text");
-		assert.ok(typeof result.content[0].text === "string");
+		assert.ok(typeof firstText(result) === "string");
 	});
 });
 
@@ -205,12 +211,12 @@ describe("AC-3: pg_notify trigger", () => {
 	let sql: string;
 
 	beforeEach(() => {
-		sql = readFileSync(resolve(ROOT, "database/ddl/016-channel-subscriptions.sql"), "utf-8");
+		sql = readFileSync(resolve(ROOT, "database/ddl/roadmap-baseline-2026-04-13.sql"), "utf-8");
 	});
 
 	it("migration defines fn_notify_new_message trigger function", () => {
 		assert.ok(
-			sql.includes("CREATE OR REPLACE FUNCTION roadmap.fn_notify_new_message()"),
+			sql.includes("CREATE FUNCTION roadmap.fn_notify_new_message()"),
 			"Should define trigger function",
 		);
 		assert.ok(sql.includes("pg_notify("), "Should call pg_notify");

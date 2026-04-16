@@ -6,6 +6,9 @@
  * 2. Environment variables (PG_HOST, PG_PORT, PG_USER, PG_PASSWORD, PG_DATABASE)
  * 3. DATABASE_URL
  *
+ * Connections default to the AgentHive domain search path:
+ * roadmap_proposal, roadmap_workforce, roadmap_efficiency, roadmap, public.
+ *
  * For CLI contexts (no systemd env), PG_PASSWORD is loaded from:
  *   - Project root `.env` file
  *   - `~/.agenthive.env` file
@@ -54,6 +57,14 @@ let configuredSchema: string | null = normalizeSchemaName(
 );
 let poolSignature: string | null = null;
 
+const DEFAULT_SEARCH_PATH = [
+	"roadmap_proposal",
+	"roadmap_workforce",
+	"roadmap_efficiency",
+	"roadmap",
+	"public",
+];
+
 type AgentHivePoolConfig = PoolConfig & {
 	schema?: string | null;
 };
@@ -91,9 +102,10 @@ function buildSearchPathOptions(
 	schema: string | null,
 ): string | undefined {
 	const parts = [options?.trim()].filter(Boolean) as string[];
-	if (schema) {
-		parts.push(`-c search_path=${schema},public`);
-	}
+	const searchPath = schema
+		? [schema, ...DEFAULT_SEARCH_PATH.filter((entry) => entry !== schema)]
+		: DEFAULT_SEARCH_PATH;
+	parts.push(`-c search_path=${searchPath.join(",")}`);
 	return parts.length > 0 ? parts.join(" ") : undefined;
 }
 

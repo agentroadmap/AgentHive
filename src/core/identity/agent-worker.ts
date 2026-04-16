@@ -3,10 +3,6 @@
  * Uses MCP tools to review and update proposals
  */
 
-import { SDB_CONFIG } from "../constants/index.ts";
-
-const DB_ID = SDB_CONFIG.DB_ID;
-
 export class AgentWorker {
   constructor(
     public agentId: string,

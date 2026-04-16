@@ -316,7 +316,7 @@ const ProposalsPage: React.FC<ProposalsPageProps> = ({
 									</td>
 									<td className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">
 										{formatStoredUtcDateForCompactDisplay(
-											parseStoredUtcDate(proposal.createdDate),
+											proposal.createdDate,
 										)}
 									</td>
 								</tr>

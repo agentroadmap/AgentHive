@@ -23,6 +23,7 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { mcpText, parseMcpJson } from "./mcp-result.ts";
 import { getPool, query } from "../src/infra/postgres/pool.ts";
 
 const MCP_URL = "http://127.0.0.1:6421/sse";
@@ -117,15 +118,15 @@ async function dispatchAgent(agent: string, proposalId: string, task: string): P
     const created = await client.callTool({
       name: "cubic_create",
       arguments: {
-        name: \`\${agent} — \${proposalId} — \${Date.now()}\`,
+        name: `${agent} — ${proposalId} — ${Date.now()}`,
         agents: [agent, "reviewer"],
         proposals: [proposalId],
       },
     });
     
-    const data = JSON.parse(created.content?.[0]?.text || "{}");
+    const data = JSON.parse(mcpText(created) || "{}");
     if (!data.success || !data.cubic) {
-      logger.error(\`Failed to create cubic for \${agent}\`);
+      logger.error(`Failed to create cubic for ${agent}`);
       return;
     }
     
@@ -137,7 +138,7 @@ async function dispatchAgent(agent: string, proposalId: string, task: string): P
       arguments: {
         cubicId,
         agent,
-        task: \`Working on \${proposalId}: \${task}\`,
+        task: `Working on ${proposalId}: ${task}`,
         phase: "design",
       },
     });
@@ -148,10 +149,10 @@ async function dispatchAgent(agent: string, proposalId: string, task: string): P
     }
     activeAgents.get(proposalId)?.add(agent);
     
-    logger.log(\`🚀 \${agent} → \${cubicId} for \${proposalId}\`);
+    logger.log(`🚀 ${agent} → ${cubicId} for ${proposalId}`);
     
   } catch (e) {
-    logger.error(\`Failed to dispatch \${agent}:\`, e);
+    logger.error(`Failed to dispatch ${agent}:`, e);
   } finally {
     await client.close();
   }
@@ -162,14 +163,14 @@ async function dispatchSquad(proposalId: string, newState: string) {
   const squad = SQUAD_DISPATCH[newState];
   
   if (!squad) {
-    logger.log(\`No squad for state: \${newState}\`);
+    logger.log(`No squad for state: ${newState}`);
     return;
   }
   
-  logger.log(\`📢 \${proposalId} → \${newState} (\${squad.description})\`);
-  logger.log(\`   Squad: \${squad.agents.join(", ")}\`);
+  logger.log(`📢 ${proposalId} → ${newState} (${squad.description})`);
+  logger.log(`   Squad: ${squad.agents.join(", ")}`);
   if (squad.specialized) {
-    logger.log(\`   Support: \${squad.specialized.join(", ")}\`);
+    logger.log(`   Support: ${squad.specialized.join(", ")}`);
   }
   
   // Dispatch ALL agents in parallel
@@ -180,7 +181,7 @@ async function dispatchSquad(proposalId: string, newState: string) {
   
   await Promise.all(promises);
   
-  logger.log(\`✅ Dispatched \${allAgents.length} agents for \${proposalId}\`);
+  logger.log(`✅ Dispatched ${allAgents.length} agents for ${proposalId}`);
 }
 
 // Main orchestrator
@@ -226,11 +227,11 @@ async function main() {
   setInterval(async () => {
     try {
       const result = await query(
-        \`SELECT id, display_id, status 
-         FROM roadmap.proposal 
-         WHERE maturity_state = 'new' 
+        `SELECT id, display_id, status
+         FROM roadmap_proposal.proposal
+         WHERE maturity = 'new'
          ORDER BY priority DESC NULLS LAST 
-         LIMIT 10\`
+         LIMIT 10`
       );
       
       for (const proposal of result.rows) {
@@ -245,14 +246,14 @@ async function main() {
   setInterval(() => {
     const totalAgents = Array.from(activeAgents.values()).reduce((sum, set) => sum + set.size, 0);
     const totalAttempts = Array.from(attemptLog.values()).reduce((sum, count) => sum + count, 0);
-    logger.log(\`📊 Fleet Status: \${totalAgents} active agents, \${totalAttempts} attempts\`);
+    logger.log(`📊 Fleet Status: ${totalAgents} active agents, ${totalAttempts} attempts`);
   }, 5 * 60 * 1000);
   
   logger.log("Refined Orchestrator running with squad-based dispatch...");
   
   // Graceful shutdown
   const shutdown = async (signal: string) => {
-    logger.log(\`Received \${signal}, shutting down...\`);
+    logger.log(`Received ${signal}, shutting down...`);
     pgClient.release();
     await pool.end();
     process.exit(0);

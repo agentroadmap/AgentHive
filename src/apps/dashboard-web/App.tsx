@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { Route, Switch } from "wouter";
-import type { Proposal } from "../../shared/types";
+import type {
+	Agent as SharedAgent,
+	Channel as SharedChannel,
+	Proposal,
+} from "../../shared/types";
 import AchievementsView from "./components/AchievementsView";
 import AgentDashboard from "./components/AgentDashboard";
 import AgentsPage from "./components/AgentsPage";
@@ -18,7 +22,12 @@ import ProposalsPage from "./components/ProposalsPage";
 import SettingsPage from "./components/SettingsPage";
 import StatisticsPage from "./components/StatisticsPage";
 import TeamsPage from "./components/TeamsPage";
-import { useWebSocket } from "./hooks/useWebSocket";
+import {
+	type Agent as WebSocketAgent,
+	type Channel as WebSocketChannel,
+	type Proposal as WebSocketProposal,
+	useWebSocket,
+} from "./hooks/useWebSocket";
 
 const STATUSES = [
 	"Draft",
@@ -28,8 +37,53 @@ const STATUSES = [
 	"Complete",
 ];
 
+function toSharedProposal(proposal: WebSocketProposal): Proposal {
+	return {
+		id: proposal.displayId || proposal.id,
+		title: proposal.title,
+		status: proposal.status,
+		assignee: [],
+		createdDate: proposal.createdAt,
+		updatedDate: proposal.updatedAt,
+		labels: proposal.tags ? [proposal.tags] : [],
+		dependencies: proposal.parentId ? [proposal.parentId] : [],
+		description: proposal.bodyMarkdown ?? undefined,
+		domainId: proposal.domainId,
+		proposalType: proposal.proposalType,
+		category: proposal.category,
+		priority:
+			proposal.priority === "high" ||
+			proposal.priority === "medium" ||
+			proposal.priority === "low"
+				? proposal.priority
+				: undefined,
+	};
+}
+
+function toSharedAgent(agent: WebSocketAgent): SharedAgent {
+	return {
+		name: agent.agentId || agent.identity,
+		identity: agent.identity,
+		capabilities: [],
+		trustScore: 0,
+		lastSeen: agent.lastSeenAt,
+		status: agent.isActive ? "active" : "offline",
+	};
+}
+
+function toSharedChannel(channel: WebSocketChannel): SharedChannel {
+	return {
+		name: channel.channelName,
+		fileName: channel.channelName,
+		type: "group",
+	};
+}
+
 export default function App() {
 	const { proposals, agents, channels } = useWebSocket();
+	const sharedProposals = proposals.map(toSharedProposal);
+	const sharedAgents = agents.map(toSharedAgent);
+	const sharedChannels = channels.map(toSharedChannel);
 	const [activeFeature, setActiveFeature] = useState<string | null>(null);
 
 	const handleProposalClick = (proposal: Proposal) => {
@@ -42,7 +96,7 @@ export default function App() {
 				<main className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden">
 					<Switch>
 						<Route path="/">
-							<DashboardPage proposals={proposals as unknown as Proposal[]} />
+							<DashboardPage proposals={sharedProposals} />
 						</Route>
 						<Route path="/board">
 							<BoardPage
@@ -54,22 +108,22 @@ export default function App() {
 							/>
 						</Route>
 						<Route path="/proposals">
-							<ProposalsPage proposals={proposals} />
+							<ProposalsPage proposals={sharedProposals} />
 						</Route>
 						<Route path="/directives">
-							<DirectivesPage proposals={proposals} />
+							<DirectivesPage proposals={sharedProposals} />
 						</Route>
 						<Route path="/agents">
-							<AgentsPage agents={agents} />
+							<AgentsPage agents={sharedAgents} />
 						</Route>
 						<Route path="/teams">
 							<TeamsPage />
 						</Route>
 						<Route path="/channels">
-							<ChannelsPage channels={channels} />
+							<ChannelsPage channels={sharedChannels} />
 						</Route>
 						<Route path="/statistics">
-							<StatisticsPage proposals={proposals} />
+							<StatisticsPage proposals={sharedProposals} />
 						</Route>
 						<Route path="/agent-dashboard">
 							<AgentDashboard />
@@ -99,9 +153,7 @@ export default function App() {
 					{activeFeature && (
 						<ProposalDetailsModal
 							proposal={
-								proposals.find((p) => p.id === activeFeature) as unknown as
-									| Proposal
-									| undefined
+								sharedProposals.find((p) => p.id === activeFeature)
 							}
 							isOpen={true}
 							onClose={() => setActiveFeature(null)}

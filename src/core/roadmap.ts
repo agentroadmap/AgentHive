@@ -907,8 +907,8 @@ export class Core {
 	}
 
 	private mapPgMaturity(row: ProposalRow): Proposal["maturity"] | undefined {
-		// maturity_state is now a direct TEXT column — no JSONB parsing needed
-		const state = row.maturity_state;
+		// maturity is now a direct TEXT column — no JSONB parsing needed
+		const state = row.maturity;
 		if (!state) return undefined;
 		switch (state) {
 			case "new":

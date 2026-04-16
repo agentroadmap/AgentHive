@@ -23,7 +23,7 @@ Timestamp: 2026-04-12T00:30 UTC
 | Proposal | Decision | Reason |
 |----------|----------|--------|
 | P045 (Self-Healing DAG) | **HOLD** | Dependencies P070/P071 status unknown; visual graph scope creep risk |
-| P046 (Hybrid Storage Adapter) | **HOLD** | Major architectural change; SDB/file backends unvalidated; consistency model unclear |
+| P046 (Hybrid Storage Adapter) | **HOLD** | Major architectural change; secondary/file backends unvalidated; consistency model unclear |
 | P047 (Efficiency & Finance) | **HOLD** | Financial projections unvalidated; pgvector dependency; loop detection scope unclear |
 | P048 (MCP Tool Versioning) | **HOLD** | 30-day warning period arbitrary; consumer notification system undefined |
 
@@ -116,11 +116,11 @@ Scanning the filesystem for proposals in REVIEW state found none. All new propos
 - **State:** RFC (not in workflow)
 - **Type:** INFRASTRUCTURE
 - **Coherent:** ✅ Well-designed interface abstraction
-- **Economically Optimized:** ❌ Major architectural change; SDB/file backends unvalidated
+- **Economically Optimized:** ❌ Major architectural change; secondary/file backends unvalidated
 - **Acceptance Criteria:** ⚠️ Present but unverifiable
 
 **Challenges:**
-1. **"SDB" backend undefined:** What is SDB? Is it implemented? Available? Production-ready?
+1. **Secondary backend undefined:** What is the backend? Is it implemented? Available? Production-ready?
 2. **File-based backend:** What does "offline/disconnected operation" mean for a server-side system?
 3. **Consistency model:** "Eventual consistency" with "last-write-wins" is dangerous for proposal data. What happens when two agents update the same proposal simultaneously?
 4. **"30% reduction in storage costs":** Based on what? Current storage costs are presumably Postgres. How does adding more backends reduce costs?
@@ -129,7 +129,7 @@ Scanning the filesystem for proposals in REVIEW state found none. All new propos
 **Decision: HOLD**
 
 **Rationale:** This is a **major architectural change** that deserves rigorous analysis:
-1. Define SDB and validate its existence
+1. Define the secondary backend and validate its existence
 2. Justify why Postgres alone is insufficient
 3. Detail the consistency conflict resolution strategy
 4. Provide actual cost analysis, not aspirational percentages

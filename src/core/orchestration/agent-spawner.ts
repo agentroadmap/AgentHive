@@ -192,6 +192,19 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	const provider = detectProvider(worktree);
 	const model = resolveModel(provider, modelHint);
 	const agentEnv = await loadEnvAgent(worktree);
+	let assembledTask = task;
+
+	if (proposalId !== undefined) {
+		const contextPackage = await buildProposalContextPackage({
+			proposalId,
+			taskType: stage ?? "unknown",
+			agentIdentity: worktree,
+			maxTokens: 2000,
+		});
+		assembledTask = `${contextPackage}\n\n## Task\n${task}`;
+	}
+
+	const spawnReq = { ...req, task: assembledTask };
 
 	// Build provider-specific argv and additional env
 	let argv: string[];
@@ -199,14 +212,14 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 
 	switch (provider) {
 		case "claude":
-			({ argv, env: extraEnv } = buildClaudeArgs(req, model));
+			({ argv, env: extraEnv } = buildClaudeArgs(spawnReq, model));
 			break;
 		case "gemini":
-			({ argv, env: extraEnv } = buildGeminiArgs(req, model));
+			({ argv, env: extraEnv } = buildGeminiArgs(spawnReq, model));
 			break;
 		case "copilot":
 		case "openclaw":
-			({ argv, env: extraEnv } = buildOpenAICompatArgs(req, model));
+			({ argv, env: extraEnv } = buildOpenAICompatArgs(spawnReq, model));
 			break;
 	}
 
@@ -337,7 +350,7 @@ export async function escalateOrNotify(
 	proposalId?: number,
 ): Promise<SpawnResult | null> {
 	const LADDER: Array<{ provider: AgentProvider; model: string }> = [
-		{ provider: "claude", model: "claude-haiku-4-5-20251001" },
+		{ provider: "claude", model: "claude-haiku-4-5" },
 		{ provider: "claude", model: "claude-sonnet-4-6" },
 		{ provider: "claude", model: "claude-opus-4-6" },
 	];

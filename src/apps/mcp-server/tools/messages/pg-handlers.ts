@@ -22,6 +22,11 @@ function errorResult(msg: string, err: unknown): CallToolResult {
 	};
 }
 
+function firstText(result: CallToolResult): string | undefined {
+	const first = result.content[0];
+	return first?.type === "text" ? first.text : undefined;
+}
+
 /**
  * Notification payload from the fn_notify_new_message trigger.
  */
@@ -354,7 +359,7 @@ export class PgMessagingHandlers {
 				// First, check if messages already exist
 				const existing = await this.fetchMessages(args);
 
-				if (existing.content[0]?.text === "No messages found.") {
+				if (firstText(existing) === "No messages found.") {
 					// No messages — wait for pg_notify
 					const listener = new MessageNotificationListener();
 					try {

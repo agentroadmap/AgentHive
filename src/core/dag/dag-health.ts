@@ -574,7 +574,7 @@ export async function detectOscillationFromDB(
 	}>(
 		`SELECT id, from_state, to_state,
         TO_CHAR(transitioned_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS transitioned_at
-     FROM proposal_state_transitions
+     FROM roadmap_proposal.proposal_state_transitions
      WHERE proposal_id = $1
      ORDER BY transitioned_at ASC`,
 		[proposalId],
@@ -664,8 +664,8 @@ export async function scanForOscillation(
          WHERE (LOWER(pst.from_state) = 'review' AND LOWER(pst.to_state) = 'develop')
             OR (LOWER(pst.from_state) = 'develop' AND LOWER(pst.to_state) = 'review')
        ) AS oscillation_count
-     FROM proposal_state_transitions pst
-     JOIN proposal p ON p.id = pst.proposal_id
+     FROM roadmap_proposal.proposal_state_transitions pst
+     JOIN roadmap_proposal.proposal p ON p.id = pst.proposal_id
      GROUP BY pst.proposal_id, p.display_id
      HAVING COUNT(*) FILTER (
        WHERE (LOWER(pst.from_state) = 'review' AND LOWER(pst.to_state) = 'develop')

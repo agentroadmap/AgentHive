@@ -23,7 +23,7 @@ type ResolvedProposal = {
 	type: string;
 	title: string;
 	status: string;
-	maturity_state: 'new' | 'active' | 'mature' | 'obsolete';
+	maturity: 'new' | 'active' | 'mature' | 'obsolete';
 	summary: string | null;
 	motivation: string | null;
 	design: string | null;
@@ -88,7 +88,7 @@ async function resolveProposalRecord(
        p.type,
        p.title,
        p.status,
-       p.maturity_state,
+       p.maturity,
        p.summary,
        p.motivation,
        p.design,
@@ -98,9 +98,9 @@ async function resolveProposalRecord(
        w.id AS workflow_id,
        w.current_stage,
        wt.name AS workflow_name
-     FROM proposal p
-     LEFT JOIN workflows w ON w.proposal_id = p.id
-     LEFT JOIN workflow_templates wt ON wt.id = w.template_id
+     FROM roadmap_proposal.proposal p
+     LEFT JOIN roadmap.workflows w ON w.proposal_id = p.id
+     LEFT JOIN roadmap.workflow_templates wt ON wt.id = w.template_id
      WHERE p.display_id = $1 OR p.id = $2
      LIMIT 1`,
 		[identifier, numericId],
@@ -163,7 +163,7 @@ async function loadTransitionDefinition(
          pvt.allowed_reasons,
          pvt.allowed_roles,
          pvt.requires_ac
-       FROM proposal_valid_transitions pvt
+       FROM roadmap_proposal.proposal_valid_transitions pvt
        WHERE pvt.workflow_name = $1
          AND LOWER(pvt.from_state) = LOWER($2)
          AND LOWER(pvt.to_state) = LOWER($3)
@@ -190,7 +190,7 @@ async function loadMissingRequiredFields(
 ): Promise<string[]> {
 	const { rows } = await query<{ required_fields: string[] | null }>(
 		`SELECT required_fields
-     FROM proposal_type_config
+     FROM roadmap_proposal.proposal_type_config
      WHERE type = $1
      LIMIT 1`,
 		[proposal.type],
@@ -218,7 +218,7 @@ async function hasOutstandingAcceptanceCriteria(
 ): Promise<boolean> {
 	const { rows } = await query<{ outstanding_count: number }>(
 		`SELECT COUNT(*)::int AS outstanding_count
-     FROM proposal_acceptance_criteria
+     FROM roadmap_proposal.proposal_acceptance_criteria
      WHERE proposal_id = $1
        AND status <> 'pass'`,
 		[proposalId],
@@ -252,7 +252,7 @@ function deriveMaturityLabel(
 	_fromState: string,
 	_toState: string,
 ): string {
-	return proposal.maturity_state ?? "new";
+	return proposal.maturity ?? "new";
 }
 
 // ─── State Transitions ──────────────────────────────────────────────────────
@@ -320,9 +320,9 @@ export async function transitionProposal(args: {
 			`WITH _actor AS (
          SELECT set_config('app.agent_identity', $1, true) AS agent_identity
        )
-       UPDATE proposal
+       UPDATE roadmap_proposal.proposal
        SET status = $2,
-           maturity = jsonb_set(COALESCE(maturity, '{}'::jsonb), ARRAY[$2], to_jsonb($3::text), true),
+           maturity = $3,
            modified_at = NOW()
        FROM _actor
        WHERE id = $4`,
@@ -350,13 +350,13 @@ export async function transitionProposal(args: {
 		}
 
 		const { rowCount } = await query(
-			`UPDATE proposal_state_transitions
+			`UPDATE roadmap_proposal.proposal_state_transitions
        SET transition_reason = $1,
            transitioned_by = $2,
            notes = $3
        WHERE id = (
          SELECT id
-         FROM proposal_state_transitions
+         FROM roadmap_proposal.proposal_state_transitions
          WHERE proposal_id = $4
            AND LOWER(from_state) = LOWER($5)
            AND LOWER(to_state) = LOWER($6)
@@ -375,7 +375,7 @@ export async function transitionProposal(args: {
 
 		if ((rowCount ?? 0) === 0) {
 			await query(
-				`INSERT INTO proposal_state_transitions
+				`INSERT INTO roadmap_proposal.proposal_state_transitions
            (proposal_id, from_state, to_state, transition_reason, notes, transitioned_by)
          VALUES ($1, $2, $3, $4, $5, $6)`,
 				[
@@ -438,14 +438,14 @@ export async function addAcceptanceCriteria(args: {
 		}
 
 		const { rows: maxRow } = await query(
-			"SELECT COALESCE(MAX(item_number), 0) as max_idx FROM proposal_acceptance_criteria WHERE proposal_id = $1",
+			"SELECT COALESCE(MAX(item_number), 0) as max_idx FROM roadmap_proposal.proposal_acceptance_criteria WHERE proposal_id = $1",
 			[proposalId],
 		);
 		let idx = maxRow[0].max_idx + 1;
 
 		for (const criterion of criteriaList) {
 			await query(
-				`INSERT INTO proposal_acceptance_criteria (proposal_id, criterion_text, item_number)
+				`INSERT INTO roadmap_proposal.proposal_acceptance_criteria (proposal_id, criterion_text, item_number)
          VALUES ($1, $2, $3)`,
 				[proposalId, criterion, idx++],
 			);
@@ -500,7 +500,7 @@ export async function verifyAC(args: {
 
 		// Fetch the AC first to confirm it exists and get its text
 		const { rows: acRows } = await query(
-			`SELECT item_number, criterion_text, status FROM proposal_acceptance_criteria
+			`SELECT item_number, criterion_text, status FROM roadmap_proposal.proposal_acceptance_criteria
 			 WHERE proposal_id = $1 AND item_number = $2`,
 			[proposalId, itemNum],
 		);
@@ -519,7 +519,7 @@ export async function verifyAC(args: {
 		const ac = acRows[0];
 
 		await query(
-			`UPDATE proposal_acceptance_criteria SET status = $1, verified_by = $2,
+			`UPDATE roadmap_proposal.proposal_acceptance_criteria SET status = $1, verified_by = $2,
                verification_notes = $3, verified_at = NOW()
        WHERE proposal_id = $4 AND item_number = $5`,
 			[
@@ -570,7 +570,7 @@ export async function deleteAC(args: {
 		// Cleanup mode: delete all single-character AC entries (corrupted by P156)
 		if (args.cleanup_singles) {
 			const { rowCount } = await query(
-				`DELETE FROM proposal_acceptance_criteria
+				`DELETE FROM roadmap_proposal.proposal_acceptance_criteria
 				 WHERE proposal_id = $1 AND LENGTH(criterion_text) = 1`,
 				[proposalId],
 			);
@@ -601,7 +601,7 @@ export async function deleteAC(args: {
 			: args.item_number;
 
 		const { rowCount } = await query(
-			`DELETE FROM proposal_acceptance_criteria
+			`DELETE FROM roadmap_proposal.proposal_acceptance_criteria
 			 WHERE proposal_id = $1 AND item_number = $2`,
 			[proposalId, itemNum],
 		);
@@ -621,10 +621,10 @@ export async function deleteAC(args: {
 		await query(
 			`WITH renumbered AS (
 				SELECT id, ROW_NUMBER() OVER (ORDER BY item_number) AS new_num
-				FROM proposal_acceptance_criteria
+				FROM roadmap_proposal.proposal_acceptance_criteria
 				WHERE proposal_id = $1
 			)
-			UPDATE proposal_acceptance_criteria pac
+			UPDATE roadmap_proposal.proposal_acceptance_criteria pac
 			SET item_number = r.new_num
 			FROM renumbered r
 			WHERE pac.id = r.id AND pac.item_number != r.new_num`,
@@ -659,7 +659,7 @@ export async function listAC(args: {
 
 		const { rows } = await query(
 			`SELECT item_number, criterion_text, status, verified_by, verified_at, verification_notes
-       FROM proposal_acceptance_criteria WHERE proposal_id = $1
+       FROM roadmap_proposal.proposal_acceptance_criteria WHERE proposal_id = $1
        ORDER BY item_number`,
 			[proposalId],
 		);
@@ -699,62 +699,6 @@ export async function listAC(args: {
 	}
 }
 
-/**
- * P158: Delete all acceptance criteria for a proposal (cleanup for corrupted data
- * from the character-splitting bug). Optionally delete by specific item_number.
- */
-export async function deleteAC(args: {
-	proposal_id: string;
-	item_number?: number;
-}): Promise<CallToolResult> {
-	try {
-		const proposalId = await resolveProposalId(args.proposal_id);
-		if (proposalId === null) {
-			return {
-				content: [
-					{ type: "text", text: `Proposal ${args.proposal_id} not found.` },
-				],
-			};
-		}
-
-		if (args.item_number != null) {
-			const itemNum = typeof args.item_number === "string"
-				? parseInt(args.item_number, 10)
-				: args.item_number;
-			const { rowCount } = await query(
-				`DELETE FROM proposal_acceptance_criteria WHERE proposal_id = $1 AND item_number = $2`,
-				[proposalId, itemNum],
-			);
-			return {
-				content: [
-					{
-						type: "text",
-						text: rowCount && rowCount > 0
-							? `🗑️ Deleted AC #${itemNum} from ${args.proposal_id}`
-							: `AC #${itemNum} not found for ${args.proposal_id}`,
-					},
-				],
-			};
-		}
-
-		// Delete all ACs for the proposal
-		const { rowCount } = await query(
-			`DELETE FROM proposal_acceptance_criteria WHERE proposal_id = $1`,
-			[proposalId],
-		);
-		return {
-			content: [
-				{
-					type: "text",
-					text: `🗑️ Deleted ${rowCount || 0} AC items from ${args.proposal_id}`,
-				},
-			],
-		};
-	} catch (err) {
-		return errorResult("Failed to delete AC", err);
-	}
-}
-
 // ─── Dependencies ───────────────────────────────────────────────────────────
 
 export async function addDependency(args: {
@@ -786,7 +730,7 @@ export async function addDependency(args: {
 		}
 
 		await query(
-			`INSERT INTO proposal_dependencies (from_proposal_id, to_proposal_id, dependency_type)
+			`INSERT INTO roadmap_proposal.proposal_dependencies (from_proposal_id, to_proposal_id, dependency_type)
        VALUES ($1, $2, $3)
        ON CONFLICT DO NOTHING`,
 			[fromProposalId, toProposalId, depType],
@@ -826,7 +770,7 @@ export async function getDependencies(args: {
 				`SELECT related_display_id, related_title, related_status,
 				        related_maturity, dependency_type, resolved_at,
 				        is_effective_blocker
-				 FROM roadmap.v_blocking_diagram
+				 FROM roadmap_proposal.v_blocking_diagram
 				 WHERE proposal_id = $1 AND direction = 'i_depend_on'
 				 ORDER BY is_effective_blocker DESC, dependency_type, related_display_id`,
 				[proposalId],
@@ -836,14 +780,14 @@ export async function getDependencies(args: {
 			// View doesn't exist yet — fall back to raw query
 			const result = await query(
 				`SELECT p.display_id AS related_display_id, p.title AS related_title,
-				        p.status AS related_status, p.maturity_state AS related_maturity,
+				        p.status AS related_status, p.maturity AS related_maturity,
 				        d.dependency_type, d.resolved_at,
 				        CASE WHEN d.dependency_type = 'blocks'
-				              AND p.maturity_state NOT IN ('mature', 'obsolete')
+				              AND p.maturity NOT IN ('mature', 'obsolete')
 				              AND d.resolved_at IS NULL
 				         THEN true ELSE false END AS is_effective_blocker
-				 FROM proposal_dependencies d
-				 JOIN proposal p ON p.id = d.to_proposal_id
+				 FROM roadmap_proposal.proposal_dependencies d
+				 JOIN roadmap_proposal.proposal p ON p.id = d.to_proposal_id
 				 WHERE d.from_proposal_id = $1
 				 ORDER BY is_effective_blocker DESC, d.dependency_type, p.display_id`,
 				[proposalId],
@@ -889,7 +833,7 @@ export async function resolveDependency(args: {
 }): Promise<CallToolResult> {
 	try {
 		const { rows } = await query(
-			`UPDATE proposal_dependencies
+			`UPDATE roadmap_proposal.proposal_dependencies
 			 SET resolved_at = NOW(), resolved_by = $1
 			 WHERE id = $2 AND resolved_at IS NULL
 			 RETURNING id, from_proposal_id, to_proposal_id, dependency_type`,
@@ -942,12 +886,12 @@ export async function submitReview(args: {
 
 		// Check for existing review (prevent double-voting)
 		const { rows: existing } = await query(
-			"SELECT verdict FROM proposal_reviews WHERE proposal_id = $1 AND reviewer_identity = $2",
+			"SELECT verdict FROM roadmap_proposal.proposal_reviews WHERE proposal_id = $1 AND reviewer_identity = $2",
 			[proposalId, args.reviewer],
 		);
 		if (existing.length) {
 			await query(
-				`UPDATE proposal_reviews SET verdict = $1, notes = $2, findings = $3, reviewed_at = NOW()
+				`UPDATE roadmap_proposal.proposal_reviews SET verdict = $1, notes = $2, findings = $3, reviewed_at = NOW()
          WHERE proposal_id = $4 AND reviewer_identity = $5`,
 				[
 					args.verdict,
@@ -959,7 +903,7 @@ export async function submitReview(args: {
 			);
 		} else {
 			await query(
-				`INSERT INTO proposal_reviews (proposal_id, reviewer_identity, verdict, notes, findings)
+				`INSERT INTO roadmap_proposal.proposal_reviews (proposal_id, reviewer_identity, verdict, notes, findings)
          VALUES ($1, $2, $3, $4, $5)`,
 				[
 					proposalId,
@@ -999,7 +943,7 @@ export async function listReviews(args: {
 
 		const { rows: reviewRows } = await query(
 			`SELECT reviewer_identity, verdict, notes, findings, reviewed_at
-       FROM proposal_reviews WHERE proposal_id = $1
+       FROM roadmap_proposal.proposal_reviews WHERE proposal_id = $1
        ORDER BY reviewed_at DESC`,
 			[propId],
 		);
@@ -1052,7 +996,7 @@ export async function addDiscussion(args: {
 		}
 
 		const { rows } = await query(
-			`INSERT INTO proposal_discussions (proposal_id, author_identity, body, parent_id, context_prefix)
+			`INSERT INTO roadmap_proposal.proposal_discussions (proposal_id, author_identity, body, parent_id, context_prefix)
        VALUES ($1, $2, $3, $4, $5) RETURNING id`,
 			[
 				proposalId,
@@ -1083,7 +1027,7 @@ export async function getValidTransitions(args: {
 }): Promise<CallToolResult> {
 	try {
 		let sql = `SELECT from_state, to_state, allowed_reasons, allowed_roles, requires_ac
-               FROM proposal_valid_transitions`;
+               FROM roadmap_proposal.proposal_valid_transitions`;
 		const params: any[] = [];
 
 		if (args.from_state) {

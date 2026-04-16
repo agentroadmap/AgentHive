@@ -34,7 +34,7 @@ The archive contains several older models that are no longer canonical:
 
 - SQLite-first or daemon-first coordination assumptions
 - markdown/state-file workflows as the primary control plane
-- SpacetimeDB-era pathing and migration assumptions
+- legacy secondary-database pathing and migration assumptions
 - mixed filesystem plus database truth models
 
 Those documents remain useful as historical reasoning, but the active architecture should be interpreted through this Postgres-first control-plane model.

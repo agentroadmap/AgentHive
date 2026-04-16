@@ -12,7 +12,7 @@ describe("P055: Team Composition Tools", () => {
 	describe("team_list schema", () => {
 		it("should have correct schema structure", () => {
 			const { teamListSchema } = require(
-				"../../../src/apps/mcp-server/tools/teams/schemas.ts",
+				"../../src/mcp/tools/teams/schemas.ts",
 			);
 
 			assert.equal(teamListSchema.type, "object");
@@ -23,7 +23,7 @@ describe("P055: Team Composition Tools", () => {
 
 		it("should support status filter options", () => {
 			const { teamListSchema } = require(
-				"../../../src/apps/mcp-server/tools/teams/schemas.ts",
+				"../../src/mcp/tools/teams/schemas.ts",
 			);
 
 			const statusOptions = teamListSchema.properties.status.enum;
@@ -34,7 +34,7 @@ describe("P055: Team Composition Tools", () => {
 
 		it("should support team type filter options", () => {
 			const { teamListSchema } = require(
-				"../../../src/apps/mcp-server/tools/teams/schemas.ts",
+				"../../src/mcp/tools/teams/schemas.ts",
 			);
 
 			const typeOptions = teamListSchema.properties.teamType.enum;
@@ -48,7 +48,7 @@ describe("P055: Team Composition Tools", () => {
 	describe("team_add_member schema", () => {
 		it("should have correct schema structure", () => {
 			const { teamAddMemberSchema } = require(
-				"../../../src/apps/mcp-server/tools/teams/schemas.ts",
+				"../../src/mcp/tools/teams/schemas.ts",
 			);
 
 			assert.equal(teamAddMemberSchema.type, "object");
@@ -59,7 +59,7 @@ describe("P055: Team Composition Tools", () => {
 
 		it("should require teamId, agentId, and role", () => {
 			const { teamAddMemberSchema } = require(
-				"../../../src/apps/mcp-server/tools/teams/schemas.ts",
+				"../../src/mcp/tools/teams/schemas.ts",
 			);
 
 			assert.deepEqual(teamAddMemberSchema.required, ["teamId", "agentId", "role"]);
@@ -69,7 +69,7 @@ describe("P055: Team Composition Tools", () => {
 	describe("Tool registration", () => {
 		it("should export team_list and team_add_member schemas", async () => {
 			const schemas = await import(
-				"../../../src/apps/mcp-server/tools/teams/schemas.ts"
+				"../../src/mcp/tools/teams/schemas.ts"
 			);
 
 			assert.ok(schemas.teamListSchema);
@@ -78,7 +78,7 @@ describe("P055: Team Composition Tools", () => {
 
 		it("should have registerTeamTools function that registers all tools", async () => {
 			const { registerTeamTools } = await import(
-				"../../../src/apps/mcp-server/tools/teams/index.ts"
+				"../../src/mcp/tools/teams/index.ts"
 			);
 
 			assert.ok(typeof registerTeamTools === "function");

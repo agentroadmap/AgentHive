@@ -57,7 +57,7 @@ Schema artifacts are split between `/database/ddl/`, `/database/dml/`, and canon
 
 ## Coding Standards
 - TypeScript throughout
-- PostgreSQL-native (no SpacetimeDB references)
+- PostgreSQL-native (no retired secondary-database references)
 - Use connection pooling from `.env` credentials
 - Maintain backward compatibility where possible for migration
 - All new code must use `roadmap.` schema prefix in queries

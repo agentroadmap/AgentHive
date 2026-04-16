@@ -22,6 +22,22 @@ const WORKTREE_PREFIXES = ["claude", "gemini", "copilot", "openclaw"] as const;
 type TransitionQueueId = number | string;
 type JsonRecord = Record<string, unknown>;
 type Logger = Pick<Console, "log" | "warn" | "error">;
+type SpawnAgentRequest = {
+	worktree: string;
+	task: string;
+	proposalId: number | string;
+	stage: string;
+	model?: string;
+	timeoutMs?: number;
+};
+type SpawnAgentResult = {
+	agentRunId: string;
+	worktree: string;
+	exitCode: number;
+	stdout: string;
+	stderr: string;
+	durationMs: number;
+};
 
 export interface NotificationMessage {
 	channel: string;
@@ -54,6 +70,7 @@ interface TransitionQueueRow {
 export interface PipelineCronDeps {
 	queryFn?: typeof query;
 	connectListener?: () => Promise<ListenerClient>;
+	spawnAgentFn?: (request: SpawnAgentRequest) => Promise<SpawnAgentResult>;
 	mcpUrl?: string;
 	logger?: Logger;
 	defaultWorktree?: string;
@@ -61,6 +78,15 @@ export interface PipelineCronDeps {
 	batchSize?: number;
 	setIntervalFn?: typeof setInterval;
 	clearIntervalFn?: typeof clearInterval;
+}
+
+function mcpResultText(result: unknown): string {
+	const content = (result as { content?: Array<{ type?: string; text?: string }> })
+		.content;
+	const first = content?.[0];
+	return first?.type === "text" && typeof first.text === "string"
+		? first.text
+		: "";
 }
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -170,6 +196,7 @@ export class PipelineCron {
 	private readonly batchSize: number;
 	private readonly setIntervalFn: typeof setInterval;
 	private readonly clearIntervalFn: typeof clearInterval;
+	private readonly spawnAgentFn?: (request: SpawnAgentRequest) => Promise<SpawnAgentResult>;
 
 	private listenerClient: ListenerClient | null = null;
 	private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -207,6 +234,7 @@ export class PipelineCron {
 		this.batchSize = deps.batchSize ?? DEFAULT_BATCH_SIZE;
 		this.setIntervalFn = deps.setIntervalFn ?? setInterval;
 		this.clearIntervalFn = deps.clearIntervalFn ?? clearInterval;
+		this.spawnAgentFn = deps.spawnAgentFn;
 	}
 
 	async run(): Promise<void> {
@@ -377,6 +405,11 @@ export class PipelineCron {
 	private async processTransition(
 		transition: TransitionQueueRow,
 	): Promise<void> {
+		if (this.spawnAgentFn) {
+			await this.processTransitionWithSpawnAgent(transition);
+			return;
+		}
+
 		const client = new Client({ name: "gate-pipeline", version: "1.0.0" });
 		const transport = new SSEClientTransport(new URL(this.mcpUrl));
 
@@ -401,9 +434,7 @@ export class PipelineCron {
 					proposals: [proposalId],
 				},
 			});
-			const cubicData = JSON.parse(
-				cubicResult.content?.[0]?.text || "{}",
-			);
+				const cubicData = JSON.parse(mcpResultText(cubicResult) || "{}");
 
 			if (!cubicData.success || !cubicData.cubic?.id) {
 				throw new Error(
@@ -436,6 +467,46 @@ export class PipelineCron {
 		} finally {
 			await client.close();
 		}
+	}
+
+	private async processTransitionWithSpawnAgent(
+		transition: TransitionQueueRow,
+	): Promise<void> {
+		if (!this.spawnAgentFn) return;
+		const spawnMetadata = isRecord(transition.metadata?.spawn)
+			? transition.metadata.spawn
+			: null;
+		const proposalId =
+			readNumber(transition.metadata, "proposalId", "proposal_id") ??
+			(typeof transition.proposal_id === "number"
+				? transition.proposal_id
+				: Number.isFinite(Number(transition.proposal_id))
+					? Number(transition.proposal_id)
+					: transition.proposal_id);
+		const request: SpawnAgentRequest = {
+			worktree:
+				readString(spawnMetadata, "worktree") ??
+				readString(transition.metadata, "worktree") ??
+				this.defaultWorktree,
+			task: readString(spawnMetadata, "task") ?? buildDefaultTask(transition),
+			proposalId,
+			stage: transition.to_stage,
+		};
+		const model = readString(spawnMetadata, "model");
+		if (model) request.model = model;
+		const timeoutMs = readNumber(spawnMetadata, "timeoutMs", "timeout_ms");
+		if (timeoutMs !== null) request.timeoutMs = timeoutMs;
+
+		const result = await this.spawnAgentFn(request);
+		if (result.exitCode !== 0) {
+			const details = [result.stderr, result.stdout].filter(Boolean).join("\n");
+			await this.handleTransitionFailure(
+				transition,
+				`spawnAgent exited with code ${result.exitCode}${details ? `\n${details}` : ""}`,
+			);
+			return;
+		}
+		await this.markTransitionDone(transition.id);
 	}
 
 	private async markTransitionDispatched(

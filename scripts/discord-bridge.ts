@@ -113,7 +113,7 @@ async function routeToAgent(agent: string, message: string): Promise<string> {
 }
 
 // Handle incoming Discord message
-async function handleDiscordMessage(content: string, author: string): Promise<string> {
+async function handleDiscordMessage(content: string, author: string): Promise<string | null> {
   // Check for status command
   if (content.toLowerCase() === "status") {
     return await getPipelineStatus();

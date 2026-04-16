@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { mcpText, parseMcpJson } from "./mcp-result.ts";
 
 const transport = new SSEClientTransport(new URL("http://127.0.0.1:6421/sse"));
 const client = new Client({ name: "hermes-check", version: "1.0.0" });
@@ -7,7 +8,7 @@ await client.connect(transport);
 
 // Get all cubics
 const cubes = await client.callTool({ name: "cubic_list", arguments: {} });
-const text = cubes.content?.[0]?.text || "";
+const text = mcpText(cubes);
 const data = JSON.parse(text);
 const cubics = data.cubics || [];
 
@@ -33,7 +34,7 @@ for (const c of active.slice(0, 10)) {
 // Show agent roster
 console.log("\n=== AGENT ROSTER ===");
 const agents = await client.callTool({ name: "agent_list", arguments: {} });
-console.log(agents.content?.[0]?.text?.substring(0, 800));
+console.log(mcpText(agents).substring(0, 800));
 
 await client.close();
 

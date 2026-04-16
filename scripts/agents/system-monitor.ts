@@ -12,6 +12,7 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { mcpText } from "../mcp-result.ts";
 
 const MCP_URL = "http://127.0.0.1:6421/sse";
 
@@ -25,7 +26,7 @@ export async function systemMonitor() {
   
   // Check proposals
   const proposals = await client.callTool({ name: "prop_list", arguments: {} });
-  const text = proposals.content?.[0]?.text || "";
+  const text = mcpText(proposals);
   
   // Scan for inconsistencies
   const issues: string[] = [];

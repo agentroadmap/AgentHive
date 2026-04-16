@@ -75,7 +75,7 @@ export class PgPulseHandlers {
 
 			// Upsert agent_health
 			await query(
-				`INSERT INTO roadmap.agent_health
+				`INSERT INTO roadmap_workforce.agent_health
 				 (agent_identity, last_heartbeat_at, status, current_task, current_proposal,
 				  current_cubic, cpu_percent, memory_mb, active_model, uptime_seconds, metadata)
 				 VALUES ($1, $2, 'healthy', $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
@@ -106,7 +106,7 @@ export class PgPulseHandlers {
 
 			// Append to heartbeat log
 			await query(
-				`INSERT INTO roadmap.agent_heartbeat_log
+				`INSERT INTO roadmap_workforce.agent_heartbeat_log
 				 (agent_identity, heartbeat_at, cpu_percent, memory_mb, active_model, current_task, metadata)
 				 VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
 				[
@@ -157,14 +157,14 @@ export class PgPulseHandlers {
 				sql = `SELECT agent_identity, last_heartbeat_at, status, current_task,
 				              current_proposal, current_cubic, cpu_percent, memory_mb,
 				              active_model, uptime_seconds, metadata, updated_at
-				       FROM roadmap.agent_health
+				       FROM roadmap_workforce.agent_health
 				       WHERE agent_identity = $1`;
 				params.push(args.agent_identity);
 			} else {
 				sql = `SELECT agent_identity, last_heartbeat_at, status, current_task,
 				              current_proposal, current_cubic, cpu_percent, memory_mb,
 				              active_model, uptime_seconds, metadata, updated_at
-				       FROM roadmap.agent_health
+				       FROM roadmap_workforce.agent_health
 				       ORDER BY last_heartbeat_at DESC`;
 			}
 
@@ -219,7 +219,7 @@ export class PgPulseHandlers {
 			const { rows } = await query<AgentHealthRow>(
 				`SELECT agent_identity, last_heartbeat_at, status, cpu_percent,
 				        memory_mb, uptime_seconds, metadata
-				 FROM roadmap.agent_health`,
+				 FROM roadmap_workforce.agent_health`,
 			);
 
 			if (!rows.length) {
@@ -274,7 +274,7 @@ export class PgPulseHandlers {
 			// Get heartbeat rate in last hour
 			const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
 			const { rows: recentHeartbeats } = await query<{ cnt: string }>(
-				`SELECT COUNT(*) as cnt FROM roadmap.agent_heartbeat_log
+				`SELECT COUNT(*) as cnt FROM roadmap_workforce.agent_heartbeat_log
 				 WHERE heartbeat_at >= $1`,
 				[oneHourAgo],
 			);
@@ -285,7 +285,7 @@ export class PgPulseHandlers {
 				cnt: string;
 			}>(
 				`SELECT agent_identity, COUNT(*) as cnt
-				 FROM roadmap.agent_heartbeat_log
+				 FROM roadmap_workforce.agent_heartbeat_log
 				 WHERE heartbeat_at >= $1
 				 GROUP BY agent_identity
 				 ORDER BY cnt DESC
@@ -346,7 +346,7 @@ export class PgPulseHandlers {
 				metadata: unknown;
 			}>(
 				`SELECT heartbeat_at, cpu_percent, memory_mb, active_model, current_task, metadata
-				 FROM roadmap.agent_heartbeat_log
+				 FROM roadmap_workforce.agent_heartbeat_log
 				 WHERE agent_identity = $1
 				 ORDER BY heartbeat_at DESC
 				 LIMIT $2`,
@@ -406,28 +406,28 @@ export class PgPulseHandlers {
 
 			// Mark crashed
 			const { rowCount: crashed } = await query(
-				`UPDATE roadmap.agent_health SET status = 'crashed'
+				`UPDATE roadmap_workforce.agent_health SET status = 'crashed'
 				 WHERE last_heartbeat_at < $1 AND status != 'crashed'`,
 				[crashCutoff],
 			);
 
 			// Mark offline
 			const { rowCount: offline } = await query(
-				`UPDATE roadmap.agent_health SET status = 'offline'
+				`UPDATE roadmap_workforce.agent_health SET status = 'offline'
 				 WHERE last_heartbeat_at < $2 AND last_heartbeat_at >= $1 AND status != 'offline'`,
 				[crashCutoff, offlineCutoff],
 			);
 
 			// Mark stale
 			const { rowCount: stale } = await query(
-				`UPDATE roadmap.agent_health SET status = 'stale'
+				`UPDATE roadmap_workforce.agent_health SET status = 'stale'
 				 WHERE last_heartbeat_at < $2 AND last_heartbeat_at >= $1 AND status != 'stale'`,
 				[offlineCutoff, staleCutoff],
 			);
 
 			// Clean old heartbeat logs
 			await query(
-				`DELETE FROM roadmap.agent_heartbeat_log WHERE heartbeat_at < $1`,
+				`DELETE FROM roadmap_workforce.agent_heartbeat_log WHERE heartbeat_at < $1`,
 				[new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)],
 			);
 

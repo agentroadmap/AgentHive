@@ -16,8 +16,8 @@ PATTERNS=(
   "agent-roadmap-v2"  # Old database name
   "roadmap2"          # Current database name (should be in config)
   "roadmap"           # MCP server name (should be in config)
-  "127.0.0.1:3000"    # SpacetimeDB URL (should be in config)
-  "localhost:3000"    # SpacetimeDB URL (should be in config)
+  "127.0.0.1:3000"    # Local service URL (should be in config)
+  "localhost:3000"    # Local service URL (should be in config)
   "c200[0-9a-f]"      # Database IDs (should be in config)
 )
 

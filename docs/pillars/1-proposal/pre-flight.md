@@ -36,7 +36,7 @@ run_unit_tests()
 
 # 4. Postgres Schema Alignment
 # Checks if the proposed code matches the current Postgres workflow action signatures
-check_sdb_compatibility()
+check_postgres_compatibility()
 
 echo "✅ Pre-flight Complete. Ready for RFC Submission."
 ```
@@ -79,4 +79,3 @@ We have now established a professional, enterprise-grade foundation for **agentR
 2.  **Workforce:** Role-based agents with performance tracking.
 3.  **Spending:** Real-time OpenRouter/Postgres budget firewalls.
 4.  **Pipeline:** Multi-stage verification to ensure code quality and security.
-

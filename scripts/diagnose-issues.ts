@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { mcpText, parseMcpJson } from "./mcp-result.ts";
 
 const transport = new SSEClientTransport(new URL("http://127.0.0.1:6421/sse"));
 const client = new Client({ name: "hermes-diagnose", version: "1.0.0" });
@@ -8,7 +9,7 @@ await client.connect(transport);
 // 1. Check transition queue for details
 console.log("=== TRANSITION QUEUE DETAILS ===");
 const list = await client.callTool({ name: "prop_list", arguments: {} });
-const text = list.content?.[0]?.text || "";
+const text = mcpText(list);
 
 // Find proposals in different states
 const stateMap: Record<string, string[]> = {

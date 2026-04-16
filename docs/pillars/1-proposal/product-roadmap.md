@@ -35,8 +35,8 @@
 | P071 | Typed Dependencies in SMDL | 0/8 |
 | P001 | CHILD-RFCS-CREATED | 1/1 |
 | P002 | Test-Team-Memory-Sprint | 0/0 |
-| P003 | Fix-hardcoded-SDB-database-names | 0/0 |
-| P004 | Fix-hardcoded-SDB-database-names | 0/0 |
+| P003 | Retired secondary-database naming cleanup | 0/0 |
+| P004 | Retired secondary-database naming cleanup | 0/0 |
 | P005 | Agent-Profile-Upgrade — GitHub-Sync Personality Injection | 0/0 |
 | P006 | Messaging-Synchronization | 0/0 |
 | P007 | RFC-20260401-BUSINESS-DESIGN | 0/0 |
@@ -60,7 +60,7 @@
 | P026 | RFC-20260401-TUI-COCKPIT | 0/5 |
 | P027 | RFC-20260401-WORKFORCE-CORE | 0/5 |
 | P028–P031 | Agent Memory Architecture: 4-Layer Memory System | 4×0/5 |
-| P029 | Eliminate WebSocket Bridge - Use SDB Native Subscriptions Directly | 0/5 |
+| P029 | Retire secondary-database subscription path | 0/5 |
 
 ## 🆕 PROPOSAL (22)
 | ID | Title | AC |
