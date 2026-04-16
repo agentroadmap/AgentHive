@@ -87,7 +87,7 @@ describe("board workflow helpers", () => {
 		expect(filterProposalsForWorkflow(proposals, "quick-fix")).toHaveLength(1);
 	});
 
-	it("keeps workflow column order and adds custom statuses", () => {
+	it("keeps workflow column order and sorts custom states deterministically", () => {
 		const workflow = getWorkflowViewDefinition("rfc");
 		const proposals: Proposal[] = [
 			{
@@ -103,6 +103,16 @@ describe("board workflow helpers", () => {
 			{
 				id: "p2",
 				title: "RFC2",
+				status: "REVIEW",
+				proposalType: "feature",
+				assignee: [],
+				createdDate: "",
+				labels: [],
+				dependencies: [],
+			},
+			{
+				id: "p3",
+				title: "RFC3",
 				status: "Blocked",
 				proposalType: "feature",
 				assignee: [],

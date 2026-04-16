@@ -124,6 +124,18 @@ export function getWorkflowViewDefinition(
 	return WORKFLOW_BY_KEY.get(key) ?? WORKFLOW_VIEWS[0];
 }
 
+function normalizeWorkflowStatus(
+	status: string,
+	workflowKey: WorkflowViewKey,
+): string {
+	const trimmed = status.trim();
+	const workflow = getWorkflowViewDefinition(workflowKey);
+	const canonical = workflow.statuses.find(
+		(candidate) => candidate.toLowerCase() === trimmed.toLowerCase(),
+	);
+	return canonical ?? trimmed;
+}
+
 export function getWorkflowViewForProposal(
 	proposal: Proposal,
 ): WorkflowViewDefinition {
@@ -166,17 +178,28 @@ export function resolveWorkflowStatuses(
 	workflowKey: WorkflowViewKey,
 ): string[] {
 	const workflow = getWorkflowViewDefinition(workflowKey);
-	const statuses = new Set<string>(workflow.statuses);
+	const canonicalStatuses = [...workflow.statuses];
+	const extraStatuses = new Set<string>();
 	for (const proposal of proposals) {
 		if (getWorkflowViewForProposal(proposal).key !== workflowKey) {
 			continue;
 		}
-		const status = proposal.status.trim();
-		if (status) {
-			statuses.add(status);
+		const status = normalizeWorkflowStatus(proposal.status, workflowKey);
+		if (status && !canonicalStatuses.includes(status)) {
+			extraStatuses.add(status);
 		}
 	}
-	return Array.from(statuses);
+	return [...canonicalStatuses, ...Array.from(extraStatuses).sort((a, b) => a.localeCompare(b))];
+}
+
+function normalizeProposalsForWorkflow(
+	proposals: Proposal[],
+	workflowKey: WorkflowViewKey,
+): Proposal[] {
+	return proposals.map((proposal) => ({
+		...proposal,
+		status: normalizeWorkflowStatus(proposal.status, workflowKey),
+	}));
 }
 
 function isCompleteStatus(status: string): boolean {
@@ -612,9 +635,10 @@ export async function renderBoardTui(
 		};
 
 		const getVisibleWorkflowProposals = (): Proposal[] => {
-			return filterProposalsForWorkflow(
-				getFilteredProposals(),
-				getCurrentWorkflowView().key,
+			const workflowKey = getCurrentWorkflowView().key;
+			return normalizeProposalsForWorkflow(
+				filterProposalsForWorkflow(getFilteredProposals(), workflowKey),
+				workflowKey,
 			);
 		};
 
