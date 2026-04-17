@@ -906,3 +906,35 @@ sal-001 - Test: Team Memory Sprint
 [2026-04-17 16:21:57] System: __roadmap_msg_b64__:KipbcHJvcG9zYWwgY3JlYXRlZF0qKiBQUk9KRUNUIC0gUmUtSW5pdCBUZXN0Cj4gUHJvamVjdCBpbml0aWFsaXplZCB3aXRoIEFnZW50IFV0aWxpdHkgQmVsdCBpbmZyYXN0cnVjdHVyZS4=
 [2026-04-17 16:21:57] System: __roadmap_msg_b64__:KipbcHJvcG9zYWwgY3JlYXRlZF0qKiBQUk9KRUNUIC0gRGVmYXVsdCBQcmVmaXggSW5pdAo+IFByb2plY3QgaW5pdGlhbGl6ZWQgd2l0aCBBZ2VudCBVdGlsaXR5IEJlbHQgaW5mcmFzdHJ1Y3R1cmUu
 [2026-04-17 16:21:58] System: __roadmap_msg_b64__:KipbcHJvcG9zYWwgY3JlYXRlZF0qKiBQUk9KRUNUIC0gRGlzayBQZXJzaXN0ZW5jZSBUZXN0Cj4gUHJvamVjdCBpbml0aWFsaXplZCB3aXRoIEFnZW50IFV0aWxpdHkgQmVsdCBpbmZyYXN0cnVjdHVyZS4=
+[2026-04-17 16:22:01] System: **[proposal created]** PROPOSAL-1 - Test Proposal
+[2026-04-17 16:22:02] System: **[proposal created]** PROPOSAL-1 - High Priority
+[2026-04-17 16:22:02] System: **[proposal created]** PROPOSAL-1 - Test Proposal
+[2026-04-17 16:22:03] System: **[proposal created]** PROPOSAL-2 - Medium Priority
+[2026-04-17 16:22:04] System: **[proposal created]** PROPOSAL-1 - Test Proposal
+[2026-04-17 16:22:04] System: __roadmap_msg_b64__:KipbcHJvcG9zYWwgY3JlYXRlZF0qKiBQUk9KRUNUIC0gTmV3IFByb2plY3QKPiBQcm9qZWN0IGluaXRpYWxpemVkIHdpdGggQWdlbnQgVXRpbGl0eSBCZWx0IGluZnJhc3RydWN0dXJlLg==
+[2026-04-17 16:22:05] System: **[proposal created]** PROPOSAL-3 - Low Priority
+[2026-04-17 16:22:05] System: **[proposal created]** PROPOSAL-1 - Dependency
+[2026-04-17 16:22:06] System: **[proposal created]** PROPOSAL-1 - Dependency
+[2026-04-17 16:22:07] System: __roadmap_msg_b64__:KipbcHJvcG9zYWwgY3JlYXRlZF0qKiBwcm9wb3NhbC0xIC0gVGVzdCBQcm9wb3NhbAo+IFNUQUxFIExFQVNFIFJFQ09WRVJFRDogQWdlbnQgQHN0YWxlLWFnZW50IG1pc3NlZCBoZWFydGJlYXQgZm9yIDEyMCBtaW51dGVzLg==
+[2026-04-17 16:22:09] System: **[proposal created]** PROPOSAL-1 - Test Proposal
+[2026-04-17 16:22:09] System: **[proposal created]** PROPOSAL-1 - High Priority
+[2026-04-17 16:22:11] System: **[proposal created]** PROPOSAL-2 - Medium Priority
+[2026-04-17 16:22:12] System: **[proposal created]** PROPOSAL-3 - Low Priority
+[2026-04-17 16:22:15] System: **[proposal created]** PROPOSAL-1 - Dead End
+[2026-04-17 16:22:16] System: **[proposal created]** PROPOSAL-1 - Renewal Test
+[2026-04-17 16:22:18] System: **[proposal created]** PROPOSAL-1 - Renewal Extension Test
+[2026-04-17 16:22:18] System: **[proposal created]** PROPOSAL-1 - High Priority
+[2026-04-17 16:22:20] System: **[proposal created]** PROPOSAL-2 - Medium Priority
+[2026-04-17 16:22:20] System: **[proposal created]** PROPOSAL-1 - Test Proposal
+[2026-04-17 16:22:21] System: **[proposal created]** PROPOSAL-3 - Low Priority
+[2026-04-17 16:22:22] System: **[proposal created]** PROPOSAL-1 - Test 1
+[2026-04-17 16:22:22] System: **[proposal created]** PROPOSAL-1 - Test Proposal
+[2026-04-17 16:22:23] System: **[proposal created]** PROPOSAL-2 - Test 2
+[2026-04-17 16:22:23] System: **[proposal created]** PROPOSAL-1 - Test Proposal
+[2026-04-17 16:22:24] System: **[proposal created]** PROPOSAL-1 - High Priority
+[2026-04-17 16:22:25] System: **[proposal created]** PROPOSAL-1 - Test Proposal
+[2026-04-17 16:22:25] System: **[proposal created]** PROPOSAL-2 - Medium Priority
+[2026-04-17 16:22:26] System: **[proposal created]** PROPOSAL-1 - Test Proposal
+[2026-04-17 16:22:27] System: **[proposal created]** PROPOSAL-3 - Low Priority
+[2026-04-17 16:22:27] System: **[proposal created]** PROPOSAL-1 - Test Proposal
+[2026-04-17 16:22:27] System: **[proposal created]** PROPOSAL-1 - Symlink root auto-commit
