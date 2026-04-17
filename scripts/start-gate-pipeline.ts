@@ -1,16 +1,46 @@
 /**
  * Startup script for PipelineCron gate worker.
  *
- * Initializes the PipelineCron class to process transition_queue entries
+ * Initializes the PipelineCron class to process legacy transition_queue entries
  * automatically via pg_notify and polling fallback.
  */
+import { spawnAgent } from "../src/core/orchestration/agent-spawner.ts";
 import { PipelineCron } from "../src/core/pipeline/pipeline-cron.ts";
-import { getPool, closePool } from "../src/infra/postgres/pool.ts";
+import { closePool, getPool } from "../src/infra/postgres/pool.ts";
 
-const cron = new PipelineCron();
+const executorMode = process.env.AGENTHIVE_GATE_EXECUTOR ?? "cubic";
+const spawnAdapter =
+	executorMode === "spawn"
+		? async (request: {
+				worktree: string;
+				task: string;
+				proposalId: number | string;
+				stage: string;
+				model?: string;
+				timeoutMs?: number;
+			}) =>
+				spawnAgent({
+					worktree: request.worktree,
+					task: request.task,
+					proposalId:
+						typeof request.proposalId === "number"
+							? request.proposalId
+							: Number.isFinite(Number(request.proposalId))
+								? Number(request.proposalId)
+								: undefined,
+					stage: request.stage,
+					model: request.model,
+					timeoutMs: request.timeoutMs,
+				})
+		: undefined;
+const cron = new PipelineCron(
+	spawnAdapter ? { spawnAgentFn: spawnAdapter } : {},
+);
 
 async function main() {
-	console.log("[GatePipeline] Starting PipelineCron gate worker...");
+	console.log(
+		`[GatePipeline] Starting PipelineCron gate worker (${executorMode} executor)...`,
+	);
 
 	// Initialize the postgres pool to verify connectivity
 	try {
