@@ -14,17 +14,21 @@ const outfileTmpPath = `${outfile}.tmp-${process.pid}`;
 
 console.log(`Building ${outfile}...`);
 
+function copyAsset(source, target) {
+	fs.writeFileSync(target, fs.readFileSync(source), { mode: 0o664 });
+}
+
 try {
 	fs.mkdirSync(path.join(outdir, "mcp"), { recursive: true });
-	fs.copyFileSync(
+	copyAsset(
 		"src/apps/guidelines/agent-guidelines.md",
 		path.join(outdir, "agent-guidelines.md"),
 	);
-	fs.copyFileSync(
+	copyAsset(
 		"src/apps/guidelines/project-manager-roadmap.md",
 		path.join(outdir, "project-manager-roadmap.md"),
 	);
-	fs.copyFileSync(
+	copyAsset(
 		"src/apps/guidelines/mcp/agent-nudge.md",
 		path.join(outdir, "mcp/agent-nudge.md"),
 	);
@@ -39,7 +43,7 @@ try {
 		"proposal-finalization.md",
 	];
 	for (const file of mcpFiles) {
-		fs.copyFileSync(
+		copyAsset(
 			path.join("src/apps/guidelines/mcp", file),
 			path.join(outdir, file),
 		);
