@@ -33,12 +33,7 @@ const AGENTHIVE_HOST = process.env.AGENTHIVE_HOST ?? hostname();
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type AgentProvider =
-	| "claude"
-	| "gemini"
-	| "copilot"
-	| "openclaw"
-	| "codex";
+export type AgentProvider = string;
 
 export interface WorktreeConfig {
 	/** Worktree directory name (e.g. "claude-andy") */
@@ -385,13 +380,22 @@ async function loadEnvAgent(
 }
 
 /** Detect provider from worktree name prefix. */
-function detectProvider(worktreeName: string): AgentProvider {
-	if (worktreeName.startsWith("claude")) return "claude";
-	if (worktreeName.startsWith("gemini")) return "gemini";
-	if (worktreeName.startsWith("copilot")) return "copilot";
-	if (worktreeName.startsWith("openclaw")) return "openclaw";
-	if (worktreeName.startsWith("codex")) return "codex";
-	throw new Error(`Unknown provider prefix for worktree "${worktreeName}"`);
+/**
+ * Look up agent_provider from model_routes DB table.
+ * No hardcoded prefix matching — DB is source of truth.
+ */
+async function detectProvider(worktreeName: string): Promise<AgentProvider> {
+	const { rows } = await query<{ agent_provider: string }>(
+		`SELECT DISTINCT agent_provider
+       FROM roadmap.model_routes
+       WHERE is_enabled = true
+       ORDER BY priority ASC
+       LIMIT 1`,
+	);
+	if (rows.length === 0) {
+		throw new Error(`No enabled model routes in DB — cannot determine provider for "${worktreeName}"`);
+	}
+	return rows[0].agent_provider;
 }
 
 // ─── P235: Platform-Aware Model Constraints ──────────────────────────────────
@@ -636,7 +640,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		timeoutMs = 300_000,
 	} = req;
 
-	const provider = detectProvider(worktree);
+	const provider = await detectProvider(worktree);
 	// P235/M026: resolve full route (model + api_spec + base_url) from model_routes
 	const route = await resolveModelRoute(provider, modelHint);
 	// P245: enforce host-level spawn policy before launching any CLI subprocess.
@@ -785,7 +789,7 @@ export async function escalateOrNotify(
 	result: SpawnResult,
 	proposalId?: number,
 ): Promise<SpawnResult | null> {
-	const provider = detectProvider(req.worktree);
+	const provider = await detectProvider(req.worktree);
 
 	// P235/M026: build escalation ladder from model_routes for this agent_provider.
 	// Per model: pick best (lowest priority) route. Then sort models cheap → expensive.

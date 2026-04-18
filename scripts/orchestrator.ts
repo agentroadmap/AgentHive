@@ -264,15 +264,6 @@ async function selectExecutorWorktree(
        FROM roadmap_workforce.agent_registry
       WHERE status = 'active'
         AND agent_type IN ('llm', 'tool')
-        AND (
-          role ILIKE '%gate%'
-          OR role ILIKE '%developer%'
-          OR agent_identity ILIKE 'codex%'
-          OR agent_identity ILIKE 'openclaw%'
-          OR agent_identity ILIKE 'gemini%'
-          OR agent_identity ILIKE 'copilot%'
-          OR agent_identity ILIKE 'claude%'
-        )
       ORDER BY
         CASE WHEN role ILIKE '%gate%' THEN 0 ELSE 1 END,
         updated_at DESC NULLS LAST,
