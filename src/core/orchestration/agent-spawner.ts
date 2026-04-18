@@ -246,33 +246,37 @@ function buildHermesArgs(
 
 /** Dispatch to the correct builder based on route.apiSpec and agent_provider. */
 /**
- * Agent provider → hermes --provider fallback mapping.
- * Used when the provider's native CLI is not available.
- * claude and codex always use their native CLIs.
+ * Which agent CLI to use, based on MODEL PROVIDER and API SPEC.
+ *
+ * Model provider (route_provider) determines which API endpoint to hit.
+ * Agent CLI (the subprocess) determines which CLI tool format to use.
+ *
+ * claude CLI works with any anthropic-spec endpoint (anthropic, xiaomi).
+ * codex CLI works with openai-spec endpoints.
+ * hermes CLI is the universal fallback with --provider flag.
  */
-const HERMES_FALLBACK_MAP: Record<string, string> = {
-	hermes: "nous",
-	openclaw: "anthropic",
-	copilot: "copilot",
-};
+function selectAgentCLI(route: ModelRoute): "claude" | "codex" | "hermes" {
+	// codex always uses codex CLI
+	if (route.agentProvider === "codex") return "codex";
+
+	// claude CLI handles any anthropic-spec endpoint (anthropic, xiaomi)
+	if (route.apiSpec === "anthropic") return "claude";
+
+	// everything else: hermes CLI
+	return "hermes";
+}
 
 function buildArgsBySpec(req: SpawnRequest, route: ModelRoute): CommandSpec {
-	// Codex has its own CLI
-	if (route.agentProvider === "codex") return buildCodexArgs(req, route);
+	const cli = selectAgentCLI(route);
 
-	// Claude uses claude CLI directly for anthropic spec
-	if (route.agentProvider === "claude" && route.apiSpec === "anthropic") {
-		return buildClaudeArgs(req, route);
+	switch (cli) {
+		case "codex":
+			return buildCodexArgs(req, route);
+		case "claude":
+			return buildClaudeArgs(req, route);
+		case "hermes":
+			return buildHermesArgs(req, route, route.routeProvider);
 	}
-
-	// Google uses gemini CLI
-	if (route.apiSpec === "google") {
-		return buildGeminiArgs(req, route);
-	}
-
-	// Everything else: hermes CLI as universal fallback
-	const hermesProvider = HERMES_FALLBACK_MAP[route.agentProvider] ?? route.routeProvider;
-	return buildHermesArgs(req, route, hermesProvider);
 }
 
 export function assertResolvedRouteMetadata(
