@@ -20,18 +20,29 @@ export interface ReapResult {
 	transitions: number;
 	leases: number;
 	dispatches: number;
+	sequencesRealigned: number;
 }
 
 const TRANSITION_STALE_MIN = 15;
 const LEASE_STALE_MIN = 10;
 const DISPATCH_STALE_MIN = 20;
 
+// Task #24/#28: schemas whose IDENTITY sequences we realign at boot.
+// fn_realign_identity_sequences is a no-op when nothing drifted, so this
+// is cheap to run on every orchestrator/gate-pipeline start.
+const REALIGN_SCHEMAS = ["roadmap", "roadmap_workforce"] as const;
+
 export async function reapStaleRows(
 	pool: Pool,
 	logger: ReaperLogger,
 	tag = "Reaper",
 ): Promise<ReapResult> {
-	const result: ReapResult = { transitions: 0, leases: 0, dispatches: 0 };
+	const result: ReapResult = {
+		transitions: 0,
+		leases: 0,
+		dispatches: 0,
+		sequencesRealigned: 0,
+	};
 
 	try {
 		const r = await pool.query(
@@ -90,9 +101,39 @@ export async function reapStaleRows(
 		);
 	}
 
-	if (result.transitions || result.leases || result.dispatches) {
+	// Task #24/#28: realign any IDENTITY sequences that drifted while we
+	// were down. Migration 037 installed fn_realign_identity_sequences which
+	// only moves sequences where max(col) > last_value, so this is a no-op
+	// on healthy fleets and cheap enough to run every boot.
+	for (const schema of REALIGN_SCHEMAS) {
+		try {
+			const r = await pool.query(
+				"SELECT table_name, old_last_value, new_last_value FROM roadmap.fn_realign_identity_sequences($1)",
+				[schema],
+			);
+			if (r.rowCount && r.rowCount > 0) {
+				result.sequencesRealigned += r.rowCount;
+				for (const row of r.rows) {
+					logger.warn(
+						`[${tag}] realigned ${schema}.${row.table_name}: ${row.old_last_value} -> ${row.new_last_value}`,
+					);
+				}
+			}
+		} catch (err) {
+			logger.warn(
+				`[${tag}] sequence realign failed for ${schema}: ${err instanceof Error ? err.message : String(err)}`,
+			);
+		}
+	}
+
+	if (
+		result.transitions ||
+		result.leases ||
+		result.dispatches ||
+		result.sequencesRealigned
+	) {
 		logger.log(
-			`[${tag}] reaped: ${result.transitions} transition(s), ${result.leases} lease(s), ${result.dispatches} dispatch(es)`,
+			`[${tag}] reaped: ${result.transitions} transition(s), ${result.leases} lease(s), ${result.dispatches} dispatch(es), ${result.sequencesRealigned} sequence(s) realigned`,
 		);
 	} else {
 		logger.log(`[${tag}] no stale rows`);

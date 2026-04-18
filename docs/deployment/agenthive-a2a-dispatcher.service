@@ -1,0 +1,27 @@
+[Unit]
+Description=AgentHive A2A Message Dispatcher
+Documentation=https://github.com/agentroadmap/agentRoadmap
+After=network-online.target postgresql.service agenthive-mcp.service
+Wants=network-online.target agenthive-mcp.service
+
+[Service]
+Type=simple
+WorkingDirectory=/data/code/AgentHive
+ExecStart=/usr/bin/env node --import jiti/register scripts/a2a-dispatcher.ts
+Restart=always
+RestartSec=5
+# P254+P267: give the dispatcher up to 2min to drain the current message
+# cycle and close the pg pool on SIGTERM before systemd escalates to SIGKILL.
+# Matches SHUTDOWN_DRAIN_MS (90s) in scripts/a2a-dispatcher.ts plus headroom.
+TimeoutStopSec=120
+KillSignal=SIGTERM
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agenthive-a2a-dispatcher
+
+EnvironmentFile=-%h/.agenthive.env
+
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
