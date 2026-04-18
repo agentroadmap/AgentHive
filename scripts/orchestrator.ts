@@ -11,7 +11,7 @@
  */
 
 import { constants as fsConstants } from "node:fs";
-import { access, readdir, stat } from "node:fs/promises";
+import { access, readFile, readdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
@@ -145,7 +145,35 @@ type ExecutorCandidate = {
 	worktree: string;
 	source: string;
 	score: number;
+	provider: string | null;
 };
+
+// Read AGENT_PROVIDER from a worktree's .env.agent
+async function readAgentProvider(worktree: string): Promise<string | null> {
+	try {
+		const dir = join(WORKTREE_ROOT, worktree);
+		const envContent = await readFile(join(dir, ".env.agent"), "utf-8");
+		const match = envContent.match(/^AGENT_PROVIDER=(.+)$/m);
+		return match ? match[1].trim() : null;
+	} catch {
+		return null;
+	}
+}
+
+// Check if a provider's routes are allowed on the current host
+async function isProviderAllowedOnHost(provider: string): Promise<boolean> {
+	const host = process.env.AGENTHIVE_HOST;
+	if (!host) return true; // no host constraint
+	try {
+		const { rows } = await query<{ allowed: boolean }>(
+			`SELECT roadmap.fn_check_spawn_policy($1, $2) AS allowed`,
+			[host, provider],
+		);
+		return rows[0]?.allowed ?? true;
+	} catch {
+		return true; // fail-open if policy check errors
+	}
+}
 
 function normalizeState(state: string): string {
 	return state.trim().toUpperCase();
@@ -216,9 +244,11 @@ async function scoreUsableWorktree(
 		const ownedByCurrentUser =
 			currentUid !== null && dirStat.uid === currentUid;
 		const currentWorktree = normalized === basename(process.cwd());
+		const provider = await readAgentProvider(normalized);
 		return {
 			worktree: normalized,
 			source,
+			provider,
 			score:
 				(ownedByCurrentUser ? 100 : 0) +
 				(currentWorktree ? 20 : 0) +
@@ -298,7 +328,25 @@ async function selectExecutorWorktree(
 	const ranked = [...deduped.values()].sort(
 		(a, b) => b.score - a.score || a.worktree.localeCompare(b.worktree),
 	);
-	const selected = ranked[0];
+
+	// Filter by host model policy — skip worktrees whose provider is forbidden
+	const filtered: ExecutorCandidate[] = [];
+	for (const c of ranked) {
+		if (!c.provider) {
+			filtered.push(c); // unknown provider, allow (fail-open)
+			continue;
+		}
+		const allowed = await isProviderAllowedOnHost(c.provider);
+		if (allowed) {
+			filtered.push(c);
+		} else {
+			logger.warn(
+				`Skipping executor ${c.worktree} — provider "${c.provider}" forbidden by host policy (${process.env.AGENTHIVE_HOST ?? "unknown"})`,
+			);
+		}
+	}
+
+	const selected = filtered[0];
 	if (!selected) {
 		throw new Error(
 			`No usable executor worktree found under ${WORKTREE_ROOT}. Create one such as codex-one/codex-two with a readable .env.agent and write access for ${process.env.USER ?? "the orchestrator user"}.`,
