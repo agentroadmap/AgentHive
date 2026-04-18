@@ -33,13 +33,7 @@ const AGENTHIVE_HOST = process.env.AGENTHIVE_HOST ?? hostname();
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type AgentProvider =
-	| "claude"
-	| "gemini"
-	| "copilot"
-	| "openclaw"
-	| "codex"
-	| "hermes";
+export type AgentProvider = string;
 
 export interface WorktreeConfig {
 	/** Worktree directory name (e.g. "claude-andy") */
@@ -91,8 +85,7 @@ export interface ModelRoute {
 	routeProvider: string;
 	agentProvider: string;
 	agentCli: string;
-	fallbackCli: string;
-	apiSpec: string;
+	apiSpec: "anthropic" | "openai" | "google";
 	baseUrl: string;
 	planType: string | null;
 	costPer1kInput: number;
@@ -197,6 +190,27 @@ function buildClaudeArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
 }
 
 /**
+ * Build argv + env for the Hermes CLI.
+ * Used when agent_cli = 'hermes' — the native AgentHive agent framework.
+ * Uses `hermes chat -q <prompt> -m <model> --provider <provider> --yolo`.
+ */
+function buildHermesArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
+	const argv = [
+		"hermes",
+		"chat",
+		"-q",
+		req.task,
+		"-m",
+		route.modelName,
+		"--provider",
+		route.routeProvider,
+		"--yolo",
+		"-Q", // quiet mode: no spinner/activity
+	];
+	return { argv, env: {} };
+}
+
+/**
  * Build argv + env for the OpenAI Codex CLI.
  * Used when agent_provider = 'codex' (openai spec, `codex` terminal tool).
  * https://github.com/openai/codex
@@ -218,59 +232,47 @@ function buildCodexArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
 	return { argv, env };
 }
 
+/**
+ * Build argv + env for any OpenAI-compatible endpoint.
+ * Used when api_spec = 'openai' (Nous, Xiaomi, OpenAI, GitHub Copilot, etc.).
+ * Uses the `llm` CLI (https://llm.datasette.io).
+ */
+function buildOpenAICompatArgs(
+	req: SpawnRequest,
+	route: ModelRoute,
+): CommandSpec {
+	const argv = ["llm", "--model", route.modelName, req.task];
+	const env: Record<string, string> = {
+		OPENAI_BASE_URL: route.baseUrl,
+	};
+	return { argv, env };
+}
+
+/**
+ * Build argv + env for Google Gemini CLI.
+ * Used when api_spec = 'google'.
+ */
 function buildGeminiArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
 	const argv = ["gemini", "--model", route.modelName, "--prompt", req.task];
 	return { argv, env: {} };
 }
 
-/**
- * Build args for hermes CLI — universal fallback for providers without their own CLI.
- * hermes chat --provider <provider> --model <model> -q <task> -Q
- */
-function buildHermesArgs(
-	req: SpawnRequest,
-	route: ModelRoute,
-	hermesProvider: string,
-): CommandSpec {
-	const argv = [
-		"hermes",
-		"chat",
-		"--provider",
-		hermesProvider,
-		"--model",
-		route.modelName,
-		"-Q", // quiet mode: no banner, suppress spinner
-		"-q",
-		req.task,
-	];
-	return { argv, env: {} };
-}
-
-/** Dispatch to the correct builder based on route.apiSpec and agent_provider. */
-/**
- * Build args for a model route. Reads agent_cli from DB.
- *
- * Known CLIs have dedicated builders. Unknown CLIs fall back to the route's
- * fallback_cli (DB-controlled, default: codex). The fallback CLI's builder
- * is used with the original route's provider/model.
- */
-const CLI_BUILDERS: Record<string, (req: SpawnRequest, route: ModelRoute) => CommandSpec> = {
-	claude: buildClaudeArgs,
-	codex: buildCodexArgs,
-	hermes: (req, route) => buildHermesArgs(req, route, route.routeProvider),
-};
-
+/** Dispatch to the correct builder based on route.agentCli (DB is source of truth). */
 function buildArgsBySpec(req: SpawnRequest, route: ModelRoute): CommandSpec {
-	// Try agent_cli first
-	const builder = CLI_BUILDERS[route.agentCli];
-	if (builder) return builder(req, route);
-
-	// Unknown CLI: fall back to the route's fallback_cli
-	const fallbackBuilder = CLI_BUILDERS[route.fallbackCli];
-	if (fallbackBuilder) return fallbackBuilder(req, route);
-
-	// Last resort: codex (most compatible with openai-spec endpoints)
-	return buildCodexArgs(req, route);
+	// agent_cli from DB determines which CLI to use
+	switch (route.agentCli) {
+		case "codex":
+			return buildCodexArgs(req, route);
+		case "claude":
+			return buildClaudeArgs(req, route);
+		case "gemini":
+			return buildGeminiArgs(req, route);
+		case "hermes":
+			return buildHermesArgs(req, route);
+		default:
+			// copilot, llm, or any other → openai-compatible CLI
+			return buildOpenAICompatArgs(req, route);
+	}
 }
 
 export function assertResolvedRouteMetadata(
@@ -404,14 +406,22 @@ async function loadEnvAgent(
 }
 
 /** Detect provider from worktree name prefix. */
-function detectProvider(worktreeName: string): AgentProvider {
-	if (worktreeName.startsWith("claude")) return "claude";
-	if (worktreeName.startsWith("gemini")) return "gemini";
-	if (worktreeName.startsWith("copilot")) return "copilot";
-	if (worktreeName.startsWith("openclaw")) return "openclaw";
-	if (worktreeName.startsWith("codex")) return "codex";
-	if (worktreeName.startsWith("xiaomi")) return "hermes";
-	throw new Error(`Unknown provider prefix for worktree "${worktreeName}"`);
+/**
+ * Look up agent_provider from model_routes DB table.
+ * No hardcoded prefix matching — DB is source of truth.
+ */
+export async function detectProvider(worktreeName: string): Promise<AgentProvider> {
+	const { rows } = await query<{ agent_provider: string }>(
+		`SELECT DISTINCT agent_provider
+       FROM roadmap.model_routes
+       WHERE is_enabled = true
+       ORDER BY priority ASC
+       LIMIT 1`,
+	);
+	if (rows.length === 0) {
+		throw new Error(`No enabled model routes in DB — cannot determine provider for "${worktreeName}"`);
+	}
+	return rows[0].agent_provider;
 }
 
 // ─── P235: Platform-Aware Model Constraints ──────────────────────────────────
@@ -438,7 +448,6 @@ async function resolveModelRoute(
 		route_provider: string;
 		agent_provider: string;
 		agent_cli: string;
-		fallback_cli: string;
 		api_spec: string;
 		base_url: string;
 		plan_type: string | null;
@@ -453,7 +462,7 @@ async function resolveModelRoute(
 		if (perMillionPricing) {
 		return query<RouteRow>(
 			`SELECT model_name, route_provider, agent_provider,
-               agent_cli, fallback_cli, api_spec, base_url, plan_type,
+               agent_cli, api_spec, base_url, plan_type,
                cost_per_1k_input, cost_per_million_input, cost_per_million_output
         FROM roadmap.model_routes
         WHERE model_name = $1
@@ -467,7 +476,7 @@ async function resolveModelRoute(
 
 		return query<RouteRow>(
 			`SELECT model_name, route_provider, agent_provider,
-              agent_cli, fallback_cli, api_spec, base_url, plan_type,
+              agent_cli, api_spec, base_url, plan_type,
               cost_per_1k_input, NULL::numeric AS cost_per_million_input,
               NULL::numeric AS cost_per_million_output
        FROM roadmap.model_routes
@@ -484,9 +493,8 @@ async function resolveModelRoute(
 		modelName: r.model_name,
 		routeProvider: r.route_provider,
 		agentProvider: r.agent_provider,
-		agentCli: r.agent_cli,
-		fallbackCli: r.fallback_cli,
-		apiSpec: r.api_spec,
+		agentCli: r.agent_cli ?? r.agent_provider,
+		apiSpec: r.api_spec as ModelRoute["apiSpec"],
 		baseUrl: r.base_url,
 		planType: r.plan_type,
 		costPer1kInput: Number(r.cost_per_1k_input ?? 0),
@@ -513,7 +521,7 @@ async function resolveModelRoute(
 	const { rows } = perMillionPricing
 		? await query<RouteRow>(
 				`SELECT model_name, route_provider, agent_provider,
-               api_spec, base_url, plan_type,
+               agent_cli, api_spec, base_url, plan_type,
                cost_per_1k_input, cost_per_million_input, cost_per_million_output
         FROM roadmap.model_routes
         WHERE agent_provider = $1
@@ -524,12 +532,12 @@ async function resolveModelRoute(
 			)
 		: await query<RouteRow>(
 				`SELECT model_name, route_provider, agent_provider,
-               api_spec, base_url, plan_type,
-               cost_per_1k_input, NULL::numeric AS cost_per_million_input,
-               NULL::numeric AS cost_per_million_output
-        FROM roadmap.model_routes
-        WHERE agent_provider = $1
-          AND is_enabled = true
+              agent_cli, api_spec, base_url, plan_type,
+              cost_per_1k_input, NULL::numeric AS cost_per_million_input,
+              NULL::numeric AS cost_per_million_output
+       FROM roadmap.model_routes
+       WHERE agent_provider = $1
+         AND is_enabled = true
         ORDER BY priority ASC, cost_per_1k_input ASC
         LIMIT 1`,
 				[provider],
@@ -546,7 +554,7 @@ async function resolveModelRoute(
 		const { rows: defaultRows } = perMillionPricing
 			? await query<RouteRow>(
 					`SELECT model_name, route_provider, agent_provider,
-               api_spec, base_url, plan_type,
+               agent_cli, api_spec, base_url, plan_type,
                cost_per_1k_input, cost_per_million_input, cost_per_million_output
         FROM roadmap.model_routes
         WHERE model_name = $1
@@ -558,13 +566,13 @@ async function resolveModelRoute(
 				)
 			: await query<RouteRow>(
 					`SELECT model_name, route_provider, agent_provider,
-               api_spec, base_url, plan_type,
-               cost_per_1k_input, NULL::numeric AS cost_per_million_input,
-               NULL::numeric AS cost_per_million_output
-        FROM roadmap.model_routes
-        WHERE model_name = $1
-          AND agent_provider = $2
-          AND is_enabled = true
+              agent_cli, api_spec, base_url, plan_type,
+              cost_per_1k_input, NULL::numeric AS cost_per_million_input,
+              NULL::numeric AS cost_per_million_output
+       FROM roadmap.model_routes
+       WHERE model_name = $1
+         AND agent_provider = $2
+         AND is_enabled = true
         ORDER BY priority ASC, cost_per_1k_input ASC
         LIMIT 1`,
 					[fallbackModel, provider],
@@ -647,55 +655,6 @@ async function buildProposalContextPackage(input: {
 // ─── Core spawn logic ─────────────────────────────────────────────────────────
 
 /**
- * Build the agent communication protocol instructions injected into spawned agent tasks.
- * Agents use MCP tools to send messages to the orchestrator and check for replies.
- */
-function buildCommProtocol(proposalId: number, agentIdentity: string): string {
-	return [
-		"## Agent Communication Protocol",
-		"",
-		"You can communicate with the orchestrator via MCP tools.",
-		"MCP endpoint: http://127.0.0.1:6421/sse",
-		"",
-		"### Sending messages to the orchestrator:",
-		"Use `mcp_message` with action `send`:",
-		"  from_agent: \"your-agent-identity\"",
-		"  to_agent: \"orchestrator\"",
-		"  channel: \"orchestrator\"",
-		"  message_type: one of [sos, ask, decision, report]",
-		"  message_content: JSON string with your payload",
-		`  proposal_id: ${proposalId}`,
-		"",
-		"### Message types:",
-		"",
-		"**sos** (critical failure — LLM error, model unavailable, budget exceeded):",
-		'  {"action": "sos", "error": "description of what went wrong", "model": "model-name", "suggested_action": "retry|model_switch|abort"}',
-		"",
-		"**ask** (you need context not visible to you):",
-		'  {"action": "ask", "topic": "proposal_status|host_policy|system_state", "question": "your question"}',
-		"",
-		"**decision** (you need the orchestrator to make a choice):",
-		'  {"action": "decision", "question": "what you need decided", "options": ["opt1", "opt2"], "context": "relevant info"}',
-		"",
-		"**report** (status update, no response expected):",
-		'  {"action": "report", "status": "progress update", "details": "what you accomplished"}',
-		"",
-		"### Checking for replies:",
-		"Use `mcp_message` with action `read`:",
-		'  to_agent: "your-agent-identity"',
-		'  channel: "orchestrator"',
-		"  The reply will have message_type=\"reply\" and reply_to matching your message id.",
-		"",
-		"### When to communicate:",
-		"- If an LLM call fails or returns an error → send sos",
-		"- If you need architectural context not in your task → send ask",
-		"- If you need approval to proceed → send decision",
-		"- If you want to report progress → send report",
-		"- Do NOT silently fail — always report errors via sos",
-	].join("\n");
-}
-
-/**
  * Spawn an agent subprocess inside its worktree.
  * Records the run in agent_runs and agent_budget_ledger.
  */
@@ -709,7 +668,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		timeoutMs = 300_000,
 	} = req;
 
-	const provider = detectProvider(worktree);
+	const provider = await detectProvider(worktree);
 	// P235/M026: resolve full route (model + api_spec + base_url) from model_routes
 	const route = await resolveModelRoute(provider, modelHint);
 	// P245: enforce host-level spawn policy before launching any CLI subprocess.
@@ -724,8 +683,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 			agentIdentity: worktree,
 			maxTokens: 2000,
 		});
-		const commProtocol = buildCommProtocol(proposalId, worktree);
-		assembledTask = `${contextPackage}\n\n${commProtocol}\n\n## Task\n${task}`;
+		assembledTask = `${contextPackage}\n\n## Task\n${task}`;
 	}
 
 	const spawnReq = { ...req, task: assembledTask };
@@ -859,7 +817,7 @@ export async function escalateOrNotify(
 	result: SpawnResult,
 	proposalId?: number,
 ): Promise<SpawnResult | null> {
-	const provider = detectProvider(req.worktree);
+	const provider = await detectProvider(req.worktree);
 
 	// P235/M026: build escalation ladder from model_routes for this agent_provider.
 	// Per model: pick best (lowest priority) route. Then sort models cheap → expensive.

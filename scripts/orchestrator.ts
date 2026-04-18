@@ -11,11 +11,11 @@
  */
 
 import { constants as fsConstants } from "node:fs";
-import { access, readFile, readdir, stat } from "node:fs/promises";
+import { access, readdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { spawnAgent } from "../src/core/orchestration/agent-spawner.ts";
+import { spawnAgent, detectProvider } from "../src/core/orchestration/agent-spawner.ts";
 import { reapStaleRows } from "../src/core/pipeline/reap-stale-rows.ts";
 import { getPool, query } from "../src/infra/postgres/pool.ts";
 import { mcpText } from "./mcp-result.ts";
@@ -112,6 +112,98 @@ const AGENT_PROMPTS: Record<string, string> = {
 	"fix-agent": "You are a Fix Agent. Implement code changes to resolve issues.",
 };
 
+// ─── Provider Health & Dynamic Control ─────────────────────────────────────
+
+const RATE_LIMIT_PATTERNS = [
+	/rate.?limit/i,
+	/429/,
+	/too many requests/i,
+	/throttle/i,
+	/retry.?after/i,
+	/rpm.?exceeded/i,
+	/tpm.?exceeded/i,
+];
+
+const CREDIT_PATTERNS = [
+	/credit/i,
+	/insufficient.?funds/i,
+	/billing/i,
+	/quota.?exceeded/i,
+	/usage.?limit/i,
+	/budget.?exceeded/i,
+];
+
+/**
+ * Classify an error string into rate_limit, credit_exhausted, or unknown.
+ */
+function classifyProviderError(stderr: string): {
+	type: "rate_limit" | "credit_exhausted" | "unknown";
+	matched: string;
+} | null {
+	for (const pat of RATE_LIMIT_PATTERNS) {
+		const m = stderr.match(pat);
+		if (m) return { type: "rate_limit", matched: m[0] };
+	}
+	for (const pat of CREDIT_PATTERNS) {
+		const m = stderr.match(pat);
+		if (m) return { type: "credit_exhausted", matched: m[0] };
+	}
+	return null;
+}
+
+/**
+ * Check if a provider is in cooldown. Returns true if provider should NOT be used.
+ */
+async function isProviderInCooldown(provider: string): Promise<boolean> {
+	const { rows } = await query<{ in_cooldown: boolean }>(
+		`SELECT (cooldown_until IS NOT NULL AND cooldown_until > now()) AS in_cooldown
+       FROM roadmap.provider_health
+       WHERE provider_name = $1`,
+		[provider],
+	);
+	return rows[0]?.in_cooldown ?? false;
+}
+
+/**
+ * Set cooldown on a provider. rate_limit: 2min backoff, credit_exhausted: 30min.
+ */
+async function setProviderCooldown(
+	provider: string,
+	errorType: "rate_limit" | "credit_exhausted",
+	errorMsg: string,
+): Promise<void> {
+	const cooldownMinutes = errorType === "rate_limit" ? 2 : 30;
+	await query(
+		`INSERT INTO roadmap.provider_health
+       (provider_name, status, last_error_at, last_error_msg, error_count, cooldown_until, updated_at)
+     VALUES ($1, $2, now(), $3, 1, now() + interval '${cooldownMinutes} minutes', now())
+     ON CONFLICT (provider_name) DO UPDATE SET
+       status = EXCLUDED.status,
+       last_error_at = now(),
+       last_error_msg = EXCLUDED.last_error_msg,
+       error_count = roadmap.provider_health.error_count + 1,
+       cooldown_until = now() + interval '${cooldownMinutes} minutes',
+       updated_at = now()`,
+		[provider, errorType === "rate_limit" ? "rate_limited" : "credit_exhausted", errorMsg.slice(0, 500)],
+	);
+	logger.warn(
+		`⏱ Provider ${provider} → ${errorType}, cooldown ${cooldownMinutes}min: ${errorMsg.slice(0, 100)}`,
+	);
+}
+
+/**
+ * Record a successful run for a provider (resets error_count, clears cooldown).
+ */
+async function recordProviderSuccess(provider: string): Promise<void> {
+	await query(
+		`UPDATE roadmap.provider_health
+        SET status = 'healthy', error_count = 0, cooldown_until = NULL,
+            last_success_at = now(), updated_at = now()
+      WHERE provider_name = $1`,
+		[provider],
+	);
+}
+
 type TransitionQueueRow = {
 	id: number;
 	proposal_id: number;
@@ -145,35 +237,7 @@ type ExecutorCandidate = {
 	worktree: string;
 	source: string;
 	score: number;
-	provider: string | null;
 };
-
-// Read AGENT_PROVIDER from a worktree's .env.agent
-async function readAgentProvider(worktree: string): Promise<string | null> {
-	try {
-		const dir = join(WORKTREE_ROOT, worktree);
-		const envContent = await readFile(join(dir, ".env.agent"), "utf-8");
-		const match = envContent.match(/^AGENT_PROVIDER=(.+)$/m);
-		return match ? match[1].trim() : null;
-	} catch {
-		return null;
-	}
-}
-
-// Check if a provider's routes are allowed on the current host
-async function isProviderAllowedOnHost(provider: string): Promise<boolean> {
-	const host = process.env.AGENTHIVE_HOST;
-	if (!host) return true; // no host constraint
-	try {
-		const { rows } = await query<{ allowed: boolean }>(
-			`SELECT roadmap.fn_check_spawn_policy($1, $2) AS allowed`,
-			[host, provider],
-		);
-		return rows[0]?.allowed ?? true;
-	} catch {
-		return true; // fail-open if policy check errors
-	}
-}
 
 function normalizeState(state: string): string {
 	return state.trim().toUpperCase();
@@ -244,11 +308,9 @@ async function scoreUsableWorktree(
 		const ownedByCurrentUser =
 			currentUid !== null && dirStat.uid === currentUid;
 		const currentWorktree = normalized === basename(process.cwd());
-		const provider = await readAgentProvider(normalized);
 		return {
 			worktree: normalized,
 			source,
-			provider,
 			score:
 				(ownedByCurrentUser ? 100 : 0) +
 				(currentWorktree ? 20 : 0) +
@@ -294,15 +356,6 @@ async function selectExecutorWorktree(
        FROM roadmap_workforce.agent_registry
       WHERE status = 'active'
         AND agent_type IN ('llm', 'tool')
-        AND (
-          role ILIKE '%gate%'
-          OR role ILIKE '%developer%'
-          OR agent_identity ILIKE 'codex%'
-          OR agent_identity ILIKE 'openclaw%'
-          OR agent_identity ILIKE 'gemini%'
-          OR agent_identity ILIKE 'copilot%'
-          OR agent_identity ILIKE 'claude%'
-        )
       ORDER BY
         CASE WHEN role ILIKE '%gate%' THEN 0 ELSE 1 END,
         updated_at DESC NULLS LAST,
@@ -328,25 +381,7 @@ async function selectExecutorWorktree(
 	const ranked = [...deduped.values()].sort(
 		(a, b) => b.score - a.score || a.worktree.localeCompare(b.worktree),
 	);
-
-	// Filter by host model policy — skip worktrees whose provider is forbidden
-	const filtered: ExecutorCandidate[] = [];
-	for (const c of ranked) {
-		if (!c.provider) {
-			filtered.push(c); // unknown provider, allow (fail-open)
-			continue;
-		}
-		const allowed = await isProviderAllowedOnHost(c.provider);
-		if (allowed) {
-			filtered.push(c);
-		} else {
-			logger.warn(
-				`Skipping executor ${c.worktree} — provider "${c.provider}" forbidden by host policy (${process.env.AGENTHIVE_HOST ?? "unknown"})`,
-			);
-		}
-	}
-
-	const selected = filtered[0];
+	const selected = ranked[0];
 	if (!selected) {
 		throw new Error(
 			`No usable executor worktree found under ${WORKTREE_ROOT}. Create one such as codex-one/codex-two with a readable .env.agent and write access for ${process.env.USER ?? "the orchestrator user"}.`,
@@ -415,14 +450,6 @@ async function dispatchAgent(
 			`${verb} cubic ${cubicId.substring(0, 8)} for ${agent} → P${proposalId} (${phase})`,
 		);
 
-		// Rich event: agent dispatched
-		await emitEvent(Number(proposalId), "agent_dispatched", {
-			agent,
-			cubic_id: cubicId.substring(0, 8),
-			phase,
-			cubic_action: data.was_created ? "created" : data.was_recycled ? "recycled" : "reused",
-		});
-
 		// Spawn the agent process
 		const taskPrompt = `${AGENT_PROMPTS[agent] || ""}\n\nProposal P${proposalId}: ${task}\n\nUse the MCP tools to do your work. Connect to http://127.0.0.1:6421/sse for proposal management.`;
 		const result = await spawnAgent({
@@ -437,23 +464,24 @@ async function dispatchAgent(
 			logger.log(
 				`✅ ${agent} completed (run=${result.agentRunId}) for P${proposalId}`,
 			);
-			await emitEvent(Number(proposalId), "agent_completed", {
-				agent,
-				run_id: result.agentRunId,
-				duration_ms: result.durationMs,
-				exit_code: 0,
-			});
+			// Record provider success — clears any cooldown
+			try {
+				const provider = await detectProvider(worktree);
+				await recordProviderSuccess(provider);
+			} catch {}
 		} else {
 			logger.warn(
 				`⚠️ ${agent} exited ${result.exitCode} (run=${result.agentRunId}) for P${proposalId}`,
 			);
-			await emitEvent(Number(proposalId), "agent_failed", {
-				agent,
-				run_id: result.agentRunId,
-				duration_ms: result.durationMs,
-				exit_code: result.exitCode,
-				stderr_tail: result.stderr.slice(-500),
-			});
+			// Dynamic control: classify error, set cooldown
+			const fullError = [result.stderr, result.stdout].filter(Boolean).join("\n");
+			const classified = classifyProviderError(fullError);
+			if (classified) {
+				try {
+					const provider = await detectProvider(worktree);
+					await setProviderCooldown(provider, classified.type, fullError);
+				} catch {}
+			}
 		}
 
 		return cubicId;
@@ -480,16 +508,22 @@ async function handleStateChange(proposalId: string, newState: string) {
 	logger.log(`📢 P${proposalId} → ${newState} (${phase})`);
 	logger.log(`   Squad: ${agents.join(", ")}`);
 
-	// Rich event: squad dispatched
-	await emitEvent(Number(proposalId), "squad_dispatched", {
-		state: newState,
-		phase,
-		squad: agents,
-		squad_size: agents.length,
-	});
-
 	// Release any locked cubics for this proposal from previous phases
 	await releaseStaleCubics(proposalId);
+
+	// Dynamic control: check if provider is in cooldown before dispatching
+	try {
+		const worktree = await selectExecutorWorktree(null);
+		const provider = await detectProvider(worktree);
+		if (await isProviderInCooldown(provider)) {
+			logger.log(
+				`⏸ Skipping P${proposalId} (${newState}): provider ${provider} is in cooldown`,
+			);
+			return;
+		}
+	} catch {
+		// Provider resolution failed — let dispatch handle it
+	}
 
 	// Dispatch all agents for this state (parallel, tolerate individual failures)
 	const results = await Promise.allSettled(
@@ -515,28 +549,6 @@ async function ensureAgentIdentity(
            status = 'active'`,
 		[agentIdentity, role],
 	);
-}
-
-// ─── Rich Event Emission ───────────────────────────────────────────────────
-//
-// Emits structured events to proposal_event for the state feed.
-// Events should tell a story: what happened, who did it, why, what was the outcome.
-
-async function emitEvent(
-	proposalId: number | null,
-	eventType: string,
-	payload: Record<string, unknown>,
-): Promise<void> {
-	if (!proposalId) return;
-	try {
-		await query(
-			`INSERT INTO roadmap_proposal.proposal_event (proposal_id, event_type, payload)
-			 VALUES ($1, $2, $3::jsonb)`,
-			[proposalId, eventType, JSON.stringify(payload)],
-		);
-	} catch (e) {
-		logger.warn(`Failed to emit ${eventType} event for P${proposalId}:`, e);
-	}
 }
 
 async function recordGateCommunication(input: {
@@ -719,6 +731,20 @@ async function dispatchImplicitGate(
 	}
 
 	const worktree = await selectExecutorWorktree(null);
+
+	// Dynamic control: check if provider is in cooldown before dispatching
+	try {
+		const provider = await detectProvider(worktree);
+		if (await isProviderInCooldown(provider)) {
+			logger.log(
+				`⏸ Skipping ${proposal.display_id}: provider ${provider} is in cooldown`,
+			);
+			return;
+		}
+	} catch {
+		// Provider resolution failed — let spawn handle the error
+	}
+
 	await ensureAgentIdentity("orchestrator", "State Machine Orchestrator");
 	await ensureAgentIdentity(worktree, "Gate Executor");
 
@@ -750,16 +776,6 @@ async function dispatchImplicitGate(
 		`Implicit gate dispatch ${dispatchId} -> ${worktree} for ${proposal.display_id} (${proposal.status} -> ${gate.toStage}, ${gate.gate})`,
 	);
 
-	// Rich event: gate dispatch started
-	await emitEvent(proposal.id, "gate_dispatched", {
-		dispatch_id: dispatchId,
-		agent: worktree,
-		gate: gate.gate,
-		from: proposal.status,
-		to: gate.toStage,
-		reason,
-	});
-
 	const result = await spawnAgent({
 		worktree,
 		task: buildImplicitGateTask(proposal, gate),
@@ -785,14 +801,6 @@ async function dispatchImplicitGate(
 			worktree,
 			`gate ${gate.gate} advanced to ${gate.toStage}`,
 		);
-		// Rich event: gate advanced
-		await emitEvent(proposal.id, "gate_advanced", {
-			gate: gate.gate,
-			from: proposal.status,
-			to: gate.toStage,
-			agent: worktree,
-			duration_ms: result.durationMs,
-		});
 		await query(
 			`UPDATE roadmap_workforce.squad_dispatch
           SET dispatch_status = 'completed',
@@ -823,16 +831,6 @@ async function dispatchImplicitGate(
 				`gate ${gate.gate} sent back or held`,
 			);
 		}
-		// Rich event: gate held (agent completed but didn't advance)
-		await emitEvent(proposal.id, "gate_held", {
-			gate: gate.gate,
-			from: proposal.status,
-			to: gate.toStage,
-			agent: worktree,
-			current_status: current.status,
-			current_maturity: finalMaturity,
-			duration_ms: result.durationMs,
-		});
 		const decisionMessage = `gate decision completed without state transition: proposal is ${current.status}/${finalMaturity}`;
 		await recordGateCommunication({
 			proposalId: proposal.id,
@@ -883,16 +881,17 @@ async function dispatchImplicitGate(
 			? `gate agent completed but proposal state could not be read`
 			: `gate agent exited ${result.exitCode}: ${[result.stderr, result.stdout].filter(Boolean).join("\n").slice(0, 2000)}`;
 
-	// Rich event: gate failed
-	await emitEvent(proposal.id, "gate_failed", {
-		gate: gate.gate,
-		from: proposal.status,
-		to: gate.toStage,
-		agent: worktree,
-		exit_code: result.exitCode,
-		error: errorMessage.slice(0, 500),
-		duration_ms: result.durationMs,
-	});
+	// Dynamic control: classify error and set provider cooldown if needed
+	const fullError = [result.stderr, result.stdout].filter(Boolean).join("\n");
+	const classified = classifyProviderError(fullError);
+	if (classified && result.exitCode !== 0) {
+		try {
+			const provider = await detectProvider(worktree);
+			await setProviderCooldown(provider, classified.type, fullError);
+		} catch {
+			// Provider detection failed — skip cooldown
+		}
+	}
 
 	await query(
 		`UPDATE roadmap_workforce.squad_dispatch
@@ -1177,267 +1176,6 @@ async function releaseStaleCubics(proposalId: string) {
 	}
 }
 
-// ─── Agent Communication Protocol ──────────────────────────────────────────
-//
-// Spawned agents send structured messages to the orchestrator via message_ledger.
-// Message types:
-//   sos     -- critical failure, needs immediate attention
-//   ask     -- clarification question, agent is blocked waiting for answer
-//   decision -- needs orchestrator to make a choice
-//   report  -- status update, no response expected
-//
-// The orchestrator reads the full message, evaluates, and responds:
-//   reply   -- answer to ask/decision (written back to message_ledger)
-//   command -- instruction to agent (retry, switch_model, abort)
-
-type AgentMessage = {
-	fromAgent: string;
-	toAgent: string;
-	proposalId: number | null;
-	messageId: number | null;
-};
-
-async function handleAgentSOS(msg: AgentMessage): Promise<void> {
-	// Read full message content
-	if (!msg.messageId) {
-		logger.warn(`SOS from ${msg.fromAgent} but no message_id`);
-		return;
-	}
-
-	const { rows } = await query<{
-		message_type: string;
-		message_content: string;
-		channel: string | null;
-		metadata: Record<string, unknown> | null;
-	}>(
-		`SELECT message_type, message_content, channel, metadata
-		 FROM roadmap.message_ledger WHERE id = $1`,
-		[msg.messageId],
-	);
-
-	if (rows.length === 0) {
-		logger.warn(`SOS message ${msg.messageId} not found`);
-		return;
-	}
-
-	const { message_type, message_content, metadata } = rows[0];
-
-	// Parse the message content (agents send JSON payloads)
-	let payload: Record<string, unknown> = {};
-	try {
-		payload = JSON.parse(message_content);
-	} catch {
-		payload = { raw: message_content };
-	}
-
-	const action = (payload.action as string) || "unknown";
-	const error = (payload.error as string) || "no error detail";
-	const proposalLabel = msg.proposalId ? `P${msg.proposalId}` : "no-proposal";
-
-	logger.warn(
-		`🆘 ${message_type.toUpperCase()} from ${msg.fromAgent} on ${proposalLabel}: ${action} — ${error.slice(0, 200)}`,
-	);
-
-	// ─── Handle by message type ──────────────────────────────────────────
-
-	if (message_type === "sos") {
-		await handleSOS(msg, payload, proposalLabel);
-	} else if (message_type === "ask") {
-		await handleAsk(msg, payload, proposalLabel);
-	} else if (message_type === "decision") {
-		await handleDecision(msg, payload, proposalLabel);
-	} else if (message_type === "report") {
-		logger.log(
-			`📋 Report from ${msg.fromAgent} on ${proposalLabel}: ${(payload.status as string) || "update"}`,
-		);
-	}
-}
-
-async function handleSOS(
-	msg: AgentMessage,
-	payload: Record<string, unknown>,
-	proposalLabel: string,
-): Promise<void> {
-	const error = (payload.error as string) || "unknown error";
-	const model = (payload.model as string) || "unknown";
-	const action = (payload.action as string) || "retry";
-
-	// Rich event: agent in distress
-	await emitEvent(msg.proposalId, "agent_sos", {
-		agent: msg.fromAgent,
-		error: error.slice(0, 300),
-		model,
-		suggested_action: action,
-	});
-
-	// Log escalation to DB
-	try {
-		await query(
-			`INSERT INTO roadmap.escalation_log
-			   (proposal_id, obstacle_type, description, severity, source_agent, metadata)
-			 VALUES ($1, 'AGENT_DEAD', $2, 'high', $3, $4::jsonb)`,
-			[
-				msg.proposalId,
-				`SOS from ${msg.fromAgent}: ${error} (model=${model})`,
-				msg.fromAgent,
-				JSON.stringify({ error, model, requested_action: action, message_id: msg.messageId }),
-			],
-		);
-	} catch (e) {
-		logger.error("Failed to log SOS escalation:", e);
-	}
-
-	// If there's an active dispatch for this agent, mark it as blocked
-	// so the orchestrator can retry or escalate
-	if (msg.proposalId) {
-		try {
-			await query(
-				`UPDATE roadmap_workforce.squad_dispatch
-				 SET dispatch_status = 'blocked',
-				     completed_at = now(),
-				     metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb
-				 WHERE proposal_id = $1
-				   AND agent_identity = $2
-				   AND dispatch_status IN ('assigned', 'active')
-				   AND completed_at IS NULL`,
-				[
-					msg.proposalId,
-					msg.fromAgent,
-					JSON.stringify({ sos_error: error, sos_action: action, sos_at: new Date().toISOString() }),
-				],
-			);
-		} catch (e) {
-			logger.error("Failed to update dispatch on SOS:", e);
-		}
-	}
-
-	// Send reply acknowledging the SOS
-	await sendReply(
-		msg.fromAgent,
-		"orchestrator",
-		msg.messageId,
-		msg.proposalId,
-		{
-			status: "received",
-			action: action === "model_switch" ? "will_retry_with_different_model" : "logged",
-			message: `SOS received by orchestrator. Error logged to escalation_log. Dispatch marked blocked for retry.`,
-		},
-	);
-
-	logger.log(`🆘 SOS handled for ${msg.fromAgent} on ${proposalLabel}`);
-}
-
-async function handleAsk(
-	msg: AgentMessage,
-	payload: Record<string, unknown>,
-	proposalLabel: string,
-): Promise<void> {
-	const question = (payload.question as string) || (payload.raw as string) || "no question";
-	const topic = (payload.topic as string) || "general";
-
-	logger.log(`❓ ASK from ${msg.fromAgent} on ${proposalLabel} [${topic}]: ${question.slice(0, 150)}`);
-
-	// Rich event: agent asking for context
-	await emitEvent(msg.proposalId, "agent_ask", {
-		agent: msg.fromAgent,
-		topic,
-		question: question.slice(0, 300),
-	});
-
-	// Look up context based on topic
-	let answer = "Orchestrator received your question but could not find relevant context.";
-
-	if (topic === "proposal_status" && msg.proposalId) {
-		const { rows } = await query<{ status: string; maturity: string; title: string }>(
-			`SELECT status, maturity, title FROM roadmap_proposal.proposal WHERE id = $1`,
-			[msg.proposalId],
-		);
-		if (rows.length > 0) {
-			answer = `Proposal ${proposalLabel}: status=${rows[0].status}, maturity=${rows[0].maturity}, title="${rows[0].title}"`;
-		}
-	} else if (topic === "host_policy") {
-		const host = process.env.AGENTHIVE_HOST ?? "unknown";
-		const { rows } = await query<{ allowed_providers: string[]; forbidden_providers: string[] }>(
-			`SELECT allowed_providers, forbidden_providers FROM roadmap.host_model_policy WHERE host_name = $1`,
-			[host],
-		);
-		if (rows.length > 0) {
-			answer = `Host ${host}: allowed=[${rows[0].allowed_providers}], forbidden=[${rows[0].forbidden_providers}]`;
-		}
-	} else if (topic === "system_state") {
-		const { rows } = await query<{ active: string; idle: string; expired: string }>(
-			`SELECT
-			   (SELECT COUNT(*)::text FROM roadmap.cubics WHERE status='active') as active,
-			   (SELECT COUNT(*)::text FROM roadmap.cubics WHERE status='idle') as idle,
-			   (SELECT COUNT(*)::text FROM roadmap.cubics WHERE status='expired') as expired`,
-		);
-		answer = `Cubics: ${rows[0]?.active} active, ${rows[0]?.idle} idle, ${rows[0]?.expired} expired`;
-	}
-
-	await sendReply(msg.fromAgent, "orchestrator", msg.messageId, msg.proposalId, {
-		answer,
-		topic,
-		timestamp: new Date().toISOString(),
-	});
-
-	logger.log(`❓ Answered ${msg.fromAgent}: ${answer.slice(0, 100)}...`);
-}
-
-async function handleDecision(
-	msg: AgentMessage,
-	payload: Record<string, unknown>,
-	proposalLabel: string,
-): Promise<void> {
-	const question = (payload.question as string) || "decision needed";
-	const options = (payload.options as string[]) || [];
-	const context = (payload.context as string) || "";
-
-	logger.log(
-		`⚖️ DECISION from ${msg.fromAgent} on ${proposalLabel}: ${question.slice(0, 100)}`,
-	);
-
-	// Rich event: agent requesting decision
-	await emitEvent(msg.proposalId, "agent_decision", {
-		agent: msg.fromAgent,
-		question: question.slice(0, 300),
-		options,
-	});
-
-	// Auto-decide based on heuristics, or escalate to human
-	let decision = "escalate";
-	let rationale = "No auto-decision rule matched. Escalating to human.";
-
-	// If it's a model switch request, approve it
-	if (question.toLowerCase().includes("model") || question.toLowerCase().includes("switch")) {
-		decision = "approved";
-		rationale = "Auto-approved model switch request. Agent should retry with a different model.";
-	}
-
-	await sendReply(msg.fromAgent, "orchestrator", msg.messageId, msg.proposalId, {
-		decision,
-		rationale,
-		options,
-		timestamp: new Date().toISOString(),
-	});
-
-	logger.log(`⚖️ Decision for ${msg.fromAgent}: ${decision}`);
-}
-
-async function sendReply(
-	toAgent: string,
-	fromAgent: string,
-	replyToId: number | null,
-	proposalId: number | null,
-	payload: Record<string, unknown>,
-): Promise<void> {
-	await query(
-		`INSERT INTO roadmap.message_ledger
-		   (from_agent, to_agent, channel, message_type, message_content, proposal_id, reply_to)
-		 VALUES ($1, $2, 'orchestrator', 'reply', $3, $4, $5)`,
-		[fromAgent, toAgent, JSON.stringify(payload), proposalId, replyToId],
-	);
-}
-
 // P266: poller handles owned by main() so shutdown() can clear them.
 let pollTimer: NodeJS.Timeout | null = null;
 let implicitGateTimer: NodeJS.Timeout | null = null;
@@ -1463,7 +1201,6 @@ async function main() {
 	// Listen for state changes
 	await pgClient.query("LISTEN proposal_gate_ready");
 	await pgClient.query("LISTEN proposal_maturity_changed");
-	await pgClient.query("LISTEN new_message"); // SOS protocol: agents call for help
 
 	logger.log("Listening for state changes to dispatch agents...");
 
@@ -1485,20 +1222,6 @@ async function main() {
 					}
 					return;
 				}
-
-				// SOS protocol: agent calling for help
-				if (msg.channel === "new_message" && data.message_type === "sos") {
-					await trackInFlight(
-						handleAgentSOS({
-							fromAgent: data.from_agent,
-							toAgent: data.to_agent,
-							proposalId: data.proposal_id ? Number(data.proposal_id) : null,
-							messageId: data.message_id ? Number(data.message_id) : null,
-						}),
-					);
-					return;
-				}
-
 				const proposalId = data.proposal_id || data.id;
 
 				if (!proposalId) return;
