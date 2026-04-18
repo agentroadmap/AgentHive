@@ -38,7 +38,8 @@ export type AgentProvider =
 	| "gemini"
 	| "copilot"
 	| "openclaw"
-	| "codex";
+	| "codex"
+	| "hermes";
 
 export interface WorktreeConfig {
 	/** Worktree directory name (e.g. "claude-andy") */
@@ -391,6 +392,7 @@ function detectProvider(worktreeName: string): AgentProvider {
 	if (worktreeName.startsWith("copilot")) return "copilot";
 	if (worktreeName.startsWith("openclaw")) return "openclaw";
 	if (worktreeName.startsWith("codex")) return "codex";
+	if (worktreeName.startsWith("xiaomi")) return "hermes";
 	throw new Error(`Unknown provider prefix for worktree "${worktreeName}"`);
 }
 
