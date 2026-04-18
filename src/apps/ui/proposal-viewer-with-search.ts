@@ -879,12 +879,7 @@ export async function viewProposalEnhanced(
 		) {
 			return;
 		}
-		const enriched = enrichProposal(selectedProposal);
-		currentSelectedProposal = enriched ?? selectedProposal;
-		options.onProposalChange?.(currentSelectedProposal);
 		const requestId = ++selectionRequestId;
-		refreshDetailPane();
-		screen.render();
 		const refreshed = await core.getProposalWithSubproposals(
 			selectedProposal.id,
 			allProposals,
@@ -892,10 +887,10 @@ export async function viewProposalEnhanced(
 		if (requestId !== selectionRequestId) {
 			return;
 		}
-		if (refreshed) {
-			currentSelectedProposal = refreshed;
-			options.onProposalChange?.(refreshed);
-		}
+		const nextSelected =
+			refreshed ?? enrichProposal(selectedProposal) ?? selectedProposal;
+		currentSelectedProposal = nextSelected;
+		options.onProposalChange?.(nextSelected);
 		refreshDetailPane();
 		screen.render();
 	}

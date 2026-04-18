@@ -59,7 +59,7 @@ describe("board workflow helpers", () => {
 		).toBe("rfc");
 	});
 
-	it("filters proposals to the active workflow", () => {
+	it("filters proposals to the active workflow and separates obsolete items", () => {
 		const proposals: Proposal[] = [
 			{
 				id: "p1",
@@ -80,11 +80,24 @@ describe("board workflow helpers", () => {
 				createdDate: "",
 				labels: [],
 				dependencies: [],
+				maturity: "obsolete",
+			},
+			{
+				id: "p3",
+				title: "Done",
+				status: "DONE",
+				proposalType: "hotfix",
+				assignee: [],
+				createdDate: "",
+				labels: [],
+				dependencies: [],
 			},
 		];
 
+		expect(filterProposalsForWorkflow(proposals, "all")).toHaveLength(2);
+		expect(filterProposalsForWorkflow(proposals, "obsolete")).toHaveLength(1);
 		expect(filterProposalsForWorkflow(proposals, "rfc")).toHaveLength(1);
-		expect(filterProposalsForWorkflow(proposals, "quick-fix")).toHaveLength(1);
+		expect(filterProposalsForWorkflow(proposals, "quick-fix")).toHaveLength(0);
 	});
 
 	it("keeps workflow column order and sorts custom states deterministically", () => {
@@ -172,6 +185,56 @@ describe("board workflow helpers", () => {
 			"DEPLOYED",
 			"ESCALATE",
 			"WONT_FIX",
+		]);
+	});
+
+	it("combines workflow status columns for the all view", () => {
+		const proposals: Proposal[] = [
+			{
+				id: "p1",
+				title: "RFC",
+				status: "Draft",
+				proposalType: "product",
+				assignee: [],
+				createdDate: "",
+				labels: [],
+				dependencies: [],
+			},
+			{
+				id: "p2",
+				title: "Fix",
+				status: "TRIAGE",
+				proposalType: "issue",
+				assignee: [],
+				createdDate: "",
+				labels: [],
+				dependencies: [],
+			},
+			{
+				id: "p3",
+				title: "Hotfix",
+				status: "DONE",
+				proposalType: "hotfix",
+				assignee: [],
+				createdDate: "",
+				labels: [],
+				dependencies: [],
+			},
+		];
+
+		expect(resolveWorkflowStatuses(proposals, "all")).toEqual([
+			"Draft",
+			"Review",
+			"Develop",
+			"Merge",
+			"Complete",
+			"TRIAGE",
+			"FIX",
+			"DEPLOYED",
+			"ESCALATE",
+			"WONT_FIX",
+			"FIXING",
+			"DONE",
 		]);
 	});
 });
