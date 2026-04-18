@@ -98,12 +98,49 @@ export interface ModelRoute {
 }
 
 export function buildSpawnProcessEnv(input: {
-	provider: AgentProvider;
 	worktree: string;
 	route: ModelRoute;
 	agentEnv: Record<string, string>;
 	extraEnv: Record<string, string>;
 }): Record<string, string> {
+	const routeCredentialEnv = (() => {
+		if (input.route.apiSpec === "anthropic") {
+			return process.env.ANTHROPIC_API_KEY
+				? { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY }
+				: {};
+		}
+		if (input.route.apiSpec === "google") {
+			return process.env.GEMINI_API_KEY
+				? { GEMINI_API_KEY: process.env.GEMINI_API_KEY }
+				: {};
+		}
+		if (input.route.apiSpec === "openai") {
+			if (input.route.routeProvider === "nous") {
+				const nousKey = process.env.NOUS_API_KEY ?? process.env.OPENAI_API_KEY;
+				return {
+					...(process.env.NOUS_API_KEY
+						? { NOUS_API_KEY: process.env.NOUS_API_KEY }
+						: {}),
+					...(nousKey ? { OPENAI_API_KEY: nousKey } : {}),
+				};
+			}
+			if (input.route.routeProvider === "xiaomi") {
+				const xiaomiKey =
+					process.env.XIAOMI_API_KEY ?? process.env.OPENAI_API_KEY;
+				return {
+					...(process.env.XIAOMI_API_KEY
+						? { XIAOMI_API_KEY: process.env.XIAOMI_API_KEY }
+						: {}),
+					...(xiaomiKey ? { OPENAI_API_KEY: xiaomiKey } : {}),
+				};
+			}
+			return process.env.OPENAI_API_KEY
+				? { OPENAI_API_KEY: process.env.OPENAI_API_KEY }
+				: {};
+		}
+		return {};
+	})();
+
 	const baseEnv: Record<string, string> = {
 		// Carry through essential PATH
 		PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
@@ -111,35 +148,14 @@ export function buildSpawnProcessEnv(input: {
 		// Agent-specific overrides from .env.agent
 		DATABASE_URL: input.agentEnv.DATABASE_URL ?? "",
 		AGENT_WORKTREE: input.worktree,
-		AGENT_PROVIDER: input.provider,
+		AGENT_PROVIDER: input.route.agentProvider,
 		AGENT_ROUTE_PROVIDER: input.route.routeProvider,
 		AGENT_API_SPEC: input.route.apiSpec,
 		// Git identity isolation
 		GIT_CONFIG_GLOBAL: `${GITCONFIG_ROOT}/${input.worktree}.gitconfig`,
 		GIT_CONFIG_NOSYSTEM: "1",
-		// API keys: pass through only what the provider route needs
-		...(input.provider === "claude" &&
-		process.env.ANTHROPIC_API_KEY
-			? { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY }
-			: {}),
-		...(input.provider === "gemini" && process.env.GEMINI_API_KEY
-			? { GEMINI_API_KEY: process.env.GEMINI_API_KEY }
-			: {}),
-		...(input.provider === "openclaw" && process.env.NOUS_API_KEY
-			? {
-					OPENAI_API_KEY: process.env.NOUS_API_KEY,
-					NOUS_API_KEY: process.env.NOUS_API_KEY,
-				}
-			: {}),
-		...(input.provider === "copilot" && process.env.OPENAI_API_KEY
-			? { OPENAI_API_KEY: process.env.OPENAI_API_KEY }
-			: {}),
-		...(input.provider === "codex" && process.env.OPENAI_API_KEY
-			? { OPENAI_API_KEY: process.env.OPENAI_API_KEY }
-			: {}),
-		...(process.env.XIAOMI_API_KEY && input.provider === "claude"
-			? { XIAOMI_API_KEY: process.env.XIAOMI_API_KEY }
-			: {}),
+		// API keys are selected from DB-backed route metadata, not worktree prefix.
+		...routeCredentialEnv,
 		...(process.env.GITHUB_TOKEN && {
 			GITHUB_TOKEN: process.env.GITHUB_TOKEN,
 		}),
@@ -238,31 +254,18 @@ function buildArgsBySpec(req: SpawnRequest, route: ModelRoute): CommandSpec {
 	}
 }
 
-export function assertPlatformAwareRoute(
+export function assertResolvedRouteMetadata(
 	provider: AgentProvider,
 	route: ModelRoute,
 ): void {
-	const expected = {
-		claude: { routeProvider: "anthropic", apiSpec: "anthropic" },
-		gemini: { routeProvider: "google", apiSpec: "google" },
-		copilot: { routeProvider: "openai", apiSpec: "openai" },
-		openclaw: { routeProvider: "nous", apiSpec: "openai" },
-		codex: { routeProvider: "openai", apiSpec: "openai" },
-	}[provider];
-
 	if (route.agentProvider !== provider) {
 		throw new Error(
 			`[P235] Route agent_provider "${route.agentProvider}" does not match worktree provider "${provider}" for model "${route.modelName}".`,
 		);
 	}
-	if (provider === "openclaw" && !HERMES_SAFE_MODELS.has(route.modelName)) {
+	if (!route.routeProvider || !route.apiSpec || !route.baseUrl) {
 		throw new Error(
-			`[P235] Hermes route "${route.modelName}" is not allowlisted. Use only ${[...HERMES_SAFE_MODELS].join(", ")}.`,
-		);
-	}
-	if (route.routeProvider !== expected.routeProvider || route.apiSpec !== expected.apiSpec) {
-		throw new Error(
-			`[P235] Refusing to run "${provider}" route "${route.modelName}" through "${route.routeProvider}" / "${route.apiSpec}". Expected "${expected.routeProvider}" / "${expected.apiSpec}".`,
+			`[P235] Refusing to run "${provider}" route "${route.modelName}" with incomplete DB route metadata.`,
 		);
 	}
 }
@@ -323,22 +326,6 @@ async function assertSpawnAllowed(
 	}
 
 	throw new SpawnPolicyViolation(host, route.routeProvider, route.modelName);
-}
-
-export function assertHermesRouteAllowed(
-	modelName: string,
-	routeProvider?: string,
-): void {
-	if (routeProvider !== undefined && routeProvider !== "nous") {
-		throw new Error(
-			`[P235] Hermes spawn is restricted to the Nous provider; got "${routeProvider}".`,
-		);
-	}
-	if (!HERMES_SAFE_MODELS.has(modelName)) {
-		throw new Error(
-			`[P235] Hermes spawn is restricted to ${[...HERMES_SAFE_MODELS].join(", ")}.`,
-		);
-	}
 }
 
 let modelRoutesMillionPricingPromise: Promise<boolean> | undefined;
@@ -409,20 +396,6 @@ function detectProvider(worktreeName: string): AgentProvider {
 
 // ─── P235: Platform-Aware Model Constraints ──────────────────────────────────
 
-/** Hard-coded platform defaults used when route lookup fails. */
-const PROVIDER_DEFAULTS: Record<AgentProvider, string> = {
-	claude: "claude-sonnet-4-6",
-	gemini: "gemini-2.0-flash",
-	copilot: "gpt-4o",
-	openclaw: "xiaomi/mimo-v2-pro",
-	codex: "gpt-5.4",
-};
-
-const HERMES_SAFE_MODELS = new Set([
-	"xiaomi/mimo-v2-pro",
-	"xiaomi/mimo-v2-omni",
-]);
-
 /**
  * P235 + M026: Resolve model route for a spawn request.
  *
@@ -453,22 +426,20 @@ async function resolveModelRoute(
 	};
 
 	const perMillionPricing = await supportsPerMillionRoutePricing();
-	const hermesFilter = provider === "openclaw" ? [...HERMES_SAFE_MODELS] : null;
 
 	const fetchRoute = (modelName: string) => {
 		if (perMillionPricing) {
-			return query<RouteRow>(
-				`SELECT model_name, route_provider, agent_provider,
+		return query<RouteRow>(
+			`SELECT model_name, route_provider, agent_provider,
                api_spec, base_url, plan_type,
                cost_per_1k_input, cost_per_million_input, cost_per_million_output
         FROM roadmap.model_routes
         WHERE model_name = $1
           AND agent_provider = $2
           AND is_enabled = true
-          AND ($3::text[] IS NULL OR model_name = ANY($3::text[]))
         ORDER BY priority ASC, COALESCE(cost_per_million_input, cost_per_1k_input * 1000) ASC
         LIMIT 1`,
-				[modelName, provider, hermesFilter],
+				[modelName, provider],
 			);
 		}
 
@@ -481,10 +452,9 @@ async function resolveModelRoute(
        WHERE model_name = $1
          AND agent_provider = $2
          AND is_enabled = true
-         AND ($3::text[] IS NULL OR model_name = ANY($3::text[]))
-       ORDER BY priority ASC, cost_per_1k_input ASC
-       LIMIT 1`,
-			[modelName, provider, hermesFilter],
+        ORDER BY priority ASC, cost_per_1k_input ASC
+        LIMIT 1`,
+			[modelName, provider],
 		);
 	};
 
@@ -501,13 +471,10 @@ async function resolveModelRoute(
 	});
 
 	if (hint) {
-		if (provider === "openclaw") {
-			assertHermesRouteAllowed(hint);
-		}
 		const { rows } = await fetchRoute(hint);
 		if (rows.length > 0) {
 			const route = toModelRoute(rows[0]);
-			assertPlatformAwareRoute(provider, route);
+			assertResolvedRouteMetadata(provider, route);
 			return route;
 		}
 
@@ -527,10 +494,9 @@ async function resolveModelRoute(
         FROM roadmap.model_routes
         WHERE agent_provider = $1
           AND is_enabled = true
-          AND ($2::text[] IS NULL OR model_name = ANY($2::text[]))
         ORDER BY priority ASC, COALESCE(cost_per_million_input, cost_per_1k_input * 1000) ASC
         LIMIT 1`,
-				[provider, hermesFilter],
+				[provider],
 			)
 		: await query<RouteRow>(
 				`SELECT model_name, route_provider, agent_provider,
@@ -540,67 +506,70 @@ async function resolveModelRoute(
         FROM roadmap.model_routes
         WHERE agent_provider = $1
           AND is_enabled = true
-          AND ($2::text[] IS NULL OR model_name = ANY($2::text[]))
         ORDER BY priority ASC, cost_per_1k_input ASC
         LIMIT 1`,
-				[provider, hermesFilter],
+				[provider],
 			);
 
 	if (rows.length > 0) {
 		const route = toModelRoute(rows[0]);
-		assertPlatformAwareRoute(provider, route);
+		assertResolvedRouteMetadata(provider, route);
 		return route;
 	}
 
-	// No DB routes at all — synthesize a hard-coded fallback
-	const fallbackModel = PROVIDER_DEFAULTS[provider];
-	console.warn(
-		`[P235] No routes in DB for agent_provider "${provider}". Using hard-coded default "${fallbackModel}".`,
+	const fallbackModel = await getHostDefaultModel();
+	if (fallbackModel) {
+		const { rows: defaultRows } = perMillionPricing
+			? await query<RouteRow>(
+					`SELECT model_name, route_provider, agent_provider,
+               api_spec, base_url, plan_type,
+               cost_per_1k_input, cost_per_million_input, cost_per_million_output
+        FROM roadmap.model_routes
+        WHERE model_name = $1
+          AND agent_provider = $2
+          AND is_enabled = true
+        ORDER BY priority ASC, COALESCE(cost_per_million_input, cost_per_1k_input * 1000) ASC
+        LIMIT 1`,
+					[fallbackModel, provider],
+				)
+			: await query<RouteRow>(
+					`SELECT model_name, route_provider, agent_provider,
+               api_spec, base_url, plan_type,
+               cost_per_1k_input, NULL::numeric AS cost_per_million_input,
+               NULL::numeric AS cost_per_million_output
+        FROM roadmap.model_routes
+        WHERE model_name = $1
+          AND agent_provider = $2
+          AND is_enabled = true
+        ORDER BY priority ASC, cost_per_1k_input ASC
+        LIMIT 1`,
+					[fallbackModel, provider],
+				);
+		if (defaultRows.length > 0) {
+			const route = toModelRoute(defaultRows[0]);
+			assertResolvedRouteMetadata(provider, route);
+			return route;
+		}
+	}
+
+	throw new Error(
+		`[P235] No enabled route found in DB for agent_provider "${provider}" and no usable host default_model fallback for host "${AGENTHIVE_HOST}".`,
 	);
-	const fallbackRouteConfig: Record<
-		AgentProvider,
-		{ routeProvider: string; apiSpec: ModelRoute["apiSpec"]; baseUrl: string }
-	> = {
-		claude: {
-			routeProvider: "anthropic",
-			apiSpec: "anthropic",
-			baseUrl: "https://api.anthropic.com",
-		},
-		gemini: {
-			routeProvider: "google",
-			apiSpec: "google",
-			baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-		},
-		copilot: {
-			routeProvider: "openai",
-			apiSpec: "openai",
-			baseUrl: "https://api.openai.com/v1",
-		},
-		openclaw: {
-			routeProvider: "nous",
-			apiSpec: "openai",
-			baseUrl: "https://inference-api.nousresearch.com/v1",
-		},
-		codex: {
-			routeProvider: "openai",
-			apiSpec: "openai",
-			baseUrl: "https://api.openai.com/v1",
-		},
-	};
-	const fallbackRouteConfigForProvider = fallbackRouteConfig[provider];
-	const fallbackRoute = {
-		modelName: fallbackModel,
-		routeProvider: fallbackRouteConfigForProvider.routeProvider,
-		agentProvider: provider,
-		apiSpec: fallbackRouteConfigForProvider.apiSpec,
-		baseUrl: fallbackRouteConfigForProvider.baseUrl,
-		planType: null,
-		costPer1kInput: 0,
-		costPerMillionInput: 0,
-		costPerMillionOutput: 0,
-	};
-	assertPlatformAwareRoute(provider, fallbackRoute);
-	return fallbackRoute;
+}
+
+let hostDefaultModelPromise: Promise<string | null> | undefined;
+
+async function getHostDefaultModel(): Promise<string | null> {
+	if (!hostDefaultModelPromise) {
+		hostDefaultModelPromise = query<{ default_model: string | null }>(
+			`SELECT default_model
+       FROM roadmap.host_model_policy
+       WHERE host_name = $1
+       LIMIT 1`,
+			[AGENTHIVE_HOST],
+		).then(({ rows }) => rows[0]?.default_model ?? null);
+	}
+	return hostDefaultModelPromise;
 }
 
 async function buildProposalContextPackage(input: {
@@ -692,7 +661,6 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 
 	// Assemble process environment (agent-scoped, not inheriting secrets from host)
 	const processEnv = buildSpawnProcessEnv({
-		provider,
 		worktree,
 		route,
 		agentEnv,
@@ -850,7 +818,7 @@ export async function escalateOrNotify(
 	}
 
 	// Find current position (req.model is the model used for this run)
-	const currentModel = req.model ?? PROVIDER_DEFAULTS[provider];
+	const currentModel = req.model ?? (await getHostDefaultModel()) ?? "";
 	const currentIdx = ladder.indexOf(currentModel);
 	const nextIdx = currentIdx + 1;
 

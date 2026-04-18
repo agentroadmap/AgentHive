@@ -2,28 +2,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-	assertHermesRouteAllowed,
-	assertPlatformAwareRoute,
+	assertResolvedRouteMetadata,
 	buildSpawnProcessEnv,
 } from "../../src/core/orchestration/agent-spawner.ts";
 
-describe("Hermes model allowlist", () => {
-	it("allows the Xiaomi Hermes models", () => {
-		assert.doesNotThrow(() => assertHermesRouteAllowed("xiaomi/mimo-v2-pro"));
-		assert.doesNotThrow(() => assertHermesRouteAllowed("xiaomi/mimo-v2-omni"));
-	});
-
-	it("rejects non-Hermes models", () => {
-		assert.throws(() => assertHermesRouteAllowed("claude-sonnet-4-6"));
-		assert.throws(() => assertHermesRouteAllowed("xiaomi/mimo-v2-tts"));
-		assert.throws(() =>
-			assertHermesRouteAllowed("xiaomi/mimo-v2-pro", "xiaomi"),
-		);
-	});
-
-	it("requires Hermes routes to stay on the Nous/OpenAI-compatible path", () => {
+describe("Hermes route compatibility", () => {
+	it("accepts DB-shaped Hermes route metadata", () => {
 		assert.doesNotThrow(() =>
-			assertPlatformAwareRoute("openclaw", {
+			assertResolvedRouteMetadata("openclaw", {
 				modelName: "xiaomi/mimo-v2-pro",
 				routeProvider: "nous",
 				agentProvider: "openclaw",
@@ -35,13 +21,16 @@ describe("Hermes model allowlist", () => {
 				costPerMillionOutput: 0,
 			}),
 		);
+	});
+
+	it("rejects route metadata that does not match the worktree provider", () => {
 		assert.throws(() =>
-			assertPlatformAwareRoute("openclaw", {
+			assertResolvedRouteMetadata("openclaw", {
 				modelName: "xiaomi/mimo-v2-pro",
 				routeProvider: "nous",
-				agentProvider: "openclaw",
-				apiSpec: "anthropic",
-				baseUrl: "https://api.xiaomi.com/anthropic/v1",
+				agentProvider: "claude",
+				apiSpec: "openai",
+				baseUrl: "https://inference-api.nousresearch.com/v1",
 				planType: "token_plan",
 				costPer1kInput: 0.0002,
 				costPerMillionInput: 0,
@@ -60,7 +49,6 @@ describe("Hermes model allowlist", () => {
 
 		try {
 			const env = buildSpawnProcessEnv({
-				provider: "openclaw",
 				worktree: "openclaw-hermes",
 				route: {
 					modelName: "xiaomi/mimo-v2-pro",
