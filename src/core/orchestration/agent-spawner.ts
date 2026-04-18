@@ -216,43 +216,63 @@ function buildCodexArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
 	return { argv, env };
 }
 
-/**
- * Build argv + env for any OpenAI-compatible endpoint.
- * Used when api_spec = 'openai' (Nous, Xiaomi, OpenAI, GitHub Copilot, etc.).
- * Uses the `llm` CLI (https://llm.datasette.io).
- */
-function buildOpenAICompatArgs(
-	req: SpawnRequest,
-	route: ModelRoute,
-): CommandSpec {
-	const argv = ["llm", "--model", route.modelName, req.task];
-	const env: Record<string, string> = {
-		OPENAI_BASE_URL: route.baseUrl,
-	};
-	return { argv, env };
-}
-
-/**
- * Build argv + env for Google Gemini CLI.
- * Used when api_spec = 'google'.
- */
 function buildGeminiArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
 	const argv = ["gemini", "--model", route.modelName, "--prompt", req.task];
 	return { argv, env: {} };
 }
 
+/**
+ * Build args for hermes CLI — universal fallback for providers without their own CLI.
+ * hermes chat --provider <provider> --model <model> -q <task> -Q
+ */
+function buildHermesArgs(
+	req: SpawnRequest,
+	route: ModelRoute,
+	hermesProvider: string,
+): CommandSpec {
+	const argv = [
+		"hermes",
+		"chat",
+		"--provider",
+		hermesProvider,
+		"--model",
+		route.modelName,
+		"-Q", // quiet mode: no banner, suppress spinner
+		"-q",
+		req.task,
+	];
+	return { argv, env: {} };
+}
+
 /** Dispatch to the correct builder based on route.apiSpec and agent_provider. */
+/**
+ * Agent provider → hermes --provider fallback mapping.
+ * Used when the provider's native CLI is not available.
+ * claude and codex always use their native CLIs.
+ */
+const HERMES_FALLBACK_MAP: Record<string, string> = {
+	hermes: "nous",
+	openclaw: "anthropic",
+	copilot: "copilot",
+};
+
 function buildArgsBySpec(req: SpawnRequest, route: ModelRoute): CommandSpec {
-	// Codex CLI gets its own builder regardless of api_spec (always openai spec)
+	// Codex has its own CLI
 	if (route.agentProvider === "codex") return buildCodexArgs(req, route);
-	switch (route.apiSpec) {
-		case "anthropic":
-			return buildClaudeArgs(req, route);
-		case "google":
-			return buildGeminiArgs(req, route);
-		case "openai":
-			return buildOpenAICompatArgs(req, route);
+
+	// Claude uses claude CLI directly for anthropic spec
+	if (route.agentProvider === "claude" && route.apiSpec === "anthropic") {
+		return buildClaudeArgs(req, route);
 	}
+
+	// Google uses gemini CLI
+	if (route.apiSpec === "google") {
+		return buildGeminiArgs(req, route);
+	}
+
+	// Everything else: hermes CLI as universal fallback
+	const hermesProvider = HERMES_FALLBACK_MAP[route.agentProvider] ?? route.routeProvider;
+	return buildHermesArgs(req, route, hermesProvider);
 }
 
 export function assertResolvedRouteMetadata(
