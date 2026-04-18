@@ -10,6 +10,10 @@ WorkingDirectory=/data/code/AgentHive
 ExecStart=/usr/bin/env node --import jiti/register scripts/start-gate-pipeline.ts
 Restart=on-failure
 RestartSec=5
+# P254: give PipelineCron up to 3min to drain in-flight gate work on SIGTERM
+# before systemd escalates to SIGKILL (default would be 90s).
+TimeoutStopSec=180
+KillSignal=SIGTERM
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=agenthive-gate-pipeline

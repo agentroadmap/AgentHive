@@ -10,6 +10,10 @@ WorkingDirectory=/data/code/AgentHive
 ExecStart=/usr/bin/env node --import jiti/register scripts/orchestrator.ts
 Restart=on-failure
 RestartSec=10
+# P254: 5min stop window covers the orchestrator's 600s spawn timeout's
+# tail so dispatchImplicitGate can finish before SIGKILL.
+TimeoutStopSec=300
+KillSignal=SIGTERM
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=agenthive-orchestrator
