@@ -428,38 +428,55 @@ export async function runUnifiedView(
 					result = "switch";
 				};
 
-				renderBoardTui(kanbanProposals, statuses, layout, maxColumnWidth, {
-					projectRoot: options.core.getProjectRoot(),
-					onProposalSelect: (proposal) => {
-						selectedProposal = proposal;
-					},
-					onTabPress,
-					filters: createKanbanSharedFilters(currentFilters),
-					availableLabels: getBoardAvailableLabels(),
-					availableDirectives: getBoardAvailableDirectives(),
-					onFilterChange: (filters) => {
-						currentFilters = {
-							...currentFilters,
-							searchQuery: filters.searchQuery,
-							priorityFilter: filters.priorityFilter,
-							labelFilter: [...filters.labelFilter],
-							directiveFilter: filters.directiveFilter,
-						};
-					},
-					subscribeUpdates: (updater) => {
-						boardUpdater = updater;
-						emitBoardUpdate();
-					},
-					directiveMode: options.directiveMode,
-					directiveEntities,
-				}).then(() => {
-					// If user wants to exit, do it immediately
-					if (result === "exit") {
-						process.exit(0);
-					}
-					boardUpdater = null;
-					resolve(result);
-				});
+			renderBoardTui(kanbanProposals, statuses, layout, maxColumnWidth, {
+				projectRoot: options.core.getProjectRoot(),
+				onProposalSelect: (proposal) => {
+					selectedProposal = proposal;
+				},
+				onTabPress,
+				filters: createKanbanSharedFilters(currentFilters),
+				availableLabels: getBoardAvailableLabels(),
+				availableDirectives: getBoardAvailableDirectives(),
+				onFilterChange: (filters) => {
+					currentFilters = {
+						...currentFilters,
+						searchQuery: filters.searchQuery,
+						priorityFilter: filters.priorityFilter,
+						labelFilter: [...filters.labelFilter],
+						directiveFilter: filters.directiveFilter,
+					};
+				},
+				subscribeUpdates: (updater) => {
+					boardUpdater = updater;
+					emitBoardUpdate();
+				},
+				directiveMode: options.directiveMode,
+				directiveEntities,
+			}).then(() => {
+				// If user wants to exit, do it immediately
+				if (result === "exit") {
+					process.exit(0);
+				}
+				boardUpdater = null;
+				resolve(result);
+			});
+
+			// Auto-refresh: reload proposals from DB every 5s and push to board
+			const refreshTimer = setInterval(() => {
+				void (async () => {
+					await loadProposalsForUnifiedView(options.core, {
+						onProgress: () => {},
+					});
+					emitBoardUpdate();
+				})();
+			}, 5000);
+
+			// Clean up timer when board exits
+			const origResolve = resolve;
+			resolve = ((value: ViewResult) => {
+				clearInterval(refreshTimer);
+				origResolve(value);
+			}) as typeof resolve;
 			});
 		};
 

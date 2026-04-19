@@ -41,7 +41,7 @@ export function timestampToMillis(value: FeedRow["timestamp_ms"]): number {
 	return Number.isFinite(fallback) ? fallback : Date.now();
 }
 
-export async function getBoardLiveFeed(limit = 30): Promise<StreamEvent[]> {
+export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 	try {
 		const { rows } = await query<FeedRow>(
 			`
@@ -79,7 +79,7 @@ export async function getBoardLiveFeed(limit = 30): Promise<StreamEvent[]> {
 					COALESCE(p.display_id || ' ', '') || pe.event_type AS message
 				FROM roadmap_proposal.proposal_event pe
 				LEFT JOIN roadmap_proposal.proposal p ON p.id = pe.proposal_id
-				WHERE pe.event_type NOT IN ('status_changed', 'maturity_changed')
+				WHERE pe.event_type NOT IN ('status_changed', 'maturity_changed', 'lease_claimed', 'lease_released')
 
 				UNION ALL
 

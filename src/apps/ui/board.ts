@@ -2290,7 +2290,7 @@ export async function renderBoardTui(
 		const seenFeedEventIds = new Set<string>();
 		let feedLines: string[] = [];
 		const FEED_PAGE_SIZE = 12;
-		const FEED_HISTORY_LIMIT = 200;
+		const FEED_HISTORY_LIMIT = 500;
 		let feedWindowStart = 0;
 		let feedPinnedToLatest = true;
 		const getFeedMaxWindowStart = () =>
