@@ -811,13 +811,31 @@ async function dispatchImplicitGate(
 		`Implicit gate dispatch ${dispatchId} -> ${worktree} for ${proposal.display_id} (${proposal.status} -> ${gate.toStage}, ${gate.gate})`,
 	);
 
-	const result = await spawnAgent({
-		worktree,
-		task: buildImplicitGateTask(proposal, gate),
-		proposalId: proposal.id,
-		stage: gate.toStage,
-		timeoutMs: 600_000,
-	});
+	let result: Awaited<ReturnType<typeof spawnAgent>>;
+	try {
+		result = await spawnAgent({
+			worktree,
+			task: buildImplicitGateTask(proposal, gate),
+			proposalId: proposal.id,
+			stage: gate.toStage,
+			timeoutMs: 600_000,
+		});
+	} catch (spawnErr) {
+		const errMsg =
+			spawnErr instanceof Error ? spawnErr.message : String(spawnErr);
+		await query(
+			`UPDATE roadmap_workforce.squad_dispatch
+	        SET dispatch_status = 'blocked',
+	            completed_at = now(),
+	            metadata = COALESCE(metadata, '{}'::jsonb) ||
+	              jsonb_build_object('error', $2::text)
+	      WHERE id = $1`,
+			[dispatchId, errMsg],
+		);
+		await releaseDispatchLease(dispatchId, `gate spawn failed: ${errMsg.slice(0, 500)}`);
+		logger.warn(`Implicit gate dispatch ${dispatchId} blocked (spawn threw): ${errMsg}`);
+		return;
+	}
 
 	const proposalState = await query<{ status: string; maturity: string }>(
 		`SELECT status, maturity
