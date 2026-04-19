@@ -405,31 +405,26 @@ async function loadEnvAgent(
 	return env;
 }
 
-/** Detect provider from worktree name prefix. */
 /**
- * Look up agent_provider from model_routes DB table.
- * No hardcoded prefix matching — DB is source of truth.
+ * Detect a worktree's true provider by reading its `.env.agent` (AGENT_PROVIDER).
+ * Host policy is enforced by the caller, not here.
  */
 export async function detectProvider(worktreeName: string): Promise<AgentProvider> {
-	const { rows } = await query<{ agent_provider: string }>(
-		`SELECT mr.agent_provider
-       FROM roadmap.model_routes mr
-       WHERE mr.is_enabled = true
-         AND mr.route_provider = ANY(
-           SELECT unnest(allowed_providers)
-             FROM roadmap.host_model_policy
-             WHERE host_name = $1
-         )
-       ORDER BY mr.priority ASC
-       LIMIT 1`,
-		[AGENTHIVE_HOST],
-	);
-	if (rows.length === 0) {
-		throw new Error(
-			`No enabled model routes for host "${AGENTHIVE_HOST}" with allowed providers — cannot determine provider for "${worktreeName}"`,
-		);
+	const envPath = join(WORKTREE_ROOT, worktreeName, ".env.agent");
+	const content = await readFile(envPath, "utf8");
+	for (const line of content.split("\n")) {
+		const trimmed = line.trim();
+		if (!trimmed || trimmed.startsWith("#")) continue;
+		const eq = trimmed.indexOf("=");
+		if (eq < 0) continue;
+		const key = trimmed.slice(0, eq).trim();
+		if (key !== "AGENT_PROVIDER") continue;
+		const value = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+		if (value) return value;
 	}
-	return rows[0].agent_provider;
+	throw new Error(
+		`Worktree "${worktreeName}" has no AGENT_PROVIDER in .env.agent`,
+	);
 }
 
 // ─── P235: Platform-Aware Model Constraints ──────────────────────────────────

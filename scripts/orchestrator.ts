@@ -405,9 +405,10 @@ async function selectExecutorWorktree(
 					`Skipping executor ${candidate.worktree} — provider "${routeProvider}" forbidden by host policy (${AGENTHIVE_HOST})`,
 				);
 			}
-		} catch {
-			// Provider detection failed — include candidate, let spawn handle the error
-			filtered.push(candidate);
+		} catch (err) {
+			logger.warn(
+				`Skipping executor ${candidate.worktree} — provider detection failed: ${err instanceof Error ? err.message : String(err)}`,
+			);
 		}
 	}
 
@@ -485,8 +486,9 @@ async function dispatchAgent(
 
 		// Spawn the agent process
 		const taskPrompt = `${AGENT_PROMPTS[agent] || ""}\n\nProposal P${proposalId}: ${task}\n\nUse the MCP tools to do your work. Connect to http://127.0.0.1:6421/sse for proposal management.`;
+		const worktree = await selectExecutorWorktree(null);
 		const result = await spawnAgent({
-			worktree: await selectExecutorWorktree(null),
+			worktree,
 			task: taskPrompt,
 			proposalId: Number(proposalId),
 			stage: phase,
