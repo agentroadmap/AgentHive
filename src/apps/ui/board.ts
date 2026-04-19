@@ -2509,8 +2509,21 @@ export async function renderBoardTui(
 			void updateEventPanel();
 		}, 3000);
 
+		// Auto-refresh proposals from DB every 5s
+		const proposalRefreshTimer = setInterval(async () => {
+			try {
+				const fresh = await core.queryProposals({
+					includeCrossBranch: false,
+				});
+				currentProposals = fresh;
+				renderView();
+				screen.render();
+			} catch {}
+		}, 5000);
+
 		screen.on("destroy", () => {
 			clearInterval(eventPanelTimer);
+			clearInterval(proposalRefreshTimer);
 			clearFooterTimer();
 		});
 
