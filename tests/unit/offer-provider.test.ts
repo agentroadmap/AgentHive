@@ -25,14 +25,14 @@ function makeLogger() {
 
 function makeIntervals() {
 	const handles = new Map<ReturnType<typeof setInterval>, () => void>();
-	let nextId = 1 as unknown as ReturnType<typeof setInterval>;
+	let nextId = 1;
 	function setIntervalFn(fn: () => void, _ms: number) {
-		const id = nextId++;
+		const id = nextId++ as unknown as ReturnType<typeof setInterval>;
 		handles.set(id, fn);
 		return id;
 	}
-	function clearIntervalFn(id: ReturnType<typeof setInterval>) {
-		handles.delete(id);
+	function clearIntervalFn(id: ReturnType<typeof setInterval> | undefined) {
+		if (id !== undefined) handles.delete(id);
 	}
 	function fireAll() {
 		for (const fn of handles.values()) fn();
@@ -84,7 +84,7 @@ describe("OfferProvider", () => {
 
 		const claimsLeft = [claimRow, null]; // second call returns nothing
 
-		const queryFn: QueryFn = async (text: string, params?: unknown[]) => {
+		const queryFn = (async (text: string, params?: unknown[]) => {
 			sqlCalls.push({ text, params });
 			if (text.includes("fn_claim_work_offer")) {
 				const row = claimsLeft.shift();
@@ -97,7 +97,7 @@ describe("OfferProvider", () => {
 				return { rows: [] } as unknown as QueryResultLike;
 			}
 			return { rows: [] } as unknown as QueryResultLike;
-		};
+		}) as unknown as QueryFn;
 
 		const spawnFn: SpawnFn = async (req) => {
 			spawnCalled = true;
@@ -124,8 +124,8 @@ describe("OfferProvider", () => {
 			connectListener: async () => client,
 			spawnFn,
 			logger,
-			setIntervalFn: intervals.setIntervalFn,
-			clearIntervalFn: intervals.clearIntervalFn,
+			setIntervalFn: intervals.setIntervalFn as unknown as typeof setInterval,
+			clearIntervalFn: intervals.clearIntervalFn as unknown as typeof clearInterval,
 			leaseTtlSeconds: 30,
 		});
 
@@ -163,7 +163,7 @@ describe("OfferProvider", () => {
 		};
 		const claimsLeft = [claimRow, null];
 
-		const queryFn: QueryFn = async (text: string, params?: unknown[]) => {
+		const queryFn = (async (text: string, params?: unknown[]) => {
 			sqlCalls.push({ text, params });
 			if (text.includes("fn_claim_work_offer")) {
 				const r = claimsLeft.shift();
@@ -173,7 +173,7 @@ describe("OfferProvider", () => {
 				return { rows: [{ ok: true }] } as unknown as QueryResultLike;
 			}
 			return { rows: [] } as unknown as QueryResultLike;
-		};
+		}) as unknown as QueryFn;
 
 		const spawnFn: SpawnFn = async () => {
 			throw new Error("CLI crashed");
@@ -189,8 +189,8 @@ describe("OfferProvider", () => {
 			connectListener: async () => client,
 			spawnFn,
 			logger,
-			setIntervalFn: intervals.setIntervalFn,
-			clearIntervalFn: intervals.clearIntervalFn,
+			setIntervalFn: intervals.setIntervalFn as unknown as typeof setInterval,
+			clearIntervalFn: intervals.clearIntervalFn as unknown as typeof clearInterval,
 		});
 
 		await provider.run();
@@ -220,7 +220,7 @@ describe("OfferProvider", () => {
 		};
 		const claimsLeft = [claimRow, null];
 
-		const queryFn: QueryFn = async (text: string, params?: unknown[]) => {
+		const queryFn = (async (text: string, params?: unknown[]) => {
 			sqlCalls.push({ text, params });
 			if (text.includes("fn_claim_work_offer")) {
 				const r = claimsLeft.shift();
@@ -230,7 +230,7 @@ describe("OfferProvider", () => {
 				return { rows: [{ ok: false }] } as unknown as QueryResultLike;
 			}
 			return { rows: [] } as unknown as QueryResultLike;
-		};
+		}) as unknown as QueryFn;
 
 		const spawnFn: SpawnFn = async () => {
 			spawnCalled = true;
@@ -247,8 +247,8 @@ describe("OfferProvider", () => {
 			connectListener: async () => client,
 			spawnFn,
 			logger,
-			setIntervalFn: intervals.setIntervalFn,
-			clearIntervalFn: intervals.clearIntervalFn,
+			setIntervalFn: intervals.setIntervalFn as unknown as typeof setInterval,
+			clearIntervalFn: intervals.clearIntervalFn as unknown as typeof clearInterval,
 		});
 
 		await provider.run();
@@ -280,7 +280,7 @@ describe("OfferProvider", () => {
 		// First poll returns nothing; the NOTIFY triggers a second claim call
 		const claimsLeft = [null, claimRow, null];
 
-		const queryFn: QueryFn = async (text: string, params?: unknown[]) => {
+		const queryFn = (async (text: string, params?: unknown[]) => {
 			sqlCalls.push({ text, params });
 			if (text.includes("fn_claim_work_offer")) {
 				const r = claimsLeft.shift();
@@ -290,7 +290,7 @@ describe("OfferProvider", () => {
 				return { rows: [{ ok: true }] } as unknown as QueryResultLike;
 			}
 			return { rows: [] } as unknown as QueryResultLike;
-		};
+		}) as unknown as QueryFn;
 
 		let spawnCount = 0;
 		const spawnFn: SpawnFn = async () => {
@@ -308,8 +308,8 @@ describe("OfferProvider", () => {
 			connectListener: async () => client,
 			spawnFn,
 			logger,
-			setIntervalFn: intervals.setIntervalFn,
-			clearIntervalFn: intervals.clearIntervalFn,
+			setIntervalFn: intervals.setIntervalFn as unknown as typeof setInterval,
+			clearIntervalFn: intervals.clearIntervalFn as unknown as typeof clearInterval,
 		});
 
 		await provider.run();
@@ -343,7 +343,7 @@ describe("OfferProvider", () => {
 		};
 		const claimsLeft = [claimRow, null];
 
-		const queryFn: QueryFn = async (text: string, params?: unknown[]) => {
+		const queryFn = (async (text: string, params?: unknown[]) => {
 			sqlCalls.push({ text, params });
 			if (text.includes("fn_claim_work_offer")) {
 				const r = claimsLeft.shift();
@@ -356,7 +356,7 @@ describe("OfferProvider", () => {
 				return { rows: [{ ok: true }] } as unknown as QueryResultLike;
 			}
 			return { rows: [] } as unknown as QueryResultLike;
-		};
+		}) as unknown as QueryFn;
 
 		const intervals = makeIntervals();
 		let resolveSpawn!: () => void;
@@ -375,8 +375,8 @@ describe("OfferProvider", () => {
 			connectListener: async () => client,
 			spawnFn,
 			logger,
-			setIntervalFn: intervals.setIntervalFn,
-			clearIntervalFn: intervals.clearIntervalFn,
+			setIntervalFn: intervals.setIntervalFn as unknown as typeof setInterval,
+			clearIntervalFn: intervals.clearIntervalFn as unknown as typeof clearInterval,
 			renewIntervalMs: 100,
 		});
 
