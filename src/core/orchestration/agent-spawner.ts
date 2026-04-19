@@ -412,14 +412,18 @@ async function loadEnvAgent(
  */
 export async function detectProvider(worktreeName: string): Promise<AgentProvider> {
 	const { rows } = await query<{ agent_provider: string }>(
-		`SELECT agent_provider
-       FROM roadmap.model_routes
-       WHERE is_enabled = true
-       ORDER BY priority ASC
+		`SELECT mr.agent_provider
+       FROM roadmap.model_routes mr
+       WHERE mr.is_enabled = true
+         AND roadmap.fn_check_spawn_policy($1, mr.route_provider)
+       ORDER BY mr.priority ASC
        LIMIT 1`,
+		[AGENTHIVE_HOST],
 	);
 	if (rows.length === 0) {
-		throw new Error(`No enabled model routes in DB — cannot determine provider for "${worktreeName}"`);
+		throw new Error(
+			`No enabled model routes in DB for host "${AGENTHIVE_HOST}" that pass spawn policy — cannot determine provider for "${worktreeName}"`,
+		);
 	}
 	return rows[0].agent_provider;
 }
