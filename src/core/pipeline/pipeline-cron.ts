@@ -399,6 +399,38 @@ function looksLikeWorktreeName(
 }
 
 
+// P297: Map dispatch roles to required capabilities for offer matching.
+// Returns {"all": ["cap1", "cap2"]} — an agency needs ALL listed caps to claim.
+// Empty array = any agency can claim (no capability requirement).
+function roleToCapabilities(role: string, allRoles: string[]): Record<string, string[]> {
+	const ROLE_CAP_MAP: Record<string, string[]> = {
+		"developer": ["code"],
+		"senior-developer": ["code"],
+		"architect": ["design"],
+		"reviewer": ["review"],
+		"gate-reviewer": ["review"],
+		"tester": ["testing"],
+		"devops": ["devops"],
+		"pm": ["management"],
+		"skeptic": ["review"],
+		"researcher": ["research"],
+		"documenter": ["docs"],
+		"triage-agent": ["triage"],
+		"fix-agent": ["code"],
+		"merge-agent": ["code"],
+		"enhancer": ["code"],
+	};
+
+	// Collect capabilities from all roles
+	const caps = new Set<string>();
+	for (const r of allRoles) {
+		const mapped = ROLE_CAP_MAP[r.toLowerCase()];
+		if (mapped) mapped.forEach((c) => caps.add(c));
+	}
+
+	return caps.size > 0 ? { all: [...caps] } : {};
+}
+
 
 function buildDefaultTask(transition: TransitionQueueRow): string {
 	const lines = [
@@ -1089,13 +1121,16 @@ export class PipelineCron {
 		}
 
 		try {
+			// P297: Derive required_capabilities from dispatch role
+			const requiredCaps = roleToCapabilities(role, plan?.roles ?? [role]);
+
 			const { rows } = await this.queryFn<{ id: number }>(
 				`INSERT INTO roadmap_workforce.squad_dispatch
 				   (proposal_id, squad_name, dispatch_role, dispatch_status,
 				    offer_status, agent_identity, required_capabilities, metadata)
-				 VALUES ($1, $2, $3, 'open', 'open', NULL, '{}'::jsonb, $4::jsonb)
+				 VALUES ($1, $2, $3, 'open', 'open', NULL, $4::jsonb, $5::jsonb)
 				 RETURNING id`,
-				[proposalIdNum, squadName, role, JSON.stringify(offerMetadata)],
+				[proposalIdNum, squadName, role, JSON.stringify(requiredCaps), JSON.stringify(offerMetadata)],
 			);
 			const dispatchId = rows[0]?.id;
 			if (!dispatchId) {

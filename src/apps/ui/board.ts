@@ -831,6 +831,7 @@ export async function renderBoardTui(
 			targetIndex: number;
 		};
 		let moveOp: MoveOperation | null = null;
+		let lastEscapeTime = 0;
 		const undoStack: Array<() => Promise<void>> = [];
 		const pushUndo = (undo: () => Promise<void>): void => {
 			undoStack.push(undo);
@@ -2305,9 +2306,18 @@ export async function renderBoardTui(
 			}
 
 			if (!popupOpen) {
-				clearFooterTimer();
-				screen.destroy();
-				resolve();
+				// Require double-press within 2s to exit
+				const now = Date.now();
+				if (lastEscapeTime && now - lastEscapeTime < 2000) {
+					clearFooterTimer();
+					screen.destroy();
+					resolve();
+				} else {
+					lastEscapeTime = now;
+					showTransientFooter(
+						" {yellow-fg}Press ESC again within 2s to exit{/}",
+					);
+				}
 			}
 		});
 

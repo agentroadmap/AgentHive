@@ -58,6 +58,7 @@ const agentIdentity =
 const offerProvider = useOfferDispatch
 	? new OfferProvider({
 			agentIdentity,
+			capabilities: (process.env.AGENTHIVE_CAPABILITIES ?? "code,review").split(",").map(s => s.trim()).filter(Boolean),
 			spawnFn: spawnAdapter,
 			connectListener: async () => getPool().connect(),
 			leaseTtlSeconds: Number(process.env.AGENTHIVE_LEASE_TTL_SECONDS ?? "30"),

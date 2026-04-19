@@ -135,6 +135,9 @@ export class OfferProvider {
 		if (this.started) throw new Error("OfferProvider already running");
 		this.started = true;
 
+		// P297: Self-register agency in agent_registry + agent_capability before claiming
+		await this.registerAgency();
+
 		const client = await this.connectListener();
 		this.listenerClient = client;
 
@@ -288,6 +291,49 @@ export class OfferProvider {
 		} catch (err) {
 			this.logger.error(`[OfferProvider] activate ${dispatchId} error:`, err);
 			return false;
+		}
+	}
+
+	// P297: Register this agency in agent_registry + agent_capability
+	private async registerAgency(): Promise<void> {
+		try {
+			// Parse capabilities from the JSON string
+			let caps: string[] = [];
+			try {
+				const parsed = JSON.parse(this.capabilitiesJson);
+				caps = parsed.all ?? [];
+			} catch { /* empty capabilities */ }
+
+			// Upsert agency in agent_registry
+			await this.queryFn(
+				`INSERT INTO roadmap_workforce.agent_registry
+				 (agent_identity, agent_type, status, skills)
+				 VALUES ($1, 'agency', 'active', $2::jsonb)
+				 ON CONFLICT (agent_identity) DO UPDATE SET
+				   status = 'active',
+				   skills = EXCLUDED.skills,
+				   updated_at = now()`,
+				[this.agentIdentity, this.capabilitiesJson],
+			);
+
+			// Insert capabilities into agent_capability (one row per cap)
+			if (caps.length > 0) {
+				await this.queryFn(
+					`INSERT INTO roadmap_workforce.agent_capability (agent_id, capability)
+					 SELECT ar.id, cap.val
+					 FROM roadmap_workforce.agent_registry ar
+					 CROSS JOIN unnest($2::text[]) AS cap(val)
+					 WHERE ar.agent_identity = $1
+					 ON CONFLICT DO NOTHING`,
+					[this.agentIdentity, caps],
+				);
+			}
+
+			this.logger.log(
+				`[OfferProvider] Agency registered: ${this.agentIdentity} (caps: ${caps.join(", ") || "none"})`,
+			);
+		} catch (err) {
+			this.logger.error(`[OfferProvider] registerAgency ${this.agentIdentity} error:`, err);
 		}
 	}
 
