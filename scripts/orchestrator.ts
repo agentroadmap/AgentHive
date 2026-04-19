@@ -21,6 +21,7 @@ import { getPool, query } from "../src/infra/postgres/pool.ts";
 import { mcpText } from "./mcp-result.ts";
 
 const MCP_URL = "http://127.0.0.1:6421/sse";
+const AGENTHIVE_HOST = process.env.AGENTHIVE_HOST ?? "default";
 const WORKTREE_ROOT =
 	process.env.AGENTHIVE_WORKTREE_ROOT ?? "/data/code/worktree";
 const DEFAULT_EXECUTOR_WORKTREE =
@@ -378,7 +379,30 @@ async function selectExecutorWorktree(
 			deduped.set(candidate.worktree, candidate);
 		}
 	}
-	const ranked = [...deduped.values()].sort(
+
+	// Filter out worktrees whose provider is forbidden by host policy
+	const filtered: ExecutorCandidate[] = [];
+	for (const candidate of deduped.values()) {
+		try {
+			const provider = await detectProvider(candidate.worktree);
+			const { rows } = await query<{ allowed: boolean }>(
+				`SELECT roadmap.fn_check_spawn_policy($1, $2) AS allowed`,
+				[AGENTHIVE_HOST, provider],
+			);
+			if (rows[0]?.allowed) {
+				filtered.push(candidate);
+			} else {
+				logger.log(
+					`Skipping executor ${candidate.worktree} — provider "${provider}" forbidden by host policy (${AGENTHIVE_HOST})`,
+				);
+			}
+		} catch {
+			// Provider detection failed — include candidate, let spawn handle the error
+			filtered.push(candidate);
+		}
+	}
+
+	const ranked = filtered.sort(
 		(a, b) => b.score - a.score || a.worktree.localeCompare(b.worktree),
 	);
 	const selected = ranked[0];

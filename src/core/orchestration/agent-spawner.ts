@@ -412,7 +412,7 @@ async function loadEnvAgent(
  */
 export async function detectProvider(worktreeName: string): Promise<AgentProvider> {
 	const { rows } = await query<{ agent_provider: string }>(
-		`SELECT DISTINCT agent_provider
+		`SELECT agent_provider
        FROM roadmap.model_routes
        WHERE is_enabled = true
        ORDER BY priority ASC
