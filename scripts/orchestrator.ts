@@ -385,15 +385,24 @@ async function selectExecutorWorktree(
 	for (const candidate of deduped.values()) {
 		try {
 			const provider = await detectProvider(candidate.worktree);
+			// Look up route_provider (what fn_check_spawn_policy validates)
+			const { rows: routeRows } = await query<{ route_provider: string }>(
+				`SELECT mr.route_provider
+           FROM roadmap.model_routes mr
+           WHERE mr.agent_provider = $1 AND mr.is_enabled = true
+           ORDER BY mr.priority ASC LIMIT 1`,
+				[provider],
+			);
+			const routeProvider = routeRows[0]?.route_provider ?? provider;
 			const { rows } = await query<{ allowed: boolean }>(
 				`SELECT roadmap.fn_check_spawn_policy($1, $2) AS allowed`,
-				[AGENTHIVE_HOST, provider],
+				[AGENTHIVE_HOST, routeProvider],
 			);
 			if (rows[0]?.allowed) {
 				filtered.push(candidate);
 			} else {
 				logger.log(
-					`Skipping executor ${candidate.worktree} — provider "${provider}" forbidden by host policy (${AGENTHIVE_HOST})`,
+					`Skipping executor ${candidate.worktree} — provider "${routeProvider}" forbidden by host policy (${AGENTHIVE_HOST})`,
 				);
 			}
 		} catch {

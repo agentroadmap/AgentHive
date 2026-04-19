@@ -415,14 +415,18 @@ export async function detectProvider(worktreeName: string): Promise<AgentProvide
 		`SELECT mr.agent_provider
        FROM roadmap.model_routes mr
        WHERE mr.is_enabled = true
-         AND roadmap.fn_check_spawn_policy($1, mr.route_provider)
+         AND mr.route_provider = ANY(
+           SELECT unnest(allowed_providers)
+             FROM roadmap.host_model_policy
+             WHERE host_name = $1
+         )
        ORDER BY mr.priority ASC
        LIMIT 1`,
 		[AGENTHIVE_HOST],
 	);
 	if (rows.length === 0) {
 		throw new Error(
-			`No enabled model routes in DB for host "${AGENTHIVE_HOST}" that pass spawn policy — cannot determine provider for "${worktreeName}"`,
+			`No enabled model routes for host "${AGENTHIVE_HOST}" with allowed providers — cannot determine provider for "${worktreeName}"`,
 		);
 	}
 	return rows[0].agent_provider;
