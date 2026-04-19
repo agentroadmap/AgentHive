@@ -2318,7 +2318,11 @@ export async function renderBoardTui(
 		let feedPinnedToLatest = true;
 		let feedThreadMode = false;
 		let _allFeedEvents: StreamEvent[] = []; // kept for thread mode rebuild
-		const getFeedPageSize = () => ((eventPanel as any).iheight as number) || 20;
+		const getFeedPageSize = () => {
+			const pos = (eventPanel as any).lpos || (eventPanel as any)._getCoords?.();
+			if (pos) return Math.max((pos.yl - pos.yi - ((eventPanel as any).iheight || 2)), 5);
+			return 20;
+		};
 		const getFeedMaxWindowStart = () =>
 			Math.max(feedLines.length - getFeedPageSize(), 0);
 		const renderFeedPanel = () => {
