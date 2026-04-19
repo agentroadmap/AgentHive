@@ -249,9 +249,19 @@ function formatNotification(channel: string, payload: string): string {
       return `🚪 **GATE READY** — Proposal ${data.proposal_id || data.id} is ready for gate evaluation`;
     }
 
+    if (channel === "proposal_state_changed") {
+      const from = data.from_state ?? "?";
+      const to = data.to_state ?? "?";
+      const by = data.transitioned_by ? ` by ${data.transitioned_by}` : "";
+      const reason = data.reason ? ` (${data.reason})` : "";
+      return `🔄 **STATE** — ${data.display_id ?? data.proposal_id}: ${from} → ${to}${by}${reason}`;
+    }
+
     if (channel === "proposal_maturity_changed") {
-      const maturity = data.maturity_state || data.maturity;
-      return `📊 **MATURITY CHANGE** — ${data.display_id || data.proposal_id} → ${maturity}`;
+      const from = data.from_maturity ?? "?";
+      const to = data.to_maturity ?? data.maturity_state ?? data.maturity ?? "?";
+      const by = data.transitioned_by ? ` by ${data.transitioned_by}` : "";
+      return `📊 **MATURITY** — ${data.display_id ?? data.proposal_id}: ${from} → ${to}${by}`;
     }
 
     if (channel === "transition_queued") {
@@ -285,6 +295,7 @@ client.once("ready", async () => {
   const pgClient = await pool.connect();
 
   // Listen for state change notifications
+  await pgClient.query("LISTEN proposal_state_changed");
   await pgClient.query("LISTEN proposal_gate_ready");
   await pgClient.query("LISTEN proposal_maturity_changed");
   await pgClient.query("LISTEN transition_queued");
@@ -388,7 +399,6 @@ client.on("messageCreate", async (msg) => {
 // Graceful shutdown
 const shutdown = async (signal: string) => {
   logger.log(`Received ${signal}, shutting down...`);
-  await sendToDiscord("🔴 **AgentHive Discord Bridge** — Shutting down.");
   client.destroy();
   process.exit(0);
 };
