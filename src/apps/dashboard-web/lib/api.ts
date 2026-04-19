@@ -602,6 +602,16 @@ export class ApiClient {
 		return this.fetchJson<Agent[]>(`${API_BASE}/agents`);
 	}
 
+	async fetchRoutes(): Promise<any[]> {
+		const result = await this.fetchJson<{ routes: any[] }>(`${API_BASE}/routes`);
+		return result.routes;
+	}
+
+	async fetchDispatches(): Promise<any[]> {
+		const result = await this.fetchJson<{ dispatches: any[] }>(`${API_BASE}/dispatches`);
+		return result.dispatches;
+	}
+
 	async fetchPulse(limit?: number): Promise<PulseEvent[]> {
 		const params = limit ? `?limit=${limit}` : "";
 		return this.fetchJson<PulseEvent[]>(`${API_BASE}/pulse${params}`);

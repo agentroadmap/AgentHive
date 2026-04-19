@@ -89,5 +89,19 @@ export function createBoardApi(dbQuery: DbQuery): Router {
     res.json({ dispatches: dispatches || [] });
   });
 
+  // GET /api/board/routes — model routing table
+  router.get('/routes', (_req: any, res: any) => {
+    const routes = dbQuery(
+      `SELECT id, model_name, route_provider, agent_provider, agent_cli, fallback_cli,
+              is_enabled, priority, api_spec, base_url,
+              cost_per_million_input, cost_per_million_output,
+              cost_per_million_cache_write, cost_per_million_cache_hit,
+              plan_type, notes, created_at
+       FROM roadmap.model_routes
+       ORDER BY is_enabled DESC, priority DESC, model_name`,
+    );
+    res.json({ routes: routes || [] });
+  });
+
   return router;
 }
