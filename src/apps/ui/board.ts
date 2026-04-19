@@ -2317,8 +2317,11 @@ export async function renderBoardTui(
 					: "{gray-fg}No recent feed items{/}",
 			);
 			if (feedPinnedToLatest) {
-				// Scroll to bottom — blessed uses setScrollPerc or scrollTo
-				eventPanel.setScrollPerc(100);
+				// Scroll to bottom — use getScrollHeight and scrollTo
+				const scrollHeight = (eventPanel as any).getScrollHeight?.() ?? 0;
+				if (scrollHeight > 0) {
+					eventPanel.scrollTo(scrollHeight);
+				}
 			}
 		};
 		// Board-style icons matching status-icon.ts
