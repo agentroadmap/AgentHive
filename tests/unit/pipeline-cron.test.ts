@@ -767,4 +767,81 @@ describe("PipelineCron", () => {
 		await cron.stop();
 		intervals.dispose();
 	});
+
+	it("emits an offer into squad_dispatch and notifies work_offers when useOfferDispatch is set", async () => {
+		const listener = createListener();
+		const sqlCalls: SqlCall[] = [];
+		const claimResponses = [
+			[createTransition({ id: 77, proposal_id: 42, to_stage: "Develop" })],
+			[],
+		];
+
+		const queryFn = (async (text: string, params?: unknown[]) => {
+			sqlCalls.push({ text, params });
+			if (text.includes("FROM roadmap.transition_queue tq")) {
+				return {
+					rows: claimResponses.shift() ?? [],
+				} as unknown as QueryResultLike;
+			}
+			if (text.includes("INSERT INTO roadmap_workforce.squad_dispatch")) {
+				return { rows: [{ id: 9001 }] } as unknown as QueryResultLike;
+			}
+			return { rows: [], rowCount: 1 } as unknown as QueryResultLike;
+		}) as QueryFn;
+
+		const connectListener: ConnectListener = async () => listener.client;
+		const intervals = createIntervalFns();
+		const toolCalls: Array<{ name: string; arguments: Record<string, unknown> }> = [];
+
+		const cron = new PipelineCron({
+			queryFn,
+			connectListener,
+			mcpClientFactory: createMcpClientFactory({}, toolCalls),
+			logger: createLogger(),
+			setIntervalFn: intervals.setIntervalFn,
+			clearIntervalFn: intervals.clearIntervalFn,
+			useOfferDispatch: true,
+		});
+
+		await cron.run();
+		await new Promise((resolve) => setImmediate(resolve));
+
+		const insertCall = sqlCalls.find((c) =>
+			c.text.includes("INSERT INTO roadmap_workforce.squad_dispatch"),
+		);
+		assert.ok(insertCall, "expected an INSERT into squad_dispatch");
+		assert.equal(insertCall!.params?.[0], 42, "proposal_id should be numeric 42");
+		assert.match(
+			String(insertCall!.params?.[1]),
+			/^42-develop$/,
+			"squad_name should be displayId-phase",
+		);
+
+		const offerMetadata = JSON.parse(String(insertCall!.params?.[3]));
+		assert.equal(offerMetadata.transition_id, 77);
+		assert.equal(offerMetadata.phase, "develop");
+		assert.equal(offerMetadata.proposal_display_id, "42");
+		assert.ok(typeof offerMetadata.task === "string" && offerMetadata.task.length > 0);
+
+		const notifyCall = sqlCalls.find((c) =>
+			c.text.includes("pg_notify('work_offers'"),
+		);
+		assert.ok(notifyCall, "expected pg_notify on work_offers");
+		const notifyPayload = JSON.parse(String(notifyCall!.params?.[0]));
+		assert.equal(notifyPayload.event, "emitted");
+		assert.equal(notifyPayload.dispatch_id, 9001);
+
+		assert.ok(
+			sqlCalls.some((c) => c.text.includes("SET status = 'processing'")),
+			"transition should be marked processing after offer emission",
+		);
+		assert.equal(
+			toolCalls.length,
+			0,
+			"offer dispatch must not invoke MCP cubic tools",
+		);
+
+		await cron.stop();
+		intervals.dispose();
+	});
 });

@@ -93,6 +93,7 @@ export interface PipelineCronDeps {
 	pollIntervalMs?: number;
 	batchSize?: number;
 	offerReapIntervalMs?: number;
+	useOfferDispatch?: boolean;
 	setIntervalFn?: typeof setInterval;
 	clearIntervalFn?: typeof clearInterval;
 }
@@ -669,6 +670,7 @@ export class PipelineCron {
 	private readonly pollIntervalMs: number;
 	private readonly batchSize: number;
 	private readonly offerReapIntervalMs: number;
+	private readonly useOfferDispatch: boolean;
 	private readonly setIntervalFn: typeof setInterval;
 	private readonly clearIntervalFn: typeof clearInterval;
 	private readonly spawnAgentFn?: (request: SpawnAgentRequest) => Promise<SpawnAgentResult>;
@@ -712,6 +714,9 @@ export class PipelineCron {
 		this.batchSize = deps.batchSize ?? DEFAULT_BATCH_SIZE;
 		this.offerReapIntervalMs =
 			deps.offerReapIntervalMs ?? DEFAULT_OFFER_REAP_INTERVAL_MS;
+		this.useOfferDispatch =
+			deps.useOfferDispatch ??
+			process.env.AGENTHIVE_USE_OFFER_DISPATCH === "1";
 		this.setIntervalFn = deps.setIntervalFn ?? setInterval;
 		this.clearIntervalFn = deps.clearIntervalFn ?? clearInterval;
 		this.spawnAgentFn = deps.spawnAgentFn;
@@ -959,6 +964,11 @@ export class PipelineCron {
 				)
 			: null;
 
+		if (this.useOfferDispatch) {
+			await this.processTransitionWithOffer(transition, plan, proposalContext);
+			return;
+		}
+
 		if (this.spawnAgentFn) {
 			await this.processTransitionWithSpawnAgent(transition, plan);
 			return;
@@ -1025,6 +1035,95 @@ export class PipelineCron {
 			await this.handleTransitionFailure(transition, message);
 		} finally {
 			await client.close();
+		}
+	}
+
+	private async processTransitionWithOffer(
+		transition: TransitionQueueRow,
+		plan: DispatchPlan | null,
+		proposalContext: ProposalDispatchContext | null,
+	): Promise<void> {
+		const spawnMetadata = isRecord(transition.metadata?.spawn)
+			? transition.metadata.spawn
+			: null;
+		const proposalDisplayId =
+			proposalContext?.displayId ?? String(transition.proposal_id);
+		const phase =
+			plan?.phase ?? transition.to_stage?.toLowerCase() ?? "build";
+		const role = plan?.roles[0] ?? "developer";
+		const squadName = `${proposalDisplayId}-${phase}`;
+		const task =
+			plan?.task ??
+			readString(spawnMetadata, "task") ??
+			readString(transition.metadata, "task") ??
+			buildDefaultTask(transition);
+		const worktreeHint =
+			plan?.agentIdentity ??
+			readString(spawnMetadata, "worktree") ??
+			readString(transition.metadata, "worktree") ??
+			null;
+		const offerMetadata: JsonRecord = {
+			task,
+			phase,
+			stage: transition.to_stage,
+			roles: plan?.roles ?? [role],
+			transition_id: transition.id,
+			proposal_display_id: proposalDisplayId,
+		};
+		if (worktreeHint) offerMetadata.worktree_hint = worktreeHint;
+		if (plan?.modelHint) offerMetadata.model = plan.modelHint;
+		if (plan?.timeoutMs) offerMetadata.timeout_ms = plan.timeoutMs;
+
+		const proposalIdNum =
+			typeof transition.proposal_id === "number"
+				? transition.proposal_id
+				: Number.isFinite(Number(transition.proposal_id))
+					? Number(transition.proposal_id)
+					: null;
+		if (proposalIdNum === null) {
+			await this.handleTransitionFailure(
+				transition,
+				`offer-dispatch: cannot resolve numeric proposal_id from ${String(transition.proposal_id)}`,
+			);
+			return;
+		}
+
+		try {
+			const { rows } = await this.queryFn<{ id: number }>(
+				`INSERT INTO roadmap_workforce.squad_dispatch
+				   (proposal_id, squad_name, dispatch_role, dispatch_status,
+				    offer_status, agent_identity, required_capabilities, metadata)
+				 VALUES ($1, $2, $3, 'open', 'open', NULL, '{}'::jsonb, $4::jsonb)
+				 RETURNING id`,
+				[proposalIdNum, squadName, role, JSON.stringify(offerMetadata)],
+			);
+			const dispatchId = rows[0]?.id;
+			if (!dispatchId) {
+				throw new Error("INSERT returned no dispatch_id");
+			}
+
+			await this.queryFn(
+				`SELECT pg_notify('work_offers', $1)`,
+				[
+					JSON.stringify({
+						event: "emitted",
+						dispatch_id: dispatchId,
+						proposal_id: proposalIdNum,
+						role,
+					}),
+				],
+			);
+
+			await this.markTransitionDispatched(transition.id);
+			this.logger.log(
+				`[PipelineCron] Emitted offer ${dispatchId} for ${proposalDisplayId} (${role}/${phase}); transition ${transition.id} marked processing`,
+			);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			await this.handleTransitionFailure(
+				transition,
+				`offer-dispatch failed: ${message}`,
+			);
 		}
 	}
 
