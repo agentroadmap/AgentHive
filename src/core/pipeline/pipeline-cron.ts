@@ -23,6 +23,7 @@ const TRANSITION_QUEUED_CHANNEL = "transition_queued";
 const GATE_READY_CHANNEL = "proposal_gate_ready";
 const DEFAULT_POLL_INTERVAL_MS = 30_000;
 const DEFAULT_BATCH_SIZE = 10;
+const DEFAULT_OFFER_REAP_INTERVAL_MS = 60_000;
 const WORKTREE_PREFIXES = ["claude", "gemini", "copilot", "openclaw"] as const;
 
 type TransitionQueueId = number | string;
@@ -91,6 +92,7 @@ export interface PipelineCronDeps {
 	defaultWorktree?: string;
 	pollIntervalMs?: number;
 	batchSize?: number;
+	offerReapIntervalMs?: number;
 	setIntervalFn?: typeof setInterval;
 	clearIntervalFn?: typeof clearInterval;
 }
@@ -666,6 +668,7 @@ export class PipelineCron {
 	private readonly defaultWorktree: string;
 	private readonly pollIntervalMs: number;
 	private readonly batchSize: number;
+	private readonly offerReapIntervalMs: number;
 	private readonly setIntervalFn: typeof setInterval;
 	private readonly clearIntervalFn: typeof clearInterval;
 	private readonly spawnAgentFn?: (request: SpawnAgentRequest) => Promise<SpawnAgentResult>;
@@ -673,6 +676,8 @@ export class PipelineCron {
 
 	private listenerClient: ListenerClient | null = null;
 	private pollTimer: ReturnType<typeof setInterval> | null = null;
+	private offerReapTimer: ReturnType<typeof setInterval> | null = null;
+	private offerReapInFlight = false;
 	private drainPromise: Promise<void> | null = null;
 	private rerunRequested = false;
 	private started = false;
@@ -705,6 +710,8 @@ export class PipelineCron {
 		this.defaultWorktree = deps.defaultWorktree ?? basename(process.cwd());
 		this.pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
 		this.batchSize = deps.batchSize ?? DEFAULT_BATCH_SIZE;
+		this.offerReapIntervalMs =
+			deps.offerReapIntervalMs ?? DEFAULT_OFFER_REAP_INTERVAL_MS;
 		this.setIntervalFn = deps.setIntervalFn ?? setInterval;
 		this.clearIntervalFn = deps.clearIntervalFn ?? clearInterval;
 		this.spawnAgentFn = deps.spawnAgentFn;
@@ -741,11 +748,16 @@ export class PipelineCron {
 			void this.scheduleDrain("poll");
 		}, this.pollIntervalMs);
 
+		this.offerReapTimer = this.setIntervalFn(() => {
+			void this.runOfferReaper();
+		}, this.offerReapIntervalMs);
+
 		this.logger.log(
-			`[PipelineCron] Listening on ${MATURITY_CHANGED_CHANNEL}, ${GATE_READY_CHANNEL}, and ${TRANSITION_QUEUED_CHANNEL}; legacy queue polling every ${this.pollIntervalMs}ms`,
+			`[PipelineCron] Listening on ${MATURITY_CHANGED_CHANNEL}, ${GATE_READY_CHANNEL}, and ${TRANSITION_QUEUED_CHANNEL}; legacy queue polling every ${this.pollIntervalMs}ms; offer reaper every ${this.offerReapIntervalMs}ms`,
 		);
 
 		await this.scheduleDrain("startup");
+		void this.runOfferReaper();
 	}
 
 	async stop(): Promise<void> {
@@ -754,6 +766,11 @@ export class PipelineCron {
 		if (this.pollTimer) {
 			this.clearIntervalFn(this.pollTimer);
 			this.pollTimer = null;
+		}
+
+		if (this.offerReapTimer) {
+			this.clearIntervalFn(this.offerReapTimer);
+			this.offerReapTimer = null;
 		}
 
 		if (this.listenerClient) {
@@ -781,6 +798,30 @@ export class PipelineCron {
 
 	async waitForIdle(): Promise<void> {
 		await (this.drainPromise ?? Promise.resolve());
+	}
+
+	private async runOfferReaper(): Promise<void> {
+		if (this.offerReapInFlight) return;
+		this.offerReapInFlight = true;
+		try {
+			const { rows } = await this.queryFn<{
+				reissued_count: number;
+				expired_count: number;
+			}>("SELECT * FROM roadmap_workforce.fn_reap_expired_offers()");
+			const row = rows[0];
+			const reissued = Number(row?.reissued_count ?? 0);
+			const expired = Number(row?.expired_count ?? 0);
+			if (reissued > 0 || expired > 0) {
+				this.logger.log(
+					`[PipelineCron] offer reaper: ${reissued} reissued, ${expired} expired`,
+				);
+			}
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			this.logger.warn(`[PipelineCron] offer reaper failed: ${message}`);
+		} finally {
+			this.offerReapInFlight = false;
+		}
 	}
 
 	private async startListener(): Promise<void> {

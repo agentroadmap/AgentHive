@@ -180,12 +180,12 @@ describe("PipelineCron", () => {
 		const sqlCalls: SqlCall[] = [];
 		const claimResponses = [[createTransition()], []];
 		const toolCalls: Array<{ name: string; arguments: Record<string, unknown> }> = [];
-		let pollDelay = 0;
+		const scheduledDelays: number[] = [];
 
 		const queryFn = createQueryFn(claimResponses, sqlCalls);
 		const connectListener: ConnectListener = async () => listener.client;
 		const intervals = createIntervalFns((_, delay) => {
-			pollDelay = delay;
+			scheduledDelays.push(delay);
 		});
 
 		const cron = new PipelineCron({
@@ -203,7 +203,7 @@ describe("PipelineCron", () => {
 			"LISTEN proposal_maturity_changed",
 			"LISTEN transition_queued",
 		]);
-		assert.equal(pollDelay, 30_000);
+		assert.deepEqual(scheduledDelays, [30_000, 60_000]);
 
 		// Dispatched via cubic_create + cubic_focus — NOT spawnAgent
 		assert.ok(toolCalls.some((c) => c.name === "cubic_create"), "cubic_create should be called");
@@ -587,6 +587,54 @@ describe("PipelineCron", () => {
 		);
 		assert.equal(spawnRequests[0].worktree, "architect-alpha");
 		assert.equal(spawnRequests[0].stage, "review");
+
+		await cron.stop();
+		intervals.dispose();
+	});
+
+	it("invokes fn_reap_expired_offers at startup and logs non-zero results", async () => {
+		const listener = createListener();
+		const sqlCalls: SqlCall[] = [];
+		const logs: string[] = [];
+
+		const queryFn = (async (text: string, params?: unknown[]) => {
+			sqlCalls.push({ text, params });
+			if (text.includes("fn_reap_expired_offers")) {
+				return {
+					rows: [{ reissued_count: 2, expired_count: 1 }],
+				} as unknown as QueryResultLike;
+			}
+			return { rows: [], rowCount: 0 } as unknown as QueryResultLike;
+		}) as QueryFn;
+
+		const connectListener: ConnectListener = async () => listener.client;
+		const intervals = createIntervalFns();
+
+		const cron = new PipelineCron({
+			queryFn,
+			connectListener,
+			mcpClientFactory: createMcpClientFactory(),
+			logger: {
+				log: (msg: string) => logs.push(msg),
+				warn: () => {},
+				error: () => {},
+			},
+			setIntervalFn: intervals.setIntervalFn,
+			clearIntervalFn: intervals.clearIntervalFn,
+		});
+
+		await cron.run();
+		// Allow the kickoff reaper microtask to settle.
+		await new Promise((resolve) => setImmediate(resolve));
+
+		const reapCall = sqlCalls.find((c) =>
+			c.text.includes("fn_reap_expired_offers"),
+		);
+		assert.ok(reapCall, "fn_reap_expired_offers should be invoked at startup");
+		assert.ok(
+			logs.some((l) => l.includes("offer reaper") && l.includes("2 reissued")),
+			"non-zero reap result should be logged",
+		);
 
 		await cron.stop();
 		intervals.dispose();
