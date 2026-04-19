@@ -1550,6 +1550,7 @@ export async function renderBoardTui(
 			feedOnlyMode = !feedOnlyMode;
 			if (feedOnlyMode) {
 				feedPinnedToLatest = true;
+				feedWindowStart = getFeedMaxWindowStart();
 				renderFeedPanel();
 			}
 			showTransientFooter(
@@ -1574,6 +1575,7 @@ export async function renderBoardTui(
 				feedLines = _allFeedEvents.map(formatEventLine);
 			}
 			feedPinnedToLatest = true;
+			feedWindowStart = getFeedMaxWindowStart();
 			renderFeedPanel();
 			showTransientFooter(
 				feedThreadMode
@@ -1966,7 +1968,11 @@ export async function renderBoardTui(
 
 			if (feedOnlyMode) {
 				feedPinnedToLatest = false;
-				eventPanel.scroll((eventPanel as any).iheight || 20);
+				const pageSize = getFeedPageSize();
+				feedWindowStart = Math.min(
+					feedWindowStart + pageSize,
+					Math.max(feedLines.length - pageSize, 0),
+				);
 				renderFeedPanel();
 				screen.render();
 				return;
@@ -1992,7 +1998,8 @@ export async function renderBoardTui(
 
 			if (feedOnlyMode) {
 				feedPinnedToLatest = false;
-				eventPanel.scroll(-((eventPanel as any).iheight || 20));
+				const pageSize = getFeedPageSize();
+				feedWindowStart = Math.max(feedWindowStart - pageSize, 0);
 				renderFeedPanel();
 				screen.render();
 				return;
@@ -2307,22 +2314,27 @@ export async function renderBoardTui(
 		const seenFeedEventIds = new Set<string>();
 		let feedLines: string[] = [];
 		const FEED_HISTORY_LIMIT = 500;
+		let feedWindowStart = 0;
 		let feedPinnedToLatest = true;
 		let feedThreadMode = false;
 		let _allFeedEvents: StreamEvent[] = []; // kept for thread mode rebuild
+		const getFeedPageSize = () => ((eventPanel as any).iheight as number) || 20;
+		const getFeedMaxWindowStart = () =>
+			Math.max(feedLines.length - getFeedPageSize(), 0);
 		const renderFeedPanel = () => {
+			if (feedPinnedToLatest) {
+				feedWindowStart = getFeedMaxWindowStart();
+			}
+			const pageSize = getFeedPageSize();
+			const visibleLines = feedLines.slice(
+				feedWindowStart,
+				feedWindowStart + pageSize,
+			);
 			eventPanel.setContent(
-				feedLines.length > 0
-					? feedLines.join("\n")
+				visibleLines.length > 0
+					? visibleLines.join("\n")
 					: "{gray-fg}No recent feed items{/}",
 			);
-			if (feedPinnedToLatest) {
-				// Scroll to bottom — use getScrollHeight and scrollTo
-				const scrollHeight = (eventPanel as any).getScrollHeight?.() ?? 0;
-				if (scrollHeight > 0) {
-					eventPanel.scrollTo(scrollHeight);
-				}
-			}
 		};
 		// Board-style icons matching status-icon.ts
 		const stateIconMap: Record<string, string> = {
@@ -2457,6 +2469,11 @@ export async function renderBoardTui(
 					.reverse()
 					.map(formatEventLine);
 				feedLines = [...feedLines, ...newLines].slice(-FEED_HISTORY_LIMIT);
+			}
+			if (feedPinnedToLatest) {
+				feedWindowStart = getFeedMaxWindowStart();
+			} else {
+				feedWindowStart = Math.min(feedWindowStart, getFeedMaxWindowStart());
 			}
 			renderFeedPanel();
 			screen.render();
