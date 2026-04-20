@@ -965,6 +965,30 @@ export async function renderBoardTui(
 			);
 		};
 
+		eventPanel.mouse = true;
+		// Mouse wheel on feed panel
+		eventPanel.on("wheeldown", () => {
+			if (feedOnlyMode || feedThreadMode) return;
+			feedPinnedToLatest = false;
+			const pageSize = getFeedPageSize();
+			feedWindowStart = Math.min(
+				feedWindowStart + 3,
+				Math.max(feedLines.length - pageSize, 0),
+			);
+			renderFeedPanel();
+			screen.render();
+		});
+		eventPanel.on("wheelup", () => {
+			if (feedOnlyMode || feedThreadMode) return;
+			feedPinnedToLatest = false;
+			feedWindowStart = Math.max(feedWindowStart - 3, 0);
+			renderFeedPanel();
+			screen.render();
+		});
+
+		let dragProposalId: string | null = null;
+		let dragSourceCol = -1;
+
 		const createColumnViews = (data: ColumnData[]) => {
 			clearColumns();
 			const layouts = getColumnLayout(data.length);
@@ -979,6 +1003,7 @@ export async function renderBoardTui(
 					height: "100%",
 					border: { type: "line" },
 					style: { border: { fg: "gray" } },
+					mouse: true,
 					label: formatColumnLabel(
 						columnData.status,
 						columnData.proposals.length,
@@ -1017,6 +1042,77 @@ export async function renderBoardTui(
 					filterHeader?.setBorderColor("cyan");
 					updateFooter();
 					screen.render();
+				});
+
+				// Click column box to focus its list
+				columnBox.on("click", () => {
+					if (popupOpen || filterPopupOpen) return;
+					proposalList.focus();
+				});
+
+				// Mouse wheel on column lists
+				proposalList.on("wheeldown", () => {
+					const sel = proposalList.selected ?? 0;
+					const total = columnData.proposals.length;
+					if (sel < total - 1) {
+						proposalList.select(sel + 1);
+						updateFooter();
+						screen.render();
+					}
+				});
+				proposalList.on("wheelup", () => {
+					const sel = proposalList.selected ?? 0;
+					if (sel > 0) {
+						proposalList.select(sel - 1);
+						updateFooter();
+						screen.render();
+					}
+				});
+
+				// Double-click to edit title
+				proposalList.on("element doubleClick", async () => {
+					if (popupOpen || filterPopupOpen) return;
+					const sel = proposalList.selected ?? 0;
+					const proposal = columnData.proposals[sel];
+					if (proposal) await openQuickEdit(proposal, "title");
+				});
+
+				// Drag start: mousedown remembers proposal
+				proposalList.on("element mousedown", () => {
+					if (popupOpen || filterPopupOpen || moveOp) return;
+					const sel = proposalList.selected ?? 0;
+					const proposal = columnData.proposals[sel];
+					if (proposal) {
+						dragProposalId = proposal.id;
+						dragSourceCol = idx;
+					}
+				});
+
+				// Drag end: mouseup on this column moves proposal here
+				columnBox.on("mouseup", async () => {
+					if (!dragProposalId || dragSourceCol === idx) {
+						dragProposalId = null;
+						dragSourceCol = -1;
+						return;
+					}
+					const proposal = currentProposals.find(
+						(p) => p.id === dragProposalId,
+					);
+					const sourceCol = columns[dragSourceCol];
+					dragProposalId = null;
+					dragSourceCol = -1;
+					if (proposal && sourceCol) {
+						moveOp = {
+							proposalId: proposal.id,
+							fromStatus: proposal.status,
+							targetStatus: columnData.status,
+							proposal,
+							originalStatus: proposal.status,
+							originalIndex: sourceCol.proposals.indexOf(proposal),
+							targetIndex: 0,
+						};
+						await performProposalMove();
+					}
 				});
 			});
 		};
@@ -2474,7 +2570,7 @@ export async function renderBoardTui(
 		};
 
 		const updateEventPanel = async () => {
-			const events = await getBoardLiveFeed(30);
+			const events = await getBoardLiveFeed(200);
 			_currentEvents = events;
 			const unseenEvents = events.filter((event) => !seenFeedEventIds.has(event.id));
 			if (unseenEvents.length === 0 && feedLines.length > 0) {
