@@ -969,8 +969,8 @@ export async function renderBoardTui(
 		// Screen-level mouse handlers for kanban
 		let dragProposalId: string | null = null;
 		let dragSourceCol = -1;
-		let lastClickElement: any = null;
-		let lastClickTime = 0;
+		let lastMouseDownCol = -1;
+		let lastMouseDownTime = 0;
 		const hitTest = (data: any, el: any): boolean => {
 			const pos = el.lpos;
 			if (!pos) return false;
@@ -1041,13 +1041,61 @@ export async function renderBoardTui(
 			});
 		};
 
-		// Click on column to focus + double-click detection
-		screen.on("click", async (data: any) => {
+		// All mouse interaction via mousedown/mouseup (screen doesn't emit "click")
+		screen.on("mousedown", (data: any) => {
 			if (popupOpen || filterPopupOpen || feedOnlyMode) return;
 			const colIdx = findColumnAt(data);
 			if (colIdx < 0) return;
+			// Track for drag
+			if (!moveOp) {
+				const col = columns[colIdx];
+				const sel = col.list.selected ?? 0;
+				const proposal = col.proposals[sel];
+				if (proposal) {
+					dragProposalId = proposal.id;
+					dragSourceCol = colIdx;
+				}
+			}
+			// Track for click/double-click
+			lastMouseDownCol = colIdx;
+			lastMouseDownTime = Date.now();
+		});
 
-			// Focus column
+		screen.on("mouseup", async (data: any) => {
+			if (popupOpen || filterPopupOpen || feedOnlyMode) return;
+			const colIdx = findColumnAt(data);
+			if (colIdx < 0) {
+				dragProposalId = null;
+				dragSourceCol = -1;
+				return;
+			}
+
+			// Drag: mousedown on one column, mouseup on another
+			if (dragProposalId && dragSourceCol >= 0 && colIdx !== dragSourceCol) {
+				const proposal = currentProposals.find(p => p.id === dragProposalId);
+				const sourceCol = columns[dragSourceCol];
+				const targetCol = columns[colIdx];
+				dragProposalId = null;
+				dragSourceCol = -1;
+				if (proposal && sourceCol && targetCol) {
+					moveOp = {
+						proposalId: proposal.id,
+						fromStatus: proposal.status,
+						targetStatus: targetCol.status,
+						proposal,
+						originalStatus: proposal.status,
+						originalIndex: sourceCol.proposals.indexOf(proposal),
+						targetIndex: 0,
+					};
+					await performProposalMove();
+				}
+				return;
+			}
+
+			dragProposalId = null;
+			dragSourceCol = -1;
+
+			// Click: same column mousedown and mouseup
 			if (colIdx !== currentCol) {
 				setColumnActiveProposal(columns[currentCol], false);
 				currentCol = colIdx;
@@ -1058,17 +1106,17 @@ export async function renderBoardTui(
 				screen.render();
 			}
 
-			// Double-click detection
+			// Double-click: two clicks within 400ms on same column
 			const now = Date.now();
-			if (now - lastClickTime < 400 && lastClickElement === colIdx) {
+			if (now - lastMouseDownTime < 400 && lastMouseDownCol === colIdx) {
 				const col = columns[colIdx];
 				const sel = col.list.selected ?? 0;
 				const proposal = col.proposals[sel];
 				if (proposal) await openQuickEdit(proposal, "title");
-				lastClickTime = 0;
+				lastMouseDownTime = 0;
 			} else {
-				lastClickTime = now;
-				lastClickElement = colIdx;
+				lastMouseDownTime = now;
+				lastMouseDownCol = colIdx;
 			}
 		});
 
@@ -1096,47 +1144,6 @@ export async function renderBoardTui(
 				list.select(sel - 1);
 				updateFooter();
 				screen.render();
-			}
-		});
-
-		// Drag: mousedown on list, mouseup on different column
-		screen.on("mousedown", (data: any) => {
-			if (popupOpen || filterPopupOpen || moveOp || feedOnlyMode) return;
-			const colIdx = findColumnAt(data);
-			if (colIdx < 0) return;
-			const col = columns[colIdx];
-			const sel = col.list.selected ?? 0;
-			const proposal = col.proposals[sel];
-			if (proposal) {
-				dragProposalId = proposal.id;
-				dragSourceCol = colIdx;
-			}
-		});
-
-		screen.on("mouseup", async (data: any) => {
-			if (!dragProposalId) return;
-			const colIdx = findColumnAt(data);
-			if (colIdx < 0 || colIdx === dragSourceCol) {
-				dragProposalId = null;
-				dragSourceCol = -1;
-				return;
-			}
-			const proposal = currentProposals.find(p => p.id === dragProposalId);
-			const sourceCol = columns[dragSourceCol];
-			const targetCol = columns[colIdx];
-			dragProposalId = null;
-			dragSourceCol = -1;
-			if (proposal && sourceCol && targetCol) {
-				moveOp = {
-					proposalId: proposal.id,
-					fromStatus: proposal.status,
-					targetStatus: targetCol.status,
-					proposal,
-					originalStatus: proposal.status,
-					originalIndex: sourceCol.proposals.indexOf(proposal),
-					targetIndex: 0,
-				};
-				await performProposalMove();
 			}
 		});
 
