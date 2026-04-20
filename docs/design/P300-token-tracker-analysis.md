@@ -1,69 +1,122 @@
 # TOKEN TRACKER ANALYSIS — P300 Multi-Project Architecture
 **Agent:** hermes/token-tracker
-**Date:** 2026-04-20
+**Date:** 2026-04-20T14:36 UTC
 **Proposal:** P300 (DEVELOP, maturity=new)
+**Phase:** BUILD
 
 ---
 
-## 1. Connection Pool Cost Analysis
+## 1. Current State Summary
 
-| Metric | Current | Proposed |
-|--------|---------|----------|
-| Pools | 1 singleton (5 conns) | metaPool(5) + N projectPools(5 each) |
-| Max connections | 5 | 55 (10 projects × 5 + meta 5) |
-| Postgres limit | 100 | 100 (45 conn margin) |
+| Metric | Value |
+|--------|-------|
+| Status | DEVELOP / new |
+| Total dispatches | 124 (111 completed, 10 failed, 3 active) |
+| Spending log rows | **0** (cost tracking disconnected) |
+| AC pass | 8/11 |
+| AC pending | 3 (PoolManager, git_root, backward compat) |
+| Blocking deps | P289 (DEVELOP/new, 7 ACs all pending) |
+| Blocked by P300 | P302 (DRAFT/new) |
 
-Pool cap at 10 projects is safe. Monitor approaching 8+.
+## 2. Implementation Progress: ~65% Done
 
-## 2. Token Impact by Phase
+Previous analysis (2026-04-20 14:08) estimated ~30%. Code review shows significantly more work completed:
 
-| Phase | Effort | Token Estimate | Cost Model |
-|-------|--------|---------------|------------|
-| 1a (Migrations) | ~2h | LOW — mechanical SQL | xiaomi/mimo-v2-pro |
-| 1b (PoolManager) | ~4h | MEDIUM — ~200 LOC TS | xiaomi/mimo-v2-pro |
-| 2 (Routing) | ~5h | MEDIUM — fn_claim, spawner | xiaomi/mimo-v2-pro |
-| 3 (Polish) | ~3h | LOW — MCP wrappers | xiaomi/mimo-v2-pro |
-| 4 (Migration) | ~5h | HIGH — E2E, backward compat | xiaomi/mimo-v2-pro |
-| **Total** | **~19h** | **150K-250K tokens** | **$10 budget** |
+### Completed Items
+| Item | Evidence |
+|------|----------|
+| PoolManager class | pool.ts line 332: `export class PoolManager` |
+| Orchestrator uses PoolManager | orchestrator.ts line 1223: `const poolManager = await PoolManager.init()` |
+| metaPool for cross-project | orchestrator.ts line 1224: `const pool = poolManager.metaPool` |
+| Direct-spawn project_id | orchestrator.ts line 616: INSERT includes `(SELECT COALESCE(project_id, 1) ...)` |
+| Offer-dispatch project_id | orchestrator.ts line 895: INSERT includes `(SELECT COALESCE(project_id, 1) ...)` |
+| OfferProvider p_project_id | offer-provider.ts line 201: 4-param call to `fn_claim_work_offer` |
+| Cubic worktree_path fix | orchestrator.ts line 491: `data.worktree_path ?? await selectExecutorWorktree(null)` |
+| projects table extended | Migration 010 applied (db_name, git_root, etc.) |
+| proposal.project_id | NOT NULL DEFAULT 1 with FK |
+| fn_claim_work_offer | 4-param signature with p_project_id |
 
-## 3. Cost Optimization Wins
+### Remaining Items (blocking AC-13775, AC-13778, AC-13804)
+| Item | Evidence | Effort |
+|------|----------|--------|
+| Gate-reviewer project_id | orchestrator.ts line 1002: INSERT lacks project_id column | 15 min |
+| Agent-spawner git_root | agent-spawner.ts line 26: hardcoded `WORKTREE_ROOT = "/data/code/worktree"` | 2-3 hours |
+| Per-project pool routing | orchestrator uses metaPool for everything — correct for single-project, needs routing for multi-project | 2 hours |
+| Backward compat E2E test | Not started | 1-2 hours |
 
-- Lazy pool creation prevents startup connection storms
-- Pool reaping after 5min idle reduces idle cost
-- Central squad_dispatch avoids multi-DB polling overhead
-- Default project_id=1 is zero-cost backward compat
+## 3. Cost Tracking Gap
 
-## 4. Token Waste Risks
+**CRITICAL: 124 dispatches produced ZERO spending_log rows.**
+
+| Table | Rows for P300 |
+|-------|---------------|
+| squad_dispatch | 124 |
+| spending_log | 0 |
+
+The spawner dispatches agents via the offer pipeline, but no cost tracking hooks fire. This means:
+- Token consumption for P300 is completely unknown
+- Cannot calculate cost-per-AC or cost-per-phase
+- Budget allocation in the previous token-tracker analysis ($10 total) is unverifiable
+
+**Root cause:** The spending_log INSERT likely happens in the spawned agent's process, not in the orchestrator. If agents exit before writing cost data, it's lost. The `agent-spawner.ts` has no inline cost tracking.
+
+**Recommendation:** Add a lightweight cost estimate to squad_dispatch metadata on completion, even if the agent doesn't report exact tokens.
+
+## 4. Dependency Chain
+
+```
+P304 (REVIEW/new) ─── blocks ──→ P289 (DEVELOP/new, 7 ACs pending) ─── blocks ──→ P300 (DEVELOP/new)
+                                                                 └── blocks ──→ P302 (DRAFT/new)
+P297 (COMPLETE/mature) ─── blocks ──→ P302 (resolved)
+```
+
+**P289 is the critical path blocker.** All 7 ACs are pending. P289 must reach COMPLETE before P302 can advance past DRAFT.
+
+P304 is in REVIEW/new — its advancement timeline is uncertain but it must clear before P289 can mature.
+
+## 5. Remaining Work Estimate
+
+| Task | Hours | Tokens (est.) | Model |
+|------|-------|---------------|-------|
+| Gate-reviewer project_id fix | 0.25 | 5K | xiaomi/mimo-v2-pro |
+| Agent-spawner git_root | 2-3 | 40K-60K | xiaomi/mimo-v2-pro |
+| Per-project pool routing | 2 | 30K-40K | xiaomi/mimo-v2-pro |
+| Backward compat E2E | 1-2 | 20K-30K | xiaomi/mimo-v2-pro |
+| **Total remaining** | **5.25-7.25h** | **95K-135K** | **~$0.19-0.27** |
+
+## 6. Token Waste Risks
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| Pool config DB read on every getProjectPool() | MEDIUM | Cache config in memory, reload on health failure |
-| project_id on every MCP call | LOW | Cache project context at MCP server level |
-| fn_claim JOIN to provider_registry | MEDIUM | Index on (agency_id, is_active) in provider_registry |
-| Two-tier pool routing overhead | LOW | Meta pool always active, project pools lazy |
+| No cost tracking | HIGH — flying blind on spending | Fix spawner cost hooks |
+| 10 failed dispatches | MEDIUM — ~5 min wasted per failure | Investigate root causes (likely ENOENT in early runs) |
+| Stale active dispatches | LOW — 3 active with no completed_at, ~3.5 min old | Normal for current run; cancel if >10 min |
+| Repeated lease churn | LOW — 5 lease cycles on P300 in last 2h | Offer-expiry reaping working as designed |
 
-## 5. Recommended Budget Allocation
+## 7. Efficiency Score: 7/10
 
-| Phase | Budget | Model Recommendation |
-|-------|--------|---------------------|
-| Phase 1 | $2.00 | xiaomi/mimo-v2-pro (mechanical work) |
-| Phase 2 | $3.00 | xiaomi/mimo-v2-pro (routing logic) |
-| Phase 3 | $1.50 | xiaomi/mimo-v2-pro (polish) |
-| Phase 4 | $3.50 | xiaomi/mimo-v2-pro (E2E testing) |
-| **Total** | **$10.00** | All phases use xiaomi models |
+**Up from 6/10** — more implementation done than previously estimated. Key wins:
+- PoolManager properly bootstrapped
+- Both dispatch paths populate project_id
+- Cubic worktree_path respected
 
-## 6. Efficiency Score: 8/10
+Key concerns:
+- Cost tracking completely broken (no visibility)
+- Agent-spawner still zero-project-aware (hardcoded root)
+- Gate path missing project_id (minor — can be DEFAULT 1 for now)
 
-Design is well-optimized. Two-tier pool avoids wasted connections. Lazy creation is the key win. Only concern is the JOIN overhead in fn_claim — ensure proper indexing before deployment.
+## 8. Recommendations
 
-## 7. Recommendations
+1. **Fix cost tracking immediately** — add spending_log hook in agent-spawner completion handler
+2. **Gate-reviewer project_id** — trivial 15-min fix, do it now
+3. **Agent-spawner project awareness** — highest-impact remaining item, 2-3h
+4. **Do NOT advance P300 to Mature** until P289 clears — dependency chain must be respected
+5. **Consider deferring per-project pool routing** — if all projects share the same DB for now, metaPool-only is sufficient. Full routing is Phase 2 work.
 
-1. Add index: `CREATE INDEX idx_provider_registry_agency_active ON roadmap_workforce.provider_registry(agency_id) WHERE is_active = true;`
-2. Cache project configs in PoolManager memory, not per-request DB reads
-3. Set pool idle timeout to 5 minutes (300s) as designed
-4. Monitor connection count approaching 8+ projects
-5. Consider connection pooling per-project with max=3 (not 5) to extend headroom
+## 9. Verdict: PROCEED WITH CAUTION
 
-## 8. Verdict: PROCEED
+Implementation is ahead of schedule (~65% vs 30% estimated). Two critical items remain:
+- Fix gate-reviewer project_id (trivial)
+- Wire agent-spawner to project git_root (substantial)
 
-No blocking efficiency concerns. Design is sound for 10-project scale. Index the provider_registry before Phase 2 deployment.
+Cost tracking must be fixed before continuing — we cannot optimize what we cannot measure.
