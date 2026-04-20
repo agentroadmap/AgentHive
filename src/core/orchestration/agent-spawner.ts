@@ -138,9 +138,9 @@ export function buildSpawnProcessEnv(input: {
 	})();
 
 	const baseEnv: Record<string, string> = {
-		// Carry through essential PATH
-		PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
-		HOME: process.env.HOME ?? "/root",
+		// Carry through essential PATH — always include hermes bin
+		PATH: ["/home/xiaomi/.local/bin", process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin"].filter(Boolean).join(":"),
+		HOME: process.env.HOME ?? "/home/xiaomi",
 		// Agent-specific overrides from .env.agent
 		DATABASE_URL: input.agentEnv.DATABASE_URL ?? "",
 		AGENT_WORKTREE: input.worktree,
@@ -382,7 +382,8 @@ async function loadEnvAgent(
 	let raw: string;
 	try {
 		raw = await readFile(path, "utf8");
-	} catch {
+	} catch (err: any) {
+		if (err?.code === "ENOENT") return {}; // No .env.agent — creds from $HOME
 		throw new Error(
 			`Cannot read .env.agent for worktree "${worktreeName}" at ${path}`,
 		);

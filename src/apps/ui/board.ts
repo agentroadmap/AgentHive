@@ -701,7 +701,7 @@ export async function renderBoardTui(
 		});
 
 		// Live event stream sidebar (right panel)
-		const eventPanel = box({
+		const eventPanel = list({
 			parent: container,
 			top: 0,
 			right: 0,
@@ -709,10 +709,9 @@ export async function renderBoardTui(
 			height: "100%-1",
 			border: { type: "line" },
 			label: " 📰 Feed ",
-			style: { border: { fg: "cyan" } },
+			style: { border: { fg: "cyan" }, selected: { bg: undefined, fg: "white" } },
 			tags: true,
 			mouse: true,
-			clickable: true,
 			scrollable: true,
 			alwaysScroll: true,
 			keys: true,
@@ -967,39 +966,23 @@ export async function renderBoardTui(
 			);
 		};
 
-		// Mouse wheel on feed panel — screen-level handler
-		screen.on("wheeldown", (_data: any) => {
-			if (feedOnlyMode || feedThreadMode) return;
-			// Check if mouse is over eventPanel
-			const pos = (eventPanel as any).lpos;
-			if (!pos) return;
-			if (_data.x >= pos.xi && _data.x < pos.xl && _data.y >= pos.yi && _data.y < pos.yl) {
-				feedPinnedToLatest = false;
-				const pageSize = getFeedPageSize();
-				feedWindowStart = Math.min(
-					feedWindowStart + 3,
-					Math.max(feedLines.length - pageSize, 0),
-				);
-				renderFeedPanel();
-				screen.render();
-			}
-		});
-		screen.on("wheelup", (_data: any) => {
-			if (feedOnlyMode || feedThreadMode) return;
-			const pos = (eventPanel as any).lpos;
-			if (!pos) return;
-			if (_data.x >= pos.xi && _data.x < pos.xl && _data.y >= pos.yi && _data.y < pos.yl) {
-				feedPinnedToLatest = false;
-				feedWindowStart = Math.max(feedWindowStart - 3, 0);
-				renderFeedPanel();
-				screen.render();
-			}
-		});
-
+		// Screen-level mouse handlers for kanban
 		let dragProposalId: string | null = null;
 		let dragSourceCol = -1;
 		let lastClickElement: any = null;
 		let lastClickTime = 0;
+		const hitTest = (data: any, el: any): boolean => {
+			const pos = el.lpos;
+			if (!pos) return false;
+			return data.x >= pos.xi && data.x < pos.xl && data.y >= pos.yi && data.y < pos.yl;
+		};
+
+		const findColumnAt = (data: any): number => {
+			for (let i = 0; i < columns.length; i++) {
+				if (hitTest(data, columns[i].box)) return i;
+			}
+			return -1;
+		};
 
 		const createColumnViews = (data: ColumnData[]) => {
 			clearColumns();
@@ -1056,20 +1039,6 @@ export async function renderBoardTui(
 					screen.render();
 				});
 			});
-		};
-
-		// Screen-level mouse handlers for kanban
-		const hitTest = (data: any, el: any): boolean => {
-			const pos = el.lpos;
-			if (!pos) return false;
-			return data.x >= pos.xi && data.x < pos.xl && data.y >= pos.yi && data.y < pos.yl;
-		};
-
-		const findColumnAt = (data: any): number => {
-			for (let i = 0; i < columns.length; i++) {
-				if (hitTest(data, columns[i].box)) return i;
-			}
-			return -1;
 		};
 
 		// Click on column to focus + double-click detection
@@ -1701,7 +1670,6 @@ export async function renderBoardTui(
 			feedOnlyMode = !feedOnlyMode;
 			if (feedOnlyMode) {
 				feedPinnedToLatest = true;
-				feedWindowStart = getFeedMaxWindowStart();
 				renderFeedPanel();
 			}
 			showTransientFooter(
@@ -1727,7 +1695,6 @@ export async function renderBoardTui(
 				feedLines = _allFeedEvents.map(formatEventLine);
 			}
 			feedPinnedToLatest = true;
-			feedWindowStart = getFeedMaxWindowStart();
 			renderFeedPanel();
 			showTransientFooter(
 				feedThreadMode
@@ -2120,11 +2087,11 @@ export async function renderBoardTui(
 
 			if (feedOnlyMode) {
 				feedPinnedToLatest = false;
-				const pageSize = getFeedPageSize();
-				feedWindowStart = Math.min(
-					feedWindowStart + pageSize,
-					Math.max(feedLines.length - pageSize, 0),
-				);
+				const sel = eventPanel.selected ?? 0;
+				const total = feedLines.length;
+				if (sel < total - 1) {
+					eventPanel.select(Math.min(sel + getFeedPageSize(), total - 1));
+				}
 				renderFeedPanel();
 				screen.render();
 				return;
@@ -2150,8 +2117,10 @@ export async function renderBoardTui(
 
 			if (feedOnlyMode) {
 				feedPinnedToLatest = false;
-				const pageSize = getFeedPageSize();
-				feedWindowStart = Math.max(feedWindowStart - pageSize, 0);
+				const sel = eventPanel.selected ?? 0;
+				if (sel > 0) {
+					eventPanel.select(Math.max(sel - getFeedPageSize(), 0));
+				}
 				renderFeedPanel();
 				screen.render();
 				return;
@@ -2476,7 +2445,6 @@ export async function renderBoardTui(
 		const seenFeedEventIds = new Set<string>();
 		let feedLines: string[] = [];
 		const FEED_HISTORY_LIMIT = 500;
-		let feedWindowStart = 0;
 		let feedPinnedToLatest = true;
 		let feedThreadMode = false;
 		let _allFeedEvents: StreamEvent[] = []; // kept for thread mode rebuild
@@ -2484,22 +2452,16 @@ export async function renderBoardTui(
 			// Use screen rows minus overhead (header=1, footer=2, borders=2)
 			return Math.max((screen.rows as number) - 5, 5);
 		};
-		const getFeedMaxWindowStart = () =>
-			Math.max(feedLines.length - getFeedPageSize(), 0);
 		const renderFeedPanel = () => {
-			if (feedPinnedToLatest) {
-				feedWindowStart = getFeedMaxWindowStart();
+			if (feedLines.length > 0) {
+				eventPanel.setItems(feedLines);
+			} else {
+				eventPanel.setItems(["{gray-fg}No recent feed items{/}"]);
 			}
-			const pageSize = getFeedPageSize();
-			const visibleLines = feedLines.slice(
-				feedWindowStart,
-				feedWindowStart + pageSize,
-			);
-			eventPanel.setContent(
-				visibleLines.length > 0
-					? visibleLines.join("\n")
-					: "{gray-fg}No recent feed items{/}",
-			);
+			if (feedPinnedToLatest) {
+				const maxIdx = Math.max(feedLines.length - 1, 0);
+				eventPanel.select(maxIdx);
+			}
 		};
 		// Board-style icons matching status-icon.ts
 		const stateIconMap: Record<string, string> = {
@@ -2655,11 +2617,6 @@ export async function renderBoardTui(
 					.reverse()
 					.map(formatEventLine);
 				feedLines = [...feedLines, ...newLines].slice(-FEED_HISTORY_LIMIT);
-			}
-			if (feedPinnedToLatest) {
-				feedWindowStart = getFeedMaxWindowStart();
-			} else {
-				feedWindowStart = Math.min(feedWindowStart, getFeedMaxWindowStart());
 			}
 			renderFeedPanel();
 			screen.render();
