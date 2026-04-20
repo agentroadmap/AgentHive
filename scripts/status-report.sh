@@ -2,14 +2,21 @@
 # AgentHive Status Report — pure SQL, no LLM required
 set -euo pipefail
 
-export PGPASSWORD="${PG_PASSWORD:-}"
-PG="psql -h 127.0.0.1 -U xiaomi -d agenthive -t -A"
+# Load DB credentials — from env or .env file
+if [ -z "${PGPASSWORD:-}" ] && [ -f "$HOME/.hermes/.env" ]; then
+  . "$HOME/.hermes/.env"
+  export PGPASSWORD PG_USER PG_DATABASE
+fi
+PGPASSWORD="${PGPASSWORD:?ERROR: PGPASSWORD not set — source ~/.hermes/.env}"
+export PGPASSWORD
+PG="psql -h 127.0.0.1 -U ${PG_USER:-xiaomi} -d ${PG_DATABASE:-agenthive} -t -A"
 
 # --- Services ---
 SERVICES=""
 for svc in agenthive-orchestrator agenthive-gate-pipeline agenthive-mcp; do
-  line=$(sudo /bin/systemctl status "$svc" 2>&1 | grep -m1 "^ *Active:" || echo "")
-  state=$(echo "$line" | awk '{print $2}')
+  # Use status (allowed by sudoers) but capture output safely to avoid pipefail
+  status_out=$(sudo /bin/systemctl status "$svc" 2>&1 || true)
+  state=$(echo "$status_out" | grep -m1 '^ *Active:' | awk '{print $2}' || echo "unknown")
   if [ "$state" = "active" ]; then
     SERVICES="${SERVICES}🟢 ${svc}\n"
   else
@@ -36,11 +43,17 @@ else
   WORKTREE_LINE="⚠️ ${WT_ROOT} missing"
 fi
 
-# Check active cubics for missing worktrees
+# Check active cubics for wrong worktree paths
 CUBIC_WT_MISMATCH=$($PG -c "
 SELECT COUNT(*) FROM roadmap.cubics c
 WHERE c.status = 'active'
-  AND c.worktree_path NOT LIKE '/data/code/worktree/%';" 2>/dev/null)
+  AND c.worktree_path NOT LIKE '/data/code/worktree/%';" 2>/dev/null) || CUBIC_WT_MISMATCH=0
+
+# List cubic worktree paths (first 10)
+CUBIC_WT_LIST=$($PG -c "
+SELECT cubic_id || ' → ' || worktree_path
+FROM roadmap.cubics WHERE status = 'active'
+ORDER BY worktree_path LIMIT 10;" 2>/dev/null) || CUBIC_WT_LIST=""
 
 # --- Cubics ---
 CUBICS_ACTIVE=$($PG -c "SELECT COUNT(*) FROM roadmap.cubics WHERE status = 'active';" 2>/dev/null)
@@ -112,7 +125,13 @@ $(echo -e "$SERVICES")
 **📦 Git** \`${GIT_BRANCH}\` — \`${GIT_HEAD}\`
 
 **🌲 Worktrees** — ${WORKTREE_LINE}
-$(if [ "${CUBIC_WT_MISMATCH:-0}" -gt 0 ]; then echo "⚠️ ${CUBIC_WT_MISMATCH} active cubics have wrong worktree path (should be /data/code/worktree/ not /data/code/worktree-)"; fi)
+$(if [ "${CUBIC_WT_MISMATCH:-0}" -gt 0 ]; then
+  echo "⚠️ ${CUBIC_WT_MISMATCH} active cubics have wrong worktree path!"
+  while IFS=$'\t' read -r line; do
+    [ -z "$line" ] && continue
+    echo "$line"
+  done <<< "$CUBIC_WT_LIST"
+fi)
 
 **🔵 Cubics** — ${CUBICS_ACTIVE} active (${CUBICS_DETAIL})
 
