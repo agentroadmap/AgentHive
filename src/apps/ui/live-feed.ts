@@ -23,6 +23,7 @@ export function dedupeBoardLiveFeed(events: StreamEvent[]): StreamEvent[] {
 			event.proposalId ?? "",
 			event.agentId ?? "",
 			event.message.trim(),
+			String(event.timestamp),
 		].join("|");
 		if (seen.has(key)) continue;
 		seen.add(key);
