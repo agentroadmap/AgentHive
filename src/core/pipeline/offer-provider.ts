@@ -215,7 +215,7 @@ export class OfferProvider {
 		const task = asString(meta.task) ?? `Execute work for dispatch ${dispatch_id}`;
 		const stage = asString(meta.stage) ?? dispatch_role;
 		const model = asString(meta.model) ?? undefined;
-		const worktree = asString(meta.worktree_hint) ?? this.agentIdentity;
+		const worktree = asString(meta.worktree_hint) ?? "hermes-andy";
 		const timeoutMs = asNumber(meta.timeout_ms) ?? 300_000;
 
 		// Generate ephemeral worker identity for this dispatch

@@ -712,6 +712,7 @@ export async function renderBoardTui(
 			style: { border: { fg: "cyan" } },
 			tags: true,
 			mouse: true,
+			clickable: true,
 			scrollable: true,
 			alwaysScroll: true,
 			keys: true,
@@ -966,28 +967,39 @@ export async function renderBoardTui(
 			);
 		};
 
-		// Mouse wheel on feed panel
-		eventPanel.on("element wheeldown", () => {
+		// Mouse wheel on feed panel — screen-level handler
+		screen.on("wheeldown", (_data: any) => {
 			if (feedOnlyMode || feedThreadMode) return;
-			feedPinnedToLatest = false;
-			const pageSize = getFeedPageSize();
-			feedWindowStart = Math.min(
-				feedWindowStart + 3,
-				Math.max(feedLines.length - pageSize, 0),
-			);
-			renderFeedPanel();
-			screen.render();
+			// Check if mouse is over eventPanel
+			const pos = (eventPanel as any).lpos;
+			if (!pos) return;
+			if (_data.x >= pos.xi && _data.x < pos.xl && _data.y >= pos.yi && _data.y < pos.yl) {
+				feedPinnedToLatest = false;
+				const pageSize = getFeedPageSize();
+				feedWindowStart = Math.min(
+					feedWindowStart + 3,
+					Math.max(feedLines.length - pageSize, 0),
+				);
+				renderFeedPanel();
+				screen.render();
+			}
 		});
-		eventPanel.on("element wheelup", () => {
+		screen.on("wheelup", (_data: any) => {
 			if (feedOnlyMode || feedThreadMode) return;
-			feedPinnedToLatest = false;
-			feedWindowStart = Math.max(feedWindowStart - 3, 0);
-			renderFeedPanel();
-			screen.render();
+			const pos = (eventPanel as any).lpos;
+			if (!pos) return;
+			if (_data.x >= pos.xi && _data.x < pos.xl && _data.y >= pos.yi && _data.y < pos.yl) {
+				feedPinnedToLatest = false;
+				feedWindowStart = Math.max(feedWindowStart - 3, 0);
+				renderFeedPanel();
+				screen.render();
+			}
 		});
 
 		let dragProposalId: string | null = null;
 		let dragSourceCol = -1;
+		let lastClickElement: any = null;
+		let lastClickTime = 0;
 
 		const createColumnViews = (data: ColumnData[]) => {
 			clearColumns();
@@ -1043,87 +1055,121 @@ export async function renderBoardTui(
 					updateFooter();
 					screen.render();
 				});
-
-				// Click column box to focus its list
-				columnBox.on("click", () => {
-					if (popupOpen || filterPopupOpen) return;
-					proposalList.focus();
-				});
-
-				// Mouse wheel on column lists
-				proposalList.on("element wheeldown", () => {
-					const sel = proposalList.selected ?? 0;
-					const total = columnData.proposals.length;
-					if (sel < total - 1) {
-						proposalList.select(sel + 1);
-						updateFooter();
-						screen.render();
-					}
-				});
-				proposalList.on("element wheelup", () => {
-					const sel = proposalList.selected ?? 0;
-					if (sel > 0) {
-						proposalList.select(sel - 1);
-						updateFooter();
-						screen.render();
-					}
-				});
-
-				// Double-click detection (manual — no built-in dblclick)
-				let lastClickTime = 0;
-				proposalList.on("element click", async () => {
-					const now = Date.now();
-					if (now - lastClickTime < 400) {
-						// Double-click — edit title
-						if (popupOpen || filterPopupOpen) return;
-						const sel = proposalList.selected ?? 0;
-						const proposal = columnData.proposals[sel];
-						if (proposal) await openQuickEdit(proposal, "title");
-						lastClickTime = 0;
-					} else {
-						lastClickTime = now;
-					}
-				});
-
-				// Drag start: mousedown remembers proposal
-				proposalList.on("mousedown", () => {
-					if (popupOpen || filterPopupOpen || moveOp) return;
-					const sel = proposalList.selected ?? 0;
-					const proposal = columnData.proposals[sel];
-					if (proposal) {
-						dragProposalId = proposal.id;
-						dragSourceCol = idx;
-					}
-				});
-
-				// Drag end: mouseup on this column moves proposal here
-				columnBox.on("mouseup", async () => {
-					if (!dragProposalId || dragSourceCol === idx) {
-						dragProposalId = null;
-						dragSourceCol = -1;
-						return;
-					}
-					const proposal = currentProposals.find(
-						(p) => p.id === dragProposalId,
-					);
-					const sourceCol = columns[dragSourceCol];
-					dragProposalId = null;
-					dragSourceCol = -1;
-					if (proposal && sourceCol) {
-						moveOp = {
-							proposalId: proposal.id,
-							fromStatus: proposal.status,
-							targetStatus: columnData.status,
-							proposal,
-							originalStatus: proposal.status,
-							originalIndex: sourceCol.proposals.indexOf(proposal),
-							targetIndex: 0,
-						};
-						await performProposalMove();
-					}
-				});
 			});
 		};
+
+		// Screen-level mouse handlers for kanban
+		const hitTest = (data: any, el: any): boolean => {
+			const pos = el.lpos;
+			if (!pos) return false;
+			return data.x >= pos.xi && data.x < pos.xl && data.y >= pos.yi && data.y < pos.yl;
+		};
+
+		const findColumnAt = (data: any): number => {
+			for (let i = 0; i < columns.length; i++) {
+				if (hitTest(data, columns[i].box)) return i;
+			}
+			return -1;
+		};
+
+		// Click on column to focus + double-click detection
+		screen.on("click", async (data: any) => {
+			if (popupOpen || filterPopupOpen || feedOnlyMode) return;
+			const colIdx = findColumnAt(data);
+			if (colIdx < 0) return;
+
+			// Focus column
+			if (colIdx !== currentCol) {
+				setColumnActiveProposal(columns[currentCol], false);
+				currentCol = colIdx;
+				setColumnActiveProposal(columns[currentCol], true);
+				columns[currentCol].list.focus();
+				currentFocus = "board";
+				updateFooter();
+				screen.render();
+			}
+
+			// Double-click detection
+			const now = Date.now();
+			if (now - lastClickTime < 400 && lastClickElement === colIdx) {
+				const col = columns[colIdx];
+				const sel = col.list.selected ?? 0;
+				const proposal = col.proposals[sel];
+				if (proposal) await openQuickEdit(proposal, "title");
+				lastClickTime = 0;
+			} else {
+				lastClickTime = now;
+				lastClickElement = colIdx;
+			}
+		});
+
+		// Wheel on columns
+		screen.on("wheeldown", (data: any) => {
+			if (popupOpen || filterPopupOpen || feedOnlyMode) return;
+			const colIdx = findColumnAt(data);
+			if (colIdx < 0) return;
+			const list = columns[colIdx].list;
+			const sel = list.selected ?? 0;
+			const total = columns[colIdx].proposals.length;
+			if (sel < total - 1) {
+				list.select(sel + 1);
+				updateFooter();
+				screen.render();
+			}
+		});
+		screen.on("wheelup", (data: any) => {
+			if (popupOpen || filterPopupOpen || feedOnlyMode) return;
+			const colIdx = findColumnAt(data);
+			if (colIdx < 0) return;
+			const list = columns[colIdx].list;
+			const sel = list.selected ?? 0;
+			if (sel > 0) {
+				list.select(sel - 1);
+				updateFooter();
+				screen.render();
+			}
+		});
+
+		// Drag: mousedown on list, mouseup on different column
+		screen.on("mousedown", (data: any) => {
+			if (popupOpen || filterPopupOpen || moveOp || feedOnlyMode) return;
+			const colIdx = findColumnAt(data);
+			if (colIdx < 0) return;
+			const col = columns[colIdx];
+			const sel = col.list.selected ?? 0;
+			const proposal = col.proposals[sel];
+			if (proposal) {
+				dragProposalId = proposal.id;
+				dragSourceCol = colIdx;
+			}
+		});
+
+		screen.on("mouseup", async (data: any) => {
+			if (!dragProposalId) return;
+			const colIdx = findColumnAt(data);
+			if (colIdx < 0 || colIdx === dragSourceCol) {
+				dragProposalId = null;
+				dragSourceCol = -1;
+				return;
+			}
+			const proposal = currentProposals.find(p => p.id === dragProposalId);
+			const sourceCol = columns[dragSourceCol];
+			const targetCol = columns[colIdx];
+			dragProposalId = null;
+			dragSourceCol = -1;
+			if (proposal && sourceCol && targetCol) {
+				moveOp = {
+					proposalId: proposal.id,
+					fromStatus: proposal.status,
+					targetStatus: targetCol.status,
+					proposal,
+					originalStatus: proposal.status,
+					originalIndex: sourceCol.proposals.indexOf(proposal),
+					targetIndex: 0,
+				};
+				await performProposalMove();
+			}
+		});
 
 		const setColumnActiveProposal = (
 			column: ColumnView | undefined,

@@ -407,24 +407,28 @@ async function loadEnvAgent(
 
 /**
  * Detect a worktree's true provider by reading its `.env.agent` (AGENT_PROVIDER).
+ * Falls back to 'hermes' if the file doesn't exist — creds come from $HOME, not worktree.
  * Host policy is enforced by the caller, not here.
  */
 export async function detectProvider(worktreeName: string): Promise<AgentProvider> {
 	const envPath = join(WORKTREE_ROOT, worktreeName, ".env.agent");
-	const content = await readFile(envPath, "utf8");
-	for (const line of content.split("\n")) {
-		const trimmed = line.trim();
-		if (!trimmed || trimmed.startsWith("#")) continue;
-		const eq = trimmed.indexOf("=");
-		if (eq < 0) continue;
-		const key = trimmed.slice(0, eq).trim();
-		if (key !== "AGENT_PROVIDER") continue;
-		const value = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
-		if (value) return value;
+	try {
+		const content = await readFile(envPath, "utf8");
+		for (const line of content.split("\n")) {
+			const trimmed = line.trim();
+			if (!trimmed || trimmed.startsWith("#")) continue;
+			const eq = trimmed.indexOf("=");
+			if (eq < 0) continue;
+			const key = trimmed.slice(0, eq).trim();
+			if (key !== "AGENT_PROVIDER") continue;
+			const value = trimmed.slice(eq + 1).trim().replace(/^[\"']|[\"']$/g, "");
+			if (value) return value;
+		}
+	} catch (err: any) {
+		if (err?.code !== "ENOENT") throw err;
+		// No .env.agent — fall back to hermes (creds from $HOME)
 	}
-	throw new Error(
-		`Worktree "${worktreeName}" has no AGENT_PROVIDER in .env.agent`,
-	);
+	return "hermes";
 }
 
 // ─── P235: Platform-Aware Model Constraints ──────────────────────────────────
