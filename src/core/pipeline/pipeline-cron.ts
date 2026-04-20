@@ -9,7 +9,7 @@
 import { basename } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { getPool, query } from "../../infra/postgres/pool.ts";
+import { getPool, query, getPoolManager, type PoolManager } from "../../infra/postgres/pool.ts";
 import {
 	type AgentProfile,
 	scoreProposal,
@@ -96,6 +96,8 @@ export interface PipelineCronDeps {
 	useOfferDispatch?: boolean;
 	setIntervalFn?: typeof setInterval;
 	clearIntervalFn?: typeof clearInterval;
+	/** P300: PoolManager for multi-project query routing. If null, falls back to queryFn. */
+	poolManager?: PoolManager | null;
 }
 
 function mcpResultText(result: unknown): string {
@@ -710,6 +712,8 @@ export class PipelineCron {
 	private readonly clearIntervalFn: typeof clearInterval;
 	private readonly spawnAgentFn?: (request: SpawnAgentRequest) => Promise<SpawnAgentResult>;
 	private readonly mcpClientFactory: McpClientFactory;
+	/** P300: PoolManager for multi-project routing. Null = use legacy queryFn for everything. */
+	private _poolManager: PoolManager | null = null;
 
 	private listenerClient: ListenerClient | null = null;
 	private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -755,6 +759,7 @@ export class PipelineCron {
 		this.setIntervalFn = deps.setIntervalFn ?? setInterval;
 		this.clearIntervalFn = deps.clearIntervalFn ?? clearInterval;
 		this.spawnAgentFn = deps.spawnAgentFn;
+		this._poolManager = deps.poolManager ?? null;
 		this.mcpClientFactory =
 			deps.mcpClientFactory ??
 			((url) => {
@@ -779,6 +784,18 @@ export class PipelineCron {
 	async run(): Promise<void> {
 		if (this.started) {
 			return;
+		}
+
+		// P300: Lazy-init PoolManager if not injected via deps
+		if (!this._poolManager) {
+			try {
+				this._poolManager = await getPoolManager();
+				this.logger.log("[PipelineCron] PoolManager initialized for multi-project routing");
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				this.logger.warn(`[PipelineCron] PoolManager init failed, using legacy pool: ${msg}`);
+				this._poolManager = null;
+			}
 		}
 
 		this.started = true;
@@ -1130,12 +1147,23 @@ export class PipelineCron {
 				? proposalCaps
 				: roleToCapabilities(role, plan?.roles ?? [role]);
 
-			const { rows } = await this.queryFn<{ id: number }>(
-				`INSERT INTO roadmap_workforce.squad_dispatch
-				   (proposal_id, squad_name, dispatch_role, dispatch_status,
-				    offer_status, agent_identity, required_capabilities, metadata)
-				 VALUES ($1, $2, $3, 'open', 'open', NULL, $4::jsonb, $5::jsonb)
-				 RETURNING id`,
+		const { rows } = await this.queryFn<{ id: number }>(
+			`INSERT INTO roadmap_workforce.squad_dispatch
+			   (proposal_id, squad_name, dispatch_role, dispatch_status,
+			    offer_status, agent_identity, required_capabilities, metadata,
+			    project_id)
+			 VALUES ($1, $2, $3, 'open', 'open', NULL, $4::jsonb, 
+			    ($5::jsonb || jsonb_build_object('worktree_root',
+			      COALESCE((SELECT p.git_root || '/worktrees' 
+			                FROM roadmap_workforce.projects p 
+			                WHERE p.id = (SELECT COALESCE(pr.project_id, 1) 
+			                              FROM roadmap_proposal.proposal pr 
+			                              WHERE pr.id = $1)), 
+			               '/data/code/worktrees'))),
+			    (SELECT COALESCE(p.project_id, 1) 
+			       FROM roadmap_proposal.proposal p 
+			      WHERE p.id = $1))
+			 RETURNING id`,
 				[proposalIdNum, squadName, role, JSON.stringify(requiredCaps), JSON.stringify(offerMetadata)],
 			);
 			const dispatchId = rows[0]?.id;

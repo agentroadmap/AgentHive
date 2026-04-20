@@ -63,6 +63,7 @@ const offerProvider = useOfferDispatch
 			leaseTtlSeconds: Number(process.env.AGENTHIVE_LEASE_TTL_SECONDS ?? "30"),
 			renewIntervalMs: Number(process.env.AGENTHIVE_RENEW_INTERVAL_MS ?? "10000"),
 			pollIntervalMs: Number(process.env.AGENTHIVE_OFFER_POLL_MS ?? "15000"),
+			maxConcurrent: Number(process.env.AGENTHIVE_MAX_CONCURRENT ?? "10"),
 		})
 	: null;
 

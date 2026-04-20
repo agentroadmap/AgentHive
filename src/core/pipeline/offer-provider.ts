@@ -59,6 +59,8 @@ export interface OfferProviderDeps {
 	pollIntervalMs?: number;
 	/** Maximum concurrent claims this provider will hold (default 1) */
 	maxConcurrent?: number;
+	/** P300: Optional project_id to scope claims to a specific project. */
+	projectId?: number | null;
 	queryFn?: QueryFn;
 	connectListener?: () => Promise<ListenerClient>;
 	spawnFn?: SpawnFn;
@@ -91,6 +93,7 @@ export class OfferProvider {
 	private readonly renewIntervalMs: number;
 	private readonly pollIntervalMs: number;
 	private readonly maxConcurrent: number;
+	private readonly projectId: number | null | undefined;
 	private readonly queryFn: QueryFn;
 	private readonly connectListener: () => Promise<ListenerClient>;
 	private readonly spawnFn: SpawnFn;
@@ -119,6 +122,7 @@ export class OfferProvider {
 		this.renewIntervalMs = deps.renewIntervalMs ?? 10_000;
 		this.pollIntervalMs = deps.pollIntervalMs ?? 15_000;
 		this.maxConcurrent = deps.maxConcurrent ?? 1;
+		this.projectId = deps.projectId;
 		this.queryFn = deps.queryFn ?? query;
 		this.connectListener =
 			deps.connectListener ??
@@ -194,8 +198,8 @@ export class OfferProvider {
 			const result = (await this.queryFn(
 				`SELECT dispatch_id, proposal_id, squad_name, dispatch_role,
 				        claim_token, claim_expires_at, offer_version, metadata
-				 FROM roadmap_workforce.fn_claim_work_offer($1, $2::jsonb, $3)`,
-				[this.agentIdentity, this.capabilitiesJson, this.leaseTtlSeconds],
+				 FROM roadmap_workforce.fn_claim_work_offer($1, $2::jsonb, $3, $4)`,
+				[this.agentIdentity, this.capabilitiesJson, this.leaseTtlSeconds, this.projectId ?? null],
 			)) as QueryResultLike;
 
 			const row = result.rows[0] as ClaimRow | undefined;

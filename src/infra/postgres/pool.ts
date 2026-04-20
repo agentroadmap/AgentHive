@@ -304,3 +304,215 @@ export async function closePool(): Promise<void> {
 	}
 	configuredSchema = normalizeSchemaName(process.env.PG_SCHEMA);
 }
+
+// ─── PoolManager (P300) ──────────────────────────────────────────────────────
+
+export interface ProjectConfig {
+	id: number;
+	name: string;
+	db_name: string;
+	git_root: string;
+	discord_channel_id: string | null;
+	db_host: string;
+	db_port: number;
+	db_user: string;
+	is_active: boolean;
+}
+
+const DEFAULT_PROJECT_MAX = 3;    // connections per project pool
+const MAX_PROJECT_POOLS = 10;     // max concurrent project pools
+const IDLE_REAP_MS = 5 * 60_000;  // 5 min idle reaping
+
+/**
+ * PoolManager — multi-project connection pool orchestrator.
+ *
+ * - metaPool: always points to the agenthive database (cross-project tables)
+ * - projectPools: lazy-created per-project pools, keyed by project_id
+ */
+export class PoolManager {
+	private projectPools: Map<number, Pool> = new Map();
+	private projectConfigs: Map<number, ProjectConfig> = new Map();
+	private _metaPool: Pool;
+	private reapTimer: ReturnType<typeof setInterval> | null = null;
+	private lastUsed: Map<number, number> = new Map();
+
+	private constructor(metaPool: Pool) {
+		this._metaPool = metaPool;
+	}
+
+	get metaPool(): Pool {
+		return this._metaPool;
+	}
+
+	/**
+	 * Bootstrap the PoolManager from environment / existing getPool().
+	 * Reads roadmap_workforce.projects to discover registered projects.
+	 */
+	static async init(): Promise<PoolManager> {
+		const mp = getPool();
+		const pm = new PoolManager(mp);
+		await pm.loadProjects();
+		pm.startIdleReaping();
+		return pm;
+	}
+
+	/**
+	 * Reload project configs from DB. Call after adding/modifying projects.
+	 */
+	async loadProjects(): Promise<void> {
+		const { rows } = await this._metaPool.query<ProjectConfig>(
+			`SELECT id, name, db_name, git_root, discord_channel_id,
+			        db_host, db_port, db_user, is_active
+			   FROM roadmap_workforce.projects
+			  WHERE is_active = true
+			  ORDER BY id`
+		);
+		this.projectConfigs.clear();
+		for (const row of rows) {
+			this.projectConfigs.set(row.id, row);
+		}
+	}
+
+	/**
+	 * Get a pool for the given project_id. Creates lazily.
+	 * Falls back to metaPool for project_id=1 (default project shares agenthive DB).
+	 */
+	getPool(projectId: number): Pool {
+		if (projectId === 1) {
+			// Default project uses the same DB as metaPool
+			return this._metaPool;
+		}
+
+		this.lastUsed.set(projectId, Date.now());
+
+		if (this.projectPools.has(projectId)) {
+			return this.projectPools.get(projectId)!;
+		}
+
+		const config = this.projectConfigs.get(projectId);
+		if (!config) {
+			throw new Error(
+				`[PoolManager] Unknown project_id=${projectId}. ` +
+				`Known: ${[...this.projectConfigs.keys()].join(", ") || "none"}. ` +
+				`Run loadProjects() first or check roadmap_workforce.projects.`
+			);
+		}
+
+		if (this.projectPools.size >= MAX_PROJECT_POOLS) {
+			throw new Error(
+				`[PoolManager] Max project pools (${MAX_PROJECT_POOLS}) reached. ` +
+				`Cannot create pool for project_id=${projectId}.`
+			);
+		}
+
+		const newPool = new Pool({
+			host: config.db_host,
+			port: config.db_port,
+			database: config.db_name,
+			user: config.db_user,
+			password: process.env.PG_PASSWORD,
+			max: DEFAULT_PROJECT_MAX,
+			idleTimeoutMillis: IDLE_REAP_MS,
+			allowExitOnIdle: true,
+		});
+
+		newPool.on("error", (err) => {
+			console.error(`[PoolManager] Pool error for project ${projectId}:`, err.message);
+		});
+
+		this.projectPools.set(projectId, newPool);
+
+		if (process.env.DEBUG_PG) {
+			console.error(
+				`[PoolManager] Created pool for project ${projectId} ` +
+				`(${config.db_user}@${config.db_host}:${config.db_port}/${config.db_name})`
+			);
+		}
+
+		return newPool;
+	}
+
+	/**
+	 * Get project config by ID.
+	 */
+	getProjectConfig(projectId: number): ProjectConfig | undefined {
+		return this.projectConfigs.get(projectId);
+	}
+
+	/**
+	 * List all known project configs.
+	 */
+	listProjects(): ProjectConfig[] {
+		return [...this.projectConfigs.values()];
+	}
+
+	/**
+	 * Execute a query against a specific project's pool.
+	 */
+	async queryProject<T extends QueryResultRow = any>(
+		projectId: number,
+		text: string,
+		params?: any[]
+	): Promise<QueryResult<T>> {
+		const p = this.getPool(projectId);
+		return p.query<T>(text, params);
+	}
+
+	/**
+	 * Execute a query against the meta pool (cross-project tables).
+	 */
+	async queryMeta<T extends QueryResultRow = any>(
+		text: string,
+		params?: any[]
+	): Promise<QueryResult<T>> {
+		return this._metaPool.query<T>(text, params);
+	}
+
+	/**
+	 * Idle reaping: close project pools not used in the last IDLE_REAP_MS.
+	 */
+	private startIdleReaping(): void {
+		this.reapTimer = setInterval(() => {
+			const now = Date.now();
+			for (const [id, lastSeen] of this.lastUsed) {
+				if (now - lastSeen > IDLE_REAP_MS && this.projectPools.has(id)) {
+					const p = this.projectPools.get(id)!;
+					void p.end().catch(() => {});
+					this.projectPools.delete(id);
+					this.lastUsed.delete(id);
+					if (process.env.DEBUG_PG) {
+						console.error(`[PoolManager] Reaped idle pool for project ${id}`);
+					}
+				}
+			}
+		}, IDLE_REAP_MS);
+	}
+
+	/**
+	 * Shutdown all pools gracefully.
+	 */
+	async close(): Promise<void> {
+		if (this.reapTimer) {
+			clearInterval(this.reapTimer);
+			this.reapTimer = null;
+		}
+		for (const [, p] of this.projectPools) {
+			await p.end().catch(() => {});
+		}
+		this.projectPools.clear();
+		this.lastUsed.clear();
+	}
+}
+
+// Singleton PoolManager instance (lazy-initialized)
+let poolManager: PoolManager | null = null;
+
+/**
+ * Get or create the singleton PoolManager.
+ */
+export async function getPoolManager(): Promise<PoolManager> {
+	if (!poolManager) {
+		poolManager = await PoolManager.init();
+	}
+	return poolManager;
+}

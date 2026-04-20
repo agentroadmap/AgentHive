@@ -63,6 +63,8 @@ export interface SpawnRequest {
 	maxTokens?: number;
 	/** Wall-clock timeout in milliseconds (default 300 000 = 5 min) */
 	timeoutMs?: number;
+	/** P300: Project-aware worktree root (defaults to WORKTREE_ROOT) */
+	worktreeRoot?: string;
 }
 
 export interface SpawnResult {
@@ -377,8 +379,9 @@ async function supportsPerMillionRoutePricing(): Promise<boolean> {
 /** Parse .env.agent file — returns key/value pairs. */
 async function loadEnvAgent(
 	worktreeName: string,
+	worktreeRoot: string = WORKTREE_ROOT,
 ): Promise<Record<string, string>> {
-	const path = join(WORKTREE_ROOT, worktreeName, ".env.agent");
+	const path = join(worktreeRoot, worktreeName, ".env.agent");
 	let raw: string;
 	try {
 		raw = await readFile(path, "utf8");
@@ -411,8 +414,8 @@ async function loadEnvAgent(
  * Falls back to 'hermes' if the file doesn't exist — creds come from $HOME, not worktree.
  * Host policy is enforced by the caller, not here.
  */
-export async function detectProvider(worktreeName: string): Promise<AgentProvider> {
-	const envPath = join(WORKTREE_ROOT, worktreeName, ".env.agent");
+export async function detectProvider(worktreeName: string, worktreeRoot: string = WORKTREE_ROOT): Promise<AgentProvider> {
+	const envPath = join(worktreeRoot, worktreeName, ".env.agent");
 	try {
 		const content = await readFile(envPath, "utf8");
 		for (const line of content.split("\n")) {
@@ -674,14 +677,15 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		stage,
 		model: modelHint,
 		timeoutMs = 300_000,
+		worktreeRoot = WORKTREE_ROOT,
 	} = req;
 
-	const provider = await detectProvider(worktree);
+	const provider = await detectProvider(worktree, worktreeRoot);
 	// P235/M026: resolve full route (model + api_spec + base_url) from model_routes
 	const route = await resolveModelRoute(provider, modelHint);
 	// P245: enforce host-level spawn policy before launching any CLI subprocess.
 	await assertSpawnAllowed(AGENTHIVE_HOST, route, proposalId, worktree);
-	const agentEnv = await loadEnvAgent(worktree);
+	const agentEnv = await loadEnvAgent(worktree, worktreeRoot);
 	let assembledTask = task;
 
 	if (proposalId !== undefined) {
@@ -724,7 +728,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	const agentRunId = String(rows[0].id);
 
 	const startMs = Date.now();
-	const cwd = join(WORKTREE_ROOT, worktree);
+	const cwd = join(worktreeRoot, worktree);
 
 	const { stdout, stderr, exitCode } = await runProcess(
 		argv,
@@ -825,7 +829,7 @@ export async function escalateOrNotify(
 	result: SpawnResult,
 	proposalId?: number,
 ): Promise<SpawnResult | null> {
-	const provider = await detectProvider(req.worktree);
+	const provider = await detectProvider(req.worktree, req.worktreeRoot ?? WORKTREE_ROOT);
 
 	// P235/M026: build escalation ladder from model_routes for this agent_provider.
 	// Per model: pick best (lowest priority) route. Then sort models cheap → expensive.
