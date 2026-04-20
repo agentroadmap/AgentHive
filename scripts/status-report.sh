@@ -40,7 +40,7 @@ fi
 CUBIC_WT_MISMATCH=$($PG -c "
 SELECT COUNT(*) FROM roadmap.cubics c
 WHERE c.status = 'active'
-  AND NOT EXISTS (SELECT 1 WHERE c.worktree_path LIKE '/data/code/worktree/%');" 2>/dev/null)
+  AND c.worktree_path NOT LIKE '/data/code/worktree/%';" 2>/dev/null)
 
 # --- Cubics ---
 CUBICS_ACTIVE=$($PG -c "SELECT COUNT(*) FROM roadmap.cubics WHERE status = 'active';" 2>/dev/null)

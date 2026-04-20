@@ -2,7 +2,7 @@
 # Status report delivery — runs without LLM
 # Saves to file + optionally sends to Discord webhook
 # Logs failures to syslog (tag: agenthive-report) — does not crash
-set -uo pipefail
+set -euo pipefail
 
 TAG="agenthive-report"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
