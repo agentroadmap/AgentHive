@@ -101,6 +101,25 @@ export async function reapStaleRows(
 		);
 	}
 
+	// P309: Cancel blocked dispatches that have completed_at set.
+	// These escape the above reap (which requires completed_at IS NULL).
+	// Pre-P281 dead data from failed spawns and stale orchestrator runs.
+	try {
+		const r = await pool.query(
+			`UPDATE roadmap_workforce.squad_dispatch
+			 SET dispatch_status='cancelled',
+			     metadata = COALESCE(metadata,'{}'::jsonb) || jsonb_build_object('reaped_at', to_jsonb(now()), 'reaped_reason', 'blocked+completed cleanup')
+			 WHERE dispatch_status='blocked'
+			   AND completed_at IS NOT NULL
+			 RETURNING id`,
+		);
+		result.dispatches += r.rowCount ?? 0;
+	} catch (err) {
+		logger.warn(
+			`[${tag}] blocked dispatch reap failed: ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
+
 	// Task #24/#28: realign any IDENTITY sequences that drifted while we
 	// were down. Migration 037 installed fn_realign_identity_sequences which
 	// only moves sequences where max(col) > last_value, so this is a no-op
