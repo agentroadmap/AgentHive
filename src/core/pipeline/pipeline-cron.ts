@@ -147,6 +147,7 @@ type ProposalDispatchContext = {
 	alternatives: string | null;
 	drawbacks: string | null;
 	dependency: string | null;
+	requiredCapabilities: Record<string, string[]> | null;
 	unresolvedDependencies: number;
 	totalAcceptanceCriteria: number;
 	blockingAcceptanceCriteria: number;
@@ -475,8 +476,9 @@ async function loadProposalDispatchContext(
 		    p.design AS design,
 		    p.alternatives AS alternatives,
 		    p.drawbacks AS drawbacks,
-		    p.dependency AS dependency,
-		    COALESCE(dep.unresolved_dependencies, 0) AS unresolved_dependencies,
+	\t    p.dependency AS dependency,
+	\t    p.required_capabilities AS required_capabilities,
+	\t    COALESCE(dep.unresolved_dependencies, 0) AS unresolved_dependencies,
 		    COALESCE(ac.total_acceptance_criteria, 0) AS total_acceptance_criteria,
 		    COALESCE(ac.blocking_acceptance_criteria, 0) AS blocking_acceptance_criteria,
 		    COALESCE(ac.passed_acceptance_criteria, 0) AS passed_acceptance_criteria,
@@ -524,6 +526,7 @@ async function loadProposalDispatchContext(
 		alternatives: row.alternatives ?? null,
 		drawbacks: row.drawbacks ?? null,
 		dependency: row.dependency ?? null,
+		requiredCapabilities: row.required_capabilities ?? null,
 		unresolvedDependencies: row.unresolved_dependencies ?? 0,
 		totalAcceptanceCriteria: row.total_acceptance_criteria ?? 0,
 		blockingAcceptanceCriteria: row.blocking_acceptance_criteria ?? 0,
@@ -1121,8 +1124,11 @@ export class PipelineCron {
 		}
 
 		try {
-			// P297: Derive required_capabilities from dispatch role
-			const requiredCaps = roleToCapabilities(role, plan?.roles ?? [role]);
+			// P297: Required capabilities — proposal-level takes precedence over role mapping
+			const proposalCaps = proposalContext?.requiredCapabilities;
+			const requiredCaps = proposalCaps && Object.keys(proposalCaps).length > 0
+				? proposalCaps
+				: roleToCapabilities(role, plan?.roles ?? [role]);
 
 			const { rows } = await this.queryFn<{ id: number }>(
 				`INSERT INTO roadmap_workforce.squad_dispatch

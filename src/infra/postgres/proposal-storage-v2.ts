@@ -46,6 +46,7 @@ export type ProposalCreateInput = {
 	dependency?: string | null;
 	priority?: string | null;
 	tags?: any | null;
+	required_capabilities?: Record<string, string[]> | null;
 };
 
 export type ProposalSummary = Pick<
@@ -339,10 +340,10 @@ export async function createProposal(
 
 		const { rows } = await client.query<ProposalRow>(
 			`INSERT INTO roadmap_proposal.proposal (
-	      display_id, type, status, title, parent_id, summary, motivation, design,
-	      drawbacks, alternatives, dependency, priority, tags, audit
-	    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb)
-	    RETURNING ${PROPOSAL_COLUMNS}`,
+      display_id, type, status, title, parent_id, summary, motivation, design,
+      drawbacks, alternatives, dependency, priority, tags, required_capabilities, audit
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15::jsonb)
+    RETURNING ${PROPOSAL_COLUMNS}`,
 			[
 				input.display_id ?? null,
 				input.type,
@@ -357,6 +358,7 @@ export async function createProposal(
 				input.dependency ?? null,
 				input.priority ?? null,
 				input.tags ? JSON.stringify(input.tags) : null,
+				input.required_capabilities ? JSON.stringify(input.required_capabilities) : null,
 				JSON.stringify([
 					{
 						TS: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
