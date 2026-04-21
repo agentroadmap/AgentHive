@@ -42,9 +42,9 @@ import {
 				const match = /^\s*PGPASSWORD\s*=\s*(.+)/.exec(line);
 				if (match) {
 				const value = match[1].trim();
-			if (value === "***") continue; // skip sentinel, try next candidate
-			process.env.PGPASSWORD = value;
-			return;
+				if (value === "***") continue; // skip sentinel, try next candidate
+				process.env.PGPASSWORD = value;
+				return;
 				}
 			}
 		} catch {
@@ -274,7 +274,7 @@ export function initPoolFromConfig(dbConfig: Record<string, any>): Pool {
 
 	return getPool({
 		host: dbConfig.host ?? process.env.PGHOST ?? "127.0.0.1",
-		port: Number(dbConfig.port) ?? Number(process.env.PGPORT) ?? 5432,
+		port: Number(dbConfig.port || process.env.PGPORT || 5432),
 		user: dbConfig.user ?? process.env.PGUSER ?? "xiaomi",
 		password: process.env.PGPASSWORD ?? process.env.__PGPASSWORD_FROM_CONFIG,
 		database: dbConfig.name ?? process.env.PGDATABASE ?? "agenthive",
