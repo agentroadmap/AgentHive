@@ -91,6 +91,9 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 	const [reviews, setReviews] = useState<Array<{
 		id: number; reviewer_identity: string; verdict: string; notes: string | null; findings: string | null; is_blocking: boolean; reviewed_at: string;
 	}>>([]);
+	const [discussions, setDiscussions] = useState<Array<{
+		id: number; author_identity: string; context_prefix: string | null; body_markdown: string; created_at: string;
+	}>>([]);
 	const resolveDirectiveToId = useCallback(
 		(value?: string | null): string => {
 			const normalized = (value ?? "").trim();
@@ -333,9 +336,14 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 				.fetchProposalReviews(proposal.id)
 				.then(setReviews)
 				.catch(() => setReviews([]));
+			apiClient
+				.fetchProposalDiscussions(proposal.id)
+				.then(setDiscussions)
+				.catch(() => setDiscussions([]));
 		} else {
 			setDecisions([]);
 			setReviews([]);
+			setDiscussions([]);
 		}
 	}, [proposal, isCreateMode, isDraftMode, availableStatuses]);
 
@@ -1082,6 +1090,30 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 												})()}
 											</div>
 										)}
+									</div>
+								))}
+							</div>
+						</div>
+					)}
+					{/* Discussions */}
+					{mode === "preview" && discussions.length > 0 && (
+						<div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+							<SectionHeader title="Discussions" right={`${discussions.length} entries`} />
+							<div className="space-y-2 max-h-96 overflow-y-auto">
+								{discussions.map((d) => (
+									<div key={d.id} className="border-l-2 border-purple-400 dark:border-purple-500 pl-3 py-1">
+										<div className="flex items-center gap-2 text-xs">
+											{d.context_prefix && (
+												<span className="inline-block px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300">
+													{d.context_prefix}
+												</span>
+											)}
+											<span className="text-gray-600 dark:text-gray-400 font-medium">{d.author_identity}</span>
+											<span className="text-gray-400 dark:text-gray-500">{formatStoredUtcDateForDisplay(d.created_at)}</span>
+										</div>
+										<div className="text-sm text-gray-700 dark:text-gray-300 mt-1 whitespace-pre-wrap break-words">
+											{d.body_markdown.length > 500 ? d.body_markdown.slice(0, 500) + "..." : d.body_markdown}
+										</div>
 									</div>
 								))}
 							</div>

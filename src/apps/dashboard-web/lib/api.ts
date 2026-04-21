@@ -253,6 +253,19 @@ export class ApiClient {
 		return data.reviews;
 	}
 
+	async fetchProposalDiscussions(proposalId: string): Promise<Array<{
+		id: number;
+		author_identity: string;
+		context_prefix: string | null;
+		body_markdown: string;
+		created_at: string;
+	}>> {
+		const data = await this.fetchJson<{ notes: any[] }>(
+			`${API_BASE}/board/proposals/${encodeURIComponent(proposalId)}/notes`,
+		);
+		return data.notes;
+	}
+
 	async createProposal(
 		proposal: Omit<Proposal, "id" | "createdDate">,
 	): Promise<Proposal> {
