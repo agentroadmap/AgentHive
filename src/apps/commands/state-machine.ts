@@ -4,13 +4,14 @@
  * Usage:
  *   roadmap state-machine start        # Start orchestrator + gate-pipeline
  *   roadmap state-machine stop         # Stop both
+ *   roadmap state-machine restart      # Restart both
  *   roadmap state-machine status       # Show service status + offer stats
- *   roadmap state-machine register     # Register this host as an agency
  *   roadmap state-machine agencies     # List registered agencies
  *   roadmap state-machine offers       # List open/active offers
  */
 
 import { execSync } from "child_process";
+import { query } from "../../infra/postgres/pool";
 
 const SERVICES = [
   { name: "agenthive-orchestrator", label: "Orchestrator" },
@@ -19,8 +20,16 @@ const SERVICES = [
 
 function run(cmd: string): string {
   try {
-    return execSync(cmd, { encoding: "utf8", timeout: 10_000 }).trim();
-  } catch {
+    return execSync(cmd, {
+      encoding: "utf8",
+      timeout: 10_000,
+      stdio: ["pipe", "pipe", "pipe"],
+    }).trim();
+  } catch (err: any) {
+    const stderr = err.stderr?.toString().trim();
+    if (stderr) {
+      console.error(`  [error] ${stderr}`);
+    }
     return "";
   }
 }
@@ -83,69 +92,101 @@ export function registerStateMachineCommand(program: any) {
         console.log(`  ${icon} ${svc.label}: ${status}`);
       }
 
-      // DB stats
-      const pgPass = process.env.PG_PASSWORD || "";
-      const psql = `PGPASSWORD=${pgPass} psql -h 127.0.0.1 -U admin -d agenthive -t -c`;
-
-      console.log("\nAgencies:");
-      const agencies = run(`${psql} "SELECT agent_identity || ' (' || agent_type || ', ' || status || ')' FROM roadmap_workforce.agent_registry ORDER BY agent_identity;"`);
-      if (agencies) {
-        for (const line of agencies.split("\n").filter(Boolean)) {
-          console.log(`  ${line.trim()}`);
+      try {
+        // DB stats
+        console.log("\nAgencies:");
+        const agencies = await query(
+          `SELECT agent_identity || ' (' || agent_type || ', ' || status || ')' as info
+           FROM roadmap_workforce.agent_registry
+           ORDER BY agent_identity`
+        );
+        if (agencies.rows.length > 0) {
+          for (const row of agencies.rows) {
+            console.log(`  ${row.info}`);
+          }
+        } else {
+          console.log("  (none)");
         }
-      } else {
-        console.log("  (none)");
-      }
 
-      console.log("\nOffers:");
-      const offers = run(`${psql} "SELECT offer_status || ': ' || count(*) FROM roadmap_workforce.squad_dispatch GROUP BY offer_status ORDER BY offer_status;"`);
-      if (offers) {
-        for (const line of offers.split("\n").filter(Boolean)) {
-          console.log(`  ${line.trim()}`);
+        console.log("\nOffers:");
+        const offers = await query(
+          `SELECT offer_status || ': ' || count(*) as info
+           FROM roadmap_workforce.squad_dispatch
+           GROUP BY offer_status
+           ORDER BY offer_status`
+        );
+        if (offers.rows.length > 0) {
+          for (const row of offers.rows) {
+            console.log(`  ${row.info}`);
+          }
         }
-      }
 
-      console.log("\nActive dispatches:");
-      const active = run(`${psql} "SELECT id || ': ' || dispatch_role || ' @ ' || COALESCE(worker_identity, 'unassigned') || ' (' || offer_status || ')' FROM roadmap_workforce.squad_dispatch WHERE offer_status IN ('open','claimed','active') ORDER BY id DESC LIMIT 10;"`);
-      if (active) {
-        for (const line of active.split("\n").filter(Boolean)) {
-          console.log(`  ${line.trim()}`);
+        console.log("\nActive dispatches:");
+        const active = await query(
+          `SELECT id || ': ' || dispatch_role || ' @ ' ||
+                  COALESCE(worker_identity, 'unassigned') || ' (' || offer_status || ')' as info
+           FROM roadmap_workforce.squad_dispatch
+           WHERE offer_status IN ('open','claimed','active')
+           ORDER BY id DESC LIMIT 10`
+        );
+        if (active.rows.length > 0) {
+          for (const row of active.rows) {
+            console.log(`  ${row.info}`);
+          }
+        } else {
+          console.log("  (none)");
         }
-      } else {
-        console.log("  (none)");
+      } catch (err: any) {
+        console.error(`\n  DB query failed: ${err.message}`);
       }
     });
 
   sm.command("agencies")
     .description("List registered agencies and their capabilities")
-    .action(() => {
-      const pgPass = process.env.PG_PASSWORD || "";
-      const result = run(
-        `PGPASSWORD=${pgPass} psql -h 127.0.0.1 -U admin -d agenthive -c "
-          SELECT ar.agent_identity, ar.agent_type, ar.status,
-                 COALESCE(string_agg(ac.capability, ', ' ORDER BY ac.capability), 'none') as capabilities
-          FROM roadmap_workforce.agent_registry ar
-          LEFT JOIN roadmap_workforce.agent_capability ac ON ac.agent_id = ar.id
-          GROUP BY ar.id, ar.agent_identity, ar.agent_type, ar.status
-          ORDER BY ar.agent_identity;"`
-      );
-      console.log(result || "No agencies registered.");
+    .action(async () => {
+      try {
+        const result = await query(
+          `SELECT ar.agent_identity, ar.agent_type, ar.status,
+                  COALESCE(string_agg(ac.capability, ', ' ORDER BY ac.capability), 'none') as capabilities
+           FROM roadmap_workforce.agent_registry ar
+           LEFT JOIN roadmap_workforce.agent_capability ac ON ac.agent_id = ar.id
+           GROUP BY ar.id, ar.agent_identity, ar.agent_type, ar.status
+           ORDER BY ar.agent_identity`
+        );
+        if (result.rows.length === 0) {
+          console.log("No agencies registered.");
+          return;
+        }
+        for (const row of result.rows) {
+          console.log(`  ${row.agent_identity} [${row.agent_type}, ${row.status}] caps: ${row.capabilities}`);
+        }
+      } catch (err: any) {
+        console.error(`DB query failed: ${err.message}`);
+      }
     });
 
   sm.command("offers")
     .description("List open and active offers")
-    .action(() => {
-      const pgPass = process.env.PG_PASSWORD || "";
-      const result = run(
-        `PGPASSWORD=${pgPass} psql -h 127.0.0.1 -U admin -d agenthive -c "
-          SELECT id, proposal_id, dispatch_role, offer_status,
-                 COALESCE(agent_identity, '-') as agency,
-                 COALESCE(worker_identity, '-') as worker,
-                 required_capabilities
-          FROM roadmap_workforce.squad_dispatch
-          WHERE offer_status IN ('open','claimed','active')
-          ORDER BY id;"`
-      );
-      console.log(result || "No open/active offers.");
+    .action(async () => {
+      try {
+        const result = await query(
+          `SELECT id, proposal_id, dispatch_role, offer_status,
+                  COALESCE(agent_identity, '-') as agency,
+                  COALESCE(worker_identity, '-') as worker,
+                  required_capabilities
+           FROM roadmap_workforce.squad_dispatch
+           WHERE offer_status IN ('open','claimed','active')
+           ORDER BY id`
+        );
+        if (result.rows.length === 0) {
+          console.log("No open/active offers.");
+          return;
+        }
+        for (const row of result.rows) {
+          console.log(`  #${row.id} P${row.proposal_id} ${row.dispatch_role} [${row.offer_status}] ${row.agency}/${row.worker} caps=${row.required_capabilities}`);
+        }
+      } catch (err: any) {
+        console.error(`DB query failed: ${err.message}`);
+      }
     });
 }
