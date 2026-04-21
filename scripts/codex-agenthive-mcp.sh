@@ -6,7 +6,7 @@ if [[ -f ".env.agent" ]]; then
   # shellcheck disable=SC1091
   source ".env.agent"
   set +a
-  unset PG_HOST PG_PORT PG_USER PG_PASSWORD PG_DATABASE PG_SCHEMA
+  unset PGHOST PGPORT PGUSER PGPASSWORD PGDATABASE PGSCHEMA
 elif [[ -f "${HOME}/.agenthive.env" ]]; then
   set -a
   # shellcheck disable=SC1091

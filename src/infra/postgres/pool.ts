@@ -3,13 +3,13 @@
  *
  * Config precedence (highest first):
  * 1. Explicit PoolConfig passed to getPool()
- * 2. Environment variables (PG_HOST, PG_PORT, PG_USER, PG_PASSWORD, PG_DATABASE)
+ * 2. Environment variables (PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE)
  * 3. DATABASE_URL
  *
  * Connections default to the AgentHive domain search path:
  * roadmap_proposal, roadmap_workforce, roadmap_efficiency, roadmap, public.
  *
- * For CLI contexts (no systemd env), PG_PASSWORD is loaded from:
+ * For CLI contexts (no systemd env), PGPASSWORD is loaded from:
  *   - Project root `.env` file
  *   - `~/.agenthive.env` file
  *
@@ -26,9 +26,9 @@ import {
 	type QueryResultRow,
 } from "pg";
 
-// Attempt to load PG_PASSWORD from .env files if not set in environment
+// Attempt to load PGPASSWORD from .env files if not set in environment
 (function loadPGPassword() {
-	if (process.env.PG_PASSWORD) return;
+	if (process.env.PGPASSWORD) return;
 	const candidates = [
 		resolve(process.cwd(), ".env"),
 		resolve(process.cwd(), ".env.agent"),
@@ -39,9 +39,9 @@ import {
 			if (!existsSync(envPath)) continue;
 			const content = readFileSync(envPath, "utf-8");
 				for (const line of content.split("\n")) {
-				const match = /^\s*PG_PASSWORD\s*=\s*(.+)/.exec(line);
+				const match = /^\s*PGPASSWORD\s*=\s*(.+)/.exec(line);
 		if (match) {
-			process.env.PG_PASSWORD = match[1].trim();
+			process.env.PGPASSWORD = match[1].trim();
 			return;
 				}
 				}
@@ -140,14 +140,14 @@ function resolvePoolConfig(config?: AgentHivePoolConfig): ResolvedPoolConfig {
 
 	const resolvedPassword =
 		configuredPassword ??
-		process.env.PG_PASSWORD ??
+		process.env.PGPASSWORD ??
 		databaseUrlConfig.password ??
-		process.env.__PG_PASSWORD_FROM_CONFIG;
+		process.env.__PGPASSWORD_FROM_CONFIG;
 
 	if (!resolvedPassword) {
 		throw new Error(
-			"[PG] PG_PASSWORD environment variable is required. " +
-				"Set PG_PASSWORD before starting the MCP server.",
+			"[PG] PGPASSWORD environment variable is required. " +
+				"Set PGPASSWORD before starting the MCP server.",
 		);
 	}
 
@@ -158,18 +158,18 @@ function resolvePoolConfig(config?: AgentHivePoolConfig): ResolvedPoolConfig {
 	return {
 		host:
 			config?.host ??
-			process.env.PG_HOST ??
+			process.env.PGHOST ??
 			databaseUrlConfig.host ??
 			"127.0.0.1",
 		port:
-			Number(config?.port ?? process.env.PG_PORT ?? databaseUrlConfig.port) ||
+			Number(config?.port ?? process.env.PGPORT ?? databaseUrlConfig.port) ||
 			5432,
 		user:
-			config?.user ?? process.env.PG_USER ?? databaseUrlConfig.user ?? "xiaomi",
+			config?.user ?? process.env.PGUSER ?? databaseUrlConfig.user ?? "xiaomi",
 		password: resolvedPassword,
 		database:
 			config?.database ??
-			process.env.PG_DATABASE ??
+			process.env.PGDATABASE ??
 			databaseUrlConfig.database ??
 			"agenthive",
 		options: buildSearchPathOptions(
@@ -259,11 +259,11 @@ export function getPool(config?: AgentHivePoolConfig): Pool {
  * anywhere on disk or in logs.
  */
 export function initPoolFromConfig(dbConfig: Record<string, any>): Pool {
-	if (dbConfig.password && !process.env.PG_PASSWORD) {
+	if (dbConfig.password && !process.env.PGPASSWORD) {
 		// Transfer config password into env so the singleton getter sees it.
 		// This prevents the password from being stored in the Pg Pool options
 		// object (which could be leaked in logs or debug dumps).
-		process.env.__PG_PASSWORD_FROM_CONFIG = dbConfig.password;
+		process.env.__PGPASSWORD_FROM_CONFIG = dbConfig.password;
 	}
 
 	configuredSchema = normalizeSchemaName(
@@ -271,11 +271,11 @@ export function initPoolFromConfig(dbConfig: Record<string, any>): Pool {
 	);
 
 	return getPool({
-		host: dbConfig.host ?? process.env.PG_HOST ?? "127.0.0.1",
-		port: Number(dbConfig.port) ?? Number(process.env.PG_PORT) ?? 5432,
-		user: dbConfig.user ?? process.env.PG_USER ?? "xiaomi",
-		password: process.env.PG_PASSWORD ?? process.env.__PG_PASSWORD_FROM_CONFIG,
-		database: dbConfig.name ?? process.env.PG_DATABASE ?? "agenthive",
+		host: dbConfig.host ?? process.env.PGHOST ?? "127.0.0.1",
+		port: Number(dbConfig.port) ?? Number(process.env.PGPORT) ?? 5432,
+		user: dbConfig.user ?? process.env.PGUSER ?? "xiaomi",
+		password: process.env.PGPASSWORD ?? process.env.__PGPASSWORD_FROM_CONFIG,
+		database: dbConfig.name ?? process.env.PGDATABASE ?? "agenthive",
 		schema: configuredSchema,
 	});
 }
@@ -410,7 +410,7 @@ export class PoolManager {
 			port: config.db_port,
 			database: config.db_name,
 			user: config.db_user,
-			password: process.env.PG_PASSWORD,
+			password: process.env.PGPASSWORD,
 			max: DEFAULT_PROJECT_MAX,
 			idleTimeoutMillis: IDLE_REAP_MS,
 			allowExitOnIdle: true,

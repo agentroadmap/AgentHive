@@ -17,7 +17,6 @@ const CHANNELS = [
 // Load PG password
 function getPGPassword(): string {
   const candidates = [
-    process.env.PG_PASSWORD,
     process.env.PGPASSWORD,
   ];
   for (const pw of candidates) {
@@ -31,7 +30,7 @@ function getPGPassword(): string {
   for (const envPath of envPaths) {
     if (!envPath || !existsSync(envPath)) continue;
     for (const line of readFileSync(envPath, "utf-8").split("\n")) {
-      const m = /^\s*(?:PGPASSWORD|PG_PASSWORD)\s*=\s*(.+)/.exec(line);
+      const m = /^\s*PGPASSWORD\s*=\s*(.+)/.exec(line);
       if (m) return m[1].trim();
     }
   }

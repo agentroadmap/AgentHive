@@ -5,11 +5,11 @@ set -euo pipefail
 # Load DB credentials — from env or .env file
 if [ -z "${PGPASSWORD:-}" ] && [ -f "$HOME/.hermes/.env" ]; then
   . "$HOME/.hermes/.env"
-  export PGPASSWORD PG_USER PG_DATABASE
+  export PGPASSWORD PGUSER PGDATABASE
 fi
 PGPASSWORD="${PGPASSWORD:?ERROR: PGPASSWORD not set — source ~/.hermes/.env}"
 export PGPASSWORD
-PG="psql -h 127.0.0.1 -U ${PG_USER:-xiaomi} -d ${PG_DATABASE:-agenthive} -t -A"
+PG="psql -h 127.0.0.1 -U ${PGUSER:-xiaomi} -d ${PGDATABASE:-agenthive} -t -A"
 
 # --- Services ---
 SERVICES=""

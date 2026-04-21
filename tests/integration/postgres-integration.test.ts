@@ -32,10 +32,10 @@ function loadEnvFilePassword(): string | undefined {
 	for (const candidate of [".env", ".env.agent"]) {
 		if (!existsSync(candidate)) continue;
 		const env = readFileSync(candidate, "utf8");
-		const match = env.match(/^PG_PASSWORD=(.+)$/m);
+		const match = env.match(/^PGPASSWORD=(.+)$/m);
 		if (match) {
-			process.env.PG_PASSWORD = match[1].trim();
-			return process.env.PG_PASSWORD;
+			process.env.PGPASSWORD = match[1].trim();
+			return process.env.PGPASSWORD;
 		}
 	}
 	return undefined;
@@ -71,13 +71,13 @@ function parseDatabaseUrl(value?: string): {
 function resolvePgConfig() {
 	const databaseUrlConfig = parseDatabaseUrl(process.env.DATABASE_URL);
 	const password =
-		process.env.PG_PASSWORD ??
+		process.env.PGPASSWORD ??
 		databaseUrlConfig.password ??
 		loadEnvFilePassword();
 
 	if (!password) {
 		throw new Error(
-			"PG_PASSWORD or DATABASE_URL is required for postgres-integration.test.ts",
+			"PGPASSWORD or DATABASE_URL is required for postgres-integration.test.ts",
 		);
 	}
 

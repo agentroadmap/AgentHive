@@ -873,6 +873,8 @@ async function claimImplicitGateReady(
            FROM roadmap_proposal.proposal_lease pl
           WHERE pl.proposal_id = p.id
             AND pl.released_at IS NULL
+            -- Treat expired leases as no lease (agent died)
+            AND pl.expires_at > now()
           ORDER BY pl.claimed_at DESC
           LIMIT 1
        ) lease ON true
@@ -884,10 +886,22 @@ async function claimImplicitGateReady(
           ORDER BY sd.assigned_at DESC
           LIMIT 1
        ) dispatch ON true
-      WHERE p.maturity = 'mature'
-        AND p.status IN ('DRAFT', 'REVIEW', 'DEVELOP', 'MERGE')
+      WHERE p.status IN ('DRAFT', 'REVIEW', 'DEVELOP', 'MERGE')
         AND ($1::bigint IS NULL OR p.id = $1)
-      ORDER BY p.modified_at ASC, p.id ASC
+        AND (
+          -- Mature: ready for gate decision
+          p.maturity = 'mature'
+          -- New without active lease: needs an agent
+          OR (
+            p.maturity = 'new'
+            AND lease.agent_identity IS NULL
+            AND dispatch.id IS NULL
+          )
+        )
+      ORDER BY
+        -- Unclaimed new proposals first (they need work)
+        CASE WHEN p.maturity = 'new' AND lease.agent_identity IS NULL THEN 0 ELSE 1 END,
+        p.modified_at ASC, p.id ASC
       LIMIT $2`,
 		[proposalId ?? null, limit],
 	);

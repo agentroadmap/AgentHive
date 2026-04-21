@@ -6,11 +6,11 @@ set -euo pipefail
 # Load DB credentials — from env or .env file
 if [ -z "${PGPASSWORD:-}" ] && [ -f "$HOME/.hermes/.env" ]; then
   . "$HOME/.hermes/.env"
-  export PGPASSWORD PG_USER PG_DATABASE DISCORD_WEBHOOK_STATEFEED
+  export PGPASSWORD PGUSER PGDATABASE DISCORD_WEBHOOK_STATEFEED
 fi
 PGPASSWORD="${PGPASSWORD:?ERROR: PGPASSWORD not set — source ~/.hermes/.env}"
 export PGPASSWORD
-PG="psql -h 127.0.0.1 -U ${PG_USER:-xiaomi} -d ${PG_DATABASE:-agenthive} -t -A"
+PG="psql -h 127.0.0.1 -U ${PGUSER:-xiaomi} -d ${PGDATABASE:-agenthive} -t -A"
 WEBHOOK_URL="${DISCORD_WEBHOOK_STATEFEED:?ERROR: DISCORD_WEBHOOK_STATEFEED not set — add to ~/.hermes/.env}"
 LISTENER_SCRIPT="/data/code/AgentHive/scripts/state-feed-listener.ts"
 STATE_FILE="$HOME/.hermes/cron/output/.state-feed-watchdog"
