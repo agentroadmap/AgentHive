@@ -2,7 +2,7 @@
 ## Reconcile and deduplicate 5 instruction files — AGENTS.md, CLAUDE.md, CONVENTIONS.md, agentGuide.md, copilot-instructions.md
 
 **Status:** SHIPPED
-**Date:** 2026-04-21
+**Date:** 2026-04-20
 **Type:** Issue
 **Proposal:** P310
 
@@ -55,16 +55,16 @@ From AGENTS.md/CLAUDE.md (consolidated into existing sections):
 
 | AC | Criteria | Result |
 | :--- | :--- | :--- |
-| AC1 | Precedence section exists in CONVENTIONS.md | PASS |
-| AC2 | AGENTS.md is thin shim (~30 lines, 26 actual) | PASS |
-| AC3 | CLAUDE.md is thin shim (~40 lines, 27 actual) | PASS |
-| AC4 | agentGuide.md retired with pointer table | PASS |
-| AC5 | copilot-instructions.md is redirect | PASS |
-| AC6 | schema-migration-guide.md exists | PASS |
-| AC7 | Merged content (overseer, governance, escalation) in CONVENTIONS.md | PASS |
-| AC8 | No hardcoded worktree paths in agentGuide.md | PASS |
-| AC9 | AGENTS.md points to CONVENTIONS.md | PASS |
-| AC10 | CLAUDE.md points to CONVENTIONS.md | PASS |
+| AC1 | All proposal-type definitions, RFC workflow states, and maturity levels exist in exactly ONE canonical file (CONVENTIONS.md). No other file contains duplicated versions. | PASS |
+| AC2 | AGENTS.md contains a clear pointer to CONVENTIONS.md as the precedence winner, plus only Codex-specific content. | PASS |
+| AC3 | CLAUDE.md contains a clear pointer to CONVENTIONS.md as the precedence winner, plus only Claude-specific content (hotfix workflow, model constraints). | PASS |
+| AC4 | agentGuide.md unique content (overseer role, financial governance, loop detection, escalation matrix) is merged into CONVENTIONS.md under dedicated sections. | PASS |
+| AC5 | copilot-instructions.md is moved to docs/reference/schema-migration-guide.md. A thin redirect remains at .github/copilot-instructions.md for Copilot auto-discovery. | PASS |
+| AC6 | Worktree path convention is CWD-based across all files. No hardcoded /data/code/worktree-{agent_name} paths remain in agent instructions. | PASS |
+| AC7 | No agent-facing instruction file contains content that contradicts another file. | PASS |
+| AC8 | CONVENTIONS.md has a File Precedence section declaring it the canonical source for all shared project rules. | PASS |
+| AC9 | agentGuide.md retired, replaced with pointer to CONVENTIONS.md. | PASS |
+| AC10 | No contradictions remain: worktree path uses CWD convention everywhere, maturity definitions consistent, escalation rules unified. | PASS |
 
 ## Verification
 
