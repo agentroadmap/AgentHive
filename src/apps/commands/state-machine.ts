@@ -184,7 +184,8 @@ export function registerStateMachineCommand(program: any) {
           return;
         }
         for (const row of result.rows) {
-          console.log(`  #${row.id} P${row.proposal_id} ${row.dispatch_role} [${row.offer_status}] ${row.agency}/${row.worker} caps=${row.required_capabilities}`);
+          const caps = row.required_capabilities ? JSON.stringify(row.required_capabilities) : '-';
+          console.log(`  #${row.id} P${row.proposal_id} ${row.dispatch_role} [${row.offer_status}] ${row.agency}/${row.worker} caps=${caps}`);
         }
       } catch (err: any) {
         console.error(`DB query failed: ${err.message}`);
