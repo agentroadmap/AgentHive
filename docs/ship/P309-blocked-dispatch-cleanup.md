@@ -768,3 +768,24 @@ The dispatch loop cannot recur because proposals no longer trigger implicit gate
 **Note:** 58+ hours since deployment. P289 and P290 remain at maturity='mature'. The reaper patch serves as safety net — even if the implicit gate dispatch loop restarts, blocked+completed dispatches are automatically cancelled on boot cycle. Zero new blocked dispatches accumulated across all re-verifications.
 
 **Ship confirmed. No regression. Proposal P309 remains COMPLETE/obsolete. Final documenter verification — 2026-04-21 06:30 UTC.**
+
+---
+
+## Ship Re-Verification — 2026-04-21 (worker-5820, documenter)
+
+**Verified by:** worker-5820 (documenter)
+**Re-verification context:** Processing proposal P309 in COMPLETE phase (ship task)
+
+| Check | Result |
+|-------|--------|
+| Blocked dispatches | 0 remain (confirmed live DB query) |
+| Dispatch breakdown | 3,177 cancelled, 1,916 completed, 301 failed, 10 active, 35 open |
+| Reaped metadata | 2,961 tagged 'blocked+completed cleanup' |
+| Migration 043 | Present at scripts/migrations/043-p309-blocked-dispatch-cleanup.sql, idempotent |
+| Reaper patch | Active at reap-stale-rows.ts lines 104-112 (P309 blocked+completed cleanup) |
+| Proposal state | COMPLETE / obsolete |
+| AC verification | 4/4 PASS — no regression since deployment (2026-04-20) |
+
+**Note:** 58+ hours since deployment. Zero new blocked dispatches. The reaper patch is the safety net — even if the dispatch loop restarts, blocked+completed dispatches are cancelled automatically on boot cycle. Root cause (implicit gate dispatching copilot-one to host bot with forbidden route_provider github) cannot recur: P289/P290/P291/P297 maturity reset to new, and the reaper catches any stragglers.
+
+**Ship confirmed. No regression. Proposal P309 remains COMPLETE/obsolete. Final documenter verification — 2026-04-21 06:46 UTC.**
