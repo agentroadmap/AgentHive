@@ -8,7 +8,7 @@
 **Phase:** Complete (ship)
 **Created:** 2026-04-20
 **Completed:** 2026-04-20
-**Verified:** 2026-04-20 (initial), 2026-04-20 22:52 (re-verify), 2026-04-21 (ship processing), 2026-04-21 02:26 (ship final), 2026-04-21 22:41 (documenter re-confirm)
+**Verified:** 2026-04-20 (initial), 2026-04-20 22:52 (re-verify), 2026-04-21 (ship processing), 2026-04-21 02:26 (ship final), 2026-04-21 22:41 (documenter re-confirm), 2026-04-21 04:17 (documenter re-confirm, worker-5461)
 **Status:** SHIPPED
 
 ## Problem Statement
@@ -491,5 +491,24 @@ Run by pillar-researcher (worker-5462) in COMPLETE phase ship processing.
 | Trigger `trg_normalize_proposal_status` enabled | PASS — tgenabled='O' |
 | CHECK `proposal_status_canonical` active | PASS |
 | Proposal P306 status | COMPLETE, maturity obsolete |
+
+**All 8 ACs PASS. P306 fully shipped. No further action needed.**
+
+## Documenter Re-Verification (2026-04-21 04:17 UTC)
+
+Run by documenter (worker-5461) in COMPLETE phase ship processing.
+
+| Check | Result |
+|-------|--------|
+| `COUNT(DISTINCT status)` = 6 | PASS — COMPLETE(71), DEPLOYED(34), DEVELOP(30), DRAFT(34), MERGE(2), REVIEW(13) |
+| `COUNT(*) WHERE status != UPPER(status)` = 0 | PASS — zero residual mixed-case |
+| Trigger `trg_normalize_proposal_status` enabled | PASS — tgenabled='O' |
+| CHECK `proposal_status_canonical` active | PASS — constraint_type='c' |
+| LOWER() removed from orchestrator.ts + bootstrap | PASS — grep returns exit 1 (no matches) |
+| LOWER() preserved in pipeline-cron.ts:1278 | PASS — intentional cross-table comparison |
+| toUpperCase() in proposal-storage-v2.ts:342 | PASS — input guard active |
+| Migration 044 exists | PASS — database/ddl/v4/044-normalize-proposal-status-casing.sql |
+| Proposal P306 status | COMPLETE, maturity obsolete |
+| Git HEAD | d1ebef4 — clean, on main |
 
 **All 8 ACs PASS. P306 fully shipped. No further action needed.**
