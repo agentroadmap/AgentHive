@@ -416,3 +416,8 @@
 [2026-04-21 06:57:37] System: **[proposal created]** PROPOSAL-1 - Dead End
 [2026-04-21 06:57:38] System: __roadmap_msg_b64__:KipbcHJvcG9zYWwgY3JlYXRlZF0qKiBQUk9KRUNUIC0gTmV3IFByb2plY3QKPiBQcm9qZWN0IGluaXRpYWxpemVkIHdpdGggQWdlbnQgVXRpbGl0eSBCZWx0IGluZnJhc3RydWN0dXJlLg==
 [2026-04-21 06:57:38] System: **[proposal created]** PROPOSAL-1 - Dependency
+[2026-04-21 06:57:38] System: **[proposal created]** PROPOSAL-1 - Symlink root proposal
+[2026-04-21 06:57:39] System: **[proposal created]** PROPOSAL-1 - High Priority
+[2026-04-21 06:57:40] System: **[proposal created]** PROPOSAL-2 - Medium Priority
+[2026-04-21 06:57:40] System: **[proposal created]** PROPOSAL-1 - Renewal Test
+[2026-04-21 06:57:40] System: **[proposal created]** PROPOSAL-1 - Symlink root auto-commit
