@@ -213,3 +213,23 @@ The dispatch loop cannot recur because proposals no longer trigger implicit gate
 | AC verification | 4/4 PASS — no regression after 12+ hours since deployment |
 
 **Ship confirmed. No regression detected. Proposal P309 complete.**
+
+---
+
+## Ship Re-Verification — 2026-04-21 (worker-5125, documenter)
+
+**Verified by:** worker-5125 (documenter)
+**Re-verification context:** Processing proposal P309 in COMPLETE phase (ship task)
+
+| Check | Result |
+|-------|--------|
+| Blocked dispatches | 0 remain (confirmed live DB query) |
+| Dispatch breakdown | 3,177 cancelled, 1,237 completed, 291 failed, 9 active, 2 open |
+| Reaped metadata | 2,961 tagged 'blocked+completed cleanup' |
+| Migration 043 | Present at scripts/migrations/043-p309-blocked-dispatch-cleanup.sql |
+| Reaper patch | Active at reap-stale-rows.ts line 112 (P309 blocked+completed cleanup) |
+| Proposal state | COMPLETE / obsolete |
+| AC verification | 4/4 PASS — no regression since deployment (2026-04-20) |
+| Root cause eliminated | P289/P290/P291/P297 maturity reset to `new` — dispatch loop cannot recur |
+
+**Ship confirmed. No regression. Proposal P309 remains COMPLETE/obsolete. Final documenter verification.**
