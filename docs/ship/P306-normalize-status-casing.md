@@ -256,3 +256,22 @@ Run by pillar-researcher (worker-5124) in COMPLETE phase ship processing.
 - **Trigger fires BEFORE CHECK:** The trigger converts to UPPERCASE before the CHECK constraint evaluates, so the constraint can list both cases safely.
 - **pipeline-cron.ts LOWER() preserved intentionally:** Compares `proposal.status` (now UPPERCASE) against `transition_queue.to_stage` (title-case). This cross-table comparison requires LOWER() until to_stage is normalized separately.
 - **Deploy order safe:** Migration first (trigger handles new inserts), then code cleanup. No window of vulnerability.
+
+## Pillar-Researcher Re-Verification (2026-04-21 23:11 UTC)
+
+Run by pillar-researcher (worker-5137) in COMPLETE phase ship processing.
+
+| Check | Result |
+|-------|--------|
+| `COUNT(DISTINCT status)` = 6 | PASS — DRAFT(35), REVIEW(14), DEVELOP(30), MERGE(1), COMPLETE(70), DEPLOYED(34) |
+| `COUNT(*) WHERE status != UPPER(status)` = 0 | PASS — zero residual mixed-case |
+| Trigger `trg_normalize_proposal_status` enabled | PASS — tgenabled='O' |
+| CHECK `proposal_status_canonical` active | PASS — constraint exists |
+| LOWER() removed from orchestrator.ts + bootstrap | PASS — grep confirms zero matches |
+| toUpperCase() in proposal-storage-v2.ts:342 | PASS — input guard active |
+| LOWER() preserved in pipeline-cron.ts:1278 | PASS — intentional cross-table comparison |
+| AC items in DB | 8/8 PASS (verified_by=hermes) |
+| Migration 044 | Committed + merged to main |
+| Proposal P306 | COMPLETE, maturity obsolete |
+
+**All 8 ACs PASS. P306 fully shipped. No further action needed.**
