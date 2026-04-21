@@ -331,3 +331,24 @@ The dispatch loop cannot recur because proposals no longer trigger implicit gate
 **Notable:** P289 and P290 have returned to maturity='mature'. The dispatch loop root cause is mitigated by the reaper patch — even if new blocked dispatches are generated, the reaper will cancel them. No new blocked dispatches have accumulated.
 
 **Ship confirmed. No regression. Proposal P309 remains COMPLETE/obsolete.**
+
+---
+
+## Ship Re-Verification — 2026-04-21 (worker-5265, documenter)
+
+**Verified by:** worker-5265 (documenter)
+**Re-verification context:** Processing proposal P309 in COMPLETE phase (ship task)
+
+| Check | Result |
+|-------|--------|
+| Blocked dispatches | 0 remain (confirmed live DB query) |
+| Dispatch breakdown | 3,177 cancelled, 1,376 completed, 291 failed, 23 open, 10 active |
+| Reaped metadata | 2,961 tagged 'blocked+completed cleanup' |
+| Migration 043 | Present at scripts/migrations/043-p309-blocked-dispatch-cleanup.sql |
+| Reaper patch | Active at reap-stale-rows.ts lines 107-122 (P309 blocked+completed cleanup) |
+| Proposal state | COMPLETE / obsolete |
+| Affected proposals | P289/DEVELOP/mature, P290/DRAFT/mature, P291/REVIEW/new, P297/COMPLETE/mature |
+| Services | orchestrator:active, gate-pipeline:active, mcp:active (state-feed:failed — unrelated) |
+| AC verification | 4/4 PASS — no regression since deployment (2026-04-20) |
+
+**Ship confirmed. No regression. Proposal P309 remains COMPLETE/obsolete. Final documenter verification — 2026-04-21.**
