@@ -38,13 +38,13 @@ import {
 		try {
 			if (!existsSync(envPath)) continue;
 			const content = readFileSync(envPath, "utf-8");
-			for (const line of content.split("\n")) {
+				for (const line of content.split("\n")) {
 				const match = /^\s*PG_PASSWORD\s*=\s*(.+)/.exec(line);
-				if (match) {
-					process.env.PG_PASSWORD = match[1].trim();
-					return;
+		if (match) {
+			process.env.PG_PASSWORD = match[1].trim();
+			return;
 				}
-			}
+				}
 		} catch {
 			// fallthrough
 		}
@@ -165,7 +165,7 @@ function resolvePoolConfig(config?: AgentHivePoolConfig): ResolvedPoolConfig {
 			Number(config?.port ?? process.env.PG_PORT ?? databaseUrlConfig.port) ||
 			5432,
 		user:
-			config?.user ?? process.env.PG_USER ?? databaseUrlConfig.user ?? "admin",
+			config?.user ?? process.env.PG_USER ?? databaseUrlConfig.user ?? "xiaomi",
 		password: resolvedPassword,
 		database:
 			config?.database ??
@@ -273,7 +273,7 @@ export function initPoolFromConfig(dbConfig: Record<string, any>): Pool {
 	return getPool({
 		host: dbConfig.host ?? process.env.PG_HOST ?? "127.0.0.1",
 		port: Number(dbConfig.port) ?? Number(process.env.PG_PORT) ?? 5432,
-		user: dbConfig.user ?? process.env.PG_USER ?? "admin",
+		user: dbConfig.user ?? process.env.PG_USER ?? "xiaomi",
 		password: process.env.PG_PASSWORD ?? process.env.__PG_PASSWORD_FROM_CONFIG,
 		database: dbConfig.name ?? process.env.PG_DATABASE ?? "agenthive",
 		schema: configuredSchema,
