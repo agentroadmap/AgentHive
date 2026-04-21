@@ -85,6 +85,15 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 	const [criteria, setCriteria] = useState<AcceptanceCriterion[]>(
 		proposal?.acceptanceCriteriaItems || [],
 	);
+	const [decisions, setDecisions] = useState<Array<{
+		id: number; decision: string; authority: string; rationale: string | null; binding: boolean; decided_at: string;
+	}>>([]);
+	const [reviews, setReviews] = useState<Array<{
+		id: number; reviewer_identity: string; verdict: string; notes: string | null; findings: string | null; is_blocking: boolean; reviewed_at: string;
+	}>>([]);
+	const [discussions, setDiscussions] = useState<Array<{
+		id: number; author_identity: string; context_prefix: string | null; body_markdown: string; created_at: string;
+	}>>([]);
 	const resolveDirectiveToId = useCallback(
 		(value?: string | null): string => {
 			const normalized = (value ?? "").trim();
@@ -317,6 +326,25 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 			.fetchProposals()
 			.then(setAvailableProposals)
 			.catch(() => setAvailableProposals([]));
+		// Fetch decisions and reviews for this proposal
+		if (proposal?.id) {
+			apiClient
+				.fetchProposalDecisions(proposal.id)
+				.then(setDecisions)
+				.catch(() => setDecisions([]));
+			apiClient
+				.fetchProposalReviews(proposal.id)
+				.then(setReviews)
+				.catch(() => setReviews([]));
+			apiClient
+				.fetchProposalDiscussions(proposal.id)
+				.then(setDiscussions)
+				.catch(() => setDiscussions([]));
+		} else {
+			setDecisions([]);
+			setReviews([]);
+			setDiscussions([]);
+		}
 	}, [proposal, isCreateMode, isDraftMode, availableStatuses]);
 
 	const handleCancelEdit = useCallback(() => {
@@ -1003,6 +1031,92 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 									/>
 								</div>
 							)}
+						</div>
+					)}
+					{/* Decisions */}
+					{mode === "preview" && decisions.length > 0 && (
+						<div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+							<SectionHeader title="Decisions" right={`${decisions.length} recorded`} />
+							<div className="space-y-3">
+								{decisions.map((d) => (
+									<div key={d.id} className="border-l-2 border-blue-400 dark:border-blue-500 pl-3">
+										<div className="flex items-center gap-2 text-sm">
+											<span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${
+												d.binding ? "bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300" : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400"
+											}`}>
+												{d.binding ? "binding" : "non-binding"}
+											</span>
+											<span className="text-gray-500 dark:text-gray-400">by {d.authority}</span>
+											<span className="text-gray-400 dark:text-gray-500 text-xs">{formatStoredUtcDateForDisplay(d.decided_at)}</span>
+										</div>
+										<div className="text-sm text-gray-800 dark:text-gray-200 mt-1">{d.decision}</div>
+										{d.rationale && (
+											<div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Rationale: {d.rationale}</div>
+										)}
+									</div>
+								))}
+							</div>
+						</div>
+					)}
+					{/* Reviews */}
+					{mode === "preview" && reviews.length > 0 && (
+						<div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+							<SectionHeader title="Reviews" right={`${reviews.length} recorded`} />
+							<div className="space-y-3">
+								{reviews.map((r) => (
+									<div key={r.id} className={`border-l-2 pl-3 ${
+										r.verdict === "approve" ? "border-green-400 dark:border-green-500" :
+										r.verdict === "request_changes" ? "border-yellow-400 dark:border-yellow-500" :
+										"border-red-400 dark:border-red-500"
+									}`}>
+										<div className="flex items-center gap-2 text-sm">
+											<span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${
+												r.verdict === "approve" ? "bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300" :
+												r.verdict === "request_changes" ? "bg-yellow-100 dark:bg-yellow-900 text-yellow-700 dark:text-yellow-300" :
+												"bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300"
+											}`}>
+												{r.verdict}
+											</span>
+											<span className="text-gray-500 dark:text-gray-400">by {r.reviewer_identity}</span>
+											<span className="text-gray-400 dark:text-gray-500 text-xs">{formatStoredUtcDateForDisplay(r.reviewed_at)}</span>
+										</div>
+										{r.notes && (
+											<div className="text-sm text-gray-700 dark:text-gray-300 mt-1">{r.notes}</div>
+										)}
+										{r.findings && (
+											<div className="text-xs text-gray-500 dark:text-gray-400 mt-1 font-mono bg-gray-50 dark:bg-gray-900 rounded p-1.5 overflow-x-auto">
+												{(() => {
+													try { return JSON.stringify(JSON.parse(r.findings), null, 2); } catch { return r.findings; }
+												})()}
+											</div>
+										)}
+									</div>
+								))}
+							</div>
+						</div>
+					)}
+					{/* Discussions */}
+					{mode === "preview" && discussions.length > 0 && (
+						<div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+							<SectionHeader title="Discussions" right={`${discussions.length} entries`} />
+							<div className="space-y-2 max-h-96 overflow-y-auto">
+								{discussions.map((d) => (
+									<div key={d.id} className="border-l-2 border-purple-400 dark:border-purple-500 pl-3 py-1">
+										<div className="flex items-center gap-2 text-xs">
+											{d.context_prefix && (
+												<span className="inline-block px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300">
+													{d.context_prefix}
+												</span>
+											)}
+											<span className="text-gray-600 dark:text-gray-400 font-medium">{d.author_identity}</span>
+											<span className="text-gray-400 dark:text-gray-500">{formatStoredUtcDateForDisplay(d.created_at)}</span>
+										</div>
+										<div className="text-sm text-gray-700 dark:text-gray-300 mt-1 whitespace-pre-wrap break-words">
+											{d.body_markdown.length > 500 ? d.body_markdown.slice(0, 500) + "..." : d.body_markdown}
+										</div>
+									</div>
+								))}
+							</div>
 						</div>
 					)}
 				</div>

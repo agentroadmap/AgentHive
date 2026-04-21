@@ -915,6 +915,22 @@ export async function submitReview(args: {
 			);
 		}
 
+		// Emit review_submitted event for state feed visibility
+		await query(
+			`INSERT INTO roadmap_proposal.proposal_event (proposal_id, event_type, payload)
+       VALUES ($1, 'review_submitted', $2::jsonb)`,
+			[
+				proposalId,
+				JSON.stringify({
+					reviewer: args.reviewer,
+					verdict: args.verdict,
+					has_notes: !!args.notes,
+					has_findings: !!args.findings,
+					ts: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+				}),
+			],
+		);
+
 		return {
 			content: [
 				{

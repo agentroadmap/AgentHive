@@ -28,6 +28,14 @@ interface ProposalMemoryRow {
 	updated_at: Date;
 }
 
+interface ProposalReviewRow {
+	reviewer_identity: string;
+	verdict: string;
+	notes: string | null;
+	findings: string | null;
+	reviewed_at: Date;
+}
+
 function summarizeText(text: string, maxChars: number): string {
 	if (text.length <= maxChars) return text.trim();
 	return `${text.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
@@ -75,6 +83,26 @@ function formatMemory(rows: ProposalMemoryRow[]): string {
 		.join("\n");
 }
 
+function formatReviews(rows: ProposalReviewRow[]): string {
+	if (rows.length === 0) return "No reviews recorded.";
+	return rows
+		.map((row) => {
+			const parts = [`- **${row.verdict}** by ${row.reviewer_identity} @ ${row.reviewed_at.toISOString()}`];
+			if (row.notes) parts.push(`  Notes: ${summarizeText(row.notes, 300)}`);
+			if (row.findings) {
+				try {
+					const parsed = JSON.parse(row.findings);
+					const summary = typeof parsed === "string" ? parsed : JSON.stringify(parsed);
+					parts.push(`  Findings: ${summarizeText(summary, 200)}`);
+				} catch {
+					parts.push(`  Findings: ${summarizeText(row.findings, 200)}`);
+				}
+			}
+			return parts.join("\n");
+		})
+		.join("\n");
+}
+
 export async function buildProposalContextPackage(params: {
 	proposalId: string | number;
 	taskType: TaskType;
@@ -86,7 +114,7 @@ export async function buildProposalContextPackage(params: {
 		throw new Error(`Proposal ${params.proposalId} not found.`);
 	}
 
-	const [acs, decisions, discussions, memoryRows] = await Promise.all([
+	const [acs, decisions, discussions, memoryRows, reviews] = await Promise.all([
 		listAcceptanceCriteria(proposal.id),
 		query<ProposalDecisionRow>(
 			`SELECT decision, authority, rationale, decided_at
@@ -111,6 +139,14 @@ export async function buildProposalContextPackage(params: {
        ORDER BY updated_at DESC
        LIMIT 5`,
 			[`proposal:${proposal.display_id}%`],
+		).then((result) => result.rows),
+		query<ProposalReviewRow>(
+			`SELECT reviewer_identity, verdict, notes, findings, reviewed_at
+       FROM roadmap_proposal.proposal_reviews
+       WHERE proposal_id = $1
+       ORDER BY reviewed_at DESC
+       LIMIT 3`,
+			[proposal.id],
 		).then((result) => result.rows),
 	]);
 
@@ -157,12 +193,17 @@ export async function buildProposalContextPackage(params: {
 			priority: 5,
 			body: formatMemory(memoryRows),
 		},
+		{
+			title: "Reviews",
+			priority: 6,
+			body: formatReviews(reviews),
+		},
 	];
 
 	if (proposal.dependency) {
 		sections.push({
 			title: "Dependencies",
-			priority: 6,
+			priority: 7,
 			body: summarizeText(proposal.dependency, 600),
 		});
 	}
@@ -170,7 +211,7 @@ export async function buildProposalContextPackage(params: {
 	if (params.agentIdentity) {
 		sections.push({
 			title: "Agent Context",
-			priority: 7,
+			priority: 8,
 			body: `Agent: ${params.agentIdentity}\nTask type: ${taskType}`,
 		});
 	}

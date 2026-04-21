@@ -224,6 +224,48 @@ export class ApiClient {
 		return this.fetchJson<Proposal>(`${API_BASE}/proposal/${id}`);
 	}
 
+	async fetchProposalDecisions(proposalId: string): Promise<Array<{
+		id: number;
+		decision: string;
+		authority: string;
+		rationale: string | null;
+		binding: boolean;
+		decided_at: string;
+	}>> {
+		const data = await this.fetchJson<{ decisions: any[] }>(
+			`${API_BASE}/proposals/${encodeURIComponent(proposalId)}/decisions`,
+		);
+		return data.decisions;
+	}
+
+	async fetchProposalReviews(proposalId: string): Promise<Array<{
+		id: number;
+		reviewer_identity: string;
+		verdict: string;
+		notes: string | null;
+		findings: string | null;
+		is_blocking: boolean;
+		reviewed_at: string;
+	}>> {
+		const data = await this.fetchJson<{ reviews: any[] }>(
+			`${API_BASE}/proposals/${encodeURIComponent(proposalId)}/reviews`,
+		);
+		return data.reviews;
+	}
+
+	async fetchProposalDiscussions(proposalId: string): Promise<Array<{
+		id: number;
+		author_identity: string;
+		context_prefix: string | null;
+		body_markdown: string;
+		created_at: string;
+	}>> {
+		const data = await this.fetchJson<{ notes: any[] }>(
+			`${API_BASE}/proposals/${encodeURIComponent(proposalId)}/notes`,
+		);
+		return data.notes;
+	}
+
 	async createProposal(
 		proposal: Omit<Proposal, "id" | "createdDate">,
 	): Promise<Proposal> {

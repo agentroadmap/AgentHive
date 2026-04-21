@@ -53,6 +53,42 @@ export function createBoardApi(dbQuery: DbQuery): Router {
     }
   });
 
+  // GET /api/board/proposals/:id/decisions
+  router.get('/proposals/:id/decisions', (req: any, res: any) => {
+    try {
+      const proposalId = req.params.id;
+      const isNumeric = /^\d+$/.test(proposalId);
+      const decisions = dbQuery(
+        `SELECT id, decision, authority, rationale, binding, decided_at
+         FROM roadmap_proposal.proposal_decision
+         WHERE proposal_id = ${isNumeric ? '$1' : '(SELECT id FROM roadmap_proposal.proposal WHERE display_id = $1)'}
+         ORDER BY decided_at DESC`,
+        [isNumeric ? parseInt(proposalId, 10) : proposalId],
+      );
+      res.json({ decisions: decisions || [] });
+    } catch (error) {
+      res.status(500).json({ error: String(error) });
+    }
+  });
+
+  // GET /api/board/proposals/:id/reviews
+  router.get('/proposals/:id/reviews', (req: any, res: any) => {
+    try {
+      const proposalId = req.params.id;
+      const isNumeric = /^\d+$/.test(proposalId);
+      const reviews = dbQuery(
+        `SELECT id, reviewer_identity, verdict, notes, findings, is_blocking, reviewed_at
+         FROM roadmap_proposal.proposal_reviews
+         WHERE proposal_id = ${isNumeric ? '$1' : '(SELECT id FROM roadmap_proposal.proposal WHERE display_id = $1)'}
+         ORDER BY reviewed_at DESC`,
+        [isNumeric ? parseInt(proposalId, 10) : proposalId],
+      );
+      res.json({ reviews: reviews || [] });
+    } catch (error) {
+      res.status(500).json({ error: String(error) });
+    }
+  });
+
   // GET /api/board/channels
   router.get('/channels', (_req: any, res: any) => {
     const channels = dbQuery('SELECT DISTINCT channel AS name FROM roadmap.channel_subscription ORDER BY channel');
