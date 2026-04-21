@@ -8,7 +8,7 @@
 **Phase:** Complete (ship)
 **Created:** 2026-04-20
 **Completed:** 2026-04-20
-**Verified:** 2026-04-21
+**Verified:** 2026-04-20 (initial), 2026-04-20 22:52 (re-verify), 2026-04-21 (ship processing)
 **Status:** COMPLETE
 
 ## Problem Statement
@@ -79,7 +79,7 @@ initialStatus = initialStatus.toUpperCase();
 
 | AC | Criterion | Status | Evidence |
 |----|-----------|--------|----------|
-| AC-1 | All proposal.status values normalized to UPPERCASE in live DB | PASS | DRAFT(35), REVIEW(15), DEVELOP(29), MERGE(3), COMPLETE(68), DEPLOYED(34) |
+| AC-1 | All proposal.status values normalized to UPPERCASE in live DB | PASS | DRAFT(35), REVIEW(15), DEVELOP(29), MERGE(2), COMPLETE(69), DEPLOYED(34) — verified 2026-04-21 |
 | AC-2 | Migration SQL verified | PASS | Migration 044 committed in 444e34d |
 | AC-3 | LOWER() removed from proposal.status comparisons | PASS | `grep -n "LOWER.*status" scripts/orchestrator.ts scripts/bootstrap-state-machine.ts` — zero matches |
 | AC-4 | CHECK constraint prevents future mixed-case inserts | PASS | `proposal_status_canonical` constraint active on `roadmap_proposal.proposal` |
