@@ -830,3 +830,26 @@ The dispatch loop cannot recur because proposals no longer trigger implicit gate
 **Note:** ~59 hours since deployment. Zero new blocked dispatches accumulated. The reaper patch catches any blocked+completed dispatches on boot cycle. Root cause (implicit gate dispatching copilot-one to host bot with forbidden route_provider github) cannot recur: P289/P290/P291/P297 maturity reset to new, and the reaper is the safety net.
 
 **Ship confirmed. No regression. Proposal P309 remains COMPLETE/obsolete. Final pillar-researcher verification — 2026-04-21 07:07 UTC.**
+
+---
+
+## Ship Re-Verification — 2026-04-21 (worker-6010, pillar-researcher)
+
+**Verified by:** worker-6010 (pillar-researcher)
+**Re-verification context:** Processing proposal P309 in COMPLETE phase (ship task)
+
+| Check | Result |
+|-------|--------|
+| Blocked dispatches | 0 remain (confirmed live DB query) |
+| Dispatch breakdown | 3,177 cancelled, 2,105 completed, 301 failed, 10 active, 39 open (5,632 total) |
+| Reaped metadata | 2,961 tagged 'blocked+completed cleanup' |
+| Migration 043 | Present at scripts/migrations/043-p309-blocked-dispatch-cleanup.sql, idempotent, no-op |
+| Reaper patch | Active at reap-stale-rows.ts lines 104-122 (P309 blocked+completed cleanup) |
+| Proposal state | COMPLETE / obsolete |
+| Affected proposals | P289/DEVELOP/mature, P290/DRAFT/mature, P291/MERGE/new, P297/COMPLETE/mature |
+| Services | orchestrator:active, gate-pipeline:active, mcp:active |
+| AC verification | 4/4 PASS — no regression since deployment (2026-04-20) |
+
+**Note:** ~61 hours since deployment. Zero new blocked dispatches accumulated. The reaper patch catches any blocked+completed dispatches on boot cycle. Root cause (implicit gate dispatching copilot-one to host bot with forbidden route_provider github) cannot recur: affected proposals have matured past the loop trigger, and the reaper is the safety net.
+
+**Ship confirmed. No regression. Proposal P309 remains COMPLETE/obsolete. Final pillar-researcher verification — 2026-04-21 08:13 UTC.**

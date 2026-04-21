@@ -262,7 +262,7 @@ export function getPool(config?: AgentHivePoolConfig): Pool {
  */
 export function initPoolFromConfig(dbConfig: Record<string, any>): Pool {
 	if (dbConfig.password && !process.env.PGPASSWORD) {
-	// Transfer config password into env so the singleton getter sees it.
+		// Transfer config password into env so the singleton getter sees it.
 		// This prevents the password from being stored in the Pg Pool options
 		// object (which could be leaked in logs or debug dumps).
 		process.env.__PGPASSWORD_FROM_CONFIG = dbConfig.password;

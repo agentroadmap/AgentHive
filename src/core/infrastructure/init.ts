@@ -41,7 +41,7 @@ function resolveDatabaseConfig(
 		host: existingDatabase?.host ?? process.env.PG_HOST ?? "127.0.0.1",
 		port:
 			existingDatabase?.port ?? (Number(process.env.PG_PORT) || 5432),
-		user: existingDatabase?.user ?? process.env.PG_USER ?? "admin",
+		user: existingDatabase?.user ?? process.env.PGUSER ?? "xiaomi",
 		name: existingDatabase?.name ?? process.env.PG_DATABASE ?? "agenthive",
 		schema: existingDatabase?.schema ?? process.env.PG_SCHEMA ?? "roadmap",
 		...(existingDatabase?.password ? { password: existingDatabase.password } : {}),

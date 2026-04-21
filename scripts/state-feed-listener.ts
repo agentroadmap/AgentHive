@@ -34,7 +34,7 @@ function getPGPassword(): string {
       if (m) return m[1].trim();
     }
   }
-  throw new Error("PG_PASSWORD not found in env or .env files");
+  throw new Error("PGPASSWORD not found in env or .env files");
 }
 
 async function sendToDiscord(content: string) {

@@ -1159,7 +1159,7 @@ export class Core {
 		}
 	}
 
-	/** Ensure Postgres pool is initialised — needed when CLI has no PG_PASSWORD env from systemd. */
+	/** Ensure Postgres pool is initialised — needed when CLI has no PGPASSWORD env from systemd. */
 	private async ensurePgPool(): Promise<void> {
 		try {
 			const config = await this.filesystem.loadConfig();
