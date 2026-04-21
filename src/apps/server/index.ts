@@ -565,7 +565,7 @@ export class RoadmapServer {
 			req.url || "/",
 			`http://${req.headers.host || "localhost"}`,
 		);
-		appendFileSync("/tmp/mcp-debug.log", `[HTTP] ${req.method} ${req.url}\n`);
+		try { appendFileSync("/tmp/mcp-debug.log", `[HTTP] ${req.method} ${req.url}\n`); } catch {}
 		const _pathname = url.pathname;
 		const method = req.method || "GET";
 
@@ -660,11 +660,11 @@ export class RoadmapServer {
 				return await this.handleListMessages(req);
 
 			if (pathname === "/api/mcp/sse" && method === "GET") {
-				appendFileSync("/tmp/mcp-debug.log", "[Server] MCP SSE request\n");
+				try { appendFileSync("/tmp/mcp-debug.log", "[Server] MCP SSE request\n"); } catch {}
 				return await this.handleMcpSse(req);
 			}
 			if (pathname === "/api/mcp/message" && method === "POST") {
-				appendFileSync("/tmp/mcp-debug.log", "[Server] MCP POST request\n");
+				try { appendFileSync("/tmp/mcp-debug.log", "[Server] MCP POST request\n"); } catch {}
 				return await this.handleMcpMessage(req);
 			}
 
@@ -2222,7 +2222,7 @@ export class RoadmapServer {
 	}
 
 	private async handleMcpMessage(req: Request): Promise<Response> {
-		appendFileSync("/tmp/mcp-debug.log", "[MCP] handleMcpMessage called\n");
+		try { appendFileSync("/tmp/mcp-debug.log", "[MCP] handleMcpMessage called\n"); } catch {}
 		await this.ensureServicesReady();
 		if (!this.mcpServer) {
 			return Response.json(
@@ -2260,17 +2260,17 @@ export class RoadmapServer {
 				? parsedBody.method
 				: "unknown";
 
-		appendFileSync(
-			"/tmp/mcp-debug.log",
-			`[MCP] POST message: ${parsedMethod} sessionId: ${sessionId}\n`,
-		);
+	try { appendFileSync(
+		"/tmp/mcp-debug.log",
+		`[MCP] POST message: ${parsedMethod} sessionId: ${sessionId}\n`,
+	); } catch {}
 
 		// Handle message through SSE transport
 		try {
-			appendFileSync(
+			try { appendFileSync(
 				"/tmp/mcp-debug.log",
 				"[MCP] Calling transport.handlePostMessage\n",
-			);
+			); } catch {}
 
 			// Create mock response that captures status
 			let responseStatus = 202;
@@ -2286,10 +2286,10 @@ export class RoadmapServer {
 				},
 				end: (chunk?: any) => {
 					if (chunk) responseBody += Buffer.from(chunk).toString();
-					appendFileSync(
+					try { appendFileSync(
 						"/tmp/mcp-debug.log",
 						`[MCP] Response status: ${responseStatus} body: ${responseBody.slice(0, 100)}\n`,
-					);
+					); } catch {}
 					return mockRes;
 				},
 				flushHeaders: () => {},
@@ -2317,7 +2317,7 @@ export class RoadmapServer {
 			}
 			return Response.json({ ok: true });
 		} catch (e) {
-			appendFileSync("/tmp/mcp-debug.log", `[MCP] POST error: ${String(e)}\n`);
+			try { appendFileSync("/tmp/mcp-debug.log", `[MCP] POST error: ${String(e)}\n`); } catch {}
 			return Response.json({ error: String(e) }, { status: 500 });
 		}
 	}
