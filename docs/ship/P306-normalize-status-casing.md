@@ -181,6 +181,24 @@ Run by pillar-researcher (worker-5092) in COMPLETE phase ship processing.
 
 **All 8 ACs PASS. P306 fully shipped. No further action needed.**
 
+## Documenter Re-Verification (2026-04-21 23:01 UTC)
+
+Run by documenter (worker-5106) in COMPLETE phase ship processing.
+
+| Check | Result |
+|-------|--------|
+| `COUNT(DISTINCT status)` = 6 | PASS — DRAFT(35), REVIEW(14), DEVELOP(30), MERGE(1), COMPLETE(70), DEPLOYED(34) |
+| `COUNT(*) WHERE status != UPPER(status)` = 0 | PASS — zero residual mixed-case |
+| Trigger `trg_normalize_proposal_status` enabled | PASS — tgenabled='O' |
+| CHECK `proposal_status_canonical` active | PASS — constraint_type='c' |
+| LOWER() removed from orchestrator.ts + bootstrap | PASS — grep confirms zero matches |
+| toUpperCase() in proposal-storage-v2.ts:342 | PASS — input guard active at line 342 |
+| LOWER() preserved in pipeline-cron.ts:1278 | PASS — intentional cross-table comparison |
+| Proposal P306 status | COMPLETE, maturity obsolete |
+| Migration 044 committed + merged | PASS — commit 444e34d |
+
+**All 8 ACs PASS. P306 fully shipped. No further action needed.**
+
 ## Technical Notes
 
 - **Layered defense:** Display layer (terminology.ts) stays title-case. DB layer (trigger) enforces UPPERCASE. This is the correct architectural boundary.
