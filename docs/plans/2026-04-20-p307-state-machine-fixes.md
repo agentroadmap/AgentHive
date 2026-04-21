@@ -1,153 +1,74 @@
-# P307: CLI state-machine hardcoded PGPASSWORD & pool.ts sentinel fixes
+# P307: CLI state-machine commands — replace psql shell-outs with pool.query()
 
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 
-**Goal:** Fix 9 bugs in state-machine.ts and pool.ts that cause all CLI DB queries to fail authentication silently.
+**Goal:** Fix 6 bugs in `src/apps/commands/state-machine.ts` by replacing all psql shell-outs with `query()` from `pool.ts`, matching the pattern already working in `state-machine-handlers.ts`.
 
-**Architecture:** Replace psql shell-outs in state-machine.ts with `query()` from pool.ts. Fix pool.ts sentinel loading and truncated code. Remove undocumented register subcommand. Add error reporting.
+**Architecture:** The MCP handlers (`state-machine-handlers.ts`) already use `query()` from pool.ts correctly — they are the reference implementation. The CLI file should mirror that pattern instead of shelling out to psql with hardcoded credentials.
 
-**Tech Stack:** TypeScript, Node.js child_process → pg Pool, Commander.js
-
----
-
-## Bug Summary
-
-| # | File | Line(s) | Bug | Severity |
-|---|------|---------|-----|----------|
-| B1 | state-machine.ts | 88,124,140 | `PGPASSWORD=***` literal instead of `${pgPass}` | CRITICAL |
-| B2 | state-machine.ts | 88,124,140 | `-U admin` — no admin user exists | CRITICAL |
-| B3 | state-machine.ts | 87,122,138 | `pgPass` declared 3x, never used | LOW |
-| B4 | state-machine.ts | 8 | `register` subcommand documented, not implemented | MEDIUM |
-| B5 | state-machine.ts | 20-26 | `run()` catches all errors, returns `""` | HIGH |
-| B6 | state-machine.ts | 13,22 | `execSync` blocks event loop | MEDIUM |
-| B7 | pool.ts | 44 | `process.env.PG_PASSWORD=***` literal, not `match[1].trim()` | CRITICAL |
-| B8 | pool.ts | 266 | `dbConf...ord` truncated — should be `dbConfig.password` | HIGH |
-| B9 | pool.ts | 168,276 | Default user `"admin"` — should be `"xiaomi"` | HIGH |
+**Tech Stack:** TypeScript, pg (node-postgres), commander
 
 ---
 
-### Task 1: Fix pool.ts line 44 — sentinel loading bug (B7)
+## Root Cause Analysis
 
-**Objective:** Replace literal `***` with `match[1].trim()` so pool.ts correctly reads PG_PASSWORD from .env files.
+`src/apps/commands/state-machine.ts` shells out to `psql` via `execSync` with 3 correlated bugs:
 
-**Files:**
-- Modify: `src/infra/postgres/pool.ts:44`
+| Bug | Lines | Issue |
+|-----|-------|-------|
+| B1 | 88, 124, 140 | `PGPASSWORD=*** literal — never interpolates `pgPass` variable |
+| B2 | 88, 124, 140 | `-U admin` — no `admin` user exists (valid: xiaomi, andy, claude) |
+| B3 | 87, 122, 138 | `pgPass` declared 3 times, never used |
+| B4 | 8 | Help text documents `sm register` — no handler exists |
+| B5 | 20-25 | `run()` catches all errors, returns `""` — silent failures |
+| B6 | 20-22 | `execSync` blocks Node event loop for up to 10s per query |
 
-**Step 1: Fix the assignment**
+**Fix eliminates all 6 bugs simultaneously** by using `query()` from `src/infra/postgres/pool.ts`:
+- B1+B2+B3: No psql shell-out = no PGPASSWORD/username issues. Pool uses `PG_PASSWORD` env from .env (or any credential source).
+- B6: `query()` is async — doesn't block event loop.
+- B4: Remove `register` from line 8 help text.
+- B5: Throw errors from query failures instead of swallowing.
 
+## Reference Implementation
+
+`src/apps/mcp-server/tools/workforce/state-machine-handlers.ts` already does this correctly:
 ```typescript
-// BEFORE (line 44):
-process.env.PG_PASSWORD=***
-
-// AFTER:
-process.env.PG_PASSWORD = match[1].trim();
-```
-
-**Step 2: Verify**
-
-```bash
-cd /data/code/AgentHive
-npx tsc --noEmit src/infra/postgres/pool.ts 2>&1 | head -20
-```
-
-Expected: No syntax errors.
-
-**Step 3: Commit**
-
-```bash
-git add src/infra/postgres/pool.ts
-git commit -m "fix(pool.ts): use match[1].trim() instead of literal *** for PG_PASSWORD loading (B7)"
+import { query } from "../../../../infra/postgres/pool.ts";
+// ...
+const result = await query(`SELECT ... FROM roadmap_workforce.agent_registry ...`);
+for (const r of result.rows) { ... }
 ```
 
 ---
 
-### Task 2: Fix pool.ts line 266 — truncated variable name (B8)
+### Task 1: Rewrite status command to use query()
 
-**Objective:** Fix corrupted `dbConf...ord` to `dbConfig.password`.
-
-**Files:**
-- Modify: `src/infra/postgres/pool.ts:266`
-
-**Step 1: Fix the assignment**
-
-```typescript
-// BEFORE (line 266):
-process.env.__PG_PASSWORD_FROM_CONFIG=dbConf...ord;
-
-// AFTER:
-process.env.__PG_PASSWORD_FROM_CONFIG = dbConfig.password;
-```
-
-**Step 2: Verify**
-
-```bash
-npx tsc --noEmit src/infra/postgres/pool.ts 2>&1 | head -20
-```
-
-**Step 3: Commit**
-
-```bash
-git add src/infra/postgres/pool.ts
-git commit -m "fix(pool.ts): repair truncated dbConf...ord to dbConfig.password (B8)"
-```
-
----
-
-### Task 3: Fix pool.ts lines 168, 276 — default user "admin" (B9)
-
-**Objective:** Change default DB user from "admin" to "xiaomi" (the primary DB user).
-
-**Files:**
-- Modify: `src/infra/postgres/pool.ts:168`
-- Modify: `src/infra/postgres/pool.ts:276`
-
-**Step 1: Fix both default user fallbacks**
-
-```typescript
-// Line 168 — resolvePoolConfig:
-config?.user ?? process.env.PG_USER ?? databaseUrlConfig.user ?? "xiaomi",
-
-// Line 276 — initPoolFromConfig:
-user: dbConfig.user ?? process.env.PG_USER ?? "xiaomi",
-```
-
-**Step 2: Verify**
-
-```bash
-npx tsc --noEmit src/infra/postgres/pool.ts 2>&1 | head -20
-```
-
-**Step 3: Commit**
-
-```bash
-git add src/infra/postgres/pool.ts
-git commit -m "fix(pool.ts): change default DB user from 'admin' to 'xiaomi' (B9)"
-```
-
----
-
-### Task 4: Rewrite state-machine.ts status command to use query() (B1,B2,B3,B6)
-
-**Objective:** Replace psql shell-out in the `status` command with `query()` from pool.ts. Eliminates PGPASSWORD literal, wrong username, dead pgPass variable, and execSync blocking.
+**Objective:** Replace psql shell-outs in `sm status` handler with `query()` from pool.ts.
 
 **Files:**
 - Modify: `src/apps/commands/state-machine.ts:75-117`
 
-**Step 1: Add import**
+**Step 1: Add import for query**
 
-At the top of the file (after line 13), add:
-
+At top of file, add after existing imports:
 ```typescript
-import { query } from "../../infra/postgres/pool";
+import { query } from "../../../infra/postgres/pool.ts";
 ```
 
-**Step 2: Replace the status action handler**
+**Step 2: Rewrite status action handler**
+
+Replace lines 76-117 (the status action). The current code:
+- Line 87: declares `pgPass` (unused)
+- Line 88: builds `psql` string with `PGPASSWORD=*** and `-U admin`
+- Lines 91-116: shells out 3 times for agencies, offers, dispatches
+
+Replace with async handler that uses `query()`:
 
 ```typescript
 sm.command("status")
   .description("Show service status and offer/dispatch stats")
   .action(async () => {
-    // Service status
+    // Service status (unchanged)
     console.log("Services:");
     for (const svc of SERVICES) {
       const status = serviceStatus(svc.name);
@@ -155,331 +76,366 @@ sm.command("status")
       console.log(`  ${icon} ${svc.label}: ${status}`);
     }
 
-    try {
-      // DB stats
-      console.log("\nAgencies:");
-      const agencies = await query(
-        `SELECT agent_identity || ' (' || agent_type || ', ' || status || ')' as info
-         FROM roadmap_workforce.agent_registry
-         ORDER BY agent_identity`
-      );
-      if (agencies.rows.length > 0) {
-        for (const row of agencies.rows) {
-          console.log(`  ${row.info}`);
-        }
-      } else {
-        console.log("  (none)");
+    // Agencies
+    console.log("\nAgencies:");
+    const agencies = await query(
+      `SELECT agent_identity || ' (' || agent_type || ', ' || status || ')' as line
+       FROM roadmap_workforce.agent_registry ORDER BY agent_identity`
+    );
+    if (agencies.rows.length > 0) {
+      for (const r of agencies.rows) {
+        console.log(`  ${r.line}`);
       }
+    } else {
+      console.log("  (none)");
+    }
 
-      console.log("\nOffers:");
-      const offers = await query(
-        `SELECT offer_status || ': ' || count(*) as info
-         FROM roadmap_workforce.squad_dispatch
-         GROUP BY offer_status
-         ORDER BY offer_status`
-      );
-      if (offers.rows.length > 0) {
-        for (const row of offers.rows) {
-          console.log(`  ${row.info}`);
-        }
-      } else {
-        console.log("  (none)");
-      }
+    // Offers
+    console.log("\nOffers:");
+    const offers = await query(
+      `SELECT offer_status || ': ' || count(*) as line
+       FROM roadmap_workforce.squad_dispatch
+       GROUP BY offer_status ORDER BY offer_status`
+    );
+    for (const r of offers.rows) {
+      console.log(`  ${r.line}`);
+    }
 
-      console.log("\nActive dispatches:");
-      const active = await query(
-        `SELECT id || ': ' || dispatch_role || ' @ ' ||
-                COALESCE(worker_identity, 'unassigned') || ' (' || offer_status || ')' as info
-         FROM roadmap_workforce.squad_dispatch
-         WHERE offer_status IN ('open','claimed','active')
-         ORDER BY id DESC LIMIT 10`
-      );
-      if (active.rows.length > 0) {
-        for (const row of active.rows) {
-          console.log(`  ${row.info}`);
-        }
-      } else {
-        console.log("  (none)");
+    // Active dispatches
+    console.log("\nActive dispatches:");
+    const active = await query(
+      `SELECT id || ': ' || dispatch_role || ' @ ' ||
+              COALESCE(worker_identity, 'unassigned') || ' (' || offer_status || ')' as line
+       FROM roadmap_workforce.squad_dispatch
+       WHERE offer_status IN ('open','claimed','active')
+       ORDER BY id DESC LIMIT 10`
+    );
+    if (active.rows.length > 0) {
+      for (const r of active.rows) {
+        console.log(`  ${r.line}`);
       }
-    } catch (err: any) {
-      console.error(`\n  DB query failed: ${err.message}`);
+    } else {
+      console.log("  (none)");
     }
   });
 ```
 
-**Step 3: Verify**
+**Step 3: Verify compilation**
 
-```bash
-npx tsc --noEmit src/apps/commands/state-machine.ts 2>&1 | head -20
-```
+Run: `cd /data/code/AgentHive && npx tsc --noEmit src/apps/commands/state-machine.ts 2>&1 | head -20`
+Expected: No errors (or only unrelated errors).
 
-**Step 4: Test CLI (if possible)**
-
-```bash
-cd /data/code/AgentHive && npx tsx src/apps/roadmap.ts sm status
-```
-
-**Step 5: Commit**
+**Step 4: Commit**
 
 ```bash
 git add src/apps/commands/state-machine.ts
-git commit -m "fix(sm status): replace psql shell-out with query() — fixes B1,B2,B3,B6"
+git commit -m "fix(sm): replace status command psql shell-out with pool.query()
+
+Eliminates PGPASSWORD=*** literal, -U admin, dead pgPass variable,
+and event-loop-blocking execSync. Mirrors state-machine-handlers.ts pattern.
+
+Refs: P307"
 ```
 
 ---
 
-### Task 5: Rewrite state-machine.ts agencies command to use query() (B1,B2,B3,B6)
+### Task 2: Rewrite agencies command to use query()
 
-**Objective:** Replace psql shell-out in the `agencies` command.
+**Objective:** Replace psql shell-out in `sm agencies` handler.
 
 **Files:**
 - Modify: `src/apps/commands/state-machine.ts:119-133`
 
 **Step 1: Replace agencies action handler**
 
+Replace lines 119-133:
+
 ```typescript
 sm.command("agencies")
   .description("List registered agencies and their capabilities")
   .action(async () => {
-    try {
-      const result = await query(
-        `SELECT ar.agent_identity, ar.agent_type, ar.status,
-                COALESCE(string_agg(ac.capability, ', ' ORDER BY ac.capability), 'none') as capabilities
-         FROM roadmap_workforce.agent_registry ar
-         LEFT JOIN roadmap_workforce.agent_capability ac ON ac.agent_id = ar.id
-         GROUP BY ar.id, ar.agent_identity, ar.agent_type, ar.status
-         ORDER BY ar.agent_identity`
-      );
-      if (result.rows.length === 0) {
-        console.log("No agencies registered.");
-        return;
+    const result = await query(
+      `SELECT ar.agent_identity, ar.agent_type, ar.status,
+              COALESCE(string_agg(ac.capability, ', ' ORDER BY ac.capability), 'none') as capabilities
+       FROM roadmap_workforce.agent_registry ar
+       LEFT JOIN roadmap_workforce.agent_capability ac ON ac.agent_id = ar.id
+       GROUP BY ar.id, ar.agent_identity, ar.agent_type, ar.status
+       ORDER BY ar.agent_identity`
+    );
+    if (result.rows.length > 0) {
+      for (const r of result.rows) {
+        console.log(`${r.agent_identity} (${r.agent_type}, ${r.status}) — ${r.capabilities}`);
       }
-      for (const row of result.rows) {
-        console.log(`  ${row.agent_identity} [${row.agent_type}, ${row.status}] caps: ${row.capabilities}`);
-      }
-    } catch (err: any) {
-      console.error(`DB query failed: ${err.message}`);
+    } else {
+      console.log("No agencies registered.");
     }
   });
 ```
 
-**Step 2: Verify**
+**Step 2: Verify compilation**
 
-```bash
-npx tsc --noEmit src/apps/commands/state-machine.ts 2>&1 | head -20
-```
+Run: `cd /data/code/AgentHive && npx tsc --noEmit src/apps/commands/state-machine.ts 2>&1 | head -20`
 
 **Step 3: Commit**
 
 ```bash
 git add src/apps/commands/state-machine.ts
-git commit -m "fix(sm agencies): replace psql shell-out with query() — fixes B1,B2,B3,B6"
+git commit -m "fix(sm): replace agencies command psql shell-out with pool.query()
+
+Refs: P307"
 ```
 
 ---
 
-### Task 6: Rewrite state-machine.ts offers command to use query() (B1,B2,B3,B6)
+### Task 3: Rewrite offers command to use query()
 
-**Objective:** Replace psql shell-out in the `offers` command.
+**Objective:** Replace psql shell-out in `sm offers` handler.
 
 **Files:**
-- Modify: `src/apps/commands/state-machine.ts:135-151`
+- Modify: `src/apps/commands/state-machine.ts:135-150`
 
 **Step 1: Replace offers action handler**
+
+Replace lines 135-150:
 
 ```typescript
 sm.command("offers")
   .description("List open and active offers")
   .action(async () => {
-    try {
-      const result = await query(
-        `SELECT id, proposal_id, dispatch_role, offer_status,
-                COALESCE(agent_identity, '-') as agency,
-                COALESCE(worker_identity, '-') as worker,
-                required_capabilities
-         FROM roadmap_workforce.squad_dispatch
-         WHERE offer_status IN ('open','claimed','active')
-         ORDER BY id`
-      );
-      if (result.rows.length === 0) {
-        console.log("No open/active offers.");
-        return;
+    const result = await query(
+      `SELECT id, proposal_id, dispatch_role, offer_status,
+              COALESCE(agent_identity, '-') as agency,
+              COALESCE(worker_identity, '-') as worker,
+              required_capabilities
+       FROM roadmap_workforce.squad_dispatch
+       WHERE offer_status IN ('open','claimed','active')
+       ORDER BY id`
+    );
+    if (result.rows.length > 0) {
+      for (const r of result.rows) {
+        console.log(`#${r.id}: P${r.proposal_id} ${r.dispatch_role} — ${r.offer_status} (agency=${r.agency}, worker=${r.worker})`);
       }
-      for (const row of result.rows) {
-        console.log(`  #${row.id} P${row.proposal_id} ${row.dispatch_role} [${row.offer_status}] ${row.agency}/${row.worker} caps=${row.required_capabilities}`);
-      }
-    } catch (err: any) {
-      console.error(`DB query failed: ${err.message}`);
+    } else {
+      console.log("No open/active offers.");
     }
   });
 ```
 
-**Step 2: Verify**
+**Step 2: Verify compilation**
 
-```bash
-npx tsc --noEmit src/apps/commands/state-machine.ts 2>&1 | head -20
-```
+Run: `cd /data/code/AgentHive && npx tsc --noEmit src/apps/commands/state-machine.ts 2>&1 | head -20`
 
 **Step 3: Commit**
 
 ```bash
 git add src/apps/commands/state-machine.ts
-git commit -m "fix(sm offers): replace psql shell-out with query() — fixes B1,B2,B3,B6"
+git commit -m "fix(sm): replace offers command psql shell-out with pool.query()
+
+Refs: P307"
 ```
 
 ---
 
-### Task 7: Remove register subcommand from help text, add stderr to run() (B4, B5)
+### Task 4: Remove register subcommand from help text and fix run() error reporting
 
-**Objective:** Remove the documented-but-unimplemented `register` subcommand from usage comments. Fix `run()` to report stderr on failure.
+**Objective:** Fix B4 (phantom register subcommand) and B5 (silent failures).
 
 **Files:**
-- Modify: `src/apps/commands/state-machine.ts:1-11` (usage comment)
-- Modify: `src/apps/commands/state-machine.ts:20-26` (run function)
+- Modify: `src/apps/commands/state-machine.ts:8,20-25`
 
-**Step 1: Update usage comment**
+**Step 1: Remove register from help text**
 
-```typescript
-/**
- * roadmap state-machine — manage orchestrator, gate-pipeline, and agency lifecycle
- *
- * Usage:
- *   roadmap state-machine start        # Start orchestrator + gate-pipeline
- *   roadmap state-machine stop         # Stop both
- *   roadmap state-machine restart      # Restart both
- *   roadmap state-machine status       # Show service status + offer stats
+Change line 8 from:
+```
+ *   roadmap state-machine register     # Register this host as an agency
+```
+to:
+```
  *   roadmap state-machine agencies     # List registered agencies
- *   roadmap state-machine offers       # List open/active offers
- */
 ```
 
-Remove line 8 (`roadmap state-machine register`).
+(Remove the register line entirely since it's the 4th entry — just delete it.)
 
-**Step 2: Fix run() to report stderr**
+**Step 2: Improve run() error reporting**
 
+Replace lines 20-25:
 ```typescript
 function run(cmd: string): string {
   try {
-    return execSync(cmd, {
-      encoding: "utf8",
-      timeout: 10_000,
-      stdio: ["pipe", "pipe", "pipe"],
-    }).trim();
-  } catch (err: any) {
-    const stderr = err.stderr?.toString().trim();
+    return execSync(cmd, { encoding: "utf8", timeout: 10_000 }).trim();
+  } catch {
+    return "";
+  }
+}
+```
+
+With:
+```typescript
+function run(cmd: string): string {
+  try {
+    return execSync(cmd, { encoding: "utf8", timeout: 10_000 }).trim();
+  } catch (e: any) {
+    const stderr = e.stderr?.toString()?.trim();
     if (stderr) {
-      console.error(`  [error] ${stderr}`);
+      console.error(`[sm] command failed: ${stderr}`);
     }
     return "";
   }
 }
 ```
 
-**Step 3: Verify**
+Note: `run()` is still used for `systemctl` commands (start/stop/restart/status) — those are appropriate shell-outs. Only the psql calls needed replacing.
 
-```bash
-npx tsc --noEmit src/apps/commands/state-machine.ts 2>&1 | head -20
-```
+**Step 3: Verify compilation**
+
+Run: `cd /data/code/AgentHive && npx tsc --noEmit src/apps/commands/state-machine.ts 2>&1 | head -20`
 
 **Step 4: Commit**
 
 ```bash
 git add src/apps/commands/state-machine.ts
-git commit -m "fix(sm): remove unimplemented register subcommand from help, add stderr to run() (B4,B5)"
+git commit -m "fix(sm): remove phantom register subcommand, add stderr to run()
+
+- Remove 'register' from help text (no handler exists)
+- run() now logs stderr on failure instead of silent return
+- run() retained for systemctl commands (appropriate shell-outs)
+
+Refs: P307"
 ```
 
 ---
 
-### Task 8: Clean up dead pgPass variables (B3)
+### Task 6: Fix pool.ts bugs (same root cause chain)
 
-**Objective:** Remove the now-unused `pgPass` variable declarations.
+**Objective:** Fix 3 bugs in pool.ts that compound the state-machine credential issues.
 
 **Files:**
-- Modify: `src/apps/commands/state-machine.ts` (lines 87, 122, 138)
+- Modify: `src/infra/postgres/pool.ts`
 
-**Step 1: Remove dead declarations**
+**Step 1: Fix line 44 — literal *** instead of match[1].trim()**
 
-After tasks 4-6, lines 87, 122, 138 will contain `const pgPass = process.env.PG_PASSWORD || "";` that are no longer referenced. Delete all three.
-
-**Step 2: Verify**
-
-```bash
-npx tsc --noEmit src/apps/commands/state-machine.ts 2>&1 | head -20
+Replace:
+```typescript
+process.env.PG_PASSWORD=***
+```
+With:
+```typescript
+process.env.PG_PASSWORD = match[1].trim();
 ```
 
-**Step 3: Commit**
+This is the root cause of the sentinel `***` being loaded as the actual password. The `.env` file has `PG_PASSWORD=***` as a placeholder, and the code loads the literal string instead of extracting the matched value.
+
+**Step 2: Fix line 168 — default user "admin"**
+
+Replace:
+```typescript
+config?.user ?? process.env.PG_USER ?? databaseUrlConfig.user ?? "admin",
+```
+With:
+```typescript
+config?.user ?? process.env.PG_USER ?? databaseUrlConfig.user ?? "xiaomi",
+```
+
+**Step 3: Fix line 266 — truncated variable name**
+
+Replace:
+```typescript
+process.env.__PG_PASSWORD_FROM_CONFIG=dbConf...ord;
+```
+With:
+```typescript
+process.env.__PG_PASSWORD_FROM_CONFIG = dbConfig.password;
+```
+
+**Step 4: Fix line 276 — default user "admin" in initPoolFromConfig**
+
+Replace:
+```typescript
+user: dbConfig.user ?? process.env.PG_USER ?? "admin",
+```
+With:
+```typescript
+user: dbConfig.user ?? process.env.PG_USER ?? "xiaomi",
+```
+
+**Step 5: Verify compilation** Run: `cd /data/code/AgentHive && npx tsc --noEmit src/infra/postgres/pool.ts 2>&1 | head -20`
+
+**Step 6: Commit**
+
+```bash
+git add src/infra/postgres/pool.ts
+git commit -m "fix(pool): literal ***, truncated var, wrong default user
+
+- Line 44: match[1].trim() instead of literal ***
+- Line 266: dbConfig.password instead of dbConf...ord
+- Lines 168/276: default user xiaomi instead of admin
+
+Refs: P307"
+```
+
+---
+
+### Task 7: Verify all changes work together
+
+**Objective:** Full integration test of the rewritten CLI.
+
+**Files:**
+- Read: `src/apps/commands/state-machine.ts`
+
+**Step 1: Final compilation check**
+
+Run: `cd /data/code/AgentHive && npx tsc --noEmit 2>&1 | head -30`
+Expected: No errors from state-machine.ts.
+
+**Step 2: Review final file**
+
+Read the full file to verify:
+- No `PGPASSWORD=*** literals remain
+- No `-U admin` remains
+- No unused `pgPass` variables
+- All DB queries use `await query()` from pool.ts
+- `run()` only used for systemctl commands
+- Help text has no `register` entry
+
+**Step 3: Functional test (if possible)**
+
+Run: `cd /data/code/AgentHive && npx tsx src/apps/commands/state-machine.ts status 2>&1 | head -20`
+Expected: Service status + DB stats (or clear DB connection error, not silent failure).
+
+**Step 4: Commit (if any final fixes needed)**
 
 ```bash
 git add src/apps/commands/state-machine.ts
-git commit -m "cleanup(sm): remove unused pgPass variable declarations (B3)"
+git commit -m "fix(sm): final verification for P307
+
+All psql shell-outs replaced with pool.query(). 6 bugs fixed:
+- PGPASSWORD=*** literal eliminated
+- Wrong -U admin eliminated
+- Dead pgPass variable removed
+- Phantom register subcommand removed from help
+- Silent failures now report stderr
+- execSync blocking replaced with async query()
+
+Refs: P307"
 ```
 
 ---
 
-### Task 9: Remove execSync import if no longer needed (B6)
+## Summary
 
-**Objective:** Check if `execSync` is still needed after psql removal. If only `systemctl` commands remain, keep it. If all uses converted to async, remove import.
+| Before | After |
+|--------|-------|
+| `PGPASSWORD=*** psql -U admin ...` | `await query(...)` |
+| `execSync` (blocks event loop) | `async/await` (non-blocking) |
+| `pgPass` declared but unused | Removed |
+| `run()` swallows errors | `run()` logs stderr |
+| `register` in help, no handler | Removed from help |
+| pool.ts: literal `***` loaded as password | `match[1].trim()` |
+| pool.ts: truncated `dbConf...ord` | `dbConfig.password` |
+| pool.ts: default user `admin` | default user `xiaomi` |
 
-**Files:**
-- Modify: `src/apps/commands/state-machine.ts:13`
+**Files changed:** `src/apps/commands/state-machine.ts` + `src/infra/postgres/pool.ts`
 
-**Step 1: Check remaining execSync usage**
+The fix mirrors the working pattern in `state-machine-handlers.ts` which already uses `query()` from pool.ts for identical queries. No new dependencies, no schema changes, no MCP tool changes needed.
 
-After Tasks 4-6, `execSync` is still used in:
-- `run()` function (for systemctl start/stop/restart/status calls)
-- `serviceStatus()` function
-
-These are fine as sync calls (fast systemctl operations). Keep the import.
-
-**Step 2: No commit needed** — just verify. Document finding:
-
-```bash
-echo "execSync still used for systemctl commands — acceptable (fast operations). Keeping import."
-```
-
----
-
-### Task 10: Build and verify full compilation
-
-**Objective:** Ensure entire project compiles without errors after all changes.
-
-**Files:** All modified files.
-
-**Step 1: Full TypeScript check**
-
-```bash
-cd /data/code/AgentHive
-npx tsc --noEmit 2>&1 | head -50
-```
-
-Expected: No errors (or pre-existing errors unrelated to P307).
-
-**Step 2: Run tests if available**
-
-```bash
-npm test 2>&1 | head -50
-```
-
-**Step 3: Final commit if any adjustments needed**
-
-```bash
-git add -A
-git commit -m "fix(P307): resolve 9 bugs in state-machine.ts and pool.ts — hardcoded PGPASSWORD, wrong DB user, sentinel loading, truncated code, silent failures"
-```
-
----
-
-## Verification Checklist
-
-- [ ] pool.ts line 44: `match[1].trim()` not `***`
-- [ ] pool.ts line 266: `dbConfig.password` not `dbConf...ord`
-- [ ] pool.ts lines 168, 276: default user `"xiaomi"` not `"admin"`
-- [ ] state-machine.ts: no `PGPASSWORD=***` literals remain
-- [ ] state-machine.ts: no `-U admin` psql calls remain
-- [ ] state-machine.ts: no `pgPass` dead variables remain
-- [ ] state-machine.ts: no `register` subcommand in help text
-- [ ] state-machine.ts: `run()` reports stderr on failure
-- [ ] `roadmap sm status` shows agencies/offers/dispatches from DB
-- [ ] `roadmap sm agencies` lists agencies with capabilities
-- [ ] `roadmap sm offers` lists open/active offers
-- [ ] All systemctl commands (start/stop/restart) still work
+**Architect note (2026-04-20):** The original plan only covered state-machine.ts (5 tasks). During review, 3 additional pool.ts bugs were discovered as part of the same root cause chain: literal `***` loading (line 44), truncated variable (line 266), and wrong default user (lines 168, 276). These are now included as Task 6. Total: 7 tasks.
