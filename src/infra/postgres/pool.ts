@@ -11,7 +11,14 @@
  *
  * For CLI contexts (no systemd env), PGPASSWORD is loaded from:
  *   - Project root `.env` file
+ *   - Project root `.env.agent` file (worktree contexts)
  *   - `~/.agenthive.env` file
+ *
+ * Pool connections use timeout safeguards:
+ *   - connectionTimeoutMillis: 5 s (configurable via PG_CONNECTION_TIMEOUT_MS)
+ *   - query_timeout: 30 s (configurable via PG_QUERY_TIMEOUT_MS)
+ *   - statement_timeout: 30 s (configurable via PG_STATEMENT_TIMEOUT_MS)
+ * So failures surface as thrown errors, not silent hangs.
  *
  * SECURITY: Only the environment variable is used at pool creation time.
  * No passwords are hardcoded.
@@ -41,10 +48,10 @@ import {
 			for (const line of content.split("\n")) {
 				const match = /^\s*PGPASSWORD\s*=\s*(.+)/.exec(line);
 				if (match) {
-				const value = match[1].trim();
-				if (value === "***") continue; // skip sentinel, try next candidate
-				process.env.PGPASSWORD = value;
-				return;
+			const value = match[1].trim();
+			if (value === "***") continue; // skip sentinel, try next candidate
+			process.env.PGPASSWORD = value;
+			return;
 				}
 			}
 		} catch {
