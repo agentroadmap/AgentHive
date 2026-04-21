@@ -233,7 +233,7 @@ export class ApiClient {
 		decided_at: string;
 	}>> {
 		const data = await this.fetchJson<{ decisions: any[] }>(
-			`${API_BASE}/board/proposals/${encodeURIComponent(proposalId)}/decisions`,
+			`${API_BASE}/proposals/${encodeURIComponent(proposalId)}/decisions`,
 		);
 		return data.decisions;
 	}
@@ -248,7 +248,7 @@ export class ApiClient {
 		reviewed_at: string;
 	}>> {
 		const data = await this.fetchJson<{ reviews: any[] }>(
-			`${API_BASE}/board/proposals/${encodeURIComponent(proposalId)}/reviews`,
+			`${API_BASE}/proposals/${encodeURIComponent(proposalId)}/reviews`,
 		);
 		return data.reviews;
 	}
@@ -261,7 +261,7 @@ export class ApiClient {
 		created_at: string;
 	}>> {
 		const data = await this.fetchJson<{ notes: any[] }>(
-			`${API_BASE}/board/proposals/${encodeURIComponent(proposalId)}/notes`,
+			`${API_BASE}/proposals/${encodeURIComponent(proposalId)}/notes`,
 		);
 		return data.notes;
 	}

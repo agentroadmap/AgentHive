@@ -24,6 +24,7 @@ import type {
 } from "../../types/index.ts";
 import { watchConfig } from "../../utils/config-watcher.ts";
 import { formatVersionLabel, getVersionInfo } from "../../utils/version.ts";
+import { query } from "../../infra/postgres/pool.ts";
 
 // Regex pattern to match any prefix (letters followed by dash)
 const PREFIX_PATTERN = /^[a-zA-Z]+-/i;
@@ -701,6 +702,26 @@ export class RoadmapServer {
 				if (method === "GET") return await this.handleGetProposalNotes(id, req);
 			}
 
+			// GET /api/proposals/:id/decisions
+			if (
+				pathname.startsWith("/api/proposals/") &&
+				pathname.endsWith("/decisions")
+			) {
+				const parts = pathname.split("/");
+				const id = parts[3]!;
+				if (method === "GET") return await this.handleGetProposalDecisions(id);
+			}
+
+			// GET /api/proposals/:id/reviews
+			if (
+				pathname.startsWith("/api/proposals/") &&
+				pathname.endsWith("/reviews")
+			) {
+				const parts = pathname.split("/");
+				const id = parts[3]!;
+				if (method === "GET") return await this.handleGetProposalReviews(id);
+			}
+
 			if (pathname === "/api/statuses" && method === "GET")
 				return await this.handleGetStatuses();
 
@@ -1111,18 +1132,50 @@ export class RoadmapServer {
 		try {
 			const url = new URL(req.url);
 			const noteType = url.searchParams.get("type");
-			const notes = (await this.core.listPulse(200))
-				.filter((event) => event.id === proposalId)
-				.filter((event) => !noteType || event.type === noteType)
-				.map((event, index) => ({
-					id: `${proposalId}-${index}`,
-					proposal_id: proposalId,
-					agent_identity: event.agent,
-					content: event.impact || event.title,
-					note_type: event.type,
-					created_at: event.timestamp,
-				}));
-			return Response.json({ notes, proposal_id: proposalId });
+			const isNumeric = /^\d+$/.test(proposalId);
+			let sql = `SELECT id, proposal_id, author_identity, context_prefix, COALESCE(body, body_markdown) as body_markdown, created_at
+				FROM roadmap_proposal.proposal_discussions
+				WHERE proposal_id = ${isNumeric ? "$1" : "(SELECT id FROM roadmap_proposal.proposal WHERE display_id = $1)"}`;
+			const params: unknown[] = [isNumeric ? parseInt(proposalId, 10) : proposalId];
+			if (noteType) {
+				sql += ` AND context_prefix = $2`;
+				params.push(noteType);
+			}
+			sql += ` ORDER BY created_at DESC LIMIT 50`;
+			const { rows } = await query(sql, params);
+			return Response.json({ notes: rows || [] });
+		} catch (error) {
+			return Response.json({ error: String(error) }, { status: 500 });
+		}
+	}
+
+	private async handleGetProposalDecisions(proposalId: string): Promise<Response> {
+		try {
+			const isNumeric = /^\d+$/.test(proposalId);
+			const { rows } = await query(
+				`SELECT id, decision, authority, rationale, binding, decided_at
+				 FROM roadmap_proposal.proposal_decision
+				 WHERE proposal_id = ${isNumeric ? "$1" : "(SELECT id FROM roadmap_proposal.proposal WHERE display_id = $1)"}
+				 ORDER BY decided_at DESC`,
+				[isNumeric ? parseInt(proposalId, 10) : proposalId],
+			);
+			return Response.json({ decisions: rows || [] });
+		} catch (error) {
+			return Response.json({ error: String(error) }, { status: 500 });
+		}
+	}
+
+	private async handleGetProposalReviews(proposalId: string): Promise<Response> {
+		try {
+			const isNumeric = /^\d+$/.test(proposalId);
+			const { rows } = await query(
+				`SELECT id, reviewer_identity, verdict, notes, findings, is_blocking, reviewed_at
+				 FROM roadmap_proposal.proposal_reviews
+				 WHERE proposal_id = ${isNumeric ? "$1" : "(SELECT id FROM roadmap_proposal.proposal WHERE display_id = $1)"}
+				 ORDER BY reviewed_at DESC`,
+				[isNumeric ? parseInt(proposalId, 10) : proposalId],
+			);
+			return Response.json({ reviews: rows || [] });
 		} catch (error) {
 			return Response.json({ error: String(error) }, { status: 500 });
 		}
