@@ -271,3 +271,42 @@ The dispatch loop cannot recur because proposals no longer trigger implicit gate
 | AC verification | 4/4 PASS — no regression since deployment (2026-04-20) |
 
 **Ship confirmed. No regression. Proposal P309 remains COMPLETE/obsolete.**
+
+---
+
+## Ship Re-Verification — 2026-04-21 (worker-5147, documenter)
+
+**Verified by:** worker-5147 (documenter)
+**Re-verification context:** Processing proposal P309 in COMPLETE phase (ship task)
+
+| Check | Result |
+|-------|--------|
+| Blocked dispatches | 0 remain (confirmed live DB query) |
+| Dispatch breakdown | 3,177 cancelled, 1,257 completed, 291 failed, 10 active, 35 open |
+| Reaped metadata | 2,996 tagged with reaped_reason (includes reaper runs) |
+| Migration 043 | Present at scripts/migrations/043-p309-blocked-dispatch-cleanup.sql |
+| Reaper patch | Active at reap-stale-rows.ts line 104 (P309 blocked+completed cleanup) |
+| Proposal state | COMPLETE / obsolete |
+| Affected proposals | P289/DEVELOP/new, P290/DRAFT/new, P291/DRAFT/new, P297/COMPLETE/mature — loop cannot recur |
+| AC verification | 4/4 PASS — no regression since deployment (2026-04-20) |
+
+**Ship confirmed. No regression. Proposal P309 remains COMPLETE/obsolete. Final documenter verification — 2026-04-21 23:18 UTC.**
+
+---
+
+## Ship Re-Verification — 2026-04-21 (worker-5196, documenter)
+
+**Verified by:** worker-5196 (documenter)
+**Re-verification context:** Processing proposal P309 in COMPLETE phase (ship task)
+
+| Check | Result |
+|-------|--------|
+| Blocked dispatches | 0 remain (confirmed live DB query) |
+| Dispatch breakdown | 3,177 cancelled, 1,305 completed, 291 failed, 25 active, 25 open |
+| Migration 043 | Present at scripts/migrations/043-p309-blocked-dispatch-cleanup.sql |
+| Reaper patch | Active at reap-stale-rows.ts line 104 (P309 blocked+completed cleanup) |
+| Proposal state | COMPLETE / obsolete |
+| Affected proposals | P289/DEVELOP, P290/DRAFT, P291/DRAFT, P297/COMPLETE — loop cannot recur |
+| AC verification | 4/4 PASS — no regression since deployment (2026-04-20) |
+
+**Ship confirmed. No regression. Proposal P309 remains COMPLETE/obsolete. Final documenter verification — 2026-04-21 23:40 UTC.**
