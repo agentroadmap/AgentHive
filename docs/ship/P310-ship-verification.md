@@ -1,58 +1,40 @@
 # P310 Ship Verification — Reconcile and Deduplicate 5 Instruction Files
 
-**Date:** 2026-04-21  
-**Status:** SHIPPED  
-**Verifier:** hermes (documenter)  
-**Commit:** 6b7969d — `P310: Reconcile and deduplicate 5 instruction files`
+**Date:** 2026-04-21
+**Verifying:** worker-5897 (pillar-researcher)
+**Status:** COMPLETE
+**Commits:** 6b7969d (main), d1ebef4 (fix: model names in §12)
 
----
+## Acceptance Criteria Verification
 
-## Deliverable Verification
+| # | Criterion | Status | Evidence |
+|---|-----------|--------|----------|
+| 1 | CONVENTIONS.md has precedence section declaring it canonical | PASS | §0 "Precedence and Instruction File Map" — declares canonical, lists all 5 files with roles |
+| 2 | agentGuide.md unique content merged into CONVENTIONS.md | PASS | Sections 11-16: Overseer (§11), Model-to-Workflow (§12), Financial Governance (§13), Anomaly Detection (§14), Escalation Matrix (§15), Definitions (§16) |
+| 3 | AGENTS.md/CLAUDE.md shared content merged into CONVENTIONS.md | PASS | §5 contains: RFC workflow states, maturity definitions, proposal types — single copy, not duplicated |
+| 4 | Worktree path convention fixed (CWD-based) | PASS | §7 "Git and Worktree Best Practices" uses CWD convention, no hardcoded paths |
+| 5 | AGENTS.md rewritten as thin shim | PASS | 26 lines — pointer to CONVENTIONS.md, Codex-specific notes, repo context |
+| 6 | CLAUDE.md rewritten as thin shim | PASS | 27 lines — pointer to CONVENTIONS.md, Claude-specific notes (host policy, hotfix reference), repo context |
+| 7 | copilot-instructions.md moved to docs/reference/ | PASS | `.github/copilot-instructions.md` is redirect (5 lines). `docs/reference/schema-migration-guide.md` created |
+| 8 | agentGuide.md retired | PASS | 18 lines — "RETIRED" header, section mapping table, pointer to CONVENTIONS.md |
+| 9 | Cross-references updated throughout | PASS | §1 removes agentGuide.md from reading list, notes it's retired. All thin shims point to CONVENTIONS.md |
+| 10 | No contradictions remain between files | PASS | All files consistent: MCP port 6421, CWD worktree, proposal workflow DRAFT→COMPLETE |
 
-### 1. CONVENTIONS.md — Canonical Source (498 lines, up from 337)
-- [x] Precedence section (Section 0) declares it canonical
-- [x] Proposal types table merged (Section 3, line 97)
-- [x] RFC workflow states consolidated
-- [x] Maturity definitions merged (line 128)
-- [x] Overseer role: Hermes/Andy responsibilities (Section 11)
-- [x] Financial governance & budget control (Section 13)
-- [x] Anomaly & loop detection (Section 14)
-- [x] Escalation matrix (Section 15)
-- [x] No hardcoded paths — CWD-based convention throughout
-- [x] Cross-references updated (agentGuide.md retired, not in reading list)
+## Post-Merge Fix Applied
 
-### 2. AGENTS.md — Thin Shim (26 lines, target ~30)
-- [x] Points to CONVENTIONS.md as canonical source
-- [x] Codex-specific quirks only (sandbox, MCP, surgical changes)
-- [x] No duplicated proposal types, workflow, or maturity content
+Skeptic review (d1ebef4) caught hardcoded unavailable model names in §12 (copied from retired agentGuide.md). Fix: removed specific model names, added NOTE that `model_routes` table is authoritative, added host constraint note.
 
-### 3. CLAUDE.md — Thin Shim (27 lines, target ~40)
-- [x] Points to CONVENTIONS.md as canonical source
-- [x] Claude-specific memory: host policy (nous+xiaomi), MCP, DB
-- [x] Hotfix workflow pointer (Section 5 + Section 15)
-- [x] No duplicated content
+## Deliverables Summary
 
-### 4. agentGuide.md — Retired (18 lines)
-- [x] Marked RETIRED with section mapping table
-- [x] All original content merged into CONVENTIONS.md sections 10-16
-- [x] Clear pointer to CONVENTIONS.md
-
-### 5. copilot-instructions.md — Redirect (7 lines)
-- [x] Redirects to `docs/reference/schema-migration-guide.md`
-- [x] Points to CONVENTIONS.md for all other conventions
-- [x] `docs/reference/schema-migration-guide.md` exists (11 lines)
-
-## Contradiction Check
-- No duplicated proposal types across files
-- No conflicting workflow definitions
-- No hardcoded paths (agentGuide.md bug fixed)
-- Precedence is unambiguous: CONVENTIONS.md wins
-
-## DB State
-- P310: status=COMPLETE, maturity=obsolete
-- Stale leases cleaned (1 released)
-- Stale dispatches cleaned (2 cancelled)
-- No active leases or dispatches remaining
+| File | Lines | Role |
+|------|-------|------|
+| CONVENTIONS.md | 500 | Canonical source (§0-§17) |
+| AGENTS.md | 26 | Thin shim for Codex |
+| CLAUDE.md | 27 | Thin shim for Claude Code |
+| agentGuide.md | 18 | Retired (pointer only) |
+| .github/copilot-instructions.md | ~5 | Redirect to docs/reference/ |
+| docs/reference/schema-migration-guide.md | ~6 | Schema migration context |
 
 ## Verdict
-**ALL 5 deliverables PASS. No contradictions. Ship approved.**
+
+All 10 design requirements delivered. No contradictions between files. Ship.
