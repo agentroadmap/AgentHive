@@ -4,7 +4,8 @@
 ├── package.json            # Workspace definitions (npm/pnpm/yarn)
 ├── CONVENTIONS.md          # Rules for coding & testing (for humans)
 ├── README.md               # Human-facing project overview
-├── agentGuide.md           # Strict operational rules for Agents
+├── AGENTS.md               # Thin shim for Codex (→ CONVENTIONS.md)
+├── CLAUDE.md               # Thin shim for Claude Code (→ CONVENTIONS.md)
 ├── docs/
 │   ├── architecture/       # High-level system design & Pillar interactions
 │   ├── glossary.md         # Domain-specific terminology
