@@ -49,7 +49,17 @@
       "testFile": "review/P053-ac6-state-names",
       "discoveredAt": "2026-04-08T10:54:01.155Z",
       "status": "open"
+    },
+    {
+      "id": "ISSUE-P209-1",
+      "proposalId": "P209",
+      "title": "P209: Execution blocker - 7th consecutive gate failure with zero implementation",
+      "description": "P209 has failed 7 consecutive gate reviews with zero implementation. All 8 ACs unmet. Design path mismatch (src/proposal-engine/ vs src/infra/). No implementation agent has touched codebase. Recommend reassigning or decomposing proposal.",
+      "severity": "major",
+      "testFile": "gate-review",
+      "discoveredAt": "2026-04-21T15:16:39.025Z",
+      "status": "open"
     }
   ],
-  "updatedAt": "2026-04-08T10:54:01.155Z"
+  "updatedAt": "2026-04-21T15:16:39.025Z"
 }

@@ -11,6 +11,9 @@ type BoardRow = {
 	queue_position: number | null;
 	ac_total: number;
 	ac_pass: number;
+	latest_review_verdict: string | null;
+	latest_decision: string | null;
+	discussion_count: number;
 };
 
 const MATURITY_ICONS: Record<string, string> = {
@@ -51,7 +54,10 @@ async function main() {
 		   p.maturity,
 		   q.queue_position,
 		   COALESCE(ac.ac_total, 0)::int AS ac_total,
-		   COALESCE(ac.ac_pass, 0)::int AS ac_pass
+		   COALESCE(ac.ac_pass, 0)::int AS ac_pass,
+		   rev.latest_verdict AS latest_review_verdict,
+		   dec.latest_decision AS latest_decision,
+		   COALESCE(disc.disc_count, 0)::int AS discussion_count
 		 FROM roadmap.proposal p
 		 LEFT JOIN roadmap.v_proposal_queue q ON q.id = p.id
 		 LEFT JOIN (
@@ -62,6 +68,25 @@ async function main() {
 		   FROM roadmap.proposal_acceptance_criteria
 		   GROUP BY proposal_id
 		 ) ac ON ac.proposal_id = p.id
+		 LEFT JOIN LATERAL (
+		   SELECT verdict AS latest_verdict
+		   FROM roadmap_proposal.proposal_reviews
+		   WHERE proposal_id = p.id
+		   ORDER BY reviewed_at DESC
+		   LIMIT 1
+		 ) rev ON true
+		 LEFT JOIN LATERAL (
+		   SELECT decision AS latest_decision
+		   FROM roadmap_proposal.proposal_decision
+		   WHERE proposal_id = p.id
+		   ORDER BY decided_at DESC
+		   LIMIT 1
+		 ) dec ON true
+		 LEFT JOIN (
+		   SELECT proposal_id, COUNT(*)::int AS disc_count
+		   FROM roadmap_proposal.proposal_discussions
+		   GROUP BY proposal_id
+		 ) disc ON disc.proposal_id = p.id
 		 ORDER BY
 		   CASE WHEN q.queue_position IS NULL THEN 1 ELSE 0 END,
 		   q.queue_position NULLS LAST,
@@ -103,8 +128,17 @@ async function main() {
 				: "";
 			const acText =
 				row.ac_total > 0 ? ` AC:${row.ac_pass}/${row.ac_total}` : "";
+			const reviewText = row.latest_review_verdict
+				? ` review:${row.latest_review_verdict}`
+				: "";
+			const decisionText = row.latest_decision
+				? ` dec:${row.latest_decision.length > 30 ? row.latest_decision.slice(0, 30) + "…" : row.latest_decision}`
+				: "";
+			const discText = row.discussion_count > 0
+				? ` disc:${row.discussion_count}`
+				: "";
 			console.log(
-				`  ${maturityIcon} ${row.display_id} [${row.type}]${queueText}${acText} — ${row.title}`,
+				`  ${maturityIcon} ${row.display_id} [${row.type}]${queueText}${acText}${reviewText}${decisionText}${discText} — ${row.title}`,
 			);
 		}
 		console.log("");

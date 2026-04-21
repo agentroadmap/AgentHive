@@ -38,16 +38,16 @@ import {
 		try {
 			if (!existsSync(envPath)) continue;
 			const content = readFileSync(envPath, "utf-8");
-				for (const line of content.split("\n")) {
+			for (const line of content.split("\n")) {
 				const match = /^\s*PGPASSWORD\s*=\s*(.+)/.exec(line);
-		if (match) {
-const value = match[1].trim();
-if (value === "***") continue; // skip sentinel, try next candidate
-process.env.PGPASSWORD = value;
-		return;
+				if (match) {
+				const value = match[1].trim();
+			if (value === "***") continue; // skip sentinel, try next candidate
+			process.env.PGPASSWORD = value;
+			return;
+				}
 			}
-			}
-	} catch {
+		} catch {
 			// fallthrough
 		}
 	}
