@@ -8,8 +8,8 @@
 **Phase:** Complete (ship)
 **Created:** 2026-04-20
 **Completed:** 2026-04-20
-**Verified:** 2026-04-20 (initial), 2026-04-20 22:52 (re-verify), 2026-04-21 (ship processing)
-**Status:** COMPLETE
+**Verified:** 2026-04-20 (initial), 2026-04-20 22:52 (re-verify), 2026-04-21 (ship processing), 2026-04-21 02:26 (ship final)
+**Status:** SHIPPED
 
 ## Problem Statement
 
@@ -114,6 +114,20 @@ initialStatus = initialStatus.toUpperCase();
 - `transition_queue.to_stage` — 98.7% title-case, requires rewriting SQL across 4 migrations + views. LOWER() comparisons handle it correctly. Separate future effort.
 - `proposal_state_transitions` — 261 mixed-case rows (41%), historical data. Out of scope.
 - `terminology.ts` CanonicalStatus — display layer, title-case correct for UI. Trigger catches at DB boundary.
+
+## Ship Verification (2026-04-21 02:26 UTC)
+
+Final confirmation — all live system checks pass:
+
+| Check | Result |
+|-------|--------|
+| `COUNT(DISTINCT status)` = 6 | PASS — DRAFT(35), REVIEW(15), DEVELOP(29), MERGE(2), COMPLETE(69), DEPLOYED(34) |
+| `COUNT(*) WHERE status != UPPER(status)` = 0 | PASS — zero residual mixed-case |
+| Trigger `trg_normalize_proposal_status` enabled | PASS — tgenabled='O' |
+| CHECK `proposal_status_canonical` active | PASS — constraint_type='c' |
+| Trigger live test (Draft→DRAFT) | PASS — verified in error log on test INSERT |
+| Git HEAD on main | PASS — clean, ship doc committed |
+| Code merged to `/data/code/AgentHive` | PASS — services see latest code |
 
 ## Technical Notes
 
