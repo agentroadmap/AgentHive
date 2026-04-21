@@ -710,7 +710,10 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		worktree,
 		route,
 		agentEnv,
-		extraEnv,
+		extraEnv: {
+			...extraEnv,
+			MCP_URL: process.env.MCP_URL ?? "http://127.0.0.1:6421/sse",
+		},
 	});
 
 	// Insert agent_runs row (status = running)

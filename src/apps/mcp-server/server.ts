@@ -1,5 +1,6 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
 	CallToolRequestSchema,
@@ -340,6 +341,18 @@ export class McpServer extends Core {
 		res: SseTransportResponse,
 	): Promise<SSEServerTransport> {
 		const transport = new SSEServerTransport(endpoint, res);
+		await this.server.connect(transport);
+		return transport;
+	}
+
+	/**
+	 * Create a new StreamableHTTP transport for a connection.
+	 * Compatible with hermes MCP client and other StreamableHTTP clients.
+	 */
+	public async createStreamableHttpTransport(): Promise<StreamableHTTPServerTransport> {
+		const transport = new StreamableHTTPServerTransport({
+			sessionIdGenerator: undefined, // stateless
+		});
 		await this.server.connect(transport);
 		return transport;
 	}
