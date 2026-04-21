@@ -418,16 +418,18 @@ The orchestrator handles the "how" of dispatch. Hermes handles the "what" and "w
 
 ## 12. Model-to-Workflow Phase Mapping
 
-Models should be assigned to cubic phases based on capability and cost:
+> **NOTE:** The authoritative model-to-phase mapping lives in the DB (`model_routes` table). The table below is a **design intent** reference, not operational fact. Models listed may not be available on every host — check your host's actual model availability before relying on this.
 
-| Cubic Phase | Default Model | Why | Cost Tier |
+**Current host constraint:** Only `xiaomi/mimo-v2-pro` and `xiaomi/mimo-v2-omni` (Nous subscription) are available. No Claude, GPT-4, or Gemini models are configured.
+
+| Cubic Phase | Design Intent | Why | Cost Tier |
 | :--- | :--- | :--- | :--- |
-| **Design** (DRAFT, REVIEW, TRIAGE) | `claude-opus-4-6` or `o3` | Deep reasoning, architecture, adversarial review | Premium |
-| **Build** (DEVELOP, FIX) | `claude-sonnet-4-6` or `gemini-2.5-pro` | Code generation, implementation, balanced cost | Standard |
-| **Test** (MERGE) | `gpt-4o` or `claude-sonnet-4` | Integration testing, validation | Standard |
-| **Ship** (COMPLETE, DEPLOYED) | `claude-haiku-4-5` or `gemini-2.0-flash` | Documentation, finalization, low-cost | Economy |
+| **Design** (DRAFT, REVIEW, TRIAGE) | Deep reasoning model | Architecture, adversarial review | Premium |
+| **Build** (DEVELOP, FIX) | Code generation model | Implementation, balanced cost | Standard |
+| **Test** (MERGE) | Balanced model | Integration testing, validation | Standard |
+| **Ship** (COMPLETE, DEPLOYED) | Fast economy model | Documentation, finalization, low-cost | Economy |
 
-**Fallback chain:** If primary model is unavailable or budget exhausted, fall back to `o4-mini` (mid-tier) then `gpt-4o-mini` or `gemini-2.0-flash-lite` (economy).
+**To see actual routed models:** Query `model_routes` in the DB or check `roadmap.yaml`. Do not hardcode model names from this table into code — the DB is the source of truth.
 
 ## 13. Financial Governance & Budget Control
 
