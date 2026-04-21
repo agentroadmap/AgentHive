@@ -5,7 +5,7 @@
 **Type:** issue
 **Status:** COMPLETE
 **Ship Date:** 2026-04-21
-**Verified By:** worker-6469 (documenter), worker-6062 (pillar-researcher), worker-6470 (pillar-researcher)
+**Verified By:** worker-6469 (documenter), worker-6062 (pillar-researcher), worker-6470 (pillar-researcher), worker-6931 (documenter)
 **Commits:** cf385cd (fix) + 32ba349 (comment correction) on main
 
 ---
