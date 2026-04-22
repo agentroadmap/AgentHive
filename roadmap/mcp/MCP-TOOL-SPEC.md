@@ -18,6 +18,7 @@ _Schema-aligned, domain-organized, no bloat._
 |------|-------------|-----------|-----------|
 | `prop_create` | Create a new proposal (any type) | `title`, `proposal_type`, `domain_id`, `category`, `body_markdown`, `priority`, `budget_limit_usd`, `parent_id?`, `tags?` | `proposal` |
 | `prop_get` | Get proposal by ID (includes criteria, latest version) | `id` | — (read) |
+| `prop_get_detail` | Complete proposal with ALL children in one call: ACs, deps, discussions, reviews, gate_decisions, dispatches, lease, workflow | `id`, `format?` (`json`|`yaml_md`) | — (read, `v_proposal_detail`) |
 | `prop_list` | List proposals with filters | `proposal_type?`, `status?`, `domain_id?`, `category?`, `assigned_identity?` | — (read) |
 | `prop_update` | Update proposal fields (auto-creates version entry) | `id`, `title?`, `body_markdown?`, `priority?`, `tags?`, `change_summary` | `proposal`, `proposal_version` |
 | `prop_transition` | Change proposal status | `id`, `new_status` | `proposal`, `proposal_version` |
