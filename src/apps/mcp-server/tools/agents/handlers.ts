@@ -506,14 +506,26 @@ export class AgentPoolHandlers {
 				);
 			}
 
-			// 3. Call real spawnAgent
+			// 3. Derive stage from proposal state vocabulary
+			let stage = args.template;
+			if (args.targetProposalId) {
+				const { rows: proposalRows } = await query<{ status: string }>(
+					`SELECT status FROM roadmap_proposal.proposal WHERE id = $1`,
+					[Number(args.targetProposalId)],
+				);
+				if (proposalRows.length > 0) {
+					stage = proposalRows[0].status;
+				}
+			}
+
+			// 4. Call real spawnAgent
 			const result = await realSpawnAgent({
 				worktree,
 				task: args.reason,
 				proposalId: args.targetProposalId
 					? Number(args.targetProposalId)
 					: undefined,
-				stage: args.template,
+				stage,
 				model: args.model,
 				timeoutMs: args.timeoutMs ?? 300_000,
 			});

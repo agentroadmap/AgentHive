@@ -15,7 +15,7 @@ import { access, readdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { spawnAgent, detectProvider } from "../src/core/orchestration/agent-spawner.ts";
+import { spawnAgent } from "../src/core/orchestration/agent-spawner.ts";
 import { reapStaleRows } from "../src/core/pipeline/reap-stale-rows.ts";
 import { getPool, query } from "../src/infra/postgres/pool.ts";
 import { mcpText } from "./mcp-result.ts";
@@ -291,6 +291,21 @@ function normalizeWorktreeIdentity(value: string): string {
 	return basename(value.trim().replaceAll("/", "-"));
 }
 
+/**
+ * P405: Resolve the active route provider from model_routes.
+ * Worktrees are filesystem contexts, not provider constraints.
+ */
+async function resolveActiveRouteProvider(): Promise<string | null> {
+	const { rows } = await query<{ agent_provider: string }>(
+		`SELECT agent_provider
+		 FROM roadmap.model_routes
+		 WHERE is_enabled = true
+		 ORDER BY priority ASC, COALESCE(cost_per_million_input, 0) ASC
+		 LIMIT 1`,
+	);
+	return rows[0]?.agent_provider ?? null;
+}
+
 async function scoreUsableWorktree(
 	worktree: string,
 	source: string,
@@ -380,39 +395,9 @@ async function selectExecutorWorktree(
 		}
 	}
 
-	// Filter out worktrees whose provider is forbidden by host policy
-	const filtered: ExecutorCandidate[] = [];
-	for (const candidate of deduped.values()) {
-		try {
-			const provider = await detectProvider(candidate.worktree);
-			// Look up route_provider (what fn_check_spawn_policy validates)
-			const { rows: routeRows } = await query<{ route_provider: string }>(
-				`SELECT mr.route_provider
-           FROM roadmap.model_routes mr
-           WHERE mr.agent_provider = $1 AND mr.is_enabled = true
-           ORDER BY mr.priority ASC LIMIT 1`,
-				[provider],
-			);
-			const routeProvider = routeRows[0]?.route_provider ?? provider;
-			const { rows } = await query<{ allowed: boolean }>(
-				`SELECT roadmap.fn_check_spawn_policy($1, $2) AS allowed`,
-				[AGENTHIVE_HOST, routeProvider],
-			);
-			if (rows[0]?.allowed) {
-				filtered.push(candidate);
-			} else {
-				logger.log(
-					`Skipping executor ${candidate.worktree} — provider "${routeProvider}" forbidden by host policy (${AGENTHIVE_HOST})`,
-				);
-			}
-		} catch (err) {
-			logger.warn(
-				`Skipping executor ${candidate.worktree} — provider detection failed: ${err instanceof Error ? err.message : String(err)}`,
-			);
-		}
-	}
-
-	const ranked = filtered.sort(
+	// P405: worktree is a filesystem context, not a provider constraint.
+	// Provider/model are resolved from model_routes at spawn time.
+	const ranked = Array.from(deduped.values()).sort(
 		(a, b) => b.score - a.score || a.worktree.localeCompare(b.worktree),
 	);
 	const selected = ranked[0];
@@ -455,6 +440,7 @@ async function dispatchAgent(
 	proposalId: string,
 	task: string,
 	phase: string,
+	stage: string,
 ): Promise<string | null> {
 	const client = new Client({ name: "orchestrator", version: "1.0.0" });
 	const transport = new SSEClientTransport(new URL(MCP_URL));
@@ -487,12 +473,15 @@ async function dispatchAgent(
 		// Spawn the agent process
 		const taskPrompt = `${AGENT_PROMPTS[agent] || ""}\n\nProposal P${proposalId}: ${task}\n\nUse the MCP tools to do your work. Connect to http://127.0.0.1:6421/sse for proposal management.`;
 		const worktree = await selectExecutorWorktree(null);
+		// P405: resolve provider from model_routes, not worktree metadata
+		const activeProvider = await resolveActiveRouteProvider();
 		const result = await spawnAgent({
 			worktree,
 			task: taskPrompt,
 			proposalId: Number(proposalId),
-			stage: phase,
+			stage,
 			timeoutMs: 600_000,
+			provider: activeProvider ?? undefined,
 		});
 
 		if (result.exitCode === 0) {
@@ -500,10 +489,11 @@ async function dispatchAgent(
 				`✅ ${agent} completed (run=${result.agentRunId}) for P${proposalId}`,
 			);
 			// Record provider success — clears any cooldown
-			try {
-				const provider = await detectProvider(worktree);
-				await recordProviderSuccess(provider);
-			} catch {}
+			if (activeProvider) {
+				try {
+					await recordProviderSuccess(activeProvider);
+				} catch {}
+			}
 		} else {
 			logger.warn(
 				`⚠️ ${agent} exited ${result.exitCode} (run=${result.agentRunId}) for P${proposalId}`,
@@ -511,10 +501,9 @@ async function dispatchAgent(
 			// Dynamic control: classify error, set cooldown
 			const fullError = [result.stderr, result.stdout].filter(Boolean).join("\n");
 			const classified = classifyProviderError(fullError);
-			if (classified) {
+			if (classified && activeProvider) {
 				try {
-					const provider = await detectProvider(worktree);
-					await setProviderCooldown(provider, classified.type, fullError);
+					await setProviderCooldown(activeProvider, classified.type, fullError);
 				} catch {}
 			}
 		}
@@ -548,11 +537,10 @@ async function handleStateChange(proposalId: string, newState: string) {
 
 	// Dynamic control: check if provider is in cooldown before dispatching
 	try {
-		const worktree = await selectExecutorWorktree(null);
-		const provider = await detectProvider(worktree);
-		if (await isProviderInCooldown(provider)) {
+		const activeProvider = await resolveActiveRouteProvider();
+		if (activeProvider && await isProviderInCooldown(activeProvider)) {
 			logger.log(
-				`⏸ Skipping P${proposalId} (${newState}): provider ${provider} is in cooldown`,
+				`⏸ Skipping P${proposalId} (${newState}): provider ${activeProvider} is in cooldown`,
 			);
 			return;
 		}
@@ -563,7 +551,7 @@ async function handleStateChange(proposalId: string, newState: string) {
 	// Dispatch all agents for this state (parallel, tolerate individual failures)
 	const results = await Promise.allSettled(
 		agents.map((agent) =>
-			dispatchAgent(agent, proposalId, `Handle ${newState}`, phase),
+			dispatchAgent(agent, proposalId, `Handle ${newState}`, phase, normalizedState),
 		),
 	);
 	const dispatched = results.filter(
@@ -816,10 +804,10 @@ async function dispatchImplicitGate(
 
 	// Dynamic control: check if provider is in cooldown before dispatching
 	try {
-		const provider = await detectProvider(worktree);
-		if (await isProviderInCooldown(provider)) {
+		const activeProvider = await resolveActiveRouteProvider();
+		if (activeProvider && await isProviderInCooldown(activeProvider)) {
 			logger.log(
-				`⏸ Skipping ${proposal.display_id}: provider ${provider} is in cooldown`,
+				`⏸ Skipping ${proposal.display_id}: provider ${activeProvider} is in cooldown`,
 			);
 			return;
 		}
@@ -841,7 +829,8 @@ async function dispatchImplicitGate(
          'reason', $4::text,
          'gate', $5::text,
          'from_stage', $6::text,
-         'to_stage', $7::text
+         'to_stage', $7::text,
+         'stage', 'gate:' || $7::text
        ))
      RETURNING id`,
 		[
@@ -861,13 +850,16 @@ async function dispatchImplicitGate(
 	);
 
 	let result: Awaited<ReturnType<typeof spawnAgent>>;
+	// P405: resolve provider from model_routes, not worktree metadata
+	const activeProvider = await resolveActiveRouteProvider();
 	try {
 		result = await spawnAgent({
 			worktree,
 			task: buildImplicitGateTask(proposal, gate),
 			proposalId: proposal.id,
-			stage: gate.toStage,
+			stage: `gate:${gate.toStage.toUpperCase()}`,
 			timeoutMs: 600_000,
+			provider: activeProvider ?? undefined,
 		});
 	} catch (spawnErr) {
 		const errMsg =
@@ -988,10 +980,12 @@ async function dispatchImplicitGate(
 	const classified = classifyProviderError(fullError);
 	if (classified && result.exitCode !== 0) {
 		try {
-			const provider = await detectProvider(worktree);
-			await setProviderCooldown(provider, classified.type, fullError);
+			const provider = activeProvider ?? await resolveActiveRouteProvider();
+			if (provider) {
+				await setProviderCooldown(provider, classified.type, fullError);
+			}
 		} catch {
-			// Provider detection failed — skip cooldown
+			// Provider resolution failed — skip cooldown
 		}
 	}
 
@@ -1075,7 +1069,8 @@ async function _dispatchTransitionQueue(queueId: number): Promise<void> {
        jsonb_build_object(
          'transition_queue_id', $4::text,
          'from_stage', $5::text,
-         'to_stage', $6::text
+         'to_stage', $6::text,
+         'stage', 'gate:' || $6::text
        ))
      RETURNING id`,
 		[
@@ -1097,7 +1092,7 @@ async function _dispatchTransitionQueue(queueId: number): Promise<void> {
 		worktree,
 		task,
 		proposalId: transition.proposal_id,
-		stage: transition.to_stage,
+		stage: `gate:${transition.to_stage}`,
 		timeoutMs,
 	});
 

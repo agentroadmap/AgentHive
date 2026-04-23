@@ -56,9 +56,11 @@ export interface SpawnRequest {
 	/** Proposal context (optional) */
 	proposalId?: number;
 	/** Stage context */
-	stage?: string;
+	stage: string;
 	/** Preferred model override (provider decides default) */
 	model?: string;
+	/** P405: Agent provider override — model_routes controls routing, not worktree metadata */
+	provider?: string;
 	/** Max tokens for this invocation */
 	maxTokens?: number;
 	/** Wall-clock timeout in milliseconds (default 300 000 = 5 min) */
@@ -101,6 +103,8 @@ export interface ModelRoute {
 	baseUrlEnv: string | null;
 	/** Comma-separated Hermes toolsets to grant; null = defaults */
 	spawnToolsets: string | null;
+	/** Whether agents spawned on this route may spawn their own subagents */
+	spawnDelegate: boolean;
 }
 
 export function buildSpawnProcessEnv(input: {
@@ -128,15 +132,17 @@ export function buildSpawnProcessEnv(input: {
 	// the correct behaviour (fail closed rather than run with no key).
 
 	const baseEnv: Record<string, string> = {
-		// Carry through essential PATH — always include hermes bin
-		PATH: ["/home/xiaomi/.local/bin", process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin"].filter(Boolean).join(":"),
-		HOME: process.env.HOME ?? "/home/xiaomi",
+		// Carry through essential PATH
+		PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
+		HOME: process.env.HOME ?? "/var/lib/agenthive",
 		// Agent-specific overrides from .env.agent
 		DATABASE_URL: input.agentEnv.DATABASE_URL ?? "",
 		AGENT_WORKTREE: input.worktree,
 		AGENT_PROVIDER: input.route.agentProvider,
 		AGENT_ROUTE_PROVIDER: input.route.routeProvider,
 		AGENT_API_SPEC: input.route.apiSpec,
+		// Spawn control: DB-driven flag tells the agent whether it may spawn subagents
+		AGENTHIVE_SPAWN_DELEGATE: String(input.route.spawnDelegate),
 		// Git identity isolation
 		GIT_CONFIG_GLOBAL: `${GITCONFIG_ROOT}/${input.worktree}.gitconfig`,
 		GIT_CONFIG_NOSYSTEM: "1",
@@ -186,7 +192,7 @@ function buildClaudeArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
  */
 function buildHermesArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
 	const argv = [
-		"hermes",
+		"/home/xiaomi/.local/bin/hermes",
 		"chat",
 		"-q",
 		req.task,
@@ -456,13 +462,13 @@ async function resolveModelRoute(
 		api_spec: string;
 		base_url: string;
 		plan_type: string | null;
-		cost_per_1k_input: number | null;
 		cost_per_million_input: number | null;
 		cost_per_million_output: number | null;
 		api_key_env: string | null;
 		api_key_fallback_env: string | null;
 		base_url_env: string | null;
 		spawn_toolsets: string | null;
+		spawn_delegate: boolean | null;
 	};
 
 	const perMillionPricing = await supportsPerMillionRoutePricing();
@@ -472,13 +478,13 @@ async function resolveModelRoute(
 		return query<RouteRow>(
 			`SELECT model_name, route_provider, agent_provider,
                agent_cli, api_spec, base_url, plan_type,
-               cost_per_1k_input, cost_per_million_input, cost_per_million_output,
-               api_key_env, api_key_fallback_env, base_url_env, spawn_toolsets
+               cost_per_million_input, cost_per_million_output,
+               api_key_env, api_key_fallback_env, base_url_env, spawn_toolsets, spawn_delegate
         FROM roadmap.model_routes
         WHERE model_name = $1
           AND agent_provider = $2
           AND is_enabled = true
-        ORDER BY priority ASC, COALESCE(cost_per_million_input, cost_per_1k_input * 1000) ASC
+        ORDER BY priority ASC, COALESCE(cost_per_million_input, 0) ASC
         LIMIT 1`,
 				[modelName, provider],
 			);
@@ -487,14 +493,14 @@ async function resolveModelRoute(
 		return query<RouteRow>(
 			`SELECT model_name, route_provider, agent_provider,
               agent_cli, api_spec, base_url, plan_type,
-              cost_per_1k_input, NULL::numeric AS cost_per_million_input,
+              NULL::numeric AS cost_per_million_input,
               NULL::numeric AS cost_per_million_output,
-              api_key_env, api_key_fallback_env, base_url_env, spawn_toolsets
+              api_key_env, api_key_fallback_env, base_url_env, spawn_toolsets, spawn_delegate
        FROM roadmap.model_routes
        WHERE model_name = $1
          AND agent_provider = $2
          AND is_enabled = true
-        ORDER BY priority ASC, cost_per_1k_input ASC
+        ORDER BY priority ASC
         LIMIT 1`,
 			[modelName, provider],
 		);
@@ -508,13 +514,14 @@ async function resolveModelRoute(
 		apiSpec: r.api_spec as ModelRoute["apiSpec"],
 		baseUrl: r.base_url,
 		planType: r.plan_type,
-		costPer1kInput: Number(r.cost_per_1k_input ?? 0),
+		costPer1kInput: Number(r.cost_per_million_input ? r.cost_per_million_input / 1000 : 0),
 		costPerMillionInput: Number(r.cost_per_million_input ?? 0),
 		costPerMillionOutput: Number(r.cost_per_million_output ?? 0),
 		apiKeyEnv: r.api_key_env,
 		apiKeyFallbackEnv: r.api_key_fallback_env,
 		baseUrlEnv: r.base_url_env,
 		spawnToolsets: r.spawn_toolsets,
+		spawnDelegate: r.spawn_delegate ?? false,
 	});
 
 	if (hint) {
@@ -537,31 +544,30 @@ async function resolveModelRoute(
 		? await query<RouteRow>(
 				`SELECT model_name, route_provider, agent_provider,
                agent_cli, api_spec, base_url, plan_type,
-               cost_per_1k_input, cost_per_million_input, cost_per_million_output,
-               api_key_env, api_key_fallback_env, base_url_env, spawn_toolsets
+               cost_per_million_input, cost_per_million_output,
+               api_key_env, api_key_fallback_env, base_url_env, spawn_toolsets, spawn_delegate
         FROM roadmap.model_routes
         WHERE agent_provider = $1
           AND is_enabled = true
         ORDER BY
           CASE WHEN is_default = true THEN 0 ELSE 1 END,
           priority ASC,
-          COALESCE(cost_per_million_input, cost_per_1k_input * 1000) ASC
+          COALESCE(cost_per_million_input, 0) ASC
         LIMIT 1`,
 				[provider],
 			)
 		: await query<RouteRow>(
 				`SELECT model_name, route_provider, agent_provider,
               agent_cli, api_spec, base_url, plan_type,
-              cost_per_1k_input, NULL::numeric AS cost_per_million_input,
+              NULL::numeric AS cost_per_million_input,
               NULL::numeric AS cost_per_million_output,
-              api_key_env, api_key_fallback_env, base_url_env, spawn_toolsets
+              api_key_env, api_key_fallback_env, base_url_env, spawn_toolsets, spawn_delegate
        FROM roadmap.model_routes
        WHERE agent_provider = $1
          AND is_enabled = true
         ORDER BY
           CASE WHEN is_default = true THEN 0 ELSE 1 END,
-          priority ASC,
-          cost_per_1k_input ASC
+          priority ASC
         LIMIT 1`,
 				[provider],
 			);
@@ -579,27 +585,27 @@ async function resolveModelRoute(
 			? await query<RouteRow>(
 					`SELECT model_name, route_provider, agent_provider,
                agent_cli, api_spec, base_url, plan_type,
-               cost_per_1k_input, cost_per_million_input, cost_per_million_output,
-               api_key_env, api_key_fallback_env, base_url_env, spawn_toolsets
+               cost_per_million_input, cost_per_million_output,
+               api_key_env, api_key_fallback_env, base_url_env, spawn_toolsets, spawn_delegate
         FROM roadmap.model_routes
         WHERE model_name = $1
           AND agent_provider = $2
           AND is_enabled = true
-        ORDER BY priority ASC, COALESCE(cost_per_million_input, cost_per_1k_input * 1000) ASC
+        ORDER BY priority ASC, COALESCE(cost_per_million_input, 0) ASC
         LIMIT 1`,
 					[fallbackModel, provider],
 				)
 			: await query<RouteRow>(
 					`SELECT model_name, route_provider, agent_provider,
               agent_cli, api_spec, base_url, plan_type,
-              cost_per_1k_input, NULL::numeric AS cost_per_million_input,
+              NULL::numeric AS cost_per_million_input,
               NULL::numeric AS cost_per_million_output,
-              api_key_env, api_key_fallback_env, base_url_env, spawn_toolsets
+              api_key_env, api_key_fallback_env, base_url_env, spawn_toolsets, spawn_delegate
        FROM roadmap.model_routes
        WHERE model_name = $1
          AND agent_provider = $2
          AND is_enabled = true
-        ORDER BY priority ASC, cost_per_1k_input ASC
+        ORDER BY priority ASC
         LIMIT 1`,
 					[fallbackModel, provider],
 				);
@@ -693,9 +699,11 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		model: modelHint,
 		timeoutMs = 300_000,
 		worktreeRoot = WORKTREE_ROOT,
+		provider: providerOverride,
 	} = req;
 
-	const provider = await detectProvider(worktree, worktreeRoot);
+	// P405: provider comes from model_routes via orchestrator, not hardcoded to worktree
+	const provider = providerOverride ?? await detectProvider(worktree, worktreeRoot);
 	// P235/M026: resolve full route (model + api_spec + base_url) from model_routes
 	const route = await resolveModelRoute(provider, modelHint);
 	// P245: enforce host-level spawn policy before launching any CLI subprocess.
@@ -706,7 +714,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	if (proposalId !== undefined) {
 		const contextPackage = await buildProposalContextPackage({
 			proposalId,
-			taskType: stage ?? "unknown",
+			taskType: stage,
 			agentIdentity: req.agentLabel ?? worktree,
 			maxTokens: 2000,
 		});
@@ -739,7 +747,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 			proposalId ?? null,
 			`wt:${worktree}`,
 			req.agentLabel ?? worktree,
-			stage ?? "unknown",
+			stage,
 			route.modelName,
 		],
 	);
@@ -847,7 +855,8 @@ export async function escalateOrNotify(
 	result: SpawnResult,
 	proposalId?: number,
 ): Promise<SpawnResult | null> {
-	const provider = await detectProvider(req.worktree, req.worktreeRoot ?? WORKTREE_ROOT);
+	// P405: use explicit provider if passed, otherwise fall back to worktree detection
+	const provider = req.provider ?? await detectProvider(req.worktree, req.worktreeRoot ?? WORKTREE_ROOT);
 
 	// P235/M026: build escalation ladder from model_routes for this agent_provider.
 	// Per model: pick best (lowest priority) route. Then sort models cheap → expensive.

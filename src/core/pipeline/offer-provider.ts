@@ -24,7 +24,7 @@ export type SpawnFn = (req: {
 	worktree: string;
 	task: string;
 	proposalId?: number;
-	stage?: string;
+	stage: string;
 	model?: string;
 	timeoutMs?: number;
 	agentLabel?: string;

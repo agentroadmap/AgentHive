@@ -12,7 +12,8 @@
 		"package.json"
 	],
 	"bin": {
-		"roadmap": "scripts/cli.cjs"
+		"roadmap": "scripts/cli.cjs",
+		"agenthive": "scripts/agenthive.cjs"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.3.11",
@@ -65,8 +66,9 @@
 		"check:types": "node node_modules/typescript/bin/tsc --noEmit",
 		"check:publish": "node scripts/check-publish-hygiene.mjs",
 		"build:css": "node ./node_modules/@tailwindcss/cli/dist/index.mjs -i src/apps/dashboard-web/styles/source.css -o src/apps/dashboard-web/styles/style.css --minify",
-		"build": "npm run build:css && node scripts/build-dist.cjs",
+		"build": "npm run build:css && node scripts/build-dist.cjs && node scripts/build-agenthive.cjs",
 		"cli": "npm run build:css && node --import jiti/register src/apps/cli.ts",
+		"build:agenthive": "node scripts/build-agenthive.cjs",
 		"board": "node --import jiti/register scripts/roadmap-board.ts",
 		"mcp": "node --import jiti/register src/apps/cli.ts mcp start",
 		"update-nix": "sh scripts/update-nix.sh",

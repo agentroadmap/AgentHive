@@ -199,7 +199,7 @@ class AIAgentEvaluator implements GateEvaluator {
 			worktree: `gate-eval-${proposal.id}`,
 			task,
 			proposalId: proposal.id,
-			stage: gate.to_state,
+			stage: `gate:${gate.to_state.toUpperCase()}`,
 			model: this.config.model,
 			timeoutMs,
 		});

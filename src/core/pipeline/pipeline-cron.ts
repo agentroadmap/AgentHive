@@ -194,6 +194,7 @@ type AgentDispatchCandidate = {
 type DispatchPlan = {
 	mode: DispatchMode;
 	phase: string;
+	stage: string;
 	agentIdentity: string | null;
 	modelHint: string | null;
 	timeoutMs: number;
@@ -649,6 +650,10 @@ function buildDispatchPlan(
 	return {
 		mode,
 		phase: normalizedTarget.toLowerCase(),
+		stage:
+			mode === "gate"
+				? `gate:${normalizedTarget}`
+				: normalizeStage(context.status),
 		agentIdentity: agent?.agent_identity ?? null,
 		modelHint: agent?.preferred_model ?? agent?.active_model ?? null,
 		timeoutMs: mode === "gate" ? 300_000 : 180_000,
@@ -1065,7 +1070,7 @@ export class PipelineCron {
 		const offerMetadata: JsonRecord = {
 			task,
 			phase,
-			stage: transition.to_stage,
+			stage: `gate:${transition.to_stage}`,
 			roles: plan?.roles ?? [role],
 			transition_id: transition.id,
 			proposal_display_id: proposalDisplayId,
@@ -1154,7 +1159,7 @@ export class PipelineCron {
 				readString(transition.metadata, "task") ??
 				buildDefaultTask(transition),
 			proposalId,
-			stage: plan?.phase ?? transition.to_stage,
+			stage: plan?.stage ?? `gate:${transition.to_stage}`,
 		};
 		const model =
 			plan?.modelHint ?? readString(spawnMetadata, "model") ?? undefined;
