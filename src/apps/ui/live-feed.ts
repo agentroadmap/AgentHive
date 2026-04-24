@@ -77,7 +77,34 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					EXTRACT(EPOCH FROM pe.created_at) * 1000 AS timestamp_ms,
 					p.display_id AS proposal_id,
 					COALESCE(pe.payload->>'agent', pe.payload->>'agent_identity', pe.payload->>'source') AS agent_id,
-					COALESCE(p.display_id || ' ', '') || pe.event_type AS message
+					CASE
+						WHEN pe.event_type = 'proposal_created' THEN
+							COALESCE(p.display_id || ' ', '') || 'created ' || COALESCE(p.title, '(untitled)')
+						WHEN pe.event_type = 'lease_claimed' THEN
+							COALESCE(p.display_id || ' ', '') || 'lease claimed by ' ||
+								COALESCE(pe.payload->>'agent', pe.payload->>'agent_identity', 'agent') ||
+								CASE
+									WHEN pe.payload->>'expires_at' IS NOT NULL THEN
+										' until ' || pe.payload->>'expires_at'
+									ELSE ''
+								END
+						WHEN pe.event_type = 'lease_released' THEN
+							COALESCE(p.display_id || ' ', '') || 'lease released by ' ||
+								COALESCE(pe.payload->>'agent', pe.payload->>'agent_identity', 'agent') ||
+								CASE
+									WHEN pe.payload->>'release_reason' IS NOT NULL THEN
+										' (' || pe.payload->>'release_reason' || ')'
+									ELSE ''
+								END
+						WHEN pe.event_type = 'status_changed' THEN
+							COALESCE(p.display_id || ' ', '') || 'state ' ||
+								COALESCE(pe.payload->>'from', '?') || ' -> ' || COALESCE(pe.payload->>'to', '?')
+						WHEN pe.event_type = 'maturity_changed' THEN
+							COALESCE(p.display_id || ' ', '') || 'maturity ' ||
+								COALESCE(pe.payload->>'from', '?') || ' -> ' || COALESCE(pe.payload->>'to', '?')
+						ELSE
+							COALESCE(p.display_id || ' ', '') || pe.event_type
+					END AS message
 				FROM roadmap_proposal.proposal_event pe
 				LEFT JOIN roadmap_proposal.proposal p ON p.id = pe.proposal_id
 				WHERE pe.event_type NOT IN ('status_changed', 'maturity_changed', 'lease_claimed', 'lease_released')

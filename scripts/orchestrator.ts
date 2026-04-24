@@ -16,6 +16,7 @@ import { basename, join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { spawnAgent, detectProvider } from "../src/core/orchestration/agent-spawner.ts";
+import { Core } from "../src/core/roadmap.ts";
 import { reapStaleRows } from "../src/core/pipeline/reap-stale-rows.ts";
 import { getPool, query, PoolManager } from "../src/infra/postgres/pool.ts";
 import { mcpText } from "./mcp-result.ts";
@@ -61,6 +62,18 @@ const STATE_TO_PHASE: Record<string, string> = {
 const ENABLE_POLLING = process.env.AGENTHIVE_ORCHESTRATOR_POLL === "1";
 const IMPLICIT_GATE_POLL_INTERVAL_MS = Number(
 	process.env.AGENTHIVE_IMPLICIT_GATE_POLL_MS ?? 30_000,
+);
+const ACTIVE_PICKUP_INTERVAL_MS = Number(
+	process.env.AGENTHIVE_ACTIVE_PICKUP_MS ?? 15_000,
+);
+const ACTIVE_PICKUP_CLAIM_MINUTES = Number(
+	process.env.AGENTHIVE_ACTIVE_PICKUP_CLAIM_MINUTES ?? 10,
+);
+const ACTIVE_WATCHDOG_INTERVAL_MS = Number(
+	process.env.AGENTHIVE_ACTIVE_WATCHDOG_MS ?? 30_000,
+);
+const ACTIVE_DISPATCH_STALE_MINUTES = Number(
+	process.env.AGENTHIVE_ACTIVE_DISPATCH_STALE_MINUTES ?? 20,
 );
 
 // Agent dispatch map: state → agents to call
@@ -232,6 +245,19 @@ type GateReadyProposal = {
 	summary: string | null;
 	leased_by: string | null;
 	active_dispatch_id: number | null;
+};
+
+type ActiveDispatchRow = {
+	id: number;
+	display_id: string;
+	dispatch_role: string;
+	dispatch_status: string;
+	assigned_at: string;
+	lease_id: number | null;
+	leased_by: string | null;
+	lease_expires: string | null;
+	status: string;
+	maturity: string;
 };
 
 type ExecutorCandidate = {
@@ -531,7 +557,10 @@ async function dispatchAgent(
 }
 
 // Handle state change and dispatch agents via offer/claim pipeline
-async function handleStateChange(proposalId: string, _newState: string) {
+async function handleStateChange(
+	proposalId: string,
+	_newState: string,
+): Promise<number> {
 	// Always read actual proposal state — workflows table may be stale
 	const { rows: propRows } = await query<{
 		display_id: string;
@@ -545,7 +574,7 @@ async function handleStateChange(proposalId: string, _newState: string) {
 	const proposal = propRows[0];
 	if (!proposal) {
 		logger.log(`Proposal ${proposalId} not found`);
-		return;
+		return 0;
 	}
 
 	const newState = proposal.status;
@@ -553,7 +582,7 @@ async function handleStateChange(proposalId: string, _newState: string) {
 	const agents = AGENT_DISPATCH[normalizedState];
 
 	if (!agents || agents.length === 0) {
-		return;
+		return 0;
 	}
 
 	const phase = STATE_TO_PHASE[normalizedState] || "design";
@@ -571,7 +600,7 @@ async function handleStateChange(proposalId: string, _newState: string) {
 		logger.log(
 			`⏳ P${proposalId} → ${newState}: ${unresolved} unresolved dependencies, skipping dispatch`,
 		);
-		return;
+		return 0;
 	}
 
 	// Check for existing active/open dispatches for this proposal
@@ -585,7 +614,7 @@ async function handleStateChange(proposalId: string, _newState: string) {
 		logger.log(
 			`⏭ P${proposalId} → ${newState}: active dispatch already exists, skipping`,
 		);
-		return;
+		return 0;
 	}
 
 	const displayId = proposal.display_id ?? `P${proposalId}`;
@@ -607,13 +636,14 @@ async function handleStateChange(proposalId: string, _newState: string) {
 	].join("\n");
 
 	const squadName = `${displayId}-${phase}`;
+	let emittedCount = 0;
 
 	// Create open offers for each agent in the squad
 	for (const role of agents) {
 		const requiredCaps = roleToCapabilities(role);
 		try {
-		const { rows: dispatchRows } = await query<{ id: number }>(
-			`INSERT INTO roadmap_workforce.squad_dispatch
+			const { rows: dispatchRows } = await query<{ id: number }>(
+				`INSERT INTO roadmap_workforce.squad_dispatch
            (proposal_id, project_id, squad_name, dispatch_role, dispatch_status,
             offer_status, agent_identity, assigned_by,
             required_capabilities, metadata)
@@ -630,18 +660,19 @@ async function handleStateChange(proposalId: string, _newState: string) {
                                WHERE p.id = (SELECT COALESCE(pr.project_id, 1) FROM roadmap_proposal.proposal pr WHERE pr.id = $1))
            ))
          RETURNING id`,
-			[
-				proposalId,
-				squadName,
-				role,
-				JSON.stringify(requiredCaps),
-				newState,
-				phase,
-				task,
-			],
-		);
+				[
+					proposalId,
+					squadName,
+					role,
+					JSON.stringify(requiredCaps),
+					newState,
+					phase,
+					task,
+				],
+			);
 			const dispatchId = dispatchRows[0]?.id;
 			if (dispatchId) {
+				emittedCount += 1;
 				await query(
 					`SELECT pg_notify('work_offers', $1)`,
 					[
@@ -663,6 +694,8 @@ async function handleStateChange(proposalId: string, _newState: string) {
 			);
 		}
 	}
+
+	return emittedCount;
 }
 
 async function ensureAgentIdentity(
@@ -1246,6 +1279,36 @@ async function releaseStaleCubics(proposalId: string) {
 let pollTimer: NodeJS.Timeout | null = null;
 let implicitGateTimer: NodeJS.Timeout | null = null;
 
+function normalizeMaturity(value: string | null | undefined): string {
+	return (value ?? "").trim().toUpperCase();
+}
+
+function isActivePickupCandidate(proposal: {
+	status: string;
+	maturity?: string | null;
+}): boolean {
+	const status = normalizeState(proposal.status);
+	const maturity = normalizeMaturity(proposal.maturity);
+	if (maturity === "MATURE" || maturity === "OBSOLETE") {
+		return false;
+	}
+	return !["COMPLETE", "DEPLOYED"].includes(status);
+}
+
+function minutesSince(value: string | Date | null | undefined): number {
+	if (!value) return Number.POSITIVE_INFINITY;
+	const parsed = typeof value === "string" ? new Date(value) : value;
+	const time = parsed.getTime();
+	if (!Number.isFinite(time)) return Number.POSITIVE_INFINITY;
+	return (Date.now() - time) / 60000;
+}
+
+function isActiveUntil(expiresAt: string | null | undefined): boolean {
+	if (!expiresAt) return false;
+	const parsed = new Date(expiresAt);
+	return Number.isFinite(parsed.getTime()) && parsed > new Date();
+}
+
 // Main orchestrator
 async function main() {
 	logger.log("Starting Orchestrator with dynamic agent deployment...");
@@ -1268,12 +1331,141 @@ async function main() {
 	);
 
 	const pgClient = await pool.connect();
+	const pickupCore = new Core(process.cwd(), { enableWatchers: false });
+	await pickupCore.ensureConfigLoaded();
+	let activePickupInFlight = false;
+	let activeWatchdogInFlight = false;
+	let activeSweepCount = 0;
+
+	const runActivePickupSweep = async (reason: string) => {
+		if (activePickupInFlight) {
+			return;
+		}
+		activePickupInFlight = true;
+		try {
+			const readyProposals = await pickupCore.queryProposals({
+				filters: { ready: true },
+				includeCrossBranch: false,
+				limit: 25,
+			});
+			const candidate = readyProposals.find(isActivePickupCandidate);
+			if (!candidate) {
+				logger.log(`Active pickup sweep (${reason}): no actionable ready proposals.`);
+				return;
+			}
+
+			const claimed = await pickupCore.claimProposal(candidate.id, "orchestrator", {
+				durationMinutes: ACTIVE_PICKUP_CLAIM_MINUTES,
+				message: `active pickup sweep (${reason})`,
+			});
+			activeSweepCount += 1;
+			logger.log(
+				`Active pickup sweep (${reason}): claimed ${claimed.id} ${claimed.status}/${claimed.maturity ?? "unknown"} (sweep=${activeSweepCount})`,
+			);
+			const dispatched = await handleStateChange(claimed.id, claimed.status);
+			if (dispatched === 0) {
+				await pickupCore.releaseClaim(claimed.id, "orchestrator");
+				logger.log(
+					`Active pickup sweep (${reason}): released ${claimed.id} after dispatch failure`,
+				);
+			}
+		} catch (err) {
+			logger.error(`Active pickup sweep (${reason}) failed:`, err);
+		} finally {
+			activePickupInFlight = false;
+		}
+	};
+
+	const runWatchdogSweep = async (reason: string) => {
+		if (activeWatchdogInFlight) {
+			return;
+		}
+		activeWatchdogInFlight = true;
+		try {
+			const recoveredIds = await pickupCore.pruneClaims({
+				timeoutMinutes: ACTIVE_PICKUP_CLAIM_MINUTES,
+			});
+			if (recoveredIds.length > 0) {
+				logger.log(
+					`Watchdog sweep (${reason}): recovered stale leases for ${recoveredIds.join(", ")}`,
+				);
+			}
+
+			const { rows: activeDispatches } = await query<ActiveDispatchRow>(
+				`SELECT sd.id,
+                p.display_id,
+                sd.dispatch_role,
+                sd.dispatch_status,
+                sd.assigned_at,
+                sd.lease_id,
+                lease.agent_identity AS leased_by,
+                lease.expires_at AS lease_expires,
+                p.status,
+                p.maturity
+           FROM roadmap_workforce.squad_dispatch sd
+           JOIN roadmap_proposal.proposal p ON p.id = sd.proposal_id
+      LEFT JOIN roadmap_proposal.proposal_lease lease ON lease.id = sd.lease_id
+          WHERE sd.dispatch_status = 'active'
+          ORDER BY sd.assigned_at ASC
+          LIMIT 50`,
+			);
+
+			for (const dispatch of activeDispatches) {
+				const ageMinutes = minutesSince(dispatch.assigned_at);
+				const leaseExpired =
+					dispatch.lease_id !== null && !isActiveUntil(dispatch.lease_expires);
+				const stale =
+					ageMinutes > ACTIVE_DISPATCH_STALE_MINUTES || leaseExpired;
+				if (!stale) continue;
+
+				await query(
+					`UPDATE roadmap_workforce.squad_dispatch
+                SET dispatch_status = 'cancelled',
+                    completed_at = now(),
+                    metadata = COALESCE(metadata, '{}'::jsonb) ||
+                      jsonb_build_object(
+                        'watchdog_reason', $2::text,
+                        'dispatch_age_minutes', $3::numeric,
+                        'lease_expired', $4::boolean,
+                        'proposal_status', $5::text,
+                        'proposal_maturity', $6::text
+                      )
+              WHERE id = $1
+                AND dispatch_status = 'active'`,
+					[
+						dispatch.id,
+						reason,
+						ageMinutes,
+						leaseExpired,
+						dispatch.status,
+						dispatch.maturity,
+					],
+				);
+
+				if (dispatch.lease_id !== null) {
+					await releaseDispatchLease(
+						dispatch.id,
+						`watchdog ${reason}: stale ${dispatch.dispatch_role} dispatch for ${dispatch.display_id}`,
+					);
+				}
+
+				logger.warn(
+					`Watchdog sweep (${reason}): cancelled stale dispatch ${dispatch.id} for ${dispatch.display_id} (${dispatch.dispatch_role}, age=${ageMinutes.toFixed(1)}m, leaseExpired=${leaseExpired})`,
+				);
+			}
+		} catch (err) {
+			logger.error(`Watchdog sweep (${reason}) failed:`, err);
+		} finally {
+			activeWatchdogInFlight = false;
+		}
+	};
 
 	// Listen for state changes
 	await pgClient.query("LISTEN proposal_gate_ready");
 	await pgClient.query("LISTEN proposal_maturity_changed");
 
 	logger.log("Listening for state changes to dispatch agents...");
+	await runActivePickupSweep("startup");
 
 	// Handle notifications
 	pgClient.on(
@@ -1353,6 +1545,31 @@ async function main() {
 		logger.log(
 			"Polling disabled; orchestrator will react to notifications only.",
 		);
+	}
+
+	if (ACTIVE_PICKUP_INTERVAL_MS > 0) {
+		setInterval(async () => {
+			try {
+				await runActivePickupSweep("interval");
+			} catch (e) {
+				logger.error("Active pickup interval error:", e);
+			}
+		}, ACTIVE_PICKUP_INTERVAL_MS);
+		logger.log(
+			`Active pickup sweep every ${ACTIVE_PICKUP_INTERVAL_MS}ms.`,
+		);
+	}
+
+	if (ACTIVE_WATCHDOG_INTERVAL_MS > 0) {
+		await runWatchdogSweep("startup");
+		setInterval(async () => {
+			try {
+				await runWatchdogSweep("interval");
+			} catch (e) {
+				logger.error("Active watchdog interval error:", e);
+			}
+		}, ACTIVE_WATCHDOG_INTERVAL_MS);
+		logger.log(`Active watchdog sweep every ${ACTIVE_WATCHDOG_INTERVAL_MS}ms.`);
 	}
 
 	if (IMPLICIT_GATE_POLL_INTERVAL_MS > 0) {

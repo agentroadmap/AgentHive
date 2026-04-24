@@ -66,8 +66,8 @@ Zero tables exist. All MCP tools backed by Postgres return `relation does not ex
 ```
 $ systemctl status hermes-gate-pipeline
 Unit hermes-gate-pipeline.service could not be found.
-$ systemctl status hermes-orchestrator
-Unit hermes-orchestrator.service could not be found.
+$ systemctl status agenthive-orchestrator
+Unit agenthive-orchestrator.service could not be found.
 $ systemctl status hermes-gateway
 Unit hermes-gateway.service could not be found.
 ```

@@ -37,10 +37,11 @@ $$;
 COMMENT ON FUNCTION roadmap.fn_check_spawn_policy(TEXT, TEXT) IS
     'Returns TRUE if the given route_provider is allowed to spawn on the given host. Unknown hosts deny anthropic (safe fallback) but permit other providers.';
 
--- Seed 'bot' explicitly so this machine matches gary-main/hermes posture
--- without relying on the fallback.
+-- Seed 'bot' explicitly as the shared operator host. It may launch any
+-- route_provider because the CLI/worktree identity, not the physical host,
+-- is what determines which auth/config path the child process uses.
 INSERT INTO roadmap.host_model_policy(host_name, allowed_providers, forbidden_providers, default_model) VALUES
-    ('bot', ARRAY['nous','xiaomi'], ARRAY['anthropic'], 'xiaomi/mimo-v2-omni')
+    ('bot', ARRAY[]::TEXT[], ARRAY[]::TEXT[], 'gpt-5.4')
 ON CONFLICT (host_name) DO UPDATE
     SET allowed_providers   = EXCLUDED.allowed_providers,
         forbidden_providers = EXCLUDED.forbidden_providers,

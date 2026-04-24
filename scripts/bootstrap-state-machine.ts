@@ -1,11 +1,14 @@
 /**
  * AgentHive — State Machine Bootstrap
  *
- * Dispatches agents to key pipeline positions by:
- *   1. Sending A2A messages to worktree agents to pick up DEVELOP proposals
- *   2. Printing a summary of gate-ready proposals
+ * Canonical startup helper for the proposal machines.
  *
- * Mature proposals are the implicit gate-ready signal in Draft/Review/Develop/Merge.
+ * It does not replace the gate worker or orchestrator. It verifies the live
+ * proposal lanes and sends A2A nudges so operators can see what each workflow
+ * machine is about to do:
+ *   - New/active proposals are enhancement lanes
+ *   - Mature proposals are gate lanes
+ *   - Complete proposals are terminal and excluded
  *
  * Usage:
  *   node --import jiti/register scripts/bootstrap-state-machine.ts [--dry-run] [--stage DEVELOP|all]
@@ -51,6 +54,10 @@ async function printPipelineSummary() {
 	console.log("\n═══════════════════════════════════════════════════════════");
 	console.log("  AgentHive Pipeline Status");
 	console.log("═══════════════════════════════════════════════════════════");
+	console.log("  Live lanes:");
+	console.log("    New / Active   → enhancement and development");
+	console.log("    Mature         → gating and review");
+	console.log("    Complete       → terminal");
 	console.log("\n  Proposals by state/maturity:");
 	for (const r of stateRows) {
 		console.log(
@@ -139,6 +146,7 @@ async function main() {
 	log(
 		`Starting state machine bootstrap (stage=${STAGE_ARG}, dry-run=${DRY_RUN})`,
 	);
+	log("This helper only reports and nudges. The workflow workers and orchestrator must already be running.");
 
 	await printPipelineSummary();
 
@@ -149,7 +157,7 @@ async function main() {
 
 	if (STAGE_ARG === "DRAFT" || STAGE_ARG === "REVIEW") {
 		log(
-			"Implicit gating is now mature-driven; no transition_queue rows are created by bootstrap.",
+			"Implicit gating is mature-driven; no transition_queue rows are created by bootstrap.",
 		);
 	}
 

@@ -39,6 +39,34 @@
       ],
       "burstClaims": [],
       "queue": []
+    },
+    "orchestrator": {
+      "claims": [
+        {
+          "agentId": "orchestrator",
+          "timestamp": "2026-04-18T06:38:07.874Z",
+          "proposalId": "P046",
+          "proposalPriority": "medium",
+          "bypassed": false
+        },
+        {
+          "agentId": "orchestrator",
+          "timestamp": "2026-04-18T06:54:23.394Z",
+          "proposalId": "P046",
+          "proposalPriority": "medium",
+          "bypassed": false
+        }
+      ],
+      "burstClaims": [
+        {
+          "agentId": "orchestrator",
+          "timestamp": "2026-04-18T06:54:23.394Z",
+          "proposalId": "P046",
+          "proposalPriority": "medium",
+          "bypassed": false
+        }
+      ],
+      "queue": []
     }
   }
 }

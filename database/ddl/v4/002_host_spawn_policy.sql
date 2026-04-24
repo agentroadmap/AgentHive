@@ -33,8 +33,9 @@ COMMENT ON COLUMN roadmap.host_model_policy.forbidden_providers IS
     'Route_provider values that MUST never run on this host. Takes precedence over allowed_providers.';
 
 INSERT INTO roadmap.host_model_policy(host_name, allowed_providers, forbidden_providers, default_model) VALUES
-    ('hermes',     ARRAY['nous','xiaomi'],                    ARRAY['anthropic'], 'xiaomi/mimo-v2-omni'),
-    ('gary-main',  ARRAY['nous','xiaomi'],                    ARRAY['anthropic'], 'xiaomi/mimo-v2-omni'),
+    ('bot',        ARRAY[]::TEXT[],                          ARRAY[]::TEXT[], 'gpt-5.4'),
+    ('hermes',     ARRAY['nous','xiaomi'],                   ARRAY['anthropic'], 'xiaomi/mimo-v2-omni'),
+    ('gary-main',  ARRAY['nous','xiaomi'],                   ARRAY['anthropic'], 'xiaomi/mimo-v2-omni'),
     ('claude-box', ARRAY['anthropic','nous','xiaomi','openai','google','github'], ARRAY[]::TEXT[], 'claude-sonnet-4-6')
 ON CONFLICT (host_name) DO UPDATE
     SET allowed_providers   = EXCLUDED.allowed_providers,

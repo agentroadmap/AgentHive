@@ -42,7 +42,7 @@ No change. `list_ac` returns "No acceptance criteria" for all 7 proposals across
 
 From Run 3 findings, still unverified/unresolved:
 - `hermes-gate-pipeline.service` — unit file missing
-- `hermes-orchestrator.service` — unit file missing  
+- `agenthive-orchestrator.service` — unit file missing
 - `hermes-gateway.service` — unit file missing
 - Audit log broken (P168)
 - Decision rationale broken (P167)

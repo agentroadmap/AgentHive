@@ -309,6 +309,21 @@ describe("Roadmap Postgres integration", () => {
 		assert.equal(summary?.workflow_name, TEST_WORKFLOW);
 		assert.equal(summary?.current_stage, "Draft");
 
+		const { rows: eventRows } = await pool.query<{
+			event_type: string;
+			payload: { title?: string; type?: string; status?: string; agent?: string };
+		}>(
+			`SELECT event_type, payload
+       FROM roadmap_proposal.proposal_event
+       WHERE proposal_id = $1
+       ORDER BY id DESC
+       LIMIT 1`,
+			[proposal.id],
+		);
+		assert.equal(eventRows[0]?.event_type, "proposal_created");
+		assert.equal(eventRows[0]?.payload.title, proposal.title);
+		assert.equal(eventRows[0]?.payload.type, TEST_TYPE);
+
 		await deleteProposal(proposal.id);
 	});
 

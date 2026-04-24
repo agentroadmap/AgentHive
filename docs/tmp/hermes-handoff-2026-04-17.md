@@ -1,6 +1,6 @@
 # Handoff to Hermes — 2026-04-17
 
-**From:** claude-opus (on `bot`, Gary's Claude-Code CLI)
+**From:** claude-opus (on `bot`, Gary's shared CLI/operator host)
 **To:** hermes (a peer CLI, same kind of thing as Claude Code — just a different agent identity running a different model)
 **Workspace:** `/data/code/AgentHive`, branch `main`, up to date.
 
@@ -13,7 +13,7 @@ Hermes — you're picking up the driver seat on this workspace. This note is wha
 You run as a CLI just like I do. The difference is **which model answers your prompts**. Gary's intent:
 
 - You (**hermes**) answer from `xiaomi/mimo-v2-pro` or `xiaomi/mimo-v2-omni`, which route via `nous` → Gary's Hermes account → **no Anthropic credit burned**.
-- I (**claude-opus**) answer from Anthropic → burns Anthropic credit. I stay on `claude-box`-class hosts.
+- I (**claude-opus**) answer from Anthropic → burns Anthropic credit. I can still run on the shared `bot` host, but I must not resolve to Anthropic routes there unless the DB policy explicitly allows it.
 
 Do **not** resolve model hints that route to `anthropic` while you're running on a non-Claude host. The platform will stop you if you try (see §2), but please don't try — escalations are noisy.
 
@@ -30,15 +30,15 @@ Current policy:
 |---|---|---|---|
 | `hermes` | nous, xiaomi | **anthropic** | `xiaomi/mimo-v2-omni` |
 | `gary-main` | nous, xiaomi | **anthropic** | `xiaomi/mimo-v2-omni` |
-| `bot` | nous, xiaomi | **anthropic** | `xiaomi/mimo-v2-omni` |
+| `bot` | shared operator host | route-specific by DB policy | `gpt-5.4` (default operator fallback) |
 | `claude-box` | all | — | `claude-sonnet-4-6` |
 | *unknown host* | anything **except anthropic** (safe default) | anthropic | — |
 
-Host identity comes from `AGENTHIVE_HOST` env, falling back to `os.hostname()`. If you run outside systemd, set `AGENTHIVE_HOST=hermes` explicitly so the policy lookup lands the right row.
+Host identity comes from `AGENTHIVE_HOST` env, falling back to `os.hostname()`. On the shared operator machine, set `AGENTHIVE_HOST=bot` explicitly so the policy lookup lands the shared-host row. The host is not a single-provider host; route selection still comes from the DB.
 
 **Design note worth knowing:** the check is on the **resolved `route_provider`** from `resolveModelRoute()`, not the raw model string. So `claude-sonnet-4-6` (no slash) still gets flagged correctly. Don't "fix" this by going back to `split_part(model,'/',1)` — that was the bug in the original P245 body.
 
-Files: `database/ddl/v4/002_host_spawn_policy.sql`, `database/ddl/v4/004_spawn_policy_default_deny_anthropic.sql`, `src/core/orchestration/agent-spawner.ts` (search `assertSpawnAllowed`), `docs/deployment/hermes-orchestrator.service`.
+Files: `database/ddl/v4/002_host_spawn_policy.sql`, `database/ddl/v4/004_spawn_policy_default_deny_anthropic.sql`, `src/core/orchestration/agent-spawner.ts` (search `assertSpawnAllowed`), `docs/deployment/agenthive-orchestrator.service`.
 
 ## 3. Workspace posture
 

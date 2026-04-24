@@ -189,7 +189,7 @@ The batch auto-advance of P183/P184/P185 by `system` is direct evidence this byp
 This is why agents avoid using the AC system — it's broken. The workaround (embedding ACs in design field) works but is not enforced by the gate pipeline. Until P156 is fixed, the "Zero ACs" finding will keep recurring.
 
 ### Issue 3: Gate Pipeline Services Don't Exist — CRITICAL
-`hermes-gate-pipeline.service`, `hermes-orchestrator.service`, `hermes-gateway.service` — all three unit files are missing. Not inactive, but nonexistent. The MCP server runs, but the state machine engine does not. Proposals can be created and listed, but no automated transitions happen.
+`hermes-gate-pipeline.service`, `agenthive-orchestrator.service`, `hermes-gateway.service` — all three unit files are missing. Not inactive, but nonexistent. The MCP server runs, but the state machine engine does not. Proposals can be created and listed, but no automated transitions happen.
 
 ### Issue 4: Audit Log Schema Missing Column (P168) — UNRESOLVED
 The skeptic cannot record gate decisions in the audit trail. This makes the gate process non-auditable — the exact opposite of what the constitution (P179) demands.

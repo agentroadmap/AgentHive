@@ -2429,7 +2429,7 @@ CREATE TABLE roadmap_proposal.proposal_event (
     payload jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     dispatched_at timestamp with time zone,
-    CONSTRAINT proposal_event_type_check CHECK ((event_type = ANY (ARRAY['status_changed'::text, 'decision_made'::text, 'lease_claimed'::text, 'lease_released'::text, 'dependency_added'::text, 'dependency_resolved'::text, 'ac_updated'::text, 'review_submitted'::text, 'maturity_changed'::text, 'milestone_achieved'::text])))
+    CONSTRAINT proposal_event_type_check CHECK ((event_type = ANY (ARRAY['status_changed'::text, 'decision_made'::text, 'lease_claimed'::text, 'lease_released'::text, 'dependency_added'::text, 'dependency_resolved'::text, 'ac_updated'::text, 'review_submitted'::text, 'maturity_changed'::text, 'milestone_achieved'::text, 'proposal_created'::text])))
 );
 
 

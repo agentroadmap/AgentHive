@@ -65,8 +65,8 @@ No individual proposal reviews can proceed. The review pipeline is broken at the
 ```
 $ systemctl status hermes-gate-pipeline
 Unit hermes-gate-pipeline.service could not be found.
-$ systemctl status hermes-orchestrator
-Unit hermes-orchestrator.service could not be found.
+$ systemctl status agenthive-orchestrator
+Unit agenthive-orchestrator.service could not be found.
 $ systemctl status hermes-gateway
 Unit hermes-gateway.service could not be found.
 ```
