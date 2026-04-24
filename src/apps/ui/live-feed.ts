@@ -133,9 +133,31 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					EXTRACT(EPOCH FROM COALESCE(ar.completed_at, ar.started_at)) * 1000 AS timestamp_ms,
 					p.display_id AS proposal_id,
 					ar.agent_identity AS agent_id,
-					COALESCE(p.display_id || ' ', '') || ar.agent_identity || ' ' || COALESCE(ar.activity, ar.status) || ' ' || ar.stage AS message
+					COALESCE(p.display_id || ' ', '') ||
+						'run-' || ar.id::text || ' ' ||
+						ar.agent_identity || ' ' ||
+						COALESCE(ar.activity, ar.status) ||
+						' stage=' || ar.stage ||
+						' model=' || ar.model_used ||
+						CASE
+							WHEN mr.route_provider IS NOT NULL THEN
+								' provider=' || mr.route_provider || '/' || mr.agent_provider ||
+								' cli=' || COALESCE(mr.agent_cli, '-')
+							ELSE ''
+						END ||
+						CASE
+							WHEN ar.duration_ms IS NOT NULL THEN ' duration=' || ar.duration_ms::text || 'ms'
+							ELSE ''
+						END AS message
 				FROM roadmap_workforce.agent_runs ar
 				LEFT JOIN roadmap_proposal.proposal p ON p.id = ar.proposal_id
+				LEFT JOIN LATERAL (
+					SELECT model_name, route_provider, agent_provider, agent_cli
+					FROM roadmap.model_routes
+					WHERE model_name = ar.model_used
+					ORDER BY is_default DESC, priority ASC
+					LIMIT 1
+				) mr ON true
 
 				UNION ALL
 

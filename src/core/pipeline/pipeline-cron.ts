@@ -99,8 +99,9 @@ export interface PipelineCronDeps {
 }
 
 function mcpResultText(result: unknown): string {
-	const content = (result as { content?: Array<{ type?: string; text?: string }> })
-		.content;
+	const content = (
+		result as { content?: Array<{ type?: string; text?: string }> }
+	).content;
 	const first = content?.[0];
 	return first?.type === "text" && typeof first.text === "string"
 		? first.text
@@ -201,6 +202,7 @@ type DispatchPlan = {
 	task: string;
 	reasons: string[];
 	roles: string[];
+	requiredCapabilities: string[];
 };
 
 const STAGE_DISPATCH_ROLES: Record<string, DispatchRoleSet> = {
@@ -230,16 +232,24 @@ function normalizeStage(value: string | null | undefined): string {
 	return (value ?? "").trim().toUpperCase();
 }
 
-function parsePriority(value: string | null | undefined): "high" | "medium" | "low" {
+function parsePriority(
+	value: string | null | undefined,
+): "high" | "medium" | "low" {
 	const normalized = (value ?? "").trim().toLowerCase();
-	if (normalized === "high" || normalized === "urgent" || normalized === "critical") {
+	if (
+		normalized === "high" ||
+		normalized === "urgent" ||
+		normalized === "critical"
+	) {
 		return "high";
 	}
 	if (normalized === "low") return "low";
 	return "medium";
 }
 
-function deriveCostClass(costPer1kInput: number | null): "low" | "medium" | "high" {
+function deriveCostClass(
+	costPer1kInput: number | null,
+): "low" | "medium" | "high" {
 	if (costPer1kInput === null || !Number.isFinite(costPer1kInput)) {
 		return "medium";
 	}
@@ -248,7 +258,9 @@ function deriveCostClass(costPer1kInput: number | null): "low" | "medium" | "hig
 	return "high";
 }
 
-function buildScorableProposal(context: ProposalDispatchContext): ScorableProposal {
+function buildScorableProposal(
+	context: ProposalDispatchContext,
+): ScorableProposal {
 	return {
 		id: context.displayId,
 		title: context.title,
@@ -269,7 +281,9 @@ function gateTaskForStage(
 ): string {
 	const nextStage = normalizeStage(stage);
 	const readinessSummary =
-		reasons.length > 0 ? `Blocking items: ${reasons.join(", ")}.` : "Ready to gate.";
+		reasons.length > 0
+			? `Blocking items: ${reasons.join(", ")}.`
+			: "Ready to gate.";
 
 	return [
 		`You are the ${gate} gate agent for ${context.displayId} (${context.title}).`,
@@ -399,8 +413,6 @@ function looksLikeWorktreeName(
 	);
 }
 
-
-
 function buildDefaultTask(transition: TransitionQueueRow): string {
 	const lines = [
 		"Process the queued AgentHive proposal transition below.",
@@ -508,9 +520,12 @@ async function loadDispatchCandidates(
 	if (!roles.length) return [];
 
 	const normalizedRoles = roles.map((role) => role.toLowerCase());
-	const { rows } = await queryFn<AgentDispatchCandidate & {
-		capability: string;
-	}>(`
+	const { rows } = await queryFn<
+		AgentDispatchCandidate & {
+			capability: string;
+		}
+	>(
+		`
 		SELECT
 		  v.agent_identity,
 		  ar.agent_type,
@@ -538,7 +553,9 @@ async function loadDispatchCandidates(
 		WHERE LOWER(v.capability) = ANY($1)
 		   OR LOWER(COALESCE(ar.role, '')) = ANY($1)
 		ORDER BY v.active_leases ASC, v.context_load ASC, COALESCE(ah.cpu_percent, 0) ASC
-	`, [normalizedRoles]);
+	`,
+		[normalizedRoles],
+	);
 
 	const grouped = new Map<string, AgentDispatchCandidate>();
 
@@ -646,6 +663,13 @@ function buildDispatchPlan(
 		gate: ["reviewer"],
 	};
 	const roles = mode === "prep" ? stageRoles.prep : stageRoles.gate;
+	const agentCapabilities = new Set(
+		(agent?.capabilities ?? []).map((capability) => capability.toLowerCase()),
+	);
+	const matchedRole =
+		roles.find((role) => agentCapabilities.has(role.toLowerCase())) ??
+		roles[0] ??
+		null;
 
 	return {
 		mode,
@@ -659,10 +683,16 @@ function buildDispatchPlan(
 		timeoutMs: mode === "gate" ? 300_000 : 180_000,
 		task:
 			mode === "gate"
-				? gateTaskForStage(context, normalizedTarget, roles[0] ?? "reviewer", reasons)
+				? gateTaskForStage(
+						context,
+						normalizedTarget,
+						roles[0] ?? "reviewer",
+						reasons,
+					)
 				: prepTaskForStage(context, normalizedTarget, reasons),
 		reasons,
 		roles,
+		requiredCapabilities: matchedRole ? [matchedRole] : [],
 	};
 }
 
@@ -678,7 +708,9 @@ export class PipelineCron {
 	private readonly useOfferDispatch: boolean;
 	private readonly setIntervalFn: typeof setInterval;
 	private readonly clearIntervalFn: typeof clearInterval;
-	private readonly spawnAgentFn?: (request: SpawnAgentRequest) => Promise<SpawnAgentResult>;
+	private readonly spawnAgentFn?: (
+		request: SpawnAgentRequest,
+	) => Promise<SpawnAgentResult>;
 	private readonly mcpClientFactory: McpClientFactory;
 
 	private listenerClient: ListenerClient | null = null;
@@ -720,8 +752,7 @@ export class PipelineCron {
 		this.offerReapIntervalMs =
 			deps.offerReapIntervalMs ?? DEFAULT_OFFER_REAP_INTERVAL_MS;
 		this.useOfferDispatch =
-			deps.useOfferDispatch ??
-			process.env.AGENTHIVE_USE_OFFER_DISPATCH === "1";
+			deps.useOfferDispatch ?? process.env.AGENTHIVE_USE_OFFER_DISPATCH === "1";
 		this.setIntervalFn = deps.setIntervalFn ?? setInterval;
 		this.clearIntervalFn = deps.clearIntervalFn ?? clearInterval;
 		this.spawnAgentFn = deps.spawnAgentFn;
@@ -948,16 +979,21 @@ export class PipelineCron {
 				? await loadProposalDispatchContext(this.queryFn, proposalId)
 				: null;
 		const readiness = proposalContext ? assessReadiness(proposalContext) : null;
-		const stageRoles =
-			STAGE_DISPATCH_ROLES[normalizeStage(transition.from_stage)] ?? {
-				prep: ["architect"],
-				gate: ["reviewer"],
-			};
+		const stageRoles = STAGE_DISPATCH_ROLES[
+			normalizeStage(transition.from_stage)
+		] ?? {
+			prep: ["architect"],
+			gate: ["reviewer"],
+		};
 		const dispatchRoles =
 			readiness?.mode === "prep" ? stageRoles.prep : stageRoles.gate;
 		const selectedAgent =
 			proposalContext && dispatchRoles.length > 0
-				? await chooseDispatchAgent(this.queryFn, proposalContext, dispatchRoles)
+				? await chooseDispatchAgent(
+						this.queryFn,
+						proposalContext,
+						dispatchRoles,
+					)
 				: null;
 		const plan = proposalContext
 			? buildDispatchPlan(
@@ -1010,9 +1046,7 @@ export class PipelineCron {
 			const cubicData = JSON.parse(mcpResultText(cubicResult) || "{}");
 
 			if (!cubicData.success || !cubicData.cubic?.id) {
-				throw new Error(
-					`Failed to create cubic: ${JSON.stringify(cubicData)}`,
-				);
+				throw new Error(`Failed to create cubic: ${JSON.stringify(cubicData)}`);
 			}
 
 			const cubicId = cubicData.cubic.id;
@@ -1035,8 +1069,7 @@ export class PipelineCron {
 				`[PipelineCron] Dispatched transition ${transition.id} for proposal ${proposalDisplayId} via MCP cubic ${cubicId}`,
 			);
 		} catch (error) {
-			const message =
-				error instanceof Error ? error.message : String(error);
+			const message = error instanceof Error ? error.message : String(error);
 			await this.handleTransitionFailure(transition, message);
 		} finally {
 			await client.close();
@@ -1053,9 +1086,11 @@ export class PipelineCron {
 			: null;
 		const proposalDisplayId =
 			proposalContext?.displayId ?? String(transition.proposal_id);
-		const phase =
-			plan?.phase ?? transition.to_stage?.toLowerCase() ?? "build";
-		const role = plan?.roles[0] ?? "developer";
+		const phase = plan?.phase ?? transition.to_stage?.toLowerCase() ?? "build";
+		const requiredCapabilities = plan?.requiredCapabilities?.length
+			? plan.requiredCapabilities
+			: [];
+		const role = requiredCapabilities[0] ?? plan?.roles[0] ?? "developer";
 		const squadName = `${proposalDisplayId}-${phase}`;
 		const task =
 			plan?.task ??
@@ -1094,30 +1129,58 @@ export class PipelineCron {
 		}
 
 		try {
+			const existing = await this.queryFn<{ id: number }>(
+				`SELECT id
+				   FROM roadmap_workforce.squad_dispatch
+				  WHERE proposal_id = $1
+				    AND dispatch_role = $2
+				    AND (
+				      completed_at IS NULL
+				      OR dispatch_status IN ('assigned', 'active', 'blocked')
+				      OR offer_status IN ('open', 'claimed', 'activated')
+				    )
+				  ORDER BY assigned_at DESC
+				  LIMIT 1`,
+				[proposalIdNum, role],
+			);
+			const existingDispatchId = existing.rows[0]?.id;
+			if (existingDispatchId) {
+				await this.markTransitionDispatched(transition.id);
+				this.logger.log(
+					`[PipelineCron] Reused active offer ${existingDispatchId} for ${proposalDisplayId} (${role}/${phase}); transition ${transition.id} marked processing`,
+				);
+				return;
+			}
+
 			const { rows } = await this.queryFn<{ id: number }>(
 				`INSERT INTO roadmap_workforce.squad_dispatch
 				   (proposal_id, squad_name, dispatch_role, dispatch_status,
 				    offer_status, agent_identity, required_capabilities, metadata)
-				 VALUES ($1, $2, $3, 'open', 'open', NULL, '{}'::jsonb, $4::jsonb)
+				 VALUES ($1, $2, $3, 'open', 'open', NULL, $4::jsonb, $5::jsonb)
 				 RETURNING id`,
-				[proposalIdNum, squadName, role, JSON.stringify(offerMetadata)],
+				[
+					proposalIdNum,
+					squadName,
+					role,
+					requiredCapabilities.length
+						? JSON.stringify({ all: requiredCapabilities })
+						: "{}",
+					JSON.stringify(offerMetadata),
+				],
 			);
 			const dispatchId = rows[0]?.id;
 			if (!dispatchId) {
 				throw new Error("INSERT returned no dispatch_id");
 			}
 
-			await this.queryFn(
-				`SELECT pg_notify('work_offers', $1)`,
-				[
-					JSON.stringify({
-						event: "emitted",
-						dispatch_id: dispatchId,
-						proposal_id: proposalIdNum,
-						role,
-					}),
-				],
-			);
+			await this.queryFn(`SELECT pg_notify('work_offers', $1)`, [
+				JSON.stringify({
+					event: "emitted",
+					dispatch_id: dispatchId,
+					proposal_id: proposalIdNum,
+					role,
+				}),
+			]);
 
 			await this.markTransitionDispatched(transition.id);
 			this.logger.log(
@@ -1182,9 +1245,7 @@ export class PipelineCron {
 		await this.completeTransitionIfApplied(transition);
 	}
 
-	private async markTransitionDispatched(
-		id: TransitionQueueId,
-	): Promise<void> {
+	private async markTransitionDispatched(id: TransitionQueueId): Promise<void> {
 		await this.queryFn(
 			`UPDATE roadmap.transition_queue
        SET status = 'processing',

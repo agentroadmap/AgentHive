@@ -15,7 +15,10 @@ import { access, readdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { spawnAgent, resolveActiveRouteProvider } from "../src/core/orchestration/agent-spawner.ts";
+import {
+	spawnAgent,
+	resolveActiveRouteProvider,
+} from "../src/core/orchestration/agent-spawner.ts";
 import { postWorkOffer } from "../src/core/pipeline/post-work-offer.ts";
 import { reapStaleRows } from "../src/core/pipeline/reap-stale-rows.ts";
 import { getPool, query } from "../src/infra/postgres/pool.ts";
@@ -85,7 +88,8 @@ const JOB_ROLES: Record<string, RoleSlot[]> = {
 			role: "architect",
 			requiredCapabilities: ["design", "system-design"],
 			minProficiency: 3,
-			prompt: "You are an Architecture Agent. Enhance this DRAFT proposal with acceptance criteria, design rationale, and implementation plan.",
+			prompt:
+				"You are an Architecture Agent. Enhance this DRAFT proposal with acceptance criteria, design rationale, and implementation plan.",
 			count: 1,
 			activity: "enhancing",
 		},
@@ -93,7 +97,8 @@ const JOB_ROLES: Record<string, RoleSlot[]> = {
 			role: "researcher",
 			requiredCapabilities: ["research"],
 			minProficiency: 2,
-			prompt: "You are a Researcher. Gather context for proposals that need investigation.",
+			prompt:
+				"You are a Researcher. Gather context for proposals that need investigation.",
 			count: 1,
 			activity: "researching",
 		},
@@ -103,7 +108,8 @@ const JOB_ROLES: Record<string, RoleSlot[]> = {
 			role: "triage-agent",
 			requiredCapabilities: ["triage"],
 			minProficiency: 2,
-			prompt: "You are a Triage Agent. Evaluate issues and decide what to work on.",
+			prompt:
+				"You are a Triage Agent. Evaluate issues and decide what to work on.",
 			count: 1,
 			activity: "triaging",
 		},
@@ -113,7 +119,8 @@ const JOB_ROLES: Record<string, RoleSlot[]> = {
 			role: "skeptic",
 			requiredCapabilities: ["review", "gating", "skeptic-review"],
 			minProficiency: 3,
-			prompt: "You are a Skeptic Reviewer. Challenge design decisions. Demand evidence. Question assumptions.",
+			prompt:
+				"You are a Skeptic Reviewer. Challenge design decisions. Demand evidence. Question assumptions.",
 			count: 2,
 			activity: "reviewing",
 		},
@@ -121,7 +128,8 @@ const JOB_ROLES: Record<string, RoleSlot[]> = {
 			role: "arch-reviewer",
 			requiredCapabilities: ["design", "architecture"],
 			minProficiency: 3,
-			prompt: "You are the Architecture Reviewer. Analyze design completeness, scalability, and integration constraints.",
+			prompt:
+				"You are the Architecture Reviewer. Analyze design completeness, scalability, and integration constraints.",
 			count: 1,
 			activity: "reviewing architecture",
 		},
@@ -141,7 +149,8 @@ const JOB_ROLES: Record<string, RoleSlot[]> = {
 			role: "developer",
 			requiredCapabilities: ["code"],
 			minProficiency: 3,
-			prompt: "You are a Senior Developer. Implement all acceptance criteria. Write production code and tests.",
+			prompt:
+				"You are a Senior Developer. Implement all acceptance criteria. Write production code and tests.",
 			count: 1,
 			activity: "implementing",
 		},
@@ -149,7 +158,8 @@ const JOB_ROLES: Record<string, RoleSlot[]> = {
 			role: "skeptic-beta",
 			requiredCapabilities: ["review", "code"],
 			minProficiency: 2,
-			prompt: "You are SKEPTIC BETA. Review implementation quality. Check test coverage. Validate error handling.",
+			prompt:
+				"You are SKEPTIC BETA. Review implementation quality. Check test coverage. Validate error handling.",
 			count: 1,
 			activity: "reviewing code",
 		},
@@ -159,7 +169,8 @@ const JOB_ROLES: Record<string, RoleSlot[]> = {
 			role: "merge-agent",
 			requiredCapabilities: ["devops", "terminal"],
 			minProficiency: 2,
-			prompt: "You are a Git Specialist. Integrate branches, resolve conflicts, run tests.",
+			prompt:
+				"You are a Git Specialist. Integrate branches, resolve conflicts, run tests.",
 			count: 1,
 			activity: "integrating",
 		},
@@ -169,7 +180,8 @@ const JOB_ROLES: Record<string, RoleSlot[]> = {
 			role: "documenter",
 			requiredCapabilities: ["docs"],
 			minProficiency: 2,
-			prompt: "You are a Documenter. Write documentation for completed proposals.",
+			prompt:
+				"You are a Documenter. Write documentation for completed proposals.",
 			count: 1,
 			activity: "documenting",
 		},
@@ -179,7 +191,8 @@ const JOB_ROLES: Record<string, RoleSlot[]> = {
 			role: "system-monitor",
 			requiredCapabilities: ["ops", "devops"],
 			minProficiency: 2,
-			prompt: "You are the System Monitor. Spot inconsistencies. Make proposals for rectifications.",
+			prompt:
+				"You are the System Monitor. Spot inconsistencies. Make proposals for rectifications.",
 			count: 1,
 			activity: "monitoring",
 		},
@@ -287,9 +300,15 @@ function scoreAgentForRole(agent: AgentCandidate, slot: RoleSlot): number {
 
 	// Trust bonus
 	switch (agent.trustTier) {
-		case "authority": score += 15; break;
-		case "trusted": score += 10; break;
-		case "known": score += 5; break;
+		case "authority":
+			score += 15;
+			break;
+		case "trusted":
+			score += 10;
+			break;
+		case "known":
+			score += 5;
+			break;
 	}
 
 	return score;
@@ -298,6 +317,7 @@ function scoreAgentForRole(agent: AgentCandidate, slot: RoleSlot): number {
 interface MatchedAgent {
 	agentIdentity: string;
 	role: string;
+	requiredCapabilities: string[];
 	prompt: string;
 	score: number;
 	activity: string;
@@ -357,6 +377,7 @@ async function matchAgentsForState(state: string): Promise<MatchedAgent[]> {
 			.map((a) => ({
 				agentIdentity: a.agentIdentity,
 				role: slot.role,
+				requiredCapabilities: slot.requiredCapabilities,
 				prompt: slot.prompt,
 				score: scoreAgentForRole(a, slot),
 				activity: slot.activity,
@@ -453,7 +474,11 @@ async function setProviderCooldown(
        error_count = roadmap.provider_health.error_count + 1,
        cooldown_until = now() + interval '${cooldownMinutes} minutes',
        updated_at = now()`,
-		[provider, errorType === "rate_limit" ? "rate_limited" : "credit_exhausted", errorMsg.slice(0, 500)],
+		[
+			provider,
+			errorType === "rate_limit" ? "rate_limited" : "credit_exhausted",
+			errorMsg.slice(0, 500),
+		],
 	);
 	logger.warn(
 		`⏱ Provider ${provider} → ${errorType}, cooldown ${cooldownMinutes}min: ${errorMsg.slice(0, 100)}`,
@@ -704,11 +729,15 @@ async function dispatchAgent(
 	stage: string,
 	agentLabel?: string,
 	activity?: string,
+	requiredCapabilities: string[] = [],
 ): Promise<string | null> {
 	const client = new Client({ name: "orchestrator", version: "1.0.0" });
 	const transport = new SSEClientTransport(new URL(MCP_URL));
 
 	try {
+		const selectedWorktree = await selectExecutorWorktree(agent);
+		const selectedWorktreePath = join(WORKTREE_ROOT, selectedWorktree);
+
 		await client.connect(transport);
 
 		// Single MCP call replaces: cubic_list → cubic_recycle → cubic_focus
@@ -718,17 +747,24 @@ async function dispatchAgent(
 				agent_identity: agent,
 				proposal_id: Number(proposalId),
 				phase,
+				worktree_path: selectedWorktreePath,
 			},
 		});
 		const data = safeParseMcpResponse(mcpText(acquired));
 
 		if (!data?.success || !data?.cubic_id) {
-			logger.warn(`cubic_acquire failed for ${agent} on P${proposalId}: ${mcpText(acquired)?.substring(0, 120)}`);
+			logger.warn(
+				`cubic_acquire failed for ${agent} on P${proposalId}: ${mcpText(acquired)?.substring(0, 120)}`,
+			);
 			return null;
 		}
 
 		const cubicId = data.cubic_id as string;
-		const verb = data.was_created ? "📦 New" : data.was_recycled ? "♻️ Recycled" : "🔄 Reused";
+		const verb = data.was_created
+			? "📦 New"
+			: data.was_recycled
+				? "♻️ Recycled"
+				: "🔄 Reused";
 		logger.log(
 			`${verb} cubic ${cubicId.substring(0, 8)} for ${agent} → P${proposalId} (${phase})`,
 		);
@@ -748,15 +784,35 @@ async function dispatchAgent(
 				stage,
 				phase,
 				timeoutMs: 600_000,
+				worktreeHint: agent,
+				requiredCapabilities:
+					requiredCapabilities.length > 0
+						? requiredCapabilities
+						: [agentLabel ?? agent],
 			});
-			logger.log(`📬 Posted offer ${dispatchId} for ${agent} on P${proposalId} (${stage})`);
+			logger.log(
+				`📬 Posted offer ${dispatchId} for ${agent} on P${proposalId} (${stage})`,
+			);
 			return cubicId;
 		}
 
 		// Direct spawn path (used when AGENTHIVE_USE_OFFER_DISPATCH is not set)
-		let worktree: string | null = null;
+		let worktree: string | null = selectedWorktree;
 		const tried = new Set<string>();
+		const { rows: selectedRuns } = await query<{ cnt: number }>(
+			`SELECT count(*)::int AS cnt FROM agent_runs
+		      WHERE display_id LIKE '%' || $1 || '%'
+		        AND status = 'running'`,
+			[selectedWorktree],
+		);
+		if (selectedRuns[0]?.cnt) {
+			logger.log(
+				`⏭ ${selectedWorktree} busy (${selectedRuns[0].cnt} running) — trying another`,
+			);
+			worktree = null;
+		}
 		for (let attempt = 0; attempt < 5; attempt++) {
+			if (worktree) break;
 			const candidate = await selectExecutorWorktree(null);
 			if (!candidate) break;
 			if (tried.has(candidate)) break;
@@ -768,14 +824,18 @@ async function dispatchAgent(
 				[candidate],
 			);
 			if (rows[0]?.cnt) {
-				logger.log(`⏭ ${candidate} busy (${rows[0].cnt} running) — trying another`);
+				logger.log(
+					`⏭ ${candidate} busy (${rows[0].cnt} running) — trying another`,
+				);
 				continue;
 			}
 			worktree = candidate;
 			break;
 		}
 		if (!worktree) {
-			logger.warn(`No free worktree for ${agent} on P${proposalId} — skipping dispatch`);
+			logger.warn(
+				`No free worktree for ${agent} on P${proposalId} — skipping dispatch`,
+			);
 			return null;
 		}
 		// P405: resolve provider from model_routes, not worktree metadata
@@ -806,7 +866,9 @@ async function dispatchAgent(
 				`⚠️ ${agent} exited ${result.exitCode} (run=${result.agentRunId}) for P${proposalId}`,
 			);
 			// Dynamic control: classify error, set cooldown
-			const fullError = [result.stderr, result.stdout].filter(Boolean).join("\n");
+			const fullError = [result.stderr, result.stdout]
+				.filter(Boolean)
+				.join("\n");
 			const classified = classifyProviderError(fullError);
 			if (classified && activeProvider) {
 				try {
@@ -837,7 +899,27 @@ async function handleStateChange(proposalId: string, newState: string) {
 		[proposalId],
 	);
 	if (runningRows[0]?.cnt) {
-		logger.log(`⏭ P${proposalId} → ${newState}: already has ${runningRows[0].cnt} running agent(s) — skipping`);
+		logger.log(
+			`⏭ P${proposalId} → ${newState}: already has ${runningRows[0].cnt} running agent(s) — skipping`,
+		);
+		return;
+	}
+
+	const { rows: activeDispatchRows } = await query<{ cnt: number }>(
+		`SELECT count(*)::int AS cnt
+		   FROM roadmap_workforce.squad_dispatch
+		  WHERE proposal_id = $1
+		    AND (
+		      completed_at IS NULL
+		      OR dispatch_status IN ('assigned', 'active', 'blocked')
+		      OR offer_status IN ('open', 'claimed', 'activated')
+		    )`,
+		[proposalId],
+	);
+	if (activeDispatchRows[0]?.cnt) {
+		logger.log(
+			`⏭ P${proposalId} → ${newState}: already has ${activeDispatchRows[0].cnt} active dispatch(es) — skipping`,
+		);
 		return;
 	}
 
@@ -847,7 +929,7 @@ async function handleStateChange(proposalId: string, newState: string) {
 	// Dynamic control: check if provider is in cooldown before dispatching
 	try {
 		const activeProvider = await resolveActiveRouteProvider();
-		if (activeProvider && await isProviderInCooldown(activeProvider)) {
+		if (activeProvider && (await isProviderInCooldown(activeProvider))) {
 			logger.log(
 				`⏸ Skipping P${proposalId} (${newState}): provider ${activeProvider} is in cooldown`,
 			);
@@ -862,13 +944,18 @@ async function handleStateChange(proposalId: string, newState: string) {
 
 	// Fallback to hardcoded dispatch if capability matching returns too few
 	const fallbackAgents = AGENT_DISPATCH[normalizedState];
-	if (matchedAgents.length === 0 && fallbackAgents && fallbackAgents.length > 0) {
+	if (
+		matchedAgents.length === 0 &&
+		fallbackAgents &&
+		fallbackAgents.length > 0
+	) {
 		logger.warn(
 			`⚠ No capability-matched agents for ${normalizedState} — falling back to hardcoded dispatch`,
 		);
 		matchedAgents = fallbackAgents.map((agent) => ({
 			agentIdentity: agent,
 			role: agent,
+			requiredCapabilities: [agent],
 			prompt: AGENT_PROMPTS[agent] || `Handle ${newState}`,
 			score: 0,
 			activity: "working",
@@ -888,7 +975,16 @@ async function handleStateChange(proposalId: string, newState: string) {
 	// Dispatch all matched agents (parallel, tolerate individual failures)
 	const results = await Promise.allSettled(
 		matchedAgents.map((m) =>
-			dispatchAgent(m.agentIdentity, proposalId, m.prompt, phase, normalizedState, m.role, m.activity),
+			dispatchAgent(
+				m.agentIdentity,
+				proposalId,
+				m.prompt,
+				phase,
+				normalizedState,
+				m.role,
+				m.activity,
+				m.requiredCapabilities,
+			),
 		),
 	);
 	const dispatched = results.filter(
@@ -1030,7 +1126,9 @@ function buildImplicitGateTask(
 ): string {
 	const roleConfig = GATE_ROLES[gate.gate];
 	return [
-		roleConfig ? roleConfig.framing : `Process implicit maturity gate ${gate.gate} for ${proposal.display_id}.`,
+		roleConfig
+			? roleConfig.framing
+			: `Process implicit maturity gate ${gate.gate} for ${proposal.display_id}.`,
 		"",
 		`Proposal: ${proposal.display_id}`,
 		`Title: ${proposal.title}`,
@@ -1111,7 +1209,7 @@ async function dispatchImplicitGate(
 	}
 
 	// Defense in depth: re-check maturity at dispatch time
-	if (proposal.maturity !== 'mature') {
+	if (proposal.maturity !== "mature") {
 		logger.log(
 			`Skipping gate for ${proposal.display_id}: maturity=${proposal.maturity}, not mature`,
 		);
@@ -1142,7 +1240,7 @@ async function dispatchImplicitGate(
 	// Dynamic control: check if provider is in cooldown before dispatching
 	try {
 		const activeProvider = await resolveActiveRouteProvider();
-		if (activeProvider && await isProviderInCooldown(activeProvider)) {
+		if (activeProvider && (await isProviderInCooldown(activeProvider))) {
 			logger.log(
 				`⏸ Skipping ${proposal.display_id}: provider ${activeProvider} is in cooldown`,
 			);
@@ -1210,8 +1308,13 @@ async function dispatchImplicitGate(
 	      WHERE id = $1`,
 			[dispatchId, errMsg],
 		);
-		await releaseDispatchLease(dispatchId, `gate spawn failed: ${errMsg.slice(0, 500)}`);
-		logger.warn(`Implicit gate dispatch ${dispatchId} blocked (spawn threw): ${errMsg}`);
+		await releaseDispatchLease(
+			dispatchId,
+			`gate spawn failed: ${errMsg.slice(0, 500)}`,
+		);
+		logger.warn(
+			`Implicit gate dispatch ${dispatchId} blocked (spawn threw): ${errMsg}`,
+		);
 		return;
 	}
 
@@ -1317,7 +1420,7 @@ async function dispatchImplicitGate(
 	const classified = classifyProviderError(fullError);
 	if (classified && result.exitCode !== 0) {
 		try {
-			const provider = activeProvider ?? await resolveActiveRouteProvider();
+			const provider = activeProvider ?? (await resolveActiveRouteProvider());
 			if (provider) {
 				await setProviderCooldown(provider, classified.type, fullError);
 			}

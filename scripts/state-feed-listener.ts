@@ -147,11 +147,11 @@ async function handleNotification(client: Client, channel: string, payload: stri
 async function main() {
   const pgPassword = getPGPassword();
   const client = new Client({
-    host: "127.0.0.1",
-    port: 5432,
-    user: "xiaomi",
+    host: process.env.PGHOST ?? process.env.PG_HOST ?? "127.0.0.1",
+    port: Number(process.env.PGPORT ?? process.env.PG_PORT ?? "5432"),
+    user: process.env.PGUSER ?? process.env.PG_USER ?? "xiaomi",
     password: pgPassword,
-    database: "agenthive",
+    database: process.env.PGDATABASE ?? process.env.PG_DATABASE ?? "agenthive",
   });
 
   await client.connect();

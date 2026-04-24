@@ -38,10 +38,12 @@ function errorResponse(
 }
 
 /**
- * Handle the legacy direct MCP HTTP POST used by internal callers.
+ * Handle the direct MCP HTTP POST used by internal callers and smoke tests.
  *
- * This accepts a minimal JSON-RPC `tools/call` payload and dispatches it to the
- * existing in-process MCP server so older clients can keep using `/mcp`.
+ * This accepts the small JSON-RPC surface needed to verify MCP health without
+ * opening a streaming session: `initialize`, `tools/list`, `tools/call`, and
+ * `notifications/initialized`. Full clients should continue using SSE or
+ * StreamableHTTP.
  */
 export async function handleDirectMcpRequest(
 	server: McpServer,
@@ -57,7 +59,67 @@ export async function handleDirectMcpRequest(
 	const request = payload as JsonRpcRequest;
 	const id = request.id ?? null;
 
-	if (request.jsonrpc !== "2.0" || request.method !== "tools/call") {
+	if (request.jsonrpc !== "2.0") {
+		return {
+			status: 400,
+			body: errorResponse(id, -32600, "Invalid JSON-RPC request"),
+		};
+	}
+
+	if (request.method === "initialize") {
+		return {
+			status: 200,
+			body: {
+				jsonrpc: "2.0",
+				id,
+				result: {
+					protocolVersion: "2024-11-05",
+					capabilities: {
+						tools: { listChanged: true },
+						resources: { listChanged: true },
+						prompts: { listChanged: true },
+					},
+					serverInfo: {
+						name: "agenthive",
+						version: "direct-http",
+					},
+				},
+			},
+		};
+	}
+
+	if (request.method === "notifications/initialized") {
+		return {
+			status: 202,
+			body: {
+				jsonrpc: "2.0",
+				id,
+				result: {},
+			},
+		};
+	}
+
+	if (request.method === "tools/list") {
+		try {
+			const result = await server.testInterface.listTools();
+			return {
+				status: 200,
+				body: {
+					jsonrpc: "2.0",
+					id,
+					result,
+				},
+			};
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			return {
+				status: 500,
+				body: errorResponse(id, -32000, message),
+			};
+		}
+	}
+
+	if (request.method !== "tools/call") {
 		return {
 			status: 400,
 			body: errorResponse(id, -32600, "Unsupported JSON-RPC method"),

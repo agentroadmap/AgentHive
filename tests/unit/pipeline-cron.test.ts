@@ -817,7 +817,10 @@ describe("PipelineCron", () => {
 			"squad_name should be displayId-phase",
 		);
 
-		const offerMetadata = JSON.parse(String(insertCall!.params?.[3]));
+		const requiredCapabilities = JSON.parse(String(insertCall!.params?.[3]));
+		assert.deepEqual(requiredCapabilities, { all: ["developer"] });
+
+		const offerMetadata = JSON.parse(String(insertCall!.params?.[4]));
 		assert.equal(offerMetadata.transition_id, 77);
 		assert.equal(offerMetadata.phase, "develop");
 		assert.equal(offerMetadata.proposal_display_id, "42");

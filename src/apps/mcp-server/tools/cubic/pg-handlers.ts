@@ -12,6 +12,14 @@ import { CubicIdleDetector } from "../../../../core/orchestration/cubic-idle-det
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
 
+const WORKTREE_ROOT =
+	process.env.AGENTHIVE_WORKTREE_ROOT ?? "/data/code/worktree";
+
+function worktreePathFor(name: string): string {
+	const safeName = name.trim().replace(/[^A-Za-z0-9._-]+/g, "-");
+	return `${WORKTREE_ROOT}/${safeName}`;
+}
+
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
 		content: [
@@ -41,7 +49,7 @@ export class PgCubicHandlers {
 				 VALUES ($1, $2)
 				 RETURNING cubic_id`,
 				[
-					`/data/code/worktree-${args.name}`,
+					worktreePathFor(args.name),
 					JSON.stringify({
 						name: args.name,
 						agents: args.agents ?? ["coder", "reviewer"],
@@ -115,7 +123,11 @@ export class PgCubicHandlers {
 				worktree: r.worktree_path,
 				budget_usd: r.budget_usd,
 				lock: r.lock_holder
-					? { holder: r.lock_holder, phase: r.lock_phase, lockedAt: r.locked_at }
+					? {
+							holder: r.lock_holder,
+							phase: r.lock_phase,
+							lockedAt: r.locked_at,
+						}
 					: null,
 				createdAt: r.created_at,
 				activatedAt: r.activated_at,
@@ -144,12 +156,16 @@ export class PgCubicHandlers {
 		phase?: string;
 	}): Promise<CallToolResult> {
 		try {
-			const { rows: existing } = await query<{ cubic_id: string; status: string }>(
-				`SELECT cubic_id, status FROM roadmap.cubics WHERE cubic_id = $1`,
-				[args.cubicId],
-			);
+			const { rows: existing } = await query<{
+				cubic_id: string;
+				status: string;
+			}>(`SELECT cubic_id, status FROM roadmap.cubics WHERE cubic_id = $1`, [
+				args.cubicId,
+			]);
 			if (!existing.length) {
-				return { content: [{ type: "text", text: `Cubic ${args.cubicId} not found.` }] };
+				return {
+					content: [{ type: "text", text: `Cubic ${args.cubicId} not found.` }],
+				};
 			}
 
 			await query(
@@ -168,32 +184,32 @@ export class PgCubicHandlers {
 					JSON.stringify({ currentTask: args.task }),
 				],
 			);
-		// P196: Update cubic_state activity tracking
-		await this.detector.updateActivity(args.cubicId);
+			// P196: Update cubic_state activity tracking
+			await this.detector.updateActivity(args.cubicId);
 
-		return {
-			content: [
-				{
-					type: "text",
-					text: JSON.stringify(
-						{
-							success: true,
-							lock: {
-								holder: args.agent,
-								phase: args.phase ?? existing[0].status,
-								lockedAt: new Date().toISOString(),
+			return {
+				content: [
+					{
+						type: "text",
+						text: JSON.stringify(
+							{
+								success: true,
+								lock: {
+									holder: args.agent,
+									phase: args.phase ?? existing[0].status,
+									lockedAt: new Date().toISOString(),
+								},
 							},
-						},
-						null,
-						2,
-					),
-				},
-			],
-		};
-	} catch (err) {
-		return errorResult("Failed to focus cubic", err);
+							null,
+							2,
+						),
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to focus cubic", err);
+		}
 	}
-}
 
 	async transitionCubic(args: {
 		cubicId: string;
@@ -205,7 +221,9 @@ export class PgCubicHandlers {
 				[args.cubicId],
 			);
 			if (!existing.length) {
-				return { content: [{ type: "text", text: `Cubic ${args.cubicId} not found.` }] };
+				return {
+					content: [{ type: "text", text: `Cubic ${args.cubicId} not found.` }],
+				};
 			}
 
 			const isComplete = args.toPhase === "complete";
@@ -218,14 +236,23 @@ export class PgCubicHandlers {
 				     locked_at = NULL,
 				     completed_at = CASE WHEN $4 THEN NOW() ELSE completed_at END
 				 WHERE cubic_id = $1`,
-				[args.cubicId, args.toPhase, isComplete ? "complete" : "active", isComplete],
+				[
+					args.cubicId,
+					args.toPhase,
+					isComplete ? "complete" : "active",
+					isComplete,
+				],
 			);
 			return {
 				content: [
 					{
 						type: "text",
 						text: JSON.stringify(
-							{ success: true, phase: args.toPhase, status: isComplete ? "complete" : "active" },
+							{
+								success: true,
+								phase: args.toPhase,
+								status: isComplete ? "complete" : "active",
+							},
 							null,
 							2,
 						),
@@ -257,39 +284,39 @@ export class PgCubicHandlers {
 				[
 					args.agent_identity,
 					args.proposal_id,
-					args.phase ?? 'design',
+					args.phase ?? "design",
 					args.budget_usd ?? null,
 					args.worktree_path ?? null,
 				],
 			);
-		const r = rows[0];
+			const r = rows[0];
 
-		// P196: Update cubic_state activity tracking
-		await this.detector.updateActivity(r.cubic_id);
+			// P196: Update cubic_state activity tracking
+			await this.detector.updateActivity(r.cubic_id);
 
-		return {
-			content: [
-				{
-					type: "text",
-					text: JSON.stringify(
-						{
-							success: true,
-							cubic_id: r.cubic_id,
-							was_recycled: r.was_recycled,
-							was_created: r.was_created,
-							status: r.status,
-							worktree_path: r.worktree_path,
-						},
-						null,
-						2,
-					),
-				},
-			],
-		};
-	} catch (err) {
-		return errorResult("Failed to acquire cubic", err);
+			return {
+				content: [
+					{
+						type: "text",
+						text: JSON.stringify(
+							{
+								success: true,
+								cubic_id: r.cubic_id,
+								was_recycled: r.was_recycled,
+								was_created: r.was_created,
+								status: r.status,
+								worktree_path: r.worktree_path,
+							},
+							null,
+							2,
+						),
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to acquire cubic", err);
+		}
 	}
-}
 
 	async recycleCubic(args: {
 		cubicId: string;
@@ -301,7 +328,9 @@ export class PgCubicHandlers {
 				[args.cubicId],
 			);
 			if (!existing.length) {
-				return { content: [{ type: "text", text: `Cubic ${args.cubicId} not found.` }] };
+				return {
+					content: [{ type: "text", text: `Cubic ${args.cubicId} not found.` }],
+				};
 			}
 
 			await query(
