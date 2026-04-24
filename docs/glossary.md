@@ -101,7 +101,7 @@ An agent's assertion of exclusive work rights on a proposal. Implemented via pro
 Command-line interface at `src/apps/cli.ts`. Entry point: `roadmap` command. Has known bugs: hardcoded PGPASSWORD (P307). P144 (type case mismatch) fixed in 9189d4f.
 
 **Complete**
-Terminal workflow state. The proposal is fully delivered. Fifth state in RFC workflow.
+Terminal workflow state. The proposal is fully delivered. Fifth state in RFC workflow. Entering `COMPLETE` still resets maturity to `new`; a later `COMPLETE/mature` does not request another gating agent to advance it further.
 
 **Component**
 A proposal type (Type A, design). Major subsystem or architectural pillar.
@@ -197,7 +197,7 @@ SQL function checking if a route_provider is allowed on a host. Unknown hosts de
 SQL function that scans for mature proposals not in the transition queue and enqueues them. Fixed in P204 (case mismatch).
 
 **fn_notify_gate_ready**
-Trigger function that fires pg_notify when a proposal reaches maturity. Inserts into transition_queue.
+Trigger function that fires when a proposal reaches `mature` in a gateable RFC state (`DRAFT`, `REVIEW`, `DEVELOP`, `MERGE`). Inserts into `transition_queue`. `COMPLETE/mature` does not enqueue another gate advance.
 
 ---
 
@@ -275,7 +275,7 @@ Language model used by agent processes. Registered in model_metadata. Routes def
 ## M
 
 **Mature**
-A maturity level. Work is complete enough for gate review. The only gate-ready signal.
+A maturity level. Work is complete enough for gate review. It is gate-ready only when the current workflow state has a configured next transition; `COMPLETE/mature` is terminal metadata, not a gate-advance request.
 
 **MCP (Model Context Protocol)**
 The tool protocol used by agents to interact with AgentHive. 127 tools registered. SSE transport at `127.0.0.1:6421`.
@@ -303,7 +303,7 @@ Architecture (P282) for multiple AgentHive agencies collaborating across hosts a
 ## N
 
 **New**
-A maturity level. Just entered the state. Waiting for agent to claim or lease.
+A maturity level. Just entered the state. Waiting for agent to claim or lease. Every workflow state entry resets maturity to `new`, including entry into `COMPLETE`.
 
 **No-Cost Tool Agent**
 A tool agent (agent_type='tool') that performs mechanical operations without LLM invocation. P232. Seeded: state-monitor, health-checker, merge-executor, test-runner, cubic-cleaner, budget-enforcer.
@@ -397,7 +397,7 @@ Fleet observability tools: pulse_heartbeat, pulse_health, pulse_fleet, pulse_his
 ## Q
 
 **Quick Fix**
-Legacy workflow for issues. Superseded by the standard RFC workflow for all proposal types.
+Legacy compatibility workflow for pre-RFC issue data. Active `issue` proposals use the standard RFC workflow.
 
 ---
 

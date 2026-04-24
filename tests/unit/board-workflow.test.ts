@@ -26,19 +26,19 @@ describe("board workflow helpers", () => {
 			getWorkflowViewForProposal({
 				id: "p2",
 				title: "Fix",
-				status: "TRIAGE",
+				status: "DRAFT",
 				proposalType: "issue",
 				assignee: [],
 				createdDate: "",
 				labels: [],
 				dependencies: [],
 			} as Proposal).key,
-		).toBe("quick-fix");
+		).toBe("rfc");
 		expect(
 			getWorkflowViewForProposal({
 				id: "p3",
 				title: "Hotfix",
-				status: "DONE",
+				status: "DEPLOYED",
 				proposalType: "hotfix",
 				assignee: [],
 				createdDate: "",
@@ -73,7 +73,7 @@ describe("board workflow helpers", () => {
 			},
 			{
 				id: "p2",
-				title: "Fix",
+				title: "Legacy Fix",
 				status: "TRIAGE",
 				proposalType: "issue",
 				assignee: [],
@@ -145,11 +145,11 @@ describe("board workflow helpers", () => {
 		]);
 	});
 
-	it("normalizes quick-fix legacy states into canonical columns", () => {
+	it("routes legacy issue states into the compatibility quick-fix view", () => {
 		const proposals: Proposal[] = [
 			{
 				id: "p1",
-				title: "Fix",
+				title: "Legacy Fix",
 				status: "FIXING",
 				proposalType: "issue",
 				assignee: [],
@@ -159,8 +159,8 @@ describe("board workflow helpers", () => {
 			},
 			{
 				id: "p2",
-				title: "Done",
-				status: "COMPLETE",
+				title: "Legacy Done",
+				status: "DONE",
 				proposalType: "issue",
 				assignee: [],
 				createdDate: "",
@@ -169,7 +169,7 @@ describe("board workflow helpers", () => {
 			},
 			{
 				id: "p3",
-				title: "Start",
+				title: "Current Issue",
 				status: "DRAFT",
 				proposalType: "issue",
 				assignee: [],
@@ -179,12 +179,16 @@ describe("board workflow helpers", () => {
 			},
 		];
 
+		expect(getWorkflowViewForProposal(proposals[0]).key).toBe("quick-fix");
+		expect(getWorkflowViewForProposal(proposals[1]).key).toBe("quick-fix");
+		expect(getWorkflowViewForProposal(proposals[2]).key).toBe("rfc");
 		expect(resolveWorkflowStatuses(proposals, "quick-fix")).toEqual([
 			"TRIAGE",
 			"FIX",
 			"DEPLOYED",
 			"ESCALATE",
 			"WONT_FIX",
+			"NON_ISSUE",
 		]);
 	});
 
@@ -202,8 +206,8 @@ describe("board workflow helpers", () => {
 			},
 			{
 				id: "p2",
-				title: "Fix",
-				status: "TRIAGE",
+				title: "Issue",
+				status: "DRAFT",
 				proposalType: "issue",
 				assignee: [],
 				createdDate: "",
@@ -213,7 +217,7 @@ describe("board workflow helpers", () => {
 			{
 				id: "p3",
 				title: "Hotfix",
-				status: "DONE",
+				status: "DEPLOYED",
 				proposalType: "hotfix",
 				assignee: [],
 				createdDate: "",
@@ -233,8 +237,7 @@ describe("board workflow helpers", () => {
 			"DEPLOYED",
 			"ESCALATE",
 			"WONT_FIX",
-			"FIXING",
-			"DONE",
+			"NON_ISSUE",
 		]);
 	});
 });

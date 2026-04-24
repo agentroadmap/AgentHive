@@ -212,8 +212,8 @@ export function registerProposalTools(
 		description:
 			"Set the maturity of a proposal within its current state. " +
 			"Maturity flows: new → active → mature → obsolete. " +
-			"Setting 'mature' fires a gate-ready event (pg_notify proposal_gate_ready) " +
-			"to queue the appropriate D* gating review without changing the proposal status.",
+			"Setting 'mature' on DRAFT/REVIEW/DEVELOP/MERGE marks the proposal gate-ready " +
+			"without changing status; COMPLETE is terminal and does not queue a gate advance.",
 		inputSchema: {
 			type: "object",
 			properties: {

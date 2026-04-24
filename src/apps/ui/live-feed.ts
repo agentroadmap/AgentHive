@@ -133,7 +133,7 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					EXTRACT(EPOCH FROM COALESCE(ar.completed_at, ar.started_at)) * 1000 AS timestamp_ms,
 					p.display_id AS proposal_id,
 					ar.agent_identity AS agent_id,
-					COALESCE(p.display_id || ' ', '') || ar.agent_identity || ' ' || ar.status || ' ' || ar.stage AS message
+					COALESCE(p.display_id || ' ', '') || ar.agent_identity || ' ' || COALESCE(ar.activity, ar.status) || ' ' || ar.stage AS message
 				FROM roadmap_workforce.agent_runs ar
 				LEFT JOIN roadmap_proposal.proposal p ON p.id = ar.proposal_id
 

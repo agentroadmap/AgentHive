@@ -44,8 +44,7 @@ export const agentRegisterSchema: JsonSchema = {
 		},
 		provider: {
 			type: "string",
-			enum: ["anthropic", "openai", "google", "local", "custom"],
-			description: "AI model provider",
+			description: "AI model provider (must match a route_provider in model_routes)",
 		},
 		identity: {
 			type: "string",
@@ -131,8 +130,7 @@ export const agentListSchema: JsonSchema = {
 		},
 		provider: {
 			type: "string",
-			enum: ["anthropic", "openai", "google", "local", "custom"],
-			description: "Filter by AI provider",
+			description: "Filter by AI provider (route_provider from model_routes)",
 		},
 		template: {
 			type: "string",
@@ -227,12 +225,11 @@ export const agentSpawnSchema: JsonSchema = {
 		},
 		model: {
 			type: "string",
-			description: "AI model to use",
+			description: "AI model to use (must exist in model_routes)",
 		},
 		provider: {
 			type: "string",
-			enum: ["anthropic", "openai", "google", "local", "custom"],
-			description: "AI model provider",
+			description: "AI model route provider (route_provider from model_routes). Used to resolve default model and worktree if model is omitted.",
 		},
 		capabilities: {
 			type: "array",
@@ -245,7 +242,17 @@ export const agentSpawnSchema: JsonSchema = {
 		},
 		reason: {
 			type: "string",
-			description: "Reason for spawning",
+			description: "Reason for spawning (becomes the task prompt)",
+		},
+		worktree: {
+			type: "string",
+			description: "Optional: target worktree directory name. If omitted, auto-selected from model_routes agent_provider.",
+		},
+		timeoutMs: {
+			type: "integer",
+			minimum: 1000,
+			maximum: 3600000,
+			description: "Spawn timeout in milliseconds (default: 300000)",
 		},
 	},
 	required: ["template", "model", "provider", "reason"],

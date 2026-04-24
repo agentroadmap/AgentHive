@@ -15,10 +15,10 @@ import { access, readdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { spawnAgent, detectProvider } from "../src/core/orchestration/agent-spawner.ts";
-import { Core } from "../src/core/roadmap.ts";
+import { spawnAgent, resolveActiveRouteProvider } from "../src/core/orchestration/agent-spawner.ts";
+import { postWorkOffer } from "../src/core/pipeline/post-work-offer.ts";
 import { reapStaleRows } from "../src/core/pipeline/reap-stale-rows.ts";
-import { getPool, query, PoolManager } from "../src/infra/postgres/pool.ts";
+import { getPool, query } from "../src/infra/postgres/pool.ts";
 import { mcpText } from "./mcp-result.ts";
 
 const MCP_URL = "http://127.0.0.1:6421/sse";
@@ -27,6 +27,10 @@ const WORKTREE_ROOT =
 	process.env.AGENTHIVE_WORKTREE_ROOT ?? "/data/code/worktree";
 const DEFAULT_EXECUTOR_WORKTREE =
 	process.env.AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE;
+
+// When true, orchestrator posts work offers instead of direct-spawning.
+// Registered agency processes (e.g. copilot/agency-gary) claim and execute.
+const USE_OFFER_DISPATCH = process.env.AGENTHIVE_USE_OFFER_DISPATCH === "1";
 
 const logger = {
 	log: (...args: unknown[]) => console.log("[Orchestrator]", ...args),
@@ -63,20 +67,126 @@ const ENABLE_POLLING = process.env.AGENTHIVE_ORCHESTRATOR_POLL === "1";
 const IMPLICIT_GATE_POLL_INTERVAL_MS = Number(
 	process.env.AGENTHIVE_IMPLICIT_GATE_POLL_MS ?? 30_000,
 );
-const ACTIVE_PICKUP_INTERVAL_MS = Number(
-	process.env.AGENTHIVE_ACTIVE_PICKUP_MS ?? 15_000,
-);
-const ACTIVE_PICKUP_CLAIM_MINUTES = Number(
-	process.env.AGENTHIVE_ACTIVE_PICKUP_CLAIM_MINUTES ?? 10,
-);
-const ACTIVE_WATCHDOG_INTERVAL_MS = Number(
-	process.env.AGENTHIVE_ACTIVE_WATCHDOG_MS ?? 30_000,
-);
-const ACTIVE_DISPATCH_STALE_MINUTES = Number(
-	process.env.AGENTHIVE_ACTIVE_DISPATCH_STALE_MINUTES ?? 20,
-);
 
-// Agent dispatch map: state → agents to call
+// ─── Capability-Based Agent Matching ─────────────────────────────────────────
+
+interface RoleSlot {
+	role: string;
+	requiredCapabilities: string[];
+	minProficiency: number;
+	prompt: string;
+	count: number;
+	activity: string; // descriptive label: "researching", "enhancing", "reviewing", etc.
+}
+
+const JOB_ROLES: Record<string, RoleSlot[]> = {
+	DRAFT: [
+		{
+			role: "architect",
+			requiredCapabilities: ["design", "system-design"],
+			minProficiency: 3,
+			prompt: "You are an Architecture Agent. Enhance this DRAFT proposal with acceptance criteria, design rationale, and implementation plan.",
+			count: 1,
+			activity: "enhancing",
+		},
+		{
+			role: "researcher",
+			requiredCapabilities: ["research"],
+			minProficiency: 2,
+			prompt: "You are a Researcher. Gather context for proposals that need investigation.",
+			count: 1,
+			activity: "researching",
+		},
+	],
+	TRIAGE: [
+		{
+			role: "triage-agent",
+			requiredCapabilities: ["triage"],
+			minProficiency: 2,
+			prompt: "You are a Triage Agent. Evaluate issues and decide what to work on.",
+			count: 1,
+			activity: "triaging",
+		},
+	],
+	REVIEW: [
+		{
+			role: "skeptic",
+			requiredCapabilities: ["review", "gating", "skeptic-review"],
+			minProficiency: 3,
+			prompt: "You are a Skeptic Reviewer. Challenge design decisions. Demand evidence. Question assumptions.",
+			count: 2,
+			activity: "reviewing",
+		},
+		{
+			role: "arch-reviewer",
+			requiredCapabilities: ["design", "architecture"],
+			minProficiency: 3,
+			prompt: "You are the Architecture Reviewer. Analyze design completeness, scalability, and integration constraints.",
+			count: 1,
+			activity: "reviewing architecture",
+		},
+	],
+	FIX: [
+		{
+			role: "fix-agent",
+			requiredCapabilities: ["code"],
+			minProficiency: 3,
+			prompt: "You are a Fix Agent. Implement code changes to resolve issues.",
+			count: 1,
+			activity: "fixing",
+		},
+	],
+	DEVELOP: [
+		{
+			role: "developer",
+			requiredCapabilities: ["code"],
+			minProficiency: 3,
+			prompt: "You are a Senior Developer. Implement all acceptance criteria. Write production code and tests.",
+			count: 1,
+			activity: "implementing",
+		},
+		{
+			role: "skeptic-beta",
+			requiredCapabilities: ["review", "code"],
+			minProficiency: 2,
+			prompt: "You are SKEPTIC BETA. Review implementation quality. Check test coverage. Validate error handling.",
+			count: 1,
+			activity: "reviewing code",
+		},
+	],
+	MERGE: [
+		{
+			role: "merge-agent",
+			requiredCapabilities: ["devops", "terminal"],
+			minProficiency: 2,
+			prompt: "You are a Git Specialist. Integrate branches, resolve conflicts, run tests.",
+			count: 1,
+			activity: "integrating",
+		},
+	],
+	COMPLETE: [
+		{
+			role: "documenter",
+			requiredCapabilities: ["docs"],
+			minProficiency: 2,
+			prompt: "You are a Documenter. Write documentation for completed proposals.",
+			count: 1,
+			activity: "documenting",
+		},
+	],
+	DEPLOYED: [
+		{
+			role: "system-monitor",
+			requiredCapabilities: ["ops", "devops"],
+			minProficiency: 2,
+			prompt: "You are the System Monitor. Spot inconsistencies. Make proposals for rectifications.",
+			count: 1,
+			activity: "monitoring",
+		},
+	],
+};
+
+// Legacy fallback — used when capability matching returns too few agents
 const AGENT_DISPATCH: Record<string, string[]> = {
 	DRAFT: ["architect", "researcher"],
 	TRIAGE: ["triage-agent", "system-monitor"],
@@ -125,6 +235,151 @@ const AGENT_PROMPTS: Record<string, string> = {
 		"You are a Triage Agent. Evaluate issues and decide what to work on.",
 	"fix-agent": "You are a Fix Agent. Implement code changes to resolve issues.",
 };
+
+// ─── Capability-Based Agent Matching ─────────────────────────────────────────
+
+interface AgentCandidate {
+	agentIdentity: string;
+	agentRole: string | null;
+	skills: string[] | null;
+	trustTier: string;
+	capabilities: Array<{ cap: string; prof: number }>;
+	activeLeases: number;
+}
+
+/**
+ * Score an agent against a role slot.
+ * Higher score = better fit.
+ */
+function scoreAgentForRole(agent: AgentCandidate, slot: RoleSlot): number {
+	let score = 0;
+
+	// Capability match from agent_capability table
+	for (const ac of agent.capabilities) {
+		if (
+			slot.requiredCapabilities.includes(ac.cap) &&
+			ac.prof >= slot.minProficiency
+		) {
+			score += Math.min(ac.prof, 5) * 2;
+		}
+	}
+
+	// Capability match from skills jsonb (fallback signal)
+	if (agent.skills) {
+		for (const skill of agent.skills) {
+			if (slot.requiredCapabilities.includes(skill)) {
+				score += 5;
+			}
+		}
+	}
+
+	// Role alignment bonus — agent's declared role matches the slot
+	if (agent.agentRole) {
+		const roleLower = agent.agentRole.toLowerCase();
+		const slotLower = slot.role.toLowerCase();
+		if (roleLower.includes(slotLower) || slotLower.includes(roleLower)) {
+			score += 10;
+		}
+	}
+
+	// Workload penalty — prefer less loaded agents
+	score -= agent.activeLeases * 5;
+
+	// Trust bonus
+	switch (agent.trustTier) {
+		case "authority": score += 15; break;
+		case "trusted": score += 10; break;
+		case "known": score += 5; break;
+	}
+
+	return score;
+}
+
+interface MatchedAgent {
+	agentIdentity: string;
+	role: string;
+	prompt: string;
+	score: number;
+	activity: string;
+}
+
+/**
+ * Query the DB for active agents and score them against the role slots
+ * required for a given proposal state. Returns the best-fit agents,
+ * one per role slot (up to the slot's count).
+ */
+async function matchAgentsForState(state: string): Promise<MatchedAgent[]> {
+	const slots = JOB_ROLES[state];
+	if (!slots || slots.length === 0) return [];
+
+	// Single query: fetch all active agents with capabilities, skills, workload
+	const { rows } = await query<{
+		agent_identity: string;
+		role: string | null;
+		skills: string[] | null;
+		trust_tier: string;
+		capabilities: Array<{ cap: string; prof: number }>;
+		active_leases: number;
+	}>(
+		`SELECT
+			ar.agent_identity,
+			ar.role,
+			ar.skills,
+			ar.trust_tier,
+			COALESCE(
+				(SELECT jsonb_agg(jsonb_build_object('cap', ac.capability, 'prof', ac.proficiency))
+				 FROM roadmap_workforce.agent_capability ac WHERE ac.agent_id = ar.id),
+				'[]'::jsonb
+			) AS capabilities,
+			COALESCE(aw.active_lease_count, 0) AS active_leases
+		FROM roadmap_workforce.agent_registry ar
+		LEFT JOIN roadmap_workforce.agent_workload aw ON aw.agent_id = ar.id
+		WHERE ar.status = 'active'
+		  AND ar.agent_type IN ('llm', 'tool', 'hybrid')`,
+	);
+
+	const agents: AgentCandidate[] = rows.map((r) => ({
+		agentIdentity: r.agent_identity,
+		agentRole: r.role,
+		skills: r.skills,
+		trustTier: r.trust_tier,
+		capabilities: r.capabilities ?? [],
+		activeLeases: r.active_leases,
+	}));
+
+	const matched: MatchedAgent[] = [];
+	const used = new Set<string>(); // no double-booking within one dispatch
+
+	for (const slot of slots) {
+		// Score all agents against this slot, exclude already-used agents
+		const scored = agents
+			.filter((a) => !used.has(a.agentIdentity))
+			.map((a) => ({
+				agentIdentity: a.agentIdentity,
+				role: slot.role,
+				prompt: slot.prompt,
+				score: scoreAgentForRole(a, slot),
+				activity: slot.activity,
+			}))
+			.filter((s) => s.score > 0) // must have at least some capability match
+			.sort((a, b) => b.score - a.score);
+
+		// Pick top N agents for this slot
+		const picks = scored.slice(0, slot.count);
+		for (const pick of picks) {
+			matched.push(pick);
+			used.add(pick.agentIdentity);
+		}
+
+		if (picks.length < slot.count) {
+			logger.warn(
+				`Only ${picks.length}/${slot.count} agents matched for role "${slot.role}" in ${state} (needed capabilities: ${slot.requiredCapabilities.join(", ")})`,
+			);
+		}
+	}
+
+	return matched;
+}
 
 // ─── Provider Health & Dynamic Control ─────────────────────────────────────
 
@@ -247,19 +502,6 @@ type GateReadyProposal = {
 	active_dispatch_id: number | null;
 };
 
-type ActiveDispatchRow = {
-	id: number;
-	display_id: string;
-	dispatch_role: string;
-	dispatch_status: string;
-	assigned_at: string;
-	lease_id: number | null;
-	leased_by: string | null;
-	lease_expires: string | null;
-	status: string;
-	maturity: string;
-};
-
 type ExecutorCandidate = {
 	worktree: string;
 	source: string;
@@ -316,6 +558,11 @@ function readNumber(
 function normalizeWorktreeIdentity(value: string): string {
 	return basename(value.trim().replaceAll("/", "-"));
 }
+
+/**
+ * P405: Resolve the active route provider from model_routes.
+ * Worktrees are filesystem contexts, not provider constraints.
+ */
 
 async function scoreUsableWorktree(
 	worktree: string,
@@ -406,49 +653,22 @@ async function selectExecutorWorktree(
 		}
 	}
 
-	// Filter out worktrees whose provider is forbidden by host policy
-	const filtered: ExecutorCandidate[] = [];
-	for (const candidate of deduped.values()) {
-		try {
-			const provider = await detectProvider(candidate.worktree);
-			// Look up route_provider (what fn_check_spawn_policy validates)
-			const { rows: routeRows } = await query<{ route_provider: string }>(
-				`SELECT mr.route_provider
-           FROM roadmap.model_routes mr
-           WHERE mr.agent_provider = $1 AND mr.is_enabled = true
-           ORDER BY mr.priority ASC LIMIT 1`,
-				[provider],
-			);
-			const routeProvider = routeRows[0]?.route_provider ?? provider;
-			const { rows } = await query<{ allowed: boolean }>(
-				`SELECT roadmap.fn_check_spawn_policy($1, $2) AS allowed`,
-				[AGENTHIVE_HOST, routeProvider],
-			);
-			if (rows[0]?.allowed) {
-				filtered.push(candidate);
-			} else {
-				logger.log(
-					`Skipping executor ${candidate.worktree} — provider "${routeProvider}" forbidden by host policy (${AGENTHIVE_HOST})`,
-				);
-			}
-		} catch (err) {
-			logger.warn(
-				`Skipping executor ${candidate.worktree} — provider detection failed: ${err instanceof Error ? err.message : String(err)}`,
-			);
-		}
-	}
-
-	const ranked = filtered.sort(
+	// P405: worktree is a filesystem context, not a provider constraint.
+	// Provider/model are resolved from model_routes at spawn time.
+	const ranked = Array.from(deduped.values()).sort(
 		(a, b) => b.score - a.score || a.worktree.localeCompare(b.worktree),
 	);
-	const selected = ranked[0];
-	if (!selected) {
+	if (!ranked.length) {
 		throw new Error(
 			`No usable executor worktree found under ${WORKTREE_ROOT}. Create one such as codex-one/codex-two with a readable .env.agent and write access for ${process.env.USER ?? "the orchestrator user"}.`,
 		);
 	}
+	// Pick randomly from top scorers (within 10 points of best) for load distribution
+	const bestScore = ranked[0].score;
+	const topTier = ranked.filter((c) => c.score >= bestScore - 10);
+	const selected = topTier[Math.floor(Math.random() * topTier.length)];
 	logger.log(
-		`Selected executor ${selected.worktree} (${selected.source}, score=${selected.score})`,
+		`Selected executor ${selected.worktree} (${selected.source}, score=${selected.score}) [${topTier.length} candidates]`,
 	);
 	return selected.worktree;
 }
@@ -481,6 +701,9 @@ async function dispatchAgent(
 	proposalId: string,
 	task: string,
 	phase: string,
+	stage: string,
+	agentLabel?: string,
+	activity?: string,
 ): Promise<string | null> {
 	const client = new Client({ name: "orchestrator", version: "1.0.0" });
 	const transport = new SSEClientTransport(new URL(MCP_URL));
@@ -510,17 +733,62 @@ async function dispatchAgent(
 			`${verb} cubic ${cubicId.substring(0, 8)} for ${agent} → P${proposalId} (${phase})`,
 		);
 
-		// Spawn the agent process
-		const taskPrompt = `${AGENT_PROMPTS[agent] || ""}\n\nProposal P${proposalId}: ${task}\n\nUse the MCP tools to do your work. Connect to http://127.0.0.1:6421/sse for proposal management.`;
-		// AC-7: Use worktree_path from cubic_acquire instead of re-scanning filesystem.
-		// The cubic already knows its worktree — respect it.
-		const worktree = data.worktree_path ?? await selectExecutorWorktree(null);
+		const taskPrompt = `${task}\n\nUse the MCP tools to do your work. Connect to http://127.0.0.1:6421/sse for proposal management.`;
+
+		if (USE_OFFER_DISPATCH) {
+			// Post a work offer — any registered agency (e.g. copilot/agency-gary)
+			// will race to claim it and spawn the appropriate CLI. The orchestrator
+			// does not need to know the binary path or credentials.
+			const squadName = `P${proposalId}-${phase}`;
+			const { dispatchId } = await postWorkOffer({
+				proposalId: Number(proposalId),
+				squadName,
+				role: agentLabel ?? agent,
+				task: taskPrompt,
+				stage,
+				phase,
+				timeoutMs: 600_000,
+			});
+			logger.log(`📬 Posted offer ${dispatchId} for ${agent} on P${proposalId} (${stage})`);
+			return cubicId;
+		}
+
+		// Direct spawn path (used when AGENTHIVE_USE_OFFER_DISPATCH is not set)
+		let worktree: string | null = null;
+		const tried = new Set<string>();
+		for (let attempt = 0; attempt < 5; attempt++) {
+			const candidate = await selectExecutorWorktree(null);
+			if (!candidate) break;
+			if (tried.has(candidate)) break;
+			tried.add(candidate);
+			const { rows } = await query<{ cnt: number }>(
+				`SELECT count(*)::int AS cnt FROM agent_runs
+			      WHERE display_id LIKE '%' || $1 || '%'
+			        AND status = 'running'`,
+				[candidate],
+			);
+			if (rows[0]?.cnt) {
+				logger.log(`⏭ ${candidate} busy (${rows[0].cnt} running) — trying another`);
+				continue;
+			}
+			worktree = candidate;
+			break;
+		}
+		if (!worktree) {
+			logger.warn(`No free worktree for ${agent} on P${proposalId} — skipping dispatch`);
+			return null;
+		}
+		// P405: resolve provider from model_routes, not worktree metadata
+		const activeProvider = await resolveActiveRouteProvider();
 		const result = await spawnAgent({
 			worktree,
 			task: taskPrompt,
 			proposalId: Number(proposalId),
-			stage: phase,
+			stage,
 			timeoutMs: 600_000,
+			provider: activeProvider ?? undefined,
+			agentLabel: agentLabel ?? agent,
+			activity,
 		});
 
 		if (result.exitCode === 0) {
@@ -528,10 +796,11 @@ async function dispatchAgent(
 				`✅ ${agent} completed (run=${result.agentRunId}) for P${proposalId}`,
 			);
 			// Record provider success — clears any cooldown
-			try {
-				const provider = await detectProvider(worktree);
-				await recordProviderSuccess(provider);
-			} catch {}
+			if (activeProvider) {
+				try {
+					await recordProviderSuccess(activeProvider);
+				} catch {}
+			}
 		} else {
 			logger.warn(
 				`⚠️ ${agent} exited ${result.exitCode} (run=${result.agentRunId}) for P${proposalId}`,
@@ -539,10 +808,9 @@ async function dispatchAgent(
 			// Dynamic control: classify error, set cooldown
 			const fullError = [result.stderr, result.stdout].filter(Boolean).join("\n");
 			const classified = classifyProviderError(fullError);
-			if (classified) {
+			if (classified && activeProvider) {
 				try {
-					const provider = await detectProvider(worktree);
-					await setProviderCooldown(provider, classified.type, fullError);
+					await setProviderCooldown(activeProvider, classified.type, fullError);
 				} catch {}
 			}
 		}
@@ -556,146 +824,77 @@ async function dispatchAgent(
 	}
 }
 
-// Handle state change and dispatch agents via offer/claim pipeline
-async function handleStateChange(
-	proposalId: string,
-	_newState: string,
-): Promise<number> {
-	// Always read actual proposal state — workflows table may be stale
-	const { rows: propRows } = await query<{
-		display_id: string;
-		title: string;
-		status: string;
-		maturity: string;
-	}>(
-		`SELECT display_id, title, status, maturity FROM roadmap_proposal.proposal WHERE id = $1`,
-		[proposalId],
-	);
-	const proposal = propRows[0];
-	if (!proposal) {
-		logger.log(`Proposal ${proposalId} not found`);
-		return 0;
-	}
-
-	const newState = proposal.status;
+// Handle state change and dispatch agents
+async function handleStateChange(proposalId: string, newState: string) {
 	const normalizedState = normalizeState(newState);
-	const agents = AGENT_DISPATCH[normalizedState];
-
-	if (!agents || agents.length === 0) {
-		return 0;
-	}
 
 	const phase = STATE_TO_PHASE[normalizedState] || "design";
 
-	// Check unresolved dependencies — skip dispatch if blockers exist
-	const { rows: depRows } = await query<{ unresolved: number }>(
-		`SELECT COUNT(*)::int AS unresolved
-       FROM roadmap.proposal_dependencies
-      WHERE from_proposal_id = $1
-        AND resolved = false`,
+	// Skip if this proposal already has a running agent (prevents re-dispatch every poll cycle)
+	const { rows: runningRows } = await query<{ cnt: number }>(
+		`SELECT count(*)::int AS cnt FROM agent_runs
+	      WHERE proposal_id = $1 AND status = 'running'`,
 		[proposalId],
 	);
-	const unresolved = depRows[0]?.unresolved ?? 0;
-	if (unresolved > 0) {
-		logger.log(
-			`⏳ P${proposalId} → ${newState}: ${unresolved} unresolved dependencies, skipping dispatch`,
-		);
-		return 0;
+	if (runningRows[0]?.cnt) {
+		logger.log(`⏭ P${proposalId} → ${newState}: already has ${runningRows[0].cnt} running agent(s) — skipping`);
+		return;
 	}
 
-	// Check for existing active/open dispatches for this proposal
-	const { rows: existing } = await query<{ id: number }>(
-		`SELECT id FROM roadmap_workforce.squad_dispatch
-      WHERE proposal_id = $1 AND dispatch_status IN ('active', 'open')
-      LIMIT 1`,
-		[proposalId],
-	);
-	if (existing.length > 0) {
-		logger.log(
-			`⏭ P${proposalId} → ${newState}: active dispatch already exists, skipping`,
-		);
-		return 0;
+	// Release any locked cubics for this proposal from previous phases
+	await releaseStaleCubics(proposalId);
+
+	// Dynamic control: check if provider is in cooldown before dispatching
+	try {
+		const activeProvider = await resolveActiveRouteProvider();
+		if (activeProvider && await isProviderInCooldown(activeProvider)) {
+			logger.log(
+				`⏸ Skipping P${proposalId} (${newState}): provider ${activeProvider} is in cooldown`,
+			);
+			return;
+		}
+	} catch {
+		// Provider resolution failed — let dispatch handle it
 	}
 
-	const displayId = proposal.display_id ?? `P${proposalId}`;
-	const title = proposal.title ?? "";
+	// Capability-based agent matching
+	let matchedAgents = await matchAgentsForState(normalizedState);
+
+	// Fallback to hardcoded dispatch if capability matching returns too few
+	const fallbackAgents = AGENT_DISPATCH[normalizedState];
+	if (matchedAgents.length === 0 && fallbackAgents && fallbackAgents.length > 0) {
+		logger.warn(
+			`⚠ No capability-matched agents for ${normalizedState} — falling back to hardcoded dispatch`,
+		);
+		matchedAgents = fallbackAgents.map((agent) => ({
+			agentIdentity: agent,
+			role: agent,
+			prompt: AGENT_PROMPTS[agent] || `Handle ${newState}`,
+			score: 0,
+			activity: "working",
+		}));
+	}
+
+	if (matchedAgents.length === 0) {
+		logger.log(`No agents for state: ${newState}`);
+		return;
+	}
 
 	logger.log(`📢 P${proposalId} → ${newState} (${phase})`);
-	logger.log(`   Squad: ${agents.join(", ")}`);
-
-	// Build task prompt
-	const task = [
-		`Process proposal ${displayId} in ${newState} phase.`,
-		`Title: ${title}`,
-		`Phase: ${phase}`,
-		``,
-		`Agents in squad: ${agents.join(", ")}`,
-		``,
-		`Use MCP proposal tools to read the full YAML+Markdown projection, discussions, acceptance criteria.`,
-		`Connect to http://127.0.0.1:6421/sse for proposal management.`,
-	].join("\n");
-
-	const squadName = `${displayId}-${phase}`;
-	let emittedCount = 0;
-
-	// Create open offers for each agent in the squad
-	for (const role of agents) {
-		const requiredCaps = roleToCapabilities(role);
-		try {
-			const { rows: dispatchRows } = await query<{ id: number }>(
-				`INSERT INTO roadmap_workforce.squad_dispatch
-           (proposal_id, project_id, squad_name, dispatch_role, dispatch_status,
-            offer_status, agent_identity, assigned_by,
-            required_capabilities, metadata)
-         VALUES ($1,
-           (SELECT COALESCE(project_id, 1) FROM roadmap_proposal.proposal WHERE id = $1),
-           $2, $3, 'open', 'open', NULL, 'orchestrator',
-           $4::jsonb,
-           jsonb_build_object(
-             'source', 'state_change',
-             'state', $5::text,
-             'phase', $6::text,
-             'task', $7::text,
-             'worktree_root', (SELECT p.git_root || '/worktrees' FROM roadmap_workforce.projects p
-                               WHERE p.id = (SELECT COALESCE(pr.project_id, 1) FROM roadmap_proposal.proposal pr WHERE pr.id = $1))
-           ))
-         RETURNING id`,
-				[
-					proposalId,
-					squadName,
-					role,
-					JSON.stringify(requiredCaps),
-					newState,
-					phase,
-					task,
-				],
-			);
-			const dispatchId = dispatchRows[0]?.id;
-			if (dispatchId) {
-				emittedCount += 1;
-				await query(
-					`SELECT pg_notify('work_offers', $1)`,
-					[
-						JSON.stringify({
-							event: "emitted",
-							dispatch_id: dispatchId,
-							proposal_id: proposalId,
-							role,
-						}),
-					],
-				);
-				logger.log(
-					`   Emitted offer ${dispatchId} for ${displayId} (${role}/${phase})`,
-				);
-			}
-		} catch (err) {
-			logger.warn(
-				`   Failed to emit offer for ${role}: ${err instanceof Error ? err.message : String(err)}`,
-			);
-		}
+	for (const m of matchedAgents) {
+		logger.log(`   → ${m.agentIdentity} as ${m.role} (score=${m.score})`);
 	}
 
-	return emittedCount;
+	// Dispatch all matched agents (parallel, tolerate individual failures)
+	const results = await Promise.allSettled(
+		matchedAgents.map((m) =>
+			dispatchAgent(m.agentIdentity, proposalId, m.prompt, phase, normalizedState, m.role, m.activity),
+		),
+	);
+	const dispatched = results.filter(
+		(r) => r.status === "fulfilled" && r.value,
+	).length;
+	logger.log(`   ${dispatched}/${matchedAgents.length} dispatched`);
 }
 
 async function ensureAgentIdentity(
@@ -821,35 +1020,6 @@ const GATE_ROLES: Record<string, { role: string; framing: string }> = {
 	},
 };
 
-// Map dispatch roles to required capabilities for offer matching.
-// Returns {"all": ["cap1", "cap2"]} — an agency needs ALL listed caps to claim.
-// Empty array = any agency can claim (no capability requirement).
-function roleToCapabilities(role: string): Record<string, string[]> {
-	const ROLE_CAP_MAP: Record<string, string[]> = {
-		"developer": ["code"],
-		"senior-developer": ["code"],
-		"architect": ["design"],
-		"reviewer": ["review"],
-		"gate-reviewer": ["review"],
-		"tester": ["testing"],
-		"devops": ["devops"],
-		"pm": ["management"],
-		"skeptic": ["review"],
-		"skeptic-alpha": ["design", "review"],
-		"skeptic-beta": ["review"],
-		"architecture-reviewer": ["design", "review"],
-		"researcher": ["research"],
-		"documenter": ["docs"],
-		"triage-agent": ["triage"],
-		"fix-agent": ["code"],
-		"merge-agent": ["code"],
-		"enhancer": ["code"],
-	};
-
-	const mapped = ROLE_CAP_MAP[role.toLowerCase()];
-	return mapped && mapped.length > 0 ? { all: [...mapped] } : {};
-}
-
 function gateRole(gate: GateDefinition): string {
 	return GATE_ROLES[gate.gate]?.role ?? "gate-reviewer";
 }
@@ -913,12 +1083,15 @@ async function claimImplicitGateReady(
          SELECT sd.id
            FROM roadmap_workforce.squad_dispatch sd
           WHERE sd.proposal_id = p.id
+            AND sd.dispatch_role LIKE 'skeptic%'
             AND sd.dispatch_status IN ('active', 'open')
+            AND sd.metadata->>'source' = 'implicit_maturity_gating'
           ORDER BY sd.assigned_at DESC
           LIMIT 1
        ) dispatch ON true
       WHERE p.maturity = 'mature'
-        AND p.status IN ('DRAFT', 'REVIEW', 'DEVELOP', 'MERGE')
+        AND LOWER(p.status) IN ('draft', 'review', 'develop', 'merge')
+        AND dispatch.id IS NULL
         AND ($1::bigint IS NULL OR p.id = $1)
       ORDER BY p.modified_at ASC, p.id ASC
       LIMIT $2`,
@@ -931,8 +1104,17 @@ async function dispatchImplicitGate(
 	proposalId: number,
 	reason: string,
 ): Promise<void> {
+	// Gate dispatch ONLY for maturity='mature'. new/active = enhancement queue, not gating.
 	const [proposal] = await claimImplicitGateReady(proposalId, 1);
 	if (!proposal) {
+		return;
+	}
+
+	// Defense in depth: re-check maturity at dispatch time
+	if (proposal.maturity !== 'mature') {
+		logger.log(
+			`Skipping gate for ${proposal.display_id}: maturity=${proposal.maturity}, not mature`,
+		);
 		return;
 	}
 
@@ -955,59 +1137,211 @@ async function dispatchImplicitGate(
 		return;
 	}
 
-	const role = gateRole(gate);
-	const task = buildImplicitGateTask(proposal, gate);
-	const squadName = `gate-${proposal.display_id}-${gate.gate}`;
-	const requiredCaps = roleToCapabilities(role);
+	const worktree = await selectExecutorWorktree(null);
 
-const { rows: dispatchRows } = await query<{ id: number }>(
-	`INSERT INTO roadmap_workforce.squad_dispatch
-       (proposal_id, project_id, squad_name, dispatch_role, dispatch_status,
-        offer_status, agent_identity, assigned_by,
-        required_capabilities, metadata)
-     VALUES ($1,
-       (SELECT COALESCE(project_id, 1) FROM roadmap_proposal.proposal WHERE id = $1),
-       $2, $3, 'open', 'open', NULL, 'orchestrator',
-       $4::jsonb,
+	// Dynamic control: check if provider is in cooldown before dispatching
+	try {
+		const activeProvider = await resolveActiveRouteProvider();
+		if (activeProvider && await isProviderInCooldown(activeProvider)) {
+			logger.log(
+				`⏸ Skipping ${proposal.display_id}: provider ${activeProvider} is in cooldown`,
+			);
+			return;
+		}
+	} catch {
+		// Provider resolution failed — let spawn handle the error
+	}
+
+	await ensureAgentIdentity("orchestrator", "State Machine Orchestrator");
+	await ensureAgentIdentity(worktree, "Gate Executor");
+
+	const role = gateRole(gate);
+	const { rows: dispatchRows } = await query<{ id: number }>(
+		`INSERT INTO roadmap_workforce.squad_dispatch
+       (proposal_id, agent_identity, squad_name, dispatch_role, dispatch_status,
+        assigned_by, metadata)
+     VALUES ($1, $2, $3, $8, 'active', 'orchestrator',
        jsonb_build_object(
          'source', 'implicit_maturity_gating',
-         'reason', $5::text,
-         'gate', $6::text,
-         'from_stage', $7::text,
-         'to_stage', $8::text,
-         'task', $9::text,
-         'worktree_root', (SELECT p.git_root || '/worktrees' FROM roadmap_workforce.projects p
-                           WHERE p.id = (SELECT COALESCE(pr.project_id, 1) FROM roadmap_proposal.proposal pr WHERE pr.id = $1))
+         'reason', $4::text,
+         'gate', $5::text,
+         'from_stage', $6::text,
+         'to_stage', $7::text,
+         'stage', 'gate:' || $7::text
        ))
      RETURNING id`,
 		[
 			proposal.id,
-			squadName,
-			role,
-			JSON.stringify(requiredCaps),
+			worktree,
+			`gate-${proposal.display_id}-${gate.gate}`,
 			reason,
 			gate.gate,
 			proposal.status,
 			gate.toStage,
-			task,
+			role,
 		],
 	);
 	const dispatchId = dispatchRows[0]?.id;
-	if (!dispatchId) {
-		logger.warn(`Failed to create offer for ${proposal.display_id}`);
+	logger.log(
+		`Implicit gate dispatch ${dispatchId} -> ${worktree} for ${proposal.display_id} (${proposal.status} -> ${gate.toStage}, ${gate.gate})`,
+	);
+
+	let result: Awaited<ReturnType<typeof spawnAgent>>;
+	// P405: resolve provider from model_routes, not worktree metadata
+	const activeProvider = await resolveActiveRouteProvider();
+	try {
+		result = await spawnAgent({
+			worktree,
+			task: buildImplicitGateTask(proposal, gate),
+			proposalId: proposal.id,
+			stage: `gate:${gate.toStage.toUpperCase()}`,
+			timeoutMs: 600_000,
+			provider: activeProvider ?? undefined,
+		});
+	} catch (spawnErr) {
+		const errMsg =
+			spawnErr instanceof Error ? spawnErr.message : String(spawnErr);
+		await query(
+			`UPDATE roadmap_workforce.squad_dispatch
+	        SET dispatch_status = 'blocked',
+	            completed_at = now(),
+	            metadata = COALESCE(metadata, '{}'::jsonb) ||
+	              jsonb_build_object('error', $2::text)
+	      WHERE id = $1`,
+			[dispatchId, errMsg],
+		);
+		await releaseDispatchLease(dispatchId, `gate spawn failed: ${errMsg.slice(0, 500)}`);
+		logger.warn(`Implicit gate dispatch ${dispatchId} blocked (spawn threw): ${errMsg}`);
 		return;
 	}
 
+	const proposalState = await query<{ status: string; maturity: string }>(
+		`SELECT status, maturity
+       FROM roadmap_proposal.proposal
+      WHERE id = $1`,
+		[proposal.id],
+	);
+	const current = proposalState.rows[0];
+	const reachedTarget =
+		current && normalizeState(current.status) === normalizeState(gate.toStage);
+
+	if (result.exitCode === 0 && reachedTarget) {
+		await setProposalMaturity(
+			proposal.id,
+			"new",
+			worktree,
+			`gate ${gate.gate} advanced to ${gate.toStage}`,
+		);
+		await query(
+			`UPDATE roadmap_workforce.squad_dispatch
+          SET dispatch_status = 'completed',
+              completed_at = now(),
+              metadata = COALESCE(metadata, '{}'::jsonb) ||
+                jsonb_build_object('agent_run_id', $2::text, 'gate_decision', 'advance', 'proposal_status', $3::text, 'proposal_maturity', 'new')
+        WHERE id = $1`,
+			[dispatchId, result.agentRunId, gate.toStage],
+		);
+		await releaseDispatchLease(
+			dispatchId,
+			`gate ${gate.gate} advanced to ${gate.toStage}`,
+		);
+		logger.log(
+			`Implicit gate dispatch ${dispatchId} advanced ${proposal.display_id} to ${gate.toStage}/new`,
+		);
+		return;
+	}
+
+	if (result.exitCode === 0 && current) {
+		const finalMaturity =
+			normalizeState(current.maturity) === "OBSOLETE" ? "obsolete" : "new";
+		if (finalMaturity === "new") {
+			await setProposalMaturity(
+				proposal.id,
+				"new",
+				worktree,
+				`gate ${gate.gate} sent back or held`,
+			);
+		}
+		const decisionMessage = `gate decision completed without state transition: proposal is ${current.status}/${finalMaturity}`;
+		await recordGateCommunication({
+			proposalId: proposal.id,
+			author: worktree,
+			toAgent: "orchestrator",
+			channel: "direct",
+			contextPrefix: "feedback:",
+			body: [
+				`Gate ${gate.gate} held ${proposal.display_id}.`,
+				`Target transition: ${proposal.status} -> ${gate.toStage}`,
+				`Current proposal state: ${current.status}/${finalMaturity}`,
+				"",
+				"The gate agent made a non-transition decision. Continue the conversation through MCP discussions/messages, revise the proposal, then set maturity back to mature when it is ready for another gate attempt.",
+			].join("\n"),
+			metadata: {
+				gate: gate.gate,
+				gate_decision: finalMaturity === "obsolete" ? "obsolete" : "hold",
+				proposal_status: current.status,
+				proposal_maturity: finalMaturity,
+				agent_run_id: result.agentRunId,
+				source: "implicit_maturity_gating",
+			},
+		});
+		await query(
+			`UPDATE roadmap_workforce.squad_dispatch
+          SET dispatch_status = 'completed',
+              completed_at = now(),
+              metadata = COALESCE(metadata, '{}'::jsonb) ||
+                jsonb_build_object('agent_run_id', $2::text, 'gate_decision', $3::text, 'proposal_status', $4::text, 'proposal_maturity', $5::text)
+        WHERE id = $1`,
+			[
+				dispatchId,
+				result.agentRunId,
+				finalMaturity === "obsolete" ? "obsolete" : "hold",
+				current.status,
+				finalMaturity,
+			],
+		);
+		await releaseDispatchLease(dispatchId, decisionMessage);
+		logger.log(
+			`Implicit gate dispatch ${dispatchId} held ${proposal.display_id}: ${decisionMessage}`,
+		);
+		return;
+	}
+
+	const errorMessage =
+		result.exitCode === 0
+			? `gate agent completed but proposal state could not be read`
+			: `gate agent exited ${result.exitCode}: ${[result.stderr, result.stdout].filter(Boolean).join("\n").slice(0, 2000)}`;
+
+	// Dynamic control: classify error and set provider cooldown if needed
+	const fullError = [result.stderr, result.stdout].filter(Boolean).join("\n");
+	const classified = classifyProviderError(fullError);
+	if (classified && result.exitCode !== 0) {
+		try {
+			const provider = activeProvider ?? await resolveActiveRouteProvider();
+			if (provider) {
+				await setProviderCooldown(provider, classified.type, fullError);
+			}
+		} catch {
+			// Provider resolution failed — skip cooldown
+		}
+	}
+
 	await query(
-		`SELECT pg_notify('work_offers', $1)`,
-		[JSON.stringify({ event: "emitted", dispatch_id: dispatchId, proposal_id: proposal.id, role })],
+		`UPDATE roadmap_workforce.squad_dispatch
+        SET dispatch_status = 'blocked',
+            completed_at = now(),
+            metadata = COALESCE(metadata, '{}'::jsonb) ||
+              jsonb_build_object('agent_run_id', $2::text, 'error', $3::text)
+      WHERE id = $1`,
+		[dispatchId, result.agentRunId, errorMessage],
 	);
-
-	logger.log(
-		`Emitted offer ${dispatchId} for ${proposal.display_id} (${proposal.status} -> ${gate.toStage}, ${role})`,
+	await releaseDispatchLease(
+		dispatchId,
+		`gate dispatch blocked: ${errorMessage.slice(0, 500)}`,
 	);
-
-	return;
+	logger.warn(
+		`Implicit gate dispatch ${dispatchId} blocked ${proposal.display_id}: ${errorMessage}`,
+	);
 }
 
 async function drainImplicitGateReady(
@@ -1072,7 +1406,8 @@ async function _dispatchTransitionQueue(queueId: number): Promise<void> {
        jsonb_build_object(
          'transition_queue_id', $4::text,
          'from_stage', $5::text,
-         'to_stage', $6::text
+         'to_stage', $6::text,
+         'stage', 'gate:' || $6::text
        ))
      RETURNING id`,
 		[
@@ -1094,7 +1429,7 @@ async function _dispatchTransitionQueue(queueId: number): Promise<void> {
 		worktree,
 		task,
 		proposalId: transition.proposal_id,
-		stage: transition.to_stage,
+		stage: `gate:${transition.to_stage}`,
 		timeoutMs,
 	});
 
@@ -1279,46 +1614,11 @@ async function releaseStaleCubics(proposalId: string) {
 let pollTimer: NodeJS.Timeout | null = null;
 let implicitGateTimer: NodeJS.Timeout | null = null;
 
-function normalizeMaturity(value: string | null | undefined): string {
-	return (value ?? "").trim().toUpperCase();
-}
-
-function isActivePickupCandidate(proposal: {
-	status: string;
-	maturity?: string | null;
-}): boolean {
-	const status = normalizeState(proposal.status);
-	const maturity = normalizeMaturity(proposal.maturity);
-	if (maturity === "MATURE" || maturity === "OBSOLETE") {
-		return false;
-	}
-	return !["COMPLETE", "DEPLOYED"].includes(status);
-}
-
-function minutesSince(value: string | Date | null | undefined): number {
-	if (!value) return Number.POSITIVE_INFINITY;
-	const parsed = typeof value === "string" ? new Date(value) : value;
-	const time = parsed.getTime();
-	if (!Number.isFinite(time)) return Number.POSITIVE_INFINITY;
-	return (Date.now() - time) / 60000;
-}
-
-function isActiveUntil(expiresAt: string | null | undefined): boolean {
-	if (!expiresAt) return false;
-	const parsed = new Date(expiresAt);
-	return Number.isFinite(parsed.getTime()) && parsed > new Date();
-}
-
 // Main orchestrator
 async function main() {
 	logger.log("Starting Orchestrator with dynamic agent deployment...");
 
-	// AC-3: Bootstrap PoolManager for multi-project support.
-	// metaPool replaces the old singleton getPool() for cross-project tables.
-	// Per-project pools are lazy-created via poolManager.getPool(projectId).
-	const poolManager = await PoolManager.init();
-	const pool = poolManager.metaPool;
-	logger.log(`PoolManager initialized. Known projects: ${poolManager.listProjects().map(p => p.name).join(", ") || "none"}`);
+	const pool = getPool();
 
 	// P269: reap stale rows left by any prior abrupt stop, BEFORE LISTEN.
 	await reapStaleRows(
@@ -1331,141 +1631,12 @@ async function main() {
 	);
 
 	const pgClient = await pool.connect();
-	const pickupCore = new Core(process.cwd(), { enableWatchers: false });
-	await pickupCore.ensureConfigLoaded();
-	let activePickupInFlight = false;
-	let activeWatchdogInFlight = false;
-	let activeSweepCount = 0;
-
-	const runActivePickupSweep = async (reason: string) => {
-		if (activePickupInFlight) {
-			return;
-		}
-		activePickupInFlight = true;
-		try {
-			const readyProposals = await pickupCore.queryProposals({
-				filters: { ready: true },
-				includeCrossBranch: false,
-				limit: 25,
-			});
-			const candidate = readyProposals.find(isActivePickupCandidate);
-			if (!candidate) {
-				logger.log(`Active pickup sweep (${reason}): no actionable ready proposals.`);
-				return;
-			}
-
-			const claimed = await pickupCore.claimProposal(candidate.id, "orchestrator", {
-				durationMinutes: ACTIVE_PICKUP_CLAIM_MINUTES,
-				message: `active pickup sweep (${reason})`,
-			});
-			activeSweepCount += 1;
-			logger.log(
-				`Active pickup sweep (${reason}): claimed ${claimed.id} ${claimed.status}/${claimed.maturity ?? "unknown"} (sweep=${activeSweepCount})`,
-			);
-			const dispatched = await handleStateChange(claimed.id, claimed.status);
-			if (dispatched === 0) {
-				await pickupCore.releaseClaim(claimed.id, "orchestrator");
-				logger.log(
-					`Active pickup sweep (${reason}): released ${claimed.id} after dispatch failure`,
-				);
-			}
-		} catch (err) {
-			logger.error(`Active pickup sweep (${reason}) failed:`, err);
-		} finally {
-			activePickupInFlight = false;
-		}
-	};
-
-	const runWatchdogSweep = async (reason: string) => {
-		if (activeWatchdogInFlight) {
-			return;
-		}
-		activeWatchdogInFlight = true;
-		try {
-			const recoveredIds = await pickupCore.pruneClaims({
-				timeoutMinutes: ACTIVE_PICKUP_CLAIM_MINUTES,
-			});
-			if (recoveredIds.length > 0) {
-				logger.log(
-					`Watchdog sweep (${reason}): recovered stale leases for ${recoveredIds.join(", ")}`,
-				);
-			}
-
-			const { rows: activeDispatches } = await query<ActiveDispatchRow>(
-				`SELECT sd.id,
-                p.display_id,
-                sd.dispatch_role,
-                sd.dispatch_status,
-                sd.assigned_at,
-                sd.lease_id,
-                lease.agent_identity AS leased_by,
-                lease.expires_at AS lease_expires,
-                p.status,
-                p.maturity
-           FROM roadmap_workforce.squad_dispatch sd
-           JOIN roadmap_proposal.proposal p ON p.id = sd.proposal_id
-      LEFT JOIN roadmap_proposal.proposal_lease lease ON lease.id = sd.lease_id
-          WHERE sd.dispatch_status = 'active'
-          ORDER BY sd.assigned_at ASC
-          LIMIT 50`,
-			);
-
-			for (const dispatch of activeDispatches) {
-				const ageMinutes = minutesSince(dispatch.assigned_at);
-				const leaseExpired =
-					dispatch.lease_id !== null && !isActiveUntil(dispatch.lease_expires);
-				const stale =
-					ageMinutes > ACTIVE_DISPATCH_STALE_MINUTES || leaseExpired;
-				if (!stale) continue;
-
-				await query(
-					`UPDATE roadmap_workforce.squad_dispatch
-                SET dispatch_status = 'cancelled',
-                    completed_at = now(),
-                    metadata = COALESCE(metadata, '{}'::jsonb) ||
-                      jsonb_build_object(
-                        'watchdog_reason', $2::text,
-                        'dispatch_age_minutes', $3::numeric,
-                        'lease_expired', $4::boolean,
-                        'proposal_status', $5::text,
-                        'proposal_maturity', $6::text
-                      )
-              WHERE id = $1
-                AND dispatch_status = 'active'`,
-					[
-						dispatch.id,
-						reason,
-						ageMinutes,
-						leaseExpired,
-						dispatch.status,
-						dispatch.maturity,
-					],
-				);
-
-				if (dispatch.lease_id !== null) {
-					await releaseDispatchLease(
-						dispatch.id,
-						`watchdog ${reason}: stale ${dispatch.dispatch_role} dispatch for ${dispatch.display_id}`,
-					);
-				}
-
-				logger.warn(
-					`Watchdog sweep (${reason}): cancelled stale dispatch ${dispatch.id} for ${dispatch.display_id} (${dispatch.dispatch_role}, age=${ageMinutes.toFixed(1)}m, leaseExpired=${leaseExpired})`,
-				);
-			}
-		} catch (err) {
-			logger.error(`Watchdog sweep (${reason}) failed:`, err);
-		} finally {
-			activeWatchdogInFlight = false;
-		}
-	};
 
 	// Listen for state changes
 	await pgClient.query("LISTEN proposal_gate_ready");
 	await pgClient.query("LISTEN proposal_maturity_changed");
 
 	logger.log("Listening for state changes to dispatch agents...");
-	await runActivePickupSweep("startup");
 
 	// Handle notifications
 	pgClient.on(
@@ -1545,31 +1716,6 @@ async function main() {
 		logger.log(
 			"Polling disabled; orchestrator will react to notifications only.",
 		);
-	}
-
-	if (ACTIVE_PICKUP_INTERVAL_MS > 0) {
-		setInterval(async () => {
-			try {
-				await runActivePickupSweep("interval");
-			} catch (e) {
-				logger.error("Active pickup interval error:", e);
-			}
-		}, ACTIVE_PICKUP_INTERVAL_MS);
-		logger.log(
-			`Active pickup sweep every ${ACTIVE_PICKUP_INTERVAL_MS}ms.`,
-		);
-	}
-
-	if (ACTIVE_WATCHDOG_INTERVAL_MS > 0) {
-		await runWatchdogSweep("startup");
-		setInterval(async () => {
-			try {
-				await runWatchdogSweep("interval");
-			} catch (e) {
-				logger.error("Active watchdog interval error:", e);
-			}
-		}, ACTIVE_WATCHDOG_INTERVAL_MS);
-		logger.log(`Active watchdog sweep every ${ACTIVE_WATCHDOG_INTERVAL_MS}ms.`);
 	}
 
 	if (IMPLICIT_GATE_POLL_INTERVAL_MS > 0) {

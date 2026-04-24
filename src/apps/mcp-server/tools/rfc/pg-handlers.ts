@@ -1,7 +1,7 @@
 /**
  * Postgres-backed RFC Workflow MCP Tools for AgentHive.
  *
- * Implements the RFC state machine: Proposal → Draft → Review → Develop → Merge → Complete
+ * Implements the RFC state machine: Draft → Review → Develop → Merge → Complete
  * With maturity lifecycle: New(0) → Active(1) → Mature(2) → Obsolete(3)
  *
  * Matches live schema on agenthive DB (applied by Andy):
@@ -60,11 +60,9 @@ function errorResult(msg: string, err: unknown): CallToolResult {
 
 /** Transition type labels derived from from→to state mapping */
 function classifyTransition(from: string, to: string): string {
-	if (to === "REJECTED") return "rejected";
-	if (to === "DISCARDED" || to === "DEFERRED") return "discard";
 	if (to === "COMPLETE") return "decision";
 	// Going backward in state sequence
-	const order = ["PROPOSAL", "DRAFT", "REVIEW", "DEVELOP", "MERGE", "COMPLETE"];
+	const order = ["DRAFT", "REVIEW", "DEVELOP", "MERGE", "COMPLETE"];
 	const fromIdx = order.indexOf(from.toUpperCase());
 	const toIdx = order.indexOf(to.toUpperCase());
 	if (toIdx < fromIdx) return "iteration";
@@ -98,7 +96,7 @@ async function resolveProposalRecord(
        p.design,
        p.drawbacks,
        p.alternatives,
-       p.dependency,
+       p.dependency_note AS dependency,
        w.id AS workflow_id,
        w.current_stage,
        wt.name AS workflow_name
@@ -252,11 +250,11 @@ function deriveTransitionReason(
 }
 
 function deriveMaturityLabel(
-	proposal: ResolvedProposal,
+	_proposal: ResolvedProposal,
 	_fromState: string,
 	_toState: string,
 ): string {
-	return proposal.maturity ?? "new";
+	return "new";
 }
 
 // ─── State Transitions ──────────────────────────────────────────────────────

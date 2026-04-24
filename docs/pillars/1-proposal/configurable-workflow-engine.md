@@ -111,29 +111,20 @@ VALUES (1, 'Default RFC', 'Standard RFC workflow', true);  -- id = 1
 -- Stages
 INSERT INTO workflow_stages (workflow_id, stage_name, stage_order, maturity_gate, gating_config)
 VALUES
-    (1, 'PROPOSAL',  1, 2, '{"roles": ["any"]}'),
-    (1, 'DRAFT',     2, 2, '{"roles": ["any"]}'),
-    (1, 'REVIEW',    3, 2, '{"roles": ["any"], "requires_ac": true}'),
-    (1, 'DEVELOP',   4, 2, '{"roles": ["any"], "requires_ac": true}'),
-    (1, 'MERGE',     5, 2, '{"roles": ["any"], "requires_ac": true}'),
-    (1, 'COMPLETE',  6, 0, '{"roles": ["any"]}');
+    (1, 'DRAFT',     1, 2, '{"roles": ["any"]}'),
+    (1, 'REVIEW',    2, 2, '{"roles": ["any"], "requires_ac": true}'),
+    (1, 'DEVELOP',   3, 2, '{"roles": ["any"], "requires_ac": true}'),
+    (1, 'MERGE',     4, 2, '{"roles": ["any"], "requires_ac": true}'),
+    (1, 'COMPLETE',  5, 0, '{"roles": ["any"]}');
 
--- Transitions (18 rules for the RFC 5-stage workflow)
+-- Transitions (12 rules for the RFC 5-stage workflow)
 INSERT INTO workflow_transitions (workflow_id, from_stage, to_stage, label, allowed_roles, requires_ac)
 VALUES
     -- Core advancement
-    (1, 'PROPOSAL', 'DRAFT',   'mature',  '{any}', false),
     (1, 'DRAFT',    'REVIEW',  'mature',  '{any}', false),
     (1, 'REVIEW',   'DEVELOP', 'mature',  '{any}', true),
     (1, 'DEVELOP',  'MERGE',   'mature',  '{any}', true),
     (1, 'MERGE',    'COMPLETE','mature',  '{any}', true),
-    -- Rejection paths
-    (1, 'REVIEW',   'REJECTED','reject',  '{any}', false),
-    (1, 'DEVELOP',  'REJECTED','reject',  '{any}', false),
-    (1, 'MERGE',    'REJECTED','reject',  '{any}', false),
-    -- Discard paths
-    (1, 'DRAFT',    'DISCARDED','discard', '{any}', false),
-    (1, 'REVIEW',   'DISCARDED','discard', '{any}', false),
     -- Iteration (go back one stage)
     (1, 'REVIEW',   'DRAFT',   'iterate', '{any}', false),
     (1, 'DEVELOP',  'REVIEW',  'iterate', '{any}', false),

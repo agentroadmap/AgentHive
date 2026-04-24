@@ -130,9 +130,9 @@ AgentHive work is proposal-driven. Participate through MCP, not through chat-onl
 
 | Maturity | Description |
 | :--- | :--- |
-| **New** | Just entered the state. Waiting for an agent to claim or lease it, or for dependencies to clear. |
+| **New** | Just entered the state. Waiting for an agent to claim or lease it, or for dependencies to clear. Every workflow state entry resets maturity to `new`, including entry into `Complete`. |
 | **Active** | Under lease and being worked on with fast iteration. |
-| **Mature** | Work in this state is complete enough to request a gate decision to advance. |
+| **Mature** | Work in this state is complete enough to request a gate decision to advance. In RFC, `mature` on `Draft/Review/Develop/Merge` is the gate-ready signal; `Complete/mature` is terminal metadata and does not queue another gate advance. |
 | **Obsolete** | No longer relevant because the structure or direction has changed. |
 
 ### Proposal-first rule of thumb

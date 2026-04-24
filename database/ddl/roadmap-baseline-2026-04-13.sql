@@ -422,13 +422,6 @@ BEGIN
             WHEN 'DEVELOP' THEN v_gate := 'D3'; v_to_state := 'MERGE';
             WHEN 'MERGE'   THEN v_gate := 'D4'; v_to_state := 'COMPLETE';
             ELSE
-                PERFORM pg_notify('proposal_gate_ready', jsonb_build_object(
-                    'proposal_id', NEW.id,
-                    'display_id',  NEW.display_id,
-                    'stage',       NEW.status,
-                    'reason',      'no_gate_defined_for_state',
-                    'ts',          to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
-                )::text);
                 RETURN NEW;
         END CASE;
 
@@ -641,23 +634,16 @@ $$;
 CREATE FUNCTION roadmap.fn_sync_proposal_maturity() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
-DECLARE
-  v_level text;
 BEGIN
   -- Only act on status changes
   IF NEW.status IS NOT DISTINCT FROM OLD.status THEN
     RETURN NEW;
   END IF;
 
-  -- Determine maturity level from new status
-  v_level := CASE
-    WHEN NEW.status IN ('DEPLOYED','COMPLETE','MERGED','CLOSED','WONT_FIX') THEN 'mature'
-    WHEN NEW.status IN ('FIX','DEVELOP','REVIEW','REVIEWING','MERGE','ESCALATE') THEN 'active'
-    WHEN NEW.status IN ('REJECTED','DISCARDED','ABANDONED') THEN 'obsolete'
-    ELSE 'new'
-  END;
-
-  NEW.maturity := v_level;
+  -- Every workflow state entry resets maturity to 'new'.
+  -- COMPLETE is terminal, but COMPLETE/mature is an explicit later signal,
+  -- not something inferred automatically from the state change.
+  NEW.maturity := 'new';
   RETURN NEW;
 END;
 $$;

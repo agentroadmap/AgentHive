@@ -57,6 +57,10 @@ Thumbs.db
 /workflows/
 /scripts/tmp-*
 
+# Agent artifact directories that keep getting committed
+docs/tmp/
+docs/test-write
+
 # Local-only generated files
 /config.yaml
 /config.example.yaml

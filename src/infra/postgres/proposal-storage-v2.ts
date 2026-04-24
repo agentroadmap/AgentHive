@@ -8,7 +8,7 @@ import { getPool, query } from "./pool.ts";
 const PROPOSAL_COLUMNS = `
   id, display_id, parent_id, type, status, maturity, title,
   summary, motivation, design, drawbacks, alternatives,
-  dependency_note, priority, tags, audit, created_at, modified_at
+  dependency_note AS dependency, priority, tags, audit, created_at, modified_at
 `;
 
 export type ProposalRow = {
@@ -24,7 +24,7 @@ export type ProposalRow = {
 	design: string | null;
 	drawbacks: string | null;
 	alternatives: string | null;
-	dependency_note: string | null; // was dependency in older schema
+	dependency: string | null;
 	priority: string | null; // descriptive; queue order from v_proposal_queue
 	tags: any | null; // jsonb
 	audit: any[]; // jsonb: [{ TS, Agent, Activity, Reason }]
@@ -43,10 +43,9 @@ export type ProposalCreateInput = {
 	design?: string | null;
 	drawbacks?: string | null;
 	alternatives?: string | null;
-	dependency_note?: string | null;
+	dependency?: string | null;
 	priority?: string | null;
 	tags?: any | null;
-	required_capabilities?: Record<string, string[]> | null;
 };
 
 export type ProposalSummary = Pick<
@@ -297,7 +296,7 @@ export async function createProposal(
 		await client.query("BEGIN");
 
 		// Resolve the workflow's start_stage for this proposal type so the initial
-		// status matches the workflow (e.g. Quick Fix starts at TRIAGE, not Draft).
+		// status matches the workflow (for example issue -> RFC starts at Draft).
 		// Falls back to "Draft" if no workflow is configured for this type.
 		// If input.status is provided, validate it exists in the workflow's stages;
 		// if not, silently use the workflow's start stage instead.
@@ -334,18 +333,15 @@ export async function createProposal(
 			// No workflow configured — accept provided status as-is
 			initialStatus = input.status;
 		} else {
-		// No status provided — use workflow start stage or default
-		initialStatus = startStage ?? "Draft";
-	}
+			// No status provided — use workflow start stage or default
+			initialStatus = startStage ?? "Draft";
+		}
 
-	// P306: Normalize status to UPPERCASE before INSERT (belt-and-suspenders with DB trigger)
-	initialStatus = initialStatus.toUpperCase();
-
-	const { rows } = await client.query<ProposalRow>(
+		const { rows } = await client.query<ProposalRow>(
 			`INSERT INTO roadmap_proposal.proposal (
       display_id, type, status, title, parent_id, summary, motivation, design,
-      drawbacks, alternatives, dependency_note, priority, tags, required_capabilities, audit
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15::jsonb)
+      drawbacks, alternatives, dependency_note, priority, tags, audit
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb)
     RETURNING ${PROPOSAL_COLUMNS}`,
 			[
 				input.display_id ?? null,
@@ -358,10 +354,9 @@ export async function createProposal(
 				input.design ?? null,
 				input.drawbacks ?? null,
 				input.alternatives ?? null,
-				input.dependency_note ?? null,
+				input.dependency ?? null,
 				input.priority ?? null,
 				input.tags ? JSON.stringify(input.tags) : null,
-				input.required_capabilities ? JSON.stringify(input.required_capabilities) : null,
 				JSON.stringify([
 					{
 						TS: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
@@ -422,11 +417,12 @@ export async function updateProposal(
 
 	for (const [key, value] of Object.entries(updates)) {
 		if (value !== undefined) {
+			const colName = key === "dependency" ? "dependency_note" : key;
 			if (jsonbFields.includes(key as any)) {
-				setClauses.push(`${key} = $${idx}::jsonb`);
+				setClauses.push(`${colName} = $${idx}::jsonb`);
 				params.push(value === null ? null : JSON.stringify(value));
 			} else {
-				setClauses.push(`${key} = $${idx}`);
+				setClauses.push(`${colName} = $${idx}`);
 				params.push(value);
 			}
 			idx++;
@@ -606,8 +602,9 @@ export async function getValidTransitions(proposalId: number): Promise<
  * This is the canonical way for agents to declare readiness within a state:
  *   new → active → mature → obsolete
  *
- * When maturity reaches 'mature', the DB trigger fn_notify_gate_ready fires
- * pg_notify('proposal_gate_ready', ...) to queue a D* gating review.
+ * When maturity reaches 'mature' in DRAFT/REVIEW/DEVELOP/MERGE, the DB trigger
+ * fn_notify_gate_ready queues the inferred D* gating review. COMPLETE is
+ * terminal and does not join the gate-advance queue.
  */
 export async function setMaturity(
 	proposalId: number,
@@ -652,7 +649,8 @@ export async function setMaturity(
 		],
 	);
 
-	// Record an audit note when self-declaring mature (the gate-ready event)
+	// Record an audit note when self-declaring mature so later agents can see
+	// whether the maturity change was meant to request a gate review.
 	if (maturity === "mature") {
 		await query(
 			`INSERT INTO roadmap_proposal.proposal_discussions
@@ -917,7 +915,7 @@ export async function searchProposals(
                COALESCE(design, ''),
                COALESCE(drawbacks, ''),
                COALESCE(alternatives, ''),
-               COALESCE(dependency_note, '')
+				COALESCE(dependency_note, '')
              )
            )
             @@ plainto_tsquery('english', $1)

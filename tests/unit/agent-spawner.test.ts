@@ -13,12 +13,18 @@ describe("Hermes route compatibility", () => {
 				modelName: "xiaomi/mimo-v2-pro",
 				routeProvider: "nous",
 				agentProvider: "openclaw",
+				agentCli: "hermes",
 				apiSpec: "openai",
 				baseUrl: "https://inference-api.nousresearch.com/v1",
 				planType: "token_plan",
 				costPer1kInput: 0.0002,
 				costPerMillionInput: 0,
 				costPerMillionOutput: 0,
+				apiKeyEnv: "NOUS_API_KEY",
+				apiKeyFallbackEnv: "OPENAI_API_KEY",
+				baseUrlEnv: "OPENAI_BASE_URL",
+				spawnToolsets:
+					"web,browser,terminal,file,code_execution,vision,image_gen,tts,skills,todo,memory,session_search,clarify,cronjob,messaging",
 			}),
 		);
 	});
@@ -29,12 +35,18 @@ describe("Hermes route compatibility", () => {
 				modelName: "xiaomi/mimo-v2-pro",
 				routeProvider: "nous",
 				agentProvider: "claude",
+				agentCli: "claude",
 				apiSpec: "openai",
 				baseUrl: "https://inference-api.nousresearch.com/v1",
 				planType: "token_plan",
 				costPer1kInput: 0.0002,
 				costPerMillionInput: 0,
 				costPerMillionOutput: 0,
+				apiKeyEnv: "NOUS_API_KEY",
+				apiKeyFallbackEnv: "OPENAI_API_KEY",
+				baseUrlEnv: "OPENAI_BASE_URL",
+				spawnToolsets:
+					"web,browser,terminal,file,code_execution,vision,image_gen,tts,skills,todo,memory,session_search,clarify,cronjob,messaging",
 			}),
 		);
 	});
@@ -54,19 +66,30 @@ describe("Hermes route compatibility", () => {
 					modelName: "xiaomi/mimo-v2-pro",
 					routeProvider: "nous",
 					agentProvider: "openclaw",
+					agentCli: "hermes",
 					apiSpec: "openai",
 					baseUrl: "https://inference-api.nousresearch.com/v1",
 					planType: "token_plan",
 					costPer1kInput: 0.0002,
 					costPerMillionInput: 0,
 					costPerMillionOutput: 0,
+					apiKeyEnv: "NOUS_API_KEY",
+					apiKeyFallbackEnv: "OPENAI_API_KEY",
+					baseUrlEnv: "OPENAI_BASE_URL",
+					spawnToolsets:
+						"web,browser,terminal,file,code_execution,vision,image_gen,tts,skills,todo,memory,session_search,clarify,cronjob,messaging",
 				},
-				agentEnv: { DATABASE_URL: "postgresql://example" },
+				agentEnv: {
+					DATABASE_URL: "postgresql://example",
+					NOUS_API_KEY: "nous-secret",
+					OPENAI_API_KEY: "openai-secret",
+					ANTHROPIC_API_KEY: "anthropic-secret",
+				},
 				extraEnv: {},
 			});
 
 			assert.equal(env.ANTHROPIC_API_KEY, undefined);
-			assert.equal(env.OPENAI_API_KEY, "nous-secret");
+			assert.equal(env.OPENAI_API_KEY, "openai-secret");
 			assert.equal(env.NOUS_API_KEY, "nous-secret");
 			assert.equal(env.AGENT_PROVIDER, "openclaw");
 		} finally {

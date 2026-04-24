@@ -113,8 +113,8 @@ workflow:
   description: '5-stage RFC pipeline for product development'
   version: '1.0.0'
   
-  start_stage: 'PROPOSAL'
-  terminal_stages: ['COMPLETE', 'REJECTED', 'DISCARDED']
+  start_stage: 'DRAFT'
+  terminal_stages: ['COMPLETE']
   default_maturity_gate: 2
   
   roles:
@@ -133,20 +133,14 @@ workflow:
       clearance: 2
 
   stages:
-    - name: 'PROPOSAL'
-      order: 1
-      description: 'Initial idea submitted'
-      auto_transitions:
-        on_mature: 'DRAFT'
-    
     - name: 'DRAFT'
-      order: 2
+      order: 1
       description: 'AI research and enhancement'
       auto_transitions:
         on_mature: 'REVIEW'
     
     - name: 'REVIEW'
-      order: 3
+      order: 2
       description: 'Formal review, define acceptance criteria'
       requires_ac: true
       quorum:
@@ -157,38 +151,25 @@ workflow:
         on_mature: 'DEVELOP'
     
     - name: 'DEVELOP'
-      order: 4
+      order: 3
       description: 'Design, build, test'
       requires_ac: true
       auto_transitions:
         on_mature: 'MERGE'
     
     - name: 'MERGE'
-      order: 5
+      order: 4
       description: 'Code review, regression, E2E testing'
       requires_ac: true
       auto_transitions:
         on_mature: 'COMPLETE'
     
     - name: 'COMPLETE'
-      order: 6
+      order: 5
       description: 'Released and dependencies resolved'
-    
-    - name: 'REJECTED'
-      order: 97
-      description: 'Declined after review or development'
-    
-    - name: 'DISCARDED'
-      order: 98
-      description: 'Deprecated or abandoned'
 
   transitions:
     # Core advancement (mature = advance to next stage)
-    - from: 'PROPOSAL'
-      to: 'DRAFT'
-      labels: ['mature', 'submit', 'research']
-      allowed_roles: ['any']
-      
     - from: 'DRAFT'
       to: 'REVIEW'
       labels: ['mature', 'submit']
@@ -212,33 +193,6 @@ workflow:
       allowed_roles: ['PM', 'Architect']
       requires_ac: true
       
-    # Rejection paths
-    - from: 'REVIEW'
-      to: 'REJECTED'
-      labels: ['reject', 'decision']
-      allowed_roles: ['PM', 'Architect']
-      
-    - from: 'DEVELOP'
-      to: 'REJECTED'
-      labels: ['reject', 'decision']
-      allowed_roles: ['PM', 'Architect']
-      
-    - from: 'MERGE'
-      to: 'REJECTED'
-      labels: ['reject', 'decision']
-      allowed_roles: ['PM', 'Architect']
-      
-    # Discard paths
-    - from: 'DRAFT'
-      to: 'DISCARDED'
-      labels: ['discard']
-      allowed_roles: ['any']
-      
-    - from: 'REVIEW'
-      to: 'DISCARDED'
-      labels: ['discard']
-      allowed_roles: ['PM']
-    
     # Iteration (go back one stage)
     - from: 'REVIEW'
       to: 'DRAFT'

@@ -88,22 +88,22 @@ const WORKFLOW_VIEWS: WorkflowViewDefinition[] = [
 		key: "rfc",
 		label: "RFC",
 		description: "Standard RFC workflow",
-		proposalTypes: ["product", "component", "feature"],
+		proposalTypes: ["product", "component", "feature", "issue"],
 		statuses: ["Draft", "Review", "Develop", "Merge", "Complete"],
 	},
 	{
 		key: "quick-fix",
-		label: "Quick Fix",
-		description: "Rapid fix workflow",
-		proposalTypes: ["issue"],
-		statuses: ["TRIAGE", "FIX", "DEPLOYED", "ESCALATE", "WONT_FIX"],
+		label: "Legacy Quick Fix",
+		description: "Compatibility view for pre-RFC issue data",
+		proposalTypes: [],
+		statuses: ["TRIAGE", "FIX", "DEPLOYED", "ESCALATE", "WONT_FIX", "NON_ISSUE"],
 	},
 	{
 		key: "hotfix",
 		label: "Hotfix",
 		description: "Urgent operational workflow",
 		proposalTypes: ["hotfix"],
-		statuses: ["TRIAGE", "FIXING", "DONE"],
+		statuses: ["TRIAGE", "FIX", "DEPLOYED", "ESCALATE", "WONT_FIX", "NON_ISSUE"],
 	},
 	{
 		key: "obsolete",
@@ -117,8 +117,7 @@ const WORKFLOW_VIEWS: WorkflowViewDefinition[] = [
 const WORKFLOW_BY_KEY = new Map(
 	WORKFLOW_VIEWS.map((workflow) => [workflow.key, workflow]),
 );
-const RFC_TYPES = new Set(["product", "component", "feature"]);
-const QUICK_FIX_TYPES = new Set(["issue"]);
+const RFC_TYPES = new Set(["product", "component", "feature", "issue"]);
 const HOTFIX_TYPES = new Set(["hotfix"]);
 const RFC_STATUSES = new Set([
 	"draft",
@@ -164,7 +163,7 @@ const QUICK_FIX_STATUS_ALIASES = new Map<string, string>([
 	["deployed", "DEPLOYED"],
 	["closed", "DEPLOYED"],
 	["wont_fix", "WONT_FIX"],
-	["non_issue", "WONT_FIX"],
+	["non_issue", "NON_ISSUE"],
 	["escalate", "ESCALATE"],
 ]);
 const HOTFIX_STATUS_ALIASES = new Map<string, string>([
@@ -174,21 +173,24 @@ const HOTFIX_STATUS_ALIASES = new Map<string, string>([
 	["open", "TRIAGE"],
 	["proposal", "TRIAGE"],
 	["triage", "TRIAGE"],
-	["review", "FIXING"],
-	["reviewing", "FIXING"],
-	["develop", "FIXING"],
-	["developing", "FIXING"],
-	["merge", "FIXING"],
-	["accepted", "FIXING"],
-	["active", "FIXING"],
-	["building", "FIXING"],
-	["fix", "FIXING"],
-	["fixing", "FIXING"],
-	["done", "DONE"],
-	["completed", "DONE"],
-	["complete", "DONE"],
-	["deployed", "DONE"],
-	["closed", "DONE"],
+	["review", "FIX"],
+	["reviewing", "FIX"],
+	["develop", "FIX"],
+	["developing", "FIX"],
+	["merge", "FIX"],
+	["accepted", "FIX"],
+	["active", "FIX"],
+	["building", "FIX"],
+	["fix", "FIX"],
+	["fixing", "FIX"],
+	["done", "DEPLOYED"],
+	["completed", "DEPLOYED"],
+	["complete", "DEPLOYED"],
+	["deployed", "DEPLOYED"],
+	["closed", "DEPLOYED"],
+	["wont_fix", "WONT_FIX"],
+	["non_issue", "NON_ISSUE"],
+	["escalate", "ESCALATE"],
 ]);
 const STATUS_ALIASES_BY_WORKFLOW: Record<
 	WorkflowViewKey,
@@ -204,10 +206,20 @@ const QUICK_FIX_STATUSES = new Set([
 	"deployed",
 	"escalate",
 	"wont_fix",
+	"non_issue",
 	"fixing",
 	"done",
 ]);
-const HOTFIX_STATUSES = new Set(["triage", "fixing", "done"]);
+const HOTFIX_STATUSES = new Set([
+	"triage",
+	"fix",
+	"deployed",
+	"escalate",
+	"wont_fix",
+	"non_issue",
+	"fixing",
+	"done",
+]);
 
 function isObsoleteProposal(proposal: Proposal): boolean {
 	return (proposal.maturity ?? "").toLowerCase() === "obsolete";
@@ -263,25 +275,26 @@ export function getWorkflowViewForProposal(
 	proposal: Proposal,
 ): WorkflowViewDefinition {
 	const proposalType = proposal.proposalType?.trim().toLowerCase();
-	if (proposalType && RFC_TYPES.has(proposalType)) {
-		return getWorkflowViewDefinition("rfc");
-	}
-	if (proposalType && QUICK_FIX_TYPES.has(proposalType)) {
-		return getWorkflowViewDefinition("quick-fix");
-	}
+	const status = proposal.status.trim().toLowerCase();
 	if (proposalType && HOTFIX_TYPES.has(proposalType)) {
 		return getWorkflowViewDefinition("hotfix");
 	}
-
-	const status = proposal.status.trim().toLowerCase();
+	if (proposalType === "issue") {
+		return QUICK_FIX_STATUSES.has(status)
+			? getWorkflowViewDefinition("quick-fix")
+			: getWorkflowViewDefinition("rfc");
+	}
+	if (proposalType && RFC_TYPES.has(proposalType)) {
+		return getWorkflowViewDefinition("rfc");
+	}
 	if (RFC_STATUSES.has(status)) {
 		return getWorkflowViewDefinition("rfc");
 	}
-	if (QUICK_FIX_STATUSES.has(status)) {
-		return getWorkflowViewDefinition("quick-fix");
-	}
 	if (HOTFIX_STATUSES.has(status)) {
 		return getWorkflowViewDefinition("hotfix");
+	}
+	if (QUICK_FIX_STATUSES.has(status)) {
+		return getWorkflowViewDefinition("quick-fix");
 	}
 
 	return getWorkflowViewDefinition("rfc");
@@ -2624,11 +2637,8 @@ export async function renderBoardTui(
 				// Rebuild entire thread view from accumulated events
 				feedLines = buildThreadLines(_allFeedEvents);
 			} else {
-				const newLines = unseenEvents
-					.slice()
-					.reverse()
-					.map(formatEventLine);
-				feedLines = [...feedLines, ...newLines].slice(-FEED_HISTORY_LIMIT);
+				// Always rebuild from sorted accumulated events to maintain chronological order
+				feedLines = _allFeedEvents.map(formatEventLine).slice(-FEED_HISTORY_LIMIT);
 			}
 			renderFeedPanel();
 			screen.render();

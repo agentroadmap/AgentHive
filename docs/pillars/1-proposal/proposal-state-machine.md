@@ -18,9 +18,9 @@ Every proposal also carries a maturity value inside its current state:
 
 | Maturity | Meaning |
 | :--- | :--- |
-| **New** | Proposal just entered the state and may be waiting on dependencies or claim/lease. |
+| **New** | Proposal just entered the state and may be waiting on dependencies or claim/lease. Every workflow state entry resets maturity to `New`, including entry into `Complete`. |
 | **Active** | An agent has claimed the work and is actively progressing it. |
-| **Mature** | The work in the current state is ready for gate evaluation. |
+| **Mature** | The work in the current state is ready for gate evaluation. In RFC, `Mature` on `Draft/Review/Develop/Merge` is gate-ready; `Complete/Mature` is terminal metadata and does not queue another advance gate. |
 | **Obsolete** | The proposal is no longer relevant because the surrounding structure changed. |
 
 ## Gate Model

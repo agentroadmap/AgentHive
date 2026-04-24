@@ -9,7 +9,7 @@
 import { basename } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { getPool, query, getPoolManager, type PoolManager } from "../../infra/postgres/pool.ts";
+import { getPool, query } from "../../infra/postgres/pool.ts";
 import {
 	type AgentProfile,
 	scoreProposal,
@@ -96,8 +96,6 @@ export interface PipelineCronDeps {
 	useOfferDispatch?: boolean;
 	setIntervalFn?: typeof setInterval;
 	clearIntervalFn?: typeof clearInterval;
-	/** P300: PoolManager for multi-project query routing. If null, falls back to queryFn. */
-	poolManager?: PoolManager | null;
 }
 
 function mcpResultText(result: unknown): string {
@@ -148,8 +146,7 @@ type ProposalDispatchContext = {
 	design: string | null;
 	alternatives: string | null;
 	drawbacks: string | null;
-	dependency_note: string | null;
-	requiredCapabilities: Record<string, string[]> | null;
+	dependency: string | null;
 	unresolvedDependencies: number;
 	totalAcceptanceCriteria: number;
 	blockingAcceptanceCriteria: number;
@@ -168,7 +165,7 @@ type ProposalDispatchRow = {
 	design: string | null;
 	alternatives: string | null;
 	drawbacks: string | null;
-	dependency_note: string | null;
+	dependency: string | null;
 	unresolved_dependencies: number;
 	total_acceptance_criteria: number;
 	blocking_acceptance_criteria: number;
@@ -197,6 +194,7 @@ type AgentDispatchCandidate = {
 type DispatchPlan = {
 	mode: DispatchMode;
 	phase: string;
+	stage: string;
 	agentIdentity: string | null;
 	modelHint: string | null;
 	timeoutMs: number;
@@ -402,41 +400,6 @@ function looksLikeWorktreeName(
 }
 
 
-// P297: Map dispatch roles to required capabilities for offer matching.
-// Returns {"all": ["cap1", "cap2"]} — an agency needs ALL listed caps to claim.
-// Empty array = any agency can claim (no capability requirement).
-function roleToCapabilities(role: string, allRoles: string[]): Record<string, string[]> {
-	const ROLE_CAP_MAP: Record<string, string[]> = {
-		"developer": ["code"],
-		"senior-developer": ["code"],
-		"architect": ["design"],
-		"reviewer": ["review"],
-		"gate-reviewer": ["review"],
-		"tester": ["testing"],
-		"devops": ["devops"],
-		"pm": ["management"],
-		"skeptic": ["review"],
-		"skeptic-alpha": ["design", "review"],
-		"skeptic-beta": ["review"],
-		"architecture-reviewer": ["design", "review"],
-		"researcher": ["research"],
-		"documenter": ["docs"],
-		"triage-agent": ["triage"],
-		"fix-agent": ["code"],
-		"merge-agent": ["code"],
-		"enhancer": ["code"],
-	};
-
-	// Collect capabilities from all roles
-	const caps = new Set<string>();
-	for (const r of allRoles) {
-		const mapped = ROLE_CAP_MAP[r.toLowerCase()];
-		if (mapped) mapped.forEach((c) => caps.add(c));
-	}
-
-	return caps.size > 0 ? { all: [...caps] } : {};
-}
-
 
 function buildDefaultTask(transition: TransitionQueueRow): string {
 	const lines = [
@@ -481,9 +444,8 @@ async function loadProposalDispatchContext(
 		    p.design AS design,
 		    p.alternatives AS alternatives,
 		    p.drawbacks AS drawbacks,
-	\t    p.dependency_note AS dependency_note,
-	\t    p.required_capabilities AS required_capabilities,
-	\t    COALESCE(dep.unresolved_dependencies, 0) AS unresolved_dependencies,
+		    p.dependency_note AS dependency,
+		    COALESCE(dep.unresolved_dependencies, 0) AS unresolved_dependencies,
 		    COALESCE(ac.total_acceptance_criteria, 0) AS total_acceptance_criteria,
 		    COALESCE(ac.blocking_acceptance_criteria, 0) AS blocking_acceptance_criteria,
 		    COALESCE(ac.passed_acceptance_criteria, 0) AS passed_acceptance_criteria,
@@ -530,8 +492,7 @@ async function loadProposalDispatchContext(
 		design: row.design ?? null,
 		alternatives: row.alternatives ?? null,
 		drawbacks: row.drawbacks ?? null,
-		dependency: row.dependency_note ?? null,
-		requiredCapabilities: row.required_capabilities ?? null,
+		dependency: row.dependency ?? null,
 		unresolvedDependencies: row.unresolved_dependencies ?? 0,
 		totalAcceptanceCriteria: row.total_acceptance_criteria ?? 0,
 		blockingAcceptanceCriteria: row.blocking_acceptance_criteria ?? 0,
@@ -689,6 +650,10 @@ function buildDispatchPlan(
 	return {
 		mode,
 		phase: normalizedTarget.toLowerCase(),
+		stage:
+			mode === "gate"
+				? `gate:${normalizedTarget}`
+				: normalizeStage(context.status),
 		agentIdentity: agent?.agent_identity ?? null,
 		modelHint: agent?.preferred_model ?? agent?.active_model ?? null,
 		timeoutMs: mode === "gate" ? 300_000 : 180_000,
@@ -715,8 +680,6 @@ export class PipelineCron {
 	private readonly clearIntervalFn: typeof clearInterval;
 	private readonly spawnAgentFn?: (request: SpawnAgentRequest) => Promise<SpawnAgentResult>;
 	private readonly mcpClientFactory: McpClientFactory;
-	/** P300: PoolManager for multi-project routing. Null = use legacy queryFn for everything. */
-	private _poolManager: PoolManager | null = null;
 
 	private listenerClient: ListenerClient | null = null;
 	private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -762,7 +725,6 @@ export class PipelineCron {
 		this.setIntervalFn = deps.setIntervalFn ?? setInterval;
 		this.clearIntervalFn = deps.clearIntervalFn ?? clearInterval;
 		this.spawnAgentFn = deps.spawnAgentFn;
-		this._poolManager = deps.poolManager ?? null;
 		this.mcpClientFactory =
 			deps.mcpClientFactory ??
 			((url) => {
@@ -787,18 +749,6 @@ export class PipelineCron {
 	async run(): Promise<void> {
 		if (this.started) {
 			return;
-		}
-
-		// P300: Lazy-init PoolManager if not injected via deps
-		if (!this._poolManager) {
-			try {
-				this._poolManager = await getPoolManager();
-				this.logger.log("[PipelineCron] PoolManager initialized for multi-project routing");
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				this.logger.warn(`[PipelineCron] PoolManager init failed, using legacy pool: ${msg}`);
-				this._poolManager = null;
-			}
 		}
 
 		this.started = true;
@@ -1120,7 +1070,7 @@ export class PipelineCron {
 		const offerMetadata: JsonRecord = {
 			task,
 			phase,
-			stage: transition.to_stage,
+			stage: `gate:${transition.to_stage}`,
 			roles: plan?.roles ?? [role],
 			transition_id: transition.id,
 			proposal_display_id: proposalDisplayId,
@@ -1144,30 +1094,13 @@ export class PipelineCron {
 		}
 
 		try {
-			// P297: Required capabilities — proposal-level takes precedence over role mapping
-			const proposalCaps = proposalContext?.requiredCapabilities;
-			const requiredCaps = proposalCaps && Object.keys(proposalCaps).length > 0
-				? proposalCaps
-				: roleToCapabilities(role, plan?.roles ?? [role]);
-
-		const { rows } = await this.queryFn<{ id: number }>(
-			`INSERT INTO roadmap_workforce.squad_dispatch
-			   (proposal_id, squad_name, dispatch_role, dispatch_status,
-			    offer_status, agent_identity, required_capabilities, metadata,
-			    project_id)
-			 VALUES ($1, $2, $3, 'open', 'open', NULL, $4::jsonb, 
-			    ($5::jsonb || jsonb_build_object('worktree_root',
-			      COALESCE((SELECT p.git_root || '/worktrees' 
-			                FROM roadmap_workforce.projects p 
-			                WHERE p.id = (SELECT COALESCE(pr.project_id, 1) 
-			                              FROM roadmap_proposal.proposal pr 
-			                              WHERE pr.id = $1)), 
-			               '/data/code/worktrees'))),
-			    (SELECT COALESCE(p.project_id, 1) 
-			       FROM roadmap_proposal.proposal p 
-			      WHERE p.id = $1))
-			 RETURNING id`,
-				[proposalIdNum, squadName, role, JSON.stringify(requiredCaps), JSON.stringify(offerMetadata)],
+			const { rows } = await this.queryFn<{ id: number }>(
+				`INSERT INTO roadmap_workforce.squad_dispatch
+				   (proposal_id, squad_name, dispatch_role, dispatch_status,
+				    offer_status, agent_identity, required_capabilities, metadata)
+				 VALUES ($1, $2, $3, 'open', 'open', NULL, '{}'::jsonb, $4::jsonb)
+				 RETURNING id`,
+				[proposalIdNum, squadName, role, JSON.stringify(offerMetadata)],
 			);
 			const dispatchId = rows[0]?.id;
 			if (!dispatchId) {
@@ -1226,7 +1159,7 @@ export class PipelineCron {
 				readString(transition.metadata, "task") ??
 				buildDefaultTask(transition),
 			proposalId,
-			stage: plan?.phase ?? transition.to_stage,
+			stage: plan?.stage ?? `gate:${transition.to_stage}`,
 		};
 		const model =
 			plan?.modelHint ?? readString(spawnMetadata, "model") ?? undefined;

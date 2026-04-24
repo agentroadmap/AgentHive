@@ -3,19 +3,16 @@
  * Dynamic multi-model agent pool management backed by in-memory state.
  */
 
+import { spawnAgent as realSpawnAgent } from "../../../../core/orchestration/agent-spawner.ts";
 import type { AgentStatus } from "../../../../shared/types/index.ts";
+import { query } from "../../../../infra/postgres/pool.ts";
 import { McpError } from "../../errors/mcp-errors.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
 
 export type McpAgentStatus = AgentStatus | "online" | "busy" | "error";
 
-export type AgentProvider =
-	| "anthropic"
-	| "openai"
-	| "google"
-	| "local"
-	| "custom";
+export type AgentProvider = string;
 
 export interface AgentConfig {
 	baseUrl?: string;
@@ -131,7 +128,7 @@ export class AgentPoolHandlers {
 					identity: args.identity,
 					capabilities: args.capabilities ?? [],
 					status: "idle",
-					costClass: this.estimateCostClass(args.model, args.provider),
+					costClass: await this.estimateCostClass(args.model, args.provider),
 				});
 			} catch {
 				// Non-critical: server registry is optional fallback
@@ -456,7 +453,8 @@ export class AgentPoolHandlers {
 	}
 
 	/**
-	 * AC#2: Spawn request for new agents
+	 * AC#2: Real agent spawn via agent-spawner.ts.
+	 * Validates model against model_routes, resolves worktree, and executes.
 	 */
 	async spawnAgent(args: {
 		template: string;
@@ -465,21 +463,71 @@ export class AgentPoolHandlers {
 		capabilities?: string[];
 		targetProposalId?: string;
 		reason: string;
+		worktree?: string;
+		timeoutMs?: number;
 	}): Promise<CallToolResult> {
 		try {
-			const requestId = `spawn-${Date.now()}`;
-			const now = new Date().toISOString();
+			// 1. Validate model exists in model_routes for the requested route provider
+			const { rows: routeRows } = await query<{
+				agent_provider: string;
+				model_name: string;
+				is_enabled: boolean;
+			}>(
+				`SELECT agent_provider, model_name, is_enabled
+				 FROM roadmap.model_routes
+				 WHERE model_name = $1
+				   AND route_provider = $2
+				   AND is_enabled = true
+				 ORDER BY priority ASC
+				 LIMIT 1`,
+				[args.model, args.provider],
+			);
 
-			this.spawnRequests.set(requestId, {
-				id: requestId,
-				template: args.template,
+			if (routeRows.length === 0) {
+				throw new McpError(
+					`Model "${args.model}" with provider "${args.provider}" is not enabled in model_routes. Spawn blocked.`,
+					"INVALID_PARAMS",
+				);
+			}
+
+			const requiredAgentProvider = routeRows[0].agent_provider;
+
+			// 2. Resolve worktree
+			let worktree = args.worktree;
+			if (!worktree) {
+				const resolved = await this.findWorktreeForProvider(requiredAgentProvider);
+				if (resolved) worktree = resolved;
+			}
+
+			if (!worktree) {
+				throw new McpError(
+					`No usable worktree found for agent_provider "${requiredAgentProvider}". Pass worktree explicitly.`,
+					"RESOURCE_NOT_FOUND",
+				);
+			}
+
+			// 3. Derive stage from proposal state vocabulary
+			let stage = args.template;
+			if (args.targetProposalId) {
+				const { rows: proposalRows } = await query<{ status: string }>(
+					`SELECT status FROM roadmap_proposal.proposal WHERE id = $1`,
+					[Number(args.targetProposalId)],
+				);
+				if (proposalRows.length > 0) {
+					stage = proposalRows[0].status;
+				}
+			}
+
+			// 4. Call real spawnAgent
+			const result = await realSpawnAgent({
+				worktree,
+				task: args.reason,
+				proposalId: args.targetProposalId
+					? Number(args.targetProposalId)
+					: undefined,
+				stage,
 				model: args.model,
-				provider: args.provider,
-				capabilities: args.capabilities,
-				targetProposalId: args.targetProposalId,
-				reason: args.reason,
-				status: "pending",
-				createdAt: now,
+				timeoutMs: args.timeoutMs ?? 300_000,
 			});
 
 			return {
@@ -487,16 +535,20 @@ export class AgentPoolHandlers {
 					{
 						type: "text",
 						text: [
-							"🚀 Spawn request created",
-							`Request ID: ${requestId}`,
-							`Template: ${args.template}`,
+							result.exitCode === 0
+								? "✅ Agent spawned and completed"
+								: "❌ Agent spawn failed",
+							`Run ID: ${result.agentRunId}`,
+							`Worktree: ${worktree}`,
 							`Model: ${args.model} (${args.provider})`,
-							`Reason: ${args.reason}`,
-							args.targetProposalId
-								? `Target Proposal: ${args.targetProposalId}`
+							`Exit Code: ${result.exitCode}`,
+							`Duration: ${result.durationMs}ms`,
+							result.stdout
+								? `Output:\n${result.stdout.slice(0, 2000)}`
 								: "",
-							"",
-							"Status: Pending approval",
+							result.stderr
+								? `Errors:\n${result.stderr.slice(0, 1000)}`
+								: "",
 						]
 							.filter(Boolean)
 							.join("\n"),
@@ -504,6 +556,7 @@ export class AgentPoolHandlers {
 				],
 			};
 		} catch (error) {
+			if (error instanceof McpError) throw error;
 			if (error instanceof Error) {
 				throw new McpError(error.message, "OPERATION_FAILED");
 			}
@@ -621,6 +674,11 @@ export class AgentPoolHandlers {
 		try {
 			const agents = Array.from(this.agents.values());
 
+			const byProvider: Record<string, number> = {};
+			for (const a of agents) {
+				byProvider[a.provider] = (byProvider[a.provider] ?? 0) + 1;
+			}
+
 			const stats = {
 				totalAgents: agents.length,
 				byStatus: {
@@ -630,13 +688,7 @@ export class AgentPoolHandlers {
 					offline: agents.filter((a) => a.status === "offline").length,
 					error: agents.filter((a) => a.status === "error").length,
 				},
-				byProvider: {
-					anthropic: agents.filter((a) => a.provider === "anthropic").length,
-					openai: agents.filter((a) => a.provider === "openai").length,
-					google: agents.filter((a) => a.provider === "google").length,
-					local: agents.filter((a) => a.provider === "local").length,
-					custom: agents.filter((a) => a.provider === "custom").length,
-				},
+				byProvider,
 				totalClaims: Array.from(this.claims.values()).length,
 				avgTrustScore:
 					agents.length > 0
@@ -646,6 +698,13 @@ export class AgentPoolHandlers {
 							)
 						: 0,
 			};
+
+			const providerLines = Object.entries(stats.byProvider)
+				.sort((a, b) => b[1] - a[1])
+				.map(([provider, count]) => {
+					const emoji = this.providerEmoji(provider);
+					return `  ${emoji} ${provider}: ${count}`;
+				});
 
 			return {
 				content: [
@@ -666,11 +725,7 @@ export class AgentPoolHandlers {
 							`  🔴 Error: ${stats.byStatus.error}`,
 							"",
 							"By Provider:",
-							`  🟣 Anthropic (Claude): ${stats.byProvider.anthropic}`,
-							`  🟢 OpenAI (GPT): ${stats.byProvider.openai}`,
-							`  🔵 Google (Gemini): ${stats.byProvider.google}`,
-							`  🟤 Local: ${stats.byProvider.local}`,
-							`  ⚪ Custom: ${stats.byProvider.custom}`,
+							...providerLines,
 						].join("\n"),
 					},
 				],
@@ -697,43 +752,83 @@ export class AgentPoolHandlers {
 		return map[status] ?? "⚪";
 	}
 
-	private providerEmoji(provider: AgentProvider): string {
-		const map: Partial<Record<AgentProvider, string>> = {
-			anthropic: "🟣",
-			openai: "🟢",
-			google: "🔵",
-			local: "🟤",
-			custom: "⚪",
-		};
-		return map[provider] ?? "⚪";
+	private providerEmoji(provider: string): string {
+		// Deterministic emoji from provider name so any route_provider gets a visual
+		// without maintaining a hardcoded map.
+		const pool = ["🟣", "🟢", "🔵", "🟡", "🔴", "⚫", "🟤", "⚪", "🟠", "🩵", "🩷", "🩶"];
+		let hash = 0;
+		for (let i = 0; i < provider.length; i++) {
+			hash = (hash << 5) - hash + provider.charCodeAt(i);
+			hash |= 0;
+		}
+		return pool[Math.abs(hash) % pool.length];
 	}
 
-	private estimateCostClass(
+	private async findWorktreeForProvider(
+		agentProvider: string,
+	): Promise<string | null> {
+		// 1. Try agent registry
+		const { rows } = await query<{ agent_identity: string }>(
+			`SELECT agent_identity
+			 FROM roadmap_workforce.agent_registry
+			 WHERE status = 'active'
+			   AND (role = $1 OR agent_identity LIKE $2)
+			 LIMIT 1`,
+			[agentProvider, `${agentProvider}-%`],
+		);
+		if (rows.length > 0) return rows[0].agent_identity;
+
+		// 2. Fallback: filesystem scan under WORKTREE_ROOT
+		const fs = await import("node:fs/promises");
+		const path = await import("node:path");
+		const WORKTREE_ROOT = "/data/code/worktree";
+
+		try {
+			const entries = await fs.readdir(WORKTREE_ROOT, { withFileTypes: true });
+			for (const entry of entries) {
+				if (entry.isDirectory() && entry.name.startsWith(`${agentProvider}-`)) {
+					const envPath = path.join(WORKTREE_ROOT, entry.name, ".env.agent");
+					try {
+						await fs.access(envPath);
+						return entry.name;
+					} catch {
+						// directory exists but missing .env.agent — skip
+					}
+				}
+			}
+		} catch {
+			// WORKTREE_ROOT unreadable
+		}
+
+		return null;
+	}
+
+	private async estimateCostClass(
 		model: string,
-		provider: AgentProvider,
-	): "low" | "medium" | "high" {
-		const modelLower = model.toLowerCase();
-
-		// High cost models
-		if (
-			modelLower.includes("opus") ||
-			modelLower.includes("gpt-4-turbo") ||
-			modelLower.includes("gpt-4o")
-		) {
-			return "high";
+		provider: string,
+	): Promise<"low" | "medium" | "high"> {
+		try {
+			const { rows } = await query<{
+				cost_per_million_input: string | null;
+			}>(
+				`SELECT COALESCE(cost_per_million_input, cost_per_1k_input * 1000) AS cost_per_million_input
+				 FROM roadmap.model_routes
+				 WHERE model_name = $1
+				   AND agent_provider = $2
+				   AND is_enabled = true
+				 ORDER BY priority ASC
+				 LIMIT 1`,
+				[model, provider],
+			);
+			if (rows.length > 0 && rows[0].cost_per_million_input) {
+				const cost = Number(rows[0].cost_per_million_input);
+				if (cost >= 3.0) return "high";
+				if (cost <= 0.5) return "low";
+				return "medium";
+			}
+		} catch {
+			// fallthrough
 		}
-
-		// Low cost models
-		if (
-			provider === "local" ||
-			modelLower.includes("haiku") ||
-			modelLower.includes("mini") ||
-			modelLower.includes("flash")
-		) {
-			return "low";
-		}
-
-		// Default medium
 		return "medium";
 	}
 }

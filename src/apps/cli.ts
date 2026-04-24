@@ -2838,14 +2838,24 @@ proposalCmd
 				),
 			];
 
-			// Reorder by workflow: RFC first, then Quick Fix
-			const rfcOrder = ["Draft", "Review", "Develop", "Merge", "Complete"];
-			const quickFixOrder = ["TRIAGE", "FIX", "DEPLOYED", "ESCALATE", "WONT_FIX"];
-			const workflowOrder = [...rfcOrder, ...quickFixOrder];
+			// Reorder by workflow: RFC first, then operational/legacy states
+			const workflowOrder = [
+				"DRAFT",
+				"REVIEW",
+				"DEVELOP",
+				"MERGE",
+				"COMPLETE",
+				"TRIAGE",
+				"FIX",
+				"DEPLOYED",
+				"ESCALATE",
+				"WONT_FIX",
+				"NON_ISSUE",
+			];
 
 			const reorderedStatuses = orderedStatuses.sort((a, b) => {
-				const aIdx = workflowOrder.indexOf(a);
-				const bIdx = workflowOrder.indexOf(b);
+				const aIdx = workflowOrder.indexOf(a.toUpperCase());
+				const bIdx = workflowOrder.indexOf(b.toUpperCase());
 				// If both are in workflow order, sort by that
 				if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
 				// If only one is in workflow order, it comes first

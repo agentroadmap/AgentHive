@@ -11,7 +11,7 @@
  * deployment.
  */
 import { hostname } from "node:os";
-import { spawnAgent } from "../src/core/orchestration/agent-spawner.ts";
+import { spawnAgent, resolveActiveRouteProvider } from "../src/core/orchestration/agent-spawner.ts";
 import { OfferProvider } from "../src/core/pipeline/offer-provider.ts";
 import { PipelineCron } from "../src/core/pipeline/pipeline-cron.ts";
 import { reapStaleRows } from "../src/core/pipeline/reap-stale-rows.ts";
@@ -21,6 +21,9 @@ const executorMode = process.env.AGENTHIVE_GATE_EXECUTOR ?? "cubic";
 const useOfferDispatch = process.env.AGENTHIVE_USE_OFFER_DISPATCH === "1";
 
 // Shared spawn adapter — used by both PipelineCron (legacy) and OfferProvider.
+// Provider is resolved from the AGENTHIVE_AGENT_IDENTITY prefix, with DB fallback,
+// so no binary path or provider name is hardcoded here.
+const agentIdentity = process.env.AGENTHIVE_AGENT_IDENTITY ?? hostname();
 const spawnAdapter =
 	executorMode === "spawn" || useOfferDispatch
 		? async (request: {
@@ -30,9 +33,10 @@ const spawnAdapter =
 				stage: string;
 				model?: string;
 				timeoutMs?: number;
-				agentLabel?: string;
-			}) =>
-				spawnAgent({
+			}) => {
+				const identityPrefix = agentIdentity.split("/")[0];
+				const provider = identityPrefix || (await resolveActiveRouteProvider()) || undefined;
+				return spawnAgent({
 					worktree: request.worktree,
 					task: request.task,
 					proposalId:
@@ -44,8 +48,9 @@ const spawnAdapter =
 					stage: request.stage,
 					model: request.model,
 					timeoutMs: request.timeoutMs,
-					agentLabel: request.agentLabel,
-				})
+					provider: provider as any,
+				});
+			}
 		: undefined;
 
 const cron = new PipelineCron({
@@ -55,8 +60,6 @@ const cron = new PipelineCron({
 
 // P281: When offer dispatch is enabled, start OfferProvider so this process
 // both emits offers (via PipelineCron) and claims/executes them.
-const agentIdentity =
-	process.env.AGENTHIVE_AGENT_IDENTITY ?? hostname();
 const offerProvider = useOfferDispatch
 	? new OfferProvider({
 			agentIdentity,
@@ -65,7 +68,6 @@ const offerProvider = useOfferDispatch
 			leaseTtlSeconds: Number(process.env.AGENTHIVE_LEASE_TTL_SECONDS ?? "30"),
 			renewIntervalMs: Number(process.env.AGENTHIVE_RENEW_INTERVAL_MS ?? "10000"),
 			pollIntervalMs: Number(process.env.AGENTHIVE_OFFER_POLL_MS ?? "15000"),
-			maxConcurrent: Number(process.env.AGENTHIVE_MAX_CONCURRENT ?? "10"),
 		})
 	: null;
 
@@ -116,9 +118,9 @@ async function shutdown(signal: string) {
 	if (offerProvider) {
 		try {
 			await offerProvider.stop();
-			// Wait for active claims to finish before closing the pool (P376 fix)
-			await offerProvider.waitForIdle(30_000);
-			console.log("[GatePipeline] OfferProvider stopped (idle)");
+			// Wait for in-flight claims to finish before closing the pool
+			await offerProvider.waitForIdle(90_000);
+			console.log("[GatePipeline] OfferProvider stopped and drained");
 		} catch (err) {
 			console.error("[GatePipeline] Error stopping OfferProvider:", err);
 		}

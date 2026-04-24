@@ -460,8 +460,8 @@ const BUILTIN_SMDLS: SMDLRoot[] = [
 			name: "Standard RFC",
 			description: "5-stage RFC pipeline for product development",
 			version: "1.0.0",
-			start_stage: "PROPOSAL",
-			terminal_stages: ["COMPLETE", "REJECTED", "DISCARDED"],
+			start_stage: "DRAFT",
+			terminal_stages: ["COMPLETE"],
 			default_maturity_gate: 2,
 			roles: [
 				{
@@ -484,21 +484,15 @@ const BUILTIN_SMDLS: SMDLRoot[] = [
 			],
 			stages: [
 				{
-					name: "PROPOSAL",
-					order: 1,
-					description: "Initial idea submitted",
-					auto_transitions: { on_mature: "DRAFT" },
-				},
-				{
 					name: "DRAFT",
-					order: 2,
+					order: 1,
 					description: "AI research and enhancement",
 					auto_transitions: { on_mature: "REVIEW" },
 					decision_gate: { evaluator: "auto" },
 				},
 				{
 					name: "REVIEW",
-					order: 3,
+					order: 2,
 					description: "Formal review, define acceptance criteria",
 					requires_ac: true,
 					quorum: {
@@ -518,41 +512,25 @@ const BUILTIN_SMDLS: SMDLRoot[] = [
 				},
 				{
 					name: "DEVELOP",
-					order: 4,
+					order: 3,
 					description: "Design, build, test",
 					requires_ac: true,
 					auto_transitions: { on_mature: "MERGE" },
 				},
 				{
 					name: "MERGE",
-					order: 5,
+					order: 4,
 					description: "Code review, regression, E2E testing",
 					requires_ac: true,
 					auto_transitions: { on_mature: "COMPLETE" },
 				},
 				{
 					name: "COMPLETE",
-					order: 6,
+					order: 5,
 					description: "Released and dependencies resolved",
-				},
-				{
-					name: "REJECTED",
-					order: 97,
-					description: "Declined after review or development",
-				},
-				{
-					name: "DISCARDED",
-					order: 98,
-					description: "Deprecated or abandoned",
 				},
 			],
 			transitions: [
-				{
-					from: "PROPOSAL",
-					to: "DRAFT",
-					labels: ["mature", "submit", "research"],
-					allowed_roles: ["any"],
-				},
 				{
 					from: "DRAFT",
 					to: "REVIEW",
@@ -582,36 +560,6 @@ const BUILTIN_SMDLS: SMDLRoot[] = [
 				},
 				{
 					from: "REVIEW",
-					to: "REJECTED",
-					labels: ["reject", "decision"],
-					allowed_roles: ["PM", "Architect"],
-				},
-				{
-					from: "DEVELOP",
-					to: "REJECTED",
-					labels: ["reject", "decision"],
-					allowed_roles: ["PM", "Architect"],
-				},
-				{
-					from: "MERGE",
-					to: "REJECTED",
-					labels: ["reject", "decision"],
-					allowed_roles: ["PM", "Architect"],
-				},
-				{
-					from: "DRAFT",
-					to: "DISCARDED",
-					labels: ["discard"],
-					allowed_roles: ["any"],
-				},
-				{
-					from: "REVIEW",
-					to: "DISCARDED",
-					labels: ["discard"],
-					allowed_roles: ["PM"],
-				},
-				{
-					from: "REVIEW",
 					to: "DRAFT",
 					labels: ["iterate", "revision"],
 					allowed_roles: ["PM", "Architect"],
@@ -631,12 +579,107 @@ const BUILTIN_SMDLS: SMDLRoot[] = [
 			],
 		},
 	},
+	// Hotfix
+	{
+		workflow: {
+			id: "hotfix",
+			name: "Hotfix",
+			description: "Localized operational fix workflow",
+			version: "1.0.0",
+			start_stage: "TRIAGE",
+			terminal_stages: ["DEPLOYED", "WONT_FIX", "NON_ISSUE"],
+			default_maturity_gate: 1,
+			roles: [
+				{
+					name: "any",
+					description: "Any developer",
+					clearance: 1,
+					is_default: true,
+				},
+				{ name: "Lead", description: "Team lead approval", clearance: 3 },
+			],
+			stages: [
+				{
+					name: "TRIAGE",
+					order: 1,
+					description: "Confirm the problem exists and scope the fix",
+					auto_transitions: { on_mature: "FIX" },
+				},
+				{
+					name: "FIX",
+					order: 2,
+					description: "Apply and verify the localized operational fix",
+					timeout: "4h",
+					auto_transitions: { on_mature: "DEPLOYED", on_timeout: "ESCALATE" },
+				},
+				{
+					name: "DEPLOYED",
+					order: 3,
+					description: "Fix applied and verified",
+				},
+				{
+					name: "ESCALATE",
+					order: 90,
+					description: "Escalate into a standard RFC issue",
+				},
+				{
+					name: "WONT_FIX",
+					order: 97,
+					description: "Declined as not worth fixing",
+				},
+				{
+					name: "NON_ISSUE",
+					order: 98,
+					description: "Closed because the reported problem is not an actual issue",
+				},
+			],
+			transitions: [
+				{
+					from: "TRIAGE",
+					to: "FIX",
+					labels: ["mature", "accepted"],
+					allowed_roles: ["any"],
+				},
+				{
+					from: "TRIAGE",
+					to: "WONT_FIX",
+					labels: ["reject", "discard"],
+					allowed_roles: ["Lead"],
+				},
+				{
+					from: "TRIAGE",
+					to: "NON_ISSUE",
+					labels: ["reject", "non_issue"],
+					allowed_roles: ["Lead"],
+				},
+				{
+					from: "FIX",
+					to: "DEPLOYED",
+					labels: ["mature", "deploy"],
+					allowed_roles: ["any"],
+					requires_ac: true,
+				},
+				{
+					from: "FIX",
+					to: "TRIAGE",
+					labels: ["iterate", "revision"],
+					allowed_roles: ["Lead"],
+				},
+				{
+					from: "FIX",
+					to: "ESCALATE",
+					labels: ["timeout", "escalate"],
+					allowed_roles: ["any"],
+				},
+			],
+		},
+	},
 	// Quick-Fix
 	{
 		workflow: {
 			id: "quick-fix",
 			name: "Quick Fix",
-			description: "3-stage rapid fix pipeline for bugs and hotfixes",
+			description: "Legacy compatibility workflow for pre-RFC issue data",
 			version: "1.0.0",
 			start_stage: "TRIAGE",
 			terminal_stages: ["DEPLOYED", "WONT_FIX"],
@@ -921,7 +964,7 @@ export async function workflowList(): Promise<CallToolResult> {
 				content: [
 					{
 						type: "text",
-						text: "No workflow templates loaded. Run `workflow_load_builtin` to load 3 presets.",
+						text: "No workflow templates loaded. Run `workflow_load_builtin` to load 4 presets.",
 					},
 				],
 			};

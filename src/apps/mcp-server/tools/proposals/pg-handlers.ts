@@ -10,68 +10,10 @@ import type { QueryResultRow } from "pg";
 import { query } from "../../../../postgres/pool.ts";
 import type { ProposalRow } from "../../../../postgres/proposal-storage-v2.ts";
 import * as pg from "../../../../postgres/proposal-storage-v2.ts";
-import {
-	validateLease,
-	formatValidationError,
-} from "../../../../core/proposal/proposal-integrity.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
 
 type ProjectionFormat = "yaml_md" | "json";
-
-type ProjectionField =
-	| "id"
-	| "display_id"
-	| "title"
-	| "type"
-	| "status"
-	| "maturity"
-	| "priority"
-	| "summary"
-	| "motivation"
-	| "design"
-	| "drawbacks"
-	| "alternatives"
-	| "dependency_note"
-	| "dependencies"
-	| "acceptance_criteria"
-	| "criteria"
-	| "lease"
-	| "workflow"
-	| "latest_decision"
-	| "tags";
-
-type ProposalProjectionArgs = {
-	id?: string;
-	projection?: string;
-	fields?: string[] | string;
-	format?: ProjectionFormat;
-};
-
-type ProposalProjectionRow = QueryResultRow & {
-	id: number;
-	display_id: string | null;
-	title: string;
-	type: string;
-	status: string;
-	maturity: string;
-	priority: string | null;
-	summary: string | null;
-	motivation: string | null;
-	design: string | null;
-	drawbacks: string | null;
-	alternatives: string | null;
-	dependency_note: string | null;
-	dependencies: unknown;
-	acceptance_criteria: unknown;
-	latest_decision: string | null;
-	decision_at: Date | string | null;
-	leased_by: string | null;
-	lease_expires: Date | string | null;
-	workflow_name: string | null;
-	current_stage: string | null;
-	tags: unknown;
-};
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
@@ -81,93 +23,6 @@ function errorResult(msg: string, err: unknown): CallToolResult {
 				text: `⚠️ ${msg}: ${err instanceof Error ? err.message : String(err)}`,
 			},
 		],
-	};
-}
-
-const PROJECTION_FIELD_ALIASES: Record<string, ProjectionField> = {
-	acceptance: "acceptance_criteria",
-	acceptance_criteria: "acceptance_criteria",
-	criteria: "acceptance_criteria",
-	dependency_link: "dependencies",
-	id: "id",
-	display_id: "display_id",
-	title: "title",
-	type: "type",
-	status: "status",
-	state: "status",
-	maturity: "maturity",
-	priority: "priority",
-	summary: "summary",
-	motivation: "motivation",
-	design: "design",
-	drawbacks: "drawbacks",
-	alternatives: "alternatives",
-	dependency_note: "dependency_note",
-	dependencies: "dependencies",
-	lease: "lease",
-	workflow: "workflow",
-	latest_decision: "latest_decision",
-	decision: "latest_decision",
-	tags: "tags",
-};
-
-const DEFAULT_PROJECTION_FIELDS: ProjectionField[] = [
-	"id",
-	"display_id",
-	"title",
-	"type",
-	"status",
-	"maturity",
-	"priority",
-	"lease",
-	"motivation",
-	"design",
-	"acceptance_criteria",
-];
-
-function normalizeProjectionField(field: string): ProjectionField | null {
-	const key = field.trim().toLowerCase();
-	return PROJECTION_FIELD_ALIASES[key] ?? null;
-}
-
-function parseProjectionArgs(args: ProposalProjectionArgs): {
-	id: string | null;
-	fields: ProjectionField[];
-} {
-	let id = args.id?.trim() || null;
-	const rawFields: string[] = [];
-
-	if (args.projection?.trim()) {
-		const projection = args.projection.trim();
-		const match = projection.match(/\{\s*([^,}\s]+)\s*:\s*([^,}]+)(.*)\}/);
-		if (match) {
-			if (!id && match[1].trim() === "id") {
-				id = match[2].trim().replace(/^['"]|['"]$/g, "");
-			}
-			rawFields.push(
-				...match[3]
-					.split(",")
-					.map((part) => part.trim())
-					.filter(Boolean),
-			);
-		} else {
-			rawFields.push(...projection.split(","));
-		}
-	}
-
-	if (Array.isArray(args.fields)) {
-		rawFields.push(...args.fields);
-	} else if (typeof args.fields === "string") {
-		rawFields.push(...args.fields.split(","));
-	}
-
-	const fields = rawFields
-		.map(normalizeProjectionField)
-		.filter((field): field is ProjectionField => Boolean(field));
-
-	return {
-		id,
-		fields: fields.length > 0 ? Array.from(new Set(fields)) : DEFAULT_PROJECTION_FIELDS,
 	};
 }
 
@@ -266,52 +121,6 @@ export class PgProposalHandlers {
 		}
 	}
 
-	async getProposalProjection(args: ProposalProjectionArgs): Promise<CallToolResult> {
-		try {
-			const projection = parseProjectionArgs(args);
-			if (!projection.id) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: "Projection requires an id, either as { id } or inside projection, e.g. roadmap proposal detail {id:P190, title, maturity, design}.",
-						},
-					],
-				};
-			}
-
-			const numericId = Number.parseInt(projection.id, 10);
-			const { rows } = await query<ProposalProjectionRow>(
-				`SELECT *
-				 FROM roadmap_proposal.v_proposal_full
-				 WHERE display_id = $1 OR id = $2
-				 LIMIT 1`,
-				[projection.id, Number.isNaN(numericId) ? null : numericId],
-			);
-			const row = rows[0];
-			if (!row) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Proposal ${projection.id} not found.`,
-						},
-					],
-				};
-			}
-
-			const object = this.buildProjectionObject(row, projection.fields);
-			const text =
-				args.format === "json"
-					? JSON.stringify(object, null, 2)
-					: this.formatProjectionYamlMarkdown(object, projection.fields);
-
-			return { content: [{ type: "text", text }] };
-		} catch (err) {
-			return errorResult("Failed to get proposal projection", err);
-		}
-	}
-
 	async createProposal(args: {
 		title: string;
 		type?: string;
@@ -323,7 +132,7 @@ export class PgProposalHandlers {
 		design?: string;
 		drawbacks?: string;
 		alternatives?: string;
-		dependency_note?: string;
+		dependency?: string;
 		priority?: string;
 		body_markdown?: string;
 		status?: string;
@@ -351,7 +160,7 @@ export class PgProposalHandlers {
 					design: args.design || null,
 					drawbacks: args.drawbacks || null,
 					alternatives: args.alternatives || null,
-					dependency_note: args.dependency_note || null,
+					dependency: args.dependency || null,
 					priority: args.priority || null,
 					tags: args.tags ? JSON.parse(args.tags) : null,
 				},
@@ -379,7 +188,7 @@ export class PgProposalHandlers {
 		design?: string;
 		drawbacks?: string;
 		alternatives?: string;
-		dependency_note?: string;
+		dependency?: string;
 		priority?: string;
 		body_markdown?: string;
 		tags?: string;
@@ -400,7 +209,7 @@ export class PgProposalHandlers {
 			if (args.design) updates.design = args.design;
 			if (args.drawbacks) updates.drawbacks = args.drawbacks;
 			if (args.alternatives) updates.alternatives = args.alternatives;
-			if (args.dependency_note) updates.dependency_note = args.dependency_note;
+			if (args.dependency) updates.dependency = args.dependency;
 			if (args.priority) updates.priority = args.priority;
 			if (args.body_markdown) updates.summary = args.body_markdown;
 			if (args.tags) updates.tags = JSON.parse(args.tags);
@@ -458,42 +267,30 @@ export class PgProposalHandlers {
 
 			// Gate transitions require decision notes
 			const gateTransitions: Record<string, string[]> = {
-				Draft: ["Review"],
-				Review: ["Develop"],
-				Develop: ["Merge"],
-				Merge: ["Complete"],
+				DRAFT: ["REVIEW"],
+				REVIEW: ["DEVELOP"],
+				DEVELOP: ["MERGE"],
+				MERGE: ["COMPLETE"],
 			};
 
 			// Get current status to check if this is a gate transition
 			const current = await pg.getProposal(id);
 			if (current) {
-				const allowedTargets = gateTransitions[current.status];
-				if (allowedTargets?.includes(args.status)) {
+				const currentStatus = current.status.toUpperCase();
+				const requestedStatus = args.status.toUpperCase();
+				const allowedTargets = gateTransitions[currentStatus];
+				if (allowedTargets?.includes(requestedStatus)) {
 					if (!args.notes || args.notes.trim().length === 0) {
 						return {
 							content: [
 								{
 									type: "text",
-									text: `Gate transition ${current.status} → ${args.status} requires decision notes. Please provide notes with your reasoning.`,
+									text: `Gate transition ${currentStatus} → ${requestedStatus} requires decision notes. Please provide notes with your reasoning.`,
 								},
 							],
 						};
 					}
 				}
-			}
-
-			// AC-2: Require active lease before allowing transition
-			const agentIdentity = args.author ?? "system";
-			const leaseResult = await validateLease(id, agentIdentity);
-			if (!leaseResult.valid) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: `🔒 ${formatValidationError(leaseResult.error!)}`,
-						},
-					],
-				};
 			}
 
 			const updated = await pg.transitionProposal(
@@ -559,14 +356,22 @@ export class PgProposalHandlers {
 				};
 			}
 
+			const inferredGate =
+				updated.status === "DRAFT"
+					? "D1"
+					: updated.status === "REVIEW"
+						? "D2"
+						: updated.status === "DEVELOP"
+							? "D3"
+							: updated.status === "MERGE"
+								? "D4"
+								: null;
 			const gateNote =
-				args.maturity === "mature"
-					? ` — gate-ready event fired (D${
-							{ DRAFT: "1", REVIEW: "2", DEVELOP: "3", MERGE: "4" }[
-								updated.status
-							] ?? "?"
-						} queue)`
-					: "";
+				args.maturity === "mature" && inferredGate
+					? ` — entered ${inferredGate} gate-ready queue`
+					: args.maturity === "mature" && updated.status === "COMPLETE"
+						? " — terminal state; no gate advance queued"
+						: "";
 			return {
 				content: [
 					{
@@ -872,28 +677,19 @@ export class PgProposalHandlers {
 				 FROM roadmap_proposal.proposal_lease
 				 WHERE proposal_id = $1 AND released_at IS NULL
 				 ORDER BY claimed_at DESC LIMIT 1`,
-			[proposal.id],
-		);
+				[proposal.id],
+			);
 
-		// 4. Fetch all decisions (for decisions field)
-		const allDecisionsResult = await query(
-			`SELECT decision, authority, rationale, binding, decided_at
-			 FROM roadmap_proposal.proposal_decision
-			 WHERE proposal_id = $1
-			 ORDER BY decided_at DESC`,
-			[proposal.id],
-		);
+			// 4. Fetch latest decision
+			const decisionResult = await query(
+				`SELECT decision, authority, rationale, decided_at
+				 FROM roadmap_proposal.proposal_decision
+				 WHERE proposal_id = $1
+				 ORDER BY decided_at DESC LIMIT 1`,
+				[proposal.id],
+			);
 
-		// 5. Fetch latest decision
-		const decisionResult = await query(
-			`SELECT decision, authority, rationale, decided_at
-			 FROM roadmap_proposal.proposal_decision
-			 WHERE proposal_id = $1
-			 ORDER BY decided_at DESC LIMIT 1`,
-			[proposal.id],
-		);
-
-		// 6. Fetch dependencies
+			// 5. Fetch dependencies
 			const depResult = await query(
 				`SELECT d.to_proposal_id, p.display_id, d.dependency_type, d.resolved
 				 FROM roadmap_proposal.proposal_dependencies d
@@ -947,24 +743,11 @@ export class PgProposalHandlers {
 			if (proposal.alternatives) {
 				md += `## Alternatives\n\n${proposal.alternatives}\n\n`;
 			}
-			if (proposal.dependency_note) {
-				md += `## Dependencies (Free Text)\n\n${proposal.dependency_note}\n\n`;
+			if (proposal.dependency) {
+				md += `## Dependencies (Free Text)\n\n${proposal.dependency}\n\n`;
 			}
 			if (decision?.rationale) {
 				md += `## Decision Rationale\n\n${decision.rationale}\n\n`;
-			}
-
-			// All decisions section (full history)
-			const allDecisions = allDecisionsResult.rows;
-			if (allDecisions.length > 0) {
-				md += `## All Decisions (${allDecisions.length})\n\n`;
-				for (const d of allDecisions) {
-					md += `- **${d.decision}** by ${d.authority} (${d.decided_at})`;
-					if (d.binding) md += ` [binding]`;
-					if (d.rationale) md += ` — ${d.rationale.slice(0, 100)}${d.rationale.length > 100 ? '...' : ''}`;
-					md += `\n`;
-				}
-				md += `\n`;
 			}
 
 			// Acceptance criteria
@@ -1004,255 +787,5 @@ export class PgProposalHandlers {
 		const source =
 			proposal.summary ?? proposal.motivation ?? proposal.design ?? "";
 		return source ? source.substring(0, 150) : "";
-	}
-
-	private buildProjectionObject(
-		row: ProposalProjectionRow,
-		fields: ProjectionField[],
-	): Record<string, unknown> {
-		const object: Record<string, unknown> = {};
-		for (const field of fields) {
-			switch (field) {
-				case "maturity":
-					object.maturity = row.maturity;
-					break;
-				case "criteria":
-				case "acceptance_criteria":
-					object.acceptance_criteria = normalizeJsonArray(row.acceptance_criteria);
-					break;
-				case "lease":
-					object.lease = row.leased_by
-						? { agent: row.leased_by, expires: row.lease_expires }
-						: null;
-					break;
-				case "workflow":
-					object.workflow = {
-						name: row.workflow_name,
-						current_stage: row.current_stage,
-					};
-					break;
-				case "dependencies":
-					object.dependencies = normalizeJsonArray(row.dependencies);
-					break;
-		case "latest_decision":
-				object.latest_decision = row.latest_decision
-					? { decision: row.latest_decision, decided_at: row.decision_at }
-					: null;
-				break;
-			case "decisions":
-				// decisions are added from allDecisionsResult, not row
-				break;
-			default:
-					object[field] = row[field];
-					break;
-			}
-		}
-		return object;
-	}
-
-	private formatProjectionYamlMarkdown(
-		object: Record<string, unknown>,
-		fields: ProjectionField[],
-	): string {
-		const metadataKeys = [
-			"id",
-			"display_id",
-			"title",
-			"type",
-			"status",
-			"maturity",
-			"priority",
-			"lease",
-			"workflow",
-			"latest_decision",
-			"tags",
-		];
-		const metadata = metadataKeys
-			.filter((key) => Object.hasOwn(object, key))
-			.map((key) => {
-				const value = object[key];
-				if (value && typeof value === "object") {
-					return `${key}: ${JSON.stringify(value)}`;
-				}
-				return `${key}: ${yamlValue(value)}`;
-			})
-			.join("\n");
-
-		const sections: string[] = [];
-		for (const field of fields) {
-			switch (field) {
-				case "summary":
-				case "motivation":
-				case "design":
-				case "drawbacks":
-				case "alternatives":
-				case "dependency_note": {
-					const value = object[field];
-					if (value) {
-						sections.push(`## ${field.replace(/_/g, " ")}\n${formatScalar(value)}`);
-					}
-					break;
-				}
-				case "dependencies": {
-					if (Object.hasOwn(object, "dependencies")) {
-						sections.push(
-							`## Dependencies\n${markdownList(normalizeJsonArray(object.dependencies), "to_display_id")}`,
-						);
-					}
-					break;
-				}
-				case "criteria":
-				case "acceptance_criteria": {
-					if (Object.hasOwn(object, "acceptance_criteria")) {
-						sections.push(
-							`## Acceptance Criteria\n${markdownList(
-								normalizeJsonArray(object.acceptance_criteria),
-								"criterion_text",
-							)}`,
-						);
-					}
-					break;
-				}
-			}
-		}
-
-		return `# --- METADATA (YAML) ---\n${metadata}\n# -----------------------\n\n# --- NARRATIVE (Markdown) ---\n${sections.join("\n\n") || "No narrative fields requested."}`;
-	}
-
-	/**
-	 * getProposalDetail - returns complete proposal with ALL child entities in one call.
-	 * Queries v_proposal_detail view which includes: ACs, deps, discussions, reviews,
-	 * gate_decisions, active_dispatches, lease, workflow.
-	 */
-	async getProposalDetail(args: { id: string; format?: string }): Promise<CallToolResult> {
-		try {
-			const { rows } = await query(
-				`SELECT * FROM roadmap_proposal.v_proposal_detail
-				 WHERE display_id = $1 OR id = $2
-				 LIMIT 1`,
-				[args.id, Number.isNaN(Number.parseInt(args.id, 10)) ? null : Number.parseInt(args.id, 10)],
-			);
-			const row = rows[0];
-			if (!row) {
-				return {
-					content: [{ type: "text", text: `Proposal ${args.id} not found.` }],
-				};
-			}
-
-			// Build the detail object with all fields
-			const detail: Record<string, any> = {
-				id: row.id,
-				display_id: row.display_id,
-				parent_id: row.parent_id,
-				type: row.type,
-				status: row.status,
-				maturity: row.maturity,
-				title: row.title,
-				summary: row.summary,
-				motivation: row.motivation,
-				design: row.design,
-				drawbacks: row.drawbacks,
-				alternatives: row.alternatives,
-				dependency_note: row.dependency_note,
-				priority: row.priority,
-				tags: row.tags,
-				required_capabilities: row.required_capabilities,
-				created_at: row.created_at,
-				modified_at: row.modified_at,
-				// Child entities (JSONB arrays)
-				dependencies: row.dependencies || [],
-				acceptance_criteria: row.acceptance_criteria || [],
-				discussions: row.discussions || [],
-				reviews: row.reviews || [],
-				gate_decisions: row.gate_decisions || [],
-				active_dispatches: row.active_dispatches || [],
-				// Lease
-				lease: row.leased_by
-					? { agent: row.leased_by, expires: row.lease_expires }
-					: null,
-				// Workflow
-				workflow: row.workflow_name
-					? { name: row.workflow_name, current_stage: row.current_stage }
-					: null,
-			};
-
-			if (args.format === "yaml_md") {
-				// Format as YAML header + markdown sections
-				const yamlHeader = [
-					`display_id: ${detail.display_id}`,
-					`type: ${detail.type}`,
-					`status: ${detail.status}`,
-					`maturity: ${detail.maturity}`,
-					detail.priority ? `priority: ${detail.priority}` : null,
-					detail.lease ? `lease: ${detail.lease.agent} (expires ${detail.lease.expires})` : null,
-					detail.workflow ? `workflow: ${detail.workflow.name} → ${detail.workflow.current_stage}` : null,
-					`discussions: ${detail.discussions.length}`,
-					`reviews: ${detail.reviews.length}`,
-					`gate_decisions: ${detail.gate_decisions.length}`,
-					`dispatches: ${detail.active_dispatches.length}`,
-				]
-					.filter(Boolean)
-					.join("\n");
-
-				const sections: string[] = [];
-				if (detail.title) sections.push(`# ${detail.title}`);
-				if (detail.summary) sections.push(`## Summary\n${detail.summary}`);
-				if (detail.motivation) sections.push(`## Motivation\n${detail.motivation}`);
-				if (detail.design) sections.push(`## Design\n${detail.design}`);
-				if (detail.acceptance_criteria.length > 0) {
-					sections.push(
-						`## Acceptance Criteria\n${detail.acceptance_criteria
-							.map((ac: any) => `- [${ac.status}] AC${ac.item_number}: ${ac.criterion_text}`)
-							.join("\n")}`,
-					);
-				}
-				if (detail.dependencies.length > 0) {
-					sections.push(
-						`## Dependencies\n${detail.dependencies.map((d: any) => `- ${d.to_display_id} (${d.dependency_type})`).join("\n")}`,
-					);
-				}
-				if (detail.gate_decisions.length > 0) {
-					sections.push(
-						`## Gate Decisions\n${detail.gate_decisions
-							.map(
-								(gd: any) =>
-									`- **${gd.decision}** (${gd.from_state}→${gd.to_state}) by ${gd.decided_by}\n  Rationale: ${gd.rationale}`,
-							)
-							.join("\n")}`,
-					);
-				}
-				if (detail.reviews.length > 0) {
-					sections.push(
-						`## Reviews\n${detail.reviews
-							.map((r: any) => `- **${r.verdict}** by ${r.reviewer_identity}: ${r.notes || r.findings || ""}`)
-							.join("\n")}`,
-					);
-				}
-				if (detail.discussions.length > 0) {
-					sections.push(
-						`## Discussions (${detail.discussions.length} messages)\n${detail.discussions
-							.slice(0, 5)
-							.map((d: any) => `- [${d.author_identity}]: ${d.body?.substring(0, 200)}`)
-							.join("\n")}${detail.discussions.length > 5 ? `\n... and ${detail.discussions.length - 5} more` : ""}`,
-					);
-				}
-
-				return {
-					content: [
-						{
-							type: "text",
-							text: `# --- METADATA (YAML) ---\n${yamlHeader}\n# -----------------------\n\n${sections.join("\n\n")}`,
-						},
-					],
-				};
-			}
-
-			// Default: JSON format
-			return {
-				content: [{ type: "text", text: JSON.stringify(detail, null, 2) }],
-			};
-		} catch (err) {
-			return errorResult("Failed to get proposal detail", err);
-		}
 	}
 }

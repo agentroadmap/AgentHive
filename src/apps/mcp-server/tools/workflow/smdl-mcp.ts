@@ -1,9 +1,9 @@
 /**
  * SMDL (State Machine Definition Language) MCP Tool Registration
  *
- * Registers 3 workflow management tools:
+ * Registers workflow management tools:
  * - workflow_load: Parse YAML SMDL and materialize into Postgres
- * - workflow_load_builtin: Load the 3 preset workflows from SMDL spec
+ * - workflow_load_builtin: Load the preset workflows from SMDL spec
  * - workflow_list: List all registered workflow templates
  *
  * Based on SMDL spec at: docs/pillars/1-proposal/state-machine-definition-language.md
@@ -251,12 +251,6 @@ const BUILTIN_SMDLS: SMDLWorkflow[] = [
 				order: 5,
 				description: "Released and dependencies resolved",
 			},
-			{
-				name: "REJECTED",
-				order: 97,
-				description: "Declined after review or development",
-			},
-			{ name: "DISCARDED", order: 98, description: "Deprecated or abandoned" },
 		],
 		transitions: [
 			{
@@ -288,36 +282,6 @@ const BUILTIN_SMDLS: SMDLWorkflow[] = [
 			},
 			{
 				from: "REVIEW",
-				to: "REJECTED",
-				labels: ["reject", "decision"],
-				allowed_roles: ["PM", "Architect"],
-			},
-			{
-				from: "DEVELOP",
-				to: "REJECTED",
-				labels: ["reject", "decision"],
-				allowed_roles: ["PM", "Architect"],
-			},
-			{
-				from: "MERGE",
-				to: "REJECTED",
-				labels: ["reject", "decision"],
-				allowed_roles: ["PM", "Architect"],
-			},
-			{
-				from: "DRAFT",
-				to: "DISCARDED",
-				labels: ["discard"],
-				allowed_roles: ["any"],
-			},
-			{
-				from: "REVIEW",
-				to: "DISCARDED",
-				labels: ["discard"],
-				allowed_roles: ["PM"],
-			},
-			{
-				from: "REVIEW",
 				to: "DRAFT",
 				labels: ["iterate", "revision"],
 				allowed_roles: ["PM", "Architect"],
@@ -337,9 +301,92 @@ const BUILTIN_SMDLS: SMDLWorkflow[] = [
 		],
 	},
 	{
+		id: "hotfix",
+		name: "Hotfix",
+		description: "Localized operational fix workflow",
+		version: "1.0.0",
+		default_maturity_gate: 1,
+		roles: [
+			{
+				name: "any",
+				description: "Any developer",
+				clearance: 1,
+				is_default: true,
+			},
+			{ name: "Lead", description: "Team lead approval", clearance: 3 },
+		],
+		stages: [
+			{
+				name: "TRIAGE",
+				order: 1,
+				description: "Confirm the problem exists and scope the fix",
+			},
+			{
+				name: "FIX",
+				order: 2,
+				description: "Apply and verify the localized operational fix",
+			},
+			{ name: "DEPLOYED", order: 3, description: "Fix applied and verified" },
+			{
+				name: "ESCALATE",
+				order: 90,
+				description: "Escalate into a standard RFC issue",
+			},
+			{
+				name: "WONT_FIX",
+				order: 97,
+				description: "Declined as not worth fixing",
+			},
+			{
+				name: "NON_ISSUE",
+				order: 98,
+				description: "Closed because the reported problem is not an actual issue",
+			},
+		],
+		transitions: [
+			{
+				from: "TRIAGE",
+				to: "FIX",
+				labels: ["mature", "accepted"],
+				allowed_roles: ["any"],
+			},
+			{
+				from: "TRIAGE",
+				to: "WONT_FIX",
+				labels: ["reject", "discard"],
+				allowed_roles: ["Lead"],
+			},
+			{
+				from: "TRIAGE",
+				to: "NON_ISSUE",
+				labels: ["reject", "non_issue"],
+				allowed_roles: ["Lead"],
+			},
+			{
+				from: "FIX",
+				to: "DEPLOYED",
+				labels: ["mature", "deploy"],
+				allowed_roles: ["any"],
+				requires_ac: true,
+			},
+			{
+				from: "FIX",
+				to: "TRIAGE",
+				labels: ["iterate", "revision"],
+				allowed_roles: ["Lead"],
+			},
+			{
+				from: "FIX",
+				to: "ESCALATE",
+				labels: ["timeout", "escalate"],
+				allowed_roles: ["any"],
+			},
+		],
+	},
+	{
 		id: "quick-fix",
 		name: "Quick Fix",
-		description: "3-stage rapid fix pipeline for bugs and hotfixes",
+		description: "Legacy compatibility workflow for pre-RFC issue data",
 		version: "1.0.0",
 		default_maturity_gate: 1,
 		roles: [
@@ -578,7 +625,7 @@ async function loadBuiltinWorkflows(): Promise<CallToolResult> {
 			content: [
 				{
 					type: "text",
-					text: `✅ Loaded ${BUILTIN_SMDLS.length} builtin SMDL workflows:\n\n${results.join("\n")}\n\nNo code changes needed — define new workflows via YAML.`,
+				text: `✅ Loaded ${BUILTIN_SMDLS.length} builtin SMDL workflows:\n\n${results.join("\n")}\n\nNo code changes needed — define new workflows via YAML.`,
 				},
 			],
 		};
@@ -644,7 +691,7 @@ export class SMDLWorkflowHandlers {
 		this.server.addTool({
 			name: "workflow_load_builtin",
 			description:
-				"Load 3 preset SMDL workflows (RFC-5, Quick-Fix, Code-Review) into Postgres",
+				"Load 4 preset SMDL workflows (RFC-5, Hotfix, Quick-Fix, Code-Review) into Postgres",
 			inputSchema: { type: "object", properties: {} },
 			handler: () => loadBuiltinWorkflows(),
 		});
@@ -659,7 +706,7 @@ export class SMDLWorkflowHandlers {
 
 		// eslint-disable-next-line no-console
 		console.error(
-			"[MCP] Registered 3 SMDL workflow tools (load YAML, load builtins, list)",
+			"[MCP] Registered SMDL workflow tools (load YAML, load builtins, list)",
 		);
 	}
 }

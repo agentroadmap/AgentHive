@@ -16,6 +16,7 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
@@ -56,9 +57,11 @@ export interface SpawnRequest {
 	/** Proposal context (optional) */
 	proposalId?: number;
 	/** Stage context */
-	stage?: string;
+	stage: string;
 	/** Preferred model override (provider decides default) */
 	model?: string;
+	/** P405: Agent provider override — model_routes controls routing, not worktree metadata */
+	provider?: string;
 	/** Max tokens for this invocation */
 	maxTokens?: number;
 	/** Wall-clock timeout in milliseconds (default 300 000 = 5 min) */
@@ -67,6 +70,8 @@ export interface SpawnRequest {
 	worktreeRoot?: string;
 	/** Display label for context package (e.g. "worker-4620 (skeptic-alpha)") */
 	agentLabel?: string;
+	/** Descriptive activity label (e.g. "researching", "enhancing", "reviewing") */
+	activity?: string;
 }
 
 export interface SpawnResult {
@@ -89,12 +94,52 @@ export interface ModelRoute {
 	routeProvider: string;
 	agentProvider: string;
 	agentCli: string;
-	apiSpec: "anthropic" | "openai" | "google";
+	/** Full path to the CLI binary from DB. NULL = rely on system PATH. */
+	cliPath: string | null;
+	apiSpec: string;
 	baseUrl: string;
 	planType: string | null;
 	costPer1kInput: number;
 	costPerMillionInput: number;
 	costPerMillionOutput: number;
+	/** DB-driven credential env var names (migration 039) */
+	apiKeyEnv: string | null;
+	apiKeyFallbackEnv: string | null;
+	baseUrlEnv: string | null;
+	/** The env var the CLI actually reads for auth (e.g. ANTHROPIC_API_KEY for claude CLI) */
+	cliApiKeyEnv: string | null;
+	/** Actual API key values stored in DB (primary and secondary/fallback) */
+	apiKeyPrimary: string | null;
+	apiKeySecondary: string | null;
+	/** Comma-separated Hermes toolsets to grant; null = defaults */
+	spawnToolsets: string | null;
+	/** Whether agents spawned on this route may spawn their own subagents */
+	spawnDelegate: boolean;
+}
+
+// Lazy-loaded Claude settings.json env vars (read once, cached)
+let claudeSettingsEnv: Record<string, string> | undefined;
+
+function loadClaudeSettingsEnv(): Record<string, string> {
+	if (claudeSettingsEnv !== undefined) return claudeSettingsEnv;
+	claudeSettingsEnv = {};
+	try {
+		const settingsPath = join(process.env.HOME ?? "/root", ".claude", "settings.json");
+		console.error(`[AgentSpawner] Loading Claude settings from: ${settingsPath}`);
+		const raw = readFileSync(settingsPath, "utf8");
+		const parsed = JSON.parse(raw);
+		if (parsed?.env && typeof parsed.env === "object") {
+			for (const [k, v] of Object.entries(parsed.env)) {
+				if (typeof v === "string") claudeSettingsEnv[k] = v;
+			}
+		}
+		console.error(`[AgentSpawner] Loaded ${Object.keys(claudeSettingsEnv).length} env vars from settings.json`);
+		console.error(`[AgentSpawner] ANTHROPIC_AUTH_TOKEN present: ${!!claudeSettingsEnv.ANTHROPIC_AUTH_TOKEN}`);
+		console.error(`[AgentSpawner] ANTHROPIC_BASE_URL present: ${!!claudeSettingsEnv.ANTHROPIC_BASE_URL}`);
+	} catch (e) {
+		console.error(`[AgentSpawner] Failed to load settings.json:`, e);
+	}
+	return claudeSettingsEnv;
 }
 
 export function buildSpawnProcessEnv(input: {
@@ -103,54 +148,58 @@ export function buildSpawnProcessEnv(input: {
 	agentEnv: Record<string, string>;
 	extraEnv: Record<string, string>;
 }): Record<string, string> {
-	const routeCredentialEnv = (() => {
-		if (input.route.apiSpec === "anthropic") {
-			return process.env.ANTHROPIC_API_KEY
-				? { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY }
-				: {};
+	// Credential resolution order:
+	// 1. DB-stored keys (api_key_primary / api_key_secondary) — highest priority
+	// 2. Env var named by api_key_env (from process.env or ~/.claude/settings.json)
+	// 3. Env var named by api_key_fallback_env (same resolution)
+	// The resolved key is set under cliApiKeyEnv (what the CLI actually reads).
+	const settingsEnv = loadClaudeSettingsEnv();
+	const routeCredentialEnv: Record<string, string> = {};
+
+	// Resolve the API key value: DB primary > DB secondary > env var > settings.json
+	let resolvedKey: string | null = null;
+	if (input.route.apiKeyPrimary) {
+		resolvedKey = input.route.apiKeyPrimary;
+	} else if (input.route.apiKeyEnv) {
+		resolvedKey = process.env[input.route.apiKeyEnv] ?? settingsEnv[input.route.apiKeyEnv] ?? null;
+	}
+	let resolvedFallback: string | null = null;
+	if (input.route.apiKeySecondary) {
+		resolvedFallback = input.route.apiKeySecondary;
+	} else if (input.route.apiKeyFallbackEnv) {
+		resolvedFallback = process.env[input.route.apiKeyFallbackEnv] ?? settingsEnv[input.route.apiKeyFallbackEnv] ?? null;
+	}
+
+	// Set the key under the env var the CLI reads (cliApiKeyEnv), falling back to apiKeyEnv
+	const cliKeyEnv = input.route.cliApiKeyEnv ?? input.route.apiKeyEnv;
+	if (cliKeyEnv && resolvedKey) {
+		routeCredentialEnv[cliKeyEnv] = resolvedKey;
+	} else if (cliKeyEnv && resolvedFallback) {
+		routeCredentialEnv[cliKeyEnv] = resolvedFallback;
+	}
+
+	// Resolve base URL: route's DB value > process.env > settings.json
+	if (input.route.baseUrlEnv) {
+		if (input.route.baseUrl) {
+			routeCredentialEnv[input.route.baseUrlEnv] = input.route.baseUrl;
+		} else if (!process.env[input.route.baseUrlEnv]) {
+			const val = settingsEnv[input.route.baseUrlEnv];
+			if (val) routeCredentialEnv[input.route.baseUrlEnv] = val;
 		}
-		if (input.route.apiSpec === "google") {
-			return process.env.GEMINI_API_KEY
-				? { GEMINI_API_KEY: process.env.GEMINI_API_KEY }
-				: {};
-		}
-		if (input.route.apiSpec === "openai") {
-			if (input.route.routeProvider === "nous") {
-				const nousKey = process.env.NOUS_API_KEY ?? process.env.OPENAI_API_KEY;
-				return {
-					...(process.env.NOUS_API_KEY
-						? { NOUS_API_KEY: process.env.NOUS_API_KEY }
-						: {}),
-					...(nousKey ? { OPENAI_API_KEY: nousKey } : {}),
-				};
-			}
-			if (input.route.routeProvider === "xiaomi") {
-				const xiaomiKey =
-					process.env.XIAOMI_API_KEY ?? process.env.OPENAI_API_KEY;
-				return {
-					...(process.env.XIAOMI_API_KEY
-						? { XIAOMI_API_KEY: process.env.XIAOMI_API_KEY }
-						: {}),
-					...(xiaomiKey ? { OPENAI_API_KEY: xiaomiKey } : {}),
-				};
-			}
-			return process.env.OPENAI_API_KEY
-				? { OPENAI_API_KEY: process.env.OPENAI_API_KEY }
-				: {};
-		}
-		return {};
-	})();
+	}
 
 	const baseEnv: Record<string, string> = {
-		// Carry through essential PATH — always include hermes bin
-		PATH: ["/home/xiaomi/.local/bin", process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin"].filter(Boolean).join(":"),
-		HOME: process.env.HOME ?? "/home/xiaomi",
+		// Carry through essential PATH
+		PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
+		HOME: process.env.HOME ?? "/var/lib/agenthive",
 		// Agent-specific overrides from .env.agent
 		DATABASE_URL: input.agentEnv.DATABASE_URL ?? "",
 		AGENT_WORKTREE: input.worktree,
 		AGENT_PROVIDER: input.route.agentProvider,
 		AGENT_ROUTE_PROVIDER: input.route.routeProvider,
 		AGENT_API_SPEC: input.route.apiSpec,
+		// Spawn control: DB-driven flag tells the agent whether it may spawn subagents
+		AGENTHIVE_SPAWN_DELEGATE: String(input.route.spawnDelegate),
 		// Git identity isolation
 		GIT_CONFIG_GLOBAL: `${GITCONFIG_ROOT}/${input.worktree}.gitconfig`,
 		GIT_CONFIG_NOSYSTEM: "1",
@@ -179,16 +228,16 @@ type CommandSpec = {
 
 function buildClaudeArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
 	const argv = [
-		"claude",
+		route.cliPath ?? "claude",
 		"--print", // non-interactive: print response and exit
 		"--model",
 		route.modelName,
 		req.task,
 	];
 	const env: Record<string, string> = { ANTHROPIC_MODEL: route.modelName };
-	// Non-default base URL (e.g. Xiaomi anthropic-spec endpoint)
-	if (route.baseUrl !== "https://api.anthropic.com") {
-		env.ANTHROPIC_BASE_URL = route.baseUrl;
+	// DB controls base_url; set env var whenever baseUrlEnv is configured.
+	if (route.baseUrlEnv) {
+		env[route.baseUrlEnv] = route.baseUrl;
 	}
 	return { argv, env };
 }
@@ -197,10 +246,11 @@ function buildClaudeArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
  * Build argv + env for the Hermes CLI.
  * Used when agent_cli = 'hermes' — the native AgentHive agent framework.
  * Uses `hermes chat -q <prompt> -m <model> --provider <provider> --yolo`.
+ * cli_path in model_routes controls the binary location (no hardcoding here).
  */
 function buildHermesArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
 	const argv = [
-		"hermes",
+		route.cliPath ?? "hermes",
 		"chat",
 		"-q",
 		req.task,
@@ -211,6 +261,11 @@ function buildHermesArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
 		"--yolo",
 		"-Q", // quiet mode: no spinner/activity
 	];
+	// Migration 039: if spawn_toolsets is configured, restrict the agent's
+	// toolsets so it cannot spawn subagents via the built-in delegate_task.
+	if (route.spawnToolsets) {
+		argv.push("--toolsets", route.spawnToolsets);
+	}
 	return { argv, env: {} };
 }
 
@@ -221,7 +276,7 @@ function buildHermesArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
  */
 function buildCodexArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
 	const argv = [
-		"codex",
+		route.cliPath ?? "codex",
 		"exec",
 		"--dangerously-bypass-approvals-and-sandbox",
 		"--model",
@@ -229,9 +284,9 @@ function buildCodexArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
 		req.task,
 	];
 	const env: Record<string, string> = {};
-	// Allow overriding base URL if needed (e.g. enterprise proxy)
-	if (route.baseUrl !== "https://api.openai.com/v1") {
-		env.OPENAI_BASE_URL = route.baseUrl;
+	// DB controls base_url; set env var whenever baseUrlEnv is configured.
+	if (route.baseUrlEnv) {
+		env[route.baseUrlEnv] = route.baseUrl;
 	}
 	return { argv, env };
 }
@@ -246,18 +301,38 @@ function buildOpenAICompatArgs(
 	route: ModelRoute,
 ): CommandSpec {
 	const argv = ["llm", "--model", route.modelName, req.task];
-	const env: Record<string, string> = {
-		OPENAI_BASE_URL: route.baseUrl,
-	};
+	const env: Record<string, string> = {};
+	if (route.baseUrlEnv) {
+		env[route.baseUrlEnv] = route.baseUrl;
+	}
 	return { argv, env };
 }
 
 /**
  * Build argv + env for Google Gemini CLI.
  * Used when api_spec = 'google'.
+ * cli_path in model_routes controls the binary location (no hardcoding here).
  */
 function buildGeminiArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
-	const argv = ["gemini", "--model", route.modelName, "--prompt", req.task];
+	const argv = [route.cliPath ?? "gemini", "--model", route.modelName, "--prompt", req.task];
+	return { argv, env: {} };
+}
+
+/**
+ * Build argv + env for the GitHub Copilot CLI.
+ * Used when agent_cli = 'copilot' — auth is read from ~/.copilot/settings.json
+ * by the CLI itself; no API key env var is required.
+ * cli_path in model_routes controls the binary location (no hardcoding here).
+ */
+function buildCopilotArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
+	const argv = [
+		route.cliPath ?? "copilot",
+		"-p",
+		req.task,
+		"--yolo",
+		"--model",
+		route.modelName,
+	];
 	return { argv, env: {} };
 }
 
@@ -269,12 +344,14 @@ function buildArgsBySpec(req: SpawnRequest, route: ModelRoute): CommandSpec {
 			return buildCodexArgs(req, route);
 		case "claude":
 			return buildClaudeArgs(req, route);
+		case "copilot":
+			return buildCopilotArgs(req, route);
 		case "gemini":
 			return buildGeminiArgs(req, route);
 		case "hermes":
 			return buildHermesArgs(req, route);
 		default:
-			// copilot, llm, or any other → openai-compatible CLI
+			// llm or any other openai-compatible CLI
 			return buildOpenAICompatArgs(req, route);
 	}
 }
@@ -412,9 +489,24 @@ async function loadEnvAgent(
 }
 
 /**
- * Detect a worktree's true provider by reading its `.env.agent` (AGENT_PROVIDER).
- * Falls back to 'hermes' if the file doesn't exist — creds come from $HOME, not worktree.
- * Host policy is enforced by the caller, not here.
+ * Resolve the first enabled agent provider from model_routes.
+ * Used as a dynamic fallback when no worktree-level provider is configured.
+ */
+export async function resolveActiveRouteProvider(): Promise<AgentProvider | null> {
+	const { rows } = await query<{ agent_provider: string }>(
+		`SELECT agent_provider
+		 FROM roadmap.model_routes
+		 WHERE is_enabled = true
+		 ORDER BY priority ASC, COALESCE(cost_per_million_input, 0) ASC
+		 LIMIT 1`,
+	);
+	return (rows[0]?.agent_provider ?? null) as AgentProvider | null;
+}
+
+/**
+ * Detect a worktree's provider from its `.env.agent` (AGENT_PROVIDER key).
+ * Falls back to the first enabled route in model_routes rather than hardcoding
+ * a specific provider, so provider changes only require a DB update.
  */
 export async function detectProvider(worktreeName: string, worktreeRoot: string = WORKTREE_ROOT): Promise<AgentProvider> {
 	const envPath = join(worktreeRoot, worktreeName, ".env.agent");
@@ -428,13 +520,17 @@ export async function detectProvider(worktreeName: string, worktreeRoot: string 
 			const key = trimmed.slice(0, eq).trim();
 			if (key !== "AGENT_PROVIDER") continue;
 			const value = trimmed.slice(eq + 1).trim().replace(/^[\"']|[\"']$/g, "");
-			if (value) return value;
+			if (value) return value as AgentProvider;
 		}
 	} catch (err: any) {
 		if (err?.code !== "ENOENT") throw err;
-		// No .env.agent — fall back to hermes (creds from $HOME)
 	}
-	return "hermes";
+	// No .env.agent — resolve from DB so switching providers requires only a DB change
+	const active = await resolveActiveRouteProvider();
+	if (active) return active;
+	// Last resort: use the env var if set
+	const envProvider = process.env.AGENTHIVE_DEFAULT_PROVIDER as AgentProvider | undefined;
+	return envProvider ?? "hermes";
 }
 
 // ─── P235: Platform-Aware Model Constraints ──────────────────────────────────
@@ -461,12 +557,20 @@ async function resolveModelRoute(
 		route_provider: string;
 		agent_provider: string;
 		agent_cli: string;
+		cli_path: string | null;
 		api_spec: string;
 		base_url: string;
 		plan_type: string | null;
-		cost_per_1k_input: number | null;
 		cost_per_million_input: number | null;
 		cost_per_million_output: number | null;
+		api_key_env: string | null;
+		api_key_fallback_env: string | null;
+		base_url_env: string | null;
+		cli_api_key_env: string | null;
+		api_key_primary: string | null;
+		api_key_secondary: string | null;
+		spawn_toolsets: string | null;
+		spawn_delegate: boolean | null;
 	};
 
 	const perMillionPricing = await supportsPerMillionRoutePricing();
@@ -475,13 +579,15 @@ async function resolveModelRoute(
 		if (perMillionPricing) {
 		return query<RouteRow>(
 			`SELECT model_name, route_provider, agent_provider,
-               agent_cli, api_spec, base_url, plan_type,
-               cost_per_1k_input, cost_per_million_input, cost_per_million_output
+               agent_cli, cli_path, api_spec, base_url, plan_type,
+               cost_per_million_input, cost_per_million_output,
+               api_key_env, api_key_fallback_env, base_url_env, cli_api_key_env,
+               api_key_primary, api_key_secondary, spawn_toolsets, spawn_delegate
         FROM roadmap.model_routes
         WHERE model_name = $1
           AND agent_provider = $2
           AND is_enabled = true
-        ORDER BY priority ASC, COALESCE(cost_per_million_input, cost_per_1k_input * 1000) ASC
+        ORDER BY priority ASC, COALESCE(cost_per_million_input, 0) ASC
         LIMIT 1`,
 				[modelName, provider],
 			);
@@ -489,14 +595,16 @@ async function resolveModelRoute(
 
 		return query<RouteRow>(
 			`SELECT model_name, route_provider, agent_provider,
-              agent_cli, api_spec, base_url, plan_type,
-              cost_per_1k_input, NULL::numeric AS cost_per_million_input,
-              NULL::numeric AS cost_per_million_output
+              agent_cli, cli_path, api_spec, base_url, plan_type,
+              NULL::numeric AS cost_per_million_input,
+              NULL::numeric AS cost_per_million_output,
+              api_key_env, api_key_fallback_env, base_url_env, cli_api_key_env,
+              api_key_primary, api_key_secondary, spawn_toolsets, spawn_delegate
        FROM roadmap.model_routes
        WHERE model_name = $1
          AND agent_provider = $2
          AND is_enabled = true
-        ORDER BY priority ASC, cost_per_1k_input ASC
+        ORDER BY priority ASC
         LIMIT 1`,
 			[modelName, provider],
 		);
@@ -507,12 +615,21 @@ async function resolveModelRoute(
 		routeProvider: r.route_provider,
 		agentProvider: r.agent_provider,
 		agentCli: r.agent_cli ?? r.agent_provider,
+		cliPath: r.cli_path ?? null,
 		apiSpec: r.api_spec as ModelRoute["apiSpec"],
 		baseUrl: r.base_url,
 		planType: r.plan_type,
-		costPer1kInput: Number(r.cost_per_1k_input ?? 0),
+		costPer1kInput: Number(r.cost_per_million_input ? r.cost_per_million_input / 1000 : 0),
 		costPerMillionInput: Number(r.cost_per_million_input ?? 0),
 		costPerMillionOutput: Number(r.cost_per_million_output ?? 0),
+		apiKeyEnv: r.api_key_env,
+		apiKeyFallbackEnv: r.api_key_fallback_env,
+		baseUrlEnv: r.base_url_env,
+		cliApiKeyEnv: r.cli_api_key_env,
+		apiKeyPrimary: r.api_key_primary,
+		apiKeySecondary: r.api_key_secondary,
+		spawnToolsets: r.spawn_toolsets,
+		spawnDelegate: r.spawn_delegate ?? false,
 	});
 
 	if (hint) {
@@ -530,28 +647,37 @@ async function resolveModelRoute(
 		// Fall through to default resolution
 	}
 
-	// Default: cheapest enabled model for this provider
+	// Default: use DB is_default flag first, then cheapest enabled as fallback.
 	const { rows } = perMillionPricing
 		? await query<RouteRow>(
 				`SELECT model_name, route_provider, agent_provider,
-               agent_cli, api_spec, base_url, plan_type,
-               cost_per_1k_input, cost_per_million_input, cost_per_million_output
+               agent_cli, cli_path, api_spec, base_url, plan_type,
+               cost_per_million_input, cost_per_million_output,
+               api_key_env, api_key_fallback_env, base_url_env, cli_api_key_env,
+               api_key_primary, api_key_secondary, spawn_toolsets, spawn_delegate
         FROM roadmap.model_routes
         WHERE agent_provider = $1
           AND is_enabled = true
-        ORDER BY priority ASC, COALESCE(cost_per_million_input, cost_per_1k_input * 1000) ASC
+        ORDER BY
+          CASE WHEN is_default = true THEN 0 ELSE 1 END,
+          priority ASC,
+          COALESCE(cost_per_million_input, 0) ASC
         LIMIT 1`,
 				[provider],
 			)
 		: await query<RouteRow>(
 				`SELECT model_name, route_provider, agent_provider,
-              agent_cli, api_spec, base_url, plan_type,
-              cost_per_1k_input, NULL::numeric AS cost_per_million_input,
-              NULL::numeric AS cost_per_million_output
+              agent_cli, cli_path, api_spec, base_url, plan_type,
+              NULL::numeric AS cost_per_million_input,
+              NULL::numeric AS cost_per_million_output,
+              api_key_env, api_key_fallback_env, base_url_env, cli_api_key_env,
+              api_key_primary, api_key_secondary, spawn_toolsets, spawn_delegate
        FROM roadmap.model_routes
        WHERE agent_provider = $1
          AND is_enabled = true
-        ORDER BY priority ASC, cost_per_1k_input ASC
+        ORDER BY
+          CASE WHEN is_default = true THEN 0 ELSE 1 END,
+          priority ASC
         LIMIT 1`,
 				[provider],
 			);
@@ -562,31 +688,36 @@ async function resolveModelRoute(
 		return route;
 	}
 
+	// Host-level fallback (legacy, kept for transition)
 	const fallbackModel = await getHostDefaultModel();
 	if (fallbackModel) {
 		const { rows: defaultRows } = perMillionPricing
 			? await query<RouteRow>(
 					`SELECT model_name, route_provider, agent_provider,
-               agent_cli, api_spec, base_url, plan_type,
-               cost_per_1k_input, cost_per_million_input, cost_per_million_output
+               agent_cli, cli_path, api_spec, base_url, plan_type,
+               cost_per_million_input, cost_per_million_output,
+               api_key_env, api_key_fallback_env, base_url_env, cli_api_key_env,
+               api_key_primary, api_key_secondary, spawn_toolsets, spawn_delegate
         FROM roadmap.model_routes
         WHERE model_name = $1
           AND agent_provider = $2
           AND is_enabled = true
-        ORDER BY priority ASC, COALESCE(cost_per_million_input, cost_per_1k_input * 1000) ASC
+        ORDER BY priority ASC, COALESCE(cost_per_million_input, 0) ASC
         LIMIT 1`,
 					[fallbackModel, provider],
 				)
 			: await query<RouteRow>(
 					`SELECT model_name, route_provider, agent_provider,
-              agent_cli, api_spec, base_url, plan_type,
-              cost_per_1k_input, NULL::numeric AS cost_per_million_input,
-              NULL::numeric AS cost_per_million_output
+              agent_cli, cli_path, api_spec, base_url, plan_type,
+              NULL::numeric AS cost_per_million_input,
+              NULL::numeric AS cost_per_million_output,
+              api_key_env, api_key_fallback_env, base_url_env, cli_api_key_env,
+              api_key_primary, api_key_secondary, spawn_toolsets, spawn_delegate
        FROM roadmap.model_routes
        WHERE model_name = $1
          AND agent_provider = $2
          AND is_enabled = true
-        ORDER BY priority ASC, cost_per_1k_input ASC
+        ORDER BY priority ASC
         LIMIT 1`,
 					[fallbackModel, provider],
 				);
@@ -680,9 +811,11 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		model: modelHint,
 		timeoutMs = 300_000,
 		worktreeRoot = WORKTREE_ROOT,
+		provider: providerOverride,
 	} = req;
 
-	const provider = await detectProvider(worktree, worktreeRoot);
+	// P405: provider comes from model_routes via orchestrator, not hardcoded to worktree
+	const provider = providerOverride ?? await detectProvider(worktree, worktreeRoot);
 	// P235/M026: resolve full route (model + api_spec + base_url) from model_routes
 	const route = await resolveModelRoute(provider, modelHint);
 	// P245: enforce host-level spawn policy before launching any CLI subprocess.
@@ -693,11 +826,14 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	if (proposalId !== undefined) {
 		const contextPackage = await buildProposalContextPackage({
 			proposalId,
-			taskType: stage ?? "unknown",
+			taskType: stage,
 			agentIdentity: req.agentLabel ?? worktree,
 			maxTokens: 2000,
 		});
-		assembledTask = `${contextPackage}\n\n## Task\n${task}`;
+		const maturityHint = stage === "COMPLETE" || stage === "DEPLOYED"
+			? ""
+			: `\n\n## Maturity Advancement\nWhen you complete your task, call the MCP tool \`set_maturity\` (action: "set_maturity") to advance this proposal to maturity "mature". This triggers the implicit gate to transition the proposal to the next workflow state. Use the proposal ID ${proposalId}.`;
+		assembledTask = `${contextPackage}\n\n## Task\n${task}${maturityHint}`;
 	}
 
 	const spawnReq = { ...req, task: assembledTask };
@@ -719,15 +855,16 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	// Insert agent_runs row (status = running)
 	const { rows } = await query(
 		`INSERT INTO agent_runs
-       (proposal_id, display_id, agent_identity, stage, model_used, status, started_at)
-     VALUES ($1, $2, $3, $4, $5, 'running', now())
+       (proposal_id, display_id, agent_identity, stage, model_used, status, activity, started_at)
+     VALUES ($1, $2, $3, $4, $5, 'running', $6, now())
      RETURNING id`,
 		[
 			proposalId ?? null,
 			`wt:${worktree}`,
-			req.agentLabel ?? worktree,
-			stage ?? "unknown",
+			req.agentLabel ? `${req.agentLabel}@${worktree}` : worktree,
+			stage,
 			route.modelName,
+			req.activity ?? null,
 		],
 	);
 	const agentRunId = String(rows[0].id);
@@ -779,6 +916,10 @@ function runProcess(
 ): Promise<ProcessResult> {
 	return new Promise((resolve) => {
 		const [cmd, ...args] = argv;
+		console.error(`[AgentSpawner] Spawning: ${cmd} ${args.slice(0, 3).join(" ")}...`);
+		console.error(`[AgentSpawner] ANTHROPIC_AUTH_TOKEN in env: ${!!env.ANTHROPIC_AUTH_TOKEN}`);
+		console.error(`[AgentSpawner] ANTHROPIC_BASE_URL in env: ${env.ANTHROPIC_BASE_URL}`);
+		console.error(`[AgentSpawner] ANTHROPIC_MODEL in env: ${env.ANTHROPIC_MODEL}`);
 		const child: ChildProcess = spawn(cmd, args, {
 			cwd,
 			env,
@@ -834,7 +975,8 @@ export async function escalateOrNotify(
 	result: SpawnResult,
 	proposalId?: number,
 ): Promise<SpawnResult | null> {
-	const provider = await detectProvider(req.worktree, req.worktreeRoot ?? WORKTREE_ROOT);
+	// P405: use explicit provider if passed, otherwise fall back to worktree detection
+	const provider = req.provider ?? await detectProvider(req.worktree, req.worktreeRoot ?? WORKTREE_ROOT);
 
 	// P235/M026: build escalation ladder from model_routes for this agent_provider.
 	// Per model: pick best (lowest priority) route. Then sort models cheap → expensive.
@@ -842,7 +984,7 @@ export async function escalateOrNotify(
 		model_name: string;
 		cost: number;
 	}>(
-		`SELECT model_name, min(cost_per_1k_input) AS cost
+		`SELECT model_name, min(COALESCE(cost_per_million_input, 0)) AS cost
      FROM roadmap.model_routes
      WHERE agent_provider = $1 AND is_enabled = true
      GROUP BY model_name
