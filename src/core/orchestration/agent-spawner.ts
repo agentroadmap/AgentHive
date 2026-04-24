@@ -16,6 +16,7 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
@@ -69,6 +70,8 @@ export interface SpawnRequest {
 	worktreeRoot?: string;
 	/** Display label for context package (e.g. "worker-4620 (skeptic-alpha)") */
 	agentLabel?: string;
+	/** Activity description shown in feed (e.g. "enhancing DRAFT") */
+	activity?: string;
 }
 
 export interface SpawnResult {
@@ -101,10 +104,40 @@ export interface ModelRoute {
 	apiKeyEnv: string | null;
 	apiKeyFallbackEnv: string | null;
 	baseUrlEnv: string | null;
+	/** The env var the CLI actually reads for auth (e.g. ANTHROPIC_API_KEY for claude CLI) */
+	cliApiKeyEnv: string | null;
+	/** Actual API key values stored in DB (primary and secondary/fallback) */
+	apiKeyPrimary: string | null;
+	apiKeySecondary: string | null;
 	/** Comma-separated Hermes toolsets to grant; null = defaults */
 	spawnToolsets: string | null;
 	/** Whether agents spawned on this route may spawn their own subagents */
 	spawnDelegate: boolean;
+}
+
+// Lazy-loaded Claude settings.json env vars (read once, cached)
+let claudeSettingsEnv: Record<string, string> | undefined;
+
+function loadClaudeSettingsEnv(): Record<string, string> {
+	if (claudeSettingsEnv !== undefined) return claudeSettingsEnv;
+	claudeSettingsEnv = {};
+	try {
+		const settingsPath = join(process.env.HOME ?? "/root", ".claude", "settings.json");
+		console.error(`[AgentSpawner] Loading Claude settings from: ${settingsPath}`);
+		const raw = readFileSync(settingsPath, "utf8");
+		const parsed = JSON.parse(raw);
+		if (parsed?.env && typeof parsed.env === "object") {
+			for (const [k, v] of Object.entries(parsed.env)) {
+				if (typeof v === "string") claudeSettingsEnv[k] = v;
+			}
+		}
+		console.error(`[AgentSpawner] Loaded ${Object.keys(claudeSettingsEnv).length} env vars from settings.json`);
+		console.error(`[AgentSpawner] ANTHROPIC_AUTH_TOKEN present: ${!!claudeSettingsEnv.ANTHROPIC_AUTH_TOKEN}`);
+		console.error(`[AgentSpawner] ANTHROPIC_BASE_URL present: ${!!claudeSettingsEnv.ANTHROPIC_BASE_URL}`);
+	} catch (e) {
+		console.error(`[AgentSpawner] Failed to load settings.json:`, e);
+	}
+	return claudeSettingsEnv;
 }
 
 export function buildSpawnProcessEnv(input: {
@@ -113,23 +146,45 @@ export function buildSpawnProcessEnv(input: {
 	agentEnv: Record<string, string>;
 	extraEnv: Record<string, string>;
 }): Record<string, string> {
-	// Migration 039: credential env vars come from model_routes, not hardcoded rules.
+	// Credential resolution order:
+	// 1. DB-stored keys (api_key_primary / api_key_secondary) — highest priority
+	// 2. Env var named by api_key_env (from process.env or ~/.claude/settings.json)
+	// 3. Env var named by api_key_fallback_env (same resolution)
+	// The resolved key is set under cliApiKeyEnv (what the CLI actually reads).
+	const settingsEnv = loadClaudeSettingsEnv();
 	const routeCredentialEnv: Record<string, string> = {};
 
-	if (input.route.apiKeyEnv && process.env[input.route.apiKeyEnv]) {
-		routeCredentialEnv[input.route.apiKeyEnv] = process.env[input.route.apiKeyEnv]!;
+	// Resolve the API key value: DB primary > DB secondary > env var > settings.json
+	let resolvedKey: string | null = null;
+	if (input.route.apiKeyPrimary) {
+		resolvedKey = input.route.apiKeyPrimary;
+	} else if (input.route.apiKeyEnv) {
+		resolvedKey = process.env[input.route.apiKeyEnv] ?? settingsEnv[input.route.apiKeyEnv] ?? null;
 	}
-	if (
-		input.route.apiKeyFallbackEnv &&
-		process.env[input.route.apiKeyFallbackEnv]
-	) {
-		routeCredentialEnv[input.route.apiKeyFallbackEnv] =
-			process.env[input.route.apiKeyFallbackEnv]!;
+	let resolvedFallback: string | null = null;
+	if (input.route.apiKeySecondary) {
+		resolvedFallback = input.route.apiKeySecondary;
+	} else if (input.route.apiKeyFallbackEnv) {
+		resolvedFallback = process.env[input.route.apiKeyFallbackEnv] ?? settingsEnv[input.route.apiKeyFallbackEnv] ?? null;
 	}
-	// If the route specifies a primary key but it's missing, and a fallback exists
-	// that IS present, the fallback was already added above.  If neither is present,
-	// the spawner will fail later when the CLI tries to call the API — that is
-	// the correct behaviour (fail closed rather than run with no key).
+
+	// Set the key under the env var the CLI reads (cliApiKeyEnv), falling back to apiKeyEnv
+	const cliKeyEnv = input.route.cliApiKeyEnv ?? input.route.apiKeyEnv;
+	if (cliKeyEnv && resolvedKey) {
+		routeCredentialEnv[cliKeyEnv] = resolvedKey;
+	} else if (cliKeyEnv && resolvedFallback) {
+		routeCredentialEnv[cliKeyEnv] = resolvedFallback;
+	}
+
+	// Resolve base URL: route's DB value > process.env > settings.json
+	if (input.route.baseUrlEnv) {
+		if (input.route.baseUrl) {
+			routeCredentialEnv[input.route.baseUrlEnv] = input.route.baseUrl;
+		} else if (!process.env[input.route.baseUrlEnv]) {
+			const val = settingsEnv[input.route.baseUrlEnv];
+			if (val) routeCredentialEnv[input.route.baseUrlEnv] = val;
+		}
+	}
 
 	const baseEnv: Record<string, string> = {
 		// Carry through essential PATH
@@ -467,6 +522,9 @@ async function resolveModelRoute(
 		api_key_env: string | null;
 		api_key_fallback_env: string | null;
 		base_url_env: string | null;
+		cli_api_key_env: string | null;
+		api_key_primary: string | null;
+		api_key_secondary: string | null;
 		spawn_toolsets: string | null;
 		spawn_delegate: boolean | null;
 	};
@@ -479,7 +537,8 @@ async function resolveModelRoute(
 			`SELECT model_name, route_provider, agent_provider,
                agent_cli, api_spec, base_url, plan_type,
                cost_per_million_input, cost_per_million_output,
-               api_key_env, api_key_fallback_env, base_url_env, spawn_toolsets, spawn_delegate
+               api_key_env, api_key_fallback_env, base_url_env, cli_api_key_env,
+               api_key_primary, api_key_secondary, spawn_toolsets, spawn_delegate
         FROM roadmap.model_routes
         WHERE model_name = $1
           AND agent_provider = $2
@@ -495,7 +554,8 @@ async function resolveModelRoute(
               agent_cli, api_spec, base_url, plan_type,
               NULL::numeric AS cost_per_million_input,
               NULL::numeric AS cost_per_million_output,
-              api_key_env, api_key_fallback_env, base_url_env, spawn_toolsets, spawn_delegate
+              api_key_env, api_key_fallback_env, base_url_env, cli_api_key_env,
+              api_key_primary, api_key_secondary, spawn_toolsets, spawn_delegate
        FROM roadmap.model_routes
        WHERE model_name = $1
          AND agent_provider = $2
@@ -520,6 +580,9 @@ async function resolveModelRoute(
 		apiKeyEnv: r.api_key_env,
 		apiKeyFallbackEnv: r.api_key_fallback_env,
 		baseUrlEnv: r.base_url_env,
+		cliApiKeyEnv: r.cli_api_key_env,
+		apiKeyPrimary: r.api_key_primary,
+		apiKeySecondary: r.api_key_secondary,
 		spawnToolsets: r.spawn_toolsets,
 		spawnDelegate: r.spawn_delegate ?? false,
 	});
@@ -545,7 +608,8 @@ async function resolveModelRoute(
 				`SELECT model_name, route_provider, agent_provider,
                agent_cli, api_spec, base_url, plan_type,
                cost_per_million_input, cost_per_million_output,
-               api_key_env, api_key_fallback_env, base_url_env, spawn_toolsets, spawn_delegate
+               api_key_env, api_key_fallback_env, base_url_env, cli_api_key_env,
+               api_key_primary, api_key_secondary, spawn_toolsets, spawn_delegate
         FROM roadmap.model_routes
         WHERE agent_provider = $1
           AND is_enabled = true
@@ -561,7 +625,8 @@ async function resolveModelRoute(
               agent_cli, api_spec, base_url, plan_type,
               NULL::numeric AS cost_per_million_input,
               NULL::numeric AS cost_per_million_output,
-              api_key_env, api_key_fallback_env, base_url_env, spawn_toolsets, spawn_delegate
+              api_key_env, api_key_fallback_env, base_url_env, cli_api_key_env,
+              api_key_primary, api_key_secondary, spawn_toolsets, spawn_delegate
        FROM roadmap.model_routes
        WHERE agent_provider = $1
          AND is_enabled = true
@@ -586,7 +651,8 @@ async function resolveModelRoute(
 					`SELECT model_name, route_provider, agent_provider,
                agent_cli, api_spec, base_url, plan_type,
                cost_per_million_input, cost_per_million_output,
-               api_key_env, api_key_fallback_env, base_url_env, spawn_toolsets, spawn_delegate
+               api_key_env, api_key_fallback_env, base_url_env, cli_api_key_env,
+               api_key_primary, api_key_secondary, spawn_toolsets, spawn_delegate
         FROM roadmap.model_routes
         WHERE model_name = $1
           AND agent_provider = $2
@@ -600,7 +666,8 @@ async function resolveModelRoute(
               agent_cli, api_spec, base_url, plan_type,
               NULL::numeric AS cost_per_million_input,
               NULL::numeric AS cost_per_million_output,
-              api_key_env, api_key_fallback_env, base_url_env, spawn_toolsets, spawn_delegate
+              api_key_env, api_key_fallback_env, base_url_env, cli_api_key_env,
+              api_key_primary, api_key_secondary, spawn_toolsets, spawn_delegate
        FROM roadmap.model_routes
        WHERE model_name = $1
          AND agent_provider = $2
@@ -718,7 +785,10 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 			agentIdentity: req.agentLabel ?? worktree,
 			maxTokens: 2000,
 		});
-		assembledTask = `${contextPackage}\n\n## Task\n${task}`;
+		const maturityHint = stage === "COMPLETE" || stage === "DEPLOYED"
+			? ""
+			: `\n\n## Maturity Advancement\nWhen you complete your task, call the MCP tool \`set_maturity\` (action: "set_maturity") to advance this proposal to maturity "mature". This triggers the implicit gate to transition the proposal to the next workflow state. Use the proposal ID ${proposalId}.`;
+		assembledTask = `${contextPackage}\n\n## Task\n${task}${maturityHint}`;
 	}
 
 	const spawnReq = { ...req, task: assembledTask };
@@ -740,15 +810,16 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	// Insert agent_runs row (status = running)
 	const { rows } = await query(
 		`INSERT INTO agent_runs
-       (proposal_id, display_id, agent_identity, stage, model_used, status, started_at)
-     VALUES ($1, $2, $3, $4, $5, 'running', now())
+       (proposal_id, display_id, agent_identity, stage, model_used, status, activity, started_at)
+     VALUES ($1, $2, $3, $4, $5, 'running', $6, now())
      RETURNING id`,
 		[
 			proposalId ?? null,
 			`wt:${worktree}`,
-			req.agentLabel ?? worktree,
+			req.agentLabel ? `${req.agentLabel}@${worktree}` : worktree,
 			stage,
 			route.modelName,
+			req.activity ?? null,
 		],
 	);
 	const agentRunId = String(rows[0].id);
