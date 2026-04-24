@@ -70,11 +70,7 @@ export interface SpawnRequest {
 	worktreeRoot?: string;
 	/** Display label for context package (e.g. "worker-4620 (skeptic-alpha)") */
 	agentLabel?: string;
-<<<<<<< HEAD
 	/** Descriptive activity label (e.g. "researching", "enhancing", "reviewing") */
-=======
-	/** Activity description shown in feed (e.g. "enhancing DRAFT") */
->>>>>>> xiaomi/one
 	activity?: string;
 }
 
@@ -98,6 +94,8 @@ export interface ModelRoute {
 	routeProvider: string;
 	agentProvider: string;
 	agentCli: string;
+	/** Full path to the CLI binary from DB. NULL = rely on system PATH. */
+	cliPath: string | null;
 	apiSpec: string;
 	baseUrl: string;
 	planType: string | null;
@@ -230,7 +228,7 @@ type CommandSpec = {
 
 function buildClaudeArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
 	const argv = [
-		"claude",
+		route.cliPath ?? "claude",
 		"--print", // non-interactive: print response and exit
 		"--model",
 		route.modelName,
@@ -248,10 +246,11 @@ function buildClaudeArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
  * Build argv + env for the Hermes CLI.
  * Used when agent_cli = 'hermes' — the native AgentHive agent framework.
  * Uses `hermes chat -q <prompt> -m <model> --provider <provider> --yolo`.
+ * cli_path in model_routes controls the binary location (no hardcoding here).
  */
 function buildHermesArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
 	const argv = [
-		"/home/xiaomi/.local/bin/hermes",
+		route.cliPath ?? "hermes",
 		"chat",
 		"-q",
 		req.task,
@@ -277,7 +276,7 @@ function buildHermesArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
  */
 function buildCodexArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
 	const argv = [
-		"codex",
+		route.cliPath ?? "codex",
 		"exec",
 		"--dangerously-bypass-approvals-and-sandbox",
 		"--model",
@@ -312,9 +311,28 @@ function buildOpenAICompatArgs(
 /**
  * Build argv + env for Google Gemini CLI.
  * Used when api_spec = 'google'.
+ * cli_path in model_routes controls the binary location (no hardcoding here).
  */
 function buildGeminiArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
-	const argv = ["gemini", "--model", route.modelName, "--prompt", req.task];
+	const argv = [route.cliPath ?? "gemini", "--model", route.modelName, "--prompt", req.task];
+	return { argv, env: {} };
+}
+
+/**
+ * Build argv + env for the GitHub Copilot CLI.
+ * Used when agent_cli = 'copilot' — auth is read from ~/.copilot/settings.json
+ * by the CLI itself; no API key env var is required.
+ * cli_path in model_routes controls the binary location (no hardcoding here).
+ */
+function buildCopilotArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
+	const argv = [
+		route.cliPath ?? "copilot",
+		"-p",
+		req.task,
+		"--yolo",
+		"--model",
+		route.modelName,
+	];
 	return { argv, env: {} };
 }
 
@@ -326,12 +344,14 @@ function buildArgsBySpec(req: SpawnRequest, route: ModelRoute): CommandSpec {
 			return buildCodexArgs(req, route);
 		case "claude":
 			return buildClaudeArgs(req, route);
+		case "copilot":
+			return buildCopilotArgs(req, route);
 		case "gemini":
 			return buildGeminiArgs(req, route);
 		case "hermes":
 			return buildHermesArgs(req, route);
 		default:
-			// copilot, llm, or any other → openai-compatible CLI
+			// llm or any other openai-compatible CLI
 			return buildOpenAICompatArgs(req, route);
 	}
 }
@@ -518,6 +538,7 @@ async function resolveModelRoute(
 		route_provider: string;
 		agent_provider: string;
 		agent_cli: string;
+		cli_path: string | null;
 		api_spec: string;
 		base_url: string;
 		plan_type: string | null;
@@ -539,7 +560,7 @@ async function resolveModelRoute(
 		if (perMillionPricing) {
 		return query<RouteRow>(
 			`SELECT model_name, route_provider, agent_provider,
-               agent_cli, api_spec, base_url, plan_type,
+               agent_cli, cli_path, api_spec, base_url, plan_type,
                cost_per_million_input, cost_per_million_output,
                api_key_env, api_key_fallback_env, base_url_env, cli_api_key_env,
                api_key_primary, api_key_secondary, spawn_toolsets, spawn_delegate
@@ -555,7 +576,7 @@ async function resolveModelRoute(
 
 		return query<RouteRow>(
 			`SELECT model_name, route_provider, agent_provider,
-              agent_cli, api_spec, base_url, plan_type,
+              agent_cli, cli_path, api_spec, base_url, plan_type,
               NULL::numeric AS cost_per_million_input,
               NULL::numeric AS cost_per_million_output,
               api_key_env, api_key_fallback_env, base_url_env, cli_api_key_env,
@@ -575,6 +596,7 @@ async function resolveModelRoute(
 		routeProvider: r.route_provider,
 		agentProvider: r.agent_provider,
 		agentCli: r.agent_cli ?? r.agent_provider,
+		cliPath: r.cli_path ?? null,
 		apiSpec: r.api_spec as ModelRoute["apiSpec"],
 		baseUrl: r.base_url,
 		planType: r.plan_type,
@@ -610,7 +632,7 @@ async function resolveModelRoute(
 	const { rows } = perMillionPricing
 		? await query<RouteRow>(
 				`SELECT model_name, route_provider, agent_provider,
-               agent_cli, api_spec, base_url, plan_type,
+               agent_cli, cli_path, api_spec, base_url, plan_type,
                cost_per_million_input, cost_per_million_output,
                api_key_env, api_key_fallback_env, base_url_env, cli_api_key_env,
                api_key_primary, api_key_secondary, spawn_toolsets, spawn_delegate
@@ -626,7 +648,7 @@ async function resolveModelRoute(
 			)
 		: await query<RouteRow>(
 				`SELECT model_name, route_provider, agent_provider,
-              agent_cli, api_spec, base_url, plan_type,
+              agent_cli, cli_path, api_spec, base_url, plan_type,
               NULL::numeric AS cost_per_million_input,
               NULL::numeric AS cost_per_million_output,
               api_key_env, api_key_fallback_env, base_url_env, cli_api_key_env,
@@ -653,7 +675,7 @@ async function resolveModelRoute(
 		const { rows: defaultRows } = perMillionPricing
 			? await query<RouteRow>(
 					`SELECT model_name, route_provider, agent_provider,
-               agent_cli, api_spec, base_url, plan_type,
+               agent_cli, cli_path, api_spec, base_url, plan_type,
                cost_per_million_input, cost_per_million_output,
                api_key_env, api_key_fallback_env, base_url_env, cli_api_key_env,
                api_key_primary, api_key_secondary, spawn_toolsets, spawn_delegate
@@ -667,7 +689,7 @@ async function resolveModelRoute(
 				)
 			: await query<RouteRow>(
 					`SELECT model_name, route_provider, agent_provider,
-              agent_cli, api_spec, base_url, plan_type,
+              agent_cli, cli_path, api_spec, base_url, plan_type,
               NULL::numeric AS cost_per_million_input,
               NULL::numeric AS cost_per_million_output,
               api_key_env, api_key_fallback_env, base_url_env, cli_api_key_env,

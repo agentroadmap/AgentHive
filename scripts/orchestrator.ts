@@ -16,6 +16,7 @@ import { basename, join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { spawnAgent } from "../src/core/orchestration/agent-spawner.ts";
+import { postWorkOffer } from "../src/core/pipeline/post-work-offer.ts";
 import { reapStaleRows } from "../src/core/pipeline/reap-stale-rows.ts";
 import { getPool, query } from "../src/infra/postgres/pool.ts";
 import { mcpText } from "./mcp-result.ts";
@@ -26,6 +27,10 @@ const WORKTREE_ROOT =
 	process.env.AGENTHIVE_WORKTREE_ROOT ?? "/data/code/worktree";
 const DEFAULT_EXECUTOR_WORKTREE =
 	process.env.AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE;
+
+// When true, orchestrator posts work offers instead of direct-spawning.
+// Registered agency processes (e.g. copilot/agency-gary) claim and execute.
+const USE_OFFER_DISPATCH = process.env.AGENTHIVE_USE_OFFER_DISPATCH === "1";
 
 const logger = {
 	log: (...args: unknown[]) => console.log("[Orchestrator]", ...args),
@@ -738,8 +743,27 @@ async function dispatchAgent(
 			`${verb} cubic ${cubicId.substring(0, 8)} for ${agent} → P${proposalId} (${phase})`,
 		);
 
-		// Spawn the agent process — pick a worktree that isn't already running an agent
 		const taskPrompt = `${task}\n\nUse the MCP tools to do your work. Connect to http://127.0.0.1:6421/sse for proposal management.`;
+
+		if (USE_OFFER_DISPATCH) {
+			// Post a work offer — any registered agency (e.g. copilot/agency-gary)
+			// will race to claim it and spawn the appropriate CLI. The orchestrator
+			// does not need to know the binary path or credentials.
+			const squadName = `P${proposalId}-${phase}`;
+			const { dispatchId } = await postWorkOffer({
+				proposalId: Number(proposalId),
+				squadName,
+				role: agentLabel ?? agent,
+				task: taskPrompt,
+				stage,
+				phase,
+				timeoutMs: 600_000,
+			});
+			logger.log(`📬 Posted offer ${dispatchId} for ${agent} on P${proposalId} (${stage})`);
+			return cubicId;
+		}
+
+		// Direct spawn path (used when AGENTHIVE_USE_OFFER_DISPATCH is not set)
 		let worktree: string | null = null;
 		const tried = new Set<string>();
 		for (let attempt = 0; attempt < 5; attempt++) {
