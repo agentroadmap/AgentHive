@@ -1,5 +1,4 @@
 /**
-import { getMcpUrl } from "../src/shared/runtime/endpoints.js";
  * AgentHive Orchestrator — Event-driven agent dispatcher with dynamic agent deployment.
  *
  * When state machine calls:
@@ -25,6 +24,7 @@ import { reapStaleRows } from "../src/core/pipeline/reap-stale-rows.ts";
 import { getPool, query } from "../src/infra/postgres/pool.ts";
 import { loadStateNames } from "../src/core/workflow/state-names.ts";
 import { mcpText } from "./mcp-result.ts";
+import { getMcpUrl } from "../src/shared/runtime/endpoints.ts";
 
 const MCP_URL = getMcpUrl();
 const AGENTHIVE_HOST = process.env.AGENTHIVE_HOST ?? "default";
@@ -280,7 +280,7 @@ function scoreAgentForRole(agent: AgentCandidate, slot: RoleSlot): number {
 	}
 
 	// Capability match from skills jsonb (fallback signal)
-	if (agent.skills) {
+	if (Array.isArray(agent.skills)) {
 		for (const skill of agent.skills) {
 			if (slot.requiredCapabilities.includes(skill)) {
 				score += 5;
