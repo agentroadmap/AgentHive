@@ -888,6 +888,7 @@ export async function submitReview(args: {
 	verdict: string;
 	findings?: Record<string, any>;
 	notes?: string;
+	change_requirements?: string[];
 }): Promise<CallToolResult> {
 	try {
 		const proposalId = await resolveProposalId(args.proposal_id);
@@ -901,10 +902,13 @@ export async function submitReview(args: {
 
 		// Check for existing review (prevent double-voting)
 		const { rows: existing } = await query(
-			"SELECT verdict FROM roadmap_proposal.proposal_reviews WHERE proposal_id = $1 AND reviewer_identity = $2",
+			"SELECT id FROM roadmap_proposal.proposal_reviews WHERE proposal_id = $1 AND reviewer_identity = $2",
 			[proposalId, args.reviewer],
 		);
+
+		let reviewId: number;
 		if (existing.length) {
+			reviewId = existing[0].id;
 			await query(
 				`UPDATE roadmap_proposal.proposal_reviews SET verdict = $1, notes = $2, findings = $3, reviewed_at = NOW()
          WHERE proposal_id = $4 AND reviewer_identity = $5`,
@@ -916,10 +920,17 @@ export async function submitReview(args: {
 					args.reviewer,
 				],
 			);
+			// If updating and verdict is approve_with_changes, delete old requirements and insert new ones
+			if (args.verdict === "approve_with_changes") {
+				await query(
+					"DELETE FROM roadmap_proposal.post_gate_change_requirement WHERE review_id = $1",
+					[reviewId],
+				);
+			}
 		} else {
-			await query(
+			const { rows: inserted } = await query(
 				`INSERT INTO roadmap_proposal.proposal_reviews (proposal_id, reviewer_identity, verdict, notes, findings)
-         VALUES ($1, $2, $3, $4, $5)`,
+         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
 				[
 					proposalId,
 					args.reviewer,
@@ -928,6 +939,18 @@ export async function submitReview(args: {
 					args.findings ? JSON.stringify(args.findings) : null,
 				],
 			);
+			reviewId = inserted[0].id;
+		}
+
+		// If verdict is approve_with_changes, insert change requirements
+		if (args.verdict === "approve_with_changes" && args.change_requirements?.length) {
+			for (const requirement of args.change_requirements) {
+				await query(
+					`INSERT INTO roadmap_proposal.post_gate_change_requirement (review_id, requirement_text)
+           VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+					[reviewId, requirement],
+				);
+			}
 		}
 
 		// Emit review_submitted event for state feed visibility
@@ -941,6 +964,7 @@ export async function submitReview(args: {
 					verdict: args.verdict,
 					has_notes: !!args.notes,
 					has_findings: !!args.findings,
+					has_change_requirements: !!args.change_requirements?.length,
 					ts: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
 				}),
 			],
@@ -1004,6 +1028,25 @@ export async function listReviews(args: {
 		};
 	} catch (err) {
 		return errorResult("Failed to list reviews", err);
+	}
+}
+
+export async function getOpenChangeRequirements(
+	proposalId: number,
+): Promise<Array<{ review_id: number; requirement_text: string }>> {
+	try {
+		const { rows } = await query(
+			`SELECT pgcr.review_id, pgcr.requirement_text
+       FROM roadmap_proposal.post_gate_change_requirement pgcr
+       INNER JOIN roadmap_proposal.proposal_reviews pr ON pr.id = pgcr.review_id
+       WHERE pgcr.satisfied = FALSE AND pr.proposal_id = $1
+       ORDER BY pr.reviewed_at, pgcr.created_at`,
+			[proposalId],
+		);
+		return rows;
+	} catch (err) {
+		console.error("Error fetching open change requirements:", err);
+		return [];
 	}
 }
 
@@ -1268,9 +1311,14 @@ export class RfcWorkflowHandlers {
 					reviewer: { type: "string" },
 					verdict: {
 						type: "string",
-						enum: ["approve", "request_changes", "reject"],
+						enum: ["approve", "approve_with_changes", "request_changes", "send_back", "reject", "defer", "recuse"],
 					},
 					notes: { type: "string" },
+					change_requirements: {
+						type: "array",
+						items: { type: "string" },
+						description: "Array of change requirements when verdict is approve_with_changes",
+					},
 				},
 				required: ["proposal_id", "reviewer", "verdict"],
 			},

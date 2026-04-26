@@ -57,9 +57,18 @@ Thumbs.db
 /workflows/
 /scripts/tmp-*
 
-# Agent artifact directories that keep getting committed
+# Agent artifact directories that keep getting committed (P452 cleanup)
 docs/tmp/
+docs/ship/
+docs/ships/
+docs/shipping/
+docs/ship-reports/
 docs/test-write
+
+# Scratch/session directories: all content archived to tmp/ with date stamps
+# See docs/operations/scratch-pre-commit-hook.md for prevention strategy
+tmp/*
+!tmp/.gitkeep
 
 # Local-only generated files
 /config.yaml
