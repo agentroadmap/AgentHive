@@ -434,9 +434,12 @@ export class RoadmapServer {
 
 	// Transform API proposal to frontend WebSocketProposal format
 	private proposalToWsFormat(p: any): any {
+		const canonicalDisplayId = p.displayId || p.display_id || p.id || "";
+		const websocketId = p.id || p.display_id || "";
 		return {
-			id: p.id || `#${p.display_id || ""}`,
-			displayId: p.id || p.display_id || "",
+			id: canonicalDisplayId || `#${websocketId}`,
+			displayId: canonicalDisplayId,
+			websocketId,
 			parentId: p.parentProposalId || null,
 			proposalType: p.proposalType || p.type || "feature",
 			category: p.category || "",

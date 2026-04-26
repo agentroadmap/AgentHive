@@ -16,6 +16,7 @@ export interface WebSocketMessage {
 export interface Proposal {
 	id: string;
 	displayId: string;
+	websocketId?: string;
 	parentId: string | null;
 	proposalType: string;
 	category: string;

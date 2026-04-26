@@ -24,6 +24,12 @@ import SettingsPage from "./components/SettingsPage";
 import StatisticsPage from "./components/StatisticsPage";
 import TeamsPage from "./components/TeamsPage";
 import {
+	buildProposalSelectionAliases,
+	mergeProposalDetailState,
+	proposalMatchesSelection,
+	type ProposalWithSelectionAliases,
+} from "./lib/proposal-detail-selection";
+import {
 	useWebSocket,
 	type Agent as WebSocketAgent,
 	type Channel as WebSocketChannel,
@@ -76,6 +82,13 @@ function toSharedProposal(proposal: WebSocketProposal): Proposal {
 		parentProposalTitle: proposal.parentProposalTitle,
 		maturity: proposal.maturity,
 		rawContent: proposal.rawContent,
+		displayId: proposal.displayId,
+		websocketId: proposal.websocketId ?? proposal.id,
+		selectionAliases: buildProposalSelectionAliases(
+			proposal.displayId,
+			proposal.websocketId,
+			proposal.id,
+		),
 	} as Proposal & Record<string, unknown>;
 }
 
@@ -109,14 +122,27 @@ export default function App() {
 		() => channels.map(toSharedChannel),
 		[channels],
 	);
-	const [activeFeature, setActiveFeature] = useState<string | null>(null);
-	const activeProposal = useMemo(
-		() => sharedProposals.find((p) => p.id === activeFeature),
-		[activeFeature, sharedProposals],
+	const [activeProposal, setActiveProposal] = useState(
+		null as ProposalWithSelectionAliases | null,
 	);
+	const resolvedActiveProposal = useMemo(() => {
+		if (!activeProposal) return null;
+		const match = sharedProposals.find((proposal) =>
+			proposalMatchesSelection(
+				proposal as ProposalWithSelectionAliases,
+				activeProposal,
+			)
+		);
+		return match
+			? mergeProposalDetailState(
+					activeProposal,
+					match as ProposalWithSelectionAliases,
+				)
+			: activeProposal;
+	}, [activeProposal, sharedProposals]);
 
 	const handleProposalClick = (proposal: Proposal) => {
-		setActiveFeature(proposal.id);
+		setActiveProposal(proposal as ProposalWithSelectionAliases);
 	};
 
 	return (
@@ -182,11 +208,11 @@ export default function App() {
 							<NotFoundPage />
 						</Route>
 					</Switch>
-					{activeFeature && activeProposal && (
+					{resolvedActiveProposal && (
 						<ProposalDetailsModal
-							proposal={activeProposal}
+							proposal={resolvedActiveProposal}
 							isOpen={true}
-							onClose={() => setActiveFeature(null)}
+							onClose={() => setActiveProposal(null)}
 						/>
 					)}
 				</main>
