@@ -98,11 +98,28 @@ interface TemplateEntry {
 export class StateNamesRegistry {
 	private entries: Map<string, TemplateEntry> = new Map();
 	private notifySubscription: { client: PoolClient; unsubscribe: () => Promise<void> } | null = null;
+	// P522: serialize concurrent load()s on this instance. The internal NOTIFY
+	// handler calls load() directly (not the outer loadStateNames serializer),
+	// so two NOTIFYs arriving close together would each acquire a fresh
+	// PoolClient and the loser's client would be orphaned (still LISTENing,
+	// no longer referenced by notifySubscription). Sharing one in-flight
+	// Promise caps the leak at zero per reload wave.
+	private loadInFlight: Promise<void> | null = null;
 
 	/**
 	 * Load the registry from the database and set up NOTIFY listeners for live reloads.
 	 */
 	async load(pool: Pool): Promise<void> {
+		if (this.loadInFlight) {
+			return this.loadInFlight;
+		}
+		this.loadInFlight = this.loadInner(pool).finally(() => {
+			this.loadInFlight = null;
+		});
+		return this.loadInFlight;
+	}
+
+	private async loadInner(pool: Pool): Promise<void> {
 		// Fetch all workflow templates from the DB
 		const result: QueryResult<{ id: string; name: string; smdl_definition: unknown }> =
 			await pool.query(
