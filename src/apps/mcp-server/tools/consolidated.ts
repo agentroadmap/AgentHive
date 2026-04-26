@@ -164,6 +164,14 @@ const proposalRoutes: RouteMap = {
 	verify_ac: "verify_ac",
 	list_ac: "list_ac",
 	delete_ac: "delete_ac",
+	// P466 spawn-briefing actions — primary home is `mcp_agent`, but agents
+	// often guess `mcp_proposal` because the work is proposal-scoped. Alias
+	// here so misrouted calls succeed instead of bouncing on "Unknown action".
+	briefing_assemble: "briefing_assemble",
+	briefing_load: "briefing_load",
+	child_boot_check: "child_boot_check",
+	spawn_summary_emit: "spawn_summary_emit",
+	briefing_list: "briefing_list",
 };
 
 const messageRoutes: RouteMap = {

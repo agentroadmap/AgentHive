@@ -970,19 +970,30 @@ async function dispatchAgent(
 
 		const taskPrompt = briefingId
 			? `${task}\n\n` +
-			  `## Boot protocol\n` +
+			  `## Boot protocol — DO THIS FIRST\n` +
 			  `Your warm-boot briefing is at briefing_id=${briefingId}.\n` +
-			  `BEFORE doing anything else, call:\n` +
-			  `  mcp_proposal action="briefing_load" briefing_id="${briefingId}"\n` +
-			  `to retrieve your mission, success criteria (the AC list this proposal needs), allowed tools, MCP quirks catalog, and escalation channels.\n\n` +
+			  `Call this MCP action BEFORE any other work:\n` +
+			  `  mcp_agent  action="briefing_load"  briefing_id="${briefingId}"\n` +
+			  `(Note the tool is **mcp_agent**, not mcp_proposal. Briefings live in the agent domain.)\n` +
+			  `It returns mission, success_criteria (the proposal's pending AC list), allowed_tools, MCP quirks catalog, and escalation channels. If the call fails with 'Unknown action', try mcp_proposal as fallback — the same actions are aliased there.\n\n` +
 			  `## Working context\n` +
 			  `Proposal: P${proposalId}\n` +
+			  `Read the full projection with:\n` +
+			  `  mcp_proposal  action="detail"  id="P${proposalId}"\n` +
 			  `MCP endpoint: ${getMcpUrl()}\n\n` +
-			  `## Output contract\n` +
-			  `When you finish (success or failure), emit a spawn summary:\n` +
-			  `  mcp_proposal action="spawn_summary_emit" briefing_id="${briefingId}" outcome=<success|partial|failure|timeout|escalated> emitted_by="${agent}" summary="..." new_findings=[...]\n` +
-			  `For enhancement work: write design content via prop_update, ACs via add_criteria, dependencies via add_dependency. Do NOT just produce a prose summary — persist to the DB.\n` +
-			  `For gate work: emit ## Verdict / ## Failures / ## Remediation to stdout (orchestrator parses stdout into gate_decision_log).`
+			  `## Output contract — REQUIRED\n` +
+			  `For enhancement work (architect/researcher/developer):\n` +
+			  `  - persist substantive design content into proposal.design via:\n` +
+			  `      mcp_proposal  action="update"  id="P${proposalId}"  design="..."  motivation="..."  drawbacks="..."\n` +
+			  `  - add measurable ACs via:\n` +
+			  `      mcp_proposal  action="add_criteria"  proposal_id="P${proposalId}"  criteria=["...","..."]\n` +
+			  `  - record cross-proposal links via add_dependency.\n` +
+			  `  Do NOT just emit a prose summary — the DB is the source of truth. A run that writes nothing is a failed run.\n\n` +
+			  `For gate work (skeptic/reviewer): emit\n` +
+			  `  ## Verdict\n  hold|advance|reject\n  ## Failures\n  - (severity) [code] summary — evidence: file:line\n  ## Remediation\n  - action — fixes: codes\n  ## Next step\n  ...\n` +
+			  `to stdout. Orchestrator parses stdout into gate_decision_log.\n\n` +
+			  `When you finish, emit a spawn summary:\n` +
+			  `  mcp_agent  action="spawn_summary_emit"  briefing_id="${briefingId}"  outcome=<success|partial|failure|timeout|escalated>  emitted_by="${agent}"  summary="..."`
 			: `${task}\n\nUse the MCP tools to do your work. Connect to ${getMcpUrl()} for proposal management.`;
 
 		if (USE_OFFER_DISPATCH) {

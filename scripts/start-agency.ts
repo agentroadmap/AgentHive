@@ -71,10 +71,18 @@ const offerProvider = new OfferProvider({
 	connectListener: async () => getPool().connect(),
 	spawnFn: async (req) => {
 		const provider = await resolveProvider();
+		// pg returns bigint as a JS string; coerce so agent_runs.proposal_id
+		// gets populated.
+		const proposalIdNum =
+			req.proposalId === undefined || req.proposalId === null
+				? undefined
+				: typeof req.proposalId === "number"
+					? req.proposalId
+					: Number(req.proposalId);
 		return spawnAgent({
 			worktree: req.worktree,
 			task: req.task,
-			proposalId: typeof req.proposalId === "number" ? req.proposalId : undefined,
+			proposalId: Number.isFinite(proposalIdNum) ? proposalIdNum : undefined,
 			stage: req.stage,
 			model: req.model,
 			timeoutMs: req.timeoutMs,

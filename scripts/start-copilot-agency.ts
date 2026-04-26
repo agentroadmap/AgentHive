@@ -40,10 +40,19 @@ const offerProvider = new OfferProvider({
 		// Falls back to active DB route if identity prefix is not a known provider.
 		const identityPrefix = agentIdentity.split("/")[0];
 		const provider = identityPrefix || (await resolveActiveRouteProvider()) || "copilot";
+		// pg returns bigint as a JS string; coerce so agent_runs.proposal_id
+		// gets populated. Without this every dispatched run lands as NULL
+		// proposal_id and breaks downstream filters.
+		const proposalIdNum =
+			req.proposalId === undefined || req.proposalId === null
+				? undefined
+				: typeof req.proposalId === "number"
+					? req.proposalId
+					: Number(req.proposalId);
 		return spawnAgent({
 			worktree: req.worktree,
 			task: req.task,
-			proposalId: typeof req.proposalId === "number" ? req.proposalId : undefined,
+			proposalId: Number.isFinite(proposalIdNum) ? proposalIdNum : undefined,
 			stage: req.stage,
 			model: req.model,
 			timeoutMs: req.timeoutMs,
