@@ -1002,18 +1002,32 @@ export class ProposalHandlers {
 		agent?: string;
 	}): Promise<CallToolResult> {
 		try {
+			// P209: Enforce transition gate before moving proposal
+			const { enforceTransitionGate } = await import(
+				"../../../../proposal-engine/middleware/transition-gate.ts"
+			);
 			const proposalId = normalizeProposalId(args.id);
+			const agentId = args.agent || "agent";
+
+			try {
+				await enforceTransitionGate(proposalId, agentId, args.targetStatus);
+			} catch (gateError) {
+				// ForbiddenError: escalation already logged
+				throw new McpError(String(gateError), "FORBIDDEN");
+			}
+
 			const proposal = await this.core.moveProposal(
 				proposalId,
 				args.targetStatus,
 				args.targetIndex,
-				args.agent || "agent",
+				agentId,
 				true,
 			);
 			return await formatProposalCallResult(proposal, [
 				`Moved proposal ${proposalId} to ${args.targetStatus} at index ${args.targetIndex}`,
 			]);
 		} catch (error) {
+			if (error instanceof McpError) throw error;
 			throw new McpError(String(error), "OPERATION_FAILED");
 		}
 	}
