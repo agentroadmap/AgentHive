@@ -13,6 +13,7 @@ import * as pg from "../../../../postgres/proposal-storage-v2.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
 import { RfcStates, Maturity } from "../../../../core/workflow/state-names.ts";
+import { validateLease, formatValidationError } from "../../../../core/proposal/proposal-integrity.ts";
 
 type ProjectionFormat = "yaml_md" | "json";
 
@@ -380,6 +381,20 @@ export class PgProposalHandlers {
 				};
 			}
 
+			// AC-2: Require active lease before allowing transition (P224)
+			const author = args.author ?? "system";
+			const leaseResult = await validateLease(id, author);
+			if (!leaseResult.valid) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `🔒 ${formatValidationError(leaseResult.error!)}`,
+						},
+					],
+				};
+			}
+
 			// Gate transitions require decision notes
 			const gateTransitions: Record<string, string[]> = {
 				[RfcStates.DRAFT]: [RfcStates.REVIEW],
@@ -411,7 +426,7 @@ export class PgProposalHandlers {
 			const updated = await pg.transitionProposal(
 				id,
 				args.status,
-				args.author ?? "system",
+				author,
 				args.reason,
 				args.notes,
 			);
