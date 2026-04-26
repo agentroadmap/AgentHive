@@ -38,6 +38,16 @@ export interface Proposal {
 	acceptanceCriteriaItems?: Array<{ index: number; text: string; checked: boolean }>;
 	requiredCapabilities?: string[];
 	needsCapabilities?: string[];
+	liveActivity?: {
+		leaseHolder?: string;
+		gateDispatchAgent?: string;
+		gateDispatchRole?: string;
+		gateDispatchStatus?: string;
+		activeCubic?: string;
+		activeModel?: string;
+		heartbeatAgeSeconds?: number;
+		lastEventType?: string;
+	};
 	maturityLevel: number | null;
 	maturity?: string;
 	repositoryPath: string | null;

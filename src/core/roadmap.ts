@@ -928,38 +928,53 @@ export class Core {
 	}
 
 	private mapPgLabels(tags: ProposalRow["tags"]): string[] {
+		const metadataPrefixes = [
+			"labels:",
+			"directive:",
+			"domainid:",
+			"category:",
+			"references:",
+			"documentation:",
+			"proof:",
+			"needs_capabilities:",
+			"required_capabilities:",
+			"external_injections:",
+			"unlocks:",
+			"rationale:",
+			"implementationnotes:",
+			"auditnotes:",
+			"finalsummary:",
+			"scopesummary:",
+			"builder:",
+			"auditor:",
+			"rawcontent:",
+		];
+		const sanitizeLabels = (labels: string[]): string[] =>
+			labels
+				.map((label) => label.trim())
+				.filter(
+					(label) =>
+						label.length > 0 &&
+						!label.includes("\n") &&
+						!metadataPrefixes.some((prefix) =>
+							label.toLowerCase().startsWith(prefix),
+						),
+				);
+
 		if (!tags) {
 			return [];
 		}
 
 		const explicitLabels = this.getPgTagStringArray(tags, "labels");
 		if (explicitLabels) {
-			return explicitLabels;
+			return sanitizeLabels(explicitLabels);
 		}
 
 		if (Array.isArray(tags)) {
-			return tags.map((tag) => String(tag));
+			return sanitizeLabels(tags.map((tag) => String(tag)));
 		}
 
-		if (typeof tags === "object") {
-			return Object.entries(tags).flatMap(([key, value]) => {
-				if (Array.isArray(value)) {
-					return value.map((item) => String(item));
-				}
-
-				if (
-					value === null ||
-					value === undefined ||
-					typeof value === "object"
-				) {
-					return [];
-				}
-
-				return [`${key}:${String(value)}`];
-			});
-		}
-
-		return [String(tags)];
+		return sanitizeLabels([String(tags)]);
 	}
 
 	private mapPgMaturity(row: ProposalRow): Proposal["maturity"] | undefined {
@@ -3754,7 +3769,8 @@ export class Core {
 			!proposal.id.startsWith("DRAFT-")
 		) {
 			const requestedStatus = input.status?.trim().toLowerCase();
-			if (requestedStatus === "draft") {
+			const currentStatus = proposal.status?.trim().toLowerCase();
+			if (requestedStatus === "draft" && currentStatus !== "draft") {
 				throw new Error(
 					"Postgres-backed proposals cannot be demoted to filesystem drafts.",
 				);

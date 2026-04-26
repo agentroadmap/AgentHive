@@ -19,6 +19,9 @@ const MessageStream: React.FC = () => {
 	const [channels, setChannels] = useState<Channel[]>([]);
 	const [selectedChannel, setSelectedChannel] = useState<string>("");
 	const [messages, setMessages] = useState<Message[]>([]);
+	const [draft, setDraft] = useState("");
+	const [sending, setSending] = useState(false);
+	const [error, setError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [wsConnected, setWsConnected] = useState(false);
 	const wsRef = useRef<WebSocket | null>(null);
@@ -132,9 +135,29 @@ const MessageStream: React.FC = () => {
 		(e: React.ChangeEvent<HTMLSelectElement>) => {
 			setSelectedChannel(e.target.value);
 			setMessages([]);
+			setError(null);
 		},
 		[],
 	);
+
+	const selectedChannelMeta = channels.find((channel) => channel.name === selectedChannel);
+	const canSend = selectedChannelMeta?.type !== "private";
+
+	const handleSend = useCallback(async () => {
+		if (!selectedChannel || !draft.trim() || !canSend) return;
+		try {
+			setSending(true);
+			setError(null);
+			await apiClient.sendMessage(selectedChannel, draft.trim());
+			setDraft("");
+			const refreshed = await apiClient.fetchMessages(selectedChannel);
+			setMessages(refreshed);
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setSending(false);
+		}
+	}, [canSend, draft, selectedChannel]);
 
 	return (
 		<div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col h-full">
@@ -169,7 +192,8 @@ const MessageStream: React.FC = () => {
 					No channels available
 				</div>
 			) : (
-				<div className="divide-y divide-gray-100 dark:divide-gray-700 overflow-y-auto flex-1 p-4 space-y-3">
+				<div className="flex min-h-0 flex-1 flex-col">
+					<div className="divide-y divide-gray-100 dark:divide-gray-700 overflow-y-auto flex-1 p-4 space-y-3">
 					{messages.length === 0 ? (
 						<p className="text-sm text-gray-500 dark:text-gray-400">
 							No messages in #{selectedChannel}
@@ -193,6 +217,35 @@ const MessageStream: React.FC = () => {
 						))
 					)}
 					<div ref={messagesEndRef} />
+					</div>
+					<div className="border-t border-gray-200 p-3 dark:border-gray-700">
+						{error ? (
+							<div className="mb-2 text-xs text-red-600 dark:text-red-400">
+								{error}
+							</div>
+						) : null}
+						<div className="flex gap-2">
+							<textarea
+								value={draft}
+								onChange={(event) => setDraft(event.target.value)}
+								placeholder={
+									canSend
+										? `Send to #${selectedChannel}`
+										: "Private channel sending not wired yet"
+								}
+								disabled={!canSend || sending}
+								className="min-h-[44px] flex-1 resize-none rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+							/>
+							<button
+								type="button"
+								onClick={() => void handleSend()}
+								disabled={!canSend || sending || !draft.trim()}
+								className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+							>
+								{sending ? "Sending..." : "Send"}
+							</button>
+						</div>
+					</div>
 				</div>
 			)}
 		</div>

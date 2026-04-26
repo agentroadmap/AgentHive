@@ -36,17 +36,34 @@ const Board: React.FC<BoardProps> = ({
 		Record<string, boolean>
 	>({});
 	const [hideComplete, setHideComplete] = useState(false);
+	const [hideObsolete, setHideObsolete] = useState(true);
+
+	const visibleProposals = useMemo(
+		() =>
+			hideObsolete
+				? proposals.filter(
+						(proposal) => (proposal.maturity ?? "").toLowerCase() !== "obsolete",
+					)
+				: proposals,
+		[hideObsolete, proposals],
+	);
 
 	// Build lane definitions
 	const lanes = useMemo(
-		() => buildLanes(laneMode, proposals, proposalTypes, domains),
-		[laneMode, proposals, proposalTypes, domains],
+		() => buildLanes(laneMode, visibleProposals, proposalTypes, domains),
+		[laneMode, visibleProposals, proposalTypes, domains],
 	);
 
 	// Group proposals by lane and status
 	const proposalsByLane = useMemo(
-		() => groupProposalsByLaneAndStatus(laneMode, lanes, statuses, proposals),
-		[laneMode, lanes, statuses, proposals],
+		() =>
+			groupProposalsByLaneAndStatus(
+				laneMode,
+				lanes,
+				statuses,
+				visibleProposals,
+			),
+		[laneMode, lanes, statuses, visibleProposals],
 	);
 
 	// Filtered proposals (hide complete if toggled)
@@ -85,8 +102,16 @@ const Board: React.FC<BoardProps> = ({
 					/>
 					Hide Complete
 				</label>
+				<label className="flex items-center gap-2 text-sm text-gray-600">
+					<input
+						type="checkbox"
+						checked={hideObsolete}
+						onChange={(e) => setHideObsolete(e.target.checked)}
+					/>
+					Hide Obsolete
+				</label>
 				<div className="ml-auto text-sm text-gray-500">
-					{proposals.length} proposals across {lanes.length} lane
+					{visibleProposals.length} proposals across {lanes.length} lane
 					{lanes.length !== 1 ? "s" : ""}
 				</div>
 			</div>
@@ -104,7 +129,10 @@ const Board: React.FC<BoardProps> = ({
 										{status}
 									</h3>
 									<span className="text-xs text-gray-500 bg-white px-2 py-0.5 rounded-full">
-										{proposals.filter((p) => p.status === status).length}
+										{
+											visibleProposals.filter((p) => p.status === status)
+												.length
+										}
 									</span>
 								</div>
 							</div>
@@ -143,7 +171,9 @@ const Board: React.FC<BoardProps> = ({
 															{proposal.priority}
 														</span>
 													</div>
-													<h4 className="text-sm font-medium text-gray-800 line-clamp-2">
+													<h4
+														className={`text-sm font-medium line-clamp-2 ${getMaturityTitleColor(proposal.maturity)}`}
+													>
 														{proposal.title}
 													</h4>
 													<div className="mt-2 flex items-center gap-2 text-xs text-gray-400">
@@ -204,6 +234,21 @@ function getPriorityColor(priority: string): string {
 			return "bg-green-100 text-green-700";
 		default:
 			return "bg-gray-100 text-gray-700";
+	}
+}
+
+function getMaturityTitleColor(maturity?: string | null): string {
+	switch ((maturity ?? "").toLowerCase()) {
+		case "mature":
+			return "text-emerald-700 dark:text-emerald-300";
+		case "active":
+			return "text-blue-700 dark:text-blue-300";
+		case "obsolete":
+			return "text-gray-400 dark:text-gray-500";
+		case "new":
+			return "text-amber-700 dark:text-amber-300";
+		default:
+			return "text-gray-800 dark:text-gray-100";
 	}
 }
 
