@@ -7,6 +7,7 @@
  */
 
 import { query } from "../../infra/postgres/pool.ts";
+import { Maturity } from "../workflow/state-names.ts";
 import type { ToolAgent, ToolTask, ToolResult } from "./registry.ts";
 
 interface StateMonitorConfig {
@@ -74,16 +75,16 @@ export class StateMonitor implements ToolAgent {
 		if (this.autoAdvance) {
 			await query(
 				`UPDATE roadmap.proposal
-				    SET maturity = 'mature',
+				    SET maturity = $2,
 				        modified_at = now()
 				  WHERE id = $1
-				    AND maturity != 'mature'`,
-				[proposalId],
+				    AND maturity != $2`,
+				[proposalId, Maturity.MATURE],
 			);
 
 			return {
 				success: true,
-				output: `Proposal ${proposalId}: ${passed}/${total} ACs pass — maturity set to 'mature'`,
+				output: `Proposal ${proposalId}: ${passed}/${total} ACs pass — maturity set to '${Maturity.MATURE}'`,
 				tokensUsed: 0,
 			};
 		}
