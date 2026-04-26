@@ -227,6 +227,10 @@ const opsRoutes: RouteMap = {
 	federation_remove_host: "federation_remove_host",
 	set_project: "project_set",
 	list_projects: "project_registry_list",
+	create_project: "project_create_v2",
+	project_route_list: "project_route_list",
+	project_capability_list: "project_capability_list",
+	project_cap_list: "project_cap_list",
 };
 
 const projectRoutes: RouteMap = {
