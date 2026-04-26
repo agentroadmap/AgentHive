@@ -741,18 +741,20 @@ async function dispatchAgent(
 
 	try {
 		const selectedWorktree = await selectExecutorWorktree(agent);
-		const selectedWorktreePath = join(WORKTREE_ROOT, selectedWorktree);
 
 		await client.connect(transport);
 
 		// Single MCP call replaces: cubic_list → cubic_recycle → cubic_focus
+		// Pass the worktree *basename* — the MCP-side safeWorktreePath() normalizes
+		// it as an agent-id and joins with WORKTREE_ROOT itself. Passing a full
+		// absolute path triggers normalizeAgentId rejection ("path traversal").
 		const acquired = await client.callTool({
 			name: "cubic_acquire",
 			arguments: {
 				agent_identity: agent,
 				proposal_id: Number(proposalId),
 				phase,
-				worktree_path: selectedWorktreePath,
+				worktree_path: selectedWorktree,
 			},
 		});
 		const data = safeParseMcpResponse(mcpText(acquired));
