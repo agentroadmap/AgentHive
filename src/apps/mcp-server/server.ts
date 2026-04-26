@@ -88,6 +88,7 @@ type SseTransportBody = Parameters<SSEServerTransport["handlePostMessage"]>[2];
 
 export class McpServer extends Core {
 	private readonly server: Server;
+	private readonly instructions: string;
 	private transport?: StdioServerTransport;
 	private stopping = false;
 	private consolidatedToolSurface = false;
@@ -99,6 +100,7 @@ export class McpServer extends Core {
 	constructor(projectRoot: string, instructions: string) {
 		super(projectRoot, { enableWatchers: true });
 
+		this.instructions = instructions;
 		this.server = new Server(
 			{
 				name: APP_NAME,
@@ -336,26 +338,77 @@ export class McpServer extends Core {
 	}
 
 	/**
+	 * Create a fresh SDK Server whose request handlers all delegate to this
+	 * shared McpServer instance.
+	 *
+	 * The MCP SDK Protocol is strictly one-to-one with a transport: calling
+	 * server.connect() a second time throws "Already connected to a transport".
+	 * SSE and StreamableHTTP sessions therefore each need their own SDK Server,
+	 * but they can share this McpServer's tool/resource/prompt registries.
+	 * Using this factory, createMcpServer() is called only once at process
+	 * startup (no repeated DB queries or NOTIFY listener setup).
+	 */
+	private createBoundSessionServer(): Server {
+		const sessionServer = new Server(
+			{ name: APP_NAME, version: APP_VERSION },
+			{
+				capabilities: {
+					tools: { listChanged: true },
+					resources: { listChanged: true },
+					prompts: { listChanged: true },
+				},
+				instructions: this.instructions,
+			},
+		);
+		sessionServer.setRequestHandler(ListToolsRequestSchema, async () =>
+			this.listTools(),
+		);
+		sessionServer.setRequestHandler(CallToolRequestSchema, async (request) =>
+			this.callTool(request),
+		);
+		sessionServer.setRequestHandler(ListResourcesRequestSchema, async () =>
+			this.listResources(),
+		);
+		sessionServer.setRequestHandler(
+			ListResourceTemplatesRequestSchema,
+			async () => this.listResourceTemplates(),
+		);
+		sessionServer.setRequestHandler(
+			ReadResourceRequestSchema,
+			async (request) => this.readResource(request),
+		);
+		sessionServer.setRequestHandler(ListPromptsRequestSchema, async () =>
+			this.listPrompts(),
+		);
+		sessionServer.setRequestHandler(GetPromptRequestSchema, async (request) =>
+			this.getPrompt(request),
+		);
+		return sessionServer;
+	}
+
+	/**
 	 * Create a new SSE transport for a connection.
+	 * Uses a per-session SDK Server that delegates handlers to this shared instance.
 	 */
 	public async createSseTransport(
 		endpoint: string,
 		res: SseTransportResponse,
 	): Promise<SSEServerTransport> {
 		const transport = new SSEServerTransport(endpoint, res);
-		await this.server.connect(transport);
+		await this.createBoundSessionServer().connect(transport);
 		return transport;
 	}
 
 	/**
 	 * Create a new StreamableHTTP transport for a connection.
 	 * Compatible with hermes MCP client and other StreamableHTTP clients.
+	 * Uses a per-session SDK Server that delegates handlers to this shared instance.
 	 */
 	public async createStreamableHttpTransport(): Promise<StreamableHTTPServerTransport> {
 		const transport = new StreamableHTTPServerTransport({
 			sessionIdGenerator: undefined, // stateless
 		});
-		await this.server.connect(transport);
+		await this.createBoundSessionServer().connect(transport);
 		return transport;
 	}
 

@@ -23,14 +23,16 @@ if (!handleDirectMcpRequest) {
 }
 
 const app = express();
-// The direct (POST /mcp) endpoint reuses one server for the lifetime of the process.
-// SSE and StreamableHTTP create per-session servers because the MCP SDK Protocol
-// is one-to-one with a transport — sharing breaks with "Already connected to a
-// transport". Pool leaks from per-session createMcpServer() are mitigated by
-// state-names.ts disposing the previous global registry on each loadStateNames().
-const directMcpServer = await createMcpServer(projectRoot);
 
-// Session tracking: sessionId → { server, transport }
+// Single shared MCP server for the lifetime of the process.
+// createSseTransport() and createStreamableHttpTransport() create per-session
+// SDK Server instances (required by the SDK's one-transport-per-Protocol
+// constraint) but those session servers delegate all request handling back to
+// this shared instance, so createMcpServer() — and its DB queries and NOTIFY
+// listener setup — runs exactly once.
+const sharedServer = await createMcpServer(projectRoot);
+
+// Session tracking: sessionId → SSEServerTransport
 const sessions = new Map();
 
 // Health check endpoint
@@ -49,7 +51,7 @@ const jsonBodyParser = express.json({ limit: "4mb" });
 
 app.post(["/mcp", "/api/mcp"], jsonBodyParser, async (req, res) => {
 	try {
-		const response = await handleDirectMcpRequest(directMcpServer, req.body);
+		const response = await handleDirectMcpRequest(sharedServer, req.body);
 		res.status(response.status).json(response.body);
 	} catch (err) {
 		console.error("[MCP] Direct MCP request failed:", String(err));
@@ -68,11 +70,7 @@ app.all(
 	jsonBodyParser,
 	async (req, res) => {
 		try {
-			// SDK requires fresh Server per StreamableHTTP request (Protocol is
-			// one-to-one with transport). Pool leak is contained by state-names
-			// dispose-on-reload; see P522.
-			const server = await createMcpServer(projectRoot);
-			const transport = await server.createStreamableHttpTransport();
+			const transport = await sharedServer.createStreamableHttpTransport();
 			await transport.handleRequest(req, res, req.body);
 		} catch (err) {
 			console.error("[MCP] StreamableHTTP request failed:", err.message);
@@ -90,14 +88,10 @@ app.all(
 app.get("/sse", async (_req, res) => {
 	console.log("[MCP] New SSE connection request");
 	try {
-		// SDK requires fresh Server per SSE session (Protocol is one-to-one with
-		// transport). Pool leak from this is contained by state-names registry
-		// disposing the prior global on each load; see P522.
-		const server = await createMcpServer(projectRoot);
-		const sseTransport = await server.createSseTransport("/messages", res);
+		const sseTransport = await sharedServer.createSseTransport("/messages", res);
 
 		const sessionId = sseTransport.sessionId;
-		sessions.set(sessionId, { server, transport: sseTransport });
+		sessions.set(sessionId, sseTransport);
 		console.log(
 			`[MCP] SSE session created: ${sessionId}, active sessions: ${sessions.size}`,
 		);
@@ -105,7 +99,6 @@ app.get("/sse", async (_req, res) => {
 		res.on("close", () => {
 			console.log(`[MCP] SSE connection closed: ${sessionId}`);
 			sessions.delete(sessionId);
-			server.stop().catch(() => {});
 			console.log(`[MCP] Active sessions: ${sessions.size}`);
 		});
 	} catch (err) {
@@ -118,22 +111,15 @@ app.get("/sse", async (_req, res) => {
 
 app.post("/messages", express.json(), async (req, res) => {
 	const sessionId = req.query.sessionId;
-	const session = sessions.get(sessionId);
+	const transport = sessions.get(sessionId);
 
-	if (!session) {
+	if (!transport) {
 		res.status(400).send(`No active SSE connection for session: ${sessionId}`);
 		return;
 	}
 
 	try {
-		// Pass req, res, AND the pre-parsed body (req.body from express.json())
-		// The SDK needs the parsed body because it won't try to re-read the stream
-		await session.server.handleSseMessage(
-			session.transport,
-			req,
-			res,
-			req.body,
-		);
+		await sharedServer.handleSseMessage(transport, req, res, req.body);
 	} catch (err) {
 		console.error("[MCP] Error handling message:", err.message);
 		if (!res.writableEnded) {
