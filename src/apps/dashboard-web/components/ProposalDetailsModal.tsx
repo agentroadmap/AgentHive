@@ -5,7 +5,6 @@ import type {
 	Directive,
 	Proposal,
 } from "../../../shared/types";
-import { useTheme } from "../contexts/ThemeContext";
 import { apiClient } from "../lib/api";
 import { formatStoredUtcDateForDisplay } from "../utils/date-display";
 import AcceptanceCriteriaEditor from "./AcceptanceCriteriaEditor";
@@ -90,6 +89,12 @@ const maturityBadgeClass = (maturity?: string) => {
 	}
 };
 
+const getColorMode = (): "light" | "dark" =>
+	typeof document !== "undefined" &&
+	document.documentElement.classList.contains("dark")
+		? "dark"
+		: "light";
+
 export const ProposalDetailsModal: React.FC<Props> = ({
 	proposal,
 	isOpen,
@@ -103,7 +108,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 	archivedDirectiveEntities,
 	isDraftMode,
 }) => {
-	const { theme } = useTheme();
+	const theme = getColorMode();
 	const isCreateMode = !proposal;
 	const isFromOtherBranch = Boolean(proposal?.branch);
 	const proposalId = proposal?.id ?? "";

@@ -2,12 +2,17 @@ import MDEditor from "@uiw/react-md-editor";
 import { memo, useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import type { Document } from "../../../shared/types";
-import { useTheme } from "../contexts/ThemeContext";
 import { apiClient } from "../lib/api";
 import { sanitizeUrlTitle } from "../utils/urlHelpers";
 import ErrorBoundary from "./ErrorBoundary";
 import MermaidMarkdown from "./MermaidMarkdown";
 import { SuccessToast } from "./SuccessToast";
+
+const getColorMode = (): "light" | "dark" =>
+	typeof document !== "undefined" &&
+	document.documentElement.classList.contains("dark")
+		? "dark"
+		: "light";
 
 // Custom MDEditor wrapper for proper height handling
 const MarkdownEditor = memo(function MarkdownEditor({
@@ -20,7 +25,7 @@ const MarkdownEditor = memo(function MarkdownEditor({
 	isEditing: boolean;
 	isReadonly?: boolean;
 }) {
-	const { theme } = useTheme();
+	const theme = getColorMode();
 	if (!isEditing) {
 		// Preview mode - just show the rendered markdown without editor UI
 		return (
