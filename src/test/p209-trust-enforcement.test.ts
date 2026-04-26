@@ -60,8 +60,9 @@ describe("P209: Trust Enforcement", () => {
 
 		it("blocks restricted agents from sending task messages", async () => {
 			// Assume unknown-agent is restricted by default
+			const testAgent = `unknown-agent-single-${Date.now()}`;
 			const result = await enforceMessageGate({
-				from_agent: "unknown-agent-1",
+				from_agent: testAgent,
 				to_agent: "some-target",
 				message_type: "task",
 				channel: undefined,
@@ -72,6 +73,7 @@ describe("P209: Trust Enforcement", () => {
 				false,
 				"restricted agent should not be allowed to send task messages",
 			);
+			// A single denial won't escalate
 			assert.strictEqual(
 				result.escalationRequired,
 				false,
