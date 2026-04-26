@@ -901,6 +901,22 @@ export async function submitReview(args: {
 			};
 		}
 
+		// P521: Auto-register reviewer on first use to prevent opaque FK errors
+		// from blocking specialist subagents who haven't been pre-registered.
+		// Slug-format guard prevents arbitrary identifier injection.
+		if (!/^[a-z][a-z0-9-]*[a-z0-9]$/.test(args.reviewer)) {
+			return errorResult(
+				`Invalid reviewer identity '${args.reviewer}'. Must match ^[a-z][a-z0-9-]*[a-z0-9]$ (lowercase, hyphens, 2+ chars).`,
+				"reviewer_format_invalid",
+			);
+		}
+		await query(
+			`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, role, skills, status)
+			 VALUES ($1, 'specialist', 'reviewer', '["review"]'::jsonb, 'active')
+			 ON CONFLICT (agent_identity) DO NOTHING`,
+			[args.reviewer],
+		);
+
 		// Check for existing review (prevent double-voting)
 		const { rows: existing } = await query(
 			"SELECT id FROM roadmap_proposal.proposal_reviews WHERE proposal_id = $1 AND reviewer_identity = $2",
