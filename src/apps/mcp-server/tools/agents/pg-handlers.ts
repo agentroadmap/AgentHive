@@ -3,9 +3,15 @@
  *
  * Workforce management via the `agent_registry`, `team`, and `team_member` tables.
  * All handler methods catch errors and return MCP text responses instead of throwing.
+ * P462: Added agent identity sanitization to prevent collisions and path traversal.
  */
 
 import { query } from "../../../../postgres/pool.ts";
+import {
+	normalizeAgentId,
+	detectCollision,
+	AgentIdInvalidError,
+} from "../../../../shared/identity/sanitize-agent-id.ts";
 import type { CallToolResult } from "../../types.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
@@ -150,13 +156,25 @@ export class PgAgentHandlers {
 		skills?: string;
 	}): Promise<CallToolResult> {
 		try {
+			// P462: Sanitize and validate agent identity
+			const normalizedIdentity = normalizeAgentId(args.identity);
+
+			// P462: Check for collisions with existing identities
+			const collision = await detectCollision(args.identity);
+			if (collision && collision !== args.identity) {
+				return errorResult(
+					"Agent identity collision",
+					`"${args.identity}" normalizes to same as "${collision}"`,
+				);
+			}
+
 			const { rows } = await query(
 				`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, role, skills)
          VALUES ($1, $2, $3, $4::jsonb) ON CONFLICT (agent_identity)
          DO UPDATE SET agent_type = EXCLUDED.agent_type, role = EXCLUDED.role, skills = EXCLUDED.skills
          RETURNING agent_identity, role, status`,
 				[
-					args.identity,
+					normalizedIdentity,
 					args.agent_type || null,
 					args.role || null,
 					args.skills
@@ -177,6 +195,9 @@ export class PgAgentHandlers {
 				],
 			};
 		} catch (err) {
+			if (err instanceof AgentIdInvalidError) {
+				return errorResult("Invalid agent identity", err);
+			}
 			return errorResult("Failed to register agent", err);
 		}
 	}

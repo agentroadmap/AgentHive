@@ -5,20 +5,20 @@
  * Handles cubic lifecycle: create, focus (lock), transition, recycle, list.
  *
  * P196: Added activity tracking (cubic_state updates) and lifecycle stats.
+ * P462: Added agent identity sanitization to prevent path traversal and collisions.
  */
 
 import { query } from "../../../../postgres/pool.ts";
 import { CubicIdleDetector } from "../../../../core/orchestration/cubic-idle-detector.ts";
+import {
+	safeWorktreePath,
+	AgentIdInvalidError,
+} from "../../../../shared/identity/sanitize-agent-id.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
 
 const WORKTREE_ROOT =
 	process.env.AGENTHIVE_WORKTREE_ROOT ?? "/data/code/worktree";
-
-function worktreePathFor(name: string): string {
-	const safeName = name.trim().replace(/[^A-Za-z0-9._-]+/g, "-");
-	return `${WORKTREE_ROOT}/${safeName}`;
-}
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
@@ -42,6 +42,9 @@ export class PgCubicHandlers {
 		proposals?: string[];
 	}): Promise<CallToolResult> {
 		try {
+			// P462: Sanitize cubic name to safe worktree path
+			const worktreePath = safeWorktreePath(WORKTREE_ROOT, args.name);
+
 			const { rows } = await query<{
 				cubic_id: string;
 			}>(
@@ -49,7 +52,7 @@ export class PgCubicHandlers {
 				 VALUES ($1, $2)
 				 RETURNING cubic_id`,
 				[
-					worktreePathFor(args.name),
+					worktreePath,
 					JSON.stringify({
 						name: args.name,
 						agents: args.agents ?? ["coder", "reviewer"],
@@ -83,6 +86,9 @@ export class PgCubicHandlers {
 				],
 			};
 		} catch (err) {
+			if (err instanceof AgentIdInvalidError) {
+				return errorResult("Invalid cubic name", err);
+			}
 			return errorResult("Failed to create cubic", err);
 		}
 	}
@@ -212,6 +218,12 @@ export class PgCubicHandlers {
 		phase?: string;
 	}): Promise<CallToolResult> {
 		try {
+			// P462: Validate agent identity (note: not stored, just validated)
+			const { normalizeAgentId } = await import(
+				"../../../../shared/identity/sanitize-agent-id.ts"
+			);
+			normalizeAgentId(args.agent); // Will throw if invalid
+
 			const { rows: existing } = await query<{
 				cubic_id: string;
 				status: string;
@@ -263,6 +275,9 @@ export class PgCubicHandlers {
 				],
 			};
 		} catch (err) {
+			if (err instanceof AgentIdInvalidError) {
+				return errorResult("Invalid agent identity", err);
+			}
 			return errorResult("Failed to focus cubic", err);
 		}
 	}
@@ -328,6 +343,25 @@ export class PgCubicHandlers {
 		worktree_path?: string;
 	}): Promise<CallToolResult> {
 		try {
+			// P462: Sanitize agent identity (will throw if invalid or collides)
+			const { normalizeAgentId, detectCollision } = await import(
+				"../../../../shared/identity/sanitize-agent-id.ts"
+			);
+			normalizeAgentId(args.agent_identity); // Throws if invalid
+			const collision = await detectCollision(args.agent_identity);
+			if (collision) {
+				return errorResult(
+					`Agent identity collision`,
+					`"${args.agent_identity}" collides with existing "${collision}"`,
+				);
+			}
+
+			// P462: Sanitize worktree path if provided
+			let safePath = args.worktree_path;
+			if (args.worktree_path) {
+				safePath = safeWorktreePath(WORKTREE_ROOT, args.worktree_path);
+			}
+
 			const { rows } = await query<{
 				cubic_id: string;
 				was_recycled: boolean;
@@ -342,7 +376,7 @@ export class PgCubicHandlers {
 					args.proposal_id,
 					args.phase ?? "design",
 					args.budget_usd ?? null,
-					args.worktree_path ?? null,
+					safePath ?? null,
 				],
 			);
 			const r = rows[0];
@@ -370,6 +404,9 @@ export class PgCubicHandlers {
 				],
 			};
 		} catch (err) {
+			if (err instanceof AgentIdInvalidError) {
+				return errorResult("Invalid agent identity", err);
+			}
 			return errorResult("Failed to acquire cubic", err);
 		}
 	}
