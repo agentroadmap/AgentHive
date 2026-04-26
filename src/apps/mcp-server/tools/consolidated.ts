@@ -130,11 +130,23 @@ const proposalRoutes: RouteMap = {
 	merge_worktree: "worktree_merge",
 	sync_worktrees: "worktree_sync",
 	merge_status: "worktree_merge_status",
-	get_detail: "prop_get_detail",
+	get_detail: "mcp_get_proposal_projection",
+	// Common variant names agents try when they don't recall the canonical
+	// short action — route them all to the projection tool, which returns
+	// summary/design/AC/lease/decisions in one payload (the union of what a
+	// gate/review agent typically wants up-front).
+	get_projection: "mcp_get_proposal_projection",
+	get_acceptance_criteria: "list_ac",
+	get_ac: "list_ac",
+	get_discussions: "mcp_get_proposal_projection",
+	get_advisory: "mcp_get_proposal_projection",
 	// raw-tool aliases (agents often dispatch on raw tool names)
 	prop_list: "prop_list",
 	prop_get: "prop_get",
-	prop_get_detail: "prop_get_detail",
+	// `prop_get_detail` is registered but its handler binding (handlers.getProposalDetail)
+	// does not exist — the call throws at dispatch. Route to the projection tool until
+	// the handler is implemented (TODO P609 follow-up).
+	prop_get_detail: "mcp_get_proposal_projection",
 	prop_create: "prop_create",
 	prop_update: "prop_update",
 	prop_delete: "prop_delete",
