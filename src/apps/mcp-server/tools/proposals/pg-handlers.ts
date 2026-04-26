@@ -12,6 +12,7 @@ import type { ProposalRow } from "../../../../postgres/proposal-storage-v2.ts";
 import * as pg from "../../../../postgres/proposal-storage-v2.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
+import { RfcStates, Maturity } from "../../../../core/workflow/state-names.ts";
 
 type ProjectionFormat = "yaml_md" | "json";
 
@@ -381,10 +382,10 @@ export class PgProposalHandlers {
 
 			// Gate transitions require decision notes
 			const gateTransitions: Record<string, string[]> = {
-				DRAFT: ["REVIEW"],
-				REVIEW: ["DEVELOP"],
-				DEVELOP: ["MERGE"],
-				MERGE: ["COMPLETE"],
+				[RfcStates.DRAFT]: [RfcStates.REVIEW],
+				[RfcStates.REVIEW]: [RfcStates.DEVELOP],
+				[RfcStates.DEVELOP]: [RfcStates.MERGE],
+				[RfcStates.MERGE]: [RfcStates.COMPLETE],
 			};
 
 			// Get current status to check if this is a gate transition
@@ -446,13 +447,13 @@ export class PgProposalHandlers {
 				};
 			}
 
-			const valid = ["new", "active", "mature", "obsolete"];
-			if (!valid.includes(args.maturity)) {
+			const validMaturityValues = [Maturity.NEW, Maturity.ACTIVE, Maturity.MATURE, Maturity.OBSOLETE];
+			if (!validMaturityValues.includes(args.maturity)) {
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Invalid maturity '${args.maturity}'. Must be one of: ${valid.join(", ")}`,
+							text: `Invalid maturity '${args.maturity}'. Must be one of: ${validMaturityValues.join(", ")}`,
 						},
 					],
 				};
@@ -471,19 +472,19 @@ export class PgProposalHandlers {
 			}
 
 			const inferredGate =
-				updated.status === "DRAFT"
+				updated.status === RfcStates.DRAFT
 					? "D1"
-					: updated.status === "REVIEW"
+					: updated.status === RfcStates.REVIEW
 						? "D2"
-						: updated.status === "DEVELOP"
+						: updated.status === RfcStates.DEVELOP
 							? "D3"
-							: updated.status === "MERGE"
+							: updated.status === RfcStates.MERGE
 								? "D4"
 								: null;
 			const gateNote =
-				args.maturity === "mature" && inferredGate
+				args.maturity === Maturity.MATURE && inferredGate
 					? ` — entered ${inferredGate} gate-ready queue`
-					: args.maturity === "mature" && updated.status === "COMPLETE"
+					: args.maturity === Maturity.MATURE && updated.status === RfcStates.COMPLETE
 						? " — terminal state; no gate advance queued"
 						: "";
 			return {
