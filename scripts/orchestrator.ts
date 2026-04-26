@@ -1082,6 +1082,76 @@ async function recordGateCommunication(input: {
 	);
 }
 
+/**
+ * Persist a non-advance gate decision into `gate_decision_log` so the next
+ * enhancing agent can read structured findings, not just liaison messages.
+ *
+ * MCP discussions/messages are best-effort — they may not reach the next
+ * cubic. `gate_decision_log` IS the canonical channel: every non-transition
+ * gate decision MUST land here with enough rationale that a fresh agent
+ * (with no prior conversation context) can plan its next revision.
+ *
+ * `agentStdout` is the gate agent's raw output; we excerpt the tail (where
+ * conclusions usually live) into the rationale so the row is actionable
+ * even if the agent didn't emit a structured `details` payload.
+ */
+async function recordGateDecisionFromOrchestrator(input: {
+	proposalId: number;
+	fromState: string;
+	toState: string;
+	gate: string;
+	decision: "hold" | "reject" | "escalate";
+	authorityAgent: string;
+	agentRunId: number | string | null;
+	agentStdout: string | null;
+	maturity: string;
+}): Promise<void> {
+	const stdout = (input.agentStdout ?? "").trim();
+	const tail = stdout.length > 3500 ? stdout.slice(-3500) : stdout;
+	const rationale =
+		tail.length > 0
+			? `Gate ${input.gate} decision: ${input.decision}. ` +
+			  `${input.authorityAgent} did not advance ${input.proposalId}. ` +
+			  `Excerpted gate-agent output (tail) follows; for full context see ` +
+			  `agent_runs.id=${input.agentRunId ?? "?"}.\n\n` +
+			  tail
+			: `Gate ${input.gate} decision: ${input.decision}. ` +
+			  `${input.authorityAgent} did not advance ${input.proposalId} and ` +
+			  `produced no structured rationale. agent_runs.id=${input.agentRunId ?? "?"}.`;
+
+	try {
+		await query(
+			`INSERT INTO roadmap_proposal.gate_decision_log
+         (proposal_id, from_state, to_state, maturity, gate, decided_by,
+          authority_agent, decision, rationale, ac_verification)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)`,
+			[
+				input.proposalId,
+				input.fromState,
+				input.toState,
+				input.maturity,
+				input.gate,
+				input.authorityAgent,
+				"gate-evaluator",
+				input.decision,
+				rationale,
+				JSON.stringify({
+					source: "orchestrator_implicit_gating",
+					agent_run_id: input.agentRunId,
+					captured_from_stdout: stdout.length > 0,
+					details: null,
+				}),
+			],
+		);
+	} catch (err) {
+		// Don't let a logging failure break the dispatch path; log and move on.
+		console.error(
+			`[orchestrator] failed to record gate_decision_log row for proposal=${input.proposalId} gate=${input.gate}:`,
+			err,
+		);
+	}
+}
+
 async function setProposalMaturity(
 	proposalId: number,
 	maturity: "new" | "active" | "mature" | "obsolete",
@@ -1141,25 +1211,31 @@ const GATE_ROLES: Record<string, { role: string; framing: string }> = {
 		role: "skeptic-alpha",
 		framing:
 			"You are SKEPTIC ALPHA. Challenge this Draft RFC hard. Demand evidence. Question every assumption. " +
-			"Verify ACs are measurable and complete. Only advance if the RFC is coherent, economically sound, and structurally ready for Review.",
+			"Verify ACs are measurable and complete. Only advance if the RFC is coherent, economically sound, and structurally ready for Review.\n\n" +
+			"OUTPUT CONTRACT: emit a clear final-line decision and structured findings to STDOUT — the orchestrator parses your stdout and persists it into gate_decision_log. " +
+			"For HOLD/REJECT, output a `## Failures` section (one bullet per blocker, severity tag, file:line evidence where possible) and a `## Remediation` section. " +
+			"You may also call `mcp_proposal action=add_discussion` to leave a human-readable thread, but the canonical channel is your stdout — the next enhancing agent reads that.",
 	},
 	D2: {
 		role: "architecture-reviewer",
 		framing:
 			"You are the Architecture Reviewer. Validate design completeness, scalability, integration constraints, and dependency health. " +
-			"Only advance if the proposal is ready to be built.",
+			"Only advance if the proposal is ready to be built.\n\n" +
+			"OUTPUT CONTRACT: same as D1 — for non-advance verdicts, emit `## Failures` + `## Remediation` to stdout so the next enhancing agent can act.",
 	},
 	D3: {
 		role: "skeptic-beta",
 		framing:
 			"You are SKEPTIC BETA. Review implementation quality: test coverage, error handling, edge cases, and AC verification. " +
-			"Only advance if all ACs are met and the implementation is production-ready.",
+			"Only advance if all ACs are met and the implementation is production-ready.\n\n" +
+			"OUTPUT CONTRACT: same as D1 — emit `## Failures` + `## Remediation` to stdout for non-advance verdicts.",
 	},
 	D4: {
 		role: "gate-reviewer",
 		framing:
 			"You are the Integration Reviewer. Validate that the merge is clean, tests pass, and the feature is deployable. " +
-			"Only advance if the integration is stable.",
+			"Only advance if the integration is stable.\n\n" +
+			"OUTPUT CONTRACT: same as D1 — emit `## Failures` + `## Remediation` to stdout for non-advance verdicts.",
 	},
 };
 
@@ -1413,6 +1489,20 @@ async function dispatchImplicitGate(
 			);
 		}
 		const decisionMessage = `gate decision completed without state transition: proposal is ${current.status}/${finalMaturity}`;
+		// Persist canonical decision to gate_decision_log first — that's the
+		// table the enhancing agent reads. MCP discussions/messages below are
+		// best-effort and may not reach the next cubic.
+		await recordGateDecisionFromOrchestrator({
+			proposalId: proposal.id,
+			fromState: proposal.status,
+			toState: gate.toStage,
+			gate: gate.gate,
+			decision: finalMaturity === "obsolete" ? "reject" : "hold",
+			authorityAgent: gateRole(gate),
+			agentRunId: result.agentRunId,
+			agentStdout: result.stdout,
+			maturity: "mature",
+		});
 		await recordGateCommunication({
 			proposalId: proposal.id,
 			author: worktree,
@@ -1424,7 +1514,7 @@ async function dispatchImplicitGate(
 				`Target transition: ${proposal.status} -> ${gate.toStage}`,
 				`Current proposal state: ${current.status}/${finalMaturity}`,
 				"",
-				"The gate agent made a non-transition decision. Continue the conversation through MCP discussions/messages, revise the proposal, then set maturity back to mature when it is ready for another gate attempt.",
+				"The gate agent made a non-transition decision. Read the latest gate_decision_log row (rationale + ac_verification.details) for the canonical findings, revise the proposal, then set maturity back to mature when it is ready for another gate attempt.",
 			].join("\n"),
 			metadata: {
 				gate: gate.gate,
@@ -1624,6 +1714,18 @@ async function _dispatchTransitionQueue(queueId: number): Promise<void> {
 		normalizeState(current.maturity) !== "MATURE"
 	) {
 		const decisionMessage = `gate decision completed without state transition: proposal is ${current.status}/${current.maturity}`;
+		await recordGateDecisionFromOrchestrator({
+			proposalId: transition.proposal_id,
+			fromState: transition.from_stage ?? current.status ?? "unknown",
+			toState: transition.to_stage ?? "unknown",
+			gate: transition.gate ?? "unknown",
+			decision: "hold",
+			authorityAgent:
+				(transition.gate && GATE_ROLES[transition.gate]?.role) ?? "gate-reviewer",
+			agentRunId: result.agentRunId,
+			agentStdout: result.stdout,
+			maturity: current.maturity ?? "mature",
+		});
 		await recordGateCommunication({
 			proposalId: transition.proposal_id,
 			author: worktree,
@@ -1636,7 +1738,7 @@ async function _dispatchTransitionQueue(queueId: number): Promise<void> {
 				`Target transition: ${transition.from_stage} -> ${transition.to_stage}`,
 				`Current proposal state: ${current.status}/${current.maturity}`,
 				"",
-				"The gate agent made a non-transition decision. Continue the conversation through MCP discussions/messages, revise the proposal, then set maturity back to mature when it is ready for another gate attempt.",
+				"The gate agent made a non-transition decision. Read the latest gate_decision_log row (rationale + ac_verification.details) for the canonical findings, revise the proposal, then set maturity back to mature when it is ready for another gate attempt.",
 			].join("\n"),
 			metadata: {
 				transition_queue_id: transition.id,

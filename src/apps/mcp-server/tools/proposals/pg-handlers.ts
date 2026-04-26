@@ -200,15 +200,32 @@ export class PgProposalHandlers {
 		}
 	}
 
-	async getProposal(args: { id: string }): Promise<CallToolResult> {
+	async getProposal(args: {
+		id?: string | number;
+		proposal_id?: string | number;
+		proposalId?: string | number;
+		display_id?: string;
+	}): Promise<CallToolResult> {
 		try {
+			// Many agents call with `proposal_id` (matching the consolidated
+			// router schema) or `display_id`. Coerce to a single canonical
+			// identifier so the call doesn't strand with "Proposal undefined
+			// not found" — that error mode looks like a missing proposal but
+			// is actually a missing arg.
+			const identifier =
+				args.id ?? args.proposal_id ?? args.proposalId ?? args.display_id;
+			if (identifier === undefined || identifier === null || identifier === "") {
+				return {
+					content: [{ type: "text", text: "prop_get requires `id` (or `proposal_id`/`display_id`)." }],
+				};
+			}
 			// display_id is text (e.g. 'P001'), db id is bigint.
 			// Always pass as string — the storage layer uses separate queries
 			// to avoid Postgres cross-type comparison errors.
-			const proposal = await pg.getProposal(args.id);
+			const proposal = await pg.getProposal(String(identifier));
 			if (!proposal) {
 				return {
-					content: [{ type: "text", text: `Proposal ${args.id} not found.` }],
+					content: [{ type: "text", text: `Proposal ${identifier} not found.` }],
 				};
 			}
 			return {
@@ -782,13 +799,31 @@ export class PgProposalHandlers {
 		}
 	}
 
-	async getProposalProjection(args: { id: string }): Promise<CallToolResult> {
+	async getProposalProjection(args: {
+		id?: string | number;
+		proposal_id?: string | number;
+		proposalId?: string | number;
+		display_id?: string;
+		fields?: string[] | string;
+		projection?: string;
+		format?: "yaml_md" | "json";
+	}): Promise<CallToolResult> {
 		try {
+			// Same identifier coercion as prop_get — accept proposal_id/display_id
+			// aliases so an agent that mixes router-style args with raw-tool calls
+			// doesn't bounce with "Proposal undefined not found".
+			const identifier =
+				args.id ?? args.proposal_id ?? args.proposalId ?? args.display_id;
+			if (identifier === undefined || identifier === null || identifier === "") {
+				return {
+					content: [{ type: "text", text: "mcp_get_proposal_projection requires `id` (or `proposal_id`/`display_id`)." }],
+				};
+			}
 			// 1. Fetch the proposal
-			const proposal = await pg.getProposal(args.id);
+			const proposal = await pg.getProposal(String(identifier));
 			if (!proposal) {
 				return {
-					content: [{ type: "text", text: `Proposal ${args.id} not found.` }],
+					content: [{ type: "text", text: `Proposal ${identifier} not found.` }],
 				};
 			}
 
