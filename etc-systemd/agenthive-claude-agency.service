@@ -1,0 +1,31 @@
+[Unit]
+Description=AgentHive Claude Agency (Claude offer-claim worker)
+After=network.target postgresql.service agenthive-mcp.service
+Requires=agenthive-mcp.service
+
+[Service]
+Type=simple
+User=gary
+Group=gary
+WorkingDirectory=/data/code/AgentHive
+EnvironmentFile=/etc/agenthive/env
+Environment=NODE_ENV=production
+Environment=PATH=/home/gary/.nvm/versions/node/v24.14.0/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=/home/gary
+# Identity for Claude agency; matches agent_registry entry
+Environment=AGENTHIVE_AGENT_IDENTITY=claude/agency-bot
+# Explicit provider override for Claude
+Environment=AGENTHIVE_AGENT_PROVIDER=claude
+ExecStart=/home/gary/.nvm/versions/node/v24.14.0/bin/node --import jiti/register scripts/start-agency.ts
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=60
+KillSignal=SIGTERM
+MemoryMax=512M
+CPUQuota=50%
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agenthive-claude-agency
+
+[Install]
+WantedBy=multi-user.target
