@@ -791,7 +791,13 @@ async function dispatchAgent(
 				stage,
 				phase,
 				timeoutMs: 600_000,
-				worktreeHint: agent,
+				// IMPORTANT: pass the *selected worktree directory name* — not the
+				// agent identity. The agency's offer-provider uses worktree_hint as
+				// the cwd basename under WORKTREE_ROOT (`/data/code/worktree/`). If
+				// we pass the agent identity (e.g. "researcher" or "sre@agenthive"),
+				// `spawn()` fails with ENOENT because no such worktree directory
+				// exists. selectedWorktree was already validated by scoreUsableWorktree.
+				worktreeHint: selectedWorktree,
 				requiredCapabilities:
 					requiredCapabilities.length > 0
 						? requiredCapabilities
