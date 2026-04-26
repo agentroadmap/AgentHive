@@ -291,11 +291,22 @@ export function startWebSocketServer(
 		});
 	}, 5000);
 
-	// Subscribe to pg_notify for real-time push
+	// Subscribe to pg_notify for real-time push.
+	//
+	// Self-heals on startup race: if PG isn't reachable yet (typical when
+	// systemd brings ws-bridge up before postgresql.service is accepting
+	// connections), we retry with exponential backoff capped at 60s instead
+	// of falling back to poll-only mode forever. Also re-attaches if the
+	// LISTEN client errors out after the fact (idle disconnects, PG restart).
 	void (async () => {
-		try {
+		const setupListener = async (): Promise<void> => {
 			const pool = getPool();
 			const pgClient = await pool.connect();
+			pgClient.on("error", (err) => {
+				console.error("[WS] pg_notify client error, will reconnect:", err.message);
+				try { pgClient.release(true); } catch { /* already released */ }
+				scheduleRetry();
+			});
 			await pgClient.query("LISTEN proposal_state_changed");
 			await pgClient.query("LISTEN proposal_gate_ready");
 			await pgClient.query("LISTEN proposal_maturity_changed");
@@ -306,8 +317,32 @@ export function startWebSocketServer(
 				});
 			});
 			console.log("[WS] Listening for pg_notify events");
+		};
+
+		let attempt = 0;
+		let retryTimer: ReturnType<typeof setTimeout> | null = null;
+		const scheduleRetry = () => {
+			if (retryTimer) return;
+			attempt += 1;
+			const delayMs = Math.min(60_000, 1000 * 2 ** Math.min(attempt - 1, 6));
+			console.warn(
+				`[WS] pg_notify setup failed; retrying in ${delayMs / 1000}s (attempt ${attempt})`,
+			);
+			retryTimer = setTimeout(() => {
+				retryTimer = null;
+				setupListener().catch((err) => {
+					console.warn("[WS] pg_notify retry failed:", err.message);
+					scheduleRetry();
+				});
+			}, delayMs);
+		};
+
+		try {
+			await setupListener();
+			attempt = 0;
 		} catch (error) {
-			console.warn("[WS] pg_notify setup failed, using poll-only mode:", error);
+			console.warn("[WS] pg_notify initial setup failed:", (error as Error).message);
+			scheduleRetry();
 		}
 	})();
 
