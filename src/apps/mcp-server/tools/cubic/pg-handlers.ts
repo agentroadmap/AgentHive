@@ -38,12 +38,143 @@ export class PgCubicHandlers {
 
 	async createCubic(args: {
 		name: string;
+		agent_identity?: string;
 		agents?: string[];
 		proposals?: string[];
+		phase?: string;
 	}): Promise<CallToolResult> {
 		try {
 			// P462: Sanitize cubic name to safe worktree path
 			const worktreePath = safeWorktreePath(WORKTREE_ROOT, args.name);
+
+			// P459: Phase-driven role allocation
+			const phase = args.phase ?? "design";
+
+			// Fetch phase role configuration
+			const phaseRoleResult = await query<{
+				default_roles: string[];
+				allowed_roles: string[];
+			}>(
+				`SELECT default_roles, allowed_roles FROM roadmap.cubic_phase_roles WHERE phase = $1`,
+				[phase],
+			);
+
+			if (!phaseRoleResult.rows.length) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{
+									ok: false,
+									error: "invalid_phase",
+									phase,
+									message: `Phase '${phase}' not found in cubic_phase_roles`,
+								},
+								null,
+								2,
+							),
+						},
+					],
+				};
+			}
+
+			const phaseRoles = phaseRoleResult.rows[0];
+			let agentRoles: string[] = args.agents ?? [];
+
+			// P459: If agent_identity provided, resolve its role and validate against phase
+			if (args.agent_identity) {
+				// Look up agent's registered role
+				const agentResult = await query<{ role: string }>(
+					`SELECT role FROM roadmap.agent_registry WHERE agent_identity = $1`,
+					[args.agent_identity],
+				);
+
+				if (!agentResult.rows.length) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify(
+									{
+										ok: false,
+										error: "agent_not_found",
+										agent_identity: args.agent_identity,
+										message: `Agent '${args.agent_identity}' not found in registry`,
+									},
+									null,
+									2,
+								),
+							},
+						],
+					};
+				}
+
+				const agentRole = agentResult.rows[0].role || "developer";
+
+				// Split multi-word roles and check if any match allowed_roles
+				const roleTokens = agentRole
+					.toLowerCase()
+					.split(/\s+/)
+					.filter((r) => r.length > 0);
+
+				const matchedRole = roleTokens.find((token) =>
+					phaseRoles.allowed_roles.includes(token),
+				);
+
+				if (!matchedRole) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify(
+									{
+										ok: false,
+										error: "phase_role_mismatch",
+										phase,
+										agent_role: agentRole,
+										allowed_roles: phaseRoles.allowed_roles,
+										message: `Agent role '${agentRole}' not allowed in phase '${phase}'`,
+									},
+									null,
+									2,
+								),
+							},
+						],
+					};
+				}
+
+				agentRoles = args.agents ?? [matchedRole];
+			} else if (!args.agents) {
+				// P459 AC2: No agent_identity, use phase defaults
+				agentRoles = phaseRoles.default_roles;
+			}
+
+			// Final validation: all agents must be in allowed_roles (optional arg override still validated)
+			const invalidRoles = agentRoles.filter(
+				(role) => !phaseRoles.allowed_roles.includes(role),
+			);
+			if (invalidRoles.length > 0) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{
+									ok: false,
+									error: "invalid_agents_for_phase",
+									phase,
+									invalid_roles: invalidRoles,
+									allowed_roles: phaseRoles.allowed_roles,
+									message: `Agents ${invalidRoles.join(", ")} not allowed in phase '${phase}'`,
+								},
+								null,
+								2,
+							),
+						},
+					],
+				};
+			}
 
 			const { rows } = await query<{
 				cubic_id: string;
@@ -55,9 +186,9 @@ export class PgCubicHandlers {
 					worktreePath,
 					JSON.stringify({
 						name: args.name,
-						agents: args.agents ?? ["coder", "reviewer"],
+						agents: agentRoles,
 						assignedProposals: args.proposals ?? [],
-						phase: "design",
+						phase,
 						phaseGate: "G1",
 					}),
 				],
@@ -73,9 +204,9 @@ export class PgCubicHandlers {
 								cubic: {
 									id: cubicId,
 									name: args.name,
-									phase: "design",
+									phase,
 									phaseGate: "G1",
-									agents: args.agents ?? ["coder", "reviewer"],
+									agents: agentRoles,
 									assignedProposals: args.proposals ?? [],
 								},
 							},
