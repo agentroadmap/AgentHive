@@ -25,6 +25,10 @@ import type {
 import { watchConfig } from "../../utils/config-watcher.ts";
 import { formatVersionLabel, getVersionInfo } from "../../utils/version.ts";
 import { query } from "../../infra/postgres/pool.ts";
+import {
+	hashOperatorToken,
+	requireOperator,
+} from "./operator-auth.ts";
 
 // Regex pattern to match any prefix (letters followed by dash)
 const PREFIX_PATTERN = /^[a-zA-Z]+-/i;
@@ -132,6 +136,10 @@ export class RoadmapServer {
 	private channelSubscriptions = new Map<WebSocket, Map<string, () => void>>();
 	// Table subscriptions for frontend protocol: { ws -> Set<table> }
 	private tableSubscriptions = new Map<WebSocket, Set<string>>();
+	// P477 AC-2: per-socket project scope. Updated on every "subscribe"
+	// payload that carries a project_id; null means "no scope chosen yet"
+	// so we fall back to the server-default project.
+	private wsProjectScope = new Map<WebSocket, number | null>();
 	private contentStore: ContentStore | null = null;
 	private searchService: SearchService | null = null;
 	private unsubscribeContentStore?: () => void;
@@ -416,22 +424,44 @@ export class RoadmapServer {
 	}
 
 	// Frontend table subscription protocol
-	private async handleTableSubscribe(ws: WebSocket, tables: string[]) {
+	// P477 AC-2: project_id is captured per-socket so subsequent snapshots and
+	// broadcasts can be filtered down to the operator's selected project. A
+	// null/missing project_id keeps the legacy "all projects" behaviour.
+	private async handleTableSubscribe(
+		ws: WebSocket,
+		tables: string[],
+		projectId: number | null,
+	) {
 		const subscribedTables = this.tableSubscriptions.get(ws);
 		if (!subscribedTables) return;
 
+		const previousScope = this.wsProjectScope.get(ws) ?? null;
+		const scopeChanged = previousScope !== projectId;
+		// Always update the scope; clients re-send subscribe on project change.
+		this.wsProjectScope.set(ws, projectId);
+
+		let needsProposalSnapshot = false;
 		for (const table of tables) {
 			if (subscribedTables.has(table)) {
+				if (table === "proposal" && scopeChanged) {
+					// Same table, new scope — refresh.
+					needsProposalSnapshot = true;
+				}
 				continue;
 			}
 			subscribedTables.add(table);
-			console.log(`[WS] Client subscribed to table: ${table}`);
+			console.log(
+				`[WS] Client subscribed to table: ${table} (project=${projectId ?? "*"})`,
+			);
 
-			// Send initial snapshot for each subscribed table
 			if (table === "proposal") {
-				await this.sendProposalSnapshot(ws);
+				needsProposalSnapshot = true;
 			}
 			// Other tables (workforce_registry, etc.) can be added here
+		}
+
+		if (needsProposalSnapshot) {
+			await this.sendProposalSnapshot(ws);
 		}
 	}
 
@@ -484,9 +514,17 @@ export class RoadmapServer {
 	}
 
 	// Send proposal snapshot to a WebSocket client
+	// P477 AC-2: roadmap.proposal lives in the control plane and has no
+	// project_id column today (CONVENTIONS.md §6.0 / §8d). Filtering happens
+	// later via tenant-DB resolution (P429/P482-P485). We still consult the
+	// per-socket scope so future wiring can intersect via cubics/dispatches
+	// without rewriting this method.
 	private async sendProposalSnapshot(ws: WebSocket) {
 		try {
-			console.log("[WS] Sending proposal snapshot...");
+			const projectScope = this.wsProjectScope.get(ws) ?? null;
+			console.log(
+				`[WS] Sending proposal snapshot (project=${projectScope ?? "*"})...`,
+			);
 			const store = await this.getContentStoreInstance();
 			const proposals = await this.core.queryProposals({ includeCrossBranch: true });
 			console.log(`[WS] Got ${proposals.length} proposals from query`);
@@ -510,16 +548,30 @@ export class RoadmapServer {
 		}
 	}
 
-	// Broadcast proposal update to all subscribed clients
+	// Broadcast proposal update to all subscribed clients.
+	// P477 AC-2: proposals are control-plane today (no project_id column),
+	// so we cannot filter per recipient. Once tenant-DB routing lands the
+	// payload will carry project_id and we will skip clients whose
+	// wsProjectScope(ws) does not match.
 	private broadcastProposalUpdate(type: "proposal_update" | "proposal_insert" | "proposal_delete", data: any) {
 		const wsData = type === "proposal_delete" ? data : this.proposalToWsFormat(data);
+		const dataProjectId =
+			typeof (data as Record<string, unknown> | null)?.project_id === "number"
+				? ((data as Record<string, unknown>).project_id as number)
+				: null;
 		const msg = JSON.stringify({ type, data: wsData });
 
 		for (const ws of this.sockets) {
 			const tables = this.tableSubscriptions.get(ws);
-			if (tables?.has("proposal")) {
-				try { ws.send(msg); } catch {}
+			if (!tables?.has("proposal")) continue;
+			// When the row carries an explicit project_id (future tenant-DB path),
+			// honour the recipient's scope. Today dataProjectId is always null,
+			// so this short-circuits to "send to everyone subscribed".
+			if (dataProjectId != null) {
+				const scope = this.wsProjectScope.get(ws) ?? null;
+				if (scope != null && scope !== dataProjectId) continue;
 			}
+			try { ws.send(msg); } catch {}
 		}
 	}
 
@@ -574,9 +626,16 @@ export class RoadmapServer {
 					// Try JSON protocol for table/channel subscribe
 					try {
 						const data = JSON.parse(text);
-						// Frontend table subscription: { type: "subscribe", tables: ["proposal", ...] }
+						// Frontend table subscription: { type: "subscribe", tables: ["proposal", ...], project_id?: number }
 						if (data.type === "subscribe" && Array.isArray(data.tables)) {
-							this.handleTableSubscribe(ws, data.tables);
+							const rawId = (data as Record<string, unknown>).project_id;
+							const projectId =
+								typeof rawId === "number" && Number.isFinite(rawId) && rawId > 0
+									? rawId
+									: typeof rawId === "string" && /^\d+$/.test(rawId)
+										? Number(rawId)
+										: null;
+							this.handleTableSubscribe(ws, data.tables, projectId);
 							return;
 						}
 						if (data.type === "subscribe" && data.channel) {
@@ -595,6 +654,7 @@ export class RoadmapServer {
 					this.cleanupSubscriptions(ws);
 					this.channelSubscriptions.delete(ws);
 					this.tableSubscriptions.delete(ws);
+					this.wsProjectScope.delete(ws);
 					this.sockets.delete(ws);
 				});
 			});
@@ -862,7 +922,69 @@ export class RoadmapServer {
 			}
 
 			if (pathname === "/api/agents" && method === "GET")
-				return await this.handleListAgents();
+				return await this.handleListAgents(req);
+			if (pathname.startsWith("/api/agents/")) {
+				const parts = pathname.split("/").filter(Boolean);
+				// /api/agents/:identity            → detail bundle
+				// /api/agents/:identity/message    → POST: send a private DM
+				// /api/agents/:identity/stop       → POST: stop active runs
+				const identity = parts[2] ? decodeURIComponent(parts[2]) : "";
+				if (parts.length === 3 && method === "GET" && identity) {
+					return await this.handleGetAgentDetail(identity, req);
+				}
+				if (
+					parts.length === 4 &&
+					parts[3] === "message" &&
+					method === "POST" &&
+					identity
+				) {
+					return await this.handleSendAgentMessage(identity, req);
+				}
+				if (
+					parts.length === 4 &&
+					parts[3] === "stop" &&
+					method === "POST" &&
+					identity
+				) {
+					return await this.handleStopAgent(identity, req);
+				}
+			}
+			if (pathname.startsWith("/api/cubics/")) {
+				const parts = pathname.split("/").filter(Boolean);
+				const cubicId = parts[2] ? decodeURIComponent(parts[2]) : "";
+				if (
+					parts.length === 4 &&
+					parts[3] === "stop" &&
+					method === "POST" &&
+					cubicId
+				) {
+					return await this.handleStopCubic(cubicId, req);
+				}
+			}
+			if (pathname.startsWith("/api/proposals/") && pathname.endsWith("/state-machine/halt")) {
+				const parts = pathname.split("/").filter(Boolean);
+				const id = parts[2] ? decodeURIComponent(parts[2]) : "";
+				if (method === "POST" && id) {
+					return await this.handleHaltProposalGate(id, req);
+				}
+			}
+			if (pathname.startsWith("/api/proposals/") && pathname.endsWith("/state-machine/resume")) {
+				const parts = pathname.split("/").filter(Boolean);
+				const id = parts[2] ? decodeURIComponent(parts[2]) : "";
+				if (method === "POST" && id) {
+					return await this.handleResumeProposalGate(id, req);
+				}
+			}
+			if (pathname === "/api/projects" && method === "GET")
+				return await this.handleListProjects();
+			if (pathname === "/api/control-plane/overview" && method === "GET")
+				return await this.handleControlPlaneOverview(req);
+			if (pathname === "/api/operator/audit" && method === "GET")
+				return await this.handleOperatorAudit(req);
+			if (pathname === "/api/operator/tokens" && method === "POST")
+				return await this.handleIssueOperatorToken(req);
+			if (pathname === "/api/operator/tokens" && method === "GET")
+				return await this.handleListOperatorTokens(req);
 			if (pathname === "/api/pulse" && method === "GET")
 				return await this.handleListPulse(req);
 			if (pathname === "/api/channels" && method === "GET")
@@ -874,7 +996,7 @@ export class RoadmapServer {
 			if (pathname === "/api/routes" && method === "GET")
 				return await this.handleListRoutes();
 			if (pathname === "/api/dispatches" && method === "GET")
-				return await this.handleListDispatches();
+				return await this.handleListDispatches(req);
 
 			if (pathname === "/api/mcp/sse" && method === "GET") {
 				try { appendFileSync("/tmp/mcp-debug.log", "[Server] MCP SSE request\n"); } catch {}
@@ -2367,13 +2489,838 @@ export class RoadmapServer {
 		}
 	}
 
-	private async handleListAgents(): Promise<Response> {
+	private async handleListAgents(req?: Request): Promise<Response> {
 		try {
+			// AC-2: when an X-Project-Id header is present, scope the agent
+			// listing to that project's registry so the dashboard reflects
+			// the operator's selected project. Falls back to core.listAgents()
+			// (which serves the default project) when no scope is provided.
+			if (req) {
+				const scope = await this.resolveProjectScope(req);
+				const { rows } = await query<{
+					name: string;
+					identity: string;
+					agent_type: string;
+					role: string | null;
+					status: string;
+					trust_tier: string;
+					updated_at: string;
+				}>(
+					`SELECT agent_identity AS identity,
+					        COALESCE(role, agent_identity) AS name,
+					        agent_identity AS name_fallback,
+					        agent_type, role, status, trust_tier, updated_at
+					   FROM roadmap_workforce.agent_registry
+					  WHERE project_id = $1
+					  ORDER BY agent_identity ASC`,
+					[scope.project_id],
+				);
+				const agents = rows.map((r) => ({
+					name: r.identity,
+					identity: r.identity,
+					agent_type: r.agent_type,
+					role: r.role,
+					status: r.status,
+					trustScore: 0,
+					trust_tier: r.trust_tier,
+					capabilities: [] as string[],
+					lastSeen: r.updated_at,
+				}));
+				return Response.json(agents);
+			}
 			const agents = await this.core.listAgents();
 			return Response.json(agents);
 		} catch (error) {
 			console.error("Error listing agents:", error);
 			return Response.json({ error: "Failed to list agents" }, { status: 500 });
+		}
+	}
+
+	// P477 AC-4: stop all running agent_runs rows for an agent.
+	// Action name 'agent.stop'. Soft cancel: marks status='cancelled',
+	// sets cancelled_by/at/reason. Workers honor this on next heartbeat.
+	private async handleStopAgent(
+		identity: string,
+		req: Request,
+	): Promise<Response> {
+		let body: { reason?: unknown } = {};
+		try { body = (await req.json()) as { reason?: unknown }; } catch { /* empty body ok */ }
+		const auth = await requireOperator(req, {
+			action: "agent.stop",
+			targetKind: "agent",
+			targetIdentity: identity,
+			requestSummary: { reason: typeof body.reason === "string" ? body.reason.slice(0, 200) : null },
+		});
+		if (auth.rejected) return auth.rejected;
+
+		const reason =
+			typeof body.reason === "string" && body.reason.trim().length > 0
+				? body.reason.trim()
+				: null;
+		try {
+			const { rows: regRows } = await query<{ exists: boolean }>(
+				`SELECT EXISTS(SELECT 1 FROM roadmap_workforce.agent_registry WHERE agent_identity=$1) AS exists`,
+				[identity],
+			);
+			if (!regRows[0]?.exists) {
+				return Response.json({ error: "Unknown agent" }, { status: 404 });
+			}
+			const { rows } = await query<{
+				id: number;
+				status: string;
+				stage: string;
+			}>(
+				`UPDATE roadmap_workforce.agent_runs
+				    SET status='cancelled',
+				        completed_at = COALESCE(completed_at, now()),
+				        cancelled_by = $2,
+				        cancelled_at = now(),
+				        cancelled_reason = $3
+				  WHERE agent_identity = $1
+				    AND status = 'running'
+				  RETURNING id, status, stage`,
+				[identity, auth.outcome.operatorName, reason],
+			);
+			return Response.json({
+				success: true,
+				cancelled_count: rows.length,
+				cancelled_runs: rows.map((r) => ({ id: r.id, stage: r.stage })),
+				operator: auth.outcome.operatorName,
+			});
+		} catch (err) {
+			console.error(`[agent.stop] ${identity}:`, (err as Error).message);
+			return Response.json({ error: "Failed to stop agent" }, { status: 500 });
+		}
+	}
+
+	// P477 AC-4: stop a single cubic. Action 'cubic.stop'. Flips active
+	// cubics to 'expired', clears lock_holder/lock_phase, records stop trail.
+	private async handleStopCubic(
+		cubicId: string,
+		req: Request,
+	): Promise<Response> {
+		let body: { reason?: unknown } = {};
+		try { body = (await req.json()) as { reason?: unknown }; } catch { /* empty body ok */ }
+		const auth = await requireOperator(req, {
+			action: "cubic.stop",
+			targetKind: "cubic",
+			targetIdentity: cubicId,
+			requestSummary: { reason: typeof body.reason === "string" ? body.reason.slice(0, 200) : null },
+		});
+		if (auth.rejected) return auth.rejected;
+
+		const reason =
+			typeof body.reason === "string" && body.reason.trim().length > 0
+				? body.reason.trim()
+				: null;
+		try {
+			const { rows } = await query<{
+				cubic_id: string;
+				status: string;
+				phase: string;
+				agent_identity: string | null;
+			}>(
+				`UPDATE roadmap.cubics
+				    SET status         = 'expired',
+				        completed_at   = COALESCE(completed_at, now()),
+				        lock_holder    = NULL,
+				        lock_phase     = NULL,
+				        locked_at      = NULL,
+				        stopped_by     = $2,
+				        stopped_at     = now(),
+				        stopped_reason = $3
+				  WHERE cubic_id = $1
+				    AND status NOT IN ('expired','complete')
+				  RETURNING cubic_id, status, phase, agent_identity`,
+				[cubicId, auth.outcome.operatorName, reason],
+			);
+			if (rows.length === 0) {
+				const { rows: existsRows } = await query<{ status: string }>(
+					`SELECT status FROM roadmap.cubics WHERE cubic_id=$1`,
+					[cubicId],
+				);
+				if (existsRows.length === 0) {
+					return Response.json({ error: "Cubic not found" }, { status: 404 });
+				}
+				return Response.json({
+					success: true,
+					already_terminal: true,
+					status: existsRows[0].status,
+				});
+			}
+			return Response.json({
+				success: true,
+				cubic_id: rows[0].cubic_id,
+				agent_identity: rows[0].agent_identity,
+				operator: auth.outcome.operatorName,
+			});
+		} catch (err) {
+			console.error(`[cubic.stop] ${cubicId}:`, (err as Error).message);
+			return Response.json({ error: "Failed to stop cubic" }, { status: 500 });
+		}
+	}
+
+	// P477 AC-4: halt the gate scanner for one proposal.
+	// Action 'state-machine.halt'. Sets gate_scanner_paused=true.
+	// Scanner / orchestrator must skip paused proposals.
+	private async handleHaltProposalGate(
+		displayOrNumericId: string,
+		req: Request,
+	): Promise<Response> {
+		let body: { reason?: unknown } = {};
+		try { body = (await req.json()) as { reason?: unknown }; } catch { /* empty body ok */ }
+		const auth = await requireOperator(req, {
+			action: "state-machine.halt",
+			targetKind: "proposal",
+			targetIdentity: displayOrNumericId,
+			requestSummary: { reason: typeof body.reason === "string" ? body.reason.slice(0, 200) : null },
+		});
+		if (auth.rejected) return auth.rejected;
+
+		const reason =
+			typeof body.reason === "string" && body.reason.trim().length > 0
+				? body.reason.trim()
+				: null;
+		const isNumeric = /^\d+$/.test(displayOrNumericId);
+		try {
+			const { rows } = await query<{
+				id: number;
+				display_id: string;
+				gate_scanner_paused: boolean;
+			}>(
+				`UPDATE roadmap_proposal.proposal
+				    SET gate_scanner_paused = true,
+				        gate_paused_by      = $2,
+				        gate_paused_at      = now(),
+				        gate_paused_reason  = $3
+				  WHERE ${isNumeric ? "id = $1" : "display_id = $1"}
+				  RETURNING id, display_id, gate_scanner_paused`,
+				[isNumeric ? Number(displayOrNumericId) : displayOrNumericId, auth.outcome.operatorName, reason],
+			);
+			if (rows.length === 0) {
+				return Response.json({ error: "Proposal not found" }, { status: 404 });
+			}
+			return Response.json({
+				success: true,
+				proposal_id: rows[0].display_id,
+				gate_scanner_paused: rows[0].gate_scanner_paused,
+				operator: auth.outcome.operatorName,
+			});
+		} catch (err) {
+			console.error(`[state-machine.halt] ${displayOrNumericId}:`, (err as Error).message);
+			return Response.json({ error: "Failed to halt gate scanner" }, { status: 500 });
+		}
+	}
+
+	// P477 AC-4: resume the gate scanner for one proposal. Same gate as halt
+	// but separate action so a narrower operator can be granted halt-only or
+	// resume-only.
+	private async handleResumeProposalGate(
+		displayOrNumericId: string,
+		req: Request,
+	): Promise<Response> {
+		const auth = await requireOperator(req, {
+			action: "state-machine.resume",
+			targetKind: "proposal",
+			targetIdentity: displayOrNumericId,
+		});
+		if (auth.rejected) return auth.rejected;
+
+		const isNumeric = /^\d+$/.test(displayOrNumericId);
+		try {
+			const { rows } = await query<{
+				id: number;
+				display_id: string;
+				gate_scanner_paused: boolean;
+			}>(
+				`UPDATE roadmap_proposal.proposal
+				    SET gate_scanner_paused = false,
+				        gate_paused_by      = NULL,
+				        gate_paused_at      = NULL,
+				        gate_paused_reason  = NULL
+				  WHERE ${isNumeric ? "id = $1" : "display_id = $1"}
+				  RETURNING id, display_id, gate_scanner_paused`,
+				[isNumeric ? Number(displayOrNumericId) : displayOrNumericId],
+			);
+			if (rows.length === 0) {
+				return Response.json({ error: "Proposal not found" }, { status: 404 });
+			}
+			return Response.json({
+				success: true,
+				proposal_id: rows[0].display_id,
+				gate_scanner_paused: rows[0].gate_scanner_paused,
+				operator: auth.outcome.operatorName,
+			});
+		} catch (err) {
+			console.error(`[state-machine.resume] ${displayOrNumericId}:`, (err as Error).message);
+			return Response.json({ error: "Failed to resume gate scanner" }, { status: 500 });
+		}
+	}
+
+	// P477 AC-7: list audit log (operator-only, action='audit.read').
+	private async handleOperatorAudit(req: Request): Promise<Response> {
+		const auth = await requireOperator(req, { action: "audit.read" });
+		if (auth.rejected) return auth.rejected;
+		try {
+			const url = new URL(req.url);
+			const limit = Math.min(
+				Math.max(Number.parseInt(url.searchParams.get("limit") ?? "100", 10) || 100, 1),
+				500,
+			);
+			const { rows } = await query(
+				`SELECT id, occurred_at, operator_name, action, decision,
+				        target_kind, target_identity, request_summary,
+				        remote_addr, response_status, failure_reason
+				   FROM roadmap.operator_audit_log
+				  ORDER BY occurred_at DESC
+				  LIMIT $1`,
+				[limit],
+			);
+			return Response.json({ entries: rows });
+		} catch (err) {
+			console.error("[operator-audit] read failed:", (err as Error).message);
+			return Response.json({ error: "audit read failed" }, { status: 500 });
+		}
+	}
+
+	// P477 AC-7: issue a new operator token. The plaintext is returned
+	// exactly once; only its sha256 hash is persisted. Locked behind
+	// requireOperator(action='token.issue') so existing operators
+	// can rotate / add new ones, and the first one is bootstrapped via
+	// scripts/operator-token.ts (which talks straight to pg).
+	private async handleIssueOperatorToken(req: Request): Promise<Response> {
+		const auth = await requireOperator(req, { action: "token.issue" });
+		if (auth.rejected) return auth.rejected;
+		try {
+			const body = await req.json();
+			const operatorName =
+				typeof body.operator_name === "string" && body.operator_name.trim().length > 0
+					? body.operator_name.trim()
+					: null;
+			if (!operatorName) {
+				return Response.json(
+					{ error: "operator_name is required" },
+					{ status: 400 },
+				);
+			}
+			const allowedActions = Array.isArray(body.allowed_actions) &&
+				body.allowed_actions.every((s: unknown) => typeof s === "string")
+				? (body.allowed_actions as string[])
+				: ["*"];
+			const expiresAt =
+				typeof body.expires_at === "string" && body.expires_at.length > 0
+					? body.expires_at
+					: null;
+			const notes =
+				typeof body.notes === "string" ? body.notes : null;
+
+			// Strong random token. crypto.randomUUID is fine; we hash + store.
+			const raw = `op_${crypto.randomUUID().replace(/-/g, "")}${crypto
+				.randomUUID()
+				.replace(/-/g, "")}`;
+			const sha = hashOperatorToken(raw);
+
+			const { rows } = await query<{ id: number }>(
+				`INSERT INTO roadmap.operator_token
+				   (operator_name, token_sha256, allowed_actions, expires_at, notes)
+				 VALUES ($1, $2, $3, $4, $5)
+				 RETURNING id`,
+				[operatorName, sha, allowedActions, expiresAt, notes],
+			);
+			return Response.json({
+				id: rows[0]?.id,
+				operator_name: operatorName,
+				allowed_actions: allowedActions,
+				expires_at: expiresAt,
+				token: raw,
+				note: "This is the only time the plaintext token is shown. Store it securely.",
+			});
+		} catch (err) {
+			console.error("[operator-token] issue failed:", (err as Error).message);
+			return Response.json({ error: "token issue failed" }, { status: 500 });
+		}
+	}
+
+	// P477 AC-7: list configured tokens (no plaintext, no hash).
+	private async handleListOperatorTokens(req: Request): Promise<Response> {
+		const auth = await requireOperator(req, { action: "token.list" });
+		if (auth.rejected) return auth.rejected;
+		try {
+			const { rows } = await query(
+				`SELECT id, operator_name, allowed_actions, expires_at, revoked_at,
+				        created_at, last_used_at, notes
+				   FROM roadmap.operator_token
+				  ORDER BY id ASC`,
+			);
+			return Response.json({ tokens: rows });
+		} catch (err) {
+			console.error("[operator-token] list failed:", (err as Error).message);
+			return Response.json({ error: "token list failed" }, { status: 500 });
+		}
+	}
+
+	// P477 AC-2: list active projects so the UI can show a switcher.
+	// Read-only, unauthenticated (parity with /api/agents). Operators see
+	// every active project; archived ones are hidden by default.
+	private async handleListProjects(): Promise<Response> {
+		try {
+			const { rows } = await query<{
+				project_id: number;
+				slug: string;
+				name: string;
+				worktree_root: string;
+				bootstrap_status: string;
+				host: string;
+				port: number;
+				db_name: string | null;
+			}>(
+				`SELECT project_id, slug, name, worktree_root,
+				        bootstrap_status, host, port, db_name
+				   FROM roadmap.project
+				  WHERE status = 'active'
+				  ORDER BY project_id ASC`,
+			);
+			return Response.json({
+				projects: rows,
+				default_project_id: rows[0]?.project_id ?? null,
+			});
+		} catch (err) {
+			console.error("[projects] list failed:", (err as Error).message);
+			return Response.json({ error: "Failed to list projects" }, { status: 500 });
+		}
+	}
+
+	// P477 AC-2: resolve the operator's chosen project for a request.
+	// Reads X-Project-Id header (or ?project_id=NN query param). Validates
+	// against the project table — invalid values fall back to project_id=1
+	// so the UI can never lock itself out by sending garbage. Returns the
+	// resolved id along with metadata used to render the active-scope chip.
+	private async resolveProjectScope(
+		req: Request,
+	): Promise<{ project_id: number; project_slug: string; project_name: string }> {
+		const url = new URL(req.url);
+		const headerVal = req.headers.get("x-project-id") ?? "";
+		const queryVal = url.searchParams.get("project_id") ?? "";
+		const requested = headerVal.trim() || queryVal.trim();
+		const requestedNum =
+			requested && /^\d+$/.test(requested) ? Number(requested) : null;
+
+		const { rows } = await query<{
+			project_id: number;
+			slug: string;
+			name: string;
+		}>(
+			`SELECT project_id, slug, name FROM roadmap.project
+			  WHERE status = 'active'
+			    AND ($1::bigint IS NULL OR project_id = $1::bigint)
+			  ORDER BY project_id ASC LIMIT 1`,
+			[requestedNum],
+		);
+		const r = rows[0];
+		if (r) {
+			return {
+				project_id: r.project_id,
+				project_slug: r.slug,
+				project_name: r.name,
+			};
+		}
+		// Fallback: no row matched (e.g. archived project requested) — use first active.
+		const { rows: defaultRows } = await query<{
+			project_id: number;
+			slug: string;
+			name: string;
+		}>(
+			`SELECT project_id, slug, name FROM roadmap.project
+			  WHERE status = 'active' ORDER BY project_id ASC LIMIT 1`,
+		);
+		const d = defaultRows[0];
+		return {
+			project_id: d?.project_id ?? 1,
+			project_slug: d?.slug ?? "agenthive",
+			project_name: d?.name ?? "AgentHive",
+		};
+	}
+
+	// P477 AC-3: live operations overview — single round-trip aggregate
+	// covering workforce, active cubics, route health, messaging traffic,
+	// and recent system activity. Polled by the dashboard panel; stays
+	// cheap by gathering everything in one query and bounding result rows.
+	// AC-2: scoped to the operator-selected project. The aggregate adds a
+	// `project` echo so the UI can verify which scope rendered the data.
+	private async handleControlPlaneOverview(req: Request): Promise<Response> {
+		try {
+			const scope = await this.resolveProjectScope(req);
+			const { rows } = await query<{ overview: Record<string, unknown> }>(
+				`
+				WITH
+				project_agents AS (
+				  SELECT agent_identity FROM roadmap_workforce.agent_registry
+				   WHERE project_id = $1
+				),
+				workforce AS (
+				  SELECT
+				    COUNT(*) FILTER (WHERE h.status = 'healthy')   AS healthy,
+				    COUNT(*) FILTER (WHERE h.status = 'stale')     AS stale,
+				    COUNT(*) FILTER (WHERE h.status = 'offline')   AS offline,
+				    COUNT(*) FILTER (WHERE h.status = 'crashed')   AS crashed,
+				    COUNT(*) AS total
+				  FROM roadmap_workforce.agent_health h
+				  WHERE h.agent_identity IN (SELECT agent_identity FROM project_agents)
+				),
+				busy_agents AS (
+				  SELECT jsonb_agg(jsonb_build_object(
+				           'agent_identity', agent_identity,
+				           'status', status,
+				           'current_task', current_task,
+				           'current_proposal', current_proposal,
+				           'current_cubic', current_cubic,
+				           'active_model', active_model,
+				           'last_heartbeat_at', last_heartbeat_at
+				         ) ORDER BY last_heartbeat_at DESC) AS rows
+				  FROM (
+				    SELECT h.* FROM roadmap_workforce.agent_health h
+				     WHERE h.agent_identity IN (SELECT agent_identity FROM project_agents)
+				       AND (h.current_task IS NOT NULL OR h.status IN ('healthy','stale'))
+				     ORDER BY h.last_heartbeat_at DESC
+				     LIMIT 12
+				  ) hb
+				),
+				cubic_summary AS (
+				  SELECT
+				    COUNT(*) FILTER (WHERE status = 'active')   AS active,
+				    COUNT(*) FILTER (WHERE status = 'idle')     AS idle,
+				    COUNT(*) FILTER (WHERE status = 'expired')  AS expired,
+				    COUNT(*) FILTER (WHERE status = 'complete') AS complete,
+				    COUNT(*) AS total
+				  FROM roadmap.cubics
+				  WHERE project_id = $1
+				),
+				active_cubics AS (
+				  SELECT jsonb_agg(jsonb_build_object(
+				           'cubic_id', cubic_id,
+				           'phase', phase,
+				           'status', status,
+				           'agent_identity', agent_identity,
+				           'budget_usd', budget_usd,
+				           'lock_holder', lock_holder,
+				           'activated_at', activated_at
+				         ) ORDER BY activated_at DESC NULLS LAST) AS rows
+				  FROM (
+				    SELECT * FROM roadmap.cubics
+				     WHERE project_id = $1
+				       AND status NOT IN ('expired','complete')
+				     ORDER BY activated_at DESC NULLS LAST
+				     LIMIT 15
+				  ) c
+				),
+				route_health AS (
+				  SELECT jsonb_agg(jsonb_build_object(
+				           'model_name', model_name,
+				           'route_provider', route_provider,
+				           'agent_provider', agent_provider,
+				           'agent_cli', agent_cli,
+				           'is_enabled', is_enabled,
+				           'priority', priority,
+				           'tier', tier
+				         ) ORDER BY tier NULLS LAST, priority ASC) AS rows
+				  FROM roadmap.model_routes
+				),
+				message_metrics AS (
+				  SELECT
+				    COUNT(*) FILTER (WHERE created_at > now() - interval '5 minutes')  AS last_5m,
+				    COUNT(*) FILTER (WHERE created_at > now() - interval '1 hour')     AS last_1h,
+				    COUNT(*) FILTER (WHERE created_at > now() - interval '24 hours')   AS last_24h,
+				    COUNT(*) FILTER (WHERE channel = 'direct'    AND created_at > now() - interval '1 hour') AS direct_1h,
+				    COUNT(*) FILTER (WHERE channel = 'broadcast' AND created_at > now() - interval '1 hour') AS broadcast_1h,
+				    COUNT(*) FILTER (WHERE channel LIKE 'team:%' AND created_at > now() - interval '1 hour') AS team_1h
+				  FROM roadmap.message_ledger
+				  WHERE project_id = $1
+				),
+				recent_runs AS (
+				  SELECT jsonb_agg(jsonb_build_object(
+				           'id', id,
+				           'agent_identity', agent_identity,
+				           'proposal_display_id', display_id,
+				           'stage', stage,
+				           'status', status,
+				           'model_used', model_used,
+				           'started_at', started_at,
+				           'completed_at', completed_at,
+				           'duration_ms', duration_ms,
+				           'cost_usd', cost_usd
+				         ) ORDER BY started_at DESC) AS rows
+				  FROM (
+				    SELECT r.* FROM roadmap_workforce.agent_runs r
+				     WHERE r.agent_identity IN (SELECT agent_identity FROM project_agents)
+				     ORDER BY r.started_at DESC
+				     LIMIT 15
+				  ) r
+				)
+				SELECT jsonb_build_object(
+				  'generated_at', now(),
+				  'project', jsonb_build_object(
+				    'project_id', $1::bigint,
+				    'slug', $2::text,
+				    'name', $3::text
+				  ),
+				  'workforce', (SELECT to_jsonb(w) FROM workforce w),
+				  'busy_agents', COALESCE((SELECT rows FROM busy_agents), '[]'::jsonb),
+				  'cubics_summary', (SELECT to_jsonb(c) FROM cubic_summary c),
+				  'active_cubics', COALESCE((SELECT rows FROM active_cubics), '[]'::jsonb),
+				  'routes', COALESCE((SELECT rows FROM route_health), '[]'::jsonb),
+				  'messages', (SELECT to_jsonb(m) FROM message_metrics m),
+				  'recent_runs', COALESCE((SELECT rows FROM recent_runs), '[]'::jsonb)
+				) AS overview
+				`,
+				[scope.project_id, scope.project_slug, scope.project_name],
+			);
+			return Response.json(rows[0]?.overview ?? {});
+		} catch (error) {
+			console.error("Error loading control-plane overview:", error);
+			return Response.json(
+				{ error: "Failed to load control-plane overview" },
+				{ status: 500 },
+			);
+		}
+	}
+
+	// P477 AC-5: per-agent detail bundle.
+	// One round-trip: registry row, latest health snapshot, recent
+	// heartbeats, recent agent_runs (current work + recent output),
+	// and recent messages from/to the agent.
+	// AC-2: enforces project scope — if the agent belongs to a different
+	// project than the caller's scope, returns 404 (not "you can't see
+	// this", just "not in this project").
+	private async handleGetAgentDetail(
+		identity: string,
+		req?: Request,
+	): Promise<Response> {
+		try {
+			if (req) {
+				const scope = await this.resolveProjectScope(req);
+				const { rows: scopeRows } = await query<{ in_scope: boolean }>(
+					`SELECT EXISTS(
+					   SELECT 1 FROM roadmap_workforce.agent_registry
+					    WHERE agent_identity = $1 AND project_id = $2
+					 ) AS in_scope`,
+					[identity, scope.project_id],
+				);
+				if (!scopeRows[0]?.in_scope) {
+					return Response.json(
+						{
+							error: "Agent not found in current project scope",
+							project_id: scope.project_id,
+							project_slug: scope.project_slug,
+						},
+						{ status: 404 },
+					);
+				}
+			}
+			const { rows } = await query<{
+				registry: Record<string, unknown> | null;
+				health: Record<string, unknown> | null;
+				heartbeats: Array<Record<string, unknown>> | null;
+				runs: Array<Record<string, unknown>> | null;
+				messages: Array<Record<string, unknown>> | null;
+			}>(
+				`
+				SELECT
+				  (SELECT to_jsonb(r) - 'public_key' - 'api_spec'
+				     FROM (SELECT *
+				             FROM roadmap_workforce.agent_registry
+				            WHERE agent_identity = $1) r) AS registry,
+				  (SELECT to_jsonb(h)
+				     FROM roadmap_workforce.agent_health h
+				    WHERE h.agent_identity = $1) AS health,
+				  (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+				            'heartbeat_at', heartbeat_at,
+				            'cpu_percent', cpu_percent,
+				            'memory_mb', memory_mb,
+				            'active_model', active_model,
+				            'current_task', current_task
+				          ) ORDER BY heartbeat_at DESC), '[]'::jsonb)
+				     FROM (SELECT *
+				             FROM roadmap_workforce.agent_heartbeat_log
+				            WHERE agent_identity = $1
+				            ORDER BY heartbeat_at DESC
+				            LIMIT 20) hb) AS heartbeats,
+				  (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+				            'id', id,
+				            'proposal_display_id', display_id,
+				            'stage', stage,
+				            'model_used', model_used,
+				            'status', status,
+				            'activity', activity,
+				            'output_summary', output_summary,
+				            'tokens_in', tokens_in,
+				            'tokens_out', tokens_out,
+				            'cost_usd', cost_usd,
+				            'duration_ms', duration_ms,
+				            'started_at', started_at,
+				            'completed_at', completed_at,
+				            'error_detail', error_detail
+				          ) ORDER BY started_at DESC), '[]'::jsonb)
+				     FROM (SELECT *
+				             FROM roadmap_workforce.agent_runs
+				            WHERE agent_identity = $1
+				            ORDER BY started_at DESC
+				            LIMIT 25) r) AS runs,
+				  (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+				            'id', id,
+				            'from_agent', from_agent,
+				            'to_agent', to_agent,
+				            'channel', channel,
+				            'message_type', message_type,
+				            'message_content', message_content,
+				            'created_at', created_at,
+				            'proposal_id', proposal_id
+				          ) ORDER BY created_at DESC), '[]'::jsonb)
+				     FROM (SELECT *
+				             FROM roadmap.message_ledger
+				            WHERE from_agent = $1 OR to_agent = $1
+				            ORDER BY created_at DESC
+				            LIMIT 25) m) AS messages
+				`,
+				[identity],
+			);
+			const r = rows[0];
+			if (!r || !r.registry) {
+				return Response.json({ error: "Agent not found" }, { status: 404 });
+			}
+			return Response.json({
+				identity,
+				registry: r.registry,
+				health: r.health ?? null,
+				heartbeats: r.heartbeats ?? [],
+				runs: r.runs ?? [],
+				messages: r.messages ?? [],
+			});
+		} catch (error) {
+			console.error(`Error loading agent detail for ${identity}:`, error);
+			return Response.json(
+				{ error: "Failed to load agent detail" },
+				{ status: 500 },
+			);
+		}
+	}
+
+	// P477 AC-5 + AC-7: operator → agent reminder/message.
+	// Inserts directly into roadmap.message_ledger as a private DM.
+	// (We don't go through core.sendMessage because that path rejects
+	// private DMs from the web API.)
+	// AC-7: gated by requireOperator with action='agent.message'.
+	private async handleSendAgentMessage(
+		identity: string,
+		req: Request,
+	): Promise<Response> {
+		try {
+			const body = await req.json();
+			const auth = await requireOperator(req, {
+				action: "agent.message",
+				targetKind: "agent",
+				targetIdentity: identity,
+				requestSummary: {
+					message_type:
+						typeof body.message_type === "string" ? body.message_type : null,
+					length:
+						typeof body.text === "string" ? body.text.length : null,
+				},
+			});
+			if (auth.rejected) return auth.rejected;
+			// On allow, prefer the operator name from the token over body.from
+			// so we never let the caller spoof a different operator identity.
+			body.from = auth.outcome.operatorName ?? body.from;
+			const text = typeof body.text === "string" ? body.text.trim() : "";
+			// message_ledger.from_agent has a FK to agent_registry, so an
+			// arbitrary "@operator" handle won't work. Default to the human
+			// operator row that already exists ('gary'); allow body.from
+			// override for callers that pass a registered identity.
+			const from =
+				typeof body.from === "string" && body.from.trim().length > 0
+					? body.from.trim()
+					: "gary";
+
+			// message_ledger.message_type is constrained to:
+			// text | task | notify | ack | error | event
+			// Operator intent ('reminder', 'nudge', 'instruction') lives in
+			// metadata.intent so we can render labels without breaking the CHECK.
+			const ALLOWED_TYPES = new Set([
+				"text",
+				"task",
+				"notify",
+				"ack",
+				"error",
+				"event",
+			]);
+			const requestedIntent =
+				typeof body.message_type === "string" && body.message_type.trim().length > 0
+					? body.message_type.trim()
+					: "reminder";
+			const messageType = ALLOWED_TYPES.has(requestedIntent)
+				? requestedIntent
+				: "notify";
+			if (!text) {
+				return Response.json({ error: "text is required" }, { status: 400 });
+			}
+
+			// Verify the target and the sender both exist so we don't trip
+			// the message_ledger FKs.
+			const { rows: regRows } = await query<{
+				to_exists: boolean;
+				from_exists: boolean;
+			}>(
+				`SELECT
+				   EXISTS(SELECT 1 FROM roadmap_workforce.agent_registry WHERE agent_identity = $1) AS to_exists,
+				   EXISTS(SELECT 1 FROM roadmap_workforce.agent_registry WHERE agent_identity = $2) AS from_exists`,
+				[identity, from],
+			);
+			if (!regRows[0]?.to_exists) {
+				return Response.json({ error: "Unknown agent" }, { status: 404 });
+			}
+			if (!regRows[0]?.from_exists) {
+				return Response.json(
+					{ error: `from agent '${from}' is not registered` },
+					{ status: 400 },
+				);
+			}
+
+			// message_ledger.channel is constrained to direct|team:*|broadcast|system.
+			// Use 'direct' for operator → agent DMs so anything filtering by
+			// channel can still classify the message; per-agent routing is
+			// handled by to_agent. fn_notify_new_message fires on insert,
+			// waking any LISTEN new_message subscriber.
+			const channel = "direct";
+			const { rows } = await query<{ id: number; created_at: string }>(
+				`INSERT INTO roadmap.message_ledger
+				   (from_agent, to_agent, channel, message_type, message_content, metadata)
+				 VALUES ($1, $2, $3, $4, $5, $6)
+				 RETURNING id, created_at`,
+				[
+					from,
+					identity,
+					channel,
+					messageType,
+					text,
+					JSON.stringify({
+						source: "web-control-plane",
+						intent: requestedIntent,
+					}),
+				],
+			);
+
+			return Response.json({
+				success: true,
+				message_id: rows[0]?.id,
+				created_at: rows[0]?.created_at,
+				message_type: messageType,
+				intent: requestedIntent,
+			});
+		} catch (error) {
+			console.error(`Error sending message to ${identity}:`, error);
+			return Response.json(
+				{ error: "Failed to send agent message" },
+				{ status: 500 },
+			);
 		}
 	}
 
@@ -2498,34 +3445,56 @@ export class RoadmapServer {
 		}
 	}
 
-	private async handleListDispatches(): Promise<Response> {
+	// P477 AC-2: dispatches scoped to operator's selected project_id.
+	// squad_dispatch carries project_id directly so we filter there; an
+	// `?all=1` query bypass is preserved for control-plane debug views.
+	private async handleListDispatches(req: Request): Promise<Response> {
 		try {
-			const { rows } = await query(
-				`SELECT d.id,
-				        d.proposal_id,
-				        p.display_id AS proposal_display_id,
-				        p.title AS proposal_title,
-				        d.agent_identity,
-				        d.worker_identity,
-				        d.squad_name,
-				        d.dispatch_role,
-				        d.dispatch_status,
-				        d.offer_status,
-				        d.assigned_at,
-				        d.completed_at,
-				        d.claim_expires_at,
-				        d.claimed_at,
-				        d.renew_count,
-				        d.reissue_count,
-				        d.max_reissues,
-				        d.required_capabilities,
-				        d.metadata
-				   FROM roadmap_workforce.squad_dispatch d
-				   LEFT JOIN roadmap_proposal.proposal p
-				     ON p.id = d.proposal_id
-				  ORDER BY d.assigned_at DESC NULLS LAST, d.id DESC`,
-			);
-			return Response.json({ dispatches: rows ?? [] });
+			const url = new URL(req.url);
+			const all = url.searchParams.get("all") === "1";
+			const scope = await this.resolveProjectScope(req);
+			const baseSelect = `SELECT d.id,
+			        d.proposal_id,
+			        d.project_id,
+			        p.display_id AS proposal_display_id,
+			        p.title AS proposal_title,
+			        d.agent_identity,
+			        d.worker_identity,
+			        d.squad_name,
+			        d.dispatch_role,
+			        d.dispatch_status,
+			        d.offer_status,
+			        d.assigned_at,
+			        d.completed_at,
+			        d.claim_expires_at,
+			        d.claimed_at,
+			        d.renew_count,
+			        d.reissue_count,
+			        d.max_reissues,
+			        d.required_capabilities,
+			        d.metadata
+			   FROM roadmap_workforce.squad_dispatch d
+			   LEFT JOIN roadmap_proposal.proposal p
+			     ON p.id = d.proposal_id`;
+			const { rows } = all
+				? await query(
+					`${baseSelect}
+					  ORDER BY d.assigned_at DESC NULLS LAST, d.id DESC`,
+				)
+				: await query(
+					`${baseSelect}
+					  WHERE d.project_id = $1
+					  ORDER BY d.assigned_at DESC NULLS LAST, d.id DESC`,
+					[scope.project_id],
+				);
+			return Response.json({
+				dispatches: rows ?? [],
+				project: {
+					project_id: scope.project_id,
+					slug: scope.project_slug,
+					name: scope.project_name,
+				},
+			});
 		} catch (error) {
 			console.error("Error listing dispatches:", error);
 			return Response.json(
