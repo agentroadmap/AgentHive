@@ -808,7 +808,7 @@ async function dispatchAgent(
 					const targetAgency = agencies[0];
 					const envelope = createMessageEnvelope({
 						agencyId: targetAgency.agency_id,
-						direction: "orchestrator_to_liaison",
+						direction: "orchestrator->liaison",
 						kind: "offer_dispatch",
 						payload: {
 							dispatch_id: dispatchId,
