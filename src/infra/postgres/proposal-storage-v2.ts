@@ -4,6 +4,7 @@
  * Targets the active schema selected by the connection pool search_path.
  */
 import { getPool, query } from "./pool.ts";
+import { Maturity } from "../../core/workflow/state-names.ts";
 
 const PROPOSAL_COLUMNS = `
   id, display_id, parent_id, type, status, maturity, title,
@@ -612,10 +613,10 @@ export async function setMaturity(
 	agentIdentity: string,
 	reason?: string,
 ): Promise<ProposalRow | null> {
-	const valid = new Set(["new", "active", "mature", "obsolete"]);
-	if (!valid.has(maturity)) {
+	const validMaturityValues = new Set([Maturity.NEW, Maturity.ACTIVE, Maturity.MATURE, Maturity.OBSOLETE]);
+	if (!validMaturityValues.has(maturity)) {
 		throw new Error(
-			`Invalid maturity '${maturity}'. Must be one of: new, active, mature, obsolete`,
+			`Invalid maturity '${maturity}'. Must be one of: ${[Maturity.NEW, Maturity.ACTIVE, Maturity.MATURE, Maturity.OBSOLETE].join(", ")}`,
 		);
 	}
 
@@ -651,7 +652,7 @@ export async function setMaturity(
 
 	// Record an audit note when self-declaring mature so later agents can see
 	// whether the maturity change was meant to request a gate review.
-	if (maturity === "mature") {
+	if (maturity === Maturity.MATURE) {
 		await query(
 			`INSERT INTO roadmap_proposal.proposal_discussions
          (proposal_id, author_identity, context_prefix, body)
@@ -661,7 +662,7 @@ export async function setMaturity(
 				agentIdentity,
 				reason
 					? `Declared mature: ${reason}`
-					: `Agent self-declared proposal ready for gate review (maturity → mature)`,
+					: `Agent self-declared proposal ready for gate review (maturity → ${Maturity.MATURE})`,
 			],
 		);
 	}

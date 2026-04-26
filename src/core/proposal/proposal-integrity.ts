@@ -15,6 +15,7 @@
  */
 
 import { query } from "../../infra/postgres/pool.ts";
+import { Maturity } from "../workflow/state-names.ts";
 import type {
 	ProposalAcceptanceCriterionRow,
 	ProposalRow,
@@ -168,17 +169,17 @@ async function validateMaturityGate(
 
 	const maturityState = rows[0].maturity;
 
-	if (maturityState !== "mature") {
+	if (maturityState !== Maturity.MATURE) {
 		return {
 			valid: false,
 			error: {
 				code: "MATURITY_GATE_BLOCKED",
-				message: `Cannot promote: proposal maturity is '${maturityState}', must be 'mature' to transition from ${currentState}`,
+				message: `Cannot promote: proposal maturity is '${maturityState}', must be '${Maturity.MATURE}' to transition from ${currentState}`,
 				context: {
 					proposalId,
 					currentState,
 					currentMaturity: maturityState,
-					requiredMaturity: "mature",
+					requiredMaturity: Maturity.MATURE,
 				},
 			},
 		};

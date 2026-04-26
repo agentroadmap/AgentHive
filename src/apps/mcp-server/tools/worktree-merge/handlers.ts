@@ -3,6 +3,7 @@ import { stat } from "node:fs/promises";
 import { promisify } from "node:util";
 import { query } from "../../../../postgres/pool.ts";
 import type { CallToolResult } from "../../types.ts";
+import { RfcStates } from "../../../../core/workflow/state-names.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -251,12 +252,12 @@ export class WorktreeMergeHandlers {
 
 			// Validate proposal is in MERGE state
 			const status = proposal.status?.toUpperCase();
-			if (status !== "MERGE" && status !== "COMPLETE") {
+			if (status !== RfcStates.MERGE && status !== RfcStates.COMPLETE) {
 				return {
 					content: [
 						{
 							type: "text",
-							text: `❌ Proposal ${args.proposal_id} is in ${proposal.status} state. Must be in MERGE or COMPLETE state to merge worktree.`,
+							text: `❌ Proposal ${args.proposal_id} is in ${proposal.status} state. Must be in ${RfcStates.MERGE} or ${RfcStates.COMPLETE} state to merge worktree.`,
 						},
 					],
 				};
@@ -353,7 +354,7 @@ export class WorktreeMergeHandlers {
 					content: [
 						{
 							type: "text",
-							text: `❌ Merge conflict detected for ${args.proposal_id}. Conflicting files:\n${conflicts.map((f) => `  - ${f}`).join("\n")}\n\nManual resolution required. Proposal held at MERGE state.`,
+							text: `❌ Merge conflict detected for ${args.proposal_id}. Conflicting files:\n${conflicts.map((f) => `  - ${f}`).join("\n")}\n\nManual resolution required. Proposal held at ${RfcStates.MERGE} state.`,
 						},
 					],
 				};

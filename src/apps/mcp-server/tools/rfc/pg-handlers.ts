@@ -18,6 +18,7 @@ import {
 	validateLease,
 	formatValidationError,
 } from "../../../../core/proposal/proposal-integrity.ts";
+import { RfcStates } from "../../../../core/workflow/state-names.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
 
@@ -60,9 +61,9 @@ function errorResult(msg: string, err: unknown): CallToolResult {
 
 /** Transition type labels derived from from→to state mapping */
 function classifyTransition(from: string, to: string): string {
-	if (to === "COMPLETE") return "decision";
+	if (to === RfcStates.COMPLETE) return "decision";
 	// Going backward in state sequence
-	const order = ["DRAFT", "REVIEW", "DEVELOP", "MERGE", "COMPLETE"];
+	const order = [RfcStates.DRAFT, RfcStates.REVIEW, RfcStates.DEVELOP, RfcStates.MERGE, RfcStates.COMPLETE];
 	const fromIdx = order.indexOf(from.toUpperCase());
 	const toIdx = order.indexOf(to.toUpperCase());
 	if (toIdx < fromIdx) return "iteration";

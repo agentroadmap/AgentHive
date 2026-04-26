@@ -514,7 +514,7 @@ export interface RoadmapConfig {
 	prefixes?: PrefixConfig;
 	/** Schema version of the roadmap layout. 1 = legacy (nodes/), 2 = current (proposals/). */
 	schemaVersion?: number;
-	/** URL of the daemon to route operations through (e.g., "http://localhost:6420"). When set, CLI/MCP tools use HTTP API instead of direct filesystem access. */
+	/** URL of the daemon to route operations through (e.g., "${getDaemonUrl()}"). When set, CLI/MCP tools use HTTP API instead of direct filesystem access. */
 	daemonUrl?: string;
 	/** When true, worktree setup creates HTTP client config instead of roadmap/ symlinks. */
 	daemonMode?: boolean;
