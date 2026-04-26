@@ -22,6 +22,7 @@ import { readFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { query } from "../../infra/postgres/pool.ts";
+import { RfcStates, HotfixStates } from "../workflow/state-names.ts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -831,7 +832,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 			agentIdentity: req.agentLabel ?? worktree,
 			maxTokens: 2000,
 		});
-		const maturityHint = stage === "COMPLETE" || stage === "DEPLOYED"
+		const maturityHint = stage === RfcStates.COMPLETE || stage === "DEPLOYED"
 			? ""
 			: `\n\n## Maturity Advancement\nWhen you complete your task, call the MCP tool \`set_maturity\` (action: "set_maturity") to advance this proposal to maturity "mature". This triggers the implicit gate to transition the proposal to the next workflow state. Use the proposal ID ${proposalId}.`;
 		assembledTask = `${contextPackage}\n\n## Task\n${task}${maturityHint}`;

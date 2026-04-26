@@ -16,6 +16,7 @@ import {
 	scoreProposal,
 	type ScorableProposal,
 } from "../orchestration/pickup-scorer.ts";
+import { RfcStates, isTerminal } from "../workflow/state-names.ts";
 
 const MCP_URL = process.env.MCP_URL || getMcpUrl();
 
@@ -320,7 +321,7 @@ function assessReadiness(context: ProposalDispatchContext): {
 	const stage = normalizeStage(context.status);
 	const missing: string[] = [];
 
-	if (stage === "COMPLETE") {
+	if (stage === RfcStates.COMPLETE) {
 		return { mode: "noop", reasons: ["terminal state"] };
 	}
 
@@ -332,25 +333,25 @@ function assessReadiness(context: ProposalDispatchContext): {
 	const acPending = context.blockingAcceptanceCriteria > 0;
 	if (acPending) missing.push("open acceptance criteria");
 
-	if (stage === "DRAFT") {
+	if (stage === RfcStates.DRAFT) {
 		return missing.length > 0
 			? { mode: "prep", reasons: missing }
 			: { mode: "gate", reasons: [] };
 	}
 
-	if (stage === "REVIEW") {
+	if (stage === RfcStates.REVIEW) {
 		return missing.length > 0
 			? { mode: "prep", reasons: missing }
 			: { mode: "gate", reasons: [] };
 	}
 
-	if (stage === "DEVELOP") {
+	if (stage === RfcStates.DEVELOP) {
 		return missing.length > 0
 			? { mode: "prep", reasons: missing }
 			: { mode: "gate", reasons: [] };
 	}
 
-	if (stage === "MERGE") {
+	if (stage === RfcStates.MERGE) {
 		return missing.length > 0 || context.latestDecision !== "approved"
 			? {
 					mode: "prep",

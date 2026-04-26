@@ -899,13 +899,31 @@ export async function createMcpServer(
 		type RecycleCubicArgs = Parameters<typeof cubic.recycleCubic>[0];
 		server.addTool({
 			name: "cubic_create",
-			description: "Create a new cubic workspace",
+			description:
+				"Create a new cubic workspace. P459: Supports phase-driven role allocation. " +
+				"If agent_identity provided, validates its role against phase. " +
+				"Without agent_identity, uses phase defaults. " +
+				"agents arg overrides (operator escape hatch) but is still validated.",
 			inputSchema: {
 				type: "object",
 				properties: {
 					name: { type: "string" },
-					agents: { type: "array", items: { type: "string" } },
+					agent_identity: {
+						type: "string",
+						description:
+							"Optional agent identity. Role validated against allowed_roles for phase.",
+					},
+					agents: {
+						type: "array",
+						items: { type: "string" },
+						description:
+							"Optional override of agents. If provided, still validated against phase allowed_roles.",
+					},
 					proposals: { type: "array", items: { type: "string" } },
+					phase: {
+						type: "string",
+						description: "Phase (design/build/test/ship, default: design)",
+					},
 				},
 				required: ["name"],
 			},
