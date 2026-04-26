@@ -25,6 +25,8 @@
 - Current worktree root: CWD
 - Main project root: repository root
 - MCP server: `http://127.0.0.1:6421/sse`
+- **DB topology (target):** `hiveControl` for control plane + one DB per project tenant (`agenthive`, `monkeyKing-audio`, `georgia-singer`, …). See CONVENTIONS.md §6.0.
+- **DB today (transition):** single-DB `agenthive`. P429 extracts `hiveControl` and recasts `agenthive` as the first project tenant DB.
 - Shared operator host: `bot`
 - Use `AGENTHIVE_HOST=bot` when the current machine is the shared CLI/operator host. The physical host may run Codex, Claude, Hermes, or Copilot-backed spawns, but the child route must still come from the DB-resolved model route and host policy.
 - Host policy is shared-host, route-specific. Do not treat `bot` as a single-provider host; use `roadmap.host_model_policy` to decide which route providers are allowed.

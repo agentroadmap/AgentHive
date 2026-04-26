@@ -41,7 +41,7 @@ AgentHive is not a greenfield repo. Work against the system that exists today.
 
 | Surface | Current convention |
 | --- | --- |
-| Runtime database | PostgreSQL, database `agenthive`, schema `roadmap` |
+| Runtime database | PostgreSQL. **Two-tier topology** (target): `hiveControl` for control plane, one DB per project tenant (`agenthive`, `monkeyKing-audio`, `georgia-singer`, …). Today still single-DB `agenthive`; see §6.0. |
 | MCP service | `agenthive-mcp.service` on `127.0.0.1:6421` |
 | Runtime config | `roadmap.yaml` |
 | Main proposal storage code | `src/infra/postgres/proposal-storage-v2.ts` |
@@ -255,6 +255,49 @@ Notes:
 - Proposal type determines workflow selection. Do not invent ad-hoc types. Check existing usage or `roadmap.proposal_type_config` before creating new proposals.
 
 ## 6. Database Conventions
+
+### 6.0 Database Topology (target architecture)
+
+AgentHive runs on a **two-tier Postgres topology**:
+
+1. **`hiveControl`** — the **control-plane database**. Single, shared, contains everything that is global to the platform:
+   - Proposal lifecycle (`roadmap_proposal.proposal`, `roadmap.workflows`, `roadmap.workflow_templates`, gate decisions, reviews, dependencies, discussions)
+   - Agent registry (`roadmap.agent_registry`, teams, cubics, leases)
+   - Runtime configuration (`roadmap.runtime_flag`, `roadmap.host_model_policy`, model registry)
+   - Project registry (`roadmap.project` — one row per tenant DB; carries the **DSN** for the tenant DB, not project tenant data)
+   - Knowledge, federation, escalation, spending, identity/auth (P472), observability surfaces
+   - All DDL labeled "control" in `database/ddl/control/` and migrations in `scripts/migrations/control/`
+
+2. **Project tenant DBs** — one Postgres database **per project**, fully isolated. Names are project-chosen (`agenthive`, `monkeyKing-audio`, `georgia-singer`, …). Each contains:
+   - Project-specific application data (audio assets, song metadata, project documents, project-scoped notes)
+   - Project-private workflows that don't escalate to the platform
+   - Per-project credentials, backups, replicas, and geographic placement
+   - All DDL labeled "tenant" in `database/ddl/tenant/` and migrations in `scripts/migrations/tenant/`
+
+**The keystone invariant:** `roadmap_proposal.proposal.project_id` (in `hiveControl`) is a **foreign key into `roadmap.project.project_id`**, which **points at a tenant DB connection record** — it is **NOT** a tenancy discriminator on rows that share a database with other tenants. Two projects never share a table inside a single DB.
+
+**Why two tiers (not single-DB-with-project_id):**
+- **Blast radius:** a runaway query against tenant data cannot lock control-plane tables.
+- **Backup/RTO:** each project gets its own backup schedule and retention; control-plane has its own.
+- **Credentials:** a tenant DB can hand out scoped credentials without leaking control-plane access.
+- **Placement:** tenants can move to dedicated hosts/replicas without re-architecting control plane.
+- **Tenancy by accident:** prevents the multi-tenant-without-isolation failure mode.
+
+**Connection resolution at runtime:**
+- All control-plane queries connect to `hiveControl` (DSN in `databases.control` of `roadmap.yaml`, env-overridable per §config-resolver).
+- A handler that needs project tenant data resolves the DSN via `config.getProjectDb(slug_or_id)`, which queries `hiveControl.roadmap.project` and returns the tenant DSN.
+- Connection pools are keyed per-DB; never reuse a `hiveControl` pool for tenant queries.
+
+**Today's reality (transition state):**
+- The live database is still single-DB `agenthive` — control-plane and the agenthive-tenant data share one Postgres instance.
+- P429 is the keystone migration that extracts `hiveControl` and recasts `agenthive` as the first project tenant DB.
+- P487 defines the per-project DB schema bootstrap and registry connection model.
+- Until P429 lands, `project_id = 1` is implicit and refers to the agenthive tenant inside the same DB. Do not seed projects with `project_id > 1` outside test fixtures.
+
+**Schema-qualification rules under the new topology:**
+- Inside `hiveControl`: continue to schema-qualify with `roadmap.` and `roadmap_proposal.`
+- Inside a tenant DB: project-chosen schemas (e.g., `audio.`, `song.`); never use `roadmap.` in a tenant DB.
+- Cross-DB joins are forbidden. If a handler needs both, it issues two queries and joins in code.
 
 ### 6.1 DDL belongs in `database/ddl/`
 

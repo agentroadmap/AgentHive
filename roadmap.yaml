@@ -3,11 +3,52 @@ project:
   project_root: /data/code/AgentHive
   date_format: yyyy-mm-dd
 database:
+  # DEPRECATED single-DB config. Kept for transition compatibility only.
+  # Once P429 ships, the runtime reads `databases.control` and resolves
+  # tenant DSNs from `hiveControl.roadmap.project`. See CONVENTIONS.md §6.0.
   provider: Postgres
   name: agenthive
   schema: roadmap
   host: 127.0.0.1
   port: 5432
+databases:
+  # TARGET two-tier topology (CONVENTIONS.md §6.0). Live values land with P429.
+  control:
+    name: hiveControl
+    schema: roadmap
+    host: 127.0.0.1
+    port: 5432
+    role: control_plane
+    notes: |
+      Holds proposals, agent registry, runtime_flag, host_model_policy,
+      project registry (DSN pointers), knowledge, federation, identity.
+      Never holds project tenant data.
+  projects:
+    # Each project gets its own database. The list below is the seed
+    # registry; the source of truth at runtime is `hiveControl.roadmap.project`.
+    - slug: agenthive
+      name: AgentHive
+      db_name: agenthive
+      host: 127.0.0.1
+      port: 5432
+      schema_prefix: agenthive_
+      role: tenant
+    - slug: monkeyKing-audio
+      name: Monkey King Audio
+      db_name: monkeyKing_audio
+      host: 127.0.0.1
+      port: 5432
+      schema_prefix: audio_
+      role: tenant
+      status: planned
+    - slug: georgia-singer
+      name: Georgia Singer
+      db_name: georgia_singer
+      host: 127.0.0.1
+      port: 5432
+      schema_prefix: song_
+      role: tenant
+      status: planned
 mcp:
   port: 6421
   transport: sse
