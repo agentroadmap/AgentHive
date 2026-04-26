@@ -602,13 +602,45 @@ When blocked, leave the next agent a better surface:
 
 That is the standard for blending into AgentHive quickly without creating drift.
 
-## 16. Definitions for Agents
+## 16. Active Architectural Initiatives — Keystone Index
+
+When you start work that touches one of these areas, **read the keystone proposal first**. Sub-proposals are blocked by it; competing/older proposals are marked obsolete and should be ignored. This index is the canonical resolver for "which proposal owns this concern" — if you find conflicting proposals not listed here, the one named here wins; raise an issue to fix the others.
+
+| Concern | Keystone | Sub-proposals (under keystone) | Obsoleted (do not use) |
+| :--- | :--- | :--- | :--- |
+| **Multi-tenancy DB topology** (hiveControl + per-project tenant DBs, two-tier) | **P429** | Foundation: P495, P496, P497, P498, P499, P500, P520. Bootstrap: P501, P502, P503. Cutover: P504, P505, P518, P506. Tenant lifecycle: P507, P508, P509. Cleanup: P511, P512. Real tenants: P513, P514. Long tail: P515, P516, P517. | P430 (column classification → P506), P431 (control DB bootstrap → P501), P432 (project DB isolation → P429), P487 (memory artifact, never created) |
+| **Multi-tenancy program plan** (4-phase rollout orchestration) | **P471** | Blocks: P429, P448, P453✓, P463, P472, P473, P474, P475, P476✓, plus the entire P429 wave above | P471 IS the master plan; do not create competing program proposals |
+| **MCP tool surface hardening** (input validation, naming, error envelopes) | **P475** | Implements principle from **P456** (REVIEW mature). Companion fixes shipped: P457✓ (context_prefix CHECK widening), P486 (extractArgs+collision detection), P521 (auto-register reviewer FK). | P380 (type errors — fixed by P457 and P475) |
+| **State machine + dispatch hardening** (concurrency, idempotency, retry, leases, races) | **P433** | Blocks: P437 (idempotency), P438 (claim fail-closed), P439 (concurrency ceilings), P440 (retry+terminal), P442 (operator stop), P443 (causal IDs), P444 (host/provider/route sep), P445 (race tests), P446 (MCP runtime reliability). P441 (service topology) is adjacent but separate. | — |
+| **Gate evaluator automation** (auto-advance mature proposals through gates) | **P206** (DEVELOP active critical) | Companion: P222 (SMDL DSL), P224 (lease-required gates), P227 (workflow quality gates) | — |
+| **Liaison + agency protocol** (always-on agency representative, two-way orchestrator) | **P463** | Blocks: P464 (liaison spec + dormancy), P465 (subscription claim policy), P466 (spawn briefing), P467 (stuck detection), P468 (orchestrator↔liaison messaging), P469 (observability surface) | — |
+| **Web control plane** (multi-project operations dashboard, workforce control) | **P477** | Sub-areas (originally drafted under P387 umbrella): P388 (data layer), P389 (info-arch), P390 (design system), P391 (project/host mgmt), P392 (agency/workforce), P393 (model routes), P394 (proposal kanban), P395 (observability views), P396 (workforce viz), P397 (budget center), P398 (OAuth), P399 (co-orchestration). Treat these as P477's design backlog until/unless explicitly re-keyed. | P387 (Universal Web Dashboard — superseded by P477's multi-project framing), P301 (filesystem→Postgres unify — partially absorbed by P294) |
+| **Auth + identity unification** (keys, sessions, tokens, OAuth across agents/liaisons/operators) | **P472** (REVIEW mature) | Adjacent: P398 (OAuth UI), P159 (agent-identity wiring), P413 (service account consolidation) | — |
+| **Configuration resolution order** (env vs roadmap.yaml vs control DB vs feature flags) | **P474** (DEVELOP active) | Extended by P498 (tenant DSN class), companion P416✓/P402✓ obsoleted | — |
+| **Compatibility migration plan** (control plane and liaison cutover, dual-write windows) | **P473** (REVIEW mature) | Blocks: P438, P432 (now obsolete), P468, P464, P431 (now obsolete), P453✓ | — |
+
+### Operating rules for this index
+
+1. **Discovery flow**: When triaging a new task, look up its concern here first. The keystone tells you which design + AC are canonical. Sub-proposals are partial implementations or fragments — read them only after the keystone.
+2. **Conflict resolution**: If two non-obsolete proposals describe overlapping scope, the one named here wins. The other should either be marked obsolete or rewired as a sub-proposal under the keystone. Do not silently work on both.
+3. **Adding a new keystone**: Don't. Instead, propose extending an existing keystone, OR file an issue declaring why a new architectural concern doesn't fit any existing keystone.
+4. **Marking a proposal obsolete**: Wire a `supersedes` edge from the replacement to the obsolete proposal in `roadmap_proposal.proposal_dependencies`, then UPDATE `maturity = 'obsolete'`. Keep the row for forensic value (audit JSONB column captures the why).
+5. **Refresh cadence**: This table needs review every time a major realignment happens (new keystone proposal, large cluster of sub-proposals created, or DB topology pivot). The 2026-04-26 refresh wired the P429 family + reconciled MCP/web UI/state machine clusters.
+
+### What this index does NOT cover
+
+- **Code-level conventions** (naming, structure, testing) — see §3, §4, §6.
+- **Runtime operating rules** (folder discipline, git, deployment) — see §4a, §7, §8.
+- **Process** (proposal lifecycle, gates, leases) — see §5.
+- **Stale proposals not on critical path** — many proposals from the 2026-04-21 batch (P046–P296) sit in DEVELOP without active leases. Triage is a separate concern; this index only names the architecturally-load-bearing keystones.
+
+## 17. Definitions for Agents
 
 * **Universal Maturity Model**: Fresh entries are **new** (White), work in progress is **active** (Yellow), and ready for transition is **mature** (Green).
 * **Zero-Trust**: You have no "root" access. Every action is recorded in the `proposal_version` ledger with a Git-style delta.
 * **Staging**: All code must pass "Pre-flight Checks" in an isolated environment before promotion to the main branch.
 
-## 17. Completed Capabilities
+## 18. Completed Capabilities
 
 | Proposal | Capability | Description |
 | :--- | :--- | :--- |

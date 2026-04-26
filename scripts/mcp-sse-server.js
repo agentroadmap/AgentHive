@@ -23,6 +23,11 @@ if (!handleDirectMcpRequest) {
 }
 
 const app = express();
+// The direct (POST /mcp) endpoint reuses one server for the lifetime of the process.
+// SSE and StreamableHTTP create per-session servers because the MCP SDK Protocol
+// is one-to-one with a transport — sharing breaks with "Already connected to a
+// transport". Pool leaks from per-session createMcpServer() are mitigated by
+// state-names.ts disposing the previous global registry on each loadStateNames().
 const directMcpServer = await createMcpServer(projectRoot);
 
 // Session tracking: sessionId → { server, transport }
@@ -63,6 +68,9 @@ app.all(
 	jsonBodyParser,
 	async (req, res) => {
 		try {
+			// SDK requires fresh Server per StreamableHTTP request (Protocol is
+			// one-to-one with transport). Pool leak is contained by state-names
+			// dispose-on-reload; see P522.
 			const server = await createMcpServer(projectRoot);
 			const transport = await server.createStreamableHttpTransport();
 			await transport.handleRequest(req, res, req.body);
@@ -82,6 +90,9 @@ app.all(
 app.get("/sse", async (_req, res) => {
 	console.log("[MCP] New SSE connection request");
 	try {
+		// SDK requires fresh Server per SSE session (Protocol is one-to-one with
+		// transport). Pool leak from this is contained by state-names registry
+		// disposing the prior global on each load; see P522.
 		const server = await createMcpServer(projectRoot);
 		const sseTransport = await server.createSseTransport("/messages", res);
 

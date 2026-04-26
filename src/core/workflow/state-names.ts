@@ -137,30 +137,70 @@ export class StateNamesRegistry {
 			}
 		}
 
-		// Set up NOTIFY listener for live reloads
-		if (!this.notifySubscription) {
+		// Set up NOTIFY listener for live reloads.
+		// P522: idempotent — dispose any existing subscription before installing a new one.
+		// Previously a fresh registry per createMcpServer() call would acquire a new
+		// PoolClient and never release it, exhausting the pool after ~5-10 restarts.
+		if (this.notifySubscription) {
 			try {
-				const client = await pool.connect();
-				await client.query("LISTEN workflow_templates_changed");
+				await this.notifySubscription.unsubscribe();
+			} catch (err) {
+				console.error("[StateNames] Failed to dispose stale NOTIFY subscription:", err);
+			}
+			this.notifySubscription = null;
+		}
 
-				const reloadHandler = async () => {
-					await this.load(pool).catch((err) => {
-						console.error("[StateNames] Error reloading registry on NOTIFY:", err);
-					});
-				};
+		let client: PoolClient | null = null;
+		try {
+			client = await pool.connect();
+			await client.query("LISTEN workflow_templates_changed");
 
-				client.on("notification", reloadHandler);
-				this.notifySubscription = {
-					client,
-					unsubscribe: async () => {
-						await client.query("UNLISTEN workflow_templates_changed");
-						client.removeListener("notification", reloadHandler);
-						client.release();
-					},
-				};
-			} catch (error) {
-				console.error("[StateNames] Failed to set up NOTIFY listener:", error);
-				// Non-fatal; registry will still work without live reload
+			const acquiredClient = client;
+			const reloadHandler = async () => {
+				await this.load(pool).catch((err) => {
+					console.error("[StateNames] Error reloading registry on NOTIFY:", err);
+				});
+			};
+
+			acquiredClient.on("notification", reloadHandler);
+			this.notifySubscription = {
+				client: acquiredClient,
+				unsubscribe: async () => {
+					try {
+						await acquiredClient.query("UNLISTEN workflow_templates_changed");
+					} catch {
+						// LISTEN may already be torn down; release anyway.
+					}
+					acquiredClient.removeListener("notification", reloadHandler);
+					acquiredClient.release();
+				},
+			};
+			// Hand-off succeeded; do not release in the finally guard below.
+			client = null;
+		} catch (error) {
+			console.error("[StateNames] Failed to set up NOTIFY listener:", error);
+			// Non-fatal; registry will still work without live reload.
+			// Release the client we acquired so it returns to the pool.
+			if (client) {
+				try {
+					client.release();
+				} catch {
+					// best-effort
+				}
+			}
+		}
+	}
+
+	/**
+	 * Release any held NOTIFY PoolClient. Safe to call on a never-loaded registry.
+	 * P522: callers that throw away a registry should call this first to avoid pool leaks.
+	 */
+	async dispose(): Promise<void> {
+		if (this.notifySubscription) {
+			try {
+				await this.notifySubscription.unsubscribe();
+			} finally {
+				this.notifySubscription = null;
 			}
 		}
 	}
@@ -355,8 +395,19 @@ let globalRegistry: StateNamesRegistry | null = null;
 /**
  * Load the state-names registry from the database.
  * Call this once at process startup.
+ *
+ * P522: dispose the previous global registry before installing a new one so
+ * repeated calls don't leak NOTIFY PoolClients. Prior behaviour orphaned the
+ * old registry's subscription on every reload — the root of the pool exhaustion.
  */
 export async function loadStateNames(pool: Pool): Promise<StateNamesRegistry> {
+	if (globalRegistry) {
+		try {
+			await globalRegistry.dispose();
+		} catch (err) {
+			console.error("[StateNames] Failed to dispose prior registry:", err);
+		}
+	}
 	const registry = new StateNamesRegistry();
 	await registry.load(pool);
 	globalRegistry = registry;
