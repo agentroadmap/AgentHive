@@ -439,6 +439,14 @@ export class RoadmapServer {
 	private proposalToWsFormat(p: any): any {
 		const canonicalDisplayId = p.displayId || p.display_id || p.id || "";
 		const websocketId = p.id || p.display_id || "";
+		const sanitizedLabels = Array.isArray(p.labels)
+			? p.labels
+					.map((label: unknown) => String(label).trim())
+					.filter(
+						(label: string) =>
+							label.length > 0 && label !== "[object Object]",
+					)
+			: [];
 		return {
 			id: canonicalDisplayId || `#${websocketId}`,
 			displayId: canonicalDisplayId,
@@ -465,13 +473,11 @@ export class RoadmapServer {
 			requiredCapabilities: p.required_capabilities || [],
 			needsCapabilities: p.needs_capabilities || [],
 			liveActivity: p.liveActivity || null,
+			maturity: p.maturity || null,
 			maturityLevel: p.maturity === "new" ? 0 : p.maturity === "mature" ? 5 : p.maturity === "obsolete" ? 10 : null,
 			repositoryPath: p.filePath || null,
 			budgetLimitUsd: p.budgetLimitUsd || 0,
-			tags:
-				Array.isArray(p.labels) && p.labels.length > 0
-					? p.labels.join(",")
-					: null,
+			tags: sanitizedLabels.length > 0 ? sanitizedLabels.join(",") : null,
 			createdAt: p.createdDate || p.createdAt || "",
 			updatedAt: p.updatedDate || p.updatedAt || "",
 		};

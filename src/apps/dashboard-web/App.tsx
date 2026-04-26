@@ -50,7 +50,9 @@ function toSharedProposal(proposal: WebSocketProposal): Proposal {
 		? proposal.tags
 				.split(",")
 				.map((label) => label.trim())
-				.filter((label) => label.length > 0)
+				.filter(
+					(label) => label.length > 0 && label !== "[object Object]",
+				)
 		: [];
 	return {
 		id: proposal.displayId || proposal.id,

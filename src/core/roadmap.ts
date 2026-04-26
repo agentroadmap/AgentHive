@@ -955,6 +955,7 @@ export class Core {
 				.filter(
 					(label) =>
 						label.length > 0 &&
+						label !== "[object Object]" &&
 						!label.includes("\n") &&
 						!metadataPrefixes.some((prefix) =>
 							label.toLowerCase().startsWith(prefix),
