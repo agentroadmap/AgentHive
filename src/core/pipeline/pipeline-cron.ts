@@ -6,6 +6,7 @@
  * rows that already exist while the orchestrator handles proposal_gate_ready.
  */
 
+import { getMcpUrl, getDaemonUrl } from "../../shared/runtime/endpoints.ts";
 import { basename } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
@@ -16,7 +17,7 @@ import {
 	type ScorableProposal,
 } from "../orchestration/pickup-scorer.ts";
 
-const MCP_URL = process.env.MCP_URL || "http://127.0.0.1:6421/sse";
+const MCP_URL = process.env.MCP_URL || getMcpUrl();
 
 const MATURITY_CHANGED_CHANNEL = "proposal_maturity_changed";
 const TRANSITION_QUEUED_CHANNEL = "transition_queued";

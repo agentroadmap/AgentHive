@@ -13,12 +13,11 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { mcpText } from "../mcp-result.ts";
-
-const MCP_URL = "http://127.0.0.1:6421/sse";
+import { getMcpUrl } from "../../src/shared/runtime/endpoints.js";
 
 export async function systemMonitor() {
   const client = new Client({ name: "system-monitor", version: "1.0.0" });
-  const transport = new SSEClientTransport(new URL(MCP_URL));
+  const transport = new SSEClientTransport(new URL(getMcpUrl()));
   
   await client.connect(transport);
   

@@ -1,4 +1,5 @@
 /**
+import { getMcpUrl } from "../src/shared/runtime/endpoints.js";
  * AgentHive Orchestrator — Event-driven agent dispatcher with dynamic agent deployment.
  * 
  * When state machine calls:
@@ -14,7 +15,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { getPool, query } from "../src/infra/postgres/pool.ts";
 
-const MCP_URL = "http://127.0.0.1:6421/sse";
+const MCP_URL = getMcpUrl();
 
 const logger = {
   log: (...args: unknown[]) => console.log("[Orchestrator]", ...args),

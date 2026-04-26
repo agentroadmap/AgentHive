@@ -1,8 +1,9 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { getMcpUrl } from "../src/shared/runtime/endpoints.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 
 async function main() {
-  const transport = new SSEClientTransport(new URL("http://127.0.0.1:6421/sse"));
+  const transport = new SSEClientTransport(new URL(getMcpUrl()));
   const client = new Client({ name: "hermes-subscription-checker", version: "1.0.0" });
   await client.connect(transport);
 

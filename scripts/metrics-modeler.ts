@@ -1,4 +1,5 @@
 /**
+import { getMcpUrl } from "../src/shared/runtime/endpoints.js";
  * AgentHive Daily Efficiency View & Enhanced Metrics
  * 
  * Creates daily efficiency view and combined metrics
@@ -8,7 +9,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 
-const MCP_URL = "http://127.0.0.1:6421/sse";
+const MCP_URL = getMcpUrl();
 
 export async function createEfficiencyViews() {
   const client = new Client({ name: "metrics-modeler", version: "1.0.0" });

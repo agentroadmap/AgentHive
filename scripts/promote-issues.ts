@@ -1,7 +1,8 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { getMcpUrl } from "../src/shared/runtime/endpoints.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 
-const MCP_URL = "http://127.0.0.1:6421/sse";
+const MCP_URL = getMcpUrl();
 
 async function main() {
   const transport = new SSEClientTransport(new URL(MCP_URL));

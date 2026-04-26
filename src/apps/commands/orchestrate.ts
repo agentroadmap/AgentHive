@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process";
+import { getMcpUrl, getDaemonUrl } from "../../shared/runtime/endpoints.ts";
 import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import * as clack from "@clack/prompts";
@@ -269,7 +270,7 @@ async function setupAgentWorktree(
 		const heartbeatSyncEndpoint =
 			useDaemon && daemonUrl
 				? `${daemonUrl}/api/heartbeat`
-				: "http://localhost:6420/api/heartbeat";
+				: "${getDaemonUrl()}/api/heartbeat";
 		const openClawConfig = {
 			identity: {
 				name: agentName,

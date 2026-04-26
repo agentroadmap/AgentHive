@@ -1,6 +1,14 @@
 // Seed P070 and P071 via MCP SSE
 const http = require("node:http");
 
+// Get MCP URL from environment (required; no literal default per P449)
+const MCP_URL_STR = process.env.AGENTHIVE_MCP_URL;
+if (!MCP_URL_STR) {
+	console.error("ERROR: MCP URL not configured. Set AGENTHIVE_MCP_URL environment variable.");
+	process.exit(1);
+}
+const MCP_URL = new URL(MCP_URL_STR);
+
 const proposals = [
 	{
 		display_id: "P070",
@@ -34,7 +42,7 @@ const proposals = [
 // Connect SSE and listen for events
 function connectSSE() {
 	return new Promise((resolve, reject) => {
-		const req = http.get("http://localhost:6421/sse", (res) => {
+		const req = http.get(MCP_URL.toString(), (res) => {
 			let buffer = "";
 			let sessionId = null;
 			const events = [];
@@ -109,7 +117,7 @@ function connectSSE() {
 						// POST the message
 						const postBody = Buffer.from(body);
 						const postReq = http.request(
-							`http://localhost:6421/messages?sessionId=${handle.sessionId}`,
+							`${MCP_URL.protocol}//${MCP_URL.host}/messages?sessionId=${handle.sessionId}`,
 							{
 								method: "POST",
 								headers: {

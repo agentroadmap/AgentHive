@@ -1,4 +1,5 @@
 /**
+import { getMcpUrl } from "../src/shared/runtime/endpoints.js";
  * AgentHive Orchestrator — Refined squad-based dispatch
  * 
  * Implements Gemini's recommendations for 100-agent fleet:
@@ -26,7 +27,7 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { mcpText, parseMcpJson } from "./mcp-result.ts";
 import { getPool, query } from "../src/infra/postgres/pool.ts";
 
-const MCP_URL = "http://127.0.0.1:6421/sse";
+const MCP_URL = getMcpUrl();
 
 const logger = {
   log: (...args: unknown[]) => console.log("[Orchestrator]", ...args),

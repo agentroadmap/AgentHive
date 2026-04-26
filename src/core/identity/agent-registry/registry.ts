@@ -13,6 +13,8 @@
  *   created_at      — registration timestamp
  */
 
+import { getMcpUrl, getDaemonUrl } from "../../shared/runtime/endpoints.ts";
+
 import { randomUUID } from "node:crypto";
 import { query } from "../../../infra/postgres/pool.ts";
 import { AUTHORITY_IDENTITIES, type TrustTier } from "../../../infra/trust/trust-model.ts";
@@ -23,7 +25,7 @@ import type {
 	RegistrationResponse,
 } from "./types.ts";
 
-const MCP_URL = process.env.MCP_URL || "http://localhost:6421/mcp";
+// MCP_URL now resolved at runtime via getMcpUrl()
 
 /** Generate unique suffix for contract agents */
 function uniqueSuffix(): string {
@@ -211,7 +213,7 @@ async function announcePresence(
 	content: string,
 ): Promise<void> {
 	try {
-		const response = await fetch(MCP_URL, {
+		const response = await fetch(getMcpUrl(), {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({

@@ -8,6 +8,7 @@ import { stdin as input } from "node:process";
 import { createInterface } from "node:readline/promises";
 import * as clack from "@clack/prompts";
 import { Command } from "commander";
+import { getDaemonUrl } from "../shared/runtime/endpoints.ts";
 import { resolveBoardDataSource } from "./board-source.ts";
 import { initializeProject } from "../core/infrastructure/init.ts";
 import {
@@ -2416,7 +2417,7 @@ proposalCmd
 			process.exit(1);
 		}
 		try {
-			const resp = await fetch("http://localhost:6420/mcp", {
+			const resp = await fetch(`${getDaemonUrl()}/mcp`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
@@ -2449,7 +2450,7 @@ proposalCmd
 	.option("-n, --limit <number>", "limit number of results")
 	.action(async (proposalId, options) => {
 		try {
-			const resp = await fetch("http://localhost:6420/mcp", {
+			const resp = await fetch(`${getDaemonUrl()}/mcp`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
@@ -2479,7 +2480,7 @@ proposalCmd
 	.description("delete a note (must be author)")
 	.action(async (noteId, agent) => {
 		try {
-			const resp = await fetch("http://localhost:6420/mcp", {
+			const resp = await fetch(`${getDaemonUrl()}/mcp`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({

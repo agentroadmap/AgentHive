@@ -5,6 +5,7 @@
  * Supports heartbeat (periodic) and on-demand pings.
  */
 
+import { getMcpUrl, getDaemonUrl } from "../../shared/runtime/endpoints.ts";
 import type {
 	AgentHealth,
 	HealthConfig,
@@ -13,7 +14,7 @@ import type {
 	PongResponse,
 } from "./types.ts";
 
-const MCP_URL = process.env.MCP_URL || "http://localhost:6421/mcp";
+// MCP_URL now resolved at runtime via getMcpUrl()
 
 /** Default health config */
 const DEFAULT_CONFIG: HealthConfig = {

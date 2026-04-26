@@ -16,6 +16,7 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
+import { getMcpUrl, getDaemonUrl } from "../../shared/runtime/endpoints.ts";
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { hostname } from "node:os";
@@ -848,7 +849,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		agentEnv,
 		extraEnv: {
 			...extraEnv,
-			MCP_URL: process.env.MCP_URL ?? "http://127.0.0.1:6421/sse",
+			MCP_URL: process.env.MCP_URL ?? getMcpUrl(),
 		},
 	});
 
