@@ -24,6 +24,7 @@ import {
 	endLiaisonSession,
 } from "../src/infra/agency/liaison-service.ts";
 import { checkAndMarkDormant } from "../src/infra/agency/liaison-service.ts";
+import { loadStateNames } from "../src/core/workflow/state-names.ts";
 
 const agentIdentity =
 	process.env.AGENTHIVE_AGENT_IDENTITY ?? `copilot/agency-${hostname()}`;
@@ -75,6 +76,18 @@ async function main() {
 	const pool = getPool();
 	await pool.query("SELECT 1");
 	console.log("[CopilotAgency] Database connection verified");
+
+	// Load the per-process StateNames registry. spawnAgent uses RfcStates
+	// (e.g. RfcStates.COMPLETE) when assembling the proposal context package.
+	// Without this, every spawn throws "[StateNames] Registry not loaded".
+	try {
+		await loadStateNames(pool);
+		console.log("[CopilotAgency] State-names registry loaded from database");
+	} catch (err) {
+		console.error("[CopilotAgency] Failed to load state-names registry:", err);
+		// Continue: spawnAgent's downstream calls will fail loudly, but the
+		// agency stays up so the operator can fix the registry.
+	}
 
 	// Register agency with liaison service (P464)
 	try {

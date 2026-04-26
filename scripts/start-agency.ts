@@ -101,6 +101,19 @@ async function main() {
 	await pool.query("SELECT 1");
 	console.log("[Agency] Database connection verified");
 
+	// Load the per-process StateNames registry — spawnAgent reads RfcStates
+	// when assembling proposal context. Without this every spawn throws
+	// "[StateNames] Registry not loaded".
+	try {
+		const { loadStateNames } = await import(
+			"../src/core/workflow/state-names.ts"
+		);
+		await loadStateNames(pool);
+		console.log("[Agency] State-names registry loaded from database");
+	} catch (err) {
+		console.error("[Agency] Failed to load state-names registry:", err);
+	}
+
 	const provider = await resolveProvider();
 	console.log(`[Agency] Provider resolved as: ${provider}`);
 
