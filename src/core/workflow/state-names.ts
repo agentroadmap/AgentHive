@@ -392,26 +392,44 @@ export class StateNamesRegistry {
 // Global singleton instance
 let globalRegistry: StateNamesRegistry | null = null;
 
+// P522 (concurrency hardening): serialize loadStateNames() calls.
+// Without this lock, N concurrent SSE sessions calling createMcpServer() →
+// loadStateNames() race to overwrite globalRegistry. Each loser orphans its
+// just-acquired NOTIFY PoolClient because dispose() only ever sees the most
+// recent prior global, not the in-flight ones.
+let loadingPromise: Promise<StateNamesRegistry> | null = null;
+
 /**
  * Load the state-names registry from the database.
- * Call this once at process startup.
  *
- * P522: dispose the previous global registry before installing a new one so
- * repeated calls don't leak NOTIFY PoolClients. Prior behaviour orphaned the
- * old registry's subscription on every reload — the root of the pool exhaustion.
+ * Concurrent callers receive the same in-flight Promise — only ONE
+ * StateNamesRegistry is created per "load wave", and its NOTIFY PoolClient
+ * is the only one we leave on the pool. Subsequent waves dispose the prior
+ * global before installing a new one. Together this caps the leak at exactly
+ * one PoolClient per process, regardless of SSE session churn.
  */
 export async function loadStateNames(pool: Pool): Promise<StateNamesRegistry> {
-	if (globalRegistry) {
-		try {
-			await globalRegistry.dispose();
-		} catch (err) {
-			console.error("[StateNames] Failed to dispose prior registry:", err);
-		}
+	if (loadingPromise) {
+		return loadingPromise;
 	}
-	const registry = new StateNamesRegistry();
-	await registry.load(pool);
-	globalRegistry = registry;
-	return registry;
+	loadingPromise = (async () => {
+		try {
+			if (globalRegistry) {
+				try {
+					await globalRegistry.dispose();
+				} catch (err) {
+					console.error("[StateNames] Failed to dispose prior registry:", err);
+				}
+			}
+			const registry = new StateNamesRegistry();
+			await registry.load(pool);
+			globalRegistry = registry;
+			return registry;
+		} finally {
+			loadingPromise = null;
+		}
+	})();
+	return loadingPromise;
 }
 
 /**
