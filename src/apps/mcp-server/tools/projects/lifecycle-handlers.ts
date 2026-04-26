@@ -10,6 +10,7 @@
 
 import { mkdir, stat } from "node:fs/promises";
 import { query } from "../../../../postgres/pool.ts";
+import { projectCreateSaga } from "../../../../core/saga/saga-create.ts";
 import type { CallToolResult } from "../../types.ts";
 
 /**
@@ -85,25 +86,70 @@ function computeWorktreeRoot(slug: string, worktreeRootArg?: string): string {
 }
 
 /**
- * Create a new project (P483 Phase 1).
+ * Create a new project (P483 Phase 1 + P495 Saga).
+ *
+ * Entry point that delegates to either projectCreateWithSaga (if AGENTHIVE_TENANT_SAGA=true)
+ * or projectCreateLegacy (default, P483 worktree-only mode).
+ *
+ * @param args {slug, name, worktree_root?, default_workflow_template?}
+ * @returns {ok, project_id, dsn_validated} (saga mode) or
+ *          {ok, project, worktree_created, repair_needed, note?} (legacy mode)
+ */
+export async function projectCreate(args: {
+	slug?: string;
+	name?: string;
+	worktree_root?: string;
+	default_workflow_template?: string;
+}): Promise<CallToolResult> {
+	const useSaga = process.env.AGENTHIVE_TENANT_SAGA === 'true';
+	if (useSaga) {
+		return projectCreateWithSaga(args);
+	}
+	return projectCreateLegacy(args);
+}
+
+/**
+ * P495 Saga-based project creation (full tenant DB bootstrap)
+ */
+async function projectCreateWithSaga(args: {
+	slug?: string;
+	name?: string;
+	worktree_root?: string;
+	default_workflow_template?: string;
+}): Promise<CallToolResult> {
+	try {
+		if (!args.slug || !args.name) {
+			return errorResult(
+				"projectCreate (saga mode) requires 'slug' and 'name'",
+				new Error("Missing required args")
+			);
+		}
+
+		const result = await projectCreateSaga(args.slug, args.name);
+
+		if (!result.ok) {
+			return jsonResult(result);
+		}
+
+		return jsonResult({
+			ok: true,
+			project_id: result.project_id,
+			dsn_validated: result.dsn_validated,
+			message: `Project '${args.slug}' created successfully with tenant DB`,
+		});
+	} catch (err) {
+		return errorResult("Saga project creation failed", err);
+	}
+}
+
+/**
+ * Legacy P483 Phase 1 project creation (worktree-only, no tenant DB).
  *
  * AC #2: Validate slug against safe pattern.
  * AC #100: Transactional insert with worktree orphan detection.
  * AC #103: On failed directory stat, queue for repair instead of failing.
- *
- * Transaction boundary:
- *   - BEGIN
- *   - INSERT into roadmap.project
- *   - Stat worktree directory (fails gracefully → repair_queue row)
- *   - COMMIT
- * Post-commit:
- *   - mkdir -p worktree_root with 0o775
- *   - chown (requires sudo; documented in response)
- *
- * @param args {slug, name, worktree_root?, default_workflow_template?}
- * @returns {ok, project, worktree_created, repair_needed, note?}
  */
-export async function projectCreate(args: {
+async function projectCreateLegacy(args: {
 	slug?: string;
 	name?: string;
 	worktree_root?: string;
@@ -112,7 +158,7 @@ export async function projectCreate(args: {
 	try {
 		// Validate slug
 		if (!args.slug) {
-			return errorResult("projectCreate requires 'slug'", new Error("Missing slug"));
+			return errorResult("projectCreateLegacy requires 'slug'", new Error("Missing slug"));
 		}
 
 		const slugValidationError = validateSlug(args.slug);
@@ -124,7 +170,7 @@ export async function projectCreate(args: {
 
 		// Validate name
 		if (!args.name || typeof args.name !== "string") {
-			return errorResult("projectCreate requires 'name'", new Error("Missing or invalid name"));
+			return errorResult("projectCreateLegacy requires 'name'", new Error("Missing or invalid name"));
 		}
 
 		const name = args.name.trim();
