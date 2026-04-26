@@ -8,7 +8,10 @@
  * that was previously inline in agent-spawner.ts.
  *
  * P228: Cubic Runtime Abstraction
+ * P450 V1: defaultModel() wrapped with route-first resolution + fallback audit
  */
+
+import { emitCliBuilderFallback, getRouteForBuilder } from "./cli-builder-route-resolver.ts";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -357,4 +360,28 @@ export function isKnownCli(cliName: string): cliName is CliName {
  */
 export function listCliNames(): CliName[] {
 	return Object.keys(BUILDERS) as CliName[];
+}
+
+/**
+ * P450 V1: Resolve model for a builder with route-first logic.
+ *
+ * Attempt to fetch an active route from DB for the given builder.
+ * If found, return the route's model. If not found, emit fallback audit
+ * and return the builder's hardcoded defaultModel().
+ *
+ * This async wrapper ensures spawners can route through DB before falling
+ * back to legacy hardcoded defaults.
+ */
+export async function resolveBuilderModel(cliName: string): Promise<string> {
+	const builder = getCliBuilder(cliName);
+	const route = await getRouteForBuilder(cliName);
+
+	if (route.found) {
+		return route.modelName;
+	}
+
+	// No route found; emit audit and use hardcoded default
+	const defaultModel = builder.defaultModel();
+	await emitCliBuilderFallback(cliName, defaultModel);
+	return defaultModel;
 }
