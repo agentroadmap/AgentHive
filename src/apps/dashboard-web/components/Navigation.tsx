@@ -1,4 +1,5 @@
 import type React from "react";
+import ProjectChip from "./ProjectChip";
 import ThemeToggle from "./ThemeToggle";
 
 interface NavigationProps {
@@ -25,7 +26,11 @@ const Navigation: React.FC<NavigationProps> = ({ projectName }) => {
 						Roadmap.md
 					</a>
 				</div>
-				<ThemeToggle />
+				<div className="flex items-center gap-3">
+					{/* P477 AC-2: global project scope switcher */}
+					<ProjectChip />
+					<ThemeToggle />
+				</div>
 			</div>
 		</nav>
 	);

@@ -1,4 +1,5 @@
 import type { ProposalStatistics } from "../../../core/infrastructure/statistics.ts";
+import { getStoredProjectId } from "./project-scope-storage";
 import type {
 	Agent,
 	Channel,
@@ -92,13 +93,22 @@ export class ApiClient {
 				const controller = new AbortController();
 				const timeoutId = setTimeout(() => controller.abort(), timeout);
 
+				// P477 AC-2: every API request inherits the operator's
+				// project scope from localStorage so the server's
+				// resolveProjectScope picks the right tenant.
+				const projectId = getStoredProjectId();
+				const mergedHeaders: Record<string, string> = {
+					"Content-Type": "application/json",
+					...((options.headers as Record<string, string>) ?? {}),
+				};
+				if (projectId != null && !mergedHeaders["X-Project-Id"]) {
+					mergedHeaders["X-Project-Id"] = String(projectId);
+				}
+
 				const response = await fetch(url, {
 					...options,
 					signal: controller.signal,
-					headers: {
-						"Content-Type": "application/json",
-						...options.headers,
-					},
+					headers: mergedHeaders,
 				});
 
 				clearTimeout(timeoutId);

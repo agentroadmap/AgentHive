@@ -2,6 +2,7 @@ import type React from "react";
 import { useCallback, useEffect, useState } from "react";
 import type { Agent } from "../../../shared/types";
 import { apiClient } from "../lib/api";
+import AgentDetail from "./AgentDetail";
 import LoadingSpinner from "./LoadingSpinner";
 
 interface AgentsPageProps {
@@ -40,6 +41,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ agents: propAgents }) => {
 	const [sortBy, setSortBy] = useState<
 		"name" | "status" | "lastSeen" | "trustScore"
 	>("name");
+	const [selectedIdentity, setSelectedIdentity] = useState<string | null>(null);
 
 	const fetchData = useCallback(async () => {
 		try {
@@ -136,9 +138,13 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ agents: propAgents }) => {
 
 			<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 				{sortedAgents.map((agent) => (
-					<div
+					<button
+						type="button"
 						key={agent.name}
-						className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-3"
+						onClick={() =>
+							setSelectedIdentity(agent.identity || agent.name || null)
+						}
+						className="text-left bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-3 hover:border-blue-400 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
 					>
 						<div className="flex items-center justify-between">
 							<h3 className="font-semibold text-gray-900 dark:text-gray-100">
@@ -174,7 +180,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ agents: propAgents }) => {
 								))}
 							</div>
 						)}
-					</div>
+					</button>
 				))}
 			</div>
 
@@ -182,6 +188,13 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ agents: propAgents }) => {
 				<div className="text-center py-12 text-gray-500 dark:text-gray-400">
 					No agents registered
 				</div>
+			)}
+
+			{selectedIdentity && (
+				<AgentDetail
+					identity={selectedIdentity}
+					onClose={() => setSelectedIdentity(null)}
+				/>
 			)}
 		</div>
 	);

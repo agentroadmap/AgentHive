@@ -7,6 +7,8 @@ import type {
 } from "../hooks/useWebSocket";
 import { apiClient } from "../lib/api";
 import ActivityFeed from "./ActivityFeed";
+import AgentDetail from "./AgentDetail";
+import LiveOpsPanel from "./LiveOpsPanel";
 import MessageStream from "./MessageStream";
 
 interface DashboardPageProps {
@@ -129,6 +131,9 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 	const [releasingProposalId, setReleasingProposalId] = useState<string | null>(
 		null,
 	);
+	const [selectedAgentIdentity, setSelectedAgentIdentity] = useState<
+		string | null
+	>(null);
 
 	const fetchControlPlaneData = useCallback(async () => {
 		const [statusData, routesData, dispatchData, pulseData] = await Promise.all([
@@ -252,6 +257,16 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 
 	return (
 		<div className="space-y-8 px-4 py-6 md:px-6 xl:px-8">
+			{/* P477 AC-3: live operations overview */}
+			<LiveOpsPanel onAgentClick={(id) => setSelectedAgentIdentity(id)} />
+
+			{selectedAgentIdentity && (
+				<AgentDetail
+					identity={selectedAgentIdentity}
+					onClose={() => setSelectedAgentIdentity(null)}
+				/>
+			)}
+
 			<section className="border-b border-gray-200 pb-6 dark:border-gray-800">
 				<div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
 					<div className="space-y-3">

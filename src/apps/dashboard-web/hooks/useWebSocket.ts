@@ -6,6 +6,10 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	getStoredProjectId,
+	onProjectScopeChange,
+} from "../lib/project-scope-storage";
 
 export interface WebSocketMessage {
 	type: string;
@@ -138,19 +142,36 @@ export function useWebSocket(
 	const connect = useCallback(() => {
 		// Clean up existing connection
 		if (wsRef.current) {
-			wsRef.current.close();
+			// Strip handlers off the old socket so its onclose can't
+			// reschedule another reconnect after we replace it. Without this
+			// guard, every replaced socket fires onclose → setTimeout(connect),
+			// causing an exponential snapshot-loop on the server.
+			const old = wsRef.current;
+			old.onopen = null;
+			old.onclose = null;
+			old.onerror = null;
+			old.onmessage = null;
+			try {
+				old.close();
+			} catch {
+				// ignore
+			}
 		}
 
 		const ws = new WebSocket(wsUrl);
 		wsRef.current = ws;
 
 		ws.onopen = () => {
+			if (wsRef.current !== ws) return;
 			console.log("[WS] Connected to roadmap bridge");
 			setConnected(true);
-			// Subscribe to the bridge snapshot stream
+			// Subscribe to the bridge snapshot stream.
+			// P477 AC-2: include the operator's selected project_id so the
+			// server-side snapshot/insert/update broadcasts are scoped.
 			ws.send(
 				JSON.stringify({
 					type: "subscribe",
+					project_id: getStoredProjectId(),
 					tables: [
 						"proposal",
 						"workforce_registry",
@@ -248,7 +269,11 @@ export function useWebSocket(
 					case "sync":
 						// Refresh snapshot after a bridge sync event
 						ws.send(
-							JSON.stringify({ type: "subscribe", tables: ["proposal"] }),
+							JSON.stringify({
+								type: "subscribe",
+								project_id: getStoredProjectId(),
+								tables: ["proposal"],
+							}),
 						);
 						break;
 
@@ -265,9 +290,15 @@ export function useWebSocket(
 		};
 
 		ws.onclose = () => {
+			// Ignore close events for sockets we already replaced — their
+			// reconnect would double-fire and trigger snapshot floods.
+			if (wsRef.current !== ws) return;
 			console.log("[WS] Disconnected");
 			setConnected(false);
 			// Auto-reconnect after 3 seconds
+			if (reconnectTimeoutRef.current) {
+				clearTimeout(reconnectTimeoutRef.current);
+			}
 			reconnectTimeoutRef.current = setTimeout(() => {
 				console.log("[WS] Reconnecting...");
 				connect();
@@ -275,6 +306,7 @@ export function useWebSocket(
 		};
 
 		ws.onerror = (err) => {
+			if (wsRef.current !== ws) return;
 			console.error("[WS] Error:", err);
 			ws.close();
 		};
@@ -291,6 +323,34 @@ export function useWebSocket(
 			}
 		};
 	}, [connect]);
+
+	// P477 AC-2: when the operator switches projects, push a fresh
+	// subscribe payload through the existing WS so the server scopes
+	// snapshot replies to the new project. Reconnecting would also work
+	// but would trigger a snapshot flood; this re-uses the open socket.
+	useEffect(() => {
+		const off = onProjectScopeChange((id) => {
+			const ws = wsRef.current;
+			if (!ws || ws.readyState !== WebSocket.OPEN) return;
+			try {
+				ws.send(
+					JSON.stringify({
+						type: "subscribe",
+						project_id: id,
+						tables: [
+							"proposal",
+							"workforce_registry",
+							"workforce_pulse",
+							"message_ledger",
+						],
+					}),
+				);
+			} catch {
+				// best-effort; reconnect will eventually pick up the new scope.
+			}
+		});
+		return off;
+	}, []);
 
 	const reconnect = useCallback(() => {
 		if (reconnectTimeoutRef.current) {

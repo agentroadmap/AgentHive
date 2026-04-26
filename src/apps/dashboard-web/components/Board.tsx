@@ -161,19 +161,26 @@ const Board: React.FC<BoardProps> = ({
                             ${proposal.id === highlightProposalId ? "ring-2 ring-blue-400" : ""}
                           `}
 												>
-													<div className="flex items-start justify-between mb-1">
-														<span className="text-xs font-mono text-gray-400">
+													<div
+														className={`-mx-3 -mt-3 mb-2 px-3 py-1 rounded-t-lg flex items-center justify-between gap-2 ${getMaturityTitleBarColor(proposal.maturity)}`}
+													>
+														<span className="text-xs font-mono opacity-80">
 															{proposal.displayId}
 														</span>
-														<span
-															className={`text-xs px-1.5 py-0.5 rounded ${getPriorityColor(proposal.priority)}`}
-														>
-															{proposal.priority}
-														</span>
+														<div className="flex items-center gap-1.5">
+															{proposal.maturity && (
+																<span className="text-[10px] uppercase tracking-wide font-semibold opacity-90">
+																	{proposal.maturity}
+																</span>
+															)}
+															<span
+																className={`text-xs px-1.5 py-0.5 rounded ${getPriorityColor(proposal.priority)}`}
+															>
+																{proposal.priority}
+															</span>
+														</div>
 													</div>
-													<h4
-														className={`text-sm font-medium line-clamp-2 ${getMaturityTitleColor(proposal.maturity)}`}
-													>
+													<h4 className="text-sm font-medium line-clamp-2 text-gray-800 dark:text-gray-100">
 														{proposal.title}
 													</h4>
 													<div className="mt-2 flex items-center gap-2 text-xs text-gray-400">
@@ -237,18 +244,18 @@ function getPriorityColor(priority: string): string {
 	}
 }
 
-function getMaturityTitleColor(maturity?: string | null): string {
+function getMaturityTitleBarColor(maturity?: string | null): string {
 	switch ((maturity ?? "").toLowerCase()) {
 		case "mature":
-			return "text-emerald-700 dark:text-emerald-300";
+			return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200";
 		case "active":
-			return "text-blue-700 dark:text-blue-300";
+			return "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200";
 		case "obsolete":
-			return "text-gray-400 dark:text-gray-500";
+			return "bg-gray-200 text-gray-500 dark:bg-gray-800 dark:text-gray-500";
 		case "new":
-			return "text-amber-700 dark:text-amber-300";
+			return "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200";
 		default:
-			return "text-gray-800 dark:text-gray-100";
+			return "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300";
 	}
 }
 
