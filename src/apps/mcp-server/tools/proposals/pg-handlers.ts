@@ -78,20 +78,121 @@ export class PgProposalHandlers {
 		status?: string;
 		type?: string;
 		proposal_type?: string;
+		limit?: number;
+		include_terminal?: boolean;
+		include_metadata?: boolean;
 	}): Promise<CallToolResult> {
 		try {
-			const proposals = await pg.listProposals({
-				status: args.status,
-				type: args.type ?? args.proposal_type,
-			});
-			if (!proposals || proposals.length === 0) {
-				return { content: [{ type: "text", text: "No proposals found." }] };
+			const limit = Math.min(Math.max(args.limit ?? 50, 1), 500);
+			const includeTerminal = args.include_terminal === true;
+			const includeMetadata = args.include_metadata === true;
+
+			let sql = `SELECT id, display_id, title, status, type, maturity, created_at${includeMetadata ? ", summary, design, motivation" : ""}
+			       FROM roadmap_proposal.proposal`;
+			const params: (string | number)[] = [];
+			const conditions: string[] = [];
+
+			// Terminal statuses: Complete, Deployed, Recycled
+			const terminalStatuses = ["Complete", "Deployed", "Recycled"];
+
+			if (args.status) {
+				conditions.push(`status = $${params.length + 1}`);
+				params.push(args.status);
+			} else if (!includeTerminal) {
+				conditions.push(`status NOT IN (${terminalStatuses.map((_, i) => `$${params.length + i + 1}`).join(", ")})`);
+				terminalStatuses.forEach((s) => params.push(s));
 			}
-			const lines = proposals.map((p) => {
-				const did = p.display_id ?? `#${p.id}`;
-				return `[${did}] ${p.title || "(no title)"} — status: ${p.status}, type: ${p.type}, maturity: ${p.maturity ?? "unknown"}`;
-			});
-			return { content: [{ type: "text", text: lines.join("\n") }] };
+
+			if (args.type ?? args.proposal_type) {
+				conditions.push(`type = $${params.length + 1}`);
+				params.push(args.type ?? args.proposal_type);
+			}
+
+			if (conditions.length) {
+				sql += ` WHERE ${conditions.join(" AND ")}`;
+			}
+			sql += ` ORDER BY created_at DESC LIMIT $${params.length + 1}`;
+			params.push(limit);
+
+			const [{ rows }, countResult] = await Promise.all([
+				query(sql, params),
+				query<{ total: string }>(
+					`SELECT COUNT(*)::text AS total FROM roadmap_proposal.proposal${
+						conditions.length ? ` WHERE ${conditions.join(" AND ")}` : ""
+					}`,
+					params.slice(0, -1),
+				),
+			]);
+
+			const totalMatching = Number(countResult.rows[0]?.total ?? rows.length);
+			const truncated = totalMatching > rows.length;
+
+			if (!rows.length) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{
+									total: 0,
+									returned: 0,
+									truncated: false,
+									limit,
+									filter: {
+										status: args.status,
+										type: args.type ?? args.proposal_type,
+										includeTerminal,
+									},
+									note: includeTerminal
+										? "No proposals match the filter."
+										: "No active proposals. Pass include_terminal=true to see complete/deployed.",
+								},
+								null,
+								2,
+							),
+						},
+					],
+				};
+			}
+
+			const items = rows.map((p: any) => ({
+				id: p.id,
+				display_id: p.display_id,
+				title: p.title,
+				status: p.status,
+				type: p.type,
+				maturity: p.maturity,
+				created_at: p.created_at,
+				...(includeMetadata && {
+					summary: p.summary,
+					design: p.design,
+					motivation: p.motivation,
+				}),
+			}));
+
+			return {
+				content: [
+					{
+						type: "text",
+						text: JSON.stringify(
+							{
+								total: totalMatching,
+								returned: rows.length,
+								truncated,
+								limit,
+								filter: {
+									status: args.status,
+									type: args.type ?? args.proposal_type,
+									includeTerminal,
+								},
+								items,
+							},
+							null,
+							2,
+						),
+					},
+				],
+			};
 		} catch (err) {
 			return errorResult("Failed to list proposals", err);
 		}
@@ -193,8 +294,21 @@ export class PgProposalHandlers {
 		body_markdown?: string;
 		tags?: string;
 		author?: string;
+		type?: string;
 	}): Promise<CallToolResult> {
 		try {
+			// P461: Reject type changes — route to schema reconciliation (P436)
+			if ((args as any).type !== undefined) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: "⚠️ prop_update: type changes are not permitted via this MCP surface. Use roadmap.fn_reconcile_proposal_type or migration P436. Affected key: 'type'.",
+						},
+					],
+				};
+			}
+
 			const id = await pg.resolveProposalId(args.id);
 			if (id === null) {
 				return {

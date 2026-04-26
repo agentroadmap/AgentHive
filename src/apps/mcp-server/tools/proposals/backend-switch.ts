@@ -37,6 +37,21 @@ export function registerProposalTools(
 					description:
 						"Minimum maturity gate level when supported by the backend query",
 				},
+				limit: {
+					type: "number",
+					description:
+						"Maximum results to return (default 50, max 500)",
+				},
+				include_terminal: {
+					type: "boolean",
+					description:
+						"Include terminal statuses (Complete, Deployed, Recycled). Default false.",
+				},
+				include_metadata: {
+					type: "boolean",
+					description:
+						"Include metadata fields (summary, design, motivation). Default false.",
+				},
 			},
 		},
 		handler: (args: any) => handlers.listProposals(args),
@@ -173,6 +188,11 @@ export function registerProposalTools(
 				body_markdown: { type: "string" },
 				tags: { type: "string", description: "JSON string" },
 				author: { type: "string" },
+				type: {
+					type: "string",
+					description:
+						"FORBIDDEN: type changes are not permitted via this MCP surface. Use roadmap.fn_reconcile_proposal_type or migration P436.",
+				},
 			},
 			required: ["id"],
 		},
