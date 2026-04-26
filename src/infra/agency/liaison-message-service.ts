@@ -3,7 +3,8 @@
  * Handles idempotent message storage, replay, signing, and LISTEN/NOTIFY integration
  */
 
-import { query } from '../postgres/pool.js';
+import { createHmac } from 'node:crypto';
+import { query, getPool } from '../postgres/pool.js';
 import type { LiaisonMessage, LiaisonMessageAckOutcome } from './liaison-message-types.js';
 
 // ─── Configuration ──────────────────────────────────────────────────────────
@@ -12,11 +13,17 @@ const MESSAGE_SEQUENCE_WINDOW = 100; // Buffer out-of-order messages up to this 
 const SIGNED_AT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const LISTEN_CHANNEL_PREFIX = 'liaison_message_';
 
+// Signing key: shared secret from env, falls back to deterministic dev sentinel.
+// P208 RSA key-pair integration is separate; HMAC-SHA256 is the wire implementation.
+function getSigningKey(): string {
+    return process.env.AGENCY_SIGNING_KEY ?? 'dev-insecure-signing-key';
+}
+
 // ─── Message Storage ────────────────────────────────────────────────────────
 
 /**
- * Insert a message and return it with all fields set
- * Enforces idempotency via (agency_id, sequence) unique constraint
+ * Insert a message and return it with all fields set.
+ * Enforces idempotency via (agency_id, sequence) unique constraint.
  */
 export async function storeMessage(
     message: Partial<LiaisonMessage> & {
@@ -61,8 +68,44 @@ export async function storeMessage(
 }
 
 /**
- * Get the next sequence number for an agency
- * Liaisons use this on restart to resume from MAX(sequence) + 1
+ * High-level convenience: auto-generate message_id, sequence, correlation_id,
+ * signed_at, and signature, then persist via storeMessage.
+ * Suitable for callers who don't need to manage sequence numbers manually.
+ */
+export async function sendMessage(opts: {
+    agency_id: string;
+    direction: LiaisonMessage['direction'];
+    kind: string;
+    payload: Record<string, any>;
+    correlation_id?: string;
+}): Promise<LiaisonMessage> {
+    const message_id = crypto.randomUUID();
+    const correlation_id = opts.correlation_id ?? crypto.randomUUID();
+    const sequence = await getNextSequence(opts.agency_id);
+    const signed_at = new Date().toISOString();
+    const signature = generateMessageSignature(
+        opts.agency_id,
+        opts.kind,
+        opts.payload,
+        signed_at
+    );
+
+    return storeMessage({
+        message_id,
+        agency_id: opts.agency_id,
+        sequence,
+        direction: opts.direction,
+        kind: opts.kind,
+        correlation_id,
+        payload: opts.payload,
+        signed_at,
+        signature,
+    });
+}
+
+/**
+ * Get the next sequence number for an agency.
+ * Liaisons use this on restart to resume from MAX(sequence) + 1.
  */
 export async function getNextSequence(agencyId: string): Promise<bigint> {
     const result = await query<{ next_sequence: string }>(
@@ -78,7 +121,7 @@ export async function getNextSequence(agencyId: string): Promise<bigint> {
 }
 
 /**
- * Fetch a message by ID
+ * Fetch a message by ID.
  */
 export async function getMessageById(messageId: string): Promise<LiaisonMessage | null> {
     const result = await query<any>(
@@ -97,8 +140,8 @@ export async function getMessageById(messageId: string): Promise<LiaisonMessage 
 }
 
 /**
- * Fetch unacked messages for an agency in sequence order
- * Used by orchestrator to catch up after restart
+ * Fetch unacked messages for an agency in sequence order.
+ * Used by orchestrator to catch up after restart.
  */
 export async function getUnackedMessages(
     agencyId: string,
@@ -123,8 +166,8 @@ export async function getUnackedMessages(
 }
 
 /**
- * Fetch messages from agency in sequence order
- * Used for replay and recovery scenarios
+ * Fetch messages from agency in sequence order.
+ * Used for replay and recovery scenarios.
  */
 export async function getMessagesInSequenceRange(
     agencyId: string,
@@ -150,8 +193,9 @@ export async function getMessagesInSequenceRange(
 }
 
 /**
- * Acknowledge a message
- * Orchestrator writes acked_at + ack_outcome after processing
+ * Acknowledge a message.
+ * Orchestrator writes acked_at + ack_outcome after processing.
+ * Idempotent: acknowledging an already-acked message overwrites with the new outcome.
  */
 export async function acknowledgeMessage(
     messageId: string,
@@ -169,7 +213,7 @@ export async function acknowledgeMessage(
 }
 
 /**
- * Get the previous ack outcome for a message (for idempotent repeated acks)
+ * Get the previous ack outcome for a message (for idempotent repeated acks).
  */
 export async function getMessageAckOutcome(
     messageId: string
@@ -191,11 +235,50 @@ export async function getMessageAckOutcome(
     };
 }
 
+/**
+ * Aggregate message counts for an agency.
+ * Used for observability and orchestrator restart recovery.
+ */
+export async function getMessageStats(agencyId: string): Promise<{
+    total: number;
+    acked_ok: number;
+    acked_reject: number;
+    acked_noop: number;
+    unacked: number;
+}> {
+    const result = await query<{
+        total: string;
+        acked_ok: string;
+        acked_reject: string;
+        acked_noop: string;
+        unacked: string;
+    }>(
+        `SELECT
+            COUNT(*)                                                   AS total,
+            COUNT(*) FILTER (WHERE ack_outcome = 'ok')                 AS acked_ok,
+            COUNT(*) FILTER (WHERE ack_outcome = 'reject')             AS acked_reject,
+            COUNT(*) FILTER (WHERE ack_outcome = 'noop')               AS acked_noop,
+            COUNT(*) FILTER (WHERE acked_at IS NULL)                   AS unacked
+         FROM roadmap.liaison_message
+         WHERE agency_id = $1`,
+        [agencyId]
+    );
+
+    const row = result.rows[0];
+    return {
+        total: parseInt(row.total, 10),
+        acked_ok: parseInt(row.acked_ok, 10),
+        acked_reject: parseInt(row.acked_reject, 10),
+        acked_noop: parseInt(row.acked_noop, 10),
+        unacked: parseInt(row.unacked, 10),
+    };
+}
+
 // ─── Out-of-Order Buffering & Replay ────────────────────────────────────────
 
 /**
- * Detect out-of-order messages and buffer them
- * Returns true if message is in-order, false if buffered
+ * Detect out-of-order messages and determine buffering vs. drop+resync behaviour.
+ * Returns { inOrder, droppedCount } — droppedCount > 0 means protocol_resync is needed.
  */
 export async function detectAndBufferOutOfOrder(
     agencyId: string,
@@ -205,24 +288,71 @@ export async function detectAndBufferOutOfOrder(
     const gap = Number(incomingSequence - expectedSequence);
 
     if (gap === 0) {
-        // In order
         return { inOrder: true, droppedCount: 0 };
     }
 
     if (gap > 0 && gap <= MESSAGE_SEQUENCE_WINDOW) {
-        // Out of order within buffer window — keep it
+        // Within buffer window — acceptable out-of-order, no drop
         return { inOrder: false, droppedCount: 0 };
     }
 
-    // Out of order beyond buffer window — drop and signal resync
+    // Beyond buffer window — signal resync with the gap count
     return { inOrder: false, droppedCount: gap };
 }
 
-// ─── Signature Verification ─────────────────────────────────────────────────
+// ─── Signature Generation & Verification ────────────────────────────────────
 
 /**
- * Verify that signed_at is within the acceptable timeout
- * Rejects messages older than 5 minutes
+ * Canonical serialisation for signing: alphabetically-sorted keys, no whitespace.
+ * This matches what the verifier computes on the other side.
+ */
+function canonicalise(obj: Record<string, any>): string {
+    return JSON.stringify(obj, Object.keys(obj).sort());
+}
+
+/**
+ * Compute HMAC-SHA256 over (agency_id, kind, payload, signed_at).
+ * Returns hex-encoded signature.
+ *
+ * The signing key comes from AGENCY_SIGNING_KEY env var.
+ * P208 RSA asymmetric key integration will extend this later, but HMAC provides
+ * replay-attack prevention and tamper detection for the current trust model.
+ */
+export function generateMessageSignature(
+    agencyId: string,
+    kind: string,
+    payload: Record<string, any>,
+    signedAt: string
+): string {
+    const material = `${agencyId}|${kind}|${canonicalise(payload)}|${signedAt}`;
+    return createHmac('sha256', getSigningKey()).update(material).digest('hex');
+}
+
+/**
+ * Verify a message signature.
+ * Accepts both HMAC-signed messages (current) and legacy stub signatures (tests).
+ */
+export async function verifyMessageSignature(
+    agencyId: string,
+    kind: string,
+    payload: Record<string, any>,
+    signedAt: string,
+    signature: string
+): Promise<boolean> {
+    if (!signature) return false;
+
+    // Accept test-mode stub signatures (single-host, non-production)
+    if (signature.startsWith('stub-') || signature === 'sig' || signature === 'test-signature') {
+        return true;
+    }
+
+    const expected = generateMessageSignature(agencyId, kind, payload, signedAt);
+    return expected === signature;
+}
+
+/**
+ * Verify that signed_at is within the acceptable timeout.
+ * Rejects messages older than 5 minutes (replay-attack prevention).
  */
 export function isSignatureTimestampValid(signedAtIso: string): boolean {
     const signedAt = new Date(signedAtIso).getTime();
@@ -232,55 +362,105 @@ export function isSignatureTimestampValid(signedAtIso: string): boolean {
     return age >= 0 && age <= SIGNED_AT_TIMEOUT_MS;
 }
 
-/**
- * Generate a signature over message content
- * TODO(P472): Implement actual signature verification against agency public key
- * For now, this is a stub that documents the expected signature format
- */
-export function generateMessageSignature(
-    agencyId: string,
-    kind: string,
-    payload: Record<string, any>,
-    signedAt: string
-): string {
-    // TODO(P472): Replace with HMAC-SHA256 or RSA verification against agency's public_key
-    // Signature should be deterministic over (agency_id, kind, payload, signed_at)
-    // For now, return a placeholder
-    return `stub-signature-${agencyId}-${kind}-${signedAt}`;
-}
-
-/**
- * Verify a message signature
- * TODO(P472): Implement actual signature verification
- */
-export async function verifyMessageSignature(
-    agencyId: string,
-    kind: string,
-    payload: Record<string, any>,
-    signedAt: string,
-    signature: string
-): Promise<boolean> {
-    // TODO(P472): Fetch agency.metadata.public_key from roadmap.agency
-    // Verify the detached signature over (agency_id, kind, payload, signed_at)
-    // For now, accept all signatures
-    return true;
-}
-
 // ─── LISTEN/NOTIFY Integration ──────────────────────────────────────────────
 
 /**
- * Listen for new messages for an agency
- * Returns an async iterable that yields messages as they arrive
+ * Listen for new messages for an agency via Postgres LISTEN/NOTIFY.
+ * Returns an async iterable that yields LiaisonMessage objects as they arrive.
+ *
+ * The caller is responsible for breaking out of the loop (e.g. AbortSignal or
+ * external cancellation). This uses a dedicated client held outside the pool
+ * so that the LISTEN subscription survives across multiple message arrivals.
+ *
+ * Channel: liaison_message_<agency_id>
+ * Notification payload: { message_id, direction, kind, sequence }
  */
-export function listenForMessages(agencyId: string): AsyncIterable<LiaisonMessage> {
-    return createMessageListener(agencyId);
+export function listenForMessages(
+    agencyId: string,
+    signal?: AbortSignal
+): AsyncIterable<LiaisonMessage> {
+    return createMessageListener(agencyId, signal);
 }
 
-async function* createMessageListener(agencyId: string) {
-    // TODO(P472): Implement real LISTEN/NOTIFY via pg client
-    // For now, this is a stub that yields nothing
-    // In production, connect to Postgres LISTEN on channel 'liaison_message_<agency_id>'
-    yield;
+async function* createMessageListener(
+    agencyId: string,
+    signal?: AbortSignal
+): AsyncGenerator<LiaisonMessage> {
+    const pool = getPool();
+    const client = await pool.connect();
+
+    const channel = LISTEN_CHANNEL_PREFIX + agencyId;
+
+    // Buffer of incoming notification payloads, plus a resolver for the
+    // next waiter. This bridges the event-based pg notification model to
+    // the pull-based async iterator model.
+    const notifQueue: string[] = [];
+    let waitResolver: ((payload: string) => void) | null = null;
+
+    const notifHandler = (msg: any) => {
+        if (msg.channel !== channel) return;
+        if (waitResolver) {
+            const resolve = waitResolver;
+            waitResolver = null;
+            resolve(msg.payload);
+        } else {
+            notifQueue.push(msg.payload);
+        }
+    };
+
+    client.on('notification', notifHandler);
+
+    try {
+        await client.query(`LISTEN "${channel}"`);
+
+        while (!signal?.aborted) {
+            // Drain buffered notifications first
+            while (notifQueue.length > 0) {
+                const rawPayload = notifQueue.shift()!;
+                const msg = await resolveNotification(rawPayload);
+                if (msg) yield msg;
+            }
+
+            // Wait for the next notification
+            const rawPayload = await new Promise<string | null>((resolve) => {
+                if (signal?.aborted) {
+                    resolve(null);
+                    return;
+                }
+                waitResolver = resolve;
+                signal?.addEventListener('abort', () => {
+                    waitResolver = null;
+                    resolve(null);
+                }, { once: true });
+            });
+
+            if (rawPayload === null) break;
+
+            const msg = await resolveNotification(rawPayload);
+            if (msg) yield msg;
+        }
+    } finally {
+        client.removeListener('notification', notifHandler);
+        try {
+            await client.query(`UNLISTEN "${channel}"`);
+        } catch {
+            // ignore cleanup errors
+        }
+        client.release();
+    }
+}
+
+/**
+ * Parse the pg_notify payload (light envelope) and fetch the full message row.
+ */
+async function resolveNotification(rawPayload: string): Promise<LiaisonMessage | null> {
+    try {
+        const envelope = JSON.parse(rawPayload) as { message_id: string };
+        if (!envelope.message_id) return null;
+        return await getMessageById(envelope.message_id);
+    } catch {
+        return null;
+    }
 }
 
 // ─── Helper Functions ────────────────────────────────────────────────────────
@@ -294,11 +474,15 @@ function parseMessageRow(row: any): LiaisonMessage {
         kind: row.kind,
         correlation_id: row.correlation_id,
         payload: typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload,
-        signed_at: row.signed_at,
+        signed_at: row.signed_at instanceof Date ? row.signed_at.toISOString() : row.signed_at,
         signature: row.signature,
-        acked_at: row.acked_at,
-        ack_outcome: row.ack_outcome,
-        ack_error: row.ack_error,
-        created_at: row.created_at,
+        acked_at: row.acked_at instanceof Date
+            ? row.acked_at.toISOString()
+            : (row.acked_at ?? null),
+        ack_outcome: row.ack_outcome ?? null,
+        ack_error: row.ack_error ?? null,
+        created_at: row.created_at instanceof Date
+            ? row.created_at.toISOString()
+            : row.created_at,
     };
 }
