@@ -222,6 +222,178 @@ export const StructuralKeys = {
 		description: "Logical host identifier (shared operator host name)",
 		envOverride: true,
 	} satisfies ConfigKey<string | undefined>,
+
+	AGENTHIVE_CONTROL_DSN: {
+		name: "AGENTHIVE_CONTROL_DSN",
+		class: "structural" as const,
+		parse: (v: string) => v,
+		required: true,
+		description: "Control database DSN (hiveControl connection)",
+		yamlPath: "databases.control",
+		envOverride: true,
+	} satisfies ConfigKey<string>,
+
+	CONTROL_DB_HOST: {
+		name: "CONTROL_DB_HOST",
+		class: "structural" as const,
+		parse: (v: string) => v,
+		required: false,
+		description: "Control database hostname",
+		yamlPath: "databases.control.host",
+		defaultValue: "127.0.0.1",
+	} satisfies ConfigKey<string>,
+
+	CONTROL_DB_PORT: {
+		name: "CONTROL_DB_PORT",
+		class: "structural" as const,
+		parse: (v: string) => {
+			const parsed = Number(v);
+			if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 65535) {
+				throw new Error(`Invalid port number: ${v}`);
+			}
+			return parsed;
+		},
+		required: false,
+		description: "Control database port (PgBouncer)",
+		yamlPath: "databases.control.port",
+		defaultValue: 6432,
+	} satisfies ConfigKey<number>,
+
+	CONTROL_DB_NAME: {
+		name: "CONTROL_DB_NAME",
+		class: "structural" as const,
+		parse: (v: string) => v,
+		required: false,
+		description: "Control database name",
+		yamlPath: "databases.control.name",
+		defaultValue: "hiveControl",
+	} satisfies ConfigKey<string>,
+
+	CONTROL_DB_ROLE: {
+		name: "CONTROL_DB_ROLE",
+		class: "structural" as const,
+		parse: (v: string) => v,
+		required: false,
+		description: "Control database role",
+		yamlPath: "databases.control.role",
+		defaultValue: "agenthive_admin",
+	} satisfies ConfigKey<string>,
+
+	CONTROL_DB_PASSWORD_REF: {
+		name: "CONTROL_DB_PASSWORD_REF",
+		class: "structural" as const,
+		parse: (v: string) => v,
+		required: false,
+		description: "Vault path for control DB password (from P496)",
+		yamlPath: "databases.control.password_ref",
+		envOverride: true,
+		defaultValue: "vault://file/control/db_password",
+	} satisfies ConfigKey<string>,
+
+	AGENTHIVE_VAULT_ROOT: {
+		name: "AGENTHIVE_VAULT_ROOT",
+		class: "structural" as const,
+		parse: (v: string) => v,
+		required: false,
+		description: "Vault file root directory (P496)",
+		yamlPath: "vault.root",
+		defaultValue: "/etc/agenthive/secrets",
+	} satisfies ConfigKey<string>,
+
+	AGENTHIVE_VAULT_KIND: {
+		name: "AGENTHIVE_VAULT_KIND",
+		class: "structural" as const,
+		parse: (v: string) => {
+			if (!["file", "aws", "gcp"].includes(v)) {
+				throw new Error(`Invalid vault kind: ${v}. Must be file, aws, or gcp`);
+			}
+			return v;
+		},
+		required: false,
+		description: "Vault adapter kind (P496/P515)",
+		yamlPath: "vault.kind",
+		defaultValue: "file",
+	} satisfies ConfigKey<string>,
+
+	AGENTHIVE_TENANT_POOL_LRU_MAX: {
+		name: "AGENTHIVE_TENANT_POOL_LRU_MAX",
+		class: "structural" as const,
+		parse: (v: string) => {
+			const parsed = Number(v);
+			if (!Number.isFinite(parsed) || parsed <= 0) {
+				throw new Error(`Invalid LRU max: ${v}`);
+			}
+			return parsed;
+		},
+		required: false,
+		description: "LRU cap for tenant pool registry (P497)",
+		yamlPath: "pools.tenant_lru_max",
+		defaultValue: 16,
+	} satisfies ConfigKey<number>,
+
+	AGENTHIVE_TENANT_POOL_MAX: {
+		name: "AGENTHIVE_TENANT_POOL_MAX",
+		class: "structural" as const,
+		parse: (v: string) => {
+			const parsed = Number(v);
+			if (!Number.isFinite(parsed) || parsed <= 0) {
+				throw new Error(`Invalid pool max: ${v}`);
+			}
+			return parsed;
+		},
+		required: false,
+		description: "Per-pool size for tenant pools (P497)",
+		yamlPath: "pools.tenant_max",
+		defaultValue: 8,
+	} satisfies ConfigKey<number>,
+
+	AGENTHIVE_DRAIN_TIMEOUT_MS: {
+		name: "AGENTHIVE_DRAIN_TIMEOUT_MS",
+		class: "structural" as const,
+		parse: (v: string) => {
+			const parsed = Number(v);
+			if (!Number.isFinite(parsed) || parsed <= 0) {
+				throw new Error(`Invalid drain timeout: ${v}`);
+			}
+			return parsed;
+		},
+		required: false,
+		description: "Pool drain grace period in ms (P497)",
+		yamlPath: "pools.drain_timeout_ms",
+		defaultValue: 30000,
+	} satisfies ConfigKey<number>,
+
+	AGENTHIVE_PG_PORT: {
+		name: "AGENTHIVE_PG_PORT",
+		class: "structural" as const,
+		parse: (v: string) => {
+			const parsed = Number(v);
+			if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 65535) {
+				throw new Error(`Invalid port number: ${v}`);
+			}
+			return parsed;
+		},
+		required: false,
+		description: "PostgreSQL direct port (P499)",
+		yamlPath: "databases.pg_port",
+		defaultValue: 6432,
+	} satisfies ConfigKey<number>,
+
+	AGENTHIVE_LISTEN_PORT: {
+		name: "AGENTHIVE_LISTEN_PORT",
+		class: "structural" as const,
+		parse: (v: string) => {
+			const parsed = Number(v);
+			if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 65535) {
+				throw new Error(`Invalid port number: ${v}`);
+			}
+			return parsed;
+		},
+		required: false,
+		description: "LISTEN bypass port (P499)",
+		yamlPath: "databases.listen_port",
+		defaultValue: 5432,
+	} satisfies ConfigKey<number>,
 };
 
 /**

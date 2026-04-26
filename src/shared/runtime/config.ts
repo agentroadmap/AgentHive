@@ -1,5 +1,6 @@
 /**
  * Canonical configuration resolver with class-based source enforcement.
+ * P498 extension: tenant_dsn class for pool-bound DSN resources
  *
  * Resolution order (immutable, enforced by class):
  * 1. Explicit override (constructor arg, CLI --flag)
@@ -15,18 +16,19 @@
  * - `structural`: yaml (4) with env override (1-3) | PGHOST, PGPORT, project_root
  * - `registry`: DB (5) with env override (1-3) | host_model_policy, model_routes
  * - `flag`: DB (6) | feature flags, cached per process
+ * - `tenant_dsn`: NOT readable via get()/getOptional() — use getProjectDb(slug)
  *
  * Usage:
  *   const port = config.get(StructuralKeys.PGPORT);
  *   const token = config.getOptional(SecretKeys.GITHUB_TOKEN);
+ *   const dsn = await config.getProjectDb('tenant-slug');
  *   config.reload(); // Live reload on pg_notify
  *   config.audit(); // Get access audit log
  */
 
 import type { Pool, PoolClient } from "pg";
-import type { ConfigKey as RawConfigKey } from "./config-keys";
 
-export type ConfigClass = "secret" | "structural" | "registry" | "flag";
+export type ConfigClass = "secret" | "structural" | "registry" | "flag" | "tenant_dsn";
 
 export interface ConfigKey<T> {
 	name: string;
@@ -59,7 +61,7 @@ export class RuntimeConfigMissing extends Error {
 }
 
 /**
- * RuntimeConfigInvalidSource: thrown when a secret key is read from yaml/DB.
+ * RuntimeConfigInvalidSource: thrown when a secret/tenant_dsn key is read via get()/getOptional().
  */
 export class RuntimeConfigInvalidSource extends Error {
 	constructor(
@@ -68,7 +70,7 @@ export class RuntimeConfigInvalidSource extends Error {
 		public allowedSources: string[],
 	) {
 		super(
-			`[RuntimeConfig] Secret key "${keyName}" cannot be read from ${attemptedSource}. ` +
+			`[RuntimeConfig] Key "${keyName}" cannot be read from ${attemptedSource}. ` +
 			`Allowed sources: ${allowedSources.join(", ")}`,
 		);
 		this.name = "RuntimeConfigInvalidSource";
@@ -88,6 +90,16 @@ export interface ConfigAuditEntry {
 }
 
 /**
+ * Audit log entry for tenant_dsn access.
+ */
+export interface TenantDsnAuditEntry {
+	slug: string;
+	accessor: string;
+	lastAccessedAt: Date;
+	accessCount: number;
+}
+
+/**
  * Internal cache for resolved config values.
  */
 interface CachedValue<T> {
@@ -99,10 +111,12 @@ interface CachedValue<T> {
 class ConfigResolver {
 	private cache: Map<string, CachedValue<any>> = new Map();
 	private audit: Map<string, ConfigAuditEntry> = new Map();
+	private tenantDsnAudit: Map<string, TenantDsnAuditEntry> = new Map();
 	private yamlConfig: Record<string, any> | null = null;
 	private pool: Pool | null = null;
 	private dbCache: Map<string, any> = new Map();
 	private notifySubscription: PoolClient | null = null;
+	private cachedControlDsn: string | null = null;
 
 	/**
 	 * Initialize the resolver with optional yaml config and database pool.
@@ -160,6 +174,7 @@ class ConfigResolver {
 			client.on("notification", async () => {
 				this.cache.clear();
 				this.dbCache.clear();
+				this.cachedControlDsn = null;
 			});
 			this.notifySubscription = client;
 		} catch {
@@ -268,7 +283,7 @@ class ConfigResolver {
 			);
 		}
 
-		// Special enforcement: secret keys can NEVER come from yaml or DB
+		// Special enforcement: secret and tenant_dsn keys have restricted access
 		if (key.class === "secret" && (source === "yaml" || source === "db")) {
 			throw new RuntimeConfigInvalidSource(
 				key.name,
@@ -302,8 +317,16 @@ class ConfigResolver {
 
 	/**
 	 * Get a required config value.
+	 * Throws RuntimeConfigInvalidSource for tenant_dsn keys.
 	 */
 	async get<T>(key: ConfigKey<T>): Promise<T> {
+		if (key.class === "tenant_dsn") {
+			throw new RuntimeConfigInvalidSource(
+				key.name,
+				"get()",
+				["getProjectDb()"],
+			);
+		}
 		const cached = await this.resolve(key);
 		if (cached.value === undefined && key.required) {
 			throw new RuntimeConfigMissing(key.name, key.class, "Value is undefined");
@@ -313,10 +336,120 @@ class ConfigResolver {
 
 	/**
 	 * Get an optional config value (may return undefined).
+	 * Throws RuntimeConfigInvalidSource for tenant_dsn keys.
 	 */
 	async getOptional<T>(key: ConfigKey<T | undefined>): Promise<T | undefined> {
+		if (key.class === "tenant_dsn") {
+			throw new RuntimeConfigInvalidSource(
+				key.name,
+				"getOptional()",
+				["getProjectDb()"],
+			);
+		}
 		const cached = await this.resolve(key);
 		return cached.value;
+	}
+
+	/**
+	 * Resolve CONTROL_DSN with env-first resolution.
+	 * Resolution order: env AGENTHIVE_CONTROL_DSN > yaml assembly > throw.
+	 * NOTE: Does NOT cache env var to allow re-reading on each call (AC5).
+	 */
+	private resolveControlDsn(): string {
+		// Step 1: env override (re-read on each call, no cache)
+		const envDsn = process.env.AGENTHIVE_CONTROL_DSN;
+		if (envDsn) {
+			return envDsn;
+		}
+
+		// Step 2: yaml assembly fallback (cached)
+		if (this.cachedControlDsn) {
+			return this.cachedControlDsn;
+		}
+
+		if (this.yamlConfig?.databases?.control) {
+			const ctrl = this.yamlConfig.databases.control;
+			const host = ctrl.host || "127.0.0.1";
+			const port = ctrl.port || 6432;
+			const name = ctrl.name || "hiveControl";
+			const role = ctrl.role || "agenthive_admin";
+			const passwordRef = ctrl.password_ref || process.env.CONTROL_DB_PASSWORD_REF || "vault://file/control/db_password";
+
+			// Assemble DSN; password will be fetched by pool registry (P497)
+			const dsn = `postgres://${role}@${host}:${port}/${name}?application_name=agenthive-control&password_ref=${encodeURIComponent(passwordRef)}`;
+			this.cachedControlDsn = dsn;
+			return dsn;
+		}
+
+		// Step 3: throw if both absent
+		throw new RuntimeConfigMissing(
+			"AGENTHIVE_CONTROL_DSN",
+			"structural",
+			"AGENTHIVE_CONTROL_DSN env var must be set or databases.control block must exist in yaml",
+		);
+	}
+
+	/**
+	 * Get the control DSN (used internally for bootstrap).
+	 */
+	getControlDsn(): string {
+		return this.resolveControlDsn();
+	}
+
+	/**
+	 * Record tenant_dsn access in audit log.
+	 */
+	private recordTenantDsnAccess(slug: string, accessor: string): void {
+		const key = `${slug}`;
+		const existing = this.tenantDsnAudit.get(key);
+		if (existing) {
+			existing.lastAccessedAt = new Date();
+			existing.accessCount++;
+		} else {
+			this.tenantDsnAudit.set(key, {
+				slug,
+				accessor,
+				lastAccessedAt: new Date(),
+				accessCount: 1,
+			});
+		}
+
+		// Log to DB if pool exists (non-blocking)
+		if (this.pool) {
+			this.logTenantDsnAccessAsync(slug, accessor).catch(() => {
+				// Non-fatal if logging fails
+			});
+		}
+	}
+
+	/**
+	 * Async log tenant_dsn access to roadmap.tenant_dsn_access_log (non-blocking).
+	 */
+	private async logTenantDsnAccessAsync(slug: string, accessor: string): Promise<void> {
+		if (!this.pool) return;
+		try {
+			await this.pool.query(
+				`INSERT INTO roadmap.tenant_dsn_access_log (slug, accessor, accessed_at)
+				 VALUES ($1, $2, NOW())
+				 ON CONFLICT (slug, accessor, accessed_at) DO NOTHING`,
+				[slug, accessor],
+			);
+		} catch {
+			// Non-fatal; continue
+		}
+	}
+
+	/**
+	 * Get project database DSN for a given slug (tenant_dsn class).
+	 * Records access in audit log.
+	 */
+	async getProjectDb(slug: string): Promise<string> {
+		this.recordTenantDsnAccess(slug, "config.getProjectDb");
+
+		// Placeholder: in production, this queries the pool registry (P497)
+		// For now, return a synthetic DSN that would be resolved by P497
+		const controlDsn = this.getControlDsn();
+		return `project://${slug}?control=${encodeURIComponent(controlDsn)}`;
 	}
 
 	/**
@@ -325,6 +458,7 @@ class ConfigResolver {
 	clear(): void {
 		this.cache.clear();
 		this.dbCache.clear();
+		this.cachedControlDsn = null;
 	}
 
 	/**
@@ -339,6 +473,13 @@ class ConfigResolver {
 	 */
 	getAudit(): ConfigAuditEntry[] {
 		return [...this.audit.values()];
+	}
+
+	/**
+	 * Get tenant_dsn audit log.
+	 */
+	getTenantDsnAudit(): TenantDsnAuditEntry[] {
+		return [...this.tenantDsnAudit.values()];
 	}
 
 	/**
@@ -453,6 +594,21 @@ export async function getOptional<T>(
 }
 
 /**
+ * Get the control database DSN (for bootstrap).
+ */
+export function getControlDsn(): string {
+	return getResolver().getControlDsn();
+}
+
+/**
+ * Get project database DSN for a given slug (tenant_dsn class).
+ * Records access in audit log.
+ */
+export async function getProjectDb(slug: string): Promise<string> {
+	return getResolver().getProjectDb(slug);
+}
+
+/**
  * Reload config from DB (clears cache).
  */
 export async function reload(): Promise<void> {
@@ -465,6 +621,14 @@ export async function reload(): Promise<void> {
 export function getAudit(): ConfigAuditEntry[] {
 	if (!globalResolver) return [];
 	return globalResolver.getAudit();
+}
+
+/**
+ * Get tenant_dsn audit log.
+ */
+export function getTenantDsnAudit(): TenantDsnAuditEntry[] {
+	if (!globalResolver) return [];
+	return globalResolver.getTenantDsnAudit();
 }
 
 /**
