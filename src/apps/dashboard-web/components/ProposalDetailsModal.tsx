@@ -75,6 +75,21 @@ const SectionHeader: React.FC<{ title: string; right?: React.ReactNode }> = ({
 	</div>
 );
 
+const maturityBadgeClass = (maturity?: string) => {
+	switch ((maturity ?? "").toLowerCase()) {
+		case "active":
+			return "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300";
+		case "mature":
+			return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300";
+		case "obsolete":
+			return "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300";
+		case "new":
+			return "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300";
+		default:
+			return "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300";
+	}
+};
+
 export const ProposalDetailsModal: React.FC<Props> = ({
 	proposal,
 	isOpen,
@@ -982,7 +997,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 
 					{/* References */}
 					<div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-						<SectionHeader title="References" />
+						<SectionHeader title="References" right="Links and file paths" />
 						<div className="space-y-3">
 							{references.length > 0 ? (
 								<ul className="space-y-2">
@@ -1390,7 +1405,19 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 
 					{/* Status */}
 					<div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
-						<SectionHeader title="Status" />
+						<SectionHeader
+							title="Status"
+							right={
+								proposal?.maturity ? (
+									<span
+										className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${maturityBadgeClass(proposal.maturity)}`}
+										title="Proposal maturity"
+									>
+										{proposal.maturity}
+									</span>
+								) : null
+							}
+						/>
 						<StatusSelect
 							current={status}
 							onChange={(val) => handleInlineMetaUpdate({ status: val })}
@@ -1450,7 +1477,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 
 					{/* Directive */}
 					<div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
-						<SectionHeader title="Directive" />
+						<SectionHeader title="Directive" right="Owning initiative" />
 						<select
 							className={`w-full h-10 px-3 pr-10 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 focus:border-transparent transition-colors duration-200 ${isFromOtherBranch ? "opacity-60 cursor-not-allowed" : ""}`}
 							value={directiveSelectionValue}
@@ -1479,7 +1506,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 
 					{/* Dependencies */}
 					<div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
-						<SectionHeader title="Dependencies" />
+						<SectionHeader title="Dependencies" right="Type to search proposals" />
 						<DependencyInput
 							value={dependencies}
 							onChange={(value) =>

@@ -1400,12 +1400,6 @@ export class RoadmapServer {
 		proposalId: string,
 	): Promise<Response> {
 		const updates = await req.json();
-		const existingProposal =
-			await this.core.filesystem.loadProposal(proposalId);
-		if (!existingProposal) {
-			return Response.json({ error: "Proposal not found" }, { status: 404 });
-		}
-
 		const updateInput: ProposalUpdateInput = {};
 
 		if ("title" in updates && typeof updates.title === "string") {
