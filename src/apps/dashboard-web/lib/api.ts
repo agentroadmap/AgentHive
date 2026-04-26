@@ -37,7 +37,16 @@ export class ApiError extends Error {
 	}
 
 	static fromResponse(response: Response, data?: unknown): ApiError {
-		const message = `HTTP ${response.status}: ${response.statusText}`;
+		const responseError =
+			typeof data === "object" &&
+			data !== null &&
+			"error" in data &&
+			typeof (data as { error?: unknown }).error === "string"
+				? (data as { error: string }).error
+				: null;
+		const message = responseError
+			? `HTTP ${response.status}: ${responseError}`
+			: `HTTP ${response.status}: ${response.statusText}`;
 		return new ApiError(message, response.status, response.statusText, data);
 	}
 }
@@ -671,6 +680,13 @@ export class ApiClient {
 			messages: Message[];
 		}>(`${API_BASE}/messages?${params}`);
 		return result.messages;
+	}
+
+	async sendMessage(channel: string, text: string, from = "@operator"): Promise<void> {
+		await this.fetchWithRetry(`${API_BASE}/messages`, {
+			method: "POST",
+			body: JSON.stringify({ channel, text, from }),
+		});
 	}
 }
 

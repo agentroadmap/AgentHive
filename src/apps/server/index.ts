@@ -464,10 +464,14 @@ export class RoadmapServer {
 			acceptanceCriteriaItems: p.acceptanceCriteriaItems || [],
 			requiredCapabilities: p.required_capabilities || [],
 			needsCapabilities: p.needs_capabilities || [],
+			liveActivity: p.liveActivity || null,
 			maturityLevel: p.maturity === "new" ? 0 : p.maturity === "mature" ? 5 : p.maturity === "obsolete" ? 10 : null,
 			repositoryPath: p.filePath || null,
 			budgetLimitUsd: p.budgetLimitUsd || 0,
-			tags: Array.isArray(p.labels) ? p.labels.join(",") : (p.tags || null),
+			tags:
+				Array.isArray(p.labels) && p.labels.length > 0
+					? p.labels.join(",")
+					: null,
 			createdAt: p.createdDate || p.createdAt || "",
 			updatedAt: p.updatedDate || p.updatedAt || "",
 		};
@@ -859,6 +863,12 @@ export class RoadmapServer {
 				return await this.handleListChannels();
 			if (pathname === "/api/messages" && method === "GET")
 				return await this.handleListMessages(req);
+			if (pathname === "/api/messages" && method === "POST")
+				return await this.handleSendMessage(req);
+			if (pathname === "/api/routes" && method === "GET")
+				return await this.handleListRoutes();
+			if (pathname === "/api/dispatches" && method === "GET")
+				return await this.handleListDispatches();
 
 			if (pathname === "/api/mcp/sse" && method === "GET") {
 				try { appendFileSync("/tmp/mcp-debug.log", "[Server] MCP SSE request\n"); } catch {}
@@ -2408,6 +2418,112 @@ export class RoadmapServer {
 			console.error("Error listing messages:", error);
 			return Response.json(
 				{ error: "Failed to list messages" },
+				{ status: 500 },
+			);
+		}
+	}
+
+	private async handleSendMessage(req: Request): Promise<Response> {
+		try {
+			const body = await req.json();
+			const channel =
+				typeof body.channel === "string" ? body.channel.trim() : "";
+			const text = typeof body.text === "string" ? body.text.trim() : "";
+			const from =
+				typeof body.from === "string" && body.from.trim().length > 0
+					? body.from.trim()
+					: "@operator";
+
+			if (!channel) {
+				return Response.json({ error: "channel is required" }, { status: 400 });
+			}
+			if (!text) {
+				return Response.json({ error: "text is required" }, { status: 400 });
+			}
+			if (channel.startsWith("private-")) {
+				return Response.json(
+					{ error: "Private DM sending is not wired through the web API yet" },
+					{ status: 400 },
+				);
+			}
+
+			await this.core.sendMessage({
+				from,
+				message: text,
+				type: channel === "public" ? "public" : "group",
+				group: channel === "public" ? undefined : channel,
+			});
+
+			return Response.json({ success: true });
+		} catch (error) {
+			console.error("Error sending message:", error);
+			return Response.json(
+				{ error: "Failed to send message" },
+				{ status: 500 },
+			);
+		}
+	}
+
+	private async handleListRoutes(): Promise<Response> {
+		try {
+			const { rows } = await query(
+				`SELECT id,
+				        model_name,
+				        route_provider,
+				        agent_provider,
+				        agent_cli,
+				        fallback_cli,
+				        is_enabled,
+				        priority,
+				        api_spec,
+				        base_url,
+				        cost_per_1k_input * 1000 AS cost_per_million_input,
+				        cost_per_1k_output * 1000 AS cost_per_million_output,
+				        plan_type,
+				        notes,
+				        created_at
+				   FROM roadmap.model_routes
+				  ORDER BY is_enabled DESC, priority ASC, model_name ASC`,
+			);
+			return Response.json({ routes: rows ?? [] });
+		} catch (error) {
+			console.error("Error listing routes:", error);
+			return Response.json({ error: "Failed to list routes" }, { status: 500 });
+		}
+	}
+
+	private async handleListDispatches(): Promise<Response> {
+		try {
+			const { rows } = await query(
+				`SELECT d.id,
+				        d.proposal_id,
+				        p.display_id AS proposal_display_id,
+				        p.title AS proposal_title,
+				        d.agent_identity,
+				        d.worker_identity,
+				        d.squad_name,
+				        d.dispatch_role,
+				        d.dispatch_status,
+				        d.offer_status,
+				        d.assigned_at,
+				        d.completed_at,
+				        d.claim_expires_at,
+				        d.claimed_at,
+				        d.renew_count,
+				        d.reissue_count,
+				        d.max_reissues,
+				        d.required_capabilities,
+				        d.metadata
+				   FROM roadmap_workforce.squad_dispatch d
+				   LEFT JOIN roadmap_proposal.proposal p
+				     ON p.id = d.proposal_id
+				  ORDER BY d.assigned_at DESC NULLS LAST, d.id DESC`,
+			);
+			return Response.json({ dispatches: rows ?? [] });
+		} catch (error) {
+			console.error("Error listing dispatches:", error);
+			return Response.json(
+				{ error: "Failed to list dispatches" },
 				{ status: 500 },
 			);
 		}

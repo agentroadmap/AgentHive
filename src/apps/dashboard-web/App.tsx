@@ -6,13 +6,13 @@ import type {
 	Channel as SharedChannel,
 } from "../../shared/types";
 import AchievementsView from "./components/AchievementsView";
-import AgentDashboard from "./components/AgentDashboard";
 import AgentsPage from "./components/AgentsPage";
 import BoardPage from "./components/BoardPage";
 import ChannelsPage from "./components/ChannelsPage";
 import DashboardPage from "./components/DashboardPage";
 import DecisionsPage from "./components/DecisionsPage";
 import DirectivesPage from "./components/DirectivesPage";
+import DispatchPage from "./components/DispatchPage";
 import DocumentsPage from "./components/DocumentsPage";
 import KnowledgePage from "./components/KnowledgePage";
 import MapPage from "./components/MapPage";
@@ -46,6 +46,12 @@ const STATUSES = [
 ];
 
 function toSharedProposal(proposal: WebSocketProposal): Proposal {
+	const labels = proposal.tags
+		? proposal.tags
+				.split(",")
+				.map((label) => label.trim())
+				.filter((label) => label.length > 0)
+		: [];
 	return {
 		id: proposal.displayId || proposal.id,
 		title: proposal.title,
@@ -53,7 +59,7 @@ function toSharedProposal(proposal: WebSocketProposal): Proposal {
 		assignee: [],
 		createdDate: proposal.createdAt,
 		updatedDate: proposal.updatedAt,
-		labels: proposal.tags ? [proposal.tags] : [],
+		labels,
 		dependencies: proposal.parentId ? [proposal.parentId] : [],
 		summary: proposal.summary ?? proposal.bodyMarkdown ?? undefined,
 		motivation: proposal.motivation ?? undefined,
@@ -82,6 +88,8 @@ function toSharedProposal(proposal: WebSocketProposal): Proposal {
 		parentProposalTitle: proposal.parentProposalTitle,
 		maturity: proposal.maturity,
 		rawContent: proposal.rawContent,
+		budgetLimitUsd: proposal.budgetLimitUsd,
+		liveActivity: proposal.liveActivity,
 		displayId: proposal.displayId,
 		websocketId: proposal.websocketId ?? proposal.id,
 		selectionAliases: buildProposalSelectionAliases(
@@ -112,7 +120,7 @@ function toSharedChannel(channel: WebSocketChannel): SharedChannel {
 }
 
 export default function App() {
-	const { proposals, agents, channels } = useWebSocket();
+	const { connected, proposals, agents, channels } = useWebSocket();
 	const sharedProposals = useMemo(
 		() => proposals.map(toSharedProposal),
 		[proposals],
@@ -151,7 +159,12 @@ export default function App() {
 				<main className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden">
 					<Switch>
 						<Route path="/">
-							<DashboardPage proposals={sharedProposals} />
+							<DashboardPage
+								connected={connected}
+								proposals={sharedProposals}
+								agents={agents}
+								channels={channels}
+							/>
 						</Route>
 						<Route path="/board">
 							<BoardPage
@@ -181,7 +194,15 @@ export default function App() {
 							<StatisticsPage proposals={sharedProposals} />
 						</Route>
 						<Route path="/agent-dashboard">
-							<AgentDashboard />
+							<DashboardPage
+								connected={connected}
+								proposals={sharedProposals}
+								agents={agents}
+								channels={channels}
+							/>
+						</Route>
+						<Route path="/dispatch">
+							<DispatchPage />
 						</Route>
 						<Route path="/knowledge">
 							<KnowledgePage />
