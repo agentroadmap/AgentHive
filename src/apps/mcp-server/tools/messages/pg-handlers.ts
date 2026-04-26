@@ -10,6 +10,7 @@
 import { query, getPool } from "../../../../postgres/pool.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
+import { enforceMessageGate } from "../../../../proposal-engine/middleware/message-dispatch-gate.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
@@ -250,6 +251,29 @@ export class PgMessagingHandlers {
 		proposal_id?: string;
 	}): Promise<CallToolResult> {
 		try {
+			// P209: Enforce message dispatch gate before insertion
+			const gateResult = await enforceMessageGate({
+				from_agent: args.from_agent,
+				to_agent: args.to_agent,
+				channel: args.channel,
+				message_type: args.message_type,
+				proposal_id: args.proposal_id,
+			});
+
+			// Blocked messages fail silently (no error to sender)
+			if (!gateResult.allowed) {
+				// Silent failure per P209 design: return empty response
+				// (The denial is logged in denied_messages table for audit)
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Message processed.",
+						},
+					],
+				};
+			}
+
 			const { rows } = await query(
 				`INSERT INTO message_ledger (from_agent, to_agent, channel, message_content, message_type, proposal_id)
          VALUES ($1, $2, $3, $4, $5, $6)
