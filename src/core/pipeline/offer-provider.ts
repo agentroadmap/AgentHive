@@ -28,6 +28,8 @@ export type SpawnFn = (req: {
 	model?: string;
 	timeoutMs?: number;
 	agentLabel?: string;
+	/** P466: warm-boot briefing id (passed to child as AGENTHIVE_BRIEFING_ID env). */
+	briefingId?: string;
 }) => Promise<SpawnResult>;
 
 export interface ListenerClient {
@@ -240,6 +242,12 @@ export class OfferProvider {
 		const model = asString(meta.model) ?? undefined;
 		const worktree = asString(meta.worktree_hint) ?? this.defaultWorktree();
 		const timeoutMs = asNumber(meta.timeout_ms) ?? 300_000;
+		// P466: warm-boot briefing assembled by parent (orchestrator) before
+		// posting the offer. The child agent reads this from its env on boot
+		// and calls `briefing_load(<id>)` to retrieve mission, success criteria,
+		// allowed tools, MCP quirks, and escalation channels. If absent, the
+		// child runs in legacy "blind" mode with only the task prompt.
+		const briefingId = asString(meta.briefing_id);
 
 		// Generate ephemeral worker identity for this dispatch
 		const workerIdentity = `${this.agentIdentity}/worker-${dispatch_id}`;
@@ -277,6 +285,7 @@ export class OfferProvider {
 				model,
 				timeoutMs,
 				agentLabel: `worker-${dispatch_id} (${dispatch_role})`,
+				briefingId,
 			});
 		} catch (err) {
 			spawnError = err instanceof Error ? err : new Error(String(err));
@@ -289,6 +298,37 @@ export class OfferProvider {
 		const completionStatus = succeeded ? "delivered" : "failed";
 
 		await this.complete(dispatch_id, claim_token, completionStatus);
+
+		// P466: emit a spawn summary on behalf of the child if a briefing was
+		// in play. This guarantees the harvester gets at least an outcome row
+		// (even when the child crashed before calling spawn_summary_emit
+		// itself), so future briefings inherit something. Best-effort —
+		// failures here must not break the dispatch path.
+		if (briefingId) {
+			try {
+				const { emitSpawnSummary } = await import(
+					"../../infra/agency/spawn-briefing-service.js"
+				);
+				await emitSpawnSummary({
+					briefing_id: briefingId,
+					outcome: succeeded ? "success" : "failure",
+					summary: spawnError
+						? `Agency-side spawn error: ${spawnError.message.slice(0, 500)}`
+						: spawnResult?.exitCode === 0
+							? `Agency-side spawn returned exit 0 in ${spawnResult.durationMs ?? 0}ms (child should have emitted its own summary; this is the agency fallback).`
+							: `Agency-side spawn exit ${spawnResult?.exitCode ?? "n/a"}`,
+					new_findings: [],
+					updated_quirks: [],
+					duration_seconds: Math.round((spawnResult?.durationMs ?? 0) / 1000),
+					error_log: spawnError ? { message: spawnError.message } : undefined,
+					emitted_by: workerIdentity,
+				});
+			} catch (err) {
+				this.logger.warn(
+					`[OfferProvider] dispatch ${dispatch_id} agency-fallback spawn_summary_emit failed (non-fatal): ${(err as Error).message}`,
+				);
+			}
+		}
 
 		if (spawnError) {
 			this.logger.error(

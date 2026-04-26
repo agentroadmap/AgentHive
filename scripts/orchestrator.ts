@@ -21,6 +21,7 @@ import {
 } from "../src/core/orchestration/agent-spawner.ts";
 import { postWorkOffer } from "../src/core/pipeline/post-work-offer.ts";
 import { reapStaleRows } from "../src/core/pipeline/reap-stale-rows.ts";
+import { briefingAssemble } from "../src/infra/agency/spawn-briefing-service.ts";
 import { getPool, query } from "../src/infra/postgres/pool.ts";
 import { loadStateNames } from "../src/core/workflow/state-names.ts";
 import { mcpText } from "./mcp-result.ts";
@@ -637,6 +638,148 @@ async function listEnvAgentWorktrees(): Promise<string[]> {
 	}
 }
 
+// ─── Briefing helpers (P466) ─────────────────────────────────────────────────
+
+interface ProposalBriefingContext {
+	id: number;
+	displayId: string;
+	title: string;
+	type: string | null;
+	status: string;
+	maturity: string;
+	summary: string | null;
+	motivation: string | null;
+	design: string | null;
+	pendingAcs: string[];
+	totalAcs: number;
+}
+
+async function fetchProposalBriefingContext(
+	proposalId: number,
+): Promise<ProposalBriefingContext> {
+	const { rows } = await query<{
+		id: number;
+		display_id: string;
+		title: string;
+		type: string | null;
+		status: string;
+		maturity: string;
+		summary: string | null;
+		motivation: string | null;
+		design: string | null;
+	}>(
+		`SELECT id, display_id, title, type, status, maturity, summary, motivation, design
+       FROM roadmap_proposal.proposal
+      WHERE id = $1`,
+		[proposalId],
+	);
+	const p = rows[0];
+	if (!p) throw new Error(`proposal ${proposalId} not found`);
+
+	const { rows: acRows } = await query<{ item_number: number; criterion_text: string; status: string }>(
+		`SELECT item_number, criterion_text, status
+       FROM roadmap_proposal.proposal_acceptance_criteria
+      WHERE proposal_id = $1
+      ORDER BY item_number`,
+		[proposalId],
+	);
+	const pendingAcs = acRows
+		.filter((r) => r.status !== "pass" && r.status !== "waived")
+		.map((r) => `[AC#${r.item_number}] ${r.criterion_text}`);
+
+	return {
+		id: p.id,
+		displayId: p.display_id,
+		title: p.title,
+		type: p.type,
+		status: p.status,
+		maturity: p.maturity,
+		summary: p.summary,
+		motivation: p.motivation,
+		design: p.design,
+		pendingAcs,
+		totalAcs: acRows.length,
+	};
+}
+
+function composeBriefingMission(
+	ctx: ProposalBriefingContext,
+	role: string,
+	rolePrompt: string,
+): string {
+	const acsHeader =
+		ctx.pendingAcs.length > 0
+			? `\n\nPending ACs (${ctx.pendingAcs.length}/${ctx.totalAcs} not yet pass):\n${ctx.pendingAcs.map((s) => `  - ${s}`).join("\n")}`
+			: ctx.totalAcs === 0
+				? "\n\nNo ACs defined yet — your job (if architect/researcher) is to author measurable ACs and INSERT them via add_criteria."
+				: "\n\nAll ACs already pass; verify and advance.";
+
+	const designStatus = ctx.design
+		? `Design column populated (${ctx.design.length} chars).`
+		: "Design column is EMPTY. If you are an architect/researcher, write substantive design content via prop_update.";
+
+	return [
+		`Role: ${role}`,
+		``,
+		`Proposal: ${ctx.displayId} — ${ctx.title}`,
+		`Type: ${ctx.type ?? "(unknown)"} · Status: ${ctx.status}/${ctx.maturity}`,
+		``,
+		`Summary: ${ctx.summary ?? "(none)"}`,
+		`Motivation: ${ctx.motivation ?? "(none)"}`,
+		``,
+		designStatus,
+		acsHeader,
+		``,
+		`Role-specific framing:`,
+		rolePrompt,
+	].join("\n");
+}
+
+function deriveAllowedTools(role: string): string[] | undefined {
+	// Conservative default: every dispatched role can read proposal data,
+	// add discussion/criteria/dependencies, submit reviews, and emit spawn
+	// summaries. Skeptic/gate roles also need transition + set_maturity.
+	const base = [
+		"prop_get",
+		"prop_list",
+		"mcp_get_proposal_projection",
+		"prop_get_detail",
+		"list_ac",
+		"list_reviews",
+		"add_discussion",
+		"submit_review",
+		"add_criteria",
+		"verify_criteria",
+		"add_dependency",
+		"get_dependencies",
+		"briefing_load",
+		"child_boot_check",
+		"spawn_summary_emit",
+	];
+	const enhancer = [...base, "prop_update"];
+	const gate = [
+		...base,
+		"prop_transition",
+		"prop_set_maturity",
+	];
+	if (role.startsWith("skeptic") || role.includes("gate") || role.includes("review")) {
+		return gate;
+	}
+	if (role === "architect" || role === "researcher" || role === "developer") {
+		return enhancer;
+	}
+	return undefined; // no restriction
+}
+
+async function firstDispatchableAgency(): Promise<string | null> {
+	try {
+		const agencies = await listDispatchableAgencies();
+		return agencies[0]?.agency_id ?? null;
+	} catch {
+		return null;
+	}
+}
+
 async function selectExecutorWorktree(
 	requested?: string | null,
 ): Promise<string> {
@@ -776,7 +919,71 @@ async function dispatchAgent(
 			`${verb} cubic ${cubicId.substring(0, 8)} for ${agent} → P${proposalId} (${phase})`,
 		);
 
-		const taskPrompt = `${task}\n\nUse the MCP tools to do your work. Connect to ${getMcpUrl()} for proposal management.`;
+		// P466 — assemble a warm-boot briefing BEFORE posting the offer. Without
+		// this, the spawned child receives only the generic role prompt and runs
+		// blind (P597–P608 evidence: 12 dispatches exited 0 in ~55s and wrote
+		// nothing to the proposal table). With briefing wired, the child calls
+		// `briefing_load(<id>)` on boot and gets mission, success_criteria
+		// (the proposal's pending ACs), allowed_tools, MCP quirks catalog, and
+		// fallback playbook entries.
+		let briefingId: string | undefined;
+		try {
+			const proposalContext = await fetchProposalBriefingContext(
+				Number(proposalId),
+			);
+			const briefing = await briefingAssemble(
+				{
+					task_id: `P${proposalId}-${phase}-${agentLabel ?? agent}`,
+					mission: composeBriefingMission(
+						proposalContext,
+						agentLabel ?? agent,
+						task,
+					),
+					success_criteria: proposalContext.pendingAcs,
+					done_signal:
+						(agentLabel ?? agent).startsWith("skeptic") ||
+						stage.startsWith("gate")
+							? "verdict"
+							: "ac-pass",
+					allowed_tools: deriveAllowedTools(agentLabel ?? agent),
+					parent_agent: "orchestrator",
+					liaison_agent:
+						(await firstDispatchableAgency()) ?? null ?? undefined,
+					request_assistance_threshold: 3,
+					topic_keywords: [
+						`P${proposalId}`,
+						proposalContext.type ?? "feature",
+						agentLabel ?? agent,
+					],
+				},
+				"orchestrator",
+			);
+			briefingId = briefing.briefing_id;
+		} catch (err) {
+			// Non-fatal: briefing service may not be ready (e.g. during a partial
+			// migration). Fall back to the legacy generic prompt so the dispatch
+			// path still functions, but the child runs blind.
+			logger.warn(
+				`briefing_assemble failed for P${proposalId} (${agent}); falling back to generic prompt: ${(err as Error).message}`,
+			);
+		}
+
+		const taskPrompt = briefingId
+			? `${task}\n\n` +
+			  `## Boot protocol\n` +
+			  `Your warm-boot briefing is at briefing_id=${briefingId}.\n` +
+			  `BEFORE doing anything else, call:\n` +
+			  `  mcp_proposal action="briefing_load" briefing_id="${briefingId}"\n` +
+			  `to retrieve your mission, success criteria (the AC list this proposal needs), allowed tools, MCP quirks catalog, and escalation channels.\n\n` +
+			  `## Working context\n` +
+			  `Proposal: P${proposalId}\n` +
+			  `MCP endpoint: ${getMcpUrl()}\n\n` +
+			  `## Output contract\n` +
+			  `When you finish (success or failure), emit a spawn summary:\n` +
+			  `  mcp_proposal action="spawn_summary_emit" briefing_id="${briefingId}" outcome=<success|partial|failure|timeout|escalated> emitted_by="${agent}" summary="..." new_findings=[...]\n` +
+			  `For enhancement work: write design content via prop_update, ACs via add_criteria, dependencies via add_dependency. Do NOT just produce a prose summary — persist to the DB.\n` +
+			  `For gate work: emit ## Verdict / ## Failures / ## Remediation to stdout (orchestrator parses stdout into gate_decision_log).`
+			: `${task}\n\nUse the MCP tools to do your work. Connect to ${getMcpUrl()} for proposal management.`;
 
 		if (USE_OFFER_DISPATCH) {
 			// Post a work offer — any registered agency (e.g. copilot/agency-gary)
@@ -798,6 +1005,7 @@ async function dispatchAgent(
 				// `spawn()` fails with ENOENT because no such worktree directory
 				// exists. selectedWorktree was already validated by scoreUsableWorktree.
 				worktreeHint: selectedWorktree,
+				briefingId,
 				requiredCapabilities:
 					requiredCapabilities.length > 0
 						? requiredCapabilities

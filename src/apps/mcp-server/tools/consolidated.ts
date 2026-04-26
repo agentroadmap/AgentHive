@@ -202,6 +202,16 @@ const agentRoutes: RouteMap = {
 	cubic_transition: "cubic_transition",
 	cubic_recycle: "cubic_recycle",
 	cubic_acquire: "cubic_acquire",
+	// P466 spawn-briefing protocol — child agents call these over the
+	// `mcp_agent` router (`action: 'briefing_load'` etc.) AND the raw tool
+	// names work via the standalone tool registrations.
+	briefing_assemble: "briefing_assemble",
+	briefing_load: "briefing_load",
+	child_boot_check: "child_boot_check",
+	spawn_summary_emit: "spawn_summary_emit",
+	briefing_list: "briefing_list",
+	fallback_playbook_add: "fallback_playbook_add",
+	mcp_quirks_register: "mcp_quirks_register",
 };
 
 const memoryRoutes: RouteMap = {

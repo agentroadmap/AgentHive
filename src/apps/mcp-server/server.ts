@@ -1440,6 +1440,183 @@ export async function createMcpServer(
 		handler: () => projectHandlers.projectOverviewHandler({}),
 	});
 
+	// P466: Spawn-briefing protocol — wire the liaison loop.
+	// Without these tools registered, briefing_assemble / briefing_load /
+	// spawn_summary_emit are unreachable and dispatched agents run blind
+	// with no proposal context. The handlers themselves were already built
+	// in tools/agency/handlers.ts; this block exposes them over MCP and
+	// adapts their raw return shape to CallToolResult.
+	const agencyHandlers = await import("./tools/agency/handlers.ts");
+	const wrapJson = (fn: (a: any) => Promise<unknown>) =>
+		async (args: any): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
+			try {
+				const result = await fn(args);
+				return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+			} catch (err) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `❌ ${(err as Error).message}`,
+						},
+					],
+				};
+			}
+		};
+
+	server.addTool({
+		name: "briefing_assemble",
+		description:
+			"Parent assembles a warm-boot briefing before spawning a child agent. " +
+			"Returns briefing_id; pass it to the child as AGENTHIVE_BRIEFING_ID env or in task metadata. " +
+			"Required: task_id, mission, briefed_by. " +
+			"Optional: success_criteria[], allowed_tools[], forbidden_tools[], budget, parent_agent, liaison_agent.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				task_id: { type: "string" },
+				mission: { type: "string" },
+				success_criteria: { type: "array", items: { type: "string" } },
+				done_signal: { type: "string", enum: ["ac-pass", "verdict", "pr-merged", "custom"] },
+				allowed_tools: { type: "array", items: { type: "string" } },
+				forbidden_tools: { type: "array", items: { type: "string" } },
+				budget: {
+					type: "object",
+					properties: {
+						max_tokens: { type: ["number", "null"] },
+						max_minutes: { type: ["number", "null"] },
+						max_tool_calls: { type: ["number", "null"] },
+					},
+				},
+				stop_conditions: { type: "array", items: { type: "string" } },
+				parent_agent: { type: "string" },
+				liaison_agent: { type: "string" },
+				rescue_team_channel: { type: "string" },
+				request_assistance_threshold: { type: "number" },
+				topic_keywords: { type: "array", items: { type: "string" } },
+				briefed_by: { type: "string" },
+			},
+			required: ["task_id", "mission", "briefed_by"],
+		},
+		handler: wrapJson((a) => agencyHandlers.handleBriefingAssemble(a)),
+	});
+
+	server.addTool({
+		name: "briefing_load",
+		description:
+			"Child agent calls this on boot to retrieve the warm-boot briefing assembled by its parent. " +
+			"Returns the full SpawnBriefing (mission, success_criteria, allowed_tools, MCP quirks, fallback playbook, escalation channels). " +
+			"Fails closed if briefing_id is missing or unknown — child should HALT in that case.",
+		inputSchema: {
+			type: "object",
+			properties: { briefing_id: { type: "string" } },
+			required: ["briefing_id"],
+		},
+		handler: wrapJson((a) => agencyHandlers.handleBriefingLoad(a)),
+	});
+
+	server.addTool({
+		name: "child_boot_check",
+		description:
+			"Child agent calls at startup to verify the warm-boot payload exists. " +
+			"Returns {status: 'ready', briefing}. Fails closed when briefing_id absent or unknown — refuse to proceed.",
+		inputSchema: {
+			type: "object",
+			properties: { briefing_id: { type: "string" } },
+			required: ["briefing_id"],
+		},
+		handler: wrapJson((a) => agencyHandlers.handleChildBootCheck(a)),
+	});
+
+	server.addTool({
+		name: "spawn_summary_emit",
+		description:
+			"Child agent calls on completion to emit outcome + new findings + updated MCP quirks. " +
+			"Required: briefing_id, outcome (success|partial|failure|timeout|escalated), emitted_by. " +
+			"Subsequent spawns inherit harvested findings via briefing_assemble.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				briefing_id: { type: "string" },
+				outcome: { type: "string", enum: ["success", "partial", "failure", "timeout", "escalated"] },
+				summary: { type: "string" },
+				new_findings: {
+					type: "array",
+					items: {
+						type: "object",
+						properties: {
+							date: { type: "string" },
+							summary: { type: "string" },
+							proposal: { type: "string" },
+						},
+						required: ["summary"],
+					},
+				},
+				updated_quirks: { type: "array", items: { type: "object" } },
+				tool_calls_made: { type: "number" },
+				tokens_used: { type: "number" },
+				duration_seconds: { type: "number" },
+				error_log: { type: "object" },
+				state_snapshot: { type: "object" },
+				emitted_by: { type: "string" },
+			},
+			required: ["briefing_id", "outcome", "emitted_by"],
+		},
+		handler: wrapJson((a) => agencyHandlers.handleSpawnSummaryEmit(a)),
+	});
+
+	server.addTool({
+		name: "briefing_list",
+		description: "Operator/debug: list recent briefings (briefing_id, task_id, mission, briefed_by, briefed_at).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				limit: { type: "number" },
+				offset: { type: "number" },
+			},
+		},
+		handler: wrapJson((a) => agencyHandlers.handleBriefingList(a)),
+	});
+
+	server.addTool({
+		name: "fallback_playbook_add",
+		description: "Add an error→action recovery pattern that future briefings will inherit.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				error_signature: { type: "string" },
+				tool_name: { type: "string" },
+				error_class: { type: "string" },
+				try_action: { type: "string" },
+				rationale: { type: "string" },
+				source_proposal: { type: "string" },
+				confidence: { type: "number" },
+			},
+			required: ["error_signature", "try_action"],
+		},
+		handler: wrapJson((a) => agencyHandlers.handleFallbackPlaybookAdd(a)),
+	});
+
+	server.addTool({
+		name: "mcp_quirks_register",
+		description: "Register/update canonical args + known gotchas for an MCP tool. Briefings inherit this catalog.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				tool_name: { type: "string" },
+				mcp_server: { type: "string" },
+				canonical_args: { type: "object", additionalProperties: { type: "string" } },
+				description: { type: "string" },
+				known_gotchas: { type: "array", items: { type: "object" } },
+				param_aliases: { type: "object", additionalProperties: { type: "string" } },
+			},
+			required: ["tool_name", "canonical_args"],
+		},
+		handler: wrapJson((a) => agencyHandlers.handleMcpQuirksRegister(a)),
+	});
+
+	console.error("[MCP] Registered 7 P466 spawn-briefing tools (liaison protocol)");
+
 	// Start background maintenance tasks
 	const MAINTENANCE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 	setInterval(async () => {

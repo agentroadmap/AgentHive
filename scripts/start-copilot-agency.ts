@@ -49,6 +49,9 @@ const offerProvider = new OfferProvider({
 			timeoutMs: req.timeoutMs,
 			agentLabel: req.agentLabel,
 			provider: provider as any,
+			// P466: forward warm-boot briefing id so the child can call
+			// `briefing_load(<id>)` on boot and run with full context.
+			briefingId: req.briefingId,
 		});
 	},
 });

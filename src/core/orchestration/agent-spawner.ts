@@ -74,6 +74,13 @@ export interface SpawnRequest {
 	agentLabel?: string;
 	/** Descriptive activity label (e.g. "researching", "enhancing", "reviewing") */
 	activity?: string;
+	/**
+	 * P466: warm-boot briefing id assembled by the parent (orchestrator) before
+	 * dispatch. Set as AGENTHIVE_BRIEFING_ID env in the spawned child so the
+	 * child can call `briefing_load(<id>)` on boot. Without this the child
+	 * runs in legacy "blind" mode (only the task prompt for context).
+	 */
+	briefingId?: string;
 }
 
 export interface SpawnResult {
@@ -851,6 +858,12 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		extraEnv: {
 			...extraEnv,
 			MCP_URL: process.env.MCP_URL ?? getMcpUrl(),
+			// P466: hand the warm-boot briefing id to the child via env so it
+			// can call `briefing_load(<id>)` on boot. Real uuid → child can
+			// retrieve mission, success_criteria, allowed_tools, MCP quirks,
+			// and escalation channels. Absent → child runs in legacy "blind"
+			// mode using only the task prompt.
+			...(req.briefingId ? { AGENTHIVE_BRIEFING_ID: req.briefingId } : {}),
 		},
 	});
 

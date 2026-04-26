@@ -21,6 +21,15 @@ export interface WorkOfferInput {
 	timeoutMs?: number;
 	worktreeHint?: string;
 	requiredCapabilities?: string[];
+	/**
+	 * P466 spawn-briefing: identifier of the warm-boot briefing assembled by
+	 * the parent (orchestrator) before posting the offer. The agency claims
+	 * the offer, reads briefing_id from metadata, and passes it to the
+	 * spawned child via AGENTHIVE_BRIEFING_ID env. The child calls
+	 * `briefing_load(<id>)` on boot to retrieve mission, success criteria,
+	 * allowed tools, MCP quirks, and escalation channels.
+	 */
+	briefingId?: string;
 }
 
 export interface WorkOfferResult {
@@ -41,6 +50,7 @@ export async function postWorkOffer(
 	if (input.model) metadata.model = input.model;
 	if (input.timeoutMs) metadata.timeout_ms = input.timeoutMs;
 	if (input.worktreeHint) metadata.worktree_hint = input.worktreeHint;
+	if (input.briefingId) metadata.briefing_id = input.briefingId;
 
 	const caps = input.requiredCapabilities?.length
 		? JSON.stringify({ all: input.requiredCapabilities })
