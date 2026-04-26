@@ -1284,3 +1284,7 @@
 [2026-04-26 00:44:44] System: **[proposal created]** PROPOSAL-1 - Symlink root proposal
 [2026-04-26 00:44:45] System: **[proposal created]** PROPOSAL-1 - Test Proposal
 [2026-04-26 00:44:45] System: **[proposal created]** PROPOSAL-1 - Symlink root auto-commit
+[2026-04-26 00:44:46] System: **[proposal created]** PROPOSAL-1 - Test Proposal
+[2026-04-26 00:44:47] System: **[proposal created]** PROPOSAL-1 - High Priority
+[2026-04-26 00:44:47] System: **[proposal created]** PROPOSAL-2 - Medium Priority
+[2026-04-26 00:44:48] System: **[proposal created]** PROPOSAL-3 - Low Priority

@@ -172,9 +172,15 @@ class ConfigResolver {
 	 */
 	private async resolve<T>(key: ConfigKey<T>): Promise<CachedValue<T>> {
 		// Check cache first
-		const cached = this.cache.get(key.name);
-		if (cached !== undefined) {
-			return cached;
+		const cachedValue = this.cache.get(key.name);
+		if (cachedValue !== undefined) {
+			// Update audit log for cache hit
+			const audit = this.audit.get(key.name);
+			if (audit) {
+				audit.lastAccessedAt = new Date();
+				audit.accessCount++;
+			}
+			return cachedValue;
 		}
 
 		let value: T | undefined;
@@ -215,16 +221,16 @@ class ConfigResolver {
 
 		// Step 5: Control DB registry (registry keys)
 		if (value === undefined && key.class === "registry" && key.dbTable && this.pool) {
-			const dbValue = await this.getDbValue(key.dbTable, key.dbColumn || key.name);
-			if (dbValue !== undefined) {
+			const registryDbValue = await this.getDbValue(key.dbTable, key.dbColumn || key.name);
+			if (registryDbValue !== undefined) {
 				try {
-					value = key.parse(String(dbValue));
+					value = key.parse(String(registryDbValue));
 					source = "db";
 				} catch (err) {
 					throw new RuntimeConfigMissing(
 						key.name,
 						key.class,
-						`Invalid DB value from ${key.dbTable}: ${dbValue}\n${(err as Error).message}`,
+						`Invalid DB value from ${key.dbTable}: ${registryDbValue}\n${(err as Error).message}`,
 					);
 				}
 			}
@@ -232,16 +238,16 @@ class ConfigResolver {
 
 		// Step 6: Feature flags (DB, cached, live-reloadable)
 		if (value === undefined && key.class === "flag" && key.dbTable && this.pool) {
-			const dbValue = await this.getDbValue(key.dbTable, key.dbColumn || key.name);
-			if (dbValue !== undefined) {
+			const flagDbValue = await this.getDbValue(key.dbTable, key.dbColumn || key.name);
+			if (flagDbValue !== undefined) {
 				try {
-					value = key.parse(String(dbValue));
+					value = key.parse(String(flagDbValue));
 					source = "db";
 				} catch (err) {
 					throw new RuntimeConfigMissing(
 						key.name,
 						key.class,
-						`Invalid flag value from ${key.dbTable}: ${dbValue}\n${(err as Error).message}`,
+						`Invalid flag value from ${key.dbTable}: ${flagDbValue}\n${(err as Error).message}`,
 					);
 				}
 			}
@@ -400,13 +406,17 @@ let globalResolver: ConfigResolver | null = null;
 
 /**
  * Initialize the global config resolver.
- * Call once at process startup.
+ * Call once at process startup. If called multiple times, creates a new resolver.
  */
 export async function initConfig(opts: {
 	yamlConfig?: Record<string, any>;
 	pool?: Pool;
 	envFilePath?: string;
 }): Promise<ConfigResolver> {
+	// Close the previous resolver if it exists
+	if (globalResolver) {
+		await globalResolver.cleanup();
+	}
 	const resolver = new ConfigResolver();
 	await resolver.init(opts);
 	globalResolver = resolver;
