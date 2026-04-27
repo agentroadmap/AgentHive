@@ -2,6 +2,7 @@
 -- Tables : agent, skill, agent_skill, agent_project, skill_grant_log
 -- Views  : v_agent_capabilities, v_project_coverage, v_skill_roster
 -- Enum   : agent_type, agent_status, skill_lifecycle, proficiency_level, grant_action
+-- Slot   : 006 (canonical slot for P597 per DDL README)
 -- Dep    : none (standalone; migration from roadmap_workforce.* → 056-workforce-from-roadmap.sql)
 -- 2026-04-27
 
@@ -52,6 +53,12 @@ CREATE TABLE IF NOT EXISTS workforce.agent (
     contact        TEXT,
     status         workforce.agent_status  NOT NULL DEFAULT 'active',
     metadata       JSONB                   NOT NULL DEFAULT '{}',
+    -- Catalog hygiene: uniform across all hiveCentral catalog tables (see DDL README §catalog-hygiene).
+    owner_did      TEXT                    NOT NULL DEFAULT 'agenthive',
+    lifecycle_status TEXT                  NOT NULL DEFAULT 'active'
+                                           CHECK (lifecycle_status IN ('active', 'deprecated', 'retired')),
+    deprecated_at  TIMESTAMPTZ,
+    retire_after   TIMESTAMPTZ,
     created_at     TIMESTAMPTZ             NOT NULL DEFAULT now(),
     updated_at     TIMESTAMPTZ             NOT NULL DEFAULT now()
 );

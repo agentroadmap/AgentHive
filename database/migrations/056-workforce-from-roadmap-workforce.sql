@@ -1,6 +1,6 @@
 -- Migration 056: Populate workforce.* from roadmap_workforce.*
 -- Proposal: P597
--- Prerequisites: database/ddl/hivecentral/007-workforce.sql applied first.
+-- Prerequisites: database/ddl/hivecentral/006-workforce.sql applied first.
 -- Idempotency: All inserts use ON CONFLICT DO NOTHING; safe to re-run.
 -- Scope: Copies agent_registry + agent_capability rows into workforce.* tables.
 --        roadmap_workforce.* tables are NOT dropped — they remain authoritative
