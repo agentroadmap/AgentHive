@@ -18,7 +18,14 @@
  */
 
 import { program } from "commander";
-import { version } from "../../package.json" assert { type: "json" };
+import { readFileSync } from "fs";
+import { dirname, resolve } from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const packageJsonPath = resolve(__dirname, "../../package.json");
+const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
+const version = packageJson.version;
 import {
   Errors,
   HiveError,
@@ -95,7 +102,7 @@ async function main() {
     // Handle --schema and --recipes early
     program.hook("preAction", async (thisCommand) => {
       const opts = thisCommand.optsWithGlobals?.();
-      if (opts?.schema && !thisCommand._name) {
+      if (opts?.schema && !thisCommand.name()) {
         // Global --schema: show full CLI schema
         const schema = getFullSchema(version);
         const format = opts.format || detectDefaultFormat(isTtyOutput());
