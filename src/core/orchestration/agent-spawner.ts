@@ -23,6 +23,11 @@ import { hostname } from "node:os";
 import { join } from "node:path";
 import { query } from "../../infra/postgres/pool.ts";
 import { RfcStates, HotfixStates } from "../workflow/state-names.ts";
+import {
+	resolveToolEnvelope,
+	serializeEnvelope,
+	ToolGrantResolutionError,
+} from "../../infra/agency/tool-grant.ts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -74,6 +79,10 @@ export interface SpawnRequest {
 	agentLabel?: string;
 	/** Descriptive activity label (e.g. "researching", "enhancing", "reviewing") */
 	activity?: string;
+	/** P599: Project ID for tool grant resolution. When set, resolveToolEnvelope() is called. */
+	projectId?: number;
+	/** P599: Agency principal ID (e.g. "agency:42") for tool grant resolution. */
+	agencyPrincipalId?: string;
 }
 
 export interface SpawnResult {
@@ -822,6 +831,18 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	const route = await resolveModelRoute(provider, modelHint);
 	// P245: enforce host-level spawn policy before launching any CLI subprocess.
 	await assertSpawnAllowed(AGENTHIVE_HOST, route, proposalId, worktree);
+
+	// P599: resolve tool grant envelope for this (project, agency) pair.
+	// Fail-closed: if the DB is unreachable, the spawn is aborted.
+	let toolEnvelopeJson: string | undefined;
+	if (req.agencyPrincipalId !== undefined || req.projectId !== undefined) {
+		const envelope = await resolveToolEnvelope(
+			req.projectId ?? null,
+			req.agencyPrincipalId ?? null,
+		);
+		toolEnvelopeJson = serializeEnvelope(envelope);
+	}
+
 	const agentEnv = await loadEnvAgent(worktree, worktreeRoot);
 	let assembledTask = task;
 
@@ -851,6 +872,9 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		extraEnv: {
 			...extraEnv,
 			MCP_URL: process.env.MCP_URL ?? getMcpUrl(),
+			...(toolEnvelopeJson !== undefined && {
+				AGENT_TOOL_ENVELOPE: toolEnvelopeJson,
+			}),
 		},
 	});
 

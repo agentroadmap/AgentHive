@@ -18,6 +18,8 @@ import * as pgPool from "../../postgres/pool.ts";
 import { loadStateNames } from "../../core/workflow/state-names.ts";
 import { getPackageName } from "../../shared/utils/app-info.ts";
 import { getVersion } from "../../shared/utils/version.ts";
+import { parseEnvelopeFromEnv, opsMatch, type ToolEnvelope } from "../../infra/agency/tool-grant.ts";
+import { query } from "../../infra/postgres/pool.ts";
 import { registerInitRequiredResource } from "./resources/init-required/index.ts";
 import { registerWorkflowResources } from "./resources/workflow/index.ts";
 import { registerAgentTools } from "./tools/agents/index.ts";
@@ -91,6 +93,10 @@ export class McpServer extends Core {
 	private transport?: StdioServerTransport;
 	private stopping = false;
 	private consolidatedToolSurface = false;
+
+	// P599: Tool grant envelope. Read once at startup from AGENT_TOOL_ENVELOPE.
+	// null = no restriction (orchestrator context; shared server).
+	private readonly toolEnvelope: ToolEnvelope | null = parseEnvelopeFromEnv();
 
 	private readonly tools = new Map<string, McpToolHandler>();
 	private readonly resources = new Map<string, McpResourceHandler>();
@@ -216,12 +222,21 @@ export class McpServer extends Core {
 	// -- Internal handlers --------------------------------------------------
 
 	protected async listTools(): Promise<ListToolsResult> {
-		const tools = Array.from(this.tools.values()).filter(
-			(tool) =>
-				SHOW_LEGACY_TOOLS ||
-				!this.consolidatedToolSurface ||
-				CONSOLIDATED_TOOL_NAMES.has(tool.name),
-		);
+		const tools = Array.from(this.tools.values()).filter((tool) => {
+			if (
+				!SHOW_LEGACY_TOOLS &&
+				this.consolidatedToolSurface &&
+				!CONSOLIDATED_TOOL_NAMES.has(tool.name)
+			) {
+				return false;
+			}
+			// P599: if an envelope is present, only expose tools with at least one granted op.
+			if (this.toolEnvelope !== null) {
+				const granted = this.toolEnvelope[tool.name];
+				return Array.isArray(granted) && granted.length > 0;
+			}
+			return true;
+		});
 		return {
 			tools: tools.map((tool) => ({
 				name: tool.name,
@@ -255,6 +270,19 @@ export class McpServer extends Core {
 			throw new Error(`Tool not found: ${name}`);
 		}
 
+		// P599: enforce tool grant envelope. Deny if tool absent from envelope.
+		if (this.toolEnvelope !== null) {
+			const granted = this.toolEnvelope[name] ?? [];
+			// Use tool:* as the representative op for a generic call; callers may
+			// provide a specific op via args._op for finer-grained checks.
+			const requestedOp = (args._op as string | undefined) ?? `${name}:*`;
+			if (!opsMatch(granted, requestedOp)) {
+				throw new Error(
+					`[P599] Tool "${name}" is not granted for this agent (op=${requestedOp}).`,
+				);
+			}
+		}
+
 		const result = await tool.handler(args);
 
 		// Log tool call to pulse
@@ -269,6 +297,23 @@ export class McpServer extends Core {
 			});
 		} catch (_err) {
 			// Ignore pulse logging errors to not block tool execution
+		}
+
+		// P599: write to tool_invocation_log (best-effort; never blocks the response).
+		try {
+			const principal =
+				(args.agent as string | undefined) ||
+				(args.from as string | undefined) ||
+				process.env.AGENT_PRINCIPAL_ID ||
+				"unknown";
+			const op = (args._op as string | undefined) ?? `${name}:call`;
+			await query(
+				`INSERT INTO roadmap.tool_invocation_log (tool_name, principal_id, op, metadata)
+				 VALUES ($1, $2, $3, $4)`,
+				[name, principal, op, JSON.stringify({ args })],
+			);
+		} catch (_err) {
+			// Invocation log write failures are non-fatal.
 		}
 
 		return result;
