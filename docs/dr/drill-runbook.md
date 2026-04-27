@@ -36,7 +36,7 @@ These must be verified before any drill. If any item is missing, the drill is bl
 | `agenthive-orchestrator` (staging instance) running | `ssh stg-A1 systemctl is-active agenthive-orchestrator` → `active` |
 | `agenthive-copilot-agency` (staging) running | `ssh stg-A1 systemctl is-active agenthive-copilot-agency` → `active` |
 | At least one active proposal lease in staging | `psql -h stg-pgbouncer -d hiveCentral -c "SELECT COUNT(*) FROM roadmap.v_agency_status WHERE status='active'"` → ≥ 1 |
-| DR scripts deployed to staging DR_DIR | `ls /usr/local/share/agenthive/dr/` on `stg-A1` shows `lease-reconcile.sql`, `post-failover-verify.sql`, `record-dr-event.sql` |
+| DR scripts deployed to staging DR_DIR | `ls /usr/local/share/agenthive/dr/` on `stg-A1` shows `lease-reconcile.sql`, `post-failover-verify.sql`, `record-dr-event.sql`, `record-drill-event.sql` |
 | Clock sync ≤ 5 s on both staging hosts | `chronyc tracking` on `stg-A1` and `stg-A2`; check `Last offset` |
 
 ### 1.2 Required env vars (export before running)
@@ -143,12 +143,12 @@ psql -U admin -h stg-A2 -p 5432 -d hiveCentral \
   -v decision_seconds='<operator decision latency seconds>' \
   -v clock_skew_max='<max clock offset observed>' \
   -v notes='"clean failover drill; no active leases"' \
-  -f /usr/local/share/agenthive/dr/record-dr-event.sql
+  -f /usr/local/share/agenthive/dr/record-drill-event.sql
 ```
 
 Confirm a row exists:
 ```sql
-SELECT entry_id, entry_kind, payload FROM governance.decision_log
+SELECT entry_id, entry_kind, payload FROM roadmap.governance_decision_log
   WHERE entry_kind = 'dr_drill' ORDER BY entry_id DESC LIMIT 1;
 ```
 
@@ -171,16 +171,21 @@ systemctl reload pgbouncer
 ### 3.1 Create a synthetic stuck agent
 
 ```bash
-# In staging, claim a lease on a test proposal from a shell session
+# In staging, claim a lease on any existing proposal from a shell session
 # (this simulates a mid-flight agent that will be killed)
+# Resolve a real proposal_id from staging rather than hard-coding one:
+STUCK_PROPOSAL_ID=$(psql -h stg-pgbouncer -p 6432 -U admin -d hiveCentral -tAc \
+  "SELECT proposal_id FROM roadmap.proposals LIMIT 1;")
+[[ -z "$STUCK_PROPOSAL_ID" ]] && { echo "ERROR: no proposals found in staging"; exit 1; }
+
 LEASE_ID=$(psql -h stg-pgbouncer -p 6432 -U admin -d hiveCentral -tAc "
   INSERT INTO proposal.proposal_lease
     (proposal_id, agent_identity, claimed_at, last_renewed_at, status, lease_duration_seconds)
   VALUES
-    (1, 'did:hive:spawn:stg-stuck-test:1', now(), now(), 'active', 300)
+    ($STUCK_PROPOSAL_ID, 'did:hive:spawn:stg-stuck-test:1', now(), now(), 'active', 300)
   RETURNING lease_id;
 ")
-echo "Synthetic lease created: $LEASE_ID"
+echo "Synthetic lease created: $LEASE_ID (proposal_id=$STUCK_PROPOSAL_ID)"
 ```
 
 Verify:
@@ -247,7 +252,7 @@ psql -U admin -h stg-A2 -p 5432 -d hiveCentral \
   -v decision_seconds='<measured>' \
   -v clock_skew_max='<measured>' \
   -v notes='"stuck-claim drill; 1 synthetic lease; orphan correctly released"' \
-  -f /usr/local/share/agenthive/dr/record-dr-event.sql
+  -f /usr/local/share/agenthive/dr/record-drill-event.sql
 ```
 
 ### 3.6 Restore staging (same as §2.8)
