@@ -1,0 +1,43 @@
+#!/usr/bin/env node
+
+/**
+ * hive CLI executable shim.
+ *
+ * Routes to either:
+ * 1. Prebuilt dist/hive-cli.cjs (after bundling)
+ * 2. Or directly runs src/apps/hive-cli/index.ts via jiti (during development)
+ *
+ * For npm install -g, package.json "bin" field points here.
+ */
+
+import { fileURLToPath } from "url";
+import { dirname, resolve } from "path";
+import { existsSync } from "fs";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(__dirname, "..");
+
+// Try to use prebuilt bundle first
+const bundledPath = resolve(repoRoot, "dist/hive-cli.cjs.js");
+if (existsSync(bundledPath)) {
+  // Run bundled version
+  const { createRequire } = await import("module");
+  const require = createRequire(import.meta.url);
+  require(bundledPath);
+  process.exit(0);
+}
+
+// Fallback: Run via jiti (TypeScript loader)
+// This allows development without rebuilding
+const cliPath = resolve(repoRoot, "src/apps/hive-cli/index.ts");
+try {
+  const { default: jiti } = await import("jiti");
+  const loader = jiti(repoRoot, {
+    esmResolve: true,
+    interopDefault: true,
+  });
+  await loader(cliPath);
+} catch (err) {
+  console.error("Failed to load hive CLI:", err);
+  process.exit(99);
+}
