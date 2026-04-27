@@ -1718,6 +1718,64 @@ async function releaseStaleCubics(proposalId: string) {
 // P266: poller handles owned by main() so shutdown() can clear them.
 let pollTimer: NodeJS.Timeout | null = null;
 let implicitGateTimer: NodeJS.Timeout | null = null;
+let reconcilerTimer: NodeJS.Timeout | null = null;
+
+// P611: backstop reconciler — catches any gate advances that the AFTER INSERT trigger
+// missed (e.g., trigger disabled, cross-transaction race, or manual GDL INSERT).
+async function reconcileStrandedAdvances(
+	pool: ReturnType<typeof getPool>,
+): Promise<void> {
+	const stranded = await pool.query(`
+		SELECT gdl.id, gdl.proposal_id, gdl.from_state, gdl.to_state, gdl.decided_by
+		  FROM roadmap_proposal.gate_decision_log gdl
+		  JOIN roadmap_proposal.proposal p ON p.id = gdl.proposal_id
+		 WHERE gdl.decision = 'advance'
+		   AND gdl.created_at > now() - INTERVAL '24 hours'
+		   AND UPPER(p.status) = UPPER(gdl.from_state)
+		 ORDER BY gdl.created_at ASC
+	`);
+	let recovered = 0;
+	for (const row of stranded.rows) {
+		const client = await pool.connect();
+		try {
+			await client.query("BEGIN");
+			await client.query("SET LOCAL lock_timeout = '5s'");
+			await client.query("SET LOCAL app.gate_bypass = 'true'");
+			await client.query(
+				"SELECT id FROM roadmap_proposal.proposal WHERE id = $1 FOR UPDATE",
+				[row.proposal_id],
+			);
+			const upd = await client.query(
+				`UPDATE roadmap_proposal.proposal
+				    SET status = $1, maturity = 'new'
+				  WHERE id = $2
+				    AND UPPER(status) = UPPER($3)`,
+				[row.to_state, row.proposal_id, row.from_state],
+			);
+			if (upd.rowCount && upd.rowCount > 0) {
+				await client.query(
+					`INSERT INTO roadmap_proposal.proposal_discussions
+					     (proposal_id, author_identity, context_prefix, body)
+					 VALUES ($1, 'system/reconciler', 'gate-decision:', $2)`,
+					[
+						row.proposal_id,
+						`Auto-advanced ${row.from_state}->${row.to_state} via gate_decision_log id=${row.id} (decided_by: ${row.decided_by}). Reconciler backstop.`,
+					],
+				);
+				recovered++;
+			}
+			await client.query("COMMIT");
+		} catch (e) {
+			await client.query("ROLLBACK").catch(() => {});
+			logger.error(
+				`Reconciler: Failed to apply advance for proposal_id=${row.proposal_id}, gdl_id=${row.id}: ${e instanceof Error ? e.message : e}`,
+			);
+		} finally {
+			client.release();
+		}
+	}
+	if (recovered > 0) logger.log(`Reconciler: Recovered ${recovered} stranded advances`);
+}
 
 // Main orchestrator
 async function main() {
@@ -1847,6 +1905,15 @@ async function main() {
 		);
 	}
 
+	// P611: backstop reconciler runs every 30s to catch stranded gate advances.
+	reconcilerTimer = setInterval(() => {
+		if (stopping) return;
+		reconcileStrandedAdvances(pool).catch((e) =>
+			logger.error("Reconciler error:", e),
+		);
+	}, 30_000);
+	logger.log("P611 reconciler polling every 30s for stranded gate advances.");
+
 	logger.log("Orchestrator running with dynamic agent deployment...");
 
 	// P266: graceful shutdown — drain in-flight dispatches before exit.
@@ -1859,6 +1926,7 @@ async function main() {
 
 		if (pollTimer) clearInterval(pollTimer);
 		if (implicitGateTimer) clearInterval(implicitGateTimer);
+		if (reconcilerTimer) clearInterval(reconcilerTimer);
 
 		const drainStart = Date.now();
 		const drainPromise = Promise.allSettled(Array.from(inFlight));

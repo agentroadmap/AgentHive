@@ -102,6 +102,7 @@ Important live facts:
 - If you notice an improvement, consolidation opportunity, concept unification, or a current or potential issue, create or update a proposal instead of leaving it as chat-only context.
 - Never commit credentials, copied env files, or secrets from `.env`, `/etc/agenthive/env`, or local shell history.
 - Do not claim a deployment, migration, or verification step that you did not actually perform.
+- Gate cubic agents MUST call prop_transition (records gate_decision_log + flips status) and set_maturity after a verdict. The P611 reconciler is the safety net — omitting these is a protocol violation, not an acceptable shortcut.
 
 ## 4a. Folder Discipline (mandatory for every cubic agent)
 
@@ -513,6 +514,55 @@ Before you finish:
 * **The RFC Standard:** For a proposal to advance, it must be **Coherent**, **Economically/Architecturally optimized**, and have **Structurally defined Acceptance Criteria (AC)** with clear functions/tests.
 * **Issue Reporting:** If an error or blocker is encountered, use the MCP to **log an issue immediately**. Do not attempt to bypass fundamental architectural constraints without a formal issue log.
 * **The "Cubic" Context:** When spawning agents in a "Cubic" environment, ensure they are passed the relevant MCP context for their specific task.
+
+## 10a. Gate & Review Agent Protocol
+
+### MCP canonical actions
+
+| Action | When to call |
+| :--- | :--- |
+| `prop_transition` | After a gate verdict — advances status AND records `gate_decision_log` row in one atomic operation |
+| `set_maturity` | After `prop_transition` — set maturity to `new` (or `active` if immediately claimed) |
+| `add_discussion` | For reasoning, intermediate findings, questions — does NOT trigger gate logic |
+| `submit_review` | For structured review objects (score, recommended action) |
+| `log_issue` | For any blocker, environment problem, or unresolvable ambiguity |
+
+### Output contract for gate/review agents
+
+A gate agent run is only complete when:
+1. `prop_transition` has been called with `decision` = one of `advance | hold | reject | waive | escalate`
+2. `set_maturity` has been called to reflect the new state
+3. A `add_discussion` entry exists summarising the rationale (linked AC references, risk notes)
+
+Calling only `add_discussion` without `prop_transition` leaves the proposal stranded in its current state. The P611 reconciler is a safety net for trigger failures — it is not a substitute for correct agent protocol.
+
+### Source-of-truth rule
+
+**DB is authoritative.** Markdown files under `docs/` are supplementary. On any divergence between a markdown file and the DB, the DB wins. Gate agents must read from MCP, not from markdown files, before making decisions.
+
+### What stops a gate run
+
+A gate agent MUST call `log_issue` and stop (not guess) when:
+- The proposal has no Acceptance Criteria
+- A required dependency proposal is not `complete`
+- The DB is unreachable or the MCP returns an error
+- The agent cannot determine the correct `from_state` / `to_state` transition
+
+### Gate spawn author_identity convention
+
+Author identities for gate agents follow the pattern:
+
+```
+<provider>/<role>-d<depth_level>-p<proposal_id>
+```
+
+Examples:
+- `claude/skeptic-alpha-d1-p472`
+- `nous/gate-review-d2-p611`
+
+The DB template is stored at `roadmap.gate_task_templates.author_identity_template`. Gate agents MUST use the template from the DB, not a hardcoded string, so that author_identity stays consistent across provider switches.
+
+System-generated audit entries use `system/auto-advance` (trigger) and `system/reconciler` (backstop) — both registered in `roadmap_workforce.agent_registry`.
 
 ## 11. Overseer Role: Hermes (Andy)
 
