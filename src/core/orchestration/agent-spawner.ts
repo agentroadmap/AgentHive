@@ -16,12 +16,14 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { getMcpUrl, getDaemonUrl } from "../../shared/runtime/endpoints.ts";
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { query } from "../../infra/postgres/pool.ts";
+import { ObservabilityWriter } from "../observability/observability-writer.ts";
 import { RfcStates, HotfixStates } from "../workflow/state-names.ts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -74,6 +76,12 @@ export interface SpawnRequest {
 	agentLabel?: string;
 	/** Descriptive activity label (e.g. "researching", "enhancing", "reviewing") */
 	activity?: string;
+	/** P604: trace context — propagated from parent orchestrator span */
+	traceId?: string;
+	/** P604: parent span ID for child span linking */
+	parentSpanId?: string | null;
+	/** P604: briefing ID associated with this spawn */
+	briefingId?: string | null;
 }
 
 export interface SpawnResult {
@@ -117,6 +125,8 @@ export interface ModelRoute {
 	spawnToolsets: string | null;
 	/** Whether agents spawned on this route may spawn their own subagents */
 	spawnDelegate: boolean;
+	/** DB primary key of the resolved model_routes row (P604: routing observability) */
+	routeId?: bigint | null;
 }
 
 // Lazy-loaded Claude settings.json env vars (read once, cached)
@@ -149,6 +159,7 @@ export function buildSpawnProcessEnv(input: {
 	route: ModelRoute;
 	agentEnv: Record<string, string>;
 	extraEnv: Record<string, string>;
+	traceId?: string;
 }): Record<string, string> {
 	// Credential resolution order:
 	// 1. DB-stored keys (api_key_primary / api_key_secondary) — highest priority
@@ -202,6 +213,8 @@ export function buildSpawnProcessEnv(input: {
 		AGENT_API_SPEC: input.route.apiSpec,
 		// Spawn control: DB-driven flag tells the agent whether it may spawn subagents
 		AGENTHIVE_SPAWN_DELEGATE: String(input.route.spawnDelegate),
+		// P604: propagate trace context into child process
+		...(input.traceId && { AGENTHIVE_TRACE_ID: input.traceId }),
 		// Git identity isolation
 		GIT_CONFIG_GLOBAL: `${GITCONFIG_ROOT}/${input.worktree}.gitconfig`,
 		GIT_CONFIG_NOSYSTEM: "1",
@@ -555,6 +568,7 @@ async function resolveModelRoute(
 	hint?: string,
 ): Promise<ModelRoute> {
 	type RouteRow = {
+		id: string;
 		model_name: string;
 		route_provider: string;
 		agent_provider: string;
@@ -580,7 +594,7 @@ async function resolveModelRoute(
 	const fetchRoute = (modelName: string) => {
 		if (perMillionPricing) {
 		return query<RouteRow>(
-			`SELECT model_name, route_provider, agent_provider,
+			`SELECT id, model_name, route_provider, agent_provider,
                agent_cli, cli_path, api_spec, base_url, plan_type,
                cost_per_million_input, cost_per_million_output,
                api_key_env, api_key_fallback_env, base_url_env, cli_api_key_env,
@@ -596,7 +610,7 @@ async function resolveModelRoute(
 		}
 
 		return query<RouteRow>(
-			`SELECT model_name, route_provider, agent_provider,
+			`SELECT id, model_name, route_provider, agent_provider,
               agent_cli, cli_path, api_spec, base_url, plan_type,
               NULL::numeric AS cost_per_million_input,
               NULL::numeric AS cost_per_million_output,
@@ -632,6 +646,7 @@ async function resolveModelRoute(
 		apiKeySecondary: r.api_key_secondary,
 		spawnToolsets: r.spawn_toolsets,
 		spawnDelegate: r.spawn_delegate ?? false,
+		routeId: r.id ? BigInt(r.id) : null,
 	});
 
 	if (hint) {
@@ -652,7 +667,7 @@ async function resolveModelRoute(
 	// Default: use DB is_default flag first, then cheapest enabled as fallback.
 	const { rows } = perMillionPricing
 		? await query<RouteRow>(
-				`SELECT model_name, route_provider, agent_provider,
+				`SELECT id, model_name, route_provider, agent_provider,
                agent_cli, cli_path, api_spec, base_url, plan_type,
                cost_per_million_input, cost_per_million_output,
                api_key_env, api_key_fallback_env, base_url_env, cli_api_key_env,
@@ -668,7 +683,7 @@ async function resolveModelRoute(
 				[provider],
 			)
 		: await query<RouteRow>(
-				`SELECT model_name, route_provider, agent_provider,
+				`SELECT id, model_name, route_provider, agent_provider,
               agent_cli, cli_path, api_spec, base_url, plan_type,
               NULL::numeric AS cost_per_million_input,
               NULL::numeric AS cost_per_million_output,
@@ -695,7 +710,7 @@ async function resolveModelRoute(
 	if (fallbackModel) {
 		const { rows: defaultRows } = perMillionPricing
 			? await query<RouteRow>(
-					`SELECT model_name, route_provider, agent_provider,
+					`SELECT id, model_name, route_provider, agent_provider,
                agent_cli, cli_path, api_spec, base_url, plan_type,
                cost_per_million_input, cost_per_million_output,
                api_key_env, api_key_fallback_env, base_url_env, cli_api_key_env,
@@ -709,7 +724,7 @@ async function resolveModelRoute(
 					[fallbackModel, provider],
 				)
 			: await query<RouteRow>(
-					`SELECT model_name, route_provider, agent_provider,
+					`SELECT id, model_name, route_provider, agent_provider,
               agent_cli, cli_path, api_spec, base_url, plan_type,
               NULL::numeric AS cost_per_million_input,
               NULL::numeric AS cost_per_million_output,
@@ -843,11 +858,28 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	// Build argv + env from route metadata (api_spec drives which CLI is used)
 	const { argv, env: extraEnv, stdin } = buildArgsBySpec(spawnReq, route);
 
+	// P604: trace context — inherit from request or start a new root trace
+	const traceId = req.traceId ?? randomUUID();
+	const obsWriter = new ObservabilityWriter("operator:agent-spawner");
+
+	const { spanId } = await obsWriter.startSpan({
+		traceId,
+		operation: "agent.spawn",
+		parentSpanId: req.parentSpanId ?? null,
+		attributes: {
+			worktree,
+			agent_provider: provider,
+			stage,
+			...(proposalId !== undefined && { proposal_id: proposalId }),
+		},
+	});
+
 	// Assemble process environment (agent-scoped, not inheriting secrets from host)
 	const processEnv = buildSpawnProcessEnv({
 		worktree,
 		route,
 		agentEnv,
+		traceId,
 		extraEnv: {
 			...extraEnv,
 			MCP_URL: process.env.MCP_URL ?? getMcpUrl(),
@@ -897,6 +929,32 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
      WHERE id = $5`,
 		[status, durationMs, outputSummary, errorDetail, agentRunId],
 	);
+
+	// P604: close span + write child observability records
+	await obsWriter.closeSpan({
+		spanId,
+		status: exitCode === 0 ? "ok" : "error",
+		errorMessage: exitCode !== 0 ? errorDetail.slice(0, 500) : null,
+	});
+	await obsWriter.writeAgentExecutionSpan({
+		spanId,
+		agencyId: worktree,
+		agentId: BigInt(agentRunId),
+		proposalId: proposalId ?? null,
+		modelName: route.modelName,
+		routeId: route.routeId ?? null,
+	});
+	if (route.routeId) {
+		const selectionReason = modelHint
+			? route.modelName === modelHint ? "hint_match" : "hint_fallback"
+			: "default_route";
+		await obsWriter.writeModelRoutingOutcome({
+			traceId,
+			selectedRouteId: route.routeId,
+			candidateRoutes: [{ routeId: String(route.routeId), modelName: route.modelName, selectionReason }],
+			selectionReason,
+		});
+	}
 
 	return { agentRunId, worktree, exitCode, stdout, stderr, durationMs };
 }

@@ -13,6 +13,7 @@ import { getMcpUrl } from "../src/shared/runtime/endpoints.js";
 
 import { constants as fsConstants } from "node:fs";
 import { access, readdir, stat } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
@@ -20,6 +21,7 @@ import {
 	spawnAgent,
 	resolveActiveRouteProvider,
 } from "../src/core/orchestration/agent-spawner.ts";
+import { ObservabilityWriter } from "../src/core/observability/observability-writer.ts";
 import { postWorkOffer } from "../src/core/pipeline/post-work-offer.ts";
 import { reapStaleRows } from "../src/core/pipeline/reap-stale-rows.ts";
 import { getPool, query } from "../src/infra/postgres/pool.ts";
@@ -842,6 +844,21 @@ async function dispatchAgent(
 		}
 		// P405: resolve provider from model_routes, not worktree metadata
 		const activeProvider = await resolveActiveRouteProvider();
+
+		// P604: parent dispatch span
+		const traceId = randomUUID();
+		const orchWriter = new ObservabilityWriter("operator:orchestrator");
+		const { spanId: orchSpanId } = await orchWriter.startSpan({
+			traceId,
+			operation: "orch.dispatch",
+			attributes: {
+				proposal_id: Number(proposalId),
+				agent,
+				stage,
+				phase,
+			},
+		});
+
 		const result = await spawnAgent({
 			worktree,
 			task: taskPrompt,
@@ -851,6 +868,13 @@ async function dispatchAgent(
 			provider: activeProvider ?? undefined,
 			agentLabel: agentLabel ?? agent,
 			activity,
+			traceId,
+			parentSpanId: orchSpanId,
+		});
+
+		await orchWriter.closeSpan({
+			spanId: orchSpanId,
+			status: result.exitCode === 0 ? "ok" : "error",
 		});
 
 		if (result.exitCode === 0) {
@@ -1286,6 +1310,24 @@ async function dispatchImplicitGate(
 		`Implicit gate dispatch ${dispatchId} -> ${worktree} for ${proposal.display_id} (${proposal.status} -> ${gate.toStage}, ${gate.gate})`,
 	);
 
+	// P604: gate observability span
+	const gateTraceId = randomUUID();
+	const gateWriter = new ObservabilityWriter("operator:orchestrator");
+	let gateSpanId: string | null = null;
+	try {
+		const { spanId } = await gateWriter.startSpan({
+			traceId: gateTraceId,
+			operation: "orch.gate",
+			attributes: {
+				proposal_id: proposal.id,
+				gate: gate.gate,
+				from_stage: proposal.status,
+				to_stage: gate.toStage,
+			},
+		});
+		gateSpanId = spanId;
+	} catch {}
+
 	let result: Awaited<ReturnType<typeof spawnAgent>>;
 	// P405: resolve provider from model_routes, not worktree metadata
 	const activeProvider = await resolveActiveRouteProvider();
@@ -1297,6 +1339,8 @@ async function dispatchImplicitGate(
 			stage: `gate:${gate.toStage.toUpperCase()}`,
 			timeoutMs: 600_000,
 			provider: activeProvider ?? undefined,
+			traceId: gateTraceId,
+			parentSpanId: gateSpanId,
 		});
 	} catch (spawnErr) {
 		const errMsg =
@@ -1353,6 +1397,16 @@ async function dispatchImplicitGate(
 		logger.log(
 			`Implicit gate dispatch ${dispatchId} advanced ${proposal.display_id} to ${gate.toStage}/new`,
 		);
+		if (gateSpanId) {
+			await gateWriter.writeDecisionExplainability({
+				traceId: gateTraceId,
+				decisionKind: "gate_advance",
+				inputs: { proposal_id: proposal.id, gate: gate.gate, from_stage: proposal.status, to_stage: gate.toStage },
+				rulesEvaluated: { gate_rule: "maturity=mature AND exit_code=0 AND reached_target=true" },
+				outcome: { decision: "advance", to_stage: gate.toStage, agent_run_id: result.agentRunId },
+			});
+			await gateWriter.closeSpan({ spanId: gateSpanId, status: "ok" });
+		}
 		return;
 	}
 
@@ -1409,6 +1463,16 @@ async function dispatchImplicitGate(
 		logger.log(
 			`Implicit gate dispatch ${dispatchId} held ${proposal.display_id}: ${decisionMessage}`,
 		);
+		if (gateSpanId) {
+			await gateWriter.writeDecisionExplainability({
+				traceId: gateTraceId,
+				decisionKind: "gate_advance",
+				inputs: { proposal_id: proposal.id, gate: gate.gate, from_stage: proposal.status },
+				rulesEvaluated: { gate_rule: "maturity=mature AND exit_code=0 AND reached_target=false" },
+				outcome: { decision: finalMaturity === "obsolete" ? "obsolete" : "hold", proposal_status: current.status, agent_run_id: result.agentRunId },
+			});
+			await gateWriter.closeSpan({ spanId: gateSpanId, status: "ok" });
+		}
 		return;
 	}
 
@@ -1447,6 +1511,9 @@ async function dispatchImplicitGate(
 	logger.warn(
 		`Implicit gate dispatch ${dispatchId} blocked ${proposal.display_id}: ${errorMessage}`,
 	);
+	if (gateSpanId) {
+		await gateWriter.closeSpan({ spanId: gateSpanId, status: "error", errorMessage: errorMessage.slice(0, 500) });
+	}
 }
 
 async function drainImplicitGateReady(
