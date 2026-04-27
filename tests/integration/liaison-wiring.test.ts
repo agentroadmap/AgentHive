@@ -79,7 +79,7 @@ test("Heartbeat updates last_heartbeat_at", async (t) => {
 		status: "active",
 	});
 
-	assert.equal(result.heartbeat_ok, true);
+	assert.equal(result.success, true);
 
 	const after = await getAgencyStatus(agency_id);
 	assert.ok(after.last_heartbeat_at, "last_heartbeat_at should be set after heartbeat");
@@ -223,12 +223,12 @@ test("Shutdown: endLiaisonSession marks session.ended_at", async (t) => {
 	assert.ok(after[0].ended_at, "ended_at should be set");
 	assert.equal(after[0].end_reason, "test-shutdown");
 
-	// Verify heartbeat fails on closed session
-	const result = await liaisonHeartbeat({
-		session_id,
-		status: "active",
-	});
-	assert.equal(result.heartbeat_ok, false, "heartbeat should fail on closed session");
+	// Verify heartbeat throws on closed session
+	await assert.rejects(
+		() => liaisonHeartbeat({ session_id, status: "active" }),
+		/not found|already ended/i,
+		"heartbeat should throw on closed session",
+	);
 });
 
 test("Dormancy detection: checkAndMarkDormant", async (t) => {
@@ -267,7 +267,7 @@ test("Integration: Register → Heartbeat → Message → Acknowledge → Shutdo
 
 	// Heartbeat
 	const hb = await liaisonHeartbeat({ session_id, status: "active" });
-	assert.ok(hb.heartbeat_ok);
+	assert.ok(hb.success);
 
 	// Store message (simulating orchestrator dispatch)
 	const { message_id } = await storeMessage({
