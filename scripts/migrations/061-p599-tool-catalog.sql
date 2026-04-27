@@ -69,6 +69,20 @@ $$;
 -- NULL project_id          = global grant (any project)
 -- NULL agency_principal_id = global grant (any agency)
 
+-- Validator for permitted_ops: rejects '', bare strings without ':', '*:' prefix,
+-- and nested wildcards '%:*:*'. PostgreSQL forbids subqueries in CHECK constraints,
+-- so this logic lives in an IMMUTABLE STRICT SQL function.
+CREATE OR REPLACE FUNCTION roadmap.fn_valid_permitted_ops(ops TEXT[])
+  RETURNS BOOLEAN LANGUAGE sql IMMUTABLE STRICT AS $$
+    SELECT NOT EXISTS (
+      SELECT 1 FROM unnest(ops) AS op
+      WHERE op = ''
+         OR op NOT LIKE '%:%'
+         OR op LIKE '*:%'
+         OR op LIKE '%:*:*'
+    )
+  $$;
+
 CREATE TABLE IF NOT EXISTS roadmap.tool_grant (
   grant_id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   tool_id               BIGINT NOT NULL REFERENCES roadmap.tool (tool_id),
@@ -89,13 +103,7 @@ CREATE TABLE IF NOT EXISTS roadmap.tool_grant (
   -- ops must be non-empty strings in namespace:verb form.
   -- Wildcards are single-level only: namespace:* is valid; *:* is not.
   CONSTRAINT chk_permitted_ops_format
-    CHECK (NOT EXISTS (
-      SELECT 1 FROM unnest(permitted_ops) AS op
-      WHERE op = ''
-         OR op NOT LIKE '%:%'
-         OR op LIKE '*:%'
-         OR op LIKE '%:*:*'
-    ))
+    CHECK (roadmap.fn_valid_permitted_ops(permitted_ops))
 );
 
 COMMENT ON TABLE roadmap.tool_grant IS
