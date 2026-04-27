@@ -4,13 +4,15 @@
 -- Idempotent: ALTER if already present.
 -- Run BEFORE any schema DDL.
 -- ============================================================
--- Required runtime settings (passed via psql -v):
---   -v admin_password='<vault value>'
---   -v orchestrator_password='<vault value>'
---   -v agency_password='<vault value>'
---   -v a2a_password='<vault value>'
---   -v observability_password='<vault value>'
---   -v repl_password='<vault value>'
+-- Required runtime settings (passed via PGOPTIONS GUC custom parameters):
+--   PGOPTIONS='-c agenthive.admin_password=<vault value> \
+--              -c agenthive.orchestrator_password=<vault value> \
+--              -c agenthive.agency_password=<vault value> \
+--              -c agenthive.a2a_password=<vault value> \
+--              -c agenthive.observability_password=<vault value> \
+--              -c agenthive.repl_password=<vault value>'
+-- NOTE: Do NOT use psql -v foo=bar — that sets client substitution variable :foo,
+--       not the GUC agenthive.foo used by current_setting(). Use PGOPTIONS= instead.
 -- ============================================================
 
 \set ON_ERROR_STOP on

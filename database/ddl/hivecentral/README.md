@@ -25,31 +25,74 @@ Target schema files for the v3 redesign control-plane database. These run **only
 
 ## Catalog hygiene fields (uniform across every central catalog)
 
-Every central catalog table includes the same five anti-swamp fields:
+Every central catalog table carries exactly **seven** hygiene fields:
 
 ```sql
-owner_did         TEXT NOT NULL,
-lifecycle_status  TEXT NOT NULL DEFAULT 'active' CHECK (lifecycle_status IN ('active','deprecated','retired')),
+owner_did         TEXT         NOT NULL,
+lifecycle_status  TEXT         NOT NULL DEFAULT 'active'
+                              CHECK (lifecycle_status IN ('active','deprecated','retired','blocked')),
 deprecated_at     TIMESTAMPTZ,
 retire_after      TIMESTAMPTZ,
-notes             TEXT
+notes             TEXT,
+created_at        TIMESTAMPTZ  NOT NULL DEFAULT now(),
+updated_at        TIMESTAMPTZ  NOT NULL DEFAULT now()
 ```
 
-Catalog rows are **never deleted** — they are retired. A `lifecycle_status='retired'` row is invisible to dispatch but still resolvable for historical audit.
+The four `lifecycle_status` states are:
+- `active` — normal operating state
+- `deprecated` — soft-deleted; still resolvable for history but invisible to dispatch
+- `retired` — permanently decommissioned; `deprecated_at` is set
+- `blocked` — temporarily suspended; not deprecated, may return to `active`
+
+Catalog rows are **never hard-deleted** — they are deprecated or retired.
+
+### service_heartbeat hygiene-field exemption
+
+`core.service_heartbeat` carries **no** catalog hygiene fields (`owner_did`, `lifecycle_status`,
+`deprecated_at`, `retire_after`, `notes`, `created_at`, `updated_at` are all absent). Rationale:
+- No ownership concept: heartbeats are anonymous service signals, not managed entities
+- No lifecycle: rows are replaced via `ON CONFLICT (service_id) DO UPDATE`, never deprecated
+- Write volume: each service writes a row every 30 s; unnecessary columns waste I/O
+
+The `set_updated_at()` trigger is **not** attached to `core.service_heartbeat`.
+
+## Role grant matrix
+
+| Role                    | core.installation | core.host | core.os_user | core.runtime_flag | core.service_heartbeat | Views           |
+|-------------------------|:-----------------:|:---------:|:------------:|:-----------------:|:----------------------:|:---------------:|
+| `agenthive_admin`       | ALL               | ALL       | ALL          | ALL               | ALL                    | ALL             |
+| `agenthive_orchestrator`| SELECT            | SELECT    | SELECT       | SELECT, INSERT, UPDATE | SELECT, INSERT, UPDATE | SELECT     |
+| `agenthive_agency`      | —                 | SELECT    | SELECT       | SELECT            | INSERT, UPDATE         | —               |
+| `agenthive_a2a`         | —                 | —         | —            | SELECT            | INSERT, UPDATE         | —               |
+| `agenthive_observability`| SELECT           | SELECT    | SELECT       | SELECT            | SELECT                 | SELECT          |
+| `agenthive_repl`        | replication slot access only                                                               |
+
+Notes:
+- `agenthive_orchestrator` holds **SELECT-only** on `host`, `os_user`, and `installation`. It must NOT hold INSERT/UPDATE on these catalog tables — catalog writes belong to provisioning workflows (not the orchestrator); granting write access is a least-privilege violation.
+- `agenthive_agency` holds SELECT on `os_user` so it can look up the OS user a process runs as.
+- `agenthive_a2a` needs SELECT on `runtime_flag` to pick up per-project config and INSERT/UPDATE on `service_heartbeat` to publish its own heartbeat.
 
 ## Apply order
+
+Minimum PostgreSQL version: **14** (required for `CREATE OR REPLACE TRIGGER` syntax used in
+`001-core.sql`). For PostgreSQL ≤ 13 targets, use `DROP TRIGGER IF EXISTS` + `CREATE TRIGGER`
+instead.
 
 These files run during P501 against a freshly created `hiveCentral` database:
 
 ```bash
-# As superuser, on the postgres DB:
-psql -d postgres -f 000-roles.sql \
-  -v admin_password=<vault> \
-  -v orchestrator_password=<vault> \
-  -v agency_password=<vault> \
-  -v a2a_password=<vault> \
-  -v observability_password=<vault> \
-  -v repl_password=<vault>
+# As superuser, on the postgres DB — passwords passed via PGOPTIONS GUC custom parameters:
+PGOPTIONS='-c agenthive.admin_password=<vault> \
+           -c agenthive.orchestrator_password=<vault> \
+           -c agenthive.agency_password=<vault> \
+           -c agenthive.a2a_password=<vault> \
+           -c agenthive.observability_password=<vault> \
+           -c agenthive.repl_password=<vault>' \
+  psql -d postgres -f 000-roles.sql
+
+# NOTE: Do NOT use psql -v admin_password=<vault> — that sets the psql client
+# substitution variable :admin_password, not the GUC agenthive.admin_password
+# read by current_setting(). Using -v produces a runtime error.
 
 # Then on hiveCentral DB itself:
 psql -d hiveCentral -f 001-core.sql
