@@ -35,19 +35,13 @@ CREATE TABLE IF NOT EXISTS hivecentral.model (
     capabilities        TEXT[]       NOT NULL DEFAULT '{}',
     metadata            JSONB        NOT NULL DEFAULT '{}',
     created_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    updated_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    CONSTRAINT model_capabilities_valid CHECK (
-        capabilities <@ ARRAY[
-            'long-context', 'tool-use', 'vision', 'code-review',
-            'structured-output', 'reasoning', 'streaming', 'cache-aware'
-        ]
-    )
+    updated_at          TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
 COMMENT ON TABLE  hivecentral.model IS
     'Canonical model catalogue. One row per unique (provider, model_name) combination.';
 COMMENT ON COLUMN hivecentral.model.capabilities IS
-    'Subset of hivecentral.model_capability.name. CHECK constraint enforces the 8-entry vocabulary.';
+    'Subset of hivecentral.model_capability.name. Trigger trg_hc_model_capabilities_check enforces membership at INSERT/UPDATE.';
 COMMENT ON COLUMN hivecentral.model.successor_model_id IS
     'When is_deprecated=true, points to the recommended drop-in replacement.';
 
@@ -158,7 +152,7 @@ CREATE INDEX IF NOT EXISTS idx_hc_model_route_fallback
 CREATE INDEX IF NOT EXISTS idx_hc_host_policy_host
     ON hivecentral.host_model_policy (host, is_allowed);
 
--- One default per route_provider (AC-3 enforcement at index level)
+-- One default per route_provider (enforces is_default uniqueness per route_provider)
 CREATE UNIQUE INDEX IF NOT EXISTS uidx_hc_route_provider_default
     ON hivecentral.model_route (route_provider)
     WHERE is_default = true;
@@ -169,6 +163,30 @@ CREATE OR REPLACE FUNCTION hivecentral.fn_set_updated_at()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
     NEW.updated_at = now();
+    RETURN NEW;
+END;
+$$;
+
+-- Validates capabilities[] against hivecentral.model_capability at INSERT/UPDATE.
+-- Replaces the former literal ARRAY[] CHECK so model_capability is the single source of truth:
+-- adding a 9th capability only requires an INSERT to model_capability, no ALTER TABLE.
+CREATE OR REPLACE FUNCTION hivecentral.fn_check_capabilities()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE
+    invalid_caps TEXT[];
+BEGIN
+    SELECT ARRAY(
+        SELECT cap
+        FROM   unnest(NEW.capabilities) AS cap
+        WHERE  cap NOT IN (SELECT name FROM hivecentral.model_capability)
+    ) INTO invalid_caps;
+
+    IF array_length(invalid_caps, 1) > 0 THEN
+        RAISE EXCEPTION
+            'model.capabilities contains unknown values: %. '
+            'Add missing entries to hivecentral.model_capability first.',
+            invalid_caps;
+    END IF;
     RETURN NEW;
 END;
 $$;
@@ -189,6 +207,11 @@ BEGIN
         CREATE TRIGGER trg_hc_host_policy_updated_at
             BEFORE UPDATE ON hivecentral.host_model_policy
             FOR EACH ROW EXECUTE FUNCTION hivecentral.fn_set_updated_at();
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_hc_model_capabilities_check') THEN
+        CREATE TRIGGER trg_hc_model_capabilities_check
+            BEFORE INSERT OR UPDATE ON hivecentral.model
+            FOR EACH ROW EXECUTE FUNCTION hivecentral.fn_check_capabilities();
     END IF;
 END $$;
 
@@ -270,7 +293,7 @@ VALUES
      'anthropic', 'claude', 200000, 64000,
      ARRAY['long-context','tool-use','vision','code-review','structured-output','reasoning','streaming','cache-aware']),
     ('claude-haiku-4-5',
-     'anthropic', 'claude', 200000,  8096,
+     'anthropic', 'claude', 200000,  8192,
      ARRAY['long-context','tool-use','vision','structured-output','streaming','cache-aware'])
 ON CONFLICT (model_name) DO UPDATE
     SET provider           = EXCLUDED.provider,

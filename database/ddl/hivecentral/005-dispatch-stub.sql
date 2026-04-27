@@ -57,4 +57,31 @@ CREATE INDEX IF NOT EXISTS idx_dispatch_work_claim_open
     ON dispatch.work_claim (id)
     WHERE released_at IS NULL;
 
+-- ── cost_snapshot immutability guard ─────────────────────────────────────────
+-- cost_snapshot is a billing audit record; any UPDATE that changes it is a bug.
+-- Enforced at DB level so application bugs or ad-hoc migrations cannot silently
+-- corrupt historical cost reports.
+
+CREATE OR REPLACE FUNCTION dispatch.fn_guard_cost_snapshot()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.cost_snapshot IS DISTINCT FROM OLD.cost_snapshot THEN
+        RAISE EXCEPTION
+            'dispatch.work_claim.cost_snapshot is immutable after insert (claim id=%). '
+            'Attempted update rejected — create a new claim instead.',
+            OLD.id;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_dispatch_guard_cost_snapshot') THEN
+        CREATE TRIGGER trg_dispatch_guard_cost_snapshot
+            BEFORE UPDATE ON dispatch.work_claim
+            FOR EACH ROW EXECUTE FUNCTION dispatch.fn_guard_cost_snapshot();
+    END IF;
+END $$;
+
 COMMIT;

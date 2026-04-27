@@ -133,6 +133,43 @@ BEGIN
     END IF;
 END $$;
 
+-- Step 2c: Detect and warn on route_name slug collisions (silent discard audit)
+-- ON CONFLICT DO NOTHING above drops duplicate slugs without error; this block
+-- surfaces them so operators can deduplicate source data before switching dispatch.
+DO $$
+DECLARE
+    rec            RECORD;
+    collision_rows INT := 0;
+BEGIN
+    FOR rec IN
+        SELECT
+            LOWER(REGEXP_REPLACE(
+                mr.model_name || '-via-' || mr.route_provider || '-' || COALESCE(mr.agent_provider, 'default'),
+                '[^a-z0-9]+', '-', 'g'
+            ))                              AS slug,
+            COUNT(*)                        AS cnt,
+            array_agg(mr.id ORDER BY mr.id) AS source_ids
+        FROM  roadmap.model_routes mr
+        WHERE mr.cost_per_1k_input      IS NOT NULL
+           OR mr.cost_per_million_input IS NOT NULL
+        GROUP BY 1
+        HAVING COUNT(*) > 1
+    LOOP
+        RAISE WARNING
+            'Migration 055 route_name collision: slug "%" normalises from % source rows (ids: %). '
+            'Only the lowest-id row was imported; others were silently discarded.',
+            rec.slug, rec.cnt, rec.source_ids;
+        collision_rows := collision_rows + rec.cnt - 1;
+    END LOOP;
+
+    IF collision_rows > 0 THEN
+        RAISE WARNING
+            'Migration 055: % route rows total were discarded by slug collisions. '
+            'Deduplicate source data or append route IDs to route_name slugs.',
+            collision_rows;
+    END IF;
+END $$;
+
 -- ── Step 3: Expand roadmap.host_model_policy arrays → per-row hivecentral policy ──
 -- v1 schema: host_name TEXT PK, allowed_providers TEXT[], forbidden_providers TEXT[]
 -- v2 schema: one explicit row per (host, route_id) with is_allowed + deny_reason
