@@ -10,7 +10,7 @@
 
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import { query } from "../../src/infra/postgres/pool.ts";
+import { query, closePool } from "../../src/infra/postgres/pool.ts";
 import {
 	liaisonRegister,
 	liaisonHeartbeat,
@@ -20,6 +20,7 @@ import {
 	hasActiveLiaisonSession,
 	getAgencyStatus,
 } from "../../src/infra/agency/liaison-service.ts";
+import { PgProposalHandlers } from "../../src/apps/mcp-server/tools/proposals/pg-handlers.ts";
 
 const TS = Date.now();
 
@@ -111,3 +112,38 @@ test("AC-7: claim gateway helpers — registered agency without active session i
 	await query(`DELETE FROM roadmap.agency_liaison_session WHERE agency_id = $1`, [agency_id]);
 	await query(`DELETE FROM roadmap.agency WHERE agency_id = $1`, [agency_id]);
 });
+
+test("AC-7 e2e: claimProposal() rejects registered agency with no active session", async () => {
+	const agency_id = `test-p463-ac7-e2e-${TS}`;
+
+	const { session_id } = await liaisonRegister({
+		agency_id,
+		display_name: "P463 AC-7 E2E Test Agency",
+		provider: "test",
+		host_id: "bot",
+	});
+	// Close the session so hasActiveLiaisonSession returns false
+	await endLiaisonSession(session_id, "normal");
+
+	// Preconditions
+	assert.equal(await isRegisteredAgency(agency_id), true);
+	assert.equal(await hasActiveLiaisonSession(agency_id), false);
+
+	// Call the actual handler — AC-7 guard fires before any lease write.
+	// Passing null for core is safe; claimProposal never dereferences it.
+	const handlers = new PgProposalHandlers(null as any, "");
+	const result = await handlers.claimProposal({ id: "463", agent: agency_id });
+
+	const text = (result.content[0] as { type: string; text: string }).text;
+	assert.match(
+		text,
+		/no active liaison session/i,
+		"claimProposal must surface AC-7 rejection for agency with no session",
+	);
+
+	// Cleanup
+	await query(`DELETE FROM roadmap.agency_liaison_session WHERE agency_id = $1`, [agency_id]);
+	await query(`DELETE FROM roadmap.agency WHERE agency_id = $1`, [agency_id]);
+});
+
+test.after(() => closePool());

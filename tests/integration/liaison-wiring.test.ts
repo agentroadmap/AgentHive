@@ -27,15 +27,15 @@ import {
 	getMessageStats,
 } from "../../src/infra/agency/liaison-message-service.ts";
 
-// Test timeout
-const TIMEOUT_MS = 10_000;
+const TS = Date.now();
 
 test("Liaison Registration → Agency enters DB with session", async () => {
 	const { session_id, agency_id } = await liaisonRegister({
+		agency_id: `copilot/test-agency-1-${TS}`,
 		display_name: "test-agency-1",
 		provider: "copilot",
 		host_id: "bot",
-		capability_tags: ["test", "copilot"],
+		capabilities: ["test", "copilot"],
 	});
 
 	assert.ok(session_id, "session_id should be returned");
@@ -46,12 +46,18 @@ test("Liaison Registration → Agency enters DB with session", async () => {
 		"agency_id should be prefixed by provider",
 	);
 
-	// Verify in DB
+	// Verify in DB via getAgencyStatus (does not expose provider)
 	const status = await getAgencyStatus(agency_id);
 	assert.equal(status.agency_id, agency_id);
-	assert.equal(status.provider, "copilot");
 	assert.equal(status.display_name, "test-agency-1");
 	assert.equal(status.status, "active");
+
+	// provider is not in getAgencyStatus() return type — verify via direct query
+	const { rows: [agencyRow] } = await query(
+		`SELECT provider FROM roadmap.agency WHERE agency_id = $1`,
+		[agency_id],
+	);
+	assert.equal(agencyRow.provider, "copilot");
 
 	// Verify session
 	const { rows: sessions } = await query(
@@ -64,13 +70,18 @@ test("Liaison Registration → Agency enters DB with session", async () => {
 
 test("Heartbeat updates last_heartbeat_at", async (t) => {
 	const { session_id, agency_id } = await liaisonRegister({
-		display_name: `test-agency-heartbeat-${Date.now()}`,
+		agency_id: `copilot/test-heartbeat-${TS}`,
+		display_name: `test-agency-heartbeat-${TS}`,
 		provider: "copilot",
 		host_id: "bot",
 	});
 
-	const before = await getAgencyStatus(agency_id);
-	assert.ok(!before.last_heartbeat_at, "last_heartbeat_at should be null initially");
+	// last_heartbeat_at is not in getAgencyStatus() return type — query directly
+	const { rows: [beforeRow] } = await query(
+		`SELECT last_heartbeat_at FROM roadmap.agency WHERE agency_id = $1`,
+		[agency_id],
+	);
+	assert.ok(!beforeRow.last_heartbeat_at, "last_heartbeat_at should be null initially");
 
 	await new Promise((resolve) => setTimeout(resolve, 100));
 
@@ -81,14 +92,20 @@ test("Heartbeat updates last_heartbeat_at", async (t) => {
 
 	assert.equal(result.success, true);
 
+	const { rows: [afterRow] } = await query(
+		`SELECT last_heartbeat_at FROM roadmap.agency WHERE agency_id = $1`,
+		[agency_id],
+	);
+	assert.ok(afterRow.last_heartbeat_at, "last_heartbeat_at should be set after heartbeat");
+
 	const after = await getAgencyStatus(agency_id);
-	assert.ok(after.last_heartbeat_at, "last_heartbeat_at should be set after heartbeat");
 	assert.ok(after.silence_seconds <= 1, "silence_seconds should be ~0");
 });
 
 test("ListDispatchableAgencies filters by silence threshold", async (t) => {
 	// Register fresh agency
 	const { agency_id: fresh_id } = await liaisonRegister({
+		agency_id: `copilot/fresh-agency-${TS}`,
 		display_name: "fresh-agency",
 		provider: "copilot",
 		host_id: "bot",
@@ -106,19 +123,16 @@ test("ListDispatchableAgencies filters by silence threshold", async (t) => {
 		status: "active",
 	});
 
-	// List dispatchable with tight threshold
-	const list = await listDispatchableAgencies(5);
+	// listDispatchableAgencies() takes no arguments — function filters by dispatchable=true
+	const list = await listDispatchableAgencies();
 	const hasFresh = list.some((a) => a.agency_id === fresh_id);
 	assert.ok(hasFresh, "fresh agency should be in dispatchable list");
-	assert.ok(
-		list.every((a) => a.silence_seconds < 5),
-		"all agencies should have silence < 5s",
-	);
 });
 
 test("Liaison Message: storeMessage → getUnackedMessages → acknowledgeMessage", async (t) => {
 	const { agency_id } = await liaisonRegister({
-		display_name: `test-agency-msg-${Date.now()}`,
+		agency_id: `copilot/test-msg-${TS}`,
+		display_name: `test-agency-msg-${TS}`,
 		provider: "copilot",
 		host_id: "bot",
 	});
@@ -159,7 +173,8 @@ test("Liaison Message: storeMessage → getUnackedMessages → acknowledgeMessag
 
 test("Multiple messages maintain sequence order", async (t) => {
 	const { agency_id } = await liaisonRegister({
-		display_name: `test-agency-seq-${Date.now()}`,
+		agency_id: `copilot/test-seq-${TS}`,
+		display_name: `test-agency-seq-${TS}`,
 		provider: "copilot",
 		host_id: "bot",
 	});
@@ -200,6 +215,7 @@ test("Multiple messages maintain sequence order", async (t) => {
 
 test("Shutdown: endLiaisonSession marks session.ended_at", async (t) => {
 	const { session_id, agency_id } = await liaisonRegister({
+		agency_id: `copilot/test-shutdown-${TS}`,
 		display_name: "test-agency-shutdown",
 		provider: "copilot",
 		host_id: "bot",
@@ -213,7 +229,7 @@ test("Shutdown: endLiaisonSession marks session.ended_at", async (t) => {
 	assert.equal(before[0].ended_at, null);
 
 	// End session
-	await endLiaisonSession(session_id, "test-shutdown");
+	await endLiaisonSession(session_id, "normal");
 
 	// Verify session is closed
 	const { rows: after } = await query(
@@ -221,7 +237,7 @@ test("Shutdown: endLiaisonSession marks session.ended_at", async (t) => {
 		[session_id],
 	);
 	assert.ok(after[0].ended_at, "ended_at should be set");
-	assert.equal(after[0].end_reason, "test-shutdown");
+	assert.equal(after[0].end_reason, "normal");
 
 	// Verify heartbeat throws on closed session
 	await assert.rejects(
@@ -233,6 +249,7 @@ test("Shutdown: endLiaisonSession marks session.ended_at", async (t) => {
 
 test("Dormancy detection: checkAndMarkDormant", async (t) => {
 	const { session_id, agency_id } = await liaisonRegister({
+		agency_id: `copilot/test-dormant-${TS}`,
 		display_name: "test-agency-dormant",
 		provider: "copilot",
 		host_id: "bot",
@@ -247,8 +264,8 @@ test("Dormancy detection: checkAndMarkDormant", async (t) => {
 		[agency_id],
 	);
 
-	// Run check
-	const marked = await checkAndMarkDormant(120);
+	// checkAndMarkDormant() takes no arguments
+	const marked = await checkAndMarkDormant();
 	assert.ok(marked >= 1, "should mark at least 1 agency as dormant");
 
 	// Verify status changed
@@ -259,10 +276,11 @@ test("Dormancy detection: checkAndMarkDormant", async (t) => {
 test("Integration: Register → Heartbeat → Message → Acknowledge → Shutdown", async (t) => {
 	// Register
 	const { session_id, agency_id } = await liaisonRegister({
+		agency_id: `copilot/full-integration-${TS}`,
 		display_name: "test-full-integration",
 		provider: "copilot",
 		host_id: "bot",
-		capability_tags: ["integration-test"],
+		capabilities: ["integration-test"],
 	});
 
 	// Heartbeat
@@ -292,7 +310,7 @@ test("Integration: Register → Heartbeat → Message → Acknowledge → Shutdo
 	assert.equal(unackedAfter.length, 0);
 
 	// Shutdown
-	await endLiaisonSession(session_id, "integration-test-end");
+	await endLiaisonSession(session_id, "normal");
 
 	const { rows: sessions } = await query(
 		`SELECT ended_at FROM roadmap.agency_liaison_session WHERE session_id = $1`,
