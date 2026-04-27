@@ -31,7 +31,7 @@ let mockFetchError: Error | null = null;
 
 const originalFetch = global.fetch;
 
-// @ts-expect-error - patching global.fetch for testing
+
 global.fetch = async (
   _url: string,
   _opts: RequestInit
@@ -295,7 +295,7 @@ test("HiveMcpClient: retry logic", async (t) => {
   await t.test("retries on transient errors", async () => {
     let attemptCount = 0;
     // Custom fetch that fails twice, then succeeds
-    // @ts-expect-error - patching for testing
+
     global.fetch = async (): Promise<Response> => {
       attemptCount++;
       if (attemptCount < 3) {
@@ -326,14 +326,14 @@ test("HiveMcpClient: retry logic", async (t) => {
       assert.deepEqual(result, { success: true });
     } finally {
       // Restore original fetch
-      // @ts-expect-error - restoring global
+
       global.fetch = originalFetchForRetry;
     }
   });
 
   await t.test("fails after max retries exhausted", async () => {
     // Always failing fetch
-    // @ts-expect-error - patching for testing
+
     global.fetch = async (): Promise<Response> => {
       return {
         ok: false,
@@ -356,7 +356,7 @@ test("HiveMcpClient: retry logic", async (t) => {
       }
     } finally {
       // Restore original fetch
-      // @ts-expect-error - restoring global
+
       global.fetch = originalFetchForRetry;
     }
   });
@@ -364,7 +364,7 @@ test("HiveMcpClient: retry logic", async (t) => {
   await t.test("does not retry non-retriable errors", async () => {
     let attemptCount = 0;
     // Non-retriable 404 error
-    // @ts-expect-error - patching for testing
+
     global.fetch = async (): Promise<Response> => {
       attemptCount++;
       return {
@@ -391,7 +391,7 @@ test("HiveMcpClient: retry logic", async (t) => {
       }
     } finally {
       // Restore original fetch
-      // @ts-expect-error - restoring global
+
       global.fetch = originalFetchForRetry;
     }
   });
@@ -446,6 +446,6 @@ test("getMcpClient: singleton pattern", async (t) => {
 
 // Restore original fetch
 process.on("exit", () => {
-  // @ts-expect-error - restoring global
+
   global.fetch = originalFetch;
 });

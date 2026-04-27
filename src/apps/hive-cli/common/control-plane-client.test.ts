@@ -200,8 +200,8 @@ describe("ControlPlaneClient", () => {
 
     if (agencies.length > 0) {
       const agency = agencies[0];
-      assert.ok(agency.id, "agency should have id");
-      assert.ok(agency.agency_identity, "agency should have agency_identity");
+      assert.ok(agency.agency_id, "agency should have agency_id");
+      assert.ok(typeof agency.status === "string", "agency should have status");
     }
   });
 

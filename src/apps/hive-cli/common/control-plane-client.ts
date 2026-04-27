@@ -113,10 +113,16 @@ export class ControlPlaneClient {
          WHERE status = 'active'
       `;
 
+      // pg returns bigint columns as strings, so getProject(project.project_id)
+      // arrives as a numeric-looking string. Treat both number and numeric-string
+      // shapes as id lookups; everything else is a slug.
+      const looksNumeric =
+        typeof idOrSlug === "number" ||
+        (typeof idOrSlug === "string" && /^\d+$/.test(idOrSlug));
       let param: string | number = idOrSlug;
-
-      if (typeof idOrSlug === "number") {
-        query += ` AND project_id = $1`;
+      if (looksNumeric) {
+        query += ` AND project_id = $1::bigint`;
+        param = String(idOrSlug);
       } else {
         query += ` AND slug = $1`;
         param = idOrSlug;
@@ -284,23 +290,28 @@ export class ControlPlaneClient {
     projectId: number,
     filter?: { status?: string }
   ): Promise<AgencyRow[]> {
+    // P455 transitional note: roadmap.agency is a control-plane table with
+    // no project_id column (CONVENTIONS.md §8d). projectId is accepted for
+    // API symmetry and reserved for the post-P429 tenant-DB routing path
+    // where each project's agency view will live in its tenant DB. Today
+    // we return all agencies and ignore the arg.
+    void projectId;
     const pool = getPool();
     try {
       let query = `
-        SELECT id, agency_identity, type, display_name, description, status,
-               created_at, updated_at
-          FROM roadmap.agency_registry
-         WHERE project_id = $1
+        SELECT agency_id, display_name, provider, host_id, capability_tags,
+               status, status_reason, last_heartbeat_at, registered_at, metadata
+          FROM roadmap.agency
+         WHERE 1=1
       `;
-
-      const params: any[] = [projectId];
+      const params: any[] = [];
 
       if (filter?.status) {
-        query += ` AND status = $${params.length + 1}`;
         params.push(filter.status);
+        query += ` AND status = $${params.length}`;
       }
 
-      query += ` ORDER BY id ASC`;
+      query += ` ORDER BY agency_id ASC`;
 
       const result = await pool.query<AgencyRow>(query, params);
       return result.rows;
@@ -325,11 +336,14 @@ export class ControlPlaneClient {
   async listAgents(projectId: number): Promise<AgentRow[]> {
     const pool = getPool();
     try {
+      // roadmap_workforce.agent_registry is the project-scoped variant
+      // (CONVENTIONS.md §8d); the legacy roadmap.agent_registry has no
+      // project_id column.
       const query = `
-        SELECT id, agent_identity, agency_id, model, status, created_at,
-               updated_at, last_heartbeat
-          FROM roadmap.agent_registry
-         WHERE project_id = $1
+        SELECT id, agent_identity, agent_type, role, skills, preferred_model,
+               status, github_handle, created_at, updated_at, project_id
+          FROM roadmap_workforce.agent_registry
+         WHERE project_id = $1::bigint
          ORDER BY id ASC
       `;
 
@@ -377,7 +391,7 @@ export class ControlPlaneClient {
                modified_at, required_capabilities, project_id, gate_scanner_paused,
                gate_paused_by, gate_paused_at, gate_paused_reason
           FROM roadmap_proposal.proposal
-         WHERE project_id = $1
+         WHERE project_id = $1::bigint
       `;
 
       const params: any[] = [projectId];
@@ -390,12 +404,15 @@ export class ControlPlaneClient {
       }
 
       if (idAfter > 0) {
-        query += ` AND id > $${paramIndex}`;
+        query += ` AND id > $${paramIndex}::bigint`;
         params.push(idAfter);
         paramIndex++;
       }
 
-      query += ` ORDER BY id ASC LIMIT $${paramIndex + 1}`;
+      // Off-by-one fix: paramIndex points to the next slot; use it directly
+      // for LIMIT instead of paramIndex+1, which created a gap that pg
+      // surfaced as "could not determine data type of parameter $N".
+      query += ` ORDER BY id ASC LIMIT $${paramIndex}`;
       params.push(limit + 1); // Fetch one extra to check if there are more
 
       const result = await pool.query<ProposalRow>(query, params);
@@ -477,18 +494,20 @@ export class ControlPlaneClient {
   ): Promise<DispatchRow[]> {
     const pool = getPool();
     try {
+      // Real table is roadmap_workforce.squad_dispatch; status column is
+      // dispatch_status (not status), and project_id is bigint.
       let query = `
-        SELECT id, display_id, proposal_id, agency_id, status, created_at,
-               updated_at, completed_at, result
-          FROM roadmap.dispatch
-         WHERE project_id = $1
+        SELECT id, proposal_id, agent_identity, squad_name, dispatch_role,
+               dispatch_status AS status, offer_status, assigned_at,
+               completed_at, claim_expires_at, claimed_at, project_id, metadata
+          FROM roadmap_workforce.squad_dispatch
+         WHERE project_id = $1::bigint
       `;
-
       const params: any[] = [projectId];
 
       if (filter?.status) {
-        query += ` AND status = $${params.length + 1}`;
         params.push(filter.status);
+        query += ` AND dispatch_status = $${params.length}`;
       }
 
       query += ` ORDER BY id DESC`;
@@ -518,25 +537,40 @@ export class ControlPlaneClient {
     projectId: number,
     filter?: { agent_identity?: string; status?: string }
   ): Promise<LeaseRow[]> {
+    // P455 transitional note: roadmap.proposal_lease has no project_id
+    // column today (CONVENTIONS.md §8d). projectId is accepted for symmetry;
+    // narrow to one project by joining through proposal once that table
+    // gains project_id (post-P429). Today returns all active leases.
+    void projectId;
     const pool = getPool();
     try {
       let query = `
-        SELECT id, proposal_id, agency_id, agent_identity, status, acquired_at,
-               expires_at, released_at
-          FROM roadmap.lease
-         WHERE project_id = $1
+        SELECT id, proposal_id, agent_identity, claimed_at, expires_at,
+               released_at, release_reason, is_active
+          FROM roadmap.proposal_lease
+         WHERE 1=1
       `;
-
-      const params: any[] = [projectId];
+      const params: any[] = [];
 
       if (filter?.agent_identity) {
-        query += ` AND agent_identity = $${params.length + 1}`;
         params.push(filter.agent_identity);
+        query += ` AND agent_identity = $${params.length}`;
       }
 
       if (filter?.status) {
-        query += ` AND status = $${params.length + 1}`;
         params.push(filter.status);
+        // Map "status" filter to is_active boolean if the caller passed
+        // active/released; otherwise filter on release_reason for richer
+        // status names.
+        if (filter.status === "active") {
+          query += ` AND is_active = true`;
+          params.pop();
+        } else if (filter.status === "released") {
+          query += ` AND is_active = false`;
+          params.pop();
+        } else {
+          query += ` AND release_reason = $${params.length}`;
+        }
       }
 
       query += ` ORDER BY id DESC`;
@@ -564,8 +598,9 @@ export class ControlPlaneClient {
     const pool = getPool();
     try {
       const query = `
-        SELECT id, name, description, states, transitions, created_at,
-               updated_at, project_id
+        SELECT id, name, description, version, is_default, is_system,
+               stage_count, smdl_id, smdl_definition, created_at, modified_at,
+               project_id
           FROM roadmap.workflow_templates
          ORDER BY name ASC
       `;
@@ -594,8 +629,9 @@ export class ControlPlaneClient {
     const pool = getPool();
     try {
       const query = `
-        SELECT id, name, description, states, transitions, created_at,
-               updated_at, project_id
+        SELECT id, name, description, version, is_default, is_system,
+               stage_count, smdl_id, smdl_definition, created_at, modified_at,
+               project_id
           FROM roadmap.workflow_templates
          WHERE name = $1
       `;

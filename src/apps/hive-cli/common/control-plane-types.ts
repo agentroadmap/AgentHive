@@ -69,86 +69,103 @@ export interface ProposalRow {
 /**
  * A workflow template row from `roadmap.workflow_templates`.
  *
- * Represents a state machine definition (e.g., "RFC 5-Stage", "Hotfix").
+ * Represents a state machine definition (e.g., "Standard RFC", "Hotfix"),
+ * keyed by name and project. The smdl_definition jsonb is the canonical
+ * stage/transition graph; the higher-level fields (version, stage_count,
+ * is_default, is_system) are convenience metadata.
  */
 export interface WorkflowTemplateRow {
-  id: number;
+  id: string; // bigint
   name: string;
   description: string | null;
-  states: Record<string, unknown>; // JSONB: workflow state definition
-  transitions: Record<string, unknown> | null; // JSONB: allowed state transitions
+  version: number | null;
+  is_default: boolean;
+  is_system: boolean;
+  stage_count: number | null;
+  smdl_id: string | null;
+  smdl_definition: Record<string, unknown> | null;
   created_at: string;
-  updated_at: string;
-  project_id: number;
+  modified_at: string;
+  project_id: string;
 }
 
 /**
- * An agency registry row from `roadmap.agency_registry`.
+ * An agency row from `roadmap.agency`.
  *
- * Represents a single agency (AI or human team).
+ * Represents a single agency (AI or human team). Today the agency table
+ * is control-plane-only — no project_id column. Will become per-tenant
+ * post-P429.
  */
 export interface AgencyRow {
-  id: number;
-  agency_identity: string; // e.g., "hermes/agency-xiaomi"
-  type: string; // "ai_agency", "human_team", etc.
-  display_name: string;
-  description: string | null;
-  status: string; // "active", "suspended", "archived"
-  created_at: string;
-  updated_at: string;
-  project_id?: number; // May be per-project or global
+  agency_id: string; // text PK, e.g., "hermes/agency-xiaomi"
+  display_name: string | null;
+  provider: string | null;
+  host_id: string | null;
+  capability_tags: string[] | null;
+  status: string;
+  status_reason: string | null;
+  last_heartbeat_at: string | null;
+  registered_at: string;
+  metadata: Record<string, unknown> | null;
 }
 
 /**
- * An agent registry row from `roadmap.agent_registry`.
+ * An agent registry row from `roadmap_workforce.agent_registry`.
  *
- * Represents a single agent instance.
+ * Represents a single project-scoped agent instance. The legacy
+ * `roadmap.agent_registry` view has no project_id column; this client
+ * always reads from the workforce schema.
  */
 export interface AgentRow {
-  id: number;
-  agent_identity: string; // e.g., "hermes-andy"
-  agency_id: number;
-  model: string;
-  status: string; // "idle", "busy", "failed", "terminated"
+  id: string; // bigint
+  agent_identity: string;
+  agent_type: string | null;
+  role: string | null;
+  skills: string[] | null;
+  preferred_model: string | null;
+  status: string;
+  github_handle: string | null;
   created_at: string;
   updated_at: string;
-  last_heartbeat: string | null;
-  project_id?: number;
+  project_id: string; // bigint
 }
 
 /**
- * A dispatch row from `roadmap.dispatch` or equivalent.
+ * A dispatch row from `roadmap_workforce.squad_dispatch`.
  *
- * Represents a single work dispatch (offer to run).
+ * Represents a single work dispatch (offer / claim / run).
  */
 export interface DispatchRow {
-  id: number;
-  display_id: string;
-  proposal_id: number;
-  agency_id: number;
-  status: string; // "offered", "claimed", "running", "completed", "failed"
-  created_at: string;
-  updated_at: string;
+  id: string; // bigint
+  proposal_id: string;
+  agent_identity: string | null;
+  squad_name: string;
+  dispatch_role: string;
+  status: string; // mapped from dispatch_status
+  offer_status: string;
+  assigned_at: string;
   completed_at: string | null;
-  result: Record<string, unknown> | null;
-  project_id?: number;
+  claim_expires_at: string | null;
+  claimed_at: string | null;
+  project_id: string;
+  metadata: Record<string, unknown>;
 }
 
 /**
- * A lease row from `roadmap.lease` or equivalent.
+ * A lease row from `roadmap.proposal_lease`.
  *
- * Represents a proposal work lease held by an agency.
+ * Active or historical claim by an agent on a proposal. No project_id
+ * column today (control-plane); will gain one post-P429.
  */
 export interface LeaseRow {
-  id: number;
-  proposal_id: number;
-  agency_id: number;
+  id: string; // bigint
+  proposal_id: string;
   agent_identity: string;
-  status: string; // "active", "released", "expired"
-  acquired_at: string;
-  expires_at: string;
+  claimed_at: string;
+  expires_at: string | null;
   released_at: string | null;
-  project_id?: number;
+  release_reason: string | null;
+  is_active: boolean;
 }
 
 /**

@@ -269,14 +269,19 @@ export class HiveMcpClient {
           errorCode,
           `MCP server returned HTTP ${response.status}`,
           {
-            status: response.status,
-            url: this.mcpUrl,
+            detail: {
+              status: response.status,
+              url: this.mcpUrl,
+            },
           }
         );
       }
 
       // Parse JSON-RPC response
-      const json = await response.json();
+      const json = (await response.json()) as {
+        error?: { message?: string; [k: string]: unknown };
+        result?: McpToolResponse;
+      };
 
       // Check for JSON-RPC error
       if (json.error) {
@@ -320,8 +325,10 @@ export class HiveMcpClient {
           "TIMEOUT",
           `MCP call timed out after ${timeoutMs}ms`,
           {
-            timeout_ms: timeoutMs,
-            tool: toolName,
+            detail: {
+              timeout_ms: timeoutMs,
+              tool: toolName,
+            },
           }
         );
       }
@@ -333,8 +340,10 @@ export class HiveMcpClient {
           errorCode,
           `Cannot reach MCP server: ${err.message}`,
           {
-            url: this.mcpUrl,
-            detail: { original_error: err.message },
+            detail: {
+              url: this.mcpUrl,
+              original_error: err.message,
+            },
           }
         );
       }
