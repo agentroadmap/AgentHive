@@ -13,6 +13,10 @@ import * as pg from "../../../../postgres/proposal-storage-v2.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
 import { RfcStates, Maturity } from "../../../../core/workflow/state-names.ts";
+import {
+	isRegisteredAgency,
+	hasActiveLiaisonSession,
+} from "../../../../infra/agency/liaison-service.ts";
 
 type ProjectionFormat = "yaml_md" | "json";
 
@@ -520,6 +524,24 @@ export class PgProposalHandlers {
          ON CONFLICT (agent_identity) DO UPDATE SET role = EXCLUDED.role`,
 				[args.agent, "llm", "developer"],
 			);
+
+			// AC-7: liaison is the sole prop_claim gateway for registered agencies.
+			// If the claiming agent identity matches a registered agency, it must have
+			// an active liaison session — otherwise the claim is rejected.
+			const agencyRegistered = await isRegisteredAgency(args.agent);
+			if (agencyRegistered) {
+				const hasSession = await hasActiveLiaisonSession(args.agent);
+				if (!hasSession) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Agency '${args.agent}' is registered but has no active liaison session. Start the liaison process (scripts/start-liaison.ts) before claiming proposals.`,
+							},
+						],
+					};
+				}
+			}
 
 			const activeLeases = (await pg.getActiveLeases(id)).filter(
 				(lease) => lease.lease_status === "active" || lease.lease_status === "open",
