@@ -4,13 +4,17 @@
 -- Idempotent: ALTER if already present.
 -- Run BEFORE any schema DDL.
 -- ============================================================
--- Required runtime settings (passed via psql -v):
---   -v admin_password='<vault value>'
---   -v orchestrator_password='<vault value>'
---   -v agency_password='<vault value>'
---   -v a2a_password='<vault value>'
---   -v observability_password='<vault value>'
---   -v repl_password='<vault value>'
+-- Required runtime settings (passed via PGOPTIONS — server-side PostgreSQL GUC):
+--   The file uses current_setting('agenthive.*_password') which reads server GUC values.
+--   DO NOT use psql -v foo=bar (sets psql :var substitution, NOT the GUC).
+--   Correct invocation:
+--     PGOPTIONS='-c agenthive.admin_password=<vault> \
+--                -c agenthive.orchestrator_password=<vault> \
+--                -c agenthive.agency_password=<vault> \
+--                -c agenthive.a2a_password=<vault> \
+--                -c agenthive.observability_password=<vault> \
+--                -c agenthive.repl_password=<vault>' \
+--     psql -d postgres -f 000-roles.sql
 -- ============================================================
 
 \set ON_ERROR_STOP on
