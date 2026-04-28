@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration 061 — P594: agency schema data migration
+-- Migration 062 — P594: agency schema data migration
 -- Migrates roadmap.agency + roadmap.agency_liaison_session
 -- into hiveCentral.agency.* tables.
 -- Seeds liaison_message_kind_catalog with all 21 kinds.
