@@ -49,6 +49,48 @@ lint:
       - node_modules/
   allow_failure: true
 
+migration-schema-lint:
+  stage: check
+  script:
+    - |
+      set -euo pipefail
+      # Extract roadmap.TABLENAME refs from TypeScript.
+      # Require underscore (table naming convention); exclude fn_* functions and v_* views.
+      ts=$(grep -rho 'roadmap\.[a-z][a-z0-9_]*' src/ --include='*.ts' 2>/dev/null \
+             | grep -E 'roadmap\.[a-z0-9]+_[a-z0-9_]+' \
+             | grep -vE 'roadmap\.(fn_|v_)' \
+             | sed 's/roadmap\.//' | sort -u || true)
+      # CREATE TABLE targets from the active runner path (scripts/migrations/)
+      active=$(grep -rh 'CREATE TABLE' scripts/migrations/*.sql 2>/dev/null \
+             | grep -oE '(roadmap\.)?[a-z][a-z0-9_]+' | grep '_' \
+             | sed 's/roadmap\.//' | sort -u || true)
+      # CREATE TABLE targets from the legacy inactive path (database/migrations/)
+      legacy=$(grep -rh 'CREATE TABLE' database/migrations/*.sql 2>/dev/null \
+             | grep -oE '(roadmap\.)?[a-z][a-z0-9_]+' | grep '_' \
+             | sed 's/roadmap\.//' | sort -u || true)
+      fail=0
+      # P690 guard: table is in TS + legacy path but NOT active path → will vanish on fresh deploy
+      drift=$(comm -23 <(echo "$ts") <(echo "$active") \
+              | comm -12 - <(echo "$legacy") || true)
+      if [ -n "$drift" ]; then
+        echo "SCHEMA DRIFT: TypeScript references tables defined only in database/migrations/ (INACTIVE runner)."
+        echo "These tables will not exist on a fresh deploy:"
+        printf '  roadmap.%s\n' $drift
+        echo "Fix: add a migration to scripts/migrations/ that creates the table(s)."
+        fail=1
+      fi
+      # Orphan guard: table in TS but absent from ALL migration DDL
+      orphaned=$(comm -23 <(echo "$ts") <(echo "$active") \
+                 | comm -23 - <(echo "$legacy") || true)
+      if [ -n "$orphaned" ]; then
+        echo "MISSING DDL: TypeScript references roadmap.* tables absent from all migration DDL:"
+        printf '  roadmap.%s\n' $orphaned
+        echo "Fix: add a migration to scripts/migrations/ that creates the table(s)."
+        fail=1
+      fi
+      [ "$fail" = "0" ] && echo "OK: all roadmap.* table refs covered by migration DDL."
+      exit $fail
+
 # ─── Stage 2: Test ────────────────────────────────────────────
 test:
   stage: test
