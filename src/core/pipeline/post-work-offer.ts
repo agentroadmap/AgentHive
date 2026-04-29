@@ -43,8 +43,8 @@ export async function postWorkOffer(
 	if (input.worktreeHint) metadata.worktree_hint = input.worktreeHint;
 
 	const caps = input.requiredCapabilities?.length
-		? JSON.stringify({ all: input.requiredCapabilities })
-		: "{}";
+		? JSON.stringify(input.requiredCapabilities)
+		: '["general"]';
 
 	const existing = await queryFn<{ id: number }>(
 		`SELECT id
