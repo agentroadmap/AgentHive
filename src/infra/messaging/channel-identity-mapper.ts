@@ -19,6 +19,13 @@ import { query } from "../postgres/pool.ts";
 import type { TrustTier } from "../trust/trust-model.ts";
 import { DEFAULT_TIER } from "../trust/trust-model.ts";
 
+export class ExpiredError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "ExpiredError";
+	}
+}
+
 export interface ChannelIdentity {
 	id: number;
 	channel: string;
@@ -125,13 +132,20 @@ export async function resolveChannelIdentity(
 	}>(
 		`SELECT * FROM channel_identities
 		 WHERE channel = $1
-		   AND external_id = $2
-		   AND (expires_at IS NULL OR expires_at > now())`,
+		   AND external_id = $2`,
 		[channel, externalId],
 	);
 
 	if (result.rows.length === 0) return null;
-	return hydrateIdentity(result.rows[0]);
+
+	const row = result.rows[0];
+	if (row.expires_at && new Date(row.expires_at) <= new Date()) {
+		throw new ExpiredError(
+			`Channel identity ${channel}:${externalId} has expired`,
+		);
+	}
+
+	return hydrateIdentity(row);
 }
 
 /**
