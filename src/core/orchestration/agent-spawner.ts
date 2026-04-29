@@ -83,6 +83,21 @@ export interface SpawnRequest {
 	projectId?: number;
 	/** P599: Agency principal ID (e.g. "agency:42") for tool grant resolution. */
 	agencyPrincipalId?: string;
+	// ── P444: run-record separation fields (all optional for backward compat) ──
+	/** Dispatch row ID that triggered this spawn. */
+	dispatchId?: number;
+	/** Agency identity string (e.g. "agency:42"). */
+	agencyId?: string;
+	/** Worker slot identity (e.g. "worker-15411"). */
+	workerId?: string;
+	/** Host override — defaults to AGENTHIVE_HOST. */
+	hostId?: string;
+	/** Provider account identifier (slug or key fingerprint). */
+	providerAccountId?: string;
+	/** FK to roadmap.model_routes.id — set after route resolution. */
+	routeId?: number;
+	/** How the API key was sourced (env_file | db_primary | db_secondary). */
+	authSourceClass?: string;
 }
 
 export interface SpawnResult {
@@ -881,8 +896,12 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	// Insert agent_runs row (status = running)
 	const { rows } = await query(
 		`INSERT INTO agent_runs
-       (proposal_id, display_id, agent_identity, stage, model_used, status, activity, started_at)
-     VALUES ($1, $2, $3, $4, $5, 'running', $6, now())
+       (proposal_id, display_id, agent_identity, stage, model_used, status, activity, started_at,
+        dispatch_id, agency_id, worker_id, host_id, provider_account_id, route_id,
+        agent_cli, agent_provider, route_provider, auth_source_class, project_id)
+     VALUES ($1, $2, $3, $4, $5, 'running', $6, now(),
+             $7, $8, $9, $10, $11, $12,
+             $13, $14, $15, $16, $17)
      RETURNING id`,
 		[
 			proposalId ?? null,
@@ -891,6 +910,18 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 			stage,
 			route.modelName,
 			req.activity ?? null,
+			// P444 separation fields (nullable — backward compat)
+			req.dispatchId ?? null,
+			req.agencyId ?? null,
+			req.workerId ?? null,
+			req.hostId ?? AGENTHIVE_HOST,
+			req.providerAccountId ?? null,
+			req.routeId ?? null,
+			route.agentCli,
+			route.agentProvider,
+			route.routeProvider,
+			req.authSourceClass ?? null,
+			req.projectId ?? null,
 		],
 	);
 	const agentRunId = String(rows[0].id);
