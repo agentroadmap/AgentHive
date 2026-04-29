@@ -81,70 +81,60 @@ export class PgCubicHandlers {
 
 			const phaseRoles = phaseRoleResult.rows[0];
 			let agentRoles: string[] = args.agents ?? [];
+			// Tracks whether agent_identity is a registered FK-eligible agent or an ad-hoc label
+			let registeredAgentIdentity: string | null = null;
+			let adHocIdentity: string | undefined;
 
 			// P459: If agent_identity provided, resolve its role and validate against phase
 			if (args.agent_identity) {
-				// Look up agent's registered role
+				// Look up agent's registered role (single query — result used for both validation and FK resolution)
 				const agentResult = await query<{ role: string }>(
 					`SELECT role FROM roadmap.agent_registry WHERE agent_identity = $1`,
 					[args.agent_identity],
 				);
 
-				if (!agentResult.rows.length) {
-					return {
-						content: [
-							{
-								type: "text",
-								text: JSON.stringify(
-									{
-										ok: false,
-										error: "agent_not_found",
-										agent_identity: args.agent_identity,
-										message: `Agent '${args.agent_identity}' not found in registry`,
-									},
-									null,
-									2,
-								),
-							},
-						],
-					};
+				if (agentResult.rows.length) {
+					// Registered agent: validate role against phase, store FK-eligible identity
+					registeredAgentIdentity = args.agent_identity;
+					const agentRole = agentResult.rows[0].role || "developer";
+
+					const roleTokens = agentRole
+						.toLowerCase()
+						.split(/\s+/)
+						.filter((r) => r.length > 0);
+
+					const matchedRole = roleTokens.find((token) =>
+						phaseRoles.allowed_roles.includes(token),
+					);
+
+					if (!matchedRole) {
+						return {
+							content: [
+								{
+									type: "text",
+									text: JSON.stringify(
+										{
+											ok: false,
+											error: "phase_role_mismatch",
+											phase,
+											agent_role: agentRole,
+											allowed_roles: phaseRoles.allowed_roles,
+											message: `Agent role '${agentRole}' not allowed in phase '${phase}'`,
+										},
+										null,
+										2,
+									),
+								},
+							],
+						};
+					}
+
+					agentRoles = args.agents ?? [matchedRole];
+				} else {
+					// P459 design §4: ad-hoc identity — accept as slot label, tag in metadata
+					adHocIdentity = args.agent_identity;
+					agentRoles = args.agents ?? phaseRoles.default_roles;
 				}
-
-				const agentRole = agentResult.rows[0].role || "developer";
-
-				// Split multi-word roles and check if any match allowed_roles
-				const roleTokens = agentRole
-					.toLowerCase()
-					.split(/\s+/)
-					.filter((r) => r.length > 0);
-
-				const matchedRole = roleTokens.find((token) =>
-					phaseRoles.allowed_roles.includes(token),
-				);
-
-				if (!matchedRole) {
-					return {
-						content: [
-							{
-								type: "text",
-								text: JSON.stringify(
-									{
-										ok: false,
-										error: "phase_role_mismatch",
-										phase,
-										agent_role: agentRole,
-										allowed_roles: phaseRoles.allowed_roles,
-										message: `Agent role '${agentRole}' not allowed in phase '${phase}'`,
-									},
-									null,
-									2,
-								),
-							},
-						],
-					};
-				}
-
-				agentRoles = args.agents ?? [matchedRole];
 			} else if (!args.agents) {
 				// P459 AC2: No agent_identity, use phase defaults
 				agentRoles = phaseRoles.default_roles;
@@ -176,24 +166,31 @@ export class PgCubicHandlers {
 				};
 			}
 
+			const metadata = JSON.stringify({
+				name: args.name,
+				agents: agentRoles,
+				assignedProposals: args.proposals ?? [],
+				phase,
+				phaseGate: "G1",
+				...(adHocIdentity ? { ad_hoc_identity: adHocIdentity } : {}),
+			});
+
+			// P459 AC#102/AC#103: ON CONFLICT on uk_cubics_agent_phase_status (partial index).
+			// When two concurrent creates race for the same (agent_identity, phase, status='idle'),
+			// the second gets DO UPDATE (no-op) and RETURNING still yields the existing row.
 			const { rows } = await query<{
 				cubic_id: string;
+				was_existing: boolean;
 			}>(
-				`INSERT INTO roadmap.cubics (worktree_path, metadata)
-				 VALUES ($1, $2)
-				 RETURNING cubic_id`,
-				[
-					worktreePath,
-					JSON.stringify({
-						name: args.name,
-						agents: agentRoles,
-						assignedProposals: args.proposals ?? [],
-						phase,
-						phaseGate: "G1",
-					}),
-				],
+				`INSERT INTO roadmap.cubics (worktree_path, phase, status, agent_identity, metadata)
+				 VALUES ($1, $2, 'idle', $3, $4)
+				 ON CONFLICT (agent_identity, phase, status)
+				     WHERE agent_identity IS NOT NULL
+				 DO UPDATE SET metadata = roadmap.cubics.metadata
+				 RETURNING cubic_id, (xmax <> 0) AS was_existing`,
+				[worktreePath, phase, registeredAgentIdentity, metadata],
 			);
-			const cubicId = rows[0].cubic_id;
+			const { cubic_id: cubicId, was_existing: wasExisting } = rows[0];
 			return {
 				content: [
 					{
@@ -201,6 +198,7 @@ export class PgCubicHandlers {
 						text: JSON.stringify(
 							{
 								success: true,
+								was_existing: wasExisting,
 								cubic: {
 									id: cubicId,
 									name: args.name,
@@ -208,6 +206,7 @@ export class PgCubicHandlers {
 									phaseGate: "G1",
 									agents: agentRoles,
 									assignedProposals: args.proposals ?? [],
+									...(adHocIdentity ? { ad_hoc_identity: adHocIdentity } : {}),
 								},
 							},
 							null,

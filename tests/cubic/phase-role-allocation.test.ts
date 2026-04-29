@@ -367,6 +367,124 @@ test("P459: Cubic Phase-Driven Role Allocation", async (t) => {
 		},
 	);
 
+	await t.test(
+		"AC#102: Unique constraint uk_cubics_agent_phase_status exists",
+		async (t) => {
+			await t.test(
+				"partial unique index on (agent_identity, phase, status) should exist",
+				async () => {
+					const result = await query(
+						`SELECT indexname, indexdef
+						 FROM pg_indexes
+						 WHERE schemaname = 'roadmap'
+						   AND tablename = 'cubics'
+						   AND indexname = 'uk_cubics_agent_phase_status'`,
+					);
+					assert.strictEqual(
+						result.rows.length,
+						1,
+						"uk_cubics_agent_phase_status index should exist",
+					);
+					const def = result.rows[0].indexdef as string;
+					assert(
+						def.includes("agent_identity") && def.includes("phase") && def.includes("status"),
+						"index should cover agent_identity, phase, status columns",
+					);
+					assert(
+						def.includes("WHERE") && def.includes("IS NOT NULL"),
+						"index should be partial (WHERE agent_identity IS NOT NULL)",
+					);
+				},
+			);
+		},
+	);
+
+	await t.test(
+		"AC#103: Concurrent cubic_create returns existing cubic_id on conflict",
+		async (t) => {
+			const raceAgent = "race-test-agent";
+			const racePhase = "build";
+
+			// Seed a registered agent so the unique index is triggered
+			await query(
+				`INSERT INTO roadmap.agent_registry (agent_identity, agent_type, role, status)
+				 VALUES ($1, $2, $3, $4)
+				 ON CONFLICT (agent_identity) DO NOTHING`,
+				[raceAgent, "llm", "coder", "active"],
+			);
+
+			// Insert the first cubic directly to simulate an existing one
+			const insertResult = await query<{ cubic_id: string }>(
+				`INSERT INTO roadmap.cubics (worktree_path, phase, status, agent_identity, metadata)
+				 VALUES ($1, $2, 'idle', $3, '{}')
+				 RETURNING cubic_id`,
+				[`/data/code/worktree/${raceAgent}`, racePhase, raceAgent],
+			);
+			const existingCubicId = insertResult.rows[0].cubic_id;
+
+			await t.test(
+				"second create for same agent+phase returns existing cubic_id",
+				async () => {
+					// Second insert — should hit ON CONFLICT and return the existing row
+					const conflictResult = await query<{
+						cubic_id: string;
+						was_existing: boolean;
+					}>(
+						`INSERT INTO roadmap.cubics (worktree_path, phase, status, agent_identity, metadata)
+						 VALUES ($1, $2, 'idle', $3, '{}')
+						 ON CONFLICT (agent_identity, phase, status)
+						     WHERE agent_identity IS NOT NULL
+						 DO UPDATE SET metadata = roadmap.cubics.metadata
+						 RETURNING cubic_id, (xmax <> 0) AS was_existing`,
+						[`/data/code/worktree/${raceAgent}-2`, racePhase, raceAgent],
+					);
+
+					assert.strictEqual(
+						conflictResult.rows.length,
+						1,
+						"should return exactly one row",
+					);
+					assert.strictEqual(
+						conflictResult.rows[0].cubic_id,
+						existingCubicId,
+						"second create should return the first cubic_id",
+					);
+					assert.strictEqual(
+						conflictResult.rows[0].was_existing,
+						true,
+						"was_existing should be true for the conflicting row",
+					);
+				},
+			);
+
+			await t.test(
+				"exactly one row exists for the agent+phase after conflict",
+				async () => {
+					const countResult = await query<{ cnt: string }>(
+						`SELECT COUNT(*) AS cnt FROM roadmap.cubics
+						 WHERE agent_identity = $1 AND phase = $2 AND status = 'idle'`,
+						[raceAgent, racePhase],
+					);
+					assert.strictEqual(
+						Number(countResult.rows[0].cnt),
+						1,
+						"exactly one cubic row for same agent+phase+status after conflict",
+					);
+				},
+			);
+
+			// Cleanup race test cubic
+			await query(
+				`DELETE FROM roadmap.cubics WHERE cubic_id = $1`,
+				[existingCubicId],
+			);
+			await query(
+				`DELETE FROM roadmap.agent_registry WHERE agent_identity = $1`,
+				[raceAgent],
+			);
+		},
+	);
+
 	// Cleanup: Remove test agents
 	for (const identity of testAgents.map((a) => a.identity)) {
 		await query(
