@@ -13,6 +13,8 @@ import * as pg from "../../../../postgres/proposal-storage-v2.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
 import { RfcStates, Maturity } from "../../../../core/workflow/state-names.ts";
+import { detectConflicts } from "./directive-conflict-detector.ts";
+import { calculateDispatchPriority } from "./directive-priority.ts";
 
 type ProjectionFormat = "yaml_md" | "json";
 
@@ -250,29 +252,82 @@ export class PgProposalHandlers {
 			}
 
 			const author = args.author ?? "system";
+			const isDirective = proposalType === "directive";
+			const summary = args.summary ?? args.body_markdown ?? null;
+
+			// AC-3: Directives always start in Draft state
+			// AC-4: Directives carry 1.5× dispatch priority
+			const resolvedStatus = isDirective ? "Draft" : (args.status || null);
+			const basePriority = args.priority ? parseFloat(args.priority) : null;
+			const resolvedPriority = isDirective
+				? String(calculateDispatchPriority(basePriority))
+				: (args.priority || null);
+
+			// AC-5 + AC-7: Conflict detection and escalation for directives
+			let conflictNote = "";
+			let detectedConflicts: Awaited<ReturnType<typeof detectConflicts>> = [];
+			if (isDirective) {
+				detectedConflicts = await detectConflicts(args.title, summary);
+				if (detectedConflicts.length > 0) {
+					conflictNote = `\n⚠️ Conflicts detected (${detectedConflicts.length}): ${detectedConflicts.map((c) => c.displayId).join(", ")}`;
+				}
+			}
+
 			const created = await pg.createProposal(
 				{
 					display_id: args.display_id || null,
 					type: proposalType,
 					title: args.title,
-					status: args.status || null,
+					status: resolvedStatus,
 					parent_id: args.parent_id ? parseInt(args.parent_id, 10) : null,
-					summary: args.summary ?? args.body_markdown ?? null,
+					summary,
 					motivation: args.motivation || null,
 					design: args.design || null,
 					drawbacks: args.drawbacks || null,
 					alternatives: args.alternatives || null,
 					dependency: args.dependency || null,
-					priority: args.priority || null,
+					priority: resolvedPriority,
 					tags: args.tags ? JSON.parse(args.tags) : null,
 				},
 				author,
 			);
+
+			const displayRef = created.display_id ?? String(created.id);
+
+			if (isDirective) {
+				// AC-8: Write audit trail entry for directive creation
+				await query(
+					`INSERT INTO roadmap.audit_log (entity_type, entity_id, action, changed_by, before_json, after_json)
+					 VALUES ($1, $2, 'insert', $3, NULL, $4::jsonb)`,
+					[
+						"proposal",
+						displayRef,
+						author,
+						JSON.stringify({
+							type: "directive",
+							title: args.title,
+							issuer: author,
+							rationale: summary,
+							priority: resolvedPriority,
+						}),
+					],
+				);
+
+				// AC-7: Escalate to D2 gate if conflicts were detected
+				if (detectedConflicts.length > 0) {
+					await query(
+						`INSERT INTO roadmap.escalation_log (obstacle_type, proposal_id, agent_identity, escalated_to, severity)
+						 VALUES ('DEPENDENCY_UNRESOLVED', $1, $2, 'skeptic_d2', 'high')`,
+						[displayRef, author],
+					);
+				}
+			}
+
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Created proposal: [${created.display_id ?? created.id}] ${created.title}`,
+						text: `Created proposal: [${displayRef}] ${created.title}${conflictNote}`,
 					},
 				],
 			};
