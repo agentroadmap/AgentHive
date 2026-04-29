@@ -29,10 +29,18 @@ function loadEnvPassword(): void {
 
 loadEnvPassword();
 
+const pgUser = process.env.PGUSER;
+if (!pgUser) {
+	throw new Error(
+		"[migrate-principal-identity] PGUSER is required. " +
+		"Set PGUSER in /etc/agenthive/env before running this script.",
+	);
+}
+
 const pool = new Pool({
 	host: process.env.PGHOST ?? "127.0.0.1",
 	port: Number(process.env.PGPORT ?? 5432),
-	user: process.env.PGUSER ?? "xiaomi",
+	user: pgUser,
 	database: process.env.PGDATABASE ?? "agenthive",
 	connectionTimeoutMillis: 5000,
 });

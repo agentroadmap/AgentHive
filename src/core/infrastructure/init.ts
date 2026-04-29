@@ -10,6 +10,7 @@ import {
 import { DEFAULT_INIT_CONFIG } from "../../constants/index.ts";
 import type { DatabaseConfig, RoadmapConfig } from "../../types/index.ts";
 import { initPoolFromConfig, query as pgQuery } from "../../infra/postgres/pool.ts";
+import { AgentHiveConfigError } from "../../shared/runtime/endpoints.ts";
 import type { Core } from "../roadmap.ts";
 import { BLUEPRINTS, type BlueprintType } from "./blueprints.ts";
 import { initializeFederation } from "./federation.ts";
@@ -41,7 +42,12 @@ function resolveDatabaseConfig(
 		host: existingDatabase?.host ?? process.env.PG_HOST ?? "127.0.0.1",
 		port:
 			existingDatabase?.port ?? (Number(process.env.PG_PORT) || 5432),
-		user: existingDatabase?.user ?? process.env.PGUSER ?? "xiaomi",
+		user: existingDatabase?.user ?? process.env.PGUSER ?? (() => {
+			throw new AgentHiveConfigError(
+				"[Config] PGUSER is required. Set PGUSER in /etc/agenthive/env. " +
+				"See scripts/systemd/env.template for a migration guide.",
+			);
+		})(),
 		name: existingDatabase?.name ?? process.env.PG_DATABASE ?? "agenthive",
 		schema: existingDatabase?.schema ?? process.env.PG_SCHEMA ?? "roadmap",
 		...(existingDatabase?.password ? { password: existingDatabase.password } : {}),

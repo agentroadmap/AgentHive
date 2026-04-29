@@ -498,6 +498,15 @@ AgentHive is shared infrastructure. The following patterns block parallel multi-
 
 When the registered alternative does not yet exist (e.g., the new `paths.ts` and `endpoints.ts` modules per P448/P449 are still draft), capture a `// TODO(P###):` comment naming the proposal that will replace the literal — do not silently re-add the antipattern.
 
+#### P448 deprecation schedule — `"xiaomi"` fallback removal in `pool.ts`
+
+| Phase | Timeline | Behaviour |
+| --- | --- | --- |
+| **V1** (current, 2026-Q2) | P448 ships | `pool.ts` removes silent `"xiaomi"` PGUSER fallback. Missing PGUSER emits `console.warn` with P448 context **and** throws `AgentHiveConfigError`. Operators must source `/etc/agenthive/env` before next service restart. |
+| **V2** | 2026-Q3 | `console.warn` removed; only the `AgentHiveConfigError` throw remains. Operators who have not set PGUSER will still fail fast, but without the deprecation preamble in logs. |
+
+Operator action required for V1: copy `scripts/systemd/env.template` to `/etc/agenthive/env`, fill in `PGUSER`, `PGHOST`, `PGDATABASE`, `PGPASSWORD`, then `sudo systemctl daemon-reload && sudo systemctl restart agenthive-mcp`. If the file is absent and these vars are not already in the environment, the service will fail with `AgentHiveConfigError` pointing at `scripts/systemd/env.template`.
+
 Before you finish:
 
 1. Update code, docs, and SQL together if they are coupled.
