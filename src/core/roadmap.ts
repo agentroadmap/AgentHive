@@ -23,8 +23,8 @@ import type {
 	ProposalDependency,
 	ProposalRow,
 	ProposalSummary,
-} from "../postgres/proposal-storage-v2.ts";
-import * as pg from "../postgres/proposal-storage-v2.ts";
+} from "../infra/postgres/proposal-storage-v2.ts";
+import * as pg from "../infra/postgres/proposal-storage-v2.ts";
 import {
 	type AcceptanceCriterion,
 	type Agent,

@@ -8,8 +8,8 @@
 
 import type { QueryResultRow } from "pg";
 import { query } from "../../../../postgres/pool.ts";
-import type { ProposalRow } from "../../../../postgres/proposal-storage-v2.ts";
-import * as pg from "../../../../postgres/proposal-storage-v2.ts";
+import type { ProposalRow } from "../../../../infra/postgres/proposal-storage-v2.ts";
+import * as pg from "../../../../infra/postgres/proposal-storage-v2.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
 import { RfcStates, Maturity } from "../../../../core/workflow/state-names.ts";

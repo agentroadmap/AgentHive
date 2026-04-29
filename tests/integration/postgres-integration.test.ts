@@ -20,7 +20,7 @@ import {
 	createProposal,
 	deleteProposal,
 	getProposalSummary,
-} from "../../src/postgres/proposal-storage-v2.ts";
+} from "../../src/infra/postgres/proposal-storage-v2.ts";
 
 const TEST_PREFIX = `itest_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 const TEST_WORKFLOW = `${TEST_PREFIX}_workflow`;

@@ -6,7 +6,7 @@
  */
 
 import { query } from "../../../../postgres/pool.ts";
-import { resolveProposalId } from "../../../../postgres/proposal-storage-v2.ts";
+import { resolveProposalId } from "../../../../infra/postgres/proposal-storage-v2.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
 
