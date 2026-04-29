@@ -14,7 +14,7 @@
 
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-// SQLite removed
+import { DatabaseSync } from "node:sqlite";
 
 /** A single skill that an agent can perform */
 export interface Skill {

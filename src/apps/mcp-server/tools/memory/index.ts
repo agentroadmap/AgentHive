@@ -100,6 +100,7 @@ export function registerMemoryTools(server: McpServer): void {
 			properties: {
 				agent_identity: { type: "string" },
 				layer: { type: "string" },
+				proposal_id: { type: "number", description: "Filter to agents currently working on this proposal ID" },
 			},
 			required: [],
 		},
@@ -110,6 +111,8 @@ export function registerMemoryTools(server: McpServer): void {
 						? args.agent_identity
 						: undefined,
 				layer: typeof args.layer === "string" ? args.layer : undefined,
+				proposal_id:
+					typeof args.proposal_id === "number" ? args.proposal_id : undefined,
 			}),
 	});
 
@@ -143,6 +146,7 @@ export function registerMemoryTools(server: McpServer): void {
 			properties: {
 				agent_identity: { type: "string" },
 				layer: { type: "string" },
+				token_budget: { type: "number", description: "Max tokens to use; compresses content to fit (1 token ≈ 4 chars)" },
 			},
 			required: [],
 		},
@@ -153,6 +157,8 @@ export function registerMemoryTools(server: McpServer): void {
 						? args.agent_identity
 						: undefined,
 				layer: typeof args.layer === "string" ? args.layer : undefined,
+				token_budget:
+					typeof args.token_budget === "number" ? args.token_budget : undefined,
 			}),
 	});
 }

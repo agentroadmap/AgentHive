@@ -276,6 +276,7 @@ export class PgMemoryHandlers {
 	async memoryList(args: {
 		agent_identity?: string;
 		layer?: string;
+		proposal_id?: number;
 	}): Promise<CallToolResult> {
 		try {
 			let sql =
@@ -290,6 +291,13 @@ export class PgMemoryHandlers {
 			if (args.layer) {
 				conditions.push(`layer = $${paramIdx++}`);
 				params.push(args.layer);
+			}
+			// AC#14: filter to agents currently working on a specific proposal
+			if (args.proposal_id !== undefined) {
+				conditions.push(
+					`agent_identity IN (SELECT agent_identity FROM roadmap_workforce.agent_health WHERE current_proposal = $${paramIdx++})`,
+				);
+				params.push(args.proposal_id);
 			}
 			if (conditions.length) {
 				sql += ` WHERE ${conditions.join(" AND ")}`;
@@ -321,6 +329,7 @@ export class PgMemoryHandlers {
 	async memorySummary(args: {
 		agent_identity?: string;
 		layer?: string;
+		token_budget?: number;
 	}): Promise<CallToolResult> {
 		try {
 			const clauses: string[] = [];
@@ -338,6 +347,43 @@ export class PgMemoryHandlers {
 
 			const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
 
+			if (args.token_budget !== undefined && args.token_budget > 0) {
+				// AC#13: token-budget mode — fetch actual entries and compress to fit
+				const { rows } = await query(
+					`SELECT agent_identity, layer, key, value, updated_at
+           FROM v_active_memory ${where}
+           ORDER BY agent_identity, layer, updated_at DESC`,
+					params,
+				);
+
+				if (!rows.length) {
+					return { content: [{ type: "text", text: "No memory entries found." }] };
+				}
+
+				const budgetChars = args.token_budget * 4; // 1 token ≈ 4 chars
+				const lines: string[] = [];
+				let usedChars = 0;
+				let truncated = false;
+
+				for (const r of rows) {
+					const line = `[${r.agent_identity}|${r.layer}] ${r.key}: ${r.value}`;
+					if (usedChars + line.length > budgetChars) {
+						truncated = true;
+						const remaining = budgetChars - usedChars;
+						if (remaining > 20) {
+							lines.push(line.substring(0, remaining - 3) + "...");
+						}
+						break;
+					}
+					lines.push(line);
+					usedChars += line.length + 1; // +1 for newline
+				}
+
+				const suffix = truncated ? `\n(truncated to fit ${args.token_budget}-token budget)` : "";
+				return { content: [{ type: "text", text: lines.join("\n") + suffix }] };
+			}
+
+			// Default: count-only summary grouped by agent/layer
 			const { rows } = await query(
 				`SELECT agent_identity, layer, COUNT(*) as count, MAX(updated_at) as last_updated
          FROM v_active_memory ${where}

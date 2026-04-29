@@ -58,6 +58,10 @@ export interface KnowledgeEntry {
 export interface KnowledgeSearchQuery {
 	/** Search keywords (fuzzy match) */
 	keywords: string[];
+	/** Optional 1536-dim embedding for cosine similarity search (AC#9) */
+	embedding?: number[];
+	/** Minimum cosine similarity threshold when embedding is provided (default 0.5) */
+	similarityThreshold?: number;
 	/** Filter by entry type */
 	type?: KnowledgeEntryType;
 	/** Filter by tags */
@@ -165,14 +169,73 @@ export class KnowledgeBase {
 	}
 
 	/**
-	 * AC#1: Search knowledge base by keywords.
-	 * Uses ILIKE for broad compatibility; a later migration can add a tsvector column.
+	 * AC#1 + AC#9: Search knowledge base by keywords and/or embedding vector.
+	 *
+	 * When `embedding` is provided, performs cosine-similarity ranking against
+	 * `knowledge_entries.embedding` (added by migration 060). Falls back to
+	 * ILIKE text search when no embedding is supplied.
 	 */
 	async search(
 		searchQuery: KnowledgeSearchQuery,
 	): Promise<KnowledgeSearchResult[]> {
+		const limit = searchQuery.limit ?? 20;
+
+		// AC#9: vector path — cosine similarity when caller supplies an embedding
+		if (searchQuery.embedding && searchQuery.embedding.length === 1536) {
+			const threshold = searchQuery.similarityThreshold ?? 0.5;
+			let paramIndex = 1;
+			const params: unknown[] = [];
+
+			const vecIdx = paramIndex++;
+			params.push(JSON.stringify(searchQuery.embedding));
+
+			const conditions: string[] = [
+				`embedding IS NOT NULL`,
+				`1 - (embedding <=> $${vecIdx}::vector(1536)) >= ${threshold}`,
+			];
+
+			if (searchQuery.type) {
+				conditions.push(`type = $${paramIndex++}`);
+				params.push(searchQuery.type);
+			}
+			if (searchQuery.minConfidence !== undefined) {
+				conditions.push(`confidence >= $${paramIndex++}`);
+				params.push(searchQuery.minConfidence);
+			}
+			if (searchQuery.relatedProposal) {
+				conditions.push(`related_proposals::text ILIKE $${paramIndex++}`);
+				params.push(`%${searchQuery.relatedProposal}%`);
+			}
+
+			params.push(limit);
+			const sql = `SELECT *, 1 - (embedding <=> $1::vector(1536)) AS _similarity
+			             FROM knowledge_entries
+			             WHERE ${conditions.join(" AND ")}
+			             ORDER BY _similarity DESC
+			             LIMIT $${paramIndex}`;
+
+			const result = await query(sql, params);
+			return result.rows.map((row: any) => {
+				const entry = this.hydrateEntry(row);
+				const matchedKeywords = searchQuery.keywords.filter(
+					(k) =>
+						entry.keywords.some((ek) =>
+							ek.toLowerCase().includes(k.toLowerCase()),
+						) ||
+						entry.title.toLowerCase().includes(k.toLowerCase()) ||
+						entry.content.toLowerCase().includes(k.toLowerCase()),
+				);
+				const similarity = Number(row._similarity ?? 0);
+				const relevanceScore = Math.min(
+					100,
+					Math.round(similarity * 50 + matchedKeywords.length * 10 + entry.confidence / 5),
+				);
+				return { entry, relevanceScore, matchedKeywords };
+			});
+		}
+
+		// Keyword / ILIKE text path
 		const likeTerms = searchQuery.keywords.map((k) => `%${k}%`);
-		// Build an OR condition across all keyword terms
 		const likeClause = likeTerms
 			.map(
 				(_, i) =>
@@ -201,8 +264,6 @@ export class KnowledgeBase {
 		}
 
 		sql += ` ORDER BY confidence DESC, helpful_count DESC`;
-
-		const limit = searchQuery.limit ?? 20;
 		sql += ` LIMIT $${paramIndex++}`;
 		params.push(limit);
 
@@ -475,6 +536,7 @@ export class KnowledgeBase {
 
 	/**
 	 * Get statistics about the knowledge base.
+	 * AC#11: Includes low-helpfulness entries (helpful_count=0 AND age > 30 days).
 	 */
 	async getStats(): Promise<{
 		totalEntries: number;
@@ -483,8 +545,9 @@ export class KnowledgeBase {
 		averageConfidence: number;
 		topContributors: Array<{ author: string; count: number }>;
 		mostHelpful: Array<{ id: string; title: string; helpfulCount: number }>;
+		lowHelpfulness: Array<{ id: string; title: string; ageDays: number }>;
 	}> {
-		const [totalRes, patternRes, avgRes, typeRes, contribRes, helpfulRes] =
+		const [totalRes, patternRes, avgRes, typeRes, contribRes, helpfulRes, lowHelpRes] =
 			await Promise.all([
 				query(`SELECT COUNT(*) AS c FROM knowledge_entries`),
 				query(`SELECT COUNT(*) AS c FROM extracted_patterns`),
@@ -497,6 +560,16 @@ export class KnowledgeBase {
 				),
 				query(
 					`SELECT id, title, helpful_count FROM knowledge_entries ORDER BY helpful_count DESC LIMIT 5`,
+				),
+				// AC#11: entries with zero upvotes that are at least 30 days old
+				query(
+					`SELECT id, title,
+					        EXTRACT(EPOCH FROM (NOW() - created_at)) / 86400 AS age_days
+					 FROM knowledge_entries
+					 WHERE helpful_count = 0
+					   AND created_at < NOW() - INTERVAL '30 days'
+					 ORDER BY created_at ASC
+					 LIMIT 10`,
 				),
 			]);
 
@@ -518,6 +591,11 @@ export class KnowledgeBase {
 				id: r.id,
 				title: r.title,
 				helpfulCount: Number(r.helpful_count),
+			})),
+			lowHelpfulness: (lowHelpRes.rows as any[]).map((r) => ({
+				id: r.id,
+				title: r.title,
+				ageDays: Math.round(Number(r.age_days)),
 			})),
 		};
 	}

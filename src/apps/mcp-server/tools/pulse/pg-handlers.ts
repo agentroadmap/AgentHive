@@ -293,6 +293,64 @@ export class PgPulseHandlers {
 				[oneHourAgo],
 			);
 
+			// AC#15: cross-reference spending — flag degraded agents with ≥80% daily spend
+			const { rows: spendingRows } = await query<{
+				agent_identity: string;
+				daily_limit_usd: string | null;
+				spent_usd: string | null;
+				is_frozen: boolean | null;
+			}>(
+				`SELECT sc.agent_identity,
+				        sc.daily_limit_usd,
+				        COALESCE(ds.total_usd, 0) AS spent_usd,
+				        sc.is_frozen
+				 FROM roadmap_efficiency.spending_caps sc
+				 LEFT JOIN roadmap.v_daily_spend ds
+				   ON ds.agent_identity = sc.agent_identity
+				  AND ds.spend_date = CURRENT_DATE`,
+			);
+
+			const spendingByAgent = new Map(
+				spendingRows.map((r) => [
+					r.agent_identity,
+					{
+						dailyLimitUsd: r.daily_limit_usd ? Number(r.daily_limit_usd) : null,
+						spentUsd: Number(r.spent_usd ?? 0),
+						isFrozen: r.is_frozen ?? false,
+					},
+				]),
+			);
+
+			// Build status map for quick lookup
+			const inferredStatusMap = new Map(
+				rows.map((r) => [r.agent_identity, inferStatus(new Date(r.last_heartbeat_at))]),
+			);
+
+			const flaggedAgents: Array<{
+				agent: string;
+				status: string;
+				spentUsd: number;
+				dailyLimitUsd: number;
+				pctUsed: number;
+				isFrozen: boolean;
+			}> = [];
+
+			for (const [agent, spending] of spendingByAgent) {
+				if (spending.dailyLimitUsd === null || spending.dailyLimitUsd === 0) continue;
+				const pct = (spending.spentUsd / spending.dailyLimitUsd) * 100;
+				if (pct < 80) continue;
+				const status = inferredStatusMap.get(agent) ?? "unknown";
+				if (status === "healthy") continue; // only flag degraded agents
+				flaggedAgents.push({
+					agent,
+					status,
+					spentUsd: spending.spentUsd,
+					dailyLimitUsd: spending.dailyLimitUsd,
+					pctUsed: Math.round(pct),
+					isFrozen: spending.isFrozen,
+				});
+			}
+
 			const fleet = {
 				totalAgents: rows.length,
 				...statusCounts,
@@ -313,6 +371,7 @@ export class PgPulseHandlers {
 					agent: r.agent_identity,
 					heartbeats: Number(r.cnt),
 				})),
+				flaggedAgents,
 			};
 
 			return {

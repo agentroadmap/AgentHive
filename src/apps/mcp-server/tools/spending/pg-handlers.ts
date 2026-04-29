@@ -155,19 +155,6 @@ export class PgSpendingHandlers {
 				],
 			};
 		} catch (err) {
-			if (
-				err instanceof Error &&
-				err.message.includes('record "new" has no field "id"')
-			) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: "⚠️ Failed to set spending cap: roadmap.audit trigger on spending_caps expects an id column, so cap rows cannot be written until the database trigger is fixed.",
-						},
-					],
-				};
-			}
 			return errorResult("Failed to set spending cap", err);
 		}
 	}
@@ -277,6 +264,58 @@ export class PgSpendingHandlers {
 						{
 							type: "text",
 							text: `Logged $${args.cost_usd} for ${args.agent_identity}.${efficiencyNote}`,
+						},
+					],
+				};
+			}
+
+			const dailySpent = Number(snapshot.total_spent_today_usd);
+			const dailyLimit =
+				snapshot.daily_limit_usd !== null
+					? Number(snapshot.daily_limit_usd)
+					: null;
+
+			// AC#6: auto-freeze when daily budget is exhausted
+			if (dailyLimit !== null && dailySpent >= dailyLimit) {
+				await query(
+					`UPDATE spending_caps
+					 SET is_frozen = true, frozen_reason = 'Daily budget exhausted', updated_at = NOW()
+					 WHERE agent_identity = $1 AND NOT COALESCE(is_frozen, false)`,
+					[args.agent_identity],
+				);
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								error: "budget_exhausted",
+								agent: args.agent_identity,
+								daily_spent_usd: dailySpent,
+								daily_limit_usd: dailyLimit,
+								message: `Daily budget of $${dailyLimit} exhausted. Agent ${args.agent_identity} frozen.`,
+							}),
+						},
+					],
+				};
+			}
+
+			// AC#5: warn when 80% of daily budget consumed
+			if (dailyLimit !== null && dailySpent >= 0.8 * dailyLimit) {
+				const pct = Math.round((dailySpent / dailyLimit) * 100);
+				const remainingUsd = (dailyLimit - dailySpent).toFixed(6);
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								warning: "budget_warning_80pct",
+								agent: args.agent_identity,
+								daily_spent_usd: dailySpent,
+								daily_limit_usd: dailyLimit,
+								remaining_usd: Number(remainingUsd),
+								pct_used: pct,
+								message: `Warning: ${args.agent_identity} has used ${pct}% of daily budget ($${remainingUsd} remaining).${efficiencyNote}`,
+							}),
 						},
 					],
 				};
