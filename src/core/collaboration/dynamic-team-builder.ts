@@ -193,11 +193,12 @@ export class DynamicTeamBuilder {
 	evaluateOverlap(proposals: AgentProposal[]): ProposalOverlap[] {
 		const byProposal = new Map<string, AgentProposal[]>();
 
-		// Group proposals by proposal
+		// Group proposals by target proposal
 		for (const proposal of proposals) {
-			const existing = byProposal.get(proposal.proposalId) ?? [];
+			const key = proposal.targetProposalId;
+			const existing = byProposal.get(key) ?? [];
 			existing.push(proposal);
-			byProposal.set(proposal.proposalId, existing);
+			byProposal.set(key, existing);
 		}
 
 		// Find overlaps (proposals with multiple proposals)
@@ -349,7 +350,7 @@ export class DynamicTeamBuilder {
 			throw new Error("Need at least 2 proposals to form a team");
 		}
 
-		const allSameProposal = proposals.every((p) => p.proposalId === proposalId);
+		const allSameProposal = proposals.every((p) => p.targetProposalId === proposalId);
 		if (!allSameProposal) {
 			throw new Error("All proposals must target the same proposal");
 		}

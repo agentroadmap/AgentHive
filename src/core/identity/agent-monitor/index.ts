@@ -80,7 +80,7 @@ export function checkDuplicates(
 	const titles = agentProposals.map((s) => s.title.toLowerCase());
 	const duplicates = titles.filter((t, i) => titles.indexOf(t) !== i);
 
-	if (duplicates.length >= 3) {
+	if (duplicates.length >= 2) {
 		return {
 			type: "duplicate",
 			agent_id: agentId,

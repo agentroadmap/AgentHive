@@ -19,7 +19,8 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import type { ProposalStatus } from "./proposal-workflow.ts";
+/** Status of a proposal record in the lease-backlog system */
+export type LeaseProposalStatus = "Proposed" | "Approved" | "Rejected" | "Under Review";
 
 /** Review record for a proposal */
 export interface Review {
@@ -68,7 +69,7 @@ export interface ProposalRecord {
 	title: string;
 	proposer: string;
 	proposedAt: string;
-	status: ProposalStatus;
+	status: LeaseProposalStatus;
 	approvedBy?: string;
 	approvedAt?: string;
 	addedToBacklogAt?: string;
@@ -148,9 +149,9 @@ export class LeaseBacklogManager {
 		_priority: BacklogItem["priority"] = "medium",
 	): ProposalRecord {
 		// Validate proposalId format
-		if (!proposalId.match(/^STATE-\d+(\.\d+)?$/)) {
+		if (!proposalId.match(/^(STATE-\d+(\.\d+)?|proposal-\d+|P\d+)$/)) {
 			throw new Error(
-				`Invalid proposal ID format: ${proposalId}. Expected STATE-<number>`,
+				`Invalid proposal ID format: ${proposalId}. Expected STATE-<number>, proposal-<number>, or P<number>`,
 			);
 		}
 
@@ -164,7 +165,7 @@ export class LeaseBacklogManager {
 			title,
 			proposer,
 			proposedAt: new Date().toISOString(),
-			status: "proposed",
+			status: "Proposed",
 			reviews: [],
 			notes: `Proposed by ${proposer}`,
 		};
@@ -209,13 +210,13 @@ export class LeaseBacklogManager {
 		);
 
 		if (hasPmApproval && hasArchitectApproval) {
-			proposal.status = "approved";
+			proposal.status = "Approved";
 			proposal.approvedBy = [reviewer].join(", ");
 			proposal.approvedAt = review.timestamp;
 		} else if (proposal.reviews.some((r) => r.decision === "rejected")) {
-			proposal.status = "rejected";
+			proposal.status = "Rejected";
 		} else {
-			proposal.status = "in-review";
+			proposal.status = "Under Review";
 		}
 
 		this.proposals.set(proposalId, proposal);
@@ -240,7 +241,7 @@ export class LeaseBacklogManager {
 			throw new Error(`No proposal found for ${proposalId}`);
 		}
 
-		if (proposal.status !== "approved") {
+		if (proposal.status !== "Approved") {
 			throw new Error(
 				`Proposal ${proposalId} is not approved (status: ${proposal.status})`,
 			);
@@ -576,7 +577,7 @@ export class LeaseBacklogManager {
 	/**
 	 * Get proposals by status
 	 */
-	getProposalsByStatus(status: ProposalStatus): ProposalRecord[] {
+	getProposalsByStatus(status: LeaseProposalStatus): ProposalRecord[] {
 		return Array.from(this.proposals.values()).filter(
 			(p) => p.status === status,
 		);
@@ -611,10 +612,10 @@ export class LeaseBacklogManager {
 		return {
 			totalProposals: proposals.length,
 			pendingReview: proposals.filter(
-				(p) => p.status === "in-review" || p.status === "proposed",
+				(p) => p.status === "Under Review" || p.status === "Proposed",
 			).length,
-			approved: proposals.filter((p) => p.status === "approved").length,
-			rejected: proposals.filter((p) => p.status === "rejected").length,
+			approved: proposals.filter((p) => p.status === "Approved").length,
+			rejected: proposals.filter((p) => p.status === "Rejected").length,
 			totalBacklog: items.length,
 			available: items.filter((i) => i.status === "available").length,
 			leased: items.filter((i) => i.status === "leased").length,

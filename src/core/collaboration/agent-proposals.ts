@@ -215,7 +215,8 @@ const COMPLEXITY_SCORES: Record<ComplexityLevel, number> = {
  * Manages agent proposals and lease-based claiming.
  */
 export class AgentProposalSystem {
-	private proposals: Map<string, AgentProposal> = new Map();
+	private proposals: Map<string, AgentProposal> = new Map(); // unique internal key → proposal
+	private activeByTarget: Map<string, string> = new Map(); // targetProposalId → current unique key
 	private leases: Map<string, ProposalLease> = new Map();
 	private history: ProposalHistoryEntry[] = [];
 	private leaseTtlMs: number;
@@ -270,8 +271,9 @@ export class AgentProposalSystem {
 		}
 
 		const now = new Date().toISOString();
+		const uniqueKey = generateId("PROP");
 		const proposal: AgentProposal = {
-			proposalId: generateId("PROP"),
+			proposalId: proposalId,
 			targetProposalId: proposalId,
 			agentId,
 			title: options.title,
@@ -286,17 +288,23 @@ export class AgentProposalSystem {
 			version: 1,
 		};
 
-		this.proposals.set(proposal.proposalId, proposal);
+		this.proposals.set(uniqueKey, proposal);
+		this.activeByTarget.set(proposalId, uniqueKey);
 		this.recordHistory("submitted", proposal);
 
 		return proposal;
+	}
+
+	/** Resolve external proposalId to internal unique key. */
+	private resolveKey(proposalId: string): string {
+		return this.activeByTarget.get(proposalId) ?? proposalId;
 	}
 
 	/**
 	 * Get a proposal by ID.
 	 */
 	getProposal(proposalId: string): AgentProposal | undefined {
-		return this.proposals.get(proposalId);
+		return this.proposals.get(this.resolveKey(proposalId));
 	}
 
 	/**
@@ -358,7 +366,7 @@ export class AgentProposalSystem {
 		agentId: string,
 		approach: ImplementationApproach,
 	): AgentProposal {
-		const proposal = this.proposals.get(proposalId);
+		const proposal = this.proposals.get(this.resolveKey(proposalId));
 		if (!proposal) throw new Error(`Proposal not found: ${proposalId}`);
 		if (proposal.agentId !== agentId)
 			throw new Error("Only the proposing agent can update");
@@ -380,7 +388,7 @@ export class AgentProposalSystem {
 		agentId: string,
 		complexity: ComplexityEstimate,
 	): AgentProposal {
-		const proposal = this.proposals.get(proposalId);
+		const proposal = this.proposals.get(this.resolveKey(proposalId));
 		if (!proposal) throw new Error(`Proposal not found: ${proposalId}`);
 		if (proposal.agentId !== agentId)
 			throw new Error("Only the proposing agent can update");
@@ -405,7 +413,7 @@ export class AgentProposalSystem {
 		estimatedHours?: number;
 		confidence: number;
 	} | null {
-		const proposal = this.proposals.get(proposalId);
+		const proposal = this.proposals.get(this.resolveKey(proposalId));
 		if (!proposal) return null;
 
 		return {
@@ -448,7 +456,7 @@ export class AgentProposalSystem {
 	 * Withdraw a proposal (by the proposing agent).
 	 */
 	withdrawProposal(proposalId: string, agentId: string): AgentProposal {
-		const proposal = this.proposals.get(proposalId);
+		const proposal = this.proposals.get(this.resolveKey(proposalId));
 		if (!proposal) throw new Error(`Proposal not found: ${proposalId}`);
 		if (proposal.agentId !== agentId)
 			throw new Error("Only the proposing agent can withdraw");
@@ -519,7 +527,7 @@ export class AgentProposalSystem {
 	 * Claim a proposal via an approved proposal. Creates a lease.
 	 */
 	claimProposal(proposalId: string): ProposalLease {
-		const proposal = this.proposals.get(proposalId);
+		const proposal = this.proposals.get(this.resolveKey(proposalId));
 		if (!proposal) throw new Error(`Proposal not found: ${proposalId}`);
 		if (proposal.status !== "approved") {
 			throw new Error(
@@ -691,8 +699,13 @@ export class AgentProposalSystem {
 	 * Get all feedback for a proposal.
 	 */
 	getProposalFeedback(proposalId: string): ProposalFeedbackItem[] {
-		const proposal = this.proposals.get(proposalId);
-		return proposal ? proposal.feedback : [];
+		const feedback: ProposalFeedbackItem[] = [];
+		for (const p of this.proposals.values()) {
+			if (p.proposalId === proposalId) {
+				feedback.push(...p.feedback);
+			}
+		}
+		return feedback;
 	}
 
 	/**
@@ -924,7 +937,10 @@ export class AgentProposalSystem {
 
 			if (data.proposals) {
 				for (const p of data.proposals) {
-					this.proposals.set(p.proposalId, p);
+					const key = generateId("PROP");
+					this.proposals.set(key, p);
+					// Last proposal wins as active for that target
+					this.activeByTarget.set(p.proposalId, key);
 				}
 			}
 			if (data.leases) {
@@ -948,7 +964,7 @@ export class AgentProposalSystem {
 		approve: boolean,
 		options?: { notes?: string; feedback?: ProposalFeedbackItem[] },
 	): AgentProposal {
-		const proposal = this.proposals.get(proposalId);
+		const proposal = this.proposals.get(this.resolveKey(proposalId));
 		if (!proposal) throw new Error(`Proposal not found: ${proposalId}`);
 		if (proposal.status !== "pending") {
 			throw new Error(`Cannot review proposal in status: ${proposal.status}`);

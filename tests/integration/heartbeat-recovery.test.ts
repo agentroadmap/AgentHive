@@ -141,7 +141,7 @@ describe("Heartbeat & Stale Agent Recovery", () => {
 		it("should not pick up proposals claimed by stale agents (claim valid but heartbeat stale)", async () => {
 			const { proposal } = await core.createProposalFromInput({
 				title: "Test Proposal",
-				status: "Potential",
+				status: "Draft",
 			});
 
 			// Create a claim that is NOT expired (expires in 30 min) but has a STALE heartbeat (2 hours ago)
@@ -177,7 +177,6 @@ describe("Heartbeat & Stale Agent Recovery", () => {
 		it("should allow recovery after agent crash (no heartbeat)", async () => {
 			const { proposal } = await core.createProposalFromInput({
 				title: "Crash Recovery Test",
-				status: "Potential",
 			});
 
 			// Agent claims the proposal
