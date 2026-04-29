@@ -58,6 +58,8 @@ export interface OfferProviderDeps {
 	renewIntervalMs?: number;
 	/** Fallback poll when LISTEN fires nothing, ms (default 15_000) */
 	pollIntervalMs?: number;
+	/** How often to refresh provider_registry heartbeat, ms (default 30_000) */
+	heartbeatIntervalMs?: number;
 	/** Maximum concurrent claims this provider will hold (default 1) */
 	maxConcurrent?: number;
 	/** P300: Optional project_id to scope claims to a specific project. */
@@ -94,6 +96,7 @@ export class OfferProvider {
 	private readonly renewIntervalMs: number;
 	private readonly pollIntervalMs: number;
 	private readonly maxConcurrent: number;
+	private readonly heartbeatIntervalMs: number;
 	private readonly projectId: number | null | undefined;
 	private readonly queryFn: QueryFn;
 	private readonly connectListener: () => Promise<ListenerClient>;
@@ -104,6 +107,7 @@ export class OfferProvider {
 
 	private listenerClient: ListenerClient | null = null;
 	private pollTimer: ReturnType<typeof setInterval> | null = null;
+	private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 	private started = false;
 	private activeClaims = 0;
 
@@ -123,6 +127,7 @@ export class OfferProvider {
 		this.renewIntervalMs = deps.renewIntervalMs ?? 10_000;
 		this.pollIntervalMs = deps.pollIntervalMs ?? 15_000;
 		this.maxConcurrent = deps.maxConcurrent ?? 1;
+		this.heartbeatIntervalMs = deps.heartbeatIntervalMs ?? 30_000;
 		this.projectId = deps.projectId;
 		this.queryFn = deps.queryFn ?? query;
 		this.connectListener =
@@ -142,6 +147,12 @@ export class OfferProvider {
 
 		// P297: Self-register agency in agent_registry + agent_capability before claiming
 		await this.registerAgency();
+
+		// AC2: Upsert into provider_registry and keep it alive with a heartbeat
+		await this.upsertProviderRegistry();
+		this.heartbeatTimer = this.setIntervalFn(() => {
+			void this.upsertProviderRegistry();
+		}, this.heartbeatIntervalMs);
 
 		const client = await this.connectListener();
 		this.listenerClient = client;
@@ -168,6 +179,14 @@ export class OfferProvider {
 	}
 
 	async stop(): Promise<void> {
+		// AC2: Signal graceful shutdown — set status='paused' before releasing listener
+		await this.pauseProviderRegistry();
+
+		if (this.heartbeatTimer !== null) {
+			this.clearIntervalFn(this.heartbeatTimer);
+			this.heartbeatTimer = null;
+		}
+
 		if (this.pollTimer !== null) {
 			this.clearIntervalFn(this.pollTimer);
 			this.pollTimer = null;
@@ -349,6 +368,33 @@ export class OfferProvider {
 			);
 		} catch (err) {
 			this.logger.error(`[OfferProvider] registerAgency ${this.agentIdentity} error:`, err);
+		}
+	}
+
+	// AC2: Upsert into provider_registry, refreshing status='active' and last_seen_at.
+	// Called on startup and every heartbeatIntervalMs while running.
+	private async upsertProviderRegistry(): Promise<void> {
+		try {
+			await this.queryFn(
+				`SELECT roadmap_workforce.fn_offer_provider_heartbeat($1, $2, $3, $4::jsonb)`,
+				[this.agentIdentity, this.projectId ?? null, null, this.capabilitiesJson],
+			);
+		} catch (err) {
+			this.logger.error(`[OfferProvider] upsertProviderRegistry error:`, err);
+		}
+	}
+
+	// AC2: Set status='paused' on graceful shutdown so fn_claim_work_offer stops routing to this agency.
+	private async pauseProviderRegistry(): Promise<void> {
+		try {
+			await this.queryFn(
+				`UPDATE roadmap_workforce.provider_registry
+				 SET status = 'paused', updated_at = now()
+				 WHERE agency_identity = $1`,
+				[this.agentIdentity],
+			);
+		} catch (err) {
+			this.logger.error(`[OfferProvider] pauseProviderRegistry error:`, err);
 		}
 	}
 
