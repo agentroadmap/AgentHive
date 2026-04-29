@@ -10,6 +10,11 @@
 import { query, getPool } from "../../../../postgres/pool.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
+import {
+	agentNotifyChannel,
+	checkMessageACL,
+} from "../../../../infra/messaging/a2a-access-control.ts";
+import type { A2ANotification } from "../../../../infra/messaging/a2a-types.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
@@ -27,46 +32,46 @@ function firstText(result: CallToolResult): string | undefined {
 	return first?.type === "text" ? first.text : undefined;
 }
 
-/**
- * Notification payload from the fn_notify_new_message trigger.
- */
-export interface NewMessageNotification {
-	message_id: number;
-	from_agent: string;
-	to_agent: string | null;
-	channel: string;
-	message_type: string;
-	proposal_id: number | null;
-	created_at: string;
-}
+/** @deprecated Use A2ANotification from a2a-types.ts instead. */
+export type NewMessageNotification = A2ANotification;
 
 /**
- * Listener for pg_notify 'new_message' channel.
- * Provides blocking wait for new messages with timeout fallback.
+ * P199: Listener for a specific agent's dedicated pg_notify channel.
+ *
+ * Replaces the old 'new_message' broadcast listener with a per-agent
+ * channel (agent_msg_<sanitized_identity>) so that each agent only
+ * receives notifications addressed to them.
+ *
+ * AC#3: No broadcast fallback — the trigger no longer fires on 'new_message'.
  */
 export class MessageNotificationListener {
 	private listenerClient: any = null;
 	private started = false;
+	private readonly pgChannel: string;
 
 	/**
-	 * Start listening for new_message notifications.
-	 * Requires a dedicated client connection (pg LISTEN requires persistent connection).
+	 * @param agentIdentity - The agent identity to listen for.
+	 *   Converted to a safe pg_notify channel name via agentNotifyChannel().
+	 *   Falls back to legacy 'new_message' when omitted (deprecated).
 	 */
+	constructor(agentIdentity?: string) {
+		this.pgChannel = agentIdentity
+			? agentNotifyChannel(agentIdentity)
+			: "new_message"; // legacy fallback — only used if caller passes no identity
+	}
+
 	async start(): Promise<void> {
 		if (this.started) return;
 		const pool = getPool();
 		this.listenerClient = await pool.connect();
-		await this.listenerClient.query("LISTEN new_message");
+		await this.listenerClient.query(`LISTEN "${this.pgChannel}"`);
 		this.started = true;
 	}
 
-	/**
-	 * Stop listening and release the connection.
-	 */
 	async stop(): Promise<void> {
 		if (!this.started || !this.listenerClient) return;
 		try {
-			await this.listenerClient.query("UNLISTEN new_message");
+			await this.listenerClient.query(`UNLISTEN "${this.pgChannel}"`);
 		} catch {
 			// ignore cleanup errors
 		}
@@ -76,10 +81,10 @@ export class MessageNotificationListener {
 	}
 
 	/**
-	 * Wait for a new_message notification with timeout.
-	 * Returns the notification payload if received within waitMs, or null on timeout.
+	 * Wait for a notification on this agent's channel with timeout.
+	 * Returns the parsed A2ANotification payload or null on timeout.
 	 */
-	async waitForMessage(waitMs: number): Promise<NewMessageNotification | null> {
+	async waitForMessage(waitMs: number): Promise<A2ANotification | null> {
 		if (!this.started || !this.listenerClient) {
 			await this.start();
 		}
@@ -96,7 +101,7 @@ export class MessageNotificationListener {
 			}, waitMs);
 
 			const handler = (msg: any) => {
-				if (msg.channel === "new_message" && !resolved) {
+				if (msg.channel === this.pgChannel && !resolved) {
 					resolved = true;
 					clearTimeout(timeout);
 					this.listenerClient?.removeListener("notification", handler);
@@ -250,10 +255,30 @@ export class PgMessagingHandlers {
 		proposal_id?: string;
 	}): Promise<CallToolResult> {
 		try {
+			// AC#2: Enforce ACL before inserting. DMs require an explicit grant;
+			// channel posts require a channel_post grant.
+			const grantType = args.to_agent ? "dm" : "channel_post";
+			const aclResult = await checkMessageACL(
+				args.from_agent,
+				args.to_agent ?? null,
+				grantType,
+			);
+			if (!aclResult.allowed) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `⛔ Delivery denied (AC#2): ${aclResult.reason}`,
+						},
+					],
+				};
+			}
+
 			const { rows } = await query(
-				`INSERT INTO message_ledger (from_agent, to_agent, channel, message_content, message_type, proposal_id)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id, created_at`,
+				`INSERT INTO roadmap.message_ledger
+                    (from_agent, to_agent, channel, message_content, message_type, proposal_id)
+                 VALUES ($1, $2, $3, $4, $5, $6)
+                 RETURNING id, nonce, created_at`,
 				[
 					args.from_agent,
 					args.to_agent || null,
@@ -267,7 +292,7 @@ export class PgMessagingHandlers {
 				content: [
 					{
 						type: "text",
-						text: `Message sent (id: ${rows[0].id}) at ${rows[0].created_at}`,
+						text: `Message sent (id: ${rows[0].id}, nonce: ${rows[0].nonce}) at ${rows[0].created_at}`,
 					},
 				],
 			};
@@ -360,8 +385,8 @@ export class PgMessagingHandlers {
 				const existing = await this.fetchMessages(args);
 
 				if (firstText(existing) === "No messages found.") {
-					// No messages — wait for pg_notify
-					const listener = new MessageNotificationListener();
+					// No messages — wait for pg_notify on this agent's dedicated channel (AC#3)
+					const listener = new MessageNotificationListener(args.agent);
 					try {
 						const notification = await listener.waitForMessage(waitMs);
 						if (notification) {
