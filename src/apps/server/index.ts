@@ -140,6 +140,7 @@ export class RoadmapServer {
 	private mcpServer: McpServer | null = null;
 	private sseTransports = new Map<string, SSEServerTransport>();
 	private relayService: RelayService | null = null;
+	private startedAt: string | null = null;
 
 	constructor(projectPath: string) {
 		this.core = new Core(projectPath, { enableWatchers: true });
@@ -529,6 +530,7 @@ export class RoadmapServer {
 			console.log("Server already running");
 			return;
 		}
+		this.startedAt = new Date().toISOString();
 		// Load config (migration is handled globally by CLI)
 		const config = await this.core.filesystem.loadConfig();
 
@@ -853,6 +855,12 @@ export class RoadmapServer {
 		) {
 			return await this.handleDirectMcp(req);
 		}
+
+		// Health and smoke-test endpoints (no /api/ prefix — callable before MCP init)
+		if (pathname === "/healthz" && method === "GET")
+			return await this.handleHealthz();
+		if (pathname === "/smoke" && method === "POST")
+			return await this.handleSmoke();
 
 		// API Routes
 		if (pathname.startsWith("/api/")) {
@@ -2299,6 +2307,134 @@ export class RoadmapServer {
 				projectPath: this.core.filesystem.rootDir,
 			});
 		}
+	}
+
+	private async handleHealthz(): Promise<Response> {
+		const { getRevision, getVersion } = await import("../../shared/utils/version.ts");
+		const [gitRevision, appVersion] = await Promise.all([
+			getRevision().catch(() => null),
+			getVersion().catch(() => "0.0.0"),
+		]);
+
+		// DB health check — never throws, surface result in response
+		let dbStatus: "ok" | "error" = "error";
+		let dbError: string | undefined;
+		let schemaVersion: string | null = null;
+		let dbHost: string | null = null;
+		let dbName: string | null = null;
+		let schema: string | null = null;
+
+		dbHost = process.env.PGHOST ?? "127.0.0.1";
+		dbName = process.env.PGDATABASE ?? "agenthive";
+		schema = process.env.PG_SCHEMA ?? null;
+
+		try {
+			const { query: pgQuery } = await import("../../infra/postgres/pool.ts");
+			await pgQuery("SELECT 1");
+			dbStatus = "ok";
+			// Try to get schema version from schema_info table
+			try {
+				const res = await pgQuery<{ schema_version: string }>(
+					"SELECT schema_version FROM roadmap.schema_info ORDER BY id DESC LIMIT 1",
+				);
+				schemaVersion = res.rows[0]?.schema_version ?? null;
+			} catch {
+				// schema_info absent or empty — not fatal
+			}
+		} catch (err) {
+			dbStatus = "error";
+			dbError = err instanceof Error ? err.message : String(err);
+		}
+
+		const body: Record<string, unknown> = {
+			service: "ok",
+			db: dbStatus,
+			schema_version: schemaVersion,
+			git_revision: gitRevision,
+			app_version: appVersion,
+			project_root: this.core.filesystem.rootDir,
+			db_host: dbHost,
+			db_name: dbName,
+			schema,
+			started_at: this.startedAt,
+			mcp_protocol_version: "2024-11-05",
+		};
+		if (dbError !== undefined) {
+			body.db_error = dbError;
+		}
+
+		return Response.json(body, { status: 200 });
+	}
+
+	private async handleSmoke(): Promise<Response> {
+		if (!this.mcpServer) {
+			return Response.json(
+				{ error: "MCP server not initialised" },
+				{ status: 503 },
+			);
+		}
+
+		const { handleDirectMcpRequest: direct } = await import(
+			"../mcp-server/http-compat.ts"
+		);
+
+		type SmokeStep = { name: string; elapsed_ms: number; result: "ok" | "error"; error?: string };
+		const steps: SmokeStep[] = [];
+		const overallStart = Date.now();
+
+		const run = async (
+			name: string,
+			payload: unknown,
+		): Promise<void> => {
+			const t0 = Date.now();
+			try {
+				const res = await direct(this.mcpServer!, payload);
+				const elapsed_ms = Date.now() - t0;
+				if (res.status >= 400 && "error" in res.body) {
+					steps.push({
+						name,
+						elapsed_ms,
+						result: "error",
+						error: String((res.body as any).error?.message ?? res.status),
+					});
+				} else {
+					steps.push({ name, elapsed_ms, result: "ok" });
+				}
+			} catch (err) {
+				steps.push({
+					name,
+					elapsed_ms: Date.now() - t0,
+					result: "error",
+					error: err instanceof Error ? err.message : String(err),
+				});
+			}
+		};
+
+		await run("initialize", {
+			jsonrpc: "2.0",
+			id: 1,
+			method: "initialize",
+			params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "smoke", version: "0" } },
+		});
+
+		await run("tools/list", {
+			jsonrpc: "2.0",
+			id: 2,
+			method: "tools/list",
+			params: {},
+		});
+
+		await run("tools/call", {
+			jsonrpc: "2.0",
+			id: 3,
+			method: "tools/call",
+			params: { name: "mcp_project", arguments: { action: "list_actions" } },
+		});
+
+		return Response.json({
+			steps,
+			total_ms: Date.now() - overallStart,
+		});
 	}
 
 	private async handleInit(req: Request): Promise<Response> {
