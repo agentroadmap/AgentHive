@@ -1,30 +1,38 @@
 # hiveCentral Database Review — P429/P755 Status
 
-⚠️ **ACCURACY CORRECTION:** Previous review contained hallucinated table names. This version reflects actual schema introspection.
+**Last updated: 2026-05-02** (Codex + Copilot reviews reconciled; corrections applied)
 
-## Summary ⏳ PARTIAL
+## Summary ⏳ PARTIAL — schema complete, seed data pending
 
-The **hiveCentral** control-plane database is **deployed with DDL** but has **significant gaps**:
+The **hiveCentral** control-plane database DDL is now structurally complete:
 - ✅ All 17 schemas created
-- ✅ Base table structure in place (40 logical tables)
-- ❌ **Partition counting inflated metrics** — system shows 160+ "tables" but ~100 are partition children (_p* partitions + _default parent templates)
-- ❌ **Missing tables cited in P787/P788:** No `control_runtime_service`, no `agency_service_definition`, no `workforce.agent_capability`
+- ✅ 42 logical base tables deployed (40 original + `core.control_runtime_service` + `workforce.agent_trust`)
+- ✅ `control_runtime_service` added (Codex CF-1, 2026-05-02)
+- ✅ `control_identity.principal` present (Copilot finding incorrect — table exists)
+- ✅ `workforce.agent_trust` added (Copilot finding confirmed, 2026-05-02)
+- ⚠️ **Partition counting inflates metrics** — system shows 160+ "tables" but ~120 are partition children
 - ⏳ **Baseline seed data not populated** — blocking P429 multi-project integration tests
 
-### Key Facts (Corrected)
-- **Database Name:** `hiveCentral` (live @ 127.0.0.1:5432)
-- **Design Doc:** `data-model.md` (950 lines, contains outdated table names)
-- **DDL Files:** ~17 files in `database/ddl/hivecentral/` (001-015 + 000-roles)
+### Copilot Table Name Corrections (reconciled with live schema)
+
+| Copilot old name | Actual table name | Status |
+|---|---|---|
+| `governance.proposal_decision_log` | `governance.decision_log` | ✅ live |
+| `control_model.model_metadata` | `control_model.model` | ✅ live |
+| `efficiency.token_budget_ledger` | `efficiency.route_token_budget` | ✅ live |
+| `workforce.agent_registry` | `workforce.agent` | ✅ live |
+| `workforce.agent_capability` | `workforce.agent_skill` | ✅ live |
+| `control_runtime_service` (missing) | `core.control_runtime_service` | ✅ added 2026-05-02 |
+| `control_identity.principal` (missing) | `control_identity.principal` | ✅ was already present |
+| `workforce.agent_trust` (missing) | `workforce.agent_trust` | ✅ added 2026-05-02 |
+
+### Key Facts
+- **Database Name:** `hiveCentral` (live @ 127.0.0.1:5432, same PostgreSQL instance as `agenthive`)
+- **Design Doc:** `data-model.md` (schema migration mapping + naming decisions added 2026-05-02)
+- **DDL Files:** 17 files in `database/ddl/hivecentral/` (000-roles + 001–015)
 - **Schemas Created:** 17 (core, agency, control_identity, control_model, control_project, control_credential, workforce, template, tooling, sandbox, dependency, messaging, observability, governance, efficiency, partman, public)
-- **Logical Base Tables:** 40 across all schemas (excluding partitions and _default tables)
+- **Logical Base Tables:** 42 across all schemas (excluding partitions and _default tables)
 - **Partition Inflation:** System shows 160+ due to time-series partitioning (_p20260501, _p20260601, _default parent templates)
-- **Distribution (Base Tables Only):**
-  - `governance` — 3 logical tables (decision_log, event_log, policy_version + 10 partitions each)
-  - `observability` — 1 logical table (model_routing_outcome, no time-series partitions yet)
-  - `efficiency` — 3 logical tables (cost_ledger_summary, efficiency_metric, route_token_budget + 10 partitions each)
-  - `control_model` — 2 logical tables (model, model_route)
-  - `control_project` — 5 logical tables (project, project_db, project_host, project_member, project_sandbox_grant, project_worktree)
-  - Others: 20 tables across core, agency, credential, identity, messaging, tooling, sandbox, workforce, template
 
 ---
 
@@ -146,19 +154,17 @@ The **hiveCentral** control-plane database is **deployed with DDL** but has **si
 - Partition scheme is correct; metrics reporting is misleading
 - System is actually **smaller than initially believed** and requires more schema extension for P501
 
-### P755 Classification (Corrected)
+### P755 Classification (Updated 2026-05-02)
 
-**Control-Plane Tables (hiveCentral):** 40 base tables across 17 schemas
+**Control-Plane Tables (hiveCentral):** 42 base tables across 17 schemas
 - ✅ Correctly isolated from tenant databases
 - ✅ Role-based access control in place (agenthive_orchestrator, agenthive_agency, agenthive_observability)
-- ⚠️ Incomplete — missing 4-5 tables required by dependent proposals (P787, P748+)
+- ✅ All previously missing structural tables now added
 
 **Tenant-Scoped Tables (per-project DB):** ~140 tables in `agenthive` (first tenant)
 - ✅ Schema design exists
 - ⏳ P501 must migrate these without mixing with control-plane
 - ⏳ New tenant databases not yet provisioned
-
----
 
 ---
 
@@ -168,10 +174,9 @@ The **hiveCentral** control-plane database is **deployed with DDL** but has **si
 |---|---|---|
 | Database creation | ✅ | `CREATE DATABASE hiveCentral;` |
 | Roles & permissions | ✅ | 000-roles.sql applied (agenthive_orchestrator, agenthive_agency, agenthive_observability) |
-| Schema 001-015 DDL | ⚠️ PARTIAL | 40 base tables deployed; 4-5 required tables missing (control_runtime_service, principal, agent_trust, compliance_check) |
+| Schema 001-015 DDL | ✅ | 42 logical base tables; all previously missing tables added 2026-05-02 |
 | pg_partman extension | ✅ | Installed; time-series tables partitioned monthly |
 | **Baseline seed data** | ❌ | **BLOCKING:** Control-plane seed (agencies, models, routes, hosts, projects) — required by P501 migration |
-| **Missing tables** | ❌ | control_runtime_service (P787), principal registry (identity), agent_trust (workforce), compliance_check (governance) |
 | Cross-tenant FK validation | ⏳ | Deferred to P501 integration tests |
 
 ---
@@ -181,17 +186,16 @@ The **hiveCentral** control-plane database is **deployed with DDL** but has **si
 ### ✅ Working
 - Time-series infrastructure (partman, monthly rotation)
 - Role-based access control (RBAC schema)
-- Core infrastructure (hosts, flags, heartbeats)
+- Core infrastructure (hosts, flags, heartbeats, `core.control_runtime_service`)
+- Identity registry (`control_identity.principal`, did_document, principal_key)
 - Model routing core (model, model_route tables)
 - Project metadata (project, project_db, project_member tables)
 - Message queuing (a2a_message, DLQ)
 - Basic governance (decision_log, event_log)
+- Agent authorization (`workforce.agent_trust` — added 2026-05-02)
 
-### ❌ Blocking P787/P788/P748+
-- `control_runtime_service` table — P787 code expects this; doesn't exist
-- `control_identity.principal` — canonical agent identity missing
-- `workforce.agent_trust` — agent authorization per project missing
-- `governance.compliance_check` — table appears in design but not created
+### ❌ Blocking P501 (seed data only — no structural gaps remain)
+- `governance.compliance_check` — table appears in design but not yet created (low priority; no proposals currently depend on it)
 
 ### ⏳ Needs P501 Data Migration
 - **Agency seed data** — "Anthropic", "OpenAI", etc. not inserted

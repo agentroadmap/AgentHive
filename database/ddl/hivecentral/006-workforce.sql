@@ -302,6 +302,70 @@ COMMENT ON VIEW workforce.v_skill_roster IS
   'Full skill grant/revoke/update/expire history per agent. Source: skill_grant_log.';
 
 -- ============================================================
+-- workforce.agent_trust — per-project authorization grants
+-- ============================================================
+-- Determines whether dispatch may assign work to this agent within
+-- a given project scope. Global grants (project_id IS NULL) apply
+-- across all projects. Project-scoped grants are additive.
+-- Scope invariant: global ↔ project_id IS NULL; project ↔ NOT NULL.
+CREATE TABLE workforce.agent_trust (
+  id               BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  agent_id         BIGINT       NOT NULL REFERENCES workforce.agent (id) ON DELETE CASCADE,
+  scope            TEXT         NOT NULL DEFAULT 'project'
+                               CHECK (scope IN ('global','project')),
+  project_id       TEXT,                                   -- tenant slug; NULL when scope='global'
+  trust_level      TEXT         NOT NULL
+                               CHECK (trust_level IN ('observer','contributor','reviewer','gatekeeper','owner')),
+  granted_by       TEXT         NOT NULL,                  -- agent_identity or 'system'
+  granted_at       TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  expires_at       TIMESTAMPTZ,                            -- NULL = permanent
+  revoked_at       TIMESTAMPTZ,
+  revoked_by       TEXT,
+  notes            TEXT,
+  -- Catalog hygiene:
+  owner_did        TEXT         NOT NULL,
+  lifecycle_status TEXT         NOT NULL DEFAULT 'active'
+                               CHECK (lifecycle_status IN ('active','deprecated','retired','blocked')),
+  deprecated_at    TIMESTAMPTZ,
+  retire_after     TIMESTAMPTZ,
+  created_at       TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  updated_at       TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  -- Scope invariant
+  CONSTRAINT agent_trust_scope_chk
+    CHECK ((scope = 'global' AND project_id IS NULL) OR (scope = 'project' AND project_id IS NOT NULL)),
+  -- Revocation must name who revoked
+  CONSTRAINT agent_trust_revoke_chk
+    CHECK (revoked_at IS NULL OR revoked_by IS NOT NULL)
+);
+
+-- One active grant per (agent, scope=global) and per (agent, project_id, scope=project)
+CREATE UNIQUE INDEX agent_trust_active_global
+  ON workforce.agent_trust (agent_id)
+  WHERE scope = 'global' AND revoked_at IS NULL AND lifecycle_status = 'active';
+
+CREATE UNIQUE INDEX agent_trust_active_project
+  ON workforce.agent_trust (agent_id, project_id)
+  WHERE scope = 'project' AND revoked_at IS NULL AND lifecycle_status = 'active';
+
+CREATE INDEX agent_trust_project ON workforce.agent_trust (project_id) WHERE revoked_at IS NULL;
+CREATE INDEX agent_trust_agent   ON workforce.agent_trust (agent_id, trust_level);
+
+CREATE OR REPLACE TRIGGER agent_trust_touch_updated_at
+  BEFORE UPDATE ON workforce.agent_trust
+  FOR EACH ROW EXECUTE FUNCTION workforce.touch_updated_at();
+
+COMMENT ON TABLE workforce.agent_trust IS
+  'Authorization grants controlling whether an agent may operate within a project '
+  'scope. scope=global grants apply platform-wide; scope=project grants are '
+  'project-specific. Dispatch checks for an active (non-revoked, non-expired) row '
+  'with the required trust_level before assigning work. One active grant per scope '
+  'target enforced by partial unique indexes.';
+
+COMMENT ON COLUMN workforce.agent_trust.trust_level IS
+  'observer = read-only; contributor = work on proposals; reviewer = peer review; '
+  'gatekeeper = gate decisions; owner = full project control.';
+
+-- ============================================================
 -- Grants (per CONVENTIONS §6 / hivecentral README)
 -- ============================================================
 GRANT USAGE ON SCHEMA workforce TO
@@ -316,3 +380,4 @@ GRANT SELECT ON ALL SEQUENCES IN SCHEMA workforce TO agenthive_orchestrator, age
 GRANT INSERT, UPDATE, DELETE ON workforce.agent_skill   TO agenthive_orchestrator;
 GRANT INSERT, UPDATE         ON workforce.agent_project TO agenthive_orchestrator;
 GRANT INSERT                 ON workforce.skill_grant_log TO agenthive_orchestrator;
+GRANT INSERT, UPDATE         ON workforce.agent_trust   TO agenthive_orchestrator;
