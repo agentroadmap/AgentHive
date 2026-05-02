@@ -937,6 +937,58 @@ The DDL files must be applied in order. Cross-schema FKs create dependencies:
 
 ---
 
+## Schema Migration Mapping
+
+This table is the authoritative bridge-vs-canonical register. Every compatibility migration in `database/migrations/` must reference its hiveCentral target here. Proposals consuming these tables should read this mapping before choosing which table to query.
+
+| Current table (agenthive DB) | hiveCentral target | Migration tag | Notes |
+|---|---|---|---|
+| `roadmap.provider_registry` | `agency.agency_provider` | `move` | Canonical agency providers; seed rows: claude, codex, hermes, copilot |
+| `roadmap_workforce.provider_registry` | `agency.agency` | `move` | Agency instances; replaces `provider_identity` and `agent_provider` |
+| `roadmap.agency_route_policy` (text arrays) | `agency.agency_route_policy` (normalized rows) | `rename+normalize` | P768: text-array design is bridge-only; canonical is one row per (agency_id, route_id) |
+| `roadmap.control_runtime_service` | `core.control_runtime_service` | `bridge-only` | migration 056-p787; canonical table now in hiveCentral core schema |
+| `roadmap.workflow_stages` | `template.state_name` | `rename` | Ordered by `ordinal` (see Naming Decision below); one row per stage per template |
+| `roadmap.gate_criteria` | `template.gate_definition` | `rename` | One gate per (template, from_state); `required_maturity` replaces freeform criteria |
+| `roadmap.agent_role_profile` | `template.agent_role_profile` | `move` | Replaces `STAGE_DISPATCH_ROLES`/`JOB_ROLES`/`GATE_ROLES` literals |
+| `roadmap.model_routes` | `control_model.model_route` | `rename` | `route_provider` column → normalized FK to `agency_provider` |
+| `roadmap.model_metadata` | `control_model.model` | `rename` | `model_metadata` → `model` (shorter canonical name) |
+| `roadmap.host_model_policy` | `control_model.host_model_policy` | `move` | Unchanged semantics; FK now references `core.host` |
+| `roadmap.project` | `control_project.project` | `move` | Gains `db_name` pointer for tenant DB resolution (P501) |
+| `roadmap.principal` | `control_identity.principal` | `move` | Canonical identity; gains `did_document` + `principal_key` sub-tables |
+| `roadmap.credential` | `control_credential.credential` | `move+split` | Splits into `credential` + `credential_grant` |
+| `roadmap.work_offer` | **tenant-stays** | `tenant-stays` | Proposal lifecycle stays in per-project tenant DB |
+| `roadmap.squad_dispatch` | **tenant-stays** | `tenant-stays` | Dispatch records stay in tenant DB; gains explicit `project_id` column |
+| `roadmap.token_budget` | `efficiency.route_token_budget` | `rename` | Lazy-reset hourly window; UNIQUE (project_id, route_id, window_start) |
+| `roadmap.audit_log` | `governance.decision_log` | `rename+harden` | Decision log is hash-chained in hiveCentral; old table is plain append |
+| `roadmap.event_log` | `governance.event_log` | `move` | Event-sourcing spine moves to governance schema |
+
+**Tags:**
+- `move` — content moves to hiveCentral; original table deprecated after P501
+- `rename` — same content, new schema/table name; bridge view provided during cutover
+- `rename+normalize` — name changes AND schema becomes more normalized (e.g. array → rows)
+- `split` — one table becomes two or more
+- `bridge-only` — migration table is temporary; canonical already in hiveCentral; no content to migrate
+- `tenant-stays` — table belongs in per-project tenant DB; not moving to hiveCentral
+
+---
+
+## Naming Decision: `state_name` vs `workflow_stage`
+
+**Decision: `template.state_name` is canonical.** `roadmap.workflow_stages` maps to it during P501 cutover.
+
+| Attribute | `template.state_name` (canonical) | `roadmap.workflow_stages` (bridge) |
+|---|---|---|
+| DB | hiveCentral | agenthive (tenant) |
+| Ordering | `ordinal SMALLINT NOT NULL` | `stage_order INT` |
+| Scope | Per `workflow_template` (data-driven) | Global (hardcoded to single workflow) |
+| Stage list | Runtime rows — no hardcoded list in code | Seeded at migration time |
+
+**Invariant:** No code hardcodes workflow stage lists. The orchestrator renders and routes exclusively from DB rows ordered by `ordinal`. Any code referencing literal stage names (`'DRAFT'`, `'REVIEW'`, `'DEVELOP'`, `'MERGE'`, `'COMPLETE'`) must resolve them by querying `template.state_name WHERE template_id = <current_template_id> ORDER BY ordinal`.
+
+**P706/P780 alignment:** `roadmap.workflow_stages` used in P706/P780 work maps as: `name → state_name.name`, `stage_order → state_name.ordinal`. No semantic difference — field rename only.
+
+---
+
 ## Conclusion
 
 hiveCentral is a comprehensive, immutable control-plane database that unifies proposal lifecycle orchestration, workforce governance, model routing, cost attribution, and policy enforcement. Its schema design emphasizes:

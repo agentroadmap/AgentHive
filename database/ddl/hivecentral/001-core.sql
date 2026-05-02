@@ -226,6 +226,75 @@ COMMENT ON TABLE core.service_heartbeat IS
   'detection. Also fed to systemd sd_notify so monitoring works even when PG is unreachable.';
 
 -- ============================================================
+-- core.control_runtime_service — canonical runtime endpoint registry
+-- ============================================================
+-- Codex finding CF-1: bridge table roadmap.control_runtime_service
+-- (migration 056-p787) is a temporary compatibility shim. This is the
+-- canonical hiveCentral home. Runtime readers resolve: env → this table
+-- → hard fail. When P501 cutover lands, update endpoints.ts to query
+-- here instead of agenthive.roadmap.control_runtime_service.
+CREATE TABLE IF NOT EXISTS core.control_runtime_service (
+  id           BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  service_key  TEXT         NOT NULL UNIQUE,             -- 'mcp', 'daemon', etc.
+  url          TEXT         NOT NULL,                    -- canonical endpoint URL
+  host_id      BIGINT       NULL REFERENCES core.host (host_id) ON DELETE SET NULL,
+  port         INT,                                      -- extracted port for convenience
+  protocol     TEXT         NOT NULL DEFAULT 'http'
+                            CHECK (protocol IN ('http','https','grpc','sse')),
+  -- Catalog hygiene:
+  owner_did    TEXT,
+  lifecycle_status TEXT     NOT NULL DEFAULT 'active'
+                            CHECK (lifecycle_status IN ('active','deprecated','retired','blocked')),
+  deprecated_at  TIMESTAMPTZ,
+  retire_after   TIMESTAMPTZ,
+  notes          TEXT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS control_runtime_service_active
+  ON core.control_runtime_service (service_key)
+  WHERE lifecycle_status = 'active';
+
+CREATE OR REPLACE TRIGGER set_updated_at_control_runtime_service
+  BEFORE UPDATE ON core.control_runtime_service
+  FOR EACH ROW EXECUTE FUNCTION core.set_updated_at();
+
+-- NOTIFY on change so services can flush their endpoint cache.
+-- Paired with invalidateEndpointCache() in src/shared/runtime/endpoints.ts.
+CREATE OR REPLACE FUNCTION core.notify_runtime_endpoint_change()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM pg_notify(
+    'runtime_endpoint_changed',
+    json_build_object(
+      'service_key', COALESCE(NEW.service_key, OLD.service_key),
+      'url',         CASE WHEN TG_OP = 'DELETE' THEN NULL ELSE NEW.url END,
+      'op',          TG_OP
+    )::text
+  );
+  RETURN COALESCE(NEW, OLD);
+END;
+$$;
+
+CREATE OR REPLACE TRIGGER control_runtime_service_change_notify
+  AFTER INSERT OR UPDATE OR DELETE ON core.control_runtime_service
+  FOR EACH ROW EXECUTE FUNCTION core.notify_runtime_endpoint_change();
+
+COMMENT ON TABLE core.control_runtime_service IS
+  'Canonical runtime endpoint registry. Replaces agenthive.roadmap.control_runtime_service '
+  '(migration 056-p787) once P501 cutover lands. service_key values: mcp, daemon. '
+  'Runtime resolution order: env var → this table (lifecycle_status=active) → hard fail. '
+  'Emits pg_notify(runtime_endpoint_changed) on every change for cache invalidation.';
+
+-- Seed: standard service keys (idempotent)
+INSERT INTO core.control_runtime_service (service_key, url, protocol, owner_did)
+VALUES
+  ('mcp',    'http://127.0.0.1:6421/sse', 'sse',  'did:agenthive:system'),
+  ('daemon', 'http://127.0.0.1:3000',     'http', 'did:agenthive:system')
+ON CONFLICT (service_key) DO NOTHING;
+
+-- ============================================================
 -- Views for common queries
 -- ============================================================
 CREATE OR REPLACE VIEW core.v_active_hosts AS
@@ -265,6 +334,7 @@ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'agenthive_orchestrator') THEN
     GRANT USAGE ON SCHEMA core TO agenthive_orchestrator;
     GRANT SELECT, INSERT, UPDATE ON core.runtime_flag, core.service_heartbeat TO agenthive_orchestrator;
+    GRANT SELECT, INSERT, UPDATE ON core.control_runtime_service TO agenthive_orchestrator;
     GRANT SELECT ON core.host, core.os_user, core.installation TO agenthive_orchestrator;
     GRANT SELECT ON core.v_active_hosts, core.v_service_health TO agenthive_orchestrator;
   END IF;
@@ -276,13 +346,13 @@ BEGIN
 
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'agenthive_agency') THEN
     GRANT USAGE ON SCHEMA core TO agenthive_agency;
-    GRANT SELECT ON core.runtime_flag, core.host, core.os_user TO agenthive_agency;
+    GRANT SELECT ON core.runtime_flag, core.host, core.os_user, core.control_runtime_service TO agenthive_agency;
     GRANT INSERT, UPDATE ON core.service_heartbeat TO agenthive_agency;
   END IF;
 
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'agenthive_a2a') THEN
     GRANT USAGE ON SCHEMA core TO agenthive_a2a;
-    GRANT SELECT ON core.runtime_flag TO agenthive_a2a;
+    GRANT SELECT ON core.runtime_flag, core.control_runtime_service TO agenthive_a2a;
     GRANT INSERT, UPDATE ON core.service_heartbeat TO agenthive_a2a;
   END IF;
 END $$;

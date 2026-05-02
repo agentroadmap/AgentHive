@@ -143,6 +143,9 @@ let _cachePopulated = false;
 
 async function _populateCache(): Promise<void> {
 	try {
+		// Bridge: queries agenthive.roadmap.control_runtime_service (migration 056-p787).
+		// Canonical target: hiveCentral core.control_runtime_service (001-core.sql).
+		// TODO(P501): switch to hiveCentral query after control-plane cutover.
 		const result = await query(
 			`SELECT service_key, url FROM roadmap.control_runtime_service WHERE is_active = true`,
 		);
