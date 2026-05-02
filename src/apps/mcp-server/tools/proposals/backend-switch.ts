@@ -350,6 +350,26 @@ export function registerProposalTools(
 		},
 		handler: (args: any) => handlers.deleteProposal(args),
 	});
+	server.addTool({
+		name: "prop_history",
+		description:
+			"Get the version history of a proposal — who changed what and when. Returns versions newest-first.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				id: {
+					type: "string",
+					description: "Proposal display_id or numeric id (e.g. P190)",
+				},
+				limit: {
+					type: "number",
+					description: "Max versions to return (default 50)",
+				},
+			},
+			required: ["id"],
+		},
+		handler: (args: any) => handlers.getVersions(args),
+	});
 	console.error("[MCP] Using Postgres proposal handlers (AgentHive)");
 	server.addTool({
 		name: "prop_get_projection",

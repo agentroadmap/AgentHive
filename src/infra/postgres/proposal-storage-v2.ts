@@ -405,10 +405,14 @@ export async function listProposalTypes(): Promise<ProposalTypeConfigRow[]> {
 
 /**
  * Update proposal fields (non-status).
+ * Version history is captured by trg_proposal_version (DB trigger) for all
+ * write paths.  When actor is supplied it is passed via SET LOCAL so the
+ * trigger records it; otherwise the trigger falls back to current_user.
  */
 export async function updateProposal(
 	id: number,
 	updates: Partial<Omit<ProposalCreateInput, "status">>,
+	actor?: string,
 ): Promise<ProposalRow | null> {
 	const setClauses: string[] = [];
 	const params: any[] = [];
@@ -434,13 +438,26 @@ export async function updateProposal(
 	setClauses.push(`modified_at = NOW()`);
 	params.push(id);
 
-	const { rows } = await query<ProposalRow>(
-		`UPDATE roadmap_proposal.proposal SET ${setClauses.join(", ")}
-     WHERE id = $${idx}
-     RETURNING ${PROPOSAL_COLUMNS}`,
-		params,
-	);
-	return rows[0] ?? null;
+	const client = await getPool().connect();
+	try {
+		await client.query("BEGIN");
+		if (actor) {
+			await client.query(`SELECT set_config('app.current_actor', $1, true)`, [actor]);
+		}
+		const { rows } = await client.query<ProposalRow>(
+			`UPDATE roadmap_proposal.proposal SET ${setClauses.join(", ")}
+       WHERE id = $${idx}
+       RETURNING ${PROPOSAL_COLUMNS}`,
+			params,
+		);
+		await client.query("COMMIT");
+		return rows[0] ?? null;
+	} catch (err) {
+		await client.query("ROLLBACK");
+		throw err;
+	} finally {
+		client.release();
+	}
 }
 
 /**
@@ -964,7 +981,7 @@ export async function proposalSummary(): Promise<
 /**
  * Get proposal versions.
  */
-export async function getProposalVersions(identifier: string | number) {
+export async function getProposalVersions(identifier: string | number, limit = 50) {
 	const proposalId = await resolveProposalId(identifier);
 	if (proposalId === null) {
 		return [];
@@ -973,8 +990,9 @@ export async function getProposalVersions(identifier: string | number) {
 	const { rows } = await query(
 		`SELECT * FROM roadmap_proposal.proposal_version
      WHERE proposal_id = $1
-     ORDER BY version_number ASC`,
-		[proposalId],
+     ORDER BY version_number DESC
+     LIMIT $2`,
+		[proposalId, limit],
 	);
 	return rows;
 }

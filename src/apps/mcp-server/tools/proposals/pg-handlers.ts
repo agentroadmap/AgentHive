@@ -354,7 +354,7 @@ export class PgProposalHandlers {
 
 			let updated =
 				Object.keys(updates).length > 0
-					? await pg.updateProposal(id, updates)
+					? await pg.updateProposal(id, updates, args.author ?? "unknown")
 					: await pg.getProposal(id);
 			if (args.status) {
 				updated = await pg.transitionProposal(
@@ -750,9 +750,9 @@ export class PgProposalHandlers {
 		}
 	}
 
-	async getVersions(args: { id: string }): Promise<CallToolResult> {
+	async getVersions(args: { id: string; limit?: number }): Promise<CallToolResult> {
 		try {
-			const versions = await pg.getProposalVersions(args.id);
+			const versions = await pg.getProposalVersions(args.id, args.limit ?? 50);
 			if (!versions || versions.length === 0) {
 				return {
 					content: [
