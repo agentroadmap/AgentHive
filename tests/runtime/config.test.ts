@@ -270,6 +270,12 @@ describe("Config Resolver (P474)", () => {
 		});
 
 		it("should handle database connection params", async () => {
+			// Explicitly delete env vars to test yaml fallback
+			delete process.env.PGHOST;
+			delete process.env.PGPORT;
+			delete process.env.PGDATABASE;
+			delete process.env.PGUSER;
+
 			await initConfig({
 				yamlConfig: {
 					database: {
