@@ -270,7 +270,7 @@ export class MapProjection {
 			const rows = db
 				.prepare(`
 				SELECT id, title, status, assignee, priority, directive, labels, dependencies
-				FROM proposals
+				FROM roadmap.proposals
 				ORDER BY id
 			`)
 				.all() as unknown as ProposalRow[];
