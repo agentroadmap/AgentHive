@@ -6,25 +6,23 @@
  * rows that already exist while the orchestrator handles proposal_gate_ready.
  */
 
-import { getMcpUrl, getDaemonUrl } from "../../shared/runtime/endpoints.ts";
 import { basename } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { sendLiaisonPoke } from "../../infra/agency/liaison-message-service.ts";
 import { getPool, query } from "../../infra/postgres/pool.ts";
+import { getMcpUrlAsync } from "../../shared/runtime/endpoints.ts";
 import {
 	type AgentProfile,
-	scoreProposal,
 	type ScorableProposal,
+	scoreProposal,
 } from "../orchestration/pickup-scorer.ts";
-import { RfcStates, isTerminal } from "../workflow/state-names.ts";
+import { RfcStates } from "../workflow/state-names.ts";
 import {
 	bootCancelPokeAttempts,
 	runOfferReaper as sharedRunOfferReaper,
 	runPokeWatchdogTick as sharedRunPokeWatchdogTick,
 } from "../orchestration/maintenance.ts";
-
-// TODO(P787): convert to getMcpUrlAsync when caller can be async
-const MCP_URL = process.env.MCP_URL || getMcpUrl();
 
 const MATURITY_CHANGED_CHANNEL = "proposal_maturity_changed";
 const TRANSITION_QUEUED_CHANNEL = "transition_queued";
@@ -678,7 +676,7 @@ function buildDispatchPlan(
 export class PipelineCron {
 	private readonly queryFn: typeof query;
 	private readonly connectListener: () => Promise<ListenerClient>;
-	private readonly mcpUrl: string;
+	private mcpUrl: string | null;
 	private readonly logger: Logger;
 	private readonly defaultWorktree: string;
 	private readonly pollIntervalMs: number;
@@ -726,7 +724,7 @@ export class PipelineCron {
 		this.queryFn = deps.queryFn ?? query;
 		this.connectListener =
 			deps.connectListener ?? (async () => getPool().connect());
-		this.mcpUrl = deps.mcpUrl ?? MCP_URL;
+		this.mcpUrl = deps.mcpUrl ?? null;
 		this.logger = deps.logger ?? console;
 		this.defaultWorktree = deps.defaultWorktree ?? basename(process.cwd());
 		this.pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
@@ -770,6 +768,7 @@ export class PipelineCron {
 		}
 
 		this.started = true;
+		this.mcpUrl ??= process.env.MCP_URL || (await getMcpUrlAsync());
 		await this.runBootCancelPass();
 		await this.startListener();
 
@@ -1027,7 +1026,9 @@ export class PipelineCron {
 			return;
 		}
 
-		const client = this.mcpClientFactory(this.mcpUrl);
+		const client = this.mcpClientFactory(
+			this.mcpUrl ?? process.env.MCP_URL ?? (await getMcpUrlAsync()),
+		);
 
 		try {
 			const proposalDisplayId =

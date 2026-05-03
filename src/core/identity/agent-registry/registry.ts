@@ -13,11 +13,13 @@
  *   created_at      — registration timestamp
  */
 
-import { getMcpUrl, getDaemonUrl, getMcpUrlAsync } from "../../../shared/runtime/endpoints.ts";
-
 import { randomUUID } from "node:crypto";
 import { query } from "../../../infra/postgres/pool.ts";
-import { AUTHORITY_IDENTITIES, type TrustTier } from "../../../infra/trust/trust-model.ts";
+import {
+	AUTHORITY_IDENTITIES,
+	type TrustTier,
+} from "../../../infra/trust/trust-model.ts";
+import { getMcpUrlAsync } from "../../../shared/runtime/endpoints.ts";
 import type {
 	AgentRegistration,
 	DeregisterRequest,
@@ -25,7 +27,22 @@ import type {
 	RegistrationResponse,
 } from "./types.ts";
 
-// MCP_URL now resolved at runtime via getMcpUrl()
+// MCP_URL now resolved at runtime via getMcpUrlAsync()
+
+type AgentRegistryRow = {
+	agent_identity: string;
+	agent_type: AgentRegistration["agentType"] | null;
+	role: string | null;
+	skills: {
+		agentId?: string;
+		capabilities?: string[];
+		channel?: string;
+		lastSeen?: string;
+		currentTask?: string;
+	} | null;
+	status: AgentRegistration["status"] | null;
+	created_at: Date | string;
+};
 
 /** Generate unique suffix for contract agents */
 function uniqueSuffix(): string {
@@ -53,7 +70,7 @@ function defaultTrustTier(agentId: string, agentType: string): TrustTier {
 	// Check authority identities (orchestrator-agent, gary, system)
 	if (AUTHORITY_IDENTITIES.has(agentId)) return "authority";
 	for (const auth of AUTHORITY_IDENTITIES) {
-		if (agentId.startsWith(auth + "/") || agentId.startsWith(auth + "-")) {
+		if (agentId.startsWith(`${auth}/`) || agentId.startsWith(`${auth}-`)) {
 			return "authority";
 		}
 	}
@@ -70,12 +87,12 @@ function defaultTrustTier(agentId: string, agentType: string): TrustTier {
 }
 
 /** Map a DB row to AgentRegistration */
-function hydrate(row: any): AgentRegistration {
+function hydrate(row: AgentRegistryRow): AgentRegistration {
 	const skills = row.skills ?? {};
 	return {
 		agentId: skills.agentId ?? row.agent_identity,
 		instanceId: row.agent_identity,
-		agentType: row.agent_type ?? "contract",
+		agentType: row.agent_type === "permanent" ? "permanent" : "contract",
 		role: row.role ?? undefined,
 		capabilities: skills.capabilities ?? [],
 		channel: skills.channel ?? agentChannel(row.agent_identity),

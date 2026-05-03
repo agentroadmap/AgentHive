@@ -1,19 +1,23 @@
 /**
  * Central URL resolution for MCP and daemon endpoints.
  *
- * Sync resolution order (getMcpUrl / getDaemonUrl):
- * 1. Environment variable (AGENTHIVE_MCP_URL, AGENTHIVE_DAEMON_URL)
- * 2. Hard fail with AgentHiveConfigError (no literal default)
- *
- * Async resolution order (getMcpUrlAsync / getDaemonUrlAsync) — P787:
- * 1. Environment variable (MCP_URL / DAEMON_URL)
- * 2. roadmap.control_runtime_service DB row
- * 3. Hard fail with Error if unresolvable
- *
- * Async values are cached per process; call invalidateEndpointCache() to flush.
+ * Synchronous helpers preserve legacy env-only behavior for callers that cannot
+ * await. Async helpers resolve from the control runtime registry after env
+ * overrides and cache DB values until runtime_endpoint_changed is received.
  */
 
-import { query } from "../../infra/postgres/pool.ts";
+import type { PoolClient, QueryResult } from "pg";
+import { getPool, query as pgQuery } from "../../infra/postgres/pool.ts";
+
+type RuntimeServiceName = "mcp" | "daemon";
+type RuntimeQueryFn = (
+	text: string,
+	params?: unknown[],
+) => Promise<
+	QueryResult<{ endpoint_url?: string | null; url?: string | null }>
+>;
+type RuntimeListenerClient = Pick<PoolClient, "query" | "on" | "release">;
+type RuntimeConnectListener = () => Promise<RuntimeListenerClient>;
 
 export class AgentHiveConfigError extends Error {
 	constructor(message: string) {
@@ -23,95 +27,175 @@ export class AgentHiveConfigError extends Error {
 	}
 }
 
-/**
- * Cache for resolved endpoint URLs
- */
 let mcpUrlCache: string | null = null;
 let daemonUrlCache: string | null = null;
+let listenerStarted = false;
+let listenerClient: RuntimeListenerClient | null = null;
+
+let runtimeQueryFn: RuntimeQueryFn = pgQuery as RuntimeQueryFn;
+let runtimeConnectListener: RuntimeConnectListener = async () =>
+	getPool().connect();
+
+const SERVICE_ENV: Record<RuntimeServiceName, string[]> = {
+	mcp: ["MCP_URL", "AGENTHIVE_MCP_URL"],
+	daemon: ["DAEMON_URL", "AGENTHIVE_DAEMON_URL"],
+};
+
+const SERVICE_LABEL: Record<RuntimeServiceName, string> = {
+	mcp: "MCP",
+	daemon: "Daemon",
+};
+
+function getCache(serviceName: RuntimeServiceName): string | null {
+	return serviceName === "mcp" ? mcpUrlCache : daemonUrlCache;
+}
+
+function setCache(serviceName: RuntimeServiceName, value: string): void {
+	if (serviceName === "mcp") {
+		mcpUrlCache = value;
+	} else {
+		daemonUrlCache = value;
+	}
+}
+
+function envEndpoint(serviceName: RuntimeServiceName): string | null {
+	for (const envName of SERVICE_ENV[serviceName]) {
+		const value = process.env[envName]?.trim();
+		if (value && value.length > 0) return value;
+	}
+	return null;
+}
+
+function missingEndpointError(
+	serviceName: RuntimeServiceName,
+	cause?: unknown,
+): AgentHiveConfigError {
+	const label = SERVICE_LABEL[serviceName];
+	const suffix =
+		cause instanceof Error && cause.message
+			? ` DB lookup failed: ${cause.message}`
+			: "";
+	return new AgentHiveConfigError(
+		`${label} URL not configured. Set ${SERVICE_ENV[serviceName].join(" or ")} or add an active roadmap.control_runtime_service row for service_key='${serviceName}'.${suffix}`,
+	);
+}
+
+async function queryRuntimeService(
+	serviceName: RuntimeServiceName,
+): Promise<string | null> {
+	const result = await runtimeQueryFn(
+		`SELECT url
+		   FROM roadmap.control_runtime_service
+		  WHERE service_key = $1
+		    AND lifecycle_status = 'active'
+		  LIMIT 1`,
+		[serviceName],
+	);
+	const row = result.rows[0];
+	const url = row?.endpoint_url ?? row?.url ?? null;
+	const trimmed = typeof url === "string" ? url.trim() : "";
+	return trimmed.length > 0 ? trimmed : null;
+}
+
+async function startEndpointInvalidationListener(): Promise<void> {
+	if (listenerStarted) return;
+	listenerStarted = true;
+
+	try {
+		const client = await runtimeConnectListener();
+		listenerClient = client;
+		await client.query("LISTEN runtime_endpoint_changed");
+		client.on("notification", (message: { channel?: string }) => {
+			if (message.channel === "runtime_endpoint_changed") {
+				clearEndpointCache();
+			}
+		});
+		client.on("error", () => {
+			listenerClient = null;
+			listenerStarted = false;
+			clearEndpointCache();
+		});
+	} catch {
+		listenerClient = null;
+		// Endpoint resolution still works without live invalidation.
+	}
+}
+
+async function resolveEndpointAsync(
+	serviceName: RuntimeServiceName,
+): Promise<string> {
+	const cached = getCache(serviceName);
+	if (cached !== null) return cached;
+
+	const envUrl = envEndpoint(serviceName);
+	if (envUrl) {
+		setCache(serviceName, envUrl);
+		return envUrl;
+	}
+
+	await startEndpointInvalidationListener();
+
+	try {
+		const registryUrl = await queryRuntimeService(serviceName);
+		if (registryUrl) {
+			setCache(serviceName, registryUrl);
+			return registryUrl;
+		}
+		throw missingEndpointError(serviceName);
+	} catch (err) {
+		if (err instanceof AgentHiveConfigError) throw err;
+		throw missingEndpointError(serviceName, err);
+	}
+}
 
 /**
- * Resolve the MCP endpoint URL.
- *
- * Resolution:
- * 1. Check AGENTHIVE_MCP_URL environment variable
- * 2. Query control_runtime registry (when P431 lands; catch if table missing)
- * 3. Throw AgentHiveConfigError if unresolvable
- *
- * @returns The resolved MCP URL
- * @throws AgentHiveConfigError if MCP URL cannot be resolved
+ * Legacy synchronous MCP resolver. Env-only by design; use getMcpUrlAsync for
+ * DB-backed control-runtime fallback.
  */
 export function getMcpUrl(): string {
-	// Return cached value if available
-	if (mcpUrlCache !== null) {
-		return mcpUrlCache;
-	}
+	const cached = getCache("mcp");
+	if (cached !== null) return cached;
 
-	// Check environment variable first
-	const envUrl = process.env.AGENTHIVE_MCP_URL?.trim();
+	const envUrl = envEndpoint("mcp");
 	if (envUrl) {
-		mcpUrlCache = envUrl;
+		setCache("mcp", envUrl);
 		return envUrl;
 	}
 
-	// TODO: Query control_runtime registry when P431 lands
-	// For now, try to query control_runtime.service and catch if table doesn't exist
-	// const registryUrl = await queryControlRuntimeRegistry('mcp');
-	// if (registryUrl) {
-	//   mcpUrlCache = registryUrl;
-	//   return registryUrl;
-	// }
-
-	// Hard fail - no literal default
-	throw new AgentHiveConfigError(
-		"MCP URL not configured. Set AGENTHIVE_MCP_URL environment variable.",
-	);
+	throw missingEndpointError("mcp");
 }
 
 /**
- * Resolve the daemon endpoint URL.
- *
- * Resolution:
- * 1. Check AGENTHIVE_DAEMON_URL environment variable
- * 2. Query control_runtime registry (when P431 lands; catch if table missing)
- * 3. Throw AgentHiveConfigError if unresolvable
- *
- * @returns The resolved daemon URL
- * @throws AgentHiveConfigError if daemon URL cannot be resolved
+ * Resolve the MCP endpoint from env first, then control_runtime.service.
+ */
+export async function getMcpUrlAsync(): Promise<string> {
+	return resolveEndpointAsync("mcp");
+}
+
+/**
+ * Legacy synchronous daemon resolver. Env-only by design; use
+ * getDaemonUrlAsync for DB-backed control-runtime fallback.
  */
 export function getDaemonUrl(): string {
-	// Return cached value if available
-	if (daemonUrlCache !== null) {
-		return daemonUrlCache;
-	}
+	const cached = getCache("daemon");
+	if (cached !== null) return cached;
 
-	// Check environment variable first
-	const envUrl = process.env.AGENTHIVE_DAEMON_URL?.trim();
+	const envUrl = envEndpoint("daemon");
 	if (envUrl) {
-		daemonUrlCache = envUrl;
+		setCache("daemon", envUrl);
 		return envUrl;
 	}
 
-	// TODO: Query control_runtime registry when P431 lands
-	// For now, try to query control_runtime.service and catch if table doesn't exist
-	// const registryUrl = await queryControlRuntimeRegistry('daemon');
-	// if (registryUrl) {
-	//   daemonUrlCache = registryUrl;
-	//   return registryUrl;
-	// }
-
-	// Hard fail - no literal default
-	throw new AgentHiveConfigError(
-		"Daemon URL not configured. Set AGENTHIVE_DAEMON_URL environment variable.",
-	);
+	throw missingEndpointError("daemon");
 }
 
 /**
- * Get the control plane port.
- * Common helper for extracting port from resolved URLs.
- *
- * @returns The control plane port number
- * @throws AgentHiveConfigError if port cannot be determined
+ * Resolve the daemon endpoint from env first, then control_runtime.service.
  */
+export async function getDaemonUrlAsync(): Promise<string> {
+	return resolveEndpointAsync("daemon");
+}
+
 export function getControlPlanePort(): number {
 	const mcpUrl = getMcpUrl();
 	try {
@@ -125,96 +209,44 @@ export function getControlPlanePort(): number {
 	}
 }
 
-/**
- * Clear cached endpoint URLs.
- * Useful for testing and when pg_notify('runtime_endpoint_changed') fires.
- *
- * @internal
- */
+export async function getControlPlanePortAsync(): Promise<number> {
+	const mcpUrl = await getMcpUrlAsync();
+	try {
+		const url = new URL(mcpUrl);
+		const port = url.port || (url.protocol === "https:" ? 443 : 80);
+		return Number(port);
+	} catch {
+		throw new AgentHiveConfigError(
+			`Invalid MCP URL format: ${mcpUrl}. Cannot extract port.`,
+		);
+	}
+}
+
 export function clearEndpointCache(): void {
 	mcpUrlCache = null;
 	daemonUrlCache = null;
 }
 
-// ─── P787: Async DB-backed endpoint registry ──────────────────────────────────
-
-let _endpointCache = new Map<string, string>();
-let _cachePopulated = false;
-
-async function _populateCache(): Promise<void> {
-	try {
-		// Bridge: queries agenthive.roadmap.control_runtime_service (migration 056-p787).
-		// Canonical target: hiveCentral core.control_runtime_service (001-core.sql).
-		// TODO(P501): switch to hiveCentral query after control-plane cutover.
-		const result = await query(
-			`SELECT service_key, url FROM roadmap.control_runtime_service WHERE is_active = true`,
-		);
-		_endpointCache = new Map(
-			result.rows.map((r: any) => [r.service_key as string, r.url as string]),
-		);
-		_cachePopulated = true;
-	} catch (err) {
-		// Table may not exist yet in some environments; treat as empty registry
-		_cachePopulated = true;
+/**
+ * Test hook for unit tests; production uses the shared Postgres pool.
+ *
+ * @internal
+ */
+export function configureEndpointResolverForTests(deps?: {
+	queryFn?: RuntimeQueryFn;
+	connectListener?: RuntimeConnectListener;
+}): void {
+	clearEndpointCache();
+	if (listenerClient) {
+		try {
+			listenerClient.release();
+		} catch {
+			// ignore test cleanup errors
+		}
 	}
+	listenerClient = null;
+	listenerStarted = false;
+	runtimeQueryFn = deps?.queryFn ?? (pgQuery as RuntimeQueryFn);
+	runtimeConnectListener =
+		deps?.connectListener ?? (async () => getPool().connect());
 }
-
-/**
- * Flush the async DB endpoint cache.
- * Call on pg_notify('runtime_endpoint_changed') or after a config change.
- */
-export function invalidateEndpointCache(): void {
-	_endpointCache.clear();
-	_cachePopulated = false;
-}
-
-async function getFromRegistry(key: string): Promise<string | null> {
-	if (!_cachePopulated) await _populateCache();
-	return _endpointCache.get(key) ?? null;
-}
-
-/**
- * Resolve the MCP endpoint URL (async, with DB fallback — P787).
- *
- * Resolution:
- * 1. MCP_URL environment variable
- * 2. roadmap.control_runtime_service row with service_key='mcp'
- * 3. Throws if unresolvable
- */
-export async function getMcpUrlAsync(): Promise<string> {
-	if (process.env.MCP_URL) return process.env.MCP_URL;
-	const dbUrl = await getFromRegistry("mcp");
-	if (dbUrl) return dbUrl;
-	throw new Error(
-		"MCP URL not configured: set MCP_URL env or add a control_runtime_service row",
-	);
-}
-
-/**
- * Resolve the daemon endpoint URL (async, with DB fallback — P787).
- *
- * Resolution:
- * 1. DAEMON_URL environment variable
- * 2. roadmap.control_runtime_service row with service_key='daemon'
- * 3. Throws if unresolvable
- */
-export async function getDaemonUrlAsync(): Promise<string> {
-	if (process.env.DAEMON_URL) return process.env.DAEMON_URL;
-	const dbUrl = await getFromRegistry("daemon");
-	if (dbUrl) return dbUrl;
-	throw new Error(
-		"Daemon URL not configured: set DAEMON_URL env or add a control_runtime_service row",
-	);
-}
-
-/**
- * TODO(P787): When P431 lands and control_runtime.service table exists,
- * implement pg_notify listener:
- * client.query('LISTEN runtime_endpoint_changed');
- * client.on('notification', (msg) => {
- *   if (msg.channel === 'runtime_endpoint_changed') {
- *     invalidateEndpointCache();
- *     clearEndpointCache();
- *   }
- * });
- */
