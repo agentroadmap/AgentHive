@@ -9,6 +9,7 @@ import { createInterface } from "node:readline/promises";
 import * as clack from "@clack/prompts";
 import { Command } from "commander";
 import { getDaemonUrl } from "../shared/runtime/endpoints.ts";
+import { RfcStates } from "../core/workflow/state-names.ts";
 import { resolveBoardDataSource } from "./board-source.ts";
 import { initializeProject } from "../core/infrastructure/init.ts";
 import {
@@ -2839,7 +2840,13 @@ proposalCmd
 				),
 			];
 
-			const workflowOrder = ["DRAFT", "REVIEW", "DEVELOP", "MERGE", "COMPLETE"];
+			const workflowOrder = [
+				RfcStates.DRAFT,
+				RfcStates.REVIEW,
+				RfcStates.DEVELOP,
+				RfcStates.MERGE,
+				RfcStates.COMPLETE,
+			];
 
 			const reorderedStatuses = orderedStatuses.sort((a, b) => {
 				const aIdx = workflowOrder.indexOf(a.toUpperCase());

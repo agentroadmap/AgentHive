@@ -22,6 +22,7 @@ import { Core } from "../../core/roadmap.ts";
 import type { ContentStore } from "../../core/storage/content-store.ts";
 import { createMcpServer, type McpServer } from "../../mcp/server.ts";
 import { handleDirectMcpRequest } from "../mcp-server/http-compat.ts";
+import { RfcStates } from "../../core/workflow/state-names.ts";
 import type {
 	Proposal,
 	ProposalUpdateInput,
@@ -492,7 +493,7 @@ export class RoadmapServer {
 			category: p.category || "",
 			domainId: p.domainId || "",
 			title: p.title || "(no title)",
-			status: p.status || "DRAFT",
+			status: p.status || RfcStates.DRAFT,
 			priority: p.priority || "",
 			bodyMarkdown: p.summary || p.description || p.rawContent || null,
 			summary: p.summary || p.description || null,

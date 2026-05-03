@@ -6,6 +6,7 @@ import {
 } from "../../board.ts";
 import type { StreamEvent } from "../../core/messaging/event-stream.ts";
 import { Core } from "../../core/roadmap.ts";
+import { RfcStates, HotfixStates, getView } from "../../core/workflow/state-names.ts";
 import type { Directive, Proposal } from "../../shared/types/index.ts";
 import { collectAvailableLabels } from "../../shared/utils/label-filter.ts";
 import {
@@ -85,22 +86,21 @@ export interface WorkflowViewDefinition {
 //   DRAFT, REVIEW    → TRIAGE
 //   DEVELOP, MERGE   → FIX
 //   COMPLETE         → DEPLOYED
-const RFC_STATUSES_CANONICAL = ["DRAFT", "REVIEW", "DEVELOP", "MERGE", "COMPLETE"];
-const HOTFIX_STATUSES_CANONICAL = [
-	"TRIAGE",
-	"FIX",
-	"DEPLOYED",
-	"ESCALATE",
-	"WONT_FIX",
-	"NON_ISSUE",
+const RFC_STATUSES_CANONICAL = [
+	RfcStates.DRAFT,
+	RfcStates.REVIEW,
+	RfcStates.DEVELOP,
+	RfcStates.MERGE,
+	RfcStates.COMPLETE,
 ];
+const HOTFIX_STATUSES_CANONICAL = getView("Hotfix").stages.map((s) => s.name);
 const HOTFIX_PROPOSAL_TYPES = new Set(["hotfix"]);
 const HOTFIX_DISPLAY_MAP: Record<string, string> = {
-	DRAFT: "TRIAGE",
-	REVIEW: "TRIAGE",
-	DEVELOP: "FIX",
-	MERGE: "FIX",
-	COMPLETE: "DEPLOYED",
+	[RfcStates.DRAFT]: "TRIAGE",
+	[RfcStates.REVIEW]: "TRIAGE",
+	[RfcStates.DEVELOP]: "FIX",
+	[RfcStates.MERGE]: "FIX",
+	[RfcStates.COMPLETE]: "DEPLOYED",
 };
 
 const WORKFLOW_VIEWS: WorkflowViewDefinition[] = [

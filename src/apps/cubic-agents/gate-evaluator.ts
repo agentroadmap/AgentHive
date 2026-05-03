@@ -20,6 +20,7 @@ import {
 	type GateBrief,
 	type ProposalBrief,
 } from "../../core/gate/evaluator.ts";
+import { RfcStates } from "../../core/workflow/state-names.ts";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -590,7 +591,7 @@ export async function runGateEvaluation(
 		from_state: request.from_state,
 		to_state: request.to_state,
 		requires_ac:
-			request.from_state !== "DRAFT" && request.from_state !== "MERGE",
+			request.from_state !== RfcStates.DRAFT && request.from_state !== RfcStates.MERGE,
 	};
 
 	const proposalBrief: ProposalBrief = {
