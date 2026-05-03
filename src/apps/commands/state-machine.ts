@@ -194,10 +194,10 @@ export function registerStateMachineCommand(program: any) {
 
   sm.command("register")
     .description("Register this host as an agency in AgentHive")
-    .requiredOption("--identity <identity>", "Agency identity (e.g. hermes/agency-xiaomi)")
+    .requiredOption("--identity <identity>", "Agency identity (format: provider/agency-name, e.g. hermes/agency-xyz)")
     .option("--type <type>", "Agent type", "agency")
-    .option("--provider <provider>", "AI provider (e.g. xiaomi, nous)")
-    .option("--model <model>", "Preferred model (e.g. xiaomi/mimo-v2-pro)")
+    .option("--provider <provider>", "AI provider (e.g. anthropic, openai, xiaomi)")
+    .option("--model <model>", "Preferred model (resolved from model_routes table at runtime)")
     .option("--capabilities <caps>", "Comma-separated capabilities")
     .option("--project <projectId>", "Join a specific project (ID)")
     .action(async (opts: { identity: string; type: string; provider?: string; model?: string; capabilities?: string; project?: string }) => {

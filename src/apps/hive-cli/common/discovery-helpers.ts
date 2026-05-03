@@ -8,6 +8,8 @@
  * @module common/discovery-helpers
  */
 
+import { RfcStates, getView } from "../../../core/workflow/state-names.ts";
+
 /**
  * Descriptor for a CLI flag/option.
  */
@@ -231,7 +233,7 @@ export const CommonFlags = {
     short: "a",
     type: "string",
     description: "Agency identity (overrides HIVE_AGENCY env)",
-    example: "--agency hermes/agency-xiaomi",
+    example: "--agency hermes/agency-example",
   }),
 
   host: (): FlagDescriptor => ({
@@ -380,7 +382,7 @@ export function buildProposalDomainSchema(): SchemaDescriptor {
         {
           name: "new_state",
           type: "enum",
-          enum: ["DRAFT", "REVIEW", "DEVELOP", "MERGE", "COMPLETE"],
+          enum: getView("Standard RFC").stages.map((s) => s.name),
           required: true,
           description: "Target state (loaded from control-plane)",
         },

@@ -7,7 +7,7 @@ export const agencyRegisterSchema: JsonSchema = {
 			type: "string",
 			minLength: 1,
 			maxLength: 200,
-			description: "Agency identity (e.g., hermes/agency-xiaomi)",
+			description: "Agency identity (format: provider/agency-name; e.g., hermes/agency-example)",
 		},
 		agentType: {
 			type: "string",
@@ -17,11 +17,11 @@ export const agencyRegisterSchema: JsonSchema = {
 		},
 		provider: {
 			type: "string",
-			description: "AI provider (e.g., nous, openai)",
+			description: "AI provider (e.g., anthropic, openai, xiaomi)",
 		},
 		model: {
 			type: "string",
-			description: "Preferred model (e.g., xiaomi/mimo-v2-pro)",
+			description: "Preferred model (resolved from model_routes table at runtime)",
 		},
 		skills: {
 			type: "array",
@@ -83,7 +83,7 @@ export const workerRegisterSchema: JsonSchema = {
 		workerIdentity: {
 			type: "string",
 			minLength: 1,
-			description: "Worker identity (e.g., hermes/agency-xiaomi/worker-42)",
+			description: "Worker identity (format: provider/agency-name/worker-id; e.g., hermes/agency-example/worker-42)",
 		},
 		agencyIdentity: {
 			type: "string",

@@ -1106,7 +1106,7 @@ export async function createMcpServer(
 				properties: {
 					agent_identity: {
 						type: "string",
-						description: "Agent identity (e.g. 'architect', 'developer', 'skeptic-alpha')",
+						description: "Agent identity (resolved from trust registry; format: provider/agency-name or role-name)",
 					},
 					proposal_id: {
 						type: "number",

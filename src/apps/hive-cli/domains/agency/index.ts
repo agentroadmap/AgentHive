@@ -62,7 +62,7 @@ const domainSchema: DomainSchema = {
           name: "AGENCY_ID",
           type: "string",
           required: true,
-          description: "Agency ID (e.g., hermes/agency-xiaomi)",
+          description: "Agency ID (e.g., hermes/agency-example; format: provider/agency-name)",
         },
       ],
       flags: [

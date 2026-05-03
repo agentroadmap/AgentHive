@@ -97,7 +97,7 @@ export interface WorkflowTemplateRow {
  * post-P429.
  */
 export interface AgencyRow {
-  agency_id: string; // text PK, e.g., "hermes/agency-xiaomi"
+  agency_id: string; // text PK, e.g., "hermes/agency-example" (format: provider/agency-name)
   display_name: string | null;
   provider: string | null;
   host_id: string | null;
