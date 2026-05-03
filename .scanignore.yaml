@@ -34,3 +34,11 @@
 - path: scripts/cli.cjs
   rules: "*"
   reason: generated CLI wrapper script
+
+- path: src/core/workflow/smdl-loader.ts
+  rules: "*"
+  reason: SMDL definitions contain workflow stage state machine literals (canonical workflow definitions)
+
+- path: src/apps/mcp-server/tools/workflow/smdl-mcp.ts
+  rules: "*"
+  reason: SMDL MCP handler exports hardcoded workflow definitions (canonical workflow templates)
