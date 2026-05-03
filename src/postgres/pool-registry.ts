@@ -422,7 +422,7 @@ export async function shutdown(): Promise<void> {
 function buildDefaultDsn(database: string): string {
 	const host = process.env.PGHOST || "127.0.0.1";
 	const port = process.env.PGPORT || "5432";
-	const user = process.env.PGUSER || "xiaomi";
+	const user = process.env.PGUSER || process.env.USER || process.env.USERNAME || "postgres";
 	const password = process.env.PGPASSWORD || "";
 	return `postgresql://${user}:${password}@${host}:${port}/${database}`;
 }

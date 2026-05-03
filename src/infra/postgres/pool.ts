@@ -297,7 +297,7 @@ export function initPoolFromConfig(dbConfig: Record<string, any>): Pool {
 		port: Number(dbConfig.port || process.env.PGPORT || 5432),
 		user: dbConfig.user ?? process.env.PGUSER,
 		password: process.env.PGPASSWORD ?? process.env.__PGPASSWORD_FROM_CONFIG,
-		database: dbConfig.name ?? process.env.PGDATABASE ?? "agenthive",
+		database: dbConfig.name ?? process.env.PGDATABASE,
 		schema: configuredSchema,
 	});
 }
