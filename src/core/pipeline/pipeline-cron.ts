@@ -226,6 +226,8 @@ const STAGE_DISPATCH_ROLES: Record<string, DispatchRoleSet> = {
 	},
 	REVIEW: {
 		prep: ["architect", "skeptic"],
+		// NOTE: Agent role names are fallback defaults from orchestrator. Canonical values
+		// are loaded from roadmap.gate_role table at init time (phase 2 will make DB authoritative).
 		gate: ["skeptic-alpha", "reviewer-d2", "architect"],
 	},
 	DEVELOP: {

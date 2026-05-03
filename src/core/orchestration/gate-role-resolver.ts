@@ -31,6 +31,8 @@ export interface GateRoleProfile {
 // Used when the DB is unreachable or the row is missing.
 // persona = identity + what-to-check checklist (mirrors GATE_ROLES framing up to OUTPUT CONTRACT).
 // outputContract = the OUTPUT CONTRACT section of the same framing.
+// NOTE: Agent role names ("skeptic-alpha", etc.) are fallback constants; canonical values
+// come from roadmap.gate_role table (DB cache). The DB lookup fails gracefully to this table.
 const BUILTIN_FALLBACK: Record<string, Omit<GateRoleProfile, "source">> = {
 	D1: {
 		role: "skeptic-alpha",

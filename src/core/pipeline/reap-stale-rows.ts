@@ -116,8 +116,8 @@ export async function reapStaleRows(
 
 	// P309: Cancel blocked dispatches that have completed_at set.
 	// These escape the above reap (which requires completed_at IS NULL).
-	// From 10hr dispatch loop (2026-04-19/20): implicit gate dispatched
-	// copilot-one to host bot, SpawnPolicyViolation on every attempt.
+	// Note: blocked dispatches indicate SpawnPolicyViolation or host routing failures
+	// and should be reaped to avoid accumulation in workflow state.
 	try {
 		const r = await pool.query(
 			`UPDATE roadmap_workforce.squad_dispatch
