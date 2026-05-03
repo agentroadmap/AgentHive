@@ -52,7 +52,6 @@ const SYSTEMD_SERVICE_PATH = `/etc/systemd/system/${SYSTEMD_SERVICE_NAME}.servic
 const ENV_FILE_PATH = "/etc/agenthive/env";
 const AGENTHIVE_USER = "agenthive";
 const AGENTHIVE_HOME = "/var/lib/agenthive";
-const WORKTREE_ROOT = "/data/code/worktree";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
@@ -172,17 +171,19 @@ async function cmdInit() {
 	s.start("Installing Hermes CLI for agenthive...");
 	try {
 		// Check if xiaomi has hermes installed — symlink if available
+		// Resolve xiaomi home directory dynamically
+		const xiaomiHome = process.env.XIAOMI_HOME || "/home/xiaomi";
 		try {
-			const xiaomiHermes = "/home/xiaomi/.local/bin/hermes";
+			const xiaomiHermes = `${xiaomiHome}/.local/bin/hermes`;
 			await access(xiaomiHermes, constants.X_OK);
 			const agenthiveBin = `${AGENTHIVE_HOME}/.local/bin`;
 			sudo(["mkdir", "-p", agenthiveBin]);
 			sudo(["ln", "-sf", xiaomiHermes, `${agenthiveBin}/hermes`]);
-			sudo(["ln", "-sf", "/home/xiaomi/.hermes", `${AGENTHIVE_HOME}/.hermes`]);
+			sudo(["ln", "-sf", `${xiaomiHome}/.hermes`, `${AGENTHIVE_HOME}/.hermes`]);
 			// Fix permissions so agenthive can read xiaomi's .hermes
-			sudo(["chmod", "750", "/home/xiaomi/.hermes"]);
-			sudo(["chgrp", "-R", "dev", "/home/xiaomi/.hermes"]);
-			sudo(["chmod", "-R", "g+rX", "/home/xiaomi/.hermes"]);
+			sudo(["chmod", "750", `${xiaomiHome}/.hermes`]);
+			sudo(["chgrp", "-R", "dev", `${xiaomiHome}/.hermes`]);
+			sudo(["chmod", "-R", "g+rX", `${xiaomiHome}/.hermes`]);
 			s.stop("Linked Hermes from xiaomi installation.");
 		} catch {
 			// Fall back: install fresh for agenthive

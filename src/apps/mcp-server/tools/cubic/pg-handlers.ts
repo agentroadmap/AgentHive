@@ -18,11 +18,11 @@ import {
 	AgentIdInvalidError,
 	safeWorktreePath,
 } from "../../../../shared/identity/sanitize-agent-id.ts";
+import { getWorktreeRoot } from "../../../../shared/runtime/paths.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
 
-const WORKTREE_ROOT =
-	process.env.AGENTHIVE_WORKTREE_ROOT ?? "/data/code/worktree";
+const WORKTREE_ROOT = getWorktreeRoot();
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {

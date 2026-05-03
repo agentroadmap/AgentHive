@@ -781,7 +781,8 @@ export class AgentPoolHandlers {
 		// 2. Fallback: filesystem scan under WORKTREE_ROOT
 		const fs = await import("node:fs/promises");
 		const path = await import("node:path");
-		const WORKTREE_ROOT = "/data/code/worktree";
+		const { getWorktreeRoot } = await import("../../../../shared/runtime/paths.ts");
+		const WORKTREE_ROOT = getWorktreeRoot();
 
 		try {
 			const entries = await fs.readdir(WORKTREE_ROOT, { withFileTypes: true });

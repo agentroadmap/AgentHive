@@ -8,9 +8,10 @@
 
 import { spawn } from "node:child_process";
 import { query } from "../../infra/postgres/pool.ts";
+import { getWorktreeRoot } from "../../shared/runtime/paths.ts";
 import type { ToolAgent, ToolTask, ToolResult } from "./registry.ts";
 
-const WORKTREE_ROOT = "/data/code/worktree";
+const WORKTREE_ROOT = getWorktreeRoot();
 
 interface MergeExecutorConfig {
 	escalateOnConflict?: boolean;
