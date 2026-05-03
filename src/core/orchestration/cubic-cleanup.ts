@@ -19,6 +19,7 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { QueryResult, QueryResultRow } from "pg";
 import { query } from "../../infra/postgres/pool.ts";
+import { getWorktreeRoot } from "../../shared/runtime/paths.ts";
 import { CubicIdleDetector } from "./cubic-idle-detector.ts";
 
 const execFileAsync = promisify(execFile);
@@ -167,7 +168,7 @@ export async function checkCubicCreateBudget(
 	options: CubicBudgetOptions,
 ): Promise<CubicBudgetStatus> {
 	const hostName = options.hostName ?? resolveCubicHostName();
-	const worktreeRoot = options.worktreeRoot ?? "/data/code/worktree";
+	const worktreeRoot = options.worktreeRoot ?? getWorktreeRoot();
 	const defaultMaxActive =
 		options.defaultMaxActive ?? DEFAULT_MAX_ACTIVE_CUBICS_PER_HOST;
 

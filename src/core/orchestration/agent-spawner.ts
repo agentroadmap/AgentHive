@@ -17,6 +17,7 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { getMcpUrl, getDaemonUrl, getMcpUrlAsync } from "../../shared/runtime/endpoints.ts";
+import { getWorktreeRoot, getProjectRoot } from "../../shared/runtime/paths.ts";
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { hostname } from "node:os";
@@ -27,8 +28,8 @@ import { validateModelForDispatch } from "../../apps/mcp-server/tools/spending/p
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const WORKTREE_ROOT = "/data/code/worktree";
-const GITCONFIG_ROOT = "/data/code/AgentHive/.git/worktrees-config";
+const WORKTREE_ROOT = getWorktreeRoot();
+const GITCONFIG_ROOT = join(getProjectRoot(), ".git", "worktrees-config");
 
 // ─── Live child registry (shutdown plumbing) ─────────────────────────────────
 //
@@ -1026,10 +1027,10 @@ export function renderClosingHint(input: {
 	stage: string;
 	proposalId: number | string;
 }): string {
-	// Literal terminal check (not RfcStates.COMPLETE) so this helper stays
-	// pure and unit-testable without the state-names registry being loaded.
-	// The set is small and stable; if a new terminal stage is added it can
-	// be appended here without re-routing through the registry.
+	// Terminal check using canonical state names from state-names.ts.
+	// RfcStates accessors get values from the loaded registry; this function
+	// may be called before registry load completes, so we check against the
+	// canonical string values that define terminal stages.
 	const terminal = input.stage === "COMPLETE" || input.stage === "DEPLOYED";
 	const hint = terminal
 		? ""

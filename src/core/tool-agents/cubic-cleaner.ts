@@ -9,9 +9,10 @@ import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { query } from "../../infra/postgres/pool.ts";
+import { getWorktreeRoot } from "../../shared/runtime/paths.ts";
 import type { ToolAgent, ToolTask, ToolResult } from "./registry.ts";
 
-const WORKTREE_ROOT = "/data/code/worktree";
+const WORKTREE_ROOT = getWorktreeRoot();
 
 interface CubicCleanerConfig {
 	idleTimeoutMinutes?: number;
