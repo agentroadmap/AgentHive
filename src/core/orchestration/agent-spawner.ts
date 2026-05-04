@@ -38,6 +38,7 @@ import {
 	agencyPolicyFilterSql,
 	budgetFilterSql,
 	buildEliminationDiagnosticSql,
+	cooldownFilterSql,
 	hostPolicyFilterSql,
 	projectPolicyFilterSql,
 	rolePolicyFilterSql,
@@ -563,17 +564,25 @@ export class NoProviderConfigured extends Error {
  * the picker layer. Distinct from SpawnPolicyViolation, which fires
  * post-resolution when an already-picked route is rejected. NoPolicyAllowedRoute
  * means the picker never found a candidate — fail-closed at resolution time.
+ *
+ * P773: all_throttled=true when routes exist and pass all policy layers (1-5)
+ * but are all under active cooldown (Layer 6). Caller can distinguish this
+ * from a permanent policy block and may retry after cooldown elapses.
  */
 export class NoPolicyAllowedRoute extends Error {
+	readonly all_throttled: boolean;
 	constructor(
 		readonly host: string,
 		readonly provider: string,
 		readonly hint: string | null,
+		opts: { all_throttled?: boolean } = {},
 	) {
+		const throttledNote = opts.all_throttled ? " All routes are in cooldown — retry after throttle window elapses." : " Check roadmap.host_model_policy.";
 		super(
-			`[P742] No host_model_policy-allowed route for host="${host}" provider="${provider}" hint=${hint ? `"${hint}"` : "null"}. Check roadmap.host_model_policy.`,
+			`[P742] No host_model_policy-allowed route for host="${host}" provider="${provider}" hint=${hint ? `"${hint}"` : "null"}.${throttledNote}`,
 		);
 		this.name = "NoPolicyAllowedRoute";
+		this.all_throttled = opts.all_throttled ?? false;
 	}
 }
 
@@ -812,12 +821,13 @@ async function logRouteDecision({
  * can build the correct CLI args regardless of which worktree is invoking it.
  * This enables global escalation (e.g. openclaw → claude-opus via anthropic route).
  *
- * P771: applies a 5-layer AND filter chain before selecting the route:
+ * P771/P773: applies a 6-layer AND filter chain before selecting the route:
  *   Layer 1 — host_model_policy (existing P742 filter)
  *   Layer 2 — project_route_policy (allowlist/denylist per project)
  *   Layer 3 — agency_route_policy (allowlist/denylist per agency identity)
  *   Layer 4 — agent_role_profile route constraints (role-based)
  *   Layer 5 — route_token_budget (depleted hourly budgets excluded)
+ *   Layer 6 — cooldown_until (throttled routes excluded until cooldown elapses)
  *
  * Resolution order:
  *   1. If hint given: find the best enabled route for (hint, agent_provider) passing all layers
@@ -858,14 +868,15 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 
 	const perMillionPricing = await supportsPerMillionRoutePricing();
 
-	// P771: shared params for all route queries: $3=host, $4=projectId, $5=agencyIdentity, $6=roleProfileId
+	// P771/P773: shared params for all route queries: $3=host, $4=projectId, $5=agencyIdentity, $6=roleProfileId
 	const policyParams = [AGENTHIVE_HOST, projectId, agencyIdentity, roleProfileId] as const;
 	const policyFilters = `
           AND ${hostPolicyFilterSql(3, "mr")}
           AND ${projectPolicyFilterSql(4, "mr")}
           AND ${agencyPolicyFilterSql(5, "mr")}
           AND ${rolePolicyFilterSql(6, "mr")}
-          AND ${budgetFilterSql(4, "mr")}`;
+          AND ${budgetFilterSql(4, "mr")}
+          AND ${cooldownFilterSql("mr")}`;
 
 	const fetchRoute = (modelName: string) => {
 		// P742+P771: $3=host, $4=projectId, $5=agencyIdentity, $6=roleProfileId
@@ -946,13 +957,14 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 		// Fall through to default resolution
 	}
 
-	// P771: filter string for queries with params (provider=$1, host=$2, projectId=$3, agency=$4, role=$5)
+	// P771/P773: filter string for queries with params (provider=$1, host=$2, projectId=$3, agency=$4, role=$5)
 	const defaultPolicyFilters = `
           AND ${hostPolicyFilterSql(2, "mr")}
           AND ${projectPolicyFilterSql(3, "mr")}
           AND ${agencyPolicyFilterSql(4, "mr")}
           AND ${rolePolicyFilterSql(5, "mr")}
-          AND ${budgetFilterSql(3, "mr")}`;
+          AND ${budgetFilterSql(3, "mr")}
+          AND ${cooldownFilterSql("mr")}`;
 	// P771: policy params without a leading modelName param (for default-selection queries)
 	const defaultPolicyParams = [AGENTHIVE_HOST, projectId, agencyIdentity, roleProfileId] as const;
 
@@ -1045,9 +1057,7 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 		}
 	}
 
-	// P742: distinguish "no route at all for this provider" from
-	// "policy excluded everything." The former is a misconfiguration;
-	// the latter is the precise scenario NoPolicyAllowedRoute was introduced to catch.
+	// P742/P773: distinguish "no route at all", "policy excluded everything", and "all throttled".
 	const { rows: anyRowsForProvider } = await query<{ count: number }>(
 		`SELECT COUNT(*)::int AS count
 		   FROM roadmap.model_routes
@@ -1055,7 +1065,29 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 		[provider],
 	);
 	if ((anyRowsForProvider[0]?.count ?? 0) > 0) {
-		throw new NoPolicyAllowedRoute(AGENTHIVE_HOST, provider, hint ?? null);
+		// P773: check if routes exist that pass layers 1-5 but are blocked only by cooldown.
+		const { rows: throttledRows } = await query<{ count: number }>(
+			`SELECT COUNT(*)::int AS count
+			   FROM roadmap.model_routes mr
+			  WHERE mr.agent_provider = $1
+			    AND mr.is_enabled = true
+			    AND ${hostPolicyFilterSql(2, "mr")}
+			    AND ${projectPolicyFilterSql(3, "mr")}
+			    AND ${agencyPolicyFilterSql(4, "mr")}
+			    AND ${rolePolicyFilterSql(5, "mr")}
+			    AND ${budgetFilterSql(3, "mr")}
+			    AND mr.cooldown_until IS NOT NULL
+			    AND mr.cooldown_until > NOW()`,
+			[provider, ...defaultPolicyParams],
+		);
+		const allThrottled = (throttledRows[0]?.count ?? 0) > 0;
+		if (allThrottled) {
+			console.warn(
+				`[P773] All eligible routes for provider "${provider}" are in cooldown. ` +
+				`They will become eligible again after cooldown_until elapses.`,
+			);
+		}
+		throw new NoPolicyAllowedRoute(AGENTHIVE_HOST, provider, hint ?? null, { all_throttled: allThrottled });
 	}
 
 	throw new Error(

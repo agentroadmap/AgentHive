@@ -1,5 +1,5 @@
 /**
- * P771/P772: SQL fragment helpers for the 5-layer resolveModelRoute() filter chain.
+ * P771/P772/P773: SQL fragment helpers for the 6-layer resolveModelRoute() filter chain.
  * Each function returns a self-contained SQL boolean expression. All are
  * null-safe: passing NULL for the binding parameter skips (open-passes) the layer.
  */
@@ -90,8 +90,13 @@ export function budgetFilterSql(projectParamIdx: number, alias = "mr"): string {
 	)`;
 }
 
+/** P773 Layer 6: exclude routes with an active upstream throttle cooldown. */
+export function cooldownFilterSql(alias = "mr"): string {
+	return `(${alias}.cooldown_until IS NULL OR ${alias}.cooldown_until <= NOW())`;
+}
+
 /**
- * P772: Diagnostic query that classifies each non-winning enabled route by the
+ * P772/P773: Diagnostic query that classifies each non-winning enabled route by the
  * first policy layer that eliminated it. Used for the eliminated_routes JSONB in
  * route_decision_log.
  *
@@ -102,6 +107,7 @@ export function budgetFilterSql(projectParamIdx: number, alias = "mr"): string {
  *   $projectIdx    — project_id BIGINT  (Layers 2 + 5)
  *   $agencyIdx     — agency_identity TEXT (Layer 3)
  *   $roleIdx       — role_profile_id BIGINT (Layer 4)
+ *   Layer 6 (cooldown) uses no param — direct column expression.
  */
 export function buildEliminationDiagnosticSql(
 	providerIdx: number,
@@ -120,6 +126,7 @@ export function buildEliminationDiagnosticSql(
 		    WHEN NOT (${agencyPolicyFilterSql(agencyIdx, alias)}) THEN 'agency_policy'
 		    WHEN NOT (${rolePolicyFilterSql(roleIdx, alias)}) THEN 'role_policy'
 		    WHEN NOT (${budgetFilterSql(projectIdx, alias)}) THEN 'budget_exhausted'
+		    WHEN NOT (${cooldownFilterSql(alias)}) THEN 'throttled'
 		    ELSE 'passed'
 		  END AS first_failing_layer
 		FROM roadmap.model_routes ${alias}
