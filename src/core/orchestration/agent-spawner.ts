@@ -30,6 +30,10 @@ import {
 import { getProjectRoot, getWorktreeRoot } from "../../shared/runtime/paths.ts";
 import { HotfixStates, RfcStates } from "../workflow/state-names.ts";
 import { isWithinCapacity } from "./resolvers/capacity-guard.ts";
+import type {
+	EliminatedRoute,
+	ResolveRouteOpts,
+} from "./resolvers/route-resolver.types.ts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -186,6 +190,10 @@ export interface SpawnRequest {
 	briefingId?: string;
 	/** P760: Project id used to enforce per-project dispatch capacity limits. */
 	projectId?: number;
+	/** P771 Layer 3: agency identity for per-agency route policy filter. */
+	agencyIdentity?: string | null;
+	/** P771 Layer 4: agent_role_profile row id for role-based route constraints. */
+	roleProfileId?: number | null;
 }
 
 export interface SpawnResult {
@@ -588,6 +596,85 @@ function hostPolicyFilterSql(hostParamIdx: number, alias = "mr"): string {
 }
 
 /**
+ * P771 Layer 2: SQL fragment that filters model_routes by project_route_policy.
+ * projectId is bound at $${projectParamIdx}. Skipped (passes) when null or no row exists.
+ */
+function projectPolicyFilterSql(projectParamIdx: number, alias = "mr"): string {
+	return `(
+		$${projectParamIdx}::bigint IS NULL
+		OR NOT EXISTS (
+			SELECT 1 FROM roadmap.project_route_policy WHERE project_id = $${projectParamIdx}::bigint
+		)
+		OR EXISTS (
+			SELECT 1 FROM roadmap.project_route_policy pp
+			WHERE pp.project_id = $${projectParamIdx}::bigint
+			  AND (array_length(pp.allowed_route_providers, 1) IS NULL
+			       OR ${alias}.route_provider = ANY(pp.allowed_route_providers))
+			  AND NOT (${alias}.route_provider = ANY(COALESCE(pp.forbidden_route_providers, '{}')))
+		)
+	)`;
+}
+
+/**
+ * P771 Layer 3: SQL fragment that filters model_routes by agency_route_policy.
+ * agencyIdentity is bound at $${agencyParamIdx}. Skipped when null or no row exists.
+ */
+function agencyPolicyFilterSql(agencyParamIdx: number, alias = "mr"): string {
+	return `(
+		$${agencyParamIdx}::text IS NULL
+		OR NOT EXISTS (
+			SELECT 1 FROM roadmap.agency_route_policy WHERE agency_identity = $${agencyParamIdx}::text
+		)
+		OR EXISTS (
+			SELECT 1 FROM roadmap.agency_route_policy arp
+			WHERE arp.agency_identity = $${agencyParamIdx}::text
+			  AND (array_length(arp.allowed_route_providers, 1) IS NULL
+			       OR ${alias}.route_provider = ANY(arp.allowed_route_providers))
+			  AND NOT (${alias}.route_provider = ANY(COALESCE(arp.forbidden_route_providers, '{}')))
+		)
+	)`;
+}
+
+/**
+ * P771 Layer 4: SQL fragment that filters model_routes by agent_role_profile route constraints.
+ * roleProfileId is bound at $${roleParamIdx}. Skipped when null or no row exists.
+ */
+function rolePolicyFilterSql(roleParamIdx: number, alias = "mr"): string {
+	return `(
+		$${roleParamIdx}::bigint IS NULL
+		OR NOT EXISTS (
+			SELECT 1 FROM roadmap.agent_role_profile WHERE id = $${roleParamIdx}::bigint
+		)
+		OR EXISTS (
+			SELECT 1 FROM roadmap.agent_role_profile rp
+			WHERE rp.id = $${roleParamIdx}::bigint
+			  AND (rp.allowed_route_providers IS NULL
+			       OR ${alias}.route_provider = ANY(rp.allowed_route_providers))
+			  AND (rp.forbidden_route_providers IS NULL
+			       OR NOT (${alias}.route_provider = ANY(rp.forbidden_route_providers)))
+		)
+	)`;
+}
+
+/**
+ * P771 Layer 5: SQL fragment that excludes routes with exhausted hourly token budgets.
+ * projectId is bound at $${projectParamIdx}. Skipped when null.
+ */
+function budgetFilterSql(projectParamIdx: number, alias = "mr"): string {
+	return `(
+		$${projectParamIdx}::bigint IS NULL
+		OR NOT EXISTS (
+			SELECT 1 FROM roadmap.route_token_budget rtb
+			WHERE rtb.project_id = $${projectParamIdx}::bigint
+			  AND rtb.route_provider = ${alias}.route_provider
+			  AND rtb.hour_window = date_trunc('hour', NOW())
+			  AND rtb.max_tokens IS NOT NULL
+			  AND rtb.tokens_consumed >= rtb.max_tokens
+		)
+	)`;
+}
+
+/**
  * Enforce host-level spawn policy. Called after resolveModelRoute but before
  * the CLI subprocess is launched. Violations are recorded to
  * roadmap.escalation_log with severity=high and the spawn is aborted.
@@ -768,22 +855,26 @@ export async function detectProvider(
 // ─── P235: Platform-Aware Model Constraints ──────────────────────────────────
 
 /**
- * P235 + M026: Resolve model route for a spawn request.
+ * P235 + M026 + P771: Resolve model route for a spawn request.
  *
  * Returns a full ModelRoute (including base_url and api_spec) so the spawner
  * can build the correct CLI args regardless of which worktree is invoking it.
  * This enables global escalation (e.g. openclaw → claude-opus via anthropic route).
  *
+ * P771: applies a 5-layer AND filter chain before selecting the route:
+ *   Layer 1 — host_model_policy (existing P742 filter)
+ *   Layer 2 — project_route_policy (allowlist/denylist per project)
+ *   Layer 3 — agency_route_policy (allowlist/denylist per agency identity)
+ *   Layer 4 — agent_role_profile route constraints (role-based)
+ *   Layer 5 — route_token_budget (depleted hourly budgets excluded)
+ *
  * Resolution order:
- *   1. If hint given: find the best enabled route for (hint, agent_provider)
- *   2. If hint has no enabled route: warn and fall back to provider default
- *   3. If no hint: pick the cheapest enabled route for this agent_provider
- *      (lowest priority number first, i.e. token_plan before api_key)
+ *   1. If hint given: find the best enabled route for (hint, agent_provider) passing all layers
+ *   2. If hint has no passing route: warn and fall back to provider default
+ *   3. If no hint: pick cheapest enabled route passing all 5 layers
  */
-async function resolveModelRoute(
-	provider: AgentProvider,
-	hint?: string,
-): Promise<ModelRoute> {
+async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & { eliminatedRoutes: EliminatedRoute[] }> {
+	const { provider, projectId = null, agencyIdentity = null, roleProfileId = null, modelHint: hint } = opts;
 	type RouteRow = {
 		model_name: string;
 		route_provider: string;
@@ -807,12 +898,18 @@ async function resolveModelRoute(
 
 	const perMillionPricing = await supportsPerMillionRoutePricing();
 
+	// P771: shared params for all route queries: $3=host, $4=projectId, $5=agencyIdentity, $6=roleProfileId
+	const policyParams = [AGENTHIVE_HOST, projectId, agencyIdentity, roleProfileId] as const;
+	const policyFilters = `
+          AND ${hostPolicyFilterSql(3, "mr")}
+          AND ${projectPolicyFilterSql(4, "mr")}
+          AND ${agencyPolicyFilterSql(5, "mr")}
+          AND ${rolePolicyFilterSql(6, "mr")}
+          AND ${budgetFilterSql(4, "mr")}`;
+
 	const fetchRoute = (modelName: string) => {
-		// P742: $3 binds AGENTHIVE_HOST so the policy filter (no-host-row
-		// allows any; non-empty allowed_providers narrows; forbidden_providers
-		// excludes) runs alongside the model+provider match. Routes that
-		// would have been rejected post-hoc by assertSpawnAllowed never get
-		// returned here.
+		// P742+P771: $3=host, $4=projectId, $5=agencyIdentity, $6=roleProfileId
+		// Layers 1-5 applied in WHERE; routes failing any layer are never returned.
 		if (perMillionPricing) {
 			return query<RouteRow>(
 				`SELECT mr.model_name, mr.route_provider, mr.agent_provider,
@@ -823,11 +920,10 @@ async function resolveModelRoute(
         FROM roadmap.model_routes mr
         WHERE mr.model_name = $1
           AND mr.agent_provider = $2
-          AND mr.is_enabled = true
-          AND ${hostPolicyFilterSql(3, "mr")}
+          AND mr.is_enabled = true${policyFilters}
         ORDER BY mr.priority ASC, COALESCE(mr.cost_per_million_input, 0) ASC
         LIMIT 1`,
-				[modelName, provider, AGENTHIVE_HOST],
+				[modelName, provider, ...policyParams],
 			);
 		}
 
@@ -841,11 +937,10 @@ async function resolveModelRoute(
        FROM roadmap.model_routes mr
        WHERE mr.model_name = $1
          AND mr.agent_provider = $2
-         AND mr.is_enabled = true
-         AND ${hostPolicyFilterSql(3, "mr")}
+         AND mr.is_enabled = true${policyFilters}
         ORDER BY mr.priority ASC
         LIMIT 1`,
-			[modelName, provider, AGENTHIVE_HOST],
+			[modelName, provider, ...policyParams],
 		);
 	};
 
@@ -878,7 +973,7 @@ async function resolveModelRoute(
 		if (rows.length > 0) {
 			const route = toModelRoute(rows[0]);
 			assertResolvedRouteMetadata(provider, route);
-			return route;
+			return { ...route, eliminatedRoutes: [] };
 		}
 
 		console.warn(
@@ -888,8 +983,18 @@ async function resolveModelRoute(
 		// Fall through to default resolution
 	}
 
+	// P771: filter string for queries with params (provider=$1, host=$2, projectId=$3, agency=$4, role=$5)
+	const defaultPolicyFilters = `
+          AND ${hostPolicyFilterSql(2, "mr")}
+          AND ${projectPolicyFilterSql(3, "mr")}
+          AND ${agencyPolicyFilterSql(4, "mr")}
+          AND ${rolePolicyFilterSql(5, "mr")}
+          AND ${budgetFilterSql(3, "mr")}`;
+	// P771: policy params without a leading modelName param (for default-selection queries)
+	const defaultPolicyParams = [AGENTHIVE_HOST, projectId, agencyIdentity, roleProfileId] as const;
+
 	// Default: use DB is_default flag first, then cheapest enabled as fallback.
-	// P742: also policy-filter so a forbidden-on-this-host default is never returned.
+	// P742+P771: all 5 policy layers applied so a policy-excluded default is never returned.
 	const { rows } = perMillionPricing
 		? await query<RouteRow>(
 				`SELECT mr.model_name, mr.route_provider, mr.agent_provider,
@@ -899,14 +1004,13 @@ async function resolveModelRoute(
                mr.api_key_primary, mr.api_key_secondary, mr.spawn_toolsets, mr.spawn_delegate
         FROM roadmap.model_routes mr
         WHERE mr.agent_provider = $1
-          AND mr.is_enabled = true
-          AND ${hostPolicyFilterSql(2, "mr")}
+          AND mr.is_enabled = true${defaultPolicyFilters}
         ORDER BY
           CASE WHEN mr.is_default = true THEN 0 ELSE 1 END,
           mr.priority ASC,
           COALESCE(mr.cost_per_million_input, 0) ASC
         LIMIT 1`,
-				[provider, AGENTHIVE_HOST],
+				[provider, ...defaultPolicyParams],
 			)
 		: await query<RouteRow>(
 				`SELECT mr.model_name, mr.route_provider, mr.agent_provider,
@@ -917,24 +1021,22 @@ async function resolveModelRoute(
               mr.api_key_primary, mr.api_key_secondary, mr.spawn_toolsets, mr.spawn_delegate
        FROM roadmap.model_routes mr
        WHERE mr.agent_provider = $1
-         AND mr.is_enabled = true
-         AND ${hostPolicyFilterSql(2, "mr")}
+         AND mr.is_enabled = true${defaultPolicyFilters}
         ORDER BY
           CASE WHEN mr.is_default = true THEN 0 ELSE 1 END,
           mr.priority ASC
         LIMIT 1`,
-				[provider, AGENTHIVE_HOST],
+				[provider, ...defaultPolicyParams],
 			);
 
 	if (rows.length > 0) {
 		const route = toModelRoute(rows[0]);
 		assertResolvedRouteMetadata(provider, route);
-		return route;
+		return { ...route, eliminatedRoutes: [] };
 	}
 
 	// Host-level fallback (legacy, kept for transition).
-	// P742: policy-filter here too — a host-default model that maps to a
-	// forbidden route_provider must NOT be returned.
+	// P742+P771: all 5 policy layers applied.
 	const fallbackModel = await getHostDefaultModel();
 	if (fallbackModel) {
 		const { rows: defaultRows } = perMillionPricing
@@ -947,11 +1049,10 @@ async function resolveModelRoute(
         FROM roadmap.model_routes mr
         WHERE mr.model_name = $1
           AND mr.agent_provider = $2
-          AND mr.is_enabled = true
-          AND ${hostPolicyFilterSql(3, "mr")}
+          AND mr.is_enabled = true${policyFilters}
         ORDER BY mr.priority ASC, COALESCE(mr.cost_per_million_input, 0) ASC
         LIMIT 1`,
-					[fallbackModel, provider, AGENTHIVE_HOST],
+					[fallbackModel, provider, ...policyParams],
 				)
 			: await query<RouteRow>(
 					`SELECT mr.model_name, mr.route_provider, mr.agent_provider,
@@ -963,22 +1064,21 @@ async function resolveModelRoute(
        FROM roadmap.model_routes mr
        WHERE mr.model_name = $1
          AND mr.agent_provider = $2
-         AND mr.is_enabled = true
-         AND ${hostPolicyFilterSql(3, "mr")}
+         AND mr.is_enabled = true${policyFilters}
         ORDER BY mr.priority ASC
         LIMIT 1`,
-					[fallbackModel, provider, AGENTHIVE_HOST],
+					[fallbackModel, provider, ...policyParams],
 				);
 		if (defaultRows.length > 0) {
 			const route = toModelRoute(defaultRows[0]);
 			assertResolvedRouteMetadata(provider, route);
-			return route;
+			return { ...route, eliminatedRoutes: [] };
 		}
 	}
 
 	// P742: distinguish "no route at all for this provider" from
-	// "host_model_policy excluded everything." The former is a misconfiguration;
-	// the latter is the precise scenario HF-E was filed to catch.
+	// "policy excluded everything." The former is a misconfiguration;
+	// the latter is the precise scenario NoPolicyAllowedRoute was introduced to catch.
 	const { rows: anyRowsForProvider } = await query<{ count: number }>(
 		`SELECT COUNT(*)::int AS count
 		   FROM roadmap.model_routes
@@ -1116,8 +1216,14 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	// P405: provider comes from model_routes via orchestrator, not hardcoded to worktree
 	const provider =
 		providerOverride ?? (await detectProvider(worktree, worktreeRoot));
-	// P235/M026: resolve full route (model + api_spec + base_url) from model_routes
-	const route = await resolveModelRoute(provider, modelHint);
+	// P235/M026/P771: resolve full route applying all 5 policy layers
+	const { eliminatedRoutes: _eliminatedRoutes, ...route } = await resolveModelRoute({
+		provider,
+		projectId: req.projectId ?? null,
+		agencyIdentity: req.agencyIdentity ?? null,
+		roleProfileId: req.roleProfileId ?? null,
+		modelHint,
+	});
 	// P797: validate that the resolved model has at least one enabled route before spawning
 	const routeCheck = await validateModelForDispatch(
 		route.modelName,
