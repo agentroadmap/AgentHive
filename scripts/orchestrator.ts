@@ -33,6 +33,11 @@ import { listDispatchableAgencies } from "../src/infra/agency/liaison-service.ts
 import { storeMessage, getNextSequence } from "../src/infra/agency/liaison-message-service.ts";
 import { createMessageEnvelope } from "../src/infra/agency/liaison-message-types.ts";
 import { resolveGateRole, getGateRoleRegistry } from "../src/core/orchestration/gate-role-resolver.ts";
+import {
+	bootCancelPokeAttempts,
+	runOfferReaper,
+	runPokeWatchdogTick,
+} from "../src/core/orchestration/maintenance.ts";
 
 const MCP_URL = getMcpUrl();
 const AGENTHIVE_HOST = process.env.AGENTHIVE_HOST ?? "default";
@@ -2540,6 +2545,9 @@ let pollTimer: NodeJS.Timeout | null = null;
 let implicitGateTimer: NodeJS.Timeout | null = null;
 let enhancerReviseTimer: NodeJS.Timeout | null = null;
 let reconcilerTimer: NodeJS.Timeout | null = null;
+let offerReapTimer: NodeJS.Timeout | null = null;
+let pokeWatchdogTimer: NodeJS.Timeout | null = null;
+let offerReapInFlight = false;
 
 // P611: backstop reconciler — catches any gate advances that the AFTER INSERT trigger
 // missed (e.g., trigger disabled, cross-transaction race, or manual GDL INSERT).
@@ -2622,6 +2630,9 @@ async function main() {
 		},
 		"Orchestrator.Reaper",
 	);
+
+	// Cancel orphaned poke attempts from any prior process epoch.
+	await bootCancelPokeAttempts(query, logger, "Orchestrator");
 
 	const pgClient = await pool.connect();
 
@@ -2769,6 +2780,28 @@ async function main() {
 	}, 30_000);
 	logger.log("P611 reconciler polling every 30s for stranded gate advances.");
 
+	// Phase 3 / maintenance.ts: offer reaper (every 60s) + poke watchdog (every 60s).
+	offerReapTimer = setInterval(() => {
+		if (stopping || offerReapInFlight) return;
+		offerReapInFlight = true;
+		void runOfferReaper(query, logger, "Orchestrator").finally(() => {
+			offerReapInFlight = false;
+		});
+	}, 60_000);
+	pokeWatchdogTimer = setInterval(() => {
+		if (stopping) return;
+		void runPokeWatchdogTick(
+			{
+				idleThresholdMin: Number(process.env.AGENTHIVE_POKE_IDLE_THRESHOLD_MIN ?? 5),
+				stormCap: Number(process.env.POKE_STORM_CAP ?? 10),
+			},
+			query,
+			logger,
+			"Orchestrator",
+		);
+	}, 60_000);
+	logger.log("[Orchestrator] Maintenance started — offer reaper + poke watchdog every 60s");
+
 	logger.log("Orchestrator running with dynamic agent deployment...");
 
 	// P266 + hotfix: graceful shutdown — drain in-flight dispatches before
@@ -2789,6 +2822,8 @@ async function main() {
 		if (implicitGateTimer) clearInterval(implicitGateTimer);
 		if (enhancerReviseTimer) clearInterval(enhancerReviseTimer);
 		if (reconcilerTimer) clearInterval(reconcilerTimer);
+		if (offerReapTimer) clearInterval(offerReapTimer);
+		if (pokeWatchdogTimer) clearInterval(pokeWatchdogTimer);
 
 		// Propagate the signal to spawned children; their stdout/close events
 		// then let the in-flight dispatch promises settle naturally. Use a
@@ -2843,8 +2878,19 @@ async function main() {
 			}
 		}
 
+		// Hard-exit guard: if pool.end() hangs (LISTEN socket not cleanly closed),
+		// the process would otherwise sit until systemd SIGKILLs it. unref() so
+		// the timer doesn't prevent an earlier clean exit.
+		const hardExit = setTimeout(() => {
+			logger.warn("pool.end hung, forcing process.exit(0)");
+			process.exit(0);
+		}, 5_000);
+		hardExit.unref();
+
 		try {
-			pgClient.release();
+			// Destroy (not recycle) the LISTEN client so pool.end() doesn't wait
+			// for a LISTEN socket that has no clean teardown path.
+			pgClient.release(true);
 		} catch (e) {
 			logger.warn(`pgClient release: ${e instanceof Error ? e.message : e}`);
 		}

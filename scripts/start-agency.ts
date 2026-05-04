@@ -197,6 +197,9 @@ async function main() {
 			}
 			await offerProvider.stop();
 			await offerProvider.waitForIdle(30_000);
+			// Hard-exit guard: pool.end() can hang on open LISTEN sockets.
+			const hardExit = setTimeout(() => process.exit(0), 5_000);
+			hardExit.unref();
 			await closePool();
 			process.exit(0);
 		});
