@@ -8,8 +8,10 @@
 import { query } from "../postgres/pool.ts";
 import {
   recordAssistanceRequest,
+  updateAssistanceRequest,
   type AssistancePayload,
 } from "./stuck-detection.ts";
+import { sendMessage } from "./liaison-message-service.ts";
 
 export interface RequestAssistanceInput {
   briefing_id: string;
@@ -85,16 +87,15 @@ export async function handleRequestAssistance(
   await pauseLease(input.briefing_id);
 
   // Step 3: Post notification message to liaison (via liaison_message table)
-  // TODO(P475): Wire message insertion to notify parent agent and liaison
   await notifyLiaisonAndParent(
     input.briefing_context.agency_id,
+    input.briefing_context.agent_identity,
     input.briefing_id,
     request_id,
     payload
   );
 
-  // Step 4: Post to rescue:<agency_id> channel for watchdog
-  // TODO(P475): Wire channel message posting
+  // Step 4: Post to system:liaison:<agency_id> channel for watchdog
   await postToRescueChannel(input.briefing_context.agency_id, request_id, payload);
 
   return {
@@ -119,51 +120,103 @@ async function pauseLease(briefing_id: string): Promise<void> {
 }
 
 /**
- * Notify parent agent and liaison of the assistance request.
+ * Notify liaison of the assistance request via liaison_message protocol.
+ * Fires pg_notify('liaison_message_<agency_id>') → wakes LiaisonHub listener.
  */
 async function notifyLiaisonAndParent(
   agency_id: string,
+  agent_identity: string,
   briefing_id: string,
   request_id: bigint,
   payload: AssistancePayload
 ): Promise<void> {
-  // TODO(P475): Wire assistance_request message insertion to liaison_message
-  // Message kind: "assistance_request" is already in the catalog
-  if (process.env.DEBUG_P467) {
-    console.log(
-      `[P467] Notified liaison and parent of assistance request ${request_id}`
-    );
+  try {
+    await sendMessage({
+      agency_id,
+      direction: "liaison->orchestrator",
+      kind: "assistance_request",
+      payload: {
+        ...payload,
+        request_id: String(request_id),
+        agent_identity,
+        briefing_id,
+      },
+    });
+  } catch (err) {
+    // Non-fatal: assistance_request is already recorded; hub will pick it up on next poll
+    if (process.env.DEBUG_P467) {
+      console.error(`[P467] Failed to notify liaison for request ${request_id}:`, err);
+    }
   }
 }
 
 /**
- * Post to rescue:<agency_id> channel so watchdog picks it up.
+ * Mirror to message_ledger on the liaison channel so watchdog/observers can track via A2A query.
  */
 async function postToRescueChannel(
   agency_id: string,
   request_id: bigint,
   payload: AssistancePayload
 ): Promise<void> {
-  // TODO(P475): Wire channel message posting for rescue:<agency_id>
-  if (process.env.DEBUG_P467) {
-    console.log(
-      `[P467] Posted assistance request ${request_id} to rescue:${agency_id}`
+  try {
+    await query(
+      `INSERT INTO roadmap.message_ledger
+          (from_agent, channel, message_content, message_type, metadata)
+       VALUES ($1, $2, $3, 'notify', $4)`,
+      [
+        agency_id,
+        `system:liaison:${agency_id}`,
+        `Assistance request ${request_id}: ${payload.error_signature ?? "unknown"}`,
+        JSON.stringify({
+          kind: "assistance_request",
+          request_id: String(request_id),
+          blocker_severity: payload.blocker_severity,
+        }),
+      ]
     );
+  } catch {
+    // Non-critical
   }
 }
 
 /**
  * Resolve an assistance request with a directive from the liaison.
- * Called by liaison after auto-remediation or re-spawn decision.
+ * Marks the request resolved and sends a downlink directive to the subagent
+ * via message_ledger → trig_a2a_message_notify → pg_notify a2a_msg_{agent}.
  */
 export async function handleAssistanceResolve(input: {
   request_id: bigint;
   directive: string;
   try_directive?: Record<string, any>;
 }): Promise<void> {
-  // TODO(P475): Implement assistance_resolve action
-  // This sends back a directive to the child (e.g., "try with different params")
-  if (process.env.DEBUG_P467) {
-    console.log(`[P467] Resolved assistance request ${input.request_id}`);
+  // Look up agent_identity from the assistance_request record
+  const { rows } = await query<{ agent_identity: string; agency_id: string }>(
+    `SELECT agent_identity, agency_id FROM roadmap.assistance_request WHERE id = $1`,
+    [input.request_id]
+  );
+  const record = rows[0];
+
+  await updateAssistanceRequest(input.request_id, "resolved", {
+    resolution_path: "operator_directive",
+    directive: input.directive,
+  });
+
+  // Send directive downlink to the subagent if identity is known
+  if (record?.agent_identity) {
+    await query(
+      `INSERT INTO roadmap.message_ledger
+          (from_agent, to_agent, message_content, message_type, metadata)
+       VALUES ('liaison', $1, $2, 'notify', $3)`,
+      [
+        record.agent_identity,
+        input.directive,
+        JSON.stringify({
+          type: "directive",
+          request_id: String(input.request_id),
+          source: "operator",
+          ...(input.try_directive ?? {}),
+        }),
+      ]
+    );
   }
 }

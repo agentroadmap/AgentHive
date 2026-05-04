@@ -1276,6 +1276,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 			// and escalation channels. Absent → child runs in legacy "blind"
 			// mode using only the task prompt.
 			...(req.briefingId ? { AGENTHIVE_BRIEFING_ID: req.briefingId } : {}),
+			...(req.agentLabel ? { AGENTHIVE_AGENT_IDENTITY: req.agentLabel } : {}),
 		},
 	});
 
