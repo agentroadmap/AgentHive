@@ -78,7 +78,7 @@ export class GateEvaluatorAgent {
 			newStatus: string,
 			authorIdentity?: string,
 			changeSummary?: string,
-		) => Promise<any>,
+		) => Promise<unknown>,
 	) {}
 
 	/**

@@ -38,6 +38,16 @@ type-check:
     paths:
       - node_modules/
 
+tsc-check:
+  stage: check
+  script:
+    - npm ci
+    - node node_modules/typescript/bin/tsc --project tsconfig.check.json
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+
 lint:
   stage: check
   script:
