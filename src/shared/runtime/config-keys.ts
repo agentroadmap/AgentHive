@@ -20,9 +20,10 @@ export const SecretKeys = {
 		name: "PGPASSWORD",
 		class: "secret" as const,
 		parse: (v: string) => v,
-		required: false,
-		description: "PostgreSQL password (rely on .pgpass / libpq implicit auth if not set)",
-	} satisfies ConfigKey<string | undefined>,
+		required: true,
+		description:
+			"PostgreSQL password (rely on .pgpass / libpq implicit auth if not set)",
+	} satisfies ConfigKey<string>,
 
 	DISCORD_BOT_TOKEN: {
 		name: "DISCORD_BOT_TOKEN",
@@ -90,7 +91,8 @@ export const StructuralKeys = {
 		class: "structural" as const,
 		parse: (v: string) => v,
 		required: true,
-		description: "PostgreSQL username (no default — set PGUSER env or rely on OS user via peer auth)",
+		description:
+			"PostgreSQL username (no default — set PGUSER env or rely on OS user via peer auth)",
 		yamlPath: "database.user",
 		envOverride: true,
 	} satisfies ConfigKey<string>,
@@ -399,7 +401,8 @@ export const StructuralKeys = {
 		class: "structural" as const,
 		parse: (v: string) => v,
 		required: false,
-		description: "PostgreSQL service name (.pgpass/.pg_service.conf) for connection",
+		description:
+			"PostgreSQL service name (.pgpass/.pg_service.conf) for connection",
 		envOverride: true,
 	} satisfies ConfigKey<string | undefined>,
 
@@ -521,7 +524,8 @@ export const RegistryKeys = {
 			return parsed;
 		},
 		required: false,
-		description: "Project spending threshold for hard limits (in currency units)",
+		description:
+			"Project spending threshold for hard limits (in currency units)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
@@ -721,7 +725,7 @@ export const FlagKeys = {
 export const DiagnosticKeys = {
 	DEBUG: {
 		name: "DEBUG",
-		class: "structural" as const,
+		class: "secret" as const,
 		parse: (v: string) => v.toLowerCase() === "true" || v === "1",
 		required: false,
 		description: "Enable debug logging",
@@ -729,7 +733,7 @@ export const DiagnosticKeys = {
 
 	DEBUG_PG: {
 		name: "DEBUG_PG",
-		class: "structural" as const,
+		class: "secret" as const,
 		parse: (v: string) => v.toLowerCase() === "true" || v === "1",
 		required: false,
 		description: "Enable PostgreSQL debug logging",
@@ -763,7 +767,7 @@ export function getConfigKeyByName(name: string): ConfigKey<any> {
 	if (!key) {
 		throw new Error(
 			`[Config] Unknown configuration key: ${name}. ` +
-			`Known keys: ${Object.keys(AllConfigKeys).join(", ")}`,
+				`Known keys: ${Object.keys(AllConfigKeys).join(", ")}`,
 		);
 	}
 	return key;
