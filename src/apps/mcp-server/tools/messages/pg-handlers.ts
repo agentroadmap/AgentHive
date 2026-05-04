@@ -269,23 +269,7 @@ export class PgMessagingHandlers {
 				);
 
 				if (agentCheckResult.rows.length === 0) {
-					// Agent not found — send NACK
-					await query(
-						`INSERT INTO message_ledger (from_agent, to_agent, message_type, message_content)
-						 VALUES ($1, $2, 'nack', $3)`,
-						[
-							"system:dead-letter",
-							args.from_agent,
-							JSON.stringify({
-								original_message_id: null,
-								failure_reason: "agent_not_found",
-								retriable: false,
-								target_agent: args.to_agent,
-								timestamp: new Date().toISOString(),
-							}),
-						],
-					);
-					// Silent return per P209
+					// Agent not found — silent return per P209 (dead-letter NACK deferred to P835)
 					return {
 						content: [
 							{
@@ -305,23 +289,7 @@ export class PgMessagingHandlers {
 				if (trustTierResult.rows.length > 0) {
 					const trustTier = trustTierResult.rows[0]?.trust_tier;
 					if (trustTier === "blocked") {
-						// Recipient blocked — send NACK
-						await query(
-							`INSERT INTO message_ledger (from_agent, to_agent, message_type, message_content)
-							 VALUES ($1, $2, 'nack', $3)`,
-							[
-								"system:dead-letter",
-								args.from_agent,
-								JSON.stringify({
-									original_message_id: null,
-									failure_reason: "recipient_blocked",
-									retriable: false,
-									target_agent: args.to_agent,
-									timestamp: new Date().toISOString(),
-								}),
-							],
-						);
-						// Silent return per P209
+						// Recipient blocked — silent return per P209 (dead-letter NACK deferred to P835)
 						return {
 							content: [
 								{
@@ -463,25 +431,8 @@ export class PgMessagingHandlers {
 					console.error(`[P834] Signature verification error: ${err}`);
 				}
 
-				// On signature failure, send NACK and return
+				// On signature failure, silent return per P209 design (NACK delivery deferred to P835)
 				if (sigVerified === "failed") {
-					// Insert NACK into ledger
-					await query(
-						`INSERT INTO roadmap.message_ledger
-						  (from_agent, to_agent, message_type, message_content, correlation_id, sig_verified)
-						 VALUES ($1, $2, 'nack', $3, $4, 'verified')`,
-						[
-							"system:sig-gate",
-							args.from_agent,
-							JSON.stringify({
-								failure_reason: "signature_verification_failed",
-								original_from: args.from_agent,
-								timestamp: new Date().toISOString(),
-							}),
-							correlationId,
-						],
-					);
-					// Silent return per P209 design
 					return {
 						content: [
 							{

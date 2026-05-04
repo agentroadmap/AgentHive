@@ -16,7 +16,7 @@ import { Pool } from "pg";
 
 const DB_URL =
 	process.env.DATABASE_URL ??
-	"postgresql://admin:YMA3peHGLi6shUTr@127.0.0.1:5432/agenthive";
+	"postgresql://admin@127.0.0.1:5432/agenthive";
 
 let pool: Pool;
 

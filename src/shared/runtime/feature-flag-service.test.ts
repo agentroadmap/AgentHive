@@ -13,7 +13,7 @@ describe("FeatureFlagService", () => {
       host: process.env.PGHOST || "127.0.0.1",
       port: parseInt(process.env.PGPORT || "5432", 10),
       user: process.env.PGUSER || "admin",
-      password: process.env.PGPASSWORD || "YMA3peHGLi6shUTr",
+      password: process.env.PGPASSWORD,
       database: process.env.PGDATABASE || "agenthive",
     });
 

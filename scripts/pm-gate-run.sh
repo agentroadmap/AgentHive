@@ -9,7 +9,7 @@ PGHOST="${PGHOST:-127.0.0.1}"
 PGPORT="${PGPORT:-5432}"
 PGUSER="${PGUSER:-admin}"
 PGDATABASE="${PGDATABASE:-agenthive}"
-export PGPASSWORD="${PGPASSWORD:-YMA3peHGLi6shUTr}"
+export PGPASSWORD="${PGPASSWORD:?PGPASSWORD must be set (use ~/.pgpass or set the env var)}"
 
 MCP_URL="${MCP_URL:-http://127.0.0.1:6421}"
 
