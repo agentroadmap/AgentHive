@@ -52,7 +52,7 @@ export async function storeMessage(
              VALUES ($1, $2, $3, 'liaison', $4)
              RETURNING id`,
             [
-                message.agency_id,
+                `liaison:${message.agency_id}`,
                 `system:liaison:${message.agency_id}`,
                 JSON.stringify(message.payload).substring(0, 4096),
                 JSON.stringify({
