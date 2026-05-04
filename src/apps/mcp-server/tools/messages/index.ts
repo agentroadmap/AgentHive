@@ -3,6 +3,9 @@ import type { McpToolHandler } from "../../types.ts";
 import { createSimpleValidatedTool } from "../../validation/tool-wrapper.ts";
 import type { JsonSchema } from "../../validation/validators.ts";
 import { PgMessagingHandlers } from "./pg-handlers.ts";
+import { handleMsgAck } from "./msg-ack.ts";
+import { handleMsgReply } from "./msg-reply.ts";
+import { handleMsgWaitReply } from "./msg-wait-reply.ts";
 
 const msgMarkReadSchema: JsonSchema = {
 	type: "object",
@@ -205,10 +208,143 @@ export function registerMessageTools(server: McpServer): void {
 			pgHandlers.subscribe(input as { agent_identity: string; channel: string; subscribe?: boolean }),
 	);
 
+	const msgAckTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "msg_ack",
+			description:
+				"Acknowledge a message with outcome (ok|reject|noop). Idempotent — if already acked, returns existing outcome. Cancels pending timeout escalation.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					message_id: {
+						type: "number",
+						description: "Message ID to acknowledge",
+					},
+					outcome: {
+						type: "string",
+						enum: ["ok", "reject", "noop"],
+						description: "ACK outcome",
+					},
+					reason: {
+						type: "string",
+						description: "Optional reason for the outcome",
+					},
+				},
+				required: ["message_id", "outcome"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				message_id: { type: "number" },
+				outcome: { type: "string" },
+				reason: { type: "string" },
+			},
+			required: ["message_id", "outcome"],
+		} as JsonSchema,
+		async (input) =>
+			handleMsgAck(input as {
+				message_id: number;
+				outcome: "ok" | "reject" | "noop";
+				reason?: string;
+			}),
+	);
+
+	const msgReplyTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "msg_reply",
+			description:
+				"Reply to a message using correlation_id. Auto-acks the original message and notifies recipient via pg_notify.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					correlation_id: {
+						type: "string",
+						description: "UUID correlation_id of the original message to reply to",
+					},
+					content: {
+						type: "string",
+						description: "Reply message content",
+					},
+					message_type: {
+						type: "string",
+						description: "Reply message type (defaults to 'ack')",
+					},
+					from_agent: {
+						type: "string",
+						description: "Agent identity sending the reply",
+					},
+				},
+				required: ["correlation_id", "content", "from_agent"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				correlation_id: { type: "string" },
+				content: { type: "string" },
+				message_type: { type: "string" },
+				from_agent: { type: "string" },
+			},
+			required: ["correlation_id", "content", "from_agent"],
+		} as JsonSchema,
+		async (input) =>
+			handleMsgReply(input as {
+				correlation_id: string;
+				content: string;
+				message_type?: string;
+				from_agent: string;
+			}),
+	);
+
+	const msgWaitReplyTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "msg_wait_reply",
+			description:
+				"Wait for a reply to a message using correlation_id. Polls every 5s with pg_notify fallback. Returns reply_message_id if a reply arrives, or timed_out: true if timeout exceeded.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					message_id: {
+						type: "number",
+						description: "Original message ID to wait for a reply to",
+					},
+					timeout_ms: {
+						type: "number",
+						description: "Timeout in milliseconds (0-300000, capped at 5 minutes)",
+					},
+					agent: {
+						type: "string",
+						description: "Agent identity waiting for the reply",
+					},
+				},
+				required: ["message_id", "timeout_ms", "agent"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				message_id: { type: "number" },
+				timeout_ms: { type: "number" },
+				agent: { type: "string" },
+			},
+			required: ["message_id", "timeout_ms", "agent"],
+		} as JsonSchema,
+		async (input) =>
+			handleMsgWaitReply(input as {
+				message_id: number;
+				timeout_ms: number;
+				agent: string;
+			}),
+	);
+
 	server.addTool(sendTool);
 	server.addTool(readTool);
 	server.addTool(markReadTool);
 	server.addTool(unreadCountTool);
 	server.addTool(chanListTool);
 	server.addTool(chanSubscribeTool);
+	server.addTool(msgAckTool);
+	server.addTool(msgReplyTool);
+	server.addTool(msgWaitReplyTool);
 }
