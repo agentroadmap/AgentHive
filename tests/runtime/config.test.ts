@@ -12,23 +12,20 @@
  */
 
 import { strict as assert } from "node:assert";
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import {
-	initConfig,
-	clearCache,
 	cleanup,
+	clearCache,
 	get,
-	getOptional,
 	getAudit,
-	RuntimeConfigMissing,
-	RuntimeConfigInvalidSource,
-	type ConfigKey,
+	getOptional,
+	initConfig,
 } from "../../src/shared/runtime/config";
 import {
+	DiagnosticKeys,
+	RegistryKeys,
 	SecretKeys,
 	StructuralKeys,
-	RegistryKeys,
-	DiagnosticKeys,
 } from "../../src/shared/runtime/config-keys";
 
 // Store original env for cleanup
@@ -68,7 +65,10 @@ describe("Config Resolver (P474)", () => {
 		});
 
 		it("should declare all registry keys", () => {
-			assert.strictEqual(RegistryKeys.AGENTHIVE_DEFAULT_PROVIDER.class, "registry");
+			assert.strictEqual(
+				RegistryKeys.AGENTHIVE_DEFAULT_PROVIDER.class,
+				"registry",
+			);
 			assert.strictEqual(
 				RegistryKeys.AGENTHIVE_DEFAULT_PROVIDER.name,
 				"AGENTHIVE_DEFAULT_PROVIDER",
@@ -160,7 +160,7 @@ describe("Config Resolver (P474)", () => {
 			let thrown = false;
 			try {
 				await get(StructuralKeys.PGPORT);
-			} catch (err) {
+			} catch (_err) {
 				thrown = true;
 			}
 			assert.strictEqual(thrown, true);
@@ -172,9 +172,7 @@ describe("Config Resolver (P474)", () => {
 			await initConfig({});
 			delete process.env.AGENTHIVE_DEFAULT_PROVIDER;
 
-			const value = await getOptional(
-				RegistryKeys.AGENTHIVE_DEFAULT_PROVIDER,
-			);
+			const value = await getOptional(RegistryKeys.AGENTHIVE_DEFAULT_PROVIDER);
 			assert.strictEqual(value, undefined);
 		});
 
@@ -182,9 +180,7 @@ describe("Config Resolver (P474)", () => {
 			await initConfig({});
 			process.env.AGENTHIVE_DEFAULT_PROVIDER = "claude";
 
-			const value = await getOptional(
-				RegistryKeys.AGENTHIVE_DEFAULT_PROVIDER,
-			);
+			const value = await getOptional(RegistryKeys.AGENTHIVE_DEFAULT_PROVIDER);
 			assert.strictEqual(value, "claude");
 		});
 	});
@@ -228,8 +224,14 @@ describe("Config Resolver (P474)", () => {
 
 			const audit = getAudit();
 			assert.strictEqual(audit.length >= 2, true);
-			assert.strictEqual(audit.some((a) => a.keyName === "PGHOST"), true);
-			assert.strictEqual(audit.some((a) => a.keyName === "PGUSER"), true);
+			assert.strictEqual(
+				audit.some((a) => a.keyName === "PGHOST"),
+				true,
+			);
+			assert.strictEqual(
+				audit.some((a) => a.keyName === "PGUSER"),
+				true,
+			);
 		});
 	});
 
@@ -334,7 +336,7 @@ describe("Config Resolver (P474)", () => {
 			let thrown = false;
 			try {
 				await get(StructuralKeys.PG_SCHEMA);
-			} catch (err) {
+			} catch (_err) {
 				thrown = true;
 			}
 			assert.strictEqual(thrown, true);
@@ -383,7 +385,7 @@ describe("Config Resolver (P474)", () => {
 			let thrown = false;
 			try {
 				await get(StructuralKeys.AGENTHIVE_MCP_URL);
-			} catch (err) {
+			} catch (_err) {
 				thrown = true;
 			}
 			assert.strictEqual(thrown, true);

@@ -762,7 +762,7 @@ export const AllConfigKeys = {
 /**
  * Get a config key by name. Throws if key not found.
  */
-export function getConfigKeyByName(name: string): ConfigKey<any> {
+export function getConfigKeyByName(name: string): ConfigKey<unknown> {
 	const key = AllConfigKeys[name as keyof typeof AllConfigKeys];
 	if (!key) {
 		throw new Error(

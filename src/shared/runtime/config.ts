@@ -96,19 +96,19 @@ interface CachedValue<T> {
 }
 
 class ConfigResolver {
-	private cache: Map<string, CachedValue<any>> = new Map();
+	private cache: Map<string, CachedValue<unknown>> = new Map();
 	private audit: Map<string, ConfigAuditEntry> = new Map();
 	private envFileVars: Map<string, string> = new Map();
-	private yamlConfig: Record<string, any> | null = null;
+	private yamlConfig: Record<string, unknown> | null = null;
 	private pool: Pool | null = null;
-	private dbCache: Map<string, any> = new Map();
+	private dbCache: Map<string, unknown> = new Map();
 	private notifySubscription: PoolClient | null = null;
 
 	/**
 	 * Initialize the resolver with optional yaml config and database pool.
 	 */
 	async init(opts: {
-		yamlConfig?: Record<string, any>;
+		yamlConfig?: Record<string, unknown>;
 		pool?: Pool;
 		envFilePath?: string;
 	}): Promise<void> {
@@ -367,15 +367,15 @@ class ConfigResolver {
 	/**
 	 * Extract value from yaml config using dot-notation path.
 	 */
-	private getYamlValue(path: string): any {
+	private getYamlValue(path: string): unknown {
 		if (!this.yamlConfig) return undefined;
 		const parts = path.split(".");
-		let current: any = this.yamlConfig;
+		let current: unknown = this.yamlConfig;
 		for (const part of parts) {
 			if (current === null || typeof current !== "object") {
 				return undefined;
 			}
-			current = current[part];
+			current = (current as Record<string, unknown>)[part];
 		}
 		return current;
 	}
@@ -384,7 +384,7 @@ class ConfigResolver {
 	 * Phase 2 stub: DB registry/flag resolution deferred to P827.
 	 * P827 will replace this with schema-aware parameterized queries.
 	 */
-	private async getDbValue(_table: string, _column: string): Promise<any> {
+	private async getDbValue(_table: string, _column: string): Promise<unknown> {
 		return undefined;
 	}
 
@@ -417,7 +417,7 @@ let globalResolver: ConfigResolver | null = null;
  * Call once at process startup.
  */
 export async function initConfig(opts: {
-	yamlConfig?: Record<string, any>;
+	yamlConfig?: Record<string, unknown>;
 	pool?: Pool;
 	envFilePath?: string;
 }): Promise<ConfigResolver> {
