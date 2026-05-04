@@ -1093,6 +1093,26 @@ export class PipelineCron {
 					? Number(transition.proposal_id)
 					: null;
 
+		// A3 (P750): skip dispatch if orchestrator already holds an active lease.
+		// Prevents double-dispatch when both services receive the same PG NOTIFY.
+		if (proposalId !== null) {
+			const { rows: leaseRows } = await this.queryFn<{ agent_identity: string }>(
+				`SELECT agent_identity FROM roadmap_proposal.proposal_lease
+				  WHERE proposal_id = $1
+				    AND released_at IS NULL
+				    AND (expires_at IS NULL OR expires_at > now())
+				  LIMIT 1`,
+				[proposalId],
+			);
+			if (leaseRows.length > 0) {
+				this.logger.log(
+					`[PipelineCron] Skipping transition ${transition.id} for proposal ${proposalId} — active lease held by ${leaseRows[0].agent_identity}`,
+				);
+				await this.releaseTransitionToQueue(transition.id);
+				return;
+			}
+		}
+
 		const proposalContext =
 			proposalId !== null
 				? await loadProposalDispatchContext(this.queryFn, proposalId)
@@ -1371,6 +1391,17 @@ export class PipelineCron {
            processing_at = now(),
            last_error = NULL
        WHERE id = $1`,
+			[id],
+		);
+	}
+
+	private async releaseTransitionToQueue(id: TransitionQueueId): Promise<void> {
+		await this.queryFn(
+			`UPDATE roadmap.transition_queue
+       SET status = 'pending',
+           processing_at = NULL,
+           process_after = now() + interval '60 seconds'
+       WHERE id = $1 AND status = 'processing'`,
 			[id],
 		);
 	}
