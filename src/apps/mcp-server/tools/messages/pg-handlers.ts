@@ -252,6 +252,80 @@ export class PgMessagingHandlers {
 		proposal_id?: string;
 	}): Promise<CallToolResult> {
 		try {
+			// P835: Dead letter checks before INSERT
+			if (args.to_agent) {
+				// Check if to_agent exists in agent_registry
+				const agentCheckResult = await query<{ agent_identity: string }>(
+					`SELECT agent_identity FROM roadmap_workforce.agent_registry WHERE agent_identity = $1 LIMIT 1`,
+					[args.to_agent],
+				);
+
+				if (agentCheckResult.rows.length === 0) {
+					// Agent not found — send NACK
+					await query(
+						`INSERT INTO message_ledger (from_agent, to_agent, message_type, message_content)
+						 VALUES ($1, $2, 'nack', $3)`,
+						[
+							"system:dead-letter",
+							args.from_agent,
+							JSON.stringify({
+								original_message_id: null,
+								failure_reason: "agent_not_found",
+								retriable: false,
+								target_agent: args.to_agent,
+								timestamp: new Date().toISOString(),
+							}),
+						],
+					);
+					// Silent return per P209
+					return {
+						content: [
+							{
+								type: "text",
+								text: "Message processed.",
+							},
+						],
+					};
+				}
+
+				// Check if to_agent has trust_tier='blocked'
+				const trustTierResult = await query<{ trust_tier: string }>(
+					`SELECT trust_tier FROM roadmap_workforce.agent_registry WHERE agent_identity = $1 LIMIT 1`,
+					[args.to_agent],
+				);
+
+				if (trustTierResult.rows.length > 0) {
+					const trustTier = trustTierResult.rows[0]?.trust_tier;
+					if (trustTier === "blocked") {
+						// Recipient blocked — send NACK
+						await query(
+							`INSERT INTO message_ledger (from_agent, to_agent, message_type, message_content)
+							 VALUES ($1, $2, 'nack', $3)`,
+							[
+								"system:dead-letter",
+								args.from_agent,
+								JSON.stringify({
+									original_message_id: null,
+									failure_reason: "recipient_blocked",
+									retriable: false,
+									target_agent: args.to_agent,
+									timestamp: new Date().toISOString(),
+								}),
+							],
+						);
+						// Silent return per P209
+						return {
+							content: [
+								{
+									type: "text",
+									text: "Message processed.",
+								},
+							],
+						};
+					}
+				}
+			}
+
 			// P209: Enforce message dispatch gate before insertion
 			const gateResult = await enforceMessageGate({
 				from_agent: args.from_agent,
@@ -275,24 +349,88 @@ export class PgMessagingHandlers {
 				};
 			}
 
+			// P833: Look up message_type in message_type_contract — reject unknown types
+			const messageType = args.message_type || "text";
+			const contractResult = await query(
+				`SELECT ack_required, timeout_seconds, escalation_recipient
+				 FROM roadmap.message_type_contract
+				 WHERE message_type = $1`,
+				[messageType],
+			);
+
+			if (contractResult.rows.length === 0) {
+				return errorResult(
+					`Unknown message type: ${messageType}`,
+					new Error("UNKNOWN_MESSAGE_TYPE"),
+				);
+			}
+
+			const contract = contractResult.rows[0];
+			// Generate correlation_id using crypto.randomUUID or fallback
+			let correlationId: string;
+			try {
+				correlationId = crypto.randomUUID();
+			} catch {
+				// Fallback for environments without crypto.randomUUID
+				correlationId = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+			}
+
+			// P833: INSERT into message_ledger with sig_verified='pending' and correlation_id
 			const { rows } = await query(
-				`INSERT INTO message_ledger (from_agent, to_agent, channel, message_content, message_type, proposal_id)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id, created_at`,
+				`INSERT INTO message_ledger (from_agent, to_agent, channel, message_content, message_type, proposal_id, correlation_id, sig_verified)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
+				RETURNING id, created_at`,
 				[
 					args.from_agent,
 					args.to_agent || null,
 					args.channel || null,
 					args.message_content,
-					args.message_type || "text",
+					messageType,
 					args.proposal_id || null,
+					correlationId,
 				],
 			);
+
+			const messageId = rows[0].id;
+
+			// P833: If ack_required=true and timeout_seconds is set: INSERT into message_timeout_tracking
+			if (contract.ack_required && contract.timeout_seconds) {
+				await query(
+					`INSERT INTO roadmap.message_timeout_tracking (
+						message_id, timeout_at, escalation_recipient
+					)
+					VALUES ($1, now() + ($2 || ' seconds')::interval, $3)
+					ON CONFLICT (message_id) DO NOTHING`,
+					[messageId, contract.timeout_seconds, contract.escalation_recipient || "liaison_hub"],
+				);
+			}
+
+			// P833: pg_notify with JSON payload {message_id, correlation_id, from_agent}
+			if (args.to_agent) {
+				const pool = getPool();
+				const client = await pool.connect();
+				try {
+					await client.query(
+						`SELECT pg_notify(
+							'a2a_msg_' || $1,
+							json_build_object(
+								'message_id', $2,
+								'correlation_id', $3,
+								'from_agent', $4
+							)::text
+						)`,
+						[args.to_agent, messageId, correlationId, args.from_agent],
+					);
+				} finally {
+					client.release();
+				}
+			}
+
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Message sent (id: ${rows[0].id}) at ${rows[0].created_at}`,
+						text: `Message sent (id: ${messageId}, correlation_id: ${correlationId}) at ${rows[0].created_at}`,
 					},
 				],
 			};
