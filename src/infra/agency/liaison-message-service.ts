@@ -24,6 +24,10 @@ function getSigningKey(): string {
 /**
  * Insert a message and return it with all fields set.
  * Enforces idempotency via (agency_id, sequence) unique constraint.
+ *
+ * P149 Phase C: also mirrors to message_ledger for unified A2A observability.
+ * The ledger insert is best-effort — if it fails (e.g. from_agent not in
+ * agent_registry), liaison_message remains the authoritative store.
  */
 export async function storeMessage(
     message: Partial<LiaisonMessage> & {
@@ -38,12 +42,42 @@ export async function storeMessage(
         sequence: bigint;
     }
 ): Promise<LiaisonMessage> {
+    // Mirror to message_ledger — enables unified A2A query surface and pg_notify
+    // on a2a_chan_system:liaison:<agency_id> for future consumers.
+    let ledgerId: number | null = null;
+    try {
+        const ledgerResult = await query<{ id: number }>(
+            `INSERT INTO roadmap.message_ledger
+                (from_agent, channel, message_content, message_type, metadata)
+             VALUES ($1, $2, $3, 'liaison', $4)
+             RETURNING id`,
+            [
+                message.agency_id,
+                `system:liaison:${message.agency_id}`,
+                JSON.stringify(message.payload).substring(0, 4096),
+                JSON.stringify({
+                    kind: message.kind,
+                    direction: message.direction,
+                    correlation_id: message.correlation_id,
+                    signed_at: message.signed_at,
+                    signature: message.signature,
+                    sequence: String(message.sequence),
+                    message_id: message.message_id,
+                }),
+            ]
+        );
+        ledgerId = ledgerResult.rows[0]?.id ?? null;
+    } catch {
+        // Mirror failed — proceed with liaison_message as the authoritative store
+    }
+
     const result = await query<LiaisonMessage>(
         `INSERT INTO roadmap.liaison_message
-            (message_id, agency_id, sequence, direction, kind, correlation_id, payload, signed_at, signature)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            (message_id, agency_id, sequence, direction, kind, correlation_id, payload, signed_at, signature, ledger_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         ON CONFLICT (agency_id, sequence) DO UPDATE
-            SET message_id = EXCLUDED.message_id
+            SET message_id = EXCLUDED.message_id,
+                ledger_id  = COALESCE(roadmap.liaison_message.ledger_id, EXCLUDED.ledger_id)
         RETURNING
             message_id, agency_id, sequence, direction, kind, correlation_id,
             payload, signed_at, signature, acked_at, ack_outcome, ack_error, created_at`,
@@ -57,6 +91,7 @@ export async function storeMessage(
             JSON.stringify(message.payload),
             message.signed_at,
             message.signature,
+            ledgerId,
         ]
     );
 
@@ -126,7 +161,7 @@ export async function getNextSequence(agencyId: string): Promise<bigint> {
 export async function getMessageById(messageId: string): Promise<LiaisonMessage | null> {
     const result = await query<any>(
         `SELECT message_id, agency_id, sequence, direction, kind, correlation_id,
-                payload, signed_at, signature, acked_at, ack_outcome, ack_error, created_at
+                payload, signed_at, signature, acked_at, ack_outcome, ack_error, created_at, ledger_id
          FROM roadmap.liaison_message
          WHERE message_id = $1`,
         [messageId]
