@@ -1741,7 +1741,67 @@ export async function createMcpServer(
 		}),
 	});
 
-	console.error("[MCP] Registered 8 P466/P468 spawn-briefing tools (liaison protocol)");
+	server.addTool({
+		name: "progress_note",
+		description:
+			"Report a progress checkpoint to Liaison. Call every 5 tool calls to confirm you are making forward progress. " +
+			"Required when checkpoint_interval is due — failure to call causes Liaison to flag you as stuck.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				briefing_id: { type: "string", description: "UUID of the current briefing" },
+				summary: { type: "string", description: "What you accomplished since the last checkpoint" },
+				confidence: {
+					type: "string",
+					enum: ["low", "med", "high"],
+					description: "How confident you are that your current approach will succeed",
+				},
+				next_attempt: {
+					type: "string",
+					description: "Optional: what you plan to do next",
+				},
+			},
+			required: ["briefing_id", "summary", "confidence"],
+		},
+		handler: wrapJson(async (a) => {
+			const { recordProgressCheckpoint } = await import("../../infra/agency/stuck-detection.ts");
+			const accepted = await recordProgressCheckpoint({
+				briefing_id: a.briefing_id,
+				summary: a.summary,
+				next_attempt: a.next_attempt ?? "",
+				confidence: a.confidence as "low" | "med" | "high",
+			});
+			// Best-effort notification to Liaison channel
+			try {
+				await pgPool.query(
+					`INSERT INTO roadmap.message_ledger
+					    (from_agent, channel, message_content, message_type, metadata)
+					 VALUES ('subagent', $1, $2, 'progress_note', $3)`,
+					[
+						`system:progress:${a.briefing_id}`,
+						a.summary,
+						JSON.stringify({
+							briefing_id: a.briefing_id,
+							confidence: a.confidence,
+							next_attempt: a.next_attempt ?? null,
+							accepted,
+							ts: new Date().toISOString(),
+						}),
+					]
+				);
+			} catch {
+				// Best-effort; do not fail the checkpoint because the ledger insert failed
+			}
+			return {
+				accepted,
+				message: accepted
+					? "Checkpoint recorded. Keep going."
+					: "Checkpoint already pending — no duplicate recorded. Continue working.",
+			};
+		}),
+	});
+
+	console.error("[MCP] Registered 9 P466/P468/P475 spawn-briefing tools (liaison protocol)");
 
 	// Start background maintenance tasks
 	const MAINTENANCE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
