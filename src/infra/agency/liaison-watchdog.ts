@@ -7,7 +7,9 @@ import { query } from "../../postgres/pool.ts";
 import {
   getOpenAssistanceRequests,
   updateAssistanceRequest,
+  detectRunaway,
   type AssistancePayload,
+  type RunawaySignal,
 } from "./stuck-detection.ts";
 
 // ─── Provider termination specs ───────────────────────────────────────────────
@@ -52,16 +54,20 @@ export async function checkFallbackPlaybook(
   const result = await query<{
     error_signature: string | null;
     error_class: string | null;
-    directive: string;
+    try_action: string;
     confidence: number | string;
   }>(
-    `SELECT error_signature, error_class, directive, confidence
+    `SELECT error_signature, error_class, try_action, confidence
      FROM roadmap.fallback_playbook
-     WHERE ($1::text IS NOT NULL AND error_signature = $1)
-        OR ($2::text IS NOT NULL AND error_class = $2)
+     WHERE is_obsolete = false
+       AND (
+         ($1::text IS NOT NULL AND error_signature = $1)
+         OR ($2::text IS NOT NULL AND error_class = $2)
+         OR ($2::text IS NOT NULL AND error_signature = 'class:' || $2)
+       )
      ORDER BY
        (agency_id = $3 OR ($3::text IS NULL AND agency_id IS NULL)) DESC,
-       (error_signature IS NOT NULL) DESC,
+       (error_signature = $1) DESC,
        confidence DESC
      LIMIT 1`,
     [error_signature, error_class ?? null, agency_id ?? null]
@@ -73,7 +79,7 @@ export async function checkFallbackPlaybook(
   return {
     error_signature: row.error_signature ?? error_signature,
     error_pattern: row.error_class ?? "",
-    remediation_directive: row.directive,
+    remediation_directive: row.try_action,
     confidence: typeof row.confidence === "string" ? parseFloat(row.confidence) : row.confidence,
   };
 }
@@ -131,6 +137,106 @@ export interface WatchdogAction {
   request_id: bigint;
   description: string;
   details?: Record<string, any>;
+}
+
+// ─── Runaway helpers ─────────────────────────────────────────────────────────
+
+async function getActiveBriefings(): Promise<string[]> {
+  const result = await query<{ briefing_id: string }>(
+    `SELECT DISTINCT briefing_id::text FROM roadmap.tool_call_log
+     WHERE called_at > now() - interval '2 minutes'`
+  );
+  return result.rows.map((r) => r.briefing_id);
+}
+
+async function hasAnyStrike(briefing_id: string): Promise<boolean> {
+  const result = await query<{ cnt: string | number }>(
+    `SELECT count(*) AS cnt FROM roadmap.spawn_error_strike WHERE briefing_id = $1`,
+    [briefing_id]
+  );
+  const cnt = result.rows[0]?.cnt;
+  const count = typeof cnt === "string" ? parseInt(cnt, 10) : (cnt ?? 0);
+  return count > 0;
+}
+
+async function sendRunawayWarning(
+  briefing_id: string,
+  agency_id: string,
+  signal: RunawaySignal
+): Promise<void> {
+  // Try to find the agent_identity for a direct downlink message
+  const identResult = await query<{ agent_identity: string }>(
+    `SELECT agent_identity FROM roadmap.assistance_request
+     WHERE briefing_id = $1::uuid
+     ORDER BY opened_at DESC LIMIT 1`,
+    [briefing_id]
+  ).catch(() => ({ rows: [] as Array<{ agent_identity: string }> }));
+
+  const agentIdentity = identResult.rows[0]?.agent_identity;
+
+  await query(
+    `INSERT INTO roadmap.message_ledger
+        (from_agent, to_agent, channel, message_content, message_type, metadata)
+     VALUES ('liaison', $1, $2, $3, 'notify', $4)`,
+    [
+      agentIdentity ?? null,
+      agentIdentity ? null : `system:runaway:${briefing_id}`,
+      `RUNAWAY_WARNING: ${signal.description}. Pause repetitive calls immediately and reassess your approach.`,
+      JSON.stringify({
+        type: "runaway_warning",
+        briefing_id,
+        agency_id,
+        signal_kind: signal.kind,
+        details: signal.details,
+        ts: new Date().toISOString(),
+      }),
+    ]
+  );
+}
+
+async function notifyOperatorRunaway(
+  agency_id: string,
+  briefing_id: string,
+  signal: RunawaySignal
+): Promise<void> {
+  try {
+    await query(
+      `INSERT INTO roadmap.message_ledger
+          (from_agent, channel, message_content, message_type, metadata)
+       VALUES ($1, 'system:operator', $2, 'alert', $3)`,
+      [
+        agency_id,
+        `Runaway agent escalation [${signal.kind.toUpperCase()}]: briefing ${briefing_id} — ${signal.description}`,
+        JSON.stringify({
+          kind: "runaway_escalation",
+          briefing_id,
+          agency_id,
+          signal_kind: signal.kind,
+          details: signal.details,
+          ts: new Date().toISOString(),
+        }),
+      ]
+    );
+  } catch {
+    // Best-effort
+  }
+
+  const webhookUrl = process.env.OPERATOR_WEBHOOK_URL;
+  if (webhookUrl) {
+    fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "runaway_escalation",
+        agency_id,
+        briefing_id,
+        signal_kind: signal.kind,
+        description: signal.description,
+        details: signal.details,
+        ts: new Date().toISOString(),
+      }),
+    }).catch(() => undefined);
+  }
 }
 
 // ─── Core processing ──────────────────────────────────────────────────────────
@@ -232,6 +338,46 @@ export async function runWatchdogCycle(
         request_id: request.id,
         description: `Processing error: ${String(error)}`,
       });
+    }
+  }
+
+  // Runaway detection: scan briefings active in the last 2 minutes
+  try {
+    const activeBriefings = await getActiveBriefings();
+    for (const briefing_id of activeBriefings) {
+      try {
+        const signal = await detectRunaway(briefing_id);
+        if (!signal) continue;
+
+        const alreadyStruck = await hasAnyStrike(briefing_id);
+        if (alreadyStruck) {
+          // Prior errors + runaway pattern → escalate to operator immediately
+          await notifyOperatorRunaway(agency_id, briefing_id, signal);
+          actions.push({
+            type: "escalate",
+            request_id: BigInt(0),
+            description: `Runaway escalated for briefing ${briefing_id}: ${signal.description}`,
+            details: { briefing_id, signal_kind: signal.kind, ...signal.details },
+          });
+        } else {
+          // First detection → warn agent, allow one recovery window
+          await sendRunawayWarning(briefing_id, agency_id, signal);
+          actions.push({
+            type: "auto_remediation",
+            request_id: BigInt(0),
+            description: `RUNAWAY_WARNING sent to briefing ${briefing_id}: ${signal.description}`,
+            details: { briefing_id, signal_kind: signal.kind, ...signal.details },
+          });
+        }
+      } catch (err) {
+        if (process.env.DEBUG_WATCHDOG) {
+          console.error(`[Watchdog] Runaway check error for briefing ${briefing_id}:`, err);
+        }
+      }
+    }
+  } catch (err) {
+    if (process.env.DEBUG_WATCHDOG) {
+      console.error(`[Watchdog] getActiveBriefings error:`, err);
     }
   }
 

@@ -1712,7 +1712,36 @@ export async function createMcpServer(
 		handler: wrapJson((a) => agencyHandlers.handleMcpQuirksRegister(a)),
 	});
 
-	console.error("[MCP] Registered 7 P466 spawn-briefing tools (liaison protocol)");
+	server.addTool({
+		name: "request_lease_renewal",
+		description:
+			"Request a lease extension for a proposal that needs more time (agent is making progress, not stuck). " +
+			"Renewals 1 and 2 are auto-approved (extend lease 30 min). Renewal 3 requires operator approval.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				briefing_id: { type: "string", description: "UUID of the current briefing" },
+				agency_id: { type: "string", description: "Agency handling this briefing" },
+				reason: { type: "string", description: "Why more time is needed" },
+				proposal_id: {
+					type: "number",
+					description: "Optional proposal_id for direct lease lookup (faster than briefing lookup)",
+				},
+			},
+			required: ["briefing_id", "agency_id", "reason"],
+		},
+		handler: wrapJson(async (a) => {
+			const { requestLeaseRenewal } = await import("../../infra/agency/liaison-lease.ts");
+			return requestLeaseRenewal(
+				a.briefing_id,
+				a.agency_id,
+				a.reason,
+				a.proposal_id != null ? BigInt(a.proposal_id) : undefined
+			);
+		}),
+	});
+
+	console.error("[MCP] Registered 8 P466/P468 spawn-briefing tools (liaison protocol)");
 
 	// Start background maintenance tasks
 	const MAINTENANCE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
