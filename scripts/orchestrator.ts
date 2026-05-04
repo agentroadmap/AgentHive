@@ -1284,6 +1284,7 @@ async function handleStateChange(proposalId: string, newState: string) {
 		`SELECT count(*)::int AS cnt
 		   FROM roadmap_workforce.squad_dispatch
 		  WHERE proposal_id = $1
+		    AND dispatch_status NOT IN ('cancelled', 'failed', 'completed')
 		    AND (
 		      completed_at IS NULL
 		      OR dispatch_status IN ('assigned', 'active', 'blocked')
