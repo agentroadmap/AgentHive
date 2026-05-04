@@ -6,6 +6,12 @@ import { PgMessagingHandlers } from "./pg-handlers.ts";
 import { handleMsgAck } from "./msg-ack.ts";
 import { handleMsgReply } from "./msg-reply.ts";
 import { handleMsgWaitReply } from "./msg-wait-reply.ts";
+import {
+	spawnManifestCreate,
+	agentCredentialClaim,
+	agentCredentialDeliver,
+	agentCredentialRetrieve,
+} from "./credential-handlers.ts";
 
 const msgMarkReadSchema: JsonSchema = {
 	type: "object",
@@ -40,7 +46,7 @@ export function registerMessageTools(server: McpServer): void {
 		{
 			name: "msg_send",
 			description:
-				"Send a message to the Postgres message_ledger. Trust gate enforced on send — restricted/blocked senders are silently dropped.",
+				"Send a message to the Postgres message_ledger. Trust gate enforced on send — restricted/blocked senders are silently dropped. P834: Signature verification gate on provider_sig.",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -53,6 +59,9 @@ export function registerMessageTools(server: McpServer): void {
 						enum: ["task", "notify", "ack", "error", "event", "text"],
 					},
 					proposal_id: { type: "string" },
+					provider_sig: { type: "string" },
+					created_at: { type: "string" },
+					provider_sig_salt: { type: "string" },
 				},
 				required: ["from_agent", "message_content"],
 			},
@@ -66,6 +75,9 @@ export function registerMessageTools(server: McpServer): void {
 				message_content: { type: "string" },
 				message_type: { type: "string" },
 				proposal_id: { type: "string" },
+				provider_sig: { type: "string" },
+				created_at: { type: "string" },
+				provider_sig_salt: { type: "string" },
 			},
 			required: ["from_agent", "message_content"],
 		} as JsonSchema,
@@ -77,6 +89,9 @@ export function registerMessageTools(server: McpServer): void {
 				message_content: string;
 				message_type?: string;
 				proposal_id?: string;
+				provider_sig?: string;
+				created_at?: string;
+				provider_sig_salt?: string;
 			}),
 	);
 
@@ -338,6 +353,188 @@ export function registerMessageTools(server: McpServer): void {
 			}),
 	);
 
+	const spawnManifestTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "agent_credential_spawn_manifest",
+			description:
+				"Create a spawn manifest and store in spawn_bucket (P834 Phase 1). Generates a unique nonce and signs manifest with parent agent_secret. Returns manifest object.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					parent_identity: { type: "string" },
+					child_identity: { type: "string" },
+					agency_id: { type: "string" },
+					allowed_scopes: { type: "array", items: { type: "string" } },
+					denied_scopes: { type: "array", items: { type: "string" } },
+					max_spawn_depth: { type: "number" },
+					parent_ephemeral_public_key: { type: "string" },
+					parent_sig: { type: "string" },
+				},
+				required: [
+					"parent_identity",
+					"child_identity",
+					"agency_id",
+					"allowed_scopes",
+					"parent_ephemeral_public_key",
+					"parent_sig",
+				],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				parent_identity: { type: "string" },
+				child_identity: { type: "string" },
+				agency_id: { type: "string" },
+				allowed_scopes: { type: "array", items: { type: "string" } },
+				denied_scopes: { type: "array", items: { type: "string" } },
+				max_spawn_depth: { type: "number" },
+				parent_ephemeral_public_key: { type: "string" },
+				parent_sig: { type: "string" },
+			},
+			required: [
+				"parent_identity",
+				"child_identity",
+				"agency_id",
+				"allowed_scopes",
+				"parent_ephemeral_public_key",
+				"parent_sig",
+			],
+		} as JsonSchema,
+		async (input) => {
+			const result = spawnManifestCreate(
+				input as {
+					parent_identity: string;
+					child_identity: string;
+					agency_id: string;
+					allowed_scopes: string[];
+					denied_scopes?: string[];
+					max_spawn_depth?: number;
+					parent_ephemeral_public_key: string;
+					parent_sig: string;
+				},
+			);
+			if ("error" in result) {
+				return {
+					content: [{ type: "text", text: `⚠️ Error: ${result.error}` }],
+				};
+			}
+			return {
+				content: [{ type: "text", text: JSON.stringify(result.manifest) }],
+			};
+		},
+	);
+
+	const credentialClaimTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "agent_credential_claim",
+			description:
+				"Phase 2: Child claims credential grant (P834). Validates nonce, sets child's ephemeral public key, enforces single-use claim.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					nonce: { type: "string" },
+					child_ephemeral_public_key: { type: "string" },
+					child_identity: { type: "string" },
+				},
+				required: ["nonce", "child_ephemeral_public_key", "child_identity"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				nonce: { type: "string" },
+				child_ephemeral_public_key: { type: "string" },
+				child_identity: { type: "string" },
+			},
+			required: ["nonce", "child_ephemeral_public_key", "child_identity"],
+		} as JsonSchema,
+		async (input) =>
+			agentCredentialClaim(
+				input as {
+					nonce: string;
+					child_ephemeral_public_key: string;
+					child_identity: string;
+				},
+			),
+	);
+
+	const credentialDeliverTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "agent_credential_deliver",
+			description:
+				"Phase 3: Orchestrator delivers encrypted credential (P834). Stores credential envelope in spawn_bucket, notifies child via pg_notify.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					nonce: { type: "string" },
+					child_agent_secret_encrypted: { type: "string" },
+					encryption_nonce: { type: "string" },
+					encryption_tag: { type: "string" },
+					grant_expires_at: { type: "string" },
+				},
+				required: [
+					"nonce",
+					"child_agent_secret_encrypted",
+					"encryption_nonce",
+					"encryption_tag",
+					"grant_expires_at",
+				],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				nonce: { type: "string" },
+				child_agent_secret_encrypted: { type: "string" },
+				encryption_nonce: { type: "string" },
+				encryption_tag: { type: "string" },
+				grant_expires_at: { type: "string" },
+			},
+			required: [
+				"nonce",
+				"child_agent_secret_encrypted",
+				"encryption_nonce",
+				"encryption_tag",
+				"grant_expires_at",
+			],
+		} as JsonSchema,
+		async (input) =>
+			agentCredentialDeliver(
+				input as {
+					nonce: string;
+					child_agent_secret_encrypted: string;
+					encryption_nonce: string;
+					encryption_tag: string;
+					grant_expires_at: string;
+				},
+			),
+	);
+
+	const credentialRetrieveTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "agent_credential_retrieve",
+			description:
+				"Retrieve credential envelope from spawn_bucket (for testing/debugging). In production, child receives via pg_notify.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					nonce: { type: "string" },
+				},
+				required: ["nonce"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				nonce: { type: "string" },
+			},
+			required: ["nonce"],
+		} as JsonSchema,
+		async (input) =>
+			agentCredentialRetrieve(input as { nonce: string }),
+	);
+
 	server.addTool(sendTool);
 	server.addTool(readTool);
 	server.addTool(markReadTool);
@@ -347,4 +544,8 @@ export function registerMessageTools(server: McpServer): void {
 	server.addTool(msgAckTool);
 	server.addTool(msgReplyTool);
 	server.addTool(msgWaitReplyTool);
+	server.addTool(spawnManifestTool);
+	server.addTool(credentialClaimTool);
+	server.addTool(credentialDeliverTool);
+	server.addTool(credentialRetrieveTool);
 }

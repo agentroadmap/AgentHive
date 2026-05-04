@@ -16,6 +16,10 @@ import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
 import { enforceMessageGate } from "../../../../proposal-engine/middleware/message-dispatch-gate.ts";
 import { resolveTrust } from "../../../../infra/trust/trust-resolver.ts";
+import crypto from "crypto";
+import { getAgentSecret } from "../../../../infra/security/agent-secret-store.ts";
+import { verifySignature } from "../../../../infra/security/agent-crypto.ts";
+import type { Pool } from "pg";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
@@ -250,6 +254,9 @@ export class PgMessagingHandlers {
 		message_content: string;
 		message_type?: string;
 		proposal_id?: string;
+		provider_sig?: string;
+		created_at?: string;
+		provider_sig_salt?: string;
 	}): Promise<CallToolResult> {
 		try {
 			// P835: Dead letter checks before INSERT
@@ -375,10 +382,121 @@ export class PgMessagingHandlers {
 				correlationId = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
 			}
 
-			// P833: INSERT into message_ledger with sig_verified='pending' and correlation_id
+			// P834: Signature verification dispatch gate
+			let sigVerified: "pending" | "verified" | "failed" = "pending";
+			let sigSaltBuffer: Buffer | null = null;
+
+			if (args.provider_sig) {
+				try {
+					// Parse created_at timestamp (default to now if not provided)
+					const createdAtStr = args.created_at || new Date().toISOString();
+					const createdAtDt = new Date(createdAtStr);
+					const createdAtEpoch = Math.floor(createdAtDt.getTime() / 1000);
+					const nowEpoch = Math.floor(Date.now() / 1000);
+
+					// Reject if signature is older than 5 minutes
+					if (nowEpoch - createdAtEpoch > 300) {
+						sigVerified = "failed";
+						console.warn(
+							`[P834] Signature too old for message from ${args.from_agent}: ${nowEpoch - createdAtEpoch} seconds`,
+						);
+					} else {
+						// Load agent secret for verification
+						const pool = getPool();
+						const agentSecret = await getAgentSecret(pool, args.from_agent);
+
+						if (!agentSecret) {
+							sigVerified = "failed";
+							console.warn(`[P834] Agent secret not found for ${args.from_agent}`);
+						} else {
+							// Compute payload SHA256 for verification
+							const payloadJson = JSON.stringify(
+								{ message_content: args.message_content },
+								Object.keys({ message_content: args.message_content }).sort(),
+							);
+							const payloadSha256 = crypto
+								.createHash("sha256")
+								.update(payloadJson, "utf-8")
+								.digest();
+
+							// Parse provider_sig_salt if provided (IMP-3A)
+							let saltBuffer: Buffer | undefined;
+							if (args.provider_sig_salt) {
+								try {
+									saltBuffer = Buffer.from(args.provider_sig_salt, "hex");
+									if (saltBuffer.length !== 32) {
+										saltBuffer = undefined; // Fall back to deterministic salt
+									}
+								} catch {
+									// Fall back to deterministic salt
+									saltBuffer = undefined;
+								}
+							}
+
+							// Verify signature using RFC 5869 derived key
+							const isValid = verifySignature(
+								agentSecret,
+								args.from_agent,
+								args.to_agent || "",
+								messageType,
+								createdAtEpoch,
+								payloadSha256,
+								args.provider_sig,
+								saltBuffer,
+							);
+
+							sigVerified = isValid ? "verified" : "failed";
+
+							if (isValid) {
+								// Generate and store random provider_sig_salt (IMP-3A)
+								sigSaltBuffer = crypto.randomBytes(32);
+							} else {
+								console.warn(
+									`[P834] Signature verification failed for message from ${args.from_agent}`,
+								);
+							}
+						}
+					}
+				} catch (err) {
+					sigVerified = "failed";
+					console.error(`[P834] Signature verification error: ${err}`);
+				}
+
+				// On signature failure, send NACK and return
+				if (sigVerified === "failed") {
+					// Insert NACK into ledger
+					await query(
+						`INSERT INTO roadmap.message_ledger
+						  (from_agent, to_agent, message_type, message_content, correlation_id, sig_verified)
+						 VALUES ($1, $2, 'nack', $3, $4, 'verified')`,
+						[
+							"system:sig-gate",
+							args.from_agent,
+							JSON.stringify({
+								failure_reason: "signature_verification_failed",
+								original_from: args.from_agent,
+								timestamp: new Date().toISOString(),
+							}),
+							correlationId,
+						],
+					);
+					// Silent return per P209 design
+					return {
+						content: [
+							{
+								type: "text",
+								text: "Message processed.",
+							},
+						],
+					};
+				}
+			}
+
+			// P833: INSERT into message_ledger with sig_verified status and provider_sig_salt
 			const { rows } = await query(
-				`INSERT INTO message_ledger (from_agent, to_agent, channel, message_content, message_type, proposal_id, correlation_id, sig_verified)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
+				`INSERT INTO roadmap.message_ledger
+				  (from_agent, to_agent, channel, message_content, message_type, proposal_id, correlation_id, sig_verified, provider_sig, provider_sig_salt, created_at)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 				RETURNING id, created_at`,
 				[
 					args.from_agent,
@@ -388,6 +506,10 @@ export class PgMessagingHandlers {
 					messageType,
 					args.proposal_id || null,
 					correlationId,
+					sigVerified,
+					args.provider_sig || null,
+					sigSaltBuffer,
+					args.created_at || new Date().toISOString(),
 				],
 			);
 
