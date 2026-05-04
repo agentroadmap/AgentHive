@@ -3,6 +3,7 @@
  */
 
 import type { Core } from "../../core/roadmap.ts";
+import { query as pgQuery } from "../../postgres/pool.ts";
 import { DEFAULT_STATUSES } from "../../shared/constants/index.ts";
 import type { Directive, Proposal } from "../../shared/types/index.ts";
 import { watchConfig } from "../../shared/utils/config-watcher.ts";
@@ -492,10 +493,14 @@ export async function runUnifiedView(
 
 				const refresh = async () => {
 					// Load proposals and agents concurrently
-					const [_pipelineProposals, agents, pulseMessages] = await Promise.all([
+					const [_pipelineProposals, agents, msgRows] = await Promise.all([
 						options.core.loadProposals(),
 						options.core.listAgents(),
-						options.core.readMessages({ channel: "public" }),
+						pgQuery(
+							`SELECT from_agent, message_content, created_at FROM roadmap.message_ledger
+							 WHERE channel = 'public' ORDER BY created_at DESC LIMIT 30`,
+							[],
+						).then((r) => r.rows).catch(() => [] as any[]),
 					]);
 
 					const agentData: WorkforceAgent[] = agents.map((agent) => ({
@@ -508,12 +513,12 @@ export async function runUnifiedView(
 						lastSeen: Date.parse(agent.lastSeen || new Date().toISOString()),
 					}));
 
-					const cockpitMessages = pulseMessages.messages
-						.slice(-30)
-						.map((message) => ({
-							sender_identity: message.from,
-							content: message.text,
-							timestamp: Date.parse(message.timestamp) * 1000,
+					const cockpitMessages = (msgRows as any[])
+						.reverse()
+						.map((row: any) => ({
+							sender_identity: row.from_agent,
+							content: row.message_content,
+							timestamp: new Date(row.created_at).getTime(),
 						}));
 
 					renderCockpit(screen, {
@@ -620,30 +625,35 @@ export async function runUnifiedView(
 
 				const currentChannel = "public";
 				const refresh = async () => {
-					const [channelsResult, messagesResult] = await Promise.all([
-						options.core.listChannels(),
-						options.core.readMessages({ channel: currentChannel }),
+					const [channelRows, messageRows] = await Promise.all([
+						pgQuery(
+							`SELECT DISTINCT channel FROM roadmap.message_ledger WHERE channel IS NOT NULL ORDER BY channel LIMIT 50`,
+							[],
+						).then((r) => r.rows).catch(() => [] as any[]),
+						pgQuery(
+							`SELECT id, from_agent, message_content, created_at FROM roadmap.message_ledger
+							 WHERE channel = $1 ORDER BY created_at DESC LIMIT 100`,
+							[currentChannel],
+						).then((r) => r.rows.reverse()).catch(() => [] as any[]),
 					]);
 
 					renderChat(screen, {
-						messages: messagesResult.messages.map((message, index) => ({
-							id: `${message.timestamp}-${index}`,
-							sender_identity: message.from,
-							content: message.text,
-							timestamp: Date.parse(message.timestamp) * 1000,
+						messages: (messageRows as any[]).map((row: any, index: number) => ({
+							id: `${row.id ?? index}`,
+							sender_identity: row.from_agent,
+							content: row.message_content,
+							timestamp: new Date(row.created_at).getTime(),
 							channel_name: currentChannel,
 						})),
-						channels: channelsResult.map((channel) => channel.name),
+						channels: (channelRows as any[]).map((r: any) => r.channel),
 						currentChannel,
 						projectName: config?.projectName || "Roadmap.md",
 						userSystemName: "HUMAN",
 						onSend: async (content: string) => {
-							await options.core.sendMessage({
-								from: "HUMAN",
-								type: "group",
-								group: currentChannel,
-								message: content,
-							});
+							await pgQuery(
+								`INSERT INTO roadmap.message_ledger (from_agent, channel, message_content, message_type) VALUES ($1, $2, $3, 'text')`,
+								["HUMAN", currentChannel, content],
+							);
 						},
 					});
 				};

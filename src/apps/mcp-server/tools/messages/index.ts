@@ -2,117 +2,7 @@ import type { McpServer } from "../../server.ts";
 import type { McpToolHandler } from "../../types.ts";
 import { createSimpleValidatedTool } from "../../validation/tool-wrapper.ts";
 import type { JsonSchema } from "../../validation/validators.ts";
-import type {
-	MessageChannelsArgs,
-	MessageReadArgs,
-	MessageSendArgs,
-} from "./handlers.ts";
-import { MessageHandlers } from "./handlers.ts";
 import { PgMessagingHandlers } from "./pg-handlers.ts";
-
-const messageChannelsSchema: JsonSchema = {
-	type: "object",
-	properties: {
-		limit: {
-			type: "number",
-			description:
-				"Maximum channels to return (default 50, max 500)",
-		},
-		include_metadata: {
-			type: "boolean",
-			description:
-				"Include metadata fields (last_message_at). Default false.",
-		},
-	},
-	required: [],
-};
-
-const messageReadSchema: JsonSchema = {
-	type: "object",
-	properties: {
-		channel: {
-			type: "string",
-			description:
-				"Channel name to read from. Use 'public' for the public channel, a group name (e.g. 'project'), or a private channel name (e.g. 'alice-bob').",
-		},
-		since: {
-			type: "string",
-			description:
-				"ISO 8601 timestamp. Only return messages after this time. Use the timestamp of the last message you read to get only new messages.",
-		},
-	},
-	required: ["channel"],
-};
-
-const messageSendSchema: JsonSchema = {
-	type: "object",
-	properties: {
-		from: {
-			type: "string",
-			description:
-				"Your agent name or identity (e.g. 'Gemini', 'Copilot', 'Alice').",
-		},
-		message: {
-			type: "string",
-			description: "The message content to send.",
-		},
-		channel: {
-			type: "string",
-			description:
-				"Group channel name (e.g. 'project') or 'public'. Ignored when 'to' is set.",
-		},
-		to: {
-			type: "string",
-			description:
-				"Agent name for a private DM (e.g. 'alice' or '@alice'). When set, sends a private message.",
-		},
-		intent: {
-			type: "object",
-			description:
-				"Structured negotiation intent (claim_request, handoff, reject, accept, block).",
-			properties: {
-				type: {
-					type: "string",
-					enum: ["claim_request", "handoff", "reject", "accept", "block"],
-					description: "Intent type.",
-				},
-				proposalId: {
-					type: "string",
-					description: "Target proposal ID (e.g. 'STATE-9').",
-				},
-				to: {
-					type: "string",
-					description: "Target agent for the intent.",
-				},
-				reason: {
-					type: "string",
-					description: "Human-readable reason for the intent.",
-				},
-			},
-			required: ["type", "proposalId"],
-		},
-	},
-	required: ["from", "message"],
-};
-
-const messageSubscribeSchema: JsonSchema = {
-	type: "object",
-	properties: {
-		channel: {
-			type: "string",
-			description: "Channel name to subscribe to (e.g. 'public', 'project').",
-		},
-		from: {
-			type: "string",
-			description: "Agent identity for the subscription.",
-		},
-		subscribe: {
-			type: "boolean",
-			description: "True to subscribe, false to unsubscribe. Defaults to true.",
-		},
-	},
-	required: ["channel", "from"],
-};
 
 const msgMarkReadSchema: JsonSchema = {
 	type: "object",
@@ -141,68 +31,13 @@ const msgUnreadCountSchema: JsonSchema = {
 };
 
 export function registerMessageTools(server: McpServer): void {
-	const handlers = new MessageHandlers(server);
 	const pgHandlers = new PgMessagingHandlers(server, process.cwd());
-
-	// ─── Filesystem-backed tools ─────────────────────────────────────────
-	const channelsTool: McpToolHandler = createSimpleValidatedTool(
-		{
-			name: "chan_list",
-			description:
-				"List all available chat channels (group chats and private DMs) in this project.",
-			inputSchema: messageChannelsSchema,
-		},
-		messageChannelsSchema,
-		async (input) => handlers.listChannels(input as MessageChannelsArgs),
-	);
-
-	const readTool: McpToolHandler = createSimpleValidatedTool(
-		{
-			name: "msg_read",
-			description:
-				"Read messages from a chat channel. Use the 'since' parameter with the last message timestamp to fetch only new messages — this is how you listen for replies.",
-			inputSchema: messageReadSchema,
-		},
-		messageReadSchema,
-		async (input) => handlers.readMessages(input as MessageReadArgs),
-	);
 
 	const sendTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "msg_send",
 			description:
-				"Send a message to a group chat channel or a private DM with another agent.",
-			inputSchema: messageSendSchema,
-		},
-		messageSendSchema,
-		async (input) => handlers.sendMessage(input as MessageSendArgs),
-	);
-
-	const subscribeTool: McpToolHandler = createSimpleValidatedTool(
-		{
-			name: "chan_subscribe",
-			description:
-				"Subscribe or unsubscribe from a channel to receive push notifications when new messages arrive. Subscriptions persist across sessions.",
-			inputSchema: messageSubscribeSchema,
-		},
-		messageSubscribeSchema,
-		async (input) =>
-			handlers.subscribe(
-				input as { channel: string; from: string; subscribe?: boolean },
-			),
-	);
-
-	server.addTool(channelsTool);
-	server.addTool(readTool);
-	server.addTool(sendTool);
-	server.addTool(subscribeTool);
-
-	// ─── Postgres-backed tools (P067) ────────────────────────────────────
-	const pgSendTool: McpToolHandler = createSimpleValidatedTool(
-		{
-			name: "msg_pg_send",
-			description:
-				"Send a message to Postgres message_ledger with typed message_type, channel, and optional proposal link",
+				"Send a message to the Postgres message_ledger. Trust gate enforced on send — restricted/blocked senders are silently dropped.",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -212,7 +47,7 @@ export function registerMessageTools(server: McpServer): void {
 					message_content: { type: "string" },
 					message_type: {
 						type: "string",
-						enum: ["task", "notify", "ack", "error", "event"],
+						enum: ["task", "notify", "ack", "error", "event", "text"],
 					},
 					proposal_id: { type: "string" },
 				},
@@ -242,18 +77,25 @@ export function registerMessageTools(server: McpServer): void {
 			}),
 	);
 
-	const pgReadTool: McpToolHandler = createSimpleValidatedTool(
+	const readTool: McpToolHandler = createSimpleValidatedTool(
 		{
-			name: "msg_pg_read",
+			name: "msg_read",
 			description:
-				"Read messages from Postgres message_ledger. Supports wait_ms for blocking reads via pg_notify.",
+				"Read messages from the Postgres message_ledger. With agent + wait_ms, blocks on pg_notify channel `a2a_msg_{agent}` until a new message arrives or timeout expires (migration 096). Trust-filtered: restricted/blocked senders are excluded.",
 			inputSchema: {
 				type: "object",
 				properties: {
-					agent: { type: "string" },
-					channel: { type: "string" },
-					limit: { type: "number" },
-					wait_ms: { type: "number" },
+					agent: {
+						type: "string",
+						description: "Filter by agent identity (required for wait_ms blocking reads)",
+					},
+					channel: { type: "string", description: "Filter by channel name" },
+					limit: { type: "number", description: "Max messages to return (default 50)" },
+					wait_ms: {
+						type: "number",
+						description:
+							"Block up to N ms waiting for a new DM via pg_notify (0–30000). Requires agent. Returns immediately if messages already exist.",
+					},
 				},
 			},
 		},
@@ -275,11 +117,10 @@ export function registerMessageTools(server: McpServer): void {
 			}),
 	);
 
-	const pgMarkReadTool: McpToolHandler = createSimpleValidatedTool(
+	const markReadTool: McpToolHandler = createSimpleValidatedTool(
 		{
-			name: "msg_pg_mark_read",
-			description:
-				"Mark a Postgres message as read (AC-7). Sets read_at timestamp and decreases unread count.",
+			name: "msg_mark_read",
+			description: "Mark a Postgres message as read. Sets read_at timestamp.",
 			inputSchema: msgMarkReadSchema,
 		},
 		msgMarkReadSchema,
@@ -287,20 +128,87 @@ export function registerMessageTools(server: McpServer): void {
 			pgHandlers.markRead(input as { message_id: number; agent: string }),
 	);
 
-	const pgUnreadCountTool: McpToolHandler = createSimpleValidatedTool(
+	const unreadCountTool: McpToolHandler = createSimpleValidatedTool(
 		{
-			name: "msg_pg_unread_count",
-			description:
-				"Get unread message count for an agent from Postgres message_ledger (AC-7)",
+			name: "msg_unread_count",
+			description: "Get unread message count for an agent from message_ledger.",
 			inputSchema: msgUnreadCountSchema,
 		},
 		msgUnreadCountSchema,
-		async (input) =>
-			pgHandlers.unreadCount(input as { agent: string }),
+		async (input) => pgHandlers.unreadCount(input as { agent: string }),
 	);
 
-	server.addTool(pgSendTool);
-	server.addTool(pgReadTool);
-	server.addTool(pgMarkReadTool);
-	server.addTool(pgUnreadCountTool);
+	const chanListTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "chan_list",
+			description: "List channels with message counts from the Postgres message_ledger.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					limit: {
+						type: "number",
+						description: "Maximum channels to return (default 50, max 500)",
+					},
+					include_metadata: {
+						type: "boolean",
+						description: "Include last_message_at metadata. Default false.",
+					},
+				},
+				required: [],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				limit: { type: "number" },
+				include_metadata: { type: "boolean" },
+			},
+		} as JsonSchema,
+		async (input) =>
+			pgHandlers.listChannels(input as { limit?: number; include_metadata?: boolean }),
+	);
+
+	const chanSubscribeTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "chan_subscribe",
+			description:
+				"Subscribe or unsubscribe from a channel. Persisted in channel_subscription table for pg_notify delivery.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					agent_identity: {
+						type: "string",
+						description: "Agent identity for the subscription.",
+					},
+					channel: {
+						type: "string",
+						description: "Channel name (direct, team:<name>, broadcast, system).",
+					},
+					subscribe: {
+						type: "boolean",
+						description: "True to subscribe, false to unsubscribe. Defaults to true.",
+					},
+				},
+				required: ["agent_identity", "channel"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				agent_identity: { type: "string" },
+				channel: { type: "string" },
+				subscribe: { type: "boolean" },
+			},
+			required: ["agent_identity", "channel"],
+		} as JsonSchema,
+		async (input) =>
+			pgHandlers.subscribe(input as { agent_identity: string; channel: string; subscribe?: boolean }),
+	);
+
+	server.addTool(sendTool);
+	server.addTool(readTool);
+	server.addTool(markReadTool);
+	server.addTool(unreadCountTool);
+	server.addTool(chanListTool);
+	server.addTool(chanSubscribeTool);
 }

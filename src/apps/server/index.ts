@@ -17,7 +17,6 @@ import { type WebSocket, WebSocketServer } from "ws";
 import { initializeProject } from "../../core/infrastructure/init.ts";
 import type { SearchService } from "../../core/infrastructure/search-service.ts";
 import { getProposalStatistics } from "../../core/infrastructure/statistics.ts";
-import { RelayService } from "../../core/messaging/relay.ts";
 import { Core } from "../../core/roadmap.ts";
 import type { ContentStore } from "../../core/storage/content-store.ts";
 import { createMcpServer, type McpServer } from "../../mcp/server.ts";
@@ -152,7 +151,6 @@ export class RoadmapServer {
 	private configWatcher: { stop: () => void } | null = null;
 	private mcpServer: McpServer | null = null;
 	private sseTransports = new Map<string, SSEServerTransport>();
-	private relayService: RelayService | null = null;
 	private roadmapEventsClient: PoolClient | null = null;
 	private roadmapEventsReconnectTimer: ReturnType<typeof setTimeout> | null =
 		null;
@@ -323,11 +321,6 @@ export class RoadmapServer {
 			// The mcpServer factory already starts its own background maintenance
 		}
 
-		const config = await this.core.filesystem.loadConfig();
-		if (config?.relay?.enabled && !this.relayService) {
-			this.relayService = new RelayService(this.core, config.relay);
-			void this.relayService.start();
-		}
 	}
 
 	private async getContentStoreInstance(): Promise<ContentStore> {
@@ -397,20 +390,28 @@ export class RoadmapServer {
 		console.log(`📊 Change polling started (every ${POLL_INTERVAL / 1000}s)`);
 	}
 
-	private async handleSubscribe(ws: WebSocket, channel: string) {
+	private handleSubscribe(ws: WebSocket, channel: string) {
 		const subs = this.channelSubscriptions.get(ws);
 		if (!subs || subs.has(channel)) return;
-		const unsubscribe = await this.core.watchMessages({
-			channel,
-			onMessage: (msg) => {
-				try {
-					ws.send(
-						JSON.stringify({ type: "channel-message", channel, message: msg }),
-					);
-				} catch {}
-			},
-		});
-		subs.set(channel, unsubscribe);
+		let lastId = 0;
+		const interval = setInterval(async () => {
+			try {
+				const result = await query(
+					`SELECT id, from_agent, to_agent, message_content, created_at
+					 FROM roadmap.message_ledger
+					 WHERE channel = $1 AND id > $2
+					 ORDER BY id ASC LIMIT 50`,
+					[channel, lastId],
+				);
+				for (const row of result.rows) {
+					lastId = row.id;
+					try {
+						ws.send(JSON.stringify({ type: "channel-message", channel, message: row }));
+					} catch {}
+				}
+			} catch {}
+		}, 1000);
+		subs.set(channel, () => clearInterval(interval));
 	}
 
 	private handleUnsubscribe(ws: WebSocket, channel: string) {
@@ -3505,8 +3506,13 @@ export class RoadmapServer {
 
 	private async handleListChannels(): Promise<Response> {
 		try {
-			const channels = await this.core.listChannels();
-			return Response.json(channels);
+			const { rows } = await query(
+				`SELECT DISTINCT channel, COUNT(*) as msg_count
+				 FROM roadmap.message_ledger WHERE channel IS NOT NULL
+				 GROUP BY channel ORDER BY channel ASC LIMIT 200`,
+				[],
+			);
+			return Response.json(rows);
 		} catch (error) {
 			console.error("Error listing channels:", error);
 			return Response.json(
@@ -3527,8 +3533,16 @@ export class RoadmapServer {
 				);
 			}
 			const since = url.searchParams.get("since") || undefined;
-			const messages = await this.core.readMessages({ channel, since });
-			return Response.json(messages);
+			const params: (string)[] = [channel];
+			const sinceClause = since ? ` AND created_at > $2` : "";
+			if (since) params.push(since);
+			const { rows } = await query(
+				`SELECT id, from_agent, to_agent, channel, message_content, message_type, created_at
+				 FROM roadmap.message_ledger WHERE channel = $1${sinceClause}
+				 ORDER BY created_at DESC LIMIT 100`,
+				params,
+			);
+			return Response.json(rows);
 		} catch (error) {
 			console.error("Error listing messages:", error);
 			return Response.json(
@@ -3555,21 +3569,13 @@ export class RoadmapServer {
 			if (!text) {
 				return Response.json({ error: "text is required" }, { status: 400 });
 			}
-			if (channel.startsWith("private-")) {
-				return Response.json(
-					{ error: "Private DM sending is not wired through the web API yet" },
-					{ status: 400 },
-				);
-			}
 
-			await this.core.sendMessage({
-				from,
-				message: text,
-				type: channel === "public" ? "public" : "group",
-				group: channel === "public" ? undefined : channel,
-			});
-
-			return Response.json({ success: true });
+			const { rows } = await query(
+				`INSERT INTO roadmap.message_ledger (from_agent, channel, message_content, message_type)
+				 VALUES ($1, $2, $3, 'text') RETURNING id, created_at`,
+				[from, channel, text],
+			);
+			return Response.json({ success: true, id: rows[0]?.id });
 		} catch (error) {
 			console.error("Error sending message:", error);
 			return Response.json(

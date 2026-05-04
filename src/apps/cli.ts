@@ -112,6 +112,7 @@ import {
 	isGitRepository,
 	updateReadmeWithBoard,
 } from "./index.ts";
+import { query as pgQuery } from "../infra/postgres/pool.ts";
 
 type IntegrationMode = "mcp" | "cli" | "none";
 
@@ -4731,8 +4732,12 @@ program
 				}
 			}
 
-			await core.sendMessage({ from, message, type, group, to });
-			console.log(`Message sent to ${group}${to ? ` (to @${to})` : ""}`);
+			const pgChan = type === "public" ? "broadcast" : type === "group" ? `team:${group}` : "direct";
+			await pgQuery(
+				`INSERT INTO roadmap.message_ledger (from_agent, to_agent, channel, message_type, message_content) VALUES ($1, $2, $3, 'text', $4)`,
+				[from, to ?? null, pgChan, message],
+			);
+			console.log(`Message sent to ${pgChan}${to ? ` (to @${to})` : ""}`);
 		} catch (err) {
 			console.error("Failed to send message:", err);
 			process.exit(1);
@@ -4801,6 +4806,13 @@ program
 						? fileName.replace(/\.md$/u, "")
 						: group.toLowerCase().replace(/[^a-z0-9-]/g, "-");
 
+			const pgChannel =
+				type === "public"
+					? "broadcast"
+					: type === "private"
+						? "direct"
+						: `team:${group.toLowerCase().replace(/[^a-z0-9-]/g, "-")}`;
+
 			// Get sender name
 			let from = options.as;
 			if (!from) {
@@ -4827,7 +4839,11 @@ program
 				writeFileSync(logPath, header);
 			}
 
-			const knownUsers = await core.getKnownUsers();
+			const _agentRows = await pgQuery(
+				`SELECT agent_identity FROM roadmap_workforce.agent_registry ORDER BY agent_identity`,
+				[],
+			).catch(() => ({ rows: [] as { agent_identity: string }[] }));
+			const knownUsers: string[] = _agentRows.rows.map((r) => r.agent_identity);
 			let draft: ChatComposerProposal = createChatComposerProposal();
 			const interactiveInput =
 				Boolean(process.stdin.isTTY && process.stdout.isTTY) &&
@@ -4906,9 +4922,14 @@ program
 
 				process.stdout.write(`\x1b[1m${channelHeading}\x1b[0m\n\n`);
 
-				const history = await core.readMessages({ channel: channelKey });
-				for (const message of history.messages) {
-					process.stdout.write(Core.formatMessagePretty(message));
+				const historyResult = await pgQuery(
+					`SELECT from_agent, message_content, created_at FROM roadmap.message_ledger
+					 WHERE channel = $1 ORDER BY created_at DESC LIMIT 50`,
+					[pgChannel],
+				).catch(() => ({ rows: [] as { from_agent: string; message_content: string; created_at: Date }[] }));
+				for (const msg of historyResult.rows.reverse()) {
+					const t = new Date(msg.created_at).toLocaleTimeString();
+					process.stdout.write(`[${t}] ${msg.from_agent}: ${msg.message_content}\n`);
 				}
 
 				if (interactiveInput) {
@@ -5005,13 +5026,10 @@ program
 						draft = result.proposal;
 						renderComposer();
 						try {
-							await core.sendMessage({
-								from,
-								message: result.message,
-								type,
-								group,
-								to,
-							});
+							await pgQuery(
+								`INSERT INTO roadmap.message_ledger (from_agent, to_agent, channel, message_type, message_content) VALUES ($1, $2, $3, 'text', $4)`,
+								[from, to ?? null, pgChannel, result.message],
+							);
 						} finally {
 							isSending = false;
 							renderComposer();
@@ -5027,12 +5045,22 @@ program
 			await renderChatScreen();
 
 			if (interactiveInput) {
-				stopWatchingMessages = await core.watchMessages({
-					channel: channelKey,
-					onMessage: (message) => {
-						appendChatOutput(Core.formatMessagePretty(message));
-					},
-				});
+				let _lastMsgId = 0;
+				const _watchInterval = setInterval(async () => {
+					try {
+						const r = await pgQuery(
+							`SELECT id, from_agent, message_content, created_at FROM roadmap.message_ledger
+							 WHERE channel = $1 AND id > $2 ORDER BY id ASC LIMIT 20`,
+							[pgChannel, _lastMsgId],
+						);
+						for (const msg of r.rows) {
+							_lastMsgId = msg.id as number;
+							const t = new Date(msg.created_at as Date).toLocaleTimeString();
+							appendChatOutput(`[${t}] ${msg.from_agent as string}: ${msg.message_content as string}\n`);
+						}
+					} catch {}
+				}, 1000);
+				stopWatchingMessages = () => clearInterval(_watchInterval);
 			}
 
 			if (!interactiveInput) {
@@ -5043,7 +5071,10 @@ program
 				rl.on("line", async (line) => {
 					const message = line.replace(/\s+$/u, "");
 					if (message.trim().length === 0) return;
-					await core.sendMessage({ from, message, type, group, to });
+					await pgQuery(
+						`INSERT INTO roadmap.message_ledger (from_agent, to_agent, channel, message_type, message_content) VALUES ($1, $2, $3, 'text', $4)`,
+						[from, to ?? null, pgChannel, message],
+					);
 				});
 				return new Promise(() => {
 					rl.on("SIGINT", () => {
@@ -5136,11 +5167,10 @@ program
 				} else {
 					const lines = content.split("\n");
 					for (const line of lines) {
-						const parsed = Core.parseLine(line);
-						if (parsed) {
-							process.stdout.write(Core.formatMessagePretty(parsed));
-						} else if (line.startsWith("#")) {
+						if (line.startsWith("#")) {
 							process.stdout.write(`\x1b[1m${line}\x1b[0m\n\n`);
+						} else if (line.trim()) {
+							process.stdout.write(`${line}\n`);
 						}
 					}
 				}
@@ -5196,45 +5226,50 @@ program
 				}
 			}
 
-			const filePath = await core.resolveChannelFile(resolvedChannel);
-			const { existsSync } = await import("node:fs");
-
-			// If the channel file doesn't exist yet, create it so the watcher has something to attach to
-			if (!existsSync(filePath)) {
-				const { writeFileSync, mkdirSync } = await import("node:fs");
-				const { dirname } = await import("node:path");
-				mkdirSync(dirname(filePath), { recursive: true });
-				writeFileSync(filePath, `# Group Chat: #${resolvedChannel}\n\n`);
-			}
+			const listenChannel =
+				resolvedChannel === "public"
+					? "broadcast"
+					: resolvedChannel.startsWith("team:")
+						? resolvedChannel
+						: `team:${resolvedChannel}`;
 
 			const label = [`#${resolvedChannel}`];
 			if (identity) label.push(`as ${identity}`);
 			if (options.mention) label.push(`filtering @${options.mention}`);
 
 			if (!options.pretty && !options.markdown) {
-				process.stderr.write(
-					`Listening on ${label.join(" ")} (Ctrl+C to stop)\n`,
-				);
+				process.stderr.write(`Listening on ${label.join(" ")} (Ctrl+C to stop)\n`);
 			}
 
-			await core.watchMessages({
-				channel: resolvedChannel,
-				identity: options.all ? undefined : identity,
-				mention: options.mention,
-				since: options.since,
-				onMessage: (msg) => {
-					if (options.pretty || options.markdown) {
-						process.stdout.write(
-							Core.formatMessagePretty(msg, {
-								color: options.pretty && !options.markdown,
-								markdown: options.markdown,
-							}),
-						);
-					} else {
-						process.stdout.write(`${JSON.stringify(msg)}\n`);
+			let listenLastId = 0;
+			if (options.since) {
+				const sinceResult = await pgQuery(
+					`SELECT COALESCE(MAX(id), 0) as last_id FROM roadmap.message_ledger WHERE channel = $1 AND created_at < $2`,
+					[listenChannel, options.since],
+				).catch(() => ({ rows: [{ last_id: 0 }] }));
+				listenLastId = Number((sinceResult.rows[0] as any)?.last_id ?? 0);
+			}
+
+			const _listenInterval = setInterval(async () => {
+				try {
+					const r = await pgQuery(
+						`SELECT id, from_agent, to_agent, message_content, created_at, channel FROM roadmap.message_ledger
+						 WHERE channel = $1 AND id > $2 ORDER BY id ASC LIMIT 50`,
+						[listenChannel, listenLastId],
+					);
+					for (const msg of r.rows) {
+						listenLastId = msg.id as number;
+						if (!options.all && identity && (msg.from_agent as string) === identity) continue;
+						if (options.mention && !(msg.message_content as string)?.includes(`@${options.mention as string}`)) continue;
+						if (options.pretty || options.markdown) {
+							const t = new Date(msg.created_at as Date).toLocaleTimeString();
+							process.stdout.write(`[${t}] ${msg.from_agent as string}: ${msg.message_content as string}\n`);
+						} else {
+							process.stdout.write(`${JSON.stringify(msg)}\n`);
+						}
 					}
-				},
-			});
+				} catch {}
+			}, 1000);
 
 			// Keep process alive
 			await new Promise(() => {});
@@ -5367,15 +5402,12 @@ agentsCmd
 				}
 			}
 
-			const filePath = await core.sendMessage({
-				from,
-				message,
-				type,
-				group: options.group,
-				to: options.to,
-			});
-
-			console.log(`Message sent to ${filePath}`);
+			const atChannel = type === "public" ? "broadcast" : type === "group" ? `team:${options.group ?? "general"}` : "direct";
+			await pgQuery(
+				`INSERT INTO roadmap.message_ledger (from_agent, to_agent, channel, message_type, message_content) VALUES ($1, $2, $3, 'text', $4)`,
+				[from, options.to ?? null, atChannel, message],
+			);
+			console.log(`Message sent to ${atChannel}`);
 		} catch (err) {
 			console.error("Failed to send message:", err);
 			process.exit(1);
@@ -5430,16 +5462,10 @@ agentsCmd
 				} else {
 					const lines = content.split("\n");
 					for (const line of lines) {
-						const parsed = Core.parseLine(line);
-						if (parsed) {
-							process.stdout.write(
-								Core.formatMessagePretty(parsed, {
-									color: !options.markdown,
-									markdown: !!options.markdown,
-								}),
-							);
-						} else if (line.startsWith("#")) {
+						if (line.startsWith("#")) {
 							process.stdout.write(`\x1b[1m${line}\x1b[0m\n\n`);
+						} else if (line.trim()) {
+							process.stdout.write(`${line}\n`);
 						}
 					}
 				}
@@ -5473,7 +5499,10 @@ agentsCmd
 				}
 			}
 
-			await core.subscribeToChannel(agent, channel);
+			await pgQuery(
+				`INSERT INTO roadmap.channel_subscription (agent_identity, channel) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+				[agent, channel],
+			);
 			console.log(`Subscribed ${agent} to channel: ${channel}`);
 		} catch (err) {
 			console.error("Failed to subscribe:", err);
@@ -5504,7 +5533,10 @@ agentsCmd
 				}
 			}
 
-			await core.unsubscribeFromChannel(agent, channel);
+			await pgQuery(
+				`DELETE FROM roadmap.channel_subscription WHERE agent_identity = $1 AND channel = $2`,
+				[agent, channel],
+			);
 			console.log(`Unsubscribed ${agent} from channel: ${channel}`);
 		} catch (err) {
 			console.error("Failed to unsubscribe:", err);
@@ -5524,13 +5556,16 @@ agentsCmd
 			const core = new Core(cwd);
 
 			if (options.channel) {
-				const agents = await core.getSubscribedAgents(options.channel);
-				if (agents.length === 0) {
+				const subResult = await pgQuery(
+					`SELECT agent_identity FROM roadmap.channel_subscription WHERE channel = $1 ORDER BY agent_identity`,
+					[options.channel],
+				).catch(() => ({ rows: [] as { agent_identity: string }[] }));
+				if (subResult.rows.length === 0) {
 					console.log(`No agents subscribed to channel: ${options.channel}`);
 				} else {
 					console.log(`Agents subscribed to ${options.channel}:`);
-					for (const agent of agents) {
-						console.log(`  - ${agent}`);
+					for (const row of subResult.rows) {
+						console.log(`  - ${row.agent_identity}`);
 					}
 				}
 				return;
@@ -5551,27 +5586,31 @@ agentsCmd
 			}
 
 			if (options.all) {
-				// Show all channels and their subscribers
-				const channels = await core.listChannels();
-				let found = false;
-				for (const ch of channels) {
-					const agents = await core.getSubscribedAgents(ch.name);
-					if (agents.length > 0) {
-						console.log(`${ch.name}: ${agents.join(", ")}`);
-						found = true;
+				const allSubResult = await pgQuery(
+					`SELECT channel, array_agg(agent_identity ORDER BY agent_identity) as agents
+					 FROM roadmap.channel_subscription
+					 GROUP BY channel
+					 ORDER BY channel`,
+					[],
+				).catch(() => ({ rows: [] as { channel: string; agents: string[] }[] }));
+				if (allSubResult.rows.length === 0) {
+					console.log("No active subscriptions.");
+				} else {
+					for (const row of allSubResult.rows) {
+						console.log(`${row.channel}: ${(row.agents as string[]).join(", ")}`);
 					}
 				}
-				if (!found) {
-					console.log("No active subscriptions.");
-				}
 			} else if (agent) {
-				const subs = await core.getSubscriptions(agent);
-				if (subs.length === 0) {
+				const mySubResult = await pgQuery(
+					`SELECT channel FROM roadmap.channel_subscription WHERE agent_identity = $1 ORDER BY channel`,
+					[agent],
+				).catch(() => ({ rows: [] as { channel: string }[] }));
+				if (mySubResult.rows.length === 0) {
 					console.log(`${agent} has no channel subscriptions.`);
 				} else {
 					console.log(`${agent}'s subscriptions:`);
-					for (const ch of subs) {
-						console.log(`  - ${ch}`);
+					for (const row of mySubResult.rows) {
+						console.log(`  - ${row.channel}`);
 					}
 				}
 			}

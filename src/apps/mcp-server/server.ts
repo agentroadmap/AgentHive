@@ -11,7 +11,6 @@ import {
 	ListToolsRequestSchema,
 	ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { RelayService } from "../../core/messaging/relay.ts";
 import { PipelineCron } from "../../core/pipeline/pipeline-cron.ts";
 import { Core } from "../../core/roadmap.ts";
 import * as pgPool from "../../postgres/pool.ts";
@@ -1724,12 +1723,6 @@ export async function createMcpServer(
 			// Silently ignore background maintenance errors
 		}
 	}, MAINTENANCE_INTERVAL_MS);
-
-	// Start Relay Service if enabled
-	if (config.relay?.enabled) {
-		const relay = new RelayService(server, config.relay);
-		void relay.start();
-	}
 
 	if (options.debug) {
 		console.error("MCP server initialised (stdio transport only).");

@@ -306,14 +306,6 @@ describe("AC-4: msg_read wait_ms", () => {
 // AC-5: Fallback when pg_notify unavailable
 // ---------------------------------------------------------------------------
 describe("AC-5: pg_notify fallback", () => {
-	it("MessageNotificationListener can be instantiated", async () => {
-		const { MessageNotificationListener } = await import(
-			"../apps/mcp-server/tools/messages/pg-handlers.ts"
-		);
-		const listener = new MessageNotificationListener();
-		assert.ok(listener, "Should create listener instance");
-	});
-
 	it("readMessages degrades gracefully when pg_notify is unavailable", async () => {
 		const { PgMessagingHandlers } = await import(
 			"../apps/mcp-server/tools/messages/pg-handlers.ts"

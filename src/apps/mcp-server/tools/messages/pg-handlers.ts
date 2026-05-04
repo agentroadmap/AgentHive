@@ -4,13 +4,18 @@
  * A2A/A2H communication via the `message_ledger` table.
  * All handler methods catch errors and return MCP text responses instead of throwing.
  *
- * P149: Added channel subscriptions, pg_notify push notifications, and wait_ms blocking reads.
+ * P149: Channel subscriptions, pg_notify push notifications, and wait_ms blocking reads.
+ * Migration 096 adds the trig_a2a_message_notify trigger that fires these notifications.
+ *
+ * Trust model: readMessages enforces trust tier via resolveTrust() — restricted/blocked
+ * agents cannot receive DMs; authority agents bypass all filters.
  */
 
 import { query, getPool } from "../../../../postgres/pool.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
 import { enforceMessageGate } from "../../../../proposal-engine/middleware/message-dispatch-gate.ts";
+import { resolveTrust } from "../../../../infra/trust/trust-resolver.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
@@ -29,88 +34,84 @@ function firstText(result: CallToolResult): string | undefined {
 }
 
 /**
- * Notification payload from the fn_notify_new_message trigger.
+ * Notification payload from the trig_a2a_message_notify trigger (migration 096).
  */
 export interface NewMessageNotification {
 	message_id: number;
 	from_agent: string;
-	to_agent: string | null;
-	channel: string;
-	message_type: string;
-	proposal_id: number | null;
-	created_at: string;
+	channel: string | null;
+	message_type: string | null;
 }
 
 /**
- * Listener for pg_notify 'new_message' channel.
- * Provides blocking wait for new messages with timeout fallback.
+ * Wait for a pg_notify on the per-agent DM channel `a2a_msg_{agentIdentity}`.
+ * Uses a dedicated pool connection with LISTEN/NOTIFY, following the liaison
+ * listener pattern in liaison-message-service.ts.
+ *
+ * Returns the raw notification payload or null on timeout.
  */
-export class MessageNotificationListener {
-	private listenerClient: any = null;
-	private started = false;
+async function waitForAgentNotification(
+	agentIdentity: string,
+	waitMs: number,
+): Promise<NewMessageNotification | null> {
+	const pool = getPool();
+	const client = await pool.connect();
+	const pgChannel = `a2a_msg_${agentIdentity}`;
 
-	/**
-	 * Start listening for new_message notifications.
-	 * Requires a dedicated client connection (pg LISTEN requires persistent connection).
-	 */
-	async start(): Promise<void> {
-		if (this.started) return;
-		const pool = getPool();
-		this.listenerClient = await pool.connect();
-		await this.listenerClient.query("LISTEN new_message");
-		this.started = true;
-	}
+	try {
+		await client.query(`LISTEN "${pgChannel}"`);
 
-	/**
-	 * Stop listening and release the connection.
-	 */
-	async stop(): Promise<void> {
-		if (!this.started || !this.listenerClient) return;
-		try {
-			await this.listenerClient.query("UNLISTEN new_message");
-		} catch {
-			// ignore cleanup errors
-		}
-		this.listenerClient.release();
-		this.listenerClient = null;
-		this.started = false;
-	}
-
-	/**
-	 * Wait for a new_message notification with timeout.
-	 * Returns the notification payload if received within waitMs, or null on timeout.
-	 */
-	async waitForMessage(waitMs: number): Promise<NewMessageNotification | null> {
-		if (!this.started || !this.listenerClient) {
-			await this.start();
-		}
-
-		return new Promise((resolve) => {
+		return await new Promise<NewMessageNotification | null>((resolve) => {
 			let resolved = false;
 
 			const timeout = setTimeout(() => {
 				if (!resolved) {
 					resolved = true;
-					this.listenerClient?.removeListener("notification", handler);
+					client.removeListener("notification", handler);
 					resolve(null);
 				}
 			}, waitMs);
 
 			const handler = (msg: any) => {
-				if (msg.channel === "new_message" && !resolved) {
+				if (msg.channel === pgChannel && !resolved) {
 					resolved = true;
 					clearTimeout(timeout);
-					this.listenerClient?.removeListener("notification", handler);
+					client.removeListener("notification", handler);
 					try {
-						resolve(JSON.parse(msg.payload));
+						resolve(JSON.parse(msg.payload) as NewMessageNotification);
 					} catch {
 						resolve(null);
 					}
 				}
 			};
 
-			this.listenerClient.on("notification", handler);
+			client.on("notification", handler);
 		});
+	} finally {
+		try {
+			await client.query(`UNLISTEN "${pgChannel}"`);
+		} catch {
+			// ignore cleanup errors
+		}
+		client.release();
+	}
+}
+
+/**
+ * Check if a reader agent is allowed to receive a message from sender.
+ * Restricted and blocked tiers cannot receive DMs.
+ * Authority agents bypass all trust checks.
+ */
+async function canRead(reader: string, fromAgent: string): Promise<boolean> {
+	try {
+		const result = await resolveTrust({ sender: fromAgent, receiver: reader });
+		// authority and trusted tiers can always communicate
+		// known tier: can receive DMs
+		// restricted: no DM initiation allowed (can only receive pong/response)
+		// blocked: no communication
+		return result.tier !== "blocked" && result.tier !== "restricted";
+	} catch {
+		return false;
 	}
 }
 
@@ -366,8 +367,14 @@ export class PgMessagingHandlers {
 	}
 
 	/**
-	 * Read messages with optional wait_ms for blocking until new messages arrive (AC-4).
-	 * When wait_ms > 0, uses pg_notify to block until a notification arrives or timeout.
+	 * Read messages with optional wait_ms for trust-bound blocking reads (AC-4).
+	 *
+	 * When wait_ms > 0 and agent is specified: LISTENs on the per-agent pg_notify
+	 * channel `a2a_msg_{agent}` (fired by migration 096 trigger). Blocks up to
+	 * wait_ms ms, then returns. Results are filtered by the trust model — a
+	 * restricted or blocked sender's DMs will not be surfaced.
+	 *
+	 * When agent is omitted: non-blocking channel/broadcast reads (no trust filter).
 	 */
 	async readMessages(args: {
 		agent?: string;
@@ -376,38 +383,32 @@ export class PgMessagingHandlers {
 		wait_ms?: number;
 	}): Promise<CallToolResult> {
 		try {
-			// If wait_ms specified and no messages immediately available, block on pg_notify
-			if (args.wait_ms && args.wait_ms > 0) {
+			if (args.wait_ms && args.wait_ms > 0 && args.agent) {
 				const waitMs = Math.min(Math.max(args.wait_ms, 0), 30000);
 
-				// First, check if messages already exist
+				// Check if unread messages already exist for this agent
 				const existing = await this.fetchMessages(args);
-
-				if (firstText(existing) === "No messages found.") {
-					// No messages — wait for pg_notify
-					const listener = new MessageNotificationListener();
-					try {
-						const notification = await listener.waitForMessage(waitMs);
-						if (notification) {
-							// A notification arrived — re-fetch messages
-							return await this.fetchMessages(args);
-						}
-						// Timeout — return empty
-						return {
-							content: [
-								{
-									type: "text",
-									text: `No new messages after waiting ${waitMs}ms.`,
-								},
-							],
-						};
-					} finally {
-						await listener.stop();
-					}
+				if (firstText(existing) !== "No messages found.") {
+					return existing;
 				}
 
-				// Messages already exist — return them immediately
-				return existing;
+				// Block on pg_notify channel `a2a_msg_{agent}` (migration 096)
+				const notification = await waitForAgentNotification(args.agent, waitMs);
+				if (!notification) {
+					return {
+						content: [{ type: "text", text: `No new messages after waiting ${waitMs}ms.` }],
+					};
+				}
+
+				// Trust check on the arriving sender before fetching
+				const allowed = await canRead(args.agent, notification.from_agent);
+				if (!allowed) {
+					return {
+						content: [{ type: "text", text: `No new messages after waiting ${waitMs}ms.` }],
+					};
+				}
+
+				return await this.fetchMessages(args);
 			}
 
 			// Normal (non-blocking) read

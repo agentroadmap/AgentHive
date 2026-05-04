@@ -1,26 +1,13 @@
 /**
  * MCP tools for inter-agent communication protocol
  *
- * STATE-49: Inter-Agent Communication Protocol
- * AC#3: Agent mentions trigger notifications
- * AC#4: Message threading supported
- *
- * P067: Added Postgres-backed tools (protocol_pg_*) for threads, replies, and mentions.
+ * P067: Postgres-backed tools for threads, replies, and mentions.
  */
 
 import type { McpServer } from "../../server.ts";
 import type { McpToolHandler } from "../../types.ts";
 import { createSimpleValidatedTool } from "../../validation/tool-wrapper.ts";
-import { ProtocolHandlers } from "./handlers.ts";
 import { PgProtocolHandlers } from "./pg-handlers.ts";
-import {
-	protocolMentionSearchSchema,
-	protocolNotificationsSchema,
-	protocolSendWithMentionSchema,
-	protocolThreadGetSchema,
-	protocolThreadListSchema,
-	protocolThreadReplySchema,
-} from "./schemas.ts";
 
 // ─── Postgres schemas ────────────────────────────────────────────────────────
 const pgCreateThreadSchema = {
@@ -111,77 +98,7 @@ const pgMarkReadSchema = {
 };
 
 export function registerProtocolTools(server: McpServer): void {
-	const handlers = new ProtocolHandlers(server);
 	const pgHandlers = new PgProtocolHandlers();
-
-	// ─── Filesystem-backed tools (legacy) ────────────────────────────────
-	const mentionSearchTool: McpToolHandler = createSimpleValidatedTool(
-		{
-			name: "protocol_mention_search",
-			description: "Search for mentions of an agent across channels",
-			inputSchema: protocolMentionSearchSchema,
-		},
-		protocolMentionSearchSchema,
-		async (input) => handlers.searchMentions(input as any),
-	);
-
-	const threadGetTool: McpToolHandler = createSimpleValidatedTool(
-		{
-			name: "protocol_thread_get",
-			description: "Get a specific thread with all replies",
-			inputSchema: protocolThreadGetSchema,
-		},
-		protocolThreadGetSchema,
-		async (input) => handlers.getThread(input as any),
-	);
-
-	const threadListTool: McpToolHandler = createSimpleValidatedTool(
-		{
-			name: "protocol_thread_list",
-			description: "List all threads in a channel",
-			inputSchema: protocolThreadListSchema,
-		},
-		protocolThreadListSchema,
-		async (input) => handlers.listThreads(input as any),
-	);
-
-	const threadReplyTool: McpToolHandler = createSimpleValidatedTool(
-		{
-			name: "protocol_thread_reply",
-			description: "Reply to an existing thread",
-			inputSchema: protocolThreadReplySchema,
-		},
-		protocolThreadReplySchema,
-		async (input) => handlers.replyToThread(input as any),
-	);
-
-	const sendWithMentionTool: McpToolHandler = createSimpleValidatedTool(
-		{
-			name: "protocol_send_mention",
-			description:
-				"Send a message with agent mentions (triggers notifications)",
-			inputSchema: protocolSendWithMentionSchema,
-		},
-		protocolSendWithMentionSchema,
-		async (input) => handlers.sendWithMentions(input as any),
-	);
-
-	const notificationsTool: McpToolHandler = createSimpleValidatedTool(
-		{
-			name: "protocol_notifications",
-			description: "Get all notifications (mentions) for an agent",
-			inputSchema: protocolNotificationsSchema,
-		},
-		protocolNotificationsSchema,
-		async (input) => handlers.getNotifications(input as any),
-	);
-
-	server.addTool(mentionSearchTool);
-	server.addTool(threadGetTool);
-	server.addTool(threadListTool);
-	server.addTool(threadReplyTool);
-	server.addTool(sendWithMentionTool);
-	server.addTool(notificationsTool);
 
 	// ─── Postgres-backed tools (P067) ────────────────────────────────────
 	const pgCreateThreadTool: McpToolHandler = createSimpleValidatedTool(
