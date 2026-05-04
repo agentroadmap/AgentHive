@@ -8,31 +8,33 @@ import {
 function makeEdge(
 	edgeId: number,
 	fromProject: number,
-	fromProposal: number,
 	toProject: number,
-	toProposal: number,
-	kind = "blocks",
+	kindId = 1,
+	referenceId = "ref-1",
+	referenceType = "proposal",
+	isBlocking = true,
 ): CrossProjectEdge {
 	return {
 		edgeId: BigInt(edgeId),
 		fromProjectId: BigInt(fromProject),
-		fromProposalId: BigInt(fromProposal),
 		toProjectId: BigInt(toProject),
-		toProposalId: BigInt(toProposal),
-		kind,
+		kindId: BigInt(kindId),
+		referenceId,
+		referenceType,
+		isBlocking,
 	};
 }
 
 describe("P602: detectCycles — cross-project BFS", () => {
 	it("returns empty for acyclic graph", () => {
-		// P1:1 → P2:2 → P3:3 (no cycle)
-		const edges = [makeEdge(1, 1, 1, 2, 2), makeEdge(2, 2, 2, 3, 3)];
+		// project 1 → 2 → 3 (no cycle)
+		const edges = [makeEdge(1, 1, 2), makeEdge(2, 2, 3)];
 		assert.deepStrictEqual(detectCycles(edges), []);
 	});
 
 	it("detects a simple two-node cycle", () => {
-		// P1:1 → P2:2 → P1:1 (cycle)
-		const edges = [makeEdge(1, 1, 1, 2, 2), makeEdge(2, 2, 2, 1, 1)];
+		// project 1 → 2 → 1 (cycle)
+		const edges = [makeEdge(1, 1, 2), makeEdge(2, 2, 1)];
 		const cycles = detectCycles(edges);
 		assert.equal(cycles.length, 1);
 		assert.equal(cycles[0].hasCycle, true);
@@ -40,12 +42,8 @@ describe("P602: detectCycles — cross-project BFS", () => {
 	});
 
 	it("detects a three-node cycle", () => {
-		// P1:1 → P2:2 → P3:3 → P1:1
-		const edges = [
-			makeEdge(1, 1, 1, 2, 2),
-			makeEdge(2, 2, 2, 3, 3),
-			makeEdge(3, 3, 3, 1, 1),
-		];
+		// project 1 → 2 → 3 → 1
+		const edges = [makeEdge(1, 1, 2), makeEdge(2, 2, 3), makeEdge(3, 3, 1)];
 		const cycles = detectCycles(edges);
 		assert.ok(cycles.length >= 1);
 		assert.ok(cycles.every((c) => c.hasCycle));
@@ -55,24 +53,22 @@ describe("P602: detectCycles — cross-project BFS", () => {
 		assert.deepStrictEqual(detectCycles([]), []);
 	});
 
-	it("does not detect self-loops (excluded by DB CHECK constraint)", () => {
-		// Self-loops (same project_id) cannot enter the DB; this confirms
-		// the checker handles same-project-id gracefully if called directly.
-		const edges = [makeEdge(1, 1, 1, 1, 1)];
-		// P1:1 → P1:1 is a self-cycle; the cycle check should catch it
+	it("detects self-loops (same project_id in from and to)", () => {
+		// project 1 → 1 is a self-cycle
+		const edges = [makeEdge(1, 1, 1)];
 		const cycles = detectCycles(edges);
 		assert.ok(cycles.length >= 1);
 	});
 
 	it("handles disconnected graph without false positives", () => {
 		// Two independent chains, no cycles
-		const edges = [makeEdge(1, 1, 1, 2, 2), makeEdge(3, 3, 3, 4, 4)];
+		const edges = [makeEdge(1, 1, 2), makeEdge(3, 3, 4)];
 		assert.deepStrictEqual(detectCycles(edges), []);
 	});
 
 	it("cycle edge IDs reference the edges that form the cycle", () => {
-		// P1:1 → P2:2 (edge 10), P2:2 → P1:1 (edge 11)
-		const edges = [makeEdge(10, 1, 1, 2, 2), makeEdge(11, 2, 2, 1, 1)];
+		// project 1 → 2 (edge 10), project 2 → 1 (edge 11)
+		const edges = [makeEdge(10, 1, 2), makeEdge(11, 2, 1)];
 		const cycles = detectCycles(edges);
 		assert.equal(cycles.length, 1);
 		assert.ok(
