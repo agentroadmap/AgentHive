@@ -538,6 +538,21 @@ export async function createMcpServer(
 			// Non-fatal; continue without the registry
 		}
 
+		// Register timeout cron for A2A message reliability (P835)
+		try {
+			const { registerTimeoutCron } = await import(
+				"../../infra/messaging/timeout-cron.ts"
+			);
+			const pool = pgPool.getPool();
+			await registerTimeoutCron(pool);
+			if (options.debug) {
+				console.error("[MCP] Timeout cron registered for message reliability");
+			}
+		} catch (error) {
+			console.error("[MCP] Failed to register timeout cron:", error);
+			// Non-fatal; continue without timeout reliability (messages won't escalate/remind)
+		}
+
 		// V2 agentHive2 connectivity check (P826) — non-fatal, opt-in via env
 		if (process.env.AGENTHIVE_V2_DB_URL) {
 			const { verifyAgentHive2Connection } = await import(
