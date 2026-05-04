@@ -878,6 +878,45 @@ You are responsible for identifying and breaking unproductive execution cycles.
 * **DAG Loops**: Monitor for Directed Acyclic Graph (DAG) cycles. If a proposal oscillates between states without advancing, examine the claim log and escalate for structural intervention.
 * **Reporting**: Log all detected loops for audit.
 
+## 14a. Phase Gating
+
+The multi-tenancy program is organized into **four phases** (P471). Each phase contains a logical cluster of proposals that must advance together to avoid collisions on shared modules. Phase gating is a **workflow enforcement rule** that prevents premature advancement.
+
+### The Four Phases
+
+| Phase | Name | Focus | Exit Criteria |
+| :--- | :--- | :--- | :--- |
+| **0** | MCP integrity | Fix bugs in MCP tool surface (fn_spawn_workflow, prop_update, add_dependency, context_prefix, identifier sanitization) | All MCP tool calls documented, validated, persistent; scanner findings on src/ < threshold |
+| **1** | Foundation modules | Build shared TS modules (paths.ts, identity.ts, endpoints.ts, state-names.ts, config resolution) | All src/ imports from shared modules; hardcode-scanner rules → 0 findings |
+| **2** | Control plane and dispatch hardening | Implement control DB, dispatch hardening, idempotency, fail-closed claims, concurrency ceilings, retry/terminal, provider/budget, host/provider/route separation, service topology, causal IDs, stop/cancel, observability, race tests, cubic paths, workflow state literals, scratch cleanup | Control DB online, dispatch race-tested, total hardcode scanner findings < 50 |
+| **3** | Agency liaison and orchestrator readiness | Enable multi-agency coexistence (unified auth, compatibility migration, liaison spec, dormancy, subscription claims, spawn briefing, stuck-detection, two-way protocol, observability, scan-hardcoding extraction) | Orchestrator safely dispatches to multiple agencies with subscription-window awareness; dispatch race-test green |
+
+### Gating Rule
+
+**No proposal advances from DRAFT to REVIEW unless its target phase is open.**
+
+To look up a proposal's phase:
+
+```sql
+SELECT p.phase_number, p.name
+FROM roadmap.program_phases p
+JOIN roadmap_proposal.proposal pr ON pr.phase_id = p.phase_id
+WHERE pr.id = $1;
+```
+
+If no phase is tagged, the proposal is out-of-scope and must be re-triaged before advancing.
+
+### Operator Override
+
+An operator may override this rule and advance a proposal despite its phase being closed or pending, but the override **must** be recorded in the `gate_decision_log` with reason `"phase gating override: <reason>"` (e.g., "critical security patch", "already shipping with Phase 0"). This preserves the audit trail and allows the leadership team to detect patterns of exceptions.
+
+### Implementation Notes
+
+- Each phase begins in status **open**.
+- Phases do NOT close automatically; only an operator or the phase owner may close one after verifying exit criteria.
+- A proposal tagged with phase N depends on all proposals in phases 0..N-1. The DAG advancement engine (P050) should use this to compute critical path.
+- New proposals filed during implementation are tagged with their target phase as they are created; untagged proposals default to out-of-scope until triaged.
+
 ## 15. Escalation Matrix
 
 When a blocker is out of control, follow the formal hierarchy:
