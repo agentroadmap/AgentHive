@@ -104,3 +104,31 @@ export const canPromoteSchema = {
 	},
 	required: ["proposalId"],
 };
+
+export const addCrossProjectDepSchema = {
+	type: "object",
+	properties: {
+		fromProjectId: { type: "string", description: "Source project ID" },
+		toProjectId: { type: "string", description: "Target project ID" },
+		kindId: {
+			type: "string",
+			description: "Kind catalog ID (dependency_kind_catalog.id)",
+		},
+		referenceId: {
+			type: "string",
+			description: "Reference entity ID (e.g. proposal ID as string)",
+		},
+		referenceType: {
+			type: "string",
+			description: "Reference entity type (e.g. 'proposal')",
+		},
+		notes: { type: "string", description: "Optional notes" },
+	},
+	required: [
+		"fromProjectId",
+		"toProjectId",
+		"kindId",
+		"referenceId",
+		"referenceType",
+	],
+};

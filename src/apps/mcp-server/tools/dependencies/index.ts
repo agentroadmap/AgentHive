@@ -11,6 +11,7 @@ import type { McpToolHandler } from "../../types.ts";
 import { createSimpleValidatedTool } from "../../validation/tool-wrapper.ts";
 import { DependencyHandlers } from "./handlers.ts";
 import {
+	addCrossProjectDepSchema,
 	addDependencySchema,
 	canPromoteSchema,
 	checkCycleSchema,
@@ -77,7 +78,9 @@ export function registerDependencyTools(server: McpServer): void {
 		},
 		resolveDependencySchema,
 		async (input) =>
-			handlers.resolveDependency(input as { id: number; resolved: boolean; notes?: string }),
+			handlers.resolveDependency(
+				input as { id: number; resolved: boolean; notes?: string },
+			),
 	);
 
 	// check_cycle: Check if a dependency would create a cycle
@@ -91,14 +94,17 @@ export function registerDependencyTools(server: McpServer): void {
 		},
 		checkCycleSchema,
 		async (input) =>
-			handlers.checkCycle(input as { fromProposalId: string; toProposalId: string }),
+			handlers.checkCycle(
+				input as { fromProposalId: string; toProposalId: string },
+			),
 	);
 
 	// remove_dependency: Remove a dependency
 	const removeDependencyTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "remove_dependency",
-			description: "Remove a dependency by ID. Use with caution as this affects DAG structure.",
+			description:
+				"Remove a dependency by ID. Use with caution as this affects DAG structure.",
 			inputSchema: removeDependencySchema,
 		},
 		removeDependencySchema,
@@ -118,6 +124,30 @@ export function registerDependencyTools(server: McpServer): void {
 		async (input) => handlers.canPromote(input as { proposalId: string }),
 	);
 
+	// add_cross_project_dep: Add a cross-project dependency edge (P602)
+	const addCrossProjectDepTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "add_cross_project_dep",
+			description:
+				"Add a cross-project dependency edge. Records that one project depends on " +
+				"another for a specific reference (e.g. a proposal). Uses dependency_kind_catalog " +
+				"to type the edge. Duplicate edges are rejected with a typed error.",
+			inputSchema: addCrossProjectDepSchema,
+		},
+		addCrossProjectDepSchema,
+		async (input) =>
+			handlers.addCrossProjectDep(
+				input as {
+					fromProjectId: string;
+					toProjectId: string;
+					kindId: string;
+					referenceId: string;
+					referenceType: string;
+					notes?: string;
+				},
+			),
+	);
+
 	// Register all tools
 	server.addTool(addDependencyTool);
 	server.addTool(getDependenciesTool);
@@ -125,4 +155,5 @@ export function registerDependencyTools(server: McpServer): void {
 	server.addTool(checkCycleTool);
 	server.addTool(removeDependencyTool);
 	server.addTool(canPromoteTool);
+	server.addTool(addCrossProjectDepTool);
 }

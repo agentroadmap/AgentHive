@@ -46,7 +46,10 @@ export class DependencyHandlers {
 			const depType = input.dependencyType ?? "blocks";
 
 			if (fromId === toId) {
-				return errorResult("Self-loop rejected", "from_proposal_id cannot equal to_proposal_id");
+				return errorResult(
+					"Self-loop rejected",
+					"from_proposal_id cannot equal to_proposal_id",
+				);
 			}
 
 			const existFrom = await query(
@@ -54,7 +57,10 @@ export class DependencyHandlers {
 				[fromId],
 			);
 			if (existFrom.rows.length === 0) {
-				return errorResult("Validation failed", `from_proposal_id ${fromId} does not exist`);
+				return errorResult(
+					"Validation failed",
+					`from_proposal_id ${fromId} does not exist`,
+				);
 			}
 
 			const existTo = await query(
@@ -62,7 +68,10 @@ export class DependencyHandlers {
 				[toId],
 			);
 			if (existTo.rows.length === 0) {
-				return errorResult("Validation failed", `to_proposal_id ${toId} does not exist`);
+				return errorResult(
+					"Validation failed",
+					`to_proposal_id ${toId} does not exist`,
+				);
 			}
 
 			const existing = await query<ProposalDependency>(
@@ -136,14 +145,17 @@ export class DependencyHandlers {
 	/**
 	 * Get dependencies with optional filters.
 	 */
-	async getDependencies(input: {
-		fromProposalId?: string;
-		toProposalId?: string;
-		dependencyType?: string;
-		resolved?: boolean;
-	} = {}): Promise<CallToolResult> {
+	async getDependencies(
+		input: {
+			fromProposalId?: string;
+			toProposalId?: string;
+			dependencyType?: string;
+			resolved?: boolean;
+		} = {},
+	): Promise<CallToolResult> {
 		try {
-			let sql = "SELECT * FROM roadmap_proposal.proposal_dependencies WHERE 1=1";
+			let sql =
+				"SELECT * FROM roadmap_proposal.proposal_dependencies WHERE 1=1";
 			const params: (string | boolean)[] = [];
 			let paramIdx = 1;
 
@@ -300,7 +312,9 @@ export class DependencyHandlers {
 	/**
 	 * Remove a dependency by ID.
 	 */
-	async removeDependency(input: { id: string | number }): Promise<CallToolResult> {
+	async removeDependency(input: {
+		id: string | number;
+	}): Promise<CallToolResult> {
 		try {
 			const depId = String(input.id);
 			const result = await query(
@@ -333,7 +347,10 @@ export class DependencyHandlers {
 	 */
 	async canPromote(input: { proposalId: string }): Promise<CallToolResult> {
 		try {
-			const blockers = await query<{ from_proposal_id: string; dependency_type: string }>(
+			const blockers = await query<{
+				from_proposal_id: string;
+				dependency_type: string;
+			}>(
 				`SELECT from_proposal_id, dependency_type FROM roadmap_proposal.proposal_dependencies
 				 WHERE to_proposal_id = $1 AND dependency_type = 'blocks' AND NOT resolved`,
 				[input.proposalId],
@@ -362,6 +379,52 @@ export class DependencyHandlers {
 			};
 		} catch (err) {
 			return errorResult("Failed to check promotion", err);
+		}
+	}
+
+	async addCrossProjectDep(input: {
+		fromProjectId: string;
+		toProjectId: string;
+		kindId: string;
+		referenceId: string;
+		referenceType: string;
+		notes?: string;
+	}): Promise<CallToolResult> {
+		try {
+			const { getControlPool } = await import(
+				"../../../../postgres/pool-registry.ts"
+			);
+			const { addCrossProjectDependency } = await import(
+				"../../../../core/cross-project/cross-dep-service.ts"
+			);
+			const result = await addCrossProjectDependency(getControlPool(), {
+				fromProjectId: BigInt(input.fromProjectId),
+				toProjectId: BigInt(input.toProjectId),
+				kindId: BigInt(input.kindId),
+				referenceId: input.referenceId,
+				referenceType: input.referenceType,
+				notes: input.notes,
+			});
+			if (!result.ok) {
+				return errorResult(
+					"Failed to add cross-project dependency",
+					result.error,
+				);
+			}
+			return {
+				content: [
+					{
+						type: "text",
+						text: JSON.stringify(
+							{ ok: true, edgeId: result.edgeId.toString() },
+							null,
+							2,
+						),
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to add cross-project dependency", err);
 		}
 	}
 }
