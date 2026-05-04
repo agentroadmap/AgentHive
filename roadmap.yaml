@@ -23,6 +23,19 @@ databases:
       Holds proposals, agent registry, runtime_flag, host_model_policy,
       project registry (DSN pointers), knowledge, federation, identity.
       Never holds project tenant data.
+  # V2 single-database (P821/P823). All project data lives here under per-project schemas.
+  # Application code connects via AGENTHIVE_V2_DB_URL (env) or these defaults.
+  agentHive2:
+    name: agentHive2
+    host: 127.0.0.1
+    port: 5432
+    # Default project schema — overridden per project by core.project.schema_name
+    project_schema: agentHive
+    role: v2_single_db
+    notes: |
+      V2 unified database. Control-plane lives in `core` schema.
+      Each project gets its own schema (see core.project.schema_name).
+      Connection string via AGENTHIVE_V2_DB_URL env var.
   projects:
     # Each project gets its own database. The list below is the seed
     # registry; the source of truth at runtime is `hiveCentral.roadmap.project`.

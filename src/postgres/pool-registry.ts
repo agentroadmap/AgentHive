@@ -135,6 +135,10 @@ if (process.env.AGENTHIVE_TENANT_POOL_LRU_MAX) {
 
 let controlPool: Pool | null = null;
 let controlPoolDsn: string | null = null;
+
+// V2 agentHive2 pool — single database with per-project schemas (P826)
+let v2Pool: Pool | null = null;
+let v2PoolDsn: string | null = null;
 let controlPoolMetrics: PoolMetrics = {
 	hits: 0,
 	misses: 0,
@@ -198,6 +202,106 @@ export function getControlPool(): Pool {
 
 	controlPoolMetrics.hits++;
 	return controlPool;
+}
+
+// ─── V2 agentHive2 Pool (P826) ───────────────────────────────────────────────
+
+/**
+ * Build a Postgres `options` string that sets the search path.
+ * schema comes first so unqualified table refs resolve to the project schema.
+ */
+function buildV2SearchPath(projectSchema: string): string {
+	return `-c search_path=${projectSchema},core,public`;
+}
+
+/**
+ * Get or create the agentHive2 pool for a specific project schema.
+ *
+ * Connection string priority:
+ *   1. AGENTHIVE_V2_DB_URL env var
+ *   2. Default DSN using PGHOST/PGPORT/PGUSER/PGPASSWORD against "agentHive2"
+ *
+ * search_path is set to: <projectSchema>, core, public
+ *
+ * Returns null if agentHive2 is not reachable (non-fatal — V2 is opt-in).
+ */
+export async function getAgentHive2Pool(
+	projectSchema = "agentHive",
+): Promise<Pool | null> {
+	const baseDsn =
+		process.env.AGENTHIVE_V2_DB_URL || buildDefaultDsn("agentHive2");
+	const dsn = `${baseDsn}?options=${encodeURIComponent(buildV2SearchPath(projectSchema))}`;
+
+	if (v2Pool && v2PoolDsn !== dsn) {
+		const old = v2Pool;
+		v2Pool = null;
+		v2PoolDsn = null;
+		void drainPool(old, "v2:agentHive2", DRAIN_TIMEOUT_MS).catch(() => {});
+	}
+
+	if (!v2Pool) {
+		try {
+			v2Pool = new Pool({
+				connectionString: baseDsn,
+				options: buildV2SearchPath(projectSchema),
+				max: poolMaxDefault,
+				idleTimeoutMillis: idleTimeoutMsDefault,
+				statement_timeout: statementTimeoutMsDefault,
+			});
+			v2Pool.on("error", (err) => {
+				console.error("[PoolRegistry] V2 pool error:", err.message);
+			});
+			v2PoolDsn = dsn;
+
+			if (process.env.DEBUG_PG) {
+				console.error(
+					`[PoolRegistry] V2 pool created (schema=${projectSchema})`,
+				);
+			}
+		} catch (err) {
+			console.error("[PoolRegistry] Failed to create V2 pool:", err);
+			return null;
+		}
+	}
+
+	return v2Pool;
+}
+
+/**
+ * Verify agentHive2 connectivity and schema presence.
+ *
+ * Called at MCP server startup if AGENTHIVE_V2_DB_URL is set.
+ * Non-fatal: logs result and returns boolean — never throws.
+ */
+export async function verifyAgentHive2Connection(
+	projectSchema = "agentHive",
+): Promise<boolean> {
+	try {
+		const pool = await getAgentHive2Pool(projectSchema);
+		if (!pool) return false;
+
+		const result = await pool.query<{ schema_name: string }>(
+			`SELECT schema_name
+			   FROM information_schema.schemata
+			  WHERE schema_name = $1`,
+			[projectSchema],
+		);
+
+		const found = result.rows.length > 0;
+		if (found) {
+			console.error(
+				`[PoolRegistry] V2 agentHive2 verified: schema '${projectSchema}' present`,
+			);
+		} else {
+			console.error(
+				`[PoolRegistry] V2 agentHive2 connected but schema '${projectSchema}' not found — run deploy/project-init/`,
+			);
+		}
+		return found;
+	} catch (err) {
+		console.error("[PoolRegistry] V2 agentHive2 connection check failed:", err);
+		return false;
+	}
 }
 
 // ─── Project Pool Registry ──────────────────────────────────────────────────

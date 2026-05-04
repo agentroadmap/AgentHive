@@ -539,6 +539,16 @@ export async function createMcpServer(
 			// Non-fatal; continue without the registry
 		}
 
+		// V2 agentHive2 connectivity check (P826) — non-fatal, opt-in via env
+		if (process.env.AGENTHIVE_V2_DB_URL) {
+			const { verifyAgentHive2Connection } = await import(
+				"../../postgres/pool-registry.ts"
+			);
+			void verifyAgentHive2Connection(
+				process.env.AGENTHIVE_V2_PROJECT_SCHEMA ?? "agentHive",
+			);
+		}
+
 		// Postgres-backed tools
 		const { registerProposalTools } = await import(
 			"./tools/proposals/backend-switch.ts"
