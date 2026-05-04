@@ -103,7 +103,11 @@ export async function liaisonRegister(
 		throw new Error(`Failed to register agency ${agency_id}`);
 
 	const row = result.rows[0];
-	return { session_id: row.session_id, agency_id: row.agency_id, status: row.status };
+	return {
+		session_id: row.session_id,
+		agency_id: row.agency_id,
+		status: row.status,
+	};
 }
 
 /**
@@ -243,7 +247,9 @@ export async function endLiaisonSession(
  * Check whether an agency has an active (non-ended) liaison session.
  * Used by the prop_claim gateway to enforce AC-7.
  */
-export async function hasActiveLiaisonSession(agency_id: string): Promise<boolean> {
+export async function hasActiveLiaisonSession(
+	agency_id: string,
+): Promise<boolean> {
 	const result = await query(
 		`
     SELECT 1 FROM roadmap.agency_liaison_session
@@ -291,7 +297,12 @@ export async function getAgencyStatus(agency_id: string): Promise<{
  * List all dispatchable agencies (active, within 90s heartbeat).
  */
 export async function listDispatchableAgencies(): Promise<
-	Array<{ agency_id: string; display_name: string; provider: string; status: string }>
+	Array<{
+		agency_id: string;
+		display_name: string;
+		provider: string;
+		status: string;
+	}>
 > {
 	const result = await query(`
     SELECT agency_id, display_name, provider, status
