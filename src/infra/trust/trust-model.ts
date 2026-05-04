@@ -34,21 +34,21 @@ export interface TrustPolicy {
  */
 export const TRUST_POLICIES: Record<TrustTier, TrustPolicy> = {
 	authority: {
-		canSendMessageTypes: ["task", "query", "response", "status", "ping", "pong"],
+		canSendMessageTypes: ["text", "task", "notify", "ack", "error", "event", "query", "response", "status", "ping", "pong"],
 		canRequireAction: true,
 		canModifyTrustLists: true,
 		canOverrideBlocks: true,
 		canDirectMessage: true,
 	},
 	trusted: {
-		canSendMessageTypes: ["task", "query", "response", "status", "ping", "pong"],
+		canSendMessageTypes: ["text", "task", "notify", "ack", "error", "event", "query", "response", "status", "ping", "pong"],
 		canRequireAction: true,
 		canModifyTrustLists: false,
 		canOverrideBlocks: false,
 		canDirectMessage: true,
 	},
 	known: {
-		canSendMessageTypes: ["query", "response", "status", "ping", "pong"],
+		canSendMessageTypes: ["text", "notify", "event", "query", "response", "status", "ping", "pong"],
 		canRequireAction: false,
 		canModifyTrustLists: false,
 		canOverrideBlocks: false,

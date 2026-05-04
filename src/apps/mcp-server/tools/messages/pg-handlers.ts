@@ -448,7 +448,7 @@ export class PgMessagingHandlers {
 			const { rows } = await query(
 				`INSERT INTO roadmap.message_ledger
 				  (from_agent, to_agent, channel, message_content, message_type, proposal_id, correlation_id, sig_verified, provider_sig, provider_sig_salt, created_at)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::bytea, $11)
 				RETURNING id, created_at`,
 				[
 					args.from_agent,
@@ -473,7 +473,7 @@ export class PgMessagingHandlers {
 					`INSERT INTO roadmap.message_timeout_tracking (
 						message_id, timeout_at, escalation_recipient
 					)
-					VALUES ($1, now() + ($2 || ' seconds')::interval, $3)
+					VALUES ($1, now() + $2 * interval '1 second', $3)
 					ON CONFLICT (message_id) DO NOTHING`,
 					[messageId, contract.timeout_seconds, contract.escalation_recipient || "liaison_hub"],
 				);
@@ -484,16 +484,14 @@ export class PgMessagingHandlers {
 				const pool = getPool();
 				const client = await pool.connect();
 				try {
+					const notifyPayload = JSON.stringify({
+						message_id: messageId,
+						correlation_id: correlationId,
+						from_agent: args.from_agent,
+					});
 					await client.query(
-						`SELECT pg_notify(
-							'a2a_msg_' || $1,
-							json_build_object(
-								'message_id', $2,
-								'correlation_id', $3,
-								'from_agent', $4
-							)::text
-						)`,
-						[args.to_agent, messageId, correlationId, args.from_agent],
+						`SELECT pg_notify($1, $2)`,
+						[`a2a_msg_${args.to_agent}`, notifyPayload],
 					);
 				} finally {
 					client.release();
