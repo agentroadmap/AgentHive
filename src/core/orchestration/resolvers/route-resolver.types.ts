@@ -8,7 +8,8 @@ export type EliminationReason =
 	| "project_policy"
 	| "agency_policy"
 	| "role_policy"
-	| "budget_exhausted";
+	| "budget_exhausted"
+	| "throttled";
 
 /** A route candidate that was excluded before selection. */
 export interface EliminatedRoute {
