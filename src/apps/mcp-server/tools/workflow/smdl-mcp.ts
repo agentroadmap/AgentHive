@@ -316,8 +316,6 @@ export class SMDLWorkflowHandlers {
 		});
 
 		// eslint-disable-next-line no-console
-		console.error(
-			"[MCP] Registered SMDL workflow tools (load YAML, load builtins, list, visualize)",
-		);
+		console.error("[MCP] Registered SMDL workflow tools (load YAML, list, visualize)");
 	}
 }
