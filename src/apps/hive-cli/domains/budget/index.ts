@@ -10,141 +10,135 @@
 
 import type { Command } from "commander";
 import {
-  registerDomain,
-  Errors,
-  type DomainSchema,
-  getControlPlaneClient,
-  resolveContext,
+	type DomainSchema,
+	Errors,
+	getControlPlaneClient,
+	registerDomain,
+	resolveContext,
 } from "../../common/index";
 
 const DOMAIN_NAME = "budget";
 const DOMAIN_DESCRIPTION = "Project and agency spend cap management";
 
 const domainSchema: DomainSchema = {
-  name: DOMAIN_NAME,
-  aliases: [],
-  description: DOMAIN_DESCRIPTION,
-  subcommands: [
-    {
-      name: "show",
-      signature: "hive budget show",
-      description: "Show budget cap and current consumption",
-      flags: [
-        {
-          name: "format",
-          type: "enum",
-          enum: ["text", "json"],
-          default: "text",
-        },
-        {
-          name: "scope",
-          type: "enum",
-          enum: ["project", "agency", "global"],
-          default: "project",
-          description: "Budget scope (project, agency, or global)",
-        },
-      ],
-      output: {
-        type: "object",
-        schema: {
-          scope: "string",
-          cap_usd: "number",
-          consumed_usd: "number",
-          remaining_usd: "number",
-          percent_used: "number",
-          period: "string",
-        },
-      },
-      idempotency: "idempotent",
-      formats_supported: ["text", "json"],
-    },
-    {
-      name: "consumed",
-      signature: "hive budget consumed",
-      description: "Show detailed spend breakdown",
-      flags: [
-        {
-          name: "format",
-          type: "enum",
-          enum: ["text", "json", "jsonl"],
-          default: "text",
-        },
-        {
-          name: "period",
-          type: "string",
-          description: "Time period (e.g., 2026-04 for April 2026)",
-        },
-      ],
-      output: {
-        type: "array",
-        schema: {
-          category: "string",
-          amount_usd: "number",
-          count: "number",
-        },
-      },
-      idempotency: "idempotent",
-      formats_supported: ["text", "json", "jsonl"],
-    },
-  ],
+	name: DOMAIN_NAME,
+	aliases: [],
+	description: DOMAIN_DESCRIPTION,
+	subcommands: [
+		{
+			name: "show",
+			signature: "hive budget show",
+			description: "Show budget cap and current consumption",
+			flags: [
+				{
+					name: "format",
+					type: "enum",
+					enum: ["text", "json"],
+					default: "text",
+				},
+				{
+					name: "scope",
+					type: "enum",
+					enum: ["project", "agency", "global"],
+					default: "project",
+					description: "Budget scope (project, agency, or global)",
+				},
+			],
+			output: {
+				type: "object",
+				schema: {
+					scope: "string",
+					cap_usd: "number",
+					consumed_usd: "number",
+					remaining_usd: "number",
+					percent_used: "number",
+					period: "string",
+				},
+			},
+			idempotency: "idempotent",
+			formats_supported: ["text", "json"],
+		},
+		{
+			name: "consumed",
+			signature: "hive budget consumed",
+			description: "Show detailed spend breakdown",
+			flags: [
+				{
+					name: "format",
+					type: "enum",
+					enum: ["text", "json", "jsonl"],
+					default: "text",
+				},
+				{
+					name: "period",
+					type: "string",
+					description: "Time period (e.g., 2026-04 for April 2026)",
+				},
+			],
+			output: {
+				type: "array",
+				schema: {
+					category: "string",
+					amount_usd: "number",
+					count: "number",
+				},
+			},
+			idempotency: "idempotent",
+			formats_supported: ["text", "json", "jsonl"],
+		},
+	],
 };
 
 async function handleShow(options: Record<string, unknown>) {
-  const client = getControlPlaneClient();
-  const ctx = await resolveContext(options);
-  const scope = options.scope ?? "project";
+	const client = getControlPlaneClient();
+	const ctx = await resolveContext(options);
+	const scope = options.scope ?? "project";
 
-  // TODO: Implement getBudgetCap on ControlPlaneClient
-  // Query roadmap.project_budget_cap
-  if (!ctx.projectId && scope === "project") {
-    throw Errors.notFound(
-      "Cannot resolve project context for budget show.",
-      { hint: "Set --project flag or HIVE_PROJECT environment variable" }
-    );
-  }
+	if (!ctx.projectId && scope === "project") {
+		throw Errors.notFound("Cannot resolve project context for budget show.", {
+			hint: "Set --project flag or HIVE_PROJECT environment variable",
+		});
+	}
 
-  return {
-    scope,
-    cap_usd: 0,
-    consumed_usd: 0,
-    remaining_usd: 0,
-    percent_used: 0,
-    period: new Date().toISOString().substring(0, 7), // YYYY-MM
-  };
+	const budget = await client.getBudgetStatus(ctx.projectId ?? undefined);
+	return budget;
 }
 
 async function handleConsumed(options: Record<string, unknown>) {
-  const client = getControlPlaneClient();
-  const ctx = await resolveContext(options);
-  const period = options.period ?? new Date().toISOString().substring(0, 7);
+	const client = getControlPlaneClient();
+	const ctx = await resolveContext(options);
 
-  // TODO: Implement getSpendBreakdown on ControlPlaneClient
-  return [];
+	const budget = await client.getBudgetStatus(ctx.projectId ?? undefined);
+	return budget.caps ?? [];
 }
 
 export function register(program: Command): void {
-  registerDomain(domainSchema);
+	registerDomain(domainSchema);
 
-  const domainCmd = program
-    .command(DOMAIN_NAME)
-    .description(DOMAIN_DESCRIPTION)
-    .addHelpCommand(false);
+	const domainCmd = program
+		.command(DOMAIN_NAME)
+		.description(DOMAIN_DESCRIPTION)
+		.addHelpCommand(false);
 
-  domainCmd
-    .command("show")
-    .description("Show budget cap and consumption")
-    .option("-s, --scope <scope>", "Budget scope (project, agency, global)", "project")
-    .action(async (options) => {
-      const result = await handleShow(options);
-      process.stdout.write(JSON.stringify(result, null, 2) + "\n");
-    });
+	domainCmd
+		.command("show")
+		.description("Show budget cap and consumption")
+		.option(
+			"-s, --scope <scope>",
+			"Budget scope (project, agency, global)",
+			"project",
+		)
+		.action(async (options) => {
+			const result = await handleShow(options);
+			process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+		});
 
-  domainCmd
-    .command("consumed")
-    .description("Show detailed spend breakdown")
-    .option("-p, --period <period>", "Time period (YYYY-MM)")
-    .action(async (options) => {
-      const result = await handleConsumed(options);
-      process.stdout.write(JSON.stringify(result, null, 2) + "\n");
-    });
+	domainCmd
+		.command("consumed")
+		.description("Show detailed spend breakdown")
+		.option("-p, --period <period>", "Time period (YYYY-MM)")
+		.action(async (options) => {
+			const result = await handleConsumed(options);
+			process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+		});
 }
