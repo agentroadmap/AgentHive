@@ -37,6 +37,8 @@ import type {
 import {
 	agencyPolicyFilterSql,
 	budgetFilterSql,
+	buildEliminationDiagnosticSql,
+	hostPolicyFilterSql,
 	projectPolicyFilterSql,
 	rolePolicyFilterSql,
 } from "./resolvers/route-policy-filters.ts";
@@ -576,33 +578,6 @@ export class NoPolicyAllowedRoute extends Error {
 }
 
 /**
- * P742: SQL fragment that filters model_routes by host_model_policy. The
- * host name is bound at $${hostParamIdx}.
- *
- *   - host has no policy row → allow any (legacy fallback)
- *   - allowed_providers non-empty → route_provider must be in the array
- *   - forbidden_providers contains route_provider → exclude
- */
-function hostPolicyFilterSql(hostParamIdx: number, alias = "mr"): string {
-	return `(
-		EXISTS (
-			SELECT 1 FROM roadmap.host_model_policy hp
-			 WHERE hp.host_name = $${hostParamIdx}::text
-			   AND (
-			     coalesce(array_length(hp.allowed_providers, 1), 0) = 0
-			     OR ${alias}.route_provider = ANY(hp.allowed_providers)
-			   )
-			   AND NOT (${alias}.route_provider = ANY(hp.forbidden_providers))
-		)
-		OR NOT EXISTS (
-			SELECT 1 FROM roadmap.host_model_policy hp
-			 WHERE hp.host_name = $${hostParamIdx}::text
-		)
-	)`;
-}
-
-
-/**
  * Enforce host-level spawn policy. Called after resolveModelRoute but before
  * the CLI subprocess is launched. Violations are recorded to
  * roadmap.escalation_log with severity=high and the spawn is aborted.
@@ -783,6 +758,54 @@ export async function detectProvider(
 // ─── P235: Platform-Aware Model Constraints ──────────────────────────────────
 
 /**
+ * P772: Fire-and-forget audit INSERT. Classifies every non-winning enabled route
+ * by the first policy layer that eliminated it, then writes one row to
+ * roadmap.route_decision_log. Errors are swallowed — this must never block dispatch.
+ */
+async function logRouteDecision({
+	provider,
+	chosenRouteId,
+	proposalId,
+	role,
+	agencyIdentity,
+	projectId,
+	roleProfileId,
+}: {
+	provider: string;
+	chosenRouteId: number;
+	proposalId: number | null;
+	role: string | null;
+	agencyIdentity: string | null;
+	projectId: number | null;
+	roleProfileId: number | null;
+}): Promise<void> {
+	// Params: $1=provider, $2=winner id, $3=host, $4=projectId, $5=agencyIdentity, $6=roleProfileId
+	const { rows } = await query<{
+		id: number;
+		route_provider: string;
+		first_failing_layer: string;
+	}>(
+		buildEliminationDiagnosticSql(1, 2, 3, 4, 5, 6, "mr"),
+		[provider, chosenRouteId, AGENTHIVE_HOST, projectId, agencyIdentity, roleProfileId],
+	);
+
+	const eliminatedRoutes = rows
+		.filter((r) => r.first_failing_layer !== "passed")
+		.map((r) => ({
+			route_id: r.id,
+			route_provider: r.route_provider,
+			reason: r.first_failing_layer,
+		}));
+
+	await query(
+		`INSERT INTO roadmap.route_decision_log
+		   (proposal_id, role, agency_identity, chosen_route_id, eliminated_routes)
+		 VALUES ($1, $2, $3, $4, $5)`,
+		[proposalId, role, agencyIdentity, chosenRouteId, JSON.stringify(eliminatedRoutes)],
+	);
+}
+
+/**
  * P235 + M026 + P771: Resolve model route for a spawn request.
  *
  * Returns a full ModelRoute (including base_url and api_spec) so the spawner
@@ -802,8 +825,17 @@ export async function detectProvider(
  *   3. If no hint: pick cheapest enabled route passing all 5 layers
  */
 async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & { eliminatedRoutes: EliminatedRoute[] }> {
-	const { provider, projectId = null, agencyIdentity = null, roleProfileId = null, modelHint: hint } = opts;
+	const {
+		provider,
+		projectId = null,
+		agencyIdentity = null,
+		roleProfileId = null,
+		modelHint: hint,
+		proposalId = null,
+		role = null,
+	} = opts;
 	type RouteRow = {
+		id: number;
 		model_name: string;
 		route_provider: string;
 		agent_provider: string;
@@ -840,7 +872,7 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 		// Layers 1-5 applied in WHERE; routes failing any layer are never returned.
 		if (perMillionPricing) {
 			return query<RouteRow>(
-				`SELECT mr.model_name, mr.route_provider, mr.agent_provider,
+				`SELECT mr.id, mr.model_name, mr.route_provider, mr.agent_provider,
                mr.agent_cli, mr.cli_path, mr.api_spec, mr.base_url, mr.plan_type,
                mr.cost_per_million_input, mr.cost_per_million_output,
                mr.api_key_env, mr.api_key_fallback_env, mr.base_url_env, mr.cli_api_key_env,
@@ -856,7 +888,7 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 		}
 
 		return query<RouteRow>(
-			`SELECT mr.model_name, mr.route_provider, mr.agent_provider,
+			`SELECT mr.id, mr.model_name, mr.route_provider, mr.agent_provider,
               mr.agent_cli, mr.cli_path, mr.api_spec, mr.base_url, mr.plan_type,
               NULL::numeric AS cost_per_million_input,
               NULL::numeric AS cost_per_million_output,
@@ -901,6 +933,9 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 		if (rows.length > 0) {
 			const route = toModelRoute(rows[0]);
 			assertResolvedRouteMetadata(provider, route);
+			void logRouteDecision({ provider, chosenRouteId: rows[0].id, proposalId, role, agencyIdentity, projectId, roleProfileId }).catch((err) => {
+				console.warn("[P772] route_decision_log write failed (non-blocking):", err instanceof Error ? err.message : String(err));
+			});
 			return { ...route, eliminatedRoutes: [] };
 		}
 
@@ -925,7 +960,7 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 	// P742+P771: all 5 policy layers applied so a policy-excluded default is never returned.
 	const { rows } = perMillionPricing
 		? await query<RouteRow>(
-				`SELECT mr.model_name, mr.route_provider, mr.agent_provider,
+				`SELECT mr.id, mr.model_name, mr.route_provider, mr.agent_provider,
                mr.agent_cli, mr.cli_path, mr.api_spec, mr.base_url, mr.plan_type,
                mr.cost_per_million_input, mr.cost_per_million_output,
                mr.api_key_env, mr.api_key_fallback_env, mr.base_url_env, mr.cli_api_key_env,
@@ -941,7 +976,7 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 				[provider, ...defaultPolicyParams],
 			)
 		: await query<RouteRow>(
-				`SELECT mr.model_name, mr.route_provider, mr.agent_provider,
+				`SELECT mr.id, mr.model_name, mr.route_provider, mr.agent_provider,
               mr.agent_cli, mr.cli_path, mr.api_spec, mr.base_url, mr.plan_type,
               NULL::numeric AS cost_per_million_input,
               NULL::numeric AS cost_per_million_output,
@@ -960,6 +995,9 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 	if (rows.length > 0) {
 		const route = toModelRoute(rows[0]);
 		assertResolvedRouteMetadata(provider, route);
+		void logRouteDecision({ provider, chosenRouteId: rows[0].id, proposalId, role, agencyIdentity, projectId, roleProfileId }).catch((err) => {
+			console.warn("[P772] route_decision_log write failed (non-blocking):", err instanceof Error ? err.message : String(err));
+		});
 		return { ...route, eliminatedRoutes: [] };
 	}
 
@@ -969,7 +1007,7 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 	if (fallbackModel) {
 		const { rows: defaultRows } = perMillionPricing
 			? await query<RouteRow>(
-					`SELECT mr.model_name, mr.route_provider, mr.agent_provider,
+					`SELECT mr.id, mr.model_name, mr.route_provider, mr.agent_provider,
                mr.agent_cli, mr.cli_path, mr.api_spec, mr.base_url, mr.plan_type,
                mr.cost_per_million_input, mr.cost_per_million_output,
                mr.api_key_env, mr.api_key_fallback_env, mr.base_url_env, mr.cli_api_key_env,
@@ -983,7 +1021,7 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 					[fallbackModel, provider, ...policyParams],
 				)
 			: await query<RouteRow>(
-					`SELECT mr.model_name, mr.route_provider, mr.agent_provider,
+					`SELECT mr.id, mr.model_name, mr.route_provider, mr.agent_provider,
               mr.agent_cli, mr.cli_path, mr.api_spec, mr.base_url, mr.plan_type,
               NULL::numeric AS cost_per_million_input,
               NULL::numeric AS cost_per_million_output,
@@ -1000,6 +1038,9 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 		if (defaultRows.length > 0) {
 			const route = toModelRoute(defaultRows[0]);
 			assertResolvedRouteMetadata(provider, route);
+			void logRouteDecision({ provider, chosenRouteId: defaultRows[0].id, proposalId, role, agencyIdentity, projectId, roleProfileId }).catch((err) => {
+				console.warn("[P772] route_decision_log write failed (non-blocking):", err instanceof Error ? err.message : String(err));
+			});
 			return { ...route, eliminatedRoutes: [] };
 		}
 	}
@@ -1144,13 +1185,15 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	// P405: provider comes from model_routes via orchestrator, not hardcoded to worktree
 	const provider =
 		providerOverride ?? (await detectProvider(worktree, worktreeRoot));
-	// P235/M026/P771: resolve full route applying all 5 policy layers
+	// P235/M026/P771/P772: resolve full route applying all 5 policy layers; logs decision
 	const { eliminatedRoutes: _eliminatedRoutes, ...route } = await resolveModelRoute({
 		provider,
 		projectId: req.projectId ?? null,
 		agencyIdentity: req.agencyIdentity ?? null,
 		roleProfileId: req.roleProfileId ?? null,
 		modelHint,
+		proposalId: req.proposalId ?? null,
+		role: req.stage,
 	});
 	// P797: validate that the resolved model has at least one enabled route before spawning
 	const routeCheck = await validateModelForDispatch(
