@@ -32,6 +32,7 @@ import {
 	type QueryResult,
 	type QueryResultRow,
 } from "pg";
+import { StructuralKeys } from "../../shared/runtime/config-keys";
 
 // Attempt to load PGPASSWORD from .env files if not set in environment
 (function loadPGPassword() {
@@ -66,13 +67,21 @@ let configuredSchema: string | null = normalizeSchemaName(
 );
 let poolSignature: string | null = null;
 
-const DEFAULT_SEARCH_PATH = [
-	"roadmap_proposal",
-	"roadmap_workforce",
-	"roadmap_efficiency",
-	"roadmap",
-	"public",
-];
+// Build search path from structural config
+// Default: ["roadmap_proposal", "roadmap_workforce", "roadmap_efficiency", "roadmap", "public"]
+// But can be overridden via PG_SCHEMA env or config if needed
+function getDefaultSearchPath(): string[] {
+	// For Phase 1, keep the hardcoded default; Phase 2 can parameterize via ConfigResolver
+	return [
+		"roadmap_proposal",
+		"roadmap_workforce",
+		"roadmap_efficiency",
+		"roadmap",
+		"public",
+	];
+}
+
+const DEFAULT_SEARCH_PATH = getDefaultSearchPath();
 
 type AgentHivePoolConfig = PoolConfig & {
 	schema?: string | null;
@@ -82,7 +91,7 @@ type ResolvedPoolConfig = {
 	host: string;
 	port: number;
 	user: string;
-	password: string;
+	password?: string;
 	database: string;
 	options?: string;
 	schema: string | null;
@@ -148,18 +157,12 @@ function resolvePoolConfig(config?: AgentHivePoolConfig): ResolvedPoolConfig {
 	const configuredPassword =
 		typeof config?.password === "function" ? undefined : config?.password;
 
-const resolvedPassword =
+	// PGPASSWORD is optional — rely on .pgpass/PGSERVICE/libpq implicit auth if not set
+	const resolvedPassword =
 		configuredPassword ??
 		process.env.PGPASSWORD ??
-	databaseUrlConfig.password ??
-	process.env.__PGPASSWORD_FROM_CONFIG;
-
-	if (!resolvedPassword) {
-		throw new Error(
-			"[PG] PGPASSWORD environment variable is required. " +
-				"Set PGPASSWORD before starting the MCP server.",
-		);
-	}
+		databaseUrlConfig.password ??
+		process.env.__PGPASSWORD_FROM_CONFIG;
 
 	const schema = normalizeSchemaName(
 		config?.schema ?? configuredSchema ?? process.env.PG_SCHEMA,
@@ -170,18 +173,18 @@ const resolvedPassword =
 			config?.host ??
 			process.env.PGHOST ??
 			databaseUrlConfig.host ??
-			"127.0.0.1",
+			(StructuralKeys.PGHOST.defaultValue ?? "127.0.0.1"),
 		port:
 			Number(config?.port ?? process.env.PGPORT ?? databaseUrlConfig.port) ||
-			5432,
+			(StructuralKeys.PGPORT.defaultValue ?? 5432),
 		user:
 			config?.user ?? process.env.PGUSER ?? databaseUrlConfig.user ?? "postgres",
-		password: resolvedPassword,
+		password: resolvedPassword ?? undefined,
 		database:
 			config?.database ??
 			process.env.PGDATABASE ??
 			databaseUrlConfig.database ??
-			"agenthive",
+			(StructuralKeys.PGDATABASE.defaultValue ?? "agenthive"),
 		options: buildSearchPathOptions(
 			config?.options ?? process.env.PG_OPTIONS,
 			schema,
@@ -190,17 +193,17 @@ const resolvedPassword =
 		connectionTimeoutMillis: parsePositiveInteger(
 			(config as PoolConfig | undefined)?.connectionTimeoutMillis ??
 				process.env.PG_CONNECTION_TIMEOUT_MS,
-			5000,
+			StructuralKeys.PG_CONNECTION_TIMEOUT_MS.defaultValue ?? 5000,
 		),
 		queryTimeoutMillis: parsePositiveInteger(
 			(config as PoolConfig | undefined)?.query_timeout ??
 				process.env.PG_QUERY_TIMEOUT_MS,
-			30000,
+			StructuralKeys.PG_QUERY_TIMEOUT_MS.defaultValue ?? 30000,
 		),
 		statementTimeoutMillis: parsePositiveInteger(
 			(config as PoolConfig | undefined)?.statement_timeout ??
 				process.env.PG_STATEMENT_TIMEOUT_MS,
-			30000,
+			StructuralKeys.PG_STATEMENT_TIMEOUT_MS.defaultValue ?? 30000,
 		),
 		// Pool size: pg-pool defaults to 10. Long-lived LISTEN clients
 		// (state-names, pipeline-cron, websocket-server, feature-flag-service)

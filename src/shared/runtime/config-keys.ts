@@ -20,9 +20,9 @@ export const SecretKeys = {
 		name: "PGPASSWORD",
 		class: "secret" as const,
 		parse: (v: string) => v,
-		required: true,
-		description: "PostgreSQL password for agenthive database",
-	} satisfies ConfigKey<string>,
+		required: false,
+		description: "PostgreSQL password (rely on .pgpass / libpq implicit auth if not set)",
+	} satisfies ConfigKey<string | undefined>,
 
 	DISCORD_BOT_TOKEN: {
 		name: "DISCORD_BOT_TOKEN",
@@ -393,6 +393,26 @@ export const StructuralKeys = {
 		yamlPath: "databases.listen_port",
 		defaultValue: 5432,
 	} satisfies ConfigKey<number>,
+
+	PGSERVICE: {
+		name: "PGSERVICE",
+		class: "structural" as const,
+		parse: (v: string) => v,
+		required: false,
+		description: "PostgreSQL service name (.pgpass/.pg_service.conf) for connection",
+		envOverride: true,
+	} satisfies ConfigKey<string | undefined>,
+
+	PGPASSFILE: {
+		name: "PGPASSFILE",
+		class: "structural" as const,
+		parse: (v: string) => v,
+		required: false,
+		description: "Path to .pgpass file for implicit PostgreSQL auth",
+		yamlPath: "database.pgpass_path",
+		envOverride: true,
+		defaultValue: "~/.pgpass",
+	} satisfies ConfigKey<string>,
 };
 
 /**
@@ -406,29 +426,293 @@ export const RegistryKeys = {
 		parse: (v: string) => v,
 		required: false,
 		description: "Default model provider (Claude, Codex, etc)",
-		dbTable: "control_runtime.host",
+		dbTable: "control_model.model_route",
 		dbColumn: "default_provider",
-		envOverride: true,
+		envOverride: false,
 	} satisfies ConfigKey<string | undefined>,
 
-	AGENTHIVE_USE_OFFER_DISPATCH: {
-		name: "AGENTHIVE_USE_OFFER_DISPATCH",
+	PROJECT_SCHEMA_NAME: {
+		name: "PROJECT_SCHEMA_NAME",
 		class: "registry" as const,
-		parse: (v: string) => v.toLowerCase() === "true" || v === "1",
+		parse: (v: string) => {
+			const trimmed = v.trim();
+			if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(trimmed)) {
+				throw new Error(`Invalid schema name: ${trimmed}`);
+			}
+			return trimmed;
+		},
 		required: false,
-		description: "Enable offer-dispatch workflow",
-		dbTable: "control_runtime.flags",
-		dbColumn: "use_offer_dispatch",
-		envOverride: true,
-	} satisfies ConfigKey<boolean>,
+		description: "Project database schema name",
+		dbTable: "control_project.project",
+		dbColumn: "schema_name",
+		envOverride: false,
+	} satisfies ConfigKey<string | undefined>,
+
+	PROJECT_TOKEN_BUDGET: {
+		name: "PROJECT_TOKEN_BUDGET",
+		class: "registry" as const,
+		parse: (v: string) => {
+			const parsed = Number(v);
+			if (!Number.isFinite(parsed) || parsed < 0) {
+				throw new Error(`Invalid token budget: ${v}`);
+			}
+			return parsed;
+		},
+		required: false,
+		description: "Project token budget for API calls",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number | undefined>,
+
+	PROJECT_MAX_CONCURRENT_LEASES: {
+		name: "PROJECT_MAX_CONCURRENT_LEASES",
+		class: "registry" as const,
+		parse: (v: string) => {
+			const parsed = Number(v);
+			if (!Number.isFinite(parsed) || parsed <= 0) {
+				throw new Error(`Invalid max concurrent leases: ${v}`);
+			}
+			return parsed;
+		},
+		required: false,
+		description: "Maximum concurrent leases for a project",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number | undefined>,
+
+	PROJECT_DEFAULT_WORKFLOW: {
+		name: "PROJECT_DEFAULT_WORKFLOW",
+		class: "registry" as const,
+		parse: (v: string) => v,
+		required: false,
+		description: "Default workflow type for project proposals",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<string | undefined>,
+
+	PROJECT_SPENDING_THRESHOLD_WARN: {
+		name: "PROJECT_SPENDING_THRESHOLD_WARN",
+		class: "registry" as const,
+		parse: (v: string) => {
+			const parsed = parseFloat(v);
+			if (!Number.isFinite(parsed) || parsed < 0) {
+				throw new Error(`Invalid spending threshold: ${v}`);
+			}
+			return parsed;
+		},
+		required: false,
+		description: "Project spending threshold for warnings (in currency units)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number | undefined>,
+
+	PROJECT_SPENDING_THRESHOLD_HARD: {
+		name: "PROJECT_SPENDING_THRESHOLD_HARD",
+		class: "registry" as const,
+		parse: (v: string) => {
+			const parsed = parseFloat(v);
+			if (!Number.isFinite(parsed) || parsed < 0) {
+				throw new Error(`Invalid spending threshold: ${v}`);
+			}
+			return parsed;
+		},
+		required: false,
+		description: "Project spending threshold for hard limits (in currency units)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number | undefined>,
+
+	PROJECT_KB_EMBEDDING_MODEL: {
+		name: "PROJECT_KB_EMBEDDING_MODEL",
+		class: "registry" as const,
+		parse: (v: string) => v,
+		required: false,
+		description: "Knowledge base embedding model",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+		defaultValue: "text-embedding-3-small",
+	} satisfies ConfigKey<string>,
+
+	MODEL_CONTEXT_WINDOW: {
+		name: "MODEL_CONTEXT_WINDOW",
+		class: "registry" as const,
+		parse: (v: string) => {
+			const parsed = Number(v);
+			if (!Number.isFinite(parsed) || parsed <= 0) {
+				throw new Error(`Invalid context window: ${v}`);
+			}
+			return parsed;
+		},
+		required: false,
+		description: "Model context window in tokens",
+		dbTable: "control_model.model",
+		dbColumn: "context_window_tokens",
+		envOverride: false,
+	} satisfies ConfigKey<number | undefined>,
+
+	MODEL_COST_PER_INPUT_TOKEN: {
+		name: "MODEL_COST_PER_INPUT_TOKEN",
+		class: "registry" as const,
+		parse: (v: string) => {
+			const parsed = parseFloat(v);
+			if (!Number.isFinite(parsed) || parsed < 0) {
+				throw new Error(`Invalid cost: ${v}`);
+			}
+			return parsed;
+		},
+		required: false,
+		description: "Cost per million input tokens",
+		dbTable: "control_model.model",
+		dbColumn: "cost_per_million_input",
+		envOverride: false,
+	} satisfies ConfigKey<number | undefined>,
+
+	MODEL_COST_PER_OUTPUT_TOKEN: {
+		name: "MODEL_COST_PER_OUTPUT_TOKEN",
+		class: "registry" as const,
+		parse: (v: string) => {
+			const parsed = parseFloat(v);
+			if (!Number.isFinite(parsed) || parsed < 0) {
+				throw new Error(`Invalid cost: ${v}`);
+			}
+			return parsed;
+		},
+		required: false,
+		description: "Cost per million output tokens",
+		dbTable: "control_model.model",
+		dbColumn: "cost_per_million_output",
+		envOverride: false,
+	} satisfies ConfigKey<number | undefined>,
+
+	MODEL_MAX_SPEND_PER_CALL: {
+		name: "MODEL_MAX_SPEND_PER_CALL",
+		class: "registry" as const,
+		parse: (v: string) => {
+			const parsed = parseFloat(v);
+			if (!Number.isFinite(parsed) || parsed < 0) {
+				throw new Error(`Invalid max spend: ${v}`);
+			}
+			return parsed;
+		},
+		required: false,
+		description: "Maximum spend per model API call",
+		dbTable: "control_model.host_model_policy",
+		dbColumn: "max_spend_per_call",
+		envOverride: false,
+	} satisfies ConfigKey<number | undefined>,
+
+	MODEL_PREFERRED_PROVIDER: {
+		name: "MODEL_PREFERRED_PROVIDER",
+		class: "registry" as const,
+		parse: (v: string) => v,
+		required: false,
+		description: "Preferred model provider for routing",
+		dbTable: "control_model.model_route",
+		dbColumn: "preferred_provider",
+		envOverride: false,
+	} satisfies ConfigKey<string | undefined>,
+
+	MODEL_FALLBACK_MODEL_ID: {
+		name: "MODEL_FALLBACK_MODEL_ID",
+		class: "registry" as const,
+		parse: (v: string) => v,
+		required: false,
+		description: "Fallback model ID for routing failures",
+		dbTable: "control_model.model_route",
+		dbColumn: "fallback_model_id",
+		envOverride: false,
+	} satisfies ConfigKey<string | undefined>,
+
+	MODEL_DEFAULT_TEMPERATURE: {
+		name: "MODEL_DEFAULT_TEMPERATURE",
+		class: "registry" as const,
+		parse: (v: string) => {
+			const parsed = parseFloat(v);
+			if (!Number.isFinite(parsed) || parsed < 0 || parsed > 2) {
+				throw new Error(`Invalid temperature: ${v}`);
+			}
+			return parsed;
+		},
+		required: false,
+		description: "Default temperature for model requests",
+		dbTable: "control_model.model_route",
+		dbColumn: "default_temperature",
+		envOverride: false,
+	} satisfies ConfigKey<number | undefined>,
+
+	MODEL_ALLOWED_HOST_POLICY: {
+		name: "MODEL_ALLOWED_HOST_POLICY",
+		class: "registry" as const,
+		parse: (v: string) => v,
+		required: false,
+		description: "Allowed host policy for model routing",
+		dbTable: "control_model.host_model_policy",
+		dbColumn: "allowed_hosts",
+		envOverride: false,
+	} satisfies ConfigKey<string | undefined>,
 };
 
 /**
  * Feature flag keys: DB sourced, cached per process, live-reloadable via pg_notify.
  */
 export const FlagKeys = {
-	// Currently feature flags are handled as generic registry entries in control_runtime.flags
-	// Add specific flag keys here as needed
+	USE_OFFER_DISPATCH: {
+		name: "USE_OFFER_DISPATCH",
+		class: "flag" as const,
+		parse: (v: string) => {
+			// Parse JSON or boolean string from JSONB value_jsonb
+			try {
+				return JSON.parse(v) === true;
+			} catch {
+				return v.toLowerCase() === "true" || v === "1";
+			}
+		},
+		required: false,
+		description: "Enable offer-dispatch workflow",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<boolean>,
+
+	ENABLE_MULTI_TENANT: {
+		name: "ENABLE_MULTI_TENANT",
+		class: "flag" as const,
+		parse: (v: string) => {
+			try {
+				return JSON.parse(v) === true;
+			} catch {
+				return v.toLowerCase() === "true" || v === "1";
+			}
+		},
+		required: false,
+		description: "Enable multi-tenant mode",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<boolean>,
+
+	ENABLE_AUDIT_LOG: {
+		name: "ENABLE_AUDIT_LOG",
+		class: "flag" as const,
+		parse: (v: string) => {
+			try {
+				return JSON.parse(v) === true;
+			} catch {
+				return v.toLowerCase() === "true" || v === "1";
+			}
+		},
+		required: false,
+		description: "Enable audit logging",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<boolean>,
 };
 
 /**
@@ -437,7 +721,7 @@ export const FlagKeys = {
 export const DiagnosticKeys = {
 	DEBUG: {
 		name: "DEBUG",
-		class: "secret" as const,
+		class: "structural" as const,
 		parse: (v: string) => v.toLowerCase() === "true" || v === "1",
 		required: false,
 		description: "Enable debug logging",
@@ -445,7 +729,7 @@ export const DiagnosticKeys = {
 
 	DEBUG_PG: {
 		name: "DEBUG_PG",
-		class: "secret" as const,
+		class: "structural" as const,
 		parse: (v: string) => v.toLowerCase() === "true" || v === "1",
 		required: false,
 		description: "Enable PostgreSQL debug logging",
@@ -453,7 +737,7 @@ export const DiagnosticKeys = {
 
 	DEBUG_STATE_NAMES: {
 		name: "DEBUG_STATE_NAMES",
-		class: "secret" as const,
+		class: "structural" as const,
 		parse: (v: string) => v.toLowerCase() === "true" || v === "1",
 		required: false,
 		description: "Enable state-names registry debug logging",

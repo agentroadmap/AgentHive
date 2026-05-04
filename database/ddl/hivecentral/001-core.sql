@@ -13,6 +13,9 @@
 
 \set ON_ERROR_STOP on
 
+-- Default MCP endpoint URL (overridable at deploy time)
+\set mcp_url 'http://127.0.0.1:6421/sse'
+
 CREATE SCHEMA IF NOT EXISTS core;
 
 COMMENT ON SCHEMA core IS
@@ -290,7 +293,7 @@ COMMENT ON TABLE core.control_runtime_service IS
 -- Seed: standard service keys (idempotent)
 INSERT INTO core.control_runtime_service (service_key, url, protocol, owner_did)
 VALUES
-  ('mcp',    'http://127.0.0.1:6421/sse', 'sse',  'did:agenthive:system'),
+  ('mcp',    :'mcp_url', 'sse',  'did:agenthive:system'),
   ('daemon', 'http://127.0.0.1:3000',     'http', 'did:agenthive:system')
 ON CONFLICT (service_key) DO NOTHING;
 

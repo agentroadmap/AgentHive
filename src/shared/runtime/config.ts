@@ -142,6 +142,7 @@ class ConfigResolver {
 
 	/**
 	 * Load environment variables from a file (e.g., /etc/agenthive/env).
+	 * Strict parser: rejects shell expansion, backticks, command substitution.
 	 */
 	private async loadEnvFile(filePath: string): Promise<void> {
 		try {
@@ -152,25 +153,43 @@ class ConfigResolver {
 				if (!trimmed || trimmed.startsWith("#")) continue;
 				const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(trimmed);
 				if (match) {
-					const [, key, value] = match;
+					const [, key, rawValue] = match;
+					// Reject dangerous shell syntax
+					if (
+						rawValue.includes("$(") ||
+						rawValue.includes("`") ||
+						rawValue.includes("${") ||
+						rawValue.includes("<<")
+					) {
+						throw new Error(
+							`[Config] Env file ${filePath}: line '${trimmed}' contains shell expansion. ` +
+							"Environment files must use literal values only (no $(...), backticks, $\\{...\\}, or <<...)",
+						);
+					}
 					if (!process.env[key]) {
-						process.env[key] = value;
+						process.env[key] = rawValue;
 					}
 				}
 			}
-		} catch {
-			// File not found or not readable — continue without it
+		} catch (err) {
+			// If it's our syntax check error, re-throw; otherwise ignore file not found
+			if (err instanceof Error && err.message.includes("[Config] Env file")) {
+				throw err;
+			}
 		}
 	}
 
 	/**
 	 * Set up a NOTIFY listener for config change events.
+	 * Listens on both runtime_flag_changed and runtime_endpoint_changed channels.
 	 */
 	private async setupNotifyListener(): Promise<void> {
 		if (!this.pool) return;
 		try {
 			const client = await this.pool.connect();
-			await client.query("LISTEN runtime_config_changed");
+			// Listen for both runtime flag changes and endpoint changes
+			await client.query("LISTEN runtime_flag_changed");
+			await client.query("LISTEN runtime_endpoint_changed");
 			client.on("notification", async () => {
 				this.cache.clear();
 				this.dbCache.clear();
