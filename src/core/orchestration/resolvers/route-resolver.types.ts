@@ -27,4 +27,8 @@ export interface ResolveRouteOpts {
 	roleProfileId?: number | null;
 	/** Optional model hint (takes precedence over default selection). */
 	modelHint?: string | null;
+	/** P772: proposal id for route_decision_log (omit to skip logging). */
+	proposalId?: number | null;
+	/** P772: workflow stage / role label for route_decision_log. */
+	role?: string | null;
 }

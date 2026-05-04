@@ -1,8 +1,27 @@
 /**
- * P771: SQL fragment helpers for the 5-layer resolveModelRoute() filter chain.
+ * P771/P772: SQL fragment helpers for the 5-layer resolveModelRoute() filter chain.
  * Each function returns a self-contained SQL boolean expression. All are
  * null-safe: passing NULL for the binding parameter skips (open-passes) the layer.
  */
+
+/** P742 Layer 1: host_model_policy allowlist/denylist. */
+export function hostPolicyFilterSql(hostParamIdx: number, alias = "mr"): string {
+	return `(
+		EXISTS (
+			SELECT 1 FROM roadmap.host_model_policy hp
+			 WHERE hp.host_name = $${hostParamIdx}::text
+			   AND (
+			     coalesce(array_length(hp.allowed_providers, 1), 0) = 0
+			     OR ${alias}.route_provider = ANY(hp.allowed_providers)
+			   )
+			   AND NOT (${alias}.route_provider = ANY(hp.forbidden_providers))
+		)
+		OR NOT EXISTS (
+			SELECT 1 FROM roadmap.host_model_policy hp
+			 WHERE hp.host_name = $${hostParamIdx}::text
+		)
+	)`;
+}
 
 /** P771 Layer 2: project_route_policy allowlist/denylist. */
 export function projectPolicyFilterSql(projectParamIdx: number, alias = "mr"): string {
@@ -69,4 +88,42 @@ export function budgetFilterSql(projectParamIdx: number, alias = "mr"): string {
 			  AND rtb.tokens_consumed >= rtb.max_tokens
 		)
 	)`;
+}
+
+/**
+ * P772: Diagnostic query that classifies each non-winning enabled route by the
+ * first policy layer that eliminated it. Used for the eliminated_routes JSONB in
+ * route_decision_log.
+ *
+ * Param layout (caller must bind in this order):
+ *   $providerIdx   — agent_provider TEXT
+ *   $winnerIdx     — chosen route id BIGINT (excluded from result)
+ *   $hostIdx       — host name TEXT     (Layer 1)
+ *   $projectIdx    — project_id BIGINT  (Layers 2 + 5)
+ *   $agencyIdx     — agency_identity TEXT (Layer 3)
+ *   $roleIdx       — role_profile_id BIGINT (Layer 4)
+ */
+export function buildEliminationDiagnosticSql(
+	providerIdx: number,
+	winnerIdx: number,
+	hostIdx: number,
+	projectIdx: number,
+	agencyIdx: number,
+	roleIdx: number,
+	alias = "mr",
+): string {
+	return `
+		SELECT ${alias}.id, ${alias}.route_provider,
+		  CASE
+		    WHEN NOT (${hostPolicyFilterSql(hostIdx, alias)}) THEN 'host_policy'
+		    WHEN NOT (${projectPolicyFilterSql(projectIdx, alias)}) THEN 'project_policy'
+		    WHEN NOT (${agencyPolicyFilterSql(agencyIdx, alias)}) THEN 'agency_policy'
+		    WHEN NOT (${rolePolicyFilterSql(roleIdx, alias)}) THEN 'role_policy'
+		    WHEN NOT (${budgetFilterSql(projectIdx, alias)}) THEN 'budget_exhausted'
+		    ELSE 'passed'
+		  END AS first_failing_layer
+		FROM roadmap.model_routes ${alias}
+		WHERE ${alias}.agent_provider = $${providerIdx} AND ${alias}.is_enabled = true
+		  AND ${alias}.id != $${winnerIdx}
+	`;
 }
