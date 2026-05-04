@@ -23,6 +23,7 @@ import {
   endLiaisonSession,
   type LiaisonRegisterResult,
 } from "./liaison-service.js";
+import { startLiaisonHub, propagateHeartbeat } from "./liaison-hub.ts";
 
 export interface AgencyConfig {
   agency_id: string;
@@ -104,6 +105,10 @@ export async function bootLiaison(
     public_key: config.public_key,
   });
 
+  // Start bidirectional message hub — listens for uplink messages from subagents
+  // and handles downlink directives and cross-project hiveCentral broadcasts.
+  const hub = startLiaisonHub(config.agency_id);
+
   let running = true;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -112,11 +117,17 @@ export async function bootLiaison(
     timer = setTimeout(async () => {
       if (!running) return;
       try {
-        await liaisonHeartbeat({
+        const hbResult = await liaisonHeartbeat({
           session_id: session.session_id,
           status: "active",
           capacity_envelope: {},
         });
+        // Propagate heartbeat to A2A surface so orchestrators/observers react
+        await propagateHeartbeat(
+          config.agency_id,
+          hbResult.agency_status,
+          hbResult.dispatchable
+        );
       } catch {
         // Non-fatal: heartbeat failure is logged by orchestrator watchdog
       }
@@ -134,6 +145,7 @@ export async function bootLiaison(
       clearTimeout(timer);
       timer = null;
     }
+    hub.stop();
     await endLiaisonSession(session.session_id, reason);
   };
 
