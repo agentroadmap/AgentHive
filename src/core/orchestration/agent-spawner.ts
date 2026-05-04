@@ -16,15 +16,20 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { getMcpUrl, getDaemonUrl, getMcpUrlAsync } from "../../shared/runtime/endpoints.ts";
-import { getWorktreeRoot, getProjectRoot } from "../../shared/runtime/paths.ts";
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
-import { query } from "../../infra/postgres/pool.ts";
-import { RfcStates, HotfixStates } from "../workflow/state-names.ts";
 import { validateModelForDispatch } from "../../apps/mcp-server/tools/spending/pg-handlers.ts";
+import { query } from "../../infra/postgres/pool.ts";
+import {
+	getDaemonUrl,
+	getMcpUrl,
+	getMcpUrlAsync,
+} from "../../shared/runtime/endpoints.ts";
+import { getProjectRoot, getWorktreeRoot } from "../../shared/runtime/paths.ts";
+import { HotfixStates, RfcStates } from "../workflow/state-names.ts";
+import { isWithinCapacity } from "./resolvers/capacity-guard.ts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -84,7 +89,9 @@ export async function terminateLiveChildren(
 	const snapshot = Array.from(liveChildren);
 	if (snapshot.length === 0) return { signalled: 0, killed: 0 };
 
-	log(`[AgentSpawner] terminating ${snapshot.length} live child(ren) with SIGTERM`);
+	log(
+		`[AgentSpawner] terminating ${snapshot.length} live child(ren) with SIGTERM`,
+	);
 	let signalled = 0;
 	for (const child of snapshot) {
 		try {
@@ -93,7 +100,9 @@ export async function terminateLiveChildren(
 				signalled++;
 			}
 		} catch (err) {
-			log(`[AgentSpawner] SIGTERM failed for pid ${child.pid}: ${(err as Error).message}`);
+			log(
+				`[AgentSpawner] SIGTERM failed for pid ${child.pid}: ${(err as Error).message}`,
+			);
 		}
 	}
 
@@ -112,7 +121,9 @@ export async function terminateLiveChildren(
 				killed++;
 			}
 		} catch (err) {
-			log(`[AgentSpawner] SIGKILL failed for pid ${child.pid}: ${(err as Error).message}`);
+			log(
+				`[AgentSpawner] SIGKILL failed for pid ${child.pid}: ${(err as Error).message}`,
+			);
 		}
 	}
 	if (killed > 0) {
@@ -173,6 +184,8 @@ export interface SpawnRequest {
 	 * runs in legacy "blind" mode (only the task prompt for context).
 	 */
 	briefingId?: string;
+	/** P760: Project id used to enforce per-project dispatch capacity limits. */
+	projectId?: number;
 }
 
 export interface SpawnResult {
@@ -225,8 +238,14 @@ function loadClaudeSettingsEnv(): Record<string, string> {
 	if (claudeSettingsEnv !== undefined) return claudeSettingsEnv;
 	claudeSettingsEnv = {};
 	try {
-		const settingsPath = join(process.env.HOME ?? "/root", ".claude", "settings.json");
-		console.error(`[AgentSpawner] Loading Claude settings from: ${settingsPath}`);
+		const settingsPath = join(
+			process.env.HOME ?? "/root",
+			".claude",
+			"settings.json",
+		);
+		console.error(
+			`[AgentSpawner] Loading Claude settings from: ${settingsPath}`,
+		);
 		const raw = readFileSync(settingsPath, "utf8");
 		const parsed = JSON.parse(raw);
 		if (parsed?.env && typeof parsed.env === "object") {
@@ -234,9 +253,15 @@ function loadClaudeSettingsEnv(): Record<string, string> {
 				if (typeof v === "string") claudeSettingsEnv[k] = v;
 			}
 		}
-		console.error(`[AgentSpawner] Loaded ${Object.keys(claudeSettingsEnv).length} env vars from settings.json`);
-		console.error(`[AgentSpawner] ANTHROPIC_AUTH_TOKEN present: ${!!claudeSettingsEnv.ANTHROPIC_AUTH_TOKEN}`);
-		console.error(`[AgentSpawner] ANTHROPIC_BASE_URL present: ${!!claudeSettingsEnv.ANTHROPIC_BASE_URL}`);
+		console.error(
+			`[AgentSpawner] Loaded ${Object.keys(claudeSettingsEnv).length} env vars from settings.json`,
+		);
+		console.error(
+			`[AgentSpawner] ANTHROPIC_AUTH_TOKEN present: ${!!claudeSettingsEnv.ANTHROPIC_AUTH_TOKEN}`,
+		);
+		console.error(
+			`[AgentSpawner] ANTHROPIC_BASE_URL present: ${!!claudeSettingsEnv.ANTHROPIC_BASE_URL}`,
+		);
 	} catch (e) {
 		console.error(`[AgentSpawner] Failed to load settings.json:`, e);
 	}
@@ -262,13 +287,19 @@ export function buildSpawnProcessEnv(input: {
 	if (input.route.apiKeyPrimary) {
 		resolvedKey = input.route.apiKeyPrimary;
 	} else if (input.route.apiKeyEnv) {
-		resolvedKey = process.env[input.route.apiKeyEnv] ?? settingsEnv[input.route.apiKeyEnv] ?? null;
+		resolvedKey =
+			process.env[input.route.apiKeyEnv] ??
+			settingsEnv[input.route.apiKeyEnv] ??
+			null;
 	}
 	let resolvedFallback: string | null = null;
 	if (input.route.apiKeySecondary) {
 		resolvedFallback = input.route.apiKeySecondary;
 	} else if (input.route.apiKeyFallbackEnv) {
-		resolvedFallback = process.env[input.route.apiKeyFallbackEnv] ?? settingsEnv[input.route.apiKeyFallbackEnv] ?? null;
+		resolvedFallback =
+			process.env[input.route.apiKeyFallbackEnv] ??
+			settingsEnv[input.route.apiKeyFallbackEnv] ??
+			null;
 	}
 
 	// Set the key under the env var the CLI reads (cliApiKeyEnv), falling back to apiKeyEnv
@@ -415,7 +446,13 @@ function buildOpenAICompatArgs(
  * cli_path in model_routes controls the binary location (no hardcoding here).
  */
 function buildGeminiArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
-	const argv = [route.cliPath ?? "gemini", "--model", route.modelName, "--prompt", req.task];
+	const argv = [
+		route.cliPath ?? "gemini",
+		"--model",
+		route.modelName,
+		"--prompt",
+		req.task,
+	];
 	return { argv, env: {} };
 }
 
@@ -690,7 +727,10 @@ export async function resolveActiveRouteProvider(): Promise<AgentProvider | null
  * Falls back to the first enabled route in model_routes rather than hardcoding
  * a specific provider, so provider changes only require a DB update.
  */
-export async function detectProvider(worktreeName: string, worktreeRoot: string = WORKTREE_ROOT): Promise<AgentProvider> {
+export async function detectProvider(
+	worktreeName: string,
+	worktreeRoot: string = WORKTREE_ROOT,
+): Promise<AgentProvider> {
 	const envPath = join(worktreeRoot, worktreeName, ".env.agent");
 	try {
 		const content = await readFile(envPath, "utf8");
@@ -701,7 +741,10 @@ export async function detectProvider(worktreeName: string, worktreeRoot: string 
 			if (eq < 0) continue;
 			const key = trimmed.slice(0, eq).trim();
 			if (key !== "AGENT_PROVIDER") continue;
-			const value = trimmed.slice(eq + 1).trim().replace(/^[\"']|[\"']$/g, "");
+			const value = trimmed
+				.slice(eq + 1)
+				.trim()
+				.replace(/^["']|["']$/g, "");
 			if (value) return value as AgentProvider;
 		}
 	} catch (err: any) {
@@ -715,7 +758,9 @@ export async function detectProvider(worktreeName: string, worktreeRoot: string 
 	// originate from .env.agent, AGENTHIVE_DEFAULT_PROVIDER, or roadmap.model_routes
 	// — never a hardcoded source literal. Loud failure is preferred over routing
 	// to a provider the operator may not have configured.
-	const envProvider = process.env.AGENTHIVE_DEFAULT_PROVIDER as AgentProvider | undefined;
+	const envProvider = process.env.AGENTHIVE_DEFAULT_PROVIDER as
+		| AgentProvider
+		| undefined;
 	if (envProvider) return envProvider;
 	throw new NoProviderConfigured(worktreeName);
 }
@@ -769,8 +814,8 @@ async function resolveModelRoute(
 		// would have been rejected post-hoc by assertSpawnAllowed never get
 		// returned here.
 		if (perMillionPricing) {
-		return query<RouteRow>(
-			`SELECT mr.model_name, mr.route_provider, mr.agent_provider,
+			return query<RouteRow>(
+				`SELECT mr.model_name, mr.route_provider, mr.agent_provider,
                mr.agent_cli, mr.cli_path, mr.api_spec, mr.base_url, mr.plan_type,
                mr.cost_per_million_input, mr.cost_per_million_output,
                mr.api_key_env, mr.api_key_fallback_env, mr.base_url_env, mr.cli_api_key_env,
@@ -813,7 +858,9 @@ async function resolveModelRoute(
 		apiSpec: r.api_spec as ModelRoute["apiSpec"],
 		baseUrl: r.base_url,
 		planType: r.plan_type,
-		costPer1kInput: Number(r.cost_per_million_input ? r.cost_per_million_input / 1000 : 0),
+		costPer1kInput: Number(
+			r.cost_per_million_input ? r.cost_per_million_input / 1000 : 0,
+		),
 		costPerMillionInput: Number(r.cost_per_million_input ?? 0),
 		costPerMillionOutput: Number(r.cost_per_million_output ?? 0),
 		apiKeyEnv: r.api_key_env,
@@ -1056,12 +1103,26 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		provider: providerOverride,
 	} = req;
 
+	// P760: enforce per-project dispatch capacity before any costly work.
+	if (req.projectId !== undefined) {
+		const withinCap = await isWithinCapacity(req.projectId);
+		if (!withinCap) {
+			throw new SpawnPolicyViolation(
+				`[P760] Project ${req.projectId} is at max concurrent dispatch capacity`,
+			);
+		}
+	}
+
 	// P405: provider comes from model_routes via orchestrator, not hardcoded to worktree
-	const provider = providerOverride ?? await detectProvider(worktree, worktreeRoot);
+	const provider =
+		providerOverride ?? (await detectProvider(worktree, worktreeRoot));
 	// P235/M026: resolve full route (model + api_spec + base_url) from model_routes
 	const route = await resolveModelRoute(provider, modelHint);
 	// P797: validate that the resolved model has at least one enabled route before spawning
-	const routeCheck = await validateModelForDispatch(route.modelName, req.proposalId);
+	const routeCheck = await validateModelForDispatch(
+		route.modelName,
+		req.proposalId,
+	);
 	if (!routeCheck.valid) {
 		throw new Error(
 			`[P797] Cannot spawn agent: ${routeCheck.error} — model="${routeCheck.model ?? route.modelName}"`,
@@ -1099,7 +1160,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		agentEnv,
 		extraEnv: {
 			...extraEnv,
-			MCP_URL: process.env.MCP_URL ?? await getMcpUrlAsync(),
+			MCP_URL: process.env.MCP_URL ?? (await getMcpUrlAsync()),
 			// P466: hand the warm-boot briefing id to the child via env so it
 			// can call `briefing_load(<id>)` on boot. Real uuid → child can
 			// retrieve mission, success_criteria, allowed_tools, MCP quirks,
@@ -1144,7 +1205,8 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	// P721: classify non-zero exits — rate-limit hits must not count toward
 	// P689's circuit breaker and must throttle the route for future dispatches.
 	const exitClass = classifyExit(stdout, stderr, exitCode);
-	const status = exitClass.outcome === "rate_limited" ? "rate_limited" : exitClass.outcome;
+	const status =
+		exitClass.outcome === "rate_limited" ? "rate_limited" : exitClass.outcome;
 
 	await query(
 		`UPDATE agent_runs
@@ -1158,7 +1220,8 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	);
 
 	if (exitClass.outcome === "rate_limited") {
-		const throttledUntil = exitClass.resetAt ?? new Date(Date.now() + 60 * 60 * 1000);
+		const throttledUntil =
+			exitClass.resetAt ?? new Date(Date.now() + 60 * 60 * 1000);
 		await query(
 			`INSERT INTO roadmap.host_model_route_throttle
 			   (provider, model, throttled_until, reason)
@@ -1190,7 +1253,9 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 					agent_run_id: agentRunId,
 				}),
 			],
-		).catch(() => {/* non-fatal */});
+		).catch(() => {
+			/* non-fatal */
+		});
 	}
 
 	return { agentRunId, worktree, exitCode, stdout, stderr, durationMs };
@@ -1213,7 +1278,9 @@ interface ExitClassification {
 
 function parseResetTime(text: string): Date | null {
 	// e.g. "resets 11pm (America/Toronto)" or "resets at 2026-04-29T03:00Z"
-	const match = text.match(/resets(?:\s+at)?\s+([^\n(]{1,40})(?:\s*\([^)]+\))?/i);
+	const match = text.match(
+		/resets(?:\s+at)?\s+([^\n(]{1,40})(?:\s*\([^)]+\))?/i,
+	);
 	if (!match) return null;
 	const raw = match[1].trim();
 	const attempt = new Date(raw);
@@ -1222,7 +1289,11 @@ function parseResetTime(text: string): Date | null {
 	return new Date(Date.now() + 60 * 60 * 1000);
 }
 
-function classifyExit(stdout: string, stderr: string, exitCode: number | null): ExitClassification {
+function classifyExit(
+	stdout: string,
+	stderr: string,
+	exitCode: number | null,
+): ExitClassification {
 	if (exitCode === 0) return { outcome: "completed" };
 	const hay = `${stdout}\n${stderr}`;
 	for (const pat of RATE_LIMIT_PATTERNS) {
@@ -1250,10 +1321,18 @@ function runProcess(
 ): Promise<ProcessResult> {
 	return new Promise((resolve) => {
 		const [cmd, ...args] = argv;
-		console.error(`[AgentSpawner] Spawning: ${cmd} ${args.slice(0, 3).join(" ")}...`);
-		console.error(`[AgentSpawner] ANTHROPIC_AUTH_TOKEN in env: ${!!env.ANTHROPIC_AUTH_TOKEN}`);
-		console.error(`[AgentSpawner] ANTHROPIC_BASE_URL in env: ${env.ANTHROPIC_BASE_URL}`);
-		console.error(`[AgentSpawner] ANTHROPIC_MODEL in env: ${env.ANTHROPIC_MODEL}`);
+		console.error(
+			`[AgentSpawner] Spawning: ${cmd} ${args.slice(0, 3).join(" ")}...`,
+		);
+		console.error(
+			`[AgentSpawner] ANTHROPIC_AUTH_TOKEN in env: ${!!env.ANTHROPIC_AUTH_TOKEN}`,
+		);
+		console.error(
+			`[AgentSpawner] ANTHROPIC_BASE_URL in env: ${env.ANTHROPIC_BASE_URL}`,
+		);
+		console.error(
+			`[AgentSpawner] ANTHROPIC_MODEL in env: ${env.ANTHROPIC_MODEL}`,
+		);
 		const child: ChildProcess = spawn(cmd, args, {
 			cwd,
 			env,
@@ -1332,7 +1411,9 @@ export async function escalateOrNotify(
 	proposalId?: number,
 ): Promise<SpawnResult | null> {
 	// P405: use explicit provider if passed, otherwise fall back to worktree detection
-	const provider = req.provider ?? await detectProvider(req.worktree, req.worktreeRoot ?? WORKTREE_ROOT);
+	const provider =
+		req.provider ??
+		(await detectProvider(req.worktree, req.worktreeRoot ?? WORKTREE_ROOT));
 
 	// P235/M026: build escalation ladder from model_routes for this agent_provider.
 	// Per model: pick best (lowest priority) route. Then sort models cheap → expensive.
