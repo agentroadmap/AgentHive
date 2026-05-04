@@ -1,11 +1,12 @@
 /**
- * P467: Subagent stuck-detection and auto-escalation
+ * P467/P475: Subagent stuck-detection and auto-escalation
  *
  * Implements:
  * - N-strikes error signature deduplication per spawn
  * - Forced progress checkpoints every M tool calls
  * - Hard-stop budget enforcement (max_tool_calls)
  * - request_assistance MCP action routing
+ * - Proactive runaway detection (velocity, pattern, sequence)
  */
 
 import { createHash } from "node:crypto";
@@ -300,6 +301,124 @@ export async function initSpawnBriefingConfig(
   );
 
   return config;
+}
+
+// ─── Runaway detection (P475) ─────────────────────────────────────────────────
+
+export interface RunawaySignal {
+  kind: "velocity_spike" | "repetitive_pattern" | "loop_sequence";
+  description: string;
+  details?: Record<string, unknown>;
+}
+
+/**
+ * Log a single tool call for runaway analysis.
+ * Writes to roadmap.tool_call_log (migration 100).
+ */
+export async function logToolCall(
+  briefing_id: string,
+  tool_name: string,
+  args_hash?: string
+): Promise<void> {
+  await query(
+    `INSERT INTO roadmap.tool_call_log (briefing_id, tool_name, args_hash)
+     VALUES ($1, $2, $3)`,
+    [briefing_id, tool_name, args_hash ?? null]
+  );
+}
+
+/**
+ * Detect if the last N tool names form a repeated sequence.
+ * Returns true when the first half of the array equals the second half.
+ * Requires an even-length array of at least 6 calls.
+ */
+function detectSequenceLoop(toolNames: string[]): boolean {
+  const len = toolNames.length;
+  if (len < 6 || len % 2 !== 0) return false;
+  const half = len / 2;
+  for (let i = 0; i < half; i++) {
+    if (toolNames[i] !== toolNames[i + half]) return false;
+  }
+  return true;
+}
+
+/**
+ * Run all three runaway detectors against recent tool_call_log rows:
+ *   1. Velocity spike: >15 calls in the last minute
+ *   2. Repetitive pattern: same (tool_name, args_hash) ≥3 times in last 10 calls
+ *   3. Loop sequence: same tool-name sequence repeated in last 20 calls
+ *
+ * Returns the first signal found, or null if none.
+ */
+export async function detectRunaway(
+  briefing_id: string
+): Promise<RunawaySignal | null> {
+  // Velocity check
+  const velocityResult = await query<{ cnt: string | number }>(
+    `SELECT count(*) AS cnt FROM roadmap.tool_call_log
+     WHERE briefing_id = $1 AND called_at > now() - interval '1 minute'`,
+    [briefing_id]
+  );
+  const velocity =
+    typeof velocityResult.rows[0]?.cnt === "string"
+      ? parseInt(velocityResult.rows[0].cnt, 10)
+      : (velocityResult.rows[0]?.cnt ?? 0);
+  if (velocity > 15) {
+    return {
+      kind: "velocity_spike",
+      description: `${velocity} tool calls in the last minute (threshold: 15)`,
+      details: { call_count: velocity },
+    };
+  }
+
+  // Repetitive pattern check (last 10 calls)
+  const patternResult = await query<{
+    tool_name: string;
+    args_hash: string | null;
+    cnt: string | number;
+  }>(
+    `SELECT tool_name, args_hash, count(*) AS cnt
+     FROM (
+       SELECT tool_name, args_hash
+       FROM roadmap.tool_call_log
+       WHERE briefing_id = $1
+       ORDER BY called_at DESC
+       LIMIT 10
+     ) recent
+     GROUP BY tool_name, args_hash
+     HAVING count(*) >= 3`,
+    [briefing_id]
+  );
+  if (patternResult.rows.length > 0) {
+    const row = patternResult.rows[0]!;
+    const cnt =
+      typeof row.cnt === "string" ? parseInt(row.cnt, 10) : row.cnt;
+    return {
+      kind: "repetitive_pattern",
+      description: `Tool '${row.tool_name}' called ${cnt} times with same args in last 10 calls`,
+      details: { tool_name: row.tool_name, args_hash: row.args_hash, count: cnt },
+    };
+  }
+
+  // Loop sequence check (last 20 tool names)
+  const seqResult = await query<{ tool_name: string }>(
+    `SELECT tool_name
+     FROM roadmap.tool_call_log
+     WHERE briefing_id = $1
+     ORDER BY called_at DESC
+     LIMIT 20`,
+    [briefing_id]
+  );
+  const toolNames = seqResult.rows.map((r) => r.tool_name).reverse();
+  if (detectSequenceLoop(toolNames)) {
+    return {
+      kind: "loop_sequence",
+      description: `Tool call sequence is repeating (last ${toolNames.length} calls form a loop)`,
+      details: { sequence: toolNames.slice(0, toolNames.length / 2) },
+    };
+  }
+
+  return null;
 }
 
 /**

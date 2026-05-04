@@ -108,14 +108,30 @@ export async function handleRequestAssistance(
 
 /**
  * Pause the lease associated with this briefing.
- * Sets lease state to 'awaiting-assistance' so it doesn't consume window time
- * and reaper doesn't terminate it.
+ * Extends expires_at by 24h so the reaper doesn't terminate the agent
+ * while it is awaiting assistance resolution.
  */
 async function pauseLease(briefing_id: string): Promise<void> {
-  // TODO(P468): Implement lease pause lookup and state update
-  // Placeholder for now
-  if (process.env.DEBUG_P467) {
-    console.log(`[P467] Paused lease for briefing ${briefing_id}`);
+  try {
+    const result = await query(
+      `UPDATE roadmap_proposal.proposal_lease pl
+       SET expires_at = GREATEST(COALESCE(pl.expires_at, now()), now()) + interval '24 hours'
+       WHERE pl.agent_identity = (
+         SELECT agent_identity FROM roadmap.assistance_request
+         WHERE briefing_id = $1::uuid
+         ORDER BY opened_at DESC LIMIT 1
+       )
+       AND pl.released_at IS NULL`,
+      [briefing_id]
+    );
+    if (process.env.DEBUG_P467) {
+      console.log(`[P467] Paused lease for briefing ${briefing_id}: ${result.rowCount} rows updated`);
+    }
+  } catch (err) {
+    // Non-fatal: assistance_request is already recorded; watchdog will handle escalation
+    if (process.env.DEBUG_P467) {
+      console.error(`[P467] Failed to pause lease for briefing ${briefing_id}:`, err);
+    }
   }
 }
 
