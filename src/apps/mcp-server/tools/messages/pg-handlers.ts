@@ -19,6 +19,7 @@ import { resolveTrust } from "../../../../infra/trust/trust-resolver.ts";
 import crypto from "crypto";
 import { getAgentSecret } from "../../../../infra/security/agent-secret-store.ts";
 import { verifySignature } from "../../../../infra/security/agent-crypto.ts";
+import { postDeliveryWithAuth } from "../../../../infra/messaging/cross-host-relay.ts";
 import type { Pool } from "pg";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
@@ -546,6 +547,52 @@ export class PgMessagingHandlers {
 				} finally {
 					client.release();
 				}
+
+				// P836: Trigger callback delivery if recipient has callback_url configured
+				// Non-blocking — fire and forget to avoid slowing down sendMessage
+				(async () => {
+					try {
+						// Check if recipient has callback_url
+						const callbackResult = await query<{ callback_url: string }>(
+							`SELECT callback_url FROM roadmap.agent_registry WHERE identity = $1 LIMIT 1`,
+							[args.to_agent],
+						);
+
+						if (callbackResult.rows.length > 0 && callbackResult.rows[0].callback_url) {
+							const callbackUrl = callbackResult.rows[0].callback_url;
+
+							// Build message envelope for delivery
+							const messageEnvelope = {
+								message_id: messageId,
+								correlation_id: correlationId,
+								from_agent: args.from_agent,
+								to_agent: args.to_agent,
+								message_type: messageType,
+								message_content: args.message_content,
+								channel: args.channel || null,
+								created_at: rows[0].created_at,
+							};
+
+							// Post to callback URL (with retry and audit logging)
+							try {
+								await postDeliveryWithAuth(
+									callbackUrl,
+									messageEnvelope,
+									args.from_agent,
+									pool,
+									messageId,
+								);
+							} catch (deliveryErr) {
+								// Error already logged in postDeliveryWithAuth
+								console.warn(
+									`[P836] Callback delivery failed for message ${messageId}: ${deliveryErr instanceof Error ? deliveryErr.message : String(deliveryErr)}`,
+								);
+							}
+						}
+					} catch (err) {
+						console.error("[P836] Failed to trigger callback delivery:", err);
+					}
+				})();
 			}
 
 			return {
