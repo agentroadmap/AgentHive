@@ -34,6 +34,12 @@ import type {
 	EliminatedRoute,
 	ResolveRouteOpts,
 } from "./resolvers/route-resolver.types.ts";
+import {
+	agencyPolicyFilterSql,
+	budgetFilterSql,
+	projectPolicyFilterSql,
+	rolePolicyFilterSql,
+} from "./resolvers/route-policy-filters.ts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -595,84 +601,6 @@ function hostPolicyFilterSql(hostParamIdx: number, alias = "mr"): string {
 	)`;
 }
 
-/**
- * P771 Layer 2: SQL fragment that filters model_routes by project_route_policy.
- * projectId is bound at $${projectParamIdx}. Skipped (passes) when null or no row exists.
- */
-function projectPolicyFilterSql(projectParamIdx: number, alias = "mr"): string {
-	return `(
-		$${projectParamIdx}::bigint IS NULL
-		OR NOT EXISTS (
-			SELECT 1 FROM roadmap.project_route_policy WHERE project_id = $${projectParamIdx}::bigint
-		)
-		OR EXISTS (
-			SELECT 1 FROM roadmap.project_route_policy pp
-			WHERE pp.project_id = $${projectParamIdx}::bigint
-			  AND (array_length(pp.allowed_route_providers, 1) IS NULL
-			       OR ${alias}.route_provider = ANY(pp.allowed_route_providers))
-			  AND NOT (${alias}.route_provider = ANY(COALESCE(pp.forbidden_route_providers, '{}')))
-		)
-	)`;
-}
-
-/**
- * P771 Layer 3: SQL fragment that filters model_routes by agency_route_policy.
- * agencyIdentity is bound at $${agencyParamIdx}. Skipped when null or no row exists.
- */
-function agencyPolicyFilterSql(agencyParamIdx: number, alias = "mr"): string {
-	return `(
-		$${agencyParamIdx}::text IS NULL
-		OR NOT EXISTS (
-			SELECT 1 FROM roadmap.agency_route_policy WHERE agency_identity = $${agencyParamIdx}::text
-		)
-		OR EXISTS (
-			SELECT 1 FROM roadmap.agency_route_policy arp
-			WHERE arp.agency_identity = $${agencyParamIdx}::text
-			  AND (array_length(arp.allowed_route_providers, 1) IS NULL
-			       OR ${alias}.route_provider = ANY(arp.allowed_route_providers))
-			  AND NOT (${alias}.route_provider = ANY(COALESCE(arp.forbidden_route_providers, '{}')))
-		)
-	)`;
-}
-
-/**
- * P771 Layer 4: SQL fragment that filters model_routes by agent_role_profile route constraints.
- * roleProfileId is bound at $${roleParamIdx}. Skipped when null or no row exists.
- */
-function rolePolicyFilterSql(roleParamIdx: number, alias = "mr"): string {
-	return `(
-		$${roleParamIdx}::bigint IS NULL
-		OR NOT EXISTS (
-			SELECT 1 FROM roadmap.agent_role_profile WHERE id = $${roleParamIdx}::bigint
-		)
-		OR EXISTS (
-			SELECT 1 FROM roadmap.agent_role_profile rp
-			WHERE rp.id = $${roleParamIdx}::bigint
-			  AND (rp.allowed_route_providers IS NULL
-			       OR ${alias}.route_provider = ANY(rp.allowed_route_providers))
-			  AND (rp.forbidden_route_providers IS NULL
-			       OR NOT (${alias}.route_provider = ANY(rp.forbidden_route_providers)))
-		)
-	)`;
-}
-
-/**
- * P771 Layer 5: SQL fragment that excludes routes with exhausted hourly token budgets.
- * projectId is bound at $${projectParamIdx}. Skipped when null.
- */
-function budgetFilterSql(projectParamIdx: number, alias = "mr"): string {
-	return `(
-		$${projectParamIdx}::bigint IS NULL
-		OR NOT EXISTS (
-			SELECT 1 FROM roadmap.route_token_budget rtb
-			WHERE rtb.project_id = $${projectParamIdx}::bigint
-			  AND rtb.route_provider = ${alias}.route_provider
-			  AND rtb.hour_window = date_trunc('hour', NOW())
-			  AND rtb.max_tokens IS NOT NULL
-			  AND rtb.tokens_consumed >= rtb.max_tokens
-		)
-	)`;
-}
 
 /**
  * Enforce host-level spawn policy. Called after resolveModelRoute but before
