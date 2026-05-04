@@ -67,9 +67,6 @@ export interface Proposal {
 	tags: string | null;
 	createdAt: string;
 	updatedAt: string;
-	parentProposalId?: string | null;
-	parentProposalTitle?: string | null;
-	rawContent?: string | null;
 }
 
 export interface Agent {

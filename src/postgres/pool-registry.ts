@@ -23,7 +23,7 @@ export class ProjectNotRegistered extends Error {
 }
 
 export class RegistryUnavailable extends Error {
-	constructor(public cause: Error) {
+	constructor(public override cause: Error) {
 		super(`Registry unavailable: ${cause.message}`);
 		this.name = "RegistryUnavailable";
 	}
@@ -32,7 +32,7 @@ export class RegistryUnavailable extends Error {
 export class TenantSecretUnavailable extends Error {
 	constructor(
 		public ref: string,
-		public cause: Error,
+		public override cause: Error,
 	) {
 		super(`Tenant secret unavailable: ${ref} — ${cause.message}`);
 		this.name = "TenantSecretUnavailable";
@@ -43,7 +43,7 @@ export class TenantDbUnreachable extends Error {
 	constructor(
 		public slug: string,
 		public dsnHost: string,
-		public cause: Error,
+		public override cause: Error,
 	) {
 		super(`Tenant DB unreachable: ${slug} (${dsnHost}) — ${cause.message}`);
 		this.name = "TenantDbUnreachable";

@@ -29,6 +29,7 @@ import {
   // P788 — new domain row types
   type ModelRow,
   type RouteRow,
+  type RouteTestResult,
   type ProviderRow,
   type SystemStatus,
   type SystemServiceRow,
@@ -826,6 +827,114 @@ export class ControlPlaneClient {
         GROUP BY route_provider
         ORDER BY route_provider`
     );
+  }
+
+  async getModel(modelId: string): Promise<ModelRow | null> {
+    const rows = await this.query<ModelRow>(
+      `SELECT m.model_name AS model_id, m.model_name, m.model_name AS name,
+              m.provider,
+              CASE WHEN COALESCE(m.is_active, true) THEN 'active' ELSE 'inactive' END AS status,
+              COALESCE(m.is_active, true) AS is_active,
+              m.max_tokens, m.context_window, m.capabilities, m.rating,
+              m.cost_per_million_input, m.cost_per_million_output,
+              m.cost_per_million_cache_write, m.cost_per_million_cache_hit,
+              COUNT(r.route_provider)::int AS route_count,
+              COUNT(r.route_provider) FILTER (WHERE r.is_enabled)::int AS enabled_route_count,
+              COALESCE(ARRAY_AGG(DISTINCT r.route_provider) FILTER (WHERE r.route_provider IS NOT NULL), ARRAY[]::text[]) AS agent_providers,
+              COALESCE(ARRAY_AGG(DISTINCT r.route_provider) FILTER (WHERE r.route_provider IS NOT NULL), ARRAY[]::text[]) AS route_providers,
+              m.created_at::text, m.created_at::text AS updated_at
+         FROM roadmap.model_metadata m
+         LEFT JOIN roadmap.model_routes r ON r.model_name = m.model_name
+        WHERE m.model_name = $1
+        GROUP BY m.model_name, m.provider, m.is_active, m.max_tokens, m.context_window,
+                 m.capabilities, m.rating, m.cost_per_million_input, m.cost_per_million_output,
+                 m.cost_per_million_cache_write, m.cost_per_million_cache_hit, m.created_at`,
+      [modelId]
+    );
+    return rows[0] ?? null;
+  }
+
+  async getModelCosts(): Promise<ModelRow[]> {
+    return this.query<ModelRow>(
+      `SELECT m.model_name AS model_id, m.model_name, m.model_name AS name,
+              m.provider,
+              CASE WHEN COALESCE(m.is_active, true) THEN 'active' ELSE 'inactive' END AS status,
+              COALESCE(m.is_active, true) AS is_active,
+              m.max_tokens, m.context_window, m.capabilities, m.rating,
+              m.cost_per_million_input, m.cost_per_million_output,
+              m.cost_per_million_cache_write, m.cost_per_million_cache_hit,
+              COUNT(r.route_provider)::int AS route_count,
+              COUNT(r.route_provider) FILTER (WHERE r.is_enabled)::int AS enabled_route_count,
+              COALESCE(ARRAY_AGG(DISTINCT r.route_provider) FILTER (WHERE r.route_provider IS NOT NULL), ARRAY[]::text[]) AS agent_providers,
+              COALESCE(ARRAY_AGG(DISTINCT r.route_provider) FILTER (WHERE r.route_provider IS NOT NULL), ARRAY[]::text[]) AS route_providers,
+              m.created_at::text, m.created_at::text AS updated_at
+         FROM roadmap.model_metadata m
+         LEFT JOIN roadmap.model_routes r ON r.model_name = m.model_name
+        WHERE m.cost_per_million_input IS NOT NULL OR m.cost_per_million_output IS NOT NULL
+        GROUP BY m.model_name, m.provider, m.is_active, m.max_tokens, m.context_window,
+                 m.capabilities, m.rating, m.cost_per_million_input, m.cost_per_million_output,
+                 m.cost_per_million_cache_write, m.cost_per_million_cache_hit, m.created_at
+        ORDER BY m.model_name`
+    );
+  }
+
+  async getRoute(routeId: string): Promise<RouteRow | null> {
+    const rows = await this.query<RouteRow>(
+      `SELECT r.model_name AS route_id, r.model_name AS id, r.model_name AS model_id,
+              r.model_name, r.route_provider, r.route_provider AS provider,
+              r.route_provider AS agent_provider, NULL::text AS plan_type,
+              r.priority, r.is_enabled AS enabled, r.is_enabled,
+              false AS is_default, NULL::text AS notes,
+              NULL::text AS base_url, NULL::text AS api_spec,
+              NULL::text AS agent_cli, NULL::text AS fallback_cli,
+              NULL::text AS cli_path, NULL::text AS api_key_env,
+              NULL::text AS api_key_fallback_env, NULL::text AS base_url_env,
+              NULL::text AS spawn_toolsets, NULL::boolean AS spawn_delegate,
+              r.tier, NULL::float AS confidence_threshold,
+              NULL::text[] AS capabilities, NULL::float AS objective_rating,
+              NULL::float AS cost_per_million_input, NULL::float AS cost_per_million_output,
+              NULL::float AS cost_per_million_cache_write, NULL::float AS cost_per_million_cache_hit,
+              NOW()::text AS created_at
+         FROM roadmap.model_routes r
+        WHERE r.model_name = $1
+        LIMIT 1`,
+      [routeId]
+    );
+    return rows[0] ?? null;
+  }
+
+  async testRoute(routeId: string): Promise<RouteTestResult | null> {
+    const route = await this.getRoute(routeId);
+    if (!route) return null;
+    return {
+      route_id: routeId,
+      status: route.is_enabled ? "ok" : "warning",
+      enabled: route.is_enabled,
+      host_allowed: null,
+      credentials_active: false,
+      missing_env: [],
+      latency_ms: 0,
+      message: route.is_enabled ? "Route is enabled" : "Route is disabled",
+    };
+  }
+
+  async getProvider(providerId: string): Promise<ProviderRow | null> {
+    const rows = await this.query<ProviderRow>(
+      `SELECT r.route_provider AS provider_id, r.route_provider AS name,
+              CASE WHEN bool_or(r.is_enabled) THEN 'active' ELSE 'inactive' END AS status,
+              COUNT(*)::int AS route_count,
+              COUNT(*) FILTER (WHERE r.is_enabled)::int AS enabled_route_count,
+              COUNT(DISTINCT r.model_name)::int AS model_count,
+              ARRAY[]::text[] AS agent_providers,
+              0 AS active_worker_count,
+              false AS credentials_active,
+              ARRAY[]::text[] AS credential_env_vars
+         FROM roadmap.model_routes r
+        WHERE r.route_provider = $1
+        GROUP BY r.route_provider`,
+      [providerId]
+    );
+    return rows[0] ?? null;
   }
 
   /**

@@ -131,6 +131,8 @@ type ModelListCacheEntry = {
 };
 const MODEL_LIST_CACHE_TTL_MS = 2_000;
 const modelListCache = new Map<string, ModelListCacheEntry>();
+let _cacheHitTotal = 0;
+type ModelQueryFn = <T>(sql: string, params?: unknown[]) => Promise<{ rows: T[] }>;
 
 function modelListCacheKey(args: {
 	provider?: string;
@@ -158,11 +160,13 @@ async function fetchModelRouteRows(args: {
 	tier?: string;
 	project_id?: number;
 	active_only?: boolean;
+	_queryFn?: ModelQueryFn;
 }): Promise<ModelRouteRow[]> {
 	const activeOnly = args.active_only !== false;
 	const provider = args.provider ?? null;
 	const tier = args.tier ? normaliseTier(args.tier) : null;
-	const { rows } = await query<ModelRouteRow>(
+	const queryFn: ModelQueryFn = args._queryFn ?? (query as unknown as ModelQueryFn);
+	const { rows } = await queryFn<ModelRouteRow>(
 		`SELECT m.model_name, m.provider, m.cost_per_million_input,
 		        m.context_window, m.capabilities, m.rating, m.is_active,
 		        r.route_provider, r.priority
@@ -195,11 +199,13 @@ async function getModelRouteRows(args: {
 	tier?: string;
 	project_id?: number;
 	active_only?: boolean;
+	_queryFn?: ModelQueryFn;
 }): Promise<ModelRouteRow[]> {
 	const key = modelListCacheKey(args);
 	const cached = getCachedModelRows(key);
 
 	if (cached) {
+		_cacheHitTotal++;
 		const entry = modelListCache.get(key)!;
 		if (entry.revalidating) {
 			// Background revalidate without awaiting
@@ -733,6 +739,7 @@ export class PgModelHandlers {
 	constructor(
 		readonly _core: McpServer,
 		readonly _projectRoot: string,
+		readonly _queryFn?: ModelQueryFn,
 	) {}
 
 	// P797: Rewritten with model_routes JOIN, provider/tier/project_id filtering, and SWR cache
@@ -757,6 +764,7 @@ export class PgModelHandlers {
 				tier: args.tier,
 				project_id: args.project_id,
 				active_only: args.active_only,
+				_queryFn: this._queryFn,
 			});
 
 			if (rows.length === 0) {
@@ -945,4 +953,13 @@ export class PgModelHandlers {
 			return errorResult("Failed to add model", err);
 		}
 	}
+}
+
+export function getModelListMetrics(): { cache_hit_total: number } {
+	return { cache_hit_total: _cacheHitTotal };
+}
+
+export function resetModelListCacheForTest(): void {
+	modelListCache.clear();
+	_cacheHitTotal = 0;
 }

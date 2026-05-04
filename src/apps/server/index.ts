@@ -3607,6 +3607,17 @@ export class RoadmapServer {
 		}
 	}
 
+	private async handleGetBoardStages(): Promise<Response> {
+		const stages = [
+			{ id: "Draft", label: "Draft", phase: "Architecture" },
+			{ id: "Review", label: "Review", phase: "Gating" },
+			{ id: "Develop", label: "Develop", phase: "Building" },
+			{ id: "Merge", label: "Merge", phase: "Integration" },
+			{ id: "Complete", label: "Complete", phase: "Stable" },
+		];
+		return Response.json({ stages });
+	}
+
 	// P477 AC-2: dispatches scoped to operator's selected project_id.
 	// squad_dispatch carries project_id directly so we filter there; an
 	// `?all=1` query bypass is preserved for control-plane debug views.

@@ -46,6 +46,7 @@ function resolveProjectRoot(): string {
 }
 
 const PROJECT_ROOT = resolveProjectRoot();
+const WORKTREE_ROOT = resolve(PROJECT_ROOT, "../worktree");
 
 const SYSTEMD_SERVICE_NAME = "agenthive-orchestrator";
 const SYSTEMD_SERVICE_PATH = `/etc/systemd/system/${SYSTEMD_SERVICE_NAME}.service`;

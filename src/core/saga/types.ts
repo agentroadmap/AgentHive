@@ -45,6 +45,7 @@ export interface StepResult {
 }
 
 export interface SagaError {
+  ok: false;
   error_code: ErrorCode;
   message: string;
   step: number;

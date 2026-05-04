@@ -158,7 +158,7 @@ async function step2SpeculativeInsert(ctx: SagaContext): Promise<SagaResult> {
         const now = new Date();
         const ageMin = (now.getTime() - createdAt.getTime()) / (1000 * 60);
 
-        if (row.bootstrap_status !== 'live' && ageMin <= 5) {
+        if (ageMin <= 5) {
           // Concurrent retry in progress
           return createError(
             'slug_collision_concurrent',
@@ -491,6 +491,7 @@ function createError(
   recovery: any
 ): SagaError {
   return {
+    ok: false,
     error_code: code,
     message,
     step,

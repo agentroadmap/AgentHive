@@ -1107,7 +1107,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	if (req.projectId !== undefined) {
 		const withinCap = await isWithinCapacity(req.projectId);
 		if (!withinCap) {
-			throw new SpawnPolicyViolation(
+			throw new Error(
 				`[P760] Project ${req.projectId} is at max concurrent dispatch capacity`,
 			);
 		}
@@ -1485,4 +1485,17 @@ export async function escalateOrNotify(
 	);
 
 	return null;
+}
+
+export function softSortProviderHealthCandidates<T extends { route_provider: string }>(
+	rows: T[],
+	healthFn: (provider: string) => { status: string; checkedAt: number } | null,
+): T[] {
+	function rank(row: T): number {
+		const h = healthFn(row.route_provider);
+		if (!h) return 1;
+		if (h.status === "ok") return 0;
+		return 2;
+	}
+	return [...rows].sort((a, b) => rank(a) - rank(b));
 }

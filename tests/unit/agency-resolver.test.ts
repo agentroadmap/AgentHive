@@ -72,7 +72,7 @@ test("recordSpawnFailure increments throttle_count and recent_failure_count (SQL
 	queryCalls.length = 0;
 	await recordSpawnFailure(42n);
 	assert.ok(queryCalls.length > 0);
-	const sql = queryCalls.at(-1)?.sql;
+	const sql = queryCalls.at(-1)!.sql;
 	assert.ok(sql.includes("throttle_count"));
 	assert.ok(sql.includes("recent_failure_count"));
 	assert.ok(sql.includes("last_failure_at"));
@@ -82,9 +82,9 @@ test("recordSpawnFailure transitions to throttled at threshold (SQL check)", asy
 	mockRows = [];
 	queryCalls.length = 0;
 	await recordSpawnFailure(42n);
-	const sql = queryCalls.at(-1)?.sql;
+	const sql = queryCalls.at(-1)!.sql;
 	assert.ok(sql.includes("throttled"));
-	const params = queryCalls.at(-1)?.params;
+	const params = queryCalls.at(-1)!.params;
 	assert.equal(params[0], 42n);
 	assert.equal(params[1], THROTTLE_THRESHOLD);
 });
@@ -93,7 +93,7 @@ test("recordCheckIn resets status from throttled/dormant (SQL check)", async () 
 	mockRows = [];
 	queryCalls.length = 0;
 	await recordCheckIn("claude-opus");
-	const sql = queryCalls.at(-1)?.sql;
+	const sql = queryCalls.at(-1)!.sql;
 	assert.ok(sql.includes("throttled"));
 	assert.ok(sql.includes("dormant"));
 	assert.ok(sql.includes("active"));
@@ -103,7 +103,7 @@ test("recordCheckIn joins via agent_registry to match TEXT identity (SQL check)"
 	mockRows = [];
 	queryCalls.length = 0;
 	await recordCheckIn("claude-opus");
-	const sql = queryCalls.at(-1)?.sql;
+	const sql = queryCalls.at(-1)!.sql;
 	assert.ok(sql.includes("agent_registry"));
 	assert.ok(sql.includes("agent_identity"));
 });
@@ -112,6 +112,6 @@ test("recordCheckIn decays recent_failure_count (SQL check)", async () => {
 	mockRows = [];
 	queryCalls.length = 0;
 	await recordCheckIn("claude-opus");
-	const sql = queryCalls.at(-1)?.sql;
+	const sql = queryCalls.at(-1)!.sql;
 	assert.ok(sql.includes("recent_failure_count"));
 });

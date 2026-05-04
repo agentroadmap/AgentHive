@@ -193,7 +193,7 @@ class ConfigResolver {
 					auditEntry.lastAccessedAt = new Date();
 					auditEntry.accessCount++;
 				}
-				return cachedValue;
+				return cachedValue as CachedValue<T>;
 			}
 		}
 

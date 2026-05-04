@@ -31,5 +31,5 @@ export async function isWithinCapacity(
 		[projectId],
 	);
 	if (!rows.length) return true; // no config row = uncapped
-	return Number(rows[0].active_count) < rows[0].max_concurrent_dispatches;
+	return Number(rows[0].active_count) < Number(rows[0].max_concurrent_dispatches);
 }
