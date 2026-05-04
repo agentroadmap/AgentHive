@@ -270,7 +270,6 @@ const opsRoutes: RouteMap = {
 	test_issue_resolve: "test_issue_resolve",
 	test_check_blocked: "test_check_blocked",
 	workflow_load: "workflow_load",
-	workflow_load_builtin: "workflow_load_builtin",
 	workflow_list: "workflow_list",
 	federation_stats: "federation_stats",
 	federation_list_hosts: "federation_list_hosts",
