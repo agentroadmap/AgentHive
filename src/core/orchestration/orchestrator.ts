@@ -1,7 +1,14 @@
-import { query } from "../../infra/postgres/pool.ts";
+import { getPool, query } from "../../infra/postgres/pool.ts";
+import { reapStaleRows } from "../pipeline/reap-stale-rows.ts";
 import { enqueueNotification } from "../notifications/enqueue.ts";
 import { getUnlockedGateQueue } from "../proposal/gate-scanner-v2.ts";
 import { spawnAgent } from "./agent-spawner.ts";
+import {
+	bootCancelPokeAttempts,
+	runOfferReaper,
+	runPokeWatchdogTick,
+	type PokeWatchdogOptions,
+} from "./maintenance.ts";
 import { resolveQueueContext } from "./queue-context-resolver.ts";
 import {
 	assessReadiness,
@@ -45,19 +52,103 @@ const STALL_BATCH_LIMIT = Number(
 const ORCHESTRATOR_LIAISON_PROVIDER =
 	process.env.ORCHESTRATOR_LIAISON_PROVIDER ?? null;
 
+const DEFAULT_OFFER_REAP_INTERVAL_MS = Number(
+	process.env.AGENTHIVE_OFFER_REAP_INTERVAL_MS ?? 60_000,
+);
+const DEFAULT_POKE_WATCHDOG_INTERVAL_MS = 60_000;
+const DEFAULT_POKE_IDLE_THRESHOLD_MIN = Number(
+	process.env.AGENTHIVE_POKE_IDLE_THRESHOLD_MIN ?? 5,
+);
+const DEFAULT_POKE_STORM_CAP = Number(process.env.POKE_STORM_CAP ?? 10);
+
 export interface OrchestratorConfig {
 	/** Worktree used for liaison agent spawns (Tier 1 stall escalation). */
 	defaultWorktree?: string;
+	/** Offer reaper interval in ms (default 60 s). */
+	offerReapIntervalMs?: number;
+	/** Poke watchdog interval in ms (default 60 s). */
+	pokeWatchdogIntervalMs?: number;
+	/** Minutes of agency silence before a poke is emitted. */
+	pokeIdleThresholdMin?: number;
+	/** Max pokes emitted per watchdog tick (storm cap). */
+	pokeStormCap?: number;
 }
 
 export class Orchestrator {
 	private readonly defaultWorktree: string;
+	private readonly offerReapIntervalMs: number;
+	private readonly pokeWatchdogIntervalMs: number;
+	private readonly pokeOpts: PokeWatchdogOptions;
+
+	private offerReapTimer: ReturnType<typeof setInterval> | null = null;
+	private pokeWatchdogTimer: ReturnType<typeof setInterval> | null = null;
+	private offerReapInFlight = false;
 
 	constructor(config: OrchestratorConfig = {}) {
 		this.defaultWorktree =
 			config.defaultWorktree ??
 			process.env.AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE ??
 			"claude-andy";
+		this.offerReapIntervalMs =
+			config.offerReapIntervalMs ?? DEFAULT_OFFER_REAP_INTERVAL_MS;
+		this.pokeWatchdogIntervalMs =
+			config.pokeWatchdogIntervalMs ?? DEFAULT_POKE_WATCHDOG_INTERVAL_MS;
+		this.pokeOpts = {
+			idleThresholdMin:
+				config.pokeIdleThresholdMin ?? DEFAULT_POKE_IDLE_THRESHOLD_MIN,
+			stormCap: config.pokeStormCap ?? DEFAULT_POKE_STORM_CAP,
+		};
+	}
+
+	// ─── Maintenance cycle ─────────────────────────────────────────────────────
+
+	/**
+	 * Run boot-time maintenance: cancel orphaned poke attempts and reap stale
+	 * DB rows left by a prior abrupt stop. Call once before startMaintenance().
+	 */
+	async bootMaintenance(): Promise<void> {
+		await bootCancelPokeAttempts(query, console, "Orchestrator");
+		await reapStaleRows(
+			getPool(),
+			{ log: (m) => console.log(m), warn: (m) => console.warn(m) },
+			"Orchestrator.Reaper",
+		);
+	}
+
+	/**
+	 * Start periodic maintenance timers: offer reaper + poke watchdog.
+	 * Idempotent — calling twice is a no-op.
+	 */
+	startMaintenance(): void {
+		if (this.offerReapTimer) return;
+
+		this.offerReapTimer = setInterval(() => {
+			if (this.offerReapInFlight) return;
+			this.offerReapInFlight = true;
+			void runOfferReaper(query, console, "Orchestrator").finally(() => {
+				this.offerReapInFlight = false;
+			});
+		}, this.offerReapIntervalMs);
+
+		this.pokeWatchdogTimer = setInterval(() => {
+			void runPokeWatchdogTick(this.pokeOpts, query, console, "Orchestrator");
+		}, this.pokeWatchdogIntervalMs);
+
+		console.log(
+			`[Orchestrator] Maintenance started — offer reaper every ${this.offerReapIntervalMs}ms, poke watchdog every ${this.pokeWatchdogIntervalMs}ms`,
+		);
+	}
+
+	/** Stop periodic maintenance timers. */
+	stopMaintenance(): void {
+		if (this.offerReapTimer) {
+			clearInterval(this.offerReapTimer);
+			this.offerReapTimer = null;
+		}
+		if (this.pokeWatchdogTimer) {
+			clearInterval(this.pokeWatchdogTimer);
+			this.pokeWatchdogTimer = null;
+		}
 	}
 
 	// ─── Unified dispatch loop ─────────────────────────────────────────────────

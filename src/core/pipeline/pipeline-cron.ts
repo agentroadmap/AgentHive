@@ -17,7 +17,11 @@ import {
 	type ScorableProposal,
 } from "../orchestration/pickup-scorer.ts";
 import { RfcStates, isTerminal } from "../workflow/state-names.ts";
-import { sendLiaisonPoke } from "../../infra/agency/liaison-message-service.ts";
+import {
+	bootCancelPokeAttempts,
+	runOfferReaper as sharedRunOfferReaper,
+	runPokeWatchdogTick as sharedRunPokeWatchdogTick,
+} from "../orchestration/maintenance.ts";
 
 // TODO(P787): convert to getMcpUrlAsync when caller can be async
 const MCP_URL = process.env.MCP_URL || getMcpUrl();
@@ -880,105 +884,23 @@ export class PipelineCron {
 	}
 
 	private async runBootCancelPass(): Promise<void> {
-		try {
-			const { rowCount } = await this.queryFn(
-				`UPDATE roadmap.liaison_poke_attempt
-				 SET outcome = 'cancelled', resolved_at = now()
-				 WHERE outcome IS NULL`,
-			);
-			if (rowCount && rowCount > 0) {
-				this.logger.log(
-					`[PipelineCron] Boot-cancelled ${rowCount} open poke attempt(s) from prior epoch`,
-				);
-			}
-		} catch (err) {
-			this.logger.warn(
-				`[PipelineCron] Boot-cancel pass failed: ${err instanceof Error ? err.message : String(err)}`,
-			);
-		}
+		await bootCancelPokeAttempts(this.queryFn, this.logger, "PipelineCron");
 	}
 
 	private async runPokeWatchdogTick(): Promise<void> {
-		// Resolution pass: CAS-close poke attempts older than 60s
-		try {
-			const { rowCount: timedOut } = await this.queryFn(
-				`UPDATE roadmap.liaison_poke_attempt
-				 SET outcome = 'timed_out', resolved_at = now()
-				 WHERE outcome IS NULL
-				   AND poked_at < now() - INTERVAL '60 seconds'`,
-			);
-			if (timedOut && timedOut > 0) {
-				this.logger.log(
-					`[PipelineCron] Poke watchdog: ${timedOut} poke(s) timed out → stale-unresponsive`,
-				);
-			}
-		} catch (err) {
-			this.logger.warn(
-				`[PipelineCron] Poke resolution pass failed: ${err instanceof Error ? err.message : String(err)}`,
-			);
-			return;
-		}
-
-		// Emission pass: find stale agencies with no open poke and emit (storm-capped)
-		try {
-			const { rows: staleAgencies } = await this.queryFn<{
-				agency_id: string;
-			}>(
-				`SELECT a.agency_id
-				 FROM roadmap.agency a
-				 WHERE a.status IN ('active', 'throttled')
-				   AND a.last_heartbeat_at IS NOT NULL
-				   AND (now() - a.last_heartbeat_at) > ($1 || ' minutes')::interval
-				   AND NOT EXISTS (
-				     SELECT 1 FROM roadmap.liaison_poke_attempt lpa
-				     WHERE lpa.agency_id = a.agency_id AND lpa.outcome IS NULL
-				   )
-				 ORDER BY a.last_heartbeat_at ASC
-				 LIMIT $2`,
-				[String(this.pokeIdleThresholdMin), String(this.pokeStormCap)],
-			);
-
-			for (const { agency_id } of staleAgencies) {
-				try {
-					const { pokeMessageId } = await sendLiaisonPoke(
-						agency_id,
-						this.pokeIdleThresholdMin,
-					);
-					this.logger.log(
-						`[PipelineCron] Sent poke ${pokeMessageId} to stale agency ${agency_id}`,
-					);
-				} catch (err) {
-					this.logger.warn(
-						`[PipelineCron] Failed to poke agency ${agency_id}: ${err instanceof Error ? err.message : String(err)}`,
-					);
-				}
-			}
-		} catch (err) {
-			this.logger.warn(
-				`[PipelineCron] Poke emission pass failed: ${err instanceof Error ? err.message : String(err)}`,
-			);
-		}
+		await sharedRunPokeWatchdogTick(
+			{ idleThresholdMin: this.pokeIdleThresholdMin, stormCap: this.pokeStormCap },
+			this.queryFn,
+			this.logger,
+			"PipelineCron",
+		);
 	}
 
 	private async runOfferReaper(): Promise<void> {
 		if (this.offerReapInFlight) return;
 		this.offerReapInFlight = true;
 		try {
-			const { rows } = await this.queryFn<{
-				reissued_count: number;
-				expired_count: number;
-			}>("SELECT * FROM roadmap_workforce.fn_reap_expired_offers()");
-			const row = rows[0];
-			const reissued = Number(row?.reissued_count ?? 0);
-			const expired = Number(row?.expired_count ?? 0);
-			if (reissued > 0 || expired > 0) {
-				this.logger.log(
-					`[PipelineCron] offer reaper: ${reissued} reissued, ${expired} expired`,
-				);
-			}
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			this.logger.warn(`[PipelineCron] offer reaper failed: ${message}`);
+			await sharedRunOfferReaper(this.queryFn, this.logger, "PipelineCron");
 		} finally {
 			this.offerReapInFlight = false;
 		}
