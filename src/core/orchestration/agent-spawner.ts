@@ -293,6 +293,14 @@ function loadClaudeSettingsEnv(): Record<string, string> {
 	return claudeSettingsEnv;
 }
 
+const DANGEROUS_KEY_PATTERNS = [/_SECRET$/i, /_PASSWORD$/i];
+
+function sanitizeExtraEnv(extraEnv: Record<string, string>): Record<string, string> {
+	return Object.fromEntries(
+		Object.entries(extraEnv).filter(([key]) => !DANGEROUS_KEY_PATTERNS.some((p) => p.test(key))),
+	);
+}
+
 export function buildSpawnProcessEnv(input: {
 	worktree: string;
 	route: ModelRoute;
@@ -365,14 +373,11 @@ export function buildSpawnProcessEnv(input: {
 		GIT_CONFIG_NOSYSTEM: "1",
 		// API keys are selected from DB-backed route metadata, not worktree prefix.
 		...routeCredentialEnv,
-		...(process.env.GITHUB_TOKEN && {
-			GITHUB_TOKEN: process.env.GITHUB_TOKEN,
-		}),
 	};
 
 	return {
 		...baseEnv,
-		...input.extraEnv,
+		...sanitizeExtraEnv(input.extraEnv),
 	};
 }
 
