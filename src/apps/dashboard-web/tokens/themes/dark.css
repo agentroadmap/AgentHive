@@ -1,0 +1,39 @@
+/* Dark theme — overrides via .dark class on document root */
+.dark {
+  --color-primary: #60a5fa;
+  --color-primary-hover: #3b82f6;
+  --color-primary-active: #2563eb;
+  --color-primary-foreground: #1e3a5f;
+  --color-secondary: #9ca3af;
+  --color-secondary-hover: #d1d5db;
+  --color-secondary-foreground: #1f2937;
+  --color-danger: #f87171;
+  --color-danger-hover: #ef4444;
+  --color-danger-foreground: #7f1d1d;
+  --color-success: #34d399;
+  --color-success-bg: #064e3b;
+  --color-success-fg: #6ee7b7;
+  --color-warning: #fbbf24;
+  --color-warning-bg: #78350f;
+  --color-warning-fg: #fde68a;
+  --color-error: #f87171;
+  --color-error-bg: #7f1d1d;
+  --color-error-fg: #fca5a5;
+  --color-info: #60a5fa;
+  --color-info-bg: #1e3a5f;
+  --color-info-fg: #93c5fd;
+  --color-neutral: #9ca3af;
+  --color-neutral-bg: #374151;
+  --color-neutral-fg: #d1d5db;
+  --color-surface: #1f2937;
+  --color-surface-elevated: #111827;
+  --color-surface-hover: #374151;
+  --color-surface-overlay: rgb(0 0 0 / 0.6);
+  --color-border: #374151;
+  --color-border-strong: #4b5563;
+  --color-text: #f9fafb;
+  --color-text-muted: #9ca3af;
+  --color-text-subtle: #6b7280;
+  --color-text-on-primary: #1e3a5f;
+  --color-focus-ring: #60a5fa;
+}

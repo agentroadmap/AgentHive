@@ -10,11 +10,10 @@ import type { Pool } from "pg";
 
 export type EdgeInput = {
 	fromProjectId: bigint;
+	fromProposalId: bigint;
 	toProjectId: bigint;
-	kindId: bigint;
-	referenceId: string;
-	referenceType: string;
-	notes?: string;
+	toProposalId: bigint;
+	kind: string;
 };
 
 export type AddEdgeResult =
@@ -24,46 +23,44 @@ export type AddEdgeResult =
 /**
  * Inserts a cross-project dependency edge.
  *
- * Validates kindId against dependency_kind_catalog.id before insert.
+ * Validates kind against dependency_kind_catalog before insert.
  * Returns a typed error (not a throw) for constraint violations.
  */
 export async function addCrossProjectDependency(
 	pool: Pool,
 	edge: EdgeInput,
 ): Promise<AddEdgeResult> {
-	const kindCheck = await pool.query<{ id: string }>(
-		"SELECT id FROM dependency.dependency_kind_catalog WHERE id = $1 AND lifecycle_status = 'active'",
-		[edge.kindId],
+	const kindCheck = await pool.query<{ kind: string }>(
+		"SELECT kind FROM dependency.dependency_kind_catalog WHERE kind = $1",
+		[edge.kind],
 	);
 	if ((kindCheck.rowCount ?? 0) === 0) {
-		return {
-			ok: false,
-			error: `Unknown or inactive dependency kind: ${edge.kindId}`,
-		};
+		return { ok: false, error: `Unknown dependency kind: ${edge.kind}` };
 	}
 
 	try {
-		const result = await pool.query<{ id: string }>(
+		const result = await pool.query<{ edge_id: string }>(
 			`INSERT INTO dependency.cross_project_dependency
-			   (from_project_id, to_project_id, kind_id, reference_id, reference_type, notes)
-			 VALUES ($1, $2, $3, $4, $5, $6)
-			 RETURNING id`,
+			   (from_project_id, from_proposal_id, to_project_id, to_proposal_id, kind)
+			 VALUES ($1, $2, $3, $4, $5)
+			 RETURNING edge_id`,
 			[
 				edge.fromProjectId,
+				edge.fromProposalId,
 				edge.toProjectId,
-				edge.kindId,
-				edge.referenceId,
-				edge.referenceType,
-				edge.notes ?? null,
+				edge.toProposalId,
+				edge.kind,
 			],
 		);
-		return { ok: true, edgeId: BigInt(result.rows[0].id) };
-	} catch (err: unknown) {
-		const error = err as Record<string, unknown>;
-		if (error?.constraint === "cross_project_dependency_unique") {
+		return { ok: true, edgeId: BigInt(result.rows[0].edge_id) };
+	} catch (err: any) {
+		if (err?.constraint === "cross_project_dep_unique") {
+			return { ok: false, error: "Duplicate edge: this dependency already exists" };
+		}
+		if (err?.constraint === "cross_project_no_self_loop") {
 			return {
 				ok: false,
-				error: "Duplicate edge: this dependency already exists",
+				error: "Self-loop: from_project_id must differ from to_project_id",
 			};
 		}
 		throw err;

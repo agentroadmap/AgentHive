@@ -1,22 +1,21 @@
 /**
  * Cross-project dependency cycle checker (P602)
  *
- * Detects circular blocking chains across projects using BFS.
- * Works across tenant boundaries using BIGINT project IDs from
- * dependency.cross_project_dependency.
+ * Adapts the BFS algorithm from dependency-engine.ts:72–99 for composite
+ * (project_id, proposal_id) node keys. Works across tenant boundaries
+ * using BIGINT IDs from dependency.cross_project_dependency.
  *
- * Node key encoding: "${projectId}"
- * A cycle means projectA blocks projectB blocks … blocks projectA.
+ * Node key encoding: "${projectId}:${proposalId}"
+ * Safe for BIGSERIAL project_id and proposal_id (no colon in numeric IDs).
  */
 
 export type CrossProjectEdge = {
 	edgeId: bigint;
 	fromProjectId: bigint;
+	fromProposalId: bigint;
 	toProjectId: bigint;
-	kindId: bigint;
-	referenceId: string;
-	referenceType: string;
-	isBlocking: boolean;
+	toProposalId: bigint;
+	kind: string;
 };
 
 export type CycleResult = {
@@ -24,27 +23,24 @@ export type CycleResult = {
 	cycleEdgeIds: bigint[];
 };
 
-function nodeKey(projectId: bigint): string {
-	return `${projectId}`;
+function nodeKey(projectId: bigint, proposalId: bigint): string {
+	return `${projectId}:${proposalId}`;
 }
 
 /**
- * Detects all cross-project cycles in the given edge set using BFS.
+ * Detects all cycles in the given edge set using BFS (queue-based).
  *
- * Only call with edges where isBlocking=true (nightly job pre-filters).
+ * Only call with edges where cycle_check = true (nightly job pre-filters).
  * Returns one CycleResult per detected cycle, with the edge IDs involved.
  */
 export function detectCycles(edges: CrossProjectEdge[]): CycleResult[] {
 	const adjList = new Map<string, Array<{ key: string; edgeId: bigint }>>();
 
 	for (const e of edges) {
-		const from = nodeKey(e.fromProjectId);
-		const to = nodeKey(e.toProjectId);
+		const from = nodeKey(e.fromProjectId, e.fromProposalId);
+		const to = nodeKey(e.toProjectId, e.toProposalId);
 		if (!adjList.has(from)) adjList.set(from, []);
-		const neighbors = adjList.get(from);
-		if (neighbors) {
-			neighbors.push({ key: to, edgeId: e.edgeId });
-		}
+		adjList.get(from)!.push({ key: to, edgeId: e.edgeId });
 	}
 
 	const cycles: CycleResult[] = [];
@@ -63,9 +59,7 @@ export function detectCycles(edges: CrossProjectEdge[]): CycleResult[] {
 		const visited = new Set<string>();
 
 		while (queue.length > 0) {
-			const item = queue.shift();
-			if (!item) continue;
-			const { node, pathSet, edgeIds } = item;
+			const { node, pathSet, edgeIds } = queue.shift()!;
 
 			if (visited.has(node)) continue;
 			visited.add(node);

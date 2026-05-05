@@ -1,128 +1,126 @@
 /**
- * DiscordBridgeService — bridges AgentHive A2A messages to Discord.
+ * Discord Bridge Service — A2A to Discord gateway relay.
  *
- * Maintains a Discord Gateway WebSocket (heartbeat every 45s) and subscribes
- * to the pg_notify `new_message` channel. Eligible messages (broadcast, team:*)
- * are formatted as Discord embeds and posted via the REST API.
- *
- * AC-1: DiscordBridgeService class with start()
- * AC-2: WebSocket Gateway + 45s heartbeat
- * AC-5: A2A broadcast → Discord embed relay
- * AC-7: Failed messages queued and retried
+ * Opens a Discord Gateway WebSocket, subscribes to pg_notify new_message,
+ * and relays broadcast / team:* A2A messages to mapped Discord channels.
  */
 
 import WebSocket from "ws";
-import { getPool, query } from "../../infra/postgres/pool.ts";
+import { getPool } from "../../infra/postgres/pool.ts";
 import { DiscordRateLimiter } from "./rate-limiter.ts";
-import {
-	formatMessageEmbed,
-	type AgentiveMessage,
-	type DiscordEmbed,
-} from "./message-formatter.ts";
+import { formatMessageEmbed, type AgentiveMessage } from "./message-formatter.ts";
 import { HealthChecker } from "./health-check.ts";
 
-const DISCORD_GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json";
-const HEARTBEAT_INTERVAL_MS = 45_000;
-const MAX_RETRIES = 3;
-const RETRY_DELAY_MS = 5_000;
+const OP_HEARTBEAT = 1;
+const OP_IDENTIFY = 2;
+const OP_HELLO = 10;
+const OP_HEARTBEAT_ACK = 11;
 
-interface MessageAck {
+const DISCORD_API = "https://discord.com/api/v10";
+const DISCORD_GATEWAY = "wss://gateway.discord.gg/?v=10&encoding=json";
+const MAX_RETRIES = 3;
+
+interface QueuedMessage {
 	msg: AgentiveMessage;
+	channelId: string;
 	retries: number;
+}
+
+interface GatewayPayload {
+	op: number;
+	d?: { heartbeat_interval?: number } | null;
 }
 
 export class DiscordBridgeService {
 	private ws: WebSocket | null = null;
-	private messageQueue: Map<string, MessageAck> = new Map();
-	private rateLimiter = new DiscordRateLimiter();
-	readonly healthChecker = new HealthChecker();
-	private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-	private retryTimer: ReturnType<typeof setInterval> | null = null;
-	private listenerClient: any = null;
-	private running = false;
+	private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+	private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+	private retryInterval: ReturnType<typeof setInterval> | null = null;
+	private readonly rateLimiter: DiscordRateLimiter;
+	private readonly healthChecker: HealthChecker;
+	private messageQueue: QueuedMessage[] = [];
+	private readonly channelMappings = new Map<string, string>();
+	private readonly botToken: string;
 
-	constructor(private readonly token: string) {}
+	constructor(botToken: string, healthChecker: HealthChecker) {
+		this.botToken = botToken;
+		this.rateLimiter = new DiscordRateLimiter();
+		this.healthChecker = healthChecker;
+	}
 
 	async start(): Promise<void> {
-		this.running = true;
+		await this.loadChannelMappings();
 		this.connectGateway();
-		await this.subscribeToA2AMessages();
+		await this.subscribeToMessages();
 		this.startRetryLoop();
 	}
 
-	// ─── Discord Gateway ─────────────────────────────────────────────────────
+	private async loadChannelMappings(): Promise<void> {
+		const pool = getPool();
+		const result = await pool.query<{
+			agentive_channel: string;
+			discord_channel_id: string;
+		}>(
+			`SELECT agentive_channel, discord_channel_id
+			 FROM roadmap.discord_channel_mapping
+			 WHERE enabled = true`,
+		);
+		for (const row of result.rows) {
+			this.channelMappings.set(row.agentive_channel, row.discord_channel_id);
+		}
+	}
 
 	private connectGateway(): void {
-		this.ws = new WebSocket(DISCORD_GATEWAY_URL);
+		this.ws = new WebSocket(DISCORD_GATEWAY);
 
 		this.ws.on("open", () => {
 			this.healthChecker.setConnectionState(true);
-			console.log("[discord-bridge] Connected to Discord Gateway");
 		});
 
-		this.ws.on("message", (data: Buffer) => {
-			this.handleGatewayMessage(data.toString());
+		this.ws.on("message", (data: WebSocket.RawData) => {
+			try {
+				const payload = JSON.parse(data.toString()) as GatewayPayload;
+				this.handleGatewayPayload(payload);
+			} catch (err) {
+				console.error("[DiscordBridge] Bad gateway payload:", err);
+			}
 		});
 
 		this.ws.on("close", () => {
 			this.healthChecker.setConnectionState(false);
-			if (this.heartbeatTimer) {
-				clearInterval(this.heartbeatTimer);
-				this.heartbeatTimer = null;
-			}
-			if (this.running) {
-				console.log(
-					"[discord-bridge] Gateway disconnected — reconnecting in 5s",
-				);
-				setTimeout(() => this.connectGateway(), 5_000);
-			}
+			this.clearHeartbeat();
 		});
 
 		this.ws.on("error", (err: Error) => {
-			console.error("[discord-bridge] WebSocket error:", err.message);
+			console.error("[DiscordBridge] WS error:", err.message);
+			this.healthChecker.setConnectionState(false);
 		});
 	}
 
-	private handleGatewayMessage(raw: string): void {
-		let payload: { op: number; d: any; s?: number };
-		try {
-			payload = JSON.parse(raw);
-		} catch {
-			return;
-		}
-
+	private handleGatewayPayload(payload: GatewayPayload): void {
 		switch (payload.op) {
-			case 10: // HELLO — start heartbeat + identify
-				this.setupHeartbeat(
-					payload.d?.heartbeat_interval ?? HEARTBEAT_INTERVAL_MS,
-				);
+			case OP_HELLO: {
+				const interval = payload.d?.heartbeat_interval ?? 45_000;
+				// Jitter: start heartbeat at a random offset within the interval
+				this.heartbeatTimer = setTimeout(() => {
+					this.sendHeartbeat();
+					this.heartbeatInterval = setInterval(
+						() => this.sendHeartbeat(),
+						interval,
+					);
+				}, Math.random() * interval);
 				this.identify();
 				break;
-			case 11: // HEARTBEAT ACK
+			}
+			case OP_HEARTBEAT_ACK:
 				this.healthChecker.recordHeartbeat();
-				break;
-			case 1: // Server-requested heartbeat
-				this.sendHeartbeat(payload.s ?? null);
 				break;
 		}
 	}
 
-	private setupHeartbeat(intervalMs: number): void {
-		if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
-		// Discord requires a jittered first beat
-		const jitter = Math.floor(Math.random() * intervalMs);
-		setTimeout(() => {
-			this.sendHeartbeat(null);
-			this.heartbeatTimer = setInterval(
-				() => this.sendHeartbeat(null),
-				intervalMs,
-			);
-		}, jitter);
-	}
-
-	private sendHeartbeat(seq: number | null): void {
+	private sendHeartbeat(): void {
 		if (this.ws?.readyState === WebSocket.OPEN) {
-			this.ws.send(JSON.stringify({ op: 1, d: seq }));
+			this.ws.send(JSON.stringify({ op: OP_HEARTBEAT, d: null }));
 		}
 	}
 
@@ -130,264 +128,153 @@ export class DiscordBridgeService {
 		if (this.ws?.readyState !== WebSocket.OPEN) return;
 		this.ws.send(
 			JSON.stringify({
-				op: 2,
+				op: OP_IDENTIFY,
 				d: {
-					token: this.token,
+					token: this.botToken,
 					intents: 0,
 					properties: {
 						os: "linux",
-						browser: "agenthive-discord-bridge",
-						device: "agenthive-discord-bridge",
+						browser: "agentive-discord-bridge",
+						device: "agentive-discord-bridge",
 					},
 				},
 			}),
 		);
 	}
 
-	// ─── A2A Subscription (pg_notify) ────────────────────────────────────────
-
-	private async subscribeToA2AMessages(): Promise<void> {
+	private async subscribeToMessages(): Promise<void> {
 		const pool = getPool();
-		this.listenerClient = await pool.connect();
-		await this.listenerClient.query("LISTEN new_message");
+		const pgClient = await pool.connect();
+		await pgClient.query("LISTEN new_message");
 
-		this.listenerClient.on("notification", (msg: any) => {
-			if (msg.channel === "new_message") {
-				void this.handleNewMessageNotification(msg.payload as string);
-			}
-		});
-
-		console.log("[discord-bridge] Subscribed to A2A new_message notifications");
+		pgClient.on(
+			"notification",
+			async (n: { channel: string; payload?: string }) => {
+				if (!n.payload) return;
+				try {
+					await this.handleNotification(n.payload);
+				} catch (err) {
+					console.error("[DiscordBridge] Notification error:", err);
+				}
+			},
+		);
 	}
 
-	private async handleNewMessageNotification(payload: string): Promise<void> {
-		let notification: { message_id: number; channel: string };
-		try {
-			notification = JSON.parse(payload);
-		} catch {
-			return;
-		}
+	private async handleNotification(payload: string): Promise<void> {
+		const data = JSON.parse(payload) as { id?: unknown; msg_id?: unknown };
+		const msgId = data.id ?? data.msg_id;
+		if (msgId == null) return;
 
-		const ch = notification.channel ?? "";
+		const pool = getPool();
+		const result = await pool.query<AgentiveMessage>(
+			`SELECT id, channel, from_agent, to_agent, message_content,
+			        message_type, proposal_id, title, created_at
+			 FROM roadmap.message_ledger
+			 WHERE id = $1`,
+			[msgId],
+		);
+		const msg = result.rows[0];
+		if (!msg) return;
+
+		const ch = msg.channel ?? "";
 		if (ch !== "broadcast" && !ch.startsWith("team:")) return;
 
-		try {
-			const { rows } = await query<AgentiveMessage>(
-				`SELECT id::text AS id,
-				        channel,
-				        from_agent,
-				        to_agent,
-				        message_content,
-				        message_type,
-				        proposal_id::text AS proposal_id,
-				        created_at
-				 FROM message_ledger
-				 WHERE id = $1`,
-				[notification.message_id],
-			);
-			if (rows[0]) await this.relayMessage(rows[0]);
-		} catch (err) {
-			console.error("[discord-bridge] Failed to fetch/relay message:", err);
-		}
+		const discordChannelId = this.channelMappings.get(ch);
+		if (!discordChannelId) return;
+
+		await this.relayMessage(msg, discordChannelId);
 	}
 
-	// ─── Message Relay ────────────────────────────────────────────────────────
-
-	async relayMessage(msg: AgentiveMessage): Promise<void> {
-		const mapping = await this.getDiscordChannel(msg.channel);
-		if (!mapping) {
-			console.warn(
-				`[discord-bridge] No Discord mapping for channel '${msg.channel}'`,
-			);
-			return;
-		}
-
-		if (!this.rateLimiter.allow(mapping.discord_channel_id)) {
-			this.messageQueue.set(String(msg.id), { msg, retries: 0 });
-			this.healthChecker.setQueueLength(this.messageQueue.size);
-			return;
-		}
-
-		const embed = formatMessageEmbed(msg);
-		await this.trySend(String(msg.id), mapping.discord_channel_id, embed);
-	}
-
-	private async trySend(
-		agentiveMsgId: string,
-		discordChannelId: string,
-		embed: DiscordEmbed,
-	): Promise<void> {
-		try {
-			const sent = await this.sendToDiscord(discordChannelId, embed);
-			await this.recordAck(agentiveMsgId, sent.id, discordChannelId, "sent");
-		} catch (err) {
-			await this.recordAck(
-				agentiveMsgId,
-				null,
-				discordChannelId,
-				"failed",
-				err instanceof Error ? err.message : String(err),
-			);
-		}
-	}
-
-	private async getDiscordChannel(
-		agentiveChannel: string,
-	): Promise<{ discord_channel_id: string } | null> {
-		try {
-			const { rows } = await query<{ discord_channel_id: string }>(
-				`SELECT discord_channel_id
-				 FROM roadmap.discord_channel_mapping
-				 WHERE agentive_channel = $1 AND enabled = true`,
-				[agentiveChannel],
-			);
-			return rows[0] ?? null;
-		} catch {
-			return null;
+	async relayMessage(msg: AgentiveMessage, channelId: string): Promise<void> {
+		if (this.rateLimiter.allow(channelId)) {
+			await this.sendToDiscord(msg, channelId);
+		} else {
+			this.messageQueue.push({ msg, channelId, retries: 0 });
+			this.healthChecker.setQueueLength(this.messageQueue.length);
 		}
 	}
 
 	private async sendToDiscord(
+		msg: AgentiveMessage,
 		channelId: string,
-		embed: DiscordEmbed,
-	): Promise<{ id: string }> {
-		const res = await fetch(
-			`https://discord.com/api/v10/channels/${channelId}/messages`,
+	): Promise<void> {
+		const embed = formatMessageEmbed(msg);
+		const response = await fetch(
+			`${DISCORD_API}/channels/${channelId}/messages`,
 			{
 				method: "POST",
 				headers: {
+					Authorization: `Bot ${this.botToken}`,
 					"Content-Type": "application/json",
-					Authorization: `Bot ${this.token}`,
-					"User-Agent":
-						"AgentHive Discord Bridge (https://github.com/agenthive, 1.0)",
 				},
 				body: JSON.stringify({ embeds: [embed] }),
 			},
 		);
 
-		if (!res.ok) {
-			const text = await res.text();
-			throw new Error(`Discord API ${res.status}: ${text}`);
-		}
-
-		return res.json() as Promise<{ id: string }>;
-	}
-
-	private async recordAck(
-		agentiveMsgId: string,
-		discordMsgId: string | null,
-		discordChannelId: string,
-		status: "sent" | "failed" | "retrying",
-		errorReason?: string,
-	): Promise<void> {
-		try {
-			await query(
+		const pool = getPool();
+		if (response.ok) {
+			const discordMsg = (await response.json()) as { id: string };
+			await pool.query(
 				`INSERT INTO roadmap.discord_message_ack
-				   (agentive_msg_id, discord_msg_id, discord_channel_id, status, error_reason, acked_at)
-				 VALUES ($1, $2, $3, $4, $5, $6)
-				 ON CONFLICT (agentive_msg_id) DO UPDATE SET
-				   discord_msg_id     = EXCLUDED.discord_msg_id,
-				   discord_channel_id = EXCLUDED.discord_channel_id,
-				   status             = EXCLUDED.status,
-				   attempt_count      = roadmap.discord_message_ack.attempt_count + 1,
-				   last_attempt_at    = now(),
-				   error_reason       = EXCLUDED.error_reason,
-				   acked_at           = EXCLUDED.acked_at`,
-				[
-					agentiveMsgId,
-					discordMsgId,
-					discordChannelId,
-					status,
-					errorReason ?? null,
-					status === "sent" ? new Date() : null,
-				],
+				   (agentive_msg_id, discord_msg_id, discord_channel_id, status, attempt_count, acked_at)
+				 VALUES ($1, $2, $3, 'sent', 1, now())
+				 ON CONFLICT (agentive_msg_id) DO UPDATE
+				   SET discord_msg_id = $2, status = 'sent', acked_at = now()`,
+				[String(msg.id), discordMsg.id, channelId],
 			);
-		} catch (err) {
-			console.error("[discord-bridge] Failed to record ACK:", err);
+		} else {
+			await pool.query(
+				`INSERT INTO roadmap.discord_message_ack
+				   (agentive_msg_id, discord_channel_id, status, attempt_count)
+				 VALUES ($1, $2, 'failed', 1)
+				 ON CONFLICT (agentive_msg_id) DO UPDATE
+				   SET status = 'failed',
+				       attempt_count = discord_message_ack.attempt_count + 1,
+				       last_attempt_at = now()`,
+				[String(msg.id), channelId],
+			);
 		}
 	}
-
-	// ─── Retry Loop (AC-7) ───────────────────────────────────────────────────
 
 	private startRetryLoop(): void {
-		this.retryTimer = setInterval(async () => {
-			if (this.messageQueue.size === 0) return;
-
-			for (const [msgId, ack] of this.messageQueue) {
-				const mapping = await this.getDiscordChannel(ack.msg.channel);
-				if (!mapping) {
-					this.messageQueue.delete(msgId);
-					continue;
-				}
-
-				if (!this.rateLimiter.allow(mapping.discord_channel_id)) continue;
-
-				if (ack.retries >= MAX_RETRIES) {
-					await this.recordAck(
-						msgId,
-						null,
-						mapping.discord_channel_id,
-						"failed",
-						"Max retries exceeded",
-					);
-					this.messageQueue.delete(msgId);
-					continue;
-				}
-
-				const embed = formatMessageEmbed(ack.msg);
-				try {
-					const sent = await this.sendToDiscord(
-						mapping.discord_channel_id,
-						embed,
-					);
-					await this.recordAck(
-						msgId,
-						sent.id,
-						mapping.discord_channel_id,
-						"sent",
-					);
-					this.messageQueue.delete(msgId);
-				} catch (err) {
-					ack.retries++;
-					await this.recordAck(
-						msgId,
-						null,
-						mapping.discord_channel_id,
-						"retrying",
-						err instanceof Error ? err.message : String(err),
-					);
+		this.retryInterval = setInterval(async () => {
+			if (this.messageQueue.length === 0) return;
+			const remaining: QueuedMessage[] = [];
+			for (const item of this.messageQueue) {
+				if (this.rateLimiter.allow(item.channelId)) {
+					try {
+						await this.sendToDiscord(item.msg, item.channelId);
+					} catch {
+						item.retries++;
+						if (item.retries < MAX_RETRIES) remaining.push(item);
+					}
+				} else {
+					item.retries++;
+					if (item.retries < MAX_RETRIES) remaining.push(item);
 				}
 			}
-
-			this.healthChecker.setQueueLength(this.messageQueue.size);
-		}, RETRY_DELAY_MS);
+			this.messageQueue = remaining;
+			this.healthChecker.setQueueLength(this.messageQueue.length);
+		}, 5_000);
 	}
 
-	// ─── Lifecycle ───────────────────────────────────────────────────────────
+	private clearHeartbeat(): void {
+		if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
+		if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
+		this.heartbeatTimer = null;
+		this.heartbeatInterval = null;
+	}
+
+	getQueueLength(): number {
+		return this.messageQueue.length;
+	}
 
 	async stop(): Promise<void> {
-		this.running = false;
-
-		if (this.heartbeatTimer) {
-			clearInterval(this.heartbeatTimer);
-			this.heartbeatTimer = null;
-		}
-		if (this.retryTimer) {
-			clearInterval(this.retryTimer);
-			this.retryTimer = null;
-		}
-		if (this.listenerClient) {
-			try {
-				await this.listenerClient.query("UNLISTEN new_message");
-			} catch {
-				// ignore
-			}
-			this.listenerClient.release();
-			this.listenerClient = null as any;
-		}
-		if (this.ws) {
-			this.ws.close();
-			this.ws = null;
-		}
+		this.clearHeartbeat();
+		if (this.retryInterval) clearInterval(this.retryInterval);
+		this.retryInterval = null;
+		this.ws?.close();
+		this.ws = null;
+		this.healthChecker.setConnectionState(false);
 	}
 }

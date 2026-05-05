@@ -67,6 +67,15 @@ log "  Latest dump: ${DUMP_KEY}"
 # ----------------------------------------------------------------
 log "Step 2: Download dump"
 DUMP_FILE="$(mktemp /tmp/dr-restore-XXXXXX.dump)"
+
+# F3 fix: define teardown before trap so the handler exists on any early exit
+_scratch_teardown() {
+  if pg_ctl status -D "$SCRATCH_DATA" >/dev/null 2>&1; then
+    log "Tearing down scratch instance..."
+    pg_ctl stop -D "$SCRATCH_DATA" -m fast >/dev/null 2>&1 || true
+  fi
+  rm -rf "$SCRATCH_DATA"
+}
 trap 'rm -f "$DUMP_FILE"; _scratch_teardown' EXIT
 
 aws s3 cp "s3://${S3_BUCKET}/${S3_PREFIX}/${DUMP_KEY}" "$DUMP_FILE" \
@@ -80,16 +89,9 @@ log "  Downloaded ${DUMP_SIZE} to ${DUMP_FILE}"
 # ----------------------------------------------------------------
 log "Step 3: Initialize scratch Postgres"
 
-_scratch_teardown() {
-  if pg_ctl status -D "$SCRATCH_DATA" >/dev/null 2>&1; then
-    log "Tearing down scratch instance..."
-    pg_ctl stop -D "$SCRATCH_DATA" -m fast >/dev/null 2>&1 || true
-  fi
-  rm -rf "$SCRATCH_DATA"
-}
-
 rm -rf "$SCRATCH_DATA"
-initdb -D "$SCRATCH_DATA" --no-locale --encoding=UTF8 -U postgres >> "$LOG" 2>&1 \
+initdb -D "$SCRATCH_DATA" --no-locale --encoding=UTF8 -U postgres \
+  --auth-local=trust --auth-host=trust >> "$LOG" 2>&1 \
   || fail "initdb failed" 1
 
 # Minimal config: listen only on localhost at scratch port
@@ -113,13 +115,18 @@ PGPASSWORD="" createdb -h 127.0.0.1 -p "$SCRATCH_PORT" -U postgres "$PG_DATABASE
 # Step 4: Restore dump
 # ----------------------------------------------------------------
 log "Step 4: Restore dump to scratch"
+RESTORE_RC=0
 PGPASSWORD="" pg_restore \
   -h 127.0.0.1 -p "$SCRATCH_PORT" -U postgres \
   -d "$PG_DATABASE" \
   --no-owner --no-privileges \
   -j 2 \
-  "$DUMP_FILE" >> "$LOG" 2>&1 \
-  || { log "pg_restore exited non-zero (may be ignorable warnings); continuing to smoke tests"; }
+  "$DUMP_FILE" >> "$LOG" 2>&1 || RESTORE_RC=$?
+if [[ $RESTORE_RC -gt 1 ]]; then
+  fail "pg_restore failed fatally (exit code $RESTORE_RC); aborting smoke tests" 2
+elif [[ $RESTORE_RC -eq 1 ]]; then
+  log "  pg_restore exited 1 (non-fatal warnings); proceeding to smoke tests"
+fi
 log "  Restore complete"
 
 # ----------------------------------------------------------------
@@ -194,7 +201,7 @@ PGPASSWORD="${PGPASSWORD:-}" psql \
   -v decision_seconds="0" \
   -v clock_skew_max="0" \
   -v notes="${NOTES}" \
-  -f "${DR_DIR}/record-dr-event.sql" >> "$LOG" 2>&1 \
+  -f "${DR_DIR}/record-drill-event.sql" >> "$LOG" 2>&1 \
   || log "  (warning: failed to write to live governance.decision_log; check ${LOG})"
 
 log "=== Backup restore-test completed at $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="

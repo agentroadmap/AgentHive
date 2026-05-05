@@ -11,12 +11,7 @@
  * deployment.
  */
 import { hostname } from "node:os";
-import {
-	spawnAgent,
-	resolveActiveRouteProvider,
-	terminateLiveChildren,
-	liveChildCount,
-} from "../src/core/orchestration/agent-spawner.ts";
+import { spawnAgent, resolveActiveRouteProvider } from "../src/core/orchestration/agent-spawner.ts";
 import { OfferProvider } from "../src/core/pipeline/offer-provider.ts";
 import { PipelineCron } from "../src/core/pipeline/pipeline-cron.ts";
 import { reapStaleRows } from "../src/core/pipeline/reap-stale-rows.ts";
@@ -26,50 +21,54 @@ import { loadStateNames } from "../src/core/workflow/state-names.ts";
 const executorMode = process.env.AGENTHIVE_GATE_EXECUTOR ?? "cubic";
 const useOfferDispatch = process.env.AGENTHIVE_USE_OFFER_DISPATCH === "1";
 
-// Shared spawn adapter — used by both PipelineCron (legacy) and OfferProvider.
-// Provider is resolved from the AGENTHIVE_AGENT_IDENTITY prefix, with DB fallback,
-// so no binary path or provider name is hardcoded here.
 const agentIdentity = process.env.AGENTHIVE_AGENT_IDENTITY ?? hostname();
-const spawnAdapter =
+
+type SpawnRequestBase = {
+	worktree: string;
+	task: string;
+	proposalId: number | string;
+	stage: string;
+	model?: string;
+	timeoutMs?: number;
+};
+
+const resolveSpawnArgs = async (request: SpawnRequestBase) => {
+	const identityPrefix = agentIdentity.split("/")[0];
+	const provider = identityPrefix || (await resolveActiveRouteProvider()) || undefined;
+	return {
+		worktree: request.worktree,
+		task: request.task,
+		proposalId:
+			typeof request.proposalId === "number"
+				? request.proposalId
+				: Number.isFinite(Number(request.proposalId))
+					? Number(request.proposalId)
+					: undefined,
+		stage: request.stage,
+		model: request.model,
+		timeoutMs: request.timeoutMs,
+		provider: provider as any,
+	};
+};
+
+// For PipelineCron.spawnAgentFn — expects Promise<SpawnResult> (unwraps SpawnHandle)
+const pipelineSpawnAdapter =
 	executorMode === "spawn" || useOfferDispatch
-		? async (request: {
-				worktree: string;
-				task: string;
-				proposalId: number | string;
-				stage: string;
-				model?: string;
-				timeoutMs?: number;
-			}) => {
-				const identityPrefix = agentIdentity.split("/")[0];
-				const provider = identityPrefix || (await resolveActiveRouteProvider()) || undefined;
-				return spawnAgent({
-					worktree: request.worktree,
-					task: request.task,
-					proposalId:
-						typeof request.proposalId === "number"
-							? request.proposalId
-							: Number.isFinite(Number(request.proposalId))
-								? Number(request.proposalId)
-								: undefined,
-					stage: request.stage,
-					model: request.model,
-					timeoutMs: request.timeoutMs,
-					provider: provider as any,
-				});
-			}
+		? async (request: SpawnRequestBase) =>
+				(await spawnAgent(await resolveSpawnArgs(request))).result
 		: undefined;
 
 const cron = new PipelineCron({
-	...(spawnAdapter ? { spawnAgentFn: spawnAdapter as any } : {}),
+	...(pipelineSpawnAdapter ? { spawnAgentFn: pipelineSpawnAdapter } : {}),
 	useOfferDispatch,
 });
 
 // P281: When offer dispatch is enabled, start OfferProvider so this process
 // both emits offers (via PipelineCron) and claims/executes them.
+// OfferProvider uses spawnAgent directly (returns SpawnHandle) — no spawnFn override needed.
 const offerProvider = useOfferDispatch
 	? new OfferProvider({
 			agentIdentity,
-			spawnFn: spawnAdapter as any,
 			connectListener: async () => getPool().connect(),
 			leaseTtlSeconds: Number(process.env.AGENTHIVE_LEASE_TTL_SECONDS ?? "30"),
 			renewIntervalMs: Number(process.env.AGENTHIVE_RENEW_INTERVAL_MS ?? "10000"),
@@ -123,19 +122,7 @@ async function main() {
 }
 
 async function shutdown(signal: string) {
-	console.log(
-		`[GatePipeline] ${signal} received, shutting down gracefully (${liveChildCount()} live child(ren))...`,
-	);
-	// Hotfix: send SIGTERM to spawned children up-front so PipelineCron /
-	// OfferProvider waitForIdle() can settle quickly. Without this, in-flight
-	// `claude --print` evaluations would block waitForIdle until systemd's
-	// TimeoutStopSec elapses and the unit is SIGKILL'd as a whole.
-	void terminateLiveChildren({
-		graceMs: 8000,
-		log: (m) => console.log(m),
-	}).catch((err) => {
-		console.error("[GatePipeline] terminateLiveChildren failed:", err);
-	});
+	console.log(`[GatePipeline] ${signal} received, shutting down gracefully...`);
 	try {
 		await cron.stop();
 		console.log("[GatePipeline] PipelineCron stopped");
@@ -145,11 +132,8 @@ async function shutdown(signal: string) {
 	if (offerProvider) {
 		try {
 			await offerProvider.stop();
-			// Wait for in-flight claims to finish before closing the pool.
-			// Bounded at 30s now (was 90s) — children are already SIGKILL'd
-			// by terminateLiveChildren if they ignored SIGTERM, so anything
-			// still in-flight is a DB-side stall worth a shorter wait.
-			await offerProvider.waitForIdle(30_000);
+			// Wait for in-flight claims to finish before closing the pool
+			await offerProvider.waitForIdle(90_000);
 			console.log("[GatePipeline] OfferProvider stopped and drained");
 		} catch (err) {
 			console.error("[GatePipeline] Error stopping OfferProvider:", err);

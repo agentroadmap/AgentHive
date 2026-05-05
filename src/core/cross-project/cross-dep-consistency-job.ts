@@ -2,26 +2,26 @@
  * Cross-project dependency nightly consistency job (P602)
  *
  * Runs every 86_400_000 ms (24 h). Builds adjacency list from the live DB,
- * runs BFS cycle detection (is_blocking=true kinds only), and emits
+ * runs BFS cycle detection (cycle_check=true kinds only), and emits
  * proposal_event rows for any cycles or unresolvable project references.
  *
- * Orphan policy (AC-6): for each project_id referenced by an unresolved edge,
- * resolve its slug from roadmap.project, then call getProjectDb(slug) to verify
- * tenant DB reachability. If getProjectDb throws (ProjectNotRegistered or
- * TenantDbUnreachable), the project is unresolvable and orphan events are emitted.
+ * Orphan policy: if roadmap.project has no active row for a project_id
+ * referenced by an edge, emit cross_dep_orphan_detected with check_skipped=true.
+ * This prevents false-positive alerts during partial DB outage (P474 deferred).
  */
 
 import type { Pool } from "pg";
-import { getProjectDb } from "../../postgres/pool-registry.ts";
-import type { CrossProjectEdge } from "./cross-project-dependency-checker.ts";
-import { detectCycles } from "./cross-project-dependency-checker.ts";
+import {
+	detectCycles,
+	type CrossProjectEdge,
+} from "./cross-project-dependency-checker.ts";
 
-async function getSlugForProjectId(
+async function resolveProjectSlug(
 	pool: Pool,
 	projectId: bigint,
 ): Promise<string | null> {
 	const { rows } = await pool.query<{ slug: string }>(
-		"SELECT slug FROM roadmap.project WHERE project_id = $1",
+		"SELECT slug FROM roadmap.project WHERE project_id = $1 AND status = 'active'",
 		[projectId],
 	);
 	return rows[0]?.slug ?? null;
@@ -41,31 +41,29 @@ async function emitProposalEvent(
 }
 
 export async function runCrossDepConsistencyCheck(pool: Pool): Promise<void> {
-	// Step 1: Load unresolved edges with is_blocking=true kinds
+	// Step 1: Load unresolved edges with cycle_check=true kinds
 	const { rows: cycleRows } = await pool.query<{
 		edge_id: string;
 		from_project_id: string;
+		from_proposal_id: string;
 		to_project_id: string;
-		kind_id: string;
-		is_blocking: boolean;
-		reference_id: string;
-		reference_type: string;
+		to_proposal_id: string;
+		kind: string;
 	}>(
-		`SELECT e.id AS edge_id, e.from_project_id, e.to_project_id,
-		        e.kind_id, k.is_blocking, e.reference_id, e.reference_type
+		`SELECT e.edge_id, e.from_project_id, e.from_proposal_id,
+		        e.to_project_id, e.to_proposal_id, e.kind
 		 FROM dependency.cross_project_dependency e
-		 JOIN dependency.dependency_kind_catalog k ON k.id = e.kind_id
-		 WHERE e.resolved_at IS NULL AND k.is_blocking = true`,
+		 JOIN dependency.dependency_kind_catalog k USING (kind)
+		 WHERE e.resolved_at IS NULL AND k.cycle_check = true`,
 	);
 
 	const cycleEdges: CrossProjectEdge[] = cycleRows.map((r) => ({
 		edgeId: BigInt(r.edge_id),
 		fromProjectId: BigInt(r.from_project_id),
+		fromProposalId: BigInt(r.from_proposal_id),
 		toProjectId: BigInt(r.to_project_id),
-		kindId: BigInt(r.kind_id),
-		referenceId: r.reference_id,
-		referenceType: r.reference_type,
-		isBlocking: r.is_blocking,
+		toProposalId: BigInt(r.to_proposal_id),
+		kind: r.kind,
 	}));
 
 	// Step 2: BFS cycle detection — emit cycle events (cycles are NOT auto-broken)
@@ -74,31 +72,27 @@ export async function runCrossDepConsistencyCheck(pool: Pool): Promise<void> {
 		const anchorEdgeId = cycle.cycleEdgeIds[0];
 		const anchor = cycleEdges.find((e) => e.edgeId === anchorEdgeId);
 		if (!anchor) continue;
-		// Only emit proposal event when the reference is a proposal
-		if (anchor.referenceType === "proposal") {
-			await emitProposalEvent(
-				pool,
-				BigInt(anchor.referenceId),
-				"cross_dep_cycle_detected",
-				{ edge_ids: cycle.cycleEdgeIds.map(String) },
-			);
-		}
+		await emitProposalEvent(
+			pool,
+			anchor.fromProposalId,
+			"cross_dep_cycle_detected",
+			{ edge_ids: cycle.cycleEdgeIds.map(String) },
+		);
 	}
 
-	// Step 3: Orphan detection (AC-6) — all unresolved edges
+	// Step 3: Orphan detection — all unresolved edges (not just cycle_check kinds)
 	const { rows: allRows } = await pool.query<{
 		edge_id: string;
 		from_project_id: string;
+		from_proposal_id: string;
 		to_project_id: string;
-		reference_id: string;
-		reference_type: string;
 	}>(
-		`SELECT id AS edge_id, from_project_id, to_project_id, reference_id, reference_type
+		`SELECT edge_id, from_project_id, from_proposal_id, to_project_id
 		 FROM dependency.cross_project_dependency
 		 WHERE resolved_at IS NULL`,
 	);
 
-	// Collect distinct project IDs and verify reachability via getProjectDb (AC-6)
+	// Collect distinct project IDs and resolve them once
 	const projectIds = new Set<bigint>();
 	for (const r of allRows) {
 		projectIds.add(BigInt(r.from_project_id));
@@ -107,16 +101,8 @@ export async function runCrossDepConsistencyCheck(pool: Pool): Promise<void> {
 
 	const unresolvable = new Set<bigint>();
 	for (const pid of projectIds) {
-		const slug = await getSlugForProjectId(pool, pid);
-		if (slug === null) {
-			unresolvable.add(pid);
-			continue;
-		}
-		try {
-			await getProjectDb(slug);
-		} catch {
-			unresolvable.add(pid);
-		}
+		const slug = await resolveProjectSlug(pool, pid);
+		if (slug === null) unresolvable.add(pid);
 	}
 
 	// Emit orphan event for each edge touching an unresolvable project
@@ -124,15 +110,12 @@ export async function runCrossDepConsistencyCheck(pool: Pool): Promise<void> {
 		const fromPid = BigInt(r.from_project_id);
 		const toPid = BigInt(r.to_project_id);
 		if (unresolvable.has(fromPid) || unresolvable.has(toPid)) {
-			// Emit proposal event when reference is a proposal; log otherwise
-			if (r.reference_type === "proposal") {
-				await emitProposalEvent(
-					pool,
-					BigInt(r.reference_id),
-					"cross_dep_orphan_detected",
-					{ edge_id: r.edge_id, check_skipped: true },
-				);
-			}
+			await emitProposalEvent(
+				pool,
+				BigInt(r.from_proposal_id),
+				"cross_dep_orphan_detected",
+				{ edge_id: r.edge_id, check_skipped: true },
+			);
 		}
 	}
 }

@@ -1,0 +1,40 @@
+/* Light theme — explicit overrides (same as :root defaults, acts as a reset) */
+:root,
+.light {
+  --color-primary: #3b82f6;
+  --color-primary-hover: #2563eb;
+  --color-primary-active: #1d4ed8;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #6b7280;
+  --color-secondary-hover: #4b5563;
+  --color-secondary-foreground: #ffffff;
+  --color-danger: #ef4444;
+  --color-danger-hover: #dc2626;
+  --color-danger-foreground: #ffffff;
+  --color-success: #10b981;
+  --color-success-bg: #d1fae5;
+  --color-success-fg: #065f46;
+  --color-warning: #f59e0b;
+  --color-warning-bg: #fef3c7;
+  --color-warning-fg: #92400e;
+  --color-error: #ef4444;
+  --color-error-bg: #fee2e2;
+  --color-error-fg: #991b1b;
+  --color-info: #3b82f6;
+  --color-info-bg: #dbeafe;
+  --color-info-fg: #1e40af;
+  --color-neutral: #6b7280;
+  --color-neutral-bg: #f3f4f6;
+  --color-neutral-fg: #374151;
+  --color-surface: #ffffff;
+  --color-surface-elevated: #f9fafb;
+  --color-surface-hover: #f3f4f6;
+  --color-surface-overlay: rgb(0 0 0 / 0.4);
+  --color-border: #e5e7eb;
+  --color-border-strong: #d1d5db;
+  --color-text: #111827;
+  --color-text-muted: #6b7280;
+  --color-text-subtle: #9ca3af;
+  --color-text-on-primary: #ffffff;
+  --color-focus-ring: #3b82f6;
+}

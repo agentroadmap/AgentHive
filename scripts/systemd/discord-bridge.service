@@ -1,8 +1,6 @@
 [Unit]
-Description=AgentHive Discord Bridge
-Documentation=https://github.com/agenthive
-After=network.target postgresql.service agenthive-mcp.service
-Wants=agenthive-mcp.service
+Description=AgentHive Discord Bridge — A2A to Discord relay
+After=network.target postgresql.service
 
 [Service]
 Type=simple
@@ -13,14 +11,11 @@ EnvironmentFile=/etc/agenthive/env
 Environment=HOME=/home/agenthive
 Environment=NODE_ENV=production
 Environment=PATH=/home/agenthive/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/usr/bin/node --import jiti/register /data/code/AgentHive/scripts/discord-bridge-runner.js
+ExecStart=node --import jiti/register scripts/discord-bridge-runner.js
 Restart=always
 RestartSec=10
 TimeoutStopSec=30
 KillSignal=SIGTERM
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=discord-bridge
 
 [Install]
 WantedBy=multi-user.target

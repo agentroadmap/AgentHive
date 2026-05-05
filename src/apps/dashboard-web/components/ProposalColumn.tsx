@@ -2,6 +2,7 @@ import React from "react";
 import type { Proposal } from "../../../shared/types";
 import type { ReorderProposalPayload } from "../lib/api";
 import ProposalCard from "./ProposalCard";
+import { Badge, Button } from "./ui";
 
 interface ProposalColumnProps {
 	title: string;
@@ -44,20 +45,6 @@ const ProposalColumn: React.FC<ProposalColumnProps> = ({
 		index: number;
 		position: "before" | "after";
 	} | null>(null);
-	const getStatusBadgeClass = (status: string) => {
-		const statusLower = status.toLowerCase();
-		if (statusLower.includes("done") || statusLower.includes("complete")) {
-			return "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 transition-colors duration-200";
-		}
-		if (statusLower.includes("progress") || statusLower.includes("doing")) {
-			return "bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 transition-colors duration-200";
-		}
-		if (statusLower.includes("blocked") || statusLower.includes("stuck")) {
-			return "bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 transition-colors duration-200";
-		}
-		return "bg-stone-100 dark:bg-stone-900 text-stone-800 dark:text-stone-200 transition-colors duration-200";
-	};
-
 	const handleDrop = (e: React.DragEvent) => {
 		e.preventDefault();
 		setIsDragOver(false);
@@ -170,11 +157,9 @@ const ProposalColumn: React.FC<ProposalColumnProps> = ({
 					<h3 className="font-semibold text-gray-900 dark:text-gray-100 transition-colors duration-200">
 						{title}
 					</h3>
-					<span
-						className={`px-2 py-1 text-xs font-medium rounded-circle ${getStatusBadgeClass(title)}`}
-					>
+					<Badge variant="neutral" display="count">
 						{proposals.length}
-					</span>
+					</Badge>
 				</div>
 			</div>
 
@@ -268,30 +253,33 @@ const ProposalColumn: React.FC<ProposalColumnProps> = ({
 					title.toLowerCase() === "done" &&
 					proposals.length > 0 && (
 						<div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-							<button
-								type="button"
+							<Button
+								variant="ghost"
+								size="sm"
 								onClick={onCleanup}
-								className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md transition-colors duration-200"
 								title="Clean up old completed proposals"
+								className="w-full justify-center"
+								leftIcon={
+									<svg
+										className="w-4 h-4"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24"
+										xmlns="http://www.w3.org/2000/svg"
+										aria-hidden="true"
+										focusable="false"
+									>
+										<path
+											strokeLinecap="round"
+											strokeLinejoin="round"
+											strokeWidth={2}
+											d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+										/>
+									</svg>
+								}
 							>
-								<svg
-									className="w-4 h-4"
-									fill="none"
-									stroke="currentColor"
-									viewBox="0 0 24 24"
-									xmlns="http://www.w3.org/2000/svg"
-									aria-hidden="true"
-									focusable="false"
-								>
-									<path
-										strokeLinecap="round"
-										strokeLinejoin="round"
-										strokeWidth={2}
-										d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-									/>
-								</svg>
 								Clean Up Old Proposals
-							</button>
+							</Button>
 						</div>
 					)}
 			</div>

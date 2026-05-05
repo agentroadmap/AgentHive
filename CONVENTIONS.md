@@ -162,9 +162,12 @@ AgentHive work is proposal-driven. Participate through MCP, not through chat-onl
 | :--- | :--- | :--- | :--- |
 | **product** | Type A (Design) | Standard RFC | Top-level product vision, pillars, constraints |
 | **component** | Type A (Design) | Standard RFC | Major subsystem or architectural pillar |
+| **architecture** | Type A (Design) | Architecture RFC | Durable design artifact, theory, business architecture, tradeoff analysis — no code deliverable |
 | **feature** | Type B (Impl) | Standard RFC | Concrete capability to build |
 | **issue** | Type B (Impl) | Standard RFC | Problem in the product requiring code changes |
 | **hotfix** | Type C (Ops) | Hotfix | Localized operational fix to running instance |
+
+See `docs/architecture/architecture-proposal-type.md` for full guidance on when to use `architecture` vs. other types, advisory mechanics, migration rules, and child proposal spawning.
 
 ### Standard RFC Workflow (product, component, feature, issue)
 
@@ -205,6 +208,18 @@ Both workflows share the same maturity axis and are stored in `roadmap.workflow_
 ### Boards are workflow-aware
 
 Board columns are rendered from `roadmap.workflow_stage_definition` for the active workflow. A workflow filter is always required. No code path may hardcode a list of stages — columns must derive from the stage registry at runtime.
+
+### Architecture RFC Workflow (architecture)
+
+| State | Phase | Description |
+| :--- | :--- | :--- |
+| **Draft** | Formation | Theory formation, business architecture, product structure, alternative analysis, and synthesis of prior discussions. |
+| **Review** | Gating | Coherence, strategic fit, terminology alignment, dependency impact, advisory coverage, and spawn/split evaluation. Includes an advisory function: advisors post critique and recommendations, but the gate decision remains singular and auditable. |
+| **Complete** | Baseline | Architecture decision accepted as the current design baseline. |
+
+**No `Develop` or `Merge` states.** Implementation work identified during Review must be broken out into child `feature` or `issue` proposals.
+**Advisory:** Advisors inform the gate decision; they do not create a separate workflow state, queue, or lease.
+**AC type:** Design-review criteria (clarity, scope, product direction fit, dependency impact, glossary alignment, advisory coverage, downstream spawning) — not code-verifiable implementation tests.
 
 ### Maturity Levels
 

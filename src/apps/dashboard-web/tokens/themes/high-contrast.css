@@ -1,0 +1,70 @@
+/* High-contrast mode — orthogonal to light/dark, class .high-contrast on document root */
+/* WCAG AAA: 7:1 contrast ratio for all text */
+
+.high-contrast {
+  --color-primary: #0050d0;
+  --color-primary-hover: #0040b0;
+  --color-primary-foreground: #ffffff;
+  --color-danger: #cc0000;
+  --color-danger-hover: #aa0000;
+  --color-danger-foreground: #ffffff;
+  --color-surface: #ffffff;
+  --color-surface-elevated: #f0f0f0;
+  --color-surface-hover: #e0e0e0;
+  --color-surface-overlay: rgb(0 0 0 / 0.6);
+  --color-border: #000000;
+  --color-border-strong: #000000;
+  --color-text: #000000;
+  --color-text-muted: #1a1a1a;
+  --color-text-subtle: #333333;
+  --color-focus-ring: #000000;
+  --color-success: #006600;
+  --color-success-bg: #e0ffe0;
+  --color-success-fg: #004400;
+  --color-warning: #8b6500;
+  --color-warning-bg: #fff8e0;
+  --color-warning-fg: #5a4000;
+  --color-error: #cc0000;
+  --color-error-bg: #ffe0e0;
+  --color-error-fg: #880000;
+  --color-info: #0050d0;
+  --color-info-bg: #e0eeff;
+  --color-info-fg: #003399;
+  --color-neutral: #1a1a1a;
+  --color-neutral-bg: #f0f0f0;
+  --color-neutral-fg: #000000;
+}
+
+.dark.high-contrast {
+  --color-primary: #66aaff;
+  --color-primary-hover: #88ccff;
+  --color-primary-foreground: #000000;
+  --color-danger: #ff6666;
+  --color-danger-hover: #ff8888;
+  --color-danger-foreground: #000000;
+  --color-surface: #000000;
+  --color-surface-elevated: #0a0a0a;
+  --color-surface-hover: #1a1a1a;
+  --color-surface-overlay: rgb(0 0 0 / 0.8);
+  --color-border: #ffffff;
+  --color-border-strong: #ffffff;
+  --color-text: #ffffff;
+  --color-text-muted: #e0e0e0;
+  --color-text-subtle: #cccccc;
+  --color-focus-ring: #ffffff;
+  --color-success: #00ff88;
+  --color-success-bg: #001a0d;
+  --color-success-fg: #00ff88;
+  --color-warning: #ffcc00;
+  --color-warning-bg: #1a1100;
+  --color-warning-fg: #ffcc00;
+  --color-error: #ff6666;
+  --color-error-bg: #1a0000;
+  --color-error-fg: #ff6666;
+  --color-info: #66aaff;
+  --color-info-bg: #001133;
+  --color-info-fg: #66aaff;
+  --color-neutral: #e0e0e0;
+  --color-neutral-bg: #1a1a1a;
+  --color-neutral-fg: #ffffff;
+}
