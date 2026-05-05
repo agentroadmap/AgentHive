@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Route, Switch } from "wouter";
 import type {
 	Proposal,
@@ -31,14 +31,13 @@ import {
 	type Channel as WebSocketChannel,
 	type Proposal as WebSocketProposal,
 } from "./hooks/useWebSocket";
+import { useBoardStages } from "./hooks/useBoardStages";
 import {
 	buildProposalSelectionAliases,
 	mergeProposalDetailState,
 	type ProposalWithSelectionAliases,
 	proposalMatchesSelection,
 } from "./lib/proposal-detail-selection";
-
-const STATUSES = ["DRAFT", "REVIEW", "DEVELOP", "MERGE", "COMPLETE"];
 
 function toSharedProposal(proposal: WebSocketProposal): Proposal {
 	const labels = proposal.tags
@@ -82,6 +81,7 @@ function toSharedProposal(proposal: WebSocketProposal): Proposal {
 		parentProposalId: proposal.parentProposalId,
 		parentProposalTitle: proposal.parentProposalTitle,
 		maturity: proposal.maturity,
+		obsoleted_reason: proposal.obsoleted_reason,
 		rawContent: proposal.rawContent,
 		budgetLimitUsd: proposal.budgetLimitUsd,
 		liveActivity: proposal.liveActivity,
@@ -116,6 +116,28 @@ function toSharedChannel(channel: WebSocketChannel): SharedChannel {
 
 export default function App() {
 	const { connected, proposals, agents, channels } = useWebSocket();
+	const [activeWorkflow, setActiveWorkflow] = useState(() => {
+		if (typeof window !== "undefined") {
+			return (
+				window.localStorage.getItem("roadmap.board.workflow") ||
+				"Standard RFC"
+			);
+		}
+		return "Standard RFC";
+	});
+
+	// Load dynamic stages based on active workflow
+	const { stages: boardStages } = useBoardStages(activeWorkflow);
+
+	// Convert stage objects to status strings for backward compatibility
+	const statuses = boardStages.map((stage) => stage.id);
+
+	useEffect(() => {
+		if (typeof window !== "undefined") {
+			window.localStorage.setItem("roadmap.board.workflow", activeWorkflow);
+		}
+	}, [activeWorkflow]);
+
 	const sharedProposals = useMemo(
 		() => proposals.map(toSharedProposal),
 		[proposals],
@@ -148,6 +170,10 @@ export default function App() {
 		setActiveProposal(proposal as ProposalWithSelectionAliases);
 	};
 
+	const handleWorkflowChange = (workflow: string) => {
+		setActiveWorkflow(workflow);
+	};
+
 	return (
 		<div className="h-screen bg-gray-50 dark:bg-gray-900 flex overflow-hidden transition-colors duration-200">
 			<div className="flex-1 flex flex-col min-h-0 min-w-0">
@@ -165,7 +191,9 @@ export default function App() {
 						<Route path="/board">
 							<BoardPage
 								proposals={proposals}
-								statuses={STATUSES}
+								statuses={statuses}
+								activeWorkflow={activeWorkflow}
+								onWorkflowChange={handleWorkflowChange}
 								onProposalClick={(p) =>
 									handleProposalClick(p as unknown as Proposal)
 								}

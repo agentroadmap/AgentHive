@@ -7,6 +7,8 @@ import Board from "./Board";
 interface BoardPageProps {
 	proposals: Proposal[];
 	statuses: string[];
+	activeWorkflow?: string;
+	onWorkflowChange?: (workflow: string) => void;
 	onProposalClick: (proposal: Proposal) => void;
 }
 
@@ -27,6 +29,8 @@ const isMaturityFilter = (v: string | null): v is MaturityFilter =>
 export default function BoardPage({
 	proposals,
 	statuses,
+	activeWorkflow = "Standard RFC",
+	onWorkflowChange,
 	onProposalClick,
 }: BoardPageProps) {
 	const [searchParams, setSearchParams] = useSearchParams();
@@ -40,8 +44,10 @@ export default function BoardPage({
 	const [maturityFilter, setMaturityFilter] =
 		useState<MaturityFilter>("non-obsolete");
 	const [searchText, setSearchText] = useState("");
+	const [localWorkflow, setLocalWorkflow] = useState(activeWorkflow);
 	const laneStorageKey = "roadmap.board.lane";
 	const maturityStorageKey = "roadmap.board.maturity";
+	const workflowStorageKey = "roadmap.board.workflow";
 
 	useEffect(() => {
 		const storedLane =
@@ -184,11 +190,35 @@ export default function BoardPage({
 		updateParam("maturity", next === "non-obsolete" ? null : next);
 	};
 
+	const handleWorkflowSelect = (workflow: string) => {
+		setLocalWorkflow(workflow);
+		onWorkflowChange?.(workflow);
+	};
+
 	const focusStatus =
 		statusFilter && statuses.includes(statusFilter) ? statusFilter : null;
 
 	return (
 		<div className="container mx-auto px-0 sm:px-4 py-3 sm:py-8 transition-colors duration-200">
+			{/* Workflow Selection */}
+			<div className="mb-3 px-3 sm:px-0 flex items-center gap-2">
+				<label
+					htmlFor="board-workflow-select"
+					className="text-sm font-medium text-gray-600 dark:text-gray-400"
+				>
+					Workflow:
+				</label>
+				<select
+					id="board-workflow-select"
+					value={localWorkflow}
+					onChange={(e) => handleWorkflowSelect(e.target.value)}
+					className="rounded border px-2 py-1 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-200"
+				>
+					<option value="Standard RFC">Standard RFC</option>
+					<option value="Hotfix">Hotfix</option>
+				</select>
+			</div>
+
 			{/* Lane Controls */}
 			<div className="mb-4 px-3 sm:px-0 flex flex-wrap items-center gap-x-4 gap-y-2">
 				{/* Search filter */}

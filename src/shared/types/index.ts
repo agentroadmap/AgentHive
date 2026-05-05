@@ -119,6 +119,8 @@ export interface Proposal {
 	requires?: string[];
 	/** Level of completeness/validation */
 	maturity?: ProposalMaturity;
+	/** Free-text reason for obsolescence when maturity='obsolete' */
+	obsoleted_reason?: string;
 	/** The agent primarily responsible for implementation */
 	builder?: string;
 	/** The agent responsible for peer review and audit */

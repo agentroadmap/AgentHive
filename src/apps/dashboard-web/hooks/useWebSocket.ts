@@ -62,6 +62,7 @@ export interface Proposal {
 	};
 	maturityLevel: number | null;
 	maturity?: string;
+	obsoleted_reason?: string | null;
 	repositoryPath: string | null;
 	budgetLimitUsd: number;
 	tags: string | null;

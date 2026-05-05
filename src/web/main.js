@@ -174926,11 +174926,11 @@ ${config5.themeCSS}`;
 });
 
 // src/apps/dashboard-web/main.tsx
-var import_react71 = __toESM(require_react(), 1);
+var import_react72 = __toESM(require_react(), 1);
 var import_client = __toESM(require_client(), 1);
 
 // src/apps/dashboard-web/App.tsx
-var import_react68 = __toESM(require_react(), 1);
+var import_react69 = __toESM(require_react(), 1);
 
 // node_modules/regexparam/dist/index.mjs
 function parse(input, loose) {
@@ -177536,6 +177536,8 @@ var isMaturityFilter = (v) => v !== null && MATURITY_OPTIONS.some((o) => o.value
 function BoardPage({
   proposals,
   statuses,
+  activeWorkflow = "Standard RFC",
+  onWorkflowChange,
   onProposalClick
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -177546,8 +177548,10 @@ function BoardPage({
   const [statusFilter, setStatusFilter] = import_react11.useState(null);
   const [maturityFilter, setMaturityFilter] = import_react11.useState("non-obsolete");
   const [searchText, setSearchText] = import_react11.useState("");
+  const [localWorkflow, setLocalWorkflow] = import_react11.useState(activeWorkflow);
   const laneStorageKey = "roadmap.board.lane";
   const maturityStorageKey = "roadmap.board.maturity";
+  const workflowStorageKey = "roadmap.board.workflow";
   import_react11.useEffect(() => {
     const storedLane = typeof window !== "undefined" ? window.localStorage.getItem(laneStorageKey) : null;
     const storedMaturity = typeof window !== "undefined" ? window.localStorage.getItem(maturityStorageKey) : null;
@@ -177659,10 +177663,40 @@ function BoardPage({
     }
     updateParam("maturity", next2 === "non-obsolete" ? null : next2);
   };
+  const handleWorkflowSelect = (workflow) => {
+    setLocalWorkflow(workflow);
+    onWorkflowChange?.(workflow);
+  };
   const focusStatus = statusFilter && statuses.includes(statusFilter) ? statusFilter : null;
   return /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
     className: "container mx-auto px-0 sm:px-4 py-3 sm:py-8 transition-colors duration-200",
     children: [
+      /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
+        className: "mb-3 px-3 sm:px-0 flex items-center gap-2",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("label", {
+            htmlFor: "board-workflow-select",
+            className: "text-sm font-medium text-gray-600 dark:text-gray-400",
+            children: "Workflow:"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("select", {
+            id: "board-workflow-select",
+            value: localWorkflow,
+            onChange: (e) => handleWorkflowSelect(e.target.value),
+            className: "rounded border px-2 py-1 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-200",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("option", {
+                value: "Standard RFC",
+                children: "Standard RFC"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("option", {
+                value: "Hotfix",
+                children: "Hotfix"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
       /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
         className: "mb-4 px-3 sm:px-0 flex flex-wrap items-center gap-x-4 gap-y-2",
         children: [
@@ -231299,6 +231333,18 @@ var ProposalDetailsModal = ({
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
+              proposal?.maturity === "obsolete" && proposal?.obsoleted_reason && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                className: "border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-3 pt-3 sm:pt-3 pb-3 sm:pb-3",
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(SectionHeader, {
+                    title: "Closure"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                    className: "text-sm text-gray-700 dark:text-gray-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded px-3 py-2",
+                    children: proposal.obsoleted_reason
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
               /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
                 className: "border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-3 pt-3 sm:pt-3 pb-3 sm:pb-3",
                 children: [
@@ -233010,6 +233056,51 @@ function useWebSocket(url) {
   return { connected, proposals, agents, channels: channels2, messages: messages2, reconnect };
 }
 
+// src/apps/dashboard-web/hooks/useBoardStages.ts
+var import_react68 = __toESM(require_react(), 1);
+var FALLBACK_STATUSES = [
+  { id: "DRAFT", label: "DRAFT", order: 1, isTerminal: false },
+  { id: "REVIEW", label: "REVIEW", order: 2, isTerminal: false },
+  { id: "DEVELOP", label: "DEVELOP", order: 3, isTerminal: false },
+  { id: "MERGE", label: "MERGE", order: 4, isTerminal: false },
+  { id: "COMPLETE", label: "COMPLETE", order: 5, isTerminal: true }
+];
+function useBoardStages(workflow = "Standard RFC") {
+  const [stages, setStages] = import_react68.useState(FALLBACK_STATUSES);
+  const [loading, setLoading] = import_react68.useState(true);
+  const [error3, setError] = import_react68.useState(null);
+  const [activeWorkflow, setActiveWorkflow] = import_react68.useState(workflow);
+  import_react68.useEffect(() => {
+    const fetchStages = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const url = new URL("/api/board/stages", window.location.origin);
+        url.searchParams.set("workflow", workflow);
+        const response = await fetch(url.toString());
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        const data5 = await response.json();
+        setStages(data5.stages);
+        setActiveWorkflow(data5.workflow);
+        if (data5.error) {
+          console.warn("Board stages API warning:", data5.error);
+        }
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : "Failed to fetch board stages";
+        setError(errorMsg);
+        console.error("Error fetching board stages:", err);
+        setStages(FALLBACK_STATUSES);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchStages();
+  }, [workflow]);
+  return { stages, loading, error: error3, workflow: activeWorkflow };
+}
+
 // src/apps/dashboard-web/lib/proposal-detail-selection.ts
 function normalizeSelectionAliases(...values3) {
   const aliases = new Set;
@@ -233069,7 +233160,6 @@ function mergeProposalDetailState(current, next4) {
 
 // src/apps/dashboard-web/App.tsx
 var jsx_dev_runtime33 = __toESM(require_jsx_dev_runtime(), 1);
-var STATUSES = ["DRAFT", "REVIEW", "DEVELOP", "MERGE", "COMPLETE"];
 function toSharedProposal(proposal) {
   const labels = proposal.tags ? proposal.tags.split(",").map((label) => label.trim()).filter((label) => label.length > 0 && label !== "[object Object]") : [];
   return {
@@ -233101,6 +233191,7 @@ function toSharedProposal(proposal) {
     parentProposalId: proposal.parentProposalId,
     parentProposalTitle: proposal.parentProposalTitle,
     maturity: proposal.maturity,
+    obsoleted_reason: proposal.obsoleted_reason,
     rawContent: proposal.rawContent,
     budgetLimitUsd: proposal.budgetLimitUsd,
     liveActivity: proposal.liveActivity,
@@ -233128,11 +233219,24 @@ function toSharedChannel(channel2) {
 }
 function App() {
   const { connected, proposals, agents, channels: channels2 } = useWebSocket();
-  const sharedProposals = import_react68.useMemo(() => proposals.map(toSharedProposal), [proposals]);
-  const sharedAgents = import_react68.useMemo(() => agents.map(toSharedAgent), [agents]);
-  const sharedChannels = import_react68.useMemo(() => channels2.map(toSharedChannel), [channels2]);
-  const [activeProposal, setActiveProposal] = import_react68.useState(null);
-  const resolvedActiveProposal = import_react68.useMemo(() => {
+  const [activeWorkflow, setActiveWorkflow] = import_react69.useState(() => {
+    if (typeof window !== "undefined") {
+      return window.localStorage.getItem("roadmap.board.workflow") || "Standard RFC";
+    }
+    return "Standard RFC";
+  });
+  const { stages: boardStages } = useBoardStages(activeWorkflow);
+  const statuses = boardStages.map((stage) => stage.id);
+  import_react69.useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("roadmap.board.workflow", activeWorkflow);
+    }
+  }, [activeWorkflow]);
+  const sharedProposals = import_react69.useMemo(() => proposals.map(toSharedProposal), [proposals]);
+  const sharedAgents = import_react69.useMemo(() => agents.map(toSharedAgent), [agents]);
+  const sharedChannels = import_react69.useMemo(() => channels2.map(toSharedChannel), [channels2]);
+  const [activeProposal, setActiveProposal] = import_react69.useState(null);
+  const resolvedActiveProposal = import_react69.useMemo(() => {
     if (!activeProposal)
       return null;
     const match2 = sharedProposals.find((proposal) => proposalMatchesSelection(proposal, activeProposal));
@@ -233140,6 +233244,9 @@ function App() {
   }, [activeProposal, sharedProposals]);
   const handleProposalClick = (proposal) => {
     setActiveProposal(proposal);
+  };
+  const handleWorkflowChange = (workflow) => {
+    setActiveWorkflow(workflow);
   };
   return /* @__PURE__ */ jsx_dev_runtime33.jsxDEV("div", {
     className: "h-screen bg-gray-50 dark:bg-gray-900 flex overflow-hidden transition-colors duration-200",
@@ -233165,7 +233272,9 @@ function App() {
                   path: "/board",
                   children: /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(BoardPage, {
                     proposals,
-                    statuses: STATUSES,
+                    statuses,
+                    activeWorkflow,
+                    onWorkflowChange: handleWorkflowChange,
                     onProposalClick: (p5) => handleProposalClick(p5)
                   }, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
@@ -233271,18 +233380,18 @@ function App() {
 }
 
 // src/apps/dashboard-web/contexts/HealthCheckContext.tsx
-var import_react70 = __toESM(require_react(), 1);
+var import_react71 = __toESM(require_react(), 1);
 
 // src/apps/dashboard-web/hooks/useHealthCheck.tsx
-var import_react69 = __toESM(require_react(), 1);
+var import_react70 = __toESM(require_react(), 1);
 var RECONNECT_DELAY = 5000;
 function useHealthCheck() {
-  const [isOnline, setIsOnline] = import_react69.useState(true);
-  const [wasDisconnected, setWasDisconnected] = import_react69.useState(false);
-  const wsRef = import_react69.useRef(null);
-  const reconnectTimeoutRef = import_react69.useRef(null);
-  const isMountedRef = import_react69.useRef(true);
-  const connectWebSocket = import_react69.useCallback(() => {
+  const [isOnline, setIsOnline] = import_react70.useState(true);
+  const [wasDisconnected, setWasDisconnected] = import_react70.useState(false);
+  const wsRef = import_react70.useRef(null);
+  const reconnectTimeoutRef = import_react70.useRef(null);
+  const isMountedRef = import_react70.useRef(true);
+  const connectWebSocket = import_react70.useCallback(() => {
     if (!isMountedRef.current) {
       return;
     }
@@ -233319,13 +233428,13 @@ function useHealthCheck() {
       setWasDisconnected(true);
     }
   }, []);
-  const retry = import_react69.useCallback(() => {
+  const retry = import_react70.useCallback(() => {
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
     }
     connectWebSocket();
   }, [connectWebSocket]);
-  import_react69.useEffect(() => {
+  import_react70.useEffect(() => {
     isMountedRef.current = true;
     const connectTimer = setTimeout(() => {
       connectWebSocket();
@@ -233352,7 +233461,7 @@ function useHealthCheck() {
 
 // src/apps/dashboard-web/contexts/HealthCheckContext.tsx
 var jsx_dev_runtime34 = __toESM(require_jsx_dev_runtime(), 1);
-var HealthCheckContext = import_react70.createContext(undefined);
+var HealthCheckContext = import_react71.createContext(undefined);
 function HealthCheckProvider({ children: children2 }) {
   const healthCheck = useHealthCheck();
   return /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(HealthCheckContext.Provider, {
@@ -233364,7 +233473,7 @@ function HealthCheckProvider({ children: children2 }) {
 // src/apps/dashboard-web/main.tsx
 var jsx_dev_runtime35 = __toESM(require_jsx_dev_runtime(), 1);
 var root10 = import_client.default.createRoot(document.getElementById("root"));
-root10.render(/* @__PURE__ */ jsx_dev_runtime35.jsxDEV(import_react71.default.StrictMode, {
+root10.render(/* @__PURE__ */ jsx_dev_runtime35.jsxDEV(import_react72.default.StrictMode, {
   children: /* @__PURE__ */ jsx_dev_runtime35.jsxDEV(ThemeProvider, {
     children: /* @__PURE__ */ jsx_dev_runtime35.jsxDEV(HealthCheckProvider, {
       children: /* @__PURE__ */ jsx_dev_runtime35.jsxDEV(App, {}, undefined, false, undefined, this)

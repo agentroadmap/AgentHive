@@ -1549,6 +1549,16 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 						/>
 					</div>
 
+					{/* Closure / Obsoleted Reason */}
+					{proposal?.maturity === "obsolete" && proposal?.obsoleted_reason && (
+						<div className="border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-3 pt-3 sm:pt-3 pb-3 sm:pb-3">
+							<SectionHeader title="Closure" />
+							<div className="text-sm text-gray-700 dark:text-gray-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded px-3 py-2">
+								{proposal.obsoleted_reason}
+							</div>
+						</div>
+					)}
+
 					{/* Assignee */}
 					<div className="border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-3 pt-3 sm:pt-3 pb-3 sm:pb-3">
 						<SectionHeader title="Assignee" />

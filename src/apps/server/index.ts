@@ -21,7 +21,7 @@ import { Core } from "../../core/roadmap.ts";
 import type { ContentStore } from "../../core/storage/content-store.ts";
 import { createMcpServer, type McpServer } from "../../mcp/server.ts";
 import { handleDirectMcpRequest } from "../mcp-server/http-compat.ts";
-import { RfcStates } from "../../core/workflow/state-names.ts";
+import { RfcStates, getView, getRegistry } from "../../core/workflow/state-names.ts";
 import type {
 	Proposal,
 	ProposalUpdateInput,
@@ -1102,7 +1102,7 @@ export class RoadmapServer {
 			if (pathname === "/api/dispatches" && method === "GET")
 				return await this.handleListDispatches(req);
 			if (pathname === "/api/board/stages" && method === "GET")
-				return await this.handleGetBoardStages();
+				return await this.handleGetBoardStages(req);
 
 			if (pathname === "/api/mcp/sse" && method === "GET") {
 				try {
@@ -3613,15 +3613,42 @@ export class RoadmapServer {
 		}
 	}
 
-	private async handleGetBoardStages(): Promise<Response> {
-		const stages = [
-			{ id: "Draft", label: "Draft", phase: "Architecture" },
-			{ id: "Review", label: "Review", phase: "Gating" },
-			{ id: "Develop", label: "Develop", phase: "Building" },
-			{ id: "Merge", label: "Merge", phase: "Integration" },
-			{ id: "Complete", label: "Complete", phase: "Stable" },
-		];
-		return Response.json({ stages });
+	private async handleGetBoardStages(req?: Request): Promise<Response> {
+		try {
+			const url = new URL(req?.url || "http://localhost/?workflow=Standard RFC");
+			const workflow = url.searchParams.get("workflow") || "Standard RFC";
+
+			// Get the workflow view from the registry
+			const registry = getRegistry();
+			const view = registry.getView(workflow);
+
+			// Convert stage metadata to board format
+			const stages = view.stages.map((stage) => ({
+				id: stage.name,
+				label: stage.name,
+				order: stage.order,
+				isTerminal: stage.isTerminal,
+			}));
+
+			return Response.json({
+				stages,
+				workflow: view.template,
+			});
+		} catch (error) {
+			// Fallback to default RFC stages if registry not loaded
+			const stages = [
+				{ id: "DRAFT", label: "DRAFT", order: 1, isTerminal: false },
+				{ id: "REVIEW", label: "REVIEW", order: 2, isTerminal: false },
+				{ id: "DEVELOP", label: "DEVELOP", order: 3, isTerminal: false },
+				{ id: "MERGE", label: "MERGE", order: 4, isTerminal: false },
+				{ id: "COMPLETE", label: "COMPLETE", order: 5, isTerminal: true },
+			];
+			return Response.json({
+				stages,
+				workflow: "Standard RFC",
+				error: error instanceof Error ? error.message : "Registry not loaded",
+			});
+		}
 	}
 
 	// P477 AC-2: dispatches scoped to operator's selected project_id.
