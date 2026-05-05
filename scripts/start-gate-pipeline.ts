@@ -51,11 +51,16 @@ const resolveSpawnArgs = async (request: SpawnRequestBase) => {
 	};
 };
 
-// For PipelineCron.spawnAgentFn — expects Promise<SpawnResult> (unwraps SpawnHandle)
+// For PipelineCron.spawnAgentFn — expects Promise<SpawnAgentResult> (normalizes exitCode)
 const pipelineSpawnAdapter =
 	executorMode === "spawn" || useOfferDispatch
-		? async (request: SpawnRequestBase) =>
-				(await spawnAgent(await resolveSpawnArgs(request))).result
+		? async (request: SpawnRequestBase) => {
+				const result = await spawnAgent(await resolveSpawnArgs(request));
+				return {
+					...result,
+					exitCode: result.exitCode ?? 1,
+				};
+			}
 		: undefined;
 
 const cron = new PipelineCron({
