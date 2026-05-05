@@ -617,6 +617,58 @@ async function createTenantPool(canonical: string): Promise<Pool> {
   throw lastErr;
 }
 
+// ── Pool Access Control (P844) ────────────────────────────────────────────────
+
+/**
+ * Check if an agent principal has a project role.
+ * Uses the control pool to query agent_project_roles.
+ */
+async function checkAgentProjectRole(
+  principalId: string,
+  projectSlug: string,
+): Promise<boolean> {
+  try {
+    const ctrlPool = await getControlPool();
+    const result = await ctrlPool.query<{ exists: boolean }>(
+      `SELECT EXISTS(
+         SELECT 1 FROM control_identity.agent_project_roles
+         WHERE agent_principal_did = $1 AND project_slug = $2
+       ) AS exists`,
+      [principalId, projectSlug],
+    );
+    return result.rows[0]?.exists ?? false;
+  } catch (err) {
+    // If the role check itself fails (e.g., table doesn't exist during bootstrap),
+    // deny access conservatively
+    console.error(`[P844] checkAgentProjectRole failed:`, err);
+    return false;
+  }
+}
+
+/**
+ * Write a pool access decision to the audit table.
+ * Uses the control pool to avoid circular dependencies.
+ * Failures are non-fatal — logging outages should not block access checks.
+ */
+async function writePoolAudit(
+  principalId: string | null,
+  projectSlug: string | null,
+  result: "allowed" | "denied" | "bootstrap_passthrough",
+  callSite: string,
+): Promise<void> {
+  try {
+    const ctrlPool = await getControlPool();
+    await ctrlPool.query(
+      `INSERT INTO control_identity.pool_access_audit
+         (principal_id, project_slug, result, call_site)
+       VALUES ($1, $2, $3, $4)`,
+      [principalId, projectSlug, result, callSite],
+    );
+  } catch {
+    // Audit write failure is non-fatal — access decision proceeds
+  }
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
@@ -632,6 +684,33 @@ export async function getProjectDb(slugOrId: string | number): Promise<Pool> {
   // Recursion guard: hiveControl IS the control plane
   if (canonical === "hiveControl") {
     throw new ProjectNotRegistered("hiveControl");
+  }
+
+  // P844: Gate agent principal access to project DBs
+  const ctx = agentContextStorage.getStore();
+  if (ctx?.verified?.principal_kind === "agent") {
+    // Agents must have an explicit project role
+    const allowed = await checkAgentProjectRole(
+      ctx.verified.principal_id,
+      canonical,
+    );
+    await writePoolAudit(
+      ctx.verified.principal_id,
+      canonical,
+      allowed ? "allowed" : "denied",
+      "getProjectDb",
+    );
+    if (!allowed) {
+      throw new PoolAccessDenied(ctx.verified.principal_id, canonical);
+    }
+  } else if (ctx?.verified) {
+    // Non-agent principals (operator/agency) are allowed with audit
+    await writePoolAudit(
+      ctx.verified.principal_id,
+      canonical,
+      "bootstrap_passthrough",
+      "getProjectDb",
+    );
   }
 
   // LRU hit — move to end (MRU position)
