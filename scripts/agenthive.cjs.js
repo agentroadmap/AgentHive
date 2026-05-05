@@ -3189,12 +3189,12 @@ function resolveProjectRoot() {
   return resolve(__dirname2, "../..");
 }
 var PROJECT_ROOT = resolveProjectRoot();
+var WORKTREE_ROOT = resolve(PROJECT_ROOT, "../worktree");
 var SYSTEMD_SERVICE_NAME = "agenthive-orchestrator";
 var SYSTEMD_SERVICE_PATH = `/etc/systemd/system/${SYSTEMD_SERVICE_NAME}.service`;
 var ENV_FILE_PATH = "/etc/agenthive/env";
 var AGENTHIVE_USER = "agenthive";
 var AGENTHIVE_HOME = "/var/lib/agenthive";
-var WORKTREE_ROOT = "/data/code/worktree";
 function die(msg) {
   R2.error(msg);
   process.exit(1);
@@ -3284,16 +3284,17 @@ async function cmdInit() {
   s.stop("Group memberships configured.");
   s.start("Installing Hermes CLI for agenthive...");
   try {
+    const xiaomiHome = process.env.XIAOMI_HOME || "/home/xiaomi";
     try {
-      const xiaomiHermes = "/home/xiaomi/.local/bin/hermes";
+      const xiaomiHermes = `${xiaomiHome}/.local/bin/hermes`;
       await access(xiaomiHermes, constants.X_OK);
       const agenthiveBin = `${AGENTHIVE_HOME}/.local/bin`;
       sudo(["mkdir", "-p", agenthiveBin]);
       sudo(["ln", "-sf", xiaomiHermes, `${agenthiveBin}/hermes`]);
-      sudo(["ln", "-sf", "/home/xiaomi/.hermes", `${AGENTHIVE_HOME}/.hermes`]);
-      sudo(["chmod", "750", "/home/xiaomi/.hermes"]);
-      sudo(["chgrp", "-R", "dev", "/home/xiaomi/.hermes"]);
-      sudo(["chmod", "-R", "g+rX", "/home/xiaomi/.hermes"]);
+      sudo(["ln", "-sf", `${xiaomiHome}/.hermes`, `${AGENTHIVE_HOME}/.hermes`]);
+      sudo(["chmod", "750", `${xiaomiHome}/.hermes`]);
+      sudo(["chgrp", "-R", "dev", `${xiaomiHome}/.hermes`]);
+      sudo(["chmod", "-R", "g+rX", `${xiaomiHome}/.hermes`]);
       s.stop("Linked Hermes from xiaomi installation.");
     } catch {
       sudo(["-u", AGENTHIVE_USER, "pip", "install", "--user", "hermes-agent"]);
