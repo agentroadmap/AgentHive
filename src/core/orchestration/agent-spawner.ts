@@ -31,6 +31,7 @@ import {
 import { getProjectRoot, getWorktreeRoot } from "../../shared/runtime/paths.ts";
 import { HotfixStates, RfcStates } from "../workflow/state-names.ts";
 import { isWithinCapacity } from "./resolvers/capacity-guard.ts";
+import { sanitizeExtraEnv } from "./spawn-env-sanitizer.ts";
 import type {
 	EliminatedRoute,
 	ResolveRouteOpts,
@@ -291,14 +292,6 @@ function loadClaudeSettingsEnv(): Record<string, string> {
 		console.error(`[AgentSpawner] Failed to load settings.json:`, e);
 	}
 	return claudeSettingsEnv;
-}
-
-const DANGEROUS_KEY_PATTERNS = [/_SECRET$/i, /_PASSWORD$/i];
-
-function sanitizeExtraEnv(extraEnv: Record<string, string>): Record<string, string> {
-	return Object.fromEntries(
-		Object.entries(extraEnv).filter(([key]) => !DANGEROUS_KEY_PATTERNS.some((p) => p.test(key))),
-	);
 }
 
 export function buildSpawnProcessEnv(input: {
