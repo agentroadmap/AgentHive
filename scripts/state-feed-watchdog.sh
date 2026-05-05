@@ -3,13 +3,16 @@
 # catches up on missed changes, restarts if dead.
 set -euo pipefail
 
-# Load DB credentials — from env or .env file
-if [ -z "${PGPASSWORD:-}" ] && [ -f "$HOME/.hermes/.env" ]; then
+# Load DB credentials — prefer ~/.pgpass, then env, then .env file
+if [ -n "${PGPASSWORD:-}" ]; then
+  export PGPASSWORD
+elif [ -f "$HOME/.hermes/.env" ]; then
   . "$HOME/.hermes/.env"
   export PGPASSWORD PGUSER PGDATABASE DISCORD_WEBHOOK_STATEFEED
+elif [ ! -f "$HOME/.pgpass" ]; then
+  echo "ERROR: no DB credentials found (set PGPASSWORD, use ~/.pgpass, or source ~/.hermes/.env)" >&2
+  exit 1
 fi
-PGPASSWORD="${PGPASSWORD:?ERROR: PGPASSWORD not set — source ~/.hermes/.env}"
-export PGPASSWORD
 PG="psql -h 127.0.0.1 -U ${PGUSER:-$USER} -d ${PGDATABASE:-agenthive} -t -A"
 WEBHOOK_URL="${DISCORD_WEBHOOK_STATEFEED:?ERROR: DISCORD_WEBHOOK_STATEFEED not set — add to ~/.hermes/.env}"
 LISTENER_SCRIPT="/data/code/AgentHive/scripts/state-feed-listener.ts"

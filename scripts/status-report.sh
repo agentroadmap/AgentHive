@@ -2,13 +2,16 @@
 # AgentHive Status Report — pure SQL, no LLM required
 set -euo pipefail
 
-# Load DB credentials — from env or .env file
-if [ -z "${PGPASSWORD:-}" ] && [ -f "$HOME/.hermes/.env" ]; then
+# Load DB credentials — prefer ~/.pgpass, then env, then .env file
+if [ -n "${PGPASSWORD:-}" ]; then
+  export PGPASSWORD
+elif [ -f "$HOME/.hermes/.env" ]; then
   . "$HOME/.hermes/.env"
   export PGPASSWORD PGUSER PGDATABASE
+elif [ ! -f "$HOME/.pgpass" ]; then
+  echo "ERROR: no DB credentials found (set PGPASSWORD, use ~/.pgpass, or source ~/.hermes/.env)" >&2
+  exit 1
 fi
-PGPASSWORD="${PGPASSWORD:?ERROR: PGPASSWORD not set — source ~/.hermes/.env}"
-export PGPASSWORD
 PG="psql -h 127.0.0.1 -U ${PGUSER:-$USER} -d ${PGDATABASE:-agenthive} -t -A"
 
 # --- Services ---

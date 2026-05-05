@@ -9,7 +9,13 @@ PGHOST="${PGHOST:-127.0.0.1}"
 PGPORT="${PGPORT:-5432}"
 PGUSER="${PGUSER:-admin}"
 PGDATABASE="${PGDATABASE:-agenthive}"
-export PGPASSWORD="${PGPASSWORD:?PGPASSWORD must be set (use ~/.pgpass or set the env var)}"
+# Prefer ~/.pgpass; fall back to PGPASSWORD env var
+if [ -n "${PGPASSWORD:-}" ]; then
+  export PGPASSWORD
+elif [ ! -f "$HOME/.pgpass" ]; then
+  echo "ERROR: neither PGPASSWORD env var nor ~/.pgpass found" >&2
+  exit 1
+fi
 
 MCP_URL="${MCP_URL:-http://127.0.0.1:6421}"
 
