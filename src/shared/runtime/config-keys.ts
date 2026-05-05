@@ -222,6 +222,56 @@ export const StructuralKeys = {
 		description: "Logical host identifier (shared operator host name)",
 		envOverride: true,
 	} satisfies ConfigKey<string | undefined>,
+
+	CONTROL_DSN: {
+		name: "CONTROL_DSN",
+		class: "structural" as const,
+		parse: (v: string) => {
+			try {
+				const u = new URL(v);
+				if (u.protocol !== "postgres:" && u.protocol !== "postgresql:") {
+					throw new Error("not a postgres URL");
+				}
+				return v;
+			} catch {
+				throw new Error(`CONTROL_DSN is not a valid postgres:// connection string: ${v}`);
+			}
+		},
+		required: false,
+		description: "Override DSN for control-plane pool (P518 hiveControl cutover). When set, supersedes PGHOST/PGPORT/PGUSER/PGDATABASE for the control pool.",
+		envOverride: true,
+	} satisfies ConfigKey<string | undefined>,
+
+	AGENTHIVE_TENANT_POOL_LRU_MAX: {
+		name: "AGENTHIVE_TENANT_POOL_LRU_MAX",
+		class: "structural" as const,
+		parse: (v: string) => {
+			const n = Number(v);
+			if (!Number.isFinite(n) || n <= 0) {
+				throw new Error(`AGENTHIVE_TENANT_POOL_LRU_MAX must be a positive integer, got: ${v}`);
+			}
+			return Math.trunc(n);
+		},
+		required: false,
+		description: "Maximum number of concurrently cached tenant pools in the LRU registry (default: 16). Oldest pool is evicted when the cap is reached.",
+		envOverride: true,
+		defaultValue: 16,
+	} satisfies ConfigKey<number>,
+
+	PGPORT_DIRECT: {
+		name: "PGPORT_DIRECT",
+		class: "structural" as const,
+		parse: (v: string) => {
+			const n = Number(v);
+			if (!Number.isFinite(n) || n <= 0 || n > 65535) {
+				throw new Error(`Invalid PGPORT_DIRECT port number: ${v}`);
+			}
+			return n;
+		},
+		required: false,
+		description: "Direct Postgres port, bypassing PgBouncer (used for LISTEN connections when P499 is deployed). Defaults to PGPORT when not set.",
+		envOverride: true,
+	} satisfies ConfigKey<number | undefined>,
 };
 
 /**

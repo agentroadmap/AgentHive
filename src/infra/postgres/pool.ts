@@ -32,6 +32,10 @@ import {
 	type QueryResult,
 	type QueryResultRow,
 } from "pg";
+import {
+	getControlPool,
+	shutdown as poolRegistryShutdown,
+} from "../../postgres/pool-registry.js";
 
 // Attempt to load PGPASSWORD from .env files if not set in environment
 (function loadPGPassword() {
@@ -221,10 +225,19 @@ function getPoolSignature(config: ResolvedPoolConfig): string {
 /**
  * Initialize the Postgres connection pool.
  *
+ * When called without arguments, delegates to pool-registry's getControlPool()
+ * which provides LRU management, DSN-change detection, and P518 cutover support.
+ * When called with an explicit config, manages its own pool (legacy path for
+ * callers that override host/database, e.g. PoolManager, initPoolFromConfig).
+ *
  * @param config - Explicit PoolConfig (highest priority)
  * @returns A singleton Pg connection pool
  */
 export function getPool(config?: AgentHivePoolConfig): Pool {
+	if (!config) {
+		return getControlPool();
+	}
+
 	const resolvedConfig = resolvePoolConfig(config);
 	const nextSignature = getPoolSignature(resolvedConfig);
 	configuredSchema = resolvedConfig.schema;
@@ -298,16 +311,18 @@ export async function query<T extends QueryResultRow = any>(
 	text: string,
 	params?: any[],
 ): Promise<QueryResult<T>> {
-	const client = getPool();
-	return client.query<T>(text, params);
+	return getControlPool().query<T>(text, params);
 }
 
 /**
  * Close the pool gracefully — call during shutdown.
+ * Drains the pool-registry (control + tenant pools) then closes any
+ * legacy explicit-config pool held by this module.
  */
 export async function closePool(): Promise<void> {
+	await poolRegistryShutdown();
 	if (pool) {
-		await pool.end();
+		await pool.end().catch(() => {});
 		pool = null;
 		poolSignature = null;
 	}
