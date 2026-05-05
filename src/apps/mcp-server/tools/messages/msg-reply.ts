@@ -61,37 +61,36 @@ export async function handleMsgReply(args: {
 
 		const replyId = replyResult.rows[0].id;
 
-		// Auto-ack the original message with outcome='ok'
+		// Mark original as read
 		await query(
 			`UPDATE roadmap.message_ledger
-			 SET acked_at = now(), ack_outcome = 'ok'
-			 WHERE id = $1 AND acked_at IS NULL`,
+			 SET read_at = now()
+			 WHERE id = $1 AND read_at IS NULL`,
 			[original.id],
 		);
 
 		// Cancel pending timeout escalation on the original
 		await query(
 			`UPDATE roadmap.message_timeout_tracking
-			 SET escalated_at = now()
-			 WHERE message_id = $1 AND escalated_at IS NULL`,
+			 SET resolved_at = now()
+			 WHERE message_id = $1 AND resolved_at IS NULL`,
 			[original.id],
 		);
 
 		// pg_notify the recipient on channel a2a_msg_${recipientAgent}
+		// Build JSON in JS to avoid json_build_object anyelement type-inference failure
+		const notifyPayload = JSON.stringify({
+			message_id: replyId,
+			from_agent: args.from_agent,
+			channel: null,
+			message_type: args.message_type ?? "ack",
+		});
 		const pool = getPool();
 		const client = await pool.connect();
 		try {
 			await client.query(
-				`SELECT pg_notify(
-					'a2a_msg_' || $1,
-					json_build_object(
-						'message_id', $2,
-						'from_agent', $3,
-						'channel', null,
-						'message_type', $4
-					)::text
-				)`,
-				[recipientAgent, replyId, args.from_agent, args.message_type ?? "ack"],
+				`SELECT pg_notify($1, $2)`,
+				[`a2a_msg_${recipientAgent}`, notifyPayload],
 			);
 		} finally {
 			client.release();
