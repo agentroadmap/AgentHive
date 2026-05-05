@@ -20,10 +20,10 @@ export const SecretKeys = {
 		name: "PGPASSWORD",
 		class: "secret" as const,
 		parse: (v: string) => v,
-		required: true,
+		required: false,
 		description:
 			"PostgreSQL password (rely on .pgpass / libpq implicit auth if not set)",
-	} satisfies ConfigKey<string>,
+	} satisfies ConfigKey<string | undefined>,
 
 	DISCORD_BOT_TOKEN: {
 		name: "DISCORD_BOT_TOKEN",
@@ -92,9 +92,10 @@ export const StructuralKeys = {
 		parse: (v: string) => v,
 		required: true,
 		description:
-			"PostgreSQL username (no default — set PGUSER env or rely on OS user via peer auth)",
+			"PostgreSQL username",
 		yamlPath: "database.user",
 		envOverride: true,
+		defaultValue: "admin",
 	} satisfies ConfigKey<string>,
 
 	PG_SCHEMA: {

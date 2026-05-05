@@ -998,3 +998,23 @@ When you start work that touches one of these areas, **read the keystone proposa
 | **P078** | Escalation Management | Obstacle detection, severity routing, compressed lifecycle for urgent issues |
 | **P090** | Token Efficiency | Three-tier cost reduction: semantic cache, prompt caching, context management + model routing |
 | **P148** | Auto-merge Worktrees | Automated merge from agent worktrees to main with back-sync to other agents |
+
+## 19. Configuration Discipline
+
+All PostgreSQL connection parameters **must** be read through `ConfigResolver`, not via bare `process.env.*` calls.
+
+### Rules
+
+- `process.env.PG*` is **forbidden** outside `src/shared/runtime/config.ts` and `src/shared/runtime/config-keys.ts`
+- Synchronous startup code (pool IIFE, module-level initialization): use `ConfigResolver.resolvePasswordSync()`
+- Async application code: use `config.get(StructuralKeys.PGHOST)` etc.
+- CI enforcement: `scripts/ci-env-check.sh` (run in pre-commit or CI pipeline)
+
+### Implementation
+
+- `ConfigResolver.parsePgpassFile()` — centralized pgpass parsing for `~/.pgpass` lookup
+- `ConfigResolver.resolvePasswordSync()` — synchronous password resolution at startup (pgpass → env → undefined)
+- `StructuralKeys.PGUSER` has `defaultValue: "admin"` to avoid hardcoded fallbacks
+- `SecretKeys.PGPASSWORD` is `required: false` — pgpass/libpq are valid authentication paths
+
+This is enforced automatically — violations will fail the CI check.

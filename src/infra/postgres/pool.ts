@@ -33,63 +33,23 @@ import {
 	type QueryResultRow,
 } from "pg";
 import { StructuralKeys } from "../../shared/runtime/config-keys";
-
-/**
- * Parse ~/.pgpass and return the password for the given connection.
- * pgpass format: hostname:port:database:username:password (colons escaped as \:)
- * Any field may be * to wildcard-match.
- */
-function parsePgpassEntry(
-	pgpassPath: string,
-	host: string,
-	port: string,
-	database: string,
-	user: string,
-): string | undefined {
-	try {
-		const content = readFileSync(pgpassPath, "utf-8");
-		for (const line of content.split("\n")) {
-			const trimmed = line.trim();
-			if (!trimmed || trimmed.startsWith("#")) continue;
-			// Temporarily replace escaped colons, then split, then restore
-			const parts = trimmed
-				.replace(/\\:/g, "\x00")
-				.split(":")
-				.map((p) => p.replace(/\x00/g, ":"));
-			if (parts.length < 5) continue;
-			const [h, p, d, u, ...rest] = parts;
-			const pw = rest.join(":");
-			const match = (pat: string, val: string) => pat === "*" || pat === val;
-			if (match(h, host) && match(p, port) && match(d, database) && match(u, user)) {
-				return pw;
-			}
-		}
-	} catch {
-		// unreadable — fall through
-	}
-	return undefined;
-}
+import { ConfigResolver } from "../../shared/runtime/config";
 
 // Password resolution priority:
-//   1. ~/.pgpass (parsed here, set as PGPASSWORD env so pg uses the normal env path)
+//   1. ~/.pgpass (ConfigResolver.resolvePasswordSync)
 //   2. Existing PGPASSWORD env (set by caller / systemd)
-//   3. .env files (for Docker/CI contexts without pgpass)
+//   3. .env files (for Docker/CI contexts without pgpass) — handled by fallback path
 (function loadPGPassword() {
-	const pgpassPath = join(process.env.HOME || "", ".pgpass");
-	if (existsSync(pgpassPath)) {
-		// Read pgpass ourselves — never rely on pg's built-in pgpass (deprecated in pg@8).
-		// Use env defaults as the match target; resolvePoolConfig may refine later, but
-		// the common case is a single-entry pgpass file where * wildcards cover all fields.
-		const host = process.env.PGHOST ?? "127.0.0.1";
-		const port = process.env.PGPORT ?? "5432";
-		const database = process.env.PGDATABASE ?? "agenthive";
-		const user = process.env.PGUSER ?? "admin";
-		const pw = parsePgpassEntry(pgpassPath, host, port, database, user);
-		if (pw !== undefined) {
-			process.env.PGPASSWORD = pw;
-			return;
-		}
+	const host = process.env.PGHOST ?? "127.0.0.1";
+	const port = process.env.PGPORT ?? "5432";
+	const database = process.env.PGDATABASE ?? "agenthive";
+	const user = process.env.PGUSER ?? "admin";
+	const pw = ConfigResolver.resolvePasswordSync({ host, port, database, user });
+	if (pw !== undefined) {
+		process.env.PGPASSWORD = pw;
+		return;
 	}
+	// Fallback to .env file scanning for Docker/CI contexts
 	if (process.env.PGPASSWORD) return;
 	const candidates = [
 		resolve(process.cwd(), ".env"),
