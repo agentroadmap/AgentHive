@@ -1663,9 +1663,7 @@ async function claimImplicitGateReady(
          SELECT sd.id
            FROM roadmap_workforce.squad_dispatch sd
           WHERE sd.proposal_id = p.id
-            AND sd.dispatch_role LIKE 'skeptic%'
-            AND sd.dispatch_status IN ('active', 'open')
-            AND sd.metadata->>'source' = 'implicit_maturity_gating'
+            AND sd.dispatch_status IN ('active', 'open', 'assigned', 'blocked')
           ORDER BY sd.assigned_at DESC
           LIMIT 1
        ) dispatch ON true
