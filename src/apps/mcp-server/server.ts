@@ -18,6 +18,7 @@ import * as pgPool from "../../postgres/pool.ts";
 import { loadStateNames } from "../../core/workflow/state-names.ts";
 import { getPackageName } from "../../shared/utils/app-info.ts";
 import { getVersion } from "../../shared/utils/version.ts";
+import { getAuditSnapshot } from "../../shared/runtime/config.ts";
 import { registerInitRequiredResource } from "./resources/init-required/index.ts";
 import { registerWorkflowResources } from "./resources/workflow/index.ts";
 import { registerAgentTools } from "./tools/agents/index.ts";
@@ -1168,6 +1169,28 @@ export async function createMcpServer(
 			inputSchema: { type: "object", properties: {} },
 			handler: () => pulse.refreshAgentStatuses(),
 		});
+		server.addTool({
+			name: "pulse_stale_spenders",
+			description:
+				"List agents that are stale (no recent heartbeat) but have significant spend today — AC#15 runaway-agent alert",
+			inputSchema: {
+				type: "object",
+				properties: {
+					spend_threshold_usd: {
+						type: "number",
+						description: "Minimum daily spend to flag (default 0.50)",
+					},
+					stale_minutes: {
+						type: "number",
+						description: "Heartbeat age threshold in minutes (default 5)",
+					},
+				},
+			},
+			handler: (a) =>
+				pulse.getStaleHighSpendingAgents(
+					a as { spend_threshold_usd?: number; stale_minutes?: number },
+				),
+		});
 
 		// Federation tools (P068) — filesystem-backed PKI
 		const { FederationHandlers } = await import(
@@ -1491,6 +1514,16 @@ export async function createMcpServer(
 		description: "Full overview: all projects with their agencies and capabilities",
 		inputSchema: { type: "object", properties: {}, additionalProperties: false },
 		handler: () => projectHandlers.projectOverviewHandler({}),
+	});
+
+	server.addTool({
+		name: "config_audit",
+		description: "Return a grouped snapshot of all resolved config keys and tenant DSN accesses. Output: {config: Record<string,AuditEntry>, tenantDsn: TenantDsnAuditEntry[]}",
+		inputSchema: { type: "object", properties: {}, additionalProperties: false },
+		handler: () => {
+			const snap = getAuditSnapshot();
+			return { content: [{ type: "text", text: JSON.stringify(snap, null, 2) }] };
+		},
 	});
 
 	// Start background maintenance tasks

@@ -3,11 +3,14 @@
  *
  * Each ConfigKey declares:
  * - name: The key identifier (env var name, yaml path, DB column)
- * - class: The resolution class (secret|structural|registry|flag)
+ * - class: The resolution class (secret|structural|registry|flag|tenant_dsn)
  * - parse: Parser function (string -> typed value)
  * - required: Whether missing key throws RuntimeConfigMissing
  *
  * This is the single source of truth for all configuration keys used in AgentHive.
+ *
+ * P498 additions: tenant_dsn class, AGENTHIVE_CONTROL_DSN (with assembleFromYaml),
+ * control topology keys, vault keys, pool tuning keys.
  */
 
 import type { ConfigKey } from "./config";
@@ -223,8 +226,8 @@ export const StructuralKeys = {
 		envOverride: true,
 	} satisfies ConfigKey<string | undefined>,
 
-	CONTROL_DSN: {
-		name: "CONTROL_DSN",
+	AGENTHIVE_CONTROL_DSN: {
+		name: "AGENTHIVE_CONTROL_DSN",
 		class: "structural" as const,
 		parse: (v: string) => {
 			try {
@@ -234,12 +237,25 @@ export const StructuralKeys = {
 				}
 				return v;
 			} catch {
-				throw new Error(`CONTROL_DSN is not a valid postgres:// connection string: ${v}`);
+				throw new Error(`AGENTHIVE_CONTROL_DSN is not a valid postgres:// connection string: ${v}`);
 			}
 		},
 		required: false,
-		description: "Override DSN for control-plane pool (P518 hiveControl cutover). When set, supersedes PGHOST/PGPORT/PGUSER/PGDATABASE for the control pool.",
+		description: "Override DSN for control-plane pool (P518 hiveControl cutover). When set, supersedes individual PGHOST/PGPORT/PGUSER/PGDATABASE env vars for the control pool.",
 		envOverride: true,
+		assembleFromYaml: (yaml: Record<string, any>) => {
+			const ctrl = yaml?.databases?.control;
+			if (!ctrl) return undefined;
+			const host = ctrl.host ?? "127.0.0.1";
+			const port = ctrl.port ?? 5432;
+			const name = ctrl.name;
+			if (!name) return undefined;
+			const role = ctrl.role ?? process.env.PGUSER ?? "xiaomi";
+			// Password must come from env (secret); skip assembly if unavailable.
+			const pass = process.env.PGPASSWORD;
+			if (!pass) return undefined;
+			return `postgresql://${encodeURIComponent(role)}:${encodeURIComponent(pass)}@${host}:${port}/${encodeURIComponent(name)}`;
+		},
 	} satisfies ConfigKey<string | undefined>,
 
 	AGENTHIVE_TENANT_POOL_LRU_MAX: {
@@ -272,6 +288,170 @@ export const StructuralKeys = {
 		description: "Direct Postgres port, bypassing PgBouncer (used for LISTEN connections when P499 is deployed). Defaults to PGPORT when not set.",
 		envOverride: true,
 	} satisfies ConfigKey<number | undefined>,
+};
+
+/**
+ * Control topology keys: individual components of the control-plane DSN.
+ * Yaml canonical (databases.control.*) with env override.
+ * Used when AGENTHIVE_CONTROL_DSN is not set directly.
+ */
+export const ControlTopologyKeys = {
+	CONTROL_DB_HOST: {
+		name: "CONTROL_DB_HOST",
+		class: "structural" as const,
+		parse: (v: string) => v,
+		required: false,
+		description: "Control-plane DB hostname (read from databases.control.host in roadmap.yaml)",
+		yamlPath: "databases.control.host",
+		envOverride: true,
+		defaultValue: "127.0.0.1",
+	} satisfies ConfigKey<string>,
+
+	CONTROL_DB_PORT: {
+		name: "CONTROL_DB_PORT",
+		class: "structural" as const,
+		parse: (v: string) => {
+			const n = Number(v);
+			if (!Number.isFinite(n) || n <= 0 || n > 65535) {
+				throw new Error(`Invalid CONTROL_DB_PORT: ${v}`);
+			}
+			return n;
+		},
+		required: false,
+		description: "Control-plane DB port",
+		yamlPath: "databases.control.port",
+		envOverride: true,
+		defaultValue: 5432,
+	} satisfies ConfigKey<number>,
+
+	CONTROL_DB_NAME: {
+		name: "CONTROL_DB_NAME",
+		class: "structural" as const,
+		parse: (v: string) => v,
+		required: false,
+		description: "Control-plane database name (default: hiveControl)",
+		yamlPath: "databases.control.name",
+		envOverride: true,
+		defaultValue: "hiveControl",
+	} satisfies ConfigKey<string>,
+
+	CONTROL_DB_ROLE: {
+		name: "CONTROL_DB_ROLE",
+		class: "structural" as const,
+		parse: (v: string) => v,
+		required: false,
+		description: "PostgreSQL role (user) for the control-plane connection",
+		yamlPath: "databases.control.role",
+		envOverride: true,
+	} satisfies ConfigKey<string | undefined>,
+
+	CONTROL_DB_PASSWORD_REF: {
+		name: "CONTROL_DB_PASSWORD_REF",
+		class: "structural" as const,
+		parse: (v: string) => v,
+		required: false,
+		description: "Vault reference name for the control DB password (default: PGPASSWORD). The vault resolves this ref to the actual secret value.",
+		yamlPath: "databases.control.password_ref",
+		envOverride: true,
+		defaultValue: "PGPASSWORD",
+	} satisfies ConfigKey<string>,
+};
+
+/**
+ * Vault keys: vault implementation configuration.
+ * Yaml canonical (vault.*) with env override.
+ */
+export const VaultKeys = {
+	AGENTHIVE_VAULT_ROOT: {
+		name: "AGENTHIVE_VAULT_ROOT",
+		class: "structural" as const,
+		parse: (v: string) => v,
+		required: false,
+		description: "Vault root path (e.g. /run/agenthive/secrets or HashiCorp Vault mount path)",
+		yamlPath: "vault.root",
+		envOverride: true,
+	} satisfies ConfigKey<string | undefined>,
+
+	AGENTHIVE_VAULT_KIND: {
+		name: "AGENTHIVE_VAULT_KIND",
+		class: "structural" as const,
+		parse: (v: string) => v,
+		required: false,
+		description: "Vault implementation kind: env | file | hashicorp (default: env)",
+		yamlPath: "vault.kind",
+		envOverride: true,
+		defaultValue: "env",
+	} satisfies ConfigKey<string>,
+};
+
+/**
+ * Pool tuning keys: connection pool sizing and timeout overrides.
+ * All env-only (no yaml path) — operational knobs set per-host.
+ */
+export const PoolTuningKeys = {
+	AGENTHIVE_TENANT_POOL_MAX: {
+		name: "AGENTHIVE_TENANT_POOL_MAX",
+		class: "structural" as const,
+		parse: (v: string) => {
+			const n = Number(v);
+			if (!Number.isFinite(n) || n <= 0) {
+				throw new Error(`AGENTHIVE_TENANT_POOL_MAX must be a positive integer, got: ${v}`);
+			}
+			return Math.trunc(n);
+		},
+		required: false,
+		description: "Max connections per tenant pool (default: 8)",
+		envOverride: true,
+		defaultValue: 8,
+	} satisfies ConfigKey<number>,
+
+	AGENTHIVE_DRAIN_TIMEOUT_MS: {
+		name: "AGENTHIVE_DRAIN_TIMEOUT_MS",
+		class: "structural" as const,
+		parse: (v: string) => {
+			const n = Number(v);
+			if (!Number.isFinite(n) || n <= 0) {
+				throw new Error(`AGENTHIVE_DRAIN_TIMEOUT_MS must be positive, got: ${v}`);
+			}
+			return n;
+		},
+		required: false,
+		description: "Pool drain grace period in ms (default: 30000)",
+		envOverride: true,
+		defaultValue: 30_000,
+	} satisfies ConfigKey<number>,
+
+	AGENTHIVE_PG_PORT: {
+		name: "AGENTHIVE_PG_PORT",
+		class: "structural" as const,
+		parse: (v: string) => {
+			const n = Number(v);
+			if (!Number.isFinite(n) || n <= 0 || n > 65535) {
+				throw new Error(`Invalid AGENTHIVE_PG_PORT: ${v}`);
+			}
+			return n;
+		},
+		required: false,
+		description: "Process-wide Postgres port override for AgentHive components (takes precedence over PGPORT)",
+		envOverride: true,
+	} satisfies ConfigKey<number | undefined>,
+
+	AGENTHIVE_LISTEN_PORT: {
+		name: "AGENTHIVE_LISTEN_PORT",
+		class: "structural" as const,
+		parse: (v: string) => {
+			const n = Number(v);
+			if (!Number.isFinite(n) || n <= 0 || n > 65535) {
+				throw new Error(`Invalid AGENTHIVE_LISTEN_PORT: ${v}`);
+			}
+			return n;
+		},
+		required: false,
+		description: "MCP server listen port (default: 6421)",
+		yamlPath: "mcp.port",
+		envOverride: true,
+		defaultValue: 6421,
+	} satisfies ConfigKey<number>,
 };
 
 /**
@@ -345,6 +525,9 @@ export const DiagnosticKeys = {
 export const AllConfigKeys = {
 	...SecretKeys,
 	...StructuralKeys,
+	...ControlTopologyKeys,
+	...VaultKeys,
+	...PoolTuningKeys,
 	...RegistryKeys,
 	...FlagKeys,
 	...DiagnosticKeys,

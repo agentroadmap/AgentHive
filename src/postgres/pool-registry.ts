@@ -247,7 +247,7 @@ async function drainPool(entry: PoolEntry, reason: EvictionReason): Promise<void
 // ── Control pool ──────────────────────────────────────────────────────────────
 
 function readControlDsnSignature(): string {
-  if (process.env.CONTROL_DSN) return process.env.CONTROL_DSN;
+  if (process.env.AGENTHIVE_CONTROL_DSN) return process.env.AGENTHIVE_CONTROL_DSN;
   const host = process.env.PGHOST ?? "127.0.0.1";
   const port = process.env.PGPORT ?? "5432";
   const user = process.env.PGUSER ?? "xiaomi";
@@ -266,10 +266,10 @@ function buildControlPool(): Pool {
 
   const searchPathOptions = `-c search_path=${CONTROL_SEARCH_PATH}`;
 
-  // When CONTROL_DSN is set (P518 cutover), use it as a connection string.
-  if (process.env.CONTROL_DSN) {
+  // When AGENTHIVE_CONTROL_DSN is set (P518 cutover), use it as a connection string.
+  if (process.env.AGENTHIVE_CONTROL_DSN) {
     return new Pool({
-      connectionString: process.env.CONTROL_DSN,
+      connectionString: process.env.AGENTHIVE_CONTROL_DSN,
       options: searchPathOptions,
       max: DEFAULT_POOL_MAX_CONTROL,
       idleTimeoutMillis: DEFAULT_IDLE_MS,

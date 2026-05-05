@@ -231,6 +231,7 @@ const opsRoutes: RouteMap = {
 	project_route_list: "project_route_list",
 	project_capability_list: "project_capability_list",
 	project_cap_list: "project_cap_list",
+	config_audit: "config_audit",
 };
 
 const projectRoutes: RouteMap = {

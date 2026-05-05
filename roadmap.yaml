@@ -19,6 +19,7 @@ databases:
     host: 127.0.0.1
     port: 5432
     role: control_plane
+    password_ref: PGPASSWORD
     notes: |
       Holds proposals, agent registry, runtime_flag, host_model_policy,
       project registry (DSN pointers), knowledge, federation, identity.
@@ -49,6 +50,14 @@ databases:
       schema_prefix: song_
       role: tenant
       status: planned
+pools:
+  control:
+    max: 10
+  tenant:
+    max: 8
+vault:
+  kind: env
+  root: ""
 mcp:
   port: 6421
   transport: sse
