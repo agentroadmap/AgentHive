@@ -82,6 +82,12 @@ export interface AgentSessionTokenInput {
 	agent_identity: string;
 	spawn_briefing_id: string;
 	spawn_started_at: Date;
+	/** P842: Optional budget scope embedded in token for fast-path enforcement */
+	budget_scope?: {
+		max_spend_usd: number;
+		period: 'day' | 'week' | 'month' | 'total';
+		reset_at_utc_hour?: number;
+	};
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
