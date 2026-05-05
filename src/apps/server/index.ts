@@ -873,6 +873,8 @@ export class RoadmapServer {
 				return await this.handleSendMessage(req);
 			if (pathname === "/api/routes" && method === "GET")
 				return await this.handleListRoutes();
+			if (pathname.startsWith("/api/routes/") && method === "PATCH")
+				return await this.handleToggleRoute(req, pathname.split("/").at(-1)!);
 			if (pathname === "/api/dispatches" && method === "GET")
 				return await this.handleListDispatches();
 
@@ -2473,28 +2475,73 @@ export class RoadmapServer {
 	private async handleListRoutes(): Promise<Response> {
 		try {
 			const { rows } = await query(
-				`SELECT id,
-				        model_name,
-				        route_provider,
-				        agent_provider,
-				        agent_cli,
-				        fallback_cli,
-				        is_enabled,
-				        priority,
-				        api_spec,
-				        base_url,
-				        cost_per_1k_input * 1000 AS cost_per_million_input,
-				        cost_per_1k_output * 1000 AS cost_per_million_output,
-				        plan_type,
-				        notes,
-				        created_at
-				   FROM roadmap.model_routes
-				  ORDER BY is_enabled DESC, priority ASC, model_name ASC`,
+				`SELECT mr.id,
+				        mr.model_name,
+				        mr.route_provider,
+				        mr.agent_provider,
+				        mr.agent_cli,
+				        mr.fallback_cli,
+				        mr.is_enabled,
+				        mr.priority,
+				        mr.api_spec,
+				        mr.base_url,
+				        mr.cost_per_1k_input * 1000 AS cost_per_million_input,
+				        mr.cost_per_1k_output * 1000 AS cost_per_million_output,
+				        mr.plan_type,
+				        mr.notes,
+				        mr.created_at,
+				        COALESCE(
+				          (SELECT bool_or(
+				                    NOT (mr.route_provider = ANY(hmp.forbidden_providers))
+				                    AND (hmp.allowed_providers = '{}'
+				                         OR mr.route_provider = ANY(hmp.allowed_providers))
+				                  )
+				             FROM roadmap.host_model_policy hmp
+				          ),
+				          true
+				        ) AS has_host_policy_match
+				   FROM roadmap.model_routes mr
+				  ORDER BY mr.is_enabled DESC, mr.priority ASC, mr.model_name ASC`,
 			);
 			return Response.json({ routes: rows ?? [] });
 		} catch (error) {
 			console.error("Error listing routes:", error);
 			return Response.json({ error: "Failed to list routes" }, { status: 500 });
+		}
+	}
+
+	private async handleToggleRoute(req: Request, id: string): Promise<Response> {
+		try {
+			const numericId = parseInt(id, 10);
+			if (Number.isNaN(numericId))
+				return Response.json({ error: "Invalid id" }, { status: 400 });
+
+			let body: unknown;
+			try {
+				body = await req.json();
+			} catch {
+				body = null;
+			}
+			if (
+				body === null ||
+				typeof body !== "object" ||
+				typeof (body as Record<string, unknown>).is_enabled !== "boolean"
+			) {
+				return Response.json({ error: "is_enabled (boolean) required" }, { status: 400 });
+			}
+
+			const isEnabled = (body as { is_enabled: boolean }).is_enabled;
+			const { rows } = await query(
+				`UPDATE roadmap.model_routes SET is_enabled = $1 WHERE id = $2 RETURNING id, is_enabled`,
+				[isEnabled, numericId],
+			);
+
+			if (!rows.length)
+				return Response.json({ error: "Route not found" }, { status: 404 });
+			return Response.json(rows[0]);
+		} catch (error) {
+			console.error("Error toggling route:", error);
+			return Response.json({ error: "Failed to update route" }, { status: 500 });
 		}
 	}
 

@@ -18,6 +18,7 @@ interface Route {
 	plan_type: string;
 	notes: string;
 	created_at: string;
+	has_host_policy_match: boolean;
 }
 
 const RoutesPage: React.FC = () => {
@@ -26,6 +27,8 @@ const RoutesPage: React.FC = () => {
 	const [error, setError] = useState<string | null>(null);
 	const [filterProvider, setFilterProvider] = useState<string>("");
 	const [showDisabled, setShowDisabled] = useState(false);
+	const [togglingIds, setTogglingIds] = useState<Set<number>>(new Set());
+	const [toggleErrors, setToggleErrors] = useState<Map<number, string>>(new Map());
 
 	const fetchData = useCallback(async () => {
 		try {
@@ -44,6 +47,43 @@ const RoutesPage: React.FC = () => {
 		void fetchData();
 	}, [fetchData]);
 
+	const handleToggle = useCallback(async (route: Route) => {
+		if (togglingIds.has(route.id)) return;
+
+		const newEnabled = !route.is_enabled;
+
+		// Optimistic update
+		setRoutes((prev) =>
+			prev.map((r) => (r.id === route.id ? { ...r, is_enabled: newEnabled } : r)),
+		);
+		setTogglingIds((prev) => new Set(prev).add(route.id));
+		setToggleErrors((prev) => {
+			const next = new Map(prev);
+			next.delete(route.id);
+			return next;
+		});
+
+		try {
+			await apiClient.toggleRoute(route.id, newEnabled);
+		} catch (err) {
+			// Revert optimistic update
+			setRoutes((prev) =>
+				prev.map((r) => (r.id === route.id ? { ...r, is_enabled: route.is_enabled } : r)),
+			);
+			setToggleErrors((prev) => {
+				const next = new Map(prev);
+				next.set(route.id, "Toggle failed");
+				return next;
+			});
+		} finally {
+			setTogglingIds((prev) => {
+				const next = new Set(prev);
+				next.delete(route.id);
+				return next;
+			});
+		}
+	}, [togglingIds]);
+
 	const providers = [...new Set(routes.map((r) => r.route_provider))].sort();
 
 	const filtered = routes.filter((r) => {
@@ -51,6 +91,8 @@ const RoutesPage: React.FC = () => {
 		if (filterProvider && r.route_provider !== filterProvider) return false;
 		return true;
 	});
+
+	const orphanCount = routes.filter((r) => r.has_host_policy_match === false).length;
 
 	if (loading) {
 		return (
@@ -69,7 +111,14 @@ const RoutesPage: React.FC = () => {
 	return (
 		<div className="container mx-auto px-4 py-8">
 			<div className="flex items-center justify-between mb-6">
-				<h1 className="text-2xl font-bold">Model Routes</h1>
+				<div className="flex items-center gap-3">
+					<h1 className="text-2xl font-bold">Model Routes</h1>
+					{orphanCount > 0 && (
+						<span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+							⚠ {orphanCount} no host policy
+						</span>
+					)}
+				</div>
 				<div className="flex items-center gap-4">
 					<div className="flex items-center gap-2">
 						<label htmlFor="provider-filter" className="text-sm text-gray-600">
@@ -134,44 +183,72 @@ const RoutesPage: React.FC = () => {
 						</tr>
 					</thead>
 					<tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
-						{filtered.map((route) => (
-							<tr key={route.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
-								<td className="px-4 py-3">
-									<span
-										className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
-											route.is_enabled
-												? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
-												: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400"
-										}`}
-									>
-										{route.is_enabled ? "ON" : "OFF"}
-									</span>
-								</td>
-								<td className="px-4 py-3 font-mono text-sm">
-									{route.model_name}
-								</td>
-								<td className="px-4 py-3 text-sm">
-									{route.route_provider}
-								</td>
-								<td className="px-4 py-3 text-sm">
-									{route.agent_provider}
-								</td>
-								<td className="px-4 py-3 font-mono text-sm text-gray-500">
-									{route.agent_cli}
-								</td>
-								<td className="px-4 py-3 text-sm text-gray-500">
-									{route.api_spec}
-								</td>
-								<td className="px-4 py-3 text-sm tabular-nums">
-									{route.cost_per_million_input > 0 || route.cost_per_million_output > 0
-										? `$${route.cost_per_million_input}/$${route.cost_per_million_output}`
-										: "free"}
-								</td>
-								<td className="px-4 py-3 text-sm tabular-nums">
-									{route.priority}
-								</td>
-							</tr>
-						))}
+						{filtered.map((route) => {
+							const isOrphan = route.has_host_policy_match === false;
+							const isToggling = togglingIds.has(route.id);
+							const toggleError = toggleErrors.get(route.id);
+							return (
+								<tr
+									key={route.id}
+									className={
+										isOrphan
+											? "bg-yellow-50 dark:bg-yellow-900/10 hover:bg-yellow-100 dark:hover:bg-yellow-900/20"
+											: "hover:bg-gray-50 dark:hover:bg-gray-800"
+									}
+								>
+									<td className="px-4 py-3">
+										<div className="flex flex-col gap-1">
+											<button
+												type="button"
+												onClick={() => void handleToggle(route)}
+												disabled={isToggling}
+												className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium cursor-pointer disabled:opacity-60 ${
+													route.is_enabled
+														? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 hover:bg-green-200"
+														: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400 hover:bg-red-200"
+												}`}
+											>
+												{isToggling ? (
+													<span className="inline-block w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
+												) : null}
+												{route.is_enabled ? "ON" : "OFF"}
+											</button>
+											{toggleError && (
+												<span className="text-xs text-red-600">{toggleError}</span>
+											)}
+										</div>
+									</td>
+									<td className="px-4 py-3 font-mono text-sm">
+										{isOrphan && (
+											<span className="mr-1 text-yellow-600" title="No host policy match">
+												⚠
+											</span>
+										)}
+										{route.model_name}
+									</td>
+									<td className="px-4 py-3 text-sm">
+										{route.route_provider}
+									</td>
+									<td className="px-4 py-3 text-sm">
+										{route.agent_provider}
+									</td>
+									<td className="px-4 py-3 font-mono text-sm text-gray-500">
+										{route.agent_cli}
+									</td>
+									<td className="px-4 py-3 text-sm text-gray-500">
+										{route.api_spec}
+									</td>
+									<td className="px-4 py-3 text-sm tabular-nums">
+										{route.cost_per_million_input > 0 || route.cost_per_million_output > 0
+											? `$${route.cost_per_million_input}/$${route.cost_per_million_output}`
+											: "free"}
+									</td>
+									<td className="px-4 py-3 text-sm tabular-nums">
+										{route.priority}
+									</td>
+								</tr>
+							);
+						})}
 					</tbody>
 				</table>
 			</div>

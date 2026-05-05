@@ -658,6 +658,13 @@ export class ApiClient {
 		return result.routes;
 	}
 
+	async toggleRoute(id: number, isEnabled: boolean): Promise<{ id: number; is_enabled: boolean }> {
+		return this.fetchJson<{ id: number; is_enabled: boolean }>(`${API_BASE}/routes/${id}`, {
+			method: "PATCH",
+			body: JSON.stringify({ is_enabled: isEnabled }),
+		});
+	}
+
 	async fetchDispatches(): Promise<any[]> {
 		const result = await this.fetchJson<{ dispatches: any[] }>(`${API_BASE}/dispatches`);
 		return result.dispatches;
