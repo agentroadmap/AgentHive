@@ -5415,6 +5415,133 @@ agentsCmd
 	});
 
 agentsCmd
+	.command("msg <message>")
+	.description("send a message to an agent via A2A and wait for reply")
+	.requiredOption("--to <agent>", "recipient agent identity (e.g. claude/claude-code)")
+	.option(
+		"--from <agent>",
+		"sender identity (defaults to git user or 'operator')",
+	)
+	.option(
+		"--type <type>",
+		"message type: task|notify|text|event",
+		"task",
+	)
+	.option(
+		"--timeout <ms>",
+		"max milliseconds to wait for reply (default 60000)",
+		"60000",
+	)
+	.action(async (message, options) => {
+		const { getPool } = await import("../infra/postgres/pool.ts");
+		const { PgMessagingHandlers } = await import(
+			"./mcp-server/tools/messages/pg-handlers.ts"
+		);
+
+		let fromAgent = options.from as string | undefined;
+		if (!fromAgent) {
+			fromAgent = "orchestrator-agent";
+		}
+
+		// Auto-register sender as authority if not yet in agent_registry
+		await pgQuery(
+			`INSERT INTO roadmap_workforce.agent_registry
+			   (agent_identity, agent_type, trust_tier, status)
+			 VALUES ($1, 'hybrid', 'authority', 'active')
+			 ON CONFLICT (agent_identity) DO NOTHING`,
+			[fromAgent],
+		);
+
+		const toAgent = options.to as string;
+		const timeoutMs = Math.max(0, Math.min(Number(options.timeout) || 60000, 300000));
+
+		// Ensure pool is up (cli.ts uses env-level pool for pgQuery already)
+		const pool = getPool();
+
+		const handlers = new PgMessagingHandlers(null as any, process.cwd());
+
+		// Send via proper A2A path (trust gate + pg_notify)
+		const sendResult = await handlers.sendMessage({
+			from_agent: fromAgent,
+			to_agent: toAgent,
+			message_content: message,
+			message_type: options.type as string,
+		});
+
+		const sendText =
+			sendResult.content[0]?.type === "text" ? sendResult.content[0].text : "";
+
+		if (!sendText.startsWith("Message sent")) {
+			console.error(`Send failed or gated: ${sendText}`);
+			process.exit(1);
+		}
+
+		// Extract sent message_id from result text: "Message sent (id: 42, correlation_id: <uuid>)"
+		const idMatch = sendText.match(/id:\s*(\d+)/);
+		const corrMatch = sendText.match(/correlation_id:\s*([a-f0-9-]+)/);
+		const sentId = idMatch ? Number(idMatch[1]) : null;
+		const corrId = corrMatch ? corrMatch[1] : null;
+
+		console.log(`Sent → ${toAgent} [id=${sentId ?? "?"}]`);
+
+		if (!corrId || timeoutMs === 0) {
+			console.log("(no reply wait requested)");
+			await pool.end();
+			return;
+		}
+
+		// Wait for reply via pg LISTEN on our own DM channel
+		const pgChannel = `a2a_msg_${fromAgent}`;
+		const listenClient = await pool.connect();
+		await listenClient.query(`LISTEN "${pgChannel}"`);
+
+		console.log(`Waiting up to ${timeoutMs / 1000}s for reply...`);
+
+		const reply = await new Promise<{ id: number; content: string } | null>((resolve) => {
+			const timer = setTimeout(() => {
+				listenClient.removeAllListeners("notification");
+				resolve(null);
+			}, timeoutMs);
+
+			listenClient.on("notification", async (n) => {
+				if (n.channel !== pgChannel || !n.payload) return;
+				try {
+					const payload = JSON.parse(n.payload) as { message_id?: number; from_agent?: string };
+					if (!payload.message_id) return;
+					// A reply is any message from toAgent directed to fromAgent
+					// sent after our original message (id >= sentId)
+					const { rows } = await listenClient.query(
+						`SELECT id, message_content
+						 FROM roadmap.message_ledger
+						 WHERE id = $1
+						   AND from_agent = $2
+						   AND to_agent = $3`,
+						[payload.message_id, toAgent, fromAgent],
+					);
+					if (rows.length > 0) {
+						clearTimeout(timer);
+						listenClient.removeAllListeners("notification");
+						resolve({ id: rows[0].id, content: rows[0].message_content });
+					}
+				} catch {
+					// ignore parse errors, keep waiting
+				}
+			});
+		});
+
+		try { listenClient.release(); } catch { /* ignore */ }
+
+		if (reply) {
+			console.log(`\n← ${toAgent} [id=${reply.id}]:`);
+			console.log(reply.content);
+		} else {
+			console.log(`\n(no reply after ${timeoutMs / 1000}s)`);
+		}
+
+		try { await pool.end(); } catch { /* ignore */ }
+	});
+
+agentsCmd
 	.command("log")
 	.description("monitor agent conversations")
 	.option("--public", "show public announcements (default)")
