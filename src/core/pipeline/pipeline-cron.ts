@@ -149,7 +149,7 @@ type ProposalDispatchContext = {
 	design: string | null;
 	alternatives: string | null;
 	drawbacks: string | null;
-	dependency: string | null;
+	dependency_note: string | null;
 	unresolvedDependencies: number;
 	totalAcceptanceCriteria: number;
 	blockingAcceptanceCriteria: number;
@@ -168,7 +168,7 @@ type ProposalDispatchRow = {
 	design: string | null;
 	alternatives: string | null;
 	drawbacks: string | null;
-	dependency: string | null;
+	dependency_note: string | null;
 	unresolved_dependencies: number;
 	total_acceptance_criteria: number;
 	blocking_acceptance_criteria: number;
@@ -458,7 +458,7 @@ async function loadProposalDispatchContext(
 		    p.design AS design,
 		    p.alternatives AS alternatives,
 		    p.drawbacks AS drawbacks,
-		    p.dependency_note AS dependency,
+		    p.dependency_note,
 		    COALESCE(dep.unresolved_dependencies, 0) AS unresolved_dependencies,
 		    COALESCE(ac.total_acceptance_criteria, 0) AS total_acceptance_criteria,
 		    COALESCE(ac.blocking_acceptance_criteria, 0) AS blocking_acceptance_criteria,
@@ -506,7 +506,7 @@ async function loadProposalDispatchContext(
 		design: row.design ?? null,
 		alternatives: row.alternatives ?? null,
 		drawbacks: row.drawbacks ?? null,
-		dependency: row.dependency ?? null,
+		dependency_note: row.dependency_note ?? null,
 		unresolvedDependencies: row.unresolved_dependencies ?? 0,
 		totalAcceptanceCriteria: row.total_acceptance_criteria ?? 0,
 		blockingAcceptanceCriteria: row.blocking_acceptance_criteria ?? 0,

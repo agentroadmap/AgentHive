@@ -27,7 +27,7 @@ const p149Data = JSON.parse(mcpText(p149) || "{}");
 
 console.log("P149 — Channel subscription and push notifications");
 console.log("  Status: " + p149Data.status);
-console.log("  Maturity: " + p149Data.maturity_state);
+console.log("  Maturity: " + p149Data.maturity);
 console.log("  Has ACs: " + (p149Data.acceptance_criteria?.length > 0 ? "Yes (" + p149Data.acceptance_criteria.length + ")" : "NO"));
 console.log("");
 
@@ -68,7 +68,7 @@ for (const id of developIds) {
     const result = await client.callTool({ name: "prop_get", arguments: { id } });
     const data = JSON.parse(mcpText(result) || "{}");
     
-    if (data.status === "DEVELOP" && data.maturity_state === "mature") {
+    if (data.status === "DEVELOP" && data.maturity === "mature") {
       console.log(`${id} — ${data.title?.substring(0, 50)}`);
       console.log("  Maturity: mature (ready for merge)");
       console.log("  SKEPTIC QUESTION: Has code been reviewed?");

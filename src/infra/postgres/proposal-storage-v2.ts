@@ -9,7 +9,7 @@ import { Maturity } from "../../core/workflow/state-names.ts";
 const PROPOSAL_COLUMNS = `
   id, display_id, parent_id, type, status, maturity, title,
   summary, motivation, design, drawbacks, alternatives,
-  dependency_note AS dependency, priority, tags, audit, created_at, modified_at
+  dependency_note, priority, tags, audit, created_at, modified_at
 `;
 
 export type ProposalRow = {
@@ -25,7 +25,7 @@ export type ProposalRow = {
 	design: string | null;
 	drawbacks: string | null;
 	alternatives: string | null;
-	dependency: string | null;
+	dependency_note: string | null;
 	priority: string | null; // descriptive; queue order from v_proposal_queue
 	tags: any | null; // jsonb
 	audit: any[]; // jsonb: [{ TS, Agent, Activity, Reason }]
@@ -44,7 +44,7 @@ export type ProposalCreateInput = {
 	design?: string | null;
 	drawbacks?: string | null;
 	alternatives?: string | null;
-	dependency?: string | null;
+	dependency_note?: string | null;
 	priority?: string | null;
 	tags?: any | null;
 };
@@ -355,7 +355,7 @@ export async function createProposal(
 				input.design ?? null,
 				input.drawbacks ?? null,
 				input.alternatives ?? null,
-				input.dependency ?? null,
+				input.dependency_note ?? null,
 				input.priority ?? null,
 				input.tags ? JSON.stringify(input.tags) : null,
 				JSON.stringify([
@@ -418,7 +418,7 @@ export async function updateProposal(
 
 	for (const [key, value] of Object.entries(updates)) {
 		if (value !== undefined) {
-			const colName = key === "dependency" ? "dependency_note" : key;
+			const colName = key;
 			if (jsonbFields.includes(key as any)) {
 				setClauses.push(`${colName} = $${idx}::jsonb`);
 				params.push(value === null ? null : JSON.stringify(value));

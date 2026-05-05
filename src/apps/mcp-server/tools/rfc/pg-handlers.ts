@@ -34,7 +34,7 @@ type ResolvedProposal = {
 	design: string | null;
 	drawbacks: string | null;
 	alternatives: string | null;
-	dependency: string | null;
+	dependency_note: string | null;
 	workflow_id: number | null;
 	current_stage: string | null;
 	workflow_name: string | null;
@@ -97,7 +97,7 @@ async function resolveProposalRecord(
        p.design,
        p.drawbacks,
        p.alternatives,
-       p.dependency_note AS dependency,
+       p.dependency_note,
        w.id AS workflow_id,
        w.current_stage,
        wt.name AS workflow_name
@@ -207,7 +207,7 @@ async function loadMissingRequiredFields(
 		design: proposal.design,
 		drawbacks: proposal.drawbacks,
 		alternatives: proposal.alternatives,
-		dependency: proposal.dependency,
+		dependency_note: proposal.dependency_note,
 	};
 
 	return requiredFields.filter((field) => {

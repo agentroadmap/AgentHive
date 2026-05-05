@@ -298,7 +298,7 @@ function formatNotification(channel: string, payload: string): string {
 
     if (channel === "proposal_maturity_changed") {
       const from = data.from_maturity ?? "?";
-      const to = data.to_maturity ?? data.maturity_state ?? data.maturity ?? "?";
+      const to = data.to_maturity ?? data.maturity ?? "?";
       const by = data.transitioned_by ? ` by ${data.transitioned_by}` : "";
       return `📊 **MATURITY** — ${data.display_id ?? data.proposal_id}: ${from} → ${to}${by}`;
     }

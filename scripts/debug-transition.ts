@@ -21,7 +21,7 @@ async function main() {
       for (const c of content) {
         if (c.type === "text") {
           const data = JSON.parse(c.text);
-          console.log(`${id}: status="${data.status}", type="${data.type}", maturity="${data.maturity_state}"`);
+          console.log(`${id}: status="${data.status}", type="${data.type}", maturity="${data.maturity}"`);
         }
       }
     } catch (err: any) {

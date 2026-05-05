@@ -285,7 +285,7 @@ export class PgProposalHandlers {
 					design: args.design || null,
 					drawbacks: args.drawbacks || null,
 					alternatives: args.alternatives || null,
-					dependency: args.dependency || null,
+					dependency_note: args.dependency || null,
 					priority: resolvedPriority,
 					tags: args.tags ? JSON.parse(args.tags) : null,
 				},
@@ -379,7 +379,7 @@ export class PgProposalHandlers {
 			if (args.design) updates.design = args.design;
 			if (args.drawbacks) updates.drawbacks = args.drawbacks;
 			if (args.alternatives) updates.alternatives = args.alternatives;
-			if (args.dependency) updates.dependency = args.dependency;
+			if (args.dependency) updates.dependency_note = args.dependency;
 			if (args.priority) updates.priority = args.priority;
 			if (args.body_markdown) updates.summary = args.body_markdown;
 			if (args.tags) updates.tags = JSON.parse(args.tags);
@@ -913,8 +913,8 @@ export class PgProposalHandlers {
 			if (proposal.alternatives) {
 				md += `## Alternatives\n\n${proposal.alternatives}\n\n`;
 			}
-			if (proposal.dependency) {
-				md += `## Dependencies (Free Text)\n\n${proposal.dependency}\n\n`;
+			if (proposal.dependency_note) {
+				md += `## Dependencies (Free Text)\n\n${proposal.dependency_note}\n\n`;
 			}
 			if (decision?.rationale) {
 				md += `## Decision Rationale\n\n${decision.rationale}\n\n`;

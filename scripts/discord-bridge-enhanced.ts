@@ -25,7 +25,7 @@ function formatNotification(channel: string, payload: string): string {
     
     // Maturity changed with proposal details
     if (channel === "proposal_maturity_changed") {
-      const maturity = data.maturity_state || data.maturity;
+      const maturity = data.maturity;
       const displayId = data.display_id || `P${data.proposal_id || data.id}`;
       return `📊 **MATURITY** — ${displayId} → ${maturity}`;
     }
