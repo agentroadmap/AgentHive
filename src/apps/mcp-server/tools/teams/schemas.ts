@@ -277,6 +277,103 @@ export const federationStatusSchema = {
 	required: [],
 };
 
+// ── P182: Team Governance ──────────────────────────────────────────────────────
+
+export const teamNormsSetSchema = {
+	type: "object",
+	properties: {
+		teamId: {
+			type: "string",
+			description: "Team ID to set norms for",
+		},
+		normKey: {
+			type: "string",
+			description:
+				"Norm key (e.g. team:norm:handoff, team:norm:communication, team:charter)",
+		},
+		normValue: {
+			type: "object",
+			description: "Norm value as a JSON object",
+			additionalProperties: true,
+		},
+		setBy: {
+			type: "string",
+			description: "Agent identity setting the norm",
+		},
+	},
+	required: ["teamId", "normKey", "normValue", "setBy"],
+};
+
+export const teamDisputeLogSchema = {
+	type: "object",
+	properties: {
+		proposalId: {
+			type: "string",
+			description: "Proposal ID where the dispute arose",
+		},
+		initiatorAgent: {
+			type: "string",
+			description: "Agent identity initiating the dispute",
+		},
+		respondentAgent: {
+			type: "string",
+			description: "Agent identity responding to the dispute",
+		},
+		description: {
+			type: "string",
+			description: "Description of the dispute",
+		},
+		escalationLevel: {
+			type: "string",
+			enum: ["L1", "L2", "L3", "L4"],
+			description: "Escalation level: L1=self, L2=peer, L3=team, L4=society",
+		},
+		status: {
+			type: "string",
+			enum: ["open", "team_resolved", "escalated", "resolved", "dismissed"],
+			description: "Dispute status",
+		},
+		teamId: {
+			type: "string",
+			description: "Team ID handling this dispute (for L3+ disputes)",
+		},
+		resolutionNote: {
+			type: "string",
+			description: "Resolution note when resolving a dispute",
+		},
+	},
+	required: ["proposalId", "initiatorAgent", "respondentAgent", "description", "escalationLevel"],
+};
+
+export const teamCharterCreateSchema = {
+	type: "object",
+	properties: {
+		teamId: {
+			type: "string",
+			description: "Team ID to create charter for",
+		},
+		proposalIds: {
+			type: "array",
+			items: { type: "string" },
+			description: "Proposal IDs this team covers",
+		},
+		teamName: {
+			type: "string",
+			description: "Human-readable team name",
+		},
+		createdBy: {
+			type: "string",
+			description: "Agent identity creating the charter",
+		},
+		norms: {
+			type: "object",
+			description: "Initial team norms to set at charter creation",
+			additionalProperties: true,
+		},
+	},
+	required: ["teamId", "proposalIds", "teamName", "createdBy"],
+};
+
 export const federationSyncSchema = {
 	type: "object",
 	properties: {
