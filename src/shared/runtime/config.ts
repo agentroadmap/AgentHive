@@ -139,7 +139,9 @@ class ConfigResolver {
 
 	/**
 	 * Synchronously resolve the DB password for the given connection params.
-	 * Resolution order: PGPASSWORD env → ~/.pgpass file match → undefined
+	 * Resolution order: ~/.pgpass file match → PGPASSWORD env → undefined
+	 * pgpass wins over env so that stale PGPASSWORD values in the environment
+	 * don't shadow a correctly-configured pgpass file.
 	 * Used by pool.ts startup IIFE where async resolution is not available.
 	 */
 	static resolvePasswordSync(opts: {
@@ -149,17 +151,18 @@ class ConfigResolver {
 		user: string;
 		pgpassPath?: string;
 	}): string | undefined {
-		if (process.env.PGPASSWORD) return process.env.PGPASSWORD;
 		const pgpassPath = opts.pgpassPath ??
 			(process.env.PGPASSFILE ||
 			 ((process.env.HOME || "") + "/.pgpass"));
-		return ConfigResolver.parsePgpassFile(
+		const fromPgpass = ConfigResolver.parsePgpassFile(
 			pgpassPath,
 			opts.host,
 			opts.port,
 			opts.database,
 			opts.user,
 		);
+		if (fromPgpass !== undefined) return fromPgpass;
+		return process.env.PGPASSWORD || undefined;
 	}
 
 	/**
