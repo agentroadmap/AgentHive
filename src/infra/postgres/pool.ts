@@ -25,6 +25,7 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import {
 	Pool,
@@ -33,6 +34,14 @@ import {
 	type QueryResultRow,
 } from "pg";
 import { StructuralKeys } from "../../shared/runtime/config-keys";
+
+// pgpass is a CJS-only package — load via createRequire to avoid pg's deprecated
+// built-in pgpass reading (removed in pg@9). We call it ourselves and provide an
+// async function as the Pool password, which is the pg@8 recommended migration path.
+const _require = createRequire(import.meta.url);
+type PgpassConnInfo = { host: string; port: number | string; database: string; user: string };
+type PgpassLookup = (connInfo: PgpassConnInfo, cb: (password: string | undefined) => void) => void;
+const pgpassLookup: PgpassLookup = _require("pgpass");
 
 // Password resolution: if ~/.pgpass exists, it takes priority over all env-sourced passwords.
 // The pg package reads pgpass natively when process.env.PGPASSWORD is absent.
@@ -99,7 +108,7 @@ type ResolvedPoolConfig = {
 	host: string;
 	port: number;
 	user: string;
-	password?: string;
+	password?: string | (() => Promise<string | undefined>);
 	database: string;
 	options?: string;
 	schema: string | null;
@@ -165,38 +174,49 @@ function resolvePoolConfig(config?: AgentHivePoolConfig): ResolvedPoolConfig {
 	const configuredPassword =
 		typeof config?.password === "function" ? undefined : config?.password;
 
-	// If ~/.pgpass exists, skip all env-sourced passwords so pg reads pgpass natively.
+	// Resolve connection identity first — needed for pgpass lookup.
+	const host =
+		config?.host ??
+		process.env.PGHOST ??
+		databaseUrlConfig.host ??
+		(StructuralKeys.PGHOST.defaultValue ?? "127.0.0.1");
+	const port =
+		Number(config?.port ?? process.env.PGPORT ?? databaseUrlConfig.port) ||
+		(StructuralKeys.PGPORT.defaultValue ?? 5432);
+	const user =
+		config?.user ?? process.env.PGUSER ?? databaseUrlConfig.user ?? "admin";
+	const database =
+		config?.database ??
+		process.env.PGDATABASE ??
+		databaseUrlConfig.database ??
+		(StructuralKeys.PGDATABASE.defaultValue ?? "agenthive");
+
+	// When ~/.pgpass exists, provide an async password function so pg never reads
+	// pgpass natively (deprecated in pg@8, removed in pg@9). The pgpass npm package
+	// does the same ~/.pgpass lookup but without the deprecation warning.
 	const pgpassPath = join(process.env.HOME || "", ".pgpass");
 	const hasPgpass = !configuredPassword && existsSync(pgpassPath);
 
-	const resolvedPassword = hasPgpass
-		? undefined
+	const password: string | (() => Promise<string | undefined>) | undefined = hasPgpass
+		? () => new Promise<string | undefined>((res) => {
+			pgpassLookup({ host, port, database, user }, res);
+		  })
 		: (configuredPassword ??
 			process.env.PGPASSWORD ??
 			databaseUrlConfig.password ??
-			process.env.__PGPASSWORD_FROM_CONFIG);
+			process.env.__PGPASSWORD_FROM_CONFIG ??
+			undefined);
 
 	const schema = normalizeSchemaName(
 		config?.schema ?? configuredSchema ?? process.env.PG_SCHEMA,
 	);
 
 	return {
-		host:
-			config?.host ??
-			process.env.PGHOST ??
-			databaseUrlConfig.host ??
-			(StructuralKeys.PGHOST.defaultValue ?? "127.0.0.1"),
-		port:
-			Number(config?.port ?? process.env.PGPORT ?? databaseUrlConfig.port) ||
-			(StructuralKeys.PGPORT.defaultValue ?? 5432),
-		user:
-			config?.user ?? process.env.PGUSER ?? databaseUrlConfig.user ?? "admin",
-		password: resolvedPassword ?? undefined,
-		database:
-			config?.database ??
-			process.env.PGDATABASE ??
-			databaseUrlConfig.database ??
-			(StructuralKeys.PGDATABASE.defaultValue ?? "agenthive"),
+		host,
+		port,
+		user,
+		password,
+		database,
 		options: buildSearchPathOptions(
 			config?.options ?? process.env.PG_OPTIONS,
 			schema,
@@ -272,7 +292,9 @@ export function getPool(config?: AgentHivePoolConfig): Pool {
 			host: resolvedConfig.host,
 			port: resolvedConfig.port,
 			user: resolvedConfig.user,
-			password: resolvedConfig.password,
+			// pg@8 TypeScript types don't include the async function form, but the
+			// runtime supports it (and pg@9 requires it for pgpass). Cast to avoid TS error.
+			password: resolvedConfig.password as string | undefined,
 			database: resolvedConfig.database,
 			options: resolvedConfig.options,
 			connectionTimeoutMillis: resolvedConfig.connectionTimeoutMillis,

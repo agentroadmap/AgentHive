@@ -462,6 +462,12 @@ export function getRegistry(): StateNamesRegistry {
 	return globalRegistry;
 }
 
+/** Returns null instead of throwing when the registry isn't loaded. */
+function getViewSafe(templateName: string): WorkflowStateView | null {
+	if (!globalRegistry) return null;
+	return globalRegistry.getView(templateName);
+}
+
 /**
  * Get the view for a workflow template.
  */
@@ -510,25 +516,25 @@ export function gateForTransition(templateName: string, from: string, to: string
  */
 export const RfcStates = {
 	get DRAFT(): string {
-		return getView("Standard RFC").stages.find((s) => s.name === "DRAFT")?.name || "DRAFT";
+		return getViewSafe("Standard RFC")?.stages.find((s) => s.name === "DRAFT")?.name ?? "DRAFT";
 	},
 	get REVIEW(): string {
-		return getView("Standard RFC").stages.find((s) => s.name === "REVIEW")?.name || "REVIEW";
+		return getViewSafe("Standard RFC")?.stages.find((s) => s.name === "REVIEW")?.name ?? "REVIEW";
 	},
 	get DEVELOP(): string {
-		return getView("Standard RFC").stages.find((s) => s.name === "DEVELOP")?.name || "DEVELOP";
+		return getViewSafe("Standard RFC")?.stages.find((s) => s.name === "DEVELOP")?.name ?? "DEVELOP";
 	},
 	get MERGE(): string {
-		return getView("Standard RFC").stages.find((s) => s.name === "MERGE")?.name || "MERGE";
+		return getViewSafe("Standard RFC")?.stages.find((s) => s.name === "MERGE")?.name ?? "MERGE";
 	},
 	get COMPLETE(): string {
-		return getView("Standard RFC").stages.find((s) => s.name === "COMPLETE")?.name || "COMPLETE";
+		return getViewSafe("Standard RFC")?.stages.find((s) => s.name === "COMPLETE")?.name ?? "COMPLETE";
 	},
 	get REJECTED(): string {
-		return getView("Standard RFC").stages.find((s) => s.name === "REJECTED")?.name || "REJECTED";
+		return getViewSafe("Standard RFC")?.stages.find((s) => s.name === "REJECTED")?.name ?? "REJECTED";
 	},
 	get DISCARDED(): string {
-		return getView("Standard RFC").stages.find((s) => s.name === "DISCARDED")?.name || "DISCARDED";
+		return getViewSafe("Standard RFC")?.stages.find((s) => s.name === "DISCARDED")?.name ?? "DISCARDED";
 	},
 };
 
