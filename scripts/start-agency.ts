@@ -28,6 +28,7 @@ import {
 	endLiaisonSession,
 	checkAndMarkDormant,
 } from "../src/infra/agency/liaison-service.ts";
+import { pulseHeartbeat } from "../src/infra/pulse/heartbeat.ts";
 
 const agentIdentity =
 	process.env.AGENTHIVE_AGENT_IDENTITY ?? `agency-${hostname()}`;
@@ -167,7 +168,14 @@ async function main() {
 			} catch (err) {
 				console.error("[Agency] Heartbeat error:", err);
 			}
+			pulseHeartbeat(agentIdentity, { currentTask: "offer-provider" }).catch(
+				(e) => console.warn("[Agency] pulse heartbeat failed:", e),
+			);
 		}, 30_000);
+		// Emit immediately so the agency is visible without waiting 30s
+		pulseHeartbeat(agentIdentity, { currentTask: "starting" }).catch(
+			(e) => console.warn("[Agency] initial pulse heartbeat failed:", e),
+		);
 
 		watchdogTimer = setInterval(async () => {
 			try {

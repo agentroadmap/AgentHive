@@ -38,6 +38,7 @@ import {
 	runOfferReaper,
 	runPokeWatchdogTick,
 } from "../src/core/orchestration/maintenance.ts";
+import { pulseHeartbeat } from "../src/infra/pulse/heartbeat.ts";
 
 const MCP_URL = getMcpUrl();
 const AGENTHIVE_HOST = process.env.AGENTHIVE_HOST ?? "default";
@@ -2802,6 +2803,20 @@ async function main() {
 	}, 60_000);
 	logger.log("[Orchestrator] Maintenance started — offer reaper + poke watchdog every 60s");
 
+	const orchStartMs = Date.now();
+	const heartbeatTimer = setInterval(() => {
+		pulseHeartbeat("orchestrator-agent", {
+			currentTask: "dispatching",
+			uptimeSeconds: Math.floor((Date.now() - orchStartMs) / 1000),
+		}).catch((e) => logger.warn("Heartbeat failed:", e));
+	}, 60_000);
+	// Write first heartbeat immediately so the process is visible without waiting 60s
+	pulseHeartbeat("orchestrator-agent", { currentTask: "starting" }).catch(
+		(e) => logger.warn("Initial heartbeat failed:", e),
+	);
+	// Ensure timer is cleared on shutdown (timer var captured via closure below)
+	void heartbeatTimer;
+
 	logger.log("Orchestrator running with dynamic agent deployment...");
 
 	// P266 + hotfix: graceful shutdown — drain in-flight dispatches before
@@ -2824,6 +2839,7 @@ async function main() {
 		if (reconcilerTimer) clearInterval(reconcilerTimer);
 		if (offerReapTimer) clearInterval(offerReapTimer);
 		if (pokeWatchdogTimer) clearInterval(pokeWatchdogTimer);
+		clearInterval(heartbeatTimer);
 
 		// Propagate the signal to spawned children; their stdout/close events
 		// then let the in-flight dispatch promises settle naturally. Use a

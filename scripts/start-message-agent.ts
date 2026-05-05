@@ -19,6 +19,7 @@
 import { spawn } from "node:child_process";
 import { getPool, closePool } from "../src/infra/postgres/pool.ts";
 import { PgMessagingHandlers } from "../src/apps/mcp-server/tools/messages/pg-handlers.ts";
+import { pulseHeartbeat } from "../src/infra/pulse/heartbeat.ts";
 
 const agentIdentity =
 	process.env.AGENTHIVE_AGENT_IDENTITY ?? "copilot/agency-gary";
@@ -167,9 +168,19 @@ async function main() {
 		process.exit(1);
 	});
 
+	const startMs = Date.now();
+	const hbTimer = setInterval(() => {
+		pulseHeartbeat(agentIdentity, {
+			currentTask: "listening",
+			uptimeSeconds: Math.floor((Date.now() - startMs) / 1000),
+		}).catch((e) => console.warn("[MessageAgent] Heartbeat failed:", e));
+	}, 60_000);
+	await pulseHeartbeat(agentIdentity, { currentTask: "starting" });
+
 	for (const sig of ["SIGTERM", "SIGINT"] as const) {
 		process.on(sig, async () => {
 			console.log(`[MessageAgent] ${sig} — shutting down`);
+			clearInterval(hbTimer);
 			try { listenClient.release(); } catch { /* ignore */ }
 			const hardExit = setTimeout(() => process.exit(0), 3_000);
 			hardExit.unref();
