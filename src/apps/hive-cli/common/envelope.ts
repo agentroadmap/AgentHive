@@ -1,96 +1,80 @@
 /**
- * JSON envelope builder per cli-hive-contract.md §2.
- *
- * Every CLI response (success or error) is wrapped in a standardized envelope
- * that includes schema version, command, context, and timing info.
+ * Universal JSON envelope for all hive CLI responses.
+ * Every command produces this envelope when --format json/jsonl/yaml is used.
+ * Schema is versioned; increment SCHEMA_VERSION on breaking changes.
  */
 
-import type { HiveError } from "./error";
+import type { HiveContext } from "./context.ts";
+import type { ErrorCode } from "./exit-codes.ts";
+import { exitCodeForError } from "./exit-codes.ts";
 
-export interface CliContext {
-  project?: string;
-  agency?: string;
-  host?: string;
-  mcp_url?: string;
-  db_host?: string;
-  db_port?: number;
-  resolved_at?: string;
-}
+export const SCHEMA_VERSION = 1;
 
 export interface Warning {
   code: string;
   message: string;
+  retriable: boolean;
 }
 
-export interface SuccessEnvelope<T = unknown> {
-  schema_version: number;
+export interface ErrorDetail {
+  code: ErrorCode;
+  message: string;
+  hint?: string;
+  detail?: Record<string, unknown>;
+  retriable: boolean;
+  exit_code: number;
+}
+
+export interface HiveEnvelope<T = unknown> {
+  schema_version: typeof SCHEMA_VERSION;
   command: string;
-  context: CliContext;
-  ok: true;
+  context: HiveContext;
+  ok: boolean;
   data?: T;
+  error?: ErrorDetail;
   warnings: Warning[];
-  next_cursor?: string | null;
+  next_cursor: string | null;
   elapsed_ms: number;
 }
 
-export interface ErrorEnvelope {
-  schema_version: number;
-  command: string;
-  context: CliContext;
-  ok: false;
-  error: {
-    code: string;
-    message: string;
-    hint?: string;
-    detail?: Record<string, unknown>;
-    retriable: boolean;
-    exit_code: number;
-  };
-  warnings: Warning[];
-  elapsed_ms: number;
-}
-
-export type HiveEnvelope<T = unknown> = SuccessEnvelope<T> | ErrorEnvelope;
-
-const SCHEMA_VERSION = 1;
-
-/**
- * Build a success envelope.
- */
-export function successEnvelope<T = unknown>(
-  data: T | undefined,
+export function buildOkEnvelope<T>(
   command: string,
-  context: CliContext,
-  options?: {
+  context: HiveContext,
+  data: T,
+  opts: {
     warnings?: Warning[];
     next_cursor?: string | null;
     elapsed_ms?: number;
-  }
-): SuccessEnvelope<T> {
+  } = {},
+): HiveEnvelope<T> {
   return {
     schema_version: SCHEMA_VERSION,
     command,
     context,
     ok: true,
-    ...(data !== undefined && { data }),
-    warnings: options?.warnings ?? [],
-    ...(options?.next_cursor !== undefined && { next_cursor: options.next_cursor }),
-    elapsed_ms: options?.elapsed_ms ?? 0,
+    data,
+    warnings: opts.warnings ?? [],
+    next_cursor: opts.next_cursor ?? null,
+    elapsed_ms: opts.elapsed_ms ?? 0,
   };
 }
 
-/**
- * Build an error envelope from a HiveError.
- */
-export function errorEnvelope(
-  error: HiveError,
+export function buildErrorEnvelope(
   command: string,
-  context: CliContext,
-  options?: {
+  context: HiveContext,
+  error: {
+    code: ErrorCode;
+    message: string;
+    hint?: string;
+    detail?: Record<string, unknown>;
+    retriable?: boolean;
+  },
+  opts: {
     warnings?: Warning[];
     elapsed_ms?: number;
-  }
-): ErrorEnvelope {
+  } = {},
+): HiveEnvelope<never> {
+  const exit_code = exitCodeForError(error.code);
   return {
     schema_version: SCHEMA_VERSION,
     command,
@@ -99,37 +83,13 @@ export function errorEnvelope(
     error: {
       code: error.code,
       message: error.message,
-      ...(error.hint && { hint: error.hint }),
-      ...(error.detail && { detail: error.detail }),
-      retriable: error.retriable,
-      exit_code: error.exitCode,
+      hint: error.hint,
+      detail: error.detail,
+      retriable: error.retriable ?? false,
+      exit_code,
     },
-    warnings: options?.warnings ?? [],
-    elapsed_ms: options?.elapsed_ms ?? 0,
-  };
-}
-
-/**
- * Build a success envelope for a list response with pagination.
- */
-export function successListEnvelope<T = unknown>(
-  items: T[],
-  command: string,
-  context: CliContext,
-  options?: {
-    next_cursor?: string | null;
-    warnings?: Warning[];
-    elapsed_ms?: number;
-  }
-): SuccessEnvelope<T[]> {
-  return {
-    schema_version: SCHEMA_VERSION,
-    command,
-    context,
-    ok: true,
-    data: items,
-    warnings: options?.warnings ?? [],
-    ...(options?.next_cursor !== undefined && { next_cursor: options.next_cursor }),
-    elapsed_ms: options?.elapsed_ms ?? 0,
+    warnings: opts.warnings ?? [],
+    next_cursor: null,
+    elapsed_ms: opts.elapsed_ms ?? 0,
   };
 }

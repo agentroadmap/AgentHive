@@ -1,214 +1,110 @@
 /**
- * Output formatters per cli-hive-contract.md §2 and design.md §2.
- *
- * Supports: text (TTY), json, jsonl, yaml, sarif.
- * Each formatter is a pure function that takes data + context and returns a string.
+ * Domain-agnostic output formatters for hive CLI.
+ * Never wrap output to terminal width when format != "text".
  */
 
-import type { CliContext } from "./envelope";
+import type { HiveEnvelope } from "./envelope.ts";
 
 export type OutputFormat = "text" | "json" | "jsonl" | "yaml" | "sarif";
 
-export interface FormatterOptions {
-  format: OutputFormat;
-  isTty: boolean;
-  noColor: boolean;
+export function isStructuredFormat(fmt: OutputFormat): boolean {
+  return fmt !== "text";
 }
 
-/**
- * Auto-detect default format based on TTY status.
- * TTY defaults to "text"; non-TTY defaults to "json".
- */
-export function detectDefaultFormat(isTty: boolean): OutputFormat {
-  return isTty ? "text" : "json";
-}
-
-/**
- * Format a list of items for output.
- */
-export function formatList(
-  items: unknown[],
-  format: OutputFormat,
-  options?: {
-    isTty?: boolean;
-    noColor?: boolean;
-    next_cursor?: string | null;
-  }
-): string {
-  const isTty = options?.isTty ?? true;
-  const noColor = options?.noColor ?? false;
-
+export function printEnvelope(envelope: HiveEnvelope, format: OutputFormat): void {
   switch (format) {
-    case "text":
-      return formatListAsText(items, isTty, noColor);
     case "json":
-      return formatListAsJson(items, options?.next_cursor);
+      process.stdout.write(JSON.stringify(envelope, null, 2) + "\n");
+      break;
     case "jsonl":
-      return formatListAsJsonl(items);
+      process.stdout.write(JSON.stringify(envelope) + "\n");
+      break;
     case "yaml":
-      return formatListAsYaml(items);
+      process.stdout.write(toYaml(envelope) + "\n");
+      break;
     case "sarif":
-      return formatListAsSarif(items);
-    default:
-      throw new Error(`Unknown format: ${format}`);
-  }
-}
-
-/**
- * Format a single record for output.
- */
-export function formatRecord(
-  record: unknown,
-  format: OutputFormat,
-  options?: {
-    isTty?: boolean;
-    noColor?: boolean;
-  }
-): string {
-  const isTty = options?.isTty ?? true;
-  const noColor = options?.noColor ?? false;
-
-  switch (format) {
+      // Only scan/lint output is sarif; other commands fall back to json
+      process.stdout.write(JSON.stringify(envelope, null, 2) + "\n");
+      break;
     case "text":
-      return formatRecordAsText(record, isTty, noColor);
-    case "json":
-      return formatRecordAsJson(record);
-    case "jsonl":
-      return formatRecordAsJsonl(record);
-    case "yaml":
-      return formatRecordAsYaml(record);
-    case "sarif":
-      // Single record is not suitable for SARIF; treat as array of 1
-      return formatListAsSarif([record]);
-    default:
-      throw new Error(`Unknown format: ${format}`);
+      // Callers handle text rendering themselves
+      break;
   }
 }
 
-// ===== Text Formatters =====
-
-function formatListAsText(
-  items: unknown[],
-  isTty: boolean,
-  noColor: boolean
-): string {
-  if (items.length === 0) {
-    return "(no results)";
+export function printText(lines: string[]): void {
+  for (const line of lines) {
+    process.stdout.write(line + "\n");
   }
-
-  // For now, simple JSON-like pretty printing in text mode.
-  // A production implementation would detect TTY and use colored tables,
-  // but for Round 2 this is sufficient.
-  return items.map((item) => formatRecordAsText(item, isTty, noColor)).join("\n");
 }
 
-function formatRecordAsText(
-  record: unknown,
-  _isTty: boolean,
-  _noColor: boolean
-): string {
-  // Stub: Pretty-print as indented JSON.
-  // Production: Use chalk + table library for colored, formatted output.
-  return JSON.stringify(record, null, 2);
+export function printError(message: string): void {
+  process.stderr.write(`error: ${message}\n`);
 }
 
-// ===== JSON Formatters =====
-
-function formatListAsJson(
-  items: unknown[],
-  next_cursor?: string | null
-): string {
-  const output: Record<string, unknown> = {
-    items,
-  };
-  if (next_cursor !== undefined) {
-    output.next_cursor = next_cursor;
+/** Minimal YAML serializer — handles the subset of types the envelope uses. */
+function toYaml(value: unknown, indent = 0): string {
+  const pad = "  ".repeat(indent);
+  if (value === null || value === undefined) return `${pad}~`;
+  if (typeof value === "boolean") return `${pad}${value}`;
+  if (typeof value === "number") return `${pad}${value}`;
+  if (typeof value === "string") {
+    if (value.includes("\n") || value.includes('"')) {
+      return `${pad}|\n${value.split("\n").map((l) => `${pad}  ${l}`).join("\n")}`;
+    }
+    return `${pad}${JSON.stringify(value)}`;
   }
-  return JSON.stringify(output, null, 2);
+  if (Array.isArray(value)) {
+    if (value.length === 0) return `${pad}[]`;
+    return value.map((item) => `${pad}- ${toYaml(item, indent).trimStart()}`).join("\n");
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).filter(
+      ([, v]) => v !== undefined,
+    );
+    if (entries.length === 0) return `${pad}{}`;
+    return entries
+      .map(([k, v]) => {
+        const vStr = toYaml(v, indent + 1);
+        const inline = vStr.trimStart();
+        if (typeof v === "object" && v !== null && !Array.isArray(v)) {
+          return `${pad}${k}:\n${vStr}`;
+        }
+        if (Array.isArray(v) && v.length > 0) {
+          return `${pad}${k}:\n${vStr}`;
+        }
+        return `${pad}${k}: ${inline}`;
+      })
+      .join("\n");
+  }
+  return `${pad}${String(value)}`;
 }
 
-function formatRecordAsJson(record: unknown): string {
-  return JSON.stringify(record, null, 2);
+/** Format a list of records as an aligned text table. */
+export function formatTable(
+  rows: Record<string, unknown>[],
+  columns: string[],
+): string {
+  if (rows.length === 0) return "(empty)";
+  const widths: number[] = columns.map((c) => c.length);
+  for (const row of rows) {
+    columns.forEach((col, i) => {
+      const cell = String(row[col] ?? "");
+      widths[i] = Math.max(widths[i], cell.length);
+    });
+  }
+  const header = columns.map((c, i) => c.padEnd(widths[i])).join("  ");
+  const sep = widths.map((w) => "-".repeat(w)).join("  ");
+  const body = rows
+    .map((row) => columns.map((col, i) => String(row[col] ?? "").padEnd(widths[i])).join("  "))
+    .join("\n");
+  return [header, sep, body].join("\n");
 }
 
-// ===== JSONL Formatters =====
-
-function formatListAsJsonl(items: unknown[]): string {
-  return items.map((item) => JSON.stringify(item)).join("\n");
-}
-
-function formatRecordAsJsonl(record: unknown): string {
-  return JSON.stringify(record);
-}
-
-// ===== YAML Formatters =====
-
-function formatListAsYaml(items: unknown[]): string {
-  // Stub: Convert to YAML format.
-  // Production: Use js-yaml library (already in package.json).
-  // For now, return JSON representation with YAML-like comments.
-  return (
-    "# List of items\n" +
-    JSON.stringify(items, null, 2)
-      .split("\n")
-      .map((line) => "  " + line)
-      .join("\n")
-  );
-}
-
-function formatRecordAsYaml(record: unknown): string {
-  // Stub: Convert to YAML format.
-  return "# Record\n" + JSON.stringify(record, null, 2);
-}
-
-// ===== SARIF Formatters =====
-
-/**
- * Format items as SARIF v2.1.0 (Static Analysis Results Interchange Format).
- *
- * Used by `hive scan` to output findings in CI/CD-compatible format.
- * Stub for now; production implementation will follow SARIF spec.
- */
-function formatListAsSarif(items: unknown[]): string {
-  const results = items.map((item, index) => ({
-    ruleId: `hive-scan-${index}`,
-    message: {
-      text: String(item),
-    },
-    level: "warning" as const,
-  }));
-
-  return JSON.stringify(
-    {
-      version: "2.1.0",
-      $schema: "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
-      runs: [
-        {
-          tool: {
-            driver: {
-              name: "hive-scan",
-              version: "0.5.0",
-            },
-          },
-          results,
-        },
-      ],
-    },
-    null,
-    2
-  );
-}
-
-/**
- * Check if stdout is a TTY (terminal) or pipe/file.
- */
-export function isTtyOutput(stream: NodeJS.WriteStream = process.stdout): boolean {
-  return stream.isTTY ?? false;
-}
-
-/**
- * Check if NO_COLOR env var is set (disables ANSI color codes).
- */
-export function shouldDisableColor(env: Record<string, string | undefined> = process.env): boolean {
-  return env.NO_COLOR === "1" || env.NO_COLOR === "true";
+/** Format a single record as key: value pairs. */
+export function formatRecord(record: Record<string, unknown>): string {
+  return Object.entries(record)
+    .filter(([, v]) => v !== undefined && v !== null)
+    .map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`)
+    .join("\n");
 }

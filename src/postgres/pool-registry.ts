@@ -1,783 +1,797 @@
 /**
- * Connection pool registry for AgentHive.
+ * P497: Connection pool registry.
  *
- * P497: Manages multiple pools — one for hiveControl + one per tenant — with LRU eviction,
- * per-pool sizing, promise-cache for concurrent lookups, and telemetry.
- *
- * Control pool: singleton, lazily created, re-read DSN from config on each call.
- * Project pools: LRU cached (default 16), per-pool sizing from registry or defaults.
- *
- * Failure modes typed: ProjectNotRegistered, RegistryUnavailable, TenantSecretUnavailable,
- * TenantDbUnreachable, DsnFormatInvalid, PoolExhausted.
+ * Public API:
+ *   getControlPool()         — singleton control-plane pool (DSN-change detection)
+ *   getProjectDb(slugOrId)   — LRU-cached tenant pool with promise deduplication
+ *   evictProject(slugOrId)   — drain + remove a tenant pool
+ *   poolStats()              — current PoolStatsSnapshot
+ *   shutdown()               — ordered drain (tenants → control)
+ *   pingProject(slug)        — test connectivity
+ *   setVault(v)              — inject vault implementation (default: env-var read)
+ *   resetForTesting()        — hard-reset all state; only for test isolation
  */
 
-import { Pool, type PoolConfig, type QueryResultRow } from "pg";
+import { Client, Pool } from "pg";
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const DEFAULT_LRU_MAX = 16;
+
+// Mirror the search path that infra/postgres/pool.ts sets, so callers that
+// switch from getPool() → getControlPool() see the same schema resolution.
+const CONTROL_SEARCH_PATH =
+  "roadmap_proposal,roadmap_workforce,roadmap_efficiency,roadmap,public";
+const DEFAULT_POOL_MAX_CONTROL = 10;
+const DEFAULT_POOL_MAX_TENANT = 8;
+const DEFAULT_IDLE_MS = 5 * 60_000;
+const DEFAULT_DRAIN_TIMEOUT_MS = 30_000;
+const DEFAULT_STMT_TIMEOUT_MS = 30_000;
+const DEFAULT_CONN_TIMEOUT_MS = 5_000;
+
+const RETRY_BACKOFF_SEQUENCE_MS = [500, 1_000, 2_000, 4_000, 8_000, 15_000];
+
+// ── Eviction reasons ──────────────────────────────────────────────────────────
+
+type EvictionReason = "lru" | "idle" | "stale" | "shutdown";
+
+// ── Error classes ─────────────────────────────────────────────────────────────
 
 export class ProjectNotRegistered extends Error {
-	constructor(public slugOrId: string | number) {
-		super(`Project not registered: ${slugOrId}`);
-		this.name = "ProjectNotRegistered";
-	}
+  constructor(public readonly slugOrId: string | number) {
+    super(
+      String(slugOrId) === "hiveControl"
+        ? "hiveControl is the control plane; use getControlPool() not getProjectDb()"
+        : `Project not found in registry: ${slugOrId}`,
+    );
+    this.name = "ProjectNotRegistered";
+    Object.setPrototypeOf(this, ProjectNotRegistered.prototype);
+  }
 }
 
 export class RegistryUnavailable extends Error {
-	constructor(public override cause: Error) {
-		super(`Registry unavailable: ${cause.message}`);
-		this.name = "RegistryUnavailable";
-	}
+  constructor(public readonly cause: Error) {
+    super(`hiveControl registry is unavailable: ${cause.message}`);
+    this.name = "RegistryUnavailable";
+    Object.setPrototypeOf(this, RegistryUnavailable.prototype);
+  }
 }
 
 export class TenantSecretUnavailable extends Error {
-	constructor(
-		public ref: string,
-		public override cause: Error,
-	) {
-		super(`Tenant secret unavailable: ${ref} — ${cause.message}`);
-		this.name = "TenantSecretUnavailable";
-	}
+  constructor(
+    public readonly ref: string,
+    public readonly cause: Error,
+  ) {
+    super(`Vault secret unavailable for ref "${ref}": ${cause.message}`);
+    this.name = "TenantSecretUnavailable";
+    Object.setPrototypeOf(this, TenantSecretUnavailable.prototype);
+  }
 }
 
 export class TenantDbUnreachable extends Error {
-	constructor(
-		public slug: string,
-		public dsnHost: string,
-		public override cause: Error,
-	) {
-		super(`Tenant DB unreachable: ${slug} (${dsnHost}) — ${cause.message}`);
-		this.name = "TenantDbUnreachable";
-	}
+  constructor(
+    public readonly slug: string,
+    public readonly dsnHost: string,
+    public readonly cause: Error,
+  ) {
+    super(
+      `Tenant DB unreachable for "${slug}" at ${dsnHost}: ${cause.message}`,
+    );
+    this.name = "TenantDbUnreachable";
+    Object.setPrototypeOf(this, TenantDbUnreachable.prototype);
+  }
 }
 
 export class DsnFormatInvalid extends Error {
-	constructor(
-		public ref: string,
-		valueHint: string,
-	) {
-		super(`DSN format invalid: ${ref} (hint: ${valueHint})`);
-		this.name = "DsnFormatInvalid";
-	}
+  constructor(public readonly ref: string) {
+    super(`Vault ref "${ref}" returned a value that is not a valid postgres DSN`);
+    this.name = "DsnFormatInvalid";
+    Object.setPrototypeOf(this, DsnFormatInvalid.prototype);
+  }
 }
 
 export class PoolExhausted extends Error {
-	constructor(
-		public poolName: string,
-		public max: number,
-	) {
-		super(`Pool exhausted: ${poolName} (max ${max})`);
-		this.name = "PoolExhausted";
-	}
+  constructor(
+    public readonly poolName: string,
+    public readonly max: number,
+  ) {
+    super(`Pool "${poolName}" is exhausted (max=${max})`);
+    this.name = "PoolExhausted";
+    Object.setPrototypeOf(this, PoolExhausted.prototype);
+  }
+}
+
+// ── Metrics types ─────────────────────────────────────────────────────────────
+
+interface PoolCounters {
+  hits: number;
+  misses: number;
+  evictions: number;
+  create_failures: number;
+  create_retries: number;
+  drain_timeouts: number;
+}
+
+function makeCounters(): PoolCounters {
+  return {
+    hits: 0,
+    misses: 0,
+    evictions: 0,
+    create_failures: 0,
+    create_retries: 0,
+    drain_timeouts: 0,
+  };
+}
+
+export interface PoolStatsEntry {
+  name: string;
+  source: "control" | "project";
+  hits: number;
+  misses: number;
+  evictions: number;
+  create_failures: number;
+  create_retries: number;
+  active_connections: number;
+  idle_connections: number;
+  drain_timeouts: number;
 }
 
 export interface PoolStatsSnapshot {
-	timestamp: string; // ISO 8601
-	pools: Array<{
-		name: string;
-		source: "control" | "project";
-		hits: number;
-		misses: number;
-		evictions: number;
-		create_failures: number;
-		create_retries: number;
-		active_connections: number;
-		idle_connections: number;
-		drain_timeouts: number;
-	}>;
-	total_active_pools: number;
+  timestamp: string;
+  pools: PoolStatsEntry[];
+  total_active_pools: number;
 }
 
-interface PoolMetrics {
-	hits: number;
-	misses: number;
-	evictions: number;
-	create_failures: number;
-	create_retries: number;
-	drain_timeouts: number;
+// ── Vault interface ───────────────────────────────────────────────────────────
+
+export interface VaultInterface {
+  read(secretRef: string): Promise<string>;
 }
 
-interface PoolEntry {
-	pool: Pool;
-	metrics: PoolMetrics;
-	createdAt: number;
-	lastUsed: number;
-}
-
-interface PromiseCacheEntry {
-	promise: Promise<Pool>;
-	createdAt: number;
-}
-
-// ─── Configuration ──────────────────────────────────────────────────────────
-
-const LRU_MAX_DEFAULT = 16;
-const POOL_MAX_DEFAULT = 8;
-const IDLE_TIMEOUT_MS_DEFAULT = 5 * 60_000; // 5 min
-const STATEMENT_TIMEOUT_MS_DEFAULT = 30_000; // 30 s
-const DRAIN_TIMEOUT_MS = 30_000; // 30 s grace for in-flight queries
-const TELEMETRY_INTERVAL_MS = 30_000; // 30 s
-const RETRY_MAX_DURATION_MS = 30_000; // 30 s backoff window
-
-let lruMax = LRU_MAX_DEFAULT;
-let poolMaxDefault = POOL_MAX_DEFAULT;
-let idleTimeoutMsDefault = IDLE_TIMEOUT_MS_DEFAULT;
-let statementTimeoutMsDefault = STATEMENT_TIMEOUT_MS_DEFAULT;
-
-// Parse config from env
-if (process.env.AGENTHIVE_TENANT_POOL_LRU_MAX) {
-	const parsed = parseInt(process.env.AGENTHIVE_TENANT_POOL_LRU_MAX, 10);
-	if (Number.isFinite(parsed) && parsed > 0) {
-		lruMax = Math.trunc(parsed);
-	}
-}
-
-// ─── State ──────────────────────────────────────────────────────────────────
-
-let controlPool: Pool | null = null;
-let controlPoolDsn: string | null = null;
-
-// V2 agentHive2 pool — single database with per-project schemas (P826)
-let v2Pool: Pool | null = null;
-let v2PoolDsn: string | null = null;
-let controlPoolMetrics: PoolMetrics = {
-	hits: 0,
-	misses: 0,
-	evictions: 0,
-	create_failures: 0,
-	create_retries: 0,
-	drain_timeouts: 0,
+// Default vault: resolves DSN from process.env by ref name.
+// Replace via setVault() when P496 (real vault) lands.
+const envVault: VaultInterface = {
+  async read(ref: string): Promise<string> {
+    const val = process.env[ref];
+    if (!val) {
+      throw new TenantSecretUnavailable(
+        ref,
+        new Error(`environment variable "${ref}" is not set`),
+      );
+    }
+    return val;
+  },
 };
 
-const projectPools = new Map<string, PoolEntry>(); // keyed by DSN for LRU
-const projectPoolsBySlug = new Map<string, string>(); // slug -> DSN
-const projectPoolsById = new Map<number, string>(); // project_id -> DSN
+let _vault: VaultInterface = envVault;
 
-const promiseCache = new Map<string, PromiseCacheEntry>(); // DSN -> in-flight create promise
+export function setVault(v: VaultInterface): void {
+  _vault = v;
+}
 
-let telemetryTimer: ReturnType<typeof setInterval> | null = null;
-let listenConnection: Pool | null = null;
-let shuttingDown = false;
+function getVault(): VaultInterface {
+  return _vault;
+}
 
-// ─── Control Pool ───────────────────────────────────────────────────────────
+// ── Internal pool entry ───────────────────────────────────────────────────────
+
+interface PoolEntry {
+  pool: Pool;
+  counters: PoolCounters;
+  name: string;
+  source: "control" | "project";
+  lastUsedAt: number;
+  draining: boolean;
+}
+
+// ── Global counters (survive pool eviction + re-creation) ─────────────────────
+
+const _globalCounters = new Map<string, PoolCounters>();
+
+function getOrMakeCounters(name: string): PoolCounters {
+  let c = _globalCounters.get(name);
+  if (!c) {
+    c = makeCounters();
+    _globalCounters.set(name, c);
+  }
+  return c;
+}
+
+// ── Registry row shape ────────────────────────────────────────────────────────
+
+interface RegistryRow {
+  slug: string;
+  project_id: number;
+  dsn_secret_ref: string;
+  pool_max?: number | null;
+  idle_ms?: number | null;
+  stmt_timeout_ms?: number | null;
+}
+
+// ── Drain utility ─────────────────────────────────────────────────────────────
+
+async function drainPool(entry: PoolEntry, reason: EvictionReason): Promise<void> {
+  if (entry.draining) return;
+  entry.draining = true;
+  entry.counters.evictions++;
+
+  let timedOut = false;
+  const drainTimeout = new Promise<void>((resolve) => {
+    const t = setTimeout(() => {
+      timedOut = true;
+      resolve();
+    }, DEFAULT_DRAIN_TIMEOUT_MS);
+    if (typeof (t as any).unref === "function") (t as any).unref();
+  });
+
+  await Promise.race([
+    entry.pool.end().catch((err) => {
+      if (!timedOut) {
+        console.error(
+          `[pool-registry] Drain error for "${entry.name}" (${reason}):`,
+          (err as Error).message,
+        );
+      }
+    }),
+    drainTimeout,
+  ]);
+
+  if (timedOut) {
+    entry.counters.drain_timeouts++;
+    console.warn(
+      `[pool-registry] Drain timeout for pool "${entry.name}" (${reason}); force-closing.`,
+    );
+  }
+}
+
+// ── Control pool ──────────────────────────────────────────────────────────────
+
+function readControlDsnSignature(): string {
+  if (process.env.AGENTHIVE_CONTROL_DSN) return process.env.AGENTHIVE_CONTROL_DSN;
+  const host = process.env.PGHOST ?? "127.0.0.1";
+  const port = process.env.PGPORT ?? "5432";
+  const user = process.env.PGUSER ?? "xiaomi";
+  const database = process.env.PGDATABASE ?? "agenthive";
+  return `${user}@${host}:${port}/${database}`;
+}
+
+function buildControlPool(): Pool {
+  const password = process.env.PGPASSWORD;
+  if (!password) {
+    throw new Error(
+      "[pool-registry] PGPASSWORD is required for getControlPool(). " +
+        "Set PGPASSWORD before starting.",
+    );
+  }
+
+  const searchPathOptions = `-c search_path=${CONTROL_SEARCH_PATH}`;
+
+  // When AGENTHIVE_CONTROL_DSN is set (P518 cutover), use it as a connection string.
+  if (process.env.AGENTHIVE_CONTROL_DSN) {
+    return new Pool({
+      connectionString: process.env.AGENTHIVE_CONTROL_DSN,
+      options: searchPathOptions,
+      max: DEFAULT_POOL_MAX_CONTROL,
+      idleTimeoutMillis: DEFAULT_IDLE_MS,
+      connectionTimeoutMillis: DEFAULT_CONN_TIMEOUT_MS,
+      statement_timeout: DEFAULT_STMT_TIMEOUT_MS,
+      allowExitOnIdle: true,
+    });
+  }
+
+  return new Pool({
+    host: process.env.PGHOST ?? "127.0.0.1",
+    port: Number(process.env.PGPORT ?? 5432),
+    user: process.env.PGUSER ?? "xiaomi",
+    database: process.env.PGDATABASE ?? "agenthive",
+    password,
+    options: searchPathOptions,
+    max: DEFAULT_POOL_MAX_CONTROL,
+    idleTimeoutMillis: DEFAULT_IDLE_MS,
+    connectionTimeoutMillis: DEFAULT_CONN_TIMEOUT_MS,
+    statement_timeout: DEFAULT_STMT_TIMEOUT_MS,
+    allowExitOnIdle: true,
+  });
+}
+
+let _controlEntry: PoolEntry | null = null;
+let _controlDsnSig: string | null = null;
 
 /**
- * Get or create the control pool.
+ * Returns the singleton control-plane pool.
  *
- * Lazily created; DSN is re-read from config on each call to detect cutover.
- * If DSN changed, drain old pool and create new one.
+ * The DSN signature is re-read from env on every call so that a
+ * CONTROL_DSN env-var flip (P518 cutover) is detected without restart.
+ * When the signature changes, the old pool is drained asynchronously
+ * and a fresh pool is built.
  */
 export function getControlPool(): Pool {
-	// Re-read DSN from environment each call
-	const dsn = process.env.DATABASE_URL || buildDefaultDsn("agenthive");
+  const sig = readControlDsnSignature();
 
-	if (controlPool && controlPoolDsn !== dsn) {
-		// DSN changed; drain old pool in background
-		if (process.env.DEBUG_PG) {
-			console.error("[PoolRegistry] Control pool DSN changed; draining old pool");
-		}
-		const oldPool = controlPool;
-		controlPool = null;
-		controlPoolDsn = null;
-		void drainPool(oldPool, "control", DRAIN_TIMEOUT_MS).catch(() => {});
-	}
+  if (_controlEntry && _controlDsnSig !== sig) {
+    const old = _controlEntry;
+    _controlEntry = null;
+    _controlDsnSig = null;
+    void drainPool(old, "shutdown").catch(() => {});
+  }
 
-	if (!controlPool) {
-		if (process.env.DEBUG_PG) {
-			console.error("[PoolRegistry] Creating control pool");
-		}
+  if (!_controlEntry) {
+    const pool = buildControlPool();
+    pool.on("error", (err) => {
+      console.error("[pool-registry] Control pool error:", err.message);
+    });
+    _controlEntry = {
+      pool,
+      counters: getOrMakeCounters("control"),
+      name: "control",
+      source: "control",
+      lastUsedAt: Date.now(),
+      draining: false,
+    };
+    _controlDsnSig = sig;
+  }
 
-		controlPool = new Pool({
-			connectionString: dsn,
-			max: poolMaxDefault,
-			idleTimeoutMillis: idleTimeoutMsDefault,
-			statement_timeout: statementTimeoutMsDefault,
-		});
-
-		controlPool.on("error", (err) => {
-			console.error("[PoolRegistry] Control pool error:", err.message);
-		});
-
-		controlPoolDsn = dsn;
-	}
-
-	controlPoolMetrics.hits++;
-	return controlPool;
+  _controlEntry.counters.hits++;
+  _controlEntry.lastUsedAt = Date.now();
+  return _controlEntry.pool;
 }
 
-// ─── V2 agentHive2 Pool (P826) ───────────────────────────────────────────────
+// ── Tenant pool LRU (Map preserves insertion order; oldest = first) ───────────
 
-/**
- * Build a Postgres `options` string that sets the search path.
- * schema comes first so unqualified table refs resolve to the project schema.
- */
-function buildV2SearchPath(projectSchema: string): string {
-	return `-c search_path=${projectSchema},core,public`;
+const _tenantPools = new Map<string, PoolEntry>();
+const _inflightCreates = new Map<string, Promise<Pool>>();
+
+let _idleEvictionTimer: ReturnType<typeof setInterval> | null = null;
+
+function getLruMax(): number {
+  const val = process.env.AGENTHIVE_TENANT_POOL_LRU_MAX;
+  if (val) {
+    const n = Number(val);
+    if (Number.isFinite(n) && n > 0) return Math.trunc(n);
+  }
+  return DEFAULT_LRU_MAX;
 }
 
-/**
- * Get or create the agentHive2 pool for a specific project schema.
- *
- * Connection string priority:
- *   1. AGENTHIVE_V2_DB_URL env var
- *   2. Default DSN using PGHOST/PGPORT/PGUSER/PGPASSWORD against "agentHive2"
- *
- * search_path is set to: <projectSchema>, core, public
- *
- * Returns null if agentHive2 is not reachable (non-fatal — V2 is opt-in).
- */
-export async function getAgentHive2Pool(
-	projectSchema = "agentHive",
-): Promise<Pool | null> {
-	const baseDsn =
-		process.env.AGENTHIVE_V2_DB_URL || buildDefaultDsn("agentHive2");
-	const dsn = `${baseDsn}?options=${encodeURIComponent(buildV2SearchPath(projectSchema))}`;
+function startIdleEvictionTimer(): void {
+  if (_idleEvictionTimer) return;
+  const halfIdle = Math.floor(DEFAULT_IDLE_MS / 2);
+  _idleEvictionTimer = setInterval(async () => {
+    const now = Date.now();
+    for (const [key, entry] of _tenantPools) {
+      if (
+        !entry.draining &&
+        entry.pool.idleCount === entry.pool.totalCount &&
+        now - entry.lastUsedAt > DEFAULT_IDLE_MS
+      ) {
+        _tenantPools.delete(key);
+        void drainPool(entry, "idle").catch(() => {});
+      }
+    }
+  }, halfIdle);
 
-	if (v2Pool && v2PoolDsn !== dsn) {
-		const old = v2Pool;
-		v2Pool = null;
-		v2PoolDsn = null;
-		void drainPool(old, "v2:agentHive2", DRAIN_TIMEOUT_MS).catch(() => {});
-	}
-
-	if (!v2Pool) {
-		try {
-			v2Pool = new Pool({
-				connectionString: baseDsn,
-				options: buildV2SearchPath(projectSchema),
-				max: poolMaxDefault,
-				idleTimeoutMillis: idleTimeoutMsDefault,
-				statement_timeout: statementTimeoutMsDefault,
-			});
-			v2Pool.on("error", (err) => {
-				console.error("[PoolRegistry] V2 pool error:", err.message);
-			});
-			v2PoolDsn = dsn;
-
-			if (process.env.DEBUG_PG) {
-				console.error(
-					`[PoolRegistry] V2 pool created (schema=${projectSchema})`,
-				);
-			}
-		} catch (err) {
-			console.error("[PoolRegistry] Failed to create V2 pool:", err);
-			return null;
-		}
-	}
-
-	return v2Pool;
+  if (typeof (_idleEvictionTimer as any).unref === "function") {
+    (_idleEvictionTimer as any).unref();
+  }
 }
 
-/**
- * Verify agentHive2 connectivity and schema presence.
- *
- * Called at MCP server startup if AGENTHIVE_V2_DB_URL is set.
- * Non-fatal: logs result and returns boolean — never throws.
- */
-export async function verifyAgentHive2Connection(
-	projectSchema = "agentHive",
-): Promise<boolean> {
-	try {
-		const pool = await getAgentHive2Pool(projectSchema);
-		if (!pool) return false;
+// ── LISTEN connection for stale-registry eviction ────────────────────────────
+// Must use a direct pg.Client (NOT PgBouncer transaction-mode — LISTEN is
+// not supported by transaction-mode poolers; see P499).
 
-		const result = await pool.query<{ schema_name: string }>(
-			`SELECT schema_name
-			   FROM information_schema.schemata
-			  WHERE schema_name = $1`,
-			[projectSchema],
-		);
+let _listenClient: Client | null = null;
 
-		const found = result.rows.length > 0;
-		if (found) {
-			console.error(
-				`[PoolRegistry] V2 agentHive2 verified: schema '${projectSchema}' present`,
-			);
-		} else {
-			console.error(
-				`[PoolRegistry] V2 agentHive2 connected but schema '${projectSchema}' not found — run deploy/project-init/`,
-			);
-		}
-		return found;
-	} catch (err) {
-		console.error("[PoolRegistry] V2 agentHive2 connection check failed:", err);
-		return false;
-	}
+async function ensureListenConnection(): Promise<void> {
+  if (_listenClient) return;
+
+  // PGPORT_DIRECT overrides PgBouncer port when P499 is deployed.
+  const host = process.env.PGHOST ?? "127.0.0.1";
+  const port = Number(process.env.PGPORT_DIRECT ?? process.env.PGPORT ?? 5432);
+
+  const client = new Client({
+    host,
+    port,
+    user: process.env.PGUSER ?? "xiaomi",
+    database: process.env.PGDATABASE ?? "agenthive",
+    password: process.env.PGPASSWORD,
+    keepAlive: true,
+  });
+
+  try {
+    await client.connect();
+    await client.query("LISTEN pool_evict");
+
+    client.on("notification", (msg) => {
+      if (msg.channel !== "pool_evict" || !msg.payload) return;
+      try {
+        const data = JSON.parse(msg.payload) as {
+          slug?: string;
+          project_id?: number;
+        };
+        const key =
+          data.slug ??
+          (data.project_id !== undefined ? String(data.project_id) : null);
+        if (key) {
+          void evictProject(key).catch((err) => {
+            console.error(
+              `[pool-registry] Auto-evict error for "${key}":`,
+              (err as Error).message,
+            );
+          });
+        }
+      } catch {
+        // Malformed payload — ignore
+      }
+    });
+
+    client.on("error", (err) => {
+      console.error("[pool-registry] LISTEN client error:", err.message);
+      _listenClient = null;
+      const t = setTimeout(
+        () => void ensureListenConnection().catch(() => {}),
+        5_000,
+      );
+      if (typeof (t as any).unref === "function") (t as any).unref();
+    });
+
+    client.on("end", () => {
+      _listenClient = null;
+    });
+
+    _listenClient = client;
+  } catch (err) {
+    console.error(
+      "[pool-registry] Failed to establish LISTEN connection:",
+      (err as Error).message,
+    );
+    void client.end().catch(() => {});
+  }
 }
 
-// ─── Project Pool Registry ──────────────────────────────────────────────────
+// ── Tenant pool creation ──────────────────────────────────────────────────────
+
+function isFatalError(err: unknown): boolean {
+  return (
+    err instanceof ProjectNotRegistered ||
+    err instanceof DsnFormatInvalid
+  );
+}
+
+function isTransientVaultError(err: TenantSecretUnavailable): boolean {
+  const cause = err.cause as NodeJS.ErrnoException | undefined;
+  return cause?.code === "ECONNREFUSED" || cause?.code === "ETIMEDOUT";
+}
+
+function isTransient(err: unknown): boolean {
+  if (isFatalError(err)) return false;
+  if (err instanceof TenantSecretUnavailable) return isTransientVaultError(err);
+  if (err instanceof TenantDbUnreachable) return true;
+  if (err instanceof RegistryUnavailable) return true;
+  return false;
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, ms);
+    if (typeof (t as any).unref === "function") (t as any).unref();
+  });
+}
+
+async function createTenantPoolOnce(canonical: string): Promise<Pool> {
+  // Query hiveControl for the project registry row
+  let row: RegistryRow;
+  try {
+    const ctrl = getControlPool();
+    const result = await ctrl.query<RegistryRow>(
+      `SELECT slug,
+              project_id,
+              dsn_secret_ref,
+              pool_max,
+              idle_ms,
+              stmt_timeout_ms
+         FROM roadmap.project
+        WHERE slug = $1
+           OR project_id::text = $1
+        LIMIT 1`,
+      [canonical],
+    );
+    if (!result.rows[0]) throw new ProjectNotRegistered(canonical);
+    row = result.rows[0];
+  } catch (err) {
+    if (err instanceof ProjectNotRegistered) throw err;
+    throw new RegistryUnavailable(err as Error);
+  }
+
+  // Resolve DSN from vault
+  let dsn: string;
+  try {
+    dsn = await getVault().read(row.dsn_secret_ref);
+  } catch (err) {
+    if (err instanceof TenantSecretUnavailable) throw err;
+    throw new TenantSecretUnavailable(row.dsn_secret_ref, err as Error);
+  }
+
+  // Validate DSN format (fatal — do not retry)
+  let dsnHost: string;
+  try {
+    const parsed = new URL(dsn);
+    if (
+      parsed.protocol !== "postgres:" &&
+      parsed.protocol !== "postgresql:"
+    ) {
+      throw new Error("not a postgres URL");
+    }
+    dsnHost = parsed.hostname;
+  } catch {
+    throw new DsnFormatInvalid(row.dsn_secret_ref);
+  }
+
+  const poolMax = row.pool_max ?? DEFAULT_POOL_MAX_TENANT;
+  const idleMs = row.idle_ms ?? DEFAULT_IDLE_MS;
+  const stmtTimeout = row.stmt_timeout_ms ?? DEFAULT_STMT_TIMEOUT_MS;
+
+  const pool = new Pool({
+    connectionString: dsn,
+    max: poolMax,
+    idleTimeoutMillis: idleMs,
+    connectionTimeoutMillis: DEFAULT_CONN_TIMEOUT_MS,
+    statement_timeout: stmtTimeout,
+    allowExitOnIdle: true,
+  });
+
+  // Verify connectivity before caching
+  try {
+    const client = await pool.connect();
+    client.release();
+  } catch (err) {
+    void pool.end().catch(() => {});
+    throw new TenantDbUnreachable(canonical, dsnHost, err as Error);
+  }
+
+  pool.on("error", (err) => {
+    console.error(
+      `[pool-registry] Tenant pool error for "${canonical}":`,
+      err.message,
+    );
+  });
+
+  return pool;
+}
+
+async function createTenantPool(canonical: string): Promise<Pool> {
+  const counters = getOrMakeCounters(canonical);
+  counters.misses++;
+
+  let totalBackoffMs = 0;
+  let lastErr: unknown;
+
+  for (let i = 0; i <= RETRY_BACKOFF_SEQUENCE_MS.length; i++) {
+    try {
+      const pool = await createTenantPoolOnce(canonical);
+
+      // Enforce LRU cap before inserting
+      const lruMax = getLruMax();
+      if (_tenantPools.size >= lruMax) {
+        const [oldestKey, oldestEntry] = _tenantPools
+          .entries()
+          .next().value as [string, PoolEntry];
+        _tenantPools.delete(oldestKey);
+        void drainPool(oldestEntry, "lru").catch(() => {});
+      }
+
+      const entry: PoolEntry = {
+        pool,
+        counters,
+        name: canonical,
+        source: "project",
+        lastUsedAt: Date.now(),
+        draining: false,
+      };
+      _tenantPools.set(canonical, entry);
+
+      startIdleEvictionTimer();
+      void ensureListenConnection().catch(() => {});
+
+      return pool;
+    } catch (err) {
+      lastErr = err;
+
+      // Fatal errors: throw immediately, no retry, no caching
+      if (isFatalError(err)) throw err;
+
+      const backoffMs = RETRY_BACKOFF_SEQUENCE_MS[i];
+      if (backoffMs === undefined || totalBackoffMs + backoffMs > 30_000) break;
+
+      if (isTransient(err)) {
+        counters.create_retries++;
+        await sleep(backoffMs);
+        totalBackoffMs += backoffMs;
+      } else {
+        break;
+      }
+    }
+  }
+
+  counters.create_failures++;
+  throw lastErr;
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Get or create a pool for a tenant.
+ * Returns a pool for the given project slug or numeric project_id.
  *
- * Lookup:
- * 1. Check in-memory LRU cache.
- * 2. Query hiveControl.roadmap.project for registry.
- * 3. Resolve secret via vault (mocked for now).
- * 4. Create pool.
- * 5. Insert into LRU (evict oldest if at cap).
- * 6. Emit metrics.
+ * Concurrent calls for the same key share the in-flight create promise
+ * (no duplicate pools created).  Fatal errors (ProjectNotRegistered,
+ * DsnFormatInvalid) are NOT cached — the next call retries from scratch.
  */
 export async function getProjectDb(slugOrId: string | number): Promise<Pool> {
-	// Recursion guard
-	if (
-		(typeof slugOrId === "string" && slugOrId === "hiveControl") ||
-		(typeof slugOrId === "number" &&
-			projectPoolsById.has(slugOrId) &&
-			projectPoolsById.get(slugOrId) === "hiveControl")
-	) {
-		throw new ProjectNotRegistered(slugOrId);
-	}
+  const canonical = String(slugOrId);
 
-	let dsn: string;
+  // Recursion guard: hiveControl IS the control plane
+  if (canonical === "hiveControl") {
+    throw new ProjectNotRegistered("hiveControl");
+  }
 
-	if (typeof slugOrId === "string") {
-		// Lookup by slug
-		const cachedDsn = projectPoolsBySlug.get(slugOrId);
-		if (cachedDsn) {
-			const entry = projectPools.get(cachedDsn);
-			if (entry) {
-				entry.lastUsed = Date.now();
-				entry.metrics.hits++;
-				if (process.env.DEBUG_PG) {
-					console.error(`[PoolRegistry] Hit: project ${slugOrId} (cached)`);
-				}
-				return entry.pool;
-			}
-		}
+  // LRU hit — move to end (MRU position)
+  const existing = _tenantPools.get(canonical);
+  if (existing && !existing.draining) {
+    _tenantPools.delete(canonical);
+    _tenantPools.set(canonical, existing);
+    existing.counters.hits++;
+    existing.lastUsedAt = Date.now();
+    return existing.pool;
+  }
 
-		dsn = await resolveProjectDsn(slugOrId);
-		projectPoolsBySlug.set(slugOrId, dsn);
-	} else {
-		// Lookup by project_id
-		const cachedDsn = projectPoolsById.get(slugOrId);
-		if (cachedDsn) {
-			const entry = projectPools.get(cachedDsn);
-			if (entry) {
-				entry.lastUsed = Date.now();
-				entry.metrics.hits++;
-				if (process.env.DEBUG_PG) {
-					console.error(`[PoolRegistry] Hit: project ${slugOrId} (cached)`);
-				}
-				return entry.pool;
-			}
-		}
+  // In-flight deduplication: concurrent callers share the same promise
+  const inflight = _inflightCreates.get(canonical);
+  if (inflight) return inflight;
 
-		dsn = await resolveProjectDsnById(slugOrId);
-		projectPoolsById.set(slugOrId, dsn);
-	}
+  const createPromise = createTenantPool(canonical)
+    .then((pool) => {
+      _inflightCreates.delete(canonical);
+      return pool;
+    })
+    .catch((err) => {
+      _inflightCreates.delete(canonical);
+      throw err;
+    });
 
-	// Check if DSN is already in pool
-	const existingEntry = projectPools.get(dsn);
-	if (existingEntry) {
-		existingEntry.lastUsed = Date.now();
-		existingEntry.metrics.hits++;
-		return existingEntry.pool;
-	}
-
-	// Create new pool (with promise cache to deduplicate concurrent requests)
-	const pool = await createPoolWithPromiseCache(dsn);
-
-	// Insert into LRU
-	const entry: PoolEntry = {
-		pool,
-		metrics: {
-			hits: 1,
-			misses: 0,
-			evictions: 0,
-			create_failures: 0,
-			create_retries: 0,
-			drain_timeouts: 0,
-		},
-		createdAt: Date.now(),
-		lastUsed: Date.now(),
-	};
-
-	projectPools.set(dsn, entry);
-
-	// Enforce LRU cap
-	if (projectPools.size > lruMax) {
-		await evictOldestPool();
-	}
-
-	return pool;
+  _inflightCreates.set(canonical, createPromise);
+  return createPromise;
 }
 
 /**
- * Evict a project pool by slug or ID.
- * Called by stale registry triggers or manual cleanup.
+ * Drain and remove a tenant pool.  No-op if the pool is not cached.
  */
 export async function evictProject(slugOrId: string | number): Promise<void> {
-	let dsn: string | undefined;
+  const canonical = String(slugOrId);
+  _inflightCreates.delete(canonical);
 
-	if (typeof slugOrId === "string") {
-		dsn = projectPoolsBySlug.get(slugOrId);
-		projectPoolsBySlug.delete(slugOrId);
-	} else {
-		dsn = projectPoolsById.get(slugOrId);
-		projectPoolsById.delete(slugOrId);
-	}
+  const entry = _tenantPools.get(canonical);
+  if (!entry) return;
 
-	if (dsn) {
-		const entry = projectPools.get(dsn);
-		if (entry) {
-			projectPools.delete(dsn);
-			entry.metrics.evictions++;
-			await drainPool(entry.pool, `project:${slugOrId}`, DRAIN_TIMEOUT_MS);
-			if (process.env.DEBUG_PG) {
-				console.error(`[PoolRegistry] Evicted project ${slugOrId}`);
-			}
-		}
-	}
+  _tenantPools.delete(canonical);
+  await drainPool(entry, "stale");
 }
 
 /**
- * Get current pool statistics snapshot.
+ * Snapshot of in-process pool metrics.
+ * Counters are cumulative since process start (survive eviction/re-creation).
  */
 export function poolStats(): PoolStatsSnapshot {
-	const pools = [
-		controlPool
-			? {
-					name: "control",
-					source: "control" as const,
-					hits: controlPoolMetrics.hits,
-					misses: controlPoolMetrics.misses,
-					evictions: controlPoolMetrics.evictions,
-					create_failures: controlPoolMetrics.create_failures,
-					create_retries: controlPoolMetrics.create_retries,
-					active_connections: controlPool.totalCount - (controlPool.idleCount || 0),
-					idle_connections: controlPool.idleCount || 0,
-					drain_timeouts: controlPoolMetrics.drain_timeouts,
-				}
-			: null,
-		...Array.from(projectPools.values()).map((entry, idx) => ({
-			name: `project:${idx}`,
-			source: "project" as const,
-			hits: entry.metrics.hits,
-			misses: entry.metrics.misses,
-			evictions: entry.metrics.evictions,
-			create_failures: entry.metrics.create_failures,
-			create_retries: entry.metrics.create_retries,
-			active_connections:
-				entry.pool.totalCount - (entry.pool.idleCount || 0),
-			idle_connections: entry.pool.idleCount || 0,
-			drain_timeouts: entry.metrics.drain_timeouts,
-		})),
-	].filter(Boolean) as PoolStatsSnapshot["pools"];
+  const pools: PoolStatsEntry[] = [];
 
-	return {
-		timestamp: new Date().toISOString(),
-		pools,
-		total_active_pools: (controlPool ? 1 : 0) + projectPools.size,
-	};
+  if (_controlEntry) {
+    pools.push({
+      name: "control",
+      source: "control",
+      hits: _controlEntry.counters.hits,
+      misses: _controlEntry.counters.misses,
+      evictions: _controlEntry.counters.evictions,
+      create_failures: _controlEntry.counters.create_failures,
+      create_retries: _controlEntry.counters.create_retries,
+      active_connections:
+        _controlEntry.pool.totalCount - _controlEntry.pool.idleCount,
+      idle_connections: _controlEntry.pool.idleCount,
+      drain_timeouts: _controlEntry.counters.drain_timeouts,
+    });
+  }
+
+  for (const [name, entry] of _tenantPools) {
+    pools.push({
+      name,
+      source: "project",
+      hits: entry.counters.hits,
+      misses: entry.counters.misses,
+      evictions: entry.counters.evictions,
+      create_failures: entry.counters.create_failures,
+      create_retries: entry.counters.create_retries,
+      active_connections: entry.pool.totalCount - entry.pool.idleCount,
+      idle_connections: entry.pool.idleCount,
+      drain_timeouts: entry.counters.drain_timeouts,
+    });
+  }
+
+  return {
+    timestamp: new Date().toISOString(),
+    pools,
+    total_active_pools: (_controlEntry ? 1 : 0) + _tenantPools.size,
+  };
 }
 
 /**
- * Ping a tenant to verify connectivity.
+ * Test if a tenant DB is reachable.  Returns false on any error.
  */
 export async function pingProject(slug: string): Promise<boolean> {
-	try {
-		const pool = await getProjectDb(slug);
-		const result = await pool.query("SELECT 1");
-		return result.rowCount === 1;
-	} catch {
-		return false;
-	}
+  try {
+    const pool = await getProjectDb(slug);
+    await pool.query("SELECT 1");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
- * Graceful shutdown: drain all pools in order (tenants in parallel, control last).
+ * Ordered shutdown:
+ *   1. Stop idle-eviction timer
+ *   2. Drain tenant pools in parallel (30 s grace each)
+ *   3. Close LISTEN client
+ *   4. Drain control pool last
+ *   5. Emit final stats to stderr
  */
 export async function shutdown(): Promise<void> {
-	shuttingDown = true;
+  // 1. Stop idle-eviction timer
+  if (_idleEvictionTimer) {
+    clearInterval(_idleEvictionTimer);
+    _idleEvictionTimer = null;
+  }
 
-	if (telemetryTimer) {
-		clearInterval(telemetryTimer);
-		telemetryTimer = null;
-	}
+  // 2. Drain all tenant pools in parallel
+  const tenantDrains: Promise<void>[] = [];
+  for (const [key, entry] of _tenantPools) {
+    _tenantPools.delete(key);
+    tenantDrains.push(drainPool(entry, "shutdown").catch(() => {}));
+  }
+  await Promise.all(tenantDrains);
 
-	if (listenConnection) {
-		await listenConnection.end().catch(() => {});
-		listenConnection = null;
-	}
+  // 3. Close LISTEN client
+  if (_listenClient) {
+    try {
+      await _listenClient.query("UNLISTEN pool_evict");
+      await _listenClient.end();
+    } catch {
+      // Ignore errors during shutdown
+    }
+    _listenClient = null;
+  }
 
-	// Drain tenant pools in parallel
-	const drainPromises = Array.from(projectPools.values()).map((entry) =>
-		drainPool(entry.pool, entry.pool.toString(), DRAIN_TIMEOUT_MS),
-	);
-	await Promise.all(drainPromises);
-	projectPools.clear();
-	projectPoolsBySlug.clear();
-	projectPoolsById.clear();
+  // 4. Drain control pool last (tenant drain may have issued registry queries)
+  if (_controlEntry) {
+    const ctrl = _controlEntry;
+    _controlEntry = null;
+    _controlDsnSig = null;
+    await drainPool(ctrl, "shutdown").catch(() => {});
+  }
 
-	// Drain control pool last
-	if (controlPool) {
-		await drainPool(controlPool, "control", DRAIN_TIMEOUT_MS);
-		controlPool = null;
-		controlPoolDsn = null;
-	}
+  // 5. Final snapshot to logs
+  console.info(
+    "[pool-registry] shutdown complete. final stats:",
+    JSON.stringify(poolStats()),
+  );
 
-	// Emit final snapshot
-	const final = poolStats();
-	console.error("[PoolRegistry] Final pool stats:", JSON.stringify(final));
-}
-
-// ─── Internals ──────────────────────────────────────────────────────────────
-
-function buildDefaultDsn(database: string): string {
-	const host = process.env.PGHOST || "127.0.0.1";
-	const port = process.env.PGPORT || "5432";
-	const user = process.env.PGUSER || process.env.USER || process.env.USERNAME || "postgres";
-	const password = process.env.PGPASSWORD || "";
-	return `postgresql://${user}:${password}@${host}:${port}/${database}`;
-}
-
-/**
- * Resolve project DSN by slug.
- * Queries hiveControl.roadmap.project.
- */
-async function resolveProjectDsn(slug: string): Promise<string> {
-	try {
-		const controlPool = getControlPool();
-		const result = await controlPool.query<{
-			dsn_secret_ref: string;
-			pool_max?: number;
-			idle_ms?: number;
-			stmt_timeout_ms?: number;
-		}>(
-			`SELECT dsn_secret_ref, pool_max, idle_ms, stmt_timeout_ms
-       FROM roadmap.project
-      WHERE slug = $1`,
-			[slug],
-		);
-
-		if (result.rows.length === 0) {
-			throw new ProjectNotRegistered(slug);
-		}
-
-		const row = result.rows[0];
-		const dsn = await resolveDsnSecret(row.dsn_secret_ref);
-		return dsn;
-	} catch (err) {
-		if (err instanceof ProjectNotRegistered) throw err;
-		if (err instanceof TenantSecretUnavailable) throw err;
-		if (err instanceof DsnFormatInvalid) throw err;
-		throw new RegistryUnavailable(err as Error);
-	}
+  _globalCounters.clear();
 }
 
 /**
- * Resolve project DSN by project_id.
+ * Hard-reset all module state.  ONLY call from test setup/teardown.
+ * Drains all pools before clearing state.
  */
-async function resolveProjectDsnById(projectId: number): Promise<string> {
-	try {
-		const controlPool = getControlPool();
-		const result = await controlPool.query<{
-			slug: string;
-			dsn_secret_ref: string;
-			pool_max?: number;
-			idle_ms?: number;
-			stmt_timeout_ms?: number;
-		}>(
-			`SELECT slug, dsn_secret_ref, pool_max, idle_ms, stmt_timeout_ms
-       FROM roadmap.project
-      WHERE project_id = $1`,
-			[projectId],
-		);
-
-		if (result.rows.length === 0) {
-			throw new ProjectNotRegistered(projectId);
-		}
-
-		const row = result.rows[0];
-		projectPoolsBySlug.set(row.slug, ""); // placeholder for later
-		const dsn = await resolveDsnSecret(row.dsn_secret_ref);
-		return dsn;
-	} catch (err) {
-		if (err instanceof ProjectNotRegistered) throw err;
-		if (err instanceof TenantSecretUnavailable) throw err;
-		if (err instanceof DsnFormatInvalid) throw err;
-		throw new RegistryUnavailable(err as Error);
-	}
-}
-
-/**
- * Mock vault secret resolution.
- * In production, this calls getVault().read(ref).
- */
-async function resolveDsnSecret(ref: string): Promise<string> {
-	// For now, assume ref is a direct DSN or env var name
-	if (process.env[ref]) {
-		return process.env[ref]!;
-	}
-
-	// Try parsing as a literal DSN
-	if (ref.startsWith("postgresql://")) {
-		return ref;
-	}
-
-	throw new DsnFormatInvalid(ref, `expected postgresql:// or env var`);
-}
-
-/**
- * Create pool with promise cache to deduplicate concurrent requests.
- */
-async function createPoolWithPromiseCache(dsn: string): Promise<Pool> {
-	// Check if create is already in flight
-	const cached = promiseCache.get(dsn);
-	if (cached) {
-		return cached.promise;
-	}
-
-	// Start create promise
-	const promise = createPoolWithRetry(dsn);
-	promiseCache.set(dsn, {
-		promise,
-		createdAt: Date.now(),
-	});
-
-	// Clean up promise cache entry on completion
-	promise
-		.then(() => {
-			// Success: keep for 1s in case more concurrent callers arrive
-			setTimeout(() => promiseCache.delete(dsn), 1000);
-		})
-		.catch(() => {
-			// On failure, immediately remove (don't cache fatals)
-			promiseCache.delete(dsn);
-		});
-
-	return promise;
-}
-
-/**
- * Create pool with transient error retry.
- * Transient: timeout, ECONNREFUSED. Fatal: ProjectNotRegistered, DsnFormatInvalid.
- */
-async function createPoolWithRetry(dsn: string): Promise<Pool> {
-	const startTime = Date.now();
-
-	for (let attempt = 0; ; attempt++) {
-		try {
-			const pool = new Pool({ connectionString: dsn });
-
-			// Test connection
-			const client = await pool.connect();
-			client.release();
-
-			if (process.env.DEBUG_PG) {
-				console.error(`[PoolRegistry] Created pool for ${dsn}`);
-			}
-
-			return pool;
-		} catch (err) {
-			const error = err as Error;
-
-			// Classify error
-			const isTransient =
-				error.message.includes("ECONNREFUSED") ||
-				error.message.includes("timeout") ||
-				error.message.includes("ETIMEDOUT");
-
-			const elapsed = Date.now() - startTime;
-
-			if (isTransient && elapsed < RETRY_MAX_DURATION_MS) {
-				// Backoff + retry
-				const backoffMs = Math.min(1000, 100 * Math.pow(2, attempt));
-				await new Promise((resolve) => setTimeout(resolve, backoffMs));
-				controlPoolMetrics.create_retries++;
-				continue;
-			}
-
-			// Fatal or exhausted retries
-			controlPoolMetrics.create_failures++;
-			throw new TenantDbUnreachable("(unknown)", "(unknown)", error);
-		}
-	}
-}
-
-/**
- * Evict the oldest pool by createdAt.
- */
-async function evictOldestPool(): Promise<void> {
-	let oldest: [string, PoolEntry] | null = null;
-
-	for (const [dsn, entry] of projectPools.entries()) {
-		if (!oldest || entry.createdAt < oldest[1].createdAt) {
-			oldest = [dsn, entry];
-		}
-	}
-
-	if (oldest) {
-		const [dsn, entry] = oldest;
-		projectPools.delete(dsn);
-		entry.metrics.evictions++;
-		await drainPool(entry.pool, dsn, DRAIN_TIMEOUT_MS);
-		if (process.env.DEBUG_PG) {
-			console.error(`[PoolRegistry] Evicted oldest pool (LRU): ${dsn}`);
-		}
-	}
-}
-
-/**
- * Drain a pool gracefully: stop accepting queries, wait for in-flight, force-close.
- */
-async function drainPool(
-	pool: Pool,
-	name: string,
-	timeoutMs: number,
-): Promise<void> {
-	try {
-		// Wait for in-flight queries with timeout
-		const endPromise = pool.end();
-		const timeoutPromise = new Promise<void>((_, reject) =>
-			setTimeout(
-				() =>
-					reject(
-						new Error(
-							`Pool drain timeout for ${name} after ${timeoutMs}ms`,
-						),
-					),
-				timeoutMs,
-			),
-		);
-
-		await Promise.race([endPromise, timeoutPromise]);
-	} catch (err) {
-		console.error(`[PoolRegistry] Drain timeout for ${name}:`, err);
-		// Force close even on timeout
-		try {
-			await pool.end().catch(() => {});
-		} catch {
-			// Already closed
-		}
-	}
-}
-
-/**
- * Start telemetry emission (mocked; would write to roadmap.pool_stats table or logs).
- */
-export function startTelemetry(): void {
-	if (telemetryTimer) return;
-
-	telemetryTimer = setInterval(() => {
-		if (!shuttingDown) {
-			const snapshot = poolStats();
-			if (process.env.DEBUG_PG) {
-				console.error("[PoolRegistry] Telemetry snapshot:", snapshot);
-			}
-		}
-	}, TELEMETRY_INTERVAL_MS);
-}
-
-/**
- * Setup LISTEN for stale eviction notifications.
- * Mocked for now; in production, connects directly to Postgres (not via PgBouncer).
- */
-export async function setupListenNotifications(): Promise<void> {
-	// Mock: in production, this would:
-	// 1. Open a direct Postgres connection (not pooled)
-	// 2. LISTEN pool_evict
-	// 3. On notification, parse JSON and call evictProject()
-	//
-	// For now, this is a no-op to avoid complexity in tests.
+export async function resetForTesting(opts?: {
+  vault?: VaultInterface;
+}): Promise<void> {
+  await shutdown().catch(() => {});
+  _globalCounters.clear();
+  _inflightCreates.clear();
+  _vault = opts?.vault ?? envVault;
 }

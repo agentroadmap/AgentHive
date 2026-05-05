@@ -4,28 +4,30 @@
  * Resolution order (immutable, enforced by class):
  * 1. Explicit override (constructor arg, CLI --flag)
  * 2. Process env var
- * 3. Process env file loaded at startup (/etc/agenthive/env) — instance-local, does NOT mutate process.env
+ * 3. Process env file loaded at startup (/etc/agenthive/env) — promoted to env
  * 4. roadmap.yaml (structural defaults; file-level)
- * 5. Control DB registry (control_runtime.host, control_runtime.flags, etc.) — Phase 2 (P827)
- * 6. Feature flag (when applicable; runtime_flag table) — Phase 2 (P827)
+ * 5. Control DB registry (control_runtime.host, control_runtime.flags, etc.)
+ * 6. Feature flag (when applicable; runtime_flag table)
  * 7. Throw RuntimeConfigMissing — no silent default
  *
  * Classification (CONSTRAINT, not suggestion — resolver must enforce):
- * - `secret`: env only (1–3) | PGPASSWORD, OAUTH_CLIENT_SECRET — NEVER cached in-process
+ * - `secret`: env only (1–3) | PGPASSWORD, OAUTH_CLIENT_SECRET
  * - `structural`: yaml (4) with env override (1-3) | PGHOST, PGPORT, project_root
- * - `registry`: DB (5) with env override (1-3) | host_model_policy, model_routes — Phase 2
- * - `flag`: DB (6) | feature flags, cached per process — Phase 2
+ * - `registry`: DB (5) with env override (1-3) | host_model_policy, model_routes
+ * - `flag`: DB (6) | feature flags, cached per process
+ * - `tenant_dsn`: pool-bound only; NEVER read via get()/getOptional() — use getProjectDb(slug)
  *
  * Usage:
  *   const port = config.get(StructuralKeys.PGPORT);
  *   const token = config.getOptional(SecretKeys.GITHUB_TOKEN);
+ *   const pool = await config.getProjectDb('my-project');
  *   config.reload(); // Live reload on pg_notify
  *   config.audit(); // Get access audit log
  */
 
 import type { Pool, PoolClient } from "pg";
 
-export type ConfigClass = "secret" | "structural" | "registry" | "flag";
+export type ConfigClass = "secret" | "structural" | "registry" | "flag" | "tenant_dsn";
 
 export interface ConfigKey<T> {
 	name: string;
@@ -34,6 +36,13 @@ export interface ConfigKey<T> {
 	required: boolean;
 	description?: string;
 	yamlPath?: string;
+	/**
+	 * Optional yaml-assembly function for keys whose value is derived from
+	 * multiple yaml paths (e.g. AGENTHIVE_CONTROL_DSN assembled from
+	 * databases.control.{host,port,name,role}).  Takes precedence over yamlPath
+	 * when no env var is set.
+	 */
+	assembleFromYaml?: (yaml: Record<string, any>) => T | undefined;
 	dbTable?: string;
 	dbColumn?: string;
 	envOverride?: boolean;
@@ -59,16 +68,19 @@ export class RuntimeConfigMissing extends Error {
 
 /**
  * RuntimeConfigInvalidSource: thrown when a key is read from a disallowed source.
+ * Used for: secret keys read from yaml/DB, tenant_dsn keys read via get().
  */
 export class RuntimeConfigInvalidSource extends Error {
 	constructor(
 		public keyName: string,
 		public attemptedSource: string,
 		public allowedSources: string[],
+		message?: string,
 	) {
 		super(
+			message ??
 			`[RuntimeConfig] Key "${keyName}" cannot be read from ${attemptedSource}. ` +
-				`Allowed sources: ${allowedSources.join(", ")}`,
+			`Allowed sources: ${allowedSources.join(", ")}`,
 		);
 		this.name = "RuntimeConfigInvalidSource";
 		Object.setPrototypeOf(this, RuntimeConfigInvalidSource.prototype);
@@ -87,6 +99,25 @@ export interface ConfigAuditEntry {
 }
 
 /**
+ * Audit entry for tenant_dsn lookups via getProjectDb().
+ * Recorded under synthetic key `tenant_dsn:<slug>`.
+ */
+export interface TenantDsnAuditEntry {
+	syntheticKey: string;
+	slug: string;
+	lastAccessedAt: Date;
+	accessCount: number;
+}
+
+/**
+ * Grouped audit snapshot returned by getConfigAudit().
+ */
+export interface ConfigAuditSnapshot {
+	config: ConfigAuditEntry[];
+	tenantDsn: TenantDsnAuditEntry[];
+}
+
+/**
  * Internal cache for resolved config values.
  */
 interface CachedValue<T> {
@@ -96,80 +127,19 @@ interface CachedValue<T> {
 }
 
 class ConfigResolver {
-	private cache: Map<string, CachedValue<unknown>> = new Map();
-	private audit: Map<string, ConfigAuditEntry> = new Map();
-	private envFileVars: Map<string, string> = new Map();
-	private yamlConfig: Record<string, unknown> | null = null;
+	private cache: Map<string, CachedValue<any>> = new Map();
+	private auditMap: Map<string, ConfigAuditEntry> = new Map();
+	private tenantDsnAuditMap: Map<string, TenantDsnAuditEntry> = new Map();
+	private yamlConfig: Record<string, any> | null = null;
 	private pool: Pool | null = null;
-	private dbCache: Map<string, unknown> = new Map();
+	private dbCache: Map<string, any> = new Map();
 	private notifySubscription: PoolClient | null = null;
-
-	/**
-	 * Parse ~/.pgpass for a matching password entry.
-	 * Format: hostname:port:database:username:password (colons escaped as \:)
-	 */
-	static parsePgpassFile(
-		pgpassPath: string,
-		host: string,
-		port: string,
-		database: string,
-		user: string,
-	): string | undefined {
-		try {
-			const { readFileSync } = require("node:fs");
-			const content = readFileSync(pgpassPath, "utf-8") as string;
-			for (const line of content.split("\n")) {
-				const trimmed = line.trim();
-				if (!trimmed || trimmed.startsWith("#")) continue;
-				const parts = trimmed
-					.replace(/\\:/g, "\x00")
-					.split(":")
-					.map((p: string) => p.replace(/\x00/g, ":"));
-				if (parts.length < 5) continue;
-				const [h, p, d, u, ...rest] = parts;
-				const pw = rest.join(":");
-				const m = (pat: string, val: string) => pat === "*" || pat === val;
-				if (m(h, host) && m(p, port) && m(d, database) && m(u, user)) {
-					return pw;
-				}
-			}
-		} catch { /* unreadable */ }
-		return undefined;
-	}
-
-	/**
-	 * Synchronously resolve the DB password for the given connection params.
-	 * Resolution order: ~/.pgpass file match → PGPASSWORD env → undefined
-	 * pgpass wins over env so that stale PGPASSWORD values in the environment
-	 * don't shadow a correctly-configured pgpass file.
-	 * Used by pool.ts startup IIFE where async resolution is not available.
-	 */
-	static resolvePasswordSync(opts: {
-		host: string;
-		port: string;
-		database: string;
-		user: string;
-		pgpassPath?: string;
-	}): string | undefined {
-		const pgpassPath = opts.pgpassPath ??
-			(process.env.PGPASSFILE ||
-			 ((process.env.HOME || "") + "/.pgpass"));
-		const fromPgpass = ConfigResolver.parsePgpassFile(
-			pgpassPath,
-			opts.host,
-			opts.port,
-			opts.database,
-			opts.user,
-		);
-		if (fromPgpass !== undefined) return fromPgpass;
-		return process.env.PGPASSWORD || undefined;
-	}
 
 	/**
 	 * Initialize the resolver with optional yaml config and database pool.
 	 */
 	async init(opts: {
-		yamlConfig?: Record<string, unknown>;
+		yamlConfig?: Record<string, any>;
 		pool?: Pool;
 		envFilePath?: string;
 	}): Promise<void> {
@@ -187,8 +157,6 @@ class ConfigResolver {
 
 	/**
 	 * Load environment variables from a file (e.g., /etc/agenthive/env).
-	 * Stores in instance-local map — does NOT mutate global process.env.
-	 * Strict parser: rejects shell expansion, backticks, command substitution.
 	 */
 	private async loadEnvFile(filePath: string): Promise<void> {
 		try {
@@ -199,39 +167,26 @@ class ConfigResolver {
 				if (!trimmed || trimmed.startsWith("#")) continue;
 				const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(trimmed);
 				if (match) {
-					const [, key, rawValue] = match;
-					if (
-						rawValue.includes("$(") ||
-						rawValue.includes("`") ||
-						rawValue.includes("${") ||
-						rawValue.includes("<<")
-					) {
-						throw new Error(
-							`[Config] Env file ${filePath}: line '${trimmed}' contains shell expansion. ` +
-								"Environment files must use literal values only (no $(...), backticks, $\\{...\\}, or <<...)",
-						);
+					const [, key, value] = match;
+					if (!process.env[key]) {
+						process.env[key] = value;
 					}
-					this.envFileVars.set(key, rawValue);
 				}
 			}
-		} catch (err) {
-			if (err instanceof Error && err.message.includes("[Config] Env file")) {
-				throw err;
-			}
+		} catch {
+			// File not found or not readable — continue without it
 		}
 	}
 
 	/**
 	 * Set up a NOTIFY listener for config change events.
-	 * Listens on runtime_flag_changed and runtime_endpoint_changed channels.
 	 */
 	private async setupNotifyListener(): Promise<void> {
 		if (!this.pool) return;
 		try {
 			const client = await this.pool.connect();
-			await client.query("LISTEN runtime_flag_changed");
-			await client.query("LISTEN runtime_endpoint_changed");
-			client.on("notification", () => {
+			await client.query("LISTEN runtime_config_changed");
+			client.on("notification", async () => {
 				this.cache.clear();
 				this.dbCache.clear();
 			});
@@ -243,25 +198,36 @@ class ConfigResolver {
 
 	/**
 	 * Resolve a single config key using the class-based resolution order.
+	 *
+	 * tenant_dsn keys throw immediately — they are pool-bound resources that
+	 * must be accessed via getProjectDb(), not via get()/getOptional().
 	 */
 	private async resolve<T>(key: ConfigKey<T>): Promise<CachedValue<T>> {
-		// Non-secret keys: check cache first (secrets never cached — heap dump risk)
-		if (key.class !== "secret") {
-			const cachedValue = this.cache.get(key.name);
-			if (cachedValue !== undefined) {
-				const auditEntry = this.audit.get(key.name);
-				if (auditEntry) {
-					auditEntry.lastAccessedAt = new Date();
-					auditEntry.accessCount++;
-				}
-				return cachedValue as CachedValue<T>;
+		// tenant_dsn enforcement: these keys are pool-bound, not value-bound.
+		if (key.class === "tenant_dsn") {
+			throw new RuntimeConfigInvalidSource(
+				key.name,
+				"get()",
+				["getProjectDb(slug)"],
+				`[RuntimeConfig] tenant_dsn keys cannot be read via get(). Use config.getProjectDb(slug) instead. For per-tenant databases, pool binding is required.`,
+			);
+		}
+
+		// Check cache first
+		const cachedValue = this.cache.get(key.name);
+		if (cachedValue !== undefined) {
+			const audit = this.auditMap.get(key.name);
+			if (audit) {
+				audit.lastAccessedAt = new Date();
+				audit.accessCount++;
 			}
+			return cachedValue;
 		}
 
 		let value: T | undefined;
 		let source: "env" | "yaml" | "db" | "default" = "default";
 
-		// Step 2: Process env var (highest priority)
+		// Step 2 & 3: Process env var (or promoted from /etc/agenthive/env)
 		const envValue = process.env[key.name];
 		if (envValue !== undefined) {
 			try {
@@ -276,66 +242,67 @@ class ConfigResolver {
 			}
 		}
 
-		// Step 3: Env file vars (instance-local; does not override process.env)
-		if (value === undefined) {
-			const fileValue = this.envFileVars.get(key.name);
-			if (fileValue !== undefined) {
-				try {
-					value = key.parse(fileValue);
-					source = "env";
-				} catch (err) {
-					throw new RuntimeConfigMissing(
-						key.name,
-						key.class,
-						`Invalid env file value: ${fileValue}\n${(err as Error).message}`,
-					);
-				}
-			}
-		}
-
-		// Step 4: roadmap.yaml (structural only)
-		if (value === undefined && key.class === "structural" && key.yamlPath) {
-			const yamlValue = this.getYamlValue(key.yamlPath);
-			if (yamlValue !== undefined) {
-				try {
-					value = key.parse(String(yamlValue));
+		// Step 4: roadmap.yaml (structural defaults)
+		if (value === undefined && key.class === "structural") {
+			// Try assembleFromYaml first (multi-path assembly like AGENTHIVE_CONTROL_DSN)
+			if (key.assembleFromYaml && this.yamlConfig) {
+				const assembled = key.assembleFromYaml(this.yamlConfig);
+				if (assembled !== undefined) {
+					value = assembled;
 					source = "yaml";
-				} catch (err) {
-					throw new RuntimeConfigMissing(
-						key.name,
-						key.class,
-						`Invalid yaml value at ${key.yamlPath}: ${yamlValue}\n${(err as Error).message}`,
-					);
+				}
+			} else if (key.yamlPath) {
+				const yamlValue = this.getYamlValue(key.yamlPath);
+				if (yamlValue !== undefined) {
+					try {
+						value = key.parse(String(yamlValue));
+						source = "yaml";
+					} catch (err) {
+						throw new RuntimeConfigMissing(
+							key.name,
+							key.class,
+							`Invalid yaml value at ${key.yamlPath}: ${yamlValue}\n${(err as Error).message}`,
+						);
+					}
 				}
 			}
 		}
 
-		// Steps 5-6: DB registry / flags — Phase 2 stub (P827)
-		if (
-			value === undefined &&
-			(key.class === "registry" || key.class === "flag") &&
-			key.dbTable &&
-			this.pool
-		) {
-			const dbValue = await this.getDbValue(
-				key.dbTable,
-				key.dbColumn || key.name,
-			);
-			if (dbValue !== undefined) {
+		// Step 5: Control DB registry (registry keys)
+		if (value === undefined && key.class === "registry" && key.dbTable && this.pool) {
+			const registryDbValue = await this.getDbValue(key.dbTable, key.dbColumn || key.name);
+			if (registryDbValue !== undefined) {
 				try {
-					value = key.parse(String(dbValue));
+					value = key.parse(String(registryDbValue));
 					source = "db";
 				} catch (err) {
 					throw new RuntimeConfigMissing(
 						key.name,
 						key.class,
-						`Invalid DB value from ${key.dbTable}: ${dbValue}\n${(err as Error).message}`,
+						`Invalid DB value from ${key.dbTable}: ${registryDbValue}\n${(err as Error).message}`,
 					);
 				}
 			}
 		}
 
-		// Step 7: Default value
+		// Step 6: Feature flags (DB, cached, live-reloadable)
+		if (value === undefined && key.class === "flag" && key.dbTable && this.pool) {
+			const flagDbValue = await this.getDbValue(key.dbTable, key.dbColumn || key.name);
+			if (flagDbValue !== undefined) {
+				try {
+					value = key.parse(String(flagDbValue));
+					source = "db";
+				} catch (err) {
+					throw new RuntimeConfigMissing(
+						key.name,
+						key.class,
+						`Invalid flag value from ${key.dbTable}: ${flagDbValue}\n${(err as Error).message}`,
+					);
+				}
+			}
+		}
+
+		// Step 7: Default value (if provided and non-required)
 		if (value === undefined && key.defaultValue !== undefined) {
 			value = key.defaultValue;
 			source = "default";
@@ -350,7 +317,7 @@ class ConfigResolver {
 			);
 		}
 
-		// Enforce: secret keys must not resolve from yaml or DB
+		// Enforcement: secret keys can NEVER come from yaml or DB
 		if (key.class === "secret" && (source === "yaml" || source === "db")) {
 			throw new RuntimeConfigInvalidSource(
 				key.name,
@@ -364,22 +331,18 @@ class ConfigResolver {
 			source,
 			resolvedAt: new Date(),
 		};
+		this.cache.set(key.name, cached);
 
-		// Secret keys are never stored in-process cache (heap dump risk)
-		if (key.class !== "secret") {
-			this.cache.set(key.name, cached);
-		}
-
-		const auditEntry = this.audit.get(key.name) || {
+		const audit = this.auditMap.get(key.name) || {
 			keyName: key.name,
 			keyClass: key.class,
 			lastAccessedAt: new Date(),
 			source,
 			accessCount: 0,
 		};
-		auditEntry.lastAccessedAt = new Date();
-		auditEntry.accessCount++;
-		this.audit.set(key.name, auditEntry);
+		audit.lastAccessedAt = new Date();
+		audit.accessCount++;
+		this.auditMap.set(key.name, audit);
 
 		return cached;
 	}
@@ -404,6 +367,25 @@ class ConfigResolver {
 	}
 
 	/**
+	 * Record a tenant DSN access in the audit map under `tenant_dsn:<slug>`.
+	 */
+	recordTenantDsnAccess(slug: string): void {
+		const syntheticKey = `tenant_dsn:${slug}`;
+		const existing = this.tenantDsnAuditMap.get(syntheticKey);
+		if (existing) {
+			existing.lastAccessedAt = new Date();
+			existing.accessCount++;
+		} else {
+			this.tenantDsnAuditMap.set(syntheticKey, {
+				syntheticKey,
+				slug,
+				lastAccessedAt: new Date(),
+				accessCount: 1,
+			});
+		}
+	}
+
+	/**
 	 * Clear the cache (useful for testing or after config reload).
 	 */
 	clear(): void {
@@ -419,34 +401,66 @@ class ConfigResolver {
 	}
 
 	/**
-	 * Get current audit log.
+	 * Get current audit log (config keys).
 	 */
 	getAudit(): ConfigAuditEntry[] {
-		return [...this.audit.values()];
+		return [...this.auditMap.values()];
+	}
+
+	/**
+	 * Get tenant DSN audit log.
+	 */
+	getTenantDsnAudit(): TenantDsnAuditEntry[] {
+		return [...this.tenantDsnAuditMap.values()];
+	}
+
+	/**
+	 * Get grouped audit snapshot for mcp_ops config_audit.
+	 */
+	getAuditSnapshot(): ConfigAuditSnapshot {
+		return {
+			config: this.getAudit(),
+			tenantDsn: this.getTenantDsnAudit(),
+		};
 	}
 
 	/**
 	 * Extract value from yaml config using dot-notation path.
 	 */
-	private getYamlValue(path: string): unknown {
+	private getYamlValue(path: string): any {
 		if (!this.yamlConfig) return undefined;
 		const parts = path.split(".");
-		let current: unknown = this.yamlConfig;
+		let current: any = this.yamlConfig;
 		for (const part of parts) {
 			if (current === null || typeof current !== "object") {
 				return undefined;
 			}
-			current = (current as Record<string, unknown>)[part];
+			current = current[part];
 		}
 		return current;
 	}
 
 	/**
-	 * Phase 2 stub: DB registry/flag resolution deferred to P827.
-	 * P827 will replace this with schema-aware parameterized queries.
+	 * Query a value from the control DB registry.
 	 */
-	private async getDbValue(_table: string, _column: string): Promise<unknown> {
-		return undefined;
+	private async getDbValue(table: string, column: string): Promise<any> {
+		if (!this.pool) return undefined;
+
+		const cacheKey = `${table}:${column}`;
+		if (this.dbCache.has(cacheKey)) {
+			return this.dbCache.get(cacheKey);
+		}
+
+		try {
+			const result = await this.pool.query(
+				`SELECT ${column} FROM ${table} LIMIT 1`,
+			);
+			const value = result.rows[0]?.[column];
+			this.dbCache.set(cacheKey, value);
+			return value;
+		} catch {
+			return undefined;
+		}
 	}
 
 	/**
@@ -455,10 +469,7 @@ class ConfigResolver {
 	async cleanup(): Promise<void> {
 		if (this.notifySubscription) {
 			try {
-				await this.notifySubscription.query("UNLISTEN runtime_flag_changed");
-				await this.notifySubscription.query(
-					"UNLISTEN runtime_endpoint_changed",
-				);
+				await this.notifySubscription.query("UNLISTEN runtime_config_changed");
 				this.notifySubscription.release();
 				this.notifySubscription = null;
 			} catch {
@@ -478,7 +489,7 @@ let globalResolver: ConfigResolver | null = null;
  * Call once at process startup.
  */
 export async function initConfig(opts: {
-	yamlConfig?: Record<string, unknown>;
+	yamlConfig?: Record<string, any>;
 	pool?: Pool;
 	envFilePath?: string;
 }): Promise<ConfigResolver> {
@@ -492,7 +503,7 @@ export async function initConfig(opts: {
 }
 
 /**
- * Get the global resolver instance. Throws if not yet initialized.
+ * Get the global resolver instance.
  */
 function getResolver(): ConfigResolver {
 	if (!globalResolver) {
@@ -505,6 +516,7 @@ function getResolver(): ConfigResolver {
 
 /**
  * Get a required config value.
+ * Throws RuntimeConfigInvalidSource for tenant_dsn keys.
  */
 export async function get<T>(key: ConfigKey<T>): Promise<T> {
 	return getResolver().get(key);
@@ -512,11 +524,31 @@ export async function get<T>(key: ConfigKey<T>): Promise<T> {
 
 /**
  * Get an optional config value.
+ * Throws RuntimeConfigInvalidSource for tenant_dsn keys.
  */
 export async function getOptional<T>(
 	key: ConfigKey<T | undefined>,
 ): Promise<T | undefined> {
 	return getResolver().getOptional(key);
+}
+
+/**
+ * Get a tenant database pool by project slug or numeric project_id.
+ *
+ * Forwards to the P497 pool registry (pool-registry.getProjectDb).
+ * Records the access in the audit map under `tenant_dsn:<slug>`.
+ *
+ * Throws ProjectNotRegistered, RegistryUnavailable, TenantDbUnreachable,
+ * TenantSecretUnavailable, or DsnFormatInvalid — all from pool-registry.
+ */
+export async function getProjectDb(slugOrId: string | number): Promise<import("pg").Pool> {
+	const { getProjectDb: registryGetProjectDb } = await import("../../postgres/pool-registry.js");
+	const slug = String(slugOrId);
+	const pool = await registryGetProjectDb(slugOrId);
+	if (globalResolver) {
+		globalResolver.recordTenantDsnAccess(slug);
+	}
+	return pool;
 }
 
 /**
@@ -532,6 +564,15 @@ export async function reload(): Promise<void> {
 export function getAudit(): ConfigAuditEntry[] {
 	if (!globalResolver) return [];
 	return globalResolver.getAudit();
+}
+
+/**
+ * Get grouped audit snapshot: config keys + tenant_dsn lookups.
+ * Used by mcp_ops action=config_audit.
+ */
+export function getAuditSnapshot(): ConfigAuditSnapshot {
+	if (!globalResolver) return { config: [], tenantDsn: [] };
+	return globalResolver.getAuditSnapshot();
 }
 
 /**
@@ -552,6 +593,3 @@ export async function cleanup(): Promise<void> {
 }
 
 export { ConfigResolver };
-
-// Convenience re-exports for the synchronous resolution path used by pool.ts
-export const resolvePasswordSync = ConfigResolver.resolvePasswordSync.bind(ConfigResolver);

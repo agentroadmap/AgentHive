@@ -18,8 +18,7 @@ import {
 	isRegisteredAgency,
 	hasActiveLiaisonSession,
 } from "../../../../infra/agency/liaison-service.ts";
-import { detectConflicts } from "./directive-conflict-detector.ts";
-import { calculateDispatchPriority } from "./directive-priority.ts";
+import { detectConflicts } from "../../../../core/proposal/directive-conflict-detector.ts";
 
 type ProjectionFormat = "yaml_md" | "json";
 
@@ -345,7 +344,6 @@ export class PgProposalHandlers {
 					);
 				}
 			}
-
 			return {
 				content: [
 					{

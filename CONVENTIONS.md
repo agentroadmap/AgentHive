@@ -327,6 +327,48 @@ MERGE phase:
 
 **Why this pattern:** keeps the architectural proposal alive as an active coordination anchor through implementation, surfaces design corrections as children reveal edge cases, and ensures MERGE is a meaningful system-level gate rather than a formality.
 
+### 5b. Program Phases and Build-Order Gate (P471)
+
+The multi-tenancy program is sequenced into four phases tracked in `roadmap.program_phases`
+(migration 060-program-phases-p471.sql). Phase assignments are stored in `roadmap.proposal.phase_id`.
+
+| Phase | Name | Proposals | Exit Gate |
+| :--- | :--- | :--- | :--- |
+| **0** | MCP Integrity | P456-P462, P470 | Scanner endpoints+workflow-states findings in `src/` < 5 |
+| **1** | Foundation Modules | P416, P448, P449, P453 | Scanner paths/identity/endpoints/workflow-states → 0 findings |
+| **2** | Control Plane & Dispatch | P429 family (P495–P520), P430–P452, P471 | Total scanner findings < 50; race tests green; hiveControl online |
+| **3** | Agency Liaison | P454, P463–P469, P472–P476 | Multi-agency dispatch race-test green |
+
+#### Querying build order
+
+```sql
+-- All incomplete proposals in a phase, dependency-sorted
+SELECT p.display_id, p.title, p.status, p.maturity
+FROM roadmap.proposal p
+WHERE p.phase_id = <N>
+  AND p.status NOT IN ('COMPLETE','DEPLOYED')
+ORDER BY p.id;
+
+-- Phase progress dashboard
+SELECT * FROM roadmap.v_phase_progress;
+
+-- Advisory gate check before DRAFT→REVIEW transition
+SELECT roadmap.fn_check_phase_gate(<proposal_id>, 'REVIEW');
+```
+
+#### Advisory gate rule (AC#4)
+
+Gate agents **MUST** call `roadmap.fn_check_phase_gate(proposal_id, 'REVIEW')` before emitting
+`advance` on any `DRAFT → REVIEW` transition for phase-tagged proposals. If the function returns
+`FALSE`, the gate agent **SHOULD** hold the proposal with a `[ADVISORY]` note in `gate_decision_log`
+explaining which predecessor phase is incomplete.
+
+This rule is **advisory** (non-blocking) until Phase 2 lands. After Phase 2, it becomes a hard
+reject unless the operator writes an override record in the proposal `audit` JSONB column.
+
+Operators who need to override must add `{"phase_gate_override": true, "reason": "..."}` to the
+proposal `audit` column and call `fn_check_phase_gate` again — it will pass on override.
+
 ## 6. Database Conventions
 
 ### 6.0a Provider/agency identity is DB-sourced (P743)
@@ -765,52 +807,50 @@ Before you finish:
 * **Issue Reporting:** If an error or blocker is encountered, use the MCP to **log an issue immediately**. Do not attempt to bypass fundamental architectural constraints without a formal issue log.
 * **The "Cubic" Context:** When spawning agents in a "Cubic" environment, ensure they are passed the relevant MCP context for their specific task.
 
-### 10a. Settings every spawned cubic agent inherits
+### 10a. Gate & Review Agent Protocol
 
-Every dispatch from the orchestrator (architect, researcher, skeptic-alpha,
-skeptic-beta, architecture-reviewer, gate-reviewer, developer, merge-agent,
-…) starts cold and re-reads CONVENTIONS.md. The non-negotiable settings
-below MUST be observable behavior of the spawned agent — if your run
-violates one, the orchestrator will not advance you, and your dispatch
-lease will be released without a decision.
+Every dispatch from the orchestrator (architect, researcher, skeptic-alpha, skeptic-beta, architecture-reviewer, gate-reviewer, developer, merge-agent, …) starts cold and re-reads CONVENTIONS.md. The non-negotiable settings below MUST be observable behavior of the spawned agent — if your run violates one, the orchestrator will not advance you, and your dispatch lease will be released without a decision.
 
-#### MCP canonical actions (use these names, not raw tool names)
+#### MCP canonical actions
 
-The consolidated MCP router accepts both the canonical short-action names
-AND raw-tool-name aliases (e.g. `prop_get`, `prop_list`). Prefer the
-canonical short names for clarity:
+The consolidated MCP router accepts both the canonical short-action names AND raw-tool-name aliases (e.g. `prop_get`, `prop_list`). Prefer the canonical short names for clarity:
 
-| Domain  | Action          | Args                                                   |
+| Domain  | Action          | When to call |
 | ------- | --------------- | ------------------------------------------------------ |
-| proposal| `get`           | `id` OR `proposal_id` (string OR number — both accepted) |
-| proposal| `detail`        | same as get; returns YAML+Markdown projection          |
-| proposal| `list`          | optional filters: `status`, `maturity`, `type`, `limit`  |
-| proposal| `claim`         | `id`/`proposal_id`, `agent_identity`, `phase`          |
-| proposal| `set_maturity`  | `id`, `maturity` ∈ {new, active, mature, obsolete}     |
-| proposal| `transition`    | `proposal_id`, target state, `decided_by`, `rationale` |
-| proposal| `add_criteria`  | `proposal_id`, list of criterion strings                |
-| proposal| `verify_criteria`| `proposal_id`, `item_number`, `status`, `verified_by`   |
-| proposal| `list_reviews`  | `proposal_id`                                          |
-| proposal| `submit_review` | `proposal_id`, `reviewer`, `verdict`, `notes` (or `review`/`body`/`content` alias)|
-| proposal| `add_discussion`| `proposal_id`, `author`, `content` (or `discussion`/`text`/`body` alias) |
+| proposal| `get` / `detail`| Query — returns proposal data and YAML+Markdown projection |
+| proposal| `list`          | Query — optional filters: `status`, `maturity`, `type`, `limit` |
+| proposal| `claim`         | Before work starts — acquire lease |
+| proposal| `set_maturity`  | After `prop_transition` — set maturity to `new` (or `active` if immediately claimed) |
+| proposal| `transition`    | After a gate verdict — advances status AND records `gate_decision_log` row in one atomic operation |
+| proposal| `add_criteria`  | During enhance — structure acceptance criteria |
+| proposal| `verify_criteria`| During develop — mark tests/ACs verified |
+| proposal| `list_reviews`  | Query — fetch review records |
+| proposal| `submit_review` | After gate analysis — structured review (score, verdict, notes) |
+| proposal| `add_discussion`| For reasoning, intermediate findings — does NOT trigger gate logic |
+| proposal| `log_issue`     | For any blocker, environment problem, or unresolvable ambiguity — stops gate run |
 
-Authoritative source: `src/apps/mcp-server/tools/consolidated.ts`. If an
-action you need is not listed, call `mcp_proposal action=list_actions` to
-discover it; do NOT guess.
+Authoritative source: `src/apps/mcp-server/tools/consolidated.ts`. If an action you need is not listed, call `mcp_proposal action=list_actions` to discover it; do NOT guess.
 
-#### Output contract for gate / review agents
+#### Gate protocol sequence (required for all gate agents)
 
-**Pre-transition requirement — submit_review must come first.**  
-`prop_transition` for an advance verdict will be rejected unless `submit_review` has already been called for this proposal. The required sequence for any advance (including DRAFT → REVIEW) is:
+**Pre-transition requirement — submit_review must come first.**
+
+The required sequence for any advance (including DRAFT → REVIEW) is:
 
 1. `submit_review` — `proposal_id`, `reviewer` (slug, see below), `verdict=approve`, `notes?`, `findings?`
 2. `prop_transition` — `id`, `status` (target state), `author`, `reason="decision"`
 3. `set_maturity` — reflect the new state
 4. `add_discussion` — summarise rationale (linked AC references, risk notes)
 
+For non-advance verdicts (hold/reject/escalate), the sequence is:
+1. `submit_review` (if submitting a verdict)
+2. `add_discussion` — structured findings in the format below
+3. `log_issue` (if blockers need escalation)
+
 Calling `prop_transition` before `submit_review` will return an error even when the verdict would otherwise be valid.
 
-**Reviewer ID constraint.**  
+#### Reviewer ID constraint
+
 The `reviewer` field in `submit_review` must match `^[a-z][a-z0-9-]*[a-z0-9]$` — lowercase slug, no slashes. This is **different** from `author_identity` (which uses `<provider>/<role>-d<depth>-p<id>` slash format). Do not pass an `author_identity` string directly as `reviewer`.
 
 ```
@@ -819,17 +859,13 @@ The `reviewer` field in `submit_review` must match `^[a-z][a-z0-9-]*[a-z0-9]$` �
 ✗  reviewer: "claude/skeptic-alpha-d1-p841"   # slash → DB constraint violation
 ```
 
-Calling only `add_discussion` without `prop_transition` leaves the proposal stranded. The P611 reconciler is a safety net for trigger failures — it is not a substitute for correct agent protocol.
+#### Gate findings and verdict format
 
-For gate-review dispatches (D1/D2/D3/D4) and any non-advance verdict
-(hold/reject/escalate), structured findings MUST be emitted to **stdout**
-in this format. The orchestrator parses your stdout into
-`gate_decision_log.rationale`; the next enhancing agent reads that row
-(NOT the MCP discussion thread, which may not reach them).
+For gate-review dispatches (D1/D2/D3/D4) and any non-advance verdict (hold/reject/escalate), structured findings MUST be emitted to **stdout** in this format. The orchestrator parses your stdout into `gate_decision_log.rationale`; the next enhancing agent reads that row (NOT the MCP discussion thread, which may not reach them).
 
 ```
 ## Verdict
-hold  (or: advance | reject | escalate)
+hold  (or: advance | reject | escalate | waive)
 
 ## Failures
 - (critical) [C1] one-line summary — evidence: file:line or query
@@ -847,27 +883,30 @@ hold  (or: advance | reject | escalate)
 Concrete instruction the enhancing agent can act on without further context.
 ```
 
-`advance` verdicts also write to `gate_decision_log` (via `prop_transition`
-which records the decision) and may omit the failures/remediation
-sections.
+`advance` verdicts also write to `gate_decision_log` (via `prop_transition` which records the decision) and may omit the failures/remediation sections.
 
 #### Source-of-truth rule (DB > markdown)
 
-Product design content lives in DB proposal rows (`proposal.design`,
-`proposal.summary`, `proposal.motivation`) plus the relational tables
-(`proposal_acceptance_criteria`, `proposal_dependencies`,
-`proposal_reviews`, `proposal_discussions`, `gate_decision_log`).
-Markdown files under `docs/proposals/` are documentation surface; they
-are NOT authoritative. When you enhance a proposal:
+Product design content lives in DB proposal rows (`proposal.design`, `proposal.summary`, `proposal.motivation`) plus the relational tables (`proposal_acceptance_criteria`, `proposal_dependencies`, `proposal_reviews`, `proposal_discussions`, `gate_decision_log`). Markdown files under `docs/proposals/` are documentation surface; they are NOT authoritative. 
+
+**DB is authoritative.** Markdown files under `docs/` are supplementary. On any divergence between a markdown file and the DB, the DB wins. Gate agents must read from MCP, not from markdown files, before making decisions.
+
+When you enhance a proposal:
 
 1. Write the design into the DB columns.
-2. Insert ACs into `proposal_acceptance_criteria` (the gate evaluator
-   reads this — empty table = automatic reject with "No acceptance
-   criteria defined").
+2. Insert ACs into `proposal_acceptance_criteria` (the gate evaluator reads this — empty table = automatic reject with "No acceptance criteria defined").
 3. Insert dependencies into `proposal_dependencies` if any.
-4. A markdown supplement is OK for long-form rationale, transcripts, or
-   diagrams that don't fit in TEXT columns — but it must mirror the DB,
-   not replace it. If they diverge, the DB wins.
+4. A markdown supplement is OK for long-form rationale, transcripts, or diagrams that don't fit in TEXT columns — but it must mirror the DB, not replace it. If they diverge, the DB wins.
+
+#### What stops a gate run
+
+A gate agent MUST call `log_issue` and stop (not guess) when:
+- The proposal has no Acceptance Criteria
+- A required dependency proposal is not `complete`
+- The DB is unreachable or the MCP returns an error
+- The agent cannot determine the correct `from_state` / `to_state` transition
+
+If you can't read the proposal, stop and emit `## Verdict\nhold` with a `## Failures` line naming the MCP error you hit. Don't invent context. Do NOT let a tool error become a free-form prose conclusion — the orchestrator can parse a structured hold but cannot parse a paragraph.
 
 #### Gate spawn author_identity convention
 
@@ -881,23 +920,11 @@ Examples:
 - `claude/skeptic-alpha-d1-p472`
 - `nous/gate-review-d2-p611`
 
-The DB template is stored at `roadmap.gate_task_templates.author_identity_template`.
-Gate agents MUST use the template from the DB, not a hardcoded string, so that
-author_identity stays consistent across provider switches.
+The DB template is stored at `roadmap.gate_task_templates.author_identity_template`. Gate agents MUST use the template from the DB, not a hardcoded string, so that author_identity stays consistent across provider switches.
 
-**Note:** `author_identity` (slash format) is used for `add_discussion` and
-`prop_transition` author fields. The `reviewer` field in `submit_review` is a
-separate slug (no slashes) — see the Reviewer ID constraint above.
+**Note:** `author_identity` (slash format) is used for `add_discussion` and `prop_transition` author fields. The `reviewer` field in `submit_review` is a separate slug (no slashes) — see the Reviewer ID constraint above.
 
-System-generated audit entries use `system/auto-advance` (trigger) and
-`system/reconciler` (backstop) — both registered in `roadmap_workforce.agent_registry`.
-
-#### What stops a gate run
-
-If you can't read the proposal, stop and emit `## Verdict\nhold` with a
-`## Failures` line naming the MCP error you hit. Don't invent context. Do
-NOT let a tool error become a free-form prose conclusion — the orchestrator
-can parse a structured hold but cannot parse a paragraph.
+System-generated audit entries use `system/auto-advance` (trigger) and `system/reconciler` (backstop) — both registered in `roadmap_workforce.agent_registry`.
 
 ## 11. Overseer Role: Hermes (Andy)
 

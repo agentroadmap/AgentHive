@@ -4,22 +4,17 @@
  * A2A/A2H communication via the `message_ledger` table.
  * All handler methods catch errors and return MCP text responses instead of throwing.
  *
- * P149: Channel subscriptions, pg_notify push notifications, and wait_ms blocking reads.
- * Migration 096 adds the trig_a2a_message_notify trigger that fires these notifications.
- *
- * Trust model: readMessages enforces trust tier via resolveTrust() — restricted/blocked
- * agents cannot receive DMs; authority agents bypass all filters.
+ * P149: Added channel subscriptions, pg_notify push notifications, and wait_ms blocking reads.
  */
 
 import { query, getPool } from "../../../../postgres/pool.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
-import { enforceMessageGate } from "../../../../proposal-engine/middleware/message-dispatch-gate.ts";
-import { resolveTrust } from "../../../../infra/trust/trust-resolver.ts";
-import crypto from "crypto";
-import { getAgentSecret } from "../../../../infra/security/agent-secret-store.ts";
-import { verifySignature } from "../../../../infra/security/agent-crypto.ts";
-import type { Pool } from "pg";
+import {
+	agentNotifyChannel,
+	checkMessageACL,
+} from "../../../../infra/messaging/a2a-access-control.ts";
+import type { A2ANotification } from "../../../../infra/messaging/a2a-types.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
@@ -37,85 +32,89 @@ function firstText(result: CallToolResult): string | undefined {
 	return first?.type === "text" ? first.text : undefined;
 }
 
-/**
- * Notification payload from the trig_a2a_message_notify trigger (migration 096).
- */
-export interface NewMessageNotification {
-	message_id: number;
-	from_agent: string;
-	channel: string | null;
-	message_type: string | null;
-}
+/** @deprecated Use A2ANotification from a2a-types.ts instead. */
+export type NewMessageNotification = A2ANotification;
 
 /**
- * Wait for a pg_notify on the per-agent DM channel `a2a_msg_{agentIdentity}`.
- * Uses a dedicated pool connection with LISTEN/NOTIFY, following the liaison
- * listener pattern in liaison-message-service.ts.
+ * P199: Listener for a specific agent's dedicated pg_notify channel.
  *
- * Returns the raw notification payload or null on timeout.
+ * Replaces the old 'new_message' broadcast listener with a per-agent
+ * channel (agent_msg_<sanitized_identity>) so that each agent only
+ * receives notifications addressed to them.
+ *
+ * AC#3: No broadcast fallback — the trigger no longer fires on 'new_message'.
  */
-async function waitForAgentNotification(
-	agentIdentity: string,
-	waitMs: number,
-): Promise<NewMessageNotification | null> {
-	const pool = getPool();
-	const client = await pool.connect();
-	const pgChannel = `a2a_msg_${agentIdentity}`;
+export class MessageNotificationListener {
+	private listenerClient: any = null;
+	private started = false;
+	private readonly pgChannel: string;
 
-	try {
-		await client.query(`LISTEN "${pgChannel}"`);
+	/**
+	 * @param agentIdentity - The agent identity to listen for.
+	 *   Converted to a safe pg_notify channel name via agentNotifyChannel().
+	 *   Falls back to legacy 'new_message' when omitted (deprecated).
+	 */
+	constructor(agentIdentity?: string) {
+		this.pgChannel = agentIdentity
+			? agentNotifyChannel(agentIdentity)
+			: "new_message"; // legacy fallback — only used if caller passes no identity
+	}
 
-		return await new Promise<NewMessageNotification | null>((resolve) => {
+	async start(): Promise<void> {
+		if (this.started) return;
+		const pool = getPool();
+		this.listenerClient = await pool.connect();
+		await this.listenerClient.query(`LISTEN "${this.pgChannel}"`);
+		this.started = true;
+	}
+
+	async stop(): Promise<void> {
+		if (!this.started || !this.listenerClient) return;
+		try {
+			await this.listenerClient.query(`UNLISTEN "${this.pgChannel}"`);
+		} catch {
+			// ignore cleanup errors
+		}
+		this.listenerClient.release();
+		this.listenerClient = null;
+		this.started = false;
+	}
+
+	/**
+	 * Wait for a notification on this agent's channel with timeout.
+	 * Returns the parsed A2ANotification payload or null on timeout.
+	 */
+	async waitForMessage(waitMs: number): Promise<A2ANotification | null> {
+		if (!this.started || !this.listenerClient) {
+			await this.start();
+		}
+
+		return new Promise((resolve) => {
 			let resolved = false;
 
 			const timeout = setTimeout(() => {
 				if (!resolved) {
 					resolved = true;
-					client.removeListener("notification", handler);
+					this.listenerClient?.removeListener("notification", handler);
 					resolve(null);
 				}
 			}, waitMs);
 
 			const handler = (msg: any) => {
-				if (msg.channel === pgChannel && !resolved) {
+				if (msg.channel === this.pgChannel && !resolved) {
 					resolved = true;
 					clearTimeout(timeout);
-					client.removeListener("notification", handler);
+					this.listenerClient?.removeListener("notification", handler);
 					try {
-						resolve(JSON.parse(msg.payload) as NewMessageNotification);
+						resolve(JSON.parse(msg.payload));
 					} catch {
 						resolve(null);
 					}
 				}
 			};
 
-			client.on("notification", handler);
+			this.listenerClient.on("notification", handler);
 		});
-	} finally {
-		try {
-			await client.query(`UNLISTEN "${pgChannel}"`);
-		} catch {
-			// ignore cleanup errors
-		}
-		client.release();
-	}
-}
-
-/**
- * Check if a reader agent is allowed to receive a message from sender.
- * Restricted and blocked tiers cannot receive DMs.
- * Authority agents bypass all trust checks.
- */
-async function canRead(reader: string, fromAgent: string): Promise<boolean> {
-	try {
-		const result = await resolveTrust({ sender: fromAgent, receiver: reader });
-		// authority and trusted tiers can always communicate
-		// known tier: can receive DMs
-		// restricted: no DM initiation allowed (can only receive pong/response)
-		// blocked: no communication
-		return result.tier !== "blocked" && result.tier !== "restricted";
-	} catch {
-		return false;
 	}
 }
 
@@ -254,256 +253,46 @@ export class PgMessagingHandlers {
 		message_content: string;
 		message_type?: string;
 		proposal_id?: string;
-		provider_sig?: string;
-		created_at?: string;
-		provider_sig_salt?: string;
 	}): Promise<CallToolResult> {
 		try {
-			// P835: Dead letter checks before INSERT
-			if (args.to_agent) {
-				// Check if to_agent exists in agent_registry
-				const agentCheckResult = await query<{ agent_identity: string }>(
-					`SELECT agent_identity FROM roadmap_workforce.agent_registry WHERE agent_identity = $1 LIMIT 1`,
-					[args.to_agent],
-				);
-
-				if (agentCheckResult.rows.length === 0) {
-					// Agent not found — silent return per P209 (dead-letter NACK deferred to P835)
-					return {
-						content: [
-							{
-								type: "text",
-								text: "Message processed.",
-							},
-						],
-					};
-				}
-
-				// Check if to_agent has trust_tier='blocked'
-				const trustTierResult = await query<{ trust_tier: string }>(
-					`SELECT trust_tier FROM roadmap_workforce.agent_registry WHERE agent_identity = $1 LIMIT 1`,
-					[args.to_agent],
-				);
-
-				if (trustTierResult.rows.length > 0) {
-					const trustTier = trustTierResult.rows[0]?.trust_tier;
-					if (trustTier === "blocked") {
-						// Recipient blocked — silent return per P209 (dead-letter NACK deferred to P835)
-						return {
-							content: [
-								{
-									type: "text",
-									text: "Message processed.",
-								},
-							],
-						};
-					}
-				}
-			}
-
-			// P209: Enforce message dispatch gate before insertion
-			const gateResult = await enforceMessageGate({
-				from_agent: args.from_agent,
-				to_agent: args.to_agent,
-				channel: args.channel,
-				message_type: args.message_type,
-				proposal_id: args.proposal_id,
-			});
-
-			// Blocked messages fail silently (no error to sender)
-			if (!gateResult.allowed) {
-				// Silent failure per P209 design: return empty response
-				// (The denial is logged in denied_messages table for audit)
+			// AC#2: Enforce ACL before inserting. DMs require an explicit grant;
+			// channel posts require a channel_post grant.
+			const grantType = args.to_agent ? "dm" : "channel_post";
+			const aclResult = await checkMessageACL(
+				args.from_agent,
+				args.to_agent ?? null,
+				grantType,
+			);
+			if (!aclResult.allowed) {
 				return {
 					content: [
 						{
 							type: "text",
-							text: "Message processed.",
+							text: `⛔ Delivery denied (AC#2): ${aclResult.reason}`,
 						},
 					],
 				};
 			}
 
-			// P833: Look up message_type in message_type_contract — reject unknown types
-			const messageType = args.message_type || "text";
-			const contractResult = await query(
-				`SELECT ack_required, timeout_seconds, escalation_recipient
-				 FROM roadmap.message_type_contract
-				 WHERE message_type = $1`,
-				[messageType],
-			);
-
-			if (contractResult.rows.length === 0) {
-				return errorResult(
-					`Unknown message type: ${messageType}`,
-					new Error("UNKNOWN_MESSAGE_TYPE"),
-				);
-			}
-
-			const contract = contractResult.rows[0];
-			// Generate correlation_id using crypto.randomUUID or fallback
-			let correlationId: string;
-			try {
-				correlationId = crypto.randomUUID();
-			} catch {
-				// Fallback for environments without crypto.randomUUID
-				correlationId = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
-			}
-
-			// P834: Signature verification dispatch gate
-			let sigVerified: "pending" | "verified" | "failed" = "pending";
-			let sigSaltBuffer: Buffer | null = null;
-
-			if (args.provider_sig) {
-				try {
-					// Parse created_at timestamp (default to now if not provided)
-					const createdAtStr = args.created_at || new Date().toISOString();
-					const createdAtDt = new Date(createdAtStr);
-					const createdAtEpoch = Math.floor(createdAtDt.getTime() / 1000);
-					const nowEpoch = Math.floor(Date.now() / 1000);
-
-					// Reject if signature is older than 5 minutes
-					if (nowEpoch - createdAtEpoch > 300) {
-						sigVerified = "failed";
-						console.warn(
-							`[P834] Signature too old for message from ${args.from_agent}: ${nowEpoch - createdAtEpoch} seconds`,
-						);
-					} else {
-						// Load agent secret for verification
-						const pool = getPool();
-						const agentSecret = await getAgentSecret(pool, args.from_agent);
-
-						if (!agentSecret) {
-							sigVerified = "failed";
-							console.warn(`[P834] Agent secret not found for ${args.from_agent}`);
-						} else {
-							// Compute payload SHA256 for verification
-							const payloadJson = JSON.stringify(
-								{ message_content: args.message_content },
-								Object.keys({ message_content: args.message_content }).sort(),
-							);
-							const payloadSha256 = crypto
-								.createHash("sha256")
-								.update(payloadJson, "utf-8")
-								.digest();
-
-							// Parse provider_sig_salt if provided (IMP-3A)
-							let saltBuffer: Buffer | undefined;
-							if (args.provider_sig_salt) {
-								try {
-									saltBuffer = Buffer.from(args.provider_sig_salt, "hex");
-									if (saltBuffer.length !== 32) {
-										saltBuffer = undefined; // Fall back to deterministic salt
-									}
-								} catch {
-									// Fall back to deterministic salt
-									saltBuffer = undefined;
-								}
-							}
-
-							// Verify signature using RFC 5869 derived key
-							const isValid = verifySignature(
-								agentSecret,
-								args.from_agent,
-								args.to_agent || "",
-								messageType,
-								createdAtEpoch,
-								payloadSha256,
-								args.provider_sig,
-								saltBuffer,
-							);
-
-							sigVerified = isValid ? "verified" : "failed";
-
-							if (isValid) {
-								// Generate and store random provider_sig_salt (IMP-3A)
-								sigSaltBuffer = crypto.randomBytes(32);
-							} else {
-								console.warn(
-									`[P834] Signature verification failed for message from ${args.from_agent}`,
-								);
-							}
-						}
-					}
-				} catch (err) {
-					sigVerified = "failed";
-					console.error(`[P834] Signature verification error: ${err}`);
-				}
-
-				// On signature failure, silent return per P209 design (NACK delivery deferred to P835)
-				if (sigVerified === "failed") {
-					return {
-						content: [
-							{
-								type: "text",
-								text: "Message processed.",
-							},
-						],
-					};
-				}
-			}
-
-			// P833: INSERT into message_ledger with sig_verified status and provider_sig_salt
 			const { rows } = await query(
 				`INSERT INTO roadmap.message_ledger
-				  (from_agent, to_agent, channel, message_content, message_type, proposal_id, correlation_id, sig_verified, provider_sig, provider_sig_salt, created_at)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::bytea, $11)
-				RETURNING id, created_at`,
+                    (from_agent, to_agent, channel, message_content, message_type, proposal_id)
+                 VALUES ($1, $2, $3, $4, $5, $6)
+                 RETURNING id, nonce, created_at`,
 				[
 					args.from_agent,
 					args.to_agent || null,
 					args.channel || null,
 					args.message_content,
-					messageType,
+					args.message_type || "text",
 					args.proposal_id || null,
-					correlationId,
-					sigVerified,
-					args.provider_sig || null,
-					sigSaltBuffer,
-					args.created_at || new Date().toISOString(),
 				],
 			);
-
-			const messageId = rows[0].id;
-
-			// P833: If ack_required=true and timeout_seconds is set: INSERT into message_timeout_tracking
-			if (contract.ack_required && contract.timeout_seconds) {
-				await query(
-					`INSERT INTO roadmap.message_timeout_tracking (
-						message_id, timeout_at, escalation_recipient
-					)
-					VALUES ($1, now() + $2 * interval '1 second', $3)
-					ON CONFLICT (message_id) DO NOTHING`,
-					[messageId, contract.timeout_seconds, contract.escalation_recipient || "liaison_hub"],
-				);
-			}
-
-			// P833: pg_notify with JSON payload {message_id, correlation_id, from_agent}
-			if (args.to_agent) {
-				const pool = getPool();
-				const client = await pool.connect();
-				try {
-					const notifyPayload = JSON.stringify({
-						message_id: messageId,
-						correlation_id: correlationId,
-						from_agent: args.from_agent,
-					});
-					await client.query(
-						`SELECT pg_notify($1, $2)`,
-						[`a2a_msg_${args.to_agent}`, notifyPayload],
-					);
-				} finally {
-					client.release();
-				}
-
-				// P836: callback_url delivery — deferred until migration adds callback_url column
-			}
-
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Message sent (id: ${messageId}, correlation_id: ${correlationId}) at ${rows[0].created_at}`,
+						text: `Message sent (id: ${rows[0].id}, nonce: ${rows[0].nonce}) at ${rows[0].created_at}`,
 					},
 				],
 			};
@@ -578,14 +367,8 @@ export class PgMessagingHandlers {
 	}
 
 	/**
-	 * Read messages with optional wait_ms for trust-bound blocking reads (AC-4).
-	 *
-	 * When wait_ms > 0 and agent is specified: LISTENs on the per-agent pg_notify
-	 * channel `a2a_msg_{agent}` (fired by migration 096 trigger). Blocks up to
-	 * wait_ms ms, then returns. Results are filtered by the trust model — a
-	 * restricted or blocked sender's DMs will not be surfaced.
-	 *
-	 * When agent is omitted: non-blocking channel/broadcast reads (no trust filter).
+	 * Read messages with optional wait_ms for blocking until new messages arrive (AC-4).
+	 * When wait_ms > 0, uses pg_notify to block until a notification arrives or timeout.
 	 */
 	async readMessages(args: {
 		agent?: string;
@@ -594,32 +377,38 @@ export class PgMessagingHandlers {
 		wait_ms?: number;
 	}): Promise<CallToolResult> {
 		try {
-			if (args.wait_ms && args.wait_ms > 0 && args.agent) {
+			// If wait_ms specified and no messages immediately available, block on pg_notify
+			if (args.wait_ms && args.wait_ms > 0) {
 				const waitMs = Math.min(Math.max(args.wait_ms, 0), 30000);
 
-				// Check if unread messages already exist for this agent
+				// First, check if messages already exist
 				const existing = await this.fetchMessages(args);
-				if (firstText(existing) !== "No messages found.") {
-					return existing;
+
+				if (firstText(existing) === "No messages found.") {
+					// No messages — wait for pg_notify on this agent's dedicated channel (AC#3)
+					const listener = new MessageNotificationListener(args.agent);
+					try {
+						const notification = await listener.waitForMessage(waitMs);
+						if (notification) {
+							// A notification arrived — re-fetch messages
+							return await this.fetchMessages(args);
+						}
+						// Timeout — return empty
+						return {
+							content: [
+								{
+									type: "text",
+									text: `No new messages after waiting ${waitMs}ms.`,
+								},
+							],
+						};
+					} finally {
+						await listener.stop();
+					}
 				}
 
-				// Block on pg_notify channel `a2a_msg_{agent}` (migration 096)
-				const notification = await waitForAgentNotification(args.agent, waitMs);
-				if (!notification) {
-					return {
-						content: [{ type: "text", text: `No new messages after waiting ${waitMs}ms.` }],
-					};
-				}
-
-				// Trust check on the arriving sender before fetching
-				const allowed = await canRead(args.agent, notification.from_agent);
-				if (!allowed) {
-					return {
-						content: [{ type: "text", text: `No new messages after waiting ${waitMs}ms.` }],
-					};
-				}
-
-				return await this.fetchMessages(args);
+				// Messages already exist — return them immediately
+				return existing;
 			}
 
 			// Normal (non-blocking) read

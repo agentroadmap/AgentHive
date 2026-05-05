@@ -13,7 +13,8 @@
   ],
   "bin": {
     "roadmap": "scripts/cli.cjs",
-    "agenthive": "scripts/agenthive.cjs"
+    "agenthive": "scripts/agenthive.cjs",
+    "hive": "scripts/hive.cjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.11",
@@ -76,6 +77,7 @@
     "operator:revoke": "node --import jiti/register scripts/operator-token.ts revoke",
     "build": "npm run build:css && node scripts/build-dist.cjs && node scripts/build-agenthive.cjs && npm run build:web -- --js-only",
     "cli": "npm run build:css && node --import jiti/register src/apps/cli.ts",
+    "hive": "node --import jiti/register src/apps/hive-cli/index.ts",
     "build:agenthive": "node scripts/build-agenthive.cjs",
     "board": "node --import jiti/register scripts/roadmap-board.ts",
     "agents:stop": "node --import jiti/register scripts/agent-stop.ts",
@@ -89,6 +91,7 @@
     "release:major": "npm version major && npm run release",
     "sync-deps": "TAG=$(jq -r .version package.json) && jq --arg v \"$TAG\" '.optionalDependencies |= with_entries(.value = $v)' package.json > tmp.json && mv tmp.json package.json && git add package.json && git commit --amend --no-edit",
     "check:hardcoded": "bash scripts/check-hardcoded.sh",
+    "check:credential-env": "bash scripts/check-credential-env.sh",
     "check:migrations": "tsx scripts/check-migration-prefixes.ts",
     "scan": "node --import jiti/register scripts/scan-hardcoding.ts",
     "scan:workflow-states": "node --import jiti/register scripts/scan-hardcoding.ts --rule-tag workflow --fail-on high --baseline .workflow-states-baseline.jsonl",

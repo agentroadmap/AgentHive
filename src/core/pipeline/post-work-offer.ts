@@ -125,8 +125,8 @@ export async function postWorkOffer(
 	if (input.briefingId) metadata.briefing_id = input.briefingId;
 
 	const caps = input.requiredCapabilities?.length
-		? JSON.stringify({ all: input.requiredCapabilities })
-		: "{}";
+		? JSON.stringify(input.requiredCapabilities)
+		: '["general"]';
 
 	const dispatchVersion = input.dispatchVersion ?? 1;
 

@@ -292,6 +292,8 @@ const opsRoutes: RouteMap = {
 	ref_list_terms: "ref_list_terms",
 	ref_add_term: "ref_add_term",
 	ref_get_term: "ref_get_term",
+	// P498: Config audit tool
+	config_audit: "config_audit",
 };
 
 const projectRoutes: RouteMap = {

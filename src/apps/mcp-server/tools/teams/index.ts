@@ -11,6 +11,7 @@ import type { McpServer } from "../../server.ts";
 import type { McpToolHandler } from "../../types.ts";
 import { createSimpleValidatedTool } from "../../validation/tool-wrapper.ts";
 import { TeamHandlers } from "./handlers.ts";
+import { PgTeamGovernanceHandlers } from "./pg-governance-handlers.ts";
 import {
 	federationStatusSchema,
 	leaseAcquireSchema,
@@ -19,10 +20,13 @@ import {
 	proposalSubmitSchema,
 	teamAcceptSchema,
 	teamAddMemberSchema,
+	teamCharterCreateSchema,
 	teamCreateSchema,
 	teamDeclineSchema,
+	teamDisputeLogSchema,
 	teamDissolveSchema,
 	teamListSchema,
+	teamNormsSetSchema,
 	teamRegisterAgentSchema,
 	teamRosterSchema,
 } from "./schemas.ts";
@@ -30,6 +34,8 @@ import {
 export async function registerTeamTools(server: McpServer): Promise<void> {
 	const handlers = new TeamHandlers(server);
 	await handlers.initialize();
+
+	const govHandlers = new PgTeamGovernanceHandlers(server);
 
 	// STATE-62: Team Creation
 	const teamCreateTool: McpToolHandler = createSimpleValidatedTool(
@@ -180,6 +186,49 @@ const teamRosterTool: McpToolHandler = createSimpleValidatedTool(
 		async () => handlers.getFederationStatus(),
 	);
 
+	// P182: Team Charter Creation (AC-1, AC-6)
+	const teamCharterCreateTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "team_charter_create",
+			description:
+				"Create a team charter at squad assembly. Stores team:charter and default " +
+				"governance norms in team_norms. Idempotent — safe to call again. " +
+				"P182: Team Governance Layer (Ostrom Principle 8).",
+			inputSchema: teamCharterCreateSchema,
+		},
+		teamCharterCreateSchema,
+		async (input) => govHandlers.teamCharterCreate(input as any),
+	);
+
+	// P182: Team Norms Set (AC-2)
+	const teamNormsSetTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "team_norms_set",
+			description:
+				"Set or update a named governance norm for a team. " +
+				"Keys must start with 'team:' (e.g. team:norm:handoff, team:decision:X). " +
+				"P182: Team Governance Layer.",
+			inputSchema: teamNormsSetSchema,
+		},
+		teamNormsSetSchema,
+		async (input) => govHandlers.teamNormsSet(input as any),
+	);
+
+	// P182: Team Dispute Log (AC-3, AC-4, AC-5)
+	const teamDisputeLogTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "team_dispute_log",
+			description:
+				"Log or update a dispute between agents on a proposal. " +
+				"Supports three-tier ladder: L1(self) → L2(peer) → L3(team) → L4(society). " +
+				"Use status=team_resolved for disputes settled at team level. " +
+				"P182: Team Governance Layer.",
+			inputSchema: teamDisputeLogSchema,
+		},
+		teamDisputeLogSchema,
+		async (input) => govHandlers.teamDisputeLog(input as any),
+	);
+
 	server.addTool(teamCreateTool);
 	server.addTool(teamAcceptTool);
 	server.addTool(teamDeclineTool);
@@ -193,4 +242,8 @@ const teamRosterTool: McpToolHandler = createSimpleValidatedTool(
 	server.addTool(leaseAcquireTool);
 	server.addTool(leaseRenewTool);
 	server.addTool(federationStatusTool);
+	// P182 governance tools
+	server.addTool(teamCharterCreateTool);
+	server.addTool(teamNormsSetTool);
+	server.addTool(teamDisputeLogTool);
 }

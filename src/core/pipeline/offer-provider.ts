@@ -121,9 +121,7 @@ export class OfferProvider {
 	constructor(deps: OfferProviderDeps) {
 		this.agentIdentity = deps.agentIdentity;
 		this.capabilitiesJson = JSON.stringify(
-			deps.capabilities?.length
-				? { all: deps.capabilities }
-				: {},
+			deps.capabilities?.length ? deps.capabilities : [],
 		);
 		this.leaseTtlSeconds = deps.leaseTtlSeconds ?? 30;
 		this.renewIntervalMs = deps.renewIntervalMs ?? 10_000;
