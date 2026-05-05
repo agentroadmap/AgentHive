@@ -17,6 +17,7 @@ import {
 	isRegisteredAgency,
 	hasActiveLiaisonSession,
 } from "../../../../infra/agency/liaison-service.ts";
+import { detectConflicts } from "../../../../core/proposal/directive-conflict-detector.ts";
 
 type ProjectionFormat = "yaml_md" | "json";
 
@@ -272,6 +273,45 @@ export class PgProposalHandlers {
 				},
 				author,
 			);
+			if (proposalType === "directive") {
+				try {
+					const report = await detectConflicts(
+						String(created.id),
+						created.title,
+						created.summary ?? null,
+					);
+					if (report.conflicts.length > 0) {
+						await query(
+							`UPDATE roadmap_proposal.proposal
+							    SET audit = audit || $1::jsonb
+							  WHERE id = $2`,
+							[
+								JSON.stringify([{
+									TS: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+									Agent: author,
+									Activity: "ConflictsDetected",
+									conflicts: report.conflicts,
+								}]),
+								created.id,
+							],
+						);
+						await query(
+							`INSERT INTO roadmap.escalation_log
+							        (obstacle_type, proposal_id, agent_identity, escalated_to, severity)
+							 VALUES ('DEPENDENCY_UNRESOLVED', $1, $2, 'skeptic_d2', 'medium')`,
+							[String(created.id), author],
+						);
+						return {
+							content: [{
+								type: "text",
+								text: `Created directive: [${created.display_id ?? created.id}] ${created.title}\n⚠️ ${report.conflicts.length} conflict(s) detected — escalated to skeptic_d2 for D2 review.`,
+							}],
+						};
+					}
+				} catch {
+					// Conflict detection is non-fatal — proposal is already persisted
+				}
+			}
 			return {
 				content: [
 					{
