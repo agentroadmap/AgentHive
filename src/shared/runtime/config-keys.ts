@@ -95,7 +95,7 @@ export const StructuralKeys = {
 			"PostgreSQL username",
 		yamlPath: "database.user",
 		envOverride: true,
-		defaultValue: "admin",
+		// P448: no defaultValue — PGUSER is deployment-specific, must be explicit
 	} satisfies ConfigKey<string>,
 
 	PG_SCHEMA: {

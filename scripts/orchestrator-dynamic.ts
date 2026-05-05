@@ -178,9 +178,9 @@ async function main() {
   setInterval(async () => {
     try {
       const result = await query(
-        `SELECT id, display_id, status, maturity_state 
+        `SELECT id, display_id, status, maturity 
          FROM roadmap.proposal 
-         WHERE maturity_state = 'new' 
+         WHERE maturity = 'new' 
          ORDER BY priority DESC NULLS LAST 
          LIMIT 5`
       );

@@ -435,6 +435,40 @@ const Icons = {
 			<circle cx="12" cy="12" r="1" strokeWidth={2} />
 		</svg>
 	),
+	Agency: () => (
+		<svg
+			className="w-5 h-5"
+			fill="none"
+			stroke="currentColor"
+			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
+		>
+			<path
+				strokeLinecap="round"
+				strokeLinejoin="round"
+				strokeWidth={2}
+				d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
+			/>
+		</svg>
+	),
+	Dispatch: () => (
+		<svg
+			className="w-5 h-5"
+			fill="none"
+			stroke="currentColor"
+			viewBox="0 0 24 24"
+			aria-hidden="true"
+			focusable="false"
+		>
+			<path
+				strokeLinecap="round"
+				strokeLinejoin="round"
+				strokeWidth={2}
+				d="M13 10V3L4 14h7v7l9-11h-7z"
+			/>
+		</svg>
+	),
 };
 
 interface SideNavigationProps {
@@ -926,6 +960,36 @@ const SideNavigation = memo(function SideNavigation({
 								<Icons.Statistics />
 								<span className="ml-3 text-sm font-medium">Statistics</span>
 							</NavLink>
+
+							{/* Dispatches Navigation */}
+							<NavLink
+								to="/dispatches"
+								className={({ isActive }) =>
+									`flex items-center px-3 py-2 rounded-lg transition-colors duration-200 ${
+										isActive
+											? "bg-blue-50 dark:bg-blue-600/20 text-blue-600 dark:text-blue-400 font-medium"
+											: "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100"
+									}`
+								}
+							>
+								<Icons.Dispatch />
+								<span className="ml-3 text-sm font-medium">Dispatches</span>
+							</NavLink>
+
+							{/* Agencies Navigation */}
+							<NavLink
+								to="/agencies"
+								className={({ isActive }) =>
+									`flex items-center px-3 py-2 rounded-lg transition-colors duration-200 ${
+										isActive
+											? "bg-blue-50 dark:bg-blue-600/20 text-blue-600 dark:text-blue-400 font-medium"
+											: "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100"
+									}`
+								}
+							>
+								<Icons.Agency />
+								<span className="ml-3 text-sm font-medium">Agencies</span>
+							</NavLink>
 						</div>
 					)}
 
@@ -1197,6 +1261,40 @@ const SideNavigation = memo(function SideNavigation({
 							>
 								<div className="w-6 h-6 flex items-center justify-center">
 									<Icons.Statistics />
+								</div>
+							</NavLink>
+							{/* Dispatches Navigation (collapsed) */}
+							<NavLink
+								to="/dispatches"
+								data-tooltip-id="sidebar-tooltip"
+								data-tooltip-content="Dispatches"
+								className={({ isActive }) =>
+									`flex items-center justify-center p-3 rounded-md transition-colors duration-200 ${
+										isActive
+											? "bg-blue-50 dark:bg-blue-600/20 text-blue-700 dark:text-blue-400"
+											: "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100"
+									}`
+								}
+							>
+								<div className="w-6 h-6 flex items-center justify-center">
+									<Icons.Dispatch />
+								</div>
+							</NavLink>
+							{/* Agencies Navigation (collapsed) */}
+							<NavLink
+								to="/agencies"
+								data-tooltip-id="sidebar-tooltip"
+								data-tooltip-content="Agencies"
+								className={({ isActive }) =>
+									`flex items-center justify-center p-3 rounded-md transition-colors duration-200 ${
+										isActive
+											? "bg-blue-50 dark:bg-blue-600/20 text-blue-700 dark:text-blue-400"
+											: "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100"
+									}`
+								}
+							>
+								<div className="w-6 h-6 flex items-center justify-center">
+									<Icons.Agency />
 								</div>
 							</NavLink>
 							<button

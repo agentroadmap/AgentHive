@@ -1,118 +1,86 @@
-# P611 — Gate Advance Reconciler: Operator Guide
+# Gate Advance Reconciler — Operator Guide (P611)
 
-**Proposal:** P611  
-**Migration:** `scripts/migrations/059-p611-gate-decision-auto-advance.sql`  
+**Proposal:** P611 — Auto-advance reconciler: gate_decision_log advance verdict must flip proposal.status  
 **Status:** COMPLETE  
-**Last verified:** 2026-04-27
+**Migration:** `scripts/migrations/059-p611-gate-decision-auto-advance.sql`  
+**Last revised:** 2026-04-27
 
 ---
 
-## Overview
+## 1. What was built
 
-P611 eliminates the two-write atomicity gap in the gate-loop advance path. Before this feature, a gate agent could write a `gate_decision_log` row with `decision='advance'` but then crash or skip the `prop_transition` call — leaving the proposal permanently stranded. P472 hit this exact failure mode (gdl#158, 2026-04-26).
+Before P611, a gate cubic that crashed or skipped `prop_transition` after inserting a `gate_decision_log` row with `decision='advance'` left the proposal permanently stranded. The orchestrator's post-check had no compensating path for "advance is logged but status didn't flip."
 
-The fix makes `gate_decision_log.decision = 'advance'` the durable source of truth via two complementary paths:
+**Root cause incident:** P472, gate_decision_log #158, `decision='advance'` at 2026-04-26 21:24:14Z. Proposal stayed `DRAFT/mature` until manual operator intervention.
 
-| Path | Mechanism | Latency | Handles |
-|:---|:---|:---|:---|
-| **Option A (primary)** | DB trigger `trg_apply_gate_advance` on `gate_decision_log` AFTER INSERT | 0 ms (atomic) | All future INSERTs |
-| **Option B (backstop)** | Orchestrator `reconcileStrandedAdvances` timer (30s) | ≤ 30s | Historical rows, trigger disabled |
+P611 adds two complementary recovery paths:
 
-Both paths are idempotent and write an audit trail to `proposal_discussions`.
+| Path | Mechanism | Recovery latency |
+|:---|:---|:---|
+| **Trigger (primary)** | `trg_apply_gate_advance` fires atomically within the same INSERT transaction | 0 ms |
+| **Reconciler (backstop)** | `reconcileStrandedAdvances()` in orchestrator.ts, every 30 s | ≤ 30 s |
+
+After migration 059, `gate_decision_log.decision = 'advance'` is the durable source of truth. The trigger derives `proposal.status` from it atomically — the two-write atomicity gap is closed.
 
 ---
 
-## Trigger Mechanics (Option A)
+## 2. How the trigger works
 
-### Objects
+`fn_apply_gate_advance()` is an `AFTER INSERT FOR EACH ROW` trigger on `roadmap_proposal.gate_decision_log`.
 
-| Object | Location |
+**Three-way status check (after locking proposal row FOR UPDATE):**
+
+| `proposal.status` vs. logged states | Action |
 |:---|:---|
-| Function | `roadmap_proposal.fn_apply_gate_advance()` |
-| Trigger | `trg_apply_gate_advance` on `roadmap_proposal.gate_decision_log` AFTER INSERT FOR EACH ROW |
+| Equals `to_state` | No-op (agent already advanced — idempotent) |
+| Equals `from_state` | UPDATE proposal, INSERT audit discussion row |
+| Equals neither (drift) | INSERT warning discussion row only; do NOT advance |
+| `decision != 'advance'` | RETURN NULL immediately (hold/reject/waive/escalate are silent) |
 
-### Logic (three-way status check)
+**Key invariants:**
+- `SET LOCAL lock_timeout = '5s'` — gate INSERT fails hard after 5 s of lock contention rather than hanging silently. The reconciler closes the gap within 30 s.
+- `SET LOCAL app.gate_bypass = 'true'` — required to bypass `fn_guard_gate_advance` (P290), which would otherwise reject the update because the decision row is not yet visible to other transactions. `SET LOCAL` is transaction-scoped; it does not bleed to concurrent sessions.
+- SECURITY DEFINER + `SET search_path = roadmap_proposal, pg_temp` — prevents search-path injection.
+- Audit row uses `author_identity='system/auto-advance'` and `context_prefix='gate-decision:'`.
 
-```
-INSERT into gate_decision_log (decision='advance')
-  └─ fn_apply_gate_advance fires:
-       1. decision != 'advance'?          → RETURN NULL (no-op)
-       2. SET LOCAL lock_timeout = '5s'
-       3. SELECT proposal FOR UPDATE
-       4. proposal.status == to_state?    → RETURN NULL (idempotent no-op — agent already advanced)
-       5. proposal.status != from_state?  → INSERT warning discussion row; RETURN NULL (drift)
-       6. proposal.status == from_state:
-            SET LOCAL app.gate_bypass='true'
-            UPDATE proposal SET status=to_state, maturity='new'
-            INSERT audit discussion row (author_identity='system/auto-advance')
-```
-
-### Why `SET LOCAL app.gate_bypass = 'true'`
-
-`fn_guard_gate_advance` (P290, migration 040) checks `current_setting('app.gate_bypass', true) = 'true'`. When the trigger fires, the inserted row is **not yet visible** to other transactions and would not satisfy the guard's SELECT. The bypass is essential. `SET LOCAL` is transaction-scoped — concurrent sessions are never affected even though `fn_apply_gate_advance` is `SECURITY DEFINER`.
-
-### Why `lock_timeout = '5s'`
-
-Without a timeout, a competing long-running transaction holding the proposal row causes the gate_decision_log INSERT to block indefinitely, silently hanging the gate cubic. With the timeout, the INSERT fails with a hard error after 5s; the gate agent can retry, and the reconciler backstop closes any remaining stranded-advance window within 30s.
-
-### Audit trail
-
-Every trigger-applied advance writes one `proposal_discussions` row:
-- `author_identity = 'system/auto-advance'`
-- `context_prefix = 'gate-decision:'`
-- `body = 'Auto-advanced <from>-><to> via gate_decision_log id=<id> (decided_by: <agent>). Trigger: fn_apply_gate_advance.'`
-
-Drift warnings (status neither `from_state` nor `to_state`) write:
-- `author_identity = 'system/auto-advance'`
-- `body = 'WARNING: gate_decision_log id=<id> expects from=<X> but proposal.status=<Y> (to=<Z>). No action.'`
+**Atomicity guarantee:** If the trigger's UPDATE fails, the transaction rolls back both the `gate_decision_log` INSERT and the UPDATE together. State is clean for retry.
 
 ---
 
-## Reconciler Behavior (Option B)
+## 3. How the reconciler works
 
-### Location in orchestrator.ts
+`reconcileStrandedAdvances(pool)` runs every 30 s in `scripts/orchestrator.ts`.
 
+**Query — finds stranded advances in the last 24 h:**
+```sql
+SELECT gdl.id, gdl.proposal_id, gdl.from_state, gdl.to_state, gdl.decided_by
+FROM roadmap_proposal.gate_decision_log gdl
+JOIN roadmap_proposal.proposal p ON p.id = gdl.proposal_id
+WHERE gdl.decision = 'advance'
+  AND gdl.created_at > now() - INTERVAL '24 hours'
+  AND UPPER(p.status) = UPPER(gdl.from_state)
+ORDER BY gdl.created_at ASC;
 ```
-let reconcilerTimer: NodeJS.Timeout | null = null;   // at module scope
-                                                      // grep: "let implicitGateTimer"
 
-reconcilerTimer = setInterval(                       // after IMPLICIT_GATE_POLL block
-  () => reconcileStrandedAdvances(pool).catch(...),
-  30_000
-);
+**Per-row behavior:**
+- Each row runs in an independent transaction with `try/catch`.
+- A single row failure logs the error (with `gdl.id` and `proposal_id`) and continues — does not abort the reconciler run.
+- UPDATE guard: `WHERE UPPER(status) = UPPER(from_state)` — races with the trigger produce 0 rows affected, not an error.
+- Audit row uses `author_identity='system/reconciler'` (not `system/auto-advance`) so operators can distinguish trigger-applied advances from reconciler-applied advances in proposal history.
 
-if (reconcilerTimer) clearInterval(reconcilerTimer); // in shutdown(), after implicitGateTimer clear
+**Log lines to watch:**
 ```
-
-> **Note:** Line numbers differ between worktrees. Always grep for variable/function names — do not use hardcoded line numbers.
-
-### What the reconciler does
-
-Every 30 seconds:
-
-1. Queries `gate_decision_log` for `decision='advance'` rows created in the last 24 hours where the proposal's current `status` still equals `from_state`.
-2. For each stranded row: opens an independent transaction, SELECTs proposal FOR UPDATE, UPDATEs `status=to_state, maturity='new'` WHERE `UPPER(status)=UPPER(from_state)` (conditional guard for idempotency), inserts an audit discussion row.
-3. Each row is wrapped in its own try/catch — one failure logs and continues, does not abort the full run.
-4. Logs: `Reconciler: Recovered N stranded advances` or `Reconciler: Failed to apply advance for proposal_id=X, gdl_id=Y: <msg>`.
-
-### Audit trail (reconciler vs. trigger distinction)
-
-| Applied by | `author_identity` |
-|:---|:---|
-| Trigger (Option A) | `system/auto-advance` |
-| Reconciler (Option B) | `system/reconciler` |
-
-`context_prefix` and body format are otherwise identical. This distinction lets operators determine which path applied a given advance when reviewing `proposal_discussions`.
-
-### HA safety
-
-Two orchestrator instances both fire reconcilers. `SELECT FOR UPDATE` prevents concurrent apply. The conditional `UPDATE WHERE UPPER(status)=UPPER(from_state)` means the second instance always updates 0 rows — no error, clean idempotency.
+Reconciler: Recovered N stranded advances
+Reconciler: Failed to apply advance for proposal_id=X, gdl_id=Y: <msg>
+```
 
 ---
 
-## Observability Queries
+## 4. Observability
 
-### Steady-state health check (returns 0 rows in healthy system)
+### 4.1 Steady-state dashboard query
+
+Returns 0 rows in a healthy system. Any row older than 2 minutes with status still at `from_state` means the trigger fired but failed and the reconciler hasn't run yet (or is broken).
 
 ```sql
 SELECT gdl.id, gdl.proposal_id, p.status AS current_status,
@@ -127,13 +95,62 @@ WHERE gdl.decision = 'advance'
 ORDER BY gdl.created_at;
 ```
 
-Any row here means either the trigger and reconciler both failed, or the system is in a partial deploy/rollback state. Investigate immediately.
-
-### One-time backfill report (historical stranded advances)
+### 4.2 Verify trigger exists
 
 ```sql
-SELECT gdl.id, gdl.proposal_id, p.title, p.status AS current_status,
-       gdl.from_state, gdl.to_state, gdl.decided_by, gdl.created_at
+SELECT trigger_name, event_manipulation, action_timing
+FROM information_schema.triggers
+WHERE trigger_name = 'trg_apply_gate_advance';
+-- Expected: 1 row, event_manipulation=INSERT, action_timing=AFTER
+```
+
+### 4.3 Verify reconciler is running
+
+```bash
+# Check orchestrator logs for reconciler heartbeat
+grep "Reconciler:" /var/log/agenthive/orchestrator.log | tail -20
+```
+
+### 4.4 Audit trail — how an advance was applied
+
+```sql
+SELECT body, author_identity, created_at
+FROM roadmap_proposal.proposal_discussions
+WHERE proposal_id = <pid>
+  AND context_prefix = 'gate-decision:'
+ORDER BY created_at DESC LIMIT 5;
+-- author_identity='system/auto-advance' → trigger applied
+-- author_identity='system/reconciler'   → reconciler applied
+```
+
+---
+
+## 5. Post-deploy checklist
+
+Run after migration 059 is deployed:
+
+- [ ] Trigger exists: run §4.2 query → 1 row returned
+- [ ] Steady-state query returns 0 rows (§4.1)
+- [ ] Orchestrator logs show `Reconciler: Recovered 0 stranded advances` (or N > 0 if backfill found stranded proposals)
+- [ ] Run backfill report (§6) and decide on P497/gdl#144
+- [ ] Verify CONVENTIONS.md §4 has the gate three-action rule bullet
+- [ ] Verify CONVENTIONS.md §10a has the `#### Gate spawn author_identity convention` subsection
+
+---
+
+## 6. Backfill — surface historical stranded advances
+
+Run once post-deploy to find proposals stranded before migration 059:
+
+```sql
+SELECT gdl.id   AS gdl_id,
+       gdl.proposal_id,
+       p.title,
+       p.status AS current_status,
+       gdl.from_state,
+       gdl.to_state,
+       gdl.decided_by,
+       gdl.created_at
 FROM roadmap_proposal.gate_decision_log gdl
 JOIN roadmap_proposal.proposal p ON p.id = gdl.proposal_id
 WHERE gdl.decision = 'advance'
@@ -141,222 +158,112 @@ WHERE gdl.decision = 'advance'
 ORDER BY gdl.created_at DESC;
 ```
 
-### Verify trigger exists
+**Known stranded advance at time of P611 COMPLETE (2026-04-27):**
 
+| proposal_id | gdl.id | Transition | decided_by | created_at |
+|:---|:---|:---|:---|:---|
+| P497 | 144 | DEVELOP → MERGE | code-reviewer-d3 | 2026-04-26 08:06:59Z |
+
+Operator action required: decide whether to apply or close P497/gdl#144 as stale. Do not auto-apply without reviewing P497's current state.
+
+To manually apply a stranded advance (after verifying P497 is still in DEVELOP):
 ```sql
-SELECT trigger_name, event_manipulation, action_timing
-FROM information_schema.triggers
-WHERE event_object_schema = 'roadmap_proposal'
-  AND event_object_table = 'gate_decision_log'
-  AND trigger_name = 'trg_apply_gate_advance';
-```
-
-### Verify function exists
-
-```sql
-SELECT routine_name, security_type
-FROM information_schema.routines
-WHERE routine_schema = 'roadmap_proposal'
-  AND routine_name = 'fn_apply_gate_advance';
-```
-
----
-
-## Post-Deploy Checklist
-
-Run these steps after deploying migration 059 and restarting the orchestrator:
-
-1. **Verify trigger installed:**
-   ```sql
-   -- Must return 1 row
-   SELECT COUNT(*) FROM information_schema.triggers
-   WHERE trigger_name = 'trg_apply_gate_advance';
-   ```
-
-2. **Verify function installed:**
-   ```sql
-   SELECT routine_name FROM information_schema.routines
-   WHERE routine_schema = 'roadmap_proposal'
-     AND routine_name = 'fn_apply_gate_advance';
-   ```
-
-3. **Run steady-state health check** — expect 0 rows (trigger + reconciler should have resolved any pre-existing stranded advances within 30s of orchestrator restart).
-
-4. **Run backfill report** — identify any historical stranded advances predating migration 059.
-
-5. **Handle P497/gdl#144** — see Backfill Procedure below.
-
-6. **Verify reconciler timer** in orchestrator logs — look for `Reconciler: Recovered` or absence of `Reconciler:` lines (silence is OK if no stranded advances exist).
-
-7. **Verify shutdown clean** — send SIGTERM, confirm no `Reconciler:` log lines appear after the shutdown message.
-
----
-
-## Backfill Procedure (P497 / gdl#144)
-
-**Live DB status (verified 2026-04-27):**
-- `proposal_id=497`, `gdl.id=144`, `decision=advance`, `from_state=DEVELOP`, `to_state=MERGE`
-- `decided_by=code-reviewer-d3`, `created_at=2026-04-26 08:06:59Z`
-- **P472 is NOT stranded** — gdl#158 was DRAFT→REVIEW; P472 is now at DEVELOP (past from_state).
-
-**Post-migration-059 operator decision required for P497/gdl#144:**
-
-Option A — Apply the advance (P497 should proceed to MERGE):
-```sql
--- Trigger will handle this automatically once migration 059 is deployed.
--- If trigger does not fire for historical rows, apply manually:
 BEGIN;
 SET LOCAL app.gate_bypass = 'true';
-UPDATE roadmap_proposal.proposal
-SET status = 'MERGE', maturity = 'new'
-WHERE id = 497 AND UPPER(status) = UPPER('DEVELOP');
+SET LOCAL lock_timeout = '5s';
+SELECT id, status FROM roadmap_proposal.proposal WHERE id = 497 FOR UPDATE;
+-- Verify status = 'DEVELOP' before proceeding
+UPDATE roadmap_proposal.proposal SET status = 'MERGE', maturity = 'new' WHERE id = 497;
 INSERT INTO roadmap_proposal.proposal_discussions
-  (proposal_id, author_identity, context_prefix, body)
-VALUES (497, 'system/operator-backfill', 'gate-decision:',
-  'Manual backfill: applied advance from gate_decision_log id=144 (DEVELOP->MERGE, decided_by: code-reviewer-d3, created_at: 2026-04-26 08:06:59Z). P611 post-deploy operator action.');
+    (proposal_id, author_identity, context_prefix, body)
+VALUES (497, 'system/reconciler', 'gate-decision:',
+    'Backfill: manual operator apply of gate_decision_log id=144 (DEVELOP→MERGE, decided_by: code-reviewer-d3). P611 post-deploy backfill.');
 COMMIT;
 ```
 
-Option B — Close as stale (P497 advance is no longer valid):
-```sql
-INSERT INTO roadmap_proposal.proposal_discussions
-  (proposal_id, author_identity, context_prefix, body)
-VALUES (497, 'system/operator-backfill', 'gate-decision:',
-  'Operator decision: gate_decision_log id=144 advance (DEVELOP->MERGE) closed as stale. Reason: [operator notes here]. P611 post-deploy review.');
-```
-
-> **Note:** The reconciler's 24-hour window means gdl#144 (created 2026-04-26) will **not** be auto-applied by the reconciler after migration 059 deploys (age > 24h). Operator must decide and act manually.
-
 ---
 
-## Emergency Controls
+## 7. Emergency controls
 
-### Disable trigger (keep function, stop auto-advance)
+### 7.1 Disable trigger (leave reconciler active)
 
-```sql
-ALTER TABLE roadmap_proposal.gate_decision_log
-  DISABLE TRIGGER trg_apply_gate_advance;
-```
-
-This is the fastest rollback if the trigger causes issues. The reconciler continues to operate at ≤30s latency as the backstop.
-
-### Re-enable trigger
+Suspends the atomic trigger without stopping the reconciler. Recovery latency degrades to ≤ 30 s.
 
 ```sql
 ALTER TABLE roadmap_proposal.gate_decision_log
-  ENABLE TRIGGER trg_apply_gate_advance;
+    DISABLE TRIGGER trg_apply_gate_advance;
 ```
 
-### Full removal (trigger + function)
+Re-enable:
+```sql
+ALTER TABLE roadmap_proposal.gate_decision_log
+    ENABLE TRIGGER trg_apply_gate_advance;
+```
+
+### 7.2 Full rollback (trigger + function)
+
+Both commands are idempotent. They do NOT remove any `gate_decision_log` rows or reverse any `proposal.status` values already written.
 
 ```sql
 DROP TRIGGER IF EXISTS trg_apply_gate_advance
-  ON roadmap_proposal.gate_decision_log;
+    ON roadmap_proposal.gate_decision_log;
 DROP FUNCTION IF EXISTS roadmap_proposal.fn_apply_gate_advance();
 ```
 
-Both commands are idempotent. Neither removes `gate_decision_log` rows nor reverses any `proposal.status` values already written.
+After full rollback, the reconciler continues to operate as the sole recovery path. Restart orchestrator to reload after rollback.
 
-### Disable reconciler (orchestrator restart required)
+### 7.3 Disable reconciler only
 
-Set `IMPLICIT_GATE_RECONCILER_DISABLED=true` in the orchestrator environment and restart. (If no env var gate exists, comment out the `reconcilerTimer` setInterval block and redeploy.)
+Stop orchestrator, comment out the `reconcilerTimer = setInterval(...)` block, redeploy. The trigger remains active.
 
 ---
 
-## Integration Test Matrix
+## 8. Integration test coverage
 
-**Test file:** `src/test/migration-059-gate-advance.test.ts`
+**Test file:** `src/test/migration-059-gate-advance.test.ts`  
+Connects to a real DB — no mocks.
 
-Tests connect to a real DB. No mocks.
-
-| # | Scenario | INSERT decision | Proposal status before | Expected outcome |
-|:---|:---|:---|:---|:---|
-| a | **Advance path** | `advance` | `from_state` | `proposal.status` flips to `to_state`, `maturity='new'`, one `proposal_discussions` row written (`author_identity='system/auto-advance'`) |
-| b | **Idempotent no-op** | `advance` | already `to_state` | 0 proposal rows updated, no error, no discussion row written |
-| c | **Drift warning** | `advance` | neither `from_state` nor `to_state` | 0 proposal rows updated, one warning discussion row written |
-| d | **Non-advance decision no-op** | `hold` / `reject` / `waive` / `escalate` | `from_state` | trigger is silent no-op; proposal unchanged |
+| Test | Scenario | Expected |
+|:---|:---|:---|
+| (a) advance path | INSERT decision=advance, proposal.status=from_state | status → to_state, maturity=new, 1 discussion row |
+| (b) idempotent no-op | proposal.status already equals to_state | 0 rows updated, no error |
+| (c) drift warning | status equals neither from_state nor to_state | 0 rows updated, 1 warning discussion row |
+| (d) non-advance decision | INSERT decision=hold/reject/waive/escalate | trigger is silent no-op |
 
 All four paths must pass before P611 PR is merged.
 
 ---
 
-## AC Supersession Table
+## 9. Out of scope
 
-When ACs conflict, the higher-numbered AC is authoritative.
+- Auto-rollback on reject — advance is monotonic; rollbacks require manual operator action.
+- `orchestrator.ts:1330` (`dispatchImplicitGate`) and `:1548` (`_dispatchTransitionQueue`) — **NOT modified**. After migration 059, the trigger makes `reachedTarget` true by the time the orchestrator reads `proposal.status`. (AC-28 is definitive.)
+- `gate_decision_log.decision` CHECK constraint — no change needed. Existing 5-value constraint (`advance`, `hold`, `reject`, `waive`, `escalate`) is correct. (AC-26 supersedes AC-18.)
+- `pg_notify` for real-time reconciliation — deferred. Trigger's 0 ms atomicity makes ≤30 s reconciler latency acceptable as backstop.
 
-| Superseded | Superseding | Topic |
+---
+
+## 10. Decision log for contradictory ACs
+
+During development, several ACs contradicted each other. The authoritative resolution:
+
+| Superseded | Superseding | Resolution |
 |:---|:---|:---|
-| AC-13 | **AC-19 / AC-23** | Migration number is **059**, not 058 |
-| AC-27 | **AC-31** | `gate_task_templates.author_identity_template` column **EXISTS** in live DB |
-| AC-25 | **AC-32** | CONVENTIONS.md §10a **already exists** (codex-one line 519); ADD bullet, do not create section |
-| AC-18 | **AC-26** | `decision` CHECK has **5** values (`advance`, `hold`, `reject`, `waive`, `escalate`); no constraint change needed |
-| AC-36 | **AC-39** | Integration test path is `src/test/migration-059-gate-advance.test.ts` (not `scripts/tests/`) |
+| AC-13 (migration=058) | **AC-19 / AC-23** | Migration is **059**; 058 reserved by P472 |
+| AC-27 (no author_identity_template column) | **AC-31** | Column **exists** in live DB; AC-27 checked stale DDL |
+| AC-25 (§10a doesn't exist) | **AC-32** | §10a exists in main at line 632; add bullet, don't create section |
+| AC-18 (3-value constraint) | **AC-26** | CHECK has **5** values (waive + escalate also valid) |
+| AC-36 (test dir = scripts/tests/) | **AC-39** | Test dir is **src/test/** |
 
-**AC-28 is definitive:** do NOT modify `orchestrator.ts` lines for `dispatchImplicitGate` or `_dispatchTransitionQueue`. The trigger's atomicity makes those changes unnecessary.
-
----
-
-## CONVENTIONS.md Changes Required
-
-### Section 4 — Gate agent three-action rule (AC-44)
-
-Insertion point: after the 7th bullet (line 104 in main), before §4a (line 106).
-
-Add as 8th bullet:
-> Gate cubic agents MUST call `prop_transition` (records `gate_decision_log` + flips status) and `set_maturity` after a verdict. The P611 reconciler is the safety net — omitting these is a protocol violation, not an acceptable shortcut.
-
-### Section 10a — Gate spawn author_identity convention (AC-43)
-
-Insertion point in main repo: after line 714 (Source-of-truth rule section), before `#### What stops a gate run` (line 715).
-
-Add new subsection:
-```
-#### Gate spawn author_identity convention
-
-Gate spawn `author_identity` follows the pattern: `<provider>/<role>-d<level>-p<proposal_id>`
-
-Examples:
-- `claude/skeptic-alpha-d1-p472`
-- `claude/architecture-reviewer-d2-p611`
-
-Canonical template stored in `roadmap.gate_task_templates.author_identity_template`.
-```
-
-> **codex-four worktree gap:** §10a does NOT exist in codex-four as of 2026-04-27. Developer must rebase/merge main (commits `21c8518` + `ffe50c5`) before editing CONVENTIONS.md.
+When a later-numbered AC conflicts with an earlier one, the later AC wins.
 
 ---
 
-## Architecture Notes
+## See also
 
-### Why not pg_notify?
-
-A `pg_notify` listener would achieve near-zero latency without polling. Rejected for this iteration:
-- Orchestrator startup already has three timers — a fourth listener adds restart-order complexity.
-- `LISTEN/NOTIFY` does not replay on reconnect, so a missed notification during restart leaves the same stranded-advance window the trigger already closes.
-- The trigger's atomic guarantee makes ≤30s reconciler latency acceptable as a backstop.
-
-Revisit if the reconciler adds observable overhead at scale.
-
-### Atomicity invariant
-
-With `trg_apply_gate_advance` deployed, the two-write atomicity problem is **eliminated for all future INSERTs**:
-- INSERT commits → trigger fires → `proposal.status` updated → all in one atomic commit.
-- INSERT rolls back → trigger does not fire → no state change → clean retry possible.
-
-This means `dispatchImplicitGate` and `_dispatchTransitionQueue` require **no code changes** — `reachedTarget` will be `true` whenever the gate agent successfully commits its decision row.
-
-### Reconciler scope post-migration 059
-
-The reconciler handles three residual cases:
-1. **Backfill:** proposals stranded before migration 059 was deployed.
-2. **Trigger disabled:** operator ran `ALTER TABLE ... DISABLE TRIGGER`.
-3. **Function replacement failure:** broken `fn_apply_gate_advance` mid-deploy.
-
----
-
-## See Also
-
-- [P611 Proposal Design](../../proposals/P611-gate-advance-reconciler.md) — full design, drawbacks, AC list
-- [CONVENTIONS.md](../../CONVENTIONS.md) — gate agent protocol (§4, §10a)
-- [Migration 059](../../scripts/migrations/059-p611-gate-decision-auto-advance.sql) — SQL source
-- [Integration tests](../../src/test/migration-059-gate-advance.test.ts) — four test paths
+- `scripts/migrations/059-p611-gate-decision-auto-advance.sql` — trigger + function DDL
+- `src/test/migration-059-gate-advance.test.ts` — integration tests
+- `CONVENTIONS.md §4` — gate agent three-action rule (prop_transition + set_maturity required)
+- `CONVENTIONS.md §10a` — gate spawn author_identity convention
+- P472 — incident that motivated P611 (gate_decision_log #158 stranded advance)
+- P290 — `fn_guard_gate_advance` (the guard this trigger bypasses via `app.gate_bypass`)

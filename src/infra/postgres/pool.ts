@@ -166,6 +166,33 @@ function parsePositiveInteger(value: unknown, fallback: number): number {
 	return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : fallback;
 }
 
+/**
+ * Require a resolved PGUSER value or throw.
+ *
+ * P448 deprecation schedule:
+ *   V1 (2026-Q2, this release): silent "xiaomi" fallback removed; throws with
+ *     a deprecation warning in logs so operators see what needs fixing.
+ *   V2 (2026-Q3): remove the console.warn — only the throw remains.
+ *
+ * Operators: set PGUSER (and PGHOST, PGDATABASE) in /etc/agenthive/env.
+ * See scripts/systemd/env.template for a migration guide.
+ */
+function requirePgUser(resolved: string | undefined): string {
+	if (resolved) return resolved;
+	// V1: emit deprecation warning so the operator log captures it before the throw
+	// V2 (2026-Q3, P448): remove the console.warn below, keep only the throw
+	console.warn(
+		"[PG] DEPRECATION (P448/V1): PGUSER is not set and the silent 'xiaomi' " +
+			"fallback has been removed. Source /etc/agenthive/env before the next " +
+			"service restart. This will be a hard error in 2026-Q3 (P448/V2).",
+	);
+	throw new AgentHiveConfigError(
+		"[PG] PGUSER is required but not set. " +
+			"Set PGUSER (and PGHOST, PGDATABASE) in /etc/agenthive/env. " +
+			"See scripts/systemd/env.template for a migration guide.",
+	);
+}
+
 function resolvePoolConfig(config?: AgentHivePoolConfig): ResolvedPoolConfig {
 	const databaseUrlConfig = parseDatabaseUrl(process.env.DATABASE_URL);
 	const configuredPassword =
@@ -189,10 +216,11 @@ function resolvePoolConfig(config?: AgentHivePoolConfig): ResolvedPoolConfig {
 			(StructuralKeys.PGHOST.defaultValue ?? "127.0.0.1"),
 		port:
 			Number(config?.port ?? process.env.PGPORT ?? databaseUrlConfig.port) ||
-			(StructuralKeys.PGPORT.defaultValue ?? 5432),
-		user:
-			config?.user ?? process.env.PGUSER ?? databaseUrlConfig.user ?? "admin",
-		password: resolvedPassword ?? undefined,
+			5432,
+		user: requirePgUser(
+			config?.user ?? process.env.PGUSER ?? databaseUrlConfig.user,
+		),
+		password: resolvedPassword,
 		database:
 			config?.database ??
 			process.env.PGDATABASE ??
@@ -311,7 +339,7 @@ export function initPoolFromConfig(dbConfig: Record<string, any>): Pool {
 	return getPool({
 		host: dbConfig.host ?? process.env.PGHOST ?? "127.0.0.1",
 		port: Number(dbConfig.port || process.env.PGPORT || 5432),
-		user: dbConfig.user ?? process.env.PGUSER,
+		user: requirePgUser(dbConfig.user ?? process.env.PGUSER),
 		password: process.env.PGPASSWORD ?? process.env.__PGPASSWORD_FROM_CONFIG,
 		database: dbConfig.name ?? process.env.PGDATABASE,
 		schema: configuredSchema,

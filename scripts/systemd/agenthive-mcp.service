@@ -1,5 +1,5 @@
 [Unit]
-Description=AgentHive MCP SSE Server
+Description=AgentHive MCP Server (SSE + Streamable HTTP)
 After=network.target
 
 [Service]

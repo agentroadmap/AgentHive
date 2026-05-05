@@ -764,7 +764,7 @@ export class Core {
 			design: row.design || undefined,
 			drawbacks: row.drawbacks || undefined,
 			alternatives: row.alternatives || undefined,
-			dependency_note: row.dependency || undefined,
+			dependency_note: row.dependency_note || undefined,
 			description: row.summary || undefined,
 			implementationPlan: row.design || undefined,
 			implementationNotes: this.getPgTagString(row.tags, "implementationNotes"),
@@ -2485,7 +2485,7 @@ export class Core {
 					design: proposal.design ?? proposal.implementationPlan ?? null,
 					drawbacks: proposal.drawbacks ?? null,
 					alternatives: proposal.alternatives ?? null,
-					dependency:
+					dependency_note:
 						proposal.dependency_note ??
 						(proposal.dependencies.length > 0
 							? proposal.dependencies.join(", ")
@@ -2640,7 +2640,7 @@ export class Core {
 				design: proposal.design ?? proposal.implementationPlan ?? null,
 				drawbacks: proposal.drawbacks ?? null,
 				alternatives: proposal.alternatives ?? null,
-				dependency:
+				dependency_note:
 					proposal.dependency_note ??
 					(proposal.dependencies.length > 0
 						? proposal.dependencies.join(", ")

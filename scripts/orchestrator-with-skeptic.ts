@@ -153,7 +153,7 @@ async function skepticReview(proposalId: string, fromState: string, toState: str
     // D3 GATE: DEVELOP → MERGE
     if (fromState === "DEVELOP" && toState === "MERGE") {
       // Rule: Must be mature
-      if (data.maturity_state !== "mature") {
+      if (data.maturity !== "mature") {
         verdict.approved = false;
         verdict.blockers.push("Maturity is not 'mature'");
       }

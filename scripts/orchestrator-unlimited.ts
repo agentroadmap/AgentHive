@@ -166,7 +166,7 @@ async function main() {
       const result = await query(
         `SELECT id, display_id, status 
          FROM roadmap.proposal 
-         WHERE maturity_state = 'new' 
+         WHERE maturity = 'new'
          ORDER BY priority DESC NULLS LAST 
          LIMIT 10`
       );

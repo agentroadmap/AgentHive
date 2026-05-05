@@ -16,6 +16,7 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { hostname } from "node:os";
@@ -43,6 +44,7 @@ import {
 	projectPolicyFilterSql,
 	rolePolicyFilterSql,
 } from "./resolvers/route-policy-filters.ts";
+import { ObservabilityWriter } from "../observability/observability-writer.ts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -196,13 +198,17 @@ export interface SpawnRequest {
 	 * child can call `briefing_load(<id>)` on boot. Without this the child
 	 * runs in legacy "blind" mode (only the task prompt for context).
 	 */
-	briefingId?: string;
+	briefingId?: string | null;
 	/** P760: Project id used to enforce per-project dispatch capacity limits. */
 	projectId?: number;
 	/** P771 Layer 3: agency identity for per-agency route policy filter. */
 	agencyIdentity?: string | null;
 	/** P771 Layer 4: agent_role_profile row id for role-based route constraints. */
 	roleProfileId?: number | null;
+	/** P604: trace context — propagated from parent orchestrator span */
+	traceId?: string;
+	/** P604: parent span ID for child span linking */
+	parentSpanId?: string | null;
 }
 
 export interface SpawnResult {
@@ -246,6 +252,8 @@ export interface ModelRoute {
 	spawnToolsets: string | null;
 	/** Whether agents spawned on this route may spawn their own subagents */
 	spawnDelegate: boolean;
+	/** DB primary key of the resolved model_routes row (P604: routing observability) */
+	routeId?: bigint | null;
 }
 
 // Lazy-loaded Claude settings.json env vars (read once, cached)
@@ -290,6 +298,7 @@ export function buildSpawnProcessEnv(input: {
 	route: ModelRoute;
 	agentEnv: Record<string, string>;
 	extraEnv: Record<string, string>;
+	traceId?: string;
 }): Record<string, string> {
 	// Credential resolution order:
 	// 1. DB-stored keys (api_key_primary / api_key_secondary) — highest priority
@@ -341,14 +350,16 @@ export function buildSpawnProcessEnv(input: {
 		// Carry through essential PATH
 		PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
 		HOME: process.env.HOME ?? "/var/lib/agenthive",
-		// Agent-specific overrides from .env.agent
-		DATABASE_URL: input.agentEnv.DATABASE_URL ?? "",
+		// Agent-specific DB credentials — agent env first, then process env
+		DATABASE_URL: input.agentEnv.DATABASE_URL ?? process.env.DATABASE_URL ?? "",
 		AGENT_WORKTREE: input.worktree,
 		AGENT_PROVIDER: input.route.agentProvider,
 		AGENT_ROUTE_PROVIDER: input.route.routeProvider,
 		AGENT_API_SPEC: input.route.apiSpec,
 		// Spawn control: DB-driven flag tells the agent whether it may spawn subagents
 		AGENTHIVE_SPAWN_DELEGATE: String(input.route.spawnDelegate),
+		// P604: propagate trace context into child process
+		...(input.traceId && { AGENTHIVE_TRACE_ID: input.traceId }),
 		// Git identity isolation
 		GIT_CONFIG_GLOBAL: `${GITCONFIG_ROOT}/${input.worktree}.gitconfig`,
 		GIT_CONFIG_NOSYSTEM: "1",
@@ -722,34 +733,33 @@ export async function resolveActiveRouteProvider(): Promise<AgentProvider | null
 }
 
 /**
- * Detect a worktree's provider from its `.env.agent` (AGENT_PROVIDER key).
- * Falls back to the first enabled route in model_routes rather than hardcoding
- * a specific provider, so provider changes only require a DB update.
+ * Detect a worktree's provider from provider_registry → agent_registry.preferred_provider.
+ * Falls through to AGENT_PROVIDER env var, then the first enabled model_routes row.
+ * .env.agent is no longer read here (AC5).
  */
-export async function detectProvider(
-	worktreeName: string,
-	worktreeRoot: string = WORKTREE_ROOT,
-): Promise<AgentProvider> {
-	const envPath = join(worktreeRoot, worktreeName, ".env.agent");
+export async function detectProvider(worktreeName: string, _worktreeRoot: string = WORKTREE_ROOT): Promise<AgentProvider> {
+	// AC5: query preferred_provider for the active agency matching this worktree identity
 	try {
-		const content = await readFile(envPath, "utf8");
-		for (const line of content.split("\n")) {
-			const trimmed = line.trim();
-			if (!trimmed || trimmed.startsWith("#")) continue;
-			const eq = trimmed.indexOf("=");
-			if (eq < 0) continue;
-			const key = trimmed.slice(0, eq).trim();
-			if (key !== "AGENT_PROVIDER") continue;
-			const value = trimmed
-				.slice(eq + 1)
-				.trim()
-				.replace(/^["']|["']$/g, "");
-			if (value) return value as AgentProvider;
-		}
-	} catch (err: any) {
-		if (err?.code !== "ENOENT") throw err;
+		const { rows } = await query<{ preferred_provider: string | null }>(
+			`SELECT ar.preferred_provider
+			 FROM roadmap_workforce.agent_registry ar
+			 WHERE ar.agent_identity = $1
+			   AND EXISTS (
+			     SELECT 1 FROM roadmap_workforce.provider_registry pr
+			     WHERE pr.agency_id = ar.id AND pr.status = 'active'
+			   )
+			 LIMIT 1`,
+			[worktreeName],
+		);
+		const fromRegistry = rows[0]?.preferred_provider;
+		if (fromRegistry) return fromRegistry as AgentProvider;
+	} catch {
+		// Table may not yet exist on a fresh DB — fall through gracefully
 	}
-	// No .env.agent — resolve from DB so switching providers requires only a DB change
+	// Env var set by operator (avoids hard-coded provider in config files)
+	const envProvider = process.env.AGENT_PROVIDER as AgentProvider | undefined;
+	if (envProvider) return envProvider;
+	// DB fallback: first enabled route so switching providers requires only a DB update
 	const active = await resolveActiveRouteProvider();
 	if (active) return active;
 	// Last resort: use the env var if set.
@@ -937,6 +947,7 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 		apiKeySecondary: r.api_key_secondary,
 		spawnToolsets: r.spawn_toolsets,
 		spawnDelegate: r.spawn_delegate ?? false,
+		routeId: r.id ? BigInt(r.id) : null,
 	});
 
 	if (hint) {
@@ -1262,11 +1273,28 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	// Build argv + env from route metadata (api_spec drives which CLI is used)
 	const { argv, env: extraEnv, stdin } = buildArgsBySpec(spawnReq, route);
 
+	// P604: trace context — inherit from request or start a new root trace
+	const traceId = req.traceId ?? randomUUID();
+	const obsWriter = new ObservabilityWriter("operator:agent-spawner");
+
+	const { spanId } = await obsWriter.startSpan({
+		traceId,
+		operation: "agent.spawn",
+		parentSpanId: req.parentSpanId ?? null,
+		attributes: {
+			worktree,
+			agent_provider: provider,
+			stage,
+			...(proposalId !== undefined && { proposal_id: proposalId }),
+		},
+	});
+
 	// Assemble process environment (agent-scoped, not inheriting secrets from host)
 	const processEnv = buildSpawnProcessEnv({
 		worktree,
 		route,
 		agentEnv,
+		traceId,
 		extraEnv: {
 			...extraEnv,
 			MCP_URL: process.env.MCP_URL ?? (await getMcpUrlAsync()),
@@ -1329,6 +1357,29 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		[status, durationMs, outputSummary, errorDetail, agentRunId],
 	);
 
+	// P604: close span + write child observability records
+	await obsWriter.closeSpan({
+		spanId,
+		status: exitCode === 0 ? "ok" : "error",
+		errorMessage: exitCode !== 0 ? errorDetail.slice(0, 500) : null,
+	});
+	await obsWriter.writeAgentExecutionSpan({
+		spanId,
+		agencyId: worktree,
+		agentId: BigInt(agentRunId),
+		proposalId: proposalId ?? null,
+		modelName: route.modelName,
+		routeId: route.routeId ?? null,
+	});
+	if (route.routeId) {
+		const selectionReason = modelHint
+			? route.modelName === modelHint ? "hint_match" : "hint_fallback"
+			: "default_route";
+		await obsWriter.writeModelRoutingOutcome({
+			traceId,
+			selectedRouteId: route.routeId,
+			candidateRoutes: [{ routeId: String(route.routeId), modelName: route.modelName, selectionReason }],
+			selectionReason,
 	if (exitClass.outcome === "rate_limited") {
 		const throttledUntil =
 			exitClass.resetAt ?? new Date(Date.now() + 60 * 60 * 1000);
