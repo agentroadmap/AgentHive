@@ -93,7 +93,9 @@ const RFC_STATUSES_CANONICAL = [
 	RfcStates.MERGE,
 	RfcStates.COMPLETE,
 ];
-const HOTFIX_STATUSES_CANONICAL = getView("Hotfix").stages.map((s) => s.name);
+const HOTFIX_STATUSES_CANONICAL = (() => {
+	try { return getView("Hotfix").stages.map((s) => s.name); } catch { return [] as string[]; }
+})();
 const HOTFIX_PROPOSAL_TYPES = new Set(["hotfix"]);
 const HOTFIX_DISPLAY_MAP: Record<string, string> = {
 	[RfcStates.DRAFT]: "TRIAGE",
