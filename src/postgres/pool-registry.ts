@@ -13,6 +13,8 @@
  */
 
 import { Client, Pool } from "pg";
+import { agentContextStorage } from "../shared/identity/agent-context";
+import { PoolAccessDenied } from "../infra/postgres/pool";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 

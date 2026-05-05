@@ -36,6 +36,7 @@ export type { Pool, PoolConfig, QueryResult, QueryResultRow };
 import { StructuralKeys } from "../../shared/runtime/config-keys";
 import { ConfigResolver } from "../../shared/runtime/config";
 import { AgentHiveConfigError } from "../../shared/runtime/endpoints";
+import { agentContextStorage } from "../../shared/identity/agent-context";
 
 // Password resolution priority:
 //   1. ~/.pgpass (ConfigResolver.resolvePasswordSync)
@@ -348,17 +349,109 @@ export function initPoolFromConfig(dbConfig: Record<string, any>): Pool {
 	});
 }
 
+// ─── Pool Access Control (P844) ──────────────────────────────────────────────
+
 /**
- * Execute a parameterised query. All queries use prepared statements — safe
- * against SQL injection as long as callers never interpolate user input
- * directly into the `text` parameter.
+ * PoolAccessDenied error — thrown when an agent principal attempts unauthorized
+ * pool access. MCP handlers catch this and return a redacted error message.
  */
-export async function query<T extends QueryResultRow = any>(
+export class PoolAccessDenied extends Error {
+	constructor(principalId: string, projectSlug: string) {
+		super(
+			`[P844] Pool access denied: agent ${principalId} has no role for project ${projectSlug}`,
+		);
+		this.name = "PoolAccessDenied";
+	}
+}
+
+/**
+ * Internal query function that bypasses the agent-denial guard.
+ * ONLY called by checkAgentProjectRole() and writePoolAudit().
+ * Never exported; never called directly from application code.
+ */
+async function internalQuery<T extends QueryResultRow = any>(
 	text: string,
 	params?: any[],
 ): Promise<QueryResult<T>> {
 	const client = getPool();
 	return client.query<T>(text, params);
+}
+
+/**
+ * Check if an agent principal has a project role.
+ * Uses internalQuery to avoid circular denial.
+ */
+async function checkAgentProjectRole(
+	principalId: string,
+	projectSlug: string,
+): Promise<boolean> {
+	const result = await internalQuery<{ exists: boolean }>(
+		`SELECT EXISTS(
+       SELECT 1 FROM control_identity.agent_project_roles
+       WHERE agent_principal_did = $1 AND project_slug = $2
+     ) AS exists`,
+		[principalId, projectSlug],
+	);
+	return result.rows[0]?.exists ?? false;
+}
+
+/**
+ * Write a pool access decision to the audit table.
+ * Uses internalQuery to avoid circular denial.
+ * Failures are non-fatal — logging outages should not block access checks.
+ */
+async function writePoolAudit(
+	principalId: string | null,
+	projectSlug: string | null,
+	result: "allowed" | "denied" | "bootstrap_passthrough",
+	callSite: string,
+): Promise<void> {
+	try {
+		await internalQuery(
+			`INSERT INTO control_identity.pool_access_audit
+         (principal_id, project_slug, result, call_site)
+       VALUES ($1, $2, $3, $4)`,
+			[principalId, projectSlug, result, callSite],
+		);
+	} catch {
+		// Audit write failure is non-fatal — access decision proceeds
+	}
+}
+
+/**
+ * Execute a parameterised query. All queries use prepared statements — safe
+ * against SQL injection as long as callers never interpolate user input
+ * directly into the `text` parameter.
+ *
+ * P844: Gates agent principal access to hiveCentral.
+ * - Agents are DENIED all access (reads and writes)
+ * - Non-agent principals (operator, agency) are allowed with audit logging
+ * - Unauthenticated callers (no agentContextStorage) bypass the guard
+ */
+export async function query<T extends QueryResultRow = any>(
+	text: string,
+	params?: any[],
+): Promise<QueryResult<T>> {
+	const ctx = agentContextStorage.getStore();
+
+	// Agent principals are denied all access to the control plane
+	if (ctx?.verified?.principal_kind === "agent") {
+		await writePoolAudit(ctx.verified.principal_id, "hiveCentral", "denied", "query");
+		throw new PoolAccessDenied(ctx.verified.principal_id, "hiveCentral");
+	}
+
+	// Non-agent principals (operator/agency/bootstrap) are allowed
+	if (ctx?.verified) {
+		await writePoolAudit(
+			ctx.verified.principal_id,
+			"hiveCentral",
+			"bootstrap_passthrough",
+			"query",
+		);
+	}
+
+	// Proceed with the query
+	return internalQuery<T>(text, params);
 }
 
 /**

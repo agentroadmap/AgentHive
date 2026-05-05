@@ -1,13 +1,11 @@
 {
   "proposalId": "proposal-61",
-  "title": "Test Proposal",
-  "description": "Description",
-  "acceptanceCriteria": [
-    "AC#1: Test"
-  ],
+  "title": "Test",
+  "description": "desc",
+  "acceptanceCriteria": [],
   "approvedBy": "arch-user",
-  "approvedDate": "2026-05-01T23:51:58.834Z",
-  "addedToBacklogDate": "2026-05-01T23:51:58.836Z",
+  "approvedDate": "2026-05-05T23:20:30.208Z",
+  "addedToBacklogDate": "2026-05-05T23:20:30.212Z",
   "priority": "medium",
   "dependencies": [],
   "status": "available"

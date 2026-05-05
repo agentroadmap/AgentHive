@@ -33,6 +33,8 @@ import { formatVersionLabel, getVersionInfo } from "../../utils/version.ts";
 import { getPool, query } from "../../infra/postgres/pool.ts";
 import type { PoolClient } from "pg";
 import { hashOperatorToken, requireOperator } from "./operator-auth.ts";
+import { agentContextStorage, type VerifiedPrincipal } from "../../shared/identity/agent-context.ts";
+import { verifyBoundBearer } from "../../core/identity/principal-identity.ts";
 
 // Regex pattern to match any prefix (letters followed by dash)
 const PREFIX_PATTERN = /^[a-zA-Z]+-/i;
@@ -1295,8 +1297,29 @@ export class RoadmapServer {
 		}
 
 		try {
+			// P843: Extract and verify operator bearer token if present
+			let verifiedPrincipal: VerifiedPrincipal | null = null;
+			const authHeader = req.headers.get("Authorization");
+			if (authHeader?.startsWith("Bearer ")) {
+				const token = authHeader.slice(7);
+				// TODO: wire verifyBoundBearer once operator HMAC secret is available
+				// For now, skip bearer verification in direct HTTP handler (will be enforced in callTool)
+			}
+
 			const payload = await req.json();
-			const response = await handleDirectMcpRequest(this.mcpServer, payload);
+
+			// Call MCP handler with optional context wrapping
+			const callHandler = async () => {
+				return await handleDirectMcpRequest(this.mcpServer, payload);
+			};
+
+			const response = verifiedPrincipal
+				? await agentContextStorage.run(
+					{ verified: verifiedPrincipal },
+					() => callHandler(),
+				)
+				: await callHandler();
+
 			return Response.json(response.body, { status: response.status });
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -3867,6 +3890,15 @@ export class RoadmapServer {
 				);
 			} catch {}
 
+			// P843: Extract and verify operator bearer token if present
+			let verifiedPrincipal: VerifiedPrincipal | null = null;
+			const authHeader = req.headers.get("Authorization");
+			if (authHeader?.startsWith("Bearer ")) {
+				const token = authHeader.slice(7);
+				// TODO: wire verifyBoundBearer once operator HMAC secret is available
+				// For now, skip bearer verification in SSE handler (will be enforced in callTool)
+			}
+
 			// Create mock response that captures status
 			let responseStatus = 202;
 			let responseBody = "";
@@ -3894,15 +3926,26 @@ export class RoadmapServer {
 				setHeader: () => {},
 			};
 
-			// Call transport's handlePostMessage which handles the message internally
-			await transport.handlePostMessage(
-				{
-					headers: Object.fromEntries(new Headers(req.headers as any)),
-					auth: undefined,
-				} as any,
-				mockRes as any,
-				parsedBody,
-			);
+			// Call transport's handlePostMessage (wrapped in agentContextStorage if principal was verified)
+			const callHandler = async () => {
+				await transport.handlePostMessage(
+					{
+						headers: Object.fromEntries(new Headers(req.headers as any)),
+						auth: undefined,
+					} as any,
+					mockRes as any,
+					parsedBody,
+				);
+			};
+
+			if (verifiedPrincipal) {
+				await agentContextStorage.run(
+					{ verified: verifiedPrincipal },
+					() => callHandler(),
+				);
+			} else {
+				await callHandler();
+			}
 
 			// Return the actual captured response
 			if (responseBody) {

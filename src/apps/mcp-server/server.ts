@@ -19,6 +19,8 @@ import { getPackageName } from "../../shared/utils/app-info.ts";
 import { getVersion } from "../../shared/utils/version.ts";
 import { parseEnvelopeFromEnv, opsMatch, type ToolEnvelope } from "../../infra/agency/tool-grant.ts";
 import { query } from "../../infra/postgres/pool.ts";
+import { agentContextStorage, type AgentContext } from "../../shared/identity/agent-context.ts";
+import { type McpAuthEnvelope, type VerifiedPrincipal } from "../../core/identity/principal-verifier.ts";
 import { registerInitRequiredResource } from "./resources/init-required/index.ts";
 import { registerWorkflowResources } from "./resources/workflow/index.ts";
 import { registerAgentTools } from "./tools/agents/index.ts";
@@ -76,6 +78,26 @@ const CONSOLIDATED_TOOL_NAMES = new Set([
 
 // Track whether gate pipeline (PipelineCron) has already been started to avoid duplicates
 let gatePipelineStarted = false;
+
+// P843: Auth enforcement mode flag (default log-only)
+const P843_AUTH_ENFORCE_MCP = process.env.P843_AUTH_ENFORCE_MCP === "true";
+
+// P843: Write auth decision to audit log (non-blocking, fire-and-forget)
+async function writeAuthDecisionLog(
+	principalId: string | null,
+	toolName: string,
+	result: "allowed" | "denied" | "unauthenticated",
+): Promise<void> {
+	try {
+		await query(
+			`INSERT INTO control_identity.auth_decision_log (principal_id, tool_name, result)
+			 VALUES ($1, $2, $3)`,
+			[principalId, toolName, result],
+		);
+	} catch {
+		// Non-fatal: auth decision logging never blocks tool execution
+	}
+}
 
 type ServerInitOptions = {
 	debug?: boolean;
@@ -293,6 +315,31 @@ export class McpServer extends Core {
 
 		if (!tool) {
 			throw new Error(`Tool not found: ${name}`);
+		}
+
+		// P843: Identity gate — verify principal before capability check
+		const envelope = args._auth as McpAuthEnvelope | undefined;
+		delete args._auth; // Strip auth envelope before handler sees it
+		const ctx = agentContextStorage.getStore();
+
+		let verifiedPrincipal: VerifiedPrincipal | null = null;
+		if (ctx) {
+			// Context set by HTTP transport handler (operator bearer token)
+			verifiedPrincipal = ctx.verified;
+		} else if (envelope) {
+			// Inline _auth envelope (agency/agent flow, or stdio)
+			// TODO: wire PrincipalVerifier.verify() call here once available
+			// For now, log unauthenticated and let enforcement mode decide
+			await writeAuthDecisionLog(envelope.principal_id ?? null, name, "unauthenticated");
+			if (P843_AUTH_ENFORCE_MCP) {
+				throw new Error("[P843] Auth envelope present but verifier not yet wired");
+			}
+		} else {
+			// No auth context or envelope
+			await writeAuthDecisionLog(null, name, "unauthenticated");
+			if (P843_AUTH_ENFORCE_MCP) {
+				throw new Error("[P843] No verified principal");
+			}
 		}
 
 		// P599: enforce tool grant envelope. Deny if tool absent from envelope.
