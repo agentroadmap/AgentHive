@@ -1,5 +1,7 @@
 import React from "react";
 import type { Proposal } from "../../../shared/types";
+import { Card } from "./ui/Card";
+import { Badge } from "./ui/Badge";
 
 interface ProposalCardProps {
 	proposal: Proposal;
@@ -82,26 +84,27 @@ const ProposalCard: React.FC<ProposalCardProps> = ({
 		return `${Math.floor(diffDays / 365)}y ago`;
 	};
 
-	const getPriorityBadge = (priority?: string) => {
+	const getPriorityBadgeVariant = (priority?: string) => {
 		switch (priority) {
 			case "high":
-				return {
-					bg: "bg-red-100 dark:bg-red-900/40",
-					text: "text-red-700 dark:text-red-300",
-					label: "High",
-				};
+				return "error" as const;
 			case "medium":
-				return {
-					bg: "bg-yellow-100 dark:bg-yellow-900/40",
-					text: "text-yellow-700 dark:text-yellow-300",
-					label: "Med",
-				};
+				return "warning" as const;
 			case "low":
-				return {
-					bg: "bg-green-100 dark:bg-green-900/40",
-					text: "text-green-700 dark:text-green-300",
-					label: "Low",
-				};
+				return "success" as const;
+			default:
+				return null;
+		}
+	};
+
+	const getPriorityLabel = (priority?: string) => {
+		switch (priority) {
+			case "high":
+				return "High";
+			case "medium":
+				return "Med";
+			case "low":
+				return "Low";
 			default:
 				return null;
 		}
@@ -190,13 +193,12 @@ const ProposalCard: React.FC<ProposalCardProps> = ({
 						{proposal.id}
 					</span>
 					{(() => {
-						const badge = getPriorityBadge(proposal.priority);
-						return badge ? (
-							<span
-								className={`px-1.5 py-0.5 text-[10px] font-semibold rounded ${badge.bg} ${badge.text} transition-colors duration-200`}
-							>
-								{badge.label}
-							</span>
+						const variant = getPriorityBadgeVariant(proposal.priority);
+						const label = getPriorityLabel(proposal.priority);
+						return variant && label ? (
+							<Badge variant={variant} display="default">
+								{label}
+							</Badge>
 						) : null;
 					})()}
 				</div>

@@ -80,6 +80,8 @@
 		"release:minor": "npm version minor && npm run sync-deps && npm run release",
 		"release:major": "npm version major && npm run release",
 		"sync-deps": "TAG=$(jq -r .version package.json) && jq --arg v \"$TAG\" '.optionalDependencies |= with_entries(.value = $v)' package.json > tmp.json && mv tmp.json package.json && git add package.json && git commit --amend --no-edit",
+		"gate": "bash scripts/gate.sh",
+		"gate:full": "bash scripts/gate.sh full",
 		"check:hardcoded": "bash scripts/check-hardcoded.sh",
 		"scan": "node --import jiti/register scripts/scan-hardcoding.ts",
 		"scan:self-test": "node --import jiti/register scripts/scan-hardcoding.ts --self-test"
@@ -115,10 +117,12 @@
 	],
 	"dependencies": {
 		"@types/pg": "^8.20.0",
+		"clsx": "^2.1.1",
 		"discord.js": "^14.26.3",
 		"jiti": "^2.6.1",
 		"js-yaml": "^4.1.1",
 		"pg": "^8.20.0",
+		"tailwind-merge": "^3.3.0",
 		"wouter": "^3.9.0",
 		"ws": "^8.20.0"
 	}

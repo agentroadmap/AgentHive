@@ -1,4 +1,8 @@
 @import "tailwindcss";
+@import "../tokens/design-tokens.css";
+@import "../tokens/themes/light.css";
+@import "../tokens/themes/dark.css";
+@import "../tokens/themes/high-contrast.css";
 @import "@uiw/react-md-editor/markdown-editor.css";
 @import "@uiw/react-markdown-preview/markdown.css";
 
@@ -17,6 +21,11 @@
 
 	button:disabled {
 		cursor: not-allowed;
+	}
+
+	*:focus-visible {
+		outline: 3px solid var(--color-focus-ring);
+		outline-offset: 2px;
 	}
 }
 
