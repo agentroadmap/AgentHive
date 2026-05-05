@@ -28,15 +28,17 @@ const STATUS_COLORS: Record<string, string> = {
 	blocked: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
 	completed: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400",
 	failed: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
+	open: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
+	cancelled: "bg-gray-100 text-gray-600 dark:bg-gray-900/30 dark:text-gray-500",
 };
 
 const OFFER_COLORS: Record<string, string> = {
-	open: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
-	delivered: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400",
-	claimed: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
-	active: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
-	rejected: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
-	expired: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
+	open: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
+	claimed: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
+	active: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
+	delivered: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400",
+	failed: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
+	expired: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400",
 };
 
 function timeAgo(dateStr: string): string {
@@ -47,6 +49,35 @@ function timeAgo(dateStr: string): string {
 	return `${Math.floor(seconds / 86400)}d`;
 }
 
+function leaseCountdown(expiresAt: string | null, nowMs: number): string | null {
+	if (!expiresAt) return null;
+	const remaining = Math.floor((new Date(expiresAt).getTime() - nowMs) / 1000);
+	if (remaining <= 0) return "expired";
+	return `expires in ${remaining}s`;
+}
+
+function ReissueBar({ count, max }: { count: number; max: number }) {
+	const color = count === 0
+		? "bg-green-500"
+		: count >= max
+			? "bg-red-500"
+			: "bg-yellow-500";
+	const pct = max === 0 ? 0 : Math.min((count / max) * 100, 100);
+	return (
+		<div>
+			<span className="text-sm tabular-nums">
+				{count}/{max}
+			</span>
+			<div className="mt-0.5 h-1 w-16 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+				<div
+					className={`h-full ${color} rounded-full`}
+					style={{ width: `${pct}%` }}
+				/>
+			</div>
+		</div>
+	);
+}
+
 const DispatchPage: React.FC = () => {
 	const [dispatches, setDispatches] = useState<Dispatch[]>([]);
 	const [loading, setLoading] = useState(true);
@@ -54,6 +85,7 @@ const DispatchPage: React.FC = () => {
 	const [filterStatus, setFilterStatus] = useState<string>("");
 	const [filterOffer, setFilterOffer] = useState<string>("");
 	const [showCompleted, setShowCompleted] = useState(false);
+	const [nowMs, setNowMs] = useState(() => Date.now());
 
 	const fetchData = useCallback(async () => {
 		try {
@@ -68,9 +100,18 @@ const DispatchPage: React.FC = () => {
 		}
 	}, []);
 
+	// Auto-refresh every 15s (AC-6)
 	useEffect(() => {
 		void fetchData();
+		const poll = setInterval(() => void fetchData(), 15000);
+		return () => clearInterval(poll);
 	}, [fetchData]);
+
+	// 1-second ticker for lease countdown (AC-4)
+	useEffect(() => {
+		const tick = setInterval(() => setNowMs(Date.now()), 1000);
+		return () => clearInterval(tick);
+	}, []);
 
 	const statuses = [...new Set(dispatches.map((d) => d.dispatch_status))].sort();
 	const offerStatuses = [...new Set(dispatches.map((d) => d.offer_status))].sort();
@@ -168,7 +209,7 @@ const DispatchPage: React.FC = () => {
 				</div>
 			) : (
 				<div className="space-y-6">
-					{[...byProposal.entries()].map(([proposalId, dispatches]) => (
+					{[...byProposal.entries()].map(([proposalId, pDispatches]) => (
 						<div
 							key={proposalId}
 							className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden"
@@ -176,7 +217,7 @@ const DispatchPage: React.FC = () => {
 							<div className="bg-gray-50 dark:bg-gray-800 px-4 py-2 border-b border-gray-200 dark:border-gray-700">
 								<span className="font-semibold">P{proposalId}</span>
 								<span className="text-sm text-gray-500 ml-2">
-									{dispatches.length} dispatch{dispatches.length > 1 ? "es" : ""}
+									{pDispatches.length} dispatch{pDispatches.length > 1 ? "es" : ""}
 								</span>
 							</div>
 							<table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
@@ -209,48 +250,69 @@ const DispatchPage: React.FC = () => {
 									</tr>
 								</thead>
 								<tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
-									{dispatches.map((d) => (
-										<tr key={d.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
-											<td className="px-4 py-2 font-mono text-sm">
-												{d.agent_identity || "—"}
-											</td>
-											<td className="px-4 py-2 font-mono text-sm">
-												{d.worker_identity ? (
-													d.worker_identity
-												) : (
-													<span className="text-gray-400 italic">empty</span>
-												)}
-											</td>
-											<td className="px-4 py-2 text-sm">{d.dispatch_role}</td>
-											<td className="px-4 py-2 text-sm text-gray-500">
-												{d.squad_name}
-											</td>
-											<td className="px-4 py-2">
-												<span
-													className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
-														STATUS_COLORS[d.dispatch_status] ?? "bg-gray-100 text-gray-800"
-													}`}
-												>
-													{d.dispatch_status}
-												</span>
-											</td>
-											<td className="px-4 py-2">
-												<span
-													className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
-														OFFER_COLORS[d.offer_status] ?? "bg-gray-100 text-gray-800"
-													}`}
-												>
-													{d.offer_status}
-												</span>
-											</td>
-											<td className="px-4 py-2 text-sm tabular-nums text-gray-500">
-												{timeAgo(d.assigned_at)}
-											</td>
-											<td className="px-4 py-2 text-sm tabular-nums">
-												{d.reissue_count}/{d.max_reissues}
-											</td>
-										</tr>
-									))}
+									{pDispatches.map((d) => {
+										const countdown =
+											d.offer_status === "claimed"
+												? leaseCountdown(d.claim_expires_at, nowMs)
+												: null;
+										return (
+											<tr
+												key={d.id}
+												className="hover:bg-gray-50 dark:hover:bg-gray-800"
+											>
+												<td className="px-4 py-2 font-mono text-sm">
+													{d.agent_identity || "—"}
+												</td>
+												<td className="px-4 py-2 font-mono text-sm">
+													{d.worker_identity ? (
+														d.worker_identity
+													) : (
+														<span className="text-gray-400 italic">empty</span>
+													)}
+												</td>
+												<td className="px-4 py-2 text-sm">
+													{d.dispatch_role}
+												</td>
+												<td className="px-4 py-2 text-sm text-gray-500">
+													{d.squad_name}
+												</td>
+												<td className="px-4 py-2">
+													<span
+														className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
+															STATUS_COLORS[d.dispatch_status] ??
+															"bg-gray-100 text-gray-800"
+														}`}
+													>
+														{d.dispatch_status}
+													</span>
+												</td>
+												<td className="px-4 py-2">
+													<span
+														className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
+															OFFER_COLORS[d.offer_status] ??
+															"bg-gray-100 text-gray-800"
+														}`}
+													>
+														{d.offer_status}
+													</span>
+													{countdown && (
+														<div className="text-xs text-gray-500 mt-0.5 tabular-nums">
+															{countdown}
+														</div>
+													)}
+												</td>
+												<td className="px-4 py-2 text-sm tabular-nums text-gray-500">
+													{timeAgo(d.assigned_at)}
+												</td>
+												<td className="px-4 py-2">
+													<ReissueBar
+														count={d.reissue_count}
+														max={d.max_reissues}
+													/>
+												</td>
+											</tr>
+										);
+									})}
 								</tbody>
 							</table>
 						</div>

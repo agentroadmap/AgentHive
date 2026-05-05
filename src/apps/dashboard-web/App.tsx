@@ -6,6 +6,7 @@ import type {
 	Channel as SharedChannel,
 } from "../../shared/types";
 import AchievementsView from "./components/AchievementsView";
+import AgenciesPage from "./components/AgenciesPage";
 import AgentsPage from "./components/AgentsPage";
 import BoardPage from "./components/BoardPage";
 import ChannelsPage from "./components/ChannelsPage";
@@ -203,7 +204,7 @@ export default function App() {
 								channels={channels}
 							/>
 						</Route>
-						<Route path="/dispatch">
+						<Route path="/dispatches">
 							<DispatchPage />
 						</Route>
 						<Route path="/knowledge">
@@ -220,6 +221,9 @@ export default function App() {
 						</Route>
 						<Route path="/routes">
 							<RoutesPage />
+						</Route>
+						<Route path="/agencies">
+							<AgenciesPage />
 						</Route>
 						<Route path="/achievements">
 							<AchievementsView />
