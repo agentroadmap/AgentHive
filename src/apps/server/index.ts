@@ -1310,7 +1310,7 @@ export class RoadmapServer {
 
 			// Call MCP handler with optional context wrapping
 			const callHandler = async () => {
-				return await handleDirectMcpRequest(this.mcpServer, payload);
+				return await handleDirectMcpRequest(this.mcpServer as McpServer, payload);
 			};
 
 			const response = verifiedPrincipal
