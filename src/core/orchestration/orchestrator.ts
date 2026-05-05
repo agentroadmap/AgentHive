@@ -163,10 +163,10 @@ export class Orchestrator {
 	 * Flow per candidate:
 	 *   1. resolveQueueContext()  — enrich with workflowTemplateId + roleProfiles
 	 *   2. fetchProposalDetail()  — full RFC fields for readiness check
-	 *   3. assessReadiness()      — determines mode: gate | prep | noop
+	 *   3. assessReadiness()      — determines mode: gate | prep | skip
 	 *   4. spawnAgent()           — routes through 6-layer policy filter
 	 *
-	 * Returns the number of proposals that were dispatched (mode ≠ noop).
+	 * Returns the number of proposals that were dispatched (mode ≠ skip).
 	 */
 	async scanQueues(): Promise<number> {
 		const candidates = await getUnlockedGateQueue(SCAN_BATCH_LIMIT);
@@ -188,7 +188,7 @@ export class Orchestrator {
 
 				const { mode, reasons } = assessReadiness(detail);
 
-				if (mode === "noop") {
+				if (mode === "skip") {
 					continue;
 				}
 

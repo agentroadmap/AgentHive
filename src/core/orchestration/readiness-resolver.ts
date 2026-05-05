@@ -16,7 +16,7 @@ import { RfcStates } from "../workflow/state-names.ts";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type ReadinessMode = "prep" | "gate" | "noop";
+export type ReadinessMode = "prep" | "gate" | "skip";
 
 export interface ProposalDetail {
 	id: number;
@@ -148,14 +148,14 @@ function normalizeStage(value: string | null | undefined): string {
  * Returns:
  *   { mode: 'gate', reasons: [] }  — proposal is complete, needs gate review
  *   { mode: 'prep', reasons: [...] } — proposal has gaps, needs prep work
- *   { mode: 'noop', reasons: [...] } — terminal state or unsupported stage
+ *   { mode: 'skip', reasons: [...] } — terminal state or unsupported stage
  */
 export function assessReadiness(detail: ProposalDetail): ReadinessResult {
 	const stage = normalizeStage(detail.status);
 	const missing: string[] = [];
 
 	if (stage === RfcStates.COMPLETE) {
-		return { mode: "noop", reasons: ["terminal state"] };
+		return { mode: "skip", reasons: ["terminal state"] };
 	}
 
 	if (!detail.summary?.trim()) missing.push("summary");
@@ -188,7 +188,7 @@ export function assessReadiness(detail: ProposalDetail): ReadinessResult {
 		return { mode: "gate", reasons: [] };
 	}
 
-	return { mode: "noop", reasons: ["unsupported stage"] };
+	return { mode: "skip", reasons: ["unsupported stage"] };
 }
 
 // ─── Task prompt builders ─────────────────────────────────────────────────────
