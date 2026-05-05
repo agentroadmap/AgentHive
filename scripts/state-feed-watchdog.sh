@@ -13,7 +13,7 @@ elif [ ! -f "$HOME/.pgpass" ]; then
   echo "ERROR: no DB credentials found (set PGPASSWORD, use ~/.pgpass, or source ~/.hermes/.env)" >&2
   exit 1
 fi
-PG="psql -h 127.0.0.1 -U ${PGUSER:-$USER} -d ${PGDATABASE:-agenthive} -t -A"
+PG="psql -h 127.0.0.1 -U ${PGUSER:-admin} -d ${PGDATABASE:-agenthive} -t -A"
 WEBHOOK_URL="${DISCORD_WEBHOOK_STATEFEED:?ERROR: DISCORD_WEBHOOK_STATEFEED not set — add to ~/.hermes/.env}"
 LISTENER_SCRIPT="/data/code/AgentHive/scripts/state-feed-listener.ts"
 STATE_FILE="$HOME/.hermes/cron/output/.state-feed-watchdog"

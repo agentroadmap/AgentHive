@@ -178,7 +178,7 @@ function resolvePoolConfig(config?: AgentHivePoolConfig): ResolvedPoolConfig {
 			Number(config?.port ?? process.env.PGPORT ?? databaseUrlConfig.port) ||
 			(StructuralKeys.PGPORT.defaultValue ?? 5432),
 		user:
-			config?.user ?? process.env.PGUSER ?? databaseUrlConfig.user ?? "postgres",
+			config?.user ?? process.env.PGUSER ?? databaseUrlConfig.user ?? "admin",
 		password: resolvedPassword ?? undefined,
 		database:
 			config?.database ??

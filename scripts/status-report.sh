@@ -12,7 +12,7 @@ elif [ ! -f "$HOME/.pgpass" ]; then
   echo "ERROR: no DB credentials found (set PGPASSWORD, use ~/.pgpass, or source ~/.hermes/.env)" >&2
   exit 1
 fi
-PG="psql -h 127.0.0.1 -U ${PGUSER:-$USER} -d ${PGDATABASE:-agenthive} -t -A"
+PG="psql -h 127.0.0.1 -U ${PGUSER:-admin} -d ${PGDATABASE:-agenthive} -t -A"
 
 # --- Services ---
 SERVICES=""
