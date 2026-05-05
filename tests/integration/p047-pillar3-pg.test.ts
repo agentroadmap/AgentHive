@@ -67,7 +67,7 @@ describe("P047 Pillar 3 — Postgres integration", { skip: SKIP }, () => {
 			database: process.env.PGDATABASE ?? "agenthive",
 		});
 
-		spending = new PgSpendingHandlers({} as any, "" as any);
+		spending = new PgSpendingHandlers({} as any);
 		memory = new PgMemoryHandlers({} as any);
 		pulse = new PgPulseHandlers({} as any);
 	});
@@ -106,21 +106,21 @@ describe("P047 Pillar 3 — Postgres integration", { skip: SKIP }, () => {
 			await ensureAgent(agent);
 
 			// Set a $1.00 daily cap
-			await spending.setSpendingCap(({
+			await spending.setSpendingCap({
 				agent_identity: agent,
 				daily_limit_usd: 1.0,
 				monthly_limit_usd: null,
-			} as any));
+			});
 
 			// Log $0.80 (exactly 80%)
-			const result = await spending.logSpending(({
+			const result = await spending.logSpending({
 				agent_identity: agent,
 				model: "test-model",
 				input_tokens: 1000,
 				output_tokens: 100,
 				cost_usd: 0.8,
 				task_type: "test",
-			} as any));
+			});
 
 			const text = textOf(result);
 			const data = JSON.parse(text);
@@ -138,21 +138,21 @@ describe("P047 Pillar 3 — Postgres integration", { skip: SKIP }, () => {
 			await ensureAgent(agent);
 
 			// Set a $0.50 cap
-			await spending.setSpendingCap(({
+			await spending.setSpendingCap({
 				agent_identity: agent,
 				daily_limit_usd: 0.5,
 				monthly_limit_usd: null,
-			} as any));
+			});
 
 			// Log $0.60 (120% of cap)
-			const result = await spending.logSpending(({
+			const result = await spending.logSpending({
 				agent_identity: agent,
 				model: "test-model",
 				input_tokens: 1000,
 				output_tokens: 100,
 				cost_usd: 0.6,
 				task_type: "test",
-			} as any));
+			});
 
 			const text = textOf(result);
 			const data = JSON.parse(text);
@@ -216,9 +216,9 @@ describe("P047 Pillar 3 — Postgres integration", { skip: SKIP }, () => {
 
 	describe("AC#11 — getStats returns lowHelpfulness array", () => {
 		it("getStats response includes lowHelpfulness array", async () => {
-			const { KnowledgeBasePostgres } = (await import(
+			const { KnowledgeBasePostgres } = await import(
 				"../../src/core/infrastructure/knowledge-base.ts"
-			).catch(() => ({ KnowledgeBasePostgres: null }))) as any;
+			).catch(() => ({ KnowledgeBasePostgres: null }));
 
 			if (!KnowledgeBasePostgres) {
 				// Fall back to checking the DB column exists
@@ -363,11 +363,11 @@ describe("P047 Pillar 3 — Postgres integration", { skip: SKIP }, () => {
 			await ensureAgent(agent);
 
 			// Set spending cap
-			await spending.setSpendingCap(({
+			await spending.setSpendingCap({
 				agent_identity: agent,
 				daily_limit_usd: 1.0,
 				monthly_limit_usd: null,
-			} as any));
+			});
 
 			// Log 90% of cap directly via DB to bypass auto-freeze logic
 			await pool.query(

@@ -233,6 +233,7 @@ export class CertificateAuthority extends EventEmitter {
 		fs.writeFileSync(
 			caKeyPath,
 			privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+			{ mode: 0o600 },
 		);
 
 		fs.writeFileSync(

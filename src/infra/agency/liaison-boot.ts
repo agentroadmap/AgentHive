@@ -109,6 +109,7 @@ export async function bootLiaison(
   // and handles downlink directives and cross-project hiveCentral broadcasts.
   const hub = startLiaisonHub(config.agency_id);
 
+
   let running = true;
   let timer: ReturnType<typeof setTimeout> | null = null;
 

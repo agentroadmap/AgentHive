@@ -16,6 +16,7 @@
 -- Default MCP endpoint URL (overridable at deploy time)
 \set mcp_url 'http://127.0.0.1:6421/sse'
 
+
 CREATE SCHEMA IF NOT EXISTS core;
 
 COMMENT ON SCHEMA core IS
