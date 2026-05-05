@@ -274,6 +274,44 @@ Notes:
 - The default lifecycle is `Draft -> Review -> Develop -> Merge -> Complete`.
 - Proposal type determines workflow selection. Do not invent ad-hoc types. Check existing usage or `roadmap.proposal_type_config` before creating new proposals.
 
+### 5a. Architectural Umbrella Pattern
+
+Use this pattern for proposals that span multiple implementation phases (architecture, migrations, multi-system changes).
+
+**Lifecycle:**
+
+| State | Meaning |
+|---|---|
+| **DRAFT** | Architecture being designed; ACs not yet settled |
+| **REVIEW** | Design locked; gate agents validate coherence + feasibility |
+| **DEVELOP** | Active coordination: file child proposals, track their progress |
+| **MERGE** | All children COMPLETE; run e2e integration test across all phases |
+| **COMPLETE** | Integration verified; architecture fully shipped |
+
+**Rules:**
+1. File the architectural proposal with type `feature` (or `component` for subsystem work). Its ACs define the child breakdown and the MERGE test scope.
+2. During DEVELOP: file each child as a separate proposal with `parent_id` set to the architectural proposal. Children are normal feature proposals — they move through DRAFT→REVIEW→DEVELOP→MERGE→COMPLETE independently.
+3. Wire sequential dependencies via `add_dependency` where a phase requires a prior phase to be COMPLETE.
+4. The architectural proposal stays in DEVELOP until all children are COMPLETE.
+5. MERGE phase = run the e2e integration test defined in the MERGE ACs. This verifies the assembled system behaves as the architecture intended — not just that all PRs landed.
+6. Do not advance to MERGE until every child is COMPLETE.
+
+**Standard AC structure (required for all architectural proposals):**
+
+```
+DEVELOP phase:
+- [ ] File child proposal: Phase A — <title> (parent_id: this)
+- [ ] File child proposal: Phase B — <title> (parent_id: this, depends_on: Phase A)
+- [ ] ... (enumerate all phases)
+- [ ] All child proposals reach COMPLETE
+
+MERGE phase:
+- [ ] E2E integration test: <specific test scope covering all phases>
+- [ ] No regressions in <critical paths>
+```
+
+**Why this pattern:** keeps the architectural proposal alive as an active coordination anchor through implementation, surfaces design corrections as children reveal edge cases, and ensures MERGE is a meaningful system-level gate rather than a formality.
+
 ## 6. Database Conventions
 
 ### 6.0a Provider/agency identity is DB-sourced (P743)
