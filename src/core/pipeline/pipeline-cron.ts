@@ -141,11 +141,6 @@ function normalizeMetadata(value: unknown): JsonRecord | null {
 
 type DispatchMode = "prep" | "gate" | "noop";
 
-type DispatchRoleSet = {
-	prep: string[];
-	gate: string[];
-};
-
 type ProposalDispatchContext = {
 	id: number;
 	displayId: string;
@@ -213,42 +208,6 @@ type DispatchPlan = {
 	reasons: string[];
 	roles: string[];
 	requiredCapabilities: string[];
-};
-
-// P739 (HF-A): gate role lists must contain ONLY review-style roles
-// (skeptic, reviewer-*, architect, qa, maintainer, gate-agent). Developer
-// and engineer roles must NEVER appear in a `gate` list — that was the
-// classification bug that caused gate-ready DEVELOP proposals to be
-// re-dispatched as developer claims, re-firing the gate-ready loop.
-//
-// invariant enforced by tests/unit/pipeline-cron-roles.test.ts:
-//   for every stage, gate.length === 0 OR gate has no 'developer'/'engineer'
-const STAGE_DISPATCH_ROLES: Record<string, DispatchRoleSet> = {
-	DRAFT: {
-		prep: ["researcher", "architect"],
-		gate: ["architect", "reviewer-d1", "reviewer"],
-	},
-	REVIEW: {
-		prep: ["architect", "skeptic"],
-		// NOTE: Agent role names are fallback defaults from orchestrator. Canonical values
-		// are loaded from roadmap.gate_role table at init time (phase 2 will make DB authoritative).
-		gate: ["skeptic-alpha", "reviewer-d2", "architect"],
-	},
-	DEVELOP: {
-		prep: ["developer", "engineer"],
-		// HF-A: was ["developer","qa","integration"] — first entry was the
-		// fallback when no agent capability matched, so DEVELOP/mature gates
-		// dispatched developer workers instead of gate reviewers.
-		gate: ["skeptic-beta", "reviewer-d3", "qa"],
-	},
-	MERGE: {
-		prep: ["qa", "integration"],
-		gate: ["reviewer-d4", "qa", "maintainer", "gate-agent"],
-	},
-	COMPLETE: {
-		prep: [],
-		gate: [],
-	},
 };
 
 function normalizeStage(value: string | null | undefined): string {
@@ -681,10 +640,7 @@ function buildDispatchPlan(
 	reasons: string[],
 ): DispatchPlan {
 	const normalizedTarget = normalizeStage(targetStage);
-	const stageRoles = STAGE_DISPATCH_ROLES[normalizeStage(context.status)] ?? {
-		prep: ["architect"],
-		gate: ["reviewer"],
-	};
+	const stageRoles = { prep: ["architect"] as string[], gate: ["reviewer"] as string[] };
 	const roles = mode === "prep" ? stageRoles.prep : stageRoles.gate;
 	const agentCapabilities = new Set(
 		(agent?.capabilities ?? []).map((capability) => capability.toLowerCase()),
@@ -1040,12 +996,7 @@ export class PipelineCron {
 				? await loadProposalDispatchContext(this.queryFn, proposalId)
 				: null;
 		const readiness = proposalContext ? assessReadiness(proposalContext) : null;
-		const stageRoles = STAGE_DISPATCH_ROLES[
-			normalizeStage(transition.from_stage)
-		] ?? {
-			prep: ["architect"],
-			gate: ["reviewer"],
-		};
+		const stageRoles = { prep: ["architect"] as string[], gate: ["reviewer"] as string[] };
 		const dispatchRoles =
 			readiness?.mode === "prep" ? stageRoles.prep : stageRoles.gate;
 		const selectedAgent =
