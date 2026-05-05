@@ -13,7 +13,14 @@
 
 import { query } from "../../infra/postgres/pool.ts";
 import { spawnAgent } from "../orchestration/agent-spawner.ts";
-import type { SpawnResult } from "../orchestration/agent-spawner.ts";
+import type { SpawnHandle, SpawnResult } from "../orchestration/agent-spawner.ts";
+import {
+	preClaimCapacityCheck,
+	pauseClaimForHardLimit,
+	recordWindowUsage,
+	resumeThrottle,
+	SubscriptionThrottleError,
+} from "./subscription-capacity.ts";
 
 // ─── Public types (injectable for tests) ──────────────────────────────────────
 
@@ -28,7 +35,7 @@ export type SpawnFn = (req: {
 	model?: string;
 	timeoutMs?: number;
 	agentLabel?: string;
-}) => Promise<SpawnResult>;
+}) => Promise<SpawnHandle>;
 
 export interface ListenerClient {
 	query(text: string, params?: unknown[]): Promise<unknown>;
@@ -62,6 +69,15 @@ export interface OfferProviderDeps {
 	maxConcurrent?: number;
 	/** P300: Optional project_id to scope claims to a specific project. */
 	projectId?: number | null;
+	/**
+	 * P465: Estimated token cost per claim for subscription window checks.
+	 * Used by preClaimCapacityCheck to project whether claiming would breach
+	 * the safety margin. Default 0 (no token estimate — capacity check still
+	 * runs but only refuses when slots are exhausted).
+	 */
+	estTokensPerClaim?: number;
+	/** P465: Estimated request count per claim (default 1). */
+	estRequestsPerClaim?: number;
 	queryFn?: QueryFn;
 	connectListener?: () => Promise<ListenerClient>;
 	spawnFn?: SpawnFn;
@@ -95,6 +111,8 @@ export class OfferProvider {
 	private readonly pollIntervalMs: number;
 	private readonly maxConcurrent: number;
 	private readonly projectId: number | null | undefined;
+	private readonly estTokensPerClaim: number;
+	private readonly estRequestsPerClaim: number;
 	private readonly queryFn: QueryFn;
 	private readonly connectListener: () => Promise<ListenerClient>;
 	private readonly spawnFn: SpawnFn;
@@ -124,6 +142,8 @@ export class OfferProvider {
 		this.pollIntervalMs = deps.pollIntervalMs ?? 15_000;
 		this.maxConcurrent = deps.maxConcurrent ?? 1;
 		this.projectId = deps.projectId;
+		this.estTokensPerClaim = deps.estTokensPerClaim ?? 0;
+		this.estRequestsPerClaim = deps.estRequestsPerClaim ?? 1;
 		this.queryFn = deps.queryFn ?? query;
 		this.connectListener =
 			deps.connectListener ??
@@ -201,7 +221,31 @@ export class OfferProvider {
 	// ─── Claim loop ─────────────────────────────────────────────────────────────
 
 	private async tryClaimLoop(): Promise<void> {
+		// P465: Clear throttle if the window has expired before trying new claims
+		await this.maybeResumeThrottle();
+
 		while (this.activeClaims < this.maxConcurrent) {
+			// P465: Subscription capacity pre-check — refuse new claims when any window
+			// is within the safety margin. In-flight claims (activeClaims > 0) continue.
+			try {
+				await preClaimCapacityCheck({
+					agencyId: this.agentIdentity,
+					activeClaims: this.activeClaims,
+					maxConcurrent: this.maxConcurrent,
+					estTokens: this.estTokensPerClaim,
+					estRequests: this.estRequestsPerClaim,
+					queryFn: this.queryFn,
+				});
+			} catch (err) {
+				if (err instanceof SubscriptionThrottleError) {
+					this.logger.warn(
+						`[OfferProvider] ${this.agentIdentity} throttled (${err.reason}) until ${err.until.toISOString()} — ${this.activeClaims} in-flight claim(s) continue`,
+					);
+					return; // stop claiming new work; in-flight claims finish normally
+				}
+				throw err;
+			}
+
 			const claim = await this.claimOne();
 			if (!claim) break;
 			this.activeClaims++;
@@ -209,6 +253,19 @@ export class OfferProvider {
 			void this.executeOffer(claim).finally(() => {
 				this.activeClaims--;
 			});
+		}
+	}
+
+	private async maybeResumeThrottle(): Promise<void> {
+		try {
+			const cleared = await resumeThrottle(this.agentIdentity, this.queryFn);
+			if (cleared) {
+				this.logger.log(
+					`[OfferProvider] ${this.agentIdentity} throttle cleared — window has reset`,
+				);
+			}
+		} catch {
+			// best-effort: don't block claiming if resume check fails
 		}
 	}
 
@@ -260,16 +317,12 @@ export class OfferProvider {
 			return;
 		}
 
-		// Renew lease while the spawn runs
-		const renewTimer = this.setIntervalFn(() => {
-			void this.renew(dispatch_id, claim_token);
-		}, this.renewIntervalMs);
-
+		let handle: SpawnHandle | null = null;
 		let spawnResult: SpawnResult | null = null;
 		let spawnError: Error | null = null;
 
 		try {
-			spawnResult = await this.spawnFn({
+			handle = await this.spawnFn({
 				worktree,
 				task,
 				proposalId: proposal_id,
@@ -280,8 +333,42 @@ export class OfferProvider {
 			});
 		} catch (err) {
 			spawnError = err instanceof Error ? err : new Error(String(err));
-		} finally {
-			this.clearIntervalFn(renewTimer);
+		}
+
+		if (handle) {
+			// Renew lease while spawn runs; kill the process if renewal is rejected (lease reaped)
+			const renewTimer = this.setIntervalFn(() => {
+				void this.renew(dispatch_id, claim_token, () => handle!.kill());
+			}, this.renewIntervalMs);
+			try {
+				spawnResult = await handle.result;
+			} catch (err) {
+				spawnError = err instanceof Error ? err : new Error(String(err));
+			} finally {
+				this.clearIntervalFn(renewTimer);
+			}
+		}
+
+		// P465: If provider returned a hard rate-limit (429 or exit 429), pause the
+		// dispatch and let the orchestrator decide to wait, reassign, or escalate.
+		// This is distinct from a soft throttle (which blocks NEW claims only).
+		const isHardProviderLimit = this.isProviderHardLimit(spawnError, spawnResult);
+		if (isHardProviderLimit) {
+			const resumeEligibleAt = new Date(Date.now() + 3_600_000); // 1h default — orchestrator may override
+			await pauseClaimForHardLimit(dispatch_id, resumeEligibleAt, this.queryFn);
+			this.logger.warn(
+				`[OfferProvider] dispatch ${dispatch_id} paused — provider hard limit hit; resume eligible at ${resumeEligibleAt.toISOString()}`,
+			);
+			// Record estimated tokens as proxy (actual usage not available from SpawnResult)
+			if (this.estTokensPerClaim > 0) {
+				await recordWindowUsage(
+					this.agentIdentity,
+					this.estTokensPerClaim,
+					this.estRequestsPerClaim,
+					this.queryFn,
+				).catch(() => {/* best-effort */});
+			}
+			return;
 		}
 
 		const succeeded =
@@ -289,6 +376,16 @@ export class OfferProvider {
 		const completionStatus = succeeded ? "delivered" : "failed";
 
 		await this.complete(dispatch_id, claim_token, completionStatus);
+
+		// P465: Update local meter with estimated token usage after claim completes
+		if (this.estTokensPerClaim > 0) {
+			await recordWindowUsage(
+				this.agentIdentity,
+				this.estTokensPerClaim,
+				this.estRequestsPerClaim,
+				this.queryFn,
+			).catch(() => {/* best-effort */});
+		}
 
 		if (spawnError) {
 			this.logger.error(
@@ -300,6 +397,18 @@ export class OfferProvider {
 				`[OfferProvider] dispatch ${dispatch_id} → ${completionStatus} (exit ${spawnResult?.exitCode ?? "n/a"}, ${spawnResult?.durationMs ?? 0}ms)`,
 			);
 		}
+	}
+
+	// ─── P465: hard limit detection ─────────────────────────────────────────────
+
+	private isProviderHardLimit(err: Error | null, result: SpawnResult | null): boolean {
+		if (err) {
+			const msg = err.message.toLowerCase();
+			return msg.includes("429") || msg.includes("rate limit") || msg.includes("quota exceeded");
+		}
+		// Exit code 429 is a convention we use when a CLI wrapper detects a hard 429
+		if (result?.exitCode === 429) return true;
+		return false;
 	}
 
 	// ─── SQL helpers ─────────────────────────────────────────────────────────────
@@ -376,7 +485,11 @@ export class OfferProvider {
 		}
 	}
 
-	private async renew(dispatchId: number, claimToken: string): Promise<void> {
+	private async renew(
+		dispatchId: number,
+		claimToken: string,
+		onLeaseRejected?: () => void,
+	): Promise<void> {
 		try {
 			const result = (await this.queryFn(
 				`SELECT roadmap_workforce.fn_renew_lease($1, $2, $3::uuid, $4) AS ok`,
@@ -387,6 +500,7 @@ export class OfferProvider {
 				this.logger.warn(
 					`[OfferProvider] lease renewal rejected for dispatch ${dispatchId} — token mismatch (reaped?)`,
 				);
+				onLeaseRejected?.();
 			}
 		} catch (err) {
 			this.logger.error(`[OfferProvider] renew ${dispatchId} error:`, err);

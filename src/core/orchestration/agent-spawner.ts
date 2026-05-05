@@ -109,6 +109,14 @@ export interface SpawnResult {
 	durationMs: number;
 }
 
+export interface SpawnHandle {
+	child: ChildProcess;
+	pid: number;
+	result: Promise<SpawnResult>;
+	/** SIGTERM with 5-second grace period then SIGKILL. */
+	kill(): void;
+}
+
 // ─── Provider CLI builders ────────────────────────────────────────────────────
 
 // ─── Provider CLI builders ────────────────────────────────────────────────────
@@ -826,9 +834,11 @@ async function buildProposalContextPackage(input: {
 
 /**
  * Spawn an agent subprocess inside its worktree.
- * Records the run in agent_runs and agent_budget_ledger.
+ * Records the run in agent_runs. Returns immediately with a SpawnHandle —
+ * the caller awaits handle.result for the final SpawnResult.
+ * Lease-loss kill: call handle.kill() to SIGTERM + 5s grace + SIGKILL.
  */
-export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
+export async function spawnAgent(req: SpawnRequest): Promise<SpawnHandle> {
 	const {
 		worktree,
 		task,
@@ -929,31 +939,43 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	const startMs = Date.now();
 	const cwd = join(worktreeRoot, worktree);
 
-	const { stdout, stderr, exitCode } = await runProcess(
+	const { child, result: processResult } = startProcess(
 		argv,
 		cwd,
 		processEnv,
 		timeoutMs,
 		stdin,
 	);
-	const durationMs = Date.now() - startMs;
 
-	// Update agent_runs on completion
-	const status = exitCode === 0 ? "completed" : "failed";
-	const outputSummary = stdout.slice(-1000);
-	const errorDetail = stderr.slice(-4000);
-	await query(
-		`UPDATE agent_runs
-     SET status = $1,
-         duration_ms = $2,
-         output_summary = $3,
-         error_detail = $4,
-         completed_at = now()
-     WHERE id = $5`,
-		[status, durationMs, outputSummary, errorDetail, agentRunId],
+	const spawnResultPromise: Promise<SpawnResult> = processResult.then(
+		async ({ stdout, stderr, exitCode }) => {
+			const durationMs = Date.now() - startMs;
+			const status = exitCode === 0 ? "completed" : "failed";
+			await query(
+				`UPDATE agent_runs
+         SET status = $1,
+             duration_ms = $2,
+             output_summary = $3,
+             error_detail = $4,
+             completed_at = now()
+         WHERE id = $5`,
+				[status, durationMs, stdout.slice(-1000), stderr.slice(-4000), agentRunId],
+			);
+			return { agentRunId, worktree, exitCode, stdout, stderr, durationMs };
+		},
 	);
 
-	return { agentRunId, worktree, exitCode, stdout, stderr, durationMs };
+	return {
+		child,
+		pid: child.pid ?? 0,
+		result: spawnResultPromise,
+		kill() {
+			child.kill("SIGTERM");
+			setTimeout(() => {
+				if (!child.killed) child.kill("SIGKILL");
+			}, 5_000);
+		},
+	};
 }
 
 // ─── Process runner ───────────────────────────────────────────────────────────
@@ -964,44 +986,44 @@ interface ProcessResult {
 	exitCode: number | null;
 }
 
-function runProcess(
+function startProcess(
 	argv: string[],
 	cwd: string,
 	env: Record<string, string>,
 	timeoutMs: number,
 	stdin?: string,
-): Promise<ProcessResult> {
-	return new Promise((resolve) => {
-		const [cmd, ...args] = argv;
-		console.error(`[AgentSpawner] Spawning: ${cmd} ${args.slice(0, 3).join(" ")}...`);
-		console.error(`[AgentSpawner] ANTHROPIC_AUTH_TOKEN in env: ${!!env.ANTHROPIC_AUTH_TOKEN}`);
-		console.error(`[AgentSpawner] ANTHROPIC_BASE_URL in env: ${env.ANTHROPIC_BASE_URL}`);
-		console.error(`[AgentSpawner] ANTHROPIC_MODEL in env: ${env.ANTHROPIC_MODEL}`);
-		const child: ChildProcess = spawn(cmd, args, {
-			cwd,
-			env,
-			stdio: [stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
-		});
+): { child: ChildProcess; result: Promise<ProcessResult> } {
+	const [cmd, ...args] = argv;
+	console.error(`[AgentSpawner] Spawning: ${cmd} ${args.slice(0, 3).join(" ")}...`);
+	console.error(`[AgentSpawner] ANTHROPIC_AUTH_TOKEN in env: ${!!env.ANTHROPIC_AUTH_TOKEN}`);
+	console.error(`[AgentSpawner] ANTHROPIC_BASE_URL in env: ${env.ANTHROPIC_BASE_URL}`);
+	console.error(`[AgentSpawner] ANTHROPIC_MODEL in env: ${env.ANTHROPIC_MODEL}`);
+	const child: ChildProcess = spawn(cmd, args, {
+		cwd,
+		env,
+		stdio: [stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+	});
 
-		let stdout = "";
-		let stderr = "";
+	let stdout = "";
+	let stderr = "";
 
-		child.stdout?.on("data", (d: Buffer) => {
-			stdout += d.toString();
-		});
-		child.stderr?.on("data", (d: Buffer) => {
-			stderr += d.toString();
-		});
+	child.stdout?.on("data", (d: Buffer) => {
+		stdout += d.toString();
+	});
+	child.stderr?.on("data", (d: Buffer) => {
+		stderr += d.toString();
+	});
 
-		if (stdin !== undefined) {
-			child.stdin?.end(stdin);
-		}
+	if (stdin !== undefined) {
+		child.stdin?.end(stdin);
+	}
 
-		const timer = setTimeout(() => {
-			child.kill("SIGTERM");
-			stderr += "\n[agent-spawner] Killed after timeout";
-		}, timeoutMs);
+	const timer = setTimeout(() => {
+		child.kill("SIGTERM");
+		stderr += "\n[agent-spawner] Killed after timeout";
+	}, timeoutMs);
 
+	const result = new Promise<ProcessResult>((resolve) => {
 		child.on("close", (code) => {
 			clearTimeout(timer);
 			resolve({ stdout, stderr, exitCode: code });
@@ -1016,6 +1038,8 @@ function runProcess(
 			});
 		});
 	});
+
+	return { child, result };
 }
 
 // ─── Escalation ladder helper ─────────────────────────────────────────────────
@@ -1075,7 +1099,7 @@ export async function escalateOrNotify(
 		console.log(
 			`[escalate] ${provider} ladder: "${currentModel}" → "${nextModel}" (step ${nextIdx}/${ladder.length - 1})`,
 		);
-		return spawnAgent({ ...req, model: nextModel });
+		return (await spawnAgent({ ...req, model: nextModel })).result;
 	}
 
 	// All escalations exhausted — notify USER

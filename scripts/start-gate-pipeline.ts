@@ -21,50 +21,54 @@ import { loadStateNames } from "../src/core/workflow/state-names.ts";
 const executorMode = process.env.AGENTHIVE_GATE_EXECUTOR ?? "cubic";
 const useOfferDispatch = process.env.AGENTHIVE_USE_OFFER_DISPATCH === "1";
 
-// Shared spawn adapter — used by both PipelineCron (legacy) and OfferProvider.
-// Provider is resolved from the AGENTHIVE_AGENT_IDENTITY prefix, with DB fallback,
-// so no binary path or provider name is hardcoded here.
 const agentIdentity = process.env.AGENTHIVE_AGENT_IDENTITY ?? hostname();
-const spawnAdapter =
+
+type SpawnRequestBase = {
+	worktree: string;
+	task: string;
+	proposalId: number | string;
+	stage: string;
+	model?: string;
+	timeoutMs?: number;
+};
+
+const resolveSpawnArgs = async (request: SpawnRequestBase) => {
+	const identityPrefix = agentIdentity.split("/")[0];
+	const provider = identityPrefix || (await resolveActiveRouteProvider()) || undefined;
+	return {
+		worktree: request.worktree,
+		task: request.task,
+		proposalId:
+			typeof request.proposalId === "number"
+				? request.proposalId
+				: Number.isFinite(Number(request.proposalId))
+					? Number(request.proposalId)
+					: undefined,
+		stage: request.stage,
+		model: request.model,
+		timeoutMs: request.timeoutMs,
+		provider: provider as any,
+	};
+};
+
+// For PipelineCron.spawnAgentFn — expects Promise<SpawnResult> (unwraps SpawnHandle)
+const pipelineSpawnAdapter =
 	executorMode === "spawn" || useOfferDispatch
-		? async (request: {
-				worktree: string;
-				task: string;
-				proposalId: number | string;
-				stage: string;
-				model?: string;
-				timeoutMs?: number;
-			}) => {
-				const identityPrefix = agentIdentity.split("/")[0];
-				const provider = identityPrefix || (await resolveActiveRouteProvider()) || undefined;
-				return spawnAgent({
-					worktree: request.worktree,
-					task: request.task,
-					proposalId:
-						typeof request.proposalId === "number"
-							? request.proposalId
-							: Number.isFinite(Number(request.proposalId))
-								? Number(request.proposalId)
-								: undefined,
-					stage: request.stage,
-					model: request.model,
-					timeoutMs: request.timeoutMs,
-					provider: provider as any,
-				});
-			}
+		? async (request: SpawnRequestBase) =>
+				(await spawnAgent(await resolveSpawnArgs(request))).result
 		: undefined;
 
 const cron = new PipelineCron({
-	...(spawnAdapter ? { spawnAgentFn: spawnAdapter } : {}),
+	...(pipelineSpawnAdapter ? { spawnAgentFn: pipelineSpawnAdapter } : {}),
 	useOfferDispatch,
 });
 
 // P281: When offer dispatch is enabled, start OfferProvider so this process
 // both emits offers (via PipelineCron) and claims/executes them.
+// OfferProvider uses spawnAgent directly (returns SpawnHandle) — no spawnFn override needed.
 const offerProvider = useOfferDispatch
 	? new OfferProvider({
 			agentIdentity,
-			spawnFn: spawnAdapter,
 			connectListener: async () => getPool().connect(),
 			leaseTtlSeconds: Number(process.env.AGENTHIVE_LEASE_TTL_SECONDS ?? "30"),
 			renewIntervalMs: Number(process.env.AGENTHIVE_RENEW_INTERVAL_MS ?? "10000"),
