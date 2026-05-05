@@ -255,6 +255,48 @@ Notes:
 - The default lifecycle is `Draft -> Review -> Develop -> Merge -> Complete`.
 - Proposal type determines workflow selection. Do not invent ad-hoc types. Check existing usage or `roadmap.proposal_type_config` before creating new proposals.
 
+## 5a. Program Phases and Build-Order Gate (P471)
+
+The multi-tenancy program is sequenced into four phases tracked in `roadmap.program_phases`
+(migration 060-program-phases-p471.sql). Phase assignments are stored in `roadmap.proposal.phase_id`.
+
+| Phase | Name | Proposals | Exit Gate |
+| :--- | :--- | :--- | :--- |
+| **0** | MCP Integrity | P456-P462, P470 | Scanner endpoints+workflow-states findings in `src/` < 5 |
+| **1** | Foundation Modules | P416, P448, P449, P453 | Scanner paths/identity/endpoints/workflow-states → 0 findings |
+| **2** | Control Plane & Dispatch | P429 family (P495–P520), P430–P452, P471 | Total scanner findings < 50; race tests green; hiveControl online |
+| **3** | Agency Liaison | P454, P463–P469, P472–P476 | Multi-agency dispatch race-test green |
+
+### Querying build order
+
+```sql
+-- All incomplete proposals in a phase, dependency-sorted
+SELECT p.display_id, p.title, p.status, p.maturity
+FROM roadmap.proposal p
+WHERE p.phase_id = <N>
+  AND p.status NOT IN ('COMPLETE','DEPLOYED')
+ORDER BY p.id;
+
+-- Phase progress dashboard
+SELECT * FROM roadmap.v_phase_progress;
+
+-- Advisory gate check before DRAFT→REVIEW transition
+SELECT roadmap.fn_check_phase_gate(<proposal_id>, 'REVIEW');
+```
+
+### Advisory gate rule (AC#4)
+
+Gate agents **MUST** call `roadmap.fn_check_phase_gate(proposal_id, 'REVIEW')` before emitting
+`advance` on any `DRAFT → REVIEW` transition for phase-tagged proposals. If the function returns
+`FALSE`, the gate agent **SHOULD** hold the proposal with a `[ADVISORY]` note in `gate_decision_log`
+explaining which predecessor phase is incomplete.
+
+This rule is **advisory** (non-blocking) until Phase 2 lands. After Phase 2, it becomes a hard
+reject unless the operator writes an override record in the proposal `audit` JSONB column.
+
+Operators who need to override must add `{"phase_gate_override": true, "reason": "..."}` to the
+proposal `audit` column and call `fn_check_phase_gate` again — it will pass on override.
+
 ## 6. Database Conventions
 
 ### 6.0 Database Topology (target architecture)
