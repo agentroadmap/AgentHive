@@ -34,8 +34,16 @@ import {
 } from "pg";
 import { StructuralKeys } from "../../shared/runtime/config-keys";
 
-// Attempt to load PGPASSWORD from .env files if not set in environment
+// Password resolution: if ~/.pgpass exists, it takes priority over all env-sourced passwords.
+// The pg package reads pgpass natively when process.env.PGPASSWORD is absent.
+// If ~/.pgpass is absent, fall back to .env files (for Docker/CI contexts).
 (function loadPGPassword() {
+	const pgpassPath = join(process.env.HOME || "", ".pgpass");
+	if (existsSync(pgpassPath)) {
+		// pgpass takes priority — clear any inherited env password so pg uses pgpass
+		delete process.env.PGPASSWORD;
+		return;
+	}
 	if (process.env.PGPASSWORD) return;
 	const candidates = [
 		resolve(process.cwd(), ".env"),
@@ -157,12 +165,16 @@ function resolvePoolConfig(config?: AgentHivePoolConfig): ResolvedPoolConfig {
 	const configuredPassword =
 		typeof config?.password === "function" ? undefined : config?.password;
 
-	// PGPASSWORD is optional — rely on .pgpass/PGSERVICE/libpq implicit auth if not set
-	const resolvedPassword =
-		configuredPassword ??
-		process.env.PGPASSWORD ??
-		databaseUrlConfig.password ??
-		process.env.__PGPASSWORD_FROM_CONFIG;
+	// If ~/.pgpass exists, skip all env-sourced passwords so pg reads pgpass natively.
+	const pgpassPath = join(process.env.HOME || "", ".pgpass");
+	const hasPgpass = !configuredPassword && existsSync(pgpassPath);
+
+	const resolvedPassword = hasPgpass
+		? undefined
+		: (configuredPassword ??
+			process.env.PGPASSWORD ??
+			databaseUrlConfig.password ??
+			process.env.__PGPASSWORD_FROM_CONFIG);
 
 	const schema = normalizeSchemaName(
 		config?.schema ?? configuredSchema ?? process.env.PG_SCHEMA,
