@@ -7,7 +7,8 @@
 
 import { mapErrorCodeToExitCode, isRetriable } from "./exit-codes";
 
-export interface ErrorDetail {
+/** Arbitrary key-value detail attached to HiveError. Named distinctly to avoid collision with envelope's ErrorDetail. */
+export interface HiveErrorDetail {
   [key: string]: unknown;
 }
 
@@ -15,7 +16,7 @@ export class HiveError extends Error {
   public readonly code: string;
   public override readonly message: string;
   public readonly hint?: string;
-  public readonly detail?: ErrorDetail;
+  public readonly detail?: HiveErrorDetail;
   public readonly exitCode: number;
   public readonly retriable: boolean;
 
@@ -24,7 +25,7 @@ export class HiveError extends Error {
     message: string,
     options?: {
       hint?: string;
-      detail?: ErrorDetail;
+      detail?: HiveErrorDetail;
     }
   ) {
     super(message);
@@ -59,19 +60,19 @@ export const Errors = {
   usage: (message: string, hint?: string) =>
     new HiveError("USAGE", message, { hint }),
 
-  notFound: (message: string, detail?: ErrorDetail) =>
+  notFound: (message: string, detail?: HiveErrorDetail) =>
     new HiveError("NOT_FOUND", message, { detail }),
 
-  conflict: (message: string, detail?: ErrorDetail) =>
+  conflict: (message: string, detail?: HiveErrorDetail) =>
     new HiveError("CONFLICT", message, { detail }),
 
-  permissionDenied: (message: string, detail?: ErrorDetail) =>
+  permissionDenied: (message: string, detail?: HiveErrorDetail) =>
     new HiveError("PERMISSION_DENIED", message, { detail }),
 
-  invalidState: (message: string, detail?: ErrorDetail) =>
+  invalidState: (message: string, detail?: HiveErrorDetail) =>
     new HiveError("INVALID_STATE", message, { detail }),
 
-  remoteFailure: (message: string, detail?: ErrorDetail) =>
+  remoteFailure: (message: string, detail?: HiveErrorDetail) =>
     new HiveError("REMOTE_FAILURE", message, { detail }),
 
   mcpUnreachable: (message: string, hint?: string) =>
@@ -80,9 +81,9 @@ export const Errors = {
   dbUnreachable: (message: string, hint?: string) =>
     new HiveError("DB_UNREACHABLE", message, { hint }),
 
-  encodingError: (message: string, detail?: ErrorDetail) =>
+  encodingError: (message: string, detail?: HiveErrorDetail) =>
     new HiveError("ENCODING_ERROR", message, { detail }),
 
-  internal: (message: string, detail?: ErrorDetail) =>
+  internal: (message: string, detail?: HiveErrorDetail) =>
     new HiveError("INTERNAL_ERROR", message, { detail }),
 };

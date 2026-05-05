@@ -101,6 +101,10 @@ export function formatTable(
   return [header, sep, body].join("\n");
 }
 
+export function isTtyOutput(): boolean {
+  return Boolean(process.stdout.isTTY);
+}
+
 /** Format a single record as key: value pairs. */
 export function formatRecord(record: Record<string, unknown>): string {
   return Object.entries(record)

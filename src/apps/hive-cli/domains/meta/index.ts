@@ -171,15 +171,10 @@ async function handleContext(options: Record<string, unknown>) {
   const ctx = await resolveContext(options as { project?: string; agency?: string; host?: string });
 
   return {
-    project: ctx.projectSlug || (ctx.projectId != null ? String(ctx.projectId) : "(unresolved)"),
-    agency: ctx.agency || "(unresolved)",
+    project: ctx.project ?? "(unresolved)",
+    agency: ctx.agency ?? "(unresolved)",
     host: ctx.host || "(unresolved)",
     resolved_at: new Date().toISOString(),
-    resolution_source: {
-      project: ctx.projectResolutionSource,
-      agency: ctx.agencyResolutionSource,
-      host: ctx.hostResolutionSource,
-    },
   };
 }
 

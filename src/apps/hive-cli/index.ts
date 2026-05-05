@@ -41,7 +41,7 @@ const getContext = () => {
   return resolveContext({
     project: globalOpts.project,
     agency: globalOpts.agency,
-    mcp_url: globalOpts.mcpUrl,
+    mcpUrl: globalOpts.mcpUrl,
   });
 };
 

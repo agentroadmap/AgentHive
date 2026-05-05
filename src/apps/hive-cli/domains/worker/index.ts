@@ -91,37 +91,46 @@ const domainSchema: DomainSchema = {
 
 async function handleList(options: Record<string, unknown>) {
   const client = getControlPlaneClient();
-  const ctx = await resolveContext(options);
+  const ctx = await resolveContext(options as { project?: string; agency?: string });
 
-  if (!ctx.projectId) {
+  if (!ctx.project) {
     throw Errors.notFound(
       "Cannot resolve project context for worker list.",
       { hint: "Set --project flag or HIVE_PROJECT environment variable" }
     );
   }
 
-  const agents = await client.listAgents(ctx.projectId);
-  return agents;
+  const projectRow = await client.getProject(ctx.project);
+  if (!projectRow) {
+    throw Errors.notFound(`Project '${ctx.project}' not found.`);
+  }
+
+  return client.listAgents(projectRow.project_id);
 }
 
 async function handleInfo(workerId: string, options: Record<string, unknown>) {
   const client = getControlPlaneClient();
-  const ctx = await resolveContext(options);
+  const ctx = await resolveContext(options as { project?: string; agency?: string });
 
-  if (!ctx.projectId) {
+  if (!ctx.project) {
     throw Errors.notFound(
       "Cannot resolve project context for worker info.",
       { hint: "Set --project flag or HIVE_PROJECT environment variable" }
     );
   }
 
-  const agents = await client.listAgents(ctx.projectId);
+  const projectRow = await client.getProject(ctx.project);
+  if (!projectRow) {
+    throw Errors.notFound(`Project '${ctx.project}' not found.`);
+  }
+
+  const agents = await client.listAgents(projectRow.project_id);
   const agent = agents.find((a) => a.id === workerId);
 
   if (!agent) {
     throw Errors.notFound(`Agent '${workerId}' not found in project`, {
       agent_id: workerId,
-      project_id: ctx.projectId,
+      project_slug: ctx.project,
     });
   }
 

@@ -71,3 +71,17 @@ export const ERROR_CODE_TO_EXIT: Record<ErrorCode, ExitCode> = {
 export function exitCodeForError(code: ErrorCode): ExitCode {
   return ERROR_CODE_TO_EXIT[code];
 }
+
+/** Alias for exitCodeForError — used by error.ts */
+export function mapErrorCodeToExitCode(code: string): number {
+  return (ERROR_CODE_TO_EXIT as Record<string, number>)[code] ?? EXIT.INTERNAL_ERROR;
+}
+
+const RETRIABLE_EXIT_CODES = new Set<number>([EXIT.TIMEOUT, EXIT.RATE_LIMITED, EXIT.REMOTE_FAILURE]);
+
+export function isRetriable(exitCode: number): boolean {
+  return RETRIABLE_EXIT_CODES.has(exitCode);
+}
+
+/** Stable alias — tests import EXIT_CODES */
+export const EXIT_CODES = EXIT;

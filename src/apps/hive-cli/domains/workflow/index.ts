@@ -10,6 +10,8 @@ import {
   registerDomain,
   Errors,
   resolveContext,
+  getControlPlaneClient,
+  type HiveContext,
 } from "../../common/index";
 import { workflowSchema } from "./workflow-schema";
 import { handleList } from "./handlers/list";
@@ -18,11 +20,16 @@ import { handleGates } from "./handlers/gates";
 import { handleNextState } from "./handlers/next-state";
 import { handleHistory } from "./handlers/history";
 
-function requireProjectId(ctx: { project_id?: number }): number {
-  if (requireProjectId(ctx) === undefined) {
+async function requireProjectId(ctx: HiveContext): Promise<number> {
+  if (!ctx.project) {
     throw Errors.usage("No project selected. Use --project or set HIVE_PROJECT.");
   }
-  return requireProjectId(ctx);
+  const client = getControlPlaneClient();
+  const row = await client.getProject(ctx.project);
+  if (!row) {
+    throw Errors.notFound(`Project '${ctx.project}' not found.`);
+  }
+  return row.project_id;
 }
 
 export function register(program: Command): void {
@@ -46,7 +53,7 @@ export function register(program: Command): void {
       const ctx = await resolveContext(options);
 
       try {
-        const result = await handleList(requireProjectId(ctx), {
+        const result = await handleList(await requireProjectId(ctx), {
           limit: options.limit,
           cursor: options.cursor,
         });
@@ -75,7 +82,7 @@ export function register(program: Command): void {
       const ctx = await resolveContext(options);
 
       try {
-        const result = await handleShow(requireProjectId(ctx), workflowId, {
+        const result = await handleShow(await requireProjectId(ctx), workflowId, {
           include: options.include,
         });
         console.log(JSON.stringify(result, null, 2));
@@ -97,7 +104,7 @@ export function register(program: Command): void {
       const ctx = await resolveContext(options);
 
       try {
-        const result = await handleGates(requireProjectId(ctx), workflowId, {
+        const result = await handleGates(await requireProjectId(ctx), workflowId, {
           state: options.state,
         });
         console.log(JSON.stringify(result, null, 2));
@@ -119,7 +126,7 @@ export function register(program: Command): void {
 
       try {
         const result = await handleNextState(
-          requireProjectId(ctx),
+          await requireProjectId(ctx),
           workflowId,
           currentState
         );
@@ -142,7 +149,7 @@ export function register(program: Command): void {
       const ctx = await resolveContext(options);
 
       try {
-        const result = await handleHistory(requireProjectId(ctx), proposalId, {
+        const result = await handleHistory(await requireProjectId(ctx), proposalId, {
           limit: options.limit,
         });
         console.log(JSON.stringify(result, null, 2));

@@ -94,21 +94,21 @@ async function handleShow(options: Record<string, unknown>) {
 	const ctx = await resolveContext(options);
 	const scope = options.scope ?? "project";
 
-	if (!ctx.projectId && scope === "project") {
+	if (!ctx.project && scope === "project") {
 		throw Errors.notFound("Cannot resolve project context for budget show.", {
 			hint: "Set --project flag or HIVE_PROJECT environment variable",
 		});
 	}
 
-	const budget = await client.getBudgetStatus(ctx.projectId ?? undefined);
+	// getBudgetStatus accepts a numeric project_id; without one, returns global budget
+	const budget = await client.getBudgetStatus(undefined);
 	return budget;
 }
 
 async function handleConsumed(options: Record<string, unknown>) {
 	const client = getControlPlaneClient();
-	const ctx = await resolveContext(options);
 
-	const budget = await client.getBudgetStatus(ctx.projectId ?? undefined);
+	const budget = await client.getBudgetStatus(undefined);
 	return budget.caps ?? [];
 }
 

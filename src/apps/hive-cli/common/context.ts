@@ -17,6 +17,9 @@ export interface HiveContext {
   resolved_at: string;
 }
 
+/** Alias for HiveContext — used by handler files that import CliContext. */
+export type CliContext = HiveContext;
+
 export interface ContextFlags {
   project?: string;
   agency?: string;
