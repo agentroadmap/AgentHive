@@ -32,8 +32,10 @@ import {
 	type QueryResult,
 	type QueryResultRow,
 } from "pg";
+export type { Pool, PoolConfig, QueryResult, QueryResultRow };
 import { StructuralKeys } from "../../shared/runtime/config-keys";
 import { ConfigResolver } from "../../shared/runtime/config";
+import { AgentHiveConfigError } from "../../shared/runtime/endpoints";
 
 // Password resolution priority:
 //   1. ~/.pgpass (ConfigResolver.resolvePasswordSync)

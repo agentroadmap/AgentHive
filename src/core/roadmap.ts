@@ -895,7 +895,7 @@ export class Core {
 			["Design", row.design],
 			["Drawbacks", row.drawbacks],
 			["Alternatives", row.alternatives],
-			["Dependency Note", row.dependency],
+			["Dependency Note", row.dependency_note],
 		].flatMap(([heading, value]) => {
 			const content = value?.trim();
 			return content ? [[heading, content] as [string, string]] : [];

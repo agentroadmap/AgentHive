@@ -203,7 +203,6 @@ if (SSE_ENABLED) {
 	});
 }
 
-const port = process.env.MCP_PORT || 6421;
 const server = app.listen(port, "0.0.0.0", () => {
 	console.log(`[MCP] AgentHive MCP server v${APP_VERSION} listening on port ${port}`);
 	console.log(`[MCP] Transport config: MCP_TRANSPORT=${MCP_TRANSPORT}`);

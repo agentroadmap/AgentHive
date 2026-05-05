@@ -70,7 +70,7 @@ async function main(): Promise<void> {
 						design,
 						drawbacks: "Auto-filed proposals can be wrong about origin tracing or include false positives. Operator should sanity-check the origin link before assuming the listed parent's authors must own the fix.",
 						alternatives: "Manual triage via journalctl + grep (status quo before P675).",
-						dependency: args.originDisplayId
+						dependency_note: args.originDisplayId
 							? `Re-opens incomplete change from ${args.originDisplayId}`
 							: null,
 						priority: "high",

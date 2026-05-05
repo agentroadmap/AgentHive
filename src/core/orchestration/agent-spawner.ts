@@ -767,10 +767,10 @@ export async function detectProvider(worktreeName: string, _worktreeRoot: string
 	// originate from .env.agent, AGENTHIVE_DEFAULT_PROVIDER, or roadmap.model_routes
 	// — never a hardcoded source literal. Loud failure is preferred over routing
 	// to a provider the operator may not have configured.
-	const envProvider = process.env.AGENTHIVE_DEFAULT_PROVIDER as
+	const defaultProvider = process.env.AGENTHIVE_DEFAULT_PROVIDER as
 		| AgentProvider
 		| undefined;
-	if (envProvider) return envProvider;
+	if (defaultProvider) return defaultProvider;
 	throw new NoProviderConfigured(worktreeName);
 }
 
@@ -1380,6 +1380,9 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 			selectedRouteId: route.routeId,
 			candidateRoutes: [{ routeId: String(route.routeId), modelName: route.modelName, selectionReason }],
 			selectionReason,
+		});
+	}
+
 	if (exitClass.outcome === "rate_limited") {
 		const throttledUntil =
 			exitClass.resetAt ?? new Date(Date.now() + 60 * 60 * 1000);
