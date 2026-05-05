@@ -74,7 +74,7 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					FROM roadmap_proposal.proposal_state_transitions pst2
 					WHERE pst2.proposal_id = pmt.proposal_id
 					  AND pst2.transitioned_at <= pmt.created_at
-					ORDER BY pst2.transitioned_at DESC
+					ORDER BY pst2.transitioned_at DESC, pst2.id DESC
 					LIMIT 1
 				) state_at ON true
 
