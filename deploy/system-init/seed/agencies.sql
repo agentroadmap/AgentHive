@@ -22,7 +22,7 @@ JOIN (VALUES
   ON p.slug = m.provider_slug
 ON CONFLICT (model_id) DO NOTHING;
 
-INSERT INTO agency.msgKind (kind, description) VALUES
+INSERT INTO agency.msg_kind (kind, description) VALUES
   ('heartbeat',       'Agency liveness pulse'),
   ('task_start',      'Agent claimed a proposal/task'),
   ('task_complete',   'Agent completed a proposal/task'),

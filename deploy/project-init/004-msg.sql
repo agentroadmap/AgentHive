@@ -1,15 +1,15 @@
 -- ============================================================
 -- project-init/004-msg.sql
--- Project-scoped messaging: mMessage, mTopic, mDLQ.
+-- Project-scoped messaging: m_message, m_topic, m_dlq.
 -- Run with: psql -v schema_name=agentHive -f 004-msg.sql
 -- ============================================================
 
 \set ON_ERROR_STOP on
 
 -- ============================================================
--- mTopic — message topic / channel registry
+-- m_topic — message topic / channel registry
 -- ============================================================
-CREATE TABLE IF NOT EXISTS :schema_name.mTopic (
+CREATE TABLE IF NOT EXISTS :schema_name.m_topic (
   id               BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   slug             TEXT         NOT NULL UNIQUE,          -- 'proposal-updates', 'gate-events', etc.
   description      TEXT,
@@ -22,18 +22,18 @@ CREATE TABLE IF NOT EXISTS :schema_name.mTopic (
 );
 
 CREATE OR REPLACE TRIGGER set_updated_at_mtopic
-  BEFORE UPDATE ON :schema_name.mTopic
+  BEFORE UPDATE ON :schema_name.m_topic
   FOR EACH ROW EXECUTE FUNCTION :schema_name.set_updated_at();
 
-COMMENT ON TABLE :schema_name.mTopic IS
-  'Message topic registry. mMessage rows are published to a topic.';
+COMMENT ON TABLE :schema_name.m_topic IS
+  'Message topic registry. m_message rows are published to a topic.';
 
 -- ============================================================
--- mMessage — agent-to-agent messages
+-- m_message — agent-to-agent messages
 -- ============================================================
-CREATE TABLE IF NOT EXISTS :schema_name.mMessage (
+CREATE TABLE IF NOT EXISTS :schema_name.m_message (
   id               BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  topic_id         BIGINT       REFERENCES :schema_name.mTopic (id) ON DELETE SET NULL,
+  topic_id         BIGINT       REFERENCES :schema_name.m_topic (id) ON DELETE SET NULL,
   from_agent       TEXT         NOT NULL,
   to_agent         TEXT,                                  -- NULL = broadcast to topic
   kind             TEXT         NOT NULL,                 -- 'task', 'event', 'notify', 'request', 'reply'
@@ -46,22 +46,22 @@ CREATE TABLE IF NOT EXISTS :schema_name.mMessage (
   retry_count      INT          NOT NULL DEFAULT 0
 );
 
-CREATE INDEX IF NOT EXISTS mmessage_topic ON :schema_name.mMessage (topic_id, sent_at);
-CREATE INDEX IF NOT EXISTS mmessage_to_agent ON :schema_name.mMessage (to_agent)
+CREATE INDEX IF NOT EXISTS mmessage_topic ON :schema_name.m_message (topic_id, sent_at);
+CREATE INDEX IF NOT EXISTS mmessage_to_agent ON :schema_name.m_message (to_agent)
   WHERE ack_at IS NULL AND failed_at IS NULL;
-CREATE INDEX IF NOT EXISTS mmessage_correlation ON :schema_name.mMessage (correlation_id)
+CREATE INDEX IF NOT EXISTS mmessage_correlation ON :schema_name.m_message (correlation_id)
   WHERE correlation_id IS NOT NULL;
 
-COMMENT ON TABLE :schema_name.mMessage IS
+COMMENT ON TABLE :schema_name.m_message IS
   'Agent-to-agent messages. Undelivered messages are visible via to_agent + ack_at IS NULL filter.';
 
 -- ============================================================
--- mDLQ — dead letter queue (messages that exhausted retries)
+-- m_dlq — dead letter queue (messages that exhausted retries)
 -- ============================================================
-CREATE TABLE IF NOT EXISTS :schema_name.mDLQ (
+CREATE TABLE IF NOT EXISTS :schema_name.m_dlq (
   id               BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  original_msg_id  BIGINT,                                -- original mMessage.id if available
-  topic_id         BIGINT       REFERENCES :schema_name.mTopic (id) ON DELETE SET NULL,
+  original_msg_id  BIGINT,                                -- original m_message.id if available
+  topic_id         BIGINT       REFERENCES :schema_name.m_topic (id) ON DELETE SET NULL,
   from_agent       TEXT         NOT NULL,
   to_agent         TEXT,
   kind             TEXT         NOT NULL,
@@ -71,8 +71,8 @@ CREATE TABLE IF NOT EXISTS :schema_name.mDLQ (
   failed_at        TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS mdlq_failed_at ON :schema_name.mDLQ (failed_at);
-CREATE INDEX IF NOT EXISTS mdlq_original ON :schema_name.mDLQ (original_msg_id);
+CREATE INDEX IF NOT EXISTS mdlq_failed_at ON :schema_name.m_dlq (failed_at);
+CREATE INDEX IF NOT EXISTS mdlq_original ON :schema_name.m_dlq (original_msg_id);
 
-COMMENT ON TABLE :schema_name.mDLQ IS
+COMMENT ON TABLE :schema_name.m_dlq IS
   'Dead letter queue. Messages land here after exhausting retries. Inspected manually or by reconciler.';

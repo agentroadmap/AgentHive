@@ -13,7 +13,7 @@ ON CONFLICT (slug) DO NOTHING;
 
 -- Grant gate-review skill to the gate reviewer agent
 WITH a AS (SELECT id FROM :schema_name.agent WHERE slug = 'claude-gate')
-INSERT INTO :schema_name.aSkill (agent_id, skill, proficiency, granted_by)
+INSERT INTO :schema_name.a_skill (agent_id, skill, proficiency, granted_by)
 SELECT a.id, s.skill, s.prof, 'seed'
 FROM a, (VALUES
   ('gate-review',  'expert'),
@@ -24,7 +24,7 @@ ON CONFLICT (agent_id, skill) DO NOTHING;
 
 -- Grant development skills to developer agents
 WITH a AS (SELECT id FROM :schema_name.agent WHERE slug = 'claude-dev')
-INSERT INTO :schema_name.aSkill (agent_id, skill, proficiency, granted_by)
+INSERT INTO :schema_name.a_skill (agent_id, skill, proficiency, granted_by)
 SELECT a.id, s.skill, s.prof, 'seed'
 FROM a, (VALUES
   ('typescript', 'expert'),
@@ -34,7 +34,7 @@ FROM a, (VALUES
 ON CONFLICT (agent_id, skill) DO NOTHING;
 
 -- Seed default topics
-INSERT INTO :schema_name.mTopic (slug, description, retention_days)
+INSERT INTO :schema_name.m_topic (slug, description, retention_days)
 VALUES
   ('proposal-updates', 'Proposal status change events',   90),
   ('gate-events',      'Gate decision and review events', 365),

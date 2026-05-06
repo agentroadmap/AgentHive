@@ -1,6 +1,6 @@
 -- ============================================================
 -- project-init/003-agent.sql
--- Agent tables: agent (root), aLease, aSkill, aTrust, aHeartbeat.
+-- Agent tables: agent (root), a_lease, a_skill, a_trust, a_heartbeat.
 -- Run with: psql -v schema_name=agentHive -f 003-agent.sql
 -- ============================================================
 
@@ -38,9 +38,9 @@ COMMENT ON TABLE :schema_name.agent IS
   'Agents registered for this project. provider_slug and model_id are soft FKs to the agency schema.';
 
 -- ============================================================
--- aLease — proposal leases (one active lease per proposal)
+-- a_lease — proposal leases (one active lease per proposal)
 -- ============================================================
-CREATE TABLE IF NOT EXISTS :schema_name.aLease (
+CREATE TABLE IF NOT EXISTS :schema_name.a_lease (
   id               BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   proposal_id      BIGINT       NOT NULL REFERENCES :schema_name.proposal (id) ON DELETE CASCADE,
   agent_slug       TEXT         NOT NULL,
@@ -52,20 +52,20 @@ CREATE TABLE IF NOT EXISTS :schema_name.aLease (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS alease_active_one_per_proposal
-  ON :schema_name.aLease (proposal_id)
+  ON :schema_name.a_lease (proposal_id)
   WHERE released_at IS NULL;
 
-CREATE INDEX IF NOT EXISTS alease_agent ON :schema_name.aLease (agent_slug);
-CREATE INDEX IF NOT EXISTS alease_expires ON :schema_name.aLease (expires_at)
+CREATE INDEX IF NOT EXISTS alease_agent ON :schema_name.a_lease (agent_slug);
+CREATE INDEX IF NOT EXISTS alease_expires ON :schema_name.a_lease (expires_at)
   WHERE released_at IS NULL;
 
-COMMENT ON TABLE :schema_name.aLease IS
+COMMENT ON TABLE :schema_name.a_lease IS
   'Proposal leases. At most one active (released_at IS NULL) lease per proposal enforced by partial unique index.';
 
 -- ============================================================
--- aSkill — agent skills / capabilities for this project
+-- a_skill — agent skills / capabilities for this project
 -- ============================================================
-CREATE TABLE IF NOT EXISTS :schema_name.aSkill (
+CREATE TABLE IF NOT EXISTS :schema_name.a_skill (
   id               BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   agent_id         BIGINT       NOT NULL REFERENCES :schema_name.agent (id) ON DELETE CASCADE,
   skill            TEXT         NOT NULL,                 -- 'typescript', 'postgres', 'gate-review', etc.
@@ -77,15 +77,15 @@ CREATE TABLE IF NOT EXISTS :schema_name.aSkill (
   UNIQUE (agent_id, skill)
 );
 
-CREATE INDEX IF NOT EXISTS askill_skill ON :schema_name.aSkill (skill);
+CREATE INDEX IF NOT EXISTS askill_skill ON :schema_name.a_skill (skill);
 
-COMMENT ON TABLE :schema_name.aSkill IS
+COMMENT ON TABLE :schema_name.a_skill IS
   'Agent skill declarations per project. skill values are free-form; gate-review is a sentinel for gate eligibility.';
 
 -- ============================================================
--- aTrust — per-project agent trust levels
+-- a_trust — per-project agent trust levels
 -- ============================================================
-CREATE TABLE IF NOT EXISTS :schema_name.aTrust (
+CREATE TABLE IF NOT EXISTS :schema_name.a_trust (
   id               BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   agent_id         BIGINT       NOT NULL REFERENCES :schema_name.agent (id) ON DELETE CASCADE,
   trust_level      TEXT         NOT NULL DEFAULT 'standard'
@@ -97,25 +97,25 @@ CREATE TABLE IF NOT EXISTS :schema_name.aTrust (
   reason           TEXT
 );
 
-CREATE INDEX IF NOT EXISTS atrust_agent ON :schema_name.aTrust (agent_id)
+CREATE INDEX IF NOT EXISTS atrust_agent ON :schema_name.a_trust (agent_id)
   WHERE revoked_at IS NULL;
 
-COMMENT ON TABLE :schema_name.aTrust IS
+COMMENT ON TABLE :schema_name.a_trust IS
   'Trust levels granted to agents within this project. Revoked trust has revoked_at set.';
 
 -- ============================================================
--- aHeartbeat — agent liveness signals
+-- a_heartbeat — agent liveness signals
 -- ============================================================
-CREATE TABLE IF NOT EXISTS :schema_name.aHeartbeat (
+CREATE TABLE IF NOT EXISTS :schema_name.a_heartbeat (
   agent_slug       TEXT         PRIMARY KEY,
   last_beat_at     TIMESTAMPTZ  NOT NULL DEFAULT now(),
   status           TEXT         NOT NULL DEFAULT 'active'
                                CHECK (status IN ('starting','active','idle','stopped')),
-  current_lease_id BIGINT       REFERENCES :schema_name.aLease (id) ON DELETE SET NULL,
+  current_lease_id BIGINT       REFERENCES :schema_name.a_lease (id) ON DELETE SET NULL,
   metadata_jsonb   JSONB        NOT NULL DEFAULT '{}'
 );
 
-CREATE INDEX IF NOT EXISTS aheartbeat_recent ON :schema_name.aHeartbeat (last_beat_at);
+CREATE INDEX IF NOT EXISTS aheartbeat_recent ON :schema_name.a_heartbeat (last_beat_at);
 
-COMMENT ON TABLE :schema_name.aHeartbeat IS
+COMMENT ON TABLE :schema_name.a_heartbeat IS
   'Agent liveness. Upserted by each agent. No lifecycle columns — rows are replaced, not deprecated.';
