@@ -135,6 +135,50 @@ class ConfigResolver {
 	private dbCache: Map<string, any> = new Map();
 	private notifySubscription: PoolClient | null = null;
 
+	// Parse ~/.pgpass for a matching password entry (hostname:port:database:username:password)
+	static parsePgpassFile(
+		pgpassPath: string,
+		host: string,
+		port: string,
+		database: string,
+		user: string,
+	): string | undefined {
+		try {
+			const { readFileSync } = require("node:fs");
+			const content = readFileSync(pgpassPath, "utf-8") as string;
+			for (const line of content.split("\n")) {
+				const trimmed = line.trim();
+				if (!trimmed || trimmed.startsWith("#")) continue;
+				const parts = trimmed
+					.replace(/\\:/g, "\x00")
+					.split(":")
+					.map((p: string) => p.replace(/\x00/g, ":"));
+				if (parts.length < 5) continue;
+				const [h, p, d, u, ...rest] = parts;
+				const pw = rest.join(":");
+				const m = (pat: string, val: string) => pat === "*" || pat === val;
+				if (m(h, host) && m(p, port) && m(d, database) && m(u, user)) {
+					return pw;
+				}
+			}
+		} catch { /* unreadable */ }
+		return undefined;
+	}
+
+	// Synchronously resolve the DB password: PGPASSWORD env → ~/.pgpass → undefined
+	static resolvePasswordSync(opts: {
+		host: string;
+		port: string;
+		database: string;
+		user: string;
+		pgpassPath?: string;
+	}): string | undefined {
+		if (process.env.PGPASSWORD) return process.env.PGPASSWORD;
+		const pgpassPath = opts.pgpassPath ??
+			(process.env.PGPASSFILE || ((process.env.HOME || "") + "/.pgpass"));
+		return ConfigResolver.parsePgpassFile(pgpassPath, opts.host, opts.port, opts.database, opts.user);
+	}
+
 	/**
 	 * Initialize the resolver with optional yaml config and database pool.
 	 */
