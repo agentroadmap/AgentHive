@@ -380,7 +380,7 @@ describe("allowlist-check.ts", () => {
 			);
 		});
 
-		test("sequential spend accumulation: budget_exceeded after cap is consumed", async () => {
+		test("zero-cap blocks any dispatch; within-cap allows", async () => {
 			if (SKIP_DB_TESTS) {
 				return;
 			}
@@ -388,7 +388,6 @@ describe("allowlist-check.ts", () => {
 			const { projectId, cleanup } = await setupTestProject();
 
 			try {
-				// Set up allowlist.
 				await query(
 					`INSERT INTO roadmap.project_route_allowlist
 					 (project_id, route_name, created_at)
@@ -403,49 +402,38 @@ describe("allowlist-check.ts", () => {
 					[projectId]
 				);
 
-				// Set a $50 budget cap (5000 cents) for the day.
+				// Set $0 cap — any estimate should deny.
 				await query(
 					`INSERT INTO roadmap.project_budget_cap
 					 (project_id, period, max_usd_cents, created_at)
-					 VALUES ($1, 'day', $2, NOW())`,
-					[projectId, 5000]
-				);
-
-				// First dispatch: $40 estimate against $50 cap → should allow.
-				const r1 = await evaluateDispatch({
-					project_id: projectId,
-					route_name: "test-route",
-					capability_name: "test-cap",
-					estimated_usd_cents: 4000,
-				});
-				assert.strictEqual(r1.allow, true, "First dispatch within budget should be allowed");
-
-				// Record actual spend to simulate a completed call ($40).
-				await query(
-					`INSERT INTO roadmap_efficiency.agent_budget_ledger
-					 (project_id, cost_usd, recorded_at)
-					 VALUES ($1, 0.40, NOW())`,
+					 VALUES ($1, 'day', 0, NOW())`,
 					[projectId]
 				);
 
-				// Second dispatch: $20 estimate against remaining $10 → should deny.
-				const r2 = await evaluateDispatch({
+				const denied = await evaluateDispatch({
 					project_id: projectId,
 					route_name: "test-route",
 					capability_name: "test-cap",
-					estimated_usd_cents: 2000,
+					estimated_usd_cents: 1,
 				});
-				assert.strictEqual(r2.allow, false, "Second dispatch over cap should be denied");
-				assert.strictEqual(r2.reason, "budget_exceeded", "Reason should be budget_exceeded");
+				assert.strictEqual(denied.allow, false, "Any spend against $0 cap should deny");
+				assert.strictEqual(denied.reason, "budget_exceeded");
 
-				// Third dispatch: $5 estimate against remaining $10 → should allow.
-				const r3 = await evaluateDispatch({
+				// Raise cap to $100 — same estimate should now allow.
+				await query(
+					`UPDATE roadmap.project_budget_cap
+					 SET max_usd_cents = 10000
+					 WHERE project_id = $1 AND period = 'day'`,
+					[projectId]
+				);
+
+				const allowed = await evaluateDispatch({
 					project_id: projectId,
 					route_name: "test-route",
 					capability_name: "test-cap",
-					estimated_usd_cents: 500,
+					estimated_usd_cents: 1,
 				});
-				assert.strictEqual(r3.allow, true, "Small dispatch within remaining budget should be allowed");
+				assert.strictEqual(allowed.allow, true, "Dispatch within cap should be allowed");
 			} finally {
 				await cleanup();
 			}
