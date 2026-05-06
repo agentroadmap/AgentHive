@@ -2,9 +2,10 @@
  * P269: Stale-row reaper.
  *
  * Recovers orphans left behind by abrupt stops (SIGKILL, OOM, host reboot):
- *   - transition_queue rows stuck in 'processing'
  *   - proposal_lease rows past expires_at without released_at
  *   - squad_dispatch rows stuck in 'assigned'/'active' past assigned_at + 20m
+ *
+ * P753 retired transition_queue reaping; the unified scanner replaces it.
  *
  * Idempotent — safe to run from multiple services concurrently at boot.
  */
@@ -17,7 +18,6 @@ export interface ReaperLogger {
 }
 
 export interface ReapResult {
-	transitions: number;
 	leases: number;
 	dispatches: number;
 	sequencesRealigned: number;
@@ -25,7 +25,6 @@ export interface ReapResult {
 	lifecycleLogPruned: number;
 }
 
-const TRANSITION_STALE_MIN = 15;
 const LEASE_STALE_MIN = 10;
 const DISPATCH_STALE_MIN = 20;
 const POKE_ATTEMPT_RETENTION_DAYS = 7;
@@ -44,32 +43,12 @@ export async function reapStaleRows(
 	tag = "Reaper",
 ): Promise<ReapResult> {
 	const result: ReapResult = {
-		transitions: 0,
 		leases: 0,
 		dispatches: 0,
 		sequencesRealigned: 0,
 		pokeAttemptsPruned: 0,
 		lifecycleLogPruned: 0,
 	};
-
-	try {
-		const r = await pool.query(
-			`UPDATE roadmap.transition_queue
-			 SET status='pending',
-			     processing_at=NULL,
-			     last_error=COALESCE(last_error,'') || ' [reaped: stale processing >${TRANSITION_STALE_MIN}m]'
-			 WHERE status='processing'
-			   AND processing_at IS NOT NULL
-			   AND processing_at < now() - ($1 || ' min')::interval
-			 RETURNING id`,
-			[String(TRANSITION_STALE_MIN)],
-		);
-		result.transitions = r.rowCount ?? 0;
-	} catch (err) {
-		logger.warn(
-			`[${tag}] transition_queue reap failed: ${err instanceof Error ? err.message : String(err)}`,
-		);
-	}
 
 	try {
 		const r = await pool.query(
@@ -191,7 +170,6 @@ export async function reapStaleRows(
 	}
 
 	if (
-		result.transitions ||
 		result.leases ||
 		result.dispatches ||
 		result.sequencesRealigned ||
@@ -199,7 +177,7 @@ export async function reapStaleRows(
 		result.lifecycleLogPruned
 	) {
 		logger.log(
-			`[${tag}] reaped: ${result.transitions} transition(s), ${result.leases} lease(s), ${result.dispatches} dispatch(es), ${result.sequencesRealigned} sequence(s) realigned, ${result.pokeAttemptsPruned} poke_attempt(s) pruned, ${result.lifecycleLogPruned} lifecycle_log row(s) pruned`,
+			`[${tag}] reaped: ${result.leases} lease(s), ${result.dispatches} dispatch(es), ${result.sequencesRealigned} sequence(s) realigned, ${result.pokeAttemptsPruned} poke_attempt(s) pruned, ${result.lifecycleLogPruned} lifecycle_log row(s) pruned`,
 		);
 	} else {
 		logger.log(`[${tag}] no stale rows`);

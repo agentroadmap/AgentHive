@@ -313,10 +313,11 @@ export function startWebSocketServer(
 				try { pgClient.release(true); } catch { /* already released */ }
 				scheduleRetry();
 			});
+			// P753: transition_queued was retired; proposal_maturity_changed +
+			// proposal_gate_ready cover the activity feed without it.
 			await pgClient.query("LISTEN proposal_state_changed");
 			await pgClient.query("LISTEN proposal_gate_ready");
 			await pgClient.query("LISTEN proposal_maturity_changed");
-			await pgClient.query("LISTEN transition_queued");
 			pgClient.on("notification", () => {
 				void broadcastSnapshot().catch((error) => {
 					console.error("[WS] pg_notify snapshot failed:", error);

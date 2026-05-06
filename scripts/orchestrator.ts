@@ -557,19 +557,6 @@ async function recordProviderSuccess(provider: string): Promise<void> {
 	);
 }
 
-type TransitionQueueRow = {
-	id: number;
-	proposal_id: number;
-	display_id: string | null;
-	from_stage: string;
-	to_stage: string;
-	gate: string | null;
-	status: string;
-	attempt_count: number;
-	max_attempts: number;
-	metadata: Record<string, unknown> | null;
-};
-
 type GateDefinition = {
 	gate: "D1" | "D2" | "D3" | "D4";
 	toStage: "Review" | "Develop" | "Merge" | "Complete";
@@ -1695,7 +1682,7 @@ function buildImplicitGateTask(
 		"- Do not reject or hold this gate solely because dependencies are unresolved.",
 		"- Dependencies carry forward after an advance and may block later work or later advancement when the next state needs them resolved.",
 		"",
-		"This is not a transition_queue job. The proposal maturity is the implicit queue signal, and your gate lease must be released after the decision.",
+		"The proposal maturity is the implicit queue signal, and your gate lease must be released after the decision.",
 	]
 		.filter((line): line is string => line !== null)
 		.join("\n");
@@ -2366,278 +2353,6 @@ async function drainEnhancementRevisions(
 	}
 }
 
-async function _dispatchTransitionQueue(queueId: number): Promise<void> {
-	const { rows } = await query<TransitionQueueRow>(
-		`SELECT tq.id, tq.proposal_id, p.display_id, tq.from_stage, tq.to_stage, tq.gate,
-            tq.status, tq.attempt_count, tq.max_attempts, tq.metadata
-       FROM roadmap.transition_queue tq
-       JOIN roadmap_proposal.proposal p ON p.id = tq.proposal_id
-      WHERE tq.id = $1`,
-		[queueId],
-	);
-	const transition = rows[0];
-	if (!transition) {
-		logger.warn(`transition_queue ${queueId} not found`);
-		return;
-	}
-	if (!["pending", "processing"].includes(transition.status)) {
-		logger.log(
-			`transition_queue ${queueId} is ${transition.status}; no dispatch needed`,
-		);
-		return;
-	}
-
-	const metadata = transition.metadata ?? {};
-	const spawnMetadata = isRecord(metadata.spawn) ? metadata.spawn : null;
-	const requestedWorktree =
-		readString(spawnMetadata, "worktree") ?? readString(metadata, "worktree");
-	const worktree = await selectExecutorWorktree(requestedWorktree);
-	const task =
-		readString(spawnMetadata, "task") ??
-		readString(metadata, "task") ??
-		[
-			`Process transition_queue ${transition.id}.`,
-			`Proposal: ${transition.display_id ?? transition.proposal_id}`,
-			`Transition: ${transition.from_stage} -> ${transition.to_stage}`,
-			"Use MCP proposal tools to make the gate decision.",
-		].join("\n");
-	const timeoutMs =
-		readNumber(spawnMetadata, "timeoutMs") ??
-		readNumber(spawnMetadata, "timeout_ms") ??
-		600_000;
-
-	await ensureAgentIdentity("orchestrator", "State Machine Orchestrator");
-	await ensureAgentIdentity(worktree, "Gate Executor");
-
-	// P437: pull project_id + maturity so the idempotency key is stable
-	// across concurrent transition_queue processors.
-	const { rows: ctxRows } = await query<{
-		project_id: number | null;
-		maturity: string | null;
-	}>(
-		`SELECT project_id, maturity FROM roadmap_proposal.proposal WHERE id = $1`,
-		[transition.proposal_id],
-	);
-	const transitionIdempotencyKey = computeDispatchIdempotencyKey({
-		projectId: ctxRows[0]?.project_id ?? null,
-		proposalId: transition.proposal_id,
-		status: transition.from_stage,
-		maturity: ctxRows[0]?.maturity ?? "mature",
-		role: "gate-reviewer",
-	});
-
-	const { rows: dispatchRows } = await query<{
-		id: number;
-		attempt_count: number;
-		was_replay: boolean;
-	}>(
-		`INSERT INTO roadmap_workforce.squad_dispatch
-       (proposal_id, agent_identity, squad_name, dispatch_role, dispatch_status,
-        assigned_by, metadata, idempotency_key, attempt_count)
-     VALUES ($1, $2, $3, 'gate-reviewer', 'active', 'orchestrator',
-       jsonb_build_object(
-         'transition_queue_id', $4::text,
-         'from_stage', $5::text,
-         'to_stage', $6::text,
-         'stage', 'gate:' || $6::text
-       ), $7, 1)
-     ON CONFLICT (idempotency_key)
-       WHERE dispatch_status IN ('open', 'assigned', 'active')
-     DO UPDATE SET
-       attempt_count = squad_dispatch.attempt_count + 1,
-       metadata = squad_dispatch.metadata
-                || jsonb_build_object(
-                     'last_replay_at', to_jsonb(now()),
-                     'replay_reason', 'idempotency_collision'
-                   )
-     RETURNING id, attempt_count, (xmax::text::int <> 0) AS was_replay`,
-		[
-			transition.proposal_id,
-			worktree,
-			`gate-${transition.display_id ?? transition.proposal_id}-${transition.to_stage}`,
-			transition.id,
-			transition.from_stage,
-			transition.to_stage,
-			transitionIdempotencyKey,
-		],
-	);
-	const dispatchId = dispatchRows[0]?.id;
-	if (dispatchRows[0]?.was_replay) {
-		logger.log(
-			`Gate dispatch idempotency replay for ${transition.display_id ?? transition.proposal_id} (dispatch ${dispatchId}, attempt ${dispatchRows[0].attempt_count}) — skipping spawn`,
-		);
-		return;
-	}
-
-	logger.log(
-		`Gate dispatch ${dispatchId} -> ${worktree} for ${transition.display_id ?? transition.proposal_id} (${transition.from_stage} -> ${transition.to_stage})`,
-	);
-
-	const result = await spawnAgent({
-		worktree,
-		task,
-		proposalId: transition.proposal_id,
-		stage: `gate:${transition.to_stage}`,
-		timeoutMs,
-	});
-
-	const proposalState = await query<{ status: string; maturity: string }>(
-		`SELECT status, maturity
-       FROM roadmap_proposal.proposal
-      WHERE id = $1`,
-		[transition.proposal_id],
-	);
-	const current = proposalState.rows[0];
-	const reachedTarget =
-		current &&
-		normalizeState(current.status) === normalizeState(transition.to_stage);
-
-	if (result.exitCode === 0 && reachedTarget) {
-		await query(
-			`UPDATE roadmap.transition_queue
-          SET status = 'done',
-              completed_at = now(),
-              last_error = NULL
-        WHERE id = $1`,
-			[transition.id],
-		);
-		await query(
-			`UPDATE roadmap_workforce.squad_dispatch
-          SET dispatch_status = 'completed',
-              completed_at = now(),
-              metadata = COALESCE(metadata, '{}'::jsonb) ||
-                jsonb_build_object('agent_run_id', $2::text, 'proposal_status', $3)
-        WHERE id = $1`,
-			[dispatchId, result.agentRunId, current.status],
-		);
-		logger.log(
-			`Gate dispatch ${dispatchId} completed transition_queue ${transition.id}`,
-		);
-		return;
-	}
-
-	if (
-		result.exitCode === 0 &&
-		current &&
-		normalizeState(current.maturity) !== "MATURE"
-	) {
-		const decisionMessage = `gate decision completed without state transition: proposal is ${current.status}/${current.maturity}`;
-		await recordGateDecisionFromOrchestrator({
-			proposalId: transition.proposal_id,
-			fromState: transition.from_stage ?? current.status ?? "unknown",
-			toState: transition.to_stage ?? "unknown",
-			gate: transition.gate ?? "unknown",
-			decision: "hold",
-			authorityAgent:
-				(transition.gate && GATE_ROLES[transition.gate]?.role) ?? "gate-reviewer",
-			agentRunId: result.agentRunId,
-			agentStdout: result.stdout,
-			maturity: current.maturity ?? "mature",
-		});
-		await recordGateCommunication({
-			proposalId: transition.proposal_id,
-			author: worktree,
-			toAgent: "orchestrator",
-			channel: "direct",
-			contextPrefix: "feedback:",
-			body: [
-				`Gate ${transition.gate ?? ""} held ${transition.display_id ?? transition.proposal_id}.`,
-				`Queue: ${transition.id}`,
-				`Target transition: ${transition.from_stage} -> ${transition.to_stage}`,
-				`Current proposal state: ${current.status}/${current.maturity}`,
-				"",
-				"The gate agent made a non-transition decision. Read the latest gate_decision_log row (rationale + ac_verification.details) for the canonical findings, revise the proposal, then set maturity back to mature when it is ready for another gate attempt.",
-			].join("\n"),
-			metadata: {
-				transition_queue_id: transition.id,
-				gate: transition.gate,
-				gate_decision: "hold",
-				proposal_status: current.status,
-				proposal_maturity: current.maturity,
-				agent_run_id: result.agentRunId,
-			},
-		});
-		await query(
-			`UPDATE roadmap.transition_queue
-          SET status = 'held',
-              completed_at = now(),
-              last_error = $2,
-              metadata = COALESCE(metadata, '{}'::jsonb) ||
-                jsonb_build_object('gate_decision', 'hold', 'proposal_status', $3::text, 'proposal_maturity', $4::text)
-        WHERE id = $1`,
-			[transition.id, decisionMessage, current.status, current.maturity],
-		);
-		await query(
-			`UPDATE roadmap_workforce.squad_dispatch
-          SET dispatch_status = 'completed',
-              completed_at = now(),
-              metadata = COALESCE(metadata, '{}'::jsonb) ||
-                jsonb_build_object('agent_run_id', $2::text, 'gate_decision', 'hold', 'proposal_status', $3::text, 'proposal_maturity', $4::text)
-        WHERE id = $1`,
-			[dispatchId, result.agentRunId, current.status, current.maturity],
-		);
-		await query(
-			`UPDATE roadmap_proposal.proposal_lease pl
-          SET released_at = now(),
-              release_reason = $2
-         FROM roadmap_workforce.squad_dispatch sd
-        WHERE sd.id = $1
-          AND pl.id = sd.lease_id
-          AND pl.released_at IS NULL`,
-			[dispatchId, decisionMessage],
-		);
-		logger.log(
-			`Gate dispatch ${dispatchId} held transition_queue ${transition.id}: ${decisionMessage}`,
-		);
-		return;
-	}
-
-	const errorMessage =
-		result.exitCode === 0
-			? `gate agent completed but proposal remained ${current?.status ?? "unknown"}/${current?.maturity ?? "unknown"}`
-			: `gate agent exited ${result.exitCode}: ${[result.stderr, result.stdout].filter(Boolean).join("\n").slice(0, 2000)}`;
-	const finalAttempt = transition.attempt_count >= transition.max_attempts;
-	await query(
-		`UPDATE roadmap.transition_queue
-        SET status = $2,
-            process_after = CASE WHEN $2 = 'pending' THEN now() + interval '5 minutes' ELSE process_after END,
-            completed_at = CASE WHEN $2 = 'failed' THEN now() ELSE completed_at END,
-            last_error = $3
-      WHERE id = $1`,
-		[transition.id, finalAttempt ? "failed" : "pending", errorMessage],
-	);
-	await query(
-		`UPDATE roadmap_workforce.squad_dispatch
-        SET dispatch_status = $2,
-            completed_at = now(),
-            metadata = COALESCE(metadata, '{}'::jsonb) ||
-              jsonb_build_object('agent_run_id', $3::text, 'error', $4::text)
-      WHERE id = $1`,
-		[
-			dispatchId,
-			finalAttempt ? "cancelled" : "blocked",
-			result.agentRunId,
-			errorMessage,
-		],
-	);
-	await query(
-		`UPDATE roadmap_proposal.proposal_lease pl
-        SET released_at = now(),
-            release_reason = $2
-       FROM roadmap_workforce.squad_dispatch sd
-      WHERE sd.id = $1
-        AND pl.id = sd.lease_id
-        AND pl.released_at IS NULL`,
-		[
-			dispatchId,
-			`dispatch ${finalAttempt ? "cancelled" : "blocked"}: ${errorMessage.slice(0, 500)}`,
-		],
-	);
-	logger.warn(
-		`Gate dispatch ${dispatchId} did not advance transition_queue ${transition.id}: ${errorMessage}`,
-	);
-}
-
 // Release cubics that are still locked for a proposal that moved on
 async function releaseStaleCubics(proposalId: string) {
 	const client = new Client({ name: "orchestrator-cleanup", version: "1.0.0" });
@@ -2818,12 +2533,13 @@ async function main() {
 			async () => {
 				if (stopping) return;
 				try {
-					// Find workflows that need an agent. Three exclusions matter — without
-					// all three, the LIMIT budget gets eaten by proposals that the
+					// Find workflows that need an agent. Two exclusions matter — without
+					// both, the LIMIT budget gets eaten by proposals that the
 					// downstream handleStateChange will just no-op:
-					//   1. transition_queue already has a pending/processing row
-					//   2. proposal already has running agent_runs
-					//   3. proposal already has alive squad_dispatch (open/assigned/active)
+					//   1. proposal already has running agent_runs
+					//   2. proposal already has alive squad_dispatch (open/assigned/active)
+					// (P753: the transition_queue exclusion was removed when the table was
+					// retired; agent_runs + squad_dispatch are the canonical in-flight set.)
 					// Order by oldest-first (ASC) so backlog drains; otherwise newer
 					// proposals can monopolize every cycle and starve idle ones for days
 					// (observed: P455 stuck DEVELOP+new for 3 days behind 10+ newer rows).
@@ -2834,11 +2550,6 @@ async function main() {
            WHERE w.completed_at IS NULL
              AND p.maturity IN ('new', 'active')
              AND p.gate_scanner_paused = false
-             AND NOT EXISTS (
-               SELECT 1 FROM roadmap.transition_queue tq
-               WHERE tq.proposal_id = w.proposal_id
-                 AND tq.status IN ('pending', 'processing')
-             )
              AND NOT EXISTS (
                SELECT 1 FROM roadmap_workforce.agent_runs ar
                WHERE ar.proposal_id = w.proposal_id

@@ -303,10 +303,6 @@ function formatNotification(channel: string, payload: string): string {
       return `📊 **MATURITY** — ${data.display_id ?? data.proposal_id}: ${from} → ${to}${by}`;
     }
 
-    if (channel === "transition_queued") {
-      return `🔄 **TRANSITION QUEUED** — ${data.enqueued || 1} transitions queued for processing`;
-    }
-
     if (channel === "discord_send") {
       const LEVEL_ICONS: Record<string, string> = {
         info: "💬",
@@ -333,11 +329,12 @@ client.once("ready", async () => {
   const pool = getPool();
   const pgClient = await pool.connect();
 
-  // Listen for state change notifications
+  // Listen for state change notifications.
+  // (P753: transition_queued was retired; proposal_maturity_changed +
+  // proposal_gate_ready cover the activity feed without it.)
   await pgClient.query("LISTEN proposal_state_changed");
   await pgClient.query("LISTEN proposal_gate_ready");
   await pgClient.query("LISTEN proposal_maturity_changed");
-  await pgClient.query("LISTEN transition_queued");
   await pgClient.query("LISTEN discord_send");
 
   logger.log("Listening for pg_notify events");

@@ -149,14 +149,6 @@ async function main(): Promise<void> {
 		agentColumn: "COALESCE(agent_identity, metadata->>'worktree_hint', '')",
 		startParam: 1,
 	});
-	const transitionFilter = buildFilters({
-		all: args.all,
-		proposalIds,
-		agencies: [],
-		agentColumn: "triggered_by",
-		startParam: 1,
-	});
-
 	const agencies = await query(
 		`SELECT ar.agent_identity, ar.agent_type, ar.status, ar.role, ar.preferred_model,
 		        COALESCE(string_agg(ac.capability, ',' ORDER BY ac.capability), '') AS capabilities
@@ -204,16 +196,6 @@ async function main(): Promise<void> {
 		dispatchFilter.params,
 	);
 	printRows("Matching Dispatches", activeDispatches.rows as Row[]);
-
-	const activeTransitions = await query(
-		`SELECT id, proposal_id, from_stage, to_stage, status, attempt_count, max_attempts, triggered_by
-		 FROM roadmap.transition_queue
-		 WHERE status IN ('pending','processing','waiting_input','held')${transitionFilter.sql}
-		 ORDER BY process_after NULLS FIRST, id
-		 LIMIT 100`,
-		transitionFilter.params,
-	);
-	printRows("Matching Transition Queue Rows", activeTransitions.rows as Row[]);
 
 	if (!args.apply) {
 		console.log("\nDry run only. Re-run with --apply to cancel matching rows.");
@@ -265,26 +247,8 @@ async function main(): Promise<void> {
 		[reason, ...dispatchFilter.params],
 	);
 
-	const cancelledTransitions = await query(
-		`UPDATE roadmap.transition_queue
-		 SET status = 'cancelled',
-		     completed_at = COALESCE(completed_at, now()),
-		     last_error = $1
-		 WHERE status IN ('pending','processing','waiting_input','held')${
-				buildFilters({
-					all: args.all,
-					proposalIds,
-					agencies: [],
-					agentColumn: "triggered_by",
-					startParam: 2,
-				}).sql
-			}
-		 RETURNING id`,
-		[reason, ...transitionFilter.params],
-	);
-
 	console.log(
-		`\nCancelled rows: agent_runs=${cancelledRuns.rowCount ?? 0}, dispatches=${cancelledDispatches.rowCount ?? 0}, transitions=${cancelledTransitions.rowCount ?? 0}`,
+		`\nCancelled rows: agent_runs=${cancelledRuns.rowCount ?? 0}, dispatches=${cancelledDispatches.rowCount ?? 0}`,
 	);
 
 	if (args.deleteAgencies) {

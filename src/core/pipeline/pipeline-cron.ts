@@ -1,9 +1,8 @@
 /**
- * Compatibility worker for legacy transition_queue rows.
- *
- * P240 makes proposal maturity the implicit gate queue. This worker no longer
- * creates transition_queue rows from mature proposals; it only drains legacy
- * rows that already exist while the orchestrator handles proposal_gate_ready.
+ * Maintenance worker — runs offer reaper + poke watchdog ticks alongside the
+ * unified orchestrator. P753 retired the legacy transition_queue draining;
+ * the LISTEN/poll path that consumed transition_queued is gone. P754 will
+ * delete this whole file once the merged orchestrator's soak completes.
  */
 
 import { basename } from "node:path";
@@ -25,14 +24,12 @@ import {
 } from "../orchestration/maintenance.ts";
 
 const MATURITY_CHANGED_CHANNEL = "proposal_maturity_changed";
-const TRANSITION_QUEUED_CHANNEL = "transition_queued";
 const GATE_READY_CHANNEL = "proposal_gate_ready";
 const DEFAULT_POLL_INTERVAL_MS = 30_000;
 const DEFAULT_BATCH_SIZE = 10;
 const DEFAULT_OFFER_REAP_INTERVAL_MS = 60_000;
 const WORKTREE_PREFIXES = ["claude", "gemini", "copilot", "openclaw"] as const;
 
-type TransitionQueueId = number | string;
 type JsonRecord = Record<string, unknown>;
 type Logger = Pick<Console, "log" | "warn" | "error">;
 type SpawnAgentRequest = {
@@ -75,17 +72,6 @@ export interface ListenerClient {
 	removeListener(event: "notification", handler: NotificationHandler): unknown;
 	removeListener(event: "error", handler: ListenerErrorHandler): unknown;
 	release?(): void;
-}
-
-interface TransitionQueueRow {
-	id: TransitionQueueId;
-	proposal_id: number | string;
-	from_stage: string;
-	to_stage: string;
-	triggered_by: string;
-	attempt_count: number;
-	max_attempts: number;
-	metadata: JsonRecord | null;
 }
 
 export interface PipelineCronDeps {
@@ -393,32 +379,6 @@ function looksLikeWorktreeName(
 	);
 }
 
-function buildDefaultTask(transition: TransitionQueueRow): string {
-	const lines = [
-		"Process the queued AgentHive proposal transition below.",
-		"",
-		`Transition queue row: ${transition.id}`,
-		`Proposal ID: ${transition.proposal_id}`,
-		`From stage: ${transition.from_stage}`,
-		`To stage: ${transition.to_stage}`,
-		`Triggered by: ${transition.triggered_by}`,
-	];
-
-	if (transition.metadata && Object.keys(transition.metadata).length > 0) {
-		lines.push(
-			"",
-			"Queue metadata:",
-			JSON.stringify(transition.metadata, null, 2),
-		);
-	}
-
-	lines.push(
-		"",
-		"Read the current proposal state from the roadmap schema, perform the work required for this transition, and persist any resulting updates through the normal application paths.",
-	);
-
-	return lines.join("\n");
-}
 
 async function loadProposalDispatchContext(
 	queryFn: typeof query,
@@ -706,7 +666,6 @@ export class PipelineCron {
 	): void => {
 		if (
 			message.channel !== MATURITY_CHANGED_CHANNEL &&
-			message.channel !== TRANSITION_QUEUED_CHANNEL &&
 			message.channel !== GATE_READY_CHANNEL
 		) {
 			return;
@@ -785,7 +744,7 @@ export class PipelineCron {
 		}, 60_000);
 
 		this.logger.log(
-			`[PipelineCron] Listening on ${MATURITY_CHANGED_CHANNEL}, ${GATE_READY_CHANNEL}, and ${TRANSITION_QUEUED_CHANNEL}; legacy queue polling every ${this.pollIntervalMs}ms; offer reaper every ${this.offerReapIntervalMs}ms; poke watchdog every 60s (idle=${this.pokeIdleThresholdMin}m, cap=${this.pokeStormCap})`,
+			`[PipelineCron] Listening on ${MATURITY_CHANGED_CHANNEL}, ${GATE_READY_CHANNEL}; offer reaper every ${this.offerReapIntervalMs}ms; poke watchdog every 60s (idle=${this.pokeIdleThresholdMin}m, cap=${this.pokeStormCap})`,
 		);
 
 		await this.scheduleDrain("startup");
@@ -818,7 +777,6 @@ export class PipelineCron {
 
 			try {
 				await listener.query(`UNLISTEN ${MATURITY_CHANGED_CHANNEL}`);
-				await listener.query(`UNLISTEN ${TRANSITION_QUEUED_CHANNEL}`);
 				await listener.query(`UNLISTEN ${GATE_READY_CHANNEL}`);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
@@ -868,7 +826,6 @@ export class PipelineCron {
 		listener.on("error", this.listenerErrorHandler);
 
 		await listener.query(`LISTEN ${MATURITY_CHANGED_CHANNEL}`);
-		await listener.query(`LISTEN ${TRANSITION_QUEUED_CHANNEL}`);
 		await listener.query(`LISTEN ${GATE_READY_CHANNEL}`);
 	}
 
@@ -900,477 +857,11 @@ export class PipelineCron {
 		}
 	}
 
-	private async drainReadyTransitions(reason: string): Promise<void> {
-		while (true) {
-			const transitions = await this.claimPendingTransitions();
-			if (transitions.length === 0) {
-				return;
-			}
-
-			this.logger.log(
-				`[PipelineCron] Claimed ${transitions.length} transition(s) for ${reason}`,
-			);
-
-			for (const transition of transitions) {
-				await this.processTransition(transition);
-			}
-		}
+	private async drainReadyTransitions(_reason: string): Promise<void> {
+		// P753: legacy transition_queue draining retired. The unified
+		// orchestrator scanQueues() loop now owns mature-queue dispatch.
+		// This method is kept as a no-op stub until P754 deletes the file.
+		return;
 	}
 
-	private async claimPendingTransitions(): Promise<TransitionQueueRow[]> {
-		const { rows } = await this.queryFn<TransitionQueueRow>(
-			`WITH next_transitions AS (
-         SELECT tq.id
-         FROM roadmap.transition_queue tq
-         WHERE tq.status = 'pending'
-           AND tq.process_after <= now()
-         ORDER BY tq.process_after ASC, tq.id ASC
-         FOR UPDATE SKIP LOCKED
-         LIMIT $1
-       )
-       UPDATE roadmap.transition_queue tq
-       SET status = 'processing',
-           processing_at = now(),
-           attempt_count = tq.attempt_count + 1,
-           last_error = NULL
-       FROM next_transitions nt
-       WHERE tq.id = nt.id
-       RETURNING tq.id,
-                 tq.proposal_id,
-                 tq.from_stage,
-                 tq.to_stage,
-                 tq.triggered_by,
-                 tq.attempt_count,
-                 tq.max_attempts,
-                 tq.metadata`,
-			[this.batchSize],
-		);
-
-		return rows.map((row) => ({
-			...row,
-			metadata: normalizeMetadata(row.metadata),
-		}));
-	}
-
-	/**
-	 * Dispatch a transition via MCP cubic tools instead of subprocess.
-	 * Uses the same pattern as the orchestrator: create cubic, focus with task.
-	 * The agent picks up the work asynchronously through the MCP/Hermes subscription model.
-	 */
-	private async processTransition(
-		transition: TransitionQueueRow,
-	): Promise<void> {
-		const spawnMetadata = isRecord(transition.metadata?.spawn)
-			? transition.metadata.spawn
-			: null;
-		const proposalId =
-			typeof transition.proposal_id === "number"
-				? transition.proposal_id
-				: Number.isFinite(Number(transition.proposal_id))
-					? Number(transition.proposal_id)
-					: null;
-
-		// A3 (P750): skip dispatch if orchestrator already holds an active lease.
-		// Prevents double-dispatch when both services receive the same PG NOTIFY.
-		if (proposalId !== null) {
-			const { rows: leaseRows } = await this.queryFn<{ agent_identity: string }>(
-				`SELECT agent_identity FROM roadmap_proposal.proposal_lease
-				  WHERE proposal_id = $1
-				    AND released_at IS NULL
-				    AND (expires_at IS NULL OR expires_at > now())
-				  LIMIT 1`,
-				[proposalId],
-			);
-			if (leaseRows.length > 0) {
-				this.logger.log(
-					`[PipelineCron] Skipping transition ${transition.id} for proposal ${proposalId} — active lease held by ${leaseRows[0].agent_identity}`,
-				);
-				await this.releaseTransitionToQueue(transition.id);
-				return;
-			}
-		}
-
-		const proposalContext =
-			proposalId !== null
-				? await loadProposalDispatchContext(this.queryFn, proposalId)
-				: null;
-		const readiness = proposalContext ? assessReadiness(proposalContext) : null;
-		const stageRoles = { prep: ["architect"] as string[], gate: ["reviewer"] as string[] };
-		const dispatchRoles =
-			readiness?.mode === "prep" ? stageRoles.prep : stageRoles.gate;
-		const selectedAgent =
-			proposalContext && dispatchRoles.length > 0
-				? await chooseDispatchAgent(
-						this.queryFn,
-						proposalContext,
-						dispatchRoles,
-					)
-				: null;
-		const plan = proposalContext
-			? buildDispatchPlan(
-					proposalContext,
-					transition.to_stage,
-					readiness?.mode ?? "gate",
-					selectedAgent,
-					readiness?.reasons ?? [],
-				)
-			: null;
-
-		if (this.useOfferDispatch) {
-			await this.processTransitionWithOffer(transition, plan, proposalContext);
-			return;
-		}
-
-		if (this.spawnAgentFn) {
-			await this.processTransitionWithSpawnAgent(transition, plan ?? undefined);
-			return;
-		}
-
-		const client = this.mcpClientFactory(
-			this.mcpUrl ?? process.env.MCP_URL ?? (await getMcpUrlAsync()),
-		);
-
-		try {
-			const proposalDisplayId =
-				proposalContext?.displayId ?? String(transition.proposal_id);
-			const agentName =
-				plan?.agentIdentity ??
-				readString(transition.metadata, "agent") ??
-				(looksLikeWorktreeName(transition.triggered_by)
-					? transition.triggered_by
-					: null) ??
-				plan?.roles[0] ??
-				"architect";
-			const task =
-				plan?.task ??
-				readString(spawnMetadata, "task") ??
-				readString(transition.metadata, "task") ??
-				buildDefaultTask(transition);
-
-			// 1. Create cubic for this proposal
-			const cubicResult = await client.callTool({
-				name: "cubic_create",
-				arguments: {
-					name: `gate-${proposalDisplayId}-${transition.to_stage}`,
-					agents: Array.from(new Set([agentName, ...(plan?.roles ?? [])])),
-					proposals: [proposalDisplayId],
-				},
-			});
-			const cubicData = JSON.parse(mcpResultText(cubicResult) || "{}");
-
-			if (!cubicData.success || !cubicData.cubic?.id) {
-				throw new Error(`Failed to create cubic: ${JSON.stringify(cubicData)}`);
-			}
-
-			const cubicId = cubicData.cubic.id;
-
-			// 2. Focus cubic with the transition task
-			await client.callTool({
-				name: "cubic_focus",
-				arguments: {
-					cubicId,
-					agent: agentName,
-					task,
-					phase: plan?.phase ?? transition.to_stage?.toLowerCase() ?? "build",
-				},
-			});
-
-			// 3. Keep the row in processing. It is not complete until the proposal
-			// state itself changes to the queued target stage.
-			await this.markTransitionDispatched(transition.id);
-			this.logger.log(
-				`[PipelineCron] Dispatched transition ${transition.id} for proposal ${proposalDisplayId} via MCP cubic ${cubicId}`,
-			);
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			await this.handleTransitionFailure(transition, message);
-		} finally {
-			await client.close();
-		}
-	}
-
-	private async processTransitionWithOffer(
-		transition: TransitionQueueRow,
-		plan: DispatchPlan | null,
-		proposalContext: ProposalDispatchContext | null,
-	): Promise<void> {
-		const spawnMetadata = isRecord(transition.metadata?.spawn)
-			? transition.metadata.spawn
-			: null;
-		const proposalDisplayId =
-			proposalContext?.displayId ?? String(transition.proposal_id);
-		const phase = plan?.phase ?? transition.to_stage?.toLowerCase() ?? "build";
-		const requiredCapabilities = plan?.requiredCapabilities?.length
-			? plan.requiredCapabilities
-			: [];
-		const role = requiredCapabilities[0] ?? plan?.roles[0] ?? "developer";
-		const squadName = `${proposalDisplayId}-${phase}`;
-		const task =
-			plan?.task ??
-			readString(spawnMetadata, "task") ??
-			readString(transition.metadata, "task") ??
-			buildDefaultTask(transition);
-		const worktreeHint =
-			plan?.agentIdentity ??
-			readString(spawnMetadata, "worktree") ??
-			readString(transition.metadata, "worktree") ??
-			null;
-		const offerMetadata: JsonRecord = {
-			task,
-			phase,
-			stage: `gate:${transition.to_stage}`,
-			roles: plan?.roles ?? [role],
-			transition_id: transition.id,
-			proposal_display_id: proposalDisplayId,
-		};
-		if (worktreeHint) offerMetadata.worktree_hint = worktreeHint;
-		if (plan?.modelHint) offerMetadata.model = plan.modelHint;
-		if (plan?.timeoutMs) offerMetadata.timeout_ms = plan.timeoutMs;
-
-		const proposalIdNum =
-			typeof transition.proposal_id === "number"
-				? transition.proposal_id
-				: Number.isFinite(Number(transition.proposal_id))
-					? Number(transition.proposal_id)
-					: null;
-		if (proposalIdNum === null) {
-			await this.handleTransitionFailure(
-				transition,
-				`offer-dispatch: cannot resolve numeric proposal_id from ${String(transition.proposal_id)}`,
-			);
-			return;
-		}
-
-		try {
-			const existing = await this.queryFn<{ id: number }>(
-				`SELECT id
-				   FROM roadmap_workforce.squad_dispatch
-				  WHERE proposal_id = $1
-				    AND dispatch_role = $2
-				    AND (
-				      completed_at IS NULL
-				      OR dispatch_status IN ('assigned', 'active', 'blocked')
-				      OR offer_status IN ('open', 'claimed', 'activated')
-				    )
-				  ORDER BY assigned_at DESC
-				  LIMIT 1`,
-				[proposalIdNum, role],
-			);
-			const existingDispatchId = existing.rows[0]?.id;
-			if (existingDispatchId) {
-				await this.markTransitionDispatched(transition.id);
-				this.logger.log(
-					`[PipelineCron] Reused active offer ${existingDispatchId} for ${proposalDisplayId} (${role}/${phase}); transition ${transition.id} marked processing`,
-				);
-				return;
-			}
-
-			const { rows } = await this.queryFn<{ id: number }>(
-				`INSERT INTO roadmap_workforce.squad_dispatch
-				   (proposal_id, squad_name, dispatch_role, dispatch_status,
-				    offer_status, agent_identity, required_capabilities, metadata)
-				 VALUES ($1, $2, $3, 'open', 'open', NULL, $4::jsonb, $5::jsonb)
-				 RETURNING id`,
-				[
-					proposalIdNum,
-					squadName,
-					role,
-					requiredCapabilities.length
-						? JSON.stringify({ all: requiredCapabilities })
-						: "{}",
-					JSON.stringify(offerMetadata),
-				],
-			);
-			const dispatchId = rows[0]?.id;
-			if (!dispatchId) {
-				throw new Error("INSERT returned no dispatch_id");
-			}
-
-			await this.queryFn(`SELECT pg_notify('work_offers', $1)`, [
-				JSON.stringify({
-					event: "emitted",
-					dispatch_id: dispatchId,
-					proposal_id: proposalIdNum,
-					role,
-				}),
-			]);
-
-			await this.markTransitionDispatched(transition.id);
-			this.logger.log(
-				`[PipelineCron] Emitted offer ${dispatchId} for ${proposalDisplayId} (${role}/${phase}); transition ${transition.id} marked processing`,
-			);
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			await this.handleTransitionFailure(
-				transition,
-				`offer-dispatch failed: ${message}`,
-			);
-		}
-	}
-
-	private async processTransitionWithSpawnAgent(
-		transition: TransitionQueueRow,
-		plan?: DispatchPlan,
-	): Promise<void> {
-		if (!this.spawnAgentFn) return;
-		const spawnMetadata = isRecord(transition.metadata?.spawn)
-			? transition.metadata.spawn
-			: null;
-		const proposalId =
-			readNumber(transition.metadata, "proposalId", "proposal_id") ??
-			(typeof transition.proposal_id === "number"
-				? transition.proposal_id
-				: Number.isFinite(Number(transition.proposal_id))
-					? Number(transition.proposal_id)
-					: transition.proposal_id);
-		const request: SpawnAgentRequest = {
-			worktree:
-				readString(spawnMetadata, "worktree") ??
-				plan?.agentIdentity ??
-				readString(transition.metadata, "worktree") ??
-				this.defaultWorktree,
-			task:
-				plan?.task ??
-				readString(spawnMetadata, "task") ??
-				readString(transition.metadata, "task") ??
-				buildDefaultTask(transition),
-			proposalId,
-			stage: plan?.stage ?? `gate:${transition.to_stage}`,
-		};
-		const model =
-			plan?.modelHint ?? readString(spawnMetadata, "model") ?? undefined;
-		if (model) request.model = model;
-		const timeoutMs =
-			plan?.timeoutMs ??
-			readNumber(spawnMetadata, "timeoutMs", "timeout_ms") ??
-			undefined;
-		if (timeoutMs !== undefined) request.timeoutMs = timeoutMs;
-
-		const result = await this.spawnAgentFn(request);
-		if (result.exitCode !== 0) {
-			const details = [result.stderr, result.stdout].filter(Boolean).join("\n");
-			await this.handleTransitionFailure(
-				transition,
-				`spawnAgent exited with code ${result.exitCode}${details ? `\n${details}` : ""}`,
-			);
-			return;
-		}
-		await this.completeTransitionIfApplied(transition);
-	}
-
-	private async markTransitionDispatched(id: TransitionQueueId): Promise<void> {
-		await this.queryFn(
-			`UPDATE roadmap.transition_queue
-       SET status = 'processing',
-           processing_at = now(),
-           last_error = NULL
-       WHERE id = $1`,
-			[id],
-		);
-	}
-
-	private async releaseTransitionToQueue(id: TransitionQueueId): Promise<void> {
-		await this.queryFn(
-			`UPDATE roadmap.transition_queue
-       SET status = 'pending',
-           processing_at = NULL,
-           process_after = now() + interval '60 seconds'
-       WHERE id = $1 AND status = 'processing'`,
-			[id],
-		);
-	}
-
-	private async completeTransitionIfApplied(
-		transition: TransitionQueueRow,
-	): Promise<void> {
-		const result = await this.queryFn(
-			`UPDATE roadmap.transition_queue tq
-       SET status = 'done',
-           completed_at = now(),
-           last_error = NULL
-       WHERE tq.id = $1
-         AND EXISTS (
-           SELECT 1
-           FROM roadmap_proposal.proposal p
-           WHERE p.id = tq.proposal_id
-             AND LOWER(p.status) = LOWER(tq.to_stage)
-         )`,
-			[transition.id],
-		);
-		if ((result.rowCount ?? 0) === 0) {
-			await this.handleTransitionFailure(
-				transition,
-				`transition target not applied: proposal did not reach ${transition.to_stage}`,
-			);
-		}
-	}
-
-	private async handleTransitionFailure(
-		transition: TransitionQueueRow,
-		errorMessage: string,
-	): Promise<void> {
-		const exhausted = transition.attempt_count >= transition.max_attempts;
-
-		if (exhausted) {
-			const proposalId =
-				typeof transition.proposal_id === "number"
-					? transition.proposal_id
-					: Number.isFinite(Number(transition.proposal_id))
-						? Number(transition.proposal_id)
-						: transition.proposal_id;
-			await this.queryFn(
-				`UPDATE roadmap.transition_queue
-         SET status = 'failed',
-             completed_at = now(),
-             last_error = $2
-         WHERE id = $1`,
-				[transition.id, errorMessage],
-			);
-			await this.queryFn(
-				`INSERT INTO roadmap.notification_queue
-         (proposal_id, severity, channel, title, body, metadata)
-       VALUES (
-         $1,
-         'CRITICAL',
-         'ops',
-         'Gate transition failed permanently',
-         $2,
-         jsonb_build_object(
-           'transition_queue_id', $3::text,
-           'from_stage', $4,
-           'to_stage', $5,
-           'error', $6
-         )
-       )`,
-				[
-					proposalId,
-					`Transition ${transition.from_stage} -> ${transition.to_stage} failed permanently: ${errorMessage}`,
-					transition.id,
-					transition.from_stage,
-					transition.to_stage,
-					errorMessage,
-				],
-			);
-
-			this.logger.error(
-				`[PipelineCron] Transition ${transition.id} failed permanently: ${errorMessage}`,
-			);
-			return;
-		}
-
-		await this.queryFn(
-			`UPDATE roadmap.transition_queue
-       SET status = 'pending',
-           process_after = now() + ($2 * interval '2 minutes'),
-           processing_at = NULL,
-           completed_at = NULL,
-           last_error = $3
-       WHERE id = $1`,
-			[transition.id, Math.max(transition.attempt_count, 1), errorMessage],
-		);
-
-		this.logger.warn(
-			`[PipelineCron] Transition ${transition.id} requeued after failure: ${errorMessage}`,
-		);
-	}
 }
