@@ -33,6 +33,7 @@ import {
 	endLiaisonSession,
 	checkAndMarkDormant,
 } from "../src/infra/agency/liaison-service.ts";
+import { startLiaisonHub } from "../src/infra/agency/liaison-hub.ts";
 
 // --- AC-1: Read required env vars ---
 const agencyId = process.env.AGENCY_ID;
@@ -77,6 +78,14 @@ async function main() {
 		process.exit(1);
 	}
 
+	// --- P299-D: Start message hub so offer_dispatch (and other downlink) ---
+	// messages from the orchestrator are processed. Without this, the agency
+	// has a registration row but no way to receive dispatch instructions.
+	const hub = startLiaisonHub(agencyId!);
+	console.log(
+		`[Liaison] Hub started for agency=${agencyId} — listening for offer_dispatch + assistance_request + liaison_pong`,
+	);
+
 	// --- AC-5: Heartbeat loop (every 30s) ---
 	const heartbeatTimer = setInterval(async () => {
 		try {
@@ -106,6 +115,7 @@ async function main() {
 		console.log(`[Liaison] ${sig} received — shutting down`);
 		clearInterval(heartbeatTimer);
 		clearInterval(watchdogTimer);
+		hub.stop();
 		try {
 			await endLiaisonSession(sessionId, sig === "SIGTERM" ? "operator" : "normal");
 			console.log("[Liaison] Session ended cleanly");

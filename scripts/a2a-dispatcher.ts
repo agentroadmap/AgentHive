@@ -13,7 +13,8 @@
  *
  * Delivery:
  *   - Worktree agents (claude/*, gemini/*, etc.) → pg_notify to agent:<identity> channel
- *   - Virtual agents (gate-agent, skeptic-*, etc.) → queued to transition_queue
+ *   - Virtual agents (gate-agent, skeptic-*, etc.) → logged; the unified
+ *     orchestrator scanQueues() loop now owns their dispatch (P753).
  *   - Broadcast/system → logged and queued for next orchestrator cycle
  */
 
@@ -83,30 +84,10 @@ async function shouldSkipLegacyTransitionTask(
 	const queueId = parseLegacyTransitionTask(msg.message_content);
 	if (!queueId) return false;
 
-	const { rows } = await query<{ status: string; proposal_id: number }>(
-		`SELECT status, proposal_id
-		   FROM roadmap.transition_queue
-		  WHERE id = $1
-		  LIMIT 1`,
-		[queueId],
-	);
-	const row = rows[0];
-	if (!row) {
-		logger.warn(
-			`[msg:${msg.id}] legacy transition task references missing queue row ${queueId}; marking consumed`,
-		);
-		return true;
-	}
-
-	if (TERMINAL_TRANSITION_STATUSES.has(row.status.toLowerCase())) {
-		logger.log(
-			`[msg:${msg.id}] skipped stale transition task for ${recipient}; queue ${queueId} is ${row.status}`,
-		);
-		return true;
-	}
-
+	// P753: transition_queue retired; any message referencing a legacy queue ID
+	// is by definition stale. Drop it without a SQL lookup.
 	logger.log(
-		`[msg:${msg.id}] legacy transition task for queue ${queueId} is ${row.status}; leaving transition processing to gate pipeline`,
+		`[msg:${msg.id}] dropped legacy transition task for ${recipient}; queue ${queueId} no longer exists (P753)`,
 	);
 	return true;
 }
@@ -175,7 +156,10 @@ async function deliverToAgent(
 			logger.error(`[deliver] pg_notify failed for ${recipient}:`, err);
 		}
 	} else {
-		// Virtual agent — queue to transition_queue for next orchestrator cycle
+		// Virtual agent (gate-agent, skeptic-*, etc.) — P753 retired the
+		// transition_queue write path that used to enqueue these. The unified
+		// orchestrator scanQueues() loop now picks up virtual-agent work from
+		// proposal maturity/state directly, so we log-and-drop here.
 		if (!ACTIONABLE_VIRTUAL_MESSAGE_TYPES.has(msg.message_type)) {
 			logger.log(
 				`[deliver] virtual agent ${recipient} — ${msg.message_type} message logged only`,
@@ -184,28 +168,10 @@ async function deliverToAgent(
 		}
 
 		if (msg.proposal_id) {
-			try {
-				await query(
-					`INSERT INTO roadmap.transition_queue
-					 (proposal_id, from_stage, to_stage, triggered_by, metadata)
-					 VALUES ($1, 'pending', 'pending', $2, $3::jsonb)
-					 ON CONFLICT DO NOTHING`,
-					[
-						msg.proposal_id,
-						`a2a-dispatch:${recipient}`,
-						JSON.stringify({
-							a2a_from: msg.from_agent,
-							a2a_message: msg.message_content.slice(0, 400),
-							a2a_type: msg.message_type,
-						}),
-					],
-				);
-				logger.log(`[deliver] queued for virtual agent ${recipient} (proposal_id=${msg.proposal_id})`);
-			} catch (err) {
-				logger.error(`[deliver] queue insert failed for ${recipient}:`, err);
-			}
+			logger.log(
+				`[deliver] virtual agent ${recipient} (proposal_id=${msg.proposal_id}) — message logged; orchestrator owns dispatch (P753)`,
+			);
 		} else {
-			// No proposal_id — just log the delivery intent
 			logger.log(`[deliver] virtual agent ${recipient} — no proposal_id, message logged only`);
 		}
 	}

@@ -62,8 +62,8 @@ const GITCONFIG_ROOT = join(getProjectRoot(), ".git", "worktrees-config");
 //
 // `runProcess` spawns long-lived `claude --print` (and similar) children that
 // can run for many minutes. systemd units configure TimeoutStopSec, and the
-// orchestrator/gate-pipeline `shutdown()` paths used to wait on the in-flight
-// promise set — but those promises only resolve when the children themselves
+// orchestrator's `shutdown()` path used to wait on the in-flight promise set
+// — but those promises only resolve when the children themselves
 // exit. If the children never receive a signal they keep running until
 // systemd escalates to SIGKILL on the parent.
 //
@@ -1184,7 +1184,7 @@ async function buildProposalContextPackage(input: {
  * P738 (HF-B): assemble the spawn task with a closing hint that explicitly
  * forbids worker-side set_maturity calls. Gate evaluators advance maturity
  * server-side after parsing stdout verdicts; non-gate workers emit
- * spawn_summary_emit and let the gate-pipeline reconciler decide.
+ * spawn_summary_emit and let the orchestrator's reconciler decide.
  *
  * Pure function — exported for unit testing. The previous inline emitter
  * appended a "Maturity Advancement: call set_maturity → mature on completion"
@@ -1204,7 +1204,7 @@ export function renderClosingHint(input: {
 	const terminal = input.stage === "COMPLETE" || input.stage === "DEPLOYED";
 	const hint = terminal
 		? ""
-		: `\n\n## Completion\nWhen you finish, emit \`mcp_agent action="spawn_summary_emit"\` with outcome=success|partial|failure|timeout|escalated and a one-paragraph summary. DO NOT call \`set_maturity\` — only the gate-evaluator advances maturity, after parsing your stdout verdict (gate roles) or after the gate-pipeline reconciler reads your spawn_summary (non-gate roles). Proposal id: ${input.proposalId}.`;
+		: `\n\n## Completion\nWhen you finish, emit \`mcp_agent action="spawn_summary_emit"\` with outcome=success|partial|failure|timeout|escalated and a one-paragraph summary. DO NOT call \`set_maturity\` — only the gate-evaluator advances maturity, after parsing your stdout verdict (gate roles) or after the orchestrator's reconciler reads your spawn_summary (non-gate roles). Proposal id: ${input.proposalId}.`;
 	return `${input.contextPackage}\n\n## Task\n${input.task}${hint}`;
 }
 

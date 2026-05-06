@@ -7,8 +7,8 @@
  * offer (delivered/failed) when the process exits.
  *
  * This is the pull side of the offer/claim/lease model introduced in P281.
- * The orchestrator (pipeline-cron with useOfferDispatch) pushes offers;
- * each instance of this service races to claim one.
+ * The unified orchestrator (scripts/orchestrator.ts) pushes offers; each
+ * instance of this service races to claim one. (P754: gate-pipeline retired.)
  */
 
 import { query } from "../../infra/postgres/pool.ts";

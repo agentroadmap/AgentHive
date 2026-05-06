@@ -127,32 +127,33 @@ describe("AC#2: Access control — pure logic", () => {
 // ─── AC#3: Targeted delivery — channel naming ─────────────────────────────────
 
 describe("AC#3: Targeted pg_notify channel naming", () => {
-	it("maps agent identity to safe channel name", () => {
+	it("matches the deployed trigger fn_a2a_message_notify (a2a_msg_<identity>)", () => {
+		// Migration 096 emits pg_notify('a2a_msg_' || NEW.to_agent, ...).
+		// agentNotifyChannel MUST produce the same name byte-for-byte or
+		// MessageNotificationListener wakes never fire.
 		assert.strictEqual(
 			agentNotifyChannel("claude/agency-bot"),
-			"agent_msg_claude_agency_bot",
+			"a2a_msg_claude/agency-bot",
 		);
 		assert.strictEqual(
 			agentNotifyChannel("worker-15327"),
-			"agent_msg_worker_15327",
+			"a2a_msg_worker-15327",
 		);
 		assert.strictEqual(
 			agentNotifyChannel("orchestrator"),
-			"agent_msg_orchestrator",
+			"a2a_msg_orchestrator",
 		);
 	});
 
-	it("replaces all special characters with underscores", () => {
-		const ch = agentNotifyChannel("some:agent/with-many.special@chars");
-		assert.match(ch, /^agent_msg_[a-zA-Z0-9_]+$/, "channel must only contain safe chars");
+	it("rejects identities containing characters that could break LISTEN quoting", () => {
+		assert.throws(() => agentNotifyChannel('evil"name'), /Invalid agent identity/);
+		assert.throws(() => agentNotifyChannel("evil name"), /Invalid agent identity/);
+		assert.throws(() => agentNotifyChannel(""), /Invalid agent identity/);
 	});
 
-	it("produces same channel as SQL regexp_replace logic", () => {
-		// SQL: 'agent_msg_' || regexp_replace(agent_identity, '[^a-zA-Z0-9_]', '_', 'g')
-		// TS:  'agent_msg_' + agentIdentity.replace(/[^a-zA-Z0-9_]/g, '_')
-		const identity = "prod/claude-opus-4@2026";
-		const expected = "agent_msg_prod_claude_opus_4_2026";
-		assert.strictEqual(agentNotifyChannel(identity), expected);
+	it("rejects identities that would produce a channel name > 63 bytes (PG NAMEDATALEN)", () => {
+		const longId = "x".repeat(60); // prefix 'a2a_msg_' (8) + 60 = 68 bytes
+		assert.throws(() => agentNotifyChannel(longId), /exceeds 63 bytes/);
 	});
 
 	it("two different agents never share the same channel", () => {

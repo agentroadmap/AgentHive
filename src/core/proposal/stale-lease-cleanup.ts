@@ -48,24 +48,3 @@ export async function forceCleanupExpiredLeases(): Promise<number> {
 	return rowCount ?? 0;
 }
 
-/**
- * Also clean up stale processing entries in transition_queue.
- * Processing entries older than 10 minutes that haven't completed should be reset to pending.
- * This allows another agent to try processing them.
- */
-export async function cleanupStaleTransitionProcessing(): Promise<number> {
-	const staleThreshold = new Date(Date.now() - STALE_LEASE_MINUTES * 60 * 1000);
-
-	const { rowCount } = await query(
-		`UPDATE roadmap_proposal.transition_queue
-     SET status = 'pending',
-         claimed_by = NULL,
-         processing_started_at = NULL,
-         failure_reason = 'reset: stale processing (P224 AC-6)'
-     WHERE status = 'processing'
-       AND processing_started_at < $1`,
-		[staleThreshold],
-	);
-
-	return rowCount ?? 0;
-}

@@ -2,8 +2,9 @@
  * Copilot Agency — OfferProvider for the GitHub Copilot CLI.
  *
  * Registers as "copilot/agency-gary" in agent_registry and listens on the
- * work_offers Postgres channel. When the orchestrator or gate-pipeline posts
- * a job, this process races to claim it and spawns:
+ * work_offers Postgres channel. When the orchestrator posts a job
+ * (P754 retired the gate-pipeline), this process races to claim it
+ * and spawns:
  *
  *   copilot -p "<task>" --yolo --model <model>
  *

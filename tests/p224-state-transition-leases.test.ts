@@ -17,7 +17,7 @@ import { query } from "../src/postgres/pool.ts";
 import * as pg from "../src/infra/postgres/proposal-storage-v2.ts";
 import { validateLease, formatValidationError } from "../src/core/proposal/proposal-integrity.ts";
 import { getGateQueue, filterUnlockedProposals, getUnlockedGateQueue } from "../src/core/proposal/gate-scanner-v2.ts";
-import { cleanupStaleLeasesIfNeeded, cleanupStaleTransitionProcessing } from "../src/core/proposal/stale-lease-cleanup.ts";
+import { cleanupStaleLeasesIfNeeded } from "../src/core/proposal/stale-lease-cleanup.ts";
 
 describe("P224 — State transition lease enforcement", () => {
 	let proposalId: number;
@@ -329,39 +329,9 @@ describe("P224 — State transition lease enforcement", () => {
 			await query("DELETE FROM roadmap_proposal.proposal_lease WHERE proposal_id = $1", [proposalId]);
 		});
 
-		it("should cleanup stale transition_queue processing entries", async () => {
-			// Create a stale processing entry (> 10 minutes old)
-			const staleTime = new Date(Date.now() - 15 * 60 * 1000);
-			const insertResult = await query<{ id: number }>(
-				`INSERT INTO roadmap_proposal.transition_queue
-         (proposal_id, from_stage, to_stage, status, claimed_by, processing_started_at)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id`,
-				[proposalId, "Review", "Develop", "processing", "stale-processor", staleTime],
-			);
-
-			// Verify it's in processing state
-			const beforeResult = await query(
-				"SELECT status FROM roadmap_proposal.transition_queue WHERE id = $1",
-				[insertResult.rows[0].id],
-			);
-			assert.equal(beforeResult.rows[0].status, "processing");
-
-			// Run cleanup
-			const cleanedCount = await cleanupStaleTransitionProcessing();
-			assert(cleanedCount >= 1, "Stale processing entry should be cleaned");
-
-			// Verify it's back to pending
-			const afterResult = await query(
-				"SELECT status, claimed_by FROM roadmap_proposal.transition_queue WHERE id = $1",
-				[insertResult.rows[0].id],
-			);
-			assert.equal(afterResult.rows[0].status, "pending", "Should be reset to pending");
-			assert.equal(afterResult.rows[0].claimed_by, null, "Claimed_by should be cleared");
-
-			// Clean up
-			await query("DELETE FROM roadmap_proposal.transition_queue WHERE proposal_id = $1", [proposalId]);
-		});
+		// P753: removed test "should cleanup stale transition_queue processing entries"
+		// — transition_queue table retired and cleanupStaleTransitionProcessing()
+		// helper deleted. Lease cleanup tests above remain authoritative.
 	});
 
 	describe("AC-7: E2E concurrent transition attempts", () => {
@@ -390,22 +360,6 @@ describe("P224 — State transition lease enforcement", () => {
 		});
 	});
 
-	describe("AC-4 & AC-5: transition_queue schema", () => {
-		it("should have transition_queue table with claimed_by column (when created)", async () => {
-			// This test documents the expected schema for transition_queue
-			// which should be created as part of P224 implementation
-			// Expected columns:
-			// - id (PK)
-			// - proposal_id (FK)
-			// - from_stage
-			// - to_stage
-			// - status (pending/processing/completed/failed)
-			// - claimed_by (agent_identity)
-			// - created_at
-			// - processing_started_at
-			// - completed_at
-			//
-			// UNIQUE constraint on (proposal_id, from_stage, to_stage, status) where status='pending'
-		});
-	});
+	// P753: AC-4/AC-5 transition_queue schema describe block removed —
+	// table retired by migration 118.
 });

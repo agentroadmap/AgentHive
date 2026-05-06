@@ -385,6 +385,20 @@ Provider, agency, and route-provider identity strings (`route_provider`, `agent_
 
 **Why:** today's loop debugging surfaced multiple drifts where DB and code disagreed on the canonical identity (workflow_name='RFC 5-Stage' vs template name 'Standard RFC'; provider fallback to "hermes" silently routing to an unconfigured provider). DB-as-source-of-truth makes provider changes a one-row edit.
 
+### 6.0b Single dispatch loop — gate-pipeline retired (P754)
+
+The platform runs **one** dispatch decision loop: `scanQueues()` in `scripts/orchestrator.ts`. The previously-split `agenthive-gate-pipeline.service` and its `PipelineCron` class were retired by P754 (2026-05-06) after the unified scanner shipped in P744/P748–P753.
+
+**Hard rule:** **Do not reintroduce a parallel dispatch loop.** Specifically:
+
+- No new long-running service may LISTEN on `proposal_gate_ready`, `proposal_maturity_changed`, or other dispatch-trigger channels and post work offers.
+- No new code may SELECT from a queue table (`transition_queue` is gone; future queue-shaped tables must be consumed by `scanQueues()`).
+- Maintenance ticks (offer reaper, poke watchdog, stranded-advance reconciler) live in `src/core/orchestration/maintenance.ts` and run only inside the orchestrator's tick.
+
+**Why:** the old two-service split caused the 2026-04-29 double-dispatch incident (17% weekly token cap burned in 8 hours). Adding a parallel loop is a regression of that fix.
+
+**If a future workflow needs a new dispatch trigger,** add it as a notify channel that wakes `scanQueues()`, plus a queue-context resolver row, plus a role-profile row in `roadmap.agent_role_profile`. Do not stand up a separate cron or service.
+
 ### 6.0 Database Topology (target architecture)
 
 AgentHive runs on a **two-tier Postgres topology**:
@@ -932,7 +946,7 @@ Hermes (Andy) is the **overseer** of the AgentHive autonomous system. This role 
 
 ### Responsibilities
 * **Orchestrator Onboarding**: Teach the orchestrator processes, conventions, and workflow rules so it can organize the workforce without human intervention.
-* **System Oversight**: Monitor state machine health, gate pipeline integrity, agent dispatch, model routing, spending, and workflow compliance.
+* **System Oversight**: Monitor state machine health, orchestrator dispatch integrity, agent dispatch, model routing, spending, and workflow compliance.
 * **Convention Enforcement**: Ensure all agents follow CONVENTIONS.md, proposal lifecycle rules, and governance decisions.
 * **Human Interface**: Bridge between the project owner (Gary) and the autonomous workforce.
 * **Knowledge Transfer**: Ensure spawned agents inherit correct and complete context.
@@ -940,7 +954,7 @@ Hermes (Andy) is the **overseer** of the AgentHive autonomous system. This role 
 ### What Hermes Does NOT Do
 * Does NOT claim proposals or acquire leases — that is for squad agents.
 * Does NOT execute code changes directly — delegates to developer agents.
-* Does NOT advance proposals through gates — that is the gate pipeline's job.
+* Does NOT advance proposals through gates — that is the gate evaluator's job (within the unified orchestrator).
 * Does NOT make governance decisions alone — escalates for strategic calls.
 
 ### Orchestrator Relationship

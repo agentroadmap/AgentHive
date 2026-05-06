@@ -1,9 +1,9 @@
 /**
  * postWorkOffer — shared utility for posting a work offer to squad_dispatch.
  *
- * Used by both PipelineCron (gate transitions) and the Orchestrator (agent
- * dispatch). Posting an offer decouples the caller from knowing which CLI
- * or binary path to use — the agency that claims the offer handles that.
+ * Used by the unified Orchestrator for agent dispatch. Posting an offer
+ * decouples the caller from knowing which CLI or binary path to use —
+ * the agency that claims the offer handles that.
  *
  * P437: every INSERT computes a deterministic idempotency_key over
  * (project_id, proposal_id, workflow_state, maturity, role, dispatch_version).

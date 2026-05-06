@@ -46,7 +46,7 @@ export function registerMessageTools(server: McpServer): void {
 		{
 			name: "msg_send",
 			description:
-				"Send a message to the Postgres message_ledger. Trust gate enforced on send — restricted/blocked senders are silently dropped. P834: Signature verification gate on provider_sig.",
+				"Send a message to the Postgres message_ledger. ACL enforced on send (roadmap.message_acl); trust gate enforced for restricted/blocked senders. NOTE: P834 HMAC dispatch-gate verification of `provider_sig` is DESIGNED but NOT ENFORCED today — the column is accepted and stored verbatim, sig_verified stays at default 'pending', and the 5-minute replay window is not checked. Do not rely on this surface for authentication; it is delivery-only. Tracking via P834 follow-up; see drift discussion on P834.",
 			inputSchema: {
 				type: "object",
 				properties: {
