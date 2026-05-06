@@ -1,0 +1,79 @@
+-- SKETCH — NOT applied by apply.sh until P901 approved
+-- Central workflow template registry for agentHive2
+-- Design: immutable versioned templates, projects pin to versions, caching layer recommended (v3 §7.5)
+
+-- Created as part of P901: central registries (template/credential/workforce) for agentHive2 cross-project share
+
+CREATE SCHEMA IF NOT EXISTS template;
+GRANT USAGE ON SCHEMA template TO agenthive_orchestrator, agenthive_observability;
+
+-- Immutable workflow template definitions
+-- Once published, rows are read-only. New versions get new template_id.
+CREATE TABLE template.workflow_template (
+  template_id BIGSERIAL PRIMARY KEY,
+  family TEXT NOT NULL,
+  version INT NOT NULL,
+  display_name TEXT NOT NULL,
+  description TEXT,
+
+  -- State machine definition (immutable after publish)
+  states JSONB NOT NULL,    -- ordered list of state definitions with transitions
+  gates JSONB NOT NULL,     -- gate criteria per state transition
+
+  -- Catalog hygiene (per v3 design §5.0)
+  owner_did TEXT NOT NULL,
+  lifecycle_status TEXT NOT NULL DEFAULT 'active' CHECK (lifecycle_status IN ('active', 'deprecated', 'retired')),
+  published_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deprecated_at TIMESTAMPTZ,
+  retire_after TIMESTAMPTZ,
+
+  UNIQUE (family, version),
+  CHECK (deprecated_at IS NULL OR lifecycle_status IN ('deprecated', 'retired')),
+  CHECK (retire_after IS NULL OR lifecycle_status IN ('deprecated', 'retired'))
+);
+
+CREATE INDEX idx_template_workflow_template_family_version ON template.workflow_template (family, version);
+CREATE INDEX idx_template_workflow_template_lifecycle ON template.workflow_template (lifecycle_status, published_at);
+CREATE INDEX idx_template_workflow_template_owner ON template.workflow_template (owner_did);
+
+-- Alias resolution: 'feature@latest' or 'rfc-5-stage@v3' resolves to a template_id
+-- Allows stable naming across versions (e.g., 'rfc-5-stage@latest' always returns the highest version in family)
+CREATE TABLE template.workflow_template_alias (
+  alias TEXT PRIMARY KEY,    -- e.g., 'rfc-5-stage@latest', 'lightweight@v1'
+  template_id BIGINT NOT NULL REFERENCES template.workflow_template,
+  resolved_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolved_by_did TEXT NOT NULL
+);
+
+CREATE INDEX idx_template_workflow_template_alias_template_id ON template.workflow_template_alias (template_id);
+
+-- Per-project assignment of template version
+-- This is a copy of the template at bootstrap time for offline reading.
+-- Source of truth for which version the project is pinned to is hiveCentral.project.project.template_id.
+CREATE TABLE template.workflow_template_copy (
+  project_id BIGINT PRIMARY KEY,
+  template_id BIGINT NOT NULL REFERENCES template.workflow_template,
+  pinned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  pinned_by_did TEXT NOT NULL,
+  states JSONB NOT NULL,    -- snapshot copy at pin time (for offline reading)
+  gates JSONB NOT NULL,     -- snapshot copy at pin time
+
+  -- FK is soft — project_id is a pointer to hiveCentral.project.project, no hard FK
+  CHECK (project_id > 0)
+);
+
+CREATE INDEX idx_template_workflow_template_copy_template_id ON template.workflow_template_copy (template_id);
+
+-- Grant read permissions
+GRANT SELECT ON template.workflow_template TO agenthive_orchestrator;
+GRANT SELECT ON template.workflow_template_alias TO agenthive_orchestrator;
+GRANT SELECT ON template.workflow_template_copy TO agenthive_orchestrator;
+
+-- Seed: migrate existing 6 workflows from agenthive.workflow into central registry
+-- SQL executed separately after both schemas exist; seeding script will:
+-- 1. INSERT family/version/states/gates/owner/lifecycle from existing agenthive.workflow rows
+-- 2. CREATE aliases like 'rfc-5-stage@v1', 'lightweight@v1' pointing to new template_ids
+-- 3. BACKFILL project.template_id in hiveCentral for each project pointing to the version they're using
+-- 4. COPY template snapshots into workflow_template_copy for each tenant DB
+
+-- Rollback: DROP SCHEMA template CASCADE;

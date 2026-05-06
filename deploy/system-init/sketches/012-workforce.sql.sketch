@@ -1,0 +1,98 @@
+-- SKETCH — NOT applied by apply.sh until P901 approved
+-- Central agent catalog with skill and capability definitions
+-- Design: agents are platform-wide; projects grant access, never define.
+-- Reference: v3 design §5.4, metadata cache §7.5
+
+-- Created as part of P901: central registries (template/credential/workforce) for agentHive2 cross-project share
+
+CREATE SCHEMA IF NOT EXISTS workforce;
+GRANT USAGE ON SCHEMA workforce TO agenthive_orchestrator, agenthive_observability;
+
+-- Agent profiles (the workforce catalog)
+-- Central definition of named agent roles like "Senior Backend", "Skeptic Alpha", "Product Manager"
+-- Projects do not define agents; they grant access to agents from this catalog.
+CREATE TABLE workforce.agent (
+  agent_id BIGSERIAL PRIMARY KEY,
+  agent_slug TEXT UNIQUE NOT NULL,    -- 'senior-backend', 'skeptic-alpha', 'product-manager'
+  display_name TEXT NOT NULL,
+  description TEXT,
+
+  -- Default routing: which model route this agent prefers for spawning
+  default_persona TEXT,    -- system prompt / role primer (usually references a doc or config value)
+  default_route_id TEXT REFERENCES model.model_route,    -- soft FK to hiveCentral.model.model_route
+
+  is_enabled BOOLEAN NOT NULL DEFAULT true,
+
+  -- Catalog hygiene
+  owner_did TEXT NOT NULL,
+  lifecycle_status TEXT NOT NULL DEFAULT 'active' CHECK (lifecycle_status IN ('active', 'deprecated', 'retired')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deprecated_at TIMESTAMPTZ,
+  retire_after TIMESTAMPTZ,
+
+  metadata JSONB NOT NULL DEFAULT '{}',
+
+  CHECK (deprecated_at IS NULL OR lifecycle_status IN ('deprecated', 'retired')),
+  CHECK (is_enabled OR lifecycle_status != 'active')
+);
+
+CREATE INDEX idx_workforce_agent_agent_slug ON workforce.agent (agent_slug);
+CREATE INDEX idx_workforce_agent_lifecycle ON workforce.agent (lifecycle_status) WHERE is_enabled;
+CREATE INDEX idx_workforce_agent_owner ON workforce.agent (owner_did);
+
+-- Skill definitions
+-- Skills are named capabilities that agents can have (e.g., 'sql', 'react', 'k8s', 'compliance-review')
+CREATE TABLE workforce.agent_skill (
+  skill_id BIGSERIAL PRIMARY KEY,
+  skill_name TEXT UNIQUE NOT NULL,
+  description TEXT,
+  category TEXT CHECK (category IN ('code', 'review', 'design', 'ops', 'research', 'governance', 'infrastructure')),
+
+  owner_did TEXT NOT NULL,
+  lifecycle_status TEXT NOT NULL DEFAULT 'active' CHECK (lifecycle_status IN ('active', 'deprecated', 'retired')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deprecated_at TIMESTAMPTZ,
+
+  metadata JSONB NOT NULL DEFAULT '{}',
+
+  CHECK (deprecated_at IS NULL OR lifecycle_status IN ('deprecated', 'retired'))
+);
+
+CREATE INDEX idx_workforce_agent_skill_category ON workforce.agent_skill (category);
+CREATE INDEX idx_workforce_agent_skill_lifecycle ON workforce.agent_skill (lifecycle_status);
+
+-- Agent capabilities: which agents have which skills, at what proficiency
+CREATE TABLE workforce.agent_capability (
+  agent_id BIGINT NOT NULL REFERENCES workforce.agent,
+  skill_id BIGINT NOT NULL REFERENCES workforce.agent_skill,
+  proficiency INT NOT NULL DEFAULT 5 CHECK (proficiency >= 1 AND proficiency <= 10),
+  certified_at TIMESTAMPTZ,
+  certified_by_did TEXT,
+
+  PRIMARY KEY (agent_id, skill_id)
+);
+
+CREATE INDEX idx_workforce_agent_capability_agent ON workforce.agent_capability (agent_id);
+CREATE INDEX idx_workforce_agent_capability_skill ON workforce.agent_capability (skill_id);
+
+-- Per-project skill grants (which skills can this project use?)
+-- Granting a skill to a project means: any agent with that skill is dispatchable for that project.
+-- Lives centrally (hiveCentral) but schema mirrors are consulted per-tenant.
+-- See hiveCentral.project.project_skill_grant for the source.
+
+-- Metadata cache invalidation triggers
+-- When any workforce row changes, emit NOTIFY so agent-side caches invalidate
+-- See governance.sql and cache invalidation rules (v3 §7.5)
+
+GRANT SELECT ON workforce.agent TO agenthive_orchestrator, agenthive_observability;
+GRANT SELECT ON workforce.agent_skill TO agenthive_orchestrator, agenthive_observability;
+GRANT SELECT ON workforce.agent_capability TO agenthive_orchestrator, agenthive_observability;
+
+-- Seeding: existing agents from agenthive.agent + hardcoded agency agents
+-- This is populated during control-plane bootstrap:
+-- 1. Agency-scoped agents (e.g., "Claude Code", "Codex CLI") → workforce.agent + default_route_id from agency config
+-- 2. Seeded skill catalog: 'sql', 'react', 'k8s', 'python', 'bash', 'git', 'mcp', 'proposal-review', 'gate-review', etc.
+-- 3. Agent capabilities: assign proficiency 7-10 to seeded agents for their primary skills
+-- 4. Seed project_skill_grants: agenthive project gets all skills; other projects get an explicit set
+
+-- Rollback: DROP SCHEMA workforce CASCADE;
