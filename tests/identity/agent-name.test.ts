@@ -44,6 +44,7 @@ describe("encodeProvider", () => {
 		expect(encodeProvider("google")).toBe("ggl");
 		expect(encodeProvider("aws")).toBe("bdr");
 		expect(encodeProvider("bedrock")).toBe("bdr");
+		expect(encodeProvider("github")).toBe("gh");
 	});
 });
 

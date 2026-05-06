@@ -34,6 +34,7 @@ const PROVIDER_MAP: Record<string, string> = {
 	"google": "ggl",
 	"aws": "bdr",
 	"bedrock": "bdr",
+	"github": "gh",
 };
 
 export const EXPERTISE: Record<string, string> = {
