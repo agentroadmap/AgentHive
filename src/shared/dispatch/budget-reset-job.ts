@@ -5,7 +5,7 @@
  * Resets expired budget periods (day, week, month) but NOT 'total'.
  */
 
-import { query } from '../db/query.js';
+import { query } from '../../postgres/pool.ts';
 
 /**
  * Reset budget periods that have crossed their boundary.

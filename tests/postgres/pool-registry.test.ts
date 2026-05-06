@@ -154,7 +154,7 @@ describe("pool-registry (P497)", () => {
 		const err2 = new RegistryUnavailable(new Error("test"));
 		assert.strictEqual(err2.name, "RegistryUnavailable");
 
-		const err3 = new DsnFormatInvalid("ref", "hint");
+		const err3 = new DsnFormatInvalid("ref");
 		assert.strictEqual(err3.name, "DsnFormatInvalid");
 	});
 
