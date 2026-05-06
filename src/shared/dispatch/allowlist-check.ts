@@ -24,6 +24,7 @@ export interface EvaluateDispatchArgs {
   estimated_usd_cents?: number;
   agency_identity?: string;
   agent_identity?: string;
+  agency_capabilities?: string[];
 }
 
 export interface EvaluateDispatchResult {
@@ -51,9 +52,30 @@ export async function evaluateDispatch(
     estimated_usd_cents,
     agency_identity,
     agent_identity,
+    agency_capabilities,
   } = args;
 
-  // Step 1: Check route allowlist (fail-closed: NOT EXISTS = deny)
+  // Step 1: Check agency capability intersection (fail-closed: capability not in agency scope = deny)
+  if (agency_capabilities && !agency_capabilities.includes(capability_name)) {
+    const auditResult = await writeAudit(
+      project_id,
+      route_name,
+      capability_name,
+      "deny_capability",
+      "Capability not in agency's allowed set",
+      null,
+      agency_identity,
+      agent_identity
+    );
+
+    return {
+      allow: false,
+      reason: "capability_not_in_agency_scope",
+      audit_id: auditResult,
+    };
+  }
+
+  // Step 2: Check route allowlist (fail-closed: NOT EXISTS = deny)
   const routeCheckResult = await query<{ id: string }>(
     `SELECT id FROM roadmap.project_route_allowlist
      WHERE project_id = $1 AND route_name = $2`,
@@ -79,7 +101,7 @@ export async function evaluateDispatch(
     };
   }
 
-  // Step 2: Check capability scope (fail-closed: NOT EXISTS = deny)
+  // Step 3: Check capability scope (fail-closed: NOT EXISTS = deny)
   const capabilityCheckResult = await query<{ id: string }>(
     `SELECT id FROM roadmap.project_capability_scope
      WHERE project_id = $1 AND capability_name = $2`,
@@ -105,7 +127,7 @@ export async function evaluateDispatch(
     };
   }
 
-  // Step 3: Budget check (optional, atomic via SELECT...FOR UPDATE)
+  // Step 4: Budget check (optional, atomic via SELECT...FOR UPDATE)
   let remainingBudgetCents: number | null = null;
 
   if (estimated_usd_cents !== undefined) {
@@ -137,7 +159,7 @@ export async function evaluateDispatch(
     remainingBudgetCents = budgetCheckResult.remaining_cents;
   }
 
-  // Step 4: Compliance hook (Phase 2: stubbed)
+  // Step 5: Compliance hook (Phase 2: stubbed)
   // TODO Phase 2: Integrate compliance_check_callback
   // const complianceResult = await checkContentPolicy(project_id, route_name, capability_name);
   // if (!complianceResult.allowed) {
@@ -172,11 +194,9 @@ export async function evaluateDispatch(
  * Check budget atomically using SELECT...FOR UPDATE.
  * Returns whether the dispatch would exceed the cap and remaining budget.
  *
- * Phase 1: agent_budget_ledger view exists but per-project spend tracking is not yet
- * integrated. This stub sums spend across the ledger (global view) and checks against
- * the per-project cap. Atomic enforcement via SELECT...FOR UPDATE on budget_cap row.
- *
- * AC #101: Race-test with concurrent dispatches deferred to Phase 2 (full ledger integration).
+ * AC #101: Uses SELECT...FOR UPDATE on project_budget_cap to serialize concurrent checks.
+ * Queries actual spend from agent_budget_ledger per project and period, then checks
+ * against configured caps. Atomic enforcement prevents race conditions.
  */
 async function checkBudgetAtomic(
   project_id: number,
@@ -186,7 +206,7 @@ async function checkBudgetAtomic(
   reason: string;
   remaining_cents: number;
 }> {
-  // Query all budget caps for this project (day, week, month).
+  // Query all budget caps for this project (day, week, month) with FOR UPDATE lock.
   const capsResult = await query<{
     id: string;
     period: string;
@@ -208,23 +228,31 @@ async function checkBudgetAtomic(
   }
 
   // For each cap period, check if estimated spend would exceed it.
-  // Phase 1 integration: agent_budget_ledger exists but per-project filtering is not yet
-  // implemented. For now, assume zero current spend (TODO Phase 2: query ledger for project_id).
-  // Once P484 Phase 2 / P472 integration is complete, sum actual spend from ledger by project_id.
-
   for (const cap of capsResult.rows) {
     const maxCents = Number(cap.max_usd_cents);
-    // TODO Phase 2: SELECT SUM(cost_usd * 100) FROM roadmap.agent_budget_ledger
-    // WHERE project_id = $1 AND recorded_at >= date_trunc('period', NOW())
-    // For Phase 1, assume currentSpend = 0 (no project-scoped tracking yet).
-    const currentSpend = 0;
+    const period = cap.period;
+
+    // Query actual spend from agent_budget_ledger for this project and period.
+    const spendResult = await query<{ current_spend_cents: string }>(
+      `SELECT COALESCE(SUM(cost_usd * 100), 0)::bigint AS current_spend_cents
+       FROM roadmap.agent_budget_ledger
+       WHERE project_id = $1
+         AND recorded_at >= CASE $2
+           WHEN 'day'   THEN date_trunc('day', NOW())
+           WHEN 'week'  THEN date_trunc('week', NOW())
+           WHEN 'month' THEN date_trunc('month', NOW())
+         END`,
+      [project_id, period]
+    );
+
+    const currentSpend = Number(spendResult.rows[0]?.current_spend_cents ?? 0);
     const projected = currentSpend + estimated_usd_cents;
 
     if (projected > maxCents) {
       const remaining = Math.max(0, maxCents - currentSpend);
       return {
         allowed: false,
-        reason: `Budget exceeded for period ${cap.period}. Cap: ${maxCents} cents, estimated spend: ${estimated_usd_cents} cents, current: ${currentSpend} cents.`,
+        reason: `Budget exceeded for period ${period}. Cap: ${maxCents} cents, estimated spend: ${estimated_usd_cents} cents, current: ${currentSpend} cents.`,
         remaining_cents: remaining,
       };
     }
