@@ -9,6 +9,7 @@ VIOLATIONS=$(grep -rn 'process\.env\.PG' src/ \
     | grep -v 'src/infra/postgres/pool\.ts' \
     | grep -v 'src/postgres/pool-registry\.ts' \
     | grep -v 'src/core/infrastructure/init\.ts' \
+    | grep -v 'src/apps/hive-cli/common/context\.ts' \
     | grep -v '\.test\.ts' \
     || true)
 

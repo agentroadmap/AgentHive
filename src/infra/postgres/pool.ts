@@ -3,16 +3,12 @@
  *
  * Config precedence (highest first):
  * 1. Explicit PoolConfig passed to getPool()
- * 2. Environment variables (PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE)
- * 3. DATABASE_URL
+ * 2. ~/.pgpass (via ConfigResolver.resolvePasswordSync)
+ * 3. Environment variables (PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE)
+ * 4. DATABASE_URL
  *
  * Connections default to the AgentHive domain search path:
  * roadmap_proposal, roadmap_workforce, roadmap_efficiency, roadmap, public.
- *
- * For CLI contexts (no systemd env), PGPASSWORD is loaded from:
- *   - Project root `.env` file
- *   - Project root `.env.agent` file (worktree contexts)
- *   - `~/.agenthive.env` file
  *
  * Pool connections use timeout safeguards:
  *   - connectionTimeoutMillis: 5 s (configurable via PG_CONNECTION_TIMEOUT_MS)
@@ -24,8 +20,6 @@
  * No passwords are hardcoded.
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
 import {
 	Pool,
 	type PoolConfig,
@@ -38,50 +32,8 @@ import { ConfigResolver } from "../../shared/runtime/config";
 import { AgentHiveConfigError } from "../../shared/runtime/endpoints";
 import { agentContextStorage } from "../../shared/identity/agent-context";
 
-// Password resolution priority:
-//   1. ~/.pgpass (ConfigResolver.resolvePasswordSync)
-//   2. Existing PGPASSWORD env (set by caller / systemd)
-//   3. .env files (for Docker/CI contexts without pgpass) — handled by fallback path
-(function loadPGPassword() {
-	const host = process.env.PGHOST ?? "127.0.0.1";
-	const port = process.env.PGPORT ?? "5432";
-	const database = process.env.PGDATABASE ?? "agenthive";
-	const user = process.env.PGUSER ?? "admin";
-	const pw = ConfigResolver.resolvePasswordSync({ host, port, database, user });
-	if (pw !== undefined) {
-		process.env.PGPASSWORD = pw;
-		return;
-	}
-	// Fallback to .env file scanning for Docker/CI contexts
-	if (process.env.PGPASSWORD) return;
-	const candidates = [
-		resolve(process.cwd(), ".env"),
-		resolve(process.cwd(), ".env.agent"),
-		join(process.env.HOME || "", ".agenthive.env"),
-	];
-	for (const envPath of candidates) {
-		try {
-			if (!existsSync(envPath)) continue;
-			const content = readFileSync(envPath, "utf-8");
-			for (const line of content.split("\n")) {
-				const match = /^\s*PGPASSWORD\s*=\s*(.+)/.exec(line);
-				if (match) {
-					const value = match[1].trim();
-					if (value === "***") continue; // skip sentinel, try next candidate
-					process.env.PGPASSWORD = value;
-					return;
-				}
-			}
-		} catch {
-			// fallthrough
-		}
-	}
-})();
-
 let pool: Pool | null = null;
-let configuredSchema: string | null = normalizeSchemaName(
-	process.env.PG_SCHEMA,
-);
+let configuredSchema: string | null = null;
 let poolSignature: string | null = null;
 
 // Build search path from structural config
@@ -198,13 +150,36 @@ function requirePgUser(resolved: string | undefined): string {
 
 function resolvePoolConfig(config?: AgentHivePoolConfig): ResolvedPoolConfig {
 	const databaseUrlConfig = parseDatabaseUrl(process.env.DATABASE_URL);
+
+	// Resolve connection coordinates first so we can pass them to pgpass lookup.
+	const host =
+		config?.host ??
+		process.env.PGHOST ??
+		databaseUrlConfig.host ??
+		(StructuralKeys.PGHOST.defaultValue ?? "127.0.0.1");
+	const port =
+		Number(config?.port ?? process.env.PGPORT ?? databaseUrlConfig.port) || 5432;
+	const database =
+		config?.database ??
+		process.env.PGDATABASE ??
+		databaseUrlConfig.database ??
+		(StructuralKeys.PGDATABASE.defaultValue ?? "agenthive");
+	const user =
+		config?.user ?? process.env.PGUSER ?? databaseUrlConfig.user;
+
 	const configuredPassword =
 		typeof config?.password === "function" ? undefined : config?.password;
 
+	// Password resolution: explicit config > ~/.pgpass > __PGPASSWORD_FROM_CONFIG.
+	// ConfigResolver.resolvePasswordSync checks PGPASSWORD env first, then ~/.pgpass.
 	const resolvedPassword =
 		configuredPassword ??
-		process.env.PGPASSWORD ??
-		databaseUrlConfig.password ??
+		ConfigResolver.resolvePasswordSync({
+			host,
+			port: String(port),
+			database: database ?? "agenthive",
+			user: user ?? "",
+		}) ??
 		process.env.__PGPASSWORD_FROM_CONFIG;
 
 	const schema = normalizeSchemaName(
@@ -212,23 +187,11 @@ function resolvePoolConfig(config?: AgentHivePoolConfig): ResolvedPoolConfig {
 	);
 
 	return {
-		host:
-			config?.host ??
-			process.env.PGHOST ??
-			databaseUrlConfig.host ??
-			(StructuralKeys.PGHOST.defaultValue ?? "127.0.0.1"),
-		port:
-			Number(config?.port ?? process.env.PGPORT ?? databaseUrlConfig.port) ||
-			5432,
-		user: requirePgUser(
-			config?.user ?? process.env.PGUSER ?? databaseUrlConfig.user,
-		),
+		host,
+		port,
+		user: requirePgUser(user),
 		password: resolvedPassword,
-		database:
-			config?.database ??
-			process.env.PGDATABASE ??
-			databaseUrlConfig.database ??
-			(StructuralKeys.PGDATABASE.defaultValue ?? "agenthive"),
+		database: database ?? (StructuralKeys.PGDATABASE.defaultValue ?? "agenthive"),
 		options: buildSearchPathOptions(
 			config?.options ?? process.env.PG_OPTIONS,
 			schema,
@@ -328,10 +291,9 @@ export function getPool(config?: AgentHivePoolConfig): Pool {
  * anywhere on disk or in logs.
  */
 export function initPoolFromConfig(dbConfig: Record<string, any>): Pool {
-	if (dbConfig.password && !process.env.PGPASSWORD) {
-		// Transfer config password into env so the singleton getter sees it.
-		// This prevents the password from being stored in the Pg Pool options
-		// object (which could be leaked in logs or debug dumps).
+	if (dbConfig.password) {
+		// Stage explicit config password for resolvePoolConfig to pick up.
+		// Never stored in PGPASSWORD to avoid leaking into child processes.
 		process.env.__PGPASSWORD_FROM_CONFIG = dbConfig.password;
 	}
 
@@ -343,7 +305,6 @@ export function initPoolFromConfig(dbConfig: Record<string, any>): Pool {
 		host: dbConfig.host ?? process.env.PGHOST ?? "127.0.0.1",
 		port: Number(dbConfig.port || process.env.PGPORT || 5432),
 		user: requirePgUser(dbConfig.user ?? process.env.PGUSER),
-		password: process.env.PGPASSWORD ?? process.env.__PGPASSWORD_FROM_CONFIG,
 		database: dbConfig.name ?? process.env.PGDATABASE,
 		schema: configuredSchema,
 	});
@@ -463,7 +424,7 @@ export async function closePool(): Promise<void> {
 		pool = null;
 		poolSignature = null;
 	}
-	configuredSchema = normalizeSchemaName(process.env.PG_SCHEMA);
+	configuredSchema = null;
 }
 
 // ─── PoolManager (P300) ──────────────────────────────────────────────────────
@@ -571,7 +532,12 @@ export class PoolManager {
 			port: config.db_port,
 			database: config.db_name,
 			user: config.db_user,
-			password: process.env.PGPASSWORD,
+			password: ConfigResolver.resolvePasswordSync({
+				host: config.db_host,
+				port: String(config.db_port),
+				database: config.db_name,
+				user: config.db_user,
+			}),
 			max: DEFAULT_PROJECT_MAX,
 			idleTimeoutMillis: IDLE_REAP_MS,
 			allowExitOnIdle: true,
