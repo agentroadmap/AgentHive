@@ -20,7 +20,8 @@ import { getVersion } from "../../shared/utils/version.ts";
 import { parseEnvelopeFromEnv, opsMatch, type ToolEnvelope } from "../../infra/agency/tool-grant.ts";
 import { query } from "../../infra/postgres/pool.ts";
 import { agentContextStorage, type AgentContext } from "../../shared/identity/agent-context.ts";
-import { type McpAuthEnvelope, type VerifiedPrincipal } from "../../core/identity/principal-verifier.ts";
+import { PrincipalVerifier, type McpAuthEnvelope, type VerifiedPrincipal } from "../../core/identity/principal-verifier.ts";
+import { PrincipalIdentityStore } from "../../core/identity/principal-identity.ts";
 import { registerInitRequiredResource } from "./resources/init-required/index.ts";
 import { registerWorkflowResources } from "./resources/workflow/index.ts";
 import { registerAgentTools } from "./tools/agents/index.ts";
@@ -124,6 +125,10 @@ export class McpServer extends Core {
 	private readonly resources = new Map<string, McpResourceHandler>();
 	private readonly prompts = new Map<string, McpPromptHandler>();
 
+	// P843: Principal identity and auth verification
+	private readonly principalIdentityStore: PrincipalIdentityStore;
+	private readonly principalVerifier: PrincipalVerifier;
+
 	constructor(projectRoot: string, instructions: string) {
 		super(projectRoot, { enableWatchers: true });
 
@@ -142,6 +147,12 @@ export class McpServer extends Core {
 				instructions,
 			},
 		);
+
+		// P843: Initialize principal identity store and verifier
+		const pool = pgPool.getPool();
+		this.principalIdentityStore = new PrincipalIdentityStore(pool);
+		const operatorHmacSecret = this._getOperatorHmacSecret();
+		this.principalVerifier = new PrincipalVerifier(this.principalIdentityStore, operatorHmacSecret);
 
 		this.setupHandlers();
 	}
@@ -326,19 +337,24 @@ export class McpServer extends Core {
 		if (ctx) {
 			// Context set by HTTP transport handler (operator bearer token)
 			verifiedPrincipal = ctx.verified;
+			await writeAuthDecisionLog(verifiedPrincipal.principal_id, name, "allowed");
 		} else if (envelope) {
 			// Inline _auth envelope (agency/agent flow, or stdio)
-			// TODO: wire PrincipalVerifier.verify() call here once available
-			// For now, log unauthenticated and let enforcement mode decide
-			await writeAuthDecisionLog(envelope.principal_id ?? null, name, "unauthenticated");
-			if (P843_AUTH_ENFORCE_MCP) {
-				throw new Error("[P843] Auth envelope present but verifier not yet wired");
+			const authResult = await this.principalVerifier.verify(envelope);
+			if (authResult.ok && authResult.principal) {
+				verifiedPrincipal = authResult.principal;
+				await writeAuthDecisionLog(authResult.principal.principal_id, name, "allowed");
+			} else {
+				await writeAuthDecisionLog(envelope.principal_id ?? null, name, "denied");
+				if (P843_AUTH_ENFORCE_MCP) {
+					throw new Error(`[P843] Auth denied: ${authResult.reason}`);
+				}
 			}
 		} else {
 			// No auth context or envelope
 			await writeAuthDecisionLog(null, name, "unauthenticated");
 			if (P843_AUTH_ENFORCE_MCP) {
-				throw new Error("[P843] No verified principal");
+				throw new Error("[P843] No auth envelope");
 			}
 		}
 
@@ -562,6 +578,23 @@ export class McpServer extends Core {
 				params: { name: string; arguments?: Record<string, unknown> };
 			}) => this.getPrompt(request),
 		};
+	}
+
+	// P843: Get or generate operator HMAC secret
+	private _getOperatorHmacSecret(): Buffer {
+		const envSecret = process.env.OPERATOR_HMAC_SECRET;
+		if (envSecret) {
+			try {
+				return Buffer.from(envSecret, "hex");
+			} catch {
+				console.warn(
+					"[P843] OPERATOR_HMAC_SECRET is not valid hex; generating random secret"
+				);
+			}
+		}
+		// Generate a random 32-byte secret as fallback
+		const { randomBytes } = require("node:crypto") as typeof import("node:crypto");
+		return randomBytes(32);
 	}
 }
 

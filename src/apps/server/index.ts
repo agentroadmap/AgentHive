@@ -3895,8 +3895,15 @@ export class RoadmapServer {
 			const authHeader = req.headers.get("Authorization");
 			if (authHeader?.startsWith("Bearer ")) {
 				const token = authHeader.slice(7);
-				// TODO: wire verifyBoundBearer once operator HMAC secret is available
-				// For now, skip bearer verification in SSE handler (will be enforced in callTool)
+				const hmacSecret = this._getOperatorHmacSecret();
+				const result = await verifyBoundBearer(token, hmacSecret);
+				if (result.ok && result.principal_id) {
+					verifiedPrincipal = {
+						principal_id: result.principal_id,
+						principal_kind: "operator",
+						parent_principal_id: null,
+					};
+				}
 			}
 
 			// Create mock response that captures status
@@ -3965,5 +3972,22 @@ export class RoadmapServer {
 			} catch {}
 			return Response.json({ error: String(e) }, { status: 500 });
 		}
+	}
+
+	// P843: Get or generate operator HMAC secret
+	private _getOperatorHmacSecret(): Buffer {
+		const envSecret = process.env.OPERATOR_HMAC_SECRET;
+		if (envSecret) {
+			try {
+				return Buffer.from(envSecret, "hex");
+			} catch {
+				console.warn(
+					"[P843] OPERATOR_HMAC_SECRET is not valid hex; generating random secret"
+				);
+			}
+		}
+		// Generate a random 32-byte secret as fallback
+		const { randomBytes } = require("node:crypto") as typeof import("node:crypto");
+		return randomBytes(32);
 	}
 }
