@@ -214,13 +214,13 @@ export async function listCaps(args: {
 
 function _checkAuthority(): { allowed: boolean; reason: string } {
 	const ctx = agentContextStorage.getStore();
-	if (!ctx?.verified?.trust_tier) {
+	if (!ctx?.verified) {
 		return { allowed: true, reason: "log_only_mode" };
 	}
-	if (ctx.verified.trust_tier === "operator" || ctx.verified.trust_tier === "authority") {
+	if (ctx.verified.principal_kind === "operator") {
 		return { allowed: true, reason: "authorized" };
 	}
-	return { allowed: false, reason: `insufficient_tier: ${ctx.verified.trust_tier}` };
+	return { allowed: false, reason: `insufficient_principal_kind: ${ctx.verified.principal_kind}` };
 }
 
 /**
