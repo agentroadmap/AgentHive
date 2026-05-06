@@ -41,6 +41,8 @@ deploy/
     ├── 004-msg.sql                  # Topics, messages, dead-letter queue
     ├── 005-spend.sql                # Budgets, spend ledger, daily cost rollup
     ├── 006-kb.sql                   # Knowledge base documents, vector embeddings, tags
+    ├── 007-cross-project-dependencies.sql # Cross-project dependency graph (P896)
+    ├── 008-budget-reserve.sql       # Budget reserve mechanism for cross-project deadlock prevention (P897)
     └── seed/
         ├── proposal-types.sql       # Workflow templates (feature, hotfix, …)
         └── gate-roles.sql           # Default agents, skills, message topics
@@ -159,7 +161,7 @@ Creates the schema and defines `set_updated_at()` — a reusable trigger functio
 
 | Table | Description |
 | :--- | :--- |
-| `proposal` | Root proposal record: display_id, title, type, status, maturity, priority, parent_id, summary, motivation, design, drawbacks, alternatives, dependency_note, body_markdown, tags_jsonb |
+| `proposal` | Root proposal record: display_id, title, type, status, maturity, priority, parent_id, summary, motivation, design, drawbacks, alternatives, dependency_note, body_markdown, tags_jsonb; **P897:** `tier` (A/B/C, gates reserve access) |
 | `pVersion` | Append-only field-level version history; populated by `fn_version_on_update` trigger on every UPDATE |
 | `pDependency` | Directed dependency graph (blocks / informs / relates / supersedes); supports cross-project refs via `depends_on_ref` |
 | `pCriteria` | Acceptance criteria (pending / met / failed / skipped), with verifier and timestamp |
@@ -206,9 +208,13 @@ Creates the schema and defines `set_updated_at()` — a reusable trigger functio
 
 | Table | Description |
 | :--- | :--- |
-| `spBudget` | Budgets (scope: project / proposal / agent; alert_threshold: 0.80) |
+| `spBudget` | Budgets (scope: project / proposal / agent; alert_threshold: 0.80; **P897:** `ordinary_share`, `unblock_reserve_share`) |
 | `spLedger` | Append-only spend events (input/output tokens, cost_usd, model_id, session_ref) |
 | `spRoute` | Daily cost rollup per model route — populated by background job, unique on (model_id, period_date) |
+
+**P897 reserve allocation:** spBudget gains two share columns (sum constraint ≤ 1.0):
+- `ordinary_share` (default 0.80): funds regular proposal dispatches
+- `unblock_reserve_share` (default 0.20): funds cross-project unblocking dispatches only
 
 ### 006-kb.sql — Knowledge Base (3 tables)
 
@@ -219,6 +225,40 @@ Requires the `pgvector` extension.
 | `kbDocument` | Documents (source_type: manual / proposal / commit / url / import; chunk_index for multi-part docs) |
 | `kbEmbedding` | Vector embeddings — `vector(1536)` column (OpenAI default); unique on (document_id, model_id); IVFFlat index added post-load |
 | `kbTag` | Document tag index for category filtering |
+
+### 007-cross-project-dependencies.sql — Cross-Project Dependency Graph (P896)
+
+**Depends on:** system-init/004-governance.sql (for governance schema)
+
+Creates two tables in the `core` control-plane schema:
+
+| Table | Description |
+| :--- | :--- |
+| `core.dependency_kind_catalog` | Dependency kinds (blocks / informs / relates / supersedes / requires_artifact) |
+| `core.cross_project_dependency` | Cross-project edges: from_project, from_proposal, to_project, to_proposal, kind, declared_at |
+
+Includes consistency check function `core.fn_check_cross_project_dep_integrity()` returning orphaned edges where source or target proposal no longer exists. Governance logging via `governance.event` for orphan detection and cycle warnings.
+
+### 008-budget-reserve.sql — Budget Reserve & Dispatch Gate (P897)
+
+**Depends on:** 001-proposal.sql, 005-spend.sql, and system-init/007-cross-project-dependencies.sql (P896)
+
+Implements reserve mechanism for cross-project budget deadlock prevention. Adds:
+
+**Schema changes:**
+- `proposal.tier` column (A/B/C); Class C proposals excluded from reserve access
+- `spBudget.ordinary_share` (default 0.80) and `unblock_reserve_share` (default 0.20) with sum constraint
+
+**SQL functions:**
+1. `fn_get_budget_reserve_status(budget_id)` — Computes ordinary_spent, ordinary_cap, reserve_spent, reserve_cap, and utilization percentages
+2. `fn_is_reserve_eligible(proposal_id)` — Returns TRUE if proposal is Class A/B, named in `core.cross_project_dependency.to_proposal_display_id` with kind='blocks', and source proposal is in Develop/Review status
+3. `fn_decide_budget_share(proposal_id, budget_id, cost_estimate)` — Dispatch gate logic: routes to 'reserve' if eligible and has room, 'ordinary' as fallback, 'blocked' if exhausted
+
+**Orchestrator integration** (via src/core/dispatch/budget-reserve-gate.ts):
+- `getBudgetReserveStatus()` — Query spend via SQL function
+- `decideDispatchBudgetShare()` — Route dispatch costs
+- `logReserveDraw()` — Audit reserve consumption in `governance.decision` with cross_project_dependency edge reference
+- `checkAndEmitReserveDepletionAlarm()` — Emit `governance.event` warnings at 80% and critical alerts at 100% utilization
 
 ---
 
