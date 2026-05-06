@@ -32,11 +32,34 @@ import {
 const originalEnv = { ...process.env };
 
 function resetEnv() {
-	Object.keys(process.env).forEach((key) => {
-		if (!(key in originalEnv)) {
-			delete process.env[key];
-		}
-	});
+	// Delete all test-created keys
+	const configKeys = [
+		"PGPASSWORD",
+		"PGHOST",
+		"PGPORT",
+		"PGDATABASE",
+		"PGUSER",
+		"PG_SCHEMA",
+		"AGENTHIVE_MCP_URL",
+		"AGENTHIVE_DAEMON_URL",
+		"PROJECT_ROOT",
+		"PG_CONNECTION_TIMEOUT_MS",
+		"PG_QUERY_TIMEOUT_MS",
+		"PG_STATEMENT_TIMEOUT_MS",
+		"AGENTHIVE_WORKTREE_ROOT",
+		"AGENTHIVE_HOST",
+		"AGENTHIVE_DEFAULT_PROVIDER",
+		"AGENTHIVE_USE_OFFER_DISPATCH",
+		"DISCORD_BOT_TOKEN",
+		"GITHUB_TOKEN",
+		"DEBUG",
+		"DEBUG_PG",
+		"DEBUG_STATE_NAMES",
+	];
+	for (const key of configKeys) {
+		delete process.env[key];
+	}
+	// Restore original values for keys that were in the original env
 	Object.assign(process.env, originalEnv);
 }
 
