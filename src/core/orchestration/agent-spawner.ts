@@ -32,6 +32,12 @@ import { getProjectRoot, getWorktreeRoot } from "../../shared/runtime/paths.ts";
 import { HotfixStates, RfcStates } from "../workflow/state-names.ts";
 import { isWithinCapacity } from "./resolvers/capacity-guard.ts";
 import { sanitizeExtraEnv } from "./spawn-env-sanitizer.ts";
+import {
+	buildBaseName,
+	computeAbbr,
+	isLiaisonHint,
+} from "../identity/agent-registry/agent-name.ts";
+import { resolveInstanceId } from "../identity/agent-registry/registry.ts";
 import type {
 	EliminatedRoute,
 	ResolveRouteOpts,
@@ -191,6 +197,13 @@ export interface SpawnRequest {
 	worktreeRoot?: string;
 	/** Display label for context package (e.g. "worker-4620 (skeptic-alpha)") */
 	agentLabel?: string;
+	/**
+	 * P852: Capability hints used to derive the structured agent identity
+	 * (`{rt}-{host}-{exp}-{n}`). The first non-empty entry maps to the `exp`
+	 * segment; "liaison" routes the agent into the singleton 0..9 slot range.
+	 * If absent, the spawner falls back to [stage] for the hint list.
+	 */
+	capabilities?: string[];
 	/** Descriptive activity label (e.g. "researching", "enhancing", "reviewing") */
 	activity?: string;
 	/**
@@ -1251,11 +1264,34 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	const agentEnv = await loadEnvAgent(worktree, worktreeRoot);
 	let assembledTask = task;
 
+	// P852: derive structured agent identity (`{rt}-{host}-{exp}-{n}`) when the
+	// caller did not pre-claim a label. The slot allocation hits agent_registry,
+	// so we do it once here and reuse the value for context, agent_runs, and
+	// the child env. Falls back to the worktree name if anything is missing.
+	const routeAbbr = computeAbbr(
+		route.agentProvider,
+		route.modelName,
+		route.routeProvider,
+	);
+	const identityHints: ReadonlyArray<string | undefined> =
+		req.capabilities && req.capabilities.length > 0
+			? req.capabilities
+			: [stage];
+	let effectiveLabel = req.agentLabel;
+	if (!effectiveLabel) {
+		const base = buildBaseName(routeAbbr, AGENTHIVE_HOST, identityHints);
+		effectiveLabel = await resolveInstanceId(
+			base,
+			isLiaisonHint(identityHints),
+		);
+	}
+	const agentIdentity = effectiveLabel ?? worktree;
+
 	if (proposalId !== undefined) {
 		const contextPackage = await buildProposalContextPackage({
 			proposalId,
 			taskType: stage,
-			agentIdentity: req.agentLabel ?? worktree,
+			agentIdentity,
 			maxTokens: 2000,
 		});
 		assembledTask = renderClosingHint({
@@ -1302,11 +1338,16 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 			// and escalation channels. Absent → child runs in legacy "blind"
 			// mode using only the task prompt.
 			...(req.briefingId ? { AGENTHIVE_BRIEFING_ID: req.briefingId } : {}),
-			...(req.agentLabel ? { AGENTHIVE_AGENT_IDENTITY: req.agentLabel } : {}),
+			// P852: hand the structured identity and route abbr to the child so it
+			// can register itself under the same label that's already in agent_runs.
+			AGENTHIVE_AGENT_IDENTITY: agentIdentity,
+			AGENTHIVE_ROUTE_ABBR: routeAbbr,
 		},
 	});
 
 	// Insert agent_runs row (status = running)
+	// P852: agent_runs.agent_identity is the structured label without the
+	// worktree suffix, so it joins cleanly to agent_registry rows.
 	const { rows } = await query(
 		`INSERT INTO agent_runs
        (proposal_id, display_id, agent_identity, stage, model_used, status, activity, started_at)
@@ -1315,7 +1356,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		[
 			proposalId ?? null,
 			`wt:${worktree}`,
-			req.agentLabel ? `${req.agentLabel}@${worktree}` : worktree,
+			agentIdentity,
 			stage,
 			route.modelName,
 			req.activity ?? null,

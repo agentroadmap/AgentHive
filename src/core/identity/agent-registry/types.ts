@@ -22,6 +22,16 @@ export type RegistrationRequest = {
 	role?: string;
 	capabilities?: string[];
 	channel?: string;
+	/**
+	 * P852: route abbreviation token (e.g. "ccs45ant"). When provided together
+	 * with `host` and at least one capability, the registry assembles a
+	 * structured identity via buildBaseName + resolveInstanceId. Falls back to
+	 * AGENTHIVE_ROUTE_ABBR env if absent. When neither is set, the legacy
+	 * `${agentId}-${uniqueSuffix()}` path is used.
+	 */
+	routeAbbr?: string;
+	/** P852: spawning host segment (e.g. "mac", "bot"). Defaults to AGENTHIVE_HOST env. */
+	host?: string;
 };
 
 export type RegistrationResponse = {

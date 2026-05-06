@@ -14,12 +14,19 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { hostname } from "node:os";
 import { query } from "../../../infra/postgres/pool.ts";
 import {
 	AUTHORITY_IDENTITIES,
 	type TrustTier,
 } from "../../../infra/trust/trust-model.ts";
 import { getMcpUrlAsync } from "../../../shared/runtime/endpoints.ts";
+import {
+	buildBaseName,
+	EXPERT_SLOTS,
+	isLiaisonHint,
+	LIAISON_SLOTS,
+} from "./agent-name.ts";
 import type {
 	AgentRegistration,
 	DeregisterRequest,
@@ -52,6 +59,38 @@ function uniqueSuffix(): string {
 /** Derive channel name from instance ID */
 function agentChannel(instanceId: string): string {
 	return `agent-${instanceId.toLowerCase()}`;
+}
+
+/**
+ * P852: Allocate the next available slot character for a structured identity
+ * base. Liaison agents share the 0..9 range (singletons by convention); expert
+ * agents share the a..z range (up to 26 concurrent).
+ *
+ * A slot is "free" if no row exists for `${base}-${ch}`, OR the existing row's
+ * status is not 'online' (i.e. an offline session can be reclaimed).
+ *
+ * Throws when the slot range is exhausted; the caller must surface this so
+ * the operator can intervene rather than silently colliding.
+ */
+export async function resolveInstanceId(
+	base: string,
+	isLiaison: boolean,
+): Promise<string> {
+	const { rows } = await query<{ agent_identity: string; status: string }>(
+		`SELECT agent_identity, status FROM roadmap_workforce.agent_registry
+		 WHERE agent_identity LIKE $1`,
+		[`${base}-%`],
+	);
+	const byId = new Map(rows.map((r) => [r.agent_identity, r.status]));
+	const slots = isLiaison ? LIAISON_SLOTS : EXPERT_SLOTS;
+	for (const ch of slots) {
+		const candidate = `${base}-${ch}`;
+		const status = byId.get(candidate);
+		if (status === undefined || status !== "online") return candidate;
+	}
+	throw new Error(
+		`[P852] All slots exhausted for base "${base}" (liaison=${isLiaison})`,
+	);
 }
 
 /** Determine if agent is permanent (well-known identities) */
@@ -111,6 +150,34 @@ function hydrate(row: AgentRegistryRow): AgentRegistration {
 }
 
 /**
+ * P852: Resolve the instance ID for a registration in this priority:
+ *   1. Caller-provided instanceId (spawner pre-claimed a slot).
+ *   2. Permanent agents register under their bare agentId.
+ *   3. routeAbbr (or AGENTHIVE_ROUTE_ABBR env) + host (or AGENTHIVE_HOST env)
+ *      produce a structured base; resolveInstanceId allocates the slot.
+ *   4. Legacy fallback: `${agentId}-${uniqueSuffix()}`.
+ */
+async function resolveRegistrationInstanceId(
+	request: RegistrationRequest,
+	agentId: string,
+	agentType: AgentRegistration["agentType"],
+	capabilities: string[],
+): Promise<string> {
+	if (request.instanceId) return request.instanceId;
+	if (agentType === "permanent") return agentId;
+
+	const routeAbbr = request.routeAbbr ?? process.env.AGENTHIVE_ROUTE_ABBR;
+	const host = request.host ?? process.env.AGENTHIVE_HOST ?? hostname();
+
+	if (routeAbbr) {
+		const base = buildBaseName(routeAbbr, host, capabilities);
+		return resolveInstanceId(base, isLiaisonHint(capabilities));
+	}
+
+	return `${agentId}-${uniqueSuffix()}`;
+}
+
+/**
  * Register agent on startup.
  * Creates or updates the agent record in Postgres.
  */
@@ -121,9 +188,12 @@ export async function registerAgent(
 	const permanent = isPermanent(agentId);
 	const agentType = request.agentType || (permanent ? "permanent" : "contract");
 
-	const instanceId =
-		request.instanceId ||
-		(agentType === "contract" ? `${agentId}-${uniqueSuffix()}` : agentId);
+	const instanceId = await resolveRegistrationInstanceId(
+		request,
+		agentId,
+		agentType,
+		capabilities,
+	);
 
 	const channel = request.channel || agentChannel(instanceId);
 	const now = new Date().toISOString();
