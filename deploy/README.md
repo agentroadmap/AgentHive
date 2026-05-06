@@ -335,6 +335,140 @@ The project schema will contain all 28 tables populated with the default workflo
 
 ---
 
+## P898: DLQ (Dead Letter Queue) Operator Runbook
+
+Agents publishing to topics in a project schema may produce malformed messages that cannot be delivered. These land in `<schema>.mdlq` (the dead letter queue) where they accumulate silently unless triaged. P898 provides MCP actions for inspection, replay, and expiry.
+
+### Tables
+
+| Table | Columns | Purpose |
+| :--- | :--- | :--- |
+| `<schema>.mdlq` | id, original_msg_id, topic_id, from_agent, to_agent, kind, payload_jsonb, failure_reason, retry_count, replays, failed_at, expired_at | Dead letter queue — messages exhausted retries or validation failed |
+| `agency.msg_default` | id, agency_id, kind, payload_jsonb, sent_at, processed_at | Liaison messages — inter-agency or outbound RPC calls |
+
+### MCP Actions (P898)
+
+All actions available via the roadmap MCP under the `mcp_message` domain.
+
+#### dlq_list
+
+List DLQ entries for a project by topic.
+
+```bash
+# Via MCP (e.g., via Claude Code or MCP client)
+dlq_list(project_slug='myProject', topic='gate-events', limit=50)
+```
+
+Returns: id, topic_slug, dead_at (failed_at), retry_count, replays, failure_reason.
+
+#### dlq_inspect
+
+Inspect the full envelope of a single DLQ entry.
+
+```bash
+dlq_inspect(project_slug='myProject', dlq_id=42)
+```
+
+Returns: complete mdlq row including payload_jsonb and all metadata.
+
+#### dlq_replay
+
+Replay a DLQ entry back into mMessage. Validates payload (unless force=true), then atomically INSERTs to mMessage and DELETEs from mdlq in a single transaction.
+
+```bash
+# Normal: validates payload schema
+dlq_replay(project_slug='myProject', dlq_id=42)
+
+# Force (admin only): skip validation; audited in governance.event
+dlq_replay(project_slug='myProject', dlq_id=42, force=true, current_user_role='agenthive_admin')
+```
+
+**Replay Loop Guard:** The replays counter increments on each replay. After 3 attempts (replays=3), further replays are rejected. Use dlq_expire to permanently discard a poisoned message.
+
+#### dlq_expire
+
+Mark a DLQ entry as permanently expired (sets expired_at). The row is retained for audit instead of deleted.
+
+```bash
+dlq_expire(project_slug='myProject', dlq_id=42, reason='malformed JSON in payload')
+```
+
+#### dlq_stats
+
+Summary statistics: count of DLQ entries grouped by failure_reason and topic_slug.
+
+```bash
+dlq_stats(project_slug='myProject')
+```
+
+Returns: topic_slug, failure_reason, count, expired_count.
+
+#### liaison_stuck_messages
+
+Identify unprocessed liaison messages (agency.msg_default) older than 7 days. Uses partial index on processed_at IS NULL + sent_at filter.
+
+```bash
+liaison_stuck_messages(limit=50)
+```
+
+Returns: id, agency_id, kind, sent_at, days_unprocessed, payload_jsonb.
+
+### Triage Workflow
+
+1. **Check DLQ stats** → identify problematic topics/reasons:
+   ```
+   dlq_stats(project_slug='myProject')
+   ```
+
+2. **List entries** by topic:
+   ```
+   dlq_list(project_slug='myProject', topic='failing-topic')
+   ```
+
+3. **Inspect problematic entry**:
+   ```
+   dlq_inspect(project_slug='myProject', dlq_id=NNN)
+   ```
+
+4. **Decision**:
+   - If **payload is fixable** (typo, cosmetic issue): fix upstream and replay:
+     ```
+     dlq_replay(project_slug='myProject', dlq_id=NNN)
+     ```
+   - If **replayed 3 times** already: expire it:
+     ```
+     dlq_expire(project_slug='myProject', dlq_id=NNN, reason='exceeded max replays')
+     ```
+   - If **never valid** (wrong schema, broken client): expire and alert developer:
+     ```
+     dlq_expire(project_slug='myProject', dlq_id=NNN, reason='malformed JSON; schema mismatch')
+     ```
+
+5. **Monitor stuck liaison messages**:
+   ```
+   liaison_stuck_messages(limit=100)
+   ```
+   If count > 0, investigate `agency.agency` routing or downstream RPC failure.
+
+### Role-Based Access
+
+- **dlq_replay with force=true** requires `agenthive_admin` role. Non-admin users receive an error.
+- All other actions may be called by any authenticated operator.
+- All actions audit their outcome in `governance.event` for compliance.
+
+### Schema Columns (P898)
+
+New columns added to `<schema>.mdlq`:
+
+- **replays** (INT NOT NULL DEFAULT 0): Incremented on each dlq_replay call. Rejects replay if >= 3.
+- **expired_at** (TIMESTAMPTZ): Set by dlq_expire. Retained for audit trail.
+
+New index on agency.msg_default:
+
+- **msg_stuck_liaison**: Partial index on (sent_at) WHERE processed_at IS NULL. Enables fast scan for unprocessed liaison messages.
+
+---
+
 ## Development Sandbox
 
 The `dev/` subdirectory holds an ephemeral sandbox schema used for local exploration. Objects in `dev` are never referenced by deploy scripts and can be dropped freely. CI lint enforces no `dev.` references appear in production deploy files.
