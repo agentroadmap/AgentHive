@@ -41,6 +41,11 @@ import {
 	runPokeWatchdogTick,
 } from "../src/core/orchestration/maintenance.ts";
 import { pulseHeartbeat } from "../src/infra/pulse/heartbeat.ts";
+import {
+	getRolesForQueue,
+	shadowCheck,
+	type RoleProfile,
+} from "../src/core/orchestration/role-resolver.ts";
 
 const MCP_URL = getMcpUrl();
 const AGENTHIVE_HOST = process.env.AGENTHIVE_HOST ?? "default";
@@ -87,6 +92,9 @@ const STATE_TO_PHASE: Record<string, string> = {
 const ENABLE_POLLING = process.env.AGENTHIVE_ORCHESTRATOR_POLL === "1";
 const IMPLICIT_GATE_POLL_INTERVAL_MS = Number(
 	process.env.AGENTHIVE_IMPLICIT_GATE_POLL_MS ?? 30_000,
+);
+const ENHANCEMENT_HOLD_WINDOW_HOURS = Number(
+	process.env.AGENTHIVE_ENHANCEMENT_HOLD_WINDOW_HOURS ?? 24,
 );
 
 // ─── Capability-Based Agent Matching ─────────────────────────────────────────
@@ -267,6 +275,32 @@ const AGENT_PROMPTS: Record<string, string> = {
 	"fix-agent": "You are a Fix Agent. Implement code changes to resolve issues.",
 };
 
+// ─── Role Profile Resolution (Phase 2A) ──────────────────────────────────────
+
+const _roleProfileCache = new Map<
+	string,
+	{ profiles: RoleProfile[]; expiresAt: number }
+>();
+
+async function resolveRoleProfile(
+	stage: string,
+	maturity: string,
+	workflowTemplateId = 14,
+	projectId: number | null = null,
+): Promise<RoleProfile[]> {
+	const key = `${workflowTemplateId}:${stage}:${maturity}:${projectId ?? ""}`;
+	const cached = _roleProfileCache.get(key);
+	if (cached && cached.expiresAt > Date.now()) return cached.profiles;
+	const profiles = await getRolesForQueue({
+		workflowTemplateId,
+		stage,
+		maturity,
+		projectId,
+	});
+	_roleProfileCache.set(key, { profiles, expiresAt: Date.now() + 5 * 60 * 1000 });
+	return profiles;
+}
+
 // ─── Capability-Based Agent Matching ─────────────────────────────────────────
 
 interface AgentCandidate {
@@ -349,6 +383,13 @@ interface MatchedAgent {
 async function matchAgentsForState(state: string): Promise<MatchedAgent[]> {
 	const slots = JOB_ROLES[state];
 	if (!slots || slots.length === 0) return [];
+
+	// Phase 2B: shadow-mode divergence check
+	const legacyRoles = (slots ?? []).map((s) => s.role);
+	shadowCheck(
+		{ workflowTemplateId: 14, stage: state, maturity: "new", projectId: null },
+		legacyRoles,
+	).catch(() => {});
 
 	// Single query: fetch all active agents with capabilities, skills, workload
 	const { rows } = await query<{
@@ -2143,11 +2184,11 @@ async function claimEnhancementRevisionReady(
       WHERE p.maturity = 'new'
         AND LOWER(p.status) IN ('draft', 'review', 'develop')
         AND gdl.decision = 'hold'
-        AND gdl.created_at > now() - interval '24 hours'
+        AND gdl.created_at > now() - ($2 * interval '1 hour')
         AND active_enhancer IS NULL
       ORDER BY gdl.created_at ASC
       LIMIT $1`,
-		[limit],
+		[limit, ENHANCEMENT_HOLD_WINDOW_HOURS],
 	);
 	return rows;
 }
@@ -2159,6 +2200,21 @@ async function dispatchEnhancementRevision(
 	// Pull the persisted enhancer role profile so the prompt reflects the
 	// canonical contract (must_call_complete=set_maturity('mature'), allowlist,
 	// author_identity convention).
+	// Phase 3A: fallback prompt for when agent_role_profile is empty or missing
+	const ENHANCER_FALLBACK_PROMPT = `You are the Enhancement Agent. Your task is to address gate-identified gaps.
+
+{display_id} ({proposal_id}): {title}
+Current status: {status}/{maturity}
+
+Your contract:
+1. Read EVERY rationale in the sections below — latest and prior holds.
+2. Update the proposal design via mcp_proposal.update to address gaps.
+3. Update acceptance criteria via add_criteria/verify_criteria/delete_criteria.
+4. Write a feedback: discussion explaining what changed and why.
+5. Call mcp_proposal action=set_maturity maturity=mature to signal completion.
+
+Without set_maturity=mature, the gate will not re-run and your work remains invisible.`;
+
 	const { rows: profileRows } = await query<{
 		task_prompt: string | null;
 		required_capabilities: string[];
@@ -2167,12 +2223,20 @@ async function dispatchEnhancementRevision(
                 required_capabilities
            FROM roadmap.agent_role_profile
           WHERE role = 'enhancer'
+          ORDER BY CASE WHEN UPPER(stage) = UPPER($1) THEN 0 ELSE 1 END, priority ASC
           LIMIT 1`,
+		[target.status],
 	);
 	const profile = profileRows[0];
 	if (!profile) {
 		logger.warn(
-			`[Enhancer] No 'enhancer' row in agent_role_profile — skipping ${target.display_id}`,
+			JSON.stringify({
+				proposal_id: target.id,
+				display_id: target.display_id,
+				status: target.status,
+				maturity: target.maturity,
+				reason: "enhancer_profile_missing",
+			}),
 		);
 		return;
 	}
@@ -2211,8 +2275,8 @@ async function dispatchEnhancementRevision(
 		[target.id, target.hold_decision_id],
 	);
 
-	// Substitute placeholders the persisted profile uses ({display_id}, {title}, …).
-	const taskBody = (profile.task_prompt ?? "")
+	// Phase 3A: substitute placeholders using profile prompt or fallback
+	const taskBody = (profile.task_prompt ?? ENHANCER_FALLBACK_PROMPT)
 		.replace(/\{display_id\}/g, target.display_id)
 		.replace(/\{title\}/g, target.title)
 		.replace(/\{status\}/g, target.status)
@@ -2626,7 +2690,7 @@ async function reconcileStrandedAdvances(
 		  JOIN roadmap_proposal.proposal p ON p.id = gdl.proposal_id
 		 WHERE gdl.decision = 'advance'
 		   AND gdl.created_at > now() - INTERVAL '24 hours'
-		   AND UPPER(p.status) = UPPER(gdl.from_state)
+		   AND p.status = LOWER(gdl.from_state)
 		 ORDER BY gdl.created_at ASC
 	`);
 	let recovered = 0;
@@ -2644,7 +2708,7 @@ async function reconcileStrandedAdvances(
 				`UPDATE roadmap_proposal.proposal
 				    SET status = $1, maturity = 'new'
 				  WHERE id = $2
-				    AND UPPER(status) = UPPER($3)`,
+				    AND status = LOWER($3)`,
 				[row.to_state, row.proposal_id, row.from_state],
 			);
 			if (upd.rowCount && upd.rowCount > 0) {
