@@ -40,6 +40,8 @@ import { registerDependencyTools } from "./tools/dependencies/index.ts";
 import { registerWorktreeMergeTools } from "./tools/worktree-merge/index.ts";
 import { registerProjectTools } from "./tools/projects/index.ts";
 import { registerConsolidatedTools } from "./tools/consolidated.ts";
+import { PgBackupHandlers } from "./tools/backup/pg-handlers.ts";
+import { registerBackupTools } from "./tools/backup/index.ts";
 import type {
 	CallToolResult,
 	GetPromptResult,
@@ -1573,6 +1575,19 @@ export async function createMcpServer(
 	if (usePostgres) {
 		registerConsolidatedTools(server);
 		server.setConsolidatedToolSurface(true);
+
+		// P895: Backup management tools
+		const backupDb = pgPool.getDatabase("agentHive2");
+		const backupHandlers = new PgBackupHandlers(backupDb);
+		const backupTools = registerBackupTools(backupHandlers);
+		for (const tool of backupTools) {
+			server.addTool({
+				name: tool.name,
+				description: tool.description,
+				inputSchema: tool.inputSchema,
+				handler: tool.handler,
+			});
+		}
 	}
 
 	// P289: Workforce management tools (agency registration, provider registry, dispatches)
