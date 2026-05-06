@@ -455,11 +455,22 @@ async function insertDeliveryNack(
 
 /**
  * Cleanup old delivery_id_log entries (older than 10 minutes).
- * Call this periodically (e.g., every 5 minutes) to prevent table growth.
+ * Uses pg_try_advisory_lock(836836) so only one replica runs the DELETE at a time;
+ * other replicas skip the tick harmlessly. Advisory lock auto-releases on connection return.
  */
 export async function cleanupDeliveryIdLog(pool: Pool): Promise<void> {
+	const client = await pool.connect();
 	try {
-		const result = await pool.query(
+		// Advisory lock key 836836 (unique to P836 cleanup). Returns false if another
+		// replica holds the lock — skip this tick rather than running concurrent deletes.
+		const lockResult = await client.query<{ acquired: boolean }>(
+			`SELECT pg_try_advisory_lock(836836) AS acquired`,
+		);
+		if (!lockResult.rows[0]?.acquired) {
+			return;
+		}
+
+		const result = await client.query(
 			`DELETE FROM roadmap.delivery_id_log
 			 WHERE received_at < now() - interval '10 minutes'`,
 		);
@@ -471,5 +482,44 @@ export async function cleanupDeliveryIdLog(pool: Pool): Promise<void> {
 		}
 	} catch (err) {
 		console.error("[P836] Failed to cleanup delivery_id_log:", err);
+	} finally {
+		// Releasing the client back to the pool releases the advisory lock automatically.
+		client.release();
 	}
+}
+
+/**
+ * Register the delivery_id_log cleanup cron to run every 5 minutes.
+ * Singleton guard prevents double-registration in a single process.
+ * Multi-replica safety is provided by pg_try_advisory_lock inside cleanupDeliveryIdLog.
+ */
+export async function registerDeliveryIdLogCleanup(pool: Pool): Promise<void> {
+	const globalKey = "__deliveryIdLogCleanupInterval";
+	if ((globalThis as Record<string, unknown>)[globalKey]) {
+		console.log("[P836] Delivery ID log cleanup already registered — skipping");
+		return;
+	}
+
+	// Check table exists before scheduling
+	const tableCheck = await pool.query<{ count: string }>(
+		`SELECT COUNT(*) AS count FROM information_schema.tables
+		 WHERE table_schema = 'roadmap' AND table_name = 'delivery_id_log'`,
+	);
+	if (Number(tableCheck.rows[0]?.count ?? 0) === 0) {
+		console.warn("[P836] delivery_id_log table not found — cleanup cron skipped");
+		return;
+	}
+
+	const interval = setInterval(() => {
+		void cleanupDeliveryIdLog(pool).catch((err) => {
+			console.error(
+				`[P836] Unhandled error in delivery ID log cleanup: ${
+					err instanceof Error ? err.message : String(err)
+				}`,
+			);
+		});
+	}, 5 * 60 * 1000); // 5 minutes
+
+	(globalThis as Record<string, unknown>)[globalKey] = interval;
+	console.log("[P836] Delivery ID log cleanup cron registered (every 5 minutes, advisory-lock guarded)");
 }

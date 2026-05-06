@@ -699,6 +699,21 @@ export async function createMcpServer(
 			// Non-fatal; continue without timeout reliability (messages won't escalate/remind)
 		}
 
+		// Register delivery_id_log cleanup cron (P836) — every 5 min, advisory-lock guarded
+		try {
+			const { registerDeliveryIdLogCleanup } = await import(
+				"../../infra/messaging/cross-host-relay.ts"
+			);
+			const cleanupPool = pgPool.getPool();
+			await registerDeliveryIdLogCleanup(cleanupPool);
+			if (options.debug) {
+				console.error("[MCP] Delivery ID log cleanup cron registered");
+			}
+		} catch (error) {
+			console.error("[MCP] Failed to register delivery ID log cleanup:", error);
+			// Non-fatal; delivery_id_log will grow until manually pruned
+		}
+
 		// V2 agentHive2 connectivity check (P826) — non-fatal, opt-in via env
 		if (process.env.AGENTHIVE_V2_DB_URL) {
 			const { verifyAgentHive2Connection } = await import(
