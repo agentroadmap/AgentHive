@@ -2932,6 +2932,43 @@ async function main() {
 	}, 60_000);
 	logger.log("[Orchestrator] Maintenance started — offer reaper + poke watchdog every 60s");
 
+	// P299-C: orchestrator-side offer claim + dispatch (gated).
+	// Default mode (DISPATCH_MODE unset or 'offer_provider') leaves the
+	// per-agency OfferProvider service in charge of claiming offers — back-
+	// compat. When DISPATCH_MODE=liaison_hub, the central orchestrator
+	// claims and dispatches via offer_dispatch messages to each agency
+	// liaison; per-agency OfferProvider services are not started.
+	if (process.env.DISPATCH_MODE === "liaison_hub") {
+		const { OfferClaimLoop } = await import(
+			"../src/core/orchestration/offer-claim-loop.ts"
+		);
+		const { OrchestratorOfferDispatcher } = await import(
+			"../src/core/orchestration/offer-dispatch.ts"
+		);
+		const orchestratorIdentity =
+			process.env.AGENTHIVE_AGENT_IDENTITY ?? "orchestrator-agent";
+		const dispatcher = new OrchestratorOfferDispatcher({
+			orchestratorIdentity,
+			logger,
+		});
+		const claimLoop = new OfferClaimLoop({
+			orchestratorIdentity,
+			dispatcher,
+			connectListener: async () => {
+				const c = await pool.connect();
+				return c as never;
+			},
+			logger,
+		});
+		await claimLoop.start();
+		logger.log(
+			"[Orchestrator] DISPATCH_MODE=liaison_hub — orchestrator owns offer claim + dispatch (P299-C)",
+		);
+		logger.warn(
+			"[Orchestrator] TODO P299-C2: claim_status uplink subscription not yet wired; orchestrator can claim+dispatch but liaison completion reports won't be processed until follow-up wiring lands",
+		);
+	}
+
 	const orchStartMs = Date.now();
 	const heartbeatTimer = setInterval(() => {
 		pulseHeartbeat("orchestrator-agent", {

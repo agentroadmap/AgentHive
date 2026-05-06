@@ -12,6 +12,7 @@
 
 import { listenForMessages, receiveLiaisonPong } from "./liaison-message-service.ts";
 import { processAssistanceRequest } from "./liaison-watchdog.ts";
+import { handleOfferDispatch } from "./offer-dispatch-handler.ts";
 import { query } from "../postgres/pool.ts";
 import type { LiaisonMessage } from "./liaison-message-types.ts";
 
@@ -132,6 +133,14 @@ async function dispatchMessage(msg: LiaisonMessage, agencyId: string): Promise<v
 
     case "heartbeat":
       // Heartbeat from liaison itself — no hub action needed
+      break;
+
+    case "offer_dispatch":
+      // P299-D: Orchestrator dispatched an offer to this agency. Fork the
+      // CLI subprocess via spawnAgent and report the outcome via claim_status
+      // uplink. The orchestrator owns the offer lifecycle (renewal +
+      // completion); this handler only spawns and reports.
+      await handleOfferDispatch(agencyId, msg);
       break;
 
     default:
