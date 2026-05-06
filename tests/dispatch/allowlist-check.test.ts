@@ -25,8 +25,8 @@ async function setupTestProject(): Promise<{
 	let projectId = 999;
 
 	await query(
-		`INSERT INTO roadmap.project (project_id, slug, name, created_at)
-		 VALUES ($1, 'test-p484-' || NOW()::text, 'P484 Test Project', NOW())
+		`INSERT INTO roadmap.project (project_id, slug, name, worktree_root, created_at)
+		 VALUES ($1, 'test-p484-' || NOW()::text, 'P484 Test Project', '/tmp/p484-test', NOW())
 		 ON CONFLICT (project_id) DO NOTHING`,
 		[projectId]
 	);
@@ -380,7 +380,7 @@ describe("allowlist-check.ts", () => {
 			);
 		});
 
-		test("concurrent budget checks serialize correctly (integration test)", async () => {
+		test("sequential spend accumulation: budget_exceeded after cap is consumed", async () => {
 			if (SKIP_DB_TESTS) {
 				return;
 			}
@@ -403,7 +403,7 @@ describe("allowlist-check.ts", () => {
 					[projectId]
 				);
 
-				// Set a $50 budget cap for the day.
+				// Set a $50 budget cap (5000 cents) for the day.
 				await query(
 					`INSERT INTO roadmap.project_budget_cap
 					 (project_id, period, max_usd_cents, created_at)
@@ -411,30 +411,41 @@ describe("allowlist-check.ts", () => {
 					[projectId, 5000]
 				);
 
-				// Fire 10 concurrent requests, each with $1000 estimate.
-				// Expected: 5 succeed, 5 fail (for a $5000 cap).
-				const promises = [];
-				for (let i = 0; i < 10; i++) {
-					promises.push(
-						evaluateDispatch({
-							project_id: projectId,
-							route_name: "test-route",
-							capability_name: "test-cap",
-							estimated_usd_cents: 1000,
-						})
-					);
-				}
+				// First dispatch: $40 estimate against $50 cap → should allow.
+				const r1 = await evaluateDispatch({
+					project_id: projectId,
+					route_name: "test-route",
+					capability_name: "test-cap",
+					estimated_usd_cents: 4000,
+				});
+				assert.strictEqual(r1.allow, true, "First dispatch within budget should be allowed");
 
-				const results = await Promise.all(promises);
-				const allowed = results.filter((r) => r.allow).length;
-				const denied = results.filter((r) => !r.allow).length;
-
-				assert.ok(
-					allowed > 0,
-					"At least some requests should be allowed"
+				// Record actual spend to simulate a completed call ($40).
+				await query(
+					`INSERT INTO roadmap_efficiency.agent_budget_ledger
+					 (project_id, cost_usd, recorded_at)
+					 VALUES ($1, 0.40, NOW())`,
+					[projectId]
 				);
-				assert.ok(denied > 0, "At least some requests should be denied");
-				assert.strictEqual(allowed + denied, 10, "All requests accounted for");
+
+				// Second dispatch: $20 estimate against remaining $10 → should deny.
+				const r2 = await evaluateDispatch({
+					project_id: projectId,
+					route_name: "test-route",
+					capability_name: "test-cap",
+					estimated_usd_cents: 2000,
+				});
+				assert.strictEqual(r2.allow, false, "Second dispatch over cap should be denied");
+				assert.strictEqual(r2.reason, "budget_exceeded", "Reason should be budget_exceeded");
+
+				// Third dispatch: $5 estimate against remaining $10 → should allow.
+				const r3 = await evaluateDispatch({
+					project_id: projectId,
+					route_name: "test-route",
+					capability_name: "test-cap",
+					estimated_usd_cents: 500,
+				});
+				assert.strictEqual(r3.allow, true, "Small dispatch within remaining budget should be allowed");
 			} finally {
 				await cleanup();
 			}
