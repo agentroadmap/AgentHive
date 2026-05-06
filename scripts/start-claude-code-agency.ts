@@ -93,6 +93,31 @@ async function handleIncoming(payload: NotifyPayload) {
 		`[ClaudeCodeAgency] RECV [${msg.message_type}] id=${msg.id}` +
 		` from=${msg.from_agent} corr=${msg.correlation_id ?? "none"}`,
 	);
+
+	// P856: protocol_ping fast-path. Reply 'protocol_pong' synchronously with
+	// reply_to + correlation_id matched so the orchestrator's liveness probe
+	// can correlate. Skip LLM invocation entirely — this must be cheap.
+	if (msg.message_type === "protocol_ping") {
+		try {
+			const pool = getPool();
+			const { rows } = await pool.query(
+				`INSERT INTO roadmap.message_ledger
+                    (from_agent, to_agent, message_type, message_content,
+                     correlation_id, reply_to)
+                 VALUES ($1, $2, 'protocol_pong', 'pong', $3, $4)
+                 RETURNING id`,
+				[agentIdentity, msg.from_agent, msg.correlation_id ?? null, msg.id],
+			);
+			console.log(
+				`[ClaudeCodeAgency] PONG → ${msg.from_agent} (reply_to=${msg.id}, pong_id=${rows[0]?.id})`,
+			);
+			await messaging.markRead({ message_id: msg.id, agent: agentIdentity });
+		} catch (err) {
+			console.warn("[ClaudeCodeAgency] protocol_pong INSERT failed:", err);
+		}
+		return;
+	}
+
 	console.log(`[ClaudeCodeAgency]      "${msg.message_content}"`);
 
 	const systemContext =
