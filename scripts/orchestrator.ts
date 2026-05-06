@@ -2673,10 +2673,7 @@ async function main() {
 		});
 		await claimLoop.start();
 		logger.log(
-			"[Orchestrator] DISPATCH_MODE=liaison_hub — orchestrator owns offer claim + dispatch (P299-C)",
-		);
-		logger.warn(
-			"[Orchestrator] TODO P299-C2: claim_status uplink subscription not yet wired; orchestrator can claim+dispatch but liaison completion reports won't be processed until follow-up wiring lands",
+			"[Orchestrator] DISPATCH_MODE=liaison_hub — orchestrator claims + dispatches; liaisons own renewal+completion via fn_renew_lease/fn_complete_work_offer (mechanical SQL only). Offer reaper handles crash recovery.",
 		);
 	}
 

@@ -1,14 +1,16 @@
 /**
  * P299-D: offer-dispatch-handler unit tests.
  *
- * Pure-mocked: no DB, no real spawn. Verifies the message contract — that the
+ * Pure-mocked: no DB, no real spawn. Verifies the mechanical contract — the
  * handler invokes `spawnAgent` with the right shape (no agentLabel, with
- * capabilities) and emits a `claim_status` uplink with the right outcome.
+ * capabilities), renews the lease while spawning, and on exit calls
+ * `fn_complete_work_offer` directly. NO claim_status uplink is sent — the
+ * orchestrator is mechanical and observes lifecycle via DB state alone.
  */
 
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import { handleOfferDispatch } from "./offer-dispatch-handler.ts";
+import { handleOfferDispatch, type SqlExec } from "./offer-dispatch-handler.ts";
 import type { LiaisonMessage } from "./liaison-message-types.ts";
 import type { SpawnResult } from "../../core/orchestration/agent-spawner.ts";
 
@@ -30,9 +32,21 @@ function silentLogger(): Pick<Console, "log" | "warn" | "error"> {
 	return { log: () => {}, warn: () => {}, error: () => {} };
 }
 
-test("handleOfferDispatch: spawns with capabilities and undefined agentLabel", async () => {
+function recordingExec(): {
+	calls: Array<{ sql: string; params: unknown[] }>;
+	exec: SqlExec;
+} {
+	const calls: Array<{ sql: string; params: unknown[] }> = [];
+	const exec: SqlExec = async (sql, params) => {
+		calls.push({ sql, params: params ?? [] });
+		return { rows: [] };
+	};
+	return { calls, exec };
+}
+
+test("handleOfferDispatch: spawns with capabilities and undefined agentLabel; calls fn_complete_work_offer on success", async () => {
 	const spawnCalls: Array<Record<string, unknown>> = [];
-	const sendCalls: Array<Record<string, unknown>> = [];
+	const { calls: execCalls, exec } = recordingExec();
 
 	const fakeSpawn = async (req: Record<string, unknown>): Promise<SpawnResult> => {
 		spawnCalls.push(req);
@@ -46,13 +60,6 @@ test("handleOfferDispatch: spawns with capabilities and undefined agentLabel", a
 		};
 	};
 
-	const fakeSend = async (
-		opts: Record<string, unknown>,
-	): Promise<LiaisonMessage> => {
-		sendCalls.push(opts);
-		return makeMessage(opts.payload as Record<string, unknown>);
-	};
-
 	const msg = makeMessage({
 		offer_id: "00000000-0000-0000-0000-000000000abc",
 		role: "review",
@@ -62,18 +69,19 @@ test("handleOfferDispatch: spawns with capabilities and undefined agentLabel", a
 		dispatch_id: 42,
 		proposal_id: 999,
 		claim_token: "tok-1",
+		lease_ttl_seconds: 60,
 	});
 
 	await handleOfferDispatch("claude/agency-bot", msg, {
 		spawn: fakeSpawn as never,
-		send: fakeSend as never,
+		exec,
 		logger: silentLogger(),
 		resolveWorktree: () => "test-worktree",
+		renewalIntervalMs: 1_000_000, // effectively suppress renewal during test
 	});
 
-	// Wait briefly for the fire-and-forget runSpawnAndReport to complete.
-	await new Promise((r) => setImmediate(r));
-	await new Promise((r) => setImmediate(r));
+	// Wait for fire-and-forget runSpawn to complete.
+	for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
 
 	assert.equal(spawnCalls.length, 1, "spawnAgent called exactly once");
 	const spawnReq = spawnCalls[0];
@@ -88,30 +96,24 @@ test("handleOfferDispatch: spawns with capabilities and undefined agentLabel", a
 		"agentLabel must be undefined so P852 structured identity fires",
 	);
 
-	assert.equal(sendCalls.length, 1, "claim_status uplink sent");
-	const uplink = sendCalls[0];
-	assert.equal(uplink.kind, "claim_status");
-	assert.equal(uplink.direction, "liaison->orchestrator");
-	assert.equal(uplink.agency_id, "claude/agency-bot");
-	assert.equal(uplink.correlation_id, msg.correlation_id);
-	const uplinkPayload = uplink.payload as Record<string, unknown>;
-	assert.equal(uplinkPayload.offer_id, "00000000-0000-0000-0000-000000000abc");
-	assert.equal(uplinkPayload.status, "delivered");
-	assert.equal(uplinkPayload.exit_code, 0);
+	// Lifecycle assertions: only fn_complete_work_offer (orchestrator is mechanical;
+	// no uplink message is sent).
+	const completeCalls = execCalls.filter((c) =>
+		c.sql.includes("fn_complete_work_offer"),
+	);
+	assert.equal(completeCalls.length, 1, "fn_complete_work_offer called exactly once");
+	assert.deepEqual(
+		completeCalls[0].params,
+		[42, "claude/agency-bot", "tok-1", "delivered"],
+		"fn_complete_work_offer called with mechanical args (no LLM text)",
+	);
 });
 
-test("handleOfferDispatch: failed spawn produces 'failed' uplink", async () => {
-	const sendCalls: Array<Record<string, unknown>> = [];
+test("handleOfferDispatch: failed spawn marks offer 'failed' via fn_complete_work_offer", async () => {
+	const { calls: execCalls, exec } = recordingExec();
 
 	const fakeSpawn = async (): Promise<SpawnResult> => {
 		throw new Error("provider unreachable");
-	};
-
-	const fakeSend = async (
-		opts: Record<string, unknown>,
-	): Promise<LiaisonMessage> => {
-		sendCalls.push(opts);
-		return makeMessage(opts.payload as Record<string, unknown>);
 	};
 
 	const msg = makeMessage({
@@ -120,29 +122,35 @@ test("handleOfferDispatch: failed spawn produces 'failed' uplink", async () => {
 		required_capabilities: [],
 		route_hint: "claude-code",
 		dispatch_id: 50,
+		claim_token: "tok-2",
+		lease_ttl_seconds: 60,
 	});
 
 	await handleOfferDispatch("claude/agency-bot", msg, {
 		spawn: fakeSpawn as never,
-		send: fakeSend as never,
+		exec,
 		logger: silentLogger(),
 		resolveWorktree: () => "test-worktree",
+		renewalIntervalMs: 1_000_000,
 	});
 
-	await new Promise((r) => setImmediate(r));
-	await new Promise((r) => setImmediate(r));
+	for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
 
-	assert.equal(sendCalls.length, 1);
-	const uplinkPayload = sendCalls[0].payload as Record<string, unknown>;
-	assert.equal(uplinkPayload.status, "failed");
-	assert.match(
-		String(uplinkPayload.summary ?? ""),
-		/provider unreachable/,
+	const completeCalls = execCalls.filter((c) =>
+		c.sql.includes("fn_complete_work_offer"),
 	);
+	assert.equal(completeCalls.length, 1);
+	assert.deepEqual(completeCalls[0].params, [
+		50,
+		"claude/agency-bot",
+		"tok-2",
+		"failed",
+	]);
 });
 
 test("handleOfferDispatch: empty capabilities falls back to [role]", async () => {
 	const spawnCalls: Array<Record<string, unknown>> = [];
+	const { exec } = recordingExec();
 
 	const fakeSpawn = async (req: Record<string, unknown>): Promise<SpawnResult> => {
 		spawnCalls.push(req);
@@ -156,32 +164,31 @@ test("handleOfferDispatch: empty capabilities falls back to [role]", async () =>
 		};
 	};
 
-	const fakeSend = async (): Promise<LiaisonMessage> =>
-		makeMessage({});
-
 	const msg = makeMessage({
 		offer_id: "00000000-0000-0000-0000-000000000def",
 		role: "gate-review",
 		required_capabilities: [],
 		route_hint: "claude-code",
+		dispatch_id: 11,
+		claim_token: "tok-3",
 	});
 
 	await handleOfferDispatch("claude/agency-bot", msg, {
 		spawn: fakeSpawn as never,
-		send: fakeSend as never,
+		exec,
 		logger: silentLogger(),
 		resolveWorktree: () => "wt",
+		renewalIntervalMs: 1_000_000,
 	});
 
-	await new Promise((r) => setImmediate(r));
-	await new Promise((r) => setImmediate(r));
+	for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
 
 	assert.deepEqual(spawnCalls[0].capabilities, ["gate-review"]);
 });
 
 test("handleOfferDispatch: malformed payload (no role) is rejected without spawn", async () => {
 	let spawnCalled = false;
-	let sendCalled = false;
+	const { calls: execCalls, exec } = recordingExec();
 
 	const msg = makeMessage({ offer_id: "00000000-0000-0000-0000-000000000bad" });
 
@@ -190,13 +197,84 @@ test("handleOfferDispatch: malformed payload (no role) is rejected without spawn
 			spawnCalled = true;
 			return {} as SpawnResult;
 		}) as never,
-		send: (async () => {
-			sendCalled = true;
-			return makeMessage({});
-		}) as never,
+		exec,
 		logger: silentLogger(),
 	});
 
 	assert.equal(spawnCalled, false, "spawn must not run for malformed payload");
-	assert.equal(sendCalled, false, "no uplink for malformed payload");
+	assert.equal(execCalls.length, 0, "no SQL calls for malformed payload");
+});
+
+test("handleOfferDispatch: missing dispatch_id or claim_token aborts before spawn", async () => {
+	let spawnCalled = false;
+	const { calls: execCalls, exec } = recordingExec();
+
+	// Payload has role + offer_id but no dispatch_id/claim_token — liaison
+	// cannot renew or complete the offer mechanically, so it must refuse.
+	const msg = makeMessage({
+		offer_id: "00000000-0000-0000-0000-000000000ccc",
+		role: "review",
+		required_capabilities: [],
+		route_hint: "claude-code",
+	});
+
+	await handleOfferDispatch("claude/agency-bot", msg, {
+		spawn: (async () => {
+			spawnCalled = true;
+			return {} as SpawnResult;
+		}) as never,
+		exec,
+		logger: silentLogger(),
+	});
+
+	assert.equal(spawnCalled, false);
+	assert.equal(execCalls.length, 0);
+});
+
+test("handleOfferDispatch: renewal timer fires fn_renew_lease while spawn runs", async () => {
+	let renewCount = 0;
+	const exec: SqlExec = async (sql) => {
+		if (sql.includes("fn_renew_lease")) renewCount++;
+		return { rows: [] };
+	};
+
+	// Spawn that resolves after 250ms — renewal timer ticks every 50ms → ~4 renewals.
+	const fakeSpawn = (): Promise<SpawnResult> =>
+		new Promise((resolve) => {
+			setTimeout(() => {
+				resolve({
+					agentRunId: "run-3",
+					worktree: "wt",
+					exitCode: 0,
+					stdout: "",
+					stderr: "",
+					durationMs: 250,
+				});
+			}, 250);
+		});
+
+	const msg = makeMessage({
+		offer_id: "00000000-0000-0000-0000-000000000eee",
+		role: "develop",
+		required_capabilities: [],
+		route_hint: "claude-code",
+		dispatch_id: 77,
+		claim_token: "tok-4",
+		lease_ttl_seconds: 60,
+	});
+
+	await handleOfferDispatch("claude/agency-bot", msg, {
+		spawn: fakeSpawn as never,
+		exec,
+		logger: silentLogger(),
+		resolveWorktree: () => "wt",
+		renewalIntervalMs: 50,
+	});
+
+	// Wait for spawn to finish + a few extra ticks for the renewal timer to clear.
+	await new Promise((r) => setTimeout(r, 400));
+	assert.ok(
+		renewCount >= 2,
+		`expected at least 2 renewals during 250ms spawn; got ${renewCount}`,
+	);
 });
