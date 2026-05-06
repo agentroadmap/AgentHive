@@ -68,11 +68,25 @@ CREATE TABLE IF NOT EXISTS :schema_name.mDLQ (
   payload_jsonb    JSONB        NOT NULL DEFAULT '{}',
   failure_reason   TEXT,
   retry_count      INT          NOT NULL DEFAULT 0,
-  failed_at        TIMESTAMPTZ  NOT NULL DEFAULT now()
+  replays          INT          NOT NULL DEFAULT 0,       -- P898: replay attempt counter; max 3
+  failed_at        TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  expired_at       TIMESTAMPTZ                             -- P898: mark as permanently expired for audit
 );
 
 CREATE INDEX IF NOT EXISTS mdlq_failed_at ON :schema_name.mDLQ (failed_at);
 CREATE INDEX IF NOT EXISTS mdlq_original ON :schema_name.mDLQ (original_msg_id);
+CREATE INDEX IF NOT EXISTS mdlq_expired_at ON :schema_name.mDLQ (expired_at);
 
 COMMENT ON TABLE :schema_name.mDLQ IS
   'Dead letter queue. Messages land here after exhausting retries. Inspected manually or by reconciler.';
+
+-- ============================================================
+-- agency.msg stuck liaison messages partial index (P898)
+-- ============================================================
+-- Note: Partial index uses processed_at IS NULL only; the 7-day filter
+-- is applied in the query itself to avoid volatile functions in index.
+CREATE INDEX IF NOT EXISTS msg_stuck_liaison ON agency.msg_default (sent_at)
+  WHERE processed_at IS NULL;
+
+COMMENT ON INDEX agency.msg_stuck_liaison IS
+  'P898: Identifies unprocessed liaison messages. Query applies 7-day age filter. Used for operator triage of stuck messages.';

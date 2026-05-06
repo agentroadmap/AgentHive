@@ -3,6 +3,7 @@ import type { McpToolHandler } from "../../types.ts";
 import { createSimpleValidatedTool } from "../../validation/tool-wrapper.ts";
 import type { JsonSchema } from "../../validation/validators.ts";
 import { PgMessagingHandlers } from "./pg-handlers.ts";
+import { DlqHandlers } from "./dlq-handlers.ts";
 import { handleMsgAck } from "./msg-ack.ts";
 import { handleMsgReply } from "./msg-reply.ts";
 import { handleMsgWaitReply } from "./msg-wait-reply.ts";
@@ -535,6 +536,236 @@ export function registerMessageTools(server: McpServer): void {
 			agentCredentialRetrieve(input as { nonce: string }),
 	);
 
+	// P898: DLQ (Dead Letter Queue) inspection and replay tools
+	const dlqHandlers = new DlqHandlers();
+
+	const dlqListTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "dlq_list",
+			description:
+				"List dead letter queue (DLQ) entries for a project by topic. Returns id, topic_slug, dead_at (failed_at), retry_count, replays, failure_reason. P898.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					project_slug: {
+						type: "string",
+						description: "Project/schema name (e.g., 'agenthive')",
+					},
+					topic: {
+						type: "string",
+						description: "Optional: filter by topic slug",
+					},
+					limit: {
+						type: "number",
+						description: "Max results to return (default 50, max 500)",
+					},
+				},
+				required: ["project_slug"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				project_slug: { type: "string" },
+				topic: { type: "string" },
+				limit: { type: "number" },
+			},
+			required: ["project_slug"],
+		} as JsonSchema,
+		async (input) =>
+			dlqHandlers.dlqList(input as {
+				project_slug: string;
+				topic?: string;
+				limit?: number;
+			}),
+	);
+
+	const dlqInspectTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "dlq_inspect",
+			description:
+				"Inspect the full payload and metadata of a DLQ entry. Returns complete row including payload_jsonb. P898.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					project_slug: {
+						type: "string",
+						description: "Project/schema name",
+					},
+					dlq_id: {
+						type: "number",
+						description: "DLQ entry ID",
+					},
+				},
+				required: ["project_slug", "dlq_id"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				project_slug: { type: "string" },
+				dlq_id: { type: "number" },
+			},
+			required: ["project_slug", "dlq_id"],
+		} as JsonSchema,
+		async (input) =>
+			dlqHandlers.dlqInspect(input as {
+				project_slug: string;
+				dlq_id: number;
+			}),
+	);
+
+	const dlqReplayTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "dlq_replay",
+			description:
+				"Replay a DLQ entry back into mMessage. Validates payload (unless force=true). Increments replays counter; rejects if replays >= 3. INSERT to mMessage + DELETE from mdlq in same transaction. force=true requires agenthive_admin role. P898.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					project_slug: {
+						type: "string",
+						description: "Project/schema name",
+					},
+					dlq_id: {
+						type: "number",
+						description: "DLQ entry ID to replay",
+					},
+					force: {
+						type: "boolean",
+						description: "If true, skip validation (requires agenthive_admin role). Default false.",
+					},
+					current_user_role: {
+						type: "string",
+						description: "Current user role for force=true authorization check",
+					},
+				},
+				required: ["project_slug", "dlq_id"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				project_slug: { type: "string" },
+				dlq_id: { type: "number" },
+				force: { type: "boolean" },
+				current_user_role: { type: "string" },
+			},
+			required: ["project_slug", "dlq_id"],
+		} as JsonSchema,
+		async (input) =>
+			dlqHandlers.dlqReplay(input as {
+				project_slug: string;
+				dlq_id: number;
+				force?: boolean;
+				current_user_role?: string;
+			}),
+	);
+
+	const dlqExpireTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "dlq_expire",
+			description:
+				"Mark a DLQ entry as permanently expired (sets expired_at). Audited in governance.event. P898.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					project_slug: {
+						type: "string",
+						description: "Project/schema name",
+					},
+					dlq_id: {
+						type: "number",
+						description: "DLQ entry ID",
+					},
+					reason: {
+						type: "string",
+						description: "Reason for expiry (audited)",
+					},
+				},
+				required: ["project_slug", "dlq_id", "reason"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				project_slug: { type: "string" },
+				dlq_id: { type: "number" },
+				reason: { type: "string" },
+			},
+			required: ["project_slug", "dlq_id", "reason"],
+		} as JsonSchema,
+		async (input) =>
+			dlqHandlers.dlqExpire(input as {
+				project_slug: string;
+				dlq_id: number;
+				reason: string;
+			}),
+	);
+
+	const dlqStatsTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "dlq_stats",
+			description:
+				"Get DLQ statistics: count of entries grouped by failure_reason and topic_slug. P898.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					project_slug: {
+						type: "string",
+						description: "Project/schema name",
+					},
+				},
+				required: ["project_slug"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				project_slug: { type: "string" },
+			},
+			required: ["project_slug"],
+		} as JsonSchema,
+		async (input) =>
+			dlqHandlers.dlqStats(input as {
+				project_slug: string;
+			}),
+	);
+
+	const liaisonStuckTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "liaison_stuck_messages",
+			description:
+				"List unprocessed liaison messages (agency.msg) older than 7 days. Uses partial index. P898.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					host: {
+						type: "string",
+						description: "Optional: host context (reserved for multi-tenant scenarios)",
+					},
+					limit: {
+						type: "number",
+						description: "Max results to return (default 50, max 500)",
+					},
+				},
+				required: [],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				host: { type: "string" },
+				limit: { type: "number" },
+			},
+		} as JsonSchema,
+		async (input) =>
+			dlqHandlers.liaisonStuckMessages(input as {
+				host?: string;
+				limit?: number;
+			}),
+	);
+
 	server.addTool(sendTool);
 	server.addTool(readTool);
 	server.addTool(markReadTool);
@@ -548,4 +779,12 @@ export function registerMessageTools(server: McpServer): void {
 	server.addTool(credentialClaimTool);
 	server.addTool(credentialDeliverTool);
 	server.addTool(credentialRetrieveTool);
+
+	// P898: DLQ tools
+	server.addTool(dlqListTool);
+	server.addTool(dlqInspectTool);
+	server.addTool(dlqReplayTool);
+	server.addTool(dlqExpireTool);
+	server.addTool(dlqStatsTool);
+	server.addTool(liaisonStuckTool);
 }
