@@ -316,10 +316,10 @@ A tool agent (agent_type='tool') that performs mechanical operations without LLM
 A maturity level. No longer relevant because structure or direction changed.
 
 **Offer (Work Offer)**
-A row in `roadmap_workforce.squad_dispatch` with `offer_status='open'` and `agent_identity=NULL`. Created by the orchestrator (PipelineCron) when a gate decision or workflow transition needs execution. Contains: proposal_id, squad_name, dispatch_role, required_capabilities, metadata (task, phase, stage, model hint, worktree hint, timeout). Agents race to claim open offers via fn_claim_work_offer. Related: P281 (Resource Hierarchy), P289 (Pull-Based Dispatch). Also called "Job Offer" in some docs.
+A row in `roadmap_workforce.squad_dispatch` with `offer_status='open'` and `agent_identity=NULL`. Created by the unified orchestrator (`scripts/orchestrator.ts`) when a gate decision or workflow transition needs execution. Contains: proposal_id, squad_name, dispatch_role, required_capabilities, metadata (task, phase, stage, model hint, worktree hint, timeout). Agents race to claim open offers via fn_claim_work_offer. Related: P281 (Resource Hierarchy), P289 (Pull-Based Dispatch). Also called "Job Offer" in some docs.
 
 **Offer Dispatch**
-The push side of the offer/claim model. PipelineCron inserts a squad_dispatch row with offer_status='open', then emits pg_notify on the `work_offers` channel. Any listening OfferProvider receives the notification and races to claim it. The offer includes required_capabilities so only capable agents attempt claims.
+The push side of the offer/claim model. The orchestrator inserts a squad_dispatch row with offer_status='open', then emits pg_notify on the `work_offers` channel. Any listening OfferProvider receives the notification and races to claim it. The offer includes required_capabilities so only capable agents attempt claims.
 
 **Offer Provider**
 Class `src/core/pipeline/offer-provider.ts`. The pull side of the offer/claim model (P281/P289). Listens on the `work_offers` pg_notify channel. When notified, calls fn_claim_work_offer with its agent identity and capabilities. On successful claim: registers an ephemeral worker identity, activates the offer, spawns the CLI agent (via spawnAgent), renews the lease periodically, and completes the offer (delivered/failed) when the process exits. Configuration: agentIdentity, capabilities, leaseTtlSeconds, renewIntervalMs, pollIntervalMs, maxConcurrent.
@@ -362,8 +362,8 @@ Cost columns in model_metadata and model_routes: cost_per_million_input, cost_pe
 **Phase**
 The execution phase of a cubic. Values: design, build, merge, test, deploy.
 
-**Pipeline Cron**
-Module `src/core/pipeline/pipeline-cron.ts`. Polls for mature proposals and processes transition queue entries. Partially wired.
+**Pipeline Cron** *(retired — P754, 2026-05-06)*
+Formerly `src/core/pipeline/pipeline-cron.ts`. Polled `transition_queue` and processed gate transitions in a separate `agenthive-gate-pipeline.service`. Decommissioned when the unified `scanQueues()` loop in `scripts/orchestrator.ts` shipped (P744 Umbrella A). The service unit, source file, and `transition_queue` table were all removed. Adding a parallel dispatch loop is a regression — see CONVENTIONS.md §6.0b.
 
 **Pillar**
 A major architectural component. Four pillars: Lifecycle Engine (P045), Workforce (P046), Efficiency (P047), Utility (P048).
@@ -453,7 +453,7 @@ Tool agent `tool/state-monitor`. Listens on pg_notify `proposal_maturity_changed
 The proposal's position in the workflow. Values: Draft, Review, Develop, Merge, Complete, Rejected, Abandoned, Replaced.
 
 **Systemd**
-Linux service manager. Key units: agenthive-mcp.service, hermes-gateway.service. Planned: hermes-gate-pipeline, hermes-orchestrator.
+Linux service manager. Key units: agenthive-mcp.service, agenthive-orchestrator.service, agenthive-claude-agency.service, agenthive-a2a.service. (P754 retired agenthive-gate-pipeline.service.)
 
 ---
 
@@ -536,7 +536,7 @@ SQL functions in `roadmap_workforce` supporting the offer/claim lifecycle:
 - `fn_activate_work_offer(dispatch_id, agent_identity, claim_token, worker_identity)` — Activates a claimed offer with the worker identity. Returns boolean.
 - `fn_complete_work_offer(dispatch_id, agent_identity, claim_token, status)` — Marks an offer as delivered or failed.
 - `fn_renew_lease(dispatch_id, agent_identity, claim_token, ttl_seconds)` — Renews the claim token TTL while work is in progress. Returns boolean.
-- `fn_reap_expired_offers()` — Finds expired offers (claim_expires_at < now()), reissues or expires them. Returns (reissued, expired) counts. Called by PipelineCron's offer reaper timer.
+- `fn_reap_expired_offers()` — Finds expired offers (claim_expires_at < now()), reissues or expires them. Returns (reissued, expired) counts. Called by the orchestrator's offer-reaper maintenance tick.
 - `fn_register_worker(worker_identity, parent_identity, agent_type, capabilities, preferred_model)` — Creates an ephemeral worker entry in agent_registry.
 
 ---

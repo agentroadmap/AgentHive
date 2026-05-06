@@ -16,7 +16,7 @@ PG="psql -h 127.0.0.1 -U ${PGUSER:-admin} -d ${PGDATABASE:-agenthive} -t -A"
 
 # --- Services ---
 SERVICES=""
-for svc in agenthive-orchestrator agenthive-gate-pipeline agenthive-mcp; do
+for svc in agenthive-orchestrator agenthive-mcp; do
   # Use status (allowed by sudoers) but capture output safely to avoid pipefail
   status_out=$(sudo /bin/systemctl status "$svc" 2>&1 || true)
   state=$(echo "$status_out" | grep -m1 '^ *Active:' | awk '{print $2}' || echo "unknown")

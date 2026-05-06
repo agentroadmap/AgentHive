@@ -19,16 +19,46 @@ const SYSTEM_AGENTS = new Set(["system", "orchestrator"]);
 // ─── Channel naming ───────────────────────────────────────────────────────────
 
 /**
- * Converts an agent identity to a valid pg_notify channel name.
+ * Canonical pg_notify channel for an agent's direct-message inbox.
  *
- * PostgreSQL LISTEN identifiers are folded to lower-case and restricted to
- * safe characters. We prefix with 'agent_msg_' and replace any non-word
- * char with '_', matching the SQL trigger logic exactly.
+ * MUST match the channel name produced by `roadmap.fn_a2a_message_notify`
+ * (database/migrations/096-a2a-message-notify.sql). The trigger emits
+ *   pg_notify('a2a_msg_' || NEW.to_agent, ...)
+ * with the raw identity, and downstream consumers (msg-wait-reply,
+ * msg-reply, agent-liveness probe, server/index operator listener,
+ * scripts/start-message-agent) all LISTEN on `a2a_msg_<raw>`. This
+ * function MUST emit the same name or low-latency wake-ups break and
+ * msg_read(wait_ms=...) silently falls through to its no-message branch.
  *
- * Example: 'claude/agency-bot' → 'agent_msg_claude_agency_bot'
+ * Identities are validated against an allow-list of safe characters
+ * because the channel name is interpolated into a quoted LISTEN
+ * identifier (see MessageNotificationListener.start). PostgreSQL also
+ * truncates channel names to 63 bytes.
+ *
+ * Example: 'claude/agency-bot' → 'a2a_msg_claude/agency-bot'
  */
+const AGENT_IDENTITY_RE = /^[A-Za-z0-9_./:\-]+$/;
+const PG_CHANNEL_MAX_BYTES = 63;
+
 export function agentNotifyChannel(agentIdentity: string): string {
-    return "agent_msg_" + agentIdentity.replace(/[^a-zA-Z0-9_]/g, "_");
+    if (typeof agentIdentity !== "string" || agentIdentity.length === 0) {
+        throw new Error(`Invalid agent identity: must be a non-empty string`);
+    }
+    if (!AGENT_IDENTITY_RE.test(agentIdentity)) {
+        throw new Error(
+            `Invalid agent identity '${agentIdentity}': only [A-Za-z0-9_./:-] allowed`,
+        );
+    }
+    const channel = "a2a_msg_" + agentIdentity;
+    // PostgreSQL truncates LISTEN channel names beyond NAMEDATALEN-1 (63 bytes
+    // by default). Truncating silently would re-introduce the alignment bug
+    // for long identities, so reject loudly instead.
+    if (Buffer.byteLength(channel, "utf8") > PG_CHANNEL_MAX_BYTES) {
+        throw new Error(
+            `Invalid agent identity '${agentIdentity}': channel name exceeds ${PG_CHANNEL_MAX_BYTES} bytes`,
+        );
+    }
+    return channel;
 }
 
 // ─── ACL checks ───────────────────────────────────────────────────────────────

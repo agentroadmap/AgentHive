@@ -23,8 +23,9 @@ import {
  * Uses Postgres as the primary source of truth.
  *
  * P744/P748–P754: scanQueues() is the single unified dispatch loop that
- * replaces the split between scripts/orchestrator.ts and PipelineCron.
- * PG NOTIFY handlers and the poll fallback both call scanQueues().
+ * collapses the previously-split orchestrator/gate-pipeline architecture
+ * into one decision site. PG NOTIFY handlers and the poll fallback both
+ * call scanQueues(). (P754 retired the gate-pipeline service.)
  */
 
 // ─── Configuration ────────────────────────────────────────────────────────────

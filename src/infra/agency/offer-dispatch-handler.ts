@@ -1,0 +1,225 @@
+/**
+ * P299-D: Liaison-side offer_dispatch handler.
+ *
+ * Receives an `offer_dispatch` message from the orchestrator (sent via the
+ * liaison message bus), forks the CLI subprocess via `spawnAgent`, renews the
+ * lease while the subprocess runs, and on exit calls `fn_complete_work_offer`
+ * directly.
+ *
+ * Design rule: **the orchestrator is a mechanical process and does not
+ * interpret AI-generated content**. So this handler does NOT send a
+ * `claim_status` uplink with stdout summary or any LLM text back to the
+ * orchestrator. The lifecycle is communicated purely via mechanical SQL state
+ * changes:
+ *   - lease renewal     → `fn_renew_lease` (succeeds while spawn runs)
+ *   - offer completion  → `fn_complete_work_offer(claim_token, status)`
+ *   - liaison crash     → lease TTL expires; orchestrator's offer reaper
+ *                         requeues mechanically (no message exchanged)
+ *
+ * `agentLabel` is intentionally omitted from the spawnAgent call so that
+ * agent-spawner's structured-identity branch (P852) builds the
+ * `{rt}-{host}-{exp}-{n}` name from the resolved route + capabilities.
+ */
+import { query } from "../postgres/pool.ts";
+import { spawnAgent } from "../../core/orchestration/agent-spawner.ts";
+import type { SpawnResult } from "../../core/orchestration/agent-spawner.ts";
+import type { LiaisonMessage } from "./liaison-message-types.ts";
+
+export type SqlExec = (sql: string, params?: unknown[]) => Promise<unknown>;
+
+export interface OfferDispatchHandlerDeps {
+	/** Override for test injection. */
+	spawn?: typeof spawnAgent;
+	/** Override for test injection of fn_renew_lease + fn_complete_work_offer. */
+	exec?: SqlExec;
+	logger?: Pick<Console, "log" | "warn" | "error">;
+	/**
+	 * Resolves the worktree directory for an agency dispatch. Most agencies
+	 * have a 1:1 agency↔worktree mapping; the default reads from
+	 * `AGENCY_WORKTREE` env (set by `agenthive-liaison@<agency>.service`).
+	 */
+	resolveWorktree?: (agencyId: string) => string;
+	/** Renewal cadence override (ms). Default: leaseTtlSeconds * 1000 / 3. */
+	renewalIntervalMs?: number;
+}
+
+interface OfferDispatchEnvelope {
+	offer_id: string;
+	role: string;
+	required_capabilities: string[];
+	route_hint: string;
+	briefing_id?: string;
+	claim_token?: string;
+	dispatch_id?: number;
+	proposal_id?: number;
+	squad_name?: string;
+	lease_ttl_seconds?: number;
+}
+
+const DEFAULT_LEASE_TTL_SECONDS = 60;
+
+const defaultExec: SqlExec = (sql, params) =>
+	query(sql, params as unknown[]);
+
+const defaultDeps: Required<
+	Pick<
+		OfferDispatchHandlerDeps,
+		"spawn" | "exec" | "logger" | "resolveWorktree"
+	>
+> = {
+	spawn: spawnAgent,
+	exec: defaultExec,
+	logger: console,
+	resolveWorktree: (_agencyId) =>
+		process.env.AGENCY_WORKTREE ?? process.env.AGENTHIVE_DEFAULT_WORKTREE ?? "main",
+};
+
+/**
+ * Handle an `offer_dispatch` message addressed to `agencyId`.
+ *
+ * Spawns the CLI subprocess asynchronously (the message handler returns as
+ * soon as the spawn is initiated). Renews the lease via fn_renew_lease while
+ * the subprocess runs; on exit calls fn_complete_work_offer with delivered
+ * (exit 0) or failed (non-zero or thrown) status. No message is sent back to
+ * the orchestrator — the orchestrator is mechanical and observes lifecycle
+ * via DB state alone.
+ */
+export async function handleOfferDispatch(
+	agencyId: string,
+	msg: LiaisonMessage,
+	deps: OfferDispatchHandlerDeps = {},
+): Promise<void> {
+	const spawn = deps.spawn ?? defaultDeps.spawn;
+	const exec = deps.exec ?? defaultDeps.exec;
+	const logger = deps.logger ?? defaultDeps.logger;
+	const resolveWorktree = deps.resolveWorktree ?? defaultDeps.resolveWorktree;
+
+	const payload = msg.payload as unknown as OfferDispatchEnvelope;
+	if (!payload?.offer_id || !payload.role) {
+		logger.warn(
+			`[OfferDispatchHandler] ${agencyId}: malformed payload, missing offer_id/role`,
+		);
+		return;
+	}
+	if (!payload.dispatch_id || !payload.claim_token) {
+		logger.warn(
+			`[OfferDispatchHandler] ${agencyId}: payload missing dispatch_id or claim_token; cannot renew/complete the lease — refusing to spawn`,
+		);
+		return;
+	}
+
+	const worktree = resolveWorktree(agencyId);
+	const proposalId = payload.proposal_id ?? undefined;
+	const capabilities =
+		payload.required_capabilities && payload.required_capabilities.length > 0
+			? payload.required_capabilities
+			: [payload.role];
+	const leaseTtlSeconds = payload.lease_ttl_seconds ?? DEFAULT_LEASE_TTL_SECONDS;
+	const renewalIntervalMs =
+		deps.renewalIntervalMs ??
+		Math.max(5_000, Math.floor((leaseTtlSeconds * 1_000) / 3));
+
+	logger.log(
+		`[OfferDispatchHandler] ${agencyId}: spawning for offer=${payload.offer_id} role=${payload.role} (route_hint=${payload.route_hint})`,
+	);
+
+	void runSpawn({
+		agencyId,
+		payload,
+		worktree,
+		proposalId,
+		capabilities,
+		leaseTtlSeconds,
+		renewalIntervalMs,
+		spawn,
+		exec,
+		logger,
+	}).catch((err) => {
+		logger.error(
+			`[OfferDispatchHandler] ${agencyId}: unhandled error for offer=${payload.offer_id}:`,
+			err instanceof Error ? err.message : err,
+		);
+	});
+}
+
+async function runSpawn(args: {
+	agencyId: string;
+	payload: OfferDispatchEnvelope;
+	worktree: string;
+	proposalId: number | undefined;
+	capabilities: string[];
+	leaseTtlSeconds: number;
+	renewalIntervalMs: number;
+	spawn: typeof spawnAgent;
+	exec: SqlExec;
+	logger: Pick<Console, "log" | "warn" | "error">;
+}): Promise<void> {
+	const {
+		agencyId,
+		payload,
+		worktree,
+		proposalId,
+		capabilities,
+		leaseTtlSeconds,
+		renewalIntervalMs,
+		spawn,
+		exec,
+		logger,
+	} = args;
+
+	const dispatchId = payload.dispatch_id as number;
+	const claimToken = payload.claim_token as string;
+
+	const renewalTimer = setInterval(() => {
+		void exec(
+			`SELECT roadmap_workforce.fn_renew_lease($1, $2, $3, $4)`,
+			[dispatchId, agencyId, claimToken, leaseTtlSeconds],
+		).catch((err) => {
+			logger.warn(
+				`[OfferDispatchHandler] ${agencyId}: fn_renew_lease failed for offer ${payload.offer_id}:`,
+				err instanceof Error ? err.message : err,
+			);
+		});
+	}, renewalIntervalMs);
+
+	let result: SpawnResult | null = null;
+	let spawnError: Error | null = null;
+
+	try {
+		result = await spawn({
+			worktree,
+			task: `Execute offer ${payload.offer_id} (role: ${payload.role})`,
+			proposalId,
+			stage: payload.role,
+			capabilities,
+			provider: payload.route_hint as never,
+			briefingId: payload.briefing_id,
+			// agentLabel intentionally omitted — agent-spawner derives the
+			// structured identity (P852) when this is undefined.
+		});
+	} catch (err) {
+		spawnError = err instanceof Error ? err : new Error(String(err));
+	}
+
+	clearInterval(renewalTimer);
+
+	const status: "delivered" | "failed" =
+		spawnError === null && (result?.exitCode === 0 || result?.exitCode === null)
+			? "delivered"
+			: "failed";
+
+	try {
+		await exec(
+			`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, $4)`,
+			[dispatchId, agencyId, claimToken, status],
+		);
+		logger.log(
+			`[OfferDispatchHandler] ${agencyId}: offer=${payload.offer_id} ${status} (exit=${result?.exitCode ?? "n/a"})`,
+		);
+	} catch (completionErr) {
+		logger.error(
+			`[OfferDispatchHandler] ${agencyId}: fn_complete_work_offer failed for offer ${payload.offer_id} — lease will time out and reaper will requeue:`,
+			completionErr instanceof Error ? completionErr.message : completionErr,
+		);
+	}
+}

@@ -1,3 +1,7 @@
+-- ⚠️  REVERTED 2026-05-06 — see 052a-p227-quality-gates-rollback.sql.
+-- This DDL contradicted P227's stated design ("queue roles, not extra hardcoded
+-- workflow stages"). DO NOT RE-APPLY without redesigning P227 or rewriting this DDL.
+--
 -- P227: Workflow quality gates — mandatory CODE_REVIEW, TEST_WRITING, TEST_EXECUTION
 -- stages across Standard RFC and TEST_EXECUTION stage in Hotfix workflow.
 --
