@@ -1319,8 +1319,15 @@ export class RoadmapServer {
 			const authHeader = req.headers.get("Authorization");
 			if (authHeader?.startsWith("Bearer ")) {
 				const token = authHeader.slice(7);
-				// TODO: wire verifyBoundBearer once operator HMAC secret is available
-				// For now, skip bearer verification in direct HTTP handler (will be enforced in callTool)
+				const hmacSecret = this._getOperatorHmacSecret();
+				const result = await verifyBoundBearer(token, hmacSecret);
+				if (result.ok && result.principal_id) {
+					verifiedPrincipal = {
+						principal_id: result.principal_id,
+						principal_kind: "operator",
+						parent_principal_id: null,
+					};
+				}
 			}
 
 			const payload = await req.json();
