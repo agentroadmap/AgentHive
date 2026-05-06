@@ -48,6 +48,7 @@ function errorResponse(
 export async function handleDirectMcpRequest(
 	server: McpServer,
 	payload: unknown,
+	authHeader?: string,
 ): Promise<{ status: number; body: JsonRpcResponse }> {
 	if (typeof payload !== "object" || payload === null) {
 		return {
@@ -136,12 +137,14 @@ export async function handleDirectMcpRequest(
 	}
 
 	try {
-		const result = await server.testInterface.callTool({
-			params: {
-				name: toolName,
-				arguments: toolArguments,
-			},
-		});
+		const result = await server.runWithBearerContext(authHeader, () =>
+			server.testInterface.callTool({
+				params: {
+					name: toolName,
+					arguments: toolArguments,
+				},
+			}),
+		);
 		return {
 			status: 200,
 			body: {

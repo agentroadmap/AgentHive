@@ -97,7 +97,7 @@ const jsonBodyParser = express.json({ limit: "4mb" });
 
 app.post(["/mcp", "/api/mcp"], jsonBodyParser, async (req, res) => {
 	try {
-		const response = await handleDirectMcpRequest(sharedServer, req.body);
+		const response = await handleDirectMcpRequest(sharedServer, req.body, req.headers.authorization);
 		res.status(response.status).json(response.body);
 	} catch (err) {
 		console.error("[MCP] Direct MCP request failed:", String(err));

@@ -21,7 +21,7 @@ import { parseEnvelopeFromEnv, opsMatch, type ToolEnvelope } from "../../infra/a
 import { query } from "../../infra/postgres/pool.ts";
 import { agentContextStorage, type AgentContext } from "../../shared/identity/agent-context.ts";
 import { PrincipalVerifier, type McpAuthEnvelope, type VerifiedPrincipal } from "../../core/identity/principal-verifier.ts";
-import { PrincipalIdentityStore } from "../../core/identity/principal-identity.ts";
+import { PrincipalIdentityStore, verifyBoundBearer, type BoundBearerToken } from "../../core/identity/principal-identity.ts";
 import { registerInitRequiredResource } from "./resources/init-required/index.ts";
 import { registerWorkflowResources } from "./resources/workflow/index.ts";
 import { registerAgentTools } from "./tools/agents/index.ts";
@@ -371,7 +371,11 @@ export class McpServer extends Core {
 			}
 		}
 
-		const result = await tool.handler(args);
+		// P854: _auth envelope path sets verifiedPrincipal but has no transport context;
+		// wrap handler so getProjectDb() P844 gate sees the principal.
+		const result = verifiedPrincipal && !ctx
+			? await agentContextStorage.run({ verified: verifiedPrincipal }, () => tool.handler(args))
+			: await tool.handler(args);
 
 		// Log tool call to pulse
 		try {
@@ -578,6 +582,23 @@ export class McpServer extends Core {
 				params: { name: string; arguments?: Record<string, unknown> };
 			}) => this.getPrompt(request),
 		};
+	}
+
+	// P854: Run fn inside agentContextStorage if Authorization header carries a valid bearer token.
+	async runWithBearerContext<T>(authHeader: string | undefined, fn: () => Promise<T>): Promise<T> {
+		if (authHeader?.startsWith("Bearer ")) {
+			const token = authHeader.slice(7) as BoundBearerToken;
+			const res = verifyBoundBearer(token, this._getOperatorHmacSecret());
+			if (res.ok && res.principal_id) {
+				const principal: VerifiedPrincipal = {
+					principal_id: res.principal_id,
+					principal_kind: "operator",
+					parent_principal_id: null,
+				};
+				return agentContextStorage.run({ verified: principal }, fn);
+			}
+		}
+		return fn();
 	}
 
 	// P843: Get or generate operator HMAC secret
