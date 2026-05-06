@@ -143,6 +143,72 @@ Schema: `governance` — All tables are append-only (UPDATE/DELETE denied by tri
 | `governance.complianceCheck` | `check_type`, `target_ref`, `outcome`, `actor_did` | outcome: pass / fail / warn / skip; 1-year retention; partitioned by `checked_at` |
 | `governance.event` | `event_type`, `actor_did`, `subject_ref`, `payload_jsonb` | Permanent retention; partitioned by `occurred_at` |
 
+### 006-tenant-lifecycle.sql — Tenant Provisioning & Lifecycle (P893)
+
+Schema: `core` — Append-only tables with strict state machine enforcement.
+
+**Purpose:** Track the provisioning, archival, retirement, and backup lifecycle of project schemas in the schema-per-project topology. This module ensures that:
+- Provisioning steps are idempotent and transactional (advisory lock per project_id).
+- State transitions are guarded (only valid paths permitted).
+- All operations are audit-logged (append-only event table).
+- Backups are cataloged and verifiable.
+- Retirement is reversible until final DROP (catalog row survives).
+
+**State machine** (8 valid states):
+```
+requested → provisioning → active → archived → retiring → retired
+                   ↓                    ↑
+                 failed ←──── upgrading
+```
+
+**Idempotent re-entry:** `failed` → `provisioning` (re-provision the same project_id).
+
+| Table | Key Columns | Notes |
+| :--- | :--- | :--- |
+| `core.tenant_lifecycle` | `project_id` (PK) | state (CHECK constraint), state_reason, ddl_version, backup_policy (JSONB), resource_quota (JSONB), owner_did, state_changed_at |
+| `core.tenant_lifecycle_event` | `event_id` (append-only) | project_id, from_state, to_state, triggered_by_did, context (JSONB), occurred_at |
+| `core.tenant_backup` | `backup_id` (UUID, append-only) | project_id, taken_at, backup_kind (logical / physical / snapshot), storage_uri, size_bytes, retention_until, verified_at |
+
+**Key functions:**
+- `core.tenant_lifecycle_initialize(project_id, owner_did, ...)` — Create row in 'requested' state.
+- `core.tenant_lifecycle_transition(project_id, to_state, state_reason, triggered_by_did, context)` — Atomic state machine transition with advisory lock and event logging.
+- `core.validate_tenant_lifecycle_transition(from_state, to_state)` — Guard against invalid transitions (IMMUTABLE for query planner optimization).
+
+**Append-only enforcement:** Direct UPDATE/DELETE denied by triggers on `tenant_lifecycle_event` and `tenant_backup`. State transitions must use `core.tenant_lifecycle_transition()`.
+
+**Notification:** `pg_notify('tenant_lifecycle_changed', ...)` emitted on every event insert (8KB payload limit).
+
+---
+
+## Tenant Provisioning Orchestrator
+
+### scripts/cron/agenthive2-tenant-provision.sh — 10-Step Provisioning Flow
+
+Standalone Bash script implementing P893's provisioning sequence:
+
+1. **Acquire advisory lock** on project_id (prevents concurrent provisioning).
+2. **Initialize** tenant_lifecycle row (state: requested).
+3. **Transition** to provisioning.
+4. **CREATE SCHEMA IF NOT EXISTS** (idempotent).
+5. **Apply project-init DDL** via `deploy/apply.sh --project-only`.
+6. **Smoke test:** insert, read, delete a probe proposal row.
+7. **Register resource quota** and backup policy.
+8. **Transition** to active.
+9. **Emit pg_notify** event.
+10. **On failure:** transition to failed, cleanup schema (DROP SCHEMA … CASCADE).
+
+Each step is idempotent. Failure at any step triggers cleanup and state=failed with diagnostics in `state_reason`.
+
+**Usage:**
+```bash
+./scripts/cron/agenthive2-tenant-provision.sh PROJECT_ID SCHEMA_NAME OWNER_DID
+```
+
+Example:
+```bash
+./scripts/cron/agenthive2-tenant-provision.sh 2 hardcodeMiner did:agent:system
+```
+
 ---
 
 ## Project-Init Layer (Per-Project Schema)
