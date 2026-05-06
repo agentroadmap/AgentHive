@@ -52,6 +52,7 @@ if $SYSTEM; then
   $PSQL -f deploy/system-init/002-agency.sql
   $PSQL -f deploy/system-init/003-identity.sql
   $PSQL -f deploy/system-init/004-governance.sql
+  $PSQL -f deploy/system-init/005-observability.sql
   echo "==> system-init seed"
   $PSQL -f deploy/system-init/seed/hosts.sql
   $PSQL -f deploy/system-init/seed/agencies.sql
@@ -66,6 +67,7 @@ if $PROJECT; then
   $PSQL -v schema_name="$SCHEMA" -f deploy/project-init/004-msg.sql
   $PSQL -v schema_name="$SCHEMA" -f deploy/project-init/005-spend.sql
   $PSQL -v schema_name="$SCHEMA" -f deploy/project-init/006-kb.sql
+  $PSQL -v schema_name="$SCHEMA" -f deploy/project-init/007-observability-trigger.sql
   echo "==> project-init seed"
   $PSQL -v schema_name="$SCHEMA" -f deploy/project-init/seed/proposal-types.sql
   $PSQL -v schema_name="$SCHEMA" -f deploy/project-init/seed/gate-roles.sql
