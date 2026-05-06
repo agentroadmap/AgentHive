@@ -2160,15 +2160,13 @@ async function dispatchEnhancementRevision(
 	// canonical contract (must_call_complete=set_maturity('mature'), allowlist,
 	// author_identity convention).
 	const { rows: profileRows } = await query<{
-		task_prompt: string;
+		task_prompt: string | null;
 		required_capabilities: string[];
-		mcp_action_allowlist: string[];
-		author_identity_template: string;
 	}>(
-		`SELECT task_prompt, required_capabilities, mcp_action_allowlist,
-                author_identity_template
+		`SELECT prompt_template->>'task_prompt' AS task_prompt,
+                required_capabilities
            FROM roadmap.agent_role_profile
-          WHERE role_label = 'enhancer'
+          WHERE role = 'enhancer'
           LIMIT 1`,
 	);
 	const profile = profileRows[0];
@@ -2214,7 +2212,7 @@ async function dispatchEnhancementRevision(
 	);
 
 	// Substitute placeholders the persisted profile uses ({display_id}, {title}, …).
-	const taskBody = profile.task_prompt
+	const taskBody = (profile.task_prompt ?? "")
 		.replace(/\{display_id\}/g, target.display_id)
 		.replace(/\{title\}/g, target.title)
 		.replace(/\{status\}/g, target.status)
