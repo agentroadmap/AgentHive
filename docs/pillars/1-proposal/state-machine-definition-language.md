@@ -715,3 +715,69 @@ smdl validate ./workflows/my-custom.yaml
 5. **Agent-native** — agents can propose new workflows, users approve, no engineering needed
 
 This turns AgentHive from a fixed RFC tracker into a **workflow platform**.
+
+---
+
+## V2 — DB-Only Workflow Definitions (P825)
+
+> Completed: 2026-05-05. See `docs/migration/p825-smdl-v2.md` for the migration guide.
+
+### What changed
+
+Before P825, `smdl-loader.ts` and `smdl-mcp.ts` each embedded the RFC-5 and hotfix
+workflow templates as hardcoded TypeScript arrays (`BUILTIN_SMDLS`). Adding a custom
+workflow required a code change and redeploy.
+
+After P825 these arrays are removed entirely. Workflow definitions are **pure DB rows**:
+
+| Source | Tables written |
+|---|---|
+| `deploy/project-init/seed/proposal-types.sql` | `workflow_templates`, `workflow_stages`, `workflow_transitions`, `workflow_roles` |
+| MCP `workflow_load` (YAML string) | same |
+| Direct SQL `INSERT` | same |
+
+No TypeScript fallback exists. If `workflow_templates` is empty the registry returns nothing.
+
+### Runtime reload (no restart needed)
+
+`state-names.ts` holds the in-process registry. It loads at startup via
+`StateNamesRegistry.load(pool)` (wired in `init.ts`) and subscribes to a Postgres
+`LISTEN workflow_templates_changed` channel. Any `pg_notify('workflow_templates_changed', ...)`
+call — fired by DDL triggers or the seed script — causes a live reload within the same
+process. No service restart is required when adding or updating workflow templates.
+
+### Adding a custom workflow (operator runbook)
+
+```bash
+# 1. Author the YAML (see spec above for syntax)
+cat > /tmp/my-workflow.yaml <<'EOF'
+workflow:
+  id: my-custom
+  name: My Custom Workflow
+  ...
+EOF
+
+# 2. Load via MCP tool
+mcp workflow_load yaml="$(cat /tmp/my-workflow.yaml)"
+# → Returns template ID + stage/transition/role counts
+
+# 3. Verify loaded
+mcp workflow_list
+# → Shows new template in the list
+
+# 4. Registry reloads automatically via NOTIFY — no restart needed
+```
+
+Alternatively, insert directly into Postgres and fire the notify:
+
+```sql
+-- insert into workflow_templates ... (see smdl-loader.ts:materializeWorkflow for full SQL)
+SELECT pg_notify('workflow_templates_changed', 'manual');
+```
+
+### Scan-hardcoding compliance
+
+`scan-hardcoding.ts` flags bare workflow-state string literals. With BUILTIN_SMDLS
+removed, `smdl-loader.ts` and `smdl-mcp.ts` are no longer in `.scanignore.yaml`.
+All stage name strings in those files now flow through SMDL YAML or DB queries —
+not TypeScript constants.
