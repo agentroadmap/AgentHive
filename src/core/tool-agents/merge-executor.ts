@@ -1,9 +1,10 @@
 /**
  * Merge Executor — zero-cost git merge runner.
  *
- * Processes MERGE entries from transition_queue. Runs git merge in the
- * proposal's worktree and reports conflicts. Escalates to an LLM agent
- * if merge conflicts are detected.
+ * Processes MERGE-stage proposals dispatched by the unified orchestrator.
+ * Runs git merge in the proposal's worktree and reports conflicts;
+ * escalates to an LLM agent if merge conflicts are detected.
+ * (P753: previously consumed transition_queue rows; that source is retired.)
  */
 
 import { spawn } from "node:child_process";

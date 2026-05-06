@@ -200,7 +200,7 @@ hive log <service-name> [--since <duration>] [--grep <pattern>] [--tail 50] [--f
   Examples:
     hive log agenthive-orchestrator --since 5m
     hive log agenthive-mcp-server --grep "ERROR\|WARNING" --format jsonl
-    hive log agenthive-gate-pipeline --tail 100 --format text
+    hive log agenthive-claude-agency --tail 100 --format text
 ```
 
 ---

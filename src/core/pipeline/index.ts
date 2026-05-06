@@ -115,5 +115,6 @@ export {
 	ArchitectAgent as AC3,
 	BuilderAgent as AC4,
 };
-export { PipelineCron, PipelineCron as AC5 } from "./pipeline-cron.ts";
+// P754: PipelineCron / AC5 export removed — gate-pipeline service decommissioned.
+// Dispatch is owned by the unified scanQueues() loop in scripts/orchestrator.ts.
 export { OfferProvider } from "./offer-provider.ts";

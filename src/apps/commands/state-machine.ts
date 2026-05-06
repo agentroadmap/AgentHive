@@ -1,14 +1,16 @@
 /**
- * roadmap state-machine — manage orchestrator, gate-pipeline, and agency lifecycle
+ * roadmap state-machine — manage orchestrator and agency lifecycle
  *
  * Usage:
- *   roadmap state-machine start        # Start orchestrator + gate-pipeline
- *   roadmap state-machine stop         # Stop both
- *   roadmap state-machine restart      # Restart both
+ *   roadmap state-machine start        # Start orchestrator
+ *   roadmap state-machine stop         # Stop orchestrator
+ *   roadmap state-machine restart      # Restart orchestrator
  *   roadmap state-machine status       # Show service status + offer stats
  *   roadmap state-machine agencies     # List registered agencies
  *   roadmap state-machine offers       # List open/active offers
  *   roadmap state-machine register     # Register this host as an agency
+ *
+ * P754: gate-pipeline service decommissioned; orchestrator owns dispatch.
  */
 
 import { execSync } from "child_process";
@@ -16,7 +18,6 @@ import { query } from "../../infra/postgres/pool";
 
 const SERVICES = [
   { name: "agenthive-orchestrator", label: "Orchestrator" },
-  { name: "agenthive-gate-pipeline", label: "Gate Pipeline" },
 ];
 
 function run(cmd: string): string {
@@ -44,10 +45,10 @@ export function registerStateMachineCommand(program: any) {
   const sm = program
     .command("state-machine")
     .alias("sm")
-    .description("Manage AgentHive state machine (orchestrator + gate-pipeline)");
+    .description("Manage AgentHive state machine (orchestrator)");
 
   sm.command("start")
-    .description("Start orchestrator and gate-pipeline services")
+    .description("Start the orchestrator service")
     .action(() => {
       for (const svc of SERVICES) {
         const status = serviceStatus(svc.name);
@@ -63,7 +64,7 @@ export function registerStateMachineCommand(program: any) {
     });
 
   sm.command("stop")
-    .description("Stop orchestrator and gate-pipeline services")
+    .description("Stop the orchestrator service")
     .action(() => {
       for (const svc of SERVICES) {
         console.log(`  ${svc.label}: stopping...`);
@@ -73,7 +74,7 @@ export function registerStateMachineCommand(program: any) {
     });
 
   sm.command("restart")
-    .description("Restart orchestrator and gate-pipeline services")
+    .description("Restart the orchestrator service")
     .action(() => {
       for (const svc of SERVICES) {
         console.log(`  ${svc.label}: restarting...`);

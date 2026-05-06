@@ -213,7 +213,7 @@ function resolvePoolConfig(config?: AgentHivePoolConfig): ResolvedPoolConfig {
 			StructuralKeys.PG_STATEMENT_TIMEOUT_MS.defaultValue ?? 30000,
 		),
 		// Pool size: pg-pool defaults to 10. Long-lived LISTEN clients
-		// (state-names, pipeline-cron, websocket-server, feature-flag-service)
+		// (state-names, orchestrator, websocket-server, feature-flag-service)
 		// each pin a slot for the lifetime of the process, so 10 is razor-thin
 		// — a couple of leaked LISTENs (cf. P522) and the pool is dead. Bump
 		// the default to 30 and let ops override via PG_POOL_MAX. Defense in
