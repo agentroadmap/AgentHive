@@ -11,7 +11,15 @@ import type { McpServer } from "../../server.ts";
 import type { CallToolResult, McpToolHandler } from "../../types.ts";
 import { setProject, listProjects } from "./handlers.ts";
 import { projectCreate } from "./lifecycle-handlers.ts";
-import { listRoutes, listCapabilities, listCaps } from "./allowlist-handlers.ts";
+import {
+	listRoutes,
+	listCapabilities,
+	listCaps,
+	addRoute,
+	removeRoute,
+	setCapabilityScope,
+	setBudgetCap,
+} from "./allowlist-handlers.ts";
 
 export function registerProjectTools(server: McpServer): void {
 	server.addTool({
@@ -196,6 +204,131 @@ export function registerProjectTools(server: McpServer): void {
 				project_id: args.project_id as number,
 				limit: args.limit as number | undefined,
 				offset: args.offset as number | undefined,
+			});
+		},
+	} as McpToolHandler);
+
+	server.addTool({
+		name: "project_route_add",
+		description:
+			"Add or update a route in the allowlist for a project (P484 Phase 2). Requires operator or authority trust tier. Returns {ok, route_name, project_id, auth_mode}.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				project_id: {
+					type: "number",
+					description: "Project ID from project registry.",
+				},
+				route_name: {
+					type: "string",
+					description: "Route name (e.g., 'claude-opus', 'gpt-4'). Case-sensitive.",
+				},
+				max_calls_per_day: {
+					type: "number",
+					description: "(Optional) Max calls per day for this route.",
+				},
+				max_tokens_per_day: {
+					type: "number",
+					description: "(Optional) Max tokens per day for this route.",
+				},
+			},
+			required: ["project_id", "route_name"],
+		},
+		async handler(args: Record<string, unknown>): Promise<CallToolResult> {
+			return addRoute({
+				project_id: args.project_id as number,
+				route_name: args.route_name as string,
+				max_calls_per_day: args.max_calls_per_day as number | undefined,
+				max_tokens_per_day: args.max_tokens_per_day as number | undefined,
+			});
+		},
+	} as McpToolHandler);
+
+	server.addTool({
+		name: "project_route_remove",
+		description:
+			"Remove a route from the allowlist for a project (P484 Phase 2). Requires operator or authority trust tier. Returns {ok, deleted, project_id, route_name, auth_mode}.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				project_id: {
+					type: "number",
+					description: "Project ID from project registry.",
+				},
+				route_name: {
+					type: "string",
+					description: "Route name to remove.",
+				},
+			},
+			required: ["project_id", "route_name"],
+		},
+		async handler(args: Record<string, unknown>): Promise<CallToolResult> {
+			return removeRoute({
+				project_id: args.project_id as number,
+				route_name: args.route_name as string,
+			});
+		},
+	} as McpToolHandler);
+
+	server.addTool({
+		name: "project_capability_set",
+		description:
+			"Set or update capability scope for a project (P484 Phase 2). Requires operator or authority trust tier. Returns {ok, capability_name, project_id, auth_mode}.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				project_id: {
+					type: "number",
+					description: "Project ID from project registry.",
+				},
+				capability_name: {
+					type: "string",
+					description: "Capability name (e.g., 'web_search', 'knowledge_retrieve'). Case-sensitive.",
+				},
+				max_concurrency: {
+					type: "number",
+					description: "(Optional) Max concurrent instances of this capability.",
+				},
+			},
+			required: ["project_id", "capability_name"],
+		},
+		async handler(args: Record<string, unknown>): Promise<CallToolResult> {
+			return setCapabilityScope({
+				project_id: args.project_id as number,
+				capability_name: args.capability_name as string,
+				max_concurrency: args.max_concurrency as number | undefined,
+			});
+		},
+	} as McpToolHandler);
+
+	server.addTool({
+		name: "project_cap_set",
+		description:
+			"Set or update a budget cap for a project (P484 Phase 2). Requires operator or authority trust tier. Returns {ok, period, max_usd_cents, project_id, auth_mode}.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				project_id: {
+					type: "number",
+					description: "Project ID from project registry.",
+				},
+				period: {
+					type: "string",
+					enum: ["day", "week", "month"],
+					description: "Budget period: 'day', 'week', or 'month'.",
+				},
+				max_usd_cents: {
+					type: "number",
+					description: "Max USD cents allowed for this period (e.g., 5000 for $50).",
+				},
+			},
+			required: ["project_id", "period", "max_usd_cents"],
+		},
+		async handler(args: Record<string, unknown>): Promise<CallToolResult> {
+			return setBudgetCap({
+				project_id: args.project_id as number,
+				period: args.period as "day" | "week" | "month",
+				max_usd_cents: args.max_usd_cents as number,
 			});
 		},
 	} as McpToolHandler);
