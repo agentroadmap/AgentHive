@@ -14,8 +14,23 @@ ADD COLUMN IF NOT EXISTS provider_sig text,
 ADD COLUMN IF NOT EXISTS sig_verified text CHECK (sig_verified IN ('pending','verified','failed')) DEFAULT 'pending',
 ADD COLUMN IF NOT EXISTS acked_at timestamptz,
 ADD COLUMN IF NOT EXISTS ack_outcome text CHECK (ack_outcome IN ('ok','reject','noop')),
-ADD COLUMN IF NOT EXISTS trust_tier text CHECK (trust_tier IN ('authority','known','restricted','blocked')),
-ADD CONSTRAINT IF NOT EXISTS ack_consistency CHECK ((acked_at IS NULL) = (ack_outcome IS NULL));
+ADD COLUMN IF NOT EXISTS trust_tier text CHECK (trust_tier IN ('authority','known','restricted','blocked'));
+
+-- ack_consistency CHECK: PostgreSQL has no `ADD CONSTRAINT IF NOT EXISTS`, so guard via DO block.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint c
+    JOIN pg_class t ON c.conrelid = t.oid
+    JOIN pg_namespace n ON t.relnamespace = n.oid
+    WHERE n.nspname = 'roadmap'
+      AND t.relname = 'message_ledger'
+      AND c.conname = 'ack_consistency'
+  ) THEN
+    ALTER TABLE roadmap.message_ledger
+      ADD CONSTRAINT ack_consistency CHECK ((acked_at IS NULL) = (ack_outcome IS NULL));
+  END IF;
+END $$;
 
 -- Phase 1b: Indexes on message_ledger
 CREATE INDEX IF NOT EXISTS msg_ledger_correlation_idx ON roadmap.message_ledger (correlation_id) WHERE correlation_id IS NOT NULL;

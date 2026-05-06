@@ -18,6 +18,7 @@
  */
 
 import { getPool, query } from "../src/infra/postgres/pool.ts";
+import { trustGate } from "../src/infra/messaging/a2a-trust-gate.ts";
 
 const POLL_INTERVAL_MS = 10_000; // fallback poll every 10s
 const DISPATCH_BATCH = 20;       // max messages per cycle
@@ -28,55 +29,10 @@ const logger = {
 	error: (...args: unknown[]) => console.error("[A2A]", new Date().toISOString(), ...args),
 };
 
-// ─── Trust gate ────────────────────────────────────────────────────────────────
-
-type TrustLevel = "authority" | "trusted" | "known" | "restricted" | "blocked";
-
-/** Lookup trust level for (recipient, sender). Default: 'known' (open). */
-async function getTrustLevel(
-	recipient: string,
-	sender: string,
-): Promise<TrustLevel> {
-	if (sender === "system") return "authority"; // system always authority
-	if (recipient === sender) return "trusted";  // self-messages always pass
-
-	try {
-		const { rows } = await query<{ trust_level: string }>(
-			`SELECT trust_level FROM roadmap_workforce.agent_trust
-			 WHERE agent_identity = $1 AND trusted_agent = $2
-			   AND (expires_at IS NULL OR expires_at > now())
-			 LIMIT 1`,
-			[recipient, sender],
-		);
-		if (rows.length > 0) return rows[0].trust_level as TrustLevel;
-	} catch {
-		// If trust table not accessible, default open
-	}
-
-	return "known"; // default: accept unknown senders
-}
-
-/** Returns true if the message should be delivered. */
-async function trustGate(
-	recipient: string,
-	sender: string,
-	messageType: string,
-): Promise<boolean> {
-	const level = await getTrustLevel(recipient, sender);
-	if (level === "blocked") {
-		logger.log(`[trust] BLOCKED: ${sender} → ${recipient}`);
-		return false;
-	}
-	if (level === "restricted") {
-		// Restricted: only accept task/command from non-agent authority senders
-		const authoritative = ["system", "gary"];
-		if (!authoritative.includes(sender) && !["task", "command", "gate"].includes(messageType)) {
-			logger.log(`[trust] RESTRICTED: ${sender} → ${recipient} (${messageType})`);
-			return false;
-		}
-	}
-	return true;
-}
+// Trust gate is sourced from src/infra/messaging/a2a-trust-gate.ts so it can be
+// unit-tested without booting this dispatcher script. Logging on
+// blocked/restricted decisions has been removed during the extraction; reintroduce
+// a logging wrapper here if telemetry is needed.
 
 // ─── Recipient resolution ─────────────────────────────────────────────────────
 
