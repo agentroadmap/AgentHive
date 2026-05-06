@@ -28,6 +28,8 @@ export type SpawnFn = (req: {
 	model?: string;
 	timeoutMs?: number;
 	agentLabel?: string;
+	/** P852: capability hints used to derive structured agent identity. */
+	capabilities?: string[];
 	/** P466: warm-boot briefing id (passed to child as AGENTHIVE_BRIEFING_ID env). */
 	briefingId?: string;
 }) => Promise<SpawnResult>;
@@ -301,7 +303,7 @@ export class OfferProvider {
 				stage,
 				model,
 				timeoutMs,
-				agentLabel: `worker-${dispatch_id} (${dispatch_role})`,
+				capabilities: [dispatch_role],
 				briefingId,
 			});
 		} catch (err) {

@@ -114,7 +114,7 @@ Focus on correctness, security, and AC coverage only.`;
 		task,
 		proposalId: ctx.proposalId,
 		stage: "CODE_REVIEW",
-		agentLabel: `${reviewer} (code-review p${ctx.proposalId})`,
+		capabilities: ["review"],
 		activity: "reviewing",
 	});
 
