@@ -34,6 +34,7 @@ export interface QueueKey {
 }
 
 export interface RoleProfile {
+	id: number | null;
 	role: string;
 	requiredCapabilities: string[];
 	allowedRouteProviders: string[] | null;
@@ -74,6 +75,7 @@ function builtinFallback(stage: string, maturity: string): RoleProfile[] {
 	if (!set) return [];
 	const roles = maturity === "mature" ? set.gate : set.prep;
 	return roles.map((role, idx) => ({
+		id: null,
 		role,
 		requiredCapabilities: [],
 		allowedRouteProviders: null,
@@ -87,7 +89,8 @@ function builtinFallback(stage: string, maturity: string): RoleProfile[] {
 // ─── DB resolver ─────────────────────────────────────────────────────────────
 
 const SQL_ROLES = `
-SELECT role,
+SELECT id,
+       role,
        required_capabilities,
        allowed_route_providers,
        forbidden_route_providers,
@@ -95,6 +98,7 @@ SELECT role,
        priority
 FROM (
     SELECT DISTINCT ON (role)
+           id,
            role,
            required_capabilities,
            allowed_route_providers,
@@ -144,6 +148,7 @@ export async function getRolesForQueue(
 
 		if (rows.length > 0) {
 			return rows.map((r) => ({
+				id: r.id == null ? null : Number(r.id),
 				role: String(r.role),
 				requiredCapabilities: (r.required_capabilities as string[]) ?? [],
 				allowedRouteProviders:

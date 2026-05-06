@@ -204,7 +204,11 @@ export class Orchestrator {
 					agentLabel: `${detail.displayId} (${mode})`,
 					activity: mode === "gate" ? "reviewing" : "preparing",
 					projectId: ctx.projectId ?? undefined,
-					roleProfileId: primaryProfile ? undefined : undefined,
+					// Pass the DB-backed profile id when present so P771 role-policy
+					// filters (allowed_route_providers, forbidden_route_providers)
+					// reach resolveModelRoute. Builtin-fallback rows have id=null
+					// and route resolution falls through to host/project policy.
+					roleProfileId: primaryProfile?.id ?? null,
 				});
 
 				dispatched++;
