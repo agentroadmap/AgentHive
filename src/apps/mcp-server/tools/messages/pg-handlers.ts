@@ -39,8 +39,10 @@ export type NewMessageNotification = A2ANotification;
  * P199: Listener for a specific agent's dedicated pg_notify channel.
  *
  * Replaces the old 'new_message' broadcast listener with a per-agent
- * channel (agent_msg_<sanitized_identity>) so that each agent only
- * receives notifications addressed to them.
+ * channel (a2a_msg_<identity>) so that each agent only receives
+ * notifications addressed to them. The exact channel name is produced
+ * by agentNotifyChannel() and MUST match the channel emitted by
+ * roadmap.fn_a2a_message_notify (migration 096).
  *
  * AC#3: No broadcast fallback — the trigger no longer fires on 'new_message'.
  */

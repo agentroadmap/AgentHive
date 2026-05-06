@@ -6,6 +6,13 @@
  * RuntimeProvider-compatible interface.
  *
  * Multi-host (federated) messaging is future scope (P229+) — see design doc.
+ *
+ * @deprecated Prefer the MCP `mcp_message` tool surface (msg_send/msg_read/
+ * msg_ack/msg_reply/msg_wait_reply) for new callers. This class predates the
+ * P833 unified message envelope; its semantics overlap with the MCP tools and
+ * SubprocessProvider's send/recv stubs do not currently route through it.
+ * Kept for compatibility with the RuntimeProvider abstraction. To be folded
+ * into the MCP path or removed in a follow-up to P837 (legacy cleanup).
  */
 
 import { query } from "../../infra/postgres/pool.ts";
@@ -93,13 +100,18 @@ export class A2AMessenger {
   }
 
   /**
-   * Receive the next pending message addressed to this agent.
+   * Receive the next unread message addressed to this agent.
    *
-   * Polls the message_ledger for unread messages. If timeoutMs is set,
-   * retries up to the timeout before returning null.
+   * Marks the row as read (sets `read_at`) and returns it. The row stays in
+   * `message_ledger` so that `message_timeout_tracking` can still match it
+   * for ACK / escalation, and so callers can later issue an explicit
+   * `msg_ack` (mirrors P833 semantics). Earlier versions of this method
+   * DELETEd the row on read, which destroyed ACK provenance and caused
+   * timeout escalations to fire on already-delivered messages.
    *
-   * Messages are marked as read by deleting them after receipt, ensuring
-   * at-most-once delivery per (agent, message_id) pair.
+   * Returns null if no unread direct message exists for this agent within
+   * `timeoutMs`. Polls every 100ms; for low-latency wake-ups, prefer the
+   * MCP `msg_read(wait_ms=...)` tool which uses pg_notify.
    */
   async recv(opts: RecvOptions = {}): Promise<A2AMessage | null> {
     const { timeoutMs = 0, messageType } = opts;
@@ -126,6 +138,9 @@ export class A2AMessenger {
     const params: unknown[] = [this.identity];
     if (messageType) params.push(messageType);
 
+    // UPDATE … SET read_at to mark delivered without losing the row.
+    // FOR UPDATE SKIP LOCKED on the inner SELECT keeps concurrent receivers
+    // from claiming the same row.
     const { rows } = await query<{
       id: string;
       from_agent: string;
@@ -135,14 +150,16 @@ export class A2AMessenger {
       created_at: Date;
       correlation_id: string | null;
     }>(
-      `DELETE FROM roadmap.message_ledger
-       WHERE id = (
+      `UPDATE roadmap.message_ledger
+       SET    read_at = now()
+       WHERE  id = (
          SELECT id FROM roadmap.message_ledger
-         WHERE to_agent = $1
-           AND (channel IS NULL OR channel = 'direct')
+         WHERE  to_agent = $1
+           AND  (channel IS NULL OR channel = 'direct')
+           AND  read_at IS NULL
            ${typeFilter}
-         ORDER BY created_at ASC
-         LIMIT 1
+         ORDER  BY created_at ASC
+         LIMIT  1
          FOR UPDATE SKIP LOCKED
        )
        RETURNING id::text, from_agent, to_agent, message_type,
