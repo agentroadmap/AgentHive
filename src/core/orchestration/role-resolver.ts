@@ -9,8 +9,8 @@
  *   1. DB: roadmap.agent_role_profile — project rows shadow global rows for
  *      the same role name.
  *   2. BUILTIN_FALLBACK — legacy STAGE_DISPATCH_ROLES literal map (same
- *      semantics as pipeline-cron.ts). Used when the DB is empty or
- *      unreachable.
+ *      semantics as the historical gate-pipeline role registry, retired by
+ *      P754). Used when the DB is empty or unreachable.
  *
  * Phase 1 (P748): shadow-mode. Callers that still use STAGE_DISPATCH_ROLES
  * literals may call shadowCheck() to log divergence. Phase 2 deletes the
@@ -44,7 +44,7 @@ export interface RoleProfile {
 }
 
 // ─── Legacy fallback ─────────────────────────────────────────────────────────
-// Mirrors STAGE_DISPATCH_ROLES in pipeline-cron.ts.
+// Mirrors the historical STAGE_DISPATCH_ROLES (retired with gate-pipeline in P754).
 // prep → new/active maturity (build agents); gate → mature maturity (reviewers).
 
 const STAGE_DISPATCH_ROLES: Record<

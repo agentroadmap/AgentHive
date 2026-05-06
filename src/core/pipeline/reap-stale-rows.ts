@@ -34,7 +34,7 @@ const LIFECYCLE_LOG_RETENTION_DAYS = Number(
 
 // Task #24/#28: schemas whose IDENTITY sequences we realign at boot.
 // fn_realign_identity_sequences is a no-op when nothing drifted, so this
-// is cheap to run on every orchestrator/gate-pipeline start.
+// is cheap to run on every orchestrator start.
 const REALIGN_SCHEMAS = ["roadmap", "roadmap_workforce"] as const;
 
 export async function reapStaleRows(

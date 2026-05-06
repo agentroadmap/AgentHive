@@ -230,9 +230,8 @@ PG_SCHEMA=roadmap
 	s.start("Installing systemd service...");
 	const serviceContent = `[Unit]
 Description=AgentHive Orchestrator (event-driven agent dispatcher)
-After=network.target postgresql.service agenthive-mcp.service agenthive-gate-pipeline.service
+After=network.target postgresql.service agenthive-mcp.service
 Requires=agenthive-mcp.service
-Wants=agenthive-gate-pipeline.service
 
 [Service]
 Type=simple

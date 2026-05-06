@@ -11,7 +11,7 @@ import {
 	ListToolsRequestSchema,
 	ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { PipelineCron } from "../../core/pipeline/pipeline-cron.ts";
+// P754: PipelineCron import removed — gate-pipeline service decommissioned.
 import { Core } from "../../core/roadmap.ts";
 import * as pgPool from "../../postgres/pool.ts";
 import { loadStateNames } from "../../core/workflow/state-names.ts";
@@ -76,9 +76,6 @@ const CONSOLIDATED_TOOL_NAMES = new Set([
 	"mcp_document",
 	"mcp_ops",
 ]);
-
-// Track whether gate pipeline (PipelineCron) has already been started to avoid duplicates
-let gatePipelineStarted = false;
 
 // P843: Auth enforcement mode flag (default log-only)
 const P843_AUTH_ENFORCE_MCP = process.env.P843_AUTH_ENFORCE_MCP === "true";
@@ -1607,13 +1604,13 @@ export async function createMcpServer(
 	// P297: State machine management tools
 	server.addTool({
 		name: "state_machine_start",
-		description: "Start orchestrator and gate-pipeline services",
+		description: "Start the orchestrator service",
 		inputSchema: { type: "object", properties: {}, additionalProperties: false },
 		handler: () => smHandlers.stateMachineStartHandler({}),
 	});
 	server.addTool({
 		name: "state_machine_stop",
-		description: "Stop orchestrator and gate-pipeline services",
+		description: "Stop the orchestrator service",
 		inputSchema: { type: "object", properties: {}, additionalProperties: false },
 		handler: () => smHandlers.stateMachineStopHandler({}),
 	});
