@@ -1,19 +1,18 @@
 /**
- * Project Allowlist MCP Tools (P484 Phase 1)
+ * Project Allowlist MCP Tools (P484 Phase 2)
  *
- * Read-only listing for:
- * - project_route_allowlist
- * - project_capability_scope
- * - project_budget_cap
+ * Read and write operations for:
+ * - project_route_allowlist (list, add, remove)
+ * - project_capability_scope (list, set)
+ * - project_budget_cap (list, set)
  *
- * Mutation verbs (add_route, set_capability_scope, set_budget_cap) are deferred to Phase 2
- * pending P472 operator-token authorization implementation.
- *
+ * Mutation handlers require operator or authority trust tier (P843).
  * All responses use the standard pagination shape:
  * { total, returned, items, [truncated], [limit] }
  */
 
 import { query } from "../../../../postgres/pool.ts";
+import { agentContextStorage } from "../../../../shared/identity/agent-context.ts";
 import type { CallToolResult } from "../../types.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
@@ -210,5 +209,181 @@ export async function listCaps(args: {
 		});
 	} catch (err) {
 		return errorResult("Failed to list budget caps", err);
+	}
+}
+
+function _checkAuthority(): { allowed: boolean; reason: string } {
+	const ctx = agentContextStorage.getStore();
+	if (!ctx?.verified?.trust_tier) {
+		return { allowed: true, reason: "log_only_mode" };
+	}
+	if (ctx.verified.trust_tier === "operator" || ctx.verified.trust_tier === "authority") {
+		return { allowed: true, reason: "authorized" };
+	}
+	return { allowed: false, reason: `insufficient_tier: ${ctx.verified.trust_tier}` };
+}
+
+/**
+ * Add or update a route in the allowlist for a project.
+ * Requires operator or authority trust tier.
+ */
+export async function addRoute(args: {
+	project_id: number;
+	route_name: string;
+	max_calls_per_day?: number;
+	max_tokens_per_day?: number;
+}): Promise<CallToolResult> {
+	const authCheck = _checkAuthority();
+	if (!authCheck.allowed) {
+		return errorResult("Unauthorized", `Trust tier check failed: ${authCheck.reason}`);
+	}
+
+	try {
+		const result = await query<{
+			id: string;
+			route_name: string;
+			project_id: string;
+		}>(
+			`INSERT INTO roadmap.project_route_allowlist
+			 (project_id, route_name, max_calls_per_day, max_tokens_per_day, created_at)
+			 VALUES ($1, $2, $3, $4, NOW())
+			 ON CONFLICT (project_id, route_name) DO UPDATE
+			   SET max_calls_per_day = EXCLUDED.max_calls_per_day,
+			       max_tokens_per_day = EXCLUDED.max_tokens_per_day
+			 RETURNING id, route_name, project_id`,
+			[
+				args.project_id,
+				args.route_name,
+				args.max_calls_per_day ?? null,
+				args.max_tokens_per_day ?? null,
+			]
+		);
+
+		const row = result.rows[0];
+		return jsonResult({
+			ok: true,
+			route_name: row?.route_name,
+			project_id: Number(row?.project_id),
+			auth_mode: authCheck.reason,
+		});
+	} catch (err) {
+		return errorResult("Failed to add route", err);
+	}
+}
+
+/**
+ * Remove a route from the allowlist for a project.
+ * Requires operator or authority trust tier.
+ */
+export async function removeRoute(args: {
+	project_id: number;
+	route_name: string;
+}): Promise<CallToolResult> {
+	const authCheck = _checkAuthority();
+	if (!authCheck.allowed) {
+		return errorResult("Unauthorized", `Trust tier check failed: ${authCheck.reason}`);
+	}
+
+	try {
+		const result = await query<{ id: string }>(
+			`DELETE FROM roadmap.project_route_allowlist
+			 WHERE project_id = $1 AND route_name = $2
+			 RETURNING id`,
+			[args.project_id, args.route_name]
+		);
+
+		const deleted = result.rows.length > 0;
+		return jsonResult({
+			ok: true,
+			deleted,
+			project_id: args.project_id,
+			route_name: args.route_name,
+			auth_mode: authCheck.reason,
+		});
+	} catch (err) {
+		return errorResult("Failed to remove route", err);
+	}
+}
+
+/**
+ * Set or update capability scope for a project.
+ * Requires operator or authority trust tier.
+ */
+export async function setCapabilityScope(args: {
+	project_id: number;
+	capability_name: string;
+	max_concurrency?: number;
+}): Promise<CallToolResult> {
+	const authCheck = _checkAuthority();
+	if (!authCheck.allowed) {
+		return errorResult("Unauthorized", `Trust tier check failed: ${authCheck.reason}`);
+	}
+
+	try {
+		const result = await query<{
+			id: string;
+			capability_name: string;
+			project_id: string;
+		}>(
+			`INSERT INTO roadmap.project_capability_scope
+			 (project_id, capability_name, max_concurrency, created_at)
+			 VALUES ($1, $2, $3, NOW())
+			 ON CONFLICT (project_id, capability_name) DO UPDATE
+			   SET max_concurrency = EXCLUDED.max_concurrency
+			 RETURNING id, capability_name, project_id`,
+			[args.project_id, args.capability_name, args.max_concurrency ?? null]
+		);
+
+		const row = result.rows[0];
+		return jsonResult({
+			ok: true,
+			capability_name: row?.capability_name,
+			project_id: Number(row?.project_id),
+			auth_mode: authCheck.reason,
+		});
+	} catch (err) {
+		return errorResult("Failed to set capability scope", err);
+	}
+}
+
+/**
+ * Set or update a budget cap for a project.
+ * Requires operator or authority trust tier.
+ */
+export async function setBudgetCap(args: {
+	project_id: number;
+	period: "day" | "week" | "month";
+	max_usd_cents: number;
+}): Promise<CallToolResult> {
+	const authCheck = _checkAuthority();
+	if (!authCheck.allowed) {
+		return errorResult("Unauthorized", `Trust tier check failed: ${authCheck.reason}`);
+	}
+
+	if (!["day", "week", "month"].includes(args.period)) {
+		return errorResult("Invalid period", `Period must be one of: day, week, month`);
+	}
+
+	try {
+		const result = await query<{ id: string; period: string }>(
+			`INSERT INTO roadmap.project_budget_cap
+			 (project_id, period, max_usd_cents, created_at)
+			 VALUES ($1, $2, $3, NOW())
+			 ON CONFLICT (project_id, period) DO UPDATE
+			   SET max_usd_cents = EXCLUDED.max_usd_cents
+			 RETURNING id, period`,
+			[args.project_id, args.period, args.max_usd_cents]
+		);
+
+		const row = result.rows[0];
+		return jsonResult({
+			ok: true,
+			period: row?.period,
+			max_usd_cents: args.max_usd_cents,
+			project_id: args.project_id,
+			auth_mode: authCheck.reason,
+		});
+	} catch (err) {
+		return errorResult("Failed to set budget cap", err);
 	}
 }
