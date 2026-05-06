@@ -200,7 +200,7 @@ export class Orchestrator {
 					task,
 					proposalId: detail.id,
 					stage: detail.status,
-					capabilities: [mode === "gate" ? "gate-review" : detail.status.toLowerCase()],
+					agentLabel: `${detail.displayId} (${mode})`,
 					activity: mode === "gate" ? "reviewing" : "preparing",
 					projectId: ctx.projectId ?? undefined,
 					roleProfileId: primaryProfile ? undefined : undefined,
@@ -295,7 +295,7 @@ export class Orchestrator {
 					proposalId: stall.id,
 					stage: stall.status,
 					provider: ORCHESTRATOR_LIAISON_PROVIDER,
-					capabilities: ["liaison"],
+					agentLabel: `${stall.displayId} (liaison)`,
 					activity: "investigating stall",
 					task: [
 						`You are an AI liaison investigating a stalled proposal.`,
