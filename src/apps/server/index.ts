@@ -31,7 +31,7 @@ import type {
 import { watchConfig } from "../../utils/config-watcher.ts";
 import { formatVersionLabel, getVersionInfo } from "../../utils/version.ts";
 import { getPool, query } from "../../infra/postgres/pool.ts";
-import type { PoolClient } from "pg";
+import type { PoolClient, Client as PgClient } from "pg";
 import { hashOperatorToken, requireOperator } from "./operator-auth.ts";
 import { agentContextStorage, type VerifiedPrincipal } from "../../shared/identity/agent-context.ts";
 import { verifyBoundBearer } from "../../core/identity/principal-identity.ts";
@@ -156,6 +156,12 @@ export class RoadmapServer {
 	private roadmapEventsClient: PoolClient | null = null;
 	private roadmapEventsReconnectTimer: ReturnType<typeof setTimeout> | null =
 		null;
+
+	// P846: Operator agency registration and A2A relay
+	private readonly _operatorSseSessions = new Map<string, ServerResponse>();
+	private _operatorNotifyClient: PgClient | null = null;
+	private _operatorHeartbeatInterval: ReturnType<typeof setInterval> | null = null;
+	private _operatorSessionId: string | null = null;
 
 	constructor(projectPath: string) {
 		this.core = new Core(projectPath, { enableWatchers: true });
@@ -668,6 +674,10 @@ export class RoadmapServer {
 		try {
 			await this.ensureServicesReady();
 
+			// P846: Register operator agency and start notification relay
+			await this._registerOperatorAgency();
+			await this._startOperatorNotifyRelay();
+
 			this.server = createServer(async (req, res) => {
 				// Handle SSE directly with raw ServerResponse
 				const url = new URL(req.url || "/", `http://${req.headers.host}`);
@@ -788,6 +798,13 @@ export class RoadmapServer {
 	async stop(): Promise<void> {
 		if (this._stopping) return;
 		this._stopping = true;
+
+		// P846: Clean up operator agency session and notify relay
+		try {
+			await this._shutdownOperatorAgency();
+		} catch (err) {
+			console.warn("[P846] Error shutting down operator agency:", err);
+		}
 
 		// Stop filesystem watcher first to reduce churn
 		try {
@@ -3809,6 +3826,19 @@ export class RoadmapServer {
 
 		console.log(`[MCP] SSE connection: ${sessionId}`);
 
+		// P846: Check for operator bearer token and register SSE session
+		const incomingReq = req as IncomingMessage & { headers: Record<string, string> };
+		const authHeader = incomingReq.headers["authorization"];
+		if (authHeader?.startsWith("Bearer ")) {
+			const token = authHeader.slice(7);
+			const hmacSecret = this._getOperatorHmacSecret();
+			const result = await verifyBoundBearer(token, hmacSecret);
+			if (result.ok && result.principal_id) {
+				console.log(`[P846] Operator SSE session registered: ${sessionId}`);
+				this._operatorSseSessions.set(sessionId, res);
+			}
+		}
+
 		// Connect MCP server's underlying Server to transport
 		// Note: connect() calls start() automatically
 		try {
@@ -3827,6 +3857,8 @@ export class RoadmapServer {
 		req.on("close", async () => {
 			console.log(`[MCP] SSE closed: ${sessionId}`);
 			this.sseTransports.delete(sessionId);
+			// P846: Also remove from operator sessions map
+			this._operatorSseSessions.delete(sessionId);
 			try {
 				await transport.close();
 			} catch {}
@@ -3989,5 +4021,137 @@ export class RoadmapServer {
 		// Generate a random 32-byte secret as fallback
 		const { randomBytes } = require("node:crypto") as typeof import("node:crypto");
 		return randomBytes(32);
+	}
+
+	// P846: Register operator agency and set up heartbeat
+	private async _registerOperatorAgency(): Promise<void> {
+		const pool = getPool();
+		try {
+			// Insert or update operator agency registration
+			const registerResult = await pool.query(`
+				INSERT INTO roadmap.agency (
+					agency_id, display_name, provider, host_id, capability_tags, status, metadata
+				) VALUES ('operator', 'Operator Session', 'claude-code', 'bot', '[]', 'active', '{}')
+				ON CONFLICT (agency_id) DO UPDATE
+					SET status = 'active', last_heartbeat_at = NOW()
+				RETURNING agency_id
+			`);
+
+			// Create liaison session
+			const sessionResult = await pool.query(`
+				INSERT INTO roadmap.agency_liaison_session (agency_id, liaison_host, started_at)
+				VALUES ('operator', inet_server_addr()::text, NOW())
+				RETURNING session_id
+			`);
+
+			if (sessionResult.rows.length > 0) {
+				this._operatorSessionId = sessionResult.rows[0].session_id;
+				console.log(`[P846] Operator agency registered with session: ${this._operatorSessionId}`);
+			}
+
+			// Start heartbeat every 30 seconds
+			this._operatorHeartbeatInterval = setInterval(
+				() => this._sendOperatorHeartbeat().catch((err) => {
+					console.warn("[P846] Heartbeat error:", err.message);
+				}),
+				30000,
+			);
+		} catch (err) {
+			console.error("[P846] Failed to register operator agency:", err);
+		}
+	}
+
+	// P846: Send heartbeat to keep operator session active
+	private async _sendOperatorHeartbeat(): Promise<void> {
+		const pool = getPool();
+		try {
+			await pool.query(
+				`UPDATE roadmap.agency SET last_heartbeat_at = NOW() WHERE agency_id = 'operator'`,
+			);
+		} catch (err) {
+			console.warn("[P846] Heartbeat update failed:", err);
+		}
+	}
+
+	// P846: Clean up operator agency session on shutdown
+	private async _shutdownOperatorAgency(): Promise<void> {
+		const pool = getPool();
+
+		// Stop heartbeat
+		if (this._operatorHeartbeatInterval) {
+			clearInterval(this._operatorHeartbeatInterval);
+			this._operatorHeartbeatInterval = null;
+		}
+
+		// Mark session as ended
+		if (this._operatorSessionId) {
+			try {
+				await pool.query(`
+					UPDATE roadmap.agency_liaison_session
+					SET ended_at = NOW(), end_reason = 'normal'
+					WHERE session_id = $1
+				`, [this._operatorSessionId]);
+			} catch (err) {
+				console.warn("[P846] Failed to mark session as ended:", err);
+			}
+		}
+
+		// Mark agency as dormant
+		try {
+			await pool.query(
+				`UPDATE roadmap.agency SET status = 'dormant' WHERE agency_id = 'operator'`,
+			);
+		} catch (err) {
+			console.warn("[P846] Failed to mark agency as dormant:", err);
+		}
+
+		// Close notify relay client
+		if (this._operatorNotifyClient) {
+			try {
+				await this._operatorNotifyClient.query(`UNLISTEN "a2a_msg_operator"`);
+			} catch {}
+			try {
+				await this._operatorNotifyClient.end();
+			} catch {}
+			this._operatorNotifyClient = null;
+		}
+
+		console.log("[P846] Operator agency shutdown complete");
+	}
+
+	// P846: Start listening for operator messages via pg_notify
+	private async _startOperatorNotifyRelay(): Promise<void> {
+		try {
+			const { Client } = await import("pg");
+			const notifyClient = new Client({ connectionString: process.env.DATABASE_URL });
+			await notifyClient.connect();
+			await notifyClient.query(`LISTEN "a2a_msg_operator"`);
+
+			notifyClient.on("notification", (msg) => {
+				if (msg.channel !== "a2a_msg_operator") return;
+				try {
+					const payload = JSON.parse(msg.payload ?? "{}");
+					const frame = `event: a2a_message\ndata: ${JSON.stringify(payload)}\n\n`;
+					for (const [, res] of this._operatorSseSessions) {
+						try {
+							res.write(frame);
+						} catch {
+							// Session may have closed, that's okay
+						}
+					}
+				} catch (err) {
+					console.warn("[P846] Error processing notify message:", err);
+				}
+			});
+
+			notifyClient.on("error", (err) => {
+				console.error("[P846] Notify client error:", err.message);
+			});
+
+			this._operatorNotifyClient = notifyClient;
+			console.log("[P846] Operator notify relay started");
+		} catch (err) {
+			console.error("[P846] Failed to start notify relay:", err);
+		}
 	}
 }
