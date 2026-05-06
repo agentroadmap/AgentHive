@@ -1,10 +1,17 @@
 -- Migration 119: Deploy A2A foundation gap (P888)
 --
--- Background: P199/P833 are marked COMPLETE in roadmap.proposal but neither the
--- per-agent pg_notify trigger nor the message_ledger.nonce column was actually
--- deployed to hiveCentral. Migrations 096/097 in database/migrations/ are not
--- in the directory the runner scans (database/ddl/), and ddl/v4/055 is a
--- different (and equally undeployed) design. As a result:
+-- Lives in scripts/migrations/ — the canonical migration path post-P753 A6
+-- cutover (commit 6725408d). database/migrations/ is LEGACY; do not add new
+-- migrations there.
+--
+-- Background: P199/P833 are marked COMPLETE in roadmap.proposal but neither
+-- the per-agent pg_notify trigger nor the message_ledger.nonce column was
+-- actually deployed to hiveCentral. P833's foundation migration
+-- (scripts/migrations/100-p833-a2a-messaging-foundation.sql) added
+-- correlation_id, sig_verified, provider_sig, provider_sig_salt — but did
+-- not add `nonce` and did not deploy `fn_a2a_message_notify`. The two
+-- never-applied attempts (database/migrations/096, database/ddl/v4/055)
+-- live in directories that no runner scans. As a result:
 --
 --   1. msg_send fails: pg-handlers.ts:281 does
 --        INSERT INTO roadmap.message_ledger ... RETURNING id, nonce, created_at
