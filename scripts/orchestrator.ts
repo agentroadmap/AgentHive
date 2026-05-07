@@ -66,6 +66,8 @@ const logger = {
 
 // P266: graceful-shutdown bookkeeping. New dispatches are refused once
 // `stopping` is true; in-flight ones are awaited (bounded) before exit.
+// (P903 phase 4 will move this into Orchestrator.stopping; until then the
+// legacy dispatch helpers below own their own copy.)
 let stopping = false;
 const inFlight = new Set<Promise<unknown>>();
 function trackInFlight<T>(p: Promise<T>): Promise<T> {
@@ -1297,7 +1299,7 @@ async function dispatchAgent(
 }
 
 // Handle state change and dispatch agents
-async function handleStateChange(proposalId: string, newState: string) {
+export async function handleStateChange(proposalId: string, newState: string) {
 	const normalizedState = normalizeState(newState);
 
 	const phase = STATE_TO_PHASE[normalizedState] || "design";
@@ -1732,7 +1734,7 @@ async function claimImplicitGateReady(
 	return rows;
 }
 
-async function dispatchImplicitGate(
+export async function dispatchImplicitGate(
 	proposalId: number,
 	reason: string,
 ): Promise<void> {
@@ -2103,7 +2105,7 @@ async function dispatchImplicitGate(
 	}
 }
 
-async function drainImplicitGateReady(
+export async function drainImplicitGateReady(
 	reason: string,
 	limit = 5,
 ): Promise<void> {
@@ -2341,7 +2343,7 @@ Without set_maturity=mature, the gate will not re-run and your work remains invi
 	}
 }
 
-async function drainEnhancementRevisions(
+export async function drainEnhancementRevisions(
 	reason: string,
 	limit = 4,
 ): Promise<void> {
@@ -2396,7 +2398,7 @@ let offerReapInFlight = false;
 
 // P611: backstop reconciler — catches any gate advances that the AFTER INSERT trigger
 // missed (e.g., trigger disabled, cross-transaction race, or manual GDL INSERT).
-async function reconcileStrandedAdvances(
+export async function reconcileStrandedAdvances(
 	pool: ReturnType<typeof getPool>,
 ): Promise<void> {
 	const stranded = await pool.query(`

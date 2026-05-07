@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg";
 import { closePool, getPool, query } from "../../infra/postgres/pool.ts";
+import { pulseHeartbeat } from "../../infra/pulse/heartbeat.ts";
 import { reapStaleRows } from "../pipeline/reap-stale-rows.ts";
 import { enqueueNotification } from "../notifications/enqueue.ts";
 import { getUnlockedGateQueue } from "../proposal/gate-scanner-v2.ts";
@@ -16,6 +17,19 @@ import {
 	buildTaskPrompt,
 	fetchProposalDetail,
 } from "./readiness-resolver.ts";
+// P903 phase 3: import legacy dispatch entry points so start() can wire LISTEN
+// + 5 timers to them without a verbatim body move yet. P902-D will progressively
+// pull these implementations into class methods. Phase 4 (shim cutover) requires
+// these functions to live in a non-cyclic module — a pre-Phase-4 commit moves
+// them to src/core/orchestration/legacy-dispatch.ts before the import direction
+// flips.
+import {
+	dispatchImplicitGate,
+	drainEnhancementRevisions,
+	drainImplicitGateReady,
+	handleStateChange,
+	reconcileStrandedAdvances,
+} from "../../../scripts/orchestrator.ts";
 
 /**
  * Unified Agent Orchestrator
@@ -71,6 +85,23 @@ const DEFAULT_SHUTDOWN_DRAIN_MS = Number(
 /** Notify channels the orchestrator listens on for dispatch wake-ups. */
 const GATE_READY_CHANNEL = "proposal_gate_ready";
 const MATURITY_CHANGED_CHANNEL = "proposal_maturity_changed";
+
+/** Whether the 2-minute state-change poll fallback is enabled (env-driven). */
+const ENABLE_POLLING = process.env.AGENTHIVE_ORCHESTRATOR_POLL === "1";
+
+/** Implicit gate poll interval in ms (set 0 to disable). */
+const IMPLICIT_GATE_POLL_INTERVAL_MS = Number(
+	process.env.AGENTHIVE_IMPLICIT_GATE_POLL_MS ?? 30_000,
+);
+
+/** Enhancer-revise autonomous loop interval (90 s legacy default). */
+const ENHANCER_REVISE_INTERVAL_MS = 90_000;
+
+/** P611 stranded-advance reconciler interval (30 s legacy default). */
+const RECONCILER_INTERVAL_MS = 30_000;
+
+/** Observability heartbeat interval (60 s legacy default). */
+const HEARTBEAT_INTERVAL_MS = 60_000;
 
 export interface OrchestratorConfig {
 	/** Worktree used for liaison agent spawns (Tier 1 stall escalation). */
@@ -153,21 +184,161 @@ export class Orchestrator {
 	 * Start the orchestrator: boot maintenance, register notify handlers, schedule
 	 * timers. Idempotent — calling twice is a no-op.
 	 *
-	 * P902-A note: this method currently runs only the maintenance ticks. Phase 3
-	 * of P903 wires the LISTEN client and the five legacy poll timers. Phase 2
-	 * moves the legacy dispatch/poll bodies into class methods that those timers
-	 * call. Until then, start() is functionally equivalent to startMaintenance().
+	 * Behavior parity with the legacy main() in scripts/orchestrator.ts:
+	 *   - Boot: reapStaleRows + bootCancelPokeAttempts (via bootMaintenance).
+	 *   - LISTEN proposal_gate_ready + proposal_maturity_changed; route through
+	 *     onNotification().
+	 *   - Schedule maintenance ticks (offer reaper 60s, poke watchdog 60s).
+	 *   - Schedule 5 legacy poll timers (2-min state poll if AGENTHIVE_ORCHESTRATOR_POLL=1,
+	 *     30s implicit gate poll if AGENTHIVE_IMPLICIT_GATE_POLL_MS>0, 90s enhancer-revise,
+	 *     30s P611 reconciler, 60s heartbeat).
+	 *
+	 * Dispatch bodies live in scripts/orchestrator.ts as exported functions for
+	 * now (P903 phase 2); P902-D progressively pulls them into class methods.
 	 */
 	async start(): Promise<void> {
 		if (this.started) return;
 		this.started = true;
 		this.stopping = false;
+
 		await this.bootMaintenance();
 		this.startMaintenance();
-		// TODO(P903 Phase 3): connect LISTEN client for proposal_gate_ready +
-		// proposal_maturity_changed; schedule 2-min state poll, 30s implicit gate
-		// poll, 90s enhancer-revise loop, 30s P611 reconciler, 60s heartbeat.
-		console.log("[Orchestrator] started (lifecycle shell — Phase 1)");
+
+		// Connect LISTEN client and register notification handler.
+		const pool = getPool();
+		this.listenClient = await pool.connect();
+		this.listenClient.on(
+			"notification",
+			(msg: { channel: string; payload?: string }) => {
+				if (this.stopping || !msg.payload) return;
+				void this.onNotification(msg.channel, msg.payload);
+			},
+		);
+		await this.listenClient.query(`LISTEN ${GATE_READY_CHANNEL}`);
+		await this.listenClient.query(`LISTEN ${MATURITY_CHANGED_CHANNEL}`);
+		console.log(
+			`[Orchestrator] LISTEN registered: ${GATE_READY_CHANNEL}, ${MATURITY_CHANGED_CHANNEL}`,
+		);
+
+		// Schedule the five legacy poll timers. Each is parity with the
+		// scripts/orchestrator.ts main() interval; toggles preserved.
+		if (ENABLE_POLLING) {
+			this.pollTimers.set(
+				"state-change",
+				setInterval(() => this._statePollTick(), 2 * 60 * 1000),
+			);
+			console.log("[Orchestrator] 2-min state-change polling enabled");
+		} else {
+			console.log(
+				"[Orchestrator] state-change polling disabled (AGENTHIVE_ORCHESTRATOR_POLL!=1)",
+			);
+		}
+
+		if (IMPLICIT_GATE_POLL_INTERVAL_MS > 0) {
+			// Initial drain at boot (matches legacy line 2604).
+			void this.trackInFlight(
+				drainImplicitGateReady("startup", 5).catch((err) =>
+					console.error("[Orchestrator] startup drain failed:", err),
+				),
+			);
+			this.pollTimers.set(
+				"implicit-gate",
+				setInterval(() => {
+					if (this.stopping) return;
+					void this.trackInFlight(
+						drainImplicitGateReady("implicit-gate-poll", 5).catch((err) =>
+							console.error("[Orchestrator] implicit gate poll failed:", err),
+						),
+					);
+				}, IMPLICIT_GATE_POLL_INTERVAL_MS),
+			);
+			console.log(
+				`[Orchestrator] implicit gate polling every ${IMPLICIT_GATE_POLL_INTERVAL_MS}ms`,
+			);
+		}
+
+		this.pollTimers.set(
+			"enhancer-revise",
+			setInterval(() => {
+				if (this.stopping) return;
+				void this.trackInFlight(
+					drainEnhancementRevisions("enhancer-revise-loop", 4).catch((err) =>
+						console.error("[Orchestrator] enhancer-revise failed:", err),
+					),
+				);
+			}, ENHANCER_REVISE_INTERVAL_MS),
+		);
+
+		this.pollTimers.set(
+			"reconciler",
+			setInterval(() => {
+				if (this.stopping) return;
+				void this.trackInFlight(
+					reconcileStrandedAdvances(pool).catch((err) =>
+						console.error("[Orchestrator] reconciler failed:", err),
+					),
+				);
+			}, RECONCILER_INTERVAL_MS),
+		);
+
+		this.pollTimers.set(
+			"heartbeat",
+			setInterval(() => {
+				void pulseHeartbeat("orchestrator", {
+					currentTask: this.stopping ? "stopping" : "running",
+					metadata: { in_flight: this.inFlight.size },
+				}).catch((err) =>
+					console.error("[Orchestrator] heartbeat failed:", err),
+				);
+			}, HEARTBEAT_INTERVAL_MS),
+		);
+
+		console.log("[Orchestrator] started");
+	}
+
+	/**
+	 * 2-minute state-change poll fallback (enabled by AGENTHIVE_ORCHESTRATOR_POLL=1).
+	 *
+	 * Mirrors scripts/orchestrator.ts main() polling block: finds workflows that
+	 * need an agent, excluding proposals that already have running agent_runs or
+	 * alive squad_dispatch. Calls handleStateChange for each.
+	 */
+	private async _statePollTick(): Promise<void> {
+		if (this.stopping) return;
+		try {
+			const result = await query<{
+				id: number;
+				proposal_id: number;
+				current_stage: string;
+			}>(
+				`SELECT w.id, w.proposal_id, w.current_stage
+				   FROM roadmap.workflows w
+				   JOIN roadmap_proposal.proposal p ON p.id = w.proposal_id
+				  WHERE w.completed_at IS NULL
+				    AND p.maturity IN ('new', 'active')
+				    AND p.gate_scanner_paused = false
+				    AND NOT EXISTS (
+				      SELECT 1 FROM roadmap_workforce.agent_runs ar
+				       WHERE ar.proposal_id = w.proposal_id
+				         AND ar.status = 'running'
+				    )
+				    AND NOT EXISTS (
+				      SELECT 1 FROM roadmap_workforce.squad_dispatch sd
+				       WHERE sd.proposal_id = w.proposal_id
+				         AND sd.dispatch_status IN ('open','assigned','active','blocked')
+				    )
+				  ORDER BY w.started_at ASC
+				  LIMIT 5`,
+			);
+			for (const wf of result.rows) {
+				if (this.stopping) return;
+				void this.trackInFlight(
+					handleStateChange(String(wf.proposal_id), wf.current_stage),
+				);
+			}
+		} catch (err) {
+			console.error("[Orchestrator] state poll failed:", err);
+		}
 	}
 
 	/**
@@ -222,19 +393,56 @@ export class Orchestrator {
 	/**
 	 * Route a Postgres notification to the appropriate dispatch path.
 	 *
-	 * P902-A note: routing logic is wired in Phase 3 of P903. Currently this is
-	 * a stub that logs unknown channels and skips known ones until the legacy
-	 * `handleStateChange` / `dispatchImplicitGate` bodies move into class methods.
+	 * Mirrors scripts/orchestrator.ts main() notification handler at line 2491:
+	 *   - proposal_gate_ready  → dispatchImplicitGate(proposal_id)
+	 *   - proposal_maturity_changed → resolve workflow, then handleStateChange
+	 *
+	 * Both wrapped in trackInFlight so {@link stop} can drain them.
 	 */
 	async onNotification(channel: string, payload?: string): Promise<void> {
-		void payload;
+		if (this.stopping || !payload) return;
 		if (
 			channel !== GATE_READY_CHANNEL &&
 			channel !== MATURITY_CHANGED_CHANNEL
 		) {
 			return;
 		}
-		// TODO(P903 Phase 3): dispatch to scanQueues / handleStateChange.
+		try {
+			const data = JSON.parse(payload) as {
+				proposal_id?: number | string;
+				id?: number | string;
+			};
+
+			if (channel === GATE_READY_CHANNEL) {
+				const pid = Number(data.proposal_id ?? data.id);
+				if (Number.isFinite(pid)) {
+					await this.trackInFlight(
+						dispatchImplicitGate(pid, "notify:proposal_gate_ready"),
+					);
+				}
+				return;
+			}
+
+			// proposal_maturity_changed: resolve current workflow stage.
+			const proposalId = data.proposal_id ?? data.id;
+			if (!proposalId) return;
+			const result = await query<{
+				id: number;
+				proposal_id: number;
+				current_stage: string;
+			}>(
+				"SELECT id, proposal_id, current_stage FROM roadmap.workflows WHERE proposal_id = $1 ORDER BY started_at DESC LIMIT 1",
+				[proposalId],
+			);
+			if (result.rows.length > 0) {
+				const wf = result.rows[0];
+				await this.trackInFlight(
+					handleStateChange(String(wf.proposal_id), wf.current_stage),
+				);
+			}
+		} catch (err) {
+			console.error("[Orchestrator] notification handler failed:", err);
+		}
 	}
 
 	/**
