@@ -25,10 +25,25 @@ import {
 	endLiaisonSession,
 } from "../src/infra/agency/liaison-service.ts";
 import { checkAndMarkDormant } from "../src/infra/agency/liaison-service.ts";
+import {
+	runLiaisonAgent,
+	spawnCliCapture,
+	type LiaisonAgentHandle,
+	type IncomingMessage,
+} from "../src/infra/agency/liaison-agent.ts";
 import { loadStateNames } from "../src/core/workflow/state-names.ts";
 
 const agentIdentity =
 	process.env.AGENTHIVE_AGENT_IDENTITY ?? `copilot/agency-${hostname()}`;
+const copilotBin = process.env.COPILOT_BIN ?? "copilot";
+
+function buildCopilotPrompt(msg: IncomingMessage): string {
+	const systemContext =
+		`You are ${agentIdentity}, a GitHub Copilot liaison agent in the AgentHive system. ` +
+		`You received a ${msg.message_type} message from ${msg.from_agent}. ` +
+		`Reply concisely. If it's a task, acknowledge and outline your approach in 2-3 sentences.`;
+	return `${systemContext}\n\n---\nIncoming message:\n${msg.message_content}`;
+}
 
 const offerProvider = new OfferProvider({
 	agentIdentity,
@@ -70,6 +85,7 @@ const offerProvider = new OfferProvider({
 let sessionId: string | null = null;
 let heartbeatTimer: NodeJS.Timeout | null = null;
 let watchdogTimer: NodeJS.Timeout | null = null;
+let liaisonHandle: LiaisonAgentHandle | null = null;
 
 async function main() {
 	console.log(`[CopilotAgency] Starting as ${agentIdentity} ...`);
@@ -103,6 +119,25 @@ async function main() {
 		});
 		sessionId = session_id;
 		console.log(`[CopilotAgency] Registered liaison session: ${sessionId}`);
+
+		// P888 follow-up: A2A inbox/reply loop in-process. Without this,
+		// nothing answers messages addressed to copilot/agency-* and remote
+		// senders see "no reply" — the same hole that was hiding behind the
+		// pre-P888 silent NOTIFY failure.
+		try {
+			liaisonHandle = await runLiaisonAgent({
+				identity: agentIdentity,
+				loggerPrefix: `[CopilotAgency:liaison]`,
+				invokeLlm: (msg) =>
+					spawnCliCapture(copilotBin, [
+						"-p",
+						buildCopilotPrompt(msg),
+						"--yolo",
+					]),
+			});
+		} catch (err) {
+			console.error("[CopilotAgency] runLiaisonAgent failed (non-fatal):", err);
+		}
 
 		// Start heartbeat timer (every 30s)
 		heartbeatTimer = setInterval(async () => {
@@ -144,6 +179,15 @@ async function main() {
 			// Clear timers
 			if (heartbeatTimer) clearInterval(heartbeatTimer);
 			if (watchdogTimer) clearInterval(watchdogTimer);
+
+			// Stop liaison-agent listener
+			if (liaisonHandle) {
+				try {
+					await liaisonHandle.stop();
+				} catch (err) {
+					console.error("[CopilotAgency] liaison stop error:", err);
+				}
+			}
 
 			// End liaison session
 			if (sessionId) {

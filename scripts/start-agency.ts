@@ -28,10 +28,76 @@ import {
 	endLiaisonSession,
 	checkAndMarkDormant,
 } from "../src/infra/agency/liaison-service.ts";
+import {
+	runLiaisonAgent,
+	spawnCliCapture,
+	type LiaisonAgentHandle,
+	type IncomingMessage,
+	type LlmInvoke,
+} from "../src/infra/agency/liaison-agent.ts";
 import { pulseHeartbeat } from "../src/infra/pulse/heartbeat.ts";
 
 const agentIdentity =
 	process.env.AGENTHIVE_AGENT_IDENTITY ?? `agency-${hostname()}`;
+
+interface LiaisonProviderHandler {
+	bin: string;
+	buildArgs: (prompt: string) => string[];
+	brand: string;
+}
+
+/**
+ * Map provider → (CLI binary, argv builder, brand label for system prompt).
+ * Adding a provider here turns on inbox-reply support for any agency that
+ * resolves to it (start-agency.ts is the generic startup; provider-specific
+ * scripts like start-copilot-agency.ts wire their own handler directly).
+ */
+function resolveLiaisonHandler(provider: string): LiaisonProviderHandler | null {
+	switch (provider) {
+		case "claude":
+			return {
+				bin: process.env.CLAUDE_BIN ?? "claude",
+				buildArgs: (p) => ["--print", p],
+				brand: "Claude",
+			};
+		case "codex":
+			return {
+				bin: process.env.CODEX_BIN ?? "codex",
+				buildArgs: (p) => [
+					"exec",
+					"--dangerously-bypass-approvals-and-sandbox",
+					p,
+				],
+				brand: "Codex",
+			};
+		case "copilot":
+			return {
+				bin: process.env.COPILOT_BIN ?? "copilot",
+				buildArgs: (p) => ["-p", p, "--yolo"],
+				brand: "GitHub Copilot",
+			};
+		default:
+			return null;
+	}
+}
+
+function buildLiaisonPrompt(brand: string, msg: IncomingMessage): string {
+	const systemContext =
+		`You are ${agentIdentity}, a ${brand} liaison agent in the AgentHive system. ` +
+		`You received a ${msg.message_type} message from ${msg.from_agent}. ` +
+		`Reply concisely. If it's a task, acknowledge and outline your approach in 2-3 sentences.`;
+	return `${systemContext}\n\n---\nIncoming message:\n${msg.message_content}`;
+}
+
+function buildLiaisonInvokeLlm(
+	handler: LiaisonProviderHandler,
+): LlmInvoke {
+	return (msg) =>
+		spawnCliCapture(
+			handler.bin,
+			handler.buildArgs(buildLiaisonPrompt(handler.brand, msg)),
+		);
+}
 
 /**
  * Resolve provider from environment or identity prefix.
@@ -150,17 +216,43 @@ async function main() {
 	let sessionId: string | null = null;
 	let heartbeatTimer: NodeJS.Timeout | null = null;
 	let watchdogTimer: NodeJS.Timeout | null = null;
+	let liaisonHandle: LiaisonAgentHandle | null = null;
 	try {
 		const result = await liaisonRegister({
 			agency_id: agentIdentity,
 			display_name: agentIdentity.split("/").slice(-1)[0],
 			provider,
 			host_id: hostname(),
-			capabilities: [provider, "agent-spawner"],
+			capabilities: [provider, "agent-spawner", "messaging"],
 			metadata: { version: "1.0", pid: process.pid },
 		});
 		sessionId = result.session_id;
 		console.log(`[Agency] Registered liaison session: ${sessionId}`);
+
+		// P888 follow-up: start the A2A inbox/reply loop in this same process.
+		// liaisonRegister is a DB write; runLiaisonAgent owns the long-running
+		// listener. They live together so an agency that registers always has
+		// a process answering its inbox. The CLI handler dispatches by the
+		// resolved provider — never default silently to claude when the offer
+		// path will spawn codex/copilot, or replies will lie about who's
+		// answering.
+		const liaisonProviderHandler = resolveLiaisonHandler(provider);
+		if (!liaisonProviderHandler) {
+			console.warn(
+				`[Agency] No liaison-agent CLI handler for provider '${provider}'; ` +
+					`inbox replies disabled. Agency will still claim work offers.`,
+			);
+		} else {
+			try {
+				liaisonHandle = await runLiaisonAgent({
+					identity: agentIdentity,
+					loggerPrefix: `[Agency:liaison(${provider})]`,
+					invokeLlm: buildLiaisonInvokeLlm(liaisonProviderHandler),
+				});
+			} catch (err) {
+				console.error("[Agency] runLiaisonAgent failed (non-fatal):", err);
+			}
+		}
 
 		heartbeatTimer = setInterval(async () => {
 			try {
@@ -196,6 +288,13 @@ async function main() {
 			console.log(`[Agency] ${sig} — draining in-flight claims...`);
 			if (heartbeatTimer) clearInterval(heartbeatTimer);
 			if (watchdogTimer) clearInterval(watchdogTimer);
+			if (liaisonHandle) {
+				try {
+					await liaisonHandle.stop();
+				} catch (err) {
+					console.error("[Agency] liaison stop error:", err);
+				}
+			}
 			if (sessionId) {
 				try {
 					await endLiaisonSession(sessionId, "operator");
