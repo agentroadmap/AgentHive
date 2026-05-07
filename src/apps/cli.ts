@@ -9,6 +9,7 @@ import { createInterface } from "node:readline/promises";
 import * as clack from "@clack/prompts";
 import { Command } from "commander";
 import { getDaemonUrl } from "../shared/runtime/endpoints.ts";
+import { loadRuntimeEnvFile } from "../shared/runtime/config.ts";
 import { RfcStates } from "../core/workflow/state-names.ts";
 import { resolveBoardDataSource } from "./board-source.ts";
 import { initializeProject } from "../core/infrastructure/init.ts";
@@ -4359,6 +4360,10 @@ async function handleBoardView(options: {
 	const statuses = config?.statuses || [];
 
 	const source = resolveBoardDataSource(options.source, config);
+
+	if (source === "postgres") {
+		await loadRuntimeEnvFile();
+	}
 
 	if (options.plain || !process.stdout.isTTY) {
 		const proposals =

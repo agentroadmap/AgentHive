@@ -1,13 +1,17 @@
 #!/usr/bin/env node
 import { FileSystem } from "../src/infra/file-system/operations.ts";
 import { initPoolFromConfig, query } from "../src/infra/postgres/pool.ts";
+import {
+	DEFAULT_ENV_FILE_PATH,
+	loadRuntimeEnvFile,
+} from "../src/shared/runtime/config.ts";
 
 type BoardRow = {
 	display_id: string;
 	title: string;
 	status: string;
 	type: string;
-	maturity: Record<string, string> | null;
+	maturity: string | Record<string, string> | null;
 	queue_position: number | null;
 	ac_total: number;
 	ac_pass: number;
@@ -16,22 +20,35 @@ type BoardRow = {
 	discussion_count: number;
 };
 
+export const BOARD_ENV_FILE_PATH = DEFAULT_ENV_FILE_PATH;
+
 const MATURITY_ICONS: Record<string, string> = {
-	New: "🌱",
-	Active: "📐",
-	Mature: "🧪",
-	Obsolete: "🗑️",
+	new: "🌱",
+	active: "📐",
+	mature: "🧪",
+	obsolete: "🗑️",
 };
 
-function getMaturityIcon(
-	maturity: Record<string, string> | null,
+export async function loadBoardEnv(
+	envFilePath = BOARD_ENV_FILE_PATH,
+): Promise<void> {
+	await loadRuntimeEnvFile(envFilePath);
+}
+
+export function getMaturityIcon(
+	maturity: string | Record<string, string> | null,
 	status: string,
 ): string {
-	if (!maturity || typeof maturity !== "object") {
+	if (!maturity) {
 		return "📋";
 	}
-	const label = maturity[status] ?? Object.values(maturity)[0];
-	return label ? (MATURITY_ICONS[label] ?? "📋") : "📋";
+	const label =
+		typeof maturity === "string"
+			? maturity
+			: (maturity[status] ?? Object.values(maturity)[0]);
+	const normalizedLabel =
+		typeof label === "string" ? label.trim().toLowerCase() : "";
+	return normalizedLabel ? (MATURITY_ICONS[normalizedLabel] ?? "📋") : "📋";
 }
 
 async function main() {
@@ -43,6 +60,7 @@ async function main() {
 		);
 	}
 
+	await loadBoardEnv();
 	initPoolFromConfig(config.database);
 
 	const { rows } = await query<BoardRow>(
@@ -132,11 +150,10 @@ async function main() {
 				? ` review:${row.latest_review_verdict}`
 				: "";
 			const decisionText = row.latest_decision
-				? ` dec:${row.latest_decision.length > 30 ? row.latest_decision.slice(0, 30) + "…" : row.latest_decision}`
+				? ` dec:${row.latest_decision.length > 30 ? `${row.latest_decision.slice(0, 30)}…` : row.latest_decision}`
 				: "";
-			const discText = row.discussion_count > 0
-				? ` disc:${row.discussion_count}`
-				: "";
+			const discText =
+				row.discussion_count > 0 ? ` disc:${row.discussion_count}` : "";
 			console.log(
 				`  ${maturityIcon} ${row.display_id} [${row.type}]${queueText}${acText}${reviewText}${decisionText}${discText} — ${row.title}`,
 			);
@@ -159,10 +176,12 @@ async function main() {
 	console.log("");
 }
 
-main().catch((error) => {
-	console.error(
-		"Failed to generate board:",
-		error instanceof Error ? error.message : String(error),
-	);
-	process.exit(1);
-});
+if (import.meta.main) {
+	main().catch((error) => {
+		console.error(
+			"Failed to generate board:",
+			error instanceof Error ? error.message : String(error),
+		);
+		process.exit(1);
+	});
+}

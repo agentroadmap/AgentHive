@@ -81,6 +81,7 @@ import {
 	getValidStatuses as resolveValidStatuses,
 } from "../utils/status.ts";
 import { executeStatusCallback } from "../utils/status-callback.ts";
+import { loadRuntimeEnvFile } from "../shared/runtime/config.ts";
 import {
 	migrateConfig,
 	needsMigration,
@@ -1188,6 +1189,7 @@ export class Core {
 	/** Ensure Postgres pool is initialised — needed when CLI has no PGPASSWORD env from systemd. */
 	private async ensurePgPool(): Promise<void> {
 		try {
+			await loadRuntimeEnvFile();
 			const config = await this.filesystem.loadConfig();
 			if (config?.database) {
 				pgPool.initPoolFromConfig(config.database);

@@ -117,6 +117,29 @@ export interface ConfigAuditSnapshot {
 	tenantDsn: TenantDsnAuditEntry[];
 }
 
+export const DEFAULT_ENV_FILE_PATH = "/etc/agenthive/env";
+
+export async function loadRuntimeEnvFile(
+	filePath = DEFAULT_ENV_FILE_PATH,
+): Promise<void> {
+	try {
+		const { readFileSync } = await import("node:fs");
+		const content = readFileSync(filePath, "utf-8");
+		for (const line of content.split("\n")) {
+			const trimmed = line.trim();
+			if (!trimmed || trimmed.startsWith("#")) continue;
+			const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(trimmed);
+			if (!match) continue;
+			const [, key, value] = match;
+			if (!process.env[key]) {
+				process.env[key] = value;
+			}
+		}
+	} catch {
+		// File not found or not readable — continue without it
+	}
+}
+
 /**
  * Internal cache for resolved config values.
  */
@@ -175,7 +198,7 @@ class ConfigResolver {
 	}): string | undefined {
 		if (process.env.PGPASSWORD) return process.env.PGPASSWORD;
 		const pgpassPath = opts.pgpassPath ??
-			(process.env.PGPASSFILE || ((process.env.HOME || "") + "/.pgpass"));
+			(process.env.PGPASSFILE || `${process.env.HOME || ""}/.pgpass`);
 		return ConfigResolver.parsePgpassFile(pgpassPath, opts.host, opts.port, opts.database, opts.user);
 	}
 
@@ -191,34 +214,11 @@ class ConfigResolver {
 		this.pool = opts.pool || null;
 
 		if (opts.envFilePath) {
-			await this.loadEnvFile(opts.envFilePath);
+			await loadRuntimeEnvFile(opts.envFilePath);
 		}
 
 		if (this.pool) {
 			await this.setupNotifyListener();
-		}
-	}
-
-	/**
-	 * Load environment variables from a file (e.g., /etc/agenthive/env).
-	 */
-	private async loadEnvFile(filePath: string): Promise<void> {
-		try {
-			const { readFileSync } = await import("node:fs");
-			const content = readFileSync(filePath, "utf-8");
-			for (const line of content.split("\n")) {
-				const trimmed = line.trim();
-				if (!trimmed || trimmed.startsWith("#")) continue;
-				const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(trimmed);
-				if (match) {
-					const [, key, value] = match;
-					if (!process.env[key]) {
-						process.env[key] = value;
-					}
-				}
-			}
-		} catch {
-			// File not found or not readable — continue without it
 		}
 	}
 
