@@ -1,228 +1,30 @@
 /**
- * Copilot Agency — OfferProvider for the GitHub Copilot CLI.
+ * Copilot Agency Runtime — provider-pinned wrapper around start-agency.ts.
  *
- * Registers as "copilot/agency-gary" in agent_registry and listens on the
- * work_offers Postgres channel. When the orchestrator posts a job
- * (P754 retired the gate-pipeline), this process races to claim it
- * and spawns:
+ * P912 AC-5: this file no longer duplicates registry/session/heartbeat/hub
+ * code. It is a small shim that pins AGENTHIVE_AGENT_PROVIDER=copilot
+ * (and the Copilot identity default) and then runs the generic start-agency
+ * runtime. Adding a third provider follows the same pattern: a small env
+ * shim, no fresh OfferProvider instantiation, no per-provider liaison
+ * registration block.
  *
- *   copilot -p "<task>" --yolo --model <model>
- *
- * The binary path comes from model_routes.cli_path (DB), so no path is
- * hardcoded here or in the service unit.
+ * Operators can equivalently run `start-agency.ts` directly with the same
+ * env vars set externally — this script exists only so an existing systemd
+ * unit pinned to `start-copilot-agency.ts` continues to work without an
+ * env-file edit.
  *
  * Usage:
  *   node --import jiti/register scripts/start-copilot-agency.ts
  */
 
 import { hostname } from "node:os";
-import { spawnAgent, resolveActiveRouteProvider } from "../src/core/orchestration/agent-spawner.ts";
-import { OfferProvider } from "../src/core/pipeline/offer-provider.ts";
-import { closePool, getPool } from "../src/infra/postgres/pool.ts";
-import {
-	liaisonRegister,
-	liaisonHeartbeat,
-	endLiaisonSession,
-} from "../src/infra/agency/liaison-service.ts";
-import { checkAndMarkDormant } from "../src/infra/agency/liaison-service.ts";
-import {
-	runLiaisonAgent,
-	spawnCliCapture,
-	type LiaisonAgentHandle,
-	type IncomingMessage,
-} from "../src/infra/agency/liaison-agent.ts";
-import { loadStateNames } from "../src/core/workflow/state-names.ts";
 
-const agentIdentity =
-	process.env.AGENTHIVE_AGENT_IDENTITY ?? `copilot/agency-${hostname()}`;
-const copilotBin = process.env.COPILOT_BIN ?? "copilot";
+// Pin Copilot defaults BEFORE the generic runtime imports anything that
+// reads these. The generic runtime falls back to the same identity logic if
+// AGENTHIVE_AGENT_IDENTITY is unset, so this default is just for backwards
+// compatibility with the old per-provider script's hostname-based fallback.
+process.env.AGENTHIVE_AGENT_PROVIDER ??= "copilot";
+process.env.AGENTHIVE_AGENT_IDENTITY ??= `copilot/agency-${hostname()}`;
 
-function buildCopilotPrompt(msg: IncomingMessage): string {
-	const systemContext =
-		`You are ${agentIdentity}, a GitHub Copilot liaison agent in the AgentHive system. ` +
-		`You received a ${msg.message_type} message from ${msg.from_agent}. ` +
-		`Reply concisely. If it's a task, acknowledge and outline your approach in 2-3 sentences.`;
-	return `${systemContext}\n\n---\nIncoming message:\n${msg.message_content}`;
-}
-
-const offerProvider = new OfferProvider({
-	agentIdentity,
-	leaseTtlSeconds: Number(process.env.AGENTHIVE_LEASE_TTL_SECONDS ?? "60"),
-	renewIntervalMs: Number(process.env.AGENTHIVE_RENEW_INTERVAL_MS ?? "15000"),
-	pollIntervalMs: Number(process.env.AGENTHIVE_OFFER_POLL_MS ?? "20000"),
-	maxConcurrent: Number(process.env.AGENTHIVE_MAX_CONCURRENT ?? "2"),
-	connectListener: async () => getPool().connect(),
-	spawnFn: async (req) => {
-		// Extract provider prefix from identity (e.g. "copilot/agency-gary" → "copilot")
-		// Falls back to active DB route if identity prefix is not a known provider.
-		const identityPrefix = agentIdentity.split("/")[0];
-		const provider = identityPrefix || (await resolveActiveRouteProvider()) || "copilot";
-		// pg returns bigint as a JS string; coerce so agent_runs.proposal_id
-		// gets populated. Without this every dispatched run lands as NULL
-		// proposal_id and breaks downstream filters.
-		const proposalIdNum =
-			req.proposalId === undefined || req.proposalId === null
-				? undefined
-				: typeof req.proposalId === "number"
-					? req.proposalId
-					: Number(req.proposalId);
-		return spawnAgent({
-			worktree: req.worktree,
-			task: req.task,
-			proposalId: Number.isFinite(proposalIdNum) ? proposalIdNum : undefined,
-			stage: req.stage,
-			model: req.model,
-			timeoutMs: req.timeoutMs,
-			agentLabel: req.agentLabel,
-			provider: provider as any,
-			// P466: forward warm-boot briefing id so the child can call
-			// `briefing_load(<id>)` on boot and run with full context.
-			briefingId: req.briefingId,
-		});
-	},
-});
-
-let sessionId: string | null = null;
-let heartbeatTimer: NodeJS.Timeout | null = null;
-let watchdogTimer: NodeJS.Timeout | null = null;
-let liaisonHandle: LiaisonAgentHandle | null = null;
-
-async function main() {
-	console.log(`[CopilotAgency] Starting as ${agentIdentity} ...`);
-
-	const pool = getPool();
-	await pool.query("SELECT 1");
-	console.log("[CopilotAgency] Database connection verified");
-
-	// Load the per-process StateNames registry. spawnAgent uses RfcStates
-	// (e.g. RfcStates.COMPLETE) when assembling the proposal context package.
-	// Without this, every spawn throws "[StateNames] Registry not loaded".
-	try {
-		await loadStateNames(pool);
-		console.log("[CopilotAgency] State-names registry loaded from database");
-	} catch (err) {
-		console.error("[CopilotAgency] Failed to load state-names registry:", err);
-		// Continue: spawnAgent's downstream calls will fail loudly, but the
-		// agency stays up so the operator can fix the registry.
-	}
-
-	// Register agency with liaison service (P464)
-	try {
-		const { display_name } = parseAgentIdentity(agentIdentity);
-		const { session_id } = await liaisonRegister({
-			agency_id: agentIdentity,
-			display_name,
-			provider: "copilot",
-			host_id: hostname(),
-			capabilities: ["copilot", "agent-spawner"],
-			metadata: { version: "1.0", pid: process.pid },
-		});
-		sessionId = session_id;
-		console.log(`[CopilotAgency] Registered liaison session: ${sessionId}`);
-
-		// P888 follow-up: A2A inbox/reply loop in-process. Without this,
-		// nothing answers messages addressed to copilot/agency-* and remote
-		// senders see "no reply" — the same hole that was hiding behind the
-		// pre-P888 silent NOTIFY failure.
-		try {
-			liaisonHandle = await runLiaisonAgent({
-				identity: agentIdentity,
-				loggerPrefix: `[CopilotAgency:liaison]`,
-				invokeLlm: (msg) =>
-					spawnCliCapture(copilotBin, [
-						"-p",
-						buildCopilotPrompt(msg),
-						"--yolo",
-					]),
-			});
-		} catch (err) {
-			console.error("[CopilotAgency] runLiaisonAgent failed (non-fatal):", err);
-		}
-
-		// Start heartbeat timer (every 30s)
-		heartbeatTimer = setInterval(async () => {
-			try {
-				const result = await liaisonHeartbeat({
-					session_id: sessionId!,
-					status: "active",
-				});
-				if (!result.success) {
-					console.warn(
-						`[CopilotAgency] Heartbeat unsuccessful for session ${sessionId}`,
-					);
-				}
-			} catch (err) {
-				console.error("[CopilotAgency] Heartbeat error:", err);
-			}
-		}, 30_000);
-
-		// Start dormancy sweep timer (every 60s) — mark agencies silent > 90s as dormant
-		watchdogTimer = setInterval(async () => {
-			try {
-				const dormantCount = await checkAndMarkDormant();
-				if (dormantCount > 0) {
-					console.log(`[CopilotAgency] Dormancy sweep: ${dormantCount} marked dormant`);
-				}
-			} catch (err) {
-				console.error("[CopilotAgency] Dormancy sweep error:", err);
-			}
-		}, 60_000);
-	} catch (err) {
-		console.error("[CopilotAgency] Failed to register liaison session:", err);
-		// Continue anyway; legacy behavior is fallback
-	}
-
-	for (const sig of ["SIGTERM", "SIGINT"] as const) {
-		process.on(sig, async () => {
-			console.log(`[CopilotAgency] ${sig} — draining in-flight claims...`);
-
-			// Clear timers
-			if (heartbeatTimer) clearInterval(heartbeatTimer);
-			if (watchdogTimer) clearInterval(watchdogTimer);
-
-			// Stop liaison-agent listener
-			if (liaisonHandle) {
-				try {
-					await liaisonHandle.stop();
-				} catch (err) {
-					console.error("[CopilotAgency] liaison stop error:", err);
-				}
-			}
-
-			// End liaison session
-			if (sessionId) {
-				try {
-					await endLiaisonSession(sessionId, "operator");
-				} catch (err) {
-					console.error(
-						`[CopilotAgency] Failed to end liaison session:`,
-						err,
-					);
-				}
-			}
-
-			await offerProvider.stop();
-			await offerProvider.waitForIdle(30_000);
-			await closePool();
-			process.exit(0);
-		});
-	}
-
-	await offerProvider.run();
-	console.log(`[CopilotAgency] ${agentIdentity} listening for work offers`);
-}
-
-/**
- * Parse agent identity "copilot/agency-gary" → { display_name: "agency-gary" }
- */
-function parseAgentIdentity(identity: string): { display_name: string } {
-	const parts = identity.split("/");
-	return {
-		display_name: parts[1] || identity,
-	};
-}
-
-main().catch((err) => {
-	console.error("[CopilotAgency] Fatal:", err);
-	process.exit(1);
-});
+// Delegate to the generic runtime. start-agency.ts owns the lifecycle.
+await import("./start-agency.ts");

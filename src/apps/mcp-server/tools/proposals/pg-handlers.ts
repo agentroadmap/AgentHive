@@ -622,7 +622,7 @@ export class PgProposalHandlers {
 						content: [
 							{
 								type: "text",
-								text: `Agency '${args.agent}' is registered but has no active liaison session. Start the liaison process (scripts/start-liaison.ts) before claiming proposals.`,
+								text: `Agency '${args.agent}' is registered but has no active liaison session. Start the agency runtime (scripts/start-agency.ts — invoked via agenthive-${args.agent.split("/")[0] ?? "claude"}-agency.service or equivalent) before claiming proposals; the runtime opens a liaison session and starts the offer_dispatch hub via P912 selfRegisterAgency.`,
 							},
 						],
 					};
