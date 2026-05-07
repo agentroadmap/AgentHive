@@ -1,4 +1,5 @@
-import { getPool, query } from "../../infra/postgres/pool.ts";
+import type { PoolClient } from "pg";
+import { closePool, getPool, query } from "../../infra/postgres/pool.ts";
 import { reapStaleRows } from "../pipeline/reap-stale-rows.ts";
 import { enqueueNotification } from "../notifications/enqueue.ts";
 import { getUnlockedGateQueue } from "../proposal/gate-scanner-v2.ts";
@@ -62,6 +63,15 @@ const DEFAULT_POKE_IDLE_THRESHOLD_MIN = Number(
 );
 const DEFAULT_POKE_STORM_CAP = Number(process.env.POKE_STORM_CAP ?? 10);
 
+/** Drain timeout on stop() — how long to wait for in-flight dispatches before forcing exit. */
+const DEFAULT_SHUTDOWN_DRAIN_MS = Number(
+	process.env.AGENTHIVE_ORCHESTRATOR_DRAIN_MS ?? 240_000,
+);
+
+/** Notify channels the orchestrator listens on for dispatch wake-ups. */
+const GATE_READY_CHANNEL = "proposal_gate_ready";
+const MATURITY_CHANGED_CHANNEL = "proposal_maturity_changed";
+
 export interface OrchestratorConfig {
 	/** Worktree used for liaison agent spawns (Tier 1 stall escalation). */
 	defaultWorktree?: string;
@@ -73,6 +83,8 @@ export interface OrchestratorConfig {
 	pokeIdleThresholdMin?: number;
 	/** Max pokes emitted per watchdog tick (storm cap). */
 	pokeStormCap?: number;
+	/** Drain timeout on stop() in ms (default 240 s). */
+	shutdownDrainMs?: number;
 }
 
 export class Orchestrator {
@@ -80,10 +92,19 @@ export class Orchestrator {
 	private readonly offerReapIntervalMs: number;
 	private readonly pokeWatchdogIntervalMs: number;
 	private readonly pokeOpts: PokeWatchdogOptions;
+	private readonly shutdownDrainMs: number;
 
 	private offerReapTimer: ReturnType<typeof setInterval> | null = null;
 	private pokeWatchdogTimer: ReturnType<typeof setInterval> | null = null;
 	private offerReapInFlight = false;
+
+	// P902-A: lifecycle state for start()/stop().
+	private started = false;
+	private stopping = false;
+	private listenClient: PoolClient | null = null;
+	private readonly pollTimers: Map<string, ReturnType<typeof setInterval>> =
+		new Map();
+	private readonly inFlight: Set<Promise<unknown>> = new Set();
 
 	constructor(config: OrchestratorConfig = {}) {
 		this.defaultWorktree =
@@ -99,6 +120,140 @@ export class Orchestrator {
 				config.pokeIdleThresholdMin ?? DEFAULT_POKE_IDLE_THRESHOLD_MIN,
 			stormCap: config.pokeStormCap ?? DEFAULT_POKE_STORM_CAP,
 		};
+		this.shutdownDrainMs =
+			config.shutdownDrainMs ?? DEFAULT_SHUTDOWN_DRAIN_MS;
+	}
+
+	// ─── Lifecycle (P902-A) ────────────────────────────────────────────────────
+
+	/**
+	 * Track an in-flight dispatch promise so {@link stop} can wait for it.
+	 * Promise removal is scheduled on settle; callers may await the returned
+	 * promise as if `trackInFlight` were transparent.
+	 */
+	private trackInFlight<T>(p: Promise<T>): Promise<T> {
+		this.inFlight.add(p);
+		p.finally(() => this.inFlight.delete(p)).catch(() => {
+			/* swallow — settled promises are removed regardless */
+		});
+		return p;
+	}
+
+	/** Number of dispatch promises currently tracked. */
+	inFlightCount(): number {
+		return this.inFlight.size;
+	}
+
+	/** Whether {@link start} has been called and {@link stop} has not. */
+	isRunning(): boolean {
+		return this.started && !this.stopping;
+	}
+
+	/**
+	 * Start the orchestrator: boot maintenance, register notify handlers, schedule
+	 * timers. Idempotent — calling twice is a no-op.
+	 *
+	 * P902-A note: this method currently runs only the maintenance ticks. Phase 3
+	 * of P903 wires the LISTEN client and the five legacy poll timers. Phase 2
+	 * moves the legacy dispatch/poll bodies into class methods that those timers
+	 * call. Until then, start() is functionally equivalent to startMaintenance().
+	 */
+	async start(): Promise<void> {
+		if (this.started) return;
+		this.started = true;
+		this.stopping = false;
+		await this.bootMaintenance();
+		this.startMaintenance();
+		// TODO(P903 Phase 3): connect LISTEN client for proposal_gate_ready +
+		// proposal_maturity_changed; schedule 2-min state poll, 30s implicit gate
+		// poll, 90s enhancer-revise loop, 30s P611 reconciler, 60s heartbeat.
+		console.log("[Orchestrator] started (lifecycle shell — Phase 1)");
+	}
+
+	/**
+	 * Stop the orchestrator: flag stopping, clear timers, release LISTEN client,
+	 * drain in-flight dispatches up to {@link shutdownDrainMs}.
+	 *
+	 * Resolves once all in-flight promises settle or the drain timeout elapses.
+	 */
+	async stop(): Promise<void> {
+		if (!this.started || this.stopping) return;
+		this.stopping = true;
+
+		this.stopMaintenance();
+		for (const [name, timer] of this.pollTimers) {
+			clearInterval(timer);
+			void name;
+		}
+		this.pollTimers.clear();
+
+		// Release LISTEN client (release(true) destroys the underlying socket so
+		// pool.end() doesn't hang on a long-lived LISTEN connection).
+		if (this.listenClient) {
+			try {
+				this.listenClient.release(true);
+			} catch {
+				/* best-effort */
+			}
+			this.listenClient = null;
+		}
+
+		// Drain in-flight dispatches with a hard ceiling.
+		if (this.inFlight.size > 0) {
+			console.log(
+				`[Orchestrator] draining ${this.inFlight.size} in-flight dispatch(es) (timeout ${this.shutdownDrainMs}ms)…`,
+			);
+			const drain = Promise.allSettled(Array.from(this.inFlight));
+			const timeout = new Promise<void>((resolve) =>
+				setTimeout(resolve, this.shutdownDrainMs).unref(),
+			);
+			await Promise.race([drain, timeout]);
+			if (this.inFlight.size > 0) {
+				console.warn(
+					`[Orchestrator] drain timeout: ${this.inFlight.size} dispatch(es) still in-flight`,
+				);
+			}
+		}
+
+		this.started = false;
+		console.log("[Orchestrator] stopped");
+	}
+
+	/**
+	 * Route a Postgres notification to the appropriate dispatch path.
+	 *
+	 * P902-A note: routing logic is wired in Phase 3 of P903. Currently this is
+	 * a stub that logs unknown channels and skips known ones until the legacy
+	 * `handleStateChange` / `dispatchImplicitGate` bodies move into class methods.
+	 */
+	async onNotification(channel: string, payload?: string): Promise<void> {
+		void payload;
+		if (
+			channel !== GATE_READY_CHANNEL &&
+			channel !== MATURITY_CHANGED_CHANNEL
+		) {
+			return;
+		}
+		// TODO(P903 Phase 3): dispatch to scanQueues / handleStateChange.
+	}
+
+	/**
+	 * Best-effort pool teardown for the shim's signal-handler path. Idempotent.
+	 * Hard-exits at +5s if pool.end() hangs (mirrors legacy entry point).
+	 */
+	async closePoolWithFallback(hardExitMs = 5_000): Promise<void> {
+		const fallback = setTimeout(() => {
+			console.warn(
+				"[Orchestrator] pool.end() did not return; forcing process exit",
+			);
+			process.exit(0);
+		}, hardExitMs);
+		fallback.unref();
+		try {
+			await closePool();
+		} finally {
+			clearTimeout(fallback);
+		}
 	}
 
 	// ─── Maintenance cycle ─────────────────────────────────────────────────────
