@@ -17,19 +17,17 @@ import {
 	buildTaskPrompt,
 	fetchProposalDetail,
 } from "./readiness-resolver.ts";
-// P903 phase 3: import legacy dispatch entry points so start() can wire LISTEN
-// + 5 timers to them without a verbatim body move yet. P902-D will progressively
-// pull these implementations into class methods. Phase 4 (shim cutover) requires
-// these functions to live in a non-cyclic module — a pre-Phase-4 commit moves
-// them to src/core/orchestration/legacy-dispatch.ts before the import direction
-// flips.
+// P903 phase 3+4: legacy dispatch entry points live in legacy-dispatch.ts
+// (extracted from scripts/orchestrator.ts during phase 4 to break the cycle
+// between the shim and the class). P902-D will progressively pull these
+// implementations into class methods.
 import {
 	dispatchImplicitGate,
 	drainEnhancementRevisions,
 	drainImplicitGateReady,
 	handleStateChange,
 	reconcileStrandedAdvances,
-} from "../../../scripts/orchestrator.ts";
+} from "./legacy-dispatch.ts";
 
 /**
  * Unified Agent Orchestrator
