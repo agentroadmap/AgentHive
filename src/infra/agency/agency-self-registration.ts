@@ -35,6 +35,8 @@ import { pulseHeartbeat } from "../pulse/heartbeat.ts";
 import { getPool, query } from "../postgres/pool.ts";
 import { startLiaisonHub } from "./liaison-hub.ts";
 import { AgencyAlreadyActive } from "./errors.ts";
+import { assignDisplayAlias } from "../../core/identity/agent-registry/agent-name.ts";
+import { claimDisplayAlias } from "../../core/identity/agent-registry/alias-manager.ts";
 import {
 	checkAndMarkDormant,
 	endLiaisonSession,
@@ -76,6 +78,11 @@ export interface AgencySelfRegistrationHandle {
 	sessionId: string;
 	/** Numeric agent_registry.id (useful for capability writes outside this module). */
 	agentRegistryId: number;
+	/** P919 AC-12: Tier 1 display alias if one was claimed (e.g. "Gemini-Bot"),
+	 *  null when registration ran without resolving a host or another active row
+	 *  already holds the alias. The agency is fully functional either way; this
+	 *  is a UI/log label only. */
+	displayAlias: string | null;
 	/** Stop hub + timers + end session. Idempotent. */
 	stop: (
 		reason?: "normal" | "crash" | "operator" | "throttle",
@@ -114,6 +121,7 @@ export async function selfRegisterAgency(
 	const client: PoolClient = await pool.connect();
 	let reg;
 	let agentRegistryId: number;
+	let resolvedAlias: string | null = null;
 	try {
 		await client.query("BEGIN");
 
@@ -154,6 +162,34 @@ export async function selfRegisterAgency(
 				 ON CONFLICT DO NOTHING`,
 				[agentRegistryId, capabilities],
 			);
+		}
+
+		// P919 AC-12: Tier 1 display alias for the agency liaison —
+		// "{Provider}-{Host}" (e.g. "Gemini-Bot"). assignDisplayAlias is pure;
+		// the partial unique index on (display_alias) WHERE status='active'
+		// enforces "one active alias per name". On collision (another agency
+		// already holds the alias on an active row), we log and continue with
+		// display_alias=NULL — registration must not fail because of UI label
+		// contention; operators can clear via mcp_agent action=force_release_alias.
+		const tier1Alias = assignDisplayAlias(
+			opts.provider,
+			pascalCaseHost(hostId),
+			undefined,
+			"0",
+		);
+		if (tier1Alias) {
+			const claim = await claimDisplayAlias(agentRegistryId, tier1Alias, {
+				client,
+				tier: 1,
+			});
+			if (!claim.claimed) {
+				logger.warn(
+					`[selfRegisterAgency] ${agencyId} could not claim alias '${tier1Alias}': ${claim.reason} — proceeding without alias`,
+				);
+				resolvedAlias = null;
+			} else {
+				resolvedAlias = tier1Alias;
+			}
 		}
 
 		// 3. P912 AC-3: provider_registry opt-in is explicit. Empty projectIds
@@ -240,8 +276,14 @@ export async function selfRegisterAgency(
 		client.release();
 	}
 	const sessionId = reg.session_id;
+	// P919 AC-13: prefer the display alias in log lines when claimed.
+	// `displayLabel` reads "Gemini-Bot (gemini/agency-bot)" when an alias is
+	// in play, falling back to the bare identity when not.
+	const displayLabel = resolvedAlias
+		? `${resolvedAlias} (${agencyId})`
+		: agencyId;
 	logger.log(
-		`[AgencySelfReg] ${agencyId} session=${sessionId} status=${reg.status}`,
+		`[AgencySelfReg] ${displayLabel} session=${sessionId} status=${reg.status}`,
 	);
 
 	// 5. Start the offer_dispatch hub IN-PROCESS — the missing piece in the
@@ -249,7 +291,7 @@ export async function selfRegisterAgency(
 	// unacked.
 	const hub = startLiaisonHub(agencyId);
 	logger.log(
-		`[AgencySelfReg] ${agencyId} hub started — listening for offer_dispatch + assistance_request + liaison_pong`,
+		`[AgencySelfReg] ${displayLabel} hub started — listening for offer_dispatch + assistance_request + liaison_pong`,
 	);
 
 	// 6. Heartbeat: liaisonHeartbeat (DB) + pulseHeartbeat (fleet observability).
@@ -258,13 +300,13 @@ export async function selfRegisterAgency(
 			await liaisonHeartbeat({ session_id: sessionId, status: "active" });
 		} catch (err) {
 			logger.warn(
-				`[AgencySelfReg] ${agencyId} heartbeat error: ${err instanceof Error ? err.message : err}`,
+				`[AgencySelfReg] ${displayLabel} heartbeat error: ${err instanceof Error ? err.message : err}`,
 			);
 		}
 		void pulseHeartbeat(agencyId, { currentTask: "agency-runtime" }).catch(
 			(e) =>
 				logger.warn(
-					`[AgencySelfReg] ${agencyId} pulse heartbeat failed: ${e instanceof Error ? e.message : e}`,
+					`[AgencySelfReg] ${displayLabel} pulse heartbeat failed: ${e instanceof Error ? e.message : e}`,
 				),
 		);
 	}, heartbeatMs);
@@ -272,7 +314,7 @@ export async function selfRegisterAgency(
 	// Emit pulse immediately so the agency is visible without waiting heartbeat_ms.
 	void pulseHeartbeat(agencyId, { currentTask: "starting" }).catch((e) =>
 		logger.warn(
-			`[AgencySelfReg] ${agencyId} initial pulse heartbeat failed: ${e instanceof Error ? e.message : e}`,
+			`[AgencySelfReg] ${displayLabel} initial pulse heartbeat failed: ${e instanceof Error ? e.message : e}`,
 		),
 	);
 
@@ -283,12 +325,12 @@ export async function selfRegisterAgency(
 			const count = await checkAndMarkDormant();
 			if (count > 0) {
 				logger.log(
-					`[AgencySelfReg] ${agencyId} dormancy sweep: ${count} marked dormant`,
+					`[AgencySelfReg] ${displayLabel} dormancy sweep: ${count} marked dormant`,
 				);
 			}
 		} catch (err) {
 			logger.warn(
-				`[AgencySelfReg] ${agencyId} dormancy sweep error: ${err instanceof Error ? err.message : err}`,
+				`[AgencySelfReg] ${displayLabel} dormancy sweep error: ${err instanceof Error ? err.message : err}`,
 			);
 		}
 	}, dormancySweepMs);
@@ -305,20 +347,34 @@ export async function selfRegisterAgency(
 			hub.stop();
 		} catch (err) {
 			logger.warn(
-				`[AgencySelfReg] ${agencyId} hub.stop error: ${err instanceof Error ? err.message : err}`,
+				`[AgencySelfReg] ${displayLabel} hub.stop error: ${err instanceof Error ? err.message : err}`,
 			);
 		}
 		try {
 			await endLiaisonSession(sessionId, reason);
 			logger.log(
-				`[AgencySelfReg] ${agencyId} session=${sessionId} ended (reason=${reason})`,
+				`[AgencySelfReg] ${displayLabel} session=${sessionId} ended (reason=${reason})`,
 			);
 		} catch (err) {
 			logger.error(
-				`[AgencySelfReg] ${agencyId} endLiaisonSession error: ${err instanceof Error ? err.message : err}`,
+				`[AgencySelfReg] ${displayLabel} endLiaisonSession error: ${err instanceof Error ? err.message : err}`,
 			);
 		}
 	};
 
-	return { sessionId, agentRegistryId, stop };
+	return { sessionId, agentRegistryId, displayAlias: resolvedAlias, stop };
+}
+
+/**
+ * P919 AC-12: Convert a host token into PascalCase for the Tier 1 alias.
+ *   "bot" → "Bot"
+ *   "hermes-srv" → "HermesSrv"
+ *   "agency-bot" → "AgencyBot" (rare; AGENTHIVE_HOST is normally a bare host)
+ */
+function pascalCaseHost(host: string): string {
+	return host
+		.split(/[-_]+/)
+		.filter(Boolean)
+		.map((seg) => seg.charAt(0).toUpperCase() + seg.slice(1).toLowerCase())
+		.join("");
 }

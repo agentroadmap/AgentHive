@@ -214,7 +214,11 @@ async function main(): Promise<void> {
 		});
 	}
 
-	console.log(`[Agency] ${agentIdentity} ready`);
+	// P919 AC-13: prefer display alias in the ready line when one was claimed.
+	const readyLabel = registration?.displayAlias
+		? `${registration.displayAlias} (${agentIdentity})`
+		: agentIdentity;
+	console.log(`[Agency] ${readyLabel} ready`);
 }
 
 main().catch((err) => {

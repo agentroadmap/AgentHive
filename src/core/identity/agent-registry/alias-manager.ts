@@ -5,8 +5,12 @@
  * AC-4: Two reclaim paths:
  *   1. Clean: target row status='inactive' → proceed without force flag
  *   2. Stuck: target row status='active' BUT last_heartbeat < now()-90s → requires force=true
+ * AC-12: claimDisplayAlias is the write companion — assigns an alias to an
+ * agent_registry row, idempotent on re-registration, partial-unique-index
+ * enforced at the DB level so collisions surface as a structured result.
  */
 
+import type { PoolClient } from "pg";
 import { query } from "../../../infra/postgres/pool.ts";
 
 export interface AliasReclaimOptions {
@@ -127,6 +131,83 @@ export async function forceReleaseAlias(
 		code: "invalid_request",
 		message: "Unexpected state in alias reclaim logic",
 	};
+}
+
+export interface ClaimAliasOptions {
+	/** Optional client for transaction participation (e.g. selfRegisterAgency). */
+	client?: PoolClient;
+	/** Tier marker recorded in audit trail (1 = liaison, 2 = role-alpha). */
+	tier: 1 | 2;
+}
+
+export interface ClaimAliasResult {
+	claimed: boolean;
+	/** When false: 'alias_in_use' (different identity holds it on an active row)
+	 *  or 'row_already_has_different_alias' (idempotency conflict on retry). */
+	reason?: "alias_in_use" | "row_already_has_different_alias" | "unknown_row";
+}
+
+/**
+ * AC-12: Idempotent claim of a display alias for an agent_registry row.
+ *
+ * Behavior:
+ *   - Sets `display_alias = alias` only when the row currently has NULL or
+ *     already matches `alias` (allows safe re-registration).
+ *   - On unique-index collision (same alias on a different active row),
+ *     returns `{ claimed: false, reason: 'alias_in_use' }` instead of throwing
+ *     so the caller can decide whether to log + continue or escalate.
+ *   - Appends an audit entry to `alias_audit` JSONB.
+ *
+ * The partial unique index `idx_agent_alias_active` enforces that only one
+ * active row per alias can hold it. On collision, the caller can fall back
+ * to `forceReleaseAlias` (operator escape hatch) before retrying.
+ */
+export async function claimDisplayAlias(
+	agentRegistryId: number | bigint,
+	alias: string,
+	options: ClaimAliasOptions,
+): Promise<ClaimAliasResult> {
+	if (!alias?.trim()) {
+		throw new Error("[claimDisplayAlias] alias is required");
+	}
+	const exec = options.client
+		? options.client.query.bind(options.client)
+		: query;
+
+	const auditEntry = JSON.stringify([
+		{
+			action: "claimed",
+			tier: options.tier,
+			alias,
+			at: new Date().toISOString(),
+		},
+	]);
+
+	try {
+		const result = await exec(
+			`UPDATE roadmap_workforce.agent_registry
+			    SET display_alias = $2,
+			        alias_audit   = COALESCE(alias_audit, '[]'::jsonb) || $3::jsonb
+			  WHERE id = $1
+			    AND (display_alias IS NULL OR display_alias = $2)
+			RETURNING id`,
+			[agentRegistryId, alias, auditEntry],
+		);
+		if (result.rows.length === 0) {
+			return { claimed: false, reason: "row_already_has_different_alias" };
+		}
+		return { claimed: true };
+	} catch (err) {
+		const pgErr = err as { code?: string; constraint?: string };
+		if (
+			pgErr.code === "23505" &&
+			(pgErr.constraint === "idx_agent_alias_active" ||
+				(err as Error).message?.includes("idx_agent_alias_active"))
+		) {
+			return { claimed: false, reason: "alias_in_use" };
+		}
+		throw err;
+	}
 }
 
 /**
