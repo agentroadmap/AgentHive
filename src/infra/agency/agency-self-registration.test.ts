@@ -93,7 +93,7 @@ describe("P921 — Active liaison session uniqueness", () => {
 				);
 			} finally {
 				// Clean up: end the first session
-				await reg1.stop("test");
+				await reg1.stop("normal");
 			}
 		},
 	);

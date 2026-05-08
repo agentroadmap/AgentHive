@@ -28,6 +28,7 @@
  * P920: Refactored to use CliInvocationRegistry instead of inline
  * resolveLiaisonHandler switches.
  */
+import { spawn } from "node:child_process";
 import { Client } from "pg";
 import { query, getPool } from "../postgres/pool.ts";
 import { agentNotifyChannel } from "../messaging/a2a-access-control.ts";
@@ -83,7 +84,7 @@ export function spawnCliCapture(bin: string, args: string[]): Promise<string> {
 		child.stderr.on("data", (d: Buffer) => {
 			err += d.toString();
 		});
-		child.on("close", (code) => {
+		child.on("close", (code: number | null) => {
 			if (code === 0) resolve(out.trim());
 			else reject(new Error(`${bin} exited ${code}: ${err.slice(0, 300)}`));
 		});
@@ -98,13 +99,15 @@ export async function runLiaisonAgent(
 	const log = opts.loggerPrefix ?? `[Liaison ${identity}]`;
 	const registry = opts.registry ?? globalCliInvocationRegistry;
 
-	// Resolve the CLI handler for this provider
-	const handler = await registry.resolve(provider);
-	if (!handler) {
+	// Resolve the CLI handler for this provider. Alias to a non-null const so
+	// inner closures don't lose the narrowed type via TypeScript's closure widening.
+	const resolved = await registry.resolve(provider);
+	if (!resolved) {
 		throw new Error(
 			`[Liaison] No CLI handler found for provider "${provider}" — check model_routes config`,
 		);
 	}
+	const handler: CliInvocationHandler = resolved;
 
 	// Validates the identity (charset + 63-byte channel limit) and returns
 	// the same channel the DB trigger emits on. Throws on invalid identity
