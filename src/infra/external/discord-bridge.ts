@@ -54,7 +54,7 @@ export class DiscordExternalBridge extends EventEmitter {
   private circuitBreakerResetTime: number | null = null;
   private outboundQueue: OutboundMessage[] = [];
   private listenClient: any = null;
-  private processingLoop: NodeJS.Timer | null = null;
+  private processingLoop: ReturnType<typeof setInterval> | null = null;
 
   private readonly FAILURE_WINDOW_MS = 60_000;
   private readonly FAILURE_THRESHOLD = 10;
@@ -511,11 +511,12 @@ export class DiscordExternalBridge extends EventEmitter {
   ): boolean {
     try {
       const bodyString = JSON.stringify(payload);
-      const hash = createHmac("sha256", this.config.botPublicKey)
+      const keyBuffer = Buffer.from(this.config.botPublicKey, "hex");
+      const hash = createHmac("sha256", keyBuffer)
         .update(bodyString)
         .digest("hex");
 
-      const expectedSig = Buffer.from(hash);
+      const expectedSig = Buffer.from(hash, "hex");
       const providedSig = Buffer.from(signatureHeader, "hex");
 
       return timingSafeEqual(expectedSig, providedSig);

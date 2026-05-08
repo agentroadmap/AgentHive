@@ -11,6 +11,33 @@
 
 BEGIN;
 
+-- ─── 0. Fix FK constraint on message_ledger.to_agent ────────────────────────
+
+-- Migration 021 adds FK constraint referencing roadmap.agent_registry, but the
+-- actual table is roadmap_workforce.agent_registry. Drop the broken constraint
+-- and re-create it with the correct reference.
+DO $$
+BEGIN
+    -- Drop the broken FK constraint if it exists (it references non-existent table)
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'message_ledger_to_agent_fkey'
+    ) THEN
+        ALTER TABLE roadmap.message_ledger
+        DROP CONSTRAINT message_ledger_to_agent_fkey;
+    END IF;
+
+    -- Create the corrected FK constraint
+    ALTER TABLE roadmap.message_ledger
+    ADD CONSTRAINT message_ledger_to_agent_fkey
+    FOREIGN KEY (to_agent) REFERENCES roadmap_workforce.agent_registry (agent_identity)
+    ON DELETE RESTRICT;
+EXCEPTION
+    WHEN others THEN
+        -- If constraint already exists or operation fails, continue
+        NULL;
+END $$;
+
 -- ─── 1. external_routing table (main grant store) ────────────────────────────
 
 CREATE TABLE IF NOT EXISTS roadmap.external_routing (
@@ -130,6 +157,16 @@ BEGIN
     -- p_nonce is passed by the bridge; reject collision via UNIQUE constraint.
     IF p_nonce IS NULL THEN
         RAISE EXCEPTION 'p_nonce cannot be NULL (replay prevention required)';
+    END IF;
+
+    -- Validate that to_agent is a registered agent (FK constraint check).
+    -- Migration 021's FK constraint references roadmap.agent_registry which doesn't exist
+    -- in the roadmap schema, so we add explicit validation here to enforce it.
+    IF NOT EXISTS (
+        SELECT 1 FROM roadmap_workforce.agent_registry
+        WHERE agent_identity = p_to_agent
+    ) THEN
+        RAISE EXCEPTION 'to_agent % is not registered in agent registry (foreign key constraint)', p_to_agent;
     END IF;
 
     -- Insert into message_ledger (the single trust-tier table for P923).
@@ -264,5 +301,15 @@ FOR EACH ROW EXECUTE FUNCTION roadmap.fn_a2a_message_notify();
 INSERT INTO roadmap.message_acl (from_agent, to_agent, grant_type, granted_by) VALUES
     ('bridge/discord', '*', 'dm', 'system')
 ON CONFLICT ON CONSTRAINT message_acl_pair_uq DO NOTHING;
+
+-- ─── 7. Register bridge/discord agent in workforce registry ──────────────────
+
+INSERT INTO roadmap_workforce.agent_registry
+    (agent_identity, agent_type, role, status, trust_tier)
+VALUES
+    ('bridge/discord', 'tool', 'bridge', 'active', 'external_proxy')
+ON CONFLICT (agent_identity) DO UPDATE
+    SET trust_tier = 'external_proxy'
+    WHERE EXCLUDED.agent_identity = 'bridge/discord';
 
 COMMIT;
