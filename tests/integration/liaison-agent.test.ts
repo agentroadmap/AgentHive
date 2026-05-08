@@ -21,6 +21,10 @@ import {
 	type LiaisonAgentHandle,
 } from "../../src/infra/agency/liaison-agent.ts";
 import { agentNotifyChannel } from "../../src/infra/messaging/a2a-access-control.ts";
+import {
+	CliInvocationRegistry,
+	type CliInvocationHandler,
+} from "../../src/core/runtime/cli-invocation.ts";
 
 const STAMP = Date.now();
 const SENDER = `system:liaison-test-sender-${STAMP}`;
@@ -144,9 +148,19 @@ describe("liaison-agent", () => {
 		const channel = agentNotifyChannel(LIAISON);
 		expect(channel).toBe(`a2a_msg_${LIAISON}`);
 
+		const registry = new CliInvocationRegistry();
+		const mockHandler: CliInvocationHandler = {
+			provider: "claude",
+			bin: "echo",
+			buildArgs: (p) => [p],
+			brand: "Claude",
+		};
+		registry.registerLocal(mockHandler);
+
 		handle = await runLiaisonAgent({
 			identity: LIAISON,
-			invokeLlm: async () => "ok",
+			provider: "claude",
+			registry,
 			loggerPrefix: "[Test]",
 		});
 		// The LISTEN itself is observable via pg_stat_activity; checking the
@@ -159,18 +173,28 @@ describe("liaison-agent", () => {
 		await expect(
 			runLiaisonAgent({
 				identity: "bad identity with spaces",
-				invokeLlm: async () => "ok",
+				provider: "claude",
 			}),
 		).rejects.toThrow(/Invalid agent identity/);
 	});
 
 	it("text message → reply preserves correlation_id and sets reply_to", async () => {
+		const registry = new CliInvocationRegistry();
+		const mockHandler: CliInvocationHandler = {
+			provider: "claude",
+			bin: "echo",
+			buildArgs: (p) => {
+				llmCalls++;
+				return [p];
+			},
+			brand: "Claude",
+		};
+		registry.registerLocal(mockHandler);
+
 		handle = await runLiaisonAgent({
 			identity: LIAISON,
-			invokeLlm: async (msg) => {
-				llmCalls++;
-				return `echo: ${msg.message_content}`;
-			},
+			provider: "claude",
+			registry,
 			loggerPrefix: "[Test:text]",
 		});
 
@@ -189,7 +213,7 @@ describe("liaison-agent", () => {
 		expect(reply.correlation_id).toBe(correlationId);
 		expect(reply.reply_to).toBe(originalId);
 		expect(reply.message_type).toBe("text");
-		expect(reply.message_content).toContain("echo: hello agency");
+		expect(reply.message_content).toContain("hello agency");
 
 		// Original is marked read.
 		const { rows } = await query(
@@ -200,12 +224,22 @@ describe("liaison-agent", () => {
 	});
 
 	it("protocol_ping → protocol_pong without LLM invocation", async () => {
+		const registry = new CliInvocationRegistry();
+		const mockHandler: CliInvocationHandler = {
+			provider: "claude",
+			bin: "echo",
+			buildArgs: (p) => {
+				llmCalls++;
+				return [p];
+			},
+			brand: "Claude",
+		};
+		registry.registerLocal(mockHandler);
+
 		handle = await runLiaisonAgent({
 			identity: LIAISON,
-			invokeLlm: async () => {
-				llmCalls++;
-				return "should-not-be-called";
-			},
+			provider: "claude",
+			registry,
 			loggerPrefix: "[Test:ping]",
 		});
 
@@ -228,9 +262,19 @@ describe("liaison-agent", () => {
 	});
 
 	it("resolves message_timeout_tracking on reply", async () => {
+		const registry = new CliInvocationRegistry();
+		const mockHandler: CliInvocationHandler = {
+			provider: "claude",
+			bin: "echo",
+			buildArgs: (p) => [p],
+			brand: "Claude",
+		};
+		registry.registerLocal(mockHandler);
+
 		handle = await runLiaisonAgent({
 			identity: LIAISON,
-			invokeLlm: async () => "answered",
+			provider: "claude",
+			registry,
 			loggerPrefix: "[Test:timeout]",
 		});
 
@@ -264,9 +308,19 @@ describe("liaison-agent", () => {
 	});
 
 	it("stop() ends the dedicated LISTEN client cleanly", async () => {
+		const registry = new CliInvocationRegistry();
+		const mockHandler: CliInvocationHandler = {
+			provider: "claude",
+			bin: "echo",
+			buildArgs: (p) => [p],
+			brand: "Claude",
+		};
+		registry.registerLocal(mockHandler);
+
 		const localHandle = await runLiaisonAgent({
 			identity: LIAISON,
-			invokeLlm: async () => "x",
+			provider: "claude",
+			registry,
 			loggerPrefix: "[Test:stop]",
 		});
 

@@ -36,69 +36,12 @@ import { closePool, getPool } from "../src/infra/postgres/pool.ts";
 import { selfRegisterAgency } from "../src/infra/agency/agency-self-registration.ts";
 import {
 	runLiaisonAgent,
-	spawnCliCapture,
 	type LiaisonAgentHandle,
-	type IncomingMessage,
-	type LlmInvoke,
 } from "../src/infra/agency/liaison-agent.ts";
 
 const agentIdentity =
 	process.env.AGENTHIVE_AGENT_IDENTITY ?? `agency-${hostname()}`;
 
-interface LiaisonProviderHandler {
-	bin: string;
-	buildArgs: (prompt: string) => string[];
-	brand: string;
-}
-
-/**
- * Map provider → (CLI binary, argv builder, brand label for system prompt).
- * Adding a provider here turns on inbox-reply support via runLiaisonAgent.
- */
-function resolveLiaisonHandler(provider: string): LiaisonProviderHandler | null {
-	switch (provider) {
-		case "claude":
-			return {
-				bin: process.env.CLAUDE_BIN ?? "claude",
-				buildArgs: (p) => ["--print", p],
-				brand: "Claude",
-			};
-		case "codex":
-			return {
-				bin: process.env.CODEX_BIN ?? "codex",
-				buildArgs: (p) => [
-					"exec",
-					"--dangerously-bypass-approvals-and-sandbox",
-					p,
-				],
-				brand: "Codex",
-			};
-		case "copilot":
-			return {
-				bin: process.env.COPILOT_BIN ?? "copilot",
-				buildArgs: (p) => ["-p", p, "--yolo"],
-				brand: "GitHub Copilot",
-			};
-		default:
-			return null;
-	}
-}
-
-function buildLiaisonPrompt(brand: string, msg: IncomingMessage): string {
-	const systemContext =
-		`You are ${agentIdentity}, a ${brand} liaison agent in the AgentHive system. ` +
-		`You received a ${msg.message_type} message from ${msg.from_agent}. ` +
-		`Reply concisely. If it's a task, acknowledge and outline your approach in 2-3 sentences.`;
-	return `${systemContext}\n\n---\nIncoming message:\n${msg.message_content}`;
-}
-
-function buildLiaisonInvokeLlm(handler: LiaisonProviderHandler): LlmInvoke {
-	return (msg) =>
-		spawnCliCapture(
-			handler.bin,
-			handler.buildArgs(buildLiaisonPrompt(handler.brand, msg)),
-		);
-}
 
 /**
  * Resolve provider from environment or identity prefix.
@@ -218,23 +161,19 @@ async function main(): Promise<void> {
 	// shared lifecycle: messages whose handler is the LLM CLI go through
 	// runLiaisonAgent; offer_dispatch downlinks go through the hub started by
 	// selfRegisterAgency. The two surfaces are independent.
+	// P920: CliInvocationRegistry resolves the handler; runLiaisonAgent consumes it.
 	let liaisonHandle: LiaisonAgentHandle | null = null;
-	const handler = resolveLiaisonHandler(provider);
-	if (!handler) {
+	try {
+		liaisonHandle = await runLiaisonAgent({
+			identity: agentIdentity,
+			provider,
+			loggerPrefix: `[Agency:liaison(${provider})]`,
+		});
+	} catch (err) {
 		console.warn(
-			`[Agency] No liaison-agent CLI handler for provider '${provider}'; ` +
-				`inbox replies disabled. Push dispatch via the hub is unaffected.`,
+			`[Agency] runLiaisonAgent failed (non-fatal); inbox replies disabled: `,
+			err,
 		);
-	} else {
-		try {
-			liaisonHandle = await runLiaisonAgent({
-				identity: agentIdentity,
-				loggerPrefix: `[Agency:liaison(${provider})]`,
-				invokeLlm: buildLiaisonInvokeLlm(handler),
-			});
-		} catch (err) {
-			console.error("[Agency] runLiaisonAgent failed (non-fatal):", err);
-		}
 	}
 
 	for (const sig of ["SIGTERM", "SIGINT"] as const) {
