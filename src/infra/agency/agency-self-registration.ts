@@ -33,6 +33,7 @@ import { hostname } from "node:os";
 import { pulseHeartbeat } from "../pulse/heartbeat.ts";
 import { query } from "../postgres/pool.ts";
 import { startLiaisonHub } from "./liaison-hub.ts";
+import { AgencyAlreadyActive } from "./errors.ts";
 import {
 	checkAndMarkDormant,
 	endLiaisonSession,
@@ -79,6 +80,9 @@ export interface AgencySelfRegistrationHandle {
 		reason?: "normal" | "crash" | "operator" | "throttle",
 	) => Promise<void>;
 }
+
+// Re-export AgencyAlreadyActive for consumers (e.g. start-agency.ts).
+export { AgencyAlreadyActive } from "./errors.ts";
 
 /**
  * Run the full agency boot prologue. Returns a handle the caller wires into
@@ -149,15 +153,52 @@ export async function selfRegisterAgency(
 	}
 
 	// 4. Open liaison session. liaisonRegister itself upserts roadmap.agency.
-	const reg = await liaisonRegister({
-		agency_id: agencyId,
-		display_name: displayName,
-		provider: opts.provider,
-		host_id: hostId,
-		capabilities,
-		capacity_envelope: opts.capacityEnvelope,
-		metadata: { ...(opts.metadata ?? {}), pid: process.pid },
-	});
+	// P921 AC-5: wrap in try/catch to detect unique violation on idx_agency_session_one_active.
+	let reg;
+	try {
+		reg = await liaisonRegister({
+			agency_id: agencyId,
+			display_name: displayName,
+			provider: opts.provider,
+			host_id: hostId,
+			capabilities,
+			capacity_envelope: opts.capacityEnvelope,
+			metadata: { ...(opts.metadata ?? {}), pid: process.pid },
+		});
+	} catch (err) {
+		// Check if this is a unique constraint violation on idx_agency_session_one_active.
+		if (
+			err instanceof Error &&
+			err.message &&
+			err.message.includes("23505") &&
+			err.message.includes("idx_agency_session_one_active")
+		) {
+			// P921 AC-5: SELECT existing session and throw typed AgencyAlreadyActive.
+			const existingRes = await query<{
+				session_id: string;
+				liaison_pid: number | null;
+				liaison_host: string | null;
+			}>(
+				`SELECT session_id, liaison_pid, liaison_host
+				 FROM roadmap.agency_liaison_session
+				 WHERE agency_id = $1 AND ended_at IS NULL
+				 LIMIT 1`,
+				[agencyId],
+			);
+			const existing = existingRes.rows[0];
+			logger.log(
+				`[selfRegisterAgency] CONFLICT: active session for ${agencyId} — ` +
+					`session=${existing?.session_id} pid=${existing?.liaison_pid} host=${existing?.liaison_host}`,
+			);
+			throw new AgencyAlreadyActive(
+				agencyId,
+				existing?.session_id,
+				existing?.liaison_pid ?? undefined,
+				existing?.liaison_host ?? undefined,
+			);
+		}
+		throw err;
+	}
 	const sessionId = reg.session_id;
 	logger.log(
 		`[AgencySelfReg] ${agencyId} session=${sessionId} status=${reg.status}`,

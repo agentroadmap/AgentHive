@@ -33,7 +33,10 @@
 import { hostname } from "node:os";
 import { resolveActiveRouteProvider } from "../src/core/orchestration/agent-spawner.ts";
 import { closePool, getPool } from "../src/infra/postgres/pool.ts";
-import { selfRegisterAgency } from "../src/infra/agency/agency-self-registration.ts";
+import {
+	selfRegisterAgency,
+	AgencyAlreadyActive,
+} from "../src/infra/agency/agency-self-registration.ts";
 import {
 	runLiaisonAgent,
 	spawnCliCapture,
@@ -206,6 +209,16 @@ async function main(): Promise<void> {
 			metadata: { version: "1.0", pid: process.pid },
 		});
 	} catch (err) {
+		// P921 AC-7: AgencyAlreadyActive means a duplicate session exists.
+		// Exit cleanly (code 0) so systemd Restart=on-failure doesn't loop.
+		if (err instanceof AgencyAlreadyActive) {
+			console.log(
+				`[Agency] AgencyAlreadyActive: ${err.agency_id} — ` +
+					`existing session=${err.existing_session_id} pid=${err.existing_liaison_pid}. ` +
+					`Exiting cleanly.`,
+			);
+			process.exit(0);
+		}
 		console.error(
 			"[Agency] selfRegisterAgency failed; agency cannot accept push dispatch:",
 			err,
