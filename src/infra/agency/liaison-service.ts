@@ -9,6 +9,7 @@
  *   active (next heartbeat restores; CASE branch handles dormant→active)
  */
 
+import type { PoolClient } from "pg";
 import { query } from "../postgres/pool.ts";
 
 export interface LiaisonRegisterPayload {
@@ -45,9 +46,14 @@ export interface LiaisonHeartbeatResult {
 
 /**
  * Register an agency and open a liaison session.
+ *
+ * P913: accepts an optional PoolClient so callers (selfRegisterAgency) can
+ * include this work in their own transaction. When client is omitted, falls
+ * back to the pool's auto-commit query() helper for backward compatibility.
  */
 export async function liaisonRegister(
 	payload: LiaisonRegisterPayload,
+	client?: PoolClient,
 ): Promise<LiaisonRegisterResult> {
 	const {
 		agency_id,
@@ -64,7 +70,12 @@ export async function liaisonRegister(
 	if (!provider?.trim()) throw new Error("provider is required");
 	if (!host_id?.trim()) throw new Error("host_id is required");
 
-	const result = await query(
+	const runQuery = client
+		? <T extends Record<string, unknown>>(text: string, params?: unknown[]) =>
+				client.query<T>(text, params as never)
+		: query;
+
+	const result = await runQuery(
 		`
     WITH upsert_agency AS (
       INSERT INTO roadmap.agency (
@@ -97,7 +108,7 @@ export async function liaisonRegister(
 			capabilities,
 			JSON.stringify({ ...metadata, capacity_envelope, public_key }),
 		],
-	);
+	) as { rows: Array<{ session_id: string; agency_id: string; status: string }> };
 
 	if (result.rows.length === 0)
 		throw new Error(`Failed to register agency ${agency_id}`);

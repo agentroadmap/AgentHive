@@ -178,3 +178,126 @@ describe("P921 — Active liaison session uniqueness", () => {
 		},
 	);
 });
+
+describe("P913 — agency-self-registration hotfix (transaction + advisory lock + provider_registry FK)", () => {
+	dbTest(
+		"Concurrent same-identity calls serialize on advisory lock; one wins, other catches AgencyAlreadyActive",
+		async () => {
+			const testAgency = `test/agency-p913-concurrent-${Date.now()}`;
+			// Fire two registrations in parallel for the SAME agencyId.
+			const results = await Promise.allSettled([
+				selfRegisterAgency({
+					agencyId: testAgency,
+					provider: "claude",
+					capabilities: ["test"],
+				}),
+				selfRegisterAgency({
+					agencyId: testAgency,
+					provider: "claude",
+					capabilities: ["test"],
+				}),
+			]);
+			const fulfilled = results.filter((r) => r.status === "fulfilled");
+			const rejected = results.filter((r) => r.status === "rejected");
+			assert.strictEqual(fulfilled.length, 1, "exactly one call should succeed");
+			assert.strictEqual(rejected.length, 1, "the other should reject");
+			// The rejected one MUST be AgencyAlreadyActive (not a raw DatabaseError).
+			const rej = rejected[0] as PromiseRejectedResult;
+			assert(
+				rej.reason instanceof AgencyAlreadyActive,
+				`Expected AgencyAlreadyActive, got ${rej.reason?.constructor?.name}: ${rej.reason?.message}`,
+			);
+			// Exactly ONE active session for this agency.
+			const live = await pool.query(
+				`SELECT count(*)::int AS n FROM roadmap.agency_liaison_session
+				 WHERE agency_id = $1 AND ended_at IS NULL`,
+				[testAgency],
+			);
+			assert.strictEqual(live.rows[0].n, 1);
+			// No duplicate capability rows.
+			const caps = await pool.query(
+				`SELECT count(*)::int AS n FROM roadmap_workforce.agent_capability ac
+				 JOIN roadmap_workforce.agent_registry ar ON ar.id = ac.agent_id
+				 WHERE ar.agent_identity = $1 AND ac.capability = 'test'`,
+				[testAgency],
+			);
+			assert.strictEqual(caps.rows[0].n, 1, "exactly one capability row");
+			// Clean up the winner's session.
+			const winner = (fulfilled[0] as PromiseFulfilledResult<Awaited<ReturnType<typeof selfRegisterAgency>>>).value;
+			await winner.stop("operator");
+		},
+	);
+
+	dbTest(
+		"provider_registry insert populates BOTH agency_id (bigint) AND agency_identity (text)",
+		async () => {
+			const testAgency = `test/agency-p913-pr-${Date.now()}`;
+			// Pick any existing project_id for the FK.
+			const projRow = await pool.query<{ project_id: number }>(
+				`SELECT project_id FROM roadmap.project ORDER BY project_id LIMIT 1`,
+			);
+			if (projRow.rows.length === 0) return; // no projects to opt into
+			const projectId = projRow.rows[0].project_id;
+			const reg = await selfRegisterAgency({
+				agencyId: testAgency,
+				provider: "claude",
+				capabilities: ["test"],
+				projectIds: [projectId],
+			});
+			try {
+				const pr = await pool.query<{
+					agency_id: number;
+					agency_identity: string;
+				}>(
+					`SELECT pr.agency_id, pr.agency_identity
+					   FROM roadmap_workforce.provider_registry pr
+					   JOIN roadmap_workforce.agent_registry ar ON ar.id = pr.agency_id
+					  WHERE ar.agent_identity = $1 AND pr.project_id = $2`,
+					[testAgency, projectId],
+				);
+				assert.strictEqual(pr.rows.length, 1, "one provider_registry row");
+				assert.strictEqual(pr.rows[0].agency_identity, testAgency, "agency_identity matches text identity");
+				assert(typeof pr.rows[0].agency_id === "number" || typeof pr.rows[0].agency_id === "string", "agency_id is the bigint FK");
+			} finally {
+				await reg.stop("operator");
+			}
+		},
+	);
+
+	dbTest(
+		"Transaction is the boundary — agency_registry stays clean after a duplicate-session conflict",
+		async () => {
+			const testAgency = `test/agency-p913-tx-${Date.now()}`;
+			const reg1 = await selfRegisterAgency({
+				agencyId: testAgency,
+				provider: "claude",
+				capabilities: ["test"],
+			});
+			try {
+				// Second registration throws AgencyAlreadyActive — transaction rolls back.
+				let threw = false;
+				try {
+					await selfRegisterAgency({
+						agencyId: testAgency,
+						provider: "claude",
+						capabilities: ["test", "another-cap"],
+					});
+				} catch (err) {
+					threw = true;
+					assert(err instanceof AgencyAlreadyActive);
+				}
+				assert(threw, "second registration should throw");
+				// The "another-cap" capability MUST NOT have been inserted (the transaction rolled back).
+				const caps = await pool.query(
+					`SELECT count(*)::int AS n FROM roadmap_workforce.agent_capability ac
+					 JOIN roadmap_workforce.agent_registry ar ON ar.id = ac.agent_id
+					 WHERE ar.agent_identity = $1 AND ac.capability = 'another-cap'`,
+					[testAgency],
+				);
+				assert.strictEqual(caps.rows[0].n, 0, "rolled-back capability is not present");
+			} finally {
+				await reg1.stop("operator");
+			}
+		},
+	);
+});

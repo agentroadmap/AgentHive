@@ -30,8 +30,9 @@
  */
 
 import { hostname } from "node:os";
+import type { PoolClient } from "pg";
 import { pulseHeartbeat } from "../pulse/heartbeat.ts";
-import { query } from "../postgres/pool.ts";
+import { getPool, query } from "../postgres/pool.ts";
 import { startLiaisonHub } from "./liaison-hub.ts";
 import { AgencyAlreadyActive } from "./errors.ts";
 import {
@@ -105,67 +106,101 @@ export async function selfRegisterAgency(
 	const heartbeatMs = opts.heartbeatMs ?? 30_000;
 	const dormancySweepMs = opts.dormancySweepMs ?? 60_000;
 
-	// 1. Upsert agent_registry. Mirrors `roadmap state-machine register`
-	// (src/apps/commands/state-machine.ts:208) so operators and self-reg agree
-	// on the row shape.
-	const { rows: regRows } = await query<{ id: number }>(
-		`INSERT INTO roadmap_workforce.agent_registry
-		   (agent_identity, agent_type, status, preferred_provider)
-		 VALUES ($1, 'agency', 'active', $2)
-		 ON CONFLICT (agent_identity) DO UPDATE SET
-		   agent_type = 'agency',
-		   status = 'active',
-		   preferred_provider = EXCLUDED.preferred_provider,
-		   updated_at = now()
-		 RETURNING id`,
-		[agencyId, opts.provider],
-	);
-	const agentRegistryId = regRows[0]?.id;
-	if (!agentRegistryId) {
-		throw new Error(
-			`[selfRegisterAgency] agent_registry upsert returned no row for ${agencyId}`,
-		);
-	}
-
-	// 2. Upsert capabilities (no-op if empty).
-	if (capabilities.length > 0) {
-		await query(
-			`INSERT INTO roadmap_workforce.agent_capability (agent_id, capability)
-			 SELECT $1, unnest($2::text[])
-			 ON CONFLICT DO NOTHING`,
-			[agentRegistryId, capabilities],
-		);
-	}
-
-	// 3. P912 AC-3: provider_registry opt-in is explicit. Empty projectIds
-	// means "registered but not dispatchable for any project". A future
-	// agency_join_project MCP action calls back into the same INSERT shape
-	// without re-running the registry/session bootstrap.
-	if (opts.projectIds && opts.projectIds.length > 0) {
-		await query(
-			`INSERT INTO roadmap_workforce.provider_registry
-			   (agency_id, project_id, squad_name, is_active)
-			 SELECT $1, unnest($2::bigint[]), NULL, true
-			 ON CONFLICT (agency_id, project_id, squad_name) DO UPDATE SET
-			   is_active = true`,
-			[agentRegistryId, opts.projectIds],
-		);
-	}
-
-	// 4. Open liaison session. liaisonRegister itself upserts roadmap.agency.
-	// P921 AC-5: wrap in try/catch to detect unique violation on idx_agency_session_one_active.
+	// P913: wrap registry/capabilities/provider_registry/liaisonRegister in ONE
+	// transaction with an identity-keyed advisory lock. The lock serializes
+	// concurrent calls for the same agencyId without blocking other agencies.
+	// Different agencyIds hash to different keys and proceed in parallel.
+	const pool = getPool();
+	const client: PoolClient = await pool.connect();
 	let reg;
+	let agentRegistryId: number;
 	try {
-		reg = await liaisonRegister({
-			agency_id: agencyId,
-			display_name: displayName,
-			provider: opts.provider,
-			host_id: hostId,
-			capabilities,
-			capacity_envelope: opts.capacityEnvelope,
-			metadata: { ...(opts.metadata ?? {}), pid: process.pid },
-		});
+		await client.query("BEGIN");
+
+		// 0. Advisory lock keyed on identity — concurrent same-identity boots queue here.
+		await client.query(
+			`SELECT pg_advisory_xact_lock(hashtext('selfRegisterAgency:' || $1)::int4)`,
+			[agencyId],
+		);
+
+		// 1. Upsert agent_registry. Mirrors `roadmap state-machine register`
+		// (src/apps/commands/state-machine.ts:208) so operators and self-reg agree
+		// on the row shape.
+		const regRowsRes = await client.query<{ id: number }>(
+			`INSERT INTO roadmap_workforce.agent_registry
+			   (agent_identity, agent_type, status, preferred_provider)
+			 VALUES ($1, 'agency', 'active', $2)
+			 ON CONFLICT (agent_identity) DO UPDATE SET
+			   agent_type = 'agency',
+			   status = 'active',
+			   preferred_provider = EXCLUDED.preferred_provider,
+			   updated_at = now()
+			 RETURNING id`,
+			[agencyId, opts.provider],
+		);
+		const newId = regRowsRes.rows[0]?.id;
+		if (!newId) {
+			throw new Error(
+				`[selfRegisterAgency] agent_registry upsert returned no row for ${agencyId}`,
+			);
+		}
+		agentRegistryId = newId;
+
+		// 2. Upsert capabilities (no-op if empty).
+		if (capabilities.length > 0) {
+			await client.query(
+				`INSERT INTO roadmap_workforce.agent_capability (agent_id, capability)
+				 SELECT $1, unnest($2::text[])
+				 ON CONFLICT DO NOTHING`,
+				[agentRegistryId, capabilities],
+			);
+		}
+
+		// 3. P912 AC-3: provider_registry opt-in is explicit. Empty projectIds
+		// means "registered but not dispatchable for any project". A future
+		// agency_join_project MCP action calls back into the same INSERT shape
+		// without re-running the registry/session bootstrap.
+		// P913 bug-1 fix: provider_registry has BOTH agency_id (bigint FK) AND
+		// agency_identity (text NOT NULL). The previous shape omitted
+		// agency_identity and would fail the NOT NULL constraint when projectIds
+		// was non-empty.
+		if (opts.projectIds && opts.projectIds.length > 0) {
+			await client.query(
+				`INSERT INTO roadmap_workforce.provider_registry
+				   (agency_id, agency_identity, project_id, squad_name, is_active)
+				 SELECT $1, $2, unnest($3::bigint[]), NULL, true
+				 ON CONFLICT (agency_id, project_id, squad_name) DO UPDATE SET
+				   is_active = true`,
+				[agentRegistryId, agencyId, opts.projectIds],
+			);
+		}
+
+		// 4. Open liaison session. liaisonRegister itself upserts roadmap.agency.
+		// P921: detect unique-violation on idx_agency_session_one_active and throw
+		// the typed AgencyAlreadyActive. P913: pass the same client so the upsert
+		// + session insert participate in this transaction.
+		reg = await liaisonRegister(
+			{
+				agency_id: agencyId,
+				display_name: displayName,
+				provider: opts.provider,
+				host_id: hostId,
+				capabilities,
+				capacity_envelope: opts.capacityEnvelope,
+				metadata: { ...(opts.metadata ?? {}), pid: process.pid },
+			},
+			client,
+		);
+
+		await client.query("COMMIT");
 	} catch (err) {
+		try {
+			await client.query("ROLLBACK");
+		} catch (rollbackErr) {
+			logger.warn(
+				`[selfRegisterAgency] ROLLBACK failed for ${agencyId}: ${rollbackErr instanceof Error ? rollbackErr.message : rollbackErr}`,
+			);
+		}
 		// Check if this is a unique constraint violation on idx_agency_session_one_active.
 		// pg's DatabaseError carries SQLSTATE in err.code and the constraint name in
 		// err.constraint (or in the message text). Match on either shape — the literal
@@ -201,6 +236,8 @@ export async function selfRegisterAgency(
 			);
 		}
 		throw err;
+	} finally {
+		client.release();
 	}
 	const sessionId = reg.session_id;
 	logger.log(
