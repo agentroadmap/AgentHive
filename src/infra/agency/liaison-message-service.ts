@@ -118,6 +118,9 @@ export async function storeMessage(
  * High-level convenience: auto-generate message_id, sequence, correlation_id,
  * signed_at, and signature, then persist via storeMessage.
  * Suitable for callers who don't need to manage sequence numbers manually.
+ *
+ * AC-9: Rejects targets that match a current display_alias value (not routable).
+ * Callers must use agency_id or identity-based addressing, not human-readable aliases.
  */
 export async function sendMessage(opts: {
     agency_id: string;
@@ -126,6 +129,24 @@ export async function sendMessage(opts: {
     payload: Record<string, any>;
     correlation_id?: string;
 }): Promise<LiaisonMessage> {
+    // AC-9: Check if agency_id matches an active agent's display_alias
+    const aliasCheckResult = await query<{ is_alias: boolean }>(
+        `SELECT EXISTS(
+            SELECT 1 FROM roadmap_workforce.agent_registry
+            WHERE display_alias = $1 AND status = 'active'
+        ) as is_alias`,
+        [opts.agency_id]
+    );
+
+    if (aliasCheckResult.rows[0]?.is_alias) {
+        const err = new Error(
+            `ALIAS_NOT_ROUTABLE: "${opts.agency_id}" is a human-readable display_alias, ` +
+            `not a routable target. Use agent_identity or agency_id instead.`
+        );
+        (err as any).code = 'ALIAS_NOT_ROUTABLE';
+        throw err;
+    }
+
     const message_id = crypto.randomUUID();
     const correlation_id = opts.correlation_id ?? crypto.randomUUID();
     const sequence = await getNextSequence(opts.agency_id);

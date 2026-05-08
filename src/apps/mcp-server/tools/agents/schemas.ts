@@ -294,3 +294,20 @@ export const agentRetireSchema: JsonSchema = {
 	required: ["agentId", "reason"],
 	additionalProperties: false,
 };
+
+export const agentForceReleaseAliasSchema: JsonSchema = {
+	type: "object",
+	properties: {
+		identity: {
+			type: "string",
+			description: "Agent identity (agent_identity from agent_registry) to release alias from",
+		},
+		force: {
+			type: "boolean",
+			default: false,
+			description: "If true, allows forcing release from active agents with stale heartbeat (>90s)",
+		},
+	},
+	required: ["identity"],
+	additionalProperties: false,
+};

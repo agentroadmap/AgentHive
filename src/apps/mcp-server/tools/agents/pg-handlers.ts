@@ -12,6 +12,11 @@ import {
 	detectCollision,
 	AgentIdInvalidError,
 } from "../../../../shared/identity/sanitize-agent-id.ts";
+import {
+	forceReleaseAlias,
+	type AliasReclaimResult,
+	type AliasReclaimError,
+} from "../../../../core/identity/agent-registry/alias-manager.ts";
 import type { CallToolResult } from "../../types.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
@@ -278,6 +283,52 @@ export class PgAgentHandlers {
 			};
 		} catch (err) {
 			return errorResult("Failed to add team member", err);
+		}
+	}
+
+	/**
+	 * P919 AC-4: Force-release a display alias from an agent.
+	 * Two paths:
+	 *   1. Clean: target row status='inactive' → always succeeds
+	 *   2. Stuck: target row status='active' BUT last_heartbeat < now()-90s → requires force=true
+	 */
+	async forceReleaseAlias(args: {
+		identity: string;
+		force?: boolean;
+	}): Promise<CallToolResult> {
+		try {
+			const result = await forceReleaseAlias({
+				identity: args.identity,
+				force: args.force ?? false,
+			});
+
+			// Check if result is an error
+			if ("code" in result && "message" in result) {
+				const err = result as AliasReclaimError;
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Error [${err.code}]: ${err.message}`,
+						},
+					],
+					isError: true,
+				};
+			}
+
+			// Success case
+			const success = result as AliasReclaimResult;
+			const lines = [
+				`✓ Alias released successfully`,
+				`Reason: ${success.reason}`,
+				success.priorIdentity ? `Prior owner: ${success.priorIdentity}` : "",
+			].filter(Boolean);
+
+			return {
+				content: [{ type: "text", text: lines.join("\n") }],
+			};
+		} catch (err) {
+			return errorResult("Failed to force-release alias", err);
 		}
 	}
 }
