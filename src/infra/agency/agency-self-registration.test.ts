@@ -14,23 +14,25 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, it, before, after } from "node:test";
+import { describe, it, beforeAll, afterAll } from "bun:test";
 import { Pool } from "pg";
 import { selfRegisterAgency, AgencyAlreadyActive } from "./agency-self-registration.ts";
 
-const SKIP = !process.env.PGPASSWORD;
+// SKIP when no DB credentials available (PGPASSWORD env or ~/.pgpass).
+// pg.Pool reads ~/.pgpass automatically; we only need PGUSER set or default.
+const SKIP = !process.env.PGUSER && !process.env.PGPASSWORD;
 let pool: Pool;
 
 const dbTest = (name: string, fn: () => Promise<void>) =>
-	it(name, async (t) => {
+	it(name, async () => {
 		if (SKIP) {
-			t.skip("DB credentials absent");
+			console.log(`  [skipped: ${name}] — DB credentials absent`);
 			return;
 		}
 		await fn();
 	});
 
-before(async () => {
+beforeAll(async () => {
 	if (SKIP) return;
 	pool = new Pool({
 		host: process.env.PGHOST ?? "127.0.0.1",
@@ -43,7 +45,7 @@ before(async () => {
 	await pool.query("SELECT 1");
 });
 
-after(async () => {
+afterAll(async () => {
 	if (SKIP || !pool) return;
 	await pool.end();
 });

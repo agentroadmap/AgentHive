@@ -167,12 +167,15 @@ export async function selfRegisterAgency(
 		});
 	} catch (err) {
 		// Check if this is a unique constraint violation on idx_agency_session_one_active.
-		if (
-			err instanceof Error &&
-			err.message &&
-			err.message.includes("23505") &&
-			err.message.includes("idx_agency_session_one_active")
-		) {
+		// pg's DatabaseError carries SQLSTATE in err.code and the constraint name in
+		// err.constraint (or in the message text). Match on either shape — the literal
+		// "23505" is rarely embedded in the human-readable message.
+		const pgErr = err as { code?: string; constraint?: string } & Error;
+		const isUniqueViolation = pgErr.code === "23505";
+		const matchesIndex =
+			pgErr.constraint === "idx_agency_session_one_active" ||
+			(pgErr.message && pgErr.message.includes("idx_agency_session_one_active"));
+		if (err instanceof Error && isUniqueViolation && matchesIndex) {
 			// P921 AC-5: SELECT existing session and throw typed AgencyAlreadyActive.
 			const existingRes = await query<{
 				session_id: string;
