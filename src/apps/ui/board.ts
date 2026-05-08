@@ -79,11 +79,11 @@ export interface WorkflowViewDefinition {
 
 // Single status path in the DB: every proposal flows through DRAFT → REVIEW →
 // DEVELOP → MERGE → COMPLETE. The Hotfix tab is a type filter that re-labels
-// those columns using the Hotfix SMDL stage names — TRIAGE / FIX / DEPLOYED —
+// those columns using the Hotfix SMDL stage names — DRAFT / FIX / DEPLOYED —
 // because hotfixes don't have a meaningful Review or Merge step.
 //
 // Mapping (DB → display, hotfix view only):
-//   DRAFT, REVIEW    → TRIAGE
+//   DRAFT, REVIEW    → DRAFT
 //   DEVELOP, MERGE   → FIX
 //   COMPLETE         → DEPLOYED
 const RFC_STATUSES_CANONICAL = [
@@ -98,10 +98,10 @@ const HOTFIX_STATUSES_CANONICAL = (() => {
 })();
 const HOTFIX_PROPOSAL_TYPES = new Set(["hotfix"]);
 const HOTFIX_DISPLAY_MAP: Record<string, string> = {
-	[RfcStates.DRAFT]: "TRIAGE",
-	[RfcStates.REVIEW]: "TRIAGE",
-	[RfcStates.DEVELOP]: "FIX",
-	[RfcStates.MERGE]: "FIX",
+	[RfcStates.DRAFT]: "DRAFT",
+	[RfcStates.REVIEW]: "REVIEW",
+	[RfcStates.DEVELOP]: "DEVELOP",
+	[RfcStates.MERGE]: "MERGE",
 	[RfcStates.COMPLETE]: "DEPLOYED",
 };
 
@@ -123,7 +123,7 @@ const WORKFLOW_VIEWS: WorkflowViewDefinition[] = [
 	{
 		key: "hotfix",
 		label: "Hotfix",
-		description: "Hotfix-type proposals — TRIAGE / FIX / DEPLOYED columns",
+		description: "Hotfix-type proposals — DRAFT / FIX / DEPLOYED columns",
 		proposalTypes: ["hotfix"],
 		statuses: [...HOTFIX_STATUSES_CANONICAL],
 	},
@@ -231,7 +231,7 @@ function normalizeProposalsForWorkflow(
 	workflowKey: WorkflowViewKey,
 ): Proposal[] {
 	// RFC view surfaces DB-truth statuses verbatim. Hotfix view re-labels
-	// using the Hotfix SMDL stage names so columns read TRIAGE/FIX/DEPLOYED.
+	// using the Hotfix SMDL stage names so columns read DRAFT/FIX/DEPLOYED.
 	return proposals.map((proposal) => ({
 		...proposal,
 		status: statusForView(proposal.status, workflowKey),

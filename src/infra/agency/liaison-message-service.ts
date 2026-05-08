@@ -28,6 +28,10 @@ function getSigningKey(): string {
  * P149 Phase C: also mirrors to message_ledger for unified A2A observability.
  * The ledger insert is best-effort — if it fails (e.g. from_agent not in
  * agent_registry), liaison_message remains the authoritative store.
+ *
+ * P922: host_id is resolved via atomic INSERT...SELECT from roadmap.agency.host_id.
+ * This ensures host_id and the message are inserted atomically within the same
+ * transaction, preventing stale-read windows if the agency moves hosts.
  */
 export async function storeMessage(
     message: Partial<LiaisonMessage> & {
@@ -71,16 +75,24 @@ export async function storeMessage(
         // Mirror failed — proceed with liaison_message as the authoritative store
     }
 
+    // P922: Atomic INSERT...SELECT to resolve host_id from roadmap.agency.
+    // No caller-side cache or separate SELECT-then-INSERT. The host_id is resolved
+    // and inserted atomically within the same transaction, ensuring:
+    // - If agency moves hosts between caller's logic and INSERT, the SELECT sees the current host.
+    // - No stale-read window: SELECT and INSERT are indivisible from other transactions' POV.
     const result = await query<LiaisonMessage>(
         `INSERT INTO roadmap.liaison_message
-            (message_id, agency_id, sequence, direction, kind, correlation_id, payload, signed_at, signature, ledger_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            (message_id, agency_id, sequence, direction, kind, correlation_id, payload, signed_at, signature, ledger_id, host_id)
+        SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, a.host_id
+        FROM roadmap.agency a
+        WHERE a.agency_id = $2
         ON CONFLICT (agency_id, sequence) DO UPDATE
             SET message_id = EXCLUDED.message_id,
-                ledger_id  = COALESCE(roadmap.liaison_message.ledger_id, EXCLUDED.ledger_id)
+                ledger_id  = COALESCE(roadmap.liaison_message.ledger_id, EXCLUDED.ledger_id),
+                host_id    = EXCLUDED.host_id
         RETURNING
             message_id, agency_id, sequence, direction, kind, correlation_id,
-            payload, signed_at, signature, acked_at, ack_outcome, ack_error, created_at`,
+            payload, signed_at, signature, acked_at, ack_outcome, ack_error, created_at, host_id`,
         [
             message.message_id,
             message.agency_id,
@@ -633,5 +645,6 @@ function parseMessageRow(row: any): LiaisonMessage {
         created_at: row.created_at instanceof Date
             ? row.created_at.toISOString()
             : row.created_at,
+        host_id: row.host_id ?? null,
     };
 }

@@ -27,7 +27,7 @@
  */
 import { spawn } from "node:child_process";
 import { Client } from "pg";
-import { query } from "../postgres/pool.ts";
+import { query, getPool } from "../postgres/pool.ts";
 import { agentNotifyChannel } from "../messaging/a2a-access-control.ts";
 
 export interface IncomingMessage {
@@ -269,7 +269,8 @@ async function markReadAndResolveTimeout(messageId: number): Promise<void> {
 }
 
 async function connectListenClient(): Promise<Client> {
-	const client = new Client();
-	await client.connect();
-	return client;
+	// P844: getPool() handles password resolution and search_path.
+	// We use a dedicated client from the pool for LISTEN.
+	const client = await getPool().connect();
+	return client as unknown as Client;
 }

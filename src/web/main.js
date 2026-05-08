@@ -175619,6 +175619,12 @@ class ApiClient {
     const result = await this.fetchJson(`${API_BASE}/routes`);
     return result.routes;
   }
+  async toggleRoute(id, isEnabled) {
+    return this.fetchJson(`${API_BASE}/routes/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ is_enabled: isEnabled })
+    });
+  }
   async fetchDispatches() {
     const result = await this.fetchJson(`${API_BASE}/dispatches`);
     return result.dispatches;
@@ -176891,31 +176897,78 @@ var useTheme = () => {
   }
   return context;
 };
+function getSystemDark() {
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+}
 var ThemeProvider = ({ children }) => {
-  const [theme, setTheme] = import_react8.useState(() => {
-    const savedTheme = localStorage.getItem("roadmap-theme");
-    if (savedTheme && (savedTheme === "light" || savedTheme === "dark")) {
-      return savedTheme;
-    }
-    if (window.matchMedia?.("(prefers-color-scheme: dark)").matches) {
-      return "dark";
-    }
-    return "light";
+  const [mode, setModeState] = import_react8.useState(() => {
+    const saved = localStorage.getItem("roadmap-theme-mode");
+    if (saved === "light" || saved === "dark" || saved === "system")
+      return saved;
+    const legacy = localStorage.getItem("roadmap-theme");
+    if (legacy === "light" || legacy === "dark")
+      return legacy;
+    return "system";
   });
+  const [contrast, setContrast] = import_react8.useState(() => {
+    const saved = localStorage.getItem("roadmap-contrast");
+    return saved === "high" ? "high" : "normal";
+  });
+  const [systemDark, setSystemDark] = import_react8.useState(getSystemDark);
+  import_react8.useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = (e) => setSystemDark(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+  const resolvedMode = import_react8.useMemo(() => {
+    if (mode === "system")
+      return systemDark ? "dark" : "light";
+    return mode;
+  }, [mode, systemDark]);
   import_react8.useEffect(() => {
     const root = document.documentElement;
-    if (theme === "dark") {
+    if (resolvedMode === "dark") {
       root.classList.add("dark");
     } else {
       root.classList.remove("dark");
     }
-    localStorage.setItem("roadmap-theme", theme);
-  }, [theme]);
-  const toggleTheme = () => {
-    setTheme((prev) => prev === "light" ? "dark" : "light");
-  };
+  }, [resolvedMode]);
+  import_react8.useEffect(() => {
+    const root = document.documentElement;
+    if (contrast === "high") {
+      root.classList.add("high-contrast");
+    } else {
+      root.classList.remove("high-contrast");
+    }
+  }, [contrast]);
+  const setMode = import_react8.useCallback((newMode) => {
+    setModeState(newMode);
+    localStorage.setItem("roadmap-theme-mode", newMode);
+    const resolved = newMode === "system" ? getSystemDark() ? "dark" : "light" : newMode;
+    localStorage.setItem("roadmap-theme", resolved);
+  }, []);
+  const toggleContrast = import_react8.useCallback(() => {
+    setContrast((prev) => {
+      const next2 = prev === "normal" ? "high" : "normal";
+      localStorage.setItem("roadmap-contrast", next2);
+      return next2;
+    });
+  }, []);
+  const toggleTheme = import_react8.useCallback(() => {
+    setMode(resolvedMode === "light" ? "dark" : "light");
+  }, [resolvedMode, setMode]);
+  const value = import_react8.useMemo(() => ({
+    mode,
+    contrast,
+    resolvedMode,
+    setMode,
+    toggleContrast,
+    theme: resolvedMode,
+    toggleTheme
+  }), [mode, contrast, resolvedMode, setMode, toggleContrast, toggleTheme]);
   return /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(ThemeContext.Provider, {
-    value: { theme, toggleTheme },
+    value,
     children
   }, undefined, false, undefined, this);
 };
@@ -179889,15 +179942,17 @@ var STATUS_COLORS = {
   active: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
   blocked: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
   completed: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400",
-  failed: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400"
+  failed: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
+  open: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
+  cancelled: "bg-gray-100 text-gray-600 dark:bg-gray-900/30 dark:text-gray-500"
 };
 var OFFER_COLORS = {
-  open: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
-  delivered: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400",
-  claimed: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
-  active: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
-  rejected: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
-  expired: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400"
+  open: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
+  claimed: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
+  active: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
+  delivered: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400",
+  failed: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
+  expired: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400"
 };
 function timeAgo2(dateStr) {
   const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
@@ -179909,6 +179964,37 @@ function timeAgo2(dateStr) {
     return `${Math.floor(seconds / 3600)}h`;
   return `${Math.floor(seconds / 86400)}d`;
 }
+function leaseCountdown(expiresAt, nowMs) {
+  if (!expiresAt)
+    return null;
+  const remaining = Math.floor((new Date(expiresAt).getTime() - nowMs) / 1000);
+  if (remaining <= 0)
+    return "expired";
+  return `expires in ${remaining}s`;
+}
+function ReissueBar({ count, max }) {
+  const color = count === 0 ? "bg-green-500" : count >= max ? "bg-red-500" : "bg-yellow-500";
+  const pct = max === 0 ? 0 : Math.min(count / max * 100, 100);
+  return /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+    children: [
+      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("span", {
+        className: "text-sm tabular-nums",
+        children: [
+          count,
+          "/",
+          max
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+        className: "mt-0.5 h-1 w-16 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden",
+        children: /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+          className: `h-full ${color} rounded-full`,
+          style: { width: `${pct}%` }
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
 var DispatchPage = () => {
   const [dispatches, setDispatches] = import_react18.useState([]);
   const [loading, setLoading] = import_react18.useState(true);
@@ -179916,6 +180002,7 @@ var DispatchPage = () => {
   const [filterStatus, setFilterStatus] = import_react18.useState("");
   const [filterOffer, setFilterOffer] = import_react18.useState("");
   const [showCompleted, setShowCompleted] = import_react18.useState(false);
+  const [nowMs, setNowMs] = import_react18.useState(() => Date.now());
   const fetchData = import_react18.useCallback(async () => {
     try {
       setError(null);
@@ -179930,7 +180017,13 @@ var DispatchPage = () => {
   }, []);
   import_react18.useEffect(() => {
     fetchData();
+    const poll = setInterval(() => void fetchData(), 15000);
+    return () => clearInterval(poll);
   }, [fetchData]);
+  import_react18.useEffect(() => {
+    const tick = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(tick);
+  }, []);
   const statuses = [...new Set(dispatches.map((d) => d.dispatch_status))].sort();
   const offerStatuses = [...new Set(dispatches.map((d) => d.offer_status))].sort();
   const filtered = dispatches.filter((d) => {
@@ -180062,7 +180155,7 @@ var DispatchPage = () => {
         children: "No dispatches match the current filters."
       }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
         className: "space-y-6",
-        children: [...byProposal.entries()].map(([proposalId, dispatches2]) => /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+        children: [...byProposal.entries()].map(([proposalId, pDispatches]) => /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
           className: "rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden",
           children: [
             /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
@@ -180078,9 +180171,9 @@ var DispatchPage = () => {
                 /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("span", {
                   className: "text-sm text-gray-500 ml-2",
                   children: [
-                    dispatches2.length,
+                    pDispatches.length,
                     " dispatch",
-                    dispatches2.length > 1 ? "es" : ""
+                    pDispatches.length > 1 ? "es" : ""
                   ]
                 }, undefined, true, undefined, this)
               ]
@@ -180129,56 +180222,64 @@ var DispatchPage = () => {
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("tbody", {
                   className: "bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700",
-                  children: dispatches2.map((d) => /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("tr", {
-                    className: "hover:bg-gray-50 dark:hover:bg-gray-800",
-                    children: [
-                      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("td", {
-                        className: "px-4 py-2 font-mono text-sm",
-                        children: d.agent_identity || "—"
-                      }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("td", {
-                        className: "px-4 py-2 font-mono text-sm",
-                        children: d.worker_identity ? d.worker_identity : /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("span", {
-                          className: "text-gray-400 italic",
-                          children: "empty"
+                  children: pDispatches.map((d) => {
+                    const countdown = d.offer_status === "claimed" ? leaseCountdown(d.claim_expires_at, nowMs) : null;
+                    return /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("tr", {
+                      className: "hover:bg-gray-50 dark:hover:bg-gray-800",
+                      children: [
+                        /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("td", {
+                          className: "px-4 py-2 font-mono text-sm",
+                          children: d.agent_identity || "—"
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("td", {
+                          className: "px-4 py-2 font-mono text-sm",
+                          children: d.worker_identity ? d.worker_identity : /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("span", {
+                            className: "text-gray-400 italic",
+                            children: "empty"
+                          }, undefined, false, undefined, this)
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("td", {
+                          className: "px-4 py-2 text-sm",
+                          children: d.dispatch_role
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("td", {
+                          className: "px-4 py-2 text-sm text-gray-500",
+                          children: d.squad_name
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("td", {
+                          className: "px-4 py-2",
+                          children: /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("span", {
+                            className: `inline-block px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[d.dispatch_status] ?? "bg-gray-100 text-gray-800"}`,
+                            children: d.dispatch_status
+                          }, undefined, false, undefined, this)
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("td", {
+                          className: "px-4 py-2",
+                          children: [
+                            /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("span", {
+                              className: `inline-block px-2 py-0.5 rounded text-xs font-medium ${OFFER_COLORS[d.offer_status] ?? "bg-gray-100 text-gray-800"}`,
+                              children: d.offer_status
+                            }, undefined, false, undefined, this),
+                            countdown && /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+                              className: "text-xs text-gray-500 mt-0.5 tabular-nums",
+                              children: countdown
+                            }, undefined, false, undefined, this)
+                          ]
+                        }, undefined, true, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("td", {
+                          className: "px-4 py-2 text-sm tabular-nums text-gray-500",
+                          children: timeAgo2(d.assigned_at)
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("td", {
+                          className: "px-4 py-2",
+                          children: /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(ReissueBar, {
+                            count: d.reissue_count,
+                            max: d.max_reissues
+                          }, undefined, false, undefined, this)
                         }, undefined, false, undefined, this)
-                      }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("td", {
-                        className: "px-4 py-2 text-sm",
-                        children: d.dispatch_role
-                      }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("td", {
-                        className: "px-4 py-2 text-sm text-gray-500",
-                        children: d.squad_name
-                      }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("td", {
-                        className: "px-4 py-2",
-                        children: /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("span", {
-                          className: `inline-block px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[d.dispatch_status] ?? "bg-gray-100 text-gray-800"}`,
-                          children: d.dispatch_status
-                        }, undefined, false, undefined, this)
-                      }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("td", {
-                        className: "px-4 py-2",
-                        children: /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("span", {
-                          className: `inline-block px-2 py-0.5 rounded text-xs font-medium ${OFFER_COLORS[d.offer_status] ?? "bg-gray-100 text-gray-800"}`,
-                          children: d.offer_status
-                        }, undefined, false, undefined, this)
-                      }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("td", {
-                        className: "px-4 py-2 text-sm tabular-nums text-gray-500",
-                        children: timeAgo2(d.assigned_at)
-                      }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("td", {
-                        className: "px-4 py-2 text-sm tabular-nums",
-                        children: [
-                          d.reissue_count,
-                          "/",
-                          d.max_reissues
-                        ]
-                      }, undefined, true, undefined, this)
-                    ]
-                  }, d.id, true, undefined, this))
+                      ]
+                    }, d.id, true, undefined, this);
+                  })
                 }, undefined, false, undefined, this)
               ]
             }, undefined, true, undefined, this)
@@ -231959,6 +232060,8 @@ var RoutesPage = () => {
   const [error3, setError] = import_react63.useState(null);
   const [filterProvider, setFilterProvider] = import_react63.useState("");
   const [showDisabled, setShowDisabled] = import_react63.useState(false);
+  const [togglingIds, setTogglingIds] = import_react63.useState(new Set);
+  const [toggleErrors, setToggleErrors] = import_react63.useState(new Map);
   const fetchData = import_react63.useCallback(async () => {
     try {
       setError(null);
@@ -231974,6 +232077,34 @@ var RoutesPage = () => {
   import_react63.useEffect(() => {
     fetchData();
   }, [fetchData]);
+  const handleToggle = import_react63.useCallback(async (route) => {
+    if (togglingIds.has(route.id))
+      return;
+    const newEnabled = !route.is_enabled;
+    setRoutes((prev2) => prev2.map((r3) => r3.id === route.id ? { ...r3, is_enabled: newEnabled } : r3));
+    setTogglingIds((prev2) => new Set(prev2).add(route.id));
+    setToggleErrors((prev2) => {
+      const next4 = new Map(prev2);
+      next4.delete(route.id);
+      return next4;
+    });
+    try {
+      await apiClient.toggleRoute(route.id, newEnabled);
+    } catch (err) {
+      setRoutes((prev2) => prev2.map((r3) => r3.id === route.id ? { ...r3, is_enabled: route.is_enabled } : r3));
+      setToggleErrors((prev2) => {
+        const next4 = new Map(prev2);
+        next4.set(route.id, "Toggle failed");
+        return next4;
+      });
+    } finally {
+      setTogglingIds((prev2) => {
+        const next4 = new Set(prev2);
+        next4.delete(route.id);
+        return next4;
+      });
+    }
+  }, [togglingIds]);
   const providers = [...new Set(routes.map((r3) => r3.route_provider))].sort();
   const filtered = routes.filter((r3) => {
     if (!showDisabled && !r3.is_enabled)
@@ -231982,6 +232113,7 @@ var RoutesPage = () => {
       return false;
     return true;
   });
+  const orphanCount = routes.filter((r3) => r3.has_host_policy_match === false).length;
   if (loading) {
     return /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
       className: "flex items-center justify-center h-64",
@@ -232003,10 +232135,23 @@ var RoutesPage = () => {
       /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
         className: "flex items-center justify-between mb-6",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("h1", {
-            className: "text-2xl font-bold",
-            children: "Model Routes"
-          }, undefined, false, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+            className: "flex items-center gap-3",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("h1", {
+                className: "text-2xl font-bold",
+                children: "Model Routes"
+              }, undefined, false, undefined, this),
+              orphanCount > 0 && /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("span", {
+                className: "inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800",
+                children: [
+                  "⚠ ",
+                  orphanCount,
+                  " no host policy"
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
           /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
             className: "flex items-center gap-4",
             children: [
@@ -232104,46 +232249,75 @@ var RoutesPage = () => {
             }, undefined, false, undefined, this),
             /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("tbody", {
               className: "bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700",
-              children: filtered.map((route) => /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("tr", {
-                className: "hover:bg-gray-50 dark:hover:bg-gray-800",
-                children: [
-                  /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
-                    className: "px-4 py-3",
-                    children: /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("span", {
-                      className: `inline-block px-2 py-0.5 rounded text-xs font-medium ${route.is_enabled ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400" : "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400"}`,
-                      children: route.is_enabled ? "ON" : "OFF"
+              children: filtered.map((route) => {
+                const isOrphan2 = route.has_host_policy_match === false;
+                const isToggling = togglingIds.has(route.id);
+                const toggleError = toggleErrors.get(route.id);
+                return /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("tr", {
+                  className: isOrphan2 ? "bg-yellow-50 dark:bg-yellow-900/10 hover:bg-yellow-100 dark:hover:bg-yellow-900/20" : "hover:bg-gray-50 dark:hover:bg-gray-800",
+                  children: [
+                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
+                      className: "px-4 py-3",
+                      children: /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+                        className: "flex flex-col gap-1",
+                        children: [
+                          /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("button", {
+                            type: "button",
+                            onClick: () => void handleToggle(route),
+                            disabled: isToggling,
+                            className: `inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium cursor-pointer disabled:opacity-60 ${route.is_enabled ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 hover:bg-green-200" : "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400 hover:bg-red-200"}`,
+                            children: [
+                              isToggling ? /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("span", {
+                                className: "inline-block w-3 h-3 border border-current border-t-transparent rounded-full animate-spin"
+                              }, undefined, false, undefined, this) : null,
+                              route.is_enabled ? "ON" : "OFF"
+                            ]
+                          }, undefined, true, undefined, this),
+                          toggleError && /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("span", {
+                            className: "text-xs text-red-600",
+                            children: toggleError
+                          }, undefined, false, undefined, this)
+                        ]
+                      }, undefined, true, undefined, this)
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
+                      className: "px-4 py-3 font-mono text-sm",
+                      children: [
+                        isOrphan2 && /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("span", {
+                          className: "mr-1 text-yellow-600",
+                          title: "No host policy match",
+                          children: "⚠"
+                        }, undefined, false, undefined, this),
+                        route.model_name
+                      ]
+                    }, undefined, true, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
+                      className: "px-4 py-3 text-sm",
+                      children: route.route_provider
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
+                      className: "px-4 py-3 text-sm",
+                      children: route.agent_provider
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
+                      className: "px-4 py-3 font-mono text-sm text-gray-500",
+                      children: route.agent_cli
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
+                      className: "px-4 py-3 text-sm text-gray-500",
+                      children: route.api_spec
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
+                      className: "px-4 py-3 text-sm tabular-nums",
+                      children: route.cost_per_million_input > 0 || route.cost_per_million_output > 0 ? `$${route.cost_per_million_input}/$${route.cost_per_million_output}` : "free"
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
+                      className: "px-4 py-3 text-sm tabular-nums",
+                      children: route.priority
                     }, undefined, false, undefined, this)
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
-                    className: "px-4 py-3 font-mono text-sm",
-                    children: route.model_name
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
-                    className: "px-4 py-3 text-sm",
-                    children: route.route_provider
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
-                    className: "px-4 py-3 text-sm",
-                    children: route.agent_provider
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
-                    className: "px-4 py-3 font-mono text-sm text-gray-500",
-                    children: route.agent_cli
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
-                    className: "px-4 py-3 text-sm text-gray-500",
-                    children: route.api_spec
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
-                    className: "px-4 py-3 text-sm tabular-nums",
-                    children: route.cost_per_million_input > 0 || route.cost_per_million_output > 0 ? `$${route.cost_per_million_input}/$${route.cost_per_million_output}` : "free"
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
-                    className: "px-4 py-3 text-sm tabular-nums",
-                    children: route.priority
-                  }, undefined, false, undefined, this)
-                ]
-              }, route.id, true, undefined, this))
+                  ]
+                }, route.id, true, undefined, this);
+              })
             }, undefined, false, undefined, this)
           ]
         }, undefined, true, undefined, this)
@@ -233330,7 +233504,7 @@ function App() {
                   }, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(Route, {
-                  path: "/dispatch",
+                  path: "/dispatches",
                   children: /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(DispatchPage_default, {}, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(Route, {

@@ -79,6 +79,12 @@ function resolveLiaisonHandler(provider: string): LiaisonProviderHandler | null 
 				buildArgs: (p) => ["-p", p, "--yolo"],
 				brand: "GitHub Copilot",
 			};
+		case "gemini":
+			return {
+				bin: process.env.GEMINI_BIN ?? "gemini",
+				buildArgs: (p) => ["--prompt", p],
+				brand: "Gemini",
+			};
 		default:
 			return null;
 	}

@@ -34,6 +34,7 @@ export const LiaisonMessageSchema = z.object({
     ack_outcome: LiaisonMessageAckOutcomeSchema.nullable().optional(),
     ack_error: z.string().nullable().optional(),
     created_at: z.string().datetime().optional(),
+    host_id: z.string().nullable().optional(), // P922: routing field for per-host NOTIFY channel
 });
 
 export type LiaisonMessage = z.infer<typeof LiaisonMessageSchema>;
