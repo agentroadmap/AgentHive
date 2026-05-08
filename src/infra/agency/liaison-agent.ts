@@ -12,7 +12,7 @@
  *      dedicated client and end() it on stop().
  *   3. On each notification, fetches the row and either:
  *        - protocol_ping → protocol_pong fast-path (no LLM, P856), or
- *        - invokes the per-provider LLM handler to compose a text reply.
+ *        - invokes the per-provider LLM handler via CliInvocationRegistry to compose a text reply.
  *   4. Writes replies directly to roadmap.message_ledger with correlation_id
  *      copied from the original and reply_to = original.id, then marks the
  *      original read and resolves any pending timeout-tracking row. This
@@ -24,11 +24,19 @@
  * The DB INSERT trigger (fn_a2a_message_notify) emits pg_notify on
  * a2a_msg_<recipient> automatically; this module does not call pg_notify
  * itself.
+ *
+ * P920: Refactored to use CliInvocationRegistry instead of inline
+ * resolveLiaisonHandler switches.
  */
-import { spawn } from "node:child_process";
 import { Client } from "pg";
 import { query, getPool } from "../postgres/pool.ts";
 import { agentNotifyChannel } from "../messaging/a2a-access-control.ts";
+import {
+	globalCliInvocationRegistry,
+	invokeCliHandler,
+	CliInvocationRegistry,
+	type CliInvocationHandler,
+} from "../../core/runtime/cli-invocation.ts";
 
 export interface IncomingMessage {
 	id: number;
@@ -43,10 +51,12 @@ export type LlmInvoke = (msg: IncomingMessage) => Promise<string>;
 
 export interface LiaisonAgentOptions {
 	identity: string;
-	invokeLlm: LlmInvoke;
+	provider: string;
 	loggerPrefix?: string;
 	/** Override for tests; defaults to a fresh `pg.Client()` reading PG* env. */
 	createListenClient?: () => Promise<Client>;
+	/** Override for tests; defaults to globalCliInvocationRegistry. */
+	registry?: CliInvocationRegistry;
 }
 
 export interface LiaisonAgentHandle {
@@ -84,8 +94,18 @@ export function spawnCliCapture(bin: string, args: string[]): Promise<string> {
 export async function runLiaisonAgent(
 	opts: LiaisonAgentOptions,
 ): Promise<LiaisonAgentHandle> {
-	const { identity, invokeLlm } = opts;
+	const { identity, provider } = opts;
 	const log = opts.loggerPrefix ?? `[Liaison ${identity}]`;
+	const registry = opts.registry ?? globalCliInvocationRegistry;
+
+	// Resolve the CLI handler for this provider
+	const handler = await registry.resolve(provider);
+	if (!handler) {
+		throw new Error(
+			`[Liaison] No CLI handler found for provider "${provider}" — check model_routes config`,
+		);
+	}
+
 	// Validates the identity (charset + 63-byte channel limit) and returns
 	// the same channel the DB trigger emits on. Throws on invalid identity
 	// rather than silently producing a channel name no one will hear.
@@ -152,13 +172,14 @@ export async function runLiaisonAgent(
 
 		let replyContent: string;
 		try {
-			replyContent = await invokeLlm({
-				id: msg.id,
-				from_agent: msg.from_agent,
-				to_agent: msg.to_agent,
-				message_content: msg.message_content,
-				message_type: msg.message_type,
-				correlation_id: msg.correlation_id ?? null,
+			const systemContext =
+				`You are ${identity}, a ${handler.brand} liaison agent in the AgentHive system. ` +
+				`You received a ${msg.message_type} message from ${msg.from_agent}. ` +
+				`Reply concisely. If it's a task, acknowledge and outline your approach in 2-3 sentences.`;
+			const prompt = `${systemContext}\n\n---\nIncoming message:\n${msg.message_content}`;
+
+			replyContent = await invokeCliHandler(handler, prompt, {
+				timeoutMs: 30000,
 			});
 		} catch (err) {
 			console.error(`${log} LLM handler failed:`, err);
