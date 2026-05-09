@@ -358,14 +358,16 @@ export class Orchestrator {
 		// claimer can pick up offers from any project the system serves.
 		await query(
 			`INSERT INTO roadmap_workforce.provider_registry
-			    (agency_id, agency_identity, project_id, status, max_in_flight)
-			 SELECT ar.id, ar.agent_identity, p.project_id, 'active', 8
+			    (agency_id, agency_identity, project_id, squad_name,
+			     status, max_in_flight)
+			 SELECT ar.id, ar.agent_identity, p.project_id, NULL,
+			        'active', 8
 			   FROM roadmap_workforce.agent_registry ar
 			   CROSS JOIN roadmap.project p
 			  WHERE ar.agent_identity = $1
 			    AND p.status = 'active'
 			    AND p.archived_at IS NULL
-			 ON CONFLICT (agency_id, project_id) DO UPDATE
+			 ON CONFLICT (agency_id, project_id, squad_name) DO UPDATE
 			   SET status = 'active'`,
 			[ORCHESTRATOR_IDENTITY],
 		);
