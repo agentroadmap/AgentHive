@@ -127,7 +127,22 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 	}
 
 	private async pickAgency(claim: ClaimedOffer): Promise<string | null> {
-		const projectId = extractProjectId(claim.metadata);
+		// Prefer project_id from the metadata; fall back to looking it up on
+		// the proposal so resolveAgency gets a real bigint, not "" (which
+		// breaks the project_id = $1 filter with an invalid-bigint error).
+		let projectId = extractProjectId(claim.metadata);
+		if (!projectId && claim.proposalId) {
+			try {
+				const { rows } = await query<{ project_id: number | null }>(
+					`SELECT project_id FROM roadmap_proposal.proposal WHERE id = $1`,
+					[claim.proposalId],
+				);
+				const pid = rows[0]?.project_id;
+				if (pid !== undefined && pid !== null) projectId = String(pid);
+			} catch {
+				/* best-effort — fall through to "" and let resolver handle */
+			}
+		}
 		const candidate = await this.resolveAgencyFn(
 			projectId ?? "",
 			claim.role,
