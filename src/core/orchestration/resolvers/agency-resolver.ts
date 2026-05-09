@@ -52,14 +52,20 @@ export async function resolveAgency(
 	projectId: string,
 	_role?: string,
 ): Promise<AgencyCandidate | null> {
+	// P914: exclude coordinator agents (the orchestrator itself) and
+	// test scaffolding identities. Coordinators claim offers and
+	// re-dispatch them — they must never be a dispatch target.
 	const { rows } = await query(
 		`SELECT pr.id, pr.agency_id, pr.project_id, pr.capabilities,
 		        pr.status, pr.throttle_count, pr.last_seen_at, pr.max_in_flight,
 		        COALESCE(inf.in_flight_count, 0) AS in_flight_count
 		 FROM roadmap_workforce.provider_registry pr
+		 JOIN roadmap_workforce.agent_registry ar ON ar.id = pr.agency_id
 		 LEFT JOIN roadmap_workforce.v_agency_in_flight inf
 		   ON inf.provider_registry_id = pr.id
 		 WHERE pr.status NOT IN ('offline', 'retired')
+		   AND ar.agent_type <> 'coordinator'
+		   AND ar.agent_identity NOT LIKE 'test/%'
 		   AND (pr.project_id IS NULL OR pr.project_id = $1)
 		   AND COALESCE(inf.in_flight_count, 0) < pr.max_in_flight
 		 ORDER BY pr.throttle_count ASC, pr.last_seen_at DESC NULLS LAST
