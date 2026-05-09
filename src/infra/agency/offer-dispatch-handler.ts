@@ -54,6 +54,8 @@ interface OfferDispatchEnvelope {
 	proposal_id?: number;
 	squad_name?: string;
 	lease_ttl_seconds?: number;
+	/** P914: worktree directory basename selected by the orchestrator. */
+	worktree_hint?: string | null;
 }
 
 const DEFAULT_LEASE_TTL_SECONDS = 60;
@@ -70,8 +72,15 @@ const defaultDeps: Required<
 	spawn: spawnAgent,
 	exec: defaultExec,
 	logger: console,
+	// P914: include AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE (the var actually
+	// set in /etc/agenthive/env, e.g. "codex-one") as a fallback so the
+	// spawn cwd resolves to a real directory under WORKTREE_ROOT instead
+	// of the literal "main" which never existed.
 	resolveWorktree: (_agencyId) =>
-		process.env.AGENCY_WORKTREE ?? process.env.AGENTHIVE_DEFAULT_WORKTREE ?? "main",
+		process.env.AGENCY_WORKTREE ??
+		process.env.AGENTHIVE_DEFAULT_WORKTREE ??
+		process.env.AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE ??
+		"codex-one",
 };
 
 /**
@@ -108,7 +117,13 @@ export async function handleOfferDispatch(
 		return;
 	}
 
-	const worktree = resolveWorktree(agencyId);
+	// P914: prefer the orchestrator-selected worktree from the payload;
+	// fall back to the agency's local resolver only when the dispatcher
+	// didn't supply one (older clients, test fixtures).
+	const worktree =
+		(payload.worktree_hint && payload.worktree_hint.trim().length > 0
+			? payload.worktree_hint
+			: undefined) ?? resolveWorktree(agencyId);
 	const proposalId = payload.proposal_id ?? undefined;
 	const capabilities =
 		payload.required_capabilities && payload.required_capabilities.length > 0

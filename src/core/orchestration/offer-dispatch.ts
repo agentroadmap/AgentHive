@@ -112,6 +112,11 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 			proposal_id: claim.proposalId,
 			squad_name: claim.squadName,
 			lease_ttl_seconds: claim.leaseTtlSeconds,
+			// P914: propagate worktree_hint from the offer's metadata
+			// (postWorkOffer stores selectedWorktree there). Without this
+			// the handler falls back to "main" which is not a real worktree
+			// dir and node spawn raises ENOENT before the CLI runs.
+			worktree_hint: extractWorktreeHint(claim.metadata),
 		};
 
 		await this.sendMessageFn({
@@ -223,4 +228,9 @@ function extractSuccessCriteria(metadata: Record<string, unknown>): string[] {
 		return v.filter((x): x is string => typeof x === "string");
 	}
 	return [];
+}
+
+function extractWorktreeHint(metadata: Record<string, unknown>): string | null {
+	const v = metadata.worktree_hint ?? metadata.worktree;
+	return typeof v === "string" && v.trim().length > 0 ? v : null;
 }
