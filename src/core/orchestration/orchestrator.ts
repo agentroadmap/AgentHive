@@ -347,7 +347,7 @@ export class Orchestrator {
 		await query(
 			`INSERT INTO roadmap_workforce.agent_registry
 			    (agent_identity, agent_type, trust_tier, status)
-			 VALUES ($1, 'orchestrator', 'authority', 'active')
+			 VALUES ($1, 'coordinator', 'authority', 'active')
 			 ON CONFLICT (agent_identity) DO UPDATE
 			   SET status = 'active'`,
 			[ORCHESTRATOR_IDENTITY],
