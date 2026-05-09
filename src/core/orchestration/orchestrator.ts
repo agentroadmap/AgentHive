@@ -11,6 +11,8 @@ import {
 	runPokeWatchdogTick,
 	type PokeWatchdogOptions,
 } from "./maintenance.ts";
+import { OfferClaimLoop, type ListenerClient } from "./offer-claim-loop.ts";
+import { OrchestratorOfferDispatcher } from "./offer-dispatch.ts";
 import { resolveQueueContext } from "./queue-context-resolver.ts";
 import {
 	assessReadiness,
@@ -87,6 +89,21 @@ const MATURITY_CHANGED_CHANNEL = "proposal_maturity_changed";
 /** Whether the 2-minute state-change poll fallback is enabled (env-driven). */
 const ENABLE_POLLING = process.env.AGENTHIVE_ORCHESTRATOR_POLL === "1";
 
+/**
+ * Orchestrator agent identity used as the claimer in fn_claim_work_offer.
+ * Must exist in roadmap_workforce.agent_registry; ensured at boot.
+ */
+const ORCHESTRATOR_IDENTITY =
+	process.env.AGENTHIVE_ORCHESTRATOR_IDENTITY ??
+	"agenthive/agency-orchestrator";
+
+/**
+ * Escape hatch: set AGENTHIVE_OFFER_CLAIM_LOOP=0 to disable the
+ * orchestrator-side claim loop (e.g. emergency rollback). Default on.
+ */
+const ENABLE_OFFER_CLAIM_LOOP =
+	(process.env.AGENTHIVE_OFFER_CLAIM_LOOP ?? "1") !== "0";
+
 /** Implicit gate poll interval in ms (set 0 to disable). */
 const IMPLICIT_GATE_POLL_INTERVAL_MS = Number(
 	process.env.AGENTHIVE_IMPLICIT_GATE_POLL_MS ?? 30_000,
@@ -131,6 +148,7 @@ export class Orchestrator {
 	private started = false;
 	private stopping = false;
 	private listenClient: PoolClient | null = null;
+	private offerClaimLoop: OfferClaimLoop | null = null;
 	private readonly pollTimers: Map<string, ReturnType<typeof setInterval>> =
 		new Map();
 	private readonly inFlight: Set<Promise<unknown>> = new Set();
@@ -291,7 +309,68 @@ export class Orchestrator {
 			}, HEARTBEAT_INTERVAL_MS),
 		);
 
+		// P914 / P904: start the offer-claim loop. The loop LISTENs on
+		// `work_offers` (fired by postWorkOffer in legacy-dispatch.ts) +
+		// polls every 30s as a safety net. On wake, it calls
+		// fn_claim_work_offer with the orchestrator's identity, then hands
+		// the claim (with claim_token) to OrchestratorOfferDispatcher which
+		// emits a properly-formed offer_dispatch into liaison_message. This
+		// is the canonical single push-dispatch path; the broken inline
+		// emit-liaison block in legacy-dispatch.ts has been removed.
+		if (ENABLE_OFFER_CLAIM_LOOP) {
+			try {
+				await this.startOfferClaimLoop();
+			} catch (err) {
+				console.error(
+					"[Orchestrator] OfferClaimLoop start failed (push dispatch disabled):",
+					err instanceof Error ? err.message : err,
+				);
+			}
+		} else {
+			console.log(
+				"[Orchestrator] OfferClaimLoop disabled (AGENTHIVE_OFFER_CLAIM_LOOP=0)",
+			);
+		}
+
 		console.log("[Orchestrator] started");
+	}
+
+	/**
+	 * P914: instantiate and start the OfferClaimLoop + OrchestratorOfferDispatcher.
+	 *
+	 * Ensures the orchestrator's agent_registry row exists (so fn_claim_work_offer
+	 * doesn't reject with FK violation), then wires the claim → dispatch chain.
+	 */
+	private async startOfferClaimLoop(): Promise<void> {
+		// Ensure the orchestrator identity is registered as an agent so
+		// fn_claim_work_offer's Gate 1 (agent_registry lookup) passes.
+		await query(
+			`INSERT INTO roadmap_workforce.agent_registry
+			    (agent_identity, agent_type, trust_tier, status)
+			 VALUES ($1, 'orchestrator', 'authority', 'active')
+			 ON CONFLICT (agent_identity) DO UPDATE
+			   SET status = 'active'`,
+			[ORCHESTRATOR_IDENTITY],
+		);
+
+		const dispatcher = new OrchestratorOfferDispatcher({
+			orchestratorIdentity: ORCHESTRATOR_IDENTITY,
+		});
+
+		const loop = new OfferClaimLoop({
+			orchestratorIdentity: ORCHESTRATOR_IDENTITY,
+			dispatcher,
+			connectListener: async (): Promise<ListenerClient> => {
+				const client = await getPool().connect();
+				return client as unknown as ListenerClient;
+			},
+		});
+
+		await loop.start();
+		this.offerClaimLoop = loop;
+		console.log(
+			`[Orchestrator] OfferClaimLoop started as ${ORCHESTRATOR_IDENTITY}`,
+		);
 	}
 
 	/**
@@ -355,6 +434,20 @@ export class Orchestrator {
 			void name;
 		}
 		this.pollTimers.clear();
+
+		// P914: stop the offer-claim loop before draining in-flight dispatches
+		// so no new claims start during shutdown.
+		if (this.offerClaimLoop) {
+			try {
+				await this.offerClaimLoop.stop();
+			} catch (err) {
+				console.warn(
+					"[Orchestrator] OfferClaimLoop stop failed:",
+					err instanceof Error ? err.message : err,
+				);
+			}
+			this.offerClaimLoop = null;
+		}
 
 		// Release LISTEN client (release(true) destroys the underlying socket so
 		// pool.end() doesn't hang on a long-lived LISTEN connection).

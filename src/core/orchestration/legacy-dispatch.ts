@@ -32,8 +32,6 @@ import { loadStateNames } from "../workflow/state-names.ts";
 import { mcpText } from "../../../scripts/mcp-result.ts";
 import { getMcpUrl } from "../../shared/runtime/endpoints.ts";
 import { listDispatchableAgencies } from "../../infra/agency/liaison-service.ts";
-import { storeMessage, getNextSequence } from "../../infra/agency/liaison-message-service.ts";
-import { createMessageEnvelope } from "../../infra/agency/liaison-message-types.ts";
 import { resolveGateRole, getGateRoleRegistry } from "./gate-role-resolver.ts";
 import {
 	bootCancelPokeAttempts,
@@ -1144,45 +1142,16 @@ async function dispatchAgent(
 				`📬 Posted offer ${dispatchId} for ${agent} on P${proposalId} (${stage})`,
 			);
 
-			// P468: Emit liaison message to preferred agencies (additive — legacy squad_dispatch is primary)
-			try {
-				const agencies = await listDispatchableAgencies();
-				if (agencies.length > 0) {
-					const targetAgency = agencies[0];
-					const envelope = createMessageEnvelope({
-						agencyId: targetAgency.agency_id,
-						direction: "orchestrator->liaison",
-						kind: "offer_dispatch",
-						payload: {
-							dispatch_id: dispatchId,
-							proposal_id: proposalId,
-							stage,
-							phase,
-							role: agentLabel ?? agent,
-							task: taskPrompt,
-							required_capabilities:
-								requiredCapabilities.length > 0
-									? requiredCapabilities
-									: [agentLabel ?? agent],
-						},
-					});
-					const sequence = await getNextSequence(targetAgency.agency_id);
-					await storeMessage({
-						...(envelope as any),
-						sequence,
-						signature: "stub-orchestrator", // TODO(P472): proper signing
-					});
-					logger.log(
-						`📮 Emitted liaison message to ${targetAgency.agency_id} for dispatch ${dispatchId}`,
-					);
-				}
-			} catch (err) {
-				logger.warn(
-					`Failed to emit liaison message for dispatch ${dispatchId}:`,
-					err,
-				);
-			}
-
+			// P914: liaison-message emit was removed from this path. The orchestrator
+			// now runs OfferClaimLoop (in src/core/orchestration/orchestrator.ts) which
+			// LISTENs on the `work_offers` channel that postWorkOffer fires. On wake,
+			// the loop calls fn_claim_work_offer to obtain a claim_token, then routes
+			// through OrchestratorOfferDispatcher → liaison_message with all required
+			// fields populated (offer_id, claim_token, dispatch_id, route_hint,
+			// briefing_id, lease_ttl_seconds). The previous inline emit could not
+			// supply claim_token (the offer hadn't been claimed yet) and the agency's
+			// OfferDispatchHandler rejected it as "malformed payload, missing
+			// offer_id/role".
 			return cubicId;
 		}
 
