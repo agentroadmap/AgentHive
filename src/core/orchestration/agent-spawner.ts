@@ -712,6 +712,12 @@ async function loadEnvAgent(
 /**
  * Resolve the first enabled agent provider from model_routes.
  * Used as a dynamic fallback when no worktree-level provider is configured.
+ *
+ * P928: Refactored to use selectActiveRouteRow as the canonical route eligibility
+ * check, but note: this function does NOT filter by agent_provider (it picks the
+ * first enabled route across all providers). This differs from selectActiveRouteRow
+ * which requires a provider parameter. The fallback path here queries directly to
+ * find any enabled route without a provider constraint.
  */
 export async function resolveActiveRouteProvider(): Promise<AgentProvider | null> {
 	// P245 host policy: filter out routes whose route_provider is forbidden

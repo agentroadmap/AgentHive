@@ -44,6 +44,7 @@ import {
 	liaisonHeartbeat,
 	liaisonRegister,
 } from "./liaison-service.ts";
+import { resolveAgencyCurrentRoute } from "../../core/runtime/agency-route-resolver.ts";
 
 export interface AgencySelfRegistrationOptions {
 	/** e.g. "claude/agency-bot". Identity prefix should be the provider. */
@@ -253,6 +254,20 @@ export async function selfRegisterAgency(
 			},
 			client,
 		);
+
+		// P928 AC-4: Resolve and bind current_route_id. This happens AFTER the
+		// agent_registry upsert returns agentRegistryId and BEFORE the COMMIT.
+		// If route resolution returns null, current_route_id stays NULL; the
+		// column is informational and resolution failure does not abort registration.
+		const currentRoute = await resolveAgencyCurrentRoute(opts.provider, hostId);
+		if (currentRoute) {
+			await client.query(
+				`UPDATE roadmap_workforce.agent_registry
+				    SET current_route_id = $1, updated_at = now()
+				  WHERE id = $2`,
+				[currentRoute.id, agentRegistryId],
+			);
+		}
 
 		await client.query("COMMIT");
 	} catch (err) {
