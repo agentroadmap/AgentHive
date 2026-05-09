@@ -52,7 +52,7 @@ export async function forceReleaseAlias(
 		display_alias: string | null;
 		status: string;
 		last_heartbeat_at: string | null;
-		alias_audit: any;
+		alias_audit: unknown;
 	}>(
 		`
     SELECT
@@ -183,7 +183,12 @@ export async function claimDisplayAlias(
 		},
 	]);
 
+	const savepointName = "claim_display_alias";
+	const useSavepoint = Boolean(options.client);
 	try {
+		if (useSavepoint) {
+			await exec(`SAVEPOINT ${savepointName}`);
+		}
 		const result = await exec(
 			`UPDATE roadmap_workforce.agent_registry
 			    SET display_alias = $2,
@@ -194,7 +199,13 @@ export async function claimDisplayAlias(
 			[agentRegistryId, alias, auditEntry],
 		);
 		if (result.rows.length === 0) {
+			if (useSavepoint) {
+				await exec(`RELEASE SAVEPOINT ${savepointName}`);
+			}
 			return { claimed: false, reason: "row_already_has_different_alias" };
+		}
+		if (useSavepoint) {
+			await exec(`RELEASE SAVEPOINT ${savepointName}`);
 		}
 		return { claimed: true };
 	} catch (err) {
@@ -204,7 +215,16 @@ export async function claimDisplayAlias(
 			(pgErr.constraint === "idx_agent_alias_active" ||
 				(err as Error).message?.includes("idx_agent_alias_active"))
 		) {
+			if (useSavepoint) {
+				await exec(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+				await exec(`RELEASE SAVEPOINT ${savepointName}`);
+			}
 			return { claimed: false, reason: "alias_in_use" };
+		}
+		if (useSavepoint) {
+			await exec(`ROLLBACK TO SAVEPOINT ${savepointName}`).catch(() => {
+				// Preserve the original error; outer transaction rollback handles cleanup.
+			});
 		}
 		throw err;
 	}

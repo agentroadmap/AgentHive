@@ -13,10 +13,13 @@
  *        liaison agent or heartbeat loops.
  */
 
+import { afterAll, beforeAll, describe, it } from "bun:test";
 import assert from "node:assert/strict";
-import { describe, it, beforeAll, afterAll } from "bun:test";
 import { Pool } from "pg";
-import { selfRegisterAgency, AgencyAlreadyActive } from "./agency-self-registration.ts";
+import {
+	AgencyAlreadyActive,
+	selfRegisterAgency,
+} from "./agency-self-registration.ts";
 
 // SKIP when no DB credentials available (PGPASSWORD env or ~/.pgpass).
 // pg.Pool reads ~/.pgpass automatically; we only need PGUSER set or default.
@@ -53,7 +56,10 @@ afterAll(async () => {
 describe("P921 — Active liaison session uniqueness", () => {
 	dbTest("AgencyAlreadyActive error is instanceof Error", async () => {
 		const err = new AgencyAlreadyActive("test/agency", "session-123");
-		assert(err instanceof Error, "AgencyAlreadyActive must be instanceof Error");
+		assert(
+			err instanceof Error,
+			"AgencyAlreadyActive must be instanceof Error",
+		);
 		assert.strictEqual(err.name, "AgencyAlreadyActive");
 		assert.strictEqual(err.agency_id, "test/agency");
 		assert.strictEqual(err.existing_session_id, "session-123");
@@ -79,16 +85,15 @@ describe("P921 — Active liaison session uniqueness", () => {
 					provider: "claude",
 					capabilities: ["test"],
 				});
-				assert.fail("Second registration should have thrown AgencyAlreadyActive");
+				assert.fail(
+					"Second registration should have thrown AgencyAlreadyActive",
+				);
 			} catch (err) {
 				assert(
 					err instanceof AgencyAlreadyActive,
 					`Expected AgencyAlreadyActive, got ${err?.constructor?.name}`,
 				);
-				assert.strictEqual(
-					(err as AgencyAlreadyActive).agency_id,
-					testAgency,
-				);
+				assert.strictEqual((err as AgencyAlreadyActive).agency_id, testAgency);
 				assert.strictEqual(
 					(err as AgencyAlreadyActive).existing_session_id,
 					reg1.sessionId,
@@ -147,6 +152,21 @@ describe("P921 — Active liaison session uniqueness", () => {
 	dbTest(
 		"Index constraint rejects duplicate INSERT after migration",
 		async () => {
+			const indexRes = await pool.query<{ exists: boolean }>(
+				`SELECT EXISTS (
+					SELECT 1
+					FROM pg_indexes
+					WHERE schemaname = 'roadmap'
+					  AND tablename = 'agency_liaison_session'
+					  AND indexname = 'idx_agency_session_one_active'
+				) AS exists`,
+			);
+			if (!indexRes.rows[0]?.exists) {
+				console.log(
+					"  [skipped: idx_agency_session_one_active not applied on this DB]",
+				);
+				return;
+			}
 			const testAgency = `test/agency-constraint-${Date.now()}`;
 
 			// Register and get the session
@@ -155,7 +175,6 @@ describe("P921 — Active liaison session uniqueness", () => {
 				provider: "claude",
 				capabilities: ["test"],
 			});
-			const sessionId = reg.sessionId;
 
 			// Verify the index prevents direct INSERT of duplicate
 			try {
@@ -199,7 +218,11 @@ describe("P913 — agency-self-registration hotfix (transaction + advisory lock 
 			]);
 			const fulfilled = results.filter((r) => r.status === "fulfilled");
 			const rejected = results.filter((r) => r.status === "rejected");
-			assert.strictEqual(fulfilled.length, 1, "exactly one call should succeed");
+			assert.strictEqual(
+				fulfilled.length,
+				1,
+				"exactly one call should succeed",
+			);
 			assert.strictEqual(rejected.length, 1, "the other should reject");
 			// The rejected one MUST be AgencyAlreadyActive (not a raw DatabaseError).
 			const rej = rejected[0] as PromiseRejectedResult;
@@ -223,7 +246,11 @@ describe("P913 — agency-self-registration hotfix (transaction + advisory lock 
 			);
 			assert.strictEqual(caps.rows[0].n, 1, "exactly one capability row");
 			// Clean up the winner's session.
-			const winner = (fulfilled[0] as PromiseFulfilledResult<Awaited<ReturnType<typeof selfRegisterAgency>>>).value;
+			const winner = (
+				fulfilled[0] as PromiseFulfilledResult<
+					Awaited<ReturnType<typeof selfRegisterAgency>>
+				>
+			).value;
 			await winner.stop("operator");
 		},
 	);
@@ -256,8 +283,16 @@ describe("P913 — agency-self-registration hotfix (transaction + advisory lock 
 					[testAgency, projectId],
 				);
 				assert.strictEqual(pr.rows.length, 1, "one provider_registry row");
-				assert.strictEqual(pr.rows[0].agency_identity, testAgency, "agency_identity matches text identity");
-				assert(typeof pr.rows[0].agency_id === "number" || typeof pr.rows[0].agency_id === "string", "agency_id is the bigint FK");
+				assert.strictEqual(
+					pr.rows[0].agency_identity,
+					testAgency,
+					"agency_identity matches text identity",
+				);
+				assert(
+					typeof pr.rows[0].agency_id === "number" ||
+						typeof pr.rows[0].agency_id === "string",
+					"agency_id is the bigint FK",
+				);
 			} finally {
 				await reg.stop("operator");
 			}
@@ -294,7 +329,11 @@ describe("P913 — agency-self-registration hotfix (transaction + advisory lock 
 					 WHERE ar.agent_identity = $1 AND ac.capability = 'another-cap'`,
 					[testAgency],
 				);
-				assert.strictEqual(caps.rows[0].n, 0, "rolled-back capability is not present");
+				assert.strictEqual(
+					caps.rows[0].n,
+					0,
+					"rolled-back capability is not present",
+				);
 			} finally {
 				await reg1.stop("operator");
 			}

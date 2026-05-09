@@ -31,15 +31,16 @@
 
 import { hostname } from "node:os";
 import type { PoolClient } from "pg";
-import { pulseHeartbeat } from "../pulse/heartbeat.ts";
-import { getPool, query } from "../postgres/pool.ts";
-import { startLiaisonHub } from "./liaison-hub.ts";
-import { AgencyAlreadyActive } from "./errors.ts";
 import { assignDisplayAlias } from "../../core/identity/agent-registry/agent-name.ts";
 import { claimDisplayAlias } from "../../core/identity/agent-registry/alias-manager.ts";
+import { getPool, query } from "../postgres/pool.ts";
+import { pulseHeartbeat } from "../pulse/heartbeat.ts";
+import { AgencyAlreadyActive } from "./errors.ts";
+import { startLiaisonHub } from "./liaison-hub.ts";
 import {
 	checkAndMarkDormant,
 	endLiaisonSession,
+	type LiaisonRegisterResult,
 	liaisonHeartbeat,
 	liaisonRegister,
 } from "./liaison-service.ts";
@@ -119,7 +120,7 @@ export async function selfRegisterAgency(
 	// Different agencyIds hash to different keys and proceed in parallel.
 	const pool = getPool();
 	const client: PoolClient = await pool.connect();
-	let reg;
+	let reg: LiaisonRegisterResult;
 	let agentRegistryId: number;
 	let resolvedAlias: string | null = null;
 	try {
@@ -130,6 +131,31 @@ export async function selfRegisterAgency(
 			`SELECT pg_advisory_xact_lock(hashtext('selfRegisterAgency:' || $1)::int4)`,
 			[agencyId],
 		);
+
+		// Defensive preflight for transition deployments where P921's partial
+		// unique index may not be live yet. The advisory lock makes this check
+		// race-free for same-identity boots; P921's DB invariant remains the
+		// authoritative backstop once migration 122 is applied.
+		const existingSessionRes = await client.query<{
+			session_id: string;
+			liaison_pid: number | null;
+			liaison_host: string | null;
+		}>(
+			`SELECT session_id, liaison_pid, liaison_host
+			 FROM roadmap.agency_liaison_session
+			 WHERE agency_id = $1 AND ended_at IS NULL
+			 LIMIT 1`,
+			[agencyId],
+		);
+		const existingSession = existingSessionRes.rows[0];
+		if (existingSession) {
+			throw new AgencyAlreadyActive(
+				agencyId,
+				existingSession.session_id,
+				existingSession.liaison_pid ?? undefined,
+				existingSession.liaison_host ?? undefined,
+			);
+		}
 
 		// 1. Upsert agent_registry. Mirrors `roadmap state-machine register`
 		// (src/apps/commands/state-machine.ts:208) so operators and self-reg agree
@@ -245,7 +271,7 @@ export async function selfRegisterAgency(
 		const isUniqueViolation = pgErr.code === "23505";
 		const matchesIndex =
 			pgErr.constraint === "idx_agency_session_one_active" ||
-			(pgErr.message && pgErr.message.includes("idx_agency_session_one_active"));
+			pgErr.message?.includes("idx_agency_session_one_active");
 		if (err instanceof Error && isUniqueViolation && matchesIndex) {
 			// P921 AC-5: SELECT existing session and throw typed AgencyAlreadyActive.
 			const existingRes = await query<{
