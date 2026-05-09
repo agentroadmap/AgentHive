@@ -1,5 +1,12 @@
 # P241 — Optional Standby Gating Mode for Builder-Gate Collaboration
 
+**Status:** COMPLETE
+**Priority:** Medium
+**Domain:** gating / orchestrator / proposal-lifecycle
+**Tags:** `gating`, `collaboration`, `cubic`, `orchestrator`, `proposal-lifecycle`
+
+---
+
 ## Problem Statement
 
 The baseline gating model is deliberately stateless: the builder self-declares mature, releases the work lease, and the cubic waits for a gating agent to claim and decide. This is correct for most proposals. However, some proposals accumulate unnecessary full send-back cycles when the gating agent encounters minor clarifications that the original builder could resolve in seconds.
@@ -132,3 +139,9 @@ If `shouldEnableStandby` returns false, the system silently uses the baseline st
 | Always stateless handoff | Remains the default; standby is additive, not a replacement |
 | Fully synchronous pair gating | Too heavy for normal proposal flow; adds mandatory coordination overhead to every gate |
 | Standby as a maturity value | High blast radius — would touch constraint, reference_terms, and every maturity check in the codebase |
+
+## Related Proposals
+
+| Proposal | Relationship |
+|----------|-------------|
+| P240 | Baseline mature-to-gate handoff — the stateless default that standby mode extends. Must be stable before standby mode is activated. |
