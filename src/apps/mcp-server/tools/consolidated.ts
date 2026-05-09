@@ -321,7 +321,14 @@ export function registerConsolidatedTools(server: McpServer): void {
 		createRouterTool(
 			server,
 			"mcp_proposal",
-			"Consolidated proposal interface. Use actions for CRUD, projection detail, maturity, leases, criteria, dependencies, reviews, discussion, and worktree merge.",
+			"Consolidated proposal interface. Use actions for CRUD, projection detail, maturity, leases, criteria, dependencies, reviews, discussion, and worktree merge. " +
+				"PARAM-NAME GOTCHAS (read once, save retries): " +
+				"`get`/`detail`/`add_acceptance_criteria`/`add_discussion`/`claim`/`release`/`verify_ac`/`list_ac` use `proposal_id` (string). " +
+				"`update`/`set_maturity`/`transition`/`delete` use `id` (string) — passing `proposal_id` returns 'Proposal undefined not found'. " +
+				"`add_dependency`/`remove_dependency` use camelCase `fromProposalId`/`toProposalId`/`dependencyType` (string ids, not int). " +
+				"VERIFY_AC: each AC needs its own call (1-indexed item_number); ACs stay 'pending' until you explicitly call verify_ac with status='pass' — NOT inferred from tests passing or maturity advance. status enum is {pass, fail, blocked, waived}, NOT 'verified'. " +
+				"ADD_ACCEPTANCE_CRITERIA: pass `criteria: string[]` (array of full sentences), NOT individual title/description fields nor `acceptance_criteria` key. " +
+				"Use action=list_actions to enumerate every action name.",
 			proposalRoutes,
 		),
 	);
