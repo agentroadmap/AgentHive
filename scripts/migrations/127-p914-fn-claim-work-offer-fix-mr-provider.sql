@@ -1,19 +1,26 @@
 -- env: prod
--- P914 — Fix stale column reference in fn_claim_work_offer Gate 4.
--- DEPENDS ON: 100-p833-a2a-messaging-foundation.sql
+-- P914 — Two fixes to fn_claim_work_offer that block the orchestrator-side
+-- push-dispatch chain (OfferClaimLoop → OrchestratorOfferDispatcher).
+-- DEPENDS ON: 067-p438-claim-policy-fail-closed.sql
 -- ROLLBACK: 127-p914-fn-claim-work-offer-fix-mr-provider.rollback.sql
 --
--- The host-policy gate references `mr.provider` but roadmap.model_routes has
--- `agent_provider` and `route_provider` columns (no `provider`). Every claim
--- with p_host non-null was raising `column mr.provider does not exist`,
--- which OfferClaimLoop catches and treats as "no claim available". Result:
--- no offers were ever claimed via the central orchestrator path.
+-- Fix 1 — Gate 4 stale column reference.
+--   The host-policy gate references `mr.provider` but roadmap.model_routes
+--   has `agent_provider` and `route_provider` columns (no `provider`). Every
+--   claim with p_host non-null raised "column mr.provider does not exist",
+--   which OfferClaimLoop catches and treats as "no claim available".
+--   Pass `mr.route_provider` to fn_check_spawn_policy.
 --
--- Fix: pass `mr.route_provider` to fn_check_spawn_policy(p_host, p_route_provider).
--- This is the column the policy function expects per its signature
--- (p_host text, p_route_provider text).
+-- Fix 2 — Gate 7 coordinator bypass.
+--   The capability gate compares an offer's required_capabilities against
+--   the claimer's agent_capability rows. The central orchestrator
+--   (agent_type='coordinator') is a re-dispatcher, not a worker — it
+--   forwards the claim to a target agency whose capabilities are checked
+--   at dispatch time (in OrchestratorOfferDispatcher → resolveAgency).
+--   Coordinator agents now bypass the per-capability check; non-coordinator
+--   agents retain the original "all required capabilities present" gate.
 --
--- This is a CREATE OR REPLACE — no data migration; idempotent.
+-- Both fixes are idempotent CREATE OR REPLACE.
 
 CREATE OR REPLACE FUNCTION roadmap_workforce.fn_claim_work_offer(
   p_agent_identity text,
@@ -35,14 +42,16 @@ RETURNS TABLE(
 LANGUAGE plpgsql
 AS $function$
 DECLARE
-  v_picked_id     BIGINT;
-  v_new_token     UUID        := gen_random_uuid();
-  v_expires       TIMESTAMPTZ := now() + make_interval(secs => p_lease_ttl_seconds);
-  v_agency_id     BIGINT;
-  v_agency_status TEXT;
-  v_max_claims    INT;
-  v_active_claims INT;
-  v_scope_count   INT;
+  v_picked_id      BIGINT;
+  v_new_token      UUID        := gen_random_uuid();
+  v_expires        TIMESTAMPTZ := now() + make_interval(secs => p_lease_ttl_seconds);
+  v_agency_id      BIGINT;
+  v_agency_status  TEXT;
+  v_agency_type    TEXT;
+  v_max_claims     INT;
+  v_active_claims  INT;
+  v_scope_count    INT;
+  v_is_coordinator BOOLEAN;
 BEGIN
   -- Gate 1: agent must be registered
   IF NOT EXISTS (
@@ -53,10 +62,15 @@ BEGIN
       USING ERRCODE = 'foreign_key_violation';
   END IF;
 
-  SELECT ar.id, ar.status, COALESCE(ar.max_concurrent_claims, 3)
-  INTO v_agency_id, v_agency_status, v_max_claims
+  SELECT ar.id, ar.status, ar.agent_type,
+         COALESCE(ar.max_concurrent_claims, 3)
+  INTO v_agency_id, v_agency_status, v_agency_type, v_max_claims
   FROM roadmap_workforce.agent_registry ar
   WHERE ar.agent_identity = p_agent_identity;
+
+  -- P914 Fix 2: coordinator agents bypass Gate 7 (capability) — they
+  -- re-dispatch to a target agency whose caps are checked downstream.
+  v_is_coordinator := (v_agency_type = 'coordinator');
 
   -- Gate 2: agency must be active
   IF v_agency_status IS DISTINCT FROM 'active' THEN
@@ -184,7 +198,8 @@ BEGIN
         OR (p_project_id IS NULL  AND sd.project_id IN (SELECT project_id FROM agency_projects))
       )
       AND (
-        'general' = ANY(ARRAY(SELECT jsonb_array_elements_text(sd.required_capabilities)))
+        v_is_coordinator
+        OR 'general' = ANY(ARRAY(SELECT jsonb_array_elements_text(sd.required_capabilities)))
         OR NOT EXISTS (
           SELECT 1
           FROM jsonb_array_elements_text(sd.required_capabilities) req(cap)
