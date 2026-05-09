@@ -198,7 +198,11 @@ function extractCapabilities(metadata: Record<string, unknown>): string[] {
 function extractRouteHint(metadata: Record<string, unknown>): string {
 	if (typeof metadata.route_hint === "string") return metadata.route_hint;
 	if (typeof metadata.provider === "string") return metadata.provider;
-	return "claude-code";
+	// Default must match a roadmap.model_routes.agent_provider value
+	// ('claude', 'codex', 'copilot', 'gemini'). 'claude-code' is the
+	// CLI name, not the provider name — using it raises P235 in
+	// agent-spawner ("No enabled route found in DB").
+	return "claude";
 }
 
 function extractProjectId(metadata: Record<string, unknown>): string | null {
