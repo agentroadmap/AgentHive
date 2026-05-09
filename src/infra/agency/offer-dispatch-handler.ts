@@ -199,6 +199,12 @@ async function runSpawn(args: {
 		});
 	} catch (err) {
 		spawnError = err instanceof Error ? err : new Error(String(err));
+		// P914: surface the spawn failure cause so operators can diagnose
+		// without grepping; previously the only signal was "exit=n/a".
+		logger.error(
+			`[OfferDispatchHandler] ${agencyId}: spawn threw for offer=${payload.offer_id} (role=${payload.role}, worktree=${worktree}, route_hint=${payload.route_hint}):`,
+			spawnError.message,
+		);
 	}
 
 	clearInterval(renewalTimer);
