@@ -17,7 +17,7 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
@@ -364,6 +364,7 @@ export function buildSpawnProcessEnv(input: {
 		// Carry through essential PATH
 		PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
 		HOME: process.env.HOME ?? "/var/lib/agenthive",
+		...(process.env.CODEX_HOME ? { CODEX_HOME: process.env.CODEX_HOME } : {}),
 		// Agent-specific DB credentials — agent env first, then process env
 		DATABASE_URL: input.agentEnv.DATABASE_URL ?? process.env.DATABASE_URL ?? "",
 		AGENT_WORKTREE: input.worktree,
@@ -385,6 +386,26 @@ export function buildSpawnProcessEnv(input: {
 		...baseEnv,
 		...sanitizeExtraEnv(input.extraEnv),
 	};
+}
+
+function assertCliAuthAvailable(
+	route: ModelRoute,
+	env: Record<string, string>,
+): void {
+	if (route.agentCli !== "codex") return;
+	if (env.OPENAI_API_KEY || env.CODEX_API_KEY) return;
+
+	const codexHome = env.CODEX_HOME ?? join(env.HOME, ".codex");
+	const authPath = join(codexHome, "auth.json");
+	if (existsSync(authPath)) return;
+
+	throw new Error(
+		[
+			`[AgentSpawner] Codex auth missing for route ${route.agentProvider}/${route.modelName}`,
+			`no OPENAI_API_KEY/CODEX_API_KEY resolved and no auth.json found under ${codexHome}`,
+			"run codex login for the service user, or set OPENAI_API_KEY/CODEX_API_KEY/CODEX_HOME in the orchestrator environment",
+		].join("; "),
+	);
 }
 
 /**
@@ -1350,6 +1371,16 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 			AGENTHIVE_ROUTE_ABBR: routeAbbr,
 		},
 	});
+	try {
+		assertCliAuthAvailable(route, processEnv);
+	} catch (err) {
+		await obsWriter.closeSpan({
+			spanId,
+			status: "error",
+			errorMessage: err instanceof Error ? err.message : String(err),
+		});
+		throw err;
+	}
 
 	// Insert agent_runs row (status = running)
 	// P852: agent_runs.agent_identity is the structured label without the
