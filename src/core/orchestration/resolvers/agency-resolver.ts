@@ -55,15 +55,22 @@ export async function resolveAgency(
 	// P914: exclude coordinator agents (the orchestrator itself) and
 	// test scaffolding identities. Coordinators claim offers and
 	// re-dispatch them — they must never be a dispatch target.
+	// Belt-and-suspenders against status drift: the resolver checks
+	// provider_registry.status, but operators retire via roadmap.agency.status.
+	// LEFT JOIN agency lets retired agencies be excluded even if their
+	// provider_registry.status hasn't been synced. Legacy registry rows
+	// without a matching agency row (a.status IS NULL) continue to qualify.
 	const { rows } = await query(
 		`SELECT pr.id, pr.agency_id, pr.project_id, pr.capabilities,
 		        pr.status, pr.throttle_count, pr.last_seen_at, pr.max_in_flight,
 		        COALESCE(inf.in_flight_count, 0) AS in_flight_count
 		 FROM roadmap_workforce.provider_registry pr
 		 JOIN roadmap_workforce.agent_registry ar ON ar.id = pr.agency_id
+		 LEFT JOIN roadmap.agency a ON a.agency_id = ar.agent_identity
 		 LEFT JOIN roadmap_workforce.v_agency_in_flight inf
 		   ON inf.provider_registry_id = pr.id
 		 WHERE pr.status NOT IN ('offline', 'retired')
+		   AND (a.status IS NULL OR a.status <> 'retired')
 		   AND ar.agent_type <> 'coordinator'
 		   AND ar.agent_identity NOT LIKE 'test/%'
 		   AND (pr.project_id IS NULL OR pr.project_id = $1)
