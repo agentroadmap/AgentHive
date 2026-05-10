@@ -289,6 +289,24 @@ Notes:
 - The default lifecycle is `Draft -> Review -> Develop -> Merge -> Complete`.
 - Proposal type determines workflow selection. Do not invent ad-hoc types. Check existing usage or `roadmap.proposal_type_config` before creating new proposals.
 
+### 5a-release. Lease release — reason taxonomy and lock ordering
+
+**P934: releasing a lease is a lifecycle decision, not cleanup.** Choose the reason that describes the work outcome — the trigger `fn_lease_clear_maturity_on_release` uses it to set proposal `maturity` deterministically. Wrong reasons silently corrupt the pipeline queue; the trigger now raises on unknown values.
+
+| Bucket | Canonical reasons | Resulting maturity |
+|---|---|---|
+| **work_complete** | `work_delivered`, `gate_review_complete`, `authored_complete` | `mature` |
+| **abandoned** | `wont_pursue`, `superseded`, `out_of_scope` | `obsolete` |
+| **incomplete** | `gate_hold`, `gate_reject`, `lease_expired`, `manual_release`, `released_unfinished`, `reassigned`, `force_reclaimed`, `operator_cancelled`, `operator_terminated`, `gate_dispatch_blocked`, `gate_spawn_failed`, `work_failed` | `new` |
+| **internal** (trigger-only) | `gate_transitioned` | `new` |
+
+Rules:
+- **`manual_release`** and **`released_unfinished`** return the proposal to `new` (re-queues it). Use `authored_complete` or `gate_review_complete` to preserve `mature` when the work is genuinely done.
+- The `release_reason` column is capped at 128 characters. Never write stderr, stack traces, or prose — use a `proposal_event` row with `event_type='spawn_diagnostic'` for long diagnostics.
+- Source of truth for the enum: `src/core/proposal/release-reasons.ts`. All callers must pass a reason from `CALLER_RELEASE_REASONS`.
+
+**Lock acquisition order (P934 AC-15):** The trigger `fn_lease_clear_maturity_on_release` fires on `UPDATE proposal_lease` and immediately does `UPDATE proposal`. Any code that takes both row locks must acquire them in **proposal-first order** (lock the proposal row before touching proposal_lease) to avoid deadlocks with the trigger path. Transition handlers naturally start from the proposal, so this order is usually free. If you write a helper that starts from proposal_lease (e.g., a batch reaper), take a `SELECT … FOR UPDATE` on the proposal row first.
+
 ### 5a. Architectural Umbrella Pattern
 
 Use this pattern for proposals that span multiple implementation phases (architecture, migrations, multi-system changes).
