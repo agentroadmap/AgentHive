@@ -426,6 +426,11 @@ export class Orchestrator {
 				  WHERE w.completed_at IS NULL
 				    AND p.maturity IN ('new', 'active')
 				    AND p.gate_scanner_paused = false
+				    AND EXISTS (
+				      SELECT 1 FROM roadmap.workflow_transitions wt
+				       WHERE wt.template_id = w.template_id
+				         AND LOWER(wt.from_stage) = LOWER(w.current_stage)
+				    )
 				    AND NOT EXISTS (
 				      SELECT 1 FROM roadmap_workforce.agent_runs ar
 				       WHERE ar.proposal_id = w.proposal_id

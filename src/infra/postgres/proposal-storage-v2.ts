@@ -566,8 +566,18 @@ export async function transitionProposal(
 	}
 
 	await query(
-		`UPDATE workflows
-     SET current_stage = $1
+		`UPDATE roadmap.workflows
+     SET current_stage = $1,
+         completed_at = CASE
+           WHEN completed_at IS NULL
+             AND NOT EXISTS (
+               SELECT 1 FROM roadmap.workflow_transitions wt
+               WHERE wt.template_id = roadmap.workflows.template_id
+                 AND LOWER(wt.from_stage) = LOWER($1)
+             )
+           THEN NOW()
+           ELSE completed_at
+         END
      WHERE proposal_id = $2`,
 		[toState, proposalId],
 	);
