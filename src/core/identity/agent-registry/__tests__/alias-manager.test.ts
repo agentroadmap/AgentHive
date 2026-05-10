@@ -16,19 +16,9 @@ import {
 } from "../alias-manager";
 
 describe("Alias Manager — P919", () => {
-	let testDbName: string;
-
-	beforeEach(async () => {
-		// Create isolated test database
-		testDbName = `test_p919_${Date.now()}`;
-		await query(`CREATE DATABASE ${testDbName}`);
-		// Switch connection to test DB for subsequent queries
-		// (In real test setup, this would use a fixture that manages connection pooling)
-	});
-
 	afterEach(async () => {
-		// Clean up test database
-		// (In real test setup, this would be done by test fixtures)
+		await query(`DELETE FROM roadmap.agency WHERE agency_id LIKE 'ccs45ant-bot-%'`);
+		await query(`DELETE FROM roadmap_workforce.agent_registry WHERE agent_identity LIKE 'ccs45ant-bot-%'`);
 	});
 
 	describe("AC-2: Crash-restart alias reclamation", () => {
