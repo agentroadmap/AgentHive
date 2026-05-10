@@ -35,6 +35,7 @@ const SSE_ENABLED = MCP_TRANSPORT === "sse" || MCP_TRANSPORT === "both";
 const HTTP_ENABLED = MCP_TRANSPORT === "http" || MCP_TRANSPORT === "both";
 
 const port = process.env.MCP_PORT || 6421;
+const host = process.env.MCP_HOST || "127.0.0.1";
 const APP_VERSION = getVersion ? await getVersion() : "unknown";
 
 const app = express();
@@ -203,7 +204,7 @@ if (SSE_ENABLED) {
 	});
 }
 
-const server = app.listen(port, "0.0.0.0", () => {
+const server = app.listen(port, host, () => {
 	console.log(`[MCP] AgentHive MCP server v${APP_VERSION} listening on port ${port}`);
 	console.log(`[MCP] Transport config: MCP_TRANSPORT=${MCP_TRANSPORT}`);
 	console.log(`[MCP] Readiness URL: http://localhost:${port}/health`);
