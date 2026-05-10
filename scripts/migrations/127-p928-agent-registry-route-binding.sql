@@ -25,8 +25,17 @@ END $$;
 COMMENT ON COLUMN roadmap_workforce.agent_registry.current_route_id IS
   'Live binding to roadmap.model_routes(id) for the route this agent is currently invoking. NULL means unbound (legacy, or boot has not run resolveAgencyCurrentRoute yet). Set/refreshed on selfRegisterAgency.';
 
+-- View: agent_registry × model_routes. agent_registry has overlapping columns
+-- (cli_path, base_url, agent_cli, api_spec, id, created_at) so model_routes
+-- columns are aliased with `route_` prefix to disambiguate.
 CREATE OR REPLACE VIEW roadmap_workforce.v_agent_with_route AS
-SELECT ar.*, mr.route_provider, mr.model_name, mr.plan_type, mr.cli_path, mr.base_url
+SELECT
+  ar.*,
+  mr.route_provider AS route_route_provider,
+  mr.model_name     AS route_model_name,
+  mr.plan_type      AS route_plan_type,
+  mr.cli_path       AS route_cli_path,
+  mr.base_url       AS route_base_url
   FROM roadmap_workforce.agent_registry ar
   LEFT JOIN roadmap.model_routes mr ON mr.id = ar.current_route_id;
 
