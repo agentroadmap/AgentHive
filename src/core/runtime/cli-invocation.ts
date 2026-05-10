@@ -3,7 +3,7 @@
  *
  * Provides a unified interface for agency runtimes to resolve and invoke LLM
  * CLI handlers. Replaces duplicate resolveLiaisonHandler switches across
- * start-agency.ts and start-copilot-agency.ts.
+ * start-agency.ts (start-copilot-agency.ts retired by P930).
  *
  * Brand labels and argv builders are sourced from:
  *  - brand: defaultBrandFor(provider) in cli-argv-builders.ts (SOLE authority)

@@ -2,7 +2,7 @@
  * Agency self-registration — P912 shared lifecycle for any provider runtime.
  *
  * Replaces the duplicated registration prologue across start-agency.ts,
- * start-copilot-agency.ts, and the now-obsolete start-liaison.ts. A provider
+ * start-copilot-agency.ts (deleted by P930), and the now-obsolete start-liaison.ts. A provider
  * runtime calls selfRegisterAgency() once at boot and gets back a shutdown
  * handle. Every step is idempotent.
  *
@@ -255,20 +255,6 @@ export async function selfRegisterAgency(
 			client,
 		);
 
-		// P928 AC-4: Resolve and bind current_route_id. This happens AFTER the
-		// agent_registry upsert returns agentRegistryId and BEFORE the COMMIT.
-		// If route resolution returns null, current_route_id stays NULL; the
-		// column is informational and resolution failure does not abort registration.
-		const currentRoute = await resolveAgencyCurrentRoute(opts.provider, hostId);
-		if (currentRoute) {
-			await client.query(
-				`UPDATE roadmap_workforce.agent_registry
-				    SET current_route_id = $1, updated_at = now()
-				  WHERE id = $2`,
-				[currentRoute.id, agentRegistryId],
-			);
-		}
-
 		await client.query("COMMIT");
 	} catch (err) {
 		try {
@@ -316,6 +302,40 @@ export async function selfRegisterAgency(
 	} finally {
 		client.release();
 	}
+
+	// P928 AC-4: bind current_route_id AFTER the registration transaction commits.
+	// This is informational metadata, NOT load-bearing — every failure mode here
+	// (missing column on legacy DB, missing route, transient query error) MUST
+	// log + continue without aborting the agency boot. Per AC-4: "Resolution
+	// failure does NOT abort agency boot. The column is informational."
+	try {
+		const currentRoute = await resolveAgencyCurrentRoute(opts.provider, hostId);
+		if (currentRoute) {
+			await query(
+				`UPDATE roadmap_workforce.agent_registry
+				    SET current_route_id = $1, updated_at = now()
+				  WHERE id = $2`,
+				[currentRoute.id, agentRegistryId],
+			);
+		}
+	} catch (routeErr) {
+		// Common cases: (a) migration 127 not yet applied to this DB —
+		// pg error 42703 "column current_route_id does not exist"; (b)
+		// resolveAgencyCurrentRoute throws on a transient query failure;
+		// (c) host_model_policy filter excludes all routes. None of these
+		// abort registration — the agency is already committed in the tx above.
+		const code = (routeErr as { code?: string })?.code;
+		if (code === "42703") {
+			logger.warn(
+				`[selfRegisterAgency] ${agencyId}: current_route_id column missing on this DB — apply migration 127-p928-agent-registry-route-binding.sql to populate the route binding. Registration succeeded; route hint omitted.`,
+			);
+		} else {
+			logger.warn(
+				`[selfRegisterAgency] ${agencyId}: route binding failed (non-fatal) — ${routeErr instanceof Error ? routeErr.message : routeErr}`,
+			);
+		}
+	}
+
 	const sessionId = reg.session_id;
 	// P919 AC-13: prefer the display alias in log lines when claimed.
 	// `displayLabel` reads "Gemini-Bot (gemini/agency-bot)" when an alias is
