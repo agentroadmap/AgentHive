@@ -730,19 +730,35 @@ export async function claimLease(
 
 /**
  * Release a lease.
+ *
+ * P934: `reason` is REQUIRED and must be a canonical caller-facing reason
+ * from `src/core/proposal/release-reasons.ts`. The legacy default
+ * `'completed'` (and the MCP-handler default `'released'`) are rejected
+ * with InvalidReleaseReasonError. The trigger
+ * fn_lease_clear_maturity_on_release maps the canonical reason to the
+ * next maturity; passing an unknown value would cause silent demotion
+ * (proposal returns to maturity='new') or, post-AC-4, abort the
+ * transaction with a RAISE.
  */
 export async function releaseLease(
 	proposalId: number,
 	agentIdentity: string,
-	reason?: string,
+	reason: string,
 ): Promise<boolean> {
+	// Lazy import avoids a top-of-file import cycle during build (this
+	// storage module is also imported indirectly by the taxonomy tests).
+	const { assertValidCallerReason } = await import(
+		"../../core/proposal/release-reasons.ts"
+	);
+	assertValidCallerReason(reason);
+
 	const { rowCount } = await query(
 		`UPDATE roadmap_proposal.proposal_lease
      SET released_at = now(), release_reason = $1
      WHERE proposal_id = $2
        AND agent_identity = $3
        AND released_at IS NULL`,
-		[reason ?? "completed", proposalId, agentIdentity],
+		[reason, proposalId, agentIdentity],
 	);
 	return (rowCount ?? 0) > 0;
 }
@@ -919,9 +935,11 @@ export async function replaceAcceptanceCriteria(
 export async function releaseExpiredLeases(
 	before = new Date(),
 ): Promise<number[]> {
+	// P934: legacy 'expired' replaced with canonical 'lease_expired' so the
+	// trigger maps it to maturity='new' (incomplete bucket) per taxonomy.
 	const { rows } = await query<{ proposal_id: number }>(
 		`UPDATE roadmap_proposal.proposal_lease
-     SET released_at = now(), release_reason = 'expired'
+     SET released_at = now(), release_reason = 'lease_expired'
      WHERE released_at IS NULL
        AND expires_at IS NOT NULL
        AND expires_at <= $1

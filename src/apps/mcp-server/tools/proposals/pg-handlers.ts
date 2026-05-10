@@ -646,7 +646,8 @@ export class PgProposalHandlers {
 
 			if (args.force) {
 				for (const lease of activeLeases) {
-					await pg.releaseLease(id, lease.agent_identity, "force-reclaimed");
+					// P934: legacy 'force-reclaimed' (hyphen) → 'force_reclaimed' canonical.
+					await pg.releaseLease(id, lease.agent_identity, "force_reclaimed");
 				}
 			}
 
@@ -680,6 +681,9 @@ export class PgProposalHandlers {
 	async releaseProposal(args: {
 		id: string;
 		agent: string;
+		release_reason: string;
+		// Legacy "reason" field name kept for backward-compat with internal callers
+		// that haven't migrated yet. Prefer release_reason.
 		reason?: string;
 	}): Promise<CallToolResult> {
 		try {
@@ -690,11 +694,10 @@ export class PgProposalHandlers {
 				};
 			}
 
-			const released = await pg.releaseLease(
-				id,
-				args.agent,
-				args.reason ?? "released",
-			);
+			// P934: release_reason is REQUIRED. Validation throws InvalidReleaseReasonError
+			// which surfaces as a structured error to the MCP caller; no silent default.
+			const reason = args.release_reason ?? args.reason;
+			const released = await pg.releaseLease(id, args.agent, reason as string);
 			if (!released) {
 				return {
 					content: [

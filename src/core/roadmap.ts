@@ -2703,7 +2703,10 @@ export class Core {
 					await pg.renewLease(proposalId, desiredClaim.agent, desiredExpiry);
 				}
 			} else if (currentLeaseAgent) {
-				await pg.releaseLease(proposalId, currentLeaseAgent, "released");
+				// P934: legacy 'released' replaced with 'manual_release' per
+				// canonical taxonomy. updateProposal-driven release is operator
+				// intent → incomplete bucket → maturity='new'.
+				await pg.releaseLease(proposalId, currentLeaseAgent, "manual_release");
 			}
 
 			if (statusChanged) {
@@ -4281,10 +4284,11 @@ export class Core {
 			);
 
 			if (!activeLeaseHeld && currentSummary?.leased_by) {
+				// P934: legacy 'expired' replaced with canonical 'lease_expired'.
 				await pg.releaseLease(
 					resolvedProposalId,
 					currentSummary.leased_by,
-					"expired",
+					"lease_expired",
 				);
 			}
 
@@ -4429,11 +4433,21 @@ export class Core {
 	/**
 	 * Release a claim on a proposal.
 	 * Throws if the claim is held by another agent unless force is used.
+	 *
+	 * P934: `releaseReason` MUST be a canonical caller-facing reason from
+	 * `src/core/proposal/release-reasons.ts`. When unspecified AND `force`
+	 * is set, defaults to `"force_reclaimed"` (the operator-took-back
+	 * intent). Otherwise the underlying `pg.releaseLease` call rejects
+	 * with InvalidReleaseReasonError.
 	 */
 	async releaseClaim(
 		proposalId: string,
 		agent: string,
-		options?: { force?: boolean; autoCommit?: boolean },
+		options?: {
+			force?: boolean;
+			autoCommit?: boolean;
+			releaseReason?: string;
+		},
 	): Promise<Proposal> {
 		if (await this.isPostgresProposalBackend()) {
 			const proposal = await this.loadPgProposalById(proposalId);
@@ -4460,10 +4474,18 @@ export class Core {
 				);
 			}
 
+			// P934: caller-supplied releaseReason takes precedence; otherwise map
+			// from the existing semantic. Force mode → 'force_reclaimed' (admin
+			// reclaimed, incomplete bucket). Plain release → require explicit reason
+			// from the caller (default 'manual_release' as a safe-but-explicit value
+			// that matches the prior 'released' behavior of demoting to maturity='new').
+			const releaseReason =
+				options?.releaseReason ??
+				(options?.force ? "force_reclaimed" : "manual_release");
 			const released = await pg.releaseLease(
 				resolvedProposalId,
 				options?.force ? summary.leased_by : agent,
-				options?.force ? "force-released" : "released",
+				releaseReason,
 			);
 			if (!released) {
 				throw new Error(`Proposal ${proposalId} claim could not be released.`);
