@@ -1809,7 +1809,7 @@ export async function dispatchImplicitGate(
 	}>(
 		`INSERT INTO roadmap_workforce.squad_dispatch
        (proposal_id, agent_identity, squad_name, dispatch_role, dispatch_status,
-        assigned_by, metadata, idempotency_key, attempt_count)
+        assigned_by, metadata, idempotency_key, attempt_count, required_capabilities)
      VALUES ($1, $2, $3, $8, 'active', 'orchestrator',
        jsonb_build_object(
          'source', 'implicit_maturity_gating',
@@ -1819,7 +1819,7 @@ export async function dispatchImplicitGate(
          'to_stage', $7::text,
          'stage', 'gate:' || $7::text,
          'gateRoleSource', $9::text
-       ), $10, 1)
+       ), $10, 1, $11::jsonb)
      ON CONFLICT (idempotency_key)
        WHERE dispatch_status IN ('open', 'assigned', 'active')
      DO UPDATE SET
@@ -1841,6 +1841,7 @@ export async function dispatchImplicitGate(
 			role,
 			gateRoleSource,
 			gateIdempotencyKey,
+			JSON.stringify([role]),
 		],
 	);
 	const dispatchId = dispatchRows[0]?.id;
