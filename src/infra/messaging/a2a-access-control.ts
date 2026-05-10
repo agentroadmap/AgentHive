@@ -69,8 +69,11 @@ export function agentNotifyChannel(agentIdentity: string): string {
  *
  * Rules:
  *  1. System agents (system, orchestrator) always pass.
- *  2. An active ACL row with matching (from_agent, to_agent | '*', grant_type) passes.
- *  3. Everything else is denied.
+ *  2. Intra-agency: if fromAgent is a spawn of an active registered agency
+ *     (identity matches `{agency_id}/{suffix}`), the send is allowed so
+ *     workers can reply to their parent and liaison without per-worker ACL rows.
+ *  3. An active ACL row with matching (from_agent, to_agent | '*', grant_type) passes.
+ *  4. Everything else is denied.
  */
 export async function checkMessageACL(
     fromAgent: string,
@@ -79,6 +82,34 @@ export async function checkMessageACL(
 ): Promise<ACLCheckResult> {
     if (SYSTEM_AGENTS.has(fromAgent)) {
         return { allowed: true, reason: "system_agent_bypass" };
+    }
+
+    // Intra-agency bypass: worker identities take the form `{agency_id}/{suffix}`.
+    // If the prefix is an active agency in agent_registry, allow unconditionally.
+    const slashIdx = fromAgent.indexOf("/");
+    if (slashIdx !== -1) {
+        const candidate = fromAgent.slice(0, slashIdx);
+        // Handle two-segment agency ids like `claude/agency-bot` (slash in agency_id itself)
+        // by also trying the next slash boundary.
+        const secondSlash = fromAgent.indexOf("/", slashIdx + 1);
+        const candidates = secondSlash !== -1
+            ? [fromAgent.slice(0, secondSlash), candidate]
+            : [candidate];
+
+        for (const agencyId of candidates) {
+            const { rows: agencyRows } = await query<{ agent_identity: string }>(
+                `SELECT agent_identity
+                 FROM   roadmap_workforce.agent_registry
+                 WHERE  agent_identity = $1
+                   AND  agent_type     = 'agency'
+                   AND  status         = 'active'
+                 LIMIT  1`,
+                [agencyId],
+            );
+            if (agencyRows.length > 0) {
+                return { allowed: true, reason: "intra_agency_bypass" };
+            }
+        }
     }
 
     const { rows } = await query<{ id: number }>(
