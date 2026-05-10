@@ -28,6 +28,7 @@ import {
 	drainEnhancementRevisions,
 	drainImplicitGateReady,
 	handleStateChange,
+	reconcileStaleDispatches,
 	reconcileStrandedAdvances,
 } from "./legacy-dispatch.ts";
 
@@ -292,6 +293,18 @@ export class Orchestrator {
 				void this.trackInFlight(
 					reconcileStrandedAdvances(pool).catch((err) =>
 						console.error("[Orchestrator] reconciler failed:", err),
+					),
+				);
+			}, RECONCILER_INTERVAL_MS),
+		);
+
+		this.pollTimers.set(
+			"stale-dispatch-reconciler",
+			setInterval(() => {
+				if (this.stopping) return;
+				void this.trackInFlight(
+					reconcileStaleDispatches(pool).catch((err) =>
+						console.error("[Orchestrator] stale-dispatch reconciler failed:", err),
 					),
 				);
 			}, RECONCILER_INTERVAL_MS),

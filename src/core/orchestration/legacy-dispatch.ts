@@ -2431,3 +2431,45 @@ export async function reconcileStrandedAdvances(
 	if (recovered > 0) logger.log(`Reconciler: Recovered ${recovered} stranded advances`);
 }
 
+// P661: reconcile squad_dispatch rows whose agent_run reached a terminal state
+// but the dispatch was never closed (crash, orphan-cleanup, manual cancel).
+// Runs every 30s as a complement to reapStaleRows (which uses wall-clock age
+// alone). The 5-minute safety window on ar.completed_at prevents racing against
+// a slow but successful happy-path closer.
+export async function reconcileStaleDispatches(
+	pool: ReturnType<typeof getPool>,
+): Promise<void> {
+	const result = await pool.query(`
+		UPDATE roadmap_workforce.squad_dispatch sd
+		SET dispatch_status = 'cancelled',
+		    completed_at    = now(),
+		    metadata = COALESCE(sd.metadata, '{}'::jsonb)
+		               || jsonb_build_object(
+		                    'reconciled_by',  'stale-dispatch-reconciler',
+		                    'reconciled_at',  now()::text,
+		                    'reason',         'agent_run terminal but dispatch left active',
+		                    'terminal_ar_id', ar.id::text,
+		                    'terminal_status', ar.status
+		                  )
+		FROM roadmap_workforce.agent_runs ar
+		WHERE sd.proposal_id      = ar.proposal_id
+		  AND sd.agent_identity   = ar.agent_identity
+		  AND sd.dispatch_status IN ('assigned', 'active')
+		  AND ar.status          IN ('failed', 'cancelled')
+		  AND ar.completed_at     < now() - interval '5 minutes'
+		  AND NOT EXISTS (
+		    SELECT 1 FROM roadmap_workforce.agent_runs ar2
+		    WHERE ar2.proposal_id    = sd.proposal_id
+		      AND ar2.agent_identity = sd.agent_identity
+		      AND ar2.status         = 'running'
+		      AND ar2.started_at    >= sd.assigned_at
+		  )
+		RETURNING sd.id, sd.proposal_id
+	`);
+	if (result.rowCount && result.rowCount > 0) {
+		logger.log(
+			`P661 stale-dispatch reconciler: cancelled ${result.rowCount} stale dispatch(es) — proposal_ids: ${result.rows.map((r) => r.proposal_id).join(", ")}`,
+		);
+	}
+}
+
