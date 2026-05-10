@@ -755,16 +755,21 @@ export class CubicCleanupService {
 		reason: string,
 		actor: string,
 	): Promise<number> {
+		// P934: replaced free-text 'cubic_stale_timeout: ${reason}' with
+		// canonical 'lease_expired'. The cubic-specific context (the
+		// passed-in `reason` string) is preserved in the writeAudit call
+		// below, where prose belongs. release_reason itself is a short
+		// canonical enum value.
 		const { rows } = await this.query<{ proposal_id: number }>(
 			`UPDATE roadmap_proposal.proposal_lease pl
 			    SET released_at = NOW(),
-			        release_reason = $2
+			        release_reason = 'lease_expired'
 			   FROM roadmap.cubics c
 			  WHERE c.cubic_id = $1
 			    AND pl.released_at IS NULL
 			    AND pl.agent_identity = COALESCE(c.lock_holder, c.agent_identity)
 			  RETURNING pl.proposal_id`,
-			[cubicId, `cubic_stale_timeout: ${reason}`],
+			[cubicId],
 		);
 		for (const row of rows) {
 			await this.writeAudit({

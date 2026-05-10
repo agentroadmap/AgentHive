@@ -51,10 +51,15 @@ export async function reapStaleRows(
 	};
 
 	try {
+		// P934: replaced the COALESCE(release_reason,'') || ' [reaped: ...]'
+		// append with a canonical assignment. The append produced unbounded
+		// release_reason values (cleanup of 3,806 oversized rows confirmed
+		// the source). Reaped leases map to 'lease_expired' (incomplete
+		// bucket → maturity='new').
 		const r = await pool.query(
 			`UPDATE roadmap_proposal.proposal_lease
 			 SET released_at=now(),
-			     release_reason=COALESCE(release_reason,'') || ' [reaped: lease expired without release]'
+			     release_reason='lease_expired'
 			 WHERE released_at IS NULL
 			   AND expires_at IS NOT NULL
 			   AND expires_at < now() - ($1 || ' min')::interval

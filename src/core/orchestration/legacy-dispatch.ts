@@ -1899,10 +1899,12 @@ export async function dispatchImplicitGate(
 	      WHERE id = $1`,
 			[dispatchId, errMsg],
 		);
-		await releaseDispatchLease(
-			dispatchId,
-			`gate spawn failed: ${errMsg.slice(0, 500)}`,
-		);
+		// P934: free-text 'gate spawn failed: ...' replaced with canonical
+		// 'gate_spawn_failed'. The errMsg context is preserved in the
+		// squad_dispatch.metadata.error field above and the warn log line
+		// below — those are the right places for prose, not the canonical
+		// release_reason enum column.
+		await releaseDispatchLease(dispatchId, "gate_spawn_failed");
 		logger.warn(
 			`Implicit gate dispatch ${dispatchId} blocked (spawn threw): ${errMsg}`,
 		);
@@ -1935,12 +1937,12 @@ export async function dispatchImplicitGate(
         WHERE id = $1`,
 			[dispatchId, result.agentRunId, gate.toStage],
 		);
-		await releaseDispatchLease(
-			dispatchId,
-			`gate ${gate.gate} advanced to ${gate.toStage}`,
-		);
+		// P934: gate review completed → canonical 'gate_review_complete'
+		// (work_complete bucket → maturity preserved as mature in trigger).
+		// The gate-name + toStage details live in the log line below.
+		await releaseDispatchLease(dispatchId, "gate_review_complete");
 		logger.log(
-			`Implicit gate dispatch ${dispatchId} advanced ${proposal.display_id} to ${gate.toStage}/new`,
+			`Implicit gate dispatch ${dispatchId} advanced ${proposal.display_id} to ${gate.toStage}/new (gate=${gate.gate})`,
 		);
 		if (gateSpanId) {
 			await gateWriter.writeDecisionExplainability({
@@ -2018,7 +2020,13 @@ export async function dispatchImplicitGate(
 				finalMaturity,
 			],
 		);
-		await releaseDispatchLease(dispatchId, decisionMessage);
+		// P934: hold/obsolete decisions map to canonical reasons.
+		// finalMaturity='obsolete' → 'wont_pursue' (abandoned bucket); otherwise
+		// → 'gate_hold' (incomplete bucket → maturity='new'). The free-form
+		// decisionMessage is preserved in the log line.
+		const releaseReason =
+			finalMaturity === "obsolete" ? "wont_pursue" : "gate_hold";
+		await releaseDispatchLease(dispatchId, releaseReason);
 		logger.log(
 			`Implicit gate dispatch ${dispatchId} held ${proposal.display_id}: ${decisionMessage}`,
 		);
@@ -2063,10 +2071,10 @@ export async function dispatchImplicitGate(
       WHERE id = $1`,
 		[dispatchId, result.agentRunId, errorMessage],
 	);
-	await releaseDispatchLease(
-		dispatchId,
-		`gate dispatch blocked: ${errorMessage.slice(0, 500)}`,
-	);
+	// P934: free-text 'gate dispatch blocked: ...' replaced with canonical
+	// 'gate_dispatch_blocked'. errorMessage is in squad_dispatch.metadata.error
+	// and the warn log below.
+	await releaseDispatchLease(dispatchId, "gate_dispatch_blocked");
 	logger.warn(
 		`Implicit gate dispatch ${dispatchId} blocked ${proposal.display_id}: ${errorMessage}`,
 	);
