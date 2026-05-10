@@ -70,6 +70,8 @@ export const RELEASE_REASONS_BY_OUTCOME = {
 		"operator_terminated",    // operator killed the spawned agent
 		"gate_dispatch_blocked",  // gate dispatch failed (CLI exited non-zero)
 		"gate_spawn_failed",      // spawn-time policy violation or route error
+		"work_failed",            // work was attempted but did not succeed (distinct
+		                          // from released_unfinished which is passive abandon)
 	],
 
 	/**

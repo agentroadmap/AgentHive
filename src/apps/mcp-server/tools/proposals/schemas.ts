@@ -207,6 +207,7 @@ export const proposalReleaseSchema: JsonSchema = {
 				"operator_terminated",
 				"gate_dispatch_blocked",
 				"gate_spawn_failed",
+				"work_failed",
 			],
 		},
 	},

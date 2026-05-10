@@ -182,10 +182,14 @@ test("P934 AC-5: obsolete preservation (trigger never overwrites obsolete)", asy
 	});
 });
 
-test("P934 AC-4: unknown release_reason RAISES (no silent demotion)", async () => {
+test("P934 AC-4 + AC-13: unknown release_reason RAISES (no silent demotion)", async () => {
 	await withTx(async (tx) => {
 		const { lid } = await setupSandbox(tx, "mature");
 
+		// After Phase 5 migration 129, the enum CHECK constraint catches the
+		// invalid value BEFORE the BEFORE-UPDATE trigger fires. So the loud
+		// failure can come from either layer; both are correct outcomes per
+		// P934 (no silent demotion). The test accepts either error path.
 		await assert.rejects(
 			tx.query(
 				`UPDATE roadmap_proposal.proposal_lease
@@ -193,9 +197,10 @@ test("P934 AC-4: unknown release_reason RAISES (no silent demotion)", async () =
 				  WHERE id = $1`,
 				[lid],
 			),
-			(err: Error) => /P934.*Unknown release_reason/.test(err.message),
+			(err: Error) =>
+				/P934.*Unknown release_reason/.test(err.message) ||
+				/proposal_lease_release_reason_enum_check/.test(err.message),
 		);
-		// The test wrapper rolls back the whole tx; no further verification needed.
 	});
 });
 
