@@ -1,7 +1,7 @@
 -- ============================================================
 -- project-init/002-workflow.sql
--- Workflow state machine tables: workflow (root), wStage,
--- wTransition, wGate, wTemplate.
+-- Workflow state machine tables: workflow (root), w_stage,
+-- w_transition, w_gate, w_template.
 -- Run with: psql -v schema_name=agentHive -f 002-workflow.sql
 -- ============================================================
 
@@ -31,9 +31,9 @@ COMMENT ON TABLE :schema_name.workflow IS
   'Workflow template registry. proposal.type maps to a workflow.slug to determine which state machine applies.';
 
 -- ============================================================
--- wStage — workflow stages (states in the state machine)
+-- w_stage — workflow stages (states in the state machine)
 -- ============================================================
-CREATE TABLE IF NOT EXISTS :schema_name.wStage (
+CREATE TABLE IF NOT EXISTS :schema_name.w_stage (
   id               BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   workflow_id      BIGINT       NOT NULL REFERENCES :schema_name.workflow (id) ON DELETE CASCADE,
   name             TEXT         NOT NULL,                 -- 'Draft', 'Review', 'Develop', 'Merge', 'Complete'
@@ -45,38 +45,38 @@ CREATE TABLE IF NOT EXISTS :schema_name.wStage (
   UNIQUE (workflow_id, name)
 );
 
-CREATE INDEX IF NOT EXISTS wstage_workflow ON :schema_name.wStage (workflow_id);
+CREATE INDEX IF NOT EXISTS wstage_workflow ON :schema_name.w_stage (workflow_id);
 
-COMMENT ON TABLE :schema_name.wStage IS
+COMMENT ON TABLE :schema_name.w_stage IS
   'Stages (states) within a workflow. ordinal controls display order. '
   'is_gate=true means a reviewer must approve before advancing.';
 
 -- ============================================================
--- wTransition — allowed transitions between stages
+-- w_transition — allowed transitions between stages
 -- ============================================================
-CREATE TABLE IF NOT EXISTS :schema_name.wTransition (
+CREATE TABLE IF NOT EXISTS :schema_name.w_transition (
   id               BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   workflow_id      BIGINT       NOT NULL REFERENCES :schema_name.workflow (id) ON DELETE CASCADE,
-  from_stage_id    BIGINT       NOT NULL REFERENCES :schema_name.wStage (id) ON DELETE CASCADE,
-  to_stage_id      BIGINT       NOT NULL REFERENCES :schema_name.wStage (id) ON DELETE CASCADE,
+  from_stage_id    BIGINT       NOT NULL REFERENCES :schema_name.w_stage (id) ON DELETE CASCADE,
+  to_stage_id      BIGINT       NOT NULL REFERENCES :schema_name.w_stage (id) ON DELETE CASCADE,
   reason           TEXT,                                  -- 'mature', 'decision', 'iteration', 'discard', etc.
   requires_notes   BOOLEAN      NOT NULL DEFAULT false,
   metadata_jsonb   JSONB        NOT NULL DEFAULT '{}',
   UNIQUE (workflow_id, from_stage_id, to_stage_id, reason)
 );
 
-CREATE INDEX IF NOT EXISTS wtransition_from ON :schema_name.wTransition (from_stage_id);
-CREATE INDEX IF NOT EXISTS wtransition_to ON :schema_name.wTransition (to_stage_id);
+CREATE INDEX IF NOT EXISTS wtransition_from ON :schema_name.w_transition (from_stage_id);
+CREATE INDEX IF NOT EXISTS wtransition_to ON :schema_name.w_transition (to_stage_id);
 
-COMMENT ON TABLE :schema_name.wTransition IS
+COMMENT ON TABLE :schema_name.w_transition IS
   'Allowed transitions between workflow stages. reason further discriminates multi-edge transitions.';
 
 -- ============================================================
--- wGate — gate criteria per stage (checklist evaluated at gates)
+-- w_gate — gate criteria per stage (checklist evaluated at gates)
 -- ============================================================
-CREATE TABLE IF NOT EXISTS :schema_name.wGate (
+CREATE TABLE IF NOT EXISTS :schema_name.w_gate (
   id               BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  stage_id         BIGINT       NOT NULL REFERENCES :schema_name.wStage (id) ON DELETE CASCADE,
+  stage_id         BIGINT       NOT NULL REFERENCES :schema_name.w_stage (id) ON DELETE CASCADE,
   check_key        TEXT         NOT NULL,                 -- 'has_ac', 'has_design', 'has_reviewer', etc.
   description      TEXT         NOT NULL,
   is_required      BOOLEAN      NOT NULL DEFAULT true,
@@ -84,16 +84,16 @@ CREATE TABLE IF NOT EXISTS :schema_name.wGate (
   UNIQUE (stage_id, check_key)
 );
 
-CREATE INDEX IF NOT EXISTS wgate_stage ON :schema_name.wGate (stage_id);
+CREATE INDEX IF NOT EXISTS wgate_stage ON :schema_name.w_gate (stage_id);
 
-COMMENT ON TABLE :schema_name.wGate IS
+COMMENT ON TABLE :schema_name.w_gate IS
   'Gate criteria evaluated before a proposal can advance through a gating stage.';
 
 -- ============================================================
--- wTemplate — serialized workflow template snapshots
+-- w_template — serialized workflow template snapshots
 -- ============================================================
 -- Allows exporting and re-importing workflow configurations.
-CREATE TABLE IF NOT EXISTS :schema_name.wTemplate (
+CREATE TABLE IF NOT EXISTS :schema_name.w_template (
   id               BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   slug             TEXT         NOT NULL UNIQUE,
   version          INT          NOT NULL DEFAULT 1,
@@ -102,5 +102,5 @@ CREATE TABLE IF NOT EXISTS :schema_name.wTemplate (
   exported_by      TEXT
 );
 
-COMMENT ON TABLE :schema_name.wTemplate IS
+COMMENT ON TABLE :schema_name.w_template IS
   'Serialized snapshots of workflow configurations. Used to clone workflows across projects or restore defaults.';

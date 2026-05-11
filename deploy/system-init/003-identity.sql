@@ -27,7 +27,7 @@ $$;
 CREATE OR REPLACE FUNCTION identity.deny_mutation()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
-  RAISE EXCEPTION 'identity.auditAction is append-only — % not permitted', TG_OP;
+  RAISE EXCEPTION 'identity.audit_action is append-only — % not permitted', TG_OP;
 END;
 $$;
 
@@ -65,9 +65,9 @@ COMMENT ON TABLE identity.principal IS
   'DID is the stable cross-system identifier.';
 
 -- ============================================================
--- identity.didDocument — W3C DID document per principal
+-- identity.did_document — W3C DID document per principal
 -- ============================================================
-CREATE TABLE IF NOT EXISTS identity.didDocument (
+CREATE TABLE IF NOT EXISTS identity.did_document (
   id               BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   principal_id     BIGINT       NOT NULL REFERENCES identity.principal (id) ON DELETE CASCADE,
   did              TEXT         NOT NULL UNIQUE,
@@ -83,19 +83,19 @@ CREATE TABLE IF NOT EXISTS identity.didDocument (
   updated_at       TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS did_document_principal ON identity.didDocument (principal_id);
+CREATE INDEX IF NOT EXISTS did_document_principal ON identity.did_document (principal_id);
 
 CREATE OR REPLACE TRIGGER set_updated_at_did_document
-  BEFORE UPDATE ON identity.didDocument
+  BEFORE UPDATE ON identity.did_document
   FOR EACH ROW EXECUTE FUNCTION identity.set_updated_at();
 
-COMMENT ON TABLE identity.didDocument IS
+COMMENT ON TABLE identity.did_document IS
   'W3C DID document per principal. One active document per DID at any time.';
 
 -- ============================================================
--- identity.principalKey — cryptographic credentials per principal
+-- identity.principal_key — cryptographic credentials per principal
 -- ============================================================
-CREATE TABLE IF NOT EXISTS identity.principalKey (
+CREATE TABLE IF NOT EXISTS identity.principal_key (
   id               BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   principal_id     BIGINT       NOT NULL REFERENCES identity.principal (id) ON DELETE CASCADE,
   key_id           TEXT         NOT NULL,                 -- key fragment in DID URL
@@ -116,20 +116,20 @@ CREATE TABLE IF NOT EXISTS identity.principalKey (
   UNIQUE (principal_id, key_id)
 );
 
-CREATE INDEX IF NOT EXISTS principal_key_active ON identity.principalKey (principal_id)
+CREATE INDEX IF NOT EXISTS principal_key_active ON identity.principal_key (principal_id)
   WHERE lifecycle_status = 'active';
 
 CREATE OR REPLACE TRIGGER set_updated_at_principal_key
-  BEFORE UPDATE ON identity.principalKey
+  BEFORE UPDATE ON identity.principal_key
   FOR EACH ROW EXECUTE FUNCTION identity.set_updated_at();
 
-COMMENT ON TABLE identity.principalKey IS
+COMMENT ON TABLE identity.principal_key IS
   'Cryptographic credentials per principal. key_id matches the fragment in the DID URL (e.g., #key-1).';
 
 -- ============================================================
--- identity.auditAction — append-only identity audit log (time-series)
+-- identity.audit_action — append-only identity audit log (time-series)
 -- ============================================================
-CREATE TABLE IF NOT EXISTS identity.auditAction (
+CREATE TABLE IF NOT EXISTS identity.audit_action (
   id               BIGINT       GENERATED ALWAYS AS IDENTITY,
   principal_id     BIGINT       REFERENCES identity.principal (id) ON DELETE SET NULL,
   actor_did        TEXT         NOT NULL,
@@ -141,16 +141,16 @@ CREATE TABLE IF NOT EXISTS identity.auditAction (
 ) PARTITION BY RANGE (occurred_at);
 
 CREATE TABLE IF NOT EXISTS identity.auditAction_default
-  PARTITION OF identity.auditAction DEFAULT;
+  PARTITION OF identity.audit_action DEFAULT;
 
 -- Append-only: block UPDATE and DELETE
-REVOKE UPDATE, DELETE ON identity.auditAction FROM PUBLIC;
+REVOKE UPDATE, DELETE ON identity.audit_action FROM PUBLIC;
 
 CREATE OR REPLACE TRIGGER deny_audit_mutation
-  BEFORE UPDATE OR DELETE ON identity.auditAction
+  BEFORE UPDATE OR DELETE ON identity.audit_action
   FOR EACH ROW EXECUTE FUNCTION identity.deny_mutation();
 
-COMMENT ON TABLE identity.auditAction IS
+COMMENT ON TABLE identity.audit_action IS
   'Append-only identity audit log. Every principal creation, key rotation, '
   'and revocation must produce a row here. Partitioned by occurred_at.';
 
@@ -171,7 +171,7 @@ SELECT
   pk.key_usage,
   pk.expires_at,
   pk.revoked_at
-FROM identity.principalKey pk
+FROM identity.principal_key pk
 JOIN identity.principal p ON p.id = pk.principal_id
 WHERE pk.lifecycle_status = 'active'
   AND pk.revoked_at IS NULL;
@@ -183,8 +183,8 @@ DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'agenthive_orchestrator') THEN
     GRANT USAGE ON SCHEMA identity TO agenthive_orchestrator;
-    GRANT SELECT, INSERT, UPDATE ON identity.principal, identity.didDocument, identity.principalKey TO agenthive_orchestrator;
-    GRANT SELECT, INSERT ON identity.auditAction TO agenthive_orchestrator;
+    GRANT SELECT, INSERT, UPDATE ON identity.principal, identity.did_document, identity.principal_key TO agenthive_orchestrator;
+    GRANT SELECT, INSERT ON identity.audit_action TO agenthive_orchestrator;
     GRANT SELECT ON identity.v_active_principals, identity.v_principal_keys TO agenthive_orchestrator;
   END IF;
 
@@ -196,7 +196,7 @@ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'agenthive_agency') THEN
     GRANT USAGE ON SCHEMA identity TO agenthive_agency;
     GRANT SELECT ON identity.principal, identity.v_active_principals TO agenthive_agency;
-    GRANT INSERT ON identity.auditAction TO agenthive_agency;
+    GRANT INSERT ON identity.audit_action TO agenthive_agency;
   END IF;
 END $$;
 

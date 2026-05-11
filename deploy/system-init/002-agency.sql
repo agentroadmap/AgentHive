@@ -5,7 +5,7 @@
 -- Merges hiveCentral's `agency` + `control_model` schemas.
 -- Target DB:  agentHive2
 -- Owner:      agenthive_admin
--- Depends on: 001-core.sql (core.host, core.osUser)
+-- Depends on: 001-core.sql (core.host, core.os_user)
 -- ============================================================
 
 \set ON_ERROR_STOP on
@@ -116,9 +116,9 @@ COMMENT ON TABLE agency.route IS
   'Enabled model routes per host. host is a soft FK (TEXT) to allow seeding before core.host rows exist.';
 
 -- ============================================================
--- agency.hostPolicy — per-host routing policy
+-- agency.host_policy — per-host routing policy
 -- ============================================================
-CREATE TABLE IF NOT EXISTS agency.hostPolicy (
+CREATE TABLE IF NOT EXISTS agency.host_policy (
   id               BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   host             TEXT         NOT NULL,                -- matches core.host.host_name
   route_id         BIGINT       REFERENCES agency.route (id) ON DELETE SET NULL,
@@ -133,14 +133,14 @@ CREATE TABLE IF NOT EXISTS agency.hostPolicy (
   updated_at       TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS host_policy_host_active ON agency.hostPolicy (host)
+CREATE INDEX IF NOT EXISTS host_policy_host_active ON agency.host_policy (host)
   WHERE lifecycle_status = 'active';
 
 CREATE OR REPLACE TRIGGER set_updated_at_hostpolicy
-  BEFORE UPDATE ON agency.hostPolicy
+  BEFORE UPDATE ON agency.host_policy
   FOR EACH ROW EXECUTE FUNCTION agency.set_updated_at();
 
-COMMENT ON TABLE agency.hostPolicy IS
+COMMENT ON TABLE agency.host_policy IS
   'Per-host routing policy. Controls which providers/routes are permitted on a given host.';
 
 -- ============================================================
@@ -150,7 +150,7 @@ CREATE TABLE IF NOT EXISTS agency.agency (
   id               BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   provider_id      BIGINT       NOT NULL REFERENCES agency.provider (id) ON DELETE RESTRICT,
   host_id          BIGINT       REFERENCES core.host (id) ON DELETE SET NULL,
-  os_user_id       BIGINT       REFERENCES core.osUser (id) ON DELETE SET NULL,
+  os_user_id       BIGINT       REFERENCES core.os_user (id) ON DELETE SET NULL,
   project_id       BIGINT       REFERENCES core.project (id) ON DELETE SET NULL,
   slug             TEXT         NOT NULL UNIQUE,         -- 'claude-bot', 'codex-worktree-1', etc.
   display_name     TEXT         NOT NULL,
@@ -201,15 +201,15 @@ COMMENT ON TABLE agency.session IS
   'Agency session log. Partitioned by started_at for efficient time-range queries.';
 
 -- ============================================================
--- agency.msgKind — liaison message type catalog
+-- agency.msg_kind — liaison message type catalog
 -- ============================================================
-CREATE TABLE IF NOT EXISTS agency.msgKind (
+CREATE TABLE IF NOT EXISTS agency.msg_kind (
   kind             TEXT         PRIMARY KEY,
   description      TEXT         NOT NULL,
   schema_jsonb     JSONB        NOT NULL DEFAULT '{}'
 );
 
-COMMENT ON TABLE agency.msgKind IS
+COMMENT ON TABLE agency.msg_kind IS
   'Catalog of liaison message types. kind is the discriminator used in agency.msg.';
 
 -- ============================================================
@@ -218,7 +218,7 @@ COMMENT ON TABLE agency.msgKind IS
 CREATE TABLE IF NOT EXISTS agency.msg (
   id               BIGINT       GENERATED ALWAYS AS IDENTITY,
   agency_id        BIGINT       NOT NULL REFERENCES agency.agency (id) ON DELETE CASCADE,
-  kind             TEXT         NOT NULL REFERENCES agency.msgKind (kind),
+  kind             TEXT         NOT NULL REFERENCES agency.msg_kind (kind),
   payload_jsonb    JSONB        NOT NULL,
   sent_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
   processed_at     TIMESTAMPTZ,
@@ -256,7 +256,7 @@ SELECT
   r.id AS route_id,
   m.model_id,
   p.slug AS provider_slug
-FROM agency.hostPolicy hp
+FROM agency.host_policy hp
 LEFT JOIN agency.route r ON r.id = hp.route_id
 LEFT JOIN agency.model m ON m.id = r.model_id
 LEFT JOIN agency.provider p ON p.id = m.provider_id
@@ -279,9 +279,9 @@ BEGIN
 
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'agenthive_agency') THEN
     GRANT USAGE ON SCHEMA agency TO agenthive_agency;
-    GRANT SELECT ON agency.provider, agency.model, agency.route, agency.hostPolicy TO agenthive_agency;
+    GRANT SELECT ON agency.provider, agency.model, agency.route, agency.host_policy TO agenthive_agency;
     GRANT SELECT, INSERT, UPDATE ON agency.agency, agency.session, agency.msg TO agenthive_agency;
-    GRANT SELECT ON agency.msgKind TO agenthive_agency;
+    GRANT SELECT ON agency.msg_kind TO agenthive_agency;
     GRANT SELECT ON agency.v_active_routes, agency.v_host_routing TO agenthive_agency;
   END IF;
 END $$;

@@ -87,11 +87,11 @@ Schema: `core`
 | :--- | :--- | :--- |
 | `core.installation` | `display_name`, `schema_version`, `lifecycle_status` | Singleton per deployment |
 | `core.host` | `host_name`, `region`, `failure_domain`, `role` | Roles: control-plane / tenant-db / agency / mixed |
-| `core.osUser` | `host_id`, `user_name`, `uid`, `is_service_account` | OS-level users per host |
+| `core.os_user` | `host_id`, `user_name`, `uid`, `is_service_account` | OS-level users per host |
 | `core.project` | `slug`, `schema_name`, `owner_did` | Project registry; schema_name drives project-init |
-| `core.runtimeFlag` | `flag_key`, `flag_value`, `value_type` | DB-driven feature flags; emits `pg_notify` on change |
-| `core.serviceHeartbeat` | `service_id`, `host_id`, `pid`, `status`, `last_beat_at` | INSERT OR REPLACE liveness signal |
-| `core.runtimeEndpoint` | `service_key`, `url`, `protocol` | Canonical endpoint registry; emits `pg_notify` on change |
+| `core.runtime_flag` | `flag_key`, `flag_value`, `value_type` | DB-driven feature flags; emits `pg_notify` on change |
+| `core.service_heartbeat` | `service_id`, `host_id`, `pid`, `status`, `last_beat_at` | INSERT OR REPLACE liveness signal |
+| `core.runtime_endpoint` | `service_key`, `url`, `protocol` | Canonical endpoint registry; emits `pg_notify` on change |
 
 Views: `core.v_active_hosts`, `core.v_service_health` (healthy / degraded / silent / inactive).
 
@@ -106,10 +106,10 @@ Schema: `agency`
 | `agency.provider` | `slug`, `display_name`, `api_base_url` | Soft FK to `core.*` for bootstrap safety |
 | `agency.model` | `model_id`, `provider_id`, `context_window`, `cost_input_per_1k`, `cost_output_per_1k` | Tool-use support flag |
 | `agency.route` | `model_id`, `host`, `priority` | Enabled routes per host |
-| `agency.hostPolicy` | `host`, `route_id`, `policy_jsonb` | allowed_providers, cost limits per host |
+| `agency.host_policy` | `host`, `route_id`, `policy_jsonb` | allowed_providers, cost limits per host |
 | `agency.agency` | `provider_id`, `host_id`, `os_user_id`, `project_id`, `slug`, `socket_path` | Registered agency instances |
 | `agency.session` | `agency_id`, `model_id`, `input_tokens`, `output_tokens`, `cost_usd` | Time-series partitioned by `started_at` |
-| `agency.msgKind` | `slug`, `description` | heartbeat / task_start / task_complete / task_blocked / gate_request / log |
+| `agency.msg_kind` | `slug`, `description` | heartbeat / task_start / task_complete / task_blocked / gate_request / log |
 | `agency.msg` | `agency_id`, `kind`, `payload_jsonb`, `retry_count` | Liaison messages; time-series partitioned by `sent_at` |
 
 Views: `agency.v_active_routes`, `agency.v_host_routing`.
@@ -124,9 +124,9 @@ Schema: `identity`
 | Table | Key Columns | Notes |
 | :--- | :--- | :--- |
 | `identity.principal` | `did`, `kind` | kind: agent / human / service / system |
-| `identity.didDocument` | `principal_id`, `document_jsonb`, `version` | W3C DID document per principal |
-| `identity.principalKey` | `principal_id`, `key_id`, `key_type`, `public_key_b64`, `key_usage`, `expires_at` | key_type: Ed25519 / P-256 / RSA-2048 / symmetric |
-| `identity.auditAction` | `principal_id`, `actor_did`, `action`, `target_did`, `payload_jsonb` | Append-only; UPDATE/DELETE denied by trigger; partitioned by `occurred_at` |
+| `identity.did_document` | `principal_id`, `document_jsonb`, `version` | W3C DID document per principal |
+| `identity.principal_key` | `principal_id`, `key_id`, `key_type`, `public_key_b64`, `key_usage`, `expires_at` | key_type: Ed25519 / P-256 / RSA-2048 / symmetric |
+| `identity.audit_action` | `principal_id`, `actor_did`, `action`, `target_did`, `payload_jsonb` | Append-only; UPDATE/DELETE denied by trigger; partitioned by `occurred_at` |
 
 Views: `identity.v_active_principals`, `identity.v_principal_keys` (active non-revoked).
 
@@ -140,7 +140,7 @@ Schema: `governance` — All tables are append-only (UPDATE/DELETE denied by tri
 | :--- | :--- | :--- |
 | `governance.policy` | `slug`, `version`, `body_text`, `effective_at`, `superseded_at` | Published policies become immutable; status: draft / active / deprecated / retired / blocked |
 | `governance.decision` | `proposal_ref`, `stage`, `outcome`, `actor_did`, `row_hash`, `prev_hash` | Hash-chained via SHA256 (requires pgcrypto); partitioned by `decided_at` |
-| `governance.complianceCheck` | `check_type`, `target_ref`, `outcome`, `actor_did` | outcome: pass / fail / warn / skip; 1-year retention; partitioned by `checked_at` |
+| `governance.compliance_check` | `check_type`, `target_ref`, `outcome`, `actor_did` | outcome: pass / fail / warn / skip; 1-year retention; partitioned by `checked_at` |
 | `governance.event` | `event_type`, `actor_did`, `subject_ref`, `payload_jsonb` | Permanent retention; partitioned by `occurred_at` |
 
 ---
@@ -160,16 +160,16 @@ Creates the schema and defines `set_updated_at()` — a reusable trigger functio
 | Table | Description |
 | :--- | :--- |
 | `proposal` | Root proposal record: display_id, title, type, status, maturity, priority, parent_id, summary, motivation, design, drawbacks, alternatives, dependency_note, body_markdown, tags_jsonb |
-| `pVersion` | Append-only field-level version history; populated by `fn_version_on_update` trigger on every UPDATE |
-| `pDependency` | Directed dependency graph (blocks / informs / relates / supersedes); supports cross-project refs via `depends_on_ref` |
-| `pCriteria` | Acceptance criteria (pending / met / failed / skipped), with verifier and timestamp |
-| `pReview` | Review comments (verdict: approve / reject / request_changes / comment / NULL) |
-| `pDecision` | Gate transition decisions (advance / reject / defer / split / archive) |
-| `pDiscussion` | Threaded discussion with self-referential `parent_id` |
-| `pActivity` | Append-only audit log: status_changed, field_updated, lease_claimed, etc. |
-| `pTag` | Denormalized tag index kept in sync with `proposal.tags_jsonb` |
+| `p_version` | Append-only field-level version history; populated by `fn_version_on_update` trigger on every UPDATE |
+| `p_dependency` | Directed dependency graph (blocks / informs / relates / supersedes); supports cross-project refs via `depends_on_ref` |
+| `p_criteria` | Acceptance criteria (pending / met / failed / skipped), with verifier and timestamp |
+| `p_review` | Review comments (verdict: approve / reject / request_changes / comment / NULL) |
+| `p_decision` | Gate transition decisions (advance / reject / defer / split / archive) |
+| `p_discussion` | Threaded discussion with self-referential `parent_id` |
+| `p_activity` | Append-only audit log: status_changed, field_updated, lease_claimed, etc. |
+| `p_tag` | Denormalized tag index kept in sync with `proposal.tags_jsonb` |
 
-**pVersion trigger:** `trg_pVersion` fires AFTER UPDATE on `proposal`. It captures field-level changes across `title`, `summary`, `motivation`, `design`, `drawbacks`, `alternatives`, and `dependency_note`, storing the delta as a JSONB object `{field: {old, new}}`. Actor is read from `app.current_actor` session variable or falls back to `current_user`.
+**p_version trigger:** `trg_p_version` fires AFTER UPDATE on `proposal`. It captures field-level changes across `title`, `summary`, `motivation`, `design`, `drawbacks`, `alternatives`, and `dependency_note`, storing the delta as a JSONB object `{field: {old, new}}`. Actor is read from `app.current_actor` session variable or falls back to `current_user`.
 
 **Proposal status values:** Draft → Review → Develop → Merge → Complete | Deployed | Recycled  
 **Maturity values:** new → active → mature → obsolete
@@ -179,36 +179,36 @@ Creates the schema and defines `set_updated_at()` — a reusable trigger functio
 | Table | Description |
 | :--- | :--- |
 | `workflow` | Workflow template (slug: feature / bugfix / research / etc., initial_status) |
-| `wStage` | Stages per workflow (ordinal, is_terminal, is_gate) |
-| `wTransition` | Allowed edges between stages (reason: mature / decision / iteration / discard) |
-| `wGate` | Gate checks per stage (check_key, is_required, ordinal) |
-| `wTemplate` | Serialized snapshot of a workflow for replay / versioning |
+| `w_stage` | Stages per workflow (ordinal, is_terminal, is_gate) |
+| `w_transition` | Allowed edges between stages (reason: mature / decision / iteration / discard) |
+| `w_gate` | Gate checks per stage (check_key, is_required, ordinal) |
+| `w_template` | Serialized snapshot of a workflow for replay / versioning |
 
 ### 003-agent.sql — Agents, Leases, Skills (5 tables)
 
 | Table | Description |
 | :--- | :--- |
 | `agent` | Registered agents (kind: developer / reviewer / gate-reviewer / orchestrator / observer) |
-| `aLease` | Proposal leases — partial unique index enforces one active lease per proposal |
-| `aSkill` | Agent capabilities (proficiency: learning / capable / expert); `gate-review` skill gates gate-reviewer eligibility |
-| `aTrust` | Per-project trust levels (restricted / standard / trusted / elevated) |
-| `aHeartbeat` | Liveness signal — INSERT OR REPLACE; no lifecycle columns |
+| `a_lease` | Proposal leases — partial unique index enforces one active lease per proposal |
+| `a_skill` | Agent capabilities (proficiency: learning / capable / expert); `gate-review` skill gates gate-reviewer eligibility |
+| `a_trust` | Per-project trust levels (restricted / standard / trusted / elevated) |
+| `a_heartbeat` | Liveness signal — INSERT OR REPLACE; no lifecycle columns |
 
 ### 004-msg.sql — Messaging (3 tables)
 
 | Table | Description |
 | :--- | :--- |
-| `mTopic` | Topic/channel registry (retention_days: 90 default) |
-| `mMessage` | Agent-to-agent messages; `to_agent` NULL = broadcast; `correlation_id` for request/reply |
-| `mDLQ` | Dead-letter queue for exhausted retries |
+| `m_topic` | Topic/channel registry (retention_days: 90 default) |
+| `m_message` | Agent-to-agent messages; `to_agent` NULL = broadcast; `correlation_id` for request/reply |
+| `m_dlq` | Dead-letter queue for exhausted retries |
 
 ### 005-spend.sql — Budget & Spend Tracking (3 tables)
 
 | Table | Description |
 | :--- | :--- |
-| `spBudget` | Budgets (scope: project / proposal / agent; alert_threshold: 0.80) |
-| `spLedger` | Append-only spend events (input/output tokens, cost_usd, model_id, session_ref) |
-| `spRoute` | Daily cost rollup per model route — populated by background job, unique on (model_id, period_date) |
+| `sp_budget` | Budgets (scope: project / proposal / agent; alert_threshold: 0.80) |
+| `sp_ledger` | Append-only spend events (input/output tokens, cost_usd, model_id, session_ref) |
+| `sp_route` | Daily cost rollup per model route — populated by background job, unique on (model_id, period_date) |
 
 ### 006-kb.sql — Knowledge Base (3 tables)
 
@@ -216,9 +216,9 @@ Requires the `pgvector` extension (version >= 0.5.0 for HNSW support).
 
 | Table | Description |
 | :--- | :--- |
-| `kbDocument` | Documents (source_type: manual / proposal / commit / url / import; chunk_index for multi-part docs) |
-| `kbEmbedding` | Vector embeddings — `vector(1536)` column (OpenAI default); unique on (document_id, model_id); HNSW index `kb_embedding_hnsw` created at bootstrap |
-| `kbTag` | Document tag index for category filtering |
+| `kb_document` | Documents (source_type: manual / proposal / commit / url / import; chunk_index for multi-part docs) |
+| `kb_embedding` | Vector embeddings — `vector(1536)` column (OpenAI default); unique on (document_id, model_id); HNSW index `kb_embedding_hnsw` created at bootstrap |
+| `kb_tag` | Document tag index for category filtering |
 
 **HNSW indexing strategy:**
 - `kb_embedding_hnsw` is created at project bootstrap time on the `vector` column using cosine distance (`vector_cosine_ops`).
@@ -306,15 +306,15 @@ Message topics: `proposal-updates` (90d), `gate-events` (365d), `agent-activity`
 
 **Lifecycle columns** — Most tables carry `lifecycle_status` (active / deprecated / retired / blocked), `deprecated_at`, `retire_after`, `notes`.
 
-**Append-only enforcement** — `identity.auditAction`, `governance.decision`, `governance.complianceCheck`, `governance.event` deny `UPDATE`/`DELETE` via trigger. These are write-once ledgers.
+**Append-only enforcement** — `identity.audit_action`, `governance.decision`, `governance.compliance_check`, `governance.event` deny `UPDATE`/`DELETE` via trigger. These are write-once ledgers.
 
-**Time-series partitioning** — High-volume temporal tables (`agency.session`, `governance.decision`, `governance.event`, `identity.auditAction`) use range partitioning on their timestamp column.
+**Time-series partitioning** — High-volume temporal tables (`agency.session`, `governance.decision`, `governance.event`, `identity.audit_action`) use range partitioning on their timestamp column.
 
-**pg_notify hot-reload** — `core.runtimeFlag` and `core.runtimeEndpoint` emit `NOTIFY` on mutation so in-process caches can invalidate without polling.
+**pg_notify hot-reload** — `core.runtime_flag` and `core.runtime_endpoint` emit `NOTIFY` on mutation so in-process caches can invalidate without polling.
 
 **Schema variable substitution** — `project-init` files reference `:schema_name` as a psql variable. `apply.sh` passes `-v schema_name=<slug>` to every file.
 
-**Field-level version history** — The `trg_pVersion` trigger on `proposal` captures a JSONB delta of every changed field into `pVersion`, with actor tracking via `app.current_actor`.
+**Field-level version history** — The `trg_p_version` trigger on `proposal` captures a JSONB delta of every changed field into `p_version`, with actor tracking via `app.current_actor`.
 
 ---
 
@@ -323,7 +323,7 @@ Message topics: `proposal-updates` (90d), `gate-events` (365d), `agent-activity`
 | Extension | Where | Purpose |
 | :--- | :--- | :--- |
 | `pgcrypto` | system DB | SHA256 hash chain in `governance.decision` |
-| `pgvector` | per-project schema | `vector(1536)` column in `kbEmbedding` |
+| `pgvector` | per-project schema | `vector(1536)` column in `kb_embedding` |
 
 ---
 

@@ -15,7 +15,7 @@ ON CONFLICT (slug) DO NOTHING;
 
 -- Stages for the standard workflow (feature/bugfix/refactor/infra)
 WITH w AS (SELECT id FROM :schema_name.workflow WHERE slug = 'feature')
-INSERT INTO :schema_name.wStage (workflow_id, name, ordinal, is_terminal, is_gate)
+INSERT INTO :schema_name.w_stage (workflow_id, name, ordinal, is_terminal, is_gate)
 SELECT w.id, stage.name, stage.ord, stage.terminal, stage.gate
 FROM w, (VALUES
   ('Draft',    0, false, false),
@@ -30,8 +30,8 @@ ON CONFLICT (workflow_id, name) DO NOTHING;
 -- Allowed transitions for feature workflow
 WITH
   w  AS (SELECT id FROM :schema_name.workflow WHERE slug = 'feature'),
-  s  AS (SELECT id, name FROM :schema_name.wStage WHERE workflow_id = (SELECT id FROM w))
-INSERT INTO :schema_name.wTransition (workflow_id, from_stage_id, to_stage_id, reason, requires_notes)
+  s  AS (SELECT id, name FROM :schema_name.w_stage WHERE workflow_id = (SELECT id FROM w))
+INSERT INTO :schema_name.w_transition (workflow_id, from_stage_id, to_stage_id, reason, requires_notes)
 SELECT w.id, f.id, t.id, tr.reason, tr.req
 FROM w,
   (VALUES
@@ -53,8 +53,8 @@ ON CONFLICT (workflow_id, from_stage_id, to_stage_id, reason) DO NOTHING;
 -- Gate checks for Review stage
 WITH
   w AS (SELECT id FROM :schema_name.workflow WHERE slug = 'feature'),
-  st AS (SELECT id FROM :schema_name.wStage WHERE workflow_id = (SELECT id FROM w) AND name = 'Review')
-INSERT INTO :schema_name.wGate (stage_id, check_key, description, is_required, ordinal)
+  st AS (SELECT id FROM :schema_name.w_stage WHERE workflow_id = (SELECT id FROM w) AND name = 'Review')
+INSERT INTO :schema_name.w_gate (stage_id, check_key, description, is_required, ordinal)
 SELECT st.id, g.key, g.label, g.req, g.ord
 FROM st, (VALUES
   ('has_summary',    'Proposal has a non-empty summary',          true,  0),
@@ -68,8 +68,8 @@ ON CONFLICT (stage_id, check_key) DO NOTHING;
 -- Gate checks for Merge stage
 WITH
   w AS (SELECT id FROM :schema_name.workflow WHERE slug = 'feature'),
-  st AS (SELECT id FROM :schema_name.wStage WHERE workflow_id = (SELECT id FROM w) AND name = 'Merge')
-INSERT INTO :schema_name.wGate (stage_id, check_key, description, is_required, ordinal)
+  st AS (SELECT id FROM :schema_name.w_stage WHERE workflow_id = (SELECT id FROM w) AND name = 'Merge')
+INSERT INTO :schema_name.w_gate (stage_id, check_key, description, is_required, ordinal)
 SELECT st.id, g.key, g.label, g.req, g.ord
 FROM st, (VALUES
   ('has_decision',   'A gate decision row exists for this advance',   true,  0),
