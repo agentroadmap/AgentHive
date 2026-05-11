@@ -12,17 +12,21 @@ import { box, textbox } from "../blessed.ts";
 
 export type FilterControlId =
 	| "search"
+	| "workflow"
 	| "status"
 	| "priority"
 	| "labels"
-	| "directive";
+	| "directive"
+	| "maturity";
 
 export interface FilterProposal {
 	search: string;
+	workflow: string;
 	status: string;
 	priority: string;
 	labels: string[];
 	directive: string;
+	maturity: string;
 }
 
 export interface FilterHeaderOptions {
@@ -63,6 +67,13 @@ const ALL_FILTER_ITEMS: FilterItem[] = [
 		flexGrow: true,
 	},
 	{
+		id: "workflow",
+		labelText: "Workflow:",
+		labelWidth: 9,
+		minWidth: 20,
+		flexGrow: false,
+	},
+	{
 		id: "status",
 		labelText: "Status:",
 		labelWidth: 8,
@@ -88,6 +99,13 @@ const ALL_FILTER_ITEMS: FilterItem[] = [
 		labelText: "Labels:",
 		labelWidth: 8,
 		minWidth: 18,
+		flexGrow: false,
+	},
+	{
+		id: "maturity",
+		labelText: "Maturity:",
+		labelWidth: 9,
+		minWidth: 20,
 		flexGrow: false,
 	},
 ];
@@ -176,10 +194,12 @@ export class FilterHeader {
 
 	// Element references for focus management and updates
 	private searchInput: TextboxInterface | null = null;
+	private workflowButton: BoxInterface | null = null;
 	private statusButton: BoxInterface | null = null;
 	private priorityButton: BoxInterface | null = null;
 	private directiveButton: BoxInterface | null = null;
 	private labelsButton: BoxInterface | null = null;
+	private maturityButton: BoxInterface | null = null;
 	private elements: (BoxInterface | TextboxInterface)[] = [];
 
 	// Focus tracking
@@ -194,10 +214,12 @@ export class FilterHeader {
 		this.visibleFilterIds = normalizeVisibleFilters(options.visibleFilters);
 		this.proposal = {
 			search: options.initialFilters?.search ?? "",
+			workflow: options.initialFilters?.workflow ?? "",
 			status: options.initialFilters?.status ?? "",
 			priority: options.initialFilters?.priority ?? "",
 			labels: options.initialFilters?.labels ?? [],
 			directive: options.initialFilters?.directive ?? "",
+			maturity: options.initialFilters?.maturity ?? "non-obsolete",
 		};
 
 		const parentWidth =
@@ -244,6 +266,10 @@ export class FilterHeader {
 			this.proposal.search = filters.search;
 			this.searchInput?.setValue(filters.search);
 		}
+		if (filters.workflow !== undefined) {
+			this.proposal.workflow = filters.workflow;
+			this.updateWorkflowButton();
+		}
 		if (filters.status !== undefined) {
 			this.proposal.status = filters.status;
 			this.updateStatusButton();
@@ -259,6 +285,10 @@ export class FilterHeader {
 		if (filters.directive !== undefined) {
 			this.proposal.directive = filters.directive;
 			this.updateDirectiveButton();
+		}
+		if (filters.maturity !== undefined) {
+			this.proposal.maturity = filters.maturity;
+			this.updateMaturityButton();
 		}
 	}
 
@@ -291,6 +321,10 @@ export class FilterHeader {
 		this.searchInput?.focus();
 	}
 
+	focusWorkflow(): void {
+		this.workflowButton?.focus();
+	}
+
 	focusStatus(): void {
 		this.statusButton?.focus();
 	}
@@ -305,6 +339,10 @@ export class FilterHeader {
 
 	focusLabels(): void {
 		this.labelsButton?.focus();
+	}
+
+	focusMaturity(): void {
+		this.maturityButton?.focus();
 	}
 
 	setFocusChangeHandler(
@@ -406,6 +444,9 @@ export class FilterHeader {
 			case "search":
 				this.focusSearch();
 				break;
+			case "workflow":
+				this.focusWorkflow();
+				break;
 			case "status":
 				this.focusStatus();
 				break;
@@ -418,6 +459,9 @@ export class FilterHeader {
 			case "labels":
 				this.focusLabels();
 				break;
+			case "maturity":
+				this.focusMaturity();
+				break;
 		}
 	}
 
@@ -427,10 +471,12 @@ export class FilterHeader {
 		}
 		this.elements = [];
 		this.searchInput = null;
+		this.workflowButton = null;
 		this.statusButton = null;
 		this.priorityButton = null;
 		this.directiveButton = null;
 		this.labelsButton = null;
+		this.maturityButton = null;
 	}
 
 	private buildElements(): void {
@@ -489,6 +535,9 @@ export class FilterHeader {
 			case "search":
 				this.buildSearchInput(controlX, y, controlWidth);
 				break;
+			case "workflow":
+				this.buildPopupButton("workflow", controlX, y, controlWidth);
+				break;
 			case "status":
 				this.buildPopupButton("status", controlX, y, controlWidth);
 				break;
@@ -500,6 +549,9 @@ export class FilterHeader {
 				break;
 			case "labels":
 				this.buildPopupButton("labels", controlX, y, controlWidth);
+				break;
+			case "maturity":
+				this.buildPopupButton("maturity", controlX, y, controlWidth);
 				break;
 		}
 	}
@@ -627,10 +679,12 @@ export class FilterHeader {
 		});
 		this.elements.push(button);
 
+		if (field === "workflow") this.workflowButton = button;
 		if (field === "status") this.statusButton = button;
 		if (field === "priority") this.priorityButton = button;
 		if (field === "directive") this.directiveButton = button;
 		if (field === "labels") this.labelsButton = button;
+		if (field === "maturity") this.maturityButton = button;
 
 		button.on("click", () => {
 			this.options.onFilterPickerOpen(field);
@@ -687,6 +741,8 @@ export class FilterHeader {
 		field: Exclude<FilterControlId, "search">,
 	): string {
 		switch (field) {
+			case "workflow":
+				return this.proposal.workflow ? `${this.proposal.workflow} ▼` : "All ▼";
 			case "status":
 				return this.proposal.status ? `${this.proposal.status} ▼` : "All ▼";
 			case "priority":
@@ -699,7 +755,14 @@ export class FilterHeader {
 				const count = this.proposal.labels.length;
 				return count === 0 ? "All ▼" : `(${count}) ▼`;
 			}
+			case "maturity":
+				return this.proposal.maturity ? `${this.proposal.maturity} ▼` : "All ▼";
 		}
+	}
+
+	private updateWorkflowButton(): void {
+		if (!this.workflowButton) return;
+		this.workflowButton.setContent(this.getPopupButtonContent("workflow"));
 	}
 
 	private updateStatusButton(): void {
@@ -720,6 +783,11 @@ export class FilterHeader {
 	private updateLabelsButton(): void {
 		if (!this.labelsButton) return;
 		this.labelsButton.setContent(this.getPopupButtonContent("labels"));
+	}
+
+	private updateMaturityButton(): void {
+		if (!this.maturityButton) return;
+		this.maturityButton.setContent(this.getPopupButtonContent("maturity"));
 	}
 
 	private repositionElements(): void {
