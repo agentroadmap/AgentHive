@@ -294,6 +294,10 @@ const opsRoutes: RouteMap = {
 	ref_get_term: "ref_get_term",
 	// P498: Config audit tool
 	config_audit: "config_audit",
+	// P895: Backup harness
+	backup_take: "backup_take",
+	backup_verify: "backup_verify",
+	backup_list: "backup_list",
 };
 
 const projectRoutes: RouteMap = {
