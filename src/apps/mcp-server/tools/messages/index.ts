@@ -3,6 +3,7 @@ import type { McpToolHandler } from "../../types.ts";
 import { createSimpleValidatedTool } from "../../validation/tool-wrapper.ts";
 import type { JsonSchema } from "../../validation/validators.ts";
 import { PgMessagingHandlers } from "./pg-handlers.ts";
+import { DlqHandlers } from "./dlq-handlers.ts";
 import { handleMsgAck } from "./msg-ack.ts";
 import { handleMsgReply } from "./msg-reply.ts";
 import { handleMsgWaitReply } from "./msg-wait-reply.ts";
