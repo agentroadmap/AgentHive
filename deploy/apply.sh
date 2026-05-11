@@ -54,6 +54,7 @@ if $SYSTEM; then
   $PSQL -f deploy/system-init/004-governance.sql
   $PSQL -f deploy/system-init/005-observability.sql
   $PSQL -f deploy/system-init/006-partition-maintenance.sql
+  $PSQL -f deploy/system-init/007-tenant-lifecycle.sql
   echo "==> system-init seed"
   $PSQL -f deploy/system-init/seed/hosts.sql
   $PSQL -f deploy/system-init/seed/agencies.sql
