@@ -98,6 +98,7 @@ export async function outputJsonl(result: ScannerResult): Promise<string> {
   for (const finding of result.findings) {
     lines.push(
       JSON.stringify({
+        schema_version: 1,
         rule: finding.rule,
         file: finding.file,
         line: finding.line,
@@ -117,6 +118,31 @@ export async function outputJsonl(result: ScannerResult): Promise<string> {
   }
 
   return lines.join("\n");
+}
+
+export async function outputMcp(result: ScannerResult): Promise<string> {
+  return JSON.stringify({
+    schema_version: 1,
+    total: result.findings.length,
+    stats: result.stats,
+    findings: result.findings.map((f) => ({
+      schema_version: 1,
+      rule: f.rule,
+      file: f.file,
+      line: f.line,
+      col: f.col,
+      severity: f.severity,
+      confidence: f.confidence,
+      proposal: f.proposal,
+      match: f.match,
+      snippet: f.snippet,
+      fix: f.fixSuggestion,
+      tags: f.tags,
+      acknowledged_debt: f.acknowledgedDebt,
+      context_before: f.context_before,
+      context_after: f.context_after,
+    })),
+  });
 }
 
 export async function outputSarif(result: ScannerResult): Promise<string> {
@@ -198,6 +224,8 @@ export async function writeOutput(
     output = await outputJsonl(result);
   } else if (format === "sarif") {
     output = await outputSarif(result);
+  } else if (format === "mcp") {
+    output = await outputMcp(result);
   } else {
     output = await outputHuman(result, verbose);
   }
