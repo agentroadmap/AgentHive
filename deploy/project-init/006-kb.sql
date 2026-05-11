@@ -52,12 +52,16 @@ CREATE TABLE IF NOT EXISTS :schema_name.kbEmbedding (
   UNIQUE (document_id, model_id)
 );
 
--- IVFFlat index for approximate nearest-neighbor search (create after data load for efficiency)
--- CREATE INDEX kbembedding_ivfflat ON :schema_name.kbEmbedding USING ivfflat (vector vector_cosine_ops) WITH (lists = 100);
+-- HNSW index for approximate nearest-neighbor search
+-- HNSW does not require rebuild after bulk loads (unlike IVFFlat), making it ideal for bootstrap.
+-- pgvector >= 0.5.0 required for HNSW support.
+CREATE INDEX IF NOT EXISTS kb_embedding_hnsw
+  ON :schema_name."kbEmbedding" USING hnsw (vector vector_cosine_ops)
+  WITH (m = 16, ef_construction = 64);
 
 COMMENT ON TABLE :schema_name.kbEmbedding IS
   'Vector embeddings for semantic search over kbDocument. One row per (document, model) pair. '
-  'IVFFlat index commented out — create it after initial data load for best build time.';
+  'HNSW index kb_embedding_hnsw on embedding column (1536-dim, vector_cosine_ops); no rebuild needed after bulk loads.';
 
 -- ============================================================
 -- kbTag — document tag index
