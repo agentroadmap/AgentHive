@@ -90,19 +90,15 @@ COMMENT ON TABLE :schema_name.sp_route IS
 -- Adds ordinary_share / unblock_reserve_share if the table
 -- was created before this migration was applied.
 -- ============================================================
-DO $$
-BEGIN
-  ALTER TABLE :schema_name.sp_budget
-    ADD COLUMN IF NOT EXISTS ordinary_share NUMERIC(5,2) NOT NULL DEFAULT 0.80;
-  ALTER TABLE :schema_name.sp_budget
-    ADD COLUMN IF NOT EXISTS unblock_reserve_share NUMERIC(5,2) NOT NULL DEFAULT 0.20;
-  ALTER TABLE :schema_name.sp_budget
-    DROP CONSTRAINT IF EXISTS spbudget_share_sum_le_one;
-  ALTER TABLE :schema_name.sp_budget
-    ADD CONSTRAINT spbudget_share_sum_le_one
-      CHECK (ordinary_share + unblock_reserve_share <= 1.0);
-EXCEPTION WHEN OTHERS THEN NULL;
-END $$;
+ALTER TABLE :schema_name.sp_budget
+  ADD COLUMN IF NOT EXISTS ordinary_share NUMERIC(5,2) NOT NULL DEFAULT 0.80;
+ALTER TABLE :schema_name.sp_budget
+  ADD COLUMN IF NOT EXISTS unblock_reserve_share NUMERIC(5,2) NOT NULL DEFAULT 0.20;
+ALTER TABLE :schema_name.sp_budget
+  DROP CONSTRAINT IF EXISTS spbudget_share_sum_le_one;
+ALTER TABLE :schema_name.sp_budget
+  ADD CONSTRAINT spbudget_share_sum_le_one
+    CHECK (ordinary_share + unblock_reserve_share <= 1.0);
 
 -- ============================================================
 -- fn_is_reserve_eligible(p_proposal_id BIGINT) → BOOLEAN  (P897)
@@ -294,11 +290,15 @@ COMMENT ON FUNCTION :schema_name.fn_decide_budget_share(BIGINT, BIGINT, NUMERIC)
 -- ============================================================
 -- Grants for P897 functions
 -- ============================================================
-DO $$
+DO $grants$
+DECLARE v_schema TEXT;
 BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'agenthive_orchestrator') THEN
-    GRANT EXECUTE ON FUNCTION :schema_name.fn_is_reserve_eligible(BIGINT) TO agenthive_orchestrator;
-    GRANT EXECUTE ON FUNCTION :schema_name.fn_get_budget_reserve_status(BIGINT) TO agenthive_orchestrator;
-    GRANT EXECUTE ON FUNCTION :schema_name.fn_decide_budget_share(BIGINT, BIGINT, NUMERIC) TO agenthive_orchestrator;
+  SELECT nspname INTO v_schema
+  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+  WHERE p.proname = 'fn_is_reserve_eligible' LIMIT 1;
+  IF v_schema IS NOT NULL AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'agenthive_orchestrator') THEN
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %I.fn_is_reserve_eligible(BIGINT) TO agenthive_orchestrator', v_schema);
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %I.fn_get_budget_reserve_status(BIGINT) TO agenthive_orchestrator', v_schema);
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %I.fn_decide_budget_share(BIGINT, BIGINT, NUMERIC) TO agenthive_orchestrator', v_schema);
   END IF;
-END $$;
+END $grants$;

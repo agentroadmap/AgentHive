@@ -271,13 +271,9 @@ COMMENT ON TABLE :schema_name.p_tag IS
 -- Adds proposal.tier if the table was created before this
 -- migration was applied.
 -- ============================================================
-DO $$
-BEGIN
-  ALTER TABLE :schema_name.proposal
-    ADD COLUMN IF NOT EXISTS tier TEXT NOT NULL DEFAULT 'B';
-  ALTER TABLE :schema_name.proposal
-    DROP CONSTRAINT IF EXISTS proposal_tier_check;
-  ALTER TABLE :schema_name.proposal
-    ADD CONSTRAINT proposal_tier_check CHECK (tier IN ('A','B','C'));
-EXCEPTION WHEN OTHERS THEN NULL;
-END $$;
+ALTER TABLE :schema_name.proposal
+  ADD COLUMN IF NOT EXISTS tier TEXT NOT NULL DEFAULT 'B';
+ALTER TABLE :schema_name.proposal
+  DROP CONSTRAINT IF EXISTS proposal_tier_check;
+ALTER TABLE :schema_name.proposal
+  ADD CONSTRAINT proposal_tier_check CHECK (tier IN ('A','B','C'));
