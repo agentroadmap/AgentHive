@@ -93,10 +93,18 @@ export async function mcpCall(
   timeoutMs = 10_000,
 ): Promise<McpCallResult> {
   try {
-    const res = await fetch(mcpUrl.replace("/sse", "/call"), {
+    const res = await fetch(mcpUrl.replace("/sse", "/mcp"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tool, args }),
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: "cli-" + Math.random().toString(36).slice(2, 9),
+        method: "tools/call",
+        params: {
+          name: tool,
+          arguments: args,
+        },
+      }),
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) {

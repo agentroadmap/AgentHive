@@ -417,6 +417,12 @@ The platform runs **one** dispatch decision loop: `scanQueues()` in `scripts/orc
 
 **If a future workflow needs a new dispatch trigger,** add it as a notify channel that wakes `scanQueues()`, plus a queue-context resolver row, plus a role-profile row in `roadmap.agent_role_profile`. Do not stand up a separate cron or service.
 
+### 6.0c Broadcast fan-out uses per-channel NOTIFY (P907)
+
+A2A messaging remains channel-centric for broadcast delivery. Each broadcast emits a single `pg_notify(channel_name)` rather than N notifications for N subscribers. This optimizes DB write volume and leverages the existing `MessageNotificationListener`'s `wait_ms` logic. 
+
+**Per-subscriber fan-out (mailbox pattern) was rejected** to avoid O(N) storage cost and complex cache invalidation on cluster membership changes.
+
 ### 6.0 Database Topology (target architecture)
 
 AgentHive runs on a **two-tier Postgres topology**:

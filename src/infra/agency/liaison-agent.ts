@@ -12,6 +12,7 @@
  *      dedicated client and end() it on stop().
  *   3. On each notification, fetches the row and either:
  *        - protocol_ping → protocol_pong fast-path (no LLM, P856), or
+ *        - explicit spawn task → claimed squad_dispatch + offer_dispatch bridge, or
  *        - invokes the per-provider LLM handler via CliInvocationRegistry to compose a text reply.
  *   4. Writes replies directly to roadmap.message_ledger with correlation_id
  *      copied from the original and reply_to = original.id, then marks the
@@ -29,9 +30,11 @@
  * resolveLiaisonHandler switches.
  */
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { Client } from "pg";
 import { query, getPool } from "../postgres/pool.ts";
 import { agentNotifyChannel } from "../messaging/a2a-access-control.ts";
+import { sendMessage as sendLiaisonMessage } from "./liaison-message-service.ts";
 import {
 	globalCliInvocationRegistry,
 	invokeCliHandler,
@@ -45,6 +48,9 @@ export interface IncomingMessage {
 	to_agent: string;
 	message_content: string;
 	message_type: string;
+	proposal_id: number | null;
+	project_id: number | null;
+	metadata: Record<string, unknown>;
 	correlation_id: string | null;
 }
 
@@ -131,6 +137,7 @@ export async function runLiaisonAgent(
 	async function fetchMessage(messageId: number) {
 		const { rows } = await query(
 			`SELECT id, from_agent, to_agent, message_content, message_type,
+			        proposal_id, project_id, COALESCE(metadata, '{}'::jsonb) AS metadata,
 			        correlation_id, read_at
 			   FROM roadmap.message_ledger
 			  WHERE id = $1`,
@@ -169,6 +176,51 @@ export async function runLiaisonAgent(
 				console.log(`${log} PONG → ${msg.from_agent} (reply_to=${msg.id})`);
 			} catch (err) {
 				console.warn(`${log} protocol_pong INSERT failed:`, err);
+			}
+			return;
+		}
+
+		if (msg.message_type === "task" && shouldBridgeTaskToOffer(msg)) {
+			try {
+				const result = await bridgeTaskToOfferDispatch({
+					msg,
+					identity,
+					provider,
+				});
+				await insertReply({
+					fromAgent: identity,
+					toAgent: msg.from_agent,
+					content: `Accepted task ${msg.id}; dispatch ${result.dispatchId} queued for ${identity}.`,
+					messageType: "ack",
+					correlationId: msg.correlation_id ?? null,
+					replyTo: msg.id,
+				});
+				await markReadAndResolveTimeout(msg.id);
+				console.log(
+					`${log} TASK_BRIDGE dispatch=${result.dispatchId} → ${identity}`,
+				);
+				void monitorTaskDispatch({
+					identity,
+					requestor: msg.from_agent,
+					originalMessageId: msg.id,
+					correlationId: msg.correlation_id ?? null,
+					dispatchId: result.dispatchId,
+					pollMs: result.statusPollMs,
+					timeoutMs: result.statusTimeoutMs,
+					log,
+				});
+			} catch (err) {
+				const detail = err instanceof Error ? err.message : String(err);
+				console.error(`${log} task bridge failed:`, detail);
+				await insertReply({
+					fromAgent: identity,
+					toAgent: msg.from_agent,
+					content: `Unable to execute task ${msg.id}: ${detail}`,
+					messageType: "error",
+					correlationId: msg.correlation_id ?? null,
+					replyTo: msg.id,
+				});
+				await markReadAndResolveTimeout(msg.id);
 			}
 			return;
 		}
@@ -237,6 +289,275 @@ export async function runLiaisonAgent(
 			}
 		},
 	};
+}
+
+interface TaskBridgeResult {
+	dispatchId: number;
+	statusPollMs: number;
+	statusTimeoutMs: number;
+}
+
+function shouldBridgeTaskToOffer(msg: IncomingMessage): boolean {
+	const metadata = msg.metadata ?? {};
+	const marker =
+		metadata.liaison_task_execution ??
+		metadata.spawn_agent ??
+		metadata.spawnAgent ??
+		metadata.bridge ??
+		metadata.action ??
+		metadata.task_action ??
+		metadata.kind;
+
+	if (marker === true) return true;
+	if (typeof marker !== "string") return false;
+	return [
+		"spawn",
+		"spawn_agent",
+		"agent_spawn",
+		"execute",
+		"execute_task",
+		"offer_dispatch",
+		"liaison_task_execution",
+	].includes(marker);
+}
+
+async function bridgeTaskToOfferDispatch(args: {
+	msg: IncomingMessage;
+	identity: string;
+	provider: string;
+}): Promise<TaskBridgeResult> {
+	const { msg, identity, provider } = args;
+	const metadata = msg.metadata ?? {};
+	const proposalId = numberFrom(metadata.proposal_id) ?? msg.proposal_id;
+	if (!proposalId) {
+		throw new Error(
+			"task bridge requires proposal_id on message_ledger or metadata",
+		);
+	}
+
+	const role =
+		stringFrom(metadata.role) ??
+		stringFrom(metadata.dispatch_role) ??
+		stringFrom(metadata.stage) ??
+		"developer";
+	const squadName =
+		stringFrom(metadata.squad_name) ??
+		stringFrom(metadata.squadName) ??
+		"liaison-task";
+	const projectId = numberFrom(metadata.project_id) ?? msg.project_id ?? 1;
+	const capabilities = stringArrayFrom(
+		metadata.required_capabilities ?? metadata.capabilities,
+	);
+	const requiredCapabilities = capabilities.length > 0 ? capabilities : [role];
+	const leaseTtlSeconds = numberFrom(metadata.lease_ttl_seconds) ?? 60;
+	const routeHint = stringFrom(metadata.route_hint) ?? provider;
+	const worktreeHint =
+		stringFrom(metadata.worktree_hint) ??
+		stringFrom(metadata.worktree) ??
+		process.env.AGENCY_WORKTREE ??
+		process.env.AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE ??
+		null;
+	const statusPollMs = numberFrom(metadata.status_poll_ms) ?? 10_000;
+	const statusTimeoutMs =
+		numberFrom(metadata.status_timeout_ms) ?? 2 * 60 * 60_000;
+
+	const offerMetadata = {
+		task: msg.message_content,
+		source: "message_ledger_task_bridge",
+		source_message_id: msg.id,
+		source_from_agent: msg.from_agent,
+		source_correlation_id: msg.correlation_id,
+		route_hint: routeHint,
+		required_capabilities: requiredCapabilities,
+		worktree_hint: worktreeHint,
+	};
+	const idempotencyKey = `liaison-task:${msg.id}`;
+
+	const { rows } = await query<{
+		id: string | number;
+		claim_token: string;
+		offer_version: number;
+	}>(
+		`INSERT INTO roadmap_workforce.squad_dispatch
+		    (proposal_id, project_id, squad_name, dispatch_role, dispatch_status,
+		     offer_status, agent_identity, agency_identity, required_capabilities,
+		     metadata, idempotency_key, dispatch_version, claim_token,
+		     claim_expires_at, claimed_at, last_renewed_at)
+		 VALUES ($1, $2, $3, $4, 'assigned',
+		         'claimed', $5, $5, $6::jsonb,
+		         $7::jsonb, $8, 1, gen_random_uuid(),
+		         now() + ($9::text || ' seconds')::interval, now(), now())
+		 ON CONFLICT (idempotency_key)
+		   WHERE dispatch_status IN ('open', 'assigned', 'active')
+		 DO UPDATE SET
+		   offer_status = 'claimed',
+		   agent_identity = EXCLUDED.agent_identity,
+		   agency_identity = EXCLUDED.agency_identity,
+		   claim_token = COALESCE(roadmap_workforce.squad_dispatch.claim_token, gen_random_uuid()),
+		   claim_expires_at = now() + ($9::text || ' seconds')::interval,
+		   claimed_at = COALESCE(roadmap_workforce.squad_dispatch.claimed_at, now()),
+		   last_renewed_at = now(),
+		   metadata = roadmap_workforce.squad_dispatch.metadata || EXCLUDED.metadata
+		 RETURNING id, claim_token, offer_version`,
+		[
+			proposalId,
+			projectId,
+			squadName,
+			role,
+			identity,
+			JSON.stringify(requiredCapabilities),
+			JSON.stringify(offerMetadata),
+			idempotencyKey,
+			leaseTtlSeconds,
+		],
+	);
+
+	const row = rows[0];
+	if (!row) throw new Error("task bridge failed to create dispatch row");
+	const dispatchId = Number(row.id);
+	const claimToken = row.claim_token;
+
+	await sendLiaisonMessage({
+		agency_id: identity,
+		direction: "orchestrator->liaison",
+		kind: "offer_dispatch",
+		correlation_id: msg.correlation_id ?? randomUUID(),
+		payload: {
+			offer_id: toOfferUuid(dispatchId),
+			role,
+			required_capabilities: requiredCapabilities,
+			route_hint: routeHint,
+			claim_token: claimToken,
+			dispatch_id: dispatchId,
+			proposal_id: proposalId,
+			squad_name: squadName,
+			lease_ttl_seconds: leaseTtlSeconds,
+			worktree_hint: worktreeHint,
+			source_message_id: msg.id,
+			source_from_agent: msg.from_agent,
+		},
+	});
+
+	return {
+		dispatchId,
+		statusPollMs,
+		statusTimeoutMs,
+	};
+}
+
+async function monitorTaskDispatch(args: {
+	identity: string;
+	requestor: string;
+	originalMessageId: number;
+	correlationId: string | null;
+	dispatchId: number;
+	pollMs: number;
+	timeoutMs: number;
+	log: string;
+}): Promise<void> {
+	const deadline = Date.now() + args.timeoutMs;
+	let lastStatus = "";
+
+	while (Date.now() < deadline) {
+		const { rows } = await query<{
+			offer_status: string;
+			dispatch_status: string;
+			worker_identity: string | null;
+			completed_at: Date | string | null;
+		}>(
+			`SELECT offer_status, dispatch_status, worker_identity, completed_at
+			   FROM roadmap_workforce.squad_dispatch
+			  WHERE id = $1`,
+			[args.dispatchId],
+		);
+		const row = rows[0];
+		if (!row) {
+			await insertReply({
+				fromAgent: args.identity,
+				toAgent: args.requestor,
+				content: `Dispatch ${args.dispatchId} disappeared before completion.`,
+				messageType: "error",
+				correlationId: args.correlationId,
+				replyTo: args.originalMessageId,
+			});
+			return;
+		}
+
+		const statusKey = `${row.offer_status}:${row.dispatch_status}:${row.worker_identity ?? ""}`;
+		if (statusKey !== lastStatus) {
+			lastStatus = statusKey;
+			await insertReply({
+				fromAgent: args.identity,
+				toAgent: args.requestor,
+				content:
+					`Dispatch ${args.dispatchId} status: offer=${row.offer_status}, ` +
+					`dispatch=${row.dispatch_status}` +
+					(row.worker_identity ? `, worker=${row.worker_identity}` : ""),
+				messageType: terminalOfferStatus(row.offer_status, row.dispatch_status)
+					? row.offer_status === "delivered" ||
+						row.dispatch_status === "completed"
+						? "status"
+						: "error"
+					: "status",
+				correlationId: args.correlationId,
+				replyTo: args.originalMessageId,
+			});
+		}
+
+		if (terminalOfferStatus(row.offer_status, row.dispatch_status)) return;
+		await sleep(Math.max(1_000, args.pollMs));
+	}
+
+	await insertReply({
+		fromAgent: args.identity,
+		toAgent: args.requestor,
+		content: `Dispatch ${args.dispatchId} is still running after ${Math.round(args.timeoutMs / 1000)}s; monitoring stopped.`,
+		messageType: "status",
+		correlationId: args.correlationId,
+		replyTo: args.originalMessageId,
+	});
+	console.warn(
+		`${args.log} TASK_BRIDGE monitor timed out for dispatch=${args.dispatchId}`,
+	);
+}
+
+function terminalOfferStatus(
+	offerStatus: string,
+	dispatchStatus: string,
+): boolean {
+	return (
+		["delivered", "failed", "expired", "cancelled"].includes(offerStatus) ||
+		["completed", "failed", "cancelled"].includes(dispatchStatus)
+	);
+}
+
+function toOfferUuid(dispatchId: number): string {
+	const hex = BigInt(dispatchId).toString(16).padStart(12, "0").slice(-12);
+	return `00000000-0000-0000-0000-${hex}`;
+}
+
+function stringFrom(value: unknown): string | null {
+	return typeof value === "string" && value.trim().length > 0
+		? value.trim()
+		: null;
+}
+
+function numberFrom(value: unknown): number | null {
+	if (typeof value === "number" && Number.isFinite(value)) return value;
+	if (typeof value === "string" && value.trim().length > 0) {
+		const parsed = Number(value);
+		if (Number.isFinite(parsed)) return parsed;
+	}
+	return null;
+}
+
+function stringArrayFrom(value: unknown): string[] {
+	if (!Array.isArray(value)) return [];
+	return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
