@@ -12,6 +12,14 @@ import {
 	agentCredentialDeliver,
 	agentCredentialRetrieve,
 } from "./credential-handlers.ts";
+import {
+	dlqList,
+	dlqInspect,
+	dlqReplay,
+	dlqExpire,
+	dlqStats,
+	liaisonStuckMessages,
+} from "./dlq-handlers.ts";
 
 const msgMarkReadSchema: JsonSchema = {
 	type: "object",
@@ -538,6 +546,210 @@ export function registerMessageTools(server: McpServer): void {
 			agentCredentialRetrieve(input as { nonce: string }),
 	);
 
+	const dlqListTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "dlq_list",
+			description:
+				"List dead-letter queue (DLQ) entries for a project. Returns id, topic_slug, dead_at, retry_count, replays, and failure_reason. Maximum 500 entries.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					project_slug: {
+						type: "string",
+						description: "Project slug / schema name",
+					},
+					topic: {
+						type: "string",
+						description: "Optional filter by topic slug",
+					},
+					limit: {
+						type: "number",
+						description: "Max entries to return (default 100, max 500)",
+					},
+				},
+				required: ["project_slug"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				project_slug: { type: "string" },
+				topic: { type: "string" },
+				limit: { type: "number" },
+			},
+			required: ["project_slug"],
+		} as JsonSchema,
+		async (input) =>
+			dlqList(input as { project_slug: string; topic?: string; limit?: number }),
+	);
+
+	const dlqInspectTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "dlq_inspect",
+			description:
+				"Inspect full details of a DLQ entry, including all columns and payload.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					project_slug: {
+						type: "string",
+						description: "Project slug / schema name",
+					},
+					dlq_id: {
+						type: "string",
+						description: "DLQ entry ID",
+					},
+				},
+				required: ["project_slug", "dlq_id"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				project_slug: { type: "string" },
+				dlq_id: { type: "string" },
+			},
+			required: ["project_slug", "dlq_id"],
+		} as JsonSchema,
+		async (input) =>
+			dlqInspect(input as { project_slug: string; dlq_id: string }),
+	);
+
+	const dlqReplayTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "dlq_replay",
+			description:
+				"Replay a DLQ message by inserting it into mMessage and removing from DLQ. Rejects if replays >= 3 unless force=true (audited).",
+			inputSchema: {
+				type: "object",
+				properties: {
+					project_slug: {
+						type: "string",
+						description: "Project slug / schema name",
+					},
+					dlq_id: {
+						type: "string",
+						description: "DLQ entry ID to replay",
+					},
+					force: {
+						type: "boolean",
+						description:
+							"Force replay even if replays >= 3. Causes audit event. Default false.",
+					},
+				},
+				required: ["project_slug", "dlq_id"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				project_slug: { type: "string" },
+				dlq_id: { type: "string" },
+				force: { type: "boolean" },
+			},
+			required: ["project_slug", "dlq_id"],
+		} as JsonSchema,
+		async (input) =>
+			dlqReplay(input as { project_slug: string; dlq_id: string; force?: boolean }),
+	);
+
+	const dlqExpireTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "dlq_expire",
+			description:
+				"Mark a DLQ entry as expired (sets expired_at timestamp). Does not delete. Rejects if already expired. Writes audit event.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					project_slug: {
+						type: "string",
+						description: "Project slug / schema name",
+					},
+					dlq_id: {
+						type: "string",
+						description: "DLQ entry ID to expire",
+					},
+					reason: {
+						type: "string",
+						description: "Reason for expiration",
+					},
+				},
+				required: ["project_slug", "dlq_id", "reason"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				project_slug: { type: "string" },
+				dlq_id: { type: "string" },
+				reason: { type: "string" },
+			},
+			required: ["project_slug", "dlq_id", "reason"],
+		} as JsonSchema,
+		async (input) =>
+			dlqExpire(input as { project_slug: string; dlq_id: string; reason: string }),
+	);
+
+	const dlqStatsTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "dlq_stats",
+			description:
+				"Get DLQ statistics grouped by failure_reason, showing total count and expired count.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					project_slug: {
+						type: "string",
+						description: "Project slug / schema name",
+					},
+				},
+				required: ["project_slug"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				project_slug: { type: "string" },
+			},
+			required: ["project_slug"],
+		} as JsonSchema,
+		async (input) => dlqStats(input as { project_slug: string }),
+	);
+
+	const liaisonStuckTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "liaison_stuck_messages",
+			description:
+				"Find liaison messages (agency.msg_default) that have not been processed and are older than threshold_days. Uses partial index for performance.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					project_slug: {
+						type: "string",
+						description: "Project slug (context only; queries system agency table)",
+					},
+					threshold_days: {
+						type: "number",
+						description: "Messages older than this many days are considered stuck (default 7)",
+					},
+				},
+				required: ["project_slug"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				project_slug: { type: "string" },
+				threshold_days: { type: "number" },
+			},
+			required: ["project_slug"],
+		} as JsonSchema,
+		async (input) =>
+			liaisonStuckMessages(
+				input as { project_slug: string; threshold_days?: number },
+			),
+	);
+
 	server.addTool(sendTool);
 	server.addTool(readTool);
 	server.addTool(markReadTool);
@@ -551,4 +763,10 @@ export function registerMessageTools(server: McpServer): void {
 	server.addTool(credentialClaimTool);
 	server.addTool(credentialDeliverTool);
 	server.addTool(credentialRetrieveTool);
+	server.addTool(dlqListTool);
+	server.addTool(dlqInspectTool);
+	server.addTool(dlqReplayTool);
+	server.addTool(dlqExpireTool);
+	server.addTool(dlqStatsTool);
+	server.addTool(liaisonStuckTool);
 }

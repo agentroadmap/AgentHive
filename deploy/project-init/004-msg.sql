@@ -68,7 +68,9 @@ CREATE TABLE IF NOT EXISTS :schema_name.mDLQ (
   payload_jsonb    JSONB        NOT NULL DEFAULT '{}',
   failure_reason   TEXT,
   retry_count      INT          NOT NULL DEFAULT 0,
-  failed_at        TIMESTAMPTZ  NOT NULL DEFAULT now()
+  failed_at        TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  replays          INT          NOT NULL DEFAULT 0,
+  expired_at       TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS mdlq_failed_at ON :schema_name.mDLQ (failed_at);
@@ -76,3 +78,12 @@ CREATE INDEX IF NOT EXISTS mdlq_original ON :schema_name.mDLQ (original_msg_id);
 
 COMMENT ON TABLE :schema_name.mDLQ IS
   'Dead letter queue. Messages land here after exhausting retries. Inspected manually or by reconciler.';
+
+-- Add columns if table already exists
+ALTER TABLE IF EXISTS :schema_name.mDLQ ADD COLUMN IF NOT EXISTS replays INT NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS :schema_name.mDLQ ADD COLUMN IF NOT EXISTS expired_at TIMESTAMPTZ;
+
+-- Index for stuck liaison messages (unprocessed)
+CREATE INDEX IF NOT EXISTS msg_stuck_liaison
+  ON agency.msg_default (sent_at)
+  WHERE processed_at IS NULL;

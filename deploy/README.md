@@ -212,13 +212,20 @@ Creates the schema and defines `set_updated_at()` — a reusable trigger functio
 
 ### 006-kb.sql — Knowledge Base (3 tables)
 
-Requires the `pgvector` extension.
+Requires the `pgvector` extension (version >= 0.5.0 for HNSW support).
 
 | Table | Description |
 | :--- | :--- |
 | `kbDocument` | Documents (source_type: manual / proposal / commit / url / import; chunk_index for multi-part docs) |
-| `kbEmbedding` | Vector embeddings — `vector(1536)` column (OpenAI default); unique on (document_id, model_id); IVFFlat index added post-load |
+| `kbEmbedding` | Vector embeddings — `vector(1536)` column (OpenAI default); unique on (document_id, model_id); HNSW index `kb_embedding_hnsw` created at bootstrap |
 | `kbTag` | Document tag index for category filtering |
+
+**HNSW indexing strategy:**
+- `kb_embedding_hnsw` is created at project bootstrap time on the `vector` column using cosine distance (`vector_cosine_ops`).
+- HNSW parameters: `m=16` (connections per node), `ef_construction=64` (construction-time search width).
+- **Key advantage:** HNSW does not require rebuild after bulk loads (unlike IVFFlat), making it ideal for continuous ingestion.
+- **Performance monitoring:** Use `SELECT * FROM pg_stat_user_indexes WHERE relname = 'kb_embedding_hnsw'` to monitor scans/seeks.
+- **Large bulk load optimization:** After ingesting large document sets, optionally run `SELECT pg_catalog.pg_stat_reset()` to reset statistics for clean performance baselines.
 
 ---
 
