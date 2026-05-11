@@ -44,6 +44,11 @@ jobs:
           DATABASE_URL: ${{ env.AUDIT_DATABASE_URL }}
         run: npm run audit:sql
 
+      # P786: TypeScript hot-path check. Fails if hive-cli, cubic-agents, gate,
+      # or pool introduce new type errors.
+      - name: TypeScript hot-path check
+        run: npm run typecheck
+
       # P779: Scanner guard for legacy workflow state literals.
       # Fails CI if any .ts/.tsx file outside migrations/tests hardcodes
       # RFC or Hotfix stage names instead of importing from the stage registry.
