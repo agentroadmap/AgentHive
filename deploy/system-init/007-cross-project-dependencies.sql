@@ -84,6 +84,7 @@ CREATE OR REPLACE TRIGGER set_updated_at_cross_project_dependency
 -- ============================================================
 -- core.fn_check_cross_project_dep_integrity()
 -- Returns orphaned cross-project dependency edges.
+-- Checks both schema and proposal existence via dynamic queries.
 -- ============================================================
 CREATE OR REPLACE FUNCTION core.fn_check_cross_project_dep_integrity()
 RETURNS TABLE (
@@ -99,62 +100,86 @@ RETURNS TABLE (
   declared_at TIMESTAMPTZ
 ) LANGUAGE plpgsql STABLE AS $$
 DECLARE
-  v_schema_name TEXT;
-  v_proposal_exists BOOLEAN;
+  v_from_schema TEXT;
+  v_to_schema TEXT;
+  v_from_exists BOOLEAN;
+  v_to_exists BOOLEAN;
+  v_from_proposal_exists BOOLEAN;
+  v_to_proposal_exists BOOLEAN;
+  v_row RECORD;
 BEGIN
   -- Check all cross-project edges
-  RETURN QUERY
-  WITH edge_check AS (
+  FOR v_row IN
     SELECT
       cpd.edge_id,
       cpd.from_project_id,
       fp.slug AS from_project_slug,
+      fp.schema_name AS from_schema_name,
       cpd.from_proposal_display_id,
       cpd.to_project_id,
       tp.slug AS to_project_slug,
+      tp.schema_name AS to_schema_name,
       cpd.to_proposal_display_id,
       cpd.kind,
-      cpd.declared_at,
-      -- Check if from-side proposal exists
-      EXISTS (
-        SELECT 1 FROM pg_class c
-        JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = fp.schema_name
-          AND c.relname = 'proposal'
-      ) AS from_schema_exists,
-      -- Check if to-side proposal exists
-      EXISTS (
-        SELECT 1 FROM pg_class c
-        JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = tp.schema_name
-          AND c.relname = 'proposal'
-      ) AS to_schema_exists
+      cpd.declared_at
     FROM core.cross_project_dependency cpd
     JOIN core.project fp ON cpd.from_project_id = fp.id
     JOIN core.project tp ON cpd.to_project_id = tp.id
-  )
-  SELECT
-    ec.edge_id,
-    ec.from_project_id,
-    ec.from_project_slug,
-    ec.from_proposal_display_id,
-    ec.to_project_id,
-    ec.to_project_slug,
-    ec.to_proposal_display_id,
-    ec.kind,
-    CASE
-      WHEN NOT ec.from_schema_exists THEN 'from_schema_not_found'
-      WHEN NOT ec.to_schema_exists THEN 'to_schema_not_found'
-      ELSE 'unknown'
-    END::TEXT,
-    ec.declared_at
-  FROM edge_check ec
-  WHERE NOT ec.from_schema_exists OR NOT ec.to_schema_exists;
+  LOOP
+    -- Check if from-side schema exists
+    v_from_exists := EXISTS (
+      SELECT 1 FROM information_schema.schemata WHERE schema_name = v_row.from_schema_name
+    );
+
+    -- Check if to-side schema exists
+    v_to_exists := EXISTS (
+      SELECT 1 FROM information_schema.schemata WHERE schema_name = v_row.to_schema_name
+    );
+
+    -- If schemas exist, check proposal existence
+    v_from_proposal_exists := false;
+    v_to_proposal_exists := false;
+
+    IF v_from_exists THEN
+      EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I.proposal WHERE display_id = %L)',
+        v_row.from_schema_name, v_row.from_proposal_display_id)
+      INTO v_from_proposal_exists;
+    END IF;
+
+    IF v_to_exists THEN
+      EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I.proposal WHERE display_id = %L)',
+        v_row.to_schema_name, v_row.to_proposal_display_id)
+      INTO v_to_proposal_exists;
+    END IF;
+
+    -- Report orphans
+    IF NOT v_from_exists OR NOT v_from_proposal_exists OR NOT v_to_exists OR NOT v_to_proposal_exists THEN
+      RETURN QUERY SELECT
+        v_row.edge_id,
+        v_row.from_project_id,
+        v_row.from_project_slug,
+        v_row.from_proposal_display_id,
+        v_row.to_project_id,
+        v_row.to_project_slug,
+        v_row.to_proposal_display_id,
+        v_row.kind,
+        CASE
+          WHEN NOT v_from_exists THEN 'from_schema_not_found'::TEXT
+          WHEN NOT v_from_proposal_exists THEN 'from_proposal_not_found'::TEXT
+          WHEN NOT v_to_exists THEN 'to_schema_not_found'::TEXT
+          WHEN NOT v_to_proposal_exists THEN 'to_proposal_not_found'::TEXT
+          ELSE 'unknown'::TEXT
+        END,
+        v_row.declared_at;
+    END IF;
+  END LOOP;
 END;
 $$;
 
 COMMENT ON FUNCTION core.fn_check_cross_project_dep_integrity() IS
-  'Returns all cross-project dependency edges where the source or target project schema is missing or the proposal cannot be found in its target schema.';
+  'Returns all cross-project dependency edges where the source or target project schema is missing, '
+  'or where the proposal display_id cannot be found in its target schema. Uses dynamic queries (EXECUTE) '
+  'to check proposal existence, since each project uses its own schema.';
 
 -- ============================================================
 -- core.fn_check_cross_project_dep_cycles()
