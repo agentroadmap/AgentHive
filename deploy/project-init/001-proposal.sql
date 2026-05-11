@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS :schema_name.proposal (
                                CHECK (maturity IN ('new','active','mature','obsolete')),
   priority         TEXT         NOT NULL DEFAULT 'normal'
                                CHECK (priority IN ('critical','high','normal','low')),
+  tier             TEXT         NOT NULL DEFAULT 'B'
+                               CHECK (tier IN ('A','B','C')),
   parent_id        BIGINT       REFERENCES :schema_name.proposal (id) ON DELETE SET NULL,
   summary          TEXT,
   motivation       TEXT,
@@ -263,3 +265,19 @@ CREATE INDEX IF NOT EXISTS ptag_tag ON :schema_name.pTag (tag);
 
 COMMENT ON TABLE :schema_name.pTag IS
   'Proposal tag index. Kept in sync with proposal.tags_jsonb by application layer or trigger.';
+
+-- ============================================================
+-- Idempotent ALTER for existing deployments (P897)
+-- Adds proposal.tier if the table was created before this
+-- migration was applied.
+-- ============================================================
+DO $$
+BEGIN
+  ALTER TABLE :schema_name.proposal
+    ADD COLUMN IF NOT EXISTS tier TEXT NOT NULL DEFAULT 'B';
+  ALTER TABLE :schema_name.proposal
+    DROP CONSTRAINT IF EXISTS proposal_tier_check;
+  ALTER TABLE :schema_name.proposal
+    ADD CONSTRAINT proposal_tier_check CHECK (tier IN ('A','B','C'));
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
