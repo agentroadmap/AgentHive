@@ -75,6 +75,7 @@ if $PROJECT; then
   echo "==> project-init seed"
   $PSQL -v schema_name="$SCHEMA" -f deploy/project-init/seed/proposal-types.sql
   $PSQL -v schema_name="$SCHEMA" -f deploy/project-init/seed/gate-roles.sql
+  $PSQL -v schema_name="$SCHEMA" -f deploy/project-init/seed/backup-policy.sql
 fi
 
 echo "==> done"
