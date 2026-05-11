@@ -370,9 +370,16 @@ export class McpServer extends Core {
 
 		// P854: _auth envelope path sets verifiedPrincipal but has no transport context;
 		// wrap handler so getProjectDb() P844 gate sees the principal.
-		const result = verifiedPrincipal && !ctx
-			? await agentContextStorage.run({ verified: verifiedPrincipal }, () => tool.handler(args))
-			: await tool.handler(args);
+		// AC-5/AC-26: per-call error boundary — isolates handler failures from transport/SSE clients.
+		let result: CallToolResult;
+		try {
+			result = verifiedPrincipal && !ctx
+				? await agentContextStorage.run({ verified: verifiedPrincipal }, () => tool.handler(args))
+				: await tool.handler(args);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			return { isError: true, content: [{ type: "text", text: `Tool handler error: ${message}` }] };
+		}
 
 		// Log tool call to pulse
 		try {
