@@ -2485,6 +2485,11 @@ async function reconcileStaleDispatches(
 		      AND ar2.status         = 'running'
 		      AND ar2.started_at    >= sd.assigned_at
 		  )
+		  AND NOT EXISTS (
+		    SELECT 1 FROM roadmap.liaison_poke_attempt lpa
+		    WHERE lpa.agency_id = sd.agent_identity
+		      AND lpa.outcome IS NULL
+		  )
 		RETURNING sd.id, sd.proposal_id
 	`);
 	if (result.rowCount && result.rowCount > 0) {
