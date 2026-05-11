@@ -255,6 +255,7 @@ export class PgMessagingHandlers {
 		message_content: string;
 		message_type?: string;
 		proposal_id?: string;
+		correlation_id?: string;
 	}): Promise<CallToolResult> {
 		try {
 			// AC#2: Enforce ACL before inserting. DMs require an explicit grant;
@@ -278,8 +279,8 @@ export class PgMessagingHandlers {
 
 			const { rows } = await query(
 				`INSERT INTO roadmap.message_ledger
-                    (from_agent, to_agent, channel, message_content, message_type, proposal_id)
-                 VALUES ($1, $2, $3, $4, $5, $6)
+                    (from_agent, to_agent, channel, message_content, message_type, proposal_id, correlation_id)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)
                  RETURNING id, nonce, created_at`,
 				[
 					args.from_agent,
@@ -288,6 +289,7 @@ export class PgMessagingHandlers {
 					args.message_content,
 					args.message_type || "text",
 					args.proposal_id || null,
+					args.correlation_id || null,
 				],
 			);
 			return {

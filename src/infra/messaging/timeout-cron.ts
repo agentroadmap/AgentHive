@@ -82,8 +82,8 @@ async function runEscalationPass(db: Pool): Promise<void> {
 				// Insert escalation notice to escalation_recipient
 				const noticeResult = await db.query(
 					`INSERT INTO roadmap.message_ledger
-					 (from_agent, to_agent, message_type, message_content, ack_required)
-					 VALUES ($1, $2, 'escalation_notice', $3, false)
+					 (from_agent, to_agent, message_type, message_content, correlation_id, reply_to)
+					 VALUES ($1, $2, 'notify', $3, $4, $5)
 					 RETURNING id`,
 					[
 						"system:timeout-escalator",
@@ -96,6 +96,8 @@ async function runEscalationPass(db: Pool): Promise<void> {
 							original_correlation_id: candidate.correlation_id,
 							escalation_timestamp: new Date().toISOString(),
 						}),
+						candidate.correlation_id,
+						candidate.message_id,
 					],
 				);
 
@@ -218,8 +220,8 @@ async function runReminderPass(db: Pool): Promise<void> {
 				// Insert reminder message to from_agent
 				const reminderResult = await db.query(
 					`INSERT INTO roadmap.message_ledger
-					 (from_agent, to_agent, message_type, message_content)
-					 VALUES ('system:timeout-reminder', $1, 'reminder', $2)
+					 (from_agent, to_agent, message_type, message_content, correlation_id, reply_to)
+					 VALUES ('system:timeout-reminder', $1, 'notify', $2, $3, $4)
 					 RETURNING id`,
 					[
 						candidate.from_agent,
@@ -231,6 +233,8 @@ async function runReminderPass(db: Pool): Promise<void> {
 							timeout_at: candidate.timeout_at,
 							reminder_timestamp: new Date().toISOString(),
 						}),
+						candidate.correlation_id,
+						candidate.message_id,
 					],
 				);
 

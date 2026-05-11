@@ -432,10 +432,17 @@ async function insertDeliveryNack(
 	failureReason: string,
 ): Promise<void> {
 	try {
+		// Fetch correlation_id from original message
+		const { rows: original } = await pool.query(
+			`SELECT correlation_id FROM roadmap.message_ledger WHERE id = $1`,
+			[messageId],
+		);
+		const correlationId = original[0]?.correlation_id;
+
 		await pool.query(
 			`INSERT INTO roadmap.message_ledger
-			  (from_agent, to_agent, message_type, message_content)
-			 VALUES ($1, $2, 'nack', $3)`,
+			  (from_agent, to_agent, message_type, message_content, correlation_id, reply_to)
+			 VALUES ($1, $2, 'nack', $3, $4, $5)`,
 			[
 				"system:cross-host-relay",
 				originalSender,
@@ -446,6 +453,8 @@ async function insertDeliveryNack(
 					details: failureReason,
 					timestamp: new Date().toISOString(),
 				}),
+				correlationId,
+				messageId,
 			],
 		);
 	} catch (err) {

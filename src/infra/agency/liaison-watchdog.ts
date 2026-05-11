@@ -90,13 +90,15 @@ async function notifyOperator(
   agency_id: string,
   request_id: bigint,
   severity: "soft" | "hard" | "runaway",
-  details: Record<string, any>
+  details: Record<string, any>,
+  correlationId?: string,
+  replyTo?: string | number
 ): Promise<void> {
   try {
     await query(
       `INSERT INTO roadmap.message_ledger
-          (from_agent, channel, message_content, message_type, metadata)
-       VALUES ($1, 'system:operator', $2, 'alert', $3)`,
+          (from_agent, channel, message_content, message_type, metadata, correlation_id, reply_to)
+       VALUES ($1, 'system:operator', $2, 'alert', $3, $4, $5)`,
       [
         agency_id,
         `Liaison escalation [${severity.toUpperCase()}]: request ${request_id} — ${details.task_id ?? "unknown task"}`,
@@ -107,6 +109,8 @@ async function notifyOperator(
           agency_id,
           ...details,
         }),
+        correlationId ?? null,
+        replyTo ?? null,
       ]
     );
   } catch {
@@ -162,7 +166,9 @@ async function hasAnyStrike(briefing_id: string): Promise<boolean> {
 async function sendRunawayWarning(
   briefing_id: string,
   agency_id: string,
-  signal: RunawaySignal
+  signal: RunawaySignal,
+  correlationId?: string,
+  replyTo?: string | number
 ): Promise<void> {
   // Try to find the agent_identity for a direct downlink message
   const identResult = await query<{ agent_identity: string }>(
@@ -176,8 +182,8 @@ async function sendRunawayWarning(
 
   await query(
     `INSERT INTO roadmap.message_ledger
-        (from_agent, to_agent, channel, message_content, message_type, metadata)
-     VALUES ('liaison', $1, $2, $3, 'notify', $4)`,
+        (from_agent, to_agent, channel, message_content, message_type, metadata, correlation_id, reply_to)
+     VALUES ('liaison', $1, $2, $3, 'notify', $4, $5, $6)`,
     [
       agentIdentity ?? null,
       agentIdentity ? null : `system:runaway:${briefing_id}`,
@@ -190,6 +196,8 @@ async function sendRunawayWarning(
         details: signal.details,
         ts: new Date().toISOString(),
       }),
+      correlationId ?? null,
+      replyTo ?? null,
     ]
   );
 }
@@ -197,13 +205,15 @@ async function sendRunawayWarning(
 async function notifyOperatorRunaway(
   agency_id: string,
   briefing_id: string,
-  signal: RunawaySignal
+  signal: RunawaySignal,
+  correlationId?: string,
+  replyTo?: string | number
 ): Promise<void> {
   try {
     await query(
       `INSERT INTO roadmap.message_ledger
-          (from_agent, channel, message_content, message_type, metadata)
-       VALUES ($1, 'system:operator', $2, 'alert', $3)`,
+          (from_agent, channel, message_content, message_type, metadata, correlation_id, reply_to)
+       VALUES ($1, 'system:operator', $2, 'alert', $3, $4, $5)`,
       [
         agency_id,
         `Runaway agent escalation [${signal.kind.toUpperCase()}]: briefing ${briefing_id} — ${signal.description}`,
@@ -215,6 +225,8 @@ async function notifyOperatorRunaway(
           details: signal.details,
           ts: new Date().toISOString(),
         }),
+        correlationId ?? null,
+        replyTo ?? null,
       ]
     );
   } catch {

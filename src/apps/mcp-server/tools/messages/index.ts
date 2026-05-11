@@ -59,6 +59,7 @@ export function registerMessageTools(server: McpServer): void {
 						enum: ["task", "notify", "ack", "error", "event", "text"],
 					},
 					proposal_id: { type: "string" },
+					correlation_id: { type: "string", description: "UUID for request/response tracking" },
 					provider_sig: { type: "string" },
 					created_at: { type: "string" },
 					provider_sig_salt: { type: "string" },
@@ -75,6 +76,7 @@ export function registerMessageTools(server: McpServer): void {
 				message_content: { type: "string" },
 				message_type: { type: "string" },
 				proposal_id: { type: "string" },
+				correlation_id: { type: "string" },
 				provider_sig: { type: "string" },
 				created_at: { type: "string" },
 				provider_sig_salt: { type: "string" },
@@ -89,6 +91,7 @@ export function registerMessageTools(server: McpServer): void {
 				message_content: string;
 				message_type?: string;
 				proposal_id?: string;
+				correlation_id?: string;
 				provider_sig?: string;
 				created_at?: string;
 				provider_sig_salt?: string;

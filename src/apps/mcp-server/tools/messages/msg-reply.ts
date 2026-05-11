@@ -53,10 +53,10 @@ export async function handleMsgReply(args: {
 		// INSERT new reply row into message_ledger with same correlation_id, from_agent=$from_agent, to_agent=original.from_agent
 		const replyResult = await query(
 			`INSERT INTO roadmap.message_ledger (
-				from_agent, to_agent, message_content, message_type, correlation_id
-			) VALUES ($1, $2, $3, $4, $5)
+				from_agent, to_agent, message_content, message_type, correlation_id, reply_to
+			) VALUES ($1, $2, $3, $4, $5, $6)
 			 RETURNING id, created_at`,
-			[args.from_agent, recipientAgent, args.content, args.message_type ?? "ack", args.correlation_id],
+			[args.from_agent, recipientAgent, args.content, args.message_type ?? "ack", args.correlation_id, original.id],
 		);
 
 		const replyId = replyResult.rows[0].id;

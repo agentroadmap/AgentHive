@@ -26,16 +26,20 @@ import type { LiaisonMessage } from "./liaison-message-types.ts";
 export async function sendDirectiveToAgent(
   agentIdentity: string,
   directive: string,
-  details?: Record<string, any>
+  details?: Record<string, any>,
+  correlationId?: string,
+  replyTo?: string | number
 ): Promise<void> {
   await query(
     `INSERT INTO roadmap.message_ledger
-        (from_agent, to_agent, message_content, message_type, metadata)
-     VALUES ('liaison', $1, $2, 'notify', $3)`,
+        (from_agent, to_agent, message_content, message_type, metadata, correlation_id, reply_to)
+     VALUES ('liaison', $1, $2, 'notify', $3, $4, $5)`,
     [
       agentIdentity,
       directive,
       JSON.stringify({ type: "directive", ...details }),
+      correlationId ?? null,
+      replyTo ?? null,
     ]
   );
 }
@@ -49,13 +53,21 @@ export async function sendDirectiveToAgent(
 export async function broadcastToHiveCentral(
   fromAgencyId: string,
   content: string,
-  metadata?: Record<string, any>
+  metadata?: Record<string, any>,
+  correlationId?: string,
+  replyTo?: string | number
 ): Promise<void> {
   await query(
     `INSERT INTO roadmap.message_ledger
-        (from_agent, channel, message_content, message_type, metadata)
-     VALUES ($1, 'system:hiveCentral', $2, 'event', $3)`,
-    [fromAgencyId, content, JSON.stringify(metadata ?? {})]
+        (from_agent, channel, message_content, message_type, metadata, correlation_id, reply_to)
+     VALUES ($1, 'system:hiveCentral', $2, 'event', $3, $4, $5)`,
+    [
+      fromAgencyId,
+      content,
+      JSON.stringify(metadata ?? {}),
+      correlationId ?? null,
+      replyTo ?? null,
+    ]
   );
 }
 
@@ -68,17 +80,21 @@ export async function broadcastToHiveCentral(
 export async function propagateHeartbeat(
   agencyId: string,
   status: string,
-  dispatchable: boolean
+  dispatchable: boolean,
+  correlationId?: string,
+  replyTo?: string | number
 ): Promise<void> {
   try {
     await query(
       `INSERT INTO roadmap.message_ledger
-          (from_agent, channel, message_content, message_type, metadata)
-       VALUES ($1, $2, 'heartbeat', 'event', $3)`,
+          (from_agent, channel, message_content, message_type, metadata, correlation_id, reply_to)
+       VALUES ($1, $2, 'heartbeat', 'event', $3, $4, $5)`,
       [
         agencyId,
         `system:liaison:${agencyId}`,
         JSON.stringify({ status, dispatchable, ts: new Date().toISOString() }),
+        correlationId ?? null,
+        replyTo ?? null,
       ]
     );
   } catch {
