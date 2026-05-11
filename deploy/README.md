@@ -30,6 +30,7 @@ deploy/
 │   ├── 002-agency.sql               # LLM providers, model catalog, routing, sessions
 │   ├── 003-identity.sql             # Principals, DIDs, cryptographic keys, audit log
 │   ├── 004-governance.sql           # Policies, decision log, compliance, event stream
+│   ├── 005-observability.sql        # Observability schema: traces, spans, lifecycle events, routing
 │   └── seed/
 │       ├── hosts.sql                # Bootstrap host record (bot) + self-project (agentHive)
 │       └── agencies.sql            # Provider/model catalog + message kinds
@@ -41,6 +42,7 @@ deploy/
     ├── 004-msg.sql                  # Topics, messages, dead-letter queue
     ├── 005-spend.sql                # Budgets, spend ledger, daily cost rollup
     ├── 006-kb.sql                   # Knowledge base documents, vector embeddings, tags
+    ├── 007-observability-trigger.sql # Per-project trigger for proposal lifecycle events
     └── seed/
         ├── proposal-types.sql       # Workflow templates (feature, hotfix, …)
         └── gate-roles.sql           # Default agents, skills, message topics
@@ -143,6 +145,20 @@ Schema: `governance` — All tables are append-only (UPDATE/DELETE denied by tri
 | `governance.compliance_check` | `check_type`, `target_ref`, `outcome`, `actor_did` | outcome: pass / fail / warn / skip; 1-year retention; partitioned by `checked_at` |
 | `governance.event` | `event_type`, `actor_did`, `subject_ref`, `payload_jsonb` | Permanent retention; partitioned by `occurred_at` |
 
+### 005-observability.sql — Traces, Spans, Lifecycle Events, Routing Decisions
+
+Schema: `observability` — First-class observability substrate for debugging autonomous dispatch, span causality, and decision replay (ported from P604).
+
+| Table | Key Columns | Notes |
+| :--- | :--- | :--- |
+| `observability.trace_span` | `span_id`, `trace_id`, `parent_span_id`, `operation`, `service_did`, `started_at`, `ended_at`, `status` | Plain unpartitioned (self-FK on parent_span_id prevents range partitioning); 30-day retention via DELETE cron |
+| `observability.agent_execution_span` | `span_id` (FK), `agency_id`, `agent_id`, `proposal_id`, `route_id`, `model_name` | Agent-specific context; `model_name` denormalised; `agent_id` unindexed (no FK); 30-day retention |
+| `observability.proposal_lifecycle_event` | `event_id`, `proposal_display_id`, `from_state`, `to_state`, `from_maturity`, `to_maturity`, `triggered_by_did` | Append-only; written by per-project trigger on proposal status/maturity UPDATE; indefinite retention |
+| `observability.model_routing_outcome` | `outcome_id`, `trace_id`, `selected_route_id`, `candidate_routes`, `selection_reason` | Route selection decisions; `trace_id` not FK-constrained (external trace origin); indefinite retention |
+| `observability.decision_explainability` | `decision_id`, `trace_id`, `decision_kind`, `inputs`, `rules_evaluated`, `outcome`, `ruleset_id` | Gate advances, agent assignments, budget blocks, grant checks; indefinite retention |
+
+All 5 tables ship with 17 explicit indexes covering FK columns, trace IDs, and common query predicates. Roles: `agenthive_orchestrator` (SELECT+INSERT+UPDATE for span-close), `agenthive_observability` (SELECT-only), `agenthive_agency` (INSERT), `agenthive_admin` (DELETE for retention cron).
+
 ---
 
 ## Project-Init Layer (Per-Project Schema)
@@ -226,6 +242,8 @@ Requires the `pgvector` extension (version >= 0.5.0 for HNSW support).
 - **Key advantage:** HNSW does not require rebuild after bulk loads (unlike IVFFlat), making it ideal for continuous ingestion.
 - **Performance monitoring:** Use `SELECT * FROM pg_stat_user_indexes WHERE relname = 'kb_embedding_hnsw'` to monitor scans/seeks.
 - **Large bulk load optimization:** After ingesting large document sets, optionally run `SELECT pg_catalog.pg_stat_reset()` to reset statistics for clean performance baselines.
+
+**Vector Index Strategy:** The `kb_embedding_hnsw` index is created immediately during project-init (safe for empty tables) and builds incrementally as embeddings are added. HNSW (Hierarchical Navigable Small World) requires no rebuild after bulk loads, unlike the older IVFFlat approximation. Query performance scales logarithmically with table size and remains stable across growth. For semantic search via `ORDER BY embedding <-> query_vector LIMIT k`, the index handles similarity calculations efficiently.
 
 ---
 
