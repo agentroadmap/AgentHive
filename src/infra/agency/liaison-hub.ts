@@ -159,6 +159,17 @@ async function dispatchMessage(msg: LiaisonMessage, agencyId: string): Promise<v
       await handleOfferDispatch(agencyId, msg);
       break;
 
+    case "task_status":
+    case "task_complete":
+    case "task_error":
+      // P993: Worker reporting back to liaison — update tracker and relay to requestor
+      // These arrive via the liaison_message table from worker agents
+      if (process.env.DEBUG_LIAISON_HUB) {
+        console.log(`[LiaisonHub] ${agencyId}: worker report kind='${msg.kind}'`);
+      }
+      // No-op for now — handleWorkerReport is triggered via message_ledger listener
+      break;
+
     default:
       if (process.env.DEBUG_LIAISON_HUB) {
         console.log(`[LiaisonHub] ${agencyId}: unhandled kind='${msg.kind}' seq=${msg.sequence}`);
