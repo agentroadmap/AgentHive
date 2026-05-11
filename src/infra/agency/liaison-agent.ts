@@ -35,6 +35,7 @@ import { Client } from "pg";
 import { query, getPool } from "../postgres/pool.ts";
 import { agentNotifyChannel } from "../messaging/a2a-access-control.ts";
 import { sendMessage as sendLiaisonMessage } from "./liaison-message-service.ts";
+import { handleTypedTaskRequest, handleWorkerReport, type TaskDispatcherHelpers } from "./task-dispatcher.ts";
 import {
 	globalCliInvocationRegistry,
 	invokeCliHandler,
@@ -180,6 +181,40 @@ export async function runLiaisonAgent(
 			return;
 		}
 
+		// P993: Typed A2A task protocol router
+		if (msg.message_type === "task_request") {
+			try {
+				const helpers: TaskDispatcherHelpers = {
+					insertReply,
+					markReadAndResolveTimeout,
+					bridgeTaskToOfferDispatch,
+					monitorTaskDispatch,
+				};
+				await handleTypedTaskRequest(msg, identity, provider, helpers);
+			} catch (err) {
+				console.error(`${log} task_request handler failed:`, err);
+			}
+			return;
+		}
+		if (
+			msg.message_type === "task_status" ||
+			msg.message_type === "task_complete" ||
+			msg.message_type === "task_error"
+		) {
+			try {
+				const helpers: TaskDispatcherHelpers = {
+					insertReply,
+					markReadAndResolveTimeout,
+					bridgeTaskToOfferDispatch,
+					monitorTaskDispatch,
+				};
+				await handleWorkerReport(msg, identity, helpers);
+			} catch (err) {
+				console.error(`${log} worker report handler failed:`, err);
+			}
+			return;
+		}
+
 		if (msg.message_type === "task" && shouldBridgeTaskToOffer(msg)) {
 			try {
 				const result = await bridgeTaskToOfferDispatch({
@@ -321,7 +356,7 @@ function shouldBridgeTaskToOffer(msg: IncomingMessage): boolean {
 	].includes(marker);
 }
 
-async function bridgeTaskToOfferDispatch(args: {
+export async function bridgeTaskToOfferDispatch(args: {
 	msg: IncomingMessage;
 	identity: string;
 	provider: string;
@@ -445,7 +480,7 @@ async function bridgeTaskToOfferDispatch(args: {
 	};
 }
 
-async function monitorTaskDispatch(args: {
+export async function monitorTaskDispatch(args: {
 	identity: string;
 	requestor: string;
 	originalMessageId: number;
@@ -571,7 +606,7 @@ function sleep(ms: number): Promise<void> {
  *     require an explicit DM grant from the agency to every agent that
  *     ever messaged it. Same rationale used by handleMsgReply.
  */
-async function insertReply(args: {
+export async function insertReply(args: {
 	fromAgent: string;
 	toAgent: string;
 	content: string;
@@ -597,7 +632,7 @@ async function insertReply(args: {
 	return rows[0].id as number;
 }
 
-async function markReadAndResolveTimeout(messageId: number): Promise<void> {
+export async function markReadAndResolveTimeout(messageId: number): Promise<void> {
 	await query(
 		`UPDATE roadmap.message_ledger
 		    SET read_at = now()
