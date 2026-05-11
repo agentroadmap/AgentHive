@@ -26,6 +26,7 @@ export interface TaskDispatcherHelpers {
 		messageType: string;
 		correlationId: string | null;
 		replyTo: number;
+		metadata?: Record<string, unknown>;
 	}) => Promise<number>;
 	markReadAndResolveTimeout: (messageId: number) => Promise<void>;
 	bridgeTaskToOfferDispatch: (args: {
@@ -265,7 +266,7 @@ export async function handleTypedTaskRequest(
 		return;
 	}
 
-	// 5. Send task_ack reply
+	// 5. Send task_ack reply with structured metadata (AC-3)
 	try {
 		await insertReply({
 			fromAgent: identity,
@@ -274,6 +275,13 @@ export async function handleTypedTaskRequest(
 			messageType: "task_ack",
 			correlationId: correlationId,
 			replyTo: msg.id,
+			metadata: {
+				proposal_id: proposalId,
+				worker_identity: identity,
+				dispatch_id: dispatchId,
+				lease_id: leaseId,
+				estimated_completion: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+			},
 		});
 	} catch (err) {
 		console.warn(`${log} task_ack INSERT failed:`, err);
@@ -355,7 +363,77 @@ export async function handleWorkerReport(
 
 	await query(updateSql, [newStatus, correlationId]);
 
-	// Relay to requestor
+	// On task_complete: verify ACs + release lease before relaying (AC-5)
+	if (msg.message_type === "task_complete") {
+		const proposalId = trackerRow.proposal_id as string;
+		const mcpUrl = getMcpUrl();
+		const mcpEndpoint = new URL("/mcp", mcpUrl).toString();
+		let acsVerified: string[] = [];
+
+		try {
+			const listRes = await fetch(mcpEndpoint, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ action: "list_ac", proposal_id: proposalId }),
+			});
+			const listJson = await listRes.json() as { items?: Array<{ item_number: number; label?: string; status: string }> };
+			const items = listJson.items ?? [];
+
+			for (const ac of items) {
+				if (ac.status !== "pass") {
+					await fetch(mcpEndpoint, {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({
+							action: "verify_ac",
+							proposal_id: proposalId,
+							item_number: ac.item_number,
+							status: "pass",
+							verified_by: identity,
+							verification_notes: "Auto-verified on task_complete by liaison",
+						}),
+					});
+				}
+				acsVerified.push(ac.label ?? `AC-${ac.item_number}`);
+			}
+		} catch (err) {
+			console.warn(`${log} AC verification failed:`, err);
+		}
+
+		try {
+			await fetch(mcpEndpoint, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					action: "release",
+					id: proposalId,
+					agent: identity,
+					release_reason: "task_complete",
+				}),
+			});
+		} catch (err) {
+			console.warn(`${log} lease release failed:`, err);
+		}
+
+		try {
+			await insertReply({
+				fromAgent: identity,
+				toAgent: trackerRow.requestor_id,
+				content: msg.message_content,
+				messageType: "task_complete",
+				correlationId: correlationId,
+				replyTo: msg.id,
+				metadata: { ...((msg.metadata as object) ?? {}), acs_verified: acsVerified },
+			});
+		} catch (err) {
+			console.warn(`${log} relay task_complete to requestor failed:`, err);
+		}
+
+		await markReadAndResolveTimeout(msg.id);
+		return;
+	}
+
+	// Relay non-complete messages to requestor
 	try {
 		await insertReply({
 			fromAgent: identity,

@@ -31,6 +31,7 @@ import {
 	reconcileStaleDispatches,
 	reconcileStrandedAdvances,
 } from "./legacy-dispatch.ts";
+import { detectStuckWorkers } from "../../infra/agency/task-dispatcher.ts";
 
 /**
  * Unified Agent Orchestrator
@@ -308,6 +309,19 @@ export class Orchestrator {
 					),
 				);
 			}, RECONCILER_INTERVAL_MS),
+		);
+
+		console.log("[Orchestrator] detectStuckWorkers watchdog active (60s interval)");
+		this.pollTimers.set(
+			"stuck-worker-watchdog",
+			setInterval(() => {
+				if (this.stopping) return;
+				void this.trackInFlight(
+					detectStuckWorkers().catch((err) =>
+						console.error("[Orchestrator] stuck-worker watchdog failed:", err),
+					),
+				);
+			}, 60_000),
 		);
 
 		this.pollTimers.set(

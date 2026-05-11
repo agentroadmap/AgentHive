@@ -613,12 +613,13 @@ export async function insertReply(args: {
 	messageType: string;
 	correlationId: string | null;
 	replyTo: number;
+	metadata?: Record<string, unknown>;
 }): Promise<number> {
 	const { rows } = await query(
 		`INSERT INTO roadmap.message_ledger
 		    (from_agent, to_agent, message_type, message_content,
-		     correlation_id, reply_to)
-		 VALUES ($1, $2, $3, $4, $5, $6)
+		     correlation_id, reply_to, metadata)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
 		 RETURNING id`,
 		[
 			args.fromAgent,
@@ -627,6 +628,7 @@ export async function insertReply(args: {
 			args.content,
 			args.correlationId,
 			args.replyTo,
+			JSON.stringify(args.metadata ?? {}),
 		],
 	);
 	return rows[0].id as number;
