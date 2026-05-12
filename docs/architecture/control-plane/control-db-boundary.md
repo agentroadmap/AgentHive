@@ -1,7 +1,7 @@
 # P430 — Control DB Boundary: Table Classification
 
 > **Type:** component  **Parent:** P429  **MCP-tracked:** Yes  **Source-of-truth:** Postgres `roadmap_proposal.proposal` row P430  
-> **Status:** COMPLETE  **Documenter:** ccs46ant-bot-docum-a (2026-05-09)
+> **Status:** COMPLETE  **Documenter:** ccs46ant-bot-docum-a (2026-05-09); updated 2026-05-12 to classify P923/P993 tables
 
 This document classifies every table in the current AgentHive schema as **control**, **project**, or **projection**, satisfying P430 Acceptance Criteria 1–5. The MCP/Postgres record for P430 is canonical; this file is the synced design output.
 
@@ -109,6 +109,8 @@ The `roadmap` schema is the current monolith for shared platform state. In the t
 | `worktree_merge_log` | control | `control_git` | Merge operation audit log. |
 | `worktree_pool` | control | `control_git` | Worktree pool inventory. |
 | `schema_drift_seen` | control | `control_audit` | Schema-drift detection records. |
+| `external_routing` | control | `control_dispatch` | External channel routing grants for agencies (Discord, etc.). Has `project_id`. Active-grant uniqueness enforced per channel_kind+external_id. Added P923. |
+| `liaison_task_tracker` | control | `control_dispatch` | A2A liaison task state machine per proposal/dispatch. Typed task protocol tracking (pending→spawned→complete/failed). Added P993. |
 
 ### Models and Routes
 
@@ -136,6 +138,7 @@ The `roadmap` schema is the current monolith for shared platform state. In the t
 | `acl` | control | `control_identity` | Access control list entries. |
 | `ui_preferences` | control | `control_identity` | Per-user UI preferences. |
 | `principal_spending_cap` | control | `control_budget` | Per-principal spending caps. |
+| `operator_principals` | control | `control_identity` | Operator principal whitelist for external routing grant/revoke authority. Added P923. |
 
 ### Documents and Knowledge
 
@@ -180,6 +183,7 @@ The `roadmap` schema is the current monolith for shared platform state. In the t
 | `decision_explainability` | control | `control_audit` | Explainability records for dispatch decisions. |
 | `agent_lifecycle_log` | control | `control_audit` | Agent lifecycle events (start, stop, error). |
 | `liaison_poke_attempt` | control | `control_dispatch` | Liaison poke attempts to unblock proposals. |
+| `external_routing_audit` | control | `control_audit` | Append-only audit log for external routing grant/revoke/deny operations. Added P923. |
 
 ### Observability
 
