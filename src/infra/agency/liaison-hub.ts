@@ -159,6 +159,41 @@ async function dispatchMessage(msg: LiaisonMessage, agencyId: string): Promise<v
       await handleOfferDispatch(agencyId, msg);
       break;
 
+    case "progress_note":
+      // AC-5: Structured progress update from an in-flight agent. Orchestrator
+      // is mechanical — we record it as a hiveCentral event so monitors can
+      // observe it, but no dispatch decision is made from it.
+      broadcastToHiveCentral(agencyId, "progress_note", {
+        briefing_id: (msg.payload as any).briefing_id,
+        confidence: (msg.payload as any).confidence,
+        summary_length: String((msg.payload as any).summary ?? "").length,
+      }).catch(() => undefined);
+      break;
+
+    case "spawn_failure":
+      // AC-5: Child process failed to start. Lifecycle is already governed by
+      // fn_complete_work_offer('failed') in OfferDispatchHandler; we log it to
+      // hiveCentral so operators can observe without grepping liaison logs.
+      broadcastToHiveCentral(agencyId, "spawn_failure", {
+        dispatch_id: (msg.payload as any).dispatch_id,
+        offer_id: (msg.payload as any).offer_id,
+        role: (msg.payload as any).role,
+        error_message: (msg.payload as any).error_message,
+      }).catch(() => undefined);
+      break;
+
+    case "capacity_alert":
+      // AC-5: Back-pressure signal. No routing action here — provider_registry
+      // throttle_count and in-flight capacity in resolveAgency() are the
+      // authoritative back-pressure controls.
+      broadcastToHiveCentral(agencyId, "capacity_alert", {
+        in_flight_count: (msg.payload as any).in_flight_count,
+        max_in_flight: (msg.payload as any).max_in_flight,
+        utilization_pct: (msg.payload as any).utilization_pct,
+        severity: (msg.payload as any).severity,
+      }).catch(() => undefined);
+      break;
+
     case "task_status":
     case "task_complete":
     case "task_error":

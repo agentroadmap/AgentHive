@@ -24,6 +24,7 @@ import { query } from "../postgres/pool.ts";
 import { spawnAgent } from "../../core/orchestration/agent-spawner.ts";
 import type { SpawnResult } from "../../core/orchestration/agent-spawner.ts";
 import type { LiaisonMessage } from "./liaison-message-types.ts";
+import { sendMessage } from "./liaison-message-service.ts";
 
 export type SqlExec = (sql: string, params?: unknown[]) => Promise<unknown>;
 
@@ -231,6 +232,29 @@ async function runSpawn(args: {
 		spawnError === null && (result?.exitCode === 0 || result?.exitCode === null)
 			? "delivered"
 			: "failed";
+
+	// AC-5: emit a structured spawn_failure uplink so the orchestrator can
+	// observe the failure as an operational fact. Lifecycle is still governed
+	// mechanically by fn_complete_work_offer below; the uplink is informational.
+	if (status === "failed") {
+		sendMessage({
+			agency_id: agencyId,
+			direction: "liaison->orchestrator",
+			kind: "spawn_failure",
+			payload: {
+				dispatch_id: dispatchId,
+				offer_id: payload.offer_id,
+				role: payload.role,
+				error_message: spawnError?.message ?? `exit=${result?.exitCode ?? "n/a"}`,
+				exit_code: result?.exitCode ?? null,
+			},
+		}).catch((err) => {
+			logger.warn(
+				`[OfferDispatchHandler] ${agencyId}: spawn_failure uplink failed for offer=${payload.offer_id}:`,
+				err instanceof Error ? err.message : err,
+			);
+		});
+	}
 
 	try {
 		await exec(

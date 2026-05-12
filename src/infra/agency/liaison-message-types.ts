@@ -182,6 +182,36 @@ export const LiaisonPongPayloadSchema = z.object({
 });
 export type LiaisonPongPayload = z.infer<typeof LiaisonPongPayloadSchema>;
 
+// ─── P902 AC-5: Structured Uplink Schemas ────────────────────────────────────
+
+/**
+ * Emitted by the liaison's OfferDispatchHandler when spawnAgent() throws or
+ * returns a non-zero exit. The orchestrator observes this as an operational
+ * fact — no dispatch decision is made from it; lifecycle is governed by
+ * fn_complete_work_offer('failed').
+ */
+export const SpawnFailurePayloadSchema = z.object({
+    dispatch_id: z.number().int(),
+    offer_id: z.string(),
+    role: z.string(),
+    error_message: z.string(),
+    exit_code: z.number().int().nullable().optional(),
+});
+export type SpawnFailurePayload = z.infer<typeof SpawnFailurePayloadSchema>;
+
+/**
+ * Emitted by the liaison when in-flight capacity is approaching the agency
+ * max (≥80%) or the agency is fully saturated. Orchestrator uses this as a
+ * back-pressure signal — it does not parse it for routing decisions.
+ */
+export const CapacityAlertPayloadSchema = z.object({
+    in_flight_count: z.number().int(),
+    max_in_flight: z.number().int(),
+    utilization_pct: z.number().min(0).max(100),
+    severity: z.enum(["warning", "critical"]),
+});
+export type CapacityAlertPayload = z.infer<typeof CapacityAlertPayloadSchema>;
+
 // ─── Protocol Errors & Special Messages ──────────────────────────────────────
 
 export const ProtocolResyncPayloadSchema = z.object({
