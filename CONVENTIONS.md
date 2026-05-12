@@ -486,6 +486,23 @@ Permanent agents use provider-scoped first-name pools. First letter maps to prov
 
 Until those fixes land, the DB triggers provide a partial safety net but thread coherence is incomplete for reply chains.
 
+### 6.0f Role resolution — two-level rule (P609 × P748)
+
+Two role-resolver layers coexist by design. **Do not merge them.**
+
+| Layer | File | Key space | DB table | Cache invalidation |
+| :---- | :--- | :-------- | :------- | :----------------- |
+| **Queue-role resolver** (P748) | `src/core/orchestration/role-resolver.ts` | `(workflow_template_id, stage, maturity, project_id?)` | `roadmap.agent_role_profile` | Process-start only |
+| **Gate-role resolver** (P609) | `src/core/orchestration/gate-role-resolver.ts` | `(proposal_type, gate)` | `roadmap_proposal.gate_role` | NOTIFY `gate_role_changed` |
+
+**Queue-role resolver** is consumed by `scanQueues()` for queue-driven dispatch: "given this workflow template, stage, and maturity, which agent role handles it?"
+
+**Gate-role resolver** is consumed by gate evaluation: "given this proposal type and gate (D1–D4), which reviewer role and what persona should be used?" It stores complete agent personas (the D1–D4 behavioral checklists) that the queue-driven schema cannot express.
+
+**Why they cannot be merged:** the gate path requires `(proposal_type, gate)` tuple lookups with per-type persona overrides and a `gate_role_changed` NOTIFY subscription for live cache invalidation. The queue-driven path uses `(workflow_template_id, stage, maturity)` — a different key space with no D1–D4 gate enumeration concept.
+
+**Rule:** changes to gate reviewer personas belong in `roadmap_proposal.gate_role` (then `NOTIFY gate_role_changed`). Changes to queue dispatch roles belong in `roadmap.agent_role_profile`.
+
 ### 6.0 Database Topology (target architecture)
 
 AgentHive runs on a **two-tier Postgres topology**:

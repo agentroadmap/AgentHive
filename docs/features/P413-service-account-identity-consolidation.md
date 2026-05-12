@@ -245,7 +245,7 @@ Replace NVM path assumptions with a system-wide Node install:
 ```bash
 # Install Node system-wide (or symlink into /usr/local/bin)
 sudo ln -sf /home/gary/.nvm/versions/node/v24.14.0/bin/node /usr/local/bin/node
-sudo ln -sf /home/gary/.nvm/versions/node/v24.14.0/bin/node /usr/local/bin/node
+sudo ln -sf /home/gary/.nvm/versions/node/v24.14.0/bin/npm /usr/local/bin/npm
 # Verify
 sudo -u agenthive node --version
 ```
