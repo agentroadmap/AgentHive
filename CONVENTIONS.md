@@ -419,9 +419,24 @@ The platform runs **one** dispatch decision loop: `scanQueues()` in `scripts/orc
 
 ### 6.0c Broadcast fan-out uses per-channel NOTIFY (P907)
 
-A2A messaging remains channel-centric for broadcast delivery. Each broadcast emits a single `pg_notify(channel_name)` rather than N notifications for N subscribers. This optimizes DB write volume and leverages the existing `MessageNotificationListener`'s `wait_ms` logic. 
+A2A messaging remains **channel-centric** for broadcast delivery. Each broadcast emits one `pg_notify(channel_name)` regardless of how many agents are subscribed on that channel. Agents that `LISTEN` on the channel wake up and pull from `message_ledger`. Agents not listening fall back to polling.
 
-**Per-subscriber fan-out (mailbox pattern) was rejected** to avoid O(N) storage cost and complex cache invalidation on cluster membership changes.
+**Decision: stay with per-channel NOTIFY.** Per-subscriber fan-out (mailbox pattern) was evaluated and rejected.
+
+**Numbers** (@ 50 agents, 10 msg/sec mixed load — 80% DM / 15% team-of-10 / 5% broadcast):
+
+| Model | NOTIFYs/sec | Listener LOC | Schema additions |
+| --- | --- | --- | --- |
+| Per-channel (current) | ~14 | ~200 | none |
+| Per-subscriber (rejected) | ~204 (14.6×) | ~400 | +1 subscription table, +GC worker, +subscribe API |
+
+Both are well below Postgres NOTIFY queue capacity (~10K–50K/sec). Per-subscriber's amplification is real but solves a non-bottleneck at this scale.
+
+**Failure-mode comparison:**
+- **Per-channel** — missed LISTEN → ledger accumulates, polling fallback recovers. Detectable via stalled `read_at` progress. State is implicit in agent startup code.
+- **Per-subscriber** — stale subscription row → trigger silently skips delivery. State is split across code _and_ DB. Harder to diagnose; introduces a new GC/cleanup obligation.
+
+**Rule:** do not add a per-subscriber fan-out table or subscription registry without a new proposal and load evidence that 50× broadcast spike has actually been observed. Per-subscriber can be layered in as an optimization later; it is not the default.
 
 ### 6.0 Database Topology (target architecture)
 
