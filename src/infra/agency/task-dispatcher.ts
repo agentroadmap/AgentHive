@@ -47,7 +47,9 @@ export interface TaskDispatcherHelpers {
 }
 
 /**
- * Extract and validate proposal_id from message metadata.
+ * Extract and validate proposal_id from message metadata or the ledger column.
+ * Checks metadata.proposal_id first (A2A protocol), then falls back to the
+ * message_ledger.proposal_id bigint column (set by msg_send via MCP).
  */
 function extractProposalId(msg: IncomingMessage): string | null {
 	const metadata = msg.metadata ?? {};
@@ -56,6 +58,10 @@ function extractProposalId(msg: IncomingMessage): string | null {
 	}
 	if (typeof metadata.proposal_id === "number") {
 		return String(metadata.proposal_id);
+	}
+	// Fall back to message_ledger.proposal_id (written by msg_send MCP tool)
+	if (msg.proposal_id != null) {
+		return String(msg.proposal_id);
 	}
 	return null;
 }
