@@ -564,9 +564,11 @@ Use `database/ddl/` for schema structure:
 
 Current canonical references:
 
-- `database/ddl/roadmap-ddl-v2.sql`
-- `database/ddl/roadmap-ddl-v2-additions.sql`
-- numbered rollout files such as `002-...sql`, `003-...sql`, `012-...sql`
+- `database/ddl/roadmap-baseline-2026-04-13.sql` — full schema baseline (snapshot applied 2026-04-13)
+- `database/ddl/v4/` — ordered delta migrations applied on top of the baseline (002–056+)
+- `database/ddl/hivecentral/` — hiveCentral control-plane DDL (000–015+)
+
+> **Note:** `roadmap-ddl-v2.sql` and `roadmap-ddl-v2-additions.sql` are retired filenames. Do not reference them. See [P305 schema-drift ship report](docs/features/P305-schema-drift-ship-report.md) for the full delta log.
 
 DDL rules:
 

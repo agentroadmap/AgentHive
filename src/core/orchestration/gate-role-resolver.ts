@@ -1,7 +1,7 @@
 /**
  * P609: Per-(type × gate) gate-role resolver.
  *
- * BOUNDARY (see CONVENTIONS.md §6.0d): this file is NOT a duplicate of
+ * BOUNDARY (P909 / CONVENTIONS.md §6.0f): this file is NOT a duplicate of
  * role-resolver.ts (P748). It owns a distinct key space and semantic layer:
  *   - Key:   (proposal_type, gate) — e.g. ("feature", "D1")
  *   - Table: roadmap_proposal.gate_role
