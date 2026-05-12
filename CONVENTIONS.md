@@ -1245,3 +1245,41 @@ All PostgreSQL connection parameters **must** be read through `ConfigResolver`, 
 - `SecretKeys.PGPASSWORD` is `required: false` — pgpass/libpq are valid authentication paths
 
 This is enforced automatically — violations will fail the CI check.
+
+## §model-capability-scores — AC-10 (P1006)
+
+All entries in `roadmap_workforce.model_capability_profile` score each capability dimension on a 0–5 integer scale:
+
+| Score | Label | Meaning |
+| :---: | :--- | :--- |
+| **0** | incapable | Cannot perform the task reliably. Do not route this category here. |
+| **1** | toy | Handles trivial cases only; fails on structured/complex inputs. |
+| **2** | adequate / bounded | Functional for simple, well-scoped tasks. No complex reasoning expected. |
+| **3** | solid / structured-output | Reliable for standard work; handles structured outputs and moderate complexity. |
+| **4** | strong / general-purpose | Handles difficult tasks; strong instruction following and multi-step reasoning. |
+| **5** | best-in-class | Maximum capability in this dimension among currently active providers. |
+
+This rubric covers four scored dimensions: `reasoning_score`, `code_quality_score`, `instruction_following_score`, and (implicit) context throughput via `context_window_k`.
+
+**Rubric stability policy:** scores are only changed via a formal proposal. Ad-hoc DB edits are permitted for factual corrections (e.g. provider changes a model's context window) but require a `notes` update and `updated_at` refresh. Capability re-scoring that changes routing decisions must go through a proposal.
+
+## §task-categories — AC-16 (P1006)
+
+`roadmap.work_offer.task_category` classifies every dispatched offer into exactly one of eight categories. The resolver uses this to enforce spawn-eligibility and minimum reasoning requirements before matching agents.
+
+| Category | Spawn Required | Min Reasoning | Eligible Providers | Examples |
+| :--- | :---: | :---: | :--- | :--- |
+| `mechanical` | No | 0 | All | Linting, changelog, env audit, log tailing, boilerplate |
+| `workspace` | No | 0 | All incl. copilot/gemini | File management, branch cleanup, migration slot check |
+| `liaison` | No | 0 | All incl. copilot/gemini | Status pings, message routing, notification relay |
+| `testing` | **Yes** | 0 | anthropic, codex | Unit/integration test runs, coverage analysis |
+| `implementation` | **Yes** | 0 | anthropic, codex | Feature coding, bug fixes, migration authoring |
+| `analysis` | **Yes** | 0 | anthropic, codex | Data analysis, cost modelling, dependency mapping |
+| `architecture` | **Yes** | **5** | anthropic (opus only) | Design review, AC authorship, system decomposition |
+| `review` | **Yes** | **5** | anthropic (opus only) | Gate decisions, D1–D4 verdicts, spec coherence checks |
+
+**Spawn Required** means the provider must have `can_spawn_workers = true` in `model_capability_profile`. Copilot and Gemini are excluded for all spawn-required categories regardless of cost tier.
+
+**Min Reasoning = 5** means only models with `reasoning_score = 5` are eligible. In the current seed data this is `claude-opus-4-7` (anthropic) only.
+
+Default value for new offers: `'mechanical'` — safe for any provider.
