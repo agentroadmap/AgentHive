@@ -171,6 +171,31 @@ export async function getRolesForQueue(
 }
 
 /**
+ * AC-3: Alias for getRolesForQueue with alternate parameter naming.
+ *
+ * Resolves agent role profiles using individual parameters instead of a key object.
+ * Provides the named signature required by AC-3.
+ *
+ * @param workflowTemplateId - Workflow template ID
+ * @param stage - Current stage name
+ * @param maturity - Current maturity level
+ * @param projectId - Optional project ID for tenant-scoped overrides
+ * @param queryFn - Injectable query function; defaults to the shared pool
+ */
+export async function getRolesFor(
+	workflowTemplateId: number,
+	stage: string,
+	maturity: string,
+	projectId?: number | null,
+	queryFn: QueryFn = defaultQuery,
+): Promise<RoleProfile[]> {
+	return getRolesForQueue(
+		{ workflowTemplateId, stage, maturity, projectId },
+		queryFn,
+	);
+}
+
+/**
  * Shadow-mode divergence check.
  *
  * Compares a caller's legacy role list against the DB-resolved profiles and

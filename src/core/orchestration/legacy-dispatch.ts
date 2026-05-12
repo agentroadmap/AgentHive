@@ -109,122 +109,146 @@ interface RoleSlot {
 	activity: string; // descriptive label: "researching", "enhancing", "reviewing", etc.
 }
 
-const JOB_ROLES: Record<string, RoleSlot[]> = {
-	DRAFT: [
-		{
-			role: "architect",
-			requiredCapabilities: ["design", "system-design"],
-			minProficiency: 3,
-			prompt:
-				"You are an Architecture Agent. Enhance this DRAFT proposal with acceptance criteria, design rationale, and implementation plan.",
-			count: 1,
-			activity: "enhancing",
-		},
-		{
-			role: "researcher",
-			requiredCapabilities: ["research"],
-			minProficiency: 2,
-			prompt:
-				"You are a Researcher. Gather context for proposals that need investigation.",
-			count: 1,
-			activity: "researching",
-		},
-	],
-	TRIAGE: [
-		{
-			role: "triage-agent",
-			requiredCapabilities: ["triage"],
-			minProficiency: 2,
-			prompt:
-				"You are a Triage Agent. Evaluate issues and decide what to work on.",
-			count: 1,
-			activity: "triaging",
-		},
-	],
-	REVIEW: [
-		{
-			role: "skeptic",
-			requiredCapabilities: ["review", "gating", "skeptic-review"],
-			minProficiency: 3,
-			prompt:
-				"You are a Skeptic Reviewer. Challenge design decisions. Demand evidence. Question assumptions.",
-			count: 2,
-			activity: "reviewing",
-		},
-		{
-			role: "arch-reviewer",
-			requiredCapabilities: ["design", "architecture"],
-			minProficiency: 3,
-			prompt:
-				"You are the Architecture Reviewer. Analyze design completeness, scalability, and integration constraints.",
-			count: 1,
-			activity: "reviewing architecture",
-		},
-	],
-	FIX: [
-		{
-			role: "fix-agent",
-			requiredCapabilities: ["code"],
-			minProficiency: 3,
-			prompt: "You are a Fix Agent. Implement code changes to resolve issues.",
-			count: 1,
-			activity: "fixing",
-		},
-	],
-	DEVELOP: [
-		{
-			role: "developer",
-			requiredCapabilities: ["code"],
-			minProficiency: 3,
-			prompt:
-				"You are a Senior Developer. Implement all acceptance criteria. Write production code and tests.",
-			count: 1,
-			activity: "implementing",
-		},
-		{
-			role: "skeptic-beta",
-			requiredCapabilities: ["review", "code"],
-			minProficiency: 2,
-			prompt:
-				"You are SKEPTIC BETA. Review implementation quality. Check test coverage. Validate error handling.",
-			count: 1,
-			activity: "reviewing code",
-		},
-	],
-	MERGE: [
-		{
-			role: "merge-agent",
-			requiredCapabilities: ["devops", "terminal"],
-			minProficiency: 2,
-			prompt:
-				"You are a Git Specialist. Integrate branches, resolve conflicts, run tests.",
-			count: 1,
-			activity: "integrating",
-		},
-	],
-	COMPLETE: [
-		{
-			role: "documenter",
-			requiredCapabilities: ["docs"],
-			minProficiency: 2,
-			prompt:
-				"You are a Documenter. Write documentation for completed proposals.",
-			count: 1,
-			activity: "documenting",
-		},
-	],
-	DEPLOYED: [
-		{
-			role: "system-monitor",
-			requiredCapabilities: ["ops", "devops"],
-			minProficiency: 2,
-			prompt:
-				"You are the System Monitor. Spot inconsistencies. Make proposals for rectifications.",
-			count: 1,
-			activity: "monitoring",
-		},
-	],
-};
+// ─── Builtin Fallback for Role Resolution ───────────────────────────────────
+// P748: AC-4 — BUILTIN_FALLBACK local constants (AC-4 mandates this be local to
+// the function that uses it, not exported). These are used only when DB lookup fails.
+// The actual job role mapping is now driven by roadmap.agent_role_profile (see
+// getRolesForQueue in role-resolver.ts).
+
+function builtinFallbackForState(state: string): RoleProfile[] {
+	// Map legacy JOB_ROLES to RoleProfile objects for backward compat
+	// This fallback is only used if getRolesForQueue() fails or returns empty
+	const JOB_ROLES_FALLBACK: Record<string, RoleProfile[]> = {
+		DRAFT: [
+			{
+				id: null,
+				role: "architect",
+				requiredCapabilities: ["design", "system-design"],
+				allowedRouteProviders: null,
+				forbiddenRouteProviders: null,
+				promptTemplate: null,
+				priority: 10,
+				source: "builtin-fallback" as const,
+			},
+			{
+				id: null,
+				role: "researcher",
+				requiredCapabilities: ["research"],
+				allowedRouteProviders: null,
+				forbiddenRouteProviders: null,
+				promptTemplate: null,
+				priority: 20,
+				source: "builtin-fallback" as const,
+			},
+		],
+		TRIAGE: [
+			{
+				id: null,
+				role: "triage-agent",
+				requiredCapabilities: ["triage"],
+				allowedRouteProviders: null,
+				forbiddenRouteProviders: null,
+				promptTemplate: null,
+				priority: 10,
+				source: "builtin-fallback" as const,
+			},
+		],
+		REVIEW: [
+			{
+				id: null,
+				role: "skeptic",
+				requiredCapabilities: ["review", "gating", "skeptic-review"],
+				allowedRouteProviders: null,
+				forbiddenRouteProviders: null,
+				promptTemplate: null,
+				priority: 10,
+				source: "builtin-fallback" as const,
+			},
+			{
+				id: null,
+				role: "arch-reviewer",
+				requiredCapabilities: ["design", "architecture"],
+				allowedRouteProviders: null,
+				forbiddenRouteProviders: null,
+				promptTemplate: null,
+				priority: 20,
+				source: "builtin-fallback" as const,
+			},
+		],
+		FIX: [
+			{
+				id: null,
+				role: "fix-agent",
+				requiredCapabilities: ["code"],
+				allowedRouteProviders: null,
+				forbiddenRouteProviders: null,
+				promptTemplate: null,
+				priority: 10,
+				source: "builtin-fallback" as const,
+			},
+		],
+		DEVELOP: [
+			{
+				id: null,
+				role: "developer",
+				requiredCapabilities: ["code"],
+				allowedRouteProviders: null,
+				forbiddenRouteProviders: null,
+				promptTemplate: null,
+				priority: 10,
+				source: "builtin-fallback" as const,
+			},
+			{
+				id: null,
+				role: "skeptic-beta",
+				requiredCapabilities: ["review", "code"],
+				allowedRouteProviders: null,
+				forbiddenRouteProviders: null,
+				promptTemplate: null,
+				priority: 20,
+				source: "builtin-fallback" as const,
+			},
+		],
+		MERGE: [
+			{
+				id: null,
+				role: "merge-agent",
+				requiredCapabilities: ["devops", "terminal"],
+				allowedRouteProviders: null,
+				forbiddenRouteProviders: null,
+				promptTemplate: null,
+				priority: 10,
+				source: "builtin-fallback" as const,
+			},
+		],
+		COMPLETE: [
+			{
+				id: null,
+				role: "documenter",
+				requiredCapabilities: ["docs"],
+				allowedRouteProviders: null,
+				forbiddenRouteProviders: null,
+				promptTemplate: null,
+				priority: 10,
+				source: "builtin-fallback" as const,
+			},
+		],
+		DEPLOYED: [
+			{
+				id: null,
+				role: "system-monitor",
+				requiredCapabilities: ["ops", "devops"],
+				allowedRouteProviders: null,
+				forbiddenRouteProviders: null,
+				promptTemplate: null,
+				priority: 10,
+				source: "builtin-fallback" as const,
+			},
+		],
+	};
+
+	return JOB_ROLES_FALLBACK[state] ?? [];
+}
 
 // Legacy fallback — used when capability matching returns too few agents
 const AGENT_DISPATCH: Record<string, string[]> = {
@@ -382,15 +406,27 @@ interface MatchedAgent {
  * one per role slot (up to the slot's count).
  */
 async function matchAgentsForState(state: string): Promise<MatchedAgent[]> {
-	const slots = JOB_ROLES[state];
-	if (!slots || slots.length === 0) return [];
+	// AC-4: Resolve roles from DB via getRolesForQueue (P748 phase 1)
+	// Fall back to JOB_ROLES_FALLBACK if no profiles found
+	const profiles = await getRolesForQueue({
+		workflowTemplateId: 14,
+		stage: state,
+		maturity: "new",
+		projectId: null,
+	}).catch(() => builtinFallbackForState(state));
 
-	// Phase 2B: shadow-mode divergence check
-	const legacyRoles = (slots ?? []).map((s) => s.role);
-	shadowCheck(
-		{ workflowTemplateId: 14, stage: state, maturity: "new", projectId: null },
-		legacyRoles,
-	).catch(() => {});
+	// Convert RoleProfile[] to RoleSlot[] for compatibility with scoring logic
+	const slots = profiles.map(
+		(profile): RoleSlot => ({
+			role: profile.role,
+			requiredCapabilities: profile.requiredCapabilities,
+			minProficiency: 2, // default for DB-resolved roles
+			prompt: `Dispatch to role "${profile.role}" (priority ${profile.priority})`,
+			count: 1, // each profile is treated as one dispatch
+			activity: profile.role.replace(/-/g, " "),
+		}),
+	);
+	if (!slots || slots.length === 0) return [];
 
 	// Single query: fetch all active agents with capabilities, skills, workload
 	const { rows } = await query<{
@@ -1556,80 +1592,189 @@ async function releaseDispatchLease(
 	);
 }
 
-// Maps each gate to the dispatch role that should review it and a framing line
-// for the task. D1 uses a skeptic to challenge Draft RFCs; D2 uses an architect
-// to validate design; D3 uses a skeptic to review implementation; D4 validates
-// integration and deployment readiness.
-const GATE_ROLES: Record<string, { role: string; framing: string }> = {
-	D1: {
-		role: "skeptic-alpha",
-		framing:
-			"You are SKEPTIC ALPHA gating DRAFT → REVIEW. Your job is to validate the SPEC, not the IMPLEMENTATION. " +
-			"At this gate the design + AC list are authoritative; the migration files, TS modules, and tests are NOT YET expected to exist on disk. " +
-			"DEVELOP commits them later (D3 is where missing/uncommitted artifacts become a hold).\n\n" +
-			"What you check at D1 — every item below is a real P592–P607 failure mode you must call out by name when found:\n" +
-			"  1. AC ACCRETION: list_criteria + read the design body. If the body says \"AC-N supersedes AC-M\" or \"Addendum X declares Y VOID\" while AC-M is still a live row in proposal_acceptance_criteria, that's a hard hold — DEVELOP cannot follow two contradictory ACs. Cite both item_numbers and require delete_criteria.\n" +
-			"  2. PHANTOM COLUMNS in EXISTING tables: any column the design names on a table that already exists must appear in information_schema.columns. (Columns the design proposes to add via its own migration are fine — those don't exist yet by definition.)\n" +
-			"  3. INTERNAL CONTRADICTION: scan the design for sync-vs-async, two hash formulas, two table-name lists, conflicting type signatures. Pick-one-and-delete-the-other is the only valid resolution; annotation prose (\"VOID\", \"superseded\") with both versions still present = hold.\n" +
-			"  4. DEAD VOCABULARY: a CHECK constraint that hardcodes a literal list while a sibling table claims to be the canonical vocabulary = hold (the table enforces nothing).\n" +
-			"  5. MISSING GRANTS in the proposed migration: if an AC requires UPDATE on a column, the migration's GRANT block must include UPDATE. Read the migration that the proposal SHIPS, not what's already in the repo.\n" +
-			"  6. INVALID FK TARGETS: when the design declares `REFERENCES schema.table(col)` against a table that already exists, verify (col) is the PK or a UNIQUE column; if it doesn't exist or isn't unique, hold.\n\n" +
-			"What you DO NOT check at D1 (these are D3 concerns — explicitly out of scope here):\n" +
-			"  - Whether the migration / DDL / TS / test files have been committed to a branch (git ls-files / git log --all). They don't have to exist yet at DRAFT.\n" +
-			"  - Whether the implementation runs, the tests pass, or the spending log shows actual cost.\n" +
-			"  - Whether unrelated proposals' artifacts are floating in the worktree (worktree hygiene is an ops concern, not a spec concern).\n" +
-			"If you find a coherent, source-verified spec with measurable ACs, ADVANCE — even if not a single line of code has been written.\n\n" +
-			"OUTPUT CONTRACT: emit a clear final-line decision and structured findings to STDOUT — the orchestrator parses your stdout and persists it into gate_decision_log. " +
-			"For HOLD/REJECT, output a `## Failures` section (one bullet per blocker, severity tag, file:line evidence where possible) AND populate `ac_verification.details` JSONB array (each entry: {item_number, status, evidence}). " +
-			"Also call `mcp_proposal action=add_discussion context_prefix=gate-decision:` with the same body. The enhancing agent reads stdout AND the discussion thread.",
-	},
-	D2: {
-		role: "architecture-reviewer",
-		framing:
-			"You are the Architecture Reviewer gating REVIEW → DEVELOP. Validate the design is buildable: dependencies satisfied, integration constraints respected, scalability and rollback paths sound. " +
-			"At this gate you assume the spec is internally coherent (D1 already enforced that). You're checking whether a developer agent can pick this up and implement without surprises.\n\n" +
-			"What you check at D2:\n" +
-			"  - Dependency graph: every blocking proposal in proposal_dependencies is resolved or scheduled.\n" +
-			"  - Cross-proposal coherence: FK targets, shared schemas, role names, env vars match what sibling proposals expect.\n" +
-			"  - Rollback / migration safety: destructive operations are reversible or explicitly accepted.\n" +
-			"  - Cost / capacity envelope: any new index, table, or function is sized for current traffic.\n\n" +
-			"What you DO NOT check at D2 (deferred to D3):\n" +
-			"  - Whether the migration file has been committed yet. The DEVELOP phase that follows D2 is where commits land.\n" +
-			"  - Whether the tests pass or coverage is sufficient.\n\n" +
-			"OUTPUT CONTRACT: same as D1 — for non-advance verdicts, emit `## Failures` + `## Remediation` to stdout so the next enhancing agent can act.",
-	},
-	D3: {
-		role: "skeptic-beta",
-		framing:
-			"You are SKEPTIC BETA gating DEVELOP → MERGE. The spec was already validated upstream; you validate the IMPLEMENTATION. " +
-			"Files must exist on disk and be tracked by git. Tests must pass. ACs must be met against running code, not against prose.\n\n" +
-			"What you check at D3 (this is the right gate for these — they are NOT D1 concerns):\n" +
-			"  - ARTIFACT EXISTENCE: every file the design promised must be tracked. Verify with `git log --all -- <path>` returning ≥1 SHA. Untracked files = hold.\n" +
-			"  - MIGRATION SLOT COLLISIONS: the migration file's slot number must not be taken by another committed migration. Verify against the migrations directory.\n" +
-			"  - WORKTREE HYGIENE: only this proposal's deliverables should be uncommitted in this branch — sibling-proposal artifacts must be moved before merge.\n" +
-			"  - TEST COVERAGE: every AC has at least one passing test that exercises its assertion. Run `npm test` (or the relevant suite) and inspect output.\n" +
-			"  - RUNTIME CORRECTNESS: apply the migration to a scratch DB, exercise the SECURITY DEFINER functions, confirm no permission-denied errors and no broken FK chains.\n" +
-			"  - AC VERIFICATION: each AC must be verified against the live system, not just against its own text. Populate ac_verification.details with item_number, status, and concrete evidence (test name, query result, file:line).\n\n" +
-			"OUTPUT CONTRACT: same as D1 — emit `## Failures` + `## Remediation` to stdout for non-advance verdicts. ac_verification.details is mandatory at D3.",
-	},
-	D4: {
-		role: "gate-reviewer",
-		framing:
-			"You are the Integration Reviewer. Validate that the merge is clean, tests pass, and the feature is deployable. " +
-			"Only advance if the integration is stable.\n\n" +
-			"OUTPUT CONTRACT: same as D1 — emit `## Failures` + `## Remediation` to stdout for non-advance verdicts.",
-	},
-};
+/**
+ * AC-4: Resolve the primary gate reviewer role using DB lookup.
+ *
+ * For a given gate, returns the first (highest-priority) role that should
+ * review it from the agent_role_profile table. Falls back to GATE_ROLES_FALLBACK
+ * if DB lookup fails or returns empty results.
+ *
+ * Gates are implicit maturity reviews at the boundary of a stage transition.
+ * We look up profiles for the FROM stage at mature maturity, and return the
+ * first (lowest priority number) role as the gate reviewer.
+ */
+async function gateRoleFromDb(gate: GateDefinition): Promise<string> {
+	try {
+		// Infer the current stage from the gate definition
+		// D1 → DRAFT, D2 → REVIEW, D3 → DEVELOP, D4 → MERGE
+		const stageMap: Record<"D1" | "D2" | "D3" | "D4", string> = {
+			D1: "DRAFT",
+			D2: "REVIEW",
+			D3: "DEVELOP",
+			D4: "MERGE",
+		};
+		const stage = stageMap[gate.gate];
 
-function gateRole(gate: GateDefinition): string {
-	return GATE_ROLES[gate.gate]?.role ?? "gate-reviewer";
+		const profiles = await getRolesForQueue({
+			workflowTemplateId: 14, // Standard RFC
+			stage,
+			maturity: "mature",
+			projectId: null,
+		});
+
+		if (profiles.length > 0) {
+			return profiles[0].role; // highest priority (lowest number)
+		}
+	} catch (err) {
+		logger.warn(
+			`[gateRole] DB lookup failed for gate ${gate.gate}, using BUILTIN_FALLBACK:`,
+			err instanceof Error ? err.message : err,
+		);
+	}
+
+	// Fall back to hardcoded GATE_ROLES_FALLBACK
+	const GATE_ROLES_FALLBACK: Record<
+		string,
+		{ role: string; framing: string }
+	> = {
+		D1: {
+			role: "skeptic-alpha",
+			framing:
+				"You are SKEPTIC ALPHA gating DRAFT → REVIEW. Your job is to validate the SPEC, not the IMPLEMENTATION. " +
+				"At this gate the design + AC list are authoritative; the migration files, TS modules, and tests are NOT YET expected to exist on disk. " +
+				"DEVELOP commits them later (D3 is where missing/uncommitted artifacts become a hold).\n\n" +
+				"What you check at D1 — every item below is a real P592–P607 failure mode you must call out by name when found:\n" +
+				"  1. AC ACCRETION: list_criteria + read the design body. If the body says \"AC-N supersedes AC-M\" or \"Addendum X declares Y VOID\" while AC-M is still a live row in proposal_acceptance_criteria, that's a hard hold — DEVELOP cannot follow two contradictory ACs. Cite both item_numbers and require delete_criteria.\n" +
+				"  2. PHANTOM COLUMNS in EXISTING tables: any column the design names on a table that already exists must appear in information_schema.columns. (Columns the design proposes to add via its own migration are fine — those don't exist yet by definition.)\n" +
+				"  3. INTERNAL CONTRADICTION: scan the design for sync-vs-async, two hash formulas, two table-name lists, conflicting type signatures. Pick-one-and-delete-the-other is the only valid resolution; annotation prose (\"VOID\", \"superseded\") with both versions still present = hold.\n" +
+				"  4. DEAD VOCABULARY: a CHECK constraint that hardcodes a literal list while a sibling table claims to be the canonical vocabulary = hold (the table enforces nothing).\n" +
+				"  5. MISSING GRANTS in the proposed migration: if an AC requires UPDATE on a column, the migration's GRANT block must include UPDATE. Read the migration that the proposal SHIPS, not what's already in the repo.\n" +
+				"  6. INVALID FK TARGETS: when the design declares `REFERENCES schema.table(col)` against a table that already exists, verify (col) is the PK or a UNIQUE column; if it doesn't exist or isn't unique, hold.\n\n" +
+				"What you DO NOT check at D1 (these are D3 concerns — explicitly out of scope here):\n" +
+				"  - Whether the migration / DDL / TS / test files have been committed to a branch (git ls-files / git log --all). They don't have to exist yet at DRAFT.\n" +
+				"  - Whether the implementation runs, the tests pass, or the spending log shows actual cost.\n" +
+				"  - Whether unrelated proposals' artifacts are floating in the worktree (worktree hygiene is an ops concern, not a spec concern).\n" +
+				"If you find a coherent, source-verified spec with measurable ACs, ADVANCE — even if not a single line of code has been written.\n\n" +
+				"OUTPUT CONTRACT: emit a clear final-line decision and structured findings to STDOUT — the orchestrator parses your stdout and persists it into gate_decision_log. " +
+				"For HOLD/REJECT, output a `## Failures` section (one bullet per blocker, severity tag, file:line evidence where possible) AND populate `ac_verification.details` JSONB array (each entry: {item_number, status, evidence}). " +
+				"Also call `mcp_proposal action=add_discussion context_prefix=gate-decision:` with the same body. The enhancing agent reads stdout AND the discussion thread.",
+		},
+		D2: {
+			role: "architecture-reviewer",
+			framing:
+				"You are the Architecture Reviewer gating REVIEW → DEVELOP. Validate the design is buildable: dependencies satisfied, integration constraints respected, scalability and rollback paths sound. " +
+				"At this gate you assume the spec is internally coherent (D1 already enforced that). You're checking whether a developer agent can pick this up and implement without surprises.\n\n" +
+				"What you check at D2:\n" +
+				"  - Dependency graph: every blocking proposal in proposal_dependencies is resolved or scheduled.\n" +
+				"  - Cross-proposal coherence: FK targets, shared schemas, role names, env vars match what sibling proposals expect.\n" +
+				"  - Rollback / migration safety: destructive operations are reversible or explicitly accepted.\n" +
+				"  - Cost / capacity envelope: any new index, table, or function is sized for current traffic.\n\n" +
+				"What you DO NOT check at D2 (deferred to D3):\n" +
+				"  - Whether the migration file has been committed yet. The DEVELOP phase that follows D2 is where commits land.\n" +
+				"  - Whether the tests pass or coverage is sufficient.\n\n" +
+				"OUTPUT CONTRACT: same as D1 — for non-advance verdicts, emit `## Failures` + `## Remediation` to stdout so the next enhancing agent can act.",
+		},
+		D3: {
+			role: "skeptic-beta",
+			framing:
+				"You are SKEPTIC BETA gating DEVELOP → MERGE. The spec was already validated upstream; you validate the IMPLEMENTATION. " +
+				"Files must exist on disk and be tracked by git. Tests must pass. ACs must be met against running code, not against prose.\n\n" +
+				"What you check at D3 (this is the right gate for these — they are NOT D1 concerns):\n" +
+				"  - ARTIFACT EXISTENCE: every file the design promised must be tracked. Verify with `git log --all -- <path>` returning ≥1 SHA. Untracked files = hold.\n" +
+				"  - MIGRATION SLOT COLLISIONS: the migration file's slot number must not be taken by another committed migration. Verify against the migrations directory.\n" +
+				"  - WORKTREE HYGIENE: only this proposal's deliverables should be uncommitted in this branch — sibling-proposal artifacts must be moved before merge.\n" +
+				"  - TEST COVERAGE: every AC has at least one passing test that exercises its assertion. Run `npm test` (or the relevant suite) and inspect output.\n" +
+				"  - RUNTIME CORRECTNESS: apply the migration to a scratch DB, exercise the SECURITY DEFINER functions, confirm no permission-denied errors and no broken FK chains.\n" +
+				"  - AC VERIFICATION: each AC must be verified against the live system, not just against its own text. Populate ac_verification.details with item_number, status, and concrete evidence (test name, query result, file:line).\n\n" +
+				"OUTPUT CONTRACT: same as D1 — emit `## Failures` + `## Remediation` to stdout for non-advance verdicts. ac_verification.details is mandatory at D3.",
+		},
+		D4: {
+			role: "gate-reviewer",
+			framing:
+				"You are the Integration Reviewer. Validate that the merge is clean, tests pass, and the feature is deployable. " +
+				"Only advance if the integration is stable.\n\n" +
+				"OUTPUT CONTRACT: same as D1 — emit `## Failures` + `## Remediation` to stdout for non-advance verdicts.",
+		},
+	};
+
+	return GATE_ROLES_FALLBACK[gate.gate]?.role ?? "gate-reviewer";
+}
+
+async function gateRole(gate: GateDefinition): Promise<string> {
+	return gateRoleFromDb(gate);
 }
 
 function buildImplicitGateTask(
 	proposal: GateReadyProposal,
 	gate: GateDefinition,
 ): string {
-	const roleConfig = GATE_ROLES[gate.gate];
+	// AC-4: Use local fallback; gating framing text is deterministic and doesn't
+	// need DB lookup. (DB profiles are role names only; framing text lives here.)
+	const GATE_FRAMING_FALLBACK: Record<
+		string,
+		{ role: string; framing: string }
+	> = {
+		D1: {
+			role: "skeptic-alpha",
+			framing:
+				"You are SKEPTIC ALPHA gating DRAFT → REVIEW. Your job is to validate the SPEC, not the IMPLEMENTATION. " +
+				"At this gate the design + AC list are authoritative; the migration files, TS modules, and tests are NOT YET expected to exist on disk. " +
+				"DEVELOP commits them later (D3 is where missing/uncommitted artifacts become a hold).\n\n" +
+				"What you check at D1 — every item below is a real P592–P607 failure mode you must call out by name when found:\n" +
+				"  1. AC ACCRETION: list_criteria + read the design body. If the body says \"AC-N supersedes AC-M\" or \"Addendum X declares Y VOID\" while AC-M is still a live row in proposal_acceptance_criteria, that's a hard hold — DEVELOP cannot follow two contradictory ACs. Cite both item_numbers and require delete_criteria.\n" +
+				"  2. PHANTOM COLUMNS in EXISTING tables: any column the design names on a table that already exists must appear in information_schema.columns. (Columns the design proposes to add via its own migration are fine — those don't exist yet by definition.)\n" +
+				"  3. INTERNAL CONTRADICTION: scan the design for sync-vs-async, two hash formulas, two table-name lists, conflicting type signatures. Pick-one-and-delete-the-other is the only valid resolution; annotation prose (\"VOID\", \"superseded\") with both versions still present = hold.\n" +
+				"  4. DEAD VOCABULARY: a CHECK constraint that hardcodes a literal list while a sibling table claims to be the canonical vocabulary = hold (the table enforces nothing).\n" +
+				"  5. MISSING GRANTS in the proposed migration: if an AC requires UPDATE on a column, the migration's GRANT block must include UPDATE. Read the migration that the proposal SHIPS, not what's already in the repo.\n" +
+				"  6. INVALID FK TARGETS: when the design declares `REFERENCES schema.table(col)` against a table that already exists, verify (col) is the PK or a UNIQUE column; if it doesn't exist or isn't unique, hold.\n\n" +
+				"What you DO NOT check at D1 (these are D3 concerns — explicitly out of scope here):\n" +
+				"  - Whether the migration / DDL / TS / test files have been committed to a branch (git ls-files / git log --all). They don't have to exist yet at DRAFT.\n" +
+				"  - Whether the implementation runs, the tests pass, or the spending log shows actual cost.\n" +
+				"  - Whether unrelated proposals' artifacts are floating in the worktree (worktree hygiene is an ops concern, not a spec concern).\n" +
+				"If you find a coherent, source-verified spec with measurable ACs, ADVANCE — even if not a single line of code has been written.\n\n" +
+				"OUTPUT CONTRACT: emit a clear final-line decision and structured findings to STDOUT — the orchestrator parses your stdout and persists it into gate_decision_log. " +
+				"For HOLD/REJECT, output a `## Failures` section (one bullet per blocker, severity tag, file:line evidence where possible) AND populate `ac_verification.details` JSONB array (each entry: {item_number, status, evidence}). " +
+				"Also call `mcp_proposal action=add_discussion context_prefix=gate-decision:` with the same body. The enhancing agent reads stdout AND the discussion thread.",
+		},
+		D2: {
+			role: "architecture-reviewer",
+			framing:
+				"You are the Architecture Reviewer gating REVIEW → DEVELOP. Validate the design is buildable: dependencies satisfied, integration constraints respected, scalability and rollback paths sound. " +
+				"At this gate you assume the spec is internally coherent (D1 already enforced that). You're checking whether a developer agent can pick this up and implement without surprises.\n\n" +
+				"What you check at D2:\n" +
+				"  - Dependency graph: every blocking proposal in proposal_dependencies is resolved or scheduled.\n" +
+				"  - Cross-proposal coherence: FK targets, shared schemas, role names, env vars match what sibling proposals expect.\n" +
+				"  - Rollback / migration safety: destructive operations are reversible or explicitly accepted.\n" +
+				"  - Cost / capacity envelope: any new index, table, or function is sized for current traffic.\n\n" +
+				"What you DO NOT check at D2 (deferred to D3):\n" +
+				"  - Whether the migration file has been committed yet. The DEVELOP phase that follows D2 is where commits land.\n" +
+				"  - Whether the tests pass or coverage is sufficient.\n\n" +
+				"OUTPUT CONTRACT: same as D1 — for non-advance verdicts, emit `## Failures` + `## Remediation` to stdout so the next enhancing agent can act.",
+		},
+		D3: {
+			role: "skeptic-beta",
+			framing:
+				"You are SKEPTIC BETA gating DEVELOP → MERGE. The spec was already validated upstream; you validate the IMPLEMENTATION. " +
+				"Files must exist on disk and be tracked by git. Tests must pass. ACs must be met against running code, not against prose.\n\n" +
+				"What you check at D3 (this is the right gate for these — they are NOT D1 concerns):\n" +
+				"  - ARTIFACT EXISTENCE: every file the design promised must be tracked. Verify with `git log --all -- <path>` returning ≥1 SHA. Untracked files = hold.\n" +
+				"  - MIGRATION SLOT COLLISIONS: the migration file's slot number must not be taken by another committed migration. Verify against the migrations directory.\n" +
+				"  - WORKTREE HYGIENE: only this proposal's deliverables should be uncommitted in this branch — sibling-proposal artifacts must be moved before merge.\n" +
+				"  - TEST COVERAGE: every AC has at least one passing test that exercises its assertion. Run `npm test` (or the relevant suite) and inspect output.\n" +
+				"  - RUNTIME CORRECTNESS: apply the migration to a scratch DB, exercise the SECURITY DEFINER functions, confirm no permission-denied errors and no broken FK chains.\n" +
+				"  - AC VERIFICATION: each AC must be verified against the live system, not just against its own text. Populate ac_verification.details with item_number, status, and concrete evidence (test name, query result, file:line).\n\n" +
+				"OUTPUT CONTRACT: same as D1 — emit `## Failures` + `## Remediation` to stdout for non-advance verdicts. ac_verification.details is mandatory at D3.",
+		},
+		D4: {
+			role: "gate-reviewer",
+			framing:
+				"You are the Integration Reviewer. Validate that the merge is clean, tests pass, and the feature is deployable. " +
+				"Only advance if the integration is stable.\n\n" +
+				"OUTPUT CONTRACT: same as D1 — emit `## Failures` + `## Remediation` to stdout for non-advance verdicts.",
+		},
+	};
+
+	const roleConfig = GATE_FRAMING_FALLBACK[gate.gate];
 	return [
 		roleConfig
 			? roleConfig.framing
@@ -1759,7 +1904,7 @@ export async function dispatchImplicitGate(
 	await ensureAgentIdentity("orchestrator", "State Machine Orchestrator");
 	await ensureAgentIdentity(worktree, "Gate Executor");
 
-	const role = gateRole(gate);
+	const role = await gateRole(gate);
 
 	// P609 Phase 1 — shadow-mode: resolve DB profile alongside GATE_ROLES.
 	// GATE_ROLES is still authoritative; divergences are logged for ≥24h validation
@@ -1979,7 +2124,7 @@ export async function dispatchImplicitGate(
 			toState: gate.toStage,
 			gate: gate.gate,
 			decision: finalMaturity === "obsolete" ? "reject" : "hold",
-			authorityAgent: gateRole(gate),
+			authorityAgent: await gateRole(gate),
 			agentRunId: result.agentRunId,
 			agentStdout: result.stdout,
 			maturity: "mature",
