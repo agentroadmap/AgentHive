@@ -192,7 +192,7 @@ Backed by `hiveCentral` control tables. Resolved via `key.dbTable` + `key.dbColu
 
 ### FlagKeys
 
-Live-reloadable via `pg_notify feature_flag_changed`. Backed by `core.runtime_flag` or `roadmap.feature_flag`.
+Live-reloadable via `pg_notify runtime_config_changed`. Backed by `core.runtime_flag`.
 
 | Key | Description |
 | :--- | :--- |
@@ -274,6 +274,17 @@ The **path** (a `structural` key) lives in config; the **secret value** never do
 **Convention (enforced in CONVENTIONS.md §19):**  
 Agents must never generate `psql` commands with `-W password` or connection strings containing
 credentials. CI enforces this via grep scan.
+
+---
+
+## pg_notify Channels
+
+| Channel | Source | Consumer |
+| :--- | :--- | :--- |
+| `runtime_config_changed` | DB trigger on `core.runtime_flag` write | `ConfigResolver.setupNotifyListener()` — clears `cache` + `dbCache` on notification |
+| `runtime_endpoint_changed` | DB trigger on `core.control_runtime_service` write | `src/shared/runtime/endpoints.ts` — clears endpoint URL cache |
+
+> **Note:** The P474 design doc refers to `runtime_flag_changed` as the flag-reload channel, but the implementation uses `runtime_config_changed` (see `config.ts:231`). Use `runtime_config_changed` in all DB trigger definitions and tooling.
 
 ---
 
@@ -391,6 +402,13 @@ Cache invalidation is live: an `AFTER UPDATE` trigger fires
 in-process cache without a restart.
 
 See `docs/architecture/runtime-endpoint-resolution.md` for the full design.
+
+---
+
+## Known Issues
+
+- **Duplicate key definitions in `config-keys.ts`:** `AGENTHIVE_TENANT_POOL_LRU_MAX`, `AGENTHIVE_TENANT_POOL_MAX`, and `AGENTHIVE_DRAIN_TIMEOUT_MS` are declared twice in `StructuralKeys` (lines ~320–366 and ~421–467). TypeScript silently takes the last definition. The second set (with `Math.trunc` validation and `envOverride: true`) is canonical. A cleanup proposal should deduplicate these.
+- **`RuntimeConfigValidationFailed` and `RuntimeConfigMutationForbidden` not yet thrown:** These error classes are defined in the proposal spec and documented in the Error Types table but are not yet instantiated in the current `config.ts` implementation. Phase 3 mutation surface will activate them.
 
 ---
 
