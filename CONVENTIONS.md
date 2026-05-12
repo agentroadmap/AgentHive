@@ -465,6 +465,27 @@ Permanent agents use provider-scoped first-name pools. First letter maps to prov
 
 **Cross-host labels (`@host`) are deferred** — A2A channel validation does not yet allow `@` in stored routing identities. See P996 for the deferred cross-host relay design.
 
+### 6.0e A2A thread_id and reply-semantics enforcement (P907)
+
+**thread_id column** (`roadmap.message_ledger.thread_id BIGINT NOT NULL`) groups all messages in a conversation tree by their root message id. Populated entirely by the DB:
+
+- **Trigger `trg_message_ledger_set_thread_id`** (`fn_message_ledger_set_thread_id`) fires BEFORE INSERT on every row.
+  - Root message (`reply_to IS NULL`): `NEW.thread_id := NEW.id` (pre-fetches nextval when caller omits id).
+  - Reply: inherits `thread_id` from parent row (single lookup); falls back to a recursive CTE walk if parent was inserted before the trigger existed.
+  - App may pre-compute `thread_id` and pass it to skip the walk entirely.
+- **Index** `idx_message_ledger_thread_id_created_at (thread_id, created_at)` covers thread-range queries.
+- **Migration**: `scripts/migrations/130-p907-message-ledger-thread-id.sql` (backfill + trigger + index).
+
+**Schema enforcement** (migration `131-p907-message-ledger-schema-enforcement.sql`):
+- `CHECK (reply_to IS NULL OR reply_to < id)` — prevents future-pointer DAG violations.
+- **Trigger `trg_message_ledger_inherit_correlation_id`** (`fn_message_ledger_inherit_correlation_id`) auto-copies `correlation_id` from the parent row when `NEW.correlation_id IS NULL AND NEW.reply_to IS NOT NULL`. Defensive safety net for forgetful INSERT paths.
+
+**App-side gaps catalogued by P907 AC3 audit** (24 INSERT sites; 2 correct, 20 inconsistent) are tracked in child proposals for incremental fix:
+- P907-A (P1): `msg_send` missing `correlation_id` param; `msg_reply` not setting `reply_to`.
+- P907-B (P2): escalation rows, `A2AMessenger.send`, liaison handlers, `cross-host-relay` NACK.
+
+Until those fixes land, the DB triggers provide a partial safety net but thread coherence is incomplete for reply chains.
+
 ### 6.0 Database Topology (target architecture)
 
 AgentHive runs on a **two-tier Postgres topology**:
