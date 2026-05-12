@@ -150,4 +150,30 @@ BEGIN
   END IF;
 END $$;
 
+-- ─── AC-15: Copilot agent capabilities — job_family seeding ─────────────────
+-- Copilot agents (pete, pablo, paul) handle only: mechanical, workspace, liaison.
+-- Testing, implementation, analysis, architecture, review are excluded —
+-- enforced upstream by can_spawn_workers=false on model_capability_profile.
+
+-- Ensure paul has a provider_registry row (pete/pablo were seeded in P996).
+INSERT INTO roadmap_workforce.provider_registry (agency_id, agency_identity, capabilities)
+SELECT ar.id, ar.agent_identity, '{"job_family": ["mechanical", "workspace", "liaison"]}'::jsonb
+FROM roadmap_workforce.agent_registry ar
+WHERE ar.agent_identity = 'paul'
+  AND NOT EXISTS (
+    SELECT 1 FROM roadmap_workforce.provider_registry pr WHERE pr.agency_id = ar.id
+  );
+
+-- Update capabilities for all three copilot agents.
+UPDATE roadmap_workforce.provider_registry pr
+SET capabilities = jsonb_set(
+      capabilities,
+      '{job_family}',
+      '["mechanical", "workspace", "liaison"]'
+    ),
+    updated_at = now()
+FROM roadmap_workforce.agent_registry ar
+WHERE pr.agency_id = ar.id
+  AND ar.agent_identity IN ('pete', 'pablo', 'paul');
+
 COMMIT;
