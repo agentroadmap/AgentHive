@@ -74,6 +74,13 @@ export interface WorkOfferInput {
 	 * (proposal, status, maturity, role) already exists. Defaults to 1.
 	 */
 	dispatchVersion?: number;
+	/**
+	 * P771 role-policy: DB id of the role_profile row driving allowed/forbidden
+	 * provider filters. Stored in offer metadata and forwarded to spawnAgent by
+	 * the liaison's OfferDispatchHandler so route resolution applies the same
+	 * policy that scanQueues() would have applied on a direct spawn.
+	 */
+	roleProfileId?: number | null;
 }
 
 export interface WorkOfferResult {
@@ -123,6 +130,7 @@ export async function postWorkOffer(
 	if (input.timeoutMs) metadata.timeout_ms = input.timeoutMs;
 	if (input.worktreeHint) metadata.worktree_hint = input.worktreeHint;
 	if (input.briefingId) metadata.briefing_id = input.briefingId;
+	if (input.roleProfileId != null) metadata.role_profile_id = input.roleProfileId;
 
 	const caps = input.requiredCapabilities?.length
 		? JSON.stringify(input.requiredCapabilities)

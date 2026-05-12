@@ -56,6 +56,8 @@ interface OfferDispatchEnvelope {
 	lease_ttl_seconds?: number;
 	/** P914: worktree directory basename selected by the orchestrator. */
 	worktree_hint?: string | null;
+	/** P771: role_profile.id for route-policy filtering in spawnAgent. */
+	role_profile_id?: number | null;
 }
 
 const DEFAULT_LEASE_TTL_SECONDS = 60;
@@ -209,6 +211,7 @@ async function runSpawn(args: {
 			capabilities,
 			provider: payload.route_hint as never,
 			briefingId: payload.briefing_id,
+			roleProfileId: payload.role_profile_id ?? null,
 			// agentLabel intentionally omitted — agent-spawner derives the
 			// structured identity (P852) when this is undefined.
 		});

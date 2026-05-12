@@ -2,6 +2,7 @@ import type { PoolClient } from "pg";
 import { closePool, getPool, query } from "../../infra/postgres/pool.ts";
 import { pulseHeartbeat } from "../../infra/pulse/heartbeat.ts";
 import { reapStaleRows } from "../pipeline/reap-stale-rows.ts";
+import { postWorkOffer } from "../pipeline/post-work-offer.ts";
 import { enqueueNotification } from "../notifications/enqueue.ts";
 import { getUnlockedGateQueue } from "../proposal/gate-scanner-v2.ts";
 import { loadStateNames } from "../workflow/state-names.ts";
@@ -683,7 +684,8 @@ export class Orchestrator {
 	 *   1. resolveQueueContext()  — enrich with workflowTemplateId + roleProfiles
 	 *   2. fetchProposalDetail()  — full RFC fields for readiness check
 	 *   3. assessReadiness()      — determines mode: gate | prep | skip
-	 *   4. spawnAgent()           — routes through 6-layer policy filter
+	 *   4. postWorkOffer()        — enqueues offer; OfferClaimLoop → OrchestratorOfferDispatcher
+	 *                               → liaison_message offer_dispatch (AC-2)
 	 *
 	 * Returns the number of proposals that were dispatched (mode ≠ skip).
 	 */
@@ -714,18 +716,22 @@ export class Orchestrator {
 				const primaryProfile = ctx.roleProfiles[0] ?? null;
 				const task = buildTaskPrompt(detail, mode, reasons);
 
-				await spawnAgent({
-					worktree: this.defaultWorktree,
-					task,
+				// AC-2: route all proposal-level dispatches through the offer
+				// dispatch pipeline (postWorkOffer → OfferClaimLoop →
+				// OrchestratorOfferDispatcher → liaison_message offer_dispatch).
+				// The liaison's OfferDispatchHandler calls spawnAgent; the
+				// orchestrator itself no longer forks CLI subprocesses for
+				// proposal execution.
+				await postWorkOffer({
 					proposalId: detail.id,
+					squadName: `P${detail.id}-${mode}`,
+					role: `${detail.displayId} (${mode})`,
+					task,
 					stage: detail.status,
-					agentLabel: `${detail.displayId} (${mode})`,
-					activity: mode === "gate" ? "reviewing" : "preparing",
-					projectId: ctx.projectId ?? undefined,
-					// Pass the DB-backed profile id when present so P771 role-policy
-					// filters (allowed_route_providers, forbidden_route_providers)
-					// reach resolveModelRoute. Builtin-fallback rows have id=null
-					// and route resolution falls through to host/project policy.
+					worktreeHint: this.defaultWorktree,
+					// P771: forward role_profile_id so the liaison applies the
+					// same route-policy filters that a direct spawnAgent call
+					// would have applied (allowed_route_providers, etc.).
 					roleProfileId: primaryProfile?.id ?? null,
 				});
 
