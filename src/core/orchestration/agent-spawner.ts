@@ -21,7 +21,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
-import { validateModelForDispatch } from "../../apps/mcp-server/tools/spending/pg-handlers.ts";
+import {
+	validateModelForDispatch,
+	getLatestQuotaSnapshot,
+} from "../../apps/mcp-server/tools/spending/pg-handlers.ts";
 import { query } from "../../infra/postgres/pool.ts";
 import {
 	getDaemonUrl,
@@ -1260,6 +1263,40 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 			throw new Error(
 				`[P760] Project ${req.projectId} is at max concurrent dispatch capacity`,
 			);
+		}
+	}
+
+	// P1004: pre-spawn quota check — defer if provider quota is critically low.
+	// Reads the latest agent_usage_snapshot for the target provider. Missing
+	// snapshot = no data yet, so we allow the spawn (fail open rather than block
+	// all agents until the first report arrives).
+	const QUOTA_HEADROOM_PCT = parseFloat(
+		process.env.QUOTA_HEADROOM_PCT ?? "0.20",
+	);
+	if (req.provider) {
+		try {
+			const quotaSnap = await getLatestQuotaSnapshot(req.provider);
+			if (
+				quotaSnap?.quota_remaining !== null &&
+				quotaSnap?.quota_remaining !== undefined &&
+				quotaSnap.quota_limit !== null &&
+				quotaSnap.quota_limit !== undefined &&
+				quotaSnap.quota_limit > 0
+			) {
+				const pct = quotaSnap.quota_remaining / quotaSnap.quota_limit;
+				if (pct < QUOTA_HEADROOM_PCT) {
+					throw new Error(
+						`[P1004] Spawn deferred: ${req.provider} quota at ${Math.round(pct * 100)}% ` +
+						`(${quotaSnap.quota_remaining}/${quotaSnap.quota_limit} remaining, ` +
+						`headroom threshold ${Math.round(QUOTA_HEADROOM_PCT * 100)}%). ` +
+						`Resets at ${quotaSnap.quota_reset_at?.toISOString() ?? "unknown"}.`,
+					);
+				}
+			}
+		} catch (err) {
+			// Only re-throw P1004 quota errors; silently swallow DB errors so a
+			// missing snapshot table (pre-migration) never blocks spawning.
+			if (err instanceof Error && err.message.startsWith("[P1004]")) throw err;
 		}
 	}
 

@@ -298,6 +298,9 @@ const opsRoutes: RouteMap = {
 	backup_take: "backup_take",
 	backup_verify: "backup_verify",
 	backup_list: "backup_list",
+	// P1004: Agent cost & quota self-reporting
+	report_usage: "ops_report_usage",
+	ops_report_usage: "ops_report_usage",
 };
 
 const projectRoutes: RouteMap = {
