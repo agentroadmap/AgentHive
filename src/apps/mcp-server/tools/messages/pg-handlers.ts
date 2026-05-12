@@ -339,7 +339,7 @@ export class PgMessagingHandlers {
 					args.message_content,
 					args.message_type || "text",
 					args.proposal_id || null,
-					args.correlation_id || null,
+					args.correlation_id || crypto.randomUUID(),
 					args.provider_sig || null,
 					saltBuf,
 					sigVerified,
