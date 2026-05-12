@@ -47,10 +47,17 @@ export interface AgencyCandidate {
  * Excludes offline and retired agencies.
  * Filters by in-flight capacity (P764).
  * Ranks by throttle_count ASC, last_seen_at DESC.
+ *
+ * P1005: Optional taskTier and requiredCapabilities filtering
+ * - If taskTier is provided, only agencies with matching tier in capabilities are returned
+ * - If requiredCapabilities is provided, agencies must support all listed capabilities
+ * - Tier-0 isolation: Tier-3 providers are never matched for Tier-0 requests
  */
 export async function resolveAgency(
 	projectId: string,
 	_role?: string,
+	taskTier?: number,
+	requiredCapabilities?: string[],
 ): Promise<AgencyCandidate | null> {
 	// P914: exclude coordinator agents (the orchestrator itself) and
 	// test scaffolding identities. Coordinators claim offers and
@@ -60,6 +67,46 @@ export async function resolveAgency(
 	// LEFT JOIN agency lets retired agencies be excluded even if their
 	// provider_registry.status hasn't been synced. Legacy registry rows
 	// without a matching agency row (a.status IS NULL) continue to qualify.
+
+	// Build WHERE clause dynamically for tier-aware filtering
+	let tierFilter = "";
+	let capabilityFilter = "";
+	const queryParams: (string | number)[] = [projectId];
+
+	// P1005 AC-8: Tier-0 isolation — tier-0 tasks only go to tier-0 providers
+	if (taskTier !== undefined) {
+		// All tiers except tier-0 can fall back to higher-tier providers
+		// For tier-0: exact match required (no fallback to tier-3)
+		if (taskTier === 0) {
+			// Tier-0 tasks: only providers with explicit tier 0 in capabilities
+			// Providers without tier field default to 2, so exclude them too
+			tierFilter = ` AND (pr.capabilities->>'tier')::int = 0`;
+		} else if (taskTier === 1) {
+			// Tier-1: tier-1+ providers (not tier-0)
+			tierFilter = ` AND COALESCE((pr.capabilities->>'tier')::int, 2) >= 1`;
+		} else if (taskTier === 2) {
+			// Tier-2: tier-2+ providers
+			tierFilter = ` AND COALESCE((pr.capabilities->>'tier')::int, 2) >= 2`;
+		} else if (taskTier === 3) {
+			// Tier-3: only tier-3 providers
+			tierFilter = ` AND COALESCE((pr.capabilities->>'tier')::int, 2) >= 3`;
+		}
+	}
+
+	// P1005: Filter by required capabilities
+	if (requiredCapabilities && requiredCapabilities.length > 0) {
+		// Build JSON contains check for each required capability
+		capabilityFilter = requiredCapabilities
+			.map((cap, idx) => {
+				queryParams.push(cap);
+				return `pr.capabilities->'jobs' ? $${queryParams.length}`;
+			})
+			.join(" AND ");
+		if (capabilityFilter) {
+			capabilityFilter = ` AND (${capabilityFilter})`;
+		}
+	}
+
 	const { rows } = await query(
 		`SELECT pr.id, pr.agency_id, pr.project_id, pr.capabilities,
 		        pr.status, pr.throttle_count, pr.last_seen_at, pr.max_in_flight,
@@ -80,9 +127,11 @@ export async function resolveAgency(
 		   AND ar.agent_identity NOT LIKE 'test/%'
 		   AND (pr.project_id IS NULL OR pr.project_id = $1)
 		   AND COALESCE(inf.in_flight_count, 0) < pr.max_in_flight
+		   ${tierFilter}
+		   ${capabilityFilter}
 		 ORDER BY pr.throttle_count ASC, pr.last_seen_at DESC NULLS LAST
 		 LIMIT 1`,
-		[projectId],
+		queryParams,
 	);
 
 	if (!rows.length) return null;
