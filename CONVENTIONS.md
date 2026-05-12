@@ -438,6 +438,33 @@ Both are well below Postgres NOTIFY queue capacity (~10K–50K/sec). Per-subscri
 
 **Rule:** do not add a per-subscriber fan-out table or subscription registry without a new proposal and load evidence that 50× broadcast spike has actually been observed. Per-subscriber can be layered in as an optimization later; it is not the default.
 
+### 6.0d Permanent agent naming convention (P996)
+
+Permanent agents use provider-scoped first-name pools. First letter maps to provider:
+
+| Prefix | Provider | Male names (builder/default) | Female names (skeptic/review only) |
+| ------ | -------- | ----------------------------- | ---------------------------------- |
+| `a*`   | Claude / Anthropic | adam, alan, alex, andrew, andy | alice, ana |
+| `c*`   | Codex    | cooper, carter, calvin, clark, cory | chloe, cora |
+| `g*`   | Gemini   | george, glen, grant, graham | grace, gina, gwen |
+| `p*`   | Copilot  | peter, patrick, paul, preston, pete, pablo | paige, piper, petra |
+| `h*`   | Hermes   | henry, harry, harrison, hudson | hannah, hazel |
+
+**Gender-role rule:** male names = builder/developer/architect (active workers, default dispatch targets). Female names = skeptic/reviewer (seeded inactive; enabled only for review cycles). The first-boot agent for any provider MUST be a male name.
+
+**Expertise suffix:** append `.dev`, `.test`, `.review`, etc. as an operator-facing hint — e.g. `george.dev`, `pete.test`. The suffix does not affect provider routing.
+
+**Agency/liaison labels:** dotted labels distinguish roles on the shared `bot` host:
+- `.a` = combined agency+liaison process (e.g. `claude.a`, `gemini.a`)
+- `.l` = pure-relay liaison (reserved; not yet implemented)
+- `provider.<owner>.a` = provider agency scoped to an owner (e.g. `copilot.gary.a`)
+
+**Module:** `src/core/identity/agent-registry/permanent-agent-map.ts` — `resolvePermanentAgentMapping(input)` normalises any registered name (bare, qualified, with suffix, with @host) to `{ agentIdentity, provider, displayName, permanentRole, host }`. Wire this into every registration path; do not add new hardcoded name sets.
+
+**Supersedes:** P930's `provider-role` convention for permanent agents, agencies, and liaisons. P919 remains the parent display-alias architecture.
+
+**Cross-host labels (`@host`) are deferred** — A2A channel validation does not yet allow `@` in stored routing identities. See P996 for the deferred cross-host relay design.
+
 ### 6.0 Database Topology (target architecture)
 
 AgentHive runs on a **two-tier Postgres topology**:
