@@ -1,6 +1,13 @@
 /**
  * P609: Per-(type × gate) gate-role resolver.
  *
+ * BOUNDARY (P909 / CONVENTIONS.md §6.0d): This resolver is keyed by
+ * (proposal_type, gate) and is intentionally separate from
+ * src/core/orchestration/role-resolver.ts (P748), which is keyed by
+ * (workflow_template_id, stage, maturity). They serve different dispatch
+ * phases. Do not merge without a proposal proving the gate path is
+ * expressible in the queue-driven schema.
+ *
  * Resolves the agent profile for a given (proposal_type, gate) pair.
  * Two-tier lookup: DB cache → BUILTIN_FALLBACK (identical to GATE_ROLES in orchestrator.ts).
  * Two-level mutex mirrors StateNamesRegistry pattern in state-names.ts:

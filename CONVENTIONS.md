@@ -432,6 +432,17 @@ AgentHive runs on a **two-tier Postgres topology**:
 - Inside a tenant DB: project-chosen schemas (e.g., `audio.`, `song.`); never use `roadmap.` in a tenant DB.
 - Cross-DB joins are forbidden. If a handler needs both, it issues two queries and joins in code.
 
+### 6.0d Role resolution two-level rule (P909)
+
+Two role-resolver layers coexist by design — they are **not duplicates**:
+
+- **`src/core/orchestration/role-resolver.ts` (P748):** keyed by `(workflow_template_id, stage, maturity, project_id?)`. Used by `scanQueues()` for queue-driven dispatch. Returns an ordered list of `RoleProfile[]` (role name + capabilities + allowed providers).
+- **`src/core/orchestration/gate-role-resolver.ts` (P609):** keyed by `(proposal_type, gate)`. Used by gate-evaluator selection where the workflow context (`workflow_template_id`) is not available at decision time. Returns a `GateRoleProfile` with `persona`, `outputContract`, `modelPreference`, `toolAllowList` — fields not present in `RoleProfile`.
+
+**Do not merge these without a separate proposal** that proves the gate path can be expressed in the queue-driven schema. The key difference: gate resolution needs the proposal *type* (`feature`, `hotfix`, …) and the gate label (`D1`–`D4`), not the workflow template ID. At the time gate-evaluator selection runs in `scripts/orchestrator.ts`, the workflow template context may not be resolved yet.
+
+**`src/core/workflow/role-resolver.ts` (deleted, P748 alternate):** was a never-wired duplicate of `orchestration/role-resolver.ts`. Removed in P909.
+
 ### 6.1 DDL belongs in `database/ddl/`
 
 Use `database/ddl/` for schema structure:

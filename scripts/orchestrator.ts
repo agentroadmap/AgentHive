@@ -34,7 +34,7 @@ import { getMcpUrl } from "../src/shared/runtime/endpoints.ts";
 import { listDispatchableAgencies } from "../src/infra/agency/liaison-service.ts";
 import { storeMessage, getNextSequence } from "../src/infra/agency/liaison-message-service.ts";
 import { createMessageEnvelope } from "../src/infra/agency/liaison-message-types.ts";
-import { resolveGateRole, getGateRoleRegistry } from "../src/core/orchestration/gate-role-resolver.ts";
+import { resolveGateRole } from "../src/core/orchestration/gate-role-resolver.ts";
 import {
 	bootCancelPokeAttempts,
 	runOfferReaper,
