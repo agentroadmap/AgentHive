@@ -29,6 +29,11 @@ import {
 	LIAISON_SLOTS,
 } from "./agent-name.ts";
 import { claimDisplayAlias } from "./alias-manager.ts";
+import {
+	isPermanentAgent,
+	resolvePermanentAgentIdentity,
+	resolvePermanentAgentMapping,
+} from "./permanent-agent-map.ts";
 import type {
 	AgentRegistration,
 	DeregisterRequest,
@@ -96,10 +101,8 @@ export async function resolveInstanceId(
 }
 
 /** Determine if agent is permanent (well-known identities) */
-// OpenClaw core team + specialist roles
-const PERMANENT_AGENTS = new Set(["Gilbert", "Skeptic"]);
 function isPermanent(agentId: string): boolean {
-	return PERMANENT_AGENTS.has(agentId);
+	return isPermanentAgent(agentId);
 }
 
 /**
@@ -186,12 +189,15 @@ async function resolveRegistrationInstanceId(
 export async function registerAgent(
 	request: RegistrationRequest,
 ): Promise<RegistrationResponse> {
-	const { agentId, capabilities = [], role } = request;
+	const permanentMapping = resolvePermanentAgentMapping(request.agentId);
+	const agentId = permanentMapping?.agentIdentity ?? request.agentId;
+	const capabilities = request.capabilities ?? [];
+	const role = request.role;
 	const permanent = isPermanent(agentId);
 	const agentType = request.agentType || (permanent ? "permanent" : "contract");
 
 	const instanceId = await resolveRegistrationInstanceId(
-		request,
+		{ ...request, agentId },
 		agentId,
 		agentType,
 		capabilities,
@@ -241,7 +247,7 @@ export async function registerAgent(
 
 	await announcePresence(
 		"general",
-		`[${agentId}] Registered and online. Channel: ${channel}`,
+		`[${resolvePermanentAgentIdentity(agentId)}] Registered and online. Channel: ${channel}`,
 	);
 
 	return {

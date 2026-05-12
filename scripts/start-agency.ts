@@ -32,6 +32,7 @@
 
 import { hostname } from "node:os";
 import { resolveActiveRouteProvider } from "../src/core/orchestration/agent-spawner.ts";
+import { resolvePermanentAgentMapping } from "../src/core/identity/agent-registry/permanent-agent-map.ts";
 import { closePool, getPool } from "../src/infra/postgres/pool.ts";
 import {
 	selfRegisterAgency,
@@ -42,8 +43,10 @@ import {
 	type LiaisonAgentHandle,
 } from "../src/infra/agency/liaison-agent.ts";
 
-const agentIdentity =
+const requestedAgentIdentity =
 	process.env.AGENTHIVE_AGENT_IDENTITY ?? `agency-${hostname()}`;
+const permanentAgentMapping = resolvePermanentAgentMapping(requestedAgentIdentity);
+const agentIdentity = permanentAgentMapping?.agentIdentity ?? requestedAgentIdentity;
 
 
 /**
@@ -80,6 +83,9 @@ async function loadKnownProviders(): Promise<Set<string>> {
 async function resolveProvider(): Promise<string> {
 	if (process.env.AGENTHIVE_AGENT_PROVIDER) {
 		return process.env.AGENTHIVE_AGENT_PROVIDER;
+	}
+	if (permanentAgentMapping) {
+		return permanentAgentMapping.provider;
 	}
 	const identityPrefix = agentIdentity.split("/")[0];
 	const known = await loadKnownProviders();
@@ -147,6 +153,8 @@ async function main(): Promise<void> {
 		registration = await selfRegisterAgency({
 			agencyId: agentIdentity,
 			provider,
+			displayName: permanentAgentMapping?.displayName,
+			hostId: permanentAgentMapping?.host,
 			capabilities: [provider, "agent-spawner", "messaging"],
 			projectIds,
 			metadata: { version: "1.0", pid: process.pid },

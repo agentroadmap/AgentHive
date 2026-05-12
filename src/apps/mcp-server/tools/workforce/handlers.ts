@@ -1,5 +1,6 @@
 import { query } from "../../../../infra/postgres/pool.ts";
 import type { CallToolResult } from "../../types.ts";
+import { resolvePermanentAgentMapping } from "../../../../core/identity/agent-registry/permanent-agent-map.ts";
 
 type ToolHandler = (args: Record<string, unknown>) => Promise<CallToolResult>;
 
@@ -11,6 +12,10 @@ export const agencyRegisterHandler: ToolHandler = async (args) => {
 		model?: string;
 		skills?: string[];
 	};
+
+	const permanent = resolvePermanentAgentMapping(identity);
+	const agentIdentity = permanent?.agentIdentity ?? identity;
+	const agentProvider = provider ?? permanent?.provider ?? null;
 
 	// Register in agent_registry
 	const result = await query(
@@ -25,9 +30,9 @@ export const agencyRegisterHandler: ToolHandler = async (args) => {
 		   updated_at = now()
 		 RETURNING id, agent_identity, agent_type`,
 		[
-			identity,
+			agentIdentity,
 			agentType,
-			provider ?? null,
+			agentProvider,
 			model ?? null,
 		],
 	);
