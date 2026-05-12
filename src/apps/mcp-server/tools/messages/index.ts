@@ -751,6 +751,39 @@ export function registerMessageTools(server: McpServer): void {
 			),
 	);
 
+	const msgTailTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "msg_tail",
+			description:
+				"P995: Tail recent messages to/from a named agent. Returns all messages (read + unread), " +
+				"newest first. Useful for checking what an agent has been doing. Use msg_read for unread-only.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					agent: {
+						type: "string",
+						description: "Agent identity (e.g. 'adam') to tail messages for",
+					},
+					limit: {
+						type: "number",
+						description: "Max messages to return (default 20, max 200)",
+					},
+				},
+				required: ["agent"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				agent: { type: "string" },
+				limit: { type: "number" },
+			},
+			required: ["agent"],
+		} as JsonSchema,
+		async (input) =>
+			pgHandlers.tailMessages(input as { agent: string; limit?: number }),
+	);
+
 	server.addTool(sendTool);
 	server.addTool(readTool);
 	server.addTool(markReadTool);
@@ -770,4 +803,5 @@ export function registerMessageTools(server: McpServer): void {
 	server.addTool(dlqExpireTool);
 	server.addTool(dlqStatsTool);
 	server.addTool(liaisonStuckTool);
+	server.addTool(msgTailTool);
 }

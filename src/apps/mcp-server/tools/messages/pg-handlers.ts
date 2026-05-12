@@ -460,6 +460,61 @@ export class PgMessagingHandlers {
 		return { content: [{ type: "text", text: lines.join("\n") }] };
 	}
 
+	/**
+	 * P995: Tail recent messages to/from a named agent. Returns all (not unread-only),
+	 * newest first, formatted for quick reading.
+	 */
+	async tailMessages(args: {
+		agent: string;
+		limit?: number;
+	}): Promise<CallToolResult> {
+		try {
+			const limit = Math.min(Math.max(args.limit ?? 20, 1), 200);
+
+			const { rows } = await query(
+				`SELECT id, from_agent, to_agent, channel, message_content, message_type,
+				        created_at, read_at, acked_at, ack_outcome
+				 FROM   roadmap.message_ledger
+				 WHERE  to_agent = $1 OR from_agent = $1
+				 ORDER  BY created_at DESC
+				 LIMIT  $2`,
+				[args.agent, limit],
+			);
+
+			if (!rows || rows.length === 0) {
+				return {
+					content: [{ type: "text", text: `No messages for agent '${args.agent}'.` }],
+				};
+			}
+
+			const lines = rows.map((r: any) => {
+				const dir = r.from_agent === args.agent ? "→" : "←";
+				const peer =
+					r.from_agent === args.agent
+						? (r.to_agent || r.channel || "broadcast")
+						: r.from_agent;
+				const status =
+					r.acked_at
+						? `acked:${r.ack_outcome}`
+						: r.read_at
+						? "read"
+						: "unread";
+				return `[${r.id}] ${r.created_at.toISOString()} ${dir} ${peer} (${r.message_type}, ${status}): ${r.message_content}`;
+			});
+
+			return {
+				content: [
+					{
+						type: "text",
+						text: `## Messages for ${args.agent} (${rows.length} of max ${limit})\n\n${lines.join("\n")}`,
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to tail messages", err);
+		}
+	}
+
 	async listChannels(args: {
 		limit?: number;
 		include_metadata?: boolean;
