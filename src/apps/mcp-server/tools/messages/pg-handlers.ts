@@ -7,6 +7,7 @@
  * P149: Added channel subscriptions, pg_notify push notifications, and wait_ms blocking reads.
  */
 
+import crypto from "crypto";
 import { query, getPool } from "../../../../postgres/pool.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
@@ -15,6 +16,8 @@ import {
 	checkMessageACL,
 } from "../../../../infra/messaging/a2a-access-control.ts";
 import type { A2ANotification } from "../../../../infra/messaging/a2a-types.ts";
+import { verifySignature } from "../../../../infra/security/agent-crypto.ts";
+import { getAgentSecret } from "../../../../infra/security/agent-secret-store.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
@@ -256,6 +259,9 @@ export class PgMessagingHandlers {
 		message_type?: string;
 		proposal_id?: string;
 		correlation_id?: string;
+		provider_sig?: string;
+		provider_sig_salt?: string;
+		created_at?: string;
 	}): Promise<CallToolResult> {
 		try {
 			// AC#2: Enforce ACL before inserting. DMs require an explicit grant;
@@ -277,10 +283,54 @@ export class PgMessagingHandlers {
 				};
 			}
 
+			// P991 Phase 4a: verify-and-log HMAC signature (no rejection on failure).
+			// When provider_sig + created_at are supplied, look up sender secret,
+			// check the 5-minute replay window, compute SHA-256 of payload, and
+			// verify the constant-time HMAC. Result stored in sig_verified column.
+			let sigVerified = "pending";
+			let saltBuf: Buffer | null = null;
+			if (args.provider_sig && args.created_at) {
+				const createdAtMs = new Date(args.created_at).getTime();
+				const ageSeconds = (Date.now() - createdAtMs) / 1000;
+				if (ageSeconds > 300) {
+					// Outside 5-minute replay window — flag without rejecting (Phase 4a)
+					sigVerified = "failed";
+				} else {
+					const pool = getPool();
+					const secret = await getAgentSecret(pool, args.from_agent);
+					if (secret) {
+						const payloadHash = crypto
+							.createHash("sha256")
+							.update(args.message_content, "utf-8")
+							.digest();
+						try {
+							saltBuf = args.provider_sig_salt
+								? Buffer.from(args.provider_sig_salt, "hex")
+								: null;
+						} catch {
+							saltBuf = null;
+						}
+						const valid = verifySignature(
+							secret,
+							args.from_agent,
+							args.to_agent ?? "",
+							args.message_type ?? "text",
+							Math.floor(createdAtMs / 1000),
+							payloadHash,
+							args.provider_sig,
+							saltBuf ?? undefined,
+						);
+						sigVerified = valid ? "verified" : "failed";
+					}
+					// No secret enrolled → leave sig_verified as "pending"
+				}
+			}
+
 			const { rows } = await query(
 				`INSERT INTO roadmap.message_ledger
-                    (from_agent, to_agent, channel, message_content, message_type, proposal_id, correlation_id)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    (from_agent, to_agent, channel, message_content, message_type, proposal_id, correlation_id,
+                     provider_sig, provider_sig_salt, sig_verified)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                  RETURNING id, nonce, created_at`,
 				[
 					args.from_agent,
@@ -290,17 +340,29 @@ export class PgMessagingHandlers {
 					args.message_type || "text",
 					args.proposal_id || null,
 					args.correlation_id || null,
+					args.provider_sig || null,
+					saltBuf,
+					sigVerified,
 				],
 			);
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Message sent (id: ${rows[0].id}, nonce: ${rows[0].nonce}) at ${rows[0].created_at}`,
+						text: `Message sent (id: ${rows[0].id}, nonce: ${rows[0].nonce}, sig_verified: ${sigVerified}) at ${rows[0].created_at}`,
 					},
 				],
 			};
 		} catch (err) {
+			// P990: unique_violation on nonce → structured replay-attack signal
+			if (err && typeof err === "object" && (err as { code?: string }).code === "23505") {
+				return {
+					content: [{
+						type: "text",
+						text: JSON.stringify({ error: "nonce_conflict", message: "Duplicate nonce — possible replay attack" }),
+					}],
+				};
+			}
 			return errorResult("Failed to send message", err);
 		}
 	}
