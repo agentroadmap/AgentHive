@@ -14,8 +14,14 @@
  * mode (`offer_provider`) leaves the legacy OfferProvider service in charge.
  */
 import { hostname } from "node:os";
-import { query } from "../../infra/postgres/pool.ts";
+import { query as _pgQuery } from "../../infra/postgres/pool.ts";
 import type { ClaimedOffer, OfferDispatcher } from "./offer-dispatch.ts";
+
+// Allows tests to inject a mock query function without module-level mocking.
+type QueryFn = typeof _pgQuery;
+let _query: QueryFn = _pgQuery;
+export function _setQueryForTest(fn: QueryFn): void { _query = fn; }
+function query(...args: Parameters<QueryFn>) { return _query(...args); }
 
 const WORK_OFFERS_CHANNEL = "work_offers";
 const DEFAULT_POLL_INTERVAL_MS = 30_000;

@@ -42,6 +42,11 @@ export interface OfferDispatchHandlerDeps {
 	resolveWorktree?: (agencyId: string) => string;
 	/** Renewal cadence override (ms). Default: leaseTtlSeconds * 1000 / 3. */
 	renewalIntervalMs?: number;
+	/**
+	 * AC-5 / test injection: override the uplink send function used to emit
+	 * spawn_failure messages. Defaults to sendMessage from liaison-message-service.
+	 */
+	sendUplink?: typeof sendMessage;
 }
 
 interface OfferDispatchEnvelope {
@@ -152,6 +157,7 @@ export async function handleOfferDispatch(
 		spawn,
 		exec,
 		logger,
+		sendUplink: deps.sendUplink ?? sendMessage,
 	}).catch((err) => {
 		logger.error(
 			`[OfferDispatchHandler] ${agencyId}: unhandled error for offer=${payload.offer_id}:`,
@@ -171,6 +177,7 @@ async function runSpawn(args: {
 	spawn: typeof spawnAgent;
 	exec: SqlExec;
 	logger: Pick<Console, "log" | "warn" | "error">;
+	sendUplink: typeof sendMessage;
 }): Promise<void> {
 	const {
 		agencyId,
@@ -183,6 +190,7 @@ async function runSpawn(args: {
 		spawn,
 		exec,
 		logger,
+		sendUplink,
 	} = args;
 
 	const dispatchId = payload.dispatch_id as number;
@@ -237,7 +245,7 @@ async function runSpawn(args: {
 	// observe the failure as an operational fact. Lifecycle is still governed
 	// mechanically by fn_complete_work_offer below; the uplink is informational.
 	if (status === "failed") {
-		sendMessage({
+		sendUplink({
 			agency_id: agencyId,
 			direction: "liaison->orchestrator",
 			kind: "spawn_failure",
