@@ -233232,46 +233232,85 @@ function useWebSocket(url) {
 
 // src/apps/dashboard-web/hooks/useBoardStages.ts
 var import_react68 = __toESM(require_react(), 1);
-var FALLBACK_STATUSES = [
-  { id: "DRAFT", label: "DRAFT", order: 1, isTerminal: false },
-  { id: "REVIEW", label: "REVIEW", order: 2, isTerminal: false },
-  { id: "DEVELOP", label: "DEVELOP", order: 3, isTerminal: false },
-  { id: "MERGE", label: "MERGE", order: 4, isTerminal: false },
-  { id: "COMPLETE", label: "COMPLETE", order: 5, isTerminal: true }
+var FALLBACK_STAGES = [
+  { id: "DRAFT", stageName: "DRAFT", label: "Draft", displayLabel: "Draft", hexColor: null, order: 1, isTerminal: false },
+  { id: "REVIEW", stageName: "REVIEW", label: "Review", displayLabel: "Review", hexColor: null, order: 2, isTerminal: false },
+  { id: "DEVELOP", stageName: "DEVELOP", label: "Develop", displayLabel: "Develop", hexColor: null, order: 3, isTerminal: false },
+  { id: "MERGE", stageName: "MERGE", label: "Merge", displayLabel: "Merge", hexColor: null, order: 4, isTerminal: false },
+  { id: "COMPLETE", stageName: "COMPLETE", label: "Complete", displayLabel: "Complete", hexColor: null, order: 5, isTerminal: true }
 ];
 function useBoardStages(workflow = "Standard RFC") {
-  const [stages, setStages] = import_react68.useState(FALLBACK_STATUSES);
+  const [stages, setStages] = import_react68.useState(FALLBACK_STAGES);
   const [loading, setLoading] = import_react68.useState(true);
   const [error3, setError] = import_react68.useState(null);
   const [activeWorkflow, setActiveWorkflow] = import_react68.useState(workflow);
-  import_react68.useEffect(() => {
-    const fetchStages = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const url = new URL("/api/board/stages", window.location.origin);
-        url.searchParams.set("workflow", workflow);
-        const response = await fetch(url.toString());
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        const data5 = await response.json();
-        setStages(data5.stages);
-        setActiveWorkflow(data5.workflow);
-        if (data5.error) {
-          console.warn("Board stages API warning:", data5.error);
-        }
-      } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : "Failed to fetch board stages";
-        setError(errorMsg);
-        console.error("Error fetching board stages:", err);
-        setStages(FALLBACK_STATUSES);
-      } finally {
-        setLoading(false);
+  const workflowRef = import_react68.useRef(workflow);
+  workflowRef.current = workflow;
+  const fetchStages = import_react68.useCallback(async (wf) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const url = new URL("/api/board/stages", window.location.origin);
+      url.searchParams.set("workflow", wf);
+      const response = await fetch(url.toString());
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
+      const data5 = await response.json();
+      setStages(data5.stages);
+      setActiveWorkflow(data5.workflow);
+      if (data5.error) {
+        console.warn("Board stages API warning:", data5.error);
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Failed to fetch board stages";
+      setError(errorMsg);
+      console.error("Error fetching board stages:", err);
+      setStages(FALLBACK_STAGES);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  import_react68.useEffect(() => {
+    fetchStages(workflow);
+  }, [workflow, fetchStages]);
+  import_react68.useEffect(() => {
+    const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
+    let ws = null;
+    let reconnectTimer = null;
+    let closed = false;
+    const connect = () => {
+      if (closed)
+        return;
+      try {
+        ws = new WebSocket(wsUrl);
+        ws.onmessage = (event4) => {
+          try {
+            const msg = JSON.parse(event4.data);
+            if (msg?.type === "board_reload") {
+              fetchStages(workflowRef.current);
+            }
+          } catch {}
+        };
+        ws.onclose = () => {
+          if (!closed) {
+            reconnectTimer = setTimeout(connect, 5000);
+          }
+        };
+        ws.onerror = () => {
+          ws?.close();
+        };
+      } catch {}
     };
-    fetchStages();
-  }, [workflow]);
+    connect();
+    return () => {
+      closed = true;
+      if (reconnectTimer !== null)
+        clearTimeout(reconnectTimer);
+      ws?.close();
+    };
+  }, [fetchStages]);
   return { stages, loading, error: error3, workflow: activeWorkflow };
 }
 

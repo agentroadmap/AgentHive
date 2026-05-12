@@ -969,6 +969,7 @@ export function resetModelListCacheForTest(): void {
 export interface UsageSnapshot {
 	provider: string;
 	agent_identity: string;
+	model_name?: string | null;
 	session_id: string | null;
 	tokens_in: number | null;
 	tokens_out: number | null;
@@ -1012,6 +1013,7 @@ export async function getLatestQuotaSnapshot(
 export async function reportAgentUsage(args: {
 	provider: string;
 	agent_identity: string;
+	model_name?: string;
 	session_id?: string;
 	tokens_in?: number;
 	tokens_out?: number;
@@ -1024,6 +1026,52 @@ export async function reportAgentUsage(args: {
 	raw_headers?: Record<string, unknown>;
 }): Promise<CallToolResult> {
 	try {
+		// If the agent did not supply a cost estimate but provided token counts
+		// and a model_name, attempt to compute a best-effort estimate from
+		// model_metadata.cost_per_million_* pricing. This helps CLIs like
+		// 'gh copilot' which do not return billing headers.
+		let computedCost: number | null = args.cost_usd_estimate ?? null;
+		try {
+			if (
+				computedCost === null &&
+				(args.tokens_in || args.tokens_out || args.cache_creation_tokens || args.cache_read_tokens) &&
+				args.model_name
+			) {
+				const { rows: metaRows } = await query<{
+					cost_per_million_input: string | null;
+					cost_per_million_output: string | null;
+					cost_per_million_cache_write: string | null;
+					cost_per_million_cache_hit: string | null;
+				}>(
+					`SELECT cost_per_million_input, cost_per_million_output,
+					        cost_per_million_cache_write, cost_per_million_cache_hit
+					 FROM   model_metadata
+					 WHERE  model_name = $1
+					 LIMIT  1`,
+					[args.model_name],
+				);
+				const meta = metaRows[0];
+				if (meta) {
+					const inPrice = meta.cost_per_million_input ? Number(meta.cost_per_million_input) : 0;
+					const outPrice = meta.cost_per_million_output ? Number(meta.cost_per_million_output) : 0;
+					const cacheWrite = meta.cost_per_million_cache_write ? Number(meta.cost_per_million_cache_write) : 0;
+					const cacheHit = meta.cost_per_million_cache_hit ? Number(meta.cost_per_million_cache_hit) : 0;
+					const tokensIn = args.tokens_in ?? 0;
+					const tokensOut = args.tokens_out ?? 0;
+					const cacheCreate = args.cache_creation_tokens ?? 0;
+					const cacheRead = args.cache_read_tokens ?? 0;
+					const cost = (tokensIn / 1_000_000) * inPrice
+						+ (tokensOut / 1_000_000) * outPrice
+						+ (cacheCreate / 1_000_000) * cacheWrite
+						+ (cacheRead / 1_000_000) * cacheHit;
+					computedCost = Number(cost.toFixed(6));
+				}
+			}
+		} catch (err) {
+			// Non-fatal: if metadata lookup fails, proceed without computed cost.
+			computedCost = args.cost_usd_estimate ?? null;
+		}
+
 		const { rows } = await query<{ id: string; quota_remaining: number | null; quota_limit: number | null }>(
 			`INSERT INTO roadmap_workforce.agent_usage_snapshot
 			   (provider, agent_identity, session_id,
@@ -1044,7 +1092,7 @@ export async function reportAgentUsage(args: {
 				args.quota_remaining ?? null,
 				args.quota_limit ?? null,
 				args.quota_reset_at ?? null,
-				args.cost_usd_estimate ?? null,
+				computedCost ?? null,
 				args.raw_headers ? JSON.stringify(args.raw_headers) : null,
 			],
 		);
@@ -1060,6 +1108,9 @@ export async function reportAgentUsage(args: {
 			const total = (args.tokens_in ?? 0) + (args.cache_creation_tokens ?? 0) + (args.cache_read_tokens ?? 0);
 			const hitPct = total > 0 ? Math.round((args.cache_read_tokens / total) * 100) : 0;
 			parts.push(`cache_hit_ratio: ${hitPct}%`);
+		}
+		if (computedCost !== null) {
+			parts.push(`cost_usd_estimate: $${computedCost.toFixed(6)}${args.cost_usd_estimate == null ? ' (computed from model metadata)' : ''}`);
 		}
 
 		return { content: [{ type: "text", text: parts.join(" | ") }] };

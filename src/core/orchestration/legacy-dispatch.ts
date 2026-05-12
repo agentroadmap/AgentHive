@@ -26,6 +26,7 @@ import {
 import { ObservabilityWriter } from "../observability/observability-writer.ts";
 import { postWorkOffer } from "../pipeline/post-work-offer.ts";
 import { reapStaleRows } from "../pipeline/reap-stale-rows.ts";
+import { enqueueNotification } from "../notifications/enqueue.ts";
 import { briefingAssemble } from "../../infra/agency/spawn-briefing-service.ts";
 import { getPool, query } from "../../infra/postgres/pool.ts";
 import { loadStateNames } from "../workflow/state-names.ts";
@@ -2388,47 +2389,38 @@ export async function reconcileStrandedAdvances(
 		   AND p.status = LOWER(gdl.from_state)
 		 ORDER BY gdl.created_at ASC
 	`);
-	let recovered = 0;
+	let detected = 0;
 	for (const row of stranded.rows) {
-		const client = await pool.connect();
 		try {
-			await client.query("BEGIN");
-			await client.query("SET LOCAL lock_timeout = '5s'");
-			await client.query("SET LOCAL app.gate_bypass = 'true'");
-			await client.query(
-				"SELECT id FROM roadmap_proposal.proposal WHERE id = $1 FOR UPDATE",
-				[row.proposal_id],
-			);
-			const upd = await client.query(
-				`UPDATE roadmap_proposal.proposal
-				    SET status = $1, maturity = 'new'
-				  WHERE id = $2
-				    AND status = LOWER($3)`,
-				[row.to_state, row.proposal_id, row.from_state],
-			);
-			if (upd.rowCount && upd.rowCount > 0) {
-				await client.query(
-					`INSERT INTO roadmap_proposal.proposal_discussions
-					     (proposal_id, author_identity, context_prefix, body)
-					 VALUES ($1, 'system/reconciler', 'gate-decision:', $2)`,
-					[
-						row.proposal_id,
-						`Auto-advanced ${row.from_state}->${row.to_state} via gate_decision_log id=${row.id} (decided_by: ${row.decided_by}). Reconciler backstop.`,
-					],
-				);
-				recovered++;
-			}
-			await client.query("COMMIT");
+			// P902-A8.2: Emit notification for each stranded item instead of updating
+			// status/maturity. The notification triggers the normal dispatch path which
+			// applies the state machine transition. This ensures there is exactly one
+			// proposal stage mutation path.
+			await enqueueNotification({
+				severity: "ALERT",
+				kind: "stranded-gate-advance",
+				title: `Stranded gate advance for ${row.proposal_id}`,
+				body: `Detected un-applied advance ${row.from_state}->${row.to_state} (gate_decision_log id=${row.id}, decided_by=${row.decided_by}). Queuing for state machine application.`,
+				payload: {
+					gate_decision_log_id: row.id,
+					proposal_id: row.proposal_id,
+					from_state: row.from_state,
+					to_state: row.to_state,
+					decided_by: row.decided_by,
+				},
+				proposalId: row.proposal_id,
+			});
+			detected++;
 		} catch (e) {
-			await client.query("ROLLBACK").catch(() => {});
 			logger.error(
-				`Reconciler: Failed to apply advance for proposal_id=${row.proposal_id}, gdl_id=${row.id}: ${e instanceof Error ? e.message : e}`,
+				`Reconciler: Failed to enqueue notification for proposal_id=${row.proposal_id}, gdl_id=${row.id}: ${e instanceof Error ? e.message : e}`,
 			);
-		} finally {
-			client.release();
 		}
 	}
-	if (recovered > 0) logger.log(`Reconciler: Recovered ${recovered} stranded advances`);
+	if (detected > 0)
+		logger.log(
+			`Reconciler: Detected ${detected} stranded advance(s) — emitted notification(s) for state machine application`,
+		);
 }
 
 // P661: reconcile squad_dispatch rows whose agent_run reached a terminal state

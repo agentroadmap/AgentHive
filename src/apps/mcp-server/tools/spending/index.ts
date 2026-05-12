@@ -53,6 +53,7 @@ export function registerSpendingTools(server: McpServer): void {
 			properties: {
 				provider:               { type: "string", description: "Provider identifier (anthropic | codex | gemini | openai | custom)" },
 				agent_identity:         { type: "string", description: "Caller agent identity (e.g. 'adam')" },
+				model_name:             { type: "string", description: "Optional model name (e.g. 'gpt-4.1'). If provided, server may compute a cost estimate when none is supplied by the agent." },
 				session_id:             { type: "string", description: "Links to agent_runs display_id (e.g. 'wt:claude-one')" },
 				tokens_in:              { type: "number", description: "Raw input tokens billed" },
 				tokens_out:             { type: "number", description: "Raw output tokens billed" },

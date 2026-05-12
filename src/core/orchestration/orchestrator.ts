@@ -4,6 +4,7 @@ import { pulseHeartbeat } from "../../infra/pulse/heartbeat.ts";
 import { reapStaleRows } from "../pipeline/reap-stale-rows.ts";
 import { enqueueNotification } from "../notifications/enqueue.ts";
 import { getUnlockedGateQueue } from "../proposal/gate-scanner-v2.ts";
+import { loadStateNames } from "../workflow/state-names.ts";
 import { spawnAgent } from "./agent-spawner.ts";
 import {
 	bootCancelPokeAttempts,
@@ -609,13 +610,25 @@ export class Orchestrator {
 	// ─── Maintenance cycle ─────────────────────────────────────────────────────
 
 	/**
-	 * Run boot-time maintenance: cancel orphaned poke attempts and reap stale
-	 * DB rows left by a prior abrupt stop. Call once before startMaintenance().
+	 * Run boot-time maintenance: load state-names registry, cancel orphaned poke
+	 * attempts, and reap stale DB rows left by a prior abrupt stop. Call once
+	 * before startMaintenance().
 	 */
 	async bootMaintenance(): Promise<void> {
+		const pool = getPool();
+
+		// Load state-names registry from DB (includes NOTIFY listener for live reloads).
+		try {
+			await loadStateNames(pool);
+			console.log("[Orchestrator] State-names registry loaded from database");
+		} catch (error) {
+			console.error("[Orchestrator] Failed to load state-names registry:", error);
+			// Non-fatal; continue without the registry
+		}
+
 		await bootCancelPokeAttempts(query, console, "Orchestrator");
 		await reapStaleRows(
-			getPool(),
+			pool,
 			{ log: (m) => console.log(m), warn: (m) => console.warn(m) },
 			"Orchestrator.Reaper",
 		);
