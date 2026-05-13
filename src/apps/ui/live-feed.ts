@@ -149,6 +149,8 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					EXTRACT(EPOCH FROM ml.created_at) * 1000 AS timestamp_ms,
 					p.display_id AS proposal_id,
 					ml.from_agent AS agent_id,
+					ml.channel AS channel,
+					ml.message_content AS message_content,
 					COALESCE(ml.from_agent, 'agent') || ' -> ' || COALESCE(ml.to_agent, ml.channel, 'broadcast') || ': ' ||
 						left(regexp_replace(COALESCE(ml.message_content, ''), E'[\\n\\r]+', ' ', 'g'), 120) AS message
 				FROM roadmap.message_ledger ml
@@ -222,8 +224,19 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 			[limit],
 		);
 
+		const filtered = rows.filter((row) => {
+			// Drop liaison heartbeat noise: channels like `system:liaison:*` that post
+			// periodic 'heartbeat' message_content values.
+			const raw = (row.message_content ?? "").toString().trim().toLowerCase();
+			const channel = (row.channel ?? "").toString();
+			if (row.type === "message" && channel.startsWith("system:liaison") && raw === "heartbeat") return false;
+			// Drop entirely blank message rows
+			if (!row.message || String(row.message).trim() === "") return false;
+			return true;
+		});
+
 		return dedupeBoardLiveFeed(
-			rows.map((row) => ({
+			filtered.map((row) => ({
 				id: row.id,
 				type: row.type,
 				timestamp: timestampToMillis(row.timestamp_ms),
