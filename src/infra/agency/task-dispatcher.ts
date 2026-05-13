@@ -502,7 +502,7 @@ export async function detectStuckWorkers(): Promise<void> {
 	const { rows } = await query(
 		`SELECT task_id, spawn_count
 		  FROM roadmap.liaison_task_tracker
-		 WHERE last_status_at < now() - interval '5 minutes'
+		 WHERE last_status_at < now() - interval '30 minutes'
 		   AND status NOT IN ('complete', 'failed')
 		   AND spawn_count < 2`,
 	);
@@ -515,7 +515,7 @@ export async function detectStuckWorkers(): Promise<void> {
 			// Mark failed
 			await query(
 				`UPDATE roadmap.liaison_task_tracker
-				  SET status = 'failed', spawn_count = $1, last_status_at = now()
+				  SET status = 'failed', spawn_count = $1, last_status_at = now(), completed_at = now()
 				 WHERE task_id = $2`,
 				[newSpawnCount, task_id],
 			);
