@@ -47,6 +47,13 @@ export interface OfferDispatchHandlerDeps {
 	 * spawn_failure messages. Defaults to sendMessage from liaison-message-service.
 	 */
 	sendUplink?: typeof sendMessage;
+	/**
+	 * Hard wall-clock limit passed to spawnAgent for the CLI subprocess.
+	 * Default: SPAWN_TIMEOUT_MS env var, or 1_800_000ms (30 min).
+	 * The lease is renewed on a separate interval so the DB lease never expires
+	 * while spawn runs; this timeout is only a safety guard against hung processes.
+	 */
+	spawnTimeoutMs?: number;
 }
 
 interface OfferDispatchEnvelope {
@@ -146,6 +153,10 @@ export async function handleOfferDispatch(
 		`[OfferDispatchHandler] ${agencyId}: spawning for offer=${payload.offer_id} role=${payload.role} (route_hint=${payload.route_hint})`,
 	);
 
+	const spawnTimeoutMs =
+		deps.spawnTimeoutMs ??
+		parseInt(process.env.SPAWN_TIMEOUT_MS ?? "1800000", 10);
+
 	void runSpawn({
 		agencyId,
 		payload,
@@ -154,6 +165,7 @@ export async function handleOfferDispatch(
 		capabilities,
 		leaseTtlSeconds,
 		renewalIntervalMs,
+		spawnTimeoutMs,
 		spawn,
 		exec,
 		logger,
@@ -174,6 +186,7 @@ async function runSpawn(args: {
 	capabilities: string[];
 	leaseTtlSeconds: number;
 	renewalIntervalMs: number;
+	spawnTimeoutMs: number;
 	spawn: typeof spawnAgent;
 	exec: SqlExec;
 	logger: Pick<Console, "log" | "warn" | "error">;
@@ -187,6 +200,7 @@ async function runSpawn(args: {
 		capabilities,
 		leaseTtlSeconds,
 		renewalIntervalMs,
+		spawnTimeoutMs,
 		spawn,
 		exec,
 		logger,
@@ -221,6 +235,7 @@ async function runSpawn(args: {
 			provider: payload.route_hint as never,
 			briefingId: payload.briefing_id,
 			roleProfileId: payload.role_profile_id ?? null,
+			timeoutMs: spawnTimeoutMs,
 			// agentLabel intentionally omitted — agent-spawner derives the
 			// structured identity (P852) when this is undefined.
 		});
