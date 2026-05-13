@@ -195,7 +195,37 @@ export function resolveWorkflowStatuses(
 	}
 
 	try {
-		const view = getViewSafe(workflowName) ?? getView(workflowName);
+		const view = getViewSafe(workflowName) ?? (() => {
+			try {
+				return getView(workflowName);
+			} catch { /* fall through */ }
+			return null as any;
+		})();
+
+		// If the requested workflow is RFC but no view is available, fall back to canonical RFC ordering
+		if (!view && wfLower === "rfc") {
+			const rfcCanonical = [
+				"DRAFT",
+				"REVIEW",
+				"DEVELOP",
+				"MERGE",
+				"COMPLETE",
+				"BLOCKED",
+			];
+			const extras = new Set<string>();
+			const validStages = new Set(rfcCanonical.map((s) => s.toLowerCase()));
+			for (const proposal of proposals) {
+				const status = proposal.status.toLowerCase();
+				if (!isObsoleteProposal(proposal) && !validStages.has(status)) {
+					extras.add(proposal.status);
+				}
+			}
+			return [
+				...rfcCanonical,
+				...Array.from(extras).map((s) => s.toUpperCase()).sort((a, b) => a.localeCompare(b)),
+			];
+		}
+
 		const canonical = view.stages.map((s) => s.name);
 		const extras = new Set<string>();
 		const validStages = new Set(canonical.map((s) => s.toLowerCase()));
