@@ -48,12 +48,15 @@ export interface LiaisonBootHandle {
  */
 export function readAgencyConfig(): AgencyConfig {
   const agency_id = process.env.AGENCY_ID?.trim();
-  const provider = process.env.AGENCY_PROVIDER?.trim();
-  const host_id = process.env.AGENCY_HOST_ID?.trim();
+  // Accept legacy AGENTHIVE_AGENT_PROVIDER from agency-*.env per-instance files
+  const provider =
+    process.env.AGENCY_PROVIDER?.trim() ||
+    process.env.AGENTHIVE_AGENT_PROVIDER?.trim();
+  // Default host to "bot" — the shared operator host; override via AGENCY_HOST_ID
+  const host_id = process.env.AGENCY_HOST_ID?.trim() || "bot";
 
   if (!agency_id) throw new Error("AGENCY_ID env var is required");
   if (!provider) throw new Error("AGENCY_PROVIDER env var is required");
-  if (!host_id) throw new Error("AGENCY_HOST_ID env var is required");
 
   const display_name =
     process.env.AGENCY_DISPLAY_NAME?.trim() || agency_id;

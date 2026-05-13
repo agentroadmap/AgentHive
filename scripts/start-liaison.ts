@@ -19,11 +19,20 @@
  */
 
 import { bootLiaison } from "../src/infra/agency/liaison-boot.ts";
+import {
+	runLiaisonAgent,
+	type LiaisonAgentHandle,
+} from "../src/infra/agency/liaison-agent.ts";
 import { closePool } from "../src/infra/postgres/pool.ts";
 
 const agencyId = process.env.AGENCY_ID?.trim() ?? "(unknown)";
+// AGENCY_PROVIDER is the canonical var; AGENTHIVE_AGENT_PROVIDER is the legacy
+// per-instance env file var. Accept either so both service templates work.
+const agencyProvider =
+	(process.env.AGENCY_PROVIDER?.trim() || process.env.AGENTHIVE_AGENT_PROVIDER?.trim()) ?? "";
 
 let handle: Awaited<ReturnType<typeof bootLiaison>> | undefined;
+let agentHandle: LiaisonAgentHandle | undefined;
 
 async function main() {
 	console.log(`[liaison:${agencyId}] starting`);
@@ -33,6 +42,24 @@ async function main() {
 	console.log(
 		`[liaison:${agencyId}] registered session=${handle.session.session_id}`,
 	);
+
+	// Start the message_ledger LISTEN loop — handles task_request, task_status,
+	// task_complete, task_error, offer_dispatch, and protocol_ping from msg_send.
+	// This is layered on top of the hub (which listens on liaison_message_*).
+	if (agencyProvider) {
+		try {
+			agentHandle = await runLiaisonAgent({
+				identity: agencyId,
+				provider: agencyProvider,
+				loggerPrefix: `[liaison-agent:${agencyId}]`,
+			});
+			console.log(`[liaison:${agencyId}] message_ledger LISTEN active`);
+		} catch (err) {
+			console.warn(`[liaison:${agencyId}] runLiaisonAgent failed (non-fatal):`, err);
+		}
+	} else {
+		console.warn(`[liaison:${agencyId}] AGENCY_PROVIDER not set — message_ledger LISTEN disabled`);
+	}
 
 	// Keep the process alive — hub and heartbeat timer drive the loop.
 	await new Promise<void>((resolve) => {
@@ -46,6 +73,13 @@ async function main() {
 		});
 	});
 
+	if (agentHandle) {
+		try {
+			await agentHandle.stop();
+		} catch (err) {
+			console.error(`[liaison:${agencyId}] agentHandle.stop error:`, err);
+		}
+	}
 	await handle.shutdown("normal");
 	await closePool();
 	console.log(`[liaison:${agencyId}] stopped`);

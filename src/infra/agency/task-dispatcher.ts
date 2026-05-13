@@ -79,10 +79,17 @@ async function claimProposal(
 	const url = new URL("/mcp", mcpUrl).toString();
 
 	const body = {
-		action: "prop_claim",
+		jsonrpc: "2.0",
 		id: proposalId,
-		agent: identity,
-		durationMinutes: 60,
+		method: "tools/call",
+		params: {
+			name: "prop_claim",
+			arguments: {
+				id: proposalId,
+				agent: identity,
+				durationMinutes: 60,
+			},
+		},
 	};
 
 	let attempt = 0;
@@ -106,16 +113,20 @@ async function claimProposal(
 				throw new Error(`MCP claim failed: ${res.status} ${responseText}`);
 			}
 
-			// Parse response to extract lease_id
-			let responseBody: Record<string, unknown>;
+			// Parse JSON-RPC 2.0 response: result.content[0].text contains the tool output
+			let leaseId = randomUUID();
 			try {
-				responseBody = JSON.parse(responseText);
+				const rpc = JSON.parse(responseText) as {
+					result?: { content?: Array<{ text?: string }> };
+				};
+				const text = rpc.result?.content?.[0]?.text ?? "{}";
+				const toolResult = JSON.parse(text) as Record<string, unknown>;
+				if (typeof toolResult.lease_id === "string") {
+					leaseId = toolResult.lease_id;
+				}
 			} catch {
-				responseBody = {};
+				// fallback UUID already set
 			}
-
-			const leaseId =
-				(responseBody.lease_id as string | undefined) ?? randomUUID();
 			return leaseId;
 		} catch (err) {
 			if (attempt === 2) {
@@ -380,9 +391,18 @@ export async function handleWorkerReport(
 			const listRes = await fetch(mcpEndpoint, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ action: "list_ac", proposal_id: proposalId }),
+				body: JSON.stringify({
+					jsonrpc: "2.0",
+					id: proposalId,
+					method: "tools/call",
+					params: { name: "list_ac", arguments: { proposal_id: proposalId } },
+				}),
 			});
-			const listJson = await listRes.json() as { items?: Array<{ item_number: number; label?: string; status: string }> };
+			const listRpc = await listRes.json() as {
+				result?: { content?: Array<{ text?: string }> };
+			};
+			const listText = listRpc.result?.content?.[0]?.text ?? "{}";
+			const listJson = JSON.parse(listText) as { items?: Array<{ item_number: number; label?: string; status: string }> };
 			const items = listJson.items ?? [];
 
 			for (const ac of items) {
@@ -391,12 +411,19 @@ export async function handleWorkerReport(
 						method: "POST",
 						headers: { "Content-Type": "application/json" },
 						body: JSON.stringify({
-							action: "verify_ac",
-							proposal_id: proposalId,
-							item_number: ac.item_number,
-							status: "pass",
-							verified_by: identity,
-							verification_notes: "Auto-verified on task_complete by liaison",
+							jsonrpc: "2.0",
+							id: `${proposalId}-ac-${ac.item_number}`,
+							method: "tools/call",
+							params: {
+								name: "verify_ac",
+								arguments: {
+									proposal_id: proposalId,
+									item_number: ac.item_number,
+									status: "pass",
+									verified_by: identity,
+									verification_notes: "Auto-verified on task_complete by liaison",
+								},
+							},
 						}),
 					});
 				}
@@ -411,10 +438,17 @@ export async function handleWorkerReport(
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
-					action: "release",
-					id: proposalId,
-					agent: identity,
-					release_reason: "task_complete",
+					jsonrpc: "2.0",
+					id: `${proposalId}-release`,
+					method: "tools/call",
+					params: {
+						name: "release",
+						arguments: {
+							id: proposalId,
+							agent: identity,
+							release_reason: "task_complete",
+						},
+					},
 				}),
 			});
 		} catch (err) {
