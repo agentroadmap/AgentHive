@@ -230,10 +230,9 @@ export async function registerAgent(
 	// branch via registerAgent — they go through selfRegisterAgency.
 	const slotChar = instanceId.split("-").pop();
 	const expertise = capabilities[0];
-	if (slotChar && expertise) {
-		const provider = request.routeAbbr ?? agentId;
+	if (slotChar && expertise && request.agentProvider) {
 		const host = request.host ?? process.env.AGENTHIVE_HOST ?? hostname();
-		const tier2 = assignDisplayAlias(provider, host, expertise, slotChar);
+		const tier2 = assignDisplayAlias(request.agentProvider, host, expertise, slotChar);
 		const insertedId = insertResult.rows[0]?.id;
 		if (tier2 && insertedId !== undefined) {
 			const claim = await claimDisplayAlias(insertedId, tier2, { tier: 2 });

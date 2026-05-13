@@ -103,4 +103,47 @@ describe("assignDisplayAlias — P919 Tiered Naming", () => {
 			expect(aliasAt).toBeNull();
 		});
 	});
+
+	describe("P931: titleCaseExpertise — algorithmic Title-Case fixes", () => {
+		it("AC-1: unmapped expertise 'documenter' → 'Claude-Bot-Documenter', not 'Claude-Bot-undefineddocum'", () => {
+			const alias = assignDisplayAlias("Claude", "Bot", "documenter", "a");
+			expect(alias).toBe("Claude-Bot-Documenter");
+		});
+
+		it("AC-2: mapped expertise 'architect' → 'Claude-Bot-Architect'", () => {
+			const alias = assignDisplayAlias("Claude", "Bot", "architect", "a");
+			expect(alias).toBe("Claude-Bot-Architect");
+		});
+
+		it("AC-3: hyphenated expertise 'gate-review' → 'Claude-Bot-GateReview'", () => {
+			const alias = assignDisplayAlias("Claude", "Bot", "gate-review", "a");
+			expect(alias).toBe("Claude-Bot-GateReview");
+		});
+
+		it("AC-4: ALL_CAPS token 'qa' → 'Claude-Bot-QA'", () => {
+			const alias = assignDisplayAlias("Claude", "Bot", "qa", "a");
+			expect(alias).toBe("Claude-Bot-QA");
+		});
+
+		it("AC-5: multi-token + ALL_CAPS 'ai-architect' → 'Claude-Bot-AIArchitect'", () => {
+			const alias = assignDisplayAlias("Claude", "Bot", "ai-architect", "a");
+			expect(alias).toBe("Claude-Bot-AIArchitect");
+		});
+
+		it("AC-6: provider-derivation regression — dense abbr 'ccs46ant' throws instead of producing 'Ccs46ant-Bot-Documenter'", () => {
+			expect(() =>
+				assignDisplayAlias("ccs46ant", "Bot", "documenter", "a"),
+			).toThrow(/dense routeAbbr/);
+		});
+
+		it("AC-7: Tier 1 unaffected — liaison slot still returns '{Provider}-{Host}'", () => {
+			const alias = assignDisplayAlias("Claude", "Bot", undefined, "0");
+			expect(alias).toBe("Claude-Bot");
+		});
+
+		it("AC-8: Tier 3+ unaffected — rotated slots still return null", () => {
+			expect(assignDisplayAlias("Claude", "Bot", "documenter", "b")).toBeNull();
+			expect(assignDisplayAlias("Claude", "Bot", "documenter", "c")).toBeNull();
+		});
+	});
 });
