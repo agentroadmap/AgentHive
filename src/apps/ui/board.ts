@@ -107,19 +107,23 @@ function resolveWorkflowStatuses(
 			const available = registry.templateNames ?? [];
 			if (available.length > 0) {
 				try {
-					const view = getView(available[0]);
+					// Prefer the RFC template when available as a canonical ordering
+					const chosen =
+						available.find((n) => n.toLowerCase() === "rfc") ?? available[0];
+					const view = getView(chosen);
 					const canonical = view.stages.map((s) => s.name);
 					const present = new Set<string>();
 					for (const p of proposals) {
 						if (!isObsoleteProposal(p)) present.add(p.status);
 					}
+					const presentLower = new Set(Array.from(present).map((s) => s.toLowerCase()));
 					const lowerCanonical = new Set(canonical.map((s) => s.toLowerCase()));
 					const extras = new Set<string>();
 					for (const s of present) {
 						if (!lowerCanonical.has(s.toLowerCase())) extras.add(s);
 					}
-					// Return canonical statuses that are present, followed by extras.
-					const ordered = canonical.filter((c) => present.has(c));
+					// Return canonical statuses that are present (case-insensitive), followed by extras.
+					const ordered = canonical.filter((c) => presentLower.has(c.toLowerCase()));
 					return [
 						...ordered,
 						...Array.from(extras).sort((a, b) => a.localeCompare(b)),
