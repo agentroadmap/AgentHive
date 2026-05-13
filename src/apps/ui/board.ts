@@ -113,6 +113,13 @@ export function filterProposalsForWorkflow(
 			return !isObsoleteProposal(proposal) && validStages.has(proposal.status.toLowerCase());
 		});
 	} catch {
+		// If registry/view isn't available, fall back conservatively. Ensure
+		// hotfix proposals are not included in RFC view even when registry missing.
+		if (workflowName.toLowerCase() === "rfc") {
+			return proposals.filter(
+				(proposal) => !isObsoleteProposal(proposal) && (proposal.proposalType ?? "").toLowerCase() !== "hotfix",
+			);
+		}
 		return proposals.filter((proposal) => !isObsoleteProposal(proposal));
 	}
 }
