@@ -127,7 +127,13 @@ export function resolveWorkflowStatuses(
 	// the Hotfix template isn't loaded. Use canonical hotfix labels by default.
 	if (wfLower === "hotfix") {
 		try {
-			const view = getViewSafe("Hotfix");
+			const view = (() => {
+				try {
+					return getView("Hotfix");
+				} catch {
+					return null as any;
+				}
+			})();
 			if (view) return view.stages.map((s) => s.name.toUpperCase());
 		} catch {
 			// fall through
@@ -195,12 +201,13 @@ export function resolveWorkflowStatuses(
 	}
 
 	try {
-		const view = getViewSafe(workflowName) ?? (() => {
-			try {
-				return getView(workflowName);
-			} catch { /* fall through */ }
-			return null as any;
-		})();
+		let view: any = null;
+		try {
+			view = getView(workflowName);
+		} catch {
+			// registry/view may not be available in some runtime contexts
+			view = null;
+		}
 
 		// If the requested workflow is RFC but no view is available, fall back to canonical RFC ordering
 		if (!view && wfLower === "rfc") {
