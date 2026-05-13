@@ -157,8 +157,11 @@ function resolvePoolConfig(config?: AgentHivePoolConfig): ResolvedPoolConfig {
 		process.env.PGHOST ??
 		databaseUrlConfig.host ??
 		(StructuralKeys.PGHOST.defaultValue ?? "127.0.0.1");
+	// P499: default to PgBouncer port (6432) so query clients go through the pooler.
+	// LISTEN clients must set PGPORT_DIRECT=5432 (bypass) — handled in pool-registry.ts.
 	const port =
-		Number(config?.port ?? process.env.PGPORT ?? databaseUrlConfig.port) || 5432;
+		Number(config?.port ?? process.env.PGPORT ?? databaseUrlConfig.port) ||
+		Number(process.env.AGENTHIVE_PG_PORT ?? 6432);
 	const database =
 		config?.database ??
 		process.env.PGDATABASE ??

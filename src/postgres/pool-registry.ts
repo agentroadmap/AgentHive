@@ -251,7 +251,8 @@ async function drainPool(entry: PoolEntry, reason: EvictionReason): Promise<void
 function readControlDsnSignature(): string {
   if (process.env.AGENTHIVE_CONTROL_DSN) return process.env.AGENTHIVE_CONTROL_DSN;
   const host = process.env.PGHOST ?? "127.0.0.1";
-  const port = process.env.PGPORT ?? "5432";
+  // P499: default to PgBouncer port for the control pool signature
+  const port = process.env.PGPORT ?? process.env.CONTROL_DB_PORT ?? "6432";
   const user = process.env.PGUSER ?? "xiaomi";
   const database = process.env.PGDATABASE ?? "agenthive";
   return `${user}@${host}:${port}/${database}`;
@@ -283,7 +284,8 @@ function buildControlPool(): Pool {
 
   return new Pool({
     host: process.env.PGHOST ?? "127.0.0.1",
-    port: Number(process.env.PGPORT ?? 5432),
+    // P499: query clients go through PgBouncer (:6432); LISTEN bypass uses PGPORT_DIRECT
+    port: Number(process.env.PGPORT ?? process.env.CONTROL_DB_PORT ?? 6432),
     user: process.env.PGUSER ?? "xiaomi",
     database: process.env.PGDATABASE ?? "agenthive",
     password,

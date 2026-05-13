@@ -301,6 +301,10 @@ const opsRoutes: RouteMap = {
 	// P1004: Agent cost & quota self-reporting
 	report_usage: "ops_report_usage",
 	ops_report_usage: "ops_report_usage",
+	// P499: PgBouncer operator tools
+	pgbouncer_stats: "pgbouncer_stats",
+	pgbouncer_ping: "pgbouncer_ping",
+	pgbouncer_reload: "pgbouncer_reload",
 };
 
 const projectRoutes: RouteMap = {
