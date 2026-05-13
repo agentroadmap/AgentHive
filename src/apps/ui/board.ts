@@ -71,7 +71,22 @@ function isObsoleteProposal(proposal: Proposal): boolean {
 	return (proposal.maturity ?? "").toLowerCase() === "obsolete";
 }
 
-function filterProposalsForWorkflow(
+export function getWorkflowViewDefinition(name: string) {
+	try {
+		return getView(name);
+	} catch {
+		return { key: name, stages: [] } as any;
+	}
+}
+
+export function getWorkflowViewForProposal(proposal: Proposal) {
+	// Hotfix proposals live in a separate cosmetic view.
+	if ((proposal.maturity ?? "").toLowerCase() === "obsolete") return { key: "obsolete" };
+	if ((proposal.proposalType ?? "").toLowerCase() === "hotfix") return { key: "hotfix" };
+	return { key: "rfc" };
+}
+
+export function filterProposalsForWorkflow(
 	proposals: Proposal[],
 	workflowName: string,
 ): Proposal[] {
@@ -96,7 +111,7 @@ function filterProposalsForWorkflow(
 	}
 }
 
-function resolveWorkflowStatuses(
+export function resolveWorkflowStatuses(
 	proposals: Proposal[],
 	workflowName: string,
 ): string[] {
