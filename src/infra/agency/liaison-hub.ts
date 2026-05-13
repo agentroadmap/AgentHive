@@ -10,7 +10,7 @@
  * One hub runs per agency. Start with startLiaisonHub(agencyId).
  */
 
-import { listenForMessages, receiveLiaisonPong } from "./liaison-message-service.ts";
+import { listenForMessages, receiveLiaisonPong, getUnackedMessages, acknowledgeMessage } from "./liaison-message-service.ts";
 import { processAssistanceRequest } from "./liaison-watchdog.ts";
 import { handleOfferDispatch } from "./offer-dispatch-handler.ts";
 import { query } from "../postgres/pool.ts";
@@ -225,20 +225,43 @@ async function dispatchMessage(msg: LiaisonMessage, agencyId: string): Promise<v
  */
 export function startLiaisonHub(agencyId: string): { stop: () => void } {
   const controller = new AbortController();
-  let running = false;
 
   const run = async () => {
-    running = true;
     if (process.env.DEBUG_LIAISON_HUB) {
       console.log(`[LiaisonHub] ${agencyId}: started`);
     }
 
+    // Boot-time replay: process any unacked messages missed while hub was down.
+    // Must run before the LISTEN loop — pg_notify for missed messages is gone.
+    try {
+      const unacked = await getUnackedMessages(agencyId);
+      if (unacked.length > 0) {
+        console.log(`[LiaisonHub] ${agencyId}: replaying ${unacked.length} unacked message(s)`);
+        for (const msg of unacked) {
+          if (controller.signal.aborted) break;
+          try {
+            await dispatchMessage(msg, agencyId);
+            await acknowledgeMessage(msg.message_id, 'ok');
+          } catch (err) {
+            console.error(`[LiaisonHub] ${agencyId}: replay error kind='${msg.kind}':`, err);
+            await acknowledgeMessage(msg.message_id, 'reject', String(err)).catch(() => undefined);
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`[LiaisonHub] ${agencyId}: boot replay failed:`, err);
+    }
+
     try {
       for await (const msg of listenForMessages(agencyId, controller.signal)) {
+        // Skip already-acked messages (guard against replay+listen race window)
+        if (msg.acked_at) continue;
         try {
           await dispatchMessage(msg, agencyId);
+          await acknowledgeMessage(msg.message_id, 'ok');
         } catch (err) {
           console.error(`[LiaisonHub] ${agencyId}: dispatch error kind='${msg.kind}':`, err);
+          await acknowledgeMessage(msg.message_id, 'reject', String(err)).catch(() => undefined);
         }
       }
     } catch (err) {
@@ -246,7 +269,6 @@ export function startLiaisonHub(agencyId: string): { stop: () => void } {
         console.error(`[LiaisonHub] ${agencyId}: listener error:`, err);
       }
     } finally {
-      running = false;
       if (process.env.DEBUG_LIAISON_HUB) {
         console.log(`[LiaisonHub] ${agencyId}: stopped`);
       }
