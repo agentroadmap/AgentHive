@@ -209,23 +209,33 @@ export async function getMessageById(messageId: string): Promise<LiaisonMessage 
 
 /**
  * Fetch unacked messages for an agency in sequence order.
- * Used by orchestrator to catch up after restart.
+ * Used by the hub to catch up after restart.
+ *
+ * createdAfter: if set, only returns messages newer than this timestamp.
+ * Use this to bound the replay window and avoid re-triggering historical backlogs.
  */
 export async function getUnackedMessages(
     agencyId: string,
-    fromSequence?: bigint
+    fromSequence?: bigint,
+    createdAfter?: Date,
 ): Promise<LiaisonMessage[]> {
-    const whereClause = fromSequence
-        ? `WHERE agency_id = $1 AND acked_at IS NULL AND sequence >= $2`
-        : `WHERE agency_id = $1 AND acked_at IS NULL`;
+    const conditions: string[] = ['agency_id = $1', 'acked_at IS NULL'];
+    const params: unknown[] = [agencyId];
 
-    const params = fromSequence ? [agencyId, fromSequence] : [agencyId];
+    if (fromSequence !== undefined) {
+        params.push(fromSequence);
+        conditions.push(`sequence >= $${params.length}`);
+    }
+    if (createdAfter !== undefined) {
+        params.push(createdAfter);
+        conditions.push(`created_at >= $${params.length}`);
+    }
 
     const result = await query<any>(
         `SELECT message_id, agency_id, sequence, direction, kind, correlation_id,
                 payload, signed_at, signature, acked_at, ack_outcome, ack_error, created_at
          FROM roadmap.liaison_message
-         ${whereClause}
+         WHERE ${conditions.join(' AND ')}
          ORDER BY sequence ASC`,
         params
     );

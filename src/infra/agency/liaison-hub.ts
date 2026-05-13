@@ -233,10 +233,16 @@ export function startLiaisonHub(agencyId: string): { stop: () => void } {
 
     // Boot-time replay: process any unacked messages missed while hub was down.
     // Must run before the LISTEN loop — pg_notify for missed messages is gone.
+    // Bounded by LIAISON_REPLAY_WINDOW_HOURS (default 6h) to avoid re-triggering
+    // historical backlogs on agencies with long-running unacked message queues.
     try {
-      const unacked = await getUnackedMessages(agencyId);
+      const replayWindowHours = parseInt(
+        process.env.LIAISON_REPLAY_WINDOW_HOURS ?? '6', 10
+      );
+      const createdAfter = new Date(Date.now() - replayWindowHours * 60 * 60 * 1000);
+      const unacked = await getUnackedMessages(agencyId, undefined, createdAfter);
       if (unacked.length > 0) {
-        console.log(`[LiaisonHub] ${agencyId}: replaying ${unacked.length} unacked message(s)`);
+        console.log(`[LiaisonHub] ${agencyId}: replaying ${unacked.length} unacked message(s) (window=${replayWindowHours}h)`);
         for (const msg of unacked) {
           if (controller.signal.aborted) break;
           try {
