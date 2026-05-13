@@ -100,7 +100,38 @@ function resolveWorkflowStatuses(
 	proposals: Proposal[],
 	workflowName: string,
 ): string[] {
+	// Prefer a canonical workflow order when showing the combined "All" view.
 	if (!workflowName || workflowName === "all") {
+		try {
+			const registry = getRegistry();
+			const available = registry.templateNames ?? [];
+			if (available.length > 0) {
+				try {
+					const view = getView(available[0]);
+					const canonical = view.stages.map((s) => s.name);
+					const present = new Set<string>();
+					for (const p of proposals) {
+						if (!isObsoleteProposal(p)) present.add(p.status);
+					}
+					const lowerCanonical = new Set(canonical.map((s) => s.toLowerCase()));
+					const extras = new Set<string>();
+					for (const s of present) {
+						if (!lowerCanonical.has(s.toLowerCase())) extras.add(s);
+					}
+					// Return canonical statuses that are present, followed by extras.
+					const ordered = canonical.filter((c) => present.has(c));
+					return [
+						...ordered,
+						...Array.from(extras).sort((a, b) => a.localeCompare(b)),
+					];
+				} catch {
+					// Fall through to alphabetical fallback below
+				}
+			}
+		} catch {
+			// Ignore registry errors and fall back to alphabetical
+		}
+
 		const statuses = new Set<string>();
 		for (const proposal of proposals) {
 			if (!isObsoleteProposal(proposal)) {

@@ -56,3 +56,17 @@ jobs:
       - name: Workflow state literal guard
         continue-on-error: true
         run: npm run scan:workflow-states
+
+      # P690: Guard against migrations being placed in the legacy inactive runner
+      # directory (database/migrations/) instead of the active path (scripts/migrations/).
+      # Fails if any .sql file in database/migrations/ appears in the current PR diff.
+      - name: Legacy migration directory guard
+        run: |
+          LEGACY_SQL=$(git diff --name-only origin/main...HEAD -- 'database/migrations/*.sql' 2>/dev/null || true)
+          if [ -n "$LEGACY_SQL" ]; then
+            echo "::error::New SQL migration(s) committed to the INACTIVE legacy path (database/migrations/)."
+            echo "::error::These will NEVER be applied by the active runner. Move them to scripts/migrations/."
+            printf '%s\n' "$LEGACY_SQL" | sed 's/^/  /'
+            exit 1
+          fi
+          echo "Legacy migration directory guard: no new SQL files in database/migrations/ — OK."
