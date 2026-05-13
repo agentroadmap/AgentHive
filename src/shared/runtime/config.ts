@@ -25,6 +25,7 @@
  *   config.audit(); // Get access audit log
  */
 
+import { Client } from "pg";
 import type { Pool, PoolClient } from "pg";
 
 export type ConfigClass = "secret" | "structural" | "registry" | "flag" | "tenant_dsn";
@@ -133,7 +134,7 @@ class ConfigResolver {
 	private yamlConfig: Record<string, any> | null = null;
 	private pool: Pool | null = null;
 	private dbCache: Map<string, any> = new Map();
-	private notifySubscription: PoolClient | null = null;
+	private notifySubscription: Client | null = null;
 
 	// Parse ~/.pgpass for a matching password entry (hostname:port:database:username:password)
 	static parsePgpassFile(
@@ -228,7 +229,14 @@ class ConfigResolver {
 	private async setupNotifyListener(): Promise<void> {
 		if (!this.pool) return;
 		try {
-			const client = await this.pool.connect();
+			// Must use a direct pg.Client (NOT a pool checkout) — LISTEN is
+			// incompatible with PgBouncer transaction-mode pooling (P499).
+			const host = process.env.PGHOST ?? "127.0.0.1";
+			const port = Number(process.env.PGPORT_DIRECT ?? process.env.PGPORT ?? 5432);
+			const user = process.env.PGUSER;
+			const database = process.env.PGDATABASE ?? "agenthive";
+			const client = new Client({ host, port, user, database, keepAlive: true });
+			await client.connect();
 			await client.query("LISTEN runtime_config_changed");
 			client.on("notification", async () => {
 				this.cache.clear();
@@ -514,7 +522,7 @@ class ConfigResolver {
 		if (this.notifySubscription) {
 			try {
 				await this.notifySubscription.query("UNLISTEN runtime_config_changed");
-				this.notifySubscription.release();
+				await this.notifySubscription.end();
 				this.notifySubscription = null;
 			} catch {
 				// Already closed

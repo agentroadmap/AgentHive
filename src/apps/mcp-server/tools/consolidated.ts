@@ -294,6 +294,8 @@ const opsRoutes: RouteMap = {
 	ref_get_term: "ref_get_term",
 	// P498: Config audit tool
 	config_audit: "config_audit",
+	// P499: PgBouncer pool monitoring
+	pgbouncer_stats: "pgbouncer_stats",
 };
 
 const projectRoutes: RouteMap = {

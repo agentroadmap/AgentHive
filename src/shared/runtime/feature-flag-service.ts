@@ -1,4 +1,4 @@
-import { Pool } from "pg";
+import { Client, Pool } from "pg";
 
 /**
  * P523: Unified Feature Flag System
@@ -145,7 +145,14 @@ export class FeatureFlagService {
       return; // Already listening
     }
 
-    const client = await this.pool.connect();
+    // Must use a direct pg.Client (NOT a pool checkout) — LISTEN is
+    // incompatible with PgBouncer transaction-mode pooling (P499).
+    const host = process.env.PGHOST ?? "127.0.0.1";
+    const port = Number(process.env.PGPORT_DIRECT ?? process.env.PGPORT ?? 5432);
+    const user = process.env.PGUSER;
+    const database = process.env.PGDATABASE ?? "agenthive";
+    const client = new Client({ host, port, user, database, keepAlive: true });
+    await client.connect();
     this.listeningChannels.add("feature_flag_changed");
 
     client.on("notification", (msg) => {
@@ -165,7 +172,7 @@ export class FeatureFlagService {
       }
     });
 
-    client.query("LISTEN feature_flag_changed");
+    await client.query("LISTEN feature_flag_changed");
     // Keep client connection alive for the lifetime of the service
   }
 

@@ -1558,6 +1558,62 @@ export async function createMcpServer(
 			},
 		});
 
+		// P499: PgBouncer stats — queries admin console on PGPORT
+		server.addTool({
+			name: "pgbouncer_stats",
+			description:
+				"Query PgBouncer admin console (SHOW POOLS + SHOW STATS). " +
+				"Returns pool saturation, queue depth, and per-database stats. " +
+				"Returns an error message if PgBouncer is not reachable.",
+			inputSchema: {
+				type: "object",
+				properties: {},
+				additionalProperties: false,
+			},
+			handler: async (): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
+				const { Client } = await import("pg");
+				const host = process.env.PGHOST ?? "127.0.0.1";
+				const port = Number(process.env.PGPORT ?? 6432);
+				const adminUser =
+					process.env.PGBOUNCER_ADMIN_USER ?? process.env.PGUSER ?? "pgbouncer";
+				const client = new Client({ host, port, user: adminUser, database: "pgbouncer" });
+				try {
+					await client.connect();
+					const [poolsRes, statsRes] = await Promise.all([
+						client.query("SHOW POOLS"),
+						client.query("SHOW STATS"),
+					]);
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify(
+									{ pools: poolsRes.rows, stats: statsRes.rows },
+									null,
+									2,
+								),
+							},
+						],
+					};
+				} catch (err) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `pgbouncer_stats unavailable: ${(err as Error).message}`,
+							},
+						],
+					};
+				} finally {
+					try {
+						await client.end();
+					} catch {
+						// ignore close errors
+					}
+				}
+			},
+		});
+
 		console.error(
 			"[MCP] Using Postgres backend (agenthive) for proposals, messaging, agents, spending, memory, RFC workflow, SMDL, cubics, pulse, federation, discord",
 		);
