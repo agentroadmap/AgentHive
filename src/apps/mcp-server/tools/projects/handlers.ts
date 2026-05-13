@@ -14,12 +14,13 @@ import { query } from "../../../../postgres/pool.ts";
 import type { CallToolResult } from "../../types.ts";
 
 // In-process session binding: keyed by SSE session id (string) or "process-wide" fallback.
-// Maps to { project_id: number, slug: string, name: string, worktree_root: string }.
 const sessionProjectBindings = new Map<string, {
 	project_id: number;
 	slug: string;
 	name: string;
 	worktree_root: string;
+	git_remote_url: string | null;
+	git_default_branch: string;
 }>();
 
 const SESSION_KEY = "process-wide"; // Fallback when no session_id available.
@@ -62,11 +63,11 @@ export async function setProject(args: {
 
 		if (/^\d+$/.test(projectValue)) {
 			// Numeric id
-			sql = `SELECT project_id, slug, name, worktree_root FROM roadmap.project WHERE project_id = $1`;
+			sql = `SELECT project_id, slug, name, worktree_root, git_remote_url, git_default_branch FROM roadmap.project WHERE project_id = $1`;
 			params.push(Number(projectValue));
 		} else {
 			// Slug
-			sql = `SELECT project_id, slug, name, worktree_root FROM roadmap.project WHERE slug = $1`;
+			sql = `SELECT project_id, slug, name, worktree_root, git_remote_url, git_default_branch FROM roadmap.project WHERE slug = $1`;
 			params.push(projectValue);
 		}
 
@@ -75,6 +76,8 @@ export async function setProject(args: {
 			slug: string;
 			name: string;
 			worktree_root: string;
+			git_remote_url: string | null;
+			git_default_branch: string;
 		}>(sql, params);
 
 		if (!rows.length) {
@@ -104,6 +107,8 @@ export async function setProject(args: {
 			slug: project.slug,
 			name: project.name,
 			worktree_root: project.worktree_root,
+			git_remote_url: project.git_remote_url,
+			git_default_branch: project.git_default_branch,
 		});
 
 		return jsonResult({
@@ -113,6 +118,8 @@ export async function setProject(args: {
 				slug: project.slug,
 				name: project.name,
 				worktree_root: project.worktree_root,
+				git_remote_url: project.git_remote_url,
+				git_default_branch: project.git_default_branch,
 			},
 			scope: args.sessionId ? "session" : "process",
 			note: args.sessionId
@@ -194,6 +201,8 @@ export function getCurrentProject(sessionId?: string): {
 	slug: string;
 	name: string;
 	worktree_root: string;
+	git_remote_url: string | null;
+	git_default_branch: string;
 } | null {
 	const key = sessionId || SESSION_KEY;
 	return sessionProjectBindings.get(key) || null;
