@@ -326,6 +326,27 @@ export class Orchestrator {
 			}, 60_000),
 		);
 
+		// Periodic stale-row inspection: zombie agent_runs, expired leases, stale
+		// dispatches. Runs unconditionally (not gated on ENABLE_POLLING) because
+		// zombie cleanup is maintenance, not a PG NOTIFY fallback. 5-min cadence
+		// is well below the 60-min zombie threshold so zombies are caught quickly.
+		this.pollTimers.set(
+			"stale-row-reaper",
+			setInterval(() => {
+				if (this.stopping) return;
+				void this.trackInFlight(
+					reapStaleRows(
+						getPool(),
+						{ log: (m) => console.log(m), warn: (m) => console.warn(m) },
+						"Orchestrator.Reaper",
+					).catch((err) =>
+						console.error("[Orchestrator] periodic reaper failed:", err),
+					),
+				);
+			}, 5 * 60 * 1000),
+		);
+		console.log("[Orchestrator] periodic stale-row reaper active (5-min interval)");
+
 		this.pollTimers.set(
 			"heartbeat",
 			setInterval(() => {
