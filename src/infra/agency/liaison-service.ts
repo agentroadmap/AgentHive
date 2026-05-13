@@ -75,6 +75,18 @@ export async function liaisonRegister(
 				client.query<T>(text, params as never)
 		: query;
 
+	// End any active session first in a separate statement — PostgreSQL CTEs share
+	// the same snapshot, so an UPDATE in one CTE is invisible to an INSERT in
+	// another CTE of the same statement. The unique partial index
+	// idx_agency_session_one_active (WHERE ended_at IS NULL) would fire because
+	// the INSERT still sees the old un-ended row.
+	await runQuery(
+		`UPDATE roadmap.agency_liaison_session
+		 SET ended_at = now(), end_reason = 'replaced'
+		 WHERE agency_id = $1 AND ended_at IS NULL`,
+		[agency_id],
+	);
+
 	const result = await runQuery(
 		`
     WITH upsert_agency AS (
@@ -89,12 +101,6 @@ export async function liaisonRegister(
         status       = 'active',
         status_reason = NULL
       RETURNING agency_id, status
-    ),
-    end_stale_session AS (
-      UPDATE roadmap.agency_liaison_session
-      SET ended_at = now(), end_reason = 'replaced'
-      WHERE agency_id = $1 AND ended_at IS NULL
-      RETURNING session_id
     ),
     insert_session AS (
       INSERT INTO roadmap.agency_liaison_session (agency_id, liaison_host, started_at)
