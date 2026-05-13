@@ -149,8 +149,6 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					EXTRACT(EPOCH FROM ml.created_at) * 1000 AS timestamp_ms,
 					p.display_id AS proposal_id,
 					ml.from_agent AS agent_id,
-					ml.channel AS channel,
-					ml.message_content AS message_content,
 					COALESCE(ml.from_agent, 'agent') || ' -> ' || COALESCE(ml.to_agent, ml.channel, 'broadcast') || ': ' ||
 						left(regexp_replace(COALESCE(ml.message_content, ''), E'[\\n\\r]+', ' ', 'g'), 120) AS message
 				FROM roadmap.message_ledger ml
@@ -224,28 +222,32 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 			[limit],
 		);
 
-		const filtered = rows.filter((row) => {
-			// Drop liaison heartbeat noise: channels like `system:liaison:*` that post
-			// periodic 'heartbeat' message_content values.
-			const raw = (row.message_content ?? "").toString().trim().toLowerCase();
-			const channel = (row.channel ?? "").toString();
-			if (row.type === "message" && channel.startsWith("system:liaison") && raw === "heartbeat") return false;
-			// Drop entirely blank message rows
-			if (!row.message || String(row.message).trim() === "") return false;
+		const events = rows.map((row) => ({
+			id: row.id,
+			type: row.type,
+			timestamp: timestampToMillis(row.timestamp_ms),
+			proposalId: row.proposal_id ?? undefined,
+			agentId: row.agent_id ?? undefined,
+			message: row.message,
+			metadata: {},
+		}));
+
+		// Filter out liaison heartbeat noise and blank messages at the event layer so
+		// the SQL UNION remains stable across branches. The ledger writes a
+		// display string like "<from> -> <to_or_channel>: <message_content>"; detect
+		// liaison heartbeats by looking for 'system:liaison' in the recipient part
+		// and a trailing 'heartbeat' payload.
+		const filteredEvents = events.filter((ev) => {
+			if (!ev.message || String(ev.message).trim() === "") return false;
+			if (ev.type === "message") {
+				const msg = String(ev.message).toLowerCase().trim();
+				// Look for '-> system:liaison' or '-> system:liaison:' and a heartbeat suffix
+				if (msg.includes("-> system:liaison") && msg.endsWith("heartbeat")) return false;
+			}
 			return true;
 		});
 
-		return dedupeBoardLiveFeed(
-			filtered.map((row) => ({
-				id: row.id,
-				type: row.type,
-				timestamp: timestampToMillis(row.timestamp_ms),
-				proposalId: row.proposal_id ?? undefined,
-				agentId: row.agent_id ?? undefined,
-				message: row.message,
-				metadata: {},
-			})),
-		);
+		return dedupeBoardLiveFeed(filteredEvents);
 	} catch {
 		return getRecentEvents(limit);
 	}
