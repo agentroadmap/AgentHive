@@ -234,14 +234,19 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 		// Filter out liaison heartbeat noise and blank messages at the event layer so
 		// the SQL UNION remains stable across branches. The ledger writes a
 		// display string like "<from> -> <to_or_channel>: <message_content>"; detect
-		// liaison heartbeats by looking for 'system:liaison' in the recipient part
-		// and a trailing 'heartbeat' payload.
+		// liaison heartbeats by matching the recipient part for 'system:liaison' and
+		// the payload word 'heartbeat'. Be conservative: only drop fully blank
+		// messages for the message ledger rows (type === 'message').
 		const filteredEvents = events.filter((ev) => {
-			if (!ev.message || String(ev.message).trim() === "") return false;
+			if (!ev.message || String(ev.message).trim() === "") {
+				// preserve non-message events even if their message is blank
+				if (ev.type !== "message") return true;
+				return false;
+			}
 			if (ev.type === "message") {
 				const msg = String(ev.message).toLowerCase().trim();
-				// Look for '-> system:liaison' or '-> system:liaison:' and a heartbeat suffix
-				if (msg.includes("-> system:liaison") && msg.endsWith("heartbeat")) return false;
+				// Regex: '->' then recipient containing 'system:liaison' then a 'heartbeat' word
+				if (/->\s*[^:]*system:liaison\b[\w:.-]*[:\s].*\bheartbeat\b/.test(msg)) return false;
 			}
 			return true;
 		});
