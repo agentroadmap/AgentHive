@@ -1360,6 +1360,28 @@ export async function handleStateChange(proposalId: string, newState: string) {
 		return;
 	}
 
+	// Backpressure guard: stop queuing new offers when the global open-offer
+	// count exceeds total agency capacity. Prevents the queue from growing
+	// unboundedly while agents are backed up, and ensures urgent proposals
+	// that arrive later don't wait behind a wall of stale unclaimed work.
+	// Threshold = 36 (9 named agencies × max_in_flight=4); env override supported.
+	const MAX_OPEN_OFFERS =
+		Number(process.env.AGENTHIVE_MAX_OPEN_OFFERS ?? "36");
+	const { rows: openOfferRows } = await query<{ cnt: number }>(
+		`SELECT count(*)::int AS cnt
+		   FROM roadmap_workforce.squad_dispatch
+		  WHERE offer_status = 'open'
+		    AND dispatch_status NOT IN ('cancelled', 'failed', 'completed')`,
+	);
+	const openOfferCount = openOfferRows[0]?.cnt ?? 0;
+	if (openOfferCount >= MAX_OPEN_OFFERS) {
+		logger.log(
+			`⏸ P${proposalId} → ${newState}: global open-offer queue at ${openOfferCount}/${MAX_OPEN_OFFERS} — backpressure hold`,
+		);
+		return;
+	}
+
+
 	// Release any locked cubics for this proposal from previous phases
 	await releaseStaleCubics(proposalId);
 
