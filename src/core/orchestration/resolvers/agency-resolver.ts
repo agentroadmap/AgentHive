@@ -129,7 +129,11 @@ export async function resolveAgency(
 		   AND COALESCE(inf.in_flight_count, 0) < pr.max_in_flight
 		   ${tierFilter}
 		   ${capabilityFilter}
-		 ORDER BY pr.throttle_count ASC, pr.last_seen_at DESC NULLS LAST
+		 ORDER BY (vas.dispatchable IS TRUE) DESC,
+		          pr.throttle_count ASC,
+		          COALESCE(inf.in_flight_count, 0) ASC,
+		          pr.last_seen_at DESC NULLS LAST,
+		          RANDOM()
 		 LIMIT 1`,
 		queryParams,
 	);
