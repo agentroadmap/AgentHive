@@ -44,7 +44,7 @@ function recordingExec(): {
 	return { calls, exec };
 }
 
-test("handleOfferDispatch: spawns with capabilities and undefined agentLabel; calls fn_complete_work_offer on success", async () => {
+test("handleOfferDispatch: spawns with capabilities and agencyId as agentLabel; calls fn_complete_work_offer on success", async () => {
 	const spawnCalls: Array<Record<string, unknown>> = [];
 	const { calls: execCalls, exec } = recordingExec();
 
@@ -92,8 +92,8 @@ test("handleOfferDispatch: spawns with capabilities and undefined agentLabel; ca
 	assert.deepEqual(spawnReq.capabilities, ["review", "qa"]);
 	assert.equal(
 		spawnReq.agentLabel,
-		undefined,
-		"agentLabel must be undefined so P852 structured identity fires",
+		"claude/agency-bot",
+		"agentLabel must be the agency id so spawned subprocess claims as the named agent",
 	);
 
 	// Lifecycle assertions: only fn_complete_work_offer (orchestrator is mechanical;

@@ -226,18 +226,30 @@ async function runSpawn(args: {
 	let spawnError: Error | null = null;
 
 	try {
+		// Prefer the agency's own AGENTHIVE_AGENT_PROVIDER / AGENCY_PROVIDER env
+		// over the orchestrator-sent route_hint. The orchestrator defaults the hint
+		// to "claude" when the offer carries no provider preference, which would
+		// cause codex/gemini/copilot agencies to spawn claude processes instead of
+		// their own configured provider.
+		const agencyProvider =
+			(process.env.AGENTHIVE_AGENT_PROVIDER?.trim() ||
+				process.env.AGENCY_PROVIDER?.trim() ||
+				payload.route_hint) as never;
+
 		result = await spawn({
 			worktree,
 			task: `Execute offer ${payload.offer_id} (role: ${payload.role})`,
 			proposalId,
 			stage: payload.role,
 			capabilities,
-			provider: payload.route_hint as never,
+			provider: agencyProvider,
 			briefingId: payload.briefing_id,
 			roleProfileId: payload.role_profile_id ?? null,
 			timeoutMs: spawnTimeoutMs,
-			// agentLabel intentionally omitted — agent-spawner derives the
-			// structured identity (P852) when this is undefined.
+			// Use the agency's own name as the agent label so the spawned
+			// subprocess claims proposals as "adam", "alan", etc. rather than
+			// an auto-generated P852 structured identity string.
+			agentLabel: agencyId,
 		});
 	} catch (err) {
 		spawnError = err instanceof Error ? err : new Error(String(err));
