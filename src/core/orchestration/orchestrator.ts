@@ -441,6 +441,7 @@ export class Orchestrator {
 				   JOIN roadmap_proposal.proposal p ON p.id = w.proposal_id
 				  WHERE w.completed_at IS NULL
 				    AND p.maturity IN ('new', 'active')
+				    AND p.status NOT IN ('COMPLETE')
 				    AND p.gate_scanner_paused = false
 				    AND EXISTS (
 				      SELECT 1 FROM roadmap.workflow_transitions wt
