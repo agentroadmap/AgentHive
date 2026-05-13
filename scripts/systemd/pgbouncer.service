@@ -1,0 +1,35 @@
+[Unit]
+Description=PgBouncer — connection pooler for AgentHive (P499)
+Documentation=https://www.pgbouncer.org/
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=notify
+User=pgbouncer
+Group=pgbouncer
+
+ExecStart=/usr/sbin/pgbouncer /etc/pgbouncer/pgbouncer.ini
+ExecReload=/bin/kill -HUP $MAINPID
+
+Restart=always
+RestartSec=5s
+TimeoutStopSec=30
+KillSignal=SIGTERM
+
+; Watchdog: PgBouncer sends sd_notify watchdog pings every WatchdogSec/2.
+; systemd kills and restarts if it misses two consecutive pings.
+WatchdogSec=30s
+
+; Runtime directories (created by systemd, owned by pgbouncer)
+RuntimeDirectory=pgbouncer
+RuntimeDirectoryMode=0755
+
+; Log directory must exist; create with:
+;   sudo install -d -o pgbouncer -g pgbouncer -m 0755 /var/log/pgbouncer
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pgbouncer
+
+[Install]
+WantedBy=multi-user.target

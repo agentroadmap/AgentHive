@@ -294,6 +294,10 @@ const opsRoutes: RouteMap = {
 	ref_get_term: "ref_get_term",
 	// P498: Config audit tool
 	config_audit: "config_audit",
+	// P499: PgBouncer operator tools
+	pgbouncer_stats: "pgbouncer_stats",
+	pgbouncer_ping: "pgbouncer_ping",
+	pgbouncer_reload: "pgbouncer_reload",
 };
 
 const projectRoutes: RouteMap = {
