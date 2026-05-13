@@ -87,8 +87,7 @@ export async function storeMessage(
         FROM roadmap.agency a
         WHERE a.agency_id = $2
         ON CONFLICT (agency_id, sequence) DO UPDATE
-            SET message_id = EXCLUDED.message_id,
-                ledger_id  = COALESCE(roadmap.liaison_message.ledger_id, EXCLUDED.ledger_id),
+            SET ledger_id  = COALESCE(roadmap.liaison_message.ledger_id, EXCLUDED.ledger_id),
                 host_id    = EXCLUDED.host_id
         RETURNING
             message_id, agency_id, sequence, direction, kind, correlation_id,
