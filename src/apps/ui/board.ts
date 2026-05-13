@@ -115,8 +115,23 @@ export function resolveWorkflowStatuses(
 	proposals: Proposal[],
 	workflowName: string,
 ): string[] {
+	const wf = String(workflowName ?? "").trim();
+	const wfLower = wf.toLowerCase();
+
+	// Special-case: Hotfix view is a cosmetic mapping and doesn't rely on DB when
+	// the Hotfix template isn't loaded. Use canonical hotfix labels by default.
+	if (wfLower === "hotfix") {
+		try {
+			const view = getViewSafe("Hotfix");
+			if (view) return view.stages.map((s) => s.name.toUpperCase());
+		} catch {
+			// fall through
+		}
+		return ["TRIAGE", "FIX", "DEPLOYED", "ESCALATE", "WONT_FIX", "NON_ISSUE"];
+	}
+
 	// Prefer a canonical workflow order when showing the combined "All" view.
-	if (!workflowName || workflowName === "all") {
+	if (!wf || wfLower === "all") {
 		try {
 			const registry = getRegistry();
 			const available = registry.templateNames ?? [];
@@ -140,8 +155,10 @@ export function resolveWorkflowStatuses(
 					// Return canonical statuses that are present (case-insensitive), followed by extras.
 					const ordered = canonical.filter((c) => presentLower.has(c.toLowerCase()));
 					return [
-						...ordered,
-						...Array.from(extras).sort((a, b) => a.localeCompare(b)),
+						...ordered.map((s) => s.toUpperCase()),
+						...Array.from(extras)
+							.map((s) => s.toUpperCase())
+							.sort((a, b) => a.localeCompare(b)),
 					];
 				} catch {
 					// Fall through to alphabetical fallback below
@@ -157,21 +174,23 @@ export function resolveWorkflowStatuses(
 				statuses.add(proposal.status);
 			}
 		}
-		return Array.from(statuses).sort();
+		return Array.from(statuses)
+			.map((s) => s.toUpperCase())
+			.sort();
 	}
 
-	if (workflowName.toLowerCase() === "obsolete") {
+	if (wfLower === "obsolete") {
 		const statuses = new Set<string>();
 		for (const proposal of proposals) {
 			if (isObsoleteProposal(proposal)) {
 				statuses.add(proposal.status);
 			}
 		}
-		return Array.from(statuses).sort();
+		return Array.from(statuses).map((s) => s.toUpperCase()).sort();
 	}
 
 	try {
-		const view = getView(workflowName);
+		const view = getViewSafe(workflowName) ?? getView(workflowName);
 		const canonical = view.stages.map((s) => s.name);
 		const extras = new Set<string>();
 		const validStages = new Set(canonical.map((s) => s.toLowerCase()));
@@ -184,8 +203,8 @@ export function resolveWorkflowStatuses(
 		}
 
 		return [
-			...canonical,
-			...Array.from(extras).sort((a, b) => a.localeCompare(b)),
+			...canonical.map((s) => s.toUpperCase()),
+			...Array.from(extras).map((s) => s.toUpperCase()).sort((a, b) => a.localeCompare(b)),
 		];
 	} catch {
 		const statuses = new Set<string>();
@@ -194,7 +213,7 @@ export function resolveWorkflowStatuses(
 				statuses.add(proposal.status);
 			}
 		}
-		return Array.from(statuses).sort();
+		return Array.from(statuses).map((s) => s.toUpperCase()).sort();
 	}
 }
 
