@@ -98,6 +98,11 @@ export function filterProposalsForWorkflow(
 		return proposals.filter((proposal) => isObsoleteProposal(proposal));
 	}
 
+	if (workflowName.toLowerCase() === "hotfix") {
+		// Hotfix view groups proposals by type rather than the RFC stages.
+		return proposals.filter((proposal) => (proposal.proposalType ?? "").toLowerCase() === "hotfix");
+	}
+
 	try {
 		const view = getView(workflowName);
 		const validStages = new Set(view.stages.map((s) => s.name.toLowerCase()));
