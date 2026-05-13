@@ -90,6 +90,12 @@ export async function liaisonRegister(
         status_reason = NULL
       RETURNING agency_id, status
     ),
+    end_stale_session AS (
+      UPDATE roadmap.agency_liaison_session
+      SET ended_at = now(), end_reason = 'replaced'
+      WHERE agency_id = $1 AND ended_at IS NULL
+      RETURNING session_id
+    ),
     insert_session AS (
       INSERT INTO roadmap.agency_liaison_session (agency_id, liaison_host, started_at)
       VALUES ($1, inet_server_addr()::text, now())
