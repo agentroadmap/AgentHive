@@ -106,11 +106,12 @@ export function filterProposalsForWorkflow(
 	try {
 		const view = getView(workflowName);
 		const validStages = new Set(view.stages.map((s) => s.name.toLowerCase()));
-		return proposals.filter(
-			(proposal) =>
-				!isObsoleteProposal(proposal) &&
-				validStages.has(proposal.status.toLowerCase()),
-		);
+		return proposals.filter((proposal) => {
+			const isHotfix = (proposal.proposalType ?? "").toLowerCase() === "hotfix";
+			// RFC view should exclude hotfix proposals; hotfixs are their own cosmetic view.
+			if (workflowName.toLowerCase() === "rfc" && isHotfix) return false;
+			return !isObsoleteProposal(proposal) && validStages.has(proposal.status.toLowerCase());
+		});
 	} catch {
 		return proposals.filter((proposal) => !isObsoleteProposal(proposal));
 	}
