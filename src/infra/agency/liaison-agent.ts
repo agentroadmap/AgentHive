@@ -531,9 +531,9 @@ export async function monitorTaskDispatch(args: {
 				messageType: terminalOfferStatus(row.offer_status, row.dispatch_status)
 					? row.offer_status === "delivered" ||
 						row.dispatch_status === "completed"
-						? "status"
-						: "error"
-					: "status",
+						? "task_status"
+						: "task_error"
+					: "task_status",
 				correlationId: args.correlationId,
 				replyTo: args.originalMessageId,
 			});
@@ -547,7 +547,7 @@ export async function monitorTaskDispatch(args: {
 		fromAgent: args.identity,
 		toAgent: args.requestor,
 		content: `Dispatch ${args.dispatchId} is still running after ${Math.round(args.timeoutMs / 1000)}s; monitoring stopped.`,
-		messageType: "status",
+		messageType: "task_status",
 		correlationId: args.correlationId,
 		replyTo: args.originalMessageId,
 	});
