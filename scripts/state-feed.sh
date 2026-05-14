@@ -52,7 +52,12 @@ LIMIT 10;
 
 # --- Agent runs ---
 AGENT_RUNS=$($PG -F'|' -c "
-WITH route AS (
+WITH hosts AS (
+  SELECT lower(host_id) AS host_id
+  FROM roadmap.agency
+  WHERE host_id IS NOT NULL
+),
+route AS (
   SELECT DISTINCT ON (model_name)
     model_name, route_provider, agent_provider, agent_cli,
     CASE
@@ -72,7 +77,18 @@ SELECT
     WHEN 'cancelled' THEN '■'
     ELSE '◒'
   END || ' run-' || ar.id ||
-  ' ' || COALESCE(ar.agent_identity, 'agent') ||
+  ' ' || COALESCE(
+    CASE
+      WHEN ar_reg.display_alias IS NULL THEN NULL
+      WHEN array_length(string_to_array(ar_reg.display_alias, '-'), 1) = 3
+       AND lower(split_part(ar_reg.display_alias, '-', 2)) IN (SELECT host_id FROM hosts)
+        THEN split_part(ar_reg.display_alias, '-', 1) || '-' || split_part(ar_reg.display_alias, '-', 3)
+             || ' (' || ar.agent_identity || ')'
+      ELSE ar_reg.display_alias || ' (' || ar.agent_identity || ')'
+    END,
+    ar.agent_identity,
+    'agent'
+  ) ||
   ' proposal=' || COALESCE(p.display_id, ar.proposal_id::text, '-') ||
   ' stage=' || COALESCE(ar.stage, '-') ||
   ' status=' || ar.status ||
@@ -84,6 +100,7 @@ SELECT
   CASE WHEN ar.duration_ms IS NOT NULL THEN ' duration=' || ar.duration_ms::text || 'ms' ELSE '' END
 FROM roadmap_workforce.agent_runs ar
 LEFT JOIN roadmap_proposal.proposal p ON p.id = ar.proposal_id
+LEFT JOIN roadmap_workforce.agent_registry ar_reg ON ar_reg.agent_identity = ar.agent_identity
 LEFT JOIN route ON route.model_name = ar.model_used
 WHERE COALESCE(ar.completed_at, ar.started_at) > '$LAST_CHECK'::timestamptz
 ORDER BY COALESCE(ar.completed_at, ar.started_at) DESC
