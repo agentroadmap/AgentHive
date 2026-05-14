@@ -2,7 +2,11 @@ import type { PoolClient } from "pg";
 import { closePool, getPool, query } from "../../infra/postgres/pool.ts";
 import { pulseHeartbeat } from "../../infra/pulse/heartbeat.ts";
 import { reapStaleRows } from "../pipeline/reap-stale-rows.ts";
-import { postWorkOffer } from "../pipeline/post-work-offer.ts";
+import {
+	BackpressureError,
+	DispatchLoopError,
+	postWorkOffer,
+} from "../pipeline/post-work-offer.ts";
 import { enqueueNotification } from "../notifications/enqueue.ts";
 import { getUnlockedGateQueue } from "../proposal/gate-scanner-v2.ts";
 import { loadStateNames } from "../workflow/state-names.ts";
@@ -759,6 +763,22 @@ export class Orchestrator {
 
 				dispatched++;
 			} catch (err) {
+				// Backpressure isn't a failure — it's the cap doing its job.
+				// Stop scanning this tick: if the queue is full, no point
+				// trying more candidates. They'll be picked up next tick.
+				if (err instanceof BackpressureError) {
+					console.log(
+						`[Orchestrator] scanQueues: ${err.message} stopping at proposal ${candidate.id}, dispatched=${dispatched}`,
+					);
+					break;
+				}
+				// Circuit breaker is also expected behavior — log at warn, not error.
+				if (err instanceof DispatchLoopError) {
+					console.warn(
+						`[Orchestrator] scanQueues: ${err.message}`,
+					);
+					continue;
+				}
 				console.error(
 					`[Orchestrator] scanQueues: dispatch failed for proposal ${candidate.id}:`,
 					err instanceof Error ? err.message : err,
