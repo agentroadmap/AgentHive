@@ -776,7 +776,7 @@ export class Core {
 						.toISOString()
 						.slice(0, 16)
 						.replace("T", " ")
-				: "",
+				: undefined,
 			updatedDate: row.modified_at || row.created_at
 				? new Date(row.modified_at || row.created_at)
 						.toISOString()

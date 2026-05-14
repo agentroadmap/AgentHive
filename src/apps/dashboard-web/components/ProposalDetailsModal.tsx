@@ -506,6 +506,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 			setDiscussions([]);
 			return;
 		}
+		if (!isOpen) return;
 		let cancelled = false;
 		apiClient
 			.fetchProposalDecisions(proposalId)
@@ -534,7 +535,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 		return () => {
 			cancelled = true;
 		};
-	}, [proposalId]);
+	}, [proposalId, isOpen]);
 
 	const handleCancelEdit = useCallback(() => {
 		if (isDirty) {
