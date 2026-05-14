@@ -659,6 +659,16 @@ export class Orchestrator {
 			{ log: (m) => console.log(m), warn: (m) => console.warn(m) },
 			"Orchestrator.Reaper",
 		);
+
+		// Boot-time offer reaper: reapStaleRows above only catches dispatches
+		// whose dispatch_status='assigned'/'active' have aged past 20m. It
+		// leaves offer_status='claimed' rows alone — those are handled by
+		// fn_reap_expired_offers, which the periodic timer runs every 60s but
+		// only AFTER startMaintenance(). Without a boot pass, the first
+		// scanQueues tick sees the in-flight cap already poisoned by orphaned
+		// claims from the prior session (observed 2026-05-14: 25 stale rows
+		// from 5h earlier blocked the cap at boot).
+		await runOfferReaper(query, console, "Orchestrator.BootReaper");
 	}
 
 	/**
