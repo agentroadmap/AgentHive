@@ -436,12 +436,23 @@ async function handleNotification(
 
 async function main() {
 	const pgPassword = getPGPassword();
+	// LISTEN/NOTIFY must bypass PgBouncer. Transaction-pool mode
+	// multiplexes/closes server connections after each transaction, which
+	// silently drops notifications routed to the original LISTEN session.
+	// PGPORT_DIRECT is the per-process opt-out — set to 5432 (the real PG
+	// port) in /etc/agenthive/env alongside PGPORT=6432 (pgbouncer).
 	const client = new Client({
 		host: process.env.PGHOST ?? process.env.PG_HOST ?? "127.0.0.1",
-		port: Number(process.env.PGPORT ?? process.env.PG_PORT ?? "5432"),
+		port: Number(
+			process.env.PGPORT_DIRECT ??
+				process.env.PGPORT ??
+				process.env.PG_PORT ??
+				"5432",
+		),
 		user: process.env.PGUSER ?? process.env.PG_USER,
 		password: pgPassword,
 		database: process.env.PGDATABASE ?? process.env.PG_DATABASE ?? "agenthive",
+		application_name: "agenthive-state-feed",
 	});
 
 	await client.connect();
