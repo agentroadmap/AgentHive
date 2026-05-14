@@ -12,6 +12,7 @@ import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import {
 	_resetActiveSpawnForTest,
+	_resetMaxInFlightCacheForTest,
 	handleOfferDispatch,
 	type SqlExec,
 } from "./offer-dispatch-handler.ts";
@@ -372,13 +373,16 @@ test("handleOfferDispatch: renewal timer fires fn_renew_lease while spawn runs",
 
 // ── Single-active-spawn invariant ─────────────────────────────────────────────
 
-test("handleOfferDispatch: busy agency declines second offer with complete-as-failed", async () => {
+test("handleOfferDispatch: at-capacity agency returns offer via fn_return_work_offer (max_in_flight=1)", async () => {
 	_resetActiveSpawnForTest();
+	_resetMaxInFlightCacheForTest();
 	const execCalls: Array<{ sql: string; params: unknown[] }> = [];
 	const exec: SqlExec = async (sql, params) => {
 		execCalls.push({ sql, params: params ?? [] });
 		if (sql.includes("FROM roadmap.agency"))
 			return { rows: [{ paused_until: null }] };
+		if (sql.includes("FROM roadmap_workforce.provider_registry"))
+			return { rows: [{ max_in_flight: 1 }] };
 		return { rows: [] };
 	};
 
@@ -435,13 +439,27 @@ test("handleOfferDispatch: busy agency declines second offer with complete-as-fa
 
 	assert.equal(secondSpawnCalled, false, "second offer must NOT trigger a spawn");
 
-	// Find the busy-decline complete call for the second offer.
+	// Decline must go through fn_return_work_offer, NOT fn_complete_work_offer.
 	const completeCalls = execCalls.filter((c) =>
 		c.sql.includes("fn_complete_work_offer"),
 	);
-	const secondDecline = completeCalls.find((c) => c.params[0] === 200);
-	assert.ok(secondDecline, "second offer must be completed via fn_complete_work_offer");
-	assert.deepEqual(secondDecline!.params, [200, "alex", "tok-second", "failed"]);
+	assert.equal(
+		completeCalls.length,
+		0,
+		"capacity decline must NOT use fn_complete_work_offer (no failure pollution)",
+	);
+	const returnCalls = execCalls.filter((c) =>
+		c.sql.includes("fn_return_work_offer"),
+	);
+	assert.equal(returnCalls.length, 1, "exactly one fn_return_work_offer call");
+	assert.equal(returnCalls[0].params[0], 200);
+	assert.equal(returnCalls[0].params[1], "alex");
+	assert.equal(returnCalls[0].params[2], "tok-second");
+	assert.match(
+		String(returnCalls[0].params[3]),
+		/agency_at_capacity:\d+\/\d+/,
+		"reason should embed the observed count/max",
+	);
 
 	// Resolve the first spawn so its finally clears activeSpawn and the test
 	// process can exit cleanly. (Without this the runner hangs on a pending
@@ -459,11 +477,14 @@ test("handleOfferDispatch: busy agency declines second offer with complete-as-fa
 
 test("handleOfferDispatch: after spawn completes, agency accepts the NEXT offer", async () => {
 	_resetActiveSpawnForTest();
+	_resetMaxInFlightCacheForTest();
 	const execCalls: Array<{ sql: string; params: unknown[] }> = [];
 	const exec: SqlExec = async (sql, params) => {
 		execCalls.push({ sql, params: params ?? [] });
 		if (sql.includes("FROM roadmap.agency"))
 			return { rows: [{ paused_until: null }] };
+		if (sql.includes("FROM roadmap_workforce.provider_registry"))
+			return { rows: [{ max_in_flight: 1 }] };
 		return { rows: [] };
 	};
 
@@ -513,4 +534,65 @@ test("handleOfferDispatch: after spawn completes, agency accepts the NEXT offer"
 	for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
 
 	assert.equal(spawn1Calls, 2, "both offers should produce a spawn — the second is accepted after the first settles");
+});
+
+test("handleOfferDispatch: max_in_flight=2 allows two concurrent spawns, returns the third", async () => {
+	_resetActiveSpawnForTest();
+	_resetMaxInFlightCacheForTest();
+	const execCalls: Array<{ sql: string; params: unknown[] }> = [];
+	const exec: SqlExec = async (sql, params) => {
+		execCalls.push({ sql, params: params ?? [] });
+		if (sql.includes("FROM roadmap.agency"))
+			return { rows: [{ paused_until: null }] };
+		if (sql.includes("FROM roadmap_workforce.provider_registry"))
+			return { rows: [{ max_in_flight: 2 }] };
+		return { rows: [] };
+	};
+
+	// Deferred spawns so the first two stay active simultaneously.
+	const resolvers: Array<(v: SpawnResult) => void> = [];
+	let spawnCallCount = 0;
+	const deferredSpawn = (req: Record<string, unknown>): Promise<SpawnResult> => {
+		spawnCallCount++;
+		return new Promise<SpawnResult>((resolve) => {
+			resolvers.push(resolve);
+		});
+	};
+
+	const mk = (id: number, token: string) =>
+		makeMessage({
+			offer_id: `00000000-0000-0000-0000-${id.toString().padStart(12, "0")}`,
+			role: "develop",
+			required_capabilities: [],
+			route_hint: "claude-code",
+			dispatch_id: id,
+			claim_token: token,
+			lease_ttl_seconds: 60,
+		});
+
+	await handleOfferDispatch("pete", mk(11, "t1"), {
+		spawn: deferredSpawn as never, exec, logger: silentLogger(),
+		resolveWorktree: () => "wt", renewalIntervalMs: 1_000_000,
+	});
+	await handleOfferDispatch("pete", mk(12, "t2"), {
+		spawn: deferredSpawn as never, exec, logger: silentLogger(),
+		resolveWorktree: () => "wt", renewalIntervalMs: 1_000_000,
+	});
+	await handleOfferDispatch("pete", mk(13, "t3"), {
+		spawn: deferredSpawn as never, exec, logger: silentLogger(),
+		resolveWorktree: () => "wt", renewalIntervalMs: 1_000_000,
+	});
+
+	assert.equal(spawnCallCount, 2, "first two offers spawn; third is over capacity");
+	const returnCalls = execCalls.filter((c) =>
+		c.sql.includes("fn_return_work_offer"),
+	);
+	assert.equal(returnCalls.length, 1, "third offer returned");
+	assert.equal(returnCalls[0].params[0], 13, "the third dispatch_id was returned");
+
+	// Cleanup so the test runner can exit.
+	for (const r of resolvers) {
+		r({ agentRunId: "run", worktree: "wt", exitCode: 0, stdout: "", stderr: "", durationMs: 1 });
+	}
+	for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
 });

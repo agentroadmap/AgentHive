@@ -82,31 +82,33 @@ interface OfferDispatchEnvelope {
 const DEFAULT_LEASE_TTL_SECONDS = 60;
 
 /**
- * Per-process single-active-spawn invariant.
+ * Per-agency concurrent-spawn counter (per-process module-level state).
  *
- * An agency is one process; one process focuses on one CLI subprocess at a
- * time. When an offer_dispatch arrives while a prior spawn is still running,
- * we refuse the new claim (complete-as-failed) so the reaper requeues the
- * offer and another idle agency claims it.
+ * Each agency runs in its own Node process; this counter tracks the number of
+ * in-flight runSpawn promises for the local agency. The threshold is read
+ * from roadmap_workforce.provider_registry.max_in_flight per offer so an
+ * operator can tune the per-agency cap via SQL without restart.
  *
- * This is stronger than `max_in_flight`: it eliminates concurrency entirely
- * at the agency boundary. The orchestrator's global cap bounds total work
- * in the system; this invariant bounds work per agency to exactly one.
+ * Semantics (per operator policy 2026-05-14):
+ *   "Claim is calculated intention; if there is an obstacle, an agency can
+ *    regret and return the offer."
  *
- * Module-level state: each agency runs in its own Node process, so the
- * variable is naturally per-agency. Test injection overrides it to keep
- * tests deterministic.
+ * When activeSpawnCount >= max_in_flight at the moment a dispatch arrives,
+ * the handler calls fn_return_work_offer (NOT fn_complete_work_offer with
+ * 'failed'). fn_return_work_offer reverts offer_status from 'claimed' to
+ * 'open', does not increment reissue_count, and emits work_offers notify so
+ * any other idle agency picks it up immediately.
  */
-let activeSpawn: Promise<unknown> | null = null;
+let activeSpawnCount = 0;
 
 /** @internal — reset for tests that share module state. */
 export function _resetActiveSpawnForTest(): void {
-	activeSpawn = null;
+	activeSpawnCount = 0;
 }
 
 /** @internal — peek for tests. */
-export function _activeSpawnForTest(): Promise<unknown> | null {
-	return activeSpawn;
+export function _activeSpawnCountForTest(): number {
+	return activeSpawnCount;
 }
 
 const defaultExec: SqlExec = (sql, params) =>
@@ -166,19 +168,27 @@ export async function handleOfferDispatch(
 		return;
 	}
 
-	// Single-active-spawn invariant: an agency processes one offer at a time.
-	// Reject the new offer immediately so the reaper requeues it to an idle
-	// agency rather than queuing locally or running concurrent spawns.
-	if (activeSpawn !== null) {
+	// Capacity gate: if this agency is at or above its max_in_flight threshold
+	// (configured per-agency in provider_registry), return the offer instead
+	// of accepting it. fn_return_work_offer flips offer_status back to 'open',
+	// rotates the claim token, and pg_notify's the claim loop so an idle
+	// agency picks it up. No reissue penalty, no failure metric pollution.
+	const maxInFlight = await readAgencyMaxInFlight(agencyId, exec, logger);
+	if (activeSpawnCount >= maxInFlight) {
 		logger.warn(
-			`[OfferDispatchHandler] ${agencyId}: busy with prior spawn; declining offer=${payload.offer_id} role=${payload.role}`,
+			`[OfferDispatchHandler] ${agencyId}: at capacity (${activeSpawnCount}/${maxInFlight}); returning offer=${payload.offer_id} role=${payload.role}`,
 		);
 		await exec(
-			`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, $4)`,
-			[payload.dispatch_id, agencyId, payload.claim_token, "failed"],
+			`SELECT roadmap_workforce.fn_return_work_offer($1, $2, $3, $4)`,
+			[
+				payload.dispatch_id,
+				agencyId,
+				payload.claim_token,
+				`agency_at_capacity:${activeSpawnCount}/${maxInFlight}`,
+			],
 		).catch((err) => {
 			logger.error(
-				`[OfferDispatchHandler] ${agencyId}: fn_complete_work_offer failed on busy-decline:`,
+				`[OfferDispatchHandler] ${agencyId}: fn_return_work_offer failed on capacity-decline:`,
 				err instanceof Error ? err.message : err,
 			);
 		});
@@ -251,11 +261,12 @@ export async function handleOfferDispatch(
 		);
 	});
 
-	// Reserve the agency for this spawn. The `finally` clears the slot whether
-	// the spawn succeeds, fails, throws, or times out — so the agency cannot
-	// get stuck "busy" if the runSpawn pipeline misbehaves.
-	activeSpawn = spawnPromise.finally(() => {
-		activeSpawn = null;
+	// Reserve a capacity slot. The `finally` decrements whether the spawn
+	// succeeds, fails, throws, or times out — so the counter never gets stuck
+	// above zero if runSpawn misbehaves.
+	activeSpawnCount++;
+	spawnPromise.finally(() => {
+		activeSpawnCount = Math.max(0, activeSpawnCount - 1);
 	});
 }
 
@@ -429,6 +440,51 @@ async function runSpawn(args: {
 
 interface AgencyMetadataRow {
 	paused_until: string | null;
+}
+
+/**
+ * Look up roadmap_workforce.provider_registry.max_in_flight for the agency.
+ * Cached briefly per process to avoid hammering the DB on every dispatch.
+ * On any error (missing row, transient DB issue), defaults to 1 — strictest
+ * gate, fail-safe.
+ */
+const MAX_IN_FLIGHT_CACHE_MS = 30_000;
+let maxInFlightCache: { value: number; expiresAt: number } | null = null;
+
+/** @internal — reset for tests. */
+export function _resetMaxInFlightCacheForTest(): void {
+	maxInFlightCache = null;
+}
+
+async function readAgencyMaxInFlight(
+	agencyId: string,
+	exec: SqlExec,
+	logger: Pick<Console, "log" | "warn" | "error">,
+): Promise<number> {
+	const now = Date.now();
+	if (maxInFlightCache && maxInFlightCache.expiresAt > now) {
+		return maxInFlightCache.value;
+	}
+	try {
+		const result = (await exec(
+			`SELECT pr.max_in_flight
+			 FROM roadmap_workforce.provider_registry pr
+			 JOIN roadmap_workforce.agent_registry ar ON ar.id = pr.agency_id
+			 WHERE ar.agent_identity = $1
+			 ORDER BY pr.id DESC
+			 LIMIT 1`,
+			[agencyId],
+		)) as { rows: Array<{ max_in_flight: number }> } | undefined;
+		const value = result?.rows?.[0]?.max_in_flight ?? 1;
+		maxInFlightCache = { value, expiresAt: now + MAX_IN_FLIGHT_CACHE_MS };
+		return value;
+	} catch (err) {
+		logger.warn(
+			`[OfferDispatchHandler] ${agencyId}: readAgencyMaxInFlight failed; defaulting to 1:`,
+			err instanceof Error ? err.message : err,
+		);
+		return 1;
+	}
 }
 
 /**
