@@ -33,6 +33,11 @@ import {
 	endLiaisonSession,
 	checkAndMarkDormant,
 } from "../src/infra/agency/liaison-service.ts";
+import {
+	recordCheckIn,
+	scanAndTransitionSilentAgencies,
+	emitOfflineAlerts,
+} from "../src/core/orchestration/resolvers/agency-resolver.ts";
 
 // --- AC-1: Read required env vars ---
 const agencyId = process.env.AGENCY_ID;
@@ -84,6 +89,8 @@ async function main() {
 			if (!hb.dispatchable) {
 				console.warn(`[Liaison] Heartbeat OK but agency not dispatchable: status=${hb.agency_status} silence=${hb.silence_seconds}s`);
 			}
+			// Keep provider_registry in sync with liaison heartbeat (AC-1, P765)
+			await recordCheckIn(agencyId!);
 		} catch (err) {
 			console.error("[Liaison] Heartbeat error:", err);
 		}
@@ -95,6 +102,12 @@ async function main() {
 			const dormantCount = await checkAndMarkDormant();
 			if (dormantCount > 0) {
 				console.log(`[Liaison] Dormancy sweep: ${dormantCount} agenc${dormantCount === 1 ? "y" : "ies"} marked dormant`);
+			}
+			// Transition silent provider_registry rows and alert on prolonged offline (P765)
+			await scanAndTransitionSilentAgencies();
+			const alerted = await emitOfflineAlerts();
+			if (alerted > 0) {
+				console.log(`[Liaison] Offline alert: ${alerted} agenc${alerted === 1 ? "y" : "ies"} notified`);
 			}
 		} catch (err) {
 			console.error("[Liaison] Dormancy sweep error:", err);
