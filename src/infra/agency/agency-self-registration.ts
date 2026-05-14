@@ -44,6 +44,10 @@ import {
 	liaisonHeartbeat,
 	liaisonRegister,
 } from "./liaison-service.ts";
+import {
+	recordCheckIn,
+	scanAndTransitionSilentAgencies,
+} from "../../core/orchestration/resolvers/agency-resolver.ts";
 import { resolveAgencyCurrentRoute } from "../../core/runtime/agency-route-resolver.ts";
 
 export interface AgencySelfRegistrationOptions {
@@ -355,7 +359,7 @@ export async function selfRegisterAgency(
 		`[AgencySelfReg] ${displayLabel} hub started — listening for offer_dispatch + assistance_request + liaison_pong`,
 	);
 
-	// 6. Heartbeat: liaisonHeartbeat (DB) + pulseHeartbeat (fleet observability).
+	// 6. Heartbeat: liaisonHeartbeat (DB) + recordCheckIn (P765 AC-1 liveness) + pulseHeartbeat.
 	const heartbeatTimer = setInterval(async () => {
 		try {
 			await liaisonHeartbeat({ session_id: sessionId, status: "active" });
@@ -364,6 +368,12 @@ export async function selfRegisterAgency(
 				`[AgencySelfReg] ${displayLabel} heartbeat error: ${err instanceof Error ? err.message : err}`,
 			);
 		}
+		// P765 AC-1: update provider_registry.last_seen_at and auto-recover from offline→dormant
+		void recordCheckIn(agencyId).catch((e) =>
+			logger.warn(
+				`[AgencySelfReg] ${displayLabel} recordCheckIn failed: ${e instanceof Error ? e.message : e}`,
+			),
+		);
 		void pulseHeartbeat(agencyId, { currentTask: "agency-runtime" }).catch(
 			(e) =>
 				logger.warn(
@@ -379,8 +389,9 @@ export async function selfRegisterAgency(
 		),
 	);
 
-	// 7. Dormancy sweep — marks agencies silent > 90 s as dormant. Cheap to run
-	// from any agency process; idempotent across the fleet.
+	// 7. Dormancy sweep — marks agencies silent > 90 s as dormant (roadmap.agency),
+	// transitions provider_registry liveness states, and emits offline alerts.
+	// Cheap to run from any agency process; idempotent across the fleet.
 	const dormancyTimer = setInterval(async () => {
 		try {
 			const count = await checkAndMarkDormant();
@@ -394,6 +405,12 @@ export async function selfRegisterAgency(
 				`[AgencySelfReg] ${displayLabel} dormancy sweep error: ${err instanceof Error ? err.message : err}`,
 			);
 		}
+		// P765 AC-3/AC-5: transition provider_registry liveness states and emit offline alerts
+		void scanAndTransitionSilentAgencies().catch((e) =>
+			logger.warn(
+				`[AgencySelfReg] ${displayLabel} liveness scan error: ${e instanceof Error ? e.message : e}`,
+			),
+		);
 	}, dormancySweepMs);
 
 	let stopped = false;

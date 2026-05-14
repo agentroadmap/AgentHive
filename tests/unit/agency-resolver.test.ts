@@ -9,6 +9,8 @@ const {
 	resolveAgency,
 	recordSpawnFailure,
 	recordCheckIn,
+	scanAndTransitionSilentAgencies,
+	resumeAgencyProviderLiaison,
 	THROTTLE_THRESHOLD,
 	_setQueryForTest,
 } = await import("../../src/core/orchestration/resolvers/agency-resolver.ts");
@@ -114,4 +116,65 @@ test("recordCheckIn decays recent_failure_count (SQL check)", async () => {
 	await recordCheckIn("claude-opus");
 	const sql = queryCalls.at(-1)!.sql;
 	assert.ok(sql.includes("recent_failure_count"));
+});
+
+// P765 AC-1: offline → dormant auto-recovery
+test("recordCheckIn allows offline→dormant transition (SQL check)", async () => {
+	mockRows = [];
+	queryCalls.length = 0;
+	await recordCheckIn("claude-opus");
+	const sql = queryCalls.at(0)!.sql;
+	assert.ok(sql.includes("offline"), "must handle offline status in CASE");
+	assert.ok(
+		sql.includes("dormant"),
+		"must transition offline→dormant on check-in",
+	);
+	assert.ok(
+		!sql.includes("NOT IN ('offline'") && !sql.includes("NOT IN ('offline', 'retired')"),
+		"must NOT exclude offline from WHERE clause",
+	);
+});
+
+test("recordCheckIn clears offline_alerted_at on recovery (SQL check)", async () => {
+	mockRows = [];
+	queryCalls.length = 0;
+	await recordCheckIn("claude-opus");
+	const sql = queryCalls.at(0)!.sql;
+	assert.ok(sql.includes("offline_alerted_at"), "must clear alert flag on recovery");
+	assert.ok(sql.includes("offline_since_at"), "must clear episode timestamp on recovery");
+});
+
+// P765 AC-3/AC-5: liveness scan transitions
+test("scanAndTransitionSilentAgencies marks active→offline after 30 min (SQL check)", async () => {
+	mockRows = [];
+	queryCalls.length = 0;
+	await scanAndTransitionSilentAgencies();
+	const sqls = queryCalls.map((c) => c.sql);
+	const offlineSql = sqls.find((s) => s.includes("'offline'") && s.includes("30 minutes"));
+	assert.ok(offlineSql, "must transition to offline after 30 min silence");
+	assert.ok(offlineSql!.includes("offline_since_at"), "must record offline_since_at timestamp");
+});
+
+test("scanAndTransitionSilentAgencies marks active→dormant after 5 min (SQL check)", async () => {
+	mockRows = [];
+	queryCalls.length = 0;
+	await scanAndTransitionSilentAgencies();
+	const sqls = queryCalls.map((c) => c.sql);
+	const dormantSql = sqls.find((s) => s.includes("'dormant'") && s.includes("5 minutes"));
+	assert.ok(dormantSql, "must transition to dormant after 5 min silence");
+});
+
+// P765 AC-2: operator resume
+test("resumeAgencyProviderLiaison resets offline and throttle state (SQL check)", async () => {
+	mockRows = [];
+	queryCalls.length = 0;
+	await resumeAgencyProviderLiaison("claude-opus");
+	const sqls = queryCalls.map((c) => c.sql);
+	assert.ok(sqls.length >= 2, "must issue at least two queries (update + notify)");
+	const updateSql = sqls.find((s) => s.includes("offline_alerted_at") || s.includes("offline_since_at"));
+	assert.ok(updateSql, "must clear offline tracking columns");
+	assert.ok(
+		sqls.some((s) => s.includes("'retired'")),
+		"must exclude retired agencies from resume",
+	);
 });

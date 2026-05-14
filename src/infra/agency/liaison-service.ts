@@ -234,6 +234,41 @@ export async function agencyReactivate(agency_id: string): Promise<string> {
 }
 
 /**
+ * P765 AC-2: Operator resume — force an agency to active from any non-retired state.
+ * Updates both roadmap.agency (liaison layer) and provider_registry (liveness layer).
+ * Clears all offline/throttle tracking state. Idempotent if already active.
+ */
+export async function agencyResume(agency_id: string): Promise<string> {
+	if (!agency_id?.trim()) throw new Error("agency_id is required");
+
+	await query(
+		`UPDATE roadmap.agency
+		 SET status = 'active', status_reason = 'Operator resume'
+		 WHERE agency_id = $1 AND status <> 'retired'`,
+		[agency_id],
+	);
+
+	await query(
+		`UPDATE roadmap_workforce.provider_registry pr
+		 SET status              = 'active',
+		     status_reason       = 'Operator resume',
+		     offline_since_at    = NULL,
+		     offline_alerted_at  = NULL,
+		     throttle_count      = 0,
+		     recent_failure_count = 0,
+		     last_failure_at     = NULL,
+		     updated_at          = now()
+		 FROM roadmap_workforce.agent_registry ar
+		 WHERE pr.agency_id = ar.id
+		   AND ar.agent_identity = $1
+		   AND pr.status <> 'retired'`,
+		[agency_id],
+	);
+
+	return "active";
+}
+
+/**
  * End a liaison session on shutdown or crash.
  */
 export async function endLiaisonSession(
