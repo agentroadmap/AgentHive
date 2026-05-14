@@ -513,7 +513,8 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 			.then((nextDecisions) => {
 				if (!cancelled) setDecisions(nextDecisions);
 			})
-			.catch(() => {
+			.catch((err) => {
+				console.warn("[P801] fetchProposalDecisions failed:", err);
 				if (!cancelled) setDecisions([]);
 			});
 		apiClient
@@ -521,7 +522,8 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 			.then((nextReviews) => {
 				if (!cancelled) setReviews(nextReviews);
 			})
-			.catch(() => {
+			.catch((err) => {
+				console.warn("[P801] fetchProposalReviews failed:", err);
 				if (!cancelled) setReviews([]);
 			});
 		apiClient
@@ -529,7 +531,8 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 			.then((nextDiscussions) => {
 				if (!cancelled) setDiscussions(nextDiscussions);
 			})
-			.catch(() => {
+			.catch((err) => {
+				console.warn("[P801] fetchProposalDiscussions failed:", err);
 				if (!cancelled) setDiscussions([]);
 			});
 		return () => {
