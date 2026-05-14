@@ -231,6 +231,93 @@ test("handleOfferDispatch: missing dispatch_id or claim_token aborts before spaw
 	assert.equal(execCalls.length, 0);
 });
 
+test("handleOfferDispatch: paused agency declines spawn and completes offer as failed", async () => {
+	let spawnCalled = false;
+	const execCalls: Array<{ sql: string; params: unknown[] }> = [];
+	const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+	const exec: SqlExec = async (sql, params) => {
+		execCalls.push({ sql, params: params ?? [] });
+		if (sql.includes("FROM roadmap.agency"))
+			return { rows: [{ paused_until: future }] };
+		return { rows: [] };
+	};
+
+	const msg = makeMessage({
+		offer_id: "00000000-0000-0000-0000-000000000fff",
+		role: "develop",
+		required_capabilities: [],
+		route_hint: "claude-code",
+		dispatch_id: 99,
+		claim_token: "tok-paused",
+		lease_ttl_seconds: 60,
+	});
+
+	await handleOfferDispatch("claude/agency-bot", msg, {
+		spawn: (async () => {
+			spawnCalled = true;
+			return {} as SpawnResult;
+		}) as never,
+		exec,
+		logger: silentLogger(),
+		resolveWorktree: () => "wt",
+		renewalIntervalMs: 1_000_000,
+	});
+
+	assert.equal(spawnCalled, false, "paused agency must not spawn");
+	const completeCalls = execCalls.filter((c) =>
+		c.sql.includes("fn_complete_work_offer"),
+	);
+	assert.equal(completeCalls.length, 1, "offer completed-as-failed so reaper requeues to another agency");
+	assert.deepEqual(completeCalls[0].params, [99, "claude/agency-bot", "tok-paused", "failed"]);
+});
+
+test("handleOfferDispatch: codex usage-limit detected → throttle + pause SQL fired", async () => {
+	const execCalls: Array<{ sql: string; params: unknown[] }> = [];
+	const exec: SqlExec = async (sql, params) => {
+		execCalls.push({ sql, params: params ?? [] });
+		if (sql.includes("FROM roadmap.agency"))
+			return { rows: [{ paused_until: null }] };
+		return { rows: [] };
+	};
+
+	const fakeSpawn = async (req: Record<string, unknown>): Promise<SpawnResult> => ({
+		agentRunId: "run-codex-limit",
+		worktree: req.worktree as string,
+		exitCode: 1,
+		stdout:
+			"OpenAI Codex v0.130.0\nERROR: You've hit your usage limit. Upgrade to Pro... try again at 3:21 PM.",
+		stderr: "",
+		durationMs: 100,
+	});
+
+	const msg = makeMessage({
+		offer_id: "00000000-0000-0000-0000-00000000c0de",
+		role: "develop",
+		required_capabilities: [],
+		route_hint: "codex",
+		dispatch_id: 200,
+		claim_token: "tok-codex",
+		lease_ttl_seconds: 60,
+	});
+
+	await handleOfferDispatch("calvin", msg, {
+		spawn: fakeSpawn as never,
+		exec,
+		logger: silentLogger(),
+		resolveWorktree: () => "codex-one",
+		renewalIntervalMs: 1_000_000,
+	});
+
+	for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+
+	const throttleCalls = execCalls.filter((c) =>
+		c.sql.includes("host_model_route_throttle"),
+	);
+	assert.equal(throttleCalls.length, 1, "throttle row upserted exactly once");
+	assert.equal(throttleCalls[0].params[0], "openai");
+	assert.equal(throttleCalls[0].params[1], "gpt-5.4");
+});
+
 test("handleOfferDispatch: renewal timer fires fn_renew_lease while spawn runs", async () => {
 	let renewCount = 0;
 	const exec: SqlExec = async (sql) => {

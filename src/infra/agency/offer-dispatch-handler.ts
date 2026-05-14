@@ -25,6 +25,12 @@ import { spawnAgent } from "../../core/orchestration/agent-spawner.ts";
 import type { SpawnResult } from "../../core/orchestration/agent-spawner.ts";
 import type { LiaisonMessage } from "./liaison-message-types.ts";
 import { sendMessage } from "./liaison-message-service.ts";
+import {
+	detectUsageLimit,
+	isLongWindow,
+	resetSecondsForSignal,
+	type UsageLimitProvider,
+} from "./usage-limit-detector.ts";
 
 export type SqlExec = (sql: string, params?: unknown[]) => Promise<unknown>;
 
@@ -129,6 +135,27 @@ export async function handleOfferDispatch(
 		logger.warn(
 			`[OfferDispatchHandler] ${agencyId}: payload missing dispatch_id or claim_token; cannot renew/complete the lease — refusing to spawn`,
 		);
+		return;
+	}
+
+	// Usage-limit pause: if this agency has been paused after a prior usage-
+	// limit hit, decline to spawn so the orchestrator's reissue logic routes
+	// the offer to an unpaused agency. We still must call fn_complete_work_offer
+	// so the orchestrator can see the offer is done and create a new dispatch.
+	const pausedUntil = await readAgencyPausedUntil(agencyId, exec, logger);
+	if (pausedUntil && pausedUntil.getTime() > Date.now()) {
+		logger.warn(
+			`[OfferDispatchHandler] ${agencyId}: paused until ${pausedUntil.toISOString()} (usage-limit); declining offer=${payload.offer_id} role=${payload.role}`,
+		);
+		await exec(
+			`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, $4)`,
+			[payload.dispatch_id, agencyId, payload.claim_token, "failed"],
+		).catch((err) => {
+			logger.error(
+				`[OfferDispatchHandler] ${agencyId}: fn_complete_work_offer failed on paused-decline:`,
+				err instanceof Error ? err.message : err,
+			);
+		});
 		return;
 	}
 
@@ -263,6 +290,43 @@ async function runSpawn(args: {
 
 	clearInterval(renewalTimer);
 
+	// Usage-limit detection: scan spawn output for known provider limit
+	// signals (codex "hit your usage limit", claude/gemini/copilot equivalents).
+	// On detection: throttle the route AND, for long-window resets (>2h or
+	// unknown), also pause this agency in DB so it stops claiming until reset.
+	const provider =
+		(process.env.AGENTHIVE_AGENT_PROVIDER?.trim() ||
+			process.env.AGENCY_PROVIDER?.trim() ||
+			payload.route_hint) as string | undefined;
+	const limitSignal = detectUsageLimit({
+		stdout: result?.stdout,
+		stderr: result?.stderr,
+		errorMessage: spawnError?.message,
+		defaultProvider: provider,
+	});
+	if (limitSignal) {
+		const seconds = resetSecondsForSignal(limitSignal);
+		const long = isLongWindow(limitSignal);
+		logger.warn(
+			`[OfferDispatchHandler] ${agencyId}: usage-limit detected (${limitSignal.reason}); throttle ${limitSignal.provider}/${limitSignal.model} for ${seconds}s; ${long ? "PAUSE agency (long-window)" : "route-throttle only (short-window)"}`,
+		);
+		await applyThrottle(exec, limitSignal.provider, limitSignal.model, seconds, limitSignal.reason).catch(
+			(err) =>
+				logger.warn(
+					`[OfferDispatchHandler] ${agencyId}: throttle upsert failed:`,
+					err instanceof Error ? err.message : err,
+				),
+		);
+		if (long) {
+			await pauseAgency(exec, agencyId, seconds, limitSignal.reason).catch((err) =>
+				logger.warn(
+					`[OfferDispatchHandler] ${agencyId}: pauseAgency failed:`,
+					err instanceof Error ? err.message : err,
+				),
+			);
+		}
+	}
+
 	const status: "delivered" | "failed" =
 		spawnError === null && (result?.exitCode === 0 || result?.exitCode === null)
 			? "delivered"
@@ -305,4 +369,87 @@ async function runSpawn(args: {
 			completionErr instanceof Error ? completionErr.message : completionErr,
 		);
 	}
+}
+
+// ── Usage-limit pause helpers ─────────────────────────────────────────────────
+
+interface AgencyMetadataRow {
+	paused_until: string | null;
+}
+
+/**
+ * Read roadmap.agency.metadata->>'paused_until' for this agency. Returns null
+ * if the agency row is missing, the field is unset, or the value is not a
+ * parseable timestamp. Errors are logged but never thrown — a transient DB
+ * issue here should NOT prevent the agency from claiming work.
+ */
+async function readAgencyPausedUntil(
+	agencyId: string,
+	exec: SqlExec,
+	logger: Pick<Console, "log" | "warn" | "error">,
+): Promise<Date | null> {
+	try {
+		const result = (await exec(
+			`SELECT (metadata->>'paused_until') AS paused_until
+			 FROM roadmap.agency WHERE agency_id = $1`,
+			[agencyId],
+		)) as { rows: AgencyMetadataRow[] } | undefined;
+		const raw = result?.rows?.[0]?.paused_until;
+		if (!raw) return null;
+		const d = new Date(raw);
+		return Number.isNaN(d.getTime()) ? null : d;
+	} catch (err) {
+		logger.warn(
+			`[OfferDispatchHandler] ${agencyId}: readAgencyPausedUntil failed:`,
+			err instanceof Error ? err.message : err,
+		);
+		return null;
+	}
+}
+
+/**
+ * Upsert a row in roadmap.host_model_route_throttle. Pure observability +
+ * forward-compat: postWorkOffer reads this when it has a model in hand, and
+ * any operator query against this table sees the live throttle state.
+ */
+async function applyThrottle(
+	exec: SqlExec,
+	provider: UsageLimitProvider | string,
+	model: string,
+	seconds: number,
+	reason: string,
+): Promise<void> {
+	await exec(
+		`INSERT INTO roadmap.host_model_route_throttle (provider, model, throttled_until, reason)
+		 VALUES ($1, $2, now() + ($3 || ' seconds')::interval, $4)
+		 ON CONFLICT (provider, model) DO UPDATE
+		   SET throttled_until = GREATEST(host_model_route_throttle.throttled_until, EXCLUDED.throttled_until),
+		       reason          = EXCLUDED.reason,
+		       updated_at      = clock_timestamp()`,
+		[provider, model, String(seconds), reason],
+	);
+}
+
+/**
+ * Set roadmap.agency.metadata.paused_until = now() + seconds. The pause is
+ * checked at the top of handleOfferDispatch so the agency declines to spawn
+ * any new offer until the timestamp passes. The pause clears itself naturally
+ * (the next offer-dispatch sees the past timestamp and proceeds).
+ */
+async function pauseAgency(
+	exec: SqlExec,
+	agencyId: string,
+	seconds: number,
+	reason: string,
+): Promise<void> {
+	await exec(
+		`UPDATE roadmap.agency
+		    SET metadata = metadata || jsonb_build_object(
+		                     'paused_until', to_jsonb((now() + ($2 || ' seconds')::interval)::text),
+		                     'pause_reason', to_jsonb($3::text),
+		                     'paused_at',    to_jsonb(now()::text)
+		                   )
+		  WHERE agency_id = $1`,
+		[agencyId, String(seconds), reason],
+	);
 }
