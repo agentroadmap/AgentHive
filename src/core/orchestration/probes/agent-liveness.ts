@@ -231,7 +231,7 @@ async function checkHeartbeatRecent(
 	try {
 		const { rows } = await q<{ fresh: boolean | null }>(
 			`SELECT (last_heartbeat_at > now() - ($1::int * interval '1 millisecond')) AS fresh
-               FROM roadmap.agent_health
+               FROM roadmap_workforce.agent_health
               WHERE agent_identity = $2
               LIMIT 1`,
 			[freshMs, agent_identity],
