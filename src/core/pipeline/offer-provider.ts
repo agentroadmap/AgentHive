@@ -83,6 +83,8 @@ interface ClaimRow {
 	claim_expires_at: string;
 	offer_version: number;
 	metadata: Record<string, unknown> | null;
+	/** P798: route_provider captured at claim time; NULL when no policy constraints exist and no routes are seeded. */
+	route_provider?: string | null;
 }
 
 type QueryResultLike = { rows: unknown[] };
@@ -235,7 +237,8 @@ export class OfferProvider {
 		try {
 			const result = (await this.queryFn(
 				`SELECT dispatch_id, proposal_id, squad_name, dispatch_role,
-				        claim_token, claim_expires_at, offer_version, metadata
+				        claim_token, claim_expires_at, offer_version, metadata,
+				        route_provider
 				 FROM roadmap_workforce.fn_claim_work_offer($1, $2::jsonb, $3, $4)`,
 				[this.agentIdentity, this.capabilitiesJson, this.leaseTtlSeconds, this.projectId ?? null],
 			)) as QueryResultLike;
@@ -270,7 +273,7 @@ export class OfferProvider {
 		const workerIdentity = `${this.agentIdentity}/worker-${dispatch_id}`;
 
 		this.logger.log(
-			`[OfferProvider] Claimed dispatch ${dispatch_id} (${dispatch_role}) for proposal ${proposal_id} — worker: ${workerIdentity}`,
+			`[OfferProvider] Claimed dispatch ${dispatch_id} (${dispatch_role}) for proposal ${proposal_id} — worker: ${workerIdentity}${claim.route_provider ? ` route: ${claim.route_provider}` : ""}`,
 		);
 
 		// Register worker in agent_registry
