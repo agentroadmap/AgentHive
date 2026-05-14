@@ -169,45 +169,65 @@ AgentHive work is proposal-driven. Participate through MCP, not through chat-onl
 
 See `docs/architecture/architecture-proposal-type.md` for full guidance on when to use `architecture` vs. other types, advisory mechanics, migration rules, and child proposal spawning.
 
+### Workflow States (P706 unified vocabulary)
+
+P706 is the vocabulary authority for workflow stages. This section documents the unified 8-stage RFC vocabulary and 3-stage Hotfix vocabulary that boards, MCP surfaces, and agent-facing docs are expected to use. Treat older labels as migration artifacts only. See P706 for the design authority behind this vocabulary split.
+
 ### Standard RFC Workflow (product, component, feature, issue)
+
+The RFC workflow is the 8-stage path:
+
+`DRAFT -> REVIEW -> DEVELOP -> CODE_REVIEW -> TEST_WRITING -> TEST_EXECUTION -> MERGE -> COMPLETE`
 
 | State | Phase | Description |
 | :--- | :--- | :--- |
-| **DRAFT** | Architecture | Initial idea. If too broad or incoherent, **split it** into smaller proposals. |
-| **REVIEW** | Gating | Gating review for feasibility, coherence, and architectural fit. |
-| **DEVELOP** | Building | Building, coding and testing. |
-| **MERGE** | Integration | Merging branch to `main`. Focus on compatibility and stability. |
-| **COMPLETE** | Stable | Temporary stable state until the next evolution cycle begins. |
+| **DRAFT** | Formation | Initial proposal drafting, framing, and splitting if scope is still too broad. |
+| **REVIEW** | Gate | Feasibility, coherence, dependency, and architecture review before implementation starts. |
+| **DEVELOP** | Build | Main implementation work. |
+| **CODE_REVIEW** | Review | Peer review of the implementation delta. |
+| **TEST_WRITING** | Verify Prep | Add or update the acceptance tests and verification artifacts required for the change. |
+| **TEST_EXECUTION** | Verify | Run the acceptance checks and confirm the proposal is ready to integrate. |
+| **MERGE** | Integrate | Merge readiness, compatibility, rollout checks, and main-branch integration. |
+| **COMPLETE** | Terminal | Integrated and closed as the current shipped baseline. |
 
 ### Hotfix Workflow (hotfix)
 
-The hotfix workflow uses the same 3-stage structure, drawn from `roadmap.workflow_stage_definition`:
+Hotfix uses the lightweight 3-stage path:
+
+`DRAFT -> DEVELOP -> COMPLETE`
 
 | State | Phase | Description |
 | :--- | :--- | :--- |
-| **TRIAGE** | Confirm | Confirm the problem exists and is a localized operational fix |
-| **DEPLOY** | Apply | Specialist/ops claims and applies the fix (often higher privilege) |
-| **CLOSED** | Verified | Fix applied and verified working |
-
-**Terminal states:** CLOSED, WONT_FIX, NON_ISSUE  
-**Escape:** ESCALATE → creates a new issue proposal (Standard RFC)
-
-> **Legacy note:** Older data may reference FIX, DEPLOYED, ESCALATE, REJECTED, DISCARDED, REPLACED from pre-P774 hotfix vocabulary. These are migration artifacts; do not introduce them in new code.
+| **DRAFT** | Confirm | Confirm the defect, constrain scope, and decide that this remains a localized hotfix. |
+| **DEVELOP** | Apply | Implement and verify the operational fix. |
+| **COMPLETE** | Terminal | Fix applied, verified, and closed. |
 
 ### Unified Vocabulary Table
 
-Both workflows share the same maturity axis and are stored in `roadmap.workflow_stage_definition`. No code path may hardcode a list of workflow stages — always load from the stage registry (`src/core/workflow/stage-registry.ts`).
+Both workflows share the same maturity axis. Workflow stages are rendered from `roadmap.workflow_stages` for the active workflow. No code path may hardcode a list of workflow stages.
 
 | Attribute | RFC value | Hotfix value | Source |
 | :--- | :--- | :--- | :--- |
-| Status values | DRAFT, REVIEW, DEVELOP, MERGE, COMPLETE | TRIAGE, DEPLOY, CLOSED | `roadmap.workflow_stage_definition` |
+| Status values | DRAFT, REVIEW, DEVELOP, CODE_REVIEW, TEST_WRITING, TEST_EXECUTION, MERGE, COMPLETE | DRAFT, DEVELOP, COMPLETE | `roadmap.workflow_stages` |
 | Maturity values | new, active, mature, obsolete | same | `roadmap_proposal.proposal.maturity` |
-| Terminal closure | COMPLETE/mature | CLOSED/mature | stage `is_terminal = true` |
+| Terminal closure | COMPLETE with terminal-stage semantics from the active workflow | COMPLETE with terminal-stage semantics from the active workflow | `roadmap.workflow_stages` |
 | Obsolete reason | `obsoleted_reason TEXT` free-text | same | `roadmap_proposal.proposal.obsoleted_reason` |
 
-### Boards are workflow-aware
+### Boards Are Workflow-Aware
 
-Board columns are rendered from `roadmap.workflow_stage_definition` for the active workflow. A workflow filter is always required. No code path may hardcode a list of stages — columns must derive from the stage registry at runtime.
+Boards render columns from `roadmap.workflow_stages` for the active workflow and ordered stage definitions in that table. A Workflow filter is required on every board surface and must be resolved before columns are rendered. No code path may hardcode a list of stage columns or infer them from proposal type without first resolving the active workflow.
+
+### Terminal Closure
+
+Closing a proposal as terminal and closing a proposal as obsolete are different actions:
+
+- Terminal closure follows the active workflow and lands on its terminal stage, typically `COMPLETE`.
+- Obsolete closure uses `maturity='obsolete'`.
+- `obsoleted_reason` is free-text and must explain why the proposal became obsolete; it is not an enum and must not be treated as one in code or UI.
+
+### Out Of Scope
+
+`Code Review Pipeline` is a separate workflow family and is out of scope for this vocabulary section. Do not use it to infer RFC or Hotfix stage names.
 
 ### Architecture RFC Workflow (architecture)
 
@@ -286,7 +306,7 @@ Do not wait for a human to ask twice if the need is clear. The proposal system, 
 
 Notes:
 
-- The default lifecycle is `Draft -> Review -> Develop -> Merge -> Complete`.
+- The default lifecycle is workflow-defined. Resolve the active workflow and read its ordered stages from `roadmap.workflow_stages` instead of assuming a fixed five-stage path.
 - Proposal type determines workflow selection. Do not invent ad-hoc types. Check existing usage or `roadmap.proposal_type_config` before creating new proposals.
 
 ### 5a. Architectural Umbrella Pattern
@@ -346,7 +366,7 @@ The multi-tenancy program is sequenced into four phases tracked in `roadmap.prog
 SELECT p.display_id, p.title, p.status, p.maturity
 FROM roadmap.proposal p
 WHERE p.phase_id = <N>
-  AND p.status NOT IN ('COMPLETE','DEPLOYED')
+  AND p.status <> 'COMPLETE'
 ORDER BY p.id;
 
 -- Phase progress dashboard
@@ -442,6 +462,15 @@ Two role-resolver layers coexist by design — they are **not duplicates**:
 **Do not merge these without a separate proposal** that proves the gate path can be expressed in the queue-driven schema. The key difference: gate resolution needs the proposal *type* (`feature`, `hotfix`, …) and the gate label (`D1`–`D4`), not the workflow template ID. At the time gate-evaluator selection runs in `scripts/orchestrator.ts`, the workflow template context may not be resolved yet.
 
 **`src/core/workflow/role-resolver.ts` (deleted, P748 alternate):** was a never-wired duplicate of `orchestration/role-resolver.ts`. Removed in P909.
+
+### 6.0e Boards render from workflow stages (P706)
+
+Boards are workflow-aware surfaces, not fixed RFC boards.
+
+- Render columns from `roadmap.workflow_stages` for the active workflow.
+- Require an explicit Workflow filter so column selection is unambiguous.
+- Do not hardcode stage lists in UI, API, TUI, or orchestration code.
+- When workflow metadata changes, boards must reflect the new ordered stages without a code edit.
 
 ### 6.1 DDL belongs in `database/ddl/`
 
@@ -973,10 +1002,10 @@ The orchestrator handles the "how" of dispatch. Hermes handles the "what" and "w
 
 | Cubic Phase | Design Intent | Why | Cost Tier |
 | :--- | :--- | :--- | :--- |
-| **Design** (DRAFT, REVIEW, TRIAGE) | Deep reasoning model | Architecture, adversarial review | Premium |
-| **Build** (DEVELOP, FIX) | Code generation model | Implementation, balanced cost | Standard |
-| **Test** (MERGE) | Balanced model | Integration testing, validation | Standard |
-| **Ship** (COMPLETE, DEPLOYED) | Fast economy model | Documentation, finalization, low-cost | Economy |
+| **Design** (DRAFT, REVIEW) | Deep reasoning model | Architecture, adversarial review | Premium |
+| **Build** (DEVELOP, CODE_REVIEW, TEST_WRITING) | Code generation model | Implementation, review prep, verification prep | Standard |
+| **Test** (TEST_EXECUTION, MERGE) | Balanced model | Acceptance execution, integration validation | Standard |
+| **Ship** (COMPLETE) | Fast economy model | Documentation, finalization, low-cost | Economy |
 
 **To see actual routed models:** Query `model_routes` in the DB or check `roadmap.yaml`. Do not hardcode model names from this table into code — the DB is the source of truth.
 
