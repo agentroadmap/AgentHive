@@ -70,7 +70,7 @@ export function buildHermesArgs(prompt: string): string[] {
 
 /**
  * Build argv for Gemini liaison invocation.
- * Gemini pattern (placeholder; verify with actual Gemini CLI).
+ * --prompt flag verified correct for headless (non-interactive) invocation (2026-05-14).
  */
 export function buildGeminiArgs(prompt: string): string[] {
 	return ["--prompt", prompt];
