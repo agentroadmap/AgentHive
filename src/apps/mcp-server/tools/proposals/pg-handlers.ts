@@ -1032,4 +1032,253 @@ export class PgProposalHandlers {
 			proposal.summary ?? proposal.motivation ?? proposal.design ?? "";
 		return source ? source.substring(0, 150) : "";
 	}
+
+	// ── P997: proposal_migration_map handlers ─────────────────────────────────
+
+	async migrationMapUpsert(args: {
+		legacy_proposal_id: string;
+		classification: string;
+		canonical_proposal_id?: string;
+		rationale?: string;
+		evidence_refs?: unknown[];
+		superseded_by_proposal_id?: string;
+		reviewed_by?: string;
+		reviewed_at?: string;
+		created_by?: string;
+		notes?: string;
+	}): Promise<CallToolResult> {
+		try {
+			const validClassifications = [
+				"retained",
+				"delivered_evidence",
+				"duplicate",
+				"obsolete",
+				"reauthor_needed",
+				"superseded",
+			];
+			if (!validClassifications.includes(args.classification)) {
+				return errorResult(
+					"Invalid classification",
+					`Must be one of: ${validClassifications.join(", ")}`,
+				);
+			}
+			if (!args.legacy_proposal_id?.trim()) {
+				return errorResult("Missing required field", "legacy_proposal_id is required");
+			}
+
+			const evidenceRefs = args.evidence_refs ?? [];
+			const sql = `
+				INSERT INTO roadmap_proposal.proposal_migration_map
+					(legacy_proposal_id, canonical_proposal_id, classification, rationale,
+					 evidence_refs, superseded_by_proposal_id,
+					 reviewed_by, reviewed_at, created_by, notes)
+				VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10)
+				ON CONFLICT (legacy_proposal_id) DO UPDATE SET
+					canonical_proposal_id     = EXCLUDED.canonical_proposal_id,
+					classification            = EXCLUDED.classification,
+					rationale                 = COALESCE(EXCLUDED.rationale, proposal_migration_map.rationale),
+					evidence_refs             = EXCLUDED.evidence_refs,
+					superseded_by_proposal_id = EXCLUDED.superseded_by_proposal_id,
+					reviewed_by               = COALESCE(EXCLUDED.reviewed_by, proposal_migration_map.reviewed_by),
+					reviewed_at               = COALESCE(EXCLUDED.reviewed_at, proposal_migration_map.reviewed_at),
+					created_by                = COALESCE(proposal_migration_map.created_by, EXCLUDED.created_by),
+					notes                     = COALESCE(EXCLUDED.notes, proposal_migration_map.notes),
+					updated_at                = now()
+				RETURNING id, legacy_proposal_id, classification, updated_at
+			`;
+			const params = [
+				args.legacy_proposal_id.trim(),
+				args.canonical_proposal_id ?? null,
+				args.classification,
+				args.rationale ?? "",
+				JSON.stringify(evidenceRefs),
+				args.superseded_by_proposal_id ?? null,
+				args.reviewed_by ?? null,
+				args.reviewed_at ?? null,
+				args.created_by ?? null,
+				args.notes ?? null,
+			];
+			const result = await query(sql, params);
+			const row = result.rows[0] as QueryResultRow;
+			return {
+				content: [
+					{
+						type: "text",
+						text: JSON.stringify(
+							{
+								ok: true,
+								id: row.id,
+								legacy_proposal_id: row.legacy_proposal_id,
+								classification: row.classification,
+								updated_at: row.updated_at,
+							},
+							null,
+							2,
+						),
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to upsert migration map row", err);
+		}
+	}
+
+	async migrationMapGet(args: { legacy_proposal_id: string }): Promise<CallToolResult> {
+		try {
+			if (!args.legacy_proposal_id?.trim()) {
+				return errorResult("Missing required field", "legacy_proposal_id is required");
+			}
+			const result = await query(
+				`SELECT id, legacy_proposal_id, legacy_proposal_row_id,
+				        canonical_proposal_id, canonical_proposal_row_id,
+				        classification, rationale, evidence_refs,
+				        superseded_by_proposal_id, superseded_by_row_id,
+				        reviewed_by, reviewed_at, created_by, notes,
+				        created_at, updated_at
+				 FROM roadmap_proposal.proposal_migration_map
+				 WHERE legacy_proposal_id = $1`,
+				[args.legacy_proposal_id.trim()],
+			);
+			if (!result.rows.length) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{ found: false, legacy_proposal_id: args.legacy_proposal_id },
+								null,
+								2,
+							),
+						},
+					],
+				};
+			}
+			return {
+				content: [
+					{
+						type: "text",
+						text: JSON.stringify({ found: true, row: result.rows[0] }, null, 2),
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to get migration map row", err);
+		}
+	}
+
+	async migrationMapQuery(args: {
+		classification?: string;
+		unresolved?: boolean;
+		needs_review?: boolean;
+		limit?: number;
+	}): Promise<CallToolResult> {
+		try {
+			const limit = Math.min(Math.max(args.limit ?? 50, 1), 500);
+
+			// Route to appropriate view when a convenience flag is set.
+			if (args.unresolved === true) {
+				const result = await query(
+					`SELECT * FROM roadmap_proposal.v_migration_unresolved
+					 ORDER BY updated_at DESC LIMIT $1`,
+					[limit],
+				);
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{ view: "v_migration_unresolved", rows: result.rows, count: result.rows.length },
+								null,
+								2,
+							),
+						},
+					],
+				};
+			}
+
+			if (args.needs_review === true) {
+				const result = await query(
+					`SELECT * FROM roadmap_proposal.v_migration_incomplete
+					 ORDER BY updated_at DESC LIMIT $1`,
+					[limit],
+				);
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{ view: "v_migration_incomplete", rows: result.rows, count: result.rows.length },
+								null,
+								2,
+							),
+						},
+					],
+				};
+			}
+
+			// General filter query.
+			const conditions: string[] = [];
+			const params: (string | number)[] = [];
+
+			if (args.classification) {
+				conditions.push(`classification = $${params.length + 1}`);
+				params.push(args.classification);
+			}
+
+			const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+			params.push(limit);
+			const result = await query(
+				`SELECT id, legacy_proposal_id, canonical_proposal_id,
+				        classification, rationale, reviewed_by, reviewed_at, updated_at
+				 FROM roadmap_proposal.proposal_migration_map
+				 ${where}
+				 ORDER BY updated_at DESC LIMIT $${params.length}`,
+				params,
+			);
+
+			return {
+				content: [
+					{
+						type: "text",
+						text: JSON.stringify({ rows: result.rows, count: result.rows.length }, null, 2),
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to query migration map", err);
+		}
+	}
+
+	async migrationMapSummary(_args: Record<string, unknown>): Promise<CallToolResult> {
+		try {
+			const result = await query(
+				`SELECT classification, total, reviewed_count, unreviewed_count,
+				        with_canonical, without_canonical
+				 FROM roadmap_proposal.v_migration_classification_summary
+				 ORDER BY classification`,
+			);
+			const totals = result.rows.reduce(
+				(acc: { total: number; reviewed: number; unreviewed: number }, r: any) => ({
+					total: acc.total + Number(r.total),
+					reviewed: acc.reviewed + Number(r.reviewed_count),
+					unreviewed: acc.unreviewed + Number(r.unreviewed_count),
+				}),
+				{ total: 0, reviewed: 0, unreviewed: 0 },
+			);
+			return {
+				content: [
+					{
+						type: "text",
+						text: JSON.stringify(
+							{ by_classification: result.rows, totals },
+							null,
+							2,
+						),
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to get migration map summary", err);
+		}
+	}
 }

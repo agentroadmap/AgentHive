@@ -388,6 +388,109 @@ export function registerProposalTools(
 		handler: (args: any) => handlers.getProposalProjection(args),
 	});
 
+	// ── P997: proposal_migration_map tools ───────────────────────────────────
+
+	server.addTool({
+		name: "migration_map_upsert",
+		description:
+			"P997: Insert or update a proposal_migration_map row recording how a legacy proposal maps to the agentHive2 stack. " +
+			"classification must be one of: retained | delivered_evidence | duplicate | obsolete | reauthor_needed | superseded. " +
+			"superseded rows require superseded_by_proposal_id.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				legacy_proposal_id: {
+					type: "string",
+					description: "display_id of the legacy proposal (e.g. 'P123')",
+				},
+				classification: {
+					type: "string",
+					enum: [
+						"retained",
+						"delivered_evidence",
+						"duplicate",
+						"obsolete",
+						"reauthor_needed",
+						"superseded",
+					],
+				},
+				canonical_proposal_id: {
+					type: "string",
+					description: "display_id of the agentHive2 canonical node",
+				},
+				rationale: { type: "string" },
+				evidence_refs: {
+					type: "array",
+					items: { type: "object" },
+					description: "Structured evidence pointers [{type, ref, notes}]",
+				},
+				superseded_by_proposal_id: {
+					type: "string",
+					description: "Required when classification='superseded'",
+				},
+				reviewed_by: { type: "string" },
+				reviewed_at: { type: "string", description: "ISO 8601 timestamp" },
+				created_by: { type: "string" },
+				notes: { type: "string" },
+			},
+			required: ["legacy_proposal_id", "classification"],
+		},
+		handler: (args: any) => handlers.migrationMapUpsert(args),
+	});
+
+	server.addTool({
+		name: "migration_map_get",
+		description:
+			"P997: Retrieve the proposal_migration_map row for a given legacy_proposal_id.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				legacy_proposal_id: {
+					type: "string",
+					description: "display_id of the legacy proposal",
+				},
+			},
+			required: ["legacy_proposal_id"],
+		},
+		handler: (args: any) => handlers.migrationMapGet(args),
+	});
+
+	server.addTool({
+		name: "migration_map_query",
+		description:
+			"P997: Query proposal_migration_map rows. Pass unresolved=true for rows missing a canonical heir, needs_review=true for incomplete rows, or classification=<value> for a classification filter.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				classification: {
+					type: "string",
+					description: "Filter by P995 classification",
+				},
+				unresolved: {
+					type: "boolean",
+					description: "Return rows missing canonical link (v_migration_unresolved)",
+				},
+				needs_review: {
+					type: "boolean",
+					description: "Return rows with incomplete fields (v_migration_incomplete)",
+				},
+				limit: {
+					type: "number",
+					description: "Max rows (default 50, max 500)",
+				},
+			},
+		},
+		handler: (args: any) => handlers.migrationMapQuery(args),
+	});
+
+	server.addTool({
+		name: "migration_map_summary",
+		description:
+			"P997: Return roll-up counts from v_migration_classification_summary grouped by P995 classification.",
+		inputSchema: { type: "object", properties: {} },
+		handler: (args: any) => handlers.migrationMapSummary(args),
+	});
+
 	// prop_get_detail - comprehensive single-call proposal with ALL children
 	server.addTool({
 		name: "prop_get_detail",

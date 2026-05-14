@@ -172,6 +172,15 @@ const proposalRoutes: RouteMap = {
 	child_boot_check: "child_boot_check",
 	spawn_summary_emit: "spawn_summary_emit",
 	briefing_list: "briefing_list",
+	// P997: proposal_migration_map actions
+	map_upsert: "migration_map_upsert",
+	map_get: "migration_map_get",
+	map_query: "migration_map_query",
+	map_summary: "migration_map_summary",
+	migration_map_upsert: "migration_map_upsert",
+	migration_map_get: "migration_map_get",
+	migration_map_query: "migration_map_query",
+	migration_map_summary: "migration_map_summary",
 };
 
 const messageRoutes: RouteMap = {
