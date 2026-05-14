@@ -2,7 +2,7 @@ import { getPool, query } from "../../infra/postgres/pool.ts";
 import { reapStaleRows } from "../pipeline/reap-stale-rows.ts";
 import { enqueueNotification } from "../notifications/enqueue.ts";
 import { getUnlockedGateQueue } from "../proposal/gate-scanner-v2.ts";
-import { spawnAgent } from "./agent-spawner.ts";
+import { postWorkOffer } from "../pipeline/post-work-offer.ts";
 import {
 	bootCancelPokeAttempts,
 	runOfferReaper,
@@ -192,18 +192,14 @@ export class Orchestrator {
 					continue;
 				}
 
-				const primaryProfile = ctx.roleProfiles[0] ?? null;
 				const task = buildTaskPrompt(detail, mode, reasons);
 
-				await spawnAgent({
-					worktree: this.defaultWorktree,
-					task,
+				await postWorkOffer({
 					proposalId: detail.id,
+					squadName: `P${detail.id}-${detail.status}`,
+					role: mode,
+					task,
 					stage: detail.status,
-					agentLabel: `${detail.displayId} (${mode})`,
-					activity: mode === "gate" ? "reviewing" : "preparing",
-					projectId: ctx.projectId ?? undefined,
-					roleProfileId: primaryProfile ? undefined : undefined,
 				});
 
 				dispatched++;
@@ -290,13 +286,10 @@ export class Orchestrator {
 		// Tier 1: AI liaison (conditional on env var)
 		if (ORCHESTRATOR_LIAISON_PROVIDER) {
 			try {
-				await spawnAgent({
-					worktree: this.defaultWorktree,
+				await postWorkOffer({
 					proposalId: stall.id,
-					stage: stall.status,
-					provider: ORCHESTRATOR_LIAISON_PROVIDER,
-					agentLabel: `${stall.displayId} (liaison)`,
-					activity: "investigating stall",
+					squadName: `P${stall.id}-stall-liaison`,
+					role: "orchestrator-liaison-investigator",
 					task: [
 						`You are an AI liaison investigating a stalled proposal.`,
 						``,
@@ -311,6 +304,7 @@ export class Orchestrator {
 						``,
 						`If you cannot resolve the block, use mcp_ops escalation_add with severity CRITICAL.`,
 					].join("\n"),
+					stage: stall.status,
 				});
 				return;
 			} catch (err) {

@@ -13,17 +13,14 @@
 import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { access, readdir, stat } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import {
-	spawnAgent,
 	resolveActiveRouteProvider,
 	terminateLiveChildren,
 	liveChildCount,
 } from "../src/core/orchestration/agent-spawner.ts";
-import { ObservabilityWriter } from "../src/core/observability/observability-writer.ts";
 import { postWorkOffer } from "../src/core/pipeline/post-work-offer.ts";
 import { reapStaleRows } from "../src/core/pipeline/reap-stale-rows.ts";
 import { briefingAssemble } from "../src/infra/agency/spawn-briefing-service.ts";
@@ -54,9 +51,6 @@ const WORKTREE_ROOT =
 const DEFAULT_EXECUTOR_WORKTREE =
 	process.env.AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE;
 
-// When true, orchestrator posts work offers instead of direct-spawning.
-// Registered agency processes (e.g. copilot/agency-gary) claim and execute.
-const USE_OFFER_DISPATCH = process.env.AGENTHIVE_USE_OFFER_DISPATCH === "1";
 
 const logger = {
 	log: (...args: unknown[]) => console.log("[Orchestrator]", ...args),
@@ -1112,179 +1106,74 @@ async function dispatchAgent(
 			  `  mcp_agent  action="spawn_summary_emit"  briefing_id="${briefingId}"  outcome=<success|partial|failure|timeout|escalated>  emitted_by="${agent}"  summary="..."`
 			: `${task}\n\nUse the MCP tools to do your work. Connect to ${getMcpUrl()} for proposal management.`;
 
-		if (USE_OFFER_DISPATCH) {
-			// Post a work offer — any registered agency (e.g. copilot/agency-gary)
-			// will race to claim it and spawn the appropriate CLI. The orchestrator
-			// does not need to know the binary path or credentials.
-			const squadName = `P${proposalId}-${phase}`;
-			const { dispatchId } = await postWorkOffer({
-				proposalId: Number(proposalId),
-				squadName,
-				role: agentLabel ?? agent,
-				task: taskPrompt,
-				stage,
-				phase,
-				timeoutMs: roleTimeoutMs(agentLabel ?? agent),
-				// IMPORTANT: pass the *selected worktree directory name* — not the
-				// agent identity. The agency's offer-provider uses worktree_hint as
-				// the cwd basename under WORKTREE_ROOT (`/data/code/worktree/`). If
-				// we pass the agent identity (e.g. "researcher" or "sre@agenthive"),
-				// `spawn()` fails with ENOENT because no such worktree directory
-				// exists. selectedWorktree was already validated by scoreUsableWorktree.
-				worktreeHint: selectedWorktree,
-				briefingId,
-				requiredCapabilities:
-					requiredCapabilities.length > 0
-						? requiredCapabilities
-						: [agentLabel ?? agent],
-			});
-			logger.log(
-				`📬 Posted offer ${dispatchId} for ${agent} on P${proposalId} (${stage})`,
-			);
-
-			// P468: Emit liaison message to preferred agencies (additive — legacy squad_dispatch is primary)
-			try {
-				const agencies = await listDispatchableAgencies();
-				if (agencies.length > 0) {
-					const targetAgency = agencies[0];
-					const envelope = createMessageEnvelope({
-						agencyId: targetAgency.agency_id,
-						direction: "orchestrator->liaison",
-						kind: "offer_dispatch",
-						payload: {
-							dispatch_id: dispatchId,
-							proposal_id: proposalId,
-							stage,
-							phase,
-							role: agentLabel ?? agent,
-							task: taskPrompt,
-							required_capabilities:
-								requiredCapabilities.length > 0
-									? requiredCapabilities
-									: [agentLabel ?? agent],
-						},
-					});
-					const sequence = await getNextSequence(targetAgency.agency_id);
-					await storeMessage({
-						...(envelope as any),
-						sequence,
-						signature: "stub-orchestrator", // TODO(P472): proper signing
-					});
-					logger.log(
-						`📮 Emitted liaison message to ${targetAgency.agency_id} for dispatch ${dispatchId}`,
-					);
-				}
-			} catch (err) {
-				logger.warn(
-					`Failed to emit liaison message for dispatch ${dispatchId}:`,
-					err,
-				);
-			}
-
-			return cubicId;
-		}
-
-		// Direct spawn path (used when AGENTHIVE_USE_OFFER_DISPATCH is not set)
-		let worktree: string | null = selectedWorktree;
-		const tried = new Set<string>();
-		const { rows: selectedRuns } = await query<{ cnt: number }>(
-			`SELECT count(*)::int AS cnt FROM agent_runs
-		      WHERE display_id LIKE '%' || $1 || '%'
-		        AND status = 'running'`,
-			[selectedWorktree],
-		);
-		if (selectedRuns[0]?.cnt) {
-			logger.log(
-				`⏭ ${selectedWorktree} busy (${selectedRuns[0].cnt} running) — trying another`,
-			);
-			worktree = null;
-		}
-		for (let attempt = 0; attempt < 5; attempt++) {
-			if (worktree) break;
-			const candidate = await selectExecutorWorktree(null);
-			if (!candidate) break;
-			if (tried.has(candidate)) break;
-			tried.add(candidate);
-			const { rows } = await query<{ cnt: number }>(
-				`SELECT count(*)::int AS cnt FROM agent_runs
-			      WHERE display_id LIKE '%' || $1 || '%'
-			        AND status = 'running'`,
-				[candidate],
-			);
-			if (rows[0]?.cnt) {
-				logger.log(
-					`⏭ ${candidate} busy (${rows[0].cnt} running) — trying another`,
-				);
-				continue;
-			}
-			worktree = candidate;
-			break;
-		}
-		if (!worktree) {
-			logger.warn(
-				`No free worktree for ${agent} on P${proposalId} — skipping dispatch`,
-			);
-			return null;
-		}
-		// P405: resolve provider from model_routes, not worktree metadata
-		const activeProvider = await resolveActiveRouteProvider();
-
-		// P604: parent dispatch span
-		const traceId = randomUUID();
-		const orchWriter = new ObservabilityWriter("operator:orchestrator");
-		const { spanId: orchSpanId } = await orchWriter.startSpan({
-			traceId,
-			operation: "orch.dispatch",
-			attributes: {
-				proposal_id: Number(proposalId),
-				agent,
-				stage,
-				phase,
-			},
-		});
-
-		const result = await spawnAgent({
-			worktree,
-			task: taskPrompt,
+		// Post a work offer — any registered agency (e.g. copilot/agency-gary)
+		// will race to claim it and spawn the appropriate CLI. The orchestrator
+		// does not need to know the binary path or credentials.
+		const squadName = `P${proposalId}-${phase}`;
+		const { dispatchId } = await postWorkOffer({
 			proposalId: Number(proposalId),
+			squadName,
+			role: agentLabel ?? agent,
+			task: taskPrompt,
 			stage,
+			phase,
 			timeoutMs: roleTimeoutMs(agentLabel ?? agent),
-			provider: activeProvider ?? undefined,
-			agentLabel: agentLabel ?? agent,
-			activity,
-			traceId,
-			parentSpanId: orchSpanId,
+			// IMPORTANT: pass the *selected worktree directory name* — not the
+			// agent identity. The agency's offer-provider uses worktree_hint as
+			// the cwd basename under WORKTREE_ROOT (`/data/code/worktree/`). If
+			// we pass the agent identity (e.g. "researcher" or "sre@agenthive"),
+			// `spawn()` fails with ENOENT because no such worktree directory
+			// exists. selectedWorktree was already validated by scoreUsableWorktree.
+			worktreeHint: selectedWorktree,
+			briefingId,
+			requiredCapabilities:
+				requiredCapabilities.length > 0
+					? requiredCapabilities
+					: [agentLabel ?? agent],
 		});
+		logger.log(
+			`📬 Posted offer ${dispatchId} for ${agent} on P${proposalId} (${stage})`,
+		);
 
-		await orchWriter.closeSpan({
-			spanId: orchSpanId,
-			status: result.exitCode === 0 ? "ok" : "error",
-		});
-
-		if (result.exitCode === 0) {
-			logger.log(
-				`✅ ${agent} completed (run=${result.agentRunId}) for P${proposalId}`,
-			);
-			// Record provider success — clears any cooldown
-			if (activeProvider) {
-				try {
-					await recordProviderSuccess(activeProvider);
-				} catch {}
+		// Emit liaison offer_dispatch message to first dispatchable agency
+		try {
+			const agencies = await listDispatchableAgencies();
+			if (agencies.length > 0) {
+				const targetAgency = agencies[0];
+				const envelope = createMessageEnvelope({
+					agencyId: targetAgency.agency_id,
+					direction: "orchestrator->liaison",
+					kind: "offer_dispatch",
+					payload: {
+						offer_id: String(dispatchId),
+						dispatch_id: dispatchId,
+						proposal_id: proposalId,
+						squad_name: squadName,
+						stage,
+						phase,
+						role: agentLabel ?? agent,
+						required_capabilities:
+							requiredCapabilities.length > 0
+								? requiredCapabilities
+								: [agentLabel ?? agent],
+						route_hint: "anthropic",
+					},
+				});
+				const sequence = await getNextSequence(targetAgency.agency_id);
+				await storeMessage({
+					...(envelope as any),
+					sequence,
+					signature: "stub-orchestrator",
+				});
+				logger.log(
+					`📮 Emitted liaison message to ${targetAgency.agency_id} for dispatch ${dispatchId}`,
+				);
 			}
-		} else {
+		} catch (err) {
 			logger.warn(
-				`⚠️ ${agent} exited ${result.exitCode} (run=${result.agentRunId}) for P${proposalId}`,
+				`Failed to emit liaison message for dispatch ${dispatchId}:`,
+				err,
 			);
-			// Dynamic control: classify error, set cooldown
-			const fullError = [result.stderr, result.stdout]
-				.filter(Boolean)
-				.join("\n");
-			const classified = classifyProviderError(fullError);
-			if (classified && activeProvider) {
-				try {
-					await setProviderCooldown(activeProvider, classified.type as any, fullError);
-				} catch {}
-			}
 		}
 
 		return cubicId;
@@ -1769,8 +1658,6 @@ async function dispatchImplicitGate(
 		return;
 	}
 
-	const worktree = await selectExecutorWorktree(null);
-
 	// Dynamic control: check if provider is in cooldown before dispatching
 	try {
 		const activeProvider = await resolveActiveRouteProvider();
@@ -1781,11 +1668,10 @@ async function dispatchImplicitGate(
 			return;
 		}
 	} catch {
-		// Provider resolution failed — let spawn handle the error
+		// Provider resolution failed — proceed with offer dispatch
 	}
 
 	await ensureAgentIdentity("orchestrator", "State Machine Orchestrator");
-	await ensureAgentIdentity(worktree, "Gate Executor");
 
 	const role = gateRole(gate);
 
@@ -1837,18 +1723,18 @@ async function dispatchImplicitGate(
 		was_replay: boolean;
 	}>(
 		`INSERT INTO roadmap_workforce.squad_dispatch
-       (proposal_id, agent_identity, squad_name, dispatch_role, dispatch_status,
+       (proposal_id, squad_name, dispatch_role, dispatch_status, offer_status,
         assigned_by, metadata, idempotency_key, attempt_count)
-     VALUES ($1, $2, $3, $8, 'active', 'orchestrator',
+     VALUES ($1, $2, $7, 'open', 'open', 'orchestrator',
        jsonb_build_object(
          'source', 'implicit_maturity_gating',
-         'reason', $4::text,
-         'gate', $5::text,
-         'from_stage', $6::text,
-         'to_stage', $7::text,
-         'stage', 'gate:' || $7::text,
-         'gateRoleSource', $9::text
-       ), $10, 1)
+         'reason', $3::text,
+         'gate', $4::text,
+         'from_stage', $5::text,
+         'to_stage', $6::text,
+         'stage', 'gate:' || $6::text,
+         'gateRoleSource', $8::text
+       ), $9, 1)
      ON CONFLICT (idempotency_key)
        WHERE dispatch_status IN ('open', 'assigned', 'active')
      DO UPDATE SET
@@ -1861,7 +1747,6 @@ async function dispatchImplicitGate(
      RETURNING id, attempt_count, (xmax::text::int <> 0) AS was_replay`,
 		[
 			proposal.id,
-			worktree,
 			`gate-${proposal.display_id}-${gate.gate}`,
 			reason,
 			gate.gate,
@@ -1875,231 +1760,63 @@ async function dispatchImplicitGate(
 	const dispatchId = dispatchRows[0]?.id;
 	if (dispatchRows[0]?.was_replay) {
 		logger.log(
-			`Implicit gate dispatch idempotency replay for ${proposal.display_id} (dispatch ${dispatchId}, attempt ${dispatchRows[0].attempt_count}) — skipping spawn`,
+			`Implicit gate dispatch idempotency replay for ${proposal.display_id} (dispatch ${dispatchId}, attempt ${dispatchRows[0].attempt_count}) — skipping offer`,
 		);
 		return;
 	}
 	logger.log(
-		`Implicit gate dispatch ${dispatchId} -> ${worktree} for ${proposal.display_id} (${proposal.status} -> ${gate.toStage}, ${gate.gate})`,
+		`Implicit gate dispatch ${dispatchId} offer posted for ${proposal.display_id} (${proposal.status} -> ${gate.toStage}, ${gate.gate})`,
 	);
 
-	// P604: gate observability span
-	const gateTraceId = randomUUID();
-	const gateWriter = new ObservabilityWriter("operator:orchestrator");
-	let gateSpanId: string | null = null;
+	// Notify work_offers channel; agencies listening will claim and spawn.
+	await query(`SELECT pg_notify($1, $2)`, [
+		"work_offers",
+		JSON.stringify({
+			event: "emitted",
+			dispatch_id: dispatchId,
+			proposal_id: proposal.id,
+			role,
+		}),
+	]);
+
+	// Send offer_dispatch downlink to first dispatchable agency.
 	try {
-		const { spanId } = await gateWriter.startSpan({
-			traceId: gateTraceId,
-			operation: "orch.gate",
-			attributes: {
-				proposal_id: proposal.id,
-				gate: gate.gate,
-				from_stage: proposal.status,
-				to_stage: gate.toStage,
-			},
-		});
-		gateSpanId = spanId;
-	} catch {}
-
-	let result: Awaited<ReturnType<typeof spawnAgent>>;
-	// P405: resolve provider from model_routes, not worktree metadata
-	const activeProvider = await resolveActiveRouteProvider();
-	try {
-		result = await spawnAgent({
-			worktree,
-			task: buildImplicitGateTask(proposal, gate),
-			proposalId: proposal.id,
-			stage: `gate:${gate.toStage.toUpperCase()}`,
-			timeoutMs: 600_000,
-			provider: activeProvider ?? undefined,
-			traceId: gateTraceId,
-			parentSpanId: gateSpanId,
-		});
-	} catch (spawnErr) {
-		const errMsg =
-			spawnErr instanceof Error ? spawnErr.message : String(spawnErr);
-		await query(
-			`UPDATE roadmap_workforce.squad_dispatch
-	        SET dispatch_status = 'blocked',
-	            completed_at = now(),
-	            metadata = COALESCE(metadata, '{}'::jsonb) ||
-	              jsonb_build_object('error', $2::text)
-	      WHERE id = $1`,
-			[dispatchId, errMsg],
-		);
-		await releaseDispatchLease(
-			dispatchId,
-			`gate spawn failed: ${errMsg.slice(0, 500)}`,
-		);
-		logger.warn(
-			`Implicit gate dispatch ${dispatchId} blocked (spawn threw): ${errMsg}`,
-		);
-		return;
-	}
-
-	const proposalState = await query<{ status: string; maturity: string }>(
-		`SELECT status, maturity
-       FROM roadmap_proposal.proposal
-      WHERE id = $1`,
-		[proposal.id],
-	);
-	const current = proposalState.rows[0];
-	const reachedTarget =
-		current && normalizeState(current.status) === normalizeState(gate.toStage);
-
-	if (result.exitCode === 0 && reachedTarget) {
-		await setProposalMaturity(
-			proposal.id,
-			"new",
-			worktree,
-			`gate ${gate.gate} advanced to ${gate.toStage}`,
-		);
-		await query(
-			`UPDATE roadmap_workforce.squad_dispatch
-          SET dispatch_status = 'completed',
-              completed_at = now(),
-              metadata = COALESCE(metadata, '{}'::jsonb) ||
-                jsonb_build_object('agent_run_id', $2::text, 'gate_decision', 'advance', 'proposal_status', $3::text, 'proposal_maturity', 'new')
-        WHERE id = $1`,
-			[dispatchId, result.agentRunId, gate.toStage],
-		);
-		await releaseDispatchLease(
-			dispatchId,
-			`gate ${gate.gate} advanced to ${gate.toStage}`,
-		);
-		logger.log(
-			`Implicit gate dispatch ${dispatchId} advanced ${proposal.display_id} to ${gate.toStage}/new`,
-		);
-		if (gateSpanId) {
-			await gateWriter.writeDecisionExplainability({
-				traceId: gateTraceId,
-				decisionKind: "gate_advance",
-				inputs: { proposal_id: proposal.id, gate: gate.gate, from_stage: proposal.status, to_stage: gate.toStage },
-				rulesEvaluated: { gate_rule: "maturity=mature AND exit_code=0 AND reached_target=true" },
-				outcome: { decision: "advance", to_stage: gate.toStage, agent_run_id: result.agentRunId },
+		const agencies = await listDispatchableAgencies();
+		if (agencies.length > 0) {
+			const targetAgency = agencies[0];
+			const envelope = createMessageEnvelope({
+				agencyId: targetAgency.agency_id,
+				direction: "orchestrator->liaison",
+				kind: "offer_dispatch",
+				payload: {
+					offer_id: String(dispatchId),
+					dispatch_id: dispatchId,
+					proposal_id: proposal.id,
+					squad_name: `gate-${proposal.display_id}-${gate.gate}`,
+					role,
+					required_capabilities: [role],
+					route_hint: "anthropic",
+				},
 			});
-			await gateWriter.closeSpan({ spanId: gateSpanId, status: "ok" });
-		}
-		return;
-	}
-
-	if (result.exitCode === 0 && current) {
-		const finalMaturity =
-			normalizeState(current.maturity) === "OBSOLETE" ? "obsolete" : "new";
-		if (finalMaturity === "new") {
-			await setProposalMaturity(
-				proposal.id,
-				"new",
-				worktree,
-				`gate ${gate.gate} sent back or held`,
+			const sequence = await getNextSequence(targetAgency.agency_id);
+			await storeMessage({
+				...(envelope as any),
+				sequence,
+				signature: "stub-orchestrator",
+			});
+			logger.log(
+				`📮 Implicit gate offer_dispatch sent to ${targetAgency.agency_id} for dispatch ${dispatchId}`,
+			);
+		} else {
+			logger.warn(
+				`Implicit gate dispatch ${dispatchId}: no dispatchable agencies, offer posted to queue only`,
 			);
 		}
-		const decisionMessage = `gate decision completed without state transition: proposal is ${current.status}/${finalMaturity}`;
-		// Persist canonical decision to gate_decision_log first — that's the
-		// table the enhancing agent reads. MCP discussions/messages below are
-		// best-effort and may not reach the next cubic.
-		await recordGateDecisionFromOrchestrator({
-			proposalId: proposal.id,
-			fromState: proposal.status,
-			toState: gate.toStage,
-			gate: gate.gate,
-			decision: finalMaturity === "obsolete" ? "reject" : "hold",
-			authorityAgent: gateRole(gate),
-			agentRunId: result.agentRunId,
-			agentStdout: result.stdout,
-			maturity: "mature",
-		});
-		await recordGateCommunication({
-			proposalId: proposal.id,
-			author: worktree,
-			toAgent: "orchestrator",
-			channel: "direct",
-			contextPrefix: "feedback:",
-			body: [
-				`Gate ${gate.gate} held ${proposal.display_id}.`,
-				`Target transition: ${proposal.status} -> ${gate.toStage}`,
-				`Current proposal state: ${current.status}/${finalMaturity}`,
-				"",
-				"The gate agent made a non-transition decision. Read the latest gate_decision_log row (rationale + ac_verification.details) for the canonical findings, revise the proposal, then set maturity back to mature when it is ready for another gate attempt.",
-			].join("\n"),
-			metadata: {
-				gate: gate.gate,
-				gate_decision: finalMaturity === "obsolete" ? "obsolete" : "hold",
-				proposal_status: current.status,
-				proposal_maturity: finalMaturity,
-				agent_run_id: result.agentRunId,
-				source: "implicit_maturity_gating",
-			},
-		});
-		await query(
-			`UPDATE roadmap_workforce.squad_dispatch
-          SET dispatch_status = 'completed',
-              completed_at = now(),
-              metadata = COALESCE(metadata, '{}'::jsonb) ||
-                jsonb_build_object('agent_run_id', $2::text, 'gate_decision', $3::text, 'proposal_status', $4::text, 'proposal_maturity', $5::text)
-        WHERE id = $1`,
-			[
-				dispatchId,
-				result.agentRunId,
-				finalMaturity === "obsolete" ? "obsolete" : "hold",
-				current.status,
-				finalMaturity,
-			],
+	} catch (err) {
+		logger.warn(
+			`Failed to emit liaison message for implicit gate dispatch ${dispatchId}:`,
+			err,
 		);
-		await releaseDispatchLease(dispatchId, decisionMessage);
-		logger.log(
-			`Implicit gate dispatch ${dispatchId} held ${proposal.display_id}: ${decisionMessage}`,
-		);
-		if (gateSpanId) {
-			await gateWriter.writeDecisionExplainability({
-				traceId: gateTraceId,
-				decisionKind: "gate_advance",
-				inputs: { proposal_id: proposal.id, gate: gate.gate, from_stage: proposal.status },
-				rulesEvaluated: { gate_rule: "maturity=mature AND exit_code=0 AND reached_target=false" },
-				outcome: { decision: finalMaturity === "obsolete" ? "obsolete" : "hold", proposal_status: current.status, agent_run_id: result.agentRunId },
-			});
-			await gateWriter.closeSpan({ spanId: gateSpanId, status: "ok" });
-		}
-		return;
-	}
-
-	const errorMessage =
-		result.exitCode === 0
-			? `gate agent completed but proposal state could not be read`
-			: `gate agent exited ${result.exitCode}: ${[result.stderr, result.stdout].filter(Boolean).join("\n").slice(0, 2000)}`;
-
-	// Dynamic control: classify error and set provider cooldown if needed
-	const fullError = [result.stderr, result.stdout].filter(Boolean).join("\n");
-	const classified = classifyProviderError(fullError);
-	if (classified && result.exitCode !== 0) {
-		try {
-			const provider = activeProvider ?? (await resolveActiveRouteProvider());
-			if (provider) {
-				await setProviderCooldown(provider, classified.type as any, fullError);
-			}
-		} catch {
-			// Provider resolution failed — skip cooldown
-		}
-	}
-
-	await query(
-		`UPDATE roadmap_workforce.squad_dispatch
-        SET dispatch_status = 'blocked',
-            completed_at = now(),
-            metadata = COALESCE(metadata, '{}'::jsonb) ||
-              jsonb_build_object('agent_run_id', $2::text, 'error', $3::text)
-      WHERE id = $1`,
-		[dispatchId, result.agentRunId, errorMessage],
-	);
-	await releaseDispatchLease(
-		dispatchId,
-		`gate dispatch blocked: ${errorMessage.slice(0, 500)}`,
-	);
-	logger.warn(
-		`Implicit gate dispatch ${dispatchId} blocked ${proposal.display_id}: ${errorMessage}`,
-	);
-	if (gateSpanId) {
-		await gateWriter.closeSpan({ spanId: gateSpanId, status: "error", errorMessage: errorMessage.slice(0, 500) });
 	}
 }
 
