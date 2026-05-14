@@ -4,7 +4,8 @@
  */
 
 import { createHmac } from 'node:crypto';
-import { query, getPool } from '../postgres/pool.js';
+import { Client as PgClient } from 'pg';
+import { query } from '../postgres/pool.js';
 import type { LiaisonMessage, LiaisonMessageAckOutcome } from './liaison-message-types.js';
 
 // ─── Configuration ──────────────────────────────────────────────────────────
@@ -577,8 +578,24 @@ async function* createMessageListener(
     agencyId: string,
     signal?: AbortSignal
 ): AsyncGenerator<LiaisonMessage> {
-    const pool = getPool();
-    const client = await pool.connect();
+    // PgBouncer in transaction mode kills LISTEN: the server backend is
+    // returned to the pool after each transaction and either reused by other
+    // clients or closed at server_idle_timeout, so notifications never reach
+    // us. Bypass PgBouncer by opening a dedicated session-mode connection
+    // direct to PostgreSQL via PGPORT_DIRECT (mirrors the pattern in
+    // pool-registry.ts:392 for the cache-eviction LISTEN client).
+    const directPort = Number(
+        process.env.PGPORT_DIRECT ?? process.env.PGPORT ?? 5432,
+    );
+    const client = new PgClient({
+        host: process.env.PGHOST ?? '127.0.0.1',
+        port: directPort,
+        user: process.env.PGUSER ?? 'admin',
+        database: process.env.PGDATABASE ?? 'agenthive',
+        password: process.env.PGPASSWORD,
+        application_name: `agenthive-listen-${agencyId}`,
+    });
+    await client.connect();
 
     const channel = LISTEN_CHANNEL_PREFIX + agencyId;
 
@@ -637,7 +654,8 @@ async function* createMessageListener(
         } catch {
             // ignore cleanup errors
         }
-        client.release();
+        // Direct pg.Client is closed via end(), not pool-style release().
+        try { await client.end(); } catch { /* ignore */ }
     }
 }
 
