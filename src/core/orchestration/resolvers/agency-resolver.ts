@@ -53,6 +53,17 @@ export interface AgencyCandidate {
  * - If requiredCapabilities is provided, agencies must support all listed capabilities
  * - Tier-0 isolation: Tier-3 providers are never matched for Tier-0 requests
  */
+/**
+ * Permissive-fallback log target. Tests can replace this; production uses console.
+ * Kept module-level so the signature of resolveAgency stays unchanged.
+ */
+let _resolverLogger: Pick<Console, "log" | "warn"> = console;
+export function _setResolverLoggerForTest(
+	logger: Pick<Console, "log" | "warn">,
+): void {
+	_resolverLogger = logger;
+}
+
 export async function resolveAgency(
 	projectId: string,
 	_role?: string,
@@ -107,8 +118,7 @@ export async function resolveAgency(
 		}
 	}
 
-	const { rows } = await query(
-		`SELECT pr.id, pr.agency_id, pr.project_id, pr.capabilities,
+	const baseSelect = `SELECT pr.id, pr.agency_id, pr.project_id, pr.capabilities,
 		        pr.status, pr.throttle_count, pr.last_seen_at, pr.max_in_flight,
 		        COALESCE(inf.in_flight_count, 0) AS in_flight_count
 		 FROM roadmap_workforce.provider_registry pr
@@ -127,25 +137,58 @@ export async function resolveAgency(
 		   AND ar.agent_identity NOT LIKE 'test/%'
 		   AND (pr.project_id IS NULL OR pr.project_id = $1)
 		   AND COALESCE(inf.in_flight_count, 0) < pr.max_in_flight
-		   ${tierFilter}
-		   ${capabilityFilter}
-		 ORDER BY (vas.dispatchable IS TRUE) DESC,
+		   ${tierFilter}`;
+	const orderAndLimit = ` ORDER BY (vas.dispatchable IS TRUE) DESC,
 		          pr.throttle_count ASC,
 		          COALESCE(inf.in_flight_count, 0) ASC,
 		          pr.last_seen_at DESC NULLS LAST,
 		          RANDOM()
-		 LIMIT 1`,
+		 LIMIT 1`;
+
+	const { rows } = await query(
+		baseSelect + capabilityFilter + orderAndLimit,
 		queryParams,
 	);
 
-	if (!rows.length) return null;
+	// Permissive fallback: when the strict capability filter rejects every
+	// agency (e.g. provider_registry.capabilities.jobs hasn't been seeded),
+	// retry without the capability filter so dispatch keeps flowing rather
+	// than expiring offers in a loop. Logs a warn for ops visibility — a
+	// healthy system should always have at least one capability-matched
+	// agency, so this firing means data drift to investigate.
+	let resultRows = rows;
+	let usedFallback = false;
+	if (
+		!resultRows.length &&
+		requiredCapabilities &&
+		requiredCapabilities.length > 0
+	) {
+		// Re-run without the capability filter. The cap-only params are at
+		// indices > 1 (projectId is $1), so trimming queryParams to [projectId]
+		// is enough — the rebuilt SQL omits $2..$N entirely.
+		const fallback = await query(
+			baseSelect + orderAndLimit,
+			[projectId],
+		);
+		if (fallback.rows.length > 0) {
+			usedFallback = true;
+			resultRows = fallback.rows;
+			_resolverLogger.warn(
+				`[agency-resolver] permissive fallback fired: no agency had jobs ${JSON.stringify(requiredCapabilities)}; matched without filter. Seed provider_registry.capabilities.jobs to remove this warning.`,
+			);
+		}
+	}
 
-	const row = rows[0];
+	if (!resultRows.length) return null;
+
+	const row = resultRows[0];
 	return {
 		id: BigInt(row.id),
 		agencyId: BigInt(row.agency_id),
 		projectId: row.project_id,
-		capabilities: row.capabilities,
+		capabilities: usedFallback
+			? { ...(row.capabilities ?? {}), _resolved_via: "permissive-fallback" }
+			: row.capabilities,
 		status: row.status,
 		throttleCount: row.throttle_count,
 		lastSeenAt: row.last_seen_at,
