@@ -1,12 +1,17 @@
 /**
  * Liaison Service — Agency registration, heartbeat, and dormancy management.
  *
- * Dormancy state machine:
+ * Dormancy / recovery state machine (roadmap.agency):
  *   active ↔ throttled (self-declared by liaison)
  *   ↓
  *   dormant (90s silence — fn_check_agency_dormancy watchdog)
  *   ↓
  *   active (next heartbeat restores; CASE branch handles dormant→active)
+ *
+ * P765 C5 additions:
+ *   offline → dormant on first heartbeat after being offline (step 1 of two-step recovery)
+ *   dormant → active on subsequent heartbeat (step 2; pre-existing branch)
+ *   operator_resume → active from any non-retired state (liaisonResume, AC-2)
  */
 
 import type { PoolClient } from "pg";
@@ -124,10 +129,12 @@ export async function liaisonRegister(
 /**
  * Process a heartbeat from a liaison.
  *
- * AC-4 fix: dormant agencies MUST be reactivated when a heartbeat arrives.
- * The CASE now has an explicit `WHEN status = 'dormant' THEN 'active'` branch
- * BEFORE the liaison-declared status branches so a recovering agency always
- * transitions back to active rather than staying frozen in 'dormant'.
+ * P765 AC-1: two-step recovery from 'offline'.
+ *   Step 1 — offline → dormant on first heartbeat (this function).
+ *   Step 2 — dormant → active on the next heartbeat (pre-existing dormant branch).
+ *
+ * P765 AC-4: offline_alert_sent_at is cleared when transitioning out of 'offline'
+ * so the next offline episode gets a fresh alert without re-alerting on recovery.
  */
 export async function liaisonHeartbeat(
 	payload: LiaisonHeartbeatPayload,
@@ -152,14 +159,20 @@ export async function liaisonHeartbeat(
       SET
         last_heartbeat_at = now(),
         status = CASE
-          WHEN status = 'dormant'      THEN 'active'      -- reactivate on heartbeat
-          WHEN $2 = 'throttled'        THEN 'throttled'
-          WHEN $2 = 'paused'           THEN 'paused'
+          WHEN status = 'offline'  THEN 'dormant'   -- step 1: offline→dormant (P765 AC-1)
+          WHEN status = 'dormant'  THEN 'active'    -- step 2: dormant→active
+          WHEN $2 = 'throttled'    THEN 'throttled'
+          WHEN $2 = 'paused'       THEN 'paused'
           ELSE status
         END,
         status_reason = CASE
+          WHEN status = 'offline' THEN 'Recovering: offline→dormant'
           WHEN status = 'dormant' THEN 'Reactivated by heartbeat'
           ELSE status_reason
+        END,
+        offline_alert_sent_at = CASE
+          WHEN status = 'offline' THEN NULL   -- clear episode flag on recovery (P765 AC-4)
+          ELSE offline_alert_sent_at
         END,
         metadata = jsonb_set(metadata, '{capacity_envelope}', $3::jsonb)
       WHERE agency_id = (SELECT agency_id FROM session_check)
@@ -193,6 +206,30 @@ export async function liaisonHeartbeat(
 		silence_seconds: row.silence_seconds ?? 0,
 		dispatchable: row.dispatchable,
 	};
+}
+
+/**
+ * Operator short-circuit: resume an agency to 'active' from any non-retired state.
+ * Implements AC-2 (operator_resume signal).
+ *
+ * Clears offline_alert_sent_at so the next offline episode emits a fresh alert.
+ */
+export async function liaisonResume(agency_id: string): Promise<void> {
+	if (!agency_id?.trim()) throw new Error("agency_id is required");
+
+	const result = await query(
+		`UPDATE roadmap.agency
+		 SET status               = 'active',
+		     status_reason        = 'Operator resume',
+		     offline_alert_sent_at = NULL
+		 WHERE agency_id = $1
+		   AND status NOT IN ('retired')
+		 RETURNING agency_id`,
+		[agency_id],
+	);
+
+	if (result.rowCount === 0)
+		throw new Error(`Agency ${agency_id} not found or already retired`);
 }
 
 /**

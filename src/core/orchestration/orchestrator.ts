@@ -11,6 +11,10 @@ import {
 	runPokeWatchdogTick,
 	type PokeWatchdogOptions,
 } from "./maintenance.ts";
+import {
+	scanAndAlertOfflineAgencies,
+	scanAndTransitionSilentAgencies,
+} from "./resolvers/agency-resolver.ts";
 import { OfferClaimLoop, type ListenerClient } from "./offer-claim-loop.ts";
 import { OrchestratorOfferDispatcher } from "./offer-dispatch.ts";
 import { resolveQueueContext } from "./queue-context-resolver.ts";
@@ -118,6 +122,11 @@ const RECONCILER_INTERVAL_MS = 30_000;
 
 /** Observability heartbeat interval (60 s legacy default). */
 const HEARTBEAT_INTERVAL_MS = 60_000;
+
+/** P765: agency liveness scanner interval (silent → dormant/offline + alert). */
+const AGENCY_LIVENESS_SCAN_INTERVAL_MS = Number(
+	process.env.AGENTHIVE_AGENCY_LIVENESS_SCAN_MS ?? 60_000,
+);
 
 export interface OrchestratorConfig {
 	/** Worktree used for liaison agent spawns (Tier 1 stall escalation). */
@@ -320,6 +329,22 @@ export class Orchestrator {
 					console.error("[Orchestrator] heartbeat failed:", err),
 				);
 			}, HEARTBEAT_INTERVAL_MS),
+		);
+
+		// P765: agency liveness scanner — transitions silent agencies through
+		// dormant/offline states and emits / resolves offline alerts.
+		this.pollTimers.set(
+			"agency-liveness",
+			setInterval(() => {
+				if (this.stopping) return;
+				void this.trackInFlight(
+					scanAndTransitionSilentAgencies()
+						.then(() => scanAndAlertOfflineAgencies())
+						.catch((err) =>
+							console.error("[Orchestrator] agency-liveness scan failed:", err),
+						),
+				);
+			}, AGENCY_LIVENESS_SCAN_INTERVAL_MS),
 		);
 
 		// P914 / P904: start the offer-claim loop. The loop LISTENs on
