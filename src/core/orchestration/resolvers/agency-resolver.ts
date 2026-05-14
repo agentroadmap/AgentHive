@@ -131,6 +131,13 @@ export async function resolveAgency(
 		 LEFT JOIN roadmap_workforce.v_agency_in_flight inf
 		   ON inf.provider_registry_id = pr.id
 		 WHERE pr.status NOT IN ('offline', 'retired')
+		   -- The resolver picks "live" agencies only. ar.status reflects the
+		   -- registration state set by the liaison's heartbeat/registration
+		   -- flow; inactive rows are stale legacy registrations whose liaison
+		   -- service no longer runs. Without this, the permissive fallback
+		   -- (added in commit ddbf932f) matches them and the dispatch fails
+		   -- at message-store with "Failed to store message for agency X".
+		   AND ar.status = 'active'
 		   AND (a.status IS NULL OR a.status <> 'retired')
 		   AND (vas.agency_id IS NULL OR vas.dispatchable = true)
 		   AND ar.agent_type <> 'coordinator'
