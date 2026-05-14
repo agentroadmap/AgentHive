@@ -166,7 +166,7 @@ export async function liaisonHeartbeat(
         (SELECT status FROM update_agency) = 'active'
         AND now() - (SELECT last_heartbeat_at FROM roadmap.agency
                      WHERE agency_id = (SELECT agency_id FROM session_check))
-            < interval '90 seconds'
+            < interval '60 seconds'
       )                                       as dispatchable
     `,
 		[session_id, liaison_status, JSON.stringify(capacity_envelope ?? {})],
@@ -273,6 +273,25 @@ export async function isRegisteredAgency(identity: string): Promise<boolean> {
 }
 
 /**
+ * Return true if the given agency_id is currently dispatchable:
+ * status='active' and last heartbeat within the 60-second window
+ * (as computed by roadmap.v_agency_status.dispatchable).
+ *
+ * AC-B gate for P904: call before posting an offer to a specific agency
+ * to avoid sending liaison messages to agencies that have gone silent.
+ */
+export async function isAgencyDispatchable(
+	agencyId: string,
+): Promise<boolean> {
+	const result = await query(
+		`SELECT dispatchable FROM roadmap.v_agency_status WHERE agency_id = $1`,
+		[agencyId],
+	);
+	if (result.rows.length === 0) return false;
+	return result.rows[0].dispatchable === true;
+}
+
+/**
  * Get the current status of an agency.
  */
 export async function getAgencyStatus(agency_id: string): Promise<{
@@ -294,7 +313,7 @@ export async function getAgencyStatus(agency_id: string): Promise<{
 }
 
 /**
- * List all dispatchable agencies (active, within 90s heartbeat).
+ * List all dispatchable agencies (active, within 60s heartbeat).
  */
 export async function listDispatchableAgencies(): Promise<
 	Array<{

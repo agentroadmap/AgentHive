@@ -6,7 +6,8 @@
 -- 90-second dormancy mark — and is the tightest threshold that avoids false negatives.
 --
 -- Changes:
---   - Replaces roadmap.v_agency_status: 5 occurrences of interval '10 minutes' → '60 seconds'
+--   - Replaces roadmap.v_agency_status: 3 occurrences of interval '10 minutes' → '60 seconds'
+--     (dispatchable boolean, live-and-working CASE branch, live-but-idle CASE branch)
 --   - Adds composite index (status, last_heartbeat_at) for the hot dispatchable query path
 --
 -- Does NOT change roadmap.fn_check_agency_dormancy — its 15-minute sweep is out of scope.
