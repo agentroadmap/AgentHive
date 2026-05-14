@@ -257,7 +257,7 @@ async function checkHeartbeatRecent(
                     false
                   )
                   OR EXISTS (
-                    SELECT 1 FROM roadmap.agent_health
+                    SELECT 1 FROM roadmap_workforce.agent_health
                      WHERE agent_identity = $2
                        AND last_heartbeat_at > now() - ($1::int * interval '1 millisecond')
                   )
