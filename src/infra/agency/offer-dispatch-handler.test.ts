@@ -10,7 +10,11 @@
 
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import { handleOfferDispatch, type SqlExec } from "./offer-dispatch-handler.ts";
+import {
+	_resetActiveSpawnForTest,
+	handleOfferDispatch,
+	type SqlExec,
+} from "./offer-dispatch-handler.ts";
 import type { LiaisonMessage } from "./liaison-message-types.ts";
 import type { SpawnResult } from "../../core/orchestration/agent-spawner.ts";
 
@@ -364,4 +368,149 @@ test("handleOfferDispatch: renewal timer fires fn_renew_lease while spawn runs",
 		renewCount >= 2,
 		`expected at least 2 renewals during 250ms spawn; got ${renewCount}`,
 	);
+});
+
+// ── Single-active-spawn invariant ─────────────────────────────────────────────
+
+test("handleOfferDispatch: busy agency declines second offer with complete-as-failed", async () => {
+	_resetActiveSpawnForTest();
+	const execCalls: Array<{ sql: string; params: unknown[] }> = [];
+	const exec: SqlExec = async (sql, params) => {
+		execCalls.push({ sql, params: params ?? [] });
+		if (sql.includes("FROM roadmap.agency"))
+			return { rows: [{ paused_until: null }] };
+		return { rows: [] };
+	};
+
+	// First spawn is a deferred promise — we control when it resolves so the
+	// test process doesn't hang on a pending activeSpawn.
+	let firstSpawnResolve: (v: SpawnResult) => void = () => {};
+	const firstSpawn = (req: Record<string, unknown>): Promise<SpawnResult> =>
+		new Promise<SpawnResult>((resolve) => {
+			firstSpawnResolve = resolve;
+		});
+
+	const msg1 = makeMessage({
+		offer_id: "00000000-0000-0000-0000-aaaaaaaaaaa1",
+		role: "develop",
+		required_capabilities: [],
+		route_hint: "claude-code",
+		dispatch_id: 100,
+		claim_token: "tok-first",
+		lease_ttl_seconds: 60,
+	});
+
+	await handleOfferDispatch("alex", msg1, {
+		spawn: firstSpawn as never,
+		exec,
+		logger: silentLogger(),
+		resolveWorktree: () => "wt",
+		renewalIntervalMs: 1_000_000,
+	});
+
+	// Now a second offer arrives while the first spawn is still pending.
+	let secondSpawnCalled = false;
+	const secondSpawn = async (_req: Record<string, unknown>): Promise<SpawnResult> => {
+		secondSpawnCalled = true;
+		return {} as SpawnResult;
+	};
+
+	const msg2 = makeMessage({
+		offer_id: "00000000-0000-0000-0000-bbbbbbbbbbb2",
+		role: "develop",
+		required_capabilities: [],
+		route_hint: "claude-code",
+		dispatch_id: 200,
+		claim_token: "tok-second",
+		lease_ttl_seconds: 60,
+	});
+
+	await handleOfferDispatch("alex", msg2, {
+		spawn: secondSpawn as never,
+		exec,
+		logger: silentLogger(),
+		resolveWorktree: () => "wt",
+		renewalIntervalMs: 1_000_000,
+	});
+
+	assert.equal(secondSpawnCalled, false, "second offer must NOT trigger a spawn");
+
+	// Find the busy-decline complete call for the second offer.
+	const completeCalls = execCalls.filter((c) =>
+		c.sql.includes("fn_complete_work_offer"),
+	);
+	const secondDecline = completeCalls.find((c) => c.params[0] === 200);
+	assert.ok(secondDecline, "second offer must be completed via fn_complete_work_offer");
+	assert.deepEqual(secondDecline!.params, [200, "alex", "tok-second", "failed"]);
+
+	// Resolve the first spawn so its finally clears activeSpawn and the test
+	// process can exit cleanly. (Without this the runner hangs on a pending
+	// promise stored in module state.)
+	firstSpawnResolve({
+		agentRunId: "run-first",
+		worktree: "wt",
+		exitCode: 0,
+		stdout: "",
+		stderr: "",
+		durationMs: 1,
+	});
+	for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+});
+
+test("handleOfferDispatch: after spawn completes, agency accepts the NEXT offer", async () => {
+	_resetActiveSpawnForTest();
+	const execCalls: Array<{ sql: string; params: unknown[] }> = [];
+	const exec: SqlExec = async (sql, params) => {
+		execCalls.push({ sql, params: params ?? [] });
+		if (sql.includes("FROM roadmap.agency"))
+			return { rows: [{ paused_until: null }] };
+		return { rows: [] };
+	};
+
+	let spawn1Calls = 0;
+	const fastSpawn = async (req: Record<string, unknown>): Promise<SpawnResult> => {
+		spawn1Calls++;
+		return {
+			agentRunId: "run-fast",
+			worktree: req.worktree as string,
+			exitCode: 0,
+			stdout: "ok",
+			stderr: "",
+			durationMs: 1,
+		};
+	};
+
+	const mk = (id: number, token: string) =>
+		makeMessage({
+			offer_id: `00000000-0000-0000-0000-${id.toString().padStart(12, "0")}`,
+			role: "develop",
+			required_capabilities: [],
+			route_hint: "claude-code",
+			dispatch_id: id,
+			claim_token: token,
+			lease_ttl_seconds: 60,
+		});
+
+	await handleOfferDispatch("pablo", mk(1, "tok-1"), {
+		spawn: fastSpawn as never,
+		exec,
+		logger: silentLogger(),
+		resolveWorktree: () => "wt",
+		renewalIntervalMs: 1_000_000,
+	});
+
+	// Wait for the first spawn to settle (it's instant) + tick for finally.
+	for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+
+	await handleOfferDispatch("pablo", mk(2, "tok-2"), {
+		spawn: fastSpawn as never,
+		exec,
+		logger: silentLogger(),
+		resolveWorktree: () => "wt",
+		renewalIntervalMs: 1_000_000,
+	});
+
+	for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+
+	assert.equal(spawn1Calls, 2, "both offers should produce a spawn — the second is accepted after the first settles");
 });

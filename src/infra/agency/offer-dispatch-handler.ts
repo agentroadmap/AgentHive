@@ -81,6 +81,34 @@ interface OfferDispatchEnvelope {
 
 const DEFAULT_LEASE_TTL_SECONDS = 60;
 
+/**
+ * Per-process single-active-spawn invariant.
+ *
+ * An agency is one process; one process focuses on one CLI subprocess at a
+ * time. When an offer_dispatch arrives while a prior spawn is still running,
+ * we refuse the new claim (complete-as-failed) so the reaper requeues the
+ * offer and another idle agency claims it.
+ *
+ * This is stronger than `max_in_flight`: it eliminates concurrency entirely
+ * at the agency boundary. The orchestrator's global cap bounds total work
+ * in the system; this invariant bounds work per agency to exactly one.
+ *
+ * Module-level state: each agency runs in its own Node process, so the
+ * variable is naturally per-agency. Test injection overrides it to keep
+ * tests deterministic.
+ */
+let activeSpawn: Promise<unknown> | null = null;
+
+/** @internal — reset for tests that share module state. */
+export function _resetActiveSpawnForTest(): void {
+	activeSpawn = null;
+}
+
+/** @internal — peek for tests. */
+export function _activeSpawnForTest(): Promise<unknown> | null {
+	return activeSpawn;
+}
+
 const defaultExec: SqlExec = (sql, params) =>
 	query(sql, params as unknown[]);
 
@@ -138,6 +166,25 @@ export async function handleOfferDispatch(
 		return;
 	}
 
+	// Single-active-spawn invariant: an agency processes one offer at a time.
+	// Reject the new offer immediately so the reaper requeues it to an idle
+	// agency rather than queuing locally or running concurrent spawns.
+	if (activeSpawn !== null) {
+		logger.warn(
+			`[OfferDispatchHandler] ${agencyId}: busy with prior spawn; declining offer=${payload.offer_id} role=${payload.role}`,
+		);
+		await exec(
+			`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, $4)`,
+			[payload.dispatch_id, agencyId, payload.claim_token, "failed"],
+		).catch((err) => {
+			logger.error(
+				`[OfferDispatchHandler] ${agencyId}: fn_complete_work_offer failed on busy-decline:`,
+				err instanceof Error ? err.message : err,
+			);
+		});
+		return;
+	}
+
 	// Usage-limit pause: if this agency has been paused after a prior usage-
 	// limit hit, decline to spawn so the orchestrator's reissue logic routes
 	// the offer to an unpaused agency. We still must call fn_complete_work_offer
@@ -184,7 +231,7 @@ export async function handleOfferDispatch(
 		deps.spawnTimeoutMs ??
 		parseInt(process.env.SPAWN_TIMEOUT_MS ?? "1800000", 10);
 
-	void runSpawn({
+	const spawnPromise = runSpawn({
 		agencyId,
 		payload,
 		worktree,
@@ -202,6 +249,13 @@ export async function handleOfferDispatch(
 			`[OfferDispatchHandler] ${agencyId}: unhandled error for offer=${payload.offer_id}:`,
 			err instanceof Error ? err.message : err,
 		);
+	});
+
+	// Reserve the agency for this spawn. The `finally` clears the slot whether
+	// the spawn succeeds, fails, throws, or times out — so the agency cannot
+	// get stuck "busy" if the runSpawn pipeline misbehaves.
+	activeSpawn = spawnPromise.finally(() => {
+		activeSpawn = null;
 	});
 }
 
