@@ -12,55 +12,51 @@ RETURNS void
 LANGUAGE plpgsql
 AS $$
 DECLARE
-  v_old presence_state_enum;
-  v_new presence_state_enum;
+  v_old text;
+  v_new text;
 BEGIN
   -- Validate state input
   IF p_state NOT IN ('online', 'busy', 'away', 'offline') THEN
     RAISE EXCEPTION 'Invalid presence state: %', p_state;
   END IF;
 
-  -- Atomic update with row lock
+  -- Capture previous state before update so notify fires only on transition (AC-8)
+  SELECT presence_state INTO v_old FROM roadmap.agency
+   WHERE agency_id = p_agency_id FOR UPDATE;
+
+  -- Atomic update of heartbeat + presence (presence_state is TEXT with CHECK from migration 159)
   UPDATE roadmap.agency
-  SET
-    last_heartbeat_at = now(),
-    presence_state = p_state::presence_state_enum
-  WHERE agency_id = p_agency_id
-  RETURNING presence_state INTO v_new;
+     SET last_heartbeat_at = now(),
+         presence_state    = p_state
+   WHERE agency_id = p_agency_id
+   RETURNING presence_state INTO v_new;
 
   IF NOT FOUND THEN
     RAISE WARNING 'Agency % not found', p_agency_id;
     RETURN;
   END IF;
 
-  -- Emit notification only on state change
-  -- (requires tracking old state; simplified approach: notify on any pulse for now,
-  --  consumer filters by comparing from/to)
-  PERFORM pg_notify(
-    'agency_presence_changed',
-    json_build_object(
-      'agency_id', p_agency_id,
-      'to', p_state,
-      'at', now()::text
-    )::text
-  );
-
+  -- Emit notification ONLY on state change (AC-8 requires within 1s of change)
+  IF v_old IS DISTINCT FROM v_new THEN
+    PERFORM pg_notify(
+      'agency_presence_changed',
+      json_build_object(
+        'agency_id', p_agency_id,
+        'from',      v_old,
+        'to',        v_new,
+        'at',        now()::text
+      )::text
+    );
+  END IF;
 END;
 $$;
 
 COMMENT ON FUNCTION roadmap.fn_pulse(text, text) IS
   'Atomically pulse agency heartbeat and update presence state. Emits pg_notify on each call.';
 
--- Part (b): Create presence_state_enum if missing, then recreate view
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_type WHERE typname = 'presence_state_enum'
-  ) THEN
-    CREATE TYPE presence_state_enum AS ENUM ('online', 'busy', 'away', 'offline');
-  END IF;
-END $$;
-
+-- Part (b): recreate v_agency_status with 60s dispatchable threshold.
+-- (No presence_state_enum needed; migration 159 made presence_state TEXT with CHECK.)
+--
 -- Drop and recreate v_agency_status with 60s dispatchable threshold
 DROP VIEW IF EXISTS roadmap.v_agency_status CASCADE;
 
