@@ -6,6 +6,7 @@ import type {
 	Channel as WebSocketChannel,
 } from "../hooks/useWebSocket";
 import { apiClient } from "../lib/api";
+import { maturityBadgeColors } from "../lib/maturity-colors";
 import ActivityFeed from "./ActivityFeed";
 import AgentDetail from "./AgentDetail";
 import LiveOpsPanel from "./LiveOpsPanel";
@@ -75,21 +76,6 @@ function heartbeatText(seconds?: number): string {
 	if (seconds < 60) return `${seconds}s`;
 	if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
 	return `${Math.floor(seconds / 3600)}h`;
-}
-
-function proposalMaturityClass(maturity?: string): string {
-	switch ((maturity ?? "").toLowerCase()) {
-		case "mature":
-			return "text-emerald-700 dark:text-emerald-300";
-		case "active":
-			return "text-blue-700 dark:text-blue-300";
-		case "obsolete":
-			return "text-gray-400 dark:text-gray-500";
-		case "new":
-			return "text-amber-700 dark:text-amber-300";
-		default:
-			return "text-gray-900 dark:text-gray-100";
-	}
 }
 
 function badgeClass(value: string): string {
@@ -382,14 +368,14 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 											</span>
 											{proposal.maturity ? (
 												<span
-													className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${badgeClass(proposal.maturity)}`}
+													className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${maturityBadgeColors(proposal.maturity)}`}
 												>
 													{proposal.maturity}
 												</span>
 											) : null}
 										</div>
 										<div
-											className={`mt-2 text-sm font-medium ${proposalMaturityClass(proposal.maturity)}`}
+											className={`mt-2 text-sm font-medium ${maturityBadgeColors(proposal.maturity)}`}
 										>
 											{proposal.title}
 										</div>

@@ -5,9 +5,10 @@
  * Pure Postgres LISTEN + REST. Zero LLM.
  *
  * Subscribes to `roadmap_events` (the unified outbox channel emitted by
- * fn_notify_proposal_event) plus the legacy maturity/state/gate-ready
- * channels for completeness. For each event, looks up the proposal_event
- * row + the proposal title and renders a sentence per the P720 spec at
+ * fn_notify_proposal_event), `agent_lifecycle_events` for operator-visible
+ * maintenance events, plus the legacy maturity/state/gate-ready channels for
+ * completeness. For each proposal event, looks up the proposal_event row + the
+ * proposal title and renders a sentence per the P720 spec at
  * /data/code/AgentHive/docs/proposals/P720/event-render-templates.md.
  *
  * Defaults applied (Phase 1 — operator can re-tune later, see P720 task #106):
@@ -34,7 +35,7 @@ const WEBHOOK_URL =
 // The legacy maturity/state channels still fire but `roadmap_events` carries
 // the same information with better fidelity, so we ignore the legacy ones to
 // avoid double-posting.
-const CHANNELS = ["roadmap_events", "proposal_gate_ready"];
+const CHANNELS = ["roadmap_events", "agent_lifecycle_events", "proposal_gate_ready"];
 
 // ─── Auth helpers (unchanged from prior version) ──────────────────────────────
 
@@ -403,6 +404,21 @@ async function renderGateReady(client: Client, payload: string): Promise<string>
 	);
 }
 
+function renderAgentLifecycleEvent(payload: string): string {
+	let data: Record<string, unknown> = {};
+	try {
+		data = JSON.parse(payload);
+	} catch {
+		return "";
+	}
+
+	if (data.event_type !== "registry_reap") return "";
+
+	const count = Number(data.count ?? 0);
+	const retention = String(data.retention ?? "unknown retention");
+	return `**system/registry-reaper** pruned **${count}** inactive agent_registry row(s) older than ${retention}`;
+}
+
 async function handleNotification(
 	client: Client,
 	channel: string,
@@ -427,6 +443,8 @@ async function handleNotification(
 		if (!msg) console.log(`[state-feed] event ${eventId} suppressed/empty`);
 	} else if (channel === "proposal_gate_ready") {
 		msg = await renderGateReady(client, payload);
+	} else if (channel === "agent_lifecycle_events") {
+		msg = renderAgentLifecycleEvent(payload);
 	}
 	if (msg) {
 		console.log(`[state-feed] → Discord: ${msg.slice(0, 80)}`);

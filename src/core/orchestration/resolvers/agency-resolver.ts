@@ -363,7 +363,11 @@ export async function resumeAgencyProviderLiaison(
  * Called from scanAndTransitionSilentAgencies() after transitioning to offline.
  */
 async function emitOfflineAlerts(): Promise<void> {
-	const { rows } = await query<{ id: string; agent_identity: string }>(
+	const { rows } = await query<{
+		id: string;
+		agent_identity: string;
+		project_id: string | null;
+	}>(
 		`WITH alerted AS (
 		   UPDATE roadmap_workforce.provider_registry pr
 		   SET offline_alerted_at = now(),
@@ -372,20 +376,25 @@ async function emitOfflineAlerts(): Promise<void> {
 		     AND pr.offline_since_at IS NOT NULL
 		     AND pr.offline_alerted_at IS NULL
 		     AND now() - pr.offline_since_at > interval '10 minutes'
-		   RETURNING pr.id, pr.agency_id
+		   RETURNING pr.id, pr.agency_id, pr.project_id
 		 )
-		 SELECT al.id::text, ar.agent_identity
+		 SELECT al.id::text, ar.agent_identity, al.project_id::text
 		 FROM alerted al
 		 JOIN roadmap_workforce.agent_registry ar ON ar.id = al.agency_id`,
 		[],
 	);
 
 	for (const row of rows) {
+		// Scope-aware: tenant-scoped agencies (project_id set) route to the
+		// tenant operator channel; global agencies route to platform ops.
+		const scope = row.project_id ? "tenant" : "global";
 		await query(`SELECT pg_notify('discord_send', $1::text)`, [
 			JSON.stringify({
 				from: "agency-liveness-scanner",
 				message: `Agency ${row.agent_identity} (registry id: ${row.id}) has been offline for >10 minutes. Check liaison heartbeat.`,
 				level: "warning",
+				scope,
+				project_id: row.project_id ?? null,
 				ts: new Date().toISOString(),
 			}),
 		]);

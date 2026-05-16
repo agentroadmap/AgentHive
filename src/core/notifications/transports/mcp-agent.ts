@@ -12,12 +12,19 @@
  * surface is explicit.
  */
 
-import { query } from "../../../postgres/pool.ts";
+import { query as pgQuery } from "../../../infra/postgres/pool.ts";
 import type {
 	DispatchArgs,
 	NotificationTransport,
 } from "../types.ts";
 import { TransportError } from "../types.ts";
+
+type QueryFn = typeof pgQuery;
+let query: QueryFn = pgQuery;
+
+export function _setNotificationMcpAgentQueryForTest(fn: QueryFn): void {
+	query = fn;
+}
 
 export const mcpAgentTransport: NotificationTransport = {
 	name: "mcp_agent",

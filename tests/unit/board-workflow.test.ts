@@ -80,8 +80,8 @@ describe("board workflow helpers", () => {
 	});
 
 	it("re-labels hotfix-tab columns using SMDL stage names", () => {
-		// Hotfix view: cosmetic re-mapping so columns read TRIAGE / FIX /
-		// DEPLOYED instead of the underlying RFC stage names. RFC view stays
+		// Hotfix view: cosmetic re-mapping so columns read TRIAGE / DEPLOY /
+		// CLOSED instead of the underlying RFC stage names. RFC view stays
 		// DB-truth.
 		const proposals: Proposal[] = [
 			baseProposal({ id: "p1", proposalType: "hotfix", status: "DRAFT" }),
@@ -91,9 +91,8 @@ describe("board workflow helpers", () => {
 
 		expect(resolveWorkflowStatuses(proposals, "hotfix")).toEqual([
 			"TRIAGE",
-			"FIX",
-			"DEPLOYED",
-			"ESCALATE",
+			"DEPLOY",
+			"CLOSED",
 			"WONT_FIX",
 			"NON_ISSUE",
 		]);

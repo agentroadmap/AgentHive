@@ -1,0 +1,37 @@
+groups:
+  - name: agenthive_tenant_backups
+    interval: 5m
+    rules:
+      - alert: AgentHiveBackupDiskUsageHigh
+        expr: (node_filesystem_avail_bytes{mountpoint="/var"} / node_filesystem_size_bytes{mountpoint="/var"}) < 0.15
+        for: 10m
+        annotations:
+          summary: "Backup disk on {{ $labels.instance }} below 15 percent free"
+          action: "Inspect /var/backups/agenthive and tenant retention metrics."
+
+      - alert: AgentHiveTenantBackupStale
+        expr: time() - agenthive_tenant_backup_last_success_unixtime > 93600
+        for: 30m
+        annotations:
+          summary: "Tenant {{ $labels.slug }} has not produced a fresh backup in 26 hours"
+          action: "Check cron execution, pg_dump logs, and tenant connectivity."
+
+      - alert: AgentHiveTenantRestoreTestFailed
+        expr: agenthive_restore_test_failed > 0
+        for: 15m
+        annotations:
+          summary: "Tenant {{ $labels.slug }} restore-test failed"
+          action: "Review restore-test log and escalation_log entry for remediation."
+
+      - alert: AgentHiveTenantRestoreTestStale
+        expr: time() - agenthive_restore_test_last_success_unixtime > 45 * 24 * 60 * 60
+        for: 1h
+        annotations:
+          summary: "Tenant {{ $labels.slug }} has not passed a restore-test in 45 days"
+          action: "Run the monthly restore validation and inspect backup integrity."
+
+      - alert: AgentHiveTenantBackupCapExceeded
+        expr: increase(agenthive_backup_disk_cap_exceeded_total[1h]) > 0
+        annotations:
+          summary: "Tenant {{ $labels.slug }} backup disk cap exceeded"
+          action: "Inspect retention pruning, free space, and escalation_log for this tenant."

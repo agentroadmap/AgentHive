@@ -5,12 +5,16 @@
  * unit-testable.
  */
 
+import { createHash } from "node:crypto";
+
 export interface DriftHit {
 	errorCode: "42703" | "42P01";
 	missingName: string;
 	queryExcerpt: string | null;
 	rawLine: string;
 }
+
+export const NO_QUERY_SENTINEL = "<no-query>";
 
 const ERR_PATTERNS: Array<{
 	code: DriftHit["errorCode"];
@@ -74,18 +78,28 @@ export function extractDriftHits(text: string): DriftHit[] {
  * fingerprint the same.
  */
 function extractQueryExcerpt(line: string): string | null {
-	// Look for SELECT|INSERT|UPDATE|DELETE …
-	const m = /\b(SELECT|INSERT INTO|UPDATE|DELETE FROM)\b[^"]{0,400}/i.exec(line);
+	const m =
+		/\b(WITH|SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM)\b[\s\S]{0,500}/i.exec(
+			line,
+		);
 	if (!m) return null;
-	return normalizeQueryFragment(m[0]);
+
+	const excerpt = m[0]
+		.replace(/\bcode:\s*['"](42703|42P01)['"].*/i, "")
+		.replace(/\b(column|relation)\s+"[^"]+"\s+does not exist.*/i, "")
+		.trim();
+	if (!excerpt) return null;
+
+	return normalizeQueryFragment(excerpt);
 }
 
 export function normalizeQueryFragment(q: string): string {
 	return q
+		.replace(/'([^'\\]|\\.)*'/g, "?")
+		.replace(/"([^"\\]|\\.)*"/g, "?")
+		.replace(/\$\d+/g, "?")
+		.replace(/\b\d+(?:\.\d+)?\b/g, "?")
 		.replace(/\s+/g, " ")
-		.replace(/'[^']*'/g, "'?'")
-		.replace(/\$\d+/g, "$?")
-		.replace(/\b\d+\b/g, "?")
 		.trim()
 		.slice(0, 240);
 }
@@ -97,8 +111,11 @@ export function normalizeQueryFragment(q: string): string {
  * the same query repeated 1000× collapses to one entry.
  */
 export function fingerprintHit(hit: DriftHit): string {
-	const q = hit.queryExcerpt ?? "no_query";
-	return `${hit.errorCode}::${hit.missingName}::${q}`;
+	const q = hit.queryExcerpt ?? NO_QUERY_SENTINEL;
+	return createHash("sha256")
+		.update(`${hit.errorCode}|${hit.missingName}|${q}`)
+		.digest("hex")
+		.slice(0, 64);
 }
 
 /**

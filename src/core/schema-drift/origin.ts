@@ -13,7 +13,7 @@ export interface OriginGuess {
 	commitSha: string | null;
 	proposalDisplayId: string | null;   // e.g. "P634"
 	proposalNumericId: number | null;   // 634
-	source: "git_pickaxe" | "migration_filename" | "none";
+	source: "git_pickaxe" | "git_diff" | "proposal_event" | "none";
 }
 
 export interface OriginTracerDeps {
@@ -38,11 +38,12 @@ export function traceOrigin(
 			"git",
 			[
 				"log",
+				"origin/main",
 				"-S",
 				missingName,
+				"--pickaxe-regex",
 				"--all",
-				"-n",
-				"40",
+				"-n", "50",
 				"--pretty=format:%H\t%s",
 			],
 			deps.repoRoot,
@@ -68,34 +69,43 @@ export function traceOrigin(
 		}
 	}
 
-	// 2. Migration filename: greppable in `scripts/migrations` and
-	//    `database/`.
-	for (const dir of ["scripts/migrations", "database"]) {
-		try {
-			const grepOut = exec(
-				"grep",
-				[
-					"-rln",
-					"-E",
-					`(DROP COLUMN|RENAME COLUMN).*\\b${escapeRegex(missingName)}\\b`,
-					dir,
-				],
-				deps.repoRoot,
-			);
-			const files = grepOut.split(/\r?\n/).filter(Boolean);
-			for (const f of files) {
-				const m = /\bp(\d+)/i.exec(f);
-				if (m) {
-					return {
-						commitSha: null,
-						proposalDisplayId: `P${m[1]}`,
-						proposalNumericId: Number(m[1]),
-						source: "migration_filename",
-					};
-				}
-			}
-		} catch {
-			// grep returns 1 when nothing matches — fine.
+	// 2. Diff-oriented history pass over SQL-bearing paths to catch explicit
+	//    DROP/RENAME statements even when the pickaxe subject lacks a proposal id.
+	let diffOutput = "";
+	try {
+		diffOutput = exec(
+			"git",
+			[
+				"log",
+				"origin/main",
+				"-G",
+				`(DROP COLUMN|RENAME COLUMN).*${escapeRegex(missingName)}`,
+				"-n",
+				"50",
+				"--pretty=format:%H\t%s",
+				"--",
+				"scripts/migrations",
+				"database",
+			],
+			deps.repoRoot,
+		);
+	} catch {
+		diffOutput = "";
+	}
+
+	for (const line of diffOutput.split(/\r?\n/).filter(Boolean)) {
+		const tab = line.indexOf("\t");
+		if (tab < 0) continue;
+		const sha = line.slice(0, tab);
+		const subject = line.slice(tab + 1);
+		const m = PROP_RE.exec(subject);
+		if (m) {
+			return {
+				commitSha: sha,
+				proposalDisplayId: `P${m[1]}`,
+				proposalNumericId: Number(m[1]),
+				source: "git_diff",
+			};
 		}
 	}
 

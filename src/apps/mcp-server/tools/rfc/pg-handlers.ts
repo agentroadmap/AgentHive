@@ -1200,6 +1200,100 @@ export async function getValidTransitions(args: {
 	}
 }
 
+// ─── Gate Decision Log ──────────────────────────────────────────────────────
+
+export async function recordGateDecision(args: {
+	proposal_id: string;
+	gate: string;
+	decision: string;
+	rationale?: string;
+	decided_by?: string;
+	authority_agent?: string;
+	agent_run_id?: string;
+	ac_verification?: Record<string, unknown>;
+}): Promise<CallToolResult> {
+	const VALID_DECISIONS = ["advance", "hold", "reject", "waive", "escalate"];
+	if (!VALID_DECISIONS.includes(args.decision)) {
+		return errorResult(
+			`Invalid decision '${args.decision}'. Must be one of: ${VALID_DECISIONS.join(", ")}`,
+			"decision_invalid",
+		);
+	}
+	try {
+		const proposalId = await resolveProposalId(args.proposal_id);
+		if (proposalId === null) {
+			return {
+				content: [{ type: "text", text: `Proposal ${args.proposal_id} not found.` }],
+			};
+		}
+
+		// Read current from_state and maturity from the proposal.
+		const { rows: propRows } = await query<{
+			status: string;
+			maturity: string;
+		}>(
+			`SELECT status, maturity FROM roadmap_proposal.proposal WHERE id = $1`,
+			[proposalId],
+		);
+		if (!propRows.length) {
+			return { content: [{ type: "text", text: `Proposal ${args.proposal_id} not found.` }] };
+		}
+		const { status: fromState, maturity } = propRows[0];
+
+		// Shadow-mode skip: if a row with the same agent_run_id already exists,
+		// the new MCP path already wrote the canonical record — skip the insert.
+		if (args.agent_run_id) {
+			const { rows: existing } = await query(
+				`SELECT id FROM roadmap_proposal.gate_decision_log
+				  WHERE proposal_id = $1
+				    AND ac_verification->>'agent_run_id' = $2
+				  LIMIT 1`,
+				[proposalId, args.agent_run_id],
+			);
+			if (existing.length) {
+				return {
+					content: [{
+						type: "text",
+						text: `✅ Gate decision for ${args.proposal_id} (agent_run_id=${args.agent_run_id}) already recorded (#${existing[0].id}) — skipped duplicate.`,
+					}],
+				};
+			}
+		}
+
+		const acVerification: Record<string, unknown> = { ...(args.ac_verification ?? {}) };
+		if (args.agent_run_id) acVerification.agent_run_id = args.agent_run_id;
+
+		const { rows } = await query(
+			`INSERT INTO roadmap_proposal.gate_decision_log
+			   (proposal_id, from_state, to_state, maturity, gate, decided_by,
+			    authority_agent, decision, rationale, ac_verification, signature_hash)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL)
+			 RETURNING id`,
+			[
+				proposalId,
+				fromState,
+				fromState, // to_state mirrors from_state — transition is a separate step
+				maturity,
+				args.gate,
+				args.decided_by ?? "mcp",
+				args.authority_agent ?? null,
+				args.decision,
+				args.rationale ?? null,
+				Object.keys(acVerification).length ? JSON.stringify(acVerification) : null,
+			],
+		);
+
+		return {
+			content: [{
+				type: "text",
+				text: `✅ Gate decision recorded: id=${rows[0].id} proposal=${args.proposal_id} gate=${args.gate} decision=${args.decision}`,
+			}],
+		};
+	} catch (err) {
+		return errorResult("Failed to record gate decision", err);
+	}
+}
+
 // ─── Class definition for server registration ───────────────────────────────
 
 export class RfcWorkflowHandlers {
@@ -1464,9 +1558,36 @@ export class RfcWorkflowHandlers {
 			handler: (args: any) => addDiscussion(args),
 		});
 
+		// Gate decision log
+		this.server.addTool({
+			name: "record_gate_decision",
+			description: "Write a gate decision (advance/hold/reject/waive/escalate) directly to gate_decision_log. Use this instead of stdout so the orchestrator can read the structured decision without parsing LLM output.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					proposal_id: { type: "string" },
+					gate: { type: "string", description: "Gate level, e.g. D1, D2, D3, D4" },
+					decision: {
+						type: "string",
+						enum: ["advance", "hold", "reject", "waive", "escalate"],
+					},
+					rationale: { type: "string" },
+					decided_by: { type: "string", description: "Agent identity making the decision" },
+					authority_agent: { type: "string" },
+					agent_run_id: { type: "string", description: "agent_runs.id — used for dedup (shadow-mode)" },
+					ac_verification: {
+						type: "object",
+						description: "JSONB with per-criterion pass/fail map",
+					},
+				},
+				required: ["proposal_id", "gate", "decision"],
+			},
+			handler: (args: any) => recordGateDecision(args),
+		});
+
 		// eslint-disable-next-line no-console
 		console.error(
-			"[MCP] Registered 12 RFC workflow tools (state machine, AC, deps, reviews, discussions)",
+			"[MCP] Registered 13 RFC workflow tools (state machine, AC, deps, reviews, discussions, gate_decision)",
 		);
 	}
 }

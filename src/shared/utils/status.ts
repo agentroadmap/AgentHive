@@ -10,9 +10,11 @@ export function isCompleteStatus(status?: string | null): boolean {
 	if (!status) return false;
 	const normalized = String(status).trim().toLowerCase();
 	return (
+		normalized === "reached" ||
 		normalized === "done" ||
 		normalized === "complete" ||
 		normalized === "completed" ||
+		normalized.includes("reached") ||
 		normalized.includes("done") ||
 		normalized.includes("complete")
 	);

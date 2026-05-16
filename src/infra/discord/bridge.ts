@@ -50,13 +50,33 @@ const LEVEL_ICONS: Record<string, string> = {
 	error: "❌",
 };
 
+/**
+ * Resolve which Discord channel to use.
+ * Tenant-scoped alerts check DISCORD_CHANNEL_ID_<project_id> first; global
+ * alerts (and tenant ones without a per-project override) fall back to the
+ * global DISCORD_CHANNEL_ID. This is the P765 scope-aware routing mechanism:
+ * no separate service, just an env-driven channel override.
+ */
+function resolveChannelId(
+	config: BridgeConfig,
+	projectId: string | null | undefined,
+): string {
+	if (projectId) {
+		const tenantChannel = process.env[`DISCORD_CHANNEL_ID_${projectId}`];
+		if (tenantChannel) return tenantChannel;
+	}
+	return config.channelId;
+}
+
 async function sendToDiscord(
 	config: BridgeConfig,
 	content: string,
+	channelId?: string,
 ): Promise<void> {
+	const target = channelId ?? config.channelId;
 	try {
 		const resp = await fetch(
-			`${DISCORD_API}/channels/${config.channelId}/messages`,
+			`${DISCORD_API}/channels/${target}/messages`,
 			{
 				method: "POST",
 				headers: {
@@ -95,8 +115,10 @@ async function startOutboundListener(config: BridgeConfig): Promise<void> {
 				const from = data.from ?? "agent";
 				const message = data.message ?? "";
 				const content = `${icon} **${from}**: ${message}`;
+				// P765: scope-aware routing — tenant alerts route to per-project channel
+				const channelId = resolveChannelId(config, data.project_id);
 
-				void sendToDiscord(config, content);
+				void sendToDiscord(config, content, channelId);
 			} catch (err) {
 				console.error(
 					`[discord-bridge] Failed to parse discord_send payload: ${err instanceof Error ? err.message : String(err)}`,
