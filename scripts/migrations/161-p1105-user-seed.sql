@@ -6,9 +6,10 @@
 -- This migration registers the system user identity so msg_send/msg_reply
 -- can identify user/* agents for bearer token verification (AC-27).
 --
--- agent_registry actual column set verified: id, agent_identity, agent_type,
--- role, skills, preferred_model, status, github_handle, ..., trust_tier.
--- No host_id column exists here.
+-- agent_registry actual column set: id, agent_identity, agent_type, role,
+-- skills, preferred_model, status, github_handle, ..., trust_tier.
+-- No host_id column. agent_type CHECK list: human/llm/tool/hybrid/agency/
+-- workforce/coordinator — no 'user' value. Human operators use 'human'.
 
 INSERT INTO roadmap.agent_registry (
 	agent_identity,
@@ -20,10 +21,13 @@ INSERT INTO roadmap.agent_registry (
 )
 VALUES (
 	'user/gary',
-	'user',
+	'human',
 	'operator',
 	'active',
 	'authority',
 	now()
 )
-ON CONFLICT (agent_identity) DO NOTHING;
+ON CONFLICT (agent_identity) DO UPDATE
+   SET role       = COALESCE(roadmap.agent_registry.role, EXCLUDED.role),
+       trust_tier = EXCLUDED.trust_tier,
+       status     = 'active';
