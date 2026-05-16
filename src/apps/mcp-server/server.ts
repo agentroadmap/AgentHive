@@ -1981,7 +1981,84 @@ export async function createMcpServer(
 		}),
 	});
 
-	console.error("[MCP] Registered 9 P466/P468/P475 spawn-briefing tools (liaison protocol)");
+	// P917: Agency lifecycle tools (agency_bootstrap / agency_join_project / agency_leave_project / agency_liaison_status)
+	const agencyLifecycleHandlers = await import("./tools/agency/liaison-pg-handlers.ts");
+	server.addTool({
+		name: "agency_bootstrap",
+		description:
+			"Register an agency and open a liaison session. " +
+			"Required: agency_id, display_name, provider, host_id. " +
+			"Optional: capabilities[], capacity_envelope, public_key, metadata. " +
+			"Returns { session_id, agency_id, status }.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				agency_id: { type: "string" },
+				display_name: { type: "string" },
+				provider: { type: "string" },
+				host_id: { type: "string" },
+				capabilities: { type: "array", items: { type: "string" } },
+				capacity_envelope: { type: "object" },
+				public_key: { type: "string" },
+				metadata: { type: "object" },
+			},
+			required: ["agency_id", "display_name", "provider", "host_id"],
+			additionalProperties: false,
+		},
+		handler: (a) => agencyLifecycleHandlers.agencyBootstrapHandler(a),
+	});
+	server.addTool({
+		name: "agency_join_project",
+		description:
+			"Bridge an agency into a project via provider_registry (fn_offer_provider_heartbeat). " +
+			"Requires the agency to already have an agent_registry row (workforce bridge). " +
+			"Required: agency_id, project_name. Optional: capabilities[].",
+		inputSchema: {
+			type: "object",
+			properties: {
+				agency_id: { type: "string" },
+				project_name: { type: "string" },
+				capabilities: { type: "array", items: { type: "string" } },
+			},
+			required: ["agency_id", "project_name"],
+			additionalProperties: false,
+		},
+		handler: (a) => agencyLifecycleHandlers.agencyJoinProjectHandler(a),
+	});
+	server.addTool({
+		name: "agency_leave_project",
+		description:
+			"Pause an agency's provider_registry row for a project (status = paused). " +
+			"Required: agency_id, project_name.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				agency_id: { type: "string" },
+				project_name: { type: "string" },
+			},
+			required: ["agency_id", "project_name"],
+			additionalProperties: false,
+		},
+		handler: (a) => agencyLifecycleHandlers.agencyLeaveProjectHandler(a),
+	});
+	server.addTool({
+		name: "agency_liaison_status",
+		description:
+			"Query roadmap.v_agency_status for an agency. " +
+			"Returns { agency_id, display_name, status, silence_seconds, dispatchable } or { error: 'not_found' }. " +
+			"Retired agencies return not_found (excluded from the view).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				agency_id: { type: "string" },
+			},
+			required: ["agency_id"],
+			additionalProperties: false,
+		},
+		handler: (a) => agencyLifecycleHandlers.agencyLiaisonStatusHandler(a),
+	});
+
+	console.error("[MCP] Registered 9 P466/P468/P475 spawn-briefing tools + 4 P917 agency-lifecycle tools (liaison protocol)");
 
 	// P499: PgBouncer operator tools
 	const { PgBouncerOpsHandler } = await import("./tools/ops/pgbouncer-ops.ts");
