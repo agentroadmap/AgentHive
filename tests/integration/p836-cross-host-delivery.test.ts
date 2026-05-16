@@ -33,6 +33,7 @@ import crypto from "node:crypto";
 import { after, describe, it } from "node:test";
 import { Pool } from "pg";
 import {
+	canonicalizeRequestTarget,
 	cleanupDeliveryIdLog,
 	verifyDeliverySignature,
 } from "../../src/infra/messaging/cross-host-relay.ts";
@@ -44,9 +45,11 @@ const SIGNING_SECRET_HEX = crypto.randomBytes(32).toString("hex");
 const AGENT_ID = `test/p836/sender-${TS}`;
 const DEV_MODE = true;
 
-// We need a `pg.Pool` for cross-host-relay; reuse the project's connection
-// settings via env vars (PGHOST/PGUSER/etc are set by /etc/agenthive/env).
-const pool = new Pool();
+// We need a `pg.Pool` for cross-host-relay; honor DATABASE_URL (admin/agenthive)
+// when set; otherwise fall through to PG* env vars and pgpass.
+const pool = process.env.DATABASE_URL
+	? new Pool({ connectionString: process.env.DATABASE_URL })
+	: new Pool();
 
 after(async () => {
 	await query(
@@ -392,56 +395,35 @@ describe("verifyDeliverySignature", () => {
 });
 
 // ─── AC-4: Performance invariant (microbenchmark for canonicalization)
+//
+// AC-4 measures the *new code's* overhead — the canonicalization step that P1097
+// adds. The full verify path includes a dedup INSERT into roadmap.delivery_id_log,
+// which is bounded by DB round-trip (≈1–30ms) and is independent of P1097.
+// We benchmark canonicalizeRequestTarget() directly to isolate the new overhead.
 
 describe("verifyDeliverySignature (AC-4: performance)", () => {
-	it("canonicalization adds <1ms per message (1000 iterations)", async () => {
-		const body = JSON.stringify({ data: "test" });
-		const pathAndSearch = "/webhook/msg?tenant=agenthive&v=1";
-		const deliveryId = crypto.randomUUID();
-		const headers = buildHeaders({
-			deliveryId,
-			timestamp: Math.floor(Date.now() / 1000),
-			agentId: AGENT_ID,
-			body,
-			secretHex: SIGNING_SECRET_HEX,
-			pathAndSearch,
-		});
-
-		// Clean first
-		await query(`DELETE FROM roadmap.delivery_id_log WHERE delivery_id = $1`, [deliveryId]);
-
-		const iterations = 1000;
+	it("canonicalizeRequestTarget adds <1ms per call (10k iterations)", () => {
+		const targets = [
+			"/webhook/msg?tenant=agenthive&v=1",
+			"/",
+			"/api/v2/agents/abc123/messages?since=2026-05-15T00%3A00%3A00Z",
+			"/p/with/many/segments/and/a/longer/path",
+		];
+		const iterations = 10000;
 		const start = process.hrtime.bigint();
-
 		for (let i = 0; i < iterations; i++) {
-			const uniqueDeliveryId = crypto.randomUUID();
-			const headersForIteration = {
-				...headers,
-				"x-agenthive-delivery-id": uniqueDeliveryId,
-			};
-			// Deliberately verify with wrong signature to skip expensive things
-			// The bottleneck for AC-4 is just canonicalization, not HMAC or DB
-			try {
-				await verifyDeliverySignature(body, headersForIteration, SIGNING_SECRET_HEX, pool, pathAndSearch);
-			} catch {
-				// Ignore errors
-			}
+			canonicalizeRequestTarget(targets[i % targets.length]);
 		}
-
 		const end = process.hrtime.bigint();
-		const totalNs = Number(end - start);
-		const totalMs = totalNs / 1e6;
-		const perMessageMs = totalMs / iterations;
-
-		// Clean up
-		await query(
-			`DELETE FROM roadmap.delivery_id_log WHERE delivery_id::text LIKE '${AGENT_ID}%'`,
-		);
-
+		const totalMs = Number(end - start) / 1e6;
+		const perCallUs = (totalMs / iterations) * 1000;
 		console.log(
-			`[AC-4 Benchmark] ${iterations} iterations: ${totalMs.toFixed(2)}ms total, ${perMessageMs.toFixed(4)}ms per message`,
+			`[AC-4 Benchmark] canonicalizeRequestTarget: ${iterations} iterations in ${totalMs.toFixed(2)}ms, ${perCallUs.toFixed(2)}µs per call`,
 		);
-		assert.ok(perMessageMs < 1.0, `canonicalization should add <1ms per message (got ${perMessageMs.toFixed(4)}ms)`);
+		assert.ok(
+			perCallUs < 1000,
+			`canonicalizeRequestTarget should be <1ms per call (got ${perCallUs.toFixed(2)}µs)`,
+		);
 	});
 });
 

@@ -263,7 +263,7 @@ export async function postDeliveryWithAuth(
  * @returns the validated request target
  * @throws {Error} with message formatted as `invalid_<reason>` for audit trail
  */
-function canonicalizeRequestTarget(requestTarget: string): string {
+export function canonicalizeRequestTarget(requestTarget: string): string {
 	// Reject empty string
 	if (!requestTarget || requestTarget.length === 0) {
 		throw new Error("invalid_request_target:empty");
