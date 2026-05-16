@@ -87,10 +87,11 @@ function buildDirectiveAliasMap(
 			keys.add(`d-${numericAlias}`);
 			return Array.from(keys);
 		}
-		const idMatch = value.trim().match(/^d-(\d+)$/i);
-		if (idMatch?.[1]) {
-			const numericAlias = String(Number.parseInt(idMatch[1], 10));
-			keys.add(`d-${numericAlias}`);
+		const idMatch = value.trim().match(/^([a-z]+)-(\d+)$/i);
+		if (idMatch?.[1] && idMatch?.[2]) {
+			const prefix = idMatch[1].toLowerCase();
+			const numericAlias = String(Number.parseInt(idMatch[2], 10));
+			keys.add(`${prefix}-${numericAlias}`);
 			keys.add(numericAlias);
 		}
 		return Array.from(keys);
@@ -115,8 +116,8 @@ function buildDirectiveAliasMap(
 		const existingKey = existing.toLowerCase();
 		const nextKey = normalizedId.toLowerCase();
 		const preferredRawId = /^\d+$/.test(aliasKey)
-			? `d-${aliasKey}`
-			: /^d-\d+$/.test(aliasKey)
+			? null
+			: /^[a-z]+-\d+$/i.test(aliasKey)
 				? aliasKey
 				: null;
 		if (preferredRawId) {
@@ -137,10 +138,11 @@ function buildDirectiveAliasMap(
 		const allowOverwrite = options?.allowOverwrite ?? true;
 		const idKey = directiveKey(normalizedId);
 		if (idKey) setAlias(idKey, normalizedId, allowOverwrite);
-		const idMatch = normalizedId.match(/^d-(\d+)$/i);
-		if (!idMatch?.[1]) return;
-		const numericAlias = String(Number.parseInt(idMatch[1], 10));
-		const canonicalId = `d-${numericAlias}`;
+		const idMatch = normalizedId.match(/^([a-z]+)-(\d+)$/i);
+		if (!idMatch?.[1] || !idMatch?.[2]) return;
+		const prefix = idMatch[1].toLowerCase();
+		const numericAlias = String(Number.parseInt(idMatch[2], 10));
+		const canonicalId = `${prefix}-${numericAlias}`;
 		if (canonicalId) setAlias(canonicalId, normalizedId, allowOverwrite);
 		if (numericAlias) setAlias(numericAlias, normalizedId, allowOverwrite);
 	};
@@ -206,22 +208,19 @@ function canonicalizeDirectiveValue(
 	const normalizedKey = directiveKey(normalized);
 	const direct = aliasMap.get(normalizedKey);
 	if (direct) return direct;
-	const idMatch = normalized.match(/^d-(\d+)$/i);
-	if (idMatch?.[1]) {
-		const numericAlias = String(Number.parseInt(idMatch[1], 10));
+	const idMatch = normalized.match(/^([a-z]+)-(\d+)$/i);
+	if (idMatch?.[1] && idMatch?.[2]) {
+		const prefix = idMatch[1].toLowerCase();
+		const numericAlias = String(Number.parseInt(idMatch[2], 10));
 		return (
-			aliasMap.get(`d-${numericAlias}`) ??
+			aliasMap.get(`${prefix}-${numericAlias}`) ??
 			aliasMap.get(numericAlias) ??
 			normalized
 		);
 	}
 	if (/^\d+$/.test(normalized)) {
 		const numericAlias = String(Number.parseInt(normalized, 10));
-		return (
-			aliasMap.get(`d-${numericAlias}`) ??
-			aliasMap.get(numericAlias) ??
-			normalized
-		);
+		return aliasMap.get(numericAlias) ?? normalized;
 	}
 	return normalized;
 }
@@ -317,7 +316,8 @@ function createBucket(
 	}
 
 	const doneCount = bucketProposals.filter((t) =>
-		isCompleteStatus(t.status),
+		isCompleteStatus(t.status) ||
+		(t.status ?? "").toLowerCase().includes("reached"),
 	).length;
 	const progress =
 		bucketProposals.length > 0
