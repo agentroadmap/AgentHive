@@ -7,8 +7,20 @@ const projectRoot = join(__dirname, "..");
 
 // P1123: protect the shared pool from stray pool.end() in shared CLI/tool code.
 // Tool handlers use src/infra/postgres/pool.ts transitively.
+//
+// HOTFIX 2026-05-16: node --import jiti/register collapses TS named exports
+// to module.default — same pattern the createMcpServer/handleDirectMcpRequest/
+// getVersion lookups below already defend against. Without this fallback,
+// poolModule.setPoolLifecycleMode is undefined at boot and the MCP service
+// crash-loops with TypeError (NRestarts hit 66 today before this fix).
 const poolModule = await import("../src/infra/postgres/pool.ts");
-poolModule.setPoolLifecycleMode("long-running");
+const setPoolLifecycleMode =
+	poolModule.setPoolLifecycleMode || poolModule.default?.setPoolLifecycleMode;
+if (typeof setPoolLifecycleMode !== "function") {
+	console.error("[MCP] Failed to load setPoolLifecycleMode from pool module");
+	process.exit(1);
+}
+setPoolLifecycleMode("long-running");
 
 const serverModule = await import("../src/apps/mcp-server/server.ts");
 const httpCompatModule = await import("../src/apps/mcp-server/http-compat.ts");
