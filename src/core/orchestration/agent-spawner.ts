@@ -507,10 +507,16 @@ function buildOpenAICompatArgs(
  * Build argv + env for Google Gemini CLI.
  * Used when api_spec = 'google'.
  * cli_path in model_routes controls the binary location (no hardcoding here).
+ *
+ * --skip-trust: required for headless invocation when the worktree directory
+ * isn't on Gemini's trusted-folders list. The agent-spawner constructs a
+ * whitelist-only child env so GEMINI_CLI_TRUST_WORKSPACE doesn't propagate
+ * from the parent agency process; the CLI flag is the load-bearing equivalent.
  */
 function buildGeminiArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
 	const argv = [
 		route.cliPath ?? "gemini",
+		"--skip-trust",
 		"--model",
 		route.modelName,
 		"--prompt",
