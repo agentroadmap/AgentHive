@@ -75,7 +75,7 @@ Important live facts:
 | `database/ddl/` | schema DDL and numbered rollout SQL | schema-qualified, idempotent, numbered files |
 | `database/dml/` | initialization data and seed-like artifacts | reference data, seeds |
 | `database/migrations/` | newer numbered migrations | one logical migration per file |
-| `docs/architecture/` | canonical architecture documents | durable design docs that survive multiple proposals |
+| `docs/architecture/` | canonical architecture documents | durable design docs that survive multiple proposals (e.g., [`mcp-liaison-topology.md`](docs/architecture/mcp-liaison-topology.md) — P1095) |
 | `docs/governance/` | constitution, decisions log, agent onboarding | durable governance |
 | `docs/pillars/` | pillar/proposal architecture docs | per-pillar canonical docs |
 | `docs/reference/` | reference material (schema migration, glossary, etc.) | durable reference |
