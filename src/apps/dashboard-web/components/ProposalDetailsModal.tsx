@@ -497,10 +497,12 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 	}, [isOpen]);
 
 	useEffect(() => {
-		if (!proposalId) {
-			setDecisions([]);
-			setReviews([]);
-			setDiscussions([]);
+		if (!isOpen || !proposalId) {
+			if (!proposalId) {
+				setDecisions([]);
+				setReviews([]);
+				setDiscussions([]);
+			}
 			return;
 		}
 		let cancelled = false;
@@ -531,7 +533,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 		return () => {
 			cancelled = true;
 		};
-	}, [proposalId]);
+	}, [isOpen, proposalId]);
 
 	const handleCancelEdit = useCallback(() => {
 		if (isDirty) {
@@ -1476,19 +1478,25 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 									</span>
 								</div>
 							)}
-							{lastActivity && (
-								<div>
-									<span className="font-semibold text-gray-800 dark:text-gray-100">
-										Last activity:
-									</span>{" "}
-									<span className="text-gray-700 dark:text-gray-200">
-										{formatStoredUtcDateForDisplay(lastActivity.date)}
+							<div>
+								<span className="font-semibold text-gray-800 dark:text-gray-100">
+									Last activity:
+								</span>{" "}
+								{lastActivity ? (
+									<>
+										<span className="text-gray-700 dark:text-gray-200">
+											{formatStoredUtcDateForDisplay(lastActivity.date)}
+										</span>
+										<span className="ml-1 text-gray-400 dark:text-gray-500 italic">
+											({lastActivity.label})
+										</span>
+									</>
+								) : (
+									<span className="text-gray-400 dark:text-gray-500 italic">
+										No activity yet
 									</span>
-									<span className="ml-1 text-gray-400 dark:text-gray-500 italic">
-										({lastActivity.label})
-									</span>
-								</div>
-							)}
+								)}
+							</div>
 						</div>
 					)}
 					{/* Title (editable for existing proposals) */}
