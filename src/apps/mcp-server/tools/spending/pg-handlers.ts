@@ -39,6 +39,21 @@ function errorResult(msg: string, err: unknown): CallToolResult {
 }
 
 let perMillionModelPricingPromise: Promise<boolean> | undefined;
+let modelTierSupportPromise: Promise<boolean> | undefined;
+
+async function supportsModelTier(): Promise<boolean> {
+	if (!modelTierSupportPromise) {
+		modelTierSupportPromise = query<{ column_name: string }>(
+			`SELECT column_name
+       FROM information_schema.columns
+       WHERE table_schema = 'roadmap'
+         AND table_name = 'model_metadata'
+         AND column_name = 'tier'`,
+			[],
+		).then(({ rows }) => rows.length > 0);
+	}
+	return modelTierSupportPromise;
+}
 
 async function supportsPerMillionModelPricing(): Promise<boolean> {
 	if (!perMillionModelPricingPromise) {
@@ -114,6 +129,7 @@ type ModelMetadataRow = {
 type ModelRouteRow = {
 	model_name: string;
 	provider: string;
+	tier?: string | null;
 	cost_per_million_input: string | null;
 	context_window: number | null;
 	capabilities: Record<string, boolean> | null;
@@ -148,13 +164,6 @@ function modelListCacheKey(args: {
 	});
 }
 
-// P797: Maps P797 tier aliases to DB tier values
-function normaliseTier(tier: string): string {
-	if (tier === "standard") return "mid";
-	if (tier === "economy") return "lower";
-	return tier;
-}
-
 async function fetchModelRouteRows(args: {
 	provider?: string;
 	tier?: string;
@@ -164,19 +173,18 @@ async function fetchModelRouteRows(args: {
 }): Promise<ModelRouteRow[]> {
 	const activeOnly = args.active_only !== false;
 	const provider = args.provider ?? null;
-	const tier = args.tier ? normaliseTier(args.tier) : null;
+	const tier = args.tier ?? null;
 	const queryFn: ModelQueryFn = args._queryFn ?? (query as unknown as ModelQueryFn);
 	const { rows } = await queryFn<ModelRouteRow>(
-		`SELECT m.model_name, m.provider, m.cost_per_million_input,
-		        m.context_window, m.capabilities, m.rating, m.is_active,
-		        r.route_provider, r.priority
-		 FROM   model_metadata m
-		 JOIN   roadmap.model_routes r
-		          ON r.model_name = m.model_name AND r.is_enabled = true
-		 WHERE  ($1::boolean IS FALSE OR COALESCE(m.is_active, true) = true)
-		   AND  ($2::text IS NULL OR r.route_provider = $2)
-		   AND  ($3::text IS NULL OR r.tier = $3)
-		 ORDER BY m.rating DESC NULLS LAST, r.priority ASC`,
+		`SELECT v.model_name, v.provider, v.tier, v.cost_per_million_input,
+		        v.context_window, v.capabilities, v.rating, v.is_active,
+		        v.route_provider, v.priority
+		 FROM   roadmap.model_route_view v
+		 WHERE  v.is_enabled = true
+		   AND  ($1::boolean IS FALSE OR COALESCE(v.is_active, true) = true)
+		   AND  ($2::text IS NULL OR v.route_provider = $2)
+		   AND  ($3::text IS NULL OR v.tier = $3)
+		 ORDER BY v.rating DESC NULLS LAST, v.priority ASC`,
 		[activeOnly, provider, tier],
 	);
 	return rows;
@@ -233,8 +241,11 @@ async function getModelRouteRows(args: {
 export async function validateModelForDispatch(
 	modelName: string,
 	projectId?: number,
+	queryFnOverride?: <T>(sql: string, params?: unknown[]) => Promise<{ rows: T[] }>,
 ): Promise<{ valid: boolean; reason?: string; error?: string; provider?: string; model?: string }> {
-	const { rows } = await query<{ route_provider: string }>(
+	void projectId;
+	const queryFn = queryFnOverride ?? query;
+	const { rows } = await queryFn<{ route_provider: string }>(
 		`SELECT route_provider
 		 FROM   roadmap.model_routes
 		 WHERE  model_name = $1 AND is_enabled = true
@@ -815,7 +826,7 @@ export class PgModelHandlers {
 				};
 			}
 
-			const lines = filteredRows.map((r) => {
+				const lines = filteredRows.map((r) => {
 				const caps = r.capabilities
 					? Object.keys(r.capabilities)
 							.filter((k: string) => (r.capabilities as Record<string, boolean>)[k])
@@ -825,6 +836,7 @@ export class PgModelHandlers {
 				return [
 					`${r.model_name} (${r.provider})`,
 					`route: ${r.route_provider}`,
+					r.tier ? `tier: ${r.tier}` : null,
 					`priority: ${r.priority}`,
 					`rating: ${r.rating ?? "?"}/5`,
 					`input: ${formatMillionCost(inputCost)}`,
@@ -839,10 +851,11 @@ export class PgModelHandlers {
 		}
 	}
 
-	// P059: Enhanced addModel with is_active support and full upsert
+	// P059/P798: Enhanced addModel with is_active, context_window, and tier support
 	async addModel(args: {
 		model_name: string;
 		provider?: string;
+		tier?: string;
 		cost_per_million_input?: string;
 		cost_per_million_output?: string;
 		cost_per_million_cache_write?: string;
@@ -856,7 +869,10 @@ export class PgModelHandlers {
 		is_active?: string;
 	}): Promise<CallToolResult> {
 		try {
-			const perMillionPricing = await supportsPerMillionModelPricing();
+			const [perMillionPricing, tierSupported] = await Promise.all([
+				supportsPerMillionModelPricing(),
+				supportsModelTier(),
+			]);
 			const inputPerMillion =
 				parseOptionalNumber(args.cost_per_million_input) ??
 				perMillionFromPer1k(args.cost_per_1k_input);
@@ -871,16 +887,60 @@ export class PgModelHandlers {
 			);
 			const inputPer1k = per1kFromPerMillion(inputPerMillion);
 			const outputPer1k = per1kFromPerMillion(outputPerMillion);
+			const tier = args.tier ?? null;
 
 			const { rows } = perMillionPricing
-				? await query(
-						`INSERT INTO model_metadata (
-							model_name, provider,
-							cost_per_1k_input, cost_per_1k_output,
-							cost_per_million_input, cost_per_million_output,
-							cost_per_million_cache_write, cost_per_million_cache_hit,
-							max_tokens, context_window, capabilities, rating, is_active
+				? tierSupported
+					? await query(
+							`INSERT INTO model_metadata (
+								model_name, provider, tier,
+								cost_per_1k_input, cost_per_1k_output,
+								cost_per_million_input, cost_per_million_output,
+								cost_per_million_cache_write, cost_per_million_cache_hit,
+								max_tokens, context_window, capabilities, rating, is_active
+							)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14)
+          ON CONFLICT ON CONSTRAINT model_metadata_model_name_key
+          DO UPDATE SET
+            provider = EXCLUDED.provider,
+            tier = COALESCE(EXCLUDED.tier, model_metadata.tier),
+            cost_per_1k_input = COALESCE(EXCLUDED.cost_per_1k_input, model_metadata.cost_per_1k_input),
+            cost_per_1k_output = COALESCE(EXCLUDED.cost_per_1k_output, model_metadata.cost_per_1k_output),
+            cost_per_million_input = COALESCE(EXCLUDED.cost_per_million_input, model_metadata.cost_per_million_input),
+            cost_per_million_output = COALESCE(EXCLUDED.cost_per_million_output, model_metadata.cost_per_million_output),
+            cost_per_million_cache_write = COALESCE(EXCLUDED.cost_per_million_cache_write, model_metadata.cost_per_million_cache_write),
+            cost_per_million_cache_hit = COALESCE(EXCLUDED.cost_per_million_cache_hit, model_metadata.cost_per_million_cache_hit),
+            max_tokens = COALESCE(EXCLUDED.max_tokens, model_metadata.max_tokens),
+            context_window = COALESCE(EXCLUDED.context_window, model_metadata.context_window),
+            capabilities = COALESCE(EXCLUDED.capabilities, model_metadata.capabilities),
+            rating = COALESCE(EXCLUDED.rating, model_metadata.rating),
+            is_active = COALESCE(EXCLUDED.is_active, model_metadata.is_active)
+          RETURNING model_name, tier, rating, COALESCE(is_active, true) AS is_active`,
+							[
+								args.model_name,
+								args.provider || null,
+								tier,
+								inputPer1k,
+								outputPer1k,
+								inputPerMillion,
+								outputPerMillion,
+								cacheWritePerMillion,
+								cacheHitPerMillion,
+								args.max_tokens ? parseInt(args.max_tokens, 10) : null,
+								args.context_window ? parseInt(args.context_window, 10) : null,
+								args.capabilities ? JSON.parse(args.capabilities) : null,
+								args.rating ? parseInt(args.rating, 10) : null,
+								args.is_active !== undefined ? args.is_active === "true" : null,
+							],
 						)
+					: await query(
+							`INSERT INTO model_metadata (
+								model_name, provider,
+								cost_per_1k_input, cost_per_1k_output,
+								cost_per_million_input, cost_per_million_output,
+								cost_per_million_cache_write, cost_per_million_cache_hit,
+								max_tokens, context_window, capabilities, rating, is_active
+							)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13)
           ON CONFLICT ON CONSTRAINT model_metadata_model_name_key
           DO UPDATE SET
@@ -897,22 +957,22 @@ export class PgModelHandlers {
             rating = COALESCE(EXCLUDED.rating, model_metadata.rating),
             is_active = COALESCE(EXCLUDED.is_active, model_metadata.is_active)
           RETURNING model_name, rating, COALESCE(is_active, true) AS is_active`,
-						[
-							args.model_name,
-							args.provider || null,
-							inputPer1k,
-							outputPer1k,
-							inputPerMillion,
-							outputPerMillion,
-							cacheWritePerMillion,
-							cacheHitPerMillion,
-							args.max_tokens ? parseInt(args.max_tokens, 10) : null,
-							args.context_window ? parseInt(args.context_window, 10) : null,
-							args.capabilities ? JSON.parse(args.capabilities) : null,
-							args.rating ? parseInt(args.rating, 10) : null,
-							args.is_active !== undefined ? args.is_active === "true" : null,
-						],
-					)
+							[
+								args.model_name,
+								args.provider || null,
+								inputPer1k,
+								outputPer1k,
+								inputPerMillion,
+								outputPerMillion,
+								cacheWritePerMillion,
+								cacheHitPerMillion,
+								args.max_tokens ? parseInt(args.max_tokens, 10) : null,
+								args.context_window ? parseInt(args.context_window, 10) : null,
+								args.capabilities ? JSON.parse(args.capabilities) : null,
+								args.rating ? parseInt(args.rating, 10) : null,
+								args.is_active !== undefined ? args.is_active === "true" : null,
+							],
+						)
 				: await query(
 						`INSERT INTO model_metadata (model_name, provider, cost_per_1k_input, cost_per_1k_output,
 						                              max_tokens, context_window, capabilities, rating, is_active)
@@ -940,12 +1000,12 @@ export class PgModelHandlers {
 							args.is_active !== undefined ? args.is_active === "true" : null,
 						],
 					);
-			const r = rows[0];
+			const r = rows[0] as { model_name: string; tier?: string | null; rating: number | null; is_active: boolean };
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Model ${r.is_active ? "added" : "deactivated"}: ${r.model_name} (rating: ${r.rating}, active: ${r.is_active})`,
+						text: `Model ${r.is_active ? "added" : "deactivated"}: ${r.model_name}${r.tier ? ` (tier: ${r.tier})` : ""} (rating: ${r.rating}, active: ${r.is_active})`,
 					},
 				],
 			};

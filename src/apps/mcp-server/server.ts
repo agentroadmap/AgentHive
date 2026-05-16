@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -618,7 +619,6 @@ export class McpServer extends Core {
 			}
 		}
 		// Generate a random 32-byte secret as fallback
-		const { randomBytes } = require("node:crypto") as typeof import("node:crypto");
 		return randomBytes(32);
 	}
 }
@@ -993,7 +993,7 @@ export async function createMcpServer(
 					tier: {
 						type: "string",
 						enum: ["frontier", "standard", "economy"],
-						description: "Filter by model tier: frontier, standard (maps to mid), economy (maps to lower)",
+						description: "Filter by model tier: frontier, standard, or economy",
 					},
 					project_id: { type: "number", description: "Optional project context for future per-project route filtering" },
 				},
@@ -1016,6 +1016,11 @@ export async function createMcpServer(
 					capabilities: { type: "string", description: "JSON object, e.g. '{\"tool_use\":true,\"vision\":true}'" },
 					rating: { type: "string" },
 					is_active: { type: "string", description: "'true' or 'false' to activate/deactivate" },
+					tier: {
+						type: "string",
+						enum: ["frontier", "standard", "economy"],
+						description: "Model tier: frontier (GPT-4o, Claude Opus/Sonnet), standard (GPT-4o-mini, Claude Haiku), economy (Llama, open-source)",
+					},
 				},
 				required: ["model_name"],
 			},
@@ -1615,6 +1620,87 @@ export async function createMcpServer(
 		inputSchema: workforceSchemas.workerRegisterSchema,
 		handler: (a) => workforce.workerRegisterHandler(a),
 	});
+
+	// P917: Agency lifecycle tools — liaison registration, project join/leave, status
+	const {
+		agencyBootstrapHandler,
+		agencyJoinProjectHandler,
+		agencyLeaveProjectHandler,
+		agencyLiaisonStatusHandler,
+	} = await import("./tools/agency/liaison-pg-handlers.ts");
+	server.addTool({
+		name: "agency_bootstrap",
+		description:
+			"Register an agency with the liaison layer (roadmap.agency) and open a new session. " +
+			"Idempotent — safe to call on every boot. " +
+			"Required: agency_id, display_name, provider, host_id.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				agency_id: { type: "string", description: "Canonical agency identity (e.g. anthropic/hermes)" },
+				display_name: { type: "string", description: "Human-readable name" },
+				provider: { type: "string", description: "Provider prefix (e.g. anthropic, openai)" },
+				host_id: { type: "string", description: "Host machine identifier" },
+				capabilities: { type: "array", items: { type: "string" }, description: "Capability tags" },
+				capacity_envelope: { type: "object", additionalProperties: true, description: "Capacity metadata (concurrency, slots, …)" },
+				public_key: { type: "string", description: "Optional public key for identity verification" },
+				metadata: { type: "object", additionalProperties: true, description: "Arbitrary metadata bag" },
+			},
+			required: ["agency_id", "display_name", "provider", "host_id"],
+			additionalProperties: false,
+		},
+		handler: (a) => agencyBootstrapHandler(a),
+	});
+	server.addTool({
+		name: "agency_join_project",
+		description:
+			"Bridge a registered agency into a project's dispatch pool (provider_registry). " +
+			"Agency must already be registered via agency_bootstrap AND agency_register. " +
+			"Required: agency_id, project_slug.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				agency_id: { type: "string", description: "Agency identity" },
+				project_slug: { type: "string", description: "Project name/slug to join" },
+				capabilities: { type: "array", items: { type: "string" }, description: "Override capabilities for this project" },
+			},
+			required: ["agency_id", "project_slug"],
+			additionalProperties: false,
+		},
+		handler: (a) => agencyJoinProjectHandler(a),
+	});
+	server.addTool({
+		name: "agency_leave_project",
+		description:
+			"Pause an agency's dispatch eligibility for a project (sets provider_registry.status = 'paused'). " +
+			"No-op if already paused or not found.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				agency_id: { type: "string", description: "Agency identity" },
+				project_slug: { type: "string", description: "Project name/slug to leave" },
+			},
+			required: ["agency_id", "project_slug"],
+			additionalProperties: false,
+		},
+		handler: (a) => agencyLeaveProjectHandler(a),
+	});
+	server.addTool({
+		name: "agency_liaison_status",
+		description:
+			"Query liaison status for an agency or list all dispatchable agencies. " +
+			"With agency_id: returns { agency_id, display_name, status, silence_seconds, dispatchable }. " +
+			"Without agency_id: returns all dispatchable agencies.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				agency_id: { type: "string", description: "Optional agency identity; omit to list all dispatchable agencies" },
+			},
+			additionalProperties: false,
+		},
+		handler: (a) => agencyLiaisonStatusHandler(a),
+	});
+	console.error("[MCP] Registered 4 P917 agency lifecycle tools (bootstrap / join_project / leave_project / liaison_status)");
 
 	// P297: State machine management tools
 	server.addTool({
