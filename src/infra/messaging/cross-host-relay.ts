@@ -45,16 +45,21 @@ export interface DeliveryResult {
  * 3. Create signing input (POST\n<path>\n<headers>\n<body>)
  * 4. Resolve delivery signing secret (per-agent or env var)
  * 5. HMAC-SHA256 over signing input
- * 6. POST with headers: X-AgentHive-Signature, X-AgentHive-Delivery-Id, X-AgentHive-Timestamp, X-AgentHive-Agent-Id
+ * 6. POST with headers: X-AgentHive-Signature, X-AgentHive-Delivery-Id, X-AgentHive-Timestamp,
+ *    X-AgentHive-Agent-Id, X-AgentHive-Target-Host-Id (when targetHostId provided)
  * 7. Log to message_validity_log (delivery_attempted_at, delivery_status, delivery_response_code)
  * 8. Retry up to 3 times with exponential backoff on 5xx or network error
  * 9. On all failures: insert NACK into message_ledger
+ *
+ * F1 (P1106): targetHostId is included as a delimited field in the signing input to prevent
+ * cross-host replay attacks. A message signed for host-A cannot be replayed to host-B.
  *
  * @param callbackUrl - HTTPS callback URL (pre-validated by registerCallbackUrl)
  * @param messageEnvelope - Message envelope object (will be JSON stringified and signed)
  * @param sendingAgentId - Agent identity sending this message
  * @param pool - Postgres connection pool for secret lookup and logging
  * @param messageId - Optional message_id from message_ledger (for audit trail)
+ * @param targetHostId - Optional target host identifier bound into the HMAC scope (F1/AC-7)
  *
  * @returns { status, body } of final HTTP response
  * @throws {Error} if SSRF validation fails or all retry attempts exhausted
@@ -65,6 +70,7 @@ export async function postDeliveryWithAuth(
 	sendingAgentId: string,
 	pool: Pool,
 	messageId?: number,
+	targetHostId?: string,
 ): Promise<DeliveryResult> {
 	// Step 1: Re-validate callback URL before delivery (DNS rebinding protection)
 	try {
@@ -136,12 +142,18 @@ export async function postDeliveryWithAuth(
 		throw new Error(`Signing secret resolution failed: ${errorMsg}`);
 	}
 
-	// Step 5: Build signing input
+	// Step 5: Build signing input — F1 (P1106): targetHostId is a delimited field
+	// in the signing scope to prevent cross-host replay. Format:
+	//   POST\n<path>\nX-AgentHive-Delivery-Id: <id>\n...\nX-AgentHive-Target-Host-Id: <host>\n<body>
 	const url = new URL(callbackUrl);
 	const pathAndSearch = url.pathname + (url.search || "");
 
+	const targetHostField = targetHostId
+		? `\nX-AgentHive-Target-Host-Id: ${targetHostId}`
+		: "";
+
 	const signingInput =
-		`POST\n${pathAndSearch}\nX-AgentHive-Delivery-Id: ${deliveryId}\nX-AgentHive-Timestamp: ${timestamp}\nX-AgentHive-Agent-Id: ${sendingAgentId}\n${bodyJson}`;
+		`POST\n${pathAndSearch}\nX-AgentHive-Delivery-Id: ${deliveryId}\nX-AgentHive-Timestamp: ${timestamp}\nX-AgentHive-Agent-Id: ${sendingAgentId}${targetHostField}\n${bodyJson}`;
 
 	// Step 6: HMAC-SHA256 signature
 	const signature = crypto
@@ -156,17 +168,22 @@ export async function postDeliveryWithAuth(
 	let finalStatus = 0;
 	let finalBody = "";
 
+	const deliveryHeaders: Record<string, string> = {
+		"Content-Type": "application/json",
+		"X-AgentHive-Signature": signatureHeader,
+		"X-AgentHive-Delivery-Id": deliveryId,
+		"X-AgentHive-Timestamp": String(timestamp),
+		"X-AgentHive-Agent-Id": sendingAgentId,
+	};
+	if (targetHostId) {
+		deliveryHeaders["X-AgentHive-Target-Host-Id"] = targetHostId;
+	}
+
 	for (let attempt = 0; attempt < MAX_DELIVERY_ATTEMPTS; attempt++) {
 		try {
 			const result = await fetchWithTimeout(callbackUrl, {
 				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-					"X-AgentHive-Signature": signatureHeader,
-					"X-AgentHive-Delivery-Id": deliveryId,
-					"X-AgentHive-Timestamp": String(timestamp),
-					"X-AgentHive-Agent-Id": sendingAgentId,
-				},
+				headers: deliveryHeaders,
 				body: bodyJson,
 			});
 
@@ -251,16 +268,22 @@ export async function postDeliveryWithAuth(
  * Verify an incoming callback delivery signature.
  *
  * Steps:
- * 1. Extract headers: X-AgentHive-Signature, X-AgentHive-Delivery-Id, X-AgentHive-Timestamp, X-AgentHive-Agent-Id
+ * 1. Extract headers: X-AgentHive-Signature, X-AgentHive-Delivery-Id, X-AgentHive-Timestamp,
+ *    X-AgentHive-Agent-Id, X-AgentHive-Target-Host-Id (optional, F1)
  * 2. Reject if timestamp > 300 seconds old (5-minute replay window)
  * 3. Check delivery_id against delivery_id_log (INSERT ON CONFLICT DO NOTHING; rowCount=0 → duplicate)
- * 4. Rebuild signing input identically to sender
+ * 4. Rebuild signing input identically to sender (including target_host_id if present)
  * 5. crypto.timingSafeEqual comparison (NOT string ===)
+ *
+ * F1 (P1106): If X-AgentHive-Target-Host-Id header is present, it is included as a
+ * delimited field in the reconstructed signing input. This binds the signature to a
+ * specific target host and prevents cross-host replay attacks.
  *
  * @param rawBody - Exact HTTP request body (as string or Buffer)
  * @param headers - HTTP request headers (case-insensitive keys acceptable)
  * @param signingSecret - HMAC secret (hex-encoded)
  * @param pool - Postgres connection pool for dedup check
+ * @param requestTarget - Actual HTTP request target (path+query) for signing input reconstruction
  *
  * @returns true if signature is valid and not a duplicate, false otherwise
  */
@@ -269,6 +292,7 @@ export async function verifyDeliverySignature(
 	headers: Record<string, string>,
 	signingSecret: string,
 	pool: Pool,
+	requestTarget?: string,
 ): Promise<boolean> {
 	try {
 		// Step 1: Extract headers (normalize keys to lowercase)
@@ -282,6 +306,8 @@ export async function verifyDeliverySignature(
 		const deliveryId = normalizedHeaders["x-agenthive-delivery-id"] || "";
 		const timestampStr = normalizedHeaders["x-agenthive-timestamp"] || "";
 		const agentId = normalizedHeaders["x-agenthive-agent-id"] || "";
+		// F1: include target_host_id in signing input reconstruction if present
+		const targetHostId = normalizedHeaders["x-agenthive-target-host-id"] || "";
 
 		if (!signatureHeader || !deliveryId || !timestampStr || !agentId) {
 			return false;
@@ -304,14 +330,19 @@ export async function verifyDeliverySignature(
 			return false; // Duplicate delivery
 		}
 
-		// Step 4: Rebuild signing input
-		// Note: We assume path is "/" for the callback endpoint (adjust as needed)
-		const pathAndSearch = "/"; // Callback endpoints typically use fixed path
+		// Step 4: Rebuild signing input — must match sender's construction exactly.
+		// requestTarget defaults to "/" for backward-compatibility with callers that
+		// don't pass it; new callers should always provide the actual request target.
+		const pathAndSearch = requestTarget || "/";
 		const bodyStr =
 			rawBody instanceof Buffer ? rawBody.toString("utf-8") : rawBody;
 
+		const targetHostField = targetHostId
+			? `\nX-AgentHive-Target-Host-Id: ${targetHostId}`
+			: "";
+
 		const signingInput =
-			`POST\n${pathAndSearch}\nX-AgentHive-Delivery-Id: ${deliveryId}\nX-AgentHive-Timestamp: ${timestamp}\nX-AgentHive-Agent-Id: ${agentId}\n${bodyStr}`;
+			`POST\n${pathAndSearch}\nX-AgentHive-Delivery-Id: ${deliveryId}\nX-AgentHive-Timestamp: ${timestamp}\nX-AgentHive-Agent-Id: ${agentId}${targetHostField}\n${bodyStr}`;
 
 		// Step 5: Verify signature using constant-time comparison
 		const expectedSignature = crypto
