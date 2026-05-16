@@ -147,6 +147,20 @@ async function runChecks(ctx: HiveContext): Promise<DoctorCheck[]> {
     remediation: mcp.reachable ? undefined : "Restore MCP connectivity first.",
   });
 
+  // Check 13: HMAC signing secret (AC-5: P1097 requirement)
+  const hmacSecret = process.env.DELIVERY_SIGNING_SECRET;
+  const hmacOk = hmacSecret && /^[0-9a-f]{64,}$/.test(hmacSecret); // ≥256 bits = 64 hex chars
+  checks.push({
+    name: "hmac_signing_secret",
+    severity: hmacOk ? "ok" : "warn",
+    message: hmacOk
+      ? "DELIVERY_SIGNING_SECRET present and ≥256 bits of entropy"
+      : "DELIVERY_SIGNING_SECRET not set or too short (<256 bits)",
+    remediation: hmacOk
+      ? undefined
+      : "Set DELIVERY_SIGNING_SECRET to a ≥256-bit hex string. Generate with: `node -e \"console.log(require('crypto').randomBytes(32).toString('hex'));\"`",
+  });
+
   return checks;
 }
 
@@ -182,6 +196,7 @@ export function registerDoctor(program: Command, getContext: () => Promise<HiveC
     .command("doctor")
     .description("Run system readiness checks (12+ checks, severity + remediation per check)")
     .option("--project <P>", "Project slug override")
+    .option("--check <NAME>", "Run single check by name (e.g., --check hmac for P1097 HMAC verification)")
     .option("--fix", "Attempt automated remediation where possible")
     .option("--verbose", "Show additional detail per check")
     .option("--remediate", "Alias for --fix")
@@ -193,7 +208,18 @@ export function registerDoctor(program: Command, getContext: () => Promise<HiveC
       if (opts.project) ctx.project = opts.project;
       const fmt = opts.format as OutputFormat;
 
-      const checks = await runChecks(ctx);
+      let checks = await runChecks(ctx);
+
+      // If --check <name> specified, filter to just that check
+      if (opts.check) {
+        const checkName = opts.check.toLowerCase();
+        checks = checks.filter((c) => c.name.toLowerCase().includes(checkName));
+        if (checks.length === 0) {
+          printText([`hive doctor: no check matching "${opts.check}" found`]);
+          process.exit(EXIT.INTERNAL_ERROR);
+        }
+      }
+
       const elapsed = Date.now() - start;
 
       const hasErrors = checks.some((c) => c.severity === "error");
