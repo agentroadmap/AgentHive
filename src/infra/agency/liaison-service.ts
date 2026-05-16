@@ -152,56 +152,91 @@ export async function liaisonHeartbeat(
 
 	if (!session_id) throw new Error("session_id is required");
 
-	const result = await query(
-		`
-    WITH session_check AS (
-      SELECT agency_id, ended_at
-      FROM roadmap.agency_liaison_session
-      WHERE session_id = $1
-    ),
-    update_agency AS (
-      UPDATE roadmap.agency
-      SET
-        last_heartbeat_at = now(),
-        status = CASE
-          WHEN status = 'dormant'      THEN 'active'      -- reactivate on heartbeat
-          WHEN $2 = 'throttled'        THEN 'throttled'
-          WHEN $2 = 'paused'           THEN 'paused'
-          ELSE status
-        END,
-        status_reason = CASE
-          WHEN status = 'dormant' THEN 'Reactivated by heartbeat'
-          ELSE status_reason
-        END,
-        metadata = jsonb_set(metadata, '{capacity_envelope}', $3::jsonb)
-      WHERE agency_id = (SELECT agency_id FROM session_check)
-        AND (SELECT ended_at FROM session_check) IS NULL
-      RETURNING agency_id, status
-    )
-    SELECT
-      (SELECT agency_id FROM session_check)   as agency_id,
-      (SELECT status    FROM update_agency)   as agency_status,
-      EXTRACT(EPOCH FROM (now() - (
-        SELECT last_heartbeat_at FROM roadmap.agency
-        WHERE agency_id = (SELECT agency_id FROM session_check)
-      )))::int                                as silence_seconds,
-      (
-        (SELECT status FROM update_agency) = 'active'
-        AND now() - (SELECT last_heartbeat_at FROM roadmap.agency
-                     WHERE agency_id = (SELECT agency_id FROM session_check))
-            < interval '90 seconds'
-      )                                       as dispatchable
-    `,
-		[session_id, liaison_status, JSON.stringify(capacity_envelope ?? {})],
+	// Fetch session and agency info
+	const sessionResult = await query(
+		`SELECT agency_id, ended_at FROM roadmap.agency_liaison_session WHERE session_id = $1`,
+		[session_id],
 	);
 
-	if (result.rows.length === 0)
+	if (sessionResult.rows.length === 0)
 		throw new Error(`Session ${session_id} not found or already ended`);
 
-	const row = result.rows[0];
+	const { agency_id, ended_at } = sessionResult.rows[0];
+
+	if (ended_at !== null)
+		throw new Error(`Session ${session_id} already ended`);
+
+	// Update agency status and metadata (reactivate if dormant, set liaison_status)
+	await query(
+		`
+    UPDATE roadmap.agency
+    SET
+      status = CASE
+        WHEN status = 'dormant'      THEN 'active'      -- reactivate on heartbeat
+        WHEN $2 = 'throttled'        THEN 'throttled'
+        WHEN $2 = 'paused'           THEN 'paused'
+        ELSE status
+      END,
+      status_reason = CASE
+        WHEN status = 'dormant' THEN 'Reactivated by heartbeat'
+        ELSE status_reason
+      END,
+      metadata = jsonb_set(metadata, '{capacity_envelope}', $3::jsonb)
+    WHERE agency_id = $1
+    `,
+		[agency_id, liaison_status, JSON.stringify(capacity_envelope ?? {})],
+	);
+
+	// Compute presence state: busy if active dispatch or running agent, else online
+	const stateResult = await query(
+		`
+    SELECT
+      CASE
+        WHEN EXISTS(
+          SELECT 1 FROM roadmap.squad_dispatch
+          WHERE assigned_agency = $1
+            AND dispatch_status IN ('assigned', 'active')
+            AND completed_at IS NULL
+        ) THEN 'busy'
+        WHEN EXISTS(
+          SELECT 1 FROM roadmap.agent_runs
+          WHERE agency_id = $1 AND status = 'running'
+        ) THEN 'busy'
+        ELSE 'online'
+      END AS computed_state
+    `,
+		[agency_id],
+	);
+
+	const computed_state = stateResult.rows[0]?.computed_state || "online";
+
+	// Call fn_pulse to atomically update heartbeat + presence_state and emit notify
+	await query(
+		`SELECT roadmap.fn_pulse($1, $2)`,
+		[agency_id, computed_state],
+	);
+
+	// Fetch final agency state for response
+	const finalResult = await query(
+		`
+    SELECT
+      status,
+      last_heartbeat_at,
+      EXTRACT(EPOCH FROM (now() - last_heartbeat_at))::int as silence_seconds,
+      (status = 'active' AND (now() - last_heartbeat_at) < interval '90 seconds') as dispatchable
+    FROM roadmap.agency
+    WHERE agency_id = $1
+    `,
+		[agency_id],
+	);
+
+	if (finalResult.rows.length === 0)
+		throw new Error(`Agency ${agency_id} not found after update`);
+
+	const row = finalResult.rows[0];
 	return {
 		success: true,
-		agency_status: row.agency_status,
+		agency_status: row.status,
 		silence_seconds: row.silence_seconds ?? 0,
 		dispatchable: row.dispatchable,
 	};
