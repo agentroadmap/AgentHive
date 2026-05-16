@@ -7,7 +7,7 @@
 -- ───────────────────────────────────────────────────────────────────────────
 -- PILLAR 1: Control Plane (canonical P1014)
 -- ───────────────────────────────────────────────────────────────────────────
-INSERT INTO roadmap.proposal_migration_map
+INSERT INTO roadmap_proposal.proposal_migration_map
     (legacy_proposal_id, canonical_proposal_id, classification, rationale, evidence_refs, reviewed_by, reviewed_at)
 VALUES
 (821, 1014, 'delivered_evidence', 'AgentHive V2 single-database architecture — foundation for agentHive2 control plane', '["migration:agentHive2-baseline"]', 'alex', now()),
@@ -56,7 +56,7 @@ ON CONFLICT (legacy_proposal_id) DO NOTHING;
 -- ───────────────────────────────────────────────────────────────────────────
 -- PILLAR 2: Proposal Engine (canonical P1015)
 -- ───────────────────────────────────────────────────────────────────────────
-INSERT INTO roadmap.proposal_migration_map
+INSERT INTO roadmap_proposal.proposal_migration_map
     (legacy_proposal_id, canonical_proposal_id, classification, rationale, evidence_refs, reviewed_by, reviewed_at)
 VALUES
 (774, 1015, 'delivered_evidence', 'C1 workflow vocab unification migration — COMPLETE', '["migration:054"]', 'alex', now()),
@@ -82,7 +82,7 @@ ON CONFLICT (legacy_proposal_id) DO NOTHING;
 -- ───────────────────────────────────────────────────────────────────────────
 -- PILLAR 3: Workforce and Agencies (canonical P1016)
 -- ───────────────────────────────────────────────────────────────────────────
-INSERT INTO roadmap.proposal_migration_map
+INSERT INTO roadmap_proposal.proposal_migration_map
     (legacy_proposal_id, canonical_proposal_id, classification, rationale, evidence_refs, reviewed_by, reviewed_at)
 VALUES
 (918, 1016, 'delivered_evidence', 'Agency runtime contract + shared messaging gateway libraries — COMPLETE', '[]', 'alex', now()),
@@ -107,7 +107,7 @@ ON CONFLICT (legacy_proposal_id) DO NOTHING;
 -- ───────────────────────────────────────────────────────────────────────────
 -- PILLAR 4: A2A Messaging (canonical P1017)
 -- ───────────────────────────────────────────────────────────────────────────
-INSERT INTO roadmap.proposal_migration_map
+INSERT INTO roadmap_proposal.proposal_migration_map
     (legacy_proposal_id, canonical_proposal_id, classification, rationale, evidence_refs, reviewed_by, reviewed_at)
 VALUES
 (833, 1017, 'delivered_evidence', 'A2A Unified Message Envelope — extend message_ledger + ACK/reply MCP tools — COMPLETE', '["migration:096"]', 'alex', now()),
@@ -129,7 +129,7 @@ ON CONFLICT (legacy_proposal_id) DO NOTHING;
 -- ───────────────────────────────────────────────────────────────────────────
 -- PILLAR 5: Execution and Orchestration (canonical P1021)
 -- ───────────────────────────────────────────────────────────────────────────
-INSERT INTO roadmap.proposal_migration_map
+INSERT INTO roadmap_proposal.proposal_migration_map
     (legacy_proposal_id, canonical_proposal_id, classification, rationale, evidence_refs, reviewed_by, reviewed_at)
 VALUES
 (902, 1021, 'delivered_evidence', 'A8 collapse scripts/orchestrator.ts into unified Orchestrator class — COMPLETE', '["commit:8693f8d3"]', 'alex', now()),
@@ -153,7 +153,7 @@ ON CONFLICT (legacy_proposal_id) DO NOTHING;
 -- ───────────────────────────────────────────────────────────────────────────
 -- PILLAR 6: Governance and Trust (canonical P1022)
 -- ───────────────────────────────────────────────────────────────────────────
-INSERT INTO roadmap.proposal_migration_map
+INSERT INTO roadmap_proposal.proposal_migration_map
     (legacy_proposal_id, canonical_proposal_id, classification, rationale, evidence_refs, reviewed_by, reviewed_at)
 VALUES
 (841, 1022, 'delivered_evidence', 'Agent Authentication & Resource Access Distribution Architecture — COMPLETE', '[]', 'alex', now()),
@@ -170,7 +170,7 @@ ON CONFLICT (legacy_proposal_id) DO NOTHING;
 -- ───────────────────────────────────────────────────────────────────────────
 -- PILLAR 7: Observability and Efficiency (canonical P1023)
 -- ───────────────────────────────────────────────────────────────────────────
-INSERT INTO roadmap.proposal_migration_map
+INSERT INTO roadmap_proposal.proposal_migration_map
     (legacy_proposal_id, canonical_proposal_id, classification, rationale, evidence_refs, reviewed_by, reviewed_at)
 VALUES
 (897, 1023, 'delivered_evidence', 'G7 budget unblock reserve on spBudget — COMPLETE', '[]', 'alex', now()),
@@ -184,7 +184,7 @@ ON CONFLICT (legacy_proposal_id) DO NOTHING;
 -- ───────────────────────────────────────────────────────────────────────────
 -- PILLAR 8: Web and Operator Experience (canonical P1024)
 -- ───────────────────────────────────────────────────────────────────────────
-INSERT INTO roadmap.proposal_migration_map
+INSERT INTO roadmap_proposal.proposal_migration_map
     (legacy_proposal_id, canonical_proposal_id, classification, rationale, evidence_refs, reviewed_by, reviewed_at)
 VALUES
 (238, 1024, 'retained', 'State Machine Dashboard — DEVELOP open work', '[]', 'alex', now()),
@@ -201,7 +201,7 @@ ON CONFLICT (legacy_proposal_id) DO NOTHING;
 -- TEST FIXTURE PROPOSALS (P224 queue test series)
 -- Synthetic proposals created by state-transition tests; not real work items.
 -- ───────────────────────────────────────────────────────────────────────────
-INSERT INTO roadmap.proposal_migration_map
+INSERT INTO roadmap_proposal.proposal_migration_map
     (legacy_proposal_id, canonical_proposal_id, classification, rationale, evidence_refs, reviewed_by, reviewed_at)
 VALUES
 (879, NULL, 'obsolete', 'P224 Queue Test fixture — synthetic test artifact, not a real work proposal', '[]', 'alex', now()),
@@ -225,7 +225,7 @@ ON CONFLICT (legacy_proposal_id) DO NOTHING;
 -- ───────────────────────────────────────────────────────────────────────────
 -- CROSS-PILLAR / UNPARENTED OBSOLETE PROPOSALS
 -- ───────────────────────────────────────────────────────────────────────────
-INSERT INTO roadmap.proposal_migration_map
+INSERT INTO roadmap_proposal.proposal_migration_map
     (legacy_proposal_id, canonical_proposal_id, classification, rationale, evidence_refs, superseded_by_proposal_id, reviewed_by, reviewed_at)
 VALUES
 (231, NULL, 'obsolete', 'Token Efficiency — superseded by P1004/P1005 (agent cost reporting + task tier routing); maturity obsolete', '[]', 1005, 'alex', now()),
