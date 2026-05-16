@@ -74,8 +74,15 @@ export async function broadcastToHiveCentral(
 // ─── Heartbeat liveness propagation ──────────────────────────────────────────
 
 /**
- * Propagate a heartbeat event to the liaison channel and hiveCentral.
- * Called after liaisonHeartbeat() succeeds so orchestrators can react via pg_notify.
+ * P1017 Phase A: Heartbeat event propagation to message_ledger removed.
+ * The authoritative presence path (roadmap.agency.last_heartbeat_at) is updated
+ * independently in liaison-service.ts and does not depend on this mirror.
+ * The ~23K daily heartbeat rows were pure pollution on the message_ledger.
+ *
+ * This function is retained as a no-op stub to avoid breaking callers during migration.
+ * Remove entirely after all call sites have been updated.
+ *
+ * Deprecated: Do not use. Called only by liaison-boot.ts line 130 (will be removed).
  */
 export async function propagateHeartbeat(
   agencyId: string,
@@ -84,22 +91,8 @@ export async function propagateHeartbeat(
   correlationId?: string,
   replyTo?: string | number
 ): Promise<void> {
-  try {
-    await query(
-      `INSERT INTO roadmap.message_ledger
-          (from_agent, channel, message_content, message_type, metadata, correlation_id, reply_to)
-       VALUES ($1, $2, 'heartbeat', 'event', $3, $4, $5)`,
-      [
-        agencyId,
-        `system:liaison:${agencyId}`,
-        JSON.stringify({ status, dispatchable, ts: new Date().toISOString() }),
-        correlationId ?? null,
-        replyTo ?? null,
-      ]
-    );
-  } catch {
-    // Non-critical — heartbeat DB update is authoritative; ledger mirror is advisory
-  }
+  // P1017 Phase A: No-op. heartbeat message_ledger writes removed.
+  // last_heartbeat_at updates are the authoritative source.
 }
 
 // ─── Message dispatch ─────────────────────────────────────────────────────────
