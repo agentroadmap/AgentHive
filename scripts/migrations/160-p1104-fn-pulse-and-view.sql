@@ -97,7 +97,7 @@ FROM (((roadmap.agency a
   ) last_poke ON (true))
   LEFT JOIN LATERAL (
     SELECT sd.agent_identity AS agency_id
-    FROM roadmap.squad_dispatch sd
+    FROM roadmap_workforce.squad_dispatch sd
     WHERE ((sd.agent_identity = a.agency_id) AND (sd.dispatch_status = ANY (ARRAY['assigned'::text, 'active'::text])) AND (sd.completed_at IS NULL))
     LIMIT 1
   ) active_dispatch ON (true))
