@@ -315,3 +315,42 @@ test("scanAndTransitionSilentAgencies uses 5-min dormant and 30-min offline thre
 		"dormant transition should use 5-min threshold",
 	);
 });
+
+// --- P765 AC-5: orchestrator_wake pg_notify on agency recovery ---
+
+test("recordCheckIn emits orchestrator_wake pg_notify when agency transitions to active (behavior check)", async () => {
+	mockRows = [
+		{
+			new_status: "active",
+			project_id: null,
+			old_status: "dormant",
+			had_alert: false,
+		},
+	];
+	queryCalls.length = 0;
+	await recordCheckIn("worker/recovery-test");
+	const notifyCall = queryCalls.find(
+		(c) => c.sql.includes("pg_notify") && c.sql.includes("orchestrator_wake"),
+	);
+	assert.ok(notifyCall, "should emit pg_notify('orchestrator_wake', ...) on active transition");
+	const payload = JSON.parse(notifyCall.params[0] as string);
+	assert.equal(payload.reason, "agency_recovery");
+	assert.equal(payload.identity, "worker/recovery-test");
+});
+
+test("recordCheckIn does not emit orchestrator_wake when agency stays non-active (behavior check)", async () => {
+	mockRows = [
+		{
+			new_status: "dormant",
+			project_id: null,
+			old_status: "active",
+			had_alert: false,
+		},
+	];
+	queryCalls.length = 0;
+	await recordCheckIn("worker/dormant-test");
+	const notifyCall = queryCalls.find(
+		(c) => c.sql.includes("pg_notify") && c.sql.includes("orchestrator_wake"),
+	);
+	assert.equal(notifyCall, undefined, "should NOT emit orchestrator_wake when status stays non-active");
+});

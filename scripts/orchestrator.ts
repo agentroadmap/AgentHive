@@ -2201,6 +2201,7 @@ async function main() {
 	// Listen for state changes
 	await pgClient.query("LISTEN proposal_gate_ready");
 	await pgClient.query("LISTEN proposal_maturity_changed");
+	await pgClient.query("LISTEN orchestrator_wake");
 
 	logger.log("Listening for state changes to dispatch agents...");
 
@@ -2220,6 +2221,11 @@ async function main() {
 							dispatchImplicitGate(proposalId, "notify:proposal_gate_ready"),
 						);
 					}
+					return;
+				}
+
+				if (msg.channel === "orchestrator_wake") {
+					await trackInFlight(drainImplicitGateReady("notify:orchestrator_wake"));
 					return;
 				}
 				const proposalId = data.proposal_id || data.id;

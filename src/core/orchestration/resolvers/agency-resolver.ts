@@ -210,6 +210,13 @@ export async function recordCheckIn(agencyIdentity: string): Promise<void> {
 			"success",
 		);
 	}
+
+	if (row.new_status === "active") {
+		await query(
+			`SELECT pg_notify('orchestrator_wake', $1)`,
+			[JSON.stringify({ reason: "agency_recovery", identity: agencyIdentity, ts: new Date().toISOString() })],
+		);
+	}
 }
 
 /**
