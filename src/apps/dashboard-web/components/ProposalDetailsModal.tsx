@@ -497,7 +497,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 	}, [isOpen]);
 
 	useEffect(() => {
-		if (!proposalId) {
+		if (!isOpen || !proposalId) {
 			setDecisions([]);
 			setReviews([]);
 			setDiscussions([]);
@@ -531,7 +531,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 		return () => {
 			cancelled = true;
 		};
-	}, [proposalId]);
+	}, [isOpen, proposalId]);
 
 	const handleCancelEdit = useCallback(() => {
 		if (isDirty) {
@@ -1476,7 +1476,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 									</span>
 								</div>
 							)}
-							{lastActivity && (
+							{lastActivity ? (
 								<div>
 									<span className="font-semibold text-gray-800 dark:text-gray-100">
 										Last activity:
@@ -1487,6 +1487,13 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 									<span className="ml-1 text-gray-400 dark:text-gray-500 italic">
 										({lastActivity.label})
 									</span>
+								</div>
+							) : (
+								<div>
+									<span className="font-semibold text-gray-800 dark:text-gray-100">
+										Last activity:
+									</span>{" "}
+									<span className="text-gray-400 dark:text-gray-500 italic">No activity yet</span>
 								</div>
 							)}
 						</div>
