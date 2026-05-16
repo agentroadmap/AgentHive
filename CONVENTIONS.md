@@ -104,6 +104,23 @@ Important live facts:
 - Do not claim a deployment, migration, or verification step that you did not actually perform.
 - Gate cubic agents MUST call `prop_transition` (records gate_decision_log + flips status) and `set_maturity` after a verdict. The P611 reconciler is the safety net — omitting these is a protocol violation, not an acceptable shortcut.
 
+### Pool lifecycle invariant (P1123)
+
+Every long-running service (orchestrator, board, MCP server, notification-router, per-agency liaison) MUST call `setPoolLifecycleMode("long-running")` from `src/infra/postgres/pool.ts` at startup, **before any database access**. The default mode is `"one-shot"` for CLI subcommands and tests, which preserves the existing fast-exit behavior — `closePool()` and `pool.end()` on signature change both fire normally.
+
+In `"long-running"` mode:
+- `closePool()` is a no-op, logs the caller stack at warn.
+- `getPool()` with a changed signature keeps the existing pool, logs the caller stack at warn.
+
+Graceful shutdown handlers drop back to `"one-shot"` immediately before the final `closePool()` so the pool actually closes:
+
+```ts
+setPoolLifecycleMode("one-shot");
+await closePool();
+```
+
+Why this rule exists: shared CLI code (e.g., `agents send` subcommand exit, internal getPool signature-change path) can call `pool.end()` mid-process. In CLI mode that's fine — the process exits. In a long-running service it poisons every downstream consumer (broadcastSnapshot, LISTEN reconnect, TimeoutCron, ledger writes) for the remainder of the process. The 2026-05-15 agenthive-board.service outage (30 hours silent failure) is the canonical incident. See `docs/audit/p1123-pool-end-callers.md` for the full caller catalog and verdict matrix. A Phase 3 watchdog (`SELECT 1` probe + `pg_notify control_feed pool_poisoned`) provides defense in depth for any bypass path.
+
 ## 4a. Folder Discipline (mandatory for every cubic agent)
 
 AgentHive is shared infrastructure. Multiple agencies, projects, and providers share this repo. Every file you write is a vote on what belongs in the repo forever. Be ruthless about where things go.

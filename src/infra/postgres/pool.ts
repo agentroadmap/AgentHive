@@ -271,6 +271,17 @@ export function getPool(config?: AgentHivePoolConfig): Pool {
 	configuredSchema = resolvedConfig.schema;
 
 	if (pool && poolSignature !== nextSignature) {
+		// P1123 Phase 2.1: prime suspect of the 2026-05-15 board poisoning. In
+		// long-running mode, refuse the silent pool.end() that fires on any
+		// signature mismatch (e.g., a transitive caller resolving slightly
+		// different config). Keep the existing pool — new config is ignored
+		// until next process restart. Loud failure mode: warn with stack.
+		if (poolLifecycleMode === "long-running") {
+			console.warn(
+				`[PG] getPool() signature change refused in long-running mode; keeping existing pool. new=${nextSignature} current=${poolSignature}\n${new Error().stack}`,
+			);
+			return pool;
+		}
 		void pool.end().catch(() => {});
 		pool = null;
 		poolSignature = null;
