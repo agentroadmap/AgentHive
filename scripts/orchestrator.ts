@@ -12,7 +12,11 @@
  */
 
 import { Orchestrator } from "../src/core/orchestration/orchestrator.ts";
-import { closePool } from "../src/infra/postgres/pool.ts";
+import { closePool, setPoolLifecycleMode } from "../src/infra/postgres/pool.ts";
+
+// P1123: declare long-running mode so stray pool.end() calls cannot poison this
+// service. Graceful shutdown drops back to "one-shot" before the final closePool.
+setPoolLifecycleMode("long-running");
 
 const orchestrator = new Orchestrator();
 
@@ -33,8 +37,9 @@ async function main() {
 		});
 	});
 
-	// Graceful shutdown
+	// Graceful shutdown — drop the long-running guard so closePool actually fires.
 	await orchestrator.stop();
+	setPoolLifecycleMode("one-shot");
 	await closePool();
 	console.log("[orchestrator-shim] stopped");
 }

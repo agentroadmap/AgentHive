@@ -36,6 +36,22 @@ let pool: Pool | null = null;
 let configuredSchema: string | null = null;
 let poolSignature: string | null = null;
 
+// P1123: Process-mode sentinel. Long-running services (orchestrator, state-feed,
+// board, mcp, notification-router) call setPoolLifecycleMode("long-running") at
+// startup to make closePool() refuse — defends against stray CLI-style shutdown
+// paths that share process space (e.g., cli.ts `agents send` subcommand) from
+// poisoning the pool. Default "one-shot" preserves CLI/test semantics.
+type PoolLifecycleMode = "long-running" | "one-shot";
+let poolLifecycleMode: PoolLifecycleMode = "one-shot";
+
+export function setPoolLifecycleMode(mode: PoolLifecycleMode): void {
+	poolLifecycleMode = mode;
+}
+
+export function getPoolLifecycleMode(): PoolLifecycleMode {
+	return poolLifecycleMode;
+}
+
 // Build search path from structural config
 // Default: ["roadmap_proposal", "roadmap_workforce", "roadmap_efficiency", "roadmap", "public"]
 // But can be overridden via PG_SCHEMA env or config if needed
@@ -420,8 +436,19 @@ export async function query<T extends QueryResultRow = any>(
 
 /**
  * Close the pool gracefully — call during shutdown.
+ *
+ * P1123: in "long-running" mode this is a no-op (with stack-trace log). Long-
+ * running services should never end the shared pool mid-process; doing so
+ * poisons every downstream consumer (broadcastSnapshot, LISTEN reconnect,
+ * TimeoutCron, ledger writes) for the rest of the process lifetime.
  */
 export async function closePool(): Promise<void> {
+	if (poolLifecycleMode === "long-running") {
+		console.warn(
+			`[PG] closePool() refused in long-running mode\n${new Error().stack}`,
+		);
+		return;
+	}
 	if (pool) {
 		await pool.end();
 		pool = null;

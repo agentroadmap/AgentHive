@@ -6514,6 +6514,11 @@ program
 	.option("--no-open", "don't automatically open browser")
 	.action(async (options) => {
 		try {
+			// P1123: protect the shared pool from stray pool.end() in other cli
+			// subcommands that may run inside this long-running process.
+			const { setPoolLifecycleMode } = await import("../infra/postgres/pool.ts");
+			setPoolLifecycleMode("long-running");
+
 			const cwd = await requireProjectRoot();
 			const { RoadmapServer } = await import("./server/index.ts");
 			const server = new RoadmapServer(cwd);

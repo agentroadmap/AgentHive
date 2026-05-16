@@ -23,7 +23,10 @@ import {
 	runLiaisonAgent,
 	type LiaisonAgentHandle,
 } from "../src/infra/agency/liaison-agent.ts";
-import { closePool } from "../src/infra/postgres/pool.ts";
+import { closePool, setPoolLifecycleMode } from "../src/infra/postgres/pool.ts";
+
+// P1123: protect the shared pool from stray pool.end() in shared CLI code.
+setPoolLifecycleMode("long-running");
 
 const agencyId = process.env.AGENCY_ID?.trim() ?? "(unknown)";
 // AGENCY_PROVIDER is the canonical var; AGENTHIVE_AGENT_PROVIDER is the legacy
@@ -81,6 +84,7 @@ async function main() {
 		}
 	}
 	await handle.shutdown("normal");
+	setPoolLifecycleMode("one-shot");
 	await closePool();
 	console.log(`[liaison:${agencyId}] stopped`);
 }

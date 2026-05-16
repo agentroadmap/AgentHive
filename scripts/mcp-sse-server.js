@@ -5,6 +5,11 @@ import express from "express";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(__dirname, "..");
 
+// P1123: protect the shared pool from stray pool.end() in shared CLI/tool code.
+// Tool handlers use src/infra/postgres/pool.ts transitively.
+const poolModule = await import("../src/infra/postgres/pool.ts");
+poolModule.setPoolLifecycleMode("long-running");
+
 const serverModule = await import("../src/apps/mcp-server/server.ts");
 const httpCompatModule = await import("../src/apps/mcp-server/http-compat.ts");
 const versionModule = await import("../src/shared/utils/version.ts");
