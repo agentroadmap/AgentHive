@@ -24,7 +24,6 @@ The real binding issue found is narrower: D4 role configuration was split. `road
 | Active gate-reviewer agents | 1 |
 | Snapshot timestamp | 2026-05-16 15:32:52 UTC |
 
-
 ## Representative DEVELOP/new Case Studies
 
 Selection query: among `status='DEVELOP'`, `maturity='new'`, and types `feature`, `architecture`, `component`, pick the oldest feature, median architecture, and newest component by `created_at`.
@@ -78,7 +77,6 @@ Post-fix state (after migration 127):
 | `roadmap.agent_role_profile` row 76 | `gate-reviewer`, priority 5, scope `global`, template 14, stage `MERGE`, maturity `mature` |
 | `roadmap_workforce.agent_registry` row 33295 | `Gate Reviewer`, role `gate-reviewer`, status `active` |
 | active agents with `role='gate-reviewer'` | 1 |
-
 
 ### E2E runner wiring
 
