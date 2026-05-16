@@ -148,13 +148,6 @@ function modelListCacheKey(args: {
 	});
 }
 
-// P797: Maps P797 tier aliases to DB tier values
-function normaliseTier(tier: string): string {
-	if (tier === "standard") return "mid";
-	if (tier === "economy") return "lower";
-	return tier;
-}
-
 async function fetchModelRouteRows(args: {
 	provider?: string;
 	tier?: string;
@@ -164,19 +157,18 @@ async function fetchModelRouteRows(args: {
 }): Promise<ModelRouteRow[]> {
 	const activeOnly = args.active_only !== false;
 	const provider = args.provider ?? null;
-	const tier = args.tier ? normaliseTier(args.tier) : null;
+	const tier = args.tier ?? null;
 	const queryFn: ModelQueryFn = args._queryFn ?? (query as unknown as ModelQueryFn);
 	const { rows } = await queryFn<ModelRouteRow>(
-		`SELECT m.model_name, m.provider, m.cost_per_million_input,
-		        m.context_window, m.capabilities, m.rating, m.is_active,
-		        r.route_provider, r.priority
-		 FROM   model_metadata m
-		 JOIN   roadmap.model_routes r
-		          ON r.model_name = m.model_name AND r.is_enabled = true
-		 WHERE  ($1::boolean IS FALSE OR COALESCE(m.is_active, true) = true)
-		   AND  ($2::text IS NULL OR r.route_provider = $2)
-		   AND  ($3::text IS NULL OR r.tier = $3)
-		 ORDER BY m.rating DESC NULLS LAST, r.priority ASC`,
+		`SELECT model_name, provider, cost_per_million_input,
+		        context_window, capabilities, rating, is_active,
+		        route_provider, priority
+		 FROM   roadmap.model_route_view
+		 WHERE  is_enabled = true
+		   AND  ($1::boolean IS FALSE OR COALESCE(is_active, true) = true)
+		   AND  ($2::text IS NULL OR route_provider = $2)
+		   AND  ($3::text IS NULL OR tier = $3)
+		 ORDER BY rating DESC NULLS LAST, priority ASC`,
 		[activeOnly, provider, tier],
 	);
 	return rows;
