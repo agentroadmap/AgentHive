@@ -252,6 +252,10 @@ const documentRoutes: RouteMap = {
 	note_delete: "delete_note",
 };
 
+const schemaRoutes: RouteMap = {
+	describe: "schema_describe",
+};
+
 const opsRoutes: RouteMap = {
 	spending_set_cap: "spending_set_cap",
 	spending_log: "spending_log",
@@ -373,6 +377,14 @@ export function registerConsolidatedTools(server: McpServer): void {
 			"mcp_document",
 			"Consolidated document and note interface for versioned documents, search, versions, and notes.",
 			documentRoutes,
+		),
+	);
+	server.addTool(
+		createRouterTool(
+			server,
+			"mcp_schema",
+			"Schema introspection. Use this BEFORE writing migration SQL so you don't fabricate column / constraint / trigger names. action='describe' takes {table} (qualified or bare) and returns columns + CHECK constraints + triggers + indexes.",
+			schemaRoutes,
 		),
 	);
 	server.addTool(

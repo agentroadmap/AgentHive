@@ -1583,6 +1583,10 @@ export async function createMcpServer(
 	const { registerBackupTools } = await import("./tools/backup/index.ts");
 	registerBackupTools(server);
 
+	// P1109 Tier-1: schema introspection so build agents stop fabricating column names.
+	const { registerSchemaTools } = await import("./tools/schema/index.ts");
+	registerSchemaTools(server);
+
 	// P289: Workforce management tools (agency registration, provider registry, dispatches)
 	const workforce = await import("./tools/workforce/handlers.ts");
 	const workforceSchemas = await import("./tools/workforce/schemas.ts");
