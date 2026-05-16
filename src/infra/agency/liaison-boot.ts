@@ -126,8 +126,11 @@ export async function bootLiaison(
           status: "active",
           capacity_envelope: {},
         });
-      } catch {
-        // Non-fatal: heartbeat failure is logged by orchestrator watchdog
+      } catch (err) {
+        // Non-fatal but must be visible. Watchdog can't fix what we hide.
+        console.warn(
+          `[liaison:${config.agency_id}] heartbeat failed: ${(err as Error).message}`,
+        );
       }
       scheduleNext();
     }, config.heartbeat_interval_ms);

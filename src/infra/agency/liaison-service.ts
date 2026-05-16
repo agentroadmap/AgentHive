@@ -189,19 +189,20 @@ export async function liaisonHeartbeat(
 
 	// Compute presence state: busy if active dispatch or running agent, else online.
 	// squad_dispatch lives in roadmap_workforce; agent_runs lives in roadmap.
+	// Both tables key on `agent_identity` (which holds the agency_id value).
 	const stateResult = await query(
 		`
     SELECT
       CASE
         WHEN EXISTS(
           SELECT 1 FROM roadmap_workforce.squad_dispatch
-          WHERE assigned_agency = $1
+          WHERE agent_identity = $1
             AND dispatch_status IN ('assigned', 'active')
             AND completed_at IS NULL
         ) THEN 'busy'
         WHEN EXISTS(
           SELECT 1 FROM roadmap.agent_runs
-          WHERE agency_id = $1 AND status = 'running'
+          WHERE agent_identity = $1 AND status = 'running'
         ) THEN 'busy'
         ELSE 'online'
       END AS computed_state
