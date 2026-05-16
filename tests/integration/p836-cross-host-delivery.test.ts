@@ -102,9 +102,11 @@ function buildHeaders(opts: {
 	body: string;
 	secretHex: string;
 	schemePrefix?: string; // for malformed-scheme tests
+	targetHostId?: string; // F1: included in HMAC scope to prevent cross-host replay
 }): Record<string, string> {
+	const targetHostId = opts.targetHostId ?? "";
 	const signingInput =
-		`POST\n/\nX-AgentHive-Delivery-Id: ${opts.deliveryId}\nX-AgentHive-Timestamp: ${opts.timestamp}\nX-AgentHive-Agent-Id: ${opts.agentId}\n${opts.body}`;
+		`POST\n/\nX-AgentHive-Delivery-Id: ${opts.deliveryId}\nX-AgentHive-Timestamp: ${opts.timestamp}\nX-AgentHive-Agent-Id: ${opts.agentId}\nX-AgentHive-Target-Host-Id: ${targetHostId}\n${opts.body}`;
 	const sig = crypto
 		.createHmac("sha256", Buffer.from(opts.secretHex, "hex"))
 		.update(signingInput, "utf-8")
@@ -114,6 +116,7 @@ function buildHeaders(opts: {
 		"x-agenthive-delivery-id": opts.deliveryId,
 		"x-agenthive-timestamp": String(opts.timestamp),
 		"x-agenthive-agent-id": opts.agentId,
+		"x-agenthive-target-host-id": targetHostId,
 	};
 }
 
