@@ -879,9 +879,9 @@ export class Orchestrator {
 	 * P751: Stall detector — finds mature proposals with no recent dispatch and
 	 * escalates via two-tier strategy.
 	 *
-	 * Tier 1 (optional): Spawn an AI liaison agent if ORCHESTRATOR_LIAISON_PROVIDER
-	 *   is set. The liaison has MCP access to investigate blockers and unblock the
-	 *   proposal without human involvement.
+	 * Tier 1 (optional): Post a work offer for role 'orchestrator-liaison-investigator'
+	 *   if ORCHESTRATOR_LIAISON_PROVIDER is set. OfferClaimLoop picks it up and emits
+	 *   offer_dispatch to the first dispatchable agency (P904-A3: no direct spawn).
 	 *
 	 * Tier 2 (always): Emit `stall_detected` to notification_queue. The
 	 *   notification router resolves transport from the `notification_route` table
@@ -942,16 +942,13 @@ export class Orchestrator {
 		status: string;
 		stallHours: number;
 	}): Promise<void> {
-		// Tier 1: AI liaison (conditional on env var)
+		// Tier 1: AI liaison via offer dispatch (P904-A3: postWorkOffer replaces spawnAgent)
 		if (ORCHESTRATOR_LIAISON_PROVIDER) {
 			try {
-				await spawnAgent({
-					worktree: this.defaultWorktree,
+				await postWorkOffer({
 					proposalId: stall.id,
-					stage: stall.status,
-					provider: ORCHESTRATOR_LIAISON_PROVIDER,
-					agentLabel: `${stall.displayId} (liaison)`,
-					activity: "investigating stall",
+					squadName: `${stall.displayId}-stall-liaison`,
+					role: "orchestrator-liaison-investigator",
 					task: [
 						`You are an AI liaison investigating a stalled proposal.`,
 						``,
@@ -966,11 +963,17 @@ export class Orchestrator {
 						``,
 						`If you cannot resolve the block, use mcp_ops escalation_add with severity CRITICAL.`,
 					].join("\n"),
+					stage: stall.status,
+					worktreeHint: this.defaultWorktree,
+					requiredCapabilities: ["orchestrator-liaison-investigator"],
 				});
+				console.log(
+					`[Orchestrator] stall-liaison offer posted for ${stall.displayId} (${stall.stallHours}h stalled)`,
+				);
 				return;
 			} catch (err) {
 				console.warn(
-					`[Orchestrator] liaison spawn failed for ${stall.displayId}, falling through to Tier 2:`,
+					`[Orchestrator] stall-liaison offer failed for ${stall.displayId}, falling through to Tier 2:`,
 					err instanceof Error ? err.message : err,
 				);
 			}

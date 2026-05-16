@@ -390,6 +390,10 @@ export async function getAgencyStatus(agency_id: string): Promise<{
 
 /**
  * List all dispatchable agencies (active, within 90s heartbeat).
+ *
+ * Checks: status='active' AND last_heartbeat_at < 90s (via v_agency_status.dispatchable).
+ * @note Capacity envelope check (remaining_capacity > 0) is treated as always-true
+ *   until P1018/P1022 land and wire the budget substrate writers.
  */
 export async function listDispatchableAgencies(): Promise<
 	Array<{

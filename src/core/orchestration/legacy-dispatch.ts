@@ -935,7 +935,7 @@ function safeParseMcpResponse(text: string | undefined): any {
 	}
 }
 
-// Dispatch agent to cubic — uses cubic_acquire for atomic find-or-create + focus
+// P904-A1: cubic_acquire removed — dispatch via offer (postWorkOffer + OfferClaimLoop).
 async function dispatchAgent(
 	agent: string,
 	proposalId: string,
@@ -945,46 +945,9 @@ async function dispatchAgent(
 	agentLabel?: string,
 	activity?: string,
 	requiredCapabilities: string[] = [],
-): Promise<string | null> {
-	const client = new Client({ name: "orchestrator", version: "1.0.0" });
-	const transport = new SSEClientTransport(new URL(MCP_URL));
-
+): Promise<boolean> {
 	try {
 		const selectedWorktree = await selectExecutorWorktree(agent);
-
-		await client.connect(transport);
-
-		// Single MCP call replaces: cubic_list → cubic_recycle → cubic_focus
-		// Pass the worktree *basename* — the MCP-side safeWorktreePath() normalizes
-		// it as an agent-id and joins with WORKTREE_ROOT itself. Passing a full
-		// absolute path triggers normalizeAgentId rejection ("path traversal").
-		const acquired = await client.callTool({
-			name: "cubic_acquire",
-			arguments: {
-				agent_identity: agent,
-				proposal_id: Number(proposalId),
-				phase,
-				worktree_path: selectedWorktree,
-			},
-		});
-		const data = safeParseMcpResponse(mcpText(acquired));
-
-		if (!data?.success || !data?.cubic_id) {
-			logger.warn(
-				`cubic_acquire failed for ${agent} on P${proposalId}: ${mcpText(acquired)?.substring(0, 120)}`,
-			);
-			return null;
-		}
-
-		const cubicId = data.cubic_id as string;
-		const verb = data.was_created
-			? "📦 New"
-			: data.was_recycled
-				? "♻️ Recycled"
-				: "🔄 Reused";
-		logger.log(
-			`${verb} cubic ${cubicId.substring(0, 8)} for ${agent} → P${proposalId} (${phase})`,
-		);
 
 		// P466 — assemble a warm-boot briefing BEFORE posting the offer. Without
 		// this, the spawned child receives only the generic role prompt and runs
@@ -1093,17 +1056,10 @@ async function dispatchAgent(
 				`📬 Posted offer ${dispatchId} for ${agent} on P${proposalId} (${stage})`,
 			);
 
-			// P914: liaison-message emit was removed from this path. The orchestrator
-			// now runs OfferClaimLoop (in src/core/orchestration/orchestrator.ts) which
-			// LISTENs on the `work_offers` channel that postWorkOffer fires. On wake,
-			// the loop calls fn_claim_work_offer to obtain a claim_token, then routes
-			// through OrchestratorOfferDispatcher → liaison_message with all required
-			// fields populated (offer_id, claim_token, dispatch_id, route_hint,
-			// briefing_id, lease_ttl_seconds). The previous inline emit could not
-			// supply claim_token (the offer hadn't been claimed yet) and the agency's
-			// OfferDispatchHandler rejected it as "malformed payload, missing
-			// offer_id/role".
-			return cubicId;
+			// P914/P904: OfferClaimLoop LISTENs on `work_offers` and emits the
+			// offer_dispatch liaison_message with claim_token once the offer is
+			// claimed. No inline emit needed here.
+			return true;
 		}
 
 		// Direct spawn path (used when AGENTHIVE_USE_OFFER_DISPATCH is not set)
@@ -1146,7 +1102,7 @@ async function dispatchAgent(
 			logger.warn(
 				`No free worktree for ${agent} on P${proposalId} — skipping dispatch`,
 			);
-			return null;
+			return false;
 		}
 		// P405: resolve provider from model_routes, not worktree metadata
 		const activeProvider = await resolveActiveRouteProvider();
@@ -1209,12 +1165,10 @@ async function dispatchAgent(
 			}
 		}
 
-		return cubicId;
+		return true;
 	} catch (err) {
 		logger.error(`Dispatch failed for ${agent} on P${proposalId}:`, err);
-		return null;
-	} finally {
-		await client.close();
+		return false;
 	}
 }
 
