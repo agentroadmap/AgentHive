@@ -1,5 +1,7 @@
 const DATE_ONLY_REGEX = /^(\d{4})-(\d{2})-(\d{2})$/;
 const DATE_TIME_REGEX = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/;
+// Full ISO 8601 with seconds (and optional fractional + timezone) as returned by PostgreSQL over JSON
+const ISO_FULL_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
 
 function parseIntStrict(value: string): number {
 	return Number.parseInt(value, 10);
@@ -59,10 +61,11 @@ export function parseStoredUtcDate(dateStr: string): Date | null {
 		return date;
 	}
 
-	// Fallback: native Date parsing handles full ISO strings from timestamptz columns
-	// (e.g. "2026-05-16T10:30:00.000Z") that the regex patterns above don't match.
-	const fallback = new Date(normalized);
-	if (!Number.isNaN(fallback.getTime())) return fallback;
+	// Fallback: full ISO 8601 with seconds e.g. "2024-01-15T14:30:45.123Z" from PostgreSQL JSON
+	if (ISO_FULL_REGEX.test(normalized)) {
+		const d = new Date(normalized);
+		if (!isNaN(d.getTime())) return d;
+	}
 
 	return null;
 }
@@ -73,8 +76,8 @@ export function formatStoredUtcDateForDisplay(dateStr: string): string {
 	const parsed = parseStoredUtcDate(dateStr);
 	if (!parsed) return dateStr;
 
-	const hasTime = DATE_TIME_REGEX.test(dateStr.trim()) || HAS_TIME_REGEX.test(dateStr.trim());
-	if (hasTime) {
+	const normalized = dateStr.trim();
+	if (DATE_TIME_REGEX.test(normalized) || ISO_FULL_REGEX.test(normalized)) {
 		return parsed.toLocaleString(undefined, {
 			dateStyle: "medium",
 			timeStyle: "short",
