@@ -12,6 +12,19 @@ The live database does not support the headline claim that there were zero D4 ad
 
 The real binding issue found is narrower: D4 role configuration was split. `roadmap_proposal.gate_role` says D4 uses `gate-reviewer`, while `roadmap.agent_role_profile` for Standard RFC `MERGE/mature` did not include `gate-reviewer`, and no active registry row had `role='gate-reviewer'`. Migration `database/migrations/127-p1094-d4-gate-reviewer-role.sql` adds that binding and maps the existing active `Gate Reviewer` agent to the role.
 
+## Baseline Snapshot (2026-05-16)
+
+| Metric | Value |
+| --- | --- |
+| Proposals in MERGE state | 0 |
+| DEVELOP/new proposals | 77 |
+| D4 advances (last 30d, gate_decision_log) | 38 |
+| D3 holds (last 30d) | 48 |
+| `agent_role_profile` rows: MERGE/mature/gate-reviewer | 1 (post-fix) |
+| Active gate-reviewer agents | 1 |
+| Snapshot timestamp | 2026-05-16 15:32:52 UTC |
+
+
 ## Representative DEVELOP/new Case Studies
 
 Selection query: among `status='DEVELOP'`, `maturity='new'`, and types `feature`, `architecture`, `component`, pick the oldest feature, median architecture, and newest component by `created_at`.
@@ -58,6 +71,15 @@ Code path notes:
 - The newer `scanQueues()` path in `src/core/orchestration/orchestrator.ts` resolves `roleProfiles` through `resolveQueueContext()` -> `getRolesForQueue()` and passes the first profile id into route resolution.
 - Before this fix, a hypothetical Standard RFC `MERGE/mature` proposal in the queue-native path would pick `reviewer-d4` as its first role profile, while gate-role semantics say D4 is `gate-reviewer`.
 
+Post-fix state (after migration 127):
+
+| Source | D4 / MERGE mature result |
+| --- | --- |
+| `roadmap.agent_role_profile` row 76 | `gate-reviewer`, priority 5, scope `global`, template 14, stage `MERGE`, maturity `mature` |
+| `roadmap_workforce.agent_registry` row 33295 | `Gate Reviewer`, role `gate-reviewer`, status `active` |
+| active agents with `role='gate-reviewer'` | 1 |
+
+
 ### E2E runner wiring
 
 No `scripts/e2e-validate-merge.ts` or equivalent dispatch-wired D4 validator was found. Search hits were documentation and generic validators, plus worktree-merge MCP handlers. There is no e2e validator job that programmatically runs proposal AC verification and writes a D4 `gate_decision_log` row.
@@ -72,3 +94,7 @@ Migration `database/migrations/127-p1094-d4-gate-reviewer-role.sql`:
 - inserts a `gate-reviewer` fallback registry row only if no active gate reviewer exists.
 
 This is Branch B hardening. Branch C remains unimplemented because no D4 e2e runner exists; that should be a follow-up child proposal rather than a hidden service in this patch.
+
+## Binding Constraint (AC-5)
+
+**Branch B: no MERGE reviewer** is the primary binding constraint. The `gate_stage_role` table is entirely empty (confirmed 2026-05-16). The `agent_role_profile` MERGE/mature rows did not include the canonical `gate-reviewer` role required by `gate_role` for Standard RFC. The fix is the insertion in migration 127. Secondary concern is Branch A (stalled implementations) which manifests as very high D3 hold rates, but that is a separate effort tracked under P1068.
