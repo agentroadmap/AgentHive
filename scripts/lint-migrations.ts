@@ -32,6 +32,40 @@ const GREEN = "\x1b[32m";
 const YELLOW = "\x1b[33m";
 const RESET = "\x1b[0m";
 
+// Strip lines that look like top-level transaction control (BEGIN; / COMMIT;),
+// but only when we're outside a dollar-quoted string ($$ ... $$ or $tag$ ... $tag$).
+// PL/pgSQL function bodies contain BEGIN/END that must be preserved.
+function stripTopLevelTxnControl(sql: string): string {
+  const dollarTag = /\$([a-zA-Z_][a-zA-Z0-9_]*)?\$/g;
+  const out: string[] = [];
+  let inDollar = false;
+  let currentTag: string | null = null;
+
+  for (const line of sql.split("\n")) {
+    // Walk the line for $ ... $ delimiter toggles, updating inDollar.
+    dollarTag.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    let scanLine = line;
+    while ((m = dollarTag.exec(scanLine))) {
+      const tag = m[1] ?? "";
+      if (!inDollar) {
+        inDollar = true;
+        currentTag = tag;
+      } else if (currentTag === tag) {
+        inDollar = false;
+        currentTag = null;
+      }
+    }
+
+    // Skip top-level BEGIN/COMMIT lines, keep everything else.
+    if (!inDollar && /^\s*(BEGIN|COMMIT)\s*;?\s*(--.*)?$/i.test(line)) {
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
 function discoverChangedMigrations(): string[] {
   try {
     const out = execSync("git diff --name-only --diff-filter=AM main...HEAD -- 'scripts/migrations/*.sql'", {
@@ -67,14 +101,11 @@ async function lintOne(client: Client, file: string): Promise<{ ok: boolean; mes
     };
   }
 
-  // Strip embedded transaction control so our outer BEGIN/ROLLBACK wraps the
-  // whole script regardless of whether the migration manages its own txn.
-  // Without this, a migration's COMMIT terminates our linting txn early and
-  // leaves us unable to roll back.
-  const sql = rawSql
-    .split("\n")
-    .filter((line) => !/^\s*(BEGIN|COMMIT)\s*;?\s*(--.*)?$/i.test(line))
-    .join("\n");
+  // Strip embedded top-level transaction control so our outer BEGIN/ROLLBACK
+  // wraps the whole script regardless of whether the migration manages its
+  // own txn. Must NOT strip BEGIN/END that appear inside $$ ... $$ function
+  // bodies (PL/pgSQL block keywords look identical to txn keywords).
+  const sql = stripTopLevelTxnControl(rawSql);
 
   // Lint by running the SQL inside one outer transaction we always ROLLBACK.
   try {
