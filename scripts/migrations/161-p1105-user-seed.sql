@@ -6,21 +6,24 @@
 -- This migration registers the system user identity so msg_send/msg_reply
 -- can identify user/* agents for bearer token verification (AC-27).
 --
--- host_id: Uses the default 'localhost' for the operator host.
--- This can be overridden per deployment if using a different cluster_name.
+-- agent_registry actual column set verified: id, agent_identity, agent_type,
+-- role, skills, preferred_model, status, github_handle, ..., trust_tier.
+-- No host_id column exists here.
 
 INSERT INTO roadmap.agent_registry (
 	agent_identity,
 	agent_type,
-	host_id,
+	role,
 	status,
+	trust_tier,
 	created_at
 )
 VALUES (
 	'user/gary',
 	'user',
-	'localhost',
+	'operator',
 	'active',
+	'authority',
 	now()
 )
 ON CONFLICT (agent_identity) DO NOTHING;
