@@ -87,6 +87,11 @@ export function registerMessageTools(server: McpServer): void {
 					created_at: { type: "string" },
 					provider_sig_salt: { type: "string" },
 					authorization: { type: "string", description: "Bearer token for user/* agents (P1105 AC-27)" },
+					metadata: {
+						type: "object",
+						description: "Structured metadata persisted to message_ledger.metadata (jsonb). Read by downstream consumers — e.g. liaison-agent.bridgeTaskToOfferDispatch reads metadata.role, metadata.dispatch_role, metadata.worktree_hint, metadata.required_capabilities for offer-dispatch role overrides.",
+						additionalProperties: true,
+					},
 				},
 				required: ["from_agent", "message_content"],
 			},
@@ -105,6 +110,7 @@ export function registerMessageTools(server: McpServer): void {
 				created_at: { type: "string" },
 				provider_sig_salt: { type: "string" },
 				authorization: { type: "string" },
+				metadata: { type: "object", additionalProperties: true },
 			},
 			required: ["from_agent", "message_content"],
 		} as JsonSchema,
@@ -120,6 +126,7 @@ export function registerMessageTools(server: McpServer): void {
 				provider_sig?: string;
 				created_at?: string;
 				provider_sig_salt?: string;
+				metadata?: Record<string, unknown>;
 			}),
 	);
 

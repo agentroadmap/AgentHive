@@ -265,6 +265,7 @@ export class PgMessagingHandlers {
 		provider_sig_salt?: string;
 		created_at?: string;
 		authorization?: string;
+		metadata?: Record<string, unknown>;
 	}): Promise<CallToolResult> {
 		try {
 			// P1105 AC-27: Verify user/* agents have valid bearer token
@@ -348,11 +349,16 @@ export class PgMessagingHandlers {
 				}
 			}
 
+			const metadataJson =
+				args.metadata && Object.keys(args.metadata).length > 0
+					? JSON.stringify(args.metadata)
+					: null;
+
 			const { rows } = await query(
 				`INSERT INTO roadmap.message_ledger
                     (from_agent, to_agent, channel, message_content, message_type, proposal_id, correlation_id,
-                     provider_sig, provider_sig_salt, sig_verified)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                     provider_sig, provider_sig_salt, sig_verified, metadata)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11::jsonb, '{}'::jsonb))
                  RETURNING id, nonce, created_at`,
 				[
 					args.from_agent,
@@ -365,6 +371,7 @@ export class PgMessagingHandlers {
 					args.provider_sig || null,
 					saltBuf,
 					sigVerified,
+					metadataJson,
 				],
 			);
 			return {
