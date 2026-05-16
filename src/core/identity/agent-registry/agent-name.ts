@@ -132,6 +132,37 @@ export function computeAbbr(
 	);
 }
 
+/** Well-known acronyms that render fully uppercased in display aliases (e.g. qa→QA, ai→AI). */
+export const ALL_CAPS_TOKENS = new Set(["qa", "ai", "ml", "sre", "ux", "ui", "api"]);
+
+/**
+ * Convert a raw expertise hint to PascalCase for display alias.
+ * Hyphen-delimited parts are joined without separator.
+ * Parts that are well-known acronyms are fully uppercased.
+ *
+ *   "documenter"   → "Documenter"
+ *   "gate-review"  → "GateReview"
+ *   "qa"           → "QA"
+ *   "ai-architect" → "AIArchitect"
+ */
+export function titleCaseExpertise(raw: string): string {
+	return raw
+		.split(/[-_\s]+/)
+		.filter((part) => part.length > 0)
+		.map((part) => {
+			const lower = part.toLowerCase();
+			return ALL_CAPS_TOKENS.has(lower)
+				? lower.toUpperCase()
+				: lower.charAt(0).toUpperCase() + lower.slice(1);
+		})
+		.join("");
+}
+
+/** Returns true when the string looks like a dense route abbreviation (e.g. "ccs46ant"). */
+function isAbbrShape(s: string): boolean {
+	return /^[a-z]{2,4}\d/.test(s);
+}
+
 /**
  * Map a capability or stage hint to its expertise code.
  * Unknown → first 5 chars of the raw string (slug-safe).
@@ -190,13 +221,22 @@ export const EXPERT_SLOTS = "abcdefghijklmnopqrstuvwxyz";
  * @returns The display alias, or null if not applicable
  */
 export function assignDisplayAlias(
-	agencyName: string,
+	agentProvider: string,
 	hostId: string,
 	expertise?: string,
 	slotChar?: string,
 ): string | null {
-	// Normalize agency name (remove whitespace, capitalize)
-	const normalizedAgency = agencyName
+	// Reject dense route abbreviation shapes (e.g. "ccs46ant") — must be the
+	// human-friendly model_routes.agent_provider value (e.g. "Claude", "Codex").
+	if (isAbbrShape(agentProvider.trim())) {
+		throw new Error(
+			`assignDisplayAlias: received route abbreviation '${agentProvider}' as agentProvider. ` +
+			`Pass model_routes.agent_provider (e.g. 'Claude', 'Codex') instead.`,
+		);
+	}
+
+	// Normalize provider name (trim, PascalCase each whitespace-delimited word)
+	const normalizedProvider = agentProvider
 		.trim()
 		.split(/\s+/)
 		.map((word) => word[0]?.toUpperCase() + word.slice(1).toLowerCase())
@@ -204,16 +244,14 @@ export function assignDisplayAlias(
 
 	// Tier 1: Liaison (slot 0..9, no expertise hint)
 	if (slotChar && LIAISON_SLOTS.includes(slotChar) && !expertise) {
-		return `${normalizedAgency}-${hostId}`;
+		return `${normalizedProvider}-${hostId}`;
 	}
 
-	// Tier 2: Expert slot-0 with expertise (e.g., Architect, Reviewer)
+	// Tier 2: Expert slot-a with expertise — use algorithmic Title-Case, not
+	// the EXPERTISE code table (which is for routing, not display).
 	if (slotChar === "a" && expertise) {
-		const exp = encodeExpertise(expertise);
-		const expCapitalized =
-			EXPERTISE[expertise.toLowerCase()]?.charAt(0)?.toUpperCase() +
-			(EXPERTISE[expertise.toLowerCase()]?.slice(1) ?? exp);
-		return `${normalizedAgency}-${hostId}-${expCapitalized}`;
+		const expLabel = titleCaseExpertise(expertise);
+		return `${normalizedProvider}-${hostId}-${expLabel}`;
 	}
 
 	// Tier 3+: Rotated slots (b, c, ...) → no alias
