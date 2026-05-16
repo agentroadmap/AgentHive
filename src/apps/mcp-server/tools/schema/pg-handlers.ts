@@ -151,7 +151,8 @@ export async function describeTable(
 		        idx.indisunique AS is_unique,
 		        i.indexdef AS definition
 		   FROM pg_indexes i
-		   JOIN pg_class c ON c.relname = i.indexname AND c.relnamespace = ($1::regnamespace)
+		   JOIN pg_class c ON c.relname = i.indexname
+		   JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = i.schemaname
 		   JOIN pg_index idx ON idx.indexrelid = c.oid
 		  WHERE i.schemaname = $1 AND i.tablename = $2
 		  ORDER BY i.indexname`,
