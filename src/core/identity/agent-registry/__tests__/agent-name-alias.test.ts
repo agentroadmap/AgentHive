@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { assignDisplayAlias } from "../agent-name";
+import { assignDisplayAlias, titleCaseExpertise, ALL_CAPS_TOKENS } from "../agent-name";
 
 describe("assignDisplayAlias — P919 Tiered Naming", () => {
 	describe("Tier 1: Liaison (0..9, no expertise)", () => {
@@ -72,6 +72,49 @@ describe("assignDisplayAlias — P919 Tiered Naming", () => {
 
 			// No DB writes, no state mutation
 			expect(alias1).toBe("Claude-bot");
+		});
+	});
+
+	describe("P931: titleCaseExpertise regressions", () => {
+		it("unmapped expertise returns TitleCase display name, not 'undefineddocum'", () => {
+			const alias = assignDisplayAlias("Claude", "Bot", "documenter", "a");
+			expect(alias).toBe("Claude-Bot-Documenter");
+		});
+
+		it("mapped expertise uses TitleCase of the raw hint, not the EXPERTISE code", () => {
+			const alias = assignDisplayAlias("Claude", "Bot", "architect", "a");
+			expect(alias).toBe("Claude-Bot-Architect");
+		});
+
+		it("hyphenated expertise joins parts in PascalCase", () => {
+			const alias = assignDisplayAlias("Claude", "Bot", "gate-review", "a");
+			expect(alias).toBe("Claude-Bot-GateReview");
+		});
+
+		it("all-caps token (qa) uppercases the segment", () => {
+			const alias = assignDisplayAlias("Claude", "Bot", "qa", "a");
+			expect(alias).toBe("Claude-Bot-QA");
+		});
+
+		it("multi-part with all-caps token (ai-architect) renders AIArchitect", () => {
+			const alias = assignDisplayAlias("Claude", "Bot", "ai-architect", "a");
+			expect(alias).toBe("Claude-Bot-AIArchitect");
+		});
+
+		it("dense route abbreviation is rejected — must not produce Ccs46ant-Bot-Documenter", () => {
+			expect(() =>
+				assignDisplayAlias("ccs46ant", "Bot", "documenter", "a"),
+			).toThrow(/route abbreviation/);
+		});
+
+		it("Tier 1 unaffected: liaison slot 0 still returns Provider-Host", () => {
+			const alias = assignDisplayAlias("Claude", "Bot", undefined, "0");
+			expect(alias).toBe("Claude-Bot");
+		});
+
+		it("Tier 3+ unaffected: rotated slot b still returns null", () => {
+			const alias = assignDisplayAlias("Claude", "Bot", "typescript", "b");
+			expect(alias).toBeNull();
 		});
 	});
 
@@ -145,5 +188,59 @@ describe("assignDisplayAlias — P919 Tiered Naming", () => {
 			expect(assignDisplayAlias("Claude", "Bot", "documenter", "b")).toBeNull();
 			expect(assignDisplayAlias("Claude", "Bot", "documenter", "c")).toBeNull();
 		});
+	});
+});
+
+// AC-1: titleCaseExpertise pure helper — direct unit tests
+describe("titleCaseExpertise — pure helper (AC-1)", () => {
+	it("single word → Capitalized", () => {
+		expect(titleCaseExpertise("documenter")).toBe("Documenter");
+	});
+
+	it("known acronym → fully uppercased", () => {
+		expect(titleCaseExpertise("qa")).toBe("QA");
+		expect(titleCaseExpertise("ai")).toBe("AI");
+		expect(titleCaseExpertise("ml")).toBe("ML");
+	});
+
+	it("hyphenated → PascalCase joined", () => {
+		expect(titleCaseExpertise("gate-review")).toBe("GateReview");
+	});
+
+	it("hyphenated with acronym prefix → AIArchitect", () => {
+		expect(titleCaseExpertise("ai-architect")).toBe("AIArchitect");
+	});
+
+	it("hyphenated with acronym suffix → MLEngineer", () => {
+		expect(titleCaseExpertise("ml-engineer")).toBe("MLEngineer");
+	});
+
+	it("underscore delimiter → FooBarBaz", () => {
+		expect(titleCaseExpertise("foo_bar_baz")).toBe("FooBarBaz");
+	});
+
+	it("mixed underscore + hyphen → FooBarBaz", () => {
+		expect(titleCaseExpertise("foo_bar-baz")).toBe("FooBarBaz");
+	});
+
+	it("empty string → empty string", () => {
+		expect(titleCaseExpertise("")).toBe("");
+	});
+
+	it("whitespace-only → empty string", () => {
+		expect(titleCaseExpertise("   ")).toBe("");
+	});
+});
+
+// AC-6: ALL_CAPS_TOKENS is exported and contains expected entries
+describe("ALL_CAPS_TOKENS — exported constant (AC-6)", () => {
+	it("exports ALL_CAPS_TOKENS set", () => {
+		expect(ALL_CAPS_TOKENS).toBeInstanceOf(Set);
+	});
+
+	it("contains all documented acronyms", () => {
+		for (const token of ["qa", "ai", "ml", "sre", "ux", "ui", "api"]) {
+			expect(ALL_CAPS_TOKENS).toContain(token);
+		}
 	});
 });
