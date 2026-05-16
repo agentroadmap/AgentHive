@@ -1,4 +1,10 @@
+import { hostname } from "node:os";
 import { query } from "../../../../infra/postgres/pool.ts";
+import {
+	assignDisplayAlias,
+	pascalCaseHost,
+} from "../../../../core/identity/agent-registry/agent-name.ts";
+import { claimDisplayAlias } from "../../../../core/identity/agent-registry/alias-manager.ts";
 import type { CallToolResult } from "../../types.ts";
 
 type ToolHandler = (args: Record<string, unknown>) => Promise<CallToolResult>;
@@ -42,6 +48,26 @@ export const agencyRegisterHandler: ToolHandler = async (args) => {
 			 ON CONFLICT DO NOTHING`,
 			[row.id, skills],
 		);
+	}
+
+	// P932: Tier 2 alias for slot-'a' agents that come through this handler.
+	// Agency identities ending in '-0' (liaison) never satisfy slotChar==='a',
+	// so this block is a no-op for normal agency registrations.
+	const slotChar = identity.split("-").pop();
+	const expertise = skills?.[0];
+	if (slotChar === "a" && expertise && row?.id && provider) {
+		const host = process.env.AGENTHIVE_HOST ?? hostname();
+		try {
+			const alias = assignDisplayAlias(provider, pascalCaseHost(host), expertise, slotChar);
+			if (alias) {
+				const claim = await claimDisplayAlias(Number(row.id), alias, { tier: 2 });
+				if (!claim.claimed) {
+					console.warn(`[agencyRegisterHandler] ${identity} could not claim alias '${alias}': ${claim.reason}`);
+				}
+			}
+		} catch (e) {
+			console.warn(`[agencyRegisterHandler] alias skipped for ${identity}: ${e instanceof Error ? e.message : e}`);
+		}
 	}
 
 	return {
@@ -164,6 +190,34 @@ export const workerRegisterHandler: ToolHandler = async (args) => {
 	);
 
 	const workerId = result.rows[0]?.worker_id;
+
+	// P932: Claim Tier 2 display alias for slot-'a' workers with a capability hint.
+	// Look up the agency's preferred_provider for a human-friendly name; fall back
+	// to the "/" prefix of agencyIdentity (e.g. "claude/agency-bot" → "claude").
+	const slotChar = workerIdentity.split("-").pop();
+	const expertise = skills?.[0];
+	if (slotChar === "a" && expertise && workerId) {
+		const agencyRes = await query<{ preferred_provider: string | null }>(
+			`SELECT preferred_provider FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
+			[agencyIdentity],
+		);
+		const rawProvider =
+			agencyRes.rows[0]?.preferred_provider ??
+			agencyIdentity.split("/")[0] ??
+			agencyIdentity;
+		const host = process.env.AGENTHIVE_HOST ?? hostname();
+		try {
+			const alias = assignDisplayAlias(rawProvider, pascalCaseHost(host), expertise, slotChar);
+			if (alias) {
+				const claim = await claimDisplayAlias(Number(workerId), alias, { tier: 2 });
+				if (!claim.claimed) {
+					console.warn(`[workerRegisterHandler] ${workerIdentity} could not claim alias '${alias}': ${claim.reason}`);
+				}
+			}
+		} catch (e) {
+			console.warn(`[workerRegisterHandler] alias skipped for ${workerIdentity}: ${e instanceof Error ? e.message : e}`);
+		}
+	}
 
 	return {
 		content: [
