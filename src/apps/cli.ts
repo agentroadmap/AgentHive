@@ -6516,8 +6516,16 @@ program
 		try {
 			// P1123: protect the shared pool from stray pool.end() in other cli
 			// subcommands that may run inside this long-running process.
-			const { setPoolLifecycleMode } = await import("../infra/postgres/pool.ts");
-			setPoolLifecycleMode("long-running");
+			// jiti/register collapses named TS exports under module.default, so fall
+			// back through .default for both imports (mirrors mcp-sse-server.js).
+			const poolMod = (await import("../infra/postgres/pool.ts")) as any;
+			const setPoolLifecycleMode =
+				poolMod.setPoolLifecycleMode ?? poolMod.default?.setPoolLifecycleMode;
+			if (typeof setPoolLifecycleMode === "function") setPoolLifecycleMode("long-running");
+			const watchdogMod = (await import("../infra/postgres/pool-watchdog.ts")) as any;
+			const startPoolWatchdog =
+				watchdogMod.startPoolWatchdog ?? watchdogMod.default?.startPoolWatchdog;
+			if (typeof startPoolWatchdog === "function") startPoolWatchdog("agenthive-board");
 
 			const cwd = await requireProjectRoot();
 			const { RoadmapServer } = await import("./server/index.ts");

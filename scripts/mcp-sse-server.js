@@ -22,6 +22,16 @@ if (typeof setPoolLifecycleMode !== "function") {
 }
 setPoolLifecycleMode("long-running");
 
+// P1123 Phase 3: start the pool watchdog. Same jiti-named-export fallback
+// pattern as setPoolLifecycleMode above.
+const watchdogModule = await import("../src/infra/postgres/pool-watchdog.ts");
+const startPoolWatchdog =
+	watchdogModule.startPoolWatchdog ||
+	watchdogModule.default?.startPoolWatchdog;
+if (typeof startPoolWatchdog === "function") {
+	startPoolWatchdog("agenthive-mcp");
+}
+
 const serverModule = await import("../src/apps/mcp-server/server.ts");
 const httpCompatModule = await import("../src/apps/mcp-server/http-compat.ts");
 const versionModule = await import("../src/shared/utils/version.ts");

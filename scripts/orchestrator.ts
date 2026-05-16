@@ -13,11 +13,13 @@
 
 import { Orchestrator } from "../src/core/orchestration/orchestrator.ts";
 import { closePool, setPoolLifecycleMode } from "../src/infra/postgres/pool.ts";
+import { startPoolWatchdog } from "../src/infra/postgres/pool-watchdog.ts";
 
 // P1123: declare long-running mode so stray pool.end() calls cannot poison this
 // service. Graceful shutdown drops back to "one-shot" before the final closePool.
 setPoolLifecycleMode("long-running");
 
+const watchdog = startPoolWatchdog("agenthive-orchestrator");
 const orchestrator = new Orchestrator();
 
 async function main() {
@@ -39,6 +41,7 @@ async function main() {
 
 	// Graceful shutdown — drop the long-running guard so closePool actually fires.
 	await orchestrator.stop();
+	await watchdog.stop();
 	setPoolLifecycleMode("one-shot");
 	await closePool();
 	console.log("[orchestrator-shim] stopped");

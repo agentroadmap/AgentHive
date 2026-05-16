@@ -24,11 +24,13 @@ import {
 	type LiaisonAgentHandle,
 } from "../src/infra/agency/liaison-agent.ts";
 import { closePool, setPoolLifecycleMode } from "../src/infra/postgres/pool.ts";
+import { startPoolWatchdog } from "../src/infra/postgres/pool-watchdog.ts";
 
 // P1123: protect the shared pool from stray pool.end() in shared CLI code.
 setPoolLifecycleMode("long-running");
 
 const agencyId = process.env.AGENCY_ID?.trim() ?? "(unknown)";
+const watchdog = startPoolWatchdog(`agenthive-liaison:${agencyId}`);
 // AGENCY_PROVIDER is the canonical var; AGENTHIVE_AGENT_PROVIDER is the legacy
 // per-instance env file var. Accept either so both service templates work.
 const agencyProvider =
@@ -84,6 +86,7 @@ async function main() {
 		}
 	}
 	await handle.shutdown("normal");
+	await watchdog.stop();
 	setPoolLifecycleMode("one-shot");
 	await closePool();
 	console.log(`[liaison:${agencyId}] stopped`);
