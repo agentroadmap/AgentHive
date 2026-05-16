@@ -7,10 +7,13 @@
  * - Poll fallback every 5s: SELECT id FROM message_ledger WHERE correlation_id = $cid AND acked_at IS NOT NULL
  * - On timeout_ms exceeded: INSERT into message_timeout_tracking (idempotent via UNIQUE on message_id)
  * - Returns { replied: boolean, reply_message_id?: number, timed_out: boolean }
+ *
+ * P1105 AC-27: user/* agents require bearer token verification
  */
 
 import { query, getPool } from "../../../../postgres/pool.ts";
 import type { CallToolResult } from "../../types.ts";
+import { verifyUserBearer } from "../../../../infra/messaging/bearer-auth.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
@@ -105,12 +108,31 @@ async function waitForReplyViaNotify(
 	}
 }
 
-export async function handleMsgWaitReply(args: {
-	message_id: number;
-	timeout_ms: number;
-	agent: string;
-}): Promise<CallToolResult> {
+export async function handleMsgWaitReply(
+	args: {
+		message_id: number;
+		timeout_ms: number;
+		agent: string;
+		authorization?: string;
+	},
+	operatorHmacSecret?: Buffer,
+): Promise<CallToolResult> {
 	try {
+		// P1105 AC-27: Verify user/* agents have valid bearer token
+		if (operatorHmacSecret) {
+			const bearerCheck = verifyUserBearer(
+				args.authorization,
+				args.agent,
+				operatorHmacSecret,
+			);
+			if (!bearerCheck.valid) {
+				return errorResult(
+					`Authentication failed (P1105 AC-27): ${bearerCheck.reason}`,
+					new Error(bearerCheck.reason),
+				);
+			}
+		}
+
 		// Look up correlation_id for the given message_id
 		const msgResult = await query(
 			`SELECT correlation_id, from_agent FROM roadmap.message_ledger WHERE id = $1`,

@@ -49,13 +49,27 @@ const msgUnreadCountSchema: JsonSchema = {
 };
 
 export function registerMessageTools(server: McpServer): void {
-	const pgHandlers = new PgMessagingHandlers(server, process.cwd());
+	// P1105: Get operator HMAC secret for bearer token verification
+	const operatorHmacSecret = (() => {
+		const envSecret = process.env.OPERATOR_HMAC_SECRET;
+		if (envSecret) {
+			try {
+				return Buffer.from(envSecret, "hex");
+			} catch {
+				console.warn("[P1105] OPERATOR_HMAC_SECRET is not valid hex; bearer verification disabled");
+				return undefined;
+			}
+		}
+		return undefined;
+	})();
+
+	const pgHandlers = new PgMessagingHandlers(server, process.cwd(), operatorHmacSecret);
 
 	const sendTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "msg_send",
 			description:
-				"Send a message to the Postgres message_ledger. ACL enforced on send (roadmap.message_acl); trust gate enforced for restricted/blocked senders. NOTE: P834 HMAC dispatch-gate verification of `provider_sig` is DESIGNED but NOT ENFORCED today — the column is accepted and stored verbatim, sig_verified stays at default 'pending', and the 5-minute replay window is not checked. Do not rely on this surface for authentication; it is delivery-only. Tracking via P834 follow-up; see drift discussion on P834.",
+				"Send a message to the Postgres message_ledger. ACL enforced on send (roadmap.message_acl); trust gate enforced for restricted/blocked senders. P1105 AC-27: user/* agents require a valid bearer token in the authorization parameter. NOTE: P834 HMAC dispatch-gate verification of `provider_sig` is DESIGNED but NOT ENFORCED today — the column is accepted and stored verbatim, sig_verified stays at default 'pending', and the 5-minute replay window is not checked. Do not rely on this surface for authentication; it is delivery-only. Tracking via P834 follow-up; see drift discussion on P834.",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -72,6 +86,7 @@ export function registerMessageTools(server: McpServer): void {
 					provider_sig: { type: "string" },
 					created_at: { type: "string" },
 					provider_sig_salt: { type: "string" },
+					authorization: { type: "string", description: "Bearer token for user/* agents (P1105 AC-27)" },
 				},
 				required: ["from_agent", "message_content"],
 			},
@@ -89,6 +104,7 @@ export function registerMessageTools(server: McpServer): void {
 				provider_sig: { type: "string" },
 				created_at: { type: "string" },
 				provider_sig_salt: { type: "string" },
+				authorization: { type: "string" },
 			},
 			required: ["from_agent", "message_content"],
 		} as JsonSchema,
@@ -281,7 +297,7 @@ export function registerMessageTools(server: McpServer): void {
 		{
 			name: "msg_reply",
 			description:
-				"Reply to a message using correlation_id. Auto-acks the original message and notifies recipient via pg_notify.",
+				"Reply to a message using correlation_id. Auto-acks the original message and notifies recipient via pg_notify. P1105 AC-27: user/* agents require a valid bearer token in the authorization parameter.",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -301,6 +317,10 @@ export function registerMessageTools(server: McpServer): void {
 						type: "string",
 						description: "Agent identity sending the reply",
 					},
+					authorization: {
+						type: "string",
+						description: "Bearer token for user/* agents (P1105 AC-27)",
+					},
 				},
 				required: ["correlation_id", "content", "from_agent"],
 			},
@@ -312,23 +332,28 @@ export function registerMessageTools(server: McpServer): void {
 				content: { type: "string" },
 				message_type: { type: "string" },
 				from_agent: { type: "string" },
+				authorization: { type: "string" },
 			},
 			required: ["correlation_id", "content", "from_agent"],
 		} as JsonSchema,
 		async (input) =>
-			handleMsgReply(input as {
-				correlation_id: string;
-				content: string;
-				message_type?: string;
-				from_agent: string;
-			}),
+			handleMsgReply(
+				input as {
+					correlation_id: string;
+					content: string;
+					message_type?: string;
+					from_agent: string;
+					authorization?: string;
+				},
+				operatorHmacSecret,
+			),
 	);
 
 	const msgWaitReplyTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "msg_wait_reply",
 			description:
-				"Wait for a reply to a message using correlation_id. Polls every 5s with pg_notify fallback. Returns reply_message_id if a reply arrives, or timed_out: true if timeout exceeded.",
+				"Wait for a reply to a message using correlation_id. Polls every 5s with pg_notify fallback. Returns reply_message_id if a reply arrives, or timed_out: true if timeout exceeded. P1105 AC-27: user/* agents require a valid bearer token in the authorization parameter.",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -344,6 +369,10 @@ export function registerMessageTools(server: McpServer): void {
 						type: "string",
 						description: "Agent identity waiting for the reply",
 					},
+					authorization: {
+						type: "string",
+						description: "Bearer token for user/* agents (P1105 AC-27)",
+					},
 				},
 				required: ["message_id", "timeout_ms", "agent"],
 			},
@@ -354,15 +383,20 @@ export function registerMessageTools(server: McpServer): void {
 				message_id: { type: "number" },
 				timeout_ms: { type: "number" },
 				agent: { type: "string" },
+				authorization: { type: "string" },
 			},
 			required: ["message_id", "timeout_ms", "agent"],
 		} as JsonSchema,
 		async (input) =>
-			handleMsgWaitReply(input as {
-				message_id: number;
-				timeout_ms: number;
-				agent: string;
-			}),
+			handleMsgWaitReply(
+				input as {
+					message_id: number;
+					timeout_ms: number;
+					agent: string;
+					authorization?: string;
+				},
+				operatorHmacSecret,
+			),
 	);
 
 	const spawnManifestTool: McpToolHandler = createSimpleValidatedTool(

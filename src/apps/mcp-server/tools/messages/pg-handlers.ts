@@ -18,6 +18,7 @@ import {
 import type { A2ANotification } from "../../../../infra/messaging/a2a-types.ts";
 import { verifySignature } from "../../../../infra/security/agent-crypto.ts";
 import { getAgentSecret } from "../../../../infra/security/agent-secret-store.ts";
+import { verifyUserBearer } from "../../../../infra/messaging/bearer-auth.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
@@ -127,6 +128,7 @@ export class PgMessagingHandlers {
 	constructor(
 		private readonly core: McpServer,
 		private readonly projectRoot: string,
+		private readonly operatorHmacSecret?: Buffer,
 	) {}
 
 	// -------------------------------------------------------------------------
@@ -262,8 +264,28 @@ export class PgMessagingHandlers {
 		provider_sig?: string;
 		provider_sig_salt?: string;
 		created_at?: string;
+		authorization?: string;
 	}): Promise<CallToolResult> {
 		try {
+			// P1105 AC-27: Verify user/* agents have valid bearer token
+			if (this.operatorHmacSecret) {
+				const bearerCheck = verifyUserBearer(
+					args.authorization,
+					args.from_agent,
+					this.operatorHmacSecret,
+				);
+				if (!bearerCheck.valid) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `⛔ Authentication failed (P1105 AC-27): ${bearerCheck.reason}`,
+							},
+						],
+					};
+				}
+			}
+
 			// AC#2: Enforce ACL before inserting. DMs require an explicit grant;
 			// channel posts require a channel_post grant.
 			const grantType = args.to_agent ? "dm" : "channel_post";
