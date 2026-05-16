@@ -15,6 +15,7 @@ import {
 	checkMessageACL,
 } from "../../../../infra/messaging/a2a-access-control.ts";
 import type { A2ANotification } from "../../../../infra/messaging/a2a-types.ts";
+import { agentContextStorage } from "../../../../shared/identity/agent-context.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
@@ -258,6 +259,24 @@ export class PgMessagingHandlers {
 		correlation_id?: string;
 	}): Promise<CallToolResult> {
 		try {
+			// AC-27 (P1017): user/* senders must present a bearer token whose
+			// principal_id matches from_agent. Missing token → 401; mismatch → 403.
+			if (args.from_agent.startsWith("user/")) {
+				const ctx = agentContextStorage.getStore();
+				if (!ctx) {
+					return {
+						content: [{ type: "text", text: "401 Unauthorized: bearer token required for user/* senders" }],
+						isError: true,
+					};
+				}
+				if (ctx.verified.principal_id !== args.from_agent) {
+					return {
+						content: [{ type: "text", text: `403 Forbidden: token sub '${ctx.verified.principal_id}' does not match from_agent '${args.from_agent}'` }],
+						isError: true,
+					};
+				}
+			}
+
 			// AC#2: Enforce ACL before inserting. DMs require an explicit grant;
 			// channel posts require a channel_post grant.
 			const grantType = args.to_agent ? "dm" : "channel_post";
