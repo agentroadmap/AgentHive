@@ -131,7 +131,7 @@ export async function runLiaisonAgent(
 
 	const listenClient = opts.createListenClient
 		? await opts.createListenClient()
-		: await connectListenClient();
+		: await connectListenClient(identity);
 	await listenClient.query(`LISTEN "${channel}"`);
 	console.log(`${log} LISTEN active on: ${channel}`);
 
@@ -701,9 +701,13 @@ export async function markReadAndResolveTimeout(messageId: number): Promise<void
 	);
 }
 
-async function connectListenClient(): Promise<Client> {
+async function connectListenClient(identity?: string): Promise<Client> {
 	// LISTEN must bypass PgBouncer transaction pooling. Normal queries use the
 	// shared pool; this long-lived client connects directly and is ended on stop.
+	// P1125: identity is passed per-call so the single-supervisor model can tag
+	// each LISTEN session distinctly in pg_stat_activity. Falls back to
+	// AGENCY_ID env var for the legacy single-tenant start-liaison.ts path.
+	const tag = identity ?? process.env.AGENCY_ID ?? "unknown";
 	const databaseUrl = process.env.DATABASE_URL
 		? new URL(process.env.DATABASE_URL)
 		: null;
@@ -716,7 +720,7 @@ async function connectListenClient(): Promise<Client> {
 			process.env.PGDATABASE ??
 			databaseUrl?.pathname.replace(/^\/+/, "") ??
 			"agenthive",
-		application_name: `agenthive-a2a-listen-${process.env.AGENCY_ID ?? "unknown"}`,
+		application_name: `agenthive-a2a-listen-${tag}`,
 		options:
 			process.env.PG_OPTIONS ??
 			"-c search_path=roadmap_proposal,roadmap_workforce,roadmap_efficiency,roadmap,public",

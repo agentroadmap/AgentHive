@@ -46,6 +46,26 @@ export interface LiaisonBootHandle {
  * Read agency config from environment variables.
  * Throws if required vars are missing.
  */
+/**
+ * Build an AgencyConfig from a caller-provided override that already has
+ * the required fields. Used by the P1125 supervisor path which reads identity
+ * from agent_registry rather than env.
+ */
+function buildDefaultConfig(override: Partial<AgencyConfig>): AgencyConfig {
+  if (!override.agency_id?.trim() || !override.provider?.trim()) {
+    throw new Error("buildDefaultConfig requires agency_id + provider");
+  }
+  return {
+    agency_id: override.agency_id,
+    provider: override.provider,
+    host_id: override.host_id ?? "bot",
+    display_name: override.display_name ?? override.agency_id,
+    public_key: override.public_key,
+    capabilities: override.capabilities ?? [],
+    heartbeat_interval_ms: override.heartbeat_interval_ms ?? 30000,
+  };
+}
+
 export function readAgencyConfig(): AgencyConfig {
   const agency_id = process.env.AGENCY_ID?.trim();
   // Accept legacy AGENTHIVE_AGENT_PROVIDER from agency-*.env per-instance files
@@ -87,6 +107,14 @@ export function readAgencyConfig(): AgencyConfig {
  * Returns a handle that lets callers stop the loop and end the session.
  * The heartbeat loop runs every `heartbeat_interval_ms` ms (default 30s).
  *
+ * Two call shapes:
+ *   - bootLiaison()                — legacy single-tenant; reads env via readAgencyConfig
+ *   - bootLiaison({...full config}) — P1125 supervisor; pass full config, skip env reads
+ *   - bootLiaison({partial})        — env first, then override (back-compat)
+ *
+ * P1125: A full `AgencyConfig` (containing required agency_id + provider) skips
+ * readAgencyConfig() entirely so the supervisor can boot N agencies without env.
+ *
  * Usage:
  *   const handle = await bootLiaison();
  *   process.on('SIGTERM', () => handle.shutdown());
@@ -94,7 +122,12 @@ export function readAgencyConfig(): AgencyConfig {
 export async function bootLiaison(
   configOverride?: Partial<AgencyConfig>
 ): Promise<LiaisonBootHandle> {
-  const base = readAgencyConfig();
+  // P1125: if caller provides a complete config (required fields filled), skip
+  // the env-reading path so the supervisor can drive multiple agencies in-process.
+  const hasFullConfig =
+    !!configOverride?.agency_id?.trim() &&
+    !!configOverride?.provider?.trim();
+  const base = hasFullConfig ? buildDefaultConfig(configOverride!) : readAgencyConfig();
   const config: AgencyConfig = { ...base, ...configOverride };
 
   // AC#2: Registration handshake — liaison calls liaison_register
