@@ -23,7 +23,7 @@ import {
   endLiaisonSession,
   type LiaisonRegisterResult,
 } from "./liaison-service.js";
-import { startLiaisonHub, propagateHeartbeat } from "./liaison-hub.ts";
+import { startLiaisonHub } from "./liaison-hub.ts";
 
 export interface AgencyConfig {
   agency_id: string;
@@ -48,12 +48,15 @@ export interface LiaisonBootHandle {
  */
 export function readAgencyConfig(): AgencyConfig {
   const agency_id = process.env.AGENCY_ID?.trim();
-  const provider = process.env.AGENCY_PROVIDER?.trim();
-  const host_id = process.env.AGENCY_HOST_ID?.trim();
+  // Accept legacy AGENTHIVE_AGENT_PROVIDER from agency-*.env per-instance files
+  const provider =
+    process.env.AGENCY_PROVIDER?.trim() ||
+    process.env.AGENTHIVE_AGENT_PROVIDER?.trim();
+  // Default host to "bot" — the shared operator host; override via AGENCY_HOST_ID
+  const host_id = process.env.AGENCY_HOST_ID?.trim() || "bot";
 
   if (!agency_id) throw new Error("AGENCY_ID env var is required");
   if (!provider) throw new Error("AGENCY_PROVIDER env var is required");
-  if (!host_id) throw new Error("AGENCY_HOST_ID env var is required");
 
   const display_name =
     process.env.AGENCY_DISPLAY_NAME?.trim() || agency_id;
@@ -118,19 +121,16 @@ export async function bootLiaison(
     timer = setTimeout(async () => {
       if (!running) return;
       try {
-        const hbResult = await liaisonHeartbeat({
+        await liaisonHeartbeat({
           session_id: session.session_id,
           status: "active",
           capacity_envelope: {},
         });
-        // Propagate heartbeat to A2A surface so orchestrators/observers react
-        await propagateHeartbeat(
-          config.agency_id,
-          hbResult.agency_status,
-          hbResult.dispatchable
+      } catch (err) {
+        // Non-fatal but must be visible. Watchdog can't fix what we hide.
+        console.warn(
+          `[liaison:${config.agency_id}] heartbeat failed: ${(err as Error).message}`,
         );
-      } catch {
-        // Non-fatal: heartbeat failure is logged by orchestrator watchdog
       }
       scheduleNext();
     }, config.heartbeat_interval_ms);

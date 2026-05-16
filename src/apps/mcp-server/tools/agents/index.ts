@@ -136,6 +136,35 @@ export function registerAgentTools(server: McpServer): void {
 		async (input) => handlers.retireAgent(input),
 	);
 
+	// ── agent_resolve ───────────────────────────────────────────────────────
+	type ResolveAgentArgs = Parameters<PgAgentHandlers["resolveAgent"]>[0];
+	const resolveAgentTool: McpToolHandler =
+		createSimpleValidatedTool<ResolveAgentArgs>(
+			{
+				name: "agent_resolve",
+				description:
+					"P995: Resolve a named agent by agent_identity or display_alias. " +
+					"Returns registry row including preferred_provider, host_affinity, and status. " +
+					"Use this to verify an agent is registered before sending it a message.",
+				inputSchema: {
+					type: "object",
+					properties: {
+						name: {
+							type: "string",
+							description: "agent_identity (e.g. 'adam') or display_alias to look up",
+						},
+					},
+					required: ["name"],
+				},
+			},
+			{
+				type: "object",
+				properties: { name: { type: "string" } },
+				required: ["name"],
+			},
+			async (input) => pgHandlers.resolveAgent(input),
+		);
+
 	// ── agent_force_release_alias ───────────────────────────────────────────
 	type ForceReleaseAliasArgs = Parameters<
 		PgAgentHandlers["forceReleaseAlias"]
@@ -186,6 +215,7 @@ export function registerAgentTools(server: McpServer): void {
 	server.addTool(heartbeatTool);
 	server.addTool(spawnTool);
 	server.addTool(retireTool);
+	server.addTool(resolveAgentTool);
 	server.addTool(forceReleaseAliasTool);
 	server.addTool(zombieDetectTool);
 	server.addTool(poolStatsTool);

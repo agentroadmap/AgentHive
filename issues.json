@@ -59,7 +59,27 @@
       "testFile": "gate-review",
       "discoveredAt": "2026-04-21T15:16:39.025Z",
       "status": "open"
+    },
+    {
+      "id": "ISSUE-441-1",
+      "proposalId": "441",
+      "title": "Runbook rollback DROP TRIGGER commands target wrong schema (roadmap vs roadmap_proposal)",
+      "description": "Rollback section issues DROP TRIGGER commands against roadmap.proposal and roadmap.transition_queue. Actual tables are in roadmap_proposal.proposal and roadmap_proposal.transition_queue (confirmed by migration 041 and all source references). IF EXISTS suppresses the error, so operators following the runbook silently fail to remove triggers. Fix: s/roadmap.proposal/roadmap_proposal.proposal/ and s/roadmap.transition_queue/roadmap_proposal.transition_queue/ in the rollback section.",
+      "severity": "major",
+      "testFile": "docs/operations/service-topology-runbook.md",
+      "discoveredAt": "2026-05-13T09:09:39.711Z",
+      "status": "open"
+    },
+    {
+      "id": "ISSUE-441-2",
+      "proposalId": "441",
+      "title": "renewLease silently succeeds when lease is already expired — caller gets false confirmation",
+      "description": "renewLease() UPDATE matches zero rows when expires_at <= now(); no error or rowCount check means the caller believes the lease was renewed and proceeds to write governed tables, where the DB trigger will reject it. Fix: check result.rowCount after UPDATE; throw ServiceLeaseRequiredError if rowCount === 0.",
+      "severity": "major",
+      "testFile": "src/core/governance/service-topology.ts",
+      "discoveredAt": "2026-05-13T09:09:41.826Z",
+      "status": "open"
     }
   ],
-  "updatedAt": "2026-04-21T15:16:39.025Z"
+  "updatedAt": "2026-05-13T09:09:41.826Z"
 }

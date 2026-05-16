@@ -419,24 +419,53 @@ The platform runs **one** dispatch decision loop: `scanQueues()` in `scripts/orc
 
 ### 6.0c Broadcast fan-out uses per-channel NOTIFY (P907)
 
-A2A messaging remains channel-centric for broadcast delivery. Each broadcast emits a single `pg_notify(channel_name)` rather than N notifications for N subscribers. This optimizes DB write volume and leverages the existing `MessageNotificationListener`'s `wait_ms` logic.
+A2A messaging remains **channel-centric** for broadcast delivery. Each broadcast emits one `pg_notify(channel_name)` regardless of how many agents are subscribed on that channel. Agents that `LISTEN` on the channel wake up and pull from `message_ledger`. Agents not listening fall back to polling.
 
-**Measured baseline @ 50 agents, 10 msg/sec mixed load (80% DM / 15% team-of-10 / 5% broadcast):**
+**Decision: stay with per-channel NOTIFY.** Per-subscriber fan-out (mailbox pattern) was evaluated and rejected.
+
+**Numbers** (@ 50 agents, 10 msg/sec mixed load — 80% DM / 15% team-of-10 / 5% broadcast):
 
 | Model | NOTIFYs/sec | Listener LOC | Schema additions |
-| :--- | ---: | ---: | :--- |
-| Per-channel (current) | 14 | ~200 | none |
-| Per-subscriber (rejected) | 204 (14.6×) | ~400 | +1 subscription table, +GC job, +API surface |
+| --- | --- | --- | --- |
+| Per-channel (current) | ~14 | ~200 | none |
+| Per-subscriber (rejected) | ~204 (14.6×) | ~400 | +1 subscription table, +GC worker, +subscribe API |
 
-Both models are well under Postgres NOTIFY queue capacity (~10K–50K/sec). Per-subscriber's amplification is real but addresses a non-bottleneck.
+Both are well below Postgres NOTIFY queue capacity (~10K–50K/sec). Per-subscriber's amplification is real but solves a non-bottleneck at this scale.
 
 **Failure-mode comparison:**
-- Per-channel: a missing `LISTEN` causes ledger fill and no NOTIFY wake — polling fallback recovers; detectable via stalled `read_at` progress.
-- Per-subscriber: a stale subscription row causes trigger to skip emit — silent delivery failure with state spread across code and DB; harder to detect.
+- **Per-channel** — missed LISTEN → ledger accumulates, polling fallback recovers. Detectable via stalled `read_at` progress. State is implicit in agent startup code.
+- **Per-subscriber** — stale subscription row → trigger silently skips delivery. State is split across code _and_ DB. Harder to diagnose; introduces a new GC/cleanup obligation.
 
-**Per-subscriber fan-out (mailbox pattern) was rejected.** Conservative choice is per-channel; per-subscriber can be layered in later if broadcast traffic spikes 50× or selective-wake optimisation is needed.
+**Rule:** do not add a per-subscriber fan-out table or subscription registry without a new proposal and load evidence that 50× broadcast spike has actually been observed. Per-subscriber can be layered in as an optimization later; it is not the default.
 
-### 6.0d A2A thread_id and reply-semantics enforcement (P907)
+### 6.0d Permanent agent naming convention (P996)
+
+Permanent agents use provider-scoped first-name pools. First letter maps to provider:
+
+| Prefix | Provider | Male names (builder/default) | Female names (skeptic/review only) |
+| ------ | -------- | ----------------------------- | ---------------------------------- |
+| `a*`   | Claude / Anthropic | adam, alan, alex, andrew, andy | alice, ana |
+| `c*`   | Codex    | cooper, carter, calvin, clark, cory | chloe, cora |
+| `g*`   | Gemini   | george, glen, grant, graham | grace, gina, gwen |
+| `p*`   | Copilot  | peter, patrick, paul, preston, pete, pablo | paige, piper, petra |
+| `h*`   | Hermes   | henry, harry, harrison, hudson | hannah, hazel |
+
+**Gender-role rule:** male names = builder/developer/architect (active workers, default dispatch targets). Female names = skeptic/reviewer (seeded inactive; enabled only for review cycles). The first-boot agent for any provider MUST be a male name.
+
+**Expertise suffix:** append `.dev`, `.test`, `.review`, etc. as an operator-facing hint — e.g. `george.dev`, `pete.test`. The suffix does not affect provider routing.
+
+**Agency/liaison labels:** dotted labels distinguish roles on the shared `bot` host:
+- `.a` = combined agency+liaison process (e.g. `claude.a`, `gemini.a`)
+- `.l` = pure-relay liaison (reserved; not yet implemented)
+- `provider.<owner>.a` = provider agency scoped to an owner (e.g. `copilot.gary.a`)
+
+**Module:** `src/core/identity/agent-registry/permanent-agent-map.ts` — `resolvePermanentAgentMapping(input)` normalises any registered name (bare, qualified, with suffix, with @host) to `{ agentIdentity, provider, displayName, permanentRole, host }`. Wire this into every registration path; do not add new hardcoded name sets.
+
+**Supersedes:** P930's `provider-role` convention for permanent agents, agencies, and liaisons. P919 remains the parent display-alias architecture.
+
+**Cross-host labels (`@host`) are deferred** — A2A channel validation does not yet allow `@` in stored routing identities. See P996 for the deferred cross-host relay design.
+
+### 6.0e A2A thread_id and reply-semantics enforcement (P907)
 
 **thread_id column** (`roadmap.message_ledger.thread_id BIGINT NOT NULL`) groups all messages in a conversation tree by their root message id. Populated entirely by the DB:
 
@@ -456,6 +485,23 @@ Both models are well under Postgres NOTIFY queue capacity (~10K–50K/sec). Per-
 - P907-B (P2): escalation rows, `A2AMessenger.send`, liaison handlers, `cross-host-relay` NACK.
 
 Until those fixes land, the DB triggers provide a partial safety net but thread coherence is incomplete for reply chains.
+
+### 6.0f Role resolution — two-level rule (P609 × P748)
+
+Two role-resolver layers coexist by design. **Do not merge them.**
+
+| Layer | File | Key space | DB table | Cache invalidation |
+| :---- | :--- | :-------- | :------- | :----------------- |
+| **Queue-role resolver** (P748) | `src/core/orchestration/role-resolver.ts` | `(workflow_template_id, stage, maturity, project_id?)` | `roadmap.agent_role_profile` | Process-start only |
+| **Gate-role resolver** (P609) | `src/core/orchestration/gate-role-resolver.ts` | `(proposal_type, gate)` | `roadmap_proposal.gate_role` | NOTIFY `gate_role_changed` |
+
+**Queue-role resolver** is consumed by `scanQueues()` for queue-driven dispatch: "given this workflow template, stage, and maturity, which agent role handles it?"
+
+**Gate-role resolver** is consumed by gate evaluation: "given this proposal type and gate (D1–D4), which reviewer role and what persona should be used?" It stores complete agent personas (the D1–D4 behavioral checklists) that the queue-driven schema cannot express.
+
+**Why they cannot be merged:** the gate path requires `(proposal_type, gate)` tuple lookups with per-type persona overrides and a `gate_role_changed` NOTIFY subscription for live cache invalidation. The queue-driven path uses `(workflow_template_id, stage, maturity)` — a different key space with no D1–D4 gate enumeration concept.
+
+**Rule:** changes to gate reviewer personas belong in `roadmap_proposal.gate_role` (then `NOTIFY gate_role_changed`). Changes to queue dispatch roles belong in `roadmap.agent_role_profile`.
 
 ### 6.0 Database Topology (target architecture)
 
@@ -518,9 +564,11 @@ Use `database/ddl/` for schema structure:
 
 Current canonical references:
 
-- `database/ddl/roadmap-ddl-v2.sql`
-- `database/ddl/roadmap-ddl-v2-additions.sql`
-- numbered rollout files such as `002-...sql`, `003-...sql`, `012-...sql`
+- `database/ddl/roadmap-baseline-2026-04-13.sql` — full schema baseline (snapshot applied 2026-04-13)
+- `database/ddl/v4/` — ordered delta migrations applied on top of the baseline (002–056+)
+- `database/ddl/hivecentral/` — hiveCentral control-plane DDL (000–015+)
+
+> **Note:** `roadmap-ddl-v2.sql` and `roadmap-ddl-v2-additions.sql` are retired filenames. Do not reference them. See [P305 schema-drift ship report](docs/features/P305-schema-drift-ship-report.md) for the full delta log.
 
 DDL rules:
 
@@ -1197,3 +1245,41 @@ All PostgreSQL connection parameters **must** be read through `ConfigResolver`, 
 - `SecretKeys.PGPASSWORD` is `required: false` — pgpass/libpq are valid authentication paths
 
 This is enforced automatically — violations will fail the CI check.
+
+## §model-capability-scores — AC-10 (P1006)
+
+All entries in `roadmap_workforce.model_capability_profile` score each capability dimension on a 0–5 integer scale:
+
+| Score | Label | Meaning |
+| :---: | :--- | :--- |
+| **0** | incapable | Cannot perform the task reliably. Do not route this category here. |
+| **1** | toy | Handles trivial cases only; fails on structured/complex inputs. |
+| **2** | adequate / bounded | Functional for simple, well-scoped tasks. No complex reasoning expected. |
+| **3** | solid / structured-output | Reliable for standard work; handles structured outputs and moderate complexity. |
+| **4** | strong / general-purpose | Handles difficult tasks; strong instruction following and multi-step reasoning. |
+| **5** | best-in-class | Maximum capability in this dimension among currently active providers. |
+
+This rubric covers four scored dimensions: `reasoning_score`, `code_quality_score`, `instruction_following_score`, and (implicit) context throughput via `context_window_k`.
+
+**Rubric stability policy:** scores are only changed via a formal proposal. Ad-hoc DB edits are permitted for factual corrections (e.g. provider changes a model's context window) but require a `notes` update and `updated_at` refresh. Capability re-scoring that changes routing decisions must go through a proposal.
+
+## §task-categories — AC-16 (P1006)
+
+`roadmap.work_offer.task_category` classifies every dispatched offer into exactly one of eight categories. The resolver uses this to enforce spawn-eligibility and minimum reasoning requirements before matching agents.
+
+| Category | Spawn Required | Min Reasoning | Eligible Providers | Examples |
+| :--- | :---: | :---: | :--- | :--- |
+| `mechanical` | No | 0 | All | Linting, changelog, env audit, log tailing, boilerplate |
+| `workspace` | No | 0 | All incl. copilot/gemini | File management, branch cleanup, migration slot check |
+| `liaison` | No | 0 | All incl. copilot/gemini | Status pings, message routing, notification relay |
+| `testing` | **Yes** | 0 | anthropic, codex | Unit/integration test runs, coverage analysis |
+| `implementation` | **Yes** | 0 | anthropic, codex | Feature coding, bug fixes, migration authoring |
+| `analysis` | **Yes** | 0 | anthropic, codex | Data analysis, cost modelling, dependency mapping |
+| `architecture` | **Yes** | **5** | anthropic (opus only) | Design review, AC authorship, system decomposition |
+| `review` | **Yes** | **5** | anthropic (opus only) | Gate decisions, D1–D4 verdicts, spec coherence checks |
+
+**Spawn Required** means the provider must have `can_spawn_workers = true` in `model_capability_profile`. Copilot and Gemini are excluded for all spawn-required categories regardless of cost tier.
+
+**Min Reasoning = 5** means only models with `reasoning_score = 5` are eligible. In the current seed data this is `claude-opus-4-7` (anthropic) only.
+
+Default value for new offers: `'mechanical'` — safe for any provider.

@@ -1,8 +1,8 @@
 # P080: Cryptographic Agent Identity Gap — Ship Report
 
 **Phase:** COMPLETE (gap-identification)
-**Date:** 2026-05-04
-**Documenter:** worker-15721 (claude/agency-bot)
+**Date:** 2026-05-04 (reviewed 2026-05-12)
+**Documenter:** worker-15721 (claude/agency-bot); reviewed by ccs46ant-bot-docum-a
 **Type:** Issue / Security Gap Analysis
 **Status:** ✅ All 22 ACs verified — P080 closed
 
@@ -166,14 +166,36 @@ Before accepting any cross-instance proposal or message:
 
 | File | Role |
 |------|------|
-| `src/core/identity/agent-identity.ts` | Ed25519 key gen, JWT issuance/verification, signatures, rotation |
+| `src/core/identity/agent-identity.ts` | Ed25519 key gen, token issuance/verification, signatures, rotation |
+| `src/core/identity/principal-identity.ts` | Unified principal identity model (P472): OAuth/Ed25519/HMAC credential flows, key rotation, cache invalidation via pg_notify |
+| `src/core/identity/principal-verifier.ts` | MCP auth middleware (P472): verifies McpAuthEnvelope per principal kind; `buildMcpAuthMiddleware()` wraps it for handler use |
 | `src/core/infrastructure/federation-pki.ts` | Internal CA, mTLS, host registry, cert rotation |
 | `src/core/identity/agent-registry/registry.ts` | Registry CRUD — target for `public_key` integration |
 | `scripts/migrations/018-agent-registry-crypto-identity.sql` | Schema migration for `public_key` + `key_rotated_at` |
 
 ---
 
-## 10. Unblocks
+## 10. Implementation Divergence (2026-05-12 review)
+
+The MCP authentication middleware that shipped is **P472 (`principal-verifier.ts`)**, not the simpler JWT-only model described in P080's original design section. Key differences from the P080 design:
+
+| Dimension | P080 Design | Actual Implementation (P472) |
+|-----------|-------------|------------------------------|
+| Auth envelope | `Authorization: Bearer <Ed25519-JWT>` | `McpAuthEnvelope { principal_id, credential, signed_payload?, spawn_context? }` |
+| Credential flows | Single (Ed25519 JWT) | Three: OAuth bearer (operators), Ed25519 sig (agencies), HMAC session (agents) |
+| Token TTL | 30 min JWT | Operator bearers are HMAC-signed w/ expiry; agent HMAC tokens are per-spawn |
+| Identity store | `agent_registry.public_key` | Separate `principal_identity` table via `PrincipalIdentityStore` |
+| Chain walk | Not defined | P208 chain: agent → parent agency → public key for verification |
+
+P472 satisfies the spirit of AC-3 through AC-5 and AC-13 through AC-15 with a richer, three-tier model. Any future audit of those ACs should reference `principal-verifier.ts`.
+
+### Schema Discrepancy
+
+Migration 018 targets `roadmap.agent_registry` (via `SET search_path TO roadmap`), but `registry.ts` queries `roadmap_workforce.agent_registry`. If migration 018 was run as written, the `public_key` and `key_rotated_at` columns were added to the **`roadmap` schema table**, not the `roadmap_workforce` schema table that the application actually reads. SEC-CHILD-051 developers must verify which schema table is authoritative and re-run the ALTER TABLE against `roadmap_workforce.agent_registry` if needed.
+
+---
+
+## 11. Unblocks
 
 - **P068 (Federation)** — can proceed once SEC-CHILD-051 + SEC-CHILD-056 are complete.
 - Any audit/accountability feature that relies on verifiable agent attribution.

@@ -1,0 +1,19 @@
+[Unit]
+Description=PgBouncer provisioner — watches tenant_db_provisioned NOTIFY and reloads PgBouncer (AgentHive P499 AC-2)
+After=postgresql.service pgbouncer.service network.target
+Wants=postgresql.service pgbouncer.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/data/code/AgentHive
+EnvironmentFile=/etc/agenthive/env
+ExecStart=/usr/local/bin/bun run scripts/pgbouncer/provision-pgbouncer.ts --watch
+Restart=always
+RestartSec=10s
+TimeoutStartSec=30s
+TimeoutStopSec=15s
+
+[Install]
+WantedBy=multi-user.target

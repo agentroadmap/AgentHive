@@ -3,6 +3,7 @@ import type { McpToolHandler } from "../../types.ts";
 import { createSimpleValidatedTool } from "../../validation/tool-wrapper.ts";
 import type { JsonSchema } from "../../validation/validators.ts";
 import { PgMessagingHandlers } from "./pg-handlers.ts";
+import { DlqHandlers } from "./dlq-handlers.ts";
 import { handleMsgAck } from "./msg-ack.ts";
 import { handleMsgReply } from "./msg-reply.ts";
 import { handleMsgWaitReply } from "./msg-wait-reply.ts";
@@ -12,6 +13,14 @@ import {
 	agentCredentialDeliver,
 	agentCredentialRetrieve,
 } from "./credential-handlers.ts";
+import {
+	dlqList,
+	dlqInspect,
+	dlqReplay,
+	dlqExpire,
+	dlqStats,
+	liaisonStuckMessages,
+} from "./dlq-handlers.ts";
 
 const msgMarkReadSchema: JsonSchema = {
 	type: "object",
@@ -40,13 +49,27 @@ const msgUnreadCountSchema: JsonSchema = {
 };
 
 export function registerMessageTools(server: McpServer): void {
-	const pgHandlers = new PgMessagingHandlers(server, process.cwd());
+	// P1105: Get operator HMAC secret for bearer token verification
+	const operatorHmacSecret = (() => {
+		const envSecret = process.env.OPERATOR_HMAC_SECRET;
+		if (envSecret) {
+			try {
+				return Buffer.from(envSecret, "hex");
+			} catch {
+				console.warn("[P1105] OPERATOR_HMAC_SECRET is not valid hex; bearer verification disabled");
+				return undefined;
+			}
+		}
+		return undefined;
+	})();
+
+	const pgHandlers = new PgMessagingHandlers(server, process.cwd(), operatorHmacSecret);
 
 	const sendTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "msg_send",
 			description:
-				"Send a message to the Postgres message_ledger. ACL enforced on send (roadmap.message_acl); trust gate enforced for restricted/blocked senders. NOTE: P834 HMAC dispatch-gate verification of `provider_sig` is DESIGNED but NOT ENFORCED today — the column is accepted and stored verbatim, sig_verified stays at default 'pending', and the 5-minute replay window is not checked. Do not rely on this surface for authentication; it is delivery-only. Tracking via P834 follow-up; see drift discussion on P834.",
+				"Send a message to the Postgres message_ledger. ACL enforced on send (roadmap.message_acl); trust gate enforced for restricted/blocked senders. P1105 AC-27: user/* agents require a valid bearer token in the authorization parameter. NOTE: P834 HMAC dispatch-gate verification of `provider_sig` is DESIGNED but NOT ENFORCED today — the column is accepted and stored verbatim, sig_verified stays at default 'pending', and the 5-minute replay window is not checked. Do not rely on this surface for authentication; it is delivery-only. Tracking via P834 follow-up; see drift discussion on P834.",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -63,6 +86,12 @@ export function registerMessageTools(server: McpServer): void {
 					provider_sig: { type: "string" },
 					created_at: { type: "string" },
 					provider_sig_salt: { type: "string" },
+					authorization: { type: "string", description: "Bearer token for user/* agents (P1105 AC-27)" },
+					metadata: {
+						type: "object",
+						description: "Structured metadata persisted to message_ledger.metadata (jsonb). Read by downstream consumers — e.g. liaison-agent.bridgeTaskToOfferDispatch reads metadata.role, metadata.dispatch_role, metadata.worktree_hint, metadata.required_capabilities for offer-dispatch role overrides.",
+						additionalProperties: true,
+					},
 				},
 				required: ["from_agent", "message_content"],
 			},
@@ -80,6 +109,8 @@ export function registerMessageTools(server: McpServer): void {
 				provider_sig: { type: "string" },
 				created_at: { type: "string" },
 				provider_sig_salt: { type: "string" },
+				authorization: { type: "string" },
+				metadata: { type: "object", additionalProperties: true },
 			},
 			required: ["from_agent", "message_content"],
 		} as JsonSchema,
@@ -95,6 +126,7 @@ export function registerMessageTools(server: McpServer): void {
 				provider_sig?: string;
 				created_at?: string;
 				provider_sig_salt?: string;
+				metadata?: Record<string, unknown>;
 			}),
 	);
 
@@ -272,7 +304,7 @@ export function registerMessageTools(server: McpServer): void {
 		{
 			name: "msg_reply",
 			description:
-				"Reply to a message using correlation_id. Auto-acks the original message and notifies recipient via pg_notify.",
+				"Reply to a message using correlation_id. Auto-acks the original message and notifies recipient via pg_notify. P1105 AC-27: user/* agents require a valid bearer token in the authorization parameter.",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -292,6 +324,10 @@ export function registerMessageTools(server: McpServer): void {
 						type: "string",
 						description: "Agent identity sending the reply",
 					},
+					authorization: {
+						type: "string",
+						description: "Bearer token for user/* agents (P1105 AC-27)",
+					},
 				},
 				required: ["correlation_id", "content", "from_agent"],
 			},
@@ -303,23 +339,28 @@ export function registerMessageTools(server: McpServer): void {
 				content: { type: "string" },
 				message_type: { type: "string" },
 				from_agent: { type: "string" },
+				authorization: { type: "string" },
 			},
 			required: ["correlation_id", "content", "from_agent"],
 		} as JsonSchema,
 		async (input) =>
-			handleMsgReply(input as {
-				correlation_id: string;
-				content: string;
-				message_type?: string;
-				from_agent: string;
-			}),
+			handleMsgReply(
+				input as {
+					correlation_id: string;
+					content: string;
+					message_type?: string;
+					from_agent: string;
+					authorization?: string;
+				},
+				operatorHmacSecret,
+			),
 	);
 
 	const msgWaitReplyTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "msg_wait_reply",
 			description:
-				"Wait for a reply to a message using correlation_id. Polls every 5s with pg_notify fallback. Returns reply_message_id if a reply arrives, or timed_out: true if timeout exceeded.",
+				"Wait for a reply to a message using correlation_id. Polls every 5s with pg_notify fallback. Returns reply_message_id if a reply arrives, or timed_out: true if timeout exceeded. P1105 AC-27: user/* agents require a valid bearer token in the authorization parameter.",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -335,6 +376,10 @@ export function registerMessageTools(server: McpServer): void {
 						type: "string",
 						description: "Agent identity waiting for the reply",
 					},
+					authorization: {
+						type: "string",
+						description: "Bearer token for user/* agents (P1105 AC-27)",
+					},
 				},
 				required: ["message_id", "timeout_ms", "agent"],
 			},
@@ -345,15 +390,20 @@ export function registerMessageTools(server: McpServer): void {
 				message_id: { type: "number" },
 				timeout_ms: { type: "number" },
 				agent: { type: "string" },
+				authorization: { type: "string" },
 			},
 			required: ["message_id", "timeout_ms", "agent"],
 		} as JsonSchema,
 		async (input) =>
-			handleMsgWaitReply(input as {
-				message_id: number;
-				timeout_ms: number;
-				agent: string;
-			}),
+			handleMsgWaitReply(
+				input as {
+					message_id: number;
+					timeout_ms: number;
+					agent: string;
+					authorization?: string;
+				},
+				operatorHmacSecret,
+			),
 	);
 
 	const spawnManifestTool: McpToolHandler = createSimpleValidatedTool(
@@ -538,6 +588,243 @@ export function registerMessageTools(server: McpServer): void {
 			agentCredentialRetrieve(input as { nonce: string }),
 	);
 
+	const dlqListTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "dlq_list",
+			description:
+				"List dead-letter queue (DLQ) entries for a project. Returns id, topic_slug, dead_at, retry_count, replays, and failure_reason. Maximum 500 entries.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					project_slug: {
+						type: "string",
+						description: "Project slug / schema name",
+					},
+					topic: {
+						type: "string",
+						description: "Optional filter by topic slug",
+					},
+					limit: {
+						type: "number",
+						description: "Max entries to return (default 100, max 500)",
+					},
+				},
+				required: ["project_slug"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				project_slug: { type: "string" },
+				topic: { type: "string" },
+				limit: { type: "number" },
+			},
+			required: ["project_slug"],
+		} as JsonSchema,
+		async (input) =>
+			dlqList(input as { project_slug: string; topic?: string; limit?: number }),
+	);
+
+	const dlqInspectTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "dlq_inspect",
+			description:
+				"Inspect full details of a DLQ entry, including all columns and payload.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					project_slug: {
+						type: "string",
+						description: "Project slug / schema name",
+					},
+					dlq_id: {
+						type: "string",
+						description: "DLQ entry ID",
+					},
+				},
+				required: ["project_slug", "dlq_id"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				project_slug: { type: "string" },
+				dlq_id: { type: "string" },
+			},
+			required: ["project_slug", "dlq_id"],
+		} as JsonSchema,
+		async (input) =>
+			dlqInspect(input as { project_slug: string; dlq_id: string }),
+	);
+
+	const dlqReplayTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "dlq_replay",
+			description:
+				"Replay a DLQ message by inserting it into mMessage and removing from DLQ. Rejects if replays >= 3 unless force=true (audited).",
+			inputSchema: {
+				type: "object",
+				properties: {
+					project_slug: {
+						type: "string",
+						description: "Project slug / schema name",
+					},
+					dlq_id: {
+						type: "string",
+						description: "DLQ entry ID to replay",
+					},
+					force: {
+						type: "boolean",
+						description:
+							"Force replay even if replays >= 3. Causes audit event. Default false.",
+					},
+				},
+				required: ["project_slug", "dlq_id"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				project_slug: { type: "string" },
+				dlq_id: { type: "string" },
+				force: { type: "boolean" },
+			},
+			required: ["project_slug", "dlq_id"],
+		} as JsonSchema,
+		async (input) =>
+			dlqReplay(input as { project_slug: string; dlq_id: string; force?: boolean }),
+	);
+
+	const dlqExpireTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "dlq_expire",
+			description:
+				"Mark a DLQ entry as expired (sets expired_at timestamp). Does not delete. Rejects if already expired. Writes audit event.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					project_slug: {
+						type: "string",
+						description: "Project slug / schema name",
+					},
+					dlq_id: {
+						type: "string",
+						description: "DLQ entry ID to expire",
+					},
+					reason: {
+						type: "string",
+						description: "Reason for expiration",
+					},
+				},
+				required: ["project_slug", "dlq_id", "reason"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				project_slug: { type: "string" },
+				dlq_id: { type: "string" },
+				reason: { type: "string" },
+			},
+			required: ["project_slug", "dlq_id", "reason"],
+		} as JsonSchema,
+		async (input) =>
+			dlqExpire(input as { project_slug: string; dlq_id: string; reason: string }),
+	);
+
+	const dlqStatsTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "dlq_stats",
+			description:
+				"Get DLQ statistics grouped by failure_reason, showing total count and expired count.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					project_slug: {
+						type: "string",
+						description: "Project slug / schema name",
+					},
+				},
+				required: ["project_slug"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				project_slug: { type: "string" },
+			},
+			required: ["project_slug"],
+		} as JsonSchema,
+		async (input) => dlqStats(input as { project_slug: string }),
+	);
+
+	const liaisonStuckTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "liaison_stuck_messages",
+			description:
+				"Find liaison messages (agency.msg_default) that have not been processed and are older than threshold_days. Uses partial index for performance.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					project_slug: {
+						type: "string",
+						description: "Project slug (context only; queries system agency table)",
+					},
+					threshold_days: {
+						type: "number",
+						description: "Messages older than this many days are considered stuck (default 7)",
+					},
+				},
+				required: ["project_slug"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				project_slug: { type: "string" },
+				threshold_days: { type: "number" },
+			},
+			required: ["project_slug"],
+		} as JsonSchema,
+		async (input) =>
+			liaisonStuckMessages(
+				input as { project_slug: string; threshold_days?: number },
+			),
+	);
+
+	const msgTailTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "msg_tail",
+			description:
+				"P995: Tail recent messages to/from a named agent. Returns all messages (read + unread), " +
+				"newest first. Useful for checking what an agent has been doing. Use msg_read for unread-only.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					agent: {
+						type: "string",
+						description: "Agent identity (e.g. 'adam') to tail messages for",
+					},
+					limit: {
+						type: "number",
+						description: "Max messages to return (default 20, max 200)",
+					},
+				},
+				required: ["agent"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				agent: { type: "string" },
+				limit: { type: "number" },
+			},
+			required: ["agent"],
+		} as JsonSchema,
+		async (input) =>
+			pgHandlers.tailMessages(input as { agent: string; limit?: number }),
+	);
+
 	server.addTool(sendTool);
 	server.addTool(readTool);
 	server.addTool(markReadTool);
@@ -551,4 +838,11 @@ export function registerMessageTools(server: McpServer): void {
 	server.addTool(credentialClaimTool);
 	server.addTool(credentialDeliverTool);
 	server.addTool(credentialRetrieveTool);
+	server.addTool(dlqListTool);
+	server.addTool(dlqInspectTool);
+	server.addTool(dlqReplayTool);
+	server.addTool(dlqExpireTool);
+	server.addTool(dlqStatsTool);
+	server.addTool(liaisonStuckTool);
+	server.addTool(msgTailTool);
 }

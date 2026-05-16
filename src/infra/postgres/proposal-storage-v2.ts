@@ -757,9 +757,14 @@ export async function releaseLease(
 ): Promise<boolean> {
 	// Lazy import avoids a top-of-file import cycle during build (this
 	// storage module is also imported indirectly by the taxonomy tests).
-	const { assertValidCallerReason } = await import(
+	// Must assign to a typed const (not destructure) for TS2775 — assertion
+	// functions require the call target to have an explicit type annotation.
+	const _releaseReasons = await import(
 		"../../core/proposal/release-reasons.ts"
 	);
+	const assertValidCallerReason: (
+		r: string | undefined | null,
+	) => asserts r is string = _releaseReasons.assertValidCallerReason;
 	assertValidCallerReason(reason);
 
 	const { rowCount } = await query(

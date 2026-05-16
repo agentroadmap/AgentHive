@@ -1,6 +1,15 @@
 /**
  * P609: Per-(type × gate) gate-role resolver.
  *
+ * BOUNDARY (P909 / CONVENTIONS.md §6.0f): this file is NOT a duplicate of
+ * role-resolver.ts (P748). It owns a distinct key space and semantic layer:
+ *   - Key:   (proposal_type, gate) — e.g. ("feature", "D1")
+ *   - Table: roadmap_proposal.gate_role
+ *   - Cache: NOTIFY gate_role_changed (live invalidation)
+ *   - Stores complete agent personas (D1–D4 behavioral checklists)
+ * role-resolver.ts uses (workflow_template_id, stage, maturity) and has no
+ * gate-D1–D4 enumeration concept. Do not merge these two resolvers.
+ *
  * Resolves the agent profile for a given (proposal_type, gate) pair.
  * Two-tier lookup: DB cache → BUILTIN_FALLBACK (identical to GATE_ROLES in orchestrator.ts).
  * Two-level mutex mirrors StateNamesRegistry pattern in state-names.ts:

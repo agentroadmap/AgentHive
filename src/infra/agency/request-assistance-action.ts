@@ -175,10 +175,13 @@ async function postToRescueChannel(
   payload: AssistancePayload
 ): Promise<void> {
   try {
+    // Generate a correlation_id for this assistance request
+    const correlationId = `assistance:${request_id}`;
+
     await query(
       `INSERT INTO roadmap.message_ledger
-          (from_agent, channel, message_content, message_type, metadata)
-       VALUES ($1, $2, $3, 'notify', $4)`,
+          (from_agent, channel, message_content, message_type, metadata, correlation_id)
+       VALUES ($1, $2, $3, 'notify', $4, $5)`,
       [
         agency_id,
         `system:liaison:${agency_id}`,
@@ -188,6 +191,7 @@ async function postToRescueChannel(
           request_id: String(request_id),
           blocker_severity: payload.blocker_severity,
         }),
+        correlationId,
       ]
     );
   } catch {
@@ -204,6 +208,8 @@ export async function handleAssistanceResolve(input: {
   request_id: bigint;
   directive: string;
   try_directive?: Record<string, any>;
+  correlationId?: string;
+  replyToId?: number;
 }): Promise<void> {
   // Look up agent_identity from the assistance_request record
   const { rows } = await query<{ agent_identity: string; agency_id: string }>(
@@ -219,10 +225,13 @@ export async function handleAssistanceResolve(input: {
 
   // Send directive downlink to the subagent if identity is known
   if (record?.agent_identity) {
+    // Use provided correlation_id or generate one based on the request
+    const correlationId = input.correlationId ?? `assistance:${input.request_id}`;
+
     await query(
       `INSERT INTO roadmap.message_ledger
-          (from_agent, to_agent, message_content, message_type, metadata)
-       VALUES ('liaison', $1, $2, 'notify', $3)`,
+          (from_agent, to_agent, message_content, message_type, metadata, correlation_id, reply_to)
+       VALUES ('liaison', $1, $2, 'notify', $3, $4, $5)`,
       [
         record.agent_identity,
         input.directive,
@@ -232,6 +241,8 @@ export async function handleAssistanceResolve(input: {
           source: "operator",
           ...(input.try_directive ?? {}),
         }),
+        correlationId,
+        input.replyToId ?? null,
       ]
     );
   }

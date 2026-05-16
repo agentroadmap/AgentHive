@@ -24,6 +24,13 @@ import { query } from "../postgres/pool.ts";
 import { spawnAgent } from "../../core/orchestration/agent-spawner.ts";
 import type { SpawnResult } from "../../core/orchestration/agent-spawner.ts";
 import type { LiaisonMessage } from "./liaison-message-types.ts";
+import { sendMessage } from "./liaison-message-service.ts";
+import {
+	detectUsageLimit,
+	isLongWindow,
+	resetSecondsForSignal,
+	type UsageLimitProvider,
+} from "./usage-limit-detector.ts";
 
 export type SqlExec = (sql: string, params?: unknown[]) => Promise<unknown>;
 
@@ -41,6 +48,18 @@ export interface OfferDispatchHandlerDeps {
 	resolveWorktree?: (agencyId: string) => string;
 	/** Renewal cadence override (ms). Default: leaseTtlSeconds * 1000 / 3. */
 	renewalIntervalMs?: number;
+	/**
+	 * AC-5 / test injection: override the uplink send function used to emit
+	 * spawn_failure messages. Defaults to sendMessage from liaison-message-service.
+	 */
+	sendUplink?: typeof sendMessage;
+	/**
+	 * Hard wall-clock limit passed to spawnAgent for the CLI subprocess.
+	 * Default: SPAWN_TIMEOUT_MS env var, or 1_800_000ms (30 min).
+	 * The lease is renewed on a separate interval so the DB lease never expires
+	 * while spawn runs; this timeout is only a safety guard against hung processes.
+	 */
+	spawnTimeoutMs?: number;
 }
 
 interface OfferDispatchEnvelope {
@@ -56,9 +75,41 @@ interface OfferDispatchEnvelope {
 	lease_ttl_seconds?: number;
 	/** P914: worktree directory basename selected by the orchestrator. */
 	worktree_hint?: string | null;
+	/** P771: role_profile.id for route-policy filtering in spawnAgent. */
+	role_profile_id?: number | null;
 }
 
 const DEFAULT_LEASE_TTL_SECONDS = 60;
+
+/**
+ * Per-agency concurrent-spawn counter (per-process module-level state).
+ *
+ * Each agency runs in its own Node process; this counter tracks the number of
+ * in-flight runSpawn promises for the local agency. The threshold is read
+ * from roadmap_workforce.provider_registry.max_in_flight per offer so an
+ * operator can tune the per-agency cap via SQL without restart.
+ *
+ * Semantics (per operator policy 2026-05-14):
+ *   "Claim is calculated intention; if there is an obstacle, an agency can
+ *    regret and return the offer."
+ *
+ * When activeSpawnCount >= max_in_flight at the moment a dispatch arrives,
+ * the handler calls fn_return_work_offer (NOT fn_complete_work_offer with
+ * 'failed'). fn_return_work_offer reverts offer_status from 'claimed' to
+ * 'open', does not increment reissue_count, and emits work_offers notify so
+ * any other idle agency picks it up immediately.
+ */
+let activeSpawnCount = 0;
+
+/** @internal — reset for tests that share module state. */
+export function _resetActiveSpawnForTest(): void {
+	activeSpawnCount = 0;
+}
+
+/** @internal — peek for tests. */
+export function _activeSpawnCountForTest(): number {
+	return activeSpawnCount;
+}
 
 const defaultExec: SqlExec = (sql, params) =>
 	query(sql, params as unknown[]);
@@ -117,6 +168,54 @@ export async function handleOfferDispatch(
 		return;
 	}
 
+	// Capacity gate: if this agency is at or above its max_in_flight threshold
+	// (configured per-agency in provider_registry), return the offer instead
+	// of accepting it. fn_return_work_offer flips offer_status back to 'open',
+	// rotates the claim token, and pg_notify's the claim loop so an idle
+	// agency picks it up. No reissue penalty, no failure metric pollution.
+	const maxInFlight = await readAgencyMaxInFlight(agencyId, exec, logger);
+	if (activeSpawnCount >= maxInFlight) {
+		logger.warn(
+			`[OfferDispatchHandler] ${agencyId}: at capacity (${activeSpawnCount}/${maxInFlight}); returning offer=${payload.offer_id} role=${payload.role}`,
+		);
+		await exec(
+			`SELECT roadmap_workforce.fn_return_work_offer($1, $2, $3, $4)`,
+			[
+				payload.dispatch_id,
+				agencyId,
+				payload.claim_token,
+				`agency_at_capacity:${activeSpawnCount}/${maxInFlight}`,
+			],
+		).catch((err) => {
+			logger.error(
+				`[OfferDispatchHandler] ${agencyId}: fn_return_work_offer failed on capacity-decline:`,
+				err instanceof Error ? err.message : err,
+			);
+		});
+		return;
+	}
+
+	// Usage-limit pause: if this agency has been paused after a prior usage-
+	// limit hit, decline to spawn so the orchestrator's reissue logic routes
+	// the offer to an unpaused agency. We still must call fn_complete_work_offer
+	// so the orchestrator can see the offer is done and create a new dispatch.
+	const pausedUntil = await readAgencyPausedUntil(agencyId, exec, logger);
+	if (pausedUntil && pausedUntil.getTime() > Date.now()) {
+		logger.warn(
+			`[OfferDispatchHandler] ${agencyId}: paused until ${pausedUntil.toISOString()} (usage-limit); declining offer=${payload.offer_id} role=${payload.role}`,
+		);
+		await exec(
+			`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, $4)`,
+			[payload.dispatch_id, agencyId, payload.claim_token, "failed"],
+		).catch((err) => {
+			logger.error(
+				`[OfferDispatchHandler] ${agencyId}: fn_complete_work_offer failed on paused-decline:`,
+				err instanceof Error ? err.message : err,
+			);
+		});
+		return;
+	}
+
 	// P914: prefer the orchestrator-selected worktree from the payload;
 	// fall back to the agency's local resolver only when the dispatcher
 	// didn't supply one (older clients, test fixtures).
@@ -138,7 +237,11 @@ export async function handleOfferDispatch(
 		`[OfferDispatchHandler] ${agencyId}: spawning for offer=${payload.offer_id} role=${payload.role} (route_hint=${payload.route_hint})`,
 	);
 
-	void runSpawn({
+	const spawnTimeoutMs =
+		deps.spawnTimeoutMs ??
+		parseInt(process.env.SPAWN_TIMEOUT_MS ?? "1800000", 10);
+
+	const spawnPromise = runSpawn({
 		agencyId,
 		payload,
 		worktree,
@@ -146,14 +249,24 @@ export async function handleOfferDispatch(
 		capabilities,
 		leaseTtlSeconds,
 		renewalIntervalMs,
+		spawnTimeoutMs,
 		spawn,
 		exec,
 		logger,
+		sendUplink: deps.sendUplink ?? sendMessage,
 	}).catch((err) => {
 		logger.error(
 			`[OfferDispatchHandler] ${agencyId}: unhandled error for offer=${payload.offer_id}:`,
 			err instanceof Error ? err.message : err,
 		);
+	});
+
+	// Reserve a capacity slot. The `finally` decrements whether the spawn
+	// succeeds, fails, throws, or times out — so the counter never gets stuck
+	// above zero if runSpawn misbehaves.
+	activeSpawnCount++;
+	spawnPromise.finally(() => {
+		activeSpawnCount = Math.max(0, activeSpawnCount - 1);
 	});
 }
 
@@ -165,9 +278,11 @@ async function runSpawn(args: {
 	capabilities: string[];
 	leaseTtlSeconds: number;
 	renewalIntervalMs: number;
+	spawnTimeoutMs: number;
 	spawn: typeof spawnAgent;
 	exec: SqlExec;
 	logger: Pick<Console, "log" | "warn" | "error">;
+	sendUplink: typeof sendMessage;
 }): Promise<void> {
 	const {
 		agencyId,
@@ -177,9 +292,11 @@ async function runSpawn(args: {
 		capabilities,
 		leaseTtlSeconds,
 		renewalIntervalMs,
+		spawnTimeoutMs,
 		spawn,
 		exec,
 		logger,
+		sendUplink,
 	} = args;
 
 	const dispatchId = payload.dispatch_id as number;
@@ -201,16 +318,30 @@ async function runSpawn(args: {
 	let spawnError: Error | null = null;
 
 	try {
+		// Prefer the agency's own AGENTHIVE_AGENT_PROVIDER / AGENCY_PROVIDER env
+		// over the orchestrator-sent route_hint. The orchestrator defaults the hint
+		// to "claude" when the offer carries no provider preference, which would
+		// cause codex/gemini/copilot agencies to spawn claude processes instead of
+		// their own configured provider.
+		const agencyProvider =
+			(process.env.AGENTHIVE_AGENT_PROVIDER?.trim() ||
+				process.env.AGENCY_PROVIDER?.trim() ||
+				payload.route_hint) as never;
+
 		result = await spawn({
 			worktree,
 			task: `Execute offer ${payload.offer_id} (role: ${payload.role})`,
 			proposalId,
 			stage: payload.role,
 			capabilities,
-			provider: payload.route_hint as never,
+			provider: agencyProvider,
 			briefingId: payload.briefing_id,
-			// agentLabel intentionally omitted — agent-spawner derives the
-			// structured identity (P852) when this is undefined.
+			roleProfileId: payload.role_profile_id ?? null,
+			timeoutMs: spawnTimeoutMs,
+			// Use the agency's own name as the agent label so the spawned
+			// subprocess claims proposals as "adam", "alan", etc. rather than
+			// an auto-generated P852 structured identity string.
+			agentLabel: agencyId,
 		});
 	} catch (err) {
 		spawnError = err instanceof Error ? err : new Error(String(err));
@@ -224,10 +355,70 @@ async function runSpawn(args: {
 
 	clearInterval(renewalTimer);
 
+	// Usage-limit detection: scan spawn output for known provider limit
+	// signals (codex "hit your usage limit", claude/gemini/copilot equivalents).
+	// On detection: throttle the route AND, for long-window resets (>2h or
+	// unknown), also pause this agency in DB so it stops claiming until reset.
+	const provider =
+		(process.env.AGENTHIVE_AGENT_PROVIDER?.trim() ||
+			process.env.AGENCY_PROVIDER?.trim() ||
+			payload.route_hint) as string | undefined;
+	const limitSignal = detectUsageLimit({
+		stdout: result?.stdout,
+		stderr: result?.stderr,
+		errorMessage: spawnError?.message,
+		defaultProvider: provider,
+	});
+	if (limitSignal) {
+		const seconds = resetSecondsForSignal(limitSignal);
+		const long = isLongWindow(limitSignal);
+		logger.warn(
+			`[OfferDispatchHandler] ${agencyId}: usage-limit detected (${limitSignal.reason}); throttle ${limitSignal.provider}/${limitSignal.model} for ${seconds}s; ${long ? "PAUSE agency (long-window)" : "route-throttle only (short-window)"}`,
+		);
+		await applyThrottle(exec, limitSignal.provider, limitSignal.model, seconds, limitSignal.reason).catch(
+			(err) =>
+				logger.warn(
+					`[OfferDispatchHandler] ${agencyId}: throttle upsert failed:`,
+					err instanceof Error ? err.message : err,
+				),
+		);
+		if (long) {
+			await pauseAgency(exec, agencyId, seconds, limitSignal.reason).catch((err) =>
+				logger.warn(
+					`[OfferDispatchHandler] ${agencyId}: pauseAgency failed:`,
+					err instanceof Error ? err.message : err,
+				),
+			);
+		}
+	}
+
 	const status: "delivered" | "failed" =
 		spawnError === null && (result?.exitCode === 0 || result?.exitCode === null)
 			? "delivered"
 			: "failed";
+
+	// AC-5: emit a structured spawn_failure uplink so the orchestrator can
+	// observe the failure as an operational fact. Lifecycle is still governed
+	// mechanically by fn_complete_work_offer below; the uplink is informational.
+	if (status === "failed") {
+		sendUplink({
+			agency_id: agencyId,
+			direction: "liaison->orchestrator",
+			kind: "spawn_failure",
+			payload: {
+				dispatch_id: dispatchId,
+				offer_id: payload.offer_id,
+				role: payload.role,
+				error_message: spawnError?.message ?? `exit=${result?.exitCode ?? "n/a"}`,
+				exit_code: result?.exitCode ?? null,
+			},
+		}).catch((err) => {
+			logger.warn(
+				`[OfferDispatchHandler] ${agencyId}: spawn_failure uplink failed for offer=${payload.offer_id}:`,
+				err instanceof Error ? err.message : err,
+			);
+		});
+	}
 
 	try {
 		await exec(
@@ -243,4 +434,132 @@ async function runSpawn(args: {
 			completionErr instanceof Error ? completionErr.message : completionErr,
 		);
 	}
+}
+
+// ── Usage-limit pause helpers ─────────────────────────────────────────────────
+
+interface AgencyMetadataRow {
+	paused_until: string | null;
+}
+
+/**
+ * Look up roadmap_workforce.provider_registry.max_in_flight for the agency.
+ * Cached briefly per process to avoid hammering the DB on every dispatch.
+ * On any error (missing row, transient DB issue), defaults to 1 — strictest
+ * gate, fail-safe.
+ */
+const MAX_IN_FLIGHT_CACHE_MS = 30_000;
+let maxInFlightCache: { value: number; expiresAt: number } | null = null;
+
+/** @internal — reset for tests. */
+export function _resetMaxInFlightCacheForTest(): void {
+	maxInFlightCache = null;
+}
+
+async function readAgencyMaxInFlight(
+	agencyId: string,
+	exec: SqlExec,
+	logger: Pick<Console, "log" | "warn" | "error">,
+): Promise<number> {
+	const now = Date.now();
+	if (maxInFlightCache && maxInFlightCache.expiresAt > now) {
+		return maxInFlightCache.value;
+	}
+	try {
+		const result = (await exec(
+			`SELECT pr.max_in_flight
+			 FROM roadmap_workforce.provider_registry pr
+			 JOIN roadmap_workforce.agent_registry ar ON ar.id = pr.agency_id
+			 WHERE ar.agent_identity = $1
+			 ORDER BY pr.id DESC
+			 LIMIT 1`,
+			[agencyId],
+		)) as { rows: Array<{ max_in_flight: number }> } | undefined;
+		const value = result?.rows?.[0]?.max_in_flight ?? 1;
+		maxInFlightCache = { value, expiresAt: now + MAX_IN_FLIGHT_CACHE_MS };
+		return value;
+	} catch (err) {
+		logger.warn(
+			`[OfferDispatchHandler] ${agencyId}: readAgencyMaxInFlight failed; defaulting to 1:`,
+			err instanceof Error ? err.message : err,
+		);
+		return 1;
+	}
+}
+
+/**
+ * Read roadmap.agency.metadata->>'paused_until' for this agency. Returns null
+ * if the agency row is missing, the field is unset, or the value is not a
+ * parseable timestamp. Errors are logged but never thrown — a transient DB
+ * issue here should NOT prevent the agency from claiming work.
+ */
+async function readAgencyPausedUntil(
+	agencyId: string,
+	exec: SqlExec,
+	logger: Pick<Console, "log" | "warn" | "error">,
+): Promise<Date | null> {
+	try {
+		const result = (await exec(
+			`SELECT (metadata->>'paused_until') AS paused_until
+			 FROM roadmap.agency WHERE agency_id = $1`,
+			[agencyId],
+		)) as { rows: AgencyMetadataRow[] } | undefined;
+		const raw = result?.rows?.[0]?.paused_until;
+		if (!raw) return null;
+		const d = new Date(raw);
+		return Number.isNaN(d.getTime()) ? null : d;
+	} catch (err) {
+		logger.warn(
+			`[OfferDispatchHandler] ${agencyId}: readAgencyPausedUntil failed:`,
+			err instanceof Error ? err.message : err,
+		);
+		return null;
+	}
+}
+
+/**
+ * Upsert a row in roadmap.host_model_route_throttle. Pure observability +
+ * forward-compat: postWorkOffer reads this when it has a model in hand, and
+ * any operator query against this table sees the live throttle state.
+ */
+async function applyThrottle(
+	exec: SqlExec,
+	provider: UsageLimitProvider | string,
+	model: string,
+	seconds: number,
+	reason: string,
+): Promise<void> {
+	await exec(
+		`INSERT INTO roadmap.host_model_route_throttle (provider, model, throttled_until, reason)
+		 VALUES ($1, $2, now() + ($3 || ' seconds')::interval, $4)
+		 ON CONFLICT (provider, model) DO UPDATE
+		   SET throttled_until = GREATEST(host_model_route_throttle.throttled_until, EXCLUDED.throttled_until),
+		       reason          = EXCLUDED.reason,
+		       updated_at      = clock_timestamp()`,
+		[provider, model, String(seconds), reason],
+	);
+}
+
+/**
+ * Set roadmap.agency.metadata.paused_until = now() + seconds. The pause is
+ * checked at the top of handleOfferDispatch so the agency declines to spawn
+ * any new offer until the timestamp passes. The pause clears itself naturally
+ * (the next offer-dispatch sees the past timestamp and proceeds).
+ */
+async function pauseAgency(
+	exec: SqlExec,
+	agencyId: string,
+	seconds: number,
+	reason: string,
+): Promise<void> {
+	await exec(
+		`UPDATE roadmap.agency
+		    SET metadata = metadata || jsonb_build_object(
+		                     'paused_until', to_jsonb((now() + ($2 || ' seconds')::interval)::text),
+		                     'pause_reason', to_jsonb($3::text),
+		                     'paused_at',    to_jsonb(now()::text)
+		                   )
+		  WHERE agency_id = $1`,
+		[agencyId, String(seconds), reason],
+	);
 }

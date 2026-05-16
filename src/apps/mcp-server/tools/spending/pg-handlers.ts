@@ -963,3 +963,158 @@ export function resetModelListCacheForTest(): void {
 	modelListCache.clear();
 	_cacheHitTotal = 0;
 }
+
+// ─── P1004: Agent usage snapshot ─────────────────────────────────────────────
+
+export interface UsageSnapshot {
+	provider: string;
+	agent_identity: string;
+	model_name?: string | null;
+	session_id: string | null;
+	tokens_in: number | null;
+	tokens_out: number | null;
+	cache_creation_tokens: number;
+	cache_read_tokens: number;
+	quota_remaining: number | null;
+	quota_limit: number | null;
+	quota_reset_at: Date | null;
+	cost_usd_estimate: number | null;
+	raw_headers: Record<string, unknown> | null;
+}
+
+/**
+ * P1004 AC3: Returns the latest quota snapshot for the given provider,
+ * or null if no snapshot exists. Used by agent-spawner pre-spawn check.
+ */
+export async function getLatestQuotaSnapshot(
+	provider: string,
+): Promise<Pick<UsageSnapshot, "provider" | "quota_remaining" | "quota_limit" | "quota_reset_at"> | null> {
+	const { rows } = await query<{
+		provider: string;
+		quota_remaining: number | null;
+		quota_limit: number | null;
+		quota_reset_at: Date | null;
+	}>(
+		`SELECT provider, quota_remaining, quota_limit, quota_reset_at
+		 FROM   roadmap_workforce.agent_usage_snapshot
+		 WHERE  provider = $1
+		   AND  quota_remaining IS NOT NULL
+		 ORDER  BY recorded_at DESC
+		 LIMIT  1`,
+		[provider],
+	);
+	return rows[0] ?? null;
+}
+
+/**
+ * P1004: Report a usage snapshot from an agent subprocess.
+ * Inserts into agent_usage_snapshot; the AFTER INSERT trigger handles pg_notify.
+ */
+export async function reportAgentUsage(args: {
+	provider: string;
+	agent_identity: string;
+	model_name?: string;
+	session_id?: string;
+	tokens_in?: number;
+	tokens_out?: number;
+	cache_creation_tokens?: number;
+	cache_read_tokens?: number;
+	quota_remaining?: number;
+	quota_limit?: number;
+	quota_reset_at?: string;
+	cost_usd_estimate?: number;
+	raw_headers?: Record<string, unknown>;
+}): Promise<CallToolResult> {
+	try {
+		// If the agent did not supply a cost estimate but provided token counts
+		// and a model_name, attempt to compute a best-effort estimate from
+		// model_metadata.cost_per_million_* pricing. This helps CLIs like
+		// 'gh copilot' which do not return billing headers.
+		let computedCost: number | null = args.cost_usd_estimate ?? null;
+		try {
+			if (
+				computedCost === null &&
+				(args.tokens_in || args.tokens_out || args.cache_creation_tokens || args.cache_read_tokens) &&
+				args.model_name
+			) {
+				const { rows: metaRows } = await query<{
+					cost_per_million_input: string | null;
+					cost_per_million_output: string | null;
+					cost_per_million_cache_write: string | null;
+					cost_per_million_cache_hit: string | null;
+				}>(
+					`SELECT cost_per_million_input, cost_per_million_output,
+					        cost_per_million_cache_write, cost_per_million_cache_hit
+					 FROM   model_metadata
+					 WHERE  model_name = $1
+					 LIMIT  1`,
+					[args.model_name],
+				);
+				const meta = metaRows[0];
+				if (meta) {
+					const inPrice = meta.cost_per_million_input ? Number(meta.cost_per_million_input) : 0;
+					const outPrice = meta.cost_per_million_output ? Number(meta.cost_per_million_output) : 0;
+					const cacheWrite = meta.cost_per_million_cache_write ? Number(meta.cost_per_million_cache_write) : 0;
+					const cacheHit = meta.cost_per_million_cache_hit ? Number(meta.cost_per_million_cache_hit) : 0;
+					const tokensIn = args.tokens_in ?? 0;
+					const tokensOut = args.tokens_out ?? 0;
+					const cacheCreate = args.cache_creation_tokens ?? 0;
+					const cacheRead = args.cache_read_tokens ?? 0;
+					const cost = (tokensIn / 1_000_000) * inPrice
+						+ (tokensOut / 1_000_000) * outPrice
+						+ (cacheCreate / 1_000_000) * cacheWrite
+						+ (cacheRead / 1_000_000) * cacheHit;
+					computedCost = Number(cost.toFixed(6));
+				}
+			}
+		} catch (err) {
+			// Non-fatal: if metadata lookup fails, proceed without computed cost.
+			computedCost = args.cost_usd_estimate ?? null;
+		}
+
+		const { rows } = await query<{ id: string; quota_remaining: number | null; quota_limit: number | null }>(
+			`INSERT INTO roadmap_workforce.agent_usage_snapshot
+			   (provider, agent_identity, session_id,
+			    tokens_in, tokens_out,
+			    cache_creation_tokens, cache_read_tokens,
+			    quota_remaining, quota_limit, quota_reset_at,
+			    cost_usd_estimate, raw_headers)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::timestamptz,$11,$12::jsonb)
+			 RETURNING id::text, quota_remaining, quota_limit`,
+			[
+				args.provider,
+				args.agent_identity,
+				args.session_id ?? null,
+				args.tokens_in ?? null,
+				args.tokens_out ?? null,
+				args.cache_creation_tokens ?? 0,
+				args.cache_read_tokens ?? 0,
+				args.quota_remaining ?? null,
+				args.quota_limit ?? null,
+				args.quota_reset_at ?? null,
+				computedCost ?? null,
+				args.raw_headers ? JSON.stringify(args.raw_headers) : null,
+			],
+		);
+
+		const row = rows[0];
+		const parts: string[] = [`Usage snapshot #${row.id} recorded (${args.provider})`];
+		if (row.quota_remaining !== null && row.quota_limit !== null && row.quota_limit > 0) {
+			const pct = Math.round((row.quota_remaining / row.quota_limit) * 100);
+			parts.push(`quota: ${row.quota_remaining}/${row.quota_limit} (${pct}% remaining)`);
+			if (pct < 20) parts.push("⚠️ budget_alert emitted");
+		}
+		if (args.cache_read_tokens) {
+			const total = (args.tokens_in ?? 0) + (args.cache_creation_tokens ?? 0) + (args.cache_read_tokens ?? 0);
+			const hitPct = total > 0 ? Math.round((args.cache_read_tokens / total) * 100) : 0;
+			parts.push(`cache_hit_ratio: ${hitPct}%`);
+		}
+		if (computedCost !== null) {
+			parts.push(`cost_usd_estimate: $${computedCost.toFixed(6)}${args.cost_usd_estimate == null ? ' (computed from model metadata)' : ''}`);
+		}
+
+		return { content: [{ type: "text", text: parts.join(" | ") }] };
+	} catch (err) {
+		return errorResult("Failed to record usage snapshot", err);
+	}
+}

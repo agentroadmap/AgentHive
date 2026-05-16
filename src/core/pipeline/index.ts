@@ -116,5 +116,4 @@ export {
 	BuilderAgent as AC4,
 };
 // P754: PipelineCron / AC5 export removed — gate-pipeline service decommissioned.
-// Dispatch is owned by the unified scanQueues() loop in scripts/orchestrator.ts.
-export { OfferProvider } from "./offer-provider.ts";
+// P299: OfferProvider removed — dispatch owned by Orchestrator.startOfferClaimLoop().

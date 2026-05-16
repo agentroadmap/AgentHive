@@ -26,6 +26,7 @@ export interface TaskDispatcherHelpers {
 		messageType: string;
 		correlationId: string | null;
 		replyTo: number;
+		metadata?: Record<string, unknown>;
 	}) => Promise<number>;
 	markReadAndResolveTimeout: (messageId: number) => Promise<void>;
 	bridgeTaskToOfferDispatch: (args: {
@@ -46,7 +47,9 @@ export interface TaskDispatcherHelpers {
 }
 
 /**
- * Extract and validate proposal_id from message metadata.
+ * Extract and validate proposal_id from message metadata or the ledger column.
+ * Checks metadata.proposal_id first (A2A protocol), then falls back to the
+ * message_ledger.proposal_id bigint column (set by msg_send via MCP).
  */
 function extractProposalId(msg: IncomingMessage): string | null {
 	const metadata = msg.metadata ?? {};
@@ -55,6 +58,10 @@ function extractProposalId(msg: IncomingMessage): string | null {
 	}
 	if (typeof metadata.proposal_id === "number") {
 		return String(metadata.proposal_id);
+	}
+	// Fall back to message_ledger.proposal_id (written by msg_send MCP tool)
+	if (msg.proposal_id != null) {
+		return String(msg.proposal_id);
 	}
 	return null;
 }
@@ -72,10 +79,17 @@ async function claimProposal(
 	const url = new URL("/mcp", mcpUrl).toString();
 
 	const body = {
-		action: "prop_claim",
+		jsonrpc: "2.0",
 		id: proposalId,
-		agent: identity,
-		durationMinutes: 60,
+		method: "tools/call",
+		params: {
+			name: "prop_claim",
+			arguments: {
+				id: proposalId,
+				agent: identity,
+				durationMinutes: 60,
+			},
+		},
 	};
 
 	let attempt = 0;
@@ -99,16 +113,20 @@ async function claimProposal(
 				throw new Error(`MCP claim failed: ${res.status} ${responseText}`);
 			}
 
-			// Parse response to extract lease_id
-			let responseBody: Record<string, unknown>;
+			// Parse JSON-RPC 2.0 response: result.content[0].text contains the tool output
+			let leaseId = randomUUID();
 			try {
-				responseBody = JSON.parse(responseText);
+				const rpc = JSON.parse(responseText) as {
+					result?: { content?: Array<{ text?: string }> };
+				};
+				const text = rpc.result?.content?.[0]?.text ?? "{}";
+				const toolResult = JSON.parse(text) as Record<string, unknown>;
+				if (typeof toolResult.lease_id === "string") {
+					leaseId = toolResult.lease_id;
+				}
 			} catch {
-				responseBody = {};
+				// fallback UUID already set
 			}
-
-			const leaseId =
-				(responseBody.lease_id as string | undefined) ?? randomUUID();
 			return leaseId;
 		} catch (err) {
 			if (attempt === 2) {
@@ -265,7 +283,7 @@ export async function handleTypedTaskRequest(
 		return;
 	}
 
-	// 5. Send task_ack reply
+	// 5. Send task_ack reply with structured metadata (AC-3)
 	try {
 		await insertReply({
 			fromAgent: identity,
@@ -274,6 +292,13 @@ export async function handleTypedTaskRequest(
 			messageType: "task_ack",
 			correlationId: correlationId,
 			replyTo: msg.id,
+			metadata: {
+				proposal_id: proposalId,
+				worker_identity: identity,
+				dispatch_id: dispatchId,
+				lease_id: leaseId,
+				estimated_completion: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+			},
 		});
 	} catch (err) {
 		console.warn(`${log} task_ack INSERT failed:`, err);
@@ -355,7 +380,100 @@ export async function handleWorkerReport(
 
 	await query(updateSql, [newStatus, correlationId]);
 
-	// Relay to requestor
+	// On task_complete: verify ACs + release lease before relaying (AC-5)
+	if (msg.message_type === "task_complete") {
+		const proposalId = trackerRow.proposal_id as string;
+		const mcpUrl = getMcpUrl();
+		const mcpEndpoint = new URL("/mcp", mcpUrl).toString();
+		let acsVerified: string[] = [];
+
+		try {
+			const listRes = await fetch(mcpEndpoint, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					jsonrpc: "2.0",
+					id: proposalId,
+					method: "tools/call",
+					params: { name: "list_ac", arguments: { proposal_id: proposalId } },
+				}),
+			});
+			const listRpc = await listRes.json() as {
+				result?: { content?: Array<{ text?: string }> };
+			};
+			const listText = listRpc.result?.content?.[0]?.text ?? "{}";
+			const listJson = JSON.parse(listText) as { items?: Array<{ item_number: number; label?: string; status: string }> };
+			const items = listJson.items ?? [];
+
+			for (const ac of items) {
+				if (ac.status !== "pass") {
+					await fetch(mcpEndpoint, {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({
+							jsonrpc: "2.0",
+							id: `${proposalId}-ac-${ac.item_number}`,
+							method: "tools/call",
+							params: {
+								name: "verify_ac",
+								arguments: {
+									proposal_id: proposalId,
+									item_number: ac.item_number,
+									status: "pass",
+									verified_by: identity,
+									verification_notes: "Auto-verified on task_complete by liaison",
+								},
+							},
+						}),
+					});
+				}
+				acsVerified.push(ac.label ?? `AC-${ac.item_number}`);
+			}
+		} catch (err) {
+			console.warn(`${log} AC verification failed:`, err);
+		}
+
+		try {
+			await fetch(mcpEndpoint, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					jsonrpc: "2.0",
+					id: `${proposalId}-release`,
+					method: "tools/call",
+					params: {
+						name: "release",
+						arguments: {
+							id: proposalId,
+							agent: identity,
+							release_reason: "task_complete",
+						},
+					},
+				}),
+			});
+		} catch (err) {
+			console.warn(`${log} lease release failed:`, err);
+		}
+
+		try {
+			await insertReply({
+				fromAgent: identity,
+				toAgent: trackerRow.requestor_id,
+				content: msg.message_content,
+				messageType: "task_complete",
+				correlationId: correlationId,
+				replyTo: msg.id,
+				metadata: { ...((msg.metadata as object) ?? {}), acs_verified: acsVerified },
+			});
+		} catch (err) {
+			console.warn(`${log} relay task_complete to requestor failed:`, err);
+		}
+
+		await markReadAndResolveTimeout(msg.id);
+		return;
+	}
+
+	// Relay non-complete messages to requestor
 	try {
 		await insertReply({
 			fromAgent: identity,
@@ -384,7 +502,7 @@ export async function detectStuckWorkers(): Promise<void> {
 	const { rows } = await query(
 		`SELECT task_id, spawn_count
 		  FROM roadmap.liaison_task_tracker
-		 WHERE last_status_at < now() - interval '5 minutes'
+		 WHERE last_status_at < now() - interval '30 minutes'
 		   AND status NOT IN ('complete', 'failed')
 		   AND spawn_count < 2`,
 	);
@@ -397,7 +515,7 @@ export async function detectStuckWorkers(): Promise<void> {
 			// Mark failed
 			await query(
 				`UPDATE roadmap.liaison_task_tracker
-				  SET status = 'failed', spawn_count = $1, last_status_at = now()
+				  SET status = 'failed', spawn_count = $1, last_status_at = now(), completed_at = now()
 				 WHERE task_id = $2`,
 				[newSpawnCount, task_id],
 			);

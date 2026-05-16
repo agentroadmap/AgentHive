@@ -1,6 +1,6 @@
 {
   "name": "agentRoadmap",
-  "version": "0.27.0",
+  "version": "0.31.0",
   "type": "module",
   "module": "src/apps/cli.ts",
   "files": [
@@ -51,11 +51,11 @@
     "vitest": "^4.1.5"
   },
   "optionalDependencies": {
-    "agent-roadmap-darwin-arm64": "0.27.0",
-    "agent-roadmap-darwin-x64": "0.27.0",
-    "agent-roadmap-linux-arm64": "0.27.0",
-    "agent-roadmap-linux-x64": "0.27.0",
-    "agent-roadmap-windows-x64": "0.27.0"
+    "agent-roadmap-darwin-arm64": "0.31.0",
+    "agent-roadmap-darwin-x64": "0.31.0",
+    "agent-roadmap-linux-arm64": "0.31.0",
+    "agent-roadmap-linux-x64": "0.31.0",
+    "agent-roadmap-windows-x64": "0.31.0"
   },
   "engines": {
     "node": ">=24.0.0"
@@ -66,6 +66,7 @@
     "lint": "biome lint --write .",
     "check": "biome check .",
     "check:types": "node node_modules/typescript/bin/tsc --noEmit",
+    "typecheck": "node node_modules/typescript/bin/tsc -p tsconfig.check.json --noEmit",
     "check:publish": "node scripts/check-publish-hygiene.mjs",
     "audit:sql": "node --import jiti/register scripts/ci/audit-sql-columns.ts",
     "audit:migrations": "bash scripts/ci/check-migration-drops.sh",

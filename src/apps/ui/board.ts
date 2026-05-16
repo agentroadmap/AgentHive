@@ -6,7 +6,7 @@ import {
 } from "../../board.ts";
 import type { StreamEvent } from "../../core/messaging/event-stream.ts";
 import { Core } from "../../core/roadmap.ts";
-import { RfcStates, HotfixStates, getView } from "../../core/workflow/state-names.ts";
+import { getView, getRegistry } from "../../core/workflow/state-names.ts";
 import type { Directive, Proposal } from "../../shared/types/index.ts";
 import { collectAvailableLabels } from "../../shared/utils/label-filter.ts";
 import {
@@ -67,175 +67,204 @@ type ColumnView = {
 	box: BoxInterface;
 };
 
-export type WorkflowViewKey = "all" | "rfc" | "hotfix" | "obsolete";
-
-export interface WorkflowViewDefinition {
-	key: WorkflowViewKey;
-	label: string;
-	description: string;
-	proposalTypes: string[];
-	statuses: string[];
-}
-
-// Single status path in the DB: every proposal flows through DRAFT → REVIEW →
-// DEVELOP → MERGE → COMPLETE. The Hotfix tab is a type filter that re-labels
-// those columns using the Hotfix SMDL stage names — DRAFT / FIX / DEPLOYED —
-// because hotfixes don't have a meaningful Review or Merge step.
-//
-// Mapping (DB → display, hotfix view only):
-//   DRAFT, REVIEW    → DRAFT
-//   DEVELOP, MERGE   → FIX
-//   COMPLETE         → DEPLOYED
-const RFC_STATUSES_CANONICAL = [
-	RfcStates.DRAFT,
-	RfcStates.REVIEW,
-	RfcStates.DEVELOP,
-	RfcStates.MERGE,
-	RfcStates.COMPLETE,
-];
-const HOTFIX_STATUSES_CANONICAL = (() => {
-	try { return getView("Hotfix").stages.map((s) => s.name); } catch { return [] as string[]; }
-})();
-const HOTFIX_PROPOSAL_TYPES = new Set(["hotfix"]);
-const HOTFIX_DISPLAY_MAP: Record<string, string> = {
-	[RfcStates.DRAFT]: "DRAFT",
-	[RfcStates.REVIEW]: "REVIEW",
-	[RfcStates.DEVELOP]: "DEVELOP",
-	[RfcStates.MERGE]: "MERGE",
-	[RfcStates.COMPLETE]: "DEPLOYED",
-};
-
-const WORKFLOW_VIEWS: WorkflowViewDefinition[] = [
-	{
-		key: "all",
-		label: "All",
-		description: "All non-obsolete proposals",
-		proposalTypes: [],
-		statuses: [],
-	},
-	{
-		key: "rfc",
-		label: "RFC",
-		description: "Standard RFC proposals (excludes hotfix-type)",
-		proposalTypes: [],
-		statuses: [...RFC_STATUSES_CANONICAL],
-	},
-	{
-		key: "hotfix",
-		label: "Hotfix",
-		description: "Hotfix-type proposals — DRAFT / FIX / DEPLOYED columns",
-		proposalTypes: ["hotfix"],
-		statuses: [...HOTFIX_STATUSES_CANONICAL],
-	},
-	{
-		key: "obsolete",
-		label: "Obsolete",
-		description: "Archived and obsolete proposals",
-		proposalTypes: [],
-		statuses: [],
-	},
-];
-
-const WORKFLOW_BY_KEY = new Map(
-	WORKFLOW_VIEWS.map((workflow) => [workflow.key, workflow]),
-);
-
 function isObsoleteProposal(proposal: Proposal): boolean {
 	return (proposal.maturity ?? "").toLowerCase() === "obsolete";
 }
 
-function statusKey(status: string): string {
-	return status.trim().toUpperCase();
-}
-
-function statusForView(status: string, workflowKey: WorkflowViewKey): string {
-	const raw = statusKey(status);
-	if (workflowKey === "hotfix") {
-		return HOTFIX_DISPLAY_MAP[raw] ?? raw;
+export function getWorkflowViewDefinition(name: string) {
+	try {
+		return getView(name);
+	} catch {
+		return { key: name, stages: [] } as any;
 	}
-	return raw;
 }
 
-function getCombinedWorkflowStatuses(
-	proposals: Proposal[],
-	workflowKey: WorkflowViewKey,
-): string[] {
-	const canonical =
-		workflowKey === "hotfix"
-			? [...HOTFIX_STATUSES_CANONICAL]
-			: [...RFC_STATUSES_CANONICAL];
-	const extras = new Set<string>();
-	for (const proposal of proposals) {
-		const status = statusForView(proposal.status, workflowKey);
-		if (status && !canonical.includes(status)) {
-			extras.add(status);
-		}
-	}
-	return [
-		...canonical,
-		...Array.from(extras).sort((a, b) => a.localeCompare(b)),
-	];
-}
-
-export function getWorkflowViewDefinition(
-	key: WorkflowViewKey,
-): WorkflowViewDefinition {
-	return WORKFLOW_BY_KEY.get(key) ?? WORKFLOW_VIEWS[0];
-}
-
-function isHotfixProposal(proposal: Proposal): boolean {
-	const type = proposal.proposalType?.trim().toLowerCase();
-	return type ? HOTFIX_PROPOSAL_TYPES.has(type) : false;
-}
-
-export function getWorkflowViewForProposal(
-	proposal: Proposal,
-): WorkflowViewDefinition {
-	if (isObsoleteProposal(proposal)) {
-		return getWorkflowViewDefinition("obsolete");
-	}
-	if (isHotfixProposal(proposal)) {
-		return getWorkflowViewDefinition("hotfix");
-	}
-	return getWorkflowViewDefinition("rfc");
+export function getWorkflowViewForProposal(proposal: Proposal) {
+	// Hotfix proposals live in a separate cosmetic view.
+	if ((proposal.maturity ?? "").toLowerCase() === "obsolete") return { key: "obsolete" };
+	if ((proposal.proposalType ?? "").toLowerCase() === "hotfix") return { key: "hotfix" };
+	return { key: "rfc" };
 }
 
 export function filterProposalsForWorkflow(
 	proposals: Proposal[],
-	workflowKey: WorkflowViewKey,
+	workflowName: string,
 ): Proposal[] {
-	if (workflowKey === "obsolete") {
+	if (!workflowName || workflowName === "all") {
+		return proposals.filter((proposal) => !isObsoleteProposal(proposal));
+	}
+
+	if (workflowName.toLowerCase() === "obsolete") {
 		return proposals.filter((proposal) => isObsoleteProposal(proposal));
 	}
-	const live = proposals.filter((proposal) => !isObsoleteProposal(proposal));
-	if (workflowKey === "hotfix") {
-		return live.filter((proposal) => isHotfixProposal(proposal));
+
+	if (workflowName.toLowerCase() === "hotfix") {
+		// Hotfix view groups proposals by type rather than the RFC stages.
+		return proposals.filter((proposal) => (proposal.proposalType ?? "").toLowerCase() === "hotfix");
 	}
-	if (workflowKey === "rfc") {
-		return live.filter((proposal) => !isHotfixProposal(proposal));
+
+	try {
+		const view = getView(workflowName);
+		const validStages = new Set(view.stages.map((s) => s.name.toLowerCase()));
+		return proposals.filter((proposal) => {
+			const isHotfix = (proposal.proposalType ?? "").toLowerCase() === "hotfix";
+			// RFC view should exclude hotfix proposals; hotfixs are their own cosmetic view.
+			if (workflowName.toLowerCase() === "rfc" && isHotfix) return false;
+			return !isObsoleteProposal(proposal) && validStages.has(proposal.status.toLowerCase());
+		});
+	} catch {
+		// If registry/view isn't available, fall back conservatively. Ensure
+		// hotfix proposals are not included in RFC view even when registry missing.
+		if (workflowName.toLowerCase() === "rfc") {
+			return proposals.filter(
+				(proposal) => !isObsoleteProposal(proposal) && (proposal.proposalType ?? "").toLowerCase() !== "hotfix",
+			);
+		}
+		return proposals.filter((proposal) => !isObsoleteProposal(proposal));
 	}
-	// "all" — every non-obsolete proposal, hotfix and RFC alike.
-	return live;
 }
 
 export function resolveWorkflowStatuses(
 	proposals: Proposal[],
-	workflowKey: WorkflowViewKey,
+	workflowName: string,
 ): string[] {
-	const scoped = filterProposalsForWorkflow(proposals, workflowKey);
-	return getCombinedWorkflowStatuses(scoped, workflowKey);
-}
+	const wf = String(workflowName ?? "").trim();
+	const wfLower = wf.toLowerCase();
 
-function normalizeProposalsForWorkflow(
-	proposals: Proposal[],
-	workflowKey: WorkflowViewKey,
-): Proposal[] {
-	// RFC view surfaces DB-truth statuses verbatim. Hotfix view re-labels
-	// using the Hotfix SMDL stage names so columns read DRAFT/FIX/DEPLOYED.
-	return proposals.map((proposal) => ({
-		...proposal,
-		status: statusForView(proposal.status, workflowKey),
-	}));
+	// Special-case: Hotfix view is a cosmetic mapping and doesn't rely on DB when
+	// the Hotfix template isn't loaded. Use canonical hotfix labels by default.
+	if (wfLower === "hotfix") {
+		try {
+			const view = (() => {
+				try {
+					return getView("Hotfix");
+				} catch {
+					return null as any;
+				}
+			})();
+			if (view) return view.stages.map((s) => s.name.toUpperCase());
+		} catch {
+			// fall through
+		}
+		return ["TRIAGE", "FIX", "DEPLOYED", "ESCALATE", "WONT_FIX", "NON_ISSUE"];
+	}
+
+	// Prefer a canonical workflow order when showing the combined "All" view.
+	if (!wf || wfLower === "all") {
+		try {
+			const registry = getRegistry();
+			const available = registry.templateNames ?? [];
+			if (available.length > 0) {
+				try {
+					// Prefer the RFC template when available as a canonical ordering
+					const chosen =
+						available.find((n) => n.toLowerCase() === "rfc") ?? available[0];
+					const view = getView(chosen);
+					const canonical = view.stages.map((s) => s.name);
+					const present = new Set<string>();
+					for (const p of proposals) {
+						if (!isObsoleteProposal(p)) present.add(p.status);
+					}
+					const presentLower = new Set(Array.from(present).map((s) => s.toLowerCase()));
+					const lowerCanonical = new Set(canonical.map((s) => s.toLowerCase()));
+					const extras = new Set<string>();
+					for (const s of present) {
+						if (!lowerCanonical.has(s.toLowerCase())) extras.add(s);
+					}
+					// Return canonical statuses that are present (case-insensitive), followed by extras.
+					const ordered = canonical.filter((c) => presentLower.has(c.toLowerCase()));
+					return [
+						...ordered.map((s) => s.toUpperCase()),
+						...Array.from(extras)
+							.map((s) => s.toUpperCase())
+							.sort((a, b) => a.localeCompare(b)),
+					];
+				} catch {
+					// Fall through to alphabetical fallback below
+				}
+			}
+		} catch {
+			// Ignore registry errors and fall back to alphabetical
+		}
+
+		const statuses = new Set<string>();
+		for (const proposal of proposals) {
+			if (!isObsoleteProposal(proposal)) {
+				statuses.add(proposal.status);
+			}
+		}
+		return Array.from(statuses)
+			.map((s) => s.toUpperCase())
+			.sort();
+	}
+
+	if (wfLower === "obsolete") {
+		const statuses = new Set<string>();
+		for (const proposal of proposals) {
+			if (isObsoleteProposal(proposal)) {
+				statuses.add(proposal.status);
+			}
+		}
+		return Array.from(statuses).map((s) => s.toUpperCase()).sort();
+	}
+
+	try {
+		let view: any = null;
+		try {
+			view = getView(workflowName);
+		} catch {
+			// registry/view may not be available in some runtime contexts
+			view = null;
+		}
+
+		// If the requested workflow is RFC but no view is available, fall back to canonical RFC ordering
+		if (!view && wfLower === "rfc") {
+			const rfcCanonical = [
+				"DRAFT",
+				"REVIEW",
+				"DEVELOP",
+				"MERGE",
+				"COMPLETE",
+				"BLOCKED",
+			];
+			const extras = new Set<string>();
+			const validStages = new Set(rfcCanonical.map((s) => s.toLowerCase()));
+			for (const proposal of proposals) {
+				const status = proposal.status.toLowerCase();
+				if (!isObsoleteProposal(proposal) && !validStages.has(status)) {
+					extras.add(proposal.status);
+				}
+			}
+			return [
+				...rfcCanonical,
+				...Array.from(extras).map((s) => s.toUpperCase()).sort((a, b) => a.localeCompare(b)),
+			];
+		}
+
+		const canonical = view.stages.map((s) => s.name);
+		const extras = new Set<string>();
+		const validStages = new Set(canonical.map((s) => s.toLowerCase()));
+
+		for (const proposal of proposals) {
+			const status = proposal.status.toLowerCase();
+			if (!isObsoleteProposal(proposal) && !validStages.has(status)) {
+				extras.add(proposal.status);
+			}
+		}
+
+		return [
+			...canonical.map((s) => s.toUpperCase()),
+			...Array.from(extras).map((s) => s.toUpperCase()).sort((a, b) => a.localeCompare(b)),
+		];
+	} catch {
+		const statuses = new Set<string>();
+		for (const proposal of proposals) {
+			if (!isObsoleteProposal(proposal)) {
+				statuses.add(proposal.status);
+			}
+		}
+		return Array.from(statuses).map((s) => s.toUpperCase()).sort();
+	}
 }
 
 function isCompleteStatus(status: string): boolean {
@@ -530,17 +559,70 @@ export async function renderBoardTui(
 		"Replaced",
 	];
 
-	let currentWorkflowViewIndex = 0;
-	const getCurrentWorkflowView = () =>
-		WORKFLOW_VIEWS[currentWorkflowViewIndex] ?? WORKFLOW_VIEWS[0];
-	const initialWorkflowView = getCurrentWorkflowView();
+	const os = await import("node:os");
+	const path = await import("node:path");
+	const fs = await import("node:fs");
+
+	interface BoardState {
+		workflow: string;
+		maturity: string;
+		type: string;
+	}
+
+	const boardStateFilePath = path.join(os.homedir(), ".config", "agenthive", "board-state.json");
+
+	const loadBoardState = (): BoardState => {
+		try {
+			if (fs.existsSync(boardStateFilePath)) {
+				const content = fs.readFileSync(boardStateFilePath, "utf-8");
+				const parsed = JSON.parse(content) as Partial<BoardState>;
+				return {
+					workflow: parsed.workflow ?? "",
+					maturity: parsed.maturity ?? "non-obsolete",
+					type: parsed.type ?? "",
+				};
+			}
+		} catch {
+			// Ignore parse errors, use defaults
+		}
+		return { workflow: "", maturity: "non-obsolete", type: "" };
+	};
+
+	const saveBoardState = (state: BoardState): void => {
+		try {
+			const dir = path.dirname(boardStateFilePath);
+			if (!fs.existsSync(dir)) {
+				fs.mkdirSync(dir, { recursive: true });
+			}
+			fs.writeFileSync(boardStateFilePath, JSON.stringify(state, null, 2));
+		} catch {
+			// Ignore write errors
+		}
+	};
+
+	const initialBoardState = loadBoardState();
+	let currentWorkflow = initialBoardState.workflow || "";
+	let currentMaturity = initialBoardState.maturity || "non-obsolete";
+
+	const getAvailableWorkflows = (): string[] => {
+		try {
+			return getRegistry().templateNames;
+		} catch {
+			return [];
+		}
+	};
+
+	const getWorkflowLabel = (): string => {
+		return currentWorkflow || "All";
+	};
+
 	const initialVisibleProposals = filterProposalsForWorkflow(
 		initialProposals,
-		initialWorkflowView.key,
+		currentWorkflow,
 	);
 	let currentStatuses = resolveWorkflowStatuses(
 		initialVisibleProposals,
-		initialWorkflowView.key,
+		currentWorkflow,
 	);
 	let initialColumns = prepareBoardColumns(
 		initialVisibleProposals,
@@ -552,7 +634,7 @@ export async function renderBoardTui(
 
 	await new Promise<void>((resolve) => {
 		const screen = createScreen({
-			title: `Roadmap Board - ${initialWorkflowView.label} - ${versionLabel}`,
+			title: `Roadmap Board - ${getWorkflowLabel()} - ${versionLabel}`,
 		});
 		const container = box({
 			parent: screen,
@@ -615,6 +697,7 @@ export async function renderBoardTui(
 		let filterPopupOpen = false;
 		let pendingSearchWrap: "to-first" | "to-last" | null = null;
 		let feedOnlyMode = false;
+		let currentTypeFilter = "";
 		const sharedFilters = {
 			searchQuery: options?.filters?.searchQuery ?? "",
 			priorityFilter: options?.filters?.priorityFilter ?? "",
@@ -704,11 +787,15 @@ export async function renderBoardTui(
 		};
 
 		const getVisibleWorkflowProposals = (): Proposal[] => {
-			const workflowKey = getCurrentWorkflowView().key;
-			return normalizeProposalsForWorkflow(
-				filterProposalsForWorkflow(getFilteredProposals(), workflowKey),
-				workflowKey,
-			);
+			let filtered = filterProposalsForWorkflow(getFilteredProposals(), currentWorkflow);
+
+			if (currentMaturity === "non-obsolete") {
+				filtered = filtered.filter((p) => !isObsoleteProposal(p));
+			} else if (currentMaturity && currentMaturity !== "all") {
+				filtered = filtered.filter((p) => (p.maturity ?? "").toLowerCase() === currentMaturity.toLowerCase());
+			}
+
+			return filtered;
 		};
 
 		// Move mode proposal
@@ -1367,32 +1454,32 @@ export async function renderBoardTui(
 				syncBoardAreaLayout();
 				return;
 			}
-			const workflowView = getCurrentWorkflowView();
+			const workflowLabel = getWorkflowLabel();
 			if (currentFocus === "filters") {
 				const filterFocus = filterHeader?.getCurrentFocus();
 				if (filterFocus === "search") {
 					setFooterContent(
-						` {magenta-fg}${workflowView.label}{/} | {cyan-fg}[←/→]{/} Cursor (edge=Prev/Next) | {cyan-fg}[↑/↓]{/} Back to Board | {cyan-fg}[Esc]{/} Cancel | {gray-fg}(Live search){/}`,
+						` {magenta-fg}${workflowLabel}{/} | {cyan-fg}[←/→]{/} Cursor (edge=Prev/Next) | {cyan-fg}[↑/↓]{/} Back to Board | {cyan-fg}[Esc]{/} Cancel | {gray-fg}(Live search){/}`,
 					);
 					syncBoardAreaLayout();
 					return;
 				}
 				setFooterContent(
-					` {magenta-fg}${workflowView.label}{/} | {cyan-fg}[Enter/Space]{/} Open Picker | {cyan-fg}[←/→]{/} Prev/Next | {cyan-fg}[Esc]{/} Back`,
+					` {magenta-fg}${workflowLabel}{/} | {cyan-fg}[Enter/Space]{/} Open Picker | {cyan-fg}[←/→]{/} Prev/Next | {cyan-fg}[Esc]{/} Back`,
 				);
 				syncBoardAreaLayout();
 				return;
 			}
 			if (feedOnlyMode) {
 				setFooterContent(
-					` {magenta-fg}${workflowView.label}{/} | {cyan-fg}[PgUp/PgDn]{/} Scroll | {cyan-fg}[S]{/} Board | {cyan-fg}[Tab]{/} Switch View | {cyan-fg}[q/Esc]{/} Quit`,
+					` {magenta-fg}${workflowLabel}{/} | {cyan-fg}[PgUp/PgDn]{/} Scroll | {cyan-fg}[S]{/} Board | {cyan-fg}[Tab]{/} Switch View | {cyan-fg}[q/Esc]{/} Quit`,
 				);
 				syncBoardAreaLayout();
 				return;
 			}
 			if (moveOp) {
 				setFooterContent(
-					` {magenta-fg}${workflowView.label}{/} | {green-fg}MOVE MODE{/} | {cyan-fg}[←→]{/} Change Column | {cyan-fg}[↑↓]{/} Reorder | {cyan-fg}[Enter/M]{/} Confirm | {cyan-fg}[Esc]{/} Cancel`,
+					` {magenta-fg}${workflowLabel}{/} | {green-fg}MOVE MODE{/} | {cyan-fg}[←→]{/} Change Column | {cyan-fg}[↑↓]{/} Reorder | {cyan-fg}[Enter/M]{/} Confirm | {cyan-fg}[Esc]{/} Cancel`,
 				);
 			} else {
 				const base = DEFAULT_FOOTER_CONTENT;
@@ -1404,7 +1491,7 @@ export async function renderBoardTui(
 				if (hiddenStatuses.length > 0)
 					filterIndicators.push(`{yellow-fg}~${hiddenStatuses.join(",")}{/}`);
 				const indicators = [
-					`{magenta-fg}${workflowView.label}{/}`,
+					`{magenta-fg}${workflowLabel}{/}`,
 					posIndicator,
 					...filterIndicators,
 				].filter(Boolean);
@@ -1429,11 +1516,10 @@ export async function renderBoardTui(
 		};
 
 		const renderView = () => {
-			const workflowView = getCurrentWorkflowView();
 			const visibleWorkflowProposals = getVisibleWorkflowProposals();
 			currentStatuses = resolveWorkflowStatuses(
 				visibleWorkflowProposals,
-				workflowView.key,
+				currentWorkflow,
 			);
 
 			let projectedData = getProjectedColumns(visibleWorkflowProposals, moveOp);
@@ -1456,7 +1542,7 @@ export async function renderBoardTui(
 				applyColumnData(projectedData, selectedId);
 			}
 
-			screen.title = `Roadmap Board - ${workflowView.label} - ${versionLabel}`;
+			screen.title = `Roadmap Board - ${getWorkflowLabel()} - ${versionLabel}`;
 			updateFooter();
 			screen.render();
 		};
@@ -1524,46 +1610,8 @@ export async function renderBoardTui(
 			updateFooter();
 		});
 
-		screen.key(["w", "W"], () => {
-			if (popupOpen || filterPopupOpen || moveOp) return;
-			popupOpen = true;
-			void (async () => {
-				try {
-					const currentView = getCurrentWorkflowView();
-					const selected = await openSingleSelectFilterPopup({
-						screen,
-						title: "Workflow View",
-						selectedValue: currentView.key,
-						choices: WORKFLOW_VIEWS.filter(
-							(workflow) => workflow.key !== "all",
-						).map((workflow) => ({
-							label: workflow.label,
-							value: workflow.key,
-						})),
-						helpText:
-							" {cyan-fg}[↑↓]{/} Navigate | {cyan-fg}[Enter]{/} Select | {cyan-fg}[Esc]{/} Cancel",
-					});
-					if (selected === null) {
-						return;
-					}
-					const nextIndex = WORKFLOW_VIEWS.findIndex(
-						(workflow) => workflow.key === selected,
-					);
-					if (nextIndex >= 0) {
-						currentWorkflowViewIndex = nextIndex;
-						showTransientFooter(
-							` {magenta-fg}Workflow: ${getCurrentWorkflowView().label}{/}`,
-						);
-						renderView();
-					}
-				} finally {
-					popupOpen = false;
-					screen.render();
-				}
-			})();
-		});
 
-		screen.key(["s", "S"], () => {
+		screen.key(["f", "F"], () => {
 			if (popupOpen || filterPopupOpen || moveOp || currentFocus === "filters")
 				return;
 			feedOnlyMode = !feedOnlyMode;
@@ -1581,10 +1629,10 @@ export async function renderBoardTui(
 			screen.render();
 		});
 
-		screen.key(["t", "T"], () => {
+		screen.key(["e", "E"], () => {
 			if (popupOpen || filterPopupOpen || moveOp || currentFocus === "filters")
 				return;
-			if (!feedOnlyMode) return; // t is for title edit in board mode
+			if (!feedOnlyMode) return; // e is for feed thread mode only in feed view
 			feedThreadMode = !feedThreadMode;
 			if (feedThreadMode) {
 				// Rebuild feed as threads from accumulated events
@@ -1608,9 +1656,33 @@ export async function renderBoardTui(
 			void openFilterPicker("priority");
 		});
 
-		screen.key(["f", "F"], () => {
+		screen.key(["l", "L"], () => {
 			if (popupOpen || filterPopupOpen || moveOp) return;
 			void openFilterPicker("labels");
+		});
+
+		screen.key(["s", "S"], () => {
+			if (popupOpen || filterPopupOpen || moveOp) return;
+			void openFilterPicker("status");
+		});
+
+		screen.key(["t", "T"], () => {
+			if (popupOpen || filterPopupOpen || moveOp) return;
+			void openFilterPicker("workflow");
+		});
+
+		screen.key(["w", "W"], () => {
+			if (popupOpen || filterPopupOpen || moveOp) return;
+			void openFilterPicker("workflow");
+		});
+
+		screen.key(["m"], () => {
+			if (popupOpen || filterPopupOpen || moveOp) return;
+			if (currentCol < columns.length) {
+				startMove();
+				return;
+			}
+			void openFilterPicker("maturity");
 		});
 
 		// Toggle hide empty columns
@@ -2226,16 +2298,7 @@ export async function renderBoardTui(
 			}
 		};
 
-		screen.key(["t", "T"], async () => {
-			if (feedOnlyMode) return; // t is for thread mode in feed view
-			const column = columns[currentCol];
-			if (!column) return;
-			const idx = column.list.selected ?? 0;
-			const proposal = column.proposals[idx];
-			if (proposal) await openQuickEdit(proposal, "title");
-		});
-
-		screen.key(["l", "L"], async () => {
+		screen.key(["a", "A"], async () => {
 			const column = columns[currentCol];
 			if (!column) return;
 			const idx = column.list.selected ?? 0;
@@ -2292,12 +2355,17 @@ export async function renderBoardTui(
 				return;
 			}
 
-			currentWorkflowViewIndex =
-				(currentWorkflowViewIndex + 1) % WORKFLOW_VIEWS.length;
-			showTransientFooter(
-				` {magenta-fg}Workflow: ${getCurrentWorkflowView().label}{/}`,
-			);
-			renderView();
+			const available = getAvailableWorkflows();
+			const currentIdx = currentWorkflow ? available.indexOf(currentWorkflow) : -1;
+			const nextIdx = (currentIdx + 1) % (available.length > 0 ? available.length : 1);
+			if (available.length > 0) {
+				currentWorkflow = available[nextIdx] ?? "";
+				saveBoardState({ workflow: currentWorkflow, maturity: currentMaturity, type: currentTypeFilter });
+				showTransientFooter(
+					` {magenta-fg}Workflow: ${currentWorkflow || "All"}{/}`,
+				);
+				renderView();
+			}
 			screen.render();
 			return;
 		});

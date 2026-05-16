@@ -25,6 +25,7 @@
  *   config.audit(); // Get access audit log
  */
 
+import { Client } from "pg";
 import type { Pool, PoolClient } from "pg";
 
 export type ConfigClass = "secret" | "structural" | "registry" | "flag" | "tenant_dsn";
@@ -156,7 +157,7 @@ class ConfigResolver {
 	private yamlConfig: Record<string, any> | null = null;
 	private pool: Pool | null = null;
 	private dbCache: Map<string, any> = new Map();
-	private notifySubscription: PoolClient | null = null;
+	private notifySubscription: { end(): Promise<void> } | null = null;
 
 	// Parse ~/.pgpass for a matching password entry (hostname:port:database:username:password)
 	static parsePgpassFile(
@@ -224,19 +225,44 @@ class ConfigResolver {
 
 	/**
 	 * Set up a NOTIFY listener for config change events.
+	 * P499: Uses a direct pg.Client (not PgBouncer pool) — transaction-mode
+	 * pooling drops LISTEN state between transactions. PGPORT_DIRECT bypasses
+	 * the bouncer and connects straight to Postgres on :5432.
 	 */
 	private async setupNotifyListener(): Promise<void> {
-		if (!this.pool) return;
 		try {
-			const client = await this.pool.connect();
+			const host = process.env.PGHOST ?? "127.0.0.1";
+			const port = Number(
+				process.env.PGPORT_DIRECT ?? process.env.PGPORT ?? 5432,
+			);
+			const user = process.env.PGUSER ?? "xiaomi";
+			const database = process.env.PGDATABASE ?? "agenthive";
+			const password = ConfigResolver.resolvePasswordSync({
+				host,
+				port: String(port),
+				database,
+				user,
+			});
+			const client = new Client({
+				host,
+				port,
+				user,
+				database,
+				password,
+				keepAlive: true,
+			});
+			await client.connect();
 			await client.query("LISTEN runtime_config_changed");
-			client.on("notification", async () => {
+			client.on("notification", () => {
 				this.cache.clear();
 				this.dbCache.clear();
 			});
+			client.on("error", () => {
+				this.notifySubscription = null;
+			});
 			this.notifySubscription = client;
 		} catch {
-			// Non-fatal; resolver works without notifications
+			// Non-fatal; resolver works without live config notifications
 		}
 	}
 
@@ -513,11 +539,11 @@ class ConfigResolver {
 	async cleanup(): Promise<void> {
 		if (this.notifySubscription) {
 			try {
-				await this.notifySubscription.query("UNLISTEN runtime_config_changed");
-				this.notifySubscription.release();
-				this.notifySubscription = null;
+				await this.notifySubscription.end();
 			} catch {
 				// Already closed
+			} finally {
+				this.notifySubscription = null;
 			}
 		}
 	}

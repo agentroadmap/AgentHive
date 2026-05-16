@@ -317,54 +317,6 @@ export const StructuralKeys = {
 		defaultValue: "file",
 	} satisfies ConfigKey<string>,
 
-	AGENTHIVE_TENANT_POOL_LRU_MAX: {
-		name: "AGENTHIVE_TENANT_POOL_LRU_MAX",
-		class: "structural" as const,
-		parse: (v: string) => {
-			const parsed = Number(v);
-			if (!Number.isFinite(parsed) || parsed <= 0) {
-				throw new Error(`Invalid LRU max: ${v}`);
-			}
-			return parsed;
-		},
-		required: false,
-		description: "LRU cap for tenant pool registry (P497)",
-		yamlPath: "pools.tenant_lru_max",
-		defaultValue: 16,
-	} satisfies ConfigKey<number>,
-
-	AGENTHIVE_TENANT_POOL_MAX: {
-		name: "AGENTHIVE_TENANT_POOL_MAX",
-		class: "structural" as const,
-		parse: (v: string) => {
-			const parsed = Number(v);
-			if (!Number.isFinite(parsed) || parsed <= 0) {
-				throw new Error(`Invalid pool max: ${v}`);
-			}
-			return parsed;
-		},
-		required: false,
-		description: "Per-pool size for tenant pools (P497)",
-		yamlPath: "pools.tenant_max",
-		defaultValue: 8,
-	} satisfies ConfigKey<number>,
-
-	AGENTHIVE_DRAIN_TIMEOUT_MS: {
-		name: "AGENTHIVE_DRAIN_TIMEOUT_MS",
-		class: "structural" as const,
-		parse: (v: string) => {
-			const parsed = Number(v);
-			if (!Number.isFinite(parsed) || parsed <= 0) {
-				throw new Error(`Invalid drain timeout: ${v}`);
-			}
-			return parsed;
-		},
-		required: false,
-		description: "Pool drain grace period in ms (P497)",
-		yamlPath: "pools.drain_timeout_ms",
-		defaultValue: 30000,
-	} satisfies ConfigKey<number>,
-
 	AGENTHIVE_PG_PORT: {
 		name: "AGENTHIVE_PG_PORT",
 		class: "structural" as const,

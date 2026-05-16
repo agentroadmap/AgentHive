@@ -287,6 +287,69 @@ export class PgAgentHandlers {
 	}
 
 	/**
+	 * P995: Resolve a named agent by identity or display_alias.
+	 * Returns the full registry row, including host_affinity and preferred_provider.
+	 */
+	async resolveAgent(args: {
+		name: string;
+	}): Promise<CallToolResult> {
+		try {
+			const { rows } = await query(
+				`SELECT agent_identity, agent_type, role, status, preferred_provider,
+				        host_affinity, display_alias, created_at, updated_at
+				 FROM   roadmap_workforce.agent_registry
+				 WHERE  agent_identity = $1
+				    OR  display_alias  = $1
+				 ORDER  BY (agent_identity = $1) DESC
+				 LIMIT  1`,
+				[args.name],
+			);
+
+			if (!rows.length) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{ found: false, query: args.name },
+								null,
+								2,
+							),
+						},
+					],
+				};
+			}
+
+			const r = rows[0];
+			return {
+				content: [
+					{
+						type: "text",
+						text: JSON.stringify(
+							{
+								found: true,
+								agent_identity: r.agent_identity,
+								agent_type: r.agent_type,
+								role: r.role,
+								status: r.status,
+								preferred_provider: r.preferred_provider,
+								host_affinity: r.host_affinity,
+								display_alias: r.display_alias,
+								created_at: r.created_at,
+								updated_at: r.updated_at,
+							},
+							null,
+							2,
+						),
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to resolve agent", err);
+		}
+	}
+
+	/**
 	 * P919 AC-4: Force-release a display alias from an agent.
 	 * Two paths:
 	 *   1. Clean: target row status='inactive' → always succeeds

@@ -148,9 +148,17 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 				/* best-effort — fall through to "" and let resolver handle */
 			}
 		}
+
+		// Require job capabilities matching the offer role so agencies without
+		// capabilities (auto-named ghost agents) are excluded. All named agencies
+		// have the full job list; unregistered or ghost agencies don't.
+		const requiredCaps = ROLE_TO_REQUIRED_CAPABILITIES[claim.role.toLowerCase()] ?? ["develop"];
+
 		const candidate = await this.resolveAgencyFn(
 			projectId ?? "",
 			claim.role,
+			undefined,
+			requiredCaps,
 		);
 		if (!candidate) return null;
 
@@ -234,3 +242,19 @@ function extractWorktreeHint(metadata: Record<string, unknown>): string | null {
 	const v = metadata.worktree_hint ?? metadata.worktree;
 	return typeof v === "string" && v.trim().length > 0 ? v : null;
 }
+
+// Maps dispatch role names to the minimum set of job capabilities an agency
+// must declare in capabilities.jobs. Agencies without any capabilities field
+// (auto-named ghost spawns) fail this check and are excluded from dispatch.
+const ROLE_TO_REQUIRED_CAPABILITIES: Record<string, string[]> = {
+	architect: ["design"],
+	"system-architect": ["system-design"],
+	developer: ["develop"],
+	"merge-agent": ["merge"],
+	"triage-agent": ["research"],
+	"research-agent": ["research"],
+	skeptic: ["review"],
+	"skeptic-beta": ["review"],
+	"skeptic-gamma": ["review"],
+	"skeptic-alpha": ["review"],
+};

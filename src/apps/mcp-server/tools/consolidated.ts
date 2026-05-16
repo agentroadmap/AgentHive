@@ -252,6 +252,10 @@ const documentRoutes: RouteMap = {
 	note_delete: "delete_note",
 };
 
+const schemaRoutes: RouteMap = {
+	describe: "schema_describe",
+};
+
 const opsRoutes: RouteMap = {
 	spending_set_cap: "spending_set_cap",
 	spending_log: "spending_log",
@@ -294,6 +298,17 @@ const opsRoutes: RouteMap = {
 	ref_get_term: "ref_get_term",
 	// P498: Config audit tool
 	config_audit: "config_audit",
+	// P895: Backup harness
+	backup_take: "backup_take",
+	backup_verify: "backup_verify",
+	backup_list: "backup_list",
+	// P1004: Agent cost & quota self-reporting
+	report_usage: "ops_report_usage",
+	ops_report_usage: "ops_report_usage",
+	// P499: PgBouncer operator tools
+	pgbouncer_stats: "pgbouncer_stats",
+	pgbouncer_ping: "pgbouncer_ping",
+	pgbouncer_reload: "pgbouncer_reload",
 };
 
 const projectRoutes: RouteMap = {
@@ -362,6 +377,14 @@ export function registerConsolidatedTools(server: McpServer): void {
 			"mcp_document",
 			"Consolidated document and note interface for versioned documents, search, versions, and notes.",
 			documentRoutes,
+		),
+	);
+	server.addTool(
+		createRouterTool(
+			server,
+			"mcp_schema",
+			"Schema introspection. Use this BEFORE writing migration SQL so you don't fabricate column / constraint / trigger names. action='describe' takes {table} (qualified or bare) and returns columns + CHECK constraints + triggers + indexes.",
+			schemaRoutes,
 		),
 	);
 	server.addTool(

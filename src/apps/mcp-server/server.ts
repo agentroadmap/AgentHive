@@ -1579,6 +1579,14 @@ export async function createMcpServer(
 		server.setConsolidatedToolSurface(true);
 	}
 
+	// P895: Backup harness tools
+	const { registerBackupTools } = await import("./tools/backup/index.ts");
+	registerBackupTools(server);
+
+	// P1109 Tier-1: schema introspection so build agents stop fabricating column names.
+	const { registerSchemaTools } = await import("./tools/schema/index.ts");
+	registerSchemaTools(server);
+
 	// P289: Workforce management tools (agency registration, provider registry, dispatches)
 	const workforce = await import("./tools/workforce/handlers.ts");
 	const workforceSchemas = await import("./tools/workforce/schemas.ts");
@@ -1982,6 +1990,28 @@ export async function createMcpServer(
 	});
 
 	console.error("[MCP] Registered 9 P466/P468/P475 spawn-briefing tools (liaison protocol)");
+
+	// P499: PgBouncer operator tools
+	const { PgBouncerOpsHandler } = await import("./tools/ops/pgbouncer-ops.ts");
+	const pgbouncer = new PgBouncerOpsHandler();
+	server.addTool({
+		name: "pgbouncer_stats",
+		description: "Query PgBouncer admin console: SHOW POOLS + SHOW STATS. Returns pool sizes, wait times, and per-database query statistics.",
+		inputSchema: { type: "object", properties: {} },
+		handler: () => pgbouncer.pgbouncerStats().then((r) => ({ content: [{ type: "text", text: JSON.stringify(r, null, 2) }] })),
+	});
+	server.addTool({
+		name: "pgbouncer_ping",
+		description: "Ping the PgBouncer admin console. Returns { ok, latency_ms, host, port }.",
+		inputSchema: { type: "object", properties: {} },
+		handler: () => pgbouncer.pgbouncerPing().then((r) => ({ content: [{ type: "text", text: JSON.stringify(r) }] })),
+	});
+	server.addTool({
+		name: "pgbouncer_reload",
+		description: "Send RELOAD to PgBouncer — picks up userlist.txt and pgbouncer.ini changes without dropping existing connections.",
+		inputSchema: { type: "object", properties: {} },
+		handler: () => pgbouncer.pgbouncerReload().then((r) => ({ content: [{ type: "text", text: JSON.stringify(r) }] })),
+	});
 
 	// Start background maintenance tasks
 	const MAINTENANCE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes

@@ -4,7 +4,8 @@
  */
 
 import { createHmac } from 'node:crypto';
-import { query, getPool } from '../postgres/pool.js';
+import { Client as PgClient } from 'pg';
+import { query } from '../postgres/pool.js';
 import type { LiaisonMessage, LiaisonMessageAckOutcome } from './liaison-message-types.js';
 
 // ─── Configuration ──────────────────────────────────────────────────────────
@@ -87,8 +88,7 @@ export async function storeMessage(
         FROM roadmap.agency a
         WHERE a.agency_id = $2
         ON CONFLICT (agency_id, sequence) DO UPDATE
-            SET message_id = EXCLUDED.message_id,
-                ledger_id  = COALESCE(roadmap.liaison_message.ledger_id, EXCLUDED.ledger_id),
+            SET ledger_id  = COALESCE(roadmap.liaison_message.ledger_id, EXCLUDED.ledger_id),
                 host_id    = EXCLUDED.host_id
         RETURNING
             message_id, agency_id, sequence, direction, kind, correlation_id,
@@ -209,23 +209,33 @@ export async function getMessageById(messageId: string): Promise<LiaisonMessage 
 
 /**
  * Fetch unacked messages for an agency in sequence order.
- * Used by orchestrator to catch up after restart.
+ * Used by the hub to catch up after restart.
+ *
+ * createdAfter: if set, only returns messages newer than this timestamp.
+ * Use this to bound the replay window and avoid re-triggering historical backlogs.
  */
 export async function getUnackedMessages(
     agencyId: string,
-    fromSequence?: bigint
+    fromSequence?: bigint,
+    createdAfter?: Date,
 ): Promise<LiaisonMessage[]> {
-    const whereClause = fromSequence
-        ? `WHERE agency_id = $1 AND acked_at IS NULL AND sequence >= $2`
-        : `WHERE agency_id = $1 AND acked_at IS NULL`;
+    const conditions: string[] = ['agency_id = $1', 'acked_at IS NULL'];
+    const params: unknown[] = [agencyId];
 
-    const params = fromSequence ? [agencyId, fromSequence] : [agencyId];
+    if (fromSequence !== undefined) {
+        params.push(fromSequence);
+        conditions.push(`sequence >= $${params.length}`);
+    }
+    if (createdAfter !== undefined) {
+        params.push(createdAfter);
+        conditions.push(`created_at >= $${params.length}`);
+    }
 
     const result = await query<any>(
         `SELECT message_id, agency_id, sequence, direction, kind, correlation_id,
                 payload, signed_at, signature, acked_at, ack_outcome, ack_error, created_at
          FROM roadmap.liaison_message
-         ${whereClause}
+         WHERE ${conditions.join(' AND ')}
          ORDER BY sequence ASC`,
         params
     );
@@ -568,8 +578,24 @@ async function* createMessageListener(
     agencyId: string,
     signal?: AbortSignal
 ): AsyncGenerator<LiaisonMessage> {
-    const pool = getPool();
-    const client = await pool.connect();
+    // PgBouncer in transaction mode kills LISTEN: the server backend is
+    // returned to the pool after each transaction and either reused by other
+    // clients or closed at server_idle_timeout, so notifications never reach
+    // us. Bypass PgBouncer by opening a dedicated session-mode connection
+    // direct to PostgreSQL via PGPORT_DIRECT (mirrors the pattern in
+    // pool-registry.ts:392 for the cache-eviction LISTEN client).
+    const directPort = Number(
+        process.env.PGPORT_DIRECT ?? process.env.PGPORT ?? 5432,
+    );
+    const client = new PgClient({
+        host: process.env.PGHOST ?? '127.0.0.1',
+        port: directPort,
+        user: process.env.PGUSER ?? 'admin',
+        database: process.env.PGDATABASE ?? 'agenthive',
+        password: process.env.PGPASSWORD,
+        application_name: `agenthive-listen-${agencyId}`,
+    });
+    await client.connect();
 
     const channel = LISTEN_CHANNEL_PREFIX + agencyId;
 
@@ -628,7 +654,8 @@ async function* createMessageListener(
         } catch {
             // ignore cleanup errors
         }
-        client.release();
+        // Direct pg.Client is closed via end(), not pool-style release().
+        try { await client.end(); } catch { /* ignore */ }
     }
 }
 

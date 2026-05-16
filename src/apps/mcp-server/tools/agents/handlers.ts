@@ -724,6 +724,43 @@ export class AgentPoolHandlers {
 					return `  ${emoji} ${provider}: ${count}`;
 				});
 
+			// P1004 AC6: cache efficiency from agent_usage_snapshot (last 24 h)
+			type CacheRow = {
+				total_cache_creation: string;
+				total_cache_read: string;
+				total_tokens_in: string;
+				snapshot_count: string;
+			};
+			let cacheLines: string[] = [];
+			try {
+				const { rows } = await query<CacheRow>(
+					`SELECT
+					   COALESCE(SUM(cache_creation_tokens), 0)::text AS total_cache_creation,
+					   COALESCE(SUM(cache_read_tokens),     0)::text AS total_cache_read,
+					   COALESCE(SUM(COALESCE(tokens_in,0) + cache_creation_tokens + cache_read_tokens), 0)::text AS total_tokens_in,
+					   COUNT(*)::text AS snapshot_count
+					 FROM roadmap_workforce.agent_usage_snapshot
+					 WHERE recorded_at > now() - interval '24 hours'`,
+				);
+				if (rows.length > 0) {
+					const r = rows[0];
+					const creation = Number(r.total_cache_creation);
+					const read = Number(r.total_cache_read);
+					const total = Number(r.total_tokens_in);
+					const hitRatio = total > 0 ? ((read / total) * 100).toFixed(1) : "0.0";
+					cacheLines = [
+						"",
+						"Cache Efficiency (24 h):",
+						`  Snapshots: ${r.snapshot_count}`,
+						`  Cache write tokens: ${creation.toLocaleString()}`,
+						`  Cache read tokens:  ${read.toLocaleString()}`,
+						`  Effective hit ratio: ${hitRatio}%`,
+					];
+				}
+			} catch {
+				// Table may not exist yet (pre-migration); silently omit section
+			}
+
 			return {
 				content: [
 					{
@@ -744,6 +781,7 @@ export class AgentPoolHandlers {
 							"",
 							"By Provider:",
 							...providerLines,
+							...cacheLines,
 						].join("\n"),
 					},
 				],

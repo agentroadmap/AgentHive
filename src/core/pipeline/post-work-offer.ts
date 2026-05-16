@@ -35,6 +35,21 @@ const DISPATCH_LOOP_THRESHOLD_PER_HOUR = Number(
 	process.env.AGENTHIVE_DISPATCH_LOOP_THRESHOLD ?? "6",
 );
 
+/**
+ * Global cap on alive offers (open or claimed-but-not-completed) across the
+ * whole orchestrator. The orchestrator otherwise tends to fan out 80–100 offers
+ * in seconds, exhausting agency capacity and starting Claude subprocesses that
+ * can't all complete before the next tick — burning budget on offers no one can
+ * service. With a cap, postWorkOffer becomes backpressure-aware: once the
+ * queue is full, new posts are rejected until existing offers complete via
+ * fn_complete_work_offer or fn_reap_expired_offers reissues stale leases.
+ *
+ * Override via AGENTHIVE_MAX_INFLIGHT_OFFERS env. Set to 0 to disable.
+ */
+const MAX_GLOBAL_INFLIGHT_OFFERS = Number(
+	process.env.AGENTHIVE_MAX_INFLIGHT_OFFERS ?? "20",
+);
+
 export class DispatchLoopError extends Error {
 	constructor(
 		readonly proposalId: number,
@@ -45,6 +60,18 @@ export class DispatchLoopError extends Error {
 			`postWorkOffer: circuit breaker tripped for proposal ${proposalId} role=${role} (${recentRuns} runs in last hour > threshold ${DISPATCH_LOOP_THRESHOLD_PER_HOUR}). gate_scanner_paused=true.`,
 		);
 		this.name = "DispatchLoopError";
+	}
+}
+
+export class BackpressureError extends Error {
+	constructor(
+		readonly inflight: number,
+		readonly cap: number,
+	) {
+		super(
+			`postWorkOffer: backpressure — ${inflight} offers in flight (cap=${cap}). New posts paused until existing offers complete or the reaper requeues stale leases.`,
+		);
+		this.name = "BackpressureError";
 	}
 }
 
@@ -74,6 +101,13 @@ export interface WorkOfferInput {
 	 * (proposal, status, maturity, role) already exists. Defaults to 1.
 	 */
 	dispatchVersion?: number;
+	/**
+	 * P771 role-policy: DB id of the role_profile row driving allowed/forbidden
+	 * provider filters. Stored in offer metadata and forwarded to spawnAgent by
+	 * the liaison's OfferDispatchHandler so route resolution applies the same
+	 * policy that scanQueues() would have applied on a direct spawn.
+	 */
+	roleProfileId?: number | null;
 }
 
 export interface WorkOfferResult {
@@ -123,12 +157,29 @@ export async function postWorkOffer(
 	if (input.timeoutMs) metadata.timeout_ms = input.timeoutMs;
 	if (input.worktreeHint) metadata.worktree_hint = input.worktreeHint;
 	if (input.briefingId) metadata.briefing_id = input.briefingId;
+	if (input.roleProfileId != null) metadata.role_profile_id = input.roleProfileId;
 
 	const caps = input.requiredCapabilities?.length
 		? JSON.stringify(input.requiredCapabilities)
 		: '["general"]';
 
 	const dispatchVersion = input.dispatchVersion ?? 1;
+
+	// Backpressure: refuse new offers when the global in-flight queue is full.
+	// Cheap pre-check — single COUNT against an indexed predicate. Skipped when
+	// AGENTHIVE_MAX_INFLIGHT_OFFERS=0 so ops can disable in emergencies.
+	if (MAX_GLOBAL_INFLIGHT_OFFERS > 0) {
+		const { rows: inflightRows } = await queryFn<{ count: number }>(
+			`SELECT count(*)::int AS count
+			   FROM roadmap_workforce.squad_dispatch
+			  WHERE offer_status IN ('open', 'claimed')
+			    AND completed_at IS NULL`,
+		);
+		const inflight = inflightRows[0]?.count ?? 0;
+		if (inflight >= MAX_GLOBAL_INFLIGHT_OFFERS) {
+			throw new BackpressureError(inflight, MAX_GLOBAL_INFLIGHT_OFFERS);
+		}
+	}
 
 	// Read current proposal state + project to compute the idempotency key.
 	// Source from the base table (roadmap_proposal.proposal) because the

@@ -10,7 +10,12 @@
 
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import { handleOfferDispatch, type SqlExec } from "./offer-dispatch-handler.ts";
+import {
+	_resetActiveSpawnForTest,
+	_resetMaxInFlightCacheForTest,
+	handleOfferDispatch,
+	type SqlExec,
+} from "./offer-dispatch-handler.ts";
 import type { LiaisonMessage } from "./liaison-message-types.ts";
 import type { SpawnResult } from "../../core/orchestration/agent-spawner.ts";
 
@@ -44,7 +49,7 @@ function recordingExec(): {
 	return { calls, exec };
 }
 
-test("handleOfferDispatch: spawns with capabilities and undefined agentLabel; calls fn_complete_work_offer on success", async () => {
+test("handleOfferDispatch: spawns with capabilities and agencyId as agentLabel; calls fn_complete_work_offer on success", async () => {
 	const spawnCalls: Array<Record<string, unknown>> = [];
 	const { calls: execCalls, exec } = recordingExec();
 
@@ -92,8 +97,8 @@ test("handleOfferDispatch: spawns with capabilities and undefined agentLabel; ca
 	assert.deepEqual(spawnReq.capabilities, ["review", "qa"]);
 	assert.equal(
 		spawnReq.agentLabel,
-		undefined,
-		"agentLabel must be undefined so P852 structured identity fires",
+		"claude/agency-bot",
+		"agentLabel must be the agency id so spawned subprocess claims as the named agent",
 	);
 
 	// Lifecycle assertions: only fn_complete_work_offer (orchestrator is mechanical;
@@ -231,6 +236,93 @@ test("handleOfferDispatch: missing dispatch_id or claim_token aborts before spaw
 	assert.equal(execCalls.length, 0);
 });
 
+test("handleOfferDispatch: paused agency declines spawn and completes offer as failed", async () => {
+	let spawnCalled = false;
+	const execCalls: Array<{ sql: string; params: unknown[] }> = [];
+	const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+	const exec: SqlExec = async (sql, params) => {
+		execCalls.push({ sql, params: params ?? [] });
+		if (sql.includes("FROM roadmap.agency"))
+			return { rows: [{ paused_until: future }] };
+		return { rows: [] };
+	};
+
+	const msg = makeMessage({
+		offer_id: "00000000-0000-0000-0000-000000000fff",
+		role: "develop",
+		required_capabilities: [],
+		route_hint: "claude-code",
+		dispatch_id: 99,
+		claim_token: "tok-paused",
+		lease_ttl_seconds: 60,
+	});
+
+	await handleOfferDispatch("claude/agency-bot", msg, {
+		spawn: (async () => {
+			spawnCalled = true;
+			return {} as SpawnResult;
+		}) as never,
+		exec,
+		logger: silentLogger(),
+		resolveWorktree: () => "wt",
+		renewalIntervalMs: 1_000_000,
+	});
+
+	assert.equal(spawnCalled, false, "paused agency must not spawn");
+	const completeCalls = execCalls.filter((c) =>
+		c.sql.includes("fn_complete_work_offer"),
+	);
+	assert.equal(completeCalls.length, 1, "offer completed-as-failed so reaper requeues to another agency");
+	assert.deepEqual(completeCalls[0].params, [99, "claude/agency-bot", "tok-paused", "failed"]);
+});
+
+test("handleOfferDispatch: codex usage-limit detected → throttle + pause SQL fired", async () => {
+	const execCalls: Array<{ sql: string; params: unknown[] }> = [];
+	const exec: SqlExec = async (sql, params) => {
+		execCalls.push({ sql, params: params ?? [] });
+		if (sql.includes("FROM roadmap.agency"))
+			return { rows: [{ paused_until: null }] };
+		return { rows: [] };
+	};
+
+	const fakeSpawn = async (req: Record<string, unknown>): Promise<SpawnResult> => ({
+		agentRunId: "run-codex-limit",
+		worktree: req.worktree as string,
+		exitCode: 1,
+		stdout:
+			"OpenAI Codex v0.130.0\nERROR: You've hit your usage limit. Upgrade to Pro... try again at 3:21 PM.",
+		stderr: "",
+		durationMs: 100,
+	});
+
+	const msg = makeMessage({
+		offer_id: "00000000-0000-0000-0000-00000000c0de",
+		role: "develop",
+		required_capabilities: [],
+		route_hint: "codex",
+		dispatch_id: 200,
+		claim_token: "tok-codex",
+		lease_ttl_seconds: 60,
+	});
+
+	await handleOfferDispatch("calvin", msg, {
+		spawn: fakeSpawn as never,
+		exec,
+		logger: silentLogger(),
+		resolveWorktree: () => "codex-one",
+		renewalIntervalMs: 1_000_000,
+	});
+
+	for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+
+	const throttleCalls = execCalls.filter((c) =>
+		c.sql.includes("host_model_route_throttle"),
+	);
+	assert.equal(throttleCalls.length, 1, "throttle row upserted exactly once");
+	assert.equal(throttleCalls[0].params[0], "openai");
+	assert.equal(throttleCalls[0].params[1], "gpt-5.4");
+});
+
 test("handleOfferDispatch: renewal timer fires fn_renew_lease while spawn runs", async () => {
 	let renewCount = 0;
 	const exec: SqlExec = async (sql) => {
@@ -277,4 +369,230 @@ test("handleOfferDispatch: renewal timer fires fn_renew_lease while spawn runs",
 		renewCount >= 2,
 		`expected at least 2 renewals during 250ms spawn; got ${renewCount}`,
 	);
+});
+
+// ── Single-active-spawn invariant ─────────────────────────────────────────────
+
+test("handleOfferDispatch: at-capacity agency returns offer via fn_return_work_offer (max_in_flight=1)", async () => {
+	_resetActiveSpawnForTest();
+	_resetMaxInFlightCacheForTest();
+	const execCalls: Array<{ sql: string; params: unknown[] }> = [];
+	const exec: SqlExec = async (sql, params) => {
+		execCalls.push({ sql, params: params ?? [] });
+		if (sql.includes("FROM roadmap.agency"))
+			return { rows: [{ paused_until: null }] };
+		if (sql.includes("FROM roadmap_workforce.provider_registry"))
+			return { rows: [{ max_in_flight: 1 }] };
+		return { rows: [] };
+	};
+
+	// First spawn is a deferred promise — we control when it resolves so the
+	// test process doesn't hang on a pending activeSpawn.
+	let firstSpawnResolve: (v: SpawnResult) => void = () => {};
+	const firstSpawn = (req: Record<string, unknown>): Promise<SpawnResult> =>
+		new Promise<SpawnResult>((resolve) => {
+			firstSpawnResolve = resolve;
+		});
+
+	const msg1 = makeMessage({
+		offer_id: "00000000-0000-0000-0000-aaaaaaaaaaa1",
+		role: "develop",
+		required_capabilities: [],
+		route_hint: "claude-code",
+		dispatch_id: 100,
+		claim_token: "tok-first",
+		lease_ttl_seconds: 60,
+	});
+
+	await handleOfferDispatch("alex", msg1, {
+		spawn: firstSpawn as never,
+		exec,
+		logger: silentLogger(),
+		resolveWorktree: () => "wt",
+		renewalIntervalMs: 1_000_000,
+	});
+
+	// Now a second offer arrives while the first spawn is still pending.
+	let secondSpawnCalled = false;
+	const secondSpawn = async (_req: Record<string, unknown>): Promise<SpawnResult> => {
+		secondSpawnCalled = true;
+		return {} as SpawnResult;
+	};
+
+	const msg2 = makeMessage({
+		offer_id: "00000000-0000-0000-0000-bbbbbbbbbbb2",
+		role: "develop",
+		required_capabilities: [],
+		route_hint: "claude-code",
+		dispatch_id: 200,
+		claim_token: "tok-second",
+		lease_ttl_seconds: 60,
+	});
+
+	await handleOfferDispatch("alex", msg2, {
+		spawn: secondSpawn as never,
+		exec,
+		logger: silentLogger(),
+		resolveWorktree: () => "wt",
+		renewalIntervalMs: 1_000_000,
+	});
+
+	assert.equal(secondSpawnCalled, false, "second offer must NOT trigger a spawn");
+
+	// Decline must go through fn_return_work_offer, NOT fn_complete_work_offer.
+	const completeCalls = execCalls.filter((c) =>
+		c.sql.includes("fn_complete_work_offer"),
+	);
+	assert.equal(
+		completeCalls.length,
+		0,
+		"capacity decline must NOT use fn_complete_work_offer (no failure pollution)",
+	);
+	const returnCalls = execCalls.filter((c) =>
+		c.sql.includes("fn_return_work_offer"),
+	);
+	assert.equal(returnCalls.length, 1, "exactly one fn_return_work_offer call");
+	assert.equal(returnCalls[0].params[0], 200);
+	assert.equal(returnCalls[0].params[1], "alex");
+	assert.equal(returnCalls[0].params[2], "tok-second");
+	assert.match(
+		String(returnCalls[0].params[3]),
+		/agency_at_capacity:\d+\/\d+/,
+		"reason should embed the observed count/max",
+	);
+
+	// Resolve the first spawn so its finally clears activeSpawn and the test
+	// process can exit cleanly. (Without this the runner hangs on a pending
+	// promise stored in module state.)
+	firstSpawnResolve({
+		agentRunId: "run-first",
+		worktree: "wt",
+		exitCode: 0,
+		stdout: "",
+		stderr: "",
+		durationMs: 1,
+	});
+	for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+});
+
+test("handleOfferDispatch: after spawn completes, agency accepts the NEXT offer", async () => {
+	_resetActiveSpawnForTest();
+	_resetMaxInFlightCacheForTest();
+	const execCalls: Array<{ sql: string; params: unknown[] }> = [];
+	const exec: SqlExec = async (sql, params) => {
+		execCalls.push({ sql, params: params ?? [] });
+		if (sql.includes("FROM roadmap.agency"))
+			return { rows: [{ paused_until: null }] };
+		if (sql.includes("FROM roadmap_workforce.provider_registry"))
+			return { rows: [{ max_in_flight: 1 }] };
+		return { rows: [] };
+	};
+
+	let spawn1Calls = 0;
+	const fastSpawn = async (req: Record<string, unknown>): Promise<SpawnResult> => {
+		spawn1Calls++;
+		return {
+			agentRunId: "run-fast",
+			worktree: req.worktree as string,
+			exitCode: 0,
+			stdout: "ok",
+			stderr: "",
+			durationMs: 1,
+		};
+	};
+
+	const mk = (id: number, token: string) =>
+		makeMessage({
+			offer_id: `00000000-0000-0000-0000-${id.toString().padStart(12, "0")}`,
+			role: "develop",
+			required_capabilities: [],
+			route_hint: "claude-code",
+			dispatch_id: id,
+			claim_token: token,
+			lease_ttl_seconds: 60,
+		});
+
+	await handleOfferDispatch("pablo", mk(1, "tok-1"), {
+		spawn: fastSpawn as never,
+		exec,
+		logger: silentLogger(),
+		resolveWorktree: () => "wt",
+		renewalIntervalMs: 1_000_000,
+	});
+
+	// Wait for the first spawn to settle (it's instant) + tick for finally.
+	for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+
+	await handleOfferDispatch("pablo", mk(2, "tok-2"), {
+		spawn: fastSpawn as never,
+		exec,
+		logger: silentLogger(),
+		resolveWorktree: () => "wt",
+		renewalIntervalMs: 1_000_000,
+	});
+
+	for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+
+	assert.equal(spawn1Calls, 2, "both offers should produce a spawn — the second is accepted after the first settles");
+});
+
+test("handleOfferDispatch: max_in_flight=2 allows two concurrent spawns, returns the third", async () => {
+	_resetActiveSpawnForTest();
+	_resetMaxInFlightCacheForTest();
+	const execCalls: Array<{ sql: string; params: unknown[] }> = [];
+	const exec: SqlExec = async (sql, params) => {
+		execCalls.push({ sql, params: params ?? [] });
+		if (sql.includes("FROM roadmap.agency"))
+			return { rows: [{ paused_until: null }] };
+		if (sql.includes("FROM roadmap_workforce.provider_registry"))
+			return { rows: [{ max_in_flight: 2 }] };
+		return { rows: [] };
+	};
+
+	// Deferred spawns so the first two stay active simultaneously.
+	const resolvers: Array<(v: SpawnResult) => void> = [];
+	let spawnCallCount = 0;
+	const deferredSpawn = (req: Record<string, unknown>): Promise<SpawnResult> => {
+		spawnCallCount++;
+		return new Promise<SpawnResult>((resolve) => {
+			resolvers.push(resolve);
+		});
+	};
+
+	const mk = (id: number, token: string) =>
+		makeMessage({
+			offer_id: `00000000-0000-0000-0000-${id.toString().padStart(12, "0")}`,
+			role: "develop",
+			required_capabilities: [],
+			route_hint: "claude-code",
+			dispatch_id: id,
+			claim_token: token,
+			lease_ttl_seconds: 60,
+		});
+
+	await handleOfferDispatch("pete", mk(11, "t1"), {
+		spawn: deferredSpawn as never, exec, logger: silentLogger(),
+		resolveWorktree: () => "wt", renewalIntervalMs: 1_000_000,
+	});
+	await handleOfferDispatch("pete", mk(12, "t2"), {
+		spawn: deferredSpawn as never, exec, logger: silentLogger(),
+		resolveWorktree: () => "wt", renewalIntervalMs: 1_000_000,
+	});
+	await handleOfferDispatch("pete", mk(13, "t3"), {
+		spawn: deferredSpawn as never, exec, logger: silentLogger(),
+		resolveWorktree: () => "wt", renewalIntervalMs: 1_000_000,
+	});
+
+	assert.equal(spawnCallCount, 2, "first two offers spawn; third is over capacity");
+	const returnCalls = execCalls.filter((c) =>
+		c.sql.includes("fn_return_work_offer"),
+	);
+	assert.equal(returnCalls.length, 1, "third offer returned");
+	assert.equal(returnCalls[0].params[0], 13, "the third dispatch_id was returned");
+
+	// Cleanup so the test runner can exit.
+	for (const r of resolvers) {
+		r({ agentRunId: "run", worktree: "wt", exitCode: 0, stdout: "", stderr: "", durationMs: 1 });
+	}
+	for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
 });

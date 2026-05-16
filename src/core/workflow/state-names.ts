@@ -319,6 +319,13 @@ export class StateNamesRegistry {
 	}
 
 	/**
+	 * Get list of available template names (case-insensitive display names).
+	 */
+	get templateNames(): string[] {
+		return [...this.entries.values()].map((entry) => entry.name).sort();
+	}
+
+	/**
 	 * Get the view for a workflow template (case-insensitive lookup).
 	 */
 	getView(templateName: string): WorkflowStateView {

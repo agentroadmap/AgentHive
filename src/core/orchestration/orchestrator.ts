@@ -2,8 +2,14 @@ import type { PoolClient } from "pg";
 import { closePool, getPool, query } from "../../infra/postgres/pool.ts";
 import { pulseHeartbeat } from "../../infra/pulse/heartbeat.ts";
 import { reapStaleRows } from "../pipeline/reap-stale-rows.ts";
+import {
+	BackpressureError,
+	DispatchLoopError,
+	postWorkOffer,
+} from "../pipeline/post-work-offer.ts";
 import { enqueueNotification } from "../notifications/enqueue.ts";
 import { getUnlockedGateQueue } from "../proposal/gate-scanner-v2.ts";
+import { loadStateNames } from "../workflow/state-names.ts";
 import { spawnAgent } from "./agent-spawner.ts";
 import {
 	bootCancelPokeAttempts,
@@ -31,6 +37,7 @@ import {
 	reconcileStaleDispatches,
 	reconcileStrandedAdvances,
 } from "./legacy-dispatch.ts";
+import { detectStuckWorkers } from "../../infra/agency/task-dispatcher.ts";
 
 /**
  * Unified Agent Orchestrator
@@ -310,6 +317,40 @@ export class Orchestrator {
 			}, RECONCILER_INTERVAL_MS),
 		);
 
+		console.log("[Orchestrator] detectStuckWorkers watchdog active (60s interval)");
+		this.pollTimers.set(
+			"stuck-worker-watchdog",
+			setInterval(() => {
+				if (this.stopping) return;
+				void this.trackInFlight(
+					detectStuckWorkers().catch((err) =>
+						console.error("[Orchestrator] stuck-worker watchdog failed:", err),
+					),
+				);
+			}, 60_000),
+		);
+
+		// Periodic stale-row inspection: zombie agent_runs, expired leases, stale
+		// dispatches. Runs unconditionally (not gated on ENABLE_POLLING) because
+		// zombie cleanup is maintenance, not a PG NOTIFY fallback. 5-min cadence
+		// is well below the 60-min zombie threshold so zombies are caught quickly.
+		this.pollTimers.set(
+			"stale-row-reaper",
+			setInterval(() => {
+				if (this.stopping) return;
+				void this.trackInFlight(
+					reapStaleRows(
+						getPool(),
+						{ log: (m) => console.log(m), warn: (m) => console.warn(m) },
+						"Orchestrator.Reaper",
+					).catch((err) =>
+						console.error("[Orchestrator] periodic reaper failed:", err),
+					),
+				);
+			}, 5 * 60 * 1000),
+		);
+		console.log("[Orchestrator] periodic stale-row reaper active (5-min interval)");
+
 		this.pollTimers.set(
 			"heartbeat",
 			setInterval(() => {
@@ -425,6 +466,7 @@ export class Orchestrator {
 				   JOIN roadmap_proposal.proposal p ON p.id = w.proposal_id
 				  WHERE w.completed_at IS NULL
 				    AND p.maturity IN ('new', 'active')
+				    AND p.status NOT IN ('COMPLETE')
 				    AND p.gate_scanner_paused = false
 				    AND EXISTS (
 				      SELECT 1 FROM roadmap.workflow_transitions wt
@@ -595,16 +637,38 @@ export class Orchestrator {
 	// ─── Maintenance cycle ─────────────────────────────────────────────────────
 
 	/**
-	 * Run boot-time maintenance: cancel orphaned poke attempts and reap stale
-	 * DB rows left by a prior abrupt stop. Call once before startMaintenance().
+	 * Run boot-time maintenance: load state-names registry, cancel orphaned poke
+	 * attempts, and reap stale DB rows left by a prior abrupt stop. Call once
+	 * before startMaintenance().
 	 */
 	async bootMaintenance(): Promise<void> {
+		const pool = getPool();
+
+		// Load state-names registry from DB (includes NOTIFY listener for live reloads).
+		try {
+			await loadStateNames(pool);
+			console.log("[Orchestrator] State-names registry loaded from database");
+		} catch (error) {
+			console.error("[Orchestrator] Failed to load state-names registry:", error);
+			// Non-fatal; continue without the registry
+		}
+
 		await bootCancelPokeAttempts(query, console, "Orchestrator");
 		await reapStaleRows(
-			getPool(),
+			pool,
 			{ log: (m) => console.log(m), warn: (m) => console.warn(m) },
 			"Orchestrator.Reaper",
 		);
+
+		// Boot-time offer reaper: reapStaleRows above only catches dispatches
+		// whose dispatch_status='assigned'/'active' have aged past 20m. It
+		// leaves offer_status='claimed' rows alone — those are handled by
+		// fn_reap_expired_offers, which the periodic timer runs every 60s but
+		// only AFTER startMaintenance(). Without a boot pass, the first
+		// scanQueues tick sees the in-flight cap already poisoned by orphaned
+		// claims from the prior session (observed 2026-05-14: 25 stale rows
+		// from 5h earlier blocked the cap at boot).
+		await runOfferReaper(query, console, "Orchestrator.BootReaper");
 	}
 
 	/**
@@ -656,7 +720,8 @@ export class Orchestrator {
 	 *   1. resolveQueueContext()  — enrich with workflowTemplateId + roleProfiles
 	 *   2. fetchProposalDetail()  — full RFC fields for readiness check
 	 *   3. assessReadiness()      — determines mode: gate | prep | skip
-	 *   4. spawnAgent()           — routes through 6-layer policy filter
+	 *   4. postWorkOffer()        — enqueues offer; OfferClaimLoop → OrchestratorOfferDispatcher
+	 *                               → liaison_message offer_dispatch (AC-2)
 	 *
 	 * Returns the number of proposals that were dispatched (mode ≠ skip).
 	 */
@@ -687,23 +752,43 @@ export class Orchestrator {
 				const primaryProfile = ctx.roleProfiles[0] ?? null;
 				const task = buildTaskPrompt(detail, mode, reasons);
 
-				await spawnAgent({
-					worktree: this.defaultWorktree,
-					task,
+				// AC-2: route all proposal-level dispatches through the offer
+				// dispatch pipeline (postWorkOffer → OfferClaimLoop →
+				// OrchestratorOfferDispatcher → liaison_message offer_dispatch).
+				// The liaison's OfferDispatchHandler calls spawnAgent; the
+				// orchestrator itself no longer forks CLI subprocesses for
+				// proposal execution.
+				await postWorkOffer({
 					proposalId: detail.id,
+					squadName: `P${detail.id}-${mode}`,
+					role: `${detail.displayId} (${mode})`,
+					task,
 					stage: detail.status,
-					agentLabel: `${detail.displayId} (${mode})`,
-					activity: mode === "gate" ? "reviewing" : "preparing",
-					projectId: ctx.projectId ?? undefined,
-					// Pass the DB-backed profile id when present so P771 role-policy
-					// filters (allowed_route_providers, forbidden_route_providers)
-					// reach resolveModelRoute. Builtin-fallback rows have id=null
-					// and route resolution falls through to host/project policy.
+					worktreeHint: this.defaultWorktree,
+					// P771: forward role_profile_id so the liaison applies the
+					// same route-policy filters that a direct spawnAgent call
+					// would have applied (allowed_route_providers, etc.).
 					roleProfileId: primaryProfile?.id ?? null,
 				});
 
 				dispatched++;
 			} catch (err) {
+				// Backpressure isn't a failure — it's the cap doing its job.
+				// Stop scanning this tick: if the queue is full, no point
+				// trying more candidates. They'll be picked up next tick.
+				if (err instanceof BackpressureError) {
+					console.log(
+						`[Orchestrator] scanQueues: ${err.message} stopping at proposal ${candidate.id}, dispatched=${dispatched}`,
+					);
+					break;
+				}
+				// Circuit breaker is also expected behavior — log at warn, not error.
+				if (err instanceof DispatchLoopError) {
+					console.warn(
+						`[Orchestrator] scanQueues: ${err.message}`,
+					);
+					continue;
+				}
 				console.error(
 					`[Orchestrator] scanQueues: dispatch failed for proposal ${candidate.id}:`,
 					err instanceof Error ? err.message : err,
