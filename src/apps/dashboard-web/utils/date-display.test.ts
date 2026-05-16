@@ -23,6 +23,24 @@ describe("parseStoredUtcDate", () => {
 		assert.strictEqual(parseStoredUtcDate("2026-02-31 06:01"), null);
 		assert.strictEqual(parseStoredUtcDate("not-a-date"), null);
 	});
+
+	it("parses full ISO 8601 strings as returned by PostgreSQL JSON", () => {
+		const parsed = parseStoredUtcDate("2026-02-09T06:01:45.123Z");
+		assert.notStrictEqual(parsed, null);
+		assert.strictEqual(parsed?.toISOString(), "2026-02-09T06:01:45.123Z");
+	});
+
+	it("parses ISO 8601 with timezone offset", () => {
+		const parsed = parseStoredUtcDate("2026-02-09T06:01:45+00:00");
+		assert.notStrictEqual(parsed, null);
+		assert.ok(parsed !== null && parsed.getTime() > 0);
+	});
+
+	it("returns null for null or undefined input", () => {
+		assert.strictEqual(parseStoredUtcDate(null), null);
+		assert.strictEqual(parseStoredUtcDate(undefined), null);
+		assert.strictEqual(parseStoredUtcDate(""), null);
+	});
 });
 
 describe("formatStoredUtcDateForDisplay", () => {
@@ -52,6 +70,18 @@ describe("formatStoredUtcDateForDisplay", () => {
 			formatStoredUtcDateForDisplay("not-a-date"),
 			"not-a-date",
 		);
+	});
+
+	it("formats full ISO 8601 strings with time", () => {
+		const result = formatStoredUtcDateForDisplay("2026-02-09T06:01:45.123Z");
+		// Should produce a human-readable date+time string, not the raw ISO
+		assert.ok(result.length > 0 && !result.startsWith("2026-02-09T"));
+	});
+
+	it("returns empty string for null or undefined input", () => {
+		assert.strictEqual(formatStoredUtcDateForDisplay(null), "");
+		assert.strictEqual(formatStoredUtcDateForDisplay(undefined), "");
+		assert.strictEqual(formatStoredUtcDateForDisplay(""), "");
 	});
 });
 

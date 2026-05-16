@@ -7,7 +7,8 @@ function parseIntStrict(value: string): number {
 	return Number.parseInt(value, 10);
 }
 
-export function parseStoredUtcDate(dateStr: string): Date | null {
+export function parseStoredUtcDate(dateStr: string | null | undefined): Date | null {
+	if (!dateStr) return null;
 	const normalized = dateStr.trim();
 	if (!normalized) return null;
 
@@ -70,9 +71,8 @@ export function parseStoredUtcDate(dateStr: string): Date | null {
 	return null;
 }
 
-const HAS_TIME_REGEX = /T\d{2}:\d{2}/;
-
-export function formatStoredUtcDateForDisplay(dateStr: string): string {
+export function formatStoredUtcDateForDisplay(dateStr: string | null | undefined): string {
+	if (!dateStr) return "";
 	const parsed = parseStoredUtcDate(dateStr);
 	if (!parsed) return dateStr;
 
@@ -88,9 +88,10 @@ export function formatStoredUtcDateForDisplay(dateStr: string): string {
 }
 
 export function formatStoredUtcDateForCompactDisplay(
-	dateStr: string,
+	dateStr: string | null | undefined,
 	now: Date = new Date(),
 ): string {
+	if (!dateStr) return "—";
 	const normalized = dateStr.trim();
 	if (!normalized) return "—";
 
