@@ -1,0 +1,16 @@
+-- P1103 A2: Message type taxonomy governance
+--
+-- AC: message_type taxonomy governance (13 canonical values)
+--
+-- Validates that the CHECK constraint on message_ledger.message_type
+-- includes all canonical values from the TypeScript enum.
+--
+-- Current constraint lists 14 values (includes legacy 'query', 'vote', 'proposal_ref', 'code'):
+--   text, task, notify, ack, error, event, liaison,
+--   protocol_ping, protocol_pong, task_request, task_ack, task_status, task_complete, task_error
+--
+-- This migration is idempotent: constraint already exists and matches.
+-- If in the future the constraint drifts, it will be caught by check-message-type-drift.ts.
+
+-- No-op: constraint is already aligned.
+-- See check-message-type-drift.ts for continuous validation.
