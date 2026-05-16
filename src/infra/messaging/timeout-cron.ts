@@ -1,9 +1,11 @@
 /**
  * P835: A2A Message Reliability (timeout cron, dead letter, escalation)
+ * P1122: Extend timeout-cron to DLQ-enqueue on terminal failure
  *
- * Runs two passes every 30 seconds:
+ * Runs three passes every 30 seconds:
  * 1. Escalation pass: marks messages as escalated and sends escalation notices
  * 2. Reminder pass: sends reminder messages to senders for unacked messages
+ * 3. DLQ-enqueue pass: routes terminal failures to dead letter queue
  *
  * Also handles dead letter NACKs for agent_not_found and recipient_blocked
  * during the message dispatch gate check.
@@ -30,6 +32,17 @@ interface ReminderCandidate {
 	to_agent: string;
 	message_type: string;
 	correlation_id: string | null;
+}
+
+interface DLQCandidate {
+	message_id: string;
+	from_agent: string;
+	to_agent: string | null;
+	channel: string | null;
+	message_type: string;
+	message_content: string | null;
+	read_at: string | null;
+	mtt_id: string;
 }
 
 /**
@@ -266,12 +279,106 @@ async function runReminderPass(db: Pool): Promise<void> {
 }
 
 /**
- * Run both passes: escalation first, then reminder.
+ * DLQ-enqueue pass (P1122): Routes terminal failures to dead letter queue.
+ * Criteria: tracker row has both escalated_at AND reminder_sent_at set,
+ * AND resolved_at IS NULL, AND now() > timeout_at + 30 minutes.
+ * Also confirms message is unread (read_at IS NULL) to exclude delivered messages.
+ */
+async function runDLQEnqueuePass(db: Pool): Promise<void> {
+	const logger = console;
+
+	try {
+		const result = await db.query<DLQCandidate>(
+			`SELECT
+				mtt.id as mtt_id,
+				mtt.message_id,
+				ml.from_agent,
+				ml.to_agent,
+				ml.channel,
+				ml.message_type,
+				ml.message_content,
+				ml.read_at
+			FROM   roadmap.message_timeout_tracking mtt
+			JOIN   roadmap.message_ledger ml ON ml.id = mtt.message_id
+			WHERE  mtt.escalated_at    IS NOT NULL
+			  AND  mtt.reminder_sent_at IS NOT NULL
+			  AND  mtt.resolved_at      IS NULL
+			  AND  ml.read_at           IS NULL
+			  AND  now()                > mtt.timeout_at + interval '30 minutes'
+			  AND  mtt.final_outcome    IS NULL
+			FOR UPDATE SKIP LOCKED`,
+		);
+
+		const candidates = result.rows;
+		logger.log(
+			`[TimeoutCron] DLQ-enqueue pass: found ${candidates.length} candidates`,
+		);
+
+		for (const candidate of candidates) {
+			try {
+				// Insert into dead_letter_queue
+				const dlqResult = await db.query(
+					`INSERT INTO roadmap.dead_letter_queue
+					 (original_message_id, from_agent, to_agent, channel, payload, failure_reason, retry_budget_used)
+					 VALUES ($1, $2, $3, $4, $5, 'timeout_after_retries', 0)
+					 RETURNING id`,
+					[
+						candidate.message_id,
+						candidate.from_agent,
+						candidate.to_agent,
+						candidate.channel,
+						candidate.message_content,
+					],
+				);
+
+				const dlqId = dlqResult.rows[0].id;
+
+				// Update tracker row with final_outcome
+				await db.query(
+					`UPDATE roadmap.message_timeout_tracking
+					 SET final_outcome = 'dead_lettered',
+					     resolved_at = now()
+					 WHERE id = $1`,
+					[candidate.mtt_id],
+				);
+
+				// Emit pg_notify for observers
+				await db.query(
+					`SELECT pg_notify('dlq_landing', $1)`,
+					[JSON.stringify({
+						dlq_id: dlqId,
+						message_id: candidate.message_id,
+					})],
+				);
+
+				logger.log(
+					`[TimeoutCron] DLQ-enqueue: message ${candidate.message_id} routed to DLQ (dlq_id: ${dlqId})`,
+				);
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				logger.error(
+					`[TimeoutCron] DLQ-enqueue failed for message ${candidate.message_id}: ${message}`,
+				);
+				// Continue processing remaining candidates even if one fails
+			}
+		}
+	} catch (err) {
+		logger.error(
+			`[TimeoutCron] DLQ-enqueue pass failed: ${
+				err instanceof Error ? err.message : String(err)
+			}`,
+		);
+	}
+}
+
+/**
+ * Run all three passes: escalation, reminder, then DLQ-enqueue.
  */
 export async function runTimeoutSweep(db: Pool): Promise<void> {
 	console.log("[TimeoutCron] Starting timeout sweep");
 	await runEscalationPass(db);
 	await runReminderPass(db);
+	await runDLQEnqueuePass(db);
 	console.log("[TimeoutCron] Timeout sweep complete");
 }
 
