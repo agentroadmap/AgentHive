@@ -6,14 +6,35 @@
 
 import { Command } from "commander";
 import { resolveContext } from "./common/context.ts";
-import { registerProposal } from "./commands/proposal.ts";
-import { registerWorkflow, registerState } from "./commands/workflow.ts";
 import { registerDoctor } from "./commands/doctor.ts";
 import { registerContext } from "./commands/context-cmd.ts";
-import { registerStop } from "./commands/stop.ts";
-import { registerModelProfile } from "./commands/model-profile.ts";
 import { getCliSchema, RECIPES, CLI_VERSION } from "./schema.ts";
 import { EXIT } from "./common/exit-codes.ts";
+
+// New domain modules (canonical domain architecture)
+import { register as registerProposal } from "./domains/proposal/index.ts";
+import { register as registerWorkflow } from "./domains/workflow/index.ts";
+import { register as registerDispatch } from "./domains/dispatch/index.ts";
+import { register as registerStop } from "./domains/stop/index.ts";
+import { register as registerAgency } from "./domains/agency/index.ts";
+import { register as registerWorker } from "./domains/worker/index.ts";
+import { register as registerLease } from "./domains/lease/index.ts";
+import { register as registerTrust } from "./domains/trust/index.ts";
+import { register as registerBudget } from "./domains/budget/index.ts";
+import { register as registerModel } from "./domains/model/index.ts";
+import { register as registerRoute } from "./domains/route/index.ts";
+import { register as registerProvider } from "./domains/provider/index.ts";
+import { register as registerScan } from "./domains/scan/index.ts";
+import { register as registerMcp } from "./domains/mcp/index.ts";
+import { register as registerDb } from "./domains/db/index.ts";
+import { register as registerCubic } from "./domains/cubic/index.ts";
+import { register as registerKnowledge } from "./domains/knowledge/index.ts";
+import { register as registerSystem } from "./domains/system/index.ts";
+import { register as registerMeta } from "./domains/meta/index.ts";
+import { register as registerContextPolicy } from "./domains/context-policy/index.ts";
+import { register as registerLint } from "./domains/lint/index.ts";
+import { register as registerAudit } from "./domains/audit/index.ts";
+import { register as registerProject } from "./domains/project/index.ts";
 
 const program = new Command();
 
@@ -46,17 +67,48 @@ const getContext = () => {
   });
 };
 
-// Register domain sub-commands.
-registerProposal(program, getContext);
-registerWorkflow(program, getContext);
-registerState(program, getContext);
+// ── Core lifecycle domains ────────────────────────────────────────────────────
+registerProposal(program);
+registerWorkflow(program);
+registerDispatch(program);
+registerStop(program);
+
+// ── Workforce domains ─────────────────────────────────────────────────────────
+registerAgency(program);
+registerWorker(program);
+registerLease(program);
+registerTrust(program);
+
+// ── Provider / model / routing ────────────────────────────────────────────────
+registerProvider(program);
+registerModel(program);
+registerRoute(program);
+registerBudget(program);
+registerContextPolicy(program);
+
+// ── System / ops domains ──────────────────────────────────────────────────────
+registerSystem(program);
+registerMcp(program);
+registerDb(program);
+
+// ── Quality / knowledge ───────────────────────────────────────────────────────
+registerScan(program);
+registerLint(program);
+registerAudit(program);
+registerKnowledge(program);
+
+// ── Project / workspace ───────────────────────────────────────────────────────
+registerProject(program);
+registerCubic(program);
+
+// ── Meta / discovery ─────────────────────────────────────────────────────────
+registerMeta(program);
+
+// ── Doctor + context (from commands/ — kept for backward compat) ──────────────
 registerDoctor(program, getContext);
 registerContext(program, getContext);
-registerStop(program, getContext);
-registerModelProfile(program, getContext);
 
 // Parse args early to detect --schema / --recipes before Commander tries to route.
-// We parse in two passes: first a lenient parse to catch global flags, then full parse.
 const rawArgs = process.argv.slice(2);
 
 if (rawArgs.includes("--schema")) {

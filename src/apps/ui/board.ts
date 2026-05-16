@@ -6,7 +6,7 @@ import {
 } from "../../board.ts";
 import type { StreamEvent } from "../../core/messaging/event-stream.ts";
 import { Core } from "../../core/roadmap.ts";
-import { getView, getRegistry } from "../../core/workflow/state-names.ts";
+import { RfcStates, getView } from "../../core/workflow/state-names.ts";
 import type { Directive, Proposal } from "../../shared/types/index.ts";
 import { collectAvailableLabels } from "../../shared/utils/label-filter.ts";
 import {
@@ -67,23 +67,48 @@ type ColumnView = {
 	box: BoxInterface;
 };
 
-function isObsoleteProposal(proposal: Proposal): boolean {
-	return (proposal.maturity ?? "").toLowerCase() === "obsolete";
-}
-
-export function getWorkflowViewDefinition(name: string) {
-	try {
-		return getView(name);
-	} catch {
-		return { key: name, stages: [] } as any;
+function getCombinedWorkflowStatuses(
+	proposals: Proposal[],
+	workflowKey: WorkflowViewKey,
+): string[] {
+	const canonical =
+		workflowKey === "hotfix"
+			? getHotfixStatusesCanonical()
+			: getRfcStatusesCanonical();
+	const extras = new Set<string>();
+	for (const proposal of proposals) {
+		const status = statusForView(proposal.status, workflowKey);
+		if (status && !canonical.includes(status)) {
+			extras.add(status);
+		}
 	}
+	return [
+		...canonical,
+		...Array.from(extras).sort((a, b) => a.localeCompare(b)),
+	];
 }
 
-export function getWorkflowViewForProposal(proposal: Proposal) {
-	// Hotfix proposals live in a separate cosmetic view.
-	if ((proposal.maturity ?? "").toLowerCase() === "obsolete") return { key: "obsolete" };
-	if ((proposal.proposalType ?? "").toLowerCase() === "hotfix") return { key: "hotfix" };
-	return { key: "rfc" };
+export function getWorkflowViewDefinition(
+	key: WorkflowViewKey,
+): WorkflowViewDefinition {
+	return WORKFLOW_BY_KEY.get(key) ?? WORKFLOW_VIEWS[0];
+}
+
+function isHotfixProposal(proposal: Proposal): boolean {
+	const type = proposal.proposalType?.trim().toLowerCase();
+	return type ? HOTFIX_PROPOSAL_TYPES.has(type) : false;
+}
+
+export function getWorkflowViewForProposal(
+	proposal: Proposal,
+): WorkflowViewDefinition {
+	if (isObsoleteProposal(proposal)) {
+		return getWorkflowViewDefinition("obsolete");
+	}
+	if (isHotfixProposal(proposal)) {
+		return getWorkflowViewDefinition("hotfix");
+	}
+	return getWorkflowViewDefinition("rfc");
 }
 
 export function filterProposalsForWorkflow(

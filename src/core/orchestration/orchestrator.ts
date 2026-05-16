@@ -25,19 +25,25 @@ import {
 	buildTaskPrompt,
 	fetchProposalDetail,
 } from "./readiness-resolver.ts";
+import { scanAndTransitionSilentAgencies } from "./resolvers/agency-resolver.ts";
 // P903 phase 3+4: legacy dispatch entry points live in legacy-dispatch.ts
 // (extracted from scripts/orchestrator.ts during phase 4 to break the cycle
 // between the shim and the class). P902-D will progressively pull these
 // implementations into class methods.
 import {
+	claimEnhancementRevisionReady,
+	dispatchEnhancementRevision,
 	dispatchImplicitGate,
-	drainEnhancementRevisions,
 	drainImplicitGateReady,
 	handleStateChange,
 	reconcileStaleDispatches,
 	reconcileStrandedAdvances,
 } from "./legacy-dispatch.ts";
-import { detectStuckWorkers } from "../../infra/agency/task-dispatcher.ts";
+import {
+	setProviderCooldown,
+	recordProviderSuccess,
+	type ProviderSignal,
+} from "./provider-cooldown.ts";
 
 /**
  * Unified Agent Orchestrator
@@ -93,6 +99,7 @@ const DEFAULT_SHUTDOWN_DRAIN_MS = Number(
 /** Notify channels the orchestrator listens on for dispatch wake-ups. */
 const GATE_READY_CHANNEL = "proposal_gate_ready";
 const MATURITY_CHANGED_CHANNEL = "proposal_maturity_changed";
+const OFFER_COMPLETED_CHANNEL = "offer_completed";
 
 /** Whether the 2-minute state-change poll fallback is enabled (env-driven). */
 const ENABLE_POLLING = process.env.AGENTHIVE_ORCHESTRATOR_POLL === "1";
@@ -125,6 +132,9 @@ const RECONCILER_INTERVAL_MS = 30_000;
 
 /** Observability heartbeat interval (60 s legacy default). */
 const HEARTBEAT_INTERVAL_MS = 60_000;
+
+/** P765: agency liveness scanner interval — transitions dormant/offline, emits alerts. */
+const LIVENESS_SCANNER_INTERVAL_MS = 60_000;
 
 export interface OrchestratorConfig {
 	/** Worktree used for liaison agent spawns (Tier 1 stall escalation). */
@@ -240,8 +250,9 @@ export class Orchestrator {
 		);
 		await this.listenClient.query(`LISTEN ${GATE_READY_CHANNEL}`);
 		await this.listenClient.query(`LISTEN ${MATURITY_CHANGED_CHANNEL}`);
+		await this.listenClient.query(`LISTEN ${OFFER_COMPLETED_CHANNEL}`);
 		console.log(
-			`[Orchestrator] LISTEN registered: ${GATE_READY_CHANNEL}, ${MATURITY_CHANGED_CHANNEL}`,
+			`[Orchestrator] LISTEN registered: ${GATE_READY_CHANNEL}, ${MATURITY_CHANGED_CHANNEL}, ${OFFER_COMPLETED_CHANNEL}`,
 		);
 
 		// Schedule the five legacy poll timers. Each is parity with the
@@ -286,7 +297,7 @@ export class Orchestrator {
 			setInterval(() => {
 				if (this.stopping) return;
 				void this.trackInFlight(
-					drainEnhancementRevisions("enhancer-revise-loop", 4).catch((err) =>
+					this.runEnhancerReviseTick().catch((err) =>
 						console.error("[Orchestrator] enhancer-revise failed:", err),
 					),
 				);
@@ -361,6 +372,20 @@ export class Orchestrator {
 					console.error("[Orchestrator] heartbeat failed:", err),
 				);
 			}, HEARTBEAT_INTERVAL_MS),
+		);
+
+		// P765 AC-5: liveness scanner — transitions silent agencies to
+		// dormant/offline and fires Discord alerts when offline >10 min.
+		this.pollTimers.set(
+			"liveness-scanner",
+			setInterval(() => {
+				if (this.stopping) return;
+				void this.trackInFlight(
+					scanAndTransitionSilentAgencies().catch((err) =>
+						console.error("[Orchestrator] liveness scanner failed:", err),
+					),
+				);
+			}, LIVENESS_SCANNER_INTERVAL_MS),
 		);
 
 		// P914 / P904: start the offer-claim loop. The loop LISTENs on
@@ -573,7 +598,8 @@ export class Orchestrator {
 		if (this.stopping || !payload) return;
 		if (
 			channel !== GATE_READY_CHANNEL &&
-			channel !== MATURITY_CHANGED_CHANNEL
+			channel !== MATURITY_CHANGED_CHANNEL &&
+			channel !== OFFER_COMPLETED_CHANNEL
 		) {
 			return;
 		}
@@ -581,6 +607,12 @@ export class Orchestrator {
 			const data = JSON.parse(payload) as {
 				proposal_id?: number | string;
 				id?: number | string;
+				// offer_completed fields
+				dispatch_id?: number;
+				agency_id?: string;
+				provider?: string | null;
+				signal?: string | null;
+				exit_code?: number | null;
 			};
 
 			if (channel === GATE_READY_CHANNEL) {
@@ -589,6 +621,31 @@ export class Orchestrator {
 					await this.trackInFlight(
 						dispatchImplicitGate(pid, "notify:proposal_gate_ready"),
 					);
+				}
+				return;
+			}
+
+			// P908-B: offer_completed — apply provider cooldown from signal field.
+			if (channel === OFFER_COMPLETED_CHANNEL) {
+				const provider = data.provider ?? null;
+				const signal = data.signal ?? null;
+				if (provider) {
+					try {
+						if (
+							signal === "rate_limit" ||
+							signal === "credit_exhausted"
+						) {
+							await setProviderCooldown(
+								provider,
+								signal as ProviderSignal,
+								`offer_completed signal: ${signal}`,
+							);
+						} else if (data.exit_code === 0) {
+							await recordProviderSuccess(provider);
+						}
+					} catch {
+						/* best-effort — don't crash the notification handler */
+					}
 				}
 				return;
 			}
@@ -725,6 +782,23 @@ export class Orchestrator {
 	 *
 	 * Returns the number of proposals that were dispatched (mode ≠ skip).
 	 */
+
+	/**
+	 * Claim proposals held by a gate decision and dispatch enhancer offers.
+	 * Replaces the module-level drainEnhancementRevisions so it uses
+	 * this.stopping / this.trackInFlight() rather than module-level vars.
+	 */
+	private async runEnhancerReviseTick(): Promise<void> {
+		if (this.stopping) return;
+		const targets = await claimEnhancementRevisionReady(4);
+		for (const target of targets) {
+			if (this.stopping) return;
+			await this.trackInFlight(
+				dispatchEnhancementRevision(target, "enhancer-revise-loop"),
+			);
+		}
+	}
+
 	async scanQueues(): Promise<number> {
 		const candidates = await getUnlockedGateQueue(SCAN_BATCH_LIMIT);
 		if (candidates.length === 0) return 0;

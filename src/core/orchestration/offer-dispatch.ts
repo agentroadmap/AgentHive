@@ -30,6 +30,9 @@ import { resolveAgency } from "./resolvers/agency-resolver.ts";
 import { briefingAssemble } from "../../infra/agency/spawn-briefing-service.ts";
 import { sendMessage } from "../../infra/agency/liaison-message-service.ts";
 import type { OfferDispatchPayload } from "../../infra/agency/liaison-message-types.ts";
+import { ObservabilityWriter } from "../observability/observability-writer.ts";
+
+const obs = new ObservabilityWriter("offer-dispatch");
 
 const ORCHESTRATOR_HOST = process.env.AGENTHIVE_HOST ?? hostname();
 void ORCHESTRATOR_HOST; // reserved for future host-aware agency filtering
@@ -117,6 +120,9 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 			// the handler falls back to "main" which is not a real worktree
 			// dir and node spawn raises ENOENT before the CLI runs.
 			worktree_hint: extractWorktreeHint(claim.metadata),
+			// P908-D: thread trace_id so offer-dispatch-handler can open the
+			// offer_completed lifecycle span correlated to this trace.
+			trace_id: extractTraceId(claim.metadata),
 		};
 
 		await this.sendMessageFn({
@@ -125,6 +131,17 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 			kind: "offer_dispatch",
 			payload: augmented,
 		});
+
+		// P908-D: offer_activated span marks the moment the dispatch message was sent.
+		const traceId = extractTraceId(claim.metadata);
+		if (traceId) {
+			const span = await obs.startSpan({
+				traceId,
+				operation: "offer_activated",
+				attributes: { dispatch_id: claim.dispatchId, proposal_id: claim.proposalId, agency_id: targetAgencyId },
+			});
+			void obs.closeSpan({ spanId: span.spanId });
+		}
 
 		this.logger.log(
 			`[OfferDispatch] offer=${claim.offerId} dispatched to agency=${targetAgencyId} (role=${claim.role}, briefing=${briefingId})`,
@@ -243,18 +260,7 @@ function extractWorktreeHint(metadata: Record<string, unknown>): string | null {
 	return typeof v === "string" && v.trim().length > 0 ? v : null;
 }
 
-// Maps dispatch role names to the minimum set of job capabilities an agency
-// must declare in capabilities.jobs. Agencies without any capabilities field
-// (auto-named ghost spawns) fail this check and are excluded from dispatch.
-const ROLE_TO_REQUIRED_CAPABILITIES: Record<string, string[]> = {
-	architect: ["design"],
-	"system-architect": ["system-design"],
-	developer: ["develop"],
-	"merge-agent": ["merge"],
-	"triage-agent": ["research"],
-	"research-agent": ["research"],
-	skeptic: ["review"],
-	"skeptic-beta": ["review"],
-	"skeptic-gamma": ["review"],
-	"skeptic-alpha": ["review"],
-};
+function extractTraceId(metadata: Record<string, unknown>): string | null {
+	const v = metadata.trace_id;
+	return typeof v === "string" && v.length > 0 ? v : null;
+}

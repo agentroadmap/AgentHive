@@ -24,13 +24,14 @@ import { query } from "../postgres/pool.ts";
 import { spawnAgent } from "../../core/orchestration/agent-spawner.ts";
 import type { SpawnResult } from "../../core/orchestration/agent-spawner.ts";
 import type { LiaisonMessage } from "./liaison-message-types.ts";
-import { sendMessage } from "./liaison-message-service.ts";
 import {
-	detectUsageLimit,
-	isLongWindow,
-	resetSecondsForSignal,
-	type UsageLimitProvider,
-} from "./usage-limit-detector.ts";
+	classifyProviderSignal,
+	setProviderCooldown,
+	recordProviderSuccess,
+} from "../../core/orchestration/provider-cooldown.ts";
+import { ObservabilityWriter } from "../../core/observability/observability-writer.ts";
+
+const obs = new ObservabilityWriter("offer-dispatch-handler");
 
 export type SqlExec = (sql: string, params?: unknown[]) => Promise<unknown>;
 
@@ -75,8 +76,8 @@ interface OfferDispatchEnvelope {
 	lease_ttl_seconds?: number;
 	/** P914: worktree directory basename selected by the orchestrator. */
 	worktree_hint?: string | null;
-	/** P771: role_profile.id for route-policy filtering in spawnAgent. */
-	role_profile_id?: number | null;
+	/** P908-D: trace correlation UUID threaded from postWorkOffer. */
+	trace_id?: string | null;
 }
 
 const DEFAULT_LEASE_TTL_SECONDS = 60;
@@ -302,6 +303,21 @@ async function runSpawn(args: {
 	const dispatchId = payload.dispatch_id as number;
 	const claimToken = payload.claim_token as string;
 
+	// P908-D: open offer_completed lifecycle span for the full spawn duration.
+	// Best-effort — errors are swallowed inside ObservabilityWriter.
+	const traceId = typeof payload.trace_id === "string" && payload.trace_id.length > 0
+		? payload.trace_id
+		: null;
+	let completionSpanId: string | null = null;
+	if (traceId) {
+		const span = await obs.startSpan({
+			traceId,
+			operation: "offer_completed",
+			attributes: { dispatch_id: dispatchId, agency_id: agencyId, offer_id: payload.offer_id },
+		});
+		completionSpanId = span.spanId;
+	}
+
 	const renewalTimer = setInterval(() => {
 		void exec(
 			`SELECT roadmap_workforce.fn_renew_lease($1, $2, $3, $4)`,
@@ -355,47 +371,49 @@ async function runSpawn(args: {
 
 	clearInterval(renewalTimer);
 
-	// Usage-limit detection: scan spawn output for known provider limit
-	// signals (codex "hit your usage limit", claude/gemini/copilot equivalents).
-	// On detection: throttle the route AND, for long-window resets (>2h or
-	// unknown), also pause this agency in DB so it stops claiming until reset.
-	const provider =
-		(process.env.AGENTHIVE_AGENT_PROVIDER?.trim() ||
-			process.env.AGENCY_PROVIDER?.trim() ||
-			payload.route_hint) as string | undefined;
-	const limitSignal = detectUsageLimit({
-		stdout: result?.stdout,
-		stderr: result?.stderr,
-		errorMessage: spawnError?.message,
-		defaultProvider: provider,
-	});
-	if (limitSignal) {
-		const seconds = resetSecondsForSignal(limitSignal);
-		const long = isLongWindow(limitSignal);
-		logger.warn(
-			`[OfferDispatchHandler] ${agencyId}: usage-limit detected (${limitSignal.reason}); throttle ${limitSignal.provider}/${limitSignal.model} for ${seconds}s; ${long ? "PAUSE agency (long-window)" : "route-throttle only (short-window)"}`,
-		);
-		await applyThrottle(exec, limitSignal.provider, limitSignal.model, seconds, limitSignal.reason).catch(
-			(err) =>
-				logger.warn(
-					`[OfferDispatchHandler] ${agencyId}: throttle upsert failed:`,
-					err instanceof Error ? err.message : err,
-				),
-		);
-		if (long) {
-			await pauseAgency(exec, agencyId, seconds, limitSignal.reason).catch((err) =>
-				logger.warn(
-					`[OfferDispatchHandler] ${agencyId}: pauseAgency failed:`,
-					err instanceof Error ? err.message : err,
-				),
-			);
+	const succeeded =
+		spawnError === null && (result?.exitCode === 0 || result?.exitCode === null);
+	const status: "delivered" | "failed" = succeeded ? "delivered" : "failed";
+	const provider = payload.route_hint ?? null;
+
+	// P908-B: classify provider error signal and update provider_health.
+	// Use the combined stderr+stdout text so we catch errors wherever they land.
+	const fullOutput = [result?.stderr, result?.stdout].filter(Boolean).join("\n");
+	let providerSignal: string | null = null;
+	if (!succeeded && provider) {
+		try {
+			providerSignal = classifyProviderSignal(fullOutput);
+			if (providerSignal) {
+				await setProviderCooldown(
+					provider,
+					providerSignal as "rate_limit" | "credit_exhausted",
+					fullOutput,
+				);
+			}
+		} catch {
+			/* best-effort — don't block offer completion */
+		}
+	} else if (succeeded && provider) {
+		try {
+			await recordProviderSuccess(provider);
+		} catch {
+			/* best-effort */
 		}
 	}
 
-	const status: "delivered" | "failed" =
-		spawnError === null && (result?.exitCode === 0 || result?.exitCode === null)
-			? "delivered"
-			: "failed";
+	// P908-B: persist provider_signal on the dispatch row for auditability.
+	if (providerSignal) {
+		try {
+			await exec(
+				`UPDATE roadmap_workforce.squad_dispatch
+				    SET provider_signal = $1
+				  WHERE id = $2`,
+				[providerSignal, dispatchId],
+			);
+		} catch {
+			/* best-effort */
+		}
+	}
 
 	// AC-5: emit a structured spawn_failure uplink so the orchestrator can
 	// observe the failure as an operational fact. Lifecycle is still governed
@@ -433,6 +451,30 @@ async function runSpawn(args: {
 			`[OfferDispatchHandler] ${agencyId}: fn_complete_work_offer failed for offer ${payload.offer_id} — lease will time out and reaper will requeue:`,
 			completionErr instanceof Error ? completionErr.message : completionErr,
 		);
+	}
+
+	// P908-D: close the lifecycle span now that fn_complete_work_offer has run.
+	if (completionSpanId) {
+		void obs.closeSpan({
+			spanId: completionSpanId,
+			status: succeeded ? "ok" : "error",
+			errorMessage: spawnError?.message ?? null,
+		});
+	}
+
+	// P908-B: notify orchestrator of offer completion so it can react to
+	// provider signals without polling squad_dispatch.
+	try {
+		const notifyPayload = JSON.stringify({
+			dispatch_id: dispatchId,
+			agency_id: agencyId,
+			provider,
+			signal: providerSignal,
+			exit_code: result?.exitCode ?? null,
+		});
+		await exec(`SELECT pg_notify('offer_completed', $1)`, [notifyPayload]);
+	} catch {
+		/* best-effort — orchestrator's poll will still recover */
 	}
 }
 
