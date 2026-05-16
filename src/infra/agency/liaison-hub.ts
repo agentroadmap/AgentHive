@@ -71,30 +71,6 @@ export async function broadcastToHiveCentral(
   );
 }
 
-// ─── Heartbeat liveness propagation ──────────────────────────────────────────
-
-/**
- * P1017 Phase A: Heartbeat event propagation to message_ledger removed.
- * The authoritative presence path (roadmap.agency.last_heartbeat_at) is updated
- * independently in liaison-service.ts and does not depend on this mirror.
- * The ~23K daily heartbeat rows were pure pollution on the message_ledger.
- *
- * This function is retained as a no-op stub to avoid breaking callers during migration.
- * Remove entirely after all call sites have been updated.
- *
- * Deprecated: Do not use. Called only by liaison-boot.ts line 130 (will be removed).
- */
-export async function propagateHeartbeat(
-  agencyId: string,
-  status: string,
-  dispatchable: boolean,
-  correlationId?: string,
-  replyTo?: string | number
-): Promise<void> {
-  // P1017 Phase A: No-op. heartbeat message_ledger writes removed.
-  // last_heartbeat_at updates are the authoritative source.
-}
-
 // ─── Message dispatch ─────────────────────────────────────────────────────────
 
 async function dispatchMessage(msg: LiaisonMessage, agencyId: string): Promise<void> {
