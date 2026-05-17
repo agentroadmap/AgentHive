@@ -567,6 +567,8 @@ export async function renderBoardTui(
 		workflow: string;
 		maturity: string;
 		type: string;
+		columns?: string[];
+		hiddenColumns?: string[];
 	}
 
 	const boardStateFilePath = path.join(os.homedir(), ".config", "agenthive", "board-state.json");
@@ -580,6 +582,8 @@ export async function renderBoardTui(
 					workflow: parsed.workflow ?? "",
 					maturity: parsed.maturity ?? "non-obsolete",
 					type: parsed.type ?? "",
+					columns: parsed.columns ?? undefined,
+					hiddenColumns: parsed.hiddenColumns ?? undefined,
 				};
 			}
 		} catch {
@@ -631,6 +635,26 @@ export async function renderBoardTui(
 	initialColumns = filterBoardColumns(initialColumns, {
 		hiddenStatuses: hiddenStatusesFromConfig,
 	});
+
+	// Apply saved column order from board-state if present. Preserve any
+	// statuses that are present in the computed initialColumns but not in
+	// the saved order by appending them afterwards.
+	if (initialBoardState.columns && initialBoardState.columns.length > 0) {
+		const byStatus = new Map(initialColumns.map((c) => [c.status.toLowerCase(), c]));
+		const ordered: ColumnData[] = [];
+		const seen = new Set<string>();
+		for (const s of initialBoardState.columns) {
+			const c = byStatus.get(s.toLowerCase());
+			if (c) {
+				ordered.push(c);
+				seen.add(c.status.toLowerCase());
+			}
+		}
+		for (const c of initialColumns) {
+			if (!seen.has(c.status.toLowerCase())) ordered.push(c);
+		}
+		initialColumns = ordered;
+	}
 
 	await new Promise<void>((resolve) => {
 		const screen = createScreen({
@@ -1711,17 +1735,21 @@ export async function renderBoardTui(
 		});
 
 		// Column visibility toggle with proposal memory
-		const hiddenColumns = new Set<string>();
-		let previousVisibility: string[] | null = null; // For restoring previous proposal
-
-		const applyColumnVisibility = () => {
-			const filteredStatuses = currentStatuses.filter(
-				(s) => !hiddenColumns.has(s),
+			const hiddenColumns = new Set<string>(
+				(initialBoardState.hiddenColumns ?? []).map((s) => s),
 			);
-			currentStatuses = filteredStatuses;
-			rebuildColumns(currentColumnsData);
-			renderView();
-		};
+			let previousVisibility: string[] | null = null; // For restoring previous proposal
+		
+			const applyColumnVisibility = () => {
+				const filteredStatuses = currentStatuses.filter(
+					(s) => !hiddenColumns.has(s),
+				);
+				currentStatuses = filteredStatuses;
+				rebuildColumns(currentColumnsData);
+				renderView();
+				// Persist current column order and hidden columns so TUI opens with same layout
+				saveBoardState({ workflow: currentWorkflow, maturity: currentMaturity, type: currentTypeFilter, columns: currentStatuses, hiddenColumns: Array.from(hiddenColumns) });
+			};
 
 	// V = show all columns / toggle restore
 	let vPressCount = 0;
