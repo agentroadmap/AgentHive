@@ -228,12 +228,30 @@ async function checkHeartbeatRecent(
 	freshMs: number,
 	q: QueryFn,
 ): Promise<boolean> {
+	// Tier-B liveness: either canonical source proves the agent is alive.
+	//
+	//   1. roadmap.agency.presence_state IN ('online','busy') — A2A maintains this
+	//      via fn_pulse for agencies. This is the canonical signal post-P1132 and
+	//      DOES NOT rely on a 30 s timer.
+	//   2. roadmap.agent_health.last_heartbeat_at fresh — for per-task workers
+	//      that aren't agencies (no agency row), and as a transitional fallback
+	//      for agencies whose A2A presence-refresh hasn't fired yet.
+	//
+	// Either signal counts. Single query, no extra round-trips.
 	try {
 		const { rows } = await q<{ fresh: boolean | null }>(
-			`SELECT (last_heartbeat_at > now() - ($1::int * interval '1 millisecond')) AS fresh
-               FROM roadmap.agent_health
-              WHERE agent_identity = $2
-              LIMIT 1`,
+			`SELECT (
+                  COALESCE(
+                    (SELECT presence_state IN ('online', 'busy')
+                       FROM roadmap.agency WHERE agency_id = $2),
+                    false
+                  )
+                  OR EXISTS (
+                    SELECT 1 FROM roadmap.agent_health
+                     WHERE agent_identity = $2
+                       AND last_heartbeat_at > now() - ($1::int * interval '1 millisecond')
+                  )
+                ) AS fresh`,
 			[freshMs, agent_identity],
 		);
 		return Boolean(rows[0]?.fresh);
