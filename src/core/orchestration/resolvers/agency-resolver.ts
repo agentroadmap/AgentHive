@@ -124,9 +124,9 @@ export async function resolveAgency(
 		 FROM roadmap_workforce.provider_registry pr
 		 JOIN roadmap_workforce.agent_registry ar ON ar.id = pr.agency_id
 		 LEFT JOIN roadmap.agency a ON a.agency_id = ar.agent_identity
-		 -- AC-3: agencies with a roadmap.agency row must have an active liaison session
-		 -- (status='active' AND last_heartbeat_at within 90 s). Agencies with no
-		 -- roadmap.agency row (legacy) pass through for backward compatibility.
+		 -- AC-3: agencies with a roadmap.agency row must be dispatchable per v_agency_status
+		 -- (status='active' AND (presence_state IN ('online','busy') OR last_heartbeat_at within 60 s)).
+		 -- Agencies with no roadmap.agency row (legacy) pass through for backward compatibility.
 		 LEFT JOIN roadmap.v_agency_status vas ON vas.agency_id = ar.agent_identity
 		 LEFT JOIN roadmap_workforce.v_agency_in_flight inf
 		   ON inf.provider_registry_id = pr.id
