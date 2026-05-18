@@ -243,16 +243,30 @@ export async function liaisonHeartbeat(
 }
 
 /**
- * Mark dormant any agencies past the 90-second grace period.
+ * Mark dormant any agencies whose liveness signals all say absent.
  * Called by the liaison boot-process watchdog every 60s (AC-5).
+ *
+ * Aliveness signals (any one keeps the agency out of dormant):
+ *   - presence_state IN ('online', 'busy') — canonical, A2A maintains via fn_pulse.
+ *   - last_heartbeat_at < 90 s — transitional fallback (P1132).
+ *
+ * NOTE: presence_state alone cannot detect an A2A host crash (the value stays
+ * 'online' even though no one is refreshing it). Today, the A2A
+ * presence-refresh shim keeps last_heartbeat_at fresh so this sweep correctly
+ * detects crashes via heartbeat staleness. When that shim retires (follow-on),
+ * dormancy needs a different crash signal — pg_stat_activity LISTEN-session
+ * presence is the leading candidate.
  */
 export async function checkAndMarkDormant(): Promise<number> {
 	const result = await query(`
     UPDATE roadmap.agency
-    SET status = 'dormant', status_reason = 'No heartbeat > 90s'
+    SET status = 'dormant', status_reason = 'No liveness signal > 90s'
     WHERE status IN ('active', 'throttled')
-      AND last_heartbeat_at IS NOT NULL
-      AND (now() - last_heartbeat_at) > interval '90 seconds'
+      AND NOT (
+        presence_state IN ('online', 'busy')
+        OR (last_heartbeat_at IS NOT NULL
+            AND (now() - last_heartbeat_at) < interval '90 seconds')
+      )
     RETURNING agency_id
   `);
 	return result.rowCount ?? 0;
