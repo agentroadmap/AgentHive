@@ -45,29 +45,30 @@ export async function forceReleaseAlias(
 		};
 	}
 
-	// Fetch the current holder of the alias (target is being looked up by identity)
+	// Fetch the current holder of the alias (target is being looked up by identity).
+	// Aliveness signal: presence_state IN ('online','busy') is canonical (A2A maintains it
+	// via fn_pulse). last_heartbeat_at < 90 s is the transitional fallback (P1132 → P1133).
 	const targetResult = await query<{
 		id: bigint;
 		agent_identity: string;
 		display_alias: string | null;
 		status: string;
 		last_heartbeat_at: string | null;
+		presence_state: string | null;
 		alias_audit: unknown;
 	}>(
 		`
     SELECT
-      id,
-      agent_identity,
-      display_alias,
-      status,
-      COALESCE(
-        (SELECT last_heartbeat_at FROM roadmap.agency
-         WHERE agency_id = roadmap_workforce.agent_registry.id),
-        NULL
-      ) as last_heartbeat_at,
-      alias_audit
-    FROM roadmap_workforce.agent_registry
-    WHERE agent_identity = $1
+      ar.id,
+      ar.agent_identity,
+      ar.display_alias,
+      ar.status,
+      a.last_heartbeat_at,
+      a.presence_state,
+      ar.alias_audit
+    FROM roadmap_workforce.agent_registry ar
+    LEFT JOIN roadmap.agency a ON a.agency_id = ar.agent_identity
+    WHERE ar.agent_identity = $1
     LIMIT 1
     `,
 		[identity],
@@ -89,15 +90,21 @@ export async function forceReleaseAlias(
 		};
 	}
 
-	// AC-4: Check heartbeat gating
+	// AC-4: Check aliveness gating.
+	// Canonical signal: presence_state IN ('online','busy') (A2A maintains it).
+	// Transitional fallback: last_heartbeat_at < 90 s (P1132).
+	// Stuck = registry says active but liaison isn't actually alive by either signal.
 	const isInactive = target.status === "inactive";
 	const now = new Date();
 	const heartbeatAt = target.last_heartbeat_at
 		? new Date(target.last_heartbeat_at)
 		: null;
+	const presenceFresh =
+		target.presence_state === "online" || target.presence_state === "busy";
+	const heartbeatFresh =
+		!!heartbeatAt && now.getTime() - heartbeatAt.getTime() <= 90 * 1000;
 	const isStuck =
-		target.status === "active" &&
-		(!heartbeatAt || now.getTime() - heartbeatAt.getTime() > 90 * 1000);
+		target.status === "active" && !presenceFresh && !heartbeatFresh;
 
 	// Clean path: inactive row
 	if (isInactive) {
