@@ -274,7 +274,24 @@ async function refreshRegistry(): Promise<void> {
 	}
 }
 
-/** Per-host presence refresh: iterate children, call fn_pulse('online') to keep last_heartbeat_at fresh. */
+/**
+ * Per-host presence refresh: every flags.presenceRefreshMs, iterate attached
+ * children and call fn_pulse('online'). fn_pulse updates BOTH presence_state
+ * (canonical) AND last_heartbeat_at (transitional).
+ *
+ * Why this is still load-bearing after the P1132 consumer migration:
+ *
+ *   - presence_state alone cannot detect an A2A host crash — the column value
+ *     stays 'online' even though nothing is updating it.
+ *   - last_heartbeat_at going stale IS the crash signal that checkAndMarkDormant
+ *     uses (liaison-service.ts) to flip crashed agencies to dormant after 90 s.
+ *   - This refresh keeps the heartbeat fresh ONLY while A2A is running. When
+ *     A2A dies, heartbeat goes stale → dormancy fires correctly.
+ *
+ * Retirement gate: a follow-on must replace heartbeat-based crash detection
+ * with a stronger signal (e.g. pg_stat_activity check for the LISTEN session
+ * 'agenthive-a2a-listen-<identity>'). Until then, this 30 s refresh stays.
+ */
 function startPresenceRefreshTimer(): void {
 	if (presenceRefreshTimer) clearInterval(presenceRefreshTimer);
 	presenceRefreshTimer = setInterval(async () => {
