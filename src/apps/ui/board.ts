@@ -1541,10 +1541,46 @@ export async function renderBoardTui(
 
 		const renderView = () => {
 			const visibleWorkflowProposals = getVisibleWorkflowProposals();
-			currentStatuses = resolveWorkflowStatuses(
+
+			// Compute statuses in canonical order and then, if the user has a saved
+			// column ordering in their board state for the current workflow, apply
+			// that ordering (preserving any additional statuses present).
+			let resolvedStatuses = resolveWorkflowStatuses(
 				visibleWorkflowProposals,
 				currentWorkflow,
 			);
+
+			if (
+				initialBoardState.columns &&
+				Array.isArray(initialBoardState.columns) &&
+				initialBoardState.columns.length > 0 &&
+				(initialBoardState.workflow === currentWorkflow || !initialBoardState.workflow)
+			) {
+				try {
+					const savedUpper = new Set(initialBoardState.columns.map((s) => s.toUpperCase()));
+					const resolvedUpper = resolvedStatuses.map((s) => s.toUpperCase());
+					const ordered: string[] = [];
+					const seen = new Set<string>();
+					for (const s of initialBoardState.columns) {
+						const u = s.toUpperCase();
+						if (resolvedUpper.includes(u) && !seen.has(u)) {
+							ordered.push(u);
+							seen.add(u);
+						}
+					}
+					for (const s of resolvedUpper) {
+						if (!seen.has(s)) {
+							ordered.push(s);
+							seen.add(s);
+						}
+					}
+					resolvedStatuses = ordered;
+				} catch {
+					// If anything goes wrong, fall back to resolvedStatuses as-is
+				}
+			}
+
+			currentStatuses = resolvedStatuses;
 
 			let projectedData = getProjectedColumns(visibleWorkflowProposals, moveOp);
 
