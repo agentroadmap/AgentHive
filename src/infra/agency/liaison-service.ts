@@ -218,15 +218,13 @@ export async function liaisonHeartbeat(
 		[agency_id, computed_state],
 	);
 
-	// Fetch final agency state for response
+	// Fetch final agency state for response. Use v_agency_status so dispatchable
+	// honors both presence_state (canonical, A2A maintains) and last_heartbeat_at
+	// freshness (transitional fallback) — P1132 view migration.
 	const finalResult = await query(
 		`
-    SELECT
-      status,
-      last_heartbeat_at,
-      EXTRACT(EPOCH FROM (now() - last_heartbeat_at))::int as silence_seconds,
-      (status = 'active' AND (now() - last_heartbeat_at) < interval '90 seconds') as dispatchable
-    FROM roadmap.agency
+    SELECT status, last_heartbeat_at, silence_seconds::int as silence_seconds, dispatchable
+    FROM roadmap.v_agency_status
     WHERE agency_id = $1
     `,
 		[agency_id],
