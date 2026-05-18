@@ -1,21 +1,25 @@
 /**
- * A2A Host Service — P1132.
+ * A2A Host Runtime — P1132.
  *
- * Per-host supervisor that holds the LISTEN sessions and runs the existing
- * runLiaisonAgent inbox loop for every agency on this host. Replaces N
- * `agenthive-agency@<id>.service` daemons with one `agenthive-a2a-host.service`.
+ * Mechanical router shaped like Discord/WhatsApp low-level infra: discovers
+ * local agencies in agent_registry, attaches a LISTEN session for each,
+ * routes inbound a2a_msg_<identity> NOTIFY events into the existing
+ * runLiaisonAgent dispatch path. Does not host agencies, does not own their
+ * lifecycle. systemd is the sole process supervisor for this runtime;
+ * agencies will eventually own their own lifecycle (via P1129 operator-
+ * triggered MCP registration of independent standing AI liaisons).
  *
  * Phase 1 keeps today's spawn-per-message provider invocation unchanged.
  * The deferred follow-ons (stdin-loop, worker pool, multi-host inbound HTTP,
- * credential vault, etc.) are documented in the plan + appendix on P1132.
+ * credential vault, etc.) are tracked under P1132's appendix.
  *
  * Configuration source-of-truth — NO HARDCODED CONSTANTS:
  *   - AGENTHIVE_HOST: env / yaml (universal config, structural key)
  *   - All tunables: core.runtime_flag rows (seeded by migration 170-p1132-...)
- *     - A2A_HOST_LISTEN_REFRESH_MS
+ *     - A2A_HOST_LISTEN_REFRESH_MS    (registry re-read cadence; see TODO below)
  *     - A2A_HOST_PG_RECONNECT_MS
  *     - A2A_HOST_SHUTDOWN_TIMEOUT_MS
- *     - A2A_HOST_PRESENCE_REFRESH_MS
+ *     - A2A_HOST_PRESENCE_REFRESH_MS  (compat shim; see TODO below)
  *   - Operator changes via SQL `UPDATE core.runtime_flag SET value_jsonb=...`
  *     Live-reload via runtime_config_changed NOTIFY (no restart).
  *
@@ -28,14 +32,24 @@
  *   documentation of the canonical source.
  *
  * Liveness model:
- *   - A2A process aliveness → systemd (Restart=on-failure)
- *   - Per-agency presence → fn_pulse(identity, state) on lifecycle events
- *     ('online' after LISTEN established, 'offline' on shutdown, 'away' on PG
- *     disconnect)
- *   - Per-host presence refresh → ONE timer iterates children every
- *     A2A_HOST_PRESENCE_REFRESH_MS and calls fn_pulse('online'), keeping
- *     last_heartbeat_at fresh for ~10 existing dispatchability/maintenance
- *     consumers (agency-resolver, maintenance.ts, liveness-probe Tier-B, etc.)
+ *   - A2A runtime process aliveness → systemd (Restart=on-failure)
+ *   - Per-agency presence → fn_pulse(identity, state) on transitions
+ *     ('online' after LISTEN attached, 'offline' on detach)
+ *
+ * TODO — compat shim retirement:
+ *   The per-host presence-refresh timer below exists ONLY because ~10
+ *   downstream consumers (agency-resolver dispatchability, maintenance.ts
+ *   dormancy sweep, liveness-probe Tier-B, alias-manager, etc.) currently
+ *   filter on `agent_registry.last_heartbeat_at < now() - interval '90 s'`.
+ *   When those consumers migrate to `agent_registry.presence_state IN
+ *   ('online','busy')` the shim retires and this runtime becomes
+ *   purely-event-driven. Tracked under P1132 follow-on.
+ *
+ * TODO — registry polling retirement:
+ *   The registry re-read interval below picks up newly-registered local
+ *   agencies. When P1129 ships `mcp_ops agency_start`, the operator-
+ *   triggered MCP action can emit a `agency_registered` NOTIFY this
+ *   runtime LISTENs for; polling retires. Tracked under P1132 follow-on.
  */
 
 import { hostname } from "node:os";
@@ -61,7 +75,7 @@ interface AgencyRow {
 	preferred_provider: string;
 }
 
-interface ManagedAgency {
+interface AttachedListener {
 	identity: string;
 	provider: string;
 	bootHandle: LiaisonBootHandle;
@@ -75,7 +89,7 @@ interface RuntimeFlags {
 	presenceRefreshMs: number;
 }
 
-const managed = new Map<string, ManagedAgency>();
+const attached = new Map<string, AttachedListener>();
 let shuttingDown = false;
 let host = "";
 let flags: RuntimeFlags;
@@ -182,8 +196,8 @@ async function fnPulse(identity: string, state: "online" | "offline" | "away" | 
 	}
 }
 
-async function startAgency(row: AgencyRow): Promise<void> {
-	if (managed.has(row.agent_identity)) return;
+async function attachListener(row: AgencyRow): Promise<void> {
+	if (attached.has(row.agent_identity)) return;
 	const { agent_identity: identity, preferred_provider: provider } = row;
 
 	console.log(`[a2a-host] starting agency ${identity} (provider=${provider})`);
@@ -212,15 +226,15 @@ async function startAgency(row: AgencyRow): Promise<void> {
 		console.warn(`[a2a-host] runLiaisonAgent failed for ${identity} (non-fatal): ${(err as Error).message}`);
 	}
 
-	managed.set(identity, { identity, provider, bootHandle, agentHandle });
+	attached.set(identity, { identity, provider, bootHandle, agentHandle });
 	await fnPulse(identity, "online");
 	console.log(`[a2a-host] ${identity} online`);
 }
 
-async function stopAgency(identity: string, state: "offline" | "away" = "offline"): Promise<void> {
-	const m = managed.get(identity);
+async function detachListener(identity: string, state: "offline" | "away" = "offline"): Promise<void> {
+	const m = attached.get(identity);
 	if (!m) return;
-	managed.delete(identity);
+	attached.delete(identity);
 	await fnPulse(identity, state);
 	if (m.agentHandle) {
 		try {
@@ -244,15 +258,15 @@ async function refreshRegistry(): Promise<void> {
 		const seenNow = new Set(rows.map((r) => r.agent_identity));
 		// Start agencies that appeared
 		for (const row of rows) {
-			if (!managed.has(row.agent_identity)) {
-				await startAgency(row);
+			if (!attached.has(row.agent_identity)) {
+				await attachListener(row);
 			}
 		}
 		// Stop agencies that disappeared from registry (status flipped away or host_affinity changed)
-		for (const identity of Array.from(managed.keys())) {
+		for (const identity of Array.from(attached.keys())) {
 			if (!seenNow.has(identity)) {
 				console.log(`[a2a-host] ${identity} no longer in active set; stopping`);
-				await stopAgency(identity, "offline");
+				await detachListener(identity, "offline");
 			}
 		}
 	} catch (err) {
@@ -265,7 +279,7 @@ function startPresenceRefreshTimer(): void {
 	if (presenceRefreshTimer) clearInterval(presenceRefreshTimer);
 	presenceRefreshTimer = setInterval(async () => {
 		if (shuttingDown) return;
-		for (const identity of Array.from(managed.keys())) {
+		for (const identity of Array.from(attached.keys())) {
 			await fnPulse(identity, "online");
 		}
 	}, flags.presenceRefreshMs);
@@ -284,9 +298,9 @@ async function shutdownAll(): Promise<void> {
 		try { await flagsReloadClient.end(); } catch { /* ignore */ }
 		flagsReloadClient = null;
 	}
-	const identities = Array.from(managed.keys());
+	const identities = Array.from(attached.keys());
 	console.log(`[a2a-host] shutdown — stopping ${identities.length} agencies (cap=${flags.shutdownTimeoutMs}ms)`);
-	const stopPromises = identities.map((id) => stopAgency(id, "offline"));
+	const stopPromises = identities.map((id) => detachListener(id, "offline"));
 	await Promise.race([
 		Promise.allSettled(stopPromises),
 		new Promise<void>((resolve) => setTimeout(resolve, flags.shutdownTimeoutMs)),
@@ -301,7 +315,7 @@ async function shutdownAll(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-	// Each managed agency adds one or two `process` exit listeners (via
+	// Each attached listener adds one or two `process` exit listeners (via
 	// bootLiaison + runLiaisonAgent). With N=17 agencies we exceed Node's
 	// default 10-listener warning threshold. Raise the cap explicitly so it
 	// doesn't spam the journal on every boot.
@@ -335,8 +349,8 @@ async function main(): Promise<void> {
 	}
 
 	// Boot all agencies in parallel.
-	await Promise.allSettled(agencies.map((row) => startAgency(row)));
-	console.log(`[a2a-host] boot complete — ${managed.size} of ${agencies.length} agencies online`);
+	await Promise.allSettled(agencies.map((row) => attachListener(row)));
+	console.log(`[a2a-host] boot complete — ${attached.size} of ${agencies.length} agencies online`);
 
 	startPresenceRefreshTimer();
 
