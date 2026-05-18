@@ -156,11 +156,16 @@ async function subscribeFlagsReload(): Promise<void> {
 }
 
 async function loadActiveAgencies(): Promise<AgencyRow[]> {
+	// Match what the templated agenthive-agency@<id>.service daemons would have
+	// handled. agent_type is loose ('agency' OR 'llm') because some legacy P996
+	// names are typed 'llm' but operationally run as agencies (e.g. adam).
+	// host_affinity is loose: match this host OR null/empty (treated as "any
+	// host" — legacy copilot-agency-gary has empty host_affinity).
 	const { rows } = await query<AgencyRow>(
 		`SELECT agent_identity, preferred_provider
 		   FROM roadmap_workforce.agent_registry
-		  WHERE host_affinity = $1
-		    AND agent_type    = 'agency'
+		  WHERE (host_affinity = $1 OR host_affinity IS NULL OR host_affinity = '')
+		    AND agent_type    IN ('agency', 'llm')
 		    AND status        IN ('active','dormant')
 		    AND coalesce(preferred_provider, '') <> ''
 		  ORDER BY agent_identity`,
@@ -296,6 +301,12 @@ async function shutdownAll(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+	// Each managed agency adds one or two `process` exit listeners (via
+	// bootLiaison + runLiaisonAgent). With N=17 agencies we exceed Node's
+	// default 10-listener warning threshold. Raise the cap explicitly so it
+	// doesn't spam the journal on every boot.
+	process.setMaxListeners(Math.max(100, process.getMaxListeners()));
+
 	// Tier-0 bootstrap: promote /etc/agenthive/env into process.env if present.
 	await loadRuntimeEnvFile();
 
