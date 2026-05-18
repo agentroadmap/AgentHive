@@ -112,19 +112,54 @@ const ORCHESTRATOR_IDENTITY =
 const ENABLE_OFFER_CLAIM_LOOP =
 	(process.env.AGENTHIVE_OFFER_CLAIM_LOOP ?? "1") !== "0";
 
-/** Implicit gate poll interval in ms (set 0 to disable). */
+/**
+ * Workflow-drain polls — fallbacks to PG NOTIFY. Each one scans a table for
+ * proposals in a particular state and processes them. The NOTIFY-driven fast
+ * path is the primary trigger; the poll is the safety net for missed NOTIFYs
+ * (PgBouncer transaction-pool reconnects, listener restarts, race conditions
+ * around state transitions).
+ *
+ * Setting interval = 0 disables the poll (NOTIFY remains; relies on its
+ * coverage being complete). The full migration of these to core.runtime_flag
+ * is tracked as a separate follow-on under P1133 universal-config commitment.
+ *
+ *   implicit-gate poll  → NOTIFY channel: proposal_gate_ready
+ *   enhancer-revise     → NOTIFY channel: proposal_maturity_changed (mature)
+ *   reconciler          → no NOTIFY (cleanup of stranded advances; periodic only)
+ *   stale-dispatch      → no NOTIFY (cleanup of stale dispatches; periodic only)
+ *   stale-row reaper    → no NOTIFY (zombie agent_runs/leases; periodic only)
+ *   heartbeat           → not a workflow poll; observability self-pulse
+ */
+
+/** Implicit gate poll interval in ms (set 0 to disable; NOTIFY-fallback). */
 const IMPLICIT_GATE_POLL_INTERVAL_MS = Number(
 	process.env.AGENTHIVE_IMPLICIT_GATE_POLL_MS ?? 30_000,
 );
 
-/** Enhancer-revise autonomous loop interval (90 s legacy default). */
-const ENHANCER_REVISE_INTERVAL_MS = 90_000;
+/** Enhancer-revise autonomous loop interval in ms (set 0 to disable; NOTIFY-fallback). */
+const ENHANCER_REVISE_INTERVAL_MS = Number(
+	process.env.AGENTHIVE_ENHANCER_REVISE_INTERVAL_MS ?? 90_000,
+);
 
-/** P611 stranded-advance reconciler interval (30 s legacy default). */
-const RECONCILER_INTERVAL_MS = 30_000;
+/** P611 stranded-advance reconciler interval in ms (set 0 to disable; periodic-only, no NOTIFY). */
+const RECONCILER_INTERVAL_MS = Number(
+	process.env.AGENTHIVE_RECONCILER_INTERVAL_MS ?? 30_000,
+);
 
-/** Observability heartbeat interval (60 s legacy default). */
-const HEARTBEAT_INTERVAL_MS = 60_000;
+/** Stale-row reaper interval in ms (set 0 to disable; zombie cleanup, no NOTIFY). */
+const STALE_ROW_REAPER_INTERVAL_MS = Number(
+	process.env.AGENTHIVE_STALE_ROW_REAPER_INTERVAL_MS ?? 5 * 60 * 1000,
+);
+
+/** Stuck-worker watchdog interval in ms (set 0 to disable; no NOTIFY). */
+const STUCK_WORKER_WATCHDOG_INTERVAL_MS = Number(
+	process.env.AGENTHIVE_STUCK_WORKER_WATCHDOG_INTERVAL_MS ?? 60_000,
+);
+
+/** Observability heartbeat interval (60 s legacy default; observability, set 0 to disable). */
+const HEARTBEAT_INTERVAL_MS = Number(
+	process.env.AGENTHIVE_HEARTBEAT_INTERVAL_MS ?? 60_000,
+);
 
 export interface OrchestratorConfig {
 	/** Worktree used for liaison agent spawns (Tier 1 stall escalation). */
@@ -281,87 +316,115 @@ export class Orchestrator {
 			);
 		}
 
-		this.pollTimers.set(
-			"enhancer-revise",
-			setInterval(() => {
-				if (this.stopping) return;
-				void this.trackInFlight(
-					drainEnhancementRevisions("enhancer-revise-loop", 4).catch((err) =>
-						console.error("[Orchestrator] enhancer-revise failed:", err),
-					),
-				);
-			}, ENHANCER_REVISE_INTERVAL_MS),
-		);
+		if (ENHANCER_REVISE_INTERVAL_MS > 0) {
+			this.pollTimers.set(
+				"enhancer-revise",
+				setInterval(() => {
+					if (this.stopping) return;
+					void this.trackInFlight(
+						drainEnhancementRevisions("enhancer-revise-loop", 4).catch((err) =>
+							console.error("[Orchestrator] enhancer-revise failed:", err),
+						),
+					);
+				}, ENHANCER_REVISE_INTERVAL_MS),
+			);
+			console.log(
+				`[Orchestrator] enhancer-revise poll every ${ENHANCER_REVISE_INTERVAL_MS}ms (NOTIFY-fallback)`,
+			);
+		} else {
+			console.log("[Orchestrator] enhancer-revise poll disabled (AGENTHIVE_ENHANCER_REVISE_INTERVAL_MS=0)");
+		}
 
-		this.pollTimers.set(
-			"reconciler",
-			setInterval(() => {
-				if (this.stopping) return;
-				void this.trackInFlight(
-					reconcileStrandedAdvances(pool).catch((err) =>
-						console.error("[Orchestrator] reconciler failed:", err),
-					),
-				);
-			}, RECONCILER_INTERVAL_MS),
-		);
+		if (RECONCILER_INTERVAL_MS > 0) {
+			this.pollTimers.set(
+				"reconciler",
+				setInterval(() => {
+					if (this.stopping) return;
+					void this.trackInFlight(
+						reconcileStrandedAdvances(pool).catch((err) =>
+							console.error("[Orchestrator] reconciler failed:", err),
+						),
+					);
+				}, RECONCILER_INTERVAL_MS),
+			);
+			this.pollTimers.set(
+				"stale-dispatch-reconciler",
+				setInterval(() => {
+					if (this.stopping) return;
+					void this.trackInFlight(
+						reconcileStaleDispatches(pool).catch((err) =>
+							console.error("[Orchestrator] stale-dispatch reconciler failed:", err),
+						),
+					);
+				}, RECONCILER_INTERVAL_MS),
+			);
+			console.log(
+				`[Orchestrator] reconciler + stale-dispatch every ${RECONCILER_INTERVAL_MS}ms (periodic-only)`,
+			);
+		} else {
+			console.log("[Orchestrator] reconciler + stale-dispatch disabled (AGENTHIVE_RECONCILER_INTERVAL_MS=0)");
+		}
 
-		this.pollTimers.set(
-			"stale-dispatch-reconciler",
-			setInterval(() => {
-				if (this.stopping) return;
-				void this.trackInFlight(
-					reconcileStaleDispatches(pool).catch((err) =>
-						console.error("[Orchestrator] stale-dispatch reconciler failed:", err),
-					),
-				);
-			}, RECONCILER_INTERVAL_MS),
-		);
-
-		console.log("[Orchestrator] detectStuckWorkers watchdog active (60s interval)");
-		this.pollTimers.set(
-			"stuck-worker-watchdog",
-			setInterval(() => {
-				if (this.stopping) return;
-				void this.trackInFlight(
-					detectStuckWorkers().catch((err) =>
-						console.error("[Orchestrator] stuck-worker watchdog failed:", err),
-					),
-				);
-			}, 60_000),
-		);
+		if (STUCK_WORKER_WATCHDOG_INTERVAL_MS > 0) {
+			this.pollTimers.set(
+				"stuck-worker-watchdog",
+				setInterval(() => {
+					if (this.stopping) return;
+					void this.trackInFlight(
+						detectStuckWorkers().catch((err) =>
+							console.error("[Orchestrator] stuck-worker watchdog failed:", err),
+						),
+					);
+				}, STUCK_WORKER_WATCHDOG_INTERVAL_MS),
+			);
+			console.log(
+				`[Orchestrator] detectStuckWorkers watchdog every ${STUCK_WORKER_WATCHDOG_INTERVAL_MS}ms`,
+			);
+		} else {
+			console.log("[Orchestrator] stuck-worker watchdog disabled (AGENTHIVE_STUCK_WORKER_WATCHDOG_INTERVAL_MS=0)");
+		}
 
 		// Periodic stale-row inspection: zombie agent_runs, expired leases, stale
-		// dispatches. Runs unconditionally (not gated on ENABLE_POLLING) because
-		// zombie cleanup is maintenance, not a PG NOTIFY fallback. 5-min cadence
-		// is well below the 60-min zombie threshold so zombies are caught quickly.
-		this.pollTimers.set(
-			"stale-row-reaper",
-			setInterval(() => {
-				if (this.stopping) return;
-				void this.trackInFlight(
-					reapStaleRows(
-						getPool(),
-						{ log: (m) => console.log(m), warn: (m) => console.warn(m) },
-						"Orchestrator.Reaper",
-					).catch((err) =>
-						console.error("[Orchestrator] periodic reaper failed:", err),
-					),
-				);
-			}, 5 * 60 * 1000),
-		);
-		console.log("[Orchestrator] periodic stale-row reaper active (5-min interval)");
+		// dispatches. No NOTIFY fast-path — zombies live in cracks between
+		// expected transitions. Default cadence well below 60-min zombie threshold.
+		if (STALE_ROW_REAPER_INTERVAL_MS > 0) {
+			this.pollTimers.set(
+				"stale-row-reaper",
+				setInterval(() => {
+					if (this.stopping) return;
+					void this.trackInFlight(
+						reapStaleRows(
+							getPool(),
+							{ log: (m) => console.log(m), warn: (m) => console.warn(m) },
+							"Orchestrator.Reaper",
+						).catch((err) =>
+							console.error("[Orchestrator] periodic reaper failed:", err),
+						),
+					);
+				}, STALE_ROW_REAPER_INTERVAL_MS),
+			);
+			console.log(
+				`[Orchestrator] periodic stale-row reaper every ${STALE_ROW_REAPER_INTERVAL_MS}ms`,
+			);
+		} else {
+			console.log("[Orchestrator] stale-row reaper disabled (AGENTHIVE_STALE_ROW_REAPER_INTERVAL_MS=0)");
+		}
 
-		this.pollTimers.set(
-			"heartbeat",
-			setInterval(() => {
-				void pulseHeartbeat("orchestrator", {
-					currentTask: this.stopping ? "stopping" : "running",
-					metadata: { in_flight: this.inFlight.size },
-				}).catch((err) =>
-					console.error("[Orchestrator] heartbeat failed:", err),
-				);
-			}, HEARTBEAT_INTERVAL_MS),
-		);
+		if (HEARTBEAT_INTERVAL_MS > 0) {
+			this.pollTimers.set(
+				"heartbeat",
+				setInterval(() => {
+					void pulseHeartbeat("orchestrator", {
+						currentTask: this.stopping ? "stopping" : "running",
+						metadata: { in_flight: this.inFlight.size },
+					}).catch((err) =>
+						console.error("[Orchestrator] heartbeat failed:", err),
+					);
+				}, HEARTBEAT_INTERVAL_MS),
+			);
+		} else {
+			console.log("[Orchestrator] observability heartbeat disabled (AGENTHIVE_HEARTBEAT_INTERVAL_MS=0)");
+		}
 
 		// P914 / P904: start the offer-claim loop. The loop LISTENs on
 		// `work_offers` (fired by postWorkOffer in legacy-dispatch.ts) +
