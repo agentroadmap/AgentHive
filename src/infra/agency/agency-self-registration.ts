@@ -355,46 +355,23 @@ export async function selfRegisterAgency(
 		`[AgencySelfReg] ${displayLabel} hub started — listening for offer_dispatch + assistance_request + liaison_pong`,
 	);
 
-	// 6. Heartbeat: liaisonHeartbeat (DB) + pulseHeartbeat (fleet observability).
-	const heartbeatTimer = setInterval(async () => {
-		try {
-			await liaisonHeartbeat({ session_id: sessionId, status: "active" });
-		} catch (err) {
-			logger.warn(
-				`[AgencySelfReg] ${displayLabel} heartbeat error: ${err instanceof Error ? err.message : err}`,
-			);
-		}
-		void pulseHeartbeat(agencyId, { currentTask: "agency-runtime" }).catch(
-			(e) =>
-				logger.warn(
-					`[AgencySelfReg] ${displayLabel} pulse heartbeat failed: ${e instanceof Error ? e.message : e}`,
-				),
-		);
-	}, heartbeatMs);
+	// 6. P1132: Per-agency heartbeat + dormancy timers removed.
+	// Liveness is now event-driven from the A2A host service (start-a2a-host.ts):
+	//   - fn_pulse(identity, state) called on lifecycle transitions
+	//   - ONE per-host presence-refresh timer iterates children and calls
+	//     fn_pulse('online') to keep agent_registry.last_heartbeat_at fresh
+	//   - Dormancy sweep also belongs to a single host-level process, not
+	//     replicated across N agency runtimes (it was already idempotent across
+	//     the fleet; only one runner is needed)
+	// The legacy heartbeatMs / dormancySweepMs parameters are retained in the
+	// function signature for backwards compatibility but are no longer used.
 
-	// Emit pulse immediately so the agency is visible without waiting heartbeat_ms.
+	// Emit a single pulse on start so the agency is visible without waiting.
 	void pulseHeartbeat(agencyId, { currentTask: "starting" }).catch((e) =>
 		logger.warn(
 			`[AgencySelfReg] ${displayLabel} initial pulse heartbeat failed: ${e instanceof Error ? e.message : e}`,
 		),
 	);
-
-	// 7. Dormancy sweep — marks agencies silent > 90 s as dormant. Cheap to run
-	// from any agency process; idempotent across the fleet.
-	const dormancyTimer = setInterval(async () => {
-		try {
-			const count = await checkAndMarkDormant();
-			if (count > 0) {
-				logger.log(
-					`[AgencySelfReg] ${displayLabel} dormancy sweep: ${count} marked dormant`,
-				);
-			}
-		} catch (err) {
-			logger.warn(
-				`[AgencySelfReg] ${displayLabel} dormancy sweep error: ${err instanceof Error ? err.message : err}`,
-			);
-		}
-	}, dormancySweepMs);
 
 	let stopped = false;
 	const stop = async (
@@ -402,8 +379,6 @@ export async function selfRegisterAgency(
 	): Promise<void> => {
 		if (stopped) return;
 		stopped = true;
-		clearInterval(heartbeatTimer);
-		clearInterval(dormancyTimer);
 		try {
 			hub.stop();
 		} catch (err) {

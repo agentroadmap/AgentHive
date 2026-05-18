@@ -19,7 +19,8 @@
 
 import {
   liaisonRegister,
-  liaisonHeartbeat,
+  // P1132: liaisonHeartbeat import removed — per-process periodic heartbeat
+  // deleted (liveness is event-driven from A2A host service).
   endLiaisonSession,
   type LiaisonRegisterResult,
 } from "./liaison-service.js";
@@ -145,40 +146,16 @@ export async function bootLiaison(
   // and handles downlink directives and cross-project hiveCentral broadcasts.
   const hub = startLiaisonHub(config.agency_id);
 
-
-  let running = true;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-
-  const scheduleNext = () => {
-    if (!running) return;
-    timer = setTimeout(async () => {
-      if (!running) return;
-      try {
-        await liaisonHeartbeat({
-          session_id: session.session_id,
-          status: "active",
-          capacity_envelope: {},
-        });
-      } catch (err) {
-        // Non-fatal but must be visible. Watchdog can't fix what we hide.
-        console.warn(
-          `[liaison:${config.agency_id}] heartbeat failed: ${(err as Error).message}`,
-        );
-      }
-      scheduleNext();
-    }, config.heartbeat_interval_ms);
-  };
-
-  scheduleNext();
+  // P1132: per-process periodic heartbeat removed. Liveness is now event-driven
+  // from the A2A host service (start-a2a-host.ts) which calls fn_pulse(state)
+  // on lifecycle transitions plus one per-host presence-refresh timer that
+  // keeps agent_registry.last_heartbeat_at fresh for existing dispatchability
+  // and maintenance consumers. heartbeat_interval_ms in AgencyConfig is kept
+  // for backwards compatibility but no longer drives a timer in this path.
 
   const shutdown = async (
     reason: "normal" | "crash" | "operator" | "throttle" = "normal"
   ) => {
-    running = false;
-    if (timer !== null) {
-      clearTimeout(timer);
-      timer = null;
-    }
     hub.stop();
     await endLiaisonSession(session.session_id, reason);
   };
