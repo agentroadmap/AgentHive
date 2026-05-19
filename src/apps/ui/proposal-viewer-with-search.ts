@@ -1199,7 +1199,17 @@ export async function viewProposalEnhanced(
 				focusDetailPane();
 				return false;
 			});
-			listBox.key(["enter"], () => {
+			listBox.key(["enter"], async () => {
+				// Ensure the detail pane is populated before focusing it.
+				// onSelect/onHighlight calls applySelection asynchronously, but Enter
+				// fires synchronously — without awaiting we land on focusDetailPane
+				// before descriptionBox is created, which then silently no-ops via
+				// its `if (!descriptionBox) return;` guard.
+				const selected = proposalList?.getSelectedIndex();
+				const idx = Array.isArray(selected) ? selected[0] : selected;
+				if (typeof idx === "number" && filteredProposals[idx]) {
+					await applySelection(filteredProposals[idx]);
+				}
 				focusDetailPane();
 				return false;
 			});
