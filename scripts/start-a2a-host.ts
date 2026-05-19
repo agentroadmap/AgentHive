@@ -17,9 +17,17 @@
  *   - AGENTHIVE_HOST: env / yaml (universal config, structural key)
  *   - All tunables: core.runtime_flag rows (seeded by migration 170-p1132-...)
  *     - A2A_HOST_LISTEN_REFRESH_MS    (registry re-read cadence; see TODO below)
- *     - A2A_HOST_PG_RECONNECT_MS
  *     - A2A_HOST_SHUTDOWN_TIMEOUT_MS
  *     - A2A_HOST_PRESENCE_REFRESH_MS  (compat shim; see TODO below)
+ *
+ * Liveness on PG disconnect (P1138):
+ *   - pool.on("error") → process.exit(1). systemd's Restart=on-failure RestartSec=15
+ *     handles recovery; on restart, main() re-runs loadActiveAgencies() and
+ *     attachListener() per identity, fn_pulse(identity, 'online') fires per
+ *     successful re-attach. ~15-30s presence-stale window during the bounce.
+ *   - In-process reconnect (the deferred Phase 2 of P1138) would shrink that
+ *     window further; the A2A_HOST_PG_RECONNECT_MS flag was removed from
+ *     core.runtime_flag in migration 172 because Phase 1 is exit-only.
  *   - Operator changes via SQL `UPDATE core.runtime_flag SET value_jsonb=...`
  *     Live-reload via runtime_config_changed NOTIFY (no restart).
  *
@@ -70,6 +78,20 @@ import { loadRuntimeEnvFile } from "../src/shared/runtime/config.ts";
 // Protect the shared pool from stray pool.end() in shared CLI code.
 setPoolLifecycleMode("long-running");
 
+// P1138: on terminal PG pool failure, exit(1) so systemd's Restart=on-failure
+// brings us back. Without this, broken LISTENs go undetected — agencies show
+// presence_state='online' (refreshed by the per-host shim) while inbound
+// a2a_msg_<id> NOTIFY events are silently dropped. Pool errors are TERMINAL —
+// the pg library handles per-connection retry internally; .on("error") fires
+// only when the pool can't recover.
+getPool().on("error", (err) => {
+	console.error(
+		`[a2a-host] FATAL pool error — exiting for systemd restart: ${err.message}`,
+	);
+	console.error(err.stack ?? "(no stack)");
+	process.exit(1);
+});
+
 interface AgencyRow {
 	agent_identity: string;
 	preferred_provider: string;
@@ -84,7 +106,6 @@ interface AttachedListener {
 
 interface RuntimeFlags {
 	listenRefreshMs: number;
-	pgReconnectMs: number;
 	shutdownTimeoutMs: number;
 	presenceRefreshMs: number;
 }
@@ -103,7 +124,6 @@ async function loadRuntimeFlags(): Promise<RuntimeFlags> {
 		`SELECT name, value_jsonb FROM core.runtime_flag
 		 WHERE name IN (
 		   'A2A_HOST_LISTEN_REFRESH_MS',
-		   'A2A_HOST_PG_RECONNECT_MS',
 		   'A2A_HOST_SHUTDOWN_TIMEOUT_MS',
 		   'A2A_HOST_PRESENCE_REFRESH_MS'
 		 )`,
@@ -125,7 +145,6 @@ async function loadRuntimeFlags(): Promise<RuntimeFlags> {
 	};
 	return {
 		listenRefreshMs:    need("A2A_HOST_LISTEN_REFRESH_MS"),
-		pgReconnectMs:      need("A2A_HOST_PG_RECONNECT_MS"),
 		shutdownTimeoutMs:  need("A2A_HOST_SHUTDOWN_TIMEOUT_MS"),
 		presenceRefreshMs:  need("A2A_HOST_PRESENCE_REFRESH_MS"),
 	};
