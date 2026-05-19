@@ -559,7 +559,17 @@ export async function runUnifiedView(
 					});
 				};
 
-				// Initial render
+				// Immediate empty render so the screen isn't blank during the ~hundreds-of-ms
+				// it takes Promise.all to resolve. Mirrors System Feed (line ~613) and
+				// Chat (line ~653) which also render empty first then refresh.
+				renderCockpit(screen, {
+					agents: [],
+					proposals: [],
+					ledger: [],
+					messages: [],
+				});
+
+				// Initial render with real data
 				void refresh();
 
 				// Live Update Loop (500ms)
