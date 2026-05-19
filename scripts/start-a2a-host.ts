@@ -67,6 +67,7 @@ import {
 	runLiaisonAgent,
 	type LiaisonAgentHandle,
 } from "../src/infra/agency/liaison-agent.ts";
+import { startLiaisonHub } from "../src/infra/agency/liaison-hub.ts";
 import {
 	closePool,
 	getPool,
@@ -102,6 +103,7 @@ interface AttachedListener {
 	provider: string;
 	bootHandle: LiaisonBootHandle;
 	agentHandle: LiaisonAgentHandle | null;
+	liaisonHub: { stop: () => void } | null;
 }
 
 interface RuntimeFlags {
@@ -258,7 +260,19 @@ async function attachListener(row: AgencyRow): Promise<void> {
 		console.warn(`[a2a-host] runLiaisonAgent failed for ${identity} (non-fatal): ${(err as Error).message}`);
 	}
 
-	attached.set(identity, { identity, provider, bootHandle, agentHandle });
+	// Start the LiaisonHub so this agency consumes liaison_message offer_dispatch
+	// rows from the orchestrator. Without this, OfferDispatcher writes pile up
+	// unacked (311 backlog observed 2026-05-19); claim_expires_at fires; reaper
+	// requeues; dispatch loop never produces a spawn. startLiaisonHub returns
+	// immediately; the listener runs in a void run() background promise.
+	let liaisonHub: { stop: () => void } | null = null;
+	try {
+		liaisonHub = startLiaisonHub(identity);
+	} catch (err) {
+		console.warn(`[a2a-host] startLiaisonHub failed for ${identity} (non-fatal): ${(err as Error).message}`);
+	}
+
+	attached.set(identity, { identity, provider, bootHandle, agentHandle, liaisonHub });
 	await fnPulse(identity, "online");
 	console.log(`[a2a-host] ${identity} online`);
 }
@@ -268,6 +282,13 @@ async function detachListener(identity: string, state: "offline" | "away" = "off
 	if (!m) return;
 	attached.delete(identity);
 	await fnPulse(identity, state);
+	if (m.liaisonHub) {
+		try {
+			m.liaisonHub.stop();
+		} catch (err) {
+			console.warn(`[a2a-host] ${identity} liaisonHub.stop error:`, err);
+		}
+	}
 	if (m.agentHandle) {
 		try {
 			await m.agentHandle.stop();
