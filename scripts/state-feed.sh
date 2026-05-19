@@ -72,7 +72,7 @@ SELECT
     WHEN 'cancelled' THEN '■'
     ELSE '◒'
   END || ' run-' || ar.id ||
-  ' ' || COALESCE(ar.agent_identity, 'agent') ||
+  ' ' || COALESCE(ar_reg.display_label, ar.agent_identity, 'agent') ||
   ' proposal=' || COALESCE(p.display_id, ar.proposal_id::text, '-') ||
   ' stage=' || COALESCE(ar.stage, '-') ||
   ' status=' || ar.status ||
@@ -85,6 +85,7 @@ SELECT
 FROM roadmap_workforce.agent_runs ar
 LEFT JOIN roadmap_proposal.proposal p ON p.id = ar.proposal_id
 LEFT JOIN route ON route.model_name = ar.model_used
+LEFT JOIN roadmap_workforce.v_agent_display_label ar_reg ON ar_reg.agent_identity = ar.agent_identity
 WHERE COALESCE(ar.completed_at, ar.started_at) > '$LAST_CHECK'::timestamptz
 ORDER BY COALESCE(ar.completed_at, ar.started_at) DESC
 LIMIT 20;
@@ -95,7 +96,7 @@ DISPATCHES=$($PG -F'|' -c "
 SELECT
   'dispatch-' || sd.id ||
   ' proposal=' || COALESCE(p.display_id, sd.proposal_id::text) ||
-  ' agency=' || COALESCE(sd.agent_identity, 'unclaimed') ||
+  ' agency=' || COALESCE(sd_reg.display_label, sd.agent_identity, 'unclaimed') ||
   ' role=' || sd.dispatch_role ||
   ' dispatch=' || sd.dispatch_status ||
   ' offer=' || COALESCE(sd.offer_status, '-') ||
@@ -103,6 +104,7 @@ SELECT
   ' worker=' || COALESCE(sd.metadata->>'worker_identity', sd.metadata->>'worktree_hint', '-')
 FROM roadmap_workforce.squad_dispatch sd
 LEFT JOIN roadmap_proposal.proposal p ON p.id = sd.proposal_id
+LEFT JOIN roadmap_workforce.v_agent_display_label sd_reg ON sd_reg.agent_identity = sd.agent_identity
 WHERE sd.assigned_at > '$LAST_CHECK'::timestamptz
    OR (sd.completed_at IS NULL AND (sd.dispatch_status IN ('assigned','active','blocked') OR sd.offer_status IN ('open','claimed','activated')))
 ORDER BY COALESCE(sd.completed_at, sd.assigned_at) DESC
@@ -112,7 +114,17 @@ LIMIT 20;
 # --- Registered agencies ---
 AGENCIES=$($PG -F'|' -c "
 SELECT
-  ar.agent_identity ||
+  COALESCE(
+    CASE
+      WHEN ar.display_alias IS NULL THEN NULL
+      WHEN array_length(string_to_array(ar.display_alias, '-'), 1) = 3
+       AND lower(split_part(ar.display_alias, '-', 2))
+           IN (SELECT lower(host_id) FROM roadmap.agency WHERE host_id IS NOT NULL)
+        THEN split_part(ar.display_alias, '-', 1) || '-' || split_part(ar.display_alias, '-', 3)
+      ELSE ar.display_alias
+    END,
+    ar.agent_identity
+  ) ||
   ' type=' || ar.agent_type ||
   ' status=' || ar.status ||
   ' role=' || COALESCE(ar.role, '-') ||
@@ -121,7 +133,7 @@ SELECT
 FROM roadmap_workforce.agent_registry ar
 LEFT JOIN roadmap_workforce.agent_capability ac ON ac.agent_id = ar.id
 WHERE ar.agent_type = 'agency'
-GROUP BY ar.agent_identity, ar.agent_type, ar.status, ar.role, ar.preferred_model
+GROUP BY ar.agent_identity, ar.display_alias, ar.agent_type, ar.status, ar.role, ar.preferred_model
 ORDER BY ar.agent_identity
 LIMIT 20;
 " 2>/dev/null)
