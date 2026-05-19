@@ -4411,30 +4411,12 @@ async function handleBoardView(options: {
 					}))
 				: await core.loadProposals();
 
-		const [directiveEntities, archivedDirectives] = await Promise.all([
-			core.filesystem.listDirectives(),
-			core.filesystem.listArchivedDirectives(),
-		]);
-
-		const availableDirectives = [...directiveEntities, ...archivedDirectives]
-			.map((directive) => directive.title.trim())
-			.filter(Boolean);
-
-		const { renderBoardTui } = await import("../ui/board.ts");
-		await renderBoardTui(proposals, statuses, _layout, _maxColumnWidth, {
-			projectRoot: core.getProjectRoot(),
+		const { runUnifiedView } = await import("../ui/unified-view.ts");
+		await runUnifiedView({
+			core,
+			initialView: "kanban",
+			proposals,
 			directiveMode: options.directives,
-			directiveEntities,
-			availableLabels: config?.labels || [],
-			availableDirectives,
-			onTabPress: async () => {
-				const { runUnifiedView } = await import("../ui/unified-view.ts");
-				await runUnifiedView({
-					core,
-					initialView: "cockpit",
-					proposals,
-				});
-			},
 		});
 	} catch (error) {
 		console.error(error instanceof Error ? error.message : error);

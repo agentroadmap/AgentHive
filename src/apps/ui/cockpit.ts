@@ -73,6 +73,7 @@ export function renderCockpit(
 			width: "100%",
 			height: "100%",
 			tags: true,
+			keys: true,
 		});
 		(screen as any)._cockpitContainer = container;
 
@@ -100,6 +101,7 @@ export function renderCockpit(
 			label: " [F1] Workforce Pulse ",
 			tags: true,
 			scrollable: true,
+			keys: true,
 			style: { border: { fg: "green" } },
 		});
 		container._workforceBox = workforceBox;
@@ -115,6 +117,7 @@ export function renderCockpit(
 			label: " [F4] Pipeline Traffic ",
 			tags: true,
 			scrollable: true,
+			keys: true,
 			style: { border: { fg: "magenta" } },
 		});
 		container._pipelineBox = pipelineBox;
@@ -130,6 +133,7 @@ export function renderCockpit(
 			label: " [F2] The Ledger (Spending) ",
 			tags: true,
 			scrollable: true,
+			keys: true,
 			style: { border: { fg: "yellow" } },
 		});
 		container._ledgerBox = ledgerBox;
@@ -144,11 +148,29 @@ export function renderCockpit(
 			border: { type: "line" },
 			label: " [F3] Terminal bridge ",
 			tags: true,
+			keys: true,
 			style: { border: { fg: "cyan" } },
 			scrollback: 100,
 			scrollbar: { ch: " ", track: { bg: "cyan" }, style: { inverse: true } },
 		});
 		container._terminalLog = terminalLog;
+
+		const emitExit = () => {
+			(screen as any).emit("cockpit:exit");
+		};
+		const emitSwitch = () => {
+			(screen as any).emit("cockpit:switch");
+		};
+		for (const target of [
+			container,
+			workforceBox,
+			pipelineBox,
+			ledgerBox,
+			terminalLog,
+		]) {
+			target.key?.(["q", "Q", "escape", "C-c"], emitExit);
+			target.key?.(["tab"], emitSwitch);
+		}
 
 		// Footer
 		box({
@@ -216,11 +238,7 @@ export function renderCockpit(
 	statuses.forEach((s) => {
 		const count = statusCounts[s] || 0;
 		const color =
-			s === "Develop"
-				? "yellow-fg"
-				: s === "Complete"
-					? "green-fg"
-					: "gray-fg";
+			s === "Develop" ? "yellow-fg" : s === "Complete" ? "green-fg" : "gray-fg";
 		pipelineLines.push(`{${color}}${s.padEnd(10)}{/} : ${count}`);
 	});
 	pipelineLines.push("\n{bold}Recent Activity:{/}");
