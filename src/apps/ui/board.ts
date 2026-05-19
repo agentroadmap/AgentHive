@@ -1437,12 +1437,15 @@ export async function renderBoardTui(
 		};
 
 		const focusFilterControl = (
-			filterId: "search" | "priority" | "directive" | "labels",
+			filterId: "search" | "status" | "priority" | "directive" | "labels",
 		) => {
 			if (!filterHeader) return;
 			switch (filterId) {
 				case "search":
 					filterHeader.focusSearch();
+					break;
+				case "status":
+					filterHeader.focusStatus();
 					break;
 				case "priority":
 					filterHeader.focusPriority();
@@ -1454,6 +1457,40 @@ export async function renderBoardTui(
 					filterHeader.focusLabels();
 					break;
 			}
+		};
+
+		const getStatusFilterChoices = (): string[] => {
+			const workflowProposals = filterProposalsForWorkflow(
+				currentProposals,
+				currentWorkflow,
+			);
+			const resolved = orderStatusesFromBoardState(
+				resolveWorkflowStatuses(workflowProposals, currentWorkflow),
+			);
+			const byLower = new Map<string, string>();
+			for (const status of [
+				...resolved,
+				...currentStatuses,
+				...hiddenColumns,
+			]) {
+				const trimmed = status.trim();
+				if (!trimmed) continue;
+				const key = trimmed.toLowerCase();
+				if (!byLower.has(key)) {
+					byLower.set(key, trimmed);
+				}
+			}
+			return [...byLower.values()];
+		};
+
+		const updateStatusFilterLabel = (choices = getStatusFilterChoices()) => {
+			const selectedCount = choices.filter((s) => !hiddenColumns.has(s)).length;
+			filterHeader?.setFilters({
+				status:
+					selectedCount === choices.length
+						? ""
+						: `${selectedCount}/${choices.length}`,
+			});
 		};
 
 		const openFilterPicker = async (
@@ -1554,10 +1591,7 @@ export async function renderBoardTui(
 				}
 
 				if (filterId === "status") {
-					const allStatusesInView = resolveWorkflowStatuses(
-						getVisibleWorkflowProposals(),
-						currentWorkflow,
-					);
+					const allStatusesInView = getStatusFilterChoices();
 					const selected = await openMultiSelectFilterPopup({
 						screen,
 						title: "Status Filter",
@@ -1573,6 +1607,7 @@ export async function renderBoardTui(
 						for (const status of nextHidden) {
 							hiddenColumns.add(status);
 						}
+						updateStatusFilterLabel(allStatusesInView);
 						applyColumnVisibility();
 					}
 					return;
@@ -1596,9 +1631,7 @@ export async function renderBoardTui(
 			} finally {
 				filterPopupOpen = false;
 				focusFilterControl(
-					filterId === "status" ||
-						filterId === "workflow" ||
-						filterId === "maturity"
+					filterId === "workflow" || filterId === "maturity"
 						? "search"
 						: filterId,
 				);
@@ -1611,9 +1644,10 @@ export async function renderBoardTui(
 			statuses: [],
 			availableLabels: configuredLabels,
 			availableDirectives,
-			visibleFilters: ["search", "priority", "directive", "labels"],
+			visibleFilters: ["search", "status", "priority", "directive", "labels"],
 			initialFilters: {
 				search: sharedFilters.searchQuery,
+				status: "",
 				priority: sharedFilters.priorityFilter,
 				labels: sharedFilters.labelFilter,
 				directive: sharedFilters.directiveFilter,
@@ -1627,12 +1661,10 @@ export async function renderBoardTui(
 				renderView();
 			},
 			onFilterPickerOpen: (filterId) => {
-				if (filterId === "status") {
-					return;
-				}
 				void openFilterPicker(filterId);
 			},
 		});
+		updateStatusFilterLabel();
 		filterHeader.setFocusChangeHandler((focus) => {
 			if (focus !== null) {
 				currentFocus = "filters";
@@ -1853,7 +1885,7 @@ export async function renderBoardTui(
 			updateFooter();
 		});
 
-		screen.key(["f", "F"], () => {
+		const toggleFeedView = () => {
 			if (popupOpen || filterPopupOpen || moveOp || currentFocus === "filters")
 				return;
 			feedOnlyMode = !feedOnlyMode;
@@ -1869,7 +1901,9 @@ export async function renderBoardTui(
 			syncBoardAreaLayout();
 			updateFooter();
 			screen.render();
-		});
+		};
+
+		screen.key(["s", "S"], toggleFeedView);
 
 		screen.key(["e", "E"], () => {
 			if (popupOpen || filterPopupOpen || moveOp || currentFocus === "filters")
@@ -1898,14 +1932,9 @@ export async function renderBoardTui(
 			void openFilterPicker("priority");
 		});
 
-		screen.key(["l", "L"], () => {
+		screen.key(["f", "F", "l", "L"], () => {
 			if (popupOpen || filterPopupOpen || moveOp) return;
 			void openFilterPicker("labels");
-		});
-
-		screen.key(["s", "S"], () => {
-			if (popupOpen || filterPopupOpen || moveOp) return;
-			void openFilterPicker("status");
 		});
 
 		screen.key(["t", "T"], () => {

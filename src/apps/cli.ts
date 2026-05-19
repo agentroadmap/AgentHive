@@ -4427,6 +4427,14 @@ async function handleBoardView(options: {
 			directiveEntities,
 			availableLabels: config?.labels || [],
 			availableDirectives,
+			onTabPress: async () => {
+				const { runUnifiedView } = await import("../ui/unified-view.ts");
+				await runUnifiedView({
+					core,
+					initialView: "cockpit",
+					proposals,
+				});
+			},
 		});
 	} catch (error) {
 		console.error(error instanceof Error ? error.message : error);
