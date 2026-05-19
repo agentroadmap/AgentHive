@@ -163,6 +163,19 @@ async function subscribeFlagsReload(): Promise<void> {
 				process.env.PGDATABASE ?? databaseUrl?.pathname.replace(/^\/+/, "") ?? "agenthive",
 			application_name: `agenthive-a2a-host-flags-${host}`,
 		});
+		// P1138: explicit error handler. Without it, when this dedicated Client's
+		// connection is terminated (e.g., PG restart, pg_terminate_backend, network
+		// drop), pg emits an 'error' event with no listener → Node's default
+		// uncaughtException path crashes the process. That accidentally produced the
+		// correct outcome (systemd restart), but relied on a brittle default. The
+		// explicit handler makes the exit deliberate.
+		client.on("error", (err) => {
+			console.error(
+				`[a2a-host] FATAL flagsReloadClient error — exiting for systemd restart: ${err.message}`,
+			);
+			console.error(err.stack ?? "(no stack)");
+			process.exit(1);
+		});
 		await client.connect();
 		await client.query("LISTEN runtime_config_changed");
 		client.on("notification", () => {
