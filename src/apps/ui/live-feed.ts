@@ -177,17 +177,7 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					ar.agent_identity AS agent_id,
 					COALESCE(p.display_id || ' ', '') ||
 						'run-' || ar.id::text || ' ' ||
-						COALESCE(
-							CASE
-								WHEN ar_reg.display_alias IS NULL THEN NULL
-								WHEN array_length(string_to_array(ar_reg.display_alias, '-'), 1) = 3
-								 AND lower(split_part(ar_reg.display_alias, '-', 2)) IN (SELECT host_id FROM hosts)
-									THEN split_part(ar_reg.display_alias, '-', 1) || '-' || split_part(ar_reg.display_alias, '-', 3)
-										|| ' (' || ar.agent_identity || ')'
-								ELSE ar_reg.display_alias || ' (' || ar.agent_identity || ')'
-							END,
-							ar.agent_identity
-						) || ' ' ||
+						COALESCE(ar_reg.display_label, ar.agent_identity) || ' ' ||
 						COALESCE(ar.activity, ar.status) ||
 						' stage=' || ar.stage ||
 						CASE
@@ -201,7 +191,7 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 						END AS message
 				FROM roadmap_workforce.agent_runs ar
 				LEFT JOIN roadmap_proposal.proposal p ON p.id = ar.proposal_id
-				LEFT JOIN roadmap_workforce.agent_registry ar_reg ON ar_reg.agent_identity = ar.agent_identity
+				LEFT JOIN roadmap_workforce.v_agent_display_label ar_reg ON ar_reg.agent_identity = ar.agent_identity
 				LEFT JOIN LATERAL (
 					SELECT model_name, route_provider, agent_provider, agent_cli
 					FROM roadmap.model_routes
@@ -218,22 +208,11 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					EXTRACT(EPOCH FROM tl.created_at) * 1000 AS timestamp_ms,
 					p.display_id AS proposal_id,
 					tl.agent_identity AS agent_id,
-					COALESCE(p.display_id || ' ', '') ||
-						COALESCE(
-							CASE
-								WHEN tl_reg.display_alias IS NULL THEN NULL
-								WHEN array_length(string_to_array(tl_reg.display_alias, '-'), 1) = 3
-								 AND lower(split_part(tl_reg.display_alias, '-', 2)) IN (SELECT host_id FROM hosts)
-									THEN split_part(tl_reg.display_alias, '-', 1) || '-' || split_part(tl_reg.display_alias, '-', 3)
-										|| ' (' || tl.agent_identity || ')'
-								ELSE tl_reg.display_alias || ' (' || tl.agent_identity || ')'
-							END,
-							tl.agent_identity
-						) || ' tokens ' || tl.token_count::text ||
+					COALESCE(p.display_id || ' ', '') || COALESCE(tl_reg.display_label, tl.agent_identity) || ' tokens ' || tl.token_count::text ||
 						' cost $' || to_char(tl.cost_usd, 'FM999999990.0000') AS message
 				FROM roadmap_efficiency.token_ledger tl
 				LEFT JOIN roadmap_proposal.proposal p ON p.id = tl.proposal_id
-				LEFT JOIN roadmap_workforce.agent_registry tl_reg ON tl_reg.agent_identity = tl.agent_identity
+				LEFT JOIN roadmap_workforce.v_agent_display_label tl_reg ON tl_reg.agent_identity = tl.agent_identity
 
 				UNION ALL
 
@@ -243,19 +222,9 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					EXTRACT(EPOCH FROM chl.hit_at) * 1000 AS timestamp_ms,
 					NULL AS proposal_id,
 					chl.agent_identity AS agent_id,
-					COALESCE(
-						CASE
-							WHEN ch_reg.display_alias IS NULL THEN NULL
-							WHEN array_length(string_to_array(ch_reg.display_alias, '-'), 1) = 3
-							 AND lower(split_part(ch_reg.display_alias, '-', 2)) IN (SELECT host_id FROM hosts)
-								THEN split_part(ch_reg.display_alias, '-', 1) || '-' || split_part(ch_reg.display_alias, '-', 3)
-									|| ' (' || chl.agent_identity || ')'
-							ELSE ch_reg.display_alias || ' (' || chl.agent_identity || ')'
-						END,
-						chl.agent_identity
-					) || ' cache hit saved $' || to_char(chl.cost_saved_usd, 'FM999999990.0000') AS message
+					COALESCE(chl_reg.display_label, chl.agent_identity) || ' cache hit saved $' || to_char(chl.cost_saved_usd, 'FM999999990.0000') AS message
 				FROM roadmap_efficiency.cache_hit_log chl
-				LEFT JOIN roadmap_workforce.agent_registry ch_reg ON ch_reg.agent_identity = chl.agent_identity
+				LEFT JOIN roadmap_workforce.v_agent_display_label chl_reg ON chl_reg.agent_identity = chl.agent_identity
 			)
 			SELECT id, type, timestamp_ms, proposal_id, agent_id, message
 			FROM feed
