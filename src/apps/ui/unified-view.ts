@@ -21,7 +21,7 @@ import {
 	buildProposalViewerDirectiveFilterModel,
 	viewProposalEnhanced,
 } from "./proposal-viewer-with-search.ts";
-import { createScreen } from "./tui.ts";
+import { createScreen, destroySharedScreen } from "./tui.ts";
 import {
 	type ViewProposal,
 	ViewSwitcher,
@@ -332,7 +332,10 @@ export async function runUnifiedView(
 				emitBoardUpdate();
 			},
 		});
-		process.on("exit", () => configWatcher.stop());
+		process.on("exit", () => {
+			configWatcher.stop();
+			destroySharedScreen();
+		});
 
 		// Function to show proposal view
 		const showProposalView = async (): Promise<ViewResult> => {
