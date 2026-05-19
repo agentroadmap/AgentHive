@@ -94,6 +94,13 @@ export function renderHeadlines(
 			});
 		container._lastMsgTimestamp =
 			messages.length > 0 ? messages[0].timestamp : 0;
+
+		// blessed needs an explicit focus target to render. Without this the
+		// screen draws but to no focused context — appears black. Mirror
+		// the focus pattern from board.ts.
+		try {
+			container.focus?.();
+		} catch { /* ignore */ }
 	} else {
 		feedLog = container._feedLog;
 	}
