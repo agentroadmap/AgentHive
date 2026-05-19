@@ -4,6 +4,7 @@ import type { Proposal } from "../../src/types/index.ts";
 import {
 	type ColumnData,
 	filterBoardColumns,
+	orderStatusesBySavedColumns,
 	shouldRebuildColumns,
 } from "../../src/ui/board.ts";
 import { expect } from "../support/test-utils.ts";
@@ -129,5 +130,35 @@ describe("filterBoardColumns", () => {
 		expect(result.length).toBe(2);
 		expect(result[0]?.status).toBe("Active");
 		expect(result[1]?.status).toBe("Abandoned");
+	});
+});
+
+describe("orderStatusesBySavedColumns", () => {
+	it("preserves saved order and appends newly discovered statuses", () => {
+		const result = orderStatusesBySavedColumns(
+			["DRAFT", "REVIEW", "DEVELOP", "MERGE", "COMPLETE", "BLOCKED"],
+			["COMPLETE", "DEVELOP", "DRAFT", "REVIEW", "MERGE"],
+			{ savedWorkflow: "", currentWorkflow: "" },
+		);
+
+		expect(result).toEqual([
+			"COMPLETE",
+			"DEVELOP",
+			"DRAFT",
+			"REVIEW",
+			"MERGE",
+			"BLOCKED",
+		]);
+	});
+
+	it("ignores saved order from a different workflow", () => {
+		const statuses = ["DRAFT", "REVIEW", "DEVELOP"];
+
+		expect(
+			orderStatusesBySavedColumns(statuses, ["DEVELOP", "DRAFT"], {
+				savedWorkflow: "Hotfix",
+				currentWorkflow: "Standard RFC",
+			}),
+		).toEqual(statuses);
 	});
 });
