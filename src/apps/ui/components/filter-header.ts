@@ -81,6 +81,13 @@ const ALL_FILTER_ITEMS: FilterItem[] = [
 		flexGrow: false,
 	},
 	{
+		id: "maturity",
+		labelText: "Maturity:",
+		labelWidth: 9,
+		minWidth: 20,
+		flexGrow: false,
+	},
+	{
 		id: "priority",
 		labelText: "Priority:",
 		labelWidth: 9,
@@ -99,13 +106,6 @@ const ALL_FILTER_ITEMS: FilterItem[] = [
 		labelText: "Labels:",
 		labelWidth: 8,
 		minWidth: 18,
-		flexGrow: false,
-	},
-	{
-		id: "maturity",
-		labelText: "Maturity:",
-		labelWidth: 9,
-		minWidth: 20,
 		flexGrow: false,
 	},
 ];

@@ -1584,6 +1584,10 @@ export async function renderBoardTui(
 					});
 					if (selected !== null) {
 						currentMaturity = selected;
+						// "non-obsolete" is the default — show blank label instead of the value.
+						filterHeader?.setFilters({
+							maturity: selected === "non-obsolete" ? "" : selected,
+						});
 						renderView();
 						saveCurrentBoardState();
 					}
@@ -1644,10 +1648,11 @@ export async function renderBoardTui(
 			statuses: [],
 			availableLabels: configuredLabels,
 			availableDirectives,
-			visibleFilters: ["search", "status", "priority", "directive", "labels"],
+			visibleFilters: ["search", "status", "maturity", "priority", "directive", "labels"],
 			initialFilters: {
 				search: sharedFilters.searchQuery,
 				status: "",
+				maturity: currentMaturity === "non-obsolete" ? "" : currentMaturity,
 				priority: sharedFilters.priorityFilter,
 				labels: sharedFilters.labelFilter,
 				directive: sharedFilters.directiveFilter,
