@@ -24,6 +24,11 @@ import { query } from "../postgres/pool.ts";
 import { spawnAgent } from "../../core/orchestration/agent-spawner.ts";
 import type { SpawnResult } from "../../core/orchestration/agent-spawner.ts";
 import type { LiaisonMessage } from "./liaison-message-types.ts";
+// P1140 sibling: `sendMessage` is the default for sendUplink (line ~257);
+// referenced as a bare identifier without an import, causing
+// ReferenceError on every offer_dispatch handler invocation. Surfaced
+// once commit a30efd37 unblocked the LiaisonHub consumption path.
+import { sendMessage } from "./liaison-message-service.ts";
 import {
 	classifyProviderSignal,
 	setProviderCooldown,
