@@ -21,7 +21,7 @@ import {
 	buildProposalViewerDirectiveFilterModel,
 	viewProposalEnhanced,
 } from "./proposal-viewer-with-search.ts";
-import { createScreen, destroySharedScreen } from "./tui.ts";
+import { createScreen } from "./tui.ts";
 import {
 	type ViewProposal,
 	ViewSwitcher,
@@ -786,7 +786,5 @@ export async function runUnifiedView(
 	} catch (error) {
 		console.error(error instanceof Error ? error.message : error);
 		process.exit(1);
-	} finally {
-		destroySharedScreen();
 	}
 }
