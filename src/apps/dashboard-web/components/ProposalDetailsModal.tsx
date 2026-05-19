@@ -11,7 +11,7 @@ import {
 	proposalExportFilename,
 	type ProposalExportBundle,
 } from "../../../shared/proposal-markdown-export";
-import { formatStoredUtcDateForDisplay } from "../utils/date-display";
+import { formatStoredUtcDateForDisplay, parseStoredUtcDate } from "../utils/date-display";
 import AcceptanceCriteriaEditor from "./AcceptanceCriteriaEditor";
 import ChipInput from "./ChipInput";
 import DependencyInput from "./DependencyInput";
@@ -448,7 +448,11 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 		for (const r of reviews) candidates.push({ date: r.reviewed_at, label: `review by ${r.reviewer_identity}` });
 		for (const d of decisions) candidates.push({ date: d.decided_at, label: `decision by ${d.authority}` });
 		if (candidates.length === 0) return null;
-		return candidates.reduce((max, cur) => (cur.date > max.date ? cur : max));
+		return candidates.reduce((max, cur) => {
+			const curTs = parseStoredUtcDate(cur.date)?.getTime() ?? 0;
+			const maxTs = parseStoredUtcDate(max.date)?.getTime() ?? 0;
+			return curTs > maxTs ? cur : max;
+		});
 	}, [proposal, discussions, reviews, decisions]);
 
 	// Reset local proposal only when the selected proposal changes.
