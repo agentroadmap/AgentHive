@@ -497,15 +497,8 @@ export async function runUnifiedView(
 						clearInterval(timer);
 						timer = null;
 					}
-					// Tab-switch: detach the screen so its program survives for the
-					// next view. screen.destroy() also kills program (terminal owner)
-					// and that's what caused views 2/3/4 to render black after Tab.
-					// On final exit (q/Esc/Ctrl-C), the process exits anyway so
-					// leaving the screen detached doesn't leak.
 					delete (screen as any)._cockpitContainer;
-					try {
-						(screen as any).leave?.();
-					} catch { /* ignore */ }
+					(screen as any).destroy();
 					resolve(result);
 				};
 
@@ -641,17 +634,13 @@ export async function runUnifiedView(
 					onTabPress();
 					clearInterval(timer);
 					delete (screen as any)._headlinesContainer;
-					try {
-						(screen as any).leave?.();
-					} catch { /* ignore */ }
+					(screen as any).destroy();
 					resolve("switch");
 				});
 					(screen as any).key(["q", "Q", "escape", "C-c"], () => {
 						clearInterval(timer);
 						delete (screen as any)._headlinesContainer;
-						try {
-							(screen as any).leave?.();
-						} catch { /* ignore */ }
+						(screen as any).destroy();
 					resolve("exit");
 				});
 			});
@@ -726,17 +715,13 @@ export async function runUnifiedView(
 					onTabPress();
 					clearInterval(timer);
 					delete (screen as any)._chatContainer;
-					try {
-						(screen as any).leave?.();
-					} catch { /* ignore */ }
+					(screen as any).destroy();
 					resolve("switch");
 				});
 					(screen as any).key(["q", "Q", "escape", "C-c"], () => {
 						clearInterval(timer);
 						delete (screen as any)._chatContainer;
-						try {
-							(screen as any).leave?.();
-						} catch { /* ignore */ }
+						(screen as any).destroy();
 					resolve("exit");
 				});
 			});
