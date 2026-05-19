@@ -208,10 +208,6 @@ export function registerStateMachineCommand(program: any) {
         const identity = permanent?.agentIdentity ?? opts.identity;
         const provider = opts.provider ?? permanent?.provider ?? null;
         // 1. Register agency in agent_registry
-        const { resolvePermanentAgentMapping } = await import("../../core/identity/agent-registry/permanent-agent-map.ts");
-        const permanent = resolvePermanentAgentMapping(opts.identity);
-        const identity = permanent?.agentIdentity ?? opts.identity;
-        const provider = opts.provider ?? permanent?.provider ?? null;
         const { rows } = await query(
           `INSERT INTO roadmap_workforce.agent_registry
              (agent_identity, agent_type, status, preferred_provider, preferred_model)
