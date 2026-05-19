@@ -19,7 +19,7 @@
  *                    so the timeout-cron must escalate them.
  * --kill-cron-at-min N  optionally invoke `pkill -9 timeout-cron` mid-soak
  *                       to validate G3 (poison-pill counter persistence).
- *                       Requires P889 (escalation_failure_count column).
+ *                       Requires P900 (escalation_failure_count column).
  *
  * Pass criteria (printed at end):
  *   1. p50 wake latency < 250ms  AND  p99 wake latency < 1000ms

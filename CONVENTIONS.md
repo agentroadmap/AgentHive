@@ -58,6 +58,10 @@ Important live facts:
 - Do not drop compatibility columns or old views unless your task explicitly completes the runtime migration and verifies every dependent code path.
 - Live data may still contain legacy-cased stage values such as `REVIEW` and `DEVELOP`. Avoid brittle case-sensitive assumptions in SQL and code.
 
+**Process supervision topology (P1095):** MCP and agency liaisons are **not** embedded in the orchestrator — they are independent systemd units. `agenthive-mcp.service` (`Restart=always`, `RestartSec=3`) owns the listener on `127.0.0.1:6421`; liveness check: `curl -fsS http://127.0.0.1:6421/health`. Each active agency runs as `agenthive-agency@<id>.service` (`Restart=on-failure`, `RestartSec=15`, `Requires=agenthive-mcp.service`). The orchestrator, MCP server, state-feed, board, and agency liaison units are peers under systemd — no process is the parent of another; stopping the orchestrator does not stop MCP or liaisons. Full topology and failure-mode table: `docs/architecture/mcp-liaison-topology.md`.
+
+**Pool lifecycle invariant (P1123):** long-running services that use the shared Postgres singleton MUST call `setPoolLifecycleMode("long-running")` at startup. In long-running mode, accidental `getPool().end()` calls are ignored with an error-level stack trace; real shutdown must use `closePool()`, which bypasses the sentinel intentionally. If a service reports `pool_poisoned` on `control_feed` / `agent_lifecycle_events` or `Cannot use a pool after calling end`, follow `docs/operations/board-stale.md`.
+
 ## 3. Where Things Live
 
 ### Tracked vs untracked, at a glance

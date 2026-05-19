@@ -45,6 +45,12 @@ import {
 	shadowCheck,
 	type RoleProfile,
 } from "./role-resolver.ts";
+import {
+	classifyProviderSignal,
+	isProviderInCooldown,
+	setProviderCooldown,
+	recordProviderSuccess,
+} from "./provider-cooldown.ts";
 
 const MCP_URL = getMcpUrl();
 const AGENTHIVE_HOST = process.env.AGENTHIVE_HOST ?? "default";
@@ -499,100 +505,8 @@ async function matchAgentsForState(state: string): Promise<MatchedAgent[]> {
 }
 
 // ─── Provider Health & Dynamic Control ─────────────────────────────────────
-
-const RATE_LIMIT_PATTERNS = [
-	/rate.?limit/i,
-	/429/,
-	/too many requests/i,
-	/throttle/i,
-	/retry.?after/i,
-	/rpm.?exceeded/i,
-	/tpm.?exceeded/i,
-];
-
-const CREDIT_PATTERNS = [
-	/credit/i,
-	/insufficient.?funds/i,
-	/billing/i,
-	/quota.?exceeded/i,
-	/usage.?limit/i,
-	/budget.?exceeded/i,
-];
-
-/**
- * Classify an error string into rate_limit, credit_exhausted, or unknown.
- */
-function classifyProviderError(stderr: string): {
-	type: "rate_limit" | "credit_exhausted" | "unknown";
-	matched: string;
-} | null {
-	for (const pat of RATE_LIMIT_PATTERNS) {
-		const m = stderr.match(pat);
-		if (m) return { type: "rate_limit", matched: m[0] };
-	}
-	for (const pat of CREDIT_PATTERNS) {
-		const m = stderr.match(pat);
-		if (m) return { type: "credit_exhausted", matched: m[0] };
-	}
-	return null;
-}
-
-/**
- * Check if a provider is in cooldown. Returns true if provider should NOT be used.
- */
-async function isProviderInCooldown(provider: string): Promise<boolean> {
-	const { rows } = await query<{ in_cooldown: boolean }>(
-		`SELECT (cooldown_until IS NOT NULL AND cooldown_until > now()) AS in_cooldown
-       FROM roadmap.provider_health
-       WHERE provider_name = $1`,
-		[provider],
-	);
-	return rows[0]?.in_cooldown ?? false;
-}
-
-/**
- * Set cooldown on a provider. rate_limit: 2min backoff, credit_exhausted: 30min.
- */
-async function setProviderCooldown(
-	provider: string,
-	errorType: "rate_limit" | "credit_exhausted",
-	errorMsg: string,
-): Promise<void> {
-	const cooldownMinutes = errorType === "rate_limit" ? 2 : 30;
-	await query(
-		`INSERT INTO roadmap.provider_health
-       (provider_name, status, last_error_at, last_error_msg, error_count, cooldown_until, updated_at)
-     VALUES ($1, $2, now(), $3, 1, now() + interval '${cooldownMinutes} minutes', now())
-     ON CONFLICT (provider_name) DO UPDATE SET
-       status = EXCLUDED.status,
-       last_error_at = now(),
-       last_error_msg = EXCLUDED.last_error_msg,
-       error_count = roadmap.provider_health.error_count + 1,
-       cooldown_until = now() + interval '${cooldownMinutes} minutes',
-       updated_at = now()`,
-		[
-			provider,
-			errorType === "rate_limit" ? "rate_limited" : "credit_exhausted",
-			errorMsg.slice(0, 500),
-		],
-	);
-	logger.warn(
-		`⏱ Provider ${provider} → ${errorType}, cooldown ${cooldownMinutes}min: ${errorMsg.slice(0, 100)}`,
-	);
-}
-
-/**
- * Record a successful run for a provider (resets error_count, clears cooldown).
- */
-async function recordProviderSuccess(provider: string): Promise<void> {
-	await query(
-		`UPDATE roadmap.provider_health
-        SET status = 'healthy', error_count = 0, cooldown_until = NULL,
-            last_success_at = now(), updated_at = now()
-      WHERE provider_name = $1`,
-		[provider],
-	);
-}
+// isProviderInCooldown / setProviderCooldown / recordProviderSuccess /
+// classifyProviderSignal are now imported from ./provider-cooldown.ts
 
 type GateDefinition = {
 	gate: "D1" | "D2" | "D3" | "D4";
@@ -1021,7 +935,7 @@ function safeParseMcpResponse(text: string | undefined): any {
 	}
 }
 
-// Dispatch agent to cubic — uses cubic_acquire for atomic find-or-create + focus
+// P904-A1: cubic_acquire removed — dispatch via offer (postWorkOffer + OfferClaimLoop).
 async function dispatchAgent(
 	agent: string,
 	proposalId: string,
@@ -1031,46 +945,9 @@ async function dispatchAgent(
 	agentLabel?: string,
 	activity?: string,
 	requiredCapabilities: string[] = [],
-): Promise<string | null> {
-	const client = new Client({ name: "orchestrator", version: "1.0.0" });
-	const transport = new SSEClientTransport(new URL(MCP_URL));
-
+): Promise<boolean> {
 	try {
 		const selectedWorktree = await selectExecutorWorktree(agent);
-
-		await client.connect(transport);
-
-		// Single MCP call replaces: cubic_list → cubic_recycle → cubic_focus
-		// Pass the worktree *basename* — the MCP-side safeWorktreePath() normalizes
-		// it as an agent-id and joins with WORKTREE_ROOT itself. Passing a full
-		// absolute path triggers normalizeAgentId rejection ("path traversal").
-		const acquired = await client.callTool({
-			name: "cubic_acquire",
-			arguments: {
-				agent_identity: agent,
-				proposal_id: Number(proposalId),
-				phase,
-				worktree_path: selectedWorktree,
-			},
-		});
-		const data = safeParseMcpResponse(mcpText(acquired));
-
-		if (!data?.success || !data?.cubic_id) {
-			logger.warn(
-				`cubic_acquire failed for ${agent} on P${proposalId}: ${mcpText(acquired)?.substring(0, 120)}`,
-			);
-			return null;
-		}
-
-		const cubicId = data.cubic_id as string;
-		const verb = data.was_created
-			? "📦 New"
-			: data.was_recycled
-				? "♻️ Recycled"
-				: "🔄 Reused";
-		logger.log(
-			`${verb} cubic ${cubicId.substring(0, 8)} for ${agent} → P${proposalId} (${phase})`,
-		);
 
 		// P466 — assemble a warm-boot briefing BEFORE posting the offer. Without
 		// this, the spawned child receives only the generic role prompt and runs
@@ -1179,17 +1056,10 @@ async function dispatchAgent(
 				`📬 Posted offer ${dispatchId} for ${agent} on P${proposalId} (${stage})`,
 			);
 
-			// P914: liaison-message emit was removed from this path. The orchestrator
-			// now runs OfferClaimLoop (in src/core/orchestration/orchestrator.ts) which
-			// LISTENs on the `work_offers` channel that postWorkOffer fires. On wake,
-			// the loop calls fn_claim_work_offer to obtain a claim_token, then routes
-			// through OrchestratorOfferDispatcher → liaison_message with all required
-			// fields populated (offer_id, claim_token, dispatch_id, route_hint,
-			// briefing_id, lease_ttl_seconds). The previous inline emit could not
-			// supply claim_token (the offer hadn't been claimed yet) and the agency's
-			// OfferDispatchHandler rejected it as "malformed payload, missing
-			// offer_id/role".
-			return cubicId;
+			// P914/P904: OfferClaimLoop LISTENs on `work_offers` and emits the
+			// offer_dispatch liaison_message with claim_token once the offer is
+			// claimed. No inline emit needed here.
+			return true;
 		}
 
 		// Direct spawn path (used when AGENTHIVE_USE_OFFER_DISPATCH is not set)
@@ -1232,7 +1102,7 @@ async function dispatchAgent(
 			logger.warn(
 				`No free worktree for ${agent} on P${proposalId} — skipping dispatch`,
 			);
-			return null;
+			return false;
 		}
 		// P405: resolve provider from model_routes, not worktree metadata
 		const activeProvider = await resolveActiveRouteProvider();
@@ -1287,20 +1157,18 @@ async function dispatchAgent(
 			const fullError = [result.stderr, result.stdout]
 				.filter(Boolean)
 				.join("\n");
-			const classified = classifyProviderError(fullError);
-			if (classified && activeProvider) {
+			const signal = classifyProviderSignal(fullError);
+			if (signal && activeProvider) {
 				try {
-					await setProviderCooldown(activeProvider, classified.type as any, fullError);
+					await setProviderCooldown(activeProvider, signal, fullError);
 				} catch {}
 			}
 		}
 
-		return cubicId;
+		return true;
 	} catch (err) {
 		logger.error(`Dispatch failed for ${agent} on P${proposalId}:`, err);
-		return null;
-	} finally {
-		await client.close();
+		return false;
 	}
 }
 
@@ -1532,6 +1400,25 @@ async function recordGateDecisionFromOrchestrator(input: {
 			  `produced no structured rationale. agent_runs.id=${input.agentRunId ?? "?"}.`;
 
 	try {
+		// P908-C shadow-mode: if the gate agent already wrote a canonical decision
+		// row via mcp_proposal action=gate_decision (identified by agent_run_id in
+		// ac_verification), skip the stdout-tail fallback to avoid a duplicate row.
+		if (input.agentRunId !== null && input.agentRunId !== undefined) {
+			const { rows: existing } = await query(
+				`SELECT id FROM roadmap_proposal.gate_decision_log
+				  WHERE proposal_id = $1
+				    AND ac_verification->>'agent_run_id' = $2
+				  LIMIT 1`,
+				[input.proposalId, String(input.agentRunId)],
+			);
+			if (existing.length) {
+				console.log(
+					`[orchestrator] gate_decision_log row already written by agent (agent_run_id=${input.agentRunId}) for proposal=${input.proposalId} — skipping stdout-tail fallback`,
+				);
+				return;
+			}
+		}
+
 		await query(
 			`INSERT INTO roadmap_proposal.gate_decision_log
          (proposal_id, from_state, to_state, maturity, gate, decided_by,
@@ -2218,12 +2105,12 @@ export async function dispatchImplicitGate(
 
 	// Dynamic control: classify error and set provider cooldown if needed
 	const fullError = [result.stderr, result.stdout].filter(Boolean).join("\n");
-	const classified = classifyProviderError(fullError);
-	if (classified && result.exitCode !== 0) {
+	const signal = classifyProviderSignal(fullError);
+	if (signal && result.exitCode !== 0) {
 		try {
 			const provider = activeProvider ?? (await resolveActiveRouteProvider());
 			if (provider) {
-				await setProviderCooldown(provider, classified.type as any, fullError);
+				await setProviderCooldown(provider, signal, fullError);
 			}
 		} catch {
 			// Provider resolution failed — skip cooldown
@@ -2271,7 +2158,7 @@ export async function drainImplicitGateReady(
 // enhancer role profile (`roadmap.agent_role_profile.role_label='enhancer'`)
 // describes the contract; this is the dispatcher that fires it.
 
-type EnhancementRevisionTarget = {
+export type EnhancementRevisionTarget = {
 	id: number;
 	display_id: string;
 	status: string;
@@ -2285,7 +2172,7 @@ type EnhancementRevisionTarget = {
 	gate_level: string | null;
 };
 
-async function claimEnhancementRevisionReady(
+export async function claimEnhancementRevisionReady(
 	limit = 4,
 ): Promise<EnhancementRevisionTarget[]> {
 	const { rows } = await query<EnhancementRevisionTarget>(
@@ -2328,7 +2215,7 @@ async function claimEnhancementRevisionReady(
 	return rows;
 }
 
-async function dispatchEnhancementRevision(
+export async function dispatchEnhancementRevision(
 	target: EnhancementRevisionTarget,
 	reason: string,
 ): Promise<void> {
@@ -2478,9 +2365,17 @@ Without set_maturity=mature, the gate will not re-run and your work remains invi
 			requiredCapabilities:
 				requiredCapabilities.length > 0 ? requiredCapabilities : ["enhancer"],
 		});
-		logger.log(
-			`📬 Enhancer offer ${dispatchId} posted for ${target.display_id} (revising hold #${target.hold_decision_id}; reason=${reason})`,
-		);
+		const dispatchable = await listDispatchableAgencies();
+		if (dispatchable.length === 0) {
+			logger.warn(
+				`[Enhancer] offer ${dispatchId} queued for ${target.display_id} but no dispatchable agencies`,
+				{ reason: "no_dispatchable_agency", displayId: target.display_id },
+			);
+		} else {
+			logger.log(
+				`📬 Enhancer offer ${dispatchId} posted for ${target.display_id} (revising hold #${target.hold_decision_id}; reason=${reason}; ${dispatchable.length} agency/agencies available)`,
+			);
+		}
 	} catch (err) {
 		const errMsg = err instanceof Error ? err.message : String(err);
 		logger.warn(

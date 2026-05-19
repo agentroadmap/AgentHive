@@ -9,7 +9,7 @@
  * `channel` column. New code should never use this.
  */
 
-import { query } from "../../postgres/pool.ts";
+import { query } from "../../infra/postgres/pool.ts";
 import type { Severity } from "./types.ts";
 
 export interface EnqueueArgs {
@@ -39,8 +39,8 @@ export async function enqueueNotification(args: EnqueueArgs): Promise<number> {
 
 	const { rows } = await query<{ id: string | number }>(
 		`INSERT INTO roadmap.notification_queue
-		   (proposal_id, severity, kind, channel, title, body, metadata)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+		   (proposal_id, severity, kind, channel, title, body, payload, metadata)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $7::jsonb)
 		 RETURNING id`,
 		[
 			proposalId,

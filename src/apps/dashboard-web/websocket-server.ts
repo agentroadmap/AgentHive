@@ -7,7 +7,12 @@
 
 import { createServer } from "node:http";
 import { WebSocket, WebSocketServer } from "ws";
-import { query, getPool } from "../../infra/postgres/pool.ts";
+import {
+	getPool,
+	query,
+	setPoolLifecycleMode,
+	startPoolPoisonWatchdog,
+} from "../../infra/postgres/pool.ts";
 
 let wss: WebSocketServer | null = null;
 const clients = new Set<WebSocket>();
@@ -232,9 +237,9 @@ async function handleMessage(
 	}
 }
 
-export function startWebSocketServer(
-	port = 3001,
-): void {
+export function startWebSocketServer(port = 3001): void {
+	setPoolLifecycleMode("long-running");
+	startPoolPoisonWatchdog("agenthive-board-ws");
 	const server = createServer();
 	let snapshotTimer: NodeJS.Timeout | null = null;
 

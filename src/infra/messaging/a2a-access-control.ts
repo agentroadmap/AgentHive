@@ -21,12 +21,13 @@ const SYSTEM_AGENTS = new Set(["system", "orchestrator"]);
 /**
  * Canonical pg_notify channel for an agent's direct-message inbox.
  *
- * MUST match the channel name produced by `roadmap.fn_a2a_message_notify`
- * (database/migrations/096-a2a-message-notify.sql). The trigger emits
- *   pg_notify('a2a_msg_' || NEW.to_agent, ...)
+ * P1103 AC-2: channel prefix unified to 'msg_'. MUST match the channel name
+ * produced by `roadmap.fn_a2a_message_notify`
+ * (scripts/migrations/169-p1103-unify-listen-channel.sql). The trigger emits
+ *   pg_notify('msg_' || NEW.to_agent, ...)
  * with the raw identity, and downstream consumers (msg-wait-reply,
  * msg-reply, agent-liveness probe, server/index operator listener,
- * scripts/start-message-agent) all LISTEN on `a2a_msg_<raw>`. This
+ * scripts/start-message-agent) all LISTEN on `msg_<raw>`. This
  * function MUST emit the same name or low-latency wake-ups break and
  * msg_read(wait_ms=...) silently falls through to its no-message branch.
  *
@@ -35,7 +36,7 @@ const SYSTEM_AGENTS = new Set(["system", "orchestrator"]);
  * identifier (see MessageNotificationListener.start). PostgreSQL also
  * truncates channel names to 63 bytes.
  *
- * Example: 'claude/agency-bot' → 'a2a_msg_claude/agency-bot'
+ * Example: 'claude/agency-bot' → 'msg_claude/agency-bot'
  */
 const AGENT_IDENTITY_RE = /^[A-Za-z0-9_./:\-]+$/;
 const PG_CHANNEL_MAX_BYTES = 63;
@@ -49,7 +50,7 @@ export function agentNotifyChannel(agentIdentity: string): string {
             `Invalid agent identity '${agentIdentity}': only [A-Za-z0-9_./:-] allowed`,
         );
     }
-    const channel = "a2a_msg_" + agentIdentity;
+    const channel = "msg_" + agentIdentity;
     // PostgreSQL truncates LISTEN channel names beyond NAMEDATALEN-1 (63 bytes
     // by default). Truncating silently would re-introduce the alignment bug
     // for long identities, so reject loudly instead.

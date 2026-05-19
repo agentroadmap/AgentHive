@@ -336,6 +336,203 @@ export const COMMAND_TREE: CommandDef[] = [
       },
     ],
   },
+  // Dispatch domain
+  {
+    name: "dispatch",
+    description: "Work dispatch inspection and lifecycle operations",
+    subcommands: [
+      {
+        name: "list",
+        description: "List dispatches with optional filters",
+        flags: [...COMMON_FLAGS, ...PAGINATION_FLAGS, { name: "--status", type: "string", description: "assigned|active|blocked|completed|cancelled|failed" }, { name: "--proposal", type: "string", description: "Filter by proposal ID" }],
+        formats: ["text", "json", "jsonl", "yaml"],
+      },
+      {
+        name: "show",
+        description: "Show a single dispatch with optional relations",
+        args: [{ name: "id", required: true, description: "Dispatch UUID" }],
+        flags: [...COMMON_FLAGS, { name: "--include", type: "string", description: "offers|claims|runs|events" }],
+        formats: ["text", "json", "jsonl", "yaml"],
+      },
+      {
+        name: "queue",
+        description: "Show current dispatch queue (pending/ready dispatches)",
+        flags: [...COMMON_FLAGS, ...PAGINATION_FLAGS],
+        formats: ["text", "json", "jsonl", "yaml"],
+      },
+      {
+        name: "offer",
+        description: "Create an offer for a proposal dispatch",
+        args: [{ name: "proposal_id", required: true, description: "e.g. P123" }],
+        flags: [...COMMON_FLAGS, { name: "--squad", type: "string", description: "Target squad identity" }, { name: "--role", type: "string", description: "Required role" }, { name: "--idempotency-key", type: "string", description: "Idempotency key" }],
+        mutation: true,
+      },
+      {
+        name: "transition",
+        description: "Transition a dispatch to a new state",
+        args: [{ name: "id", required: true, description: "Dispatch UUID" }],
+        flags: [...COMMON_FLAGS, { name: "--to", type: "string", required: true, description: "Target state" }],
+        mutation: true,
+      },
+    ],
+  },
+  // Agency / workforce domains
+  {
+    name: "agency",
+    description: "Agency (squad) management and status",
+    subcommands: [
+      { name: "list", description: "List all agencies", flags: [...COMMON_FLAGS, ...PAGINATION_FLAGS, { name: "--status", type: "string", description: "Filter by status" }], formats: ["text", "json", "jsonl", "yaml"] },
+      { name: "show", description: "Show a single agency", args: [{ name: "agency_id", required: true, description: "Agency slug or ID" }], flags: COMMON_FLAGS, formats: ["text", "json", "jsonl", "yaml"] },
+      { name: "stop", description: "Drain and stop an agency", args: [{ name: "agency_id", required: true, description: "Agency ID" }], flags: [...COMMON_FLAGS, { name: "--yes", type: "boolean", description: "Skip confirmation" }], mutation: true, requires_yes: true },
+    ],
+  },
+  {
+    name: "worker",
+    description: "Worker (agent) registration and status",
+    subcommands: [
+      { name: "list", description: "List registered workers", flags: [...COMMON_FLAGS, ...PAGINATION_FLAGS, { name: "--agency", type: "string", description: "Filter by agency" }], formats: ["text", "json", "jsonl", "yaml"] },
+      { name: "show", description: "Show worker details", args: [{ name: "worker_id", required: true, description: "Worker identity" }], flags: COMMON_FLAGS, formats: ["text", "json", "jsonl", "yaml"] },
+    ],
+  },
+  {
+    name: "lease",
+    description: "Proposal lease inspection and management",
+    subcommands: [
+      { name: "list", description: "List active leases", flags: [...COMMON_FLAGS, ...PAGINATION_FLAGS, { name: "--agent", type: "string", description: "Filter by agent identity" }], formats: ["text", "json", "jsonl", "yaml"] },
+      { name: "show", description: "Show a single lease", args: [{ name: "lease_id", required: true, description: "Lease ID" }], flags: COMMON_FLAGS, formats: ["text", "json", "jsonl", "yaml"] },
+      { name: "release", description: "Force-release a lease", args: [{ name: "lease_id", required: true, description: "Lease ID" }], flags: [...COMMON_FLAGS, { name: "--reason", type: "string", description: "Release reason" }, { name: "--yes", type: "boolean", description: "Skip confirmation" }], mutation: true, requires_yes: true },
+    ],
+  },
+  {
+    name: "trust",
+    description: "Inter-agent trust and credential management",
+    subcommands: [
+      { name: "list", description: "List trust relationships", flags: [...COMMON_FLAGS, ...PAGINATION_FLAGS], formats: ["text", "json", "jsonl", "yaml"] },
+      { name: "grant", description: "Grant trust to an agent", args: [{ name: "agent_id", required: true, description: "Agent identity" }], flags: [...COMMON_FLAGS, { name: "--level", type: "string", description: "Trust level (read|write|admin)" }, { name: "--yes", type: "boolean", description: "Skip confirmation" }], mutation: true },
+      { name: "revoke", description: "Revoke trust from an agent", args: [{ name: "agent_id", required: true, description: "Agent identity" }], flags: [...COMMON_FLAGS, { name: "--yes", type: "boolean", description: "Skip confirmation" }], mutation: true, requires_yes: true },
+    ],
+  },
+  // Provider / model / routing
+  {
+    name: "provider",
+    description: "LLM provider inspection",
+    subcommands: [
+      { name: "list", description: "List all providers", flags: COMMON_FLAGS, formats: ["text", "json", "jsonl", "yaml"] },
+      { name: "show", description: "Show provider details", args: [{ name: "provider_id", required: true, description: "Provider slug" }], flags: COMMON_FLAGS, formats: ["text", "json", "jsonl", "yaml"] },
+    ],
+  },
+  {
+    name: "model",
+    description: "LLM model registry and cost inspection",
+    subcommands: [
+      { name: "list", description: "List all models", flags: [...COMMON_FLAGS, { name: "--provider", type: "string", description: "Filter by provider" }, { name: "--tier", type: "string", description: "Filter by tier" }], formats: ["text", "json", "jsonl", "yaml"] },
+      { name: "show", description: "Show model details and routes", args: [{ name: "model_id", required: true, description: "Model name" }], flags: COMMON_FLAGS, formats: ["text", "json", "jsonl", "yaml"] },
+      { name: "costs", description: "Show model cost table", flags: COMMON_FLAGS, formats: ["text", "json", "jsonl", "yaml"] },
+    ],
+  },
+  {
+    name: "route",
+    description: "Model dispatch route management",
+    subcommands: [
+      { name: "list", description: "List all routes", flags: COMMON_FLAGS, formats: ["text", "json", "jsonl", "yaml"] },
+      { name: "show", description: "Show route details", args: [{ name: "route_id", required: true, description: "Route ID" }], flags: COMMON_FLAGS, formats: ["text", "json", "jsonl", "yaml"] },
+      { name: "test", description: "Test a route for liveness", args: [{ name: "route_id", required: true, description: "Route ID" }], flags: COMMON_FLAGS },
+    ],
+  },
+  {
+    name: "budget",
+    description: "Project budget cap and spend inspection",
+    subcommands: [
+      { name: "status", description: "Show current budget status", flags: [...COMMON_FLAGS, { name: "--project", type: "string", description: "Project slug override" }], formats: ["text", "json", "jsonl", "yaml"] },
+    ],
+  },
+  {
+    name: "context-policy",
+    description: "Context window and token budget policy management",
+    subcommands: [
+      { name: "list", description: "List context policies", flags: COMMON_FLAGS, formats: ["text", "json", "jsonl", "yaml"] },
+    ],
+  },
+  // System / ops
+  {
+    name: "service",
+    description: "System service status and management",
+    subcommands: [
+      { name: "list", description: "List registered services", flags: COMMON_FLAGS, formats: ["text", "json", "jsonl", "yaml"] },
+      { name: "status", description: "Show overall system status", flags: COMMON_FLAGS, formats: ["text", "json", "jsonl", "yaml"] },
+    ],
+  },
+  {
+    name: "mcp",
+    description: "MCP server connection and tool inspection",
+    subcommands: [
+      { name: "status", description: "Show MCP server status", flags: COMMON_FLAGS, formats: ["text", "json", "jsonl", "yaml"] },
+      { name: "tools", description: "List available MCP tools", flags: COMMON_FLAGS, formats: ["text", "json", "jsonl", "yaml"] },
+    ],
+  },
+  {
+    name: "db",
+    description: "Control-plane database inspection",
+    subcommands: [
+      { name: "status", description: "Show DB connection status", flags: COMMON_FLAGS, formats: ["text", "json", "jsonl", "yaml"] },
+      { name: "schemas", description: "List DB schemas", flags: COMMON_FLAGS, formats: ["text", "json", "jsonl", "yaml"] },
+    ],
+  },
+  // Quality / audit
+  {
+    name: "scan",
+    description: "Static analysis and hardcoding violation scanner",
+    flags: [
+      ...COMMON_FLAGS,
+      { name: "--git-staged", type: "boolean", description: "Scan only git-staged files" },
+      { name: "--fail-on", type: "string", description: "Minimum severity to fail: low|medium|high" },
+      { name: "--paths", type: "string", description: "Comma-separated paths to scan" },
+    ],
+    formats: ["text", "json", "sarif"],
+  },
+  {
+    name: "lint",
+    description: "Proposal and workflow lint checks",
+    subcommands: [
+      { name: "proposal", description: "Lint a proposal for RFC compliance", args: [{ name: "proposal_id", required: true, description: "e.g. P123" }], flags: COMMON_FLAGS, formats: ["text", "json"] },
+    ],
+  },
+  {
+    name: "audit",
+    description: "Audit trail inspection",
+    subcommands: [
+      { name: "feed", description: "Stream recent audit events", flags: [...COMMON_FLAGS, ...PAGINATION_FLAGS, { name: "--since", type: "string", description: "Time window (e.g. 1h, 4h, 24h)" }, { name: "--actor", type: "string", description: "Filter by actor identity" }], formats: ["text", "json", "jsonl", "yaml"] },
+      { name: "search", description: "Search audit events", flags: [...COMMON_FLAGS, ...PAGINATION_FLAGS, { name: "--query", type: "string", description: "Search query" }], formats: ["text", "json", "jsonl", "yaml"] },
+    ],
+  },
+  // Knowledge / memory
+  {
+    name: "kb",
+    description: "Knowledge base management",
+    subcommands: [
+      { name: "list", description: "List knowledge entries", flags: [...COMMON_FLAGS, ...PAGINATION_FLAGS], formats: ["text", "json", "jsonl", "yaml"] },
+      { name: "get", description: "Get a knowledge entry", args: [{ name: "entry_id", required: true, description: "Entry slug or ID" }], flags: COMMON_FLAGS, formats: ["text", "json"] },
+    ],
+  },
+  // Project / workspace
+  {
+    name: "project",
+    description: "Project management",
+    subcommands: [
+      { name: "list", description: "List all projects", flags: COMMON_FLAGS, formats: ["text", "json", "jsonl", "yaml"] },
+      { name: "show", description: "Show project details", args: [{ name: "project_id", required: true, description: "Project slug" }], flags: COMMON_FLAGS, formats: ["text", "json"] },
+      { name: "register", description: "Register a new project", flags: [...COMMON_FLAGS, { name: "--name", type: "string", description: "Project name" }, { name: "--slug", type: "string", description: "Project slug" }, { name: "--yes", type: "boolean", description: "Skip confirmation" }], mutation: true, requires_yes: true },
+      { name: "archive", description: "Archive a project", args: [{ name: "project_id", required: true, description: "Project slug" }], flags: [...COMMON_FLAGS, { name: "--yes", type: "boolean", description: "Skip confirmation" }], mutation: true, requires_yes: true },
+    ],
+  },
+  {
+    name: "cubic",
+    description: "Cubic workspace and worktree management",
+    subcommands: [
+      { name: "list", description: "List cubic workspaces", flags: COMMON_FLAGS, formats: ["text", "json", "jsonl", "yaml"] },
+      { name: "show", description: "Show a cubic workspace", args: [{ name: "cubic_id", required: true, description: "Cubic workspace ID" }], flags: COMMON_FLAGS, formats: ["text", "json"] },
+    ],
+  },
   // Stop (operator)
   {
     name: "stop",

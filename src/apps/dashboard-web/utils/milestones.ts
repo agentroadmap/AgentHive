@@ -12,7 +12,7 @@ export {
 	isReachedStatus,
 	normalizeDirectiveName,
 	validateDirectiveName,
-} from "./directives";
+} from "./directives.ts";
 
 export type {
 	DirectiveBucket,

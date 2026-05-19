@@ -15,6 +15,7 @@
 import {
 	createHmac,
 	createVerify,
+	randomBytes,
 	timingSafeEqual,
 	type KeyObject,
 	createPublicKey,
@@ -501,6 +502,5 @@ function _importPrivateKeyBytes(pem: string): Buffer {
 }
 
 function randomHex(bytes: number): string {
-	const { randomBytes } = require("node:crypto") as typeof import("node:crypto");
 	return randomBytes(bytes).toString("hex");
 }

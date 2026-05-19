@@ -74,28 +74,41 @@ describe("agencyPolicyFilterSql (Layer 3)", () => {
 		assert.ok(sql.includes("$5::text IS NULL"), "must short-circuit when param is NULL");
 	});
 
-	it("skips filter when no agency_route_policy row exists", () => {
+	it("skips filter when the agency identity does not resolve or has no active policy rows", () => {
 		const sql = normalize(agencyPolicyFilterSql(5));
 		assert.ok(
-			sql.includes("OR NOT EXISTS") && sql.includes("agency_route_policy"),
-			"must open-pass when no policy row present",
+			sql.includes("FROM agency.agency a") && sql.includes("a.agency_id = $5::text"),
+			"must resolve the agency by identity",
+		);
+		assert.ok(
+			sql.includes("NOT EXISTS") && sql.includes("agency.agency_route_policy"),
+			"must open-pass when no active policy row is present",
 		);
 	});
 
-	it("checks allowed_route_providers allowlist", () => {
+	it("allows routes with an active allowed=true row", () => {
 		const sql = normalize(agencyPolicyFilterSql(5));
 		assert.ok(
-			sql.includes("route_provider = ANY(arp.allowed_route_providers)"),
-			"must check route_provider against agency allowlist",
+			sql.includes("arp.route_id = mr.id"),
+			"must match the policy row to the candidate route id",
+		);
+		assert.ok(sql.includes("arp.allowed = true"), "must permit explicit allow rows");
+	});
+
+	it("excludes routes with an active allowed=false row", () => {
+		const sql = normalize(agencyPolicyFilterSql(5));
+		assert.ok(
+			sql.includes("arp.allowed = false"),
+			"must exclude explicit deny rows",
 		);
 	});
 
-	it("checks forbidden_route_providers denylist", () => {
+	it("filters only global active policy rows", () => {
 		const sql = normalize(agencyPolicyFilterSql(5));
+		assert.ok(sql.includes("arp.scope = 'global'"), "must restrict to global scope rows");
 		assert.ok(
-			sql.includes("NOT (arp.route_provider = ANY(COALESCE(arp.forbidden_route_providers") ||
-				sql.includes("NOT (mr.route_provider = ANY(COALESCE(arp.forbidden_route_providers"),
-			"must exclude agency-forbidden providers",
+			sql.includes("arp.lifecycle_status = 'active'"),
+			"must ignore non-active policy rows",
 		);
 	});
 

@@ -1027,6 +1027,165 @@ export class PgProposalHandlers {
 		}
 	}
 
+	async mapUpsert(args: {
+		legacy_proposal_id: string;
+		classification: string;
+		rationale: string;
+		evidence_refs?: unknown[];
+		canonical_proposal_id?: string;
+		superseded_by_proposal_id?: string;
+		reviewed_by?: string;
+		notes?: string;
+		created_by?: string;
+	}): Promise<CallToolResult> {
+		const validClassifications = [
+			"retained", "delivered_evidence", "duplicate",
+			"obsolete", "reauthor_needed", "superseded",
+		];
+		if (!validClassifications.includes(args.classification)) {
+			return {
+				content: [{ type: "text", text: `Invalid classification '${args.classification}'. Must be one of: ${validClassifications.join(", ")}` }],
+			};
+		}
+		if (!args.rationale || args.rationale.trim().length === 0) {
+			return { content: [{ type: "text", text: "rationale is required and must be non-empty." }] };
+		}
+
+		try {
+			// Resolve row IDs for FK columns
+			const [legacyRowId, canonicalRowId, supersededRowId] = await Promise.all([
+				pg.resolveProposalId(args.legacy_proposal_id),
+				args.canonical_proposal_id ? pg.resolveProposalId(args.canonical_proposal_id) : Promise.resolve(null),
+				args.superseded_by_proposal_id ? pg.resolveProposalId(args.superseded_by_proposal_id) : Promise.resolve(null),
+			]);
+
+			const evidenceRefs = args.evidence_refs ?? [];
+			const reviewedAt = args.reviewed_by ? new Date() : null;
+
+			const result = await query(
+				`INSERT INTO roadmap_proposal.proposal_migration_map
+				 (legacy_proposal_id, legacy_proposal_row_id, classification, rationale,
+				  evidence_refs, canonical_proposal_id, canonical_proposal_row_id,
+				  superseded_by_proposal_id, superseded_by_row_id,
+				  reviewed_by, reviewed_at, notes, created_by)
+				 VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13)
+				 ON CONFLICT (legacy_proposal_id) DO UPDATE SET
+				   classification = EXCLUDED.classification,
+				   rationale = EXCLUDED.rationale,
+				   evidence_refs = EXCLUDED.evidence_refs,
+				   canonical_proposal_id = EXCLUDED.canonical_proposal_id,
+				   canonical_proposal_row_id = EXCLUDED.canonical_proposal_row_id,
+				   superseded_by_proposal_id = EXCLUDED.superseded_by_proposal_id,
+				   superseded_by_row_id = EXCLUDED.superseded_by_row_id,
+				   reviewed_by = EXCLUDED.reviewed_by,
+				   reviewed_at = CASE WHEN EXCLUDED.reviewed_by IS NOT NULL THEN EXCLUDED.reviewed_at ELSE roadmap_proposal.proposal_migration_map.reviewed_at END,
+				   notes = EXCLUDED.notes,
+				   legacy_proposal_row_id = EXCLUDED.legacy_proposal_row_id,
+				   updated_at = now()
+				 RETURNING *`,
+				[
+					args.legacy_proposal_id,
+					legacyRowId,
+					args.classification,
+					args.rationale.trim(),
+					JSON.stringify(evidenceRefs),
+					args.canonical_proposal_id ?? null,
+					canonicalRowId,
+					args.superseded_by_proposal_id ?? null,
+					supersededRowId,
+					args.reviewed_by ?? null,
+					reviewedAt,
+					args.notes ?? null,
+					args.created_by ?? "system",
+				],
+			);
+
+			return {
+				content: [{ type: "text", text: JSON.stringify(result.rows[0], null, 2) }],
+			};
+		} catch (err) {
+			return errorResult("map_upsert failed", err);
+		}
+	}
+
+	async mapGet(args: { legacy_proposal_id: string }): Promise<CallToolResult> {
+		if (!args.legacy_proposal_id) {
+			return { content: [{ type: "text", text: "legacy_proposal_id is required." }] };
+		}
+		try {
+			const result = await query(
+				`SELECT * FROM roadmap_proposal.proposal_migration_map WHERE legacy_proposal_id = $1`,
+				[args.legacy_proposal_id],
+			);
+			if (!result.rows.length) {
+				return { content: [{ type: "text", text: `No mapping found for ${args.legacy_proposal_id}.` }] };
+			}
+			return { content: [{ type: "text", text: JSON.stringify(result.rows[0], null, 2) }] };
+		} catch (err) {
+			return errorResult("map_get failed", err);
+		}
+	}
+
+	async mapQuery(args: {
+		classification?: string;
+		reviewed?: boolean;
+		needs_review?: boolean;
+		limit?: number;
+	}): Promise<CallToolResult> {
+		try {
+			const conditions: string[] = [];
+			const params: unknown[] = [];
+
+			if (args.classification) {
+				conditions.push(`classification = $${params.length + 1}`);
+				params.push(args.classification);
+			}
+			if (args.reviewed === true) {
+				conditions.push(`reviewed_by IS NOT NULL AND reviewed_at IS NOT NULL`);
+			} else if (args.reviewed === false) {
+				conditions.push(`(reviewed_by IS NULL OR reviewed_at IS NULL)`);
+			}
+			if (args.needs_review === true) {
+				conditions.push(
+					`(reviewed_by IS NULL OR reviewed_at IS NULL OR evidence_refs = '[]'::jsonb ` +
+					`OR (canonical_proposal_id IS NULL AND classification NOT IN ('obsolete','duplicate')))`,
+				);
+			}
+
+			const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+			const limit = Math.min(Math.max(args.limit ?? 100, 1), 500);
+			params.push(limit);
+
+			const result = await query(
+				`SELECT * FROM roadmap_proposal.proposal_migration_map ${where} ORDER BY legacy_proposal_id LIMIT $${params.length}`,
+				params,
+			);
+			return {
+				content: [{ type: "text", text: JSON.stringify({ count: result.rows.length, rows: result.rows }, null, 2) }],
+			};
+		} catch (err) {
+			return errorResult("map_query failed", err);
+		}
+	}
+
+	async mapSummary(_args: Record<string, never>): Promise<CallToolResult> {
+		try {
+			const result = await query(
+				`SELECT * FROM roadmap_proposal.v_migration_classification_summary ORDER BY classification`,
+				[],
+			);
+			const total = result.rows.reduce((sum: number, r: any) => sum + Number(r.total), 0);
+			return {
+				content: [{
+					type: "text",
+					text: JSON.stringify({ grand_total: total, by_classification: result.rows }, null, 2),
+				}],
+			};
+		} catch (err) {
+			return errorResult("map_summary failed", err);
+		}
+	}
+
 	private buildPreview(proposal: ProposalRow): string {
 		const source =
 			proposal.summary ?? proposal.motivation ?? proposal.design ?? "";

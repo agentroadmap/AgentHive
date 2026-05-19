@@ -6,7 +6,7 @@ import {
 	buildDirectiveBuckets,
 	collectArchivedDirectiveKeys,
 	isReachedStatus,
-} from "../utils/directives";
+} from "../utils/directives.ts";
 import type {
 	Directive,
 	DirectiveBucket,

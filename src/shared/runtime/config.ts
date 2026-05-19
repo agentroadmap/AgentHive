@@ -51,6 +51,16 @@ export interface ConfigKey<T> {
 }
 
 /**
+ * Scope context for runtime_flag scoped lookups.
+ * Priority order: project → host → agency → global.
+ */
+export interface ScopeContext {
+	projectSlug?: string;
+	hostId?: string;
+	agencyId?: string;
+}
+
+/**
  * RuntimeConfigMissing: thrown when a required config key cannot be resolved.
  */
 export class RuntimeConfigMissing extends Error {
@@ -89,6 +99,20 @@ export class RuntimeConfigInvalidSource extends Error {
 }
 
 /**
+ * ProjectIdMissing: thrown fail-closed when a project-scoped core.runtime_flag
+ * key (name starts with PROJECT_) is resolved without a projectSlug in scopeContext.
+ */
+export class ProjectIdMissing extends Error {
+	constructor(public keyName: string) {
+		super(
+			`[RuntimeConfig] Key "${keyName}" requires project scope but no projectSlug was provided to ConfigResolver.init(). Pass scopeContext.projectSlug.`,
+		);
+		this.name = "ProjectIdMissing";
+		Object.setPrototypeOf(this, ProjectIdMissing.prototype);
+	}
+}
+
+/**
  * Audit log entry for config access.
  */
 export interface ConfigAuditEntry {
@@ -117,6 +141,17 @@ export interface ConfigAuditSnapshot {
 	config: ConfigAuditEntry[];
 	tenantDsn: TenantDsnAuditEntry[];
 }
+
+/**
+ * TTL-bearing cache entry for core.runtime_flag dbCache entries.
+ */
+interface FlagCacheEntry {
+	value: any;
+	resolvedAt: number;
+}
+
+const FLAG_CACHE_TTL_MS = 300_000; // 5 minutes
+const RUNTIME_FLAG_TABLE = "core.runtime_flag";
 
 export const DEFAULT_ENV_FILE_PATH = "/etc/agenthive/env";
 
@@ -156,8 +191,13 @@ class ConfigResolver {
 	private tenantDsnAuditMap: Map<string, TenantDsnAuditEntry> = new Map();
 	private yamlConfig: Record<string, any> | null = null;
 	private pool: Pool | null = null;
-	private dbCache: Map<string, any> = new Map();
-	private notifySubscription: { end(): Promise<void> } | null = null;
+	/** dbCache: keyed as `runtime_flag:<flag_name>:<scope>` for flag entries (FlagCacheEntry),
+	 *  or `${table}:${column}` for non-flag entries (plain any). */
+	private dbCache: Map<string, FlagCacheEntry | any> = new Map();
+	private notifySubscription: PoolClient | null = null;
+	private scopeContext: ScopeContext = {};
+	/** Dedicated Pool used for LISTEN when PGPORT_DIRECT bypasses PgBouncer. */
+	private directListenPool: Pool | null = null;
 
 	// Parse ~/.pgpass for a matching password entry (hostname:port:database:username:password)
 	static parsePgpassFile(
@@ -204,15 +244,17 @@ class ConfigResolver {
 	}
 
 	/**
-	 * Initialize the resolver with optional yaml config and database pool.
+	 * Initialize the resolver with optional yaml config, database pool, and scope context.
 	 */
 	async init(opts: {
 		yamlConfig?: Record<string, any>;
 		pool?: Pool;
 		envFilePath?: string;
+		scopeContext?: ScopeContext;
 	}): Promise<void> {
 		this.yamlConfig = opts.yamlConfig || null;
 		this.pool = opts.pool || null;
+		this.scopeContext = opts.scopeContext || {};
 
 		if (opts.envFilePath) {
 			await loadRuntimeEnvFile(opts.envFilePath);
@@ -224,46 +266,136 @@ class ConfigResolver {
 	}
 
 	/**
-	 * Set up a NOTIFY listener for config change events.
-	 * P499: Uses a direct pg.Client (not PgBouncer pool) — transaction-mode
-	 * pooling drops LISTEN state between transactions. PGPORT_DIRECT bypasses
-	 * the bouncer and connects straight to Postgres on :5432.
+	 * Set up a NOTIFY listener for runtime_flag_changed events.
+	 * Uses PGPORT_DIRECT for PgBouncer bypass if available.
+	 * Never throws — LISTEN is best-effort; TTL cache covers the hot-reload gap.
 	 */
 	private async setupNotifyListener(): Promise<void> {
 		try {
-			const host = process.env.PGHOST ?? "127.0.0.1";
-			const port = Number(
-				process.env.PGPORT_DIRECT ?? process.env.PGPORT ?? 5432,
-			);
-			const user = process.env.PGUSER ?? "xiaomi";
-			const database = process.env.PGDATABASE ?? "agenthive";
-			const password = ConfigResolver.resolvePasswordSync({
-				host,
-				port: String(port),
-				database,
-				user,
+			let client: PoolClient;
+
+			const directPortEnv = process.env.PGPORT_DIRECT;
+			if (directPortEnv) {
+				const directPort = Number(directPortEnv);
+				if (Number.isFinite(directPort) && directPort > 0 && directPort <= 65535) {
+					// Create a dedicated direct-Postgres pool (bypasses PgBouncer transaction mode)
+					const { Pool } = await import("pg");
+					const poolOptions = (this.pool as any).options ?? {};
+					this.directListenPool = new Pool({
+						...poolOptions,
+						port: directPort,
+						max: 1,
+					});
+					client = await this.directListenPool.connect();
+				} else {
+					client = await this.pool.connect();
+				}
+			} else {
+				client = await this.pool.connect();
+			}
+
+			await client.query("LISTEN runtime_flag_changed");
+
+			client.on("notification", (msg) => {
+				this.handleFlagNotification(msg.payload);
 			});
-			const client = new Client({
-				host,
-				port,
-				user,
-				database,
-				password,
-				keepAlive: true,
-			});
-			await client.connect();
-			await client.query("LISTEN runtime_config_changed");
-			client.on("notification", () => {
-				this.cache.clear();
-				this.dbCache.clear();
-			});
+
 			client.on("error", () => {
 				this.notifySubscription = null;
 			});
+
 			this.notifySubscription = client;
-		} catch {
-			// Non-fatal; resolver works without live config notifications
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			console.warn(`[ConfigResolver] LISTEN unavailable: hot-reload disabled. ${msg}`);
 		}
+	}
+
+	/**
+	 * Handle a runtime_flag_changed pg_notify payload.
+	 * On parse success: targeted eviction of (flag_name, scope) entry.
+	 * On parse failure: full dbCache flush as safe fallback.
+	 */
+	private handleFlagNotification(payload: string | undefined): void {
+		if (!payload) {
+			this.dbCache.clear();
+			return;
+		}
+		try {
+			const parsed = JSON.parse(payload) as { flag_name?: string; scope?: string };
+			if (
+				typeof parsed.flag_name === "string" &&
+				typeof parsed.scope === "string"
+			) {
+				const dbCacheKey = `runtime_flag:${parsed.flag_name}:${parsed.scope}`;
+				this.dbCache.delete(dbCacheKey);
+				// Evict the top-level resolved cache entry so next get() re-resolves
+				this.cache.delete(parsed.flag_name);
+			} else {
+				this.dbCache.clear();
+			}
+		} catch {
+			this.dbCache.clear();
+		}
+	}
+
+	/**
+	 * Scoped priority lookup for core.runtime_flag entries.
+	 * Order: project:<slug> → host:<id> → agency:<id> → global
+	 * Each candidate scope is checked individually with per-entry TTL cache.
+	 */
+	private async getScopedFlagValue(flagName: string): Promise<any> {
+		if (!this.pool) return undefined;
+
+		const candidates: string[] = [];
+		if (this.scopeContext.projectSlug) {
+			candidates.push(`project:${this.scopeContext.projectSlug}`);
+		}
+		if (this.scopeContext.hostId) {
+			candidates.push(`host:${this.scopeContext.hostId}`);
+		}
+		if (this.scopeContext.agencyId) {
+			candidates.push(`agency:${this.scopeContext.agencyId}`);
+		}
+		candidates.push("global");
+
+		for (const scope of candidates) {
+			const cacheKey = `runtime_flag:${flagName}:${scope}`;
+			const cached = this.dbCache.get(cacheKey);
+
+			if (
+				cached !== undefined &&
+				typeof cached === "object" &&
+				cached !== null &&
+				"resolvedAt" in cached
+			) {
+				const entry = cached as FlagCacheEntry;
+				if (Date.now() - entry.resolvedAt < FLAG_CACHE_TTL_MS) {
+					return entry.value;
+				}
+				// TTL expired — evict and re-fetch
+				this.dbCache.delete(cacheKey);
+			}
+
+			try {
+				const result = await this.pool.query(
+					`SELECT value_jsonb FROM ${RUNTIME_FLAG_TABLE}
+					  WHERE flag_name = $1 AND scope = $2 AND lifecycle_status = 'active'
+					  LIMIT 1`,
+					[flagName, scope],
+				);
+				if (result.rows.length > 0) {
+					const value = result.rows[0].value_jsonb;
+					const entry: FlagCacheEntry = { value, resolvedAt: Date.now() };
+					this.dbCache.set(cacheKey, entry);
+					return value;
+				}
+			} catch {
+				// DB error for this scope — continue to next candidate
+			}
+		}
+
+		return undefined;
 	}
 
 	/**
@@ -338,12 +470,26 @@ class ConfigResolver {
 			}
 		}
 
+		// Fail-closed: PROJECT_ keys on core.runtime_flag require projectSlug
+		if (
+			value === undefined &&
+			(key.class === "registry" || key.class === "flag") &&
+			key.dbTable === RUNTIME_FLAG_TABLE &&
+			key.name.startsWith("PROJECT_") &&
+			!this.scopeContext.projectSlug
+		) {
+			throw new ProjectIdMissing(key.name);
+		}
+
 		// Step 5: Control DB registry (registry keys)
 		if (value === undefined && key.class === "registry" && key.dbTable && this.pool) {
-			const registryDbValue = await this.getDbValue(key.dbTable, key.dbColumn || key.name);
+			const registryDbValue = await this.getDbValue(key.dbTable, key.dbColumn || key.name, key.name);
 			if (registryDbValue !== undefined) {
 				try {
-					value = key.parse(String(registryDbValue));
+					const raw = typeof registryDbValue === "string"
+						? registryDbValue
+						: JSON.stringify(registryDbValue);
+					value = key.parse(raw);
 					source = "db";
 				} catch (err) {
 					throw new RuntimeConfigMissing(
@@ -357,10 +503,13 @@ class ConfigResolver {
 
 		// Step 6: Feature flags (DB, cached, live-reloadable)
 		if (value === undefined && key.class === "flag" && key.dbTable && this.pool) {
-			const flagDbValue = await this.getDbValue(key.dbTable, key.dbColumn || key.name);
+			const flagDbValue = await this.getDbValue(key.dbTable, key.dbColumn || key.name, key.name);
 			if (flagDbValue !== undefined) {
 				try {
-					value = key.parse(String(flagDbValue));
+					const raw = typeof flagDbValue === "string"
+						? flagDbValue
+						: JSON.stringify(flagDbValue);
+					value = key.parse(raw);
 					source = "db";
 				} catch (err) {
 					throw new RuntimeConfigMissing(
@@ -512,9 +661,15 @@ class ConfigResolver {
 
 	/**
 	 * Query a value from the control DB registry.
+	 * Routes core.runtime_flag lookups through getScopedFlagValue() (scoped + TTL cache).
+	 * All other tables use the single-row LIMIT 1 fallback (no TTL, no scope).
 	 */
-	private async getDbValue(table: string, column: string): Promise<any> {
+	private async getDbValue(table: string, column: string, flagName?: string): Promise<any> {
 		if (!this.pool) return undefined;
+
+		if (table === RUNTIME_FLAG_TABLE && flagName) {
+			return this.getScopedFlagValue(flagName);
+		}
 
 		const cacheKey = `${table}:${column}`;
 		if (this.dbCache.has(cacheKey)) {
@@ -534,16 +689,27 @@ class ConfigResolver {
 	}
 
 	/**
-	 * Cleanup: close NOTIFY subscription.
+	 * Cleanup: close NOTIFY subscription and direct listen pool.
+	 * Safe to call multiple times (idempotent).
 	 */
 	async cleanup(): Promise<void> {
-		if (this.notifySubscription) {
+		if (!this.notifySubscription) return;
+		try {
+			await this.notifySubscription.query("UNLISTEN runtime_flag_changed");
+			this.notifySubscription.release();
+		} catch {
+			// Already closed or errored — ignore
+		} finally {
+			this.notifySubscription = null;
+		}
+
+		if (this.directListenPool) {
 			try {
-				await this.notifySubscription.end();
+				await this.directListenPool.end();
 			} catch {
-				// Already closed
+				// ignore
 			} finally {
-				this.notifySubscription = null;
+				this.directListenPool = null;
 			}
 		}
 	}
@@ -562,6 +728,7 @@ export async function initConfig(opts: {
 	yamlConfig?: Record<string, any>;
 	pool?: Pool;
 	envFilePath?: string;
+	scopeContext?: ScopeContext;
 }): Promise<ConfigResolver> {
 	if (globalResolver) {
 		await globalResolver.cleanup();

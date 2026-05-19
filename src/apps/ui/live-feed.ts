@@ -22,7 +22,7 @@ export function dedupeBoardLiveFeed(events: StreamEvent[]): StreamEvent[] {
 			event.type,
 			event.proposalId ?? "",
 			event.agentId ?? "",
-			String(event.message ?? "").trim(),
+			event.message.trim(),
 		].join("|");
 		if (seen.has(key)) continue;
 		seen.add(key);
@@ -157,6 +157,12 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 						left(regexp_replace(COALESCE(ml.message_content, ''), E'[\\n\\r]+', ' ', 'g'), 120) AS message
 				FROM roadmap.message_ledger ml
 				LEFT JOIN roadmap_proposal.proposal p ON p.id = ml.proposal_id
+				WHERE btrim(COALESCE(ml.message_content, '')) <> ''
+				  AND NOT (
+					ml.message_type = 'event'
+					AND btrim(ml.message_content) = 'heartbeat'
+					AND COALESCE(ml.channel, '') LIKE 'system:liaison:%'
+				  )
 
 				UNION ALL
 

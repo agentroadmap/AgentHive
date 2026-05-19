@@ -77,6 +77,31 @@ COMMENT ON TABLE agency.agency IS
   'Status is tracked via agency_session.dormancy_state, not a status column here.';
 
 -- ============================================================
+-- agency.agency_route_policy — per-agency route ACL
+-- Transition-compatible shape: agency identity remains TEXT here,
+-- while routes reference the canonical control-plane route row.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS agency.agency_route_policy (
+  id                 BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  agency_id          TEXT         NOT NULL REFERENCES agency.agency(agency_id) ON DELETE CASCADE,
+  route_id           BIGINT       NOT NULL REFERENCES hivecentral.model_route(id) ON DELETE CASCADE,
+  scope              TEXT         NOT NULL DEFAULT 'global'
+                                  CHECK (scope IN ('global','tenant')),
+  project_id         BIGINT,
+  allowed            BOOLEAN      NOT NULL DEFAULT true,
+  owner_did          TEXT         NOT NULL,
+  lifecycle_status   TEXT         NOT NULL DEFAULT 'active'
+                                  CHECK (lifecycle_status IN ('active','deprecated','retired')),
+  deprecated_at      TIMESTAMPTZ,
+  retire_after       TIMESTAMPTZ,
+  notes              TEXT
+);
+
+COMMENT ON TABLE agency.agency_route_policy IS
+  'Per-agency allow/deny ACL for model routes. No row = open by default; '
+  'allowed=false is an explicit deny.';
+
+-- ============================================================
 -- agency.agency_session — heartbeats + dormancy state machine
 -- silence_seconds NOT a GENERATED column: now() is STABLE not
 -- IMMUTABLE — PostgreSQL rejects it in GENERATED AS STORED.
@@ -185,6 +210,17 @@ CREATE INDEX IF NOT EXISTS idx_agency_session_reconnect
 
 CREATE INDEX IF NOT EXISTS idx_agency_provider_id
   ON agency.agency(provider_id);
+
+CREATE INDEX IF NOT EXISTS idx_agency_route_policy_agency_scope
+  ON agency.agency_route_policy(agency_id, scope)
+  WHERE lifecycle_status = 'active';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agency_route_policy_scope_unique
+  ON agency.agency_route_policy(agency_id, route_id, scope, COALESCE(project_id, 0));
+
+CREATE INDEX IF NOT EXISTS idx_agency_route_policy_route_scope
+  ON agency.agency_route_policy(route_id, scope)
+  WHERE lifecycle_status = 'active';
 
 CREATE INDEX IF NOT EXISTS idx_agency_principal_did
   ON agency.agency(principal_did);
@@ -446,7 +482,7 @@ BEGIN
     GRANT USAGE ON SCHEMA agency TO agenthive_orchestrator;
     GRANT SELECT, INSERT, UPDATE ON agency.agency, agency.agency_session, agency.agency_capacity
       TO agenthive_orchestrator;
-    GRANT SELECT ON agency.agency_provider, agency.liaison_message_kind_catalog
+    GRANT SELECT ON agency.agency_provider, agency.liaison_message_kind_catalog, agency.agency_route_policy
       TO agenthive_orchestrator;
     GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA agency TO agenthive_orchestrator;
     ALTER ROLE agenthive_orchestrator BYPASSRLS;
@@ -473,5 +509,6 @@ END $$;
 
 -- Lifecycle-only tables: revoke DELETE from PUBLIC
 REVOKE DELETE ON agency.agency FROM PUBLIC;
+REVOKE DELETE ON agency.agency_route_policy FROM PUBLIC;
 REVOKE DELETE ON agency.agency_session FROM PUBLIC;
 REVOKE DELETE ON agency.liaison_message_kind_catalog FROM PUBLIC;

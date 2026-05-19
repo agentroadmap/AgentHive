@@ -203,6 +203,10 @@ export function registerStateMachineCommand(program: any) {
     .option("--project <projectId>", "Join a specific project (ID)")
     .action(async (opts: { identity: string; type: string; provider?: string; model?: string; capabilities?: string; project?: string }) => {
       try {
+        const { resolvePermanentAgentMapping } = await import("../../core/identity/agent-registry/permanent-agent-map.ts");
+        const permanent = resolvePermanentAgentMapping(opts.identity);
+        const identity = permanent?.agentIdentity ?? opts.identity;
+        const provider = opts.provider ?? permanent?.provider ?? null;
         // 1. Register agency in agent_registry
         const { resolvePermanentAgentMapping } = await import("../../core/identity/agent-registry/permanent-agent-map.ts");
         const permanent = resolvePermanentAgentMapping(opts.identity);

@@ -45,6 +45,7 @@ interface QueueRow {
 	proposal_id: string | number | null;
 	title: string;
 	body: string;
+	payload: Record<string, unknown> | null;
 	metadata: Record<string, unknown> | null;
 	created_at: Date | string;
 	dispatch_attempts: number;
@@ -151,9 +152,10 @@ export class NotificationRouter {
 		// FIFO by created_at within severity rank; newer CRITICAL outranks older INFO.
 		const { rows } = await this.deps.pool.query<QueueRow>(
 			`SELECT id, severity, kind, channel, proposal_id,
-			        title, body, metadata, created_at, dispatch_attempts
+			        title, body, payload, metadata, created_at, dispatch_attempts
 			   FROM roadmap.notification_queue
-			  WHERE status = 'pending'
+			  WHERE dispatched_at IS NULL
+			    AND COALESCE(next_attempt_at, created_at) <= now()
 			  ORDER BY
 			    CASE severity
 			      WHEN 'CRITICAL' THEN 0
@@ -213,10 +215,8 @@ export class NotificationRouter {
 			return;
 		}
 
-		await this.recordAttempt(envelope.queueId, newAttempts, lastError);
-		// Re-enqueue after backoff — leave row in 'pending' so the poll picks it
-		// up again. Backoff is enforced by checking dispatch_attempts vs created_at.
 		const delay = BACKOFF_MS[Math.min(newAttempts - 1, BACKOFF_MS.length - 1)];
+		await this.recordAttempt(envelope.queueId, newAttempts, lastError, delay);
 		setTimeout(() => void this.scheduleDrain(), delay).unref?.();
 	}
 
@@ -276,7 +276,9 @@ export class NotificationRouter {
 	private async markSent(queueId: number): Promise<void> {
 		await this.deps.pool.query(
 			`UPDATE roadmap.notification_queue
-			    SET status = 'sent',
+			    SET dispatched_at = now(),
+			        next_attempt_at = NULL,
+			        status = 'sent',
 			        delivered_at = now()
 			  WHERE id = $1`,
 			[queueId],
@@ -286,7 +288,9 @@ export class NotificationRouter {
 	private async markSuppressed(queueId: number, reason: string): Promise<void> {
 		await this.deps.pool.query(
 			`UPDATE roadmap.notification_queue
-			    SET status = 'suppressed',
+			    SET dispatched_at = now(),
+			        next_attempt_at = NULL,
+			        status = 'suppressed',
 			        last_error = $2,
 			        delivered_at = now()
 			  WHERE id = $1`,
@@ -301,7 +305,9 @@ export class NotificationRouter {
 	): Promise<void> {
 		await this.deps.pool.query(
 			`UPDATE roadmap.notification_queue
-			    SET status = 'failed',
+			    SET dispatched_at = now(),
+			        next_attempt_at = NULL,
+			        status = 'failed',
 			        dispatch_attempts = $2,
 			        last_error = $3,
 			        delivered_at = now()
@@ -314,13 +320,15 @@ export class NotificationRouter {
 		queueId: number,
 		attempts: number,
 		lastError: string,
+		delayMs: number,
 	): Promise<void> {
 		await this.deps.pool.query(
 			`UPDATE roadmap.notification_queue
 			    SET dispatch_attempts = $2,
-			        last_error = $3
+			        last_error = $3,
+			        next_attempt_at = now() + ($4::text)::interval
 			  WHERE id = $1`,
-			[queueId, attempts, lastError],
+			[queueId, attempts, lastError, `${Math.ceil(delayMs / 1000)} seconds`],
 		);
 	}
 
@@ -330,8 +338,8 @@ export class NotificationRouter {
 	): Promise<void> {
 		await this.deps.pool.query(
 			`INSERT INTO roadmap.notification_queue
-			   (proposal_id, severity, kind, title, body, metadata)
-			 VALUES ($1, 'CRITICAL', 'notification_dispatch_failed', $2, $3, $4::jsonb)`,
+			   (proposal_id, severity, kind, title, body, payload, metadata)
+			 VALUES ($1, 'CRITICAL', 'notification_dispatch_failed', $2, $3, $4::jsonb, $4::jsonb)`,
 			[
 				envelope.proposalId,
 				`Dispatch failed for ${envelope.kind} (queue_id=${envelope.queueId})`,
@@ -355,7 +363,7 @@ function toEnvelope(row: QueueRow): NotificationEnvelope {
 		queueId: Number(row.id),
 		severity: row.severity,
 		kind: row.kind ?? "",
-		payload: (row.metadata ?? {}) as Record<string, unknown>,
+		payload: (row.payload ?? row.metadata ?? {}) as Record<string, unknown>,
 		proposalId:
 			row.proposal_id === null || row.proposal_id === undefined
 				? null

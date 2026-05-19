@@ -35,6 +35,7 @@ if (typeof startPoolWatchdog === "function") {
 const serverModule = await import("../src/apps/mcp-server/server.ts");
 const httpCompatModule = await import("../src/apps/mcp-server/http-compat.ts");
 const versionModule = await import("../src/shared/utils/version.ts");
+const poolModule = await import("../src/infra/postgres/pool.ts");
 const createMcpServer =
 	serverModule.createMcpServer || serverModule.default?.createMcpServer;
 const handleDirectMcpRequest =
@@ -42,6 +43,8 @@ const handleDirectMcpRequest =
 	httpCompatModule.default?.handleDirectMcpRequest;
 const getVersion =
 	versionModule.getVersion || versionModule.default?.getVersion;
+poolModule.setPoolLifecycleMode("long-running");
+poolModule.startPoolPoisonWatchdog("agenthive-mcp");
 
 if (!createMcpServer) {
 	console.error("[MCP] Failed to load createMcpServer from server module");

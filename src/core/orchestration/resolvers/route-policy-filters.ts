@@ -40,19 +40,49 @@ export function projectPolicyFilterSql(projectParamIdx: number, alias = "mr"): s
 	)`;
 }
 
-/** P771 Layer 3: agency_route_policy allowlist/denylist. */
+/** P771 Layer 3: normalized agency_route_policy ACL rows. */
 export function agencyPolicyFilterSql(agencyParamIdx: number, alias = "mr"): string {
 	return `(
 		$${agencyParamIdx}::text IS NULL
 		OR NOT EXISTS (
-			SELECT 1 FROM roadmap.agency_route_policy WHERE agency_identity = $${agencyParamIdx}::text
+			SELECT 1
+			FROM agency.agency a
+			WHERE a.agency_id = $${agencyParamIdx}::text
 		)
-		OR EXISTS (
-			SELECT 1 FROM roadmap.agency_route_policy arp
-			WHERE arp.agency_identity = $${agencyParamIdx}::text
-			  AND (array_length(arp.allowed_route_providers, 1) IS NULL
-			       OR ${alias}.route_provider = ANY(arp.allowed_route_providers))
-			  AND NOT (${alias}.route_provider = ANY(COALESCE(arp.forbidden_route_providers, '{}')))
+		OR (
+			(
+				NOT EXISTS (
+					SELECT 1
+					FROM agency.agency a
+					JOIN agency.agency_route_policy arp
+					  ON arp.agency_id = a.agency_id
+					 AND arp.scope = 'global'
+					 AND arp.lifecycle_status = 'active'
+					WHERE a.agency_id = $${agencyParamIdx}::text
+				)
+				OR EXISTS (
+					SELECT 1
+					FROM agency.agency a
+					JOIN agency.agency_route_policy arp
+					  ON arp.agency_id = a.agency_id
+					 AND arp.route_id = ${alias}.id
+					 AND arp.scope = 'global'
+					 AND arp.lifecycle_status = 'active'
+					WHERE a.agency_id = $${agencyParamIdx}::text
+					  AND arp.allowed = true
+				)
+			)
+			AND NOT EXISTS (
+				SELECT 1
+				FROM agency.agency a
+				JOIN agency.agency_route_policy arp
+				  ON arp.agency_id = a.agency_id
+				 AND arp.route_id = ${alias}.id
+				 AND arp.scope = 'global'
+				 AND arp.lifecycle_status = 'active'
+				WHERE a.agency_id = $${agencyParamIdx}::text
+				  AND arp.allowed = false
+			)
 		)
 	)`;
 }

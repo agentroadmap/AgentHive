@@ -31,7 +31,12 @@ import type {
 } from "../../types/index.ts";
 import { watchConfig } from "../../utils/config-watcher.ts";
 import { formatVersionLabel, getVersionInfo } from "../../utils/version.ts";
-import { getPool, query } from "../../infra/postgres/pool.ts";
+import {
+	getPool,
+	query,
+	setPoolLifecycleMode,
+	startPoolPoisonWatchdog,
+} from "../../infra/postgres/pool.ts";
 import type { PoolClient, Client as PgClient } from "pg";
 import { hashOperatorToken, requireOperator } from "./operator-auth.ts";
 import { agentContextStorage, type VerifiedPrincipal } from "../../shared/identity/agent-context.ts";
@@ -532,8 +537,8 @@ export class RoadmapServer {
 			repositoryPath: p.filePath || null,
 			budgetLimitUsd: p.budgetLimitUsd || 0,
 			tags: sanitizedLabels.length > 0 ? sanitizedLabels.join(",") : null,
-			createdAt: p.createdDate || p.createdAt || null,
-			updatedAt: p.updatedDate || p.updatedAt || null,
+			createdAt: (p.createdDate && p.createdDate !== "") ? p.createdDate : (p.createdAt || null),
+			updatedAt: (p.updatedDate && p.updatedDate !== "") ? p.updatedDate : (p.updatedAt || null),
 		};
 	}
 
@@ -654,6 +659,8 @@ export class RoadmapServer {
 			console.log("Server already running");
 			return;
 		}
+		setPoolLifecycleMode("long-running");
+		startPoolPoisonWatchdog("agenthive-board");
 		// Load config (migration is handled globally by CLI)
 		const config = await this.core.filesystem.loadConfig();
 
@@ -1285,6 +1292,21 @@ export class RoadmapServer {
 				return await this.handleGetSequences();
 			if (pathname === "/api/sequences/move" && method === "POST")
 				return await this.handleMoveSequence(req);
+
+			if (pathname === "/api/teams" && method === "GET")
+				return await this.handleListTeams();
+
+			if (pathname === "/api/knowledge" && method === "GET")
+				return await this.handleListKnowledge(req);
+
+			if (
+				pathname.startsWith("/api/knowledge/") &&
+				pathname.endsWith("/helpful") &&
+				method === "POST"
+			) {
+				const id = pathname.split("/")[3]!;
+				return await this.handleMarkKnowledgeHelpful(id);
+			}
 		}
 
 		// Legacy/Duplicate routes
@@ -3160,6 +3182,9 @@ export class RoadmapServer {
 	// cheap by gathering everything in one query and bounding result rows.
 	// AC-2: scoped to the operator-selected project. The aggregate adds a
 	// `project` echo so the UI can verify which scope rendered the data.
+	// P238: extend the same payload with state-machine authoritative views
+	// sourced from proposal/dispatch/lease/gate/route tables rather than
+	// transition_queue or other gate-pipeline compatibility rows.
 	private async handleControlPlaneOverview(req: Request): Promise<Response> {
 		try {
 			const scope = await this.resolveProjectScope(req);
@@ -3268,6 +3293,444 @@ export class RoadmapServer {
 				     ORDER BY r.started_at DESC
 				     LIMIT 15
 				  ) r
+				),
+				project_proposals AS (
+				  SELECT p.id,
+				         p.display_id,
+				         p.title,
+				         p.type,
+				         p.status,
+				         p.maturity,
+				         p.priority,
+				         p.workflow_name,
+				         p.created_at,
+				         p.modified_at
+				    FROM roadmap_proposal.proposal p
+				   WHERE p.project_id = $1
+				),
+				queue_pools AS (
+				  SELECT jsonb_agg(jsonb_build_object(
+				           'project_slug', $2::text,
+				           'workflow_name', workflow_name,
+				           'stage', status,
+				           'maturity', maturity,
+				           'proposal_count', proposal_count,
+				           'oldest_created_at', oldest_created_at,
+				           'oldest_updated_at', oldest_updated_at
+				         )
+				         ORDER BY workflow_name, status, maturity) AS rows
+				    FROM (
+				      SELECT workflow_name,
+				             status,
+				             maturity,
+				             COUNT(*) AS proposal_count,
+				             MIN(created_at) AS oldest_created_at,
+				             MIN(modified_at) AS oldest_updated_at
+				        FROM project_proposals
+				       GROUP BY workflow_name, status, maturity
+				    ) qp
+				),
+				project_capacity AS (
+				  SELECT COUNT(*) FILTER (
+				           WHERE pr.status IN ('active', 'throttled', 'dormant')
+				             AND COALESCE(inf.in_flight_count, 0) < pr.max_in_flight
+				         ) AS available_agencies
+				    FROM roadmap_workforce.provider_registry pr
+				    JOIN roadmap_workforce.agent_registry ar
+				      ON ar.id = pr.agency_id
+				    LEFT JOIN roadmap.agency a
+				      ON a.agency_id = ar.agent_identity
+				    LEFT JOIN roadmap_workforce.v_agency_in_flight inf
+				      ON inf.provider_registry_id = pr.id
+				   WHERE (pr.project_id IS NULL OR pr.project_id = $1::text)
+				     AND pr.status NOT IN ('offline', 'retired')
+				     AND (a.status IS NULL OR a.status <> 'retired')
+				     AND ar.agent_type <> 'coordinator'
+				),
+				candidate_ranking AS (
+				  SELECT jsonb_agg(jsonb_build_object(
+				           'display_id', display_id,
+				           'title', title,
+				           'workflow_name', workflow_name,
+				           'stage', status,
+				           'maturity', maturity,
+				           'priority', priority,
+				           'dependency_blockers', dependency_blockers,
+				           'stale_lease_boost', stale_lease_boost,
+				           'capacity_blocked', capacity_blocked,
+				           'active_dispatches', active_dispatches,
+				           'last_transition_at', last_transition_at
+				         )
+				         ORDER BY rank_score DESC, dependency_blockers ASC, modified_at ASC) AS rows
+				    FROM (
+				      SELECT p.display_id,
+				             p.title,
+				             p.workflow_name,
+				             p.status,
+				             p.maturity,
+				             COALESCE(NULLIF(p.priority, ''), 'medium') AS priority,
+				             COALESCE(dep.dependency_blockers, 0) AS dependency_blockers,
+				             COALESCE(lease.stale_lease_boost, 0) AS stale_lease_boost,
+				             (SELECT available_agencies = 0 FROM project_capacity) AS capacity_blocked,
+				             COALESCE(dispatch.active_dispatches, 0) AS active_dispatches,
+				             transition.last_transition_at,
+				             p.modified_at,
+				             (
+				               CASE lower(COALESCE(p.priority, ''))
+				                 WHEN 'critical' THEN 40
+				                 WHEN 'high' THEN 28
+				                 WHEN 'medium' THEN 18
+				                 WHEN 'low' THEN 10
+				                 ELSE 12
+				               END
+				               + CASE lower(p.maturity)
+				                   WHEN 'mature' THEN 16
+				                   WHEN 'active' THEN 9
+				                   WHEN 'new' THEN 4
+				                   ELSE 0
+				                 END
+				               + COALESCE(lease.stale_lease_boost, 0) * 7
+				               - COALESCE(dep.dependency_blockers, 0) * 11
+				               - COALESCE(dispatch.active_dispatches, 0) * 3
+				             ) AS rank_score
+				        FROM project_proposals p
+				        LEFT JOIN LATERAL (
+				          SELECT COUNT(*) FILTER (
+				                   WHERE lower(COALESCE(dep.status, '')) NOT IN ('complete', 'closed')
+				                     AND lower(COALESCE(dep.maturity, '')) <> 'obsolete'
+				                 ) AS dependency_blockers
+				            FROM roadmap_proposal.proposal_dependencies pd
+				            LEFT JOIN roadmap_proposal.proposal dep
+				              ON dep.id = pd.depends_on_id
+				           WHERE pd.proposal_id = p.id
+				        ) dep ON true
+				        LEFT JOIN LATERAL (
+				          SELECT CASE
+				                   WHEN COUNT(*) FILTER (
+				                     WHERE pl.released_at IS NULL
+				                       AND pl.expires_at IS NOT NULL
+				                       AND pl.expires_at < now()
+				                   ) > 0 THEN 2
+				                   WHEN COUNT(*) FILTER (
+				                     WHERE pl.release_reason ILIKE '%expired%'
+				                       AND pl.released_at > now() - interval '7 days'
+				                   ) > 0 THEN 1
+				                   ELSE 0
+				                 END AS stale_lease_boost
+				            FROM roadmap_proposal.proposal_lease pl
+				           WHERE pl.proposal_id = p.id
+				        ) lease ON true
+				        LEFT JOIN LATERAL (
+				          SELECT COUNT(*) FILTER (
+				                   WHERE lower(sd.dispatch_status) IN ('assigned', 'active', 'blocked')
+				                 ) AS active_dispatches
+				            FROM roadmap_workforce.squad_dispatch sd
+				           WHERE sd.proposal_id = p.id
+				             AND sd.project_id = $1
+				        ) dispatch ON true
+				        LEFT JOIN LATERAL (
+				          SELECT MAX(pst.transitioned_at) AS last_transition_at
+				            FROM roadmap_proposal.proposal_state_transitions pst
+				           WHERE pst.proposal_id = p.id
+				        ) transition ON true
+				       WHERE lower(p.status) NOT IN ('complete', 'closed')
+				         AND lower(p.maturity) <> 'obsolete'
+				       ORDER BY rank_score DESC, COALESCE(dep.dependency_blockers, 0) ASC, p.modified_at ASC
+				       LIMIT 12
+				    ) ranked
+				),
+				dispatch_lifecycle_counts AS (
+				  SELECT jsonb_build_object(
+				           'posted', COUNT(*) FILTER (
+				             WHERE lower(COALESCE(offer_status, '')) = 'open'
+				           ),
+				           'claimed', COUNT(*) FILTER (
+				             WHERE lower(COALESCE(offer_status, '')) = 'claimed'
+				           ),
+				           'running', COUNT(*) FILTER (
+				             WHERE lower(dispatch_status) = 'active'
+				           ),
+				           'completed', COUNT(*) FILTER (
+				             WHERE lower(dispatch_status) = 'completed'
+				           ),
+				           'failed', COUNT(*) FILTER (
+				             WHERE lower(COALESCE(offer_status, '')) = 'failed'
+				           ),
+				           'throttled', COUNT(*) FILTER (
+				             WHERE lower(COALESCE(offer_status, '')) = 'throttled'
+				           ),
+				           'cancelled', COUNT(*) FILTER (
+				             WHERE lower(dispatch_status) = 'cancelled'
+				                OR lower(COALESCE(offer_status, '')) = 'cancelled'
+				           ),
+				           'expired', COUNT(*) FILTER (
+				             WHERE lower(COALESCE(offer_status, '')) = 'expired'
+				                OR (
+				                  claim_expires_at IS NOT NULL
+				                  AND claim_expires_at < now()
+				                  AND lower(COALESCE(dispatch_status, '')) NOT IN ('completed', 'cancelled')
+				                )
+				           )
+				         ) AS counts
+				    FROM roadmap_workforce.squad_dispatch
+				   WHERE project_id = $1
+				),
+				recent_dispatches AS (
+				  SELECT jsonb_agg(jsonb_build_object(
+				           'id', id,
+				           'proposal_display_id', proposal_display_id,
+				           'proposal_title', proposal_title,
+				           'dispatch_role', dispatch_role,
+				           'dispatch_status', dispatch_status,
+				           'offer_status', offer_status,
+				           'agent_identity', agent_identity,
+				           'worker_identity', worker_identity,
+				           'assigned_at', assigned_at,
+				           'claim_expires_at', claim_expires_at
+				         ) ORDER BY assigned_at DESC NULLS LAST, id DESC) AS rows
+				    FROM (
+				      SELECT d.id,
+				             p.display_id AS proposal_display_id,
+				             p.title AS proposal_title,
+				             d.dispatch_role,
+				             d.dispatch_status,
+				             d.offer_status,
+				             d.agent_identity,
+				             d.worker_identity,
+				             d.assigned_at,
+				             d.claim_expires_at
+				        FROM roadmap_workforce.squad_dispatch d
+				        LEFT JOIN roadmap_proposal.proposal p
+				          ON p.id = d.proposal_id
+				       WHERE d.project_id = $1
+				       ORDER BY d.assigned_at DESC NULLS LAST, d.id DESC
+				       LIMIT 12
+				    ) rd
+				),
+				lease_recovery_summary AS (
+				  SELECT jsonb_build_object(
+				           'active', COUNT(*) FILTER (
+				             WHERE pl.released_at IS NULL
+				               AND (pl.expires_at IS NULL OR pl.expires_at >= now())
+				           ),
+				           'expired', COUNT(*) FILTER (
+				             WHERE pl.released_at IS NULL
+				               AND pl.expires_at IS NOT NULL
+				               AND pl.expires_at < now()
+				           ),
+				           'recovered_workspaces', (
+				             SELECT COUNT(*)
+				               FROM roadmap.cubics c
+				              WHERE c.project_id = $1
+				                AND c.status = 'expired'
+				           )
+				         ) AS summary
+				    FROM roadmap_proposal.proposal_lease pl
+				    JOIN project_proposals p
+				      ON p.id = pl.proposal_id
+				),
+				recent_expired_leases AS (
+				  SELECT jsonb_agg(jsonb_build_object(
+				           'display_id', display_id,
+				           'title', title,
+				           'agent_identity', agent_identity,
+				           'claimed_at', claimed_at,
+				           'expires_at', expires_at,
+				           'release_reason', release_reason
+				         ) ORDER BY expires_at DESC NULLS LAST, claimed_at DESC) AS rows
+				    FROM (
+				      SELECT p.display_id,
+				             p.title,
+				             pl.agent_identity,
+				             pl.claimed_at,
+				             pl.expires_at,
+				             pl.release_reason
+				        FROM roadmap_proposal.proposal_lease pl
+				        JOIN project_proposals p
+				          ON p.id = pl.proposal_id
+				       WHERE (pl.released_at IS NULL AND pl.expires_at IS NOT NULL AND pl.expires_at < now())
+				          OR (pl.release_reason ILIKE '%expired%' AND pl.released_at > now() - interval '7 days')
+				       ORDER BY COALESCE(pl.expires_at, pl.released_at) DESC NULLS LAST
+				       LIMIT 10
+				    ) rel
+				),
+				liaison_agencies AS (
+				  SELECT jsonb_agg(jsonb_build_object(
+				           'agency_identity', agency_identity,
+				           'status', status,
+				           'last_seen_at', last_seen_at,
+				           'max_in_flight', max_in_flight,
+				           'in_flight_count', in_flight_count,
+				           'throttle_count', throttle_count,
+				           'recent_failure_count', recent_failure_count,
+				           'session_started_at', session_started_at,
+				           'liaison_host', liaison_host,
+				           'liaison_pid', liaison_pid
+				         ) ORDER BY last_seen_at DESC NULLS LAST, agency_identity) AS rows
+				    FROM (
+				      SELECT ar.agent_identity AS agency_identity,
+				             pr.status,
+				             pr.last_seen_at,
+				             pr.max_in_flight,
+				             COALESCE(inf.in_flight_count, 0) AS in_flight_count,
+				             pr.throttle_count,
+				             pr.recent_failure_count,
+				             sess.started_at AS session_started_at,
+				             sess.liaison_host,
+				             sess.liaison_pid
+				        FROM roadmap_workforce.provider_registry pr
+				        JOIN roadmap_workforce.agent_registry ar
+				          ON ar.id = pr.agency_id
+				        LEFT JOIN roadmap_workforce.v_agency_in_flight inf
+				          ON inf.provider_registry_id = pr.id
+				        LEFT JOIN LATERAL (
+				          SELECT als.started_at,
+				                 als.liaison_host,
+				                 als.liaison_pid
+				            FROM roadmap.agency_liaison_session als
+				           WHERE als.agency_id = ar.agent_identity
+				             AND als.ended_at IS NULL
+				           ORDER BY als.started_at DESC
+				           LIMIT 1
+				        ) sess ON true
+				       WHERE (pr.project_id IS NULL OR pr.project_id = $1::text)
+				       ORDER BY pr.last_seen_at DESC NULLS LAST, ar.agent_identity
+				       LIMIT 12
+				    ) la
+				),
+				liaison_summary AS (
+				  SELECT jsonb_build_object(
+				           'active', COUNT(*) FILTER (WHERE pr.status = 'active'),
+				           'throttled', COUNT(*) FILTER (WHERE pr.status = 'throttled'),
+				           'dormant', COUNT(*) FILTER (WHERE pr.status = 'dormant'),
+				           'offline', COUNT(*) FILTER (WHERE pr.status = 'offline'),
+				           'retired', COUNT(*) FILTER (WHERE pr.status = 'retired'),
+				           'sessions', COUNT(*) FILTER (WHERE als.ended_at IS NULL)
+				         ) AS summary
+				    FROM roadmap_workforce.provider_registry pr
+				    JOIN roadmap_workforce.agent_registry ar
+				      ON ar.id = pr.agency_id
+				    LEFT JOIN roadmap.agency_liaison_session als
+				      ON als.agency_id = ar.agent_identity
+				     AND als.ended_at IS NULL
+				   WHERE (pr.project_id IS NULL OR pr.project_id = $1::text)
+				),
+				gate_decision_counts AS (
+				  SELECT jsonb_build_object(
+				           'advance', COUNT(*) FILTER (WHERE decision = 'advance'),
+				           'hold', COUNT(*) FILTER (WHERE decision = 'hold'),
+				           'reject', COUNT(*) FILTER (WHERE decision = 'reject'),
+				           'waive', COUNT(*) FILTER (WHERE decision = 'waive'),
+				           'escalate', COUNT(*) FILTER (WHERE decision = 'escalate')
+				         ) AS counts
+				    FROM roadmap_proposal.gate_decision_log g
+				    JOIN project_proposals p
+				      ON p.id = g.proposal_id
+				   WHERE g.created_at > now() - interval '24 hours'
+				),
+				recent_gate_decisions AS (
+				  SELECT jsonb_agg(jsonb_build_object(
+				           'display_id', display_id,
+				           'title', title,
+				           'from_state', from_state,
+				           'to_state', to_state,
+				           'maturity', maturity,
+				           'decision', decision,
+				           'decided_by', decided_by,
+				           'created_at', created_at
+				         ) ORDER BY created_at DESC) AS rows
+				    FROM (
+				      SELECT p.display_id,
+				             p.title,
+				             g.from_state,
+				             g.to_state,
+				             g.maturity,
+				             g.decision,
+				             g.decided_by,
+				             g.created_at
+				        FROM roadmap_proposal.gate_decision_log g
+				        JOIN project_proposals p
+				          ON p.id = g.proposal_id
+				       ORDER BY g.created_at DESC
+				       LIMIT 10
+				    ) rgd
+				),
+				recent_transitions AS (
+				  SELECT jsonb_agg(jsonb_build_object(
+				           'display_id', display_id,
+				           'title', title,
+				           'from_state', from_state,
+				           'to_state', to_state,
+				           'transition_reason', transition_reason,
+				           'transitioned_by', transitioned_by,
+				           'transitioned_at', transitioned_at
+				         ) ORDER BY transitioned_at DESC) AS rows
+				    FROM (
+				      SELECT p.display_id,
+				             p.title,
+				             pst.from_state,
+				             pst.to_state,
+				             pst.transition_reason,
+				             pst.transitioned_by,
+				             pst.transitioned_at
+				        FROM roadmap_proposal.proposal_state_transitions pst
+				        JOIN project_proposals p
+				          ON p.id = pst.proposal_id
+				       ORDER BY pst.transitioned_at DESC
+				       LIMIT 10
+				    ) rt
+				),
+				recent_route_decisions AS (
+				  SELECT jsonb_agg(jsonb_build_object(
+				           'display_id', display_id,
+				           'role', role,
+				           'agency_identity', agency_identity,
+				           'chosen_route', chosen_route,
+				           'eliminated_count', eliminated_count,
+				           'decided_at', decided_at
+				         ) ORDER BY decided_at DESC) AS rows
+				    FROM (
+				      SELECT p.display_id,
+				             rdl.role,
+				             rdl.agency_identity,
+				             COALESCE(mr.model_name, CONCAT('route#', rdl.chosen_route_id::text)) AS chosen_route,
+				             jsonb_array_length(COALESCE(rdl.eliminated_routes, '[]'::jsonb)) AS eliminated_count,
+				             rdl.decided_at
+				        FROM roadmap.route_decision_log rdl
+				        LEFT JOIN roadmap_proposal.proposal p
+				          ON p.id = rdl.proposal_id
+				        LEFT JOIN roadmap.model_routes mr
+				          ON mr.id = rdl.chosen_route_id
+				       WHERE rdl.proposal_id IN (SELECT id FROM project_proposals)
+				          OR rdl.agency_identity IN (
+				            SELECT agent_identity FROM roadmap_workforce.agent_registry WHERE project_id = $1
+				          )
+				       ORDER BY rdl.decided_at DESC
+				       LIMIT 10
+				    ) rrd
+				),
+				budget_counters AS (
+				  SELECT jsonb_build_object(
+				           'tracked_principals', COUNT(*),
+				           'total_budget_cents', COALESCE(SUM(max_usd_cents), 0),
+				           'total_spent_cents', COALESCE(SUM(current_spent_usd_cents), 0),
+				           'over_budget_principals', COUNT(*) FILTER (
+				             WHERE current_spent_usd_cents > max_usd_cents
+				           )
+				         ) AS summary
+				    FROM roadmap.principal_spending_cap
+				   WHERE project_id IN ($1::text, $2::text)
+				),
+				dispatch_budget_decisions AS (
+				  SELECT jsonb_build_object(
+				           'approved', COUNT(*) FILTER (WHERE budget_decision = 'approved'),
+				           'rejected', COUNT(*) FILTER (WHERE budget_decision = 'rejected'),
+				           'deny_budget', COUNT(*) FILTER (WHERE decision = 'deny_budget'),
+				           'deny_compliance', COUNT(*) FILTER (WHERE decision = 'deny_compliance')
+				         ) AS counts
+				    FROM roadmap.dispatch_route_audit
+				   WHERE project_id IN ($1::text, $2::text)
+				     AND decided_at > now() - interval '24 hours'
 				)
 				SELECT jsonb_build_object(
 				  'generated_at', now(),
@@ -3280,6 +3743,30 @@ export class RoadmapServer {
 				  'busy_agents', COALESCE((SELECT rows FROM busy_agents), '[]'::jsonb),
 				  'cubics_summary', (SELECT to_jsonb(c) FROM cubic_summary c),
 				  'active_cubics', COALESCE((SELECT rows FROM active_cubics), '[]'::jsonb),
+				  'queue_pools', COALESCE((SELECT rows FROM queue_pools), '[]'::jsonb),
+				  'candidate_ranking', COALESCE((SELECT rows FROM candidate_ranking), '[]'::jsonb),
+				  'dispatch_lifecycle', jsonb_build_object(
+				    'status_counts', COALESCE((SELECT counts FROM dispatch_lifecycle_counts), '{}'::jsonb),
+				    'recent_dispatches', COALESCE((SELECT rows FROM recent_dispatches), '[]'::jsonb)
+				  ),
+				  'lease_recovery', jsonb_build_object(
+				    'summary', COALESCE((SELECT summary FROM lease_recovery_summary), '{}'::jsonb),
+				    'recent_expired', COALESCE((SELECT rows FROM recent_expired_leases), '[]'::jsonb)
+				  ),
+				  'liaison_health', jsonb_build_object(
+				    'summary', COALESCE((SELECT summary FROM liaison_summary), '{}'::jsonb),
+				    'agencies', COALESCE((SELECT rows FROM liaison_agencies), '[]'::jsonb)
+				  ),
+				  'gate_audit', jsonb_build_object(
+				    'decision_counts', COALESCE((SELECT counts FROM gate_decision_counts), '{}'::jsonb),
+				    'recent_decisions', COALESCE((SELECT rows FROM recent_gate_decisions), '[]'::jsonb),
+				    'recent_transitions', COALESCE((SELECT rows FROM recent_transitions), '[]'::jsonb)
+				  ),
+				  'route_budget_audit', jsonb_build_object(
+				    'recent_route_decisions', COALESCE((SELECT rows FROM recent_route_decisions), '[]'::jsonb),
+				    'budget_counters', COALESCE((SELECT summary FROM budget_counters), '{}'::jsonb),
+				    'budget_decisions', COALESCE((SELECT counts FROM dispatch_budget_decisions), '{}'::jsonb)
+				  ),
 				  'routes', COALESCE((SELECT rows FROM route_health), '[]'::jsonb),
 				  'messages', (SELECT to_jsonb(m) FROM message_metrics m),
 				  'recent_runs', COALESCE((SELECT rows FROM recent_runs), '[]'::jsonb)
@@ -3813,6 +4300,89 @@ export class RoadmapServer {
 			console.error("Error listing dispatches:", error);
 			return Response.json(
 				{ error: "Failed to list dispatches" },
+				{ status: 500 },
+			);
+		}
+	}
+
+	private async handleListTeams(): Promise<Response> {
+		try {
+			const { rows } = await query(`
+				SELECT
+					squad_name AS name,
+					ARRAY_AGG(DISTINCT agent_identity ORDER BY agent_identity) AS members,
+					MAX(assigned_at) AS created_at
+				FROM roadmap_workforce.squad_dispatch
+				WHERE squad_name IS NOT NULL
+				  AND squad_name <> ''
+				GROUP BY squad_name
+				ORDER BY squad_name
+			`);
+			return Response.json(rows ?? []);
+		} catch (error) {
+			console.error("Error listing teams:", error);
+			return Response.json({ error: "Failed to list teams" }, { status: 500 });
+		}
+	}
+
+	private async handleListKnowledge(req: Request): Promise<Response> {
+		try {
+			const url = new URL(req.url);
+			const queryParam = url.searchParams.get("query") ?? "";
+			const typeParam = url.searchParams.get("type") ?? "";
+
+			let sql = `
+				SELECT
+					id, type, content, keywords,
+					source_proposal_id AS source,
+					helpful_count, created_at
+				FROM roadmap.knowledge_entries
+				WHERE 1=1
+			`;
+			const params: unknown[] = [];
+			let idx = 1;
+
+			if (queryParam) {
+				sql += ` AND (content ILIKE $${idx} OR keywords::text ILIKE $${idx} OR title ILIKE $${idx})`;
+				params.push(`%${queryParam}%`);
+				idx++;
+			}
+			if (typeParam) {
+				sql += ` AND type = $${idx}`;
+				params.push(typeParam);
+				idx++;
+			}
+			sql += ` ORDER BY helpful_count DESC, created_at DESC LIMIT 100`;
+
+			const { rows } = await query(sql, params);
+			return Response.json(
+				(rows ?? []).map((row: Record<string, unknown>) => ({
+					...row,
+					keywords: Array.isArray(row.keywords) ? row.keywords : [],
+				})),
+			);
+		} catch (error) {
+			console.error("Error listing knowledge entries:", error);
+			return Response.json(
+				{ error: "Failed to list knowledge entries" },
+				{ status: 500 },
+			);
+		}
+	}
+
+	private async handleMarkKnowledgeHelpful(id: string): Promise<Response> {
+		try {
+			await query(
+				`UPDATE roadmap.knowledge_entries
+				    SET helpful_count = helpful_count + 1, updated_at = now()
+				  WHERE id = $1`,
+				[id],
+			);
+			return Response.json({ ok: true });
+		} catch (error) {
+			console.error("Error marking knowledge helpful:", error);
+			return Response.json(
+				{ error: "Failed to mark as helpful" },
 				{ status: 500 },
 			);
 		}

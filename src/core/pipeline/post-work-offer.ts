@@ -13,8 +13,11 @@
  * feed shows the de-duplication.
  */
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { query as defaultQuery } from "../../infra/postgres/pool.ts";
+import { ObservabilityWriter } from "../observability/observability-writer.ts";
+
+const obs = new ObservabilityWriter("offer-pipeline");
 
 export type QueryFn = typeof defaultQuery;
 
@@ -116,6 +119,8 @@ export interface WorkOfferResult {
 	replay: boolean;
 	/** Total number of times this idempotency_key has been posted. */
 	attemptCount: number;
+	/** P908-D: UUID threaded through the offer pipeline for observability trace correlation. */
+	traceId: string;
 }
 
 function computeIdempotencyKey(parts: {
@@ -150,7 +155,11 @@ export async function postWorkOffer(
 	input: WorkOfferInput,
 	queryFn: QueryFn = defaultQuery,
 ): Promise<WorkOfferResult> {
-	const metadata: Record<string, unknown> = { task: input.task };
+	// P908-D: generate a trace_id for this offer so claim/dispatch/completion
+	// spans can be correlated across the pipeline without a shared in-memory map.
+	const traceId = randomUUID();
+
+	const metadata: Record<string, unknown> = { task: input.task, trace_id: traceId };
 	if (input.stage) metadata.stage = input.stage;
 	if (input.phase) metadata.phase = input.phase;
 	if (input.model) metadata.model = input.model;
@@ -338,9 +347,21 @@ export async function postWorkOffer(
 		]);
 	}
 
+	// P908-D: open+close offer_posted span so the trace records the dispatch event.
+	// Best-effort — errors are swallowed inside ObservabilityWriter.
+	if (!row.was_replay) {
+		const span = await obs.startSpan({
+			traceId,
+			operation: "offer_posted",
+			attributes: { dispatch_id: dispatchId, proposal_id: input.proposalId, role: input.role },
+		});
+		await obs.closeSpan({ spanId: span.spanId });
+	}
+
 	return {
 		dispatchId,
 		replay: row.was_replay,
 		attemptCount: row.attempt_count,
+		traceId,
 	};
 }
