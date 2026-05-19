@@ -67,13 +67,16 @@ export function renderCockpit(
 		});
 
 		// Create persistent container
+		// (no `keys: true` on the container — pre-codex-03b5d580 the container did
+		// not capture keys, and adding it caused focus contention that resulted
+		// in cockpit rendering as a black screen. Per-box handlers below still
+		// catch Tab/q/Esc.)
 		container = box({
 			top: 0,
 			left: 0,
 			width: "100%",
 			height: "100%",
 			tags: true,
-			keys: true,
 		});
 		(screen as any)._cockpitContainer = container;
 
@@ -101,7 +104,6 @@ export function renderCockpit(
 			label: " [F1] Workforce Pulse ",
 			tags: true,
 			scrollable: true,
-			keys: true,
 			style: { border: { fg: "green" } },
 		});
 		container._workforceBox = workforceBox;
@@ -117,7 +119,6 @@ export function renderCockpit(
 			label: " [F4] Pipeline Traffic ",
 			tags: true,
 			scrollable: true,
-			keys: true,
 			style: { border: { fg: "magenta" } },
 		});
 		container._pipelineBox = pipelineBox;
@@ -133,7 +134,6 @@ export function renderCockpit(
 			label: " [F2] The Ledger (Spending) ",
 			tags: true,
 			scrollable: true,
-			keys: true,
 			style: { border: { fg: "yellow" } },
 		});
 		container._ledgerBox = ledgerBox;
