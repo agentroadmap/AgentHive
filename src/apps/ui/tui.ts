@@ -48,12 +48,14 @@ function normalizeToError(value: unknown): Error {
 export function createScreen(
 	options: Partial<ScreenOptions> = {},
 ): ScreenInterface {
-	const program: ProgramInterface = createProgram({ tput: true });
-	const fullUnicode = Boolean((program as { terminal?: { unicode?: boolean } }).terminal?.unicode);
+	// Let blessed manage program internally (singleton via blessed.program()).
+	// Explicit createProgram() per screen creates competing program instances
+	// that fight for tty ownership — second+ screens render to stale stdout
+	// and produce black-screen-on-Tab. blessed's internal program is shared
+	// across screens by design.
 	const screen = blessedScreen({
 		smartCSR: true,
-		program,
-		fullUnicode,
+		fullUnicode: true,
 		...options,
 	});
 
