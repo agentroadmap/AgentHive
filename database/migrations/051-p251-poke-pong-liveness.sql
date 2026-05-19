@@ -5,7 +5,7 @@
 --   - agent_lifecycle_log audit table
 --   - liaison_poke / liaison_pong kind catalog entries
 --   - CHECK constraint on agency.status
---   - Rebuilt v_agency_status with 6-state liveness_state + 10-minute dispatchable window
+--   - Rebuilt v_agency_status with 6-state liveness_state + 60-second dispatchable window (tightened by P915)
 --   - Rebuilt fn_check_agency_dormancy: 15-minute threshold, excludes poke-pending agencies
 
 BEGIN;
@@ -88,14 +88,14 @@ VALUES
 ON CONFLICT (kind) DO NOTHING;
 
 -- ─── 5. Rebuild v_agency_status ──────────────────────────────────────────────
--- Adds liveness_state (6 states) and widens dispatchable window to 10 minutes.
+-- Adds liveness_state (6 states). Dispatchable window tightened to 60 seconds by P915.
 --
 -- liveness_state priority order:
 --   poke-pending       → open poke_attempt exists (CAS outcome IS NULL)
 --   stale-unresponsive → last resolved poke timed out (no pong in 60s)
 --   late-pong          → last resolved poke received pong AFTER timeout window
---   live-and-working   → active, fresh heartbeat (<10 min), has active dispatch
---   live-but-idle      → active, fresh heartbeat (<10 min), no active dispatch
+--   live-and-working   → active, fresh heartbeat (<60 sec), has active dispatch
+--   live-but-idle      → active, fresh heartbeat (<60 sec), no active dispatch
 --   offline            → everything else (dormant, paused, stale heartbeat)
 CREATE OR REPLACE VIEW roadmap.v_agency_status AS
 SELECT
@@ -109,7 +109,7 @@ SELECT
     (
         a.status = 'active'
         AND a.last_heartbeat_at IS NOT NULL
-        AND (now() - a.last_heartbeat_at) < interval '10 minutes'
+        AND (now() - a.last_heartbeat_at) < interval '60 seconds'
     ) AS dispatchable,
     a.registered_at,
     a.metadata,
@@ -122,12 +122,12 @@ SELECT
             THEN 'late-pong'
         WHEN a.status = 'active'
             AND a.last_heartbeat_at IS NOT NULL
-            AND (now() - a.last_heartbeat_at) < interval '10 minutes'
+            AND (now() - a.last_heartbeat_at) < interval '60 seconds'
             AND active_dispatch.agency_id IS NOT NULL
             THEN 'live-and-working'
         WHEN a.status = 'active'
             AND a.last_heartbeat_at IS NOT NULL
-            AND (now() - a.last_heartbeat_at) < interval '10 minutes'
+            AND (now() - a.last_heartbeat_at) < interval '60 seconds'
             THEN 'live-but-idle'
         ELSE 'offline'
     END AS liveness_state

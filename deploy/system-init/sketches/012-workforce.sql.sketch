@@ -1,0 +1,170 @@
+-- ============================================================
+-- SKETCH 012 — P901: workforce schema governance
+-- Status: SKETCH (not a live migration — emit to numbered migration before applying)
+--
+-- Scope:
+--   AC-3: workforce schema documentation, ENUM constraints, audit governance
+--   Finding 2: dark-tables status and activation blockers
+--   Phase 2 (Migration Plan): per-project FK additions
+--
+-- Pre-requisites:
+--   database/ddl/hivecentral/006-workforce.sql (P597) applied.
+--   database/migrations/056-workforce-from-roadmap-workforce.sql applied
+--     (copies roadmap_workforce.agent_registry rows → workforce.agent/skill/agent_skill).
+--   P429 (multi-tenant DB topology) must land before workforce.* reads can
+--   be wired cross-project in the dispatch path.
+-- ============================================================
+
+-- ============================================================
+-- AC-3 WORKFORCE SCHEMA DOCUMENTATION
+-- ============================================================
+
+-- ── ENUM inventory (006-workforce.sql) ───────────────────────────────────────
+
+-- workforce.agent_type ENUM:    'human', 'ai', 'hybrid'
+-- workforce.agent_status ENUM:  'active', 'inactive', 'suspended'
+-- workforce.skill_lifecycle ENUM: 'active', 'deprecated', 'proposed'
+--   ↑ NOTE: Values are active/deprecated/PROPOSED (not 'retired').
+--     Application code must use exactly these literals when INSERTing into workforce.skill.
+-- workforce.proficiency_level ENUM: 'none' < 'basic' < 'intermediate' < 'advanced' < 'expert'
+--   ↑ Ordered enum. Dispatch uses >= comparisons for skill-based routing.
+-- workforce.grant_action ENUM:  'grant', 'revoke', 'update', 'expire'
+
+-- ── Self-referencing FK: workforce.skill.successor_skill_id ──────────────────
+-- When skill.lifecycle = 'deprecated', successor_skill_id BIGINT REFERENCES
+-- workforce.skill(id) ON DELETE SET NULL points to the replacement skill.
+-- Pattern:
+--   UPDATE workforce.skill
+--     SET lifecycle = 'deprecated', successor_skill_id = (SELECT id FROM workforce.skill WHERE skill_name = 'new-skill')
+--   WHERE skill_name = 'old-skill';
+-- Callers reading workforce.v_agent_capabilities should resolve deprecated skills
+-- via successor_skill_id before dispatch.
+
+-- ── Append-only audit: workforce.skill_grant_log ─────────────────────────────
+-- Auto-populated by trigger trg_agent_skill_audit (AFTER INSERT/UPDATE/DELETE on agent_skill).
+-- REVOKE UPDATE, DELETE already applied at DDL level (006-workforce.sql).
+-- Retention policy recommendation: 365 days.
+-- Enforcement: cron job or pg_partman partition rotation (not yet implemented).
+-- Archive target: workforce.skill_grant_log_archive (partition or separate table).
+-- Note: skill_grant_log has no lifecycle_status or expires_at — it is truly append-only;
+--   the action enum ('grant','revoke','update','expire') captures the event type.
+
+-- ── Dark-tables status (Finding 2) ───────────────────────────────────────────
+-- migration 056-workforce-from-roadmap-workforce.sql has populated:
+--   workforce.agent         (from roadmap_workforce.agent_registry)
+--   workforce.skill         (from roadmap_workforce.agent_capability)
+--   workforce.agent_skill   (from roadmap_workforce.agent_capability skill grants)
+-- These tables are POPULATED BUT DARK:
+--   - No live application code reads from workforce.* at runtime.
+--   - The dispatch path still reads roadmap_workforce.agent_registry directly.
+--   - Full activation is BLOCKED until P429 (multi-tenant DB) lands.
+-- Interim state is stable: per-project tables remain readable throughout.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- ============================================================
+-- PHASE 2 FK ADDITIONS (Migration Plan — weeks 3-4)
+-- ============================================================
+-- Per-project agent tables (deploy/project-init/003-agent.sql) use soft TEXT FKs:
+--   <schema>.agent.did TEXT  (soft FK to identity.principal.did)
+--   <schema>.agent.provider_slug TEXT  (soft FK to agency.provider)
+--   <schema>.agent.model_id TEXT  (soft FK to agency.model)
+--
+-- Phase 2 adds a NULLABLE hard FK to workforce.agent for cross-registry linkage.
+-- NULLABLE = existing rows are unaffected; backfill happens asynchronously.
+--
+-- IMPORTANT: This sketch represents the INTENT of Phase 2.
+-- The actual ALTER TABLE must be run per-project schema (agentHive, monkeyKing-audio, etc.)
+-- and cannot be expressed as a single statement here without knowing all tenant slugs.
+-- The Phase 2 migration script must iterate project schemas from roadmap.project.
+-- ============================================================
+
+-- Template for Phase 2 per-project FK addition (run once per tenant schema):
+--
+-- ALTER TABLE <project_schema>.agent
+--   ADD COLUMN IF NOT EXISTS workforce_agent_id BIGINT
+--     REFERENCES workforce.agent(id) ON DELETE SET NULL;
+--
+-- CREATE INDEX IF NOT EXISTS idx_<project_schema>_agent_workforce_id
+--   ON <project_schema>.agent (workforce_agent_id)
+--   WHERE workforce_agent_id IS NOT NULL;
+--
+-- COMMENT ON COLUMN <project_schema>.agent.workforce_agent_id IS
+--   'Nullable FK to the central workforce.agent catalog. '
+--   'NULL = not yet linked; backfilled by DID match after Phase 2 migration. '
+--   'ON DELETE SET NULL = safe even if the central catalog row is removed.';
+
+-- Template for Phase 2 per-project workflow FK addition:
+--
+-- ALTER TABLE <project_schema>.workflow
+--   ADD COLUMN IF NOT EXISTS template_id TEXT
+--     REFERENCES template.workflow_template(template_id)
+--     ON UPDATE RESTRICT ON DELETE RESTRICT;
+--
+-- CREATE INDEX IF NOT EXISTS idx_<project_schema>_workflow_template_id
+--   ON <project_schema>.workflow (template_id)
+--   WHERE template_id IS NOT NULL;
+
+-- ── Phase 2 backfill strategy ────────────────────────────────────────────────
+-- After adding workforce_agent_id column, backfill by DID match:
+--
+-- UPDATE <project_schema>.agent pa
+-- SET workforce_agent_id = wa.id
+-- FROM workforce.agent wa
+-- WHERE pa.did = wa.agent_identity
+--   AND pa.workforce_agent_id IS NULL;
+--
+-- Log unmatched agents for manual triage:
+-- INSERT INTO template.template_backfill_orphans (project_id, notes)
+-- SELECT DISTINCT p.project_id, 'Phase 2 backfill: agent DID not found in workforce.agent'
+-- FROM <project_schema>.agent pa
+-- JOIN roadmap.project p ON p.slug = '<project_slug>'
+-- WHERE pa.workforce_agent_id IS NULL
+--   AND pa.did IS NOT NULL
+-- ON CONFLICT DO NOTHING;
+
+-- ============================================================
+-- PHASE 3 READ-THROUGH GUARD (out of scope for P901 migration)
+-- ============================================================
+-- Once Phase 3 wires workforce.* reads into the dispatch path:
+--   1. All SQL must use fully-qualified schema.table names.
+--      getControlPool() search_path does NOT include 'workforce'.
+--   2. Cross-project reads require P429 multi-tenant DB to be live.
+--   3. Feature-flag the new read paths for rollback safety.
+-- ─────────────────────────────────────────────────────────────
+
+-- ============================================================
+-- SKILL_GRANT_LOG ARCHIVE (365-day retention)
+-- ============================================================
+-- Recommended cron job (pg_cron or external scheduler):
+--   DELETE FROM workforce.skill_grant_log
+--   WHERE created_at < now() - interval '365 days';
+-- This statement will fail (trigger blocks DELETE). Proper approach:
+--   Either use a partition rotation (pg_partman range partition on created_at)
+--   or move to an archive table before deleting:
+--     INSERT INTO workforce.skill_grant_log_archive SELECT * FROM workforce.skill_grant_log
+--       WHERE created_at < now() - interval '365 days';
+--     Then DELETE from the partition (if partitioned) or DROP the old partition.
+-- The archive table DDL (not yet created):
+--   CREATE TABLE IF NOT EXISTS workforce.skill_grant_log_archive
+--     (LIKE workforce.skill_grant_log INCLUDING ALL);
+--   COMMENT ON TABLE workforce.skill_grant_log_archive IS
+--     'Cold storage for skill grant events older than 365 days. Archived by retention cron.';
+-- ============================================================
+
+-- ============================================================
+-- AC-6 DRY-RUN NOTE
+-- ============================================================
+-- This sketch file contains no executable DDL (only comments and templates).
+-- The Phase 2 per-project ALTER TABLE statements must be emitted as a numbered
+-- migration that iterates roadmap.project to enumerate all tenant schemas.
+-- AC-6 validation applies to that emitted migration, not this sketch.
+-- ============================================================
+
+-- ============================================================
+-- AC-10 SEARCH_PATH REMINDER
+-- ============================================================
+-- getControlPool() sets:
+--   search_path = roadmap_proposal,roadmap_workforce,roadmap_efficiency,roadmap,public
+-- The 'workforce' schema is NOT in the search_path.
+-- All SQL targeting workforce.* MUST use fully-qualified schema.table names.
+-- ============================================================

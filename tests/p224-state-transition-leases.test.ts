@@ -164,18 +164,19 @@ describe("P224 — State transition lease enforcement", () => {
 			);
 			const testProposalId = testResult.rows[0].id;
 
-			// Verify it appears in v_mature_queue
-			const result = await query("SELECT id FROM roadmap_proposal.v_mature_queue WHERE id = $1", [testProposalId]);
-			assert.equal(result.rows.length, 1, "Mature proposal should be in queue");
+			try {
+				// Verify it appears in v_mature_queue
+				const result = await query("SELECT id FROM roadmap_proposal.v_mature_queue WHERE id = $1", [testProposalId]);
+				assert.equal(result.rows.length, 1, "Mature proposal should be in queue");
 
-			// Verify gate scanner sees it as unlocked
-			const queueResults = await getGateQueue(100);
-			const testProposalInQueue = queueResults.find((p) => p.id === testProposalId);
-			assert(testProposalInQueue, "Proposal should appear in gate queue");
-			assert.equal(testProposalInQueue.hasActiveLease, false, "Should not have active lease");
-
-			// Clean up
-			await query("DELETE FROM roadmap_proposal.proposal WHERE id = $1", [testProposalId]);
+				// Verify gate scanner sees it as unlocked
+				const queueResults = await getGateQueue(100);
+				const testProposalInQueue = queueResults.find((p) => p.id === testProposalId);
+				assert(testProposalInQueue, "Proposal should appear in gate queue");
+				assert.equal(testProposalInQueue.hasActiveLease, false, "Should not have active lease");
+			} finally {
+				await query("DELETE FROM roadmap_proposal.proposal WHERE id = $1", [testProposalId]);
+			}
 		});
 
 		it("should exclude proposals from unlocked queue if another agent holds a lease", async () => {
@@ -190,29 +191,30 @@ describe("P224 — State transition lease enforcement", () => {
 			);
 			const testProposalId = testResult.rows[0].id;
 
-			// Create a lease for the proposal
-			await query(
-				`INSERT INTO roadmap_proposal.proposal_lease
+			try {
+				// Create a lease for the proposal
+				await query(
+					`INSERT INTO roadmap_proposal.proposal_lease
          (proposal_id, agent_identity, claimed_at, expires_at, released_at)
        VALUES ($1, $2, NOW(), NOW() + INTERVAL '1 hour', NULL)`,
-				[testProposalId, agent],
-			);
+					[testProposalId, agent],
+				);
 
-			// Verify it appears in v_mature_queue but is marked as locked
-			const allQueue = await getGateQueue(100);
-			const lockedProposal = allQueue.find((p) => p.id === testProposalId);
-			assert(lockedProposal, "Locked proposal should appear in full gate queue");
-			assert.equal(lockedProposal.hasActiveLease, true, "Should have active lease");
-			assert.equal(lockedProposal.leaseHolder, agent, "Should show correct lease holder");
+				// Verify it appears in v_mature_queue but is marked as locked
+				const allQueue = await getGateQueue(100);
+				const lockedProposal = allQueue.find((p) => p.id === testProposalId);
+				assert(lockedProposal, "Locked proposal should appear in full gate queue");
+				assert.equal(lockedProposal.hasActiveLease, true, "Should have active lease");
+				assert.equal(lockedProposal.leaseHolder, agent, "Should show correct lease holder");
 
-			// Verify it's excluded from unlocked queue
-			const unlockedQueue = filterUnlockedProposals(allQueue);
-			const lockedInUnlocked = unlockedQueue.find((p) => p.id === testProposalId);
-			assert.equal(lockedInUnlocked, undefined, "Locked proposal should be excluded from unlocked queue");
-
-			// Clean up
-			await query("DELETE FROM roadmap_proposal.proposal_lease WHERE proposal_id = $1", [testProposalId]);
-			await query("DELETE FROM roadmap_proposal.proposal WHERE id = $1", [testProposalId]);
+				// Verify it's excluded from unlocked queue
+				const unlockedQueue = filterUnlockedProposals(allQueue);
+				const lockedInUnlocked = unlockedQueue.find((p) => p.id === testProposalId);
+				assert.equal(lockedInUnlocked, undefined, "Locked proposal should be excluded from unlocked queue");
+			} finally {
+				await query("DELETE FROM roadmap_proposal.proposal_lease WHERE proposal_id = $1", [testProposalId]);
+				await query("DELETE FROM roadmap_proposal.proposal WHERE id = $1", [testProposalId]);
+			}
 		});
 
 		it("getUnlockedGateQueue should return only unlocked proposals", async () => {
@@ -233,25 +235,26 @@ describe("P224 — State transition lease enforcement", () => {
 			);
 			const prop2Id = prop2Result.rows[0].id;
 
-			// Lock the second proposal
-			await query(
-				`INSERT INTO roadmap_proposal.proposal_lease
+			try {
+				// Lock the second proposal
+				await query(
+					`INSERT INTO roadmap_proposal.proposal_lease
          (proposal_id, agent_identity, claimed_at, expires_at, released_at)
        VALUES ($1, $2, NOW(), NOW() + INTERVAL '1 hour', NULL)`,
-				[prop2Id, "locking-agent"],
-			);
+					[prop2Id, "locking-agent"],
+				);
 
-			// Get unlocked proposals
-			const unlockedQueue = await getUnlockedGateQueue(100);
-			const prop1InQueue = unlockedQueue.find((p) => p.id === prop1Id);
-			const prop2InQueue = unlockedQueue.find((p) => p.id === prop2Id);
+				// Get unlocked proposals
+				const unlockedQueue = await getUnlockedGateQueue(100);
+				const prop1InQueue = unlockedQueue.find((p) => p.id === prop1Id);
+				const prop2InQueue = unlockedQueue.find((p) => p.id === prop2Id);
 
-			assert(prop1InQueue, "Unlocked proposal should be in queue");
-			assert.equal(prop2InQueue, undefined, "Locked proposal should not be in queue");
-
-			// Clean up
-			await query("DELETE FROM roadmap_proposal.proposal_lease WHERE proposal_id IN ($1, $2)", [prop1Id, prop2Id]);
-			await query("DELETE FROM roadmap_proposal.proposal WHERE id IN ($1, $2)", [prop1Id, prop2Id]);
+				assert(prop1InQueue, "Unlocked proposal should be in queue");
+				assert.equal(prop2InQueue, undefined, "Locked proposal should not be in queue");
+			} finally {
+				await query("DELETE FROM roadmap_proposal.proposal_lease WHERE proposal_id IN ($1, $2)", [prop1Id, prop2Id]);
+				await query("DELETE FROM roadmap_proposal.proposal WHERE id IN ($1, $2)", [prop1Id, prop2Id]);
+			}
 		});
 	});
 

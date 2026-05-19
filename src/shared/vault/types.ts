@@ -190,3 +190,38 @@ export class VaultInvalidRefError extends VaultError {
 		this.name = "VaultInvalidRefError";
 	}
 }
+
+/**
+ * Thrown when the vault backend is unreachable and no valid cached value exists.
+ *
+ * When a recent cached value exists (within cacheStaleThreshold), the adapter
+ * returns the stale cached value instead of throwing this error.
+ */
+export class VaultUnavailableError extends VaultError {
+	constructor(
+		ref: SecretRef,
+		operation: "read" | "write" | "rotate" | "exists",
+		public readonly cause: Error,
+		message: string,
+	) {
+		super(ref, operation, message);
+		this.name = "VaultUnavailableError";
+	}
+}
+
+/**
+ * Thrown when authentication to the vault backend fails.
+ *
+ * Indicates AppRole/IAM auth failure. Credentials may be expired or revoked.
+ */
+export class VaultAuthError extends VaultError {
+	constructor(
+		ref: SecretRef,
+		operation: "read" | "write" | "rotate" | "exists",
+		public readonly statusCode: number,
+		message: string,
+	) {
+		super(ref, operation, message);
+		this.name = "VaultAuthError";
+	}
+}

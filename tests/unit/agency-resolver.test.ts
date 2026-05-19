@@ -5,18 +5,30 @@ import { test } from "node:test";
 const queryCalls: Array<{ sql: string; params: unknown[] }> = [];
 let mockRows: Record<string, unknown>[] = [];
 
+const discordCalls: Array<{ from: string; message: string; level: string }> =
+	[];
+
 const {
 	resolveAgency,
 	recordSpawnFailure,
 	recordCheckIn,
+	operatorResumeAgency,
+	emitOfflineAlerts,
 	THROTTLE_THRESHOLD,
 	_setQueryForTest,
-} = await import("../../src/core/orchestration/resolvers/agency-resolver.ts");
+	_setDiscordForTest,
+} = await import(
+	"../../src/core/orchestration/resolvers/agency-resolver.ts"
+);
 
 _setQueryForTest(async (sql: string, params: unknown[] = []) => {
 	queryCalls.push({ sql, params });
 	// biome-ignore lint/suspicious/noExplicitAny: test mock returns partial QueryResult shape
 	return { rows: mockRows, rowCount: mockRows.length } as any;
+});
+
+_setDiscordForTest(async (from: string, message: string, level = "info") => {
+	discordCalls.push({ from, message, level });
 });
 
 test("THROTTLE_THRESHOLD is 3", () => {
@@ -114,4 +126,231 @@ test("recordCheckIn decays recent_failure_count (SQL check)", async () => {
 	await recordCheckIn("claude-opus");
 	const sql = queryCalls.at(-1)!.sql;
 	assert.ok(sql.includes("recent_failure_count"));
+});
+
+// --- P765 AC-1: offline → dormant auto-recovery ---
+
+test("recordCheckIn includes offline→dormant transition (SQL check)", async () => {
+	mockRows = [];
+	queryCalls.length = 0;
+	await recordCheckIn("claude-opus");
+	const sql = queryCalls[0].sql;
+	assert.ok(
+		sql.includes("offline"),
+		"SQL should reference offline state transition",
+	);
+	assert.ok(
+		sql.match(/old_status\s*=\s*'offline'/),
+		"SQL should handle offline as a CASE branch",
+	);
+});
+
+test("recordCheckIn does not exclude offline agencies from WHERE clause (SQL check)", async () => {
+	mockRows = [];
+	queryCalls.length = 0;
+	await recordCheckIn("claude-opus");
+	const sql = queryCalls[0].sql;
+	// Only 'retired' should be excluded; 'offline' must not appear in NOT IN list
+	assert.ok(
+		!sql.match(/NOT IN\s*\(\s*'offline'/),
+		"offline must not be in NOT IN exclusion list",
+	);
+	assert.ok(sql.includes("retired"), "retired should still be excluded");
+});
+
+test("recordCheckIn clears alert_sent_at when dormant→active (SQL check)", async () => {
+	mockRows = [];
+	queryCalls.length = 0;
+	await recordCheckIn("claude-opus");
+	const sql = queryCalls[0].sql;
+	assert.ok(
+		sql.includes("alert_sent_at"),
+		"SQL should reference alert_sent_at column",
+	);
+	// The dormant→active branch must null it out
+	assert.ok(
+		sql.includes("NULL"),
+		"SQL should set alert_sent_at to NULL on recovery",
+	);
+});
+
+test("recordCheckIn emits Discord recovery when dormant→active had alert (behavior check)", async () => {
+	mockRows = [
+		{
+			new_status: "active",
+			project_id: null,
+			old_status: "dormant",
+			had_alert: true,
+		},
+	];
+	discordCalls.length = 0;
+	queryCalls.length = 0;
+	await recordCheckIn("claude-opus");
+	assert.equal(discordCalls.length, 1);
+	assert.equal(discordCalls[0].level, "success");
+	assert.ok(discordCalls[0].message.includes("claude-opus"));
+});
+
+test("recordCheckIn does not emit Discord when no prior alert (behavior check)", async () => {
+	mockRows = [
+		{
+			new_status: "active",
+			project_id: null,
+			old_status: "dormant",
+			had_alert: false,
+		},
+	];
+	discordCalls.length = 0;
+	await recordCheckIn("claude-opus");
+	assert.equal(discordCalls.length, 0);
+});
+
+// --- P765 AC-2: operatorResumeAgency ---
+
+test("operatorResumeAgency sets status to active from any non-retired state (SQL check)", async () => {
+	mockRows = [];
+	queryCalls.length = 0;
+	await operatorResumeAgency("claude-opus");
+	const sql = queryCalls[0].sql;
+	assert.ok(sql.includes("'active'"), "SQL should set status = 'active'");
+	assert.ok(
+		sql.includes("Operator resume"),
+		"SQL should set status_reason to Operator resume",
+	);
+	assert.ok(
+		sql.includes("alert_sent_at"),
+		"SQL should clear alert_sent_at",
+	);
+	assert.ok(sql.includes("agent_identity"), "SQL should join via agent_identity");
+	assert.ok(
+		sql.includes("retired"),
+		"SQL should still exclude retired agencies",
+	);
+});
+
+test("operatorResumeAgency emits Discord recovery when alert was set (behavior check)", async () => {
+	mockRows = [{ project_id: null, had_alert: true }];
+	discordCalls.length = 0;
+	queryCalls.length = 0;
+	await operatorResumeAgency("claude-opus");
+	assert.equal(discordCalls.length, 1);
+	assert.equal(discordCalls[0].level, "success");
+	assert.ok(discordCalls[0].message.includes("claude-opus"));
+	assert.ok(discordCalls[0].message.includes("operator"));
+});
+
+test("operatorResumeAgency skips Discord when no prior alert (behavior check)", async () => {
+	mockRows = [{ project_id: null, had_alert: false }];
+	discordCalls.length = 0;
+	await operatorResumeAgency("claude-opus");
+	assert.equal(discordCalls.length, 0);
+});
+
+// --- P765 AC-3/AC-4: emitOfflineAlerts ---
+
+test("emitOfflineAlerts targets offline agencies past 10-min threshold (SQL check)", async () => {
+	mockRows = [];
+	queryCalls.length = 0;
+	await emitOfflineAlerts();
+	const sql = queryCalls[0].sql;
+	assert.ok(sql.includes("'offline'"), "SQL should filter on offline status");
+	assert.ok(
+		sql.includes("10 minutes"),
+		"SQL should use 10-minute threshold",
+	);
+	assert.ok(
+		sql.includes("alert_sent_at IS NULL"),
+		"SQL should only flag rows with no prior alert (AC-4)",
+	);
+	assert.ok(
+		sql.includes("alert_sent_at = now()"),
+		"SQL should stamp alert_sent_at to prevent repeat alerts",
+	);
+});
+
+test("emitOfflineAlerts fires Discord warning for each flagged agency", async () => {
+	mockRows = [
+		{ project_id: null, agent_identity: "claude-opus" },
+		{ project_id: "proj-x", agent_identity: "gemini-pro" },
+	];
+	discordCalls.length = 0;
+	await emitOfflineAlerts();
+	assert.equal(discordCalls.length, 2);
+	assert.ok(discordCalls.every((c) => c.level === "warning"));
+	assert.ok(discordCalls.some((c) => c.message.includes("claude-opus")));
+	assert.ok(discordCalls.some((c) => c.message.includes("gemini-pro")));
+});
+
+test("emitOfflineAlerts returns count of flagged agencies", async () => {
+	mockRows = [
+		{ project_id: null, agent_identity: "agency-1" },
+		{ project_id: "proj-a", agent_identity: "agency-2" },
+	];
+	const count = await emitOfflineAlerts();
+	assert.equal(count, 2);
+});
+
+test("emitOfflineAlerts returns 0 when nothing is overdue", async () => {
+	mockRows = [];
+	const count = await emitOfflineAlerts();
+	assert.equal(count, 0);
+});
+
+// --- P765 AC-5: dormant→offline silence boundary (SQL shape check) ---
+
+test("scanAndTransitionSilentAgencies uses 5-min dormant and 30-min offline thresholds (SQL check)", async () => {
+	mockRows = [];
+	queryCalls.length = 0;
+	const { scanAndTransitionSilentAgencies } = await import(
+		"../../src/core/orchestration/resolvers/agency-resolver.ts"
+	);
+	await scanAndTransitionSilentAgencies();
+	const sqls = queryCalls.slice(-2).map((c) => c.sql);
+	assert.ok(
+		sqls.some((s) => s.includes("30 minutes")),
+		"offline transition should use 30-min threshold",
+	);
+	assert.ok(
+		sqls.some((s) => s.includes("5 minutes")),
+		"dormant transition should use 5-min threshold",
+	);
+});
+
+// --- P765 AC-5: orchestrator_wake pg_notify on agency recovery ---
+
+test("recordCheckIn emits orchestrator_wake pg_notify when agency transitions to active (behavior check)", async () => {
+	mockRows = [
+		{
+			new_status: "active",
+			project_id: null,
+			old_status: "dormant",
+			had_alert: false,
+		},
+	];
+	queryCalls.length = 0;
+	await recordCheckIn("worker/recovery-test");
+	const notifyCall = queryCalls.find(
+		(c) => c.sql.includes("pg_notify") && c.sql.includes("orchestrator_wake"),
+	);
+	assert.ok(notifyCall, "should emit pg_notify('orchestrator_wake', ...) on active transition");
+	const payload = JSON.parse(notifyCall.params[0] as string);
+	assert.equal(payload.reason, "agency_recovery");
+	assert.equal(payload.identity, "worker/recovery-test");
+});
+
+test("recordCheckIn does not emit orchestrator_wake when agency stays non-active (behavior check)", async () => {
+	mockRows = [
+		{
+			new_status: "dormant",
+			project_id: null,
+			old_status: "active",
+			had_alert: false,
+		},
+	];
+	queryCalls.length = 0;
+	await recordCheckIn("worker/dormant-test");
+	const notifyCall = queryCalls.find(
+		(c) => c.sql.includes("pg_notify") && c.sql.includes("orchestrator_wake"),
+	);
+	assert.equal(notifyCall, undefined, "should NOT emit orchestrator_wake when status stays non-active");
 });

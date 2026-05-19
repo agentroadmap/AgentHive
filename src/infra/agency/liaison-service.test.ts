@@ -283,7 +283,7 @@ describe("Liaison Service (P464)", () => {
       assert(silence >= 28 && silence <= 32, `Expected ~30s, got ${silence}s`);
     });
 
-    it("should mark dispatchable when active and within 90s", async () => {
+    it("should mark dispatchable when active and within 60s", async () => {
       await query(
         `INSERT INTO roadmap.agency
          (agency_id, display_name, provider, host_id, status, last_heartbeat_at)

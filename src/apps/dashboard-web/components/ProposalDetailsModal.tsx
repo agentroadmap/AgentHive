@@ -1,5 +1,6 @@
 import MDEditor from "@uiw/react-md-editor";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "wouter";
 import type {
 	AcceptanceCriterion,
 	Directive,
@@ -11,6 +12,7 @@ import {
 	proposalExportFilename,
 	type ProposalExportBundle,
 } from "../../../shared/proposal-markdown-export";
+import { formatLocalActivityTimestamp } from "../lib/proposal-activity";
 import { formatStoredUtcDateForDisplay } from "../utils/date-display";
 import AcceptanceCriteriaEditor from "./AcceptanceCriteriaEditor";
 import ChipInput from "./ChipInput";
@@ -101,6 +103,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 	isDraftMode,
 }) => {
 	const theme = getColorMode();
+	const [, navigate] = useLocation();
 	const isCreateMode = !proposal;
 	const isFromOtherBranch = Boolean(proposal?.branch);
 	const proposalId = proposal?.id ?? "";
@@ -503,13 +506,15 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 			setDiscussions([]);
 			return;
 		}
+		if (!isOpen) return;
 		let cancelled = false;
 		apiClient
 			.fetchProposalDecisions(proposalId)
 			.then((nextDecisions) => {
 				if (!cancelled) setDecisions(nextDecisions);
 			})
-			.catch(() => {
+			.catch((err) => {
+				console.warn("[P801] fetchProposalDecisions failed:", err);
 				if (!cancelled) setDecisions([]);
 			});
 		apiClient
@@ -517,7 +522,8 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 			.then((nextReviews) => {
 				if (!cancelled) setReviews(nextReviews);
 			})
-			.catch(() => {
+			.catch((err) => {
+				console.warn("[P801] fetchProposalReviews failed:", err);
 				if (!cancelled) setReviews([]);
 			});
 		apiClient
@@ -525,13 +531,14 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 			.then((nextDiscussions) => {
 				if (!cancelled) setDiscussions(nextDiscussions);
 			})
-			.catch(() => {
+			.catch((err) => {
+				console.warn("[P801] fetchProposalDiscussions failed:", err);
 				if (!cancelled) setDiscussions([]);
 			});
 		return () => {
 			cancelled = true;
 		};
-	}, [proposalId]);
+	}, [proposalId, isOpen]);
 
 	const handleCancelEdit = useCallback(() => {
 		if (isDirty) {
@@ -1476,19 +1483,32 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 									</span>
 								</div>
 							)}
-							{lastActivity && (
-								<div>
-									<span className="font-semibold text-gray-800 dark:text-gray-100">
-										Last activity:
-									</span>{" "}
-									<span className="text-gray-700 dark:text-gray-200">
-										{formatStoredUtcDateForDisplay(lastActivity.date)}
+							<div
+								className="cursor-pointer hover:text-blue-600 dark:hover:text-blue-400"
+								onClick={() => {
+									onClose();
+									navigate(`/activity?proposal=${encodeURIComponent(proposalId)}`);
+								}}
+								title="View full activity feed"
+							>
+								<span className="font-semibold text-gray-800 dark:text-gray-100">
+									Last activity:
+								</span>{" "}
+								{lastActivity ? (
+									<>
+										<span className="text-gray-700 dark:text-gray-200">
+											{formatLocalActivityTimestamp(lastActivity.date)}
+										</span>
+										<span className="ml-1 text-gray-400 dark:text-gray-500 italic">
+											({lastActivity.label})
+										</span>
+									</>
+								) : (
+									<span className="text-gray-400 dark:text-gray-500 italic">
+										No activity yet
 									</span>
-									<span className="ml-1 text-gray-400 dark:text-gray-500 italic">
-										({lastActivity.label})
-									</span>
-								</div>
-							)}
+								)}
+							</div>
 						</div>
 					)}
 					{/* Title (editable for existing proposals) */}

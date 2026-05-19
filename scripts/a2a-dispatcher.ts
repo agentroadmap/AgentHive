@@ -20,6 +20,7 @@
 
 import { getPool, query } from "../src/infra/postgres/pool.ts";
 import { trustGate } from "../src/infra/messaging/a2a-trust-gate.ts";
+import { registerSigReconciler } from "../src/infra/messaging/sig-reconciler.ts";
 
 const POLL_INTERVAL_MS = 10_000; // fallback poll every 10s
 const DISPATCH_BATCH = 20;       // max messages per cycle
@@ -239,7 +240,9 @@ async function dispatchPendingMessages(): Promise<number> {
 		try {
 			await processMessage(msg);
 		} catch (err) {
+			const detail = err instanceof Error ? err.message : String(err);
 			logger.error(`Failed to process message ${msg.id}:`, err);
+			await writeToDlq(msg, detail);
 		}
 	}
 	return rows.length;
@@ -268,6 +271,116 @@ async function startPgListener(): Promise<void> {
 		// Reconnect after 5s
 		setTimeout(() => startPgListener().catch(logger.error), 5000);
 	});
+}
+
+// ─── Dead-letter queue (F4, F5, F7) ──────────────────────────────────────────
+
+/** Persist a failed message to roadmap.dead_letter_queue (F4). */
+async function writeToDlq(
+	msg: PendingMessage,
+	errorDetail: string,
+): Promise<void> {
+	try {
+		// Capture sig_verified from message_ledger for replay gate (F5)
+		const sigRow = await query<{ sig_verified: string | null }>(
+			`SELECT sig_verified FROM roadmap.message_ledger WHERE id = $1`,
+			[msg.id],
+		);
+		const sigVerified = sigRow.rows[0]?.sig_verified ?? null;
+
+		await query(
+			`INSERT INTO roadmap.dead_letter_queue
+			  (message_id, from_agent, to_agent, message_type, message_content, error_detail, sig_verified)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			[
+				msg.id,
+				msg.from_agent,
+				msg.to_agent ?? null,
+				msg.message_type,
+				msg.message_content,
+				errorDetail,
+				sigVerified,
+			],
+		);
+		logger.warn(`[dlq] message ${msg.id} written to dead_letter_queue: ${errorDetail}`);
+	} catch (err) {
+		logger.error(`[dlq] Failed to write message ${msg.id} to dead_letter_queue:`, err);
+	}
+}
+
+/** Replay eligible dead-letter messages. F5: only replays where sig_verified='verified'. */
+async function dlqReplay(): Promise<number> {
+	let rows: Array<{
+		id: number;
+		message_id: number | null;
+		from_agent: string;
+		to_agent: string | null;
+		message_type: string;
+		message_content: string;
+		sig_verified: string | null;
+		retry_count: number;
+	}>;
+
+	try {
+		const result = await query(
+			`SELECT id, message_id, from_agent, to_agent, message_type, message_content, sig_verified, retry_count
+			 FROM roadmap.dead_letter_queue
+			 WHERE replayed_at IS NULL
+			 ORDER BY created_at ASC
+			 LIMIT 20`,
+		);
+		rows = result.rows;
+	} catch (err) {
+		logger.error("[dlq] Failed to fetch DLQ entries:", err);
+		return 0;
+	}
+
+	if (rows.length === 0) return 0;
+	logger.log(`[dlq] Replaying ${rows.length} DLQ entries...`);
+
+	let replayed = 0;
+	for (const entry of rows) {
+		// F5: refuse to replay unverified or failed signatures
+		if (entry.sig_verified !== "verified") {
+			logger.warn(
+				`[dlq] Skipping entry ${entry.id} — sig_verified='${entry.sig_verified}' (must be 'verified' to replay)`,
+			);
+			continue;
+		}
+
+		const synthetic: PendingMessage = {
+			id: entry.message_id ?? -entry.id,
+			from_agent: entry.from_agent,
+			to_agent: entry.to_agent,
+			channel: null,
+			message_content: entry.message_content,
+			message_type: entry.message_type,
+			proposal_id: null,
+			created_at: new Date().toISOString(),
+		};
+
+		try {
+			await processMessage(synthetic);
+			await query(
+				`UPDATE roadmap.dead_letter_queue
+				 SET replayed_at = now(), retry_count = retry_count + 1, last_retry_at = now()
+				 WHERE id = $1`,
+				[entry.id],
+			);
+			replayed++;
+		} catch (err) {
+			logger.error(`[dlq] Replay failed for entry ${entry.id}:`, err);
+			await query(
+				`UPDATE roadmap.dead_letter_queue
+				 SET retry_count = retry_count + 1, last_retry_at = now()
+				 WHERE id = $1`,
+				[entry.id],
+			);
+		}
+	}
+
+	logger.log(`[dlq] Replay complete: ${replayed}/${rows.length} succeeded`);
+	return replayed;
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -306,6 +419,15 @@ async function main() {
 		if (stopping) return;
 		trackedDispatch().catch(logger.error);
 	}, POLL_INTERVAL_MS);
+
+	// F2: register sig_verified reconciler (marks stale 'pending' rows as 'failed' after 60s)
+	registerSigReconciler(getPool());
+
+	// F4/F5: periodic DLQ replay (every 5 minutes, sig_verified='verified' required)
+	setInterval(() => {
+		if (stopping) return;
+		dlqReplay().catch(logger.error);
+	}, 5 * 60 * 1000);
 
 	logger.log("A2A Dispatcher running.");
 }

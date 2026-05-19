@@ -32,7 +32,6 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { query as defaultQuery } from "../../../infra/postgres/pool.ts";
 
 type QueryFn = <T = Record<string, unknown>>(
 	sql: string,
@@ -70,6 +69,17 @@ const DEFAULT_TIMEOUT_MS = 5_000;
 const DEFAULT_HEARTBEAT_FRESH_MS = 90_000;
 const POLL_INTERVAL_MS = 100;
 
+// Lazy import: only resolved when no queryFn is injected. Keeps the module
+// loadable in test environments where the pg native addon may not be present.
+let _poolQuery: QueryFn | undefined;
+async function getPoolQuery(): Promise<QueryFn> {
+	if (!_poolQuery) {
+		const mod = await import("../../../infra/postgres/pool.ts");
+		_poolQuery = (mod as unknown as { query: QueryFn }).query;
+	}
+	return _poolQuery;
+}
+
 /**
  * Probe an agent's liveness using tiered checks.
  *
@@ -85,7 +95,7 @@ export async function probeAgentLiveness(
 	const heartbeatFreshMs = opts.heartbeatFreshMs ?? DEFAULT_HEARTBEAT_FRESH_MS;
 	const cheapOnly = opts.cheapOnly ?? false;
 	const probeFrom = opts.probeFromAgent ?? "orchestrator";
-	const q = opts.queryFn ?? (defaultQuery as unknown as QueryFn);
+	const q = opts.queryFn ?? await getPoolQuery();
 
 	// Tier-A: LISTEN check
 	const listenActive = await checkListenActive(agent_identity, q);
