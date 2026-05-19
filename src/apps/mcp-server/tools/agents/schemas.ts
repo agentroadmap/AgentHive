@@ -295,6 +295,41 @@ export const agentRetireSchema: JsonSchema = {
 	additionalProperties: false,
 };
 
+export const agentRenameSchema: JsonSchema = {
+	type: "object",
+	properties: {
+		identity: {
+			type: "string",
+			description: "Target agent_identity OR existing display_alias (resolver matches either)",
+		},
+		alias: {
+			type: "string",
+			description: "New display_alias — must match ^[A-Z][A-Za-z0-9-]{2,63}$ (PascalCase start, 3-64 chars)",
+		},
+		force: {
+			type: "boolean",
+			default: false,
+			description: "When true, bypass alias-collision check by releasing it from an inactive/stale-heartbeat prior owner",
+		},
+	},
+	required: ["identity", "alias"],
+	additionalProperties: false,
+};
+
+export const agencyResumeSchema: JsonSchema = {
+	type: "object",
+	properties: {
+		agency_id: {
+			type: "string",
+			minLength: 1,
+			maxLength: 200,
+			description: "Agency identity string (roadmap.agency.agency_id) to resume",
+		},
+	},
+	required: ["agency_id"],
+	additionalProperties: false,
+};
+
 export const agentForceReleaseAliasSchema: JsonSchema = {
 	type: "object",
 	properties: {

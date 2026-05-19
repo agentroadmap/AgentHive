@@ -16,12 +16,14 @@ import {
 } from "./handlers.ts";
 import { PgAgentHandlers } from "./pg-handlers.ts";
 import {
+	agencyResumeSchema,
 	agentAssignSchema,
 	agentForceReleaseAliasSchema,
 	agentGetSchema,
 	agentHeartbeatSchema,
 	agentListSchema,
 	agentRegisterSchema,
+	agentRenameSchema,
 	agentRetireSchema,
 	agentSpawnSchema,
 } from "./schemas.ts";
@@ -136,6 +138,22 @@ export function registerAgentTools(server: McpServer): void {
 		async (input) => handlers.retireAgent(input),
 	);
 
+	// ── agent_rename ────────────────────────────────────────────────────────
+	type RenameAgentArgs = Parameters<PgAgentHandlers["renameAgent"]>[0];
+	const renameTool: McpToolHandler = createSimpleValidatedTool<RenameAgentArgs>(
+		{
+			name: "agent_rename",
+			description:
+				"P925: Rename the display_alias of a permanent agent (Tier 1 / Tier 2). " +
+				"Accepts agent_identity OR current display_alias as the lookup key. " +
+				"Validates format (^[A-Z][A-Za-z0-9-]{2,63}$), checks collision, and writes via audit-logged UPDATE. " +
+				"Returns { identity, prior_alias, new_alias, audit_id }.",
+			inputSchema: agentRenameSchema,
+		},
+		agentRenameSchema,
+		async (input) => pgHandlers.renameAgent(input),
+	);
+
 	// ── agent_force_release_alias ───────────────────────────────────────────
 	type ForceReleaseAliasArgs = Parameters<
 		PgAgentHandlers["forceReleaseAlias"]
@@ -178,6 +196,23 @@ export function registerAgentTools(server: McpServer): void {
 		async () => handlers.getPoolStats(),
 	);
 
+	// ── agency_resume ───────────────────────────────────────────────────────
+	type AgencyResumeArgs = Parameters<PgAgentHandlers["resumeAgency"]>[0];
+	const agencyResumeTool: McpToolHandler =
+		createSimpleValidatedTool<AgencyResumeArgs>(
+			{
+				name: "agency_resume",
+				description:
+					"P765 AC-2: Operator short-circuit — force an offline/dormant/throttled " +
+					"agency back to 'active' without waiting for the two-step heartbeat recovery. " +
+					"Updates both roadmap.agency and provider_registry. Clears the offline alert " +
+					"flag so the next offline episode emits a fresh alert.",
+				inputSchema: agencyResumeSchema,
+			},
+			agencyResumeSchema,
+			async (input) => pgHandlers.resumeAgency(input),
+		);
+
 	// Register all tools
 	server.addTool(registerTool);
 	server.addTool(getTool);
@@ -186,9 +221,11 @@ export function registerAgentTools(server: McpServer): void {
 	server.addTool(heartbeatTool);
 	server.addTool(spawnTool);
 	server.addTool(retireTool);
+	server.addTool(renameTool);
 	server.addTool(forceReleaseAliasTool);
 	server.addTool(zombieDetectTool);
 	server.addTool(poolStatsTool);
+	server.addTool(agencyResumeTool);
 
 	// ── agent_update_reporting ──────────────────────────────────────────────
 	const reportingTool = createSimpleValidatedTool<UpdateReportingArgs>(

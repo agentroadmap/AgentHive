@@ -12,12 +12,17 @@ import {
 	detectCollision,
 	AgentIdInvalidError,
 } from "../../../../shared/identity/sanitize-agent-id.ts";
+import { liaisonResume } from "../../../../infra/agency/liaison-service.ts";
+import { resumeAgency } from "../../../../core/orchestration/resolvers/agency-resolver.ts";
 import {
 	forceReleaseAlias,
 	type AliasReclaimResult,
 	type AliasReclaimError,
 } from "../../../../core/identity/agent-registry/alias-manager.ts";
+import { resolveAgentByIdentityOrAlias } from "../../../../core/identity/agent-registry/registry.ts";
 import type { CallToolResult } from "../../types.ts";
+
+const ALIAS_FORMAT = /^[A-Z][A-Za-z0-9-]{2,63}$/;
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
@@ -283,6 +288,139 @@ export class PgAgentHandlers {
 			};
 		} catch (err) {
 			return errorResult("Failed to add team member", err);
+		}
+	}
+
+	/**
+	 * P925: Rename the display_alias of a permanent agent (Tier 1 / Tier 2).
+	 * Lookup is by agent_identity OR current display_alias; writes the new alias
+	 * and appends an audit entry. Collision is rejected unless force=true + prior
+	 * owner is inactive or stale-heartbeat (>90 s).
+	 */
+	async renameAgent(args: {
+		identity: string;
+		alias: string;
+		force?: boolean;
+	}): Promise<CallToolResult> {
+		try {
+			if (!ALIAS_FORMAT.test(args.alias)) {
+				return {
+					content: [{ type: "text", text: JSON.stringify({ error: "invalid_alias_format", message: `Alias "${args.alias}" must match ^[A-Z][A-Za-z0-9-]{2,63}$` }) }],
+					isError: true,
+				};
+			}
+
+			const target = await resolveAgentByIdentityOrAlias(args.identity);
+			if (!target) {
+				return {
+					content: [{ type: "text", text: JSON.stringify({ error: "agent_not_found", message: `No agent found for identity or alias "${args.identity}"` }) }],
+					isError: true,
+				};
+			}
+
+			const prior_alias = target.display_alias;
+
+			// No-op if alias is unchanged
+			if (prior_alias === args.alias) {
+				return {
+					content: [{ type: "text", text: JSON.stringify({ identity: target.agent_identity, prior_alias, new_alias: args.alias, note: "no-op: alias unchanged" }) }],
+				};
+			}
+
+			// Check collision: another active row holds the new alias
+			const { rows: colliders } = await query<{
+				id: number;
+				agent_identity: string;
+				last_heartbeat_at: string | null;
+			}>(
+				`SELECT ar.id, ar.agent_identity,
+				        (SELECT last_heartbeat_at FROM roadmap.agency WHERE agency_id = ar.id) AS last_heartbeat_at
+				   FROM roadmap_workforce.agent_registry ar
+				  WHERE ar.display_alias = $1
+				    AND ar.status = 'active'
+				    AND ar.id != $2
+				  LIMIT 1`,
+				[args.alias, target.id],
+			);
+
+			if (colliders.length > 0) {
+				const collider = colliders[0]!;
+				if (!args.force) {
+					return {
+						content: [{ type: "text", text: JSON.stringify({ error: "alias_in_use", message: `Alias "${args.alias}" is held by active agent "${collider.agent_identity}". Use force=true to override if stale.` }) }],
+						isError: true,
+					};
+				}
+				// force=true: gate on heartbeat freshness
+				const hbAt = collider.last_heartbeat_at ? new Date(collider.last_heartbeat_at) : null;
+				const isStuck = !hbAt || Date.now() - hbAt.getTime() > 90_000;
+				if (!isStuck) {
+					return {
+						content: [{ type: "text", text: JSON.stringify({ error: "alias_in_use", message: `Agent "${collider.agent_identity}" has a fresh heartbeat; cannot force-override.` }) }],
+						isError: true,
+					};
+				}
+				const releaseResult = await forceReleaseAlias({ identity: collider.agent_identity, force: true });
+				if ("code" in releaseResult) {
+					return {
+						content: [{ type: "text", text: JSON.stringify({ error: releaseResult.code, message: `Failed to release prior alias: ${releaseResult.message}` }) }],
+						isError: true,
+					};
+				}
+			}
+
+			// Write new alias — catch unique constraint race
+			const now = new Date().toISOString();
+			const auditEntry = JSON.stringify([{ action: "renamed", prior_alias, new_alias: args.alias, at: now }]);
+			try {
+				const { rows: updated } = await query<{ id: number }>(
+					`UPDATE roadmap_workforce.agent_registry
+					    SET display_alias = $2,
+					        alias_audit   = COALESCE(alias_audit, '[]'::jsonb) || $3::jsonb
+					  WHERE id = $1
+					  RETURNING id`,
+					[target.id, args.alias, auditEntry],
+				);
+				if (!updated.length) {
+					return errorResult("Rename failed", "UPDATE returned no rows");
+				}
+				return {
+					content: [{ type: "text", text: JSON.stringify({ identity: target.agent_identity, prior_alias, new_alias: args.alias, audit_id: String(updated[0]!.id) }) }],
+				};
+			} catch (err) {
+				const pgErr = err as { code?: string };
+				if (pgErr.code === "23505") {
+					return {
+						content: [{ type: "text", text: JSON.stringify({ error: "alias_in_use", message: `Alias "${args.alias}" was claimed by another agent concurrently.` }) }],
+						isError: true,
+					};
+				}
+				throw err;
+			}
+		} catch (err) {
+			return errorResult("Failed to rename agent", err);
+		}
+	}
+
+	/**
+	 * P765 AC-2: Operator short-circuit — resume an agency to 'active' from any
+	 * non-retired state. Updates both roadmap.agency and provider_registry so
+	 * routing and alerting see a consistent status.
+	 */
+	async resumeAgency(args: { agency_id: string }): Promise<CallToolResult> {
+		try {
+			await liaisonResume(args.agency_id);
+			await resumeAgency(args.agency_id);
+			return {
+				content: [
+					{
+						type: "text",
+						text: `Agency ${args.agency_id} resumed to 'active'.`,
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to resume agency", err);
 		}
 	}
 
