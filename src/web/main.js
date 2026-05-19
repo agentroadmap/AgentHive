@@ -155390,7 +155390,7 @@ var init_sankey = __esm(() => {
   init_align();
 });
 
-// node_modules/d3-sankey/node_modules/d3-shape/node_modules/d3-path/src/path.js
+// node_modules/d3-sankey/node_modules/d3-path/src/path.js
 function Path2() {
   this._x0 = this._y0 = this._x1 = this._y1 = null;
   this._ = "";
@@ -155472,7 +155472,7 @@ var init_path3 = __esm(() => {
   path_default2 = path4;
 });
 
-// node_modules/d3-sankey/node_modules/d3-shape/node_modules/d3-path/src/index.js
+// node_modules/d3-sankey/node_modules/d3-path/src/index.js
 var init_src34 = __esm(() => {
   init_path3();
 });
@@ -160400,7 +160400,7 @@ var init_diagram_5BDNPKRD = __esm(() => {
   };
 });
 
-// node_modules/cytoscape-fcose/node_modules/cose-base/node_modules/layout-base/layout-base.js
+// node_modules/cytoscape-fcose/node_modules/layout-base/layout-base.js
 var require_layout_base2 = __commonJS((exports, module) => {
   (function webpackUniversalModuleDefinition(root10, factory2) {
     if (typeof exports === "object" && typeof module === "object")
@@ -177020,7 +177020,7 @@ var SECONDARY = [
   { href: "/agents", label: "Agents" },
   { href: "/teams", label: "Teams" },
   { href: "/channels", label: "Channels" },
-  { href: "/dispatch", label: "Dispatch" },
+  { href: "/dispatches", label: "Dispatches" },
   { href: "/knowledge", label: "Knowledge" },
   { href: "/documents", label: "Documents" },
   { href: "/decisions", label: "Decisions" },
@@ -178977,7 +178977,7 @@ var DashboardPage = ({
               children: [
                 ["Board", "/board"],
                 ["Agents", "/agents"],
-                ["Dispatch", "/dispatch"],
+                ["Dispatches", "/dispatches"],
                 ["Channels", "/channels"],
                 ["Routes", "/routes"],
                 ["Settings", "/settings"]
@@ -206705,7 +206705,7 @@ var serialize = (value, { json: json2, lossy } = {}) => {
 // node_modules/@ungap/structured-clone/esm/index.js
 var esm_default = typeof structuredClone === "function" ? (any, options) => options && (("json" in options) || ("lossy" in options)) ? deserialize(serialize(any, options)) : structuredClone(any) : (any, options) => deserialize(serialize(any, options));
 
-// node_modules/hast-util-from-parse5/node_modules/hastscript/node_modules/hast-util-parse-selector/lib/index.js
+// node_modules/hast-util-parse-selector/lib/index.js
 var search2 = /[#.]/g;
 function parseSelector2(selector, defaultTagName) {
   const value = selector || "";
@@ -206741,7 +206741,7 @@ function parseSelector2(selector, defaultTagName) {
     children: []
   };
 }
-// node_modules/hast-util-from-parse5/node_modules/hastscript/lib/create-h.js
+// node_modules/hastscript/lib/create-h.js
 function createH(schema, defaultTagName, caseSensitive) {
   const adjust = caseSensitive ? createAdjustMap2(caseSensitive) : undefined;
   function h2(selector, properties2, ...children) {
@@ -206881,7 +206881,7 @@ function createAdjustMap2(values) {
   return result;
 }
 
-// node_modules/hast-util-from-parse5/node_modules/hastscript/lib/svg-case-sensitive-tag-names.js
+// node_modules/hastscript/lib/svg-case-sensitive-tag-names.js
 var svgCaseSensitiveTagNames = [
   "altGlyph",
   "altGlyphDef",
@@ -206924,7 +206924,7 @@ var svgCaseSensitiveTagNames = [
   "textPath"
 ];
 
-// node_modules/hast-util-from-parse5/node_modules/hastscript/lib/index.js
+// node_modules/hastscript/lib/index.js
 var h2 = createH(html4, "div");
 var s3 = createH(svg4, "g", svgCaseSensitiveTagNames);
 // node_modules/vfile-location/lib/index.js
@@ -230130,6 +230130,7 @@ var ProposalDetailsModal = ({
   isDraftMode
 }) => {
   const theme = getColorMode();
+  const [, setLocation] = useLocation();
   const isCreateMode = !proposal;
   const isFromOtherBranch = Boolean(proposal?.branch);
   const proposalId = proposal?.id ?? "";
@@ -230426,7 +230427,7 @@ var ProposalDetailsModal = ({
     };
   }, [isOpen]);
   import_react61.useEffect(() => {
-    if (!proposalId) {
+    if (!isOpen || !proposalId) {
       setDecisions([]);
       setReviews([]);
       setDiscussions([]);
@@ -230457,7 +230458,7 @@ var ProposalDetailsModal = ({
     return () => {
       cancelled = true;
     };
-  }, [proposalId]);
+  }, [isOpen, proposalId, proposal?.updatedDate]);
   const handleCancelEdit = import_react61.useCallback(() => {
     if (isDirty) {
       const confirmDiscard = window.confirm("Discard unsaved changes?");
@@ -231356,7 +231357,13 @@ var ProposalDetailsModal = ({
                       }, undefined, false, undefined, this)
                     ]
                   }, undefined, true, undefined, this),
-                  lastActivity && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                  lastActivity ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                    className: "cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors",
+                    onClick: () => {
+                      onClose();
+                      setLocation(`/activity?proposal=${encodeURIComponent(proposalId)}`);
+                    },
+                    title: "Open activity feed for this proposal",
                     children: [
                       /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
                         className: "font-semibold text-gray-800 dark:text-gray-100",
@@ -231375,6 +231382,24 @@ var ProposalDetailsModal = ({
                           ")"
                         ]
                       }, undefined, true, undefined, this)
+                    ]
+                  }, undefined, true, undefined, this) : /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                    className: "cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors",
+                    onClick: () => {
+                      onClose();
+                      setLocation(`/activity?proposal=${encodeURIComponent(proposalId)}`);
+                    },
+                    title: "Open activity feed for this proposal",
+                    children: [
+                      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                        className: "font-semibold text-gray-800 dark:text-gray-100",
+                        children: "Last activity:"
+                      }, undefined, false, undefined, this),
+                      " ",
+                      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                        className: "text-gray-400 dark:text-gray-500 italic",
+                        children: "No activity yet"
+                      }, undefined, false, undefined, this)
                     ]
                   }, undefined, true, undefined, this)
                 ]
@@ -233232,46 +233257,85 @@ function useWebSocket(url) {
 
 // src/apps/dashboard-web/hooks/useBoardStages.ts
 var import_react68 = __toESM(require_react(), 1);
-var FALLBACK_STATUSES = [
-  { id: "DRAFT", label: "DRAFT", order: 1, isTerminal: false },
-  { id: "REVIEW", label: "REVIEW", order: 2, isTerminal: false },
-  { id: "DEVELOP", label: "DEVELOP", order: 3, isTerminal: false },
-  { id: "MERGE", label: "MERGE", order: 4, isTerminal: false },
-  { id: "COMPLETE", label: "COMPLETE", order: 5, isTerminal: true }
+var FALLBACK_STAGES = [
+  { id: "DRAFT", stageName: "DRAFT", label: "Draft", displayLabel: "Draft", hexColor: null, order: 1, isTerminal: false },
+  { id: "REVIEW", stageName: "REVIEW", label: "Review", displayLabel: "Review", hexColor: null, order: 2, isTerminal: false },
+  { id: "DEVELOP", stageName: "DEVELOP", label: "Develop", displayLabel: "Develop", hexColor: null, order: 3, isTerminal: false },
+  { id: "MERGE", stageName: "MERGE", label: "Merge", displayLabel: "Merge", hexColor: null, order: 4, isTerminal: false },
+  { id: "COMPLETE", stageName: "COMPLETE", label: "Complete", displayLabel: "Complete", hexColor: null, order: 5, isTerminal: true }
 ];
 function useBoardStages(workflow = "Standard RFC") {
-  const [stages, setStages] = import_react68.useState(FALLBACK_STATUSES);
+  const [stages, setStages] = import_react68.useState(FALLBACK_STAGES);
   const [loading, setLoading] = import_react68.useState(true);
   const [error3, setError] = import_react68.useState(null);
   const [activeWorkflow, setActiveWorkflow] = import_react68.useState(workflow);
-  import_react68.useEffect(() => {
-    const fetchStages = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const url = new URL("/api/board/stages", window.location.origin);
-        url.searchParams.set("workflow", workflow);
-        const response = await fetch(url.toString());
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        const data5 = await response.json();
-        setStages(data5.stages);
-        setActiveWorkflow(data5.workflow);
-        if (data5.error) {
-          console.warn("Board stages API warning:", data5.error);
-        }
-      } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : "Failed to fetch board stages";
-        setError(errorMsg);
-        console.error("Error fetching board stages:", err);
-        setStages(FALLBACK_STATUSES);
-      } finally {
-        setLoading(false);
+  const workflowRef = import_react68.useRef(workflow);
+  workflowRef.current = workflow;
+  const fetchStages = import_react68.useCallback(async (wf) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const url = new URL("/api/board/stages", window.location.origin);
+      url.searchParams.set("workflow", wf);
+      const response = await fetch(url.toString());
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
+      const data5 = await response.json();
+      setStages(data5.stages);
+      setActiveWorkflow(data5.workflow);
+      if (data5.error) {
+        console.warn("Board stages API warning:", data5.error);
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Failed to fetch board stages";
+      setError(errorMsg);
+      console.error("Error fetching board stages:", err);
+      setStages(FALLBACK_STAGES);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  import_react68.useEffect(() => {
+    fetchStages(workflow);
+  }, [workflow, fetchStages]);
+  import_react68.useEffect(() => {
+    const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
+    let ws = null;
+    let reconnectTimer = null;
+    let closed = false;
+    const connect = () => {
+      if (closed)
+        return;
+      try {
+        ws = new WebSocket(wsUrl);
+        ws.onmessage = (event4) => {
+          try {
+            const msg = JSON.parse(event4.data);
+            if (msg?.type === "board_reload") {
+              fetchStages(workflowRef.current);
+            }
+          } catch {}
+        };
+        ws.onclose = () => {
+          if (!closed) {
+            reconnectTimer = setTimeout(connect, 5000);
+          }
+        };
+        ws.onerror = () => {
+          ws?.close();
+        };
+      } catch {}
     };
-    fetchStages();
-  }, [workflow]);
+    connect();
+    return () => {
+      closed = true;
+      if (reconnectTimer !== null)
+        clearTimeout(reconnectTimer);
+      ws?.close();
+    };
+  }, [fetchStages]);
   return { stages, loading, error: error3, workflow: activeWorkflow };
 }
 
@@ -233341,8 +233405,8 @@ function toSharedProposal(proposal) {
     title: proposal.title,
     status: proposal.status,
     assignee: [],
-    createdDate: proposal.createdAt,
-    updatedDate: proposal.updatedAt || proposal.createdAt,
+    createdDate: proposal.createdAt ?? "",
+    updatedDate: proposal.updatedAt ?? proposal.createdAt ?? "",
     labels,
     dependencies: proposal.parentId ? [proposal.parentId] : [],
     summary: proposal.summary ?? proposal.bodyMarkdown ?? undefined,

@@ -1,5 +1,6 @@
 import MDEditor from "@uiw/react-md-editor";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "wouter";
 import type {
 	AcceptanceCriterion,
 	Directive,
@@ -101,6 +102,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 	isDraftMode,
 }) => {
 	const theme = getColorMode();
+	const [, setLocation] = useLocation();
 	const isCreateMode = !proposal;
 	const isFromOtherBranch = Boolean(proposal?.branch);
 	const proposalId = proposal?.id ?? "";
@@ -531,7 +533,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 		return () => {
 			cancelled = true;
 		};
-	}, [isOpen, proposalId]);
+	}, [isOpen, proposalId, proposal?.updatedDate]);
 
 	const handleCancelEdit = useCallback(() => {
 		if (isDirty) {
@@ -1477,7 +1479,14 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 								</div>
 							)}
 							{lastActivity ? (
-								<div>
+								<div
+									className="cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+									onClick={() => {
+										onClose();
+										setLocation(`/activity?proposal=${encodeURIComponent(proposalId)}`);
+									}}
+									title="Open activity feed for this proposal"
+								>
 									<span className="font-semibold text-gray-800 dark:text-gray-100">
 										Last activity:
 									</span>{" "}
@@ -1489,7 +1498,14 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 									</span>
 								</div>
 							) : (
-								<div>
+								<div
+									className="cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+									onClick={() => {
+										onClose();
+										setLocation(`/activity?proposal=${encodeURIComponent(proposalId)}`);
+									}}
+									title="Open activity feed for this proposal"
+								>
 									<span className="font-semibold text-gray-800 dark:text-gray-100">
 										Last activity:
 									</span>{" "}
