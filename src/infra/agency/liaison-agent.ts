@@ -314,11 +314,21 @@ export async function runLiaisonAgent(
 
 	listenClient.on("notification", (n) => {
 		if (n.channel !== channel || !n.payload) return;
-		let parsed: NotifyPayload;
+		let parsed: NotifyPayload & { direction?: string; kind?: string };
 		try {
 			parsed = JSON.parse(n.payload);
 		} catch {
 			console.warn(`${log} Bad notify payload:`, n.payload);
+			return;
+		}
+		// Bug 4 fix (P1140-sib): two triggers fire on this channel —
+		// trig_a2a_message_notify (message_ledger, bigint id, has from_agent)
+		// and trig_liaison_notify_new_message (liaison_message, UUID
+		// message_id, has direction+kind). The LiaisonHub owns the second;
+		// this handler owns the first. Skip notifies missing from_agent OR
+		// carrying liaison_message-only fields to avoid bigint cast crash
+		// when handle()->fetchMessage queries message_ledger.id with a UUID.
+		if (!parsed.from_agent || parsed.direction !== undefined || parsed.kind !== undefined) {
 			return;
 		}
 		handle(parsed).catch((err) => console.error(`${log} Handler error:`, err));
