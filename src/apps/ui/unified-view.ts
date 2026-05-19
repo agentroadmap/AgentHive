@@ -492,10 +492,17 @@ export async function runUnifiedView(
 				};
 
 				const refresh = async () => {
-					// Load proposals and agents concurrently
-					const [_pipelineProposals, agents, msgRows] = await Promise.all([
+					// Load proposals, agents (from Postgres registry), and pulse messages concurrently.
+					// Core.listAgents was removed by P149 (2026-05-04); query agent_registry directly.
+					const [_pipelineProposals, agentRows, msgRows] = await Promise.all([
 						options.core.loadProposals(),
-						options.core.listAgents(),
+						pgQuery(
+							`SELECT agent_identity, agent_type, role, status, updated_at
+							 FROM roadmap_workforce.agent_registry
+							 WHERE status != 'retired'
+							 ORDER BY agent_identity`,
+							[],
+						).then((r) => r.rows).catch(() => [] as any[]),
 						pgQuery(
 							`SELECT from_agent, message_content, created_at FROM roadmap.message_ledger
 							 WHERE channel = 'public' ORDER BY created_at DESC LIMIT 30`,
@@ -503,14 +510,14 @@ export async function runUnifiedView(
 						).then((r) => r.rows).catch(() => [] as any[]),
 					]);
 
-					const agentData: WorkforceAgent[] = agents.map((agent) => ({
-						id: agent.identity ?? agent.name,
-						name: agent.name,
-						role: agent.capabilities[0] ?? "agent",
-						status: agent.status === "offline" ? "offline" : "active",
-						currentProposal: agent.claims?.[0]?.id,
-						statusMessage: agent.status,
-						lastSeen: Date.parse(agent.lastSeen || new Date().toISOString()),
+					const agentData: WorkforceAgent[] = (agentRows as any[]).map((row: any) => ({
+						id: row.agent_identity,
+						name: row.agent_identity,
+						role: row.role ?? row.agent_type ?? "agent",
+						status: row.status === "active" ? "active" : "offline",
+						currentProposal: undefined,
+						statusMessage: row.status ?? "unknown",
+						lastSeen: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
 					}));
 
 					const cockpitMessages = (msgRows as any[])
@@ -575,12 +582,22 @@ export async function runUnifiedView(
 				};
 
 				const refresh = async () => {
-					const messages = (await options.core.listPulse(50)).map((event) => ({
-						id: event.id,
-						sender_identity: event.agent,
-						content: event.impact || event.title,
-						timestamp: Date.parse(event.timestamp) * 1000,
-						channel_name: "pulse",
+					// Core.listPulse was removed by P149 (2026-05-04). Pulse events now
+					// live in roadmap.message_ledger filtered to system identities. Show
+					// recent system activity as the headlines feed.
+					const rows = await pgQuery(
+						`SELECT id, from_agent, message_content, message_type, created_at
+						 FROM roadmap.message_ledger
+						 WHERE from_agent LIKE 'system:%' OR message_type IN ('notify','liaison','task_status','task_complete','task_error')
+						 ORDER BY created_at DESC LIMIT 50`,
+						[],
+					).then((r) => r.rows).catch(() => [] as any[]);
+					const messages = (rows as any[]).map((row: any) => ({
+						id: String(row.id),
+						sender_identity: row.from_agent,
+						content: row.message_content,
+						timestamp: new Date(row.created_at).getTime() * 1000,
+						channel_name: row.message_type ?? "pulse",
 					}));
 					renderHeadlines(screen, {
 						messages: messages as any[],
