@@ -9,9 +9,16 @@
 import { Client } from "pg";
 
 import { NotificationRouter } from "../src/core/notifications/router.ts";
-import { closePool, getPool } from "../src/infra/postgres/pool.ts";
+import {
+	closePool,
+	getPool,
+	setPoolLifecycleMode,
+	startPoolPoisonWatchdog,
+} from "../src/infra/postgres/pool.ts";
 
 async function main(): Promise<void> {
+	setPoolLifecycleMode("long-running");
+	startPoolPoisonWatchdog("agenthive-notification-router");
 	const pool = getPool();
 	await pool.query("SELECT 1");
 	console.log("[notification-router] db ok");

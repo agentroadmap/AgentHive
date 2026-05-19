@@ -31,7 +31,12 @@ import type {
 } from "../../types/index.ts";
 import { watchConfig } from "../../utils/config-watcher.ts";
 import { formatVersionLabel, getVersionInfo } from "../../utils/version.ts";
-import { getPool, query } from "../../infra/postgres/pool.ts";
+import {
+	getPool,
+	query,
+	setPoolLifecycleMode,
+	startPoolPoisonWatchdog,
+} from "../../infra/postgres/pool.ts";
 import type { PoolClient, Client as PgClient } from "pg";
 import { hashOperatorToken, requireOperator } from "./operator-auth.ts";
 import { agentContextStorage, type VerifiedPrincipal } from "../../shared/identity/agent-context.ts";
@@ -654,6 +659,8 @@ export class RoadmapServer {
 			console.log("Server already running");
 			return;
 		}
+		setPoolLifecycleMode("long-running");
+		startPoolPoisonWatchdog("agenthive-board");
 		// Load config (migration is handled globally by CLI)
 		const config = await this.core.filesystem.loadConfig();
 

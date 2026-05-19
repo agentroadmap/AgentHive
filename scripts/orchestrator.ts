@@ -12,9 +12,15 @@
  */
 
 import { Orchestrator } from "../src/core/orchestration/orchestrator.ts";
-import { closePool } from "../src/infra/postgres/pool.ts";
+import {
+	closePool,
+	setPoolLifecycleMode,
+	startPoolPoisonWatchdog,
+} from "../src/infra/postgres/pool.ts";
 
 const orchestrator = new Orchestrator();
+setPoolLifecycleMode("long-running");
+startPoolPoisonWatchdog("agenthive-orchestrator");
 
 async function main() {
 	console.log("[orchestrator-shim] starting");

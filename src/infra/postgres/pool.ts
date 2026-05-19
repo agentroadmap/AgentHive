@@ -21,20 +21,144 @@
  */
 
 import {
+	Client,
 	Pool,
 	type PoolConfig,
 	type QueryResult,
 	type QueryResultRow,
 } from "pg";
 export type { Pool, PoolConfig, QueryResult, QueryResultRow };
-import { StructuralKeys } from "../../shared/runtime/config-keys";
-import { ConfigResolver } from "../../shared/runtime/config";
-import { AgentHiveConfigError } from "../../shared/runtime/endpoints";
 import { agentContextStorage } from "../../shared/identity/agent-context";
+import { ConfigResolver } from "../../shared/runtime/config";
+import { StructuralKeys } from "../../shared/runtime/config-keys";
+import { AgentHiveConfigError } from "../../shared/runtime/endpoints";
 
 let pool: Pool | null = null;
 let configuredSchema: string | null = null;
 let poolSignature: string | null = null;
+type PoolLifecycleMode = "long-running" | "one-shot";
+
+let poolLifecycleMode: PoolLifecycleMode | null = null;
+let allowPoolEndDepth = 0;
+let poolWatchdogTimer: ReturnType<typeof setInterval> | null = null;
+const originalPoolEnd = Symbol("agenthive.originalPoolEnd");
+
+type GuardedPool = Pool & {
+	[originalPoolEnd]?: Pool["end"];
+};
+
+export function setPoolLifecycleMode(mode: PoolLifecycleMode): void {
+	poolLifecycleMode = mode;
+	if (pool) installPoolEndGuard(pool);
+}
+
+export function getPoolLifecycleMode(): PoolLifecycleMode | null {
+	return poolLifecycleMode;
+}
+
+function isLongRunningPoolMode(): boolean {
+	return poolLifecycleMode === "long-running";
+}
+
+function installPoolEndGuard(target: Pool): void {
+	const guarded = target as GuardedPool;
+	if (guarded[originalPoolEnd]) return;
+
+	const end = target.end.bind(target);
+	guarded[originalPoolEnd] = end;
+	target.end = (async () => {
+		if (isLongRunningPoolMode() && allowPoolEndDepth === 0) {
+			const stack = new Error().stack ?? "stack unavailable";
+			console.error(
+				"[PG] Ignored pool.end() in long-running pool lifecycle mode. " +
+					"Use closePool() during process shutdown.\n" +
+					stack,
+			);
+			return;
+		}
+		return end();
+	}) as Pool["end"];
+}
+
+async function endPoolBypassingGuard(target: Pool): Promise<void> {
+	const guarded = target as GuardedPool;
+	const end = guarded[originalPoolEnd]?.bind(target) ?? target.end.bind(target);
+	allowPoolEndDepth++;
+	try {
+		await end();
+	} finally {
+		allowPoolEndDepth--;
+	}
+}
+
+function poolPoisonedMessage(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : String(error);
+	return message.includes("Cannot use a pool after calling end");
+}
+
+async function publishPoolPoisonedEvent(
+	serviceName: string,
+	error: unknown,
+): Promise<void> {
+	const resolvedConfig = resolvePoolConfig();
+	const client = new Client({
+		host: resolvedConfig.host,
+		port: Number(process.env.PGPORT_DIRECT ?? resolvedConfig.port),
+		user: resolvedConfig.user,
+		password: resolvedConfig.password,
+		database: resolvedConfig.database,
+		options: resolvedConfig.options,
+		connectionTimeoutMillis: resolvedConfig.connectionTimeoutMillis,
+		statement_timeout: resolvedConfig.statementTimeoutMillis,
+		application_name: `${serviceName}-pool-watchdog`,
+	});
+	try {
+		await client.connect();
+		const payload = JSON.stringify({
+			event_type: "pool_poisoned",
+			service: serviceName,
+			service_name: serviceName,
+			message: error instanceof Error ? error.message : String(error),
+			observed_at: new Date().toISOString(),
+		});
+		await client.query("SELECT pg_notify($1, $2)", ["control_feed", payload]);
+		await client.query("SELECT pg_notify($1, $2)", [
+			"agent_lifecycle_events",
+			payload,
+		]);
+	} finally {
+		await client.end().catch(() => {});
+	}
+}
+
+export function startPoolPoisonWatchdog(
+	serviceName: string,
+	intervalMs = 60_000,
+): void {
+	if (poolWatchdogTimer) return;
+	poolWatchdogTimer = setInterval(() => {
+		void query("SELECT 1").catch((error) => {
+			if (!poolPoisonedMessage(error)) return;
+			console.error(
+				`[PG] Pool poisoned in ${serviceName}:`,
+				error instanceof Error ? error.message : error,
+			);
+			void publishPoolPoisonedEvent(serviceName, error).catch((publishError) => {
+				console.error(
+					"[PG] Failed to publish pool_poisoned event:",
+					publishError instanceof Error ? publishError.message : publishError,
+				);
+			});
+		});
+	}, intervalMs);
+	poolWatchdogTimer.unref?.();
+}
+
+export function stopPoolPoisonWatchdog(): void {
+	if (!poolWatchdogTimer) return;
+	clearInterval(poolWatchdogTimer);
+	poolWatchdogTimer = null;
+}
 
 // Build search path from structural config
 // Default: ["roadmap_proposal", "roadmap_workforce", "roadmap_efficiency", "roadmap", "public"]
@@ -255,7 +379,7 @@ export function getPool(config?: AgentHivePoolConfig): Pool {
 	configuredSchema = resolvedConfig.schema;
 
 	if (pool && poolSignature !== nextSignature) {
-		void pool.end().catch(() => {});
+		void endPoolBypassingGuard(pool).catch(() => {});
 		pool = null;
 		poolSignature = null;
 	}
@@ -279,6 +403,7 @@ export function getPool(config?: AgentHivePoolConfig): Pool {
 			max: resolvedConfig.max,
 			allowExitOnIdle: true,
 		});
+		installPoolEndGuard(pool);
 		poolSignature = nextSignature;
 
 		pool.on("error", (err) => {
@@ -422,8 +547,9 @@ export async function query<T extends QueryResultRow = any>(
  * Close the pool gracefully — call during shutdown.
  */
 export async function closePool(): Promise<void> {
+	stopPoolPoisonWatchdog();
 	if (pool) {
-		await pool.end();
+		await endPoolBypassingGuard(pool);
 		pool = null;
 		poolSignature = null;
 	}

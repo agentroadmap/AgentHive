@@ -20,8 +20,11 @@
  *   - status_changed / decision_made / proposal_created: always post
  *   - no hourly digest, no @mentions, no #urgent tags
  */
+import { existsSync, readFileSync } from "node:fs";
 import { Client } from "pg";
-import { readFileSync, existsSync } from "node:fs";
+import { setPoolLifecycleMode } from "../src/infra/postgres/pool.ts";
+
+setPoolLifecycleMode("long-running");
 
 const WEBHOOK_URL =
 	process.env.DISCORD_WEBHOOK_STATEFEED ??
@@ -35,7 +38,12 @@ const WEBHOOK_URL =
 // The legacy maturity/state channels still fire but `roadmap_events` carries
 // the same information with better fidelity, so we ignore the legacy ones to
 // avoid double-posting.
-const CHANNELS = ["roadmap_events", "agent_lifecycle_events", "proposal_gate_ready"];
+const CHANNELS = [
+	"roadmap_events",
+	"agent_lifecycle_events",
+	"control_feed",
+	"proposal_gate_ready",
+];
 
 // ─── Auth helpers (unchanged from prior version) ──────────────────────────────
 
@@ -412,6 +420,12 @@ function renderAgentLifecycleEvent(payload: string): string {
 		return "";
 	}
 
+	if (data.event_type === "pool_poisoned") {
+		const service = String(data.service ?? "unknown-service");
+		const message = String(data.message ?? "pool ended unexpectedly");
+		return `⚠️ **${service}** Postgres pool poisoned: ${message}`;
+	}
+
 	if (data.event_type !== "registry_reap") return "";
 
 	const count = Number(data.count ?? 0);
@@ -443,7 +457,7 @@ async function handleNotification(
 		if (!msg) console.log(`[state-feed] event ${eventId} suppressed/empty`);
 	} else if (channel === "proposal_gate_ready") {
 		msg = await renderGateReady(client, payload);
-	} else if (channel === "agent_lifecycle_events") {
+	} else if (channel === "agent_lifecycle_events" || channel === "control_feed") {
 		msg = renderAgentLifecycleEvent(payload);
 	}
 	if (msg) {
