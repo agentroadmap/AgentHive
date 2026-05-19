@@ -150,12 +150,16 @@ export class NotificationRouter {
 
 	private async claimBatch(): Promise<QueueRow[]> {
 		// FIFO by created_at within severity rank; newer CRITICAL outranks older INFO.
+		// Schema drift fix (P1140 sibling): live notification_queue lacks
+		// `payload`, `dispatched_at`, and `next_attempt_at` columns. Pending-row
+		// detection uses `status='pending'` (live CHECK constraint). payload is
+		// materialized as NULL so QueueRow stays shape-compatible.
 		const { rows } = await this.deps.pool.query<QueueRow>(
 			`SELECT id, severity, kind, channel, proposal_id,
-			        title, body, payload, metadata, created_at, dispatch_attempts
+			        title, body, NULL::jsonb AS payload, metadata, created_at, dispatch_attempts
 			   FROM roadmap.notification_queue
-			  WHERE dispatched_at IS NULL
-			    AND COALESCE(next_attempt_at, created_at) <= now()
+			  WHERE status = 'pending'
+			    AND created_at <= now()
 			  ORDER BY
 			    CASE severity
 			      WHEN 'CRITICAL' THEN 0
