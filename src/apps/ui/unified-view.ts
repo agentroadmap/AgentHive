@@ -21,7 +21,7 @@ import {
 	buildProposalViewerDirectiveFilterModel,
 	viewProposalEnhanced,
 } from "./proposal-viewer-with-search.ts";
-import { createScreen } from "./tui.ts";
+import { createScreen, destroySharedScreen } from "./tui.ts";
 import {
 	type ViewProposal,
 	ViewSwitcher,
@@ -332,7 +332,10 @@ export async function runUnifiedView(
 				emitBoardUpdate();
 			},
 		});
-		process.on("exit", () => configWatcher.stop());
+		process.on("exit", () => {
+			configWatcher.stop();
+			destroySharedScreen();
+		});
 
 		// Function to show proposal view
 		const showProposalView = async (): Promise<ViewResult> => {
@@ -497,8 +500,10 @@ export async function runUnifiedView(
 						clearInterval(timer);
 						timer = null;
 					}
-					delete (screen as any)._cockpitContainer;
-					(screen as any).destroy();
+					// P1139: hide the cockpit container so the next view can render fresh.
+					// Don't destroy the screen — it's shared across all views.
+					const container = (screen as any)._cockpitContainer;
+					if (container?.hide) container.hide();
 					resolve(result);
 				};
 
@@ -629,19 +634,20 @@ export async function runUnifiedView(
 						void refresh();
 				}, 1000);
 
+				// P1139: hide on switch; on exit caller drives destroySharedScreen.
+				const closeHeadlines = (result: ViewResult) => {
+					if (timer) clearInterval(timer);
+					const container = (screen as any)._headlinesContainer;
+					if (container?.hide) container.hide();
+					resolve(result);
+				};
 				// Set up key handlers
 				(screen as any).key(["tab"], () => {
 					onTabPress();
-					clearInterval(timer);
-					delete (screen as any)._headlinesContainer;
-					(screen as any).destroy();
-					resolve("switch");
+					closeHeadlines("switch");
 				});
-					(screen as any).key(["q", "Q", "escape", "C-c"], () => {
-						clearInterval(timer);
-						delete (screen as any)._headlinesContainer;
-						(screen as any).destroy();
-					resolve("exit");
+				(screen as any).key(["q", "Q", "escape", "C-c"], () => {
+					closeHeadlines("exit");
 				});
 			});
 		};
@@ -710,19 +716,20 @@ export async function runUnifiedView(
 					void refresh();
 				}, 1000);
 
+				// P1139: hide on switch; final exit cleanup is centralized.
+				const closeChat = (result: ViewResult) => {
+					if (timer) clearInterval(timer);
+					const container = (screen as any)._chatContainer;
+					if (container?.hide) container.hide();
+					resolve(result);
+				};
 				// Set up key handlers
 				(screen as any).key(["tab"], () => {
 					onTabPress();
-					clearInterval(timer);
-					delete (screen as any)._chatContainer;
-					(screen as any).destroy();
-					resolve("switch");
+					closeChat("switch");
 				});
-					(screen as any).key(["q", "Q", "escape", "C-c"], () => {
-						clearInterval(timer);
-						delete (screen as any)._chatContainer;
-						(screen as any).destroy();
-					resolve("exit");
+				(screen as any).key(["q", "Q", "escape", "C-c"], () => {
+					closeChat("exit");
 				});
 			});
 		};

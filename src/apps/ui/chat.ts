@@ -40,8 +40,9 @@ export function renderChat(
 	let chatLog: any, sidebar: any, inputField: any;
 
 	if (!container) {
+		// P1139: hide siblings (don't destroy — other views own their containers).
 		screen.children.forEach((child: any) => {
-			child.destroy();
+			if (typeof child.hide === "function") child.hide();
 		});
 
 		container = box({
@@ -147,6 +148,14 @@ export function renderChat(
 		chatLog = container._chatLog;
 		inputField = container._inputField;
 	}
+
+	// P1139: ensure visible + focused. focus the container (not inputField — that
+	// would grab the textbox into raw input mode and capture all keystrokes).
+	try {
+		container.show?.();
+		container.setFront?.();
+		container.focus?.();
+	} catch { /* ignore */ }
 
 	// Update Sidebar
 	const channelLines = channels.map((c) => {

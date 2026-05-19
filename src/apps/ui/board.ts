@@ -2614,7 +2614,13 @@ export async function renderBoardTui(
 
 			if (options?.onTabPress) {
 				clearFooterTimer();
-				screen.destroy();
+				// P1139: hide the board's container instead of destroying the screen.
+				// The screen is shared across all views; destroying it kills the
+				// single program that owns the terminal and causes the next view
+				// (cockpit) to render to a stale stdout (black screen).
+				if (typeof (container as { hide?: () => void }).hide === "function") {
+					(container as { hide: () => void }).hide();
+				}
 				await options.onTabPress();
 				resolve();
 				return;
@@ -2622,7 +2628,9 @@ export async function renderBoardTui(
 
 			if (options?.viewSwitcher) {
 				clearFooterTimer();
-				screen.destroy();
+				if (typeof (container as { hide?: () => void }).hide === "function") {
+					(container as { hide: () => void }).hide();
+				}
 				await options.viewSwitcher.switchView();
 				resolve();
 				return;

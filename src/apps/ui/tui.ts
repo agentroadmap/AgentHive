@@ -45,9 +45,33 @@ function normalizeToError(value: unknown): Error {
 	return new Error(String(value ?? "Unknown screen error"));
 }
 
+// Shared screen for the TUI session lifetime. P1139: one program owns the tty,
+// per-view containers hide/show on top of this single screen.
+//
+// Why this exists: createProgram() per screen means subsequent programs claim
+// stdin (so chat's textbox raw mode works) but write boxes to a stale stdout
+// (so cockpit/headlines/chat box-chrome is invisible). Single screen = single
+// program = stdout always lands in the live terminal.
+//
+// CRITICAL: we do NOT override screen.destroy in this revision. The 6c969b50
+// attempt did that and broke chat's textbox raw-mode. Instead, callers must
+// stop calling screen.destroy() during view-switch (only call it on final
+// process exit via tui-shared-screen-shutdown).
+let sharedScreen: ScreenInterface | null = null;
+
 export function createScreen(
 	options: Partial<ScreenOptions> = {},
 ): ScreenInterface {
+	if (sharedScreen) {
+		// Re-apply title if specified (per-view title still updates the terminal
+		// chrome on supporting terminals).
+		if (options.title) {
+			try {
+				(sharedScreen as unknown as { title?: string }).title = options.title;
+			} catch { /* ignore */ }
+		}
+		return sharedScreen;
+	}
 	const program: ProgramInterface = createProgram({ tput: true });
 	const fullUnicode = Boolean((program as { terminal?: { unicode?: boolean } }).terminal?.unicode);
 	const screen = blessedScreen({
@@ -69,7 +93,21 @@ export function createScreen(
 		throw normalizedError;
 	});
 
+	sharedScreen = screen;
 	return screen;
+}
+
+/**
+ * Final teardown of the shared screen. Call ONLY on process exit (q/Esc/Ctrl-C
+ * after the user has finished). Do NOT call during view-switch.
+ */
+export function destroySharedScreen(): void {
+	if (sharedScreen) {
+		try {
+			(sharedScreen as unknown as { destroy: () => void }).destroy();
+		} catch { /* ignore */ }
+		sharedScreen = null;
+	}
 }
 
 // Ask the user for a single line of input.  Falls back to readline.

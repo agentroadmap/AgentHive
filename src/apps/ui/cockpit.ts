@@ -61,9 +61,11 @@ export function renderCockpit(
 		headerBox: any;
 
 	if (!container) {
-		// Clear screen for initial render
+		// P1139: hide siblings (don't destroy — kanban/headlines/chat each cache
+		// their own container on the screen). Pre-refactor this destroyed every
+		// child including other views' caches.
 		screen.children.forEach((child: any) => {
-			child.destroy();
+			if (typeof child.hide === "function") child.hide();
 		});
 
 		// Create persistent container
@@ -243,6 +245,14 @@ export function renderCockpit(
 		ledgerBox = container._ledgerBox;
 		terminalLog = container._terminalLog;
 	}
+
+	// P1139: ensure the container is visible (it may have been hidden on previous
+	// view-switch) and focused so blessed has a render target.
+	try {
+		container.show?.();
+		container.setFront?.();
+		container.focus?.();
+	} catch { /* ignore */ }
 
 	// Update Dynamic Content
 	headerBox.setContent(
