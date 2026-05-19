@@ -37,6 +37,17 @@ const obs = new ObservabilityWriter("offer-dispatch");
 const ORCHESTRATOR_HOST = process.env.AGENTHIVE_HOST ?? hostname();
 void ORCHESTRATOR_HOST; // reserved for future host-aware agency filtering
 
+// Maps lowercase role name to the minimum required capabilities for agency selection.
+// Falls back to ["develop"] for any unrecognised role.
+const ROLE_TO_REQUIRED_CAPABILITIES: Record<string, string[]> = {
+	developer: ["develop"],
+	enhancer: ["enhance"],
+	"gate-reviewer": ["gate-review"],
+	"skeptic-alpha": ["gate-review"],
+	"code-reviewer": ["code-review"],
+	"orchestrator-liaison-investigator": ["orchestrator-liaison-investigator"],
+};
+
 export interface ClaimedOffer {
 	/** Offer identifier (uses dispatch_id stringified — UUID-shaped via padding for the schema). */
 	offerId: string;
@@ -64,6 +75,8 @@ export interface OfferDispatcherOptions {
 	dispatch_briefingAssemble?: typeof briefingAssemble;
 	/** Override for test injection. */
 	dispatch_sendMessage?: typeof sendMessage;
+	/** Override for test injection — resolves agencyId → agent_identity string. */
+	dispatch_queryAgentIdentity?: (agencyId: bigint) => Promise<string | null>;
 }
 
 /**
@@ -76,6 +89,7 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 	private readonly resolveAgencyFn: typeof resolveAgency;
 	private readonly briefingAssembleFn: typeof briefingAssemble;
 	private readonly sendMessageFn: typeof sendMessage;
+	private readonly queryAgentIdentityFn: (agencyId: bigint) => Promise<string | null>;
 
 	constructor(opts: OfferDispatcherOptions) {
 		this.orchestratorIdentity = opts.orchestratorIdentity;
@@ -84,6 +98,15 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 		this.briefingAssembleFn =
 			opts.dispatch_briefingAssemble ?? briefingAssemble;
 		this.sendMessageFn = opts.dispatch_sendMessage ?? sendMessage;
+		this.queryAgentIdentityFn =
+			opts.dispatch_queryAgentIdentity ??
+			(async (agencyId) => {
+				const { rows } = await query<{ agent_identity: string }>(
+					`SELECT agent_identity FROM roadmap_workforce.agent_registry WHERE id = $1`,
+					[agencyId.toString()],
+				);
+				return rows[0]?.agent_identity ?? null;
+			});
 	}
 
 	async dispatch(claim: ClaimedOffer): Promise<void> {
@@ -181,11 +204,7 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 
 		// agency-resolver returns the provider_registry row's agency_id (numeric);
 		// the liaison message bus keys on the agent_registry.agent_identity TEXT.
-		const { rows } = await query<{ agent_identity: string }>(
-			`SELECT agent_identity FROM roadmap_workforce.agent_registry WHERE id = $1`,
-			[candidate.agencyId.toString()],
-		);
-		return rows[0]?.agent_identity ?? null;
+		return this.queryAgentIdentityFn(candidate.agencyId);
 	}
 
 	private async assembleBriefing(
