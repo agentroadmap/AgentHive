@@ -45,25 +45,10 @@ function normalizeToError(value: unknown): Error {
 	return new Error(String(value ?? "Unknown screen error"));
 }
 
-// Singleton program shared across every createScreen() call. blessed allows
-// many screens but only one program can own the terminal at a time. Creating
-// a fresh program per view (the prior pattern) caused Tab-switched views
-// 2/3/4 to render to a program that no longer owned the terminal, showing
-// as a black screen. Reuse the first program so subsequent screens attach
-// to the same active terminal owner.
-let sharedProgram: ProgramInterface | null = null;
-
-function getSharedProgram(): ProgramInterface {
-	if (!sharedProgram) {
-		sharedProgram = createProgram({ tput: true });
-	}
-	return sharedProgram;
-}
-
 export function createScreen(
 	options: Partial<ScreenOptions> = {},
 ): ScreenInterface {
-	const program = getSharedProgram();
+	const program: ProgramInterface = createProgram({ tput: true });
 	const fullUnicode = Boolean((program as { terminal?: { unicode?: boolean } }).terminal?.unicode);
 	const screen = blessedScreen({
 		smartCSR: true,
