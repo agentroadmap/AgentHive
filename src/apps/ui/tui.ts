@@ -45,9 +45,32 @@ function normalizeToError(value: unknown): Error {
 	return new Error(String(value ?? "Unknown screen error"));
 }
 
+// Cached screen reused across all createScreen() calls in a single TUI session.
+//
+// Why this exists: blessed's program owns terminal stdin/stdout. createProgram()
+// per screen means the second program inherits a tty state the first didn't
+// fully release — boxes go to a stale stdout (invisible) while textbox raw
+// mode still works (consistent with the chat view showing 2 letters but no
+// box chrome). Cache the first screen and reuse for every subsequent call;
+// each renderer already clears children before adding its own content, so
+// reuse is safe. screen.destroy() is overridden to a no-op so view-switch
+// teardown can't kill the shared screen.
+let sharedScreen: ScreenInterface | null = null;
+
 export function createScreen(
 	options: Partial<ScreenOptions> = {},
 ): ScreenInterface {
+	if (sharedScreen) {
+		// Re-apply the title if the caller specified one (helps with debugging
+		// since per-view titles still appear in terminal chrome on supporting
+		// terminals).
+		if (options.title) {
+			try {
+				(sharedScreen as unknown as { title?: string }).title = options.title;
+			} catch { /* ignore */ }
+		}
+		return sharedScreen;
+	}
 	const program: ProgramInterface = createProgram({ tput: true });
 	const fullUnicode = Boolean((program as { terminal?: { unicode?: boolean } }).terminal?.unicode);
 	const screen = blessedScreen({
@@ -69,7 +92,28 @@ export function createScreen(
 		throw normalizedError;
 	});
 
+	// Override destroy: per-view teardown calls screen.destroy() expecting the
+	// screen to go away, but we want the shared screen to live for the lifetime
+	// of the process. The real destroy is called via destroySharedScreen() on
+	// final exit.
+	const realDestroy = (screen as unknown as { destroy: () => void }).destroy.bind(screen);
+	(screen as unknown as { destroy: () => void; _realDestroy: () => void }).destroy = () => {
+		// no-op for view-switch teardown
+	};
+	(screen as unknown as { _realDestroy: () => void })._realDestroy = realDestroy;
+
+	sharedScreen = screen;
 	return screen;
+}
+
+/** Tear down the shared screen for real (call on final process exit). */
+export function destroySharedScreen(): void {
+	if (sharedScreen) {
+		try {
+			(sharedScreen as unknown as { _realDestroy?: () => void })._realDestroy?.();
+		} catch { /* ignore */ }
+		sharedScreen = null;
+	}
 }
 
 // Ask the user for a single line of input.  Falls back to readline.
