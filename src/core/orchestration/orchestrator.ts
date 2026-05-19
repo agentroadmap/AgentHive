@@ -10,7 +10,6 @@ import {
 import { enqueueNotification } from "../notifications/enqueue.ts";
 import { getUnlockedGateQueue } from "../proposal/gate-scanner-v2.ts";
 import { loadStateNames } from "../workflow/state-names.ts";
-import { spawnAgent } from "./agent-spawner.ts";
 import {
 	bootCancelPokeAttempts,
 	runOfferReaper,
@@ -44,6 +43,8 @@ import {
 	recordProviderSuccess,
 	type ProviderSignal,
 } from "./provider-cooldown.ts";
+import { detectStuckWorkers } from "../../infra/agency/task-dispatcher.ts";
+import { listDispatchableAgencies } from "../../infra/agency/liaison-service.ts";
 
 /**
  * Unified Agent Orchestrator
@@ -829,8 +830,8 @@ export class Orchestrator {
 				// AC-2: route all proposal-level dispatches through the offer
 				// dispatch pipeline (postWorkOffer → OfferClaimLoop →
 				// OrchestratorOfferDispatcher → liaison_message offer_dispatch).
-				// The liaison's OfferDispatchHandler calls spawnAgent; the
-				// orchestrator itself no longer forks CLI subprocesses for
+				// The agency's OfferDispatchHandler forks the CLI subprocess;
+				// the orchestrator itself no longer forks CLI subprocesses for
 				// proposal execution.
 				await postWorkOffer({
 					proposalId: detail.id,
@@ -840,8 +841,8 @@ export class Orchestrator {
 					stage: detail.status,
 					worktreeHint: this.defaultWorktree,
 					// P771: forward role_profile_id so the liaison applies the
-					// same route-policy filters that a direct spawnAgent call
-					// would have applied (allowed_route_providers, etc.).
+					// same route-policy filters that the agency's dispatch handler
+					// applies (allowed_route_providers, etc.).
 					roleProfileId: primaryProfile?.id ?? null,
 				});
 
@@ -942,7 +943,7 @@ export class Orchestrator {
 		status: string;
 		stallHours: number;
 	}): Promise<void> {
-		// Tier 1: AI liaison via offer dispatch (P904-A3: postWorkOffer replaces spawnAgent)
+		// Tier 1: AI liaison via offer dispatch (P904-A3: postWorkOffer → OfferClaimLoop)
 		if (ORCHESTRATOR_LIAISON_PROVIDER) {
 			try {
 				await postWorkOffer({
@@ -967,9 +968,17 @@ export class Orchestrator {
 					worktreeHint: this.defaultWorktree,
 					requiredCapabilities: ["orchestrator-liaison-investigator"],
 				});
-				console.log(
-					`[Orchestrator] stall-liaison offer posted for ${stall.displayId} (${stall.stallHours}h stalled)`,
-				);
+				const dispatchable = await listDispatchableAgencies();
+				if (dispatchable.length === 0) {
+					console.warn(
+						`[Orchestrator] stall-liaison: offer queued for ${stall.displayId} but no dispatchable agencies`,
+						{ reason: "no_dispatchable_agency", displayId: stall.displayId },
+					);
+				} else {
+					console.log(
+						`[Orchestrator] stall-liaison offer posted for ${stall.displayId} (${stall.stallHours}h stalled, ${dispatchable.length} agency/agencies available)`,
+					);
+				}
 				return;
 			} catch (err) {
 				console.warn(

@@ -2365,9 +2365,17 @@ Without set_maturity=mature, the gate will not re-run and your work remains invi
 			requiredCapabilities:
 				requiredCapabilities.length > 0 ? requiredCapabilities : ["enhancer"],
 		});
-		logger.log(
-			`📬 Enhancer offer ${dispatchId} posted for ${target.display_id} (revising hold #${target.hold_decision_id}; reason=${reason})`,
-		);
+		const dispatchable = await listDispatchableAgencies();
+		if (dispatchable.length === 0) {
+			logger.warn(
+				`[Enhancer] offer ${dispatchId} queued for ${target.display_id} but no dispatchable agencies`,
+				{ reason: "no_dispatchable_agency", displayId: target.display_id },
+			);
+		} else {
+			logger.log(
+				`📬 Enhancer offer ${dispatchId} posted for ${target.display_id} (revising hold #${target.hold_decision_id}; reason=${reason}; ${dispatchable.length} agency/agencies available)`,
+			);
+		}
 	} catch (err) {
 		const errMsg = err instanceof Error ? err.message : String(err);
 		logger.warn(
