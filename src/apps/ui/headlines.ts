@@ -29,9 +29,8 @@ export function renderHeadlines(
 	let feedLog: any;
 
 	if (!container) {
-		// P1139: hide siblings (don't destroy — other views own their containers).
 		screen.children.forEach((child: any) => {
-			if (typeof child.hide === "function") child.hide();
+			child.destroy();
 		});
 
 		container = box({
@@ -98,13 +97,6 @@ export function renderHeadlines(
 	} else {
 		feedLog = container._feedLog;
 	}
-
-	// P1139: ensure visible + focused on every render (may have been hidden).
-	try {
-		container.show?.();
-		container.setFront?.();
-		container.focus?.();
-	} catch { /* ignore */ }
 
 	// Reactive Update
 	const newMessages = messages
