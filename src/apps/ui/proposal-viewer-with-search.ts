@@ -1573,13 +1573,11 @@ export async function viewProposalEnhanced(
 				return;
 			}
 			if (currentFocus === "list" || currentFocus === "detail") {
-				// P1139: hide the container instead of destroying the screen.
-				// Screen is shared across all views; destroying it kills the
-				// program that owns the terminal and causes subsequent views
-				// (kanban after Tab from list) to render black.
-				try {
-					(container as { hide?: () => void }).hide?.();
-				} catch { /* ignore */ }
+				// Cleanup before switching
+				searchService?.dispose();
+				contentStore?.dispose();
+				filterHeader.destroy();
+				screen.destroy();
 				await options.onTabPress?.();
 			}
 		});
