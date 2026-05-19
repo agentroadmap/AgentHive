@@ -46,15 +46,15 @@ export function agencyPolicyFilterSql(agencyParamIdx: number, alias = "mr"): str
 		$${agencyParamIdx}::text IS NULL
 		OR NOT EXISTS (
 			SELECT 1
-			FROM agency.agency a
+			FROM roadmap.agency a
 			WHERE a.agency_id = $${agencyParamIdx}::text
 		)
 		OR (
 			(
 				NOT EXISTS (
 					SELECT 1
-					FROM agency.agency a
-					JOIN agency.agency_route_policy arp
+					FROM roadmap.agency a
+					JOIN roadmap.agency_route_policy arp
 					  ON arp.agency_id = a.agency_id
 					 AND arp.scope = 'global'
 					 AND arp.lifecycle_status = 'active'
@@ -62,8 +62,8 @@ export function agencyPolicyFilterSql(agencyParamIdx: number, alias = "mr"): str
 				)
 				OR EXISTS (
 					SELECT 1
-					FROM agency.agency a
-					JOIN agency.agency_route_policy arp
+					FROM roadmap.agency a
+					JOIN roadmap.agency_route_policy arp
 					  ON arp.agency_id = a.agency_id
 					 AND arp.route_id = ${alias}.id
 					 AND arp.scope = 'global'
@@ -74,8 +74,8 @@ export function agencyPolicyFilterSql(agencyParamIdx: number, alias = "mr"): str
 			)
 			AND NOT EXISTS (
 				SELECT 1
-				FROM agency.agency a
-				JOIN agency.agency_route_policy arp
+				FROM roadmap.agency a
+				JOIN roadmap.agency_route_policy arp
 				  ON arp.agency_id = a.agency_id
 				 AND arp.route_id = ${alias}.id
 				 AND arp.scope = 'global'
