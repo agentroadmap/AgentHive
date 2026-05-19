@@ -1122,6 +1122,15 @@ When you start work that touches one of these areas, **read the keystone proposa
 | **Auth + identity unification** (keys, sessions, tokens, OAuth across agents/liaisons/operators) | **P472** (REVIEW mature) | Adjacent: P398 (OAuth UI), P159 (agent-identity wiring), P413 (service account consolidation) | — |
 | **Configuration resolution order** (env vs roadmap.yaml vs control DB vs feature flags) | **P474** (DEVELOP active) | Extended by P498 (tenant DSN class), companion P416✓/P402✓ obsoleted | — |
 | **Compatibility migration plan** (control plane and liaison cutover, dual-write windows) | **P473** (REVIEW mature) | Blocks: P438, P432 (now obsolete), P468, P464, P431 (now obsolete), P453✓ | — |
+| **agentHive2 Grand Picture** (product vision, operating model, system boundaries) | **P1013** (DRAFT) | Pillars: P1014–P1024 (see below). Stack re-authoring: P995, P997✓, P998✓, P999✓, P1000✓. | Legacy keystones remain as delivered-evidence; P1013 is the canonical agentHive2 root. |
+| **Control Plane** (hiveCentral DB, tenant lifecycle, multi-project mgmt) | **P1014** (DRAFT, child of P1013) | Prior delivered: P429 family (migration topology), P474 (config resolver), P507–P509 (tenant lifecycle) | — |
+| **Proposal Engine** (lifecycle, criteria, leases, mapping, doc projection) | **P1015** (DRAFT, child of P1013) | Prior delivered: P433 (state machine), P475 (MCP hardening), P995/P997/P998/P999 (mapping artifact + doc projection) | — |
+| **Workforce and Agencies** (registry, self-reg, liaison bootstrap, tiered identity) | **P1016** (DRAFT, child of P1013) | Prior delivered: P463 (liaison protocol), P888 (A2A foundation), P996 (personal-name agents) | — |
+| **Unified Messaging / A2A** (single bus, presence, USER↔agent, HMAC, DLQ) | **P1017** (DEVELOP, child of P1013) | Phases: P1102 (heartbeat cleanup, REVIEW), P1103–P1107 (bus, presence, USER identity, HMAC/DLQ, transport contracts) | P836 (cross-host relay — absorbed into P1017-E) |
+| **Execution and Orchestration** (orchestrator, dispatch loop, offers, gate pipeline) | **P1021** (DRAFT, child of P1013) | Prior delivered: P902/P903 (orchestrator class), P206 (gate evaluator), P1018 (budget wire) | — |
+| **Governance and Trust** (identity, budget wiring, marketplace controls) | **P1022** (DRAFT, child of P1013) | Prior delivered: P472 (auth/identity), P842/P1004 (budget schemas), P1018/P1022 (wiring + mechanics) | — |
+| **Observability and Efficiency** (spans, backup, partitions, schema-drift, rollups) | **P1023** (DRAFT, child of P1013) | Prior delivered: P660 (workflow completed_at), P772 (route_decision_log), P855/P856 (fix batch) | — |
+| **Web and Operator Experience** (dashboard, CLI, TUI, activity feed, Discord bridge) | **P1024** (DRAFT, child of P1013) | In-flight: P1067 (TUI shell). Prior: P477 (web control plane) | P387 (superseded by P477), P301 (partially absorbed) |
 
 ### Operating rules for this index
 
