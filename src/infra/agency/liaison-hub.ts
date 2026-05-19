@@ -186,7 +186,7 @@ async function dispatchMessage(msg: LiaisonMessage, agencyId: string): Promise<v
 /**
  * Start the liaison message dispatch loop for an agency.
  *
- * Listens on pg_notify channel 'liaison_message_<agencyId>' (fired by
+ * Listens on pg_notify channel 'msg_<agencyId>' (fired by
  * trig_liaison_notify_new_message on liaison_message INSERT). Routes each
  * arriving message by kind to the appropriate handler.
  *
