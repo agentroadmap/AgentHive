@@ -273,12 +273,17 @@ export class NotificationRouter {
 			}));
 	}
 
+	// Schema drift fix (P1140 sibling): live notification_queue lacks
+	// `dispatched_at` and `next_attempt_at` columns. delivered_at + status
+	// carry the terminal-success/failure signal; recordAttempt no longer
+	// schedules an explicit next attempt — the poll cadence picks pending
+	// rows back up on next tick. Retry-delay precision lost (was per-row
+	// backoff; now uniform poll interval) — flagged for the proper router
+	// rework when the notification subsystem is consolidated.
 	private async markSent(queueId: number): Promise<void> {
 		await this.deps.pool.query(
 			`UPDATE roadmap.notification_queue
-			    SET dispatched_at = now(),
-			        next_attempt_at = NULL,
-			        status = 'sent',
+			    SET status = 'sent',
 			        delivered_at = now()
 			  WHERE id = $1`,
 			[queueId],
@@ -288,9 +293,7 @@ export class NotificationRouter {
 	private async markSuppressed(queueId: number, reason: string): Promise<void> {
 		await this.deps.pool.query(
 			`UPDATE roadmap.notification_queue
-			    SET dispatched_at = now(),
-			        next_attempt_at = NULL,
-			        status = 'suppressed',
+			    SET status = 'suppressed',
 			        last_error = $2,
 			        delivered_at = now()
 			  WHERE id = $1`,
@@ -305,9 +308,7 @@ export class NotificationRouter {
 	): Promise<void> {
 		await this.deps.pool.query(
 			`UPDATE roadmap.notification_queue
-			    SET dispatched_at = now(),
-			        next_attempt_at = NULL,
-			        status = 'failed',
+			    SET status = 'failed',
 			        dispatch_attempts = $2,
 			        last_error = $3,
 			        delivered_at = now()
@@ -320,15 +321,18 @@ export class NotificationRouter {
 		queueId: number,
 		attempts: number,
 		lastError: string,
-		delayMs: number,
+		_delayMs: number,
 	): Promise<void> {
+		// next_attempt_at column gone; row stays status='pending' so the next
+		// poll picks it up. dispatch_attempts increment lets max-attempt limit
+		// still terminate retry loop. Delay precision deferred to a proper
+		// router rework.
 		await this.deps.pool.query(
 			`UPDATE roadmap.notification_queue
 			    SET dispatch_attempts = $2,
-			        last_error = $3,
-			        next_attempt_at = now() + ($4::text)::interval
+			        last_error = $3
 			  WHERE id = $1`,
-			[queueId, attempts, lastError, `${Math.ceil(delayMs / 1000)} seconds`],
+			[queueId, attempts, lastError],
 		);
 	}
 
