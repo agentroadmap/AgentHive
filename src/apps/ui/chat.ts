@@ -142,13 +142,6 @@ export function renderChat(
 		container._lastMsgTimestamp =
 			messages.length > 0 ? messages[0].timestamp : 0;
 		container._currentChannel = currentChannel;
-
-		// blessed needs an explicit focus target to render. Without this the
-		// screen draws but to no focused context — appears black. Focus the
-		// container (not inputField — that grabs the textbox and keyboard).
-		try {
-			container.focus?.();
-		} catch { /* ignore */ }
 	} else {
 		sidebar = container._sidebar;
 		chatLog = container._chatLog;

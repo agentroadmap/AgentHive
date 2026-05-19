@@ -236,15 +236,6 @@ export function renderCockpit(
 		}
 		container._lastMsgTimestamp =
 			messages.length > 0 ? messages[0].timestamp : 0;
-
-		// blessed needs an explicit focus target to render. Without this the
-		// screen draws but to no focused context — appears black. board.ts
-		// works precisely because it calls .focus() on its column lists;
-		// cockpit/headlines/chat historically never did, producing the
-		// black-screen-on-Tab regression. Focus the container after setup.
-		try {
-			container.focus?.();
-		} catch { /* ignore */ }
 	} else {
 		headerBox = container._headerBox;
 		workforceBox = container._workforceBox;
