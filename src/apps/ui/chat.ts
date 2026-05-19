@@ -128,7 +128,6 @@ export function renderChat(
 					screen.render();
 				});
 			}
-			inputField.focus();
 			screen.render();
 		});
 
@@ -170,7 +169,6 @@ export function renderChat(
 		container._lastMsgTimestamp = messages[0].timestamp;
 	}
 
-	inputField.focus();
 	screen.render();
 }
 

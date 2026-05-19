@@ -1246,12 +1246,27 @@ export class RfcWorkflowHandlers {
 		// AC management
 		this.server.addTool({
 			name: "add_acceptance_criteria",
-			description: "Add acceptance criteria to a proposal",
+			description:
+				"Add one or more acceptance criteria to a proposal. " +
+				"Pass `criteria` as an ARRAY OF FULL SENTENCES (string[]); each becomes one AC row, " +
+				"item_number assigned in array order. NEVER pass individual title/description fields " +
+				"or a key named 'acceptance_criteria' — those are rejected. ACs land with status='pending'; " +
+				"call verify_ac per item once the AC is satisfied (verification is NOT auto-inferred " +
+				"from tests passing or proposal maturity).",
 			inputSchema: {
 				type: "object",
 				properties: {
-					proposal_id: { type: "string" },
-					criteria: { type: "array", items: { type: "string" } },
+					proposal_id: {
+						type: "string",
+						description: "Proposal id as string (e.g. '913'). NOT the display 'P913'.",
+					},
+					criteria: {
+						type: "array",
+						items: { type: "string" },
+						description:
+							"Array of full-sentence AC bodies. Each entry becomes one AC row with " +
+							"the next item_number after existing ACs.",
+					},
 				},
 				required: ["proposal_id", "criteria"],
 			},
@@ -1260,18 +1275,45 @@ export class RfcWorkflowHandlers {
 
 		this.server.addTool({
 			name: "verify_ac",
-			description: "Mark an acceptance criterion as pass/fail/blocked/waived",
+			description:
+				"Mark a SINGLE acceptance criterion as pass/fail/blocked/waived. " +
+				"Call once PER AC item_number (1-indexed). ACs stay 'pending' until " +
+				"this is explicitly called — verification is NOT inferred from " +
+				"tests passing, code merging, or proposal maturity advancing. " +
+				"Gating tools and dashboards read pac.status, not test output. " +
+				"After implementing a proposal, loop over each AC and call this " +
+				"with status='pass' + verification_notes citing the evidence " +
+				"(commit hash, test name, schema check, etc).",
 			inputSchema: {
 				type: "object",
 				properties: {
-					proposal_id: { type: "string" },
-					item_number: { type: "number" },
+					proposal_id: {
+						type: "string",
+						description: "Proposal id as string (e.g. '913'). NOT the display 'P913'.",
+					},
+					item_number: {
+						type: "number",
+						description: "1-indexed AC position. Use list_ac to see current numbering.",
+					},
 					status: {
 						type: "string",
 						enum: ["pass", "fail", "blocked", "waived"],
+						description:
+							"pass=AC met; fail=AC not met (record why in notes); " +
+							"blocked=external dependency; waived=operator-approved skip with reason. " +
+							"Do NOT pass 'verified' or 'pending' — they violate the CHECK constraint.",
 					},
-					verified_by: { type: "string" },
-					verification_notes: { type: "string" },
+					verified_by: {
+						type: "string",
+						description:
+							"Agent identity slug performing verification (e.g. 'operator-claude', 'codex-reviewer').",
+					},
+					verification_notes: {
+						type: "string",
+						description:
+							"Evidence the AC is satisfied: commit hash + line range, test name " +
+							"and result, schema query proof, or rejection reason for fail/blocked.",
+					},
 				},
 				required: ["proposal_id", "item_number", "status", "verified_by"],
 			},

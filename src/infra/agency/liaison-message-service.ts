@@ -4,7 +4,8 @@
  */
 
 import { createHmac } from 'node:crypto';
-import { query, getPool } from '../postgres/pool.js';
+import { Client as PgClient } from 'pg';
+import { query } from '../postgres/pool.js';
 import type { LiaisonMessage, LiaisonMessageAckOutcome } from './liaison-message-types.js';
 
 // ─── Configuration ──────────────────────────────────────────────────────────
@@ -28,6 +29,10 @@ function getSigningKey(): string {
  * P149 Phase C: also mirrors to message_ledger for unified A2A observability.
  * The ledger insert is best-effort — if it fails (e.g. from_agent not in
  * agent_registry), liaison_message remains the authoritative store.
+ *
+ * P922: host_id is resolved via atomic INSERT...SELECT from roadmap.agency.host_id.
+ * This ensures host_id and the message are inserted atomically within the same
+ * transaction, preventing stale-read windows if the agency moves hosts.
  */
 export async function storeMessage(
     message: Partial<LiaisonMessage> & {
@@ -71,16 +76,23 @@ export async function storeMessage(
         // Mirror failed — proceed with liaison_message as the authoritative store
     }
 
+    // P922: Atomic INSERT...SELECT to resolve host_id from roadmap.agency.
+    // No caller-side cache or separate SELECT-then-INSERT. The host_id is resolved
+    // and inserted atomically within the same transaction, ensuring:
+    // - If agency moves hosts between caller's logic and INSERT, the SELECT sees the current host.
+    // - No stale-read window: SELECT and INSERT are indivisible from other transactions' POV.
     const result = await query<LiaisonMessage>(
         `INSERT INTO roadmap.liaison_message
-            (message_id, agency_id, sequence, direction, kind, correlation_id, payload, signed_at, signature, ledger_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            (message_id, agency_id, sequence, direction, kind, correlation_id, payload, signed_at, signature, ledger_id, host_id)
+        SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, a.host_id
+        FROM roadmap.agency a
+        WHERE a.agency_id = $2
         ON CONFLICT (agency_id, sequence) DO UPDATE
-            SET message_id = EXCLUDED.message_id,
-                ledger_id  = COALESCE(roadmap.liaison_message.ledger_id, EXCLUDED.ledger_id)
+            SET ledger_id  = COALESCE(roadmap.liaison_message.ledger_id, EXCLUDED.ledger_id),
+                host_id    = EXCLUDED.host_id
         RETURNING
             message_id, agency_id, sequence, direction, kind, correlation_id,
-            payload, signed_at, signature, acked_at, ack_outcome, ack_error, created_at`,
+            payload, signed_at, signature, acked_at, ack_outcome, ack_error, created_at, host_id`,
         [
             message.message_id,
             message.agency_id,
@@ -106,6 +118,9 @@ export async function storeMessage(
  * High-level convenience: auto-generate message_id, sequence, correlation_id,
  * signed_at, and signature, then persist via storeMessage.
  * Suitable for callers who don't need to manage sequence numbers manually.
+ *
+ * AC-9: Rejects targets that match a current display_alias value (not routable).
+ * Callers must use agency_id or identity-based addressing, not human-readable aliases.
  */
 export async function sendMessage(opts: {
     agency_id: string;
@@ -114,6 +129,24 @@ export async function sendMessage(opts: {
     payload: Record<string, any>;
     correlation_id?: string;
 }): Promise<LiaisonMessage> {
+    // AC-9: Check if agency_id matches an active agent's display_alias
+    const aliasCheckResult = await query<{ is_alias: boolean }>(
+        `SELECT EXISTS(
+            SELECT 1 FROM roadmap_workforce.agent_registry
+            WHERE display_alias = $1 AND status = 'active'
+        ) as is_alias`,
+        [opts.agency_id]
+    );
+
+    if (aliasCheckResult.rows[0]?.is_alias) {
+        const err = new Error(
+            `ALIAS_NOT_ROUTABLE: "${opts.agency_id}" is a human-readable display_alias, ` +
+            `not a routable target. Use agent_identity or agency_id instead.`
+        );
+        (err as any).code = 'ALIAS_NOT_ROUTABLE';
+        throw err;
+    }
+
     const message_id = crypto.randomUUID();
     const correlation_id = opts.correlation_id ?? crypto.randomUUID();
     const sequence = await getNextSequence(opts.agency_id);
@@ -176,23 +209,33 @@ export async function getMessageById(messageId: string): Promise<LiaisonMessage 
 
 /**
  * Fetch unacked messages for an agency in sequence order.
- * Used by orchestrator to catch up after restart.
+ * Used by the hub to catch up after restart.
+ *
+ * createdAfter: if set, only returns messages newer than this timestamp.
+ * Use this to bound the replay window and avoid re-triggering historical backlogs.
  */
 export async function getUnackedMessages(
     agencyId: string,
-    fromSequence?: bigint
+    fromSequence?: bigint,
+    createdAfter?: Date,
 ): Promise<LiaisonMessage[]> {
-    const whereClause = fromSequence
-        ? `WHERE agency_id = $1 AND acked_at IS NULL AND sequence >= $2`
-        : `WHERE agency_id = $1 AND acked_at IS NULL`;
+    const conditions: string[] = ['agency_id = $1', 'acked_at IS NULL'];
+    const params: unknown[] = [agencyId];
 
-    const params = fromSequence ? [agencyId, fromSequence] : [agencyId];
+    if (fromSequence !== undefined) {
+        params.push(fromSequence);
+        conditions.push(`sequence >= $${params.length}`);
+    }
+    if (createdAfter !== undefined) {
+        params.push(createdAfter);
+        conditions.push(`created_at >= $${params.length}`);
+    }
 
     const result = await query<any>(
         `SELECT message_id, agency_id, sequence, direction, kind, correlation_id,
                 payload, signed_at, signature, acked_at, ack_outcome, ack_error, created_at
          FROM roadmap.liaison_message
-         ${whereClause}
+         WHERE ${conditions.join(' AND ')}
          ORDER BY sequence ASC`,
         params
     );
@@ -535,8 +578,24 @@ async function* createMessageListener(
     agencyId: string,
     signal?: AbortSignal
 ): AsyncGenerator<LiaisonMessage> {
-    const pool = getPool();
-    const client = await pool.connect();
+    // PgBouncer in transaction mode kills LISTEN: the server backend is
+    // returned to the pool after each transaction and either reused by other
+    // clients or closed at server_idle_timeout, so notifications never reach
+    // us. Bypass PgBouncer by opening a dedicated session-mode connection
+    // direct to PostgreSQL via PGPORT_DIRECT (mirrors the pattern in
+    // pool-registry.ts:392 for the cache-eviction LISTEN client).
+    const directPort = Number(
+        process.env.PGPORT_DIRECT ?? process.env.PGPORT ?? 5432,
+    );
+    const client = new PgClient({
+        host: process.env.PGHOST ?? '127.0.0.1',
+        port: directPort,
+        user: process.env.PGUSER ?? 'admin',
+        database: process.env.PGDATABASE ?? 'agenthive',
+        password: process.env.PGPASSWORD,
+        application_name: `agenthive-listen-${agencyId}`,
+    });
+    await client.connect();
 
     const channel = LISTEN_CHANNEL_PREFIX + agencyId;
 
@@ -595,7 +654,8 @@ async function* createMessageListener(
         } catch {
             // ignore cleanup errors
         }
-        client.release();
+        // Direct pg.Client is closed via end(), not pool-style release().
+        try { await client.end(); } catch { /* ignore */ }
     }
 }
 
@@ -633,5 +693,6 @@ function parseMessageRow(row: any): LiaisonMessage {
         created_at: row.created_at instanceof Date
             ? row.created_at.toISOString()
             : row.created_at,
+        host_id: row.host_id ?? null,
     };
 }

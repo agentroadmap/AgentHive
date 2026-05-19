@@ -126,9 +126,9 @@ COMMENT ON TABLE governance.decision IS
   'to detect tampering. Partitioned by decided_at. Permanent retention.';
 
 -- ============================================================
--- governance.complianceCheck — point-in-time compliance assessments (time-series)
+-- governance.compliance_check — point-in-time compliance assessments (time-series)
 -- ============================================================
-CREATE TABLE IF NOT EXISTS governance.complianceCheck (
+CREATE TABLE IF NOT EXISTS governance.compliance_check (
   id               BIGINT       GENERATED ALWAYS AS IDENTITY,
   project_id       BIGINT       REFERENCES core.project (id) ON DELETE SET NULL,
   check_type       TEXT         NOT NULL,                 -- 'proposal_ac', 'security_scan', etc.
@@ -142,15 +142,15 @@ CREATE TABLE IF NOT EXISTS governance.complianceCheck (
 ) PARTITION BY RANGE (checked_at);
 
 CREATE TABLE IF NOT EXISTS governance.complianceCheck_default
-  PARTITION OF governance.complianceCheck DEFAULT;
+  PARTITION OF governance.compliance_check DEFAULT;
 
-REVOKE UPDATE, DELETE ON governance.complianceCheck FROM PUBLIC;
+REVOKE UPDATE, DELETE ON governance.compliance_check FROM PUBLIC;
 
 CREATE OR REPLACE TRIGGER deny_compliance_mutation
-  BEFORE UPDATE OR DELETE ON governance.complianceCheck
+  BEFORE UPDATE OR DELETE ON governance.compliance_check
   FOR EACH ROW EXECUTE FUNCTION governance.deny_mutation();
 
-COMMENT ON TABLE governance.complianceCheck IS
+COMMENT ON TABLE governance.compliance_check IS
   'Append-only compliance assessment log. Partitioned by checked_at. Retained 1 year by default.';
 
 -- ============================================================
@@ -190,7 +190,7 @@ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'agenthive_orchestrator') THEN
     GRANT USAGE ON SCHEMA governance TO agenthive_orchestrator;
     GRANT SELECT, INSERT, UPDATE ON governance.policy TO agenthive_orchestrator;
-    GRANT SELECT, INSERT ON governance.decision, governance.complianceCheck, governance.event TO agenthive_orchestrator;
+    GRANT SELECT, INSERT ON governance.decision, governance.compliance_check, governance.event TO agenthive_orchestrator;
   END IF;
 
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'agenthive_observability') THEN

@@ -36,6 +36,22 @@ let pool: Pool | null = null;
 let configuredSchema: string | null = null;
 let poolSignature: string | null = null;
 
+// P1123: Process-mode sentinel. Long-running services (orchestrator, state-feed,
+// board, mcp, notification-router) call setPoolLifecycleMode("long-running") at
+// startup to make closePool() refuse — defends against stray CLI-style shutdown
+// paths that share process space (e.g., cli.ts `agents send` subcommand) from
+// poisoning the pool. Default "one-shot" preserves CLI/test semantics.
+type PoolLifecycleMode = "long-running" | "one-shot";
+let poolLifecycleMode: PoolLifecycleMode = "one-shot";
+
+export function setPoolLifecycleMode(mode: PoolLifecycleMode): void {
+	poolLifecycleMode = mode;
+}
+
+export function getPoolLifecycleMode(): PoolLifecycleMode {
+	return poolLifecycleMode;
+}
+
 // Build search path from structural config
 // Default: ["roadmap_proposal", "roadmap_workforce", "roadmap_efficiency", "roadmap", "public"]
 // But can be overridden via PG_SCHEMA env or config if needed
@@ -157,8 +173,11 @@ function resolvePoolConfig(config?: AgentHivePoolConfig): ResolvedPoolConfig {
 		process.env.PGHOST ??
 		databaseUrlConfig.host ??
 		(StructuralKeys.PGHOST.defaultValue ?? "127.0.0.1");
+	// P499: default to PgBouncer port (6432) so query clients go through the pooler.
+	// LISTEN clients must set PGPORT_DIRECT=5432 (bypass) — handled in pool-registry.ts.
 	const port =
-		Number(config?.port ?? process.env.PGPORT ?? databaseUrlConfig.port) || 5432;
+		Number(config?.port ?? process.env.PGPORT ?? databaseUrlConfig.port) ||
+		Number(process.env.AGENTHIVE_PG_PORT ?? 6432);
 	const database =
 		config?.database ??
 		process.env.PGDATABASE ??
@@ -213,7 +232,7 @@ function resolvePoolConfig(config?: AgentHivePoolConfig): ResolvedPoolConfig {
 			StructuralKeys.PG_STATEMENT_TIMEOUT_MS.defaultValue ?? 30000,
 		),
 		// Pool size: pg-pool defaults to 10. Long-lived LISTEN clients
-		// (state-names, pipeline-cron, websocket-server, feature-flag-service)
+		// (state-names, orchestrator, websocket-server, feature-flag-service)
 		// each pin a slot for the lifetime of the process, so 10 is razor-thin
 		// — a couple of leaked LISTENs (cf. P522) and the pool is dead. Bump
 		// the default to 30 and let ops override via PG_POOL_MAX. Defense in
@@ -252,6 +271,17 @@ export function getPool(config?: AgentHivePoolConfig): Pool {
 	configuredSchema = resolvedConfig.schema;
 
 	if (pool && poolSignature !== nextSignature) {
+		// P1123 Phase 2.1: prime suspect of the 2026-05-15 board poisoning. In
+		// long-running mode, refuse the silent pool.end() that fires on any
+		// signature mismatch (e.g., a transitive caller resolving slightly
+		// different config). Keep the existing pool — new config is ignored
+		// until next process restart. Loud failure mode: warn with stack.
+		if (poolLifecycleMode === "long-running") {
+			console.warn(
+				`[PG] getPool() signature change refused in long-running mode; keeping existing pool. new=${nextSignature} current=${poolSignature}\n${new Error().stack}`,
+			);
+			return pool;
+		}
 		void pool.end().catch(() => {});
 		pool = null;
 		poolSignature = null;
@@ -417,8 +447,19 @@ export async function query<T extends QueryResultRow = any>(
 
 /**
  * Close the pool gracefully — call during shutdown.
+ *
+ * P1123: in "long-running" mode this is a no-op (with stack-trace log). Long-
+ * running services should never end the shared pool mid-process; doing so
+ * poisons every downstream consumer (broadcastSnapshot, LISTEN reconnect,
+ * TimeoutCron, ledger writes) for the rest of the process lifetime.
  */
 export async function closePool(): Promise<void> {
+	if (poolLifecycleMode === "long-running") {
+		console.warn(
+			`[PG] closePool() refused in long-running mode\n${new Error().stack}`,
+		);
+		return;
+	}
 	if (pool) {
 		await pool.end();
 		pool = null;

@@ -230,9 +230,8 @@ PG_SCHEMA=roadmap
 	s.start("Installing systemd service...");
 	const serviceContent = `[Unit]
 Description=AgentHive Orchestrator (event-driven agent dispatcher)
-After=network.target postgresql.service agenthive-mcp.service agenthive-gate-pipeline.service
+After=network.target postgresql.service agenthive-mcp.service
 Requires=agenthive-mcp.service
-Wants=agenthive-gate-pipeline.service
 
 [Service]
 Type=simple
@@ -372,6 +371,65 @@ async function cmdLogs() {
 }
 
 /* ------------------------------------------------------------------ */
+/*  db ping command                                                   */
+/* ------------------------------------------------------------------ */
+
+async function cmdDbPing(target: string) {
+	const targets = target === "all" ? ["postgres", "pgbouncer"] : [target];
+
+	for (const t of targets) {
+		if (t === "pgbouncer") {
+			const host = process.env.PGBOUNCER_HOST ?? "127.0.0.1";
+			const port = Number(process.env.PGBOUNCER_PORT ?? process.env.PGPORT ?? 6432);
+			const user = process.env.PGBOUNCER_ADMIN_USER ?? process.env.PGUSER ?? "agenthive";
+			clack.log.info(`Pinging PgBouncer at ${host}:${port} (user: ${user})…`);
+			const start = Date.now();
+			try {
+				// Auth via ~/.pgpass — never PGPASSWORD
+				const out = run([
+					"psql",
+					`-h`, host,
+					`-p`, String(port),
+					`-U`, user,
+					`pgbouncer`,
+					`-c`, `SHOW VERSION`,
+					`-t`, `-A`,
+				]);
+				const ms = Date.now() - start;
+				clack.log.success(`PgBouncer OK — ${out.trim()} (${ms}ms)`);
+			} catch (e: any) {
+				clack.log.error(`PgBouncer UNREACHABLE at ${host}:${port} — ${e.message}`);
+				process.exitCode = 1;
+			}
+		} else if (t === "postgres") {
+			const host = process.env.PGHOST ?? "127.0.0.1";
+			const port = Number(process.env.PGPORT_DIRECT ?? process.env.PGPORT ?? 5432);
+			const user = process.env.PGUSER ?? "agenthive";
+			clack.log.info(`Pinging PostgreSQL at ${host}:${port} (user: ${user})…`);
+			const start = Date.now();
+			try {
+				run([
+					"psql",
+					`-h`, host,
+					`-p`, String(port),
+					`-U`, user,
+					`-c`, `SELECT 1`,
+					`-t`, `-A`,
+				]);
+				const ms = Date.now() - start;
+				clack.log.success(`PostgreSQL OK (${ms}ms)`);
+			} catch (e: any) {
+				clack.log.error(`PostgreSQL UNREACHABLE at ${host}:${port} — ${e.message}`);
+				process.exitCode = 1;
+			}
+		} else {
+			clack.log.error(`Unknown target '${t}'. Use: postgres | pgbouncer | all`);
+			process.exitCode = 1;
+		}
+	}
+}
+
+/* ------------------------------------------------------------------ */
 /*  CLI wiring                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -408,5 +466,11 @@ program
 	.command("logs")
 	.description("Tail orchestrator logs")
 	.action(cmdLogs);
+
+program
+	.command("db-ping")
+	.description("Ping a database endpoint: postgres | pgbouncer | all")
+	.argument("[target]", "postgres | pgbouncer | all", "all")
+	.action(cmdDbPing);
 
 program.parse();

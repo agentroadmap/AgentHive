@@ -252,6 +252,10 @@ const documentRoutes: RouteMap = {
 	note_delete: "delete_note",
 };
 
+const schemaRoutes: RouteMap = {
+	describe: "schema_describe",
+};
+
 const opsRoutes: RouteMap = {
 	spending_set_cap: "spending_set_cap",
 	spending_log: "spending_log",
@@ -294,8 +298,17 @@ const opsRoutes: RouteMap = {
 	ref_get_term: "ref_get_term",
 	// P498: Config audit tool
 	config_audit: "config_audit",
-	// P499: PgBouncer pool monitoring
+	// P895: Backup harness
+	backup_take: "backup_take",
+	backup_verify: "backup_verify",
+	backup_list: "backup_list",
+	// P1004: Agent cost & quota self-reporting
+	report_usage: "ops_report_usage",
+	ops_report_usage: "ops_report_usage",
+	// P499: PgBouncer operator tools
 	pgbouncer_stats: "pgbouncer_stats",
+	pgbouncer_ping: "pgbouncer_ping",
+	pgbouncer_reload: "pgbouncer_reload",
 };
 
 const projectRoutes: RouteMap = {
@@ -323,7 +336,14 @@ export function registerConsolidatedTools(server: McpServer): void {
 		createRouterTool(
 			server,
 			"mcp_proposal",
-			"Consolidated proposal interface. Use actions for CRUD, projection detail, maturity, leases, criteria, dependencies, reviews, discussion, and worktree merge.",
+			"Consolidated proposal interface. Use actions for CRUD, projection detail, maturity, leases, criteria, dependencies, reviews, discussion, and worktree merge. " +
+				"PARAM-NAME GOTCHAS (read once, save retries): " +
+				"`get`/`detail`/`add_acceptance_criteria`/`add_discussion`/`claim`/`release`/`verify_ac`/`list_ac` use `proposal_id` (string). " +
+				"`update`/`set_maturity`/`transition`/`delete` use `id` (string) — passing `proposal_id` returns 'Proposal undefined not found'. " +
+				"`add_dependency`/`remove_dependency` use camelCase `fromProposalId`/`toProposalId`/`dependencyType` (string ids, not int). " +
+				"VERIFY_AC: each AC needs its own call (1-indexed item_number); ACs stay 'pending' until you explicitly call verify_ac with status='pass' — NOT inferred from tests passing or maturity advance. status enum is {pass, fail, blocked, waived}, NOT 'verified'. " +
+				"ADD_ACCEPTANCE_CRITERIA: pass `criteria: string[]` (array of full sentences), NOT individual title/description fields nor `acceptance_criteria` key. " +
+				"Use action=list_actions to enumerate every action name.",
 			proposalRoutes,
 		),
 	);
@@ -357,6 +377,14 @@ export function registerConsolidatedTools(server: McpServer): void {
 			"mcp_document",
 			"Consolidated document and note interface for versioned documents, search, versions, and notes.",
 			documentRoutes,
+		),
+	);
+	server.addTool(
+		createRouterTool(
+			server,
+			"mcp_schema",
+			"Schema introspection. Use this BEFORE writing migration SQL so you don't fabricate column / constraint / trigger names. action='describe' takes {table} (qualified or bare) and returns columns + CHECK constraints + triggers + indexes.",
+			schemaRoutes,
 		),
 	);
 	server.addTool(

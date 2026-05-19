@@ -7,6 +7,7 @@
  * P149: Added channel subscriptions, pg_notify push notifications, and wait_ms blocking reads.
  */
 
+import crypto from "crypto";
 import { query, getPool } from "../../../../postgres/pool.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
@@ -15,6 +16,9 @@ import {
 	checkMessageACL,
 } from "../../../../infra/messaging/a2a-access-control.ts";
 import type { A2ANotification } from "../../../../infra/messaging/a2a-types.ts";
+import { verifySignature } from "../../../../infra/security/agent-crypto.ts";
+import { getAgentSecret } from "../../../../infra/security/agent-secret-store.ts";
+import { verifyUserBearer } from "../../../../infra/messaging/bearer-auth.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
@@ -124,6 +128,7 @@ export class PgMessagingHandlers {
 	constructor(
 		private readonly core: McpServer,
 		private readonly projectRoot: string,
+		private readonly operatorHmacSecret?: Buffer,
 	) {}
 
 	// -------------------------------------------------------------------------
@@ -255,8 +260,33 @@ export class PgMessagingHandlers {
 		message_content: string;
 		message_type?: string;
 		proposal_id?: string;
+		correlation_id?: string;
+		provider_sig?: string;
+		provider_sig_salt?: string;
+		created_at?: string;
+		authorization?: string;
+		metadata?: Record<string, unknown>;
 	}): Promise<CallToolResult> {
 		try {
+			// P1105 AC-27: Verify user/* agents have valid bearer token
+			if (this.operatorHmacSecret) {
+				const bearerCheck = verifyUserBearer(
+					args.authorization,
+					args.from_agent,
+					this.operatorHmacSecret,
+				);
+				if (!bearerCheck.valid) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `⛔ Authentication failed (P1105 AC-27): ${bearerCheck.reason}`,
+							},
+						],
+					};
+				}
+			}
+
 			// AC#2: Enforce ACL before inserting. DMs require an explicit grant;
 			// channel posts require a channel_post grant.
 			const grantType = args.to_agent ? "dm" : "channel_post";
@@ -276,10 +306,59 @@ export class PgMessagingHandlers {
 				};
 			}
 
+			// P991 Phase 4a: verify-and-log HMAC signature (no rejection on failure).
+			// When provider_sig + created_at are supplied, look up sender secret,
+			// check the 5-minute replay window, compute SHA-256 of payload, and
+			// verify the constant-time HMAC. Result stored in sig_verified column.
+			let sigVerified = "pending";
+			let saltBuf: Buffer | null = null;
+			if (args.provider_sig && args.created_at) {
+				const createdAtMs = new Date(args.created_at).getTime();
+				const ageSeconds = (Date.now() - createdAtMs) / 1000;
+				if (ageSeconds > 300) {
+					// Outside 5-minute replay window — flag without rejecting (Phase 4a)
+					sigVerified = "failed";
+				} else {
+					const pool = getPool();
+					const secret = await getAgentSecret(pool, args.from_agent);
+					if (secret) {
+						const payloadHash = crypto
+							.createHash("sha256")
+							.update(args.message_content, "utf-8")
+							.digest();
+						try {
+							saltBuf = args.provider_sig_salt
+								? Buffer.from(args.provider_sig_salt, "hex")
+								: null;
+						} catch {
+							saltBuf = null;
+						}
+						const valid = verifySignature(
+							secret,
+							args.from_agent,
+							args.to_agent ?? "",
+							args.message_type ?? "text",
+							Math.floor(createdAtMs / 1000),
+							payloadHash,
+							args.provider_sig,
+							saltBuf ?? undefined,
+						);
+						sigVerified = valid ? "verified" : "failed";
+					}
+					// No secret enrolled → leave sig_verified as "pending"
+				}
+			}
+
+			const metadataJson =
+				args.metadata && Object.keys(args.metadata).length > 0
+					? JSON.stringify(args.metadata)
+					: null;
+
 			const { rows } = await query(
 				`INSERT INTO roadmap.message_ledger
-                    (from_agent, to_agent, channel, message_content, message_type, proposal_id)
-                 VALUES ($1, $2, $3, $4, $5, $6)
+                    (from_agent, to_agent, channel, message_content, message_type, proposal_id, correlation_id,
+                     provider_sig, provider_sig_salt, sig_verified, metadata)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11::jsonb, '{}'::jsonb))
                  RETURNING id, nonce, created_at`,
 				[
 					args.from_agent,
@@ -288,17 +367,31 @@ export class PgMessagingHandlers {
 					args.message_content,
 					args.message_type || "text",
 					args.proposal_id || null,
+					args.correlation_id || crypto.randomUUID(),
+					args.provider_sig || null,
+					saltBuf,
+					sigVerified,
+					metadataJson,
 				],
 			);
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Message sent (id: ${rows[0].id}, nonce: ${rows[0].nonce}) at ${rows[0].created_at}`,
+						text: `Message sent (id: ${rows[0].id}, nonce: ${rows[0].nonce}, sig_verified: ${sigVerified}) at ${rows[0].created_at}`,
 					},
 				],
 			};
 		} catch (err) {
+			// P990: unique_violation on nonce → structured replay-attack signal
+			if (err && typeof err === "object" && (err as { code?: string }).code === "23505") {
+				return {
+					content: [{
+						type: "text",
+						text: JSON.stringify({ error: "nonce_conflict", message: "Duplicate nonce — possible replay attack" }),
+					}],
+				};
+			}
 			return errorResult("Failed to send message", err);
 		}
 	}
@@ -456,6 +549,61 @@ export class PgMessagingHandlers {
 				`[${r.id}] ${r.from_agent} → ${r.to_agent || r.channel || "broadcast"} (${r.message_type}): ${r.message_content}`,
 		);
 		return { content: [{ type: "text", text: lines.join("\n") }] };
+	}
+
+	/**
+	 * P995: Tail recent messages to/from a named agent. Returns all (not unread-only),
+	 * newest first, formatted for quick reading.
+	 */
+	async tailMessages(args: {
+		agent: string;
+		limit?: number;
+	}): Promise<CallToolResult> {
+		try {
+			const limit = Math.min(Math.max(args.limit ?? 20, 1), 200);
+
+			const { rows } = await query(
+				`SELECT id, from_agent, to_agent, channel, message_content, message_type,
+				        created_at, read_at, acked_at, ack_outcome
+				 FROM   roadmap.message_ledger
+				 WHERE  to_agent = $1 OR from_agent = $1
+				 ORDER  BY created_at DESC
+				 LIMIT  $2`,
+				[args.agent, limit],
+			);
+
+			if (!rows || rows.length === 0) {
+				return {
+					content: [{ type: "text", text: `No messages for agent '${args.agent}'.` }],
+				};
+			}
+
+			const lines = rows.map((r: any) => {
+				const dir = r.from_agent === args.agent ? "→" : "←";
+				const peer =
+					r.from_agent === args.agent
+						? (r.to_agent || r.channel || "broadcast")
+						: r.from_agent;
+				const status =
+					r.acked_at
+						? `acked:${r.ack_outcome}`
+						: r.read_at
+						? "read"
+						: "unread";
+				return `[${r.id}] ${r.created_at.toISOString()} ${dir} ${peer} (${r.message_type}, ${status}): ${r.message_content}`;
+			});
+
+			return {
+				content: [
+					{
+						type: "text",
+						text: `## Messages for ${args.agent} (${rows.length} of max ${limit})\n\n${lines.join("\n")}`,
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to tail messages", err);
+		}
 	}
 
 	async listChannels(args: {

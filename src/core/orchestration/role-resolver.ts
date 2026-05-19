@@ -9,8 +9,8 @@
  *   1. DB: roadmap.agent_role_profile — project rows shadow global rows for
  *      the same role name.
  *   2. BUILTIN_FALLBACK — legacy STAGE_DISPATCH_ROLES literal map (same
- *      semantics as pipeline-cron.ts). Used when the DB is empty or
- *      unreachable.
+ *      semantics as the historical gate-pipeline role registry, retired by
+ *      P754). Used when the DB is empty or unreachable.
  *
  * Phase 1 (P748): shadow-mode. Callers that still use STAGE_DISPATCH_ROLES
  * literals may call shadowCheck() to log divergence. Phase 2 deletes the
@@ -34,6 +34,7 @@ export interface QueueKey {
 }
 
 export interface RoleProfile {
+	id: number | null;
 	role: string;
 	requiredCapabilities: string[];
 	allowedRouteProviders: string[] | null;
@@ -44,7 +45,7 @@ export interface RoleProfile {
 }
 
 // ─── Legacy fallback ─────────────────────────────────────────────────────────
-// Mirrors STAGE_DISPATCH_ROLES in pipeline-cron.ts.
+// Mirrors the historical STAGE_DISPATCH_ROLES (retired with gate-pipeline in P754).
 // prep → new/active maturity (build agents); gate → mature maturity (reviewers).
 
 const STAGE_DISPATCH_ROLES: Record<
@@ -74,6 +75,7 @@ function builtinFallback(stage: string, maturity: string): RoleProfile[] {
 	if (!set) return [];
 	const roles = maturity === "mature" ? set.gate : set.prep;
 	return roles.map((role, idx) => ({
+		id: null,
 		role,
 		requiredCapabilities: [],
 		allowedRouteProviders: null,
@@ -87,7 +89,8 @@ function builtinFallback(stage: string, maturity: string): RoleProfile[] {
 // ─── DB resolver ─────────────────────────────────────────────────────────────
 
 const SQL_ROLES = `
-SELECT role,
+SELECT id,
+       role,
        required_capabilities,
        allowed_route_providers,
        forbidden_route_providers,
@@ -95,6 +98,7 @@ SELECT role,
        priority
 FROM (
     SELECT DISTINCT ON (role)
+           id,
            role,
            required_capabilities,
            allowed_route_providers,
@@ -144,6 +148,7 @@ export async function getRolesForQueue(
 
 		if (rows.length > 0) {
 			return rows.map((r) => ({
+				id: r.id == null ? null : Number(r.id),
 				role: String(r.role),
 				requiredCapabilities: (r.required_capabilities as string[]) ?? [],
 				allowedRouteProviders:
@@ -163,6 +168,31 @@ export async function getRolesForQueue(
 	}
 
 	return builtinFallback(stage, maturity);
+}
+
+/**
+ * AC-3: Alias for getRolesForQueue with alternate parameter naming.
+ *
+ * Resolves agent role profiles using individual parameters instead of a key object.
+ * Provides the named signature required by AC-3.
+ *
+ * @param workflowTemplateId - Workflow template ID
+ * @param stage - Current stage name
+ * @param maturity - Current maturity level
+ * @param projectId - Optional project ID for tenant-scoped overrides
+ * @param queryFn - Injectable query function; defaults to the shared pool
+ */
+export async function getRolesFor(
+	workflowTemplateId: number,
+	stage: string,
+	maturity: string,
+	projectId?: number | null,
+	queryFn: QueryFn = defaultQuery,
+): Promise<RoleProfile[]> {
+	return getRolesForQueue(
+		{ workflowTemplateId, stage, maturity, projectId },
+		queryFn,
+	);
 }
 
 /**

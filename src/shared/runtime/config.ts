@@ -118,6 +118,29 @@ export interface ConfigAuditSnapshot {
 	tenantDsn: TenantDsnAuditEntry[];
 }
 
+export const DEFAULT_ENV_FILE_PATH = "/etc/agenthive/env";
+
+export async function loadRuntimeEnvFile(
+	filePath = DEFAULT_ENV_FILE_PATH,
+): Promise<void> {
+	try {
+		const { readFileSync } = await import("node:fs");
+		const content = readFileSync(filePath, "utf-8");
+		for (const line of content.split("\n")) {
+			const trimmed = line.trim();
+			if (!trimmed || trimmed.startsWith("#")) continue;
+			const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(trimmed);
+			if (!match) continue;
+			const [, key, value] = match;
+			if (!process.env[key]) {
+				process.env[key] = value;
+			}
+		}
+	} catch {
+		// File not found or not readable — continue without it
+	}
+}
+
 /**
  * Internal cache for resolved config values.
  */
@@ -134,7 +157,7 @@ class ConfigResolver {
 	private yamlConfig: Record<string, any> | null = null;
 	private pool: Pool | null = null;
 	private dbCache: Map<string, any> = new Map();
-	private notifySubscription: Client | null = null;
+	private notifySubscription: { end(): Promise<void> } | null = null;
 
 	// Parse ~/.pgpass for a matching password entry (hostname:port:database:username:password)
 	static parsePgpassFile(
@@ -176,7 +199,7 @@ class ConfigResolver {
 	}): string | undefined {
 		if (process.env.PGPASSWORD) return process.env.PGPASSWORD;
 		const pgpassPath = opts.pgpassPath ??
-			(process.env.PGPASSFILE || ((process.env.HOME || "") + "/.pgpass"));
+			(process.env.PGPASSFILE || `${process.env.HOME || ""}/.pgpass`);
 		return ConfigResolver.parsePgpassFile(pgpassPath, opts.host, opts.port, opts.database, opts.user);
 	}
 
@@ -192,7 +215,7 @@ class ConfigResolver {
 		this.pool = opts.pool || null;
 
 		if (opts.envFilePath) {
-			await this.loadEnvFile(opts.envFilePath);
+			await loadRuntimeEnvFile(opts.envFilePath);
 		}
 
 		if (this.pool) {
@@ -201,50 +224,45 @@ class ConfigResolver {
 	}
 
 	/**
-	 * Load environment variables from a file (e.g., /etc/agenthive/env).
-	 */
-	private async loadEnvFile(filePath: string): Promise<void> {
-		try {
-			const { readFileSync } = await import("node:fs");
-			const content = readFileSync(filePath, "utf-8");
-			for (const line of content.split("\n")) {
-				const trimmed = line.trim();
-				if (!trimmed || trimmed.startsWith("#")) continue;
-				const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(trimmed);
-				if (match) {
-					const [, key, value] = match;
-					if (!process.env[key]) {
-						process.env[key] = value;
-					}
-				}
-			}
-		} catch {
-			// File not found or not readable — continue without it
-		}
-	}
-
-	/**
 	 * Set up a NOTIFY listener for config change events.
+	 * P499: Uses a direct pg.Client (not PgBouncer pool) — transaction-mode
+	 * pooling drops LISTEN state between transactions. PGPORT_DIRECT bypasses
+	 * the bouncer and connects straight to Postgres on :5432.
 	 */
 	private async setupNotifyListener(): Promise<void> {
-		if (!this.pool) return;
 		try {
-			// Must use a direct pg.Client (NOT a pool checkout) — LISTEN is
-			// incompatible with PgBouncer transaction-mode pooling (P499).
 			const host = process.env.PGHOST ?? "127.0.0.1";
-			const port = Number(process.env.PGPORT_DIRECT ?? process.env.PGPORT ?? 5432);
-			const user = process.env.PGUSER;
+			const port = Number(
+				process.env.PGPORT_DIRECT ?? process.env.PGPORT ?? 5432,
+			);
+			const user = process.env.PGUSER ?? "xiaomi";
 			const database = process.env.PGDATABASE ?? "agenthive";
-			const client = new Client({ host, port, user, database, keepAlive: true });
+			const password = ConfigResolver.resolvePasswordSync({
+				host,
+				port: String(port),
+				database,
+				user,
+			});
+			const client = new Client({
+				host,
+				port,
+				user,
+				database,
+				password,
+				keepAlive: true,
+			});
 			await client.connect();
 			await client.query("LISTEN runtime_config_changed");
-			client.on("notification", async () => {
+			client.on("notification", () => {
 				this.cache.clear();
 				this.dbCache.clear();
 			});
+			client.on("error", () => {
+				this.notifySubscription = null;
+			});
 			this.notifySubscription = client;
 		} catch {
-			// Non-fatal; resolver works without notifications
+			// Non-fatal; resolver works without live config notifications
 		}
 	}
 
@@ -521,11 +539,11 @@ class ConfigResolver {
 	async cleanup(): Promise<void> {
 		if (this.notifySubscription) {
 			try {
-				await this.notifySubscription.query("UNLISTEN runtime_config_changed");
 				await this.notifySubscription.end();
-				this.notifySubscription = null;
 			} catch {
 				// Already closed
+			} finally {
+				this.notifySubscription = null;
 			}
 		}
 	}

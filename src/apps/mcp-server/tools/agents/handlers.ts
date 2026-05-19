@@ -6,6 +6,7 @@
 import { spawnAgent as realSpawnAgent } from "../../../../core/orchestration/agent-spawner.ts";
 import type { AgentStatus } from "../../../../shared/types/index.ts";
 import { query } from "../../../../infra/postgres/pool.ts";
+import { agentContextStorage } from "../../../../shared/identity/agent-context.ts";
 import { McpError } from "../../errors/mcp-errors.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
@@ -453,8 +454,15 @@ export class AgentPoolHandlers {
 	}
 
 	/**
-	 * AC#2: Real agent spawn via agent-spawner.ts.
-	 * Validates model against model_routes, resolves worktree, and executes.
+	 * Real agent spawn via agent-spawner.ts.
+	 *
+	 * **P299-G escape-hatch contract:** This tool bypasses the offer/claim/lease
+	 * dispatch flow and forks a CLI subprocess directly. It is restricted to
+	 * operator-tier principals so that in-fleet agents cannot regress to direct
+	 * spawn. Normal dispatch must go through `work_offers` + the orchestrator's
+	 * claim loop + the agency liaison's `offer_dispatch` handler.
+	 *
+	 * For routine spawning, use the offer/claim/lease path (P744 / P299).
 	 */
 	async spawnAgent(args: {
 		template: string;
@@ -466,6 +474,16 @@ export class AgentPoolHandlers {
 		worktree?: string;
 		timeoutMs?: number;
 	}): Promise<CallToolResult> {
+		// P299-G: operator-only escape hatch.
+		const ctx = agentContextStorage.getStore();
+		const principal = ctx?.verified;
+		if (!principal || principal.principal_kind !== "operator") {
+			throw new McpError(
+				"[P299-G] agent_spawn is restricted to operator principals — direct spawn is an emergency escape hatch. Post a row to work_offers (or transition a proposal to mature) so the orchestrator dispatches through the offer/claim/liaison path instead.",
+				"PERMISSION_DENIED",
+			);
+		}
+
 		try {
 			// 1. Validate model exists in model_routes for the requested route provider
 			const { rows: routeRows } = await query<{
@@ -706,6 +724,43 @@ export class AgentPoolHandlers {
 					return `  ${emoji} ${provider}: ${count}`;
 				});
 
+			// P1004 AC6: cache efficiency from agent_usage_snapshot (last 24 h)
+			type CacheRow = {
+				total_cache_creation: string;
+				total_cache_read: string;
+				total_tokens_in: string;
+				snapshot_count: string;
+			};
+			let cacheLines: string[] = [];
+			try {
+				const { rows } = await query<CacheRow>(
+					`SELECT
+					   COALESCE(SUM(cache_creation_tokens), 0)::text AS total_cache_creation,
+					   COALESCE(SUM(cache_read_tokens),     0)::text AS total_cache_read,
+					   COALESCE(SUM(COALESCE(tokens_in,0) + cache_creation_tokens + cache_read_tokens), 0)::text AS total_tokens_in,
+					   COUNT(*)::text AS snapshot_count
+					 FROM roadmap_workforce.agent_usage_snapshot
+					 WHERE recorded_at > now() - interval '24 hours'`,
+				);
+				if (rows.length > 0) {
+					const r = rows[0];
+					const creation = Number(r.total_cache_creation);
+					const read = Number(r.total_cache_read);
+					const total = Number(r.total_tokens_in);
+					const hitRatio = total > 0 ? ((read / total) * 100).toFixed(1) : "0.0";
+					cacheLines = [
+						"",
+						"Cache Efficiency (24 h):",
+						`  Snapshots: ${r.snapshot_count}`,
+						`  Cache write tokens: ${creation.toLocaleString()}`,
+						`  Cache read tokens:  ${read.toLocaleString()}`,
+						`  Effective hit ratio: ${hitRatio}%`,
+					];
+				}
+			} catch {
+				// Table may not exist yet (pre-migration); silently omit section
+			}
+
 			return {
 				content: [
 					{
@@ -726,6 +781,7 @@ export class AgentPoolHandlers {
 							"",
 							"By Provider:",
 							...providerLines,
+							...cacheLines,
 						].join("\n"),
 					},
 				],

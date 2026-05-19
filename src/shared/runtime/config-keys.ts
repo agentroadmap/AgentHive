@@ -317,54 +317,6 @@ export const StructuralKeys = {
 		defaultValue: "file",
 	} satisfies ConfigKey<string>,
 
-	AGENTHIVE_TENANT_POOL_LRU_MAX: {
-		name: "AGENTHIVE_TENANT_POOL_LRU_MAX",
-		class: "structural" as const,
-		parse: (v: string) => {
-			const parsed = Number(v);
-			if (!Number.isFinite(parsed) || parsed <= 0) {
-				throw new Error(`Invalid LRU max: ${v}`);
-			}
-			return parsed;
-		},
-		required: false,
-		description: "LRU cap for tenant pool registry (P497)",
-		yamlPath: "pools.tenant_lru_max",
-		defaultValue: 16,
-	} satisfies ConfigKey<number>,
-
-	AGENTHIVE_TENANT_POOL_MAX: {
-		name: "AGENTHIVE_TENANT_POOL_MAX",
-		class: "structural" as const,
-		parse: (v: string) => {
-			const parsed = Number(v);
-			if (!Number.isFinite(parsed) || parsed <= 0) {
-				throw new Error(`Invalid pool max: ${v}`);
-			}
-			return parsed;
-		},
-		required: false,
-		description: "Per-pool size for tenant pools (P497)",
-		yamlPath: "pools.tenant_max",
-		defaultValue: 8,
-	} satisfies ConfigKey<number>,
-
-	AGENTHIVE_DRAIN_TIMEOUT_MS: {
-		name: "AGENTHIVE_DRAIN_TIMEOUT_MS",
-		class: "structural" as const,
-		parse: (v: string) => {
-			const parsed = Number(v);
-			if (!Number.isFinite(parsed) || parsed <= 0) {
-				throw new Error(`Invalid drain timeout: ${v}`);
-			}
-			return parsed;
-		},
-		required: false,
-		description: "Pool drain grace period in ms (P497)",
-		yamlPath: "pools.drain_timeout_ms",
-		defaultValue: 30000,
-	} satisfies ConfigKey<number>,
-
 	AGENTHIVE_PG_PORT: {
 		name: "AGENTHIVE_PG_PORT",
 		class: "structural" as const,
@@ -781,6 +733,79 @@ export const FlagKeys = {
 		dbColumn: "value_jsonb",
 		envOverride: false,
 	} satisfies ConfigKey<boolean>,
+
+	// ─── P1132 A2A host service tunables ────────────────────────────────────
+	// Seeded by scripts/migrations/167-p1132-a2a-host-flag-seeds.sql.
+	// Operator changes via SQL UPDATE core.runtime_flag SET value_jsonb=...
+	// Live-reload via runtime_config_changed NOTIFY (no restart).
+
+	A2A_HOST_LISTEN_REFRESH_MS: {
+		name: "A2A_HOST_LISTEN_REFRESH_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const parsed = Number(JSON.parse(v));
+			if (!Number.isFinite(parsed) || parsed <= 0) {
+				throw new Error(`Invalid A2A_HOST_LISTEN_REFRESH_MS: ${v}`);
+			}
+			return parsed;
+		},
+		required: true,
+		description: "How often A2A re-reads agent_registry for newly-registered local agencies (ms)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	A2A_HOST_PG_RECONNECT_MS: {
+		name: "A2A_HOST_PG_RECONNECT_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const parsed = Number(JSON.parse(v));
+			if (!Number.isFinite(parsed) || parsed <= 0) {
+				throw new Error(`Invalid A2A_HOST_PG_RECONNECT_MS: ${v}`);
+			}
+			return parsed;
+		},
+		required: true,
+		description: "Backoff on PG connection loss before exit(1) (ms)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	A2A_HOST_SHUTDOWN_TIMEOUT_MS: {
+		name: "A2A_HOST_SHUTDOWN_TIMEOUT_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const parsed = Number(JSON.parse(v));
+			if (!Number.isFinite(parsed) || parsed <= 0) {
+				throw new Error(`Invalid A2A_HOST_SHUTDOWN_TIMEOUT_MS: ${v}`);
+			}
+			return parsed;
+		},
+		required: true,
+		description: "Bounded wait for fn_pulse(offline) calls during SIGTERM (ms)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	A2A_HOST_PRESENCE_REFRESH_MS: {
+		name: "A2A_HOST_PRESENCE_REFRESH_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const parsed = Number(JSON.parse(v));
+			if (!Number.isFinite(parsed) || parsed <= 0) {
+				throw new Error(`Invalid A2A_HOST_PRESENCE_REFRESH_MS: ${v}`);
+			}
+			return parsed;
+		},
+		required: true,
+		description: "How often A2A calls fn_pulse('online') per child to keep last_heartbeat_at fresh for existing dispatchability/maintenance consumers (ms)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
 };
 
 /**

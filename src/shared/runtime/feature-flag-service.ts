@@ -135,8 +135,10 @@ export class FeatureFlagService {
   }
 
   /**
-   * Subscribe to NOTIFY events on feature_flag_changed channel
-   * Invalidates cache on any flag change for instant propagation
+   * Subscribe to NOTIFY events on feature_flag_changed channel.
+   * P499: Uses a direct pg.Client (not PgBouncer pool) — transaction-mode
+   * pooling drops LISTEN state between transactions. PGPORT_DIRECT bypasses
+   * the bouncer and connects straight to Postgres on :5432.
    */
   async subscribeToChanges(
     callback?: (flagName: string) => void
@@ -145,13 +147,22 @@ export class FeatureFlagService {
       return; // Already listening
     }
 
-    // Must use a direct pg.Client (NOT a pool checkout) — LISTEN is
-    // incompatible with PgBouncer transaction-mode pooling (P499).
     const host = process.env.PGHOST ?? "127.0.0.1";
-    const port = Number(process.env.PGPORT_DIRECT ?? process.env.PGPORT ?? 5432);
-    const user = process.env.PGUSER;
+    const port = Number(
+      process.env.PGPORT_DIRECT ?? process.env.PGPORT ?? 5432
+    );
+    const user = process.env.PGUSER ?? "xiaomi";
     const database = process.env.PGDATABASE ?? "agenthive";
-    const client = new Client({ host, port, user, database, keepAlive: true });
+
+    // Auth via ~/.pgpass — never PGPASSWORD
+    const client = new Client({
+      host,
+      port,
+      user,
+      database,
+      keepAlive: true,
+    });
+
     await client.connect();
     this.listeningChannels.add("feature_flag_changed");
 
@@ -170,6 +181,10 @@ export class FeatureFlagService {
           `Error handling feature_flag_changed notification: ${err}`
         );
       }
+    });
+
+    client.on("error", () => {
+      this.listeningChannels.delete("feature_flag_changed");
     });
 
     await client.query("LISTEN feature_flag_changed");

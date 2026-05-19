@@ -1,143 +1,98 @@
 /**
- * Liaison Boot Process — Agency Liaison and Two-Way Orchestrator Protocol (P463)
+ * Liaison Runtime Entrypoint — P299-E / P902 A8.
  *
- * This is the minimal always-on representative process for an agency. It:
- *   1. Reads AGENCY_ID and AGENCY_SIGNING_KEY from env (AC-1)
- *   2. Registers the agency with the orchestrator via liaisonRegister
- *   3. Sends heartbeats every 30s so v_agency_status keeps dispatchable=true
- *   4. Runs a dormancy-sweep watchdog every 60s (AC-5)
- *   5. Shuts down cleanly on SIGTERM/SIGINT, ending the session
+ * Boots a per-agency liaison process: registers the agency, starts the
+ * hub message loop (offer_dispatch handler, uplink relay), and maintains
+ * the 30-second heartbeat. Each active agency runs exactly one instance
+ * of this script via agenthive-liaison@<agency-id>.service.
  *
- * Required env vars:
- *   AGENCY_ID            — stable identifier for this agency (e.g. "claude/agency-prod")
- *   AGENCY_SIGNING_KEY   — opaque secret used to authenticate future signed requests
+ * Required env vars (set via /etc/agenthive/liaison-<instance>.env):
+ *   AGENCY_ID          — agency identity (e.g. "claude-agency-bot")
+ *   AGENCY_PROVIDER    — provider name   (e.g. "anthropic")
+ *   AGENCY_HOST_ID     — host policy key (e.g. "bot")
  *
- * Optional env vars:
- *   AGENCY_DISPLAY_NAME  — human-readable name (defaults to AGENCY_ID)
- *   AGENCY_PROVIDER      — provider tag (defaults to prefix of AGENCY_ID or "unknown")
- *   AGENCY_HOST_ID       — host identifier (defaults to hostname)
- *   AGENCY_HEARTBEAT_MS  — heartbeat interval in ms (default 30000)
- *   AGENCY_WATCHDOG_MS   — dormancy sweep interval in ms (default 60000)
- *
- * Usage:
- *   AGENCY_ID=claude/agency-prod \
- *   AGENCY_SIGNING_KEY=<secret> \
- *   node --import jiti/register scripts/start-liaison.ts
+ * Optional:
+ *   AGENCY_DISPLAY_NAME           — human-readable label (defaults to AGENCY_ID)
+ *   AGENCY_CAPABILITIES           — comma-separated capability tags
+ *   AGENCY_PUBLIC_KEY             — base64 PEM for request signing
+ *   LIAISON_HEARTBEAT_INTERVAL_MS — heartbeat interval ms (default 30000)
  */
 
-import { hostname } from "node:os";
-import { closePool } from "../src/infra/postgres/pool.ts";
+import { bootLiaison } from "../src/infra/agency/liaison-boot.ts";
 import {
-	liaisonRegister,
-	liaisonHeartbeat,
-	endLiaisonSession,
-	checkAndMarkDormant,
-} from "../src/infra/agency/liaison-service.ts";
-import {
-	recordCheckIn,
-	scanAndTransitionSilentAgencies,
-	emitOfflineAlerts,
-} from "../src/core/orchestration/resolvers/agency-resolver.ts";
+	runLiaisonAgent,
+	type LiaisonAgentHandle,
+} from "../src/infra/agency/liaison-agent.ts";
+import { closePool, setPoolLifecycleMode } from "../src/infra/postgres/pool.ts";
+import { startPoolWatchdog } from "../src/infra/postgres/pool-watchdog.ts";
 
-// --- AC-1: Read required env vars ---
-const agencyId = process.env.AGENCY_ID;
-const signingKey = process.env.AGENCY_SIGNING_KEY;
+// P1123: protect the shared pool from stray pool.end() in shared CLI code.
+setPoolLifecycleMode("long-running");
 
-if (!agencyId) {
-	console.error("[Liaison] AGENCY_ID environment variable is required");
-	process.exit(1);
-}
-if (!signingKey) {
-	console.error("[Liaison] AGENCY_SIGNING_KEY environment variable is required");
-	process.exit(1);
-}
+const agencyId = process.env.AGENCY_ID?.trim() ?? "(unknown)";
+const watchdog = startPoolWatchdog(`agenthive-liaison:${agencyId}`);
+// AGENCY_PROVIDER is the canonical var; AGENTHIVE_AGENT_PROVIDER is the legacy
+// per-instance env file var. Accept either so both service templates work.
+const agencyProvider =
+	(process.env.AGENCY_PROVIDER?.trim() || process.env.AGENTHIVE_AGENT_PROVIDER?.trim()) ?? "";
 
-const displayName = process.env.AGENCY_DISPLAY_NAME ?? agencyId;
-const provider =
-	process.env.AGENCY_PROVIDER ??
-	(agencyId.includes("/") ? agencyId.split("/")[0] : "unknown");
-const hostId = process.env.AGENCY_HOST_ID ?? hostname();
-const heartbeatMs = Number(process.env.AGENCY_HEARTBEAT_MS ?? "30000");
-const watchdogMs = Number(process.env.AGENCY_WATCHDOG_MS ?? "60000");
+let handle: Awaited<ReturnType<typeof bootLiaison>> | undefined;
+let agentHandle: LiaisonAgentHandle | undefined;
 
 async function main() {
-	console.log(`[Liaison] Booting agency=${agencyId} provider=${provider} host=${hostId}`);
+	console.log(`[liaison:${agencyId}] starting`);
 
-	// --- Register with orchestrator ---
-	let sessionId: string;
-	try {
-		const reg = await liaisonRegister({
-			agency_id: agencyId!,
-			display_name: displayName,
-			provider,
-			host_id: hostId,
-			capabilities: [provider, "liaison"],
-			metadata: { pid: process.pid, signing_key_hint: signingKey!.slice(0, 4) + "…" },
-		});
-		sessionId = reg.session_id;
-		console.log(`[Liaison] Registered session=${sessionId} status=${reg.status}`);
-	} catch (err) {
-		console.error("[Liaison] Registration failed:", err);
-		await closePool();
-		process.exit(1);
-	}
-
-	// --- AC-5: Heartbeat loop (every 30s) ---
-	const heartbeatTimer = setInterval(async () => {
-		try {
-			const hb = await liaisonHeartbeat({ session_id: sessionId, status: "active" });
-			if (!hb.dispatchable) {
-				console.warn(`[Liaison] Heartbeat OK but agency not dispatchable: status=${hb.agency_status} silence=${hb.silence_seconds}s`);
-			}
-			// Keep provider_registry in sync with liaison heartbeat (AC-1, P765)
-			await recordCheckIn(agencyId!);
-		} catch (err) {
-			console.error("[Liaison] Heartbeat error:", err);
-		}
-	}, heartbeatMs);
-
-	// --- AC-5: Dormancy-sweep watchdog (every 60s) ---
-	const watchdogTimer = setInterval(async () => {
-		try {
-			const dormantCount = await checkAndMarkDormant();
-			if (dormantCount > 0) {
-				console.log(`[Liaison] Dormancy sweep: ${dormantCount} agenc${dormantCount === 1 ? "y" : "ies"} marked dormant`);
-			}
-			// Transition silent provider_registry rows and alert on prolonged offline (P765)
-			await scanAndTransitionSilentAgencies();
-			const alerted = await emitOfflineAlerts();
-			if (alerted > 0) {
-				console.log(`[Liaison] Offline alert: ${alerted} agenc${alerted === 1 ? "y" : "ies"} notified`);
-			}
-		} catch (err) {
-			console.error("[Liaison] Dormancy sweep error:", err);
-		}
-	}, watchdogMs);
-
-	// --- Graceful shutdown ---
-	async function shutdown(sig: string) {
-		console.log(`[Liaison] ${sig} received — shutting down`);
-		clearInterval(heartbeatTimer);
-		clearInterval(watchdogTimer);
-		try {
-			await endLiaisonSession(sessionId, sig === "SIGTERM" ? "operator" : "normal");
-			console.log("[Liaison] Session ended cleanly");
-		} catch (err) {
-			console.error("[Liaison] endLiaisonSession error (non-fatal):", err);
-		}
-		await closePool();
-		process.exit(0);
-	}
-
-	process.on("SIGTERM", () => shutdown("SIGTERM"));
-	process.on("SIGINT", () => shutdown("SIGINT"));
+	handle = await bootLiaison();
 
 	console.log(
-		`[Liaison] Running: heartbeat every ${heartbeatMs / 1000}s, dormancy sweep every ${watchdogMs / 1000}s`,
+		`[liaison:${agencyId}] registered session=${handle.session.session_id}`,
 	);
+
+	// Start the message_ledger LISTEN loop — handles task_request, task_status,
+	// task_complete, task_error, offer_dispatch, and protocol_ping from msg_send.
+	// This is layered on top of the hub (which listens on liaison_message_*).
+	if (agencyProvider) {
+		try {
+			agentHandle = await runLiaisonAgent({
+				identity: agencyId,
+				provider: agencyProvider,
+				loggerPrefix: `[liaison-agent:${agencyId}]`,
+			});
+			console.log(`[liaison:${agencyId}] message_ledger LISTEN active`);
+		} catch (err) {
+			console.warn(`[liaison:${agencyId}] runLiaisonAgent failed (non-fatal):`, err);
+		}
+	} else {
+		console.warn(`[liaison:${agencyId}] AGENCY_PROVIDER not set — message_ledger LISTEN disabled`);
+	}
+
+	// Keep the process alive — hub and heartbeat timer drive the loop.
+	await new Promise<void>((resolve) => {
+		process.once("SIGTERM", () => {
+			console.log(`[liaison:${agencyId}] SIGTERM received — shutting down`);
+			resolve();
+		});
+		process.once("SIGINT", () => {
+			console.log(`[liaison:${agencyId}] SIGINT received — shutting down`);
+			resolve();
+		});
+	});
+
+	if (agentHandle) {
+		try {
+			await agentHandle.stop();
+		} catch (err) {
+			console.error(`[liaison:${agencyId}] agentHandle.stop error:`, err);
+		}
+	}
+	await handle.shutdown("normal");
+	await watchdog.stop();
+	setPoolLifecycleMode("one-shot");
+	await closePool();
+	console.log(`[liaison:${agencyId}] stopped`);
 }
 
 main().catch((err) => {
-	console.error("[Liaison] Fatal:", err);
+	console.error(`[liaison:${agencyId}] fatal:`, err);
 	process.exit(1);
 });

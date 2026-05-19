@@ -11,7 +11,7 @@ import {
 	ListToolsRequestSchema,
 	ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { PipelineCron } from "../../core/pipeline/pipeline-cron.ts";
+// P754: PipelineCron import removed — gate-pipeline service decommissioned.
 import { Core } from "../../core/roadmap.ts";
 import * as pgPool from "../../postgres/pool.ts";
 import { loadStateNames } from "../../core/workflow/state-names.ts";
@@ -76,9 +76,6 @@ const CONSOLIDATED_TOOL_NAMES = new Set([
 	"mcp_document",
 	"mcp_ops",
 ]);
-
-// Track whether gate pipeline (PipelineCron) has already been started to avoid duplicates
-let gatePipelineStarted = false;
 
 // P843: Auth enforcement mode flag (default log-only)
 const P843_AUTH_ENFORCE_MCP = process.env.P843_AUTH_ENFORCE_MCP === "true";
@@ -373,9 +370,16 @@ export class McpServer extends Core {
 
 		// P854: _auth envelope path sets verifiedPrincipal but has no transport context;
 		// wrap handler so getProjectDb() P844 gate sees the principal.
-		const result = verifiedPrincipal && !ctx
-			? await agentContextStorage.run({ verified: verifiedPrincipal }, () => tool.handler(args))
-			: await tool.handler(args);
+		// AC-5/AC-26: per-call error boundary — isolates handler failures from transport/SSE clients.
+		let result: CallToolResult;
+		try {
+			result = verifiedPrincipal && !ctx
+				? await agentContextStorage.run({ verified: verifiedPrincipal }, () => tool.handler(args))
+				: await tool.handler(args);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			return { isError: true, content: [{ type: "text", text: `Tool handler error: ${message}` }] };
+		}
 
 		// Log tool call to pulse
 		try {
@@ -1631,6 +1635,14 @@ export async function createMcpServer(
 		server.setConsolidatedToolSurface(true);
 	}
 
+	// P895: Backup harness tools
+	const { registerBackupTools } = await import("./tools/backup/index.ts");
+	registerBackupTools(server);
+
+	// P1109 Tier-1: schema introspection so build agents stop fabricating column names.
+	const { registerSchemaTools } = await import("./tools/schema/index.ts");
+	registerSchemaTools(server);
+
 	// P289: Workforce management tools (agency registration, provider registry, dispatches)
 	const workforce = await import("./tools/workforce/handlers.ts");
 	const workforceSchemas = await import("./tools/workforce/schemas.ts");
@@ -1663,13 +1675,13 @@ export async function createMcpServer(
 	// P297: State machine management tools
 	server.addTool({
 		name: "state_machine_start",
-		description: "Start orchestrator and gate-pipeline services",
+		description: "Start the orchestrator service",
 		inputSchema: { type: "object", properties: {}, additionalProperties: false },
 		handler: () => smHandlers.stateMachineStartHandler({}),
 	});
 	server.addTool({
 		name: "state_machine_stop",
-		description: "Stop orchestrator and gate-pipeline services",
+		description: "Stop the orchestrator service",
 		inputSchema: { type: "object", properties: {}, additionalProperties: false },
 		handler: () => smHandlers.stateMachineStopHandler({}),
 	});
@@ -2034,6 +2046,28 @@ export async function createMcpServer(
 	});
 
 	console.error("[MCP] Registered 9 P466/P468/P475 spawn-briefing tools (liaison protocol)");
+
+	// P499: PgBouncer operator tools
+	const { PgBouncerOpsHandler } = await import("./tools/ops/pgbouncer-ops.ts");
+	const pgbouncer = new PgBouncerOpsHandler();
+	server.addTool({
+		name: "pgbouncer_stats",
+		description: "Query PgBouncer admin console: SHOW POOLS + SHOW STATS. Returns pool sizes, wait times, and per-database query statistics.",
+		inputSchema: { type: "object", properties: {} },
+		handler: () => pgbouncer.pgbouncerStats().then((r) => ({ content: [{ type: "text", text: JSON.stringify(r, null, 2) }] })),
+	});
+	server.addTool({
+		name: "pgbouncer_ping",
+		description: "Ping the PgBouncer admin console. Returns { ok, latency_ms, host, port }.",
+		inputSchema: { type: "object", properties: {} },
+		handler: () => pgbouncer.pgbouncerPing().then((r) => ({ content: [{ type: "text", text: JSON.stringify(r) }] })),
+	});
+	server.addTool({
+		name: "pgbouncer_reload",
+		description: "Send RELOAD to PgBouncer — picks up userlist.txt and pgbouncer.ini changes without dropping existing connections.",
+		inputSchema: { type: "object", properties: {} },
+		handler: () => pgbouncer.pgbouncerReload().then((r) => ({ content: [{ type: "text", text: JSON.stringify(r) }] })),
+	});
 
 	// Start background maintenance tasks
 	const MAINTENANCE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes

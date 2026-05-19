@@ -1,12 +1,12 @@
 /**
  * Shared maintenance tasks for the unified orchestrator.
  *
- * Extracted from PipelineCron so the Orchestrator class can run the same
- * maintenance cycle independently. Both consumers import from here — no
- * logic duplication.
+ * Originally extracted from the legacy gate-pipeline (P754 retired) so the
+ * Orchestrator class could run the same maintenance cycle. Now the unified
+ * orchestrator is the only consumer.
  *
  * All functions accept a QueryFn to stay injectable (testable without a real
- * pool, and usable from both PipelineCron.queryFn and the pool.query default).
+ * pool).
  */
 
 import { query as poolQuery } from "../../infra/postgres/pool.ts";
@@ -93,10 +93,16 @@ export async function runPokeWatchdogTick(
 
 	// Emission pass
 	try {
+		// Poke watchdog: ask the liaison to prove it's alive. Skip agencies whose
+		// presence_state already says alive — A2A maintains it via fn_pulse, so
+		// 'online'/'busy' is canonical proof of liveness (no poke needed).
+		// Only poke when presence is NOT alive AND heartbeat is stale.
 		const { rows: staleAgencies } = await queryFn<{ agency_id: string }>(
 			`SELECT a.agency_id
 			 FROM roadmap.agency a
 			 WHERE a.status IN ('active', 'throttled')
+			   AND (a.presence_state IS NULL
+			        OR a.presence_state NOT IN ('online', 'busy'))
 			   AND a.last_heartbeat_at IS NOT NULL
 			   AND (now() - a.last_heartbeat_at) > ($1 || ' minutes')::interval
 			   AND NOT EXISTS (

@@ -7,10 +7,13 @@
  * - Poll fallback every 5s: SELECT id FROM message_ledger WHERE correlation_id = $cid AND acked_at IS NOT NULL
  * - On timeout_ms exceeded: INSERT into message_timeout_tracking (idempotent via UNIQUE on message_id)
  * - Returns { replied: boolean, reply_message_id?: number, timed_out: boolean }
+ *
+ * P1105 AC-27: user/* agents require bearer token verification
  */
 
 import { query, getPool } from "../../../../postgres/pool.ts";
 import type { CallToolResult } from "../../types.ts";
+import { verifyUserBearer } from "../../../../infra/messaging/bearer-auth.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
@@ -23,9 +26,18 @@ function errorResult(msg: string, err: unknown): CallToolResult {
 	};
 }
 
+const REPLY_QUERY = `
+	SELECT id FROM roadmap.message_ledger
+	WHERE correlation_id = $1
+	AND (to_agent = $2 OR channel IS NOT NULL)
+	AND acked_at IS NOT NULL
+	ORDER BY created_at DESC
+	LIMIT 1`;
+
 /**
  * Wait for a reply notification on a2a_msg_{agent} channel.
- * Filters notifications by correlation_id and returns the reply message_id when found.
+ * On each pg_notify, queries DB for matching replied correlation_id.
+ * Falls back to 5s interval polling if notify is missed.
  */
 async function waitForReplyViaNotify(
 	agent: string,
@@ -39,27 +51,48 @@ async function waitForReplyViaNotify(
 	try {
 		await client.query(`LISTEN "${pgChannel}"`);
 
+		// Immediate check — reply may have arrived before we started listening
+		const immediate = await client.query(REPLY_QUERY, [correlationId, agent]);
+		if (immediate.rows.length > 0) {
+			return { replied: true, replyMessageId: immediate.rows[0].id };
+		}
+
 		return await new Promise((resolve) => {
 			let resolved = false;
 
-			const timeout = setTimeout(() => {
+			const finish = (result: { replied: boolean; replyMessageId?: number }) => {
 				if (!resolved) {
 					resolved = true;
+					clearTimeout(timeoutHandle);
+					clearInterval(pollInterval);
 					client.removeListener("notification", handler);
-					resolve({ replied: false });
+					resolve(result);
 				}
-			}, timeoutMs);
+			};
 
-			const handler = (msg: any) => {
-				if (msg.channel === pgChannel && !resolved) {
-					try {
-						const payload = JSON.parse(msg.payload);
-						// Check if this notification matches our correlation_id
-						// (We'd need to fetch the message to check, so we'll do fallback polling instead)
-						// For now, trigger a fallback poll on any notification
-					} catch {
-						// ignore parse errors
+			const timeoutHandle = setTimeout(() => finish({ replied: false }), timeoutMs);
+
+			// Interval fallback every 5s in case pg_notify is dropped
+			const pollInterval = setInterval(async () => {
+				try {
+					const result = await client.query(REPLY_QUERY, [correlationId, agent]);
+					if (result.rows.length > 0) {
+						finish({ replied: true, replyMessageId: result.rows[0].id });
 					}
+				} catch {
+					// ignore — timeout will fire eventually
+				}
+			}, 5000);
+
+			const handler = async (msg: any) => {
+				if (msg.channel !== pgChannel || resolved) return;
+				try {
+					const result = await client.query(REPLY_QUERY, [correlationId, agent]);
+					if (result.rows.length > 0) {
+						finish({ replied: true, replyMessageId: result.rows[0].id });
+					}
+				} catch {
+					// ignore — interval will retry
 				}
 			};
 
@@ -75,48 +108,31 @@ async function waitForReplyViaNotify(
 	}
 }
 
-/**
- * Poll for a reply by checking if any message with this correlation_id and acked_at is set.
- */
-async function pollForReply(
-	correlationId: string,
-	agent: string,
-	timeoutMs: number,
-	pollIntervalMs: number = 5000,
-): Promise<{ replied: boolean; replyMessageId?: number }> {
-	const startTime = Date.now();
-
-	while (Date.now() - startTime < timeoutMs) {
-		const result = await query(
-			`SELECT id FROM roadmap.message_ledger
-			 WHERE correlation_id = $1
-			 AND (to_agent = $2 OR channel IS NOT NULL)
-			 AND acked_at IS NOT NULL
-			 ORDER BY created_at DESC
-			 LIMIT 1`,
-			[correlationId, agent],
-		);
-
-		if (result.rows.length > 0) {
-			return { replied: true, replyMessageId: result.rows[0].id };
-		}
-
-		// Wait before next poll
-		const remainingTime = timeoutMs - (Date.now() - startTime);
-		if (remainingTime > 0) {
-			await new Promise((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, remainingTime)));
-		}
-	}
-
-	return { replied: false };
-}
-
-export async function handleMsgWaitReply(args: {
-	message_id: number;
-	timeout_ms: number;
-	agent: string;
-}): Promise<CallToolResult> {
+export async function handleMsgWaitReply(
+	args: {
+		message_id: number;
+		timeout_ms: number;
+		agent: string;
+		authorization?: string;
+	},
+	operatorHmacSecret?: Buffer,
+): Promise<CallToolResult> {
 	try {
+		// P1105 AC-27: Verify user/* agents have valid bearer token
+		if (operatorHmacSecret) {
+			const bearerCheck = verifyUserBearer(
+				args.authorization,
+				args.agent,
+				operatorHmacSecret,
+			);
+			if (!bearerCheck.valid) {
+				return errorResult(
+					`Authentication failed (P1105 AC-27): ${bearerCheck.reason}`,
+					new Error(bearerCheck.reason),
+				);
+			}
+		}
+
 		// Look up correlation_id for the given message_id
 		const msgResult = await query(
 			`SELECT correlation_id, from_agent FROM roadmap.message_ledger WHERE id = $1`,
@@ -127,7 +143,7 @@ export async function handleMsgWaitReply(args: {
 			return errorResult(`Message ${args.message_id} not found`, new Error("NOT_FOUND"));
 		}
 
-		const { correlation_id, from_agent } = msgResult.rows[0];
+		const { correlation_id } = msgResult.rows[0];
 
 		if (!correlation_id) {
 			return errorResult(
@@ -138,8 +154,7 @@ export async function handleMsgWaitReply(args: {
 
 		const timeoutMs = Math.min(Math.max(args.timeout_ms, 0), 300000); // Cap at 5 minutes
 
-		// Poll for reply with 5s intervals
-		const pollResult = await pollForReply(correlation_id, args.agent, timeoutMs, 5000);
+		const pollResult = await waitForReplyViaNotify(correlation_id, args.agent, timeoutMs);
 
 		if (pollResult.replied && pollResult.replyMessageId) {
 			return {
@@ -152,8 +167,8 @@ export async function handleMsgWaitReply(args: {
 			};
 		}
 
-		// Timeout occurred — insert into message_timeout_tracking (idempotent via UNIQUE on message_id)
-		const timedOut = Date.now() - Date.now() >= timeoutMs;
+		// Timeout occurred — record in message_timeout_tracking (idempotent via UNIQUE on message_id)
+		const timedOut = !pollResult.replied;
 
 		if (timedOut) {
 			try {

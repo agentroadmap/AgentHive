@@ -1,24 +1,30 @@
 /**
  * P299-C: Orchestrator-side offer dispatch.
  *
- * Once `offer-claim-loop.ts` claims an offer with the orchestrator's identity,
+ * After `offer-claim-loop.ts` claims an offer with the orchestrator's identity,
  * this module:
  *   1. Picks the target agency (whose liaison will fork the CLI subprocess).
  *   2. Assembles the spawn briefing (P466).
- *   3. Sends an `offer_dispatch` message via the liaison message bus.
- *   4. Starts a per-offer lease-renewal timer (orchestrator-side, so a liaison
- *      crash does not orphan the lease — the orchestrator keeps renewing until
- *      a `claim_status` uplink lands or the TTL expires).
+ *   3. Sends an `offer_dispatch` message via the liaison message bus, with
+ *      the claim_token + dispatch_id + lease_ttl_seconds in the payload so
+ *      the liaison can renew and complete the offer mechanically.
  *
- * The corresponding `claim_status` uplink (sent by the agency liaison when its
- * subprocess exits) is consumed by `handleClaimStatusUplink()` below, which
- * cancels the renewal timer and calls `fn_complete_work_offer`.
+ * Design rule: **the orchestrator is a mechanical process and does not
+ * interpret AI-generated content**. After dispatch, the orchestrator is done
+ * with this offer. It does NOT subscribe to claim_status uplinks, does NOT
+ * process LLM-generated summaries, and does NOT keep an in-memory map of
+ * in-flight offers.
  *
- * No subprocess is forked here — that happens inside the agency liaison
- * (`src/infra/agency/offer-dispatch-handler.ts`).
+ * Lifecycle is driven entirely by mechanical SQL state:
+ *   - liaison renews lease   → fn_renew_lease (succeeds while spawn runs)
+ *   - liaison completes      → fn_complete_work_offer(claim_token, status)
+ *   - liaison crashes        → lease TTL expires; offer reaper requeues
+ *                              (existing maintenance.ts loop)
+ *
+ * The orchestrator's only feedback signal is DB state: agent_runs status,
+ * squad_dispatch.offer_status, lease_expires_at.
  */
 import { hostname } from "node:os";
-import { randomUUID } from "node:crypto";
 import { query } from "../../infra/postgres/pool.ts";
 import { resolveAgency } from "./resolvers/agency-resolver.ts";
 import { briefingAssemble } from "../../infra/agency/spawn-briefing-service.ts";
@@ -26,6 +32,7 @@ import { sendMessage } from "../../infra/agency/liaison-message-service.ts";
 import type { OfferDispatchPayload } from "../../infra/agency/liaison-message-types.ts";
 
 const ORCHESTRATOR_HOST = process.env.AGENTHIVE_HOST ?? hostname();
+void ORCHESTRATOR_HOST; // reserved for future host-aware agency filtering
 
 export interface ClaimedOffer {
 	/** Offer identifier (uses dispatch_id stringified — UUID-shaped via padding for the schema). */
@@ -43,22 +50,6 @@ export interface ClaimedOffer {
 
 export interface OfferDispatcher {
 	dispatch(claim: ClaimedOffer): Promise<void>;
-	handleClaimStatusUplink(payload: ClaimStatusUplink): Promise<void>;
-	stop(): void;
-}
-
-export interface ClaimStatusUplink {
-	offerId: string;
-	status: "delivered" | "failed" | "in_progress";
-	exitCode?: number | null;
-	summary?: string | null;
-}
-
-interface InFlightOffer {
-	claim: ClaimedOffer;
-	targetAgencyId: string;
-	briefingId: string;
-	renewalTimer: ReturnType<typeof setInterval>;
 }
 
 export interface OfferDispatcherOptions {
@@ -73,15 +64,12 @@ export interface OfferDispatcherOptions {
 }
 
 /**
- * Stateful dispatcher: holds in-memory state for renewal timers + agency
- * routing. One instance per orchestrator process. Crash-safe: if the
- * orchestrator dies, all in-flight leases time out at `claim_expires_at`
- * and the offer reaper requeues them.
+ * Stateless dispatcher. Each `dispatch()` call sends one message and returns.
+ * No in-memory tracking — the orchestrator is mechanical.
  */
 export class OrchestratorOfferDispatcher implements OfferDispatcher {
 	private readonly orchestratorIdentity: string;
 	private readonly logger: Pick<Console, "log" | "warn" | "error">;
-	private readonly inFlight = new Map<string, InFlightOffer>();
 	private readonly resolveAgencyFn: typeof resolveAgency;
 	private readonly briefingAssembleFn: typeof briefingAssemble;
 	private readonly sendMessageFn: typeof sendMessage;
@@ -113,9 +101,9 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 			route_hint: extractRouteHint(claim.metadata),
 		};
 
-		// Augment payload with briefing_id as an extra field. The Zod schema
-		// uses .strip() by default, so unknown fields are tolerated by the
-		// liaison side; receiver reads briefing_id from the raw message.
+		// Augment with mechanical fields the liaison needs to renew + complete
+		// the offer directly. The Zod schema strips unknown fields by default;
+		// the liaison reads these from the raw message.
 		const augmented: Record<string, unknown> = {
 			...payload,
 			briefing_id: briefingId,
@@ -123,6 +111,12 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 			dispatch_id: claim.dispatchId,
 			proposal_id: claim.proposalId,
 			squad_name: claim.squadName,
+			lease_ttl_seconds: claim.leaseTtlSeconds,
+			// P914: propagate worktree_hint from the offer's metadata
+			// (postWorkOffer stores selectedWorktree there). Without this
+			// the handler falls back to "main" which is not a real worktree
+			// dir and node spawn raises ENOENT before the CLI runs.
+			worktree_hint: extractWorktreeHint(claim.metadata),
 		};
 
 		await this.sendMessageFn({
@@ -135,91 +129,41 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 		this.logger.log(
 			`[OfferDispatch] offer=${claim.offerId} dispatched to agency=${targetAgencyId} (role=${claim.role}, briefing=${briefingId})`,
 		);
-
-		const renewalIntervalMs = Math.max(
-			5_000,
-			Math.floor((claim.leaseTtlSeconds * 1_000) / 3),
-		);
-		const renewalTimer = setInterval(() => {
-			void this.renewLease(claim);
-		}, renewalIntervalMs);
-
-		this.inFlight.set(claim.offerId, {
-			claim,
-			targetAgencyId,
-			briefingId,
-			renewalTimer,
-		});
-	}
-
-	async handleClaimStatusUplink(uplink: ClaimStatusUplink): Promise<void> {
-		const inflight = this.inFlight.get(uplink.offerId);
-		if (!inflight) {
-			this.logger.warn(
-				`[OfferDispatch] claim_status for unknown offer ${uplink.offerId} (status=${uplink.status}); orchestrator may have restarted`,
-			);
-			return;
-		}
-
-		clearInterval(inflight.renewalTimer);
-		this.inFlight.delete(uplink.offerId);
-
-		if (uplink.status === "in_progress") {
-			// Liaison reports liveness without exiting — keep tracking but don't
-			// complete the offer. Re-arm the renewal timer.
-			const renewalIntervalMs = Math.max(
-				5_000,
-				Math.floor((inflight.claim.leaseTtlSeconds * 1_000) / 3),
-			);
-			inflight.renewalTimer = setInterval(() => {
-				void this.renewLease(inflight.claim);
-			}, renewalIntervalMs);
-			this.inFlight.set(uplink.offerId, inflight);
-			return;
-		}
-
-		const completionStatus =
-			uplink.status === "delivered" ? "delivered" : "failed";
-
-		try {
-			await query(
-				`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, $4)`,
-				[
-					inflight.claim.dispatchId,
-					this.orchestratorIdentity,
-					inflight.claim.claimToken,
-					completionStatus,
-				],
-			);
-			this.logger.log(
-				`[OfferDispatch] offer=${uplink.offerId} completed status=${completionStatus} (agency=${inflight.targetAgencyId})`,
-			);
-		} catch (err) {
-			this.logger.error(
-				`[OfferDispatch] fn_complete_work_offer failed for offer ${uplink.offerId}:`,
-				err instanceof Error ? err.message : err,
-			);
-		}
-	}
-
-	stop(): void {
-		for (const [, inflight] of this.inFlight) {
-			clearInterval(inflight.renewalTimer);
-		}
-		this.inFlight.clear();
 	}
 
 	private async pickAgency(claim: ClaimedOffer): Promise<string | null> {
-		const projectId = extractProjectId(claim.metadata);
+		// Prefer project_id from the metadata; fall back to looking it up on
+		// the proposal so resolveAgency gets a real bigint, not "" (which
+		// breaks the project_id = $1 filter with an invalid-bigint error).
+		let projectId = extractProjectId(claim.metadata);
+		if (!projectId && claim.proposalId) {
+			try {
+				const { rows } = await query<{ project_id: number | null }>(
+					`SELECT project_id FROM roadmap_proposal.proposal WHERE id = $1`,
+					[claim.proposalId],
+				);
+				const pid = rows[0]?.project_id;
+				if (pid !== undefined && pid !== null) projectId = String(pid);
+			} catch {
+				/* best-effort — fall through to "" and let resolver handle */
+			}
+		}
+
+		// Require job capabilities matching the offer role so agencies without
+		// capabilities (auto-named ghost agents) are excluded. All named agencies
+		// have the full job list; unregistered or ghost agencies don't.
+		const requiredCaps = ROLE_TO_REQUIRED_CAPABILITIES[claim.role.toLowerCase()] ?? ["develop"];
+
 		const candidate = await this.resolveAgencyFn(
 			projectId ?? "",
 			claim.role,
+			undefined,
+			requiredCaps,
 		);
 		if (!candidate) return null;
 
 		// agency-resolver returns the provider_registry row's agency_id (numeric);
 		// the liaison message bus keys on the agent_registry.agent_identity TEXT.
-		// Resolve via a single lookup.
 		const { rows } = await query<{ agent_identity: string }>(
 			`SELECT agent_identity FROM roadmap_workforce.agent_registry WHERE id = $1`,
 			[candidate.agencyId.toString()],
@@ -245,30 +189,10 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 		return briefing.briefing_id;
 	}
 
-	private async renewLease(claim: ClaimedOffer): Promise<void> {
-		try {
-			await query(
-				`SELECT roadmap_workforce.fn_renew_lease($1, $2, $3, $4)`,
-				[
-					claim.dispatchId,
-					this.orchestratorIdentity,
-					claim.claimToken,
-					claim.leaseTtlSeconds,
-				],
-			);
-		} catch (err) {
-			this.logger.warn(
-				`[OfferDispatch] fn_renew_lease failed for offer ${claim.offerId} (will retry next tick):`,
-				err instanceof Error ? err.message : err,
-			);
-		}
-	}
-
 	/**
 	 * The Zod schema for OfferDispatchPayload requires offer_id to be a UUID.
 	 * Live `dispatch_id` is a BIGINT. Pad-and-format into a stable UUID-shaped
 	 * string so the schema validates without changing the payload spec.
-	 * Format: 00000000-0000-0000-0000-<12-hex-chars-of-dispatch_id>
 	 */
 	private toUuid(dispatchId: string): string {
 		const hex = BigInt(dispatchId).toString(16).padStart(12, "0").slice(-12);
@@ -287,7 +211,11 @@ function extractCapabilities(metadata: Record<string, unknown>): string[] {
 function extractRouteHint(metadata: Record<string, unknown>): string {
 	if (typeof metadata.route_hint === "string") return metadata.route_hint;
 	if (typeof metadata.provider === "string") return metadata.provider;
-	return "claude-code";
+	// Default must match a roadmap.model_routes.agent_provider value
+	// ('claude', 'codex', 'copilot', 'gemini'). 'claude-code' is the
+	// CLI name, not the provider name — using it raises P235 in
+	// agent-spawner ("No enabled route found in DB").
+	return "claude";
 }
 
 function extractProjectId(metadata: Record<string, unknown>): string | null {
@@ -302,11 +230,6 @@ function extractTask(metadata: Record<string, unknown>): string {
 	return "Execute the dispatched work for this offer.";
 }
 
-function extractStage(metadata: Record<string, unknown>): string | null {
-	if (typeof metadata.stage === "string") return metadata.stage;
-	return null;
-}
-
 function extractSuccessCriteria(metadata: Record<string, unknown>): string[] {
 	const v = metadata.success_criteria ?? metadata.acceptance_criteria;
 	if (Array.isArray(v)) {
@@ -314,3 +237,24 @@ function extractSuccessCriteria(metadata: Record<string, unknown>): string[] {
 	}
 	return [];
 }
+
+function extractWorktreeHint(metadata: Record<string, unknown>): string | null {
+	const v = metadata.worktree_hint ?? metadata.worktree;
+	return typeof v === "string" && v.trim().length > 0 ? v : null;
+}
+
+// Maps dispatch role names to the minimum set of job capabilities an agency
+// must declare in capabilities.jobs. Agencies without any capabilities field
+// (auto-named ghost spawns) fail this check and are excluded from dispatch.
+const ROLE_TO_REQUIRED_CAPABILITIES: Record<string, string[]> = {
+	architect: ["design"],
+	"system-architect": ["system-design"],
+	developer: ["develop"],
+	"merge-agent": ["merge"],
+	"triage-agent": ["research"],
+	"research-agent": ["research"],
+	skeptic: ["review"],
+	"skeptic-beta": ["review"],
+	"skeptic-gamma": ["review"],
+	"skeptic-alpha": ["review"],
+};

@@ -5,6 +5,33 @@ import express from "express";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(__dirname, "..");
 
+// P1123: protect the shared pool from stray pool.end() in shared CLI/tool code.
+// Tool handlers use src/infra/postgres/pool.ts transitively.
+//
+// HOTFIX 2026-05-16: node --import jiti/register collapses TS named exports
+// to module.default — same pattern the createMcpServer/handleDirectMcpRequest/
+// getVersion lookups below already defend against. Without this fallback,
+// poolModule.setPoolLifecycleMode is undefined at boot and the MCP service
+// crash-loops with TypeError (NRestarts hit 66 today before this fix).
+const poolModule = await import("../src/infra/postgres/pool.ts");
+const setPoolLifecycleMode =
+	poolModule.setPoolLifecycleMode || poolModule.default?.setPoolLifecycleMode;
+if (typeof setPoolLifecycleMode !== "function") {
+	console.error("[MCP] Failed to load setPoolLifecycleMode from pool module");
+	process.exit(1);
+}
+setPoolLifecycleMode("long-running");
+
+// P1123 Phase 3: start the pool watchdog. Same jiti-named-export fallback
+// pattern as setPoolLifecycleMode above.
+const watchdogModule = await import("../src/infra/postgres/pool-watchdog.ts");
+const startPoolWatchdog =
+	watchdogModule.startPoolWatchdog ||
+	watchdogModule.default?.startPoolWatchdog;
+if (typeof startPoolWatchdog === "function") {
+	startPoolWatchdog("agenthive-mcp");
+}
+
 const serverModule = await import("../src/apps/mcp-server/server.ts");
 const httpCompatModule = await import("../src/apps/mcp-server/http-compat.ts");
 const versionModule = await import("../src/shared/utils/version.ts");
@@ -35,6 +62,7 @@ const SSE_ENABLED = MCP_TRANSPORT === "sse" || MCP_TRANSPORT === "both";
 const HTTP_ENABLED = MCP_TRANSPORT === "http" || MCP_TRANSPORT === "both";
 
 const port = process.env.MCP_PORT || 6421;
+const host = process.env.MCP_HOST || "127.0.0.1";
 const APP_VERSION = getVersion ? await getVersion() : "unknown";
 
 const app = express();
@@ -203,7 +231,7 @@ if (SSE_ENABLED) {
 	});
 }
 
-const server = app.listen(port, "0.0.0.0", () => {
+const server = app.listen(port, host, () => {
 	console.log(`[MCP] AgentHive MCP server v${APP_VERSION} listening on port ${port}`);
 	console.log(`[MCP] Transport config: MCP_TRANSPORT=${MCP_TRANSPORT}`);
 	console.log(`[MCP] Readiness URL: http://localhost:${port}/health`);

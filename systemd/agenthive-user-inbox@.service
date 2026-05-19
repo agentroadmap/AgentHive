@@ -1,0 +1,33 @@
+[Unit]
+Description=AgentHive User Inbox Consumer (%i)
+Documentation=https://github.com/agentHive/agentHive/blob/main/CONVENTIONS.md
+After=network.target postgresql.service agenthive-mcp.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=gary
+Group=gary
+WorkingDirectory=/data/code/AgentHive
+EnvironmentFile=/etc/agenthive/env
+Environment=NODE_ENV=production
+Environment=PATH=/home/gary/.nvm/versions/node/v24.14.0/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=/home/gary
+Environment=OPERATOR_IDENTITY=user/%i
+
+ExecStart=/usr/local/bin/bun /data/code/AgentHive/scripts/user-inbox-consumer.ts
+Restart=always
+RestartSec=5
+StartLimitInterval=60s
+StartLimitBurst=3
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agenthive-user-inbox-%i
+
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=10s
+
+[Install]
+WantedBy=multi-user.target

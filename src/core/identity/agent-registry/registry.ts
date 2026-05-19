@@ -22,11 +22,18 @@ import {
 } from "../../../infra/trust/trust-model.ts";
 import { getMcpUrlAsync } from "../../../shared/runtime/endpoints.ts";
 import {
+	assignDisplayAlias,
 	buildBaseName,
 	EXPERT_SLOTS,
 	isLiaisonHint,
 	LIAISON_SLOTS,
 } from "./agent-name.ts";
+import { claimDisplayAlias } from "./alias-manager.ts";
+import {
+	isPermanentAgent,
+	resolvePermanentAgentIdentity,
+	resolvePermanentAgentMapping,
+} from "./permanent-agent-map.ts";
 import type {
 	AgentRegistration,
 	DeregisterRequest,
@@ -94,10 +101,8 @@ export async function resolveInstanceId(
 }
 
 /** Determine if agent is permanent (well-known identities) */
-// OpenClaw core team + specialist roles
-const PERMANENT_AGENTS = new Set(["Gilbert", "Skeptic"]);
 function isPermanent(agentId: string): boolean {
-	return PERMANENT_AGENTS.has(agentId);
+	return isPermanentAgent(agentId);
 }
 
 /**
@@ -184,12 +189,15 @@ async function resolveRegistrationInstanceId(
 export async function registerAgent(
 	request: RegistrationRequest,
 ): Promise<RegistrationResponse> {
-	const { agentId, capabilities = [], role } = request;
+	const permanentMapping = resolvePermanentAgentMapping(request.agentId);
+	const agentId = permanentMapping?.agentIdentity ?? request.agentId;
+	const capabilities = request.capabilities ?? [];
+	const role = request.role;
 	const permanent = isPermanent(agentId);
 	const agentType = request.agentType || (permanent ? "permanent" : "contract");
 
 	const instanceId = await resolveRegistrationInstanceId(
-		request,
+		{ ...request, agentId },
 		agentId,
 		agentType,
 		capabilities,
@@ -201,7 +209,7 @@ export async function registerAgent(
 	const skills = { agentId, capabilities, channel, lastSeen: now };
 	const trustTier = defaultTrustTier(instanceId, agentType);
 
-	await query(
+	const insertResult = await query<{ id: number }>(
 		`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, role, skills, status, trust_tier)
      VALUES ($1, $2, $3, $4::jsonb, 'online', $5)
      ON CONFLICT (agent_identity) DO UPDATE SET
@@ -209,13 +217,36 @@ export async function registerAgent(
        role       = EXCLUDED.role,
        skills     = agent_registry.skills || EXCLUDED.skills,
        status     = 'online',
-       trust_tier = COALESCE(NULLIF(agent_registry.trust_tier, 'authority'), EXCLUDED.trust_tier)`,
+       trust_tier = COALESCE(NULLIF(agent_registry.trust_tier, 'authority'), EXCLUDED.trust_tier)
+     RETURNING id`,
 		[instanceId, agentType, role ?? null, JSON.stringify(skills), trustTier],
 	);
 
+	// P919 AC-12: Tier 2 display alias for worker slot-0 spawns. The slot
+	// character is the last hyphen-segment of the structured identity
+	// ("ccs45ant-bot-ts-a" → "a"). Only slot 'a' with a capability hint gets a
+	// Tier 2 alias; other slots fall through to dense identity in the UI.
+	// Liaison-only registrations (no agency expertise hint) never reach this
+	// branch via registerAgent — they go through selfRegisterAgency.
+	const slotChar = instanceId.split("-").pop();
+	const expertise = capabilities[0];
+	if (slotChar && expertise && request.agentProvider) {
+		const host = request.host ?? process.env.AGENTHIVE_HOST ?? hostname();
+		const tier2 = assignDisplayAlias(request.agentProvider, host, expertise, slotChar);
+		const insertedId = insertResult.rows[0]?.id;
+		if (tier2 && insertedId !== undefined) {
+			const claim = await claimDisplayAlias(insertedId, tier2, { tier: 2 });
+			if (!claim.claimed) {
+				console.warn(
+					`[registerAgent] ${instanceId} could not claim Tier 2 alias '${tier2}': ${claim.reason}`,
+				);
+			}
+		}
+	}
+
 	await announcePresence(
 		"general",
-		`[${agentId}] Registered and online. Channel: ${channel}`,
+		`[${resolvePermanentAgentIdentity(agentId)}] Registered and online. Channel: ${channel}`,
 	);
 
 	return {

@@ -5,6 +5,12 @@ import yaml from "js-yaml";
 export type Severity = "critical" | "high" | "medium" | "low";
 export type Confidence = "high" | "medium" | "low";
 
+export interface AutoFixDescriptor {
+  transform: "path-replace" | "model-replace" | "state-name-replace";
+  target_module: string;
+  target_export: string;
+}
+
 export interface Rule {
   id: string;
   description: string;
@@ -20,6 +26,7 @@ export interface Rule {
   examples_match: string[];
   examples_no_match: string[];
   tags?: string[];
+  auto_fix?: AutoFixDescriptor;
 }
 
 export interface RuleSet {

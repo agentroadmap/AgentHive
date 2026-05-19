@@ -22,6 +22,7 @@ import type { ContentStore } from "../../core/storage/content-store.ts";
 import { createMcpServer, type McpServer } from "../../mcp/server.ts";
 import { handleDirectMcpRequest } from "../mcp-server/http-compat.ts";
 import { RfcStates, getView, getRegistry } from "../../core/workflow/state-names.ts";
+import { loadStageRegistry } from "../../core/workflow/stage-registry.ts";
 import type {
 	Proposal,
 	ProposalUpdateInput,
@@ -3712,30 +3713,43 @@ export class RoadmapServer {
 			const url = new URL(req?.url || "http://localhost/?workflow=Standard RFC");
 			const workflow = url.searchParams.get("workflow") || "Standard RFC";
 
-			// Get the workflow view from the registry
 			const registry = getRegistry();
 			const view = registry.getView(workflow);
 
-			// Convert stage metadata to board format
-			const stages = view.stages.map((stage) => ({
-				id: stage.name,
-				label: stage.name,
-				order: stage.order,
-				isTerminal: stage.isTerminal,
-			}));
+			// Load display metadata (displayLabel, hexColor) from the stage-definition table.
+			// Falls back gracefully — if the table is empty or a stage has no entry, use
+			// the stage name as the display label and null for colour.
+			let stageDefMap: Map<string, { displayLabel: string; hexColor: string | null }> = new Map();
+			try {
+				const raw = await loadStageRegistry();
+				for (const [name, def] of raw) {
+					stageDefMap.set(name, { displayLabel: def.displayLabel, hexColor: def.hexColor });
+				}
+			} catch {
+				// non-fatal — proceed with name-only labels
+			}
 
-			return Response.json({
-				stages,
-				workflow: view.template,
+			const stages = view.stages.map((stage) => {
+				const def = stageDefMap.get(stage.name);
+				return {
+					id: stage.name,
+					stageName: stage.name,
+					label: def?.displayLabel ?? stage.name,
+					displayLabel: def?.displayLabel ?? stage.name,
+					hexColor: def?.hexColor ?? null,
+					order: stage.order,
+					isTerminal: stage.isTerminal,
+				};
 			});
+
+			return Response.json({ stages, workflow: view.template });
 		} catch (error) {
-			// Fallback to default RFC stages if registry not loaded
 			const stages = [
-				{ id: "DRAFT", label: "DRAFT", order: 1, isTerminal: false },
-				{ id: "REVIEW", label: "REVIEW", order: 2, isTerminal: false },
-				{ id: "DEVELOP", label: "DEVELOP", order: 3, isTerminal: false },
-				{ id: "MERGE", label: "MERGE", order: 4, isTerminal: false },
-				{ id: "COMPLETE", label: "COMPLETE", order: 5, isTerminal: true },
+				{ id: "DRAFT", stageName: "DRAFT", label: "Draft", displayLabel: "Draft", hexColor: null, order: 1, isTerminal: false },
+				{ id: "REVIEW", stageName: "REVIEW", label: "Review", displayLabel: "Review", hexColor: null, order: 2, isTerminal: false },
+				{ id: "DEVELOP", stageName: "DEVELOP", label: "Develop", displayLabel: "Develop", hexColor: null, order: 3, isTerminal: false },
+				{ id: "MERGE", stageName: "MERGE", label: "Merge", displayLabel: "Merge", hexColor: null, order: 4, isTerminal: false },
+				{ id: "COMPLETE", stageName: "COMPLETE", label: "Complete", displayLabel: "Complete", hexColor: null, order: 5, isTerminal: true },
 			];
 			return Response.json({
 				stages,

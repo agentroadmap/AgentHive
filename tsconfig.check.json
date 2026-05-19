@@ -14,6 +14,10 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "include": ["src/apps/hive-cli/**/*.ts"],
+  "include": [
+    "src/apps/hive-cli/**/*.ts",
+    "src/apps/cubic-agents/**/*.ts",
+    "src/core/gate/**/*.ts"
+  ],
   "exclude": ["node_modules"]
 }

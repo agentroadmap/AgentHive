@@ -18,7 +18,7 @@ function serviceStatus(name: string): string {
 
 export const stateMachineStartHandler: ToolHandler = async () => {
 	const results: string[] = [];
-	for (const svc of ["agenthive-orchestrator", "agenthive-gate-pipeline"]) {
+	for (const svc of ["agenthive-orchestrator"]) {
 		const before = serviceStatus(svc);
 		if (before === "active") {
 			results.push(`${svc}: already running`);
@@ -33,7 +33,7 @@ export const stateMachineStartHandler: ToolHandler = async () => {
 
 export const stateMachineStopHandler: ToolHandler = async () => {
 	const results: string[] = [];
-	for (const svc of ["agenthive-gate-pipeline", "agenthive-orchestrator"]) {
+	for (const svc of ["agenthive-orchestrator"]) {
 		run(`sudo systemctl stop ${svc}`);
 		results.push(`${svc}: ${serviceStatus(svc)}`);
 	}
@@ -45,7 +45,7 @@ export const stateMachineStatusHandler: ToolHandler = async () => {
 
 	// Services
 	lines.push("Services:");
-	for (const svc of ["agenthive-orchestrator", "agenthive-gate-pipeline"]) {
+	for (const svc of ["agenthive-orchestrator"]) {
 		const status = serviceStatus(svc);
 		lines.push(`  ${status === "active" ? "✓" : "✗"} ${svc}: ${status}`);
 	}

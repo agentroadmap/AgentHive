@@ -64,34 +64,155 @@ export interface AgencyCandidate {
  * Excludes offline and retired agencies.
  * Filters by in-flight capacity (P764).
  * Ranks by throttle_count ASC, last_seen_at DESC.
+ *
+ * P1005: Optional taskTier and requiredCapabilities filtering
+ * - If taskTier is provided, only agencies with matching tier in capabilities are returned
+ * - If requiredCapabilities is provided, agencies must support all listed capabilities
+ * - Tier-0 isolation: Tier-3 providers are never matched for Tier-0 requests
  */
+/**
+ * Permissive-fallback log target. Tests can replace this; production uses console.
+ * Kept module-level so the signature of resolveAgency stays unchanged.
+ */
+let _resolverLogger: Pick<Console, "log" | "warn"> = console;
+export function _setResolverLoggerForTest(
+	logger: Pick<Console, "log" | "warn">,
+): void {
+	_resolverLogger = logger;
+}
+
 export async function resolveAgency(
 	projectId: string,
 	_role?: string,
+	taskTier?: number,
+	requiredCapabilities?: string[],
 ): Promise<AgencyCandidate | null> {
-	const { rows } = await query(
-		`SELECT pr.id, pr.agency_id, pr.project_id, pr.capabilities,
+	// P914: exclude coordinator agents (the orchestrator itself) and
+	// test scaffolding identities. Coordinators claim offers and
+	// re-dispatch them — they must never be a dispatch target.
+	// Belt-and-suspenders against status drift: the resolver checks
+	// provider_registry.status, but operators retire via roadmap.agency.status.
+	// LEFT JOIN agency lets retired agencies be excluded even if their
+	// provider_registry.status hasn't been synced. Legacy registry rows
+	// without a matching agency row (a.status IS NULL) continue to qualify.
+
+	// Build WHERE clause dynamically for tier-aware filtering
+	let tierFilter = "";
+	let capabilityFilter = "";
+	const queryParams: (string | number)[] = [projectId];
+
+	// P1005 AC-8: Tier-0 isolation — tier-0 tasks only go to tier-0 providers
+	if (taskTier !== undefined) {
+		// All tiers except tier-0 can fall back to higher-tier providers
+		// For tier-0: exact match required (no fallback to tier-3)
+		if (taskTier === 0) {
+			// Tier-0 tasks: only providers with explicit tier 0 in capabilities
+			// Providers without tier field default to 2, so exclude them too
+			tierFilter = ` AND (pr.capabilities->>'tier')::int = 0`;
+		} else if (taskTier === 1) {
+			// Tier-1: tier-1+ providers (not tier-0)
+			tierFilter = ` AND COALESCE((pr.capabilities->>'tier')::int, 2) >= 1`;
+		} else if (taskTier === 2) {
+			// Tier-2: tier-2+ providers
+			tierFilter = ` AND COALESCE((pr.capabilities->>'tier')::int, 2) >= 2`;
+		} else if (taskTier === 3) {
+			// Tier-3: only tier-3 providers
+			tierFilter = ` AND COALESCE((pr.capabilities->>'tier')::int, 2) >= 3`;
+		}
+	}
+
+	// P1005: Filter by required capabilities
+	if (requiredCapabilities && requiredCapabilities.length > 0) {
+		// Build JSON contains check for each required capability
+		capabilityFilter = requiredCapabilities
+			.map((cap, idx) => {
+				queryParams.push(cap);
+				return `pr.capabilities->'jobs' ? $${queryParams.length}`;
+			})
+			.join(" AND ");
+		if (capabilityFilter) {
+			capabilityFilter = ` AND (${capabilityFilter})`;
+		}
+	}
+
+	const baseSelect = `SELECT pr.id, pr.agency_id, pr.project_id, pr.capabilities,
 		        pr.status, pr.throttle_count, pr.last_seen_at, pr.max_in_flight,
 		        COALESCE(inf.in_flight_count, 0) AS in_flight_count
 		 FROM roadmap_workforce.provider_registry pr
+		 JOIN roadmap_workforce.agent_registry ar ON ar.id = pr.agency_id
+		 LEFT JOIN roadmap.agency a ON a.agency_id = ar.agent_identity
+		 -- AC-3: agencies with a roadmap.agency row must be dispatchable per v_agency_status
+		 -- (status='active' AND (presence_state IN ('online','busy') OR last_heartbeat_at within 60 s)).
+		 -- Agencies with no roadmap.agency row (legacy) pass through for backward compatibility.
+		 LEFT JOIN roadmap.v_agency_status vas ON vas.agency_id = ar.agent_identity
 		 LEFT JOIN roadmap_workforce.v_agency_in_flight inf
 		   ON inf.provider_registry_id = pr.id
 		 WHERE pr.status NOT IN ('offline', 'retired')
+		   -- The resolver picks "live" agencies only. ar.status reflects the
+		   -- registration state set by the liaison's heartbeat/registration
+		   -- flow; inactive rows are stale legacy registrations whose liaison
+		   -- service no longer runs. Without this, the permissive fallback
+		   -- (added in commit ddbf932f) matches them and the dispatch fails
+		   -- at message-store with "Failed to store message for agency X".
+		   AND ar.status = 'active'
+		   AND (a.status IS NULL OR a.status <> 'retired')
+		   AND (vas.agency_id IS NULL OR vas.dispatchable = true)
+		   AND ar.agent_type <> 'coordinator'
+		   AND ar.agent_identity NOT LIKE 'test/%'
 		   AND (pr.project_id IS NULL OR pr.project_id = $1)
 		   AND COALESCE(inf.in_flight_count, 0) < pr.max_in_flight
-		 ORDER BY pr.throttle_count ASC, pr.last_seen_at DESC NULLS LAST
-		 LIMIT 1`,
-		[projectId],
+		   ${tierFilter}`;
+	const orderAndLimit = ` ORDER BY (vas.dispatchable IS TRUE) DESC,
+		          pr.throttle_count ASC,
+		          COALESCE(inf.in_flight_count, 0) ASC,
+		          pr.last_seen_at DESC NULLS LAST,
+		          RANDOM()
+		 LIMIT 1`;
+
+	const { rows } = await query(
+		baseSelect + capabilityFilter + orderAndLimit,
+		queryParams,
 	);
 
-	if (!rows.length) return null;
+	// Permissive fallback: when the strict capability filter rejects every
+	// agency (e.g. provider_registry.capabilities.jobs hasn't been seeded),
+	// retry without the capability filter so dispatch keeps flowing rather
+	// than expiring offers in a loop. Logs a warn for ops visibility — a
+	// healthy system should always have at least one capability-matched
+	// agency, so this firing means data drift to investigate.
+	let resultRows = rows;
+	let usedFallback = false;
+	if (
+		!resultRows.length &&
+		requiredCapabilities &&
+		requiredCapabilities.length > 0
+	) {
+		// Re-run without the capability filter. The cap-only params are at
+		// indices > 1 (projectId is $1), so trimming queryParams to [projectId]
+		// is enough — the rebuilt SQL omits $2..$N entirely.
+		const fallback = await query(
+			baseSelect + orderAndLimit,
+			[projectId],
+		);
+		if (fallback.rows.length > 0) {
+			usedFallback = true;
+			resultRows = fallback.rows;
+			_resolverLogger.warn(
+				`[agency-resolver] permissive fallback fired: no agency had jobs ${JSON.stringify(requiredCapabilities)}; matched without filter. Seed provider_registry.capabilities.jobs to remove this warning.`,
+			);
+		}
+	}
 
-	const row = rows[0];
+	if (!resultRows.length) return null;
+
+	const row = resultRows[0];
 	return {
 		id: BigInt(row.id),
 		agencyId: BigInt(row.agency_id),
 		projectId: row.project_id,
-		capabilities: row.capabilities,
+		capabilities: usedFallback
+			? { ...(row.capabilities ?? {}), _resolved_via: "permissive-fallback" }
+			: row.capabilities,
 		status: row.status,
 		throttleCount: row.throttle_count,
 		lastSeenAt: row.last_seen_at,

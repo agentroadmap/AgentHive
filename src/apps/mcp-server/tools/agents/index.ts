@@ -14,8 +14,10 @@ import {
 	revokePrivilege,
 	updateReporting,
 } from "./handlers.ts";
+import { PgAgentHandlers } from "./pg-handlers.ts";
 import {
 	agentAssignSchema,
+	agentForceReleaseAliasSchema,
 	agentGetSchema,
 	agentHeartbeatSchema,
 	agentListSchema,
@@ -30,6 +32,7 @@ import {
  */
 export function registerAgentTools(server: McpServer): void {
 	const handlers = new AgentPoolHandlers(server);
+	const pgHandlers = new PgAgentHandlers();
 	type RegisterAgentArgs = Parameters<AgentPoolHandlers["registerAgent"]>[0];
 	type GetAgentArgs = Parameters<AgentPoolHandlers["getAgent"]>[0];
 	type ListAgentsArgs = Parameters<AgentPoolHandlers["listAgents"]>[0];
@@ -133,6 +136,52 @@ export function registerAgentTools(server: McpServer): void {
 		async (input) => handlers.retireAgent(input),
 	);
 
+	// ── agent_resolve ───────────────────────────────────────────────────────
+	type ResolveAgentArgs = Parameters<PgAgentHandlers["resolveAgent"]>[0];
+	const resolveAgentTool: McpToolHandler =
+		createSimpleValidatedTool<ResolveAgentArgs>(
+			{
+				name: "agent_resolve",
+				description:
+					"P995: Resolve a named agent by agent_identity or display_alias. " +
+					"Returns registry row including preferred_provider, host_affinity, and status. " +
+					"Use this to verify an agent is registered before sending it a message.",
+				inputSchema: {
+					type: "object",
+					properties: {
+						name: {
+							type: "string",
+							description: "agent_identity (e.g. 'adam') or display_alias to look up",
+						},
+					},
+					required: ["name"],
+				},
+			},
+			{
+				type: "object",
+				properties: { name: { type: "string" } },
+				required: ["name"],
+			},
+			async (input) => pgHandlers.resolveAgent(input),
+		);
+
+	// ── agent_force_release_alias ───────────────────────────────────────────
+	type ForceReleaseAliasArgs = Parameters<
+		PgAgentHandlers["forceReleaseAlias"]
+	>[0];
+	const forceReleaseAliasTool: McpToolHandler =
+		createSimpleValidatedTool<ForceReleaseAliasArgs>(
+			{
+				name: "agent_force_release_alias",
+				description:
+					"P919: Force-release a display alias from an agent. " +
+					"Two paths: (1) clean reclaim if target is inactive; (2) stuck-active reclaim if force=true and heartbeat > 90s.",
+				inputSchema: agentForceReleaseAliasSchema,
+			},
+			agentForceReleaseAliasSchema,
+			async (input) => pgHandlers.forceReleaseAlias(input),
+		);
+
 	// ── agent_zombie_detect ─────────────────────────────────────────────────
 	const zombieDetectTool: McpToolHandler = createSimpleValidatedTool(
 		{
@@ -166,6 +215,8 @@ export function registerAgentTools(server: McpServer): void {
 	server.addTool(heartbeatTool);
 	server.addTool(spawnTool);
 	server.addTool(retireTool);
+	server.addTool(resolveAgentTool);
+	server.addTool(forceReleaseAliasTool);
 	server.addTool(zombieDetectTool);
 	server.addTool(poolStatsTool);
 

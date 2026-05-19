@@ -159,6 +159,10 @@ export const proposalClaimSchema: JsonSchema = {
 	additionalProperties: false,
 };
 
+// P934: release_reason field added as REQUIRED. The legacy MCP handler
+// defaulted to 'released' which silently demoted maturity via the lease
+// trigger. Callers MUST now declare lifecycle intent. Enum kept in sync
+// with src/core/proposal/release-reasons.ts (CALLER_RELEASE_REASONS).
 export const proposalReleaseSchema: JsonSchema = {
 	type: "object",
 	properties: {
@@ -175,8 +179,39 @@ export const proposalReleaseSchema: JsonSchema = {
 		force: {
 			type: "boolean",
 		},
+		release_reason: {
+			type: "string",
+			description:
+				"P934 lifecycle decision (REQUIRED). work_complete bucket -> mature: " +
+				"work_delivered | gate_review_complete | authored_complete. " +
+				"abandoned bucket -> obsolete: wont_pursue | superseded | out_of_scope. " +
+				"incomplete bucket -> new: gate_hold | gate_reject | lease_expired | " +
+				"manual_release | released_unfinished | reassigned | force_reclaimed | " +
+				"operator_cancelled | operator_terminated | gate_dispatch_blocked | " +
+				"gate_spawn_failed.",
+			enum: [
+				"work_delivered",
+				"gate_review_complete",
+				"authored_complete",
+				"wont_pursue",
+				"superseded",
+				"out_of_scope",
+				"gate_hold",
+				"gate_reject",
+				"lease_expired",
+				"manual_release",
+				"released_unfinished",
+				"reassigned",
+				"force_reclaimed",
+				"operator_cancelled",
+				"operator_terminated",
+				"gate_dispatch_blocked",
+				"gate_spawn_failed",
+				"work_failed",
+			],
+		},
 	},
-	required: ["id", "agent"],
+	required: ["id", "agent", "release_reason"],
 	additionalProperties: false,
 };
 

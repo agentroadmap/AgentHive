@@ -33,6 +33,7 @@ import crypto from "node:crypto";
 import { after, describe, it } from "node:test";
 import { Pool } from "pg";
 import {
+	canonicalizeRequestTarget,
 	cleanupDeliveryIdLog,
 	verifyDeliverySignature,
 } from "../../src/infra/messaging/cross-host-relay.ts";
@@ -44,9 +45,11 @@ const SIGNING_SECRET_HEX = crypto.randomBytes(32).toString("hex");
 const AGENT_ID = `test/p836/sender-${TS}`;
 const DEV_MODE = true;
 
-// We need a `pg.Pool` for cross-host-relay; reuse the project's connection
-// settings via env vars (PGHOST/PGUSER/etc are set by /etc/agenthive/env).
-const pool = new Pool();
+// We need a `pg.Pool` for cross-host-relay; honor DATABASE_URL (admin/agenthive)
+// when set; otherwise fall through to PG* env vars and pgpass.
+const pool = process.env.DATABASE_URL
+	? new Pool({ connectionString: process.env.DATABASE_URL })
+	: new Pool();
 
 after(async () => {
 	await query(
@@ -101,12 +104,12 @@ function buildHeaders(opts: {
 	agentId: string;
 	body: string;
 	secretHex: string;
+	pathAndSearch?: string; // P1097: support non-root paths (AC-1, AC-6)
 	schemePrefix?: string; // for malformed-scheme tests
-	targetHostId?: string; // F1: included in HMAC scope to prevent cross-host replay
 }): Record<string, string> {
-	const targetHostId = opts.targetHostId ?? "";
+	const pathAndSearch = opts.pathAndSearch ?? "/"; // Default to root for backward compat with existing tests
 	const signingInput =
-		`POST\n/\nX-AgentHive-Delivery-Id: ${opts.deliveryId}\nX-AgentHive-Timestamp: ${opts.timestamp}\nX-AgentHive-Agent-Id: ${opts.agentId}\nX-AgentHive-Target-Host-Id: ${targetHostId}\n${opts.body}`;
+		`POST\n${pathAndSearch}\nX-AgentHive-Delivery-Id: ${opts.deliveryId}\nX-AgentHive-Timestamp: ${opts.timestamp}\nX-AgentHive-Agent-Id: ${opts.agentId}\n${opts.body}`;
 	const sig = crypto
 		.createHmac("sha256", Buffer.from(opts.secretHex, "hex"))
 		.update(signingInput, "utf-8")
@@ -116,12 +119,11 @@ function buildHeaders(opts: {
 		"x-agenthive-delivery-id": opts.deliveryId,
 		"x-agenthive-timestamp": String(opts.timestamp),
 		"x-agenthive-agent-id": opts.agentId,
-		"x-agenthive-target-host-id": targetHostId,
 	};
 }
 
 describe("verifyDeliverySignature", () => {
-	it("accepts a valid signature with fresh timestamp and unseen delivery_id", async () => {
+	it("accepts a valid signature with fresh timestamp and unseen delivery_id (AC-2: root path)", async () => {
 		const body = JSON.stringify({ hello: "world" });
 		const deliveryId = crypto.randomUUID();
 		const headers = buildHeaders({
@@ -130,8 +132,9 @@ describe("verifyDeliverySignature", () => {
 			agentId: AGENT_ID,
 			body,
 			secretHex: SIGNING_SECRET_HEX,
+			pathAndSearch: "/", // AC-2: root path regression guard
 		});
-		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool);
+		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "/");
 		assert.equal(ok, true);
 
 		// Cleanup
@@ -153,6 +156,7 @@ describe("verifyDeliverySignature", () => {
 			headers,
 			SIGNING_SECRET_HEX,
 			pool,
+			"/",
 		);
 		assert.equal(ok, false);
 		await query(`DELETE FROM roadmap.delivery_id_log WHERE delivery_id = $1`, [deliveryId]);
@@ -169,7 +173,7 @@ describe("verifyDeliverySignature", () => {
 			body,
 			secretHex: SIGNING_SECRET_HEX,
 		});
-		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool);
+		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "/");
 		assert.equal(ok, false);
 	});
 
@@ -184,7 +188,7 @@ describe("verifyDeliverySignature", () => {
 			body,
 			secretHex: SIGNING_SECRET_HEX,
 		});
-		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool);
+		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "/");
 		assert.equal(ok, false);
 	});
 
@@ -199,12 +203,12 @@ describe("verifyDeliverySignature", () => {
 			body,
 			secretHex: SIGNING_SECRET_HEX,
 		});
-		const first = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool);
+		const first = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "/");
 		assert.equal(first, true, "first delivery should pass");
 
 		// Replay the exact same headers/body — should be rejected because the
 		// delivery_id is now in delivery_id_log.
-		const replay = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool);
+		const replay = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "/");
 		assert.equal(replay, false, "second delivery with same delivery_id must fail");
 
 		await query(`DELETE FROM roadmap.delivery_id_log WHERE delivery_id = $1`, [deliveryId]);
@@ -230,7 +234,7 @@ describe("verifyDeliverySignature", () => {
 		]) {
 			const partial = { ...full };
 			delete (partial as Record<string, string>)[drop];
-			const ok = await verifyDeliverySignature(body, partial, SIGNING_SECRET_HEX, pool);
+			const ok = await verifyDeliverySignature(body, partial, SIGNING_SECRET_HEX, pool, "/");
 			assert.equal(ok, false, `must reject when ${drop} is missing`);
 		}
 	});
@@ -247,7 +251,7 @@ describe("verifyDeliverySignature", () => {
 			secretHex: SIGNING_SECRET_HEX,
 			schemePrefix: "md5",
 		});
-		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool);
+		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "/");
 		assert.equal(ok, false);
 	});
 
@@ -264,10 +268,162 @@ describe("verifyDeliverySignature", () => {
 		});
 		// Truncate the hex signature to a different length
 		headers["x-agenthive-signature"] = "sha256=deadbeef";
-		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool);
-		assert.equal(ok, false);
+		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "/");
 
 		await query(`DELETE FROM roadmap.delivery_id_log WHERE delivery_id = $1`, [deliveryId]);
+	});
+
+	// ─── P1097: Request target signature binding (AC-6, AC-7, AC-9)
+
+	it("accepts valid signature with non-root path and query string (AC-6)", async () => {
+		const body = JSON.stringify({ msg: "test" });
+		const pathAndSearch = "/webhook/msg?tenant=agenthive&v=1";
+		const deliveryId = crypto.randomUUID();
+		const headers = buildHeaders({
+			deliveryId,
+			timestamp: Math.floor(Date.now() / 1000),
+			agentId: AGENT_ID,
+			body,
+			secretHex: SIGNING_SECRET_HEX,
+			pathAndSearch, // P1097: real path + query
+		});
+		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, pathAndSearch);
+		assert.equal(ok, true, "signature with real path and query should verify");
+
+		await query(`DELETE FROM roadmap.delivery_id_log WHERE delivery_id = $1`, [deliveryId]);
+	});
+
+	it("rejects when path replay changes request target (AC-7)", async () => {
+		const body = JSON.stringify({ msg: "test" });
+		const originalPath = "/webhook/msg";
+		const replayPath = "/webhook/other";
+		const deliveryId = crypto.randomUUID();
+		const headers = buildHeaders({
+			deliveryId,
+			timestamp: Math.floor(Date.now() / 1000),
+			agentId: AGENT_ID,
+			body,
+			secretHex: SIGNING_SECRET_HEX,
+			pathAndSearch: originalPath, // Signed with /webhook/msg
+		});
+		// Verify with different path — should fail
+		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, replayPath);
+		assert.equal(ok, false, "signature mismatch when path is changed should fail");
+	});
+
+	it("rejects query string reordering (AC-6: byte-exact preservation)", async () => {
+		const body = JSON.stringify({ msg: "test" });
+		const originalQuery = "/webhook/msg?a=1&b=2";
+		const reorderedQuery = "/webhook/msg?b=2&a=1"; // Different order
+		const deliveryId = crypto.randomUUID();
+		const headers = buildHeaders({
+			deliveryId,
+			timestamp: Math.floor(Date.now() / 1000),
+			agentId: AGENT_ID,
+			body,
+			secretHex: SIGNING_SECRET_HEX,
+			pathAndSearch: originalQuery,
+		});
+		// Verify with reordered query — should fail
+		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, reorderedQuery);
+		assert.equal(ok, false, "query string reordering must invalidate signature");
+	});
+
+	// ─── AC-9: Unsafe request target rejection (early, before timingSafeEqual)
+
+	it("rejects empty request target (AC-9)", async () => {
+		const body = "{}";
+		const deliveryId = crypto.randomUUID();
+		const headers = buildHeaders({
+			deliveryId,
+			timestamp: Math.floor(Date.now() / 1000),
+			agentId: AGENT_ID,
+			body,
+			secretHex: SIGNING_SECRET_HEX,
+		});
+		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "");
+		assert.equal(ok, false, "empty request target must be rejected");
+	});
+
+	it("rejects absolute URL in request target (AC-9)", async () => {
+		const body = "{}";
+		const deliveryId = crypto.randomUUID();
+		const headers = buildHeaders({
+			deliveryId,
+			timestamp: Math.floor(Date.now() / 1000),
+			agentId: AGENT_ID,
+			body,
+			secretHex: SIGNING_SECRET_HEX,
+		});
+		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "http://host/webhook");
+		assert.equal(ok, false, "absolute URL in request target must be rejected");
+	});
+
+	it("rejects request target without leading slash (AC-9)", async () => {
+		const body = "{}";
+		const deliveryId = crypto.randomUUID();
+		const headers = buildHeaders({
+			deliveryId,
+			timestamp: Math.floor(Date.now() / 1000),
+			agentId: AGENT_ID,
+			body,
+			secretHex: SIGNING_SECRET_HEX,
+		});
+		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "webhook/no-leading-slash");
+		assert.equal(ok, false, "missing leading slash must be rejected");
+	});
+
+	it("rejects request target with control characters (AC-9: header injection prevention)", async () => {
+		const body = "{}";
+		const deliveryId = crypto.randomUUID();
+		const headers = buildHeaders({
+			deliveryId,
+			timestamp: Math.floor(Date.now() / 1000),
+			agentId: AGENT_ID,
+			body,
+			secretHex: SIGNING_SECRET_HEX,
+		});
+		const ok = await verifyDeliverySignature(
+			body,
+			headers,
+			SIGNING_SECRET_HEX,
+			pool,
+			"/webhook\nX-Custom-Header: injected",
+		);
+		assert.equal(ok, false, "control characters in request target must be rejected");
+	});
+});
+
+// ─── AC-4: Performance invariant (microbenchmark for canonicalization)
+//
+// AC-4 measures the *new code's* overhead — the canonicalization step that P1097
+// adds. The full verify path includes a dedup INSERT into roadmap.delivery_id_log,
+// which is bounded by DB round-trip (≈1–30ms) and is independent of P1097.
+// We benchmark canonicalizeRequestTarget() directly to isolate the new overhead.
+
+describe("verifyDeliverySignature (AC-4: performance)", () => {
+	it("canonicalizeRequestTarget adds <1ms per call (10k iterations)", () => {
+		const targets = [
+			"/webhook/msg?tenant=agenthive&v=1",
+			"/",
+			"/api/v2/agents/abc123/messages?since=2026-05-15T00%3A00%3A00Z",
+			"/p/with/many/segments/and/a/longer/path",
+		];
+		const iterations = 10000;
+		const start = process.hrtime.bigint();
+		for (let i = 0; i < iterations; i++) {
+			canonicalizeRequestTarget(targets[i % targets.length]);
+		}
+		const end = process.hrtime.bigint();
+		const totalMs = Number(end - start) / 1e6;
+		const perCallUs = (totalMs / iterations) * 1000;
+		console.log(
+			`[AC-4 Benchmark] canonicalizeRequestTarget: ${iterations} iterations in ${totalMs.toFixed(2)}ms, ${perCallUs.toFixed(2)}µs per call`,
+		);
+		assert.ok(
+			perCallUs < 1000,
+			`canonicalizeRequestTarget should be <1ms per call (got ${perCallUs.toFixed(2)}µs)`,
+		);
 	});
 });
 

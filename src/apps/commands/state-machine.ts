@@ -1,14 +1,16 @@
 /**
- * roadmap state-machine — manage orchestrator, gate-pipeline, and agency lifecycle
+ * roadmap state-machine — manage orchestrator and agency lifecycle
  *
  * Usage:
- *   roadmap state-machine start        # Start orchestrator + gate-pipeline
- *   roadmap state-machine stop         # Stop both
- *   roadmap state-machine restart      # Restart both
+ *   roadmap state-machine start        # Start orchestrator
+ *   roadmap state-machine stop         # Stop orchestrator
+ *   roadmap state-machine restart      # Restart orchestrator
  *   roadmap state-machine status       # Show service status + offer stats
  *   roadmap state-machine agencies     # List registered agencies
  *   roadmap state-machine offers       # List open/active offers
  *   roadmap state-machine register     # Register this host as an agency
+ *
+ * P754: gate-pipeline service decommissioned; orchestrator owns dispatch.
  */
 
 import { execSync } from "child_process";
@@ -16,7 +18,6 @@ import { query } from "../../infra/postgres/pool";
 
 const SERVICES = [
   { name: "agenthive-orchestrator", label: "Orchestrator" },
-  { name: "agenthive-gate-pipeline", label: "Gate Pipeline" },
 ];
 
 function run(cmd: string): string {
@@ -44,10 +45,10 @@ export function registerStateMachineCommand(program: any) {
   const sm = program
     .command("state-machine")
     .alias("sm")
-    .description("Manage AgentHive state machine (orchestrator + gate-pipeline)");
+    .description("Manage AgentHive state machine (orchestrator)");
 
   sm.command("start")
-    .description("Start orchestrator and gate-pipeline services")
+    .description("Start the orchestrator service")
     .action(() => {
       for (const svc of SERVICES) {
         const status = serviceStatus(svc.name);
@@ -63,7 +64,7 @@ export function registerStateMachineCommand(program: any) {
     });
 
   sm.command("stop")
-    .description("Stop orchestrator and gate-pipeline services")
+    .description("Stop the orchestrator service")
     .action(() => {
       for (const svc of SERVICES) {
         console.log(`  ${svc.label}: stopping...`);
@@ -73,7 +74,7 @@ export function registerStateMachineCommand(program: any) {
     });
 
   sm.command("restart")
-    .description("Restart orchestrator and gate-pipeline services")
+    .description("Restart the orchestrator service")
     .action(() => {
       for (const svc of SERVICES) {
         console.log(`  ${svc.label}: restarting...`);
@@ -203,6 +204,10 @@ export function registerStateMachineCommand(program: any) {
     .action(async (opts: { identity: string; type: string; provider?: string; model?: string; capabilities?: string; project?: string }) => {
       try {
         // 1. Register agency in agent_registry
+        const { resolvePermanentAgentMapping } = await import("../../core/identity/agent-registry/permanent-agent-map.ts");
+        const permanent = resolvePermanentAgentMapping(opts.identity);
+        const identity = permanent?.agentIdentity ?? opts.identity;
+        const provider = opts.provider ?? permanent?.provider ?? null;
         const { rows } = await query(
           `INSERT INTO roadmap_workforce.agent_registry
              (agent_identity, agent_type, status, preferred_provider, preferred_model)
@@ -214,7 +219,7 @@ export function registerStateMachineCommand(program: any) {
              preferred_model = EXCLUDED.preferred_model,
              updated_at = now()
            RETURNING id, agent_identity, agent_type`,
-          [opts.identity, opts.type, opts.provider ?? null, opts.model ?? null]
+          [identity, opts.type, provider, opts.model ?? null]
         );
         const row = rows[0];
         console.log(`Registered: ${row.agent_identity} (${row.agent_type}, id=${row.id})`);

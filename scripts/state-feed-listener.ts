@@ -9,15 +9,6 @@
  * channels for completeness. For each event, looks up the proposal_event
  * row + the proposal title and renders a sentence per the P720 spec at
  * /data/code/AgentHive/docs/proposals/P720/event-render-templates.md.
- *
- * Defaults applied (Phase 1 — operator can re-tune later, see P720 task #106):
- *   - lease_claimed: collapse same (agent, proposal, stage) within 60 s
- *   - lease_released: post only when release_reason indicates a gate event
- *     (gate_review_complete, gate_hold, gate_reject, gate_waive). Routine
- *     work_delivered / work_failed / lease_expired / reaped_* are suppressed.
- *   - maturity_changed: reject no-op (old == new)
- *   - status_changed / decision_made / proposal_created: always post
- *   - no hourly digest, no @mentions, no #urgent tags
  */
 import { Client } from "pg";
 import { readFileSync, existsSync } from "node:fs";
@@ -31,12 +22,9 @@ const WEBHOOK_URL =
 	})();
 
 // Subscribe to both the unified outbox and the legacy gate-ready channel.
-// The legacy maturity/state channels still fire but `roadmap_events` carries
-// the same information with better fidelity, so we ignore the legacy ones to
-// avoid double-posting.
-const CHANNELS = ["roadmap_events", "proposal_gate_ready"];
+const CHANNELS = ["roadmap_events", "proposal_gate_ready", "control_feed"];
 
-// ─── Auth helpers (unchanged from prior version) ──────────────────────────────
+// ─── Auth helpers ─────────────────────────────────────────────────────────────
 
 function getPGPassword(): string | undefined {
 	for (const pw of [process.env.PGPASSWORD, process.env.PG_PASSWORD]) {
@@ -179,7 +167,6 @@ const MATURITY_IMPL: Record<string, string> = {
 function normalizeAgent(raw: string | null | undefined): string {
 	const s = (raw ?? "").trim();
 	if (!s) return "agent";
-	// "worker-15097 (triage-agent)@codex-one" → "codex-one/triage-agent"
 	const m = /^worker-\d+\s+\(([^)]+)\)@(.+)$/i.exec(s);
 	if (m) return `${m[2]}/${m[1]}`;
 	return s;
@@ -196,7 +183,6 @@ function shouldEmitClaim(agent: string, proposalId: number, stage: string): bool
 	const last = recentClaims.get(key);
 	if (last && now - last < CLAIM_DEDUPE_WINDOW_MS) return false;
 	recentClaims.set(key, now);
-	// Garbage-collect stale entries opportunistically.
 	if (recentClaims.size > 500) {
 		for (const [k, t] of recentClaims) {
 			if (now - t > CLAIM_DEDUPE_WINDOW_MS * 2) recentClaims.delete(k);
@@ -212,7 +198,25 @@ const GATE_RELEASE_REASONS = new Set([
 	"gate_waive",
 ]);
 
-// ─── Event renderers (per /docs/proposals/P720/event-render-templates.md) ────
+// ─── In-memory event deduplication ───────────────────────────────────────────
+
+const EVENT_DEDUPE_WINDOW_MS = 5_000;
+const processedEvents = new Map<string, number>();
+
+function isDuplicate(key: string): boolean {
+	const now = Date.now();
+	const last = processedEvents.get(key);
+	if (last && now - last < EVENT_DEDUPE_WINDOW_MS) return true;
+	processedEvents.set(key, now);
+	if (processedEvents.size > 1000) {
+		for (const [k, t] of processedEvents) {
+			if (now - t > EVENT_DEDUPE_WINDOW_MS * 2) processedEvents.delete(k);
+		}
+	}
+	return false;
+}
+
+// ─── Event renderers ──────────────────────────────────────────────────────────
 
 function renderProposalCreated(p: ProposalRow, ev: EventRow): string {
 	const creator = String(ev.payload.agent ?? "system");
@@ -237,7 +241,7 @@ async function renderLeaseReleased(
 	ev: EventRow,
 ): Promise<string> {
 	const reason = String(ev.payload.release_reason ?? "").trim();
-	if (!GATE_RELEASE_REASONS.has(reason)) return ""; // routine release — suppressed
+	if (!GATE_RELEASE_REASONS.has(reason)) return "";
 
 	const agent = normalizeAgent(String(ev.payload.agent ?? "agent"));
 	const stage = p.status;
@@ -272,7 +276,7 @@ async function renderLeaseReleased(
 function renderMaturityChanged(p: ProposalRow, ev: EventRow): string {
 	const oldM = String(ev.payload.old_maturity ?? ev.payload.from_maturity ?? "");
 	const newM = String(ev.payload.maturity ?? ev.payload.new_maturity ?? p.maturity ?? "");
-	if (!newM || (oldM && oldM === newM)) return ""; // suppress no-op
+	if (!newM || (oldM && oldM === newM)) return "";
 
 	const stage = p.status;
 	const impl = MATURITY_IMPL[newM] ?? "";
@@ -319,12 +323,8 @@ async function renderDecisionMade(
 	p: ProposalRow,
 	ev: EventRow,
 ): Promise<string> {
-	const decision = String(
-		ev.payload.gate_decision ?? ev.payload.decision ?? "",
-	).toLowerCase();
-	const agent = normalizeAgent(
-		String(ev.payload.decided_by ?? ev.payload.agent ?? "gate-agent"),
-	);
+	const decision = String(ev.payload.gate_decision ?? ev.payload.decision ?? "").toLowerCase();
+	const agent = normalizeAgent(String(ev.payload.decided_by ?? ev.payload.agent ?? "gate-agent"));
 	const gate = String(ev.payload.gate ?? "").toUpperCase();
 	const stage = p.status;
 	const rationale = await fetchLatestGateRationale(client, p.id);
@@ -354,6 +354,7 @@ function renderReviewSubmitted(p: ProposalRow, ev: EventRow): string {
 // ─── Dispatch ─────────────────────────────────────────────────────────────────
 
 async function handleProposalEvent(client: Client, eventId: number): Promise<string> {
+	if (isDuplicate(`roadmap_events:${eventId}`)) return "";
 	const ev = await fetchEvent(client, eventId);
 	if (!ev) return "";
 	const p = await fetchProposal(client, ev.proposal_id);
@@ -374,14 +375,13 @@ async function handleProposalEvent(client: Client, eventId: number): Promise<str
 		case "review_submitted":
 			return renderReviewSubmitted(p, ev);
 		default:
-			// Don't post unknown event types — log and move on.
 			console.log(`[state-feed] ignoring unknown event_type=${ev.event_type}`);
 			return "";
 	}
 }
 
 async function renderGateReady(client: Client, payload: string): Promise<string> {
-	let data: Record<string, unknown> = {};
+	let data: Record<string, any> = {};
 	try {
 		data = JSON.parse(payload);
 	} catch {
@@ -389,9 +389,14 @@ async function renderGateReady(client: Client, payload: string): Promise<string>
 	}
 	const proposalId = Number(data.proposal_id ?? data.id);
 	if (!Number.isFinite(proposalId)) return "";
+	
+	// Deduplicate by proposal + gate + status
+	const gate = String(data.gate ?? "").toUpperCase();
+	const dedupeKey = `gate_ready:${proposalId}:${gate}:${data.from_stage}`;
+	if (isDuplicate(dedupeKey)) return "";
+
 	const p = await fetchProposal(client, proposalId);
 	if (!p) return "";
-	const gate = String(data.gate ?? "").toUpperCase();
 	const toStage = String(data.to_stage ?? "").toUpperCase();
 	const stage = p.status;
 	const gateLabel = gate ? `${gate} ` : "";
@@ -424,9 +429,25 @@ async function handleNotification(
 			return;
 		}
 		msg = await handleProposalEvent(client, eventId);
-		if (!msg) console.log(`[state-feed] event ${eventId} suppressed/empty`);
 	} else if (channel === "proposal_gate_ready") {
 		msg = await renderGateReady(client, payload);
+	} else if (channel === "control_feed") {
+		// P1123 Phase 3: forward pool_poisoned alerts to Discord operator channel.
+		try {
+			const env = JSON.parse(payload) as {
+				event_type?: string;
+				service_name?: string;
+				detail?: string;
+				ts?: string;
+			};
+			if (env.event_type === "pool_poisoned") {
+				const svc = env.service_name || "(unknown service)";
+				const detail = env.detail ? ` — ${env.detail.slice(0, 120)}` : "";
+				msg = `🚨 **POOL POISONED** in \`${svc}\`${detail}\nIncident detected by P1123 watchdog. Service is degraded; restart \`${svc}.service\` to recover.`;
+			}
+		} catch {
+			console.log(`[state-feed] bad JSON on control_feed`);
+		}
 	}
 	if (msg) {
 		console.log(`[state-feed] → Discord: ${msg.slice(0, 80)}`);
@@ -434,23 +455,34 @@ async function handleNotification(
 	}
 }
 
-async function main() {
+let activeClient: Client | null = null;
+let isShuttingDown = false;
+
+async function runListener() {
+	if (isShuttingDown) return;
+
+	// Close existing client if any
+	if (activeClient) {
+		console.log("[state-feed] Closing existing client before reconnect...");
+		try {
+			await activeClient.end();
+		} catch (err) {
+			console.error("[state-feed] Error closing old client:", err);
+		}
+		activeClient = null;
+	}
+
 	const pgPassword = getPGPassword();
 	const client = new Client({
 		host: process.env.PGHOST ?? process.env.PG_HOST ?? "127.0.0.1",
-		port: Number(process.env.PGPORT ?? process.env.PG_PORT ?? "5432"),
+		port: Number(process.env.PGPORT_DIRECT ?? process.env.PGPORT ?? "5432"),
 		user: process.env.PGUSER ?? process.env.PG_USER,
 		password: pgPassword,
 		database: process.env.PGDATABASE ?? process.env.PG_DATABASE ?? "agenthive",
+		application_name: "agenthive-state-feed",
 	});
 
-	await client.connect();
-	console.log("[state-feed] Connected to Postgres");
-
-	for (const ch of CHANNELS) {
-		await client.query(`LISTEN ${ch}`);
-		console.log(`[state-feed] Listening on ${ch}`);
-	}
+	activeClient = client;
 
 	client.on("notification", async (msg) => {
 		if (!msg.channel || !msg.payload) return;
@@ -462,11 +494,48 @@ async function main() {
 	});
 
 	client.on("error", (err) => {
+		if (isShuttingDown) return;
 		console.error("[state-feed] PG error:", err);
-		setTimeout(() => main().catch(console.error), 5000);
+		activeClient = null;
+		setTimeout(() => runListener().catch(console.error), 5000);
 	});
 
-	console.log("[state-feed] Ready — P720 Phase 1 grammar active");
+	try {
+		await client.connect();
+		console.log("[state-feed] Connected to Postgres");
+
+		for (const ch of CHANNELS) {
+			await client.query(`LISTEN ${ch}`);
+			console.log(`[state-feed] Listening on ${ch}`);
+		}
+		console.log("[state-feed] Ready — P720 Phase 1 grammar active");
+	} catch (err) {
+		console.error("[state-feed] Connection failed:", err);
+		activeClient = null;
+		setTimeout(() => runListener().catch(console.error), 5000);
+	}
+}
+
+async function main() {
+	// Graceful shutdown handlers
+	const shutdown = async () => {
+		if (isShuttingDown) return;
+		isShuttingDown = true;
+		console.log("[state-feed] Shutting down...");
+		if (activeClient) {
+			try {
+				await activeClient.end();
+			} catch (err) {
+				console.error("[state-feed] Error during shutdown:", err);
+			}
+		}
+		process.exit(0);
+	};
+
+	process.on("SIGTERM", shutdown);
+	process.on("SIGINT", shutdown);
+
+	await runListener();
 }
 
 main().catch((err) => {

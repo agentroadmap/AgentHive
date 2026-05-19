@@ -1,194 +1,211 @@
-# P193 — Cubic Lifecycle Management: Ship Report
+# P193: Cubic Lifecycle Management — Ship Report
 
-**Proposal:** P193 — Cubic Lifecycle Management (concurrency limits, automatic cleanup, recycling)
-**Status:** COMPLETE
-**Ship Date:** 2026-05-12
-**Core delivery:** P196 (lifecycle tables + cron + cleanup services)
-**Extended delivery:** P526 (orphan detection and reaping)
-
----
-
-## 1. Purpose
-
-This document is the agent onboarding reference for the cubic lifecycle system. It records what was actually built, what tables and services are live, the partial gap in configurable limits, and the production state as of 2026-05-04.
+**Proposal:** P193  
+**Title:** Cubic Lifecycle Management — concurrency limits, automatic cleanup, and recycling  
+**Status:** COMPLETE  
+**Ship Date:** 2026-05-04  
+**Documented:** 2026-05-09
 
 ---
 
-## 2. What Shipped
+## Background
 
-### 2.1 Database Layer
+Prior to this work, 2,593+ stale cubics accumulated without any lifecycle enforcement. Every agent dispatch created a new cubic, consuming memory and worktree disk space indefinitely. This document describes the lifecycle management system that was delivered across P193 and its sibling P196.
 
-**`roadmap.cubic_state`** — lifecycle shadow table, auto-created per cubic via trigger `trg_cubic_state_init` on `roadmap.cubics INSERT`.
+### Relationship Between P193 and P196
 
-| Column | Type | Notes |
-|--------|------|-------|
-| `cubic_id` | text | FK → `roadmap.cubics(cubic_id) ON DELETE CASCADE` |
-| `lifecycle_status` | text | `ACTIVE` \| `IDLE` \| `COMPLETED` \| `STALE` \| `ARCHIVED` |
-| `phase` | text | mirrors `cubics.phase` |
-| `last_activity_at` | timestamptz | updated on every agent action |
-| `idle_since` | timestamptz | set when status transitions to IDLE |
+P196 delivered the cleanup mechanics (idle detection, state tracking, cron), while P193 originally targeted configurable concurrency limits. In practice, the two proposals converged: the core lifecycle infrastructure shipped under P196's code footprint, and host-scoped concurrency budget checking landed in `CubicCleanupService`. Both proposals are now COMPLETE.
 
-**Schema note:** The original P193 ACs referenced `roadmap.cubic_lifecycle` (not real) and `roadmap.cubic_limits` (not yet created). The live table is `roadmap.cubic_state`. Do not reference `cubic_lifecycle` in new code.
+---
 
-**`roadmap.fn_acquire_cubic()`** — atomic cubic acquisition function (`database/ddl/v4/007_cubic_acquire.sql`).
+## Architecture: As-Built
 
-Signature:
-```sql
-roadmap.fn_acquire_cubic(
-  p_agent_identity TEXT,
-  p_proposal_id    INT8,
-  p_phase          TEXT DEFAULT 'design',
-  p_budget_usd     NUMERIC DEFAULT NULL,
-  p_worktree_path  TEXT DEFAULT NULL
-) RETURNS TABLE (cubic_id TEXT, was_recycled BOOLEAN, was_created BOOLEAN, status TEXT, worktree_path TEXT)
+### 1. `roadmap.cubic_state` — Lifecycle Shadow Table
+
+Every row in `roadmap.cubics` gets a corresponding `cubic_state` row via the trigger `trg_cubic_state_init` on INSERT. This table tracks lifecycle independently of the operational `cubics` table.
+
+**Lifecycle states:**
+
+```
+ACTIVE → IDLE → COMPLETED → STALE → ARCHIVED
 ```
 
-Behaviour (single transaction):
-1. Find existing cubic for agent (prefer IDLE, then any non-expired).
-2. If locked to a different proposal, mark `was_recycled = TRUE` and release.
-3. Focus the cubic: set `status = active`, `lock_holder = 'P' || proposal_id`.
-4. If no cubic exists, INSERT and return `was_created = TRUE`.
+| State | Meaning |
+|-------|---------|
+| `ACTIVE` | Cubic is in use (phase = RUNNING) |
+| `IDLE` | No activity for >5 min, but not yet stale |
+| `COMPLETED` | Agent finished its task |
+| `STALE` | IDLE/COMPLETED for >30 min — eligible for cleanup |
+| `ARCHIVED` | Terminal — expired and removed from active rotation |
 
-Supporting index: `idx_cubics_agent_active ON roadmap.cubics(agent_identity, status) WHERE status NOT IN ('expired', 'complete')`.
-
-### 2.2 Services
-
-**`CubicIdleDetector`** (`src/core/orchestration/cubic-idle-detector.ts`)
-
-| Method | Description |
-|--------|-------------|
-| `detectIdleCubics()` | Returns ACTIVE cubics with no activity for ≥ 5 min and `phase != RUNNING` |
-| `detectStaleCubics()` | Returns IDLE/COMPLETED cubics with no activity for ≥ 30 min |
-| `markIdle(cubicId)` | Transitions to IDLE, sets `idle_since` |
-| `markCompleted(cubicId)` | Transitions to COMPLETED |
-| `markArchived(cubicId)` | Transitions to ARCHIVED (terminal) |
-| `updateActivity(cubicId)` | Resets `last_activity_at`, clears `idle_since`, sets ACTIVE/RUNNING |
-| `syncFromCubics()` | Repairs drift between `cubics.status` and `cubic_state.lifecycle_status` |
-| `getStats()` | Returns counts grouped by `lifecycle_status` |
-
-Hardcoded thresholds: `IDLE_TIMEOUT_MS = 5 min`, `STALE_TIMEOUT_MS = 30 min`. These are class-level constants — not yet driven by config table (see §4).
-
-**`CubicCleanupService`** (`src/core/orchestration/cubic-cleanup.ts`)
-
-Core cleanup methods:
-
-| Method | Description |
-|--------|-------------|
-| `cleanupStaleCubics(opts)` | Full run: detect stale → expire → archive → optionally remove worktrees |
-| `expireCubic(cubicId)` | Sets `cubics.status = 'expired'`, archives `cubic_state`, releases locks, writes `audit_log` |
-| `removeWorktree(cubicId)` | Removes worktree dir from `cubics.worktree_path` or legacy path |
-| `markIdleCubics()` | Drives `CubicIdleDetector.markIdle()` for all detected idle cubics |
-| `syncCompletedCubics()` | Syncs `cubics.status = 'complete'` → `cubic_state.lifecycle_status = 'COMPLETED'` |
-| `expireOldCubics(minutes)` | Bulk-expires cubics older than N minutes (catches pre-`cubic_state` rows) |
-
-P526 orphan-reap extensions:
-
-| Method | Description |
-|--------|-------------|
-| `detectOrphanCubics(opts)` | Classifies candidates by 4 orphan rules (see §3) |
-| `reapOrphanCubics(opts)` | Applies preserve/delete/orphan actions; returns `P526CleanupReport` |
-| `forceReapCubic(args)` | Manual override — bypasses classification, force-reaps a named cubic |
-
-**Worktree cleanup:** Cleans both `cubics.worktree_path` and the legacy path `/data/code/.claude/cubics/<cubic-id>`.
-
-**Orphans root:** `AGENTHIVE_CUBIC_ORPHANS_ROOT` env var, defaults to `/data/code/orphans`. Dirty worktrees are moved here (not deleted) before the registry entry is purged.
-
-### 2.3 Cron Job
-
-**`scripts/cubic-lifecycle-cron.ts`** — runs every 15 minutes via crontab.
-
-Five steps per run:
-1. `detector.syncFromCubics()` — fix drift between `cubics` and `cubic_state`
-2. `cleanup.markIdleCubics()` — ACTIVE → IDLE after 5 min inactivity
-3. `cleanup.syncCompletedCubics()` — sync COMPLETED status
-4. `cleanup.cleanupStaleCubics()` — expire IDLE/COMPLETED cubics stale ≥ 30 min
-5. `cleanup.expireOldCubics(60)` — expire any cubics older than 60 min (catch-all)
-
-Flags: `--dry-run` (steps 4+5 skipped), `--no-worktree-cleanup` (worktree removal skipped).
+**Sync relationship:** `cubic_state.lifecycle_status` is kept in sync with `cubics.status` via `CubicIdleDetector.syncFromCubics()`. This covers cubics that predate the `cubic_state` table.
 
 ---
 
-## 3. Orphan Classification Rules (P526)
+### 2. `CubicIdleDetector`
 
-`detectOrphanCubics()` classifies each candidate against four rules (checked in priority order):
+**File:** `src/core/orchestration/cubic-idle-detector.ts`
+
+Detects lifecycle transitions and writes state changes to `roadmap.cubic_state`.
+
+| Constant | Value | Meaning |
+|----------|-------|---------|
+| `IDLE_TIMEOUT_MS` | 5 minutes | ACTIVE → IDLE transition threshold |
+| `STALE_TIMEOUT_MS` | 30 minutes | IDLE/COMPLETED → stale (cleanup eligible) threshold |
+
+**Key methods:**
+
+| Method | Description |
+|--------|-------------|
+| `detectIdleCubics()` | Find ACTIVE cubics with `last_activity_at < now - 5min` and `phase != 'RUNNING'` |
+| `detectStaleCubics()` | Find IDLE/COMPLETED cubics with `last_activity_at < now - 30min` |
+| `markIdle(cubicId)` | Set `lifecycle_status = IDLE`, stamp `idle_since` |
+| `markCompleted(cubicId)` | Set `lifecycle_status = COMPLETED` |
+| `markArchived(cubicId)` | Set `lifecycle_status = ARCHIVED` (terminal) |
+| `updateActivity(cubicId)` | Reset idle tracking: set `last_activity_at = NOW()`, `lifecycle_status = ACTIVE`, clear `idle_since` |
+| `syncFromCubics()` | Reconcile `cubic_state` from `cubics.status` — returns count of rows updated |
+| `getStats()` | GROUP BY `lifecycle_status` summary with oldest/newest activity timestamps |
+
+Call `updateActivity()` on cubic focus, acquire, or any agent action to prevent false idle detection.
+
+---
+
+### 3. `CubicCleanupService`
+
+**File:** `src/core/orchestration/cubic-cleanup.ts`
+
+Handles expiry, worktree removal, orphan detection, and host-scoped concurrency budgets.
+
+#### Standard Cleanup
+
+| Method | Description |
+|--------|-------------|
+| `cleanupStaleCubics(options?)` | Full cleanup pass: detect stale → expire → archive → remove worktrees. Returns `CleanupReport`. |
+| `expireCubic(cubicId)` | Mark `cubics.status = 'expired'`, set `cubic_state.lifecycle_status = 'ARCHIVED'`, release locks, write audit log |
+| `removeWorktree(cubicId)` | Remove worktree at `cubics.worktree_path` (and legacy `/data/code/.claude/cubics/<id>`); non-fatal if path is missing |
+| `syncCompletedCubics()` | Push `cubics.status = 'complete'` → `cubic_state.lifecycle_status = 'COMPLETED'` for drift repair |
+| `markIdleCubics()` | Run idle detection loop and mark all detected cubics IDLE |
+| `expireOldCubics(olderThanMinutes)` | Bulk-expire cubics older than threshold regardless of `cubic_state` (catches pre-lifecycle cubics) |
+
+#### P526 Orphan Reaping
+
+For cubics where registry state and worktree disk state have diverged:
+
+| Method | Description |
+|--------|-------------|
+| `detectOrphanCubics(options?)` | Classify cubics into 4 orphan rules (see below) |
+| `reapOrphanCubics(options?)` | Detect and apply preserve/delete/orphan actions. Returns `P526CleanupReport`. |
+| `forceReapCubic(args)` | Manual override — bypass detection, force-reap a named cubic |
+
+**Orphan classification rules:**
 
 | Rule | Condition | Action |
 |------|-----------|--------|
-| 4 | Active registry, no worktree on disk (grace period elapsed) | `ORPHANED` — set `status = orphaned`, release locks |
-| 3 | Closed (complete/expired) registry, worktree still on disk | `DELETED` — remove worktree, delete registry row |
-| 2 | Active, stale heartbeat, no active MCP reference | `DELETED` or `PRESERVED` if dirty |
-| 1 | Active, no active MCP agent slot for `cubic_id:agent_identity` | `DELETED` or `PRESERVED` if dirty |
+| 1 | Active registry, no live MCP agent slot, idle >5 min | Delete |
+| 2 | Active registry, stale heartbeat, no MCP reference after 30 min | Delete |
+| 3 | Closed registry (`complete`/`expired`), worktree still on disk after grace period | Delete worktree |
+| 4 | Active registry, worktree missing, activated >grace-period ago | Mark `orphaned` |
+| `force` | Manual operator override | Force-reap regardless of rule |
 
-Dirty worktrees (uncommitted changes) are always moved to `$AGENTHIVE_CUBIC_ORPHANS_ROOT/<cubic-id>-<timestamp>` instead of deleted, and the registry row is set to `status = orphaned` with `worktree_path` updated to the recovery path.
+Dirty worktrees (uncommitted changes) are moved to `$AGENTHIVE_CUBIC_ORPHANS_ROOT` (default `/data/code/orphans`) rather than deleted. All reap actions are written to `roadmap.cubic_cleanup_audit`.
 
----
-
-## 4. Configurable Limits — Partial Implementation
-
-The original P193 design called for a `roadmap.cubic_limits` config table and a `CubicLimitsService.isAtCapacity()` gate. **This table was not created.**
-
-What was implemented instead: `checkCubicCreateBudget()` in `cubic-cleanup.ts` reads `max_active_cubics_per_host` from `roadmap.host_model_policy.metadata` (JSON key). Default is 10 (`DEFAULT_MAX_ACTIVE_CUBICS_PER_HOST`).
+#### Host Concurrency Budget
 
 ```typescript
-// Reads from host_model_policy.metadata->>'max_active_cubics_per_host'
-const status: CubicBudgetStatus = await checkCubicCreateBudget({ query });
-if (!status.allowed) { /* block creation */ }
+export const DEFAULT_MAX_ACTIVE_CUBICS_PER_HOST = 10;
+
+checkCubicCreateBudget(options: CubicBudgetOptions): Promise<CubicBudgetStatus>
 ```
 
-The MCP `cubic_create` handler calls this before inserting. This covers the core gate but does not provide:
-- A dedicated `cubic_limits` config table with `alert_threshold`, `ttl_hours`, or `idle_timeout_minutes` config keys.
-- Operator UI or MCP tools to update limits without touching `host_model_policy`.
-- The `cubic.check_and_alert()` gate-pipeline integration originally specified in P193.
+Reads `max_active_cubics_per_host` from `roadmap.host_model_policy.metadata` for the current host. Falls back to `DEFAULT_MAX_ACTIVE_CUBICS_PER_HOST = 10`. Returns `{ hostName, activeCount, maxActive, allowed }`. Use this as a pre-check before creating a new cubic.
 
-These remain as a potential follow-on proposal if dynamic limit management is needed.
+Host name resolution: `AGENTHIVE_HOST` env var → `os.hostname()` fallback.
 
 ---
 
-## 5. Production State (2026-05-04)
+### 4. `fn_acquire_cubic()` — Atomic Acquire
+
+**File:** `database/ddl/v4/007_cubic_acquire.sql`
+
+Single SQL function that atomically find-or-creates and focuses a cubic on a proposal. Eliminates the 4-round-trip overhead of the previous MCP-based flow (16 round-trips for a 4-agent squad → 1 SQL call).
+
+```sql
+SELECT * FROM roadmap.fn_acquire_cubic(
+    p_agent_identity  TEXT,
+    p_proposal_id     INT8,
+    p_phase           TEXT    DEFAULT 'design',
+    p_budget_usd      NUMERIC DEFAULT NULL,
+    p_worktree_path   TEXT    DEFAULT NULL
+);
+-- Returns: cubic_id, was_recycled, was_created, status, worktree_path
+```
+
+**Logic:**
+1. Find existing cubic for `agent_identity` (prefer `idle`, then any non-expired)
+2. If locked to a different proposal, set `was_recycled = TRUE` and release
+3. Focus the cubic: `status = 'active'`, update `lock_holder`, `lock_phase`, `metadata`
+4. If no cubic found: INSERT a new row with `was_created = TRUE`
+
+**Index:** `idx_cubics_agent_active` on `(agent_identity, status) WHERE status NOT IN ('expired', 'complete')` supports the lookup in step 1.
+
+---
+
+### 5. `cubic-lifecycle-cron.ts` — Maintenance Cron
+
+**File:** `scripts/cubic-lifecycle-cron.ts`
+
+Runs every 15 minutes (or on-demand). Executes five steps in order:
+
+```
+Step 1: syncFromCubics()       — fix drift between cubics and cubic_state
+Step 2: markIdleCubics()       — ACTIVE → IDLE after 5 min inactivity
+Step 3: syncCompletedCubics()  — push complete status to cubic_state
+Step 4: cleanupStaleCubics()   — expire and remove worktrees for IDLE/COMPLETED >30 min
+Step 5: expireOldCubics(60)    — bulk-expire cubics >60 min old (skipped in dry-run)
+```
+
+**Crontab entry (every 15 minutes):**
+```
+*/15 * * * * cd /data/code/AgentHive && bun run scripts/cubic-lifecycle-cron.ts
+```
+
+**CLI flags:**
+```
+--dry-run              Report what would be cleaned without making changes
+--no-worktree-cleanup  Skip worktree directory removal
+```
+
+---
+
+## Production State (2026-05-04)
 
 | Metric | Value |
 |--------|-------|
-| `cubic_state` ACTIVE | 16 |
-| `cubic_state` ARCHIVED | 6,895 |
-| Cron cadence | Every 15 min |
-| Idle threshold | 5 min (hardcoded) |
-| Stale threshold | 30 min (hardcoded) |
-| Default max active per host | 10 (host_model_policy or constant) |
+| ACTIVE cubics | 16 |
+| ARCHIVED cubics | 6,895 |
+| Total | 6,911 |
+| Cron interval | 15 min |
+| Idle threshold | 5 min |
+| Stale threshold | 30 min |
+| Default max active / host | 10 |
 
 ---
 
-## 6. Code Artifacts
+## Key Files
 
-| Artifact | Path |
-|----------|------|
-| Lifecycle shadow table DDL | Shipped in P196 (see `database/ddl/v4/007_cubic_acquire.sql` for fn + index) |
-| Atomic acquire function | `database/ddl/v4/007_cubic_acquire.sql` |
-| Idle detector | `src/core/orchestration/cubic-idle-detector.ts` |
-| Cleanup service | `src/core/orchestration/cubic-cleanup.ts` |
-| Lifecycle cron | `scripts/cubic-lifecycle-cron.ts` |
-| MCP cubic tools | `src/apps/mcp-server/tools/cubic/` |
-| Orphan cleanup tests | `tests/cubic/cubic-cleanup-p526.test.ts` |
+| File | Purpose |
+|------|---------|
+| `src/core/orchestration/cubic-idle-detector.ts` | Lifecycle state detection and transition writes |
+| `src/core/orchestration/cubic-cleanup.ts` | Cleanup, expiry, orphan reaping, concurrency budget |
+| `scripts/cubic-lifecycle-cron.ts` | 15-min maintenance cron |
+| `database/ddl/v4/007_cubic_acquire.sql` | Atomic cubic acquire SQL function |
 
 ---
 
-## 7. AC Status
+## Open Items
 
-| AC | Description | Status |
-|----|-------------|--------|
-| AC-1 | `cubic_state` table created with lifecycle columns | PASS (via P196) |
-| AC-2 | Trigger auto-creates `cubic_state` row on `cubics` insert | PASS (via P196) |
-| AC-3 | Cron marks IDLE after inactivity threshold | PASS (5 min constant) |
-| AC-4 | Cron expires STALE cubics after stale threshold | PASS (30 min constant) |
-| AC-5 | `fn_acquire_cubic` recycles idle cubics atomically | PASS (via P196) |
-| AC-6 | Worktree removal on expiry | PASS |
-| AC-7 | Audit log entries for cleanup actions | PASS (`cubic_cleanup_audit` table) |
-| AC-8 | Configurable limits table with `max_concurrent` | PARTIAL — limit is in `host_model_policy.metadata`, not a dedicated `cubic_limits` table |
-
----
-
-## 8. Related Proposals
-
-- **P196** — cubic_state table + trigger + fn_acquire_cubic + cleanup services (core delivery)
-- **P201** — roadmap.cubics table schema (prerequisite)
-- **P526** — cubic orphan detection and reaping (extended cleanup rules)
-- **P193 gap** — `roadmap.cubic_limits` config table + `CubicLimitsService` (not built; limits served from `host_model_policy.metadata`)
+| Item | Notes |
+|------|-------|
+| Configurable idle/stale timeouts | Currently hardcoded constants in `CubicIdleDetector`. Original P193 plan was a `cubic_limits` table; actual implementation reads from `host_model_policy.metadata`. A dedicated config table remains an option if per-project timeout tuning is needed. |
+| Gate pipeline capacity alerts | Original AC-8: alert on `alert_threshold` capacity. Not implemented — gate pipeline was retired (P754/P753). Capacity check is available via `checkCubicCreateBudget()` for integration into the dispatch path. |
+| Orphan reaping in cron | `reapOrphanCubics()` exists but is not yet called from `cubic-lifecycle-cron.ts`. Must be added explicitly. |

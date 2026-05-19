@@ -17,11 +17,14 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
-import { validateModelForDispatch } from "../../apps/mcp-server/tools/spending/pg-handlers.ts";
+import {
+	validateModelForDispatch,
+	getLatestQuotaSnapshot,
+} from "../../apps/mcp-server/tools/spending/pg-handlers.ts";
 import { query } from "../../infra/postgres/pool.ts";
 import {
 	getDaemonUrl,
@@ -62,8 +65,8 @@ const GITCONFIG_ROOT = join(getProjectRoot(), ".git", "worktrees-config");
 //
 // `runProcess` spawns long-lived `claude --print` (and similar) children that
 // can run for many minutes. systemd units configure TimeoutStopSec, and the
-// orchestrator/gate-pipeline `shutdown()` paths used to wait on the in-flight
-// promise set — but those promises only resolve when the children themselves
+// orchestrator's `shutdown()` path used to wait on the in-flight promise set
+// — but those promises only resolve when the children themselves
 // exit. If the children never receive a signal they keep running until
 // systemd escalates to SIGKILL on the parent.
 //
@@ -364,6 +367,7 @@ export function buildSpawnProcessEnv(input: {
 		// Carry through essential PATH
 		PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
 		HOME: process.env.HOME ?? "/var/lib/agenthive",
+		...(process.env.CODEX_HOME ? { CODEX_HOME: process.env.CODEX_HOME } : {}),
 		// Agent-specific DB credentials — agent env first, then process env
 		DATABASE_URL: input.agentEnv.DATABASE_URL ?? process.env.DATABASE_URL ?? "",
 		AGENT_WORKTREE: input.worktree,
@@ -385,6 +389,26 @@ export function buildSpawnProcessEnv(input: {
 		...baseEnv,
 		...sanitizeExtraEnv(input.extraEnv),
 	};
+}
+
+function assertCliAuthAvailable(
+	route: ModelRoute,
+	env: Record<string, string>,
+): void {
+	if (route.agentCli !== "codex") return;
+	if (env.OPENAI_API_KEY || env.CODEX_API_KEY) return;
+
+	const codexHome = env.CODEX_HOME ?? join(env.HOME, ".codex");
+	const authPath = join(codexHome, "auth.json");
+	if (existsSync(authPath)) return;
+
+	throw new Error(
+		[
+			`[AgentSpawner] Codex auth missing for route ${route.agentProvider}/${route.modelName}`,
+			`no OPENAI_API_KEY/CODEX_API_KEY resolved and no auth.json found under ${codexHome}`,
+			"run codex login for the service user, or set OPENAI_API_KEY/CODEX_API_KEY/CODEX_HOME in the orchestrator environment",
+		].join("; "),
+	);
 }
 
 /**
@@ -483,10 +507,16 @@ function buildOpenAICompatArgs(
  * Build argv + env for Google Gemini CLI.
  * Used when api_spec = 'google'.
  * cli_path in model_routes controls the binary location (no hardcoding here).
+ *
+ * --skip-trust: required for headless invocation when the worktree directory
+ * isn't on Gemini's trusted-folders list. The agent-spawner constructs a
+ * whitelist-only child env so GEMINI_CLI_TRUST_WORKSPACE doesn't propagate
+ * from the parent agency process; the CLI flag is the load-bearing equivalent.
  */
 function buildGeminiArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
 	const argv = [
 		route.cliPath ?? "gemini",
+		"--skip-trust",
 		"--model",
 		route.modelName,
 		"--prompt",
@@ -712,6 +742,12 @@ async function loadEnvAgent(
 /**
  * Resolve the first enabled agent provider from model_routes.
  * Used as a dynamic fallback when no worktree-level provider is configured.
+ *
+ * P928: Refactored to use selectActiveRouteRow as the canonical route eligibility
+ * check, but note: this function does NOT filter by agent_provider (it picks the
+ * first enabled route across all providers). This differs from selectActiveRouteRow
+ * which requires a provider parameter. The fallback path here queries directly to
+ * find any enabled route without a provider constraint.
  */
 export async function resolveActiveRouteProvider(): Promise<AgentProvider | null> {
 	// P245 host policy: filter out routes whose route_provider is forbidden
@@ -1184,7 +1220,7 @@ async function buildProposalContextPackage(input: {
  * P738 (HF-B): assemble the spawn task with a closing hint that explicitly
  * forbids worker-side set_maturity calls. Gate evaluators advance maturity
  * server-side after parsing stdout verdicts; non-gate workers emit
- * spawn_summary_emit and let the gate-pipeline reconciler decide.
+ * spawn_summary_emit and let the orchestrator's reconciler decide.
  *
  * Pure function — exported for unit testing. The previous inline emitter
  * appended a "Maturity Advancement: call set_maturity → mature on completion"
@@ -1204,7 +1240,7 @@ export function renderClosingHint(input: {
 	const terminal = input.stage === "COMPLETE" || input.stage === "DEPLOYED";
 	const hint = terminal
 		? ""
-		: `\n\n## Completion\nWhen you finish, emit \`mcp_agent action="spawn_summary_emit"\` with outcome=success|partial|failure|timeout|escalated and a one-paragraph summary. DO NOT call \`set_maturity\` — only the gate-evaluator advances maturity, after parsing your stdout verdict (gate roles) or after the gate-pipeline reconciler reads your spawn_summary (non-gate roles). Proposal id: ${input.proposalId}.`;
+		: `\n\n## Completion\nWhen you finish, emit \`mcp_agent action="spawn_summary_emit"\` with outcome=success|partial|failure|timeout|escalated and a one-paragraph summary. DO NOT call \`set_maturity\` — only the gate-evaluator advances maturity, after parsing your stdout verdict (gate roles) or after the orchestrator's reconciler reads your spawn_summary (non-gate roles). Proposal id: ${input.proposalId}.`;
 	return `${input.contextPackage}\n\n## Task\n${input.task}${hint}`;
 }
 
@@ -1233,6 +1269,40 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 			throw new Error(
 				`[P760] Project ${req.projectId} is at max concurrent dispatch capacity`,
 			);
+		}
+	}
+
+	// P1004: pre-spawn quota check — defer if provider quota is critically low.
+	// Reads the latest agent_usage_snapshot for the target provider. Missing
+	// snapshot = no data yet, so we allow the spawn (fail open rather than block
+	// all agents until the first report arrives).
+	const QUOTA_HEADROOM_PCT = parseFloat(
+		process.env.QUOTA_HEADROOM_PCT ?? "0.20",
+	);
+	if (req.provider) {
+		try {
+			const quotaSnap = await getLatestQuotaSnapshot(req.provider);
+			if (
+				quotaSnap?.quota_remaining !== null &&
+				quotaSnap?.quota_remaining !== undefined &&
+				quotaSnap.quota_limit !== null &&
+				quotaSnap.quota_limit !== undefined &&
+				quotaSnap.quota_limit > 0
+			) {
+				const pct = quotaSnap.quota_remaining / quotaSnap.quota_limit;
+				if (pct < QUOTA_HEADROOM_PCT) {
+					throw new Error(
+						`[P1004] Spawn deferred: ${req.provider} quota at ${Math.round(pct * 100)}% ` +
+						`(${quotaSnap.quota_remaining}/${quotaSnap.quota_limit} remaining, ` +
+						`headroom threshold ${Math.round(QUOTA_HEADROOM_PCT * 100)}%). ` +
+						`Resets at ${quotaSnap.quota_reset_at?.toISOString() ?? "unknown"}.`,
+					);
+				}
+			}
+		} catch (err) {
+			// Only re-throw P1004 quota errors; silently swallow DB errors so a
+			// missing snapshot table (pre-migration) never blocks spawning.
+			if (err instanceof Error && err.message.startsWith("[P1004]")) throw err;
 		}
 	}
 
@@ -1344,6 +1414,16 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 			AGENTHIVE_ROUTE_ABBR: routeAbbr,
 		},
 	});
+	try {
+		assertCliAuthAvailable(route, processEnv);
+	} catch (err) {
+		await obsWriter.closeSpan({
+			spanId,
+			status: "error",
+			errorMessage: err instanceof Error ? err.message : String(err),
+		});
+		throw err;
+	}
 
 	// Insert agent_runs row (status = running)
 	// P852: agent_runs.agent_identity is the structured label without the

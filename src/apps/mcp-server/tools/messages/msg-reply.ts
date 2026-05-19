@@ -7,10 +7,13 @@
  * - Auto-acks the original message
  * - Notifies recipient via pg_notify
  * - Returns reply_message_id
+ *
+ * P1105 AC-27: user/* agents require bearer token verification
  */
 
 import { query, getPool } from "../../../../postgres/pool.ts";
 import type { CallToolResult } from "../../types.ts";
+import { verifyUserBearer } from "../../../../infra/messaging/bearer-auth.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
@@ -23,13 +26,32 @@ function errorResult(msg: string, err: unknown): CallToolResult {
 	};
 }
 
-export async function handleMsgReply(args: {
-	correlation_id: string;
-	content: string;
-	message_type?: string;
-	from_agent: string;
-}): Promise<CallToolResult> {
+export async function handleMsgReply(
+	args: {
+		correlation_id: string;
+		content: string;
+		message_type?: string;
+		from_agent: string;
+		authorization?: string;
+	},
+	operatorHmacSecret?: Buffer,
+): Promise<CallToolResult> {
 	try {
+		// P1105 AC-27: Verify user/* agents have valid bearer token
+		if (operatorHmacSecret) {
+			const bearerCheck = verifyUserBearer(
+				args.authorization,
+				args.from_agent,
+				operatorHmacSecret,
+			);
+			if (!bearerCheck.valid) {
+				return errorResult(
+					`Authentication failed (P1105 AC-27): ${bearerCheck.reason}`,
+					new Error(bearerCheck.reason),
+				);
+			}
+		}
+
 		// Find original message: SELECT * FROM message_ledger WHERE correlation_id = $correlation_id AND to_agent = $from_agent ORDER BY created_at LIMIT 1
 		const originalResult = await query(
 			`SELECT id, from_agent, to_agent, correlation_id
@@ -53,10 +75,10 @@ export async function handleMsgReply(args: {
 		// INSERT new reply row into message_ledger with same correlation_id, from_agent=$from_agent, to_agent=original.from_agent
 		const replyResult = await query(
 			`INSERT INTO roadmap.message_ledger (
-				from_agent, to_agent, message_content, message_type, correlation_id
-			) VALUES ($1, $2, $3, $4, $5)
+				from_agent, to_agent, message_content, message_type, correlation_id, reply_to
+			) VALUES ($1, $2, $3, $4, $5, $6)
 			 RETURNING id, created_at`,
-			[args.from_agent, recipientAgent, args.content, args.message_type ?? "ack", args.correlation_id],
+			[args.from_agent, recipientAgent, args.content, args.message_type ?? "ack", args.correlation_id, original.id],
 		);
 
 		const replyId = replyResult.rows[0].id;

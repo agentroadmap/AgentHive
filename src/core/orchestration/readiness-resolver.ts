@@ -1,10 +1,10 @@
 /**
  * P751: Readiness resolver.
  *
- * Extracts the `assessReadiness()` logic from pipeline-cron.ts into a
- * standalone, testable module. The scanQueues() loop uses this to decide
- * whether a mature proposal needs a prep agent (incomplete RFC) or a gate
- * agent (ready to advance).
+ * Standalone, testable module that owns the `assessReadiness()` logic
+ * (originally part of the legacy gate-pipeline, retired by P754). The
+ * scanQueues() loop uses this to decide whether a mature proposal needs
+ * a prep agent (incomplete RFC) or a gate agent (ready to advance).
  *
  * The DB fetch (fetchProposalDetail) is co-located here so readiness-resolver
  * owns the full proposal detail lifecycle — gate-scanner-v2 only carries the

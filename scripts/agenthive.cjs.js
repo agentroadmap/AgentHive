@@ -3335,9 +3335,8 @@ PG_SCHEMA=roadmap
   s.start("Installing systemd service...");
   const serviceContent = `[Unit]
 Description=AgentHive Orchestrator (event-driven agent dispatcher)
-After=network.target postgresql.service agenthive-mcp.service agenthive-gate-pipeline.service
+After=network.target postgresql.service agenthive-mcp.service
 Requires=agenthive-mcp.service
-Wants=agenthive-gate-pipeline.service
 
 [Service]
 Type=simple
@@ -3454,6 +3453,68 @@ async function cmdRestart() {
 async function cmdLogs() {
   await sudoSpawn(["journalctl", "-u", SYSTEMD_SERVICE_NAME, "-f", "--no-pager"]);
 }
+async function cmdDbPing(target) {
+  const targets = target === "all" ? ["postgres", "pgbouncer"] : [target];
+  for (const t of targets) {
+    if (t === "pgbouncer") {
+      const host = process.env.PGBOUNCER_HOST ?? "127.0.0.1";
+      const port = Number(process.env.PGBOUNCER_PORT ?? process.env.PGPORT ?? 6432);
+      const user = process.env.PGBOUNCER_ADMIN_USER ?? process.env.PGUSER ?? "agenthive";
+      R2.info(`Pinging PgBouncer at ${host}:${port} (user: ${user})…`);
+      const start = Date.now();
+      try {
+        const out = run([
+          "psql",
+          `-h`,
+          host,
+          `-p`,
+          String(port),
+          `-U`,
+          user,
+          `pgbouncer`,
+          `-c`,
+          `SHOW VERSION`,
+          `-t`,
+          `-A`
+        ]);
+        const ms = Date.now() - start;
+        R2.success(`PgBouncer OK — ${out.trim()} (${ms}ms)`);
+      } catch (e2) {
+        R2.error(`PgBouncer UNREACHABLE at ${host}:${port} — ${e2.message}`);
+        process.exitCode = 1;
+      }
+    } else if (t === "postgres") {
+      const host = process.env.PGHOST ?? "127.0.0.1";
+      const port = Number(process.env.PGPORT_DIRECT ?? process.env.PGPORT ?? 5432);
+      const user = process.env.PGUSER ?? "agenthive";
+      R2.info(`Pinging PostgreSQL at ${host}:${port} (user: ${user})…`);
+      const start = Date.now();
+      try {
+        run([
+          "psql",
+          `-h`,
+          host,
+          `-p`,
+          String(port),
+          `-U`,
+          user,
+          `-c`,
+          `SELECT 1`,
+          `-t`,
+          `-A`
+        ]);
+        const ms = Date.now() - start;
+        R2.success(`PostgreSQL OK (${ms}ms)`);
+      } catch (e2) {
+        R2.error(`PostgreSQL UNREACHABLE at ${host}:${port} — ${e2.message}`);
+        process.exitCode = 1;
+      }
+    } else {
+      R2.error(`Unknown target '${t}'. Use: postgres | pgbouncer | all`);
+      process.exitCode = 1;
+    }
+  }
+}
 var program2 = new Command("agenthive").description("AgentHive system administration CLI").version("0.1.0");
 program2.command("init").description("One-time system setup (creates user, service, env file)").action(cmdInit);
 program2.command("status").description("Check orchestrator service status").action(cmdStatus);
@@ -3461,4 +3522,5 @@ program2.command("start").description("Start the orchestrator service").action(c
 program2.command("stop").description("Stop the orchestrator service").action(cmdStop);
 program2.command("restart").description("Restart the orchestrator service").action(cmdRestart);
 program2.command("logs").description("Tail orchestrator logs").action(cmdLogs);
+program2.command("db-ping").description("Ping a database endpoint: postgres | pgbouncer | all").argument("[target]", "postgres | pgbouncer | all", "all").action(cmdDbPing);
 program2.parse();

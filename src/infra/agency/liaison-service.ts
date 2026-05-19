@@ -9,6 +9,7 @@
  *   active (next heartbeat restores; CASE branch handles dormant→active)
  */
 
+import type { PoolClient } from "pg";
 import { query } from "../postgres/pool.ts";
 
 export interface LiaisonRegisterPayload {
@@ -45,9 +46,14 @@ export interface LiaisonHeartbeatResult {
 
 /**
  * Register an agency and open a liaison session.
+ *
+ * P913: accepts an optional PoolClient so callers (selfRegisterAgency) can
+ * include this work in their own transaction. When client is omitted, falls
+ * back to the pool's auto-commit query() helper for backward compatibility.
  */
 export async function liaisonRegister(
 	payload: LiaisonRegisterPayload,
+	client?: PoolClient,
 ): Promise<LiaisonRegisterResult> {
 	const {
 		agency_id,
@@ -64,7 +70,24 @@ export async function liaisonRegister(
 	if (!provider?.trim()) throw new Error("provider is required");
 	if (!host_id?.trim()) throw new Error("host_id is required");
 
-	const result = await query(
+	const runQuery = client
+		? <T extends Record<string, unknown>>(text: string, params?: unknown[]) =>
+				client.query<T>(text, params as never)
+		: query;
+
+	// End any active session first in a separate statement — PostgreSQL CTEs share
+	// the same snapshot, so an UPDATE in one CTE is invisible to an INSERT in
+	// another CTE of the same statement. The unique partial index
+	// idx_agency_session_one_active (WHERE ended_at IS NULL) would fire because
+	// the INSERT still sees the old un-ended row.
+	await runQuery(
+		`UPDATE roadmap.agency_liaison_session
+		 SET ended_at = now(), end_reason = 'replaced'
+		 WHERE agency_id = $1 AND ended_at IS NULL`,
+		[agency_id],
+	);
+
+	const result = await runQuery(
 		`
     WITH upsert_agency AS (
       INSERT INTO roadmap.agency (
@@ -97,7 +120,7 @@ export async function liaisonRegister(
 			capabilities,
 			JSON.stringify({ ...metadata, capacity_envelope, public_key }),
 		],
-	);
+	) as { rows: Array<{ session_id: string; agency_id: string; status: string }> };
 
 	if (result.rows.length === 0)
 		throw new Error(`Failed to register agency ${agency_id}`);
@@ -129,72 +152,121 @@ export async function liaisonHeartbeat(
 
 	if (!session_id) throw new Error("session_id is required");
 
-	const result = await query(
-		`
-    WITH session_check AS (
-      SELECT agency_id, ended_at
-      FROM roadmap.agency_liaison_session
-      WHERE session_id = $1
-    ),
-    update_agency AS (
-      UPDATE roadmap.agency
-      SET
-        last_heartbeat_at = now(),
-        status = CASE
-          WHEN status = 'dormant'      THEN 'active'      -- reactivate on heartbeat
-          WHEN $2 = 'throttled'        THEN 'throttled'
-          WHEN $2 = 'paused'           THEN 'paused'
-          ELSE status
-        END,
-        status_reason = CASE
-          WHEN status = 'dormant' THEN 'Reactivated by heartbeat'
-          ELSE status_reason
-        END,
-        metadata = jsonb_set(metadata, '{capacity_envelope}', $3::jsonb)
-      WHERE agency_id = (SELECT agency_id FROM session_check)
-        AND (SELECT ended_at FROM session_check) IS NULL
-      RETURNING agency_id, status
-    )
-    SELECT
-      (SELECT agency_id FROM session_check)   as agency_id,
-      (SELECT status    FROM update_agency)   as agency_status,
-      EXTRACT(EPOCH FROM (now() - (
-        SELECT last_heartbeat_at FROM roadmap.agency
-        WHERE agency_id = (SELECT agency_id FROM session_check)
-      )))::int                                as silence_seconds,
-      (
-        (SELECT status FROM update_agency) = 'active'
-        AND now() - (SELECT last_heartbeat_at FROM roadmap.agency
-                     WHERE agency_id = (SELECT agency_id FROM session_check))
-            < interval '60 seconds'
-      )                                       as dispatchable
-    `,
-		[session_id, liaison_status, JSON.stringify(capacity_envelope ?? {})],
+	// Fetch session and agency info
+	const sessionResult = await query(
+		`SELECT agency_id, ended_at FROM roadmap.agency_liaison_session WHERE session_id = $1`,
+		[session_id],
 	);
 
-	if (result.rows.length === 0)
+	if (sessionResult.rows.length === 0)
 		throw new Error(`Session ${session_id} not found or already ended`);
 
-	const row = result.rows[0];
+	const { agency_id, ended_at } = sessionResult.rows[0];
+
+	if (ended_at !== null)
+		throw new Error(`Session ${session_id} already ended`);
+
+	// Update agency status and metadata (reactivate if dormant, set liaison_status)
+	await query(
+		`
+    UPDATE roadmap.agency
+    SET
+      status = CASE
+        WHEN status = 'dormant'      THEN 'active'      -- reactivate on heartbeat
+        WHEN $2 = 'throttled'        THEN 'throttled'
+        WHEN $2 = 'paused'           THEN 'paused'
+        ELSE status
+      END,
+      status_reason = CASE
+        WHEN status = 'dormant' THEN 'Reactivated by heartbeat'
+        ELSE status_reason
+      END,
+      metadata = jsonb_set(metadata, '{capacity_envelope}', $3::jsonb)
+    WHERE agency_id = $1
+    `,
+		[agency_id, liaison_status, JSON.stringify(capacity_envelope ?? {})],
+	);
+
+	// Compute presence state: busy if active dispatch or running agent, else online.
+	// squad_dispatch lives in roadmap_workforce; agent_runs lives in roadmap.
+	// Both tables key on `agent_identity` (which holds the agency_id value).
+	const stateResult = await query(
+		`
+    SELECT
+      CASE
+        WHEN EXISTS(
+          SELECT 1 FROM roadmap_workforce.squad_dispatch
+          WHERE agent_identity = $1
+            AND dispatch_status IN ('assigned', 'active')
+            AND completed_at IS NULL
+        ) THEN 'busy'
+        WHEN EXISTS(
+          SELECT 1 FROM roadmap.agent_runs
+          WHERE agent_identity = $1 AND status = 'running'
+        ) THEN 'busy'
+        ELSE 'online'
+      END AS computed_state
+    `,
+		[agency_id],
+	);
+
+	const computed_state = stateResult.rows[0]?.computed_state || "online";
+
+	// Call fn_pulse to atomically update heartbeat + presence_state and emit notify
+	await query(
+		`SELECT roadmap.fn_pulse($1, $2)`,
+		[agency_id, computed_state],
+	);
+
+	// Fetch final agency state for response. Use v_agency_status so dispatchable
+	// honors both presence_state (canonical, A2A maintains) and last_heartbeat_at
+	// freshness (transitional fallback) — P1132 view migration.
+	const finalResult = await query(
+		`
+    SELECT status, last_heartbeat_at, silence_seconds::int as silence_seconds, dispatchable
+    FROM roadmap.v_agency_status
+    WHERE agency_id = $1
+    `,
+		[agency_id],
+	);
+
+	if (finalResult.rows.length === 0)
+		throw new Error(`Agency ${agency_id} not found after update`);
+
+	const row = finalResult.rows[0];
 	return {
 		success: true,
-		agency_status: row.agency_status,
+		agency_status: row.status,
 		silence_seconds: row.silence_seconds ?? 0,
 		dispatchable: row.dispatchable,
 	};
 }
 
 /**
- * Mark dormant any agencies past the 90-second grace period.
+ * Mark dormant any agencies whose liveness signals all say absent.
  * Called by the liaison boot-process watchdog every 60s (AC-5).
+ *
+ * Aliveness signals (any one keeps the agency out of dormant):
+ *   - presence_state IN ('online', 'busy') — canonical, A2A maintains via fn_pulse.
+ *   - last_heartbeat_at < 90 s — transitional fallback (P1132).
+ *
+ * NOTE: presence_state alone cannot detect an A2A host crash (the value stays
+ * 'online' even though no one is refreshing it). Today, the A2A
+ * presence-refresh shim keeps last_heartbeat_at fresh so this sweep correctly
+ * detects crashes via heartbeat staleness. When that shim retires (follow-on),
+ * dormancy needs a different crash signal — pg_stat_activity LISTEN-session
+ * presence is the leading candidate.
  */
 export async function checkAndMarkDormant(): Promise<number> {
 	const result = await query(`
     UPDATE roadmap.agency
-    SET status = 'dormant', status_reason = 'No heartbeat > 90s'
+    SET status = 'dormant', status_reason = 'No liveness signal > 90s'
     WHERE status IN ('active', 'throttled')
-      AND last_heartbeat_at IS NOT NULL
-      AND (now() - last_heartbeat_at) > interval '90 seconds'
+      AND NOT (
+        presence_state IN ('online', 'busy')
+        OR (last_heartbeat_at IS NOT NULL
+            AND (now() - last_heartbeat_at) < interval '90 seconds')
+      )
     RETURNING agency_id
   `);
 	return result.rowCount ?? 0;
@@ -273,25 +345,6 @@ export async function isRegisteredAgency(identity: string): Promise<boolean> {
 }
 
 /**
- * Return true if the given agency_id is currently dispatchable:
- * status='active' and last heartbeat within the 60-second window
- * (as computed by roadmap.v_agency_status.dispatchable).
- *
- * AC-B gate for P904: call before posting an offer to a specific agency
- * to avoid sending liaison messages to agencies that have gone silent.
- */
-export async function isAgencyDispatchable(
-	agencyId: string,
-): Promise<boolean> {
-	const result = await query(
-		`SELECT dispatchable FROM roadmap.v_agency_status WHERE agency_id = $1`,
-		[agencyId],
-	);
-	if (result.rows.length === 0) return false;
-	return result.rows[0].dispatchable === true;
-}
-
-/**
  * Get the current status of an agency.
  */
 export async function getAgencyStatus(agency_id: string): Promise<{
@@ -313,7 +366,7 @@ export async function getAgencyStatus(agency_id: string): Promise<{
 }
 
 /**
- * List all dispatchable agencies (active, within 60s heartbeat).
+ * List all dispatchable agencies (active, within 90s heartbeat).
  */
 export async function listDispatchableAgencies(): Promise<
 	Array<{

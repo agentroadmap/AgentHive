@@ -10,7 +10,7 @@
  * One hub runs per agency. Start with startLiaisonHub(agencyId).
  */
 
-import { listenForMessages, receiveLiaisonPong } from "./liaison-message-service.ts";
+import { listenForMessages, receiveLiaisonPong, getUnackedMessages, acknowledgeMessage } from "./liaison-message-service.ts";
 import { processAssistanceRequest } from "./liaison-watchdog.ts";
 import { handleOfferDispatch } from "./offer-dispatch-handler.ts";
 import { query } from "../postgres/pool.ts";
@@ -26,16 +26,20 @@ import type { LiaisonMessage } from "./liaison-message-types.ts";
 export async function sendDirectiveToAgent(
   agentIdentity: string,
   directive: string,
-  details?: Record<string, any>
+  details?: Record<string, any>,
+  correlationId?: string,
+  replyTo?: string | number
 ): Promise<void> {
   await query(
     `INSERT INTO roadmap.message_ledger
-        (from_agent, to_agent, message_content, message_type, metadata)
-     VALUES ('liaison', $1, $2, 'notify', $3)`,
+        (from_agent, to_agent, message_content, message_type, metadata, correlation_id, reply_to)
+     VALUES ('liaison', $1, $2, 'notify', $3, $4, $5)`,
     [
       agentIdentity,
       directive,
       JSON.stringify({ type: "directive", ...details }),
+      correlationId ?? null,
+      replyTo ?? null,
     ]
   );
 }
@@ -49,41 +53,22 @@ export async function sendDirectiveToAgent(
 export async function broadcastToHiveCentral(
   fromAgencyId: string,
   content: string,
-  metadata?: Record<string, any>
+  metadata?: Record<string, any>,
+  correlationId?: string,
+  replyTo?: string | number
 ): Promise<void> {
   await query(
     `INSERT INTO roadmap.message_ledger
-        (from_agent, channel, message_content, message_type, metadata)
-     VALUES ($1, 'system:hiveCentral', $2, 'event', $3)`,
-    [fromAgencyId, content, JSON.stringify(metadata ?? {})]
+        (from_agent, channel, message_content, message_type, metadata, correlation_id, reply_to)
+     VALUES ($1, 'system:hiveCentral', $2, 'event', $3, $4, $5)`,
+    [
+      fromAgencyId,
+      content,
+      JSON.stringify(metadata ?? {}),
+      correlationId ?? null,
+      replyTo ?? null,
+    ]
   );
-}
-
-// ─── Heartbeat liveness propagation ──────────────────────────────────────────
-
-/**
- * Propagate a heartbeat event to the liaison channel and hiveCentral.
- * Called after liaisonHeartbeat() succeeds so orchestrators can react via pg_notify.
- */
-export async function propagateHeartbeat(
-  agencyId: string,
-  status: string,
-  dispatchable: boolean
-): Promise<void> {
-  try {
-    await query(
-      `INSERT INTO roadmap.message_ledger
-          (from_agent, channel, message_content, message_type, metadata)
-       VALUES ($1, $2, 'heartbeat', 'event', $3)`,
-      [
-        agencyId,
-        `system:liaison:${agencyId}`,
-        JSON.stringify({ status, dispatchable, ts: new Date().toISOString() }),
-      ]
-    );
-  } catch {
-    // Non-critical — heartbeat DB update is authoritative; ledger mirror is advisory
-  }
 }
 
 // ─── Message dispatch ─────────────────────────────────────────────────────────
@@ -143,6 +128,52 @@ async function dispatchMessage(msg: LiaisonMessage, agencyId: string): Promise<v
       await handleOfferDispatch(agencyId, msg);
       break;
 
+    case "progress_note":
+      // AC-5: Structured progress update from an in-flight agent. Orchestrator
+      // is mechanical — we record it as a hiveCentral event so monitors can
+      // observe it, but no dispatch decision is made from it.
+      broadcastToHiveCentral(agencyId, "progress_note", {
+        briefing_id: (msg.payload as any).briefing_id,
+        confidence: (msg.payload as any).confidence,
+        summary_length: String((msg.payload as any).summary ?? "").length,
+      }).catch(() => undefined);
+      break;
+
+    case "spawn_failure":
+      // AC-5: Child process failed to start. Lifecycle is already governed by
+      // fn_complete_work_offer('failed') in OfferDispatchHandler; we log it to
+      // hiveCentral so operators can observe without grepping liaison logs.
+      broadcastToHiveCentral(agencyId, "spawn_failure", {
+        dispatch_id: (msg.payload as any).dispatch_id,
+        offer_id: (msg.payload as any).offer_id,
+        role: (msg.payload as any).role,
+        error_message: (msg.payload as any).error_message,
+      }).catch(() => undefined);
+      break;
+
+    case "capacity_alert":
+      // AC-5: Back-pressure signal. No routing action here — provider_registry
+      // throttle_count and in-flight capacity in resolveAgency() are the
+      // authoritative back-pressure controls.
+      broadcastToHiveCentral(agencyId, "capacity_alert", {
+        in_flight_count: (msg.payload as any).in_flight_count,
+        max_in_flight: (msg.payload as any).max_in_flight,
+        utilization_pct: (msg.payload as any).utilization_pct,
+        severity: (msg.payload as any).severity,
+      }).catch(() => undefined);
+      break;
+
+    case "task_status":
+    case "task_complete":
+    case "task_error":
+      // P993: Worker reporting back to liaison — update tracker and relay to requestor
+      // These arrive via the liaison_message table from worker agents
+      if (process.env.DEBUG_LIAISON_HUB) {
+        console.log(`[LiaisonHub] ${agencyId}: worker report kind='${msg.kind}'`);
+      }
+      // No-op for now — handleWorkerReport is triggered via message_ledger listener
+      break;
+
     default:
       if (process.env.DEBUG_LIAISON_HUB) {
         console.log(`[LiaisonHub] ${agencyId}: unhandled kind='${msg.kind}' seq=${msg.sequence}`);
@@ -163,20 +194,49 @@ async function dispatchMessage(msg: LiaisonMessage, agencyId: string): Promise<v
  */
 export function startLiaisonHub(agencyId: string): { stop: () => void } {
   const controller = new AbortController();
-  let running = false;
 
   const run = async () => {
-    running = true;
     if (process.env.DEBUG_LIAISON_HUB) {
       console.log(`[LiaisonHub] ${agencyId}: started`);
     }
 
+    // Boot-time replay: process any unacked messages missed while hub was down.
+    // Must run before the LISTEN loop — pg_notify for missed messages is gone.
+    // Bounded by LIAISON_REPLAY_WINDOW_HOURS (default 6h) to avoid re-triggering
+    // historical backlogs on agencies with long-running unacked message queues.
+    try {
+      const replayWindowHours = parseInt(
+        process.env.LIAISON_REPLAY_WINDOW_HOURS ?? '6', 10
+      );
+      const createdAfter = new Date(Date.now() - replayWindowHours * 60 * 60 * 1000);
+      const unacked = await getUnackedMessages(agencyId, undefined, createdAfter);
+      if (unacked.length > 0) {
+        console.log(`[LiaisonHub] ${agencyId}: replaying ${unacked.length} unacked message(s) (window=${replayWindowHours}h)`);
+        for (const msg of unacked) {
+          if (controller.signal.aborted) break;
+          try {
+            await dispatchMessage(msg, agencyId);
+            await acknowledgeMessage(msg.message_id, 'ok');
+          } catch (err) {
+            console.error(`[LiaisonHub] ${agencyId}: replay error kind='${msg.kind}':`, err);
+            await acknowledgeMessage(msg.message_id, 'reject', String(err)).catch(() => undefined);
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`[LiaisonHub] ${agencyId}: boot replay failed:`, err);
+    }
+
     try {
       for await (const msg of listenForMessages(agencyId, controller.signal)) {
+        // Skip already-acked messages (guard against replay+listen race window)
+        if (msg.acked_at) continue;
         try {
           await dispatchMessage(msg, agencyId);
+          await acknowledgeMessage(msg.message_id, 'ok');
         } catch (err) {
           console.error(`[LiaisonHub] ${agencyId}: dispatch error kind='${msg.kind}':`, err);
+          await acknowledgeMessage(msg.message_id, 'reject', String(err)).catch(() => undefined);
         }
       }
     } catch (err) {
@@ -184,7 +244,6 @@ export function startLiaisonHub(agencyId: string): { stop: () => void } {
         console.error(`[LiaisonHub] ${agencyId}: listener error:`, err);
       }
     } finally {
-      running = false;
       if (process.env.DEBUG_LIAISON_HUB) {
         console.log(`[LiaisonHub] ${agencyId}: stopped`);
       }

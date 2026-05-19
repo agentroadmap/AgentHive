@@ -34,6 +34,8 @@ export interface SendOptions {
   correlationId?: string;
   /** Optional proposal context */
   proposalId?: number;
+  /** Optional reply_to ID (P907) */
+  replyToId?: string | number;
 }
 
 export interface RecvOptions {
@@ -75,8 +77,8 @@ export class A2AMessenger {
 
     const { rows } = await query<{ id: string }>(
       `INSERT INTO roadmap.message_ledger
-         (from_agent, to_agent, message_content, message_type, proposal_id, correlation_id)
-       VALUES ($1, $2, $3, $4, $5, $6)
+         (from_agent, to_agent, message_content, message_type, proposal_id, correlation_id, reply_to)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id::text`,
       [
         this.identity,
@@ -85,6 +87,7 @@ export class A2AMessenger {
         message.type,
         opts.proposalId ?? null,
         opts.correlationId ?? null,
+        opts.replyToId ?? null,
       ],
     );
 
@@ -205,8 +208,8 @@ export class A2AMessenger {
 
     const { rows } = await query<{ id: string }>(
       `INSERT INTO roadmap.message_ledger
-         (from_agent, channel, message_content, message_type, proposal_id, correlation_id)
-       VALUES ($1, $2, $3, $4, $5, $6)
+         (from_agent, channel, message_content, message_type, proposal_id, correlation_id, reply_to)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id::text`,
       [
         this.identity,
@@ -215,6 +218,7 @@ export class A2AMessenger {
         message.type,
         opts.proposalId ?? null,
         opts.correlationId ?? null,
+        opts.replyToId ?? null,
       ],
     );
 

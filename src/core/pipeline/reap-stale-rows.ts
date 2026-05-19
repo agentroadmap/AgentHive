@@ -20,6 +20,7 @@ export interface ReaperLogger {
 export interface ReapResult {
 	leases: number;
 	dispatches: number;
+	zombieRunsTimedOut: number;
 	sequencesRealigned: number;
 	pokeAttemptsPruned: number;
 	lifecycleLogPruned: number;
@@ -27,6 +28,10 @@ export interface ReapResult {
 
 const LEASE_STALE_MIN = 10;
 const DISPATCH_STALE_MIN = 20;
+// Agent runs still 'running' past this threshold are zombies (agency crashed and
+// re-registered without closing the run). 60 min is safely past the 20-min
+// squad_dispatch reaper, so any surviving 'running' row is orphaned.
+const AGENT_RUN_ZOMBIE_MIN = 60;
 const POKE_ATTEMPT_RETENTION_DAYS = 7;
 const LIFECYCLE_LOG_RETENTION_DAYS = Number(
 	process.env.LIFECYCLE_LOG_RETENTION_DAYS ?? "30",
@@ -34,7 +39,7 @@ const LIFECYCLE_LOG_RETENTION_DAYS = Number(
 
 // Task #24/#28: schemas whose IDENTITY sequences we realign at boot.
 // fn_realign_identity_sequences is a no-op when nothing drifted, so this
-// is cheap to run on every orchestrator/gate-pipeline start.
+// is cheap to run on every orchestrator start.
 const REALIGN_SCHEMAS = ["roadmap", "roadmap_workforce"] as const;
 
 export async function reapStaleRows(
@@ -45,16 +50,22 @@ export async function reapStaleRows(
 	const result: ReapResult = {
 		leases: 0,
 		dispatches: 0,
+		zombieRunsTimedOut: 0,
 		sequencesRealigned: 0,
 		pokeAttemptsPruned: 0,
 		lifecycleLogPruned: 0,
 	};
 
 	try {
+		// P934: replaced the COALESCE(release_reason,'') || ' [reaped: ...]'
+		// append with a canonical assignment. The append produced unbounded
+		// release_reason values (cleanup of 3,806 oversized rows confirmed
+		// the source). Reaped leases map to 'lease_expired' (incomplete
+		// bucket → maturity='new').
 		const r = await pool.query(
 			`UPDATE roadmap_proposal.proposal_lease
 			 SET released_at=now(),
-			     release_reason=COALESCE(release_reason,'') || ' [reaped: lease expired without release]'
+			     release_reason='lease_expired'
 			 WHERE released_at IS NULL
 			   AND expires_at IS NOT NULL
 			   AND expires_at < now() - ($1 || ' min')::interval
@@ -110,6 +121,27 @@ export async function reapStaleRows(
 	} catch (err) {
 		logger.warn(
 			`[${tag}] blocked dispatch reap failed: ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
+
+	// Reap zombie agent_runs: agencies that crashed/restarted without closing their run
+	// record. Surviving 'running' rows permanently block fresh dispatch via the gate
+	// check in legacy-dispatch.ts (WHERE proposal_id=$1 AND status='running').
+	try {
+		const r = await pool.query(
+			`UPDATE roadmap_workforce.agent_runs
+			 SET status = 'timeout',
+			     completed_at = now(),
+			     error_detail = 'Reaped by orchestrator: exceeded ${AGENT_RUN_ZOMBIE_MIN}-minute zombie threshold (agency restarted without completing run)'
+			 WHERE status = 'running'
+			   AND started_at < now() - ($1 || ' min')::interval
+			 RETURNING id`,
+			[String(AGENT_RUN_ZOMBIE_MIN)],
+		);
+		result.zombieRunsTimedOut = r.rowCount ?? 0;
+	} catch (err) {
+		logger.warn(
+			`[${tag}] zombie agent_run reap failed: ${err instanceof Error ? err.message : String(err)}`,
 		);
 	}
 
@@ -172,12 +204,13 @@ export async function reapStaleRows(
 	if (
 		result.leases ||
 		result.dispatches ||
+		result.zombieRunsTimedOut ||
 		result.sequencesRealigned ||
 		result.pokeAttemptsPruned ||
 		result.lifecycleLogPruned
 	) {
 		logger.log(
-			`[${tag}] reaped: ${result.leases} lease(s), ${result.dispatches} dispatch(es), ${result.sequencesRealigned} sequence(s) realigned, ${result.pokeAttemptsPruned} poke_attempt(s) pruned, ${result.lifecycleLogPruned} lifecycle_log row(s) pruned`,
+			`[${tag}] reaped: ${result.leases} lease(s), ${result.dispatches} dispatch(es), ${result.zombieRunsTimedOut} zombie run(s), ${result.sequencesRealigned} sequence(s) realigned, ${result.pokeAttemptsPruned} poke_attempt(s) pruned, ${result.lifecycleLogPruned} lifecycle_log row(s) pruned`,
 		);
 	} else {
 		logger.log(`[${tag}] no stale rows`);

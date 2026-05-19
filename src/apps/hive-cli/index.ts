@@ -11,6 +11,7 @@ import { registerWorkflow, registerState } from "./commands/workflow.ts";
 import { registerDoctor } from "./commands/doctor.ts";
 import { registerContext } from "./commands/context-cmd.ts";
 import { registerStop } from "./commands/stop.ts";
+import { registerModelProfile } from "./commands/model-profile.ts";
 import { getCliSchema, RECIPES, CLI_VERSION } from "./schema.ts";
 import { EXIT } from "./common/exit-codes.ts";
 
@@ -52,6 +53,7 @@ registerState(program, getContext);
 registerDoctor(program, getContext);
 registerContext(program, getContext);
 registerStop(program, getContext);
+registerModelProfile(program, getContext);
 
 // Parse args early to detect --schema / --recipes before Commander tries to route.
 // We parse in two passes: first a lenient parse to catch global flags, then full parse.

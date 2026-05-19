@@ -1,9 +1,10 @@
 /**
- * P836: A2A Cross-Host Delivery Worker
+ * P836/P1097: A2A Cross-Host Delivery Worker
  *
  * Handles HTTP callback delivery of A2A messages with:
  * 1. SSRF prevention (validateCallbackUrl + DNS rebinding re-validation)
  * 2. HMAC-SHA256 delivery authentication with per-agent signing keys
+ *    (P1097: signature now bound to actual request target, not hardcoded "/")
  * 3. Delivery deduplication via delivery_id_log (replay prevention)
  * 4. Retry with exponential backoff (1s, 2s, 4s)
  * 5. Audit trail in message_validity_log
@@ -42,11 +43,10 @@ export interface DeliveryResult {
  * Steps:
  * 1. Re-validate callback URL against SSRF blocklist
  * 2. Generate deliveryId and timestamp
- * 3. Create signing input (POST\n<path>\n<headers>\n<body>) — includes target_host_id (F1)
+ * 3. Create signing input (POST\n<path>\n<headers>\n<body>)
  * 4. Resolve delivery signing secret (per-agent or env var)
  * 5. HMAC-SHA256 over signing input
- * 6. POST with headers: X-AgentHive-Signature, X-AgentHive-Delivery-Id, X-AgentHive-Timestamp,
- *    X-AgentHive-Agent-Id, X-AgentHive-Target-Host-Id
+ * 6. POST with headers: X-AgentHive-Signature, X-AgentHive-Delivery-Id, X-AgentHive-Timestamp, X-AgentHive-Agent-Id
  * 7. Log to message_validity_log (delivery_attempted_at, delivery_status, delivery_response_code)
  * 8. Retry up to 3 times with exponential backoff on 5xx or network error
  * 9. On all failures: insert NACK into message_ledger
@@ -56,7 +56,6 @@ export interface DeliveryResult {
  * @param sendingAgentId - Agent identity sending this message
  * @param pool - Postgres connection pool for secret lookup and logging
  * @param messageId - Optional message_id from message_ledger (for audit trail)
- * @param targetHostId - Target host identifier included in HMAC scope to prevent cross-host replay (F1)
  *
  * @returns { status, body } of final HTTP response
  * @throws {Error} if SSRF validation fails or all retry attempts exhausted
@@ -67,7 +66,6 @@ export async function postDeliveryWithAuth(
 	sendingAgentId: string,
 	pool: Pool,
 	messageId?: number,
-	targetHostId?: string,
 ): Promise<DeliveryResult> {
 	// Step 1: Re-validate callback URL before delivery (DNS rebinding protection)
 	try {
@@ -139,13 +137,12 @@ export async function postDeliveryWithAuth(
 		throw new Error(`Signing secret resolution failed: ${errorMsg}`);
 	}
 
-	// Step 5: Build signing input — target_host_id is a delimited field to prevent cross-host replay (F1)
+	// Step 5: Build signing input
 	const url = new URL(callbackUrl);
 	const pathAndSearch = url.pathname + (url.search || "");
-	const resolvedTargetHostId = targetHostId ?? "";
 
 	const signingInput =
-		`POST\n${pathAndSearch}\nX-AgentHive-Delivery-Id: ${deliveryId}\nX-AgentHive-Timestamp: ${timestamp}\nX-AgentHive-Agent-Id: ${sendingAgentId}\nX-AgentHive-Target-Host-Id: ${resolvedTargetHostId}\n${bodyJson}`;
+		`POST\n${pathAndSearch}\nX-AgentHive-Delivery-Id: ${deliveryId}\nX-AgentHive-Timestamp: ${timestamp}\nX-AgentHive-Agent-Id: ${sendingAgentId}\n${bodyJson}`;
 
 	// Step 6: HMAC-SHA256 signature
 	const signature = crypto
@@ -170,7 +167,6 @@ export async function postDeliveryWithAuth(
 					"X-AgentHive-Delivery-Id": deliveryId,
 					"X-AgentHive-Timestamp": String(timestamp),
 					"X-AgentHive-Agent-Id": sendingAgentId,
-					"X-AgentHive-Target-Host-Id": resolvedTargetHostId,
 				},
 				body: bodyJson,
 			});
@@ -253,21 +249,95 @@ export async function postDeliveryWithAuth(
 }
 
 /**
+ * Canonicalize and validate the request target (path + query).
+ *
+ * Rejects:
+ * - Empty string
+ * - Absolute URLs (e.g., 'http://host/path')
+ * - Targets without leading '/'
+ * - Targets with control characters (e.g., newlines, which could enable header injection)
+ *
+ * Returns the validated target unchanged, or throws an error with reason for audit logging.
+ *
+ * @param requestTarget - HTTP request target from req.url or req.originalUrl
+ * @returns the validated request target
+ * @throws {Error} with message formatted as `invalid_<reason>` for audit trail
+ */
+export function canonicalizeRequestTarget(requestTarget: string): string {
+	// Reject empty string
+	if (!requestTarget || requestTarget.length === 0) {
+		throw new Error("invalid_request_target:empty");
+	}
+
+	// Reject absolute URLs (contains "://")
+	if (requestTarget.includes("://")) {
+		throw new Error("invalid_request_target:absolute_url");
+	}
+
+	// Reject targets without leading slash
+	if (!requestTarget.startsWith("/")) {
+		throw new Error("invalid_request_target:no_leading_slash");
+	}
+
+	// Reject targets containing control characters (newline, carriage return, null, etc.)
+	// This prevents header injection via request target manipulation
+	if (/[\x00-\x1f\x7f]/.test(requestTarget)) {
+		throw new Error("invalid_request_target:control_char");
+	}
+
+	return requestTarget;
+}
+
+/**
+ * Log a signature verification failure to the audit trail.
+ *
+ * Uses agent_lifecycle_log with event_type='sig_verify_failed' and reason in details.
+ * This is sparse but sufficient for post-incident analysis of replay attacks.
+ *
+ * @param pool - Postgres connection pool
+ * @param deliveryId - X-AgentHive-Delivery-Id header value
+ * @param agentId - X-AgentHive-Agent-Id header value
+ * @param reason - one of: invalid_signature, timestamp_expired, duplicate_id, invalid_request_target
+ */
+async function auditSignatureFailure(
+	pool: Pool,
+	deliveryId: string,
+	agentId: string,
+	reason: "invalid_signature" | "timestamp_expired" | "duplicate_id" | "invalid_request_target",
+): Promise<void> {
+	try {
+		await pool.query(
+			`INSERT INTO roadmap.agent_lifecycle_log
+			 (agency_id, event_type, details)
+			 VALUES ($1, 'sig_verify_failed', $2)`,
+			[agentId, JSON.stringify({ delivery_id: deliveryId, reason })],
+		);
+	} catch (err) {
+		console.error(
+			`[P1097] Failed to audit signature verification failure: ${
+				err instanceof Error ? err.message : String(err)
+			}`,
+		);
+	}
+}
+
+/**
  * Verify an incoming callback delivery signature.
  *
  * Steps:
- * 1. Extract headers: X-AgentHive-Signature, X-AgentHive-Delivery-Id, X-AgentHive-Timestamp,
- *    X-AgentHive-Agent-Id, X-AgentHive-Target-Host-Id
- * 2. Reject if timestamp > 300 seconds old (5-minute replay window)
- * 3. Check delivery_id against delivery_id_log (INSERT ON CONFLICT DO NOTHING; rowCount=0 → duplicate)
- * 4. Rebuild signing input identically to sender (includes target_host_id — F1)
- * 5. crypto.timingSafeEqual comparison (NOT string ===)
+ * 1. Extract headers: X-AgentHive-Signature, X-AgentHive-Delivery-Id, X-AgentHive-Timestamp, X-AgentHive-Agent-Id
+ * 2. Validate request target (AC-9: reject unsafe targets)
+ * 3. Reject if timestamp > 300 seconds old (5-minute replay window)
+ * 4. Check delivery_id against delivery_id_log (INSERT ON CONFLICT DO NOTHING; rowCount=0 → duplicate)
+ * 5. Rebuild signing input identically to sender, using the actual request target
+ * 6. crypto.timingSafeEqual comparison (NOT string ===)
  *
  * @param rawBody - Exact HTTP request body (as string or Buffer)
  * @param headers - HTTP request headers (case-insensitive keys acceptable)
  * @param signingSecret - HMAC secret (hex-encoded)
  * @param pool - Postgres connection pool for dedup check
- * @param expectedTargetHostId - This host's identifier; must match X-AgentHive-Target-Host-Id (F1)
+ * @param requestTarget - HTTP request target (path + query, e.g., '/webhook/msg?tenant=agenthive&v=1').
+ *                        Must start with '/', no control chars, no absolute URLs. AC-1: This is required (no default).
  *
  * @returns true if signature is valid and not a duplicate, false otherwise
  */
@@ -276,7 +346,7 @@ export async function verifyDeliverySignature(
 	headers: Record<string, string>,
 	signingSecret: string,
 	pool: Pool,
-	expectedTargetHostId?: string,
+	requestTarget: string,
 ): Promise<boolean> {
 	try {
 		// Step 1: Extract headers (normalize keys to lowercase)
@@ -290,22 +360,23 @@ export async function verifyDeliverySignature(
 		const deliveryId = normalizedHeaders["x-agenthive-delivery-id"] || "";
 		const timestampStr = normalizedHeaders["x-agenthive-timestamp"] || "";
 		const agentId = normalizedHeaders["x-agenthive-agent-id"] || "";
-		const incomingTargetHostId =
-			normalizedHeaders["x-agenthive-target-host-id"] ?? "";
 
 		if (!signatureHeader || !deliveryId || !timestampStr || !agentId) {
 			return false;
 		}
 
-		// F1: Reject if target_host_id doesn't match this host
-		if (
-			expectedTargetHostId !== undefined &&
-			incomingTargetHostId !== expectedTargetHostId
-		) {
+		// Step 2: Validate and canonicalize request target (AC-9: reject unsafe targets early)
+		let pathAndSearch: string;
+		try {
+			pathAndSearch = canonicalizeRequestTarget(requestTarget);
+		} catch (err) {
+			// Extract reason from error message (e.g., "invalid_request_target:empty" → "invalid_request_target")
+			const reason = "invalid_request_target";
+			await auditSignatureFailure(pool, deliveryId, agentId, reason);
 			return false;
 		}
 
-		// Step 2: Validate timestamp (must be within 5 minutes)
+		// Step 3: Validate timestamp (must be within 5 minutes)
 		const timestamp = parseInt(timestampStr, 10);
 		if (isNaN(timestamp)) {
 			return false;
@@ -313,25 +384,25 @@ export async function verifyDeliverySignature(
 
 		const nowEpoch = Math.floor(Date.now() / 1000);
 		if (Math.abs(nowEpoch - timestamp) > 300) {
+			await auditSignatureFailure(pool, deliveryId, agentId, "timestamp_expired");
 			return false; // Timestamp too old or in future
 		}
 
-		// Step 3: Check delivery_id against dedup log
+		// Step 4: Check delivery_id against dedup log
 		const isDuplicate = await checkAndLogDeliveryId(pool, deliveryId);
 		if (isDuplicate) {
+			await auditSignatureFailure(pool, deliveryId, agentId, "duplicate_id");
 			return false; // Duplicate delivery
 		}
 
-		// Step 4: Rebuild signing input — must mirror sender exactly, including target_host_id (F1)
-		// Note: We assume path is "/" for the callback endpoint (adjust as needed)
-		const pathAndSearch = "/"; // Callback endpoints typically use fixed path
+		// Step 5: Rebuild signing input using the actual request target (P1097 fix)
 		const bodyStr =
 			rawBody instanceof Buffer ? rawBody.toString("utf-8") : rawBody;
 
 		const signingInput =
-			`POST\n${pathAndSearch}\nX-AgentHive-Delivery-Id: ${deliveryId}\nX-AgentHive-Timestamp: ${timestamp}\nX-AgentHive-Agent-Id: ${agentId}\nX-AgentHive-Target-Host-Id: ${incomingTargetHostId}\n${bodyStr}`;
+			`POST\n${pathAndSearch}\nX-AgentHive-Delivery-Id: ${deliveryId}\nX-AgentHive-Timestamp: ${timestamp}\nX-AgentHive-Agent-Id: ${agentId}\n${bodyStr}`;
 
-		// Step 5: Verify signature using constant-time comparison
+		// Step 6: Verify signature using constant-time comparison
 		const expectedSignature = crypto
 			.createHmac("sha256", Buffer.from(signingSecret, "hex"))
 			.update(signingInput, "utf-8")
@@ -340,20 +411,27 @@ export async function verifyDeliverySignature(
 		// Extract signature value from header (e.g., "sha256=<hex>")
 		const [scheme, providedSigHex] = signatureHeader.split("=");
 		if (scheme !== "sha256" || !providedSigHex) {
+			await auditSignatureFailure(pool, deliveryId, agentId, "invalid_signature");
 			return false;
 		}
 
-		// Constant-time comparison
+		// Constant-time comparison (AC-9: don't call timingSafeEqual if target was invalid)
 		try {
-			return crypto.timingSafeEqual(
+			const isValid = crypto.timingSafeEqual(
 				expectedSignature,
 				Buffer.from(providedSigHex, "hex"),
 			);
+			if (!isValid) {
+				await auditSignatureFailure(pool, deliveryId, agentId, "invalid_signature");
+			}
+			return isValid;
 		} catch {
 			// timingSafeEqual throws if buffers are different lengths
+			await auditSignatureFailure(pool, deliveryId, agentId, "invalid_signature");
 			return false;
 		}
-	} catch {
+	} catch (err) {
+		// Catch unexpected errors and fail safely
 		return false;
 	}
 }
@@ -450,10 +528,17 @@ async function insertDeliveryNack(
 	failureReason: string,
 ): Promise<void> {
 	try {
+		// Fetch correlation_id from original message
+		const { rows: original } = await pool.query(
+			`SELECT correlation_id FROM roadmap.message_ledger WHERE id = $1`,
+			[messageId],
+		);
+		const correlationId = original[0]?.correlation_id;
+
 		await pool.query(
 			`INSERT INTO roadmap.message_ledger
-			  (from_agent, to_agent, message_type, message_content)
-			 VALUES ($1, $2, 'nack', $3)`,
+			  (from_agent, to_agent, message_type, message_content, correlation_id, reply_to)
+			 VALUES ($1, $2, 'nack', $3, $4, $5)`,
 			[
 				"system:cross-host-relay",
 				originalSender,
@@ -464,6 +549,8 @@ async function insertDeliveryNack(
 					details: failureReason,
 					timestamp: new Date().toISOString(),
 				}),
+				correlationId,
+				messageId,
 			],
 		);
 	} catch (err) {

@@ -12,6 +12,11 @@ import {
 	detectCollision,
 	AgentIdInvalidError,
 } from "../../../../shared/identity/sanitize-agent-id.ts";
+import {
+	forceReleaseAlias,
+	type AliasReclaimResult,
+	type AliasReclaimError,
+} from "../../../../core/identity/agent-registry/alias-manager.ts";
 import type { CallToolResult } from "../../types.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
@@ -278,6 +283,115 @@ export class PgAgentHandlers {
 			};
 		} catch (err) {
 			return errorResult("Failed to add team member", err);
+		}
+	}
+
+	/**
+	 * P995: Resolve a named agent by identity or display_alias.
+	 * Returns the full registry row, including host_affinity and preferred_provider.
+	 */
+	async resolveAgent(args: {
+		name: string;
+	}): Promise<CallToolResult> {
+		try {
+			const { rows } = await query(
+				`SELECT agent_identity, agent_type, role, status, preferred_provider,
+				        host_affinity, display_alias, created_at, updated_at
+				 FROM   roadmap_workforce.agent_registry
+				 WHERE  agent_identity = $1
+				    OR  display_alias  = $1
+				 ORDER  BY (agent_identity = $1) DESC
+				 LIMIT  1`,
+				[args.name],
+			);
+
+			if (!rows.length) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{ found: false, query: args.name },
+								null,
+								2,
+							),
+						},
+					],
+				};
+			}
+
+			const r = rows[0];
+			return {
+				content: [
+					{
+						type: "text",
+						text: JSON.stringify(
+							{
+								found: true,
+								agent_identity: r.agent_identity,
+								agent_type: r.agent_type,
+								role: r.role,
+								status: r.status,
+								preferred_provider: r.preferred_provider,
+								host_affinity: r.host_affinity,
+								display_alias: r.display_alias,
+								created_at: r.created_at,
+								updated_at: r.updated_at,
+							},
+							null,
+							2,
+						),
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to resolve agent", err);
+		}
+	}
+
+	/**
+	 * P919 AC-4: Force-release a display alias from an agent.
+	 * Two paths:
+	 *   1. Clean: target row status='inactive' → always succeeds
+	 *   2. Stuck: target row status='active' BUT last_heartbeat < now()-90s → requires force=true
+	 */
+	async forceReleaseAlias(args: {
+		identity: string;
+		force?: boolean;
+	}): Promise<CallToolResult> {
+		try {
+			const result = await forceReleaseAlias({
+				identity: args.identity,
+				force: args.force ?? false,
+			});
+
+			// Check if result is an error
+			if ("code" in result && "message" in result) {
+				const err = result as AliasReclaimError;
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Error [${err.code}]: ${err.message}`,
+						},
+					],
+					isError: true,
+				};
+			}
+
+			// Success case
+			const success = result as AliasReclaimResult;
+			const lines = [
+				`✓ Alias released successfully`,
+				`Reason: ${success.reason}`,
+				success.priorIdentity ? `Prior owner: ${success.priorIdentity}` : "",
+			].filter(Boolean);
+
+			return {
+				content: [{ type: "text", text: lines.join("\n") }],
+			};
+		} catch (err) {
+			return errorResult("Failed to force-release alias", err);
 		}
 	}
 }

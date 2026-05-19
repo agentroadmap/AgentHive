@@ -38,18 +38,43 @@ The `transitionProposalFn` callback was typed as returning `Promise<any>`. Chang
 no-escape-hatch alternative that preserves type soundness without requiring a concrete import
 of `ProposalRow`.
 
+## P786 Final Remediation (2026-05-10)
+
+### Duplicate config keys removed
+
+Three keys in `src/shared/runtime/config-keys.ts` were defined twice (TS1117):
+- `AGENTHIVE_TENANT_POOL_LRU_MAX` (lines 320 and 421)
+- `AGENTHIVE_TENANT_POOL_MAX` (lines 336 and 437)
+- `AGENTHIVE_DRAIN_TIMEOUT_MS` (lines 352 and 453)
+
+Earlier stubs (lines 320–366) removed; canonical definitions with `envOverride`, `Math.trunc`
+validation, and descriptive error messages kept.
+
+### tsconfig.check.json scope expanded
+
+Now covers:
+- `src/apps/hive-cli/**/*.ts`
+- `src/apps/cubic-agents/**/*.ts`
+- `src/core/gate/**/*.ts`
+
+### CI gate added
+
+`npm run typecheck` step added to `.github/workflows/publish-hygiene.yml` — fails the build on
+any type errors in the hot-path file set.
+
 ## Coverage Scope
 
-- `tsconfig.check.json` targets `src/apps/hive-cli/**/*.ts`
+- `tsconfig.check.json` targets hive-cli, cubic-agents, gate subsystems
+- `npm run typecheck` wired in GitHub Actions `publish-hygiene.yml`
 - Full repo check: `npm run check:types` → `tsc --noEmit` (uses root `tsconfig.json`)
-- Both must pass before any `Develop→Merge` advance
 
 ## Acceptance Criteria Status
 
 | AC | Status |
 |---|---|
-| Zero tsc errors in `src/` | PASS |
-| Zero tsc errors in `tests/` | PASS |
-| `allowImportingTsExtensions` in tsconfig.check.json | PASS (post-hold fix) |
-| CI tsc step present | PASS (post-hold fix) |
-| No `Promise<any>` in gate-evaluator hot path | PASS (post-hold fix) |
+| AC-1: control-plane-client.ts zero `any[]` | PASS |
+| AC-2: `npm run typecheck` exits 0 | PASS |
+| AC-3: gate-evaluator.ts and agent-spawner.test.ts no implicit-any | PASS |
+| AC-4: CI pipeline typecheck step | PASS (publish-hygiene.yml) |
+| AC-5: Unit tests unaffected (type-only changes) | PASS |
+| AC-6: ts-audit-p786.md committed | PASS |

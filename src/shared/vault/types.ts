@@ -12,13 +12,41 @@
  * Examples:
  *   vault://file/project/audiobook/dsn
  *   vault://file/project/audiobook/db_password
- *   vault://hcv/kv/data/tenants/audiobook/dsn  (P515)
- *   vault://aws/agentHive/audiobook/dsn          (P515)
+ *   vault://hcv/tenants/audiobook/dsn (P515 — HashiCorp Vault KV v2 path)
+ *   vault://aws/agentHive/audiobook/dsn (P515 — AWS Secrets Manager name)
  */
 export type SecretRef =
 	| `vault://file/${string}`
 	| `vault://hcv/${string}`
 	| `vault://aws/${string}`;
+
+/**
+ * Parsed components of a vault://hcv/... SecretRef.
+ */
+export interface HcvRefParts {
+	scheme: "hcv";
+	path: string; // KV v2 path relative to configured mount
+}
+
+/**
+ * Parsed components of a vault://aws/... SecretRef.
+ */
+export interface AwsRefParts {
+	scheme: "aws";
+	name: string; // Secrets Manager secret name/ARN
+}
+
+/**
+ * Authentication methods for HashiCorp Vault.
+ *
+ * - approle: roleId + secretId (recommended for server-to-server; secrets injected by orchestrator)
+ * - k8s:     Kubernetes ServiceAccount JWT auto-mounted at /var/run/secrets/kubernetes.io/serviceaccount/token
+ * - aws:     SigV4-signed EC2/ECS instance identity (no explicit credentials in config)
+ */
+export type HcvAuthMethod =
+	| { method: "approle"; roleId: string; secretId: string }
+	| { method: "k8s"; role: string; jwtPath?: string }
+	| { method: "aws"; role: string; region?: string };
 
 /**
  * Vault adapter interface for reading, writing, and rotating secrets.
@@ -65,6 +93,20 @@ export interface VaultAdapter {
 	 * @throws VaultError subclass on fatal errors (permission denied, etc.)
 	 */
 	exists(ref: SecretRef): Promise<boolean>;
+}
+
+/**
+ * Thrown when vault backend is unreachable and no usable stale cache exists.
+ */
+export class VaultBackendUnavailable extends Error {
+	constructor(
+		public readonly ref: SecretRef,
+		public readonly operation: "read" | "write" | "rotate" | "exists",
+		public readonly cause: Error,
+	) {
+		super(`Vault backend unreachable for ${operation} on "${ref}": ${cause.message}`);
+		this.name = "VaultBackendUnavailable";
+	}
 }
 
 /**

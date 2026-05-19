@@ -1,8 +1,8 @@
 -- ============================================================
 -- project-init/001-proposal.sql
--- Proposal tables: root table + pVersion (with trigger),
--- pDependency, pCriteria, pReview, pDecision, pDiscussion,
--- pActivity, pTag.
+-- Proposal tables: root table + p_version (with trigger),
+-- p_dependency, p_criteria, p_review, p_decision, p_discussion,
+-- p_activity, p_tag.
 -- Run with: psql -v schema_name=agentHive -f 001-proposal.sql
 -- ============================================================
 
@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS :schema_name.proposal (
                                CHECK (maturity IN ('new','active','mature','obsolete')),
   priority         TEXT         NOT NULL DEFAULT 'normal'
                                CHECK (priority IN ('critical','high','normal','low')),
+  tier             TEXT         NOT NULL DEFAULT 'B'
+                               CHECK (tier IN ('A','B','C')),
   parent_id        BIGINT       REFERENCES :schema_name.proposal (id) ON DELETE SET NULL,
   summary          TEXT,
   motivation       TEXT,
@@ -50,9 +52,9 @@ COMMENT ON TABLE :schema_name.proposal IS
   'Root proposal table. One row per proposal. Children (version, criteria, etc.) reference this by id.';
 
 -- ============================================================
--- pVersion — proposal version history (trigger-populated)
+-- p_version — proposal version history (trigger-populated)
 -- ============================================================
-CREATE TABLE IF NOT EXISTS :schema_name.pVersion (
+CREATE TABLE IF NOT EXISTS :schema_name.p_version (
   id               BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   proposal_id      BIGINT       NOT NULL REFERENCES :schema_name.proposal (id) ON DELETE CASCADE,
   version_number   INT          NOT NULL,
@@ -65,10 +67,10 @@ CREATE TABLE IF NOT EXISTS :schema_name.pVersion (
 );
 
 CREATE INDEX IF NOT EXISTS pversion_proposal_desc
-  ON :schema_name.pVersion (proposal_id, version_number DESC);
+  ON :schema_name.p_version (proposal_id, version_number DESC);
 
-COMMENT ON TABLE :schema_name.pVersion IS
-  'Append-only version history for proposals. Populated by trg_pVersion trigger on proposal UPDATE.';
+COMMENT ON TABLE :schema_name.p_version IS
+  'Append-only version history for proposals. Populated by trg_p_version trigger on proposal UPDATE.';
 
 -- Trigger function: capture field-level delta on proposal UPDATE.
 -- SET search_path pins this function to the owning project schema so the
@@ -113,15 +115,15 @@ BEGIN
 END;
 $$;
 
-DROP TRIGGER IF EXISTS trg_pVersion ON :schema_name.proposal;
-CREATE TRIGGER trg_pVersion
+DROP TRIGGER IF EXISTS trg_p_version ON :schema_name.proposal;
+CREATE TRIGGER trg_p_version
   AFTER UPDATE ON :schema_name.proposal
   FOR EACH ROW EXECUTE FUNCTION :schema_name.fn_version_on_update();
 
 -- ============================================================
--- pDependency — proposal dependency graph
+-- p_dependency — proposal dependency graph
 -- ============================================================
-CREATE TABLE IF NOT EXISTS :schema_name.pDependency (
+CREATE TABLE IF NOT EXISTS :schema_name.p_dependency (
   id               BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   proposal_id      BIGINT       NOT NULL REFERENCES :schema_name.proposal (id) ON DELETE CASCADE,
   depends_on_id    BIGINT       REFERENCES :schema_name.proposal (id) ON DELETE SET NULL,
@@ -132,16 +134,16 @@ CREATE TABLE IF NOT EXISTS :schema_name.pDependency (
   created_at       TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS pdependency_proposal ON :schema_name.pDependency (proposal_id);
-CREATE INDEX IF NOT EXISTS pdependency_depends_on ON :schema_name.pDependency (depends_on_id);
+CREATE INDEX IF NOT EXISTS pdependency_proposal ON :schema_name.p_dependency (proposal_id);
+CREATE INDEX IF NOT EXISTS pdependency_depends_on ON :schema_name.p_dependency (depends_on_id);
 
-COMMENT ON TABLE :schema_name.pDependency IS
+COMMENT ON TABLE :schema_name.p_dependency IS
   'Proposal dependency edges. depends_on_id is NULL for cross-project deps; use depends_on_ref then.';
 
 -- ============================================================
--- pCriteria — acceptance criteria
+-- p_criteria — acceptance criteria
 -- ============================================================
-CREATE TABLE IF NOT EXISTS :schema_name.pCriteria (
+CREATE TABLE IF NOT EXISTS :schema_name.p_criteria (
   id               BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   proposal_id      BIGINT       NOT NULL REFERENCES :schema_name.proposal (id) ON DELETE CASCADE,
   ordinal          INT          NOT NULL DEFAULT 0,
@@ -155,19 +157,19 @@ CREATE TABLE IF NOT EXISTS :schema_name.pCriteria (
   updated_at       TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS pcriteria_proposal ON :schema_name.pCriteria (proposal_id);
+CREATE INDEX IF NOT EXISTS pcriteria_proposal ON :schema_name.p_criteria (proposal_id);
 
 CREATE OR REPLACE TRIGGER set_updated_at_pcriteria
-  BEFORE UPDATE ON :schema_name.pCriteria
+  BEFORE UPDATE ON :schema_name.p_criteria
   FOR EACH ROW EXECUTE FUNCTION :schema_name.set_updated_at();
 
-COMMENT ON TABLE :schema_name.pCriteria IS
+COMMENT ON TABLE :schema_name.p_criteria IS
   'Acceptance criteria rows for a proposal. ordinal controls display order.';
 
 -- ============================================================
--- pReview — review comments
+-- p_review — review comments
 -- ============================================================
-CREATE TABLE IF NOT EXISTS :schema_name.pReview (
+CREATE TABLE IF NOT EXISTS :schema_name.p_review (
   id               BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   proposal_id      BIGINT       NOT NULL REFERENCES :schema_name.proposal (id) ON DELETE CASCADE,
   reviewer         TEXT         NOT NULL,
@@ -178,15 +180,15 @@ CREATE TABLE IF NOT EXISTS :schema_name.pReview (
   created_at       TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS preview_proposal ON :schema_name.pReview (proposal_id);
+CREATE INDEX IF NOT EXISTS preview_proposal ON :schema_name.p_review (proposal_id);
 
-COMMENT ON TABLE :schema_name.pReview IS
+COMMENT ON TABLE :schema_name.p_review IS
   'Review comments. verdict NULL = informational comment, non-null = formal decision input.';
 
 -- ============================================================
--- pDecision — gate transition decisions
+-- p_decision — gate transition decisions
 -- ============================================================
-CREATE TABLE IF NOT EXISTS :schema_name.pDecision (
+CREATE TABLE IF NOT EXISTS :schema_name.p_decision (
   id               BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   proposal_id      BIGINT       NOT NULL REFERENCES :schema_name.proposal (id) ON DELETE CASCADE,
   from_status      TEXT         NOT NULL,
@@ -200,18 +202,18 @@ CREATE TABLE IF NOT EXISTS :schema_name.pDecision (
   decided_at       TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS pdecision_proposal ON :schema_name.pDecision (proposal_id);
+CREATE INDEX IF NOT EXISTS pdecision_proposal ON :schema_name.p_decision (proposal_id);
 
-COMMENT ON TABLE :schema_name.pDecision IS
+COMMENT ON TABLE :schema_name.p_decision IS
   'Gate transition decisions. One row per state machine transition event.';
 
 -- ============================================================
--- pDiscussion — threaded discussion on proposals
+-- p_discussion — threaded discussion on proposals
 -- ============================================================
-CREATE TABLE IF NOT EXISTS :schema_name.pDiscussion (
+CREATE TABLE IF NOT EXISTS :schema_name.p_discussion (
   id               BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   proposal_id      BIGINT       NOT NULL REFERENCES :schema_name.proposal (id) ON DELETE CASCADE,
-  parent_id        BIGINT       REFERENCES :schema_name.pDiscussion (id) ON DELETE SET NULL,
+  parent_id        BIGINT       REFERENCES :schema_name.p_discussion (id) ON DELETE SET NULL,
   author           TEXT         NOT NULL,
   body             TEXT         NOT NULL,
   metadata_jsonb   JSONB        NOT NULL DEFAULT '{}',
@@ -219,20 +221,20 @@ CREATE TABLE IF NOT EXISTS :schema_name.pDiscussion (
   updated_at       TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS pdiscussion_proposal ON :schema_name.pDiscussion (proposal_id);
-CREATE INDEX IF NOT EXISTS pdiscussion_parent ON :schema_name.pDiscussion (parent_id);
+CREATE INDEX IF NOT EXISTS pdiscussion_proposal ON :schema_name.p_discussion (proposal_id);
+CREATE INDEX IF NOT EXISTS pdiscussion_parent ON :schema_name.p_discussion (parent_id);
 
 CREATE OR REPLACE TRIGGER set_updated_at_pdiscussion
-  BEFORE UPDATE ON :schema_name.pDiscussion
+  BEFORE UPDATE ON :schema_name.p_discussion
   FOR EACH ROW EXECUTE FUNCTION :schema_name.set_updated_at();
 
-COMMENT ON TABLE :schema_name.pDiscussion IS
+COMMENT ON TABLE :schema_name.p_discussion IS
   'Threaded discussion threads on proposals. parent_id = NULL means top-level thread.';
 
 -- ============================================================
--- pActivity — audit log of all proposal mutations
+-- p_activity — audit log of all proposal mutations
 -- ============================================================
-CREATE TABLE IF NOT EXISTS :schema_name.pActivity (
+CREATE TABLE IF NOT EXISTS :schema_name.p_activity (
   id               BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   proposal_id      BIGINT       NOT NULL REFERENCES :schema_name.proposal (id) ON DELETE CASCADE,
   actor            TEXT         NOT NULL,
@@ -244,22 +246,34 @@ CREATE TABLE IF NOT EXISTS :schema_name.pActivity (
   occurred_at      TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS pactivity_proposal ON :schema_name.pActivity (proposal_id);
-CREATE INDEX IF NOT EXISTS pactivity_actor ON :schema_name.pActivity (actor);
+CREATE INDEX IF NOT EXISTS pactivity_proposal ON :schema_name.p_activity (proposal_id);
+CREATE INDEX IF NOT EXISTS pactivity_actor ON :schema_name.p_activity (actor);
 
-COMMENT ON TABLE :schema_name.pActivity IS
+COMMENT ON TABLE :schema_name.p_activity IS
   'Append-only activity log for a proposal. Every significant mutation produces a row.';
 
 -- ============================================================
--- pTag — proposal tags (denormalized for fast tag filtering)
+-- p_tag — proposal tags (denormalized for fast tag filtering)
 -- ============================================================
-CREATE TABLE IF NOT EXISTS :schema_name.pTag (
+CREATE TABLE IF NOT EXISTS :schema_name.p_tag (
   proposal_id      BIGINT       NOT NULL REFERENCES :schema_name.proposal (id) ON DELETE CASCADE,
   tag              TEXT         NOT NULL,
   PRIMARY KEY (proposal_id, tag)
 );
 
-CREATE INDEX IF NOT EXISTS ptag_tag ON :schema_name.pTag (tag);
+CREATE INDEX IF NOT EXISTS ptag_tag ON :schema_name.p_tag (tag);
 
-COMMENT ON TABLE :schema_name.pTag IS
+COMMENT ON TABLE :schema_name.p_tag IS
   'Proposal tag index. Kept in sync with proposal.tags_jsonb by application layer or trigger.';
+
+-- ============================================================
+-- Idempotent ALTER for existing deployments (P897)
+-- Adds proposal.tier if the table was created before this
+-- migration was applied.
+-- ============================================================
+ALTER TABLE :schema_name.proposal
+  ADD COLUMN IF NOT EXISTS tier TEXT NOT NULL DEFAULT 'B';
+ALTER TABLE :schema_name.proposal
+  DROP CONSTRAINT IF EXISTS proposal_tier_check;
+ALTER TABLE :schema_name.proposal
+  ADD CONSTRAINT proposal_tier_check CHECK (tier IN ('A','B','C'));

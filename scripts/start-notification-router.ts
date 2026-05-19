@@ -9,7 +9,12 @@
 import { Client } from "pg";
 
 import { NotificationRouter } from "../src/core/notifications/router.ts";
-import { closePool, getPool } from "../src/infra/postgres/pool.ts";
+import { closePool, getPool, setPoolLifecycleMode } from "../src/infra/postgres/pool.ts";
+import { startPoolWatchdog } from "../src/infra/postgres/pool-watchdog.ts";
+
+// P1123: protect the shared pool from stray pool.end() in shared CLI code.
+setPoolLifecycleMode("long-running");
+const watchdog = startPoolWatchdog("agenthive-notification-router");
 
 async function main(): Promise<void> {
 	const pool = getPool();
@@ -44,6 +49,8 @@ async function main(): Promise<void> {
 			console.error("[notification-router] stop error:", err);
 		}
 		try {
+			await watchdog.stop();
+			setPoolLifecycleMode("one-shot");
 			await closePool();
 		} catch (err) {
 			console.error("[notification-router] pool close error:", err);

@@ -14,8 +14,8 @@
 | workflow_spawn | orchestrator | (none) |
 | service_lease_management | orchestrator | (none) |
 | gate_evaluation | orchestrator | (none — gate-pipeline decommissioned per P754) |
-| work_offer_claim | offer-provider | mcp-server |
-| subprocess_spawn | offer-provider | (none) |
+| work_offer_claim | orchestrator (via OfferClaimLoop + OrchestratorOfferDispatcher) | mcp-server |
+| subprocess_spawn | agency-liaison (agenthive-liaison@.service) | orchestrator (observes via liaison_message uplinks) |
 | proposal_crud | mcp-server | (none) |
 | feed_event_publication | state-feed-listener | (none) |
 
@@ -207,3 +207,53 @@ FROM control_runtime.service_lease
 WHERE released_at IS NULL AND expires_at > now()
 ORDER BY responsibility;
 ```
+
+---
+
+## Bringing an Agency Online (P902 A8.3 / P299)
+
+`agenthive-liaison@.service` is the **canonical** way to make an agency dispatchable.
+An `agent_registry` row alone is not sufficient — the liaison session must be active
+and heartbeating for the orchestrator to consider the agency eligible for work dispatch.
+
+### Steps to register a new agency
+
+1. Create `/etc/agenthive/liaison-<agency-id>.env`:
+
+```
+AGENCY_PROVIDER=anthropic
+AGENCY_HOST_ID=bot
+```
+
+2. Enable and start the liaison service:
+
+```bash
+sudo systemctl enable --now agenthive-liaison@<agency-id>.service
+```
+
+3. Verify the session is live:
+
+```bash
+sudo journalctl -u agenthive-liaison@<agency-id> -f
+# Expect: [liaison:<agency-id>] registered session=<uuid>
+```
+
+4. Confirm in the DB:
+
+```sql
+SELECT agency_id, session_id, last_heartbeat_at, capacity_remaining
+FROM roadmap_workforce.liaison_session
+WHERE agency_id = '<agency-id>'
+  AND status = 'active';
+```
+
+### Taking an agency offline
+
+```bash
+sudo systemctl stop agenthive-liaison@<agency-id>.service
+# Liaison sends SIGTERM → clean shutdown → session marked inactive
+```
+
+The orchestrator will stop dispatching to the agency once its liaison session
+heartbeat expires (TTL 90s by default). In-flight offers are completed by the
+liaison before shutdown.

@@ -1,20 +1,43 @@
-import { getPool, query } from "../../infra/postgres/pool.ts";
+import type { PoolClient } from "pg";
+import { closePool, getPool, query } from "../../infra/postgres/pool.ts";
+import { pulseHeartbeat } from "../../infra/pulse/heartbeat.ts";
 import { reapStaleRows } from "../pipeline/reap-stale-rows.ts";
+import {
+	BackpressureError,
+	DispatchLoopError,
+	postWorkOffer,
+} from "../pipeline/post-work-offer.ts";
 import { enqueueNotification } from "../notifications/enqueue.ts";
 import { getUnlockedGateQueue } from "../proposal/gate-scanner-v2.ts";
-import { postWorkOffer } from "../pipeline/post-work-offer.ts";
+import { loadStateNames } from "../workflow/state-names.ts";
+import { spawnAgent } from "./agent-spawner.ts";
 import {
 	bootCancelPokeAttempts,
 	runOfferReaper,
 	runPokeWatchdogTick,
 	type PokeWatchdogOptions,
 } from "./maintenance.ts";
+import { OfferClaimLoop, type ListenerClient } from "./offer-claim-loop.ts";
+import { OrchestratorOfferDispatcher } from "./offer-dispatch.ts";
 import { resolveQueueContext } from "./queue-context-resolver.ts";
 import {
 	assessReadiness,
 	buildTaskPrompt,
 	fetchProposalDetail,
 } from "./readiness-resolver.ts";
+// P903 phase 3+4: legacy dispatch entry points live in legacy-dispatch.ts
+// (extracted from scripts/orchestrator.ts during phase 4 to break the cycle
+// between the shim and the class). P902-D will progressively pull these
+// implementations into class methods.
+import {
+	dispatchImplicitGate,
+	drainEnhancementRevisions,
+	drainImplicitGateReady,
+	handleStateChange,
+	reconcileStaleDispatches,
+	reconcileStrandedAdvances,
+} from "./legacy-dispatch.ts";
+import { detectStuckWorkers } from "../../infra/agency/task-dispatcher.ts";
 
 /**
  * Unified Agent Orchestrator
@@ -23,8 +46,9 @@ import {
  * Uses Postgres as the primary source of truth.
  *
  * P744/P748–P754: scanQueues() is the single unified dispatch loop that
- * replaces the split between scripts/orchestrator.ts and PipelineCron.
- * PG NOTIFY handlers and the poll fallback both call scanQueues().
+ * collapses the previously-split orchestrator/gate-pipeline architecture
+ * into one decision site. PG NOTIFY handlers and the poll fallback both
+ * call scanQueues(). (P754 retired the gate-pipeline service.)
  */
 
 // ─── Configuration ────────────────────────────────────────────────────────────
@@ -61,6 +85,82 @@ const DEFAULT_POKE_IDLE_THRESHOLD_MIN = Number(
 );
 const DEFAULT_POKE_STORM_CAP = Number(process.env.POKE_STORM_CAP ?? 10);
 
+/** Drain timeout on stop() — how long to wait for in-flight dispatches before forcing exit. */
+const DEFAULT_SHUTDOWN_DRAIN_MS = Number(
+	process.env.AGENTHIVE_ORCHESTRATOR_DRAIN_MS ?? 240_000,
+);
+
+/** Notify channels the orchestrator listens on for dispatch wake-ups. */
+const GATE_READY_CHANNEL = "proposal_gate_ready";
+const MATURITY_CHANGED_CHANNEL = "proposal_maturity_changed";
+
+/** Whether the 2-minute state-change poll fallback is enabled (env-driven). */
+const ENABLE_POLLING = process.env.AGENTHIVE_ORCHESTRATOR_POLL === "1";
+
+/**
+ * Orchestrator agent identity used as the claimer in fn_claim_work_offer.
+ * Must exist in roadmap_workforce.agent_registry; ensured at boot.
+ */
+const ORCHESTRATOR_IDENTITY =
+	process.env.AGENTHIVE_ORCHESTRATOR_IDENTITY ??
+	"agenthive/agency-orchestrator";
+
+/**
+ * Escape hatch: set AGENTHIVE_OFFER_CLAIM_LOOP=0 to disable the
+ * orchestrator-side claim loop (e.g. emergency rollback). Default on.
+ */
+const ENABLE_OFFER_CLAIM_LOOP =
+	(process.env.AGENTHIVE_OFFER_CLAIM_LOOP ?? "1") !== "0";
+
+/**
+ * Workflow-drain polls — fallbacks to PG NOTIFY. Each one scans a table for
+ * proposals in a particular state and processes them. The NOTIFY-driven fast
+ * path is the primary trigger; the poll is the safety net for missed NOTIFYs
+ * (PgBouncer transaction-pool reconnects, listener restarts, race conditions
+ * around state transitions).
+ *
+ * Setting interval = 0 disables the poll (NOTIFY remains; relies on its
+ * coverage being complete). The full migration of these to core.runtime_flag
+ * is tracked as a separate follow-on under P1133 universal-config commitment.
+ *
+ *   implicit-gate poll  → NOTIFY channel: proposal_gate_ready
+ *   enhancer-revise     → NOTIFY channel: proposal_maturity_changed (mature)
+ *   reconciler          → no NOTIFY (cleanup of stranded advances; periodic only)
+ *   stale-dispatch      → no NOTIFY (cleanup of stale dispatches; periodic only)
+ *   stale-row reaper    → no NOTIFY (zombie agent_runs/leases; periodic only)
+ *   heartbeat           → not a workflow poll; observability self-pulse
+ */
+
+/** Implicit gate poll interval in ms (set 0 to disable; NOTIFY-fallback). */
+const IMPLICIT_GATE_POLL_INTERVAL_MS = Number(
+	process.env.AGENTHIVE_IMPLICIT_GATE_POLL_MS ?? 30_000,
+);
+
+/** Enhancer-revise autonomous loop interval in ms (set 0 to disable; NOTIFY-fallback). */
+const ENHANCER_REVISE_INTERVAL_MS = Number(
+	process.env.AGENTHIVE_ENHANCER_REVISE_INTERVAL_MS ?? 90_000,
+);
+
+/** P611 stranded-advance reconciler interval in ms (set 0 to disable; periodic-only, no NOTIFY). */
+const RECONCILER_INTERVAL_MS = Number(
+	process.env.AGENTHIVE_RECONCILER_INTERVAL_MS ?? 30_000,
+);
+
+/** Stale-row reaper interval in ms (set 0 to disable; zombie cleanup, no NOTIFY). */
+const STALE_ROW_REAPER_INTERVAL_MS = Number(
+	process.env.AGENTHIVE_STALE_ROW_REAPER_INTERVAL_MS ?? 5 * 60 * 1000,
+);
+
+/** Stuck-worker watchdog interval in ms (set 0 to disable; no NOTIFY). */
+const STUCK_WORKER_WATCHDOG_INTERVAL_MS = Number(
+	process.env.AGENTHIVE_STUCK_WORKER_WATCHDOG_INTERVAL_MS ?? 60_000,
+);
+
+/** Observability heartbeat interval (60 s legacy default; observability, set 0 to disable). */
+const HEARTBEAT_INTERVAL_MS = Number(
+	process.env.AGENTHIVE_HEARTBEAT_INTERVAL_MS ?? 60_000,
+);
+
 export interface OrchestratorConfig {
 	/** Worktree used for liaison agent spawns (Tier 1 stall escalation). */
 	defaultWorktree?: string;
@@ -72,6 +172,8 @@ export interface OrchestratorConfig {
 	pokeIdleThresholdMin?: number;
 	/** Max pokes emitted per watchdog tick (storm cap). */
 	pokeStormCap?: number;
+	/** Drain timeout on stop() in ms (default 240 s). */
+	shutdownDrainMs?: number;
 }
 
 export class Orchestrator {
@@ -79,10 +181,20 @@ export class Orchestrator {
 	private readonly offerReapIntervalMs: number;
 	private readonly pokeWatchdogIntervalMs: number;
 	private readonly pokeOpts: PokeWatchdogOptions;
+	private readonly shutdownDrainMs: number;
 
 	private offerReapTimer: ReturnType<typeof setInterval> | null = null;
 	private pokeWatchdogTimer: ReturnType<typeof setInterval> | null = null;
 	private offerReapInFlight = false;
+
+	// P902-A: lifecycle state for start()/stop().
+	private started = false;
+	private stopping = false;
+	private listenClient: PoolClient | null = null;
+	private offerClaimLoop: OfferClaimLoop | null = null;
+	private readonly pollTimers: Map<string, ReturnType<typeof setInterval>> =
+		new Map();
+	private readonly inFlight: Set<Promise<unknown>> = new Set();
 
 	constructor(config: OrchestratorConfig = {}) {
 		this.defaultWorktree =
@@ -98,21 +210,528 @@ export class Orchestrator {
 				config.pokeIdleThresholdMin ?? DEFAULT_POKE_IDLE_THRESHOLD_MIN,
 			stormCap: config.pokeStormCap ?? DEFAULT_POKE_STORM_CAP,
 		};
+		this.shutdownDrainMs =
+			config.shutdownDrainMs ?? DEFAULT_SHUTDOWN_DRAIN_MS;
+	}
+
+	// ─── Lifecycle (P902-A) ────────────────────────────────────────────────────
+
+	/**
+	 * Track an in-flight dispatch promise so {@link stop} can wait for it.
+	 * Promise removal is scheduled on settle; callers may await the returned
+	 * promise as if `trackInFlight` were transparent.
+	 */
+	private trackInFlight<T>(p: Promise<T>): Promise<T> {
+		this.inFlight.add(p);
+		p.finally(() => this.inFlight.delete(p)).catch(() => {
+			/* swallow — settled promises are removed regardless */
+		});
+		return p;
+	}
+
+	/** Number of dispatch promises currently tracked. */
+	inFlightCount(): number {
+		return this.inFlight.size;
+	}
+
+	/** Whether {@link start} has been called and {@link stop} has not. */
+	isRunning(): boolean {
+		return this.started && !this.stopping;
+	}
+
+	/**
+	 * Start the orchestrator: boot maintenance, register notify handlers, schedule
+	 * timers. Idempotent — calling twice is a no-op.
+	 *
+	 * Behavior parity with the legacy main() in scripts/orchestrator.ts:
+	 *   - Boot: reapStaleRows + bootCancelPokeAttempts (via bootMaintenance).
+	 *   - LISTEN proposal_gate_ready + proposal_maturity_changed; route through
+	 *     onNotification().
+	 *   - Schedule maintenance ticks (offer reaper 60s, poke watchdog 60s).
+	 *   - Schedule 5 legacy poll timers (2-min state poll if AGENTHIVE_ORCHESTRATOR_POLL=1,
+	 *     30s implicit gate poll if AGENTHIVE_IMPLICIT_GATE_POLL_MS>0, 90s enhancer-revise,
+	 *     30s P611 reconciler, 60s heartbeat).
+	 *
+	 * Dispatch bodies live in scripts/orchestrator.ts as exported functions for
+	 * now (P903 phase 2); P902-D progressively pulls them into class methods.
+	 */
+	async start(): Promise<void> {
+		if (this.started) return;
+		this.started = true;
+		this.stopping = false;
+
+		await this.bootMaintenance();
+		this.startMaintenance();
+
+		// Connect LISTEN client and register notification handler.
+		const pool = getPool();
+		this.listenClient = await pool.connect();
+		this.listenClient.on(
+			"notification",
+			(msg: { channel: string; payload?: string }) => {
+				if (this.stopping || !msg.payload) return;
+				void this.onNotification(msg.channel, msg.payload);
+			},
+		);
+		await this.listenClient.query(`LISTEN ${GATE_READY_CHANNEL}`);
+		await this.listenClient.query(`LISTEN ${MATURITY_CHANGED_CHANNEL}`);
+		console.log(
+			`[Orchestrator] LISTEN registered: ${GATE_READY_CHANNEL}, ${MATURITY_CHANGED_CHANNEL}`,
+		);
+
+		// Schedule the five legacy poll timers. Each is parity with the
+		// scripts/orchestrator.ts main() interval; toggles preserved.
+		if (ENABLE_POLLING) {
+			this.pollTimers.set(
+				"state-change",
+				setInterval(() => this._statePollTick(), 2 * 60 * 1000),
+			);
+			console.log("[Orchestrator] 2-min state-change polling enabled");
+		} else {
+			console.log(
+				"[Orchestrator] state-change polling disabled (AGENTHIVE_ORCHESTRATOR_POLL!=1)",
+			);
+		}
+
+		if (IMPLICIT_GATE_POLL_INTERVAL_MS > 0) {
+			// Initial drain at boot (matches legacy line 2604).
+			void this.trackInFlight(
+				drainImplicitGateReady("startup", 5).catch((err) =>
+					console.error("[Orchestrator] startup drain failed:", err),
+				),
+			);
+			this.pollTimers.set(
+				"implicit-gate",
+				setInterval(() => {
+					if (this.stopping) return;
+					void this.trackInFlight(
+						drainImplicitGateReady("implicit-gate-poll", 5).catch((err) =>
+							console.error("[Orchestrator] implicit gate poll failed:", err),
+						),
+					);
+				}, IMPLICIT_GATE_POLL_INTERVAL_MS),
+			);
+			console.log(
+				`[Orchestrator] implicit gate polling every ${IMPLICIT_GATE_POLL_INTERVAL_MS}ms`,
+			);
+		}
+
+		if (ENHANCER_REVISE_INTERVAL_MS > 0) {
+			this.pollTimers.set(
+				"enhancer-revise",
+				setInterval(() => {
+					if (this.stopping) return;
+					void this.trackInFlight(
+						drainEnhancementRevisions("enhancer-revise-loop", 4).catch((err) =>
+							console.error("[Orchestrator] enhancer-revise failed:", err),
+						),
+					);
+				}, ENHANCER_REVISE_INTERVAL_MS),
+			);
+			console.log(
+				`[Orchestrator] enhancer-revise poll every ${ENHANCER_REVISE_INTERVAL_MS}ms (NOTIFY-fallback)`,
+			);
+		} else {
+			console.log("[Orchestrator] enhancer-revise poll disabled (AGENTHIVE_ENHANCER_REVISE_INTERVAL_MS=0)");
+		}
+
+		if (RECONCILER_INTERVAL_MS > 0) {
+			this.pollTimers.set(
+				"reconciler",
+				setInterval(() => {
+					if (this.stopping) return;
+					void this.trackInFlight(
+						reconcileStrandedAdvances(pool).catch((err) =>
+							console.error("[Orchestrator] reconciler failed:", err),
+						),
+					);
+				}, RECONCILER_INTERVAL_MS),
+			);
+			this.pollTimers.set(
+				"stale-dispatch-reconciler",
+				setInterval(() => {
+					if (this.stopping) return;
+					void this.trackInFlight(
+						reconcileStaleDispatches(pool).catch((err) =>
+							console.error("[Orchestrator] stale-dispatch reconciler failed:", err),
+						),
+					);
+				}, RECONCILER_INTERVAL_MS),
+			);
+			console.log(
+				`[Orchestrator] reconciler + stale-dispatch every ${RECONCILER_INTERVAL_MS}ms (periodic-only)`,
+			);
+		} else {
+			console.log("[Orchestrator] reconciler + stale-dispatch disabled (AGENTHIVE_RECONCILER_INTERVAL_MS=0)");
+		}
+
+		if (STUCK_WORKER_WATCHDOG_INTERVAL_MS > 0) {
+			this.pollTimers.set(
+				"stuck-worker-watchdog",
+				setInterval(() => {
+					if (this.stopping) return;
+					void this.trackInFlight(
+						detectStuckWorkers().catch((err) =>
+							console.error("[Orchestrator] stuck-worker watchdog failed:", err),
+						),
+					);
+				}, STUCK_WORKER_WATCHDOG_INTERVAL_MS),
+			);
+			console.log(
+				`[Orchestrator] detectStuckWorkers watchdog every ${STUCK_WORKER_WATCHDOG_INTERVAL_MS}ms`,
+			);
+		} else {
+			console.log("[Orchestrator] stuck-worker watchdog disabled (AGENTHIVE_STUCK_WORKER_WATCHDOG_INTERVAL_MS=0)");
+		}
+
+		// Periodic stale-row inspection: zombie agent_runs, expired leases, stale
+		// dispatches. No NOTIFY fast-path — zombies live in cracks between
+		// expected transitions. Default cadence well below 60-min zombie threshold.
+		if (STALE_ROW_REAPER_INTERVAL_MS > 0) {
+			this.pollTimers.set(
+				"stale-row-reaper",
+				setInterval(() => {
+					if (this.stopping) return;
+					void this.trackInFlight(
+						reapStaleRows(
+							getPool(),
+							{ log: (m) => console.log(m), warn: (m) => console.warn(m) },
+							"Orchestrator.Reaper",
+						).catch((err) =>
+							console.error("[Orchestrator] periodic reaper failed:", err),
+						),
+					);
+				}, STALE_ROW_REAPER_INTERVAL_MS),
+			);
+			console.log(
+				`[Orchestrator] periodic stale-row reaper every ${STALE_ROW_REAPER_INTERVAL_MS}ms`,
+			);
+		} else {
+			console.log("[Orchestrator] stale-row reaper disabled (AGENTHIVE_STALE_ROW_REAPER_INTERVAL_MS=0)");
+		}
+
+		if (HEARTBEAT_INTERVAL_MS > 0) {
+			this.pollTimers.set(
+				"heartbeat",
+				setInterval(() => {
+					void pulseHeartbeat("orchestrator", {
+						currentTask: this.stopping ? "stopping" : "running",
+						metadata: { in_flight: this.inFlight.size },
+					}).catch((err) =>
+						console.error("[Orchestrator] heartbeat failed:", err),
+					);
+				}, HEARTBEAT_INTERVAL_MS),
+			);
+		} else {
+			console.log("[Orchestrator] observability heartbeat disabled (AGENTHIVE_HEARTBEAT_INTERVAL_MS=0)");
+		}
+
+		// P914 / P904: start the offer-claim loop. The loop LISTENs on
+		// `work_offers` (fired by postWorkOffer in legacy-dispatch.ts) +
+		// polls every 30s as a safety net. On wake, it calls
+		// fn_claim_work_offer with the orchestrator's identity, then hands
+		// the claim (with claim_token) to OrchestratorOfferDispatcher which
+		// emits a properly-formed offer_dispatch into liaison_message. This
+		// is the canonical single push-dispatch path; the broken inline
+		// emit-liaison block in legacy-dispatch.ts has been removed.
+		if (ENABLE_OFFER_CLAIM_LOOP) {
+			try {
+				await this.startOfferClaimLoop();
+			} catch (err) {
+				console.error(
+					"[Orchestrator] OfferClaimLoop start failed (push dispatch disabled):",
+					err instanceof Error ? err.message : err,
+				);
+			}
+		} else {
+			console.log(
+				"[Orchestrator] OfferClaimLoop disabled (AGENTHIVE_OFFER_CLAIM_LOOP=0)",
+			);
+		}
+
+		console.log("[Orchestrator] started");
+	}
+
+	/**
+	 * P914: instantiate and start the OfferClaimLoop + OrchestratorOfferDispatcher.
+	 *
+	 * Ensures the orchestrator's agent_registry row exists (so fn_claim_work_offer
+	 * doesn't reject with FK violation), then wires the claim → dispatch chain.
+	 */
+	private async startOfferClaimLoop(): Promise<void> {
+		// Ensure the orchestrator identity is registered as an agent so
+		// fn_claim_work_offer's Gate 1 (agent_registry lookup) passes.
+		await query(
+			`INSERT INTO roadmap_workforce.agent_registry
+			    (agent_identity, agent_type, trust_tier, status)
+			 VALUES ($1, 'coordinator', 'authority', 'active')
+			 ON CONFLICT (agent_identity) DO UPDATE
+			   SET status = 'active'`,
+			[ORCHESTRATOR_IDENTITY],
+		);
+
+		// Gate 6 (project scope): orchestrator needs a provider_registry row
+		// for at least one project. Subscribe to all active projects so the
+		// claimer can pick up offers from any project the system serves.
+		await query(
+			`INSERT INTO roadmap_workforce.provider_registry
+			    (agency_id, agency_identity, project_id, squad_name,
+			     status, max_in_flight)
+			 SELECT ar.id, ar.agent_identity, p.project_id, NULL,
+			        'active', 8
+			   FROM roadmap_workforce.agent_registry ar
+			   CROSS JOIN roadmap.project p
+			  WHERE ar.agent_identity = $1
+			    AND p.status = 'active'
+			    AND p.archived_at IS NULL
+			 ON CONFLICT (agency_id, project_id, squad_name) DO UPDATE
+			   SET status = 'active'`,
+			[ORCHESTRATOR_IDENTITY],
+		);
+
+		const dispatcher = new OrchestratorOfferDispatcher({
+			orchestratorIdentity: ORCHESTRATOR_IDENTITY,
+		});
+
+		const loop = new OfferClaimLoop({
+			orchestratorIdentity: ORCHESTRATOR_IDENTITY,
+			dispatcher,
+			connectListener: async (): Promise<ListenerClient> => {
+				const client = await getPool().connect();
+				return client as unknown as ListenerClient;
+			},
+		});
+
+		await loop.start();
+		this.offerClaimLoop = loop;
+		console.log(
+			`[Orchestrator] OfferClaimLoop started as ${ORCHESTRATOR_IDENTITY}`,
+		);
+	}
+
+	/**
+	 * 2-minute state-change poll fallback (enabled by AGENTHIVE_ORCHESTRATOR_POLL=1).
+	 *
+	 * Mirrors scripts/orchestrator.ts main() polling block: finds workflows that
+	 * need an agent, excluding proposals that already have running agent_runs or
+	 * alive squad_dispatch. Calls handleStateChange for each.
+	 */
+	private async _statePollTick(): Promise<void> {
+		if (this.stopping) return;
+		try {
+			const result = await query<{
+				id: number;
+				proposal_id: number;
+				current_stage: string;
+			}>(
+				`SELECT w.id, w.proposal_id, w.current_stage
+				   FROM roadmap.workflows w
+				   JOIN roadmap_proposal.proposal p ON p.id = w.proposal_id
+				  WHERE w.completed_at IS NULL
+				    AND p.maturity IN ('new', 'active')
+				    AND p.status NOT IN ('COMPLETE')
+				    AND p.gate_scanner_paused = false
+				    AND EXISTS (
+				      SELECT 1 FROM roadmap.workflow_transitions wt
+				       WHERE wt.template_id = w.template_id
+				         AND LOWER(wt.from_stage) = LOWER(w.current_stage)
+				    )
+				    AND NOT EXISTS (
+				      SELECT 1 FROM roadmap_workforce.agent_runs ar
+				       WHERE ar.proposal_id = w.proposal_id
+				         AND ar.status = 'running'
+				    )
+				    AND NOT EXISTS (
+				      SELECT 1 FROM roadmap_workforce.squad_dispatch sd
+				       WHERE sd.proposal_id = w.proposal_id
+				         AND sd.dispatch_status IN ('open','assigned','active','blocked')
+				    )
+				  ORDER BY w.started_at ASC
+				  LIMIT 5`,
+			);
+			for (const wf of result.rows) {
+				if (this.stopping) return;
+				void this.trackInFlight(
+					handleStateChange(String(wf.proposal_id), wf.current_stage),
+				);
+			}
+		} catch (err) {
+			console.error("[Orchestrator] state poll failed:", err);
+		}
+	}
+
+	/**
+	 * Stop the orchestrator: flag stopping, clear timers, release LISTEN client,
+	 * drain in-flight dispatches up to {@link shutdownDrainMs}.
+	 *
+	 * Resolves once all in-flight promises settle or the drain timeout elapses.
+	 */
+	async stop(): Promise<void> {
+		if (!this.started || this.stopping) return;
+		this.stopping = true;
+
+		this.stopMaintenance();
+		for (const [name, timer] of this.pollTimers) {
+			clearInterval(timer);
+			void name;
+		}
+		this.pollTimers.clear();
+
+		// P914: stop the offer-claim loop before draining in-flight dispatches
+		// so no new claims start during shutdown.
+		if (this.offerClaimLoop) {
+			try {
+				await this.offerClaimLoop.stop();
+			} catch (err) {
+				console.warn(
+					"[Orchestrator] OfferClaimLoop stop failed:",
+					err instanceof Error ? err.message : err,
+				);
+			}
+			this.offerClaimLoop = null;
+		}
+
+		// Release LISTEN client (release(true) destroys the underlying socket so
+		// pool.end() doesn't hang on a long-lived LISTEN connection).
+		if (this.listenClient) {
+			try {
+				this.listenClient.release(true);
+			} catch {
+				/* best-effort */
+			}
+			this.listenClient = null;
+		}
+
+		// Drain in-flight dispatches with a hard ceiling.
+		if (this.inFlight.size > 0) {
+			console.log(
+				`[Orchestrator] draining ${this.inFlight.size} in-flight dispatch(es) (timeout ${this.shutdownDrainMs}ms)…`,
+			);
+			const drain = Promise.allSettled(Array.from(this.inFlight));
+			const timeout = new Promise<void>((resolve) =>
+				setTimeout(resolve, this.shutdownDrainMs).unref(),
+			);
+			await Promise.race([drain, timeout]);
+			if (this.inFlight.size > 0) {
+				console.warn(
+					`[Orchestrator] drain timeout: ${this.inFlight.size} dispatch(es) still in-flight`,
+				);
+			}
+		}
+
+		this.started = false;
+		console.log("[Orchestrator] stopped");
+	}
+
+	/**
+	 * Route a Postgres notification to the appropriate dispatch path.
+	 *
+	 * Mirrors scripts/orchestrator.ts main() notification handler at line 2491:
+	 *   - proposal_gate_ready  → dispatchImplicitGate(proposal_id)
+	 *   - proposal_maturity_changed → resolve workflow, then handleStateChange
+	 *
+	 * Both wrapped in trackInFlight so {@link stop} can drain them.
+	 */
+	async onNotification(channel: string, payload?: string): Promise<void> {
+		if (this.stopping || !payload) return;
+		if (
+			channel !== GATE_READY_CHANNEL &&
+			channel !== MATURITY_CHANGED_CHANNEL
+		) {
+			return;
+		}
+		try {
+			const data = JSON.parse(payload) as {
+				proposal_id?: number | string;
+				id?: number | string;
+			};
+
+			if (channel === GATE_READY_CHANNEL) {
+				const pid = Number(data.proposal_id ?? data.id);
+				if (Number.isFinite(pid)) {
+					await this.trackInFlight(
+						dispatchImplicitGate(pid, "notify:proposal_gate_ready"),
+					);
+				}
+				return;
+			}
+
+			// proposal_maturity_changed: resolve current workflow stage.
+			const proposalId = data.proposal_id ?? data.id;
+			if (!proposalId) return;
+			const result = await query<{
+				id: number;
+				proposal_id: number;
+				current_stage: string;
+			}>(
+				"SELECT id, proposal_id, current_stage FROM roadmap.workflows WHERE proposal_id = $1 ORDER BY started_at DESC LIMIT 1",
+				[proposalId],
+			);
+			if (result.rows.length > 0) {
+				const wf = result.rows[0];
+				await this.trackInFlight(
+					handleStateChange(String(wf.proposal_id), wf.current_stage),
+				);
+			}
+		} catch (err) {
+			console.error("[Orchestrator] notification handler failed:", err);
+		}
+	}
+
+	/**
+	 * Best-effort pool teardown for the shim's signal-handler path. Idempotent.
+	 * Hard-exits at +5s if pool.end() hangs (mirrors legacy entry point).
+	 */
+	async closePoolWithFallback(hardExitMs = 5_000): Promise<void> {
+		const fallback = setTimeout(() => {
+			console.warn(
+				"[Orchestrator] pool.end() did not return; forcing process exit",
+			);
+			process.exit(0);
+		}, hardExitMs);
+		fallback.unref();
+		try {
+			await closePool();
+		} finally {
+			clearTimeout(fallback);
+		}
 	}
 
 	// ─── Maintenance cycle ─────────────────────────────────────────────────────
 
 	/**
-	 * Run boot-time maintenance: cancel orphaned poke attempts and reap stale
-	 * DB rows left by a prior abrupt stop. Call once before startMaintenance().
+	 * Run boot-time maintenance: load state-names registry, cancel orphaned poke
+	 * attempts, and reap stale DB rows left by a prior abrupt stop. Call once
+	 * before startMaintenance().
 	 */
 	async bootMaintenance(): Promise<void> {
+		const pool = getPool();
+
+		// Load state-names registry from DB (includes NOTIFY listener for live reloads).
+		try {
+			await loadStateNames(pool);
+			console.log("[Orchestrator] State-names registry loaded from database");
+		} catch (error) {
+			console.error("[Orchestrator] Failed to load state-names registry:", error);
+			// Non-fatal; continue without the registry
+		}
+
 		await bootCancelPokeAttempts(query, console, "Orchestrator");
 		await reapStaleRows(
-			getPool(),
+			pool,
 			{ log: (m) => console.log(m), warn: (m) => console.warn(m) },
 			"Orchestrator.Reaper",
 		);
+
+		// Boot-time offer reaper: reapStaleRows above only catches dispatches
+		// whose dispatch_status='assigned'/'active' have aged past 20m. It
+		// leaves offer_status='claimed' rows alone — those are handled by
+		// fn_reap_expired_offers, which the periodic timer runs every 60s but
+		// only AFTER startMaintenance(). Without a boot pass, the first
+		// scanQueues tick sees the in-flight cap already poisoned by orphaned
+		// claims from the prior session (observed 2026-05-14: 25 stale rows
+		// from 5h earlier blocked the cap at boot).
+		await runOfferReaper(query, console, "Orchestrator.BootReaper");
 	}
 
 	/**
@@ -164,7 +783,8 @@ export class Orchestrator {
 	 *   1. resolveQueueContext()  — enrich with workflowTemplateId + roleProfiles
 	 *   2. fetchProposalDetail()  — full RFC fields for readiness check
 	 *   3. assessReadiness()      — determines mode: gate | prep | skip
-	 *   4. spawnAgent()           — routes through 6-layer policy filter
+	 *   4. postWorkOffer()        — enqueues offer; OfferClaimLoop → OrchestratorOfferDispatcher
+	 *                               → liaison_message offer_dispatch (AC-2)
 	 *
 	 * Returns the number of proposals that were dispatched (mode ≠ skip).
 	 */
@@ -192,18 +812,46 @@ export class Orchestrator {
 					continue;
 				}
 
+				const primaryProfile = ctx.roleProfiles[0] ?? null;
 				const task = buildTaskPrompt(detail, mode, reasons);
 
+				// AC-2: route all proposal-level dispatches through the offer
+				// dispatch pipeline (postWorkOffer → OfferClaimLoop →
+				// OrchestratorOfferDispatcher → liaison_message offer_dispatch).
+				// The liaison's OfferDispatchHandler calls spawnAgent; the
+				// orchestrator itself no longer forks CLI subprocesses for
+				// proposal execution.
 				await postWorkOffer({
 					proposalId: detail.id,
-					squadName: `P${detail.id}-${detail.status}`,
-					role: mode,
+					squadName: `P${detail.id}-${mode}`,
+					role: `${detail.displayId} (${mode})`,
 					task,
 					stage: detail.status,
+					worktreeHint: this.defaultWorktree,
+					// P771: forward role_profile_id so the liaison applies the
+					// same route-policy filters that a direct spawnAgent call
+					// would have applied (allowed_route_providers, etc.).
+					roleProfileId: primaryProfile?.id ?? null,
 				});
 
 				dispatched++;
 			} catch (err) {
+				// Backpressure isn't a failure — it's the cap doing its job.
+				// Stop scanning this tick: if the queue is full, no point
+				// trying more candidates. They'll be picked up next tick.
+				if (err instanceof BackpressureError) {
+					console.log(
+						`[Orchestrator] scanQueues: ${err.message} stopping at proposal ${candidate.id}, dispatched=${dispatched}`,
+					);
+					break;
+				}
+				// Circuit breaker is also expected behavior — log at warn, not error.
+				if (err instanceof DispatchLoopError) {
+					console.warn(
+						`[Orchestrator] scanQueues: ${err.message}`,
+					);
+					continue;
+				}
 				console.error(
 					`[Orchestrator] scanQueues: dispatch failed for proposal ${candidate.id}:`,
 					err instanceof Error ? err.message : err,
@@ -286,10 +934,13 @@ export class Orchestrator {
 		// Tier 1: AI liaison (conditional on env var)
 		if (ORCHESTRATOR_LIAISON_PROVIDER) {
 			try {
-				await postWorkOffer({
+				await spawnAgent({
+					worktree: this.defaultWorktree,
 					proposalId: stall.id,
-					squadName: `P${stall.id}-stall-liaison`,
-					role: "orchestrator-liaison-investigator",
+					stage: stall.status,
+					provider: ORCHESTRATOR_LIAISON_PROVIDER,
+					agentLabel: `${stall.displayId} (liaison)`,
+					activity: "investigating stall",
 					task: [
 						`You are an AI liaison investigating a stalled proposal.`,
 						``,
@@ -304,7 +955,6 @@ export class Orchestrator {
 						``,
 						`If you cannot resolve the block, use mcp_ops escalation_add with severity CRITICAL.`,
 					].join("\n"),
-					stage: stall.status,
 				});
 				return;
 			} catch (err) {

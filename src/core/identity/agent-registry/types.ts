@@ -32,6 +32,12 @@ export type RegistrationRequest = {
 	routeAbbr?: string;
 	/** P852: spawning host segment (e.g. "mac", "bot"). Defaults to AGENTHIVE_HOST env. */
 	host?: string;
+	/**
+	 * P931: Human-readable provider name from model_routes.agent_provider
+	 * (e.g. 'Claude', 'Codex'). Used for Tier 2 display_alias label.
+	 * Must NOT be a dense routeAbbr — assignDisplayAlias throws if it detects one.
+	 */
+	agentProvider?: string;
 };
 
 export type RegistrationResponse = {

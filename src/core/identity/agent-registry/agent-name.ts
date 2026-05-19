@@ -174,3 +174,71 @@ export function isLiaisonHint(
 
 export const LIAISON_SLOTS = "0123456789";
 export const EXPERT_SLOTS = "abcdefghijklmnopqrstuvwxyz";
+
+const ALL_CAPS_TOKENS = new Set(["qa", "ai", "ml", "sre", "ux", "ui", "api"]);
+
+/** Dense routeAbbr shape: 2-3 lowercase letters + digits + 2-4 lowercase letters (e.g. "ccs46ant"). */
+const ABBR_SHAPE = /^[a-z]{2,3}\d+[a-z]{2,4}$/;
+
+/**
+ * Convert a raw expertise string to a Title-Case display segment.
+ * Splits on hyphens; ALL_CAPS_TOKENS stay uppercase; all others PascalCase.
+ * "documenter" → "Documenter", "gate-review" → "GateReview", "qa" → "QA", "ai-architect" → "AIArchitect"
+ */
+function titleCaseExpertise(raw: string): string {
+	return raw
+		.split("-")
+		.map((tok) => {
+			const lower = tok.toLowerCase();
+			if (ALL_CAPS_TOKENS.has(lower)) return lower.toUpperCase();
+			return lower[0]?.toUpperCase() + lower.slice(1);
+		})
+		.join("");
+}
+
+/**
+ * P919: Assign a human-readable display alias for an agent.
+ *
+ * Tier 1 (Liaison): "{Provider}-{Host}" (e.g., "Claude-Bot", "Codex-Hermes")
+ * Tier 2 (Expert slot-0): "{Provider}-{Host}-{Expertise}" (e.g., "Claude-Bot-Architect")
+ * Tier 3+: No alias (rotated slots return empty/null)
+ *
+ * @param agentIdentity - The immutable P852 identity (e.g., "ccs45ant-bot-ts-a")
+ * @param agencyName - Provider/agency name (e.g., "Claude", "Codex")
+ * @param hostId - Spawning host (e.g., "bot", "hermes", "mac")
+ * @param expertise - Optional expertise hint (e.g., "architecture", "typescript")
+ * @param slotChar - The slot character assigned (0..9 for liaison, a..z for expert)
+ * @returns The display alias, or null if not applicable
+ */
+export function assignDisplayAlias(
+	agencyName: string,
+	hostId: string,
+	expertise?: string,
+	slotChar?: string,
+): string | null {
+	if (ABBR_SHAPE.test(agencyName.trim())) {
+		throw new Error(
+			`assignDisplayAlias: received dense routeAbbr '${agencyName}' — pass agent_provider (e.g. 'Claude') instead`,
+		);
+	}
+
+	// Normalize agency name (remove whitespace, capitalize)
+	const normalizedAgency = agencyName
+		.trim()
+		.split(/\s+/)
+		.map((word) => word[0]?.toUpperCase() + word.slice(1).toLowerCase())
+		.join("");
+
+	// Tier 1: Liaison (slot 0..9, no expertise hint)
+	if (slotChar && LIAISON_SLOTS.includes(slotChar) && !expertise) {
+		return `${normalizedAgency}-${hostId}`;
+	}
+
+	// Tier 2: Expert slot-0 with expertise (e.g., Architect, Reviewer)
+	if (slotChar === "a" && expertise) {
+		return `${normalizedAgency}-${hostId}-${titleCaseExpertise(expertise)}`;
+	}
+
+	// Tier 3+: Rotated slots (b, c, ...) → no alias
+	return null;
+}

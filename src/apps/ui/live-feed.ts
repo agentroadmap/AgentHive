@@ -22,8 +22,7 @@ export function dedupeBoardLiveFeed(events: StreamEvent[]): StreamEvent[] {
 			event.type,
 			event.proposalId ?? "",
 			event.agentId ?? "",
-			event.message.trim(),
-			String(event.timestamp),
+			String(event.message ?? "").trim(),
 		].join("|");
 		if (seen.has(key)) continue;
 		seen.add(key);
@@ -261,17 +260,37 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 			[limit],
 		);
 
-		return dedupeBoardLiveFeed(
-			rows.map((row) => ({
-				id: row.id,
-				type: row.type,
-				timestamp: timestampToMillis(row.timestamp_ms),
-				proposalId: row.proposal_id ?? undefined,
-				agentId: row.agent_id ?? undefined,
-				message: row.message,
-				metadata: {},
-			})),
-		);
+		const events = rows.map((row) => ({
+			id: row.id,
+			type: row.type,
+			timestamp: timestampToMillis(row.timestamp_ms),
+			proposalId: row.proposal_id ?? undefined,
+			agentId: row.agent_id ?? undefined,
+			message: row.message,
+			metadata: {},
+		}));
+
+		// Filter out liaison heartbeat noise and blank messages at the event layer so
+		// the SQL UNION remains stable across branches. The ledger writes a
+		// display string like "<from> -> <to_or_channel>: <message_content>"; detect
+		// liaison heartbeats by matching the recipient part for 'system:liaison' and
+		// the payload word 'heartbeat'. Be conservative: only drop fully blank
+		// messages for the message ledger rows (type === 'message').
+		const filteredEvents = events.filter((ev) => {
+			if (!ev.message || String(ev.message).trim() === "") {
+				// preserve non-message events even if their message is blank
+				if (ev.type !== "message") return true;
+				return false;
+			}
+			if (ev.type === "message") {
+				const msg = String(ev.message).toLowerCase().trim();
+				// Regex: '->' then recipient containing 'system:liaison' then a 'heartbeat' word
+				if (/->\s*[^:]*system:liaison\b[\w:.-]*[:\s].*\bheartbeat\b/.test(msg)) return false;
+			}
+			return true;
+		});
+
+		return dedupeBoardLiveFeed(filteredEvents);
 	} catch {
 		return getRecentEvents(limit);
 	}

@@ -192,7 +192,13 @@ export function registerProposalTools(
 		proposalReleaseSchema,
 		async (input) =>
 			handlers.releaseProposal(
-				input as { id: string; agent: string; force?: boolean },
+				// P934: release_reason now required by proposalReleaseSchema; thread it through.
+				input as {
+					id: string;
+					agent: string;
+					force?: boolean;
+					release_reason: string;
+				},
 			),
 	);
 

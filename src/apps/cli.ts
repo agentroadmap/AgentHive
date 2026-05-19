@@ -8,9 +8,6 @@ import { stdin as input } from "node:process";
 import { createInterface } from "node:readline/promises";
 import * as clack from "@clack/prompts";
 import { Command } from "commander";
-import { getDaemonUrl } from "../shared/runtime/endpoints.ts";
-import { RfcStates } from "../core/workflow/state-names.ts";
-import { resolveBoardDataSource } from "./board-source.ts";
 import { initializeProject } from "../core/infrastructure/init.ts";
 import {
 	buildDirectiveBuckets,
@@ -18,12 +15,16 @@ import {
 	directiveKey,
 } from "../core/proposal/directives.ts";
 import { computeSequences } from "../core/proposal/sequences.ts";
+import { loadStateNames, RfcStates } from "../core/workflow/state-names.ts";
+import { getPool, query as pgQuery } from "../infra/postgres/pool.ts";
 import {
 	DEFAULT_CLAIM_DURATION_MINUTES,
 	DEFAULT_DIRECTORIES,
 } from "../shared/constants/index.ts";
 import { formatCompactProposalListLine } from "../shared/formatters/proposal-list-plain-text.ts";
 import { formatProposalPlainText } from "../shared/formatters/proposal-plain-text.ts";
+import { loadRuntimeEnvFile } from "../shared/runtime/config.ts";
+import { getDaemonUrl } from "../shared/runtime/endpoints.ts";
 import {
 	type AgentStatus,
 	type Decision,
@@ -85,6 +86,7 @@ import {
 	getValidStatuses,
 } from "../utils/status.ts";
 import { formatVersionLabel, getVersionInfo } from "../utils/version.ts";
+import { resolveBoardDataSource } from "./board-source.ts";
 import {
 	type CompletionInstallResult,
 	installCompletion,
@@ -94,13 +96,13 @@ import { configureAdvancedSettings } from "./commands/configure-advanced-setting
 import { registerCubicCommand } from "./commands/cubic-cli.ts";
 import { runDocsCommand } from "./commands/docs.ts";
 import { registerMcpCommand } from "./commands/mcp.ts";
-import { registerStateMachineCommand } from "./commands/state-machine.ts";
 import {
 	pickProposalForEditWizard,
 	runProposalCreateWizard,
 	runProposalEditWizard,
 } from "./commands/proposal-wizard.ts";
 import { sandboxCommand } from "./commands/sandbox.ts";
+import { registerStateMachineCommand } from "./commands/state-machine.ts";
 import {
 	type AgentInstructionFile,
 	addAgentInstructions,
@@ -112,7 +114,6 @@ import {
 	isGitRepository,
 	updateReadmeWithBoard,
 } from "./index.ts";
-import { query as pgQuery } from "../infra/postgres/pool.ts";
 
 type IntegrationMode = "mcp" | "cli" | "none";
 
@@ -4360,6 +4361,11 @@ async function handleBoardView(options: {
 
 	const source = resolveBoardDataSource(options.source, config);
 
+	if (source === "postgres") {
+		await loadRuntimeEnvFile();
+		await loadStateNames(getPool());
+	}
+
 	if (options.plain || !process.stdout.isTTY) {
 		const proposals =
 			source === "postgres"
@@ -4405,29 +4411,13 @@ async function handleBoardView(options: {
 					}))
 				: await core.loadProposals();
 
-		const [directiveEntities, archivedDirectives] = await Promise.all([
-			core.filesystem.listDirectives(),
-			core.filesystem.listArchivedDirectives(),
-		]);
-
-		const availableDirectives = [...directiveEntities, ...archivedDirectives]
-			.map((directive) => directive.title.trim())
-			.filter(Boolean);
-
-		const { renderBoardTui } = await import("../ui/board.ts");
-		await renderBoardTui(
+		const { runUnifiedView } = await import("../ui/unified-view.ts");
+		await runUnifiedView({
+			core,
+			initialView: "kanban",
 			proposals,
-			statuses,
-			_layout,
-			_maxColumnWidth,
-			{
-				projectRoot: core.getProjectRoot(),
-				directiveMode: options.directives,
-				directiveEntities,
-				availableLabels: config?.labels || [],
-				availableDirectives,
-			},
-		);
+			directiveMode: options.directives,
+		});
 	} catch (error) {
 		console.error(error instanceof Error ? error.message : error);
 		process.exitCode = 1;
@@ -4732,7 +4722,12 @@ program
 				}
 			}
 
-			const pgChan = type === "public" ? "broadcast" : type === "group" ? `team:${group}` : "direct";
+			const pgChan =
+				type === "public"
+					? "broadcast"
+					: type === "group"
+						? `team:${group}`
+						: "direct";
 			await pgQuery(
 				`INSERT INTO roadmap.message_ledger (from_agent, to_agent, channel, message_type, message_content) VALUES ($1, $2, $3, 'text', $4)`,
 				[from, to ?? null, pgChan, message],
@@ -4926,10 +4921,18 @@ program
 					`SELECT from_agent, message_content, created_at FROM roadmap.message_ledger
 					 WHERE channel = $1 ORDER BY created_at DESC LIMIT 50`,
 					[pgChannel],
-				).catch(() => ({ rows: [] as { from_agent: string; message_content: string; created_at: Date }[] }));
+				).catch(() => ({
+					rows: [] as {
+						from_agent: string;
+						message_content: string;
+						created_at: Date;
+					}[],
+				}));
 				for (const msg of historyResult.rows.reverse()) {
 					const t = new Date(msg.created_at).toLocaleTimeString();
-					process.stdout.write(`[${t}] ${msg.from_agent}: ${msg.message_content}\n`);
+					process.stdout.write(
+						`[${t}] ${msg.from_agent}: ${msg.message_content}\n`,
+					);
 				}
 
 				if (interactiveInput) {
@@ -5056,7 +5059,9 @@ program
 						for (const msg of r.rows) {
 							_lastMsgId = msg.id as number;
 							const t = new Date(msg.created_at as Date).toLocaleTimeString();
-							appendChatOutput(`[${t}] ${msg.from_agent as string}: ${msg.message_content as string}\n`);
+							appendChatOutput(
+								`[${t}] ${msg.from_agent as string}: ${msg.message_content as string}\n`,
+							);
 						}
 					} catch {}
 				}, 1000);
@@ -5238,7 +5243,9 @@ program
 			if (options.mention) label.push(`filtering @${options.mention}`);
 
 			if (!options.pretty && !options.markdown) {
-				process.stderr.write(`Listening on ${label.join(" ")} (Ctrl+C to stop)\n`);
+				process.stderr.write(
+					`Listening on ${label.join(" ")} (Ctrl+C to stop)\n`,
+				);
 			}
 
 			let listenLastId = 0;
@@ -5259,11 +5266,24 @@ program
 					);
 					for (const msg of r.rows) {
 						listenLastId = msg.id as number;
-						if (!options.all && identity && (msg.from_agent as string) === identity) continue;
-						if (options.mention && !(msg.message_content as string)?.includes(`@${options.mention as string}`)) continue;
+						if (
+							!options.all &&
+							identity &&
+							(msg.from_agent as string) === identity
+						)
+							continue;
+						if (
+							options.mention &&
+							!(msg.message_content as string)?.includes(
+								`@${options.mention as string}`,
+							)
+						)
+							continue;
 						if (options.pretty || options.markdown) {
 							const t = new Date(msg.created_at as Date).toLocaleTimeString();
-							process.stdout.write(`[${t}] ${msg.from_agent as string}: ${msg.message_content as string}\n`);
+							process.stdout.write(
+								`[${t}] ${msg.from_agent as string}: ${msg.message_content as string}\n`,
+							);
 						} else {
 							process.stdout.write(`${JSON.stringify(msg)}\n`);
 						}
@@ -5402,7 +5422,12 @@ agentsCmd
 				}
 			}
 
-			const atChannel = type === "public" ? "broadcast" : type === "group" ? `team:${options.group ?? "general"}` : "direct";
+			const atChannel =
+				type === "public"
+					? "broadcast"
+					: type === "group"
+						? `team:${options.group ?? "general"}`
+						: "direct";
 			await pgQuery(
 				`INSERT INTO roadmap.message_ledger (from_agent, to_agent, channel, message_type, message_content) VALUES ($1, $2, $3, 'text', $4)`,
 				[from, options.to ?? null, atChannel, message],
@@ -5417,16 +5442,15 @@ agentsCmd
 agentsCmd
 	.command("msg <message>")
 	.description("send a message to an agent via A2A and wait for reply")
-	.requiredOption("--to <agent>", "recipient agent identity (e.g. claude/claude-code)")
+	.requiredOption(
+		"--to <agent>",
+		"recipient agent identity (e.g. claude/claude-code)",
+	)
 	.option(
 		"--from <agent>",
 		"sender identity (defaults to git user or 'operator')",
 	)
-	.option(
-		"--type <type>",
-		"message type: task|notify|text|event",
-		"task",
-	)
+	.option("--type <type>", "message type: task|notify|text|event", "task")
 	.option(
 		"--timeout <ms>",
 		"max milliseconds to wait for reply (default 60000)",
@@ -5453,7 +5477,10 @@ agentsCmd
 		);
 
 		const toAgent = options.to as string;
-		const timeoutMs = Math.max(0, Math.min(Number(options.timeout) || 60000, 300000));
+		const timeoutMs = Math.max(
+			0,
+			Math.min(Number(options.timeout) || 60000, 300000),
+		);
 
 		// Ensure pool is up (cli.ts uses env-level pool for pgQuery already)
 		const pool = getPool();
@@ -5497,39 +5524,48 @@ agentsCmd
 
 		console.log(`Waiting up to ${timeoutMs / 1000}s for reply...`);
 
-		const reply = await new Promise<{ id: number; content: string } | null>((resolve) => {
-			const timer = setTimeout(() => {
-				listenClient.removeAllListeners("notification");
-				resolve(null);
-			}, timeoutMs);
+		const reply = await new Promise<{ id: number; content: string } | null>(
+			(resolve) => {
+				const timer = setTimeout(() => {
+					listenClient.removeAllListeners("notification");
+					resolve(null);
+				}, timeoutMs);
 
-			listenClient.on("notification", async (n) => {
-				if (n.channel !== pgChannel || !n.payload) return;
-				try {
-					const payload = JSON.parse(n.payload) as { message_id?: number; from_agent?: string };
-					if (!payload.message_id) return;
-					// A reply is any message from toAgent directed to fromAgent
-					// sent after our original message (id >= sentId)
-					const { rows } = await listenClient.query(
-						`SELECT id, message_content
+				listenClient.on("notification", async (n) => {
+					if (n.channel !== pgChannel || !n.payload) return;
+					try {
+						const payload = JSON.parse(n.payload) as {
+							message_id?: number;
+							from_agent?: string;
+						};
+						if (!payload.message_id) return;
+						// A reply is any message from toAgent directed to fromAgent
+						// sent after our original message (id >= sentId)
+						const { rows } = await listenClient.query(
+							`SELECT id, message_content
 						 FROM roadmap.message_ledger
 						 WHERE id = $1
 						   AND from_agent = $2
 						   AND to_agent = $3`,
-						[payload.message_id, toAgent, fromAgent],
-					);
-					if (rows.length > 0) {
-						clearTimeout(timer);
-						listenClient.removeAllListeners("notification");
-						resolve({ id: rows[0].id, content: rows[0].message_content });
+							[payload.message_id, toAgent, fromAgent],
+						);
+						if (rows.length > 0) {
+							clearTimeout(timer);
+							listenClient.removeAllListeners("notification");
+							resolve({ id: rows[0].id, content: rows[0].message_content });
+						}
+					} catch {
+						// ignore parse errors, keep waiting
 					}
-				} catch {
-					// ignore parse errors, keep waiting
-				}
-			});
-		});
+				});
+			},
+		);
 
-		try { listenClient.release(); } catch { /* ignore */ }
+		try {
+			listenClient.release();
+		} catch {
+			/* ignore */
+		}
 
 		if (reply) {
 			console.log(`\n← ${toAgent} [id=${reply.id}]:`);
@@ -5538,7 +5574,11 @@ agentsCmd
 			console.log(`\n(no reply after ${timeoutMs / 1000}s)`);
 		}
 
-		try { await pool.end(); } catch { /* ignore */ }
+		try {
+			await pool.end();
+		} catch {
+			/* ignore */
+		}
 	});
 
 agentsCmd
@@ -5719,12 +5759,16 @@ agentsCmd
 					 GROUP BY channel
 					 ORDER BY channel`,
 					[],
-				).catch(() => ({ rows: [] as { channel: string; agents: string[] }[] }));
+				).catch(() => ({
+					rows: [] as { channel: string; agents: string[] }[],
+				}));
 				if (allSubResult.rows.length === 0) {
 					console.log("No active subscriptions.");
 				} else {
 					for (const row of allSubResult.rows) {
-						console.log(`${row.channel}: ${(row.agents as string[]).join(", ")}`);
+						console.log(
+							`${row.channel}: ${(row.agents as string[]).join(", ")}`,
+						);
 					}
 				}
 			} else if (agent) {
@@ -6509,6 +6553,23 @@ program
 	.option("--no-open", "don't automatically open browser")
 	.action(async (options) => {
 		try {
+			// P1123: protect the shared pool from stray pool.end() in other cli
+			// subcommands that may run inside this long-running process.
+			// jiti/register collapses named TS exports under module.default, so fall
+			// back through .default for both imports (mirrors mcp-sse-server.js).
+			const poolMod = (await import("../infra/postgres/pool.ts")) as any;
+			const setPoolLifecycleMode =
+				poolMod.setPoolLifecycleMode ?? poolMod.default?.setPoolLifecycleMode;
+			if (typeof setPoolLifecycleMode === "function")
+				setPoolLifecycleMode("long-running");
+			const watchdogMod = (await import(
+				"../infra/postgres/pool-watchdog.ts"
+			)) as any;
+			const startPoolWatchdog =
+				watchdogMod.startPoolWatchdog ?? watchdogMod.default?.startPoolWatchdog;
+			if (typeof startPoolWatchdog === "function")
+				startPoolWatchdog("agenthive-board");
+
 			const cwd = await requireProjectRoot();
 			const { RoadmapServer } = await import("./server/index.ts");
 			const server = new RoadmapServer(cwd);

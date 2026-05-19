@@ -338,7 +338,6 @@ const MANAGED_SERVICES = [
   "agenthive-a2a",
   "agenthive-copilot-agency",
   "agenthive-claude-agency",
-  "agenthive-gate-pipeline",
   "agenthive-state-feed",
   "agenthive-discord-bridge",
 ];

@@ -289,7 +289,6 @@ async function main(): Promise<void> {
 
 	if (args.stopServices) {
 		for (const service of [
-			"agenthive-gate-pipeline.service",
 			"agenthive-orchestrator.service",
 		]) {
 			const result = spawnSync("systemctl", ["--user", "stop", service], {

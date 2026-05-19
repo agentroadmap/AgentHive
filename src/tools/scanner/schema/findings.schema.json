@@ -1,0 +1,101 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agenthive.dev/scan/schema/findings.schema.json",
+  "title": "HardcodingFinding",
+  "description": "A single finding emitted by scan-hardcoding. schema_version is the stable public API contract; consumers MUST reject records with a higher major version than they support.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "rule",
+    "file",
+    "line",
+    "col",
+    "severity",
+    "confidence",
+    "proposal",
+    "match",
+    "snippet",
+    "fix",
+    "tags",
+    "acknowledged_debt"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version. Consumers must check this field and reject unknown versions. Breaking changes bump this integer."
+    },
+    "rule": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9.-]*$",
+      "description": "Rule identifier in kebab-case or category.rule-name form."
+    },
+    "file": {
+      "type": "string",
+      "description": "Absolute or repo-relative path to the file containing the finding."
+    },
+    "line": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "1-based line number of the finding."
+    },
+    "col": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "1-based column number of the match start."
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["critical", "high", "medium", "low"],
+      "description": "Severity level of the finding. 'critical' and 'high' should block CI when --fail-on is set."
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["high", "medium", "low"],
+      "description": "Confidence that the finding is a true positive. 'low' findings may be noisy."
+    },
+    "proposal": {
+      "type": "string",
+      "description": "The proposal ID (e.g. 'P448') that tracks remediation of this finding category."
+    },
+    "match": {
+      "type": "string",
+      "description": "The matched text or pattern that triggered the rule."
+    },
+    "snippet": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "The source line (truncated to 120-200 chars) containing the match."
+    },
+    "fix": {
+      "type": "string",
+      "description": "Human-readable remediation suggestion. May include TypeScript code blocks. AI agents should use this field to determine the correct fix."
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Rule tags for filtering. Common tags: paths, credentials, models, workflow, multi-tenant."
+    },
+    "acknowledged_debt": {
+      "type": "boolean",
+      "description": "True if the finding is acknowledged as technical debt via a TODO(PNN) comment nearby. Severity is reduced by one level for acknowledged findings."
+    },
+    "context_before": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Up to 2 lines before the match line (truncated to 100 chars each)."
+    },
+    "context_after": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Up to 2 lines after the match line (truncated to 100 chars each)."
+    }
+  }
+}

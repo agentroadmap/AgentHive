@@ -704,11 +704,14 @@ export class ProposalHandlers {
 		id: string;
 		agent: string;
 		force?: boolean;
+		release_reason?: string;
 	}): Promise<CallToolResult> {
 		try {
 			const proposal = await this.core.releaseClaim(args.id, args.agent, {
 				force: args.force,
 				autoCommit: true,
+				// P934: thread release_reason through to releaseClaim → releaseLease.
+				releaseReason: args.release_reason,
 			});
 			return await formatProposalCallResult(proposal, [
 				`Released claim on proposal ${args.id}.`,
