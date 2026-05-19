@@ -139,20 +139,42 @@ export function renderCockpit(
 		container._ledgerBox = ledgerBox;
 
 		// 4. Terminal [Bottom Right] - USE LOG FOR AUTO-SCROLL
-		terminalLog = (screen as any).log({
-			parent: container,
-			top: "50%",
-			left: "50%",
-			width: "50%",
-			height: "50%-1",
-			border: { type: "line" },
-			label: " [F3] Terminal bridge ",
-			tags: true,
-			keys: true,
-			style: { border: { fg: "cyan" } },
-			scrollback: 100,
-			scrollbar: { ch: " ", track: { bg: "cyan" }, style: { inverse: true } },
-		});
+		// (screen as any).log may not exist on every blessed wrapper variant; fall
+		// back to a regular box so the cockpit still renders. The .add() helper
+		// is feature-detected before use further down.
+		terminalLog = (screen as any).log
+			? (screen as any).log({
+					parent: container,
+					top: "50%",
+					left: "50%",
+					width: "50%",
+					height: "50%-1",
+					border: { type: "line" },
+					label: " [F3] Terminal bridge ",
+					tags: true,
+					keys: true,
+					style: { border: { fg: "cyan" } },
+					scrollback: 100,
+					scrollbar: {
+						ch: " ",
+						track: { bg: "cyan" },
+						style: { inverse: true },
+					},
+				})
+			: box({
+					parent: container,
+					top: "50%",
+					left: "50%",
+					width: "50%",
+					height: "50%-1",
+					border: { type: "line" },
+					label: " [F3] Terminal bridge ",
+					tags: true,
+					scrollable: true,
+					alwaysScroll: true,
+					keys: true,
+					style: { border: { fg: "cyan" } },
+				});
 		container._terminalLog = terminalLog;
 
 		const emitExit = () => {
@@ -161,6 +183,10 @@ export function renderCockpit(
 		const emitSwitch = () => {
 			(screen as any).emit("cockpit:switch");
 		};
+		// Tab-crash guard (2026-05-19): any of these boxes can be undefined if a
+		// blessed wrapper returns undefined from a factory call. Skip undefined
+		// targets so the optional-chained .key?.() lookup doesn't throw
+		// "Cannot read properties of undefined (reading 'key')".
 		for (const target of [
 			container,
 			workforceBox,
@@ -168,6 +194,7 @@ export function renderCockpit(
 			ledgerBox,
 			terminalLog,
 		]) {
+			if (!target) continue;
 			target.key?.(["q", "Q", "escape", "C-c"], emitExit);
 			target.key?.(["tab"], emitSwitch);
 		}
@@ -185,19 +212,28 @@ export function renderCockpit(
 				" {white-fg}Tab: Switch View | Q: Exit | Live Updates Active {/}",
 		});
 
-		// Initial terminal populate
-		messages
-			.slice()
-			.reverse()
-			.forEach((m) => {
-				const time = new Date(Number(m.timestamp) / 1000).toLocaleTimeString(
-					[],
-					{ hour: "2-digit", minute: "2-digit" },
-				);
-				terminalLog.add(
-					`[{gray-fg}${time}{/}] {bold}${m.sender_identity}{/}: ${m.content}`,
-				);
-			});
+		// Initial terminal populate. If terminalLog fell back to a plain box
+		// (screen.log unavailable), .add isn't defined; accumulate into content.
+		if (terminalLog) {
+			const lines: string[] = [];
+			messages
+				.slice()
+				.reverse()
+				.forEach((m) => {
+					const time = new Date(
+						Number(m.timestamp) / 1000,
+					).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+					const line = `[{gray-fg}${time}{/}] {bold}${m.sender_identity}{/}: ${m.content}`;
+					if (typeof terminalLog.add === "function") {
+						terminalLog.add(line);
+					} else {
+						lines.push(line);
+					}
+				});
+			if (lines.length > 0 && typeof terminalLog.setContent === "function") {
+				terminalLog.setContent(lines.join("\n"));
+			}
+		}
 		container._lastMsgTimestamp =
 			messages.length > 0 ? messages[0].timestamp : 0;
 	} else {
