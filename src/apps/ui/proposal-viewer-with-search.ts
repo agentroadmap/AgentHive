@@ -1199,6 +1199,10 @@ export async function viewProposalEnhanced(
 				focusDetailPane();
 				return false;
 			});
+			listBox.key(["enter"], () => {
+				focusDetailPane();
+				return false;
+			});
 		}
 
 		return proposalList;
@@ -1422,7 +1426,7 @@ export async function viewProposalEnhanced(
 		} else {
 			// Proposal list help
 			content =
-				" {cyan-fg}[Tab]{/} Switch View | {cyan-fg}[/]{/} Search | {cyan-fg}[s]{/} Status | {cyan-fg}[p]{/} Priority | {cyan-fg}[l]{/} Labels | {cyan-fg}[↑↓]{/} Navigate | {cyan-fg}[q/Esc]{/} Quit";
+				" {cyan-fg}[Tab]{/} Switch View | {cyan-fg}[Enter]{/} Detail | {cyan-fg}[/]{/} Search | {cyan-fg}[s]{/} Status | {cyan-fg}[p]{/} Priority | {cyan-fg}[l]{/} Labels | {cyan-fg}[↑↓]{/} Navigate | {cyan-fg}[q/Esc]{/} Quit";
 		}
 
 		setHelpBarContent(content);

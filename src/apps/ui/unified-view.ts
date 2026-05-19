@@ -2,7 +2,6 @@
  * Unified view manager that handles Tab switching between proposal views and kanban board
  */
 
-import { emitKeypressEvents } from "node:readline";
 import type { Core } from "../../core/roadmap.ts";
 import { query as pgQuery } from "../../postgres/pool.ts";
 import { DEFAULT_STATUSES } from "../../shared/constants/index.ts";
@@ -258,26 +257,6 @@ export async function runUnifiedView(
 		let boardUpdater:
 			| ((nextProposals: Proposal[], nextStatuses: string[]) => void)
 			| null = null;
-		let stopUnifiedWatchers = () => {};
-		const forceExit = () => {
-			stopUnifiedWatchers();
-			process.exit(0);
-		};
-		emitKeypressEvents(process.stdin);
-		const emergencyKeyHandler = (
-			_: string,
-			key: { name?: string; ctrl?: boolean } = {},
-		) => {
-			if (
-				key.name === "q" ||
-				key.name === "escape" ||
-				(key.ctrl && key.name === "c")
-			) {
-				forceExit();
-			}
-		};
-		process.stdin.on("keypress", emergencyKeyHandler);
-
 		const getRenderableProposals = () =>
 			proposals.filter(
 				(proposal) =>
@@ -353,10 +332,6 @@ export async function runUnifiedView(
 				emitBoardUpdate();
 			},
 		});
-		stopUnifiedWatchers = () => {
-			watcher.stop();
-			configWatcher.stop();
-		};
 		process.on("exit", () => configWatcher.stop());
 
 		// Function to show proposal view
@@ -614,8 +589,8 @@ export async function runUnifiedView(
 			const config = await options.core.filesystem.loadConfig();
 			const screen = createScreen({ title: "System Feed" });
 
-			return new Promise<ViewResult>((resolve) => {
-				let _result: ViewResult = "exit";
+				return new Promise<ViewResult>((resolve) => {
+					let _result: ViewResult = "exit";
 
 				const onTabPress = () => {
 					_result = "switch";
@@ -633,11 +608,15 @@ export async function runUnifiedView(
 						messages: messages as any[],
 						projectName: config?.projectName || "Roadmap.md",
 					});
-				};
+					};
 
-				void refresh();
-				const timer = setInterval(() => {
+					renderHeadlines(screen, {
+						messages: [],
+						projectName: config?.projectName || "Roadmap.md",
+					});
 					void refresh();
+					const timer = setInterval(() => {
+						void refresh();
 				}, 1000);
 
 				// Set up key handlers
@@ -648,10 +627,10 @@ export async function runUnifiedView(
 					(screen as any).destroy();
 					resolve("switch");
 				});
-				(screen as any).key(["q", "C-c"], () => {
-					clearInterval(timer);
-					delete (screen as any)._headlinesContainer;
-					(screen as any).destroy();
+					(screen as any).key(["q", "Q", "escape", "C-c"], () => {
+						clearInterval(timer);
+						delete (screen as any)._headlinesContainer;
+						(screen as any).destroy();
 					resolve("exit");
 				});
 			});
@@ -663,15 +642,22 @@ export async function runUnifiedView(
 			const config = await options.core.filesystem.loadConfig();
 			const screen = createScreen({ title: "Project Chat" });
 
-			return new Promise<ViewResult>((resolve) => {
-				let _result: ViewResult = "exit";
+				return new Promise<ViewResult>((resolve) => {
+					let _result: ViewResult = "exit";
 
 				const onTabPress = () => {
 					_result = "switch";
 				};
 
-				const currentChannel = "public";
-				const refresh = async () => {
+					const currentChannel = "public";
+					renderChat(screen, {
+						messages: [],
+						channels: [currentChannel],
+						currentChannel,
+						projectName: config?.projectName || "Roadmap.md",
+						userSystemName: "HUMAN",
+					});
+					const refresh = async () => {
 					const [channelRows, messageRows] = await Promise.all([
 						pgQuery(
 							`SELECT DISTINCT channel FROM roadmap.message_ledger WHERE channel IS NOT NULL ORDER BY channel LIMIT 50`,
@@ -722,10 +708,10 @@ export async function runUnifiedView(
 					(screen as any).destroy();
 					resolve("switch");
 				});
-				(screen as any).key(["q", "C-c"], () => {
-					clearInterval(timer);
-					delete (screen as any)._chatContainer;
-					(screen as any).destroy();
+					(screen as any).key(["q", "Q", "escape", "C-c"], () => {
+						clearInterval(timer);
+						delete (screen as any)._chatContainer;
+						(screen as any).destroy();
 					resolve("exit");
 				});
 			});
@@ -785,9 +771,8 @@ export async function runUnifiedView(
 				isRunning = false;
 			}
 		}
-		process.stdin.off("keypress", emergencyKeyHandler);
-		watcher.stop();
-		configWatcher.stop();
+			watcher.stop();
+			configWatcher.stop();
 	} catch (error) {
 		console.error(error instanceof Error ? error.message : error);
 		process.exit(1);
