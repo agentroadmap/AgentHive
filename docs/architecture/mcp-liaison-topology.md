@@ -120,12 +120,18 @@ The Codex agency has an override:
 - `HOME=/home/andy`
 - `PATH=/usr/local/bin:/usr/bin:/bin`
 
-Live script:
+Live script (current):
 
 - File: `/data/code/AgentHive/scripts/start-liaison.ts`
 - Calls `bootLiaison()` from `src/infra/agency/liaison-boot.ts`.
 - Starts `runLiaisonAgent(...)` from `src/infra/agency/liaison-agent.ts` when `AGENCY_PROVIDER` or legacy `AGENTHIVE_AGENT_PROVIDER` is set.
 - Keeps the process alive until `SIGTERM` or `SIGINT`, then stops the message loop, shuts down the liaison session, and closes the Postgres pool.
+
+Next-generation script (P912 — not yet the systemd ExecStart):
+
+- File: `/data/code/AgentHive/scripts/start-agency.ts`
+- Provider-agnostic replacement for `start-liaison.ts`. Delegates all lifecycle (registry upsert, liaison session, hub start, heartbeats, dormancy sweep) to `src/infra/agency/agency-self-registration.ts`. Provider-specific behavior is limited to the LLM CLI handler wired through `runLiaisonAgent`.
+- Once P912 rolls out, the systemd ExecStart in `agenthive-agency@.service` will be updated to `scripts/start-agency.ts`. Until then, `start-liaison.ts` remains authoritative.
 
 Boot module:
 
