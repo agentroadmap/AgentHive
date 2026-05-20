@@ -521,8 +521,11 @@ export async function runUnifiedView(
 
 		// Function to show cockpit (formerly cubic dashboard)
 		const showCockpit = async (): Promise<ViewResult> => {
+			const t0 = performance.now();
 			const { renderCockpit } = await import("./cockpit.ts");
+			const t1 = performance.now();
 			const screen = createScreen({ title: "Engineer's Cockpit" });
+			const t2 = performance.now();
 
 			return new Promise<ViewResult>((resolve) => {
 				let _result: ViewResult = "exit";
@@ -531,15 +534,20 @@ export async function runUnifiedView(
 					_result = "switch";
 				};
 
+				const t3 = performance.now();
 				renderCockpit(screen, {
 					agents: [],
 					proposals: [],
 					ledger: [],
 					messages: [],
 				});
+				const t4 = performance.now();
+				console.error(`[cockpit-perf] import=${(t1 - t0).toFixed(1)}ms createScreen=${(t2 - t1).toFixed(1)}ms renderEmpty=${(t4 - t3).toFixed(1)}ms total=${(t4 - t0).toFixed(1)}ms`);
 
 				const refresh = async () => {
+					const refreshStart = performance.now();
 					const pipelineProposals = proposals;
+					const fetchStart = performance.now();
 					const [agents, msgRows] = await Promise.all([
 						options.core.listAgents(),
 						pgQuery(
@@ -548,7 +556,9 @@ export async function runUnifiedView(
 							[],
 						).then((r) => r.rows).catch(() => [] as any[]),
 					]);
+					const fetchEnd = performance.now();
 
+					const transformStart = performance.now();
 					const agentData: WorkforceAgent[] = agents.map((agent) => ({
 						id: agent.identity ?? agent.name,
 						name: agent.name,
@@ -566,7 +576,9 @@ export async function runUnifiedView(
 							content: row.message_content,
 							timestamp: new Date(row.created_at).getTime(),
 						}));
+					const transformEnd = performance.now();
 
+					const renderStart = performance.now();
 					renderCockpit(screen, {
 						agents: agentData,
 						proposals: pipelineProposals.map((proposal: { id: string; title: string; status: string; priority?: string | null; proposalType?: string }) => ({
@@ -580,6 +592,8 @@ export async function runUnifiedView(
 						ledger: [],
 						messages: cockpitMessages,
 					});
+					const renderEnd = performance.now();
+					console.error(`[cockpit-refresh] fetch=${(fetchEnd - fetchStart).toFixed(1)}ms transform=${(transformEnd - transformStart).toFixed(1)}ms render=${(renderEnd - renderStart).toFixed(1)}ms total=${(renderEnd - refreshStart).toFixed(1)}ms`);
 				};
 
 				// Initial render

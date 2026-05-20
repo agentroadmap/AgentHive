@@ -712,14 +712,17 @@ export async function renderBoardTui(
 	});
 
 	await new Promise<void>((resolve) => {
+		const t0 = performance.now();
 		const screen = createScreen({
 			title: `Roadmap Board - ${getWorkflowLabel()} - ${versionLabel}`,
 		});
+		const t1 = performance.now();
 		const container = box({
 			parent: screen,
 			width: "100%",
 			height: "100%",
 		});
+		console.error(`[board-perf] createScreen=${(t1 - t0).toFixed(1)}ms`);
 
 		// Version indicator at top right
 		box({
@@ -1626,7 +1629,9 @@ export async function renderBoardTui(
 			screen.render();
 		};
 
+		const t_rebuild_start = performance.now();
 		rebuildColumns(initialColumns);
+		const t_rebuild_end = performance.now();
 		const firstColumn = columns[0];
 		if (firstColumn) {
 			currentCol = 0;
@@ -1636,6 +1641,8 @@ export async function renderBoardTui(
 			}
 			firstColumn.list.focus();
 		}
+		const t_first_paint = performance.now();
+		console.error(`[board-perf] rebuildColumns=${(t_rebuild_end - t_rebuild_start).toFixed(1)}ms firstPaintToFocus=${(t_first_paint - t_rebuild_end).toFixed(1)}ms totalInit=${(t_first_paint - t0).toFixed(1)}ms`);
 
 		const updateBoard = (nextProposals: Proposal[], nextStatuses: string[]) => {
 			// Update source of truth
