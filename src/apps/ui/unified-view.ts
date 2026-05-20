@@ -627,24 +627,46 @@ export async function runUnifiedView(
 
 				const refresh = async () => {
 					// Core.listPulse was removed by P149 (2026-05-04). Pulse events now
-					// live in roadmap.message_ledger filtered to system identities. Show
-					// recent system activity as the headlines feed.
-					const rows = await pgQuery(
+					// live in roadmap.message_ledger filtered to system identities. Also
+					// include proposal_state_transitions as synthetic feed entries.
+					const messageRows = await pgQuery(
 						`SELECT id, from_agent, message_content, message_type, created_at
 						 FROM roadmap.message_ledger
 						 WHERE from_agent LIKE 'system:%' OR message_type IN ('notify','liaison','task_status','task_complete','task_error')
 						 ORDER BY created_at DESC LIMIT 50`,
 						[],
 					).then((r) => r.rows).catch(() => [] as any[]);
-					const messages = (rows as any[]).map((row: any) => ({
+
+					const transitionRows = await pgQuery(
+						`SELECT pst.id, pst.proposal_id, pst.to_state, pst.transitioned_by, pst.transitioned_at, p.display_id
+						 FROM roadmap.proposal_state_transitions pst
+						 JOIN roadmap.proposal p ON p.id = pst.proposal_id
+						 ORDER BY pst.transitioned_at DESC LIMIT 50`,
+						[],
+					).then((r) => r.rows).catch(() => [] as any[]);
+
+					const messages = (messageRows as any[]).map((row: any) => ({
 						id: String(row.id),
 						sender_identity: row.from_agent,
 						content: row.message_content,
 						timestamp: new Date(row.created_at).getTime() * 1000,
 						channel_name: row.message_type ?? "pulse",
 					}));
+
+					const transitionMessages = (transitionRows as any[]).map((row: any) => ({
+						id: `strans-${row.id}`,
+						sender_identity: row.transitioned_by || "system:workflow",
+						content: `[${row.to_state.toUpperCase()}] Proposal ${row.display_id} transitioned`,
+						timestamp: new Date(row.transitioned_at).getTime() * 1000,
+						channel_name: "state-change",
+					}));
+
+					const allMessages = [...messages, ...transitionMessages]
+						.sort((a: any, b: any) => b.timestamp - a.timestamp)
+						.slice(0, 50);
+
 					renderHeadlines(screen, {
-						messages: messages as any[],
+						messages: allMessages as any[],
 						projectName: config?.projectName || "Roadmap.md",
 					});
 				};
