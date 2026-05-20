@@ -58,6 +58,27 @@ Important live facts:
 - Do not drop compatibility columns or old views unless your task explicitly completes the runtime migration and verifies every dependent code path.
 - Live data may still contain legacy-cased stage values such as `REVIEW` and `DEVELOP`. Avoid brittle case-sensitive assumptions in SQL and code.
 
+### Workflow Vocabulary (quick reference)
+
+All work moves through a typed state machine. Proposal type determines the workflow; workflow determines the allowed stages; maturity applies inside every stage.
+
+| Attribute | RFC workflow | Hotfix workflow | Source |
+| :--- | :--- | :--- | :--- |
+| **Stages** | DRAFT → REVIEW → DEVELOP → MERGE → COMPLETE | TRIAGE → DEPLOY → CLOSED | `roadmap.workflow_stages` |
+| **Proposal types** | product, component, architecture, feature, issue | hotfix | `roadmap.proposal_type_config` |
+| **Maturity axis** | new → active → mature (→ obsolete) | same | `roadmap_proposal.proposal.maturity_state` |
+| **Terminal stage** | COMPLETE | CLOSED (also WONT_FIX, NON_ISSUE) | `roadmap.workflow_stages.is_terminal` |
+| **Obsolete reason** | `obsoleted_reason TEXT` — free-text, always populate when setting maturity to `obsolete` | same | `roadmap_proposal.proposal.obsoleted_reason` |
+
+Key rules:
+- **No code path may hardcode a list of workflow stages.** Boards, dispatch code, and UI must load stages from `roadmap.workflow_stages` at runtime. See §5 for the full workflow reference.
+- **Boards are workflow-aware.** Board columns derive from `roadmap.workflow_stages` for the active workflow. A workflow filter is always required. No static column list may be hardcoded.
+- **Code Review Pipeline is outside the stage model.** Git PR review, static analysis, and automated test pipelines are implementation tooling — they are not workflow stages and must not appear in `roadmap.workflow_stages`.
+
+> **Legacy note:** Older data may reference FIX, DEPLOYED, ESCALATE, REJECTED, DISCARDED, REPLACED from pre-P774 hotfix vocabulary. These are migration artifacts; do not introduce them in new code.
+
+See §5 for the full workflow reference, maturity-level semantics, architecture RFC variant, and MCP tool list.
+
 ## 3. Where Things Live
 
 ### Tracked vs untracked, at a glance
@@ -181,7 +202,7 @@ See `docs/architecture/architecture-proposal-type.md` for full guidance on when 
 
 ### Hotfix Workflow (hotfix)
 
-The hotfix workflow uses the same 3-stage structure, drawn from `roadmap.workflow_stage_definition`:
+The hotfix workflow uses the same 3-stage structure, drawn from `roadmap.workflow_stages`:
 
 | State | Phase | Description |
 | :--- | :--- | :--- |
@@ -196,18 +217,18 @@ The hotfix workflow uses the same 3-stage structure, drawn from `roadmap.workflo
 
 ### Unified Vocabulary Table
 
-Both workflows share the same maturity axis and are stored in `roadmap.workflow_stage_definition`. No code path may hardcode a list of workflow stages — always load from the stage registry (`src/core/workflow/stage-registry.ts`).
+Both workflows share the same maturity axis and are stored in `roadmap.workflow_stages`. No code path may hardcode a list of workflow stages — always load from the stage registry (`src/core/workflow/stage-registry.ts`).
 
 | Attribute | RFC value | Hotfix value | Source |
 | :--- | :--- | :--- | :--- |
-| Status values | DRAFT, REVIEW, DEVELOP, MERGE, COMPLETE | TRIAGE, DEPLOY, CLOSED | `roadmap.workflow_stage_definition` |
+| Status values | DRAFT, REVIEW, DEVELOP, MERGE, COMPLETE | TRIAGE, DEPLOY, CLOSED | `roadmap.workflow_stages` |
 | Maturity values | new, active, mature, obsolete | same | `roadmap_proposal.proposal.maturity` |
 | Terminal closure | COMPLETE/mature | CLOSED/mature | stage `is_terminal = true` |
 | Obsolete reason | `obsoleted_reason TEXT` free-text | same | `roadmap_proposal.proposal.obsoleted_reason` |
 
 ### Boards are workflow-aware
 
-Board columns are rendered from `roadmap.workflow_stage_definition` for the active workflow. A workflow filter is always required. No code path may hardcode a list of stages — columns must derive from the stage registry at runtime.
+Board columns are rendered from `roadmap.workflow_stages` for the active workflow. A workflow filter is always required. No code path may hardcode a list of stages — columns must derive from the stage registry at runtime.
 
 ### Architecture RFC Workflow (architecture)
 
