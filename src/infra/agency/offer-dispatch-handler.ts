@@ -24,6 +24,11 @@ import { query } from "../postgres/pool.ts";
 import { spawnAgent } from "../../core/orchestration/agent-spawner.ts";
 import type { SpawnResult } from "../../core/orchestration/agent-spawner.ts";
 import type { LiaisonMessage } from "./liaison-message-types.ts";
+import {
+	checkCapacityBeforeClaim,
+	declareAgencyThrottled,
+	recordUsage,
+} from "./subscription-quota.ts";
 
 export type SqlExec = (sql: string, params?: unknown[]) => Promise<unknown>;
 
@@ -185,6 +190,33 @@ async function runSpawn(args: {
 	const dispatchId = payload.dispatch_id as number;
 	const claimToken = payload.claim_token as string;
 
+	// P465: capacity check before spawning — re-queue and throttle if quota exceeded
+	const capacityCheck = await checkCapacityBeforeClaim(agencyId);
+	if (!capacityCheck.allowed) {
+		logger.warn(
+			`[OfferDispatchHandler] ${agencyId}: capacity refused for offer=${payload.offer_id} — ${capacityCheck.refuse_reason}`,
+		);
+		if (capacityCheck.throttle_until) {
+			await declareAgencyThrottled(
+				agencyId,
+				capacityCheck.throttle_until,
+				capacityCheck.refuse_reason ?? "quota_exceeded",
+			);
+		}
+		try {
+			await exec(
+				`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, $4)`,
+				[dispatchId, agencyId, claimToken, "failed"],
+			);
+		} catch (requeueErr) {
+			logger.error(
+				`[OfferDispatchHandler] ${agencyId}: fn_complete_work_offer (capacity-refused) failed for offer=${payload.offer_id}:`,
+				requeueErr instanceof Error ? requeueErr.message : requeueErr,
+			);
+		}
+		return;
+	}
+
 	const renewalTimer = setInterval(() => {
 		void exec(
 			`SELECT roadmap_workforce.fn_renew_lease($1, $2, $3, $4)`,
@@ -223,6 +255,13 @@ async function runSpawn(args: {
 	}
 
 	clearInterval(renewalTimer);
+
+	// P465: record usage against local meter (best-effort, 50k token estimate per claim)
+	try {
+		await recordUsage(agencyId, 50_000, 1);
+	} catch {
+		/* best-effort */
+	}
 
 	const status: "delivered" | "failed" =
 		spawnError === null && (result?.exitCode === 0 || result?.exitCode === null)

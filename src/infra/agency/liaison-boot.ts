@@ -24,6 +24,10 @@ import {
   type LiaisonRegisterResult,
 } from "./liaison-service.js";
 import { startLiaisonHub, propagateHeartbeat } from "./liaison-hub.ts";
+import {
+  clearThrottleIfExpired,
+  getCapacityEnvelope,
+} from "./subscription-quota.ts";
 
 export interface AgencyConfig {
   agency_id: string;
@@ -118,10 +122,26 @@ export async function bootLiaison(
     timer = setTimeout(async () => {
       if (!running) return;
       try {
+        // P465: clear any expired throttle window before declaring status
+        await clearThrottleIfExpired(config.agency_id).catch(() => { /* best-effort */ });
+
+        // P465: build capacity envelope from local meter
+        const envelope = await getCapacityEnvelope(config.agency_id).catch(() => null);
+        const envelopePayload: Record<string, unknown> = envelope
+          ? {
+              windows: envelope.windows,
+              free_claim_slots: envelope.free_claim_slots,
+              in_flight_claims: envelope.in_flight_claims,
+            }
+          : {};
+
+        // P465: if any window is exhausted (free_claim_slots=0), declare throttled
+        const isThrottled = envelope !== null && envelope.free_claim_slots <= 0;
+
         const hbResult = await liaisonHeartbeat({
           session_id: session.session_id,
-          status: "active",
-          capacity_envelope: {},
+          status: isThrottled ? "throttled" : "active",
+          capacity_envelope: envelopePayload,
         });
         // Propagate heartbeat to A2A surface so orchestrators/observers react
         await propagateHeartbeat(
