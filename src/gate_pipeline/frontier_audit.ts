@@ -106,8 +106,10 @@ async function fetchUnauditedDecisions(
 				'ac_verification', gdl.ac_verification
 			) AS decision_context
 		FROM roadmap_proposal.gate_decision_log gdl
+		LEFT JOIN roadmap_workforce.agent_registry ar
+			ON ar.agent_identity = gdl.decided_by
 		LEFT JOIN roadmap.model_routes mr
-			ON mr.model_name = gdl.decided_by
+			ON mr.model_name = ar.preferred_model
 		WHERE gdl.created_at > now() - interval '5 minutes'
 		  AND COALESCE(mr.tier, 'mid') IN ('mid', 'lower')
 		  AND NOT EXISTS (
