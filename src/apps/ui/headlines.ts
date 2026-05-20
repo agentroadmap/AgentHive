@@ -33,7 +33,10 @@ export function renderHeadlines(
 			child.destroy();
 		});
 
+		// parent: screen is required — without it the container is orphaned and
+		// renders invisible (the cockpit/headlines/chat black-screen bug).
 		container = box({
+			parent: screen,
 			top: 0,
 			left: 0,
 			width: "100%",
