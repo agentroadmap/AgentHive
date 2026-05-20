@@ -19,6 +19,11 @@ import {
 } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import {
+	getAgentPublicKey,
+	registerAgent,
+	updateAgentPublicKey,
+} from "./agent-registry/index.ts";
 
 /** Key algorithm used for agent identities */
 const _KEY_ALGORITHM = "ed25519";
@@ -193,6 +198,14 @@ export async function getOrCreateIdentity(
 	// Generate new key pair
 	const keyPair = generateAgentKeyPair(tempAgentId);
 	await saveKeyPair(workspaceRoot, keyPair);
+
+	// Best-effort: register with DB so public_key is stored in agent_registry
+	try {
+		await registerAgent({ agentId: tempAgentId, publicKey: keyPair.publicKey });
+	} catch {
+		// DB unavailable or key conflict — file system remains authoritative
+	}
+
 	return keyPair;
 }
 
@@ -397,6 +410,13 @@ export async function rotateKeyPair(
 	// Save new key as current
 	await saveKeyPair(workspaceRoot, newKeyPair);
 
+	// Best-effort: propagate new public_key to DB and stamp key_rotated_at
+	try {
+		await updateAgentPublicKey(currentKeyPair.agentId, newKeyPair.publicKey);
+	} catch {
+		// DB unavailable — file system remains authoritative
+	}
+
 	return {
 		newKeyPair,
 		previousPublicKey: currentKeyPair.publicKey,
@@ -514,4 +534,29 @@ export function verifyOperationAuthorization(
 	}
 
 	return tokenResult;
+}
+
+/**
+ * Verify an auth token using the public key stored in agent_registry.
+ *
+ * Fetches the agent's public_key from the DB; falls back to token.publicKey
+ * when the DB is unavailable or the agent has no recorded key.
+ *
+ * AC#3: Provides DB-backed verification path for MCP and orchestrator use.
+ */
+export async function verifyTokenWithDbLookup(
+	token: AuthToken,
+): Promise<TokenVerification> {
+	let publicKey = token.publicKey;
+
+	try {
+		const dbKey = await getAgentPublicKey(token.agentId);
+		if (dbKey) publicKey = dbKey;
+	} catch {
+		// DB unavailable — fall back to embedded token.publicKey
+	}
+
+	// Re-verify using the resolved public key
+	const tokenWithKey: AuthToken = { ...token, publicKey };
+	return verifyToken(tokenWithKey);
 }

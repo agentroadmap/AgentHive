@@ -32,6 +32,20 @@ export type RegistrationRequest = {
 	routeAbbr?: string;
 	/** P852: spawning host segment (e.g. "mac", "bot"). Defaults to AGENTHIVE_HOST env. */
 	host?: string;
+	/**
+	 * P931: Human-friendly provider name from model_routes.agent_provider
+	 * (e.g. "Claude", "Codex", "Hermes"). Used by the registry to construct
+	 * Tier 2 display aliases. Must NOT be the dense P852 routeAbbr — the
+	 * registry throws if assignDisplayAlias detects an abbr-shape value.
+	 * When absent, Tier 2 alias assignment is skipped.
+	 */
+	agentProvider?: string;
+	/**
+	 * P159: Ed25519 public key (PEM-encoded) for cryptographic identity.
+	 * When provided, stored in agent_registry.public_key via COALESCE upsert.
+	 * A pre-check blocks registration if the existing key differs (use rotateKeyPair to rotate).
+	 */
+	publicKey?: string;
 };
 
 export type RegistrationResponse = {
