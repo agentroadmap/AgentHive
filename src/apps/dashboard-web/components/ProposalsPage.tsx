@@ -70,6 +70,8 @@ const ProposalsPage: React.FC<ProposalsPageProps> = ({
 	const [typeFilter, setTypeFilter] = useState("");
 	const [sortColumn, setSortColumn] = useState<SortColumn>("id");
 	const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+	const [currentPage, setCurrentPage] = useState(1);
+	const ITEMS_PER_PAGE = 25;
 
 	useEffect(() => {
 		if (propProposals) {
@@ -172,7 +174,14 @@ const ProposalsPage: React.FC<ProposalsPageProps> = ({
 			setSortColumn(column);
 			setSortDirection("asc");
 		}
+		setCurrentPage(1);
 	};
+
+	const totalPages = Math.ceil(filteredProposals.length / ITEMS_PER_PAGE);
+	const paginatedProposals = useMemo(() => {
+		const start = (currentPage - 1) * ITEMS_PER_PAGE;
+		return filteredProposals.slice(start, start + ITEMS_PER_PAGE);
+	}, [filteredProposals, currentPage]);
 
 	const SortIcon = ({ column }: { column: SortColumn }) => {
 		if (sortColumn !== column)
@@ -251,7 +260,7 @@ const ProposalsPage: React.FC<ProposalsPageProps> = ({
 
 			{/* Mobile card list */}
 			<div className="md:hidden space-y-2">
-				{filteredProposals.map((proposal) => (
+				{paginatedProposals.map((proposal) => (
 					<button
 						type="button"
 						key={proposal.id}
@@ -339,7 +348,7 @@ const ProposalsPage: React.FC<ProposalsPageProps> = ({
 							</tr>
 						</thead>
 						<tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-							{filteredProposals.map((proposal) => (
+							{paginatedProposals.map((proposal) => (
 								<tr
 									key={proposal.id}
 									onClick={() => onProposalClick?.(proposal)}
@@ -388,6 +397,51 @@ const ProposalsPage: React.FC<ProposalsPageProps> = ({
 					{filter || statusFilter || priorityFilter || typeFilter
 						? "No proposals match your filters"
 						: "No proposals found"}
+				</div>
+			)}
+
+			{/* Pagination */}
+			{filteredProposals.length > 0 && (
+				<div className="flex items-center justify-between bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+					<div className="text-sm text-gray-600 dark:text-gray-400">
+						Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1} to{" "}
+						{Math.min(currentPage * ITEMS_PER_PAGE, filteredProposals.length)} of{" "}
+						{filteredProposals.length} proposals
+					</div>
+					<div className="flex gap-2">
+						<button
+							type="button"
+							disabled={currentPage === 1}
+							onClick={() => setCurrentPage(currentPage - 1)}
+							className="px-3 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+						>
+							Previous
+						</button>
+						<div className="flex items-center gap-1">
+							{Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+								<button
+									key={page}
+									type="button"
+									onClick={() => setCurrentPage(page)}
+									className={`px-2.5 py-1.5 text-sm rounded transition-colors ${
+										currentPage === page
+											? "bg-blue-600 text-white"
+											: "border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
+									}`}
+								>
+									{page}
+								</button>
+							))}
+						</div>
+						<button
+							type="button"
+							disabled={currentPage === totalPages}
+							onClick={() => setCurrentPage(currentPage + 1)}
+							className="px-3 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+						>
+							Next
+						</button>
+					</div>
 				</div>
 			)}
 		</div>
