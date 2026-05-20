@@ -2133,6 +2133,92 @@ export async function createMcpServer(
 
 	console.error("[MCP] Registered 9 P466/P468/P475 spawn-briefing tools (liaison protocol)");
 
+	// P917: Agency lifecycle actions
+	{
+		const {
+			agencyBootstrapHandler,
+			agencyJoinProjectHandler,
+			agencyLeaveProjectHandler,
+			agencyLiaisonStatusHandler,
+		} = await import("./tools/agency/liaison-pg-handlers.ts");
+
+		server.addTool({
+			name: "agency_bootstrap",
+			description:
+				"Register an agency and open a liaison session (idempotent UPSERT). " +
+				"Call once on agency boot; safe to re-call — replaces the active session and refreshes registration.",
+			inputSchema: {
+				type: "object",
+				additionalProperties: false,
+				properties: {
+					agency_id: { type: "string", description: "Stable identity of the agency (e.g. 'hermes')" },
+					display_name: { type: "string", description: "Human-readable name shown in dashboards" },
+					provider: { type: "string", description: "Model provider (e.g. 'anthropic', 'google', 'openai')" },
+					host_id: { type: "string", description: "Hostname or node identifier where the agency is running" },
+					capabilities: { type: "array", items: { type: "string" }, description: "Optional capability tags" },
+					capacity_envelope: { type: "object", description: "Optional capacity envelope (free-form JSON)" },
+					public_key: { type: "string", description: "Optional public key for A2A auth" },
+					metadata: { type: "object", description: "Optional extra metadata" },
+				},
+				required: ["agency_id", "display_name", "provider", "host_id"],
+			},
+			handler: wrapJson((a) => agencyBootstrapHandler(a)),
+		});
+
+		server.addTool({
+			name: "agency_join_project",
+			description:
+				"Opt an agency into a project's dispatch pool. " +
+				"Inserts or re-activates a provider_registry row so the agency receives work offers for that project.",
+			inputSchema: {
+				type: "object",
+				additionalProperties: false,
+				properties: {
+					agency_id: { type: "string", description: "Agency identity" },
+					project_id: { type: "number", description: "Numeric project ID to join" },
+				},
+				required: ["agency_id", "project_id"],
+			},
+			handler: wrapJson((a) => agencyJoinProjectHandler(a)),
+		});
+
+		server.addTool({
+			name: "agency_leave_project",
+			description:
+				"Remove an agency from a project's dispatch pool. " +
+				"Sets is_active=false in provider_registry; the agency stops receiving new offers for that project.",
+			inputSchema: {
+				type: "object",
+				additionalProperties: false,
+				properties: {
+					agency_id: { type: "string", description: "Agency identity" },
+					project_id: { type: "number", description: "Numeric project ID to leave" },
+				},
+				required: ["agency_id", "project_id"],
+			},
+			handler: wrapJson((a) => agencyLeaveProjectHandler(a)),
+		});
+
+		server.addTool({
+			name: "agency_liaison_status",
+			description:
+				"Query the current liveness and dispatch status of an agency from v_agency_status. " +
+				"Returns: agency_id, display_name, status, silence_seconds, dispatchable, " +
+				"liveness_state (one of: poke-pending | stale-unresponsive | late-pong | live-and-working | live-but-idle | offline).",
+			inputSchema: {
+				type: "object",
+				additionalProperties: false,
+				properties: {
+					agency_id: { type: "string", description: "Agency identity to query" },
+				},
+				required: ["agency_id"],
+			},
+			handler: wrapJson((a) => agencyLiaisonStatusHandler(a)),
+		});
+
+		console.error("[MCP] Registered 4 P917 agency lifecycle tools");
+	}
+
 	// P499: PgBouncer operator tools
 	const { PgBouncerOpsHandler } = await import("./tools/ops/pgbouncer-ops.ts");
 	const pgbouncer = new PgBouncerOpsHandler();

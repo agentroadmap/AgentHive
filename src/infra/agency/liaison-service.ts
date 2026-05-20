@@ -11,6 +11,7 @@
 
 import type { PoolClient } from "pg";
 import { query } from "../postgres/pool.ts";
+import { recordCheckIn } from "../../core/orchestration/resolvers/agency-resolver.ts";
 
 export interface LiaisonRegisterPayload {
 	agency_id: string;
@@ -234,6 +235,15 @@ export async function liaisonHeartbeat(
 		throw new Error(`Agency ${agency_id} not found after update`);
 
 	const row = finalResult.rows[0];
+
+	// P765 AC-1: keep provider_registry.last_seen_at in sync so the
+	// offline-alert sweep and dispatch resolver see fresh liveness.
+	// Fire-and-forget — heartbeat must not fail if provider_registry is
+	// momentarily unavailable (agency may not yet have a registry row).
+	recordCheckIn(agency_id).catch((err) =>
+		console.warn("[liaison] recordCheckIn failed:", err),
+	);
+
 	return {
 		success: true,
 		agency_status: row.status,
@@ -394,10 +404,11 @@ export async function getAgencyStatus(agency_id: string): Promise<{
 	status: string;
 	silence_seconds: number;
 	dispatchable: boolean;
+	liveness_state: string;
 } | null> {
 	const result = await query(
 		`
-    SELECT agency_id, display_name, status, silence_seconds, dispatchable
+    SELECT agency_id, display_name, status, silence_seconds, dispatchable, liveness_state
     FROM roadmap.v_agency_status
     WHERE agency_id = $1
     `,
