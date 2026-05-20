@@ -22,6 +22,7 @@ import {
 	bootCancelPokeAttempts,
 	runOfferReaper,
 	runPokeWatchdogTick,
+	runLivenessAlertingTick,
 	type PokeWatchdogOptions,
 } from "./maintenance.ts";
 import { OfferClaimLoop, type ListenerClient } from "./offer-claim-loop.ts";
@@ -91,6 +92,9 @@ const DEFAULT_POKE_IDLE_THRESHOLD_MIN = Number(
 	process.env.AGENTHIVE_POKE_IDLE_THRESHOLD_MIN ?? 5,
 );
 const DEFAULT_POKE_STORM_CAP = Number(process.env.POKE_STORM_CAP ?? 10);
+const DEFAULT_LIVENESS_ALERT_INTERVAL_MS = Number(
+	process.env.AGENTHIVE_LIVENESS_ALERT_INTERVAL_MS ?? 60_000,
+);
 
 /** Drain timeout on stop() — how long to wait for in-flight dispatches before forcing exit. */
 const DEFAULT_SHUTDOWN_DRAIN_MS = Number(
@@ -181,17 +185,21 @@ export interface OrchestratorConfig {
 	pokeStormCap?: number;
 	/** Drain timeout on stop() in ms (default 240 s). */
 	shutdownDrainMs?: number;
+	/** P765: liveness alerting tick interval in ms (default 60 s). */
+	livenessAlertIntervalMs?: number;
 }
 
 export class Orchestrator {
 	private readonly defaultWorktree: string;
 	private readonly offerReapIntervalMs: number;
 	private readonly pokeWatchdogIntervalMs: number;
+	private readonly livenessAlertIntervalMs: number;
 	private readonly pokeOpts: PokeWatchdogOptions;
 	private readonly shutdownDrainMs: number;
 
 	private offerReapTimer: ReturnType<typeof setInterval> | null = null;
 	private pokeWatchdogTimer: ReturnType<typeof setInterval> | null = null;
+	private livenessAlertTimer: ReturnType<typeof setInterval> | null = null;
 	private offerReapInFlight = false;
 
 	// P902-A: lifecycle state for start()/stop().
@@ -212,6 +220,8 @@ export class Orchestrator {
 			config.offerReapIntervalMs ?? DEFAULT_OFFER_REAP_INTERVAL_MS;
 		this.pokeWatchdogIntervalMs =
 			config.pokeWatchdogIntervalMs ?? DEFAULT_POKE_WATCHDOG_INTERVAL_MS;
+		this.livenessAlertIntervalMs =
+			config.livenessAlertIntervalMs ?? DEFAULT_LIVENESS_ALERT_INTERVAL_MS;
 		this.pokeOpts = {
 			idleThresholdMin:
 				config.pokeIdleThresholdMin ?? DEFAULT_POKE_IDLE_THRESHOLD_MIN,
@@ -739,7 +749,7 @@ export class Orchestrator {
 	}
 
 	/**
-	 * Start periodic maintenance timers: offer reaper + poke watchdog.
+	 * Start periodic maintenance timers: offer reaper + poke watchdog + liveness alerting.
 	 * Idempotent — calling twice is a no-op.
 	 */
 	startMaintenance(): void {
@@ -757,8 +767,14 @@ export class Orchestrator {
 			void runPokeWatchdogTick(this.pokeOpts, query, console, "Orchestrator");
 		}, this.pokeWatchdogIntervalMs);
 
+		// P765: liveness alerting — transitions silent agencies and emits Discord alerts.
+		this.livenessAlertTimer = setInterval(() => {
+			if (this.stopping) return;
+			void runLivenessAlertingTick(console, "Orchestrator");
+		}, this.livenessAlertIntervalMs);
+
 		console.log(
-			`[Orchestrator] Maintenance started — offer reaper every ${this.offerReapIntervalMs}ms, poke watchdog every ${this.pokeWatchdogIntervalMs}ms`,
+			`[Orchestrator] Maintenance started — offer reaper every ${this.offerReapIntervalMs}ms, poke watchdog every ${this.pokeWatchdogIntervalMs}ms, liveness alerting every ${this.livenessAlertIntervalMs}ms`,
 		);
 	}
 
@@ -771,6 +787,10 @@ export class Orchestrator {
 		if (this.pokeWatchdogTimer) {
 			clearInterval(this.pokeWatchdogTimer);
 			this.pokeWatchdogTimer = null;
+		}
+		if (this.livenessAlertTimer) {
+			clearInterval(this.livenessAlertTimer);
+			this.livenessAlertTimer = null;
 		}
 	}
 

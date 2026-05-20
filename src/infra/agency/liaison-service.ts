@@ -141,6 +141,10 @@ export async function liaisonRegister(
  * The CASE now has an explicit `WHEN status = 'dormant' THEN 'active'` branch
  * BEFORE the liaison-declared status branches so a recovering agency always
  * transitions back to active rather than staying frozen in 'dormant'.
+ *
+ * P765 AC-1: offline agencies transition to 'dormant' on first heartbeat,
+ * then to 'active' on the next tick (two-step auto-recovery). offline_alert_sent_at
+ * is cleared at the start of recovery so the resolved-alert fires on full recovery.
  */
 export async function liaisonHeartbeat(
 	payload: LiaisonHeartbeatPayload,
@@ -173,12 +177,14 @@ export async function liaisonHeartbeat(
     UPDATE roadmap.agency
     SET
       status = CASE
+        WHEN status = 'offline'      THEN 'dormant'     -- P765 AC-1: first step of two-step auto-recovery
         WHEN status = 'dormant'      THEN 'active'      -- reactivate on heartbeat
         WHEN $2 = 'throttled'        THEN 'throttled'
         WHEN $2 = 'paused'           THEN 'paused'
         ELSE status
       END,
       status_reason = CASE
+        WHEN status = 'offline' THEN 'Auto-recovery: first heartbeat received'
         WHEN status = 'dormant' THEN 'Reactivated by heartbeat'
         ELSE status_reason
       END,
@@ -289,6 +295,48 @@ export async function checkAndMarkDormant(): Promise<number> {
 }
 
 /**
+ * P765 AC-5: Mark offline any dormant agencies past the 5-minute silence threshold.
+ * Called by the liveness alerting maintenance tick.
+ */
+export async function checkAndMarkOffline(): Promise<number> {
+	const result = await query(`
+    UPDATE roadmap.agency
+    SET status = 'offline', status_reason = 'No heartbeat > 5 min'
+    WHERE status = 'dormant'
+      AND last_heartbeat_at IS NOT NULL
+      AND (now() - last_heartbeat_at) > interval '5 minutes'
+    RETURNING agency_id
+  `);
+	return result.rowCount ?? 0;
+}
+
+/**
+ * P765 AC-2: Operator short-circuit resume — transitions any non-retired agency
+ * directly to 'active', bypassing the two-step auto-recovery flow.
+ * Also clears offline_alert_sent_at so the recovery alert fires.
+ */
+export async function liaisonResume(agency_id: string): Promise<string> {
+	if (!agency_id?.trim()) throw new Error("agency_id is required");
+
+	const result = await query(
+		`
+    UPDATE roadmap.agency
+    SET status = 'active',
+        status_reason = 'Operator resume',
+        offline_alert_sent_at = NULL
+    WHERE agency_id = $1 AND status NOT IN ('retired')
+    RETURNING status
+    `,
+		[agency_id],
+	);
+
+	if (result.rowCount === 0)
+		throw new Error(`Agency ${agency_id} not found or retired`);
+
+	return "active";
+}
+
+/**
  * Manually reactivate a dormant agency.
  */
 export async function agencyReactivate(agency_id: string): Promise<string> {
@@ -298,14 +346,14 @@ export async function agencyReactivate(agency_id: string): Promise<string> {
 		`
     UPDATE roadmap.agency
     SET status = 'active', status_reason = NULL
-    WHERE agency_id = $1 AND status = 'dormant'
+    WHERE agency_id = $1 AND status IN ('dormant', 'offline')
     RETURNING status
     `,
 		[agency_id],
 	);
 
 	if (result.rowCount === 0)
-		throw new Error(`Agency ${agency_id} not found or not dormant`);
+		throw new Error(`Agency ${agency_id} not found or not dormant/offline`);
 
 	return "active";
 }

@@ -7,12 +7,12 @@
  * State machine:
  *   active     → throttled  : spawn failure OR capacity exceeded on check-in
  *   active     → dormant    : silence > 5 min
- *   active     → offline    : silence > 30 min OR operator command
+ *   dormant    → offline    : silence > 30 min (provider_registry) / 5 min (roadmap.agency P765)
  *   throttled  → active     : next successful check-in
  *   dormant    → active     : check-in received
- *   offline    → dormant    : first check-in after offline (AC-1, P765)
- *   dormant    → active     : following check-in after offline recovery
- *   offline    → active     : operatorResumeAgency() (AC-2, P765)
+ *   offline    → dormant    : first check-in received after silence (P765 AC-1 auto-recovery step 1)
+ *   dormant    → active     : second check-in received after offline (P765 AC-1 auto-recovery step 2)
+ *   offline    → active     : operator resume command (AC-2 short-circuit)
  *   any        → retired    : operator retire command (terminal)
  */
 
