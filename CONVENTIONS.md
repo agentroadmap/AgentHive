@@ -60,6 +60,8 @@ Important live facts:
 
 ### Workflow Vocabulary (quick reference)
 
+> Vocabulary canonicalized by P706. The table below is the authoritative quick-reference; §5 has full definitions, maturity semantics, MCP tools, and the Architecture RFC variant.
+
 All work moves through a typed state machine. Proposal type determines the workflow; workflow determines the allowed stages; maturity applies inside every stage.
 
 | Attribute | RFC workflow | Hotfix workflow | Source |
@@ -225,6 +227,18 @@ Both workflows share the same maturity axis and are stored in `roadmap.workflow_
 | Maturity values | new, active, mature, obsolete | same | `roadmap_proposal.proposal.maturity` |
 | Terminal closure | COMPLETE/mature | CLOSED/mature | stage `is_terminal = true` |
 | Obsolete reason | `obsoleted_reason TEXT` free-text | same | `roadmap_proposal.proposal.obsoleted_reason` |
+
+### Terminal closure
+
+A proposal reaches terminal closure when it enters a terminal stage at `mature` maturity:
+
+| Workflow | Terminal state | Meaning |
+| :--- | :--- | :--- |
+| RFC | COMPLETE + mature | Delivered and stable. No further gate advances are queued. |
+| Hotfix | CLOSED + mature | Fix applied and verified in production. |
+| Hotfix escape | WONT_FIX, NON_ISSUE | Problem acknowledged but will not be fixed; case closed. |
+
+`obsoleted_reason` (TEXT, free-text) must be populated whenever `maturity` is set to `obsolete`. Obsolete is not a terminal stage — it can apply in any state — but obsolete proposals are not dispatched and are filtered from active boards.
 
 ### Boards are workflow-aware
 
@@ -1035,9 +1049,9 @@ The orchestrator handles the "how" of dispatch. Hermes handles the "what" and "w
 | Cubic Phase | Design Intent | Why | Cost Tier |
 | :--- | :--- | :--- | :--- |
 | **Design** (DRAFT, REVIEW, TRIAGE) | Deep reasoning model | Architecture, adversarial review | Premium |
-| **Build** (DEVELOP, FIX) | Code generation model | Implementation, balanced cost | Standard |
+| **Build** (DEVELOP, DEPLOY) | Code generation model | Implementation, balanced cost | Standard |
 | **Test** (MERGE) | Balanced model | Integration testing, validation | Standard |
-| **Ship** (COMPLETE, DEPLOYED) | Fast economy model | Documentation, finalization, low-cost | Economy |
+| **Ship** (COMPLETE, CLOSED) | Fast economy model | Documentation, finalization, low-cost | Economy |
 
 **To see actual routed models:** Query `model_routes` in the DB or check `roadmap.yaml`. Do not hardcode model names from this table into code — the DB is the source of truth.
 
