@@ -878,3 +878,36 @@ export async function resetForTesting(opts?: {
   _inflightCreates.clear();
   _vault = opts?.vault ?? envVault;
 }
+
+/**
+ * P826 residual gap (AC-11 / P901 prerequisite): verify connectivity to
+ * the agentHive2 V2 database. Non-fatal — logs result but never throws.
+ * Called at MCP server startup when AGENTHIVE_V2_DB_URL is set.
+ */
+export async function verifyAgentHive2Connection(
+  projectSchema: string,
+): Promise<void> {
+  const dsn = process.env.AGENTHIVE_V2_DB_URL;
+  if (!dsn) return;
+
+  const client = new Client({ connectionString: dsn });
+  try {
+    await client.connect();
+    // Use only schema names that pass normalizeSchemaName() in pool.ts
+    if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(projectSchema)) {
+      throw new Error(`Invalid schema name: ${projectSchema}`);
+    }
+    await client.query(`SET search_path = "${projectSchema}", public`);
+    await client.query("SELECT 1");
+    console.info(
+      `[pool-registry] agentHive2 connectivity verified (schema=${projectSchema})`,
+    );
+  } catch (err) {
+    console.warn(
+      `[pool-registry] agentHive2 connectivity check failed (schema=${projectSchema}):`,
+      (err as Error).message,
+    );
+  } finally {
+    await client.end().catch(() => {});
+  }
+}

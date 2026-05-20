@@ -145,3 +145,24 @@ export async function getProjectTemplateSnapshot(
 	);
 	return rows[0] ?? null;
 }
+
+// ─── Alias resolver ──────────────────────────────────────────────────────────
+
+/**
+ * Finding 17 (P901 Phase 1): Resolve a workflow_template_alias.alias_name
+ * to its target template_id. Returns null if the alias is not registered.
+ *
+ * Allows callers to pin by stable alias (e.g. 'default') rather than by
+ * versioned family@version string.
+ */
+export async function resolveTemplateAlias(
+	aliasName: string,
+): Promise<string | null> {
+	const { rows } = await query<{ template_id: string }>(
+		`SELECT template_id
+     FROM template.workflow_template_alias
+     WHERE alias_name = $1`,
+		[aliasName],
+	);
+	return rows[0]?.template_id ?? null;
+}
