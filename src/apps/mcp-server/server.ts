@@ -1639,6 +1639,10 @@ export async function createMcpServer(
 	const { registerBackupTools } = await import("./tools/backup/index.ts");
 	registerBackupTools(server);
 
+	// P997: proposal migration map tools
+	const { registerMigrationMapTools } = await import("./tools/migration-map/index.ts");
+	registerMigrationMapTools(server);
+
 	// P1109 Tier-1: schema introspection so build agents stop fabricating column names.
 	const { registerSchemaTools } = await import("./tools/schema/index.ts");
 	registerSchemaTools(server);

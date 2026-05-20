@@ -317,6 +317,11 @@ const opsRoutes: RouteMap = {
 	pgbouncer_stats: "pgbouncer_stats",
 	pgbouncer_ping: "pgbouncer_ping",
 	pgbouncer_reload: "pgbouncer_reload",
+	// P997: proposal migration map
+	map_upsert: "map_upsert",
+	map_get: "map_get",
+	map_query: "map_query",
+	map_summary: "map_summary",
 };
 
 const projectRoutes: RouteMap = {
