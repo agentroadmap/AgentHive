@@ -220,6 +220,14 @@ const agentRoutes: RouteMap = {
 	briefing_list: "briefing_list",
 	fallback_playbook_add: "fallback_playbook_add",
 	mcp_quirks_register: "mcp_quirks_register",
+	// P765 AC-2: operator short-circuit resume for offline/dormant agencies
+	agency_resume: "agency_resume",
+	liaison_resume: "agency_resume",
+	// P182: Team Governance Layer tools
+	team_charter_create: "team_charter_create",
+	team_norms_set: "team_norms_set",
+	team_dispute_log: "team_dispute_log",
+	team_governance_archive: "team_governance_archive",
 };
 
 const memoryRoutes: RouteMap = {

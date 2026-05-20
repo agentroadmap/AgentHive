@@ -17,6 +17,7 @@ import {
 	type AliasReclaimResult,
 	type AliasReclaimError,
 } from "../../../../core/identity/agent-registry/alias-manager.ts";
+import { operatorResumeAgency } from "../../../../core/orchestration/resolvers/agency-resolver.ts";
 import type { CallToolResult } from "../../types.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
@@ -392,6 +393,19 @@ export class PgAgentHandlers {
 			};
 		} catch (err) {
 			return errorResult("Failed to force-release alias", err);
+		}
+	}
+
+	// P765 AC-2: operator short-circuit resume — set provider_registry status back
+	// to 'active' from any non-retired state and clear the offline alert flag.
+	async agencyResume(args: { agency_identity: string }): Promise<CallToolResult> {
+		try {
+			const result = await operatorResumeAgency(args.agency_identity);
+			return {
+				content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+			};
+		} catch (err) {
+			return errorResult("Failed to resume agency", err);
 		}
 	}
 }

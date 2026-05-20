@@ -207,6 +207,35 @@ export function registerAgentTools(server: McpServer): void {
 		async () => handlers.getPoolStats(),
 	);
 
+	// ── agency_resume ────────────────────────────────────────────────────────
+	// P765 AC-2: operator short-circuit resume for offline/dormant agencies.
+	type AgencyResumeArgs = Parameters<PgAgentHandlers["agencyResume"]>[0];
+	const agencyResumeTool: McpToolHandler =
+		createSimpleValidatedTool<AgencyResumeArgs>(
+			{
+				name: "agency_resume",
+				description:
+					"P765: Operator short-circuit recovery — force an offline or dormant agency back to active " +
+					"in provider_registry, clear the offline alert flag, and post a Discord resolved notice.",
+				inputSchema: {
+					type: "object",
+					properties: {
+						agency_identity: {
+							type: "string",
+							description: "agency_identity of the agency to resume",
+						},
+					},
+					required: ["agency_identity"],
+				},
+			},
+			{
+				type: "object",
+				properties: { agency_identity: { type: "string" } },
+				required: ["agency_identity"],
+			},
+			async (input) => pgHandlers.agencyResume(input),
+		);
+
 	// Register all tools
 	server.addTool(registerTool);
 	server.addTool(getTool);
@@ -219,6 +248,7 @@ export function registerAgentTools(server: McpServer): void {
 	server.addTool(forceReleaseAliasTool);
 	server.addTool(zombieDetectTool);
 	server.addTool(poolStatsTool);
+	server.addTool(agencyResumeTool);
 
 	// ── agent_update_reporting ──────────────────────────────────────────────
 	const reportingTool = createSimpleValidatedTool<UpdateReportingArgs>(

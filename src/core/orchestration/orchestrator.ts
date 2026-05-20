@@ -10,7 +10,6 @@ import {
 import { enqueueNotification } from "../notifications/enqueue.ts";
 import { getUnlockedGateQueue } from "../proposal/gate-scanner-v2.ts";
 import { loadStateNames } from "../workflow/state-names.ts";
-import { spawnAgent } from "./agent-spawner.ts";
 import {
 	bootCancelPokeAttempts,
 	runOfferReaper,
@@ -30,14 +29,21 @@ import {
 // between the shim and the class). P902-D will progressively pull these
 // implementations into class methods.
 import {
+	cleanupExpiredLeaseCubics,
 	dispatchImplicitGate,
 	drainEnhancementRevisions,
 	drainImplicitGateReady,
 	handleStateChange,
 	reconcileStaleDispatches,
 	reconcileStrandedAdvances,
+	retireOrphanedWorkers,
 } from "./legacy-dispatch.ts";
 import { detectStuckWorkers } from "../../infra/agency/task-dispatcher.ts";
+import { listDispatchableAgencies } from "../../infra/agency/liaison-service.ts";
+import {
+	emitOfflineAlerts,
+	scanAndTransitionSilentAgencies,
+} from "./resolvers/agency-resolver.ts";
 
 /**
  * Unified Agent Orchestrator
@@ -156,9 +162,24 @@ const STUCK_WORKER_WATCHDOG_INTERVAL_MS = Number(
 	process.env.AGENTHIVE_STUCK_WORKER_WATCHDOG_INTERVAL_MS ?? 60_000,
 );
 
+/** P196: expired-lease cubic cleanup interval (set 0 to disable). Default 5 min. */
+const LEASE_CUBIC_CLEANUP_INTERVAL_MS = Number(
+	process.env.AGENTHIVE_LEASE_CUBIC_CLEANUP_INTERVAL_MS ?? 5 * 60 * 1000,
+);
+
+/** P196: orphaned-worker retirement sweep interval (set 0 to disable). Default 5 min. */
+const ORPHAN_WORKER_SWEEP_INTERVAL_MS = Number(
+	process.env.AGENTHIVE_ORPHAN_WORKER_SWEEP_INTERVAL_MS ?? 5 * 60 * 1000,
+);
+
 /** Observability heartbeat interval (60 s legacy default; observability, set 0 to disable). */
 const HEARTBEAT_INTERVAL_MS = Number(
 	process.env.AGENTHIVE_HEARTBEAT_INTERVAL_MS ?? 60_000,
+);
+
+/** P765: offline alert sweep — transitions silent agencies and fires Discord alerts. Default 2 min. */
+const OFFLINE_ALERT_INTERVAL_MS = Number(
+	process.env.AGENTHIVE_OFFLINE_ALERT_INTERVAL_MS ?? 2 * 60 * 1000,
 );
 
 export interface OrchestratorConfig {
@@ -365,6 +386,46 @@ export class Orchestrator {
 			console.log("[Orchestrator] reconciler + stale-dispatch disabled (AGENTHIVE_RECONCILER_INTERVAL_MS=0)");
 		}
 
+		// P196: lease-expiry cubic cleanup
+		if (LEASE_CUBIC_CLEANUP_INTERVAL_MS > 0) {
+			this.pollTimers.set(
+				"lease-cubic-cleanup",
+				setInterval(() => {
+					if (this.stopping) return;
+					void this.trackInFlight(
+						cleanupExpiredLeaseCubics(pool).catch((err) =>
+							console.error("[Orchestrator] lease-cubic cleanup failed:", err),
+						),
+					);
+				}, LEASE_CUBIC_CLEANUP_INTERVAL_MS),
+			);
+			console.log(
+				`[Orchestrator] P196 lease-cubic cleanup every ${LEASE_CUBIC_CLEANUP_INTERVAL_MS}ms`,
+			);
+		} else {
+			console.log("[Orchestrator] P196 lease-cubic cleanup disabled (AGENTHIVE_LEASE_CUBIC_CLEANUP_INTERVAL_MS=0)");
+		}
+
+		// P196: orphaned-worker retirement sweep
+		if (ORPHAN_WORKER_SWEEP_INTERVAL_MS > 0) {
+			this.pollTimers.set(
+				"orphan-worker-sweep",
+				setInterval(() => {
+					if (this.stopping) return;
+					void this.trackInFlight(
+						retireOrphanedWorkers(pool).catch((err) =>
+							console.error("[Orchestrator] orphan-worker sweep failed:", err),
+						),
+					);
+				}, ORPHAN_WORKER_SWEEP_INTERVAL_MS),
+			);
+			console.log(
+				`[Orchestrator] P196 orphan-worker sweep every ${ORPHAN_WORKER_SWEEP_INTERVAL_MS}ms`,
+			);
+		} else {
+			console.log("[Orchestrator] P196 orphan-worker sweep disabled (AGENTHIVE_ORPHAN_WORKER_SWEEP_INTERVAL_MS=0)");
+		}
+
 		if (STUCK_WORKER_WATCHDOG_INTERVAL_MS > 0) {
 			this.pollTimers.set(
 				"stuck-worker-watchdog",
@@ -447,6 +508,32 @@ export class Orchestrator {
 			console.log(
 				"[Orchestrator] OfferClaimLoop disabled (AGENTHIVE_OFFER_CLAIM_LOOP=0)",
 			);
+		}
+
+		// P765 AC-3/AC-4: offline alert sweep — scan provider_registry for silent
+		// agencies and fire single-shot Discord alerts (>10 min offline, deduped via
+		// alert_sent_at). Same timer handles active→dormant (5 min) and dormant→offline
+		// (30 min) transitions in provider_registry.
+		if (OFFLINE_ALERT_INTERVAL_MS > 0) {
+			this.pollTimers.set(
+				"offline-alert-sweep",
+				setInterval(() => {
+					if (this.stopping) return;
+					void this.trackInFlight(
+						(async () => {
+							await scanAndTransitionSilentAgencies();
+							await emitOfflineAlerts();
+						})().catch((err) =>
+							console.error("[Orchestrator] offline-alert sweep failed:", err),
+						),
+					);
+				}, OFFLINE_ALERT_INTERVAL_MS),
+			);
+			console.log(
+				`[Orchestrator] offline-alert sweep every ${OFFLINE_ALERT_INTERVAL_MS}ms`,
+			);
+		} else {
+			console.log("[Orchestrator] offline-alert sweep disabled (AGENTHIVE_OFFLINE_ALERT_INTERVAL_MS=0)");
 		}
 
 		console.log("[Orchestrator] started");
@@ -931,35 +1018,46 @@ export class Orchestrator {
 		status: string;
 		stallHours: number;
 	}): Promise<void> {
-		// Tier 1: AI liaison (conditional on env var)
+		// Tier 1: AI liaison via offer dispatch (conditional on env var)
 		if (ORCHESTRATOR_LIAISON_PROVIDER) {
 			try {
-				await spawnAgent({
-					worktree: this.defaultWorktree,
+				const stallTask = [
+					`You are an AI liaison investigating a stalled proposal.`,
+					``,
+					`Proposal: ${stall.displayId} — ${stall.title}`,
+					`Current stage: ${stall.status}`,
+					`Stalled for: ${stall.stallHours}h`,
+					``,
+					`Use your MCP tools to:`,
+					`1. Diagnose why this proposal hasn't advanced`,
+					`2. Contact relevant agents or escalate blockers`,
+					`3. Record your findings and any actions taken`,
+					``,
+					`If you cannot resolve the block, use mcp_ops escalation_add with severity CRITICAL.`,
+				].join("\n");
+				const { dispatchId } = await postWorkOffer({
 					proposalId: stall.id,
+					squadName: `P${stall.id}-stall-investigate`,
+					role: "orchestrator-liaison-investigator",
+					task: stallTask,
 					stage: stall.status,
-					provider: ORCHESTRATOR_LIAISON_PROVIDER,
-					agentLabel: `${stall.displayId} (liaison)`,
-					activity: "investigating stall",
-					task: [
-						`You are an AI liaison investigating a stalled proposal.`,
-						``,
-						`Proposal: ${stall.displayId} — ${stall.title}`,
-						`Current stage: ${stall.status}`,
-						`Stalled for: ${stall.stallHours}h`,
-						``,
-						`Use your MCP tools to:`,
-						`1. Diagnose why this proposal hasn't advanced`,
-						`2. Contact relevant agents or escalate blockers`,
-						`3. Record your findings and any actions taken`,
-						``,
-						`If you cannot resolve the block, use mcp_ops escalation_add with severity CRITICAL.`,
-					].join("\n"),
+					worktreeHint: this.defaultWorktree,
 				});
+				const agencies = await listDispatchableAgencies();
+				if (agencies.length === 0) {
+					console.warn(
+						`[Orchestrator] stall ${stall.displayId}: offer ${dispatchId} queued, no dispatchable agency for push`,
+						{ reason: "no_dispatchable_agency" },
+					);
+				} else {
+					console.log(
+						`[Orchestrator] stall ${stall.displayId}: offer ${dispatchId} queued, OfferClaimLoop will push to ${agencies[0].agency_id}`,
+					);
+				}
 				return;
 			} catch (err) {
 				console.warn(
-					`[Orchestrator] liaison spawn failed for ${stall.displayId}, falling through to Tier 2:`,
+					`[Orchestrator] stall postWorkOffer failed for ${stall.displayId}, falling through to Tier 2:`,
 					err instanceof Error ? err.message : err,
 				);
 			}
