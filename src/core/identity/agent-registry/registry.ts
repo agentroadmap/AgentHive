@@ -209,17 +209,31 @@ export async function registerAgent(
 	const skills = { agentId, capabilities, channel, lastSeen: now };
 	const trustTier = defaultTrustTier(instanceId, agentType);
 
+	// P159: key conflict guard — if a different public key is already registered, reject
+	if (request.publicKey) {
+		const { rows: existing } = await query<{ public_key: string | null }>(
+			`SELECT public_key FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
+			[instanceId],
+		);
+		if (existing.length > 0 && existing[0].public_key && existing[0].public_key !== request.publicKey) {
+			throw new Error(
+				`Key conflict for agent ${instanceId}: registered public_key differs from provided key. Use rotateKeyPair() to explicitly rotate.`,
+			);
+		}
+	}
+
 	const insertResult = await query<{ id: number }>(
-		`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, role, skills, status, trust_tier)
-     VALUES ($1, $2, $3, $4::jsonb, 'online', $5)
+		`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, role, skills, status, trust_tier, public_key)
+     VALUES ($1, $2, $3, $4::jsonb, 'online', $5, $6)
      ON CONFLICT (agent_identity) DO UPDATE SET
        agent_type = EXCLUDED.agent_type,
        role       = EXCLUDED.role,
        skills     = agent_registry.skills || EXCLUDED.skills,
        status     = 'online',
-       trust_tier = COALESCE(NULLIF(agent_registry.trust_tier, 'authority'), EXCLUDED.trust_tier)
+       trust_tier = COALESCE(NULLIF(agent_registry.trust_tier, 'authority'), EXCLUDED.trust_tier),
+       public_key = COALESCE(EXCLUDED.public_key, agent_registry.public_key)
      RETURNING id`,
-		[instanceId, agentType, role ?? null, JSON.stringify(skills), trustTier],
+		[instanceId, agentType, role ?? null, JSON.stringify(skills), trustTier, request.publicKey ?? null],
 	);
 
 	// P919 AC-12: Tier 2 display alias for worker slot-0 spawns. The slot
@@ -323,6 +337,39 @@ export async function updateAgentStatus(
      WHERE agent_identity = $3`,
 		[status, JSON.stringify(skillsPatch), agentId],
 	);
+}
+
+/**
+ * P159: Update an agent's public key after rotation.
+ * Sets public_key and key_rotated_at = now().
+ * Matches by agent_identity (permanent agents) or skills->>'agentId' (contract agents).
+ */
+export async function updateAgentPublicKey(
+	agentId: string,
+	newPublicKey: string,
+): Promise<void> {
+	await query(
+		`UPDATE roadmap_workforce.agent_registry
+     SET public_key = $1, key_rotated_at = now()
+     WHERE agent_identity = $2 OR skills->>'agentId' = $2`,
+		[newPublicKey, agentId],
+	);
+}
+
+/**
+ * P159: Fetch an agent's public key from agent_registry.
+ * Returns null if agent is not found or has no key stored.
+ * Matches by agent_identity (permanent agents) or skills->>'agentId' (contract agents).
+ */
+export async function getAgentPublicKey(agentId: string): Promise<string | null> {
+	const { rows } = await query<{ public_key: string | null }>(
+		`SELECT public_key FROM roadmap_workforce.agent_registry
+     WHERE agent_identity = $1 OR skills->>'agentId' = $1
+     ORDER BY created_at DESC
+     LIMIT 1`,
+		[agentId],
+	);
+	return rows.length > 0 ? (rows[0].public_key ?? null) : null;
 }
 
 /** Send announcement via MCP (best-effort, non-blocking) */

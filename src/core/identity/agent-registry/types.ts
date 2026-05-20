@@ -22,6 +22,8 @@ export type RegistrationRequest = {
 	role?: string;
 	capabilities?: string[];
 	channel?: string;
+	/** P159: Ed25519 public key (PEM) to store in agent_registry.public_key */
+	publicKey?: string;
 	/**
 	 * P852: route abbreviation token (e.g. "ccs45ant"). When provided together
 	 * with `host` and at least one capability, the registry assembles a

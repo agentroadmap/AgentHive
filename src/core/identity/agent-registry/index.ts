@@ -7,8 +7,10 @@
 export {
 	deregisterAgent,
 	getAgent,
+	getAgentPublicKey,
 	listAgents,
 	registerAgent,
+	updateAgentPublicKey,
 	updateAgentStatus,
 } from "./registry.ts";
 export type {

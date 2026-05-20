@@ -19,6 +19,11 @@ import {
 } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import {
+	getAgentPublicKey,
+	registerAgent,
+	updateAgentPublicKey,
+} from "./agent-registry/index.ts";
 
 /** Key algorithm used for agent identities */
 const _KEY_ALGORITHM = "ed25519";
@@ -193,6 +198,14 @@ export async function getOrCreateIdentity(
 	// Generate new key pair
 	const keyPair = generateAgentKeyPair(tempAgentId);
 	await saveKeyPair(workspaceRoot, keyPair);
+
+	// P159: best-effort DB registration with public key
+	try {
+		await registerAgent({ agentId: tempAgentId, publicKey: keyPair.publicKey });
+	} catch {
+		// DB unavailable or key conflict — file system is authoritative
+	}
+
 	return keyPair;
 }
 
@@ -316,6 +329,23 @@ export function verifyToken(token: AuthToken): TokenVerification {
 	}
 }
 
+/**
+ * P159: Verify token using DB-backed public key lookup.
+ * Falls back to token.publicKey if DB is unavailable or has no key stored.
+ */
+export async function verifyTokenWithDbLookup(
+	token: AuthToken,
+): Promise<TokenVerification> {
+	let publicKey = token.publicKey;
+	try {
+		const dbKey = await getAgentPublicKey(token.agentId);
+		if (dbKey) publicKey = dbKey;
+	} catch {
+		// DB unavailable — fall back to token-embedded key
+	}
+	return verifyToken({ ...token, publicKey });
+}
+
 // ===================== Signature Operations =====================
 
 /**
@@ -396,6 +426,13 @@ export async function rotateKeyPair(
 
 	// Save new key as current
 	await saveKeyPair(workspaceRoot, newKeyPair);
+
+	// P159: best-effort DB update with new public key and rotation timestamp
+	try {
+		await updateAgentPublicKey(currentKeyPair.agentId, newKeyPair.publicKey);
+	} catch {
+		// DB unavailable — file system is authoritative
+	}
 
 	return {
 		newKeyPair,
