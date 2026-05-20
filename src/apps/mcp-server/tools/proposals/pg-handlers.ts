@@ -18,7 +18,11 @@ import {
 	isRegisteredAgency,
 	hasActiveLiaisonSession,
 } from "../../../../infra/agency/liaison-service.ts";
-import { detectConflicts } from "../../../../core/proposal/directive-conflict-detector.ts";
+import {
+	detectConflicts,
+	type ConflictEntry,
+} from "../../../../core/proposal/directive-conflict-detector.ts";
+import { calculateDispatchPriority } from "./directive-priority.ts";
 
 type ProjectionFormat = "yaml_md" | "json";
 
@@ -287,11 +291,12 @@ export class PgProposalHandlers {
 
 			// AC-5 + AC-7: Conflict detection and escalation for directives
 			let conflictNote = "";
-			let detectedConflicts: Awaited<ReturnType<typeof detectConflicts>> = [];
+			let detectedConflicts: ConflictEntry[] = [];
 			if (isDirective) {
-				detectedConflicts = await detectConflicts(args.title, summary);
+				const report = await detectConflicts("-1", args.title, summary);
+				detectedConflicts = report.conflicts;
 				if (detectedConflicts.length > 0) {
-					conflictNote = `\n⚠️ Conflicts detected (${detectedConflicts.length}): ${detectedConflicts.map((c) => c.displayId).join(", ")}`;
+					conflictNote = `\n⚠️ Conflicts detected (${detectedConflicts.length}): ${detectedConflicts.map((c) => c.display_id ?? c.proposal_id).join(", ")}`;
 				}
 			}
 
