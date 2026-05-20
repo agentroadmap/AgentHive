@@ -99,6 +99,8 @@ const DEFAULT_SHUTDOWN_DRAIN_MS = Number(
 /** Notify channels the orchestrator listens on for dispatch wake-ups. */
 const GATE_READY_CHANNEL = "proposal_gate_ready";
 const MATURITY_CHANGED_CHANNEL = "proposal_maturity_changed";
+/** P765 AC-1: agency recovery wake — fired by recordCheckIn when an agency transitions to active. */
+const AGENCY_RECOVERY_CHANNEL = "orchestrator_wake";
 
 /** Whether the 2-minute state-change poll fallback is enabled (env-driven). */
 const ENABLE_POLLING = process.env.AGENTHIVE_ORCHESTRATOR_POLL === "1";
@@ -296,8 +298,9 @@ export class Orchestrator {
 		);
 		await this.listenClient.query(`LISTEN ${GATE_READY_CHANNEL}`);
 		await this.listenClient.query(`LISTEN ${MATURITY_CHANGED_CHANNEL}`);
+		await this.listenClient.query(`LISTEN ${AGENCY_RECOVERY_CHANNEL}`);
 		console.log(
-			`[Orchestrator] LISTEN registered: ${GATE_READY_CHANNEL}, ${MATURITY_CHANGED_CHANNEL}`,
+			`[Orchestrator] LISTEN registered: ${GATE_READY_CHANNEL}, ${MATURITY_CHANGED_CHANNEL}, ${AGENCY_RECOVERY_CHANNEL}`,
 		);
 
 		// Schedule the five legacy poll timers. Each is parity with the
@@ -723,7 +726,8 @@ export class Orchestrator {
 		if (this.stopping || !payload) return;
 		if (
 			channel !== GATE_READY_CHANNEL &&
-			channel !== MATURITY_CHANGED_CHANNEL
+			channel !== MATURITY_CHANGED_CHANNEL &&
+			channel !== AGENCY_RECOVERY_CHANNEL
 		) {
 			return;
 		}
@@ -740,6 +744,17 @@ export class Orchestrator {
 						dispatchImplicitGate(pid, "notify:proposal_gate_ready"),
 					);
 				}
+				return;
+			}
+
+			// P765 AC-1: agency recovered — trigger an immediate scan so queued
+			// offers get dispatched without waiting for the next poll cycle.
+			if (channel === AGENCY_RECOVERY_CHANNEL) {
+				void this.trackInFlight(
+					drainImplicitGateReady("agency-recovery-wake", 5).catch((err) =>
+						console.error("[Orchestrator] agency-recovery scan failed:", err),
+					),
+				);
 				return;
 			}
 
