@@ -483,6 +483,7 @@ export async function viewProposalEnhanced(
 		searchQuery?: string;
 		statusFilter?: string;
 		priorityFilter?: string;
+		maturityFilter?: string;
 		directiveFilter?: string;
 		labelFilter?: string[];
 		startWithDetailFocus?: boolean;
@@ -494,6 +495,7 @@ export async function viewProposalEnhanced(
 			searchQuery: string;
 			statusFilter: string;
 			priorityFilter: string;
+			maturityFilter: string;
 			labelFilter: string[];
 			directiveFilter: string;
 		}) => void;
@@ -572,6 +574,7 @@ export async function viewProposalEnhanced(
 
 	// Priority is already lowercase
 	let priorityFilter = options.priorityFilter || "";
+	let maturityFilter = options.maturityFilter || "";
 	let labelFilter: string[] = [];
 	let directiveFilter = options.directiveFilter || "";
 	let filteredProposals = [...allProposals];
@@ -592,6 +595,7 @@ export async function viewProposalEnhanced(
 		searchQuery ||
 			statusFilter ||
 			priorityFilter ||
+			maturityFilter ||
 			labelFilter.length > 0 ||
 			directiveFilter,
 	);
@@ -662,6 +666,9 @@ export async function viewProposalEnhanced(
 				break;
 			case "priority":
 				filterHeader.focusPriority();
+				break;
+			case "maturity":
+				filterHeader.focusMaturity();
 				break;
 			case "directive":
 				filterHeader.focusDirective();
@@ -739,6 +746,29 @@ export async function viewProposalEnhanced(
 				return;
 			}
 
+			if (filterId === "maturity") {
+				const maturityOptions = ["new", "active", "mature", "obsolete"];
+				const selected = await openSingleSelectFilterPopup({
+					screen,
+					title: "Maturity Filter",
+					selectedValue: maturityFilter,
+					choices: [
+						{ label: "All", value: "" },
+						...maturityOptions.map((maturity) => ({
+							label: maturity,
+							value: maturity,
+						})),
+					],
+				});
+				if (selected !== null) {
+					maturityFilter = selected;
+					filterHeader.setFilters({ maturity: selected });
+					applyFilters();
+					notifyFilterChange();
+				}
+				return;
+			}
+
 			const selected = await openSingleSelectFilterPopup({
 				screen,
 				title: "Directive Filter",
@@ -773,6 +803,7 @@ export async function viewProposalEnhanced(
 			search: searchQuery,
 			status: statusFilter,
 			priority: priorityFilter,
+			maturity: maturityFilter,
 			labels: labelFilter,
 			directive: directiveFilter,
 		},
@@ -780,6 +811,7 @@ export async function viewProposalEnhanced(
 			searchQuery = filters.search;
 			statusFilter = filters.status;
 			priorityFilter = filters.priority;
+			maturityFilter = filters.maturity;
 			labelFilter = filters.labels;
 			directiveFilter = filters.directive;
 			applyFilters();
@@ -1005,6 +1037,14 @@ export async function viewProposalEnhanced(
 			filteredProposals = [...allProposals];
 		}
 
+		// Apply maturity filter
+		if (maturityFilter) {
+			filteredProposals = filteredProposals.filter((proposal) => {
+				const proposalMaturity = (proposal as any).maturity || "unknown";
+				return proposalMaturity.toLowerCase() === maturityFilter.toLowerCase();
+			});
+		}
+
 		// Update the proposal list label
 		if (proposalListPane.setLabel) {
 			proposalListPane.setLabel(
@@ -1027,6 +1067,9 @@ export async function viewProposalEnhanced(
 			}
 			if (priorityFilter) {
 				activeFilters.push(`Priority: {cyan-fg}${priorityFilter}{/}`);
+			}
+			if (maturityFilter) {
+				activeFilters.push(`Maturity: {cyan-fg}${maturityFilter}{/}`);
 			}
 			if (labelFilter.length > 0) {
 				activeFilters.push(`Labels: {yellow-fg}${labelFilter.join(", ")}{/}`);
