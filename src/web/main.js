@@ -184613,7 +184613,7 @@ function vbnet(Prism) {
   });
 }
 
-// node_modules/refractor/node_modules/property-information/lib/util/schema.js
+// node_modules/hastscript/node_modules/property-information/lib/util/schema.js
 class Schema {
   constructor(property, normal, space) {
     this.property = property;
@@ -184627,7 +184627,7 @@ Schema.prototype.property = {};
 Schema.prototype.normal = {};
 Schema.prototype.space = null;
 
-// node_modules/refractor/node_modules/property-information/lib/util/merge.js
+// node_modules/hastscript/node_modules/property-information/lib/util/merge.js
 function merge(definitions, space) {
   const property = {};
   const normal = {};
@@ -184639,12 +184639,12 @@ function merge(definitions, space) {
   return new Schema(property, normal, space);
 }
 
-// node_modules/refractor/node_modules/property-information/lib/normalize.js
+// node_modules/hastscript/node_modules/property-information/lib/normalize.js
 function normalize(value) {
   return value.toLowerCase();
 }
 
-// node_modules/refractor/node_modules/property-information/lib/util/info.js
+// node_modules/hastscript/node_modules/property-information/lib/util/info.js
 class Info {
   constructor(property, attribute) {
     this.property = property;
@@ -184662,7 +184662,7 @@ Info.prototype.commaOrSpaceSeparated = false;
 Info.prototype.mustUseProperty = false;
 Info.prototype.defined = false;
 
-// node_modules/refractor/node_modules/property-information/lib/util/types.js
+// node_modules/hastscript/node_modules/property-information/lib/util/types.js
 var exports_types = {};
 __export(exports_types, {
   spaceSeparated: () => spaceSeparated,
@@ -184685,7 +184685,7 @@ function increment() {
   return 2 ** ++powers;
 }
 
-// node_modules/refractor/node_modules/property-information/lib/util/defined-info.js
+// node_modules/hastscript/node_modules/property-information/lib/util/defined-info.js
 var checks = Object.keys(exports_types);
 
 class DefinedInfo extends Info {
@@ -184708,7 +184708,7 @@ function mark(values, key, value) {
   }
 }
 
-// node_modules/refractor/node_modules/property-information/lib/util/create.js
+// node_modules/hastscript/node_modules/property-information/lib/util/create.js
 var own2 = {}.hasOwnProperty;
 function create(definition) {
   const property = {};
@@ -184729,7 +184729,7 @@ function create(definition) {
   return new Schema(property, normal, definition.space);
 }
 
-// node_modules/refractor/node_modules/property-information/lib/xlink.js
+// node_modules/hastscript/node_modules/property-information/lib/xlink.js
 var xlink = create({
   space: "xlink",
   transform(_, prop) {
@@ -184746,7 +184746,7 @@ var xlink = create({
   }
 });
 
-// node_modules/refractor/node_modules/property-information/lib/xml.js
+// node_modules/hastscript/node_modules/property-information/lib/xml.js
 var xml = create({
   space: "xml",
   transform(_, prop) {
@@ -184755,17 +184755,17 @@ var xml = create({
   properties: { xmlLang: null, xmlBase: null, xmlSpace: null }
 });
 
-// node_modules/refractor/node_modules/property-information/lib/util/case-sensitive-transform.js
+// node_modules/hastscript/node_modules/property-information/lib/util/case-sensitive-transform.js
 function caseSensitiveTransform(attributes, attribute) {
   return attribute in attributes ? attributes[attribute] : attribute;
 }
 
-// node_modules/refractor/node_modules/property-information/lib/util/case-insensitive-transform.js
+// node_modules/hastscript/node_modules/property-information/lib/util/case-insensitive-transform.js
 function caseInsensitiveTransform(attributes, property) {
   return caseSensitiveTransform(attributes, property.toLowerCase());
 }
 
-// node_modules/refractor/node_modules/property-information/lib/xmlns.js
+// node_modules/hastscript/node_modules/property-information/lib/xmlns.js
 var xmlns = create({
   space: "xmlns",
   attributes: { xmlnsxlink: "xmlns:xlink" },
@@ -184773,7 +184773,7 @@ var xmlns = create({
   properties: { xmlns: null, xmlnsXLink: null }
 });
 
-// node_modules/refractor/node_modules/property-information/lib/aria.js
+// node_modules/hastscript/node_modules/property-information/lib/aria.js
 var aria = create({
   transform(_, prop) {
     return prop === "role" ? prop : "aria-" + prop.slice(4).toLowerCase();
@@ -184831,7 +184831,7 @@ var aria = create({
   }
 });
 
-// node_modules/refractor/node_modules/property-information/lib/html.js
+// node_modules/hastscript/node_modules/property-information/lib/html.js
 var html = create({
   space: "html",
   attributes: {
@@ -185138,7 +185138,7 @@ var html = create({
   }
 });
 
-// node_modules/refractor/node_modules/property-information/lib/svg.js
+// node_modules/hastscript/node_modules/property-information/lib/svg.js
 var svg = create({
   space: "svg",
   attributes: {
@@ -185696,7 +185696,7 @@ var svg = create({
   }
 });
 
-// node_modules/refractor/node_modules/property-information/lib/find.js
+// node_modules/hastscript/node_modules/property-information/lib/find.js
 var valid = /^data[-\w.:]+$/i;
 var dash = /-[a-z]/g;
 var cap = /[A-Z]/g;
@@ -185731,11 +185731,11 @@ function kebab($0) {
 function camelcase($0) {
   return $0.charAt(1).toUpperCase();
 }
-// node_modules/refractor/node_modules/property-information/index.js
+// node_modules/hastscript/node_modules/property-information/index.js
 var html2 = merge([xml, xlink, xmlns, aria, html], "html");
 var svg2 = merge([xml, xlink, xmlns, aria, svg], "svg");
 
-// node_modules/refractor/node_modules/hast-util-parse-selector/lib/index.js
+// node_modules/hast-util-parse-selector/lib/index.js
 var search = /[#.]/g;
 function parseSelector(selector, defaultTagName) {
   const value = selector || "";
@@ -185807,7 +185807,7 @@ function stringify2(values, options) {
   return input.join((settings.padRight ? " " : "") + "," + (settings.padLeft === false ? "" : " ")).trim();
 }
 
-// node_modules/refractor/node_modules/hastscript/lib/core.js
+// node_modules/hastscript/lib/core.js
 var buttonTypes = new Set(["menu", "submit", "reset", "button"]);
 var own3 = {}.hasOwnProperty;
 function core(schema, defaultTagName, caseSensitive) {
@@ -185948,7 +185948,7 @@ function createAdjustMap(values) {
   return result;
 }
 
-// node_modules/refractor/node_modules/hastscript/lib/html.js
+// node_modules/hastscript/lib/html.js
 var h = core(html2, "div");
 // node_modules/character-entities-legacy/index.js
 var characterEntitiesLegacy = [
@@ -229419,6 +229419,20 @@ function proposalExportFilename(proposal) {
   return slug2 ? `${id2}-${slug2}-${stamp}.md` : `${id2}-${stamp}.md`;
 }
 
+// src/apps/dashboard-web/lib/proposal-activity.ts
+var localActivityDateTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short"
+});
+function formatLocalActivityTimestamp(value) {
+  if (!value)
+    return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime()))
+    return value;
+  return localActivityDateTimeFormatter.format(date);
+}
+
 // src/apps/dashboard-web/utils/date-display.ts
 var DATE_ONLY_REGEX = /^(\d{4})-(\d{2})-(\d{2})$/;
 var DATE_TIME_REGEX = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/;
@@ -229465,13 +229479,18 @@ function parseStoredUtcDate(dateStr) {
     }
     return date;
   }
+  const fallback = new Date(normalized);
+  if (!Number.isNaN(fallback.getTime()))
+    return fallback;
   return null;
 }
+var HAS_TIME_REGEX = /T\d{2}:\d{2}/;
 function formatStoredUtcDateForDisplay(dateStr) {
   const parsed = parseStoredUtcDate(dateStr);
   if (!parsed)
     return dateStr;
-  if (DATE_TIME_REGEX.test(dateStr.trim())) {
+  const hasTime = DATE_TIME_REGEX.test(dateStr.trim()) || HAS_TIME_REGEX.test(dateStr.trim());
+  if (hasTime) {
     return parsed.toLocaleString(undefined, {
       dateStyle: "medium",
       timeStyle: "short"
@@ -230130,6 +230149,7 @@ var ProposalDetailsModal = ({
   isDraftMode
 }) => {
   const theme = getColorMode();
+  const [, navigate2] = useLocation();
   const isCreateMode = !proposal;
   const isFromOtherBranch = Boolean(proposal?.branch);
   const proposalId = proposal?.id ?? "";
@@ -230384,7 +230404,11 @@ var ProposalDetailsModal = ({
       candidates.push({ date: d4.decided_at, label: `decision by ${d4.authority}` });
     if (candidates.length === 0)
       return null;
-    return candidates.reduce((max9, cur) => cur.date > max9.date ? cur : max9);
+    return candidates.reduce((max9, cur) => {
+      const curTs = parseStoredUtcDate(cur.date)?.getTime() ?? 0;
+      const maxTs = parseStoredUtcDate(max9.date)?.getTime() ?? 0;
+      return curTs > maxTs ? cur : max9;
+    });
   }, [proposal, discussions, reviews, decisions]);
   import_react61.useEffect(() => {
     if (proposalId && proposalRef.current?.id !== proposalId)
@@ -230432,32 +230456,37 @@ var ProposalDetailsModal = ({
       setDiscussions([]);
       return;
     }
+    if (!isOpen)
+      return;
     let cancelled = false;
     apiClient.fetchProposalDecisions(proposalId).then((nextDecisions) => {
       if (!cancelled)
         setDecisions(nextDecisions);
-    }).catch(() => {
+    }).catch((err) => {
+      console.warn("[P801] fetchProposalDecisions failed:", err);
       if (!cancelled)
         setDecisions([]);
     });
     apiClient.fetchProposalReviews(proposalId).then((nextReviews) => {
       if (!cancelled)
         setReviews(nextReviews);
-    }).catch(() => {
+    }).catch((err) => {
+      console.warn("[P801] fetchProposalReviews failed:", err);
       if (!cancelled)
         setReviews([]);
     });
     apiClient.fetchProposalDiscussions(proposalId).then((nextDiscussions) => {
       if (!cancelled)
         setDiscussions(nextDiscussions);
-    }).catch(() => {
+    }).catch((err) => {
+      console.warn("[P801] fetchProposalDiscussions failed:", err);
       if (!cancelled)
         setDiscussions([]);
     });
     return () => {
       cancelled = true;
     };
-  }, [proposalId]);
+  }, [proposalId, isOpen]);
   const handleCancelEdit = import_react61.useCallback(() => {
     if (isDirty) {
       const confirmDiscard = window.confirm("Discard unsaved changes?");
@@ -231356,25 +231385,38 @@ var ProposalDetailsModal = ({
                       }, undefined, false, undefined, this)
                     ]
                   }, undefined, true, undefined, this),
-                  lastActivity && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                    className: "cursor-pointer hover:text-blue-600 dark:hover:text-blue-400",
+                    onClick: () => {
+                      onClose();
+                      navigate2(`/activity?proposal=${encodeURIComponent(proposalId)}`);
+                    },
+                    title: "View full activity feed",
                     children: [
                       /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
                         className: "font-semibold text-gray-800 dark:text-gray-100",
                         children: "Last activity:"
                       }, undefined, false, undefined, this),
                       " ",
-                      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
-                        className: "text-gray-700 dark:text-gray-200",
-                        children: formatStoredUtcDateForDisplay(lastActivity.date)
-                      }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
-                        className: "ml-1 text-gray-400 dark:text-gray-500 italic",
+                      lastActivity ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(jsx_dev_runtime27.Fragment, {
                         children: [
-                          "(",
-                          lastActivity.label,
-                          ")"
+                          /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                            className: "text-gray-700 dark:text-gray-200",
+                            children: formatLocalActivityTimestamp(lastActivity.date)
+                          }, undefined, false, undefined, this),
+                          /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                            className: "ml-1 text-gray-400 dark:text-gray-500 italic",
+                            children: [
+                              "(",
+                              lastActivity.label,
+                              ")"
+                            ]
+                          }, undefined, true, undefined, this)
                         ]
-                      }, undefined, true, undefined, this)
+                      }, undefined, true, undefined, this) : /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                        className: "text-gray-400 dark:text-gray-500 italic",
+                        children: "No activity yet"
+                      }, undefined, false, undefined, this)
                     ]
                   }, undefined, true, undefined, this)
                 ]
@@ -233380,8 +233422,8 @@ function toSharedProposal(proposal) {
     title: proposal.title,
     status: proposal.status,
     assignee: [],
-    createdDate: proposal.createdAt,
-    updatedDate: proposal.updatedAt || proposal.createdAt,
+    createdDate: proposal.createdAt ?? "",
+    updatedDate: proposal.updatedAt || proposal.createdAt || undefined,
     labels,
     dependencies: proposal.parentId ? [proposal.parentId] : [],
     summary: proposal.summary ?? proposal.bodyMarkdown ?? undefined,
