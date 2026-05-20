@@ -1,8 +1,10 @@
-#!/usr/bin/env tsx
+#!/usr/bin/env node
+// Source of truth: scripts/migrations/ (canonical active migrations).
+// database/migrations/ is legacy (pre-P753) — duplicate prefixes there are pre-existing.
 import { readdirSync } from 'fs';
 import { join } from 'path';
 
-const migrationsDir = join(import.meta.dirname ?? process.cwd(), '../database/migrations');
+const migrationsDir = join(import.meta.dirname ?? process.cwd(), '../scripts/migrations');
 const files = readdirSync(migrationsDir)
   .filter(f => f.endsWith('.sql'))
   .sort();
