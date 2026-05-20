@@ -66,8 +66,11 @@ export function renderCockpit(
 			child.destroy();
 		});
 
-		// Create persistent container
+		// Create persistent container.
+		// parent: screen required — without it the container is orphaned and
+		// the entire view renders invisible (the 2026-05-19 black-screen bug).
 		container = box({
+			parent: screen,
 			top: 0,
 			left: 0,
 			width: "100%",

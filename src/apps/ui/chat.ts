@@ -44,7 +44,9 @@ export function renderChat(
 			child.destroy();
 		});
 
+		// parent: screen required — without it the container is orphaned and invisible.
 		container = box({
+			parent: screen,
 			top: 0,
 			left: 0,
 			width: "100%",
