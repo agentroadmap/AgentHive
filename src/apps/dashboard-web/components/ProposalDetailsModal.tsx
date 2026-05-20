@@ -88,7 +88,7 @@ const getColorMode = (): "light" | "dark" =>
 		? "dark"
 		: "light";
 
-export const ProposalDetailsModal: React.FC<Props> = ({
+export const ProposalDetailsModal = React.memo<React.FC<Props>>(({
 	proposal,
 	isOpen,
 	onClose,
@@ -1724,7 +1724,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 			</div>
 		</Modal>
 	);
-};
+}));
 
 const StatusSelect: React.FC<{
 	current: string;
