@@ -5,6 +5,13 @@ import { reapStaleRows } from "../pipeline/reap-stale-rows.ts";
 import { enqueueNotification } from "../notifications/enqueue.ts";
 import { getUnlockedGateQueue } from "../proposal/gate-scanner-v2.ts";
 import { spawnAgent } from "./agent-spawner.ts";
+import { postWorkOffer } from "../pipeline/post-work-offer.ts";
+import { listDispatchableAgencies } from "../../infra/agency/liaison-service.ts";
+import {
+	storeMessage,
+	getNextSequence,
+} from "../../infra/agency/liaison-message-service.ts";
+import { createMessageEnvelope } from "../../infra/agency/liaison-message-types.ts";
 import {
 	bootCancelPokeAttempts,
 	runOfferReaper,
@@ -783,35 +790,82 @@ export class Orchestrator {
 		status: string;
 		stallHours: number;
 	}): Promise<void> {
-		// Tier 1: AI liaison (conditional on env var)
+		// Tier 1: liaison-first offer dispatch (P904-A3: replaced spawnAgent with postWorkOffer)
 		if (ORCHESTRATOR_LIAISON_PROVIDER) {
 			try {
-				await spawnAgent({
-					worktree: this.defaultWorktree,
+				const stallTask = [
+					`You are an AI liaison investigating a stalled proposal.`,
+					``,
+					`Proposal: ${stall.displayId} — ${stall.title}`,
+					`Current stage: ${stall.status}`,
+					`Stalled for: ${stall.stallHours}h`,
+					``,
+					`Use your MCP tools to:`,
+					`1. Diagnose why this proposal hasn't advanced`,
+					`2. Contact relevant agents or escalate blockers`,
+					`3. Record your findings and any actions taken`,
+					``,
+					`If you cannot resolve the block, use mcp_ops escalation_add with severity CRITICAL.`,
+				].join("\n");
+				const { dispatchId } = await postWorkOffer({
 					proposalId: stall.id,
+					squadName: `P${stall.id}-stall-liaison`,
+					role: "orchestrator-liaison-investigator",
+					task: stallTask,
 					stage: stall.status,
-					provider: ORCHESTRATOR_LIAISON_PROVIDER,
-					agentLabel: `${stall.displayId} (liaison)`,
-					activity: "investigating stall",
-					task: [
-						`You are an AI liaison investigating a stalled proposal.`,
-						``,
-						`Proposal: ${stall.displayId} — ${stall.title}`,
-						`Current stage: ${stall.status}`,
-						`Stalled for: ${stall.stallHours}h`,
-						``,
-						`Use your MCP tools to:`,
-						`1. Diagnose why this proposal hasn't advanced`,
-						`2. Contact relevant agents or escalate blockers`,
-						`3. Record your findings and any actions taken`,
-						``,
-						`If you cannot resolve the block, use mcp_ops escalation_add with severity CRITICAL.`,
-					].join("\n"),
+					phase: "investigate",
+					timeoutMs: 600_000,
+					worktreeHint: this.defaultWorktree ?? undefined,
+					requiredCapabilities: ["orchestrator-liaison-investigator"],
 				});
+				console.log(
+					`[Orchestrator] stall liaison offer ${dispatchId} posted for ${stall.displayId}`,
+				);
+
+				// Push notification to first dispatchable agency
+				try {
+					const agencies = await listDispatchableAgencies();
+					if (agencies.length > 0) {
+						const targetAgency = agencies[0];
+						const envelope = createMessageEnvelope({
+							agencyId: targetAgency.agency_id,
+							direction: "orchestrator->liaison",
+							kind: "offer_dispatch",
+							payload: {
+								offer_id: String(dispatchId),
+								dispatch_id: dispatchId,
+								proposal_id: stall.id,
+								squad_name: `P${stall.id}-stall-liaison`,
+								role: "orchestrator-liaison-investigator",
+								required_capabilities: ["orchestrator-liaison-investigator"],
+								route_hint: ORCHESTRATOR_LIAISON_PROVIDER,
+							},
+						});
+						const sequence = await getNextSequence(targetAgency.agency_id);
+						await storeMessage({
+							...(envelope as any),
+							sequence,
+							signature: "stub-orchestrator",
+						});
+						console.log(
+							`[Orchestrator] stall liaison offer_dispatch sent to ${targetAgency.agency_id} for dispatch ${dispatchId}`,
+						);
+					} else {
+						console.warn(
+							`[Orchestrator] stall liaison dispatch ${dispatchId}: no dispatchable agencies`,
+							{ reason: "no_dispatchable_agency" },
+						);
+					}
+				} catch (err) {
+					console.warn(
+						`[Orchestrator] failed to emit liaison message for stall dispatch ${dispatchId}:`,
+						err instanceof Error ? err.message : err,
+					);
+				}
 				return;
 			} catch (err) {
 				console.warn(
-					`[Orchestrator] liaison spawn failed for ${stall.displayId}, falling through to Tier 2:`,
+					`[Orchestrator] liaison offer failed for ${stall.displayId}, falling through to Tier 2:`,
 					err instanceof Error ? err.message : err,
 				);
 			}

@@ -984,7 +984,7 @@ function safeParseMcpResponse(text: string | undefined): any {
 	}
 }
 
-// Dispatch agent to cubic — uses cubic_acquire for atomic find-or-create + focus
+// Dispatch agent via liaison-first offer dispatch (P904: cubic_acquire removed)
 async function dispatchAgent(
 	agent: string,
 	proposalId: string,
@@ -994,46 +994,9 @@ async function dispatchAgent(
 	agentLabel?: string,
 	activity?: string,
 	requiredCapabilities: string[] = [],
-): Promise<string | null> {
-	const client = new Client({ name: "orchestrator", version: "1.0.0" });
-	const transport = new SSEClientTransport(new URL(MCP_URL));
-
+): Promise<boolean> {
 	try {
 		const selectedWorktree = await selectExecutorWorktree(agent);
-
-		await client.connect(transport);
-
-		// Single MCP call replaces: cubic_list → cubic_recycle → cubic_focus
-		// Pass the worktree *basename* — the MCP-side safeWorktreePath() normalizes
-		// it as an agent-id and joins with WORKTREE_ROOT itself. Passing a full
-		// absolute path triggers normalizeAgentId rejection ("path traversal").
-		const acquired = await client.callTool({
-			name: "cubic_acquire",
-			arguments: {
-				agent_identity: agent,
-				proposal_id: Number(proposalId),
-				phase,
-				worktree_path: selectedWorktree,
-			},
-		});
-		const data = safeParseMcpResponse(mcpText(acquired));
-
-		if (!data?.success || !data?.cubic_id) {
-			logger.warn(
-				`cubic_acquire failed for ${agent} on P${proposalId}: ${mcpText(acquired)?.substring(0, 120)}`,
-			);
-			return null;
-		}
-
-		const cubicId = data.cubic_id as string;
-		const verb = data.was_created
-			? "📦 New"
-			: data.was_recycled
-				? "♻️ Recycled"
-				: "🔄 Reused";
-		logger.log(
-			`${verb} cubic ${cubicId.substring(0, 8)} for ${agent} → P${proposalId} (${phase})`,
-		);
 
 		// P466 — assemble a warm-boot briefing BEFORE posting the offer. Without
 		// this, the spawned child receives only the generic role prompt and runs
@@ -1181,7 +1144,7 @@ async function dispatchAgent(
 				);
 			}
 
-			return cubicId;
+			return true;
 		}
 
 		// Direct spawn path (used when AGENTHIVE_USE_OFFER_DISPATCH is not set)
@@ -1287,12 +1250,10 @@ async function dispatchAgent(
 			}
 		}
 
-		return cubicId;
+		return true;
 	} catch (err) {
 		logger.error(`Dispatch failed for ${agent} on P${proposalId}:`, err);
-		return null;
-	} finally {
-		await client.close();
+		return false;
 	}
 }
 
@@ -2333,6 +2294,50 @@ Without set_maturity=mature, the gate will not re-run and your work remains invi
 		logger.log(
 			`📬 Enhancer offer ${dispatchId} posted for ${target.display_id} (revising hold #${target.hold_decision_id}; reason=${reason})`,
 		);
+
+		// A2 (P904): send offer_dispatch downlink so agencies get push notification
+		try {
+			const agencies = await listDispatchableAgencies();
+			if (agencies.length > 0) {
+				const targetAgency = agencies[0];
+				const envelope = createMessageEnvelope({
+					agencyId: targetAgency.agency_id,
+					direction: "orchestrator->liaison",
+					kind: "offer_dispatch",
+					payload: {
+						offer_id: String(dispatchId),
+						dispatch_id: dispatchId,
+						proposal_id: target.id,
+						squad_name: `P${target.id}-enhance`,
+						role: "enhancer",
+						required_capabilities:
+							requiredCapabilities.length > 0
+								? requiredCapabilities
+								: ["enhancer"],
+						route_hint: "anthropic",
+					},
+				});
+				const sequence = await getNextSequence(targetAgency.agency_id);
+				await storeMessage({
+					...(envelope as any),
+					sequence,
+					signature: "stub-orchestrator",
+				});
+				logger.log(
+					`📮 Enhancer offer_dispatch sent to ${targetAgency.agency_id} for dispatch ${dispatchId}`,
+				);
+			} else {
+				logger.warn(
+					`Enhancer dispatch ${dispatchId}: no dispatchable agencies, offer queued only`,
+					{ reason: "no_dispatchable_agency" },
+				);
+			}
+		} catch (err) {
+			logger.warn(
+				`Failed to emit liaison message for enhancer dispatch ${dispatchId}:`,
+				err,
+			);
+		}
 	} catch (err) {
 		const errMsg = err instanceof Error ? err.message : String(err);
 		logger.warn(
