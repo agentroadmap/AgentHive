@@ -120,23 +120,25 @@ let presenceRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let registryRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let flagsReloadClient: Client | null = null;
 
-/** Load tunables from core.runtime_flag. Throws (no silent defaults) if a row is missing. */
+/** Load tunables from core.runtime_flag. Throws (no silent defaults) if a row is missing.
+ *  Post-migration 174: column is now `flag_name` (was `name`); only global-scope rows applied here. */
 async function loadRuntimeFlags(): Promise<RuntimeFlags> {
-	const { rows } = await query<{ name: string; value_jsonb: unknown }>(
-		`SELECT name, value_jsonb FROM core.runtime_flag
-		 WHERE name IN (
+	const { rows } = await query<{ flag_name: string; value_jsonb: unknown }>(
+		`SELECT flag_name, value_jsonb FROM core.runtime_flag
+		 WHERE flag_name IN (
 		   'A2A_HOST_LISTEN_REFRESH_MS',
 		   'A2A_HOST_SHUTDOWN_TIMEOUT_MS',
 		   'A2A_HOST_PRESENCE_REFRESH_MS'
-		 )`,
+		 )
+		 AND scope = 'global' AND lifecycle_status = 'active'`,
 	);
-	const byName = new Map(rows.map((r) => [r.name, r.value_jsonb]));
+	const byName = new Map(rows.map((r) => [r.flag_name, r.value_jsonb]));
 	const need = (k: string): number => {
 		const v = byName.get(k);
 		if (v === undefined || v === null) {
 			throw new Error(
-				`[a2a-host] Required runtime flag '${k}' is missing from core.runtime_flag. ` +
-					`Apply migration 170-p1132-a2a-host-runtime-flags.sql.`,
+				`[a2a-host] Required runtime flag '${k}' is missing from core.runtime_flag (scope=global, active). ` +
+					`Apply migrations 170-p1132-a2a-host-runtime-flags.sql + 174-task40-runtime-flag-resolver-alignment.sql.`,
 			);
 		}
 		const n = typeof v === "number" ? v : Number(v);
@@ -437,14 +439,22 @@ async function main(): Promise<void> {
 	const agencies = await loadActiveAgencies();
 	if (agencies.length === 0) {
 		console.warn(`[a2a-host] no active agencies found for host=${host}; idling`);
-	} else {
-		console.log(
-			`[a2a-host] booting ${agencies.length} agencies: ${agencies.map((a) => a.agent_identity).join(", ")}`,
-		);
 	}
 
+	// Dedupe agencies by identity before booting to prevent race conditions
+	// and redundant listeners (Bug 9 fix).
+	const uniqueAgencies = Array.from(
+		new Map(agencies.map((a) => [a.agent_identity, a])).values(),
+	);
+
+	console.log(
+		`[a2a-host] booting ${uniqueAgencies.length} agencies: ${uniqueAgencies
+			.map((a) => a.agent_identity)
+			.join(", ")}`,
+	);
+
 	// Boot all agencies in parallel.
-	await Promise.allSettled(agencies.map((row) => attachListener(row)));
+	await Promise.allSettled(uniqueAgencies.map((row) => attachListener(row)));
 	console.log(`[a2a-host] boot complete — ${attached.size} of ${agencies.length} agencies online`);
 
 	startPresenceRefreshTimer();
