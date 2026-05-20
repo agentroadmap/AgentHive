@@ -32,7 +32,7 @@ import { sendMessage } from "../../infra/agency/liaison-message-service.ts";
 import type { OfferDispatchPayload } from "../../infra/agency/liaison-message-types.ts";
 import { ObservabilityWriter } from "../observability/observability-writer.ts";
 
-const obs = new ObservabilityWriter("offer-dispatch");
+const obs = new ObservabilityWriter("agency:offer-dispatch");
 
 const ORCHESTRATOR_HOST = process.env.AGENTHIVE_HOST ?? hostname();
 void ORCHESTRATOR_HOST; // reserved for future host-aware agency filtering

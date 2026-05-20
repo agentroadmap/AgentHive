@@ -18,7 +18,7 @@ import { query as _pgQuery } from "../../infra/postgres/pool.ts";
 import type { ClaimedOffer, OfferDispatcher } from "./offer-dispatch.ts";
 import { ObservabilityWriter } from "../observability/observability-writer.ts";
 
-const obs = new ObservabilityWriter("offer-claim-loop");
+const obs = new ObservabilityWriter("agency:offer-claim-loop");
 
 // Allows tests to inject a mock query function without module-level mocking.
 type QueryFn = typeof _pgQuery;

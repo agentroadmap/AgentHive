@@ -279,27 +279,30 @@ export class Orchestrator {
 			`[Orchestrator] LISTEN registered: ${GATE_READY_CHANNEL}, ${MATURITY_CHANGED_CHANNEL}`,
 		);
 
-		// Schedule the five legacy poll timers. Each is parity with the
-		// scripts/orchestrator.ts main() interval; toggles preserved.
+		// Schedule the maintenance and scan timers.
 		if (ENABLE_POLLING) {
 			this.pollTimers.set(
-				"state-change",
-				setInterval(() => this._statePollTick(), 2 * 60 * 1000),
+				"unified-scan",
+				setInterval(() => {
+					if (this.stopping) return;
+					void this.trackInFlight(this.scanQueues());
+				}, 60_000), // 1-minute unified scan
 			);
-			console.log("[Orchestrator] 2-min state-change polling enabled");
-		} else {
+
+			this.pollTimers.set(
+				"state-poll",
+				setInterval(() => {
+					if (this.stopping) return;
+					void this.trackInFlight(this._runLegacyStatePoll());
+				}, 2 * 60 * 1000), // 2-minute legacy state poll
+			);
+
 			console.log(
-				"[Orchestrator] state-change polling disabled (AGENTHIVE_ORCHESTRATOR_POLL!=1)",
+				"[Orchestrator] Polling enabled: unified-scan (1-min), state-poll (2-min)",
 			);
 		}
 
 		if (IMPLICIT_GATE_POLL_INTERVAL_MS > 0) {
-			// Initial drain at boot (matches legacy line 2604).
-			void this.trackInFlight(
-				drainImplicitGateReady("startup", 5).catch((err) =>
-					console.error("[Orchestrator] startup drain failed:", err),
-				),
-			);
 			this.pollTimers.set(
 				"implicit-gate",
 				setInterval(() => {
@@ -510,13 +513,10 @@ export class Orchestrator {
 	}
 
 	/**
-	 * 2-minute state-change poll fallback (enabled by AGENTHIVE_ORCHESTRATOR_POLL=1).
-	 *
-	 * Mirrors scripts/orchestrator.ts main() polling block: finds workflows that
-	 * need an agent, excluding proposals that already have running agent_runs or
+	 * Maintenance loop: checks for proposals that are ready to advance but have no
 	 * alive squad_dispatch. Calls handleStateChange for each.
 	 */
-	private async _statePollTick(): Promise<void> {
+	private async _runLegacyStatePoll(): Promise<void> {
 		if (this.stopping) return;
 		try {
 			const result = await query<{
@@ -556,13 +556,13 @@ export class Orchestrator {
 				);
 			}
 		} catch (err) {
-			console.error("[Orchestrator] state poll failed:", err);
+			console.error("[Orchestrator] legacy state poll failed:", err);
 		}
 	}
 
 	/**
 	 * Stop the orchestrator: flag stopping, clear timers, release LISTEN client,
-	 * drain in-flight dispatches up to {@link shutdownDrainMs}.
+	 * drain in-flight dispatches.
 	 *
 	 * Resolves once all in-flight promises settle or the drain timeout elapses.
 	 */
@@ -640,25 +640,22 @@ export class Orchestrator {
 		) {
 			return;
 		}
+
 		try {
+			if (channel === GATE_READY_CHANNEL) {
+				// Mature proposals ready for gating or preparation.
+				void this.trackInFlight(this.scanQueues());
+				return;
+			}
+
+			// proposal_maturity_changed: handle non-mature work dispatches.
 			const data = JSON.parse(payload) as {
 				proposal_id?: number | string;
 				id?: number | string;
 			};
-
-			if (channel === GATE_READY_CHANNEL) {
-				const pid = Number(data.proposal_id ?? data.id);
-				if (Number.isFinite(pid)) {
-					await this.trackInFlight(
-						dispatchImplicitGate(pid, "notify:proposal_gate_ready"),
-					);
-				}
-				return;
-			}
-
-			// proposal_maturity_changed: resolve current workflow stage.
 			const proposalId = data.proposal_id ?? data.id;
 			if (!proposalId) return;
+
 			const result = await query<{
 				id: number;
 				proposal_id: number;
@@ -669,7 +666,7 @@ export class Orchestrator {
 			);
 			if (result.rows.length > 0) {
 				const wf = result.rows[0];
-				await this.trackInFlight(
+				void this.trackInFlight(
 					handleStateChange(String(wf.proposal_id), wf.current_stage),
 				);
 			}

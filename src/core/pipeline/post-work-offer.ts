@@ -17,7 +17,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { query as defaultQuery } from "../../infra/postgres/pool.ts";
 import { ObservabilityWriter } from "../observability/observability-writer.ts";
 
-const obs = new ObservabilityWriter("offer-pipeline");
+const obs = new ObservabilityWriter("agency:offer-pipeline");
 
 export type QueryFn = typeof defaultQuery;
 
