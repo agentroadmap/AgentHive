@@ -36,7 +36,7 @@ import {
 } from "../../core/orchestration/provider-cooldown.ts";
 import { ObservabilityWriter } from "../../core/observability/observability-writer.ts";
 
-const obs = new ObservabilityWriter("offer-dispatch-handler");
+const obs = new ObservabilityWriter("agency:offer-dispatch-handler");
 
 export type SqlExec = (sql: string, params?: unknown[]) => Promise<unknown>;
 
@@ -356,15 +356,46 @@ async function runSpawn(args: {
 	let spawnError: Error | null = null;
 
 	try {
-		// Prefer the agency's own AGENTHIVE_AGENT_PROVIDER / AGENCY_PROVIDER env
-		// over the orchestrator-sent route_hint. The orchestrator defaults the hint
-		// to "claude" when the offer carries no provider preference, which would
-		// cause codex/gemini/copilot agencies to spawn claude processes instead of
-		// their own configured provider.
-		const agencyProvider =
-			(process.env.AGENTHIVE_AGENT_PROVIDER?.trim() ||
-				process.env.AGENCY_PROVIDER?.trim() ||
-				payload.route_hint) as never;
+		// Bug 8 fix (P1140-sib, 2026-05-19): per-agency provider selection.
+		// Pre-P1132 each agency had its own systemd unit with
+		// Environment=AGENTHIVE_AGENT_PROVIDER=<provider> in the unit file;
+		// process.env worked per-agency. Post-P1132 all agencies share one
+		// A2A host process — process.env is shared, so the env-var fallback
+		// resolved to the same value for every agency (or unset, falling
+		// through to route_hint='claude'). Result: codex/gemini/copilot
+		// agencies all spawned claude binaries.
+		//
+		// Fix: read preferred_provider from agent_registry by agencyId at
+		// spawn time. Per-process env vars still win as an operator override.
+		let agencyProvider: string | null =
+			process.env.AGENTHIVE_AGENT_PROVIDER?.trim() ||
+			process.env.AGENCY_PROVIDER?.trim() ||
+			null;
+		if (!agencyProvider) {
+			try {
+				const { rows } = await query<{ preferred_provider: string | null }>(
+					`SELECT preferred_provider FROM roadmap_workforce.agent_registry
+					 WHERE agent_identity = $1 LIMIT 1`,
+					[agencyId],
+				);
+				agencyProvider = rows[0]?.preferred_provider ?? null;
+			} catch (err) {
+				logger.warn(
+					`[OfferDispatchHandler] ${agencyId}: preferred_provider lookup failed:`,
+					err instanceof Error ? err.message : err,
+				);
+			}
+		}
+		// Last-resort: orchestrator-sent route hint. Logged loudly because
+		// arriving here means the agency lacks a preferred_provider AND no
+		// process-wide override is set — the offer is at risk of running on
+		// the wrong CLI (claude default).
+		if (!agencyProvider) {
+			agencyProvider = payload.route_hint;
+			logger.warn(
+				`[OfferDispatchHandler] ${agencyId}: no preferred_provider in agent_registry; falling back to route_hint='${payload.route_hint}'`,
+			);
+		}
 
 		result = await spawn({
 			worktree,
@@ -372,7 +403,7 @@ async function runSpawn(args: {
 			proposalId,
 			stage: payload.role,
 			capabilities,
-			provider: agencyProvider,
+			provider: agencyProvider as never,
 			briefingId: payload.briefing_id,
 			roleProfileId: payload.role_profile_id ?? null,
 			timeoutMs: spawnTimeoutMs,
@@ -508,16 +539,16 @@ interface AgencyMetadataRow {
 
 /**
  * Look up roadmap_workforce.provider_registry.max_in_flight for the agency.
- * Cached briefly per process to avoid hammering the DB on every dispatch.
+ * Cached briefly per agency to avoid hammering the DB on every dispatch.
  * On any error (missing row, transient DB issue), defaults to 1 — strictest
  * gate, fail-safe.
  */
 const MAX_IN_FLIGHT_CACHE_MS = 30_000;
-let maxInFlightCache: { value: number; expiresAt: number } | null = null;
+const maxInFlightCache = new Map<string, { value: number; expiresAt: number }>();
 
 /** @internal — reset for tests. */
 export function _resetMaxInFlightCacheForTest(): void {
-	maxInFlightCache = null;
+	maxInFlightCache.clear();
 }
 
 async function readAgencyMaxInFlight(
@@ -526,8 +557,9 @@ async function readAgencyMaxInFlight(
 	logger: Pick<Console, "log" | "warn" | "error">,
 ): Promise<number> {
 	const now = Date.now();
-	if (maxInFlightCache && maxInFlightCache.expiresAt > now) {
-		return maxInFlightCache.value;
+	const cached = maxInFlightCache.get(agencyId);
+	if (cached && cached.expiresAt > now) {
+		return cached.value;
 	}
 	try {
 		const result = (await exec(
@@ -540,7 +572,7 @@ async function readAgencyMaxInFlight(
 			[agencyId],
 		)) as { rows: Array<{ max_in_flight: number }> } | undefined;
 		const value = result?.rows?.[0]?.max_in_flight ?? 1;
-		maxInFlightCache = { value, expiresAt: now + MAX_IN_FLIGHT_CACHE_MS };
+		maxInFlightCache.set(agencyId, { value, expiresAt: now + MAX_IN_FLIGHT_CACHE_MS });
 		return value;
 	} catch (err) {
 		logger.warn(
