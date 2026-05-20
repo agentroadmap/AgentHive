@@ -1931,6 +1931,19 @@ export async function dispatchImplicitGate(
 	let result: Awaited<ReturnType<typeof spawnAgent>>;
 	// P405: resolve provider from model_routes, not worktree metadata
 	const activeProvider = await resolveActiveRouteProvider();
+	// Step 1 unblock (2026-05-19): the legacy implicit-gate dispatcher
+	// direct-spawns from the orchestrator process (running as gary). When
+	// the active route resolves to codex, the spawn fails because codex
+	// auth lives under andy, not gary. Until the marketplace-migration of
+	// gate dispatch (the proper fix), and until the andy-owned codex liaison
+	// (Step 2) is live, force gate spawns through a route the orchestrator
+	// process can actually authenticate: claude (gary has ~/.claude.json).
+	// Operators can re-enable codex by setting AGENTHIVE_GATE_PROVIDER=codex
+	// once Step 2 lands and codex-auth-as-andy is reachable from this process.
+	const gateProvider = process.env.AGENTHIVE_GATE_PROVIDER
+		?? (activeProvider === "codex" || activeProvider?.startsWith("codex/")
+			? "claude"
+			: activeProvider ?? "claude");
 	try {
 		result = await spawnAgent({
 			worktree,
@@ -1938,7 +1951,7 @@ export async function dispatchImplicitGate(
 			proposalId: proposal.id,
 			stage: `gate:${gate.toStage.toUpperCase()}`,
 			timeoutMs: 600_000,
-			provider: activeProvider ?? undefined,
+			provider: gateProvider,
 			traceId: gateTraceId,
 			parentSpanId: gateSpanId,
 		});
