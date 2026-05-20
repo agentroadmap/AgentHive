@@ -104,10 +104,6 @@ registerCubic(program);
 // ── Meta / discovery ─────────────────────────────────────────────────────────
 registerMeta(program);
 
-// ── Doctor + context (from commands/ — kept for backward compat) ──────────────
-registerDoctor(program, getContext);
-registerContext(program, getContext);
-
 // Parse args early to detect --schema / --recipes before Commander tries to route.
 const rawArgs = process.argv.slice(2);
 

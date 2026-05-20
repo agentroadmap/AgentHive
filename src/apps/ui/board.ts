@@ -1611,7 +1611,7 @@ export async function renderBoardTui(
 		});
 
 
-		screen.key(["f", "F"], () => {
+		screen.key(["s", "S"], () => {
 			if (popupOpen || filterPopupOpen || moveOp || currentFocus === "filters")
 				return;
 			feedOnlyMode = !feedOnlyMode;
@@ -1656,14 +1656,9 @@ export async function renderBoardTui(
 			void openFilterPicker("priority");
 		});
 
-		screen.key(["l", "L"], () => {
+		screen.key(["f", "F", "l", "L"], () => {
 			if (popupOpen || filterPopupOpen || moveOp) return;
 			void openFilterPicker("labels");
-		});
-
-		screen.key(["s", "S"], () => {
-			if (popupOpen || filterPopupOpen || moveOp) return;
-			void openFilterPicker("status");
 		});
 
 		screen.key(["t", "T"], () => {
