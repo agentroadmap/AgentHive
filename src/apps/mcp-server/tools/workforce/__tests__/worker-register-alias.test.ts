@@ -2,20 +2,20 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { workerRegisterHandler, agencyRegisterHandler } from "../handlers";
 
 // Mock the imported modules
-vi.mock("../../../../infra/postgres/pool.ts", () => ({
+vi.mock("../../../../../infra/postgres/pool.ts", () => ({
 	query: vi.fn(),
 }));
 
-vi.mock("../../../../core/identity/agent-registry/permanent-agent-map.ts", () => ({
+vi.mock("../../../../../core/identity/agent-registry/permanent-agent-map.ts", () => ({
 	resolvePermanentAgentMapping: vi.fn(),
 }));
 
-vi.mock("../../../../core/identity/agent-registry/agent-name.ts", () => ({
+vi.mock("../../../../../core/identity/agent-registry/agent-name.ts", () => ({
 	assignDisplayAlias: vi.fn(),
 	pascalCaseHost: vi.fn((host: string) => host.charAt(0).toUpperCase() + host.slice(1).toLowerCase()),
 }));
 
-vi.mock("../../../../core/identity/agent-registry/alias-manager.ts", () => ({
+vi.mock("../../../../../core/identity/agent-registry/alias-manager.ts", () => ({
 	claimDisplayAlias: vi.fn(),
 }));
 
@@ -23,14 +23,14 @@ vi.mock("node:os", () => ({
 	hostname: vi.fn(() => "testhost"),
 }));
 
-import { query } from "../../../../infra/postgres/pool.ts";
-import { assignDisplayAlias, pascalCaseHost } from "../../../../core/identity/agent-registry/agent-name.ts";
-import { claimDisplayAlias } from "../../../../core/identity/agent-registry/alias-manager.ts";
+import { query } from "../../../../../infra/postgres/pool.ts";
+import { assignDisplayAlias, pascalCaseHost } from "../../../../../core/identity/agent-registry/agent-name.ts";
+import { claimDisplayAlias } from "../../../../../core/identity/agent-registry/alias-manager.ts";
 
 describe("workerRegisterHandler - Alias Wiring", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		process.env.AGENTHIVE_HOST = undefined;
+		delete process.env.AGENTHIVE_HOST;
 	});
 
 	it("AC-9: should call claimDisplayAlias for slot-'a' worker with skills", async () => {
@@ -57,7 +57,7 @@ describe("workerRegisterHandler - Alias Wiring", () => {
 			expect.arrayContaining(["ccs45ant-bot-arch-a", "claude/main"]),
 		);
 
-		expect(assignDisplayAlias).toHaveBeenCalledWith("claude", "Bot", "architecture", "a");
+		expect(assignDisplayAlias).toHaveBeenCalledWith("claude", "Testhost", "architecture", "a");
 
 		expect(claimDisplayAlias).toHaveBeenCalledWith(mockWorkerId, "Claude-Testhost-Architecture", {
 			tier: 2,
@@ -119,7 +119,7 @@ describe("workerRegisterHandler - Alias Wiring", () => {
 describe("agencyRegisterHandler - Alias Wiring", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		process.env.AGENTHIVE_HOST = undefined;
+		delete process.env.AGENTHIVE_HOST;
 	});
 
 	it("should call claimDisplayAlias for slot-'a' agency with skills", async () => {

@@ -176,7 +176,7 @@ describe("assignDisplayAlias — P919 Tiered Naming", () => {
 		it("AC-6: provider-derivation regression — dense abbr 'ccs46ant' throws instead of producing 'Ccs46ant-Bot-Documenter'", () => {
 			expect(() =>
 				assignDisplayAlias("ccs46ant", "Bot", "documenter", "a"),
-			).toThrow(/dense routeAbbr/);
+			).toThrow(/route abbreviation/);
 		});
 
 		it("AC-7: Tier 1 unaffected — liaison slot still returns '{Provider}-{Host}'", () => {

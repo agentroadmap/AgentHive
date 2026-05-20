@@ -214,20 +214,6 @@ export function pascalCaseHost(host: string): string {
 	return host.charAt(0).toUpperCase() + host.slice(1).toLowerCase();
 }
 
-export const ALL_CAPS_TOKENS = new Set(["qa", "ai", "ml", "sre", "ux", "ui", "api"]);
-
-/** Dense routeAbbr shape: 2-3 lowercase letters + digits + 2-4 lowercase letters (e.g. "ccs46ant"). */
-const ABBR_SHAPE = /^[a-z]{2,3}\d+[a-z]{2,4}$/;
-
-
-/**
- * P932: Normalize host string to Title-Case.
- * "bot" → "Bot", "hermes" → "Hermes", "mac" → "Mac"
- */
-export function pascalCaseHost(host: string): string {
-	return host.charAt(0).toUpperCase() + host.slice(1).toLowerCase();
-}
-
 /**
  * P919: Assign a human-readable display alias for an agent.
  *
