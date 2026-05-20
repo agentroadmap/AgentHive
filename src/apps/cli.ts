@@ -114,7 +114,10 @@ import {
 	isGitRepository,
 	updateReadmeWithBoard,
 } from "./index.ts";
-import { initPoolFromConfig as initPgPoolFromConfig } from "../infra/postgres/pool.ts";
+import {
+	initPoolFromConfig as initPgPoolFromConfig,
+	query as pgQuery,
+} from "../infra/postgres/pool.ts";
 
 type IntegrationMode = "mcp" | "cli" | "none";
 
