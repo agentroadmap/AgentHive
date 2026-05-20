@@ -1,12 +1,13 @@
 /**
- * P919: Agent Name Display Alias Tests
+ * P919 / P931: Agent Name Display Alias Tests
  *
  * AC-8: Identity immutability — P852 identity never overwritten
- * Tests for assignDisplayAlias() Tier 1 & Tier 2 alias assignment
+ * Tests for assignDisplayAlias() Tier 1 & Tier 2 alias assignment.
+ * P931 adds regression coverage for algorithmic Title-Case + provider guard.
  */
 
 import { describe, it, expect } from "vitest";
-import { assignDisplayAlias } from "../agent-name";
+import { assignDisplayAlias, pascalCaseHost } from "../agent-name";
 
 describe("assignDisplayAlias — P919 Tiered Naming", () => {
 	describe("Tier 1: Liaison (0..9, no expertise)", () => {
@@ -102,5 +103,100 @@ describe("assignDisplayAlias — P919 Tiered Naming", () => {
 			const aliasAt = assignDisplayAlias("Claude", "bot", "typescript", "@");
 			expect(aliasAt).toBeNull();
 		});
+	});
+
+	describe("P931: algorithmic Title-Case + provider boundary enforcement", () => {
+		it("unmapped expertise 'documenter' → 'Claude-bot-Documenter' (not undefineddocum)", () => {
+			expect(assignDisplayAlias("Claude", "bot", "documenter", "a")).toBe(
+				"Claude-bot-Documenter",
+			);
+		});
+
+		it("unmapped expertise 'architect' → 'Claude-bot-Architect'", () => {
+			expect(assignDisplayAlias("Claude", "bot", "architect", "a")).toBe(
+				"Claude-bot-Architect",
+			);
+		});
+
+		it("hyphenated expertise 'gate-review' → 'Claude-bot-GateReview'", () => {
+			expect(assignDisplayAlias("Claude", "bot", "gate-review", "a")).toBe(
+				"Claude-bot-GateReview",
+			);
+		});
+
+		it("all-caps token 'qa' → 'Claude-bot-QA'", () => {
+			expect(assignDisplayAlias("Claude", "bot", "qa", "a")).toBe(
+				"Claude-bot-QA",
+			);
+		});
+
+		it("multi-token + all-caps 'ai-architect' → 'Claude-bot-AIArchitect'", () => {
+			expect(assignDisplayAlias("Claude", "bot", "ai-architect", "a")).toBe(
+				"Claude-bot-AIArchitect",
+			);
+		});
+
+		it("dense abbr 'ccs46ant' throws instead of producing 'Ccs46ant-bot-Documenter'", () => {
+			expect(() =>
+				assignDisplayAlias("ccs46ant", "bot", "documenter", "a"),
+			).toThrow(/route abbreviation/);
+		});
+
+		it("Tier 1 liaison slot unaffected — still returns 'Claude-bot'", () => {
+			expect(assignDisplayAlias("Claude", "bot", undefined, "0")).toBe(
+				"Claude-bot",
+			);
+		});
+
+		it("Tier 3+ rotated slots (b, c) unaffected — still return null", () => {
+			expect(assignDisplayAlias("Claude", "bot", "typescript", "b")).toBeNull();
+			expect(assignDisplayAlias("Claude", "bot", "typescript", "c")).toBeNull();
+		});
+	});
+});
+
+describe("pascalCaseHost — P932 host normalisation", () => {
+	it("bare lowercase → capitalised", () => {
+		expect(pascalCaseHost("bot")).toBe("Bot");
+		expect(pascalCaseHost("hermes")).toBe("Hermes");
+		expect(pascalCaseHost("mac")).toBe("Mac");
+	});
+
+	it("hyphenated host → joined PascalCase", () => {
+		expect(pascalCaseHost("hermes-srv")).toBe("HermesSrv");
+		expect(pascalCaseHost("agency-bot")).toBe("AgencyBot");
+	});
+
+	it("underscore-delimited host → joined PascalCase", () => {
+		expect(pascalCaseHost("my_host")).toBe("MyHost");
+	});
+
+	it("already-PascalCase input is idempotent (lower-then-cap)", () => {
+		// Idempotent on single-segment hosts
+		expect(pascalCaseHost("Bot")).toBe("Bot");
+	});
+
+	it("all-uppercase input → lowercased then capitalized", () => {
+		expect(pascalCaseHost("BOT")).toBe("Bot");
+	});
+
+	it("combined with assignDisplayAlias to form Tier 2 alias", () => {
+		const alias = assignDisplayAlias(
+			"Claude",
+			pascalCaseHost("bot"),
+			"documenter",
+			"a",
+		);
+		expect(alias).toBe("Claude-Bot-Documenter");
+	});
+
+	it("multi-segment combined with assignDisplayAlias", () => {
+		const alias = assignDisplayAlias(
+			"Codex",
+			pascalCaseHost("hermes-srv"),
+			"architecture",
+			"a",
+		);
+		expect(alias).toBe("Codex-HermesSrv-Architecture");
 	});
 });
