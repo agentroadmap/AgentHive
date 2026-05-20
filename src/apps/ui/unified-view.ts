@@ -461,22 +461,14 @@ export async function runUnifiedView(
 				boardUpdater = null;
 				resolve(result);
 			});
-
-			// Auto-refresh: reload proposals from DB every 5s and push to board
-			const refreshTimer = setInterval(() => {
-				void (async () => {
-					await loadProposalsForUnifiedView(options.core, {});
-					emitBoardUpdate();
-				})();
-			}, 5000);
-
-			// Clean up timer when board exits
-			const origResolve = resolve;
-			resolve = ((value: ViewResult) => {
-				clearInterval(refreshTimer);
-				origResolve(value);
-			}) as typeof resolve;
 			});
+			// Note: previously had a unified-view-level setInterval here that
+			// called loadProposalsForUnifiedView() every 5s. That broke the board
+			// because loadProposalsForUnifiedView creates a fresh blessed loading
+			// screen (line 184) which paints over the live board on every tick,
+			// AND its return value was discarded so closure state stayed stale.
+			// board.ts has its own silent refresh via core.queryProposals (board.ts:2599)
+			// which is the correct mechanism. Removed 2026-05-19.
 		};
 
 		// Function to show cockpit (formerly cubic dashboard)
