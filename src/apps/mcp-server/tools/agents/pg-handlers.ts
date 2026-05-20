@@ -6,20 +6,20 @@
  * P462: Added agent identity sanitization to prevent collisions and path traversal.
  */
 
-import { query } from "../../../../postgres/pool.ts";
 import {
-	normalizeAgentId,
-	detectCollision,
-	AgentIdInvalidError,
-} from "../../../../shared/identity/sanitize-agent-id.ts";
-import { liaisonResume } from "../../../../infra/agency/liaison-service.ts";
-import { resumeAgency } from "../../../../core/orchestration/resolvers/agency-resolver.ts";
-import {
-	forceReleaseAlias,
-	type AliasReclaimResult,
 	type AliasReclaimError,
+	type AliasReclaimResult,
+	forceReleaseAlias,
 } from "../../../../core/identity/agent-registry/alias-manager.ts";
 import { resolveAgentByIdentityOrAlias } from "../../../../core/identity/agent-registry/registry.ts";
+import { resumeAgency } from "../../../../core/orchestration/resolvers/agency-resolver.ts";
+import { liaisonResume } from "../../../../infra/agency/liaison-service.ts";
+import { query } from "../../../../postgres/pool.ts";
+import {
+	AgentIdInvalidError,
+	detectCollision,
+	normalizeAgentId,
+} from "../../../../shared/identity/sanitize-agent-id.ts";
 import type { CallToolResult } from "../../types.ts";
 
 const ALIAS_FORMAT = /^[A-Z][A-Za-z0-9-]{2,63}$/;
@@ -189,9 +189,15 @@ export class PgAgentHandlers {
 					args.role || null,
 					args.skills
 						? typeof args.skills === "string"
-							? args.skills.trim().startsWith("[") || args.skills.trim().startsWith("{")
+							? args.skills.trim().startsWith("[") ||
+								args.skills.trim().startsWith("{")
 								? args.skills
-								: JSON.stringify(args.skills.split(",").map((s) => s.trim()).filter(Boolean))
+								: JSON.stringify(
+										args.skills
+											.split(",")
+											.map((s) => s.trim())
+											.filter(Boolean),
+									)
 							: JSON.stringify(args.skills)
 						: null,
 				],
@@ -301,11 +307,20 @@ export class PgAgentHandlers {
 		identity: string;
 		alias: string;
 		force?: boolean;
+		operator?: string;
 	}): Promise<CallToolResult> {
 		try {
 			if (!ALIAS_FORMAT.test(args.alias)) {
 				return {
-					content: [{ type: "text", text: JSON.stringify({ error: "invalid_alias_format", message: `Alias "${args.alias}" must match ^[A-Z][A-Za-z0-9-]{2,63}$` }) }],
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								error: "invalid_alias_format",
+								message: `Alias "${args.alias}" must match ^[A-Z][A-Za-z0-9-]{2,63}$`,
+							}),
+						},
+					],
 					isError: true,
 				};
 			}
@@ -313,7 +328,15 @@ export class PgAgentHandlers {
 			const target = await resolveAgentByIdentityOrAlias(args.identity);
 			if (!target) {
 				return {
-					content: [{ type: "text", text: JSON.stringify({ error: "agent_not_found", message: `No agent found for identity or alias "${args.identity}"` }) }],
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								error: "agent_not_found",
+								message: `No agent found for identity or alias "${args.identity}"`,
+							}),
+						},
+					],
 					isError: true,
 				};
 			}
@@ -323,7 +346,17 @@ export class PgAgentHandlers {
 			// No-op if alias is unchanged
 			if (prior_alias === args.alias) {
 				return {
-					content: [{ type: "text", text: JSON.stringify({ identity: target.agent_identity, prior_alias, new_alias: args.alias, note: "no-op: alias unchanged" }) }],
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								identity: target.agent_identity,
+								prior_alias,
+								new_alias: args.alias,
+								note: "no-op: alias unchanged",
+							}),
+						},
+					],
 				};
 			}
 
@@ -337,7 +370,7 @@ export class PgAgentHandlers {
 				        (SELECT last_heartbeat_at FROM roadmap.agency WHERE agency_id = ar.id) AS last_heartbeat_at
 				   FROM roadmap_workforce.agent_registry ar
 				  WHERE ar.display_alias = $1
-				    AND ar.status = 'active'
+				    AND ar.status NOT IN ('inactive', 'retired')
 				    AND ar.id != $2
 				  LIMIT 1`,
 				[args.alias, target.id],
@@ -347,23 +380,52 @@ export class PgAgentHandlers {
 				const collider = colliders[0]!;
 				if (!args.force) {
 					return {
-						content: [{ type: "text", text: JSON.stringify({ error: "alias_in_use", message: `Alias "${args.alias}" is held by active agent "${collider.agent_identity}". Use force=true to override if stale.` }) }],
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify({
+									error: "alias_in_use",
+									message: `Alias "${args.alias}" is held by active agent "${collider.agent_identity}". Use force=true to override if stale.`,
+								}),
+							},
+						],
 						isError: true,
 					};
 				}
 				// force=true: gate on heartbeat freshness
-				const hbAt = collider.last_heartbeat_at ? new Date(collider.last_heartbeat_at) : null;
+				const hbAt = collider.last_heartbeat_at
+					? new Date(collider.last_heartbeat_at)
+					: null;
 				const isStuck = !hbAt || Date.now() - hbAt.getTime() > 90_000;
 				if (!isStuck) {
 					return {
-						content: [{ type: "text", text: JSON.stringify({ error: "alias_in_use", message: `Agent "${collider.agent_identity}" has a fresh heartbeat; cannot force-override.` }) }],
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify({
+									error: "alias_in_use",
+									message: `Agent "${collider.agent_identity}" has a fresh heartbeat; cannot force-override.`,
+								}),
+							},
+						],
 						isError: true,
 					};
 				}
-				const releaseResult = await forceReleaseAlias({ identity: collider.agent_identity, force: true });
+				const releaseResult = await forceReleaseAlias({
+					identity: collider.agent_identity,
+					force: true,
+				});
 				if ("code" in releaseResult) {
 					return {
-						content: [{ type: "text", text: JSON.stringify({ error: releaseResult.code, message: `Failed to release prior alias: ${releaseResult.message}` }) }],
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify({
+									error: releaseResult.code,
+									message: `Failed to release prior alias: ${releaseResult.message}`,
+								}),
+							},
+						],
 						isError: true,
 					};
 				}
@@ -371,7 +433,15 @@ export class PgAgentHandlers {
 
 			// Write new alias — catch unique constraint race
 			const now = new Date().toISOString();
-			const auditEntry = JSON.stringify([{ action: "renamed", prior_alias, new_alias: args.alias, at: now }]);
+			const auditEntry = JSON.stringify([
+				{
+					action: "renamed",
+					from: prior_alias,
+					to: args.alias,
+					by: args.operator ?? "operator",
+					at: now,
+				},
+			]);
 			try {
 				const { rows: updated } = await query<{ id: number }>(
 					`UPDATE roadmap_workforce.agent_registry
@@ -385,13 +455,31 @@ export class PgAgentHandlers {
 					return errorResult("Rename failed", "UPDATE returned no rows");
 				}
 				return {
-					content: [{ type: "text", text: JSON.stringify({ identity: target.agent_identity, prior_alias, new_alias: args.alias, audit_id: String(updated[0]!.id) }) }],
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								identity: target.agent_identity,
+								prior_alias,
+								new_alias: args.alias,
+								audit_id: String(updated[0]!.id),
+							}),
+						},
+					],
 				};
 			} catch (err) {
 				const pgErr = err as { code?: string };
 				if (pgErr.code === "23505") {
 					return {
-						content: [{ type: "text", text: JSON.stringify({ error: "alias_in_use", message: `Alias "${args.alias}" was claimed by another agent concurrently.` }) }],
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify({
+									error: "alias_in_use",
+									message: `Alias "${args.alias}" was claimed by another agent concurrently.`,
+								}),
+							},
+						],
 						isError: true,
 					};
 				}

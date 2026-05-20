@@ -44,7 +44,8 @@ export const agentRegisterSchema: JsonSchema = {
 		},
 		provider: {
 			type: "string",
-			description: "AI model provider (must match a route_provider in model_routes)",
+			description:
+				"AI model provider (must match a route_provider in model_routes)",
 		},
 		identity: {
 			type: "string",
@@ -143,8 +144,7 @@ export const agentListSchema: JsonSchema = {
 		},
 		limit: {
 			type: "number",
-			description:
-				"Maximum results to return (default 50, max 500)",
+			description: "Maximum results to return (default 50, max 500)",
 		},
 		include_terminal: {
 			type: "boolean",
@@ -153,8 +153,7 @@ export const agentListSchema: JsonSchema = {
 		},
 		include_metadata: {
 			type: "boolean",
-			description:
-				"Include metadata fields (skills, metadata). Default false.",
+			description: "Include metadata fields (skills, metadata). Default false.",
 		},
 	},
 	additionalProperties: false,
@@ -244,7 +243,8 @@ export const agentSpawnSchema: JsonSchema = {
 		},
 		provider: {
 			type: "string",
-			description: "AI model route provider (route_provider from model_routes). Used to resolve default model and worktree if model is omitted.",
+			description:
+				"AI model route provider (route_provider from model_routes). Used to resolve default model and worktree if model is omitted.",
 		},
 		capabilities: {
 			type: "array",
@@ -261,7 +261,8 @@ export const agentSpawnSchema: JsonSchema = {
 		},
 		worktree: {
 			type: "string",
-			description: "Optional: target worktree directory name. If omitted, auto-selected from model_routes agent_provider.",
+			description:
+				"Optional: target worktree directory name. If omitted, auto-selected from model_routes agent_provider.",
 		},
 		timeoutMs: {
 			type: "integer",
@@ -300,16 +301,24 @@ export const agentRenameSchema: JsonSchema = {
 	properties: {
 		identity: {
 			type: "string",
-			description: "Target agent_identity OR existing display_alias (resolver matches either)",
+			description:
+				"Target agent_identity OR existing display_alias (resolver matches either)",
 		},
 		alias: {
 			type: "string",
-			description: "New display_alias — must match ^[A-Z][A-Za-z0-9-]{2,63}$ (PascalCase start, 3-64 chars)",
+			description:
+				"New display_alias — must match ^[A-Z][A-Za-z0-9-]{2,63}$ (PascalCase start, 3-64 chars)",
 		},
 		force: {
 			type: "boolean",
 			default: false,
-			description: "When true, bypass alias-collision check by releasing it from an inactive/stale-heartbeat prior owner",
+			description:
+				"When true, bypass alias-collision check by releasing it from an inactive/stale-heartbeat prior owner",
+		},
+		operator: {
+			type: "string",
+			description:
+				"Identity of the operator performing the rename; recorded in the audit trail as the 'by' field",
 		},
 	},
 	required: ["identity", "alias"],
@@ -323,7 +332,8 @@ export const agencyResumeSchema: JsonSchema = {
 			type: "string",
 			minLength: 1,
 			maxLength: 200,
-			description: "Agency identity string (roadmap.agency.agency_id) to resume",
+			description:
+				"Agency identity string (roadmap.agency.agency_id) to resume",
 		},
 	},
 	required: ["agency_id"],
@@ -335,12 +345,14 @@ export const agentForceReleaseAliasSchema: JsonSchema = {
 	properties: {
 		identity: {
 			type: "string",
-			description: "Agent identity (agent_identity from agent_registry) to release alias from",
+			description:
+				"Agent identity (agent_identity from agent_registry) to release alias from",
 		},
 		force: {
 			type: "boolean",
 			default: false,
-			description: "If true, allows forcing release from active agents with stale heartbeat (>90s)",
+			description:
+				"If true, allows forcing release from active agents with stale heartbeat (>90s)",
 		},
 	},
 	required: ["identity"],
