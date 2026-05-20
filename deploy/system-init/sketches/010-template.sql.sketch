@@ -1,0 +1,140 @@
+-- ============================================================
+-- P901 sketch 010 (v2) — Template schema additions for hiveCentral
+-- ============================================================
+-- Target DB:  hiveCentral
+-- Depends on: 007-template.sql (template.workflow_template BIGINT PK `id`)
+-- Scope:
+--   1. template.workflow_template_alias — stable name → versioned template mapping
+--   2. workflow_active schema + workflow_template_copy — per-project snapshot storage
+--   3. Seed: default/lightweight alias rows
+-- ============================================================
+-- DDL CONFLICT RESOLUTION (Finding 1 / AC-11):
+--   004-template.sql (TEXT PK `template_id`, JSONB states/gates) is the canonical
+--   schema for the v1 agenthive DB, applied via migration 070. It is NOT the
+--   target of P901.
+--   007-template.sql (BIGINT PK `id`, slug+version UNIQUE, normalised child tables)
+--   is the canonical hiveCentral schema. This sketch targets the 007-approach
+--   with BIGINT FK references.
+-- ============================================================
+-- workflow_active note (AC-11):
+--   workflow_active schema is ABSENT from hiveCentral and from all hiveCentral DDL
+--   files. It must be created here as part of the P901 Phase 1 migration.
+--   (The workflow_active.workflow_template_copy in migration 070 uses a TEXT FK
+--   referencing the v1 schema; the hiveCentral version below uses a BIGINT FK.)
+-- ============================================================
+
+BEGIN;
+
+-- ── 1. template.workflow_template_alias ───────────────────────────────────────
+-- Stable name → versioned template mapping.
+-- Allows orchestrator bootstrap to pin by name ('default') instead of
+-- versioned slug ('agenthive@v1' / slug='agenthive', version=1).
+-- Finding 10: this table is absent from 007-template.sql and was never DDL-
+-- materialised; referenced by src/core/workflow/template-catalog.ts but
+-- that reference is forward-only and will error until this migration runs.
+-- Finding 17: resolveTemplateAlias(aliasName) must be added to template-catalog.ts
+-- alongside this migration so callers have a library function to use.
+
+CREATE TABLE IF NOT EXISTS template.workflow_template_alias (
+  id           BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  alias_name   TEXT         NOT NULL UNIQUE,
+  template_id  BIGINT       NOT NULL
+                            REFERENCES template.workflow_template(id) ON DELETE RESTRICT,
+  description  TEXT,
+  created_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS workflow_template_alias_template_id
+  ON template.workflow_template_alias (template_id);
+
+CREATE OR REPLACE TRIGGER set_updated_at_workflow_template_alias
+  BEFORE UPDATE ON template.workflow_template_alias
+  FOR EACH ROW EXECUTE FUNCTION template.set_updated_at();
+
+COMMENT ON TABLE template.workflow_template_alias IS
+  'Stable name → versioned template mapping. Orchestrators pin by alias (e.g. ''default'') '
+  'instead of a specific slug+version. When a new default is published the alias is updated; '
+  'existing per-project workflow_active snapshots remain pinned to their prior template_id.';
+
+COMMENT ON COLUMN template.workflow_template_alias.alias_name IS
+  'Short stable name, e.g. ''default'', ''lightweight'', ''hotfix''.';
+
+COMMENT ON COLUMN template.workflow_template_alias.template_id IS
+  'Points to the current canonical template row for this alias. ON DELETE RESTRICT '
+  'prevents deletion of a template that is still the target of an alias.';
+
+-- ── 2. workflow_active schema ─────────────────────────────────────────────────
+-- Per-project snapshot storage. Stores the full template at pin time
+-- so orchestrators can run without live cross-schema joins.
+
+CREATE SCHEMA IF NOT EXISTS workflow_active;
+
+COMMENT ON SCHEMA workflow_active IS
+  'Per-project template snapshot storage. Stores the full template payload at pin time '
+  'so orchestrators can run without live cross-schema joins to template.workflow_template.';
+
+CREATE TABLE IF NOT EXISTS workflow_active.workflow_template_copy (
+  project_id      BIGINT      NOT NULL,
+  template_id     BIGINT      NOT NULL
+                              REFERENCES template.workflow_template(id)
+                              ON UPDATE RESTRICT ON DELETE RESTRICT,
+  slug            TEXT        NOT NULL,
+  version         INT         NOT NULL,
+  name            TEXT        NOT NULL,
+  pinned_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  pinned_by_did   TEXT        NOT NULL DEFAULT 'system:orchestrator',
+  PRIMARY KEY (project_id, template_id)
+);
+
+COMMENT ON TABLE workflow_active.workflow_template_copy IS
+  'Tenant snapshot of the template at pin time. project_id references the '
+  'tenant project numeric ID. ON DELETE RESTRICT on template_id prevents '
+  'template deletion while any project has it pinned.';
+
+CREATE INDEX IF NOT EXISTS idx_wact_copy_project_id
+  ON workflow_active.workflow_template_copy (project_id);
+
+CREATE INDEX IF NOT EXISTS idx_wact_copy_template_id
+  ON workflow_active.workflow_template_copy (template_id);
+
+-- ── 3. Seed: alias rows ───────────────────────────────────────────────────────
+-- Insert only if the target template exists.
+-- Run after 007-template.sql seed block has seeded the AgentHive Standard Workflow.
+
+INSERT INTO template.workflow_template_alias (alias_name, template_id, description)
+SELECT
+  'default',
+  wt.id,
+  'Points to the current default AgentHive workflow (5-stage RFC)'
+FROM template.workflow_template wt
+WHERE wt.slug = 'agenthive' AND wt.is_current = true
+ON CONFLICT (alias_name) DO NOTHING;
+
+-- ── 4. Grants ─────────────────────────────────────────────────────────────────
+-- NOTE (Finding 15): search_path at getControlPool() EXCLUDES template and
+-- workflow_active schemas. All callers MUST use fully-qualified schema.table names.
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'agenthive_orchestrator') THEN
+    GRANT SELECT, INSERT, UPDATE ON template.workflow_template_alias TO agenthive_orchestrator;
+    GRANT USAGE ON ALL SEQUENCES IN SCHEMA template TO agenthive_orchestrator;
+    GRANT USAGE ON SCHEMA workflow_active TO agenthive_orchestrator;
+    GRANT SELECT, INSERT, UPDATE ON workflow_active.workflow_template_copy TO agenthive_orchestrator;
+    GRANT USAGE ON ALL SEQUENCES IN SCHEMA workflow_active TO agenthive_orchestrator;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'agenthive_agency') THEN
+    GRANT USAGE ON SCHEMA workflow_active TO agenthive_agency;
+    GRANT SELECT ON workflow_active.workflow_template_copy TO agenthive_agency;
+    GRANT SELECT ON template.workflow_template_alias TO agenthive_agency;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'agenthive_observability') THEN
+    GRANT USAGE ON SCHEMA workflow_active TO agenthive_observability;
+    GRANT SELECT ON ALL TABLES IN SCHEMA workflow_active TO agenthive_observability;
+    GRANT SELECT ON template.workflow_template_alias TO agenthive_observability;
+  END IF;
+END $$;
+
+ROLLBACK;
+-- ^^^^^ DRY-RUN sentinel. Replace with COMMIT for the production migration.

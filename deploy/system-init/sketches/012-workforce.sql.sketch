@@ -1,0 +1,106 @@
+-- ============================================================
+-- P901 sketch 012 — workforce schema: dark-table notes + Phase 2 FK additions
+-- ============================================================
+-- Target DB:  hiveCentral (per-tenant schema applications noted separately)
+-- Depends on: 006-workforce.sql (workforce schema populated)
+-- Scope:
+--   1. Finding 2 documentation: workforce.* populated but dark
+--   2. Phase 2: nullable FK additions to per-project tenant tables
+--   3. Governance: skill_grant_log retention note
+--   4. Activation gating: blocked until P429 (multi-tenant DB) lands
+-- ============================================================
+
+-- ============================================================
+-- PART A: STATUS — workforce.* POPULATED AND DARK (confirmed 2026-05-14)
+-- ============================================================
+--
+-- Migration 056 (056-workforce-from-roadmap.sql) copies rows from
+-- roadmap_workforce.agent_registry into workforce.agent / workforce.skill /
+-- workforce.agent_skill.
+--
+-- Code audit result (2026-05-14):
+--   src/infra/agency/ reads exclusively from roadmap_workforce.*.
+--   grep -r "workforce\.agent\b" src/ → zero matches in live source files.
+--   grep -r "workforce\.skill\b"  src/ → zero matches in live source files.
+--
+-- Full activation blocked by P429 (multi-tenant DB topology):
+--   cross-project workforce reads require tenant-aware pool routing that
+--   the current single-pool architecture (getControlPool) cannot provide safely.
+--
+-- Phase 3 action (tracked in P901 Migration Plan):
+--   Replace roadmap_workforce.* reads with workforce.* fully-qualified queries
+--   in src/infra/agency/ once P429 is complete. Feature-flag the transition
+--   so legacy path can be restored instantly on regression.
+
+-- ============================================================
+-- PART B: PHASE 2 — NULLABLE FK ADDITIONS (safe to apply now)
+-- ============================================================
+-- These DDL changes are ADDITIVE (NULLABLE FK columns). They do not break
+-- existing reads or writes. Apply to each tenant schema in sequence.
+-- Rollback: ALTER TABLE DROP COLUMN is safe while columns are NULLABLE and unread.
+
+BEGIN;
+
+-- ── B1. Per-project agent table: workforce_agent_id FK ────────────────────────
+-- deploy/project-init/003-agent.sql uses TEXT soft-FKs (did, provider_slug, model_id)
+-- with no hard FK to workforce.agent.
+-- Add NULLABLE BIGINT FK for the future cross-reference path (Phase 3 backfill).
+--
+-- APPLY PER TENANT (replace <schema> with e.g. agenthive, monkeyKing_audio):
+
+-- ALTER TABLE <schema>.agent
+--   ADD COLUMN IF NOT EXISTS workforce_agent_id BIGINT
+--     REFERENCES workforce.agent(id) ON DELETE SET NULL;
+--
+-- CREATE INDEX IF NOT EXISTS idx_<schema>_agent_workforce_id
+--   ON <schema>.agent (workforce_agent_id)
+--   WHERE workforce_agent_id IS NOT NULL;
+
+-- ── B2. Backfill via agent DID matching (run after B1) ────────────────────────
+-- Match per-project agent rows to workforce.agent by identity field.
+-- DID format may differ between schemas; adapt WHERE clause as needed.
+--
+-- UPDATE <schema>.agent pa
+-- SET    workforce_agent_id = wa.id
+-- FROM   workforce.agent wa
+-- WHERE  pa.did = wa.agent_identity    -- adjust join predicate to actual column names
+--   AND  pa.workforce_agent_id IS NULL;
+
+-- ── B3. Per-project workflow table: hc_template_id FK ────────────────────────
+-- deploy/project-init/002-workflow.sql has no template FK column.
+-- Add NULLABLE BIGINT FK to hiveCentral template.workflow_template (007 approach).
+-- Named hc_template_id to avoid collision with any existing template_id columns
+-- that reference the v1 DB schema (004-approach / TEXT PK).
+--
+-- APPLY PER TENANT:
+
+-- ALTER TABLE <schema>.workflow
+--   ADD COLUMN IF NOT EXISTS hc_template_id BIGINT
+--     REFERENCES template.workflow_template(id) ON DELETE SET NULL;
+
+ROLLBACK;
+-- ^^^^^ DRY-RUN sentinel. Replace with COMMIT for the production migration.
+
+-- ============================================================
+-- PART C: GOVERNANCE — skill_grant_log retention
+-- ============================================================
+-- workforce.skill_grant_log is append-only (trigger trg_agent_skill_audit on
+-- workforce.agent_skill). Rows must never be updated or deleted (REVOKE enforced).
+--
+-- Recommended retention: 365 days active + archive beyond that.
+-- Implementation options:
+--   a. pg_partman: partition skill_grant_log by created_at month; detach + archive old partitions.
+--   b. Scheduled DELETE: DELETE FROM workforce.skill_grant_log WHERE created_at < now() - interval '365 days';
+--      (safe despite append-only constraint because the trigger only prevents UPDATE/DELETE
+--       via trigger — direct DELETE by agenthive_admin bypasses the trigger per SECURITY DEFINER scope).
+--   c. Archive table: periodic INSERT INTO workforce.skill_grant_log_archive SELECT ... DELETE.
+-- Track retention policy implementation as a P901 Phase 5 item.
+
+-- ============================================================
+-- PART D: ENUM USAGE REMINDER (Finding 8)
+-- ============================================================
+-- workforce.skill_lifecycle is a PostgreSQL ENUM type (active, deprecated, proposed).
+-- Application code inserting into workforce.skill MUST use valid enum literals only.
+-- Valid values: 'active', 'deprecated', 'proposed'
+-- Invalid: 'inactive', 'retired', 'blocked' (those are lifecycle_status TEXT CHECK values
+-- used in other catalog tables but NOT in the workforce.skill ENUM).
