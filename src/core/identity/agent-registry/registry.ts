@@ -93,7 +93,7 @@ export async function resolveInstanceId(
 	for (const ch of slots) {
 		const candidate = `${base}-${ch}`;
 		const status = byId.get(candidate);
-		if (status === undefined || status !== "online") return candidate;
+		if (status === undefined || status !== "active") return candidate;
 	}
 	throw new Error(
 		`[P852] All slots exhausted for base "${base}" (liaison=${isLiaison})`,
@@ -209,6 +209,10 @@ export async function registerAgent(
 	const skills = { agentId, capabilities, channel, lastSeen: now };
 	const trustTier = defaultTrustTier(instanceId, agentType);
 
+	// Map TypeScript-level agent types ('permanent'/'contract') to DB-valid values.
+	// The DB constraint only accepts: human, llm, tool, hybrid, agency, workforce, coordinator, user.
+	const dbAgentType = agentType === "permanent" || agentType === "contract" ? "llm" : agentType;
+
 	// P159: key conflict guard — if a different public key is already registered, reject
 	if (request.publicKey) {
 		const { rows: existing } = await query<{ public_key: string | null }>(
@@ -224,16 +228,16 @@ export async function registerAgent(
 
 	const insertResult = await query<{ id: number }>(
 		`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, role, skills, status, trust_tier, public_key)
-     VALUES ($1, $2, $3, $4::jsonb, 'online', $5, $6)
+     VALUES ($1, $2, $3, $4::jsonb, 'active', $5, $6)
      ON CONFLICT (agent_identity) DO UPDATE SET
        agent_type = EXCLUDED.agent_type,
        role       = EXCLUDED.role,
        skills     = agent_registry.skills || EXCLUDED.skills,
-       status     = 'online',
+       status     = 'active',
        trust_tier = COALESCE(NULLIF(agent_registry.trust_tier, 'authority'), EXCLUDED.trust_tier),
        public_key = COALESCE(EXCLUDED.public_key, agent_registry.public_key)
      RETURNING id`,
-		[instanceId, agentType, role ?? null, JSON.stringify(skills), trustTier, request.publicKey ?? null],
+		[instanceId, dbAgentType, role ?? null, JSON.stringify(skills), trustTier, request.publicKey ?? null],
 	);
 
 	// P919 AC-12: Tier 2 display alias for worker slot-0 spawns. The slot
@@ -281,7 +285,7 @@ export async function deregisterAgent(
 	const { agentId, reason = "graceful shutdown" } = request;
 
 	await query(
-		`UPDATE agent_registry SET status = 'offline' WHERE agent_identity = $1`,
+		`UPDATE roadmap_workforce.agent_registry SET status = 'inactive' WHERE agent_identity = $1`,
 		[agentId],
 	);
 
