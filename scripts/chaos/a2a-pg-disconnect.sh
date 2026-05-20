@@ -52,9 +52,10 @@ fi
 # for flag-reload and per-agency a2a_msg). Kill them all.
 echo "[chaos] step 2: terminate PG backend(s) for a2a-host"
 KILLED=$(psql "$DATABASE_URL" -tA <<SQL
-SELECT pg_terminate_backend(pid)
+SELECT pg_terminate_backend(pid) || ' ' || application_name
 FROM pg_stat_activity
-WHERE application_name LIKE '%a2a%' OR usename = 'admin' AND query LIKE '%agent_registry%';
+WHERE application_name LIKE 'agenthive-a2a%'
+  AND pid <> pg_backend_pid();
 SQL
 )
 echo "    sent SIGTERM to backends:"
