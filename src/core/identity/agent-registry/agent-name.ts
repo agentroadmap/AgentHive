@@ -206,6 +206,12 @@ export function isLiaisonHint(
 export const LIAISON_SLOTS = "0123456789";
 export const EXPERT_SLOTS = "abcdefghijklmnopqrstuvwxyz";
 
+export const ALL_CAPS_TOKENS = new Set(["qa", "ai", "ml", "sre", "ux", "ui", "api"]);
+
+/** Dense routeAbbr shape: 2-3 lowercase letters + digits + 2-4 lowercase letters (e.g. "ccs46ant"). */
+const ABBR_SHAPE = /^[a-z]{2,3}\d+[a-z]{2,4}$/;
+
+
 /**
  * P932: Normalize host string to Title-Case.
  * "bot" → "Bot", "hermes" → "Hermes", "mac" → "Mac"
