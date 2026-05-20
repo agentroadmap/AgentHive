@@ -17,24 +17,24 @@
  */
 
 const AGENCY_MAP: Record<string, string> = {
-	"claude": "cc",
+	claude: "cc",
 	"claude-code": "cc",
-	"hermes": "hm",
-	"openclaw": "oc",
-	"codex": "cd",
-	"copilot": "cp",
+	hermes: "hm",
+	openclaw: "oc",
+	codex: "cd",
+	copilot: "cp",
 	"gemini-cli": "gm",
-	"gemini": "gm",
+	gemini: "gm",
 };
 
 const PROVIDER_MAP: Record<string, string> = {
-	"anthropic": "ant",
-	"openai": "oai",
-	"azure": "az",
-	"google": "ggl",
-	"aws": "bdr",
-	"bedrock": "bdr",
-	"github": "gh",
+	anthropic: "ant",
+	openai: "oai",
+	azure: "az",
+	google: "ggl",
+	aws: "bdr",
+	bedrock: "bdr",
+	github: "gh",
 };
 
 export const EXPERTISE: Record<string, string> = {

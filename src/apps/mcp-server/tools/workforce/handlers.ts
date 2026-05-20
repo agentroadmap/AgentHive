@@ -1,16 +1,22 @@
 import { hostname } from "node:os";
-import { query } from "../../../../infra/postgres/pool.ts";
 import {
 	assignDisplayAlias,
 	pascalCaseHost,
 } from "../../../../core/identity/agent-registry/agent-name.ts";
 import { claimDisplayAlias } from "../../../../core/identity/agent-registry/alias-manager.ts";
+import { query } from "../../../../infra/postgres/pool.ts";
 import type { CallToolResult } from "../../types.ts";
 
 type ToolHandler = (args: Record<string, unknown>) => Promise<CallToolResult>;
 
 export const agencyRegisterHandler: ToolHandler = async (args) => {
-	const { identity, agentType = "agency", provider, model, skills } = args as {
+	const {
+		identity,
+		agentType = "agency",
+		provider,
+		model,
+		skills,
+	} = args as {
 		identity: string;
 		agentType?: string;
 		provider?: string;
@@ -30,12 +36,7 @@ export const agencyRegisterHandler: ToolHandler = async (args) => {
 		   preferred_model = EXCLUDED.preferred_model,
 		   updated_at = now()
 		 RETURNING id, agent_identity, agent_type`,
-		[
-			identity,
-			agentType,
-			provider ?? null,
-			model ?? null,
-		],
+		[identity, agentType, provider ?? null, model ?? null],
 	);
 
 	const row = result.rows[0];
@@ -58,15 +59,26 @@ export const agencyRegisterHandler: ToolHandler = async (args) => {
 	if (slotChar === "a" && expertise && row?.id && provider) {
 		const host = process.env.AGENTHIVE_HOST ?? hostname();
 		try {
-			const alias = assignDisplayAlias(provider, pascalCaseHost(host), expertise, slotChar);
+			const alias = assignDisplayAlias(
+				provider,
+				pascalCaseHost(host),
+				expertise,
+				slotChar,
+			);
 			if (alias) {
-				const claim = await claimDisplayAlias(Number(row.id), alias, { tier: 2 });
+				const claim = await claimDisplayAlias(Number(row.id), alias, {
+					tier: 2,
+				});
 				if (!claim.claimed) {
-					console.warn(`[agencyRegisterHandler] ${identity} could not claim alias '${alias}': ${claim.reason}`);
+					console.warn(
+						`[agencyRegisterHandler] ${identity} could not claim alias '${alias}': ${claim.reason}`,
+					);
 				}
 			}
 		} catch (e) {
-			console.warn(`[agencyRegisterHandler] alias skipped for ${identity}: ${e instanceof Error ? e.message : e}`);
+			console.warn(
+				`[agencyRegisterHandler] alias skipped for ${identity}: ${e instanceof Error ? e.message : e}`,
+			);
 		}
 	}
 
@@ -207,15 +219,26 @@ export const workerRegisterHandler: ToolHandler = async (args) => {
 			agencyIdentity;
 		const host = process.env.AGENTHIVE_HOST ?? hostname();
 		try {
-			const alias = assignDisplayAlias(rawProvider, pascalCaseHost(host), expertise, slotChar);
+			const alias = assignDisplayAlias(
+				rawProvider,
+				pascalCaseHost(host),
+				expertise,
+				slotChar,
+			);
 			if (alias) {
-				const claim = await claimDisplayAlias(Number(workerId), alias, { tier: 2 });
+				const claim = await claimDisplayAlias(Number(workerId), alias, {
+					tier: 2,
+				});
 				if (!claim.claimed) {
-					console.warn(`[workerRegisterHandler] ${workerIdentity} could not claim alias '${alias}': ${claim.reason}`);
+					console.warn(
+						`[workerRegisterHandler] ${workerIdentity} could not claim alias '${alias}': ${claim.reason}`,
+					);
 				}
 			}
 		} catch (e) {
-			console.warn(`[workerRegisterHandler] alias skipped for ${workerIdentity}: ${e instanceof Error ? e.message : e}`);
+			console.warn(
+				`[workerRegisterHandler] alias skipped for ${workerIdentity}: ${e instanceof Error ? e.message : e}`,
+			);
 		}
 	}
 
