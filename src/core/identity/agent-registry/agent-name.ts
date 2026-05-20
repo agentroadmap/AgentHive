@@ -214,28 +214,6 @@ export function pascalCaseHost(host: string): string {
 	return host.charAt(0).toUpperCase() + host.slice(1).toLowerCase();
 }
 
-export const ALL_CAPS_TOKENS = new Set(["qa", "ai", "ml", "sre", "ux", "ui", "api"]);
-
-/** Dense routeAbbr shape: 2-3 lowercase letters + digits + 2-4 lowercase letters (e.g. "ccs46ant"). */
-const ABBR_SHAPE = /^[a-z]{2,3}\d+[a-z]{2,4}$/;
-
-/**
- * Convert a raw expertise string to a Title-Case display segment.
- * Splits on hyphens; ALL_CAPS_TOKENS stay uppercase; all others PascalCase.
- * "documenter" → "Documenter", "gate-review" → "GateReview", "qa" → "QA", "ai-architect" → "AIArchitect"
- */
-function titleCaseExpertise(raw: string): string {
-	return raw
-		.split("-")
-		.map((tok) => {
-			const lower = tok.toLowerCase();
-			if (ALL_CAPS_TOKENS.has(lower)) return lower.toUpperCase();
-			return lower[0]?.toUpperCase() + lower.slice(1);
-		})
-		.join("");
-}
-
-
 /**
  * P919: Assign a human-readable display alias for an agent.
  *
