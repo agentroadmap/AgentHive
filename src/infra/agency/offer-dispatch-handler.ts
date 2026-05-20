@@ -88,33 +88,49 @@ interface OfferDispatchEnvelope {
 const DEFAULT_LEASE_TTL_SECONDS = 60;
 
 /**
- * Per-agency concurrent-spawn counter (per-process module-level state).
+ * Per-agency concurrent-spawn counter (module-level Map, keyed by agency_id).
  *
- * Each agency runs in its own Node process; this counter tracks the number of
- * in-flight runSpawn promises for the local agency. The threshold is read
- * from roadmap_workforce.provider_registry.max_in_flight per offer so an
- * operator can tune the per-agency cap via SQL without restart.
+ * Post-P1132 (A2A host consolidation), all attached agencies share ONE Node
+ * process. Pre-P1132 this was a per-process singleton because each agency had
+ * its own systemd unit; the same singleton in the shared process meant 5 spawns
+ * total across ALL agencies tripped every agency's cap (5/4) — observed
+ * 2026-05-19 as "at capacity" spam returning every offer.
+ *
+ * Fix (Bug 7): per-agency Map. Each agency tracks its own in-flight count
+ * against its own provider_registry.max_in_flight.
  *
  * Semantics (per operator policy 2026-05-14):
  *   "Claim is calculated intention; if there is an obstacle, an agency can
  *    regret and return the offer."
  *
- * When activeSpawnCount >= max_in_flight at the moment a dispatch arrives,
- * the handler calls fn_return_work_offer (NOT fn_complete_work_offer with
- * 'failed'). fn_return_work_offer reverts offer_status from 'claimed' to
- * 'open', does not increment reissue_count, and emits work_offers notify so
- * any other idle agency picks it up immediately.
+ * When count >= max_in_flight at the moment a dispatch arrives, the handler
+ * calls fn_return_work_offer (NOT fn_complete_work_offer with 'failed').
+ * fn_return_work_offer reverts offer_status from 'claimed' to 'open', does
+ * not increment reissue_count, and emits work_offers notify so any other
+ * idle agency picks it up immediately.
  */
-let activeSpawnCount = 0;
+const activeSpawnCounts = new Map<string, number>();
+function getActiveCount(agencyId: string): number {
+	return activeSpawnCounts.get(agencyId) ?? 0;
+}
+function incActiveCount(agencyId: string): void {
+	activeSpawnCounts.set(agencyId, getActiveCount(agencyId) + 1);
+}
+function decActiveCount(agencyId: string): void {
+	activeSpawnCounts.set(agencyId, Math.max(0, getActiveCount(agencyId) - 1));
+}
 
 /** @internal — reset for tests that share module state. */
 export function _resetActiveSpawnForTest(): void {
-	activeSpawnCount = 0;
+	activeSpawnCounts.clear();
 }
 
-/** @internal — peek for tests. */
-export function _activeSpawnCountForTest(): number {
-	return activeSpawnCount;
+/** @internal — peek for tests. Pass agencyId to get per-agency count, omit for global sum. */
+export function _activeSpawnCountForTest(agencyId?: string): number {
+	if (agencyId) return getActiveCount(agencyId);
+	let sum = 0;
+	for (const n of activeSpawnCounts.values()) sum += n;
+	return sum;
 }
 
 const defaultExec: SqlExec = (sql, params) =>
@@ -180,9 +196,10 @@ export async function handleOfferDispatch(
 	// rotates the claim token, and pg_notify's the claim loop so an idle
 	// agency picks it up. No reissue penalty, no failure metric pollution.
 	const maxInFlight = await readAgencyMaxInFlight(agencyId, exec, logger);
-	if (activeSpawnCount >= maxInFlight) {
+	const currentCount = getActiveCount(agencyId);
+	if (currentCount >= maxInFlight) {
 		logger.warn(
-			`[OfferDispatchHandler] ${agencyId}: at capacity (${activeSpawnCount}/${maxInFlight}); returning offer=${payload.offer_id} role=${payload.role}`,
+			`[OfferDispatchHandler] ${agencyId}: at capacity (${currentCount}/${maxInFlight}); returning offer=${payload.offer_id} role=${payload.role}`,
 		);
 		await exec(
 			`SELECT roadmap_workforce.fn_return_work_offer($1, $2, $3, $4)`,
@@ -190,7 +207,7 @@ export async function handleOfferDispatch(
 				payload.dispatch_id,
 				agencyId,
 				payload.claim_token,
-				`agency_at_capacity:${activeSpawnCount}/${maxInFlight}`,
+				`agency_at_capacity:${currentCount}/${maxInFlight}`,
 			],
 		).catch((err) => {
 			logger.error(
@@ -270,9 +287,9 @@ export async function handleOfferDispatch(
 	// Reserve a capacity slot. The `finally` decrements whether the spawn
 	// succeeds, fails, throws, or times out — so the counter never gets stuck
 	// above zero if runSpawn misbehaves.
-	activeSpawnCount++;
+	incActiveCount(agencyId);
 	spawnPromise.finally(() => {
-		activeSpawnCount = Math.max(0, activeSpawnCount - 1);
+		decActiveCount(agencyId);
 	});
 }
 
