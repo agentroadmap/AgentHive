@@ -59,14 +59,22 @@ export function parseStoredUtcDate(dateStr: string): Date | null {
 		return date;
 	}
 
+	// Fallback: native Date parsing handles full ISO strings from timestamptz columns
+	// (e.g. "2026-05-16T10:30:00.000Z") that the regex patterns above don't match.
+	const fallback = new Date(normalized);
+	if (!Number.isNaN(fallback.getTime())) return fallback;
+
 	return null;
 }
+
+const HAS_TIME_REGEX = /T\d{2}:\d{2}/;
 
 export function formatStoredUtcDateForDisplay(dateStr: string): string {
 	const parsed = parseStoredUtcDate(dateStr);
 	if (!parsed) return dateStr;
 
-	if (DATE_TIME_REGEX.test(dateStr.trim())) {
+	const hasTime = DATE_TIME_REGEX.test(dateStr.trim()) || HAS_TIME_REGEX.test(dateStr.trim());
+	if (hasTime) {
 		return parsed.toLocaleString(undefined, {
 			dateStyle: "medium",
 			timeStyle: "short",
