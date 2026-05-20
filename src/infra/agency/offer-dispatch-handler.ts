@@ -30,6 +30,12 @@ import {
 	recordProviderSuccess,
 } from "../../core/orchestration/provider-cooldown.ts";
 import { ObservabilityWriter } from "../../core/observability/observability-writer.ts";
+import { sendMessage } from "./liaison-message-service.ts";
+import {
+	evaluateSubscriptionPolicy,
+	declareThrottle,
+} from "./subscription-policy.ts";
+import { UNKNOWN_RESET_FALLBACK_SECONDS } from "./usage-limit-detector.ts";
 
 const obs = new ObservabilityWriter("offer-dispatch-handler");
 
@@ -211,6 +217,63 @@ export async function handleOfferDispatch(
 		).catch((err) => {
 			logger.error(
 				`[OfferDispatchHandler] ${agencyId}: fn_complete_work_offer failed on paused-decline:`,
+				err instanceof Error ? err.message : err,
+			);
+		});
+		return;
+	}
+
+	// P465: Subscription window check — refuse new claims when any rolling window
+	// (5h / daily / weekly / monthly) projects below the safety margin after this
+	// claim. Returns the offer to the pool (fn_return_work_offer) and self-marks
+	// the agency throttled so resolveAgency() skips it until the window resets.
+	// AC-6: only new claims are refused; in-flight spawns are never interrupted.
+	const sendUplinkFn = deps.sendUplink ?? sendMessage;
+	const subscriptionResult = await evaluateSubscriptionPolicy(
+		agencyId,
+		exec,
+		logger,
+	);
+	if (!subscriptionResult.allowed) {
+		logger.warn(
+			`[OfferDispatchHandler] ${agencyId}: subscription throttle — ${subscriptionResult.reason}; returning offer=${payload.offer_id}`,
+		);
+		await exec(
+			`SELECT roadmap_workforce.fn_return_work_offer($1, $2, $3, $4)`,
+			[
+				payload.dispatch_id,
+				agencyId,
+				payload.claim_token,
+				`subscription_throttle:${subscriptionResult.tightest_window ?? "unknown"}`,
+			],
+		).catch((err) => {
+			logger.error(
+				`[OfferDispatchHandler] ${agencyId}: fn_return_work_offer failed on subscription-throttle:`,
+				err instanceof Error ? err.message : err,
+			);
+		});
+		await declareThrottle(
+			agencyId,
+			subscriptionResult.resets_at,
+			subscriptionResult.reason ?? `subscription_throttle:${subscriptionResult.tightest_window}`,
+			exec,
+		).catch((err) => {
+			logger.error(
+				`[OfferDispatchHandler] ${agencyId}: declareThrottle failed:`,
+				err instanceof Error ? err.message : err,
+			);
+		});
+		sendUplinkFn({
+			agency_id: agencyId,
+			direction: "liaison->orchestrator",
+			kind: "agency_throttle",
+			payload: {
+				until_iso: subscriptionResult.resets_at?.toISOString() ?? null,
+				reason: subscriptionResult.reason ?? `subscription_throttle`,
+			},
+		}).catch((err) => {
+			logger.warn(
+				`[OfferDispatchHandler] ${agencyId}: agency_throttle uplink failed:`,
 				err instanceof Error ? err.message : err,
 			);
 		});
@@ -415,6 +478,38 @@ async function runSpawn(args: {
 		}
 	}
 
+	// AC-6: hard provider limit mid-flight — flag dispatch so operators can
+	// distinguish "paused by quota" from normal failure; notify orchestrator.
+	if (providerSignal === "credit_exhausted") {
+		try {
+			await exec(
+				`UPDATE roadmap_workforce.squad_dispatch
+				    SET paused_at_provider_limit = TRUE
+				  WHERE id = $1`,
+				[dispatchId],
+			);
+		} catch {
+			/* best-effort */
+		}
+		sendUplink({
+			agency_id: agencyId,
+			direction: "liaison->orchestrator",
+			kind: "claim_paused",
+			payload: {
+				claim_id: payload.offer_id,
+				reason: `provider_hard_limit:${provider}`,
+				resume_eligible_at: new Date(
+					Date.now() + UNKNOWN_RESET_FALLBACK_SECONDS * 1000,
+				).toISOString(),
+			},
+		}).catch((err) => {
+			logger.warn(
+				`[OfferDispatchHandler] ${agencyId}: claim_paused uplink failed for offer=${payload.offer_id}:`,
+				err instanceof Error ? err.message : err,
+			);
+		});
+	}
+
 	// AC-5: emit a structured spawn_failure uplink so the orchestrator can
 	// observe the failure as an operational fact. Lifecycle is still governed
 	// mechanically by fn_complete_work_offer below; the uplink is informational.
@@ -559,49 +654,3 @@ async function readAgencyPausedUntil(
 	}
 }
 
-/**
- * Upsert a row in roadmap.host_model_route_throttle. Pure observability +
- * forward-compat: postWorkOffer reads this when it has a model in hand, and
- * any operator query against this table sees the live throttle state.
- */
-async function applyThrottle(
-	exec: SqlExec,
-	provider: UsageLimitProvider | string,
-	model: string,
-	seconds: number,
-	reason: string,
-): Promise<void> {
-	await exec(
-		`INSERT INTO roadmap.host_model_route_throttle (provider, model, throttled_until, reason)
-		 VALUES ($1, $2, now() + ($3 || ' seconds')::interval, $4)
-		 ON CONFLICT (provider, model) DO UPDATE
-		   SET throttled_until = GREATEST(host_model_route_throttle.throttled_until, EXCLUDED.throttled_until),
-		       reason          = EXCLUDED.reason,
-		       updated_at      = clock_timestamp()`,
-		[provider, model, String(seconds), reason],
-	);
-}
-
-/**
- * Set roadmap.agency.metadata.paused_until = now() + seconds. The pause is
- * checked at the top of handleOfferDispatch so the agency declines to spawn
- * any new offer until the timestamp passes. The pause clears itself naturally
- * (the next offer-dispatch sees the past timestamp and proceeds).
- */
-async function pauseAgency(
-	exec: SqlExec,
-	agencyId: string,
-	seconds: number,
-	reason: string,
-): Promise<void> {
-	await exec(
-		`UPDATE roadmap.agency
-		    SET metadata = metadata || jsonb_build_object(
-		                     'paused_until', to_jsonb((now() + ($2 || ' seconds')::interval)::text),
-		                     'pause_reason', to_jsonb($3::text),
-		                     'paused_at',    to_jsonb(now()::text)
-		                   )
-		  WHERE agency_id = $1`,
-		[agencyId, String(seconds), reason],
-	);
-}

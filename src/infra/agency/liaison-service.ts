@@ -11,6 +11,7 @@
 
 import type { PoolClient } from "pg";
 import { query } from "../postgres/pool.ts";
+import type { CapacityEnvelope } from "./liaison-message-types.ts";
 
 export interface LiaisonRegisterPayload {
 	agency_id: string;
@@ -25,7 +26,7 @@ export interface LiaisonRegisterPayload {
 
 export interface LiaisonHeartbeatPayload {
 	session_id: string;
-	capacity_envelope?: Record<string, unknown>;
+	capacity_envelope?: CapacityEnvelope;
 	in_flight_cubic_count?: number;
 	last_error?: string | null;
 	status?: "active" | "throttled" | "paused";
