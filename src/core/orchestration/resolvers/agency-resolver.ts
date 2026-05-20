@@ -7,10 +7,12 @@
  * State machine:
  *   active     → throttled  : spawn failure OR capacity exceeded on check-in
  *   active     → dormant    : silence > 5 min
- *   active     → offline    : silence > 30 min OR operator command
+ *   dormant    → offline    : silence > 30 min (provider_registry) / 5 min (roadmap.agency P765)
  *   throttled  → active     : next successful check-in
  *   dormant    → active     : check-in received
- *   offline    → active     : operator resume command (not auto)
+ *   offline    → dormant    : first check-in received after silence (P765 AC-1 auto-recovery step 1)
+ *   dormant    → active     : second check-in received after offline (P765 AC-1 auto-recovery step 2)
+ *   offline    → active     : operator resume command (AC-2 short-circuit)
  *   any        → retired    : operator retire command (terminal)
  */
 
@@ -140,6 +142,7 @@ export async function recordCheckIn(agencyIdentity: string): Promise<void> {
 		 SET last_seen_at          = now(),
 		     status = CASE
 		       WHEN pr.status IN ('throttled', 'dormant') THEN 'active'
+		       WHEN pr.status = 'offline'                 THEN 'dormant'  -- P765 AC-1: step 1 of auto-recovery
 		       ELSE pr.status
 		     END,
 		     throttle_count = CASE
@@ -156,13 +159,14 @@ export async function recordCheckIn(agencyIdentity: string): Promise<void> {
 		     END,
 		     status_reason = CASE
 		       WHEN pr.status IN ('throttled', 'dormant') THEN 'Recovered on check-in'
+		       WHEN pr.status = 'offline'                 THEN 'Auto-recovery started: first check-in'
 		       ELSE pr.status_reason
 		     END,
 		     updated_at = now()
 		 FROM roadmap_workforce.agent_registry ar
 		 WHERE pr.agency_id = ar.id
 		   AND ar.agent_identity = $1
-		   AND pr.status NOT IN ('offline', 'retired')`,
+		   AND pr.status NOT IN ('retired')`,
 		[agencyIdentity],
 	);
 }
