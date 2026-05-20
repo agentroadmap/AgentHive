@@ -7,18 +7,21 @@
  */
 
 import type { QueryResultRow } from "pg";
-import { query } from "../../../../postgres/pool.ts";
+import { detectConflicts } from "../../../../core/proposal/directive-conflict-detector.ts";
+import {
+	formatValidationError,
+	validateLease,
+} from "../../../../core/proposal/proposal-integrity.ts";
+import { Maturity, RfcStates } from "../../../../core/workflow/state-names.ts";
+import {
+	hasActiveLiaisonSession,
+	isRegisteredAgency,
+} from "../../../../infra/agency/liaison-service.ts";
 import type { ProposalRow } from "../../../../infra/postgres/proposal-storage-v2.ts";
 import * as pg from "../../../../infra/postgres/proposal-storage-v2.ts";
+import { query } from "../../../../postgres/pool.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
-import { RfcStates, Maturity } from "../../../../core/workflow/state-names.ts";
-import { validateLease, formatValidationError } from "../../../../core/proposal/proposal-integrity.ts";
-import {
-	isRegisteredAgency,
-	hasActiveLiaisonSession,
-} from "../../../../infra/agency/liaison-service.ts";
-import { detectConflicts } from "../../../../core/proposal/directive-conflict-detector.ts";
 
 type ProjectionFormat = "yaml_md" | "json";
 
@@ -42,7 +45,8 @@ function formatScalar(value: unknown): string {
 
 function yamlValue(value: unknown): string {
 	if (value === null || value === undefined || value === "") return "null";
-	if (typeof value === "number" || typeof value === "boolean") return String(value);
+	if (typeof value === "number" || typeof value === "boolean")
+		return String(value);
 	const text = formatScalar(value).replace(/"/g, '\\"');
 	return `"${text}"`;
 }
@@ -106,8 +110,12 @@ export class PgProposalHandlers {
 				conditions.push(`status = $${params.length + 1}`);
 				params.push(args.status);
 			} else if (!includeTerminal) {
-				conditions.push(`status NOT IN (${terminalStatuses.map((_, i) => `$${params.length + i + 1}`).join(", ")})`);
-				terminalStatuses.forEach((s) => params.push(s));
+				conditions.push(
+					`status NOT IN (${terminalStatuses.map((_, i) => `$${params.length + i + 1}`).join(", ")})`,
+				);
+				terminalStatuses.forEach((s) => {
+					params.push(s);
+				});
 			}
 
 			const proposalType = args.type ?? args.proposal_type;
@@ -220,9 +228,18 @@ export class PgProposalHandlers {
 			// is actually a missing arg.
 			const identifier =
 				args.id ?? args.proposal_id ?? args.proposalId ?? args.display_id;
-			if (identifier === undefined || identifier === null || identifier === "") {
+			if (
+				identifier === undefined ||
+				identifier === null ||
+				identifier === ""
+			) {
 				return {
-					content: [{ type: "text", text: "prop_get requires `id` (or `proposal_id`/`display_id`)." }],
+					content: [
+						{
+							type: "text",
+							text: "prop_get requires `id` (or `proposal_id`/`display_id`).",
+						},
+					],
 				};
 			}
 			// display_id is text (e.g. 'P001'), db id is bigint.
@@ -231,7 +248,9 @@ export class PgProposalHandlers {
 			const proposal = await pg.getProposal(String(identifier));
 			if (!proposal) {
 				return {
-					content: [{ type: "text", text: `Proposal ${identifier} not found.` }],
+					content: [
+						{ type: "text", text: `Proposal ${identifier} not found.` },
+					],
 				};
 			}
 			return {
@@ -279,11 +298,11 @@ export class PgProposalHandlers {
 
 			// AC-3: Directives always start in Draft state
 			// AC-4: Directives carry 1.5× dispatch priority
-			const resolvedStatus = isDirective ? "Draft" : (args.status || null);
+			const resolvedStatus = isDirective ? "Draft" : args.status || null;
 			const basePriority = args.priority ? parseFloat(args.priority) : null;
 			const resolvedPriority = isDirective
 				? String(calculateDispatchPriority(basePriority))
-				: (args.priority || null);
+				: args.priority || null;
 
 			// AC-5 + AC-7: Conflict detection and escalation for directives
 			let conflictNote = "";
@@ -537,8 +556,17 @@ export class PgProposalHandlers {
 				};
 			}
 
-			const validMaturityValues = [Maturity.NEW, Maturity.ACTIVE, Maturity.MATURE, Maturity.OBSOLETE];
-			if (!validMaturityValues.includes(args.maturity as typeof validMaturityValues[number])) {
+			const validMaturityValues = [
+				Maturity.NEW,
+				Maturity.ACTIVE,
+				Maturity.MATURE,
+				Maturity.OBSOLETE,
+			];
+			if (
+				!validMaturityValues.includes(
+					args.maturity as (typeof validMaturityValues)[number],
+				)
+			) {
 				return {
 					content: [
 						{
@@ -574,7 +602,8 @@ export class PgProposalHandlers {
 			const gateNote =
 				args.maturity === Maturity.MATURE && inferredGate
 					? ` — entered ${inferredGate} gate-ready queue`
-					: args.maturity === Maturity.MATURE && updated.status === RfcStates.COMPLETE
+					: args.maturity === Maturity.MATURE &&
+							updated.status === RfcStates.COMPLETE
 						? " — terminal state; no gate advance queued"
 						: "";
 			return {
@@ -630,7 +659,8 @@ export class PgProposalHandlers {
 			}
 
 			const activeLeases = (await pg.getActiveLeases(id)).filter(
-				(lease) => lease.lease_status === "active" || lease.lease_status === "open",
+				(lease) =>
+					lease.lease_status === "active" || lease.lease_status === "open",
 			);
 			if (activeLeases.length > 0 && !args.force) {
 				const lease = activeLeases[0];
@@ -806,7 +836,10 @@ export class PgProposalHandlers {
 		}
 	}
 
-	async getVersions(args: { id: string; limit?: number }): Promise<CallToolResult> {
+	async getVersions(args: {
+		id: string;
+		limit?: number;
+	}): Promise<CallToolResult> {
 		try {
 			const versions = await pg.getProposalVersions(args.id, args.limit ?? 50);
 			if (!versions || versions.length === 0) {
@@ -893,16 +926,27 @@ export class PgProposalHandlers {
 			// doesn't bounce with "Proposal undefined not found".
 			const identifier =
 				args.id ?? args.proposal_id ?? args.proposalId ?? args.display_id;
-			if (identifier === undefined || identifier === null || identifier === "") {
+			if (
+				identifier === undefined ||
+				identifier === null ||
+				identifier === ""
+			) {
 				return {
-					content: [{ type: "text", text: "mcp_get_proposal_projection requires `id` (or `proposal_id`/`display_id`)." }],
+					content: [
+						{
+							type: "text",
+							text: "mcp_get_proposal_projection requires `id` (or `proposal_id`/`display_id`).",
+						},
+					],
 				};
 			}
 			// 1. Fetch the proposal
 			const proposal = await pg.getProposal(String(identifier));
 			if (!proposal) {
 				return {
-					content: [{ type: "text", text: `Proposal ${identifier} not found.` }],
+					content: [
+						{ type: "text", text: `Proposal ${identifier} not found.` },
+					],
 				};
 			}
 
@@ -968,7 +1012,8 @@ export class PgProposalHandlers {
 				md += `  authority: "${decision.authority}"\n`;
 				md += `  decided_at: ${decision.decided_at}\n`;
 			}
-			if ((proposal as Record<string, unknown>).workflow_name) md += `workflow: ${(proposal as Record<string, unknown>).workflow_name}\n`;
+			if ((proposal as Record<string, unknown>).workflow_name)
+				md += `workflow: ${(proposal as Record<string, unknown>).workflow_name}\n`;
 			md += `---\n\n`;
 
 			// Narrative sections
@@ -998,10 +1043,16 @@ export class PgProposalHandlers {
 			if (acResult.rows.length > 0) {
 				md += `## Acceptance Criteria\n\n`;
 				for (const ac of acResult.rows) {
-					const icon = ac.status === "pass" ? "✅" :
-						ac.status === "fail" ? "❌" :
-						ac.status === "blocked" ? "🚫" :
-						ac.status === "waived" ? "⏭️" : "⏳";
+					const icon =
+						ac.status === "pass"
+							? "✅"
+							: ac.status === "fail"
+								? "❌"
+								: ac.status === "blocked"
+									? "🚫"
+									: ac.status === "waived"
+										? "⏭️"
+										: "⏳";
 					md += `${icon} **AC-${ac.item_number}**: ${ac.criterion_text}`;
 					if (ac.verified_by) md += ` (verified by ${ac.verified_by})`;
 					md += `\n`;
@@ -1063,7 +1114,10 @@ export class PgProposalHandlers {
 				);
 			}
 			if (!args.legacy_proposal_id?.trim()) {
-				return errorResult("Missing required field", "legacy_proposal_id is required");
+				return errorResult(
+					"Missing required field",
+					"legacy_proposal_id is required",
+				);
 			}
 
 			const evidenceRefs = args.evidence_refs ?? [];
@@ -1123,10 +1177,15 @@ export class PgProposalHandlers {
 		}
 	}
 
-	async migrationMapGet(args: { legacy_proposal_id: string }): Promise<CallToolResult> {
+	async migrationMapGet(args: {
+		legacy_proposal_id: string;
+	}): Promise<CallToolResult> {
 		try {
 			if (!args.legacy_proposal_id?.trim()) {
-				return errorResult("Missing required field", "legacy_proposal_id is required");
+				return errorResult(
+					"Missing required field",
+					"legacy_proposal_id is required",
+				);
 			}
 			const result = await query(
 				`SELECT id, legacy_proposal_id, legacy_proposal_row_id,
@@ -1187,7 +1246,11 @@ export class PgProposalHandlers {
 						{
 							type: "text",
 							text: JSON.stringify(
-								{ view: "v_migration_unresolved", rows: result.rows, count: result.rows.length },
+								{
+									view: "v_migration_unresolved",
+									rows: result.rows,
+									count: result.rows.length,
+								},
 								null,
 								2,
 							),
@@ -1207,7 +1270,11 @@ export class PgProposalHandlers {
 						{
 							type: "text",
 							text: JSON.stringify(
-								{ view: "v_migration_incomplete", rows: result.rows, count: result.rows.length },
+								{
+									view: "v_migration_incomplete",
+									rows: result.rows,
+									count: result.rows.length,
+								},
 								null,
 								2,
 							),
@@ -1225,7 +1292,9 @@ export class PgProposalHandlers {
 				params.push(args.classification);
 			}
 
-			const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+			const where = conditions.length
+				? `WHERE ${conditions.join(" AND ")}`
+				: "";
 			params.push(limit);
 			const result = await query(
 				`SELECT id, legacy_proposal_id, canonical_proposal_id,
@@ -1240,7 +1309,11 @@ export class PgProposalHandlers {
 				content: [
 					{
 						type: "text",
-						text: JSON.stringify({ rows: result.rows, count: result.rows.length }, null, 2),
+						text: JSON.stringify(
+							{ rows: result.rows, count: result.rows.length },
+							null,
+							2,
+						),
 					},
 				],
 			};
@@ -1249,7 +1322,9 @@ export class PgProposalHandlers {
 		}
 	}
 
-	async migrationMapSummary(_args: Record<string, unknown>): Promise<CallToolResult> {
+	async migrationMapSummary(
+		_args: Record<string, unknown>,
+	): Promise<CallToolResult> {
 		try {
 			const result = await query(
 				`SELECT classification, total, reviewed_count, unreviewed_count,
@@ -1258,7 +1333,10 @@ export class PgProposalHandlers {
 				 ORDER BY classification`,
 			);
 			const totals = result.rows.reduce(
-				(acc: { total: number; reviewed: number; unreviewed: number }, r: any) => ({
+				(
+					acc: { total: number; reviewed: number; unreviewed: number },
+					r: any,
+				) => ({
 					total: acc.total + Number(r.total),
 					reviewed: acc.reviewed + Number(r.reviewed_count),
 					unreviewed: acc.unreviewed + Number(r.unreviewed_count),

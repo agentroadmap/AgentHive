@@ -695,6 +695,10 @@ Precision matters more than confidence theater.
 
 ### 8.1 Local CI gate (P417) — trigger conditions and tier selection
 
+**Source of truth:** `scripts/gate.sh` — all required checks are listed there. This section documents the trigger conditions and structural intent.
+
+**Required capabilities:** `ci`, `typescript` (as declared in proposal P417).
+
 Run `npm run ci` (or `bash scripts/gate.sh`) before any of the following:
 - Restarting a service or systemd unit
 - Merging to `main`
@@ -709,7 +713,7 @@ Run `npm run ci` (or `bash scripts/gate.sh`) before any of the following:
 | **Tier 2 — full gate** | `npm run ci` (default) | Before restart, MCP change, migration, or merge | <60 s |
 
 **Tier 1 checks (always blocking):**
-1. `biome check` — lint + format (run `npm run check` to auto-fix)
+1. `biome check --changed --since=origin/main` — lint + format on git-changed files only (full-repo has 1000+ pre-existing violations; changed-file scope makes this enforceable)
 2. `tsc --noEmit -p tsconfig.check.json` — typecheck green zone (hive-cli + identity + workflow)
 3. `bash scripts/ci-env-check.sh` — no bare `process.env.PG*` reads outside config layer
 
@@ -719,7 +723,12 @@ Run `npm run ci` (or `bash scripts/gate.sh`) before any of the following:
 6. `bash scripts/check-hardcoded.sh` — no literal host paths, ports, or model names in source
 7. `node scripts/check-publish-hygiene.mjs` — only checked when `package.json` changed vs `origin/main`
 
+**Migration directory boundary:**
+- `scripts/migrations/` — **canonical active directory** (post-P753). All new migrations go here.
+- `database/migrations/` — **legacy directory** (pre-P753). Contains pre-existing duplicate prefixes from before P753 introduced the split; treat as read-only historical record. The migration prefix check runs against `scripts/migrations/` only.
+
 **Deferred (informational, continue-on-error):**
+- Migration prefix/sequence check — 21+ pre-existing duplicate prefix groups in `scripts/migrations/`; renumbering tracked under P417 child proposal
 - SQL column audit — requires `AUDIT_DATABASE_URL`; tracked under P677 allowlist work
 - Workflow-state literal guard — tracked under P453 canonical state-names module
 - Broader TypeScript scope (cli.ts, mcp-server/server.ts, server/index.ts, core/infrastructure/, infra/) — pre-existing errors tracked under P417 child proposals

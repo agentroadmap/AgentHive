@@ -104,11 +104,18 @@ echo -e "${BOLD}=== TIER 1: Fast preflight ===${RESET}"
 echo "Scope: typecheck (hive-cli + identity + workflow), credential-env scan"
 echo ""
 
-# 1a. Biome lint/format check — DEFERRED: 1000+ pre-existing violations across the codebase
-#   (a11y, organizeImports, CSS, and TS rules all failing before P417 was written).
-#   Blocking on pre-existing biome failures makes the gate permanently unpassable.
-#   Remediation tracked as P417 child: incrementally enable biome rules on green files.
-step_skip "biome lint/format — 1000+ pre-existing violations across codebase [DEFERRED: fix pre-existing errors before enforcing; tracked under P417 child proposal]"
+# 1a. Biome lint/format check — scoped to changed files vs origin/main.
+#   Full-repo check has 1000+ pre-existing violations; --changed limits scope to the diff.
+#   Requires git history; falls back to skip if origin/main is unreachable (e.g. fresh clone).
+if git rev-parse --verify origin/main >/dev/null 2>&1; then
+  if node_modules/.bin/biome check --changed --since=origin/main . >/dev/null 2>&1; then
+    step_pass "biome lint/format (changed files vs origin/main)"
+  else
+    step_fail "biome lint/format — run: node_modules/.bin/biome check --changed --since=origin/main ."
+  fi
+else
+  step_skip "biome lint/format — origin/main not reachable; skipping changed-file check [SKIP]"
+fi
 
 # 1b. TypeScript typecheck — scoped to tsconfig.check.json (green zone)
 #   Broader coverage deferred: src/apps/cli.ts, src/apps/mcp-server/server.ts,

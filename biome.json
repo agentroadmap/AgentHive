@@ -13,7 +13,10 @@
 			}
 		},
 		{
-			"includes": ["src/apps/dashboard-web/styles/style.css"],
+			"includes": [
+				"src/apps/dashboard-web/styles/style.css",
+				"src/web/styles/style.css"
+			],
 			"formatter": {
 				"enabled": false
 			},
