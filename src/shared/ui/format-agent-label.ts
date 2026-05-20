@@ -76,6 +76,9 @@ export function formatAgentLabel(
 	return `${displayName} (${row.agent_identity})`;
 }
 
+/** P933 live-feed variant — same as formatAgentLabel without backend-hint opts. */
+export const formatAgentLabelLive = formatAgentLabel;
+
 /**
  * Short form — display name only, no identity suffix.
  * For space-constrained contexts (column headers, status chips).
