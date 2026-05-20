@@ -116,11 +116,33 @@ export function renderHeadlines(
 }
 
 function formatPulseMessage(m: PulseMessage): string {
-	const time = new Date(Number(m.timestamp)).toLocaleTimeString([], {
+	const msgDate = new Date(Number(m.timestamp));
+	const now = new Date();
+	const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+	const msgDay = new Date(msgDate.getFullYear(), msgDate.getMonth(), msgDate.getDate());
+
+	let timeStr: string;
+	const timePart = msgDate.toLocaleTimeString([], {
 		hour: "2-digit",
 		minute: "2-digit",
 		second: "2-digit",
 	});
+
+	// If message is from a different day, show date separator
+	if (msgDay.getTime() !== today.getTime()) {
+		const dayDiff = Math.floor((today.getTime() - msgDay.getTime()) / (1000 * 60 * 60 * 24));
+		if (dayDiff === 1) {
+			timeStr = `yesterday ${timePart}`;
+		} else if (dayDiff > 1 && dayDiff <= 7) {
+			const dayName = msgDate.toLocaleDateString([], { weekday: "short" });
+			timeStr = `${dayName} ${timePart}`;
+		} else {
+			const datePart = msgDate.toLocaleDateString([], { month: "short", day: "numeric" });
+			timeStr = `${datePart} ${timePart}`;
+		}
+	} else {
+		timeStr = timePart;
+	}
 
 	let content = m.content;
 	if (
@@ -136,5 +158,5 @@ function formatPulseMessage(m: PulseMessage): string {
 		content = `{magenta-fg}${content}{/}`;
 	}
 
-	return `[{gray-fg}${time}{/}] {bold}${m.sender_identity.substring(0, 12).padEnd(12)}{/} ❯ ${content}`;
+	return `[{gray-fg}${timeStr}{/}] {bold}${m.sender_identity.substring(0, 12).padEnd(12)}{/} ❯ ${content}`;
 }
