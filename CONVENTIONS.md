@@ -940,6 +940,31 @@ Concrete instruction the enhancing agent can act on without further context.
 
 `advance` verdicts also write to `gate_decision_log` (via `prop_transition` which records the decision) and may omit the failures/remediation sections.
 
+#### AC verification standard (P378 / P707)
+
+Every `verify_ac` call with `status='pass'` MUST include a `verification_notes` field containing a JSON evidence object. **Null or empty `verification_notes` is a protocol violation — it is a phantom pass and will be treated as `status='fail'` by the D3 gate once P707 ships.**
+
+**Evidence schema by AC category:**
+
+| Category | Required JSON keys |
+|---|---|
+| `schema/migration` | `migration_file` (string), `tables` (string[]), `applied` (bool) |
+| `file/module` | `files` (string[]), `symbols` (string[]), `grep_evidence` (string snippet) |
+| `mcp_tool` | `tool_name`, `action`, `call_verified` (bool), `response_sample` (string) |
+| `behavioral/test` | `test_file`, `test_names` (string[]), `result` ("pass"\|"fail"), `output_snippet` |
+
+**Before calling `verify_ac` for any AC:**
+
+1. Identify the AC category (schema, file, mcp_tool, or behavioral).
+2. Run the category-appropriate check — read the file, grep for the symbol, call the MCP action, or run the test.
+3. Paste actual output or path into `verification_notes` — do NOT infer from design text alone.
+4. Do not call `verify_ac` on more than 2 ACs within 5 seconds for the same proposal (bulk-advance guard, P707).
+
+**What is NOT valid evidence:**
+- "The design describes this behavior" — design text is not implementation evidence.
+- "The code was written per spec" — code review without grep/read is not evidence.
+- Null, empty string, or whitespace-only `verification_notes`.
+
 #### Source-of-truth rule (DB > markdown)
 
 Product design content lives in DB proposal rows (`proposal.design`, `proposal.summary`, `proposal.motivation`) plus the relational tables (`proposal_acceptance_criteria`, `proposal_dependencies`, `proposal_reviews`, `proposal_discussions`, `gate_decision_log`). Markdown files under `docs/proposals/` are documentation surface; they are NOT authoritative. 
