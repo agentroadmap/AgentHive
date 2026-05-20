@@ -145,3 +145,24 @@ export async function getProjectTemplateSnapshot(
 	);
 	return rows[0] ?? null;
 }
+
+// ─── Alias resolver ───────────────────────────────────────────────────────────
+
+/**
+ * Finding 17 / P901 Phase 1: Resolve a stable alias name to its target
+ * template identifier. Returns null when the alias is not registered.
+ *
+ * The alias table FK is schema-dependent (TEXT on agenthive v1, BIGINT on
+ * hiveCentral v2); ::text cast normalises both to the string return type.
+ */
+export async function resolveTemplateAlias(
+	aliasName: string,
+): Promise<string | null> {
+	const { rows } = await query<{ template_id: string }>(
+		`SELECT workflow_template_id::text AS template_id
+     FROM template.workflow_template_alias
+     WHERE alias = $1`,
+		[aliasName],
+	);
+	return rows[0]?.template_id ?? null;
+}
