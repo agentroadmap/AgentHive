@@ -1,5 +1,8 @@
+import { hostname } from "node:os";
 import { query } from "../../../../infra/postgres/pool.ts";
 import { resolvePermanentAgentMapping } from "../../../../core/identity/agent-registry/permanent-agent-map.ts";
+import { assignDisplayAlias, pascalCaseHost } from "../../../../core/identity/agent-registry/agent-name.ts";
+import { claimDisplayAlias } from "../../../../core/identity/agent-registry/alias-manager.ts";
 import type { CallToolResult } from "../../types.ts";
 
 type ToolHandler = (args: Record<string, unknown>) => Promise<CallToolResult>;
@@ -46,6 +49,21 @@ export const agencyRegisterHandler: ToolHandler = async (args) => {
 			 ON CONFLICT DO NOTHING`,
 			[row.id, skills],
 		);
+	}
+
+	// P932: claim Tier 2 display alias for slot-'a' agency workers
+	const slotChar = agentIdentity.split("-").pop();
+	const expertise = skills?.[0];
+	if (slotChar === "a" && expertise && row?.id) {
+		const provider = agentIdentity.split("/")[0] ?? agentIdentity;
+		const host = process.env.AGENTHIVE_HOST ?? hostname();
+		const alias = assignDisplayAlias(provider, pascalCaseHost(host), expertise, slotChar);
+		if (alias) {
+			const claim = await claimDisplayAlias(row.id, alias, { tier: 2 });
+			if (!claim.claimed) {
+				console.warn(`[agencyRegisterHandler] ${agentIdentity} alias '${alias}': ${claim.reason}`);
+			}
+		}
 	}
 
 	return {
@@ -168,6 +186,21 @@ export const workerRegisterHandler: ToolHandler = async (args) => {
 	);
 
 	const workerId = result.rows[0]?.worker_id;
+
+	// P932: claim Tier 2 display alias for slot-'a' workers
+	const slotChar = workerIdentity.split("-").pop();
+	const expertise = skills?.[0];
+	if (slotChar === "a" && expertise && workerId) {
+		const provider = agencyIdentity.split("/")[0] ?? agencyIdentity;
+		const host = process.env.AGENTHIVE_HOST ?? hostname();
+		const alias = assignDisplayAlias(provider, pascalCaseHost(host), expertise, slotChar);
+		if (alias) {
+			const claim = await claimDisplayAlias(workerId, alias, { tier: 2 });
+			if (!claim.claimed) {
+				console.warn(`[workerRegisterHandler] ${workerIdentity} alias '${alias}': ${claim.reason}`);
+			}
+		}
+	}
 
 	return {
 		content: [

@@ -68,6 +68,7 @@ export function renderCockpit(
 
 		// Create persistent container
 		container = box({
+			parent: screen,
 			top: 0,
 			left: 0,
 			width: "100%",
@@ -168,7 +169,7 @@ export function renderCockpit(
 			.slice()
 			.reverse()
 			.forEach((m) => {
-				const time = new Date(Number(m.timestamp) / 1000).toLocaleTimeString(
+				const time = new Date(Number(m.timestamp)).toLocaleTimeString(
 					[],
 					{ hour: "2-digit", minute: "2-digit" },
 				);
@@ -250,7 +251,7 @@ export function renderCockpit(
 		.reverse();
 	if (newMessages.length > 0) {
 		newMessages.forEach((m) => {
-			const time = new Date(Number(m.timestamp) / 1000).toLocaleTimeString([], {
+			const time = new Date(Number(m.timestamp)).toLocaleTimeString([], {
 				hour: "2-digit",
 				minute: "2-digit",
 			});

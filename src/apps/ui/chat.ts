@@ -45,6 +45,7 @@ export function renderChat(
 		});
 
 		container = box({
+			parent: screen,
 			top: 0,
 			left: 0,
 			width: "100%",
@@ -175,7 +176,7 @@ export function renderChat(
 }
 
 function formatChatMessage(m: ChatMessage, userSystemName: string): string {
-	const time = new Date(Number(m.timestamp) / 1000).toLocaleTimeString([], {
+	const time = new Date(Number(m.timestamp)).toLocaleTimeString([], {
 		hour: "2-digit",
 		minute: "2-digit",
 	});

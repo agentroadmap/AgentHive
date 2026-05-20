@@ -34,6 +34,7 @@ export function renderHeadlines(
 		});
 
 		container = box({
+			parent: screen,
 			top: 0,
 			left: 0,
 			width: "100%",
@@ -113,7 +114,7 @@ export function renderHeadlines(
 }
 
 function formatPulseMessage(m: PulseMessage): string {
-	const time = new Date(Number(m.timestamp) / 1000).toLocaleTimeString([], {
+	const time = new Date(Number(m.timestamp)).toLocaleTimeString([], {
 		hour: "2-digit",
 		minute: "2-digit",
 		second: "2-digit",

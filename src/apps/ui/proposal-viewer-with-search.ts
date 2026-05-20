@@ -610,6 +610,19 @@ export async function viewProposalEnhanced(
 	const screen = createScreen({
 		title: `${options.title || "Roadmap Proposals"} - ${versionLabel}`,
 	});
+	let finishScreen: (() => void) | null = null;
+	const screenClosed = new Promise<void>((resolve) => {
+		finishScreen = () => {
+			if (helpRestoreTimer) {
+				clearTimeout(helpRestoreTimer);
+				helpRestoreTimer = null;
+			}
+			searchService?.dispose();
+			contentStore?.dispose();
+			resolve();
+		};
+		screen.on("destroy", finishScreen);
+	});
 
 	// Main container
 	const container = box({
@@ -1565,6 +1578,7 @@ export async function viewProposalEnhanced(
 				filterHeader.destroy();
 				screen.destroy();
 				await options.onTabPress?.();
+				finishScreen?.();
 			}
 		});
 	}
@@ -1608,17 +1622,7 @@ export async function viewProposalEnhanced(
 	screen.render();
 
 	// Wait for screen to close
-	return new Promise<void>((resolve) => {
-		screen.on("destroy", () => {
-			if (helpRestoreTimer) {
-				clearTimeout(helpRestoreTimer);
-				helpRestoreTimer = null;
-			}
-			searchService?.dispose();
-			contentStore?.dispose();
-			resolve();
-		});
-	});
+	return screenClosed;
 }
 
 export function generateDetailContent(

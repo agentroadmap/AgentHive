@@ -181,7 +181,13 @@ export async function loadProposalsForUnifiedView(
 
 	const loadingScreenFactory =
 		options.loadingScreenFactory || createLoadingScreen;
-	const loadingScreen = await loadingScreenFactory("Loading proposals");
+	const config = await core.filesystem.loadConfig();
+	const useLoadingScreen =
+		options.loadingScreenFactory !== undefined ||
+		config?.database?.provider !== "Postgres";
+	const loadingScreen = useLoadingScreen
+		? await loadingScreenFactory("Loading proposals")
+		: null;
 
 	try {
 		const result = await loader((message) => {
@@ -363,11 +369,21 @@ export async function runUnifiedView(
 			}
 
 			// Show enhanced proposal viewer with view switching support
-			return new Promise<ViewResult>((resolve) => {
+			return new Promise<ViewResult>((resolve, reject) => {
 				let result: ViewResult = "exit"; // Default to exit
+				let settled = false;
+
+				const finish = (value: ViewResult) => {
+					if (settled) {
+						return;
+					}
+					settled = true;
+					resolve(value);
+				};
 
 				const onTabPress = async () => {
 					result = "switch";
+					finish("switch");
 				};
 
 				// Determine initial focus based on where we're coming from
@@ -400,11 +416,18 @@ export async function runUnifiedView(
 					},
 					onTabPress,
 				}).then(() => {
+					if (settled) {
+						return;
+					}
 					// If user wants to exit, do it immediately
 					if (result === "exit") {
 						process.exit(0);
 					}
-					resolve(result);
+					finish(result);
+				}).catch((error) => {
+					if (!settled) {
+						reject(error);
+					}
 				});
 			});
 		};
@@ -462,10 +485,20 @@ export async function runUnifiedView(
 				resolve(result);
 			});
 
-			// Auto-refresh: reload proposals from DB every 5s and push to board
+			// Auto-refresh silently. This runs while the board already owns the TUI,
+			// so it must not create a separate loading screen.
 			const refreshTimer = setInterval(() => {
 				void (async () => {
-					await loadProposalsForUnifiedView(options.core, {});
+					const refreshed = await loadProposalsForUnifiedView(options.core, {
+						loadingScreenFactory: async () => null,
+					});
+					proposals = (refreshed.proposals || []).filter(
+						(proposal) =>
+							proposal.id &&
+							proposal.id.trim() !== "" &&
+							hasAnyPrefix(proposal.id),
+					);
+					kanbanStatuses = refreshed.statuses ?? kanbanStatuses;
 					emitBoardUpdate();
 				})();
 			}, 5000);
@@ -491,10 +524,16 @@ export async function runUnifiedView(
 					_result = "switch";
 				};
 
+				renderCockpit(screen, {
+					agents: [],
+					proposals: [],
+					ledger: [],
+					messages: [],
+				});
+
 				const refresh = async () => {
-					// Load proposals and agents concurrently
-					const [_pipelineProposals, agents, msgRows] = await Promise.all([
-						options.core.loadProposals(),
+					const pipelineProposals = proposals;
+					const [agents, msgRows] = await Promise.all([
 						options.core.listAgents(),
 						pgQuery(
 							`SELECT from_agent, message_content, created_at FROM roadmap.message_ledger
@@ -523,7 +562,7 @@ export async function runUnifiedView(
 
 					renderCockpit(screen, {
 						agents: agentData,
-						proposals: _pipelineProposals.map((proposal: { id: string; title: string; status: string; priority?: string | null; proposalType?: string }) => ({
+						proposals: pipelineProposals.map((proposal: { id: string; title: string; status: string; priority?: string | null; proposalType?: string }) => ({
 							id: proposal.id,
 							display_id: proposal.id,
 							title: proposal.title,
@@ -573,6 +612,11 @@ export async function runUnifiedView(
 				const onTabPress = () => {
 					_result = "switch";
 				};
+
+				renderHeadlines(screen, {
+					messages: [],
+					projectName: config?.projectName || "Roadmap.md",
+				});
 
 				const refresh = async () => {
 					const messages = (await options.core.listPulse(50)).map((event) => ({
@@ -624,6 +668,22 @@ export async function runUnifiedView(
 				};
 
 				const currentChannel = "public";
+				const onSend = async (content: string) => {
+					await pgQuery(
+						`INSERT INTO roadmap.message_ledger (from_agent, channel, message_content, message_type) VALUES ($1, $2, $3, 'text')`,
+						["HUMAN", currentChannel, content],
+					);
+				};
+
+				renderChat(screen, {
+					messages: [],
+					channels: [currentChannel],
+					currentChannel,
+					projectName: config?.projectName || "Roadmap.md",
+					userSystemName: "HUMAN",
+					onSend,
+				});
+
 				const refresh = async () => {
 					const [channelRows, messageRows] = await Promise.all([
 						pgQuery(
@@ -649,12 +709,7 @@ export async function runUnifiedView(
 						currentChannel,
 						projectName: config?.projectName || "Roadmap.md",
 						userSystemName: "HUMAN",
-						onSend: async (content: string) => {
-							await pgQuery(
-								`INSERT INTO roadmap.message_ledger (from_agent, channel, message_content, message_type) VALUES ($1, $2, $3, 'text')`,
-								["HUMAN", currentChannel, content],
-							);
-						},
+						onSend,
 					});
 				};
 

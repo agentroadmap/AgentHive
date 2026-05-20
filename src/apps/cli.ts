@@ -113,7 +113,10 @@ import {
 	isGitRepository,
 	updateReadmeWithBoard,
 } from "./index.ts";
-import { query as pgQuery } from "../infra/postgres/pool.ts";
+import {
+	initPoolFromConfig as initPgPoolFromConfig,
+	query as pgQuery,
+} from "../infra/postgres/pool.ts";
 
 type IntegrationMode = "mcp" | "cli" | "none";
 
@@ -2930,6 +2933,13 @@ proposalCmd
 			labels: baseFilters.labels,
 			ready: options.ready,
 		};
+
+		const config = await core.filesystem.loadConfig();
+		if (config?.database?.provider === "Postgres") {
+			await loadRuntimeEnvFile();
+			initPgPoolFromConfig(config.database);
+			await pgQuery("SELECT 1");
+		}
 
 		const { runUnifiedView } = await import("../ui/unified-view.ts");
 		const interactiveLoaderFilters: ProposalListFilter = {};
