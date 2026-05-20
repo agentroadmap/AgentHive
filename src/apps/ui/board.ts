@@ -6,7 +6,7 @@ import {
 } from "../../board.ts";
 import type { StreamEvent } from "../../core/messaging/event-stream.ts";
 import { Core } from "../../core/roadmap.ts";
-import { getView, getRegistry } from "../../core/workflow/state-names.ts";
+import { RfcStates, getRegistry, getView } from "../../core/workflow/state-names.ts";
 import type { Directive, Proposal } from "../../shared/types/index.ts";
 import { collectAvailableLabels } from "../../shared/utils/label-filter.ts";
 import {
@@ -67,8 +67,87 @@ type ColumnView = {
 	box: BoxInterface;
 };
 
+type WorkflowViewKey = "rfc" | "hotfix" | "obsolete";
+
+type WorkflowViewDefinition = {
+	key: WorkflowViewKey;
+	label: string;
+	stages: { name: string }[];
+};
+
+const RFC_STATUSES = [
+	"DRAFT",
+	"REVIEW",
+	"DEVELOP",
+	"MERGE",
+	"COMPLETE",
+	"BLOCKED",
+];
+const HOTFIX_STATUSES = [
+	"TRIAGE",
+	"FIX",
+	"DEPLOYED",
+	"ESCALATE",
+	"WONT_FIX",
+	"NON_ISSUE",
+];
+const HOTFIX_PROPOSAL_TYPES = new Set(["hotfix"]);
+const WORKFLOW_VIEWS: WorkflowViewDefinition[] = [
+	{
+		key: "rfc",
+		label: "RFC",
+		stages: RFC_STATUSES.map((name) => ({ name })),
+	},
+	{
+		key: "hotfix",
+		label: "Hotfix",
+		stages: HOTFIX_STATUSES.map((name) => ({ name })),
+	},
+	{
+		key: "obsolete",
+		label: "Obsolete",
+		stages: [],
+	},
+];
+const WORKFLOW_BY_KEY = new Map(
+	WORKFLOW_VIEWS.map((workflow) => [workflow.key, workflow]),
+);
+
+function getRfcStatusesCanonical(): string[] {
+	return [...RFC_STATUSES];
+}
+
+function getHotfixStatusesCanonical(): string[] {
+	return [...HOTFIX_STATUSES];
+}
+
+function statusForView(status: string, _workflowKey: WorkflowViewKey): string {
+	return status.toUpperCase();
+}
+
 function isObsoleteProposal(proposal: Proposal): boolean {
 	return (proposal.maturity ?? "").toLowerCase() === "obsolete";
+}
+
+function getCombinedWorkflowStatuses(
+	proposals: Proposal[],
+	workflowKey: WorkflowViewKey,
+): string[] {
+	const canonical =
+		workflowKey === "hotfix"
+			? getHotfixStatusesCanonical()
+			: getRfcStatusesCanonical();
+	const extras = new Set<string>();
+	for (const proposal of proposals) {
+		const status = statusForView(proposal.status, workflowKey);
+		if (status && !canonical.includes(status)) {
+			extras.add(status);
+		}
+	}
+	return [
+		...canonical,
+		...Array.from(extras).sort((a, b) => a.localeCompare(b)),
+	];
 }
 
 export function getWorkflowViewDefinition(name: string) {

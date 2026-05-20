@@ -181,7 +181,13 @@ export async function loadProposalsForUnifiedView(
 
 	const loadingScreenFactory =
 		options.loadingScreenFactory || createLoadingScreen;
-	const loadingScreen = await loadingScreenFactory("Loading proposals");
+	const config = await core.filesystem.loadConfig();
+	const useLoadingScreen =
+		options.loadingScreenFactory !== undefined ||
+		config?.database?.provider !== "Postgres";
+	const loadingScreen = useLoadingScreen
+		? await loadingScreenFactory("Loading proposals")
+		: null;
 
 	try {
 		const result = await loader((message) => {
@@ -363,11 +369,21 @@ export async function runUnifiedView(
 			}
 
 			// Show enhanced proposal viewer with view switching support
-			return new Promise<ViewResult>((resolve) => {
+			return new Promise<ViewResult>((resolve, reject) => {
 				let result: ViewResult = "exit"; // Default to exit
+				let settled = false;
+
+				const finish = (value: ViewResult) => {
+					if (settled) {
+						return;
+					}
+					settled = true;
+					resolve(value);
+				};
 
 				const onTabPress = async () => {
 					result = "switch";
+					finish("switch");
 				};
 
 				// Determine initial focus based on where we're coming from
@@ -400,11 +416,18 @@ export async function runUnifiedView(
 					},
 					onTabPress,
 				}).then(() => {
+					if (settled) {
+						return;
+					}
 					// If user wants to exit, do it immediately
 					if (result === "exit") {
 						process.exit(0);
 					}
-					resolve(result);
+					finish(result);
+				}).catch((error) => {
+					if (!settled) {
+						reject(error);
+					}
 				});
 			});
 		};
@@ -461,6 +484,31 @@ export async function runUnifiedView(
 				boardUpdater = null;
 				resolve(result);
 			});
+
+			// Auto-refresh silently. This runs while the board already owns the TUI,
+			// so it must not create a separate loading screen.
+			const refreshTimer = setInterval(() => {
+				void (async () => {
+					const refreshed = await loadProposalsForUnifiedView(options.core, {
+						loadingScreenFactory: async () => null,
+					});
+					proposals = (refreshed.proposals || []).filter(
+						(proposal) =>
+							proposal.id &&
+							proposal.id.trim() !== "" &&
+							hasAnyPrefix(proposal.id),
+					);
+					kanbanStatuses = refreshed.statuses ?? kanbanStatuses;
+					emitBoardUpdate();
+				})();
+			}, 5000);
+
+			// Clean up timer when board exits
+			const origResolve = resolve;
+			resolve = ((value: ViewResult) => {
+				clearInterval(refreshTimer);
+				origResolve(value);
+			}) as typeof resolve;
 			});
 			// Note: previously had a unified-view-level setInterval here that
 			// called loadProposalsForUnifiedView() every 5s. That broke the board
@@ -483,18 +531,17 @@ export async function runUnifiedView(
 					_result = "switch";
 				};
 
+				renderCockpit(screen, {
+					agents: [],
+					proposals: [],
+					ledger: [],
+					messages: [],
+				});
+
 				const refresh = async () => {
-					// Load proposals, agents (from Postgres registry), and pulse messages concurrently.
-					// Core.listAgents was removed by P149 (2026-05-04); query agent_registry directly.
-					const [_pipelineProposals, agentRows, msgRows] = await Promise.all([
-						options.core.loadProposals(),
-						pgQuery(
-							`SELECT agent_identity, agent_type, role, status, updated_at
-							 FROM roadmap_workforce.agent_registry
-							 WHERE status != 'retired'
-							 ORDER BY agent_identity`,
-							[],
-						).then((r) => r.rows).catch(() => [] as any[]),
+					const pipelineProposals = proposals;
+					const [agents, msgRows] = await Promise.all([
+						options.core.listAgents(),
 						pgQuery(
 							`SELECT from_agent, message_content, created_at FROM roadmap.message_ledger
 							 WHERE channel = 'public' ORDER BY created_at DESC LIMIT 30`,
@@ -502,14 +549,14 @@ export async function runUnifiedView(
 						).then((r) => r.rows).catch(() => [] as any[]),
 					]);
 
-					const agentData: WorkforceAgent[] = (agentRows as any[]).map((row: any) => ({
-						id: row.agent_identity,
-						name: row.agent_identity,
-						role: row.role ?? row.agent_type ?? "agent",
-						status: row.status === "active" ? "active" : "offline",
-						currentProposal: undefined,
-						statusMessage: row.status ?? "unknown",
-						lastSeen: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
+					const agentData: WorkforceAgent[] = agents.map((agent) => ({
+						id: agent.identity ?? agent.name,
+						name: agent.name,
+						role: agent.capabilities[0] ?? "agent",
+						status: agent.status === "offline" ? "offline" : "active",
+						currentProposal: agent.claims?.[0]?.id,
+						statusMessage: agent.status,
+						lastSeen: Date.parse(agent.lastSeen || new Date().toISOString()),
 					}));
 
 					const cockpitMessages = (msgRows as any[])
@@ -522,7 +569,7 @@ export async function runUnifiedView(
 
 					renderCockpit(screen, {
 						agents: agentData,
-						proposals: _pipelineProposals.map((proposal: { id: string; title: string; status: string; priority?: string | null; proposalType?: string }) => ({
+						proposals: pipelineProposals.map((proposal: { id: string; title: string; status: string; priority?: string | null; proposalType?: string }) => ({
 							id: proposal.id,
 							display_id: proposal.id,
 							title: proposal.title,
@@ -572,6 +619,11 @@ export async function runUnifiedView(
 				const onTabPress = () => {
 					_result = "switch";
 				};
+
+				renderHeadlines(screen, {
+					messages: [],
+					projectName: config?.projectName || "Roadmap.md",
+				});
 
 				const refresh = async () => {
 					// Core.listPulse was removed by P149 (2026-05-04). Pulse events now
@@ -633,6 +685,22 @@ export async function runUnifiedView(
 				};
 
 				const currentChannel = "public";
+				const onSend = async (content: string) => {
+					await pgQuery(
+						`INSERT INTO roadmap.message_ledger (from_agent, channel, message_content, message_type) VALUES ($1, $2, $3, 'text')`,
+						["HUMAN", currentChannel, content],
+					);
+				};
+
+				renderChat(screen, {
+					messages: [],
+					channels: [currentChannel],
+					currentChannel,
+					projectName: config?.projectName || "Roadmap.md",
+					userSystemName: "HUMAN",
+					onSend,
+				});
+
 				const refresh = async () => {
 					const [channelRows, messageRows] = await Promise.all([
 						pgQuery(
@@ -658,12 +726,7 @@ export async function runUnifiedView(
 						currentChannel,
 						projectName: config?.projectName || "Roadmap.md",
 						userSystemName: "HUMAN",
-						onSend: async (content: string) => {
-							await pgQuery(
-								`INSERT INTO roadmap.message_ledger (from_agent, channel, message_content, message_type) VALUES ($1, $2, $3, 'text')`,
-								["HUMAN", currentChannel, content],
-							);
-						},
+						onSend,
 					});
 				};
 

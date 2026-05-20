@@ -171,7 +171,7 @@ export function renderCockpit(
 			.slice()
 			.reverse()
 			.forEach((m) => {
-				const time = new Date(Number(m.timestamp) / 1000).toLocaleTimeString(
+				const time = new Date(Number(m.timestamp)).toLocaleTimeString(
 					[],
 					{ hour: "2-digit", minute: "2-digit" },
 				);
@@ -253,7 +253,7 @@ export function renderCockpit(
 		.reverse();
 	if (newMessages.length > 0) {
 		newMessages.forEach((m) => {
-			const time = new Date(Number(m.timestamp) / 1000).toLocaleTimeString([], {
+			const time = new Date(Number(m.timestamp)).toLocaleTimeString([], {
 				hour: "2-digit",
 				minute: "2-digit",
 			});

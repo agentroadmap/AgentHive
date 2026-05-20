@@ -51,6 +51,7 @@ export async function getRevision(): Promise<string | null> {
 			{
 				stdio: ["ignore", "pipe", "ignore"],
 				encoding: "utf-8",
+				timeout: 1000,
 			},
 		).trim();
 		return revision.length > 0 ? revision : null;

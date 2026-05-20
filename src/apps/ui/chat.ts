@@ -177,7 +177,7 @@ export function renderChat(
 }
 
 function formatChatMessage(m: ChatMessage, userSystemName: string): string {
-	const time = new Date(Number(m.timestamp) / 1000).toLocaleTimeString([], {
+	const time = new Date(Number(m.timestamp)).toLocaleTimeString([], {
 		hour: "2-digit",
 		minute: "2-digit",
 	});

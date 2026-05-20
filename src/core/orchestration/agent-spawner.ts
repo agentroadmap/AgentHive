@@ -900,6 +900,7 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 		modelHint: hint,
 		proposalId = null,
 		role = null,
+		requiredTier = null,
 	} = opts;
 	type RouteRow = {
 		id: number;
@@ -925,6 +926,17 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 
 	const perMillionPricing = await supportsPerMillionRoutePricing();
 
+	let tierFilter = "";
+	let tierParamValue: string | null = requiredTier;
+	
+	if (role && (role.includes("frontier-review") || role.includes("audit"))) {
+		tierParamValue = "frontier";
+	}
+
+	if (tierParamValue) {
+		tierFilter = ` AND mr.tier = '${tierParamValue}'`;
+	}
+
 	// P771/P773: shared params for all route queries: $3=host, $4=projectId, $5=agencyIdentity, $6=roleProfileId
 	const policyParams = [AGENTHIVE_HOST, projectId, agencyIdentity, roleProfileId] as const;
 	const policyFilters = `
@@ -933,7 +945,7 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
           AND ${agencyPolicyFilterSql(5, "mr")}
           AND ${rolePolicyFilterSql(6, "mr")}
           AND ${budgetFilterSql(4, "mr")}
-          AND ${cooldownFilterSql("mr")}`;
+          AND ${cooldownFilterSql("mr")}${tierFilter}`;
 
 	const fetchRoute = (modelName: string) => {
 		// P742+P771: $3=host, $4=projectId, $5=agencyIdentity, $6=roleProfileId
@@ -1022,7 +1034,7 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
           AND ${agencyPolicyFilterSql(4, "mr")}
           AND ${rolePolicyFilterSql(5, "mr")}
           AND ${budgetFilterSql(3, "mr")}
-          AND ${cooldownFilterSql("mr")}`;
+          AND ${cooldownFilterSql("mr")}${tierFilter}`;
 	// P771: policy params without a leading modelName param (for default-selection queries)
 	const defaultPolicyParams = [AGENTHIVE_HOST, projectId, agencyIdentity, roleProfileId] as const;
 

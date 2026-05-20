@@ -116,7 +116,7 @@ export function renderHeadlines(
 }
 
 function formatPulseMessage(m: PulseMessage): string {
-	const time = new Date(Number(m.timestamp) / 1000).toLocaleTimeString([], {
+	const time = new Date(Number(m.timestamp)).toLocaleTimeString([], {
 		hour: "2-digit",
 		minute: "2-digit",
 		second: "2-digit",

@@ -89,6 +89,7 @@ export class PgProposalHandlers {
 		status?: string;
 		type?: string;
 		proposal_type?: string;
+		parent_id?: string | number;
 		limit?: number;
 		include_terminal?: boolean;
 		include_metadata?: boolean;
@@ -98,7 +99,7 @@ export class PgProposalHandlers {
 			const includeTerminal = args.include_terminal === true;
 			const includeMetadata = args.include_metadata === true;
 
-			let sql = `SELECT id, display_id, title, status, type, maturity, created_at${includeMetadata ? ", summary, design, motivation" : ""}
+			let sql = `SELECT id, display_id, parent_id, title, status, type, maturity, created_at${includeMetadata ? ", summary, design, motivation" : ""}
 			       FROM roadmap_proposal.proposal`;
 			const params: (string | number)[] = [];
 			const conditions: string[] = [];
@@ -118,6 +119,20 @@ export class PgProposalHandlers {
 			if (proposalType !== undefined) {
 				conditions.push(`type = $${params.length + 1}`);
 				params.push(proposalType);
+			}
+
+			if (args.parent_id !== undefined && args.parent_id !== null) {
+				const raw = args.parent_id;
+				if (typeof raw === 'string' && raw.startsWith('P')) {
+					conditions.push(`parent_id = (SELECT id FROM roadmap_proposal.proposal WHERE display_id = $${params.length + 1} LIMIT 1)`);
+					params.push(raw);
+				} else {
+					const parentNum = Number(raw);
+					if (!Number.isNaN(parentNum)) {
+						conditions.push(`parent_id = $${params.length + 1}`);
+						params.push(parentNum);
+					}
+				}
 			}
 
 			if (conditions.length) {
@@ -170,6 +185,7 @@ export class PgProposalHandlers {
 			const items = rows.map((p: any) => ({
 				id: p.id,
 				display_id: p.display_id,
+				parent_id: p.parent_id ?? null,
 				title: p.title,
 				status: p.status,
 				type: p.type,
@@ -948,11 +964,21 @@ export class PgProposalHandlers {
 				[proposal.id],
 			);
 
-			// 6. Build YAML+MD projection
+			// 6. Fetch direct children (shallow only)
+			const childrenResult = await query(
+				`SELECT id, display_id, title, type, status, maturity, summary
+				 FROM roadmap_proposal.proposal
+				 WHERE parent_id = $1
+				 ORDER BY id`,
+				[proposal.id],
+			);
+
+			// 7. Build YAML+MD projection
 			const did = proposal.display_id ?? `#${proposal.id}`;
 			const lease = leaseResult.rows[0] ?? null;
 			const decision = decisionResult.rows[0] ?? null;
 			const deps = depResult.rows;
+			const children = childrenResult.rows;
 
 			let md = `---\n`;
 			md += `id: ${did}\n`;
@@ -961,6 +987,7 @@ export class PgProposalHandlers {
 			md += `status: ${proposal.status}\n`;
 			md += `maturity: ${proposal.maturity ?? "new"}\n`;
 			if (proposal.priority) md += `priority: ${proposal.priority}\n`;
+			if (proposal.parent_id) md += `parent_id: ${proposal.parent_id}\n`;
 			if (lease) {
 				md += `lease:\n`;
 				md += `  agent: "${lease.agent_identity}"\n`;
@@ -1020,6 +1047,16 @@ export class PgProposalHandlers {
 				for (const d of deps) {
 					const status = d.resolved ? "resolved" : "active";
 					md += `- ${d.display_id} (${d.dependency_type}) [${status}]\n`;
+				}
+				md += `\n`;
+			}
+
+			// Children (shallow, no recursive descent)
+			if (children.length > 0) {
+				md += `## Children\n\n`;
+				for (const c of children) {
+					const summary = c.summary ? ` — ${c.summary.slice(0, 120)}${c.summary.length > 120 ? '…' : ''}` : '';
+					md += `- **${c.display_id}** (${c.type}) [${c.status}/${c.maturity}] ${c.title}${summary}\n`;
 				}
 				md += `\n`;
 			}

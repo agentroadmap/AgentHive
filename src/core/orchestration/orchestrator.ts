@@ -832,7 +832,26 @@ export class Orchestrator {
 
 				const { mode, reasons } = assessReadiness(detail);
 
+				const isHighRisk =
+					detail.priority === "high" ||
+					detail.priority === "critical" ||
+					detail.unresolvedDependencies > 2 ||
+					detail.totalAcceptanceCriteria > 5;
+
 				if (mode === "skip") {
+					// P226: 10% sampling for completed work
+					if (detail.status.toUpperCase() === "COMPLETE" && Math.random() < 0.1) {
+						await postWorkOffer({
+							proposalId: detail.id,
+							squadName: `P${detail.id}-audit`,
+							role: `frontier-review`,
+							task: `Frontier audit sample for completed proposal ${detail.displayId}. Review decisions and final state.`,
+							stage: detail.status,
+							worktreeHint: this.defaultWorktree,
+							roleProfileId: null,
+						});
+						dispatched++;
+					}
 					continue;
 				}
 
@@ -859,6 +878,19 @@ export class Orchestrator {
 				});
 
 				dispatched++;
+
+				if (isHighRisk && mode === "gate") {
+					await postWorkOffer({
+						proposalId: detail.id,
+						squadName: `P${detail.id}-audit`,
+						role: `frontier-review`,
+						task: `Frontier oversight for high-risk gate transition on ${detail.displayId}. Review primary decision.`,
+						stage: detail.status,
+						worktreeHint: this.defaultWorktree,
+						roleProfileId: null,
+					});
+					dispatched++;
+				}
 			} catch (err) {
 				// Backpressure isn't a failure — it's the cap doing its job.
 				// Stop scanning this tick: if the queue is full, no point

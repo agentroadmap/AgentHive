@@ -32,4 +32,6 @@ export interface ResolveRouteOpts {
 	proposalId?: number | null;
 	/** P772: workflow stage / role label for route_decision_log. */
 	role?: string | null;
+	/** P226: required tier for model selection. If provided, overrides default selection logic to pick a model of this tier. */
+	requiredTier?: string | null;
 }

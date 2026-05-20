@@ -31,6 +31,10 @@ export function registerProposalTools(
 					description:
 						"Alias for type. Proposal type determines workflow selection.",
 				},
+				parent_id: {
+					type: "string",
+					description: "Filter to direct children of this proposal (display_id like 'P1000' or numeric id)",
+				},
 				domain_id: { type: "string", description: "Filter by domain" },
 				maturity_min: {
 					type: "number",
