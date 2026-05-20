@@ -32,7 +32,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Client } from "pg";
-import { query, getPool } from "../postgres/pool.ts";
+import { query } from "../postgres/pool.ts";
 import { agentNotifyChannel } from "../messaging/a2a-access-control.ts";
 import { sendMessage as sendLiaisonMessage } from "./liaison-message-service.ts";
 import { handleTypedTaskRequest, handleWorkerReport, type TaskDispatcherHelpers } from "./task-dispatcher.ts";
@@ -131,7 +131,7 @@ export async function runLiaisonAgent(
 
 	const listenClient = opts.createListenClient
 		? await opts.createListenClient()
-		: await connectListenClient();
+		: await connectListenClient(identity);
 	await listenClient.query(`LISTEN "${channel}"`);
 	console.log(`${log} LISTEN active on: ${channel}`);
 
@@ -613,12 +613,13 @@ export async function insertReply(args: {
 	messageType: string;
 	correlationId: string | null;
 	replyTo: number;
+	metadata?: Record<string, unknown>;
 }): Promise<number> {
 	const { rows } = await query(
 		`INSERT INTO roadmap.message_ledger
 		    (from_agent, to_agent, message_type, message_content,
-		     correlation_id, reply_to)
-		 VALUES ($1, $2, $3, $4, $5, $6)
+		     correlation_id, reply_to, metadata)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
 		 RETURNING id`,
 		[
 			args.fromAgent,
@@ -627,6 +628,7 @@ export async function insertReply(args: {
 			args.content,
 			args.correlationId,
 			args.replyTo,
+			JSON.stringify(args.metadata ?? {}),
 		],
 	);
 	return rows[0].id as number;
@@ -648,9 +650,27 @@ export async function markReadAndResolveTimeout(messageId: number): Promise<void
 	);
 }
 
-async function connectListenClient(): Promise<Client> {
-	// P844: getPool() handles password resolution and search_path.
-	// We use a dedicated client from the pool for LISTEN.
-	const client = await getPool().connect();
-	return client as unknown as Client;
+async function connectListenClient(identity?: string): Promise<Client> {
+	// LISTEN must bypass PgBouncer transaction pooling. Normal queries use the
+	// shared pool; this long-lived client connects directly and is ended on stop.
+	const tag = identity ?? process.env.AGENCY_ID ?? "unknown";
+	const databaseUrl = process.env.DATABASE_URL
+		? new URL(process.env.DATABASE_URL)
+		: null;
+	const client = new Client({
+		host: process.env.PGHOST ?? databaseUrl?.hostname ?? "127.0.0.1",
+		port: Number(process.env.PGPORT_DIRECT ?? databaseUrl?.port ?? process.env.PGPORT ?? 5432),
+		user: process.env.PGUSER ?? databaseUrl?.username,
+		password: process.env.PGPASSWORD ?? databaseUrl?.password,
+		database:
+			process.env.PGDATABASE ??
+			databaseUrl?.pathname.replace(/^\/+/, "") ??
+			"agenthive",
+		application_name: `agenthive-a2a-listen-${tag}`,
+		options:
+			process.env.PG_OPTIONS ??
+			"-c search_path=roadmap_proposal,roadmap_workforce,roadmap_efficiency,roadmap,public",
+	});
+	await client.connect();
+	return client;
 }
