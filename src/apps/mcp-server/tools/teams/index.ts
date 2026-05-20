@@ -257,6 +257,20 @@ const teamRosterTool: McpToolHandler = createSimpleValidatedTool(
 	server.addTool(leaseAcquireTool);
 	server.addTool(leaseRenewTool);
 	server.addTool(federationStatusTool);
+	// P182: Team Governance Archive (AC-7)
+	const teamGovernanceArchiveTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "team_governance_archive",
+			description:
+				"Archive team governance entries when a proposal completes. " +
+				"Marks team:charter and team:decision:* as archived; deletes transient norms. " +
+				"P182: Team Governance Layer (AC-7).",
+			inputSchema: teamGovernanceArchiveSchema,
+		},
+		teamGovernanceArchiveSchema,
+		async (input) => govHandlers.teamGovernanceArchive(input as any),
+	);
+
 	// P182 governance tools
 	server.addTool(teamCharterCreateTool);
 	server.addTool(teamNormsSetTool);
