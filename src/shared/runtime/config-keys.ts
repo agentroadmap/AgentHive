@@ -91,8 +91,7 @@ export const StructuralKeys = {
 		class: "structural" as const,
 		parse: (v: string) => v,
 		required: true,
-		description:
-			"PostgreSQL username",
+		description: "PostgreSQL username",
 		yamlPath: "database.user",
 		envOverride: true,
 		// P448: no defaultValue — PGUSER is deployment-specific, must be explicit
@@ -418,54 +417,6 @@ export const StructuralKeys = {
 		defaultValue: "~/.pgpass",
 	} satisfies ConfigKey<string>,
 
-	AGENTHIVE_TENANT_POOL_LRU_MAX: {
-		name: "AGENTHIVE_TENANT_POOL_LRU_MAX",
-		class: "structural" as const,
-		parse: (v: string) => {
-			const n = Number(v);
-			if (!Number.isFinite(n) || n <= 0) {
-				throw new Error(`AGENTHIVE_TENANT_POOL_LRU_MAX must be a positive integer, got: ${v}`);
-			}
-			return Math.trunc(n);
-		},
-		required: false,
-		description: "Maximum number of concurrently cached tenant pools in the LRU registry (default: 16). Oldest pool is evicted when the cap is reached.",
-		envOverride: true,
-		defaultValue: 16,
-	} satisfies ConfigKey<number>,
-
-	AGENTHIVE_TENANT_POOL_MAX: {
-		name: "AGENTHIVE_TENANT_POOL_MAX",
-		class: "structural" as const,
-		parse: (v: string) => {
-			const n = Number(v);
-			if (!Number.isFinite(n) || n <= 0) {
-				throw new Error(`AGENTHIVE_TENANT_POOL_MAX must be a positive integer, got: ${v}`);
-			}
-			return Math.trunc(n);
-		},
-		required: false,
-		description: "Max connections per tenant pool (default: 8)",
-		envOverride: true,
-		defaultValue: 8,
-	} satisfies ConfigKey<number>,
-
-	AGENTHIVE_DRAIN_TIMEOUT_MS: {
-		name: "AGENTHIVE_DRAIN_TIMEOUT_MS",
-		class: "structural" as const,
-		parse: (v: string) => {
-			const n = Number(v);
-			if (!Number.isFinite(n) || n <= 0) {
-				throw new Error(`AGENTHIVE_DRAIN_TIMEOUT_MS must be positive, got: ${v}`);
-			}
-			return n;
-		},
-		required: false,
-		description: "Pool drain grace period in ms (default: 30000)",
-		envOverride: true,
-		defaultValue: 30_000,
-	} satisfies ConfigKey<number>,
-
 	PGPORT_DIRECT: {
 		name: "PGPORT_DIRECT",
 		class: "structural" as const,
@@ -477,7 +428,8 @@ export const StructuralKeys = {
 			return n;
 		},
 		required: false,
-		description: "Direct Postgres port, bypassing PgBouncer (used for LISTEN connections when P499 is deployed). Defaults to PGPORT when not set.",
+		description:
+			"Direct Postgres port, bypassing PgBouncer (used for LISTEN connections when P499 is deployed). Defaults to PGPORT when not set.",
 		envOverride: true,
 	} satisfies ConfigKey<number | undefined>,
 };

@@ -693,6 +693,39 @@ AgentHive is multi-agent. Git discipline is part of system safety.
 
 Precision matters more than confidence theater.
 
+### 8.1 Local CI gate (P417) — trigger conditions and tier selection
+
+Run `npm run ci` (or `bash scripts/gate.sh`) before any of the following:
+- Restarting a service or systemd unit
+- Merging to `main`
+- Changing an MCP tool or MCP server configuration
+- Applying a database migration
+
+**Two-tier structure:**
+
+| Tier | Command | When required | Time budget |
+|---|---|---|---|
+| **Tier 1 — fast preflight** | `npm run ci -- --preflight` | Before any commit on TypeScript sources | <10 s |
+| **Tier 2 — full gate** | `npm run ci` (default) | Before restart, MCP change, migration, or merge | <60 s |
+
+**Tier 1 checks (always blocking):**
+1. `biome check` — lint + format (run `npm run check` to auto-fix)
+2. `tsc --noEmit -p tsconfig.check.json` — typecheck green zone (hive-cli + identity + workflow)
+3. `bash scripts/ci-env-check.sh` — no bare `process.env.PG*` reads outside config layer
+
+**Tier 2 checks (blocking unless explicitly deferred):**
+4. `bash scripts/ci/check-migration-drops.sh` — DROP/RENAME column with surviving codebase refs
+5. `node --import jiti/register scripts/check-migration-prefixes.ts` — sequential migration numbering, no gaps
+6. `bash scripts/check-hardcoded.sh` — no literal host paths, ports, or model names in source
+7. `node scripts/check-publish-hygiene.mjs` — only checked when `package.json` changed vs `origin/main`
+
+**Deferred (informational, continue-on-error):**
+- SQL column audit — requires `AUDIT_DATABASE_URL`; tracked under P677 allowlist work
+- Workflow-state literal guard — tracked under P453 canonical state-names module
+- Broader TypeScript scope (cli.ts, mcp-server/server.ts, server/index.ts, core/infrastructure/, infra/) — pre-existing errors tracked under P417 child proposals
+
+Exit codes: `0` = all required checks pass; `1` = one or more required checks failed; `2` = invocation error.
+
 ### 8d. Project scope (P477 AC-2)
 
 The web control plane is multi-project: every operator action belongs to one of the rows in `roadmap.project`. Scope flows through one HTTP header.
