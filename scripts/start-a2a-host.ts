@@ -209,6 +209,27 @@ async function loadActiveAgencies(): Promise<AgencyRow[]> {
 	// names are typed 'llm' but operationally run as agencies (e.g. adam).
 	// host_affinity is loose: match this host OR null/empty (treated as "any
 	// host" — legacy copilot-agency-gary has empty host_affinity).
+	//
+	// Step 2 (2026-05-19): AGENTHIVE_AGENCY_FILTER + AGENTHIVE_AGENCY_EXCLUDE
+	// let a sibling a2a-host process under a different OS user (e.g. andy)
+	// attach a subset of agencies (e.g. codex-agency-bot under andy with codex
+	// auth in andy's home). Comma-separated agent_identity lists.
+	const includeRaw = process.env.AGENTHIVE_AGENCY_FILTER ?? "";
+	const excludeRaw = process.env.AGENTHIVE_AGENCY_EXCLUDE ?? "";
+	const includeList = includeRaw.split(",").map(s => s.trim()).filter(Boolean);
+	const excludeList = excludeRaw.split(",").map(s => s.trim()).filter(Boolean);
+
+	const params: unknown[] = [host];
+	let filterSql = "";
+	if (includeList.length > 0) {
+		params.push(includeList);
+		filterSql += ` AND agent_identity = ANY($${params.length}::text[])`;
+	}
+	if (excludeList.length > 0) {
+		params.push(excludeList);
+		filterSql += ` AND agent_identity <> ALL($${params.length}::text[])`;
+	}
+
 	const { rows } = await query<AgencyRow>(
 		`SELECT agent_identity, preferred_provider
 		   FROM roadmap_workforce.agent_registry
@@ -216,9 +237,13 @@ async function loadActiveAgencies(): Promise<AgencyRow[]> {
 		    AND agent_type    IN ('agency', 'llm')
 		    AND status        IN ('active','dormant')
 		    AND coalesce(preferred_provider, '') <> ''
+		    ${filterSql}
 		  ORDER BY agent_identity`,
-		[host],
+		params,
 	);
+	if (includeList.length > 0 || excludeList.length > 0) {
+		console.log(`[a2a-host] agency-filter active: include=[${includeList.join(",")}] exclude=[${excludeList.join(",")}] → ${rows.length} agencies`);
+	}
 	return rows;
 }
 
