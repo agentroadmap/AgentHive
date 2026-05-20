@@ -237,6 +237,8 @@ test("handleOfferDispatch: missing dispatch_id or claim_token aborts before spaw
 });
 
 test("handleOfferDispatch: paused agency declines spawn and completes offer as failed", async () => {
+	_resetActiveSpawnForTest();
+	_resetMaxInFlightCacheForTest();
 	let spawnCalled = false;
 	const execCalls: Array<{ sql: string; params: unknown[] }> = [];
 	const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
