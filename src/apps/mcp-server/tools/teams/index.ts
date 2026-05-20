@@ -25,6 +25,7 @@ import {
 	teamDeclineSchema,
 	teamDisputeLogSchema,
 	teamDissolveSchema,
+	teamGovernanceArchiveSchema,
 	teamListSchema,
 	teamNormsSetSchema,
 	teamRegisterAgentSchema,
@@ -229,6 +230,20 @@ const teamRosterTool: McpToolHandler = createSimpleValidatedTool(
 		async (input) => govHandlers.teamDisputeLog(input as any),
 	);
 
+	// P182: Team Governance Archive (AC-7)
+	const teamGovernanceArchiveTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "team_governance_archive",
+			description:
+				"Archive team governance entries when a proposal reaches COMPLETE. " +
+				"Flags team:charter and team:decision:* entries as archived; removes transient norms. " +
+				"Sets team status to 'archived'. P182: Team Governance Layer.",
+			inputSchema: teamGovernanceArchiveSchema,
+		},
+		teamGovernanceArchiveSchema,
+		async (input) => govHandlers.teamGovernanceArchive(input as any),
+	);
+
 	server.addTool(teamCreateTool);
 	server.addTool(teamAcceptTool);
 	server.addTool(teamDeclineTool);
@@ -246,4 +261,5 @@ const teamRosterTool: McpToolHandler = createSimpleValidatedTool(
 	server.addTool(teamCharterCreateTool);
 	server.addTool(teamNormsSetTool);
 	server.addTool(teamDisputeLogTool);
+	server.addTool(teamGovernanceArchiveTool);
 }

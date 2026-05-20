@@ -185,6 +185,10 @@ export class PgTeamGovernanceHandlers {
 	/**
 	 * AC-3, AC-4, AC-5: Log or update a dispute in agent_conflicts.
 	 * Supports three-tier ladder: L1(self) → L2(peer) → L3(team) → L4(society).
+	 *
+	 * Column mapping (actual DB schema):
+	 *   initiatorAgent → agent_a, respondentAgent → agent_b, description → topic
+	 *   position_a / position_b are left blank (not surfaced in this tool).
 	 */
 	async teamDisputeLog(args: {
 		proposalId: string;
@@ -211,8 +215,8 @@ export class PgTeamGovernanceHandlers {
 			const existing = await query<{ id: number }>(
 				`SELECT id FROM roadmap_workforce.agent_conflicts
 				WHERE proposal_id = $1
-				  AND initiator_agent = $2
-				  AND respondent_agent = $3
+				  AND agent_a = $2
+				  AND agent_b = $3
 				  AND status = 'open'
 				LIMIT 1`,
 				[proposalIdNum, args.initiatorAgent, args.respondentAgent],
@@ -239,12 +243,15 @@ export class PgTeamGovernanceHandlers {
 					],
 				);
 			} else {
-				// Insert new dispute record
+				// Insert new dispute record.
+				// topic = description summary; position_a/b are empty (not captured here).
 				const result = await query<{ id: number }>(
 					`INSERT INTO roadmap_workforce.agent_conflicts
-						(proposal_id, initiator_agent, respondent_agent, description,
+						(proposal_id, agent_a, agent_b, topic,
+						 position_a, position_b,
 						 status, escalation_level, team_id, resolution_note)
-					VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+					VALUES ($1, $2, $3, $4, '', '',
+					        $5, $6, $7, $8)
 					RETURNING id`,
 					[
 						proposalIdNum,
@@ -321,13 +328,13 @@ export class PgTeamGovernanceHandlers {
 				[teamIdNum],
 			);
 
-			// Mark team as dissolved
+			// Mark team as archived (constraint: 'active' | 'archived' only)
 			await query(
 				`UPDATE roadmap_workforce.team
-				SET status = 'dissolved',
+				SET status = 'archived',
 				    metadata = metadata || jsonb_build_object(
-				        'dissolved_by', $2::text,
-				        'dissolved_at', now()::text
+				        'archived_by', $2::text,
+				        'archived_at', now()::text
 				    )
 				WHERE id = $1`,
 				[teamIdNum, args.archivedBy],
@@ -342,7 +349,7 @@ export class PgTeamGovernanceHandlers {
 							`Team: ${args.teamId}\n` +
 							`Archived: ${archiveResult.rows.length} entries (charter + decisions)\n` +
 							`Cleaned up: ${deleteResult.rows.length} transient norms\n` +
-							`Status: dissolved`,
+							`Status: archived`,
 					},
 				],
 			};
