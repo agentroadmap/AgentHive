@@ -42690,11 +42690,11 @@ function locale_default(locale) {
   var group3 = locale.grouping === undefined || locale.thousands === undefined ? identity_default2 : formatGroup_default(map3.call(locale.grouping, Number), locale.thousands + ""), currencyPrefix = locale.currency === undefined ? "" : locale.currency[0] + "", currencySuffix = locale.currency === undefined ? "" : locale.currency[1] + "", decimal = locale.decimal === undefined ? "." : locale.decimal + "", numerals = locale.numerals === undefined ? identity_default2 : formatNumerals_default(map3.call(locale.numerals, String)), percent = locale.percent === undefined ? "%" : locale.percent + "", minus = locale.minus === undefined ? "−" : locale.minus + "", nan = locale.nan === undefined ? "NaN" : locale.nan + "";
   function newFormat(specifier, options) {
     specifier = formatSpecifier(specifier);
-    var { fill, align, sign, symbol, zero: zero3, width, comma, precision, trim: trim2, type: type2 } = specifier;
+    var { fill, align, sign, symbol, zero: zero3, width, comma, precision, trim, type: type2 } = specifier;
     if (type2 === "n")
       comma = true, type2 = "g";
     else if (!formatTypes_default[type2])
-      precision === undefined && (precision = 12), trim2 = true, type2 = "g";
+      precision === undefined && (precision = 12), trim = true, type2 = "g";
     if (zero3 || fill === "0" && align === "=")
       zero3 = true, fill = "0", align = "=";
     var prefix = (options && options.prefix !== undefined ? options.prefix : "") + (symbol === "$" ? currencyPrefix : symbol === "#" && /[boxX]/.test(type2) ? "0" + type2.toLowerCase() : ""), suffix = (symbol === "$" ? currencySuffix : /[%p]/.test(type2) ? percent : "") + (options && options.suffix !== undefined ? options.suffix : "");
@@ -42709,7 +42709,7 @@ function locale_default(locale) {
         value = +value;
         var valueNegative = value < 0 || 1 / value < 0;
         value = isNaN(value) ? nan : formatType(Math.abs(value), precision);
-        if (trim2)
+        if (trim)
           value = formatTrim_default(value);
         if (valueNegative && +value === 0 && sign !== "+")
           valueNegative = false;
@@ -75303,11 +75303,11 @@ var init_cytoscape_esm = __esm(() => {
           edgeNext[st2] = edge;
         }
         if (!directed) {
-          var ts2 = t4 * N3 + s5;
-          if (!directed && dist[ts2] > _weight) {
-            dist[ts2] = _weight;
-            next3[ts2] = s5;
-            edgeNext[ts2] = edge;
+          var ts = t4 * N3 + s5;
+          if (!directed && dist[ts] > _weight) {
+            dist[ts] = _weight;
+            next3[ts] = s5;
+            edgeNext[ts] = edge;
           }
         }
       }
@@ -100588,7 +100588,7 @@ var init_chunk_336JU56O = __esm(() => {
 var COMMENT = "comm", RULESET = "rule", DECLARATION = "decl", IMPORT = "@import", NAMESPACE = "@namespace", KEYFRAMES = "@keyframes", LAYER = "@layer";
 
 // node_modules/stylis/src/Utility.js
-function trim2(value) {
+function trim(value) {
   return value.trim();
 }
 function replace2(value, pattern, replacement) {
@@ -100685,7 +100685,7 @@ function dealloc(value) {
   return characters2 = "", value;
 }
 function delimit(type3) {
-  return trim2(slice3(position7 - 1, delimiter(type3 === 91 ? type3 + 2 : type3 === 40 ? type3 + 1 : type3)));
+  return trim(slice3(position7 - 1, delimiter(type3 === 91 ? type3 + 2 : type3 === 40 ? type3 + 1 : type3)));
 }
 function whitespace3(type3) {
   while (character = peek())
@@ -100871,7 +100871,7 @@ function ruleset(value, root10, parent5, index2, offset, rules, points, type3, p
   var size4 = sizeof(rule);
   for (var i5 = 0, j4 = 0, k3 = 0;i5 < index2; ++i5)
     for (var x5 = 0, y5 = substr(value, post + 1, post = abs2(j4 = points[i5])), z3 = value;x5 < size4; ++x5)
-      if (z3 = trim2(j4 > 0 ? rule[x5] + " " + y5 : replace2(y5, /&\f/g, rule[x5])))
+      if (z3 = trim(j4 > 0 ? rule[x5] + " " + y5 : replace2(y5, /&\f/g, rule[x5])))
         props[k3++] = z3;
   return node2(value, root10, parent5, offset === 0 ? RULESET : type3, props, children2, length2, siblings3);
 }
@@ -123912,13 +123912,13 @@ class DefaultConfigurationProvider {
     if (typeof change2.settings !== "object" || change2.settings === null) {
       return;
     }
-    Object.entries(change2.settings).forEach(([section2, configuration]) => {
-      this.updateSectionConfiguration(section2, configuration);
-      this.onConfigurationSectionUpdateEmitter.fire({ section: section2, configuration });
+    Object.entries(change2.settings).forEach(([section, configuration]) => {
+      this.updateSectionConfiguration(section, configuration);
+      this.onConfigurationSectionUpdateEmitter.fire({ section, configuration });
     });
   }
-  updateSectionConfiguration(section2, configuration) {
-    this.settings[section2] = configuration;
+  updateSectionConfiguration(section, configuration) {
+    this.settings[section] = configuration;
   }
   async getConfiguration(language, configuration) {
     await this.ready;
@@ -136806,8 +136806,8 @@ var init_pieDiagram_DEJITSTG = __esm(() => {
       themeVariables.pie12
     ];
     let sum = 0;
-    sections22.forEach((section2) => {
-      sum += section2;
+    sections22.forEach((section) => {
+      sum += section;
     });
     const filteredArcs = arcs.filter((datum2) => (datum2.data.value / sum * 100).toFixed(0) !== "0");
     const color3 = ordinal(myGeneratedColors).domain([
@@ -150820,19 +150820,19 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
     txtObject.x = txtObject.x + 0.5 * txtObject.labelMargin;
     drawText22(elem, txtObject);
   }, "drawLabel");
-  drawSection = /* @__PURE__ */ __name(function(elem, section2, conf22) {
+  drawSection = /* @__PURE__ */ __name(function(elem, section, conf22) {
     const g2 = elem.append("g");
     const rect2 = getNoteRect();
-    rect2.x = section2.x;
-    rect2.y = section2.y;
-    rect2.fill = section2.fill;
-    rect2.width = conf22.width * section2.taskCount + conf22.diagramMarginX * (section2.taskCount - 1);
+    rect2.x = section.x;
+    rect2.y = section.y;
+    rect2.fill = section.fill;
+    rect2.width = conf22.width * section.taskCount + conf22.diagramMarginX * (section.taskCount - 1);
     rect2.height = conf22.height;
-    rect2.class = "journey-section section-type-" + section2.num;
+    rect2.class = "journey-section section-type-" + section.num;
     rect2.rx = 3;
     rect2.ry = 3;
     drawRect24(g2, rect2);
-    _drawTextCandidateFunc3(conf22)(section2.text, g2, rect2.x, rect2.y, rect2.width, rect2.height, { class: "journey-section section-type-" + section2.num }, conf22, section2.colour);
+    _drawTextCandidateFunc3(conf22)(section.text, g2, rect2.x, rect2.y, rect2.width, rect2.height, { class: "journey-section section-type-" + section.num }, conf22, section.colour);
   }, "drawSection");
   drawTask = /* @__PURE__ */ __name(function(elem, task, conf22, diagramId2) {
     const center3 = task.x + conf22.width / 2;
@@ -151078,7 +151078,7 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
             break;
           }
         }
-        const section2 = {
+        const section = {
           x: i5 * conf22.taskMargin + i5 * conf22.width + leftMargin,
           y: 50,
           text: task.section,
@@ -151087,7 +151087,7 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
           colour,
           taskCount: taskInSectionCount
         };
-        svgDraw_default3.drawSection(diagram22, section2, conf22);
+        svgDraw_default3.drawSection(diagram22, section, conf22);
         lastSection = task.section;
         sectionNumber++;
       }
@@ -151915,19 +151915,19 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
     txtObject.x = txtObject.x + 0.5 * txtObject.labelMargin;
     drawText4(elem, txtObject);
   }, "drawLabel");
-  drawSection2 = /* @__PURE__ */ __name(function(elem, section2, conf5) {
+  drawSection2 = /* @__PURE__ */ __name(function(elem, section, conf5) {
     const g2 = elem.append("g");
     const rect2 = getNoteRect3();
-    rect2.x = section2.x;
-    rect2.y = section2.y;
-    rect2.fill = section2.fill;
+    rect2.x = section.x;
+    rect2.y = section.y;
+    rect2.fill = section.fill;
     rect2.width = conf5.width;
     rect2.height = conf5.height;
-    rect2.class = "journey-section section-type-" + section2.num;
+    rect2.class = "journey-section section-type-" + section.num;
     rect2.rx = 3;
     rect2.ry = 3;
     drawRect3(g2, rect2);
-    _drawTextCandidateFunc4(conf5)(section2.text, g2, rect2.x, rect2.y, rect2.width, rect2.height, { class: "journey-section section-type-" + section2.num }, conf5, section2.colour);
+    _drawTextCandidateFunc4(conf5)(section.text, g2, rect2.x, rect2.y, rect2.width, rect2.height, { class: "journey-section section-type-" + section.num }, conf5, section.colour);
   }, "drawSection");
   drawTask2 = /* @__PURE__ */ __name(function(elem, task, conf5, diagramId2) {
     const center3 = task.x + conf5.width / 2;
@@ -152036,10 +152036,10 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
     const { theme, look } = conf5;
     const isReduxTheme = theme?.includes("redux");
     const maxSections = conf5?.themeVariables?.THEME_COLOR_LIMIT ?? 12;
-    const section2 = fullSection % maxSections - 1;
+    const section = fullSection % maxSections - 1;
     const nodeElem = elem.append("g");
-    node3.section = section2;
-    nodeElem.attr("class", (node3.class ? node3.class + " " : "") + "timeline-node " + ("section-" + section2));
+    node3.section = section;
+    nodeElem.attr("class", (node3.class ? node3.class + " " : "") + "timeline-node " + ("section-" + section));
     const bkgElem = nodeElem.append("g");
     const textElem = nodeElem.append("g");
     const txt = textElem.append("text").text(node3.descr).attr("dy", "1em").attr("alignment-baseline", "middle").attr("dominant-baseline", "middle").attr("text-anchor", "middle").call(wrap4, node3.width);
@@ -152052,7 +152052,7 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
     if (isReduxTheme) {
       textElem.attr("transform", `translate(${node3.width / 2}, ${isEvent ? node3.padding / 2 + 3 : node3.padding})`);
     }
-    defaultBkg(bkgElem, node3, section2, diagramId2, conf5);
+    defaultBkg(bkgElem, node3, section, diagramId2, conf5);
     if (look === "neo") {
       nodeElem.attr("data-look", `neo`);
       if (isReduxTheme) {
@@ -152078,14 +152078,14 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
     textElem.remove();
     return bbox.height + fontSize * 1.1 * 0.5 + node3.padding;
   }, "getVirtualNodeHeight");
-  defaultBkg = /* @__PURE__ */ __name(function(elem, node3, section2, diagramId2, config4) {
+  defaultBkg = /* @__PURE__ */ __name(function(elem, node3, section, diagramId2, config4) {
     const { theme } = config4;
     const r3 = theme?.includes("redux") ? 0 : 5;
     const rd = 5;
     const d4 = r3 > 0 ? `M0 ${node3.height - rd} v${-node3.height + 2 * rd} q0,-${r3},${r3},-${r3} h${node3.width - 2 * rd} q${r3},0,${r3},${r3} v${node3.height - rd} H0 Z` : `M0 ${node3.height - rd} v${-(node3.height - rd)} h${node3.width} v${node3.height} H0 Z`;
     elem.append("path").attr("id", diagramId2 + "-node-" + nodeCount++).attr("class", "node-bkg node-" + node3.type).attr("d", d4);
     if (!theme?.includes("redux")) {
-      elem.append("line").attr("class", "node-line-" + section2).attr("x1", 0).attr("y1", node3.height).attr("x2", node3.width).attr("y2", node3.height);
+      elem.append("line").attr("class", "node-line-" + section).attr("x1", 0).attr("y1", node3.height).attr("x2", node3.width).attr("y2", node3.height);
     }
   }, "defaultBkg");
   svgDraw_default4 = {
@@ -152131,10 +152131,10 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
     sectionBeginY = 50;
     let sectionNumber = 0;
     let hasSections = true;
-    sections22.forEach(function(section2) {
+    sections22.forEach(function(section) {
       const sectionNode = {
         number: sectionNumber,
-        descr: section2,
+        descr: section,
         section: sectionNumber,
         width: 150,
         padding: 20,
@@ -152180,11 +152180,11 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
     log2.debug("maxSectionHeight before draw", maxSectionHeight);
     log2.debug("maxTaskHeight before draw", maxTaskHeight);
     if (sections22 && sections22.length > 0) {
-      sections22.forEach((section2) => {
-        const tasksForSection = tasks22.filter((task) => task.section === section2);
+      sections22.forEach((section) => {
+        const tasksForSection = tasks22.filter((task) => task.section === section);
         const sectionNode = {
           number: sectionNumber,
-          descr: section2,
+          descr: section,
           section: sectionNumber,
           width: 200 * Math.max(tasksForSection.length, 1) - 50,
           padding: 20,
@@ -152312,10 +152312,10 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
     const hasSections = sections22 && sections22.length > 0;
     const timelineX = hasSections ? axisX : masterX + leftWidth;
     const sectionWidth = Math.max(50, leftWidth + rightWidth - NODE_PADDING * 2);
-    sections22.forEach(function(section2) {
+    sections22.forEach(function(section) {
       const sectionNode = {
         number: sectionNumber,
-        descr: section2,
+        descr: section,
         section: sectionNumber,
         width: sectionWidth,
         padding: NODE_PADDING,
@@ -152361,11 +152361,11 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
     const taskBlockHeight = Math.max(maxTaskHeight, maxEventStackHeight);
     const taskSpacing = taskBlockHeight + TASK_VERTICAL_GAP;
     if (hasSections) {
-      sections22.forEach((section2) => {
-        const tasksForSection = tasks22.filter((task) => task.section === section2);
+      sections22.forEach((section) => {
+        const tasksForSection = tasks22.filter((task) => task.section === section);
         const sectionNode = {
           number: sectionNumber,
-          descr: section2,
+          descr: section,
           section: sectionNumber,
           width: sectionWidth,
           padding: NODE_PADDING,
@@ -154615,23 +154615,23 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
     const _nodes = [];
     const sections22 = getSections5();
     const conf5 = getConfig2();
-    for (const section2 of sections22) {
+    for (const section of sections22) {
       const node3 = {
-        id: section2.id,
-        label: sanitizeText(section2.label ?? "", conf5),
+        id: section.id,
+        label: sanitizeText(section.label ?? "", conf5),
         labelType: "markdown",
         isGroup: true,
-        ticket: section2.ticket,
+        ticket: section.ticket,
         shape: "kanbanSection",
-        level: section2.level,
+        level: section.level,
         look: conf5.look
       };
       _nodes.push(node3);
-      const children2 = nodes3.filter((n3) => n3.parentId === section2.id);
+      const children2 = nodes3.filter((n3) => n3.parentId === section.id);
       for (const item of children2) {
         const childNode = {
           id: item.id,
-          parentId: section2.id,
+          parentId: section.id,
           label: sanitizeText(item.label ?? "", conf5),
           labelType: "markdown",
           isGroup: false,
@@ -154701,9 +154701,9 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
         node3.priority = doc?.priority;
       }
     }
-    const section2 = getSection(level);
-    if (section2) {
-      node3.parentId = section2.id || "kbn" + cnt2++;
+    const section = getSection(level);
+    if (section) {
+      node3.parentId = section.id || "kbn" + cnt2++;
     } else {
       sections5.push(node3);
     }
@@ -154810,33 +154810,33 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
     const padding = 10;
     const sectionObjects = [];
     let maxLabelHeight = 25;
-    for (const section2 of sections22) {
+    for (const section of sections22) {
       const WIDTH = conf5?.kanban?.sectionWidth || 200;
       cnt22 = cnt22 + 1;
-      section2.x = WIDTH * cnt22 + (cnt22 - 1) * padding / 2;
-      section2.width = WIDTH;
-      section2.y = 0;
-      section2.height = WIDTH * 3;
-      section2.rx = 5;
-      section2.ry = 5;
-      section2.cssClasses = section2.cssClasses + " section-" + cnt22;
-      const sectionObj = await insertCluster(sectionsElem, section2);
+      section.x = WIDTH * cnt22 + (cnt22 - 1) * padding / 2;
+      section.width = WIDTH;
+      section.y = 0;
+      section.height = WIDTH * 3;
+      section.rx = 5;
+      section.ry = 5;
+      section.cssClasses = section.cssClasses + " section-" + cnt22;
+      const sectionObj = await insertCluster(sectionsElem, section);
       maxLabelHeight = Math.max(maxLabelHeight, sectionObj?.labelBBox?.height);
       sectionObjects.push(sectionObj);
     }
     let i5 = 0;
-    for (const section2 of sections22) {
+    for (const section of sections22) {
       const sectionObj = sectionObjects[i5];
       i5 = i5 + 1;
       const WIDTH = conf5?.kanban?.sectionWidth || 200;
       const top2 = -WIDTH * 3 / 2 + maxLabelHeight;
       let y5 = top2;
-      const sectionItems = data4Layout.nodes.filter((node3) => node3.parentId === section2.id);
+      const sectionItems = data4Layout.nodes.filter((node3) => node3.parentId === section.id);
       for (const item of sectionItems) {
         if (item.isGroup) {
           throw new Error("Groups within groups are not allowed in Kanban diagrams");
         }
-        item.x = section2.x;
+        item.x = section.x;
         item.width = WIDTH - 1.5 * padding;
         const nodeEl = await insertNode(nodesElem, item, { config: conf5 });
         const bbox = nodeEl.node().getBBox();
@@ -155390,7 +155390,7 @@ var init_sankey = __esm(() => {
   init_align();
 });
 
-// node_modules/d3-sankey/node_modules/d3-shape/node_modules/d3-path/src/path.js
+// node_modules/d3-sankey/node_modules/d3-path/src/path.js
 function Path2() {
   this._x0 = this._y0 = this._x1 = this._y1 = null;
   this._ = "";
@@ -155472,7 +155472,7 @@ var init_path3 = __esm(() => {
   path_default2 = path4;
 });
 
-// node_modules/d3-sankey/node_modules/d3-shape/node_modules/d3-path/src/index.js
+// node_modules/d3-sankey/node_modules/d3-path/src/index.js
 var init_src34 = __esm(() => {
   init_path3();
 });
@@ -160400,7 +160400,7 @@ var init_diagram_5BDNPKRD = __esm(() => {
   };
 });
 
-// node_modules/cytoscape-fcose/node_modules/cose-base/node_modules/layout-base/layout-base.js
+// node_modules/cytoscape-fcose/node_modules/layout-base/layout-base.js
 var require_layout_base2 = __commonJS((exports, module) => {
   (function webpackUniversalModuleDefinition(root10, factory2) {
     if (typeof exports === "object" && typeof module === "object")
@@ -175629,6 +175629,21 @@ class ApiClient {
     const result = await this.fetchJson(`${API_BASE}/dispatches`);
     return result.dispatches;
   }
+  async fetchTeams() {
+    return this.fetchJson(`${API_BASE}/teams`);
+  }
+  async fetchKnowledge(options) {
+    const params = new URLSearchParams;
+    if (options?.query)
+      params.set("query", options.query);
+    if (options?.type)
+      params.set("type", options.type);
+    const qs = params.toString();
+    return this.fetchJson(`${API_BASE}/knowledge${qs ? `?${qs}` : ""}`);
+  }
+  async markKnowledgeHelpful(id) {
+    await this.fetchWithRetry(`${API_BASE}/knowledge/${id}/helpful`, { method: "POST" });
+  }
   async fetchPulse(limit) {
     const params = limit ? `?limit=${limit}` : "";
     return this.fetchJson(`${API_BASE}/pulse${params}`);
@@ -178790,20 +178805,6 @@ function heartbeatText(seconds) {
     return `${Math.floor(seconds / 60)}m`;
   return `${Math.floor(seconds / 3600)}h`;
 }
-function proposalMaturityClass(maturity) {
-  switch ((maturity ?? "").toLowerCase()) {
-    case "mature":
-      return "text-emerald-700 dark:text-emerald-300";
-    case "active":
-      return "text-blue-700 dark:text-blue-300";
-    case "obsolete":
-      return "text-gray-400 dark:text-gray-500";
-    case "new":
-      return "text-amber-700 dark:text-amber-300";
-    default:
-      return "text-gray-900 dark:text-gray-100";
-  }
-}
 function badgeClass(value) {
   switch (value.toLowerCase()) {
     case "active":
@@ -179063,13 +179064,13 @@ var DashboardPage = ({
                                   children: proposal.status
                                 }, undefined, false, undefined, this),
                                 proposal.maturity ? /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("span", {
-                                  className: `inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${badgeClass(proposal.maturity)}`,
+                                  className: `inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${maturityBadgeColors(proposal.maturity)}`,
                                   children: proposal.maturity
                                 }, undefined, false, undefined, this) : null
                               ]
                             }, undefined, true, undefined, this),
                             /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
-                              className: `mt-2 text-sm font-medium ${proposalMaturityClass(proposal.maturity)}`,
+                              className: `mt-2 text-sm font-medium ${maturityBadgeColors(proposal.maturity)}`,
                               children: proposal.title
                             }, undefined, false, undefined, this),
                             /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
@@ -180292,781 +180293,7 @@ var DispatchPage = () => {
 var DispatchPage_default = DispatchPage;
 
 // src/apps/dashboard-web/components/DocumentsPage.tsx
-var import_react19 = __toESM(require_react(), 1);
-var jsx_dev_runtime19 = __toESM(require_jsx_dev_runtime(), 1);
-var docTypeColor = (type) => {
-  switch (type) {
-    case "specification":
-      return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400";
-    case "guide":
-      return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400";
-    case "readme":
-      return "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400";
-    default:
-      return "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400";
-  }
-};
-var formatDate2 = (dateStr) => {
-  if (!dateStr)
-    return "";
-  try {
-    return new Date(dateStr).toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric"
-    });
-  } catch {
-    return dateStr;
-  }
-};
-var DocumentsPage = () => {
-  const [documents, setDocuments] = import_react19.useState([]);
-  const [loading, setLoading] = import_react19.useState(true);
-  const [error, setError] = import_react19.useState(null);
-  const [filter, setFilter] = import_react19.useState("");
-  const [typeFilter, setTypeFilter] = import_react19.useState("");
-  const [selectedDoc, setSelectedDoc] = import_react19.useState(null);
-  const fetchData = import_react19.useCallback(async () => {
-    try {
-      setError(null);
-      const data = await apiClient.fetchDocs();
-      setDocuments(data);
-    } catch (err) {
-      console.error("Failed to fetch documents:", err);
-      setError("Failed to load documents");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-  import_react19.useEffect(() => {
-    fetchData();
-  }, [fetchData]);
-  const docTypes = [...new Set(documents.map((d) => d.type))].sort();
-  const filteredDocs = documents.filter((doc) => {
-    if (filter) {
-      const query = filter.toLowerCase();
-      const matchesTitle = doc.title?.toLowerCase().includes(query);
-      const matchesName = doc.name?.toLowerCase().includes(query);
-      const matchesPath = doc.path?.toLowerCase().includes(query);
-      if (!matchesTitle && !matchesName && !matchesPath)
-        return false;
-    }
-    if (typeFilter && doc.type !== typeFilter)
-      return false;
-    return true;
-  });
-  if (loading) {
-    return /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-      className: "flex flex-col justify-center items-center h-64 space-y-4",
-      children: [
-        /* @__PURE__ */ jsx_dev_runtime19.jsxDEV(LoadingSpinner_default, {
-          size: "lg",
-          text: ""
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("p", {
-          className: "text-lg font-medium text-gray-900 dark:text-gray-100",
-          children: "Loading documents..."
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this);
-  }
-  if (error) {
-    return /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-      className: "p-8 text-center",
-      children: /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-        className: "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6",
-        children: [
-          /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("p", {
-            className: "text-red-600 dark:text-red-400 font-medium",
-            children: "Error"
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("p", {
-            className: "text-red-500 dark:text-red-300 text-sm mt-1",
-            children: error
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("button", {
-            type: "button",
-            onClick: fetchData,
-            className: "mt-4 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded hover:bg-red-200 dark:hover:bg-red-900/50",
-            children: "Retry"
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this)
-    }, undefined, false, undefined, this);
-  }
-  if (selectedDoc) {
-    return /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-      className: "space-y-4",
-      children: [
-        /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-          className: "flex items-center gap-4",
-          children: /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("button", {
-            type: "button",
-            onClick: () => setSelectedDoc(null),
-            className: "text-sm text-blue-600 dark:text-blue-400 hover:underline",
-            children: "← Back to documents"
-          }, undefined, false, undefined, this)
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-          className: "bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6",
-          children: [
-            /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("h1", {
-              className: "text-xl font-bold text-gray-900 dark:text-gray-100",
-              children: selectedDoc.title || selectedDoc.name
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-              className: "flex items-center gap-3 mt-2",
-              children: [
-                /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("span", {
-                  className: `px-2 py-0.5 rounded text-xs font-medium ${docTypeColor(selectedDoc.type)}`,
-                  children: selectedDoc.type
-                }, undefined, false, undefined, this),
-                selectedDoc.lastModified && /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("span", {
-                  className: "text-xs text-gray-500 dark:text-gray-400",
-                  children: [
-                    "Modified: ",
-                    formatDate2(selectedDoc.lastModified)
-                  ]
-                }, undefined, true, undefined, this)
-              ]
-            }, undefined, true, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-              className: "mt-4 prose dark:prose-invert max-w-none",
-              children: /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("pre", {
-                className: "whitespace-pre-wrap text-sm bg-gray-50 dark:bg-gray-900 p-4 rounded-lg overflow-auto",
-                children: selectedDoc.rawContent
-              }, undefined, false, undefined, this)
-            }, undefined, false, undefined, this)
-          ]
-        }, undefined, true, undefined, this)
-      ]
-    }, undefined, true, undefined, this);
-  }
-  return /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-    className: "space-y-6",
-    children: [
-      /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-        className: "flex items-center justify-between",
-        children: [
-          /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("h1", {
-            className: "text-2xl font-bold text-gray-900 dark:text-gray-100",
-            children: [
-              "Documents (",
-              documents.length,
-              ")"
-            ]
-          }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-            className: "flex items-center gap-3",
-            children: [
-              /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("input", {
-                type: "text",
-                placeholder: "Search documents...",
-                value: filter,
-                onChange: (e) => setFilter(e.target.value),
-                className: "rounded border px-3 py-1.5 text-sm bg-white dark:bg-gray-800 w-48"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("select", {
-                value: typeFilter,
-                onChange: (e) => setTypeFilter(e.target.value),
-                className: "rounded border px-2 py-1.5 text-sm bg-white dark:bg-gray-800",
-                children: [
-                  /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("option", {
-                    value: "",
-                    children: "All types"
-                  }, undefined, false, undefined, this),
-                  docTypes.map((t) => /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("option", {
-                    value: t,
-                    children: t
-                  }, t, false, undefined, this))
-                ]
-              }, undefined, true, undefined, this)
-            ]
-          }, undefined, true, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-        className: "space-y-3",
-        children: filteredDocs.map((doc) => /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("button", {
-          type: "button",
-          onClick: () => setSelectedDoc(doc),
-          className: "w-full text-left bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 hover:border-blue-300 dark:hover:border-blue-700 transition-colors",
-          children: /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-            className: "flex items-start justify-between",
-            children: [
-              /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-                className: "space-y-1",
-                children: [
-                  /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("h3", {
-                    className: "font-medium text-gray-900 dark:text-gray-100",
-                    children: doc.title || doc.name
-                  }, undefined, false, undefined, this),
-                  doc.path && /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("p", {
-                    className: "text-xs font-mono text-gray-500 dark:text-gray-400",
-                    children: doc.path
-                  }, undefined, false, undefined, this)
-                ]
-              }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-                className: "flex items-center gap-2",
-                children: [
-                  /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("span", {
-                    className: `px-2 py-0.5 rounded text-xs font-medium ${docTypeColor(doc.type)}`,
-                    children: doc.type
-                  }, undefined, false, undefined, this),
-                  doc.lastModified && /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("span", {
-                    className: "text-xs text-gray-500 dark:text-gray-400",
-                    children: formatDate2(doc.lastModified)
-                  }, undefined, false, undefined, this)
-                ]
-              }, undefined, true, undefined, this)
-            ]
-          }, undefined, true, undefined, this)
-        }, doc.id || doc.name, false, undefined, this))
-      }, undefined, false, undefined, this),
-      filteredDocs.length === 0 && /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-        className: "text-center py-12 text-gray-500 dark:text-gray-400",
-        children: filter || typeFilter ? "No documents match your filters" : "No documents found"
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-};
-var DocumentsPage_default = DocumentsPage;
-
-// src/apps/dashboard-web/components/KnowledgePage.tsx
-var import_react20 = __toESM(require_react(), 1);
-var jsx_dev_runtime20 = __toESM(require_jsx_dev_runtime(), 1);
-var entryTypeColor = (type) => {
-  switch (type) {
-    case "solution":
-      return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400";
-    case "pattern":
-      return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400";
-    case "decision":
-      return "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400";
-    case "obstacle":
-      return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400";
-    case "lesson":
-      return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400";
-    default:
-      return "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400";
-  }
-};
-var KnowledgePage = () => {
-  const [entries, setEntries] = import_react20.useState([]);
-  const [loading, setLoading] = import_react20.useState(true);
-  const [error, setError] = import_react20.useState(null);
-  const [searchQuery, setSearchQuery] = import_react20.useState("");
-  const [typeFilter, setTypeFilter] = import_react20.useState("");
-  const fetchData = import_react20.useCallback(async () => {
-    try {
-      setError(null);
-      const params = new URLSearchParams;
-      if (searchQuery)
-        params.set("query", searchQuery);
-      if (typeFilter)
-        params.set("type", typeFilter);
-      const url = `/api/knowledge${params.toString() ? `?${params.toString()}` : ""}`;
-      const response = await fetch(url);
-      if (!response.ok)
-        throw new Error("Failed to fetch knowledge entries");
-      const data = await response.json();
-      setEntries(data);
-    } catch (err) {
-      console.error("Failed to fetch knowledge entries:", err);
-      setError("Failed to load knowledge entries");
-    } finally {
-      setLoading(false);
-    }
-  }, [searchQuery, typeFilter]);
-  import_react20.useEffect(() => {
-    const timer = setTimeout(fetchData, 300);
-    return () => clearTimeout(timer);
-  }, [fetchData]);
-  const handleMarkHelpful = async (id) => {
-    try {
-      await fetch(`/api/knowledge/${id}/helpful`, { method: "POST" });
-      setEntries((prev) => prev.map((e) => e.id === id ? { ...e, helpful_count: (e.helpful_count || 0) + 1 } : e));
-    } catch (err) {
-      console.error("Failed to mark as helpful:", err);
-    }
-  };
-  if (loading && entries.length === 0) {
-    return /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
-      className: "flex flex-col justify-center items-center h-64 space-y-4",
-      children: [
-        /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(LoadingSpinner_default, {
-          size: "lg",
-          text: ""
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("p", {
-          className: "text-lg font-medium text-gray-900 dark:text-gray-100",
-          children: "Loading knowledge base..."
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this);
-  }
-  return /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
-    className: "space-y-6",
-    children: [
-      /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
-        className: "flex items-center justify-between",
-        children: [
-          /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("h1", {
-            className: "text-2xl font-bold text-gray-900 dark:text-gray-100",
-            children: [
-              "Knowledge Base (",
-              entries.length,
-              ")"
-            ]
-          }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
-            className: "flex items-center gap-3",
-            children: [
-              /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("input", {
-                type: "text",
-                placeholder: "Search knowledge...",
-                value: searchQuery,
-                onChange: (e) => setSearchQuery(e.target.value),
-                className: "rounded border px-3 py-1.5 text-sm bg-white dark:bg-gray-800 w-48"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("select", {
-                value: typeFilter,
-                onChange: (e) => setTypeFilter(e.target.value),
-                className: "rounded border px-2 py-1.5 text-sm bg-white dark:bg-gray-800",
-                children: [
-                  /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("option", {
-                    value: "",
-                    children: "All types"
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("option", {
-                    value: "solution",
-                    children: "Solutions"
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("option", {
-                    value: "pattern",
-                    children: "Patterns"
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("option", {
-                    value: "decision",
-                    children: "Decisions"
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("option", {
-                    value: "obstacle",
-                    children: "Obstacles"
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("option", {
-                    value: "lesson",
-                    children: "Lessons"
-                  }, undefined, false, undefined, this)
-                ]
-              }, undefined, true, undefined, this)
-            ]
-          }, undefined, true, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      error && /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
-        className: "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4",
-        children: /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("p", {
-          className: "text-red-600 dark:text-red-400",
-          children: error
-        }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
-        className: "space-y-4",
-        children: entries.map((entry) => /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
-          className: "bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-3",
-          children: [
-            /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
-              className: "flex items-start justify-between",
-              children: [
-                /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("span", {
-                  className: `px-2 py-0.5 rounded text-xs font-medium ${entryTypeColor(entry.type)}`,
-                  children: entry.type
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
-                  className: "flex items-center gap-2",
-                  children: [
-                    entry.helpful_count !== undefined && /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("span", {
-                      className: "text-xs text-gray-500 dark:text-gray-400",
-                      children: [
-                        "\uD83D\uDC4D ",
-                        entry.helpful_count
-                      ]
-                    }, undefined, true, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("button", {
-                      type: "button",
-                      onClick: () => handleMarkHelpful(entry.id),
-                      className: "text-xs text-blue-600 dark:text-blue-400 hover:underline",
-                      children: "Helpful?"
-                    }, undefined, false, undefined, this)
-                  ]
-                }, undefined, true, undefined, this)
-              ]
-            }, undefined, true, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("p", {
-              className: "text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap",
-              children: entry.content
-            }, undefined, false, undefined, this),
-            entry.keywords.length > 0 && /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
-              className: "flex flex-wrap gap-1",
-              children: entry.keywords.map((kw) => /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("span", {
-                className: "px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded text-xs",
-                children: kw
-              }, kw, false, undefined, this))
-            }, undefined, false, undefined, this),
-            entry.source && /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("p", {
-              className: "text-xs text-gray-500 dark:text-gray-400",
-              children: [
-                "Source: ",
-                entry.source
-              ]
-            }, undefined, true, undefined, this)
-          ]
-        }, entry.id, true, undefined, this))
-      }, undefined, false, undefined, this),
-      !loading && entries.length === 0 && /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
-        className: "text-center py-12 text-gray-500 dark:text-gray-400",
-        children: searchQuery || typeFilter ? "No knowledge entries match your search" : "No knowledge entries yet"
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-};
-var KnowledgePage_default = KnowledgePage;
-
-// src/apps/dashboard-web/components/MapPage.tsx
-var import_react21 = __toESM(require_react(), 1);
-var jsx_dev_runtime21 = __toESM(require_jsx_dev_runtime(), 1);
-var statusColor2 = (status) => {
-  switch (status?.toLowerCase()) {
-    case "complete":
-      return "#10B981";
-    case "develop":
-      return "#3B82F6";
-    case "review":
-      return "#F59E0B";
-    case "merge":
-      return "#8B5CF6";
-    case "draft":
-      return "#9CA3AF";
-    default:
-      return "#6B7280";
-  }
-};
-var MapPage = () => {
-  const [nodes, setNodes] = import_react21.useState([]);
-  const [loading, setLoading] = import_react21.useState(true);
-  const [error, setError] = import_react21.useState(null);
-  const [selectedNode, setSelectedNode] = import_react21.useState(null);
-  import_react21.useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setError(null);
-        const response = await fetch("/api/proposals?crossBranch=true");
-        if (!response.ok)
-          throw new Error("Failed to fetch proposals");
-        const proposals = await response.json();
-        const mapNodes = proposals.map((p) => ({
-          id: p.id,
-          title: p.title,
-          status: p.status,
-          type: p.proposalType,
-          dependencies: p.dependencies || []
-        }));
-        setNodes(mapNodes);
-      } catch (err) {
-        console.error("Failed to fetch map data:", err);
-        setError("Failed to load dependency map");
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
-  }, []);
-  const adjacencyList = import_react21.useMemo(() => {
-    const adj = new Map;
-    for (const node of nodes) {
-      adj.set(node.id, []);
-    }
-    for (const node of nodes) {
-      for (const dep of node.dependencies) {
-        const list = adj.get(dep) || [];
-        list.push(node.id);
-        adj.set(dep, list);
-      }
-    }
-    return adj;
-  }, [nodes]);
-  const selectedNodeData = import_react21.useMemo(() => nodes.find((n) => n.id === selectedNode), [nodes, selectedNode]);
-  const dependents = import_react21.useMemo(() => selectedNode ? adjacencyList.get(selectedNode) || [] : [], [adjacencyList, selectedNode]);
-  const dependencies = import_react21.useMemo(() => selectedNodeData?.dependencies || [], [selectedNodeData]);
-  if (loading) {
-    return /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-      className: "flex flex-col justify-center items-center h-64 space-y-4",
-      children: [
-        /* @__PURE__ */ jsx_dev_runtime21.jsxDEV(LoadingSpinner_default, {
-          size: "lg",
-          text: ""
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("p", {
-          className: "text-lg font-medium text-gray-900 dark:text-gray-100",
-          children: "Loading dependency map..."
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this);
-  }
-  if (error) {
-    return /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-      className: "p-8 text-center",
-      children: /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-        className: "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6",
-        children: [
-          /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("p", {
-            className: "text-red-600 dark:text-red-400 font-medium",
-            children: "Error"
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("p", {
-            className: "text-red-500 dark:text-red-300 text-sm mt-1",
-            children: error
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this)
-    }, undefined, false, undefined, this);
-  }
-  return /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-    className: "space-y-6",
-    children: [
-      /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-        className: "flex items-center justify-between",
-        children: [
-          /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("h1", {
-            className: "text-2xl font-bold text-gray-900 dark:text-gray-100",
-            children: [
-              "Dependency Map (",
-              nodes.length,
-              " proposals)"
-            ]
-          }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-            className: "flex items-center gap-4 text-xs",
-            children: [
-              { label: "Draft", color: "#9CA3AF" },
-              { label: "Review", color: "#F59E0B" },
-              { label: "Develop", color: "#3B82F6" },
-              { label: "Merge", color: "#8B5CF6" },
-              { label: "Complete", color: "#10B981" }
-            ].map(({ label, color }) => /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-              className: "flex items-center gap-1",
-              children: [
-                /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                  className: "w-3 h-3 rounded-full",
-                  style: { backgroundColor: color }
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("span", {
-                  className: "text-gray-600 dark:text-gray-400",
-                  children: label
-                }, undefined, false, undefined, this)
-              ]
-            }, label, true, undefined, this))
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-        className: "grid grid-cols-1 lg:grid-cols-3 gap-6",
-        children: [
-          /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-            className: "bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 max-h-[600px] overflow-y-auto",
-            children: [
-              /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("h2", {
-                className: "text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3",
-                children: "Proposals"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                className: "space-y-1",
-                children: nodes.map((node) => /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("button", {
-                  type: "button",
-                  onClick: () => setSelectedNode(selectedNode === node.id ? null : node.id),
-                  className: `w-full text-left px-3 py-2 rounded text-sm transition-colors ${selectedNode === node.id ? "bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700" : "hover:bg-gray-50 dark:hover:bg-gray-700"}`,
-                  children: [
-                    /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                      className: "flex items-center gap-2",
-                      children: [
-                        /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                          className: "w-2 h-2 rounded-full flex-shrink-0",
-                          style: { backgroundColor: statusColor2(node.status) }
-                        }, undefined, false, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("span", {
-                          className: "font-mono text-xs text-gray-500 dark:text-gray-400",
-                          children: node.id
-                        }, undefined, false, undefined, this)
-                      ]
-                    }, undefined, true, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                      className: "text-gray-700 dark:text-gray-300 truncate mt-0.5 ml-4",
-                      children: node.title
-                    }, undefined, false, undefined, this)
-                  ]
-                }, node.id, true, undefined, this))
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-            className: "lg:col-span-2 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6",
-            children: selectedNodeData ? /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-              className: "space-y-6",
-              children: [
-                /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                  children: [
-                    /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                      className: "flex items-center gap-2 mb-2",
-                      children: [
-                        /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                          className: "w-3 h-3 rounded-full",
-                          style: {
-                            backgroundColor: statusColor2(selectedNodeData.status)
-                          }
-                        }, undefined, false, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("span", {
-                          className: "font-mono text-sm text-gray-500 dark:text-gray-400",
-                          children: selectedNodeData.id
-                        }, undefined, false, undefined, this)
-                      ]
-                    }, undefined, true, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("h2", {
-                      className: "text-xl font-bold text-gray-900 dark:text-gray-100",
-                      children: selectedNodeData.title
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                      className: "flex items-center gap-2 mt-2",
-                      children: [
-                        /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("span", {
-                          className: "px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded text-xs",
-                          children: selectedNodeData.status
-                        }, undefined, false, undefined, this),
-                        selectedNodeData.type && /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("span", {
-                          className: "px-2 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded text-xs",
-                          children: selectedNodeData.type
-                        }, undefined, false, undefined, this)
-                      ]
-                    }, undefined, true, undefined, this)
-                  ]
-                }, undefined, true, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                  className: "grid grid-cols-2 gap-6",
-                  children: [
-                    /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                      children: [
-                        /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("h3", {
-                          className: "text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-2",
-                          children: [
-                            "Depends On (",
-                            dependencies.length,
-                            ")"
-                          ]
-                        }, undefined, true, undefined, this),
-                        dependencies.length === 0 ? /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("p", {
-                          className: "text-sm text-gray-500 dark:text-gray-400",
-                          children: "No dependencies"
-                        }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                          className: "space-y-1",
-                          children: dependencies.map((depId) => {
-                            const depNode = nodes.find((n) => n.id === depId);
-                            return /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("button", {
-                              type: "button",
-                              onClick: () => setSelectedNode(depId),
-                              className: "w-full text-left px-2 py-1 rounded text-sm hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2",
-                              children: [
-                                depNode && /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                                  className: "w-2 h-2 rounded-full",
-                                  style: {
-                                    backgroundColor: statusColor2(depNode.status)
-                                  }
-                                }, undefined, false, undefined, this),
-                                /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("span", {
-                                  className: "font-mono text-xs",
-                                  children: depId
-                                }, undefined, false, undefined, this),
-                                depNode && /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("span", {
-                                  className: "text-gray-500 dark:text-gray-400 truncate",
-                                  children: [
-                                    "— ",
-                                    depNode.title
-                                  ]
-                                }, undefined, true, undefined, this)
-                              ]
-                            }, depId, true, undefined, this);
-                          })
-                        }, undefined, false, undefined, this)
-                      ]
-                    }, undefined, true, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                      children: [
-                        /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("h3", {
-                          className: "text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-2",
-                          children: [
-                            "Blocking (",
-                            dependents.length,
-                            ")"
-                          ]
-                        }, undefined, true, undefined, this),
-                        dependents.length === 0 ? /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("p", {
-                          className: "text-sm text-gray-500 dark:text-gray-400",
-                          children: "Not blocking anything"
-                        }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                          className: "space-y-1",
-                          children: dependents.map((depId) => {
-                            const depNode = nodes.find((n) => n.id === depId);
-                            return /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("button", {
-                              type: "button",
-                              onClick: () => setSelectedNode(depId),
-                              className: "w-full text-left px-2 py-1 rounded text-sm hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2",
-                              children: [
-                                depNode && /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                                  className: "w-2 h-2 rounded-full",
-                                  style: {
-                                    backgroundColor: statusColor2(depNode.status)
-                                  }
-                                }, undefined, false, undefined, this),
-                                /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("span", {
-                                  className: "font-mono text-xs",
-                                  children: depId
-                                }, undefined, false, undefined, this),
-                                depNode && /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("span", {
-                                  className: "text-gray-500 dark:text-gray-400 truncate",
-                                  children: [
-                                    "— ",
-                                    depNode.title
-                                  ]
-                                }, undefined, true, undefined, this)
-                              ]
-                            }, depId, true, undefined, this);
-                          })
-                        }, undefined, false, undefined, this)
-                      ]
-                    }, undefined, true, undefined, this)
-                  ]
-                }, undefined, true, undefined, this)
-              ]
-            }, undefined, true, undefined, this) : /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-              className: "text-center py-16 text-gray-500 dark:text-gray-400",
-              children: "Select a proposal from the list to view its dependencies"
-            }, undefined, false, undefined, this)
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      nodes.length === 0 && /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-        className: "text-center py-12 text-gray-500 dark:text-gray-400",
-        children: "No proposals to display"
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-};
-var MapPage_default = MapPage;
-
-// src/apps/dashboard-web/components/NotFoundPage.tsx
-function NotFoundPage(_props) {
-  return null;
-}
+var import_react54 = __toESM(require_react(), 1);
 
 // node_modules/@babel/runtime/helpers/esm/extends.js
 function _extends() {
@@ -181095,10 +180322,10 @@ function _objectWithoutPropertiesLoose(r, e) {
 }
 
 // node_modules/@uiw/react-md-editor/esm/Editor.js
-var import_react55 = __toESM(require_react(), 1);
+var import_react52 = __toESM(require_react(), 1);
 
 // node_modules/@uiw/react-markdown-preview/esm/index.js
-var import_react24 = __toESM(require_react(), 1);
+var import_react21 = __toESM(require_react(), 1);
 
 // node_modules/unist-util-is/lib/index.js
 var convert = function(test) {
@@ -206705,7 +205932,7 @@ var serialize = (value, { json: json2, lossy } = {}) => {
 // node_modules/@ungap/structured-clone/esm/index.js
 var esm_default = typeof structuredClone === "function" ? (any, options) => options && (("json" in options) || ("lossy" in options)) ? deserialize(serialize(any, options)) : structuredClone(any) : (any, options) => deserialize(serialize(any, options));
 
-// node_modules/hast-util-from-parse5/node_modules/hastscript/node_modules/hast-util-parse-selector/lib/index.js
+// node_modules/hast-util-parse-selector/lib/index.js
 var search2 = /[#.]/g;
 function parseSelector2(selector, defaultTagName) {
   const value = selector || "";
@@ -206741,7 +205968,7 @@ function parseSelector2(selector, defaultTagName) {
     children: []
   };
 }
-// node_modules/hast-util-from-parse5/node_modules/hastscript/lib/create-h.js
+// node_modules/hastscript/lib/create-h.js
 function createH(schema, defaultTagName, caseSensitive) {
   const adjust = caseSensitive ? createAdjustMap2(caseSensitive) : undefined;
   function h2(selector, properties2, ...children) {
@@ -206881,7 +206108,7 @@ function createAdjustMap2(values) {
   return result;
 }
 
-// node_modules/hast-util-from-parse5/node_modules/hastscript/lib/svg-case-sensitive-tag-names.js
+// node_modules/hastscript/lib/svg-case-sensitive-tag-names.js
 var svgCaseSensitiveTagNames = [
   "altGlyph",
   "altGlyphDef",
@@ -206924,7 +206151,7 @@ var svgCaseSensitiveTagNames = [
   "textPath"
 ];
 
-// node_modules/hast-util-from-parse5/node_modules/hastscript/lib/index.js
+// node_modules/hastscript/lib/index.js
 var h2 = createH(html4, "div");
 var s3 = createH(svg4, "g", svgCaseSensitiveTagNames);
 // node_modules/vfile-location/lib/index.js
@@ -215103,7 +214330,7 @@ function rehypeRaw(options) {
   };
 }
 // node_modules/@uiw/react-markdown-preview/esm/preview.js
-var import_react23 = __toESM(require_react(), 1);
+var import_react20 = __toESM(require_react(), 1);
 
 // node_modules/estree-util-is-identifier-name/lib/index.js
 var nameRe = /^[$_\p{ID_Start}][$_\u{200C}\u{200D}\p{ID_Continue}]*$/u;
@@ -215373,12 +214600,12 @@ function productionCreate(_2, jsx2, jsxs) {
     return key ? fn(type, props, key) : fn(type, props);
   }
 }
-function developmentCreate(filePath, jsxDEV22) {
+function developmentCreate(filePath, jsxDEV19) {
   return create3;
   function create3(node, type, props, key) {
     const isStaticChildren = Array.isArray(props.children);
     const point4 = pointStart(node);
-    return jsxDEV22(type, props, key, isStaticChildren, {
+    return jsxDEV19(type, props, key, isStaticChildren, {
       columnNumber: point4 ? point4.column - 1 : undefined,
       fileName: filePath,
       lineNumber: point4 ? point4.line : undefined
@@ -225215,7 +224442,7 @@ var pathData = {
 
 // node_modules/@uiw/react-markdown-preview/esm/plugins/useCopied.js
 var import_copy_to_clipboard = __toESM(require_copy_to_clipboard_umd(), 1);
-var import_react22 = __toESM(require_react(), 1);
+var import_react19 = __toESM(require_react(), 1);
 function getParentElement(target) {
   if (!target)
     return null;
@@ -225240,7 +224467,7 @@ function useCopied(container) {
       }, 2000);
     });
   };
-  import_react22.useEffect(() => {
+  import_react19.useEffect(() => {
     var _container$current, _container$current2;
     (_container$current = container.current) == null || _container$current.removeEventListener("click", handle2, false);
     (_container$current2 = container.current) == null || _container$current2.addEventListener("click", handle2, false);
@@ -225255,7 +224482,7 @@ function useCopied(container) {
 var import_jsx_runtime2 = __toESM(require_jsx_runtime(), 1);
 var _excluded = ["prefixCls", "className", "source", "style", "disableCopy", "skipHtml", "onScroll", "onMouseOver", "pluginsFilter", "rehypeRewrite", "wrapperElement", "warpperElement", "urlTransform"];
 var defaultUrlTransform2 = (url) => url;
-var preview_default = /* @__PURE__ */ import_react23.default.forwardRef((props, ref) => {
+var preview_default = /* @__PURE__ */ import_react20.default.forwardRef((props, ref) => {
   var {
     prefixCls = "wmde-markdown wmde-markdown-color",
     className: className2,
@@ -225270,8 +224497,8 @@ var preview_default = /* @__PURE__ */ import_react23.default.forwardRef((props, 
     warpperElement = {},
     urlTransform
   } = props, other = _objectWithoutPropertiesLoose(props, _excluded);
-  var mdp = import_react23.default.useRef(null);
-  import_react23.useImperativeHandle(ref, () => _extends({}, props, {
+  var mdp = import_react20.default.useRef(null);
+  import_react20.useImperativeHandle(ref, () => _extends({}, props, {
     mdp
   }), [mdp, props]);
   var cls = (prefixCls || "") + " " + (className2 || "");
@@ -225681,7 +224908,7 @@ var defaultRehypePlugins = [rehypeSlug, rehypeAutolinkHeadings, lib_default3];
 
 // node_modules/@uiw/react-markdown-preview/esm/index.js
 var import_jsx_runtime3 = __toESM(require_jsx_runtime(), 1);
-var esm_default2 = /* @__PURE__ */ import_react24.default.forwardRef((props, ref) => {
+var esm_default2 = /* @__PURE__ */ import_react21.default.forwardRef((props, ref) => {
   var _props$disableCopy;
   var rehypePlugins = [reservedMeta, rehypeRaw, retrieveMeta, ...defaultRehypePlugins, [lib_default, {
     rewrite: rehypeRewriteHandle((_props$disableCopy = props.disableCopy) != null ? _props$disableCopy : false, props.rehypeRewrite)
@@ -225697,19 +224924,19 @@ var esm_default2 = /* @__PURE__ */ import_react24.default.forwardRef((props, ref
 });
 
 // node_modules/@uiw/react-md-editor/esm/components/Toolbar/index.js
-var import_react27 = __toESM(require_react(), 1);
+var import_react24 = __toESM(require_react(), 1);
 
 // node_modules/@uiw/react-md-editor/esm/Context.js
-var import_react25 = __toESM(require_react(), 1);
+var import_react22 = __toESM(require_react(), 1);
 function reducer(state, action) {
   return _extends({}, state, action);
 }
-var EditorContext = /* @__PURE__ */ import_react25.default.createContext({
+var EditorContext = /* @__PURE__ */ import_react22.default.createContext({
   markdown: ""
 });
 
 // node_modules/@uiw/react-md-editor/esm/components/Toolbar/Child.js
-var import_react26 = __toESM(require_react(), 1);
+var import_react23 = __toESM(require_react(), 1);
 var import_jsx_runtime4 = __toESM(require_jsx_runtime(), 1);
 function Child(props) {
   var {
@@ -225720,8 +224947,8 @@ function Child(props) {
   } = props || {};
   var {
     barPopup = {}
-  } = import_react26.useContext(EditorContext);
-  return import_react26.useMemo(() => /* @__PURE__ */ import_jsx_runtime4.jsx("div", {
+  } = import_react23.useContext(EditorContext);
+  return import_react23.useMemo(() => /* @__PURE__ */ import_jsx_runtime4.jsx("div", {
     className: prefixCls + "-toolbar-child " + (groupName && barPopup[groupName] ? "active" : ""),
     onClick: (e) => e.stopPropagation(),
     children: Array.isArray(commands) ? /* @__PURE__ */ import_jsx_runtime4.jsx(Toolbar, _extends({
@@ -225746,8 +224973,8 @@ function ToolbarItems(props) {
     components,
     commandOrchestrator,
     dispatch
-  } = import_react27.useContext(EditorContext);
-  var originalOverflow = import_react27.useRef("");
+  } = import_react24.useContext(EditorContext);
+  var originalOverflow = import_react24.useRef("");
   function handleClick(command, name3) {
     if (!dispatch)
       return;
@@ -225778,7 +225005,7 @@ function ToolbarItems(props) {
     }
     commandOrchestrator && commandOrchestrator.executeCommand(command);
   }
-  import_react27.useEffect(() => {
+  import_react24.useEffect(() => {
     if (document && overflow) {
       if (fullscreen) {
         document.body.style.overflow = "hidden";
@@ -225798,7 +225025,7 @@ function ToolbarItems(props) {
         }), idx);
       }
       if (!item.keyCommand)
-        return /* @__PURE__ */ import_jsx_runtime5.jsx(import_react27.Fragment, {}, idx);
+        return /* @__PURE__ */ import_jsx_runtime5.jsx(import_react24.Fragment, {}, idx);
       var activeBtn = fullscreen && item.keyCommand === "fullscreen" || item.keyCommand === "preview" && preview === item.value;
       var childNode = item.children && typeof item.children === "function" ? item.children({
         getState: () => commandOrchestrator.getState(),
@@ -225814,7 +225041,7 @@ function ToolbarItems(props) {
       var com = render2 && typeof render2 === "function" ? render2(item, !!disabled2, handleClick, idx) : null;
       return /* @__PURE__ */ import_jsx_runtime5.jsxs("li", _extends({}, item.liProps, {
         className: activeBtn ? "active" : "",
-        children: [com && /* @__PURE__ */ import_react27.default.isValidElement(com) && com, !com && !item.buttonProps && item.icon, !com && item.buttonProps && /* @__PURE__ */ import_react27.default.createElement("button", _extends({
+        children: [com && /* @__PURE__ */ import_react24.default.isValidElement(com) && com, !com && !item.buttonProps && item.icon, !com && item.buttonProps && /* @__PURE__ */ import_react24.default.createElement("button", _extends({
           type: "button",
           key: idx,
           disabled: disabled2,
@@ -225847,7 +225074,7 @@ function Toolbar(props) {
   var {
     commands,
     extraCommands
-  } = import_react27.useContext(EditorContext);
+  } = import_react24.useContext(EditorContext);
   return /* @__PURE__ */ import_jsx_runtime5.jsxs("div", {
     className: prefixCls + "-toolbar " + className2,
     children: [/* @__PURE__ */ import_jsx_runtime5.jsx(ToolbarItems, _extends({}, props, {
@@ -225877,7 +225104,7 @@ function ToolbarVisibility(props) {
 }
 
 // node_modules/@uiw/react-md-editor/esm/components/TextArea/index.js
-var import_react53 = __toESM(require_react(), 1);
+var import_react50 = __toESM(require_react(), 1);
 
 // node_modules/@uiw/react-md-editor/esm/components/TextArea/shortcuts.js
 function getCommands(data, resulte) {
@@ -225950,7 +225177,7 @@ function _taggedTemplateLiteralLoose(e, t) {
 }
 
 // node_modules/@uiw/react-md-editor/esm/components/TextArea/Markdown.js
-var import_react28 = __toESM(require_react(), 1);
+var import_react25 = __toESM(require_react(), 1);
 
 // node_modules/hast-util-from-html/lib/errors.js
 var errors = {
@@ -227081,9 +226308,9 @@ function Markdown2(props) {
     markdown: markdown2 = "",
     highlightEnable,
     dispatch
-  } = import_react28.useContext(EditorContext);
-  var preRef = /* @__PURE__ */ import_react28.default.createRef();
-  import_react28.useEffect(() => {
+  } = import_react25.useContext(EditorContext);
+  var preRef = /* @__PURE__ */ import_react25.default.createRef();
+  import_react25.useEffect(() => {
     if (preRef.current && dispatch) {
       dispatch({
         textareaPre: preRef.current
@@ -227107,7 +226334,7 @@ function Markdown2(props) {
       }).processSync(mdStr).toString();
     } catch (error) {}
   }
-  return /* @__PURE__ */ import_react28.default.createElement("div", {
+  return /* @__PURE__ */ import_react25.default.createElement("div", {
     className: "wmde-markdown-color",
     dangerouslySetInnerHTML: {
       __html: mdStr || ""
@@ -227116,7 +226343,7 @@ function Markdown2(props) {
 }
 
 // node_modules/@uiw/react-md-editor/esm/components/TextArea/Textarea.js
-var import_react52 = __toESM(require_react(), 1);
+var import_react49 = __toESM(require_react(), 1);
 
 // node_modules/@uiw/react-md-editor/esm/utils/InsertTextAtPosition.js
 var browserSupportsTextareaTextNodes;
@@ -227193,7 +226420,7 @@ function insertTextAtPosition(input, text10) {
 }
 
 // node_modules/@uiw/react-md-editor/esm/commands/bold.js
-var import_react29 = __toESM(require_react(), 1);
+var import_react26 = __toESM(require_react(), 1);
 
 // node_modules/@uiw/react-md-editor/esm/utils/markdownUtils.js
 function selectWord(_ref) {
@@ -227393,7 +226620,7 @@ var bold = {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/code.js
-var import_react30 = __toESM(require_react(), 1);
+var import_react27 = __toESM(require_react(), 1);
 var import_jsx_runtime8 = __toESM(require_jsx_runtime(), 1);
 var codeBlock = {
   name: "codeBlock",
@@ -227494,7 +226721,7 @@ var code4 = {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/comment.js
-var import_react31 = __toESM(require_react(), 1);
+var import_react28 = __toESM(require_react(), 1);
 var import_jsx_runtime9 = __toESM(require_jsx_runtime(), 1);
 var comment4 = {
   name: "comment",
@@ -227554,7 +226781,7 @@ var divider = {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/fullscreen.js
-var import_react32 = __toESM(require_react(), 1);
+var import_react29 = __toESM(require_react(), 1);
 var import_jsx_runtime10 = __toESM(require_jsx_runtime(), 1);
 var fullscreen = {
   name: "fullscreen",
@@ -227591,7 +226818,7 @@ function _objectDestructuringEmpty(t) {
 }
 
 // node_modules/@uiw/react-md-editor/esm/commands/group.js
-var import_react33 = __toESM(require_react(), 1);
+var import_react30 = __toESM(require_react(), 1);
 var import_jsx_runtime11 = __toESM(require_jsx_runtime(), 1);
 var group = (arr, options) => {
   var data = _extends({
@@ -227620,7 +226847,7 @@ var group = (arr, options) => {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/hr.js
-var import_react34 = __toESM(require_react(), 1);
+var import_react31 = __toESM(require_react(), 1);
 var import_jsx_runtime12 = __toESM(require_jsx_runtime(), 1);
 var hr = {
   name: "hr",
@@ -227678,7 +226905,7 @@ var hr = {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/image.js
-var import_react35 = __toESM(require_react(), 1);
+var import_react32 = __toESM(require_react(), 1);
 var import_jsx_runtime13 = __toESM(require_jsx_runtime(), 1);
 var image3 = {
   name: "image",
@@ -227745,7 +226972,7 @@ var image3 = {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/italic.js
-var import_react36 = __toESM(require_react(), 1);
+var import_react33 = __toESM(require_react(), 1);
 var import_jsx_runtime14 = __toESM(require_jsx_runtime(), 1);
 var italic = {
   name: "italic",
@@ -227784,7 +227011,7 @@ var italic = {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/link.js
-var import_react37 = __toESM(require_react(), 1);
+var import_react34 = __toESM(require_react(), 1);
 var import_jsx_runtime15 = __toESM(require_jsx_runtime(), 1);
 var link3 = {
   name: "link",
@@ -227853,7 +227080,7 @@ var link3 = {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/list.js
-var import_react38 = __toESM(require_react(), 1);
+var import_react35 = __toESM(require_react(), 1);
 var import_jsx_runtime16 = __toESM(require_jsx_runtime(), 1);
 var makeList = (state, api, insertBefore) => {
   var newSelectionRange = selectWord({
@@ -227975,7 +227202,7 @@ var checkedListCommand = {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/preview.js
-var import_react39 = __toESM(require_react(), 1);
+var import_react36 = __toESM(require_react(), 1);
 var import_jsx_runtime17 = __toESM(require_jsx_runtime(), 1);
 var codePreview = {
   name: "preview",
@@ -228069,7 +227296,7 @@ var codeLive = {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/quote.js
-var import_react40 = __toESM(require_react(), 1);
+var import_react37 = __toESM(require_react(), 1);
 var import_jsx_runtime18 = __toESM(require_jsx_runtime(), 1);
 var quote = {
   name: "quote",
@@ -228114,7 +227341,7 @@ var quote = {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/strikeThrough.js
-var import_react41 = __toESM(require_react(), 1);
+var import_react38 = __toESM(require_react(), 1);
 var import_jsx_runtime19 = __toESM(require_jsx_runtime(), 1);
 var strikethrough2 = {
   name: "strikethrough",
@@ -228153,10 +227380,10 @@ var strikethrough2 = {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/title.js
-var import_react43 = __toESM(require_react(), 1);
+var import_react40 = __toESM(require_react(), 1);
 
 // node_modules/@uiw/react-md-editor/esm/commands/title1.js
-var import_react42 = __toESM(require_react(), 1);
+var import_react39 = __toESM(require_react(), 1);
 var import_jsx_runtime20 = __toESM(require_jsx_runtime(), 1);
 var heading1 = {
   name: "heading1",
@@ -228221,7 +227448,7 @@ var heading3 = _extends({}, heading1, {
 });
 
 // node_modules/@uiw/react-md-editor/esm/commands/title2.js
-var import_react44 = __toESM(require_react(), 1);
+var import_react41 = __toESM(require_react(), 1);
 var import_jsx_runtime22 = __toESM(require_jsx_runtime(), 1);
 var heading22 = {
   name: "heading2",
@@ -228252,7 +227479,7 @@ var heading22 = {
 var title2 = heading22;
 
 // node_modules/@uiw/react-md-editor/esm/commands/title3.js
-var import_react45 = __toESM(require_react(), 1);
+var import_react42 = __toESM(require_react(), 1);
 var import_jsx_runtime23 = __toESM(require_jsx_runtime(), 1);
 var heading32 = {
   name: "heading3",
@@ -228283,7 +227510,7 @@ var heading32 = {
 var title3 = heading32;
 
 // node_modules/@uiw/react-md-editor/esm/commands/title4.js
-var import_react46 = __toESM(require_react(), 1);
+var import_react43 = __toESM(require_react(), 1);
 var import_jsx_runtime24 = __toESM(require_jsx_runtime(), 1);
 var heading4 = {
   name: "heading4",
@@ -228314,7 +227541,7 @@ var heading4 = {
 var title4 = heading4;
 
 // node_modules/@uiw/react-md-editor/esm/commands/title5.js
-var import_react47 = __toESM(require_react(), 1);
+var import_react44 = __toESM(require_react(), 1);
 var import_jsx_runtime25 = __toESM(require_jsx_runtime(), 1);
 var heading5 = {
   name: "heading5",
@@ -228345,7 +227572,7 @@ var heading5 = {
 var title5 = heading5;
 
 // node_modules/@uiw/react-md-editor/esm/commands/title6.js
-var import_react48 = __toESM(require_react(), 1);
+var import_react45 = __toESM(require_react(), 1);
 var import_jsx_runtime26 = __toESM(require_jsx_runtime(), 1);
 var heading6 = {
   name: "heading6",
@@ -228376,7 +227603,7 @@ var heading6 = {
 var title6 = heading6;
 
 // node_modules/@uiw/react-md-editor/esm/commands/table.js
-var import_react49 = __toESM(require_react(), 1);
+var import_react46 = __toESM(require_react(), 1);
 var import_jsx_runtime27 = __toESM(require_jsx_runtime(), 1);
 var table2 = {
   name: "table",
@@ -228437,11 +227664,11 @@ var table2 = {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/issue.js
-var import_react50 = __toESM(require_react(), 1);
+var import_react47 = __toESM(require_react(), 1);
 var import_jsx_runtime28 = __toESM(require_jsx_runtime(), 1);
 
 // node_modules/@uiw/react-md-editor/esm/commands/help.js
-var import_react51 = __toESM(require_react(), 1);
+var import_react48 = __toESM(require_react(), 1);
 var import_jsx_runtime29 = __toESM(require_jsx_runtime(), 1);
 var help = {
   name: "help",
@@ -228690,7 +227917,7 @@ function Textarea(props) {
     prefixCls,
     onChange: _onChange
   } = props, other = _objectWithoutPropertiesLoose(props, _excluded2);
-  var _useContext = import_react52.useContext(EditorContext), {
+  var _useContext = import_react49.useContext(EditorContext), {
     markdown: markdown2,
     commands,
     fullscreen: fullscreen2,
@@ -228703,20 +227930,20 @@ function Textarea(props) {
     textareaWarp,
     dispatch
   } = _useContext, otherStore = _objectWithoutPropertiesLoose(_useContext, _excluded22);
-  var textRef = import_react52.default.useRef(null);
-  var executeRef = import_react52.default.useRef();
-  var statesRef = import_react52.default.useRef({
+  var textRef = import_react49.default.useRef(null);
+  var executeRef = import_react49.default.useRef();
+  var statesRef = import_react49.default.useRef({
     fullscreen: fullscreen2,
     preview
   });
-  import_react52.useEffect(() => {
+  import_react49.useEffect(() => {
     statesRef.current = {
       fullscreen: fullscreen2,
       preview,
       highlightEnable
     };
   }, [fullscreen2, preview, highlightEnable]);
-  import_react52.useEffect(() => {
+  import_react49.useEffect(() => {
     if (textRef.current && dispatch) {
       var commandOrchestrator = new TextAreaCommandOrchestrator(textRef.current);
       executeRef.current = commandOrchestrator;
@@ -228726,7 +227953,7 @@ function Textarea(props) {
       });
     }
   }, []);
-  import_react52.useEffect(() => {
+  import_react49.useEffect(() => {
     if (autoFocusEnd && textRef.current && textareaWarp) {
       textRef.current.focus();
       var length = textRef.current.value.length;
@@ -228745,7 +227972,7 @@ function Textarea(props) {
     handleKeyDown(e, tabSize, defaultTabEnable);
     shortcutsHandle(e, [...commands || [], ...extraCommands || []], executeRef.current, dispatch, statesRef.current);
   };
-  import_react52.useEffect(() => {
+  import_react49.useEffect(() => {
     if (textRef.current) {
       textRef.current.addEventListener("keydown", onKeyDown);
     }
@@ -228791,11 +228018,11 @@ function TextArea(props) {
     highlightEnable,
     extraCommands,
     dispatch
-  } = import_react53.useContext(EditorContext);
-  var textRef = import_react53.default.useRef(null);
-  var executeRef = import_react53.default.useRef();
-  var warp = /* @__PURE__ */ import_react53.default.createRef();
-  import_react53.useEffect(() => {
+  } = import_react50.useContext(EditorContext);
+  var textRef = import_react50.default.useRef(null);
+  var executeRef = import_react50.default.useRef();
+  var warp = /* @__PURE__ */ import_react50.default.createRef();
+  import_react50.useEffect(() => {
     var state = {};
     if (warp.current) {
       state.textareaWarp = warp.current || undefined;
@@ -228805,7 +228032,7 @@ function TextArea(props) {
       dispatch(_extends({}, state));
     }
   }, []);
-  import_react53.useEffect(() => {
+  import_react50.useEffect(() => {
     if (textRef.current && dispatch) {
       var commandOrchestrator = new TextAreaCommandOrchestrator(textRef.current);
       executeRef.current = commandOrchestrator;
@@ -228828,7 +228055,7 @@ function TextArea(props) {
       style: {
         minHeight
       },
-      children: renderTextarea ? /* @__PURE__ */ import_react53.default.cloneElement(renderTextarea(_extends({}, otherProps, {
+      children: renderTextarea ? /* @__PURE__ */ import_react50.default.cloneElement(renderTextarea(_extends({}, otherProps, {
         value: markdown2,
         autoComplete: "off",
         autoCorrect: "off",
@@ -228850,7 +228077,7 @@ function TextArea(props) {
         }
       }), {
         ref: textRef
-      }) : /* @__PURE__ */ import_jsx_runtime31.jsxs(import_react53.Fragment, {
+      }) : /* @__PURE__ */ import_jsx_runtime31.jsxs(import_react50.Fragment, {
         children: [highlightEnable && /* @__PURE__ */ import_jsx_runtime31.jsx(Markdown2, {
           prefixCls
         }), /* @__PURE__ */ import_jsx_runtime31.jsx(Textarea, _extends({
@@ -228864,17 +228091,17 @@ function TextArea(props) {
 }
 
 // node_modules/@uiw/react-md-editor/esm/components/DragBar/index.js
-var import_react54 = __toESM(require_react(), 1);
+var import_react51 = __toESM(require_react(), 1);
 var import_jsx_runtime32 = __toESM(require_jsx_runtime(), 1);
 var DragBar = (props) => {
   var {
     prefixCls,
     onChange
   } = props || {};
-  var $dom = import_react54.useRef(null);
-  var dragRef = import_react54.useRef();
-  var heightRef = import_react54.useRef(props.height);
-  import_react54.useEffect(() => {
+  var $dom = import_react51.useRef(null);
+  var dragRef = import_react51.useRef();
+  var heightRef = import_react51.useRef(props.height);
+  import_react51.useEffect(() => {
     if (heightRef.current !== props.height) {
       heightRef.current = props.height;
     }
@@ -228914,7 +228141,7 @@ var DragBar = (props) => {
       passive: false
     });
   }
-  import_react54.useEffect(() => {
+  import_react51.useEffect(() => {
     if (document) {
       var _$dom$current5, _$dom$current6;
       (_$dom$current5 = $dom.current) == null || _$dom$current5.addEventListener("touchstart", handleMouseDown, {
@@ -228930,7 +228157,7 @@ var DragBar = (props) => {
       }
     };
   }, []);
-  var svg5 = import_react54.useMemo(() => /* @__PURE__ */ import_jsx_runtime32.jsx("svg", {
+  var svg5 = import_react51.useMemo(() => /* @__PURE__ */ import_jsx_runtime32.jsx("svg", {
     viewBox: "0 0 512 512",
     height: "100%",
     children: /* @__PURE__ */ import_jsx_runtime32.jsx("path", {
@@ -228958,7 +228185,7 @@ function setGroupPopFalse(data) {
   });
   return data;
 }
-var InternalMDEditor = /* @__PURE__ */ import_react55.default.forwardRef((props, ref) => {
+var InternalMDEditor = /* @__PURE__ */ import_react52.default.forwardRef((props, ref) => {
   var _ref = props || {}, {
     prefixCls = "w-md-editor",
     className: className2,
@@ -228992,7 +228219,7 @@ var InternalMDEditor = /* @__PURE__ */ import_react55.default.forwardRef((props,
   } = _ref, other = _objectWithoutPropertiesLoose(_ref, _excluded4);
   var cmds = commands.map((item) => commandsFilter ? commandsFilter(item, false) : item).filter(Boolean);
   var extraCmds = extraCommands.map((item) => commandsFilter ? commandsFilter(item, true) : item).filter(Boolean);
-  var [state, dispatch] = import_react55.useReducer(reducer, {
+  var [state, dispatch] = import_react52.useReducer(reducer, {
     markdown: propsValue,
     preview: previewType,
     components,
@@ -229008,15 +228235,15 @@ var InternalMDEditor = /* @__PURE__ */ import_react55.default.forwardRef((props,
     fullscreen: fullscreen2,
     barPopup: {}
   });
-  var container = import_react55.useRef(null);
-  var previewRef = import_react55.useRef(null);
-  var enableScrollRef = import_react55.useRef(enableScroll);
-  import_react55.useImperativeHandle(ref, () => _extends({}, state, {
+  var container = import_react52.useRef(null);
+  var previewRef = import_react52.useRef(null);
+  var enableScrollRef = import_react52.useRef(enableScroll);
+  import_react52.useImperativeHandle(ref, () => _extends({}, state, {
     container: container.current,
     dispatch
   }));
-  import_react55.useMemo(() => enableScrollRef.current = enableScroll, [enableScroll]);
-  import_react55.useEffect(() => {
+  import_react52.useMemo(() => enableScrollRef.current = enableScroll, [enableScroll]);
+  import_react52.useEffect(() => {
     var stateInit = {};
     if (container.current) {
       stateInit.container = container.current || undefined;
@@ -229028,41 +228255,41 @@ var InternalMDEditor = /* @__PURE__ */ import_react55.default.forwardRef((props,
     }
   }, []);
   var cls = [className2, "wmde-markdown-var", direction2 ? prefixCls + "-" + direction2 : null, prefixCls, state.preview ? prefixCls + "-show-" + state.preview : null, state.fullscreen ? prefixCls + "-fullscreen" : null].filter(Boolean).join(" ").trim();
-  import_react55.useMemo(() => propsValue !== state.markdown && dispatch({
+  import_react52.useMemo(() => propsValue !== state.markdown && dispatch({
     markdown: propsValue || ""
   }), [propsValue, state.markdown]);
-  import_react55.useMemo(() => previewType !== state.preview && dispatch({
+  import_react52.useMemo(() => previewType !== state.preview && dispatch({
     preview: previewType
   }), [previewType]);
-  import_react55.useMemo(() => tabSize !== state.tabSize && dispatch({
+  import_react52.useMemo(() => tabSize !== state.tabSize && dispatch({
     tabSize
   }), [tabSize]);
-  import_react55.useMemo(() => highlightEnable !== state.highlightEnable && dispatch({
+  import_react52.useMemo(() => highlightEnable !== state.highlightEnable && dispatch({
     highlightEnable
   }), [highlightEnable]);
-  import_react55.useMemo(() => autoFocus !== state.autoFocus && dispatch({
+  import_react52.useMemo(() => autoFocus !== state.autoFocus && dispatch({
     autoFocus
   }), [autoFocus]);
-  import_react55.useMemo(() => autoFocusEnd !== state.autoFocusEnd && dispatch({
+  import_react52.useMemo(() => autoFocusEnd !== state.autoFocusEnd && dispatch({
     autoFocusEnd
   }), [autoFocusEnd]);
-  import_react55.useMemo(() => fullscreen2 !== state.fullscreen && dispatch({
+  import_react52.useMemo(() => fullscreen2 !== state.fullscreen && dispatch({
     fullscreen: fullscreen2
   }), [fullscreen2]);
-  import_react55.useMemo(() => height !== state.height && dispatch({
+  import_react52.useMemo(() => height !== state.height && dispatch({
     height
   }), [height]);
-  import_react55.useMemo(() => height !== state.height && onHeightChange && onHeightChange(state.height, height, state), [height, onHeightChange, state]);
-  import_react55.useMemo(() => commands !== state.commands && dispatch({
+  import_react52.useMemo(() => height !== state.height && onHeightChange && onHeightChange(state.height, height, state), [height, onHeightChange, state]);
+  import_react52.useMemo(() => commands !== state.commands && dispatch({
     commands: cmds
   }), [props.commands]);
-  import_react55.useMemo(() => extraCommands !== state.extraCommands && dispatch({
+  import_react52.useMemo(() => extraCommands !== state.extraCommands && dispatch({
     extraCommands: extraCmds
   }), [props.extraCommands]);
-  var textareaDomRef = import_react55.useRef();
-  var active = import_react55.useRef("preview");
-  var initScroll = import_react55.useRef(false);
-  import_react55.useMemo(() => {
+  var textareaDomRef = import_react52.useRef();
+  var active = import_react52.useRef("preview");
+  var initScroll = import_react52.useRef(false);
+  import_react52.useMemo(() => {
     textareaDomRef.current = state.textareaWarp;
     if (state.textareaWarp) {
       state.textareaWarp.addEventListener("mouseover", () => {
@@ -229103,7 +228330,7 @@ var InternalMDEditor = /* @__PURE__ */ import_react55.default.forwardRef((props,
   };
   var previewClassName = prefixCls + "-preview " + (previewOptions.className || "");
   var handlePreviewScroll = (e) => handleScroll(e, "preview");
-  var mdPreview = import_react55.useMemo(() => /* @__PURE__ */ import_jsx_runtime33.jsx("div", {
+  var mdPreview = import_react52.useMemo(() => /* @__PURE__ */ import_jsx_runtime33.jsx("div", {
     ref: previewRef,
     className: previewClassName,
     children: /* @__PURE__ */ import_jsx_runtime33.jsx(esm_default2, _extends({}, previewOptions, {
@@ -229112,7 +228339,7 @@ var InternalMDEditor = /* @__PURE__ */ import_react55.default.forwardRef((props,
     }))
   }), [previewClassName, previewOptions, state.markdown]);
   var preview = (components == null ? undefined : components.preview) && (components == null ? undefined : components.preview(state.markdown || "", state, dispatch));
-  if (preview && /* @__PURE__ */ import_react55.default.isValidElement(preview)) {
+  if (preview && /* @__PURE__ */ import_react52.default.isValidElement(preview)) {
     mdPreview = /* @__PURE__ */ import_jsx_runtime33.jsx("div", {
       className: previewClassName,
       ref: previewRef,
@@ -229193,711 +228420,8 @@ var Editor_default = Editor;
 // node_modules/@uiw/react-md-editor/esm/index.js
 var esm_default3 = Editor_default;
 
-// src/apps/dashboard-web/components/ProposalDetailsModal.tsx
-var import_react61 = __toESM(require_react(), 1);
-
-// src/shared/proposal-markdown-export.ts
-function ts(value) {
-  if (!value)
-    return "";
-  if (value instanceof Date)
-    return value.toISOString();
-  if (typeof value === "string")
-    return value;
-  return String(value);
-}
-function trim(s4) {
-  return (s4 ?? "").trim();
-}
-function section(title7, body3) {
-  const trimmed = body3.trim();
-  if (!trimmed)
-    return [];
-  return [`## ${title7}`, "", trimmed, ""];
-}
-function arraySection(title7, items) {
-  const filtered = items.map((s4) => s4.trim()).filter(Boolean);
-  if (filtered.length === 0)
-    return [];
-  const lines = [`## ${title7}`, ""];
-  for (const item of filtered)
-    lines.push(`- ${item}`);
-  lines.push("");
-  return lines;
-}
-function frontmatter(p3) {
-  const lines = ["---"];
-  lines.push(`id: ${p3.id}`);
-  lines.push(`title: ${JSON.stringify(p3.title || "")}`);
-  if (p3.status)
-    lines.push(`status: ${p3.status}`);
-  if (p3.maturity)
-    lines.push(`maturity: ${p3.maturity}`);
-  if (p3.proposalType || p3.type)
-    lines.push(`type: ${p3.proposalType || p3.type}`);
-  if (p3.priority)
-    lines.push(`priority: ${p3.priority}`);
-  if (p3.assignee?.length)
-    lines.push(`assignee: [${p3.assignee.join(", ")}]`);
-  if (p3.reporter)
-    lines.push(`reporter: ${p3.reporter}`);
-  if (p3.createdDate)
-    lines.push(`createdDate: ${p3.createdDate}`);
-  if (p3.updatedDate)
-    lines.push(`updatedDate: ${p3.updatedDate}`);
-  if (p3.labels?.length)
-    lines.push(`labels: [${p3.labels.join(", ")}]`);
-  if (p3.directive)
-    lines.push(`directive: ${p3.directive}`);
-  if (p3.dependencies?.length)
-    lines.push(`dependencies: [${p3.dependencies.join(", ")}]`);
-  if (p3.references?.length)
-    lines.push(`references: [${p3.references.join(", ")}]`);
-  if (p3.parentProposalId)
-    lines.push(`parent: ${p3.parentProposalId}`);
-  if (p3.builder)
-    lines.push(`builder: ${p3.builder}`);
-  if (p3.auditor)
-    lines.push(`auditor: ${p3.auditor}`);
-  if (p3.branch)
-    lines.push(`branch: ${p3.branch}`);
-  lines.push("---", "");
-  return lines;
-}
-function criteriaBlock(criteria) {
-  if (!criteria || criteria.length === 0)
-    return [];
-  const lines = ["## Acceptance Criteria", ""];
-  const sorted = [...criteria].sort((a2, b) => (a2.index ?? 0) - (b.index ?? 0));
-  for (const c4 of sorted) {
-    const box = c4.checked ? "[x]" : "[ ]";
-    const meta = [];
-    if (c4.role)
-      meta.push(`role: ${c4.role}`);
-    if (c4.evidence)
-      meta.push(`evidence: ${c4.evidence}`);
-    const tail = meta.length ? `  _(${meta.join(" · ")})_` : "";
-    lines.push(`- ${box} ${c4.text}${tail}`);
-  }
-  lines.push("");
-  return lines;
-}
-function decisionsBlock(items) {
-  if (!items || items.length === 0)
-    return [];
-  const lines = ["## Decisions", ""];
-  for (const d2 of items) {
-    const when = ts(d2.decided_at);
-    const flag = d2.binding ? " (binding)" : "";
-    lines.push(`### ${trim(d2.decision) || "(decision)"}${flag}`);
-    const meta = [];
-    if (d2.authority)
-      meta.push(`**authority:** ${d2.authority}`);
-    if (when)
-      meta.push(`**at:** ${when}`);
-    if (meta.length)
-      lines.push(meta.join(" · "));
-    const rationale = trim(d2.rationale ?? "");
-    if (rationale) {
-      lines.push("");
-      lines.push(rationale);
-    }
-    lines.push("");
-  }
-  return lines;
-}
-function reviewsBlock(items) {
-  if (!items || items.length === 0)
-    return [];
-  const lines = ["## Reviews", ""];
-  for (const r2 of items) {
-    const when = ts(r2.reviewed_at);
-    const blocking = r2.is_blocking ? " (blocking)" : "";
-    const verdict = trim(r2.verdict ?? "") || "(no verdict)";
-    const reviewer = trim(r2.reviewer_identity ?? "") || "(unknown reviewer)";
-    lines.push(`### ${reviewer} — ${verdict}${blocking}`);
-    if (when)
-      lines.push(`**at:** ${when}`);
-    const notes = trim(r2.notes ?? "");
-    if (notes) {
-      lines.push("");
-      lines.push("**Notes:**");
-      lines.push("");
-      lines.push(notes);
-    }
-    const findings = trim(r2.findings ?? "");
-    if (findings) {
-      lines.push("");
-      lines.push("**Findings:**");
-      lines.push("");
-      lines.push(findings);
-    }
-    lines.push("");
-  }
-  return lines;
-}
-function discussionsBlock(items) {
-  if (!items || items.length === 0)
-    return [];
-  const lines = ["## Discussions", ""];
-  const sorted = [...items].sort((a2, b) => {
-    const ta = ts(a2.created_at);
-    const tb = ts(b.created_at);
-    return ta < tb ? -1 : ta > tb ? 1 : 0;
-  });
-  for (const d2 of sorted) {
-    const when = ts(d2.created_at);
-    const author = trim(d2.author_identity ?? "") || "(unknown)";
-    const ctx = trim(d2.context_prefix ?? "");
-    const head2 = ctx ? `${author} · ${ctx}` : author;
-    lines.push(`### ${head2}`);
-    if (when)
-      lines.push(`**at:** ${when}`);
-    const body3 = trim(d2.body ?? d2.body_markdown ?? "");
-    if (body3) {
-      lines.push("");
-      lines.push(body3);
-    }
-    lines.push("");
-  }
-  return lines;
-}
-function activityBlock(items) {
-  if (!items || items.length === 0)
-    return [];
-  const lines = ["## Activity", ""];
-  for (const e of items) {
-    const reason2 = e.reason ? ` — ${e.reason}` : "";
-    lines.push(`- \`${e.timestamp}\` **${e.actor}** ${e.action}${reason2}`);
-  }
-  lines.push("");
-  return lines;
-}
-function buildProposalMarkdown(bundle) {
-  const p3 = bundle.proposal;
-  const lines = [];
-  lines.push(...frontmatter(p3));
-  lines.push(`# ${p3.id} — ${p3.title || "(untitled)"}`, "");
-  const summary = trim(p3.summary ?? "");
-  const description = trim(p3.description ?? "");
-  if (summary)
-    lines.push(...section("Summary", summary));
-  else if (description)
-    lines.push(...section("Summary", description));
-  lines.push(...section("Motivation", p3.motivation ?? ""));
-  const design = trim(p3.design ?? p3.implementationPlan ?? "");
-  lines.push(...section("Design", design));
-  if (description && summary) {
-    lines.push(...section("Description", description));
-  }
-  lines.push(...section("Drawbacks", p3.drawbacks ?? ""));
-  lines.push(...section("Alternatives", p3.alternatives ?? ""));
-  lines.push(...section("Dependency Notes", p3.dependency_note ?? ""));
-  lines.push(...arraySection("Dependencies", (p3.dependencies ?? []).map((d2) => String(d2))));
-  lines.push(...arraySection("References", (p3.references ?? []).map((d2) => String(d2))));
-  lines.push(...arraySection("Required Capabilities", (p3.required_capabilities ?? p3.needs_capabilities ?? []).map((d2) => String(d2))));
-  lines.push(...arraySection("Unlocks", (p3.unlocks ?? []).map((d2) => String(d2))));
-  lines.push(...criteriaBlock(bundle.criteria ?? p3.acceptanceCriteriaItems));
-  lines.push(...section("Implementation Plan", p3.implementationPlan ?? ""));
-  lines.push(...section("Implementation Notes", p3.implementationNotes ?? ""));
-  lines.push(...section("Audit Notes", p3.auditNotes ?? ""));
-  lines.push(...section("Final Summary", p3.finalSummary ?? ""));
-  lines.push(...decisionsBlock(bundle.decisions));
-  lines.push(...reviewsBlock(bundle.reviews));
-  lines.push(...discussionsBlock(bundle.discussions));
-  lines.push(...activityBlock(bundle.activityLog ?? p3.activityLog));
-  lines.push("---", `_Exported ${new Date().toISOString()}_`, "");
-  return lines.join(`
-`).replace(/\n{3,}/g, `
-
-`);
-}
-function proposalExportFilename(proposal) {
-  const id2 = proposal.id || "proposal";
-  const slug2 = (proposal.title || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  return slug2 ? `${id2}-${slug2}-${stamp}.md` : `${id2}-${stamp}.md`;
-}
-
-// src/apps/dashboard-web/utils/date-display.ts
-var DATE_ONLY_REGEX = /^(\d{4})-(\d{2})-(\d{2})$/;
-var DATE_TIME_REGEX = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/;
-function parseIntStrict(value) {
-  return Number.parseInt(value, 10);
-}
-function parseStoredUtcDate(dateStr) {
-  const normalized = dateStr.trim();
-  if (!normalized)
-    return null;
-  const dateTimeMatch = normalized.match(DATE_TIME_REGEX);
-  if (dateTimeMatch) {
-    const y = dateTimeMatch[1];
-    const m = dateTimeMatch[2];
-    const d2 = dateTimeMatch[3];
-    const hh = dateTimeMatch[4];
-    const mm = dateTimeMatch[5];
-    if (!y || !m || !d2 || !hh || !mm)
-      return null;
-    const year = parseIntStrict(y);
-    const month = parseIntStrict(m);
-    const day = parseIntStrict(d2);
-    const hours = parseIntStrict(hh);
-    const minutes = parseIntStrict(mm);
-    const date = new Date(Date.UTC(year, month - 1, day, hours, minutes, 0));
-    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day || date.getUTCHours() !== hours || date.getUTCMinutes() !== minutes) {
-      return null;
-    }
-    return date;
-  }
-  const dateOnlyMatch = normalized.match(DATE_ONLY_REGEX);
-  if (dateOnlyMatch) {
-    const y = dateOnlyMatch[1];
-    const m = dateOnlyMatch[2];
-    const d2 = dateOnlyMatch[3];
-    if (!y || !m || !d2)
-      return null;
-    const year = parseIntStrict(y);
-    const month = parseIntStrict(m);
-    const day = parseIntStrict(d2);
-    const date = new Date(Date.UTC(year, month - 1, day, 0, 0, 0));
-    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
-      return null;
-    }
-    return date;
-  }
-  return null;
-}
-function formatStoredUtcDateForDisplay(dateStr) {
-  const parsed = parseStoredUtcDate(dateStr);
-  if (!parsed)
-    return dateStr;
-  if (DATE_TIME_REGEX.test(dateStr.trim())) {
-    return parsed.toLocaleString(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short"
-    });
-  }
-  return parsed.toLocaleDateString();
-}
-function formatStoredUtcDateForCompactDisplay(dateStr, now = new Date) {
-  const normalized = dateStr.trim();
-  if (!normalized)
-    return "—";
-  const parsed = parseStoredUtcDate(normalized);
-  if (!parsed)
-    return normalized;
-  const diffMs = now.getTime() - parsed.getTime();
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-  if (diffDays >= 0) {
-    if (diffDays === 0)
-      return "today";
-    if (diffDays === 1)
-      return "yesterday";
-    if (diffDays < 7)
-      return `${diffDays}d ago`;
-  }
-  return parsed.toLocaleDateString();
-}
-
-// src/apps/dashboard-web/components/AcceptanceCriteriaEditor.tsx
-var import_react56 = __toESM(require_react(), 1);
-var jsx_dev_runtime22 = __toESM(require_jsx_dev_runtime(), 1);
-var AcceptanceCriteriaEditor = ({
-  criteria: initial,
-  onChange,
-  label = "Acceptance Criteria",
-  preserveIndices = false,
-  disableToggle = false
-}) => {
-  const [criteria, setCriteria] = import_react56.useState(initial || []);
-  const [newCriterion, setNewCriterion] = import_react56.useState("");
-  const itemRefs = import_react56.useRef({});
-  const newRef = import_react56.useRef(null);
-  import_react56.useEffect(() => {
-    setCriteria(initial || []);
-  }, [initial]);
-  const autoResize = import_react56.useCallback((el) => {
-    if (!el)
-      return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
-  }, []);
-  import_react56.useEffect(() => {
-    Object.values(itemRefs.current).forEach((el) => {
-      autoResize(el);
-    });
-  }, [autoResize]);
-  import_react56.useEffect(() => {
-    autoResize(newRef.current);
-  }, [autoResize]);
-  const handleToggle = (index2, checked2) => {
-    if (disableToggle)
-      return;
-    const updated = criteria.map((c4) => c4.index === index2 ? { ...c4, checked: checked2 } : c4);
-    setCriteria(updated);
-    onChange(updated);
-  };
-  const handleTextChange = (index2, text10) => {
-    const updated = criteria.map((c4) => c4.index === index2 ? { ...c4, text: text10 } : c4);
-    setCriteria(updated);
-    onChange(updated);
-  };
-  const handleRemove = (index2) => {
-    const filtered = criteria.filter((c4) => c4.index !== index2);
-    const updated = preserveIndices ? filtered : filtered.map((c4, i) => ({ ...c4, index: i + 1 }));
-    setCriteria(updated);
-    onChange(updated);
-  };
-  const handleAdd = () => {
-    const text10 = newCriterion.trim();
-    if (!text10)
-      return;
-    const nextIndex = preserveIndices ? Math.max(0, ...criteria.map((item) => item.index)) + 1 : criteria.length + 1;
-    const updated = [...criteria, { checked: false, text: text10, index: nextIndex }];
-    setCriteria(updated);
-    setNewCriterion("");
-    onChange(updated);
-  };
-  return /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
-    className: "space-y-2",
-    children: [
-      /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
-        className: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 transition-colors duration-200",
-        children: label
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("ul", {
-        className: "space-y-2",
-        children: [
-          criteria.map((c4) => /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("li", {
-            className: "flex items-center gap-2",
-            children: [
-              /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("input", {
-                type: "checkbox",
-                className: "h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded",
-                checked: c4.checked,
-                onChange: (e) => handleToggle(c4.index, e.target.checked),
-                disabled: disableToggle
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("textarea", {
-                ref: (el) => {
-                  itemRefs.current[c4.index] = el;
-                },
-                rows: 1,
-                value: c4.text,
-                onChange: (e) => handleTextChange(c4.index, e.target.value),
-                onInput: (e) => autoResize(e.currentTarget),
-                className: "flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 focus:border-transparent transition-colors duration-200 resize-none overflow-hidden leading-5"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("button", {
-                type: "button",
-                onClick: () => handleRemove(c4.index),
-                className: "px-2 py-1 text-sm text-red-600 dark:text-red-400 hover:underline",
-                children: "Remove"
-              }, undefined, false, undefined, this)
-            ]
-          }, c4.index, true, undefined, this)),
-          /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("li", {
-            className: "flex items-center gap-2",
-            children: [
-              /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("textarea", {
-                ref: newRef,
-                rows: 1,
-                value: newCriterion,
-                onChange: (e) => setNewCriterion(e.target.value),
-                onInput: (e) => autoResize(e.currentTarget),
-                placeholder: "New criterion",
-                className: "flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 focus:border-transparent transition-colors duration-200 resize-none overflow-hidden leading-5"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("button", {
-                type: "button",
-                onClick: handleAdd,
-                className: "px-2 py-1 text-sm bg-blue-500 dark:bg-blue-600 text-white rounded-md hover:bg-blue-600 dark:hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 focus:ring-blue-400 dark:focus:ring-blue-500 transition-colors duration-200",
-                children: "Add"
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this)
-        ]
-      }, undefined, true, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-};
-var AcceptanceCriteriaEditor_default = AcceptanceCriteriaEditor;
-
-// src/apps/dashboard-web/components/ChipInput.tsx
-var import_react57 = __toESM(require_react(), 1);
-var jsx_dev_runtime23 = __toESM(require_jsx_dev_runtime(), 1);
-var ChipInput = ({
-  value,
-  onChange,
-  placeholder,
-  label,
-  name: name3,
-  disabled: disabled2
-}) => {
-  const [inputValue, setInputValue] = import_react57.useState("");
-  const inputId = `chip-input-${name3}`;
-  const handleKeyDown2 = (e) => {
-    if (disabled2)
-      return;
-    if ((e.key === "Enter" || e.key === ",") && inputValue.trim()) {
-      e.preventDefault();
-      const newValue = inputValue.trim();
-      if (!value.includes(newValue)) {
-        onChange([...value, newValue]);
-      }
-      setInputValue("");
-    } else if (e.key === "Backspace" && !inputValue && value.length > 0) {
-      onChange(value.slice(0, -1));
-    }
-  };
-  const handleInputChange = (e) => {
-    if (disabled2)
-      return;
-    const newValue = e.target.value;
-    if (newValue.endsWith(",")) {
-      const chipValue = newValue.slice(0, -1).trim();
-      if (chipValue && !value.includes(chipValue)) {
-        onChange([...value, chipValue]);
-        setInputValue("");
-      } else {
-        setInputValue("");
-      }
-    } else {
-      setInputValue(newValue);
-    }
-  };
-  const removeChip = (index2) => {
-    if (disabled2)
-      return;
-    onChange(value.filter((_2, i) => i !== index2));
-  };
-  return /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
-    className: "w-full",
-    children: [
-      /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("label", {
-        htmlFor: inputId,
-        className: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 transition-colors duration-200",
-        children: label
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
-        className: `relative w-full min-h-10 px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md focus-within:ring-2 focus-within:ring-blue-500 dark:focus-within:ring-blue-400 focus-within:border-transparent transition-colors duration-200 pr-2 ${disabled2 ? "opacity-60 cursor-not-allowed" : ""}`,
-        children: /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
-          className: "flex flex-wrap gap-2 items-center w-full",
-          children: [
-            value.map((item, index2) => /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("span", {
-              className: "inline-flex items-center gap-1 px-2 py-0.5 text-sm bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200 rounded-md flex-shrink-0 min-w-0 max-w-full transition-colors duration-200",
-              children: [
-                /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("span", {
-                  className: "truncate max-w-[16rem] sm:max-w-[20rem] md:max-w-[24rem]",
-                  children: item
-                }, undefined, false, undefined, this),
-                !disabled2 && /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("button", {
-                  type: "button",
-                  onClick: () => removeChip(index2),
-                  className: "hover:bg-blue-200 dark:hover:bg-blue-800 rounded-sm p-0.5 transition-colors duration-200",
-                  "aria-label": `Remove ${item}`,
-                  children: /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("svg", {
-                    className: "w-3 h-3",
-                    fill: "currentColor",
-                    viewBox: "0 0 20 20",
-                    "aria-hidden": "true",
-                    focusable: "false",
-                    children: /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("path", {
-                      fillRule: "evenodd",
-                      d: "M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z",
-                      clipRule: "evenodd"
-                    }, undefined, false, undefined, this)
-                  }, undefined, false, undefined, this)
-                }, undefined, false, undefined, this)
-              ]
-            }, item, true, undefined, this)),
-            /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("input", {
-              id: inputId,
-              type: "text",
-              value: inputValue,
-              onChange: handleInputChange,
-              onKeyDown: handleKeyDown2,
-              placeholder: value.length === 0 ? placeholder : "",
-              className: "flex-1 min-w-[2ch] outline-none text-sm bg-transparent text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400",
-              disabled: disabled2
-            }, undefined, false, undefined, this)
-          ]
-        }, undefined, true, undefined, this)
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-};
-var ChipInput_default = ChipInput;
-
-// src/apps/dashboard-web/components/DependencyInput.tsx
-var import_react58 = __toESM(require_react(), 1);
-var jsx_dev_runtime24 = __toESM(require_jsx_dev_runtime(), 1);
-var DependencyInput = ({
-  value,
-  onChange,
-  availableProposals,
-  currentProposalId,
-  label = "Dependencies",
-  disabled: disabled2
-}) => {
-  const [inputValue, setInputValue] = import_react58.useState("");
-  const [suggestions, setSuggestions] = import_react58.useState([]);
-  const [selectedIndex, setSelectedIndex] = import_react58.useState(0);
-  const textareaRef = import_react58.useRef(null);
-  const inputId = "dependency-input";
-  const getProposalDisplay = (proposalId) => {
-    const proposal = availableProposals.find((t) => t.id === proposalId);
-    return proposal ? `${proposal.id} - ${proposal.title}` : proposalId;
-  };
-  import_react58.useEffect(() => {
-    if (inputValue.trim()) {
-      const filtered = availableProposals.filter((proposal) => proposal.id !== currentProposalId && !value.includes(proposal.id) && (proposal.id.toLowerCase().includes(inputValue.toLowerCase()) || proposal.title.toLowerCase().includes(inputValue.toLowerCase())));
-      setSuggestions(filtered);
-      setSelectedIndex(0);
-    } else {
-      setSuggestions([]);
-    }
-  }, [inputValue, availableProposals, value, currentProposalId]);
-  import_react58.useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
-    }
-  }, []);
-  const addDependency = (proposalId) => {
-    if (disabled2)
-      return;
-    if (!value.includes(proposalId)) {
-      onChange([...value, proposalId]);
-      setInputValue("");
-      setSuggestions([]);
-      if (textareaRef.current) {
-        textareaRef.current.focus();
-      }
-    }
-  };
-  const removeDependency = (index2) => {
-    if (disabled2)
-      return;
-    onChange(value.filter((_2, i) => i !== index2));
-  };
-  const handleKeyDown2 = (e) => {
-    if (disabled2)
-      return;
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setSelectedIndex((prev) => (prev + 1) % suggestions.length);
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setSelectedIndex((prev) => (prev - 1 + suggestions.length) % suggestions.length);
-    } else if ((e.key === "Enter" || e.key === ",") && inputValue.trim()) {
-      e.preventDefault();
-      if (suggestions.length > 0 && suggestions[selectedIndex]) {
-        addDependency(suggestions[selectedIndex].id);
-      }
-    } else if (e.key === "Backspace" && !inputValue && value.length > 0) {
-      onChange(value.slice(0, -1));
-    } else if (e.key === "Escape") {
-      setSuggestions([]);
-      setInputValue("");
-    }
-  };
-  const handleInputChange = (e) => {
-    if (disabled2)
-      return;
-    const newValue = e.target.value;
-    if (newValue.endsWith(",")) {
-      const searchValue = newValue.slice(0, -1).trim();
-      if (searchValue && suggestions.length > 0 && suggestions[selectedIndex]) {
-        addDependency(suggestions[selectedIndex].id);
-      }
-    } else {
-      setInputValue(newValue);
-    }
-  };
-  return /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("div", {
-    children: [
-      label ? /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("label", {
-        htmlFor: inputId,
-        className: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 transition-colors duration-200",
-        children: label
-      }, undefined, false, undefined, this) : null,
-      /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("div", {
-        className: "relative w-full",
-        children: [
-          /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("div", {
-            className: `w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md focus-within:ring-2 focus-within:ring-blue-500 dark:focus-within:ring-blue-400 focus-within:border-transparent transition-colors duration-200 max-h-60 overflow-auto pr-2 ${disabled2 ? "opacity-60 cursor-not-allowed" : ""}`,
-            children: [
-              value.length > 0 && /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("div", {
-                className: "flex flex-wrap gap-2 mb-2",
-                children: value.map((proposalId, index2) => /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("span", {
-                  className: "inline-flex items-center gap-1 px-2 py-0.5 text-sm bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200 rounded-md transition-colors duration-200 min-w-0 max-w-full",
-                  children: [
-                    /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("span", {
-                      className: "truncate max-w-[16rem] sm:max-w-[20rem] md:max-w-[24rem]",
-                      children: getProposalDisplay(proposalId)
-                    }, undefined, false, undefined, this),
-                    !disabled2 && /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("button", {
-                      type: "button",
-                      onClick: () => removeDependency(index2),
-                      className: "hover:bg-blue-200 dark:hover:bg-blue-800 rounded-sm p-0.5 transition-colors duration-200",
-                      "aria-label": `Remove ${proposalId}`,
-                      children: /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("svg", {
-                        className: "w-3 h-3",
-                        fill: "currentColor",
-                        viewBox: "0 0 20 20",
-                        "aria-hidden": "true",
-                        focusable: "false",
-                        children: /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("path", {
-                          fillRule: "evenodd",
-                          d: "M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z",
-                          clipRule: "evenodd"
-                        }, undefined, false, undefined, this)
-                      }, undefined, false, undefined, this)
-                    }, undefined, false, undefined, this)
-                  ]
-                }, proposalId, true, undefined, this))
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("textarea", {
-                ref: textareaRef,
-                id: inputId,
-                value: inputValue,
-                onChange: handleInputChange,
-                onKeyDown: handleKeyDown2,
-                placeholder: value.length === 0 ? "Type proposal ID or title, then press Enter or comma" : "Add more dependencies...",
-                className: "w-full outline-none text-sm bg-transparent resize-none text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400",
-                rows: 1,
-                disabled: disabled2
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this),
-          suggestions.length > 0 && /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("div", {
-            className: "absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg max-h-64 overflow-auto overscroll-contain transition-colors duration-200",
-            children: suggestions.map((proposal, index2) => /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("button", {
-              type: "button",
-              onClick: () => addDependency(proposal.id),
-              className: `w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200 ${index2 === selectedIndex ? "bg-gray-100 dark:bg-gray-700" : ""}`,
-              children: [
-                /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("div", {
-                  className: "font-medium text-gray-900 dark:text-white",
-                  children: proposal.id
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("div", {
-                  className: "text-gray-600 dark:text-gray-300 break-words whitespace-normal",
-                  children: proposal.title
-                }, undefined, false, undefined, this)
-              ]
-            }, proposal.id, true, undefined, this))
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-};
-var DependencyInput_default = DependencyInput;
-
 // src/apps/dashboard-web/components/MermaidMarkdown.tsx
-var import_react59 = __toESM(require_react(), 1);
+var import_react53 = __toESM(require_react(), 1);
 
 // src/apps/dashboard-web/utils/mermaid.ts
 var mermaidModule = null;
@@ -229975,7 +228499,7 @@ async function renderMermaidIn(element10) {
 }
 
 // src/apps/dashboard-web/components/MermaidMarkdown.tsx
-var jsx_dev_runtime25 = __toESM(require_jsx_dev_runtime(), 1);
+var jsx_dev_runtime19 = __toESM(require_jsx_dev_runtime(), 1);
 var URI_AUTOLINK_PREFIX_REGEX = /^<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\s<>]*>/;
 var EMAIL_AUTOLINK_PREFIX_REGEX = /^<[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z0-9-]+>/;
 function sanitizeMarkdownSource(source) {
@@ -229988,9 +228512,9 @@ function sanitizeMarkdownSource(source) {
   });
 }
 function MermaidMarkdown({ source }) {
-  const ref = import_react59.useRef(null);
+  const ref = import_react53.useRef(null);
   const safeSource = sanitizeMarkdownSource(source);
-  import_react59.useEffect(() => {
+  import_react53.useEffect(() => {
     if (!ref.current)
       return;
     const frameId = requestAnimationFrame(() => {
@@ -230000,14 +228524,1505 @@ function MermaidMarkdown({ source }) {
     });
     return () => cancelAnimationFrame(frameId);
   }, []);
-  return /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("div", {
+  return /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
     ref,
     className: "wmde-markdown",
-    children: /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(esm_default3.Markdown, {
+    children: /* @__PURE__ */ jsx_dev_runtime19.jsxDEV(esm_default3.Markdown, {
       source: safeSource
     }, undefined, false, undefined, this)
   }, undefined, false, undefined, this);
 }
+
+// src/apps/dashboard-web/components/DocumentsPage.tsx
+var jsx_dev_runtime20 = __toESM(require_jsx_dev_runtime(), 1);
+var docTypeColor = (type3) => {
+  switch (type3) {
+    case "specification":
+      return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400";
+    case "guide":
+      return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400";
+    case "readme":
+      return "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400";
+    default:
+      return "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400";
+  }
+};
+var formatDate2 = (dateStr) => {
+  if (!dateStr)
+    return "";
+  try {
+    return new Date(dateStr).toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric"
+    });
+  } catch {
+    return dateStr;
+  }
+};
+var DocumentsPage = () => {
+  const [documents2, setDocuments] = import_react54.useState([]);
+  const [loading, setLoading] = import_react54.useState(true);
+  const [error3, setError] = import_react54.useState(null);
+  const [filter7, setFilter] = import_react54.useState("");
+  const [typeFilter, setTypeFilter] = import_react54.useState("");
+  const [selectedDoc, setSelectedDoc] = import_react54.useState(null);
+  const fetchData = import_react54.useCallback(async () => {
+    try {
+      setError(null);
+      const data5 = await apiClient.fetchDocs();
+      setDocuments(data5);
+    } catch (err) {
+      console.error("Failed to fetch documents:", err);
+      setError("Failed to load documents");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  import_react54.useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+  const docTypes = [...new Set(documents2.map((d4) => d4.type))].sort();
+  const filteredDocs = documents2.filter((doc) => {
+    if (filter7) {
+      const query = filter7.toLowerCase();
+      const matchesTitle = doc.title?.toLowerCase().includes(query);
+      const matchesName = doc.name?.toLowerCase().includes(query);
+      const matchesPath = doc.path?.toLowerCase().includes(query);
+      if (!matchesTitle && !matchesName && !matchesPath)
+        return false;
+    }
+    if (typeFilter && doc.type !== typeFilter)
+      return false;
+    return true;
+  });
+  if (loading) {
+    return /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
+      className: "flex flex-col justify-center items-center h-64 space-y-4",
+      children: [
+        /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(LoadingSpinner_default, {
+          size: "lg",
+          text: ""
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("p", {
+          className: "text-lg font-medium text-gray-900 dark:text-gray-100",
+          children: "Loading documents..."
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  }
+  if (error3) {
+    return /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
+      className: "p-8 text-center",
+      children: /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
+        className: "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("p", {
+            className: "text-red-600 dark:text-red-400 font-medium",
+            children: "Error"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("p", {
+            className: "text-red-500 dark:text-red-300 text-sm mt-1",
+            children: error3
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("button", {
+            type: "button",
+            onClick: fetchData,
+            className: "mt-4 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded hover:bg-red-200 dark:hover:bg-red-900/50",
+            children: "Retry"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    }, undefined, false, undefined, this);
+  }
+  if (selectedDoc) {
+    return /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
+      className: "space-y-4",
+      children: [
+        /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
+          className: "flex items-center gap-4",
+          children: /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("button", {
+            type: "button",
+            onClick: () => setSelectedDoc(null),
+            className: "text-sm text-blue-600 dark:text-blue-400 hover:underline",
+            children: "← Back to documents"
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
+          className: "bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6",
+          children: [
+            /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("h1", {
+              className: "text-xl font-bold text-gray-900 dark:text-gray-100",
+              children: selectedDoc.title || selectedDoc.name
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
+              className: "flex items-center gap-3 mt-2",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("span", {
+                  className: `px-2 py-0.5 rounded text-xs font-medium ${docTypeColor(selectedDoc.type)}`,
+                  children: selectedDoc.type
+                }, undefined, false, undefined, this),
+                selectedDoc.lastModified && /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("span", {
+                  className: "text-xs text-gray-500 dark:text-gray-400",
+                  children: [
+                    "Modified: ",
+                    formatDate2(selectedDoc.lastModified)
+                  ]
+                }, undefined, true, undefined, this)
+              ]
+            }, undefined, true, undefined, this),
+            /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
+              className: "mt-4 prose dark:prose-invert max-w-none",
+              children: /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(MermaidMarkdown, {
+                source: selectedDoc.rawContent ?? ""
+              }, undefined, false, undefined, this)
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  }
+  return /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
+    className: "space-y-6",
+    children: [
+      /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
+        className: "flex items-center justify-between",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("h1", {
+            className: "text-2xl font-bold text-gray-900 dark:text-gray-100",
+            children: [
+              "Documents (",
+              documents2.length,
+              ")"
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
+            className: "flex items-center gap-3",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("input", {
+                type: "text",
+                placeholder: "Search documents...",
+                value: filter7,
+                onChange: (e3) => setFilter(e3.target.value),
+                className: "rounded border px-3 py-1.5 text-sm bg-white dark:bg-gray-800 w-48"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("select", {
+                value: typeFilter,
+                onChange: (e3) => setTypeFilter(e3.target.value),
+                className: "rounded border px-2 py-1.5 text-sm bg-white dark:bg-gray-800",
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("option", {
+                    value: "",
+                    children: "All types"
+                  }, undefined, false, undefined, this),
+                  docTypes.map((t4) => /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("option", {
+                    value: t4,
+                    children: t4
+                  }, t4, false, undefined, this))
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
+        className: "space-y-3",
+        children: filteredDocs.map((doc) => /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("button", {
+          type: "button",
+          onClick: () => setSelectedDoc(doc),
+          className: "w-full text-left bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 hover:border-blue-300 dark:hover:border-blue-700 transition-colors",
+          children: /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
+            className: "flex items-start justify-between",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
+                className: "space-y-1",
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("h3", {
+                    className: "font-medium text-gray-900 dark:text-gray-100",
+                    children: doc.title || doc.name
+                  }, undefined, false, undefined, this),
+                  doc.path && /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("p", {
+                    className: "text-xs font-mono text-gray-500 dark:text-gray-400",
+                    children: doc.path
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
+                className: "flex items-center gap-2",
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("span", {
+                    className: `px-2 py-0.5 rounded text-xs font-medium ${docTypeColor(doc.type)}`,
+                    children: doc.type
+                  }, undefined, false, undefined, this),
+                  doc.lastModified && /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("span", {
+                    className: "text-xs text-gray-500 dark:text-gray-400",
+                    children: formatDate2(doc.lastModified)
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        }, doc.id || doc.name, false, undefined, this))
+      }, undefined, false, undefined, this),
+      filteredDocs.length === 0 && /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
+        className: "text-center py-12 text-gray-500 dark:text-gray-400",
+        children: filter7 || typeFilter ? "No documents match your filters" : "No documents found"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+};
+var DocumentsPage_default = DocumentsPage;
+
+// src/apps/dashboard-web/components/KnowledgePage.tsx
+var import_react55 = __toESM(require_react(), 1);
+var jsx_dev_runtime21 = __toESM(require_jsx_dev_runtime(), 1);
+var entryTypeColor = (type3) => {
+  switch (type3) {
+    case "solution":
+      return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400";
+    case "pattern":
+      return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400";
+    case "decision":
+      return "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400";
+    case "obstacle":
+      return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400";
+    case "lesson":
+      return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400";
+    default:
+      return "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400";
+  }
+};
+var KnowledgePage = () => {
+  const [entries2, setEntries] = import_react55.useState([]);
+  const [loading, setLoading] = import_react55.useState(true);
+  const [error3, setError] = import_react55.useState(null);
+  const [searchQuery, setSearchQuery] = import_react55.useState("");
+  const [typeFilter, setTypeFilter] = import_react55.useState("");
+  const fetchData = import_react55.useCallback(async () => {
+    try {
+      setError(null);
+      const data5 = await apiClient.fetchKnowledge({
+        query: searchQuery || undefined,
+        type: typeFilter || undefined
+      });
+      setEntries(data5);
+    } catch (err) {
+      console.error("Failed to fetch knowledge entries:", err);
+      setError("Failed to load knowledge entries");
+    } finally {
+      setLoading(false);
+    }
+  }, [searchQuery, typeFilter]);
+  import_react55.useEffect(() => {
+    const timer3 = setTimeout(fetchData, 300);
+    return () => clearTimeout(timer3);
+  }, [fetchData]);
+  const handleMarkHelpful = async (id33) => {
+    try {
+      await apiClient.markKnowledgeHelpful(id33);
+      setEntries((prev2) => prev2.map((e3) => e3.id === id33 ? { ...e3, helpful_count: (e3.helpful_count || 0) + 1 } : e3));
+    } catch (err) {
+      console.error("Failed to mark as helpful:", err);
+    }
+  };
+  if (loading && entries2.length === 0) {
+    return /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+      className: "flex flex-col justify-center items-center h-64 space-y-4",
+      children: [
+        /* @__PURE__ */ jsx_dev_runtime21.jsxDEV(LoadingSpinner_default, {
+          size: "lg",
+          text: ""
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("p", {
+          className: "text-lg font-medium text-gray-900 dark:text-gray-100",
+          children: "Loading knowledge base..."
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  }
+  return /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+    className: "space-y-6",
+    children: [
+      /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+        className: "flex items-center justify-between",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("h1", {
+            className: "text-2xl font-bold text-gray-900 dark:text-gray-100",
+            children: [
+              "Knowledge Base (",
+              entries2.length,
+              ")"
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+            className: "flex items-center gap-3",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("input", {
+                type: "text",
+                placeholder: "Search knowledge...",
+                value: searchQuery,
+                onChange: (e3) => setSearchQuery(e3.target.value),
+                className: "rounded border px-3 py-1.5 text-sm bg-white dark:bg-gray-800 w-48"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("select", {
+                value: typeFilter,
+                onChange: (e3) => setTypeFilter(e3.target.value),
+                className: "rounded border px-2 py-1.5 text-sm bg-white dark:bg-gray-800",
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("option", {
+                    value: "",
+                    children: "All types"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("option", {
+                    value: "solution",
+                    children: "Solutions"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("option", {
+                    value: "pattern",
+                    children: "Patterns"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("option", {
+                    value: "decision",
+                    children: "Decisions"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("option", {
+                    value: "obstacle",
+                    children: "Obstacles"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("option", {
+                    value: "lesson",
+                    children: "Lessons"
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      error3 && /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+        className: "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4",
+        children: /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("p", {
+          className: "text-red-600 dark:text-red-400",
+          children: error3
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+        className: "space-y-4",
+        children: entries2.map((entry) => /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+          className: "bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-3",
+          children: [
+            /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+              className: "flex items-start justify-between",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("span", {
+                  className: `px-2 py-0.5 rounded text-xs font-medium ${entryTypeColor(entry.type)}`,
+                  children: entry.type
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+                  className: "flex items-center gap-2",
+                  children: [
+                    entry.helpful_count !== undefined && /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("span", {
+                      className: "text-xs text-gray-500 dark:text-gray-400",
+                      children: [
+                        "\uD83D\uDC4D ",
+                        entry.helpful_count
+                      ]
+                    }, undefined, true, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("button", {
+                      type: "button",
+                      onClick: () => handleMarkHelpful(entry.id),
+                      className: "text-xs text-blue-600 dark:text-blue-400 hover:underline",
+                      children: "Helpful?"
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this)
+              ]
+            }, undefined, true, undefined, this),
+            /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("p", {
+              className: "text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap",
+              children: entry.content
+            }, undefined, false, undefined, this),
+            entry.keywords.length > 0 && /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+              className: "flex flex-wrap gap-1",
+              children: entry.keywords.map((kw) => /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("span", {
+                className: "px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded text-xs",
+                children: kw
+              }, kw, false, undefined, this))
+            }, undefined, false, undefined, this),
+            entry.source && /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("p", {
+              className: "text-xs text-gray-500 dark:text-gray-400",
+              children: [
+                "Source: ",
+                entry.source
+              ]
+            }, undefined, true, undefined, this)
+          ]
+        }, entry.id, true, undefined, this))
+      }, undefined, false, undefined, this),
+      !loading && entries2.length === 0 && /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+        className: "text-center py-12 text-gray-500 dark:text-gray-400",
+        children: searchQuery || typeFilter ? "No knowledge entries match your search" : "No knowledge entries yet"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+};
+var KnowledgePage_default = KnowledgePage;
+
+// src/apps/dashboard-web/components/MapPage.tsx
+var import_react56 = __toESM(require_react(), 1);
+var jsx_dev_runtime22 = __toESM(require_jsx_dev_runtime(), 1);
+var statusColor2 = (status) => {
+  switch (status?.toLowerCase()) {
+    case "complete":
+      return "#10B981";
+    case "develop":
+      return "#3B82F6";
+    case "review":
+      return "#F59E0B";
+    case "merge":
+      return "#8B5CF6";
+    case "draft":
+      return "#9CA3AF";
+    default:
+      return "#6B7280";
+  }
+};
+var MapPage = () => {
+  const [nodes5, setNodes] = import_react56.useState([]);
+  const [loading, setLoading] = import_react56.useState(true);
+  const [error3, setError] = import_react56.useState(null);
+  const [selectedNode, setSelectedNode] = import_react56.useState(null);
+  import_react56.useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setError(null);
+        const response = await fetch("/api/proposals?crossBranch=true");
+        if (!response.ok)
+          throw new Error("Failed to fetch proposals");
+        const proposals = await response.json();
+        const mapNodes = proposals.map((p5) => ({
+          id: p5.id,
+          title: p5.title,
+          status: p5.status,
+          type: p5.proposalType,
+          dependencies: p5.dependencies || []
+        }));
+        setNodes(mapNodes);
+      } catch (err) {
+        console.error("Failed to fetch map data:", err);
+        setError("Failed to load dependency map");
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
+  const adjacencyList = import_react56.useMemo(() => {
+    const adj = new Map;
+    for (const node3 of nodes5) {
+      adj.set(node3.id, []);
+    }
+    for (const node3 of nodes5) {
+      for (const dep of node3.dependencies) {
+        const list4 = adj.get(dep) || [];
+        list4.push(node3.id);
+        adj.set(dep, list4);
+      }
+    }
+    return adj;
+  }, [nodes5]);
+  const selectedNodeData = import_react56.useMemo(() => nodes5.find((n3) => n3.id === selectedNode), [nodes5, selectedNode]);
+  const dependents = import_react56.useMemo(() => selectedNode ? adjacencyList.get(selectedNode) || [] : [], [adjacencyList, selectedNode]);
+  const dependencies = import_react56.useMemo(() => selectedNodeData?.dependencies || [], [selectedNodeData]);
+  if (loading) {
+    return /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+      className: "flex flex-col justify-center items-center h-64 space-y-4",
+      children: [
+        /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(LoadingSpinner_default, {
+          size: "lg",
+          text: ""
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("p", {
+          className: "text-lg font-medium text-gray-900 dark:text-gray-100",
+          children: "Loading dependency map..."
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  }
+  if (error3) {
+    return /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+      className: "p-8 text-center",
+      children: /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+        className: "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("p", {
+            className: "text-red-600 dark:text-red-400 font-medium",
+            children: "Error"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("p", {
+            className: "text-red-500 dark:text-red-300 text-sm mt-1",
+            children: error3
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    }, undefined, false, undefined, this);
+  }
+  return /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+    className: "space-y-6",
+    children: [
+      /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+        className: "flex items-center justify-between",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("h1", {
+            className: "text-2xl font-bold text-gray-900 dark:text-gray-100",
+            children: [
+              "Dependency Map (",
+              nodes5.length,
+              " proposals)"
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+            className: "flex items-center gap-4 text-xs",
+            children: [
+              { label: "Draft", color: "#9CA3AF" },
+              { label: "Review", color: "#F59E0B" },
+              { label: "Develop", color: "#3B82F6" },
+              { label: "Merge", color: "#8B5CF6" },
+              { label: "Complete", color: "#10B981" }
+            ].map(({ label, color: color3 }) => /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+              className: "flex items-center gap-1",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+                  className: "w-3 h-3 rounded-full",
+                  style: { backgroundColor: color3 }
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("span", {
+                  className: "text-gray-600 dark:text-gray-400",
+                  children: label
+                }, undefined, false, undefined, this)
+              ]
+            }, label, true, undefined, this))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+        className: "grid grid-cols-1 lg:grid-cols-3 gap-6",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+            className: "bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 max-h-[600px] overflow-y-auto",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("h2", {
+                className: "text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3",
+                children: "Proposals"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+                className: "space-y-1",
+                children: nodes5.map((node3) => /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("button", {
+                  type: "button",
+                  onClick: () => setSelectedNode(selectedNode === node3.id ? null : node3.id),
+                  className: `w-full text-left px-3 py-2 rounded text-sm transition-colors ${selectedNode === node3.id ? "bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700" : "hover:bg-gray-50 dark:hover:bg-gray-700"}`,
+                  children: [
+                    /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+                      className: "flex items-center gap-2",
+                      children: [
+                        /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+                          className: "w-2 h-2 rounded-full flex-shrink-0",
+                          style: { backgroundColor: statusColor2(node3.status) }
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("span", {
+                          className: "font-mono text-xs text-gray-500 dark:text-gray-400",
+                          children: node3.id
+                        }, undefined, false, undefined, this)
+                      ]
+                    }, undefined, true, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+                      className: "text-gray-700 dark:text-gray-300 truncate mt-0.5 ml-4",
+                      children: node3.title
+                    }, undefined, false, undefined, this)
+                  ]
+                }, node3.id, true, undefined, this))
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+            className: "lg:col-span-2 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6",
+            children: selectedNodeData ? /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+              className: "space-y-6",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+                  children: [
+                    /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+                      className: "flex items-center gap-2 mb-2",
+                      children: [
+                        /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+                          className: "w-3 h-3 rounded-full",
+                          style: {
+                            backgroundColor: statusColor2(selectedNodeData.status)
+                          }
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("span", {
+                          className: "font-mono text-sm text-gray-500 dark:text-gray-400",
+                          children: selectedNodeData.id
+                        }, undefined, false, undefined, this)
+                      ]
+                    }, undefined, true, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("h2", {
+                      className: "text-xl font-bold text-gray-900 dark:text-gray-100",
+                      children: selectedNodeData.title
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+                      className: "flex items-center gap-2 mt-2",
+                      children: [
+                        /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("span", {
+                          className: "px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded text-xs",
+                          children: selectedNodeData.status
+                        }, undefined, false, undefined, this),
+                        selectedNodeData.type && /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("span", {
+                          className: "px-2 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded text-xs",
+                          children: selectedNodeData.type
+                        }, undefined, false, undefined, this)
+                      ]
+                    }, undefined, true, undefined, this)
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+                  className: "grid grid-cols-2 gap-6",
+                  children: [
+                    /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+                      children: [
+                        /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("h3", {
+                          className: "text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-2",
+                          children: [
+                            "Depends On (",
+                            dependencies.length,
+                            ")"
+                          ]
+                        }, undefined, true, undefined, this),
+                        dependencies.length === 0 ? /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("p", {
+                          className: "text-sm text-gray-500 dark:text-gray-400",
+                          children: "No dependencies"
+                        }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+                          className: "space-y-1",
+                          children: dependencies.map((depId) => {
+                            const depNode = nodes5.find((n3) => n3.id === depId);
+                            return /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("button", {
+                              type: "button",
+                              onClick: () => setSelectedNode(depId),
+                              className: "w-full text-left px-2 py-1 rounded text-sm hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2",
+                              children: [
+                                depNode && /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+                                  className: "w-2 h-2 rounded-full",
+                                  style: {
+                                    backgroundColor: statusColor2(depNode.status)
+                                  }
+                                }, undefined, false, undefined, this),
+                                /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("span", {
+                                  className: "font-mono text-xs",
+                                  children: depId
+                                }, undefined, false, undefined, this),
+                                depNode && /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("span", {
+                                  className: "text-gray-500 dark:text-gray-400 truncate",
+                                  children: [
+                                    "— ",
+                                    depNode.title
+                                  ]
+                                }, undefined, true, undefined, this)
+                              ]
+                            }, depId, true, undefined, this);
+                          })
+                        }, undefined, false, undefined, this)
+                      ]
+                    }, undefined, true, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+                      children: [
+                        /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("h3", {
+                          className: "text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-2",
+                          children: [
+                            "Blocking (",
+                            dependents.length,
+                            ")"
+                          ]
+                        }, undefined, true, undefined, this),
+                        dependents.length === 0 ? /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("p", {
+                          className: "text-sm text-gray-500 dark:text-gray-400",
+                          children: "Not blocking anything"
+                        }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+                          className: "space-y-1",
+                          children: dependents.map((depId) => {
+                            const depNode = nodes5.find((n3) => n3.id === depId);
+                            return /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("button", {
+                              type: "button",
+                              onClick: () => setSelectedNode(depId),
+                              className: "w-full text-left px-2 py-1 rounded text-sm hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2",
+                              children: [
+                                depNode && /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+                                  className: "w-2 h-2 rounded-full",
+                                  style: {
+                                    backgroundColor: statusColor2(depNode.status)
+                                  }
+                                }, undefined, false, undefined, this),
+                                /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("span", {
+                                  className: "font-mono text-xs",
+                                  children: depId
+                                }, undefined, false, undefined, this),
+                                depNode && /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("span", {
+                                  className: "text-gray-500 dark:text-gray-400 truncate",
+                                  children: [
+                                    "— ",
+                                    depNode.title
+                                  ]
+                                }, undefined, true, undefined, this)
+                              ]
+                            }, depId, true, undefined, this);
+                          })
+                        }, undefined, false, undefined, this)
+                      ]
+                    }, undefined, true, undefined, this)
+                  ]
+                }, undefined, true, undefined, this)
+              ]
+            }, undefined, true, undefined, this) : /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+              className: "text-center py-16 text-gray-500 dark:text-gray-400",
+              children: "Select a proposal from the list to view its dependencies"
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      nodes5.length === 0 && /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+        className: "text-center py-12 text-gray-500 dark:text-gray-400",
+        children: "No proposals to display"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+};
+var MapPage_default = MapPage;
+
+// src/apps/dashboard-web/components/NotFoundPage.tsx
+function NotFoundPage(_props) {
+  return null;
+}
+
+// src/apps/dashboard-web/components/ProposalDetailsModal.tsx
+var import_react61 = __toESM(require_react(), 1);
+
+// src/shared/proposal-markdown-export.ts
+function ts(value2) {
+  if (!value2)
+    return "";
+  if (value2 instanceof Date)
+    return value2.toISOString();
+  if (typeof value2 === "string")
+    return value2;
+  return String(value2);
+}
+function trim2(s5) {
+  return (s5 ?? "").trim();
+}
+function section(title8, body3) {
+  const trimmed = body3.trim();
+  if (!trimmed)
+    return [];
+  return [`## ${title8}`, "", trimmed, ""];
+}
+function arraySection(title8, items) {
+  const filtered = items.map((s5) => s5.trim()).filter(Boolean);
+  if (filtered.length === 0)
+    return [];
+  const lines = [`## ${title8}`, ""];
+  for (const item of filtered)
+    lines.push(`- ${item}`);
+  lines.push("");
+  return lines;
+}
+function frontmatter(p5) {
+  const lines = ["---"];
+  lines.push(`id: ${p5.id}`);
+  lines.push(`title: ${JSON.stringify(p5.title || "")}`);
+  if (p5.status)
+    lines.push(`status: ${p5.status}`);
+  if (p5.maturity)
+    lines.push(`maturity: ${p5.maturity}`);
+  if (p5.proposalType || p5.type)
+    lines.push(`type: ${p5.proposalType || p5.type}`);
+  if (p5.priority)
+    lines.push(`priority: ${p5.priority}`);
+  if (p5.assignee?.length)
+    lines.push(`assignee: [${p5.assignee.join(", ")}]`);
+  if (p5.reporter)
+    lines.push(`reporter: ${p5.reporter}`);
+  if (p5.createdDate)
+    lines.push(`createdDate: ${p5.createdDate}`);
+  if (p5.updatedDate)
+    lines.push(`updatedDate: ${p5.updatedDate}`);
+  if (p5.labels?.length)
+    lines.push(`labels: [${p5.labels.join(", ")}]`);
+  if (p5.directive)
+    lines.push(`directive: ${p5.directive}`);
+  if (p5.dependencies?.length)
+    lines.push(`dependencies: [${p5.dependencies.join(", ")}]`);
+  if (p5.references?.length)
+    lines.push(`references: [${p5.references.join(", ")}]`);
+  if (p5.parentProposalId)
+    lines.push(`parent: ${p5.parentProposalId}`);
+  if (p5.builder)
+    lines.push(`builder: ${p5.builder}`);
+  if (p5.auditor)
+    lines.push(`auditor: ${p5.auditor}`);
+  if (p5.branch)
+    lines.push(`branch: ${p5.branch}`);
+  lines.push("---", "");
+  return lines;
+}
+function criteriaBlock(criteria) {
+  if (!criteria || criteria.length === 0)
+    return [];
+  const lines = ["## Acceptance Criteria", ""];
+  const sorted = [...criteria].sort((a3, b3) => (a3.index ?? 0) - (b3.index ?? 0));
+  for (const c5 of sorted) {
+    const box = c5.checked ? "[x]" : "[ ]";
+    const meta3 = [];
+    if (c5.role)
+      meta3.push(`role: ${c5.role}`);
+    if (c5.evidence)
+      meta3.push(`evidence: ${c5.evidence}`);
+    const tail = meta3.length ? `  _(${meta3.join(" · ")})_` : "";
+    lines.push(`- ${box} ${c5.text}${tail}`);
+  }
+  lines.push("");
+  return lines;
+}
+function decisionsBlock(items) {
+  if (!items || items.length === 0)
+    return [];
+  const lines = ["## Decisions", ""];
+  for (const d4 of items) {
+    const when = ts(d4.decided_at);
+    const flag = d4.binding ? " (binding)" : "";
+    lines.push(`### ${trim2(d4.decision) || "(decision)"}${flag}`);
+    const meta3 = [];
+    if (d4.authority)
+      meta3.push(`**authority:** ${d4.authority}`);
+    if (when)
+      meta3.push(`**at:** ${when}`);
+    if (meta3.length)
+      lines.push(meta3.join(" · "));
+    const rationale = trim2(d4.rationale ?? "");
+    if (rationale) {
+      lines.push("");
+      lines.push(rationale);
+    }
+    lines.push("");
+  }
+  return lines;
+}
+function reviewsBlock(items) {
+  if (!items || items.length === 0)
+    return [];
+  const lines = ["## Reviews", ""];
+  for (const r3 of items) {
+    const when = ts(r3.reviewed_at);
+    const blocking = r3.is_blocking ? " (blocking)" : "";
+    const verdict = trim2(r3.verdict ?? "") || "(no verdict)";
+    const reviewer = trim2(r3.reviewer_identity ?? "") || "(unknown reviewer)";
+    lines.push(`### ${reviewer} — ${verdict}${blocking}`);
+    if (when)
+      lines.push(`**at:** ${when}`);
+    const notes = trim2(r3.notes ?? "");
+    if (notes) {
+      lines.push("");
+      lines.push("**Notes:**");
+      lines.push("");
+      lines.push(notes);
+    }
+    const findings = trim2(r3.findings ?? "");
+    if (findings) {
+      lines.push("");
+      lines.push("**Findings:**");
+      lines.push("");
+      lines.push(findings);
+    }
+    lines.push("");
+  }
+  return lines;
+}
+function discussionsBlock(items) {
+  if (!items || items.length === 0)
+    return [];
+  const lines = ["## Discussions", ""];
+  const sorted = [...items].sort((a3, b3) => {
+    const ta = ts(a3.created_at);
+    const tb = ts(b3.created_at);
+    return ta < tb ? -1 : ta > tb ? 1 : 0;
+  });
+  for (const d4 of sorted) {
+    const when = ts(d4.created_at);
+    const author = trim2(d4.author_identity ?? "") || "(unknown)";
+    const ctx = trim2(d4.context_prefix ?? "");
+    const head2 = ctx ? `${author} · ${ctx}` : author;
+    lines.push(`### ${head2}`);
+    if (when)
+      lines.push(`**at:** ${when}`);
+    const body3 = trim2(d4.body ?? d4.body_markdown ?? "");
+    if (body3) {
+      lines.push("");
+      lines.push(body3);
+    }
+    lines.push("");
+  }
+  return lines;
+}
+function activityBlock(items) {
+  if (!items || items.length === 0)
+    return [];
+  const lines = ["## Activity", ""];
+  for (const e3 of items) {
+    const reason2 = e3.reason ? ` — ${e3.reason}` : "";
+    lines.push(`- \`${e3.timestamp}\` **${e3.actor}** ${e3.action}${reason2}`);
+  }
+  lines.push("");
+  return lines;
+}
+function buildProposalMarkdown(bundle) {
+  const p5 = bundle.proposal;
+  const lines = [];
+  lines.push(...frontmatter(p5));
+  lines.push(`# ${p5.id} — ${p5.title || "(untitled)"}`, "");
+  const summary = trim2(p5.summary ?? "");
+  const description = trim2(p5.description ?? "");
+  if (summary)
+    lines.push(...section("Summary", summary));
+  else if (description)
+    lines.push(...section("Summary", description));
+  lines.push(...section("Motivation", p5.motivation ?? ""));
+  const design = trim2(p5.design ?? p5.implementationPlan ?? "");
+  lines.push(...section("Design", design));
+  if (description && summary) {
+    lines.push(...section("Description", description));
+  }
+  lines.push(...section("Drawbacks", p5.drawbacks ?? ""));
+  lines.push(...section("Alternatives", p5.alternatives ?? ""));
+  lines.push(...section("Dependency Notes", p5.dependency_note ?? ""));
+  lines.push(...arraySection("Dependencies", (p5.dependencies ?? []).map((d4) => String(d4))));
+  lines.push(...arraySection("References", (p5.references ?? []).map((d4) => String(d4))));
+  lines.push(...arraySection("Required Capabilities", (p5.required_capabilities ?? p5.needs_capabilities ?? []).map((d4) => String(d4))));
+  lines.push(...arraySection("Unlocks", (p5.unlocks ?? []).map((d4) => String(d4))));
+  lines.push(...criteriaBlock(bundle.criteria ?? p5.acceptanceCriteriaItems));
+  lines.push(...section("Implementation Plan", p5.implementationPlan ?? ""));
+  lines.push(...section("Implementation Notes", p5.implementationNotes ?? ""));
+  lines.push(...section("Audit Notes", p5.auditNotes ?? ""));
+  lines.push(...section("Final Summary", p5.finalSummary ?? ""));
+  lines.push(...decisionsBlock(bundle.decisions));
+  lines.push(...reviewsBlock(bundle.reviews));
+  lines.push(...discussionsBlock(bundle.discussions));
+  lines.push(...activityBlock(bundle.activityLog ?? p5.activityLog));
+  lines.push("---", `_Exported ${new Date().toISOString()}_`, "");
+  return lines.join(`
+`).replace(/\n{3,}/g, `
+
+`);
+}
+function proposalExportFilename(proposal) {
+  const id33 = proposal.id || "proposal";
+  const slug2 = (proposal.title || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  return slug2 ? `${id33}-${slug2}-${stamp}.md` : `${id33}-${stamp}.md`;
+}
+
+// src/apps/dashboard-web/lib/proposal-activity.ts
+var localActivityDateTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short"
+});
+function formatLocalActivityTimestamp(value2) {
+  if (!value2)
+    return "";
+  const date2 = new Date(value2);
+  if (Number.isNaN(date2.getTime()))
+    return value2;
+  return localActivityDateTimeFormatter.format(date2);
+}
+
+// src/apps/dashboard-web/utils/date-display.ts
+var DATE_ONLY_REGEX = /^(\d{4})-(\d{2})-(\d{2})$/;
+var DATE_TIME_REGEX = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/;
+function parseIntStrict(value2) {
+  return Number.parseInt(value2, 10);
+}
+function parseStoredUtcDate(dateStr) {
+  const normalized = dateStr.trim();
+  if (!normalized)
+    return null;
+  const dateTimeMatch = normalized.match(DATE_TIME_REGEX);
+  if (dateTimeMatch) {
+    const y6 = dateTimeMatch[1];
+    const m3 = dateTimeMatch[2];
+    const d4 = dateTimeMatch[3];
+    const hh = dateTimeMatch[4];
+    const mm = dateTimeMatch[5];
+    if (!y6 || !m3 || !d4 || !hh || !mm)
+      return null;
+    const year = parseIntStrict(y6);
+    const month = parseIntStrict(m3);
+    const day = parseIntStrict(d4);
+    const hours = parseIntStrict(hh);
+    const minutes = parseIntStrict(mm);
+    const date2 = new Date(Date.UTC(year, month - 1, day, hours, minutes, 0));
+    if (date2.getUTCFullYear() !== year || date2.getUTCMonth() !== month - 1 || date2.getUTCDate() !== day || date2.getUTCHours() !== hours || date2.getUTCMinutes() !== minutes) {
+      return null;
+    }
+    return date2;
+  }
+  const dateOnlyMatch = normalized.match(DATE_ONLY_REGEX);
+  if (dateOnlyMatch) {
+    const y6 = dateOnlyMatch[1];
+    const m3 = dateOnlyMatch[2];
+    const d4 = dateOnlyMatch[3];
+    if (!y6 || !m3 || !d4)
+      return null;
+    const year = parseIntStrict(y6);
+    const month = parseIntStrict(m3);
+    const day = parseIntStrict(d4);
+    const date2 = new Date(Date.UTC(year, month - 1, day, 0, 0, 0));
+    if (date2.getUTCFullYear() !== year || date2.getUTCMonth() !== month - 1 || date2.getUTCDate() !== day) {
+      return null;
+    }
+    return date2;
+  }
+  const fallback = new Date(normalized);
+  if (!Number.isNaN(fallback.getTime()))
+    return fallback;
+  return null;
+}
+var HAS_TIME_REGEX = /T\d{2}:\d{2}/;
+function formatStoredUtcDateForDisplay(dateStr) {
+  const parsed = parseStoredUtcDate(dateStr);
+  if (!parsed)
+    return dateStr;
+  const hasTime = DATE_TIME_REGEX.test(dateStr.trim()) || HAS_TIME_REGEX.test(dateStr.trim());
+  if (hasTime) {
+    return parsed.toLocaleString(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short"
+    });
+  }
+  return parsed.toLocaleDateString();
+}
+function formatStoredUtcDateForCompactDisplay(dateStr, now3 = new Date) {
+  const normalized = dateStr.trim();
+  if (!normalized)
+    return "—";
+  const parsed = parseStoredUtcDate(normalized);
+  if (!parsed)
+    return normalized;
+  const diffMs = now3.getTime() - parsed.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  if (diffDays >= 0) {
+    if (diffDays === 0)
+      return "today";
+    if (diffDays === 1)
+      return "yesterday";
+    if (diffDays < 7)
+      return `${diffDays}d ago`;
+  }
+  return parsed.toLocaleDateString();
+}
+
+// src/apps/dashboard-web/components/AcceptanceCriteriaEditor.tsx
+var import_react57 = __toESM(require_react(), 1);
+var jsx_dev_runtime23 = __toESM(require_jsx_dev_runtime(), 1);
+var AcceptanceCriteriaEditor = ({
+  criteria: initial,
+  onChange,
+  label = "Acceptance Criteria",
+  preserveIndices = false,
+  disableToggle = false
+}) => {
+  const [criteria, setCriteria] = import_react57.useState(initial || []);
+  const [newCriterion, setNewCriterion] = import_react57.useState("");
+  const itemRefs = import_react57.useRef({});
+  const newRef = import_react57.useRef(null);
+  import_react57.useEffect(() => {
+    setCriteria(initial || []);
+  }, [initial]);
+  const autoResize = import_react57.useCallback((el) => {
+    if (!el)
+      return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, []);
+  import_react57.useEffect(() => {
+    Object.values(itemRefs.current).forEach((el) => {
+      autoResize(el);
+    });
+  }, [autoResize]);
+  import_react57.useEffect(() => {
+    autoResize(newRef.current);
+  }, [autoResize]);
+  const handleToggle = (index3, checked2) => {
+    if (disableToggle)
+      return;
+    const updated = criteria.map((c5) => c5.index === index3 ? { ...c5, checked: checked2 } : c5);
+    setCriteria(updated);
+    onChange(updated);
+  };
+  const handleTextChange = (index3, text13) => {
+    const updated = criteria.map((c5) => c5.index === index3 ? { ...c5, text: text13 } : c5);
+    setCriteria(updated);
+    onChange(updated);
+  };
+  const handleRemove = (index3) => {
+    const filtered = criteria.filter((c5) => c5.index !== index3);
+    const updated = preserveIndices ? filtered : filtered.map((c5, i5) => ({ ...c5, index: i5 + 1 }));
+    setCriteria(updated);
+    onChange(updated);
+  };
+  const handleAdd = () => {
+    const text13 = newCriterion.trim();
+    if (!text13)
+      return;
+    const nextIndex = preserveIndices ? Math.max(0, ...criteria.map((item) => item.index)) + 1 : criteria.length + 1;
+    const updated = [...criteria, { checked: false, text: text13, index: nextIndex }];
+    setCriteria(updated);
+    setNewCriterion("");
+    onChange(updated);
+  };
+  return /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+    className: "space-y-2",
+    children: [
+      /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+        className: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 transition-colors duration-200",
+        children: label
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("ul", {
+        className: "space-y-2",
+        children: [
+          criteria.map((c5) => /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("li", {
+            className: "flex items-center gap-2",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("input", {
+                type: "checkbox",
+                className: "h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded",
+                checked: c5.checked,
+                onChange: (e3) => handleToggle(c5.index, e3.target.checked),
+                disabled: disableToggle
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("textarea", {
+                ref: (el) => {
+                  itemRefs.current[c5.index] = el;
+                },
+                rows: 1,
+                value: c5.text,
+                onChange: (e3) => handleTextChange(c5.index, e3.target.value),
+                onInput: (e3) => autoResize(e3.currentTarget),
+                className: "flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 focus:border-transparent transition-colors duration-200 resize-none overflow-hidden leading-5"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("button", {
+                type: "button",
+                onClick: () => handleRemove(c5.index),
+                className: "px-2 py-1 text-sm text-red-600 dark:text-red-400 hover:underline",
+                children: "Remove"
+              }, undefined, false, undefined, this)
+            ]
+          }, c5.index, true, undefined, this)),
+          /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("li", {
+            className: "flex items-center gap-2",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("textarea", {
+                ref: newRef,
+                rows: 1,
+                value: newCriterion,
+                onChange: (e3) => setNewCriterion(e3.target.value),
+                onInput: (e3) => autoResize(e3.currentTarget),
+                placeholder: "New criterion",
+                className: "flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 focus:border-transparent transition-colors duration-200 resize-none overflow-hidden leading-5"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("button", {
+                type: "button",
+                onClick: handleAdd,
+                className: "px-2 py-1 text-sm bg-blue-500 dark:bg-blue-600 text-white rounded-md hover:bg-blue-600 dark:hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 focus:ring-blue-400 dark:focus:ring-blue-500 transition-colors duration-200",
+                children: "Add"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+};
+var AcceptanceCriteriaEditor_default = AcceptanceCriteriaEditor;
+
+// src/apps/dashboard-web/components/ChipInput.tsx
+var import_react58 = __toESM(require_react(), 1);
+var jsx_dev_runtime24 = __toESM(require_jsx_dev_runtime(), 1);
+var ChipInput = ({
+  value: value2,
+  onChange,
+  placeholder,
+  label,
+  name: name3,
+  disabled: disabled2
+}) => {
+  const [inputValue, setInputValue] = import_react58.useState("");
+  const inputId = `chip-input-${name3}`;
+  const handleKeyDown2 = (e3) => {
+    if (disabled2)
+      return;
+    if ((e3.key === "Enter" || e3.key === ",") && inputValue.trim()) {
+      e3.preventDefault();
+      const newValue = inputValue.trim();
+      if (!value2.includes(newValue)) {
+        onChange([...value2, newValue]);
+      }
+      setInputValue("");
+    } else if (e3.key === "Backspace" && !inputValue && value2.length > 0) {
+      onChange(value2.slice(0, -1));
+    }
+  };
+  const handleInputChange = (e3) => {
+    if (disabled2)
+      return;
+    const newValue = e3.target.value;
+    if (newValue.endsWith(",")) {
+      const chipValue = newValue.slice(0, -1).trim();
+      if (chipValue && !value2.includes(chipValue)) {
+        onChange([...value2, chipValue]);
+        setInputValue("");
+      } else {
+        setInputValue("");
+      }
+    } else {
+      setInputValue(newValue);
+    }
+  };
+  const removeChip = (index3) => {
+    if (disabled2)
+      return;
+    onChange(value2.filter((_4, i5) => i5 !== index3));
+  };
+  return /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("div", {
+    className: "w-full",
+    children: [
+      /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("label", {
+        htmlFor: inputId,
+        className: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 transition-colors duration-200",
+        children: label
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("div", {
+        className: `relative w-full min-h-10 px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md focus-within:ring-2 focus-within:ring-blue-500 dark:focus-within:ring-blue-400 focus-within:border-transparent transition-colors duration-200 pr-2 ${disabled2 ? "opacity-60 cursor-not-allowed" : ""}`,
+        children: /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("div", {
+          className: "flex flex-wrap gap-2 items-center w-full",
+          children: [
+            value2.map((item, index3) => /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("span", {
+              className: "inline-flex items-center gap-1 px-2 py-0.5 text-sm bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200 rounded-md flex-shrink-0 min-w-0 max-w-full transition-colors duration-200",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("span", {
+                  className: "truncate max-w-[16rem] sm:max-w-[20rem] md:max-w-[24rem]",
+                  children: item
+                }, undefined, false, undefined, this),
+                !disabled2 && /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("button", {
+                  type: "button",
+                  onClick: () => removeChip(index3),
+                  className: "hover:bg-blue-200 dark:hover:bg-blue-800 rounded-sm p-0.5 transition-colors duration-200",
+                  "aria-label": `Remove ${item}`,
+                  children: /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("svg", {
+                    className: "w-3 h-3",
+                    fill: "currentColor",
+                    viewBox: "0 0 20 20",
+                    "aria-hidden": "true",
+                    focusable: "false",
+                    children: /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("path", {
+                      fillRule: "evenodd",
+                      d: "M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z",
+                      clipRule: "evenodd"
+                    }, undefined, false, undefined, this)
+                  }, undefined, false, undefined, this)
+                }, undefined, false, undefined, this)
+              ]
+            }, item, true, undefined, this)),
+            /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("input", {
+              id: inputId,
+              type: "text",
+              value: inputValue,
+              onChange: handleInputChange,
+              onKeyDown: handleKeyDown2,
+              placeholder: value2.length === 0 ? placeholder : "",
+              className: "flex-1 min-w-[2ch] outline-none text-sm bg-transparent text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400",
+              disabled: disabled2
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+};
+var ChipInput_default = ChipInput;
+
+// src/apps/dashboard-web/components/DependencyInput.tsx
+var import_react59 = __toESM(require_react(), 1);
+var jsx_dev_runtime25 = __toESM(require_jsx_dev_runtime(), 1);
+var DependencyInput = ({
+  value: value2,
+  onChange,
+  availableProposals,
+  currentProposalId,
+  label = "Dependencies",
+  disabled: disabled2
+}) => {
+  const [inputValue, setInputValue] = import_react59.useState("");
+  const [suggestions, setSuggestions] = import_react59.useState([]);
+  const [selectedIndex, setSelectedIndex] = import_react59.useState(0);
+  const textareaRef = import_react59.useRef(null);
+  const inputId = "dependency-input";
+  const getProposalDisplay = (proposalId) => {
+    const proposal = availableProposals.find((t4) => t4.id === proposalId);
+    return proposal ? `${proposal.id} - ${proposal.title}` : proposalId;
+  };
+  import_react59.useEffect(() => {
+    if (inputValue.trim()) {
+      const filtered = availableProposals.filter((proposal) => proposal.id !== currentProposalId && !value2.includes(proposal.id) && (proposal.id.toLowerCase().includes(inputValue.toLowerCase()) || proposal.title.toLowerCase().includes(inputValue.toLowerCase())));
+      setSuggestions(filtered);
+      setSelectedIndex(0);
+    } else {
+      setSuggestions([]);
+    }
+  }, [inputValue, availableProposals, value2, currentProposalId]);
+  import_react59.useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+    }
+  }, []);
+  const addDependency = (proposalId) => {
+    if (disabled2)
+      return;
+    if (!value2.includes(proposalId)) {
+      onChange([...value2, proposalId]);
+      setInputValue("");
+      setSuggestions([]);
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+      }
+    }
+  };
+  const removeDependency = (index3) => {
+    if (disabled2)
+      return;
+    onChange(value2.filter((_4, i5) => i5 !== index3));
+  };
+  const handleKeyDown2 = (e3) => {
+    if (disabled2)
+      return;
+    if (e3.key === "ArrowDown") {
+      e3.preventDefault();
+      setSelectedIndex((prev2) => (prev2 + 1) % suggestions.length);
+    } else if (e3.key === "ArrowUp") {
+      e3.preventDefault();
+      setSelectedIndex((prev2) => (prev2 - 1 + suggestions.length) % suggestions.length);
+    } else if ((e3.key === "Enter" || e3.key === ",") && inputValue.trim()) {
+      e3.preventDefault();
+      if (suggestions.length > 0 && suggestions[selectedIndex]) {
+        addDependency(suggestions[selectedIndex].id);
+      }
+    } else if (e3.key === "Backspace" && !inputValue && value2.length > 0) {
+      onChange(value2.slice(0, -1));
+    } else if (e3.key === "Escape") {
+      setSuggestions([]);
+      setInputValue("");
+    }
+  };
+  const handleInputChange = (e3) => {
+    if (disabled2)
+      return;
+    const newValue = e3.target.value;
+    if (newValue.endsWith(",")) {
+      const searchValue = newValue.slice(0, -1).trim();
+      if (searchValue && suggestions.length > 0 && suggestions[selectedIndex]) {
+        addDependency(suggestions[selectedIndex].id);
+      }
+    } else {
+      setInputValue(newValue);
+    }
+  };
+  return /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("div", {
+    children: [
+      label ? /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("label", {
+        htmlFor: inputId,
+        className: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 transition-colors duration-200",
+        children: label
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("div", {
+        className: "relative w-full",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("div", {
+            className: `w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md focus-within:ring-2 focus-within:ring-blue-500 dark:focus-within:ring-blue-400 focus-within:border-transparent transition-colors duration-200 max-h-60 overflow-auto pr-2 ${disabled2 ? "opacity-60 cursor-not-allowed" : ""}`,
+            children: [
+              value2.length > 0 && /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("div", {
+                className: "flex flex-wrap gap-2 mb-2",
+                children: value2.map((proposalId, index3) => /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("span", {
+                  className: "inline-flex items-center gap-1 px-2 py-0.5 text-sm bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200 rounded-md transition-colors duration-200 min-w-0 max-w-full",
+                  children: [
+                    /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("span", {
+                      className: "truncate max-w-[16rem] sm:max-w-[20rem] md:max-w-[24rem]",
+                      children: getProposalDisplay(proposalId)
+                    }, undefined, false, undefined, this),
+                    !disabled2 && /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("button", {
+                      type: "button",
+                      onClick: () => removeDependency(index3),
+                      className: "hover:bg-blue-200 dark:hover:bg-blue-800 rounded-sm p-0.5 transition-colors duration-200",
+                      "aria-label": `Remove ${proposalId}`,
+                      children: /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("svg", {
+                        className: "w-3 h-3",
+                        fill: "currentColor",
+                        viewBox: "0 0 20 20",
+                        "aria-hidden": "true",
+                        focusable: "false",
+                        children: /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("path", {
+                          fillRule: "evenodd",
+                          d: "M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z",
+                          clipRule: "evenodd"
+                        }, undefined, false, undefined, this)
+                      }, undefined, false, undefined, this)
+                    }, undefined, false, undefined, this)
+                  ]
+                }, proposalId, true, undefined, this))
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("textarea", {
+                ref: textareaRef,
+                id: inputId,
+                value: inputValue,
+                onChange: handleInputChange,
+                onKeyDown: handleKeyDown2,
+                placeholder: value2.length === 0 ? "Type proposal ID or title, then press Enter or comma" : "Add more dependencies...",
+                className: "w-full outline-none text-sm bg-transparent resize-none text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400",
+                rows: 1,
+                disabled: disabled2
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          suggestions.length > 0 && /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("div", {
+            className: "absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg max-h-64 overflow-auto overscroll-contain transition-colors duration-200",
+            children: suggestions.map((proposal, index3) => /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("button", {
+              type: "button",
+              onClick: () => addDependency(proposal.id),
+              className: `w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200 ${index3 === selectedIndex ? "bg-gray-100 dark:bg-gray-700" : ""}`,
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("div", {
+                  className: "font-medium text-gray-900 dark:text-white",
+                  children: proposal.id
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("div", {
+                  className: "text-gray-600 dark:text-gray-300 break-words whitespace-normal",
+                  children: proposal.title
+                }, undefined, false, undefined, this)
+              ]
+            }, proposal.id, true, undefined, this))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+};
+var DependencyInput_default = DependencyInput;
 
 // src/apps/dashboard-web/components/Modal.tsx
 var import_react60 = __toESM(require_react(), 1);
@@ -230130,6 +230145,7 @@ var ProposalDetailsModal = ({
   isDraftMode
 }) => {
   const theme = getColorMode();
+  const [, navigate2] = useLocation();
   const isCreateMode = !proposal;
   const isFromOtherBranch = Boolean(proposal?.branch);
   const proposalId = proposal?.id ?? "";
@@ -230432,32 +230448,37 @@ var ProposalDetailsModal = ({
       setDiscussions([]);
       return;
     }
+    if (!isOpen)
+      return;
     let cancelled = false;
     apiClient.fetchProposalDecisions(proposalId).then((nextDecisions) => {
       if (!cancelled)
         setDecisions(nextDecisions);
-    }).catch(() => {
+    }).catch((err) => {
+      console.warn("[P801] fetchProposalDecisions failed:", err);
       if (!cancelled)
         setDecisions([]);
     });
     apiClient.fetchProposalReviews(proposalId).then((nextReviews) => {
       if (!cancelled)
         setReviews(nextReviews);
-    }).catch(() => {
+    }).catch((err) => {
+      console.warn("[P801] fetchProposalReviews failed:", err);
       if (!cancelled)
         setReviews([]);
     });
     apiClient.fetchProposalDiscussions(proposalId).then((nextDiscussions) => {
       if (!cancelled)
         setDiscussions(nextDiscussions);
-    }).catch(() => {
+    }).catch((err) => {
+      console.warn("[P801] fetchProposalDiscussions failed:", err);
       if (!cancelled)
         setDiscussions([]);
     });
     return () => {
       cancelled = true;
     };
-  }, [proposalId]);
+  }, [proposalId, isOpen]);
   const handleCancelEdit = import_react61.useCallback(() => {
     if (isDirty) {
       const confirmDiscard = window.confirm("Discard unsaved changes?");
@@ -231356,25 +231377,38 @@ var ProposalDetailsModal = ({
                       }, undefined, false, undefined, this)
                     ]
                   }, undefined, true, undefined, this),
-                  lastActivity && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                    className: "cursor-pointer hover:text-blue-600 dark:hover:text-blue-400",
+                    onClick: () => {
+                      onClose();
+                      navigate2(`/activity?proposal=${encodeURIComponent(proposalId)}`);
+                    },
+                    title: "View full activity feed",
                     children: [
                       /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
                         className: "font-semibold text-gray-800 dark:text-gray-100",
                         children: "Last activity:"
                       }, undefined, false, undefined, this),
                       " ",
-                      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
-                        className: "text-gray-700 dark:text-gray-200",
-                        children: formatStoredUtcDateForDisplay(lastActivity.date)
-                      }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
-                        className: "ml-1 text-gray-400 dark:text-gray-500 italic",
+                      lastActivity ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(jsx_dev_runtime27.Fragment, {
                         children: [
-                          "(",
-                          lastActivity.label,
-                          ")"
+                          /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                            className: "text-gray-700 dark:text-gray-200",
+                            children: formatLocalActivityTimestamp(lastActivity.date)
+                          }, undefined, false, undefined, this),
+                          /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                            className: "ml-1 text-gray-400 dark:text-gray-500 italic",
+                            children: [
+                              "(",
+                              lastActivity.label,
+                              ")"
+                            ]
+                          }, undefined, true, undefined, this)
                         ]
-                      }, undefined, true, undefined, this)
+                      }, undefined, true, undefined, this) : /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                        className: "text-gray-400 dark:text-gray-500 italic",
+                        children: "No activity yet"
+                      }, undefined, false, undefined, this)
                     ]
                   }, undefined, true, undefined, this)
                 ]
@@ -232912,10 +232946,7 @@ var TeamsPage = () => {
   const fetchData = import_react66.useCallback(async () => {
     try {
       setError(null);
-      const response = await fetch("/api/teams");
-      if (!response.ok)
-        throw new Error("Failed to fetch teams");
-      const data5 = await response.json();
+      const data5 = await apiClient.fetchTeams();
       setTeams(data5);
     } catch (err) {
       console.error("Failed to fetch teams:", err);
@@ -233380,8 +233411,8 @@ function toSharedProposal(proposal) {
     title: proposal.title,
     status: proposal.status,
     assignee: [],
-    createdDate: proposal.createdAt,
-    updatedDate: proposal.updatedAt || proposal.createdAt,
+    createdDate: proposal.createdAt ?? "",
+    updatedDate: proposal.updatedAt || proposal.createdAt || undefined,
     labels,
     dependencies: proposal.parentId ? [proposal.parentId] : [],
     summary: proposal.summary ?? proposal.bodyMarkdown ?? undefined,
