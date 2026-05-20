@@ -117,13 +117,13 @@ export async function selectModelByTaskDifficulty(
 				tier,
 				route_provider,
 				agent_provider,
-				COALESCE(cost_per_1k_input, 0)::float8 AS cost_per_1k_input,
+				COALESCE(cost_per_million_input, 0)::float8 / 1000.0 AS cost_per_1k_input,
 				COALESCE(confidence_threshold, 0.70)::float8 AS confidence_threshold,
 				is_enabled
 			FROM roadmap.model_routes
 			WHERE tier = $1
 			  AND is_enabled = true
-			ORDER BY COALESCE(cost_per_1k_input, 0) ASC
+			ORDER BY COALESCE(cost_per_million_input, 0) ASC
 			LIMIT 1`,
 			[tier],
 		);
@@ -153,12 +153,12 @@ export async function listModelsByTier(
 			tier,
 			route_provider,
 			agent_provider,
-			COALESCE(cost_per_1k_input, 0)::float8 AS cost_per_1k_input,
+			COALESCE(cost_per_million_input, 0)::float8 / 1000.0 AS cost_per_1k_input,
 			COALESCE(confidence_threshold, 0.70)::float8 AS confidence_threshold,
 			is_enabled
 		FROM roadmap.model_routes
 		WHERE tier = $1
-		ORDER BY COALESCE(cost_per_1k_input, 0) ASC`,
+		ORDER BY COALESCE(cost_per_million_input, 0) ASC`,
 		[tier],
 	);
 	return rows;
