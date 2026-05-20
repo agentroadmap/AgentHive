@@ -247,27 +247,33 @@ export async function liaisonHeartbeat(
  * Called by the liaison boot-process watchdog every 60s (AC-5).
  *
  * Aliveness signals (any one keeps the agency out of dormant):
- *   - presence_state IN ('online', 'busy') — canonical, A2A maintains via fn_pulse.
- *   - last_heartbeat_at < 90 s — transitional fallback (P1132).
- *
- * NOTE: presence_state alone cannot detect an A2A host crash (the value stays
- * 'online' even though no one is refreshing it). Today, the A2A
- * presence-refresh shim keeps last_heartbeat_at fresh so this sweep correctly
- * detects crashes via heartbeat staleness. When that shim retires (follow-on),
- * dormancy needs a different crash signal — pg_stat_activity LISTEN-session
- * presence is the leading candidate.
+ *   - pg_stat_activity holds 'agenthive-a2a-listen-<agency_id>' — CANONICAL
+ *     crash detection (task #39 / Phase A). The A2A host opens this LISTEN
+ *     session per attached agency; when the host crashes or the connection
+ *     drops, the row disappears from pg_stat_activity within seconds — much
+ *     faster than 90s heartbeat staleness.
+ *   - presence_state IN ('online', 'busy') — set on lifecycle events by
+ *     fn_pulse. Stale on crash (presence stays 'online'), but useful when
+ *     pg_stat_activity briefly lacks the row mid-reconnect.
+ *   - last_heartbeat_at < 90 s — transitional fallback while the
+ *     A2A presence-refresh shim still writes. Retires in Phase B once
+ *     pg_stat_activity is proven sufficient.
  */
 export async function checkAndMarkDormant(): Promise<number> {
 	const result = await query(`
-    UPDATE roadmap.agency
+    UPDATE roadmap.agency a
     SET status = 'dormant', status_reason = 'No liveness signal > 90s'
-    WHERE status IN ('active', 'throttled')
+    WHERE a.status IN ('active', 'throttled')
       AND NOT (
-        presence_state IN ('online', 'busy')
-        OR (last_heartbeat_at IS NOT NULL
-            AND (now() - last_heartbeat_at) < interval '90 seconds')
+        EXISTS (
+          SELECT 1 FROM pg_stat_activity
+          WHERE application_name = 'agenthive-a2a-listen-' || a.agency_id
+        )
+        OR a.presence_state IN ('online', 'busy')
+        OR (a.last_heartbeat_at IS NOT NULL
+            AND (now() - a.last_heartbeat_at) < interval '90 seconds')
       )
-    RETURNING agency_id
+    RETURNING a.agency_id
   `);
 	return result.rowCount ?? 0;
 }
