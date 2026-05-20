@@ -418,18 +418,19 @@ export async function getAgencyStatus(agency_id: string): Promise<{
 }
 
 /**
- * Check whether a specific agency is eligible to receive an offer dispatch.
+ * Check whether a single agency is dispatchable.
  *
- * Checks: status='active' AND last_heartbeat_at within 90s (via v_agency_status.dispatchable).
- * @note Capacity envelope check (remaining_capacity > 0) is treated as always-true
- *   until P1018/P1022 land and wire the budget substrate writers.
+ * Dispatachability criteria (v_agency_status):
+ *   - status = 'active'
+ *   - last_heartbeat_at within 60 seconds
+ *
+ * @note Capacity envelope check (remaining_capacity > 0) is disabled and
+ *   treated as true until P1018/P1022 land (budget substrate unwired).
  */
-export async function isAgencyDispatchable(
-	agency_id: string,
-): Promise<boolean> {
+export async function isAgencyDispatchable(agencyId: string): Promise<boolean> {
 	const result = await query(
-		`SELECT dispatchable FROM roadmap.v_agency_status WHERE agency_id = $1`,
-		[agency_id],
+		`SELECT dispatchable FROM roadmap.v_agency_status WHERE agency_id = $1 LIMIT 1`,
+		[agencyId],
 	);
 	return result.rows[0]?.dispatchable === true;
 }
