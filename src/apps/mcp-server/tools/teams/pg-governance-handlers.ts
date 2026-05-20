@@ -211,8 +211,8 @@ export class PgTeamGovernanceHandlers {
 			const existing = await query<{ id: number }>(
 				`SELECT id FROM roadmap_workforce.agent_conflicts
 				WHERE proposal_id = $1
-				  AND initiator_agent = $2
-				  AND respondent_agent = $3
+				  AND agent_a = $2
+				  AND agent_b = $3
 				  AND status = 'open'
 				LIMIT 1`,
 				[proposalIdNum, args.initiatorAgent, args.respondentAgent],
@@ -239,18 +239,20 @@ export class PgTeamGovernanceHandlers {
 					],
 				);
 			} else {
-				// Insert new dispute record
+				// Insert new dispute record — DB cols: agent_a/agent_b/topic/position_a/position_b
 				const result = await query<{ id: number }>(
 					`INSERT INTO roadmap_workforce.agent_conflicts
-						(proposal_id, initiator_agent, respondent_agent, description,
+						(proposal_id, agent_a, agent_b, topic, position_a, position_b,
 						 status, escalation_level, team_id, resolution_note)
-					VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+					VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 					RETURNING id`,
 					[
 						proposalIdNum,
 						args.initiatorAgent,
 						args.respondentAgent,
 						args.description,
+						args.initiatorAgent,   // position_a: initiator's stance (agent identity)
+						args.respondentAgent,  // position_b: respondent's stance (agent identity)
 						status,
 						args.escalationLevel,
 						teamIdNum,
@@ -321,13 +323,14 @@ export class PgTeamGovernanceHandlers {
 				[teamIdNum],
 			);
 
-			// Mark team as dissolved
+			// Mark team as archived (terminal state; 'dissolved' is semantic intent stored in metadata)
 			await query(
 				`UPDATE roadmap_workforce.team
-				SET status = 'dissolved',
+				SET status = 'archived',
 				    metadata = metadata || jsonb_build_object(
 				        'dissolved_by', $2::text,
-				        'dissolved_at', now()::text
+				        'dissolved_at', now()::text,
+				        'lifecycle_state', 'dissolved'
 				    )
 				WHERE id = $1`,
 				[teamIdNum, args.archivedBy],
@@ -342,7 +345,7 @@ export class PgTeamGovernanceHandlers {
 							`Team: ${args.teamId}\n` +
 							`Archived: ${archiveResult.rows.length} entries (charter + decisions)\n` +
 							`Cleaned up: ${deleteResult.rows.length} transient norms\n` +
-							`Status: dissolved`,
+							`Status: archived (dissolved)`,
 					},
 				],
 			};
