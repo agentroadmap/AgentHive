@@ -146,10 +146,13 @@ describe("P1291: OfferDispatch upsertPauseRow behavior", () => {
 		);
 
 		// Simulate capability_vocabulary_changed: DELETE no_eligible_agency and capability_mismatch
+		// for this test's specific proposals only
 		const { rowCount } = await query(
 			`DELETE FROM roadmap_workforce.proposal_role_pause
-			  WHERE pause_reason IN ('no_eligible_agency', 'capability_mismatch')
+			  WHERE proposal_id IN ($1, $2)
+			    AND pause_reason IN ('no_eligible_agency', 'capability_mismatch')
 			    AND expires_at > now()`,
+			[p1, p2],
 		);
 
 		expect(rowCount).toBe(2);
