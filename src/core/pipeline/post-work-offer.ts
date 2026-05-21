@@ -16,6 +16,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { query as defaultQuery } from "../../infra/postgres/pool.ts";
 import { ObservabilityWriter } from "../observability/observability-writer.ts";
+import { ROLE_TO_REQUIRED_CAPABILITIES } from "../orchestration/offer-dispatch.ts";
 
 const obs = new ObservabilityWriter("agency:offer-pipeline");
 
@@ -343,11 +344,16 @@ export async function postWorkOffer(
 		throw new DispatchLoopError(input.proposalId, input.role, recentRuns);
 	}
 
-	// P1289 AC-3: Pre-flight dispatchability check. Throw CapabilityMismatchError
-	// (and INSERT nothing) if no active agency advertises the required capabilities
-	// in the table resolveAgency actually matches against
+	// P1289 AC-3 + P1290 AC-1: Pre-flight dispatchability check. Throw
+	// CapabilityMismatchError (and INSERT nothing) if no active agency advertises
+	// the required capabilities in the table resolveAgency actually matches against
 	// (provider_registry.capabilities->'jobs'). Mirrors agency-resolver.ts:130.
-	const checkCaps = input.requiredCapabilities ?? [];
+	// checkCaps falls back to ROLE_TO_REQUIRED_CAPABILITIES if the caller didn't
+	// supply requiredCapabilities, so the preflight always has a value to check
+	// against rather than silently skipping.
+	const checkCaps = input.requiredCapabilities
+		?? ROLE_TO_REQUIRED_CAPABILITIES[input.role.toLowerCase()]
+		?? ["develop"];
 	if (checkCaps.length > 0) {
 		const { rows: agencyCountRows } = await queryFn<{ count: number }>(
 			`SELECT count(*)::int AS count
