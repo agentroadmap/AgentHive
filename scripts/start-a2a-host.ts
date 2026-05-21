@@ -182,9 +182,16 @@ async function subscribeFlagsReload(): Promise<void> {
 		});
 		await client.connect();
 		await client.query("LISTEN runtime_config_changed");
-		client.on("notification", () => {
+		await client.query("LISTEN capability_vocabulary_changed");
+		client.on("notification", (msg) => {
 			void (async () => {
 				try {
+					// P1291: on capability_vocabulary_changed, clear pauses that may now be fixable
+					if (msg.channel === "capability_vocabulary_changed") {
+						await handleCapabilityVocabularyChanged();
+						return;
+					}
+					// runtime_config_changed → reload flags
 					const next = await loadRuntimeFlags();
 					const changed = JSON.stringify(next) !== JSON.stringify(flags);
 					if (!changed) return;
@@ -195,13 +202,29 @@ async function subscribeFlagsReload(): Promise<void> {
 						restartPresenceRefreshTimer();
 					}
 				} catch (err) {
-					console.warn(`[a2a-host] flag reload failed (keeping previous values):`, err);
+					console.warn(`[a2a-host] notification handler failed:`, err);
 				}
 			})();
 		});
 		flagsReloadClient = client;
 	} catch (err) {
 		console.warn(`[a2a-host] failed to subscribe runtime_config_changed (continuing without live reload):`, err);
+	}
+}
+
+/** P1291: auto-clear pauses on capability vocabulary change. */
+async function handleCapabilityVocabularyChanged(): Promise<void> {
+	try {
+		const result = await query(
+			`DELETE FROM roadmap_workforce.proposal_role_pause
+			  WHERE pause_reason IN ('no_eligible_agency', 'capability_mismatch')
+			    AND expires_at > now()`,
+		);
+		if (result.rowCount && result.rowCount > 0) {
+			console.log(`[a2a-host] cleared ${result.rowCount} pauses due to capability vocabulary change`);
+		}
+	} catch (err) {
+		console.warn(`[a2a-host] error clearing pauses on capability_vocabulary_changed:`, err);
 	}
 }
 
