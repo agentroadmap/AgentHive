@@ -576,39 +576,45 @@ export async function runUnifiedView(
 						 ORDER BY modified_at DESC
 						 LIMIT 5`,
 					);
-					// Filter to meaningful workforce entities. 'tool' rows are
-					// auto-spawned a2a-xproc-* test fixtures, and 'workforce' rows
-					// are legacy bulk-import noise (8000+ inactive).
-					// LATERAL join surfaces each agent's current dispatch (if any)
-					// so the panel can split WORKING vs AVAILABLE.
+					// Query roadmap.agency directly — that's the canonical
+					// provider@host record (e.g. claude@bot, codex@bot) with a
+					// real presence_state. Joins squad_dispatch to surface what
+					// each agency is currently working on. The previous
+					// agent_registry.agent_type taxonomy ('agency','llm',
+					// 'coordinator',…) was an internal classification that
+					// confused operators.
 					const agentRows = await pgrows(
-						`SELECT ar.agent_identity, ar.agent_type, ar.role,
-						        ar.status, ar.updated_at,
+						`SELECT a.provider, a.host_id, a.display_name, a.agency_id,
+						        a.presence_state, a.status, a.last_heartbeat_at,
 						        sd.proposal_id,
 						        p.display_id AS current_proposal,
 						        p.title      AS current_title,
 						        sd.dispatch_role
-						 FROM roadmap_workforce.agent_registry ar
+						 FROM (
+						   SELECT DISTINCT ON (provider, host_id, display_name)
+						          provider, host_id, display_name, agency_id,
+						          presence_state, status, last_heartbeat_at
+						   FROM roadmap.agency
+						   WHERE status = 'active'
+						     AND presence_state IN ('online','busy')
+						     AND provider != 'test'
+						     AND display_name NOT LIKE 'test%'
+						     AND display_name NOT LIKE 'fresh-agency%'
+						   ORDER BY provider, host_id, display_name, last_heartbeat_at DESC
+						 ) a
 						 LEFT JOIN LATERAL (
 						   SELECT proposal_id, dispatch_role, dispatch_status, assigned_at
 						   FROM roadmap_workforce.squad_dispatch
-						   WHERE (worker_identity = ar.agent_identity OR agent_identity = ar.agent_identity)
+						   WHERE (worker_identity = a.display_name
+						          OR agent_identity = a.display_name
+						          OR agency_identity = a.agency_id)
 						     AND dispatch_status IN ('assigned','active','running','pending','offered','claimed')
 						   ORDER BY assigned_at DESC LIMIT 1
 						 ) sd ON true
 						 LEFT JOIN roadmap_proposal.proposal p ON p.id = sd.proposal_id
-						 WHERE ar.status = 'active'
-						   AND ar.agent_type IN ('coordinator','agency','llm','human','hybrid')
 						 ORDER BY (sd.proposal_id IS NOT NULL) DESC,
-						          CASE ar.agent_type
-						            WHEN 'coordinator' THEN 1
-						            WHEN 'agency'      THEN 2
-						            WHEN 'human'       THEN 3
-						            WHEN 'hybrid'      THEN 4
-						            WHEN 'llm'         THEN 5
-						            ELSE 9 END,
-						          ar.agent_identity
-						 LIMIT 50`,
+						          a.provider, a.display_name
+						 LIMIT 100`,
 					);
 					const msgRows = await pgrows(
 						`SELECT from_agent, message_content, created_at FROM roadmap.message_ledger
@@ -638,19 +644,22 @@ export async function runUnifiedView(
 
 					const transformStart = performance.now();
 					const agentData: WorkforceAgent[] = (agentRows as any[]).map((row: any) => ({
-						id: row.agent_identity,
-						name: row.agent_identity,
-						// agent_type is the structural role (agency / coordinator /
-						// llm); .role is what the registry calls them.
-						role: row.agent_type ?? "agent",
-						status: row.status === "active" ? "active" : "offline",
-						// Current proposal renders as "P1234: title…" when the agent
-						// has a live dispatch. undefined means available/idle.
+						id: row.display_name,
+						name: row.display_name,
+						// `role` is now provider@host — groups the panel by where
+						// the agency lives (claude@bot, codex@bot, gemini@bot).
+						role: `${row.provider}@${row.host_id}`,
+						// Presence-state is the real signal: online means the
+						// heartbeat is fresh. Offline/dormant means we shouldn't
+						// route work there.
+						status: row.presence_state === "online" || row.presence_state === "busy"
+							? "active"
+							: "offline",
 						currentProposal: row.current_proposal
 							? `${row.current_proposal}: ${row.current_title ?? ""}`
 							: undefined,
-						statusMessage: row.role ?? row.dispatch_role ?? "",
-						lastSeen: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
+						statusMessage: row.presence_state ?? "",
+						lastSeen: row.last_heartbeat_at ? new Date(row.last_heartbeat_at).getTime() : Date.now(),
 					}));
 
 					const cockpitMessages = (msgRows as any[])

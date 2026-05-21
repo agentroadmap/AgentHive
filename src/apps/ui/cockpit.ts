@@ -107,7 +107,7 @@ export function renderCockpit(
 			width: "50%",
 			height: "50%-3",
 			border: { type: "line" },
-			label: " [F1] Workforce (coordinators · agencies · LLMs) ",
+			label: " [F1] Workforce — agencies by provider@host ",
 			tags: true,
 			scrollable: true,
 			style: { border: { fg: "green" } },
@@ -238,25 +238,25 @@ export function renderCockpit(
 
 		if (idle.length > 0) {
 			lines.push(`{cyan-fg}[ ] AVAILABLE{/}`);
-			// Group idle agents by type for a compact comma-separated roster.
-			const byType = new Map<string, string[]>();
+			// Group by provider@host — the user's mental model. claude@bot,
+			// codex@bot, gemini@bot, etc. Each shown as a single line with
+			// agency names comma-separated.
+			const byProvider = new Map<string, string[]>();
 			idle.forEach((a) => {
-				const t = a.role || "agent";
-				if (!byType.has(t)) byType.set(t, []);
-				byType.get(t)!.push(a.id);
+				const key = a.role || "unknown@?";
+				if (!byProvider.has(key)) byProvider.set(key, []);
+				byProvider.get(key)!.push(a.id);
 			});
-			const typeOrder = ["coordinator", "agency", "human", "hybrid", "llm"];
-			const orderedTypes = [
-				...typeOrder.filter((t) => byType.has(t)),
-				...Array.from(byType.keys()).filter((t) => !typeOrder.includes(t)),
-			];
-			orderedTypes.forEach((type) => {
-				const names = byType.get(type) ?? [];
+			// Sort providers alphabetically for stability.
+			const orderedProviders = Array.from(byProvider.keys()).sort();
+			orderedProviders.forEach((provider) => {
+				const names = byProvider.get(provider) ?? [];
 				const joined = names.join(", ");
-				const fit = joined.length > panelBudget - type.length - 6
-					? `${joined.substring(0, panelBudget - type.length - 7)}…`
+				const labelLen = provider.length + String(names.length).length + 5;
+				const fit = joined.length > panelBudget - labelLen
+					? `${joined.substring(0, panelBudget - labelLen - 1)}…`
 					: joined;
-				lines.push(`  {gray-fg}${type}{/} (${names.length}): ${fit}`);
+				lines.push(`  {gray-fg}${provider}{/} (${names.length}): ${fit}`);
 			});
 		}
 
