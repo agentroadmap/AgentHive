@@ -1,0 +1,315 @@
+-- ============================================================
+-- SKETCH 010 — P901 Phase 1: Template schema for hiveCentral
+-- ============================================================
+-- Target DB:  hiveCentral
+-- Author:     P901 researcher pass (adam, 2026-05-16)
+-- Status:     SKETCH — requires dry-run validation before production use
+--
+-- SCOPE:
+--   1. workflow_template (BIGINT PK — 007-approach, canonical for hiveCentral)
+--   2. state_name (ordered stages per template)
+--   3. gate_definition (transition criteria)
+--   4. proposal_template (proposal structure templates)
+--   5. workflow_template_alias (NEW — stable name→template mapping, Finding 10)
+--   6. workflow_active schema + workflow_template_copy (NEW for hiveCentral)
+--
+-- DDL CONFLICT RESOLUTION (AC-11):
+--   database/ddl/hivecentral/007-template.sql is the canonical hiveCentral
+--   DDL (BIGINT PK, slug+version UNIQUE, normalized child tables).
+--   database/ddl/hivecentral/004-template.sql and migration 070 target the
+--   agenthive v1 DB (TEXT PK template_id, JSONB states/gates) and are NOT
+--   used for hiveCentral.
+--
+-- AGENT_ROLE_PROFILE NOTE (Finding 4):
+--   template.agent_role_profile defined in 007-template.sql is SUPERSEDED
+--   by roadmap.agent_role_profile (migration 055, queried by role-resolver.ts).
+--   This sketch omits template.agent_role_profile; do not create it.
+--   If 007 has already been applied to hiveCentral, leave the table empty.
+--
+-- SEARCH PATH WARNING (Finding 15):
+--   getControlPool() search_path excludes template and workflow_active schemas.
+--   All SQL must use fully-qualified schema.table names.
+-- ============================================================
+
+\set ON_ERROR_STOP on
+
+BEGIN;
+
+-- ============================================================
+-- 1. Ensure template schema exists
+-- (already created by 007-template.sql if applied; idempotent)
+-- ============================================================
+CREATE SCHEMA IF NOT EXISTS template;
+
+COMMENT ON SCHEMA template IS
+  'Immutable versioned workflow templates for hiveCentral. '
+  'Uses BIGINT IDENTITY PK (007-approach). Per-project aliases '
+  'are in workflow_template_alias; per-project snapshots in workflow_active.';
+
+-- ============================================================
+-- 2. workflow_template — immutable workflow definitions
+-- (mirrors 007-template.sql exactly; idempotent)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS template.workflow_template (
+  id               BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  name             TEXT         NOT NULL,
+  slug             TEXT         NOT NULL,
+  version          INT          NOT NULL DEFAULT 1,
+  is_current       BOOL         NOT NULL DEFAULT true,
+  owner_did        TEXT,
+  lifecycle_status TEXT         NOT NULL DEFAULT 'active'
+                                CHECK (lifecycle_status IN ('active','deprecated','retired','blocked')),
+  deprecated_at    TIMESTAMPTZ,
+  retire_after     TIMESTAMPTZ,
+  notes            TEXT,
+  created_at       TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  updated_at       TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  UNIQUE (slug, version)
+);
+
+CREATE INDEX IF NOT EXISTS workflow_template_slug_current
+  ON template.workflow_template (slug, is_current);
+
+-- Immutability trigger (prevents payload updates after INSERT)
+CREATE OR REPLACE FUNCTION template.set_updated_at()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  NEW.updated_at := clock_timestamp();
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION template.deny_workflow_template_update()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'template.workflow_template rows are immutable (op=%)', TG_OP;
+END;
+$$;
+
+DO $$ BEGIN
+  CREATE TRIGGER workflow_template_no_update
+    BEFORE UPDATE ON template.workflow_template
+    FOR EACH ROW EXECUTE FUNCTION template.deny_workflow_template_update();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- ============================================================
+-- 3. state_name — ordered stages in a workflow template
+-- ============================================================
+CREATE TABLE IF NOT EXISTS template.state_name (
+  id               BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  template_id      BIGINT       NOT NULL
+                                REFERENCES template.workflow_template (id) ON DELETE CASCADE,
+  name             TEXT         NOT NULL,
+  ordinal          SMALLINT     NOT NULL,
+  owner_did        TEXT,
+  lifecycle_status TEXT         NOT NULL DEFAULT 'active'
+                                CHECK (lifecycle_status IN ('active','deprecated','retired','blocked')),
+  deprecated_at    TIMESTAMPTZ,
+  retire_after     TIMESTAMPTZ,
+  notes            TEXT,
+  created_at       TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  updated_at       TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  UNIQUE (template_id, name)
+);
+
+DO $$ BEGIN
+  CREATE TRIGGER set_updated_at_state_name
+    BEFORE UPDATE ON template.state_name
+    FOR EACH ROW EXECUTE FUNCTION template.set_updated_at();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- ============================================================
+-- 4. gate_definition — transition criteria between states
+-- ============================================================
+CREATE TABLE IF NOT EXISTS template.gate_definition (
+  id                  BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  template_id         BIGINT       NOT NULL
+                                   REFERENCES template.workflow_template (id) ON DELETE CASCADE,
+  from_state_id       BIGINT       NOT NULL
+                                   REFERENCES template.state_name (id) ON DELETE CASCADE,
+  to_state_id         BIGINT       NOT NULL
+                                   REFERENCES template.state_name (id) ON DELETE CASCADE,
+  required_maturity   TEXT,
+  min_reviewer_count  SMALLINT     NOT NULL DEFAULT 1,
+  owner_did           TEXT,
+  lifecycle_status    TEXT         NOT NULL DEFAULT 'active'
+                                   CHECK (lifecycle_status IN ('active','deprecated','retired','blocked')),
+  deprecated_at       TIMESTAMPTZ,
+  retire_after        TIMESTAMPTZ,
+  notes               TEXT,
+  created_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  updated_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  UNIQUE (template_id, from_state_id)
+);
+
+DO $$ BEGIN
+  CREATE TRIGGER set_updated_at_gate_definition
+    BEFORE UPDATE ON template.gate_definition
+    FOR EACH ROW EXECUTE FUNCTION template.set_updated_at();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+COMMENT ON TABLE template.gate_definition IS
+  'Gate transition criteria. One gate per (template, from_state) pair. '
+  'required_maturity=''mature'' means proposal must reach mature before gate opens.';
+
+-- ============================================================
+-- 5. proposal_template — proposal structure templates
+-- ============================================================
+CREATE TABLE IF NOT EXISTS template.proposal_template (
+  id               BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  template_id      BIGINT       NOT NULL
+                                REFERENCES template.workflow_template (id) ON DELETE CASCADE,
+  name             TEXT         NOT NULL,
+  body_schema      JSONB,
+  required_fields  TEXT[],
+  owner_did        TEXT,
+  lifecycle_status TEXT         NOT NULL DEFAULT 'active'
+                                CHECK (lifecycle_status IN ('active','deprecated','retired','blocked')),
+  deprecated_at    TIMESTAMPTZ,
+  retire_after     TIMESTAMPTZ,
+  notes            TEXT,
+  created_at       TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  updated_at       TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+
+DO $$ BEGIN
+  CREATE TRIGGER set_updated_at_proposal_template
+    BEFORE UPDATE ON template.proposal_template
+    FOR EACH ROW EXECUTE FUNCTION template.set_updated_at();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- ============================================================
+-- 6. workflow_template_alias — stable alias → template mapping
+-- NEW: not in 004 or 007; required by template-catalog.ts (Finding 10/17)
+-- Enables callers to pin by alias (e.g., 'default') rather than
+-- by versioned template_id. resolveTemplateAlias() reads this table.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS template.workflow_template_alias (
+  alias_name       TEXT         PRIMARY KEY,       -- 'default', 'lightweight', 'hotfix'
+  template_id      BIGINT       NOT NULL
+                                REFERENCES template.workflow_template (id) ON DELETE RESTRICT,
+  description      TEXT,
+  owner_did        TEXT         NOT NULL DEFAULT 'did:agenthive:system',
+  created_at       TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  updated_at       TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+
+DO $$ BEGIN
+  CREATE TRIGGER set_updated_at_workflow_template_alias
+    BEFORE UPDATE ON template.workflow_template_alias
+    FOR EACH ROW EXECUTE FUNCTION template.set_updated_at();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+COMMENT ON TABLE template.workflow_template_alias IS
+  'Stable alias-to-template mapping. Allows project-init and orchestrator '
+  'bootstrap to pin by friendly name (''default'') rather than versioned BIGINT id. '
+  'ON DELETE RESTRICT prevents removing an aliased template without re-pointing.';
+
+COMMENT ON COLUMN template.workflow_template_alias.alias_name IS
+  'Human-readable stable name: ''default'', ''lightweight'', ''hotfix''. '
+  'Resolved by template-catalog.ts resolveTemplateAlias().';
+
+CREATE INDEX IF NOT EXISTS idx_template_alias_template_id
+  ON template.workflow_template_alias (template_id);
+
+-- ============================================================
+-- 7. workflow_active schema — per-project template snapshots
+-- NEW for hiveCentral (already exists in agenthive v1 via migration 070)
+-- Stores the full template row at pin time; avoids live cross-schema JOINs.
+-- ============================================================
+CREATE SCHEMA IF NOT EXISTS workflow_active;
+
+COMMENT ON SCHEMA workflow_active IS
+  'Per-project template snapshots. Rows are written at pin time and '
+  'remain readable without cross-schema JOINs to template schema.';
+
+CREATE TABLE IF NOT EXISTS workflow_active.workflow_template_copy (
+  project_id       BIGINT       NOT NULL,
+  template_id      BIGINT       NOT NULL
+                                REFERENCES template.workflow_template (id)
+                                ON UPDATE RESTRICT ON DELETE RESTRICT,
+  slug             TEXT         NOT NULL,
+  version          INT          NOT NULL,
+  name             TEXT         NOT NULL,
+  -- Snapshot of state_name rows at pin time (denormalized for read performance)
+  states_snapshot  JSONB        NOT NULL DEFAULT '[]',
+  -- Snapshot of gate_definition rows at pin time
+  gates_snapshot   JSONB        NOT NULL DEFAULT '[]',
+  pinned_at        TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  pinned_by_did    TEXT         NOT NULL DEFAULT 'system:orchestrator',
+  PRIMARY KEY (project_id, template_id)
+);
+
+COMMENT ON TABLE workflow_active.workflow_template_copy IS
+  'Tenant snapshot of workflow template at pin time. Orchestrators read from '
+  'here to avoid live cross-schema joins. ON DELETE RESTRICT on template_id '
+  'prevents removing a template that any project has pinned.';
+
+CREATE INDEX IF NOT EXISTS idx_wact_copy_project
+  ON workflow_active.workflow_template_copy (project_id);
+
+-- ============================================================
+-- 8. Seed: Phase 1 alias rows
+-- These reference the agenthive standard workflow template seeded in 007.
+-- Run AFTER 007-template.sql seed block has executed.
+-- ============================================================
+DO $$
+DECLARE
+  v_tmpl_id BIGINT;
+BEGIN
+  SELECT id INTO v_tmpl_id
+    FROM template.workflow_template
+   WHERE slug = 'agenthive' AND is_current = true
+   LIMIT 1;
+
+  IF v_tmpl_id IS NULL THEN
+    RAISE NOTICE '010-sketch: agenthive template not found — skipping alias seed. Run 007 seed first.';
+  ELSE
+    INSERT INTO template.workflow_template_alias
+      (alias_name, template_id, description, owner_did)
+    VALUES
+      ('default',     v_tmpl_id, 'Default workflow template for new projects', 'did:agenthive:system'),
+      ('lightweight', v_tmpl_id, 'Alias pointing to standard workflow (P901 Phase 1 placeholder)', 'did:agenthive:system')
+    ON CONFLICT (alias_name) DO NOTHING;
+  END IF;
+END;
+$$;
+
+-- ============================================================
+-- 9. Grants
+-- ============================================================
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'agenthive_orchestrator') THEN
+    GRANT USAGE ON SCHEMA template        TO agenthive_orchestrator;
+    GRANT USAGE ON SCHEMA workflow_active TO agenthive_orchestrator;
+    GRANT SELECT ON ALL TABLES IN SCHEMA template        TO agenthive_orchestrator;
+    GRANT SELECT ON ALL TABLES IN SCHEMA workflow_active TO agenthive_orchestrator;
+    GRANT INSERT, UPDATE ON template.workflow_template_alias  TO agenthive_orchestrator;
+    GRANT INSERT, UPDATE ON workflow_active.workflow_template_copy TO agenthive_orchestrator;
+    GRANT USAGE ON ALL SEQUENCES IN SCHEMA template        TO agenthive_orchestrator;
+    GRANT USAGE ON ALL SEQUENCES IN SCHEMA workflow_active TO agenthive_orchestrator;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'agenthive_agency') THEN
+    GRANT USAGE ON SCHEMA template        TO agenthive_agency;
+    GRANT USAGE ON SCHEMA workflow_active TO agenthive_agency;
+    GRANT SELECT ON ALL TABLES IN SCHEMA template        TO agenthive_agency;
+    GRANT SELECT ON ALL TABLES IN SCHEMA workflow_active TO agenthive_agency;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'agenthive_observability') THEN
+    GRANT USAGE ON SCHEMA template        TO agenthive_observability;
+    GRANT USAGE ON SCHEMA workflow_active TO agenthive_observability;
+    GRANT SELECT ON ALL TABLES IN SCHEMA template        TO agenthive_observability;
+    GRANT SELECT ON ALL TABLES IN SCHEMA workflow_active TO agenthive_observability;
+  END IF;
+END $$;
+
+COMMIT;
+-- END SKETCH 010
