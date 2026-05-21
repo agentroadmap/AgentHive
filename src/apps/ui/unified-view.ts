@@ -583,37 +583,49 @@ export async function runUnifiedView(
 					// agent_registry.agent_type taxonomy ('agency','llm',
 					// 'coordinator',…) was an internal classification that
 					// confused operators.
+					// Use roadmap_workforce.agent_registry as the stable source.
+					// roadmap.agency holds live heartbeats but gets cleared when
+					// heartbeats lapse — using it as primary made the panel go
+					// blank during quiet periods. We overlay live presence from
+					// roadmap.agency when available, otherwise fall back to
+					// "unknown" presence.
 					const agentRows = await pgrows(
-						`SELECT a.provider, a.host_id, a.display_name, a.agency_id,
-						        a.presence_state, a.status, a.last_heartbeat_at,
+						`SELECT ar.agent_identity AS display_name,
+						        ar.preferred_provider AS provider,
+						        COALESCE(NULLIF(ar.host_affinity, ''), 'bot') AS host_id,
+						        ar.role,
+						        COALESCE(a.presence_state, 'unknown') AS presence_state,
+						        COALESCE(a.last_heartbeat_at, ar.updated_at) AS last_heartbeat_at,
 						        sd.proposal_id,
 						        p.display_id AS current_proposal,
 						        p.title      AS current_title,
 						        sd.dispatch_role
-						 FROM (
-						   SELECT DISTINCT ON (provider, host_id, display_name)
-						          provider, host_id, display_name, agency_id,
-						          presence_state, status, last_heartbeat_at
-						   FROM roadmap.agency
-						   WHERE status = 'active'
-						     AND presence_state IN ('online','busy')
-						     AND provider != 'test'
-						     AND display_name NOT LIKE 'test%'
-						     AND display_name NOT LIKE 'fresh-agency%'
-						   ORDER BY provider, host_id, display_name, last_heartbeat_at DESC
-						 ) a
+						 FROM roadmap_workforce.agent_registry ar
+						 LEFT JOIN roadmap.agency a
+						   ON a.display_name = ar.agent_identity
 						 LEFT JOIN LATERAL (
 						   SELECT proposal_id, dispatch_role, dispatch_status, assigned_at
 						   FROM roadmap_workforce.squad_dispatch
-						   WHERE (worker_identity = a.display_name
-						          OR agent_identity = a.display_name
-						          OR agency_identity = a.agency_id)
+						   WHERE (worker_identity = ar.agent_identity
+						          OR agent_identity = ar.agent_identity)
 						     AND dispatch_status IN ('assigned','active','running','pending','offered','claimed')
 						   ORDER BY assigned_at DESC LIMIT 1
 						 ) sd ON true
 						 LEFT JOIN roadmap_proposal.proposal p ON p.id = sd.proposal_id
+						 WHERE ar.status = 'active'
+						   AND ar.agent_type = 'agency'
+						   AND ar.preferred_provider IS NOT NULL
+						   -- Drop legacy bootstrap-agency names (operator
+						   -- feedback 2026-05-21). These are bot accounts
+						   -- that ran the bring-up.
+						   AND ar.agent_identity NOT IN (
+						     'codex-agency-bot', 'codex/agency-bot',
+						     'copilot-agency-gary',
+						     'gemini-agency-bot',
+						     'agency-bot'
+						   )
 						 ORDER BY (sd.proposal_id IS NOT NULL) DESC,
-						          a.provider, a.display_name
+						          ar.preferred_provider, ar.agent_identity
 						 LIMIT 100`,
 					);
 					const msgRows = await pgrows(
@@ -649,12 +661,14 @@ export async function runUnifiedView(
 						// `role` is now provider@host — groups the panel by where
 						// the agency lives (claude@bot, codex@bot, gemini@bot).
 						role: `${row.provider}@${row.host_id}`,
-						// Presence-state is the real signal: online means the
-						// heartbeat is fresh. Offline/dormant means we shouldn't
-						// route work there.
-						status: row.presence_state === "online" || row.presence_state === "busy"
-							? "active"
-							: "offline",
+						// agent_registry says status='active' (filtered above), so
+						// these are registered + available. We only flip to offline
+						// when roadmap.agency has a definitive 'offline' presence
+						// signal; 'unknown' (no live heartbeat) still counts as
+						// available because the agency is registered + active.
+						status: row.presence_state === "offline" || row.presence_state === "away"
+							? "offline"
+							: "active",
 						currentProposal: row.current_proposal
 							? `${row.current_proposal}: ${row.current_title ?? ""}`
 							: undefined,
