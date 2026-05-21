@@ -464,8 +464,16 @@ export class PgProposalHandlers {
 
 	async transitionProposal(args: {
 		id: string;
-		status: string;
+		status?: string;
+		// Aliases accepted to absorb common param-shape confusion across callers.
+		// Canonical is `status`; the rest are fallbacks so a misremembered call
+		// doesn't strand a gate transition with `undefined.toUpperCase()`.
+		to_state?: string;
+		to_status?: string;
+		to?: string;
+		target_state?: string;
 		author?: string;
+		actor?: string;
 		reason?: string;
 		notes?: string;
 	}): Promise<CallToolResult> {
@@ -477,8 +485,22 @@ export class PgProposalHandlers {
 				};
 			}
 
+			// Resolve target status from canonical `status` or any documented alias.
+			const targetStatus =
+				args.status ?? args.to_state ?? args.to_status ?? args.to ?? args.target_state;
+			if (!targetStatus || typeof targetStatus !== "string") {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `prop_transition: missing target status. Pass status="DEVELOP" (canonical) or one of the aliases: to_state, to_status, to, target_state.`,
+						},
+					],
+				};
+			}
+
 			// AC-2: Require active lease before allowing transition (P224)
-			const author = args.author ?? "system";
+			const author = args.author ?? args.actor ?? "system";
 			const leaseResult = await validateLease(id, author);
 			if (!leaseResult.valid) {
 				return {
@@ -503,7 +525,7 @@ export class PgProposalHandlers {
 			const current = await pg.getProposal(id);
 			if (current) {
 				const currentStatus = current.status.toUpperCase();
-				const requestedStatus = args.status.toUpperCase();
+				const requestedStatus = targetStatus.toUpperCase();
 				const allowedTargets = gateTransitions[currentStatus];
 				if (allowedTargets?.includes(requestedStatus)) {
 					if (!args.notes || args.notes.trim().length === 0) {
@@ -521,7 +543,7 @@ export class PgProposalHandlers {
 
 			const updated = await pg.transitionProposal(
 				id,
-				args.status,
+				targetStatus,
 				author,
 				args.reason,
 				args.notes,
@@ -535,7 +557,7 @@ export class PgProposalHandlers {
 				content: [
 					{
 						type: "text",
-						text: `Transitioned proposal ${args.id} → ${args.status}`,
+						text: `Transitioned proposal ${args.id} → ${targetStatus}`,
 					},
 				],
 			};
@@ -612,16 +634,35 @@ export class PgProposalHandlers {
 	}
 
 	async claimProposal(args: {
-		id: string;
-		agent: string;
+		id?: string;
+		// `proposal_id` accepted as alias — the consolidated dispatcher's
+		// description docs `proposal_id` for claim/release while the underlying
+		// schema requires `id`. Accept both so a misremembered call doesn't
+		// 404 with "Proposal undefined not found".
+		proposal_id?: string;
+		agent?: string;
+		// `agent_identity` accepted as alias for `agent` (same reason).
+		agent_identity?: string;
 		durationMinutes?: number;
 		force?: boolean;
 	}): Promise<CallToolResult> {
 		try {
-			const id = await pg.resolveProposalId(args.id);
+			const idArg = args.id ?? args.proposal_id;
+			const agentArg = args.agent ?? args.agent_identity;
+			if (!idArg) {
+				return {
+					content: [{ type: "text", text: `prop_claim: missing proposal identifier. Pass id="P123" (canonical) or proposal_id alias.` }],
+				};
+			}
+			if (!agentArg) {
+				return {
+					content: [{ type: "text", text: `prop_claim: missing agent identity. Pass agent="claude" (canonical) or agent_identity alias.` }],
+				};
+			}
+			const id = await pg.resolveProposalId(idArg);
 			if (id === null) {
 				return {
-					content: [{ type: "text", text: `Proposal ${args.id} not found.` }],
+					content: [{ type: "text", text: `Proposal ${idArg} not found.` }],
 				};
 			}
 
@@ -629,21 +670,21 @@ export class PgProposalHandlers {
 				`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, role)
          VALUES ($1, $2, $3)
          ON CONFLICT (agent_identity) DO UPDATE SET role = EXCLUDED.role`,
-				[args.agent, "llm", "developer"],
+				[agentArg, "llm", "developer"],
 			);
 
 			// AC-7: liaison is the sole prop_claim gateway for registered agencies.
 			// If the claiming agent identity matches a registered agency, it must have
 			// an active liaison session — otherwise the claim is rejected.
-			const agencyRegistered = await isRegisteredAgency(args.agent);
+			const agencyRegistered = await isRegisteredAgency(agentArg);
 			if (agencyRegistered) {
-				const hasSession = await hasActiveLiaisonSession(args.agent);
+				const hasSession = await hasActiveLiaisonSession(agentArg);
 				if (!hasSession) {
 					return {
 						content: [
 							{
 								type: "text",
-								text: `Agency '${args.agent}' is registered but has no active liaison session. Start the agency runtime (scripts/start-agency.ts — invoked via agenthive-${args.agent.split("/")[0] ?? "claude"}-agency.service or equivalent) before claiming proposals; the runtime opens a liaison session and starts the offer_dispatch hub via P912 selfRegisterAgency.`,
+								text: `Agency '${agentArg}' is registered but has no active liaison session. Start the agency runtime (scripts/start-agency.ts — invoked via agenthive-${agentArg.split("/")[0] ?? "claude"}-agency.service or equivalent) before claiming proposals; the runtime opens a liaison session and starts the offer_dispatch hub via P912 selfRegisterAgency.`,
 							},
 						],
 					};
@@ -659,7 +700,7 @@ export class PgProposalHandlers {
 					content: [
 						{
 							type: "text",
-							text: `Proposal ${args.id} is already claimed by ${lease.agent_identity} until ${lease.expires_at ?? "no expiry"}. Pass force=true to replace the lease.`,
+							text: `Proposal ${idArg} is already claimed by ${lease.agent_identity} until ${lease.expires_at ?? "no expiry"}. Pass force=true to replace the lease.`,
 						},
 					],
 				};
@@ -674,13 +715,13 @@ export class PgProposalHandlers {
 
 			const durationMinutes = args.durationMinutes ?? 120;
 			const expiresAt = new Date(Date.now() + durationMinutes * 60 * 1000);
-			const claimed = await pg.claimLease(id, args.agent, expiresAt);
+			const claimed = await pg.claimLease(id, agentArg, expiresAt);
 			if (!claimed) {
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Proposal ${args.id} could not be claimed; another active lease exists.`,
+							text: `Proposal ${idArg} could not be claimed; another active lease exists.`,
 						},
 					],
 				};
@@ -690,7 +731,7 @@ export class PgProposalHandlers {
 				content: [
 					{
 						type: "text",
-						text: `Claimed proposal ${args.id} for ${args.agent} until ${expiresAt.toISOString()}.`,
+						text: `Claimed proposal ${idArg} for ${agentArg} until ${expiresAt.toISOString()}.`,
 					},
 				],
 			};
@@ -700,31 +741,45 @@ export class PgProposalHandlers {
 	}
 
 	async releaseProposal(args: {
-		id: string;
-		agent: string;
-		release_reason: string;
+		id?: string;
+		proposal_id?: string;
+		agent?: string;
+		agent_identity?: string;
+		release_reason?: string;
 		// Legacy "reason" field name kept for backward-compat with internal callers
 		// that haven't migrated yet. Prefer release_reason.
 		reason?: string;
 	}): Promise<CallToolResult> {
 		try {
-			const id = await pg.resolveProposalId(args.id);
+			const idArg = args.id ?? args.proposal_id;
+			const agentArg = args.agent ?? args.agent_identity;
+			if (!idArg) {
+				return {
+					content: [{ type: "text", text: `prop_release: missing proposal identifier. Pass id="P123" (canonical) or proposal_id alias.` }],
+				};
+			}
+			if (!agentArg) {
+				return {
+					content: [{ type: "text", text: `prop_release: missing agent identity. Pass agent="claude" (canonical) or agent_identity alias.` }],
+				};
+			}
+			const id = await pg.resolveProposalId(idArg);
 			if (id === null) {
 				return {
-					content: [{ type: "text", text: `Proposal ${args.id} not found.` }],
+					content: [{ type: "text", text: `Proposal ${idArg} not found.` }],
 				};
 			}
 
 			// P934: release_reason is REQUIRED. Validation throws InvalidReleaseReasonError
 			// which surfaces as a structured error to the MCP caller; no silent default.
 			const reason = args.release_reason ?? args.reason;
-			const released = await pg.releaseLease(id, args.agent, reason as string);
+			const released = await pg.releaseLease(id, agentArg, reason as string);
 			if (!released) {
 				return {
 					content: [
 						{
 							type: "text",
-							text: `No active lease on ${args.id} for ${args.agent}.`,
+							text: `No active lease on ${idArg} for ${agentArg}.`,
 						},
 					],
 				};
@@ -734,7 +789,7 @@ export class PgProposalHandlers {
 				content: [
 					{
 						type: "text",
-						text: `Released proposal ${args.id} lease for ${args.agent}.`,
+						text: `Released proposal ${idArg} lease for ${agentArg}.`,
 					},
 				],
 			};

@@ -1211,6 +1211,11 @@ export async function recordGateDecision(args: {
 	authority_agent?: string;
 	agent_run_id?: string;
 	ac_verification?: Record<string, unknown>;
+	// Optional explicit override. When omitted and decision='advance', to_state
+	// is inferred from `gate` so the row matches fn_guard_gate_advance's check
+	// that requires to_state = NEW.status. For non-advance decisions, to_state
+	// defaults to from_state (proposal stays put).
+	to_state?: string;
 }): Promise<CallToolResult> {
 	const VALID_DECISIONS = ["advance", "hold", "reject", "waive", "escalate"];
 	if (!VALID_DECISIONS.includes(args.decision)) {
@@ -1239,6 +1244,22 @@ export async function recordGateDecision(args: {
 			return { content: [{ type: "text", text: `Proposal ${args.proposal_id} not found.` }] };
 		}
 		const { status: fromState, maturity } = propRows[0];
+
+		// Resolve to_state. Without inference, every advance decision logged
+		// to_state = from_state, and fn_guard_gate_advance rejected the actual
+		// status UPDATE because no row matched (from_state=REVIEW, NEW.status=DEVELOP).
+		// Standard RFC: D1=DRAFT→REVIEW, D2=REVIEW→DEVELOP, D3=DEVELOP→MERGE, D4=MERGE→COMPLETE.
+		const GATE_TO_NEXT_STATE: Record<string, string> = {
+			D1: "REVIEW",
+			D2: "DEVELOP",
+			D3: "MERGE",
+			D4: "COMPLETE",
+		};
+		const toState =
+			args.to_state ??
+			(args.decision === "advance"
+				? (GATE_TO_NEXT_STATE[args.gate.toUpperCase()] ?? fromState)
+				: fromState);
 
 		// Shadow-mode skip: if a row with the same agent_run_id already exists,
 		// the new MCP path already wrote the canonical record — skip the insert.
@@ -1272,7 +1293,7 @@ export async function recordGateDecision(args: {
 			[
 				proposalId,
 				fromState,
-				fromState, // to_state mirrors from_state — transition is a separate step
+				toState,
 				maturity,
 				args.gate,
 				args.decided_by ?? "mcp",
@@ -1282,11 +1303,66 @@ export async function recordGateDecision(args: {
 				Object.keys(acVerification).length ? JSON.stringify(acVerification) : null,
 			],
 		);
+		const decisionId = rows[0].id;
+
+		// Bundle the workflow advance with the decision so one MCP call moves the
+		// proposal through the gate. Without this, callers must (1) record_gate_decision,
+		// (2) acquire a 'system' lease, (3) call prop_transition, (4) release the lease —
+		// four steps that previously stranded operator-driven advances. The gate guard
+		// (fn_guard_gate_advance) finds the row we just inserted and allows the UPDATE.
+		// On non-advance decisions, no transition; on advance with toState===fromState
+		// (defensive), also no-op.
+		if (args.decision === "advance" && toState !== fromState) {
+			try {
+				// Release any active lease so the UPDATE isn't gated on lease ownership.
+				// fn_guard_gate_advance only checks gate_decision_log + proposal_reviews —
+				// not lease state — so releasing first is safe.
+				await query(
+					`UPDATE roadmap_proposal.proposal_lease
+					    SET released_at = COALESCE(released_at, now()),
+					        release_reason = COALESCE(release_reason, 'gate_review_complete')
+					  WHERE proposal_id = $1 AND released_at IS NULL`,
+					[proposalId],
+				);
+				await query(
+					`UPDATE roadmap_proposal.proposal
+					    SET status = $1,
+					        maturity = 'new',
+					        audit = audit || jsonb_build_object(
+					                  'TS', to_jsonb(now()),
+					                  'To', $1::text,
+					                  'From', $2::text,
+					                  'Agent', $3::text,
+					                  'Activity', 'StatusChange',
+					                  'Decision', format('%s gate advance (gate_decision_log #%s)', $4::text, $5::int)
+					                ),
+					        modified_at = now()
+					  WHERE id = $6`,
+					[toState, fromState, args.decided_by ?? "mcp", args.gate, decisionId, proposalId],
+				);
+				return {
+					content: [{
+						type: "text",
+						text: `✅ Gate ${args.gate} ADVANCED: P${args.proposal_id} ${fromState} → ${toState} (gate_decision_log #${decisionId}, maturity reset to 'new'). Lease released.`,
+					}],
+				};
+			} catch (transitionErr) {
+				// Decision row already written; surface the transition failure but don't
+				// roll back the decision — operator can retry just the UPDATE step.
+				const msg = transitionErr instanceof Error ? transitionErr.message : String(transitionErr);
+				return {
+					content: [{
+						type: "text",
+						text: `⚠️ Gate decision #${decisionId} recorded but auto-transition failed: ${msg}\n\nRetry the transition manually: UPDATE roadmap_proposal.proposal SET status='${toState}', maturity='new' WHERE id=${proposalId}; (the gate guard will find decision #${decisionId} for the next 10 minutes).`,
+					}],
+				};
+			}
+		}
 
 		return {
 			content: [{
 				type: "text",
-				text: `✅ Gate decision recorded: id=${rows[0].id} proposal=${args.proposal_id} gate=${args.gate} decision=${args.decision}`,
+				text: `✅ Gate decision recorded: id=${decisionId} proposal=${args.proposal_id} gate=${args.gate} decision=${args.decision}`,
 			}],
 		};
 	} catch (err) {
