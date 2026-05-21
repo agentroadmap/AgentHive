@@ -209,15 +209,18 @@ export function renderCockpit(
 		workforceBox.setContent(lines.join("\n"));
 	}
 
-	// Update Pipeline
+	// Update Pipeline — proposal.status can be Title Case ('Draft') OR
+	// UPPERCASE ('DRAFT') per the canonical check constraint. Normalize to
+	// upper for matching so the counts aren't silently zero.
 	const statusCounts: Record<string, number> = {};
 	proposals.forEach((p) => {
-		statusCounts[p.status] = (statusCounts[p.status] || 0) + 1;
+		const key = (p.status ?? "").toUpperCase();
+		statusCounts[key] = (statusCounts[key] || 0) + 1;
 	});
 	const pipelineLines: string[] = [];
 	const statuses = ["Draft", "Review", "Develop", "Merge", "Complete"];
 	statuses.forEach((s) => {
-		const count = statusCounts[s] || 0;
+		const count = statusCounts[s.toUpperCase()] || 0;
 		const color =
 			s === "Develop"
 				? "yellow-fg"

@@ -15,7 +15,7 @@ import {
 } from "../../shared/utils/proposal-search.ts";
 import { watchProposals } from "../../shared/utils/proposal-watcher.ts";
 import { renderBoardTui } from "./board.ts";
-import type { WorkforceAgent } from "./cockpit.ts";
+import type { LedgerEntry, WorkforceAgent } from "./cockpit.ts";
 import { createLoadingScreen } from "./loading.ts";
 import {
 	buildProposalViewerDirectiveFilterModel,
@@ -542,31 +542,55 @@ export async function runUnifiedView(
 					messages: [],
 				});
 				const t4 = performance.now();
-				console.error(`[cockpit-perf] import=${(t1 - t0).toFixed(1)}ms createScreen=${(t2 - t1).toFixed(1)}ms renderEmpty=${(t4 - t3).toFixed(1)}ms total=${(t4 - t0).toFixed(1)}ms`);
+				if (process.env.AGENTHIVE_TUI_PERF) {
+					console.error(`[cockpit-perf] import=${(t1 - t0).toFixed(1)}ms createScreen=${(t2 - t1).toFixed(1)}ms renderEmpty=${(t4 - t3).toFixed(1)}ms total=${(t4 - t0).toFixed(1)}ms`);
+				}
 
 				const refresh = async () => {
 					const refreshStart = performance.now();
-					const pipelineProposals = proposals;
 					const fetchStart = performance.now();
-					const [agents, msgRows] = await Promise.all([
-						options.core.listAgents(),
+					// Direct SQL fetches. Previously this called options.core.listAgents()
+					// which doesn't exist on Core — that throw made the whole refresh
+					// fail silently (void refresh()), leaving every panel showing 0.
+					const [pipelineProposals, agentRows, msgRows, ledgerRows] = await Promise.all([
+						options.core.queryProposals({ includeCrossBranch: false })
+							.catch(() => [] as any[]),
+						pgQuery(
+							`SELECT agent_identity, agent_type, role, status, updated_at
+							 FROM roadmap_workforce.agent_registry
+							 WHERE status != 'retired'
+							 ORDER BY agent_identity LIMIT 50`,
+							[],
+						).then((r) => r.rows).catch(() => [] as any[]),
 						pgQuery(
 							`SELECT from_agent, message_content, created_at FROM roadmap.message_ledger
 							 WHERE channel = 'public' ORDER BY created_at DESC LIMIT 30`,
+							[],
+						).then((r) => r.rows).catch(() => [] as any[]),
+						pgQuery(
+							`SELECT agent_identity,
+							        COALESCE(SUM(CASE WHEN recorded_at::date = CURRENT_DATE THEN cost_usd ELSE 0 END), 0) AS spent_today,
+							        COALESCE(SUM(cost_usd), 0) AS total_spent,
+							        COALESCE(MAX(budget_allocated_usd), 0) AS daily_limit
+							 FROM roadmap.agent_budget_ledger
+							 WHERE recorded_at > NOW() - INTERVAL '7 days'
+							 GROUP BY agent_identity
+							 ORDER BY spent_today DESC
+							 LIMIT 10`,
 							[],
 						).then((r) => r.rows).catch(() => [] as any[]),
 					]);
 					const fetchEnd = performance.now();
 
 					const transformStart = performance.now();
-					const agentData: WorkforceAgent[] = agents.map((agent) => ({
-						id: agent.identity ?? agent.name,
-						name: agent.name,
-						role: agent.capabilities[0] ?? "agent",
-						status: agent.status === "offline" ? "offline" : "active",
-						currentProposal: agent.claims?.[0]?.id,
-						statusMessage: agent.status,
-						lastSeen: Date.parse(agent.lastSeen || new Date().toISOString()),
+					const agentData: WorkforceAgent[] = (agentRows as any[]).map((row: any) => ({
+						id: row.agent_identity,
+						name: row.agent_identity,
+						role: row.role ?? row.agent_type ?? "agent",
+						status: row.status === "active" ? "active" : "offline",
+						currentProposal: undefined,
+						statusMessage: row.status ?? "unknown",
+						lastSeen: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
 					}));
 
 					const cockpitMessages = (msgRows as any[])
@@ -576,12 +600,20 @@ export async function runUnifiedView(
 							content: row.message_content,
 							timestamp: new Date(row.created_at).getTime(),
 						}));
+
+					const ledgerData: LedgerEntry[] = (ledgerRows as any[]).map((row: any) => ({
+						agent: row.agent_identity,
+						dailyLimit: Number(row.daily_limit) || 0,
+						spentToday: Number(row.spent_today) || 0,
+						totalSpent: Number(row.total_spent) || 0,
+						isFrozen: false,
+					}));
 					const transformEnd = performance.now();
 
 					const renderStart = performance.now();
 					renderCockpit(screen, {
 						agents: agentData,
-						proposals: pipelineProposals.map((proposal: { id: string; title: string; status: string; priority?: string | null; proposalType?: string }) => ({
+						proposals: (pipelineProposals as any[]).map((proposal: { id: string; title: string; status: string; priority?: string | null; proposalType?: string }) => ({
 							id: proposal.id,
 							display_id: proposal.id,
 							title: proposal.title,
@@ -589,20 +621,28 @@ export async function runUnifiedView(
 							priority: proposal.priority ?? "none",
 							proposal_type: proposal.proposalType ?? "proposal",
 						})),
-						ledger: [],
+						ledger: ledgerData,
 						messages: cockpitMessages,
 					});
 					const renderEnd = performance.now();
-					console.error(`[cockpit-refresh] fetch=${(fetchEnd - fetchStart).toFixed(1)}ms transform=${(transformEnd - transformStart).toFixed(1)}ms render=${(renderEnd - renderStart).toFixed(1)}ms total=${(renderEnd - refreshStart).toFixed(1)}ms`);
+					if (process.env.AGENTHIVE_TUI_PERF) {
+						console.error(`[cockpit-refresh] fetch=${(fetchEnd - fetchStart).toFixed(1)}ms transform=${(transformEnd - transformStart).toFixed(1)}ms render=${(renderEnd - renderStart).toFixed(1)}ms total=${(renderEnd - refreshStart).toFixed(1)}ms`);
+					}
 				};
 
 				// Initial render
 				void refresh();
 
-				// Live Update Loop (500ms)
+				// Refresh every 5s — the proposals query hydrates 600+ rows and
+				// takes ~6s in practice, so a 1s interval just stacks pending
+				// fetches and wastes CPU. 5s feels live enough for a status
+				// dashboard.
+				let refreshing = false;
 				const timer = setInterval(() => {
-					void refresh();
-				}, 1000);
+					if (refreshing) return;
+					refreshing = true;
+					void refresh().finally(() => { refreshing = false; });
+				}, 5000);
 
 				// Set up key handlers
 				(screen as any).key(["tab"], () => {

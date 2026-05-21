@@ -722,7 +722,9 @@ export async function renderBoardTui(
 			width: "100%",
 			height: "100%",
 		});
-		console.error(`[board-perf] createScreen=${(t1 - t0).toFixed(1)}ms`);
+		if (process.env.AGENTHIVE_TUI_PERF) {
+			console.error(`[board-perf] createScreen=${(t1 - t0).toFixed(1)}ms`);
+		}
 
 		// Version indicator at top right
 		box({
@@ -1642,7 +1644,9 @@ export async function renderBoardTui(
 			firstColumn.list.focus();
 		}
 		const t_first_paint = performance.now();
-		console.error(`[board-perf] rebuildColumns=${(t_rebuild_end - t_rebuild_start).toFixed(1)}ms firstPaintToFocus=${(t_first_paint - t_rebuild_end).toFixed(1)}ms totalInit=${(t_first_paint - t0).toFixed(1)}ms`);
+		if (process.env.AGENTHIVE_TUI_PERF) {
+			console.error(`[board-perf] rebuildColumns=${(t_rebuild_end - t_rebuild_start).toFixed(1)}ms firstPaintToFocus=${(t_first_paint - t_rebuild_end).toFixed(1)}ms totalInit=${(t_first_paint - t0).toFixed(1)}ms`);
+		}
 
 		const updateBoard = (nextProposals: Proposal[], nextStatuses: string[]) => {
 			// Update source of truth
