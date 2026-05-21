@@ -100,13 +100,19 @@ export function renderChat(
 			style: { border: { fg: "yellow" } },
 		});
 
+		// inputOnFocus is deliberately OFF. With it on, the focus-triggered
+		// readInput() races with our defocus path: blur fires __done, which
+		// re-enters _done after this._done was already deleted, leaving the
+		// keypress listener attached. The next Escape then calls a stale
+		// `done` reference (which is undefined) → TypeError at blessed.js:12786.
+		// We drive readInput manually with a single callback that owns the
+		// full lifecycle.
 		inputField = textbox({
 			parent: inputContainer,
 			top: 0,
 			left: 1,
 			width: "100%-3",
 			height: 1,
-			inputOnFocus: true,
 			keys: true,
 			mouse: true,
 		});
@@ -119,35 +125,51 @@ export function renderChat(
 			left: 0,
 			width: "100%",
 			height: 1,
-			content: " {white-fg}Enter: Send | Esc: leave input | Ctrl+C: Quit | (outside input) Tab: View | Q: Exit{/}",
+			content: " {white-fg}Enter: Send | Esc: leave input | Ctrl+C: Quit | (outside input) Tab: View | Q: Exit | i: focus input{/}",
 			tags: true,
 			style: { bg: "blue", fg: "white" },
 		});
 
-		// Event: Send Message
-		inputField.on("submit", (value: string) => {
-			if (value?.trim()) {
-				void Promise.resolve(onSend?.(value.trim())).then(() => {
-					inputField.clearValue();
+		const startReading = () => {
+			inputField.readInput((err: any, value: string | null | undefined) => {
+				if (err === "stop") return;
+				if (err) return;
+				if (value != null) {
+					// submit
+					const trimmed = value.trim();
+					if (trimmed) {
+						void Promise.resolve(onSend?.(trimmed)).then(() => {
+							inputField.clearValue();
+							if (!container._inputDefocused) startReading();
+							screen.render();
+						});
+					} else {
+						inputField.clearValue();
+						if (!container._inputDefocused) startReading();
+						screen.render();
+					}
+				} else {
+					// cancel (Escape) — leave input, free Tab/Q at screen level
+					container._inputDefocused = true;
+					chatLog.focus();
 					screen.render();
-				});
-			}
-			inputField.focus();
-			screen.render();
-		});
-
-		// Esc cancels readInput; defocus to log so screen-level Tab/Q work.
-		// Without this users get trapped: textbox swallows Tab+Q while focused.
-		inputField.on("cancel", () => {
-			container._inputDefocused = true;
-			chatLog.focus();
-			screen.render();
-		});
+				}
+			});
+		};
+		container._startReading = startReading;
 
 		// Ctrl+C exits even from inside the input box (screen-level handler is
-		// shadowed by textbox readInput, so we re-bind here).
+		// shadowed by textbox readInput, so we re-bind at program level here).
 		inputField.key(["C-c"], () => {
 			onExit?.();
+		});
+
+		// Allow re-entering input mode from the log with `i` (vim-style).
+		(chatLog as any).key(["i"], () => {
+			container._inputDefocused = false;
+			inputField.focus();
+			startReading();
+			screen.render();
 		});
 
 		// Initial populate
@@ -188,11 +210,17 @@ export function renderChat(
 		container._lastMsgTimestamp = messages[0].timestamp;
 	}
 
-	// Only re-focus the input if user hasn't explicitly defocused it with Esc.
-	// Without this guard, the 1s refresh loop steals focus back every tick,
-	// trapping the user inside the textbox.
+	// Only focus + start reading if user hasn't explicitly defocused with Esc.
+	// Without this guard, the 1s refresh loop would steal focus back every
+	// tick, trapping the user inside the textbox.
 	if (!container._inputDefocused) {
 		inputField.focus();
+		// Only kick off readInput once per focus session — blessed's _reading
+		// guard makes additional calls no-ops, but we want it to actually run
+		// at least once after initial render.
+		if (!(inputField as any)._reading && container._startReading) {
+			container._startReading();
+		}
 	}
 	screen.render();
 }
