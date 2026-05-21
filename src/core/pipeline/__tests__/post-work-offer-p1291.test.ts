@@ -34,7 +34,7 @@ describe("P1291: Per-(proposal_id, role) pause fuse", () => {
 		const expiresAt = new Date("2026-05-21T00:00:00Z");
 		const err = new PausedRoleError(proposalId, role1, "no_eligible_agency", expiresAt);
 
-		expect(err.message).toContain("Paused");
+		expect(err.message).toContain("paused");
 		expect(err.proposalId).toBe(proposalId);
 		expect(err.role).toBe(role1);
 		expect(err.reason).toBe("no_eligible_agency");
