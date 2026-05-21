@@ -1233,4 +1233,132 @@ export class PgProposalHandlers {
 			proposal.summary ?? proposal.motivation ?? proposal.design ?? "";
 		return source ? source.substring(0, 150) : "";
 	}
+
+	// P1291: Resume a paused role
+	async resumeRole(args: {
+		proposal_id: string;
+		role: string;
+		reason: string;
+	}): Promise<CallToolResult> {
+		try {
+			const id = await pg.resolveProposalId(args.proposal_id);
+			if (id === null) {
+				return {
+					content: [{ type: "text", text: `Proposal ${args.proposal_id} not found.` }],
+				};
+			}
+
+			// Delete the pause row and record in control_audit
+			const { rows } = await query<{ deleted: boolean }>(
+				`DELETE FROM roadmap_workforce.proposal_role_pause
+				  WHERE proposal_id = $1 AND role = $2
+				  RETURNING (xmax::text::int = 0) AS deleted`,
+				[id, args.role],
+			);
+
+			if (!rows[0]?.deleted) {
+				return {
+					content: [{
+						type: "text",
+						text: `No pause found for proposal ${args.proposal_id} role=${args.role}.`,
+					}],
+				};
+			}
+
+			// Record in control_audit
+			await query(
+				`INSERT INTO roadmap.control_audit
+				   (actor, action, target_type, target_id, metadata)
+				 VALUES ($1, 'resume_role', 'proposal_role_pause', $2, $3::jsonb)`,
+				[
+					process.env.AGENTHIVE_OPERATOR_IDENTITY ?? "system",
+					id,
+					JSON.stringify({ role: args.role, reason: args.reason }),
+				],
+			);
+
+			return {
+				content: [{
+					type: "text",
+					text: `Resumed role=${args.role} for proposal ${args.proposal_id} (reason: ${args.reason})`,
+				}],
+			};
+		} catch (err) {
+			return errorResult("Failed to resume role", err);
+		}
+	}
+
+	// P1291: List active role pauses
+	async listRolePauses(args: {
+		proposal_id?: string;
+	}): Promise<CallToolResult> {
+		try {
+			let id: number | null = null;
+			if (args.proposal_id) {
+				id = await pg.resolveProposalId(args.proposal_id);
+				if (id === null) {
+					return {
+						content: [{ type: "text", text: `Proposal ${args.proposal_id} not found.` }],
+					};
+				}
+			}
+
+			const query_sql = id
+				? `SELECT proposal_id, role, pause_reason, failure_count, pause_cycle,
+					      paused_at, expires_at,
+					      greatest(expires_at - now(), interval '0') AS time_until_resume
+					   FROM roadmap_workforce.proposal_role_pause
+					  WHERE proposal_id = $1
+					    AND expires_at > now()
+					  ORDER BY paused_at DESC`
+				: `SELECT proposal_id, role, pause_reason, failure_count, pause_cycle,
+					      paused_at, expires_at,
+					      greatest(expires_at - now(), interval '0') AS time_until_resume
+					   FROM roadmap_workforce.proposal_role_pause
+					  WHERE expires_at > now()
+					  ORDER BY paused_at DESC`;
+
+			const { rows } = await query<{
+				proposal_id: number;
+				role: string;
+				pause_reason: string;
+				failure_count: number;
+				pause_cycle: number;
+				paused_at: string;
+				expires_at: string;
+				time_until_resume: string;
+			}>(query_sql, id ? [id] : []);
+
+			if (rows.length === 0) {
+				return {
+					content: [{
+						type: "text",
+						text: id
+							? `No active pauses for proposal ${args.proposal_id}.`
+							: "No active role pauses.",
+					}],
+				};
+			}
+
+			const formatted = rows.map(r => ({
+				proposal_id: r.proposal_id,
+				role: r.role,
+				reason: r.pause_reason,
+				failure_count: r.failure_count,
+				cycle: r.pause_cycle,
+				paused_at: r.paused_at,
+				expires_at: r.expires_at,
+				time_until_resume: r.time_until_resume,
+			}));
+
+			return {
+				content: [{
+					type: "text",
+					text: JSON.stringify(formatted, null, 2),
+				}],
+			};
+		} catch (err) {
+			return errorResult("Failed to list role pauses", err);
+		}
+	}
 }
