@@ -107,7 +107,7 @@ export function renderCockpit(
 			width: "50%",
 			height: "50%-3",
 			border: { type: "line" },
-			label: " [F1] Workforce Pulse ",
+			label: " [F1] Workforce (coordinators · agencies · LLMs) ",
 			tags: true,
 			scrollable: true,
 			style: { border: { fg: "green" } },
@@ -248,10 +248,18 @@ export function renderCockpit(
 	// modified_at DESC; otherwise we degrade to "last 5 from the tail".
 	pipelineLines.push("\n{bold}Recent Activity:{/}");
 	const recent = data.pipelineCounts ? proposals : proposals.slice(-5).reverse();
-	recent
-		.forEach((p) => {
-			pipelineLines.push(`• ${p.display_id}: ${p.title.substring(0, 30)}...`);
-		});
+	// Pipeline panel is ~half the screen width. Estimate the usable width
+	// from the terminal columns; minus the "• PXXXX: " prefix and borders,
+	// leaves roughly half - 14. Fall back to a generous 70 if cols unknown.
+	const cols = ((screen as any).program?.cols as number | undefined) ?? 160;
+	const titleBudget = Math.max(20, Math.floor(cols / 2) - 14);
+	recent.forEach((p) => {
+		const title = p.title ?? "";
+		const trimmed = title.length > titleBudget
+			? `${title.substring(0, titleBudget - 1)}…`
+			: title;
+		pipelineLines.push(`• ${p.display_id}: ${trimmed}`);
+	});
 	pipelineBox.setContent(pipelineLines.join("\n"));
 
 	// Update Ledger

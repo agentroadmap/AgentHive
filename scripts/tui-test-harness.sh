@@ -105,7 +105,7 @@ echo
 echo "[2] Tab → cockpit view"
 send_keys Tab 2
 expect_marker "cockpit header" "ENGINEER'S COCKPIT" || FAILED=$((FAILED+1))
-expect_marker "cockpit Workforce panel" "Workforce Pulse" || FAILED=$((FAILED+1))
+expect_marker "cockpit Workforce panel" "Workforce" || FAILED=$((FAILED+1))
 expect_no_crash "cockpit" || FAILED=$((FAILED+1))
 echo
 

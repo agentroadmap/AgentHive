@@ -576,11 +576,25 @@ export async function runUnifiedView(
 						 ORDER BY modified_at DESC
 						 LIMIT 5`,
 					);
+					// Filter to meaningful workforce entities. 'tool' rows are
+					// auto-spawned a2a-xproc-* test fixtures, and 'workforce' rows
+					// are legacy bulk-import noise (8000+ inactive). Ordering puts
+					// coordinators (orchestrators) first, then agencies (the named
+					// real workers like george/pablo/alan), then LLM agents.
 					const agentRows = await pgrows(
 						`SELECT agent_identity, agent_type, role, status, updated_at
 						 FROM roadmap_workforce.agent_registry
-						 WHERE status != 'retired'
-						 ORDER BY agent_identity LIMIT 50`,
+						 WHERE status = 'active'
+						   AND agent_type IN ('coordinator','agency','llm','human','hybrid')
+						 ORDER BY CASE agent_type
+						            WHEN 'coordinator' THEN 1
+						            WHEN 'agency'      THEN 2
+						            WHEN 'human'       THEN 3
+						            WHEN 'hybrid'      THEN 4
+						            WHEN 'llm'         THEN 5
+						            ELSE 9 END,
+						          agent_identity
+						 LIMIT 50`,
 					);
 					const msgRows = await pgrows(
 						`SELECT from_agent, message_content, created_at FROM roadmap.message_ledger
@@ -612,7 +626,9 @@ export async function runUnifiedView(
 					const agentData: WorkforceAgent[] = (agentRows as any[]).map((row: any) => ({
 						id: row.agent_identity,
 						name: row.agent_identity,
-						role: row.role ?? row.agent_type ?? "agent",
+						// Show type prominently — agencies are real workers (george,
+						// pablo, etc.), coordinators are orchestrators, llm is sub-agent.
+						role: `${row.agent_type}${row.role ? `/${row.role}` : ""}`,
 						status: row.status === "active" ? "active" : "offline",
 						currentProposal: undefined,
 						statusMessage: row.status ?? "unknown",
