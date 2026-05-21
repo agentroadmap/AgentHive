@@ -1036,6 +1036,13 @@ async function dispatchAgent(
 			// will race to claim it and spawn the appropriate CLI. The orchestrator
 			// does not need to know the binary path or credentials.
 			const squadName = `P${proposalId}-${phase}`;
+			// P1290 Option B: do NOT pass fine-grained legacy capabilities
+			// (text_generation, code_generation, web_search, etc.) — they were
+			// JOB_ROLES_FALLBACK leftovers that don't exist in the seeded
+			// provider_registry.capabilities->'jobs' vocab and made the P1289
+			// preflight throw CapabilityMismatchError for every dispatchAgent call.
+			// Let postWorkOffer's AC-1 fallback derive the cap from the centralized
+			// ROLE_TO_REQUIRED_CAPABILITIES map keyed by role.
 			const { dispatchId } = await postWorkOffer({
 				proposalId: Number(proposalId),
 				squadName,
@@ -1052,10 +1059,8 @@ async function dispatchAgent(
 				// exists. selectedWorktree was already validated by scoreUsableWorktree.
 				worktreeHint: selectedWorktree,
 				briefingId,
-				requiredCapabilities:
-					requiredCapabilities.length > 0
-						? requiredCapabilities
-						: [agentLabel ?? agent],
+				// requiredCapabilities deliberately omitted — postWorkOffer derives
+				// from ROLE_TO_REQUIRED_CAPABILITIES[role] when not supplied.
 			});
 			logger.log(
 				`📬 Posted offer ${dispatchId} for ${agent} on P${proposalId} (${stage})`,
