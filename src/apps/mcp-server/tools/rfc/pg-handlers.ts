@@ -1637,23 +1637,33 @@ export class RfcWorkflowHandlers {
 		// Gate decision log
 		this.server.addTool({
 			name: "record_gate_decision",
-			description: "Write a gate decision (advance/hold/reject/waive/escalate) directly to gate_decision_log. Use this instead of stdout so the orchestrator can read the structured decision without parsing LLM output.",
+			description:
+				"Record a gate decision AND, when decision='advance', also flip the proposal status through the gate in one MCP call. " +
+				"On 'advance': writes gate_decision_log row → releases any active lease → UPDATEs proposal.status to the inferred next state → resets maturity='new' → appends audit entry. " +
+				"On non-advance ('hold'/'reject'/'waive'/'escalate'): only the gate_decision_log row is written; proposal stays put. " +
+				"to_state is inferred from `gate` (D1→REVIEW, D2→DEVELOP, D3→MERGE, D4→COMPLETE); pass to_state explicitly to override. " +
+				"Use this instead of stdout so the orchestrator/operator gets a single atomic gate advance with no follow-up calls needed.",
 			inputSchema: {
 				type: "object",
 				properties: {
 					proposal_id: { type: "string" },
-					gate: { type: "string", description: "Gate level, e.g. D1, D2, D3, D4" },
+					gate: { type: "string", description: "Gate level: D1, D2, D3, or D4. Auto-maps to next state on advance." },
 					decision: {
 						type: "string",
 						enum: ["advance", "hold", "reject", "waive", "escalate"],
+						description: "advance = also do the status transition; others only log the decision.",
 					},
-					rationale: { type: "string" },
+					rationale: { type: "string", description: "Why this decision — surfaced in audit + future reviews." },
 					decided_by: { type: "string", description: "Agent identity making the decision" },
 					authority_agent: { type: "string" },
 					agent_run_id: { type: "string", description: "agent_runs.id — used for dedup (shadow-mode)" },
 					ac_verification: {
 						type: "object",
 						description: "JSONB with per-criterion pass/fail map",
+					},
+					to_state: {
+						type: "string",
+						description: "OPTIONAL override of the inferred next state. Normally leave blank — D1/D2/D3/D4 → REVIEW/DEVELOP/MERGE/COMPLETE.",
 					},
 				},
 				required: ["proposal_id", "gate", "decision"],

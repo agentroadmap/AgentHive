@@ -205,7 +205,9 @@ export function registerProposalTools(
 	server.addTool({
 		name: "prop_transition",
 		description:
-			"Transition a proposal to a new workflow stage. Gate transitions require decision notes.",
+			"Transition a proposal to a new workflow stage. Gate transitions require decision notes AND a recent gate_decision_log row (within 10min). " +
+			"PREFERRED: use mcp_proposal action=gate_decision with decision='advance' — that single call writes the decision row AND flips status atomically, so you don't need prop_transition at all. " +
+			"Use prop_transition directly only when you've already recorded the decision separately and just need to flip status.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -213,9 +215,9 @@ export function registerProposalTools(
 				status: {
 					type: "string",
 					description:
-						"Target workflow stage, for example Draft, Review, Develop, Merge, or Complete",
+						"CANONICAL target workflow stage (Draft|Review|Develop|Merge|Complete). Aliases also accepted: to_state, to_status, to, target_state.",
 				},
-				author: { type: "string" },
+				author: { type: "string", description: "Agent identity. Alias: actor." },
 				reason: {
 					type: "string",
 					description:
@@ -259,7 +261,9 @@ export function registerProposalTools(
 	});
 	server.addTool({
 		name: "prop_claim",
-		description: "Claim an AgentHive proposal by creating a Postgres lease",
+		description:
+			"Claim an AgentHive proposal by creating a Postgres lease. " +
+			"Accepts id|proposal_id and agent|agent_identity as param-name aliases — both shapes work.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -286,7 +290,10 @@ export function registerProposalTools(
 	});
 	server.addTool({
 		name: "prop_release",
-		description: "Release an active AgentHive proposal lease",
+		description:
+			"Release an active AgentHive proposal lease. " +
+			"Accepts id|proposal_id and agent|agent_identity as param-name aliases — both shapes work. " +
+			"release_reason is REQUIRED and must be a canonical value (work_delivered, gate_review_complete, manual_release, etc.).",
 		inputSchema: {
 			type: "object",
 			properties: {
