@@ -38,7 +38,10 @@ describe("P1293: Replay harness for no-eligible-agency dispatch failure loop", (
 	});
 
 	afterEach(async () => {
-		// Clean up test data: delete squad_dispatch and agent_runs rows for our test proposals
+		// Clean up test data: delete squad_dispatch, agent_runs, proposal_role_pause,
+		// proposal, AND notification_queue rows for our test proposals.
+		// Skipping notification_queue (as the original cleanup did) leaks CRITICAL
+		// dispatch_loop_detected alerts to the operator on every test run.
 		const minId = baseProposalId;
 		const maxId = baseProposalId + testCounter;
 
@@ -56,6 +59,12 @@ describe("P1293: Replay harness for no-eligible-agency dispatch failure loop", (
 
 		await query(
 			`DELETE FROM roadmap_workforce.proposal_role_pause
+			  WHERE proposal_id >= $1 AND proposal_id < $2`,
+			[minId, maxId],
+		);
+
+		await query(
+			`DELETE FROM roadmap.notification_queue
 			  WHERE proposal_id >= $1 AND proposal_id < $2`,
 			[minId, maxId],
 		);
