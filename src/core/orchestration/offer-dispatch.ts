@@ -37,15 +37,32 @@ const obs = new ObservabilityWriter("agency:offer-dispatch");
 const ORCHESTRATOR_HOST = process.env.AGENTHIVE_HOST ?? hostname();
 void ORCHESTRATOR_HOST; // reserved for future host-aware agency filtering
 
-// Maps lowercase role name to the minimum required capabilities for agency selection.
-// Falls back to ["develop"] for any unrecognised role.
-const ROLE_TO_REQUIRED_CAPABILITIES: Record<string, string[]> = {
+// P1290 (Option B): Maps lowercase role name to the minimum required capabilities
+// for agency selection. References ONLY capabilities currently advertised by >=1
+// dispatchable agency in provider_registry.capabilities->'jobs':
+//   - develop: 9/19 dispatchable agencies (verified 2026-05-21)
+//   - review:  9/19
+//   - design:  9/19
+// enhance / gate-review / code-review have 0 advertisers and were dropped here;
+// enhancer is treated as a developer with a different briefing prompt, and
+// gate/code reviewers reduce to general review work for matching purposes.
+// Exported so the health check (P1290 AC-5) and preflight (P1289 AC-3) read the
+// same source as runtime dispatch.
+// Unrecognised roles default to ["develop"] (the broadest seeded capability).
+export const ROLE_TO_REQUIRED_CAPABILITIES: Record<string, string[]> = {
 	developer: ["develop"],
-	enhancer: ["enhance"],
-	"gate-reviewer": ["gate-review"],
-	"skeptic-alpha": ["gate-review"],
-	"code-reviewer": ["code-review"],
-	"orchestrator-liaison-investigator": ["orchestrator-liaison-investigator"],
+	engineer: ["develop"],
+	researcher: ["develop"],
+	drafter: ["develop"],
+	architect: ["develop"],
+	enhancer: ["develop"],
+	"gate-reviewer": ["review"],
+	"skeptic-alpha": ["review"],
+	skeptic: ["review"],
+	"code-reviewer": ["review"],
+	enrichment_agent: ["develop"],
+	// Niche/legacy roles (orchestrator-liaison-investigator, etc.) fall through
+	// to the default ["develop"] in OrchestratorOfferDispatcher.pickAgency.
 };
 
 export interface ClaimedOffer {
