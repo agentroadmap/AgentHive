@@ -31,6 +31,8 @@ import { briefingAssemble } from "../../infra/agency/spawn-briefing-service.ts";
 import { sendMessage } from "../../infra/agency/liaison-message-service.ts";
 import type { OfferDispatchPayload } from "../../infra/agency/liaison-message-types.ts";
 import { ObservabilityWriter } from "../observability/observability-writer.ts";
+import * as config from "../../shared/runtime/config.ts";
+import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 
 const obs = new ObservabilityWriter("agency:offer-dispatch");
 
@@ -149,6 +151,32 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 				  WHERE id = $1`,
 				[claim.dispatchId, JSON.stringify(requiredCaps)],
 			);
+
+			// P1291: increment failure counter and potentially activate pause.
+			// Compute backoff only if threshold is reached.
+			try {
+				const threshold = (await config.getOptional(FlagKeys.PAUSE_FAILURE_THRESHOLD)) ?? 2;
+				const baseBackoffMs = (await config.getOptional(FlagKeys.PAUSE_BASE_BACKOFF_MS)) ?? 1800000;
+				const multiplier = (await config.getOptional(FlagKeys.PAUSE_BACKOFF_MULTIPLIER)) ?? 2;
+				const maxBackoffMs = (await config.getOptional(FlagKeys.PAUSE_MAX_BACKOFF_MS)) ?? 86400000;
+
+				await this.upsertPauseRow(
+					claim.proposalId,
+					claim.role,
+					threshold,
+					baseBackoffMs,
+					multiplier,
+					maxBackoffMs,
+					claim.dispatchId,
+				);
+			} catch (err) {
+				// Best-effort — pause update failures don't block dispatch completion.
+				this.logger.error(
+					`[OfferDispatch] error upserting pause row for proposal=${claim.proposalId} role=${claim.role}:`,
+					err instanceof Error ? err.message : err,
+				);
+			}
+
 			return;
 		}
 
@@ -267,6 +295,87 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 	private toUuid(dispatchId: string): string {
 		const hex = BigInt(dispatchId).toString(16).padStart(12, "0").slice(-12);
 		return `00000000-0000-0000-0000-${hex}`;
+	}
+
+	/**
+	 * P1291: UPSERT proposal_role_pause row for no-eligible-agency failure.
+	 *
+	 * Increments failure_count. If failure_count >= threshold, sets expires_at
+	 * using exponential backoff formula: BASE * 2^(pause_cycle - 1), capped at MAX.
+	 * Then resets failure_count to 0 and increments pause_cycle.
+	 *
+	 * Emits NOTIFY proposal_role_paused on insertion/activation.
+	 */
+	private async upsertPauseRow(
+		proposalId: number,
+		role: string,
+		threshold: number,
+		baseBackoffMs: number,
+		multiplier: number,
+		maxBackoffMs: number,
+		dispatchId: number,
+	): Promise<void> {
+		// First attempt: INSERT or increment failure_count if already exists.
+		const { rows } = await query<{
+			new_failure_count: number;
+			pause_cycle: number;
+			paused: boolean;
+		}>(
+			`INSERT INTO roadmap_workforce.proposal_role_pause
+			   (proposal_id, role, pause_reason, expires_at, failure_count, pause_cycle, last_failure_dispatch_id)
+			 VALUES ($1, $2, 'no_eligible_agency', now() + interval '1 second', 1, 1, $3)
+			 ON CONFLICT (proposal_id, role)
+			 DO UPDATE SET
+			   failure_count = proposal_role_pause.failure_count + 1,
+			   paused_at = now(),
+			   last_failure_dispatch_id = $3
+			 RETURNING
+			   failure_count AS new_failure_count,
+			   pause_cycle,
+			   (xmax::text::int <> 0) AS was_update`,
+			[proposalId, role, dispatchId],
+		);
+
+		const row = rows[0];
+		if (!row) return;
+
+		const newFailureCount = row.new_failure_count;
+		const pauseCycle = row.pause_cycle;
+		const wasUpdate = row.paused; // true if ON CONFLICT branch executed
+
+		// If we hit the threshold, update expires_at to activate the pause.
+		if (newFailureCount >= threshold) {
+			// Compute expiry: BASE * 2^(cycle - 1), capped at MAX.
+			const expiryMs = Math.min(
+				baseBackoffMs * Math.pow(multiplier, pauseCycle - 1),
+				maxBackoffMs,
+			);
+			const expiryInterval = `${expiryMs} milliseconds`;
+
+			await query(
+				`UPDATE roadmap_workforce.proposal_role_pause
+				   SET expires_at = now() + $1::interval,
+				       failure_count = 0,
+				       pause_cycle = pause_cycle + 1
+				 WHERE proposal_id = $2 AND role = $3`,
+				[expiryInterval, proposalId, role],
+			);
+
+			// Emit NOTIFY for dashboard/operator visibility.
+			await query(`SELECT pg_notify('proposal_role_paused', $1)`, [
+				JSON.stringify({
+					proposal_id: proposalId,
+					role,
+					pause_reason: "no_eligible_agency",
+					pause_cycle: pauseCycle,
+					expires_in_ms: expiryMs,
+				}),
+			]);
+
+			this.logger.log(
+				`[OfferDispatch] P${proposalId} role=${role} paused after ${newFailureCount} failures (cycle=${pauseCycle}, duration=${expiryMs}ms)`,
+			);
+		}
 	}
 }
 
