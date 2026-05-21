@@ -549,38 +549,64 @@ export async function runUnifiedView(
 				const refresh = async () => {
 					const refreshStart = performance.now();
 					const fetchStart = performance.now();
-					// Direct SQL fetches. Previously this called options.core.listAgents()
-					// which doesn't exist on Core — that throw made the whole refresh
-					// fail silently (void refresh()), leaving every panel showing 0.
-					const [pipelineProposals, agentRows, msgRows, ledgerRows] = await Promise.all([
-						options.core.queryProposals({ includeCrossBranch: false })
-							.catch(() => [] as any[]),
-						pgQuery(
-							`SELECT agent_identity, agent_type, role, status, updated_at
-							 FROM roadmap_workforce.agent_registry
-							 WHERE status != 'retired'
-							 ORDER BY agent_identity LIMIT 50`,
-							[],
-						).then((r) => r.rows).catch(() => [] as any[]),
-						pgQuery(
-							`SELECT from_agent, message_content, created_at FROM roadmap.message_ledger
-							 WHERE channel = 'public' ORDER BY created_at DESC LIMIT 30`,
-							[],
-						).then((r) => r.rows).catch(() => [] as any[]),
-						pgQuery(
-							`SELECT agent_identity,
-							        COALESCE(SUM(CASE WHEN recorded_at::date = CURRENT_DATE THEN cost_usd ELSE 0 END), 0) AS spent_today,
-							        COALESCE(SUM(cost_usd), 0) AS total_spent,
-							        COALESCE(MAX(budget_allocated_usd), 0) AS daily_limit
-							 FROM roadmap.agent_budget_ledger
-							 WHERE recorded_at > NOW() - INTERVAL '7 days'
-							 GROUP BY agent_identity
-							 ORDER BY spent_today DESC
-							 LIMIT 10`,
-							[],
-						).then((r) => r.rows).catch(() => [] as any[]),
-					]);
+					// Cockpit only needs status counts + 5 recent proposals + agent
+					// roster + messages + ledger. Replaced the previous 6-second
+					// `core.queryProposals()` (which hydrated all 613 rows) with
+					// these small aggregations / LIMIT 5..50 queries (~10ms total).
+					//
+					// IMPORTANT: queries are awaited SEQUENTIALLY. Promise.all of
+					// these same five queries hangs indefinitely after the first
+					// resolves — the pool's writePoolAudit step (in
+					// infra/postgres/pool.ts query()) seems to serialize badly
+					// under parallel load. Sequential is fast enough; revisit if
+					// the underlying pool is fixed.
+					const pgrows = async <T = any>(text: string): Promise<T[]> => {
+						return pgQuery(text, []).then((r) => r.rows as T[]).catch(() => [] as T[]);
+					};
+					const statusCountRows = await pgrows(
+						`SELECT status, count(*)::int AS n
+						 FROM roadmap_proposal.proposal
+						 WHERE status NOT IN ('Abandoned','Replaced','Rejected','REJECTED')
+						 GROUP BY status`,
+					);
+					const recentProposalRows = await pgrows(
+						`SELECT display_id, title, status, modified_at
+						 FROM roadmap_proposal.proposal
+						 WHERE status NOT IN ('Abandoned','Replaced','Rejected','REJECTED')
+						 ORDER BY modified_at DESC
+						 LIMIT 5`,
+					);
+					const agentRows = await pgrows(
+						`SELECT agent_identity, agent_type, role, status, updated_at
+						 FROM roadmap_workforce.agent_registry
+						 WHERE status != 'retired'
+						 ORDER BY agent_identity LIMIT 50`,
+					);
+					const msgRows = await pgrows(
+						`SELECT from_agent, message_content, created_at FROM roadmap.message_ledger
+						 WHERE channel = 'public' ORDER BY created_at DESC LIMIT 30`,
+					);
+					const ledgerRows = await pgrows(
+						`SELECT agent_identity,
+						        COALESCE(SUM(CASE WHEN recorded_at::date = CURRENT_DATE THEN cost_usd ELSE 0 END), 0) AS spent_today,
+						        COALESCE(SUM(cost_usd), 0) AS total_spent,
+						        COALESCE(MAX(budget_allocated_usd), 0) AS daily_limit
+						 FROM roadmap.agent_budget_ledger
+						 WHERE recorded_at > NOW() - INTERVAL '7 days'
+						 GROUP BY agent_identity
+						 ORDER BY spent_today DESC
+						 LIMIT 10`,
+					);
 					const fetchEnd = performance.now();
+
+					// Aggregate status counts into a {STATUS_UPPER: count} map.
+					const pipelineCounts: Record<string, number> = {};
+					let pipelineTotal = 0;
+					for (const row of statusCountRows as any[]) {
+						const key = String(row.status ?? "").toUpperCase();
+						pipelineCounts[key] = (pipelineCounts[key] || 0) + Number(row.n);
+						pipelineTotal += Number(row.n);
+					}
 
 					const transformStart = performance.now();
 					const agentData: WorkforceAgent[] = (agentRows as any[]).map((row: any) => ({
@@ -613,14 +639,16 @@ export async function runUnifiedView(
 					const renderStart = performance.now();
 					renderCockpit(screen, {
 						agents: agentData,
-						proposals: (pipelineProposals as any[]).map((proposal: { id: string; title: string; status: string; priority?: string | null; proposalType?: string }) => ({
-							id: proposal.id,
-							display_id: proposal.id,
-							title: proposal.title,
-							status: proposal.status,
-							priority: proposal.priority ?? "none",
-							proposal_type: proposal.proposalType ?? "proposal",
+						proposals: (recentProposalRows as any[]).map((row: any) => ({
+							id: row.display_id,
+							display_id: row.display_id,
+							title: row.title ?? "(untitled)",
+							status: row.status ?? "",
+							priority: "none",
+							proposal_type: "proposal",
 						})),
+						pipelineTotal,
+						pipelineCounts,
 						ledger: ledgerData,
 						messages: cockpitMessages,
 					});
@@ -633,16 +661,16 @@ export async function runUnifiedView(
 				// Initial render
 				void refresh();
 
-				// Refresh every 5s — the proposals query hydrates 600+ rows and
-				// takes ~6s in practice, so a 1s interval just stacks pending
-				// fetches and wastes CPU. 5s feels live enough for a status
-				// dashboard.
+				// 1.5s interval. All queries are now small aggregations / LIMITs
+				// (~20ms total), so we can afford near-live updates. The
+				// refreshing flag still skips a tick if a previous refresh is
+				// somehow stuck — defensive against DB hiccups.
 				let refreshing = false;
 				const timer = setInterval(() => {
 					if (refreshing) return;
 					refreshing = true;
 					void refresh().finally(() => { refreshing = false; });
-				}, 5000);
+				}, 1500);
 
 				// Set up key handlers
 				(screen as any).key(["tab"], () => {

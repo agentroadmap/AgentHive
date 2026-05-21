@@ -45,12 +45,19 @@ export function renderCockpit(
 	screen: blessed.Widgets.Screen,
 	data: {
 		agents: WorkforceAgent[];
+		// proposals is the *recent activity* list (typically 5 items by
+		// modified_at DESC), not the full pipeline. Pipeline totals come from
+		// pipelineTotal + pipelineCounts so we don't have to hydrate every row.
 		proposals: PipelineProposal[];
+		pipelineTotal?: number;
+		pipelineCounts?: Record<string, number>;
 		ledger: LedgerEntry[];
 		messages: TerminalMessage[];
 	},
 ): void {
 	const { agents, proposals, ledger, messages } = data;
+	const pipelineTotal = data.pipelineTotal ?? proposals.length;
+	const pipelineCountsExplicit = data.pipelineCounts;
 
 	// Check if we already have a persistent cockpit container
 	let container = (screen as any)._cockpitContainer;
@@ -191,7 +198,7 @@ export function renderCockpit(
 
 	// Update Dynamic Content
 	headerBox.setContent(
-		`{bold}{cyan-fg}🚀 ENGINEER'S COCKPIT{/} | Agents: ${agents.length} | Pipeline: ${proposals.length} | Status: {green-fg}LIVE{/}`,
+		`{bold}{cyan-fg}🚀 ENGINEER'S COCKPIT{/} | Agents: ${agents.length} | Pipeline: ${pipelineTotal} | Status: {green-fg}LIVE{/}`,
 	);
 
 	// Update Workforce
@@ -209,14 +216,22 @@ export function renderCockpit(
 		workforceBox.setContent(lines.join("\n"));
 	}
 
-	// Update Pipeline — proposal.status can be Title Case ('Draft') OR
-	// UPPERCASE ('DRAFT') per the canonical check constraint. Normalize to
-	// upper for matching so the counts aren't silently zero.
+	// Pipeline counts come from an explicit pipelineCounts map when the caller
+	// provides one (cheap SQL aggregation). Fallback: derive from the
+	// proposals array, normalizing to UPPERCASE since proposal.status can be
+	// either Title Case ('Draft') or UPPERCASE ('DRAFT') per the canonical
+	// check constraint.
 	const statusCounts: Record<string, number> = {};
-	proposals.forEach((p) => {
-		const key = (p.status ?? "").toUpperCase();
-		statusCounts[key] = (statusCounts[key] || 0) + 1;
-	});
+	if (pipelineCountsExplicit) {
+		for (const [k, v] of Object.entries(pipelineCountsExplicit)) {
+			statusCounts[k.toUpperCase()] = v;
+		}
+	} else {
+		proposals.forEach((p) => {
+			const key = (p.status ?? "").toUpperCase();
+			statusCounts[key] = (statusCounts[key] || 0) + 1;
+		});
+	}
 	const pipelineLines: string[] = [];
 	const statuses = ["Draft", "Review", "Develop", "Merge", "Complete"];
 	statuses.forEach((s) => {
@@ -229,10 +244,11 @@ export function renderCockpit(
 					: "gray-fg";
 		pipelineLines.push(`{${color}}${s.padEnd(10)}{/} : ${count}`);
 	});
+	// proposals is the recent-activity list when the caller pre-sorted by
+	// modified_at DESC; otherwise we degrade to "last 5 from the tail".
 	pipelineLines.push("\n{bold}Recent Activity:{/}");
-	proposals
-		.slice(-5)
-		.reverse()
+	const recent = data.pipelineCounts ? proposals : proposals.slice(-5).reverse();
+	recent
 		.forEach((p) => {
 			pipelineLines.push(`• ${p.display_id}: ${p.title.substring(0, 30)}...`);
 		});
@@ -240,7 +256,10 @@ export function renderCockpit(
 
 	// Update Ledger
 	if (ledger.length === 0) {
-		ledgerBox.setContent("  {gray-fg}No spending data{/}");
+		ledgerBox.setContent(
+			"  {gray-fg}No spending data in last 7 days.{/}\n" +
+			"  {gray-fg}Budget writers not yet wired (tracked as P1018).{/}",
+		);
 	} else {
 		const ledgerLines = ledger.map((l) => {
 			const status = l.isFrozen ? "{red-fg}FROZEN{/}" : "{green-fg}ACTIVE{/}";
