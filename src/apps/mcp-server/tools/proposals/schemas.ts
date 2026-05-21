@@ -375,3 +375,45 @@ export const proposalExportSchema: JsonSchema = {
 	required: ["id", "format"],
 	additionalProperties: false,
 };
+
+// P1291: Resume a paused role
+export const proposalResumeRoleSchema: JsonSchema = {
+	type: "object",
+	properties: {
+		proposal_id: {
+			type: "string",
+			minLength: 1,
+			maxLength: 50,
+			description: "Proposal ID",
+		},
+		role: {
+			type: "string",
+			minLength: 1,
+			maxLength: 100,
+			description: "Role name to resume",
+		},
+		reason: {
+			type: "string",
+			minLength: 1,
+			maxLength: 500,
+			description: "Reason for resuming the role",
+		},
+	},
+	required: ["proposal_id", "role", "reason"],
+	additionalProperties: false,
+};
+
+// P1291: List active role pauses
+export const proposalListRolePausesSchema: JsonSchema = {
+	type: "object",
+	properties: {
+		proposal_id: {
+			type: "string",
+			minLength: 1,
+			maxLength: 50,
+			description: "Optional: filter by proposal ID",
+		},
+	},
+	required: [],
+	additionalProperties: false,
+};
