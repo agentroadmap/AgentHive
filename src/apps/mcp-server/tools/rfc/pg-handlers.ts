@@ -1203,7 +1203,12 @@ export async function getValidTransitions(args: {
 // ─── Gate Decision Log ──────────────────────────────────────────────────────
 
 export async function recordGateDecision(args: {
-	proposal_id: string;
+	proposal_id?: string;
+	// P1340 AC-4 (D3 follow-up): universal identifier aliases. Canonical here
+	// has historically been proposal_id, but record_gate_decision now accepts
+	// id and display_id too so all gate-flow tools share the same shape.
+	id?: string;
+	display_id?: string;
 	gate: string;
 	decision: string;
 	rationale?: string;
@@ -1225,10 +1230,16 @@ export async function recordGateDecision(args: {
 		);
 	}
 	try {
-		const proposalId = await resolveProposalId(args.proposal_id);
+		const idArg = args.proposal_id ?? args.id ?? args.display_id;
+		if (!idArg) {
+			return {
+				content: [{ type: "text", text: `record_gate_decision: missing proposal identifier. Pass proposal_id="P123" (canonical) or id / display_id alias.` }],
+			};
+		}
+		const proposalId = await resolveProposalId(idArg);
 		if (proposalId === null) {
 			return {
-				content: [{ type: "text", text: `Proposal ${args.proposal_id} not found.` }],
+				content: [{ type: "text", text: `Proposal ${idArg} not found.` }],
 			};
 		}
 
@@ -1241,7 +1252,7 @@ export async function recordGateDecision(args: {
 			[proposalId],
 		);
 		if (!propRows.length) {
-			return { content: [{ type: "text", text: `Proposal ${args.proposal_id} not found.` }] };
+			return { content: [{ type: "text", text: `Proposal ${idArg} not found.` }] };
 		}
 		const { status: fromState, maturity } = propRows[0];
 
@@ -1275,7 +1286,7 @@ export async function recordGateDecision(args: {
 				return {
 					content: [{
 						type: "text",
-						text: `✅ Gate decision for ${args.proposal_id} (agent_run_id=${args.agent_run_id}) already recorded (#${existing[0].id}) — skipped duplicate.`,
+						text: `✅ Gate decision for ${idArg} (agent_run_id=${args.agent_run_id}) already recorded (#${existing[0].id}) — skipped duplicate.`,
 					}],
 				};
 			}
@@ -1345,11 +1356,23 @@ export async function recordGateDecision(args: {
 					  WHERE id = $6`,
 					[toState, fromState, args.decided_by ?? "mcp", args.gate, decisionId, proposalId],
 				);
+				// P1340 AC-5 (D3 follow-up): keep roadmap.workflows.current_stage
+				// in sync with the proposal.status flip. Live P1340 was caught with
+				// proposal.status='DEVELOP' but workflows.current_stage='REVIEW',
+				// leaving future transition logic to resolve against stale stage.
+				// LEFT JOIN-style: only updates if a workflow row exists; legacy
+				// proposals without one are unaffected.
+				await client.query(
+					`UPDATE roadmap.workflows
+					    SET current_stage = $1
+					  WHERE proposal_id = $2`,
+					[toState, proposalId],
+				);
 				await client.query("COMMIT");
 				return {
 					content: [{
 						type: "text",
-						text: `✅ Gate ${args.gate} ADVANCED: P${args.proposal_id} ${fromState} → ${toState} (gate_decision_log #${decisionId}, maturity reset to 'new'). Lease released. Atomic (BEGIN/COMMIT + app.gate_bypass).`,
+						text: `✅ Gate ${args.gate} ADVANCED: P${idArg} ${fromState} → ${toState} (gate_decision_log #${decisionId}, maturity reset to 'new'). Lease released. workflows.current_stage synced. Atomic (BEGIN/COMMIT + app.gate_bypass).`,
 					}],
 				};
 			} catch (transitionErr) {
@@ -1361,7 +1384,7 @@ export async function recordGateDecision(args: {
 				return {
 					content: [{
 						type: "text",
-						text: `⚠️ Gate decision #${decisionId} recorded but atomic auto-transition rolled back: ${msg}\n\nRetry: mcp_proposal action=gate_decision { proposal_id: "${args.proposal_id}", gate: "${args.gate}", decision: "advance", to_state: "${toState}" } — the decision row's 10-min window still applies.`,
+						text: `⚠️ Gate decision #${decisionId} recorded but atomic auto-transition rolled back: ${msg}\n\nRetry: mcp_proposal action=gate_decision { proposal_id: "${idArg}", gate: "${args.gate}", decision: "advance", to_state: "${toState}" } — the decision row's 10-min window still applies.`,
 					}],
 				};
 			} finally {
@@ -1372,7 +1395,7 @@ export async function recordGateDecision(args: {
 		return {
 			content: [{
 				type: "text",
-				text: `✅ Gate decision recorded: id=${decisionId} proposal=${args.proposal_id} gate=${args.gate} decision=${args.decision}`,
+				text: `✅ Gate decision recorded: id=${decisionId} proposal=${idArg} gate=${args.gate} decision=${args.decision}`,
 			}],
 		};
 	} catch (err) {

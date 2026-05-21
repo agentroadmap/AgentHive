@@ -373,20 +373,24 @@ export async function agencyResume(agency_id: string): Promise<string> {
 		[agency_id],
 	);
 
+	// P1339 D2 follow-up: the live provider_registry schema has alert_sent_at
+	// (P765 migration). Earlier migration 134 was intended to add offline_since_at
+	// + offline_alerted_at, but those columns are not present on the live table
+	// (verified via information_schema.columns 2026-05-21). Reference only the
+	// columns that actually exist; otherwise this resume path crashes the first
+	// time an operator invokes liaisonResume(). Use direct agency_identity match
+	// (no JOIN through agent_registry — same simplification as migration 178).
 	await query(
-		`UPDATE roadmap_workforce.provider_registry pr
+		`UPDATE roadmap_workforce.provider_registry
 		 SET status              = 'active',
 		     status_reason       = 'Operator resume',
-		     offline_since_at    = NULL,
-		     offline_alerted_at  = NULL,
+		     alert_sent_at       = NULL,
 		     throttle_count      = 0,
 		     recent_failure_count = 0,
 		     last_failure_at     = NULL,
 		     updated_at          = now()
-		 FROM roadmap_workforce.agent_registry ar
-		 WHERE pr.agency_id = ar.id
-		   AND ar.agent_identity = $1
-		   AND pr.status <> 'retired'`,
+		 WHERE agency_identity = $1
+		   AND status <> 'retired'`,
 		[agency_id],
 	);
 

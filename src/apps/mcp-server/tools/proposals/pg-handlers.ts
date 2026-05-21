@@ -463,7 +463,10 @@ export class PgProposalHandlers {
 	}
 
 	async transitionProposal(args: {
-		id: string;
+		id?: string;
+		// P1340 AC-4 (D3 follow-up): universal identifier aliases.
+		proposal_id?: string;
+		display_id?: string;
 		status?: string;
 		// Aliases accepted to absorb common param-shape confusion across callers.
 		// Canonical is `status`; the rest are fallbacks so a misremembered call
@@ -477,11 +480,19 @@ export class PgProposalHandlers {
 		reason?: string;
 		notes?: string;
 	}): Promise<CallToolResult> {
+		// Hoist idArg outside the try so the catch can reference it for the
+		// gate-decision-shortcut hint (P1340 AC-7).
+		const idArg = args.id ?? args.proposal_id ?? args.display_id;
+		if (!idArg) {
+			return {
+				content: [{ type: "text", text: `prop_transition: missing proposal identifier. Pass id="P123" (canonical) or proposal_id / display_id alias.` }],
+			};
+		}
 		try {
-			const id = await pg.resolveProposalId(args.id);
+			const id = await pg.resolveProposalId(idArg);
 			if (id === null) {
 				return {
-					content: [{ type: "text", text: `Proposal ${args.id} not found.` }],
+					content: [{ type: "text", text: `Proposal ${idArg} not found.` }],
 				};
 			}
 
@@ -550,14 +561,14 @@ export class PgProposalHandlers {
 			);
 			if (!updated) {
 				return {
-					content: [{ type: "text", text: `Proposal ${args.id} not found.` }],
+					content: [{ type: "text", text: `Proposal ${idArg} not found.` }],
 				};
 			}
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Transitioned proposal ${args.id} → ${targetStatus}`,
+						text: `Transitioned proposal ${idArg} → ${targetStatus}`,
 					},
 				],
 			};
@@ -581,7 +592,7 @@ export class PgProposalHandlers {
 					content: [
 						{
 							type: "text",
-							text: `🚪 ${errMsg}\n\n💡 Shortcut: use mcp_proposal action=gate_decision { proposal_id: "${args.id}", gate: "${gateGuess}", decision: "advance", rationale: "..." } — that single MCP call records the decision AND flips status atomically. You don't need prop_transition for gate advances.`,
+							text: `🚪 ${errMsg}\n\n💡 Shortcut: use mcp_proposal action=gate_decision { proposal_id: "${idArg}", gate: "${gateGuess}", decision: "advance", rationale: "..." } — that single MCP call records the decision AND flips status atomically. You don't need prop_transition for gate advances.`,
 						},
 					],
 				};
@@ -615,16 +626,26 @@ export class PgProposalHandlers {
 	}
 
 	async setMaturity(args: {
-		id: string;
+		id?: string;
+		// P1340 AC-4 (D3 follow-up): universal alias support — proposal_id and
+		// display_id work alongside the canonical id.
+		proposal_id?: string;
+		display_id?: string;
 		maturity: string;
 		agent?: string;
 		reason?: string;
 	}): Promise<CallToolResult> {
 		try {
-			const id = await pg.resolveProposalId(args.id);
+			const idArg = args.id ?? args.proposal_id ?? args.display_id;
+			if (!idArg) {
+				return {
+					content: [{ type: "text", text: `prop_set_maturity: missing proposal identifier. Pass id="P123" (canonical) or proposal_id / display_id alias.` }],
+				};
+			}
+			const id = await pg.resolveProposalId(idArg);
 			if (id === null) {
 				return {
-					content: [{ type: "text", text: `Proposal ${args.id} not found.` }],
+					content: [{ type: "text", text: `Proposal ${idArg} not found.` }],
 				};
 			}
 
@@ -648,7 +669,7 @@ export class PgProposalHandlers {
 			);
 			if (!updated) {
 				return {
-					content: [{ type: "text", text: `Proposal ${args.id} not found.` }],
+					content: [{ type: "text", text: `Proposal ${idArg} not found.` }],
 				};
 			}
 
