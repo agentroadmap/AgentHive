@@ -1456,7 +1456,7 @@ async function recordGateDecisionFromOrchestrator(input: {
 	}
 }
 
-async function setProposalMaturity(
+export async function setProposalMaturity(
 	proposalId: number,
 	maturity: "new" | "active" | "mature" | "obsolete",
 	agentIdentity: string,
@@ -1489,7 +1489,7 @@ async function setProposalMaturity(
 	);
 }
 
-async function releaseDispatchLease(
+export async function releaseDispatchLease(
 	dispatchId: number | undefined,
 	reason: string,
 ): Promise<void> {
@@ -1850,309 +1850,36 @@ export async function dispatchImplicitGate(
 	}
 	const gateRoleSource = resolvedProfile?.source ?? "builtin-fallback";
 
-	// P437: deterministic idempotency key over the gate-dispatch tuple. Two
-	// concurrent claimImplicitGateReady poll cycles racing on the same
-	// proposal hit the partial UNIQUE INDEX and DO UPDATE the existing row
-	// instead of double-spawning the gate agent.
-	const gateIdempotencyKey = computeDispatchIdempotencyKey({
-		projectId: proposal.project_id ?? null,
-		proposalId: proposal.id,
-		status: proposal.status,
-		maturity: proposal.maturity ?? "mature",
-		role,
-	});
-
-	const { rows: dispatchRows } = await query<{
-		id: number;
-		attempt_count: number;
-		was_replay: boolean;
-	}>(
-		`INSERT INTO roadmap_workforce.squad_dispatch
-       (proposal_id, agent_identity, squad_name, dispatch_role, dispatch_status,
-        assigned_by, metadata, idempotency_key, attempt_count, required_capabilities)
-     VALUES ($1, $2, $3, $8, 'active', 'orchestrator',
-       jsonb_build_object(
-         'source', 'implicit_maturity_gating',
-         'reason', $4::text,
-         'gate', $5::text,
-         'from_stage', $6::text,
-         'to_stage', $7::text,
-         'stage', 'gate:' || $7::text,
-         'gateRoleSource', $9::text
-       ), $10, 1, $11::jsonb)
-     ON CONFLICT (idempotency_key)
-       WHERE dispatch_status IN ('open', 'assigned', 'active')
-     DO UPDATE SET
-       attempt_count = squad_dispatch.attempt_count + 1,
-       metadata = squad_dispatch.metadata
-                || jsonb_build_object(
-                     'last_replay_at', to_jsonb(now()),
-                     'replay_reason', 'idempotency_collision'
-                   )
-     RETURNING id, attempt_count, (xmax::text::int <> 0) AS was_replay`,
-		[
-			proposal.id,
-			worktree,
-			`gate-${proposal.display_id}-${gate.gate}`,
-			reason,
-			gate.gate,
-			proposal.status,
-			gate.toStage,
+	// P1292: Post implicit-gate work offer through offer lifecycle instead of direct spawn.
+	// The offer includes gate metadata (gate_role, gate_from_stage, gate_to_stage, gate_role_source)
+	// which the liaison picks up and forwards to the spawned agent. Gate completion is now
+	// handled by a listener on offer_completed (orchestrator.ts), not by this function.
+	try {
+		await postWorkOffer({
+			proposalId: proposal.id,
+			squadName: `gate-${proposal.display_id}-${gate.gate}`,
 			role,
-			gateRoleSource,
-			gateIdempotencyKey,
-			JSON.stringify([role]),
-		],
-	);
-	const dispatchId = dispatchRows[0]?.id;
-	if (dispatchRows[0]?.was_replay) {
-		logger.log(
-			`Implicit gate dispatch idempotency replay for ${proposal.display_id} (dispatch ${dispatchId}, attempt ${dispatchRows[0].attempt_count}) — skipping spawn`,
-		);
-		return;
-	}
-	logger.log(
-		`Implicit gate dispatch ${dispatchId} -> ${worktree} for ${proposal.display_id} (${proposal.status} -> ${gate.toStage}, ${gate.gate})`,
-	);
-
-	// P604: gate observability span
-	const gateTraceId = randomUUID();
-	const gateWriter = new ObservabilityWriter("operator:orchestrator");
-	let gateSpanId: string | null = null;
-	try {
-		const { spanId } = await gateWriter.startSpan({
-			traceId: gateTraceId,
-			operation: "orch.gate",
-			attributes: {
-				proposal_id: proposal.id,
-				gate: gate.gate,
-				from_stage: proposal.status,
-				to_stage: gate.toStage,
-			},
-		});
-		gateSpanId = spanId;
-	} catch {}
-
-	let result: Awaited<ReturnType<typeof spawnAgent>>;
-	// P405: resolve provider from model_routes, not worktree metadata
-	const activeProvider = await resolveActiveRouteProvider();
-	// Step 1 unblock (2026-05-19): the legacy implicit-gate dispatcher
-	// direct-spawns from the orchestrator process (running as gary). When
-	// the active route resolves to codex, the spawn fails because codex
-	// auth lives under andy, not gary. Until the marketplace-migration of
-	// gate dispatch (the proper fix), and until the andy-owned codex liaison
-	// (Step 2) is live, force gate spawns through a route the orchestrator
-	// process can actually authenticate: claude (gary has ~/.claude.json).
-	// Operators can re-enable codex by setting AGENTHIVE_GATE_PROVIDER=codex
-	// once Step 2 lands and codex-auth-as-andy is reachable from this process.
-	const gateProvider = process.env.AGENTHIVE_GATE_PROVIDER
-		?? (activeProvider === "codex" || activeProvider?.startsWith("codex/")
-			? "claude"
-			: activeProvider ?? "claude");
-	try {
-		result = await spawnAgent({
-			worktree,
 			task: buildImplicitGateTask(proposal, gate),
-			proposalId: proposal.id,
-			stage: `gate:${gate.toStage.toUpperCase()}`,
-			timeoutMs: 600_000,
-			provider: gateProvider,
-			traceId: gateTraceId,
-			parentSpanId: gateSpanId,
+			stage: `gate:${gate.toStage}`,
+			worktreeHint: worktree,
+			requiredCapabilities: [role],
+			gateRole: role,
+			gateFromStage: proposal.status,
+			gateToStage: gate.toStage,
+			gateRoleSource: gateRoleSource,
 		});
-	} catch (spawnErr) {
-		const errMsg =
-			spawnErr instanceof Error ? spawnErr.message : String(spawnErr);
-		await query(
-			`UPDATE roadmap_workforce.squad_dispatch
-	        SET dispatch_status = 'blocked',
-	            completed_at = now(),
-	            metadata = COALESCE(metadata, '{}'::jsonb) ||
-	              jsonb_build_object('error', $2::text)
-	      WHERE id = $1`,
-			[dispatchId, errMsg],
+		logger.log(
+			`Implicit gate work offer posted for ${proposal.display_id} (${proposal.status} -> ${gate.toStage}, ${gate.gate})`,
 		);
-		// P934: free-text 'gate spawn failed: ...' replaced with canonical
-		// 'gate_spawn_failed'. The errMsg context is preserved in the
-		// squad_dispatch.metadata.error field above and the warn log line
-		// below — those are the right places for prose, not the canonical
-		// release_reason enum column.
-		await releaseDispatchLease(dispatchId, "gate_spawn_failed");
+		return;
+	} catch (err) {
+		const errMsg = err instanceof Error ? err.message : String(err);
 		logger.warn(
-			`Implicit gate dispatch ${dispatchId} blocked (spawn threw): ${errMsg}`,
+			`Implicit gate work offer failed for ${proposal.display_id}: ${errMsg}`,
 		);
-		return;
-	}
-
-	const proposalState = await query<{ status: string; maturity: string }>(
-		`SELECT status, maturity
-       FROM roadmap_proposal.proposal
-      WHERE id = $1`,
-		[proposal.id],
-	);
-	const current = proposalState.rows[0];
-	const reachedTarget =
-		current && normalizeState(current.status) === normalizeState(gate.toStage);
-
-	if (result.exitCode === 0 && reachedTarget) {
-		await setProposalMaturity(
-			proposal.id,
-			"new",
-			worktree,
-			`gate ${gate.gate} advanced to ${gate.toStage}`,
-		);
-		await query(
-			`UPDATE roadmap_workforce.squad_dispatch
-          SET dispatch_status = 'completed',
-              completed_at = now(),
-              metadata = COALESCE(metadata, '{}'::jsonb) ||
-                jsonb_build_object('agent_run_id', $2::text, 'gate_decision', 'advance', 'proposal_status', $3::text, 'proposal_maturity', 'new')
-        WHERE id = $1`,
-			[dispatchId, result.agentRunId, gate.toStage],
-		);
-		// P934: gate review completed → canonical 'gate_review_complete'
-		// (work_complete bucket → maturity preserved as mature in trigger).
-		// The gate-name + toStage details live in the log line below.
-		await releaseDispatchLease(dispatchId, "gate_review_complete");
-		logger.log(
-			`Implicit gate dispatch ${dispatchId} advanced ${proposal.display_id} to ${gate.toStage}/new (gate=${gate.gate})`,
-		);
-		if (gateSpanId) {
-			await gateWriter.writeDecisionExplainability({
-				traceId: gateTraceId,
-				decisionKind: "gate_advance",
-				inputs: { proposal_id: proposal.id, gate: gate.gate, from_stage: proposal.status, to_stage: gate.toStage },
-				rulesEvaluated: { gate_rule: "maturity=mature AND exit_code=0 AND reached_target=true" },
-				outcome: { decision: "advance", to_stage: gate.toStage, agent_run_id: result.agentRunId },
-			});
-			await gateWriter.closeSpan({ spanId: gateSpanId, status: "ok" });
-		}
-		return;
-	}
-
-	if (result.exitCode === 0 && current) {
-		const finalMaturity =
-			normalizeState(current.maturity) === "OBSOLETE" ? "obsolete" : "new";
-		if (finalMaturity === "new") {
-			await setProposalMaturity(
-				proposal.id,
-				"new",
-				worktree,
-				`gate ${gate.gate} sent back or held`,
-			);
-		}
-		const decisionMessage = `gate decision completed without state transition: proposal is ${current.status}/${finalMaturity}`;
-		// Persist canonical decision to gate_decision_log first — that's the
-		// table the enhancing agent reads. MCP discussions/messages below are
-		// best-effort and may not reach the next cubic.
-		await recordGateDecisionFromOrchestrator({
-			proposalId: proposal.id,
-			fromState: proposal.status,
-			toState: gate.toStage,
-			gate: gate.gate,
-			decision: finalMaturity === "obsolete" ? "reject" : "hold",
-			authorityAgent: await gateRole(gate),
-			agentRunId: result.agentRunId,
-			agentStdout: result.stdout,
-			maturity: "mature",
-		});
-		await recordGateCommunication({
-			proposalId: proposal.id,
-			author: worktree,
-			toAgent: "orchestrator",
-			channel: "direct",
-			contextPrefix: "feedback:",
-			body: [
-				`Gate ${gate.gate} held ${proposal.display_id}.`,
-				`Target transition: ${proposal.status} -> ${gate.toStage}`,
-				`Current proposal state: ${current.status}/${finalMaturity}`,
-				"",
-				"The gate agent made a non-transition decision. Read the latest gate_decision_log row (rationale + ac_verification.details) for the canonical findings, revise the proposal, then set maturity back to mature when it is ready for another gate attempt.",
-			].join("\n"),
-			metadata: {
-				gate: gate.gate,
-				gate_decision: finalMaturity === "obsolete" ? "obsolete" : "hold",
-				proposal_status: current.status,
-				proposal_maturity: finalMaturity,
-				agent_run_id: result.agentRunId,
-				source: "implicit_maturity_gating",
-			},
-		});
-		await query(
-			`UPDATE roadmap_workforce.squad_dispatch
-          SET dispatch_status = 'completed',
-              completed_at = now(),
-              metadata = COALESCE(metadata, '{}'::jsonb) ||
-                jsonb_build_object('agent_run_id', $2::text, 'gate_decision', $3::text, 'proposal_status', $4::text, 'proposal_maturity', $5::text)
-        WHERE id = $1`,
-			[
-				dispatchId,
-				result.agentRunId,
-				finalMaturity === "obsolete" ? "obsolete" : "hold",
-				current.status,
-				finalMaturity,
-			],
-		);
-		// P934: hold/obsolete decisions map to canonical reasons.
-		// finalMaturity='obsolete' → 'wont_pursue' (abandoned bucket); otherwise
-		// → 'gate_hold' (incomplete bucket → maturity='new'). The free-form
-		// decisionMessage is preserved in the log line.
-		const releaseReason =
-			finalMaturity === "obsolete" ? "wont_pursue" : "gate_hold";
-		await releaseDispatchLease(dispatchId, releaseReason);
-		logger.log(
-			`Implicit gate dispatch ${dispatchId} held ${proposal.display_id}: ${decisionMessage}`,
-		);
-		if (gateSpanId) {
-			await gateWriter.writeDecisionExplainability({
-				traceId: gateTraceId,
-				decisionKind: "gate_advance",
-				inputs: { proposal_id: proposal.id, gate: gate.gate, from_stage: proposal.status },
-				rulesEvaluated: { gate_rule: "maturity=mature AND exit_code=0 AND reached_target=false" },
-				outcome: { decision: finalMaturity === "obsolete" ? "obsolete" : "hold", proposal_status: current.status, agent_run_id: result.agentRunId },
-			});
-			await gateWriter.closeSpan({ spanId: gateSpanId, status: "ok" });
-		}
-		return;
-	}
-
-	const errorMessage =
-		result.exitCode === 0
-			? `gate agent completed but proposal state could not be read`
-			: `gate agent exited ${result.exitCode}: ${[result.stderr, result.stdout].filter(Boolean).join("\n").slice(0, 2000)}`;
-
-	// Dynamic control: classify error and set provider cooldown if needed
-	const fullError = [result.stderr, result.stdout].filter(Boolean).join("\n");
-	const signal = classifyProviderSignal(fullError);
-	if (signal && result.exitCode !== 0) {
-		try {
-			const provider = activeProvider ?? (await resolveActiveRouteProvider());
-			if (provider) {
-				await setProviderCooldown(provider, signal, fullError);
-			}
-		} catch {
-			// Provider resolution failed — skip cooldown
-		}
-	}
-
-	await query(
-		`UPDATE roadmap_workforce.squad_dispatch
-        SET dispatch_status = 'blocked',
-            completed_at = now(),
-            metadata = COALESCE(metadata, '{}'::jsonb) ||
-              jsonb_build_object('agent_run_id', $2::text, 'error', $3::text)
-      WHERE id = $1`,
-		[dispatchId, result.agentRunId, errorMessage],
-	);
-	// P934: free-text 'gate dispatch blocked: ...' replaced with canonical
-	// 'gate_dispatch_blocked'. errorMessage is in squad_dispatch.metadata.error
-	// and the warn log below.
-	await releaseDispatchLease(dispatchId, "gate_dispatch_blocked");
-	logger.warn(
-		`Implicit gate dispatch ${dispatchId} blocked ${proposal.display_id}: ${errorMessage}`,
-	);
-	if (gateSpanId) {
-		await gateWriter.closeSpan({ spanId: gateSpanId, status: "error", errorMessage: errorMessage.slice(0, 500) });
+		// CapabilityMismatchError, BackpressureError, PausedRoleError are expected;
+		// proposal remains mature and scannable next cycle.
+		throw err;
 	}
 }
 
