@@ -753,7 +753,7 @@ export class PgProposalHandlers {
 					content: [
 						{
 							type: "text",
-							text: `Proposal ${idArg} is already claimed by ${lease.agent_identity} until ${lease.expires_at ?? "no expiry"}. Pass force=true to replace the lease.`,
+							text: `Proposal ${idArg} is already claimed by ${lease.agent_identity} until ${lease.expires_at ?? "no expiry"}. To take over the lease: mcp_proposal action=claim { id: "${idArg}", agent: "${agentArg}", force: true } (or MCP CLI: prop_claim --id ${idArg} --agent ${agentArg} --force).`,
 						},
 					],
 				};
