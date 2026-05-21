@@ -5,6 +5,7 @@ import { reapStaleRows } from "../pipeline/reap-stale-rows.ts";
 import {
 	BackpressureError,
 	DispatchLoopError,
+	PausedRoleError,
 	postWorkOffer,
 } from "../pipeline/post-work-offer.ts";
 import { enqueueNotification } from "../notifications/enqueue.ts";
@@ -903,6 +904,13 @@ export class Orchestrator {
 				}
 				// Circuit breaker is also expected behavior — log at warn, not error.
 				if (err instanceof DispatchLoopError) {
+					console.warn(
+						`[Orchestrator] scanQueues: ${err.message}`,
+					);
+					continue;
+				}
+				// P1291 per-(proposal, role) pause is also expected — skip and continue.
+				if (err instanceof PausedRoleError) {
 					console.warn(
 						`[Orchestrator] scanQueues: ${err.message}`,
 					);
