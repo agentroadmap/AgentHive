@@ -59,6 +59,16 @@ lint:
       - node_modules/
   allow_failure: true
 
+capability-coverage-check:
+  stage: check
+  script:
+    - npm ci
+    - bun run scripts/orchestrator-capability-coverage-check.ts
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+
 migration-schema-lint:
   stage: check
   script:
