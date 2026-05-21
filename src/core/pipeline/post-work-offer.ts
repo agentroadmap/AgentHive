@@ -209,9 +209,15 @@ export async function postWorkOffer(
 	if (input.gateToStage) metadata.gate_to_stage = input.gateToStage;
 	if (input.gateRoleSource) metadata.gate_role_source = input.gateRoleSource;
 
+	// P1290 follow-up: the legacy default '["general"]' was never seeded into
+	// any agency's provider_registry.capabilities->'jobs', so offers posted
+	// without explicit capabilities became permanently un-matchable and clogged
+	// the global inflight cap. Default to ROLE_TO_REQUIRED_CAPABILITIES lookup
+	// when the caller didn't supply caps; fall back to ["develop"] (the broadest
+	// seeded cap, advertised by 9 of 19 dispatchable agencies).
 	const caps = input.requiredCapabilities?.length
 		? JSON.stringify(input.requiredCapabilities)
-		: '["general"]';
+		: JSON.stringify(ROLE_TO_REQUIRED_CAPABILITIES[input.role.toLowerCase()] ?? ["develop"]);
 
 	const dispatchVersion = input.dispatchVersion ?? 1;
 
