@@ -60,8 +60,10 @@ export const ROLE_TO_REQUIRED_CAPABILITIES: Record<string, string[]> = {
 	enhancer: ["develop"],
 	"gate-reviewer": ["review"],
 	"skeptic-alpha": ["review"],
+	"skeptic-beta": ["review"],
 	skeptic: ["review"],
 	"code-reviewer": ["review"],
+	"architecture-reviewer": ["review"],
 	enrichment_agent: ["develop"],
 	// Niche/legacy roles (orchestrator-liaison-investigator, etc.) fall through
 	// to the default ["develop"] in OrchestratorOfferDispatcher.pickAgency.

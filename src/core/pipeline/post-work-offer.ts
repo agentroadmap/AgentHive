@@ -139,6 +139,14 @@ export interface WorkOfferInput {
 	 * policy that scanQueues() would have applied on a direct spawn.
 	 */
 	roleProfileId?: number | null;
+	/**
+	 * P1292: Gate metadata fields for implicit-gate dispatch through offer lifecycle.
+	 * When set, these fields are copied to metadata jsonb for gate completion listener.
+	 */
+	gateRole?: string | null;
+	gateFromStage?: string | null;
+	gateToStage?: string | null;
+	gateRoleSource?: string | null;
 }
 
 export interface WorkOfferResult {
@@ -195,6 +203,11 @@ export async function postWorkOffer(
 	if (input.worktreeHint) metadata.worktree_hint = input.worktreeHint;
 	if (input.briefingId) metadata.briefing_id = input.briefingId;
 	if (input.roleProfileId != null) metadata.role_profile_id = input.roleProfileId;
+	// P1292: Gate metadata for implicit-gate dispatch via offer lifecycle
+	if (input.gateRole) metadata.gate_role = input.gateRole;
+	if (input.gateFromStage) metadata.gate_from_stage = input.gateFromStage;
+	if (input.gateToStage) metadata.gate_to_stage = input.gateToStage;
+	if (input.gateRoleSource) metadata.gate_role_source = input.gateRoleSource;
 
 	const caps = input.requiredCapabilities?.length
 		? JSON.stringify(input.requiredCapabilities)
