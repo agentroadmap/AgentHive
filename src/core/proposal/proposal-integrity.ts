@@ -237,13 +237,41 @@ async function validateACGate(
 }
 
 /**
+ * P1340 AC-1+AC-2: Administrative identities bypass lease ownership checks.
+ * 'system' is the canonical bot-side actor used by the orchestrator's auto-advance
+ * path; the configured orchestrator identity is the matchmaker process itself.
+ * Neither needs a per-proposal lease to flip status or maturity — they are
+ * operating on the proposal's behalf and any lease conflict is incidental, not
+ * structural. Anyone else (named agencies, gating roles) goes through the normal
+ * lease-ownership check.
+ */
+export const ADMIN_IDENTITIES = new Set<string>([
+	"system",
+	"orchestrator",
+	process.env.AGENTHIVE_ORCHESTRATOR_IDENTITY ?? "agenthive/agency-orchestrator",
+]);
+
+export function isAdminIdentity(agentIdentity: string): boolean {
+	return ADMIN_IDENTITIES.has(agentIdentity);
+}
+
+/**
  * AC-LEASE: Check that the agent holds a valid active lease on the proposal.
- * If another agent holds the lease, return LEASE_CONFLICT.
+ * If another agent holds the lease, return LEASE_CONFLICT. Admin identities
+ * (P1340 AC-1) short-circuit valid:true without consulting proposal_lease.
  */
 export async function validateLease(
 	proposalId: number,
 	agentIdentity: string,
 ): Promise<TransitionValidationResult> {
+	// P1340 AC-1: admin-identity bypass. 'system' and the configured orchestrator
+	// identity skip the lease check entirely so the auto-advance / scanQueues /
+	// reaper paths can operate without first claiming a lease (which they could
+	// not safely release on crash anyway).
+	if (isAdminIdentity(agentIdentity)) {
+		return { valid: true };
+	}
+
 	const { rows } = await query<LeaseRow>(
 		`SELECT agent_identity, expires_at, released_at
      FROM roadmap_proposal.proposal_lease
@@ -253,12 +281,17 @@ export async function validateLease(
 		[proposalId],
 	);
 
+	// P1340 AC-3: lease-conflict errors include the explicit prop_claim --force
+	// shortcut so non-admin callers can resolve without guessing the schema.
+	const forceHint = (id: number) =>
+		`To take over the lease: mcp_proposal action=claim { id: "${id}", agent: "${agentIdentity}", force: true } (or MCP CLI: prop_claim --id ${id} --agent ${agentIdentity} --force).`;
+
 	if (rows.length === 0) {
 		return {
 			valid: false,
 			error: {
 				code: "LEASE_CONFLICT",
-				message: `No active lease on proposal ${proposalId}. Agent '${agentIdentity}' must claim a lease before transitioning.`,
+				message: `No active lease on proposal ${proposalId}. Agent '${agentIdentity}' must claim a lease before transitioning. ${forceHint(proposalId)}`,
 				context: {
 					proposalId,
 					requestingAgent: agentIdentity,
@@ -275,7 +308,7 @@ export async function validateLease(
 			valid: false,
 			error: {
 				code: "LEASE_CONFLICT",
-				message: `Lease on proposal ${proposalId} has expired (expired: ${lease.expires_at}). Agent '${agentIdentity}' must renew or re-claim.`,
+				message: `Lease on proposal ${proposalId} has expired (expired: ${lease.expires_at}). Agent '${agentIdentity}' must renew or re-claim. ${forceHint(proposalId)}`,
 				context: {
 					proposalId,
 					requestingAgent: agentIdentity,
@@ -291,7 +324,7 @@ export async function validateLease(
 			valid: false,
 			error: {
 				code: "LEASE_CONFLICT",
-				message: `Proposal is leased by '${lease.agent_identity}', not '${agentIdentity}'`,
+				message: `Proposal is leased by '${lease.agent_identity}', not '${agentIdentity}'. ${forceHint(proposalId)}`,
 				context: {
 					proposalId,
 					currentLeaseHolder: lease.agent_identity,

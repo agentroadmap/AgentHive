@@ -562,6 +562,54 @@ export class PgProposalHandlers {
 				],
 			};
 		} catch (err) {
+			// P1340 AC-7: when the DB gate guard (fn_guard_gate_advance) rejects
+			// the transition for missing decision log, suggest the one-call
+			// mcp_proposal action=gate_decision shortcut that bundles decision +
+			// transition + lease release into a single MCP call.
+			// P1340 AC-6: schema-level missing-field errors (NOT NULL / CHECK
+			// constraints from the proposal row) get reformatted with the
+			// column name so the caller knows exactly what to provide.
+			const errMsg = err instanceof Error ? err.message : String(err);
+			if (errMsg.includes("requires a gate decision")) {
+				const targetStatusForHint = (args.status ?? args.to_state ?? args.to_status ?? args.to ?? args.target_state ?? "").toUpperCase();
+				const gateGuess = targetStatusForHint === "REVIEW" ? "D1"
+					: targetStatusForHint === "DEVELOP" ? "D2"
+					: targetStatusForHint === "MERGE" ? "D3"
+					: targetStatusForHint === "COMPLETE" ? "D4"
+					: "D?";
+				return {
+					content: [
+						{
+							type: "text",
+							text: `🚪 ${errMsg}\n\n💡 Shortcut: use mcp_proposal action=gate_decision { proposal_id: "${args.id}", gate: "${gateGuess}", decision: "advance", rationale: "..." } — that single MCP call records the decision AND flips status atomically. You don't need prop_transition for gate advances.`,
+						},
+					],
+				};
+			}
+			// AC-6: PG NOT NULL / CHECK / FK violations carry the column name
+			// in the error. Surface it explicitly.
+			const notNullMatch = errMsg.match(/null value in column "([^"]+)" of relation "([^"]+)"/);
+			if (notNullMatch) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `❌ Missing required field: \`${notNullMatch[1]}\` on table \`${notNullMatch[2]}\`. Set it before transition. (Underlying: ${errMsg})`,
+						},
+					],
+				};
+			}
+			const checkMatch = errMsg.match(/violates check constraint "([^"]+)"/);
+			if (checkMatch) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `❌ Value rejected by constraint \`${checkMatch[1]}\`. Inspect the constraint definition for allowed values. (Underlying: ${errMsg})`,
+						},
+					],
+				};
+			}
 			return errorResult("Failed to transition proposal", err);
 		}
 	}
@@ -643,15 +691,20 @@ export class PgProposalHandlers {
 		agent?: string;
 		// `agent_identity` accepted as alias for `agent` (same reason).
 		agent_identity?: string;
+		display_id?: string;
 		durationMinutes?: number;
 		force?: boolean;
 	}): Promise<CallToolResult> {
 		try {
-			const idArg = args.id ?? args.proposal_id;
+			// P1340 AC-4: accept id|proposal_id|display_id as aliases for the
+			// proposal identifier. resolveProposalId handles both numeric ids and
+			// 'P123'-style display_id strings; the alias chain just opens the
+			// param-name door.
+			const idArg = args.id ?? args.proposal_id ?? args.display_id;
 			const agentArg = args.agent ?? args.agent_identity;
 			if (!idArg) {
 				return {
-					content: [{ type: "text", text: `prop_claim: missing proposal identifier. Pass id="P123" (canonical) or proposal_id alias.` }],
+					content: [{ type: "text", text: `prop_claim: missing proposal identifier. Pass id="P123" (canonical) or proposal_id / display_id alias.` }],
 				};
 			}
 			if (!agentArg) {
@@ -743,6 +796,7 @@ export class PgProposalHandlers {
 	async releaseProposal(args: {
 		id?: string;
 		proposal_id?: string;
+		display_id?: string;
 		agent?: string;
 		agent_identity?: string;
 		release_reason?: string;
@@ -751,11 +805,12 @@ export class PgProposalHandlers {
 		reason?: string;
 	}): Promise<CallToolResult> {
 		try {
-			const idArg = args.id ?? args.proposal_id;
+			// P1340 AC-4: id|proposal_id|display_id all accepted.
+			const idArg = args.id ?? args.proposal_id ?? args.display_id;
 			const agentArg = args.agent ?? args.agent_identity;
 			if (!idArg) {
 				return {
-					content: [{ type: "text", text: `prop_release: missing proposal identifier. Pass id="P123" (canonical) or proposal_id alias.` }],
+					content: [{ type: "text", text: `prop_release: missing proposal identifier. Pass id="P123" (canonical) or proposal_id / display_id alias.` }],
 				};
 			}
 			if (!agentArg) {

@@ -13,7 +13,7 @@
  * - proposal_dependencies (DAG)
  */
 
-import { query } from "../../../../postgres/pool.ts";
+import { getPool, query } from "../../../../postgres/pool.ts";
 import {
 	validateLease,
 	formatValidationError,
@@ -1308,23 +1308,28 @@ export async function recordGateDecision(args: {
 		// Bundle the workflow advance with the decision so one MCP call moves the
 		// proposal through the gate. Without this, callers must (1) record_gate_decision,
 		// (2) acquire a 'system' lease, (3) call prop_transition, (4) release the lease —
-		// four steps that previously stranded operator-driven advances. The gate guard
-		// (fn_guard_gate_advance) finds the row we just inserted and allows the UPDATE.
-		// On non-advance decisions, no transition; on advance with toState===fromState
-		// (defensive), also no-op.
+		// four steps that previously stranded operator-driven advances.
+		//
+		// P1340 AC-5: wrap the release_lease + UPDATE in a single transaction with
+		// `SET LOCAL app.gate_bypass='true'` so the gate guard short-circuits —
+		// the gate_decision row we just INSERTED already authorizes the transition,
+		// re-checking it from the trigger is redundant and brittle (clock skew on the
+		// 10-minute window, gate_role permission churn). The bypass scope is the txn
+		// only; outside of this handler the guard remains in force.
 		if (args.decision === "advance" && toState !== fromState) {
+			const pool = getPool();
+			const client = await pool.connect();
 			try {
-				// Release any active lease so the UPDATE isn't gated on lease ownership.
-				// fn_guard_gate_advance only checks gate_decision_log + proposal_reviews —
-				// not lease state — so releasing first is safe.
-				await query(
+				await client.query("BEGIN");
+				await client.query("SET LOCAL app.gate_bypass = 'true'");
+				await client.query(
 					`UPDATE roadmap_proposal.proposal_lease
 					    SET released_at = COALESCE(released_at, now()),
 					        release_reason = COALESCE(release_reason, 'gate_review_complete')
 					  WHERE proposal_id = $1 AND released_at IS NULL`,
 					[proposalId],
 				);
-				await query(
+				await client.query(
 					`UPDATE roadmap_proposal.proposal
 					    SET status = $1,
 					        maturity = 'new',
@@ -1340,22 +1345,27 @@ export async function recordGateDecision(args: {
 					  WHERE id = $6`,
 					[toState, fromState, args.decided_by ?? "mcp", args.gate, decisionId, proposalId],
 				);
+				await client.query("COMMIT");
 				return {
 					content: [{
 						type: "text",
-						text: `✅ Gate ${args.gate} ADVANCED: P${args.proposal_id} ${fromState} → ${toState} (gate_decision_log #${decisionId}, maturity reset to 'new'). Lease released.`,
+						text: `✅ Gate ${args.gate} ADVANCED: P${args.proposal_id} ${fromState} → ${toState} (gate_decision_log #${decisionId}, maturity reset to 'new'). Lease released. Atomic (BEGIN/COMMIT + app.gate_bypass).`,
 					}],
 				};
 			} catch (transitionErr) {
-				// Decision row already written; surface the transition failure but don't
-				// roll back the decision — operator can retry just the UPDATE step.
+				try { await client.query("ROLLBACK"); } catch { /* ignore */ }
+				// Decision row outside the rolled-back tx is still durable (separate
+				// implicit txn for the INSERT). Tell the caller they can retry the
+				// UPDATE — the decision row's 10-min window still applies.
 				const msg = transitionErr instanceof Error ? transitionErr.message : String(transitionErr);
 				return {
 					content: [{
 						type: "text",
-						text: `⚠️ Gate decision #${decisionId} recorded but auto-transition failed: ${msg}\n\nRetry the transition manually: UPDATE roadmap_proposal.proposal SET status='${toState}', maturity='new' WHERE id=${proposalId}; (the gate guard will find decision #${decisionId} for the next 10 minutes).`,
+						text: `⚠️ Gate decision #${decisionId} recorded but atomic auto-transition rolled back: ${msg}\n\nRetry: mcp_proposal action=gate_decision { proposal_id: "${args.proposal_id}", gate: "${args.gate}", decision: "advance", to_state: "${toState}" } — the decision row's 10-min window still applies.`,
 					}],
 				};
+			} finally {
+				client.release();
 			}
 		}
 
