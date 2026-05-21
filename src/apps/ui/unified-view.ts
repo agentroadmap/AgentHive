@@ -856,4 +856,11 @@ export async function runUnifiedView(
 		console.error(error instanceof Error ? error.message : error);
 		process.exit(1);
 	}
+
+	// Force a clean process exit. proposal-list (line 424) and kanban
+	// (line 482) views already call process.exit(0) on their q paths, but
+	// cockpit/headlines/chat just resolve("exit") and let the loop drain —
+	// which leaves the pg pool and other handles keeping Node's event loop
+	// alive, and the user's shell never gets its prompt back.
+	process.exit(0);
 }
