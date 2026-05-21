@@ -699,11 +699,16 @@ export async function runUnifiedView(
 						[],
 					).then((r) => r.rows).catch(() => [] as any[]);
 
+					// timestamp is milliseconds since epoch — headlines.ts:119 passes
+					// it straight into `new Date(Number(m.timestamp))`. The previous
+					// `* 1000` multiplier produced microseconds, so the formatter
+					// rendered messages as years-in-the-future dates ("Jul 14" for
+					// a May 20 message).
 					const messages = (messageRows as any[]).map((row: any) => ({
 						id: String(row.id),
 						sender_identity: row.from_agent,
 						content: row.message_content,
-						timestamp: new Date(row.created_at).getTime() * 1000,
+						timestamp: new Date(row.created_at).getTime(),
 						channel_name: row.message_type ?? "pulse",
 					}));
 
@@ -711,7 +716,7 @@ export async function runUnifiedView(
 						id: `strans-${row.id}`,
 						sender_identity: row.transitioned_by || "system:workflow",
 						content: `[${row.to_state.toUpperCase()}] Proposal ${row.display_id} transitioned`,
-						timestamp: new Date(row.transitioned_at).getTime() * 1000,
+						timestamp: new Date(row.transitioned_at).getTime(),
 						channel_name: "state-change",
 					}));
 
