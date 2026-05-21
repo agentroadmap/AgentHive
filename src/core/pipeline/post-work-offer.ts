@@ -91,6 +91,20 @@ export class CapabilityMismatchError extends Error {
 	}
 }
 
+export class PausedRoleError extends Error {
+	constructor(
+		readonly proposalId: number,
+		readonly role: string,
+		readonly reason: string,
+		readonly expiresAt: Date,
+	) {
+		super(
+			`postWorkOffer: P${proposalId} role=${role} paused (reason=${reason}, resumes=${expiresAt.toISOString()})`,
+		);
+		this.name = "PausedRoleError";
+	}
+}
+
 export interface WorkOfferInput {
 	proposalId: number;
 	squadName: string;
@@ -186,6 +200,32 @@ export async function postWorkOffer(
 		: '["general"]';
 
 	const dispatchVersion = input.dispatchVersion ?? 1;
+
+	// P1291: Check for a non-expired pause row for this (proposal_id, role) tuple.
+	// If found, throw PausedRoleError to skip posting. scanQueues catches this as
+	// skip-and-continue, same as BackpressureError / DispatchLoopError.
+	const { rows: pauseRows } = await queryFn<{
+		pause_reason: string;
+		expires_at: string;
+	}>(
+		`SELECT pause_reason, expires_at::text
+		   FROM roadmap_workforce.proposal_role_pause
+		  WHERE proposal_id = $1
+		    AND role = $2
+		    AND expires_at > now()
+		  LIMIT 1`,
+		[input.proposalId, input.role],
+	);
+	if (pauseRows.length > 0) {
+		const pauseRow = pauseRows[0];
+		const expiresAt = new Date(pauseRow.expires_at);
+		throw new PausedRoleError(
+			input.proposalId,
+			input.role,
+			pauseRow.pause_reason,
+			expiresAt,
+		);
+	}
 
 	// Backpressure: refuse new offers when the global in-flight queue is full.
 	// Cheap pre-check — single COUNT against an indexed predicate. Skipped when
