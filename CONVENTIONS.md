@@ -1316,6 +1316,40 @@ All PostgreSQL connection parameters **must** be read through `ConfigResolver`, 
 
 This is enforced automatically — violations will fail the CI check.
 
+## 20. Capability Vocabulary Mismatch Remediation — P1290 AC-7
+
+The orchestrator boot path runs `scripts/orchestrator-capability-coverage-check.ts` in `--warn-only` mode and logs a warning if any role in `ROLE_TO_REQUIRED_CAPABILITIES` (`src/core/orchestration/offer-dispatch.ts:54`) maps to a capability with zero matching dispatchable agencies.
+
+**Boot warning text** (look for this in `journalctl -u agenthive-orchestrator.service`):
+```
+[capability-coverage] WARN: capability "<cap>" required by roles [<role>, ...] has no matching dispatchable agency
+```
+
+When this warning fires, the operator has two remediation paths:
+
+**Path A — adjust the role map** (use when the missing capability is a vocabulary mistake, not a real capability gap):
+
+Edit `src/core/orchestration/offer-dispatch.ts` to re-map the affected role(s) to a capability that already has agency coverage, then redeploy. Example: re-map a niche role to the default `develop` capability.
+
+**Path B — seed the missing capability on an active agency** (use when the capability is real and an agency should advertise it):
+
+```sql
+UPDATE roadmap_workforce.provider_registry
+SET capabilities = jsonb_set(
+  capabilities,
+  '{jobs}',
+  COALESCE(capabilities->'jobs', '[]'::jsonb) || '"<cap>"'::jsonb
+)
+WHERE agency_identity = '<agency>'
+  AND status = 'active';
+
+NOTIFY capability_vocabulary_changed;
+```
+
+The NOTIFY clears any `proposal_role_pause` rows whose pause_reason is `no_eligible_agency` or `capability_mismatch` (P1291 auto-clear), letting dispatch retry immediately.
+
+Verify both paths with `bun run scripts/orchestrator-capability-coverage-check.ts` (no `--warn-only`); exit code 0 means coverage is complete. The same check runs in CI (see `.gitlab-ci.yml`) and will fail any PR that drifts.
+
 ## §model-capability-scores — AC-10 (P1006)
 
 All entries in `roadmap_workforce.model_capability_profile` score each capability dimension on a 0–5 integer scale:
