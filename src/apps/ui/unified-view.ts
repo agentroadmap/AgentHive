@@ -728,6 +728,17 @@ export async function runUnifiedView(
 					);
 				};
 
+				// Forward declaration: the chat input binds Ctrl+C to onExit, which
+				// needs to clear the refresh timer + destroy the screen. Timer is
+				// declared below; closure captures it.
+				let timer: ReturnType<typeof setInterval> | undefined;
+				const onExit = () => {
+					if (timer) clearInterval(timer);
+					delete (screen as any)._chatContainer;
+					(screen as any).destroy();
+					resolve("exit");
+				};
+
 				renderChat(screen, {
 					messages: [],
 					channels: [currentChannel],
@@ -735,6 +746,7 @@ export async function runUnifiedView(
 					projectName: config?.projectName || "Roadmap.md",
 					userSystemName: "HUMAN",
 					onSend,
+					onExit,
 				});
 
 				const refresh = async () => {
@@ -767,23 +779,21 @@ export async function runUnifiedView(
 				};
 
 				void refresh();
-				const timer = setInterval(() => {
+				timer = setInterval(() => {
 					void refresh();
 				}, 1000);
 
-				// Set up key handlers
+				// Set up key handlers (fire only when input box is NOT focused —
+				// see chat.ts for the in-input C-c rebind and Esc defocus path).
 				(screen as any).key(["tab"], () => {
 					onTabPress();
-					clearInterval(timer);
+					if (timer) clearInterval(timer);
 					delete (screen as any)._chatContainer;
 					(screen as any).destroy();
 					resolve("switch");
 				});
 				(screen as any).key(["q", "C-c"], () => {
-					clearInterval(timer);
-					delete (screen as any)._chatContainer;
-					(screen as any).destroy();
-					resolve("exit");
+					onExit();
 				});
 			});
 		};

@@ -25,6 +25,7 @@ export function renderChat(
 		projectName: string;
 		userSystemName: string;
 		onSend?: (content: string) => Promise<void> | void;
+		onExit?: () => void;
 	},
 ): void {
 	const {
@@ -34,6 +35,7 @@ export function renderChat(
 		projectName,
 		userSystemName,
 		onSend,
+		onExit,
 	} = data;
 
 	let container = (screen as any)._chatContainer;
@@ -117,7 +119,7 @@ export function renderChat(
 			left: 0,
 			width: "100%",
 			height: 1,
-			content: " {white-fg}Tab: Next View | Q: Exit | Enter: Send Message{/}",
+			content: " {white-fg}Enter: Send | Esc: leave input | Ctrl+C: Quit | (outside input) Tab: View | Q: Exit{/}",
 			tags: true,
 			style: { bg: "blue", fg: "white" },
 		});
@@ -132,6 +134,20 @@ export function renderChat(
 			}
 			inputField.focus();
 			screen.render();
+		});
+
+		// Esc cancels readInput; defocus to log so screen-level Tab/Q work.
+		// Without this users get trapped: textbox swallows Tab+Q while focused.
+		inputField.on("cancel", () => {
+			container._inputDefocused = true;
+			chatLog.focus();
+			screen.render();
+		});
+
+		// Ctrl+C exits even from inside the input box (screen-level handler is
+		// shadowed by textbox readInput, so we re-bind here).
+		inputField.key(["C-c"], () => {
+			onExit?.();
 		});
 
 		// Initial populate
@@ -172,7 +188,12 @@ export function renderChat(
 		container._lastMsgTimestamp = messages[0].timestamp;
 	}
 
-	inputField.focus();
+	// Only re-focus the input if user hasn't explicitly defocused it with Esc.
+	// Without this guard, the 1s refresh loop steals focus back every tick,
+	// trapping the user inside the textbox.
+	if (!container._inputDefocused) {
+		inputField.focus();
+	}
 	screen.render();
 }
 
