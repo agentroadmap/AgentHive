@@ -806,6 +806,78 @@ export const FlagKeys = {
 		dbColumn: "value_jsonb",
 		envOverride: false,
 	} satisfies ConfigKey<number>,
+
+	// ─── P1291 per-(proposal, role) pause fuse tunables ──────────────────────
+	// Seeded by a P1291 migration. Operator changes via SQL UPDATE core.runtime_flag SET value_jsonb=...
+	// Live-reload via runtime_config_changed NOTIFY (no restart).
+
+	PAUSE_FAILURE_THRESHOLD: {
+		name: "PAUSE_FAILURE_THRESHOLD",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const parsed = Number(JSON.parse(v));
+			if (!Number.isFinite(parsed) || parsed <= 0) {
+				throw new Error(`Invalid PAUSE_FAILURE_THRESHOLD: ${v}`);
+			}
+			return parsed;
+		},
+		required: true,
+		description: "Number of consecutive no-eligible-agency failures before first pause (P1291)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	PAUSE_BASE_BACKOFF_MS: {
+		name: "PAUSE_BASE_BACKOFF_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const parsed = Number(JSON.parse(v));
+			if (!Number.isFinite(parsed) || parsed <= 0) {
+				throw new Error(`Invalid PAUSE_BASE_BACKOFF_MS: ${v}`);
+			}
+			return parsed;
+		},
+		required: true,
+		description: "Base backoff duration in milliseconds for first pause cycle (default 1800000 = 30min)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	PAUSE_BACKOFF_MULTIPLIER: {
+		name: "PAUSE_BACKOFF_MULTIPLIER",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const parsed = Number(JSON.parse(v));
+			if (!Number.isFinite(parsed) || parsed < 1) {
+				throw new Error(`Invalid PAUSE_BACKOFF_MULTIPLIER: ${v}`);
+			}
+			return parsed;
+		},
+		required: true,
+		description: "Exponential backoff multiplier for each pause cycle (default 2)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	PAUSE_MAX_BACKOFF_MS: {
+		name: "PAUSE_MAX_BACKOFF_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const parsed = Number(JSON.parse(v));
+			if (!Number.isFinite(parsed) || parsed <= 0) {
+				throw new Error(`Invalid PAUSE_MAX_BACKOFF_MS: ${v}`);
+			}
+			return parsed;
+		},
+		required: true,
+		description: "Hard cap on pause duration in milliseconds (default 86400000 = 24h)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
 };
 
 /**
