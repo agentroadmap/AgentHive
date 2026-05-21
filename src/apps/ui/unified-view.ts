@@ -578,22 +578,36 @@ export async function runUnifiedView(
 					);
 					// Filter to meaningful workforce entities. 'tool' rows are
 					// auto-spawned a2a-xproc-* test fixtures, and 'workforce' rows
-					// are legacy bulk-import noise (8000+ inactive). Ordering puts
-					// coordinators (orchestrators) first, then agencies (the named
-					// real workers like george/pablo/alan), then LLM agents.
+					// are legacy bulk-import noise (8000+ inactive).
+					// LATERAL join surfaces each agent's current dispatch (if any)
+					// so the panel can split WORKING vs AVAILABLE.
 					const agentRows = await pgrows(
-						`SELECT agent_identity, agent_type, role, status, updated_at
-						 FROM roadmap_workforce.agent_registry
-						 WHERE status = 'active'
-						   AND agent_type IN ('coordinator','agency','llm','human','hybrid')
-						 ORDER BY CASE agent_type
+						`SELECT ar.agent_identity, ar.agent_type, ar.role,
+						        ar.status, ar.updated_at,
+						        sd.proposal_id,
+						        p.display_id AS current_proposal,
+						        p.title      AS current_title,
+						        sd.dispatch_role
+						 FROM roadmap_workforce.agent_registry ar
+						 LEFT JOIN LATERAL (
+						   SELECT proposal_id, dispatch_role, dispatch_status, assigned_at
+						   FROM roadmap_workforce.squad_dispatch
+						   WHERE (worker_identity = ar.agent_identity OR agent_identity = ar.agent_identity)
+						     AND dispatch_status IN ('assigned','active','running','pending','offered','claimed')
+						   ORDER BY assigned_at DESC LIMIT 1
+						 ) sd ON true
+						 LEFT JOIN roadmap_proposal.proposal p ON p.id = sd.proposal_id
+						 WHERE ar.status = 'active'
+						   AND ar.agent_type IN ('coordinator','agency','llm','human','hybrid')
+						 ORDER BY (sd.proposal_id IS NOT NULL) DESC,
+						          CASE ar.agent_type
 						            WHEN 'coordinator' THEN 1
 						            WHEN 'agency'      THEN 2
 						            WHEN 'human'       THEN 3
 						            WHEN 'hybrid'      THEN 4
 						            WHEN 'llm'         THEN 5
 						            ELSE 9 END,
-						          agent_identity
+						          ar.agent_identity
 						 LIMIT 50`,
 					);
 					const msgRows = await pgrows(
@@ -626,12 +640,16 @@ export async function runUnifiedView(
 					const agentData: WorkforceAgent[] = (agentRows as any[]).map((row: any) => ({
 						id: row.agent_identity,
 						name: row.agent_identity,
-						// Show type prominently — agencies are real workers (george,
-						// pablo, etc.), coordinators are orchestrators, llm is sub-agent.
-						role: `${row.agent_type}${row.role ? `/${row.role}` : ""}`,
+						// agent_type is the structural role (agency / coordinator /
+						// llm); .role is what the registry calls them.
+						role: row.agent_type ?? "agent",
 						status: row.status === "active" ? "active" : "offline",
-						currentProposal: undefined,
-						statusMessage: row.status ?? "unknown",
+						// Current proposal renders as "P1234: title…" when the agent
+						// has a live dispatch. undefined means available/idle.
+						currentProposal: row.current_proposal
+							? `${row.current_proposal}: ${row.current_title ?? ""}`
+							: undefined,
+						statusMessage: row.role ?? row.dispatch_role ?? "",
 						lastSeen: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
 					}));
 

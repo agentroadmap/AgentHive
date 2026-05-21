@@ -115,6 +115,9 @@ export function renderCockpit(
 		container._workforceBox = workforceBox;
 
 		// 2. Pipeline [Top Right]
+		// tags:true was producing a render artifact where Develop's count
+		// "120" became " 12" and subsequent lines shifted one cell right.
+		// We don't need tag-styled lines in this panel — drop tag parsing.
 		pipelineBox = box({
 			parent: container,
 			top: 3,
@@ -123,7 +126,7 @@ export function renderCockpit(
 			height: "50%-3",
 			border: { type: "line" },
 			label: " [F4] Pipeline Traffic ",
-			tags: true,
+			tags: false,
 			scrollable: true,
 			style: { border: { fg: "magenta" } },
 		});
@@ -201,18 +204,67 @@ export function renderCockpit(
 		`{bold}{cyan-fg}🚀 ENGINEER'S COCKPIT{/} | Agents: ${agents.length} | Pipeline: ${pipelineTotal} | Status: {green-fg}LIVE{/}`,
 	);
 
-	// Update Workforce
+	// Update Workforce — split into WORKING (has currentProposal) vs AVAILABLE.
+	// WORKING rows are loud and show what they're on; AVAILABLE is compact
+	// (comma-separated by type) so you can see the bench at a glance.
 	if (agents.length === 0) {
 		workforceBox.setContent("  {gray-fg}No agents registered{/}");
 	} else {
-		const lines = agents.map((a) => {
-			const icon =
-				a.status === "active" ? "🟢" : a.status === "zombie" ? "🧟" : "⚪";
-			const proposal = a.currentProposal
-				? ` {yellow-fg}[${a.currentProposal}]{/}`
-				: "";
-			return `${icon} {bold}${a.id}{/bold} (${a.role})${proposal}\n   └─ ${a.statusMessage}`;
-		});
+		const working = agents.filter((a) => a.status === "active" && a.currentProposal);
+		const idle = agents.filter((a) => a.status === "active" && !a.currentProposal);
+		const offline = agents.filter((a) => a.status !== "active");
+
+		const cols = ((screen as any).program?.cols as number | undefined) ?? 160;
+		const panelBudget = Math.max(40, Math.floor(cols / 2) - 6);
+
+		const lines: string[] = [];
+		lines.push(
+			`{bold}${working.length} working{/} · {bold}${idle.length} available{/}${offline.length ? ` · {gray-fg}${offline.length} offline{/}` : ""}`,
+		);
+		lines.push("");
+
+		if (working.length > 0) {
+			lines.push("{green-fg}[*] WORKING{/}");
+			working.forEach((a) => {
+				const role = `{gray-fg}(${a.role}){/}`;
+				const task = a.currentProposal ?? "";
+				const taskFit = task.length > panelBudget - a.id.length - 10
+					? `${task.substring(0, panelBudget - a.id.length - 11)}…`
+					: task;
+				lines.push(`  {bold}${a.id}{/} ${role} -> {yellow-fg}${taskFit}{/}`);
+			});
+			lines.push("");
+		}
+
+		if (idle.length > 0) {
+			lines.push(`{cyan-fg}[ ] AVAILABLE{/}`);
+			// Group idle agents by type for a compact comma-separated roster.
+			const byType = new Map<string, string[]>();
+			idle.forEach((a) => {
+				const t = a.role || "agent";
+				if (!byType.has(t)) byType.set(t, []);
+				byType.get(t)!.push(a.id);
+			});
+			const typeOrder = ["coordinator", "agency", "human", "hybrid", "llm"];
+			const orderedTypes = [
+				...typeOrder.filter((t) => byType.has(t)),
+				...Array.from(byType.keys()).filter((t) => !typeOrder.includes(t)),
+			];
+			orderedTypes.forEach((type) => {
+				const names = byType.get(type) ?? [];
+				const joined = names.join(", ");
+				const fit = joined.length > panelBudget - type.length - 6
+					? `${joined.substring(0, panelBudget - type.length - 7)}…`
+					: joined;
+				lines.push(`  {gray-fg}${type}{/} (${names.length}): ${fit}`);
+			});
+		}
+
+		if (offline.length > 0) {
+			lines.push("");
+			lines.push(`{gray-fg}(.) offline: ${offline.map((a) => a.id).join(", ")}{/}`);
+		}
+
 		workforceBox.setContent(lines.join("\n"));
 	}
 
@@ -234,19 +286,17 @@ export function renderCockpit(
 	}
 	const pipelineLines: string[] = [];
 	const statuses = ["Draft", "Review", "Develop", "Merge", "Complete"];
+	// Each line padded to a fixed 30-char trailing width — without this,
+	// blessed.setContent leaves residual digits from the previous render
+	// in the pipeline box (e.g. count 0 → 120 shows as "0120").
 	statuses.forEach((s) => {
 		const count = statusCounts[s.toUpperCase()] || 0;
-		const color =
-			s === "Develop"
-				? "yellow-fg"
-				: s === "Complete"
-					? "green-fg"
-					: "gray-fg";
-		pipelineLines.push(`{${color}}${s.padEnd(10)}{/} : ${count}`);
+		const raw = `${s.padEnd(10)} : ${count}`;
+		pipelineLines.push(raw.padEnd(30));
 	});
 	// proposals is the recent-activity list when the caller pre-sorted by
 	// modified_at DESC; otherwise we degrade to "last 5 from the tail".
-	pipelineLines.push("\n{bold}Recent Activity:{/}");
+	pipelineLines.push("\nRecent Activity:");
 	const recent = data.pipelineCounts ? proposals : proposals.slice(-5).reverse();
 	// Pipeline panel is ~half the screen width. Estimate the usable width
 	// from the terminal columns; minus the "• PXXXX: " prefix and borders,
@@ -260,6 +310,10 @@ export function renderCockpit(
 			: title;
 		pipelineLines.push(`• ${p.display_id}: ${trimmed}`);
 	});
+	// blessed's setContent on this scrollable+tags=true box leaves stale
+	// digits from the previous render — see the "Develop : 0120" bug.
+	// Wiping to "" first, then setting on next tick, forces a clean redraw.
+	pipelineBox.setContent("");
 	pipelineBox.setContent(pipelineLines.join("\n"));
 
 	// Update Ledger
