@@ -16,6 +16,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { query as defaultQuery } from "../../infra/postgres/pool.ts";
 import { ObservabilityWriter } from "../observability/observability-writer.ts";
+import { ROLE_TO_REQUIRED_CAPABILITIES } from "../orchestration/offer-dispatch.ts";
 
 const obs = new ObservabilityWriter("agency:offer-pipeline");
 
@@ -75,6 +76,19 @@ export class BackpressureError extends Error {
 			`postWorkOffer: backpressure — ${inflight} offers in flight (cap=${cap}). New posts paused until existing offers complete or the reaper requeues stale leases.`,
 		);
 		this.name = "BackpressureError";
+	}
+}
+
+export class CapabilityMismatchError extends Error {
+	constructor(
+		readonly proposalId: number,
+		readonly role: string,
+		readonly requiredCapabilities: string[],
+	) {
+		super(
+			`postWorkOffer: P${proposalId}: no active agency advertises required capabilities ${JSON.stringify(requiredCapabilities)} for role "${role}" via provider_registry.capabilities->'jobs'. Offer not inserted. Investigate role-to-capability mapping (P1290) or seed missing capabilities on an active agency.`,
+		);
+		this.name = "CapabilityMismatchError";
 	}
 }
 
@@ -234,18 +248,29 @@ export async function postWorkOffer(
 	// historical aliases (uppercase stage name, role string, "gate:STAGE"),
 	// so accept any match.
 	// P721: exclude 'rate_limited' — those are route outages, not loops.
+	// P1289: also count squad_dispatch failures (dispatch-level loops) where
+	// no agent_run was ever created (e.g. no eligible agency found).
 	const { rows: loopRows } = await queryFn<{ recent_runs: number }>(
-		`SELECT count(*)::int AS recent_runs
-		   FROM roadmap_workforce.agent_runs
-		  WHERE proposal_id = $1
-		    AND status IN ('completed', 'failed')
-		    AND COALESCE(completed_at, started_at) > now() - interval '1 hour'
-		    AND (
-		      stage = $2
-		      OR stage = upper($2)
-		      OR stage = 'gate:' || $2
-		      OR agent_identity LIKE '%' || $2 || '%'
-		    )`,
+		`SELECT (
+		   SELECT count(*)::int
+		     FROM roadmap_workforce.agent_runs
+		    WHERE proposal_id = $1
+		      AND status IN ('completed', 'failed')
+		      AND COALESCE(completed_at, started_at) > now() - interval '1 hour'
+		      AND (
+		        stage = $2
+		        OR stage = upper($2)
+		        OR stage = 'gate:' || $2
+		        OR agent_identity LIKE '%' || $2 || '%'
+		      )
+		 ) + (
+		   SELECT count(*)::int
+		     FROM roadmap_workforce.squad_dispatch
+		    WHERE proposal_id = $1
+		      AND dispatch_role = $2
+		      AND dispatch_status = 'failed'
+		      AND completed_at > now() - interval '1 hour'
+		 ) AS recent_runs`,
 		[input.proposalId, input.role],
 	);
 	const recentRuns = loopRows[0]?.recent_runs ?? 0;
@@ -277,6 +302,37 @@ export async function postWorkOffer(
 			],
 		);
 		throw new DispatchLoopError(input.proposalId, input.role, recentRuns);
+	}
+
+	// P1290 AC-1: Preflight dispatchability check. Compute checkCaps by falling back
+	// to ROLE_TO_REQUIRED_CAPABILITIES when input.requiredCapabilities is not provided.
+	// This ensures every dispatched role has a well-defined capability set to validate
+	// against, matching the same semantics as runtime dispatch in offer-dispatch.ts:pickAgency.
+	const checkCaps = input.requiredCapabilities ?? ROLE_TO_REQUIRED_CAPABILITIES[input.role.toLowerCase()] ?? ["develop"];
+
+	// P1289 AC-3: Pre-flight dispatchability check. Throw CapabilityMismatchError
+	// (and INSERT nothing) if no active agency advertises the required capabilities
+	// in the table resolveAgency actually matches against
+	// (provider_registry.capabilities->'jobs'). Mirrors agency-resolver.ts:130.
+	if (checkCaps.length > 0) {
+		const { rows: agencyCountRows } = await queryFn<{ count: number }>(
+			`SELECT count(*)::int AS count
+			   FROM roadmap_workforce.provider_registry pr
+			   JOIN roadmap_workforce.agent_registry ar ON ar.id = pr.agency_id
+			  WHERE pr.status NOT IN ('offline', 'retired')
+			    AND ar.status = 'active'
+			    AND ar.agent_type <> 'coordinator'
+			    AND ar.agent_identity NOT LIKE 'test/%'
+			    AND (pr.capabilities->'jobs') ?| $1::text[]`,
+			[checkCaps],
+		);
+		if (agencyCountRows[0]?.count === 0) {
+			throw new CapabilityMismatchError(
+				input.proposalId,
+				input.role,
+				checkCaps,
+			);
+		}
 	}
 
 	const idempotencyKey = computeIdempotencyKey({
