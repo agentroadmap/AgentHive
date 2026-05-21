@@ -12,7 +12,6 @@ import { enqueueNotification } from "../notifications/enqueue.ts";
 import { getUnlockedGateQueue } from "../proposal/gate-scanner-v2.ts";
 import { loadStateNames } from "../workflow/state-names.ts";
 import { spawnAgent } from "./agent-spawner.ts";
-import { postWorkOffer } from "../pipeline/post-work-offer.ts";
 import { listDispatchableAgencies } from "../../infra/agency/liaison-service.ts";
 import {
 	storeMessage,
