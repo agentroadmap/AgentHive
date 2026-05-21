@@ -22,6 +22,7 @@ import {
 	proposalHeartbeatSchema,
 	proposalImpactSchema,
 	proposalListSchema,
+	proposalListRolePausesSchema,
 	proposalMergeSchema,
 	proposalMoveSchema,
 	proposalPickupSchema,
@@ -31,6 +32,7 @@ import {
 	proposalReleaseSchema,
 	proposalRenewSchema,
 	proposalRequestEnrichmentSchema,
+	proposalResumeRoleSchema,
 	proposalSearchSchema,
 	proposalViewSchema,
 } from "./schemas.ts";
@@ -336,6 +338,39 @@ export function registerProposalTools(
 			},
 			proposalExportSchema,
 			async (input) => handlers.proposalExport(input as any),
+		),
+	);
+
+	// P1291: Resume a paused role
+	server.addTool(
+		createSimpleValidatedTool(
+			{
+				name: "proposal_resume_role",
+				description: "Resume a paused (proposal_id, role) tuple after no-eligible-agency or capability_mismatch pause",
+				inputSchema: proposalResumeRoleSchema,
+			},
+			proposalResumeRoleSchema,
+			async (input) =>
+				handlers.resumeRole(
+					input as {
+						proposal_id: string;
+						role: string;
+						reason: string;
+					},
+				),
+		),
+	);
+
+	// P1291: List active role pauses
+	server.addTool(
+		createSimpleValidatedTool(
+			{
+				name: "proposal_list_role_pauses",
+				description: "List active proposal-role pauses with expiry times",
+				inputSchema: proposalListRolePausesSchema,
+			},
+			proposalListRolePausesSchema,
+			async (input) => handlers.listRolePauses(input as { proposal_id?: string }),
 		),
 	);
 }
