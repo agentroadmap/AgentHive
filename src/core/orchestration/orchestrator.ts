@@ -44,6 +44,8 @@ import {
 	handleStateChange,
 	reconcileStaleDispatches,
 	reconcileStrandedAdvances,
+	setProposalMaturity,
+	releaseDispatchLease,
 } from "./legacy-dispatch.ts";
 import { detectStuckWorkers } from "../../infra/agency/task-dispatcher.ts";
 
@@ -104,6 +106,7 @@ const DEFAULT_SHUTDOWN_DRAIN_MS = Number(
 /** Notify channels the orchestrator listens on for dispatch wake-ups. */
 const GATE_READY_CHANNEL = "proposal_gate_ready";
 const MATURITY_CHANGED_CHANNEL = "proposal_maturity_changed";
+const OFFER_COMPLETED_CHANNEL = "offer_completed";
 
 /** Whether the 2-minute state-change poll fallback is enabled (env-driven). */
 const ENABLE_POLLING = process.env.AGENTHIVE_ORCHESTRATOR_POLL === "1";
@@ -308,8 +311,9 @@ export class Orchestrator {
 		);
 		await this.listenClient.query(`LISTEN ${GATE_READY_CHANNEL}`);
 		await this.listenClient.query(`LISTEN ${MATURITY_CHANGED_CHANNEL}`);
+		await this.listenClient.query(`LISTEN ${OFFER_COMPLETED_CHANNEL}`);
 		console.log(
-			`[Orchestrator] LISTEN registered: ${GATE_READY_CHANNEL}, ${MATURITY_CHANGED_CHANNEL}`,
+			`[Orchestrator] LISTEN registered: ${GATE_READY_CHANNEL}, ${MATURITY_CHANGED_CHANNEL}, ${OFFER_COMPLETED_CHANNEL}`,
 		);
 
 		// Schedule the maintenance and scan timers.
@@ -662,6 +666,7 @@ export class Orchestrator {
 	 * Mirrors scripts/orchestrator.ts main() notification handler at line 2491:
 	 *   - proposal_gate_ready  → dispatchImplicitGate(proposal_id)
 	 *   - proposal_maturity_changed → resolve workflow, then handleStateChange
+	 *   - offer_completed (P1292) → handle gate completion, update maturity
 	 *
 	 * Both wrapped in trackInFlight so {@link stop} can drain them.
 	 */
@@ -669,7 +674,8 @@ export class Orchestrator {
 		if (this.stopping || !payload) return;
 		if (
 			channel !== GATE_READY_CHANNEL &&
-			channel !== MATURITY_CHANGED_CHANNEL
+			channel !== MATURITY_CHANGED_CHANNEL &&
+			channel !== OFFER_COMPLETED_CHANNEL
 		) {
 			return;
 		}
@@ -678,6 +684,61 @@ export class Orchestrator {
 			if (channel === GATE_READY_CHANNEL) {
 				// Mature proposals ready for gating or preparation.
 				void this.trackInFlight(this.scanQueues());
+				return;
+			}
+
+			if (channel === OFFER_COMPLETED_CHANNEL) {
+				// P1292: Gate completion listener. Extract metadata to check if this is a gate offer.
+				const offerData = JSON.parse(payload) as {
+					dispatch_id?: number;
+					agency_id?: string;
+					provider?: string;
+					signal?: string;
+					exit_code?: number | null;
+				};
+				const dispatchId = offerData.dispatch_id;
+				if (!dispatchId) return;
+
+				// Look up the dispatch to get proposal_id and gate metadata.
+				const dispatchResult = await query<{
+					proposal_id: number;
+					metadata: Record<string, unknown>;
+				}>(
+					"SELECT proposal_id, metadata FROM roadmap_workforce.squad_dispatch WHERE id = $1",
+					[dispatchId],
+				);
+				if (dispatchResult.rows.length === 0) return;
+
+				const { proposal_id: proposalId, metadata } = dispatchResult.rows[0];
+				const gateRole = metadata?.gate_role as string | undefined;
+				if (!gateRole) {
+					// Not a gate dispatch, ignore.
+					return;
+				}
+
+				// This is a gate completion. Release the lease and reset maturity to 'new'.
+				await releaseDispatchLease(dispatchId, "gate_completed");
+
+				// Check proposal current maturity and only update if it's still in the gate transition state.
+				const proposalResult = await query<{
+					maturity: string;
+					status: string;
+				}>(
+					"SELECT maturity, status FROM roadmap_proposal.proposal WHERE id = $1",
+					[proposalId],
+				);
+				if (proposalResult.rows.length === 0) return;
+
+				const prop = proposalResult.rows[0];
+				// Only reset maturity if still mature (waiting for next dispatch cycle).
+				if (prop.maturity === "mature") {
+					await setProposalMaturity(
+						proposalId,
+						"new",
+						ORCHESTRATOR_IDENTITY,
+						`gate_completed: ${gateRole}`,
+					);
+				}
 				return;
 			}
 
