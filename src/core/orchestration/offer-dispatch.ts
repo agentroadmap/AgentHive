@@ -41,11 +41,16 @@ void ORCHESTRATOR_HOST; // reserved for future host-aware agency filtering
 // Falls back to ["develop"] for any unrecognised role.
 const ROLE_TO_REQUIRED_CAPABILITIES: Record<string, string[]> = {
 	developer: ["develop"],
+	engineer: ["develop"],
+	researcher: ["develop"],
+	drafter: ["develop"],
+	architect: ["develop"],
 	enhancer: ["enhance"],
 	"gate-reviewer": ["gate-review"],
 	"skeptic-alpha": ["gate-review"],
 	"code-reviewer": ["code-review"],
 	"orchestrator-liaison-investigator": ["orchestrator-liaison-investigator"],
+	enrichment_agent: ["develop"],
 };
 
 export interface ClaimedOffer {
@@ -112,8 +117,25 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 	async dispatch(claim: ClaimedOffer): Promise<void> {
 		const targetAgencyId = await this.pickAgency(claim);
 		if (!targetAgencyId) {
+			const requiredCaps = ROLE_TO_REQUIRED_CAPABILITIES[claim.role.toLowerCase()] ?? ["develop"];
 			this.logger.warn(
-				`[OfferDispatch] no eligible agency for offer ${claim.offerId} (role=${claim.role}); leaving lease to expire so reaper requeues`,
+				`[OfferDispatch] no eligible agency for offer ${claim.offerId} (role=${claim.role}, requiredCaps=${JSON.stringify(requiredCaps)}); marking offer failed with metadata`,
+			);
+			// P1289: record failure immediately so the dispatch-loop circuit breaker
+			// (post-work-offer.ts) can observe it without waiting for lease expiry.
+			await query(
+				`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, 'failed')`,
+				[claim.dispatchId, this.orchestratorIdentity, claim.claimToken],
+			);
+			await query(
+				`UPDATE roadmap_workforce.squad_dispatch
+				    SET metadata = metadata || jsonb_build_object(
+				                     'failure_reason', 'no_eligible_agency',
+				                     'required_capabilities', $2::jsonb,
+				                     'failed_at', to_jsonb(now())
+				                   )
+				  WHERE id = $1`,
+				[claim.dispatchId, JSON.stringify(requiredCaps)],
 			);
 			return;
 		}

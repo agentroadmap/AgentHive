@@ -1488,6 +1488,12 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		[status, durationMs, outputSummary, errorDetail, agentRunId],
 	);
 
+	// P1289 AC-5: budget ledger writer is deferred to P1018 (CLI token capture
+	// substrate). A placeholder INSERT here would require values for the NOT NULL
+	// columns budget_remaining_usd + cumulative_cost_usd that have no meaning
+	// without real per-run token data, and would degrade the ledger to a row
+	// counter with no telemetry value. P1018 owns the wire-up.
+
 	// P604: close span + write child observability records
 	await obsWriter.closeSpan({
 		spanId,
