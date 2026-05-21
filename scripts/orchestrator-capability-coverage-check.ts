@@ -117,7 +117,7 @@ function logResults(
 }
 
 /**
- * Main entry point.
+ * Main entry point (CLI).
  */
 async function main(): Promise<number> {
 	const args = process.argv.slice(2);
@@ -131,17 +131,12 @@ async function main(): Promise<number> {
 			`${RED}FATAL${RESET} ${err instanceof Error ? err.message : String(err)}`,
 		);
 		return 1;
-	} finally {
-		process.exit(0);
 	}
 }
 
-main().catch((err) => {
-	console.error(`${RED}FATAL${RESET} Unhandled error: ${err}`);
-	process.exit(1);
-});
-
-/**
- * Export the main function for orchestrator boot integration.
- */
-export { main as checkCapabilityCoverage };
+main()
+	.then((exitCode) => process.exit(exitCode))
+	.catch((err) => {
+		console.error(`${RED}FATAL${RESET} Unhandled error: ${err}`);
+		process.exit(1);
+	});
