@@ -1353,3 +1353,49 @@ This rubric covers four scored dimensions: `reasoning_score`, `code_quality_scor
 **Min Reasoning = 5** means only models with `reasoning_score = 5` are eligible. In the current seed data this is `claude-opus-4-7` (anthropic) only.
 
 Default value for new offers: `'mechanical'` — safe for any provider.
+
+---
+
+## §capability-coverage-runbook — P1290
+
+The orchestrator emits a boot warning and `npm run check:capability-coverage` exits 1 when any capability referenced by `ROLE_TO_REQUIRED_CAPABILITIES` (in `src/core/orchestration/offer-dispatch.ts`) has zero matching dispatchable agencies in `provider_registry`.
+
+**Current vocabulary** (as of 2026-05-21):
+
+| Capability | Matching agencies |
+| :--- | :---: |
+| `develop` | 9 |
+| `review` | 9 |
+| `design` | 9 |
+
+**When the warning fires, choose one of:**
+
+**Option A — add the missing capability to a live agency:**
+```sql
+UPDATE roadmap_workforce.provider_registry
+SET capabilities = jsonb_set(
+      capabilities,
+      '{jobs}',
+      (capabilities->'jobs') || '"<cap>"'::jsonb
+    )
+WHERE agency_identity = '<agency>'
+  AND status = 'active';
+```
+Example: to add `review` to agency `claude/andy`:
+```sql
+UPDATE roadmap_workforce.provider_registry pr
+SET capabilities = jsonb_set(capabilities, '{jobs}', (capabilities->'jobs') || '"review"'::jsonb)
+FROM roadmap_workforce.agent_registry ar
+WHERE pr.agency_id = ar.id
+  AND ar.agent_identity = 'claude/andy'
+  AND pr.status = 'active';
+```
+
+**Option B — remap the role to an existing capability in `offer-dispatch.ts`:**
+Edit `ROLE_TO_REQUIRED_CAPABILITIES` so the offending role maps to `develop`, `review`, or `design`. Submit as a proposal or hotfix commit.
+
+**Confirming the fix:**
+```bash
+npm run check:capability-coverage
+# Must exit 0 with all capabilities covered
+```

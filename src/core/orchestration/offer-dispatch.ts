@@ -37,15 +37,38 @@ const obs = new ObservabilityWriter("agency:offer-dispatch");
 const ORCHESTRATOR_HOST = process.env.AGENTHIVE_HOST ?? hostname();
 void ORCHESTRATOR_HOST; // reserved for future host-aware agency filtering
 
-// Maps lowercase role name to the minimum required capabilities for agency selection.
-// Falls back to ["develop"] for any unrecognised role.
-const ROLE_TO_REQUIRED_CAPABILITIES: Record<string, string[]> = {
+/**
+ * Maps lowercase role name to the minimum required capabilities for agency selection.
+ * Falls back to ["develop"] for any unrecognised role.
+ *
+ * P1290: Only references capabilities present in live provider_registry data
+ * (jobs.develop=9, jobs.review=9, jobs.design=9 as of 2026-05-21).
+ * enhance/gate-review/code-review had zero matching agencies and are NOT used.
+ * Role-specific behaviour comes from the briefing prompt, not the capability filter.
+ *
+ * Exported so the capability-coverage health check and preflight (P1289) read
+ * from the same source — no private duplicates.
+ */
+export const ROLE_TO_REQUIRED_CAPABILITIES: Record<string, string[]> = {
+	// Developer-class roles
 	developer: ["develop"],
-	enhancer: ["enhance"],
-	"gate-reviewer": ["gate-review"],
-	"skeptic-alpha": ["gate-review"],
-	"code-reviewer": ["code-review"],
-	"orchestrator-liaison-investigator": ["orchestrator-liaison-investigator"],
+	engineer: ["develop"],
+	researcher: ["develop"],
+	drafter: ["develop"],
+	architect: ["develop"],
+	enrichment_agent: ["develop"],
+	enhancer: ["develop"],
+	// Reviewer-class roles (gate/code review reduces to general review for matching)
+	"gate-reviewer": ["review"],
+	"skeptic-alpha": ["review"],
+	"skeptic-beta": ["review"],
+	"code-reviewer": ["review"],
+	"architecture-reviewer": ["review"],
+	skeptic: ["review"],
+	// Design-track
+	"system-designer": ["design"],
+	// Special investigator class — matched as developer
+	"orchestrator-liaison-investigator": ["develop"],
 };
 
 export interface ClaimedOffer {

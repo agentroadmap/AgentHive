@@ -26,6 +26,10 @@ import {
 } from "./maintenance.ts";
 import { OfferClaimLoop, type ListenerClient } from "./offer-claim-loop.ts";
 import { OrchestratorOfferDispatcher } from "./offer-dispatch.ts";
+import {
+	checkCapabilityCoverage,
+	hasGaps,
+} from "./capability-coverage.ts";
 import { resolveQueueContext } from "./queue-context-resolver.ts";
 import {
 	assessReadiness,
@@ -850,6 +854,20 @@ export class Orchestrator {
 		// claims from the prior session (observed 2026-05-14: 25 stale rows
 		// from 5h earlier blocked the cap at boot).
 		await runOfferReaper(query, console, "Orchestrator.BootReaper");
+
+		// P1290: Warn-only capability coverage check. Never throws — boot continues
+		// so the operator can diagnose and fix provider_registry seeding.
+		try {
+			const coverage = await checkCapabilityCoverage(console);
+			if (hasGaps(coverage)) {
+				console.warn(
+					"[Orchestrator] Boot warning: some capabilities have no dispatchable agencies (see above). " +
+					"Run `npm run check:capability-coverage` or see CONVENTIONS.md §capability-coverage-runbook.",
+				);
+			}
+		} catch (err) {
+			console.warn("[Orchestrator] capability coverage check failed (non-fatal):", err);
+		}
 	}
 
 	/**
