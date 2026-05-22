@@ -806,6 +806,181 @@ export const FlagKeys = {
 		dbColumn: "value_jsonb",
 		envOverride: false,
 	} satisfies ConfigKey<number>,
+
+	// ─── P1144 Orchestrator tunables ─────────────────────────────────────────
+	// Seeded by scripts/migrations/175-p1144-orchestrator-flag-seeds.sql.
+	// Operator changes via: UPDATE core.runtime_flag SET value_jsonb='...' WHERE flag_name='...' AND scope='global';
+	// Live-reload via runtime_flag_changed NOTIFY (no orchestrator restart needed for non-interval flags).
+
+	ORCHESTRATOR_SCAN_BATCH_LIMIT: {
+		name: "ORCHESTRATOR_SCAN_BATCH_LIMIT",
+		class: "flag" as const,
+		parse: (v: string) => { const n = Number(JSON.parse(v)); if (!Number.isFinite(n)) throw new Error(`invalid: ${v}`); return n; },
+		required: false,
+		description: "scanQueues batch size per tick",
+		defaultValue: 20,
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	ORCHESTRATOR_STALL_THRESHOLD_HOURS: {
+		name: "ORCHESTRATOR_STALL_THRESHOLD_HOURS",
+		class: "flag" as const,
+		parse: (v: string) => { const n = Number(JSON.parse(v)); if (!Number.isFinite(n)) throw new Error(`invalid: ${v}`); return n; },
+		required: false,
+		description: "Hours before a mature proposal is escalated as stalled",
+		defaultValue: 4,
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	ORCHESTRATOR_STALL_BATCH_LIMIT: {
+		name: "ORCHESTRATOR_STALL_BATCH_LIMIT",
+		class: "flag" as const,
+		parse: (v: string) => { const n = Number(JSON.parse(v)); if (!Number.isFinite(n)) throw new Error(`invalid: ${v}`); return n; },
+		required: false,
+		description: "Max stalls processed per tick",
+		defaultValue: 5,
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	ORCHESTRATOR_OFFER_REAP_MS: {
+		name: "ORCHESTRATOR_OFFER_REAP_MS",
+		class: "flag" as const,
+		parse: (v: string) => { const n = Number(JSON.parse(v)); if (!Number.isFinite(n)) throw new Error(`invalid: ${v}`); return n; },
+		required: false,
+		description: "Offer reap interval (ms)",
+		defaultValue: 60_000,
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	ORCHESTRATOR_POKE_IDLE_MIN: {
+		name: "ORCHESTRATOR_POKE_IDLE_MIN",
+		class: "flag" as const,
+		parse: (v: string) => { const n = Number(JSON.parse(v)); if (!Number.isFinite(n)) throw new Error(`invalid: ${v}`); return n; },
+		required: false,
+		description: "Minutes of agency silence before a poke is emitted",
+		defaultValue: 5,
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	ORCHESTRATOR_POKE_STORM_CAP: {
+		name: "ORCHESTRATOR_POKE_STORM_CAP",
+		class: "flag" as const,
+		parse: (v: string) => { const n = Number(JSON.parse(v)); if (!Number.isFinite(n)) throw new Error(`invalid: ${v}`); return n; },
+		required: false,
+		description: "Max pokes emitted per watchdog tick",
+		defaultValue: 10,
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	ORCHESTRATOR_SHUTDOWN_DRAIN_MS: {
+		name: "ORCHESTRATOR_SHUTDOWN_DRAIN_MS",
+		class: "flag" as const,
+		parse: (v: string) => { const n = Number(JSON.parse(v)); if (!Number.isFinite(n)) throw new Error(`invalid: ${v}`); return n; },
+		required: false,
+		description: "Bounded wait for in-flight dispatches on SIGTERM (ms)",
+		defaultValue: 240_000,
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	ORCHESTRATOR_IMPLICIT_GATE_POLL_MS: {
+		name: "ORCHESTRATOR_IMPLICIT_GATE_POLL_MS",
+		class: "flag" as const,
+		parse: (v: string) => { const n = Number(JSON.parse(v)); if (!Number.isFinite(n)) throw new Error(`invalid: ${v}`); return n; },
+		required: false,
+		description: "Implicit gate poll interval (ms); 0 = disabled",
+		defaultValue: 30_000,
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	ORCHESTRATOR_ENHANCER_REVISE_MS: {
+		name: "ORCHESTRATOR_ENHANCER_REVISE_MS",
+		class: "flag" as const,
+		parse: (v: string) => { const n = Number(JSON.parse(v)); if (!Number.isFinite(n)) throw new Error(`invalid: ${v}`); return n; },
+		required: false,
+		description: "Enhancer-revise autonomous loop interval (ms); 0 = disabled",
+		defaultValue: 90_000,
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	ORCHESTRATOR_RECONCILER_MS: {
+		name: "ORCHESTRATOR_RECONCILER_MS",
+		class: "flag" as const,
+		parse: (v: string) => { const n = Number(JSON.parse(v)); if (!Number.isFinite(n)) throw new Error(`invalid: ${v}`); return n; },
+		required: false,
+		description: "Stranded-advance reconciler interval (ms); 0 = disabled",
+		defaultValue: 30_000,
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	ORCHESTRATOR_STALE_ROW_REAPER_MS: {
+		name: "ORCHESTRATOR_STALE_ROW_REAPER_MS",
+		class: "flag" as const,
+		parse: (v: string) => { const n = Number(JSON.parse(v)); if (!Number.isFinite(n)) throw new Error(`invalid: ${v}`); return n; },
+		required: false,
+		description: "Stale-row reaper interval (ms); 0 = disabled",
+		defaultValue: 5 * 60_000,
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	ORCHESTRATOR_STUCK_WORKER_MS: {
+		name: "ORCHESTRATOR_STUCK_WORKER_MS",
+		class: "flag" as const,
+		parse: (v: string) => { const n = Number(JSON.parse(v)); if (!Number.isFinite(n)) throw new Error(`invalid: ${v}`); return n; },
+		required: false,
+		description: "Stuck-worker watchdog interval (ms); 0 = disabled",
+		defaultValue: 60_000,
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	ORCHESTRATOR_HEARTBEAT_MS: {
+		name: "ORCHESTRATOR_HEARTBEAT_MS",
+		class: "flag" as const,
+		parse: (v: string) => { const n = Number(JSON.parse(v)); if (!Number.isFinite(n)) throw new Error(`invalid: ${v}`); return n; },
+		required: false,
+		description: "Observability heartbeat interval (ms); 0 = disabled",
+		defaultValue: 60_000,
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	ORCHESTRATOR_OFFER_CLAIM_ENABLED: {
+		name: "ORCHESTRATOR_OFFER_CLAIM_ENABLED",
+		class: "flag" as const,
+		parse: (v: string) => {
+			try { return JSON.parse(v) === true; } catch { return v.toLowerCase() === "true" || v === "1"; }
+		},
+		required: false,
+		description: "Kill switch: false disables the offer-claim loop",
+		defaultValue: true,
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<boolean>,
 };
 
 /**

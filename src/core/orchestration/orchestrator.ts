@@ -31,6 +31,8 @@ import {
 	hasGaps,
 } from "./capability-coverage.ts";
 import { resolveQueueContext } from "./queue-context-resolver.ts";
+import * as config from "../../shared/runtime/config.ts";
+import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 import {
 	assessReadiness,
 	buildTaskPrompt,
@@ -51,7 +53,6 @@ import {
 	retireOrphanedWorkers,
 } from "./legacy-dispatch.ts";
 import { detectStuckWorkers } from "../../infra/agency/task-dispatcher.ts";
-import { listDispatchableAgencies } from "../../infra/agency/liaison-service.ts";
 import {
 	emitOfflineAlerts,
 	scanAndTransitionSilentAgencies,
@@ -71,22 +72,6 @@ import {
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
-/** Maximum proposals processed per scanQueues() call. */
-const SCAN_BATCH_LIMIT = Number(process.env.AGENTHIVE_SCAN_BATCH_LIMIT ?? 20);
-
-/**
- * Hours a proposal must sit mature with no dispatch before stall escalation
- * is triggered.
- */
-const STALL_THRESHOLD_HOURS = Number(
-	process.env.AGENTHIVE_STALL_THRESHOLD_HOURS ?? 4,
-);
-
-/** Maximum stalled proposals to escalate per checkStalls() call. */
-const STALL_BATCH_LIMIT = Number(
-	process.env.AGENTHIVE_STALL_BATCH_LIMIT ?? 5,
-);
-
 /**
  * If set, stall escalation Tier 1 spawns an AI liaison agent using this
  * provider (e.g. "anthropic"). If unset, skip to Tier 2 (notification_queue).
@@ -94,21 +79,9 @@ const STALL_BATCH_LIMIT = Number(
 const ORCHESTRATOR_LIAISON_PROVIDER =
 	process.env.ORCHESTRATOR_LIAISON_PROVIDER ?? null;
 
-const DEFAULT_OFFER_REAP_INTERVAL_MS = Number(
-	process.env.AGENTHIVE_OFFER_REAP_INTERVAL_MS ?? 60_000,
-);
 const DEFAULT_POKE_WATCHDOG_INTERVAL_MS = 60_000;
-const DEFAULT_POKE_IDLE_THRESHOLD_MIN = Number(
-	process.env.AGENTHIVE_POKE_IDLE_THRESHOLD_MIN ?? 5,
-);
-const DEFAULT_POKE_STORM_CAP = Number(process.env.POKE_STORM_CAP ?? 10);
 const DEFAULT_LIVENESS_ALERT_INTERVAL_MS = Number(
 	process.env.AGENTHIVE_LIVENESS_ALERT_INTERVAL_MS ?? 60_000,
-);
-
-/** Drain timeout on stop() — how long to wait for in-flight dispatches before forcing exit. */
-const DEFAULT_SHUTDOWN_DRAIN_MS = Number(
-	process.env.AGENTHIVE_ORCHESTRATOR_DRAIN_MS ?? 240_000,
 );
 
 /** Notify channels the orchestrator listens on for dispatch wake-ups. */
@@ -116,6 +89,8 @@ const GATE_READY_CHANNEL = "proposal_gate_ready";
 const MATURITY_CHANGED_CHANNEL = "proposal_maturity_changed";
 /** P765 AC-1: agency recovery wake — fired by recordCheckIn when an agency transitions to active. */
 const AGENCY_RECOVERY_CHANNEL = "orchestrator_wake";
+/** P1144: live-reload of orchestrator tunables from core.runtime_flag. */
+const RUNTIME_FLAG_CHANGED_CHANNEL = "runtime_flag_changed";
 
 /** Whether the 2-minute state-change poll fallback is enabled (env-driven). */
 const ENABLE_POLLING = process.env.AGENTHIVE_ORCHESTRATOR_POLL === "1";
@@ -128,57 +103,6 @@ const ORCHESTRATOR_IDENTITY =
 	process.env.AGENTHIVE_ORCHESTRATOR_IDENTITY ??
 	"agenthive/agency-orchestrator";
 
-/**
- * Escape hatch: set AGENTHIVE_OFFER_CLAIM_LOOP=0 to disable the
- * orchestrator-side claim loop (e.g. emergency rollback). Default on.
- */
-const ENABLE_OFFER_CLAIM_LOOP =
-	(process.env.AGENTHIVE_OFFER_CLAIM_LOOP ?? "1") !== "0";
-
-/**
- * Workflow-drain polls — fallbacks to PG NOTIFY. Each one scans a table for
- * proposals in a particular state and processes them. The NOTIFY-driven fast
- * path is the primary trigger; the poll is the safety net for missed NOTIFYs
- * (PgBouncer transaction-pool reconnects, listener restarts, race conditions
- * around state transitions).
- *
- * Setting interval = 0 disables the poll (NOTIFY remains; relies on its
- * coverage being complete). The full migration of these to core.runtime_flag
- * is tracked as a separate follow-on under P1133 universal-config commitment.
- *
- *   implicit-gate poll  → NOTIFY channel: proposal_gate_ready
- *   enhancer-revise     → NOTIFY channel: proposal_maturity_changed (mature)
- *   reconciler          → no NOTIFY (cleanup of stranded advances; periodic only)
- *   stale-dispatch      → no NOTIFY (cleanup of stale dispatches; periodic only)
- *   stale-row reaper    → no NOTIFY (zombie agent_runs/leases; periodic only)
- *   heartbeat           → not a workflow poll; observability self-pulse
- */
-
-/** Implicit gate poll interval in ms (set 0 to disable; NOTIFY-fallback). */
-const IMPLICIT_GATE_POLL_INTERVAL_MS = Number(
-	process.env.AGENTHIVE_IMPLICIT_GATE_POLL_MS ?? 30_000,
-);
-
-/** Enhancer-revise autonomous loop interval in ms (set 0 to disable; NOTIFY-fallback). */
-const ENHANCER_REVISE_INTERVAL_MS = Number(
-	process.env.AGENTHIVE_ENHANCER_REVISE_INTERVAL_MS ?? 90_000,
-);
-
-/** P611 stranded-advance reconciler interval in ms (set 0 to disable; periodic-only, no NOTIFY). */
-const RECONCILER_INTERVAL_MS = Number(
-	process.env.AGENTHIVE_RECONCILER_INTERVAL_MS ?? 30_000,
-);
-
-/** Stale-row reaper interval in ms (set 0 to disable; zombie cleanup, no NOTIFY). */
-const STALE_ROW_REAPER_INTERVAL_MS = Number(
-	process.env.AGENTHIVE_STALE_ROW_REAPER_INTERVAL_MS ?? 5 * 60 * 1000,
-);
-
-/** Stuck-worker watchdog interval in ms (set 0 to disable; no NOTIFY). */
-const STUCK_WORKER_WATCHDOG_INTERVAL_MS = Number(
-	process.env.AGENTHIVE_STUCK_WORKER_WATCHDOG_INTERVAL_MS ?? 60_000,
-);
-
 /** P196: expired-lease cubic cleanup interval (set 0 to disable). Default 5 min. */
 const LEASE_CUBIC_CLEANUP_INTERVAL_MS = Number(
 	process.env.AGENTHIVE_LEASE_CUBIC_CLEANUP_INTERVAL_MS ?? 5 * 60 * 1000,
@@ -187,11 +111,6 @@ const LEASE_CUBIC_CLEANUP_INTERVAL_MS = Number(
 /** P196: orphaned-worker retirement sweep interval (set 0 to disable). Default 5 min. */
 const ORPHAN_WORKER_SWEEP_INTERVAL_MS = Number(
 	process.env.AGENTHIVE_ORPHAN_WORKER_SWEEP_INTERVAL_MS ?? 5 * 60 * 1000,
-);
-
-/** Observability heartbeat interval (60 s legacy default; observability, set 0 to disable). */
-const HEARTBEAT_INTERVAL_MS = Number(
-	process.env.AGENTHIVE_HEARTBEAT_INTERVAL_MS ?? 60_000,
 );
 
 /** P765: offline alert sweep — transitions silent agencies and fires Discord alerts. Default 2 min. */
@@ -218,11 +137,25 @@ export interface OrchestratorConfig {
 
 export class Orchestrator {
 	private readonly defaultWorktree: string;
-	private readonly offerReapIntervalMs: number;
+	private offerReapIntervalMs: number;
 	private readonly pokeWatchdogIntervalMs: number;
 	private readonly livenessAlertIntervalMs: number;
-	private readonly pokeOpts: PokeWatchdogOptions;
-	private readonly shutdownDrainMs: number;
+	private pokeOpts: PokeWatchdogOptions;
+	private shutdownDrainMs: number;
+
+	// P1144: DB-tunable flags, live-reloaded from core.runtime_flag via loadOrchestratorFlags()
+	private scanBatchLimit = 20;
+	private stallThresholdHours = 4;
+	private stallBatchLimit = 5;
+	private offerClaimEnabled = true;
+	private implicitGatePollMs = 30_000;
+	private enhancerReviseMs = 90_000;
+	private reconcilerMs = 30_000;
+	private staleRowReaperMs = 300_000;
+	private stuckWorkerMs = 60_000;
+	private heartbeatMs = 60_000;
+	private pokeIdleThresholdMin = 5;
+	private pokeStormCap = 10;
 
 	private offerReapTimer: ReturnType<typeof setInterval> | null = null;
 	private pokeWatchdogTimer: ReturnType<typeof setInterval> | null = null;
@@ -238,24 +171,80 @@ export class Orchestrator {
 		new Map();
 	private readonly inFlight: Set<Promise<unknown>> = new Set();
 
-	constructor(config: OrchestratorConfig = {}) {
+	constructor(cfg: OrchestratorConfig = {}) {
 		this.defaultWorktree =
-			config.defaultWorktree ??
+			cfg.defaultWorktree ??
 			process.env.AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE ??
 			"claude-andy";
-		this.offerReapIntervalMs =
-			config.offerReapIntervalMs ?? DEFAULT_OFFER_REAP_INTERVAL_MS;
+		this.offerReapIntervalMs = cfg.offerReapIntervalMs ?? 60_000;
 		this.pokeWatchdogIntervalMs =
-			config.pokeWatchdogIntervalMs ?? DEFAULT_POKE_WATCHDOG_INTERVAL_MS;
+			cfg.pokeWatchdogIntervalMs ?? DEFAULT_POKE_WATCHDOG_INTERVAL_MS;
 		this.livenessAlertIntervalMs =
-			config.livenessAlertIntervalMs ?? DEFAULT_LIVENESS_ALERT_INTERVAL_MS;
+			cfg.livenessAlertIntervalMs ?? DEFAULT_LIVENESS_ALERT_INTERVAL_MS;
 		this.pokeOpts = {
-			idleThresholdMin:
-				config.pokeIdleThresholdMin ?? DEFAULT_POKE_IDLE_THRESHOLD_MIN,
-			stormCap: config.pokeStormCap ?? DEFAULT_POKE_STORM_CAP,
+			idleThresholdMin: cfg.pokeIdleThresholdMin ?? 5,
+			stormCap: cfg.pokeStormCap ?? 10,
 		};
-		this.shutdownDrainMs =
-			config.shutdownDrainMs ?? DEFAULT_SHUTDOWN_DRAIN_MS;
+		this.shutdownDrainMs = cfg.shutdownDrainMs ?? 240_000;
+	}
+
+	// ─── P1144: Live-reloadable tunable flags ────────────────────────────────
+
+	/**
+	 * Load the 14 orchestrator tunable flags from core.runtime_flag via the
+	 * config resolver (migration 175 seeds the rows; migration 174 aligns the
+	 * schema). Env-var overrides take priority for backward-compat.
+	 *
+	 * Called once at start() before bootMaintenance(), then again whenever
+	 * the runtime_flag_changed NOTIFY fires.
+	 */
+	private async loadOrchestratorFlags(): Promise<void> {
+		const dbGet = async <T>(key: Parameters<typeof config.get>[0]): Promise<T> => {
+			try {
+				return await config.get(key) as T;
+			} catch {
+				// Resolver unavailable or flag missing — instance field retains its last value.
+				return undefined as unknown as T;
+			}
+		};
+
+		const envOrDb = async <T extends number>(envKey: string, flagKey: Parameters<typeof config.get>[0], fallback: T): Promise<T> => {
+			const envVal = process.env[envKey];
+			if (envVal !== undefined) return Number(envVal) as T;
+			const dbVal = await dbGet<T>(flagKey);
+			return dbVal !== undefined ? dbVal : fallback;
+		};
+
+		this.scanBatchLimit = await envOrDb("AGENTHIVE_SCAN_BATCH_LIMIT", FlagKeys.ORCHESTRATOR_SCAN_BATCH_LIMIT, 20);
+		this.stallThresholdHours = await envOrDb("AGENTHIVE_STALL_THRESHOLD_HOURS", FlagKeys.ORCHESTRATOR_STALL_THRESHOLD_HOURS, 4);
+		this.stallBatchLimit = await envOrDb("AGENTHIVE_STALL_BATCH_LIMIT", FlagKeys.ORCHESTRATOR_STALL_BATCH_LIMIT, 5);
+		this.offerReapIntervalMs = await envOrDb("AGENTHIVE_OFFER_REAP_INTERVAL_MS", FlagKeys.ORCHESTRATOR_OFFER_REAP_MS, 60_000);
+		this.pokeIdleThresholdMin = await envOrDb("AGENTHIVE_POKE_IDLE_THRESHOLD_MIN", FlagKeys.ORCHESTRATOR_POKE_IDLE_MIN, 5);
+		this.pokeStormCap = await envOrDb("AGENTHIVE_POKE_STORM_CAP", FlagKeys.ORCHESTRATOR_POKE_STORM_CAP, 10);
+		this.shutdownDrainMs = await envOrDb("AGENTHIVE_SHUTDOWN_DRAIN_MS", FlagKeys.ORCHESTRATOR_SHUTDOWN_DRAIN_MS, 240_000);
+		this.implicitGatePollMs = await envOrDb("AGENTHIVE_IMPLICIT_GATE_POLL_MS", FlagKeys.ORCHESTRATOR_IMPLICIT_GATE_POLL_MS, 30_000);
+		this.enhancerReviseMs = await envOrDb("AGENTHIVE_ENHANCER_REVISE_INTERVAL_MS", FlagKeys.ORCHESTRATOR_ENHANCER_REVISE_MS, 90_000);
+		this.reconcilerMs = await envOrDb("AGENTHIVE_RECONCILER_INTERVAL_MS", FlagKeys.ORCHESTRATOR_RECONCILER_MS, 30_000);
+		this.staleRowReaperMs = await envOrDb("AGENTHIVE_STALE_ROW_REAPER_INTERVAL_MS", FlagKeys.ORCHESTRATOR_STALE_ROW_REAPER_MS, 300_000);
+		this.stuckWorkerMs = await envOrDb("AGENTHIVE_STUCK_WORKER_WATCHDOG_INTERVAL_MS", FlagKeys.ORCHESTRATOR_STUCK_WORKER_MS, 60_000);
+		this.heartbeatMs = await envOrDb("AGENTHIVE_HEARTBEAT_INTERVAL_MS", FlagKeys.ORCHESTRATOR_HEARTBEAT_MS, 60_000);
+
+		const offerClaimRaw = process.env.AGENTHIVE_OFFER_CLAIM_LOOP;
+		if (offerClaimRaw !== undefined) {
+			this.offerClaimEnabled = offerClaimRaw !== "0";
+		} else {
+			const dbEnabled = await dbGet<boolean>(FlagKeys.ORCHESTRATOR_OFFER_CLAIM_ENABLED);
+			this.offerClaimEnabled = dbEnabled !== undefined ? dbEnabled : true;
+		}
+
+		// Rebuild composite poke opts from reloaded fields.
+		this.pokeOpts = {
+			idleThresholdMin: this.pokeIdleThresholdMin,
+			stormCap: this.pokeStormCap,
+		};
+		console.log(
+			`[Orchestrator] flags loaded — scanBatch=${this.scanBatchLimit} stallHours=${this.stallThresholdHours} stallBatch=${this.stallBatchLimit} offerClaim=${this.offerClaimEnabled}`,
+		);
 	}
 
 	// ─── Lifecycle (P902-A) ────────────────────────────────────────────────────
@@ -304,6 +293,7 @@ export class Orchestrator {
 		this.started = true;
 		this.stopping = false;
 
+		await this.loadOrchestratorFlags();
 		await this.bootMaintenance();
 		this.startMaintenance();
 
@@ -320,8 +310,9 @@ export class Orchestrator {
 		await this.listenClient.query(`LISTEN ${GATE_READY_CHANNEL}`);
 		await this.listenClient.query(`LISTEN ${MATURITY_CHANGED_CHANNEL}`);
 		await this.listenClient.query(`LISTEN ${AGENCY_RECOVERY_CHANNEL}`);
+		await this.listenClient.query(`LISTEN ${RUNTIME_FLAG_CHANGED_CHANNEL}`);
 		console.log(
-			`[Orchestrator] LISTEN registered: ${GATE_READY_CHANNEL}, ${MATURITY_CHANGED_CHANNEL}, ${AGENCY_RECOVERY_CHANNEL}`,
+			`[Orchestrator] LISTEN registered: ${GATE_READY_CHANNEL}, ${MATURITY_CHANGED_CHANNEL}, ${AGENCY_RECOVERY_CHANNEL}, ${RUNTIME_FLAG_CHANGED_CHANNEL}`,
 		);
 
 		// Schedule the maintenance and scan timers.
@@ -347,7 +338,7 @@ export class Orchestrator {
 			);
 		}
 
-		if (IMPLICIT_GATE_POLL_INTERVAL_MS > 0) {
+		if (this.implicitGatePollMs > 0) {
 			this.pollTimers.set(
 				"implicit-gate",
 				setInterval(() => {
@@ -357,14 +348,14 @@ export class Orchestrator {
 							console.error("[Orchestrator] implicit gate poll failed:", err),
 						),
 					);
-				}, IMPLICIT_GATE_POLL_INTERVAL_MS),
+				}, this.implicitGatePollMs),
 			);
 			console.log(
-				`[Orchestrator] implicit gate polling every ${IMPLICIT_GATE_POLL_INTERVAL_MS}ms`,
+				`[Orchestrator] implicit gate polling every ${this.implicitGatePollMs}ms`,
 			);
 		}
 
-		if (ENHANCER_REVISE_INTERVAL_MS > 0) {
+		if (this.enhancerReviseMs > 0) {
 			this.pollTimers.set(
 				"enhancer-revise",
 				setInterval(() => {
@@ -374,16 +365,16 @@ export class Orchestrator {
 							console.error("[Orchestrator] enhancer-revise failed:", err),
 						),
 					);
-				}, ENHANCER_REVISE_INTERVAL_MS),
+				}, this.enhancerReviseMs),
 			);
 			console.log(
-				`[Orchestrator] enhancer-revise poll every ${ENHANCER_REVISE_INTERVAL_MS}ms (NOTIFY-fallback)`,
+				`[Orchestrator] enhancer-revise poll every ${this.enhancerReviseMs}ms (NOTIFY-fallback)`,
 			);
 		} else {
-			console.log("[Orchestrator] enhancer-revise poll disabled (AGENTHIVE_ENHANCER_REVISE_INTERVAL_MS=0)");
+			console.log("[Orchestrator] enhancer-revise poll disabled (interval=0)");
 		}
 
-		if (RECONCILER_INTERVAL_MS > 0) {
+		if (this.reconcilerMs > 0) {
 			this.pollTimers.set(
 				"reconciler",
 				setInterval(() => {
@@ -393,7 +384,7 @@ export class Orchestrator {
 							console.error("[Orchestrator] reconciler failed:", err),
 						),
 					);
-				}, RECONCILER_INTERVAL_MS),
+				}, this.reconcilerMs),
 			);
 			this.pollTimers.set(
 				"stale-dispatch-reconciler",
@@ -404,13 +395,13 @@ export class Orchestrator {
 							console.error("[Orchestrator] stale-dispatch reconciler failed:", err),
 						),
 					);
-				}, RECONCILER_INTERVAL_MS),
+				}, this.reconcilerMs),
 			);
 			console.log(
-				`[Orchestrator] reconciler + stale-dispatch every ${RECONCILER_INTERVAL_MS}ms (periodic-only)`,
+				`[Orchestrator] reconciler + stale-dispatch every ${this.reconcilerMs}ms (periodic-only)`,
 			);
 		} else {
-			console.log("[Orchestrator] reconciler + stale-dispatch disabled (AGENTHIVE_RECONCILER_INTERVAL_MS=0)");
+			console.log("[Orchestrator] reconciler + stale-dispatch disabled (interval=0)");
 		}
 
 		// P196: lease-expiry cubic cleanup
@@ -453,7 +444,7 @@ export class Orchestrator {
 			console.log("[Orchestrator] P196 orphan-worker sweep disabled (AGENTHIVE_ORPHAN_WORKER_SWEEP_INTERVAL_MS=0)");
 		}
 
-		if (STUCK_WORKER_WATCHDOG_INTERVAL_MS > 0) {
+		if (this.stuckWorkerMs > 0) {
 			this.pollTimers.set(
 				"stuck-worker-watchdog",
 				setInterval(() => {
@@ -463,19 +454,19 @@ export class Orchestrator {
 							console.error("[Orchestrator] stuck-worker watchdog failed:", err),
 						),
 					);
-				}, STUCK_WORKER_WATCHDOG_INTERVAL_MS),
+				}, this.stuckWorkerMs),
 			);
 			console.log(
-				`[Orchestrator] detectStuckWorkers watchdog every ${STUCK_WORKER_WATCHDOG_INTERVAL_MS}ms`,
+				`[Orchestrator] detectStuckWorkers watchdog every ${this.stuckWorkerMs}ms`,
 			);
 		} else {
-			console.log("[Orchestrator] stuck-worker watchdog disabled (AGENTHIVE_STUCK_WORKER_WATCHDOG_INTERVAL_MS=0)");
+			console.log("[Orchestrator] stuck-worker watchdog disabled (interval=0)");
 		}
 
 		// Periodic stale-row inspection: zombie agent_runs, expired leases, stale
 		// dispatches. No NOTIFY fast-path — zombies live in cracks between
 		// expected transitions. Default cadence well below 60-min zombie threshold.
-		if (STALE_ROW_REAPER_INTERVAL_MS > 0) {
+		if (this.staleRowReaperMs > 0) {
 			this.pollTimers.set(
 				"stale-row-reaper",
 				setInterval(() => {
@@ -489,16 +480,16 @@ export class Orchestrator {
 							console.error("[Orchestrator] periodic reaper failed:", err),
 						),
 					);
-				}, STALE_ROW_REAPER_INTERVAL_MS),
+				}, this.staleRowReaperMs),
 			);
 			console.log(
-				`[Orchestrator] periodic stale-row reaper every ${STALE_ROW_REAPER_INTERVAL_MS}ms`,
+				`[Orchestrator] periodic stale-row reaper every ${this.staleRowReaperMs}ms`,
 			);
 		} else {
-			console.log("[Orchestrator] stale-row reaper disabled (AGENTHIVE_STALE_ROW_REAPER_INTERVAL_MS=0)");
+			console.log("[Orchestrator] stale-row reaper disabled (interval=0)");
 		}
 
-		if (HEARTBEAT_INTERVAL_MS > 0) {
+		if (this.heartbeatMs > 0) {
 			this.pollTimers.set(
 				"heartbeat",
 				setInterval(() => {
@@ -508,10 +499,10 @@ export class Orchestrator {
 					}).catch((err) =>
 						console.error("[Orchestrator] heartbeat failed:", err),
 					);
-				}, HEARTBEAT_INTERVAL_MS),
+				}, this.heartbeatMs),
 			);
 		} else {
-			console.log("[Orchestrator] observability heartbeat disabled (AGENTHIVE_HEARTBEAT_INTERVAL_MS=0)");
+			console.log("[Orchestrator] observability heartbeat disabled (interval=0)");
 		}
 
 		// P914 / P904: start the offer-claim loop. The loop LISTENs on
@@ -522,7 +513,7 @@ export class Orchestrator {
 		// emits a properly-formed offer_dispatch into liaison_message. This
 		// is the canonical single push-dispatch path; the broken inline
 		// emit-liaison block in legacy-dispatch.ts has been removed.
-		if (ENABLE_OFFER_CLAIM_LOOP) {
+		if (this.offerClaimEnabled) {
 			try {
 				await this.startOfferClaimLoop();
 			} catch (err) {
@@ -532,9 +523,7 @@ export class Orchestrator {
 				);
 			}
 		} else {
-			console.log(
-				"[Orchestrator] OfferClaimLoop disabled (AGENTHIVE_OFFER_CLAIM_LOOP=0)",
-			);
+			console.log("[Orchestrator] OfferClaimLoop disabled (ORCHESTRATOR_OFFER_CLAIM_ENABLED=false)");
 		}
 
 		// P765 AC-3/AC-4: offline alert sweep — scan provider_registry for silent
@@ -748,8 +737,17 @@ export class Orchestrator {
 		if (
 			channel !== GATE_READY_CHANNEL &&
 			channel !== MATURITY_CHANGED_CHANNEL &&
-			channel !== AGENCY_RECOVERY_CHANNEL
+			channel !== AGENCY_RECOVERY_CHANNEL &&
+			channel !== RUNTIME_FLAG_CHANGED_CHANNEL
 		) {
+			return;
+		}
+
+		// P1144: live-reload tunable flags from core.runtime_flag on NOTIFY.
+		if (channel === RUNTIME_FLAG_CHANGED_CHANNEL) {
+			void this.loadOrchestratorFlags().catch((err) =>
+				console.warn("[Orchestrator] flag reload failed:", err),
+			);
 			return;
 		}
 
@@ -935,7 +933,7 @@ export class Orchestrator {
 	 * Returns the number of proposals that were dispatched (mode ≠ skip).
 	 */
 	async scanQueues(): Promise<number> {
-		const candidates = await getUnlockedGateQueue(SCAN_BATCH_LIMIT);
+		const candidates = await getUnlockedGateQueue(this.scanBatchLimit);
 		if (candidates.length === 0) return 0;
 
 		let dispatched = 0;
@@ -1057,7 +1055,7 @@ export class Orchestrator {
 	 * @param thresholdHours  Hours stalled before escalation (default from env)
 	 */
 	async checkStalls(
-		thresholdHours: number = STALL_THRESHOLD_HOURS,
+		thresholdHours: number = this.stallThresholdHours,
 	): Promise<void> {
 		const { rows } = await query<{
 			id: number;
@@ -1082,7 +1080,7 @@ export class Orchestrator {
 			   )
 			 ORDER BY p.updated_at ASC
 			 LIMIT $2`,
-			[thresholdHours, STALL_BATCH_LIMIT],
+			[thresholdHours, this.stallBatchLimit],
 		);
 
 		if (rows.length === 0) return;
