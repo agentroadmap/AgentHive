@@ -878,3 +878,32 @@ export async function resetForTesting(opts?: {
   _inflightCreates.clear();
   _vault = opts?.vault ?? envVault;
 }
+
+/**
+ * Non-fatal connectivity probe for the agentHive2 (V2) DB.
+ * Called at server startup when AGENTHIVE_V2_DB_URL is set (P826).
+ * Resolves the residual export gap documented in P826 "Known gap" note.
+ */
+export async function verifyAgentHive2Connection(schema?: string): Promise<void> {
+  const dsn = process.env.AGENTHIVE_V2_DB_URL;
+  if (!dsn) return;
+  const client = new Client({ connectionString: dsn });
+  try {
+    await client.connect();
+    if (schema) {
+      await client.query(
+        `SET search_path TO "${schema.replace(/"/g, '""')}",public`,
+      );
+    }
+    await client.query("SELECT 1");
+    console.info(
+      `[pool-registry] agentHive2 connection verified (schema: ${schema ?? "default"})`,
+    );
+  } catch (err) {
+    console.warn(
+      `[pool-registry] agentHive2 connection failed: ${(err as Error).message}`,
+    );
+  } finally {
+    await client.end().catch(() => {});
+  }
+}

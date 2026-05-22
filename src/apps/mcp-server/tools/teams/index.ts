@@ -230,20 +230,6 @@ const teamRosterTool: McpToolHandler = createSimpleValidatedTool(
 		async (input) => govHandlers.teamDisputeLog(input as any),
 	);
 
-	// P182: Team Governance Archive (AC-7)
-	const teamGovernanceArchiveTool: McpToolHandler = createSimpleValidatedTool(
-		{
-			name: "team_governance_archive",
-			description:
-				"Archive team governance entries when a proposal reaches COMPLETE. " +
-				"Flags team:charter and team:decision:* entries as archived; removes transient norms. " +
-				"Sets team status to 'archived'. P182: Team Governance Layer.",
-			inputSchema: teamGovernanceArchiveSchema,
-		},
-		teamGovernanceArchiveSchema,
-		async (input) => govHandlers.teamGovernanceArchive(input as any),
-	);
-
 	server.addTool(teamCreateTool);
 	server.addTool(teamAcceptTool);
 	server.addTool(teamDeclineTool);
@@ -257,6 +243,19 @@ const teamRosterTool: McpToolHandler = createSimpleValidatedTool(
 	server.addTool(leaseAcquireTool);
 	server.addTool(leaseRenewTool);
 	server.addTool(federationStatusTool);
+	// P182: Team Governance Archive (AC-7)
+	const teamGovernanceArchiveTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "team_governance_archive",
+			description:
+				"Archive team governance entries when a proposal completes. " +
+				"Marks team:charter and team:decision:* as archived; deletes transient norms. " +
+				"P182: Team Governance Layer (AC-7).",
+			inputSchema: teamGovernanceArchiveSchema,
+		},
+		teamGovernanceArchiveSchema,
+		async (input) => govHandlers.teamGovernanceArchive(input as any),
+	);
 
 	// P182 governance tools
 	server.addTool(teamCharterCreateTool);

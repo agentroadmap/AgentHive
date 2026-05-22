@@ -294,10 +294,13 @@ class ConfigResolver {
 				client = await this.pool.connect();
 			}
 
+			await client.query("LISTEN runtime_config_changed");
 			await client.query("LISTEN runtime_flag_changed");
 
 			client.on("notification", (msg) => {
 				this.handleFlagNotification(msg.payload);
+				this.cache.clear();
+				this.dbCache.clear();
 			});
 
 			client.on("error", () => {
@@ -657,6 +660,27 @@ class ConfigResolver {
 			current = current[part];
 		}
 		return current;
+	}
+
+	/**
+	 * Query a runtime flag value by flag_name + scope from core.runtime_flag.
+	 * Caches per (flag_name, scope) key; cache is cleared on runtime_flag_changed notify.
+	 */
+	private async getActiveFlagValue(flagName: string, scope = "global"): Promise<any> {
+		if (!this.pool) return undefined;
+		const cacheKey = `runtime_flag:${flagName}:${scope}`;
+		if (this.dbCache.has(cacheKey)) return this.dbCache.get(cacheKey);
+		try {
+			const result = await this.pool.query(
+				`SELECT value_jsonb FROM core.runtime_flag WHERE flag_name = $1 AND scope = $2 AND lifecycle_status = 'active' LIMIT 1`,
+				[flagName, scope],
+			);
+			const value = result.rows[0]?.value_jsonb;
+			this.dbCache.set(cacheKey, value);
+			return value;
+		} catch {
+			return undefined;
+		}
 	}
 
 	/**

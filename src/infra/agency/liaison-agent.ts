@@ -135,26 +135,6 @@ export async function runLiaisonAgent(
 	await listenClient.query(`LISTEN "${channel}"`);
 	console.log(`${log} LISTEN active on: ${channel}`);
 
-	// P1107: Record this listener in the subscription table for watchdog reconciliation.
-	const listenPid = listenClient.processID;
-	try {
-		await query(
-			`INSERT INTO roadmap.listener_subscription
-			    (agent_identity, channel, established_at, established_pid)
-			 VALUES ($1, $2, now(), $3)
-			 ON CONFLICT (agent_identity, channel) DO UPDATE SET
-			   established_at = now(),
-			   established_pid = EXCLUDED.established_pid`,
-			[identity, channel, listenPid],
-		);
-		console.log(
-			`${log} listener_subscription recorded: pid=${listenPid}, channel=${channel}`,
-		);
-	} catch (err) {
-		console.warn(`${log} Failed to record listener_subscription:`, err);
-		// Don't throw — failure to record must not break the agency
-	}
-
 	async function fetchMessage(messageId: number) {
 		const { rows } = await query(
 			`SELECT id, from_agent, to_agent, message_content, message_type,
@@ -314,21 +294,11 @@ export async function runLiaisonAgent(
 
 	listenClient.on("notification", (n) => {
 		if (n.channel !== channel || !n.payload) return;
-		let parsed: NotifyPayload & { direction?: string; kind?: string };
+		let parsed: NotifyPayload;
 		try {
 			parsed = JSON.parse(n.payload);
 		} catch {
 			console.warn(`${log} Bad notify payload:`, n.payload);
-			return;
-		}
-		// Bug 4 fix (P1140-sib): two triggers fire on this channel —
-		// trig_a2a_message_notify (message_ledger, bigint id, has from_agent)
-		// and trig_liaison_notify_new_message (liaison_message, UUID
-		// message_id, has direction+kind). The LiaisonHub owns the second;
-		// this handler owns the first. Skip notifies missing from_agent OR
-		// carrying liaison_message-only fields to avoid bigint cast crash
-		// when handle()->fetchMessage queries message_ledger.id with a UUID.
-		if (!parsed.from_agent || parsed.direction !== undefined || parsed.kind !== undefined) {
 			return;
 		}
 		handle(parsed).catch((err) => console.error(`${log} Handler error:`, err));
@@ -338,23 +308,6 @@ export async function runLiaisonAgent(
 		console.error(`${log} LISTEN client error:`, err);
 	});
 
-	// P1107: Cleanup handler for listener_subscription when agency exits.
-	const cleanup = async () => {
-		try {
-			await query(
-				`DELETE FROM roadmap.listener_subscription
-				  WHERE agent_identity = $1 AND channel = $2`,
-				[identity, channel],
-			);
-		} catch (err) {
-			console.warn(`${log} Failed to delete listener_subscription on exit:`, err);
-		}
-	};
-
-	process.on("exit", () => {
-		cleanup().catch((err) => console.error(`${log} exit handler cleanup failed:`, err));
-	});
-
 	return {
 		stop: async () => {
 			try {
@@ -362,20 +315,6 @@ export async function runLiaisonAgent(
 			} catch {
 				/* socket may already be closed */
 			}
-
-			// P1107: Delete from listener_subscription before closing the client.
-			try {
-				await query(
-					`DELETE FROM roadmap.listener_subscription
-					  WHERE agent_identity = $1 AND channel = $2`,
-					[identity, channel],
-				);
-				console.log(`${log} listener_subscription cleaned up on stop`);
-			} catch (err) {
-				console.warn(`${log} Failed to delete listener_subscription on stop:`, err);
-				// Don't throw — failure to clean up must not break stop()
-			}
-
 			listenClient.removeAllListeners("notification");
 			listenClient.removeAllListeners("error");
 			try {
@@ -592,9 +531,9 @@ export async function monitorTaskDispatch(args: {
 				messageType: terminalOfferStatus(row.offer_status, row.dispatch_status)
 					? row.offer_status === "delivered" ||
 						row.dispatch_status === "completed"
-						? "task_status"
-						: "task_error"
-					: "task_status",
+						? "status"
+						: "error"
+					: "status",
 				correlationId: args.correlationId,
 				replyTo: args.originalMessageId,
 			});
@@ -608,7 +547,7 @@ export async function monitorTaskDispatch(args: {
 		fromAgent: args.identity,
 		toAgent: args.requestor,
 		content: `Dispatch ${args.dispatchId} is still running after ${Math.round(args.timeoutMs / 1000)}s; monitoring stopped.`,
-		messageType: "task_status",
+		messageType: "status",
 		correlationId: args.correlationId,
 		replyTo: args.originalMessageId,
 	});
@@ -674,13 +613,12 @@ export async function insertReply(args: {
 	messageType: string;
 	correlationId: string | null;
 	replyTo: number;
-	metadata?: Record<string, unknown>;
 }): Promise<number> {
 	const { rows } = await query(
 		`INSERT INTO roadmap.message_ledger
 		    (from_agent, to_agent, message_type, message_content,
-		     correlation_id, reply_to, metadata)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)
+		     correlation_id, reply_to)
+		 VALUES ($1, $2, $3, $4, $5, $6)
 		 RETURNING id`,
 		[
 			args.fromAgent,
@@ -689,7 +627,6 @@ export async function insertReply(args: {
 			args.content,
 			args.correlationId,
 			args.replyTo,
-			JSON.stringify(args.metadata ?? {}),
 		],
 	);
 	return rows[0].id as number;
@@ -714,9 +651,6 @@ export async function markReadAndResolveTimeout(messageId: number): Promise<void
 async function connectListenClient(identity?: string): Promise<Client> {
 	// LISTEN must bypass PgBouncer transaction pooling. Normal queries use the
 	// shared pool; this long-lived client connects directly and is ended on stop.
-	// P1125: identity is passed per-call so the single-supervisor model can tag
-	// each LISTEN session distinctly in pg_stat_activity. Falls back to
-	// AGENCY_ID env var for the legacy single-tenant start-liaison.ts path.
 	const tag = identity ?? process.env.AGENCY_ID ?? "unknown";
 	const databaseUrl = process.env.DATABASE_URL
 		? new URL(process.env.DATABASE_URL)

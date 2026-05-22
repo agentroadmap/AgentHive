@@ -244,3 +244,57 @@ describe("ALL_CAPS_TOKENS — exported constant (AC-6)", () => {
 		}
 	});
 });
+
+// AC-1: titleCaseExpertise pure helper — direct unit tests
+describe("titleCaseExpertise — pure helper (AC-1)", () => {
+	it("single word → Capitalized", () => {
+		expect(titleCaseExpertise("documenter")).toBe("Documenter");
+	});
+
+	it("known acronym → fully uppercased", () => {
+		expect(titleCaseExpertise("qa")).toBe("QA");
+		expect(titleCaseExpertise("ai")).toBe("AI");
+		expect(titleCaseExpertise("ml")).toBe("ML");
+	});
+
+	it("hyphenated → PascalCase joined", () => {
+		expect(titleCaseExpertise("gate-review")).toBe("GateReview");
+	});
+
+	it("hyphenated with acronym prefix → AIArchitect", () => {
+		expect(titleCaseExpertise("ai-architect")).toBe("AIArchitect");
+	});
+
+	it("hyphenated with acronym suffix → MLEngineer", () => {
+		expect(titleCaseExpertise("ml-engineer")).toBe("MLEngineer");
+	});
+
+	it("underscore delimiter → FooBarBaz", () => {
+		expect(titleCaseExpertise("foo_bar_baz")).toBe("FooBarBaz");
+	});
+
+	it("mixed underscore + hyphen → FooBarBaz", () => {
+		expect(titleCaseExpertise("foo_bar-baz")).toBe("FooBarBaz");
+	});
+
+	it("empty string → empty string", () => {
+		expect(titleCaseExpertise("")).toBe("");
+	});
+
+	it("whitespace-only → empty string", () => {
+		expect(titleCaseExpertise("   ")).toBe("");
+	});
+});
+
+// AC-6: ALL_CAPS_TOKENS is exported and contains expected entries
+describe("ALL_CAPS_TOKENS — exported constant (AC-6)", () => {
+	it("exports ALL_CAPS_TOKENS set", () => {
+		expect(ALL_CAPS_TOKENS).toBeInstanceOf(Set);
+	});
+
+	it("contains all documented acronyms", () => {
+		for (const token of ["qa", "ai", "ml", "sre", "ux", "ui", "api"]) {
+			expect(ALL_CAPS_TOKENS).toContain(token);
+		}
+	});
+});

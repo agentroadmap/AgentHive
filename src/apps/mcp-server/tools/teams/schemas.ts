@@ -383,7 +383,7 @@ export const teamGovernanceArchiveSchema = {
 		},
 		archivedBy: {
 			type: "string",
-			description: "Agent identity triggering the archive (usually on proposal COMPLETE)",
+			description: "Agent identity performing the archive",
 		},
 	},
 	required: ["teamId", "archivedBy"],

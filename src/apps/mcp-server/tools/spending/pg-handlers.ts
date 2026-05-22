@@ -110,11 +110,10 @@ type ModelMetadataRow = {
 	is_active: boolean;
 };
 
-// P797/P798: Row type for model_route_view
+// P797: Row type for the model_metadata JOIN model_routes query
 type ModelRouteRow = {
 	model_name: string;
 	provider: string;
-	tier: string | null;
 	cost_per_million_input: string | null;
 	context_window: number | null;
 	capabilities: Record<string, boolean> | null;
@@ -133,8 +132,6 @@ type ModelListCacheEntry = {
 const MODEL_LIST_CACHE_TTL_MS = 2_000;
 const modelListCache = new Map<string, ModelListCacheEntry>();
 let _cacheHitTotal = 0;
-let _listCallsTotal = 0;
-let _noRouteErrorsTotal = 0;
 type ModelQueryFn = <T>(sql: string, params?: unknown[]) => Promise<{ rows: T[] }>;
 
 function modelListCacheKey(args: {
@@ -162,36 +159,17 @@ async function fetchModelRouteRows(args: {
 	const provider = args.provider ?? null;
 	const tier = args.tier ?? null;
 	const queryFn: ModelQueryFn = args._queryFn ?? (query as unknown as ModelQueryFn);
-	const projectId = args.project_id ?? null;
 	const { rows } = await queryFn<ModelRouteRow>(
-		`SELECT v.model_name, v.provider, v.tier, v.cost_per_million_input,
-		        v.context_window, v.capabilities, v.rating, v.is_active,
-		        v.route_provider, v.priority
-		 FROM   roadmap.model_route_view v
-		 WHERE  v.is_enabled = true
-		   AND  ($1::boolean IS FALSE OR COALESCE(v.is_active, true) = true)
-		   AND  ($2::text IS NULL OR v.route_provider = $2)
-		   AND  ($3::text IS NULL OR v.tier = $3)
-		   AND  (
-		       $4::bigint IS NULL
-		       OR NOT EXISTS (
-		           SELECT 1 FROM roadmap.project_route_policy p
-		           WHERE p.project_id = $4
-		       )
-		       OR EXISTS (
-		           SELECT 1 FROM roadmap.project_route_policy p
-		           WHERE p.project_id = $4
-		             AND (
-		                 array_length(p.allowed_route_providers, 1) IS NULL
-		                 OR v.route_provider = ANY(p.allowed_route_providers)
-		             )
-		             AND NOT (
-		                 v.route_provider = ANY(COALESCE(p.forbidden_route_providers, '{}'))
-		             )
-		       )
-		   )
-		 ORDER BY v.rating DESC NULLS LAST, v.priority ASC`,
-		[activeOnly, provider, tier, projectId],
+		`SELECT model_name, provider, cost_per_million_input,
+		        context_window, capabilities, rating, is_active,
+		        route_provider, priority
+		 FROM   roadmap.model_route_view
+		 WHERE  is_enabled = true
+		   AND  ($1::boolean IS FALSE OR COALESCE(is_active, true) = true)
+		   AND  ($2::text IS NULL OR route_provider = $2)
+		   AND  ($3::text IS NULL OR tier = $3)
+		 ORDER BY rating DESC NULLS LAST, priority ASC`,
+		[activeOnly, provider, tier],
 	);
 	return rows;
 }
@@ -768,7 +746,6 @@ export class PgModelHandlers {
 		project_id?: number;
 	}): Promise<CallToolResult> {
 		try {
-			_listCallsTotal++;
 			const maxCostPerMillion =
 				parseOptionalNumber(args.max_cost_per_million_input) ??
 				perMillionFromPer1k(args.max_cost_per_1k_input);
@@ -784,7 +761,6 @@ export class PgModelHandlers {
 
 			if (rows.length === 0) {
 				// P797: Return structured error when no enabled routes exist
-				_noRouteErrorsTotal++;
 				const filterDesc = [
 					args.provider ? `provider=${args.provider}` : null,
 					args.tier ? `tier=${args.tier}` : null,
@@ -840,7 +816,6 @@ export class PgModelHandlers {
 				const inputCost = parseOptionalNumber(r.cost_per_million_input ?? undefined);
 				return [
 					`${r.model_name} (${r.provider})`,
-					r.tier ? `tier: ${r.tier}` : null,
 					`route: ${r.route_provider}`,
 					`priority: ${r.priority}`,
 					`rating: ${r.rating ?? "?"}/5`,
@@ -864,8 +839,6 @@ export class PgModelHandlers {
 		cost_per_million_output?: string;
 		cost_per_million_cache_write?: string;
 		cost_per_million_cache_hit?: string;
-		cost_per_1m_input?: string;
-		cost_per_1m_output?: string;
 		cost_per_1k_input?: string;
 		cost_per_1k_output?: string;
 		max_tokens?: string;
@@ -877,10 +850,10 @@ export class PgModelHandlers {
 		try {
 			const perMillionPricing = await supportsPerMillionModelPricing();
 			const inputPerMillion =
-				parseOptionalNumber(args.cost_per_million_input ?? args.cost_per_1m_input) ??
+				parseOptionalNumber(args.cost_per_million_input) ??
 				perMillionFromPer1k(args.cost_per_1k_input);
 			const outputPerMillion =
-				parseOptionalNumber(args.cost_per_million_output ?? args.cost_per_1m_output) ??
+				parseOptionalNumber(args.cost_per_million_output) ??
 				perMillionFromPer1k(args.cost_per_1k_output);
 			const cacheWritePerMillion = parseOptionalNumber(
 				args.cost_per_million_cache_write,
@@ -895,13 +868,17 @@ export class PgModelHandlers {
 				? await query(
 						`INSERT INTO model_metadata (
 							model_name, provider,
+							cost_per_1k_input, cost_per_1k_output,
 							cost_per_million_input, cost_per_million_output,
 							cost_per_million_cache_write, cost_per_million_cache_hit,
 							max_tokens, context_window, capabilities, rating, is_active
 						)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11)
-          ON CONFLICT ON CONSTRAINT model_metadata_provider_model_name_key
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13)
+          ON CONFLICT ON CONSTRAINT model_metadata_model_name_key
           DO UPDATE SET
+            provider = EXCLUDED.provider,
+            cost_per_1k_input = COALESCE(EXCLUDED.cost_per_1k_input, model_metadata.cost_per_1k_input),
+            cost_per_1k_output = COALESCE(EXCLUDED.cost_per_1k_output, model_metadata.cost_per_1k_output),
             cost_per_million_input = COALESCE(EXCLUDED.cost_per_million_input, model_metadata.cost_per_million_input),
             cost_per_million_output = COALESCE(EXCLUDED.cost_per_million_output, model_metadata.cost_per_million_output),
             cost_per_million_cache_write = COALESCE(EXCLUDED.cost_per_million_cache_write, model_metadata.cost_per_million_cache_write),
@@ -915,6 +892,8 @@ export class PgModelHandlers {
 						[
 							args.model_name,
 							args.provider || null,
+							inputPer1k,
+							outputPer1k,
 							inputPerMillion,
 							outputPerMillion,
 							cacheWritePerMillion,
@@ -923,15 +902,18 @@ export class PgModelHandlers {
 							args.context_window ? parseInt(args.context_window, 10) : null,
 							args.capabilities ? JSON.parse(args.capabilities) : null,
 							args.rating ? parseInt(args.rating, 10) : null,
-							args.is_active !== undefined ? args.is_active === "true" : true,
+							args.is_active !== undefined ? args.is_active === "true" : null,
 						],
 					)
 				: await query(
-						`INSERT INTO model_metadata (model_name, provider,
+						`INSERT INTO model_metadata (model_name, provider, cost_per_1k_input, cost_per_1k_output,
 						                              max_tokens, context_window, capabilities, rating, is_active)
-         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
-         ON CONFLICT ON CONSTRAINT model_metadata_provider_model_name_key
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)
+         ON CONFLICT ON CONSTRAINT model_metadata_model_name_key
          DO UPDATE SET
+           provider = EXCLUDED.provider,
+           cost_per_1k_input = COALESCE(EXCLUDED.cost_per_1k_input, model_metadata.cost_per_1k_input),
+           cost_per_1k_output = COALESCE(EXCLUDED.cost_per_1k_output, model_metadata.cost_per_1k_output),
            max_tokens = COALESCE(EXCLUDED.max_tokens, model_metadata.max_tokens),
            context_window = COALESCE(EXCLUDED.context_window, model_metadata.context_window),
            capabilities = COALESCE(EXCLUDED.capabilities, model_metadata.capabilities),
@@ -941,11 +923,13 @@ export class PgModelHandlers {
 						[
 							args.model_name,
 							args.provider || null,
+							inputPer1k,
+							outputPer1k,
 							args.max_tokens ? parseInt(args.max_tokens, 10) : null,
 							args.context_window ? parseInt(args.context_window, 10) : null,
 							args.capabilities ? JSON.parse(args.capabilities) : null,
 							args.rating ? parseInt(args.rating, 10) : null,
-							args.is_active !== undefined ? args.is_active === "true" : true,
+							args.is_active !== undefined ? args.is_active === "true" : null,
 						],
 					);
 			const r = rows[0];
@@ -963,168 +947,11 @@ export class PgModelHandlers {
 	}
 }
 
-export function getModelListMetrics(): { cache_hit_total: number; list_calls_total: number; no_route_errors_total: number } {
-	return { cache_hit_total: _cacheHitTotal, list_calls_total: _listCallsTotal, no_route_errors_total: _noRouteErrorsTotal };
+export function getModelListMetrics(): { cache_hit_total: number } {
+	return { cache_hit_total: _cacheHitTotal };
 }
 
 export function resetModelListCacheForTest(): void {
 	modelListCache.clear();
 	_cacheHitTotal = 0;
-	_listCallsTotal = 0;
-	_noRouteErrorsTotal = 0;
-}
-
-// ─── P1004: Agent usage snapshot ─────────────────────────────────────────────
-
-export interface UsageSnapshot {
-	provider: string;
-	agent_identity: string;
-	model_name?: string | null;
-	session_id: string | null;
-	tokens_in: number | null;
-	tokens_out: number | null;
-	cache_creation_tokens: number;
-	cache_read_tokens: number;
-	quota_remaining: number | null;
-	quota_limit: number | null;
-	quota_reset_at: Date | null;
-	cost_usd_estimate: number | null;
-	raw_headers: Record<string, unknown> | null;
-}
-
-/**
- * P1004 AC3: Returns the latest quota snapshot for the given provider,
- * or null if no snapshot exists. Used by agent-spawner pre-spawn check.
- */
-export async function getLatestQuotaSnapshot(
-	provider: string,
-): Promise<Pick<UsageSnapshot, "provider" | "quota_remaining" | "quota_limit" | "quota_reset_at"> | null> {
-	const { rows } = await query<{
-		provider: string;
-		quota_remaining: number | null;
-		quota_limit: number | null;
-		quota_reset_at: Date | null;
-	}>(
-		`SELECT provider, quota_remaining, quota_limit, quota_reset_at
-		 FROM   roadmap_workforce.agent_usage_snapshot
-		 WHERE  provider = $1
-		   AND  quota_remaining IS NOT NULL
-		 ORDER  BY recorded_at DESC
-		 LIMIT  1`,
-		[provider],
-	);
-	return rows[0] ?? null;
-}
-
-/**
- * P1004: Report a usage snapshot from an agent subprocess.
- * Inserts into agent_usage_snapshot; the AFTER INSERT trigger handles pg_notify.
- */
-export async function reportAgentUsage(args: {
-	provider: string;
-	agent_identity: string;
-	model_name?: string;
-	session_id?: string;
-	tokens_in?: number;
-	tokens_out?: number;
-	cache_creation_tokens?: number;
-	cache_read_tokens?: number;
-	quota_remaining?: number;
-	quota_limit?: number;
-	quota_reset_at?: string;
-	cost_usd_estimate?: number;
-	raw_headers?: Record<string, unknown>;
-}): Promise<CallToolResult> {
-	try {
-		// If the agent did not supply a cost estimate but provided token counts
-		// and a model_name, attempt to compute a best-effort estimate from
-		// model_metadata.cost_per_million_* pricing. This helps CLIs like
-		// 'gh copilot' which do not return billing headers.
-		let computedCost: number | null = args.cost_usd_estimate ?? null;
-		try {
-			if (
-				computedCost === null &&
-				(args.tokens_in || args.tokens_out || args.cache_creation_tokens || args.cache_read_tokens) &&
-				args.model_name
-			) {
-				const { rows: metaRows } = await query<{
-					cost_per_million_input: string | null;
-					cost_per_million_output: string | null;
-					cost_per_million_cache_write: string | null;
-					cost_per_million_cache_hit: string | null;
-				}>(
-					`SELECT cost_per_million_input, cost_per_million_output,
-					        cost_per_million_cache_write, cost_per_million_cache_hit
-					 FROM   model_metadata
-					 WHERE  model_name = $1
-					 LIMIT  1`,
-					[args.model_name],
-				);
-				const meta = metaRows[0];
-				if (meta) {
-					const inPrice = meta.cost_per_million_input ? Number(meta.cost_per_million_input) : 0;
-					const outPrice = meta.cost_per_million_output ? Number(meta.cost_per_million_output) : 0;
-					const cacheWrite = meta.cost_per_million_cache_write ? Number(meta.cost_per_million_cache_write) : 0;
-					const cacheHit = meta.cost_per_million_cache_hit ? Number(meta.cost_per_million_cache_hit) : 0;
-					const tokensIn = args.tokens_in ?? 0;
-					const tokensOut = args.tokens_out ?? 0;
-					const cacheCreate = args.cache_creation_tokens ?? 0;
-					const cacheRead = args.cache_read_tokens ?? 0;
-					const cost = (tokensIn / 1_000_000) * inPrice
-						+ (tokensOut / 1_000_000) * outPrice
-						+ (cacheCreate / 1_000_000) * cacheWrite
-						+ (cacheRead / 1_000_000) * cacheHit;
-					computedCost = Number(cost.toFixed(6));
-				}
-			}
-		} catch (err) {
-			// Non-fatal: if metadata lookup fails, proceed without computed cost.
-			computedCost = args.cost_usd_estimate ?? null;
-		}
-
-		const { rows } = await query<{ id: string; quota_remaining: number | null; quota_limit: number | null }>(
-			`INSERT INTO roadmap_workforce.agent_usage_snapshot
-			   (provider, agent_identity, session_id,
-			    tokens_in, tokens_out,
-			    cache_creation_tokens, cache_read_tokens,
-			    quota_remaining, quota_limit, quota_reset_at,
-			    cost_usd_estimate, raw_headers)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::timestamptz,$11,$12::jsonb)
-			 RETURNING id::text, quota_remaining, quota_limit`,
-			[
-				args.provider,
-				args.agent_identity,
-				args.session_id ?? null,
-				args.tokens_in ?? null,
-				args.tokens_out ?? null,
-				args.cache_creation_tokens ?? 0,
-				args.cache_read_tokens ?? 0,
-				args.quota_remaining ?? null,
-				args.quota_limit ?? null,
-				args.quota_reset_at ?? null,
-				computedCost ?? null,
-				args.raw_headers ? JSON.stringify(args.raw_headers) : null,
-			],
-		);
-
-		const row = rows[0];
-		const parts: string[] = [`Usage snapshot #${row.id} recorded (${args.provider})`];
-		if (row.quota_remaining !== null && row.quota_limit !== null && row.quota_limit > 0) {
-			const pct = Math.round((row.quota_remaining / row.quota_limit) * 100);
-			parts.push(`quota: ${row.quota_remaining}/${row.quota_limit} (${pct}% remaining)`);
-			if (pct < 20) parts.push("⚠️ budget_alert emitted");
-		}
-		if (args.cache_read_tokens) {
-			const total = (args.tokens_in ?? 0) + (args.cache_creation_tokens ?? 0) + (args.cache_read_tokens ?? 0);
-			const hitPct = total > 0 ? Math.round((args.cache_read_tokens / total) * 100) : 0;
-			parts.push(`cache_hit_ratio: ${hitPct}%`);
-		}
-		if (computedCost !== null) {
-			parts.push(`cost_usd_estimate: $${computedCost.toFixed(6)}${args.cost_usd_estimate == null ? ' (computed from model metadata)' : ''}`);
-		}
-
-		return { content: [{ type: "text", text: parts.join(" | ") }] };
-	} catch (err) {
-		return errorResult("Failed to record usage snapshot", err);
-	}
 }

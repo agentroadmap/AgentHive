@@ -19,12 +19,16 @@
 
 import {
   liaisonRegister,
-  // P1132: liaisonHeartbeat import removed — per-process periodic heartbeat
-  // deleted (liveness is event-driven from A2A host service).
+  liaisonHeartbeat,
+  liaisonSetOffline,
   endLiaisonSession,
   type LiaisonRegisterResult,
 } from "./liaison-service.js";
-import { startLiaisonHub } from "./liaison-hub.ts";
+import { startLiaisonHub, propagateHeartbeat } from "./liaison-hub.ts";
+import {
+  clearThrottleIfExpired,
+  getCapacityEnvelope,
+} from "./subscription-quota.ts";
 
 export interface AgencyConfig {
   agency_id: string;
@@ -47,37 +51,14 @@ export interface LiaisonBootHandle {
  * Read agency config from environment variables.
  * Throws if required vars are missing.
  */
-/**
- * Build an AgencyConfig from a caller-provided override that already has
- * the required fields. Used by the P1125 supervisor path which reads identity
- * from agent_registry rather than env.
- */
-function buildDefaultConfig(override: Partial<AgencyConfig>): AgencyConfig {
-  if (!override.agency_id?.trim() || !override.provider?.trim()) {
-    throw new Error("buildDefaultConfig requires agency_id + provider");
-  }
-  return {
-    agency_id: override.agency_id,
-    provider: override.provider,
-    host_id: override.host_id ?? "bot",
-    display_name: override.display_name ?? override.agency_id,
-    public_key: override.public_key,
-    capabilities: override.capabilities ?? [],
-    heartbeat_interval_ms: override.heartbeat_interval_ms ?? 30000,
-  };
-}
-
 export function readAgencyConfig(): AgencyConfig {
   const agency_id = process.env.AGENCY_ID?.trim();
-  // Accept legacy AGENTHIVE_AGENT_PROVIDER from agency-*.env per-instance files
-  const provider =
-    process.env.AGENCY_PROVIDER?.trim() ||
-    process.env.AGENTHIVE_AGENT_PROVIDER?.trim();
-  // Default host to "bot" — the shared operator host; override via AGENCY_HOST_ID
-  const host_id = process.env.AGENCY_HOST_ID?.trim() || "bot";
+  const provider = process.env.AGENCY_PROVIDER?.trim();
+  const host_id = process.env.AGENCY_HOST_ID?.trim();
 
   if (!agency_id) throw new Error("AGENCY_ID env var is required");
   if (!provider) throw new Error("AGENCY_PROVIDER env var is required");
+  if (!host_id) throw new Error("AGENCY_HOST_ID env var is required");
 
   const display_name =
     process.env.AGENCY_DISPLAY_NAME?.trim() || agency_id;
@@ -108,14 +89,6 @@ export function readAgencyConfig(): AgencyConfig {
  * Returns a handle that lets callers stop the loop and end the session.
  * The heartbeat loop runs every `heartbeat_interval_ms` ms (default 30s).
  *
- * Two call shapes:
- *   - bootLiaison()                — legacy single-tenant; reads env via readAgencyConfig
- *   - bootLiaison({...full config}) — P1125 supervisor; pass full config, skip env reads
- *   - bootLiaison({partial})        — env first, then override (back-compat)
- *
- * P1125: A full `AgencyConfig` (containing required agency_id + provider) skips
- * readAgencyConfig() entirely so the supervisor can boot N agencies without env.
- *
  * Usage:
  *   const handle = await bootLiaison();
  *   process.on('SIGTERM', () => handle.shutdown());
@@ -123,12 +96,7 @@ export function readAgencyConfig(): AgencyConfig {
 export async function bootLiaison(
   configOverride?: Partial<AgencyConfig>
 ): Promise<LiaisonBootHandle> {
-  // P1125: if caller provides a complete config (required fields filled), skip
-  // the env-reading path so the supervisor can drive multiple agencies in-process.
-  const hasFullConfig =
-    !!configOverride?.agency_id?.trim() &&
-    !!configOverride?.provider?.trim();
-  const base = hasFullConfig ? buildDefaultConfig(configOverride!) : readAgencyConfig();
+  const base = readAgencyConfig();
   const config: AgencyConfig = { ...base, ...configOverride };
 
   // AC#2: Registration handshake — liaison calls liaison_register
@@ -146,17 +114,62 @@ export async function bootLiaison(
   // and handles downlink directives and cross-project hiveCentral broadcasts.
   const hub = startLiaisonHub(config.agency_id);
 
-  // P1132: per-process periodic heartbeat removed. Liveness is now event-driven
-  // from the A2A host service (start-a2a-host.ts) which calls fn_pulse(state)
-  // on lifecycle transitions plus one per-host presence-refresh timer that
-  // keeps agent_registry.last_heartbeat_at fresh for existing dispatchability
-  // and maintenance consumers. heartbeat_interval_ms in AgencyConfig is kept
-  // for backwards compatibility but no longer drives a timer in this path.
+
+  let running = true;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const scheduleNext = () => {
+    if (!running) return;
+    timer = setTimeout(async () => {
+      if (!running) return;
+      try {
+        // P465: clear any expired throttle window before declaring status
+        await clearThrottleIfExpired(config.agency_id).catch(() => { /* best-effort */ });
+
+        // P465: build capacity envelope from local meter
+        const envelope = await getCapacityEnvelope(config.agency_id).catch(() => null);
+        const envelopePayload: Record<string, unknown> = envelope
+          ? {
+              windows: envelope.windows,
+              free_claim_slots: envelope.free_claim_slots,
+              in_flight_claims: envelope.in_flight_claims,
+            }
+          : {};
+
+        // P465: if any window is exhausted (free_claim_slots=0), declare throttled
+        const isThrottled = envelope !== null && envelope.free_claim_slots <= 0;
+
+        const hbResult = await liaisonHeartbeat({
+          session_id: session.session_id,
+          status: isThrottled ? "throttled" : "active",
+          capacity_envelope: envelopePayload,
+        });
+        // Propagate heartbeat to A2A surface so orchestrators/observers react
+        await propagateHeartbeat(
+          config.agency_id,
+          hbResult.agency_status,
+          hbResult.dispatchable
+        );
+      } catch {
+        // Non-fatal: heartbeat failure is logged by orchestrator watchdog
+      }
+      scheduleNext();
+    }, config.heartbeat_interval_ms);
+  };
+
+  scheduleNext();
 
   const shutdown = async (
     reason: "normal" | "crash" | "operator" | "throttle" = "normal"
   ) => {
+    running = false;
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
     hub.stop();
+    // P1104: mark presence offline before closing the session
+    await liaisonSetOffline(config.agency_id);
     await endLiaisonSession(session.session_id, reason);
   };
 

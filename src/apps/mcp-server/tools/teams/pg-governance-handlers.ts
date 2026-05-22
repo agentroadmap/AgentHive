@@ -185,10 +185,6 @@ export class PgTeamGovernanceHandlers {
 	/**
 	 * AC-3, AC-4, AC-5: Log or update a dispute in agent_conflicts.
 	 * Supports three-tier ladder: L1(self) → L2(peer) → L3(team) → L4(society).
-	 *
-	 * Column mapping (actual DB schema):
-	 *   initiatorAgent → agent_a, respondentAgent → agent_b, description → topic
-	 *   position_a / position_b are left blank (not surfaced in this tool).
 	 */
 	async teamDisputeLog(args: {
 		proposalId: string;
@@ -243,7 +239,7 @@ export class PgTeamGovernanceHandlers {
 					],
 				);
 			} else {
-			// Insert new dispute record — DB cols: agent_a/agent_b/topic/position_a/position_b
+				// Insert new dispute record — DB cols: agent_a/agent_b/topic/position_a/position_b
 				const result = await query<{ id: number }>(
 					`INSERT INTO roadmap_workforce.agent_conflicts
 						(proposal_id, agent_a, agent_b, topic, position_a, position_b,

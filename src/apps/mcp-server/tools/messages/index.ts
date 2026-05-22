@@ -79,7 +79,7 @@ export function registerMessageTools(server: McpServer): void {
 					message_content: { type: "string" },
 					message_type: {
 						type: "string",
-						enum: ["task", "notify", "ack", "error", "event", "text"],
+						enum: ["task", "notify", "ack", "error", "event", "text", "user_message"],
 					},
 					proposal_id: { type: "string" },
 					correlation_id: { type: "string", description: "UUID for request/response tracking" },

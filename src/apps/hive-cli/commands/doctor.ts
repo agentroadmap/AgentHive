@@ -10,6 +10,7 @@ import { buildOkEnvelope } from "../common/envelope.ts";
 import { printEnvelope, printText, type OutputFormat } from "../common/formatters.ts";
 import { EXIT } from "../common/exit-codes.ts";
 import { pingMcp } from "../common/mcp-client.ts";
+import { getPool } from "../../../infra/postgres/pool.ts";
 
 export type CheckSeverity = "ok" | "warn" | "error";
 
@@ -18,6 +19,7 @@ export interface DoctorCheck {
   severity: CheckSeverity;
   message: string;
   remediation?: string;
+  details?: Record<string, unknown>;
 }
 
 async function runChecks(ctx: HiveContext): Promise<DoctorCheck[]> {
@@ -161,6 +163,9 @@ async function runChecks(ctx: HiveContext): Promise<DoctorCheck[]> {
       : "Set DELIVERY_SIGNING_SECRET to a ≥256-bit hex string. Generate with: `node -e \"console.log(require('crypto').randomBytes(32).toString('hex'));\"`",
   });
 
+  // Check 14: A2A host topology — service liveness + agency attachment (P1135)
+  checks.push(await checkTopology(ctx));
+
   return checks;
 }
 
@@ -191,33 +196,162 @@ function checkNodeVersion(version: string): boolean {
   return Number(match[1]) >= 24;
 }
 
+export interface TopologyProbers {
+  /** Override for child_process.execSync — used in unit tests */
+  execSync?: (cmd: string, opts: { stdio: "pipe" }) => Buffer | string;
+  /** Override for DB query — used in unit tests */
+  poolQuery?: (sql: string, params: unknown[]) => Promise<{ rows: Array<{ agent_identity: string; is_attached: boolean }> }>;
+}
+
+export async function checkTopology(ctx: HiveContext, probers: TopologyProbers = {}): Promise<DoctorCheck> {
+  const execFn = probers.execSync ?? (await import("node:child_process")).execSync;
+  const queryFn = probers.poolQuery ?? ((sql: string, params: unknown[]) => getPool().query<{ agent_identity: string; is_attached: boolean }>(sql, params));
+  const host = ctx.host;
+
+  // Sub-check A: agenthive-a2a-host.service liveness
+  let a2aHostStatus = "unknown";
+  let a2aHostActive = false;
+  try {
+    a2aHostStatus = execFn("systemctl is-active agenthive-a2a-host.service", { stdio: "pipe" })
+      .toString()
+      .trim();
+    a2aHostActive = a2aHostStatus === "active";
+  } catch {
+    a2aHostStatus = "inactive";
+  }
+
+  // Sub-check B: legacy agenthive-agency@*.service running instances
+  let legacyInstances: string[] = [];
+  try {
+    const out = execFn(
+      "systemctl list-units 'agenthive-agency@*.service' --state=active --no-pager --no-legend",
+      { stdio: "pipe" },
+    )
+      .toString()
+      .trim();
+    if (out) {
+      legacyInstances = out
+        .split("\n")
+        .map((l) => l.trim().split(/\s+/)[0])
+        .filter(Boolean);
+    }
+  } catch {
+    // systemctl unavailable or no matches — treat as empty
+  }
+
+  // Sub-check C: expected vs attached agencies (host-scoped)
+  let expectedAgencies: string[] = [];
+  let unattachedAgencies: string[] = [];
+  let dbError: string | undefined;
+  try {
+    const result = await queryFn(
+      `WITH expected AS (
+         SELECT agent_identity
+         FROM roadmap_workforce.agent_registry
+         WHERE host_affinity = $1
+           AND agent_type = 'agency'
+           AND status IN ('active', 'dormant')
+       ),
+       attached AS (
+         SELECT agency_id
+         FROM roadmap.v_agency_status
+         WHERE presence_state IN ('online', 'busy')
+       )
+       SELECT e.agent_identity, (a.agency_id IS NOT NULL) AS is_attached
+       FROM expected e
+       LEFT JOIN attached a ON a.agency_id = e.agent_identity`,
+      [host],
+    );
+    for (const row of result.rows) {
+      expectedAgencies.push(row.agent_identity);
+      if (!row.is_attached) unattachedAgencies.push(row.agent_identity);
+    }
+  } catch (err) {
+    dbError = (err as Error).message;
+  }
+
+  const details: Record<string, unknown> = {
+    host,
+    a2a_host_service: a2aHostStatus,
+    expected_agencies: expectedAgencies.length,
+    attached_agencies: expectedAgencies.length - unattachedAgencies.length,
+    unattached: unattachedAgencies,
+    legacy_template_instances: legacyInstances,
+    ...(dbError ? { db_error: dbError } : {}),
+  };
+
+  if (!a2aHostActive) {
+    return {
+      name: "topology",
+      severity: "error",
+      message: `agenthive-a2a-host.service is ${a2aHostStatus}; agency routing is down`,
+      remediation: "sudo systemctl start agenthive-a2a-host.service",
+      details,
+    };
+  }
+
+  if (dbError) {
+    return {
+      name: "topology",
+      severity: "warn",
+      message: `a2a-host active; attachment query failed: ${dbError}`,
+      remediation: "Check DB connectivity and roadmap_workforce.agent_registry access.",
+      details,
+    };
+  }
+
+  if (unattachedAgencies.length > 0) {
+    return {
+      name: "topology",
+      severity: "error",
+      message: `${unattachedAgencies.length}/${expectedAgencies.length} expected agencies not attached on ${host}: ${unattachedAgencies.slice(0, 5).join(", ")}${unattachedAgencies.length > 5 ? ` +${unattachedAgencies.length - 5} more` : ""}`,
+      remediation: "sudo systemctl restart agenthive-a2a-host.service",
+      details,
+    };
+  }
+
+  if (legacyInstances.length > 0) {
+    return {
+      name: "topology",
+      severity: "warn",
+      message: `Legacy agenthive-agency@ instances running: ${legacyInstances.join(", ")}`,
+      remediation: `sudo systemctl stop ${legacyInstances.join(" ")}`,
+      details,
+    };
+  }
+
+  return {
+    name: "topology",
+    severity: "ok",
+    message: `All ${expectedAgencies.length} expected agencies attached on ${host}; a2a-host active; no legacy instances`,
+    details,
+  };
+}
+
 export function registerDoctor(program: Command, getContext: () => Promise<HiveContext>): void {
   program
     .command("doctor")
-    .description("Run system readiness checks (12+ checks, severity + remediation per check)")
+    .description("Run system readiness checks (14 checks, severity + remediation per check)")
     .option("--project <P>", "Project slug override")
-    .option("--check <NAME>", "Run single check by name (e.g., --check hmac for P1097 HMAC verification)")
+    .option("--check <NAME>", "Run only checks whose name contains NAME (substring match)")
     .option("--fix", "Attempt automated remediation where possible")
     .option("--verbose", "Show additional detail per check")
     .option("--remediate", "Alias for --fix")
+    .option("--json", "Shorthand for --format json")
     .option("-o, --format <FMT>", "Output format (text|json|jsonl|yaml)", "text")
     .option("-q, --quiet", "Suppress output; exit code signals health")
     .action(async (opts) => {
       const start = Date.now();
       const ctx = await getContext();
       if (opts.project) ctx.project = opts.project;
-      const fmt = opts.format as OutputFormat;
+      const fmt = (opts.json ? "json" : opts.format) as OutputFormat;
 
       let checks = await runChecks(ctx);
 
-      // If --check <name> specified, filter to just that check
+      // If --check <name> specified, filter to checks matching the substring
       if (opts.check) {
-        const checkName = opts.check.toLowerCase();
-        checks = checks.filter((c) => c.name.toLowerCase().includes(checkName));
-        if (checks.length === 0) {
-          printText([`hive doctor: no check matching "${opts.check}" found`]);
-          process.exit(EXIT.INTERNAL_ERROR);
-        }
+        const needle = (opts.check as string).toLowerCase();
+        checks = checks.filter((c) => c.name.toLowerCase().includes(needle));
       }
 
       const elapsed = Date.now() - start;
@@ -231,8 +365,11 @@ export function registerDoctor(program: Command, getContext: () => Promise<HiveC
             const badge =
               check.severity === "ok" ? "[OK]" : check.severity === "warn" ? "[WARN]" : "[ERROR]";
             printText([`${badge.padEnd(7)} ${check.name}: ${check.message}`]);
-            if (check.remediation && opts.verbose) {
+            if (opts.verbose && check.remediation) {
               printText([`        ↳ ${check.remediation}`]);
+            }
+            if (opts.verbose && check.details) {
+              printText([`        ↳ ${JSON.stringify(check.details)}`]);
             }
           }
           printText([""]);

@@ -317,6 +317,54 @@ export const StructuralKeys = {
 		defaultValue: "file",
 	} satisfies ConfigKey<string>,
 
+	AGENTHIVE_TENANT_POOL_LRU_MAX: {
+		name: "AGENTHIVE_TENANT_POOL_LRU_MAX",
+		class: "structural" as const,
+		parse: (v: string) => {
+			const parsed = Number(v);
+			if (!Number.isFinite(parsed) || parsed <= 0) {
+				throw new Error(`Invalid LRU max: ${v}`);
+			}
+			return parsed;
+		},
+		required: false,
+		description: "LRU cap for tenant pool registry (P497)",
+		yamlPath: "pools.tenant_lru_max",
+		defaultValue: 16,
+	} satisfies ConfigKey<number>,
+
+	AGENTHIVE_TENANT_POOL_MAX: {
+		name: "AGENTHIVE_TENANT_POOL_MAX",
+		class: "structural" as const,
+		parse: (v: string) => {
+			const parsed = Number(v);
+			if (!Number.isFinite(parsed) || parsed <= 0) {
+				throw new Error(`Invalid pool max: ${v}`);
+			}
+			return parsed;
+		},
+		required: false,
+		description: "Per-pool size for tenant pools (P497)",
+		yamlPath: "pools.tenant_max",
+		defaultValue: 8,
+	} satisfies ConfigKey<number>,
+
+	AGENTHIVE_DRAIN_TIMEOUT_MS: {
+		name: "AGENTHIVE_DRAIN_TIMEOUT_MS",
+		class: "structural" as const,
+		parse: (v: string) => {
+			const parsed = Number(v);
+			if (!Number.isFinite(parsed) || parsed <= 0) {
+				throw new Error(`Invalid drain timeout: ${v}`);
+			}
+			return parsed;
+		},
+		required: false,
+		description: "Pool drain grace period in ms (P497)",
+		yamlPath: "pools.drain_timeout_ms",
+		defaultValue: 30000,
+	} satisfies ConfigKey<number>,
+
 	AGENTHIVE_PG_PORT: {
 		name: "AGENTHIVE_PG_PORT",
 		class: "structural" as const,
@@ -369,54 +417,6 @@ export const StructuralKeys = {
 		envOverride: true,
 		defaultValue: "~/.pgpass",
 	} satisfies ConfigKey<string>,
-
-	AGENTHIVE_TENANT_POOL_LRU_MAX: {
-		name: "AGENTHIVE_TENANT_POOL_LRU_MAX",
-		class: "structural" as const,
-		parse: (v: string) => {
-			const n = Number(v);
-			if (!Number.isFinite(n) || n <= 0) {
-				throw new Error(`AGENTHIVE_TENANT_POOL_LRU_MAX must be a positive integer, got: ${v}`);
-			}
-			return Math.trunc(n);
-		},
-		required: false,
-		description: "Maximum number of concurrently cached tenant pools in the LRU registry (default: 16). Oldest pool is evicted when the cap is reached.",
-		envOverride: true,
-		defaultValue: 16,
-	} satisfies ConfigKey<number>,
-
-	AGENTHIVE_TENANT_POOL_MAX: {
-		name: "AGENTHIVE_TENANT_POOL_MAX",
-		class: "structural" as const,
-		parse: (v: string) => {
-			const n = Number(v);
-			if (!Number.isFinite(n) || n <= 0) {
-				throw new Error(`AGENTHIVE_TENANT_POOL_MAX must be a positive integer, got: ${v}`);
-			}
-			return Math.trunc(n);
-		},
-		required: false,
-		description: "Max connections per tenant pool (default: 8)",
-		envOverride: true,
-		defaultValue: 8,
-	} satisfies ConfigKey<number>,
-
-	AGENTHIVE_DRAIN_TIMEOUT_MS: {
-		name: "AGENTHIVE_DRAIN_TIMEOUT_MS",
-		class: "structural" as const,
-		parse: (v: string) => {
-			const n = Number(v);
-			if (!Number.isFinite(n) || n <= 0) {
-				throw new Error(`AGENTHIVE_DRAIN_TIMEOUT_MS must be positive, got: ${v}`);
-			}
-			return n;
-		},
-		required: false,
-		description: "Pool drain grace period in ms (default: 30000)",
-		envOverride: true,
-		defaultValue: 30_000,
-	} satisfies ConfigKey<number>,
 
 	PGPORT_DIRECT: {
 		name: "PGPORT_DIRECT",
@@ -734,79 +734,238 @@ export const FlagKeys = {
 		envOverride: false,
 	} satisfies ConfigKey<boolean>,
 
-	// ─── P1132 A2A host service tunables ────────────────────────────────────
-	// Seeded by scripts/migrations/167-p1132-a2a-host-flag-seeds.sql.
-	// Operator changes via SQL UPDATE core.runtime_flag SET value_jsonb=...
-	// Live-reload via runtime_config_changed NOTIFY (no restart).
+	// ─── Orchestrator runtime-tunable flags (P1144) ───────────────────────────
 
-	A2A_HOST_LISTEN_REFRESH_MS: {
-		name: "A2A_HOST_LISTEN_REFRESH_MS",
+	ORCHESTRATOR_SCAN_BATCH_LIMIT: {
+		name: "ORCHESTRATOR_SCAN_BATCH_LIMIT",
 		class: "flag" as const,
 		parse: (v: string) => {
-			const parsed = Number(JSON.parse(v));
-			if (!Number.isFinite(parsed) || parsed <= 0) {
-				throw new Error(`Invalid A2A_HOST_LISTEN_REFRESH_MS: ${v}`);
-			}
-			return parsed;
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n)) throw new Error("invalid number");
+			return n;
 		},
-		required: true,
-		description: "How often A2A re-reads agent_registry for newly-registered local agencies (ms)",
+		required: false,
+		defaultValue: 20,
+		description: "scanQueues batch size per tick",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
 	} satisfies ConfigKey<number>,
 
-	A2A_HOST_PG_RECONNECT_MS: {
-		name: "A2A_HOST_PG_RECONNECT_MS",
+	ORCHESTRATOR_STALL_THRESHOLD_HOURS: {
+		name: "ORCHESTRATOR_STALL_THRESHOLD_HOURS",
 		class: "flag" as const,
 		parse: (v: string) => {
-			const parsed = Number(JSON.parse(v));
-			if (!Number.isFinite(parsed) || parsed <= 0) {
-				throw new Error(`Invalid A2A_HOST_PG_RECONNECT_MS: ${v}`);
-			}
-			return parsed;
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n)) throw new Error("invalid number");
+			return n;
 		},
-		required: true,
-		description: "Backoff on PG connection loss before exit(1) (ms)",
+		required: false,
+		defaultValue: 4,
+		description: "Hours before mature proposal escalated",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
 	} satisfies ConfigKey<number>,
 
-	A2A_HOST_SHUTDOWN_TIMEOUT_MS: {
-		name: "A2A_HOST_SHUTDOWN_TIMEOUT_MS",
+	ORCHESTRATOR_STALL_BATCH_LIMIT: {
+		name: "ORCHESTRATOR_STALL_BATCH_LIMIT",
 		class: "flag" as const,
 		parse: (v: string) => {
-			const parsed = Number(JSON.parse(v));
-			if (!Number.isFinite(parsed) || parsed <= 0) {
-				throw new Error(`Invalid A2A_HOST_SHUTDOWN_TIMEOUT_MS: ${v}`);
-			}
-			return parsed;
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n)) throw new Error("invalid number");
+			return n;
 		},
-		required: true,
-		description: "Bounded wait for fn_pulse(offline) calls during SIGTERM (ms)",
+		required: false,
+		defaultValue: 5,
+		description: "Max stalls processed per tick",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
 	} satisfies ConfigKey<number>,
 
-	A2A_HOST_PRESENCE_REFRESH_MS: {
-		name: "A2A_HOST_PRESENCE_REFRESH_MS",
+	ORCHESTRATOR_OFFER_REAP_MS: {
+		name: "ORCHESTRATOR_OFFER_REAP_MS",
 		class: "flag" as const,
 		parse: (v: string) => {
-			const parsed = Number(JSON.parse(v));
-			if (!Number.isFinite(parsed) || parsed <= 0) {
-				throw new Error(`Invalid A2A_HOST_PRESENCE_REFRESH_MS: ${v}`);
-			}
-			return parsed;
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n)) throw new Error("invalid number");
+			return n;
 		},
-		required: true,
-		description: "How often A2A calls fn_pulse('online') per child to keep last_heartbeat_at fresh for existing dispatchability/maintenance consumers (ms)",
+		required: false,
+		defaultValue: 60_000,
+		description: "Offer reap interval (ms)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
 	} satisfies ConfigKey<number>,
 
+	ORCHESTRATOR_POKE_IDLE_MIN: {
+		name: "ORCHESTRATOR_POKE_IDLE_MIN",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n)) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 5,
+		description: "Minutes idle before poke",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	ORCHESTRATOR_POKE_STORM_CAP: {
+		name: "ORCHESTRATOR_POKE_STORM_CAP",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n)) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 10,
+		description: "Max pokes per cycle",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	ORCHESTRATOR_SHUTDOWN_DRAIN_MS: {
+		name: "ORCHESTRATOR_SHUTDOWN_DRAIN_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n)) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 240_000,
+		description: "Bounded wait for drain on SIGTERM (ms)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	ORCHESTRATOR_IMPLICIT_GATE_POLL_MS: {
+		name: "ORCHESTRATOR_IMPLICIT_GATE_POLL_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n)) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 30_000,
+		description: "Implicit gate poll interval (ms)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	ORCHESTRATOR_ENHANCER_REVISE_MS: {
+		name: "ORCHESTRATOR_ENHANCER_REVISE_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n)) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 90_000,
+		description: "Enhancer-revise loop interval (ms)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	ORCHESTRATOR_RECONCILER_MS: {
+		name: "ORCHESTRATOR_RECONCILER_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n)) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 30_000,
+		description: "Reconciler loop interval (ms)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	ORCHESTRATOR_STALE_ROW_REAPER_MS: {
+		name: "ORCHESTRATOR_STALE_ROW_REAPER_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n)) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 300_000,
+		description: "Stale-row reaper interval (ms)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	ORCHESTRATOR_STUCK_WORKER_MS: {
+		name: "ORCHESTRATOR_STUCK_WORKER_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n)) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 60_000,
+		description: "Stuck-worker watchdog interval (ms)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	ORCHESTRATOR_HEARTBEAT_MS: {
+		name: "ORCHESTRATOR_HEARTBEAT_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n)) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 60_000,
+		description: "Orchestrator heartbeat interval (ms)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	ORCHESTRATOR_OFFER_CLAIM_ENABLED: {
+		name: "ORCHESTRATOR_OFFER_CLAIM_ENABLED",
+		class: "flag" as const,
+		parse: (v: string) => {
+			try {
+				return JSON.parse(v) === true;
+			} catch {
+				return v.toLowerCase() === "true" || v === "1";
+			}
+		},
+		required: false,
+		defaultValue: true,
+		description: "Kill switch: false disables offer-claim loop",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<boolean>,
+};
+
+/**
+ * Debug/diagnostic keys: env only, no parsing.
+ */
 	// ─── P1291 per-(proposal, role) pause fuse tunables ──────────────────────
 	// Seeded by a P1291 migration. Operator changes via SQL UPDATE core.runtime_flag SET value_jsonb=...
 	// Live-reload via runtime_config_changed NOTIFY (no restart).
@@ -883,6 +1042,7 @@ export const FlagKeys = {
 /**
  * Debug/diagnostic keys: env only, no parsing.
  */
+
 export const DiagnosticKeys = {
 	DEBUG: {
 		name: "DEBUG",

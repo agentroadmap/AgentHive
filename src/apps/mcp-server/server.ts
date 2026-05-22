@@ -41,6 +41,11 @@ import { registerDependencyTools } from "./tools/dependencies/index.ts";
 import { registerWorktreeMergeTools } from "./tools/worktree-merge/index.ts";
 import { registerProjectTools } from "./tools/projects/index.ts";
 import { registerConsolidatedTools } from "./tools/consolidated.ts";
+import {
+	verifyUserBearer,
+	logBearerRejection,
+	extractBearerFromHeader,
+} from "./tools/messages/user-bearer-auth.ts";
 import type {
 	CallToolResult,
 	GetPromptResult,
@@ -353,6 +358,34 @@ export class McpServer extends Core {
 			await writeAuthDecisionLog(null, name, "unauthenticated");
 			if (P843_AUTH_ENFORCE_MCP) {
 				throw new Error("[P843] No auth envelope");
+			}
+		}
+
+		// P1105 AC-3: Bearer token required for user/* from_agent on msg_send.
+		// Token is passed via inline _bearer arg (consistent with _auth envelope pattern).
+		// For HTTP transport callers the agent extracts their JWT from the Authorization
+		// header and passes it here; stdio callers pass it directly.
+		if (name === "msg_send") {
+			const fromAgent = args.from_agent as string | undefined;
+			if (fromAgent?.startsWith("user/")) {
+				const bearerHeader = args._bearer as string | undefined;
+				delete args._bearer; // strip before handler sees it
+				const token = extractBearerFromHeader(bearerHeader);
+				const check = verifyUserBearer(token, fromAgent);
+				if (!check.ok) {
+					const errorCode = check.error!;
+					void logBearerRejection(fromAgent, errorCode);
+					const httpStatus = errorCode === "missing" ? 401 : 403;
+					return {
+						isError: true,
+						content: [
+							{
+								type: "text",
+								text: `⛔ [P1105] Bearer auth rejected (${errorCode}). HTTP ${httpStatus}.`,
+							},
+						],
+					};
+				}
 			}
 		}
 

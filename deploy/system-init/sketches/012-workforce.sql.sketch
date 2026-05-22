@@ -1,174 +1,449 @@
--- ============================================================
--- SKETCH 012 — P901: workforce schema governance
--- Status: SKETCH (not a live migration — emit to numbered migration before applying)
+-- 012-workforce.sql.sketch
+-- P901: workforce schema for hiveCentral — agent catalog, skill matrix, project assignment
 --
--- Scope:
---   AC-3: workforce schema documentation, ENUM constraints, audit governance
---   Finding 2: dark-tables status and activation blockers
---   Phase 2 (Migration Plan): per-project FK additions
+-- SOURCE: database/ddl/hivecentral/006-workforce.sql (verbatim with governance additions)
 --
--- Pre-requisites:
---   database/ddl/hivecentral/006-workforce.sql (P597) applied.
---   database/migrations/056-workforce-from-roadmap-workforce.sql applied
---     (copies roadmap_workforce.agent_registry rows → workforce.agent/skill/agent_skill).
---   P429 (multi-tenant DB topology) must land before workforce.* reads can
---   be wired cross-project in the dispatch path.
--- ============================================================
-
--- ============================================================
--- AC-3 WORKFORCE SCHEMA DOCUMENTATION
--- ============================================================
-
--- ── ENUM inventory (006-workforce.sql) ───────────────────────────────────────
-
--- workforce.agent_type ENUM:    'human', 'ai', 'hybrid'
--- workforce.agent_status ENUM:  'active', 'inactive', 'suspended'
--- workforce.skill_lifecycle ENUM: 'active', 'deprecated', 'proposed'
---   ↑ NOTE: Values are active/deprecated/PROPOSED (not 'retired').
---     Application code must use exactly these literals when INSERTing into workforce.skill.
--- workforce.proficiency_level ENUM: 'none' < 'basic' < 'intermediate' < 'advanced' < 'expert'
---   ↑ Ordered enum. Dispatch uses >= comparisons for skill-based routing.
--- workforce.grant_action ENUM:  'grant', 'revoke', 'update', 'expire'
-
--- ── Self-referencing FK: workforce.skill.successor_skill_id ──────────────────
--- When skill.lifecycle = 'deprecated', successor_skill_id BIGINT REFERENCES
--- workforce.skill(id) ON DELETE SET NULL points to the replacement skill.
--- Pattern:
---   UPDATE workforce.skill
---     SET lifecycle = 'deprecated', successor_skill_id = (SELECT id FROM workforce.skill WHERE skill_name = 'new-skill')
---   WHERE skill_name = 'old-skill';
--- Callers reading workforce.v_agent_capabilities should resolve deprecated skills
--- via successor_skill_id before dispatch.
-
--- ── Append-only audit: workforce.skill_grant_log ─────────────────────────────
--- Auto-populated by trigger trg_agent_skill_audit (AFTER INSERT/UPDATE/DELETE on agent_skill).
--- REVOKE UPDATE, DELETE already applied at DDL level (006-workforce.sql).
--- Retention policy recommendation: 365 days.
--- Enforcement: cron job or pg_partman partition rotation (not yet implemented).
--- Archive target: workforce.skill_grant_log_archive (partition or separate table).
--- Note: skill_grant_log has no lifecycle_status or expires_at — it is truly append-only;
---   the action enum ('grant','revoke','update','expire') captures the event type.
-
--- ── Dark-tables status (Finding 2) ───────────────────────────────────────────
--- migration 056-workforce-from-roadmap-workforce.sql has populated:
---   workforce.agent         (from roadmap_workforce.agent_registry)
---   workforce.skill         (from roadmap_workforce.agent_capability)
---   workforce.agent_skill   (from roadmap_workforce.agent_capability skill grants)
--- These tables are POPULATED BUT DARK:
---   - No live application code reads from workforce.* at runtime.
---   - The dispatch path still reads roadmap_workforce.agent_registry directly.
---   - Full activation is BLOCKED until P429 (multi-tenant DB) lands.
--- Interim state is stable: per-project tables remain readable throughout.
--- ─────────────────────────────────────────────────────────────────────────────
-
--- ============================================================
--- PHASE 2 FK ADDITIONS (Migration Plan — weeks 3-4)
--- ============================================================
--- Per-project agent tables (deploy/project-init/003-agent.sql) use soft TEXT FKs:
---   <schema>.agent.did TEXT  (soft FK to identity.principal.did)
---   <schema>.agent.provider_slug TEXT  (soft FK to agency.provider)
---   <schema>.agent.model_id TEXT  (soft FK to agency.model)
+-- ── STATUS: DARK (Phase 1) ─────────────────────────────────────────────────────
+-- This schema is populated by migration 056-workforce-from-roadmap.sql but all
+-- live code reads from roadmap_workforce.* (roadmap_workforce.agent_registry,
+-- roadmap_workforce.squad_dispatch). workforce.* is unreachable via any service
+-- path as of 2026-05-14.
 --
--- Phase 2 adds a NULLABLE hard FK to workforce.agent for cross-registry linkage.
--- NULLABLE = existing rows are unaffected; backfill happens asynchronously.
+-- Activation is blocked by P429 (multi-tenant DB topology). When P429 ships:
+--   Phase 2: Add workforce_agent_id BIGINT FK columns to per-project agent tables.
+--   Phase 3: Route new reads through workforce.*; keep roadmap_workforce.* reads.
+--   Phase 4: Drop roadmap_workforce.* reads after full cut-over.
+--   Phase 5: Drop legacy roadmap_workforce.* tables.
+-- See P901 design §Finding-2 for full rationale.
 --
--- IMPORTANT: This sketch represents the INTENT of Phase 2.
--- The actual ALTER TABLE must be run per-project schema (agentHive, monkeyKing-audio, etc.)
--- and cannot be expressed as a single statement here without knowing all tenant slugs.
--- The Phase 2 migration script must iterate project schemas from roadmap.project.
--- ============================================================
+-- ── GOVERNANCE NOTES ──────────────────────────────────────────────────────────
+-- skill_lifecycle ENUM values: 'active' | 'deprecated' | 'proposed'
+--   deprecated: skill still queryable; successor_skill_id points to replacement.
+--   proposed:   under evaluation; not assignable until promoted to 'active'.
+--
+-- skill.successor_skill_id: self-FK REFERENCES workforce.skill(id) ON DELETE SET NULL
+--   Used when deprecating a skill. Set NULL if the successor is itself later removed.
+--
+-- skill_grant_log RETENTION: append-only; rows must not be deleted before 365 days.
+--   Enforce via pg_partman monthly partitioning + retention policy (Phase 2 task).
+--   Until partitioning lands, enforce with a rule: no DELETE before created_at < now()-'365 days'.
+--
+-- search_path WARNING: workforce is NOT in CONTROL_SEARCH_PATH
+--   (see src/postgres/pool-registry.ts line 26). All SQL referencing this schema
+--   must use fully-qualified names: workforce.<table>. No unqualified references are safe.
+--
+-- DEPENDENCY: P429 (multi-tenant DB), P826 (agentHive2 DB opt-in)
+-- ──────────────────────────────────────────────────────────────────────────────
 
--- Template for Phase 2 per-project FK addition (run once per tenant schema):
---
--- ALTER TABLE <project_schema>.agent
---   ADD COLUMN IF NOT EXISTS workforce_agent_id BIGINT
---     REFERENCES workforce.agent(id) ON DELETE SET NULL;
---
--- CREATE INDEX IF NOT EXISTS idx_<project_schema>_agent_workforce_id
---   ON <project_schema>.agent (workforce_agent_id)
---   WHERE workforce_agent_id IS NOT NULL;
---
--- COMMENT ON COLUMN <project_schema>.agent.workforce_agent_id IS
---   'Nullable FK to the central workforce.agent catalog. '
---   'NULL = not yet linked; backfilled by DID match after Phase 2 migration. '
---   'ON DELETE SET NULL = safe even if the central catalog row is removed.';
+BEGIN;
 
--- Template for Phase 2 per-project workflow FK addition:
--- NOTE (drafter correction 2026-05-20): hiveCentral uses the 007-approach (BIGINT PK uid=1000(gary) gid=1000(gary) groups=1000(gary),4(adm),24(cdrom),27(sudo),30(dip),46(plugdev),110(lxd),119(docker),991(ollama),1017(dev)).
--- The column type must be BIGINT referencing template.workflow_template(id), NOT TEXT(template_id).
--- If per-project tables live in a separate DB from hiveCentral, this is a soft FK (no constraint).
+-- ── Schema ────────────────────────────────────────────────────────────────────
+
+CREATE SCHEMA IF NOT EXISTS workforce;
+
+-- ── Enum types ────────────────────────────────────────────────────────────────
+
+DO $$ BEGIN
+    CREATE TYPE workforce.agent_type AS ENUM ('human', 'ai', 'hybrid');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE workforce.agent_status AS ENUM ('active', 'inactive', 'suspended');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+    -- Values: active | deprecated | proposed
+    -- deprecated → set successor_skill_id to recommended replacement
+    -- proposed   → under evaluation; not yet assignable
+    CREATE TYPE workforce.skill_lifecycle AS ENUM ('active', 'deprecated', 'proposed');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+    -- Ordered: none < basic < intermediate < advanced < expert
+    CREATE TYPE workforce.proficiency_level AS ENUM ('none', 'basic', 'intermediate', 'advanced', 'expert');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE workforce.grant_action AS ENUM ('grant', 'revoke', 'update', 'expire');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- ── 1. workforce.agent — project-agnostic agent catalog ───────────────────────
+-- Project assignment is via workforce.agent_project (join table), not here.
+-- agent_identity is the stable cross-table handle (e.g. 'senior-backend').
 --
--- ALTER TABLE <project_schema>.workflow
---   ADD COLUMN IF NOT EXISTS workflow_template_id BIGINT
---     -- soft FK: REFERENCES template.workflow_template(id) ON UPDATE RESTRICT ON DELETE RESTRICT
---     -- (enforce in application code if cross-DB; add constraint if co-located in hiveCentral)
---     ;
---
--- CREATE INDEX IF NOT EXISTS idx_<project_schema>_workflow_template_id
---   ON <project_schema>.workflow (workflow_template_id)
---   WHERE workflow_template_id IS NOT NULL;
+-- Phase 2 addition (P429): downstream per-project agent tables will add:
+--   workforce_agent_id BIGINT REFERENCES workforce.agent(id) ON DELETE SET NULL
+-- This provides a cross-project identity bridge without breaking existing rows.
 
--- ── Phase 2 backfill strategy ────────────────────────────────────────────────
--- After adding workforce_agent_id column, backfill by DID match:
---
--- UPDATE <project_schema>.agent pa
--- SET workforce_agent_id = wa.id
--- FROM workforce.agent wa
--- WHERE pa.did = wa.agent_identity
---   AND pa.workforce_agent_id IS NULL;
---
--- Log unmatched agents for manual triage:
--- INSERT INTO template.template_backfill_orphans (project_id, notes)
--- SELECT DISTINCT p.project_id, 'Phase 2 backfill: agent DID not found in workforce.agent'
--- FROM <project_schema>.agent pa
--- JOIN roadmap.project p ON p.slug = '<project_slug>'
--- WHERE pa.workforce_agent_id IS NULL
---   AND pa.did IS NOT NULL
--- ON CONFLICT DO NOTHING;
+CREATE TABLE IF NOT EXISTS workforce.agent (
+    id             BIGINT                  GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    agent_identity TEXT                    NOT NULL UNIQUE,
+    display_name   TEXT                    NOT NULL,
+    agent_type     workforce.agent_type    NOT NULL DEFAULT 'ai',
+    persona        TEXT,
+    contact        TEXT,
+    status         workforce.agent_status  NOT NULL DEFAULT 'active',
+    metadata       JSONB                   NOT NULL DEFAULT '{}',
+    -- Catalog hygiene: uniform across all hiveCentral catalog tables (see DDL README §catalog-hygiene).
+    owner_did      TEXT                    NOT NULL DEFAULT 'agenthive',
+    lifecycle_status TEXT                  NOT NULL DEFAULT 'active'
+                                           CHECK (lifecycle_status IN ('active', 'deprecated', 'retired')),
+    deprecated_at  TIMESTAMPTZ,
+    retire_after   TIMESTAMPTZ,
+    created_at     TIMESTAMPTZ             NOT NULL DEFAULT now(),
+    updated_at     TIMESTAMPTZ             NOT NULL DEFAULT now()
+);
 
--- ============================================================
--- PHASE 3 READ-THROUGH GUARD (out of scope for P901 migration)
--- ============================================================
--- Once Phase 3 wires workforce.* reads into the dispatch path:
---   1. All SQL must use fully-qualified schema.table names.
---      getControlPool() search_path does NOT include 'workforce'.
---   2. Cross-project reads require P429 multi-tenant DB to be live.
---   3. Feature-flag the new read paths for rollback safety.
--- ─────────────────────────────────────────────────────────────
+CREATE INDEX IF NOT EXISTS idx_workforce_agent_identity
+    ON workforce.agent (agent_identity);
+CREATE INDEX IF NOT EXISTS idx_workforce_agent_type_status
+    ON workforce.agent (agent_type, status)
+    WHERE status = 'active';
 
--- ============================================================
--- SKILL_GRANT_LOG ARCHIVE (365-day retention)
--- ============================================================
--- Recommended cron job (pg_cron or external scheduler):
---   DELETE FROM workforce.skill_grant_log
---   WHERE created_at < now() - interval '365 days';
--- This statement will fail (trigger blocks DELETE). Proper approach:
---   Either use a partition rotation (pg_partman range partition on created_at)
---   or move to an archive table before deleting:
---     INSERT INTO workforce.skill_grant_log_archive SELECT * FROM workforce.skill_grant_log
---       WHERE created_at < now() - interval '365 days';
---     Then DELETE from the partition (if partitioned) or DROP the old partition.
--- The archive table DDL (not yet created):
---   CREATE TABLE IF NOT EXISTS workforce.skill_grant_log_archive
---     (LIKE workforce.skill_grant_log INCLUDING ALL);
---   COMMENT ON TABLE workforce.skill_grant_log_archive IS
---     'Cold storage for skill grant events older than 365 days. Archived by retention cron.';
--- ============================================================
+COMMENT ON TABLE  workforce.agent IS
+    'Project-agnostic agent catalog. Covers human, AI, and hybrid agents. Project membership tracked in workforce.agent_project.';
+COMMENT ON COLUMN workforce.agent.agent_identity IS
+    'Stable unique handle: senior-backend, skeptic-alpha, product-manager. Used as FK across all tables.';
+COMMENT ON COLUMN workforce.agent.persona IS
+    'Short persona description / system prompt summary. Informational; full prompt lives in routing layer.';
+COMMENT ON COLUMN workforce.agent.metadata IS
+    'Extension bag: {preferred_model, api_spec, spawn_policy, github_repo, ...}.';
 
--- ============================================================
--- AC-6 DRY-RUN NOTE
--- ============================================================
--- This sketch file contains no executable DDL (only comments and templates).
--- The Phase 2 per-project ALTER TABLE statements must be emitted as a numbered
--- migration that iterates roadmap.project to enumerate all tenant schemas.
--- AC-6 validation applies to that emitted migration, not this sketch.
--- ============================================================
+-- ── 2. workforce.skill — global skill catalog ─────────────────────────────────
+-- successor_skill_id: self-FK; set when lifecycle='deprecated'.
+-- ON DELETE SET NULL: if the successor skill is later removed, no orphan error.
 
--- ============================================================
--- AC-10 SEARCH_PATH REMINDER
--- ============================================================
--- getControlPool() sets:
---   search_path = roadmap_proposal,roadmap_workforce,roadmap_efficiency,roadmap,public
--- The 'workforce' schema is NOT in the search_path.
--- All SQL targeting workforce.* MUST use fully-qualified schema.table names.
--- ============================================================
+CREATE TABLE IF NOT EXISTS workforce.skill (
+    id                 BIGINT                   GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    skill_name         TEXT                     NOT NULL UNIQUE,
+    display_name       TEXT                     NOT NULL,
+    description        TEXT,
+    category           TEXT                     NOT NULL,
+    lifecycle          workforce.skill_lifecycle NOT NULL DEFAULT 'active',
+    successor_skill_id BIGINT                   REFERENCES workforce.skill(id) ON DELETE SET NULL,
+    created_at         TIMESTAMPTZ              NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ              NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_workforce_skill_category
+    ON workforce.skill (category)
+    WHERE lifecycle = 'active';
+CREATE INDEX IF NOT EXISTS idx_workforce_skill_lifecycle
+    ON workforce.skill (lifecycle);
+
+COMMENT ON TABLE  workforce.skill IS
+    'Global skill catalog. Skills can be granted, revoked, or deprecated. Deprecated skills point to a successor.';
+COMMENT ON COLUMN workforce.skill.skill_name IS
+    'Slug form used in queries and API calls: code-review, architecture-review, security-audit.';
+COMMENT ON COLUMN workforce.skill.successor_skill_id IS
+    'When lifecycle=deprecated, points to the recommended replacement skill. NULL-safe self-FK.';
+
+-- ── 3. workforce.agent_skill — capability matrix ──────────────────────────────
+-- Composite PK (agent_id, skill_id). One active row per agent×skill.
+-- Full history is in workforce.skill_grant_log (auto-populated by trigger).
+
+CREATE TABLE IF NOT EXISTS workforce.agent_skill (
+    agent_id    BIGINT                      NOT NULL REFERENCES workforce.agent(id) ON DELETE CASCADE,
+    skill_id    BIGINT                      NOT NULL REFERENCES workforce.skill(id) ON DELETE CASCADE,
+    proficiency workforce.proficiency_level NOT NULL DEFAULT 'basic',
+    granted_by  TEXT                        NOT NULL,
+    granted_at  TIMESTAMPTZ                 NOT NULL DEFAULT now(),
+    expires_at  TIMESTAMPTZ,
+    notes       TEXT,
+    PRIMARY KEY (agent_id, skill_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_workforce_agent_skill_skill_prof
+    ON workforce.agent_skill (skill_id, proficiency);
+CREATE INDEX IF NOT EXISTS idx_workforce_agent_skill_expires
+    ON workforce.agent_skill (expires_at)
+    WHERE expires_at IS NOT NULL;
+
+COMMENT ON TABLE  workforce.agent_skill IS
+    'Agent×Skill capability matrix. Composite PK (agent_id, skill_id). One active row per combination; history in skill_grant_log.';
+COMMENT ON COLUMN workforce.agent_skill.proficiency IS
+    'Ordered enum: none < basic < intermediate < advanced < expert. Drives skill-based dispatch routing.';
+COMMENT ON COLUMN workforce.agent_skill.granted_by IS
+    'agent_identity of the granting agent, or "system" for seed/bootstrap grants.';
+COMMENT ON COLUMN workforce.agent_skill.expires_at IS
+    'NULL = permanent. Non-NULL = certification with expiry. Expired rows excluded from v_agent_capabilities.';
+
+-- ── 4. workforce.agent_project — cross-project assignment ────────────────────
+-- ended_at=NULL means currently assigned. Historical rows are retained.
+
+CREATE TABLE IF NOT EXISTS workforce.agent_project (
+    id          BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    agent_id    BIGINT      NOT NULL REFERENCES workforce.agent(id) ON DELETE CASCADE,
+    project_id  TEXT        NOT NULL,
+    role        TEXT        NOT NULL DEFAULT 'contributor'
+                            CHECK (role IN ('contributor', 'reviewer', 'gatekeeper', 'observer', 'owner')),
+    started_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ended_at    TIMESTAMPTZ,
+    notes       TEXT,
+    CONSTRAINT agent_project_lifecycle_chk CHECK (ended_at IS NULL OR ended_at >= started_at)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS agent_project_unique_active
+    ON workforce.agent_project (agent_id, project_id)
+    WHERE ended_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_workforce_agent_project_active
+    ON workforce.agent_project (agent_id, project_id)
+    WHERE ended_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_workforce_agent_project_by_project
+    ON workforce.agent_project (project_id)
+    WHERE ended_at IS NULL;
+
+COMMENT ON TABLE  workforce.agent_project IS
+    'Cross-project agent assignment. ended_at=NULL = currently assigned. Historical rows retained for audit.';
+COMMENT ON COLUMN workforce.agent_project.project_id IS
+    'Tenant project slug (agenthive, monkeyKing-audio, …). Logical FK to project registry (P429/P495).';
+COMMENT ON COLUMN workforce.agent_project.role IS
+    'Role in project: contributor, reviewer, gatekeeper, observer, owner.';
+
+-- ── 5. workforce.skill_grant_log — append-only audit trail ───────────────────
+-- RETENTION POLICY: rows must not be deleted before 365 days from created_at.
+-- Phase 2: implement monthly pg_partman partitioning with retention=365d.
+-- Until then: application layer must not issue DELETE on this table.
+
+CREATE TABLE IF NOT EXISTS workforce.skill_grant_log (
+    id              BIGINT                      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    agent_id        BIGINT                      NOT NULL REFERENCES workforce.agent(id),
+    skill_id        BIGINT                      NOT NULL REFERENCES workforce.skill(id),
+    action          workforce.grant_action      NOT NULL,
+    old_proficiency workforce.proficiency_level,
+    new_proficiency workforce.proficiency_level,
+    acted_by        TEXT                        NOT NULL,
+    notes           TEXT,
+    created_at      TIMESTAMPTZ                 NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_workforce_grant_log_agent
+    ON workforce.skill_grant_log (agent_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workforce_grant_log_skill
+    ON workforce.skill_grant_log (skill_id, created_at DESC);
+
+COMMENT ON TABLE  workforce.skill_grant_log IS
+    'Append-only audit trail for all skill grant/revoke/update/expire events. Auto-populated by trg_agent_skill_audit. 365-day minimum retention.';
+
+-- ── Triggers: updated_at ──────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION workforce.fn_set_updated_at()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    NEW.updated_at = now();
+    RETURN NEW;
+END;
+$$;
+
+DO $$ BEGIN
+    CREATE TRIGGER trg_workforce_agent_updated_at
+        BEFORE UPDATE ON workforce.agent
+        FOR EACH ROW EXECUTE FUNCTION workforce.fn_set_updated_at();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+    CREATE TRIGGER trg_workforce_skill_updated_at
+        BEFORE UPDATE ON workforce.skill
+        FOR EACH ROW EXECUTE FUNCTION workforce.fn_set_updated_at();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- ── Trigger: deny mutations on append-only audit log ─────────────────────────
+
+CREATE OR REPLACE FUNCTION workforce.fn_deny_mutation()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'mutation forbidden: % is append-only (op=%, table=%)',
+        TG_TABLE_NAME, TG_OP, TG_TABLE_NAME
+        USING ERRCODE = 'restrict_violation';
+END;
+$$;
+
+DO $$ BEGIN
+    CREATE TRIGGER trg_skill_grant_log_immutable
+        BEFORE UPDATE OR DELETE ON workforce.skill_grant_log
+        FOR EACH ROW EXECUTE FUNCTION workforce.fn_deny_mutation();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+REVOKE UPDATE, DELETE ON workforce.skill_grant_log FROM PUBLIC;
+
+-- ── Trigger: auto-populate audit log from agent_skill mutations ───────────────
+
+CREATE OR REPLACE FUNCTION workforce.fn_audit_agent_skill()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        INSERT INTO workforce.skill_grant_log
+            (agent_id, skill_id, action, new_proficiency, acted_by)
+        VALUES
+            (NEW.agent_id, NEW.skill_id, 'grant', NEW.proficiency, NEW.granted_by);
+        RETURN NEW;
+    ELSIF TG_OP = 'UPDATE' THEN
+        INSERT INTO workforce.skill_grant_log
+            (agent_id, skill_id, action, old_proficiency, new_proficiency, acted_by)
+        VALUES
+            (NEW.agent_id, NEW.skill_id, 'update', OLD.proficiency, NEW.proficiency, NEW.granted_by);
+        RETURN NEW;
+    ELSIF TG_OP = 'DELETE' THEN
+        INSERT INTO workforce.skill_grant_log
+            (agent_id, skill_id, action, old_proficiency, acted_by)
+        VALUES
+            (OLD.agent_id, OLD.skill_id, 'revoke', OLD.proficiency, 'system');
+        RETURN OLD;
+    END IF;
+END;
+$$;
+
+DO $$ BEGIN
+    CREATE TRIGGER trg_agent_skill_audit
+        AFTER INSERT OR UPDATE OR DELETE ON workforce.agent_skill
+        FOR EACH ROW EXECUTE FUNCTION workforce.fn_audit_agent_skill();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- ── Views (skill-based dispatch queries) ──────────────────────────────────────
+
+-- Find agents by skill + required proficiency (skill-based dispatch)
+CREATE OR REPLACE VIEW workforce.v_agent_capabilities AS
+SELECT
+    a.agent_identity,
+    a.display_name,
+    a.agent_type,
+    a.status,
+    s.skill_name,
+    s.category,
+    ags.proficiency,
+    ags.granted_at,
+    ags.expires_at,
+    (ags.expires_at IS NOT NULL AND ags.expires_at < now()) AS is_expired
+FROM  workforce.agent_skill ags
+JOIN  workforce.agent        a ON a.id = ags.agent_id
+JOIN  workforce.skill         s ON s.id = ags.skill_id
+WHERE a.status = 'active';
+
+COMMENT ON VIEW workforce.v_agent_capabilities IS
+    'Active agents with their skill matrix. Filter on skill_name + proficiency for dispatch. Includes is_expired flag.';
+
+-- Audit project skill coverage (active assignments with non-expired grants)
+CREATE OR REPLACE VIEW workforce.v_project_coverage AS
+SELECT
+    ap.project_id,
+    a.agent_identity,
+    a.display_name,
+    a.status     AS agent_status,
+    s.skill_name,
+    s.category,
+    ags.proficiency,
+    ap.role,
+    ap.started_at
+FROM  workforce.agent_project ap
+JOIN  workforce.agent          a   ON a.id   = ap.agent_id
+JOIN  workforce.agent_skill    ags ON ags.agent_id = ap.agent_id
+JOIN  workforce.skill           s  ON s.id   = ags.skill_id
+WHERE ap.ended_at IS NULL
+  AND a.status = 'active'
+  AND (ags.expires_at IS NULL OR ags.expires_at > now());
+
+COMMENT ON VIEW workforce.v_project_coverage IS
+    'Per-project skill coverage — active assignments × non-expired skill grants.';
+
+-- Full grant history per agent (from audit log)
+CREATE OR REPLACE VIEW workforce.v_skill_roster AS
+SELECT
+    a.agent_identity,
+    s.skill_name,
+    s.category,
+    sgl.action,
+    sgl.old_proficiency,
+    sgl.new_proficiency,
+    sgl.acted_by,
+    sgl.notes,
+    sgl.created_at
+FROM  workforce.skill_grant_log sgl
+JOIN  workforce.agent           a ON a.id = sgl.agent_id
+JOIN  workforce.skill            s ON s.id = sgl.skill_id
+ORDER BY sgl.created_at DESC;
+
+COMMENT ON VIEW workforce.v_skill_roster IS
+    'Full skill grant/revoke history per agent. Reads from append-only audit log.';
+
+-- ── Seed: AgentHive core agent personas ──────────────────────────────────────
+
+INSERT INTO workforce.agent (agent_identity, display_name, agent_type, persona, status) VALUES
+    ('senior-backend',      'Senior Backend Engineer',    'ai',    'Expert backend engineer: Laravel/PostgreSQL/TypeScript. Implements and reviews server-side code.',              'active'),
+    ('skeptic-alpha',       'Skeptic Alpha (Gate Agent)', 'ai',    'Gate reviewer: RFC coherence, AC measurability, architectural fit. Holds unless criteria are met.',             'active'),
+    ('product-manager',     'Product Manager',            'ai',    'Proposal authoring, AC design, backlog prioritisation, stakeholder communication.',                             'active'),
+    ('agency-orchestrator', 'Agency Orchestrator',        'ai',    'Workflow orchestrator: spawns cubics, monitors pipeline, mediates contention.',                                 'active'),
+    ('worker-enhancer',     'Worker Enhancer',            'ai',    'DRAFT-phase enhancer: closes gate gaps, adds evidence, converts ACs to testable state.',                        'active')
+ON CONFLICT (agent_identity) DO NOTHING;
+
+-- ── Seed: Core skill catalog ──────────────────────────────────────────────────
+
+INSERT INTO workforce.skill (skill_name, display_name, description, category, lifecycle) VALUES
+    ('backend-development',    'Backend Development',     'Server-side code: APIs, DB schema, migrations, services',                           'engineering', 'active'),
+    ('code-review',            'Code Review',             'Structured review for correctness, security, and maintainability',                   'engineering', 'active'),
+    ('architecture-review',    'Architecture Review',     'System design review: scalability, coupling, data model integrity',                  'engineering', 'active'),
+    ('sql-schema-design',      'SQL Schema Design',       'Relational schema design, normalization, index strategy, migration planning',        'engineering', 'active'),
+    ('gate-review',            'Gate Review',             'RFC gate assessment: coherence, AC measurability, architectural fit',               'governance',  'active'),
+    ('proposal-authoring',     'Proposal Authoring',      'Writing RFCs with motivation, design, acceptance criteria, and dependency mapping', 'governance',  'active'),
+    ('security-audit',         'Security Audit',          'OWASP, threat modeling, credential and injection vulnerability review',             'security',    'active'),
+    ('workflow-orchestration', 'Workflow Orchestration',  'Cubic dispatch, agent lifecycle, pipeline health monitoring',                       'platform',    'active'),
+    ('product-strategy',       'Product Strategy',        'Roadmap design, backlog prioritization, stakeholder alignment',                     'product',     'active'),
+    ('test-design',            'Test Design',             'AC design, integration test planning, coverage analysis',                           'engineering', 'active')
+ON CONFLICT (skill_name) DO NOTHING;
+
+-- ── Seed: Agent×Skill capability grants ──────────────────────────────────────
+
+INSERT INTO workforce.agent_skill (agent_id, skill_id, proficiency, granted_by)
+SELECT a.id, s.id, v.prof::workforce.proficiency_level, 'system'
+FROM (VALUES
+    ('senior-backend',      'backend-development',    'expert'),
+    ('senior-backend',      'code-review',            'advanced'),
+    ('senior-backend',      'sql-schema-design',      'expert'),
+    ('senior-backend',      'test-design',            'intermediate'),
+    ('skeptic-alpha',       'gate-review',            'expert'),
+    ('skeptic-alpha',       'architecture-review',    'advanced'),
+    ('skeptic-alpha',       'security-audit',         'intermediate'),
+    ('product-manager',     'proposal-authoring',     'expert'),
+    ('product-manager',     'product-strategy',       'expert'),
+    ('product-manager',     'gate-review',            'basic'),
+    ('agency-orchestrator', 'workflow-orchestration', 'expert'),
+    ('agency-orchestrator', 'gate-review',            'basic'),
+    ('worker-enhancer',     'proposal-authoring',     'advanced'),
+    ('worker-enhancer',     'gate-review',            'intermediate')
+) AS v(ident, skill_name, prof)
+JOIN workforce.agent a ON a.agent_identity = v.ident
+JOIN workforce.skill  s ON s.skill_name    = v.skill_name
+ON CONFLICT (agent_id, skill_id) DO NOTHING;
+
+-- ── Grants ────────────────────────────────────────────────────────────────────
+-- hiveCentral roles (not xiaomi): agenthive_orchestrator, agenthive_agency, agenthive_observability
+
+GRANT USAGE ON SCHEMA workforce TO agenthive_orchestrator, agenthive_agency, agenthive_observability;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON workforce.agent         TO agenthive_orchestrator, agenthive_agency;
+GRANT SELECT, INSERT, UPDATE, DELETE ON workforce.skill         TO agenthive_orchestrator, agenthive_agency;
+GRANT SELECT, INSERT, UPDATE, DELETE ON workforce.agent_skill   TO agenthive_orchestrator, agenthive_agency;
+GRANT SELECT, INSERT, UPDATE, DELETE ON workforce.agent_project TO agenthive_orchestrator, agenthive_agency;
+GRANT SELECT, INSERT                 ON workforce.skill_grant_log TO agenthive_orchestrator, agenthive_agency;
+
+GRANT SELECT ON workforce.agent         TO agenthive_observability;
+GRANT SELECT ON workforce.skill         TO agenthive_observability;
+GRANT SELECT ON workforce.agent_skill   TO agenthive_observability;
+GRANT SELECT ON workforce.agent_project TO agenthive_observability;
+GRANT SELECT ON workforce.skill_grant_log TO agenthive_observability;
+
+GRANT SELECT ON workforce.v_agent_capabilities TO agenthive_orchestrator, agenthive_agency, agenthive_observability;
+GRANT SELECT ON workforce.v_project_coverage   TO agenthive_orchestrator, agenthive_agency, agenthive_observability;
+GRANT SELECT ON workforce.v_skill_roster       TO agenthive_orchestrator, agenthive_agency, agenthive_observability;
+
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA workforce TO agenthive_orchestrator, agenthive_agency;
+
+COMMIT;
