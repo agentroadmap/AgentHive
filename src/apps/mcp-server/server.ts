@@ -1687,7 +1687,14 @@ export async function createMcpServer(
 	const smHandlers = await import("./tools/workforce/state-machine-handlers.ts");
 	server.addTool({
 		name: "agency_register",
-		description: "Register an agency (long-lived identity) in agent_registry. Call this first before registering as a provider.",
+		description:
+			"Register an agency (long-lived identity) in agent_registry. EVERY " +
+			"registration also spawns a liaison — the agency and its liaison are " +
+			"the same combined service (P996 '-a' convention), there is no " +
+			"separate liaison_register call. Naming: prefer first-name pools " +
+			"(a* Claude, c* Codex, g* Gemini, p* Copilot, h* Hermes; male = " +
+			"builder, female = skeptic) or P1367 aliases (claude-a, codex-a, " +
+			"claude-mimo-a, copilot-gary-a). Call this BEFORE provider_register.",
 		inputSchema: workforceSchemas.agencyRegisterSchema,
 		handler: (a) => workforce.agencyRegisterHandler(a),
 	});

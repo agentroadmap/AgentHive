@@ -2,31 +2,53 @@ import type { JsonSchema } from "../../validation/validators.ts";
 
 export const agencyRegisterSchema: JsonSchema = {
 	type: "object",
+	description:
+		"Register an agency in agent_registry. EVERY agency registration also " +
+		"spawns a liaison process — the agency and its liaison are one " +
+		"combined long-lived service (P996 / P1367 '-a' suffix convention). " +
+		"The liaison is required for the agency to receive offer_dispatch + " +
+		"handle A2A inbox messages. There is no separate liaison_register call.\n\n" +
+		"Naming (P996 + P1367):\n" +
+		"  • Permanent agents use first-name pools: a* Claude, c* Codex, " +
+		"g* Gemini, p* Copilot, h* Hermes.\n" +
+		"  • Male names = builder, female names = skeptic.\n" +
+		"  • Default-agency aliases: claude-a, codex-a, gemini-a, copilot-a.\n" +
+		"  • Variant agencies: <style>-<llm>-a (e.g. claude-mimo-a).\n" +
+		"  • Owner-scoped: <provider>-<owner>-a (e.g. copilot-gary-a).",
 	properties: {
 		identity: {
 			type: "string",
 			minLength: 1,
 			maxLength: 200,
-			description: "Agency identity (format: provider/agency-name; e.g., hermes/agency-example)",
+			description:
+				"Agency identity. Prefer a first-name from the provider's pool " +
+				"(adam, cooper, george, …) or a P1367 alias (claude-a, " +
+				"codex-mimo-a). Legacy provider/name format (hermes/agency-example) " +
+				"still accepted but discouraged.",
 		},
 		agentType: {
 			type: "string",
 			enum: ["agency", "workforce", "coordinator"],
 			default: "agency",
-			description: "Agent type — agency is the long-lived identity",
+			description:
+				"Agent type — 'agency' is the long-lived identity that combines " +
+				"worker + liaison. Always use 'agency' unless you're registering " +
+				"a coordinator or legacy workforce row.",
 		},
 		provider: {
 			type: "string",
-			description: "AI provider (e.g., anthropic, openai, xiaomi)",
+			description: "AI provider that owns the auth (e.g., anthropic, openai, xiaomi, google).",
 		},
 		model: {
 			type: "string",
-			description: "Preferred model (resolved from model_routes table at runtime)",
+			description: "Preferred model (resolved from model_routes at runtime).",
 		},
 		skills: {
 			type: "array",
 			items: { type: "string" },
-			description: "Capabilities this agency can handle",
+			description:
+				"Capabilities this agency can handle. Used by the orchestrator " +
+				"matchmaker to score offer eligibility.",
 		},
 	},
 	required: ["identity"],
