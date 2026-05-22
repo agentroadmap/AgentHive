@@ -164,6 +164,7 @@ export class PgProposalHandlers {
 									filter: {
 										status: args.status,
 										type: args.type ?? args.proposal_type,
+										parent_id: args.parent_id ?? null,
 										includeTerminal,
 									},
 									note: includeTerminal
@@ -207,6 +208,7 @@ export class PgProposalHandlers {
 								filter: {
 									status: args.status,
 									type: args.type ?? args.proposal_type,
+									parent_id: args.parent_id ?? null,
 									includeTerminal,
 								},
 								items,
