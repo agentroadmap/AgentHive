@@ -1,0 +1,29 @@
+[Unit]
+Description=AgentHive Liaison Hub (%i)
+After=network.target postgresql.service agenthive-mcp.service
+Requires=agenthive-mcp.service
+
+[Service]
+Type=simple
+User=${HOME_USER}
+Group=${USER_GROUP}
+WorkingDirectory=${WORKING_DIRECTORY}
+EnvironmentFile=/etc/agenthive/env
+EnvironmentFile=${ENVIRONMENT_FILE}
+Environment=NODE_ENV=production
+Environment=PATH=${NODE_BIN_DIR}:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=/home/${HOME_USER}
+Environment=AGENCY_ID=%i
+ExecStart=${NODE_BIN} --import jiti/register scripts/start-liaison.ts
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=60
+KillSignal=SIGTERM
+MemoryMax=512M
+CPUQuota=50%
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agenthive-liaison-%i
+
+[Install]
+WantedBy=multi-user.target

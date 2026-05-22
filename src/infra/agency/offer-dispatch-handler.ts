@@ -21,7 +21,7 @@
  * `{rt}-{host}-{exp}-{n}` name from the resolved route + capabilities.
  */
 import { query } from "../postgres/pool.ts";
-import { spawnAgent } from "../../core/orchestration/agent-spawner.ts";
+import { spawnAgent, spawnWithRetry } from "../../core/orchestration/agent-spawner.ts";
 import type { SpawnResult } from "../../core/orchestration/agent-spawner.ts";
 import type { LiaisonMessage } from "./liaison-message-types.ts";
 import {
@@ -46,6 +46,8 @@ export interface OfferDispatchHandlerDeps {
 	resolveWorktree?: (agencyId: string) => string;
 	/** Renewal cadence override (ms). Default: leaseTtlSeconds * 1000 / 3. */
 	renewalIntervalMs?: number;
+	/** Override for test injection of local quota/capacity checks. */
+	checkCapacity?: typeof checkCapacityBeforeClaim;
 }
 
 interface OfferDispatchEnvelope {
@@ -74,7 +76,7 @@ const defaultDeps: Required<
 		"spawn" | "exec" | "logger" | "resolveWorktree"
 	>
 > = {
-	spawn: spawnAgent,
+	spawn: spawnWithRetry,
 	exec: defaultExec,
 	logger: console,
 	// P914: include AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE (the var actually
@@ -154,6 +156,7 @@ export async function handleOfferDispatch(
 		spawn,
 		exec,
 		logger,
+		checkCapacity: deps.checkCapacity ?? checkCapacityBeforeClaim,
 	}).catch((err) => {
 		logger.error(
 			`[OfferDispatchHandler] ${agencyId}: unhandled error for offer=${payload.offer_id}:`,
@@ -173,6 +176,7 @@ async function runSpawn(args: {
 	spawn: typeof spawnAgent;
 	exec: SqlExec;
 	logger: Pick<Console, "log" | "warn" | "error">;
+	checkCapacity: typeof checkCapacityBeforeClaim;
 }): Promise<void> {
 	const {
 		agencyId,
@@ -185,13 +189,14 @@ async function runSpawn(args: {
 		spawn,
 		exec,
 		logger,
+		checkCapacity,
 	} = args;
 
 	const dispatchId = payload.dispatch_id as number;
 	const claimToken = payload.claim_token as string;
 
 	// P465: capacity check before spawning — re-queue and throttle if quota exceeded
-	const capacityCheck = await checkCapacityBeforeClaim(agencyId);
+	const capacityCheck = await checkCapacity(agencyId);
 	if (!capacityCheck.allowed) {
 		logger.warn(
 			`[OfferDispatchHandler] ${agencyId}: capacity refused for offer=${payload.offer_id} — ${capacityCheck.refuse_reason}`,

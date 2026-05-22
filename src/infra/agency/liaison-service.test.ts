@@ -38,8 +38,18 @@ describe("Liaison Service (P464)", () => {
     await query(`DELETE FROM roadmap.agency WHERE agency_id LIKE 'test/%'`);
   });
 
+  async function preRegisterAgency(agencyId = testAgencyId) {
+    await query(
+      `INSERT INTO roadmap.agency (agency_id, display_name, provider, host_id, status)
+       VALUES ($1, 'Pre-registered Test Agency', 'test-provider', $2, 'dormant')
+       ON CONFLICT (agency_id) DO NOTHING`,
+      [agencyId, testHostId],
+    );
+  }
+
   describe("AC1: Agency schema", () => {
     it("should create agency with all required fields", async () => {
+      await preRegisterAgency();
       const result = await liaisonRegister({
         agency_id: testAgencyId,
         display_name: "Test Agency",
@@ -72,6 +82,7 @@ describe("Liaison Service (P464)", () => {
 
   describe("AC2: Agency liaison session", () => {
     it("should create session on registration", async () => {
+      await preRegisterAgency();
       const result = await liaisonRegister({
         agency_id: testAgencyId,
         display_name: "Test Agency",
@@ -94,6 +105,7 @@ describe("Liaison Service (P464)", () => {
 
   describe("AC3: Registration handshake", () => {
     it("should return session token and validate host_id", async () => {
+      await preRegisterAgency();
       const result = await liaisonRegister({
         agency_id: testAgencyId,
         display_name: "Test Agency",
@@ -129,10 +141,24 @@ describe("Liaison Service (P464)", () => {
         assert(err.message.includes("agency_id is required"));
       }
     });
+
+    it("should fail fast when agency was not registered by operator first", async () => {
+      await assert.rejects(
+        () =>
+          liaisonRegister({
+            agency_id: "test/unregistered-p1361",
+            display_name: "Unregistered",
+            provider: "codex",
+            host_id: testHostId,
+          }),
+        /Agency test\/unregistered-p1361 not registered\. Register it first via: mcp_agent action='register'/,
+      );
+    });
   });
 
   describe("AC4: Heartbeat updates", () => {
     it("should update last_heartbeat_at on heartbeat", async () => {
+      await preRegisterAgency();
       const reg = await liaisonRegister({
         agency_id: testAgencyId,
         display_name: "Test",
@@ -168,6 +194,7 @@ describe("Liaison Service (P464)", () => {
     });
 
     it("should respect liaison-declared status", async () => {
+      await preRegisterAgency();
       const reg = await liaisonRegister({
         agency_id: testAgencyId,
         display_name: "Test",
@@ -348,6 +375,7 @@ describe("Liaison Service (P464)", () => {
 
   describe("End liaison session", () => {
     it("should mark session as ended with reason", async () => {
+      await preRegisterAgency();
       const reg = await liaisonRegister({
         agency_id: testAgencyId,
         display_name: "Test",

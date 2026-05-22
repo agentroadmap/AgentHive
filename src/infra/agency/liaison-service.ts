@@ -75,19 +75,28 @@ export async function liaisonRegister(
 				client.query<T>(text, params as never)
 		: query;
 
+	const registered = await runQuery<{ agency_id: string }>(
+		`SELECT agency_id FROM roadmap.agency WHERE agency_id = $1`,
+		[agency_id],
+	) as { rows: Array<{ agency_id: string }> };
+	if (registered.rows.length === 0) {
+		throw new Error(
+			`Agency ${agency_id} not registered. Register it first via: mcp_agent action='register' args={...}`,
+		);
+	}
+
 	const result = await runQuery(
 		`
-    WITH upsert_agency AS (
-      INSERT INTO roadmap.agency (
-        agency_id, display_name, provider, host_id, capability_tags, status, metadata
-      ) VALUES ($1, $2, $3, $4, $5, 'active', $6)
-      ON CONFLICT (agency_id) DO UPDATE SET
-        display_name = EXCLUDED.display_name,
-        provider     = EXCLUDED.provider,
-        host_id      = EXCLUDED.host_id,
-        capability_tags = EXCLUDED.capability_tags,
-        status       = 'active',
-        status_reason = NULL
+    WITH update_agency AS (
+      UPDATE roadmap.agency
+      SET display_name = $2,
+          provider     = $3,
+          host_id      = $4,
+          capability_tags = $5,
+          status       = 'active',
+          status_reason = NULL,
+          metadata     = $6
+      WHERE agency_id = $1
       RETURNING agency_id, status
     ),
     insert_session AS (
@@ -97,8 +106,8 @@ export async function liaisonRegister(
     )
     SELECT
       (SELECT session_id FROM insert_session) as session_id,
-      (SELECT agency_id  FROM upsert_agency)  as agency_id,
-      (SELECT status     FROM upsert_agency)  as status
+      (SELECT agency_id  FROM update_agency)  as agency_id,
+      (SELECT status     FROM update_agency)  as status
     `,
 		[
 			agency_id,
