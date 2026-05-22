@@ -2274,6 +2274,75 @@ export async function createMcpServer(
 		handler: () => pgbouncer.pgbouncerReload().then((r) => ({ content: [{ type: "text", text: JSON.stringify(r) }] })),
 	});
 
+	// P1359: Provider/model cooldown management tools
+	const { cooldownStatus, cooldownClear, providerCooldownClear } = await import(
+		"./tools/ops/cooldown-ops.ts"
+	);
+	server.addTool({
+		name: "cooldown_status",
+		description: "List active model-level and provider-level cooldowns. Params: provider (optional filter), only_active (default true).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				provider: {
+					type: "string",
+					description: "Optional filter by route provider name",
+				},
+				only_active: {
+					type: "boolean",
+					description: "Only show active cooldowns (default: true)",
+				},
+			},
+		},
+		handler: (args) => {
+			return cooldownStatus(args as Record<string, unknown>).then((r) => ({
+				content: [{ type: "text", text: JSON.stringify(r, null, 2) }],
+			}));
+		},
+	});
+	server.addTool({
+		name: "cooldown_clear",
+		description: "Clear model-level cooldown for a specific (provider, model) pair. Sets cooldown_until to NULL.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				provider: {
+					type: "string",
+					description: "Route provider name (required)",
+				},
+				model: {
+					type: "string",
+					description: "Model name (required)",
+				},
+			},
+			required: ["provider", "model"],
+		},
+		handler: (args) => {
+			return cooldownClear(args as Record<string, unknown>).then((r) => ({
+				content: [{ type: "text", text: JSON.stringify(r, null, 2) }],
+			}));
+		},
+	});
+	server.addTool({
+		name: "provider_cooldown_clear",
+		description: "Clear provider-level cooldown. Sets cooldown_until to NULL on provider_health.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				provider: {
+					type: "string",
+					description: "Provider name (required)",
+				},
+			},
+			required: ["provider"],
+		},
+		handler: (args) => {
+			return providerCooldownClear(args as Record<string, unknown>).then((r) => ({
+				content: [{ type: "text", text: JSON.stringify(r, null, 2) }],
+			}));
+		},
+	});
+
 	// Start background maintenance tasks
 	const MAINTENANCE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 	setInterval(async () => {
