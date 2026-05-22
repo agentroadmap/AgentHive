@@ -32,6 +32,13 @@ import {
 	getMcpUrlAsync,
 } from "../../shared/runtime/endpoints.ts";
 import { getProjectRoot, getWorktreeRoot } from "../../shared/runtime/paths.ts";
+import * as config from "../../shared/runtime/config.ts";
+import { FlagKeys } from "../../shared/runtime/config-keys.ts";
+import {
+	setModelCooldown,
+	isModelInCooldown,
+	setProviderCooldown,
+} from "./provider-cooldown.ts";
 import { HotfixStates, RfcStates } from "../workflow/state-names.ts";
 import { isWithinCapacity } from "./resolvers/capacity-guard.ts";
 import { sanitizeExtraEnv } from "./spawn-env-sanitizer.ts";
@@ -1259,6 +1266,132 @@ export function renderClosingHint(input: {
 // ─── Core spawn logic ─────────────────────────────────────────────────────────
 
 /**
+ * P1359: Wrapper around spawnAgent that handles provider quota cooldown and retry.
+ *
+ * On rate_limited outcome with quotaErrorModel/Provider detected:
+ * 1. Write model-level cooldown via setModelCooldown (GREATEST merge semantics)
+ * 2. Re-resolve route via resolveModelRoute (Layer 6 filter excludes cooled routes)
+ * 3. Retry with next-priority same-provider route
+ * 4. Cap retries at SPAWN_PROVIDER_MAX_ATTEMPTS flag (default 3)
+ * 5. If all enabled routes exhausted, set provider-level cooldown
+ * 6. Return 'provider_exhausted' outcome when max attempts reached
+ */
+export async function spawnWithRetry(
+	req: SpawnRequest,
+): Promise<SpawnResult> {
+	const maxAttempts = (await config.getOptional(FlagKeys.SPAWN_PROVIDER_MAX_ATTEMPTS)) ?? 3;
+	let attemptCount = 0;
+	let lastResult: SpawnResult | null = null;
+	const provider = req.provider || (await detectProvider(req.worktree, req.worktreeRoot));
+
+	while (attemptCount < maxAttempts) {
+		attemptCount++;
+		lastResult = await spawnAgent(req);
+
+		// If successful (exitCode === 0), return immediately
+		if (lastResult.exitCode === 0) {
+			return lastResult;
+		}
+
+		// Classify the exit to detect quota errors
+		const exitClass = classifyExit(lastResult.stdout, lastResult.stderr, lastResult.exitCode);
+
+		// If not a rate-limit error, return immediately
+		if (exitClass.outcome !== "rate_limited") {
+			return lastResult;
+		}
+
+		// If rate-limit but no provider quota signal detected, return now (generic rate-limit)
+		if (!exitClass.quotaErrorProvider) {
+			return lastResult;
+		}
+
+		// P1359: We have a model-specific quota error — set cooldown and retry
+		const modelName = req.model || exitClass.quotaErrorModel || "unknown";
+		const cooldownMinutes = lastResult.stderr?.includes("credit") || lastResult.stdout?.includes("credit")
+			? 30
+			: 2;
+		const cooldownReason = lastResult.stderr?.slice(0, 500) || lastResult.stdout?.slice(0, 500) || "quota_exhausted";
+
+		try {
+			await setModelCooldown(provider, modelName, cooldownMinutes, cooldownReason);
+		} catch (err) {
+			console.error(`[P1359] Failed to set model cooldown for ${provider}/${modelName}:`, err);
+		}
+
+		// Re-resolve route applying Layer 6 cooldown filter
+		let nextRoute;
+		try {
+			const resolveResult = await resolveModelRoute({
+				provider,
+				projectId: req.projectId ?? null,
+				agencyIdentity: req.agencyIdentity ?? null,
+				roleProfileId: req.roleProfileId ?? null,
+				modelHint: req.model,
+				proposalId: req.proposalId ?? null,
+				role: req.stage,
+			});
+			nextRoute = resolveResult;
+		} catch (err) {
+			console.error(`[P1359] Re-resolve failed for ${provider}:`, err);
+			// Check if all enabled routes for this provider are now cooled
+			try {
+				const countResult = await query<{ enabled_count: number }>(
+					`SELECT COUNT(*) as enabled_count FROM roadmap.model_routes
+					 WHERE route_provider = $1 AND is_enabled = true
+					   AND (cooldown_until IS NULL OR cooldown_until <= NOW())`,
+					[provider],
+				);
+				const nonCooledCount = countResult.rows[0]?.enabled_count ?? 0;
+				if (nonCooledCount === 0) {
+					// All routes cooled — escalate to provider level
+					await setProviderCooldown(provider, "rate_limit", cooldownReason);
+				}
+			} catch (err2) {
+				console.error(`[P1359] Failed to escalate to provider cooldown:`, err2);
+			}
+			return lastResult;
+		}
+
+		// Update request with new route for next attempt
+		req = { ...req, provider: nextRoute.routeProvider, model: nextRoute.modelName };
+
+		// If we've exhausted max attempts, check for provider escalation
+		if (attemptCount >= maxAttempts) {
+			try {
+				const countResult = await query<{ enabled_count: number }>(
+					`SELECT COUNT(*) as enabled_count FROM roadmap.model_routes
+					 WHERE route_provider = $1 AND is_enabled = true
+					   AND (cooldown_until IS NULL OR cooldown_until <= NOW())`,
+					[provider],
+				);
+				const nonCooledCount = countResult.rows[0]?.enabled_count ?? 0;
+				if (nonCooledCount === 0) {
+					// All routes cooled — escalate to provider level
+					await setProviderCooldown(provider, "rate_limit", cooldownReason);
+				}
+			} catch (err) {
+				console.error(`[P1359] Failed to escalate to provider cooldown at max attempts:`, err);
+			}
+			// Return the last failure; orchestrator will handle provider_exhausted state
+			return lastResult;
+		}
+
+		// Continue to next iteration (retry with new route)
+	}
+
+	// Should not reach here, but return last result as fallback
+	return lastResult || {
+		agentRunId: "unknown",
+		worktree: req.worktree,
+		exitCode: 1,
+		stdout: "",
+		stderr: "Spawn loop exhausted without valid result",
+		durationMs: 0,
+	};
+}
+
+/**
  * Spawn an agent subprocess inside its worktree.
  * Records the run in agent_runs and agent_budget_ledger.
  */
@@ -1573,8 +1706,10 @@ const RATE_LIMIT_PATTERNS: RegExp[] = [
 ];
 
 interface ExitClassification {
-	outcome: "completed" | "failed" | "rate_limited";
+	outcome: "completed" | "failed" | "rate_limited" | "provider_exhausted";
 	resetAt?: Date | null;
+	quotaErrorProvider?: string;
+	quotaErrorModel?: string;
 }
 
 function parseResetTime(text: string): Date | null {
@@ -1590,6 +1725,77 @@ function parseResetTime(text: string): Date | null {
 	return new Date(Date.now() + 60 * 60 * 1000);
 }
 
+/**
+ * P1359: Detect provider-specific quota signals with TTL parsing.
+ * Returns (provider, model, resetAt) on match, null otherwise.
+ */
+function detectProviderQuotaSignal(
+	stdout: string,
+	stderr: string,
+): { provider: string; model: string; resetAt: Date } | null {
+	const hay = `${stdout}\n${stderr}`;
+
+	// Gemini: "TerminalQuotaError" or "exhausted capacity"
+	// TTL: "reset after Xh Ym Zs" (e.g., "reset after 1h 23m 45s")
+	if (/TerminalQuotaError|exhausted\s+capacity/i.test(hay)) {
+		let resetAt = new Date(Date.now() + 60 * 60 * 1000); // default 1h
+		const match = hay.match(/reset\s+after\s+(\d+)h\s+(\d+)m\s+(\d+)s/i);
+		if (match) {
+			const h = parseInt(match[1], 10);
+			const m = parseInt(match[2], 10);
+			const s = parseInt(match[3], 10);
+			resetAt = new Date(Date.now() + (h * 3600 + m * 60 + s) * 1000);
+		}
+		return { provider: "gemini", model: "unknown", resetAt };
+	}
+
+	// OpenAI: "rate_limit_exceeded" or 429 + "quota"
+	// TTL: "Retry-After: X" header or "X-RateLimit-Reset" timestamp
+	if ((/rate_limit_exceeded|429.*quota/i.test(hay)) || (/429/.test(hay) && /quota/i.test(hay))) {
+		let resetAt = new Date(Date.now() + 60 * 60 * 1000); // default 1h
+		// Try to extract Retry-After (seconds) or X-RateLimit-Reset (Unix timestamp)
+		const retryMatch = hay.match(/Retry-After[:\s]+(\d+)/i);
+		if (retryMatch) {
+			const seconds = parseInt(retryMatch[1], 10);
+			resetAt = new Date(Date.now() + seconds * 1000);
+		}
+		const resetMatch = hay.match(/X-RateLimit-Reset[:\s]+(\d+)/i);
+		if (resetMatch) {
+			const timestamp = parseInt(resetMatch[1], 10);
+			resetAt = new Date(timestamp * 1000);
+		}
+		return { provider: "openai", model: "unknown", resetAt };
+	}
+
+	// Anthropic: "rate_limit_error" or "usage_limit"
+	// TTL: "retry-after" header (seconds) or fallback 1h
+	if (/rate_limit_error|usage_limit/i.test(hay)) {
+		let resetAt = new Date(Date.now() + 60 * 60 * 1000); // default 1h
+		const match = hay.match(/retry-after[:\s]+(\d+)/i);
+		if (match) {
+			const seconds = parseInt(match[1], 10);
+			resetAt = new Date(Date.now() + seconds * 1000);
+		}
+		return { provider: "anthropic", model: "unknown", resetAt };
+	}
+
+	// Copilot: "weekly rate limit"
+	// TTL: often contains explicit reset datetime; fallback 7 days
+	if (/weekly\s+rate\s+limit/i.test(hay)) {
+		let resetAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // default 7 days
+		const match = hay.match(/(?:reset|resets)\s+(?:at\s+)?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[^)\n]*)/i);
+		if (match) {
+			const dt = new Date(match[1]);
+			if (!isNaN(dt.getTime())) {
+				resetAt = dt;
+			}
+		}
+		return { provider: "copilot", model: "unknown", resetAt };
+	}
+
+	return null;
+}
+
 function classifyExit(
 	stdout: string,
 	stderr: string,
@@ -1597,6 +1803,19 @@ function classifyExit(
 ): ExitClassification {
 	if (exitCode === 0) return { outcome: "completed" };
 	const hay = `${stdout}\n${stderr}`;
+
+	// Check for provider-specific quota signals first (P1359)
+	const quotaSignal = detectProviderQuotaSignal(stdout, stderr);
+	if (quotaSignal) {
+		return {
+			outcome: "rate_limited",
+			resetAt: quotaSignal.resetAt,
+			quotaErrorProvider: quotaSignal.provider,
+			quotaErrorModel: quotaSignal.model,
+		};
+	}
+
+	// Fall back to generic rate-limit patterns
 	for (const pat of RATE_LIMIT_PATTERNS) {
 		if (pat.test(hay)) {
 			return { outcome: "rate_limited", resetAt: parseResetTime(hay) };
