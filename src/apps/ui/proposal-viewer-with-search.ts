@@ -610,6 +610,19 @@ export async function viewProposalEnhanced(
 	const screen = createScreen({
 		title: `${options.title || "Roadmap Proposals"} - ${versionLabel}`,
 	});
+	let finishScreen: (() => void) | null = null;
+	const screenClosed = new Promise<void>((resolve) => {
+		finishScreen = () => {
+			if (helpRestoreTimer) {
+				clearTimeout(helpRestoreTimer);
+				helpRestoreTimer = null;
+			}
+			searchService?.dispose();
+			contentStore?.dispose();
+			resolve();
+		};
+		screen.on("destroy", finishScreen);
+	});
 
 	// Main container
 	const container = box({
@@ -1199,20 +1212,6 @@ export async function viewProposalEnhanced(
 				focusDetailPane();
 				return false;
 			});
-			listBox.key(["enter"], async () => {
-				// Ensure the detail pane is populated before focusing it.
-				// onSelect/onHighlight calls applySelection asynchronously, but Enter
-				// fires synchronously — without awaiting we land on focusDetailPane
-				// before descriptionBox is created, which then silently no-ops via
-				// its `if (!descriptionBox) return;` guard.
-				const selected = proposalList?.getSelectedIndex();
-				const idx = Array.isArray(selected) ? selected[0] : selected;
-				if (typeof idx === "number" && filteredProposals[idx]) {
-					await applySelection(filteredProposals[idx]);
-				}
-				focusDetailPane();
-				return false;
-			});
 		}
 
 		return proposalList;
@@ -1436,7 +1435,7 @@ export async function viewProposalEnhanced(
 		} else {
 			// Proposal list help
 			content =
-				" {cyan-fg}[Tab]{/} Switch View | {cyan-fg}[Enter]{/} Detail | {cyan-fg}[/]{/} Search | {cyan-fg}[s]{/} Status | {cyan-fg}[p]{/} Priority | {cyan-fg}[l]{/} Labels | {cyan-fg}[↑↓]{/} Navigate | {cyan-fg}[q/Esc]{/} Quit";
+				" {cyan-fg}[Tab]{/} Switch View | {cyan-fg}[/]{/} Search | {cyan-fg}[s]{/} Status | {cyan-fg}[p]{/} Priority | {cyan-fg}[l]{/} Labels | {cyan-fg}[↑↓]{/} Navigate | {cyan-fg}[q/Esc]{/} Quit";
 		}
 
 		setHelpBarContent(content);
@@ -1579,6 +1578,7 @@ export async function viewProposalEnhanced(
 				filterHeader.destroy();
 				screen.destroy();
 				await options.onTabPress?.();
+				finishScreen?.();
 			}
 		});
 	}
@@ -1622,17 +1622,7 @@ export async function viewProposalEnhanced(
 	screen.render();
 
 	// Wait for screen to close
-	return new Promise<void>((resolve) => {
-		screen.on("destroy", () => {
-			if (helpRestoreTimer) {
-				clearTimeout(helpRestoreTimer);
-				helpRestoreTimer = null;
-			}
-			searchService?.dispose();
-			contentStore?.dispose();
-			resolve();
-		});
-	});
+	return screenClosed;
 }
 
 export function generateDetailContent(

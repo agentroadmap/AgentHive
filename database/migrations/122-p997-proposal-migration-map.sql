@@ -1,396 +1,221 @@
--- Migration 122: P997 — legacy-to-agentHive2 proposal mapping artifact
+-- Migration 122: P997 — proposal_migration_map schema
 --
--- Creates the control-plane audit table and query views that record how each
--- legacy proposal row maps into the agentHive2 documentation-shaped proposal
--- stack. This table is the authoritative mapping used by P998 (corpus
--- inventory) and P999 (documentation projection demo).
---
--- SOURCE OF TRUTH NOTE: proposal_migration_map is a projection helper and
--- migration audit log. It does NOT replace the proposal lifecycle in
--- roadmap_proposal.proposal (status/maturity), gate_decision_log, or
--- proposal_discussions. Agents must update both the mapping row here AND the
--- proposal maturity independently.
---
--- Supersedes: database/migrations/121-p997-proposal-migration-map.sql (draft,
--- wrong number, missing FK columns, wrong view names, no BEGIN/COMMIT).
+-- Defines the structured mapping artifact from legacy proposal rows to
+-- their canonical agentHive2 documentation-shaped stack nodes.
+-- This table is a control-plane projection helper and does NOT replace the
+-- proposal lifecycle source of truth (proposal, proposal_state_transitions,
+-- gate_decision_log, proposal_discussions).
 
 BEGIN;
 
--- ─────────────────────────────────────────────────────────────────────────────
--- TABLE: roadmap.proposal_migration_map
--- ─────────────────────────────────────────────────────────────────────────────
+-- ── Table ──────────────────────────────────────────────────────────────────
 
-CREATE TABLE IF NOT EXISTS roadmap.proposal_migration_map (
-    id                          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-
-    -- Text identifier for the legacy proposal (display_id or numeric string).
-    -- Stored as BIGINT so it can be used directly in SQL JOINs against
-    -- roadmap_proposal.proposal.id during the inventory phase.
-    legacy_proposal_id          BIGINT NOT NULL,
-
-    -- Optional FK to the actual proposals row; NULL if the row has been
-    -- hard-deleted or not yet resolved. ON DELETE SET NULL ensures the
-    -- mapping row survives proposal deletion.
-    legacy_proposal_row_id      BIGINT
-                                    REFERENCES roadmap_proposal.proposal(id)
-                                    ON DELETE SET NULL,
-
-    -- The agentHive2 canonical proposal that owns or supersedes this legacy
-    -- row. NULL for pure obsolete rows or delivered-evidence rows not grouped
-    -- under a canonical node.
-    canonical_proposal_id       BIGINT,
-
-    canonical_proposal_row_id   BIGINT
-                                    REFERENCES roadmap_proposal.proposal(id)
-                                    ON DELETE SET NULL,
-
-    -- Classification vocabulary (P995 §Design §Mapping Artifact):
-    --   retained          — active, still developed, no re-authoring needed
-    --   delivered_evidence — COMPLETE with verified ACs; referenced as evidence
-    --   duplicate         — near-duplicate of another proposal
-    --   obsolete          — stale, superseded, or irrelevant
-    --   reauthor_needed   — incomplete or misleading; needs a fresh canonical record
-    --   superseded        — explicitly replaced by canonical_proposal_id
-    classification              TEXT NOT NULL
-                                    CHECK (classification IN (
-                                        'retained',
-                                        'delivered_evidence',
-                                        'duplicate',
-                                        'obsolete',
-                                        'reauthor_needed',
-                                        'superseded'
-                                    )),
-
-    -- Agent- or human-readable reason for the classification. Must be
-    -- non-empty; a one-sentence summary is sufficient.
-    rationale                   TEXT NOT NULL CHECK (rationale <> ''),
-
-    -- Structured evidence: array of {type, ...} objects. Supported types:
-    -- proposal, commit, ac, migration, discussion.
-    -- Example: [{"type":"commit","sha":"6725408d"},{"type":"migration","number":118}]
-    evidence_refs               JSONB NOT NULL DEFAULT '[]',
-
-    -- When classification is 'superseded' or 'duplicate', points to the
-    -- replacing proposal (by legacy display_id integer).
-    superseded_by_proposal_id   BIGINT,
-
-    superseded_by_row_id        BIGINT
-                                    REFERENCES roadmap_proposal.proposal(id)
-                                    ON DELETE SET NULL,
-
-    -- Reviewer identity (agent alias or human email/name).
-    reviewed_by                 TEXT,
-    reviewed_at                 TIMESTAMPTZ,
-
-    -- Who created this mapping row (agent alias).
-    created_by                  TEXT,
-
-    -- Free-form notes (e.g. "needs second opinion", "defer until P999").
-    notes                       TEXT,
-
-    created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
-
-    CONSTRAINT uq_pmm_legacy_proposal_id UNIQUE (legacy_proposal_id)
+CREATE TABLE IF NOT EXISTS roadmap_proposal.proposal_migration_map (
+  id                        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  legacy_proposal_id        TEXT   NOT NULL UNIQUE,
+  legacy_proposal_row_id    BIGINT REFERENCES roadmap_proposal.proposal(id) ON DELETE SET NULL,
+  canonical_proposal_id     TEXT,
+  canonical_proposal_row_id BIGINT REFERENCES roadmap_proposal.proposal(id) ON DELETE SET NULL,
+  classification            TEXT   NOT NULL
+    CHECK (classification IN (
+      'retained', 'delivered_evidence', 'duplicate',
+      'obsolete', 'reauthor_needed', 'superseded'
+    )),
+  rationale                 TEXT   NOT NULL
+    CHECK (length(TRIM(BOTH FROM rationale)) > 0),
+  evidence_refs             JSONB  NOT NULL DEFAULT '[]',
+  superseded_by_proposal_id TEXT,
+  superseded_by_row_id      BIGINT REFERENCES roadmap_proposal.proposal(id) ON DELETE SET NULL,
+  reviewed_by               TEXT,
+  reviewed_at               TIMESTAMPTZ,
+  created_by                TEXT   NOT NULL DEFAULT 'system',
+  notes                     TEXT,
+  created_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at                TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE roadmap.proposal_migration_map IS
-    'Control-plane projection helper: records how each legacy proposal row maps '
-    'into the agentHive2 documentation-shaped proposal stack. '
-    'This is a MIGRATION AUDIT LOG only — it does NOT replace the lifecycle '
-    'source of truth in roadmap_proposal.proposal, gate_decision_log, or '
-    'proposal_discussions. Populated by P998; queried by P999.';
+COMMENT ON TABLE roadmap_proposal.proposal_migration_map IS
+  'Control-plane projection helper mapping legacy proposals to agentHive2 canonical nodes. '
+  'Does NOT replace the proposal lifecycle source of truth: proposal, proposal_state_transitions, '
+  'gate_decision_log, or proposal_discussions. Agents must update both the mapping row (this table) '
+  'and the proposal maturity (set_maturity=obsolete) independently.';
 
-COMMENT ON COLUMN roadmap.proposal_migration_map.legacy_proposal_id IS
-    'Numeric proposal ID of the legacy row being classified. '
-    'Matches roadmap_proposal.proposal.id.';
+COMMENT ON COLUMN roadmap_proposal.proposal_migration_map.legacy_proposal_id IS
+  'Display ID of the legacy proposal (e.g. ''P42''). Text anchor that survives row deletion. Always populated.';
+COMMENT ON COLUMN roadmap_proposal.proposal_migration_map.classification IS
+  'P995 vocabulary: retained | delivered_evidence | duplicate | obsolete | reauthor_needed | superseded.';
+COMMENT ON COLUMN roadmap_proposal.proposal_migration_map.evidence_refs IS
+  'JSONB array of reference objects: [{type, ref, label?}]. '
+  'Accepted types: commit, ac_id, discussion_id, doc_slug, migration_id, review_id, external_url.';
 
-COMMENT ON COLUMN roadmap.proposal_migration_map.legacy_proposal_row_id IS
-    'FK to roadmap_proposal.proposal(id) for the legacy row. '
-    'NULL if the row was hard-deleted or not yet resolved. '
-    'SET NULL on delete so the mapping survives proposal pruning.';
+-- ── Indexes ────────────────────────────────────────────────────────────────
 
-COMMENT ON COLUMN roadmap.proposal_migration_map.canonical_proposal_id IS
-    'Numeric ID of the agentHive2 canonical proposal that owns or supersedes '
-    'this legacy row. NULL for unparented obsolete rows.';
+CREATE INDEX IF NOT EXISTS idx_pmm_legacy_row
+  ON roadmap_proposal.proposal_migration_map (legacy_proposal_row_id)
+  WHERE legacy_proposal_row_id IS NOT NULL;
 
-COMMENT ON COLUMN roadmap.proposal_migration_map.classification IS
-    'P995 vocabulary: retained | delivered_evidence | duplicate | '
-    'obsolete | reauthor_needed | superseded. '
-    'Enforced by CHECK constraint — no other values accepted.';
+CREATE INDEX IF NOT EXISTS idx_pmm_canonical_row
+  ON roadmap_proposal.proposal_migration_map (canonical_proposal_row_id)
+  WHERE canonical_proposal_row_id IS NOT NULL;
 
-COMMENT ON COLUMN roadmap.proposal_migration_map.rationale IS
-    'Non-empty human/agent-readable reason for the classification. '
-    'One sentence minimum. Required before a row is considered reviewed.';
+CREATE INDEX IF NOT EXISTS idx_pmm_delivered_evidence
+  ON roadmap_proposal.proposal_migration_map (canonical_proposal_id)
+  WHERE classification = 'delivered_evidence';
 
-COMMENT ON COLUMN roadmap.proposal_migration_map.evidence_refs IS
-    'JSONB array of structured evidence references. '
-    'Supported object shapes: '
-    '{type:"proposal",id:N}, {type:"commit",sha:"..."}, '
-    '{type:"ac",proposal_id:N,item_number:N}, '
-    '{type:"migration",number:N}, {type:"discussion",id:N}.';
+CREATE INDEX IF NOT EXISTS idx_pmm_dup_superseded
+  ON roadmap_proposal.proposal_migration_map (classification)
+  WHERE classification IN ('duplicate', 'superseded');
 
--- ─────────────────────────────────────────────────────────────────────────────
--- INDEXES
--- ─────────────────────────────────────────────────────────────────────────────
+CREATE INDEX IF NOT EXISTS idx_pmm_unresolved
+  ON roadmap_proposal.proposal_migration_map (legacy_proposal_id)
+  WHERE reviewed_by IS NULL OR reviewed_at IS NULL;
 
-CREATE INDEX IF NOT EXISTS idx_pmm_canonical_proposal_id
-    ON roadmap.proposal_migration_map (canonical_proposal_id)
-    WHERE canonical_proposal_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_pmm_incomplete
+  ON roadmap_proposal.proposal_migration_map (legacy_proposal_id)
+  WHERE reviewed_by IS NULL OR evidence_refs = '[]';
 
-CREATE INDEX IF NOT EXISTS idx_pmm_classification
-    ON roadmap.proposal_migration_map (classification);
+CREATE INDEX IF NOT EXISTS idx_pmm_superseded_by
+  ON roadmap_proposal.proposal_migration_map (superseded_by_row_id)
+  WHERE superseded_by_row_id IS NOT NULL;
 
--- Partial index for the review queue — only unreviewed rows need scanning.
-CREATE INDEX IF NOT EXISTS idx_pmm_unreviewed
-    ON roadmap.proposal_migration_map (created_at)
-    WHERE reviewed_by IS NULL;
+-- ── Updated-at trigger ─────────────────────────────────────────────────────
 
--- ─────────────────────────────────────────────────────────────────────────────
--- TRIGGER: keep updated_at current on every UPDATE
--- ─────────────────────────────────────────────────────────────────────────────
-
-CREATE OR REPLACE FUNCTION roadmap.fn_pmm_updated_at()
-RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE OR REPLACE FUNCTION roadmap_proposal.fn_set_migration_map_updated_at()
+  RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
-    NEW.updated_at := now();
-    RETURN NEW;
+  NEW.updated_at := clock_timestamp();
+  RETURN NEW;
 END;
 $$;
-
-DROP TRIGGER IF EXISTS trg_pmm_updated_at ON roadmap.proposal_migration_map;
-CREATE TRIGGER trg_pmm_updated_at
-    BEFORE UPDATE ON roadmap.proposal_migration_map
-    FOR EACH ROW EXECUTE FUNCTION roadmap.fn_pmm_updated_at();
-
--- ─────────────────────────────────────────────────────────────────────────────
--- ADD FK COLUMNS to existing table if 121-p997 draft was already applied
--- (idempotent; IF NOT EXISTS prevents errors on fresh installs)
--- ─────────────────────────────────────────────────────────────────────────────
 
 DO $$
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'roadmap'
-          AND table_name   = 'proposal_migration_map'
-          AND column_name  = 'legacy_proposal_row_id'
-    ) THEN
-        ALTER TABLE roadmap.proposal_migration_map
-            ADD COLUMN legacy_proposal_row_id BIGINT
-                REFERENCES roadmap_proposal.proposal(id) ON DELETE SET NULL;
-    END IF;
-
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'roadmap'
-          AND table_name   = 'proposal_migration_map'
-          AND column_name  = 'canonical_proposal_row_id'
-    ) THEN
-        ALTER TABLE roadmap.proposal_migration_map
-            ADD COLUMN canonical_proposal_row_id BIGINT
-                REFERENCES roadmap_proposal.proposal(id) ON DELETE SET NULL;
-    END IF;
-
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'roadmap'
-          AND table_name   = 'proposal_migration_map'
-          AND column_name  = 'superseded_by_row_id'
-    ) THEN
-        ALTER TABLE roadmap.proposal_migration_map
-            ADD COLUMN superseded_by_row_id BIGINT
-                REFERENCES roadmap_proposal.proposal(id) ON DELETE SET NULL;
-    END IF;
-
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'roadmap'
-          AND table_name   = 'proposal_migration_map'
-          AND column_name  = 'created_by'
-    ) THEN
-        ALTER TABLE roadmap.proposal_migration_map
-            ADD COLUMN created_by TEXT;
-    END IF;
-
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'roadmap'
-          AND table_name   = 'proposal_migration_map'
-          AND column_name  = 'notes'
-    ) THEN
-        ALTER TABLE roadmap.proposal_migration_map
-            ADD COLUMN notes TEXT;
-    END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'trg_migration_map_updated_at'
+      AND tgrelid = 'roadmap_proposal.proposal_migration_map'::regclass
+  ) THEN
+    CREATE TRIGGER trg_migration_map_updated_at
+      BEFORE UPDATE ON roadmap_proposal.proposal_migration_map
+      FOR EACH ROW EXECUTE FUNCTION roadmap_proposal.fn_set_migration_map_updated_at();
+  END IF;
 END;
 $$;
 
--- ─────────────────────────────────────────────────────────────────────────────
--- VIEW 1: v_migration_unresolved
--- Rows that are not yet fully reviewed or are missing required linkage.
--- ─────────────────────────────────────────────────────────────────────────────
+-- ── Views ──────────────────────────────────────────────────────────────────
 
-CREATE OR REPLACE VIEW roadmap.v_migration_unresolved AS
-SELECT
-    m.id,
-    m.legacy_proposal_id,
-    m.canonical_proposal_id,
-    m.classification,
-    m.rationale,
-    m.reviewed_by,
-    m.reviewed_at,
-    m.created_at
-FROM roadmap.proposal_migration_map m
-WHERE
-    -- Missing reviewer or review timestamp
-    m.reviewed_by IS NULL
-    OR m.reviewed_at IS NULL
-    -- Non-obsolete rows with no canonical target
-    OR (m.classification NOT IN ('obsolete') AND m.canonical_proposal_id IS NULL)
-    -- Duplicate/superseded rows with no superseded_by pointer
-    OR (m.classification IN ('duplicate', 'superseded') AND m.superseded_by_proposal_id IS NULL)
-ORDER BY m.legacy_proposal_id;
+-- Rows where reviewer, timestamp, or canonical target is missing
+CREATE OR REPLACE VIEW roadmap_proposal.v_migration_unresolved AS
+  SELECT
+    id, legacy_proposal_id, legacy_proposal_row_id, classification,
+    rationale, evidence_refs, canonical_proposal_id,
+    reviewed_by, reviewed_at, created_at, updated_at,
+    CASE
+      WHEN reviewed_by IS NULL THEN 'missing_reviewer'
+      WHEN reviewed_at IS NULL THEN 'missing_reviewed_at'
+      WHEN canonical_proposal_id IS NULL
+           AND classification NOT IN ('obsolete', 'duplicate') THEN 'missing_canonical_id'
+      WHEN classification IN ('superseded', 'duplicate')
+           AND superseded_by_proposal_id IS NULL THEN 'missing_superseded_by'
+      ELSE 'unresolved'
+    END AS unresolved_reason
+  FROM roadmap_proposal.proposal_migration_map m
+  WHERE reviewed_by IS NULL
+     OR reviewed_at IS NULL
+     OR (canonical_proposal_id IS NULL
+         AND classification NOT IN ('obsolete', 'duplicate'))
+     OR (classification IN ('superseded', 'duplicate')
+         AND superseded_by_proposal_id IS NULL);
 
-COMMENT ON VIEW roadmap.v_migration_unresolved IS
-    'Mapping rows that require follow-up: missing reviewer, missing review '
-    'timestamp, non-obsolete rows without a canonical target, or '
-    'duplicate/superseded rows without a superseded_by pointer. '
-    'Part of P997 AC-3 and AC-8 query surface. '
-    'This view is a PROJECTION HELPER only — it does not replace the '
-    'lifecycle source of truth in roadmap_proposal.proposal.';
+COMMENT ON VIEW roadmap_proposal.v_migration_unresolved IS
+  'Rows missing reviewer, timestamp, canonical ID (non-obsolete/duplicate), or superseded_by (dup/superseded). '
+  'Projection helper — does NOT replace proposal lifecycle tables.';
 
--- ─────────────────────────────────────────────────────────────────────────────
--- VIEW 2: v_migration_dup_superseded
--- Duplicate and superseded rows with their replacement chain.
--- ─────────────────────────────────────────────────────────────────────────────
+-- Duplicate / superseded cluster with replacement chain
+CREATE OR REPLACE VIEW roadmap_proposal.v_migration_dup_superseded AS
+  SELECT
+    id, legacy_proposal_id, legacy_proposal_row_id, classification, rationale,
+    superseded_by_proposal_id, superseded_by_row_id, evidence_refs,
+    reviewed_by, reviewed_at,
+    canonical_proposal_id AS replacement_canonical_id,
+    canonical_proposal_row_id AS replacement_canonical_row_id
+  FROM roadmap_proposal.proposal_migration_map m
+  WHERE classification IN ('duplicate', 'superseded')
+  ORDER BY classification, legacy_proposal_id;
 
-CREATE OR REPLACE VIEW roadmap.v_migration_dup_superseded AS
-SELECT
-    m.legacy_proposal_id,
-    m.classification,
-    m.rationale,
-    m.superseded_by_proposal_id     AS replaced_by_proposal_id,
-    m.canonical_proposal_id,
-    m.reviewed_by,
-    m.reviewed_at,
-    -- Show the replacement chain title when available
-    rep.id                          AS replacement_row_id
-FROM roadmap.proposal_migration_map m
-LEFT JOIN roadmap.proposal_migration_map rep
-    ON rep.legacy_proposal_id = m.superseded_by_proposal_id
-WHERE m.classification IN ('duplicate', 'superseded')
-ORDER BY m.classification, m.legacy_proposal_id;
+COMMENT ON VIEW roadmap_proposal.v_migration_dup_superseded IS
+  'Duplicate and superseded mapping rows with their replacement chain. '
+  'Projection helper — does NOT replace proposal lifecycle tables.';
 
-COMMENT ON VIEW roadmap.v_migration_dup_superseded IS
-    'Duplicate and superseded mapping rows with their replacement chain. '
-    'Joins to proposal_migration_map on superseded_by_proposal_id to show '
-    'whether the replacement itself is mapped. '
-    'Part of P997 AC-3 and AC-8 query surface. '
-    'This view is a PROJECTION HELPER only — it does not replace the '
-    'lifecycle source of truth in roadmap_proposal.proposal.';
+-- Delivered evidence (COMPLETE proposals with verified ACs)
+CREATE OR REPLACE VIEW roadmap_proposal.v_migration_delivered_evidence AS
+  SELECT
+    id, legacy_proposal_id, legacy_proposal_row_id, canonical_proposal_id,
+    canonical_proposal_row_id, rationale, evidence_refs, reviewed_by, reviewed_at,
+    jsonb_array_length(evidence_refs) AS evidence_ref_count,
+    (evidence_refs = '[]') AS evidence_missing
+  FROM roadmap_proposal.proposal_migration_map m
+  WHERE classification = 'delivered_evidence'
+  ORDER BY legacy_proposal_id;
 
--- ─────────────────────────────────────────────────────────────────────────────
--- VIEW 3: v_migration_delivered_evidence
--- Delivered-evidence rows with evidence count and missing-evidence flag.
--- ─────────────────────────────────────────────────────────────────────────────
+COMMENT ON VIEW roadmap_proposal.v_migration_delivered_evidence IS
+  'Delivered-evidence mappings with evidence reference count and missing-evidence flag. '
+  'Projection helper — does NOT replace proposal lifecycle tables.';
 
-CREATE OR REPLACE VIEW roadmap.v_migration_delivered_evidence AS
-SELECT
-    m.legacy_proposal_id,
-    m.canonical_proposal_id,
-    m.rationale,
-    m.evidence_refs,
-    jsonb_array_length(m.evidence_refs)             AS evidence_ref_count,
-    (jsonb_array_length(m.evidence_refs) = 0)       AS evidence_missing,
-    m.reviewed_by,
-    m.reviewed_at
-FROM roadmap.proposal_migration_map m
-WHERE m.classification = 'delivered_evidence'
-ORDER BY m.canonical_proposal_id NULLS LAST, m.legacy_proposal_id;
+-- Rows missing reviewer, timestamp, evidence, or canonical_id
+CREATE OR REPLACE VIEW roadmap_proposal.v_migration_incomplete AS
+  SELECT
+    id, legacy_proposal_id, legacy_proposal_row_id, classification,
+    reviewed_by, reviewed_at,
+    (evidence_refs = '[]')                                            AS evidence_missing,
+    (reviewed_by IS NULL)                                             AS reviewer_missing,
+    (reviewed_at IS NULL)                                             AS timestamp_missing,
+    (canonical_proposal_id IS NULL
+     AND classification NOT IN ('obsolete', 'duplicate'))            AS canonical_missing,
+    notes, updated_at
+  FROM roadmap_proposal.proposal_migration_map m
+  WHERE reviewed_by IS NULL
+     OR reviewed_at IS NULL
+     OR evidence_refs = '[]'
+     OR (canonical_proposal_id IS NULL
+         AND classification NOT IN ('obsolete', 'duplicate'))
+  ORDER BY legacy_proposal_id;
 
-COMMENT ON VIEW roadmap.v_migration_delivered_evidence IS
-    'Mapping rows classified as delivered_evidence (COMPLETE proposals with '
-    'verified ACs, referenced as evidence not re-authored). '
-    'Exposes evidence_ref_count and evidence_missing flag for quality checks. '
-    'Part of P997 AC-3 and AC-8 query surface. '
-    'This view is a PROJECTION HELPER only — it does not replace the '
-    'lifecycle source of truth in roadmap_proposal.proposal.';
+COMMENT ON VIEW roadmap_proposal.v_migration_incomplete IS
+  'Rows with per-column boolean gap flags for reviewer, timestamp, evidence refs, and canonical ID. '
+  'Projection helper — does NOT replace proposal lifecycle tables.';
 
--- ─────────────────────────────────────────────────────────────────────────────
--- VIEW 4: v_migration_incomplete
--- All rows with per-column boolean flags for every missing field.
--- Superset of v_migration_unresolved; designed for bulk triage.
--- ─────────────────────────────────────────────────────────────────────────────
+-- Classification roll-up summary
+CREATE OR REPLACE VIEW roadmap_proposal.v_migration_classification_summary AS
+  SELECT
+    classification,
+    count(*)                                                            AS total,
+    count(*) FILTER (WHERE reviewed_by IS NOT NULL AND reviewed_at IS NOT NULL) AS reviewed,
+    count(*) FILTER (WHERE reviewed_by IS NULL OR reviewed_at IS NULL)          AS unreviewed,
+    count(*) FILTER (WHERE evidence_refs <> '[]')                               AS with_evidence,
+    count(*) FILTER (WHERE evidence_refs = '[]')                                AS without_evidence,
+    count(*) FILTER (WHERE canonical_proposal_id IS NOT NULL)                   AS with_canonical
+  FROM roadmap_proposal.proposal_migration_map
+  GROUP BY classification
+  ORDER BY classification;
 
-CREATE OR REPLACE VIEW roadmap.v_migration_incomplete AS
-SELECT
-    m.id,
-    m.legacy_proposal_id,
-    m.classification,
-    m.reviewed_by,
-    m.reviewed_at,
-    m.canonical_proposal_id,
-    m.superseded_by_proposal_id,
-    m.evidence_refs,
+COMMENT ON VIEW roadmap_proposal.v_migration_classification_summary IS
+  'Roll-up counts by classification — total, reviewed, unreviewed, with/without evidence, with canonical. '
+  'Projection helper — does NOT replace proposal lifecycle tables.';
 
-    -- Per-column boolean flags
-    (m.reviewed_by  IS NULL)                                                AS missing_reviewer,
-    (m.reviewed_at  IS NULL)                                                AS missing_reviewed_at,
-    (jsonb_array_length(m.evidence_refs) = 0)                               AS missing_evidence,
-    (m.canonical_proposal_id IS NULL
-        AND m.classification NOT IN ('obsolete'))                           AS missing_canonical_id,
-    (m.superseded_by_proposal_id IS NULL
-        AND m.classification IN ('duplicate', 'superseded'))                AS missing_superseded_by
-FROM roadmap.proposal_migration_map m
-WHERE
-    m.reviewed_by IS NULL
-    OR m.reviewed_at IS NULL
-    OR jsonb_array_length(m.evidence_refs) = 0
-    OR (m.canonical_proposal_id IS NULL AND m.classification NOT IN ('obsolete'))
-    OR (m.superseded_by_proposal_id IS NULL AND m.classification IN ('duplicate', 'superseded'))
-ORDER BY m.legacy_proposal_id;
+-- ── Migration history record ────────────────────────────────────────────────
 
-COMMENT ON VIEW roadmap.v_migration_incomplete IS
-    'All mapping rows with at least one incomplete field, with per-column '
-    'boolean flags: missing_reviewer, missing_reviewed_at, missing_evidence, '
-    'missing_canonical_id, missing_superseded_by. '
-    'Designed for bulk triage during the P998 corpus inventory phase. '
-    'Part of P997 AC-3 and AC-8 query surface. '
-    'This view is a PROJECTION HELPER only — it does not replace the '
-    'lifecycle source of truth in roadmap_proposal.proposal.';
-
--- ─────────────────────────────────────────────────────────────────────────────
--- VIEW 5: v_migration_classification_summary
--- Roll-up counts by classification, with reviewed vs unreviewed breakdown.
--- ─────────────────────────────────────────────────────────────────────────────
-
-CREATE OR REPLACE VIEW roadmap.v_migration_classification_summary AS
-SELECT
-    m.classification,
-    COUNT(*)                                                    AS total,
-    COUNT(*) FILTER (WHERE m.reviewed_by IS NOT NULL
-                       AND m.reviewed_at IS NOT NULL)           AS reviewed,
-    COUNT(*) FILTER (WHERE m.reviewed_by IS NULL
-                       OR  m.reviewed_at IS NULL)               AS unreviewed,
-    COUNT(*) FILTER (WHERE jsonb_array_length(m.evidence_refs) > 0) AS with_evidence,
-    COUNT(*) FILTER (WHERE jsonb_array_length(m.evidence_refs) = 0) AS without_evidence
-FROM roadmap.proposal_migration_map m
-GROUP BY m.classification
-ORDER BY total DESC;
-
-COMMENT ON VIEW roadmap.v_migration_classification_summary IS
-    'Roll-up counts grouped by classification. Shows total, reviewed, '
-    'unreviewed, with_evidence, and without_evidence per category. '
-    'Used as a progress dashboard during the P998 corpus inventory phase. '
-    'Part of P997 AC-3 and AC-8 query surface. '
-    'This view is a PROJECTION HELPER only — it does not replace the '
-    'lifecycle source of truth in roadmap_proposal.proposal.';
-
--- ─────────────────────────────────────────────────────────────────────────────
--- DROP obsolete view names from the 121-p997 draft (if applied)
--- ─────────────────────────────────────────────────────────────────────────────
-
-DROP VIEW IF EXISTS roadmap.v_migration_superseded;
-DROP VIEW IF EXISTS roadmap.v_migration_projection_tree;
+INSERT INTO roadmap.migration_history (filename, checksum_sha256, applied_by, environment, status)
+VALUES (
+  '122-p997-proposal-migration-map.sql',
+  'p997-proposal-migration-map-schema-views',
+  'P997-developer-alan',
+  'development',
+  'applied'
+)
+ON CONFLICT (filename) DO UPDATE
+  SET status     = 'applied',
+      applied_at = now()
+  WHERE roadmap.migration_history.applied_at IS NULL;
 
 COMMIT;

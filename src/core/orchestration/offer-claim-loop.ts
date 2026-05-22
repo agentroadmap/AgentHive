@@ -16,6 +16,9 @@
 import { hostname } from "node:os";
 import { query as _pgQuery } from "../../infra/postgres/pool.ts";
 import type { ClaimedOffer, OfferDispatcher } from "./offer-dispatch.ts";
+import { ObservabilityWriter } from "../observability/observability-writer.ts";
+
+const obs = new ObservabilityWriter("agency:offer-claim-loop");
 
 // Allows tests to inject a mock query function without module-level mocking.
 type QueryFn = typeof _pgQuery;
@@ -167,6 +170,18 @@ export class OfferClaimLoop {
 			const row = rows[0];
 			if (!row) return null;
 
+			const metadata = row.metadata ?? {};
+			// P908-D: emit offer_claimed span correlated to the trace started in postWorkOffer.
+			const traceId = typeof metadata.trace_id === "string" ? metadata.trace_id : null;
+			if (traceId) {
+				const span = await obs.startSpan({
+					traceId,
+					operation: "offer_claimed",
+					attributes: { dispatch_id: Number(row.dispatch_id), proposal_id: Number(row.proposal_id), role: row.dispatch_role },
+				});
+				void obs.closeSpan({ spanId: span.spanId });
+			}
+
 			return {
 				offerId: String(row.dispatch_id),
 				dispatchId: Number(row.dispatch_id),
@@ -176,7 +191,7 @@ export class OfferClaimLoop {
 				claimToken: row.claim_token,
 				claimExpiresAt: row.claim_expires_at,
 				offerVersion: Number(row.offer_version),
-				metadata: row.metadata ?? {},
+				metadata,
 				leaseTtlSeconds: this.leaseTtlSeconds,
 			};
 		} catch (err) {

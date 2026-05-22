@@ -94,15 +94,19 @@
 --   'ON DELETE SET NULL = safe even if the central catalog row is removed.';
 
 -- Template for Phase 2 per-project workflow FK addition:
+-- NOTE (drafter correction 2026-05-20): hiveCentral uses the 007-approach (BIGINT PK uid=1000(gary) gid=1000(gary) groups=1000(gary),4(adm),24(cdrom),27(sudo),30(dip),46(plugdev),110(lxd),119(docker),991(ollama),1017(dev)).
+-- The column type must be BIGINT referencing template.workflow_template(id), NOT TEXT(template_id).
+-- If per-project tables live in a separate DB from hiveCentral, this is a soft FK (no constraint).
 --
 -- ALTER TABLE <project_schema>.workflow
---   ADD COLUMN IF NOT EXISTS template_id TEXT
---     REFERENCES template.workflow_template(template_id)
---     ON UPDATE RESTRICT ON DELETE RESTRICT;
+--   ADD COLUMN IF NOT EXISTS workflow_template_id BIGINT
+--     -- soft FK: REFERENCES template.workflow_template(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+--     -- (enforce in application code if cross-DB; add constraint if co-located in hiveCentral)
+--     ;
 --
 -- CREATE INDEX IF NOT EXISTS idx_<project_schema>_workflow_template_id
---   ON <project_schema>.workflow (template_id)
---   WHERE template_id IS NOT NULL;
+--   ON <project_schema>.workflow (workflow_template_id)
+--   WHERE workflow_template_id IS NOT NULL;
 
 -- ── Phase 2 backfill strategy ────────────────────────────────────────────────
 -- After adding workforce_agent_id column, backfill by DID match:

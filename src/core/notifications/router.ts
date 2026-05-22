@@ -45,6 +45,7 @@ interface QueueRow {
 	proposal_id: string | number | null;
 	title: string;
 	body: string;
+	payload: Record<string, unknown> | null;
 	metadata: Record<string, unknown> | null;
 	created_at: Date | string;
 	dispatch_attempts: number;
@@ -149,11 +150,16 @@ export class NotificationRouter {
 
 	private async claimBatch(): Promise<QueueRow[]> {
 		// FIFO by created_at within severity rank; newer CRITICAL outranks older INFO.
+		// Schema drift fix (P1140 sibling): live notification_queue lacks
+		// `payload`, `dispatched_at`, and `next_attempt_at` columns. Pending-row
+		// detection uses `status='pending'` (live CHECK constraint). payload is
+		// materialized as NULL so QueueRow stays shape-compatible.
 		const { rows } = await this.deps.pool.query<QueueRow>(
 			`SELECT id, severity, kind, channel, proposal_id,
-			        title, body, metadata, created_at, dispatch_attempts
+			        title, body, NULL::jsonb AS payload, metadata, created_at, dispatch_attempts
 			   FROM roadmap.notification_queue
 			  WHERE status = 'pending'
+			    AND created_at <= now()
 			  ORDER BY
 			    CASE severity
 			      WHEN 'CRITICAL' THEN 0
@@ -213,10 +219,8 @@ export class NotificationRouter {
 			return;
 		}
 
-		await this.recordAttempt(envelope.queueId, newAttempts, lastError);
-		// Re-enqueue after backoff — leave row in 'pending' so the poll picks it
-		// up again. Backoff is enforced by checking dispatch_attempts vs created_at.
 		const delay = BACKOFF_MS[Math.min(newAttempts - 1, BACKOFF_MS.length - 1)];
+		await this.recordAttempt(envelope.queueId, newAttempts, lastError, delay);
 		setTimeout(() => void this.scheduleDrain(), delay).unref?.();
 	}
 
@@ -273,6 +277,13 @@ export class NotificationRouter {
 			}));
 	}
 
+	// Schema drift fix (P1140 sibling): live notification_queue lacks
+	// `dispatched_at` and `next_attempt_at` columns. delivered_at + status
+	// carry the terminal-success/failure signal; recordAttempt no longer
+	// schedules an explicit next attempt — the poll cadence picks pending
+	// rows back up on next tick. Retry-delay precision lost (was per-row
+	// backoff; now uniform poll interval) — flagged for the proper router
+	// rework when the notification subsystem is consolidated.
 	private async markSent(queueId: number): Promise<void> {
 		await this.deps.pool.query(
 			`UPDATE roadmap.notification_queue
@@ -314,7 +325,12 @@ export class NotificationRouter {
 		queueId: number,
 		attempts: number,
 		lastError: string,
+		_delayMs: number,
 	): Promise<void> {
+		// next_attempt_at column gone; row stays status='pending' so the next
+		// poll picks it up. dispatch_attempts increment lets max-attempt limit
+		// still terminate retry loop. Delay precision deferred to a proper
+		// router rework.
 		await this.deps.pool.query(
 			`UPDATE roadmap.notification_queue
 			    SET dispatch_attempts = $2,
@@ -330,8 +346,8 @@ export class NotificationRouter {
 	): Promise<void> {
 		await this.deps.pool.query(
 			`INSERT INTO roadmap.notification_queue
-			   (proposal_id, severity, kind, title, body, metadata)
-			 VALUES ($1, 'CRITICAL', 'notification_dispatch_failed', $2, $3, $4::jsonb)`,
+			   (proposal_id, severity, kind, title, body, payload, metadata)
+			 VALUES ($1, 'CRITICAL', 'notification_dispatch_failed', $2, $3, $4::jsonb, $4::jsonb)`,
 			[
 				envelope.proposalId,
 				`Dispatch failed for ${envelope.kind} (queue_id=${envelope.queueId})`,
@@ -355,7 +371,7 @@ function toEnvelope(row: QueueRow): NotificationEnvelope {
 		queueId: Number(row.id),
 		severity: row.severity,
 		kind: row.kind ?? "",
-		payload: (row.metadata ?? {}) as Record<string, unknown>,
+		payload: (row.payload ?? row.metadata ?? {}) as Record<string, unknown>,
 		proposalId:
 			row.proposal_id === null || row.proposal_id === undefined
 				? null

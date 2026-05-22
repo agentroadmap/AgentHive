@@ -186,7 +186,7 @@ async function dispatchMessage(msg: LiaisonMessage, agencyId: string): Promise<v
 /**
  * Start the liaison message dispatch loop for an agency.
  *
- * Listens on pg_notify channel 'liaison_message_<agencyId>' (fired by
+ * Listens on pg_notify channel 'msg_<agencyId>' (fired by
  * trig_liaison_notify_new_message on liaison_message INSERT). Routes each
  * arriving message by kind to the appropriate handler.
  *
@@ -194,6 +194,7 @@ async function dispatchMessage(msg: LiaisonMessage, agencyId: string): Promise<v
  */
 export function startLiaisonHub(agencyId: string): { stop: () => void } {
   const controller = new AbortController();
+  const processedIds = new Set<string>();
 
   const run = async () => {
     if (process.env.DEBUG_LIAISON_HUB) {
@@ -201,9 +202,6 @@ export function startLiaisonHub(agencyId: string): { stop: () => void } {
     }
 
     // Boot-time replay: process any unacked messages missed while hub was down.
-    // Must run before the LISTEN loop — pg_notify for missed messages is gone.
-    // Bounded by LIAISON_REPLAY_WINDOW_HOURS (default 6h) to avoid re-triggering
-    // historical backlogs on agencies with long-running unacked message queues.
     try {
       const replayWindowHours = parseInt(
         process.env.LIAISON_REPLAY_WINDOW_HOURS ?? '6', 10
@@ -214,6 +212,9 @@ export function startLiaisonHub(agencyId: string): { stop: () => void } {
         console.log(`[LiaisonHub] ${agencyId}: replaying ${unacked.length} unacked message(s) (window=${replayWindowHours}h)`);
         for (const msg of unacked) {
           if (controller.signal.aborted) break;
+          if (processedIds.has(msg.message_id)) continue;
+          processedIds.add(msg.message_id);
+
           try {
             await dispatchMessage(msg, agencyId);
             await acknowledgeMessage(msg.message_id, 'ok');
@@ -229,6 +230,9 @@ export function startLiaisonHub(agencyId: string): { stop: () => void } {
 
     try {
       for await (const msg of listenForMessages(agencyId, controller.signal)) {
+        if (processedIds.has(msg.message_id)) continue;
+        processedIds.add(msg.message_id);
+
         // Skip already-acked messages (guard against replay+listen race window)
         if (msg.acked_at) continue;
         try {
@@ -244,6 +248,7 @@ export function startLiaisonHub(agencyId: string): { stop: () => void } {
         console.error(`[LiaisonHub] ${agencyId}: listener error:`, err);
       }
     } finally {
+      processedIds.clear();
       if (process.env.DEBUG_LIAISON_HUB) {
         console.log(`[LiaisonHub] ${agencyId}: stopped`);
       }

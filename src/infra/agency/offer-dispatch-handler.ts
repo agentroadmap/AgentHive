@@ -24,13 +24,19 @@ import { query } from "../postgres/pool.ts";
 import { spawnAgent } from "../../core/orchestration/agent-spawner.ts";
 import type { SpawnResult } from "../../core/orchestration/agent-spawner.ts";
 import type { LiaisonMessage } from "./liaison-message-types.ts";
+// P1140 sibling: `sendMessage` is the default for sendUplink (line ~257);
+// referenced as a bare identifier without an import, causing
+// ReferenceError on every offer_dispatch handler invocation. Surfaced
+// once commit a30efd37 unblocked the LiaisonHub consumption path.
 import { sendMessage } from "./liaison-message-service.ts";
 import {
-	detectUsageLimit,
-	isLongWindow,
-	resetSecondsForSignal,
-	type UsageLimitProvider,
-} from "./usage-limit-detector.ts";
+	classifyProviderSignal,
+	setProviderCooldown,
+	recordProviderSuccess,
+} from "../../core/orchestration/provider-cooldown.ts";
+import { ObservabilityWriter } from "../../core/observability/observability-writer.ts";
+
+const obs = new ObservabilityWriter("agency:offer-dispatch-handler");
 
 export type SqlExec = (sql: string, params?: unknown[]) => Promise<unknown>;
 
@@ -75,40 +81,56 @@ interface OfferDispatchEnvelope {
 	lease_ttl_seconds?: number;
 	/** P914: worktree directory basename selected by the orchestrator. */
 	worktree_hint?: string | null;
-	/** P771: role_profile.id for route-policy filtering in spawnAgent. */
-	role_profile_id?: number | null;
+	/** P908-D: trace correlation UUID threaded from postWorkOffer. */
+	trace_id?: string | null;
 }
 
 const DEFAULT_LEASE_TTL_SECONDS = 60;
 
 /**
- * Per-agency concurrent-spawn counter (per-process module-level state).
+ * Per-agency concurrent-spawn counter (module-level Map, keyed by agency_id).
  *
- * Each agency runs in its own Node process; this counter tracks the number of
- * in-flight runSpawn promises for the local agency. The threshold is read
- * from roadmap_workforce.provider_registry.max_in_flight per offer so an
- * operator can tune the per-agency cap via SQL without restart.
+ * Post-P1132 (A2A host consolidation), all attached agencies share ONE Node
+ * process. Pre-P1132 this was a per-process singleton because each agency had
+ * its own systemd unit; the same singleton in the shared process meant 5 spawns
+ * total across ALL agencies tripped every agency's cap (5/4) — observed
+ * 2026-05-19 as "at capacity" spam returning every offer.
+ *
+ * Fix (Bug 7): per-agency Map. Each agency tracks its own in-flight count
+ * against its own provider_registry.max_in_flight.
  *
  * Semantics (per operator policy 2026-05-14):
  *   "Claim is calculated intention; if there is an obstacle, an agency can
  *    regret and return the offer."
  *
- * When activeSpawnCount >= max_in_flight at the moment a dispatch arrives,
- * the handler calls fn_return_work_offer (NOT fn_complete_work_offer with
- * 'failed'). fn_return_work_offer reverts offer_status from 'claimed' to
- * 'open', does not increment reissue_count, and emits work_offers notify so
- * any other idle agency picks it up immediately.
+ * When count >= max_in_flight at the moment a dispatch arrives, the handler
+ * calls fn_return_work_offer (NOT fn_complete_work_offer with 'failed').
+ * fn_return_work_offer reverts offer_status from 'claimed' to 'open', does
+ * not increment reissue_count, and emits work_offers notify so any other
+ * idle agency picks it up immediately.
  */
-let activeSpawnCount = 0;
+const activeSpawnCounts = new Map<string, number>();
+function getActiveCount(agencyId: string): number {
+	return activeSpawnCounts.get(agencyId) ?? 0;
+}
+function incActiveCount(agencyId: string): void {
+	activeSpawnCounts.set(agencyId, getActiveCount(agencyId) + 1);
+}
+function decActiveCount(agencyId: string): void {
+	activeSpawnCounts.set(agencyId, Math.max(0, getActiveCount(agencyId) - 1));
+}
 
 /** @internal — reset for tests that share module state. */
 export function _resetActiveSpawnForTest(): void {
-	activeSpawnCount = 0;
+	activeSpawnCounts.clear();
 }
 
-/** @internal — peek for tests. */
-export function _activeSpawnCountForTest(): number {
-	return activeSpawnCount;
+/** @internal — peek for tests. Pass agencyId to get per-agency count, omit for global sum. */
+export function _activeSpawnCountForTest(agencyId?: string): number {
+	if (agencyId) return getActiveCount(agencyId);
+	let sum = 0;
+	for (const n of activeSpawnCounts.values()) sum += n;
+	return sum;
 }
 
 const defaultExec: SqlExec = (sql, params) =>
@@ -174,9 +196,10 @@ export async function handleOfferDispatch(
 	// rotates the claim token, and pg_notify's the claim loop so an idle
 	// agency picks it up. No reissue penalty, no failure metric pollution.
 	const maxInFlight = await readAgencyMaxInFlight(agencyId, exec, logger);
-	if (activeSpawnCount >= maxInFlight) {
+	const currentCount = getActiveCount(agencyId);
+	if (currentCount >= maxInFlight) {
 		logger.warn(
-			`[OfferDispatchHandler] ${agencyId}: at capacity (${activeSpawnCount}/${maxInFlight}); returning offer=${payload.offer_id} role=${payload.role}`,
+			`[OfferDispatchHandler] ${agencyId}: at capacity (${currentCount}/${maxInFlight}); returning offer=${payload.offer_id} role=${payload.role}`,
 		);
 		await exec(
 			`SELECT roadmap_workforce.fn_return_work_offer($1, $2, $3, $4)`,
@@ -184,7 +207,7 @@ export async function handleOfferDispatch(
 				payload.dispatch_id,
 				agencyId,
 				payload.claim_token,
-				`agency_at_capacity:${activeSpawnCount}/${maxInFlight}`,
+				`agency_at_capacity:${currentCount}/${maxInFlight}`,
 			],
 		).catch((err) => {
 			logger.error(
@@ -264,9 +287,9 @@ export async function handleOfferDispatch(
 	// Reserve a capacity slot. The `finally` decrements whether the spawn
 	// succeeds, fails, throws, or times out — so the counter never gets stuck
 	// above zero if runSpawn misbehaves.
-	activeSpawnCount++;
+	incActiveCount(agencyId);
 	spawnPromise.finally(() => {
-		activeSpawnCount = Math.max(0, activeSpawnCount - 1);
+		decActiveCount(agencyId);
 	});
 }
 
@@ -302,6 +325,21 @@ async function runSpawn(args: {
 	const dispatchId = payload.dispatch_id as number;
 	const claimToken = payload.claim_token as string;
 
+	// P908-D: open offer_completed lifecycle span for the full spawn duration.
+	// Best-effort — errors are swallowed inside ObservabilityWriter.
+	const traceId = typeof payload.trace_id === "string" && payload.trace_id.length > 0
+		? payload.trace_id
+		: null;
+	let completionSpanId: string | null = null;
+	if (traceId) {
+		const span = await obs.startSpan({
+			traceId,
+			operation: "offer_completed",
+			attributes: { dispatch_id: dispatchId, agency_id: agencyId, offer_id: payload.offer_id },
+		});
+		completionSpanId = span.spanId;
+	}
+
 	const renewalTimer = setInterval(() => {
 		void exec(
 			`SELECT roadmap_workforce.fn_renew_lease($1, $2, $3, $4)`,
@@ -318,15 +356,46 @@ async function runSpawn(args: {
 	let spawnError: Error | null = null;
 
 	try {
-		// Prefer the agency's own AGENTHIVE_AGENT_PROVIDER / AGENCY_PROVIDER env
-		// over the orchestrator-sent route_hint. The orchestrator defaults the hint
-		// to "claude" when the offer carries no provider preference, which would
-		// cause codex/gemini/copilot agencies to spawn claude processes instead of
-		// their own configured provider.
-		const agencyProvider =
-			(process.env.AGENTHIVE_AGENT_PROVIDER?.trim() ||
-				process.env.AGENCY_PROVIDER?.trim() ||
-				payload.route_hint) as never;
+		// Bug 8 fix (P1140-sib, 2026-05-19): per-agency provider selection.
+		// Pre-P1132 each agency had its own systemd unit with
+		// Environment=AGENTHIVE_AGENT_PROVIDER=<provider> in the unit file;
+		// process.env worked per-agency. Post-P1132 all agencies share one
+		// A2A host process — process.env is shared, so the env-var fallback
+		// resolved to the same value for every agency (or unset, falling
+		// through to route_hint='claude'). Result: codex/gemini/copilot
+		// agencies all spawned claude binaries.
+		//
+		// Fix: read preferred_provider from agent_registry by agencyId at
+		// spawn time. Per-process env vars still win as an operator override.
+		let agencyProvider: string | null =
+			process.env.AGENTHIVE_AGENT_PROVIDER?.trim() ||
+			process.env.AGENCY_PROVIDER?.trim() ||
+			null;
+		if (!agencyProvider) {
+			try {
+				const { rows } = await query<{ preferred_provider: string | null }>(
+					`SELECT preferred_provider FROM roadmap_workforce.agent_registry
+					 WHERE agent_identity = $1 LIMIT 1`,
+					[agencyId],
+				);
+				agencyProvider = rows[0]?.preferred_provider ?? null;
+			} catch (err) {
+				logger.warn(
+					`[OfferDispatchHandler] ${agencyId}: preferred_provider lookup failed:`,
+					err instanceof Error ? err.message : err,
+				);
+			}
+		}
+		// Last-resort: orchestrator-sent route hint. Logged loudly because
+		// arriving here means the agency lacks a preferred_provider AND no
+		// process-wide override is set — the offer is at risk of running on
+		// the wrong CLI (claude default).
+		if (!agencyProvider) {
+			agencyProvider = payload.route_hint;
+			logger.warn(
+				`[OfferDispatchHandler] ${agencyId}: no preferred_provider in agent_registry; falling back to route_hint='${payload.route_hint}'`,
+			);
+		}
 
 		result = await spawn({
 			worktree,
@@ -334,7 +403,7 @@ async function runSpawn(args: {
 			proposalId,
 			stage: payload.role,
 			capabilities,
-			provider: agencyProvider,
+			provider: agencyProvider as never,
 			briefingId: payload.briefing_id,
 			roleProfileId: payload.role_profile_id ?? null,
 			timeoutMs: spawnTimeoutMs,
@@ -355,47 +424,49 @@ async function runSpawn(args: {
 
 	clearInterval(renewalTimer);
 
-	// Usage-limit detection: scan spawn output for known provider limit
-	// signals (codex "hit your usage limit", claude/gemini/copilot equivalents).
-	// On detection: throttle the route AND, for long-window resets (>2h or
-	// unknown), also pause this agency in DB so it stops claiming until reset.
-	const provider =
-		(process.env.AGENTHIVE_AGENT_PROVIDER?.trim() ||
-			process.env.AGENCY_PROVIDER?.trim() ||
-			payload.route_hint) as string | undefined;
-	const limitSignal = detectUsageLimit({
-		stdout: result?.stdout,
-		stderr: result?.stderr,
-		errorMessage: spawnError?.message,
-		defaultProvider: provider,
-	});
-	if (limitSignal) {
-		const seconds = resetSecondsForSignal(limitSignal);
-		const long = isLongWindow(limitSignal);
-		logger.warn(
-			`[OfferDispatchHandler] ${agencyId}: usage-limit detected (${limitSignal.reason}); throttle ${limitSignal.provider}/${limitSignal.model} for ${seconds}s; ${long ? "PAUSE agency (long-window)" : "route-throttle only (short-window)"}`,
-		);
-		await applyThrottle(exec, limitSignal.provider, limitSignal.model, seconds, limitSignal.reason).catch(
-			(err) =>
-				logger.warn(
-					`[OfferDispatchHandler] ${agencyId}: throttle upsert failed:`,
-					err instanceof Error ? err.message : err,
-				),
-		);
-		if (long) {
-			await pauseAgency(exec, agencyId, seconds, limitSignal.reason).catch((err) =>
-				logger.warn(
-					`[OfferDispatchHandler] ${agencyId}: pauseAgency failed:`,
-					err instanceof Error ? err.message : err,
-				),
-			);
+	const succeeded =
+		spawnError === null && (result?.exitCode === 0 || result?.exitCode === null);
+	const status: "delivered" | "failed" = succeeded ? "delivered" : "failed";
+	const provider = payload.route_hint ?? null;
+
+	// P908-B: classify provider error signal and update provider_health.
+	// Use the combined stderr+stdout text so we catch errors wherever they land.
+	const fullOutput = [result?.stderr, result?.stdout].filter(Boolean).join("\n");
+	let providerSignal: string | null = null;
+	if (!succeeded && provider) {
+		try {
+			providerSignal = classifyProviderSignal(fullOutput);
+			if (providerSignal) {
+				await setProviderCooldown(
+					provider,
+					providerSignal as "rate_limit" | "credit_exhausted",
+					fullOutput,
+				);
+			}
+		} catch {
+			/* best-effort — don't block offer completion */
+		}
+	} else if (succeeded && provider) {
+		try {
+			await recordProviderSuccess(provider);
+		} catch {
+			/* best-effort */
 		}
 	}
 
-	const status: "delivered" | "failed" =
-		spawnError === null && (result?.exitCode === 0 || result?.exitCode === null)
-			? "delivered"
-			: "failed";
+	// P908-B: persist provider_signal on the dispatch row for auditability.
+	if (providerSignal) {
+		try {
+			await exec(
+				`UPDATE roadmap_workforce.squad_dispatch
+				    SET provider_signal = $1
+				  WHERE id = $2`,
+				[providerSignal, dispatchId],
+			);
+		} catch {
+			/* best-effort */
+		}
+	}
 
 	// AC-5: emit a structured spawn_failure uplink so the orchestrator can
 	// observe the failure as an operational fact. Lifecycle is still governed
@@ -434,6 +505,30 @@ async function runSpawn(args: {
 			completionErr instanceof Error ? completionErr.message : completionErr,
 		);
 	}
+
+	// P908-D: close the lifecycle span now that fn_complete_work_offer has run.
+	if (completionSpanId) {
+		void obs.closeSpan({
+			spanId: completionSpanId,
+			status: succeeded ? "ok" : "error",
+			errorMessage: spawnError?.message ?? null,
+		});
+	}
+
+	// P908-B: notify orchestrator of offer completion so it can react to
+	// provider signals without polling squad_dispatch.
+	try {
+		const notifyPayload = JSON.stringify({
+			dispatch_id: dispatchId,
+			agency_id: agencyId,
+			provider,
+			signal: providerSignal,
+			exit_code: result?.exitCode ?? null,
+		});
+		await exec(`SELECT pg_notify('offer_completed', $1)`, [notifyPayload]);
+	} catch {
+		/* best-effort — orchestrator's poll will still recover */
+	}
 }
 
 // ── Usage-limit pause helpers ─────────────────────────────────────────────────
@@ -444,16 +539,16 @@ interface AgencyMetadataRow {
 
 /**
  * Look up roadmap_workforce.provider_registry.max_in_flight for the agency.
- * Cached briefly per process to avoid hammering the DB on every dispatch.
+ * Cached briefly per agency to avoid hammering the DB on every dispatch.
  * On any error (missing row, transient DB issue), defaults to 1 — strictest
  * gate, fail-safe.
  */
 const MAX_IN_FLIGHT_CACHE_MS = 30_000;
-let maxInFlightCache: { value: number; expiresAt: number } | null = null;
+const maxInFlightCache = new Map<string, { value: number; expiresAt: number }>();
 
 /** @internal — reset for tests. */
 export function _resetMaxInFlightCacheForTest(): void {
-	maxInFlightCache = null;
+	maxInFlightCache.clear();
 }
 
 async function readAgencyMaxInFlight(
@@ -462,8 +557,9 @@ async function readAgencyMaxInFlight(
 	logger: Pick<Console, "log" | "warn" | "error">,
 ): Promise<number> {
 	const now = Date.now();
-	if (maxInFlightCache && maxInFlightCache.expiresAt > now) {
-		return maxInFlightCache.value;
+	const cached = maxInFlightCache.get(agencyId);
+	if (cached && cached.expiresAt > now) {
+		return cached.value;
 	}
 	try {
 		const result = (await exec(
@@ -476,7 +572,7 @@ async function readAgencyMaxInFlight(
 			[agencyId],
 		)) as { rows: Array<{ max_in_flight: number }> } | undefined;
 		const value = result?.rows?.[0]?.max_in_flight ?? 1;
-		maxInFlightCache = { value, expiresAt: now + MAX_IN_FLIGHT_CACHE_MS };
+		maxInFlightCache.set(agencyId, { value, expiresAt: now + MAX_IN_FLIGHT_CACHE_MS });
 		return value;
 	} catch (err) {
 		logger.warn(

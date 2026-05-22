@@ -153,12 +153,14 @@ describe("AC#3: Tab Navigation", () => {
 		assert.strictEqual(switchToNextView(), "cockpit");
 		// Cubic Dashboard → Headlines
 		assert.strictEqual(switchToNextView(), "headlines");
-		// Headlines → Proposal List (wrap)
+		// Headlines → Chat
+		assert.strictEqual(switchToNextView(), "chat");
+		// Chat → Proposal List (wrap)
 		assert.strictEqual(switchToNextView(), "proposal-list");
 	});
 
-	it("cycles back to proposal-list after headlines", () => {
-		let currentViewIndex = 3; // Headlines
+	it("cycles back to proposal-list after chat", () => {
+		let currentViewIndex = 4; // Chat
 
 		function switchToNextView(): ViewProposal {
 			currentViewIndex = (currentViewIndex + 1) % viewOrder.length;

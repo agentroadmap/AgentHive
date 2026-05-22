@@ -194,6 +194,86 @@ test("emitSpawnSummary: records completion with findings and quirks", async (t) 
   assert.equal(row.tokens_used, 8500);
 });
 
+test("emitSpawnSummary: harvests findings into knowledge base and quirk stores", async (t) => {
+  const taskContext: TaskContext = {
+    task_id: "P378-harvest-test",
+    mission: "Verify spawn summary write-back reaches the knowledge base",
+    success_criteria: ["harvester persists reusable knowledge"],
+  };
+
+  const briefing = await briefingAssemble(taskContext, "test-agent");
+  const toolName = `harvest_tool_${Date.now()}`;
+  const errorSignature = `harvest_error_${Date.now()}`;
+
+  await emitSpawnSummary({
+    briefing_id: briefing.briefing_id,
+    outcome: "partial",
+    summary: "Retirement handoff captured a reusable MCP argument fix",
+    new_findings: [
+      {
+        date: new Date().toISOString(),
+        summary: "Use numeric proposal_id values when emitting follow-up MCP actions.",
+        proposal: "P378",
+      },
+    ],
+    updated_quirks: [
+      {
+        tool: toolName,
+        canonical_args: { proposal_id: "numeric string", summary: "text" },
+        gotchas: ["proposal_id must use the numeric row id, not a UUID"],
+      },
+    ],
+    error_log: {
+      error_signature: errorSignature,
+      tool: toolName,
+      error_message: "proposal_id must be numeric",
+    },
+    emitted_by: "child-agent-harvest",
+  });
+
+  const harvested = await query(
+    `SELECT harvested_into_memory, harvested_at
+     FROM roadmap.spawn_summary
+     WHERE briefing_id = $1`,
+    [briefing.briefing_id]
+  );
+  assert.equal(harvested.rowCount, 1);
+  assert.equal(harvested.rows[0].harvested_into_memory, true);
+  assert.ok(harvested.rows[0].harvested_at);
+
+  const kbRows = await query(
+    `SELECT title, source_proposal_id, metadata
+     FROM roadmap.knowledge_entries
+     WHERE metadata->>'harvested_from_briefing_id' = $1`,
+    [briefing.briefing_id]
+  );
+  assert.equal(kbRows.rowCount, 1);
+  assert.equal(kbRows.rows[0].source_proposal_id, "P378");
+  assert.match(kbRows.rows[0].title, /numeric proposal_id/i);
+
+  const quirkRows = await query(
+    `SELECT canonical_args, known_gotchas, verified_at
+     FROM roadmap.mcp_tool_schema
+     WHERE tool_name = $1`,
+    [toolName]
+  );
+  assert.equal(quirkRows.rowCount, 1);
+  assert.equal(quirkRows.rows[0].canonical_args.proposal_id, "numeric string");
+  assert.equal(quirkRows.rows[0].known_gotchas[0].issue, "proposal_id must use the numeric row id, not a UUID");
+  assert.ok(quirkRows.rows[0].verified_at);
+
+  const fallbackRows = await query(
+    `SELECT error_signature, tool_name, source_proposal, harvested_from_spawn_id
+     FROM roadmap.fallback_playbook
+     WHERE error_signature = $1`,
+    [errorSignature]
+  );
+  assert.equal(fallbackRows.rowCount, 1);
+  assert.equal(fallbackRows.rows[0].tool_name, toolName);
+  assert.equal(fallbackRows.rows[0].source_proposal, "P378");
+  assert.equal(fallbackRows.rows[0].harvested_from_spawn_id, briefing.briefing_id);
+});
+
 test("emitSpawnSummary: records failure with error log", async (t) => {
   const taskContext: TaskContext = {
     task_id: "P466-test-006",

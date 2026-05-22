@@ -181,7 +181,13 @@ export async function loadProposalsForUnifiedView(
 
 	const loadingScreenFactory =
 		options.loadingScreenFactory || createLoadingScreen;
-	const loadingScreen = await loadingScreenFactory("Loading proposals");
+	const config = await core.filesystem.loadConfig();
+	const useLoadingScreen =
+		options.loadingScreenFactory !== undefined ||
+		config?.database?.provider !== "Postgres";
+	const loadingScreen = useLoadingScreen
+		? await loadingScreenFactory("Loading proposals")
+		: null;
 
 	try {
 		const result = await loader((message) => {
@@ -257,6 +263,7 @@ export async function runUnifiedView(
 		let boardUpdater:
 			| ((nextProposals: Proposal[], nextStatuses: string[]) => void)
 			| null = null;
+
 		const getRenderableProposals = () =>
 			proposals.filter(
 				(proposal) =>
@@ -362,11 +369,21 @@ export async function runUnifiedView(
 			}
 
 			// Show enhanced proposal viewer with view switching support
-			return new Promise<ViewResult>((resolve) => {
+			return new Promise<ViewResult>((resolve, reject) => {
 				let result: ViewResult = "exit"; // Default to exit
+				let settled = false;
+
+				const finish = (value: ViewResult) => {
+					if (settled) {
+						return;
+					}
+					settled = true;
+					resolve(value);
+				};
 
 				const onTabPress = async () => {
 					result = "switch";
+					finish("switch");
 				};
 
 				// Determine initial focus based on where we're coming from
@@ -399,11 +416,18 @@ export async function runUnifiedView(
 					},
 					onTabPress,
 				}).then(() => {
+					if (settled) {
+						return;
+					}
 					// If user wants to exit, do it immediately
 					if (result === "exit") {
 						process.exit(0);
 					}
-					resolve(result);
+					finish(result);
+				}).catch((error) => {
+					if (!settled) {
+						reject(error);
+					}
 				});
 			});
 		};
@@ -428,56 +452,71 @@ export async function runUnifiedView(
 					result = "switch";
 				};
 
-				renderBoardTui(kanbanProposals, statuses, layout, maxColumnWidth, {
-					projectRoot: options.core.getProjectRoot(),
-					onProposalSelect: (proposal) => {
-						selectedProposal = proposal;
-					},
-					onTabPress,
-					filters: createKanbanSharedFilters(currentFilters),
-					availableLabels: getBoardAvailableLabels(),
-					availableDirectives: getBoardAvailableDirectives(),
-					onFilterChange: (filters) => {
-						currentFilters = {
-							...currentFilters,
-							searchQuery: filters.searchQuery,
-							priorityFilter: filters.priorityFilter,
-							labelFilter: [...filters.labelFilter],
-							directiveFilter: filters.directiveFilter,
-						};
-					},
-					subscribeUpdates: (updater) => {
-						boardUpdater = updater;
-						emitBoardUpdate();
-					},
-					directiveMode: options.directiveMode,
-					directiveEntities,
-				}).then(() => {
-					// If user wants to exit, do it immediately
-					if (result === "exit") {
-						process.exit(0);
-					}
-					boardUpdater = null;
-					resolve(result);
-				});
-
-				// Auto-refresh: reload proposals from DB every 5s and push to board
-				const refreshTimer = setInterval(() => {
-					void (async () => {
-						await loadProposalsForUnifiedView(options.core, {
-							loadingScreenFactory: async () => null,
-						});
-						emitBoardUpdate();
-					})();
-				}, 5000);
-
-				// Clean up timer when board exits
-				const origResolve = resolve;
-				resolve = ((value: ViewResult) => {
-					clearInterval(refreshTimer);
-					origResolve(value);
-				}) as typeof resolve;
+			renderBoardTui(kanbanProposals, statuses, layout, maxColumnWidth, {
+				projectRoot: options.core.getProjectRoot(),
+				onProposalSelect: (proposal) => {
+					selectedProposal = proposal;
+				},
+				onTabPress,
+				filters: createKanbanSharedFilters(currentFilters),
+				availableLabels: getBoardAvailableLabels(),
+				availableDirectives: getBoardAvailableDirectives(),
+				onFilterChange: (filters) => {
+					currentFilters = {
+						...currentFilters,
+						searchQuery: filters.searchQuery,
+						priorityFilter: filters.priorityFilter,
+						labelFilter: [...filters.labelFilter],
+						directiveFilter: filters.directiveFilter,
+					};
+				},
+				subscribeUpdates: (updater) => {
+					boardUpdater = updater;
+					emitBoardUpdate();
+				},
+				directiveMode: options.directiveMode,
+				directiveEntities,
+			}).then(() => {
+				// If user wants to exit, do it immediately
+				if (result === "exit") {
+					process.exit(0);
+				}
+				boardUpdater = null;
+				resolve(result);
 			});
+
+			// Auto-refresh silently. This runs while the board already owns the TUI,
+			// so it must not create a separate loading screen.
+			const refreshTimer = setInterval(() => {
+				void (async () => {
+					const refreshed = await loadProposalsForUnifiedView(options.core, {
+						loadingScreenFactory: async () => null,
+					});
+					proposals = (refreshed.proposals || []).filter(
+						(proposal) =>
+							proposal.id &&
+							proposal.id.trim() !== "" &&
+							hasAnyPrefix(proposal.id),
+					);
+					kanbanStatuses = refreshed.statuses ?? kanbanStatuses;
+					emitBoardUpdate();
+				})();
+			}, 5000);
+
+			// Clean up timer when board exits
+			const origResolve = resolve;
+			resolve = ((value: ViewResult) => {
+				clearInterval(refreshTimer);
+				origResolve(value);
+			}) as typeof resolve;
+			});
+			// Note: previously had a unified-view-level setInterval here that
+			// called loadProposalsForUnifiedView() every 5s. That broke the board
+			// because loadProposalsForUnifiedView creates a fresh blessed loading
+			// screen (line 184) which paints over the live board on every tick,
+			// AND its return value was discarded so closure state stayed stale.
+			// board.ts has its own silent refresh via core.queryProposals (board.ts:2599)
+			// which is the correct mechanism. Removed 2026-05-19.
 		};
 
 		// Function to show cockpit (formerly cubic dashboard)
@@ -486,35 +525,28 @@ export async function runUnifiedView(
 			const screen = createScreen({ title: "Engineer's Cockpit" });
 
 			return new Promise<ViewResult>((resolve) => {
-				let closed = false;
-				let timer: ReturnType<typeof setInterval> | null = null;
-				const openedAt = Date.now();
-				const canAcceptTab = () => Date.now() - openedAt > 300;
-				const closeCockpit = (result: ViewResult) => {
-					if (closed) return;
-					closed = true;
-					if (timer) {
-						clearInterval(timer);
-						timer = null;
-					}
-					delete (screen as any)._cockpitContainer;
-					(screen as any).destroy();
-					resolve(result);
+				let _result: ViewResult = "exit";
+
+				const onTabPress = () => {
+					_result = "switch";
 				};
 
+				renderCockpit(screen, {
+					agents: [],
+					proposals: [],
+					ledger: [],
+					messages: [],
+				});
+
 				const refresh = async () => {
-					if (closed) return;
-					// Load proposals and agents concurrently
-					const [_pipelineProposals, agents, msgRows] = await Promise.all([
-						options.core.loadProposals(),
+					const pipelineProposals = proposals;
+					const [agents, msgRows] = await Promise.all([
 						options.core.listAgents(),
 						pgQuery(
 							`SELECT from_agent, message_content, created_at FROM roadmap.message_ledger
 							 WHERE channel = 'public' ORDER BY created_at DESC LIMIT 30`,
 							[],
-						)
-							.then((r) => r.rows)
-							.catch(() => [] as any[]),
+						).then((r) => r.rows).catch(() => [] as any[]),
 					]);
 
 					const agentData: WorkforceAgent[] = agents.map((agent) => ({
@@ -535,61 +567,43 @@ export async function runUnifiedView(
 							timestamp: new Date(row.created_at).getTime(),
 						}));
 
-					if (closed) return;
 					renderCockpit(screen, {
 						agents: agentData,
-						proposals: _pipelineProposals.map(
-							(proposal: {
-								id: string;
-								title: string;
-								status: string;
-								priority?: string | null;
-								proposalType?: string;
-							}) => ({
-								id: proposal.id,
-								display_id: proposal.id,
-								title: proposal.title,
-								status: proposal.status,
-								priority: proposal.priority ?? "none",
-								proposal_type: proposal.proposalType ?? "proposal",
-							}),
-						),
+						proposals: pipelineProposals.map((proposal: { id: string; title: string; status: string; priority?: string | null; proposalType?: string }) => ({
+							id: proposal.id,
+							display_id: proposal.id,
+							title: proposal.title,
+							status: proposal.status,
+							priority: proposal.priority ?? "none",
+							proposal_type: proposal.proposalType ?? "proposal",
+						})),
 						ledger: [],
 						messages: cockpitMessages,
 					});
 				};
 
-				// Immediate empty render so the screen isn't blank during the ~hundreds-of-ms
-				// it takes Promise.all to resolve. Mirrors System Feed (line ~613) and
-				// Chat (line ~653) which also render empty first then refresh.
-				renderCockpit(screen, {
-					agents: [],
-					proposals: [],
-					ledger: [],
-					messages: [],
-				});
-
-				// Initial render with real data
+				// Initial render
 				void refresh();
 
 				// Live Update Loop (500ms)
-				timer = setInterval(() => {
+				const timer = setInterval(() => {
 					void refresh();
 				}, 1000);
 
 				// Set up key handlers
 				(screen as any).key(["tab"], () => {
-					if (!canAcceptTab()) return;
-					closeCockpit("switch");
+					onTabPress();
+					clearInterval(timer);
+					delete (screen as any)._cockpitContainer;
+					(screen as any).destroy();
+					resolve("switch");
 				});
-				(screen as any).key(["q", "Q", "escape", "C-c"], () => {
-					closeCockpit("exit");
+				(screen as any).key(["q", "C-c"], () => {
+					clearInterval(timer);
+					delete (screen as any)._cockpitContainer;
+					(screen as any).destroy();
+					resolve("exit");
 				});
-				(screen as any).on("cockpit:switch", () => {
-					if (!canAcceptTab()) return;
-					closeCockpit("switch");
-				});
-				(screen as any).on("cockpit:exit", () => closeCockpit("exit"));
 			});
 		};
 
@@ -599,34 +613,45 @@ export async function runUnifiedView(
 			const config = await options.core.filesystem.loadConfig();
 			const screen = createScreen({ title: "System Feed" });
 
-				return new Promise<ViewResult>((resolve) => {
-					let _result: ViewResult = "exit";
+			return new Promise<ViewResult>((resolve) => {
+				let _result: ViewResult = "exit";
 
 				const onTabPress = () => {
 					_result = "switch";
 				};
 
+				renderHeadlines(screen, {
+					messages: [],
+					projectName: config?.projectName || "Roadmap.md",
+				});
+
 				const refresh = async () => {
-					const messages = (await options.core.listPulse(50)).map((event) => ({
-						id: event.id,
-						sender_identity: event.agent,
-						content: event.impact || event.title,
-						timestamp: Date.parse(event.timestamp) * 1000,
-						channel_name: "pulse",
+					// Core.listPulse was removed by P149 (2026-05-04). Pulse events now
+					// live in roadmap.message_ledger filtered to system identities. Show
+					// recent system activity as the headlines feed.
+					const rows = await pgQuery(
+						`SELECT id, from_agent, message_content, message_type, created_at
+						 FROM roadmap.message_ledger
+						 WHERE from_agent LIKE 'system:%' OR message_type IN ('notify','liaison','task_status','task_complete','task_error')
+						 ORDER BY created_at DESC LIMIT 50`,
+						[],
+					).then((r) => r.rows).catch(() => [] as any[]);
+					const messages = (rows as any[]).map((row: any) => ({
+						id: String(row.id),
+						sender_identity: row.from_agent,
+						content: row.message_content,
+						timestamp: new Date(row.created_at).getTime() * 1000,
+						channel_name: row.message_type ?? "pulse",
 					}));
 					renderHeadlines(screen, {
 						messages: messages as any[],
 						projectName: config?.projectName || "Roadmap.md",
 					});
-					};
+				};
 
-					renderHeadlines(screen, {
-						messages: [],
-						projectName: config?.projectName || "Roadmap.md",
-					});
+				void refresh();
+				const timer = setInterval(() => {
 					void refresh();
-					const timer = setInterval(() => {
-						void refresh();
 				}, 1000);
 
 				// Set up key handlers
@@ -637,10 +662,10 @@ export async function runUnifiedView(
 					(screen as any).destroy();
 					resolve("switch");
 				});
-					(screen as any).key(["q", "Q", "escape", "C-c"], () => {
-						clearInterval(timer);
-						delete (screen as any)._headlinesContainer;
-						(screen as any).destroy();
+				(screen as any).key(["q", "C-c"], () => {
+					clearInterval(timer);
+					delete (screen as any)._headlinesContainer;
+					(screen as any).destroy();
 					resolve("exit");
 				});
 			});
@@ -652,36 +677,41 @@ export async function runUnifiedView(
 			const config = await options.core.filesystem.loadConfig();
 			const screen = createScreen({ title: "Project Chat" });
 
-				return new Promise<ViewResult>((resolve) => {
-					let _result: ViewResult = "exit";
+			return new Promise<ViewResult>((resolve) => {
+				let _result: ViewResult = "exit";
 
 				const onTabPress = () => {
 					_result = "switch";
 				};
 
-					const currentChannel = "public";
-					renderChat(screen, {
-						messages: [],
-						channels: [currentChannel],
-						currentChannel,
-						projectName: config?.projectName || "Roadmap.md",
-						userSystemName: "HUMAN",
-					});
-					const refresh = async () => {
+				const currentChannel = "public";
+				const onSend = async (content: string) => {
+					await pgQuery(
+						`INSERT INTO roadmap.message_ledger (from_agent, channel, message_content, message_type) VALUES ($1, $2, $3, 'text')`,
+						["HUMAN", currentChannel, content],
+					);
+				};
+
+				renderChat(screen, {
+					messages: [],
+					channels: [currentChannel],
+					currentChannel,
+					projectName: config?.projectName || "Roadmap.md",
+					userSystemName: "HUMAN",
+					onSend,
+				});
+
+				const refresh = async () => {
 					const [channelRows, messageRows] = await Promise.all([
 						pgQuery(
 							`SELECT DISTINCT channel FROM roadmap.message_ledger WHERE channel IS NOT NULL ORDER BY channel LIMIT 50`,
 							[],
-						)
-							.then((r) => r.rows)
-							.catch(() => [] as any[]),
+						).then((r) => r.rows).catch(() => [] as any[]),
 						pgQuery(
 							`SELECT id, from_agent, message_content, created_at FROM roadmap.message_ledger
 							 WHERE channel = $1 ORDER BY created_at DESC LIMIT 100`,
 							[currentChannel],
-						)
-							.then((r) => r.rows.reverse())
-							.catch(() => [] as any[]),
+						).then((r) => r.rows.reverse()).catch(() => [] as any[]),
 					]);
 
 					renderChat(screen, {
@@ -696,12 +726,7 @@ export async function runUnifiedView(
 						currentChannel,
 						projectName: config?.projectName || "Roadmap.md",
 						userSystemName: "HUMAN",
-						onSend: async (content: string) => {
-							await pgQuery(
-								`INSERT INTO roadmap.message_ledger (from_agent, channel, message_content, message_type) VALUES ($1, $2, $3, 'text')`,
-								["HUMAN", currentChannel, content],
-							);
-						},
+						onSend,
 					});
 				};
 
@@ -718,10 +743,10 @@ export async function runUnifiedView(
 					(screen as any).destroy();
 					resolve("switch");
 				});
-					(screen as any).key(["q", "Q", "escape", "C-c"], () => {
-						clearInterval(timer);
-						delete (screen as any)._chatContainer;
-						(screen as any).destroy();
+				(screen as any).key(["q", "C-c"], () => {
+					clearInterval(timer);
+					delete (screen as any)._chatContainer;
+					(screen as any).destroy();
 					resolve("exit");
 				});
 			});
@@ -781,8 +806,6 @@ export async function runUnifiedView(
 				isRunning = false;
 			}
 		}
-			watcher.stop();
-			configWatcher.stop();
 	} catch (error) {
 		console.error(error instanceof Error ? error.message : error);
 		process.exit(1);

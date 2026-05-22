@@ -64,12 +64,9 @@ describe("P059: Model Registry", () => {
 			const calls: QueryCall[] = [];
 			const queryFn = async <T>(text: string, params?: unknown[]) => {
 				calls.push({ text, params });
-				if (text.includes("information_schema.columns")) {
-					return { rows: [{ column_name: "tier" }] as T[] };
-				}
-				assert.match(text, /JOIN roadmap\.model_routes r/);
-				assert.match(text, /r\.route_provider = \$2/);
-				assert.deepEqual(params, [true, "openai"]);
+				assert.match(text, /FROM\s+roadmap\.model_route_view v/);
+				assert.match(text, /v\.route_provider = \$2/);
+				assert.deepEqual(params, [true, "openai", null]);
 				return {
 					rows: [
 						{
@@ -103,22 +100,20 @@ describe("P059: Model Registry", () => {
 			const text = modelText(result);
 
 			assert.match(text, /gpt-5/);
-			assert.match(text, /route_provider: openai/);
+			assert.match(text, /route: openai/);
+			assert.match(text, /tier: frontier/);
 			assert.match(text, /priority: 10/);
 			assert.equal(
-				calls.filter((call) => call.text.includes("FROM model_metadata m"))
+				calls.filter((call) => call.text.includes("FROM   roadmap.model_route_view v"))
 					.length,
 				1,
 			);
 		});
 
-		it("filters by model_metadata tier and returns empty for unknown tiers", async () => {
+		it("filters by model_route_view tier and returns no-route payload for unknown tiers", async () => {
 			const queryFn = async <T>(text: string, params?: unknown[]) => {
-				if (text.includes("information_schema.columns")) {
-					return { rows: [{ column_name: "tier" }] as T[] };
-				}
-				assert.match(text, /m\.tier = \$2/);
-				assert.deepEqual(params, [true, "unknown"]);
+				assert.match(text, /v\.tier = \$3/);
+				assert.deepEqual(params, [true, null, "unknown"]);
 				return { rows: [] as T[] };
 			};
 			const handlers = new PgModelHandlers(
@@ -128,37 +123,15 @@ describe("P059: Model Registry", () => {
 			);
 
 			const result = await handlers.listModels({ tier: "unknown" });
+			const payload = JSON.parse(modelText(result));
 
-			assert.equal(modelText(result), "No models found matching criteria.");
-		});
-
-		it("does not crash when tier is requested before model_metadata.tier exists", async () => {
-			let modelQueryCount = 0;
-			const queryFn = async <T>(text: string) => {
-				if (text.includes("information_schema.columns")) {
-					return { rows: [] as T[] };
-				}
-				modelQueryCount += 1;
-				return { rows: [] as T[] };
-			};
-			const handlers = new PgModelHandlers(
-				{} as never,
-				"/tmp",
-				queryFn as never,
-			);
-
-			const result = await handlers.listModels({ tier: "frontier" });
-
-			assert.equal(modelText(result), "No models found matching criteria.");
-			assert.equal(modelQueryCount, 0);
+			assert.equal(payload.error, "NO_ENABLED_ROUTE");
+			assert.equal(payload.tier, "unknown");
 		});
 
 		it("serves repeated calls from the 2000ms in-memory cache", async () => {
 			let modelQueryCount = 0;
 			const queryFn = async <T>(text: string) => {
-				if (text.includes("information_schema.columns")) {
-					return { rows: [{ column_name: "tier" }] as T[] };
-				}
 				modelQueryCount += 1;
 				return {
 					rows: [
@@ -197,17 +170,19 @@ describe("P059: Model Registry", () => {
 		});
 
 		it("validates dispatch availability against enabled routes", async () => {
-			const valid = await validateModelForDispatch("gpt-5", (async <T>() => ({
+			const valid = await validateModelForDispatch("gpt-5", undefined, (async <T>() => ({
 				rows: [{ model_name: "gpt-5" }] as T[],
 			})) as never);
-			const invalid = await validateModelForDispatch("retired-model", (async <
+			const invalid = await validateModelForDispatch("retired-model", undefined, (async <
 				T,
 			>() => ({ rows: [] as T[] })) as never);
 
 			assert.deepEqual(valid, { valid: true });
 			assert.deepEqual(invalid, {
 				valid: false,
-				reason: "NO_ENABLED_ROUTE",
+				reason: "No enabled route found for model",
+				error: "NO_ENABLED_ROUTE",
+				model: "retired-model",
 			});
 		});
 	});

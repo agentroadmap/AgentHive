@@ -1,5 +1,6 @@
 import type React from "react";
 import { useCallback, useEffect, useState } from "react";
+import { apiClient } from "../lib/api";
 import LoadingSpinner from "./LoadingSpinner";
 
 interface Team {
@@ -17,9 +18,7 @@ const TeamsPage: React.FC = () => {
 	const fetchData = useCallback(async () => {
 		try {
 			setError(null);
-			const response = await fetch("/api/teams");
-			if (!response.ok) throw new Error("Failed to fetch teams");
-			const data = await response.json();
+			const data = await apiClient.fetchTeams();
 			setTeams(data);
 		} catch (err) {
 			console.error("Failed to fetch teams:", err);

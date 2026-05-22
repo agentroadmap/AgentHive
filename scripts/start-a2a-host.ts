@@ -67,6 +67,7 @@ import {
 	runLiaisonAgent,
 	type LiaisonAgentHandle,
 } from "../src/infra/agency/liaison-agent.ts";
+import { startLiaisonHub } from "../src/infra/agency/liaison-hub.ts";
 import {
 	closePool,
 	getPool,
@@ -102,6 +103,7 @@ interface AttachedListener {
 	provider: string;
 	bootHandle: LiaisonBootHandle;
 	agentHandle: LiaisonAgentHandle | null;
+	liaisonHub: { stop: () => void } | null;
 }
 
 interface RuntimeFlags {
@@ -118,23 +120,25 @@ let presenceRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let registryRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let flagsReloadClient: Client | null = null;
 
-/** Load tunables from core.runtime_flag. Throws (no silent defaults) if a row is missing. */
+/** Load tunables from core.runtime_flag. Throws (no silent defaults) if a row is missing.
+ *  Post-migration 174: column is now `flag_name` (was `name`); only global-scope rows applied here. */
 async function loadRuntimeFlags(): Promise<RuntimeFlags> {
-	const { rows } = await query<{ name: string; value_jsonb: unknown }>(
-		`SELECT name, value_jsonb FROM core.runtime_flag
-		 WHERE name IN (
+	const { rows } = await query<{ flag_name: string; value_jsonb: unknown }>(
+		`SELECT flag_name, value_jsonb FROM core.runtime_flag
+		 WHERE flag_name IN (
 		   'A2A_HOST_LISTEN_REFRESH_MS',
 		   'A2A_HOST_SHUTDOWN_TIMEOUT_MS',
 		   'A2A_HOST_PRESENCE_REFRESH_MS'
-		 )`,
+		 )
+		 AND scope = 'global' AND lifecycle_status = 'active'`,
 	);
-	const byName = new Map(rows.map((r) => [r.name, r.value_jsonb]));
+	const byName = new Map(rows.map((r) => [r.flag_name, r.value_jsonb]));
 	const need = (k: string): number => {
 		const v = byName.get(k);
 		if (v === undefined || v === null) {
 			throw new Error(
-				`[a2a-host] Required runtime flag '${k}' is missing from core.runtime_flag. ` +
-					`Apply migration 170-p1132-a2a-host-runtime-flags.sql.`,
+				`[a2a-host] Required runtime flag '${k}' is missing from core.runtime_flag (scope=global, active). ` +
+					`Apply migrations 170-p1132-a2a-host-runtime-flags.sql + 174-task40-runtime-flag-resolver-alignment.sql.`,
 			);
 		}
 		const n = typeof v === "number" ? v : Number(v);
@@ -162,6 +166,19 @@ async function subscribeFlagsReload(): Promise<void> {
 			database:
 				process.env.PGDATABASE ?? databaseUrl?.pathname.replace(/^\/+/, "") ?? "agenthive",
 			application_name: `agenthive-a2a-host-flags-${host}`,
+		});
+		// P1138: explicit error handler. Without it, when this dedicated Client's
+		// connection is terminated (e.g., PG restart, pg_terminate_backend, network
+		// drop), pg emits an 'error' event with no listener → Node's default
+		// uncaughtException path crashes the process. That accidentally produced the
+		// correct outcome (systemd restart), but relied on a brittle default. The
+		// explicit handler makes the exit deliberate.
+		client.on("error", (err) => {
+			console.error(
+				`[a2a-host] FATAL flagsReloadClient error — exiting for systemd restart: ${err.message}`,
+			);
+			console.error(err.stack ?? "(no stack)");
+			process.exit(1);
 		});
 		await client.connect();
 		await client.query("LISTEN runtime_config_changed");
@@ -194,6 +211,27 @@ async function loadActiveAgencies(): Promise<AgencyRow[]> {
 	// names are typed 'llm' but operationally run as agencies (e.g. adam).
 	// host_affinity is loose: match this host OR null/empty (treated as "any
 	// host" — legacy copilot-agency-gary has empty host_affinity).
+	//
+	// Step 2 (2026-05-19): AGENTHIVE_AGENCY_FILTER + AGENTHIVE_AGENCY_EXCLUDE
+	// let a sibling a2a-host process under a different OS user (e.g. andy)
+	// attach a subset of agencies (e.g. codex-agency-bot under andy with codex
+	// auth in andy's home). Comma-separated agent_identity lists.
+	const includeRaw = process.env.AGENTHIVE_AGENCY_FILTER ?? "";
+	const excludeRaw = process.env.AGENTHIVE_AGENCY_EXCLUDE ?? "";
+	const includeList = includeRaw.split(",").map(s => s.trim()).filter(Boolean);
+	const excludeList = excludeRaw.split(",").map(s => s.trim()).filter(Boolean);
+
+	const params: unknown[] = [host];
+	let filterSql = "";
+	if (includeList.length > 0) {
+		params.push(includeList);
+		filterSql += ` AND agent_identity = ANY($${params.length}::text[])`;
+	}
+	if (excludeList.length > 0) {
+		params.push(excludeList);
+		filterSql += ` AND agent_identity <> ALL($${params.length}::text[])`;
+	}
+
 	const { rows } = await query<AgencyRow>(
 		`SELECT agent_identity, preferred_provider
 		   FROM roadmap_workforce.agent_registry
@@ -201,9 +239,13 @@ async function loadActiveAgencies(): Promise<AgencyRow[]> {
 		    AND agent_type    IN ('agency', 'llm')
 		    AND status        IN ('active','dormant')
 		    AND coalesce(preferred_provider, '') <> ''
+		    ${filterSql}
 		  ORDER BY agent_identity`,
-		[host],
+		params,
 	);
+	if (includeList.length > 0 || excludeList.length > 0) {
+		console.log(`[a2a-host] agency-filter active: include=[${includeList.join(",")}] exclude=[${excludeList.join(",")}] → ${rows.length} agencies`);
+	}
 	return rows;
 }
 
@@ -245,7 +287,19 @@ async function attachListener(row: AgencyRow): Promise<void> {
 		console.warn(`[a2a-host] runLiaisonAgent failed for ${identity} (non-fatal): ${(err as Error).message}`);
 	}
 
-	attached.set(identity, { identity, provider, bootHandle, agentHandle });
+	// Start the LiaisonHub so this agency consumes liaison_message offer_dispatch
+	// rows from the orchestrator. Without this, OfferDispatcher writes pile up
+	// unacked (311 backlog observed 2026-05-19); claim_expires_at fires; reaper
+	// requeues; dispatch loop never produces a spawn. startLiaisonHub returns
+	// immediately; the listener runs in a void run() background promise.
+	let liaisonHub: { stop: () => void } | null = null;
+	try {
+		liaisonHub = startLiaisonHub(identity);
+	} catch (err) {
+		console.warn(`[a2a-host] startLiaisonHub failed for ${identity} (non-fatal): ${(err as Error).message}`);
+	}
+
+	attached.set(identity, { identity, provider, bootHandle, agentHandle, liaisonHub });
 	await fnPulse(identity, "online");
 	console.log(`[a2a-host] ${identity} online`);
 }
@@ -255,6 +309,13 @@ async function detachListener(identity: string, state: "offline" | "away" = "off
 	if (!m) return;
 	attached.delete(identity);
 	await fnPulse(identity, state);
+	if (m.liaisonHub) {
+		try {
+			m.liaisonHub.stop();
+		} catch (err) {
+			console.warn(`[a2a-host] ${identity} liaisonHub.stop error:`, err);
+		}
+	}
 	if (m.agentHandle) {
 		try {
 			await m.agentHandle.stop();
@@ -378,14 +439,22 @@ async function main(): Promise<void> {
 	const agencies = await loadActiveAgencies();
 	if (agencies.length === 0) {
 		console.warn(`[a2a-host] no active agencies found for host=${host}; idling`);
-	} else {
-		console.log(
-			`[a2a-host] booting ${agencies.length} agencies: ${agencies.map((a) => a.agent_identity).join(", ")}`,
-		);
 	}
 
+	// Dedupe agencies by identity before booting to prevent race conditions
+	// and redundant listeners (Bug 9 fix).
+	const uniqueAgencies = Array.from(
+		new Map(agencies.map((a) => [a.agent_identity, a])).values(),
+	);
+
+	console.log(
+		`[a2a-host] booting ${uniqueAgencies.length} agencies: ${uniqueAgencies
+			.map((a) => a.agent_identity)
+			.join(", ")}`,
+	);
+
 	// Boot all agencies in parallel.
-	await Promise.allSettled(agencies.map((row) => attachListener(row)));
+	await Promise.allSettled(uniqueAgencies.map((row) => attachListener(row)));
 	console.log(`[a2a-host] boot complete — ${attached.size} of ${agencies.length} agencies online`);
 
 	startPresenceRefreshTimer();

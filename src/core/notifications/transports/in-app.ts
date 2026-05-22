@@ -9,7 +9,7 @@
  * before the dedicated migration lands.
  */
 
-import { query } from "../../../postgres/pool.ts";
+import { query as pgQuery } from "../../../infra/postgres/pool.ts";
 import type {
 	DispatchArgs,
 	NotificationTransport,
@@ -17,6 +17,13 @@ import type {
 import { TransportError } from "../types.ts";
 
 let tableEnsured = false;
+type QueryFn = typeof pgQuery;
+let query: QueryFn = pgQuery;
+
+export function _setNotificationInAppQueryForTest(fn: QueryFn): void {
+	query = fn;
+	tableEnsured = false;
+}
 
 async function ensureTable(): Promise<void> {
 	if (tableEnsured) return;

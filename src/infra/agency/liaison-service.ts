@@ -141,6 +141,10 @@ export async function liaisonRegister(
  * The CASE now has an explicit `WHEN status = 'dormant' THEN 'active'` branch
  * BEFORE the liaison-declared status branches so a recovering agency always
  * transitions back to active rather than staying frozen in 'dormant'.
+ *
+ * P765 AC-1: offline agencies transition to 'dormant' on first heartbeat,
+ * then to 'active' on the next tick (two-step auto-recovery). offline_alert_sent_at
+ * is cleared at the start of recovery so the resolved-alert fires on full recovery.
  */
 export async function liaisonHeartbeat(
 	payload: LiaisonHeartbeatPayload,
@@ -173,12 +177,14 @@ export async function liaisonHeartbeat(
     UPDATE roadmap.agency
     SET
       status = CASE
+        WHEN status = 'offline'      THEN 'dormant'     -- P765 AC-1: first step of two-step auto-recovery
         WHEN status = 'dormant'      THEN 'active'      -- reactivate on heartbeat
         WHEN $2 = 'throttled'        THEN 'throttled'
         WHEN $2 = 'paused'           THEN 'paused'
         ELSE status
       END,
       status_reason = CASE
+        WHEN status = 'offline' THEN 'Auto-recovery: first heartbeat received'
         WHEN status = 'dormant' THEN 'Reactivated by heartbeat'
         ELSE status_reason
       END,
@@ -257,29 +263,77 @@ export async function liaisonHeartbeat(
  * Called by the liaison boot-process watchdog every 60s (AC-5).
  *
  * Aliveness signals (any one keeps the agency out of dormant):
- *   - presence_state IN ('online', 'busy') — canonical, A2A maintains via fn_pulse.
- *   - last_heartbeat_at < 90 s — transitional fallback (P1132).
- *
- * NOTE: presence_state alone cannot detect an A2A host crash (the value stays
- * 'online' even though no one is refreshing it). Today, the A2A
- * presence-refresh shim keeps last_heartbeat_at fresh so this sweep correctly
- * detects crashes via heartbeat staleness. When that shim retires (follow-on),
- * dormancy needs a different crash signal — pg_stat_activity LISTEN-session
- * presence is the leading candidate.
+ *   - pg_stat_activity holds 'agenthive-a2a-listen-<agency_id>' — CANONICAL
+ *     crash detection (task #39 / Phase A). The A2A host opens this LISTEN
+ *     session per attached agency; when the host crashes or the connection
+ *     drops, the row disappears from pg_stat_activity within seconds — much
+ *     faster than 90s heartbeat staleness.
+ *   - presence_state IN ('online', 'busy') — set on lifecycle events by
+ *     fn_pulse. Stale on crash (presence stays 'online'), but useful when
+ *     pg_stat_activity briefly lacks the row mid-reconnect.
+ *   - last_heartbeat_at < 90 s — transitional fallback while the
+ *     A2A presence-refresh shim still writes. Retires in Phase B once
+ *     pg_stat_activity is proven sufficient.
  */
 export async function checkAndMarkDormant(): Promise<number> {
 	const result = await query(`
-    UPDATE roadmap.agency
+    UPDATE roadmap.agency a
     SET status = 'dormant', status_reason = 'No liveness signal > 90s'
-    WHERE status IN ('active', 'throttled')
+    WHERE a.status IN ('active', 'throttled')
       AND NOT (
-        presence_state IN ('online', 'busy')
-        OR (last_heartbeat_at IS NOT NULL
-            AND (now() - last_heartbeat_at) < interval '90 seconds')
+        EXISTS (
+          SELECT 1 FROM pg_stat_activity
+          WHERE application_name = 'agenthive-a2a-listen-' || a.agency_id
+        )
+        OR a.presence_state IN ('online', 'busy')
+        OR (a.last_heartbeat_at IS NOT NULL
+            AND (now() - a.last_heartbeat_at) < interval '90 seconds')
       )
+    RETURNING a.agency_id
+  `);
+	return result.rowCount ?? 0;
+}
+
+/**
+ * P765 AC-5: Mark offline any dormant agencies past the 5-minute silence threshold.
+ * Called by the liveness alerting maintenance tick.
+ */
+export async function checkAndMarkOffline(): Promise<number> {
+	const result = await query(`
+    UPDATE roadmap.agency
+    SET status = 'offline', status_reason = 'No heartbeat > 5 min'
+    WHERE status = 'dormant'
+      AND last_heartbeat_at IS NOT NULL
+      AND (now() - last_heartbeat_at) > interval '5 minutes'
     RETURNING agency_id
   `);
 	return result.rowCount ?? 0;
+}
+
+/**
+ * P765 AC-2: Operator short-circuit resume — transitions any non-retired agency
+ * directly to 'active', bypassing the two-step auto-recovery flow.
+ * Also clears offline_alert_sent_at so the recovery alert fires.
+ */
+export async function liaisonResume(agency_id: string): Promise<string> {
+	if (!agency_id?.trim()) throw new Error("agency_id is required");
+
+	const result = await query(
+		`
+    UPDATE roadmap.agency
+    SET status = 'active',
+        status_reason = 'Operator resume',
+        offline_alert_sent_at = NULL
+    WHERE agency_id = $1 AND status NOT IN ('retired')
+    RETURNING status
+    `,
+		[agency_id],
+	);
+
+	if (result.rowCount === 0)
+		throw new Error(`Agency ${agency_id} not found or retired`);
+
+	return "active";
 }
 
 /**
@@ -292,14 +346,49 @@ export async function agencyReactivate(agency_id: string): Promise<string> {
 		`
     UPDATE roadmap.agency
     SET status = 'active', status_reason = NULL
-    WHERE agency_id = $1 AND status = 'dormant'
+    WHERE agency_id = $1 AND status IN ('dormant', 'offline')
     RETURNING status
     `,
 		[agency_id],
 	);
 
 	if (result.rowCount === 0)
-		throw new Error(`Agency ${agency_id} not found or not dormant`);
+		throw new Error(`Agency ${agency_id} not found or not dormant/offline`);
+
+	return "active";
+}
+
+/**
+ * P765 AC-2: Operator resume — force an agency to active from any non-retired state.
+ * Updates both roadmap.agency (liaison layer) and provider_registry (liveness layer).
+ * Clears all offline/throttle tracking state. Idempotent if already active.
+ */
+export async function agencyResume(agency_id: string): Promise<string> {
+	if (!agency_id?.trim()) throw new Error("agency_id is required");
+
+	await query(
+		`UPDATE roadmap.agency
+		 SET status = 'active', status_reason = 'Operator resume'
+		 WHERE agency_id = $1 AND status <> 'retired'`,
+		[agency_id],
+	);
+
+	await query(
+		`UPDATE roadmap_workforce.provider_registry pr
+		 SET status              = 'active',
+		     status_reason       = 'Operator resume',
+		     offline_since_at    = NULL,
+		     offline_alerted_at  = NULL,
+		     throttle_count      = 0,
+		     recent_failure_count = 0,
+		     last_failure_at     = NULL,
+		     updated_at          = now()
+		 FROM roadmap_workforce.agent_registry ar
+		 WHERE pr.agency_id = ar.id
+		   AND ar.agent_identity = $1
+		   AND pr.status <> 'retired'`,
+		[agency_id],
+	);
 
 	return "active";
 }
@@ -377,11 +466,29 @@ export async function getAgencyStatus(agency_id: string): Promise<{
 }
 
 /**
+ * Check whether a single agency is dispatchable.
+ *
+ * Dispatachability criteria (v_agency_status):
+ *   - status = 'active'
+ *   - last_heartbeat_at within 60 seconds
+ *
+ * @note Capacity envelope check (remaining_capacity > 0) is disabled and
+ *   treated as true until P1018/P1022 land (budget substrate unwired).
+ */
+export async function isAgencyDispatchable(agencyId: string): Promise<boolean> {
+	const result = await query(
+		`SELECT dispatchable FROM roadmap.v_agency_status WHERE agency_id = $1 LIMIT 1`,
+		[agencyId],
+	);
+	return result.rows[0]?.dispatchable === true;
+}
+
+/**
  * List all dispatchable agencies (active, within 90s heartbeat).
  *
- * @note Capacity envelope check is disabled (treated as true) until P1018/P1022
- * land. Once the budget substrate is wired, this function should additionally
- * filter on `remaining_capacity > 0` before returning candidates.
+ * Checks: status='active' AND last_heartbeat_at < 90s (via v_agency_status.dispatchable).
+ * @note Capacity envelope check (remaining_capacity > 0) is treated as always-true
+ *   until P1018/P1022 land and wire the budget substrate writers.
  */
 export async function listDispatchableAgencies(): Promise<
 	Array<{

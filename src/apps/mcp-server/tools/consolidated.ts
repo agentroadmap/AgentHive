@@ -127,6 +127,8 @@ const proposalRoutes: RouteMap = {
 	submit_review: "submit_review",
 	list_reviews: "list_reviews",
 	add_discussion: "add_discussion",
+	gate_decision: "record_gate_decision",
+	record_gate_decision: "record_gate_decision",
 	merge_worktree: "worktree_merge",
 	sync_worktrees: "worktree_sync",
 	merge_status: "worktree_merge_status",
@@ -164,6 +166,15 @@ const proposalRoutes: RouteMap = {
 	verify_ac: "verify_ac",
 	list_ac: "list_ac",
 	delete_ac: "delete_ac",
+	// P997 migration-map actions
+	map_upsert: "prop_map_upsert",
+	map_get: "prop_map_get",
+	map_query: "prop_map_query",
+	map_summary: "prop_map_summary",
+	prop_map_upsert: "prop_map_upsert",
+	prop_map_get: "prop_map_get",
+	prop_map_query: "prop_map_query",
+	prop_map_summary: "prop_map_summary",
 	// P466 spawn-briefing actions — primary home is `mcp_agent`, but agents
 	// often guess `mcp_proposal` because the work is proposal-scoped. Alias
 	// here so misrouted calls succeed instead of bouncing on "Unknown action".
@@ -228,6 +239,11 @@ const agentRoutes: RouteMap = {
 	team_norms_set: "team_norms_set",
 	team_dispute_log: "team_dispute_log",
 	team_governance_archive: "team_governance_archive",
+	// P917: agency lifecycle
+	agency_bootstrap: "agency_bootstrap",
+	agency_join_project: "agency_join_project",
+	agency_leave_project: "agency_leave_project",
+	agency_liaison_status: "agency_liaison_status",
 };
 
 const memoryRoutes: RouteMap = {

@@ -1,4 +1,4 @@
-import type { ProposalStatistics } from "../types/statistics";
+import type { ProposalStatistics } from "../types/statistics.ts";
 import { getStoredProjectId } from "./project-scope-storage";
 import type {
 	Agent,
@@ -678,6 +678,22 @@ export class ApiClient {
 	async fetchDispatches(): Promise<any[]> {
 		const result = await this.fetchJson<{ dispatches: any[] }>(`${API_BASE}/dispatches`);
 		return result.dispatches;
+	}
+
+	async fetchTeams(): Promise<any[]> {
+		return this.fetchJson<any[]>(`${API_BASE}/teams`);
+	}
+
+	async fetchKnowledge(options?: { query?: string; type?: string }): Promise<any[]> {
+		const params = new URLSearchParams();
+		if (options?.query) params.set("query", options.query);
+		if (options?.type) params.set("type", options.type);
+		const qs = params.toString();
+		return this.fetchJson<any[]>(`${API_BASE}/knowledge${qs ? `?${qs}` : ""}`);
+	}
+
+	async markKnowledgeHelpful(id: string): Promise<void> {
+		await this.fetchWithRetry(`${API_BASE}/knowledge/${id}/helpful`, { method: "POST" });
 	}
 
 	async fetchPulse(limit?: number): Promise<PulseEvent[]> {

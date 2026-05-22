@@ -17,6 +17,7 @@ import {
 } from "../../../shared/utils/status.ts";
 
 const NO_DIRECTIVE_KEY = "__none";
+const NUMERIC_DIRECTIVE_ID_PATTERN = /^([a-z]+)-(\d+)$/i;
 
 /** Normalize a directive name/ID by trimming whitespace */
 export function normalizeDirectiveName(name: string): string {
@@ -87,10 +88,11 @@ function buildDirectiveAliasMap(
 			keys.add(`d-${numericAlias}`);
 			return Array.from(keys);
 		}
-		const idMatch = value.trim().match(/^d-(\d+)$/i);
+		const idMatch = value.trim().match(NUMERIC_DIRECTIVE_ID_PATTERN);
 		if (idMatch?.[1]) {
-			const numericAlias = String(Number.parseInt(idMatch[1], 10));
-			keys.add(`d-${numericAlias}`);
+			const prefix = idMatch[1].toLowerCase();
+			const numericAlias = String(Number.parseInt(idMatch[2], 10));
+			keys.add(`${prefix}-${numericAlias}`);
 			keys.add(numericAlias);
 		}
 		return Array.from(keys);
@@ -137,11 +139,12 @@ function buildDirectiveAliasMap(
 		const allowOverwrite = options?.allowOverwrite ?? true;
 		const idKey = directiveKey(normalizedId);
 		if (idKey) setAlias(idKey, normalizedId, allowOverwrite);
-		const idMatch = normalizedId.match(/^d-(\d+)$/i);
-		if (!idMatch?.[1]) return;
-		const numericAlias = String(Number.parseInt(idMatch[1], 10));
-		const canonicalId = `d-${numericAlias}`;
-		if (canonicalId) setAlias(canonicalId, normalizedId, allowOverwrite);
+		const idMatch = normalizedId.match(NUMERIC_DIRECTIVE_ID_PATTERN);
+		if (!idMatch?.[1] || !idMatch[2]) return;
+		const prefix = idMatch[1].toLowerCase();
+		const numericAlias = String(Number.parseInt(idMatch[2], 10));
+		const canonicalId = `${prefix}-${numericAlias}`;
+		setAlias(canonicalId, normalizedId, allowOverwrite);
 		if (numericAlias) setAlias(numericAlias, normalizedId, allowOverwrite);
 	};
 	const activeTitleCounts = new Map<string, number>();
@@ -206,11 +209,12 @@ function canonicalizeDirectiveValue(
 	const normalizedKey = directiveKey(normalized);
 	const direct = aliasMap.get(normalizedKey);
 	if (direct) return direct;
-	const idMatch = normalized.match(/^d-(\d+)$/i);
-	if (idMatch?.[1]) {
-		const numericAlias = String(Number.parseInt(idMatch[1], 10));
+	const idMatch = normalized.match(NUMERIC_DIRECTIVE_ID_PATTERN);
+	if (idMatch?.[1] && idMatch[2]) {
+		const prefix = idMatch[1].toLowerCase();
+		const numericAlias = String(Number.parseInt(idMatch[2], 10));
 		return (
-			aliasMap.get(`d-${numericAlias}`) ??
+			aliasMap.get(`${prefix}-${numericAlias}`) ??
 			aliasMap.get(numericAlias) ??
 			normalized
 		);

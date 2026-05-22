@@ -12,7 +12,6 @@ import {
 	proposalExportFilename,
 	type ProposalExportBundle,
 } from "../../../shared/proposal-markdown-export";
-import { formatLocalActivityTimestamp } from "../lib/proposal-activity";
 import { formatStoredUtcDateForDisplay, parseStoredUtcDate } from "../utils/date-display";
 import AcceptanceCriteriaEditor from "./AcceptanceCriteriaEditor";
 import ChipInput from "./ChipInput";
@@ -445,18 +444,21 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 
 	const lastActivity = useMemo(() => {
 		const candidates: Array<{ date: string; label: string }> = [];
-		if (proposal?.updatedDate) candidates.push({ date: proposal.updatedDate, label: "proposal updated" });
-		if (proposal?.createdDate) candidates.push({ date: proposal.createdDate, label: "created" });
-		for (const d of discussions) candidates.push({ date: d.created_at, label: `discussion by ${d.author_identity}` });
-		for (const r of reviews) candidates.push({ date: r.reviewed_at, label: `review by ${r.reviewer_identity}` });
-		for (const d of decisions) candidates.push({ date: d.decided_at, label: `decision by ${d.authority}` });
+		if (proposal?.updatedDate?.trim()) candidates.push({ date: proposal.updatedDate, label: "proposal updated" });
+		if (proposal?.createdDate?.trim()) candidates.push({ date: proposal.createdDate, label: "created" });
+		for (const d of discussions) if (d.created_at?.trim()) candidates.push({ date: d.created_at, label: `discussion by ${d.author_identity}` });
+		for (const r of reviews) if (r.reviewed_at?.trim()) candidates.push({ date: r.reviewed_at, label: `review by ${r.reviewer_identity}` });
+		for (const d of decisions) if (d.decided_at?.trim()) candidates.push({ date: d.decided_at, label: `decision by ${d.authority}` });
 		if (candidates.length === 0) return null;
-		return candidates.reduce((max, cur) => {
-			const curTs = parseStoredUtcDate(cur.date)?.getTime() ?? 0;
-			const maxTs = parseStoredUtcDate(max.date)?.getTime() ?? 0;
-			return curTs > maxTs ? cur : max;
-		});
+		// Use numeric timestamps so mixed formats ("YYYY-MM-DD HH:MM" vs ISO) compare correctly
+		const toMs = (d: string): number => parseStoredUtcDate(d)?.getTime() ?? 0;
+		return candidates.reduce((max, cur) => (toMs(cur.date) > toMs(max.date) ? cur : max));
 	}, [proposal, discussions, reviews, decisions]);
+
+	const handleActivityClick = useCallback(() => {
+		onClose();
+		navigate(`/activity?proposal=${encodeURIComponent(proposalId)}`);
+	}, [navigate, onClose, proposalId]);
 
 	// Reset local proposal only when the selected proposal changes.
 	useEffect(() => {
@@ -1487,26 +1489,21 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 									</span>
 								</div>
 							)}
-							<div
-								className="cursor-pointer hover:text-blue-600 dark:hover:text-blue-400"
-								onClick={() => {
-									onClose();
-									navigate(`/activity?proposal=${encodeURIComponent(proposalId)}`);
-								}}
-								title="View full activity feed"
-							>
+							<div>
 								<span className="font-semibold text-gray-800 dark:text-gray-100">
 									Last activity:
 								</span>{" "}
 								{lastActivity ? (
-									<>
-										<span className="text-gray-700 dark:text-gray-200">
-											{formatLocalActivityTimestamp(lastActivity.date)}
-										</span>
+									<button
+										type="button"
+										onClick={handleActivityClick}
+										className="text-gray-700 dark:text-gray-200 hover:underline cursor-pointer bg-transparent border-0 p-0 text-left"
+									>
+										{formatStoredUtcDateForDisplay(lastActivity.date)}
 										<span className="ml-1 text-gray-400 dark:text-gray-500 italic">
 											({lastActivity.label})
 										</span>
-									</>
+									</button>
 								) : (
 									<span className="text-gray-400 dark:text-gray-500 italic">
 										No activity yet

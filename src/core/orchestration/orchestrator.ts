@@ -10,10 +10,18 @@ import {
 import { enqueueNotification } from "../notifications/enqueue.ts";
 import { getUnlockedGateQueue } from "../proposal/gate-scanner-v2.ts";
 import { loadStateNames } from "../workflow/state-names.ts";
+import { spawnAgent } from "./agent-spawner.ts";
+import { listDispatchableAgencies } from "../../infra/agency/liaison-service.ts";
+import {
+	storeMessage,
+	getNextSequence,
+} from "../../infra/agency/liaison-message-service.ts";
+import { createMessageEnvelope } from "../../infra/agency/liaison-message-types.ts";
 import {
 	bootCancelPokeAttempts,
 	runOfferReaper,
 	runPokeWatchdogTick,
+	runLivenessAlertingTick,
 	type PokeWatchdogOptions,
 } from "./maintenance.ts";
 import { OfferClaimLoop, type ListenerClient } from "./offer-claim-loop.ts";
@@ -90,6 +98,9 @@ const DEFAULT_POKE_IDLE_THRESHOLD_MIN = Number(
 	process.env.AGENTHIVE_POKE_IDLE_THRESHOLD_MIN ?? 5,
 );
 const DEFAULT_POKE_STORM_CAP = Number(process.env.POKE_STORM_CAP ?? 10);
+const DEFAULT_LIVENESS_ALERT_INTERVAL_MS = Number(
+	process.env.AGENTHIVE_LIVENESS_ALERT_INTERVAL_MS ?? 60_000,
+);
 
 /** Drain timeout on stop() — how long to wait for in-flight dispatches before forcing exit. */
 const DEFAULT_SHUTDOWN_DRAIN_MS = Number(
@@ -197,17 +208,21 @@ export interface OrchestratorConfig {
 	pokeStormCap?: number;
 	/** Drain timeout on stop() in ms (default 240 s). */
 	shutdownDrainMs?: number;
+	/** P765: liveness alerting tick interval in ms (default 60 s). */
+	livenessAlertIntervalMs?: number;
 }
 
 export class Orchestrator {
 	private readonly defaultWorktree: string;
 	private readonly offerReapIntervalMs: number;
 	private readonly pokeWatchdogIntervalMs: number;
+	private readonly livenessAlertIntervalMs: number;
 	private readonly pokeOpts: PokeWatchdogOptions;
 	private readonly shutdownDrainMs: number;
 
 	private offerReapTimer: ReturnType<typeof setInterval> | null = null;
 	private pokeWatchdogTimer: ReturnType<typeof setInterval> | null = null;
+	private livenessAlertTimer: ReturnType<typeof setInterval> | null = null;
 	private offerReapInFlight = false;
 
 	// P902-A: lifecycle state for start()/stop().
@@ -228,6 +243,8 @@ export class Orchestrator {
 			config.offerReapIntervalMs ?? DEFAULT_OFFER_REAP_INTERVAL_MS;
 		this.pokeWatchdogIntervalMs =
 			config.pokeWatchdogIntervalMs ?? DEFAULT_POKE_WATCHDOG_INTERVAL_MS;
+		this.livenessAlertIntervalMs =
+			config.livenessAlertIntervalMs ?? DEFAULT_LIVENESS_ALERT_INTERVAL_MS;
 		this.pokeOpts = {
 			idleThresholdMin:
 				config.pokeIdleThresholdMin ?? DEFAULT_POKE_IDLE_THRESHOLD_MIN,
@@ -303,27 +320,30 @@ export class Orchestrator {
 			`[Orchestrator] LISTEN registered: ${GATE_READY_CHANNEL}, ${MATURITY_CHANGED_CHANNEL}, ${AGENCY_RECOVERY_CHANNEL}`,
 		);
 
-		// Schedule the five legacy poll timers. Each is parity with the
-		// scripts/orchestrator.ts main() interval; toggles preserved.
+		// Schedule the maintenance and scan timers.
 		if (ENABLE_POLLING) {
 			this.pollTimers.set(
-				"state-change",
-				setInterval(() => this._statePollTick(), 2 * 60 * 1000),
+				"unified-scan",
+				setInterval(() => {
+					if (this.stopping) return;
+					void this.trackInFlight(this.scanQueues());
+				}, 60_000), // 1-minute unified scan
 			);
-			console.log("[Orchestrator] 2-min state-change polling enabled");
-		} else {
+
+			this.pollTimers.set(
+				"state-poll",
+				setInterval(() => {
+					if (this.stopping) return;
+					void this.trackInFlight(this._runLegacyStatePoll());
+				}, 2 * 60 * 1000), // 2-minute legacy state poll
+			);
+
 			console.log(
-				"[Orchestrator] state-change polling disabled (AGENTHIVE_ORCHESTRATOR_POLL!=1)",
+				"[Orchestrator] Polling enabled: unified-scan (1-min), state-poll (2-min)",
 			);
 		}
 
 		if (IMPLICIT_GATE_POLL_INTERVAL_MS > 0) {
-			// Initial drain at boot (matches legacy line 2604).
-			void this.trackInFlight(
-				drainImplicitGateReady("startup", 5).catch((err) =>
-					console.error("[Orchestrator] startup drain failed:", err),
-				),
-			);
 			this.pollTimers.set(
 				"implicit-gate",
 				setInterval(() => {
@@ -600,13 +620,10 @@ export class Orchestrator {
 	}
 
 	/**
-	 * 2-minute state-change poll fallback (enabled by AGENTHIVE_ORCHESTRATOR_POLL=1).
-	 *
-	 * Mirrors scripts/orchestrator.ts main() polling block: finds workflows that
-	 * need an agent, excluding proposals that already have running agent_runs or
+	 * Maintenance loop: checks for proposals that are ready to advance but have no
 	 * alive squad_dispatch. Calls handleStateChange for each.
 	 */
-	private async _statePollTick(): Promise<void> {
+	private async _runLegacyStatePoll(): Promise<void> {
 		if (this.stopping) return;
 		try {
 			const result = await query<{
@@ -646,13 +663,13 @@ export class Orchestrator {
 				);
 			}
 		} catch (err) {
-			console.error("[Orchestrator] state poll failed:", err);
+			console.error("[Orchestrator] legacy state poll failed:", err);
 		}
 	}
 
 	/**
 	 * Stop the orchestrator: flag stopping, clear timers, release LISTEN client,
-	 * drain in-flight dispatches up to {@link shutdownDrainMs}.
+	 * drain in-flight dispatches.
 	 *
 	 * Resolves once all in-flight promises settle or the drain timeout elapses.
 	 */
@@ -731,21 +748,19 @@ export class Orchestrator {
 		) {
 			return;
 		}
+
 		try {
+			if (channel === GATE_READY_CHANNEL) {
+				// Mature proposals ready for gating or preparation.
+				void this.trackInFlight(this.scanQueues());
+				return;
+			}
+
+			// proposal_maturity_changed: handle non-mature work dispatches.
 			const data = JSON.parse(payload) as {
 				proposal_id?: number | string;
 				id?: number | string;
 			};
-
-			if (channel === GATE_READY_CHANNEL) {
-				const pid = Number(data.proposal_id ?? data.id);
-				if (Number.isFinite(pid)) {
-					await this.trackInFlight(
-						dispatchImplicitGate(pid, "notify:proposal_gate_ready"),
-					);
-				}
-				return;
-			}
 
 			// P765 AC-1: agency recovered — trigger an immediate scan so queued
 			// offers get dispatched without waiting for the next poll cycle.
@@ -758,9 +773,10 @@ export class Orchestrator {
 				return;
 			}
 
-			// proposal_maturity_changed: resolve current workflow stage.
+
 			const proposalId = data.proposal_id ?? data.id;
 			if (!proposalId) return;
+
 			const result = await query<{
 				id: number;
 				proposal_id: number;
@@ -771,7 +787,7 @@ export class Orchestrator {
 			);
 			if (result.rows.length > 0) {
 				const wf = result.rows[0];
-				await this.trackInFlight(
+				void this.trackInFlight(
 					handleStateChange(String(wf.proposal_id), wf.current_stage),
 				);
 			}
@@ -837,7 +853,7 @@ export class Orchestrator {
 	}
 
 	/**
-	 * Start periodic maintenance timers: offer reaper + poke watchdog.
+	 * Start periodic maintenance timers: offer reaper + poke watchdog + liveness alerting.
 	 * Idempotent — calling twice is a no-op.
 	 */
 	startMaintenance(): void {
@@ -855,8 +871,14 @@ export class Orchestrator {
 			void runPokeWatchdogTick(this.pokeOpts, query, console, "Orchestrator");
 		}, this.pokeWatchdogIntervalMs);
 
+		// P765: liveness alerting — transitions silent agencies and emits Discord alerts.
+		this.livenessAlertTimer = setInterval(() => {
+			if (this.stopping) return;
+			void runLivenessAlertingTick(console, "Orchestrator");
+		}, this.livenessAlertIntervalMs);
+
 		console.log(
-			`[Orchestrator] Maintenance started — offer reaper every ${this.offerReapIntervalMs}ms, poke watchdog every ${this.pokeWatchdogIntervalMs}ms`,
+			`[Orchestrator] Maintenance started — offer reaper every ${this.offerReapIntervalMs}ms, poke watchdog every ${this.pokeWatchdogIntervalMs}ms, liveness alerting every ${this.livenessAlertIntervalMs}ms`,
 		);
 	}
 
@@ -869,6 +891,10 @@ export class Orchestrator {
 		if (this.pokeWatchdogTimer) {
 			clearInterval(this.pokeWatchdogTimer);
 			this.pokeWatchdogTimer = null;
+		}
+		if (this.livenessAlertTimer) {
+			clearInterval(this.livenessAlertTimer);
+			this.livenessAlertTimer = null;
 		}
 	}
 
@@ -910,7 +936,26 @@ export class Orchestrator {
 
 				const { mode, reasons } = assessReadiness(detail);
 
+				const isHighRisk =
+					detail.priority === "high" ||
+					detail.priority === "critical" ||
+					detail.unresolvedDependencies > 2 ||
+					detail.totalAcceptanceCriteria > 5;
+
 				if (mode === "skip") {
+					// P226: 10% sampling for completed work
+					if (detail.status.toUpperCase() === "COMPLETE" && Math.random() < 0.1) {
+						await postWorkOffer({
+							proposalId: detail.id,
+							squadName: `P${detail.id}-audit`,
+							role: `frontier-review`,
+							task: `Frontier audit sample for completed proposal ${detail.displayId}. Review decisions and final state.`,
+							stage: detail.status,
+							worktreeHint: this.defaultWorktree,
+							roleProfileId: null,
+						});
+						dispatched++;
+					}
 					continue;
 				}
 
@@ -937,6 +982,19 @@ export class Orchestrator {
 				});
 
 				dispatched++;
+
+				if (isHighRisk && mode === "gate") {
+					await postWorkOffer({
+						proposalId: detail.id,
+						squadName: `P${detail.id}-audit`,
+						role: `frontier-review`,
+						task: `Frontier oversight for high-risk gate transition on ${detail.displayId}. Review primary decision.`,
+						stage: detail.status,
+						worktreeHint: this.defaultWorktree,
+						roleProfileId: null,
+					});
+					dispatched++;
+				}
 			} catch (err) {
 				// Backpressure isn't a failure — it's the cap doing its job.
 				// Stop scanning this tick: if the queue is full, no point
@@ -1033,7 +1091,7 @@ export class Orchestrator {
 		status: string;
 		stallHours: number;
 	}): Promise<void> {
-		// Tier 1: AI liaison via offer dispatch (conditional on env var)
+		// Tier 1: liaison-first offer dispatch (P904-A3: replaced spawnAgent with postWorkOffer)
 		if (ORCHESTRATOR_LIAISON_PROVIDER) {
 			try {
 				const stallTask = [
@@ -1052,27 +1110,63 @@ export class Orchestrator {
 				].join("\n");
 				const { dispatchId } = await postWorkOffer({
 					proposalId: stall.id,
-					squadName: `P${stall.id}-stall-investigate`,
+					squadName: `P${stall.id}-stall-liaison`,
 					role: "orchestrator-liaison-investigator",
 					task: stallTask,
 					stage: stall.status,
-					worktreeHint: this.defaultWorktree,
+					phase: "investigate",
+					timeoutMs: 600_000,
+					worktreeHint: this.defaultWorktree ?? undefined,
+					requiredCapabilities: ["orchestrator-liaison-investigator"],
 				});
-				const agencies = await listDispatchableAgencies();
-				if (agencies.length === 0) {
+				console.log(
+					`[Orchestrator] stall liaison offer ${dispatchId} posted for ${stall.displayId}`,
+				);
+
+				// Push notification to first dispatchable agency
+				try {
+					const agencies = await listDispatchableAgencies();
+					if (agencies.length > 0) {
+						const targetAgency = agencies[0];
+						const envelope = createMessageEnvelope({
+							agencyId: targetAgency.agency_id,
+							direction: "orchestrator->liaison",
+							kind: "offer_dispatch",
+							payload: {
+								offer_id: String(dispatchId),
+								dispatch_id: dispatchId,
+								proposal_id: stall.id,
+								squad_name: `P${stall.id}-stall-liaison`,
+								role: "orchestrator-liaison-investigator",
+								required_capabilities: ["orchestrator-liaison-investigator"],
+								route_hint: ORCHESTRATOR_LIAISON_PROVIDER,
+							},
+						});
+						const sequence = await getNextSequence(targetAgency.agency_id);
+						await storeMessage({
+							...(envelope as any),
+							sequence,
+							signature: "stub-orchestrator",
+						});
+						console.log(
+							`[Orchestrator] stall liaison offer_dispatch sent to ${targetAgency.agency_id} for dispatch ${dispatchId}`,
+						);
+					} else {
+						console.warn(
+							`[Orchestrator] stall liaison dispatch ${dispatchId}: no dispatchable agencies`,
+							{ reason: "no_dispatchable_agency" },
+						);
+					}
+				} catch (err) {
 					console.warn(
-						`[Orchestrator] stall ${stall.displayId}: offer ${dispatchId} queued, no dispatchable agency for push`,
-						{ reason: "no_dispatchable_agency" },
-					);
-				} else {
-					console.log(
-						`[Orchestrator] stall ${stall.displayId}: offer ${dispatchId} queued, OfferClaimLoop will push to ${agencies[0].agency_id}`,
+						`[Orchestrator] failed to emit liaison message for stall dispatch ${dispatchId}:`,
+						err instanceof Error ? err.message : err,
 					);
 				}
 				return;
 			} catch (err) {
 				console.warn(
-					`[Orchestrator] stall postWorkOffer failed for ${stall.displayId}, falling through to Tier 2:`,
+					`[Orchestrator] liaison offer failed for ${stall.displayId}, falling through to Tier 2:`,
 					err instanceof Error ? err.message : err,
 				);
 			}

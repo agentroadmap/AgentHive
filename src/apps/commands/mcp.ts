@@ -6,6 +6,10 @@
  */
 
 import type { Command } from "commander";
+import {
+	setPoolLifecycleMode,
+	startPoolPoisonWatchdog,
+} from "../../infra/postgres/pool.ts";
 import { createMcpServer } from "../../mcp/server.ts";
 import { findRoadmapRoot } from "../../utils/find-roadmap-root.ts";
 import { resolveRuntimeCwd } from "../../utils/runtime-cwd.ts";
@@ -39,6 +43,8 @@ function registerStartCommand(mcpCmd: Command): void {
 		)
 		.action(async (options: StartOptions) => {
 			try {
+				setPoolLifecycleMode("long-running");
+				startPoolPoisonWatchdog("agenthive-mcp-stdio");
 				const runtimeCwd = await resolveRuntimeCwd({ cwd: options.cwd });
 				const projectRoot =
 					(await findRoadmapRoot(runtimeCwd.cwd)) ?? runtimeCwd.cwd;

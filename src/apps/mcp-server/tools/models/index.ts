@@ -21,7 +21,7 @@ export function registerModelTools(
 				tier: {
 					type: "string",
 					enum: ["frontier", "standard", "economy"],
-					description: "Filter by model tier: frontier, standard (maps to mid), economy (maps to lower)",
+					description: "Filter by model tier: frontier, standard, or economy",
 				},
 				project_id: { type: "number", description: "Optional project context for future per-project route filtering" },
 			},

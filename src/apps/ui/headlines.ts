@@ -33,7 +33,10 @@ export function renderHeadlines(
 			child.destroy();
 		});
 
+		// parent: screen is required — without it the container is orphaned and
+		// renders invisible (the cockpit/headlines/chat black-screen bug).
 		container = box({
+			parent: screen,
 			top: 0,
 			left: 0,
 			width: "100%",
@@ -113,7 +116,7 @@ export function renderHeadlines(
 }
 
 function formatPulseMessage(m: PulseMessage): string {
-	const time = new Date(Number(m.timestamp) / 1000).toLocaleTimeString([], {
+	const time = new Date(Number(m.timestamp)).toLocaleTimeString([], {
 		hour: "2-digit",
 		minute: "2-digit",
 		second: "2-digit",

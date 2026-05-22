@@ -31,6 +31,10 @@ export function registerProposalTools(
 					description:
 						"Alias for type. Proposal type determines workflow selection.",
 				},
+				parent_id: {
+					type: "string",
+					description: "Filter to direct children of this proposal (display_id like 'P1000' or numeric id)",
+				},
 				domain_id: { type: "string", description: "Filter by domain" },
 				maturity_min: {
 					type: "number",
@@ -386,6 +390,104 @@ export function registerProposalTools(
 			required: ["id"],
 		},
 		handler: (args: any) => handlers.getProposalProjection(args),
+	});
+
+	server.addTool({
+		name: "prop_map_upsert",
+		description:
+			"Insert or update a legacy→agentHive2 proposal mapping row. " +
+			"Classifies a legacy proposal and records evidence, rationale, and review provenance " +
+			"in roadmap_proposal.proposal_migration_map.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				legacy_proposal_id: {
+					type: "string",
+					description: "Display ID of the legacy proposal (e.g. 'P123'). Durable text anchor.",
+				},
+				classification: {
+					type: "string",
+					enum: ["retained", "delivered_evidence", "duplicate", "obsolete", "reauthor_needed", "superseded"],
+					description: "P995 classification vocabulary.",
+				},
+				rationale: {
+					type: "string",
+					description: "Non-empty explanation for the classification.",
+				},
+				evidence_refs: {
+					type: "array",
+					description: "Array of reference objects, each with at least {type, ref}. Accepted types: commit, ac_id, discussion_id, doc_slug, migration_id, review_id, external_url.",
+					items: { type: "object" },
+				},
+				canonical_proposal_id: {
+					type: "string",
+					description: "Display ID of the agentHive2 canonical equivalent (null for obsolete).",
+				},
+				superseded_by_proposal_id: {
+					type: "string",
+					description: "Display ID of the proposal that replaces this one. Required when classification=superseded or duplicate.",
+				},
+				reviewed_by: {
+					type: "string",
+					description: "Agent identity or reviewer handle. Sets reviewed_at to now() when provided.",
+				},
+				notes: { type: "string", description: "Optional free-form notes." },
+				created_by: { type: "string", description: "Agent/user identity creating this mapping. Defaults to 'system'." },
+			},
+			required: ["legacy_proposal_id", "classification", "rationale"],
+		},
+		handler: (args: any) => handlers.mapUpsert(args),
+	});
+	server.addTool({
+		name: "prop_map_get",
+		description: "Get a single legacy→agentHive2 proposal mapping row by legacy_proposal_id.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				legacy_proposal_id: {
+					type: "string",
+					description: "Display ID of the legacy proposal (e.g. 'P123').",
+				},
+			},
+			required: ["legacy_proposal_id"],
+		},
+		handler: (args: any) => handlers.mapGet(args),
+	});
+	server.addTool({
+		name: "prop_map_query",
+		description:
+			"Query legacy→agentHive2 proposal mapping rows with optional filters. " +
+			"Use classification, reviewed, and needs_review to narrow results.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				classification: {
+					type: "string",
+					enum: ["retained", "delivered_evidence", "duplicate", "obsolete", "reauthor_needed", "superseded"],
+					description: "Filter by classification.",
+				},
+				reviewed: {
+					type: "boolean",
+					description: "true = only reviewed rows; false = only unreviewed rows.",
+				},
+				needs_review: {
+					type: "boolean",
+					description: "true = rows missing reviewer, timestamp, evidence, or canonical_proposal_id.",
+				},
+				limit: {
+					type: "number",
+					description: "Max rows to return (default 100, max 500).",
+				},
+			},
+		},
+		handler: (args: any) => handlers.mapQuery(args),
+	});
+	server.addTool({
+		name: "prop_map_summary",
+		description:
+			"Return classification counts for the proposal migration map: total, reviewed, unreviewed, with/without evidence, with canonical.",
+		inputSchema: { type: "object", properties: {} },
+		handler: (args: any) => handlers.mapSummary(args),
 	});
 
 	// prop_get_detail - comprehensive single-call proposal with ALL children

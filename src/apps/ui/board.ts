@@ -6,8 +6,7 @@ import {
 } from "../../board.ts";
 import type { StreamEvent } from "../../core/messaging/event-stream.ts";
 import { Core } from "../../core/roadmap.ts";
-import { getRegistry, getView } from "../../core/workflow/state-names.ts";
-import { closePool, setPoolLifecycleMode } from "../../infra/postgres/pool.ts";
+import { RfcStates, getRegistry, getView } from "../../core/workflow/state-names.ts";
 import type { Directive, Proposal } from "../../shared/types/index.ts";
 import { collectAvailableLabels } from "../../shared/utils/label-filter.ts";
 import {
@@ -68,8 +67,87 @@ type ColumnView = {
 	box: BoxInterface;
 };
 
+type WorkflowViewKey = "rfc" | "hotfix" | "obsolete";
+
+type WorkflowViewDefinition = {
+	key: WorkflowViewKey;
+	label: string;
+	stages: { name: string }[];
+};
+
+const RFC_STATUSES = [
+	"DRAFT",
+	"REVIEW",
+	"DEVELOP",
+	"MERGE",
+	"COMPLETE",
+	"BLOCKED",
+];
+const HOTFIX_STATUSES = [
+	"TRIAGE",
+	"FIX",
+	"DEPLOYED",
+	"ESCALATE",
+	"WONT_FIX",
+	"NON_ISSUE",
+];
+const HOTFIX_PROPOSAL_TYPES = new Set(["hotfix"]);
+const WORKFLOW_VIEWS: WorkflowViewDefinition[] = [
+	{
+		key: "rfc",
+		label: "RFC",
+		stages: RFC_STATUSES.map((name) => ({ name })),
+	},
+	{
+		key: "hotfix",
+		label: "Hotfix",
+		stages: HOTFIX_STATUSES.map((name) => ({ name })),
+	},
+	{
+		key: "obsolete",
+		label: "Obsolete",
+		stages: [],
+	},
+];
+const WORKFLOW_BY_KEY = new Map(
+	WORKFLOW_VIEWS.map((workflow) => [workflow.key, workflow]),
+);
+
+function getRfcStatusesCanonical(): string[] {
+	return [...RFC_STATUSES];
+}
+
+function getHotfixStatusesCanonical(): string[] {
+	return [...HOTFIX_STATUSES];
+}
+
+function statusForView(status: string, _workflowKey: WorkflowViewKey): string {
+	return status.toUpperCase();
+}
+
 function isObsoleteProposal(proposal: Proposal): boolean {
 	return (proposal.maturity ?? "").toLowerCase() === "obsolete";
+}
+
+function getCombinedWorkflowStatuses(
+	proposals: Proposal[],
+	workflowKey: WorkflowViewKey,
+): string[] {
+	const canonical =
+		workflowKey === "hotfix"
+			? getHotfixStatusesCanonical()
+			: getRfcStatusesCanonical();
+	const extras = new Set<string>();
+	for (const proposal of proposals) {
+		const status = statusForView(proposal.status, workflowKey);
+		if (status && !canonical.includes(status)) {
+			extras.add(status);
+		}
+	}
+	return [
+		...canonical,
+		...Array.from(extras).sort((a, b) => a.localeCompare(b)),
+	];
 }
 
 export function getWorkflowViewDefinition(name: string) {
@@ -82,10 +160,8 @@ export function getWorkflowViewDefinition(name: string) {
 
 export function getWorkflowViewForProposal(proposal: Proposal) {
 	// Hotfix proposals live in a separate cosmetic view.
-	if ((proposal.maturity ?? "").toLowerCase() === "obsolete")
-		return { key: "obsolete" };
-	if ((proposal.proposalType ?? "").toLowerCase() === "hotfix")
-		return { key: "hotfix" };
+	if ((proposal.maturity ?? "").toLowerCase() === "obsolete") return { key: "obsolete" };
+	if ((proposal.proposalType ?? "").toLowerCase() === "hotfix") return { key: "hotfix" };
 	return { key: "rfc" };
 }
 
@@ -103,9 +179,7 @@ export function filterProposalsForWorkflow(
 
 	if (workflowName.toLowerCase() === "hotfix") {
 		// Hotfix view groups proposals by type rather than the RFC stages.
-		return proposals.filter(
-			(proposal) => (proposal.proposalType ?? "").toLowerCase() === "hotfix",
-		);
+		return proposals.filter((proposal) => (proposal.proposalType ?? "").toLowerCase() === "hotfix");
 	}
 
 	try {
@@ -115,19 +189,14 @@ export function filterProposalsForWorkflow(
 			const isHotfix = (proposal.proposalType ?? "").toLowerCase() === "hotfix";
 			// RFC view should exclude hotfix proposals; hotfixs are their own cosmetic view.
 			if (workflowName.toLowerCase() === "rfc" && isHotfix) return false;
-			return (
-				!isObsoleteProposal(proposal) &&
-				validStages.has(proposal.status.toLowerCase())
-			);
+			return !isObsoleteProposal(proposal) && validStages.has(proposal.status.toLowerCase());
 		});
 	} catch {
 		// If registry/view isn't available, fall back conservatively. Ensure
 		// hotfix proposals are not included in RFC view even when registry missing.
 		if (workflowName.toLowerCase() === "rfc") {
 			return proposals.filter(
-				(proposal) =>
-					!isObsoleteProposal(proposal) &&
-					(proposal.proposalType ?? "").toLowerCase() !== "hotfix",
+				(proposal) => !isObsoleteProposal(proposal) && (proposal.proposalType ?? "").toLowerCase() !== "hotfix",
 			);
 		}
 		return proposals.filter((proposal) => !isObsoleteProposal(proposal));
@@ -168,27 +237,21 @@ export function resolveWorkflowStatuses(
 				try {
 					// Prefer the RFC template when available as a canonical ordering
 					const chosen =
-						available.find((n) => n.toLowerCase() === "standard rfc") ??
-						available.find((n) => n.toLowerCase().includes("rfc")) ??
-						available[0];
+						available.find((n) => n.toLowerCase() === "rfc") ?? available[0];
 					const view = getView(chosen);
 					const canonical = view.stages.map((s) => s.name);
 					const present = new Set<string>();
 					for (const p of proposals) {
 						if (!isObsoleteProposal(p)) present.add(p.status);
 					}
-					const presentLower = new Set(
-						Array.from(present).map((s) => s.toLowerCase()),
-					);
+					const presentLower = new Set(Array.from(present).map((s) => s.toLowerCase()));
 					const lowerCanonical = new Set(canonical.map((s) => s.toLowerCase()));
 					const extras = new Set<string>();
 					for (const s of present) {
 						if (!lowerCanonical.has(s.toLowerCase())) extras.add(s);
 					}
 					// Return canonical statuses that are present (case-insensitive), followed by extras.
-					const ordered = canonical.filter((c) =>
-						presentLower.has(c.toLowerCase()),
-					);
+					const ordered = canonical.filter((c) => presentLower.has(c.toLowerCase()));
 					return [
 						...ordered.map((s) => s.toUpperCase()),
 						...Array.from(extras)
@@ -221,9 +284,7 @@ export function resolveWorkflowStatuses(
 				statuses.add(proposal.status);
 			}
 		}
-		return Array.from(statuses)
-			.map((s) => s.toUpperCase())
-			.sort();
+		return Array.from(statuses).map((s) => s.toUpperCase()).sort();
 	}
 
 	try {
@@ -255,9 +316,7 @@ export function resolveWorkflowStatuses(
 			}
 			return [
 				...rfcCanonical,
-				...Array.from(extras)
-					.map((s) => s.toUpperCase())
-					.sort((a, b) => a.localeCompare(b)),
+				...Array.from(extras).map((s) => s.toUpperCase()).sort((a, b) => a.localeCompare(b)),
 			];
 		}
 
@@ -274,9 +333,7 @@ export function resolveWorkflowStatuses(
 
 		return [
 			...canonical.map((s) => s.toUpperCase()),
-			...Array.from(extras)
-				.map((s) => s.toUpperCase())
-				.sort((a, b) => a.localeCompare(b)),
+			...Array.from(extras).map((s) => s.toUpperCase()).sort((a, b) => a.localeCompare(b)),
 		];
 	} catch {
 		const statuses = new Set<string>();
@@ -285,9 +342,7 @@ export function resolveWorkflowStatuses(
 				statuses.add(proposal.status);
 			}
 		}
-		return Array.from(statuses)
-			.map((s) => s.toUpperCase())
-			.sort();
+		return Array.from(statuses).map((s) => s.toUpperCase()).sort();
 	}
 }
 
@@ -393,44 +448,6 @@ export function filterBoardColumns(
 	});
 }
 
-export function orderStatusesBySavedColumns(
-	statuses: string[],
-	savedColumns?: string[],
-	options: { savedWorkflow?: string; currentWorkflow?: string } = {},
-): string[] {
-	if (
-		!savedColumns ||
-		savedColumns.length === 0 ||
-		(options.savedWorkflow && options.savedWorkflow !== options.currentWorkflow)
-	) {
-		return statuses;
-	}
-
-	const byLower = new Map(
-		statuses.map((status) => [status.toLowerCase(), status]),
-	);
-	const ordered: string[] = [];
-	const seen = new Set<string>();
-
-	for (const savedStatus of savedColumns) {
-		const matched = byLower.get(savedStatus.toLowerCase());
-		if (!matched) continue;
-		const key = matched.toLowerCase();
-		if (seen.has(key)) continue;
-		ordered.push(matched);
-		seen.add(key);
-	}
-
-	for (const status of statuses) {
-		const key = status.toLowerCase();
-		if (seen.has(key)) continue;
-		ordered.push(status);
-		seen.add(key);
-	}
-
-	return ordered;
-}
-
 export function formatProposalListItem(
 	proposal: Proposal,
 	isMoving = false,
@@ -443,9 +460,7 @@ export function formatProposalListItem(
 	const rawAssignee = proposal.assignee?.[0];
 	let assignee = "";
 	if (rawAssignee) {
-		const handle = rawAssignee.startsWith("@")
-			? rawAssignee
-			: `@${rawAssignee}`;
+		const handle = rawAssignee.startsWith("@") ? rawAssignee : `@${rawAssignee}`;
 		if (live?.leaseHolder && rawAssignee === live.leaseHolder) {
 			assignee = ` {cyan-fg}●${handle}{/}`;
 		} else if (
@@ -612,7 +627,6 @@ export async function renderBoardTui(
 	}
 
 	const core = new Core(options?.projectRoot ?? process.cwd());
-	setPoolLifecycleMode("long-running");
 	const config = await core.filesystem.loadConfig();
 
 	const versionInfo = await getVersionInfo();
@@ -632,16 +646,9 @@ export async function renderBoardTui(
 		workflow: string;
 		maturity: string;
 		type: string;
-		columns?: string[];
-		hiddenColumns?: string[];
 	}
 
-	const boardStateFilePath = path.join(
-		os.homedir(),
-		".config",
-		"agenthive",
-		"board-state.json",
-	);
+	const boardStateFilePath = path.join(os.homedir(), ".config", "agenthive", "board-state.json");
 
 	const loadBoardState = (): BoardState => {
 		try {
@@ -652,8 +659,6 @@ export async function renderBoardTui(
 					workflow: parsed.workflow ?? "",
 					maturity: parsed.maturity ?? "non-obsolete",
 					type: parsed.type ?? "",
-					columns: parsed.columns ?? undefined,
-					hiddenColumns: parsed.hiddenColumns ?? undefined,
 				};
 			}
 		} catch {
@@ -674,9 +679,9 @@ export async function renderBoardTui(
 		}
 	};
 
-	let boardState = loadBoardState();
-	let currentWorkflow = boardState.workflow || "";
-	let currentMaturity = boardState.maturity || "non-obsolete";
+	const initialBoardState = loadBoardState();
+	let currentWorkflow = initialBoardState.workflow || "";
+	let currentMaturity = initialBoardState.maturity || "non-obsolete";
 
 	const getAvailableWorkflows = (): string[] => {
 		try {
@@ -690,52 +695,21 @@ export async function renderBoardTui(
 		return currentWorkflow || "All";
 	};
 
-	const orderStatusesFromBoardState = (statuses: string[]): string[] => {
-		return orderStatusesBySavedColumns(statuses, boardState.columns, {
-			savedWorkflow: boardState.workflow,
-			currentWorkflow,
-		});
-	};
-
 	const initialVisibleProposals = filterProposalsForWorkflow(
 		initialProposals,
 		currentWorkflow,
 	);
-	let currentStatuses = orderStatusesFromBoardState(
-		resolveWorkflowStatuses(initialVisibleProposals, currentWorkflow),
+	let currentStatuses = resolveWorkflowStatuses(
+		initialVisibleProposals,
+		currentWorkflow,
 	);
 	let initialColumns = prepareBoardColumns(
 		initialVisibleProposals,
 		currentStatuses,
 	);
 	initialColumns = filterBoardColumns(initialColumns, {
-		hiddenStatuses: [
-			...hiddenStatusesFromConfig,
-			...(boardState.hiddenColumns ?? []),
-		],
+		hiddenStatuses: hiddenStatusesFromConfig,
 	});
-
-	// Apply saved column order from board-state if present. Preserve any
-	// statuses that are present in the computed initialColumns but not in
-	// the saved order by appending them afterwards.
-	if (boardState.columns && boardState.columns.length > 0) {
-		const byStatus = new Map(
-			initialColumns.map((c) => [c.status.toLowerCase(), c]),
-		);
-		const ordered: ColumnData[] = [];
-		const seen = new Set<string>();
-		for (const s of boardState.columns) {
-			const c = byStatus.get(s.toLowerCase());
-			if (c) {
-				ordered.push(c);
-				seen.add(c.status.toLowerCase());
-			}
-		}
-		for (const c of initialColumns) {
-			if (!seen.has(c.status.toLowerCase())) ordered.push(c);
-		}
-		initialColumns = ordered;
-	}
 
 	await new Promise<void>((resolve) => {
 		const screen = createScreen({
@@ -784,10 +758,7 @@ export async function renderBoardTui(
 			height: "100%-1",
 			border: { type: "line" },
 			label: " 📰 Feed ",
-			style: {
-				border: { fg: "cyan" },
-				selected: { bg: undefined, fg: "white" },
-			},
+			style: { border: { fg: "cyan" }, selected: { bg: undefined, fg: "white" } },
 			tags: true,
 			mouse: true,
 			scrollable: true,
@@ -805,7 +776,7 @@ export async function renderBoardTui(
 		let filterPopupOpen = false;
 		let pendingSearchWrap: "to-first" | "to-last" | null = null;
 		let feedOnlyMode = false;
-		const currentTypeFilter = boardState.type || "";
+		let currentTypeFilter = "";
 		const sharedFilters = {
 			searchQuery: options?.filters?.searchQuery ?? "",
 			priorityFilter: options?.filters?.priorityFilter ?? "",
@@ -857,23 +828,6 @@ export async function renderBoardTui(
 		];
 		let hiddenStatuses = [...hiddenStatusesFromConfig];
 		let hiddenStatusesToggle = true;
-		const hiddenColumns = new Set<string>(
-			(boardState.hiddenColumns ?? []).map((s) => s),
-		);
-		const saveCurrentBoardState = (
-			overrides: Partial<BoardState> = {},
-		): void => {
-			const nextState: BoardState = {
-				workflow: currentWorkflow,
-				maturity: currentMaturity,
-				type: currentTypeFilter,
-				columns: [...currentStatuses],
-				hiddenColumns: Array.from(hiddenColumns),
-				...overrides,
-			};
-			boardState = nextState;
-			saveBoardState(nextState);
-		};
 		const hasActiveSharedFilters = () =>
 			Boolean(
 				sharedFilters.searchQuery.trim() ||
@@ -912,18 +866,12 @@ export async function renderBoardTui(
 		};
 
 		const getVisibleWorkflowProposals = (): Proposal[] => {
-			let filtered = filterProposalsForWorkflow(
-				getFilteredProposals(),
-				currentWorkflow,
-			);
+			let filtered = filterProposalsForWorkflow(getFilteredProposals(), currentWorkflow);
 
 			if (currentMaturity === "non-obsolete") {
 				filtered = filtered.filter((p) => !isObsoleteProposal(p));
 			} else if (currentMaturity && currentMaturity !== "all") {
-				filtered = filtered.filter(
-					(p) =>
-						(p.maturity ?? "").toLowerCase() === currentMaturity.toLowerCase(),
-				);
+				filtered = filtered.filter((p) => (p.maturity ?? "").toLowerCase() === currentMaturity.toLowerCase());
 			}
 
 			return filtered;
@@ -1027,30 +975,6 @@ export async function renderBoardTui(
 			clearTimeout(footerRestoreTimer);
 			footerRestoreTimer = null;
 		};
-		let boardShutdownStarted = false;
-		const shutdownBoard = async (exitProcess = false): Promise<void> => {
-			if (boardShutdownStarted) return;
-			boardShutdownStarted = true;
-			clearFooterTimer();
-			screen.destroy();
-
-			try {
-				await getRegistry().unsubscribe();
-			} catch {
-				// Registry may not be loaded or may already be released.
-			}
-
-			setPoolLifecycleMode("one-shot");
-			await Promise.race([
-				closePool(),
-				new Promise<void>((resolveTimeout) => setTimeout(resolveTimeout, 1500)),
-			]);
-			resolve();
-
-			if (exitProcess) {
-				setImmediate(() => process.exit(0));
-			}
-		};
 		const getTerminalWidth = () =>
 			typeof screen.width === "number" ? screen.width : 80;
 		const getFooterHeight = () =>
@@ -1108,12 +1032,7 @@ export async function renderBoardTui(
 		const hitTest = (data: any, el: any): boolean => {
 			const pos = el.lpos;
 			if (!pos) return false;
-			return (
-				data.x >= pos.xi &&
-				data.x < pos.xl &&
-				data.y >= pos.yi &&
-				data.y < pos.yl
-			);
+			return data.x >= pos.xi && data.x < pos.xl && data.y >= pos.yi && data.y < pos.yl;
 		};
 
 		const findColumnAt = (data: any): number => {
@@ -1211,7 +1130,7 @@ export async function renderBoardTui(
 
 			// Drag: mousedown on one column, mouseup on another
 			if (dragProposalId && dragSourceCol >= 0 && colIdx !== dragSourceCol) {
-				const proposal = currentProposals.find((p) => p.id === dragProposalId);
+				const proposal = currentProposals.find(p => p.id === dragProposalId);
 				const sourceCol = columns[dragSourceCol];
 				const targetCol = columns[colIdx];
 				dragProposalId = null;
@@ -1382,11 +1301,16 @@ export async function renderBoardTui(
 			restoreSelection(selectedProposalId);
 		};
 
-		function rebuildColumns(data: ColumnData[], selectedProposalId?: string) {
+		const rebuildColumns = (
+			data: ColumnData[],
+			selectedProposalId?: string,
+		) => {
 			currentColumnsData = data;
+			currentStatuses = data.map((column) => column.status);
 			createColumnViews(data);
 			restoreSelection(selectedProposalId);
-		}
+		};
+
 		// Pure function to calculate the projected board proposal
 		const getProjectedColumns = (
 			allProposals: Proposal[],
@@ -1437,15 +1361,12 @@ export async function renderBoardTui(
 		};
 
 		const focusFilterControl = (
-			filterId: "search" | "status" | "priority" | "directive" | "labels",
+			filterId: "search" | "priority" | "directive" | "labels",
 		) => {
 			if (!filterHeader) return;
 			switch (filterId) {
 				case "search":
 					filterHeader.focusSearch();
-					break;
-				case "status":
-					filterHeader.focusStatus();
 					break;
 				case "priority":
 					filterHeader.focusPriority();
@@ -1459,48 +1380,8 @@ export async function renderBoardTui(
 			}
 		};
 
-		const getStatusFilterChoices = (): string[] => {
-			const workflowProposals = filterProposalsForWorkflow(
-				currentProposals,
-				currentWorkflow,
-			);
-			const resolved = orderStatusesFromBoardState(
-				resolveWorkflowStatuses(workflowProposals, currentWorkflow),
-			);
-			const byLower = new Map<string, string>();
-			for (const status of [
-				...resolved,
-				...currentStatuses,
-				...hiddenColumns,
-			]) {
-				const trimmed = status.trim();
-				if (!trimmed) continue;
-				const key = trimmed.toLowerCase();
-				if (!byLower.has(key)) {
-					byLower.set(key, trimmed);
-				}
-			}
-			return [...byLower.values()];
-		};
-
-		const updateStatusFilterLabel = (choices = getStatusFilterChoices()) => {
-			const selectedCount = choices.filter((s) => !hiddenColumns.has(s)).length;
-			filterHeader?.setFilters({
-				status:
-					selectedCount === choices.length
-						? ""
-						: `${selectedCount}/${choices.length}`,
-			});
-		};
-
 		const openFilterPicker = async (
-			filterId:
-				| "priority"
-				| "directive"
-				| "labels"
-				| "status"
-				| "workflow"
-				| "maturity",
+			filterId: "priority" | "directive" | "labels",
 		) => {
 			if (filterPopupOpen || moveOp || !filterHeader) {
 				return;
@@ -1546,77 +1427,6 @@ export async function renderBoardTui(
 					return;
 				}
 
-				if (filterId === "workflow") {
-					const workflows = getAvailableWorkflows();
-					const selected = await openSingleSelectFilterPopup({
-						screen,
-						title: "Workflow Filter",
-						selectedValue: currentWorkflow,
-						choices: [
-							{ label: "All", value: "all" },
-							...workflows.map((w) => ({ label: w, value: w })),
-							{ label: "Obsolete", value: "obsolete" },
-							{ label: "Hotfix", value: "hotfix" },
-						],
-					});
-					if (selected !== null) {
-						currentWorkflow = selected === "all" ? "" : selected;
-						renderView();
-						saveCurrentBoardState();
-					}
-					return;
-				}
-
-				if (filterId === "maturity") {
-					const choices = [
-						{ label: "Non-Obsolete", value: "non-obsolete" },
-						{ label: "New", value: "new" },
-						{ label: "Active", value: "active" },
-						{ label: "Mature", value: "mature" },
-						{ label: "Obsolete", value: "obsolete" },
-						{ label: "All", value: "all" },
-					];
-					const selected = await openSingleSelectFilterPopup({
-						screen,
-						title: "Maturity Filter",
-						selectedValue: currentMaturity,
-						choices,
-					});
-					if (selected !== null) {
-						currentMaturity = selected;
-						// "non-obsolete" is the default — show blank label instead of the value.
-						filterHeader?.setFilters({
-							maturity: selected === "non-obsolete" ? "" : selected,
-						});
-						renderView();
-						saveCurrentBoardState();
-					}
-					return;
-				}
-
-				if (filterId === "status") {
-					const allStatusesInView = getStatusFilterChoices();
-					const selected = await openMultiSelectFilterPopup({
-						screen,
-						title: "Status Filter",
-						items: allStatusesInView,
-						selectedItems: currentStatuses.filter((s) => !hiddenColumns.has(s)),
-					});
-					if (selected !== null) {
-						const nextHidden = new Set<string>();
-						for (const s of allStatusesInView) {
-							if (!selected.includes(s)) nextHidden.add(s);
-						}
-						hiddenColumns.clear();
-						for (const status of nextHidden) {
-							hiddenColumns.add(status);
-						}
-						updateStatusFilterLabel(allStatusesInView);
-						applyColumnVisibility();
-					}
-					return;
-				}
-
 				const selected = await openSingleSelectFilterPopup({
 					screen,
 					title: "Directive Filter",
@@ -1634,11 +1444,7 @@ export async function renderBoardTui(
 				}
 			} finally {
 				filterPopupOpen = false;
-				focusFilterControl(
-					filterId === "workflow" || filterId === "maturity"
-						? "search"
-						: filterId,
-				);
+				focusFilterControl(filterId);
 				screen.render();
 			}
 		};
@@ -1648,11 +1454,9 @@ export async function renderBoardTui(
 			statuses: [],
 			availableLabels: configuredLabels,
 			availableDirectives,
-			visibleFilters: ["search", "status", "maturity", "priority", "directive", "labels"],
+			visibleFilters: ["search", "priority", "directive", "labels"],
 			initialFilters: {
 				search: sharedFilters.searchQuery,
-				status: "",
-				maturity: currentMaturity === "non-obsolete" ? "" : currentMaturity,
 				priority: sharedFilters.priorityFilter,
 				labels: sharedFilters.labelFilter,
 				directive: sharedFilters.directiveFilter,
@@ -1666,10 +1470,12 @@ export async function renderBoardTui(
 				renderView();
 			},
 			onFilterPickerOpen: (filterId) => {
+				if (filterId === "status") {
+					return;
+				}
 				void openFilterPicker(filterId);
 			},
 		});
-		updateStatusFilterLabel();
 		filterHeader.setFocusChangeHandler((focus) => {
 			if (focus !== null) {
 				currentFocus = "filters";
@@ -1788,26 +1594,19 @@ export async function renderBoardTui(
 			}, durationMs);
 		};
 
-		function renderView() {
+		const renderView = () => {
 			const visibleWorkflowProposals = getVisibleWorkflowProposals();
-
-			// Compute statuses in canonical order and then, if the user has a saved
-			// column ordering in their board state for the current workflow, apply
-			// that ordering (preserving any additional statuses present).
-			let resolvedStatuses = resolveWorkflowStatuses(
+			currentStatuses = resolveWorkflowStatuses(
 				visibleWorkflowProposals,
 				currentWorkflow,
 			);
-			resolvedStatuses = orderStatusesFromBoardState(resolvedStatuses);
-
-			currentStatuses = resolvedStatuses;
 
 			let projectedData = getProjectedColumns(visibleWorkflowProposals, moveOp);
 
 			// Apply column visibility filters
 			projectedData = filterBoardColumns(projectedData, {
 				hideEmpty: hideEmptyColumns,
-				hiddenStatuses: [...hiddenStatuses, ...hiddenColumns],
+				hiddenStatuses,
 			});
 
 			// If we are moving, we want to select the moving proposal
@@ -1825,7 +1624,7 @@ export async function renderBoardTui(
 			screen.title = `Roadmap Board - ${getWorkflowLabel()} - ${versionLabel}`;
 			updateFooter();
 			screen.render();
-		}
+		};
 
 		rebuildColumns(initialColumns);
 		const firstColumn = columns[0];
@@ -1890,7 +1689,8 @@ export async function renderBoardTui(
 			updateFooter();
 		});
 
-		const toggleFeedView = () => {
+
+		screen.key(["s", "S"], () => {
 			if (popupOpen || filterPopupOpen || moveOp || currentFocus === "filters")
 				return;
 			feedOnlyMode = !feedOnlyMode;
@@ -1906,9 +1706,7 @@ export async function renderBoardTui(
 			syncBoardAreaLayout();
 			updateFooter();
 			screen.render();
-		};
-
-		screen.key(["s", "S"], toggleFeedView);
+		});
 
 		screen.key(["e", "E"], () => {
 			if (popupOpen || filterPopupOpen || moveOp || currentFocus === "filters")
@@ -1987,40 +1785,44 @@ export async function renderBoardTui(
 		});
 
 		// Column visibility toggle with proposal memory
+		const hiddenColumns = new Set<string>();
 		let previousVisibility: string[] | null = null; // For restoring previous proposal
 
-		function applyColumnVisibility() {
+		const applyColumnVisibility = () => {
+			const filteredStatuses = currentStatuses.filter(
+				(s) => !hiddenColumns.has(s),
+			);
+			currentStatuses = filteredStatuses;
+			rebuildColumns(currentColumnsData);
 			renderView();
-			// Persist current column order and hidden columns so TUI opens with same layout
-			saveCurrentBoardState();
-		}
+		};
 
-		// V = show all columns / toggle restore
-		let vPressCount = 0;
-		screen.key(["v", "V"], () => {
-			if (popupOpen || filterPopupOpen || moveOp) return;
-			vPressCount++;
-			if (vPressCount === 1 && previousVisibility) {
-				// Restore previous visibility
-				hiddenColumns.clear();
-				currentStatuses.forEach((s) => {
-					if (!previousVisibility?.includes(s)) hiddenColumns.add(s);
-				});
-				applyColumnVisibility();
-				showTransientFooter(
-					" {green-fg}Previous column visibility restored{/}",
-				);
-			} else {
-				// Save current and show all
-				previousVisibility = [...currentStatuses];
-				hiddenColumns.clear();
-				applyColumnVisibility();
-				vPressCount = 0;
-				showTransientFooter(
-					" {green-fg}All columns shown{/} (V again to restore previous)",
-				);
-			}
-		});
+	// V = show all columns / toggle restore
+	let vPressCount = 0;
+	screen.key(["v", "V"], () => {
+		if (popupOpen || filterPopupOpen || moveOp) return;
+		vPressCount++;
+		if (vPressCount === 1 && previousVisibility) {
+			// Restore previous visibility
+			hiddenColumns.clear();
+			currentStatuses.forEach((s) => {
+				if (!previousVisibility?.includes(s)) hiddenColumns.add(s);
+			});
+			applyColumnVisibility();
+			showTransientFooter(
+				" {green-fg}Previous column visibility restored{/}",
+			);
+		} else {
+			// Save current and show all
+			previousVisibility = [...currentStatuses];
+			hiddenColumns.clear();
+			applyColumnVisibility();
+			vPressCount = 0;
+			showTransientFooter(
+				" {green-fg}All columns shown{/} (V again to restore previous)",
+			);
+		}
+	});
 
 		// H = hide current (focused) column
 		screen.key(["h", "H"], () => {
@@ -2466,50 +2268,50 @@ export async function renderBoardTui(
 			}
 		};
 
-		screen.key(["enter"], () => {
-			if (popupOpen || filterPopupOpen || currentFocus === "filters") return;
+	screen.key(["enter"], () => {
+		if (popupOpen || filterPopupOpen || currentFocus === "filters") return;
 
-			// In move mode, Enter confirms the move
-			if (moveOp) {
-				void performProposalMove();
-				return;
-			}
+		// In move mode, Enter confirms the move
+		if (moveOp) {
+			void performProposalMove();
+			return;
+		}
 
-			const column = columns[currentCol];
-			if (!column) return;
-			const idx = column.list.selected ?? 0;
-			if (idx < 0 || idx >= column.proposals.length) return;
-			const proposal = column.proposals[idx];
-			if (!proposal) return;
-			popupOpen = true;
+		const column = columns[currentCol];
+		if (!column) return;
+		const idx = column.list.selected ?? 0;
+		if (idx < 0 || idx >= column.proposals.length) return;
+		const proposal = column.proposals[idx];
+		if (!proposal) return;
+		popupOpen = true;
 
-			createProposalPopup(screen, proposal, resolveDirectiveLabel)
-				.then((popup) => {
-					if (!popup) {
-						popupOpen = false;
-						screen.render();
-						return;
-					}
-					const { contentArea, close } = popup;
-					contentArea.key(["escape", "q"], () => {
-						popupOpen = false;
-						close();
-						focusColumn(currentCol);
-						return false;
-					});
-					popup.background.setFront?.();
-					popup.popup.setFront?.();
-					contentArea.focus();
-					screen.render();
-				})
-				.catch((err) => {
+		createProposalPopup(screen, proposal, resolveDirectiveLabel)
+			.then((popup) => {
+				if (!popup) {
 					popupOpen = false;
-					showTransientFooter(` {red-fg}Error: ${String(err).slice(0, 80)}{/}`);
 					screen.render();
+					return;
+				}
+				const { contentArea, close } = popup;
+				contentArea.key(["escape", "q"], () => {
+					popupOpen = false;
+					close();
+					focusColumn(currentCol);
+					return false;
 				});
-		});
+				popup.background.setFront?.();
+				popup.popup.setFront?.();
+				contentArea.focus();
+				screen.render();
+			})
+			.catch((err) => {
+				popupOpen = false;
+				showTransientFooter(` {red-fg}Error: ${String(err).slice(0, 80)}{/}`);
+				screen.render();
+			});
+	});
 
-		const openQuickEdit = async (
+	const openQuickEdit = async (
 			proposal: Proposal,
 			field: "title" | "assignee" | "labels",
 		) => {
@@ -2601,8 +2403,7 @@ export async function renderBoardTui(
 		});
 
 		screen.key(["tab"], async () => {
-			if (popupOpen || filterPopupOpen || currentFocus === "filters" || moveOp)
-				return;
+			if (popupOpen || filterPopupOpen || currentFocus === "filters" || moveOp) return;
 			const column = columns[currentCol];
 			if (column) {
 				const idx = column.list.selected ?? 0;
@@ -2629,18 +2430,15 @@ export async function renderBoardTui(
 			}
 
 			const available = getAvailableWorkflows();
-			const currentIdx = currentWorkflow
-				? available.indexOf(currentWorkflow)
-				: -1;
-			const nextIdx =
-				(currentIdx + 1) % (available.length > 0 ? available.length : 1);
+			const currentIdx = currentWorkflow ? available.indexOf(currentWorkflow) : -1;
+			const nextIdx = (currentIdx + 1) % (available.length > 0 ? available.length : 1);
 			if (available.length > 0) {
 				currentWorkflow = available[nextIdx] ?? "";
+				saveBoardState({ workflow: currentWorkflow, maturity: currentMaturity, type: currentTypeFilter });
 				showTransientFooter(
 					` {magenta-fg}Workflow: ${currentWorkflow || "All"}{/}`,
 				);
 				renderView();
-				saveCurrentBoardState();
 			}
 			screen.render();
 			return;
@@ -2652,12 +2450,14 @@ export async function renderBoardTui(
 			startMove();
 		});
 
-		screen.key(["q", "C-c"], async () => {
+		screen.key(["q", "C-c"], () => {
 			if (popupOpen || filterPopupOpen) return;
-			await shutdownBoard(true);
+			clearFooterTimer();
+			screen.destroy();
+			resolve();
 		});
 
-		screen.key(["escape"], async () => {
+		screen.key(["escape"], () => {
 			if (popupOpen || filterPopupOpen) return;
 			if (currentFocus === "filters") {
 				focusColumn(currentCol);
@@ -2674,7 +2474,9 @@ export async function renderBoardTui(
 				// Require double-press within 2s to exit
 				const now = Date.now();
 				if (lastEscapeTime && now - lastEscapeTime < 2000) {
-					await shutdownBoard(true);
+					clearFooterTimer();
+					screen.destroy();
+					resolve();
 				} else {
 					lastEscapeTime = now;
 					showTransientFooter(
@@ -2709,42 +2511,19 @@ export async function renderBoardTui(
 		};
 		// Board-style icons matching status-icon.ts
 		const stateIconMap: Record<string, string> = {
-			draft: "○",
-			review: "◆",
-			develop: "◒",
-			merge: "▣",
-			complete: "✓",
-			rejected: "✖",
-			discard: "●",
-			replaced: "⇄",
-			building: "◒",
-			accepted: "▣",
-			abandoned: "●",
-			obsolete: "✖",
-			blocked: "●",
+			draft: "○", review: "◆", develop: "◒", merge: "▣", complete: "✓",
+			rejected: "✖", discard: "●", replaced: "⇄", building: "◒",
+			accepted: "▣", abandoned: "●", obsolete: "✖", blocked: "●",
 		};
 		const maturityIconMap: Record<string, string> = {
-			new: "○",
-			active: "▶",
-			mature: "✓",
-			obsolete: "✖",
+			new: "○", active: "▶", mature: "✓", obsolete: "✖",
 		};
 		const stateColorMap: Record<string, string> = {
-			draft: "white",
-			review: "yellow",
-			develop: "cyan",
-			merge: "magenta",
-			complete: "green",
-			rejected: "red",
-			discard: "gray",
-			replaced: "blue",
-			building: "cyan",
+			draft: "white", review: "yellow", develop: "cyan", merge: "magenta", complete: "green",
+			rejected: "red", discard: "gray", replaced: "blue", building: "cyan",
 		};
 		const maturityColorMap: Record<string, string> = {
-			new: "white",
-			active: "cyan",
-			mature: "green",
-			obsolete: "red",
+			new: "white", active: "cyan", mature: "green", obsolete: "red",
 		};
 		const getFeedIcon = (e: StreamEvent): string => {
 			// State transition: "P289 state draft -> review"
@@ -2771,22 +2550,14 @@ export async function renderBoardTui(
 			}
 			// Other event types with colors
 			const typeMap: Record<string, [string, string]> = {
-				proposal_accepted: ["▣", "green"],
-				proposal_claimed: ["◆", "yellow"],
-				proposal_coding: ["◒", "cyan"],
-				review_requested: ["?", "yellow"],
-				proposal_reviewing: ["◆", "yellow"],
-				review_passed: ["✓", "green"],
-				review_failed: ["✖", "red"],
-				proposal_complete: ["✓", "green"],
-				proposal_merged: ["▣", "magenta"],
-				proposal_pushed: ["P", "cyan"],
-				agent_online: ["+", "green"],
-				agent_offline: ["-", "red"],
-				heartbeat: ["$", "gray"],
-				cubic_phase_change: ["~", "blue"],
-				custom: [".", "white"],
-				message: ["@", "cyan"],
+				proposal_accepted: ["▣", "green"], proposal_claimed: ["◆", "yellow"],
+				proposal_coding: ["◒", "cyan"], review_requested: ["?", "yellow"],
+				proposal_reviewing: ["◆", "yellow"], review_passed: ["✓", "green"],
+				review_failed: ["✖", "red"], proposal_complete: ["✓", "green"],
+				proposal_merged: ["▣", "magenta"], proposal_pushed: ["P", "cyan"],
+				agent_online: ["+", "green"], agent_offline: ["-", "red"],
+				heartbeat: ["$", "gray"], cubic_phase_change: ["~", "blue"],
+				custom: [".", "white"], message: ["@", "cyan"],
 			};
 			const entry = typeMap[e.type];
 			if (entry) return `{${entry[1]}-fg}${entry[0]}{/}`;
@@ -2814,17 +2585,13 @@ export async function renderBoardTui(
 			});
 			for (const [pid, evts] of sortedEntries) {
 				// Proposal header with latest state icon
-				const latestState = evts.reduce(
-					(best, e) => {
-						if (e.message.includes(" state ")) {
-							const m = e.message.match(/state\s+\S+\s+->\s+(\S+)/);
-							if (m && e.timestamp > best.ts)
-								return { state: m[1], ts: e.timestamp };
-						}
-						return best;
-					},
-					{ state: "", ts: 0 },
-				);
+				const latestState = evts.reduce((best, e) => {
+					if (e.message.includes(" state ")) {
+						const m = e.message.match(/state\s+\S+\s+->\s+(\S+)/);
+						if (m && e.timestamp > best.ts) return { state: m[1], ts: e.timestamp };
+					}
+					return best;
+				}, { state: "", ts: 0 });
 				const headerIcon = latestState.state
 					? (stateIconMap[latestState.state.toLowerCase()] ?? "○")
 					: "○";
@@ -2833,9 +2600,7 @@ export async function renderBoardTui(
 				);
 				for (const e of evts) {
 					const time = new Date(e.timestamp).toLocaleTimeString("en-US", {
-						hour: "2-digit",
-						minute: "2-digit",
-						second: "2-digit",
+						hour: "2-digit", minute: "2-digit", second: "2-digit",
 					});
 					const icon = getFeedIcon(e);
 					// Indent thread items
@@ -2845,13 +2610,11 @@ export async function renderBoardTui(
 			}
 			if (global.length > 0) {
 				lines.push(
-					`{white-bg}{black-fg} $ global {/} {gray-fg}(${global.length} events){/}`,
+					"{white-bg}{black-fg} $ global {/} {gray-fg}(" + global.length + " events){/}",
 				);
 				for (const e of global) {
 					const time = new Date(e.timestamp).toLocaleTimeString("en-US", {
-						hour: "2-digit",
-						minute: "2-digit",
-						second: "2-digit",
+						hour: "2-digit", minute: "2-digit", second: "2-digit",
 					});
 					const icon = getFeedIcon(e);
 					lines.push(`  {cyan-fg}${time}{/} ${icon} ${e.message}`);
@@ -2862,9 +2625,7 @@ export async function renderBoardTui(
 
 		const formatEventLine = (e: StreamEvent): string => {
 			const time = new Date(e.timestamp).toLocaleTimeString("en-US", {
-				hour: "2-digit",
-				minute: "2-digit",
-				second: "2-digit",
+				hour: "2-digit", minute: "2-digit", second: "2-digit",
 			});
 			const icon = getFeedIcon(e);
 			return `{cyan-fg}${time}{/} ${icon} ${e.message}`;
@@ -2873,9 +2634,7 @@ export async function renderBoardTui(
 		const updateEventPanel = async () => {
 			const events = await getBoardLiveFeed(200);
 			_currentEvents = events;
-			const unseenEvents = events.filter(
-				(event) => !seenFeedEventIds.has(event.id),
-			);
+			const unseenEvents = events.filter((event) => !seenFeedEventIds.has(event.id));
 			if (unseenEvents.length === 0 && feedLines.length > 0) {
 				return;
 			}
@@ -2900,9 +2659,7 @@ export async function renderBoardTui(
 				feedLines = buildThreadLines(_allFeedEvents);
 			} else {
 				// Always rebuild from sorted accumulated events to maintain chronological order
-				feedLines = _allFeedEvents
-					.map(formatEventLine)
-					.slice(-FEED_HISTORY_LIMIT);
+				feedLines = _allFeedEvents.map(formatEventLine).slice(-FEED_HISTORY_LIMIT);
 			}
 			renderFeedPanel();
 			screen.render();

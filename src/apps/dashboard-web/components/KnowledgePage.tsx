@@ -1,5 +1,6 @@
 import type React from "react";
 import { useCallback, useEffect, useState } from "react";
+import { apiClient } from "../lib/api";
 import LoadingSpinner from "./LoadingSpinner";
 
 interface KnowledgeEntry {
@@ -39,13 +40,10 @@ const KnowledgePage: React.FC = () => {
 	const fetchData = useCallback(async () => {
 		try {
 			setError(null);
-			const params = new URLSearchParams();
-			if (searchQuery) params.set("query", searchQuery);
-			if (typeFilter) params.set("type", typeFilter);
-			const url = `/api/knowledge${params.toString() ? `?${params.toString()}` : ""}`;
-			const response = await fetch(url);
-			if (!response.ok) throw new Error("Failed to fetch knowledge entries");
-			const data = await response.json();
+			const data = await apiClient.fetchKnowledge({
+				query: searchQuery || undefined,
+				type: typeFilter || undefined,
+			});
 			setEntries(data);
 		} catch (err) {
 			console.error("Failed to fetch knowledge entries:", err);
@@ -62,7 +60,7 @@ const KnowledgePage: React.FC = () => {
 
 	const handleMarkHelpful = async (id: string) => {
 		try {
-			await fetch(`/api/knowledge/${id}/helpful`, { method: "POST" });
+			await apiClient.markKnowledgeHelpful(id);
 			setEntries((prev) =>
 				prev.map((e) =>
 					e.id === id ? { ...e, helpful_count: (e.helpful_count || 0) + 1 } : e,

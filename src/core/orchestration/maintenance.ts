@@ -15,6 +15,7 @@ import {
 	probeAgentLiveness,
 	type LivenessSignal,
 } from "./probes/agent-liveness.ts";
+import { runLivenessAlertTick } from "../../infra/agency/liveness-alerting.ts";
 
 export type QueryFn = typeof poolQuery;
 
@@ -130,6 +131,28 @@ export async function runPokeWatchdogTick(
 	} catch (err) {
 		logger.warn(
 			`[${tag}] Poke emission pass failed: ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
+}
+
+// ─── Periodic: liveness alerting ─────────────────────────────────────────────
+
+/**
+ * P765: One tick of the liveness alerting loop.
+ *   1. Transitions provider_registry silent agencies (dormant/offline).
+ *   2. Transitions roadmap.agency dormant→offline (5 min threshold).
+ *   3. Emits single-shot Discord alerts for agencies offline > 10 min (AC-3/AC-4).
+ *   4. Emits recovery alerts and clears debounce flags.
+ */
+export async function runLivenessAlertingTick(
+	logger: MaintenanceLogger = console,
+	tag = "Maintenance",
+): Promise<void> {
+	try {
+		await runLivenessAlertTick();
+	} catch (err) {
+		logger.warn(
+			`[${tag}] Liveness alert tick failed: ${err instanceof Error ? err.message : String(err)}`,
 		);
 	}
 }

@@ -46,11 +46,6 @@ interface DLQCandidate {
 }
 
 /**
- * Track escalation failures in memory to enforce poison pill logic
- */
-const escalationFailures = new Map<string, number>();
-
-/**
  * Escalation pass: uses two-CTE atomic bulk pattern to fetch candidates and update.
  * For each escalated message, sends an escalation notice to the escalation recipient.
  */
@@ -118,19 +113,32 @@ async function runEscalationPass(db: Pool): Promise<void> {
 					`[TimeoutCron] Escalation: message ${candidate.message_id} escalated to ${candidate.escalation_recipient} (notice id: ${noticeResult.rows[0].id})`,
 				);
 
-				// Clear failure count on success
-				escalationFailures.delete(candidate.message_id);
+				// Reset durable failure counter on success (no-op if counter was 0)
+				await db.query(
+					`UPDATE roadmap.message_timeout_tracking
+					 SET escalation_failure_count = 0
+					 WHERE message_id = $1 AND escalation_failure_count > 0`,
+					[candidate.message_id],
+				);
 			} catch (err) {
-				// Log the error and track failures
-				const failureCount = (escalationFailures.get(candidate.message_id) ?? 0) + 1;
-				escalationFailures.set(candidate.message_id, failureCount);
-
 				const message = err instanceof Error ? err.message : String(err);
+
+				// Increment durable failure counter; get new total atomically
+				const { rows: failRows } = await db.query<{ escalation_failure_count: number }>(
+					`UPDATE roadmap.message_timeout_tracking
+					 SET escalation_failure_count = escalation_failure_count + 1
+					 WHERE message_id = $1
+					 RETURNING escalation_failure_count`,
+					[candidate.message_id],
+				);
+				const failureCount = failRows[0]?.escalation_failure_count ?? 1;
+
 				logger.error(
 					`[TimeoutCron] Escalation failed for message ${candidate.message_id} (attempt ${failureCount}): ${message}`,
 				);
 
-				// After 3 consecutive failures, mark as poison pill
+				// After ESCALATION_RETRY_LIMIT consecutive failures, quarantine as poison pill;
+				// otherwise reset escalated_at so the CTE re-selects on the next tick.
 				if (failureCount >= ESCALATION_RETRY_LIMIT) {
 					try {
 						await db.query(
@@ -142,7 +150,6 @@ async function runEscalationPass(db: Pool): Promise<void> {
 						logger.error(
 							`[TimeoutCron] Message ${candidate.message_id} marked as poison pill after ${failureCount} failures`,
 						);
-						escalationFailures.delete(candidate.message_id);
 
 						// Check if escalation_recipient is missing from agent_registry
 						if (!candidate.escalation_recipient) {
@@ -185,6 +192,14 @@ async function runEscalationPass(db: Pool): Promise<void> {
 							}`,
 						);
 					}
+				} else {
+					// Below threshold: reset escalated_at so the CTE re-selects on the next tick
+					await db.query(
+						`UPDATE roadmap.message_timeout_tracking
+						 SET escalated_at = NULL
+						 WHERE message_id = $1`,
+						[candidate.message_id],
+					);
 				}
 			}
 		}

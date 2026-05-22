@@ -12,12 +12,39 @@ import type { LiaisonMessage, LiaisonMessageAckOutcome } from './liaison-message
 
 const MESSAGE_SEQUENCE_WINDOW = 100; // Buffer out-of-order messages up to this window
 const SIGNED_AT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-const LISTEN_CHANNEL_PREFIX = 'liaison_message_';
+// P1103 AC-2: unified channel namespace. MUST match fn_liaison_notify_new_message trigger.
+const LISTEN_CHANNEL_PREFIX = 'msg_';
 
 // Signing key: shared secret from env, falls back to deterministic dev sentinel.
 // P208 RSA key-pair integration is separate; HMAC-SHA256 is the wire implementation.
 function getSigningKey(): string {
     return process.env.AGENCY_SIGNING_KEY ?? 'dev-insecure-signing-key';
+}
+
+// ─── P1103 Feature-flag cache ────────────────────────────────────────────────
+// TTL-backed cache so flag lookups don't add a DB round-trip per message.
+const FLAG_CACHE_TTL_MS = 30_000;
+let _flagCache: { dualwrite: boolean; cutover: boolean; ts: number } | null = null;
+
+async function readMessageBusFlags(): Promise<{ dualwrite: boolean; cutover: boolean }> {
+    const now = Date.now();
+    if (_flagCache && now - _flagCache.ts < FLAG_CACHE_TTL_MS) {
+        return { dualwrite: _flagCache.dualwrite, cutover: _flagCache.cutover };
+    }
+    const result = await query<{ flag_name: string; enabled_default: boolean }>(
+        `SELECT flag_name, enabled_default
+         FROM roadmap.feature_flag
+         WHERE flag_name IN ('unified_message_bus_dualwrite', 'unified_message_bus_cutover')`,
+        []
+    );
+    let dualwrite = false;
+    let cutover = false;
+    for (const row of result.rows) {
+        if (row.flag_name === 'unified_message_bus_dualwrite') dualwrite = row.enabled_default;
+        if (row.flag_name === 'unified_message_bus_cutover') cutover = row.enabled_default;
+    }
+    _flagCache = { dualwrite, cutover, ts: now };
+    return { dualwrite, cutover };
 }
 
 // ─── Message Storage ────────────────────────────────────────────────────────
@@ -47,33 +74,91 @@ export async function storeMessage(
         sequence: bigint;
     }
 ): Promise<LiaisonMessage> {
-    // Mirror to message_ledger — enables unified A2A query surface and pg_notify
-    // on a2a_chan_system:liaison:<agency_id> for future consumers.
+    // P1103 AC-1/AC-8: feature-flag-controlled write order.
+    // Phase 0 (default): liaison_message authoritative, message_ledger mirror (unchanged).
+    // Phase 1 (dualwrite=ON): message_ledger authoritative, liaison_message mirror.
+    // Phase 2 (cutover=ON): message_ledger only; liaison_message INSERT skipped.
+    let flags: { dualwrite: boolean; cutover: boolean } = { dualwrite: false, cutover: false };
+    try { flags = await readMessageBusFlags(); } catch { /* flag read failure → stay on Phase 0 */ }
+
+    const ledgerPayload: Parameters<typeof query>[1] = [
+        `liaison:${message.agency_id}`,
+        `system:liaison:${message.agency_id}`,
+        JSON.stringify(message.payload).substring(0, 4096),
+        JSON.stringify({
+            kind: message.kind,
+            direction: message.direction,
+            correlation_id: message.correlation_id,
+            signed_at: message.signed_at,
+            signature: message.signature,
+            sequence: String(message.sequence),
+            message_id: message.message_id,
+        }),
+    ];
+
     let ledgerId: number | null = null;
-    try {
+
+    if (flags.cutover) {
+        // Phase 2: ledger is sole store. Write ledger as authoritative; skip liaison_message.
+        // NOTE: liaison_message-dependent callers (getMessageById, getUnackedMessages, etc.)
+        // still read from liaison_message — full cutover requires those to be redirected too.
+        // That migration is intentionally deferred (see P1103 Phase 3 design).
         const ledgerResult = await query<{ id: number }>(
             `INSERT INTO roadmap.message_ledger
                 (from_agent, channel, message_content, message_type, metadata)
              VALUES ($1, $2, $3, 'liaison', $4)
              RETURNING id`,
-            [
-                `liaison:${message.agency_id}`,
-                `system:liaison:${message.agency_id}`,
-                JSON.stringify(message.payload).substring(0, 4096),
-                JSON.stringify({
-                    kind: message.kind,
-                    direction: message.direction,
-                    correlation_id: message.correlation_id,
-                    signed_at: message.signed_at,
-                    signature: message.signature,
-                    sequence: String(message.sequence),
-                    message_id: message.message_id,
-                }),
-            ]
+            ledgerPayload
         );
         ledgerId = ledgerResult.rows[0]?.id ?? null;
-    } catch {
-        // Mirror failed — proceed with liaison_message as the authoritative store
+        // Construct a minimal LiaisonMessage from the insert parameters so
+        // callers that use the returned struct stay functional during Phase 2.
+        return {
+            message_id: message.message_id,
+            agency_id: message.agency_id,
+            sequence: message.sequence,
+            direction: message.direction as LiaisonMessage['direction'],
+            kind: message.kind,
+            correlation_id: message.correlation_id,
+            payload: message.payload,
+            signed_at: message.signed_at,
+            signature: message.signature,
+            acked_at: null,
+            ack_outcome: null,
+            ack_error: null,
+            created_at: new Date().toISOString(),
+            host_id: null,
+        };
+    }
+
+    if (flags.dualwrite) {
+        // Phase 1: message_ledger is primary; write it first so its id is canonical.
+        try {
+            const ledgerResult = await query<{ id: number }>(
+                `INSERT INTO roadmap.message_ledger
+                    (from_agent, channel, message_content, message_type, metadata)
+                 VALUES ($1, $2, $3, 'liaison', $4)
+                 RETURNING id`,
+                ledgerPayload
+            );
+            ledgerId = ledgerResult.rows[0]?.id ?? null;
+        } catch {
+            // Ledger write failed — fall through; liaison_message still gets the row.
+        }
+    } else {
+        // Phase 0: ledger is best-effort mirror.
+        try {
+            const ledgerResult = await query<{ id: number }>(
+                `INSERT INTO roadmap.message_ledger
+                    (from_agent, channel, message_content, message_type, metadata)
+                 VALUES ($1, $2, $3, 'liaison', $4)
+                 RETURNING id`,
+                ledgerPayload
+            );
+            ledgerId = ledgerResult.rows[0]?.id ?? null;
+        } catch {
+            // Mirror failed — proceed with liaison_message as the authoritative store
+        }
     }
 
     // P922: Atomic INSERT...SELECT to resolve host_id from roadmap.agency.

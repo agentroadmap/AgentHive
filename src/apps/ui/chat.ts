@@ -44,7 +44,9 @@ export function renderChat(
 			child.destroy();
 		});
 
+		// parent: screen required — without it the container is orphaned and invisible.
 		container = box({
+			parent: screen,
 			top: 0,
 			left: 0,
 			width: "100%",
@@ -128,6 +130,7 @@ export function renderChat(
 					screen.render();
 				});
 			}
+			inputField.focus();
 			screen.render();
 		});
 
@@ -169,11 +172,12 @@ export function renderChat(
 		container._lastMsgTimestamp = messages[0].timestamp;
 	}
 
+	inputField.focus();
 	screen.render();
 }
 
 function formatChatMessage(m: ChatMessage, userSystemName: string): string {
-	const time = new Date(Number(m.timestamp) / 1000).toLocaleTimeString([], {
+	const time = new Date(Number(m.timestamp)).toLocaleTimeString([], {
 		hour: "2-digit",
 		minute: "2-digit",
 	});

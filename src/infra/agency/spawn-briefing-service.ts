@@ -97,6 +97,24 @@ export interface SpawnSummaryPayload {
   emitted_by: string;
 }
 
+type SpawnSummaryRow = {
+  id: number;
+  briefing_id: string;
+  outcome: SpawnSummaryPayload["outcome"];
+  summary: string | null;
+  new_findings: Array<{ date?: string; summary: string; proposal?: string }>;
+  updated_quirks: Array<{
+    tool: string;
+    canonical_args?: Record<string, any>;
+    gotchas?: string[];
+  }>;
+  error_log: Record<string, any> | null;
+  emitted_by: string | null;
+  task_id: string | null;
+  mission: string | null;
+  harvested_into_memory: boolean;
+};
+
 /**
  * Assemble a warm-boot briefing before spawn.
  *
@@ -410,7 +428,7 @@ async function fetchFallbackPlaybook(
  * Records outcome, new findings, and quirks update for harvester processing.
  */
 export async function emitSpawnSummary(payload: SpawnSummaryPayload): Promise<void> {
-  await query(
+  const insertResult = await query(
     `
     INSERT INTO roadmap.spawn_summary (
       briefing_id,
@@ -425,6 +443,7 @@ export async function emitSpawnSummary(payload: SpawnSummaryPayload): Promise<vo
       state_snapshot,
       emitted_by
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    RETURNING id
     `,
     [
       payload.briefing_id,
@@ -440,6 +459,11 @@ export async function emitSpawnSummary(payload: SpawnSummaryPayload): Promise<vo
       payload.emitted_by,
     ]
   );
+
+  const summaryId = insertResult.rows[0]?.id as number | undefined;
+  if (summaryId) {
+    await harvestSpawnSummary(summaryId);
+  }
 }
 
 /**
@@ -449,9 +473,261 @@ export async function emitSpawnSummary(payload: SpawnSummaryPayload): Promise<vo
  * TODO(P###): Implement git commit verification logic.
  */
 export async function harvestSpawnSummary(summary_id: bigint): Promise<void> {
-  // TODO: fetch summary, verify quirks/findings against current HEAD commit,
-  // merge into roadmap.knowledge_entries and roadmap.fallback_playbook,
-  // mark summary as harvested_into_memory = true
+  const result = await query(
+    `
+    SELECT
+      ss.id,
+      ss.briefing_id,
+      ss.outcome,
+      ss.summary,
+      ss.new_findings,
+      ss.updated_quirks,
+      ss.error_log,
+      ss.emitted_by,
+      ss.harvested_into_memory,
+      sb.task_id,
+      sb.mission
+    FROM roadmap.spawn_summary ss
+    LEFT JOIN roadmap.spawn_briefing sb ON sb.briefing_id = ss.briefing_id
+    WHERE ss.id = $1
+    `,
+    [summary_id]
+  );
+
+  if (result.rowCount === 0) {
+    throw new Error(`spawn_summary ${summary_id.toString()} not found`);
+  }
+
+  const summary = result.rows[0] as SpawnSummaryRow;
+  if (summary.harvested_into_memory) {
+    return;
+  }
+
+  const summaryIdText = String(summary.id);
+  const verifiedAt = new Date().toISOString();
+
+  for (const finding of summary.new_findings || []) {
+    const proposalId =
+      typeof finding.proposal === "string" && finding.proposal.trim().length > 0
+        ? finding.proposal.trim()
+        : undefined;
+    const findingDate =
+      typeof finding.date === "string" && finding.date.trim().length > 0
+        ? finding.date
+        : verifiedAt;
+
+    await query(
+      `
+      INSERT INTO roadmap.knowledge_entries (
+        id,
+        type,
+        title,
+        content,
+        keywords,
+        related_proposals,
+        source_proposal_id,
+        author,
+        confidence,
+        helpful_count,
+        reference_count,
+        tags,
+        created_at,
+        updated_at,
+        metadata
+      ) VALUES (
+        $1, 'learned', $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8, 0, 0, $9::jsonb, $10, $10, $11::jsonb
+      )
+      ON CONFLICT (id) DO NOTHING
+      `,
+      [
+        `KB-HARVEST-${summaryIdText}-${Buffer.from(finding.summary).toString("base64url").slice(0, 12)}`,
+        truncateForTitle(finding.summary),
+        [
+          `Spawn summary outcome: ${summary.outcome}`,
+          summary.mission ? `Mission: ${summary.mission}` : null,
+          summary.summary ? `Summary: ${summary.summary}` : null,
+          `Finding: ${finding.summary}`,
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+        JSON.stringify(buildKeywordSet(summary, finding.summary)),
+        JSON.stringify(proposalId ? [proposalId] : []),
+        proposalId ?? null,
+        summary.emitted_by ?? "spawn-summary-harvester",
+        summary.outcome === "success" ? 85 : 75,
+        JSON.stringify(["spawn-summary", "retirement", "knowledge-transfer", "learned"]),
+        findingDate,
+        JSON.stringify({
+          harvested_from_spawn_summary_id: summary.id,
+          harvested_from_briefing_id: summary.briefing_id,
+          task_id: summary.task_id,
+          outcome: summary.outcome,
+        }),
+      ]
+    );
+  }
+
+  for (const quirk of summary.updated_quirks || []) {
+    if (!quirk.tool?.trim()) continue;
+
+    await query(
+      `
+      INSERT INTO roadmap.mcp_tool_schema (
+        tool_name,
+        mcp_server,
+        canonical_args,
+        known_gotchas,
+        verified_at
+      ) VALUES ($1, $2, $3::jsonb, $4::jsonb, $5)
+      ON CONFLICT (tool_name) DO UPDATE SET
+        canonical_args = CASE
+          WHEN EXCLUDED.canonical_args = '{}'::jsonb
+            THEN roadmap.mcp_tool_schema.canonical_args
+          ELSE EXCLUDED.canonical_args
+        END,
+        known_gotchas = CASE
+          WHEN jsonb_array_length(EXCLUDED.known_gotchas) = 0
+            THEN roadmap.mcp_tool_schema.known_gotchas
+          ELSE EXCLUDED.known_gotchas
+        END,
+        verified_at = EXCLUDED.verified_at,
+        last_discovered_at = now()
+      `,
+      [
+        quirk.tool.trim(),
+        "agenthive",
+        JSON.stringify(quirk.canonical_args ?? {}),
+        JSON.stringify(
+          (quirk.gotchas ?? []).map((issue) => ({
+            issue,
+            workaround: "",
+          }))
+        ),
+        verifiedAt,
+      ]
+    );
+  }
+
+  const errorSignature = normalizeErrorSignature(summary.error_log);
+  if (errorSignature) {
+    const toolName =
+      typeof summary.error_log?.tool === "string" && summary.error_log.tool.trim().length > 0
+        ? summary.error_log.tool.trim()
+        : null;
+
+    await query(
+      `
+      INSERT INTO roadmap.fallback_playbook (
+        error_signature,
+        tool_name,
+        error_class,
+        try_action,
+        rationale,
+        source_proposal,
+        harvested_from_spawn_id,
+        confidence,
+        verified_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      ON CONFLICT DO NOTHING
+      `,
+      [
+        errorSignature,
+        toolName,
+        typeof summary.error_log?.error_class === "string"
+          ? summary.error_log.error_class
+          : "SpawnSummaryError",
+        summarizeFallbackAction(summary),
+        summary.summary ?? summary.mission ?? "Harvested from spawn summary",
+        extractFirstProposal(summary.new_findings),
+        summary.briefing_id,
+        0.75,
+        verifiedAt,
+      ]
+    );
+  }
+
+  await query(
+    `
+    UPDATE roadmap.spawn_summary
+    SET harvested_into_memory = true,
+        harvested_at = $2
+    WHERE id = $1
+    `,
+    [summary.id, verifiedAt]
+  );
+}
+
+function truncateForTitle(input: string): string {
+  const trimmed = input.trim();
+  if (trimmed.length <= 120) return trimmed;
+  return `${trimmed.slice(0, 117)}...`;
+}
+
+function buildKeywordSet(summary: SpawnSummaryRow, findingSummary: string): string[] {
+  const rawTokens = [
+    summary.task_id,
+    summary.outcome,
+    summary.emitted_by,
+    ...findingSummary.split(/\W+/),
+    ...(summary.mission ? summary.mission.split(/\W+/) : []),
+  ];
+  return Array.from(
+    new Set(
+      rawTokens
+        .filter((token): token is string => Boolean(token && token.trim()))
+        .map((token) => token.toLowerCase())
+        .filter((token) => token.length >= 3)
+    )
+  ).slice(0, 24);
+}
+
+function extractFirstProposal(
+  findings: Array<{ proposal?: string }> | undefined
+): string | null {
+  for (const finding of findings || []) {
+    if (typeof finding.proposal === "string" && finding.proposal.trim().length > 0) {
+      return finding.proposal.trim();
+    }
+  }
+  return null;
+}
+
+function normalizeErrorSignature(errorLog: Record<string, any> | null): string | null {
+  if (!errorLog) return null;
+  if (typeof errorLog.error_signature === "string" && errorLog.error_signature.trim().length > 0) {
+    return errorLog.error_signature.trim();
+  }
+
+  const toolPrefix =
+    typeof errorLog.tool === "string" && errorLog.tool.trim().length > 0
+      ? errorLog.tool.trim().toLowerCase()
+      : "spawn";
+  const message =
+    typeof errorLog.error_message === "string"
+      ? errorLog.error_message
+      : typeof errorLog.error === "string"
+        ? errorLog.error
+        : "";
+  if (!message.trim()) return null;
+
+  const normalizedMessage = message
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
+  return `${toolPrefix}_${normalizedMessage}`;
+}
+
+function summarizeFallbackAction(summary: SpawnSummaryRow): string {
+  for (const quirk of summary.updated_quirks || []) {
+    if (quirk.gotchas && quirk.gotchas.length > 0) {
+      return quirk.gotchas.join("; ");
+    }
+  }
+  if (summary.summary?.trim()) {
+    return summary.summary.trim();
+  }
+  return "Review the emitted spawn summary and retry with corrected MCP arguments.";
 }
 
 /**

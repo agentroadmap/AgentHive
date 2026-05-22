@@ -2,6 +2,7 @@ import type React from "react";
 import { useCallback, useEffect, useState } from "react";
 import type { Document } from "../../../shared/types";
 import { apiClient } from "../lib/api";
+import MermaidMarkdown from "./MermaidMarkdown";
 import LoadingSpinner from "./LoadingSpinner";
 
 const docTypeColor = (type: string) => {
@@ -127,9 +128,7 @@ const DocumentsPage: React.FC = () => {
 						)}
 					</div>
 					<div className="mt-4 prose dark:prose-invert max-w-none">
-						<pre className="whitespace-pre-wrap text-sm bg-gray-50 dark:bg-gray-900 p-4 rounded-lg overflow-auto">
-							{selectedDoc.rawContent}
-						</pre>
+						<MermaidMarkdown source={selectedDoc.rawContent ?? ""} />
 					</div>
 				</div>
 			</div>

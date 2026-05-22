@@ -66,12 +66,11 @@ export function renderCockpit(
 			child.destroy();
 		});
 
-		// Create persistent container
-		// (no `keys: true` on the container — pre-codex-03b5d580 the container did
-		// not capture keys, and adding it caused focus contention that resulted
-		// in cockpit rendering as a black screen. Per-box handlers below still
-		// catch Tab/q/Esc.)
+		// Create persistent container.
+		// parent: screen required — without it the container is orphaned and
+		// the entire view renders invisible (the 2026-05-19 black-screen bug).
 		container = box({
+			parent: screen,
 			top: 0,
 			left: 0,
 			width: "100%",
@@ -139,65 +138,20 @@ export function renderCockpit(
 		container._ledgerBox = ledgerBox;
 
 		// 4. Terminal [Bottom Right] - USE LOG FOR AUTO-SCROLL
-		// (screen as any).log may not exist on every blessed wrapper variant; fall
-		// back to a regular box so the cockpit still renders. The .add() helper
-		// is feature-detected before use further down.
-		terminalLog = (screen as any).log
-			? (screen as any).log({
-					parent: container,
-					top: "50%",
-					left: "50%",
-					width: "50%",
-					height: "50%-1",
-					border: { type: "line" },
-					label: " [F3] Terminal bridge ",
-					tags: true,
-					keys: true,
-					style: { border: { fg: "cyan" } },
-					scrollback: 100,
-					scrollbar: {
-						ch: " ",
-						track: { bg: "cyan" },
-						style: { inverse: true },
-					},
-				})
-			: box({
-					parent: container,
-					top: "50%",
-					left: "50%",
-					width: "50%",
-					height: "50%-1",
-					border: { type: "line" },
-					label: " [F3] Terminal bridge ",
-					tags: true,
-					scrollable: true,
-					alwaysScroll: true,
-					keys: true,
-					style: { border: { fg: "cyan" } },
-				});
+		terminalLog = (screen as any).log({
+			parent: container,
+			top: "50%",
+			left: "50%",
+			width: "50%",
+			height: "50%-1",
+			border: { type: "line" },
+			label: " [F3] Terminal bridge ",
+			tags: true,
+			style: { border: { fg: "cyan" } },
+			scrollback: 100,
+			scrollbar: { ch: " ", track: { bg: "cyan" }, style: { inverse: true } },
+		});
 		container._terminalLog = terminalLog;
-
-		const emitExit = () => {
-			(screen as any).emit("cockpit:exit");
-		};
-		const emitSwitch = () => {
-			(screen as any).emit("cockpit:switch");
-		};
-		// Tab-crash guard (2026-05-19): any of these boxes can be undefined if a
-		// blessed wrapper returns undefined from a factory call. Skip undefined
-		// targets so the optional-chained .key?.() lookup doesn't throw
-		// "Cannot read properties of undefined (reading 'key')".
-		for (const target of [
-			container,
-			workforceBox,
-			pipelineBox,
-			ledgerBox,
-			terminalLog,
-		]) {
-			if (!target) continue;
-			target.key?.(["q", "Q", "escape", "C-c"], emitExit);
-			target.key?.(["tab"], emitSwitch);
-		}
 
 		// Footer
 		box({
@@ -212,28 +166,19 @@ export function renderCockpit(
 				" {white-fg}Tab: Switch View | Q: Exit | Live Updates Active {/}",
 		});
 
-		// Initial terminal populate. If terminalLog fell back to a plain box
-		// (screen.log unavailable), .add isn't defined; accumulate into content.
-		if (terminalLog) {
-			const lines: string[] = [];
-			messages
-				.slice()
-				.reverse()
-				.forEach((m) => {
-					const time = new Date(
-						Number(m.timestamp) / 1000,
-					).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-					const line = `[{gray-fg}${time}{/}] {bold}${m.sender_identity}{/}: ${m.content}`;
-					if (typeof terminalLog.add === "function") {
-						terminalLog.add(line);
-					} else {
-						lines.push(line);
-					}
-				});
-			if (lines.length > 0 && typeof terminalLog.setContent === "function") {
-				terminalLog.setContent(lines.join("\n"));
-			}
-		}
+		// Initial terminal populate
+		messages
+			.slice()
+			.reverse()
+			.forEach((m) => {
+				const time = new Date(Number(m.timestamp)).toLocaleTimeString(
+					[],
+					{ hour: "2-digit", minute: "2-digit" },
+				);
+				terminalLog.add(
+					`[{gray-fg}${time}{/}] {bold}${m.sender_identity}{/}: ${m.content}`,
+				);
+			});
 		container._lastMsgTimestamp =
 			messages.length > 0 ? messages[0].timestamp : 0;
 	} else {
@@ -274,7 +219,11 @@ export function renderCockpit(
 	statuses.forEach((s) => {
 		const count = statusCounts[s] || 0;
 		const color =
-			s === "Develop" ? "yellow-fg" : s === "Complete" ? "green-fg" : "gray-fg";
+			s === "Develop"
+				? "yellow-fg"
+				: s === "Complete"
+					? "green-fg"
+					: "gray-fg";
 		pipelineLines.push(`{${color}}${s.padEnd(10)}{/} : ${count}`);
 	});
 	pipelineLines.push("\n{bold}Recent Activity:{/}");
@@ -304,7 +253,7 @@ export function renderCockpit(
 		.reverse();
 	if (newMessages.length > 0) {
 		newMessages.forEach((m) => {
-			const time = new Date(Number(m.timestamp) / 1000).toLocaleTimeString([], {
+			const time = new Date(Number(m.timestamp)).toLocaleTimeString([], {
 				hour: "2-digit",
 				minute: "2-digit",
 			});

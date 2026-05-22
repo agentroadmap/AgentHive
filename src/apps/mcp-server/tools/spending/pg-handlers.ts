@@ -158,11 +158,10 @@ async function fetchModelRouteRows(args: {
 }): Promise<ModelRouteRow[]> {
 	const activeOnly = args.active_only !== false;
 	const provider = args.provider ?? null;
-	// P798: tier values are canonical (frontier/standard/economy) from model_route_view
 	const tier = args.tier ?? null;
 	const queryFn: ModelQueryFn = args._queryFn ?? (query as unknown as ModelQueryFn);
 	const { rows } = await queryFn<ModelRouteRow>(
-		`SELECT model_name, provider, tier, cost_per_million_input,
+		`SELECT model_name, provider, cost_per_million_input,
 		        context_window, capabilities, rating, is_active,
 		        route_provider, priority
 		 FROM   roadmap.model_route_view

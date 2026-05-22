@@ -100,7 +100,6 @@ export async function resolveInstanceId(
 	);
 }
 
-/** Determine if agent is permanent (well-known identities) */
 function isPermanent(agentId: string): boolean {
 	return isPermanentAgent(agentId);
 }
@@ -189,8 +188,9 @@ async function resolveRegistrationInstanceId(
 export async function registerAgent(
 	request: RegistrationRequest,
 ): Promise<RegistrationResponse> {
-	const permanentMapping = resolvePermanentAgentMapping(request.agentId);
-	const agentId = permanentMapping?.agentIdentity ?? request.agentId;
+	const requestedAgentId = request.agentId;
+	const permanentMapping = resolvePermanentAgentMapping(requestedAgentId);
+	const agentId = permanentMapping?.agentIdentity ?? requestedAgentId;
 	const capabilities = request.capabilities ?? [];
 	const role = request.role;
 	const permanent = isPermanent(agentId);

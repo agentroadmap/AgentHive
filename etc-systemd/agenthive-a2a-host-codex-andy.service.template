@@ -1,0 +1,49 @@
+# AgentHive A2A Host — codex-agency-bot under andy (Step 2 of P1140 sibling)
+#
+# Purpose: run a second a2a-host process owned by andy so codex-routed work
+# spawns under andy's OS context where /home/andy/.codex/auth.json is reachable.
+# Gary's primary a2a-host EXCLUDES the same identity via AGENTHIVE_AGENCY_EXCLUDE
+# so they don't double-LISTEN on the same channel.
+#
+# Install:
+#   sudo cp etc-systemd/agenthive-a2a-host-codex-andy.service.template \
+#           /etc/systemd/system/agenthive-a2a-host-codex-andy.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now agenthive-a2a-host-codex-andy.service
+#
+# Cutover to gary's host (same restart window):
+#   echo 'AGENTHIVE_AGENCY_EXCLUDE=codex-agency-bot,codex/agency-bot' \
+#     | sudo tee -a /etc/agenthive/env
+#   sudo systemctl restart agenthive-a2a-host.service
+#
+# Rollback:
+#   sudo systemctl stop agenthive-a2a-host-codex-andy.service
+#   sudo sed -i '/AGENTHIVE_AGENCY_EXCLUDE/d' /etc/agenthive/env
+#   sudo systemctl restart agenthive-a2a-host.service
+
+[Unit]
+Description=AgentHive A2A Host — codex agencies under andy (codex auth context)
+After=network.target postgresql.service agenthive-mcp.service
+Requires=agenthive-mcp.service
+
+[Service]
+Type=simple
+User=andy
+Group=andy
+WorkingDirectory=/data/code/AgentHive
+EnvironmentFile=/etc/agenthive/env
+Environment=NODE_ENV=production
+# Andy attaches ONLY these codex agencies. Their workers spawn as andy and
+# inherit /home/andy/.codex/auth.json for codex CLI authentication.
+Environment=AGENTHIVE_AGENCY_FILTER=codex-agency-bot,codex/agency-bot
+# Spawn workers into andy's home for codex auth resolution. Optional but
+# explicit; falls back to /home/andy via passwd if unset.
+Environment=HOME=/home/andy
+ExecStart=/usr/bin/env node --import jiti/register scripts/start-a2a-host.ts
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=60
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target
