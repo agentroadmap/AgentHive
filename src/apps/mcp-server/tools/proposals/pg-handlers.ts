@@ -1099,6 +1099,61 @@ export class PgProposalHandlers {
 				md += `\n`;
 			}
 
+			if (args.format === "json") {
+				const jsonPayload = {
+					id: did,
+					title: proposal.title,
+					type: proposal.type,
+					status: proposal.status,
+					maturity: proposal.maturity ?? "new",
+					priority: proposal.priority ?? null,
+					lease: lease
+						? {
+								agent: lease.agent_identity,
+								claimed_at: lease.claimed_at,
+								expires_at: lease.expires_at ?? null,
+							}
+						: null,
+					decision: decision
+						? {
+								verdict: decision.decision,
+								authority: decision.authority,
+								rationale: decision.rationale ?? null,
+								decided_at: decision.decided_at,
+							}
+						: null,
+					motivation: proposal.motivation ?? null,
+					summary: proposal.summary ?? null,
+					design: proposal.design ?? null,
+					drawbacks: proposal.drawbacks ?? null,
+					alternatives: proposal.alternatives ?? null,
+					dependency_note: proposal.dependency_note ?? null,
+					acceptance_criteria: acResult.rows.map((ac: any) => ({
+						item_number: ac.item_number,
+						criterion_text: ac.criterion_text,
+						status: ac.status,
+						verified_by: ac.verified_by ?? null,
+						verified_at: ac.verified_at ?? null,
+					})),
+					dependencies: deps.map((d: any) => ({
+						display_id: d.display_id,
+						dependency_type: d.dependency_type,
+						resolved: d.resolved,
+					})),
+					children: children.map((c: any) => ({
+						display_id: c.display_id,
+						title: c.title,
+						status: c.status,
+						maturity: c.maturity ?? "new",
+					})),
+				};
+				return {
+					content: [
+						{ type: "text", text: JSON.stringify(jsonPayload, null, 2) },
+					],
+				};
+			}
+
 			return {
 				content: [{ type: "text", text: md }],
 			};
