@@ -25,6 +25,7 @@ import {
 } from "./agent-spawner.ts";
 import { ObservabilityWriter } from "../observability/observability-writer.ts";
 import { postWorkOffer } from "../pipeline/post-work-offer.ts";
+import { ROLE_TO_REQUIRED_CAPABILITIES } from "./offer-dispatch.ts";
 import { reapStaleRows } from "../pipeline/reap-stale-rows.ts";
 import { enqueueNotification } from "../notifications/enqueue.ts";
 import { briefingAssemble } from "../../infra/agency/spawn-briefing-service.ts";
@@ -1867,7 +1868,7 @@ export async function dispatchImplicitGate(
 			task: buildImplicitGateTask(proposal, gate),
 			stage: `gate:${gate.toStage}`,
 			worktreeHint: worktree,
-			requiredCapabilities: [role],
+			requiredCapabilities: ROLE_TO_REQUIRED_CAPABILITIES[role.toLowerCase()] ?? ["develop"],
 			gateRole: role,
 			gateFromStage: proposal.status,
 			gateToStage: gate.toStage,
