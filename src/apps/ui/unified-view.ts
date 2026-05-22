@@ -4,6 +4,8 @@
 
 import type { Core } from "../../core/roadmap.ts";
 import { query as pgQuery } from "../../postgres/pool.ts";
+import * as runtimeConfig from "../../shared/runtime/config.ts";
+import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 import { DEFAULT_STATUSES } from "../../shared/constants/index.ts";
 import type { Directive, Proposal } from "../../shared/types/index.ts";
 import { watchConfig } from "../../shared/utils/config-watcher.ts";
@@ -527,6 +529,21 @@ export async function runUnifiedView(
 			const screen = createScreen({ title: "Engineer's Cockpit" });
 			const t2 = performance.now();
 
+			// Resolve the user-configurable layout preference. Single source of
+			// truth is FlagKeys.TUI_COCKPIT_LAYOUT (backed by core.runtime_flag,
+			// so future web UI / in-TUI config screen can persist user choice).
+			// Fallback chain when the resolver isn't yet initialized (the CLI
+			// doesn't always boot it): env var AGENTHIVE_COCKPIT_LAYOUT → "grid".
+			let cockpitLayout: "grid" | "stacked" = "grid";
+			try {
+				cockpitLayout = await runtimeConfig.get(FlagKeys.TUI_COCKPIT_LAYOUT);
+			} catch {
+				const envVal = process.env.AGENTHIVE_COCKPIT_LAYOUT;
+				if (envVal === "stacked" || envVal === "grid") {
+					cockpitLayout = envVal;
+				}
+			}
+
 			return new Promise<ViewResult>((resolve) => {
 				let _result: ViewResult = "exit";
 
@@ -540,6 +557,7 @@ export async function runUnifiedView(
 					proposals: [],
 					ledger: [],
 					messages: [],
+					layout: cockpitLayout,
 				});
 				const t4 = performance.now();
 				if (process.env.AGENTHIVE_TUI_PERF) {
@@ -714,6 +732,7 @@ export async function runUnifiedView(
 						pipelineCounts,
 						ledger: ledgerData,
 						messages: cockpitMessages,
+						layout: cockpitLayout,
 					});
 					const renderEnd = performance.now();
 					if (process.env.AGENTHIVE_TUI_PERF) {

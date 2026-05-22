@@ -1053,6 +1053,42 @@ export const FlagKeys = {
 		dbColumn: "value_jsonb",
 		envOverride: false,
 	} satisfies ConfigKey<number>,
+
+	/**
+	 * TUI cockpit layout — 'grid' (default, 2x2) or 'stacked' (single column).
+	 * User-facing preference. Persisted in core.runtime_flag so a future web
+	 * UI or in-TUI setting screen can update it without code changes.
+	 * Env var AGENTHIVE_COCKPIT_LAYOUT overrides the DB value for local dev.
+	 */
+	TUI_COCKPIT_LAYOUT: {
+		name: "AGENTHIVE_COCKPIT_LAYOUT",
+		class: "flag" as const,
+		parse: (v: string) => {
+			// Accept JSON-encoded string from the DB ("\"stacked\"") and a
+			// bare env value (stacked). JSON.parse handles both.
+			let raw: string;
+			try {
+				const decoded = JSON.parse(v);
+				raw = typeof decoded === "string" ? decoded : v;
+			} catch {
+				raw = v;
+			}
+			const trimmed = raw.trim().toLowerCase();
+			if (trimmed !== "grid" && trimmed !== "stacked") {
+				throw new Error(
+					`Invalid cockpit layout: ${v}. Must be 'grid' or 'stacked'.`,
+				);
+			}
+			return trimmed as "grid" | "stacked";
+		},
+		required: false,
+		defaultValue: "grid" as "grid" | "stacked",
+		description:
+			"TUI cockpit panel layout: 'grid' (2x2) or 'stacked' (single column).",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<"grid" | "stacked">,
 };
 
 /**

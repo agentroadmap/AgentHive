@@ -59,11 +59,16 @@ export function renderCockpit(
 		pipelineCounts?: Record<string, number>;
 		ledger: LedgerEntry[];
 		messages: TerminalMessage[];
+		// Layout resolved by the caller (FlagKeys.TUI_COCKPIT_LAYOUT). Defaults
+		// to 'grid' when not provided so the function stays safe for any caller
+		// that hasn't been updated yet.
+		layout?: "grid" | "stacked";
 	},
 ): void {
 	const { agents, proposals, ledger, messages } = data;
 	const pipelineTotal = data.pipelineTotal ?? proposals.length;
 	const pipelineCountsExplicit = data.pipelineCounts;
+	const layout: "grid" | "stacked" = data.layout ?? "grid";
 
 	// Check if we already have a persistent cockpit container
 	let container = (screen as any)._cockpitContainer;
@@ -106,18 +111,16 @@ export function renderCockpit(
 		container._headerBox = headerBox;
 
 		// Layout: "grid" (default, 2x2) or "stacked" (1 column, full width).
-		// Set AGENTHIVE_COCKPIT_LAYOUT=stacked for the single-column variant,
-		// which gives each panel full width and ~24% of remaining height —
-		// useful on narrower terminals or when you want longer Recent Activity
-		// / Terminal bridge feeds.
-		const layout = process.env.AGENTHIVE_COCKPIT_LAYOUT === "stacked"
-			? "stacked"
-			: "grid";
+		// Resolved upstream from FlagKeys.TUI_COCKPIT_LAYOUT (env override:
+		// AGENTHIVE_COCKPIT_LAYOUT). Stacked gives each panel full width and
+		// ~24% of remaining height — useful on narrower terminals or when you
+		// want longer Recent Activity / Terminal bridge feeds.
+		const panelLayout = layout;
 
 		// Position helpers: panels go below the header (top:3) and above the
 		// footer (bottom:1). Stacked = 4 equal-height bands; Grid = 2x2.
 		const panelGeometry = (slot: 0 | 1 | 2 | 3) => {
-			if (layout === "stacked") {
+			if (panelLayout === "stacked") {
 				// Each panel is 25% of (screen - header - footer).
 				// height: 25%-1 keeps a 1-row gap and avoids fractional overlap.
 				return {
@@ -276,7 +279,7 @@ export function renderCockpit(
 		const offline = agents.filter((a) => a.status === "offline");
 
 		const cols = ((screen as any).program?.cols as number | undefined) ?? 160;
-		const layout = process.env.AGENTHIVE_COCKPIT_LAYOUT === "stacked" ? "stacked" : "grid";
+		// Layout is the resolved layout from the caller (FlagKeys.TUI_COCKPIT_LAYOUT).
 		const panelBudget = layout === "stacked"
 			? Math.max(60, cols - 6)
 			: Math.max(40, Math.floor(cols / 2) - 6);
