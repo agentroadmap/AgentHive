@@ -1033,6 +1033,26 @@ export const FlagKeys = {
 		dbColumn: "value_jsonb",
 		envOverride: false,
 	} satisfies ConfigKey<number>,
+
+	// ─── P1359: Provider quota cooldown + automatic route fallback ────────────
+
+	SPAWN_PROVIDER_MAX_ATTEMPTS: {
+		name: "SPAWN_PROVIDER_MAX_ATTEMPTS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n <= 0) {
+				throw new Error(`Invalid SPAWN_PROVIDER_MAX_ATTEMPTS: ${v}`);
+			}
+			return n;
+		},
+		required: false,
+		defaultValue: 3,
+		description: "Max retry attempts when spawn hits provider-specific quota (P1359)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
 };
 
 /**
