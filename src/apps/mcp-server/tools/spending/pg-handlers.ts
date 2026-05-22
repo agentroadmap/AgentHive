@@ -841,6 +841,8 @@ export class PgModelHandlers {
 		cost_per_million_output?: string;
 		cost_per_million_cache_write?: string;
 		cost_per_million_cache_hit?: string;
+		cost_per_1m_input?: string;
+		cost_per_1m_output?: string;
 		cost_per_1k_input?: string;
 		cost_per_1k_output?: string;
 		max_tokens?: string;
@@ -852,10 +854,10 @@ export class PgModelHandlers {
 		try {
 			const perMillionPricing = await supportsPerMillionModelPricing();
 			const inputPerMillion =
-				parseOptionalNumber(args.cost_per_million_input) ??
+				parseOptionalNumber(args.cost_per_million_input ?? args.cost_per_1m_input) ??
 				perMillionFromPer1k(args.cost_per_1k_input);
 			const outputPerMillion =
-				parseOptionalNumber(args.cost_per_million_output) ??
+				parseOptionalNumber(args.cost_per_million_output ?? args.cost_per_1m_output) ??
 				perMillionFromPer1k(args.cost_per_1k_output);
 			const cacheWritePerMillion = parseOptionalNumber(
 				args.cost_per_million_cache_write,
@@ -870,17 +872,13 @@ export class PgModelHandlers {
 				? await query(
 						`INSERT INTO model_metadata (
 							model_name, provider,
-							cost_per_1k_input, cost_per_1k_output,
 							cost_per_million_input, cost_per_million_output,
 							cost_per_million_cache_write, cost_per_million_cache_hit,
 							max_tokens, context_window, capabilities, rating, is_active
 						)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13)
-          ON CONFLICT ON CONSTRAINT model_metadata_model_name_key
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11)
+          ON CONFLICT ON CONSTRAINT model_metadata_provider_model_name_key
           DO UPDATE SET
-            provider = EXCLUDED.provider,
-            cost_per_1k_input = COALESCE(EXCLUDED.cost_per_1k_input, model_metadata.cost_per_1k_input),
-            cost_per_1k_output = COALESCE(EXCLUDED.cost_per_1k_output, model_metadata.cost_per_1k_output),
             cost_per_million_input = COALESCE(EXCLUDED.cost_per_million_input, model_metadata.cost_per_million_input),
             cost_per_million_output = COALESCE(EXCLUDED.cost_per_million_output, model_metadata.cost_per_million_output),
             cost_per_million_cache_write = COALESCE(EXCLUDED.cost_per_million_cache_write, model_metadata.cost_per_million_cache_write),
@@ -894,8 +892,6 @@ export class PgModelHandlers {
 						[
 							args.model_name,
 							args.provider || null,
-							inputPer1k,
-							outputPer1k,
 							inputPerMillion,
 							outputPerMillion,
 							cacheWritePerMillion,
@@ -904,18 +900,15 @@ export class PgModelHandlers {
 							args.context_window ? parseInt(args.context_window, 10) : null,
 							args.capabilities ? JSON.parse(args.capabilities) : null,
 							args.rating ? parseInt(args.rating, 10) : null,
-							args.is_active !== undefined ? args.is_active === "true" : null,
+							args.is_active !== undefined ? args.is_active === "true" : true,
 						],
 					)
 				: await query(
-						`INSERT INTO model_metadata (model_name, provider, cost_per_1k_input, cost_per_1k_output,
+						`INSERT INTO model_metadata (model_name, provider,
 						                              max_tokens, context_window, capabilities, rating, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)
-         ON CONFLICT ON CONSTRAINT model_metadata_model_name_key
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
+         ON CONFLICT ON CONSTRAINT model_metadata_provider_model_name_key
          DO UPDATE SET
-           provider = EXCLUDED.provider,
-           cost_per_1k_input = COALESCE(EXCLUDED.cost_per_1k_input, model_metadata.cost_per_1k_input),
-           cost_per_1k_output = COALESCE(EXCLUDED.cost_per_1k_output, model_metadata.cost_per_1k_output),
            max_tokens = COALESCE(EXCLUDED.max_tokens, model_metadata.max_tokens),
            context_window = COALESCE(EXCLUDED.context_window, model_metadata.context_window),
            capabilities = COALESCE(EXCLUDED.capabilities, model_metadata.capabilities),
@@ -925,13 +918,11 @@ export class PgModelHandlers {
 						[
 							args.model_name,
 							args.provider || null,
-							inputPer1k,
-							outputPer1k,
 							args.max_tokens ? parseInt(args.max_tokens, 10) : null,
 							args.context_window ? parseInt(args.context_window, 10) : null,
 							args.capabilities ? JSON.parse(args.capabilities) : null,
 							args.rating ? parseInt(args.rating, 10) : null,
-							args.is_active !== undefined ? args.is_active === "true" : null,
+							args.is_active !== undefined ? args.is_active === "true" : true,
 						],
 					);
 			const r = rows[0];

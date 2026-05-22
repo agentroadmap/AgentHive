@@ -229528,27 +229528,16 @@ function proposalExportFilename(proposal) {
   return slug2 ? `${id33}-${slug2}-${stamp}.md` : `${id33}-${stamp}.md`;
 }
 
-// src/apps/dashboard-web/lib/proposal-activity.ts
-var localActivityDateTimeFormatter = new Intl.DateTimeFormat(undefined, {
-  dateStyle: "medium",
-  timeStyle: "short"
-});
-function formatLocalActivityTimestamp(value2) {
-  if (!value2)
-    return "";
-  const date2 = new Date(value2);
-  if (Number.isNaN(date2.getTime()))
-    return value2;
-  return localActivityDateTimeFormatter.format(date2);
-}
-
 // src/apps/dashboard-web/utils/date-display.ts
 var DATE_ONLY_REGEX = /^(\d{4})-(\d{2})-(\d{2})$/;
 var DATE_TIME_REGEX = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/;
+var ISO_FULL_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
 function parseIntStrict(value2) {
   return Number.parseInt(value2, 10);
 }
 function parseStoredUtcDate(dateStr) {
+  if (!dateStr)
+    return null;
   const normalized = dateStr.trim();
   if (!normalized)
     return null;
@@ -229588,18 +229577,21 @@ function parseStoredUtcDate(dateStr) {
     }
     return date2;
   }
-  const fallback = new Date(normalized);
-  if (!Number.isNaN(fallback.getTime()))
-    return fallback;
+  if (ISO_FULL_REGEX.test(normalized)) {
+    const d4 = new Date(normalized);
+    if (!isNaN(d4.getTime()))
+      return d4;
+  }
   return null;
 }
-var HAS_TIME_REGEX = /T\d{2}:\d{2}/;
 function formatStoredUtcDateForDisplay(dateStr) {
+  if (!dateStr)
+    return "";
   const parsed = parseStoredUtcDate(dateStr);
   if (!parsed)
     return dateStr;
-  const hasTime = DATE_TIME_REGEX.test(dateStr.trim()) || HAS_TIME_REGEX.test(dateStr.trim());
-  if (hasTime) {
+  const normalized = dateStr.trim();
+  if (DATE_TIME_REGEX.test(normalized) || ISO_FULL_REGEX.test(normalized)) {
     return parsed.toLocaleString(undefined, {
       dateStyle: "medium",
       timeStyle: "short"
@@ -229608,6 +229600,8 @@ function formatStoredUtcDateForDisplay(dateStr) {
   return parsed.toLocaleDateString();
 }
 function formatStoredUtcDateForCompactDisplay(dateStr, now3 = new Date) {
+  if (!dateStr)
+    return "—";
   const normalized = dateStr.trim();
   if (!normalized)
     return "—";
@@ -230131,7 +230125,7 @@ var SectionHeader = ({
   ]
 }, undefined, true, undefined, this);
 var getColorMode = () => typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "dark" : "light";
-var ProposalDetailsModal = ({
+var ProposalDetailsModalComponent = ({
   proposal,
   isOpen,
   onClose,
@@ -230388,20 +230382,28 @@ var ProposalDetailsModal = ({
   ]);
   const lastActivity = import_react61.useMemo(() => {
     const candidates = [];
-    if (proposal?.updatedDate)
+    if (proposal?.updatedDate?.trim())
       candidates.push({ date: proposal.updatedDate, label: "proposal updated" });
-    if (proposal?.createdDate)
+    if (proposal?.createdDate?.trim())
       candidates.push({ date: proposal.createdDate, label: "created" });
     for (const d4 of discussions)
-      candidates.push({ date: d4.created_at, label: `discussion by ${d4.author_identity}` });
+      if (d4.created_at?.trim())
+        candidates.push({ date: d4.created_at, label: `discussion by ${d4.author_identity}` });
     for (const r3 of reviews)
-      candidates.push({ date: r3.reviewed_at, label: `review by ${r3.reviewer_identity}` });
+      if (r3.reviewed_at?.trim())
+        candidates.push({ date: r3.reviewed_at, label: `review by ${r3.reviewer_identity}` });
     for (const d4 of decisions)
-      candidates.push({ date: d4.decided_at, label: `decision by ${d4.authority}` });
+      if (d4.decided_at?.trim())
+        candidates.push({ date: d4.decided_at, label: `decision by ${d4.authority}` });
     if (candidates.length === 0)
       return null;
-    return candidates.reduce((max9, cur) => cur.date > max9.date ? cur : max9);
+    const toMs = (d4) => parseStoredUtcDate(d4)?.getTime() ?? 0;
+    return candidates.reduce((max9, cur) => toMs(cur.date) > toMs(max9.date) ? cur : max9);
   }, [proposal, discussions, reviews, decisions]);
+  const handleActivityClick = import_react61.useCallback(() => {
+    onClose();
+    navigate2(`/activity?proposal=${encodeURIComponent(proposalId)}`);
+  }, [navigate2, onClose, proposalId]);
   import_react61.useEffect(() => {
     if (proposalId && proposalRef.current?.id !== proposalId)
       return;
@@ -231378,24 +231380,18 @@ var ProposalDetailsModal = ({
                     ]
                   }, undefined, true, undefined, this),
                   /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
-                    className: "cursor-pointer hover:text-blue-600 dark:hover:text-blue-400",
-                    onClick: () => {
-                      onClose();
-                      navigate2(`/activity?proposal=${encodeURIComponent(proposalId)}`);
-                    },
-                    title: "View full activity feed",
                     children: [
                       /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
                         className: "font-semibold text-gray-800 dark:text-gray-100",
                         children: "Last activity:"
                       }, undefined, false, undefined, this),
                       " ",
-                      lastActivity ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(jsx_dev_runtime27.Fragment, {
+                      lastActivity ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("button", {
+                        type: "button",
+                        onClick: handleActivityClick,
+                        className: "text-gray-700 dark:text-gray-200 hover:underline cursor-pointer bg-transparent border-0 p-0 text-left",
                         children: [
-                          /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
-                            className: "text-gray-700 dark:text-gray-200",
-                            children: formatLocalActivityTimestamp(lastActivity.date)
-                          }, undefined, false, undefined, this),
+                          formatStoredUtcDateForDisplay(lastActivity.date),
                           /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
                             className: "ml-1 text-gray-400 dark:text-gray-500 italic",
                             children: [
@@ -231655,6 +231651,7 @@ var ProposalDetailsModal = ({
     ]
   }, undefined, true, undefined, this);
 };
+var ProposalDetailsModal = import_react61.default.memo(ProposalDetailsModalComponent);
 var StatusSelect = ({ current, onChange, disabled: disabled2 }) => {
   const [statuses, setStatuses] = import_react61.useState([]);
   import_react61.useEffect(() => {
@@ -231722,6 +231719,8 @@ var ProposalsPage = ({
   const [typeFilter, setTypeFilter] = import_react62.useState("");
   const [sortColumn, setSortColumn] = import_react62.useState("id");
   const [sortDirection, setSortDirection] = import_react62.useState("desc");
+  const [currentPage, setCurrentPage] = import_react62.useState(1);
+  const ITEMS_PER_PAGE = 25;
   import_react62.useEffect(() => {
     if (propProposals) {
       setProposals(propProposals);
@@ -231802,7 +231801,13 @@ var ProposalsPage = ({
       setSortColumn(column2);
       setSortDirection("asc");
     }
+    setCurrentPage(1);
   };
+  const totalPages = Math.ceil(filteredProposals.length / ITEMS_PER_PAGE);
+  const paginatedProposals = import_react62.useMemo(() => {
+    const start4 = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredProposals.slice(start4, start4 + ITEMS_PER_PAGE);
+  }, [filteredProposals, currentPage]);
   const SortIcon = ({ column: column2 }) => {
     if (sortColumn !== column2)
       return /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
@@ -231905,7 +231910,7 @@ var ProposalsPage = ({
       }, undefined, true, undefined, this),
       /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
         className: "md:hidden space-y-2",
-        children: filteredProposals.map((proposal) => /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("button", {
+        children: paginatedProposals.map((proposal) => /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("button", {
           type: "button",
           onClick: () => onProposalClick?.(proposal),
           className: "w-full text-left bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3 hover:border-blue-400 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500",
@@ -232031,7 +232036,7 @@ var ProposalsPage = ({
               }, undefined, false, undefined, this),
               /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("tbody", {
                 className: "divide-y divide-gray-200 dark:divide-gray-700",
-                children: filteredProposals.map((proposal) => /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("tr", {
+                children: paginatedProposals.map((proposal) => /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("tr", {
                   onClick: () => onProposalClick?.(proposal),
                   className: `transition-colors ${onProposalClick ? "cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20" : "hover:bg-gray-50 dark:hover:bg-gray-700/20"}`,
                   children: [
@@ -232079,7 +232084,54 @@ var ProposalsPage = ({
       filteredProposals.length === 0 && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
         className: "text-center py-12 text-gray-500 dark:text-gray-400",
         children: filter7 || statusFilter || priorityFilter || typeFilter ? "No proposals match your filters" : "No proposals found"
-      }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      filteredProposals.length > 0 && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
+        className: "flex items-center justify-between bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
+            className: "text-sm text-gray-600 dark:text-gray-400",
+            children: [
+              "Showing ",
+              (currentPage - 1) * ITEMS_PER_PAGE + 1,
+              " to",
+              " ",
+              Math.min(currentPage * ITEMS_PER_PAGE, filteredProposals.length),
+              " of",
+              " ",
+              filteredProposals.length,
+              " proposals"
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
+            className: "flex gap-2",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("button", {
+                type: "button",
+                disabled: currentPage === 1,
+                onClick: () => setCurrentPage(currentPage - 1),
+                className: "px-3 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors",
+                children: "Previous"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
+                className: "flex items-center gap-1",
+                children: Array.from({ length: totalPages }, (_4, i5) => i5 + 1).map((page) => /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("button", {
+                  type: "button",
+                  onClick: () => setCurrentPage(page),
+                  className: `px-2.5 py-1.5 text-sm rounded transition-colors ${currentPage === page ? "bg-blue-600 text-white" : "border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"}`,
+                  children: page
+                }, page, false, undefined, this))
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("button", {
+                type: "button",
+                disabled: currentPage === totalPages,
+                onClick: () => setCurrentPage(currentPage + 1),
+                className: "px-3 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors",
+                children: "Next"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
     ]
   }, undefined, true, undefined, this);
 };
@@ -233411,8 +233463,8 @@ function toSharedProposal(proposal) {
     title: proposal.title,
     status: proposal.status,
     assignee: [],
-    createdDate: proposal.createdAt ?? "",
-    updatedDate: proposal.updatedAt || proposal.createdAt || undefined,
+    createdDate: proposal.createdDate || proposal.createdAt,
+    updatedDate: proposal.updatedDate || proposal.updatedAt || proposal.createdDate || proposal.createdAt,
     labels,
     dependencies: proposal.parentId ? [proposal.parentId] : [],
     summary: proposal.summary ?? proposal.bodyMarkdown ?? undefined,

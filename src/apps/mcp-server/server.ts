@@ -987,7 +987,7 @@ export async function createMcpServer(
 				type: "object",
 				properties: {
 					capability: { type: "string", description: "Filter by capability, e.g. 'tool_use=true'" },
-					max_cost_per_1k_input: { type: "string", description: "Max cost per 1k input tokens" },
+					max_cost_per_million_input: { type: "string", description: "Max cost per million input tokens" },
 					active_only: { type: "boolean", description: "Only show active models (default: true)" },
 					provider: { type: "string", description: "Filter by route provider (e.g. 'anthropic', 'openai')" },
 					tier: {

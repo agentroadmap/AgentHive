@@ -47,8 +47,10 @@ export function registerModelTools(
 				name: { type: "string" },
 				model_name: { type: "string" },
 				provider: { type: "string" },
-				cost_per_1k_input: { type: "string" },
-				cost_per_1k_output: { type: "string" },
+				cost_per_million_input: { type: "string" },
+				cost_per_million_output: { type: "string" },
+				cost_per_million_cache_write: { type: "string" },
+				cost_per_million_cache_hit: { type: "string" },
 				max_tokens: { type: "string" },
 				context_window: { type: "string" },
 				capabilities: { type: "string", description: "JSON object, e.g. '{\"tool_use\":true,\"vision\":true}'" },
@@ -61,13 +63,21 @@ export function registerModelTools(
 			await handlers.addModel({
 				model_name: String(args.model_name ?? args.name),
 				provider: typeof args.provider === "string" ? args.provider : undefined,
-				cost_per_1k_input:
-					typeof args.cost_per_1k_input === "string"
-						? args.cost_per_1k_input
+				cost_per_million_input:
+					typeof args.cost_per_million_input === "string"
+						? args.cost_per_million_input
 						: undefined,
-				cost_per_1k_output:
-					typeof args.cost_per_1k_output === "string"
-						? args.cost_per_1k_output
+				cost_per_million_output:
+					typeof args.cost_per_million_output === "string"
+						? args.cost_per_million_output
+						: undefined,
+				cost_per_million_cache_write:
+					typeof args.cost_per_million_cache_write === "string"
+						? args.cost_per_million_cache_write
+						: undefined,
+				cost_per_million_cache_hit:
+					typeof args.cost_per_million_cache_hit === "string"
+						? args.cost_per_million_cache_hit
 						: undefined,
 				max_tokens:
 					typeof args.max_tokens === "string" ? args.max_tokens : undefined,

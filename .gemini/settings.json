@@ -1,8 +1,3 @@
 {
-  "mcpServers": {
-    "test_roadmap": {
-      "url": "http://127.0.0.1:6421/sse",
-      "type": "sse"
-    }
-  }
+  "mcpServers": {}
 }
