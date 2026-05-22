@@ -329,6 +329,9 @@ const opsRoutes: RouteMap = {
 	cooldown_status: "cooldown_status",
 	cooldown_clear: "cooldown_clear",
 	provider_cooldown_clear: "provider_cooldown_clear",
+	// P1365: Agency capacity tracking
+	capacity_snapshot: "capacity_snapshot",
+	capacity_clear: "capacity_clear",
 };
 
 const projectRoutes: RouteMap = {

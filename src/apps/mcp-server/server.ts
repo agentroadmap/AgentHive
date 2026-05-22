@@ -2350,6 +2350,61 @@ export async function createMcpServer(
 		},
 	});
 
+	// P1365: Agency capacity tracking tools
+	const { capacitySnapshot, capacityClear } = await import(
+		"./tools/ops/capacity-ops.ts"
+	);
+	server.addTool({
+		name: "capacity_snapshot",
+		description: "Get current agency capacity signals (rate-limits, headroom %). Optional filters: provider, model.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				provider: {
+					type: "string",
+					description: "Optional filter by provider (anthropic, openai, google, github)",
+				},
+				model: {
+					type: "string",
+					description: "Optional filter by model name",
+				},
+			},
+		},
+		handler: (args) => {
+			return capacitySnapshot(server.query, args as Record<string, unknown>).then((r) => ({
+				content: [{ type: "text", text: JSON.stringify(r, null, 2) }],
+			}));
+		},
+	});
+
+	server.addTool({
+		name: "capacity_clear",
+		description: "Clear agency capacity entry from agency_capacity table and reset in-memory tracker.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				agency_id: {
+					type: "string",
+					description: "Agency ID (required)",
+				},
+				provider: {
+					type: "string",
+					description: "Provider name (required)",
+				},
+				model: {
+					type: "string",
+					description: "Model name (required)",
+				},
+			},
+			required: ["agency_id", "provider", "model"],
+		},
+		handler: (args) => {
+			return capacityClear(server.query, args as Record<string, unknown>).then((r) => ({
+				content: [{ type: "text", text: JSON.stringify(r, null, 2) }],
+			}));
+		},
+	});
+
 	// Start background maintenance tasks
 	const MAINTENANCE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 	setInterval(async () => {
