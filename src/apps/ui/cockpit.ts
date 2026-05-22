@@ -105,31 +105,76 @@ export function renderCockpit(
 		});
 		container._headerBox = headerBox;
 
-		// 1. Workforce [Top Left]
+		// Layout: "grid" (default, 2x2) or "stacked" (1 column, full width).
+		// Set AGENTHIVE_COCKPIT_LAYOUT=stacked for the single-column variant,
+		// which gives each panel full width and ~24% of remaining height —
+		// useful on narrower terminals or when you want longer Recent Activity
+		// / Terminal bridge feeds.
+		const layout = process.env.AGENTHIVE_COCKPIT_LAYOUT === "stacked"
+			? "stacked"
+			: "grid";
+
+		// Position helpers: panels go below the header (top:3) and above the
+		// footer (bottom:1). Stacked = 4 equal-height bands; Grid = 2x2.
+		const panelGeometry = (slot: 0 | 1 | 2 | 3) => {
+			if (layout === "stacked") {
+				// Each panel is 25% of (screen - header - footer).
+				// height: 25%-1 keeps a 1-row gap and avoids fractional overlap.
+				return {
+					top: `25%+${slot * 0}`,
+					height: "25%-1",
+					left: 0,
+					width: "100%",
+					// override top per slot:
+					topOverride:
+						slot === 0 ? 3
+						: slot === 1 ? "25%"
+						: slot === 2 ? "50%"
+						: "75%",
+				};
+			}
+			// grid
+			const isTop = slot < 2;
+			const isLeft = slot % 2 === 0;
+			return {
+				top: isTop ? 3 : "50%",
+				height: isTop ? "50%-3" : "50%-1",
+				left: isLeft ? 0 : "50%",
+				width: "50%",
+				topOverride: null as any,
+			};
+		};
+
+		const geom0 = panelGeometry(0);
+		const geom1 = panelGeometry(1);
+		const geom2 = panelGeometry(2);
+		const geom3 = panelGeometry(3);
+
+		// 1. Workforce
 		workforceBox = box({
 			parent: container,
-			top: 3,
-			left: 0,
-			width: "50%",
-			height: "50%-3",
+			top: geom0.topOverride ?? geom0.top,
+			left: geom0.left,
+			width: geom0.width,
+			height: geom0.height,
 			border: { type: "line" },
-			label: " [F1] Workforce — agencies by provider@host ",
+			label: " [F1] Workforce — agents grouped by agency (provider@host) ",
 			tags: true,
 			scrollable: true,
 			style: { border: { fg: "green" } },
 		});
 		container._workforceBox = workforceBox;
 
-		// 2. Pipeline [Top Right]
-		// tags:true was producing a render artifact where Develop's count
-		// "120" became " 12" and subsequent lines shifted one cell right.
-		// We don't need tag-styled lines in this panel — drop tag parsing.
+		// 2. Pipeline
+		// tags:false avoids a render artifact where colored numeric counts
+		// shifted one cell right ("Develop : 120" → " 12" at the boundary
+		// between two panels in grid mode).
 		pipelineBox = box({
 			parent: container,
-			top: 3,
-			left: "50%",
-			width: "50%",
-			height: "50%-3",
+			top: geom1.topOverride ?? geom1.top,
+			left: geom1.left,
+			width: geom1.width,
+			height: geom1.height,
 			border: { type: "line" },
 			label: " [F4] Pipeline Traffic ",
 			tags: false,
@@ -138,13 +183,13 @@ export function renderCockpit(
 		});
 		container._pipelineBox = pipelineBox;
 
-		// 3. Ledger [Bottom Left]
+		// 3. Ledger
 		ledgerBox = box({
 			parent: container,
-			top: "50%",
-			left: 0,
-			width: "50%",
-			height: "50%-1",
+			top: geom2.topOverride ?? geom2.top,
+			left: geom2.left,
+			width: geom2.width,
+			height: geom2.height,
 			border: { type: "line" },
 			label: " [F2] The Ledger (Spending) ",
 			tags: true,
@@ -153,13 +198,13 @@ export function renderCockpit(
 		});
 		container._ledgerBox = ledgerBox;
 
-		// 4. Terminal [Bottom Right] - USE LOG FOR AUTO-SCROLL
+		// 4. Terminal — log widget for auto-scroll
 		terminalLog = (screen as any).log({
 			parent: container,
-			top: "50%",
-			left: "50%",
-			width: "50%",
-			height: "50%-1",
+			top: geom3.topOverride ?? geom3.top,
+			left: geom3.left,
+			width: geom3.width,
+			height: geom3.height,
 			border: { type: "line" },
 			label: " [F3] Terminal bridge ",
 			tags: true,
@@ -205,9 +250,11 @@ export function renderCockpit(
 		terminalLog = container._terminalLog;
 	}
 
-	// Update Dynamic Content
+	// Update Dynamic Content. Header bar mirrors the panel counts —
+	// agencies = distinct provider@host groups, agents = total workers.
+	const headerAgencies = new Set(agents.map((a) => a.role || "unknown@?")).size;
 	headerBox.setContent(
-		`{bold}{cyan-fg}🚀 ENGINEER'S COCKPIT{/} | Agents: ${agents.length} | Pipeline: ${pipelineTotal} | Status: {green-fg}LIVE{/}`,
+		`{bold}{cyan-fg}🚀 ENGINEER'S COCKPIT{/} | Agencies: ${headerAgencies} | Agents: ${agents.length} | Pipeline: ${pipelineTotal} | Status: {green-fg}LIVE{/}`,
 	);
 
 	// Update Workforce — split into WORKING (has currentProposal) vs AVAILABLE
@@ -217,7 +264,11 @@ export function renderCockpit(
 	if (agents.length === 0) {
 		workforceBox.setContent("  {gray-fg}No agents registered{/}");
 	} else {
-		const registered = agents.length;
+		const totalAgents = agents.length;
+		// Count distinct provider@host groups — those are the agencies in the
+		// operator's mental model (claude@bot, codex@bot, …). The individual
+		// named entries (alice, ana, …) are workers under each agency.
+		const agencyCount = new Set(agents.map((a) => a.role || "unknown@?")).size;
 		const online = agents.filter((a) => a.presenceOnline).length;
 		const working = agents.filter((a) => a.status === "active" && a.currentProposal);
 		const idle = agents.filter((a) => a.status === "active" && !a.currentProposal);
@@ -225,14 +276,18 @@ export function renderCockpit(
 		const offline = agents.filter((a) => a.status === "offline");
 
 		const cols = ((screen as any).program?.cols as number | undefined) ?? 160;
-		const panelBudget = Math.max(40, Math.floor(cols / 2) - 6);
+		const layout = process.env.AGENTHIVE_COCKPIT_LAYOUT === "stacked" ? "stacked" : "grid";
+		const panelBudget = layout === "stacked"
+			? Math.max(60, cols - 6)
+			: Math.max(40, Math.floor(cols / 2) - 6);
 
 		const lines: string[] = [];
-		// Header: registered total, liaison responsiveness, dispatch states.
-		// Format mirrors operator request: "agencies #, registered, online
-		// (liaison responsive, token available or to reset time)".
+		// Header: agencies + agents counts, liaison responsiveness, dispatch
+		// states. Operator request (2026-05-22): "agencies #, registered,
+		// online (liaison responsive, token available or to reset time)".
 		const parts = [
-			`{bold}${registered}{/} registered`,
+			`{bold}${agencyCount}{/} agencies`,
+			`{bold}${totalAgents}{/} agents`,
 			`{green-fg}${online}{/} online`,
 			`{bold}${working.length}{/} working`,
 			`{cyan-fg}${idle.length}{/} ready`,
