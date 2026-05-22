@@ -43,6 +43,7 @@ const CHANNELS = [
 	"agent_lifecycle_events",
 	"control_feed",
 	"proposal_gate_ready",
+	"state_feed_user_inbox",
 ];
 
 // ─── Auth helpers (unchanged from prior version) ──────────────────────────────
@@ -360,6 +361,22 @@ function renderReviewSubmitted(p: ProposalRow, ev: EventRow): string {
 	return `💬 **${reviewer}** posted review on **${p.display_id}|${stage}**${tag}`;
 }
 
+// ─── User inbox renderer (AC-16 / P1120) ─────────────────────────────────────
+
+function renderUserInboxMessage(payload: string): string {
+	let data: Record<string, unknown> = {};
+	try {
+		data = JSON.parse(payload);
+	} catch {
+		return "";
+	}
+	const from = String(data.from_agent ?? "unknown");
+	const msgType = String(data.message_type ?? "message");
+	const raw = String(data.message_content ?? "").trim();
+	const content = raw ? `: ${raw.slice(0, 200)}` : "";
+	return `📬 **[inbox]** \`${from}\` → \`${msgType}\`${content}`;
+}
+
 // ─── Dispatch ─────────────────────────────────────────────────────────────────
 
 async function handleProposalEvent(client: Client, eventId: number): Promise<string> {
@@ -459,6 +476,8 @@ async function handleNotification(
 		msg = await renderGateReady(client, payload);
 	} else if (channel === "agent_lifecycle_events" || channel === "control_feed") {
 		msg = renderAgentLifecycleEvent(payload);
+	} else if (channel === "state_feed_user_inbox") {
+		msg = renderUserInboxMessage(payload);
 	}
 	if (msg) {
 		console.log(`[state-feed] → Discord: ${msg.slice(0, 80)}`);
