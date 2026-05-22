@@ -30,6 +30,9 @@ const OPERATOR = process.env.INBOX_OPERATOR ?? "gary";
 const IDENTITY = `user/${OPERATOR}`;
 const DRAIN_WINDOW_HOURS = 24;
 const LOG = `[user-inbox/${OPERATOR}]`;
+const KEEPALIVE_INTERVAL_MS = 10_000;
+
+let exiting = false;
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 
@@ -130,7 +133,8 @@ async function bootDrain(): Promise<void> {
 		  WHERE to_agent = $1
 		    AND read_at IS NULL
 		    AND created_at > now() - make_interval(hours => $2)
-		  ORDER BY id ASC`,
+		  ORDER BY id ASC
+		  FOR UPDATE SKIP LOCKED`,
 		[IDENTITY, DRAIN_WINDOW_HOURS],
 	);
 
@@ -276,21 +280,13 @@ async function main() {
 	// Drain unread messages that arrived while consumer was offline.
 	await bootDrain();
 
-	listenClient.on("notification", (n) => {
-		if (n.channel !== channel || !n.payload) return;
-		handleNotify(n.payload).catch((err) =>
-			console.error(`${LOG} handleNotify error:`, err),
-		);
-	});
+	let keepaliveTimer: ReturnType<typeof setInterval> | undefined;
 
-	listenClient.on("error", (err) => {
-		console.error(`${LOG} PG listen client error:`, err);
-		// Reconnect after a brief pause.
-		setTimeout(() => main().catch(console.error), 5000);
-	});
-
-	const shutdown = async (signal: string) => {
-		console.log(`${LOG} ${signal} received — shutting down`);
+	async function cleanup(): Promise<void> {
+		if (keepaliveTimer !== undefined) {
+			clearInterval(keepaliveTimer);
+			keepaliveTimer = undefined;
+		}
 		try {
 			await listenClient.query(`UNLISTEN "${channel}"`);
 		} catch {
@@ -303,11 +299,52 @@ async function main() {
 		} catch {
 			/* ignore */
 		}
+	}
+
+	function exitOnDisconnect(reason: string): void {
+		if (exiting) return;
+		exiting = true;
+		console.error(`${LOG} ${reason} — exiting for systemd restart`);
+		void cleanup().finally(() => process.exit(1));
+	}
+
+	listenClient.on("notification", (n) => {
+		if (n.channel !== channel || !n.payload) return;
+		handleNotify(n.payload).catch((err) =>
+			console.error(`${LOG} handleNotify error:`, err),
+		);
+	});
+
+	listenClient.on("error", (err) =>
+		exitOnDisconnect(`LISTEN client error: ${err.message}`),
+	);
+	listenClient.on("end", () =>
+		exitOnDisconnect("LISTEN client ended unexpectedly"),
+	);
+
+	keepaliveTimer = setInterval(async () => {
+		try {
+			await listenClient.query("SELECT 1");
+		} catch (err) {
+			exitOnDisconnect(`keepalive failed: ${(err as Error).message}`);
+		}
+	}, KEEPALIVE_INTERVAL_MS);
+	keepaliveTimer.unref();
+
+	const shutdown = async (signal: string) => {
+		if (exiting) return;
+		exiting = true;
+		console.log(`${LOG} ${signal} received — shutting down`);
+		await cleanup();
 		process.exit(0);
 	};
 
-	process.on("SIGTERM", () => shutdown("SIGTERM"));
-	process.on("SIGINT", () => shutdown("SIGINT"));
+	process.on("SIGTERM", () => {
+		void shutdown("SIGTERM");
+	});
+	process.on("SIGINT", () => {
+		void shutdown("SIGINT");
+	});
 
 	console.log(`${LOG} Ready — consuming inbox for ${IDENTITY}`);
 }
