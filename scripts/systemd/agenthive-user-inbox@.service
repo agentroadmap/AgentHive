@@ -1,0 +1,23 @@
+[Unit]
+Description=AgentHive User Inbox Consumer — reads a2a messages for user/%i
+After=network.target postgresql.service agenthive-mcp.service
+PartOf=agenthive.target
+
+[Service]
+Type=simple
+User=agenthive
+Group=agenthive
+WorkingDirectory=/data/code/AgentHive
+EnvironmentFile=/etc/agenthive/env
+Environment=HOME=/home/agenthive
+Environment=NODE_ENV=production
+Environment=PATH=/home/agenthive/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=INBOX_OPERATOR=%i
+ExecStart=node --import jiti/register scripts/user-inbox-consumer.ts
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target
