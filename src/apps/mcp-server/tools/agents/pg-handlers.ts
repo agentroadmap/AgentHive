@@ -160,6 +160,13 @@ export class PgAgentHandlers {
 		agent_type?: string;
 		role?: string;
 		skills?: string;
+		preferred_provider?: string;
+		agent_cli?: string;
+		host_affinity?: string;
+		display_alias?: string;
+		display_name?: string;
+		// Legacy in-memory pool fields — ignored by DB path
+		[key: string]: unknown;
 	}): Promise<CallToolResult> {
 		try {
 			// P462: Sanitize and validate agent identity
@@ -174,29 +181,55 @@ export class PgAgentHandlers {
 				);
 			}
 
+			const skillsJson = args.skills
+				? typeof args.skills === "string"
+					? args.skills.trim().startsWith("[") || args.skills.trim().startsWith("{")
+						? args.skills
+						: JSON.stringify(args.skills.split(",").map((s) => s.trim()).filter(Boolean))
+					: JSON.stringify(args.skills)
+				: null;
+
 			const { rows } = await query(
-				`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, role, skills)
-         VALUES ($1, $2, $3, $4::jsonb) ON CONFLICT (agent_identity)
-         DO UPDATE SET agent_type = EXCLUDED.agent_type, role = EXCLUDED.role, skills = EXCLUDED.skills
-         RETURNING agent_identity, role, status`,
+				`INSERT INTO roadmap_workforce.agent_registry
+				   (agent_identity, agent_type, role, skills,
+				    preferred_provider, agent_cli, host_affinity, display_alias, display_name)
+				 VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9)
+				 ON CONFLICT (agent_identity) DO UPDATE SET
+				   agent_type        = COALESCE(EXCLUDED.agent_type,        agent_registry.agent_type),
+				   role              = COALESCE(EXCLUDED.role,              agent_registry.role),
+				   skills            = COALESCE(EXCLUDED.skills,            agent_registry.skills),
+				   preferred_provider = COALESCE(EXCLUDED.preferred_provider, agent_registry.preferred_provider),
+				   agent_cli         = COALESCE(EXCLUDED.agent_cli,         agent_registry.agent_cli),
+				   host_affinity     = COALESCE(EXCLUDED.host_affinity,     agent_registry.host_affinity),
+				   display_alias     = COALESCE(EXCLUDED.display_alias,     agent_registry.display_alias),
+				   display_name      = COALESCE(EXCLUDED.display_name,      agent_registry.display_name),
+				   updated_at        = now()
+				 RETURNING agent_identity, role, status, preferred_provider, agent_cli`,
 				[
 					normalizedIdentity,
 					args.agent_type || null,
 					args.role || null,
-					args.skills
-						? typeof args.skills === "string"
-							? args.skills.trim().startsWith("[") || args.skills.trim().startsWith("{")
-								? args.skills
-								: JSON.stringify(args.skills.split(",").map((s) => s.trim()).filter(Boolean))
-							: JSON.stringify(args.skills)
-						: null,
+					skillsJson,
+					args.preferred_provider || null,
+					args.agent_cli || null,
+					args.host_affinity || null,
+					args.display_alias || null,
+					args.display_name || null,
 				],
 			);
+			const r = rows[0];
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Agent registered: ${rows[0].agent_identity} (${rows[0].role})`,
+						text: JSON.stringify({
+							registered: true,
+							agent_identity: r.agent_identity,
+							role: r.role,
+							status: r.status,
+							preferred_provider: r.preferred_provider,
+							agent_cli: r.agent_cli,
+						}, null, 2),
 					},
 				],
 			};
@@ -205,6 +238,71 @@ export class PgAgentHandlers {
 				return errorResult("Invalid agent identity", err);
 			}
 			return errorResult("Failed to register agent", err);
+		}
+	}
+
+	// P1129 Phase B: Register a model route for an agency
+	async registerModel(args: {
+		provider: string;
+		model_name: string;
+		route_provider?: string;
+		agent_provider?: string;
+		base_url?: string;
+		priority?: number;
+		cost_per_1k_tokens?: number;
+	}): Promise<CallToolResult> {
+		try {
+			const routeProvider = args.route_provider ?? args.provider;
+			const agentProvider = args.agent_provider ?? args.provider;
+
+			// Step 1: upsert model_metadata (FK source for model_routes)
+			await query(
+				`INSERT INTO roadmap.model_metadata (provider, model_name)
+				 VALUES ($1, $2)
+				 ON CONFLICT (provider, model_name) DO NOTHING`,
+				[routeProvider, args.model_name],
+			);
+
+			// Step 2: upsert model_routes
+			const { rows } = await query(
+				`INSERT INTO roadmap.model_routes
+				   (model_name, route_provider, agent_provider, base_url, priority, cost_per_1k_tokens, is_active)
+				 VALUES ($1, $2, $3, $4, $5, $6, true)
+				 ON CONFLICT (model_name, route_provider, agent_provider) DO UPDATE SET
+				   base_url            = COALESCE(EXCLUDED.base_url,            model_routes.base_url),
+				   priority            = COALESCE(EXCLUDED.priority,            model_routes.priority),
+				   cost_per_1k_tokens  = COALESCE(EXCLUDED.cost_per_1k_tokens,  model_routes.cost_per_1k_tokens),
+				   is_active           = true,
+				   updated_at          = now()
+				 RETURNING id, model_name, route_provider, agent_provider, is_active`,
+				[
+					args.model_name,
+					routeProvider,
+					agentProvider,
+					args.base_url || null,
+					args.priority ?? 50,
+					args.cost_per_1k_tokens ?? null,
+				],
+			);
+
+			const r = rows[0];
+			return {
+				content: [
+					{
+						type: "text",
+						text: JSON.stringify({
+							registered: true,
+							route_id: r.id,
+							model_name: r.model_name,
+							route_provider: r.route_provider,
+							agent_provider: r.agent_provider,
+							is_active: r.is_active,
+						}, null, 2),
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to register model", err);
 		}
 	}
 

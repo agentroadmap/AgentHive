@@ -1762,6 +1762,42 @@ export async function createMcpServer(
 	});
 	console.error("[MCP] Registered 4 P917 agency lifecycle tools (bootstrap / join_project / leave_project / liaison_status)");
 
+	// P1129 Phase C: agency_start / agency_status
+	const { handleAgencyStart, handleAgencyStatus } = await import("./tools/ops/agency-ops.ts");
+	server.addTool({
+		name: "agency_start",
+		description:
+			"P1129: Start a registered agency via its systemd unit (agenthive-agency@<id>.service). " +
+			"Verifies agent_registry entry and /etc/agenthive/agency-<id>.env exist, " +
+			"then starts the unit and polls up to 30s for active state. " +
+			"Required: agency_id.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				agency_id: { type: "string", description: "Agency identity matching agent_registry.agent_identity" },
+			},
+			required: ["agency_id"],
+			additionalProperties: false,
+		},
+		handler: (a) => handleAgencyStart(a as { agency_id: string }),
+	});
+	server.addTool({
+		name: "agency_status",
+		description:
+			"P1129: Query live status for an agency from v_agency_status + agency_liaison_session. " +
+			"With agency_id: full snapshot (status, presence_state, silence_seconds, is_listening, session_id, liaison_pid). " +
+			"Without agency_id: lists all agencies.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				agency_id: { type: "string", description: "Optional agency identity; omit to list all agencies" },
+			},
+			additionalProperties: false,
+		},
+		handler: (a) => handleAgencyStatus(a as { agency_id?: string }),
+	});
+	console.error("[MCP] Registered 2 P1129 agency ops tools (agency_start / agency_status)");
+
 	// P297: State machine management tools
 	server.addTool({
 		name: "state_machine_start",

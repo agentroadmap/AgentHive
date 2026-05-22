@@ -45,17 +45,19 @@ export function registerAgentTools(server: McpServer): void {
 	type RevokePrivilegeArgs = Parameters<typeof revokePrivilege>[0];
 
 	// ── agent_register ──────────────────────────────────────────────────────
+	// P1129: now routes to pgHandlers so preferred_provider / agent_cli /
+	// host_affinity / display_alias are persisted in agent_registry.
 	const registerTool: McpToolHandler =
 		createSimpleValidatedTool<RegisterAgentArgs>(
 			{
 				name: "agent_register",
 				description:
-					"Register or update an agent profile in the dynamic multi-model pool. " +
-					"Supports Claude, GPT, Gemini, local models, and custom AI backends.",
+					"Register or update an agent in agent_registry (DB-backed). " +
+					"Required: identity. Optional: agent_type, role, skills, preferred_provider, agent_cli, host_affinity, display_alias, display_name.",
 				inputSchema: agentRegisterSchema,
 			},
 			agentRegisterSchema,
-			async (input) => handlers.registerAgent(input),
+			async (input) => pgHandlers.registerAgent(input as Parameters<PgAgentHandlers["registerAgent"]>[0]),
 		);
 
 	// ── agent_get ────────────────────────────────────────────────────────────
@@ -236,7 +238,50 @@ export function registerAgentTools(server: McpServer): void {
 			async (input) => pgHandlers.agencyResume(input),
 		);
 
+	// ── agent_register_model ─────────────────────────────────────────────────
+	// P1129 Phase B: register a model route (upserts model_metadata + model_routes).
+	type RegisterModelArgs = Parameters<PgAgentHandlers["registerModel"]>[0];
+	const registerModelTool: McpToolHandler =
+		createSimpleValidatedTool<RegisterModelArgs>(
+			{
+				name: "agent_register_model",
+				description:
+					"P1129: Register a model route for an agency. " +
+					"Upserts model_metadata then model_routes so the resolver can dispatch to this model. " +
+					"Required: provider, model_name. Optional: route_provider, agent_provider, base_url, priority, cost_per_1k_tokens.",
+				inputSchema: {
+					type: "object",
+					properties: {
+						provider: { type: "string", description: "Provider key (e.g. 'claude', 'gemini', 'copilot')" },
+						model_name: { type: "string", description: "Model name (e.g. 'claude-sonnet-4-5', 'gemini-2.0-flash')" },
+						route_provider: { type: "string", description: "route_provider override (defaults to provider)" },
+						agent_provider: { type: "string", description: "agent_provider override (defaults to provider)" },
+						base_url: { type: "string", description: "Optional custom API base URL" },
+						priority: { type: "number", description: "Route priority (higher = preferred, default 50)" },
+						cost_per_1k_tokens: { type: "number", description: "Cost per 1k tokens for budget tracking" },
+					},
+					required: ["provider", "model_name"],
+					additionalProperties: false,
+				},
+			},
+			{
+				type: "object",
+				properties: {
+					provider: { type: "string" },
+					model_name: { type: "string" },
+					route_provider: { type: "string" },
+					agent_provider: { type: "string" },
+					base_url: { type: "string" },
+					priority: { type: "number" },
+					cost_per_1k_tokens: { type: "number" },
+				},
+				required: ["provider", "model_name"],
+			},
+			async (input) => pgHandlers.registerModel(input),
+		);
+
 	// Register all tools
+	server.addTool(registerModelTool);
 	server.addTool(registerTool);
 	server.addTool(getTool);
 	server.addTool(listTool);

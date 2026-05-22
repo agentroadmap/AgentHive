@@ -207,6 +207,7 @@ const agentRoutes: RouteMap = {
 	list: "agent_list",
 	get: "agent_get",
 	register: "agent_register",
+	register_model: "agent_register_model",
 	team_list: "team_list",
 	team_create: "team_create",
 	team_add_member: "team_add_member",
@@ -338,6 +339,9 @@ const opsRoutes: RouteMap = {
 	map_get: "map_get",
 	map_query: "map_query",
 	map_summary: "map_summary",
+	// P1129: agency lifecycle ops
+	agency_start: "agency_start",
+	agency_status: "agency_status",
 };
 
 const projectRoutes: RouteMap = {

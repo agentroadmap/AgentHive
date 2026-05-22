@@ -8,103 +8,56 @@ import type { JsonSchema } from "../../validation/validators.ts";
 export const agentRegisterSchema: JsonSchema = {
 	type: "object",
 	properties: {
-		id: {
-			type: "string",
-			minLength: 1,
-			maxLength: 100,
-			description: "Unique agent identifier (auto-generated if omitted)",
-		},
-		name: {
-			type: "string",
-			minLength: 1,
-			maxLength: 100,
-			description:
-				"Agent display name (defaults to git user if omitted in CLI)",
-		},
-		template: {
-			type: "string",
-			enum: [
-				"senior-developer",
-				"developer",
-				"tester",
-				"reviewer",
-				"pm",
-				"architect",
-				"devops",
-				"custom",
-			],
-			description: "Agent template type defining role and capabilities",
-		},
-		model: {
-			type: "string",
-			minLength: 1,
-			maxLength: 100,
-			description:
-				"AI model identifier (e.g., claude-3-opus, gpt-4o, gemini-pro, local-llama)",
-		},
-		provider: {
-			type: "string",
-			description: "AI model provider (must match a route_provider in model_routes)",
-		},
 		identity: {
 			type: "string",
 			minLength: 1,
 			maxLength: 200,
-			description: "Agent identity (email, URL, handle)",
+			description: "Agent identity (primary key in agent_registry, e.g. 'alan', 'george')",
 		},
-		workspace: {
+		agent_type: {
 			type: "string",
-			description: "Workspace path or identifier",
+			description: "Agent type, e.g. 'agency', 'worker'",
 		},
-		machineId: {
+		role: {
 			type: "string",
-			description: "Machine identifier (for multi-host tracking)",
+			description: "Role label, e.g. 'developer', 'reviewer'",
 		},
-		capabilities: {
-			type: "array",
-			items: {
-				type: "string",
-				minLength: 1,
-				maxLength: 50,
-			},
-			description:
-				"List of agent skills or capabilities (e.g., typescript, testing, threejs, laravel)",
+		skills: {
+			type: "string",
+			description: "JSON array or comma-separated skills string",
 		},
-		config: {
-			type: "object",
-			properties: {
-				baseUrl: {
-					type: "string",
-					description: "Custom API endpoint (for local/custom models)",
-				},
-				temperature: {
-					type: "number",
-					minimum: 0,
-					maximum: 2,
-					description: "Model temperature",
-				},
-				maxTokens: {
-					type: "integer",
-					minimum: 1,
-					maximum: 200000,
-					description: "Max output tokens",
-				},
-				rateLimitPerMinute: {
-					type: "integer",
-					minimum: 1,
-					description: "Rate limit for this agent",
-				},
-				timeoutMs: {
-					type: "integer",
-					minimum: 1000,
-					description: "Request timeout in milliseconds",
-				},
-			},
-			additionalProperties: false,
-			description: "Model-specific configuration",
+		preferred_provider: {
+			type: "string",
+			description: "Provider name matching model_metadata.provider (e.g. 'claude', 'codex', 'gemini', 'copilot')",
 		},
+		agent_cli: {
+			type: "string",
+			description: "CLI binary used to launch this agent (e.g. 'claude', 'codex', 'gemini', 'copilot')",
+		},
+		host_affinity: {
+			type: "string",
+			description: "Preferred host identifier (e.g. 'bot')",
+		},
+		display_alias: {
+			type: "string",
+			description: "Short human-readable alias for the agent",
+		},
+		display_name: {
+			type: "string",
+			description: "Human-readable display name",
+		},
+		// Legacy in-memory pool fields — accepted but ignored by the DB path
+		id: { type: "string" },
+		name: { type: "string" },
+		template: { type: "string" },
+		model: { type: "string" },
+		provider: { type: "string" },
+		workspace: { type: "string" },
+		machineId: { type: "string" },
+		capabilities: { type: "array", items: { type: "string" } },
+		config: { type: "object", additionalProperties: true },
 	},
-	required: ["name", "model", "provider"],
+	required: ["identity"],
 	additionalProperties: false,
 };
 
