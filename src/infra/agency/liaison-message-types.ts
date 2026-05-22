@@ -166,7 +166,25 @@ export type ProtocolPongPayload = z.infer<typeof ProtocolPongPayloadSchema>;
 
 // ─── P251: Poke/Pong Liveness ────────────────────────────────────────────────
 
-export const CapacityEnvelopeSchema = z.record(z.string(), z.any());
+// P465: typed subscription window and capacity envelope (AC-1/AC-2)
+export const SubscriptionWindowSchema = z.object({
+    window_kind: z.enum(['5h', 'daily', 'weekly', 'monthly']),
+    resets_at: z.string().datetime(),
+    quota_tokens: z.number().int().nullable(),
+    quota_requests: z.number().int().nullable(),
+    used_tokens: z.number().int(),
+    used_requests: z.number().int(),
+    source: z.enum(['provider_api', 'local_meter', 'manual']),
+});
+export type SubscriptionWindowMsg = z.infer<typeof SubscriptionWindowSchema>;
+
+export const CapacityEnvelopeSchema = z.object({
+    agency_id: z.string().optional(),
+    windows: z.array(SubscriptionWindowSchema).optional().default([]),
+    free_claim_slots: z.number().int().optional(),
+    in_flight_claims: z.number().int().optional(),
+    last_updated_at: z.string().datetime().optional(),
+}).passthrough();
 export type CapacityEnvelope = z.infer<typeof CapacityEnvelopeSchema>;
 
 export const LiaisonPokePayloadSchema = z.object({

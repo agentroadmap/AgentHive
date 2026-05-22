@@ -55,9 +55,9 @@ export const agencyRegisterHandler: ToolHandler = async (args) => {
 	const slotChar = agentIdentity.split("-").pop();
 	const expertise = skills?.[0];
 	if (slotChar === "a" && expertise && row?.id) {
-		const derivedProvider = agentProvider ?? agentIdentity.split("/")[0];
+		const provider = agentIdentity.split("/")[0] ?? agentIdentity;
 		const host = process.env.AGENTHIVE_HOST ?? hostname();
-		const alias = assignDisplayAlias(derivedProvider, pascalCaseHost(host), expertise, slotChar);
+		const alias = assignDisplayAlias(provider, pascalCaseHost(host), expertise, slotChar);
 		if (alias) {
 			const claim = await claimDisplayAlias(row.id, alias, { tier: 2 });
 			if (!claim.claimed) {

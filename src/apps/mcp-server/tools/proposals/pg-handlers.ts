@@ -168,6 +168,7 @@ export class PgProposalHandlers {
 									filter: {
 										status: args.status,
 										type: args.type ?? args.proposal_type,
+										parent_id: args.parent_id ?? null,
 										includeTerminal,
 									},
 									note: includeTerminal
@@ -211,6 +212,7 @@ export class PgProposalHandlers {
 								filter: {
 									status: args.status,
 									type: args.type ?? args.proposal_type,
+									parent_id: args.parent_id ?? null,
 									includeTerminal,
 								},
 								items,
@@ -1190,6 +1192,61 @@ export class PgProposalHandlers {
 					md += `- **${c.display_id}** (${c.type}) [${c.status}/${c.maturity}] ${c.title}${summary}\n`;
 				}
 				md += `\n`;
+			}
+
+			if (args.format === "json") {
+				const jsonPayload: Record<string, unknown> = {
+					id: did,
+					title: proposal.title,
+					type: proposal.type,
+					status: proposal.status,
+					maturity: proposal.maturity ?? "new",
+					priority: proposal.priority ?? null,
+					parent_id: proposal.parent_id ?? null,
+					motivation: proposal.motivation ?? null,
+					summary: proposal.summary ?? null,
+					design: proposal.design ?? null,
+					drawbacks: proposal.drawbacks ?? null,
+					alternatives: proposal.alternatives ?? null,
+					dependency_note: proposal.dependency_note ?? null,
+					lease: lease
+						? {
+							agent: lease.agent_identity,
+							claimed_at: lease.claimed_at,
+							expires_at: lease.expires_at ?? null,
+						}
+						: null,
+					decision: decision
+						? {
+							verdict: decision.decision,
+							authority: decision.authority,
+							rationale: decision.rationale ?? null,
+							decided_at: decision.decided_at,
+						}
+						: null,
+					dependencies: deps.map((d: Record<string, unknown>) => ({
+						display_id: d.display_id,
+						dependency_type: d.dependency_type,
+						resolved: d.resolved,
+					})),
+					acceptance_criteria: acResult.rows.map((ac: Record<string, unknown>) => ({
+						item_number: ac.item_number,
+						criterion_text: ac.criterion_text,
+						status: ac.status,
+						verified_by: ac.verified_by ?? null,
+						verified_at: ac.verified_at ?? null,
+					})),
+					children: children.map((c: Record<string, unknown>) => ({
+						display_id: c.display_id,
+						title: c.title,
+						type: c.type,
+						status: c.status,
+						maturity: c.maturity,
+					})),
+				};
+				return {
+					content: [{ type: "text", text: JSON.stringify(jsonPayload, null, 2) }],
+				};
 			}
 
 			return {

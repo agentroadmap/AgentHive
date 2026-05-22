@@ -73,7 +73,7 @@ export function registerProposalTools(
 	server.addTool({
 		name: "mcp_get_proposal_projection",
 		description:
-			"Get a projection of one proposal as YAML metadata plus Markdown narrative. Accepts fields or a compact projection string such as `roadmap proposal detail {id:P190, title, maturity, design, acceptance_criteria}`.",
+			"Get a projection of one proposal as YAML metadata plus Markdown narrative (default) or structured JSON (format=json). Includes children, dependencies, acceptance_criteria, lease, and decision. Accepts fields or a compact projection string such as `roadmap proposal detail {id:P190, title, maturity, design, acceptance_criteria}`.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -92,7 +92,7 @@ export function registerProposalTools(
 						{ type: "string" },
 					],
 					description:
-						"Fields to include. Supported: title, type, status, maturity, priority, summary, motivation, design, drawbacks, alternatives, dependency, dependencies, acceptance_criteria, lease, workflow, latest_decision, decisions, tags.",
+						"Fields to include. Supported: title, type, status, maturity, priority, summary, motivation, design, drawbacks, alternatives, dependency, dependencies, acceptance_criteria, children, lease, workflow, latest_decision, decisions, tags.",
 				},
 				format: {
 					type: "string",

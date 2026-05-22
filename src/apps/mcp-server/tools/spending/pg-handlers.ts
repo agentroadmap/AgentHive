@@ -133,6 +133,8 @@ type ModelListCacheEntry = {
 const MODEL_LIST_CACHE_TTL_MS = 2_000;
 const modelListCache = new Map<string, ModelListCacheEntry>();
 let _cacheHitTotal = 0;
+let _listCallsTotal = 0;
+let _noRouteErrorsTotal = 0;
 type ModelQueryFn = <T>(sql: string, params?: unknown[]) => Promise<{ rows: T[] }>;
 
 function modelListCacheKey(args: {
@@ -160,17 +162,36 @@ async function fetchModelRouteRows(args: {
 	const provider = args.provider ?? null;
 	const tier = args.tier ?? null;
 	const queryFn: ModelQueryFn = args._queryFn ?? (query as unknown as ModelQueryFn);
+	const projectId = args.project_id ?? null;
 	const { rows } = await queryFn<ModelRouteRow>(
-		`SELECT model_name, provider, cost_per_million_input,
-		        context_window, capabilities, rating, is_active,
-		        route_provider, priority
-		 FROM   roadmap.model_route_view
-		 WHERE  is_enabled = true
-		   AND  ($1::boolean IS FALSE OR COALESCE(is_active, true) = true)
-		   AND  ($2::text IS NULL OR route_provider = $2)
-		   AND  ($3::text IS NULL OR tier = $3)
-		 ORDER BY rating DESC NULLS LAST, priority ASC`,
-		[activeOnly, provider, tier],
+		`SELECT v.model_name, v.provider, v.tier, v.cost_per_million_input,
+		        v.context_window, v.capabilities, v.rating, v.is_active,
+		        v.route_provider, v.priority
+		 FROM   roadmap.model_route_view v
+		 WHERE  v.is_enabled = true
+		   AND  ($1::boolean IS FALSE OR COALESCE(v.is_active, true) = true)
+		   AND  ($2::text IS NULL OR v.route_provider = $2)
+		   AND  ($3::text IS NULL OR v.tier = $3)
+		   AND  (
+		       $4::bigint IS NULL
+		       OR NOT EXISTS (
+		           SELECT 1 FROM roadmap.project_route_policy p
+		           WHERE p.project_id = $4
+		       )
+		       OR EXISTS (
+		           SELECT 1 FROM roadmap.project_route_policy p
+		           WHERE p.project_id = $4
+		             AND (
+		                 array_length(p.allowed_route_providers, 1) IS NULL
+		                 OR v.route_provider = ANY(p.allowed_route_providers)
+		             )
+		             AND NOT (
+		                 v.route_provider = ANY(COALESCE(p.forbidden_route_providers, '{}'))
+		             )
+		       )
+		   )
+		 ORDER BY v.rating DESC NULLS LAST, v.priority ASC`,
+		[activeOnly, provider, tier, projectId],
 	);
 	return rows;
 }
@@ -747,6 +768,7 @@ export class PgModelHandlers {
 		project_id?: number;
 	}): Promise<CallToolResult> {
 		try {
+			_listCallsTotal++;
 			const maxCostPerMillion =
 				parseOptionalNumber(args.max_cost_per_million_input) ??
 				perMillionFromPer1k(args.max_cost_per_1k_input);
@@ -762,6 +784,7 @@ export class PgModelHandlers {
 
 			if (rows.length === 0) {
 				// P797: Return structured error when no enabled routes exist
+				_noRouteErrorsTotal++;
 				const filterDesc = [
 					args.provider ? `provider=${args.provider}` : null,
 					args.tier ? `tier=${args.tier}` : null,
@@ -940,13 +963,15 @@ export class PgModelHandlers {
 	}
 }
 
-export function getModelListMetrics(): { cache_hit_total: number } {
-	return { cache_hit_total: _cacheHitTotal };
+export function getModelListMetrics(): { cache_hit_total: number; list_calls_total: number; no_route_errors_total: number } {
+	return { cache_hit_total: _cacheHitTotal, list_calls_total: _listCallsTotal, no_route_errors_total: _noRouteErrorsTotal };
 }
 
 export function resetModelListCacheForTest(): void {
 	modelListCache.clear();
 	_cacheHitTotal = 0;
+	_listCallsTotal = 0;
+	_noRouteErrorsTotal = 0;
 }
 
 // ─── P1004: Agent usage snapshot ─────────────────────────────────────────────

@@ -66,7 +66,7 @@ describe("P059: Model Registry", () => {
 				calls.push({ text, params });
 				assert.match(text, /FROM\s+roadmap\.model_route_view v/);
 				assert.match(text, /v\.route_provider = \$2/);
-				assert.deepEqual(params, [true, "openai", null]);
+				assert.deepEqual(params, [true, "openai", null, null]);
 				return {
 					rows: [
 						{
@@ -113,7 +113,7 @@ describe("P059: Model Registry", () => {
 		it("filters by model_route_view tier and returns no-route payload for unknown tiers", async () => {
 			const queryFn = async <T>(text: string, params?: unknown[]) => {
 				assert.match(text, /v\.tier = \$3/);
-				assert.deepEqual(params, [true, null, "unknown"]);
+				assert.deepEqual(params, [true, null, "unknown", null]);
 				return { rows: [] as T[] };
 			};
 			const handlers = new PgModelHandlers(
