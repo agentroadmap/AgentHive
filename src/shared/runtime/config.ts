@@ -230,6 +230,7 @@ class ConfigResolver {
 		try {
 			const client = await this.pool.connect();
 			await client.query("LISTEN runtime_config_changed");
+			await client.query("LISTEN runtime_flag_changed");
 			client.on("notification", async () => {
 				this.cache.clear();
 				this.dbCache.clear();
@@ -331,7 +332,7 @@ class ConfigResolver {
 
 		// Step 6: Feature flags (DB, cached, live-reloadable)
 		if (value === undefined && key.class === "flag" && key.dbTable && this.pool) {
-			const flagDbValue = await this.getDbValue(key.dbTable, key.dbColumn || key.name);
+			const flagDbValue = await this.getActiveFlagValue(key.name);
 			if (flagDbValue !== undefined) {
 				try {
 					value = key.parse(String(flagDbValue));
@@ -485,6 +486,27 @@ class ConfigResolver {
 	}
 
 	/**
+	 * Query a runtime flag value by flag_name + scope from core.runtime_flag.
+	 * Caches per (flag_name, scope) key; cache is cleared on runtime_flag_changed notify.
+	 */
+	private async getActiveFlagValue(flagName: string, scope = "global"): Promise<any> {
+		if (!this.pool) return undefined;
+		const cacheKey = `runtime_flag:${flagName}:${scope}`;
+		if (this.dbCache.has(cacheKey)) return this.dbCache.get(cacheKey);
+		try {
+			const result = await this.pool.query(
+				`SELECT value_jsonb FROM core.runtime_flag WHERE flag_name = $1 AND scope = $2 AND lifecycle_status = 'active' LIMIT 1`,
+				[flagName, scope],
+			);
+			const value = result.rows[0]?.value_jsonb;
+			this.dbCache.set(cacheKey, value);
+			return value;
+		} catch {
+			return undefined;
+		}
+	}
+
+	/**
 	 * Query a value from the control DB registry.
 	 */
 	private async getDbValue(table: string, column: string): Promise<any> {
@@ -514,6 +536,7 @@ class ConfigResolver {
 		if (this.notifySubscription) {
 			try {
 				await this.notifySubscription.query("UNLISTEN runtime_config_changed");
+				await this.notifySubscription.query("UNLISTEN runtime_flag_changed");
 				this.notifySubscription.release();
 				this.notifySubscription = null;
 			} catch {

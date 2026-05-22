@@ -39,6 +39,8 @@ import {
 	reconcileStaleDispatches,
 	reconcileStrandedAdvances,
 } from "./legacy-dispatch.ts";
+import * as runtimeConfig from "../../shared/runtime/config.ts";
+import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 
 /**
  * Unified Agent Orchestrator
@@ -54,22 +56,6 @@ import {
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
-/** Maximum proposals processed per scanQueues() call. */
-const SCAN_BATCH_LIMIT = Number(process.env.AGENTHIVE_SCAN_BATCH_LIMIT ?? 20);
-
-/**
- * Hours a proposal must sit mature with no dispatch before stall escalation
- * is triggered.
- */
-const STALL_THRESHOLD_HOURS = Number(
-	process.env.AGENTHIVE_STALL_THRESHOLD_HOURS ?? 4,
-);
-
-/** Maximum stalled proposals to escalate per checkStalls() call. */
-const STALL_BATCH_LIMIT = Number(
-	process.env.AGENTHIVE_STALL_BATCH_LIMIT ?? 5,
-);
-
 /**
  * If set, stall escalation Tier 1 spawns an AI liaison agent using this
  * provider (e.g. "anthropic"). If unset, skip to Tier 2 (notification_queue).
@@ -77,21 +63,9 @@ const STALL_BATCH_LIMIT = Number(
 const ORCHESTRATOR_LIAISON_PROVIDER =
 	process.env.ORCHESTRATOR_LIAISON_PROVIDER ?? null;
 
-const DEFAULT_OFFER_REAP_INTERVAL_MS = Number(
-	process.env.AGENTHIVE_OFFER_REAP_INTERVAL_MS ?? 60_000,
-);
 const DEFAULT_POKE_WATCHDOG_INTERVAL_MS = 60_000;
-const DEFAULT_POKE_IDLE_THRESHOLD_MIN = Number(
-	process.env.AGENTHIVE_POKE_IDLE_THRESHOLD_MIN ?? 5,
-);
-const DEFAULT_POKE_STORM_CAP = Number(process.env.POKE_STORM_CAP ?? 10);
 const DEFAULT_LIVENESS_ALERT_INTERVAL_MS = Number(
 	process.env.AGENTHIVE_LIVENESS_ALERT_INTERVAL_MS ?? 60_000,
-);
-
-/** Drain timeout on stop() — how long to wait for in-flight dispatches before forcing exit. */
-const DEFAULT_SHUTDOWN_DRAIN_MS = Number(
-	process.env.AGENTHIVE_ORCHESTRATOR_DRAIN_MS ?? 240_000,
 );
 
 /** Notify channels the orchestrator listens on for dispatch wake-ups. */
@@ -108,27 +82,6 @@ const ENABLE_POLLING = process.env.AGENTHIVE_ORCHESTRATOR_POLL === "1";
 const ORCHESTRATOR_IDENTITY =
 	process.env.AGENTHIVE_ORCHESTRATOR_IDENTITY ??
 	"agenthive/agency-orchestrator";
-
-/**
- * Escape hatch: set AGENTHIVE_OFFER_CLAIM_LOOP=0 to disable the
- * orchestrator-side claim loop (e.g. emergency rollback). Default on.
- */
-const ENABLE_OFFER_CLAIM_LOOP =
-	(process.env.AGENTHIVE_OFFER_CLAIM_LOOP ?? "1") !== "0";
-
-/** Implicit gate poll interval in ms (set 0 to disable). */
-const IMPLICIT_GATE_POLL_INTERVAL_MS = Number(
-	process.env.AGENTHIVE_IMPLICIT_GATE_POLL_MS ?? 30_000,
-);
-
-/** Enhancer-revise autonomous loop interval (90 s legacy default). */
-const ENHANCER_REVISE_INTERVAL_MS = 90_000;
-
-/** P611 stranded-advance reconciler interval (30 s legacy default). */
-const RECONCILER_INTERVAL_MS = 30_000;
-
-/** Observability heartbeat interval (60 s legacy default). */
-const HEARTBEAT_INTERVAL_MS = 60_000;
 
 export interface OrchestratorConfig {
 	/** Worktree used for liaison agent spawns (Tier 1 stall escalation). */
@@ -149,11 +102,21 @@ export interface OrchestratorConfig {
 
 export class Orchestrator {
 	private readonly defaultWorktree: string;
-	private readonly offerReapIntervalMs: number;
+	private offerReapIntervalMs: number;
 	private readonly pokeWatchdogIntervalMs: number;
 	private readonly livenessAlertIntervalMs: number;
-	private readonly pokeOpts: PokeWatchdogOptions;
-	private readonly shutdownDrainMs: number;
+	private pokeOpts: PokeWatchdogOptions;
+	private shutdownDrainMs: number;
+
+	// P1144: DB-tunable intervals (defaults match legacy hardcoded values).
+	private scanBatchLimit = 20;
+	private stallThresholdHours = 4;
+	private stallBatchLimit = 5;
+	private implicitGatePollMs = 30_000;
+	private enhancerReviseMs = 90_000;
+	private reconcilerMs = 30_000;
+	private heartbeatMs = 60_000;
+	private offerClaimEnabled = true;
 
 	private offerReapTimer: ReturnType<typeof setInterval> | null = null;
 	private pokeWatchdogTimer: ReturnType<typeof setInterval> | null = null;
@@ -174,19 +137,16 @@ export class Orchestrator {
 			config.defaultWorktree ??
 			process.env.AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE ??
 			"claude-andy";
-		this.offerReapIntervalMs =
-			config.offerReapIntervalMs ?? DEFAULT_OFFER_REAP_INTERVAL_MS;
+		this.offerReapIntervalMs = config.offerReapIntervalMs ?? 60_000;
 		this.pokeWatchdogIntervalMs =
 			config.pokeWatchdogIntervalMs ?? DEFAULT_POKE_WATCHDOG_INTERVAL_MS;
 		this.livenessAlertIntervalMs =
 			config.livenessAlertIntervalMs ?? DEFAULT_LIVENESS_ALERT_INTERVAL_MS;
 		this.pokeOpts = {
-			idleThresholdMin:
-				config.pokeIdleThresholdMin ?? DEFAULT_POKE_IDLE_THRESHOLD_MIN,
-			stormCap: config.pokeStormCap ?? DEFAULT_POKE_STORM_CAP,
+			idleThresholdMin: config.pokeIdleThresholdMin ?? 5,
+			stormCap: config.pokeStormCap ?? 10,
 		};
-		this.shutdownDrainMs =
-			config.shutdownDrainMs ?? DEFAULT_SHUTDOWN_DRAIN_MS;
+		this.shutdownDrainMs = config.shutdownDrainMs ?? 240_000;
 	}
 
 	// ─── Lifecycle (P902-A) ────────────────────────────────────────────────────
@@ -215,6 +175,48 @@ export class Orchestrator {
 	}
 
 	/**
+	 * P1144: Load runtime-tunable orchestrator flags from core.runtime_flag.
+	 * Env vars are checked first (backward-compat escape hatch); if absent or
+	 * invalid, falls back to DB; if DB unavailable, falls back to hardcoded defaults.
+	 * All failures are swallowed so a missing DB does not block orchestrator startup.
+	 */
+	private async loadOrchestratorFlags(): Promise<void> {
+		const tryFlag = async <T>(
+			envKey: string | null,
+			flagKey: any,
+			def: T,
+			coerce: (s: string) => T,
+		): Promise<T> => {
+			if (envKey !== null && process.env[envKey] !== undefined) {
+				try {
+					return coerce(process.env[envKey]!);
+				} catch {
+					// fall through to DB
+				}
+			}
+			try {
+				return await runtimeConfig.get(flagKey);
+			} catch {
+				return def;
+			}
+		};
+
+		this.scanBatchLimit = await tryFlag("AGENTHIVE_SCAN_BATCH_LIMIT", FlagKeys.ORCHESTRATOR_SCAN_BATCH_LIMIT, 20, Number);
+		this.stallThresholdHours = await tryFlag("AGENTHIVE_STALL_THRESHOLD_HOURS", FlagKeys.ORCHESTRATOR_STALL_THRESHOLD_HOURS, 4, Number);
+		this.stallBatchLimit = await tryFlag("AGENTHIVE_STALL_BATCH_LIMIT", FlagKeys.ORCHESTRATOR_STALL_BATCH_LIMIT, 5, Number);
+		this.offerReapIntervalMs = await tryFlag("AGENTHIVE_OFFER_REAP_INTERVAL_MS", FlagKeys.ORCHESTRATOR_OFFER_REAP_MS, 60_000, Number);
+		const idleMin = await tryFlag("AGENTHIVE_POKE_IDLE_THRESHOLD_MIN", FlagKeys.ORCHESTRATOR_POKE_IDLE_MIN, 5, Number);
+		const stormCap = await tryFlag("POKE_STORM_CAP", FlagKeys.ORCHESTRATOR_POKE_STORM_CAP, 10, Number);
+		this.pokeOpts = { idleThresholdMin: idleMin, stormCap };
+		this.shutdownDrainMs = await tryFlag("AGENTHIVE_ORCHESTRATOR_DRAIN_MS", FlagKeys.ORCHESTRATOR_SHUTDOWN_DRAIN_MS, 240_000, Number);
+		this.implicitGatePollMs = await tryFlag("AGENTHIVE_IMPLICIT_GATE_POLL_MS", FlagKeys.ORCHESTRATOR_IMPLICIT_GATE_POLL_MS, 30_000, Number);
+		this.enhancerReviseMs = await tryFlag("AGENTHIVE_ENHANCER_REVISE_INTERVAL_MS", FlagKeys.ORCHESTRATOR_ENHANCER_REVISE_MS, 90_000, Number);
+		this.reconcilerMs = await tryFlag("AGENTHIVE_RECONCILER_INTERVAL_MS", FlagKeys.ORCHESTRATOR_RECONCILER_MS, 30_000, Number);
+		this.heartbeatMs = await tryFlag("AGENTHIVE_HEARTBEAT_INTERVAL_MS", FlagKeys.ORCHESTRATOR_HEARTBEAT_MS, 60_000, Number);
+		this.offerClaimEnabled = await tryFlag("AGENTHIVE_OFFER_CLAIM_LOOP", FlagKeys.ORCHESTRATOR_OFFER_CLAIM_ENABLED, true, (s) => s !== "0");
+	}
+
+	/**
 	 * Start the orchestrator: boot maintenance, register notify handlers, schedule
 	 * timers. Idempotent — calling twice is a no-op.
 	 *
@@ -235,6 +237,7 @@ export class Orchestrator {
 		this.started = true;
 		this.stopping = false;
 
+		await this.loadOrchestratorFlags();
 		await this.bootMaintenance();
 		this.startMaintenance();
 
@@ -268,7 +271,7 @@ export class Orchestrator {
 			);
 		}
 
-		if (IMPLICIT_GATE_POLL_INTERVAL_MS > 0) {
+		if (this.implicitGatePollMs > 0) {
 			// Initial drain at boot (matches legacy line 2604).
 			void this.trackInFlight(
 				drainImplicitGateReady("startup", 5).catch((err) =>
@@ -284,10 +287,10 @@ export class Orchestrator {
 							console.error("[Orchestrator] implicit gate poll failed:", err),
 						),
 					);
-				}, IMPLICIT_GATE_POLL_INTERVAL_MS),
+				}, this.implicitGatePollMs),
 			);
 			console.log(
-				`[Orchestrator] implicit gate polling every ${IMPLICIT_GATE_POLL_INTERVAL_MS}ms`,
+				`[Orchestrator] implicit gate polling every ${this.implicitGatePollMs}ms`,
 			);
 		}
 
@@ -300,7 +303,7 @@ export class Orchestrator {
 						console.error("[Orchestrator] enhancer-revise failed:", err),
 					),
 				);
-			}, ENHANCER_REVISE_INTERVAL_MS),
+			}, this.enhancerReviseMs),
 		);
 
 		this.pollTimers.set(
@@ -312,7 +315,7 @@ export class Orchestrator {
 						console.error("[Orchestrator] reconciler failed:", err),
 					),
 				);
-			}, RECONCILER_INTERVAL_MS),
+			}, this.reconcilerMs),
 		);
 
 		this.pollTimers.set(
@@ -324,7 +327,7 @@ export class Orchestrator {
 						console.error("[Orchestrator] stale-dispatch reconciler failed:", err),
 					),
 				);
-			}, RECONCILER_INTERVAL_MS),
+			}, this.reconcilerMs),
 		);
 
 		this.pollTimers.set(
@@ -336,7 +339,7 @@ export class Orchestrator {
 				}).catch((err) =>
 					console.error("[Orchestrator] heartbeat failed:", err),
 				);
-			}, HEARTBEAT_INTERVAL_MS),
+			}, this.heartbeatMs),
 		);
 
 		// P914 / P904: start the offer-claim loop. The loop LISTENs on
@@ -347,7 +350,7 @@ export class Orchestrator {
 		// emits a properly-formed offer_dispatch into liaison_message. This
 		// is the canonical single push-dispatch path; the broken inline
 		// emit-liaison block in legacy-dispatch.ts has been removed.
-		if (ENABLE_OFFER_CLAIM_LOOP) {
+		if (this.offerClaimEnabled) {
 			try {
 				await this.startOfferClaimLoop();
 			} catch (err) {
@@ -688,7 +691,7 @@ export class Orchestrator {
 	 * Returns the number of proposals that were dispatched (mode ≠ skip).
 	 */
 	async scanQueues(): Promise<number> {
-		const candidates = await getUnlockedGateQueue(SCAN_BATCH_LIMIT);
+		const candidates = await getUnlockedGateQueue(this.scanBatchLimit);
 		if (candidates.length === 0) return 0;
 
 		let dispatched = 0;
@@ -757,9 +760,8 @@ export class Orchestrator {
 	 *
 	 * @param thresholdHours  Hours stalled before escalation (default from env)
 	 */
-	async checkStalls(
-		thresholdHours: number = STALL_THRESHOLD_HOURS,
-	): Promise<void> {
+	async checkStalls(thresholdHours?: number): Promise<void> {
+		const hours = thresholdHours ?? this.stallThresholdHours;
 		const { rows } = await query<{
 			id: number;
 			display_id: string;
@@ -783,7 +785,7 @@ export class Orchestrator {
 			   )
 			 ORDER BY p.updated_at ASC
 			 LIMIT $2`,
-			[thresholdHours, STALL_BATCH_LIMIT],
+			[hours, this.stallBatchLimit],
 		);
 
 		if (rows.length === 0) return;
