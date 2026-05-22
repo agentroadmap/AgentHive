@@ -961,11 +961,7 @@ export const FlagKeys = {
 		dbColumn: "value_jsonb",
 		envOverride: false,
 	} satisfies ConfigKey<boolean>,
-};
 
-/**
- * Debug/diagnostic keys: env only, no parsing.
- */
 	// ─── P1291 per-(proposal, role) pause fuse tunables ──────────────────────
 	// Seeded by a P1291 migration. Operator changes via SQL UPDATE core.runtime_flag SET value_jsonb=...
 	// Live-reload via runtime_config_changed NOTIFY (no restart).
