@@ -55,6 +55,7 @@ export interface DeliveryResult {
  * @param messageEnvelope - Message envelope object (will be JSON stringified and signed)
  * @param sendingAgentId - Agent identity sending this message
  * @param pool - Postgres connection pool for secret lookup and logging
+ * @param targetHostId - Receiving host identity (AC-29: binds signature to destination host)
  * @param messageId - Optional message_id from message_ledger (for audit trail)
  *
  * @returns { status, body } of final HTTP response
@@ -65,6 +66,7 @@ export async function postDeliveryWithAuth(
 	messageEnvelope: object,
 	sendingAgentId: string,
 	pool: Pool,
+	targetHostId: string,
 	messageId?: number,
 ): Promise<DeliveryResult> {
 	// Step 1: Re-validate callback URL before delivery (DNS rebinding protection)
@@ -141,8 +143,10 @@ export async function postDeliveryWithAuth(
 	const url = new URL(callbackUrl);
 	const pathAndSearch = url.pathname + (url.search || "");
 
+	// AC-29: target_host_id binds the signature to the destination host,
+	// preventing cross-host replay (a signature from host-A cannot be replayed on host-B).
 	const signingInput =
-		`POST\n${pathAndSearch}\nX-AgentHive-Delivery-Id: ${deliveryId}\nX-AgentHive-Timestamp: ${timestamp}\nX-AgentHive-Agent-Id: ${sendingAgentId}\n${bodyJson}`;
+		`POST\n${pathAndSearch}\n${targetHostId}\nX-AgentHive-Delivery-Id: ${deliveryId}\nX-AgentHive-Timestamp: ${timestamp}\nX-AgentHive-Agent-Id: ${sendingAgentId}\n${bodyJson}`;
 
 	// Step 6: HMAC-SHA256 signature
 	const signature = crypto
@@ -338,6 +342,7 @@ async function auditSignatureFailure(
  * @param pool - Postgres connection pool for dedup check
  * @param requestTarget - HTTP request target (path + query, e.g., '/webhook/msg?tenant=agenthive&v=1').
  *                        Must start with '/', no control chars, no absolute URLs. AC-1: This is required (no default).
+ * @param targetHostId - Receiving host identity (AC-29: must match what the sender used; prevents cross-host replay).
  *
  * @returns true if signature is valid and not a duplicate, false otherwise
  */
@@ -347,6 +352,7 @@ export async function verifyDeliverySignature(
 	signingSecret: string,
 	pool: Pool,
 	requestTarget: string,
+	targetHostId: string,
 ): Promise<boolean> {
 	try {
 		// Step 1: Extract headers (normalize keys to lowercase)
@@ -396,11 +402,12 @@ export async function verifyDeliverySignature(
 		}
 
 		// Step 5: Rebuild signing input using the actual request target (P1097 fix)
+		// AC-29: targetHostId must match what the sender used — cross-host replay is rejected.
 		const bodyStr =
 			rawBody instanceof Buffer ? rawBody.toString("utf-8") : rawBody;
 
 		const signingInput =
-			`POST\n${pathAndSearch}\nX-AgentHive-Delivery-Id: ${deliveryId}\nX-AgentHive-Timestamp: ${timestamp}\nX-AgentHive-Agent-Id: ${agentId}\n${bodyStr}`;
+			`POST\n${pathAndSearch}\n${targetHostId}\nX-AgentHive-Delivery-Id: ${deliveryId}\nX-AgentHive-Timestamp: ${timestamp}\nX-AgentHive-Agent-Id: ${agentId}\n${bodyStr}`;
 
 		// Step 6: Verify signature using constant-time comparison
 		const expectedSignature = crypto
