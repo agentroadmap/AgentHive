@@ -636,10 +636,15 @@ export async function runUnifiedView(
 						   AND ar.agent_type = 'agency'
 						   AND ar.preferred_provider IS NOT NULL
 						   AND ar.agent_identity NOT IN (
+						     -- Legacy bootstrap-agency names that pre-date the P996
+						     -- canonical naming convention (provider.<owner>.a /
+						     -- provider.<owner>.l). Filter from operator-facing UI
+						     -- until the rows are renamed or retired.
 						     'codex-agency-bot', 'codex/agency-bot',
 						     'copilot-agency-gary',
 						     'gemini-agency-bot',
-						     'agency-bot'
+						     'agency-bot',
+						     'codex-liaison'
 						   )
 						 ORDER BY (sd.proposal_id IS NOT NULL) DESC,
 						          ar.preferred_provider, ar.agent_identity
@@ -868,6 +873,28 @@ export async function runUnifiedView(
 			const config = await options.core.filesystem.loadConfig();
 			const screen = createScreen({ title: "Project Chat" });
 
+			// Pick the most-recently-active channel as the default. 'public' was
+			// hardcoded and almost always empty (no system writes to it), so the
+			// chat view rendered blank. Fall back to 'public' if no channel has
+			// any messages — preserves the existing send behavior.
+			let initialChannel = "public";
+			try {
+				const r = await pgQuery(
+					`SELECT channel
+					 FROM roadmap.message_ledger
+					 WHERE channel IS NOT NULL
+					 GROUP BY channel
+					 ORDER BY max(created_at) DESC NULLS LAST
+					 LIMIT 1`,
+					[],
+				);
+				if (r.rows.length > 0 && r.rows[0].channel) {
+					initialChannel = r.rows[0].channel as string;
+				}
+			} catch {
+				// keep 'public' default if the query fails
+			}
+
 			return new Promise<ViewResult>((resolve) => {
 				let _result: ViewResult = "exit";
 
@@ -875,7 +902,7 @@ export async function runUnifiedView(
 					_result = "switch";
 				};
 
-				const currentChannel = "public";
+				const currentChannel = initialChannel;
 				const onSend = async (content: string) => {
 					await pgQuery(
 						`INSERT INTO roadmap.message_ledger (from_agent, channel, message_content, message_type) VALUES ($1, $2, $3, 'text')`,
@@ -905,17 +932,19 @@ export async function runUnifiedView(
 				});
 
 				const refresh = async () => {
-					const [channelRows, messageRows] = await Promise.all([
-						pgQuery(
-							`SELECT DISTINCT channel FROM roadmap.message_ledger WHERE channel IS NOT NULL ORDER BY channel LIMIT 50`,
-							[],
-						).then((r) => r.rows).catch(() => [] as any[]),
-						pgQuery(
-							`SELECT id, from_agent, message_content, created_at FROM roadmap.message_ledger
-							 WHERE channel = $1 ORDER BY created_at DESC LIMIT 100`,
-							[currentChannel],
-						).then((r) => r.rows.reverse()).catch(() => [] as any[]),
-					]);
+					// Sequential awaits — Promise.all of two pgQueries hangs after
+					// the first resolves under the current pool's writePoolAudit
+					// codepath (same bug the cockpit refresh hit). Sequential is
+					// fast enough for a chat refresh.
+					const channelRows = await pgQuery(
+						`SELECT DISTINCT channel FROM roadmap.message_ledger WHERE channel IS NOT NULL ORDER BY channel LIMIT 50`,
+						[],
+					).then((r) => r.rows).catch(() => [] as any[]);
+					const messageRows = await pgQuery(
+						`SELECT id, from_agent, message_content, created_at FROM roadmap.message_ledger
+						 WHERE channel = $1 ORDER BY created_at DESC LIMIT 100`,
+						[currentChannel],
+					).then((r) => r.rows.reverse()).catch(() => [] as any[]);
 
 					renderChat(screen, {
 						messages: (messageRows as any[]).map((row: any, index: number) => ({
