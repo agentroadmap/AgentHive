@@ -11,6 +11,14 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+
+const queryMock = vi.fn();
+
+// Mock pool queries for testing
+vi.mock("../../../infra/postgres/pool.ts", () => ({
+	query: (...args: unknown[]) => queryMock(...args),
+}));
+
 import { query } from "../../../infra/postgres/pool.ts";
 import {
 	setModelCooldown,
@@ -19,16 +27,13 @@ import {
 	isProviderInCooldown,
 } from "../provider-cooldown.ts";
 
-// Mock pool queries for testing
-vi.mock("../../../infra/postgres/pool.ts");
-
 describe("P1359: Quota Detection & Cooldown", () => {
 	beforeAll(async () => {
-		// Setup test database state if needed
+		queryMock.mockReset();
 	});
 
 	afterAll(async () => {
-		// Cleanup
+		queryMock.mockReset();
 	});
 
 	describe("Gemini quota signal detection", () => {
@@ -89,7 +94,7 @@ describe("P1359: Quota Detection & Cooldown", () => {
 	describe("Copilot quota signal detection", () => {
 		it("detects weekly rate limit", () => {
 			const stderr = "Error: Weekly rate limit exceeded for this subscription.";
-			expect(stderr).toContain("weekly rate limit");
+			expect(stderr.toLowerCase()).toContain("weekly rate limit");
 		});
 
 		it("parses explicit reset datetime", () => {
@@ -100,7 +105,6 @@ describe("P1359: Quota Detection & Cooldown", () => {
 
 	describe("Model-level cooldown (UPSERT with GREATEST)", () => {
 		it("writes initial model cooldown", async () => {
-			const queryMock = vi.mocked(query);
 			queryMock.mockResolvedValueOnce({ rows: [] } as any);
 
 			await setModelCooldown("openai", "gpt-4", 2, "rate_limit_exceeded");
@@ -114,7 +118,6 @@ describe("P1359: Quota Detection & Cooldown", () => {
 		});
 
 		it("merges overlapping cooldowns with GREATEST", async () => {
-			const queryMock = vi.mocked(query);
 			queryMock.mockResolvedValueOnce({ rows: [] } as any);
 
 			// Simulate existing cooldown + new one
@@ -126,7 +129,6 @@ describe("P1359: Quota Detection & Cooldown", () => {
 		});
 
 		it("checks if model is in active cooldown", async () => {
-			const queryMock = vi.mocked(query);
 			queryMock.mockResolvedValueOnce({ rows: [{ in_cooldown: true }] } as any);
 
 			const inCooldown = await isModelInCooldown("gemini", "gemini-pro");
@@ -141,7 +143,6 @@ describe("P1359: Quota Detection & Cooldown", () => {
 
 	describe("Provider-level escalation", () => {
 		it("escalates to provider cooldown when all routes cooled", async () => {
-			const queryMock = vi.mocked(query);
 
 			// Mock: query says 0 enabled routes remain
 			queryMock.mockResolvedValueOnce({ rows: [{ enabled_count: 0 }] } as any);
@@ -155,16 +156,15 @@ describe("P1359: Quota Detection & Cooldown", () => {
 		});
 
 		it("checks provider cooldown status", async () => {
-			const queryMock = vi.mocked(query);
 			queryMock.mockResolvedValueOnce({ rows: [{ in_cooldown: true }] } as any);
 
 			const inCooldown = await isProviderInCooldown("anthropic");
 
 			expect(inCooldown).toBe(true);
-			expect(queryMock).toHaveBeenCalledWith(
-				expect.stringContaining("cooldown_until IS NOT NULL AND cooldown_until > NOW()"),
-				["anthropic"],
-			);
+			// Verify the last call matches the expected provider query
+			const lastCall = queryMock.mock.calls[queryMock.mock.calls.length - 1];
+			expect(lastCall[0]).toContain("cooldown_until IS NOT NULL AND cooldown_until > now()");
+			expect(lastCall[1]).toEqual(["anthropic"]);
 		});
 	});
 
@@ -197,7 +197,6 @@ describe("P1359: Quota Detection & Cooldown", () => {
 
 	describe("MCP action: cooldown_status", () => {
 		it("lists active model-level cooldowns", async () => {
-			const queryMock = vi.mocked(query);
 			queryMock.mockResolvedValueOnce({
 				rows: [
 					{
@@ -215,7 +214,6 @@ describe("P1359: Quota Detection & Cooldown", () => {
 		});
 
 		it("lists provider-level cooldowns", async () => {
-			const queryMock = vi.mocked(query);
 			queryMock.mockResolvedValueOnce({
 				rows: [
 					{
@@ -229,7 +227,6 @@ describe("P1359: Quota Detection & Cooldown", () => {
 		});
 
 		it("filters by provider parameter", async () => {
-			const queryMock = vi.mocked(query);
 			queryMock.mockResolvedValueOnce({ rows: [] } as any);
 
 			// Test filtering works
@@ -243,7 +240,6 @@ describe("P1359: Quota Detection & Cooldown", () => {
 
 	describe("MCP action: cooldown_clear", () => {
 		it("clears model-level cooldown", async () => {
-			const queryMock = vi.mocked(query);
 			queryMock.mockResolvedValueOnce({ rowCount: 1 } as any);
 
 			// Call cooldownClear("openai", "gpt-4")
@@ -255,7 +251,6 @@ describe("P1359: Quota Detection & Cooldown", () => {
 		});
 
 		it("logs audit entry on clear", async () => {
-			const queryMock = vi.mocked(query);
 			queryMock.mockResolvedValueOnce({ rowCount: 1 } as any);
 			queryMock.mockResolvedValueOnce({ rows: [] } as any); // audit log INSERT
 
@@ -263,7 +258,6 @@ describe("P1359: Quota Detection & Cooldown", () => {
 		});
 
 		it("clears provider-level cooldown", async () => {
-			const queryMock = vi.mocked(query);
 			queryMock.mockResolvedValueOnce({ rowCount: 1 } as any);
 
 			// Call providerCooldownClear("anthropic")
