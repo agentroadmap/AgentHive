@@ -11,7 +11,7 @@
 
 import { readdir, readFile } from "node:fs/promises";
 import { join, basename, extname } from "node:path";
-import { getPool } from "../src/postgres/pool.ts";
+import { getPool, closePool } from "../src/infra/postgres/pool.ts";
 
 export interface ImportOptions {
 	localPath?: string;
@@ -31,7 +31,6 @@ const IMPORTABLE_DIVISIONS = [
 	"sales",
 	"spatial-computing",
 	"specialized",
-	"strategy",
 	"support",
 	"testing",
 ] as const;
@@ -46,7 +45,6 @@ const DIVISION_EXPERTISE: Record<Division, string[]> = {
 	support: ["writer"],
 	marketing: ["researcher", "writer"],
 	"paid-media": ["researcher", "writer"],
-	strategy: ["researcher", "writer"],
 	sales: ["researcher"],
 	product: ["researcher"],
 	"project-management": ["researcher"],
@@ -341,12 +339,18 @@ export async function runImport(opts: ImportOptions = {}): Promise<void> {
 	console.log(`[import-catalog] found ${allDefs.length} agent definitions`);
 
 	if (dryRun) {
+		const byDivision = new Map<string, number>();
 		for (const def of allDefs) {
+			byDivision.set(def.division, (byDivision.get(def.division) ?? 0) + 1);
 			console.log(
 				`  ${def.identity} | div=${def.division} caps=${def.capabilities.length} expertise=${def.expertise.join(",")}`,
 			);
 		}
-		console.log("[import-catalog] dry-run complete — no writes performed");
+		console.log("\n[import-catalog] per-division counts:");
+		for (const [div, count] of [...byDivision.entries()].sort()) {
+			console.log(`  ${div.padEnd(20)} ${count}`);
+		}
+		console.log(`[import-catalog] total=${allDefs.length} dry-run complete — no writes performed`);
 		return;
 	}
 
@@ -414,7 +418,7 @@ export async function runImport(opts: ImportOptions = {}): Promise<void> {
 	);
 
 	// Shutdown pool
-	await pool.end();
+	await closePool();
 }
 
 // Run directly if invoked as script
