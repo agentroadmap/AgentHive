@@ -5800,6 +5800,25 @@ agentsCmd
 	});
 
 agentsCmd
+	.command("import-catalog")
+	.description("import agency-agents catalog as inactive agent seeds")
+	.option(
+		"--local-path <dir>",
+		"path to local agency-agents repo",
+		"/data/code/agency-agents",
+	)
+	.option("--dry-run", "print what would be imported without writing to DB")
+	.action(async (options) => {
+		const { runImport } = await import(
+			"../../scripts/import-agency-agents-catalog.ts"
+		);
+		await runImport({
+			localPath: options.localPath,
+			dryRun: options.dryRun ?? false,
+		});
+	});
+
+agentsCmd
 	.description("manage agent instruction files")
 	.option(
 		"--update-instructions",
