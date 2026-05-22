@@ -190,6 +190,16 @@ if [[ $FULL -eq 1 ]]; then
              --rule-tag workflow --fail-on high \
              --baseline .workflow-states-baseline.jsonl
 
+    # P1290: capability coverage check — fails if any role maps to a capability
+    # with zero matching dispatchable agencies in provider_registry.
+    if [[ -n "${DATABASE_URL:-}" ]]; then
+        step_run "check:capability-coverage (P1290)" \
+            node --import jiti/register scripts/orchestrator-capability-coverage-check.ts
+    else
+        step_skip "check:capability-coverage (P1290)" \
+            "requires DATABASE_URL; run 'npm run check:capability-coverage' locally" "P1290"
+    fi
+
     echo ""
 fi
 
