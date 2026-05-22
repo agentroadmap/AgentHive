@@ -325,6 +325,10 @@ const opsRoutes: RouteMap = {
 	pgbouncer_stats: "pgbouncer_stats",
 	pgbouncer_ping: "pgbouncer_ping",
 	pgbouncer_reload: "pgbouncer_reload",
+	// P1359: Provider/model cooldown management
+	cooldown_status: "cooldown_status",
+	cooldown_clear: "cooldown_clear",
+	provider_cooldown_clear: "provider_cooldown_clear",
 };
 
 const projectRoutes: RouteMap = {
