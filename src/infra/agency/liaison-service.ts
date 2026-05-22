@@ -197,6 +197,16 @@ export async function liaisonHeartbeat(
 		throw new Error(`Session ${session_id} not found or already ended`);
 
 	const row = result.rows[0];
+
+	// P1104: update presence_state via fn_pulse whenever a heartbeat lands
+	if (row.agency_id) {
+		const presenceState =
+			liaison_status === "throttled" ? "busy"
+			: liaison_status === "paused"   ? "away"
+			: "online";
+		await query("SELECT roadmap.fn_pulse($1, $2)", [row.agency_id, presenceState]).catch(() => {});
+	}
+
 	return {
 		success: true,
 		agency_status: row.agency_status,
@@ -392,4 +402,12 @@ export async function listDispatchableAgencies(): Promise<
     ORDER BY agency_id
   `);
 	return result.rows;
+}
+
+/**
+ * P1104: Signal offline presence via fn_pulse on graceful shutdown.
+ * Best-effort — errors are silently swallowed so shutdown is never blocked.
+ */
+export async function liaisonSetOffline(agency_id: string): Promise<void> {
+	await query("SELECT roadmap.fn_pulse($1, $2)", [agency_id, "offline"]).catch(() => {});
 }

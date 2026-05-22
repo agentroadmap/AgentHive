@@ -20,6 +20,7 @@
 import {
   liaisonRegister,
   liaisonHeartbeat,
+  liaisonSetOffline,
   endLiaisonSession,
   type LiaisonRegisterResult,
 } from "./liaison-service.js";
@@ -167,6 +168,8 @@ export async function bootLiaison(
       timer = null;
     }
     hub.stop();
+    // P1104: mark presence offline before closing the session
+    await liaisonSetOffline(config.agency_id);
     await endLiaisonSession(session.session_id, reason);
   };
 
