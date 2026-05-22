@@ -3,7 +3,7 @@
  * Actions: capacity_snapshot, capacity_clear
  */
 
-import { Query } from '../../db';
+import { query } from '../../../../infra/postgres/pool.ts';
 
 export interface CapacitySnapshotRequest {
   provider?: string;
@@ -42,7 +42,6 @@ export interface CapacityClearResponse {
 }
 
 export async function capacitySnapshot(
-  query: Query,
   req: CapacitySnapshotRequest
 ): Promise<CapacitySnapshotResponse> {
   let sql = `
@@ -104,7 +103,6 @@ export async function capacitySnapshot(
 }
 
 export async function capacityClear(
-  query: Query,
   req: CapacityClearRequest
 ): Promise<CapacityClearResponse> {
   const sql = `

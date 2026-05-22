@@ -2371,7 +2371,7 @@ export async function createMcpServer(
 			},
 		},
 		handler: (args) => {
-			return capacitySnapshot(server.query, args as Record<string, unknown>).then((r) => ({
+			return capacitySnapshot(args as Record<string, unknown>).then((r) => ({
 				content: [{ type: "text", text: JSON.stringify(r, null, 2) }],
 			}));
 		},
@@ -2399,7 +2399,7 @@ export async function createMcpServer(
 			required: ["agency_id", "provider", "model"],
 		},
 		handler: (args) => {
-			return capacityClear(server.query, args as Record<string, unknown>).then((r) => ({
+			return capacityClear(args as Record<string, unknown>).then((r) => ({
 				content: [{ type: "text", text: JSON.stringify(r, null, 2) }],
 			}));
 		},
