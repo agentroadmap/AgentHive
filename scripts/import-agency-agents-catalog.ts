@@ -27,6 +27,7 @@ import { parseArgs } from "node:util";
 import { closePool, query } from "../src/infra/postgres/pool.ts";
 
 // Division folder → ExpertiseRole mapping
+// NOTE: 'integrations' (platform sub-dirs) and 'strategy' (high-level docs) excluded — no agent .md files
 const DIVISION_ROLE: Record<string, string> = {
 	engineering: "coder",
 	design: "designer",
@@ -41,7 +42,6 @@ const DIVISION_ROLE: Record<string, string> = {
 	specialized: "researcher",
 	"game-development": "coder",
 	academic: "researcher",
-	strategy: "researcher",
 };
 
 // All known divisions (in deterministic order)
@@ -108,9 +108,9 @@ function parseFrontmatter(content: string): Record<string, string> {
 }
 
 function extractCapabilities(content: string): string[] {
-	// Find the Core Mission section (stop at the next ## section)
+	// Find the Core Mission section (stop at the next same-or-higher-level section)
 	const missionMatch = content.match(
-		/##[^\n]*Core Mission[^\n]*\n([\s\S]*?)(?=\n##[^#]|\n## |$)/i,
+		/#{1,3}[^\n]*Core Mission[^\n]*\n([\s\S]*?)(?=\n#{1,2}[^#]|$)/i,
 	);
 	if (!missionMatch) return [];
 
@@ -148,7 +148,7 @@ function extractCapabilities(content: string): string[] {
 function extractBoundaries(content: string): string[] {
 	// Critical Rules section — extract rule names
 	const rulesMatch = content.match(
-		/##[^\n]*Critical Rules[^\n]*\n([\s\S]*?)(?=\n##[^#]|\n## |$)/i,
+		/#{1,3}[^\n]*Critical Rules[^\n]*\n([\s\S]*?)(?=\n#{1,2}[^#]|$)/i,
 	);
 	if (!rulesMatch) return [];
 
@@ -172,7 +172,7 @@ function extractBoundaries(content: string): string[] {
 function extractCoreTruths(content: string): string[] {
 	// Identity & Memory section — extract personality/experience lines
 	const memMatch = content.match(
-		/##[^\n]*(Identity|Memory)[^\n]*\n([\s\S]*?)(?=\n##[^#]|\n## |$)/i,
+		/#{1,3}[^\n]*(Identity|Memory)[^\n]*\n([\s\S]*?)(?=\n#{1,2}[^#]|$)/i,
 	);
 	if (!memMatch) return [];
 
