@@ -116,6 +116,8 @@ export class Orchestrator {
 	private implicitGatePollMs = 30_000;
 	private enhancerReviseMs = 90_000;
 	private reconcilerMs = 30_000;
+	private staleRowReaperMs = 300_000;
+	private stuckWorkerMs = 60_000;
 	private heartbeatMs = 60_000;
 	private offerClaimEnabled = true;
 
@@ -213,6 +215,8 @@ export class Orchestrator {
 		this.implicitGatePollMs = await tryFlag("AGENTHIVE_IMPLICIT_GATE_POLL_MS", FlagKeys.ORCHESTRATOR_IMPLICIT_GATE_POLL_MS, 30_000, Number);
 		this.enhancerReviseMs = await tryFlag("AGENTHIVE_ENHANCER_REVISE_INTERVAL_MS", FlagKeys.ORCHESTRATOR_ENHANCER_REVISE_MS, 90_000, Number);
 		this.reconcilerMs = await tryFlag("AGENTHIVE_RECONCILER_INTERVAL_MS", FlagKeys.ORCHESTRATOR_RECONCILER_MS, 30_000, Number);
+		this.staleRowReaperMs = await tryFlag("AGENTHIVE_STALE_ROW_REAPER_INTERVAL_MS", FlagKeys.ORCHESTRATOR_STALE_ROW_REAPER_MS, 300_000, Number);
+		this.stuckWorkerMs = await tryFlag("AGENTHIVE_STUCK_WORKER_WATCHDOG_INTERVAL_MS", FlagKeys.ORCHESTRATOR_STUCK_WORKER_MS, 60_000, Number);
 		this.heartbeatMs = await tryFlag("AGENTHIVE_HEARTBEAT_INTERVAL_MS", FlagKeys.ORCHESTRATOR_HEARTBEAT_MS, 60_000, Number);
 		this.offerClaimEnabled = await tryFlag("AGENTHIVE_OFFER_CLAIM_LOOP", FlagKeys.ORCHESTRATOR_OFFER_CLAIM_ENABLED, true, (s) => s !== "0");
 	}
