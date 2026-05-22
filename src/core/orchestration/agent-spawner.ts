@@ -1306,11 +1306,28 @@ export async function spawnWithRetry(
 			return lastResult;
 		}
 
-		// P1359: We have a model-specific quota error — set cooldown and retry
+		// P1359: We have a model-specific quota error — set cooldown and retry.
+		// D3 remediation: honor the parsed exitClass.resetAt (from classifyExit's
+		// per-provider detector); previous fixed 2/30 minute fallback ignored
+		// gemini's "reset after 15h56m11s", anthropic's retry-after seconds, etc.
 		const modelName = req.model || exitClass.quotaErrorModel || "unknown";
-		const cooldownMinutes = lastResult.stderr?.includes("credit") || lastResult.stdout?.includes("credit")
-			? 30
-			: 2;
+		const FALLBACK_COOLDOWN_MINUTES = 60; // 1h per P1359 design when no parsed TTL
+		const MIN_COOLDOWN_MINUTES = 1;        // floor (clock-skew safety)
+		const MAX_COOLDOWN_MINUTES = 24 * 60;  // 24h ceiling
+		let cooldownMinutes: number;
+		if (exitClass.resetAt instanceof Date) {
+			const deltaMs = exitClass.resetAt.getTime() - Date.now();
+			if (deltaMs > 0) {
+				cooldownMinutes = Math.min(
+					MAX_COOLDOWN_MINUTES,
+					Math.max(MIN_COOLDOWN_MINUTES, Math.ceil(deltaMs / 60_000)),
+				);
+			} else {
+				cooldownMinutes = FALLBACK_COOLDOWN_MINUTES;
+			}
+		} else {
+			cooldownMinutes = FALLBACK_COOLDOWN_MINUTES;
+		}
 		const cooldownReason = lastResult.stderr?.slice(0, 500) || lastResult.stdout?.slice(0, 500) || "quota_exhausted";
 
 		try {

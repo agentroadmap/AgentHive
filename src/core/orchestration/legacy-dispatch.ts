@@ -19,6 +19,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import {
 	spawnAgent,
+	spawnWithRetry,
 	resolveActiveRouteProvider,
 	terminateLiveChildren,
 	liveChildCount,
@@ -1132,7 +1133,10 @@ async function dispatchAgent(
 			},
 		});
 
-		const result = await spawnAgent({
+		// P1359 D3 wire-up: spawnWithRetry on the legacy direct-spawn path so
+		// model cooldown writes + same-provider retries exercise on every live
+		// dispatch, not just the test harness.
+		const result = await spawnWithRetry({
 			worktree,
 			task: taskPrompt,
 			proposalId: Number(proposalId),

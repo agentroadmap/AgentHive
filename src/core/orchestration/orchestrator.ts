@@ -4,7 +4,7 @@ import { pulseHeartbeat } from "../../infra/pulse/heartbeat.ts";
 import { reapStaleRows } from "../pipeline/reap-stale-rows.ts";
 import { enqueueNotification } from "../notifications/enqueue.ts";
 import { getUnlockedGateQueue } from "../proposal/gate-scanner-v2.ts";
-import { spawnAgent } from "./agent-spawner.ts";
+import { spawnAgent, spawnWithRetry } from "./agent-spawner.ts";
 import { postWorkOffer } from "../pipeline/post-work-offer.ts";
 import { listDispatchableAgencies } from "../../infra/agency/liaison-service.ts";
 import {
@@ -734,7 +734,12 @@ export class Orchestrator {
 				const primaryProfile = ctx.roleProfiles[0] ?? null;
 				const task = buildTaskPrompt(detail, mode, reasons);
 
-				await spawnAgent({
+				// P1359 D3 wire-up: spawnWithRetry writes per-(provider, model)
+				// cooldown to model_routes.cooldown_until on quota-class outcomes
+				// and re-resolves to the next-priority same-provider route via the
+				// existing cooldownFilterSql layer-6 filter. Replaces bare spawnAgent
+				// so cooldown writes exercise on every live dispatch.
+				await spawnWithRetry({
 					worktree: this.defaultWorktree,
 					task,
 					proposalId: detail.id,
