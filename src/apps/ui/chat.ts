@@ -6,7 +6,7 @@
 
 // @ts-expect-error - blessed types may not be installed
 import type blessed from "blessed";
-import { box, log, textbox } from "./blessed.ts";
+import { box, list, log, textbox } from "./blessed.ts";
 
 export interface ChatMessage {
 	id: string;
@@ -26,6 +26,10 @@ export function renderChat(
 		userSystemName: string;
 		onSend?: (content: string) => Promise<void> | void;
 		onExit?: () => void;
+		// Fired when the user selects a channel from the sidebar list. Caller
+		// is responsible for updating its currentChannel state and triggering
+		// a fresh data fetch.
+		onChannelSelect?: (channel: string) => void;
 	},
 ): void {
 	const {
@@ -36,6 +40,7 @@ export function renderChat(
 		userSystemName,
 		onSend,
 		onExit,
+		onChannelSelect,
 	} = data;
 
 	let container = (screen as any)._chatContainer;
@@ -58,8 +63,10 @@ export function renderChat(
 		});
 		(screen as any)._chatContainer = container;
 
-		// Left Sidebar (Channels)
-		sidebar = box({
+		// Left Sidebar (Channels) — interactive list. Focus with `c` from the
+		// chat log; navigate up/down; Enter to select; Esc returns focus to
+		// the chat input.
+		sidebar = list({
 			parent: container,
 			top: 0,
 			left: 0,
@@ -68,9 +75,45 @@ export function renderChat(
 			border: { type: "line" },
 			label: " Channels ",
 			tags: true,
-			style: { border: { fg: "cyan" } },
+			keys: true,
+			mouse: true,
+			vi: true,
+			items: [],
+			style: {
+				border: { fg: "cyan" },
+				selected: { bg: "blue", fg: "white", bold: true },
+				item: { fg: "white" },
+			},
 		});
 		container._sidebar = sidebar;
+
+		// Channel selection: blessed.list emits 'select' on Enter.
+		(sidebar as any).on("select", (_item: any, index: number) => {
+			const sel = (container._channels as string[] | undefined)?.[index];
+			if (sel && sel !== container._currentChannel) {
+				container._currentChannel = sel;
+				// Reset the message-cursor so the new channel's history fills
+				// the log on the next refresh tick.
+				container._lastMsgTimestamp = 0;
+				if (chatLog && (chatLog as any).setItems) {
+					(chatLog as any).setItems([]);
+				}
+				onChannelSelect?.(sel);
+			}
+			// Bounce focus back to the input so the operator can type immediately.
+			container._inputDefocused = false;
+			inputField.focus();
+			if (container._startReading) container._startReading();
+			screen.render();
+		});
+
+		// Esc on the sidebar returns to the input box.
+		(sidebar as any).key(["escape"], () => {
+			container._inputDefocused = false;
+			inputField.focus();
+			if (container._startReading) container._startReading();
+			screen.render();
+		});
 
 		// Main Chat Area (LOG for auto-scroll)
 		chatLog = log({
@@ -125,7 +168,7 @@ export function renderChat(
 			left: 0,
 			width: "100%",
 			height: 1,
-			content: " {white-fg}Enter: Send | Esc: leave input | Ctrl+C: Quit | (outside input) Tab: View | Q: Exit | i: focus input{/}",
+			content: " {white-fg}Enter: Send | Esc: leave input | Ctrl+C: Quit | (outside input) c: Channels | i: input | Tab: View | Q: Exit{/}",
 			tags: true,
 			style: { bg: "blue", fg: "white" },
 		});
@@ -172,6 +215,15 @@ export function renderChat(
 			screen.render();
 		});
 
+		// `c` jumps focus to the Channels sidebar so the operator can pick
+		// a different channel. Once focused, up/down navigate, Enter selects,
+		// Esc returns to input.
+		(chatLog as any).key(["c"], () => {
+			container._inputDefocused = true;
+			sidebar.focus();
+			screen.render();
+		});
+
 		// Initial populate
 		messages
 			.slice()
@@ -189,11 +241,26 @@ export function renderChat(
 		inputField = container._inputField;
 	}
 
-	// Update Sidebar
-	const channelLines = channels.map((c) => {
-		return c === currentChannel ? `{yellow-fg}● ${c}{/}` : `  ${c}`;
-	});
-	sidebar.setContent(channelLines.join("\n"));
+	// Update Sidebar — set list items (no leading marker; the list's own
+	// selected-style highlights the active row). Pre-select the row matching
+	// currentChannel so up/down navigation starts in the right place.
+	container._channels = channels;
+	container._currentChannel = currentChannel;
+	(sidebar as any).setItems(channels);
+	const activeIndex = Math.max(0, channels.indexOf(currentChannel));
+	(sidebar as any).select?.(activeIndex);
+
+	// Update the chat log title bar to reflect the current channel.
+	(chatLog as any).setLabel?.(` ${currentChannel} - ${projectName} `);
+
+	// If the channel changed since the last render, wipe the log so we don't
+	// keep showing the previous channel's messages mixed with the new ones.
+	if (container._displayedChannel && container._displayedChannel !== currentChannel) {
+		if ((chatLog as any).setItems) (chatLog as any).setItems([]);
+		else (chatLog as any).setContent?.("");
+		container._lastMsgTimestamp = 0;
+	}
+	container._displayedChannel = currentChannel;
 
 	// Reactive Update
 	const newMessages = messages

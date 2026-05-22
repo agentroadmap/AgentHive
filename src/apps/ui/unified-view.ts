@@ -902,12 +902,25 @@ export async function runUnifiedView(
 					_result = "switch";
 				};
 
-				const currentChannel = initialChannel;
+				// Mutable so the sidebar can switch channels. onSend reads the
+				// current value at send time.
+				let currentChannel = initialChannel;
 				const onSend = async (content: string) => {
 					await pgQuery(
 						`INSERT INTO roadmap.message_ledger (from_agent, channel, message_content, message_type) VALUES ($1, $2, $3, 'text')`,
 						["HUMAN", currentChannel, content],
 					);
+				};
+				// refresh is defined below; we forward-declare via a ref so the
+				// channel-select handler can trigger an immediate refresh.
+				let refreshRef: (() => void) | null = null;
+				const onChannelSelect = (next: string) => {
+					if (next && next !== currentChannel) {
+						currentChannel = next;
+						// Trigger an immediate refresh so the new channel's
+						// messages load without waiting for the next 1s tick.
+						refreshRef?.();
+					}
 				};
 
 				// Forward declaration: the chat input binds Ctrl+C to onExit, which
@@ -929,6 +942,7 @@ export async function runUnifiedView(
 					userSystemName: "HUMAN",
 					onSend,
 					onExit,
+					onChannelSelect,
 				});
 
 				const refresh = async () => {
@@ -959,8 +973,10 @@ export async function runUnifiedView(
 						projectName: config?.projectName || "Roadmap.md",
 						userSystemName: "HUMAN",
 						onSend,
+						onChannelSelect,
 					});
 				};
+				refreshRef = () => { void refresh(); };
 
 				void refresh();
 				timer = setInterval(() => {
