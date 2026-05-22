@@ -15,6 +15,7 @@ import {
 	checkMessageACL,
 } from "../../../../infra/messaging/a2a-access-control.ts";
 import type { A2ANotification } from "../../../../infra/messaging/a2a-types.ts";
+import { agentContextStorage } from "../../../../shared/identity/agent-context.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
@@ -248,6 +249,20 @@ export class PgMessagingHandlers {
 	// Core Messaging (enhanced for P149)
 	// -------------------------------------------------------------------------
 
+	// P1105 AC-5: write rejected bearer events to operator_audit_log
+	private async _logAuthRejection(fromAgent: string, reason: string): Promise<void> {
+		try {
+			await query(
+				`INSERT INTO roadmap.operator_audit_log
+				   (operator_name, action, decision, target_kind, target_identity, request_summary, failure_reason)
+				 VALUES ('system', 'msg_send', 'deny', 'user', $1, '{}', $2)`,
+				[fromAgent, `bearer:${reason}`],
+			);
+		} catch {
+			// audit log failures must never block the response
+		}
+	}
+
 	async sendMessage(args: {
 		from_agent: string;
 		to_agent?: string;
@@ -258,6 +273,23 @@ export class PgMessagingHandlers {
 		correlation_id?: string;
 	}): Promise<CallToolResult> {
 		try {
+			// P1105 AC-3: USER senders must carry a valid bearer token whose sub matches from_agent.
+			if (args.from_agent?.startsWith("user/")) {
+				const ctx = agentContextStorage.getStore();
+				if (!ctx?.verified) {
+					await this._logAuthRejection(args.from_agent, "missing_bearer_token");
+					return {
+						content: [{ type: "text", text: "⛔ 401 Unauthorized: Bearer token required for user/* senders." }],
+					};
+				}
+				if (ctx.verified.principal_id !== args.from_agent) {
+					await this._logAuthRejection(args.from_agent, "sub_mismatch");
+					return {
+						content: [{ type: "text", text: `⛔ 403 Forbidden: Token sub '${ctx.verified.principal_id}' does not match from_agent '${args.from_agent}'.` }],
+					};
+				}
+			}
+
 			// AC#2: Enforce ACL before inserting. DMs require an explicit grant;
 			// channel posts require a channel_post grant.
 			const grantType = args.to_agent ? "dm" : "channel_post";
