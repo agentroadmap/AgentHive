@@ -1366,7 +1366,7 @@ export async function renderBoardTui(
 		};
 
 		const focusFilterControl = (
-			filterId: "search" | "priority" | "directive" | "labels",
+			filterId: "search" | "priority" | "directive" | "labels" | "maturity",
 		) => {
 			if (!filterHeader) return;
 			switch (filterId) {
@@ -1382,11 +1382,14 @@ export async function renderBoardTui(
 				case "labels":
 					filterHeader.focusLabels();
 					break;
+				case "maturity":
+					filterHeader.focusMaturity();
+					break;
 			}
 		};
 
 		const openFilterPicker = async (
-			filterId: "priority" | "directive" | "labels",
+			filterId: "priority" | "directive" | "labels" | "maturity",
 		) => {
 			if (filterPopupOpen || moveOp || !filterHeader) {
 				return;
@@ -1432,6 +1435,34 @@ export async function renderBoardTui(
 					return;
 				}
 
+				if (filterId === "maturity") {
+					// Match the master-detail view's maturity options. Empty
+					// value means "All" in the UI which maps to the backend
+					// "non-obsolete" default (hide obsolete unless explicitly
+					// selected).
+					const maturityOptions = ["new", "active", "mature", "obsolete"];
+					const currentSelection =
+						currentMaturity === "non-obsolete" || currentMaturity === "all"
+							? ""
+							: currentMaturity;
+					const selected = await openSingleSelectFilterPopup({
+						screen,
+						title: "Maturity Filter",
+						selectedValue: currentSelection,
+						choices: [
+							{ label: "All", value: "" },
+							...maturityOptions.map((m) => ({ label: m, value: m })),
+						],
+					});
+					if (selected !== null) {
+						currentMaturity = selected === "" ? "non-obsolete" : selected;
+						filterHeader.setFilters({ maturity: selected });
+						emitFilterChange();
+						renderView();
+					}
+					return;
+				}
+
 				const selected = await openSingleSelectFilterPopup({
 					screen,
 					title: "Directive Filter",
@@ -1459,23 +1490,40 @@ export async function renderBoardTui(
 			statuses: [],
 			availableLabels: configuredLabels,
 			availableDirectives,
-			visibleFilters: ["search", "priority", "directive", "labels"],
+			// Maturity is orthogonal to the Kanban columns (which are status),
+			// so it belongs in the visible filter set on the RFC view too —
+			// not just in the master-detail view. The architect's
+			// edab78639a wired the filter logic but missed updating this
+			// visibleFilters array. (Workflow/Status are intentionally omitted:
+			// status maps to the columns themselves; workflow is implicit in
+			// the board's data source.)
+			visibleFilters: ["search", "maturity", "priority", "directive", "labels"],
 			initialFilters: {
 				search: sharedFilters.searchQuery,
 				priority: sharedFilters.priorityFilter,
 				labels: sharedFilters.labelFilter,
 				directive: sharedFilters.directiveFilter,
+				// Reuse the board's existing currentMaturity state. Display "all"
+				// or the picked value in the dropdown; "non-obsolete" (the
+				// default backend filter) renders as "All" in the UI.
+				maturity: currentMaturity === "non-obsolete" || currentMaturity === "all"
+					? ""
+					: currentMaturity,
 			},
 			onFilterChange: (filters: FilterProposal) => {
 				sharedFilters.searchQuery = filters.search;
 				sharedFilters.priorityFilter = filters.priority;
 				sharedFilters.labelFilter = filters.labels;
 				sharedFilters.directiveFilter = filters.directive;
+				// Empty maturity in the header → "non-obsolete" backend filter
+				// (hide obsolete by default). Specific value → match that
+				// maturity exactly.
+				currentMaturity = filters.maturity ? filters.maturity : "non-obsolete";
 				emitFilterChange();
 				renderView();
 			},
 			onFilterPickerOpen: (filterId) => {
-				if (filterId === "status") {
+				if (filterId === "status" || filterId === "workflow") {
 					return;
 				}
 				void openFilterPicker(filterId);
