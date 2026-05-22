@@ -1,0 +1,162 @@
+/**
+ * P1365-AC4 / AC-8: Capacity-based agency filtering and scoring
+ *
+ * Integrates agency_capacity table into resolver ranking:
+ * - Hard-throttled agencies excluded entirely
+ * - Soft-throttled agencies scored down by (1 - p_skip)
+ */
+
+import { query as _pgQuery } from "../../infra/postgres/pool.ts";
+
+type QueryFn = typeof _pgQuery;
+let _query: QueryFn = _pgQuery;
+
+export function _setQueryForTest(fn: QueryFn): void {
+  _query = fn;
+}
+
+function query(...args: Parameters<QueryFn>) {
+  return _query(...args);
+}
+
+export interface CapacityScore {
+  action: 'none' | 'soft' | 'hard' | 'unknown';
+  p_skip: number;
+  headroom_pct: number | null;
+  reset_at: Date | null;
+}
+
+/**
+ * Compute throttle score multiplier for a candidate agency.
+ * Returns 1.0 if no capacity record exists (assume healthy).
+ * Returns 0.0 if hard-throttled (exclude from candidacy).
+ * Returns (1 - p_skip) if soft-throttled (score down stochastically).
+ */
+export async function computeCapacityScoreMultiplier(
+  agencyId: string,
+  provider: string,
+  model: string
+): Promise<{ multiplier: number; score: CapacityScore }> {
+  // Query agency_capacity for this (provider, model, agency_id) tuple
+  const { rows } = await query(
+    `SELECT action:throttle_action, p_skip, headroom_pct, reset_at
+     FROM roadmap_workforce.agency_capacity
+     WHERE provider = $1 AND model = $2 AND agency_id = $3`,
+    [provider, model, agencyId]
+  );
+
+  // No record means healthy; full multiplier
+  if (rows.length === 0) {
+    return {
+      multiplier: 1.0,
+      score: {
+        action: 'none',
+        p_skip: 0,
+        headroom_pct: null,
+        reset_at: null,
+      },
+    };
+  }
+
+  const row = rows[0];
+  const throttleAction = row.throttle_action as 'none' | 'soft' | 'hard' | 'unknown';
+  const pSkip = parseFloat(row.p_skip || '0');
+  const headroomPct = row.headroom_pct ? parseFloat(row.headroom_pct) : null;
+  const resetAt = row.reset_at ? new Date(row.reset_at) : null;
+
+  const score: CapacityScore = {
+    action: throttleAction,
+    p_skip: pSkip,
+    headroom_pct: headroomPct,
+    reset_at: resetAt,
+  };
+
+  switch (throttleAction) {
+    case 'hard':
+      // Exclude entirely
+      return { multiplier: 0.0, score };
+    case 'soft':
+      // Score down by (1 - p_skip)
+      return { multiplier: 1.0 - pSkip, score };
+    case 'unknown':
+    case 'none':
+    default:
+      // No throttle
+      return { multiplier: 1.0, score };
+  }
+}
+
+/**
+ * Log a throttle decision to message_ledger for audit/observability
+ * Called when a soft-throttle or hard-throttle decision affects spawn ranking
+ */
+export async function logThrottleDecision(
+  agencyId: string,
+  provider: string,
+  model: string,
+  score: CapacityScore,
+  projectId: string | null
+): Promise<void> {
+  const metadata = {
+    agency_id: agencyId,
+    provider,
+    model,
+    throttle_action: score.action,
+    p_skip: score.p_skip,
+    headroom_pct: score.headroom_pct,
+    reset_at: score.reset_at?.toISOString() ?? null,
+    reason: score.action === 'hard'
+      ? 'agency_hard_throttled'
+      : score.action === 'soft'
+      ? 'agency_soft_throttled'
+      : 'agency_capacity_ok',
+  };
+
+  // Fire-and-forget audit log (non-blocking)
+  // The resolver must not wait on this
+  query(
+    `INSERT INTO roadmap.message_ledger (
+      message_type, metadata, project_id, created_at
+     ) VALUES ('throttle_decision', $1, $2, now())`,
+    [JSON.stringify(metadata), projectId]
+  ).catch((err) => {
+    console.warn('[P1365] Failed to log throttle decision:', err);
+  });
+}
+
+/**
+ * Multi-agency capacity check for resolver integration
+ * Filters candidates by capacity, returns list with score multipliers
+ *
+ * TODO: Integrate into agency-resolver.ts ranking query
+ * See AC-4/AC-8 for expected call site and JOIN pattern
+ */
+export async function filterByCapacity(
+  candidates: Array<{ agencyId: string; provider: string; model: string }>,
+  provider: string,
+  model: string
+): Promise<Array<{ agencyId: string; multiplier: number; score: CapacityScore }>> {
+  const results = [];
+
+  // Sequential awaits per [[feedback_concurrent_git_add]]: DB pool has known issues with parallel queries
+  for (const candidate of candidates) {
+    const { multiplier, score } = await computeCapacityScoreMultiplier(
+      candidate.agencyId,
+      provider,
+      model
+    );
+
+    // Skip hard-throttled candidates (multiplier = 0)
+    if (multiplier === 0) {
+      continue;
+    }
+
+    results.push({
+      agencyId: candidate.agencyId,
+      multiplier,
+      score,
+    });
+  }
+
+  return results;
+}

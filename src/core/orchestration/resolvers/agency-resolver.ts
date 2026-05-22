@@ -49,6 +49,14 @@ export interface AgencyCandidate {
  * Excludes offline and retired agencies.
  * Filters by in-flight capacity (P764).
  * Ranks by throttle_count ASC, last_seen_at DESC.
+ *
+ * TODO P1365-AC4/AC8: Integrate capacity filtering
+ * - LEFT JOIN roadmap_workforce.agency_capacity on (provider, model, agency_id)
+ * - WHERE throttle_action != 'hard' (hard-throttled agencies excluded)
+ * - Tiebreaker: add COALESCE(1 - p_skip, 1.0) DESC to the ORDER BY
+ *   (soft-throttled agencies ranked lower than healthy ones)
+ * - Log throttle decision to message_ledger when soft/hard action is applied
+ *   (see ../capacity-filter.ts::logThrottleDecision)
  */
 export async function resolveAgency(
 	projectId: string,

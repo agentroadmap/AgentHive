@@ -1621,6 +1621,12 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	const outputSummary = stdout.slice(-1000);
 	const errorDetail = stderr.slice(-4000);
 
+	// TODO P1365-AC2: Extract rate-limit headers from response and record signal
+	// After spawn completes, if the Anthropic SDK or other instrumentation surfaces
+	// response headers, call parseRateLimitHeaders() and pass signal to in-memory
+	// CapacityTracker via recordSignal(). Headers not yet exposed by SDK (Phase 2).
+	// This placeholder will be wired up when claude-code API proxy is available.
+
 	// P721: classify non-zero exits — rate-limit hits must not count toward
 	// P689's circuit breaker and must throttle the route for future dispatches.
 	const exitClass = classifyExit(stdout, stderr, exitCode);
