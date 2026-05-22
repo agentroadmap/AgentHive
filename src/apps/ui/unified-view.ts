@@ -595,6 +595,8 @@ export async function runUnifiedView(
 						        COALESCE(NULLIF(ar.host_affinity, ''), 'bot') AS host_id,
 						        ar.role,
 						        COALESCE(a.presence_state, 'unknown') AS presence_state,
+						        COALESCE(a.status, 'unknown')         AS agency_status,
+						        a.throttled_until,
 						        COALESCE(a.last_heartbeat_at, ar.updated_at) AS last_heartbeat_at,
 						        sd.proposal_id,
 						        p.display_id AS current_proposal,
@@ -615,9 +617,6 @@ export async function runUnifiedView(
 						 WHERE ar.status = 'active'
 						   AND ar.agent_type = 'agency'
 						   AND ar.preferred_provider IS NOT NULL
-						   -- Drop legacy bootstrap-agency names (operator
-						   -- feedback 2026-05-21). These are bot accounts
-						   -- that ran the bring-up.
 						   AND ar.agent_identity NOT IN (
 						     'codex-agency-bot', 'codex/agency-bot',
 						     'copilot-agency-gary',
@@ -655,26 +654,33 @@ export async function runUnifiedView(
 					}
 
 					const transformStart = performance.now();
-					const agentData: WorkforceAgent[] = (agentRows as any[]).map((row: any) => ({
-						id: row.display_name,
-						name: row.display_name,
-						// `role` is now provider@host — groups the panel by where
-						// the agency lives (claude@bot, codex@bot, gemini@bot).
-						role: `${row.provider}@${row.host_id}`,
-						// agent_registry says status='active' (filtered above), so
-						// these are registered + available. We only flip to offline
-						// when roadmap.agency has a definitive 'offline' presence
-						// signal; 'unknown' (no live heartbeat) still counts as
-						// available because the agency is registered + active.
-						status: row.presence_state === "offline" || row.presence_state === "away"
-							? "offline"
-							: "active",
-						currentProposal: row.current_proposal
-							? `${row.current_proposal}: ${row.current_title ?? ""}`
-							: undefined,
-						statusMessage: row.presence_state ?? "",
-						lastSeen: row.last_heartbeat_at ? new Date(row.last_heartbeat_at).getTime() : Date.now(),
-					}));
+					const nowMs = Date.now();
+					const agentData: WorkforceAgent[] = (agentRows as any[]).map((row: any) => {
+						const throttleUntilMs = row.throttled_until
+							? new Date(row.throttled_until).getTime()
+							: undefined;
+						const isThrottled = row.agency_status === "throttled"
+							|| (throttleUntilMs !== undefined && throttleUntilMs > nowMs);
+						const isOfflinePresence = row.presence_state === "offline"
+							|| row.presence_state === "away";
+						const status: WorkforceAgent["status"] =
+							isThrottled       ? "throttled"
+							: isOfflinePresence ? "offline"
+							:                    "active";
+						return {
+							id: row.display_name,
+							name: row.display_name,
+							role: `${row.provider}@${row.host_id}`,
+							status,
+							presenceOnline: row.presence_state === "online" || row.presence_state === "busy",
+							throttledUntil: throttleUntilMs,
+							currentProposal: row.current_proposal
+								? `${row.current_proposal}: ${row.current_title ?? ""}`
+								: undefined,
+							statusMessage: row.presence_state ?? "",
+							lastSeen: row.last_heartbeat_at ? new Date(row.last_heartbeat_at).getTime() : Date.now(),
+						};
+					});
 
 					const cockpitMessages = (msgRows as any[])
 						.reverse()

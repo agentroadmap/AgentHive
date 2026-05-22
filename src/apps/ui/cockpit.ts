@@ -12,7 +12,13 @@ export interface WorkforceAgent {
 	id: string;
 	name: string;
 	role: string;
-	status: "active" | "zombie" | "offline";
+	// 'active'   = registered and ready (presence online OR unknown)
+	// 'throttled' = rate-limited / token bucket exhausted; throttledUntil set
+	// 'offline'  = presence-state offline or away (not dispatchable)
+	// 'zombie'   = legacy state — unused with new schema
+	status: "active" | "zombie" | "offline" | "throttled";
+	presenceOnline?: boolean; // true when liaison heartbeat is live
+	throttledUntil?: number;  // ms epoch — when throttle clears
 	currentProposal?: string;
 	statusMessage: string;
 	lastSeen?: number;
@@ -204,23 +210,49 @@ export function renderCockpit(
 		`{bold}{cyan-fg}🚀 ENGINEER'S COCKPIT{/} | Agents: ${agents.length} | Pipeline: ${pipelineTotal} | Status: {green-fg}LIVE{/}`,
 	);
 
-	// Update Workforce — split into WORKING (has currentProposal) vs AVAILABLE.
-	// WORKING rows are loud and show what they're on; AVAILABLE is compact
-	// (comma-separated by type) so you can see the bench at a glance.
+	// Update Workforce — split into WORKING (has currentProposal) vs AVAILABLE
+	// vs THROTTLED vs OFFLINE. The header gives an at-a-glance picture of the
+	// whole bench: how many are registered, how many liaisons are responsive,
+	// how many are dispatchable right now, how many can't take work.
 	if (agents.length === 0) {
 		workforceBox.setContent("  {gray-fg}No agents registered{/}");
 	} else {
+		const registered = agents.length;
+		const online = agents.filter((a) => a.presenceOnline).length;
 		const working = agents.filter((a) => a.status === "active" && a.currentProposal);
 		const idle = agents.filter((a) => a.status === "active" && !a.currentProposal);
-		const offline = agents.filter((a) => a.status !== "active");
+		const throttled = agents.filter((a) => a.status === "throttled");
+		const offline = agents.filter((a) => a.status === "offline");
 
 		const cols = ((screen as any).program?.cols as number | undefined) ?? 160;
 		const panelBudget = Math.max(40, Math.floor(cols / 2) - 6);
 
 		const lines: string[] = [];
-		lines.push(
-			`{bold}${working.length} working{/} · {bold}${idle.length} available{/}${offline.length ? ` · {gray-fg}${offline.length} offline{/}` : ""}`,
-		);
+		// Header: registered total, liaison responsiveness, dispatch states.
+		// Format mirrors operator request: "agencies #, registered, online
+		// (liaison responsive, token available or to reset time)".
+		const parts = [
+			`{bold}${registered}{/} registered`,
+			`{green-fg}${online}{/} online`,
+			`{bold}${working.length}{/} working`,
+			`{cyan-fg}${idle.length}{/} ready`,
+		];
+		if (throttled.length > 0) {
+			// Show shortest reset window so operator knows when to expect capacity.
+			const resets = throttled
+				.map((a) => a.throttledUntil)
+				.filter((t): t is number => typeof t === "number" && t > Date.now())
+				.sort((a, b) => a - b);
+			const nextReset = resets[0];
+			const resetIn = nextReset
+				? ` (next reset ${formatRelativeTime(nextReset - Date.now())})`
+				: "";
+			parts.push(`{yellow-fg}${throttled.length} throttled${resetIn}{/}`);
+		}
+		if (offline.length > 0) {
+			parts.push(`{gray-fg}${offline.length} offline{/}`);
+		}
+		lines.push(parts.join(" · "));
 		lines.push("");
 
 		if (working.length > 0) {
@@ -257,6 +289,17 @@ export function renderCockpit(
 					? `${joined.substring(0, panelBudget - labelLen - 1)}…`
 					: joined;
 				lines.push(`  {gray-fg}${provider}{/} (${names.length}): ${fit}`);
+			});
+		}
+
+		if (throttled.length > 0) {
+			lines.push("");
+			lines.push("{yellow-fg}[!] THROTTLED{/}");
+			throttled.forEach((a) => {
+				const resetIn = a.throttledUntil
+					? formatRelativeTime(a.throttledUntil - Date.now())
+					: "unknown";
+				lines.push(`  {bold}${a.id}{/} {gray-fg}(${a.role}){/} -> reset ${resetIn}`);
 			});
 		}
 
@@ -349,4 +392,14 @@ export function renderCockpit(
 	}
 
 	screen.render();
+}
+
+function formatRelativeTime(ms: number): string {
+	if (ms < 0) return "now";
+	const seconds = Math.round(ms / 1000);
+	if (seconds < 60) return `in ${seconds}s`;
+	const minutes = Math.round(seconds / 60);
+	if (minutes < 60) return `in ${minutes}m`;
+	const hours = Math.round(minutes / 60);
+	return `in ${hours}h`;
 }
