@@ -39,8 +39,7 @@ export function registerProposalTools(
 				},
 				limit: {
 					type: "number",
-					description:
-						"Maximum results to return (default 50, max 500)",
+					description: "Maximum results to return (default 50, max 500)",
 				},
 				include_terminal: {
 					type: "boolean",
@@ -51,6 +50,11 @@ export function registerProposalTools(
 					type: "boolean",
 					description:
 						"Include metadata fields (summary, design, motivation). Default false.",
+				},
+				parent_id: {
+					type: "string",
+					description:
+						"Filter to direct children of this proposal (display_id, e.g. P190).",
 				},
 			},
 		},
@@ -88,7 +92,7 @@ export function registerProposalTools(
 						{ type: "string" },
 					],
 					description:
-						"Fields to include. Supported: title, type, status, maturity, priority, summary, motivation, design, drawbacks, alternatives, dependency, dependencies, acceptance_criteria, lease, workflow, latest_decision, decisions, tags.",
+						"Fields to include. Supported: title, type, status, maturity, priority, summary, motivation, design, drawbacks, alternatives, dependency, dependencies, acceptance_criteria, lease, workflow, latest_decision, decisions, tags, children.",
 				},
 				format: {
 					type: "string",
@@ -468,11 +472,13 @@ export function registerProposalTools(
 				},
 				unresolved: {
 					type: "boolean",
-					description: "Return rows missing canonical link (v_migration_unresolved)",
+					description:
+						"Return rows missing canonical link (v_migration_unresolved)",
 				},
 				needs_review: {
 					type: "boolean",
-					description: "Return rows with incomplete fields (v_migration_incomplete)",
+					description:
+						"Return rows with incomplete fields (v_migration_incomplete)",
 				},
 				limit: {
 					type: "number",

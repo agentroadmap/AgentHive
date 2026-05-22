@@ -89,6 +89,7 @@ export class PgProposalHandlers {
 		status?: string;
 		type?: string;
 		proposal_type?: string;
+		parent_id?: string;
 		limit?: number;
 		include_terminal?: boolean;
 		include_metadata?: boolean;
@@ -124,6 +125,13 @@ export class PgProposalHandlers {
 				params.push(proposalType);
 			}
 
+			if (args.parent_id !== undefined) {
+				conditions.push(
+					`parent_id = (SELECT id FROM roadmap_proposal.proposal WHERE display_id = $${params.length + 1})`,
+				);
+				params.push(args.parent_id);
+			}
+
 			if (conditions.length) {
 				sql += ` WHERE ${conditions.join(" AND ")}`;
 			}
@@ -157,6 +165,7 @@ export class PgProposalHandlers {
 									filter: {
 										status: args.status,
 										type: args.type ?? args.proposal_type,
+										parent_id: args.parent_id,
 										includeTerminal,
 									},
 									note: includeTerminal
@@ -199,6 +208,7 @@ export class PgProposalHandlers {
 								filter: {
 									status: args.status,
 									type: args.type ?? args.proposal_type,
+									parent_id: args.parent_id,
 									includeTerminal,
 								},
 								items,
@@ -987,11 +997,21 @@ export class PgProposalHandlers {
 				[proposal.id],
 			);
 
-			// 6. Build YAML+MD projection
+			// 6. Fetch direct children
+			const childrenResult = await query(
+				`SELECT display_id, title, status, maturity
+				 FROM roadmap_proposal.proposal
+				 WHERE parent_id = $1
+				 ORDER BY display_id`,
+				[proposal.id],
+			);
+
+			// 7. Build YAML+MD projection
 			const did = proposal.display_id ?? `#${proposal.id}`;
 			const lease = leaseResult.rows[0] ?? null;
 			const decision = decisionResult.rows[0] ?? null;
 			const deps = depResult.rows;
+			const children = childrenResult.rows;
 
 			let md = `---\n`;
 			md += `id: ${did}\n`;
@@ -1014,6 +1034,15 @@ export class PgProposalHandlers {
 			}
 			if ((proposal as Record<string, unknown>).workflow_name)
 				md += `workflow: ${(proposal as Record<string, unknown>).workflow_name}\n`;
+			if (children.length > 0) {
+				md += `children:\n`;
+				for (const child of children) {
+					md += `  - id: ${child.display_id}\n`;
+					md += `    title: "${child.title}"\n`;
+					md += `    status: ${child.status}\n`;
+					md += `    maturity: ${child.maturity ?? "new"}\n`;
+				}
+			}
 			md += `---\n\n`;
 
 			// Narrative sections
