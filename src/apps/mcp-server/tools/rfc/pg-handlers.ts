@@ -1110,6 +1110,21 @@ export async function addDiscussion(args: {
 		args.content =
 			args.discussion ?? args.text ?? args.body ?? args.message ?? "";
 	}
+	// P1364: reject empty / whitespace-only bodies. The prior coercion silently
+	// INSERTed empty rows when callers forgot to supply content (5+ observed
+	// fabrications between 2026-05-20 and 2026-05-22 — see motivation in P1364).
+	// Validation runs AFTER alias coercion so canonical `content` and all four
+	// aliases get the same treatment. Trim so '   \n\t' also rejects.
+	if (!args.content || args.content.trim().length === 0) {
+		return {
+			content: [
+				{
+					type: "text",
+					text: `add_discussion: missing or empty body. Pass content="..." (canonical) or one of the aliases: discussion, text, body, message. Empty discussions silently land in the table and look like fabrications later (P1364).`,
+				},
+			],
+		};
+	}
 	if (!args.author) {
 		// Default authoring identity so cubic/gate agents don't bounce on a
 		// missing arg — they're system-issued, not user-issued.
