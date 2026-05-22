@@ -71,6 +71,7 @@ const DEFAULT_LIVENESS_ALERT_INTERVAL_MS = Number(
 /** Notify channels the orchestrator listens on for dispatch wake-ups. */
 const GATE_READY_CHANNEL = "proposal_gate_ready";
 const MATURITY_CHANGED_CHANNEL = "proposal_maturity_changed";
+const RUNTIME_FLAG_CHANNEL = "runtime_flag_changed";
 
 /** Whether the 2-minute state-change poll fallback is enabled (env-driven). */
 const ENABLE_POLLING = process.env.AGENTHIVE_ORCHESTRATOR_POLL === "1";
@@ -253,8 +254,9 @@ export class Orchestrator {
 		);
 		await this.listenClient.query(`LISTEN ${GATE_READY_CHANNEL}`);
 		await this.listenClient.query(`LISTEN ${MATURITY_CHANGED_CHANNEL}`);
+		await this.listenClient.query(`LISTEN ${RUNTIME_FLAG_CHANNEL}`);
 		console.log(
-			`[Orchestrator] LISTEN registered: ${GATE_READY_CHANNEL}, ${MATURITY_CHANGED_CHANNEL}`,
+			`[Orchestrator] LISTEN registered: ${GATE_READY_CHANNEL}, ${MATURITY_CHANGED_CHANNEL}, ${RUNTIME_FLAG_CHANNEL}`,
 		);
 
 		// Schedule the five legacy poll timers. Each is parity with the
@@ -549,6 +551,17 @@ export class Orchestrator {
 	 */
 	async onNotification(channel: string, payload?: string): Promise<void> {
 		if (this.stopping || !payload) return;
+
+		if (channel === RUNTIME_FLAG_CHANNEL) {
+			try {
+				await this.loadOrchestratorFlags();
+				console.log("[Orchestrator] runtime flags reloaded via pg_notify");
+			} catch (err) {
+				console.error("[Orchestrator] flag reload failed:", err);
+			}
+			return;
+		}
+
 		if (
 			channel !== GATE_READY_CHANNEL &&
 			channel !== MATURITY_CHANGED_CHANNEL
