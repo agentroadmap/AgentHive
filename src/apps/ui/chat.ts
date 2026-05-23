@@ -89,6 +89,18 @@ export function renderChat(
 		container._sidebar = sidebar;
 		container._sidebarFocused = false;
 
+		// Mouse click on a channel row → select that channel immediately.
+		// blessed.list updates `selected` on mousedown but does NOT emit
+		// 'select' (that's keyboard Enter only), so wire it explicitly.
+		(sidebar as any).on("element click", (el: any) => {
+			// blessed.list items have a `name` set to the item text; index by content
+			const idx = (container._channels as string[] | undefined)?.indexOf(el?.getText?.() ?? "");
+			if (typeof idx === "number" && idx >= 0) {
+				(sidebar as any).select(idx);
+				(sidebar as any).emit("select", el, idx);
+			}
+		});
+
 		// Channel selection: blessed.list emits 'select' on Enter.
 		(sidebar as any).on("select", (_item: any, index: number) => {
 			const sel = (container._channels as string[] | undefined)?.[index];
@@ -185,6 +197,31 @@ export function renderChat(
 			mouse: true,
 		});
 		container._inputField = inputField;
+
+		// Click on the input box → focus + start reading.
+		// blessed sets focus on click for mouse:true widgets, but it doesn't
+		// invoke our manually-driven readInput loop. Wire that explicitly so a
+		// click does the same thing as pressing `i`.
+		(inputField as any).on("click", () => {
+			if ((inputField as any)._reading) return;
+			container._inputDefocused = false;
+			container._inputFocused = true;
+			container._sidebarFocused = false;
+			inputField.focus();
+			container._startReading?.();
+			container._updateFooter?.();
+			screen.render();
+		});
+
+		// Click on the chat log → defocus input so the operator can scroll/read.
+		(chatLog as any).on("click", () => {
+			container._inputDefocused = true;
+			container._inputFocused = false;
+			container._sidebarFocused = false;
+			chatLog.focus();
+			container._updateFooter?.();
+			screen.render();
+		});
 
 		// Footer — Mode indicator + help
 		const footer = box({
