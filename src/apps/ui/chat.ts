@@ -2,6 +2,12 @@
  * Chat View
  *
  * A full-screen real-time chat interface.
+ *
+ * Architecture (Approach A: Decouple input from refresh):
+ * - Input box lives once as a permanent widget with submit/cancel events.
+ * - Refresh only updates chatLog content and sidebar channels list.
+ * - No readInput() modal — normal textbox with focus/blur lifecycle.
+ * - Single source of truth: screen.focused and widget state.
  */
 
 // @ts-expect-error - blessed types may not be installed
@@ -26,9 +32,6 @@ export function renderChat(
 		userSystemName: string;
 		onSend?: (content: string) => Promise<void> | void;
 		onExit?: () => void;
-		// Fired when the user selects a channel from the sidebar list. Caller
-		// is responsible for updating its currentChannel state and triggering
-		// a fresh data fetch.
 		onChannelSelect?: (channel: string) => void;
 	},
 ): void {
@@ -51,7 +54,7 @@ export function renderChat(
 			child.destroy();
 		});
 
-		// parent: screen required — without it the container is orphaned and invisible.
+		// Root container (parent: screen required)
 		container = box({
 			parent: screen,
 			top: 0,
@@ -63,15 +66,13 @@ export function renderChat(
 		});
 		(screen as any)._chatContainer = container;
 
-		// Left Sidebar (Channels) — interactive list. Focus with `c` from the
-		// chat log; navigate up/down; Enter to select; Esc returns focus to
-		// the chat input.
+		// Left Sidebar (Channels)
 		sidebar = list({
 			parent: container,
 			top: 0,
 			left: 0,
 			width: 25,
-			height: "100%-1",
+			height: "100%-4",
 			border: { type: "line" },
 			label: " Channels ",
 			tags: true,
@@ -87,13 +88,9 @@ export function renderChat(
 			},
 		});
 		container._sidebar = sidebar;
-		container._sidebarFocused = false;
 
-		// Mouse click on a channel row → select that channel immediately.
-		// blessed.list updates `selected` on mousedown but does NOT emit
-		// 'select' (that's keyboard Enter only), so wire it explicitly.
+		// Mouse click on a channel → select immediately
 		(sidebar as any).on("element click", (el: any) => {
-			// blessed.list items have a `name` set to the item text; index by content
 			const idx = (container._channels as string[] | undefined)?.indexOf(el?.getText?.() ?? "");
 			if (typeof idx === "number" && idx >= 0) {
 				(sidebar as any).select(idx);
@@ -101,52 +98,41 @@ export function renderChat(
 			}
 		});
 
-		// Channel selection: blessed.list emits 'select' on Enter.
+		// Channel selection (Enter key or mouse click)
 		(sidebar as any).on("select", (_item: any, index: number) => {
 			const sel = (container._channels as string[] | undefined)?.[index];
 			if (sel && sel !== container._currentChannel) {
 				container._currentChannel = sel;
-				// Reset the message-cursor so the new channel's history fills
-				// the log on the next refresh tick.
 				container._lastMsgTimestamp = 0;
 				if (chatLog && (chatLog as any).setItems) {
 					(chatLog as any).setItems([]);
 				}
 				onChannelSelect?.(sel);
 			}
-			// Bounce focus back to the input so the operator can type immediately.
-			container._inputDefocused = false;
-			container._inputFocused = true;
-			container._sidebarFocused = false;
+			// Return focus to input
 			inputField.focus();
-			// Ensure _reading flag is set so next refresh doesn't auto-call startReading.
-			if (!(inputField as any)._reading) {
-				if (container._startReading) container._startReading();
-			}
+			updateBorders();
 			container._updateFooter?.();
 			screen.render();
 		});
 
-		// Esc on the sidebar returns to the input box.
+		// Esc on sidebar returns to input
 		(sidebar as any).key(["escape"], () => {
-			container._inputDefocused = false;
-			container._inputFocused = true;
-			container._sidebarFocused = false;
 			inputField.focus();
-			if (!(inputField as any)._reading) {
-				if (container._startReading) container._startReading();
-			}
+			updateBorders();
 			container._updateFooter?.();
 			screen.render();
 		});
 
 		// Track sidebar focus
 		(sidebar as any).on("focus", () => {
-			container._sidebarFocused = true;
-			container._inputFocused = false;
-			container._inputContainer.style.border = { fg: "dim_yellow" };
-			sidebar.style.border = { fg: "yellow" };
+			updateBorders();
 			container._updateFooter?.();
+			screen.render();
+		});
+
+		(sidebar as any).on("blur", () => {
+			updateBorders();
 			screen.render();
 		});
 
@@ -167,7 +153,14 @@ export function renderChat(
 		});
 		container._chatLog = chatLog;
 
-		// Message Input
+		// Click on chat log → just gives visual feedback (user can scroll)
+		(chatLog as any).on("click", () => {
+			chatLog.focus();
+			updateBorders();
+			screen.render();
+		});
+
+		// Message Input Container
 		const inputContainer = box({
 			parent: container,
 			bottom: 1,
@@ -178,15 +171,8 @@ export function renderChat(
 			style: { border: { fg: "dim_yellow" } },
 		});
 		container._inputContainer = inputContainer;
-		container._inputFocused = true;
 
-		// inputOnFocus is deliberately OFF. With it on, the focus-triggered
-		// readInput() races with our defocus path: blur fires __done, which
-		// re-enters _done after this._done was already deleted, leaving the
-		// keypress listener attached. The next Escape then calls a stale
-		// `done` reference (which is undefined) → TypeError at blessed.js:12786.
-		// We drive readInput manually with a single callback that owns the
-		// full lifecycle.
+		// Input field: textbox with keys enabled for normal text input
 		inputField = textbox({
 			parent: inputContainer,
 			top: 0,
@@ -195,35 +181,108 @@ export function renderChat(
 			height: 1,
 			keys: true,
 			mouse: true,
+			style: { focus: { fg: "white" } },
 		});
 		container._inputField = inputField;
 
-		// Click on the input box → focus + start reading.
-		// blessed sets focus on click for mouse:true widgets, but it doesn't
-		// invoke our manually-driven readInput loop. Wire that explicitly so a
-		// click does the same thing as pressing `i`.
+		// Flag to prevent multiple readInput sessions
+		let isReadingInput = false;
+
+		// Start the readInput session once when input is focused
+		const startReadingInput = () => {
+			if (isReadingInput) return;
+			isReadingInput = true;
+
+			inputField.readInput((err: any, value: string | null | undefined) => {
+				isReadingInput = false;
+
+				if (err === "stop") {
+					// Esc was pressed — blur and move to chatLog
+					chatLog.focus();
+					updateBorders();
+					container._updateFooter?.();
+					screen.render();
+					return;
+				}
+				if (err) return; // Other error, just stop
+
+				// Enter was pressed with a value
+				if (value != null && typeof value === "string") {
+					const trimmed = value.trim();
+					if (trimmed) {
+						void Promise.resolve(onSend?.(trimmed)).then(() => {
+							inputField.clearValue?.();
+							// After send completes, restart readInput if still focused
+							if ((screen as any).focused === inputField) {
+								// Need a microtask delay to avoid stack overflow
+								setImmediate(() => startReadingInput());
+							}
+							screen.render();
+						});
+					} else {
+						// Empty line, just clear and restart
+						inputField.clearValue?.();
+						if ((screen as any).focused === inputField) {
+							setImmediate(() => startReadingInput());
+						}
+						screen.render();
+					}
+				}
+			});
+		};
+		container._startReadingInput = startReadingInput;
+
+		// Track input focus: start reading when focused
+		(inputField as any).on("focus", () => {
+			updateBorders();
+			container._updateFooter?.();
+			startReadingInput();
+			screen.render();
+		});
+
+		(inputField as any).on("blur", () => {
+			isReadingInput = false;
+			updateBorders();
+			screen.render();
+		});
+
+		// Click on input → focus it
 		(inputField as any).on("click", () => {
-			if ((inputField as any)._reading) return;
-			container._inputDefocused = false;
-			container._inputFocused = true;
-			container._sidebarFocused = false;
 			inputField.focus();
-			container._startReading?.();
+			updateBorders();
 			container._updateFooter?.();
 			screen.render();
 		});
 
-		// Click on the chat log → defocus input so the operator can scroll/read.
-		(chatLog as any).on("click", () => {
-			container._inputDefocused = true;
-			container._inputFocused = false;
-			container._sidebarFocused = false;
-			chatLog.focus();
-			container._updateFooter?.();
-			screen.render();
+		// Ctrl+C exits (readInput may intercept, so also bind at element level)
+		(inputField as any).key(["C-c"], () => {
+			onExit?.();
 		});
 
-		// Footer — Mode indicator + help
+		// Helper: update border colors based on focus
+		const updateBorders = () => {
+			const screenAny = screen as any;
+			const inputContainerRef = container._inputContainer;
+			const sidebarRef = container._sidebar;
+			const chatLogRef = container._chatLog;
+
+			if (screenAny.focused === inputField) {
+				inputContainerRef.style.border = { fg: "yellow" };
+				sidebarRef.style.border = { fg: "cyan" };
+				chatLogRef.style.border = { fg: "green" };
+			} else if (screenAny.focused === sidebarRef) {
+				inputContainerRef.style.border = { fg: "dim_yellow" };
+				sidebarRef.style.border = { fg: "yellow" };
+				chatLogRef.style.border = { fg: "green" };
+			} else if (screenAny.focused === chatLogRef) {
+				inputContainerRef.style.border = { fg: "dim_yellow" };
+				sidebarRef.style.border = { fg: "cyan" };
+				chatLogRef.style.border = { fg: "yellow" };
+			}
+		};
+		container._updateBorders = updateBorders;
+
+		// Footer — Mode indicator
 		const footer = box({
 			parent: container,
 			bottom: 0,
@@ -234,77 +293,39 @@ export function renderChat(
 			style: { bg: "blue", fg: "white" },
 		});
 		container._footer = footer;
+
 		const updateFooter = () => {
-			const mode = container._inputFocused ? "INPUT" : "CHANNELS";
-			const hint = container._inputFocused
-				? " Enter: Send | Esc: Channels | Ctrl+C: Quit"
-				: " Arrows: Navigate | Enter: Select | Esc: Input | Tab: View | Q: Exit";
+			const screenAny = screen as any;
+			let mode = "IDLE";
+			if (screenAny.focused === inputField) mode = "INPUT";
+			else if (screenAny.focused === sidebar) mode = "CHANNELS";
+			else if (screenAny.focused === chatLog) mode = "CHATLOG";
+
+			const hint = mode === "INPUT"
+				? " Enter: Send | Esc: Chat | C-c: Quit"
+				: mode === "CHANNELS"
+				? " Up/Down: Navigate | Enter: Select | Esc: Input | Tab: View | Q: Quit"
+				: " i: Input | c: Channels | Tab: View | Q: Quit";
+
 			footer.setContent(`Mode: {yellow-fg}${mode}{/} |${hint}`);
 		};
 		container._updateFooter = updateFooter;
-		updateFooter();
 
-		const startReading = () => {
-			inputField.readInput((err: any, value: string | null | undefined) => {
-				if (err === "stop") return;
-				if (err) return;
-				if (value != null) {
-					// submit
-					const trimmed = value.trim();
-					if (trimmed) {
-						void Promise.resolve(onSend?.(trimmed)).then(() => {
-							inputField.clearValue();
-							if (!container._inputDefocused) startReading();
-							screen.render();
-						});
-					} else {
-						inputField.clearValue();
-						if (!container._inputDefocused) startReading();
-						screen.render();
-					}
-				} else {
-					// cancel (Escape) — leave input, free Tab/Q at screen level
-					container._inputDefocused = true;
-					chatLog.focus();
-					screen.render();
-				}
-			});
-		};
-		container._startReading = startReading;
-
-		// Ctrl+C exits even from inside the input box (screen-level handler is
-		// shadowed by textbox readInput, so we re-bind at program level here).
-		inputField.key(["C-c"], () => {
-			onExit?.();
-		});
-
-		// `i` and `c` shortcuts bound at SCREEN level (not chatLog) — blessed.log
-		// doesn't reliably forward letter keys via .key(). screen.key fires when
-		// the user is OUT of the input box (inputField captures keys while
-		// readInput is active, so these only fire after Esc defocuses input).
+		// Screen-level shortcuts (only fire when input is NOT focused)
 		(screen as any).key(["i"], () => {
-			// Re-enter input mode (vim-style). Only acts when input isn't
-			// currently focused; if it is, the keypress went into the message.
-			if ((screen as any).focused === inputField) return;
-			container._inputDefocused = false;
-			container._inputFocused = true;
-			container._sidebarFocused = false;
+			// Vim-style: 'i' to enter input mode
+			if ((screen as any).focused === inputField) return; // already in input
 			inputField.focus();
-			inputContainer.style.border = { fg: "yellow" };
-			sidebar.style.border = { fg: "cyan" };
-			startReading();
+			updateBorders();
 			container._updateFooter?.();
 			screen.render();
 		});
+
 		(screen as any).key(["c"], () => {
-			// Jump focus to the Channels sidebar.
+			// 'c' to jump to channels
 			if ((screen as any).focused === inputField) return;
-			container._inputDefocused = true;
-			container._inputFocused = false;
-			container._sidebarFocused = true;
 			sidebar.focus();
-			inputContainer.style.border = { fg: "dim_yellow" };
-			sidebar.style.border = { fg: "yellow" };
+			updateBorders();
 			container._updateFooter?.();
 			screen.render();
 		});
@@ -320,15 +341,18 @@ export function renderChat(
 		container._lastMsgTimestamp =
 			messages.length > 0 ? messages[0].timestamp : 0;
 		container._currentChannel = currentChannel;
+
+		// Set initial focus to input
+		inputField.focus();
+		updateBorders();
+		updateFooter();
 	} else {
 		sidebar = container._sidebar;
 		chatLog = container._chatLog;
 		inputField = container._inputField;
 	}
 
-	// Update Sidebar — only call setItems when channels actually changed.
-	// Without this guard the list redraws every 1s refresh, which the
-	// user perceives as flashing (the entire panel repaints).
+	// Update Sidebar — only call setItems if channels changed (avoid flashing)
 	container._currentChannel = currentChannel;
 	const channelsKey = channels.join("\x00");
 	if (channelsKey !== container._channelsKey) {
@@ -337,17 +361,12 @@ export function renderChat(
 		(sidebar as any).setItems(channels);
 	}
 
-	// Only update title + clear log + pre-select the active row when the
-	// channel ACTUALLY changes. Doing it on every tick (a) flashes the
-	// border and (b) fought against the user's mid-navigation arrow keys
-	// (refresh called sidebar.select(activeIndex) which reverted the
-	// user's Down keypress).
+	// Update title + clear log when channel actually changes
 	if (container._displayedChannel !== currentChannel) {
 		(chatLog as any).setLabel?.(` ${currentChannel} - ${projectName} `);
 		const activeIndex = Math.max(0, channels.indexOf(currentChannel));
 		(sidebar as any).select?.(activeIndex);
 		if (container._displayedChannel) {
-			// Wipe the log so the prior channel's messages don't mix in.
 			if ((chatLog as any).setItems) (chatLog as any).setItems([]);
 			else (chatLog as any).setContent?.("");
 			container._lastMsgTimestamp = 0;
@@ -355,7 +374,7 @@ export function renderChat(
 		container._displayedChannel = currentChannel;
 	}
 
-	// Reactive Update
+	// Add new messages to chatLog (only since last refresh)
 	const newMessages = messages
 		.filter(
 			(m) =>
@@ -370,34 +389,8 @@ export function renderChat(
 		container._lastMsgTimestamp = messages[0].timestamp;
 	}
 
-	// Only focus + start reading if user hasn't explicitly defocused with Esc.
-	// Without this guard, the 1s refresh loop would steal focus back every
-	// tick, trapping the user inside the textbox.
-	// ALSO: only call focus() when input isn't already focused — re-focusing
-	// an already-focused widget can fire 'focus' events and contribute to
-	// visible flicker on the input frame.
-	if (!container._inputDefocused) {
-		const screenAny = screen as any;
-		if (screenAny.focused !== inputField) {
-			inputField.focus();
-		}
-		if (!(inputField as any)._reading && container._startReading) {
-			container._startReading();
-		}
-	}
-	// Update border colors and footer text to reflect actual focus state.
-	// The local `inputContainer` only exists in the create branch above; on
-	// refresh ticks we must read it off the container.
-	const inputContainerRef = container._inputContainer;
-	if (inputContainerRef) {
-		if (container._inputFocused) {
-			inputContainerRef.style.border = { fg: "yellow" };
-			(sidebar as any).style.border = { fg: "cyan" };
-		} else if (container._sidebarFocused) {
-			inputContainerRef.style.border = { fg: "dim_yellow" };
-			(sidebar as any).style.border = { fg: "yellow" };
-		}
-	}
+	// Update border colors and footer text to reflect actual focus
+	container._updateBorders?.();
 	container._updateFooter?.();
 	screen.render();
 }
