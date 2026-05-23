@@ -111,3 +111,41 @@ export async function setCooldownFromSignal(
 	}
 	return signal;
 }
+
+/**
+ * P1359: Set model-level cooldown for a specific route/model combo.
+ * Uses GREATEST merge semantics to preserve the longer of existing or new cooldown.
+ */
+export async function setModelCooldown(
+	provider: string,
+	model: string,
+	ttlSeconds: number,
+	errorSignal: string,
+): Promise<void> {
+	await query(
+		`UPDATE roadmap.model_routes
+    SET cooldown_until = GREATEST(
+      COALESCE(cooldown_until, 'epoch'::timestamptz),
+      now() + $3::interval
+    ),
+    updated_at = now()
+   WHERE route_provider = $1 AND model_name = $2`,
+		[provider, model, `${ttlSeconds} seconds`],
+	);
+}
+
+/**
+ * P1359: Check if a model/route is in active cooldown.
+ */
+export async function isModelInCooldown(
+	provider: string,
+	model: string,
+): Promise<boolean> {
+	const { rows } = await query<{ in_cooldown: boolean }>(
+		`SELECT (cooldown_until IS NOT NULL AND cooldown_until > NOW()) AS in_cooldown
+   FROM roadmap.model_routes
+  WHERE route_provider = $1 AND model_name = $2`,
+		[provider, model],
+	);
+	return rows[0]?.in_cooldown ?? false;
+}
