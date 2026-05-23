@@ -41,6 +41,15 @@ export function timestampToMillis(value: FeedRow["timestamp_ms"]): number {
 	return Number.isFinite(fallback) ? fallback : Date.now();
 }
 
+// Module-level cache of the last successful query result. The original
+// catch path fell back to getRecentEvents() (in-process buffer) which is
+// empty in a freshly spawned `roadmap board` process — that produced the
+// "feed empty on re-entry" symptom when a transient pool/query hiccup
+// kicked the second invocation onto the fallback. Caching the most recent
+// success means the panel keeps showing the last known feed instead of
+// going blank.
+let lastSuccessfulFeed: StreamEvent[] = [];
+
 export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 	try {
 		const { rows } = await query<FeedRow>(
@@ -265,8 +274,16 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 			return true;
 		});
 
-		return dedupeBoardLiveFeed(filteredEvents);
-	} catch {
+		const result = dedupeBoardLiveFeed(filteredEvents);
+		if (result.length > 0) lastSuccessfulFeed = result;
+		return result;
+	} catch (err) {
+		if (process.env.AGENTHIVE_TUI_PERF) {
+			process.stderr.write(`[live-feed] query failed: ${(err as Error)?.message ?? err}\n`);
+		}
+		// Prefer the cached last-good feed over the in-process memory buffer
+		// (which is empty in a fresh roadmap board process).
+		if (lastSuccessfulFeed.length > 0) return lastSuccessfulFeed.slice(0, limit);
 		return getRecentEvents(limit);
 	}
 }
