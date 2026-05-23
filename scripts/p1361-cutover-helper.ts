@@ -97,7 +97,7 @@ function getDatabaseUrl(): string {
 async function psqlQuery(query: string): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const databaseUrl = getDatabaseUrl();
-		const proc = spawnSync("psql", [databaseUrl, "-c", query], {
+		const proc = spawnSync("psql", [databaseUrl, "-A", "-F", "|", "-c", query], {
 			encoding: "utf-8",
 			stdio: ["pipe", "pipe", "pipe"],
 			timeout: DB_CONNECTION_TIMEOUT_MS,

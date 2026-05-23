@@ -81,11 +81,13 @@ export function renderChat(
 			items: [],
 			style: {
 				border: { fg: "cyan" },
+				focus: { border: { fg: "yellow" } },
 				selected: { bg: "blue", fg: "white", bold: true },
 				item: { fg: "white" },
 			},
 		});
 		container._sidebar = sidebar;
+		container._sidebarFocused = false;
 
 		// Channel selection: blessed.list emits 'select' on Enter.
 		(sidebar as any).on("select", (_item: any, index: number) => {
@@ -102,16 +104,37 @@ export function renderChat(
 			}
 			// Bounce focus back to the input so the operator can type immediately.
 			container._inputDefocused = false;
+			container._inputFocused = true;
+			container._sidebarFocused = false;
 			inputField.focus();
-			if (container._startReading) container._startReading();
+			// Ensure _reading flag is set so next refresh doesn't auto-call startReading.
+			if (!(inputField as any)._reading) {
+				if (container._startReading) container._startReading();
+			}
+			container._updateFooter?.();
 			screen.render();
 		});
 
 		// Esc on the sidebar returns to the input box.
 		(sidebar as any).key(["escape"], () => {
 			container._inputDefocused = false;
+			container._inputFocused = true;
+			container._sidebarFocused = false;
 			inputField.focus();
-			if (container._startReading) container._startReading();
+			if (!(inputField as any)._reading) {
+				if (container._startReading) container._startReading();
+			}
+			container._updateFooter?.();
+			screen.render();
+		});
+
+		// Track sidebar focus
+		(sidebar as any).on("focus", () => {
+			container._sidebarFocused = true;
+			container._inputFocused = false;
+			container._inputContainer.style.border = { fg: "dim_yellow" };
+			sidebar.style.border = { fg: "yellow" };
+			container._updateFooter?.();
 			screen.render();
 		});
 
@@ -140,8 +163,10 @@ export function renderChat(
 			width: "100%-25",
 			height: 3,
 			border: { type: "line" },
-			style: { border: { fg: "yellow" } },
+			style: { border: { fg: "dim_yellow" } },
 		});
+		container._inputContainer = inputContainer;
+		container._inputFocused = true;
 
 		// inputOnFocus is deliberately OFF. With it on, the focus-triggered
 		// readInput() races with our defocus path: blur fires __done, which
@@ -161,17 +186,26 @@ export function renderChat(
 		});
 		container._inputField = inputField;
 
-		// Footer
-		box({
+		// Footer — Mode indicator + help
+		const footer = box({
 			parent: container,
 			bottom: 0,
 			left: 0,
 			width: "100%",
 			height: 1,
-			content: " {white-fg}Enter: Send | Esc: leave input | Ctrl+C: Quit | (outside input) c: Channels | i: input | Tab: View | Q: Exit{/}",
 			tags: true,
 			style: { bg: "blue", fg: "white" },
 		});
+		container._footer = footer;
+		const updateFooter = () => {
+			const mode = container._inputFocused ? "INPUT" : "CHANNELS";
+			const hint = container._inputFocused
+				? " Enter: Send | Esc: Channels | Ctrl+C: Quit"
+				: " Arrows: Navigate | Enter: Select | Esc: Input | Tab: View | Q: Exit";
+			footer.setContent(`Mode: {yellow-fg}${mode}{/} |${hint}`);
+		};
+		container._updateFooter = updateFooter;
+		updateFooter();
 
 		const startReading = () => {
 			inputField.readInput((err: any, value: string | null | undefined) => {
@@ -216,15 +250,25 @@ export function renderChat(
 			// currently focused; if it is, the keypress went into the message.
 			if ((screen as any).focused === inputField) return;
 			container._inputDefocused = false;
+			container._inputFocused = true;
+			container._sidebarFocused = false;
 			inputField.focus();
+			inputContainer.style.border = { fg: "yellow" };
+			sidebar.style.border = { fg: "cyan" };
 			startReading();
+			container._updateFooter?.();
 			screen.render();
 		});
 		(screen as any).key(["c"], () => {
 			// Jump focus to the Channels sidebar.
 			if ((screen as any).focused === inputField) return;
 			container._inputDefocused = true;
+			container._inputFocused = false;
+			container._sidebarFocused = true;
 			sidebar.focus();
+			inputContainer.style.border = { fg: "dim_yellow" };
+			sidebar.style.border = { fg: "yellow" };
+			container._updateFooter?.();
 			screen.render();
 		});
 
@@ -304,6 +348,16 @@ export function renderChat(
 			container._startReading();
 		}
 	}
+	// Update border colors and footer text to reflect actual focus state.
+	// Input focus = yellow border + bright mode indicator.
+	if (container._inputFocused) {
+		(inputContainer as any).style.border = { fg: "yellow" };
+		(sidebar as any).style.border = { fg: "cyan" };
+	} else if (container._sidebarFocused) {
+		(inputContainer as any).style.border = { fg: "dim_yellow" };
+		(sidebar as any).style.border = { fg: "yellow" };
+	}
+	container._updateFooter?.();
 	screen.render();
 }
 
