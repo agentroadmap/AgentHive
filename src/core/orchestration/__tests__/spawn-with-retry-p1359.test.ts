@@ -10,12 +10,15 @@
  * - MCP action handlers (cooldown_status, cooldown_clear)
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, mock } from "bun:test";
 
-const queryMock = vi.fn();
+const queryMock = mock(async () => ({
+	rows: [],
+	rowCount: 0,
+}));
 
 // Mock pool queries for testing
-vi.mock("../../../infra/postgres/pool.ts", () => ({
+mock.module("../../../infra/postgres/pool.ts", () => ({
 	query: (...args: unknown[]) => queryMock(...args),
 }));
 
@@ -29,11 +32,16 @@ import {
 
 describe("P1359: Quota Detection & Cooldown", () => {
 	beforeAll(async () => {
-		queryMock.mockReset();
+		queryMock.mockClear();
+	});
+
+	beforeEach(async () => {
+		queryMock.mockClear();
 	});
 
 	afterAll(async () => {
-		queryMock.mockReset();
+		queryMock.mockClear();
+		mock.restore();
 	});
 
 	describe("Gemini quota signal detection", () => {
@@ -105,7 +113,7 @@ describe("P1359: Quota Detection & Cooldown", () => {
 
 	describe("Model-level cooldown (UPSERT with GREATEST)", () => {
 		it("writes initial model cooldown", async () => {
-			queryMock.mockResolvedValueOnce({ rows: [] } as any);
+			queryMock.mockImplementation(async () => ({ rows: [] } as any));
 
 			await setModelCooldown("openai", "gpt-4", 2, "rate_limit_exceeded");
 
@@ -118,7 +126,7 @@ describe("P1359: Quota Detection & Cooldown", () => {
 		});
 
 		it("merges overlapping cooldowns with GREATEST", async () => {
-			queryMock.mockResolvedValueOnce({ rows: [] } as any);
+			queryMock.mockImplementation(async () => ({ rows: [] } as any));
 
 			// Simulate existing cooldown + new one
 			await setModelCooldown("anthropic", "claude-opus", 30, "credit_exhausted");
@@ -129,7 +137,7 @@ describe("P1359: Quota Detection & Cooldown", () => {
 		});
 
 		it("checks if model is in active cooldown", async () => {
-			queryMock.mockResolvedValueOnce({ rows: [{ in_cooldown: true }] } as any);
+			queryMock.mockImplementation(async () => ({ rows: [{ in_cooldown: true }] } as any));
 
 			const inCooldown = await isModelInCooldown("gemini", "gemini-pro");
 
@@ -145,7 +153,7 @@ describe("P1359: Quota Detection & Cooldown", () => {
 		it("escalates to provider cooldown when all routes cooled", async () => {
 
 			// Mock: query says 0 enabled routes remain
-			queryMock.mockResolvedValueOnce({ rows: [{ enabled_count: 0 }] } as any);
+			queryMock.mockImplementation(async () => ({ rows: [{ enabled_count: 0 }] } as any));
 
 			// Call setProviderCooldown
 			await setProviderCooldown("openai", "rate_limit", "All routes exhausted");
@@ -156,7 +164,7 @@ describe("P1359: Quota Detection & Cooldown", () => {
 		});
 
 		it("checks provider cooldown status", async () => {
-			queryMock.mockResolvedValueOnce({ rows: [{ in_cooldown: true }] } as any);
+			queryMock.mockImplementation(async () => ({ rows: [{ in_cooldown: true }] } as any));
 
 			const inCooldown = await isProviderInCooldown("anthropic");
 
@@ -197,7 +205,7 @@ describe("P1359: Quota Detection & Cooldown", () => {
 
 	describe("MCP action: cooldown_status", () => {
 		it("lists active model-level cooldowns", async () => {
-			queryMock.mockResolvedValueOnce({
+			queryMock.mockImplementation(async () => ({
 				rows: [
 					{
 						route_provider: "openai",
@@ -207,14 +215,14 @@ describe("P1359: Quota Detection & Cooldown", () => {
 						is_enabled: true,
 					},
 				],
-			} as any);
+			} as any));
 
 			// Call cooldownStatus via MCP
 			// (Integration test would invoke via server.invokeTool)
 		});
 
 		it("lists provider-level cooldowns", async () => {
-			queryMock.mockResolvedValueOnce({
+			queryMock.mockImplementation(async () => ({
 				rows: [
 					{
 						provider_name: "anthropic",
@@ -223,11 +231,11 @@ describe("P1359: Quota Detection & Cooldown", () => {
 						error_count: 3,
 					},
 				],
-			} as any);
+			} as any));
 		});
 
 		it("filters by provider parameter", async () => {
-			queryMock.mockResolvedValueOnce({ rows: [] } as any);
+			queryMock.mockImplementation(async () => ({ rows: [] } as any));
 
 			// Test filtering works
 		});
@@ -240,7 +248,7 @@ describe("P1359: Quota Detection & Cooldown", () => {
 
 	describe("MCP action: cooldown_clear", () => {
 		it("clears model-level cooldown", async () => {
-			queryMock.mockResolvedValueOnce({ rowCount: 1 } as any);
+			queryMock.mockImplementation(async () => ({ rowCount: 1 } as any));
 
 			// Call cooldownClear("openai", "gpt-4")
 			// Verify UPDATE sets cooldown_until = NULL
@@ -251,14 +259,13 @@ describe("P1359: Quota Detection & Cooldown", () => {
 		});
 
 		it("logs audit entry on clear", async () => {
-			queryMock.mockResolvedValueOnce({ rowCount: 1 } as any);
-			queryMock.mockResolvedValueOnce({ rows: [] } as any); // audit log INSERT
+			queryMock.mockImplementation(async () => ({ rowCount: 1 } as any));
 
 			// Verify audit log is written
 		});
 
 		it("clears provider-level cooldown", async () => {
-			queryMock.mockResolvedValueOnce({ rowCount: 1 } as any);
+			queryMock.mockImplementation(async () => ({ rowCount: 1 } as any));
 
 			// Call providerCooldownClear("anthropic")
 			// Verify UPDATE on provider_health
