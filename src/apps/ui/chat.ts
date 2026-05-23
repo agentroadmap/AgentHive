@@ -33,6 +33,10 @@ export function renderChat(
 		onSend?: (content: string) => Promise<void> | void;
 		onExit?: () => void;
 		onChannelSelect?: (channel: string) => void;
+		// Tab pressed: caller cycles to the next view. Bound at the textbox
+		// level (not just screen) because neo-neo-bblessed's readInput grab
+		// swallows Tab before it reaches screen.key handlers.
+		onSwitchView?: () => void;
 	},
 ): void {
 	const {
@@ -44,6 +48,7 @@ export function renderChat(
 		onSend,
 		onExit,
 		onChannelSelect,
+		onSwitchView,
 	} = data;
 
 	let container = (screen as any)._chatContainer;
@@ -89,13 +94,30 @@ export function renderChat(
 		});
 		container._sidebar = sidebar;
 
-		// Mouse click on a channel → select immediately
-		(sidebar as any).on("element click", (el: any) => {
-			const idx = (container._channels as string[] | undefined)?.indexOf(el?.getText?.() ?? "");
-			if (typeof idx === "number" && idx >= 0) {
-				(sidebar as any).select(idx);
-				(sidebar as any).emit("select", el, idx);
+		// Mouse click on a channel → focus + select it immediately.
+		// blessed.list with mouse:true updates `.selected` on click but does
+		// NOT emit "select" (that's keyboard Enter only). Bind at screen
+		// level using mousedown + hit-test against the sidebar's absolute
+		// position — this is the same pattern board.ts uses (line 1108) and
+		// is more reliable than list-level "click" events in this blessed
+		// fork.
+		(screen as any).on("mousedown", (data: any) => {
+			const sb = container._sidebar;
+			if (!sb) return;
+			const left = sb.aleft ?? 0;
+			const right = left + (sb.width as number);
+			const top = sb.atop ?? 0;
+			const bottom = top + (sb.height as number);
+			if (data.x < left || data.x >= right || data.y < top || data.y >= bottom) {
+				return; // click outside sidebar
 			}
+			// Skip the border row at the top + the label row inside the border.
+			const rowInList = data.y - top - 1; // -1 for the top border
+			const channels = container._channels as string[] | undefined;
+			if (!channels || rowInList < 0 || rowInList >= channels.length) return;
+			sb.select(rowInList);
+			sb.focus();
+			sb.emit("select", channels[rowInList], rowInList);
 		});
 
 		// Channel selection (Enter key or mouse click)
@@ -197,8 +219,10 @@ export function renderChat(
 				isReadingInput = false;
 
 				if (err === "stop") {
-					// Esc was pressed — blur and move to chatLog
-					chatLog.focus();
+					// Some blessed forks call this on Esc; neo-neo-bblessed does
+					// not. We also handle Esc via a screen-level binding (see
+					// below) so this path is a fallback.
+					sidebar.focus();
 					updateBorders();
 					container._updateFooter?.();
 					screen.render();
@@ -259,6 +283,26 @@ export function renderChat(
 			onExit?.();
 		});
 
+		// Tab from input → next view. Same reason as Esc: readInput's grab
+		// blocks screen.key('tab') so we bind it directly on the textbox.
+		(inputField as any).key(["tab"], () => {
+			onSwitchView?.();
+		});
+
+		// Escape from input → channels sidebar. neo-neo-bblessed swallows Esc
+		// at the readInput layer (no screen.key bubble, no readInput callback
+		// invocation), but it DOES emit a 'cancel' event on the textbox. Hook
+		// that to redirect focus to the sidebar — the user can pick a channel
+		// in three keystrokes (Esc, ↓, Enter) without a dead-end stop in
+		// chatLog.
+		(inputField as any).on("cancel", () => {
+			isReadingInput = false;
+			sidebar.focus();
+			updateBorders();
+			container._updateFooter?.();
+			screen.render();
+		});
+
 		// Helper: update border colors based on focus
 		const updateBorders = () => {
 			const screenAny = screen as any;
@@ -311,9 +355,11 @@ export function renderChat(
 		};
 		container._updateFooter = updateFooter;
 
-		// Screen-level shortcuts (only fire when input is NOT focused)
+		// Screen-level shortcuts. These fire even when readInput has the
+		// keyboard grabbed (verified in this blessed fork via tmux traces).
+		// 'i' / 'c' check the focused widget so they don't steal letters
+		// the user is typing into the input box.
 		(screen as any).key(["i"], () => {
-			// Vim-style: 'i' to enter input mode
 			if ((screen as any).focused === inputField) return; // already in input
 			inputField.focus();
 			updateBorders();
@@ -322,13 +368,18 @@ export function renderChat(
 		});
 
 		(screen as any).key(["c"], () => {
-			// 'c' to jump to channels
 			if ((screen as any).focused === inputField) return;
 			sidebar.focus();
 			updateBorders();
 			container._updateFooter?.();
 			screen.render();
 		});
+
+		// Escape from the input box → sidebar. In neo-neo-bblessed the
+		// readInput callback is NOT invoked on Esc, so we bind at screen
+		// level. When input is focused we forcibly tear down the readInput
+		// state and shift focus to the sidebar so the user can pick a
+		// channel in one keystroke. This bypasses the silent-Esc bug.
 
 		// Initial populate
 		messages

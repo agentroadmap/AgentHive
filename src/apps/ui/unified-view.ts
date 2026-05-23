@@ -933,6 +933,13 @@ export async function runUnifiedView(
 					(screen as any).destroy();
 					resolve("exit");
 				};
+				const onSwitchView = () => {
+					onTabPress();
+					if (timer) clearInterval(timer);
+					delete (screen as any)._chatContainer;
+					(screen as any).destroy();
+					resolve("switch");
+				};
 
 				renderChat(screen, {
 					messages: [],
@@ -943,6 +950,7 @@ export async function runUnifiedView(
 					onSend,
 					onExit,
 					onChannelSelect,
+					onSwitchView,
 				});
 
 				const refresh = async () => {
@@ -974,6 +982,7 @@ export async function runUnifiedView(
 						userSystemName: "HUMAN",
 						onSend,
 						onChannelSelect,
+						onSwitchView,
 					});
 				};
 				refreshRef = () => { void refresh(); };
