@@ -803,22 +803,16 @@ export async function runUnifiedView(
 					const { getBoardLiveFeed } = await import("./live-feed.ts");
 					const events = await getBoardLiveFeed(100);
 
-					// Legacy obfuscated identity (e.g. ccs46ant-bot-archi-a) carries
-					// no useful information after we already show provider+stage in
-					// the message body. Collapse it to "agent" so the sender column
-					// stays readable.
-					const legacyHashIdentity = /^[a-z0-9]{6,10}-bot-[a-z]{3,6}-[a-z]$/;
-					const allMessages = events.map((e) => {
-						const raw = e.agentId || "system";
-						const sender = legacyHashIdentity.test(raw) ? "agent" : raw;
-						return {
-							id: e.id,
-							sender_identity: sender,
-							content: e.message,
-							timestamp: e.timestamp,
-							channel_name: e.type,
-						};
-					});
+					// live-feed.ts already substitutes legacy hash identities with the
+					// agent_cli ('claude'/'codex'/'gemini') for the agent_id column,
+					// so the sender column reads cleanly here.
+					const allMessages = events.map((e) => ({
+						id: e.id,
+						sender_identity: e.agentId || "system",
+						content: e.message,
+						timestamp: e.timestamp,
+						channel_name: e.type,
+					}));
 
 					renderHeadlines(screen, {
 						messages: allMessages as any[],

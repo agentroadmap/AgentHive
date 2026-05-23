@@ -185,7 +185,16 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					END AS type,
 					EXTRACT(EPOCH FROM COALESCE(ar.completed_at, ar.started_at)) * 1000 AS timestamp_ms,
 					p.display_id AS proposal_id,
-					ar.agent_identity AS agent_id,
+					-- agent_id surfaces in the headlines view's sender column. For
+					-- legacy hash identities (ccs46ant-bot-archi-a) substitute the
+					-- agent_cli ('claude'/'codex'/'gemini') so the operator sees
+					-- which CLI is running instead of a useless "agent" placeholder.
+					-- Permanent agents (andy, mimo, claude-mimo-a) keep their name.
+					CASE
+						WHEN ar.agent_identity ~ '^[a-z0-9]{6,10}-bot-[a-z]{3,6}-[a-z]$'
+							THEN COALESCE(mr.agent_cli, mr.route_provider, 'agent')
+						ELSE ar.agent_identity
+					END AS agent_id,
 					-- Drop the obfuscated legacy agent_identity (e.g. ccs46ant-bot-enhan-a)
 					-- from the displayed message. stage + provider already convey what's
 					-- running; the long hash adds no info. Permanent agents (andy, mimo,
