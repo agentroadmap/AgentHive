@@ -66,7 +66,8 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					EXTRACT(EPOCH FROM pst.transitioned_at) * 1000 AS timestamp_ms,
 					p.display_id AS proposal_id,
 					pst.transitioned_by AS agent_id,
-					p.display_id || ' state ' || upper(COALESCE(pst.from_state, '?')) || ' -> ' || upper(pst.to_state) AS message
+					p.display_id || ' state ' || upper(COALESCE(pst.from_state, '?')) || ' -> ' || upper(pst.to_state)
+						|| COALESCE(' by ' || NULLIF(pst.transitioned_by, ''), '') AS message
 				FROM roadmap_proposal.proposal_state_transitions pst
 				LEFT JOIN roadmap_proposal.proposal p ON p.id = pst.proposal_id
 
@@ -79,7 +80,8 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					p.display_id AS proposal_id,
 					pmt.transitioned_by AS agent_id,
 					p.display_id || ' [' || upper(COALESCE(state_at.to_state, p.status, '?')) || '] maturity ' ||
-						COALESCE(pmt.from_maturity, '?') || ' -> ' || pmt.to_maturity AS message
+						COALESCE(pmt.from_maturity, '?') || ' -> ' || pmt.to_maturity
+						|| COALESCE(' by ' || NULLIF(pmt.transitioned_by, ''), '') AS message
 				FROM roadmap_proposal.proposal_maturity_transitions pmt
 				LEFT JOIN roadmap_proposal.proposal p ON p.id = pmt.proposal_id
 				LEFT JOIN LATERAL (
@@ -184,18 +186,27 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					EXTRACT(EPOCH FROM COALESCE(ar.completed_at, ar.started_at)) * 1000 AS timestamp_ms,
 					p.display_id AS proposal_id,
 					ar.agent_identity AS agent_id,
+					-- Drop the obfuscated legacy agent_identity (e.g. ccs46ant-bot-enhan-a)
+					-- from the displayed message. stage + provider already convey what's
+					-- running; the long hash adds no info. Permanent agents (andy, mimo,
+					-- claude-mimo-a) still show because their display_label differs from
+					-- the hash pattern.
 					COALESCE(p.display_id || ' ', '') ||
-						'run-' || ar.id::text || ' ' ||
-						COALESCE(ar_reg.display_label, ar.agent_identity) || ' ' ||
+						'run-' || ar.id::text ||
+						CASE
+							WHEN COALESCE(ar_reg.display_label, ar.agent_identity) ~ '^[a-z0-9]{6,10}-bot-[a-z]{3,6}-[a-z]$'
+								THEN ''  -- legacy obfuscated identity, hide
+							ELSE ' ' || COALESCE(ar_reg.display_label, ar.agent_identity)
+						END ||
+						' ' || ar.stage || ' ' ||
 						COALESCE(ar.activity, ar.status) ||
-						' stage=' || ar.stage ||
 						CASE
 							WHEN mr.route_provider IS NOT NULL THEN
-								' provider=' || mr.route_provider || '/' || mr.agent_provider
-							ELSE ' model=' || ar.model_used
+								' (' || mr.route_provider || '/' || mr.agent_provider || ')'
+							ELSE ' (' || ar.model_used || ')'
 						END ||
 						CASE
-							WHEN ar.duration_ms IS NOT NULL THEN ' (' || (ar.duration_ms / 1000)::text || 's)'
+							WHEN ar.duration_ms IS NOT NULL THEN ' [' || (ar.duration_ms / 1000)::text || 's]'
 							ELSE ''
 						END AS message
 				FROM roadmap_workforce.agent_runs ar
