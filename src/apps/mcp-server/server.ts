@@ -904,6 +904,27 @@ export async function createMcpServer(
 			handler: (a) => agents.registerAgent(a as RegisterPgAgentArgs),
 		});
 		server.addTool({
+			name: "agent_register_agency",
+			description:
+				"P1372: Register an agency in roadmap.agency. Validates that the agency_id exists in agent_registry as an active agency, then idempotently inserts into roadmap.agency.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					agent_identity: { type: "string" },
+					identity: { type: "string" },
+					agency_id: { type: "string" },
+					display_name: { type: "string" },
+					provider: { type: "string" },
+					host_id: { type: "string" },
+					metadata: { type: "object", additionalProperties: true },
+				},
+			},
+			handler: (a) =>
+				agents.registerAgency(
+					a as Parameters<PgAgentHandlers["registerAgency"]>[0],
+				),
+		});
+		server.addTool({
 			name: "team_list",
 			description: "List teams",
 			inputSchema: { type: "object", properties: {} },
