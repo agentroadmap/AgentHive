@@ -207,18 +207,22 @@ export function renderChat(
 			onExit?.();
 		});
 
-		// Allow re-entering input mode from the log with `i` (vim-style).
-		(chatLog as any).key(["i"], () => {
+		// `i` and `c` shortcuts bound at SCREEN level (not chatLog) — blessed.log
+		// doesn't reliably forward letter keys via .key(). screen.key fires when
+		// the user is OUT of the input box (inputField captures keys while
+		// readInput is active, so these only fire after Esc defocuses input).
+		(screen as any).key(["i"], () => {
+			// Re-enter input mode (vim-style). Only acts when input isn't
+			// currently focused; if it is, the keypress went into the message.
+			if ((screen as any).focused === inputField) return;
 			container._inputDefocused = false;
 			inputField.focus();
 			startReading();
 			screen.render();
 		});
-
-		// `c` jumps focus to the Channels sidebar so the operator can pick
-		// a different channel. Once focused, up/down navigate, Enter selects,
-		// Esc returns to input.
-		(chatLog as any).key(["c"], () => {
+		(screen as any).key(["c"], () => {
+			// Jump focus to the Channels sidebar.
+			if ((screen as any).focused === inputField) return;
 			container._inputDefocused = true;
 			sidebar.focus();
 			screen.render();
@@ -241,26 +245,34 @@ export function renderChat(
 		inputField = container._inputField;
 	}
 
-	// Update Sidebar — set list items (no leading marker; the list's own
-	// selected-style highlights the active row). Pre-select the row matching
-	// currentChannel so up/down navigation starts in the right place.
-	container._channels = channels;
+	// Update Sidebar — only call setItems when channels actually changed.
+	// Without this guard the list redraws every 1s refresh, which the
+	// user perceives as flashing (the entire panel repaints).
 	container._currentChannel = currentChannel;
-	(sidebar as any).setItems(channels);
-	const activeIndex = Math.max(0, channels.indexOf(currentChannel));
-	(sidebar as any).select?.(activeIndex);
-
-	// Update the chat log title bar to reflect the current channel.
-	(chatLog as any).setLabel?.(` ${currentChannel} - ${projectName} `);
-
-	// If the channel changed since the last render, wipe the log so we don't
-	// keep showing the previous channel's messages mixed with the new ones.
-	if (container._displayedChannel && container._displayedChannel !== currentChannel) {
-		if ((chatLog as any).setItems) (chatLog as any).setItems([]);
-		else (chatLog as any).setContent?.("");
-		container._lastMsgTimestamp = 0;
+	const channelsKey = channels.join("\x00");
+	if (channelsKey !== container._channelsKey) {
+		container._channels = channels;
+		container._channelsKey = channelsKey;
+		(sidebar as any).setItems(channels);
 	}
-	container._displayedChannel = currentChannel;
+
+	// Only update title + clear log + pre-select the active row when the
+	// channel ACTUALLY changes. Doing it on every tick (a) flashes the
+	// border and (b) fought against the user's mid-navigation arrow keys
+	// (refresh called sidebar.select(activeIndex) which reverted the
+	// user's Down keypress).
+	if (container._displayedChannel !== currentChannel) {
+		(chatLog as any).setLabel?.(` ${currentChannel} - ${projectName} `);
+		const activeIndex = Math.max(0, channels.indexOf(currentChannel));
+		(sidebar as any).select?.(activeIndex);
+		if (container._displayedChannel) {
+			// Wipe the log so the prior channel's messages don't mix in.
+			if ((chatLog as any).setItems) (chatLog as any).setItems([]);
+			else (chatLog as any).setContent?.("");
+			container._lastMsgTimestamp = 0;
+		}
+		container._displayedChannel = currentChannel;
+	}
 
 	// Reactive Update
 	const newMessages = messages
@@ -280,11 +292,14 @@ export function renderChat(
 	// Only focus + start reading if user hasn't explicitly defocused with Esc.
 	// Without this guard, the 1s refresh loop would steal focus back every
 	// tick, trapping the user inside the textbox.
+	// ALSO: only call focus() when input isn't already focused — re-focusing
+	// an already-focused widget can fire 'focus' events and contribute to
+	// visible flicker on the input frame.
 	if (!container._inputDefocused) {
-		inputField.focus();
-		// Only kick off readInput once per focus session — blessed's _reading
-		// guard makes additional calls no-ops, but we want it to actually run
-		// at least once after initial render.
+		const screenAny = screen as any;
+		if (screenAny.focused !== inputField) {
+			inputField.focus();
+		}
 		if (!(inputField as any)._reading && container._startReading) {
 			container._startReading();
 		}
