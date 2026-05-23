@@ -207,6 +207,7 @@ const agentRoutes: RouteMap = {
 	list: "agent_list",
 	get: "agent_get",
 	register: "agent_register",
+	register_agency: "agent_register_agency",
 	team_list: "team_list",
 	team_create: "team_create",
 	team_add_member: "team_add_member",

@@ -27,6 +27,7 @@ function errorResult(msg: string, err: unknown): CallToolResult {
 				text: `⚠️ ${msg}: ${err instanceof Error ? err.message : String(err)}`,
 			},
 		],
+		isError: true,
 	};
 }
 
@@ -392,6 +393,276 @@ export class PgAgentHandlers {
 			};
 		} catch (err) {
 			return errorResult("Failed to force-release alias", err);
+		}
+	}
+
+	/**
+	 * P1372: Register an agency in roadmap.agency.
+	 * Validates that agency_id exists in agent_registry as an active agency type,
+	 * then idempotently inserts into roadmap.agency.
+	 *
+	 * Input aliases: agent_identity (canonical), identity, agency_id.
+	 * Validates regex: ^[a-zA-Z0-9._-]{1,64}$ for agency_id and host_id.
+	 * Metadata (if supplied) must be an object, not array/scalar.
+	 *
+	 * Response shapes:
+	 * - Created: {action: 'created', agency_id, provider, host_id}
+	 * - Noop (already exists): {action: 'noop', agency_id, existing_provider, existing_host_id}
+	 * - Errors include: missing identity, missing agent_registry row, inactive/non-agency type, invalid format, missing provider, metadata type error
+	 */
+	async registerAgency(args: {
+		agent_identity?: string;
+		identity?: string;
+		agency_id?: string;
+		display_name?: string;
+		provider?: string;
+		host_id?: string;
+		metadata?: Record<string, unknown>;
+	}): Promise<CallToolResult> {
+		try {
+			// Step 1: Resolve identity from aliases
+			const agencyId =
+				args.agent_identity || args.identity || args.agency_id;
+			if (!agencyId || !agencyId.trim()) {
+				return errorResult(
+					"Missing identity",
+					new Error(
+						"One of agent_identity, identity, or agency_id is required",
+					),
+				);
+			}
+
+			const trimmedId = agencyId.trim();
+			const idRegex = /^[a-zA-Z0-9._-]{1,64}$/;
+			if (!idRegex.test(trimmedId)) {
+				return errorResult(
+					"Invalid agency_id format",
+					new Error(
+						`agency_id must match ^[a-zA-Z0-9._-]{1,64}$; got: ${trimmedId}`,
+					),
+				);
+			}
+
+			// Step 2: Validate metadata (if supplied) is an object
+			if (args.metadata !== undefined) {
+				if (
+					typeof args.metadata !== "object" ||
+					args.metadata === null ||
+					Array.isArray(args.metadata)
+				) {
+					return errorResult(
+						"Invalid metadata type",
+						new Error(
+							`metadata must be an object, not ${Array.isArray(args.metadata) ? "array" : typeof args.metadata}`,
+						),
+					);
+				}
+			}
+
+			// Step 3: Query agent_registry to validate prerequisite
+			const regResult = await query<{
+				agent_type: string;
+				status: string;
+				preferred_provider: string | null;
+				host_affinity: string | null;
+			}>(
+				`SELECT agent_type, status, preferred_provider, host_affinity
+				 FROM roadmap_workforce.agent_registry
+				 WHERE agent_identity = $1`,
+				[trimmedId],
+			);
+
+			if (!regResult.rows.length) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Error: Agency '${trimmedId}' not found in agent_registry. Prerequisite path: mcp_agent action='register' args={agent_identity: '${trimmedId}', agent_type: 'agency', ...}`,
+						},
+					],
+					isError: true,
+				};
+			}
+
+			const regRow = regResult.rows[0];
+			if (regRow.agent_type !== "agency") {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Error: agent_registry row for '${trimmedId}' has agent_type='${regRow.agent_type}', not 'agency'. Cannot promote non-agency agents to roadmap.agency.`,
+						},
+					],
+					isError: true,
+				};
+			}
+
+			if (regRow.status !== "active") {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Error: agent_registry row for '${trimmedId}' has status='${regRow.status}', not 'active'. Only active agencies can be registered.`,
+						},
+					],
+					isError: true,
+				};
+			}
+
+			// Step 4: Resolve insert values
+			const resolvedDisplayName = args.display_name || trimmedId;
+			const resolvedProvider =
+				args.provider || regRow.preferred_provider;
+
+			if (!resolvedProvider || !resolvedProvider.trim()) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Error: provider cannot be determined. No provider specified in args, and agent_registry.preferred_provider is null/blank. Please supply provider in args.`,
+						},
+					],
+					isError: true,
+				};
+			}
+
+			const resolvedHostId =
+				(args.host_id || regRow.host_affinity || "bot").trim();
+
+			// Validate host_id format
+			if (!idRegex.test(resolvedHostId)) {
+				return errorResult(
+					"Invalid host_id format",
+					new Error(
+						`host_id must match ^[a-zA-Z0-9._-]{1,64}$; got: ${resolvedHostId}`,
+					),
+				);
+			}
+
+			// Step 5: Build metadata with registration context
+			const finalMetadata = {
+				registered_via: "mcp_agent.register_agency",
+				source_agent_registry: true,
+				...(args.metadata || {}),
+			};
+
+			// Step 6: Idempotent insert
+			const insertResult = await query<{
+				agency_id: string;
+				provider: string;
+				host_id: string;
+				status: string;
+				presence_state: string;
+			}>(
+				`INSERT INTO roadmap.agency (
+					agency_id, display_name, provider, host_id, capability_tags,
+					status, presence_state, metadata
+				)
+				 VALUES ($1, $2, $3, $4, '{}', 'active', 'offline', $5::jsonb)
+				 ON CONFLICT (agency_id) DO NOTHING
+				 RETURNING agency_id, provider, host_id, status, presence_state`,
+				[
+					trimmedId,
+					resolvedDisplayName,
+					resolvedProvider.trim(),
+					resolvedHostId,
+					JSON.stringify(finalMetadata),
+				],
+			);
+
+			// Step 7: Handle result
+			if (insertResult.rows.length > 0) {
+				// Successfully inserted
+				const row = insertResult.rows[0];
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{
+									action: "created",
+									agency_id: row.agency_id,
+									provider: row.provider,
+									host_id: row.host_id,
+									status: row.status,
+									presence_state: row.presence_state,
+									registered_via: "mcp_agent.register_agency",
+								},
+								null,
+								2,
+							),
+						},
+					],
+				};
+			}
+
+			// No rows returned: conflict on duplicate agency_id, fetch existing
+			const existingResult = await query<{
+				agency_id: string;
+				provider: string;
+				host_id: string;
+				status: string;
+				presence_state: string;
+			}>(
+				`SELECT agency_id, provider, host_id, status, presence_state
+				 FROM roadmap.agency
+				 WHERE agency_id = $1`,
+				[trimmedId],
+			);
+
+			if (existingResult.rows.length > 0) {
+				const existing = existingResult.rows[0];
+				const mismatch: string[] = [];
+				if (
+					existing.provider !== resolvedProvider.trim() &&
+					args.provider
+				) {
+					mismatch.push(
+						`provider: existing='${existing.provider}', resolved='${resolvedProvider.trim()}'`,
+					);
+				}
+				if (existing.host_id !== resolvedHostId && args.host_id) {
+					mismatch.push(
+						`host_id: existing='${existing.host_id}', resolved='${resolvedHostId}'`,
+					);
+				}
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{
+									action: "noop",
+									reason: "already_exists",
+									agency_id: existing.agency_id,
+									existing_provider: existing.provider,
+									existing_host_id: existing.host_id,
+									existing_status: existing.status,
+									existing_presence_state:
+										existing.presence_state,
+									...(mismatch.length > 0 && {
+										mismatches: mismatch,
+										note: "Existing roadmap.agency rows are never modified by this action; provider/host changes require a separate proposal",
+									}),
+								},
+								null,
+								2,
+							),
+						},
+					],
+				};
+			}
+
+			// Fallback: neither insert nor select succeeded (race condition or constraint)
+			return errorResult(
+				"Unexpected state",
+				new Error(
+					`INSERT ON CONFLICT DO NOTHING succeeded (row was inserted) but RETURNING returned no rows, and subsequent SELECT also found no rows. This is an impossible state.`,
+				),
+			);
+		} catch (err) {
+			return errorResult("Failed to register agency", err);
 		}
 	}
 }

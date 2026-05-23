@@ -165,6 +165,60 @@ export function registerAgentTools(server: McpServer): void {
 			async (input) => pgHandlers.resolveAgent(input),
 		);
 
+	// ── agent_register_agency ───────────────────────────────────────────────
+	type RegisterAgencyArgs = Parameters<PgAgentHandlers["registerAgency"]>[0];
+	const registerAgencyTool: McpToolHandler =
+		createSimpleValidatedTool<RegisterAgencyArgs>(
+			{
+				name: "agent_register_agency",
+				description:
+					"P1372: Register an agency in roadmap.agency. Validates that the agency_id exists in agent_registry as an active agency, " +
+					"then idempotently inserts into roadmap.agency. Accepts agent_identity (canonical), identity, or agency_id as identifier aliases.",
+				inputSchema: {
+					type: "object",
+					properties: {
+						agent_identity: {
+							type: "string",
+							description: "Agency identity (canonical name)",
+						},
+						identity: {
+							type: "string",
+							description: "Agency identity (alias)",
+						},
+						agency_id: {
+							type: "string",
+							description: "Agency identity (alias)",
+						},
+						display_name: {
+							type: "string",
+							description: "Display name; defaults to agent_identity",
+						},
+						provider: {
+							type: "string",
+							description:
+								"Provider name; defaults to agent_registry.preferred_provider",
+						},
+						host_id: {
+							type: "string",
+							description:
+								"Host ID; defaults to agent_registry.host_affinity then 'bot'",
+						},
+						metadata: {
+							type: "object",
+							description:
+								"Additional metadata (must be an object, not array)",
+							additionalProperties: true,
+						},
+					},
+				},
+			},
+			{
+				type: "object",
+				additionalProperties: true,
+			},
+			async (input) => pgHandlers.registerAgency(input),
+		);
+
 	// ── agent_force_release_alias ───────────────────────────────────────────
 	type ForceReleaseAliasArgs = Parameters<
 		PgAgentHandlers["forceReleaseAlias"]
@@ -216,6 +270,7 @@ export function registerAgentTools(server: McpServer): void {
 	server.addTool(spawnTool);
 	server.addTool(retireTool);
 	server.addTool(resolveAgentTool);
+	server.addTool(registerAgencyTool);
 	server.addTool(forceReleaseAliasTool);
 	server.addTool(zombieDetectTool);
 	server.addTool(poolStatsTool);
