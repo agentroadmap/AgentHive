@@ -96,8 +96,28 @@ export function readAgencyConfig(): AgencyConfig {
 export async function bootLiaison(
   configOverride?: Partial<AgencyConfig>
 ): Promise<LiaisonBootHandle> {
-  const base = readAgencyConfig();
-  const config: AgencyConfig = { ...base, ...configOverride };
+  // If the caller supplies the three required fields directly (host-managed
+  // multi-tenant case, e.g. start-a2a-host.ts), skip readAgencyConfig() so the
+  // host process doesn't need per-agency env vars set. Standalone callers
+  // (start-liaison.ts) still go through the env-driven path.
+  const hasOverrideRequired = !!(
+    configOverride?.agency_id &&
+    configOverride?.provider &&
+    configOverride?.host_id
+  );
+  const config: AgencyConfig = hasOverrideRequired
+    ? {
+        agency_id: configOverride!.agency_id!,
+        provider: configOverride!.provider!,
+        host_id: configOverride!.host_id!,
+        display_name:
+          configOverride!.display_name ?? configOverride!.agency_id!,
+        public_key: configOverride!.public_key,
+        capabilities: configOverride!.capabilities ?? [],
+        heartbeat_interval_ms:
+          configOverride!.heartbeat_interval_ms ?? 30000,
+      }
+    : { ...readAgencyConfig(), ...configOverride };
 
   // AC#2: Registration handshake — liaison calls liaison_register
   const session = await liaisonRegister({
