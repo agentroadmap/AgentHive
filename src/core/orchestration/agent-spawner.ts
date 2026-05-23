@@ -1279,7 +1279,14 @@ export function renderClosingHint(input: {
 export async function spawnWithRetry(
 	req: SpawnRequest,
 ): Promise<SpawnResult> {
-	const maxAttempts = (await config.getOptional(FlagKeys.SPAWN_PROVIDER_MAX_ATTEMPTS)) ?? 3;
+	let maxAttempts = 3;
+	try {
+		maxAttempts = (await config.getOptional(FlagKeys.SPAWN_PROVIDER_MAX_ATTEMPTS)) ?? 3;
+	} catch {
+		// Standalone liaison processes may not initialize the global runtime
+		// config resolver; keep the documented retry default instead of
+		// blocking dispatch before the first spawn.
+	}
 	let attemptCount = 0;
 	let lastResult: SpawnResult | null = null;
 	const provider = req.provider || (await detectProvider(req.worktree, req.worktreeRoot));
@@ -1770,6 +1777,24 @@ function detectProviderQuotaSignal(
 			resetAt = new Date(Date.now() + (h * 3600 + m * 60 + s) * 1000);
 		}
 		return { provider: "gemini", model: "unknown", resetAt };
+	}
+
+	// Codex CLI (ChatGPT-backed gpt-5.5): "You've hit your usage limit" + "try again at H:MM AM/PM"
+	// Distinct from the OpenAI API rate_limit_exceeded format below.
+	// TTL: parse "try again at H:MM AM/PM" as local time; fallback 1h.
+	if (/you'?ve\s+hit\s+your\s+usage\s+limit|chatgpt\.com\/codex\/settings\/usage/i.test(hay)) {
+		let resetAt = new Date(Date.now() + 60 * 60 * 1000);
+		const m = hay.match(/try\s+again\s+at\s+(\d{1,2}):(\d{2})\s*(am|pm)/i);
+		if (m) {
+			const h12 = parseInt(m[1], 10);
+			const mins = parseInt(m[2], 10);
+			const h24 = (h12 === 12 ? 0 : h12) + (m[3].toLowerCase() === "pm" ? 12 : 0);
+			const candidate = new Date();
+			candidate.setHours(h24, mins, 0, 0);
+			if (candidate.getTime() < Date.now()) candidate.setDate(candidate.getDate() + 1);
+			resetAt = candidate;
+		}
+		return { provider: "codex", model: "gpt-5.5", resetAt };
 	}
 
 	// OpenAI: "rate_limit_exceeded" or 429 + "quota"
