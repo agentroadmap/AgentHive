@@ -795,49 +795,30 @@ export async function runUnifiedView(
 				});
 
 				const refresh = async () => {
-					// Core.listPulse was removed by P149 (2026-05-04). Pulse events now
-					// live in roadmap.message_ledger filtered to system identities. Also
-					// include proposal_state_transitions as synthetic feed entries.
-					const messageRows = await pgQuery(
-						`SELECT id, from_agent, message_content, message_type, created_at
-						 FROM roadmap.message_ledger
-						 WHERE from_agent LIKE 'system:%' OR message_type IN ('notify','liaison','task_status','task_complete','task_error')
-						 ORDER BY created_at DESC LIMIT 50`,
-						[],
-					).then((r) => r.rows).catch(() => [] as any[]);
+					// Use the same source as the board's Feed pane so the two views
+					// stay in sync. The Headlines view previously pulled only
+					// message_ledger + state_transitions, missing maturity changes,
+					// agent runs, lease/decision events, and token/cache ledgers
+					// that the board feed has been showing for months.
+					const { getBoardLiveFeed } = await import("./live-feed.ts");
+					const events = await getBoardLiveFeed(100);
 
-					const transitionRows = await pgQuery(
-						`SELECT pst.id, pst.proposal_id, pst.to_state, pst.transitioned_by, pst.transitioned_at, p.display_id
-						 FROM roadmap.proposal_state_transitions pst
-						 JOIN roadmap.proposal p ON p.id = pst.proposal_id
-						 ORDER BY pst.transitioned_at DESC LIMIT 50`,
-						[],
-					).then((r) => r.rows).catch(() => [] as any[]);
-
-					// timestamp is milliseconds since epoch — headlines.ts:119 passes
-					// it straight into `new Date(Number(m.timestamp))`. The previous
-					// `* 1000` multiplier produced microseconds, so the formatter
-					// rendered messages as years-in-the-future dates ("Jul 14" for
-					// a May 20 message).
-					const messages = (messageRows as any[]).map((row: any) => ({
-						id: String(row.id),
-						sender_identity: row.from_agent,
-						content: row.message_content,
-						timestamp: new Date(row.created_at).getTime(),
-						channel_name: row.message_type ?? "pulse",
-					}));
-
-					const transitionMessages = (transitionRows as any[]).map((row: any) => ({
-						id: `strans-${row.id}`,
-						sender_identity: row.transitioned_by || "system:workflow",
-						content: `[${row.to_state.toUpperCase()}] Proposal ${row.display_id} transitioned`,
-						timestamp: new Date(row.transitioned_at).getTime(),
-						channel_name: "state-change",
-					}));
-
-					const allMessages = [...messages, ...transitionMessages]
-						.sort((a: any, b: any) => b.timestamp - a.timestamp)
-						.slice(0, 50);
+					// Legacy obfuscated identity (e.g. ccs46ant-bot-archi-a) carries
+					// no useful information after we already show provider+stage in
+					// the message body. Collapse it to "agent" so the sender column
+					// stays readable.
+					const legacyHashIdentity = /^[a-z0-9]{6,10}-bot-[a-z]{3,6}-[a-z]$/;
+					const allMessages = events.map((e) => {
+						const raw = e.agentId || "system";
+						const sender = legacyHashIdentity.test(raw) ? "agent" : raw;
+						return {
+							id: e.id,
+							sender_identity: sender,
+							content: e.message,
+							timestamp: e.timestamp,
+							channel_name: e.type,
+						};
+					});
 
 					renderHeadlines(screen, {
 						messages: allMessages as any[],
