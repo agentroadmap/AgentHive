@@ -349,13 +349,17 @@ export function renderChat(
 		}
 	}
 	// Update border colors and footer text to reflect actual focus state.
-	// Input focus = yellow border + bright mode indicator.
-	if (container._inputFocused) {
-		(inputContainer as any).style.border = { fg: "yellow" };
-		(sidebar as any).style.border = { fg: "cyan" };
-	} else if (container._sidebarFocused) {
-		(inputContainer as any).style.border = { fg: "dim_yellow" };
-		(sidebar as any).style.border = { fg: "yellow" };
+	// The local `inputContainer` only exists in the create branch above; on
+	// refresh ticks we must read it off the container.
+	const inputContainerRef = container._inputContainer;
+	if (inputContainerRef) {
+		if (container._inputFocused) {
+			inputContainerRef.style.border = { fg: "yellow" };
+			(sidebar as any).style.border = { fg: "cyan" };
+		} else if (container._sidebarFocused) {
+			inputContainerRef.style.border = { fg: "dim_yellow" };
+			(sidebar as any).style.border = { fg: "yellow" };
+		}
 	}
 	container._updateFooter?.();
 	screen.render();

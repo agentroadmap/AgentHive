@@ -1389,13 +1389,56 @@ export async function renderBoardTui(
 		};
 
 		const openFilterPicker = async (
-			filterId: "priority" | "directive" | "labels" | "maturity",
+			filterId: "priority" | "directive" | "labels" | "maturity" | "workflow" | "status",
 		) => {
 			if (filterPopupOpen || moveOp || !filterHeader) {
 				return;
 			}
 			filterPopupOpen = true;
 			try {
+				if (filterId === "workflow") {
+					const workflows = getAvailableWorkflows();
+					const selected = await openSingleSelectFilterPopup({
+						screen,
+						title: "Workflow Filter",
+						selectedValue: currentWorkflow,
+						choices: [
+							{ label: "All", value: "" },
+							...workflows.map((w) => ({ label: w, value: w })),
+						],
+					});
+					if (selected !== null) {
+						currentWorkflow = selected;
+						filterHeader.setFilters({ workflow: selected });
+						emitFilterChange();
+						renderView();
+					}
+					return;
+				}
+
+				if (filterId === "status") {
+					// Status choices are derived from the current visible columns
+					// (which themselves reflect the active workflow).
+					const statusChoices = currentStatuses.length > 0
+						? currentStatuses
+						: ["DRAFT", "REVIEW", "DEVELOP", "MERGE", "COMPLETE"];
+					const selected = await openSingleSelectFilterPopup({
+						screen,
+						title: "Status Filter",
+						selectedValue: filterHeader.getFilters().status,
+						choices: [
+							{ label: "All", value: "" },
+							...statusChoices.map((s) => ({ label: s, value: s })),
+						],
+					});
+					if (selected !== null) {
+						filterHeader.setFilters({ status: selected });
+						emitFilterChange();
+						renderView();
+					}
+					return;
+				}
+
 				if (filterId === "labels") {
 					const nextLabels = await openMultiSelectFilterPopup({
 						screen,
@@ -1490,16 +1533,14 @@ export async function renderBoardTui(
 			statuses: [],
 			availableLabels: configuredLabels,
 			availableDirectives,
-			// Maturity is orthogonal to the Kanban columns (which are status),
-			// so it belongs in the visible filter set on the RFC view too —
-			// not just in the master-detail view. The architect's
-			// edab78639a wired the filter logic but missed updating this
-			// visibleFilters array. (Workflow/Status are intentionally omitted:
-			// status maps to the columns themselves; workflow is implicit in
-			// the board's data source.)
-			visibleFilters: ["search", "maturity", "priority", "directive", "labels"],
+			// Show the full filter set: workflow, status, maturity, priority,
+			// directive, labels. Workflow + status used to be hidden because
+			// columns themselves represent status — but the operator wants them
+			// visible in the header for parity with the master-detail view.
+			visibleFilters: ["search", "workflow", "status", "maturity", "priority", "directive", "labels"],
 			initialFilters: {
 				search: sharedFilters.searchQuery,
+				workflow: currentWorkflow,
 				priority: sharedFilters.priorityFilter,
 				labels: sharedFilters.labelFilter,
 				directive: sharedFilters.directiveFilter,
@@ -1515,6 +1556,7 @@ export async function renderBoardTui(
 				sharedFilters.priorityFilter = filters.priority;
 				sharedFilters.labelFilter = filters.labels;
 				sharedFilters.directiveFilter = filters.directive;
+				currentWorkflow = filters.workflow ?? currentWorkflow;
 				// Empty maturity in the header → "non-obsolete" backend filter
 				// (hide obsolete by default). Specific value → match that
 				// maturity exactly.
@@ -1523,9 +1565,6 @@ export async function renderBoardTui(
 				renderView();
 			},
 			onFilterPickerOpen: (filterId) => {
-				if (filterId === "status" || filterId === "workflow") {
-					return;
-				}
 				void openFilterPicker(filterId);
 			},
 		});
