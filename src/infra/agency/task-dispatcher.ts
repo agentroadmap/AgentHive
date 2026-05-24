@@ -11,7 +11,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { query } from "../postgres/pool.ts";
+import { query, type Pool } from "../postgres/pool.ts";
 import { getMcpUrl } from "../../shared/runtime/endpoints.ts";
 import type { IncomingMessage } from "./liaison-agent.ts";
 
@@ -143,6 +143,40 @@ async function claimProposal(
 }
 
 /**
+ * Release a proposal lease via MCP HTTP endpoint.
+ * Used when the task pipeline fails after claim (tracker INSERT or bridge failure).
+ */
+async function releaseProposal(
+	proposalId: string,
+	identity: string,
+	releaseReason: string,
+): Promise<void> {
+	const mcpUrl = getMcpUrl();
+	const url = new URL("/mcp", mcpUrl).toString();
+	const res = await fetch(url, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			jsonrpc: "2.0",
+			id: `${proposalId}-release`,
+			method: "tools/call",
+			params: {
+				name: "release",
+				arguments: {
+					id: proposalId,
+					agent: identity,
+					release_reason: releaseReason,
+				},
+			},
+		}),
+	});
+	if (!res.ok) {
+		const text = await res.text().catch(() => "");
+		throw new Error(`MCP release failed: ${res.status} ${text}`);
+	}
+}
+
+/**
  * Adapt a task_request message to task bridge format.
  * Sets message_type='task' and metadata flags for bridgeTaskToOfferDispatch.
  */
@@ -228,6 +262,11 @@ export async function handleTypedTaskRequest(
 		);
 	} catch (err) {
 		console.warn(`${log} tracker INSERT failed:`, err);
+		try {
+			await releaseProposal(proposalId, identity, "tracker_init_failed");
+		} catch (releaseErr) {
+			console.warn(`${log} lease release also failed:`, releaseErr);
+		}
 		await insertReply({
 			fromAgent: identity,
 			toAgent: msg.from_agent,
@@ -267,7 +306,7 @@ export async function handleTypedTaskRequest(
 		console.error(`${log} bridge failed:`, detail);
 		await query(
 			`UPDATE roadmap.liaison_task_tracker
-			  SET status = 'failed'
+			  SET status = 'failed', completed_at = now()
 			 WHERE correlation_id = $1`,
 			[correlationId],
 		);

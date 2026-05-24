@@ -905,6 +905,7 @@ export async function submitReview(args: {
 	verdict: string;
 	findings?: Record<string, any>;
 	notes?: string;
+	is_blocking?: boolean;
 	// Common aliases agents try when they don't recall the canonical name.
 	// Treated as fallbacks for `notes` so a misnamed arg doesn't strand a gate run.
 	review?: string;
@@ -951,12 +952,13 @@ export async function submitReview(args: {
 		if (existing.length) {
 			reviewId = existing[0].id;
 			await query(
-				`UPDATE roadmap_proposal.proposal_reviews SET verdict = $1, notes = $2, findings = $3, reviewed_at = NOW()
-         WHERE proposal_id = $4 AND reviewer_identity = $5`,
+				`UPDATE roadmap_proposal.proposal_reviews SET verdict = $1, notes = $2, findings = $3, is_blocking = $4, reviewed_at = NOW()
+         WHERE proposal_id = $5 AND reviewer_identity = $6`,
 				[
 					args.verdict,
 					args.notes || null,
 					args.findings ? JSON.stringify(args.findings) : null,
+					args.is_blocking === true,
 					proposalId,
 					args.reviewer,
 				],
@@ -970,14 +972,15 @@ export async function submitReview(args: {
 			}
 		} else {
 			const { rows: inserted } = await query(
-				`INSERT INTO roadmap_proposal.proposal_reviews (proposal_id, reviewer_identity, verdict, notes, findings)
-         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+				`INSERT INTO roadmap_proposal.proposal_reviews (proposal_id, reviewer_identity, verdict, notes, findings, is_blocking)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
 				[
 					proposalId,
 					args.reviewer,
 					args.verdict,
 					args.notes || null,
 					args.findings ? JSON.stringify(args.findings) : null,
+					args.is_blocking === true,
 				],
 			);
 			reviewId = inserted[0].id;
@@ -1015,7 +1018,14 @@ export async function submitReview(args: {
 			content: [
 				{
 					type: "text",
-					text: `✅ Review submitted for ${args.proposal_id}: ${args.verdict} (${args.reviewer})`,
+					text: JSON.stringify({
+						ok: true,
+						review_id: reviewId,
+						proposal_id: args.proposal_id,
+						reviewer_identity: args.reviewer,
+						verdict: args.verdict,
+						is_blocking: args.is_blocking === true,
+					}),
 				},
 			],
 		};

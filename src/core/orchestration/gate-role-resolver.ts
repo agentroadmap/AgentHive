@@ -25,6 +25,15 @@
  */
 
 import type { Pool, PoolClient } from "pg";
+import { query as defaultQuery } from "../../infra/postgres/pool.ts";
+
+/**
+ * Minimal query function type for test injection and internal use.
+ */
+export type QueryFn = (
+	sql: string,
+	params?: unknown[],
+) => Promise<{ rows: Array<Record<string, unknown>> }>;
 
 export interface GateRoleProfile {
 	role: string;
@@ -333,6 +342,62 @@ export async function resolveGateRole(
 					source: "builtin-fallback",
 				};
 	}
+}
+
+/**
+ * Resolve a behavioral persona string from a role name alone (no proposal_type/gate pair).
+ *
+ * Lookup order:
+ *   1. BUILTIN_FALLBACK — match on role name (e.g. 'skeptic-alpha' → D1 persona).
+ *   2. gate_role table   — WHERE role = $1 AND lifecycle_status = 'active' LIMIT 1.
+ *   3. agent_role_profile — WHERE role = $1, reads prompt_template->>'system' LIMIT 1.
+ *
+ * Returns null when no persona is found (caller degrades gracefully — no persona
+ * prepended to the task string).  Never throws.
+ */
+export async function resolvePersonaByRoleName(
+	roleName: string,
+	queryFn: QueryFn = defaultQuery as QueryFn,
+): Promise<string | null> {
+	// 1. BUILTIN_FALLBACK: scan values to find a matching role name.
+	for (const entry of Object.values(BUILTIN_FALLBACK)) {
+		if (entry.role === roleName) return entry.persona;
+	}
+
+	try {
+		// 2. gate_role table — keyed by (proposal_type, gate) but also has role column.
+		const gateResult = await queryFn(
+			`SELECT persona
+			   FROM roadmap_proposal.gate_role
+			  WHERE role = $1 AND lifecycle_status = 'active'
+			  LIMIT 1`,
+			[roleName],
+		);
+		const gatePersona = gateResult.rows[0]?.persona;
+		if (typeof gatePersona === "string" && gatePersona.length > 0) {
+			return gatePersona;
+		}
+
+		// 3. agent_role_profile — wider role registry; system prompt lives in JSONB.
+		const profileResult = await queryFn(
+			`SELECT prompt_template->>'system' AS persona
+			   FROM roadmap.agent_role_profile
+			  WHERE role = $1
+			  LIMIT 1`,
+			[roleName],
+		);
+		const profilePersona = profileResult.rows[0]?.persona;
+		if (typeof profilePersona === "string" && profilePersona.length > 0) {
+			return profilePersona;
+		}
+	} catch (err) {
+		console.warn(
+			`[GateRoleResolver] resolvePersonaByRoleName(${roleName}) DB lookup failed — returning null:`,
+			err instanceof Error ? err.message : err,
+		);
+	}
+
+	return null;
 }
 
 export { BUILTIN_FALLBACK, GateRoleRegistry };

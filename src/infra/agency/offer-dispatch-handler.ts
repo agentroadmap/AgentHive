@@ -24,6 +24,7 @@ import { query } from "../postgres/pool.ts";
 import { spawnAgent } from "../../core/orchestration/agent-spawner.ts";
 import type { SpawnResult } from "../../core/orchestration/agent-spawner.ts";
 import type { LiaisonMessage } from "./liaison-message-types.ts";
+import { resolvePersonaByRoleName } from "../../core/orchestration/gate-role-resolver.ts";
 // P1140 sibling: `sendMessage` is the default for sendUplink (line ~257);
 // referenced as a bare identifier without an import, causing
 // ReferenceError on every offer_dispatch handler invocation. Surfaced
@@ -83,6 +84,10 @@ interface OfferDispatchEnvelope {
 	worktree_hint?: string | null;
 	/** P908-D: trace correlation UUID threaded from postWorkOffer. */
 	trace_id?: string | null;
+	/** P1113: pre-resolved behavioral persona text (prepended to task). */
+	persona?: string;
+	/** P1113: full task string forwarded from squad_dispatch.metadata.task. */
+	task?: string;
 }
 
 const DEFAULT_LEASE_TTL_SECONDS = 60;
@@ -397,9 +402,23 @@ async function runSpawn(args: {
 			);
 		}
 
+		// P1113: resolve persona and build the enriched task string.
+		// Prefer orchestrator-pre-resolved persona from payload; fall back to DB lookup.
+		const persona: string | null =
+			typeof payload.persona === "string" && payload.persona.length > 0
+				? payload.persona
+				: await resolvePersonaByRoleName(payload.role, query as never).catch(() => null);
+
+		const baseTask: string =
+			typeof payload.task === "string" && payload.task.length > 0
+				? payload.task
+				: `Execute offer ${payload.offer_id} (role: ${payload.role})`;
+
+		const enrichedTask = persona ? `${persona}\n\n${baseTask}` : baseTask;
+
 		result = await spawn({
 			worktree,
-			task: `Execute offer ${payload.offer_id} (role: ${payload.role})`,
+			task: enrichedTask,
 			proposalId,
 			stage: payload.role,
 			capabilities,

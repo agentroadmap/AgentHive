@@ -31,6 +31,7 @@ import { briefingAssemble } from "../../infra/agency/spawn-briefing-service.ts";
 import { sendMessage } from "../../infra/agency/liaison-message-service.ts";
 import type { OfferDispatchPayload } from "../../infra/agency/liaison-message-types.ts";
 import { ObservabilityWriter } from "../observability/observability-writer.ts";
+import { resolvePersonaByRoleName } from "./gate-role-resolver.ts";
 
 const obs = new ObservabilityWriter("agency:offer-dispatch");
 
@@ -150,6 +151,10 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 			route_hint: extractRouteHint(claim.metadata),
 		};
 
+		// P1113: pre-resolve persona so the agency doesn't need a DB round-trip
+		// per spawn. Errors are swallowed — agency falls back to its own lookup.
+		const persona = await resolvePersonaByRoleName(claim.role).catch(() => null);
+
 		// Augment with mechanical fields the liaison needs to renew + complete
 		// the offer directly. The Zod schema strips unknown fields by default;
 		// the liaison reads these from the raw message.
@@ -169,6 +174,9 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 			// P908-D: thread trace_id so offer-dispatch-handler can open the
 			// offer_completed lifecycle span correlated to this trace.
 			trace_id: extractTraceId(claim.metadata),
+			// P1113: forward full task + pre-resolved persona to the agency.
+			task: extractTask(claim.metadata),
+			...(persona ? { persona } : {}),
 		};
 
 		await this.sendMessageFn({
