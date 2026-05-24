@@ -1574,9 +1574,9 @@ export class RfcWorkflowHandlers {
 			name: "add_discussion",
 			description:
 				"Add a discussion comment to a proposal. " +
-				"VISIBILITY WARNING: The board UI does NOT render discussion entries — the /board page has no /api/proposals/{id}/discussions route. " +
-				"Entries persist in storage and are readable via `get_discussions`/`detail` MCP projections only. " +
-				"For findings that operators need to see, use `submit_review` instead.",
+				"Entries ARE visible in the board UI: ProposalDetailsModal renders a Discussions section (preview mode) " +
+				"via GET /api/proposals/{id}/notes. Use context_prefix (arch:/critical:/concern: etc.) for structured annotations. " +
+				"For formal gate verdicts with blocking flags and verdict enum, use `submit_review` instead.",
 			inputSchema: {
 				type: "object",
 				properties: {
