@@ -614,6 +614,40 @@ export async function verifyAC(args: {
 
 		const ac = acRows[0];
 
+		// P707 null-guard: status='pass' requires structured evidence
+		if (args.status === "pass") {
+			const evidenceError = validateAcEvidence(args.verification_notes);
+			if (evidenceError) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `❌ verify_ac rejected: ${evidenceError}`,
+						},
+					],
+				};
+			}
+		}
+
+		// P707 batch-advance guard: max 2 ACs verified per proposal within 5 seconds
+		const { rows: recentRows } = await query<{ count: string }>(
+			`SELECT COUNT(*) as count
+			 FROM roadmap_proposal.proposal_acceptance_criteria
+			 WHERE proposal_id = $1 AND verified_at > NOW() - INTERVAL '5 seconds'`,
+			[proposalId],
+		);
+		const recentCount = Number(recentRows[0]?.count ?? 0);
+		if (recentCount >= 2) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `❌ verify_ac rejected: bulk-advance guard — ${recentCount} ACs already verified in the last 5 seconds for this proposal. Wait before verifying more (P707 §AC-Verification).`,
+					},
+				],
+			};
+		}
+
 		await query(
 			`UPDATE roadmap_proposal.proposal_acceptance_criteria
 			    SET status = $1, verified_by = $2, verification_notes = $3, verified_at = NOW(),
@@ -1018,6 +1052,7 @@ export async function submitReview(args: {
 		);
 
 		let reviewId: number;
+		const isBlocking = args.is_blocking === true;
 		if (existing.length) {
 			reviewId = existing[0].id;
 			await query(
@@ -1732,6 +1767,10 @@ export class RfcWorkflowHandlers {
 						enum: ["approve", "approve_with_changes", "request_changes", "send_back", "reject", "defer", "recuse"],
 					},
 					notes: { type: "string" },
+					is_blocking: {
+						type: "boolean",
+						description: "When true, marks this review as a hard blocker. Stored on the row; defaults to false.",
+					},
 					change_requirements: {
 						type: "array",
 						items: { type: "string" },

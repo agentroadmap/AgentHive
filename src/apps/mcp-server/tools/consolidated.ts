@@ -19,7 +19,8 @@ const routerSchema = {
 	properties: {
 		action: {
 			type: "string",
-			description: "Domain action to run. Use action=list_actions to inspect supported actions.",
+			description:
+				"Domain action to run. Use action=list_actions to inspect supported actions.",
 		},
 		args: {
 			...jsonObjectSchema,
@@ -211,6 +212,11 @@ const agentRoutes: RouteMap = {
 	team_list: "team_list",
 	team_create: "team_create",
 	team_add_member: "team_add_member",
+	// P182: Team Governance Layer (Ostrom Principle 8)
+	team_charter_create: "team_charter_create",
+	team_norms_set: "team_norms_set",
+	team_dispute_log: "team_dispute_log",
+	team_governance_archive: "team_governance_archive",
 	heartbeat: "pulse_heartbeat",
 	health: "pulse_health",
 	fleet: "pulse_fleet",
@@ -243,6 +249,9 @@ const agentRoutes: RouteMap = {
 	agency_start: "agency_start",
 	agency_status: "agency_status",
 	resolve: "agent_resolve",
+	// P925: operator rename CLI for permanent agent display aliases
+	rename: "agent_rename",
+	agent_rename: "agent_rename",
 };
 
 const memoryRoutes: RouteMap = {
@@ -367,10 +376,16 @@ export function registerConsolidatedTools(server: McpServer): void {
 			server,
 			"mcp_proposal",
 			"Consolidated proposal interface. Use actions for CRUD, projection detail, maturity, leases, criteria, dependencies, reviews, discussion, and worktree merge. " +
+				"TYPICAL FLOW: call `claim` (with your agent identity) before writing to a proposal you intend to work on. " +
+				"Without a lease another agent may race you; with a lease your work shows up in `prop_leases`. " +
+				"Renew with `renew` if your work runs long; release with `release` when done. " +
 				"PARAM-NAME GOTCHAS (read once, save retries): " +
 				"`get`/`detail`/`add_acceptance_criteria`/`add_discussion`/`claim`/`release`/`verify_ac`/`list_ac` use `proposal_id` (string). " +
 				"`update`/`set_maturity`/`transition`/`delete` use `id` (string) — passing `proposal_id` returns 'Proposal undefined not found'. " +
 				"`add_dependency`/`remove_dependency` use camelCase `fromProposalId`/`toProposalId`/`dependencyType` (string ids, not int). " +
+				"SUBMIT_REVIEW: reviewer identity field is `reviewer` on input (NOT `reviewer_identity`, `agent_identity`, or `identity` — those produce a PG FK not-null error). " +
+				"ADD_DISCUSSION: stored MCP-side only — the board UI does NOT render discussion entries. Use `submit_review` for operator-visible findings. " +
+				"LIST (prop_list): free-text search is NOT supported here — use `proposal_search` action instead. Params `search`/`q`/`title_contains` are silently ignored. " +
 				"VERIFY_AC: each AC needs its own call (1-indexed item_number); ACs stay 'pending' until you explicitly call verify_ac with status='pass' — NOT inferred from tests passing or maturity advance. status enum is {pass, fail, blocked, waived}, NOT 'verified'. " +
 				"ADD_ACCEPTANCE_CRITERIA: pass `criteria: string[]` (array of full sentences), NOT individual title/description fields nor `acceptance_criteria` key. " +
 				"Use action=list_actions to enumerate every action name.",

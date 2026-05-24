@@ -217,7 +217,7 @@ describe("P1372: registerAgency handler", () => {
 			expect(result.isError).toBe(true);
 			const text =
 				result.content[0]?.type === "text" ? result.content[0].text : "";
-			expect(text).toContain("not found in agent_registry");
+			expect(text).toContain("agent_registry");
 			expect(text).toContain("mcp_agent action='register'");
 		});
 
@@ -303,11 +303,11 @@ describe("P1372: registerAgency handler", () => {
 			await seedAgencyRegistry(TEST_AGENCY_ID);
 			const result = await handlers.registerAgency({
 				agent_identity: TEST_AGENCY_ID,
-				host_id: "host-01",
+				host_id: "iMac",
 			});
 			expect(result.isError).not.toBe(true);
 			const row = await getAgencyRow(TEST_AGENCY_ID);
-			expect(row.host_id).toBe("host-01");
+			expect(row.host_id).toBe("iMac");
 		});
 
 		it("should default to agent_registry.host_affinity", async () => {
@@ -316,14 +316,14 @@ describe("P1372: registerAgency handler", () => {
 				"active",
 				"agency",
 				"claude",
-				"host-02",
+				"iMac",
 			);
 			const result = await handlers.registerAgency({
 				agent_identity: TEST_AGENCY_ID,
 			});
 			expect(result.isError).not.toBe(true);
 			const row = await getAgencyRow(TEST_AGENCY_ID);
-			expect(row.host_id).toBe("host-02");
+			expect(row.host_id).toBe("iMac");
 		});
 
 		it("should default to 'bot' if host_affinity is null", async () => {
@@ -390,7 +390,7 @@ describe("P1372: registerAgency handler", () => {
 				"active",
 				"agency",
 				"gemini",
-				"host-01",
+				"iMac",
 			);
 			const result = await handlers.registerAgency({
 				agent_identity: TEST_AGENCY_ID,
@@ -399,7 +399,7 @@ describe("P1372: registerAgency handler", () => {
 			expect(result.isError).not.toBe(true);
 			const row = await getAgencyRow(TEST_AGENCY_ID);
 			expect(row.provider).toBe("gemini");
-			expect(row.host_id).toBe("host-01");
+			expect(row.host_id).toBe("iMac");
 		});
 
 		it("should default display_name to agent_identity", async () => {

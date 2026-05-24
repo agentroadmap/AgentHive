@@ -21,9 +21,9 @@ export function registerProposalTools(
 			"Filter params: status, type/proposal_type (aliases), " +
 			"maturity (exact match: new|active|mature|obsolete), " +
 			"maturity_min (floor filter — returns proposals at this maturity or higher; new < active < mature < obsolete), " +
-			"search (case-insensitive substring match on title), " +
 			"parent_id (direct children of a proposal), " +
-			"limit (default 50 max 500), include_terminal (default false), include_metadata (default false).",
+			"limit (default 50 max 500), include_terminal (default false), include_metadata (default false). " +
+			"NOTE: params `search`, `q`, and `title_contains` are silently ignored — use `proposal_search` for keyword/title search.",
 		inputSchema: {
 			type: "object",
 			properties: {
