@@ -148,6 +148,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 	const [discussions, setDiscussions] = useState<Array<{
 		id: number; author_identity: string; context_prefix: string | null; body_markdown: string; created_at: string;
 	}>>([]);
+	const [activityRefreshKey, setActivityRefreshKey] = useState(0);
 	const resolveDirectiveToId = useCallback(
 		(value?: string | null): string => {
 			const normalized = (value ?? "").trim();
@@ -505,6 +506,14 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 		};
 	}, [isOpen]);
 
+	// AC-1: Poll activity data every 30s while the modal is open so new
+	// discussions/reviews/decisions appear without a full page reload.
+	useEffect(() => {
+		if (!isOpen || !proposalId) return;
+		const timer = setInterval(() => setActivityRefreshKey((k) => k + 1), 30_000);
+		return () => clearInterval(timer);
+	}, [isOpen, proposalId]);
+
 	useEffect(() => {
 		if (!proposalId) {
 			setDecisions([]);
@@ -544,7 +553,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 		return () => {
 			cancelled = true;
 		};
-	}, [proposalId, isOpen]);
+	}, [proposalId, isOpen, activityRefreshKey, proposal?.updatedDate]);
 
 	const handleCancelEdit = useCallback(() => {
 		if (isDirty) {

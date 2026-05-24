@@ -52,7 +52,7 @@ function toSharedProposal(proposal: WebSocketProposal): Proposal {
 		title: proposal.title,
 		status: proposal.status,
 		assignee: [],
-		createdDate: proposal.createdDate || proposal.createdAt,
+		createdDate: proposal.createdDate || proposal.createdAt || '',
 		updatedDate: proposal.updatedDate || proposal.updatedAt || proposal.createdDate || proposal.createdAt,
 		labels,
 		dependencies: proposal.parentId ? [proposal.parentId] : [],
