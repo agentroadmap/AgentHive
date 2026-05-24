@@ -911,6 +911,7 @@ export async function submitReview(args: {
 	body?: string;
 	content?: string;
 	change_requirements?: string[];
+	is_blocking?: boolean;
 }): Promise<CallToolResult> {
 	if (!args.notes) {
 		args.notes = args.review ?? args.body ?? args.content;
@@ -951,12 +952,13 @@ export async function submitReview(args: {
 		if (existing.length) {
 			reviewId = existing[0].id;
 			await query(
-				`UPDATE roadmap_proposal.proposal_reviews SET verdict = $1, notes = $2, findings = $3, reviewed_at = NOW()
-         WHERE proposal_id = $4 AND reviewer_identity = $5`,
+				`UPDATE roadmap_proposal.proposal_reviews SET verdict = $1, notes = $2, findings = $3, is_blocking = $4, reviewed_at = NOW()
+         WHERE proposal_id = $5 AND reviewer_identity = $6`,
 				[
 					args.verdict,
 					args.notes || null,
 					args.findings ? JSON.stringify(args.findings) : null,
+					args.is_blocking ?? false,
 					proposalId,
 					args.reviewer,
 				],
@@ -970,14 +972,15 @@ export async function submitReview(args: {
 			}
 		} else {
 			const { rows: inserted } = await query(
-				`INSERT INTO roadmap_proposal.proposal_reviews (proposal_id, reviewer_identity, verdict, notes, findings)
-         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+				`INSERT INTO roadmap_proposal.proposal_reviews (proposal_id, reviewer_identity, verdict, notes, findings, is_blocking)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
 				[
 					proposalId,
 					args.reviewer,
 					args.verdict,
 					args.notes || null,
 					args.findings ? JSON.stringify(args.findings) : null,
+					args.is_blocking ?? false,
 				],
 			);
 			reviewId = inserted[0].id;
@@ -1038,7 +1041,7 @@ export async function listReviews(args: {
 		}
 
 		const { rows: reviewRows } = await query(
-			`SELECT reviewer_identity, verdict, notes, findings, reviewed_at
+			`SELECT reviewer_identity, verdict, notes, findings, is_blocking, reviewed_at
        FROM roadmap_proposal.proposal_reviews WHERE proposal_id = $1
        ORDER BY reviewed_at DESC`,
 			[propId],
@@ -1057,7 +1060,7 @@ export async function listReviews(args: {
 		};
 		const lines = reviewRows.map(
 			(r) =>
-				`${verdictEmoji[r.verdict] || "?"} ${r.reviewer_identity}: ${r.verdict}${r.notes ? ` — ${r.notes}` : ""}`,
+				`${verdictEmoji[r.verdict] || "?"} ${r.reviewer_identity}: ${r.verdict}${r.is_blocking ? " [BLOCKING]" : ""}${r.notes ? ` — ${r.notes}` : ""}`,
 		);
 		return {
 			content: [
@@ -1109,11 +1112,6 @@ export async function addDiscussion(args: {
 	if (!args.content) {
 		args.content =
 			args.discussion ?? args.text ?? args.body ?? args.message ?? "";
-	}
-	if (!args.author) {
-		// Default authoring identity so cubic/gate agents don't bounce on a
-		// missing arg — they're system-issued, not user-issued.
-		(args as any).author = "system";
 	}
 	try {
 		const proposalId = await resolveProposalId(args.proposal_id);
@@ -1417,6 +1415,10 @@ export class RfcWorkflowHandlers {
 						items: { type: "string" },
 						description: "Array of change requirements when verdict is approve_with_changes",
 					},
+					is_blocking: {
+						type: "boolean",
+						description: "When true, this review blocks gate advancement until the reviewer approves. Persisted to proposal_reviews.is_blocking.",
+					},
 				},
 				required: ["proposal_id", "reviewer", "verdict"],
 			},
@@ -1437,7 +1439,16 @@ export class RfcWorkflowHandlers {
 		// Discussions
 		this.server.addTool({
 			name: "add_discussion",
-			description: "Add a discussion comment to a proposal",
+			// Visibility: entries ARE rendered in ProposalDetailsModal (preview mode → Discussions section)
+			// via GET /api/proposals/:id/notes. Distinct from submit_review (formal gate verdicts with
+			// verdict enum + blocking flags). Use add_discussion for threaded commentary and
+			// context-prefixed annotations; use submit_review for operator-visible gate outcomes.
+			description:
+				"Add a threaded discussion comment to a proposal. " +
+				"Entries are visible in the board UI: open any proposal in preview mode and look for the Discussions section, " +
+				"populated via the /api/proposals/{id}/notes route. " +
+				"Use context_prefix (arch:/critical:/concern:/security: etc.) to categorise the note. " +
+				"For formal gate verdicts (ADVANCE/HOLD/REJECT), use `submit_review` instead — it carries a verdict enum and is_blocking flag.",
 			inputSchema: {
 				type: "object",
 				properties: {
