@@ -17,7 +17,13 @@ export function registerProposalTools(
 	server.addTool({
 		name: "prop_list",
 		description:
-			"List AgentHive proposals from Postgres, including workflow stage, type, and maturity",
+			"List AgentHive proposals from Postgres. " +
+			"Filter params: status, type/proposal_type (aliases), " +
+			"maturity (exact match: new|active|mature|obsolete), " +
+			"maturity_min (floor filter — returns proposals at this maturity or higher; new < active < mature < obsolete), " +
+			"search (case-insensitive substring match on title), " +
+			"parent_id (direct children of a proposal), " +
+			"limit (default 50 max 500), include_terminal (default false), include_metadata (default false).",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -31,11 +37,20 @@ export function registerProposalTools(
 					description:
 						"Alias for type. Proposal type determines workflow selection.",
 				},
-				domain_id: { type: "string", description: "Filter by domain" },
+				maturity: {
+					type: "string",
+					enum: ["new", "active", "mature", "obsolete"],
+					description: "Filter to proposals at exactly this maturity level.",
+				},
 				maturity_min: {
-					type: "number",
+					type: "string",
+					enum: ["new", "active", "mature", "obsolete"],
 					description:
-						"Minimum maturity gate level when supported by the backend query",
+						"Filter to proposals at this maturity level or higher (new < active < mature < obsolete).",
+				},
+				search: {
+					type: "string",
+					description: "Case-insensitive substring search on proposal title.",
 				},
 				limit: {
 					type: "number",
@@ -51,6 +66,11 @@ export function registerProposalTools(
 					type: "boolean",
 					description:
 						"Include metadata fields (summary, design, motivation). Default false.",
+				},
+				parent_id: {
+					type: "string",
+					description:
+						"Filter to direct children of this proposal. Accepts display_id (e.g. 'P1000') or numeric id.",
 				},
 			},
 		},
@@ -282,7 +302,10 @@ export function registerProposalTools(
 	});
 	server.addTool({
 		name: "prop_release",
-		description: "Release an active AgentHive proposal lease",
+		description:
+			"Release an active AgentHive proposal lease. " +
+			"Use release_reason (canonical param) to record why the lease is being released — required by P934 policy. " +
+			"reason is a deprecated alias for release_reason; prefer release_reason.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -294,9 +317,13 @@ export function registerProposalTools(
 					type: "string",
 					description: "Agent identity releasing the proposal",
 				},
+				release_reason: {
+					type: "string",
+					description: "Why the lease is being released (required by P934 policy). Accepted as canonical param.",
+				},
 				reason: {
 					type: "string",
-					description: "Optional release reason",
+					description: "Deprecated alias for release_reason — prefer release_reason.",
 				},
 			},
 			required: ["id", "agent"],

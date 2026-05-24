@@ -1399,7 +1399,13 @@ export class RfcWorkflowHandlers {
 		// Reviews
 		this.server.addTool({
 			name: "submit_review",
-			description: "Submit a review for a proposal",
+			description:
+				"Submit a review verdict for a proposal. " +
+				"Key params: proposal_id, reviewer (kebab-case identity), " +
+				"verdict (approve|approve_with_changes|request_changes|send_back|reject|defer|recuse), " +
+				"notes (review rationale — canonical name; do not pass as review/body/content, those aliases are stripped by MCP), " +
+				"change_requirements (string[], required when verdict=approve_with_changes), " +
+				"is_blocking (boolean — when true this review blocks gate advancement until the reviewer approves).",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -1427,7 +1433,10 @@ export class RfcWorkflowHandlers {
 
 		this.server.addTool({
 			name: "list_reviews",
-			description: "List reviews for a proposal",
+			description:
+				"List reviews for a proposal. " +
+				"Returns reviewer identity, verdict, notes, is_blocking status, and reviewed_at timestamp for each review. " +
+				"Blocking reviews (is_blocking=true) are marked [BLOCKING] in the output.",
 			inputSchema: {
 				type: "object",
 				properties: { proposal_id: { type: "string" } },
@@ -1445,10 +1454,10 @@ export class RfcWorkflowHandlers {
 			// context-prefixed annotations; use submit_review for operator-visible gate outcomes.
 			description:
 				"Add a threaded discussion comment to a proposal. " +
-				"Entries are visible in the board UI: open any proposal in preview mode and look for the Discussions section, " +
-				"populated via the /api/proposals/{id}/notes route. " +
-				"Use context_prefix (arch:/critical:/concern:/security: etc.) to categorise the note. " +
-				"For formal gate verdicts (ADVANCE/HOLD/REJECT), use `submit_review` instead — it carries a verdict enum and is_blocking flag.",
+				"Required params: proposal_id, author (no default — caller must supply), content (canonical name; do not use discussion/text/body/message aliases, they are stripped by MCP). " +
+				"Optional: parent_id (thread reply), context_prefix (arch:|critical:|concern:|security:|general:|feedback:|poc:). " +
+				"Entries are visible in the board UI via the Discussions section (/api/proposals/{id}/notes route). " +
+				"For formal gate verdicts (ADVANCE/HOLD/REJECT) use `submit_review` instead — it carries a verdict enum and is_blocking flag.",
 			inputSchema: {
 				type: "object",
 				properties: {

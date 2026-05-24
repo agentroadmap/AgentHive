@@ -85,16 +85,20 @@ export class PgProposalHandlers {
 		status?: string;
 		type?: string;
 		proposal_type?: string;
+		parent_id?: string | number | null;
 		limit?: number;
 		include_terminal?: boolean;
 		include_metadata?: boolean;
+		search?: string;
+		maturity?: string;
+		maturity_min?: string;
 	}): Promise<CallToolResult> {
 		try {
 			const limit = Math.min(Math.max(args.limit ?? 50, 1), 500);
 			const includeTerminal = args.include_terminal === true;
 			const includeMetadata = args.include_metadata === true;
 
-			let sql = `SELECT id, display_id, title, status, type, maturity, created_at${includeMetadata ? ", summary, design, motivation" : ""}
+			let sql = `SELECT id, display_id, parent_id, title, status, type, maturity, created_at${includeMetadata ? ", summary, design, motivation" : ""}
 			       FROM roadmap_proposal.proposal`;
 			const params: (string | number)[] = [];
 			const conditions: string[] = [];
@@ -114,6 +118,43 @@ export class PgProposalHandlers {
 			if (proposalType !== undefined) {
 				conditions.push(`type = $${params.length + 1}`);
 				params.push(proposalType);
+			}
+
+			if (args.parent_id !== undefined && args.parent_id !== null) {
+				const raw = args.parent_id;
+				const isDisplayId = typeof raw === 'string' && /^P\d+$/i.test(raw);
+				if (isDisplayId) {
+					conditions.push(`parent_id = (SELECT id FROM roadmap_proposal.proposal WHERE display_id = $${params.length + 1} LIMIT 1)`);
+					params.push(String(raw));
+				} else {
+					const num = Number(raw);
+					if (!Number.isNaN(num)) {
+						conditions.push(`parent_id = $${params.length + 1}`);
+						params.push(num);
+					}
+				}
+			}
+
+			if (args.search) {
+				conditions.push(`title ILIKE $${params.length + 1}`);
+				params.push(`%${args.search}%`);
+			}
+
+			if (args.maturity) {
+				conditions.push(`maturity = $${params.length + 1}`);
+				params.push(args.maturity);
+			} else if (args.maturity_min) {
+				// Ordered comparison: new=0, active=1, mature=2, obsolete=3
+				const maturityOrder: Record<string, number> = { new: 0, active: 1, mature: 2, obsolete: 3 };
+				const minLevel = maturityOrder[args.maturity_min];
+				if (minLevel !== undefined) {
+					const validLevels = Object.entries(maturityOrder)
+						.filter(([, v]) => v >= minLevel)
+						.map(([k]) => k);
+					const placeholders = validLevels.map((_, i) => `$${params.length + i + 1}`).join(", ");
+					conditions.push(`maturity IN (${placeholders})`);
+					validLevels.forEach((v) => params.push(v));
+				}
 			}
 
 			if (conditions.length) {
@@ -149,6 +190,9 @@ export class PgProposalHandlers {
 									filter: {
 										status: args.status,
 										type: args.type ?? args.proposal_type,
+										maturity: args.maturity,
+										maturity_min: args.maturity_min,
+										search: args.search,
 										includeTerminal,
 									},
 									note: includeTerminal
@@ -166,6 +210,7 @@ export class PgProposalHandlers {
 			const items = rows.map((p: any) => ({
 				id: p.id,
 				display_id: p.display_id,
+				parent_id: p.parent_id ?? null,
 				title: p.title,
 				status: p.status,
 				type: p.type,
@@ -943,11 +988,21 @@ export class PgProposalHandlers {
 				[proposal.id],
 			);
 
-			// 6. Build YAML+MD projection
+			// 6. Fetch direct children (shallow — no recursive descent)
+			const childrenResult = await query(
+				`SELECT id, display_id, title, type, status, maturity, summary
+				 FROM roadmap_proposal.proposal
+				 WHERE parent_id = $1
+				 ORDER BY id`,
+				[proposal.id],
+			);
+
+			// 7. Build YAML+MD projection
 			const did = proposal.display_id ?? `#${proposal.id}`;
 			const lease = leaseResult.rows[0] ?? null;
 			const decision = decisionResult.rows[0] ?? null;
 			const deps = depResult.rows;
+			const children = childrenResult.rows;
 
 			let md = `---\n`;
 			md += `id: ${did}\n`;
@@ -956,6 +1011,7 @@ export class PgProposalHandlers {
 			md += `status: ${proposal.status}\n`;
 			md += `maturity: ${proposal.maturity ?? "new"}\n`;
 			if (proposal.priority) md += `priority: ${proposal.priority}\n`;
+			if (proposal.parent_id) md += `parent_id: ${proposal.parent_id}\n`;
 			if (lease) {
 				md += `lease:\n`;
 				md += `  agent: "${lease.agent_identity}"\n`;
@@ -1015,6 +1071,18 @@ export class PgProposalHandlers {
 				for (const d of deps) {
 					const status = d.resolved ? "resolved" : "active";
 					md += `- ${d.display_id} (${d.dependency_type}) [${status}]\n`;
+				}
+				md += `\n`;
+			}
+
+			// Direct children
+			if (children.length > 0) {
+				md += `## Children\n\n`;
+				for (const c of children) {
+					const summary = c.summary
+						? ` — ${c.summary.slice(0, 120)}${c.summary.length > 120 ? '…' : ''}`
+						: '';
+					md += `- **${c.display_id}** (${c.type}) [${c.status}/${c.maturity}] ${c.title}${summary}\n`;
 				}
 				md += `\n`;
 			}
