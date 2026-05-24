@@ -89,10 +89,13 @@ export class PgProposalHandlers {
 		status?: string;
 		type?: string;
 		proposal_type?: string;
-		parent_id?: string | number;
+		parent_id?: string | number | null;
 		limit?: number;
 		include_terminal?: boolean;
 		include_metadata?: boolean;
+		search?: string;
+		maturity?: string;
+		maturity_min?: string;
 	}): Promise<CallToolResult> {
 		try {
 			const limit = Math.min(Math.max(args.limit ?? 50, 1), 500);
@@ -123,17 +126,40 @@ export class PgProposalHandlers {
 
 			if (args.parent_id !== undefined && args.parent_id !== null) {
 				const raw = args.parent_id;
-				if (typeof raw === 'string' && raw.startsWith('P')) {
+				const isDisplayId = typeof raw === 'string' && /^P\d+$/i.test(raw);
+				if (isDisplayId) {
 					conditions.push(`parent_id = (SELECT id FROM roadmap_proposal.proposal WHERE display_id = $${params.length + 1} LIMIT 1)`);
-					params.push(raw);
+					params.push(String(raw));
 				} else {
-					const parentNum = Number(raw);
-					if (!Number.isNaN(parentNum)) {
+					const num = Number(raw);
+					if (!Number.isNaN(num)) {
 						conditions.push(`parent_id = $${params.length + 1}`);
-						params.push(parentNum);
+						params.push(num);
 					}
 				}
 			}
+
+			if (args.search) {
+				conditions.push(`title ILIKE $${params.length + 1}`);
+				params.push(`%${args.search}%`);
+			}
+
+			if (args.maturity) {
+				conditions.push(`maturity = $${params.length + 1}`);
+				params.push(args.maturity);
+			} else if (args.maturity_min) {
+				const maturityOrder: Record<string, number> = { new: 0, active: 1, mature: 2, obsolete: 3 };
+				const minLevel = maturityOrder[args.maturity_min];
+				if (minLevel !== undefined) {
+					const validLevels = Object.entries(maturityOrder)
+						.filter(([, v]) => v >= minLevel)
+						.map(([k]) => k);
+					const placeholders = validLevels.map((_, i) => `$${params.length + i + 1}`).join(", ");
+					conditions.push(`maturity IN (${placeholders})`);
+					validLevels.forEach((v) => params.push(v));
+				}
+			}
+
 
 			if (conditions.length) {
 				sql += ` WHERE ${conditions.join(" AND ")}`;
@@ -169,6 +195,9 @@ export class PgProposalHandlers {
 										status: args.status,
 										type: args.type ?? args.proposal_type,
 										parent_id: args.parent_id ?? null,
+										maturity: args.maturity,
+										maturity_min: args.maturity_min,
+										search: args.search,
 										includeTerminal,
 									},
 									note: includeTerminal
@@ -1097,7 +1126,7 @@ export class PgProposalHandlers {
 				[proposal.id],
 			);
 
-			// 6. Fetch direct children (shallow only)
+			// 6. Fetch direct children (shallow — no recursive descent)
 			const childrenResult = await query(
 				`SELECT id, display_id, title, type, status, maturity, summary
 				 FROM roadmap_proposal.proposal
@@ -1184,11 +1213,13 @@ export class PgProposalHandlers {
 				md += `\n`;
 			}
 
-			// Children (shallow, no recursive descent)
+			// Direct children (shallow — no recursive descent)
 			if (children.length > 0) {
 				md += `## Children\n\n`;
 				for (const c of children) {
-					const summary = c.summary ? ` — ${c.summary.slice(0, 120)}${c.summary.length > 120 ? '…' : ''}` : '';
+					const summary = c.summary
+						? ` — ${c.summary.slice(0, 120)}${c.summary.length > 120 ? '…' : ''}`
+						: '';
 					md += `- **${c.display_id}** (${c.type}) [${c.status}/${c.maturity}] ${c.title}${summary}\n`;
 				}
 				md += `\n`;
@@ -1248,6 +1279,7 @@ export class PgProposalHandlers {
 					content: [{ type: "text", text: JSON.stringify(jsonPayload, null, 2) }],
 				};
 			}
+
 
 			return {
 				content: [{ type: "text", text: md }],
