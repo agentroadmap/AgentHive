@@ -21,6 +21,7 @@ import {
 import { RfcStates } from "../../../../core/workflow/state-names.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
+import { validateAcEvidence } from "./ac-evidence.ts";
 
 type ResolvedProposal = {
 	id: number;
@@ -550,6 +551,40 @@ export async function verifyAC(args: {
 
 		const ac = acRows[0];
 
+		// P707 null-guard: status='pass' requires structured evidence
+		if (args.status === "pass") {
+			const evidenceError = validateAcEvidence(args.verification_notes);
+			if (evidenceError) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `❌ verify_ac rejected: ${evidenceError}`,
+						},
+					],
+				};
+			}
+		}
+
+		// P707 batch-advance guard: max 2 ACs verified per proposal within 5 seconds
+		const { rows: recentRows } = await query<{ count: string }>(
+			`SELECT COUNT(*) as count
+			 FROM roadmap_proposal.proposal_acceptance_criteria
+			 WHERE proposal_id = $1 AND verified_at > NOW() - INTERVAL '5 seconds'`,
+			[proposalId],
+		);
+		const recentCount = Number(recentRows[0]?.count ?? 0);
+		if (recentCount >= 2) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `❌ verify_ac rejected: bulk-advance guard — ${recentCount} ACs already verified in the last 5 seconds for this proposal. Wait before verifying more (P707 §AC-Verification).`,
+					},
+				],
+			};
+		}
+
 		await query(
 			`UPDATE roadmap_proposal.proposal_acceptance_criteria SET status = $1, verified_by = $2,
                verification_notes = $3, verified_at = NOW()
@@ -905,6 +940,7 @@ export async function submitReview(args: {
 	verdict: string;
 	findings?: Record<string, any>;
 	notes?: string;
+	is_blocking?: boolean;
 	// Common aliases agents try when they don't recall the canonical name.
 	// Treated as fallbacks for `notes` so a misnamed arg doesn't strand a gate run.
 	review?: string;
@@ -948,15 +984,17 @@ export async function submitReview(args: {
 		);
 
 		let reviewId: number;
+		const isBlocking = args.is_blocking === true;
 		if (existing.length) {
 			reviewId = existing[0].id;
 			await query(
-				`UPDATE roadmap_proposal.proposal_reviews SET verdict = $1, notes = $2, findings = $3, reviewed_at = NOW()
-         WHERE proposal_id = $4 AND reviewer_identity = $5`,
+				`UPDATE roadmap_proposal.proposal_reviews SET verdict = $1, notes = $2, findings = $3, is_blocking = $4, reviewed_at = NOW()
+         WHERE proposal_id = $5 AND reviewer_identity = $6`,
 				[
 					args.verdict,
 					args.notes || null,
 					args.findings ? JSON.stringify(args.findings) : null,
+					isBlocking,
 					proposalId,
 					args.reviewer,
 				],
@@ -970,14 +1008,15 @@ export async function submitReview(args: {
 			}
 		} else {
 			const { rows: inserted } = await query(
-				`INSERT INTO roadmap_proposal.proposal_reviews (proposal_id, reviewer_identity, verdict, notes, findings)
-         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+				`INSERT INTO roadmap_proposal.proposal_reviews (proposal_id, reviewer_identity, verdict, notes, findings, is_blocking)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
 				[
 					proposalId,
 					args.reviewer,
 					args.verdict,
 					args.notes || null,
 					args.findings ? JSON.stringify(args.findings) : null,
+					isBlocking,
 				],
 			);
 			reviewId = inserted[0].id;
@@ -1200,6 +1239,91 @@ export async function getValidTransitions(args: {
 	}
 }
 
+// ─── Gate Decision Persistence (P908-C) ─────────────────────────────────────
+
+async function handleGateDecision(args: {
+	proposal_id: string | number;
+	decision: "advance" | "hold" | "reject" | "waive" | "escalate";
+	decided_by: string;
+	gate?: string;
+	gate_level?: string;
+	rationale?: string;
+	blockers?: string[];
+	ac_verification?: unknown;
+	challenges?: string[];
+	from_state?: string;
+	to_state?: string;
+	maturity?: string;
+}): Promise<CallToolResult> {
+	const proposalId = Number(args.proposal_id);
+	if (isNaN(proposalId)) {
+		return {
+			content: [{ type: "text", text: `Invalid proposal_id: ${args.proposal_id}` }],
+		};
+	}
+	const { rows: propRows } = await query<{
+		status: string;
+		maturity: string;
+		project_id: number;
+	}>(
+		`SELECT status, maturity, project_id FROM roadmap_proposal.proposal WHERE id = $1`,
+		[proposalId],
+	);
+	if (!propRows.length) {
+		return {
+			content: [{ type: "text", text: `Proposal ${proposalId} not found` }],
+		};
+	}
+	const prop = propRows[0];
+	const fromState = args.from_state ?? prop.status;
+	const toState = args.to_state ?? prop.status;
+	const maturity = args.maturity ?? prop.maturity;
+
+	try {
+		const { rows: inserted } = await query<{ id: string }>(
+			`INSERT INTO roadmap_proposal.gate_decision_log
+			   (proposal_id, from_state, to_state, maturity, gate, gate_level,
+			    decided_by, authority_agent, decision, rationale,
+			    blockers, ac_verification, challenges, project_id)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14)
+			 RETURNING id`,
+			[
+				proposalId,
+				fromState,
+				toState,
+				maturity,
+				args.gate ?? null,
+				args.gate_level ?? null,
+				args.decided_by,
+				args.decided_by,
+				args.decision,
+				args.rationale ?? null,
+				args.blockers?.length ? args.blockers : null,
+				args.ac_verification != null
+					? JSON.stringify(args.ac_verification)
+					: null,
+				args.challenges?.length ? args.challenges : null,
+				prop.project_id,
+			],
+		);
+		return {
+			content: [
+				{
+					type: "text",
+					text: JSON.stringify({
+						ok: true,
+						gate_decision_log_id: Number(inserted[0]?.id),
+						proposal_id: proposalId,
+						decision: args.decision,
+					}),
+				},
+			],
+		};
+	} catch (err) {
+		return errorResult("Failed to record gate decision", err);
+	}
+}
+
 // ─── Class definition for server registration ───────────────────────────────
 
 export class RfcWorkflowHandlers {
@@ -1401,17 +1525,28 @@ export class RfcWorkflowHandlers {
 		// Reviews
 		this.server.addTool({
 			name: "submit_review",
-			description: "Submit a review for a proposal",
+			description:
+				"Submit a review for a proposal. " +
+				"PARAM-NAME GOTCHA: reviewer identity is `reviewer` on INPUT (NOT `reviewer_identity`, `agent_identity`, or `identity` — those produce a PG not-null FK error). " +
+				"The response echoes it back as `reviewer_identity`. " +
+				"`is_blocking: true` marks the review as a hard blocker and is persisted; omitting or passing `false` stores false (the column default).",
 			inputSchema: {
 				type: "object",
 				properties: {
 					proposal_id: { type: "string" },
-					reviewer: { type: "string" },
+					reviewer: {
+						type: "string",
+						description: "Reviewer identity slug. Use THIS field — not reviewer_identity, agent_identity, or identity.",
+					},
 					verdict: {
 						type: "string",
 						enum: ["approve", "approve_with_changes", "request_changes", "send_back", "reject", "defer", "recuse"],
 					},
 					notes: { type: "string" },
+					is_blocking: {
+						type: "boolean",
+						description: "When true, marks this review as a hard blocker. Stored on the row; defaults to false.",
+					},
 					change_requirements: {
 						type: "array",
 						items: { type: "string" },
@@ -1437,7 +1572,11 @@ export class RfcWorkflowHandlers {
 		// Discussions
 		this.server.addTool({
 			name: "add_discussion",
-			description: "Add a discussion comment to a proposal",
+			description:
+				"Add a discussion comment to a proposal. " +
+				"VISIBILITY WARNING: The board UI does NOT render discussion entries — the /board page has no /api/proposals/{id}/discussions route. " +
+				"Entries persist in storage and are readable via `get_discussions`/`detail` MCP projections only. " +
+				"For findings that operators need to see, use `submit_review` instead.",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -1464,9 +1603,42 @@ export class RfcWorkflowHandlers {
 			handler: (args: any) => addDiscussion(args),
 		});
 
+		// Gate decision log (P908-C)
+		this.server.addTool({
+			name: "gate_decision",
+			description:
+				"P908-C: Record a gate decision directly from a gate agent. " +
+				"Writes to roadmap_proposal.gate_decision_log. " +
+				"decision enum: advance | hold | reject | waive | escalate. " +
+				"decided_by must be a registered agent_identity. " +
+				"from_state/to_state/maturity default to the proposal's current values if omitted.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					proposal_id: { type: "string", description: "Proposal ID (numeric string or integer)" },
+					decision: {
+						type: "string",
+						enum: ["advance", "hold", "reject", "waive", "escalate"],
+					},
+					decided_by: { type: "string", description: "Registered agent_identity of the deciding agent" },
+					gate: { type: "string", description: "Gate identifier e.g. D1, D2, D3, D4" },
+					gate_level: { type: "string" },
+					rationale: { type: "string" },
+					blockers: { type: "array", items: { type: "string" } },
+					ac_verification: { type: "object", additionalProperties: true },
+					challenges: { type: "array", items: { type: "string" } },
+					from_state: { type: "string" },
+					to_state: { type: "string" },
+					maturity: { type: "string" },
+				},
+				required: ["proposal_id", "decision", "decided_by"],
+			},
+			handler: (args: any) => handleGateDecision(args),
+		});
+
 		// eslint-disable-next-line no-console
 		console.error(
-			"[MCP] Registered 12 RFC workflow tools (state machine, AC, deps, reviews, discussions)",
+			"[MCP] Registered 13 RFC workflow tools (state machine, AC, deps, reviews, discussions, gate_decision)",
 		);
 	}
 }
