@@ -53,8 +53,10 @@ export async function reapStaleRows(
 		scratchDirs: 0,
 	};
 
-	// P404: reap orphaned scratch directories left by abrupt process exits
+	// P404: two-phase boot scan — dry-run first (audit log), then real reap.
+	// This catches rows missed while the pg_notify listener was offline (AC-19).
 	try {
+		await reapOrphanScratch({ dryRun: true });
 		result.scratchDirs = await reapOrphanScratch();
 	} catch (err) {
 		logger.warn(

@@ -82,7 +82,7 @@ export async function provisionScratch(opts: {
 
 	if (opts.cubicId) {
 		await query(
-			`UPDATE roadmap.cubics SET scratch_path = $1 WHERE id = $2`,
+			`UPDATE roadmap.cubics SET scratch_path = $1 WHERE cubic_id = $2`,
 			[scratchPath, opts.cubicId],
 		).catch(() => {
 			/* non-fatal — cubicId may not match any row */
@@ -117,8 +117,8 @@ export async function reapScratch(
 	}
 
 	const sizeMb = existsSync(scratchPath)
-		? await getDirSizeMb(scratchPath)
-		: null;
+		? await getDirSizeMb(scratchPath) ?? 0
+		: 0;
 
 	let reapError: string | null = null;
 	try {
