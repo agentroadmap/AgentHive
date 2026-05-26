@@ -29,7 +29,8 @@ export type ErrorCode =
 	| "AC_GATE_FAILED"
 	| "DAG_CYCLE_DETECTED"
 	| "LEASE_CONFLICT"
-	| "ROLE_VIOLATION";
+	| "ROLE_VIOLATION"
+	| "DRAFT_QUALITY_GATE";
 
 // ─── Structured Error ────────────────────────────────────────────────
 
@@ -89,21 +90,83 @@ export async function validateTransition(
 	const ruleResult = await validateTransitionRule(proposalId, fromState, toState);
 	if (!ruleResult.valid) return ruleResult;
 
-	// 2. Check maturity gate
+	// 2. Check DRAFT quality gate (DRAFT→REVIEW only)
+	const draftResult = await validateDraftQuality(proposalId, fromState, toState);
+	if (!draftResult.valid) return draftResult;
+
+	// 3. Check maturity gate
 	const maturityResult = await validateMaturityGate(proposalId, fromState);
 	if (!maturityResult.valid) return maturityResult;
 
-	// 3. Check AC gate (if requires_ac is set for this transition)
+	// 4. Check AC gate (if requires_ac is set for this transition)
 	const acResult = await validateACGate(proposalId, toState);
 	if (!acResult.valid) return acResult;
 
-	// 4. Check lease (if required)
+	// 5. Check lease (if required)
 	const leaseResult = await validateLease(proposalId, agentIdentity);
 	if (!leaseResult.valid) return leaseResult;
 
-	// 5. Check DAG cycle (for dependency-related transitions)
+	// 6. Check DAG cycle (for dependency-related transitions)
 	const dagResult = await validateNoCycles(proposalId, toState);
 	if (!dagResult.valid) return dagResult;
+
+	return { valid: true };
+}
+
+/**
+ * P428: Block DRAFT→REVIEW if design, motivation, or ACs are missing.
+ * No-op for all other transitions.
+ */
+async function validateDraftQuality(
+	proposalId: number,
+	fromState: string,
+	toState: string,
+): Promise<TransitionValidationResult> {
+	if (fromState.toLowerCase() !== "draft" || toState.toLowerCase() !== "review") {
+		return { valid: true };
+	}
+
+	const [proposalResult, acResult] = await Promise.all([
+		query<{ design: string | null; motivation: string | null }>(
+			`SELECT design, motivation FROM roadmap_proposal.proposal WHERE id = $1 LIMIT 1`,
+			[proposalId],
+		),
+		query<{ cnt: string }>(
+			`SELECT COUNT(*)::text AS cnt FROM roadmap_proposal.proposal_acceptance_criteria WHERE proposal_id = $1`,
+			[proposalId],
+		),
+	]);
+
+	const missingFields: string[] = [];
+
+	if (proposalResult.rows.length === 0) {
+		return {
+			valid: false,
+			error: {
+				code: "INVALID_TRANSITION",
+				message: `Proposal ${proposalId} not found`,
+				context: { proposalId },
+			},
+		};
+	}
+
+	const { design, motivation } = proposalResult.rows[0];
+	if (!design || design.trim() === "") missingFields.push("design");
+	if (!motivation || motivation.trim() === "") missingFields.push("motivation");
+
+	const acCount = parseInt(acResult.rows[0]?.cnt ?? "0", 10);
+	if (acCount === 0) missingFields.push("acceptance_criteria");
+
+	if (missingFields.length > 0) {
+		return {
+			valid: false,
+			error: {
+				code: "DRAFT_QUALITY_GATE",
+				message: `DRAFT→REVIEW blocked: missing ${missingFields.join(", ")}`,
+				context: { proposalId, missingFields },
+			},
+		};
+	}
 
 	return { valid: true };
 }
@@ -432,7 +495,9 @@ export function formatValidationError(error: ValidationError): string {
 						? "🔄"
 						: error.code === "LEASE_CONFLICT"
 							? "🔒"
-							: "⛔";
+							: error.code === "DRAFT_QUALITY_GATE"
+								? "📝"
+								: "⛔";
 	return `${icon} [${error.code}] ${error.message}`;
 }
 

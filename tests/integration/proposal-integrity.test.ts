@@ -87,7 +87,7 @@ describe("proposal-integrity: ValidationError formatting", () => {
 });
 
 describe("proposal-integrity: ErrorCode types", () => {
-	it("should have all 6 error codes defined", () => {
+	it("should have all 7 error codes defined", () => {
 		const validCodes: ErrorCode[] = [
 			"INVALID_TRANSITION",
 			"MATURITY_GATE_BLOCKED",
@@ -95,6 +95,7 @@ describe("proposal-integrity: ErrorCode types", () => {
 			"DAG_CYCLE_DETECTED",
 			"LEASE_CONFLICT",
 			"ROLE_VIOLATION",
+			"DRAFT_QUALITY_GATE",
 		];
 		// Type check — all codes should compile
 		for (const code of validCodes) {
@@ -122,5 +123,35 @@ describe("proposal-integrity: ValidationError structure", () => {
 			context: { blockingItemNumbers: [1, 2] },
 		};
 		assert.deepStrictEqual(error.context?.blockingItemNumbers, [1, 2]);
+	});
+});
+
+describe("proposal-integrity: DRAFT_QUALITY_GATE formatting", () => {
+	it("should format DRAFT_QUALITY_GATE error with 📝 icon", () => {
+		const error: ValidationError = {
+			code: "DRAFT_QUALITY_GATE",
+			message: "DRAFT→REVIEW blocked: missing design, motivation",
+			context: { missingFields: ["design", "motivation"] },
+		};
+		const formatted = formatValidationError(error);
+		assert.ok(formatted.includes("📝"));
+		assert.ok(formatted.includes("[DRAFT_QUALITY_GATE]"));
+		assert.ok(formatted.includes("design"));
+	});
+
+	it("should report missing acceptance_criteria in message", () => {
+		const error: ValidationError = {
+			code: "DRAFT_QUALITY_GATE",
+			message: "DRAFT→REVIEW blocked: missing acceptance_criteria",
+			context: { missingFields: ["acceptance_criteria"] },
+		};
+		const formatted = formatValidationError(error);
+		assert.ok(formatted.includes("[DRAFT_QUALITY_GATE]"));
+		assert.ok(formatted.includes("acceptance_criteria"));
+	});
+
+	it("should be a valid ErrorCode assignable at compile time", () => {
+		const code: ErrorCode = "DRAFT_QUALITY_GATE";
+		assert.strictEqual(code, "DRAFT_QUALITY_GATE");
 	});
 });
