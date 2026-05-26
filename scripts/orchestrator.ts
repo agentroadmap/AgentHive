@@ -26,6 +26,7 @@ import {
 import { ObservabilityWriter } from "../src/core/observability/observability-writer.ts";
 import { postWorkOffer } from "../src/core/pipeline/post-work-offer.ts";
 import { reapStaleRows } from "../src/core/pipeline/reap-stale-rows.ts";
+import { reapScratch } from "../src/shared/utils/agent-scratch.ts";
 import { briefingAssemble } from "../src/infra/agency/spawn-briefing-service.ts";
 import { getPool, query } from "../src/infra/postgres/pool.ts";
 import { loadStateNames } from "../src/core/workflow/state-names.ts";
@@ -267,7 +268,7 @@ const AGENT_PROMPTS: Record<string, string> = {
 	"pillar-researcher":
 		"You are the Pillar Researcher. Research complementary components. Propose refinements.",
 	documenter:
-		"You are a Documenter. Write documentation for completed proposals.",
+		"You are a Documenter. For each completed proposal: (1) query the DB via the MCP mcp_proposal action='get' to retrieve full proposal context including acceptance criteria, discussions, and design; (2) synthesize a structured documentation entry covering motivation, design decisions, and outcome; (3) post the result as a proposal discussion entry using mcp_proposal action='add_discussion' with context_prefix='feedback:' so the record is queryable for architecture reconstruction.",
 	researcher:
 		"You are a Researcher. Gather context for proposals that need investigation.",
 	"triage-agent":
@@ -984,7 +985,7 @@ function safeParseMcpResponse(text: string | undefined): any {
 	}
 }
 
-// Dispatch agent to cubic — uses cubic_acquire for atomic find-or-create + focus
+// Dispatch agent via liaison-first offer dispatch (liaison claims and spawns)
 async function dispatchAgent(
 	agent: string,
 	proposalId: string,
@@ -994,46 +995,9 @@ async function dispatchAgent(
 	agentLabel?: string,
 	activity?: string,
 	requiredCapabilities: string[] = [],
-): Promise<string | null> {
-	const client = new Client({ name: "orchestrator", version: "1.0.0" });
-	const transport = new SSEClientTransport(new URL(MCP_URL));
-
+): Promise<boolean> {
 	try {
 		const selectedWorktree = await selectExecutorWorktree(agent);
-
-		await client.connect(transport);
-
-		// Single MCP call replaces: cubic_list → cubic_recycle → cubic_focus
-		// Pass the worktree *basename* — the MCP-side safeWorktreePath() normalizes
-		// it as an agent-id and joins with WORKTREE_ROOT itself. Passing a full
-		// absolute path triggers normalizeAgentId rejection ("path traversal").
-		const acquired = await client.callTool({
-			name: "cubic_acquire",
-			arguments: {
-				agent_identity: agent,
-				proposal_id: Number(proposalId),
-				phase,
-				worktree_path: selectedWorktree,
-			},
-		});
-		const data = safeParseMcpResponse(mcpText(acquired));
-
-		if (!data?.success || !data?.cubic_id) {
-			logger.warn(
-				`cubic_acquire failed for ${agent} on P${proposalId}: ${mcpText(acquired)?.substring(0, 120)}`,
-			);
-			return null;
-		}
-
-		const cubicId = data.cubic_id as string;
-		const verb = data.was_created
-			? "📦 New"
-			: data.was_recycled
-				? "♻️ Recycled"
-				: "🔄 Reused";
-		logger.log(
-			`${verb} cubic ${cubicId.substring(0, 8)} for ${agent} → P${proposalId} (${phase})`,
-		);
 
 		// P466 — assemble a warm-boot briefing BEFORE posting the offer. Without
 		// this, the spawned child receives only the generic role prompt and runs
@@ -1181,7 +1145,7 @@ async function dispatchAgent(
 				);
 			}
 
-			return cubicId;
+			return true;
 		}
 
 		// Direct spawn path (used when AGENTHIVE_USE_OFFER_DISPATCH is not set)
@@ -1224,7 +1188,7 @@ async function dispatchAgent(
 			logger.warn(
 				`No free worktree for ${agent} on P${proposalId} — skipping dispatch`,
 			);
-			return null;
+			return false;
 		}
 		// P405: resolve provider from model_routes, not worktree metadata
 		const activeProvider = await resolveActiveRouteProvider();
@@ -1287,12 +1251,10 @@ async function dispatchAgent(
 			}
 		}
 
-		return cubicId;
+		return true;
 	} catch (err) {
 		logger.error(`Dispatch failed for ${agent} on P${proposalId}:`, err);
-		return null;
-	} finally {
-		await client.close();
+		return false;
 	}
 }
 
@@ -2333,6 +2295,44 @@ Without set_maturity=mature, the gate will not re-run and your work remains invi
 		logger.log(
 			`📬 Enhancer offer ${dispatchId} posted for ${target.display_id} (revising hold #${target.hold_decision_id}; reason=${reason})`,
 		);
+
+		try {
+			const agencies = await listDispatchableAgencies();
+			if (agencies.length > 0) {
+				const targetAgency = agencies[0];
+				const envelope = createMessageEnvelope({
+					agencyId: targetAgency.agency_id,
+					direction: "orchestrator->liaison",
+					kind: "offer_dispatch",
+					payload: {
+						offer_id: String(dispatchId),
+						dispatch_id: dispatchId,
+						proposal_id: target.id,
+						squad_name: `P${target.id}-enhance`,
+						role: "enhancer",
+						required_capabilities:
+							requiredCapabilities.length > 0 ? requiredCapabilities : ["enhancer"],
+						route_hint: "anthropic",
+					},
+				});
+				const sequence = await getNextSequence(targetAgency.agency_id);
+				await storeMessage({
+					...(envelope as any),
+					sequence,
+					signature: "stub-orchestrator",
+				});
+				logger.log(
+					`📮 Enhancer offer_dispatch sent to ${targetAgency.agency_id} for dispatch ${dispatchId}`,
+				);
+			} else {
+				logger.warn(
+					`Enhancer dispatch ${dispatchId}: no dispatchable agencies, offer queued only`,
+					{ reason: "no_dispatchable_agency" },
+				);
+			}
+		} catch (err) {
+			logger.warn(`Failed to emit liaison message for enhancer dispatch ${dispatchId}:`, err);
+		}
 	} catch (err) {
 		const errMsg = err instanceof Error ? err.message : String(err);
 		logger.warn(
@@ -2532,6 +2532,8 @@ async function main() {
 	// Listen for state changes
 	await pgClient.query("LISTEN proposal_gate_ready");
 	await pgClient.query("LISTEN proposal_maturity_changed");
+	// P404: listen for orphan scratch-dir reap requests from pg_cron bridge
+	await pgClient.query("LISTEN reap_scratch");
 
 	logger.log("Listening for state changes to dispatch agents...");
 
@@ -2542,6 +2544,15 @@ async function main() {
 			if (!msg.payload) return;
 
 			if (stopping) return;
+
+			// P404: orphan scratch reap — payload is a plain UUID (not JSON)
+			if (msg.channel === "reap_scratch") {
+				reapScratch(msg.payload).catch((err: unknown) => {
+					logger.warn(`[Orchestrator] reap_scratch failed for ${msg.payload}: ${err instanceof Error ? err.message : String(err)}`);
+				});
+				return;
+			}
+
 			try {
 				const data = JSON.parse(msg.payload);
 				if (msg.channel === "proposal_gate_ready") {

@@ -24,6 +24,10 @@ import { join } from "node:path";
 import { validateModelForDispatch } from "../../apps/mcp-server/tools/spending/pg-handlers.ts";
 import { query } from "../../infra/postgres/pool.ts";
 import {
+	provisionScratch,
+	reapScratch,
+} from "../../shared/utils/agent-scratch.ts";
+import {
 	getDaemonUrl,
 	getMcpUrl,
 	getMcpUrlAsync,
@@ -1401,6 +1405,16 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	);
 	const agentRunId = String(rows[0].id);
 
+	// P404: provision scratch directory for this agent run
+	let scratchUuid: string | null = null;
+	try {
+		const scratch = await provisionScratch({ agentRunId, agentIdentity });
+		scratchUuid = scratch.scratchUuid;
+		processEnv.AGENT_SCRATCH_DIR = scratch.scratchPath;
+	} catch {
+		// non-fatal — agent runs without scratch if provisioning fails
+	}
+
 	const startMs = Date.now();
 	const cwd = join(worktreeRoot, worktree);
 
@@ -1498,6 +1512,11 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		});
 	}
 
+	if (scratchUuid) {
+		await reapScratch(scratchUuid).catch(() => {
+			/* non-fatal — orphan scanner covers this at next boot */
+		});
+	}
 	return { agentRunId, worktree, exitCode, stdout, stderr, durationMs };
 }
 

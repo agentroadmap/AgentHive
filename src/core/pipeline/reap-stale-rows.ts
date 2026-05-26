@@ -11,6 +11,7 @@
  */
 
 import type { Pool } from "pg";
+import { reapOrphanScratch } from "../../shared/utils/agent-scratch.ts";
 
 export interface ReaperLogger {
 	log: (msg: string) => void;
@@ -23,6 +24,7 @@ export interface ReapResult {
 	sequencesRealigned: number;
 	pokeAttemptsPruned: number;
 	lifecycleLogPruned: number;
+	scratchDirs: number;
 }
 
 const LEASE_STALE_MIN = 10;
@@ -48,7 +50,17 @@ export async function reapStaleRows(
 		sequencesRealigned: 0,
 		pokeAttemptsPruned: 0,
 		lifecycleLogPruned: 0,
+		scratchDirs: 0,
 	};
+
+	// P404: reap orphaned scratch directories left by abrupt process exits
+	try {
+		result.scratchDirs = await reapOrphanScratch();
+	} catch (err) {
+		logger.warn(
+			`[${tag}] orphan scratch reap failed: ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
 
 	try {
 		// P934: replaced the COALESCE(release_reason,'') || ' [reaped: ...]'
@@ -179,10 +191,11 @@ export async function reapStaleRows(
 		result.dispatches ||
 		result.sequencesRealigned ||
 		result.pokeAttemptsPruned ||
-		result.lifecycleLogPruned
+		result.lifecycleLogPruned ||
+		result.scratchDirs
 	) {
 		logger.log(
-			`[${tag}] reaped: ${result.leases} lease(s), ${result.dispatches} dispatch(es), ${result.sequencesRealigned} sequence(s) realigned, ${result.pokeAttemptsPruned} poke_attempt(s) pruned, ${result.lifecycleLogPruned} lifecycle_log row(s) pruned`,
+			`[${tag}] reaped: ${result.leases} lease(s), ${result.dispatches} dispatch(es), ${result.sequencesRealigned} sequence(s) realigned, ${result.pokeAttemptsPruned} poke_attempt(s) pruned, ${result.lifecycleLogPruned} lifecycle_log row(s) pruned, ${result.scratchDirs} scratch dir(s) reaped`,
 		);
 	} else {
 		logger.log(`[${tag}] no stale rows`);
