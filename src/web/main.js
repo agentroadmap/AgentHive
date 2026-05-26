@@ -184613,7 +184613,7 @@ function vbnet(Prism) {
   });
 }
 
-// node_modules/refractor/node_modules/property-information/lib/util/schema.js
+// node_modules/hastscript/node_modules/property-information/lib/util/schema.js
 class Schema {
   constructor(property, normal, space) {
     this.property = property;
@@ -184627,7 +184627,7 @@ Schema.prototype.property = {};
 Schema.prototype.normal = {};
 Schema.prototype.space = null;
 
-// node_modules/refractor/node_modules/property-information/lib/util/merge.js
+// node_modules/hastscript/node_modules/property-information/lib/util/merge.js
 function merge(definitions, space) {
   const property = {};
   const normal = {};
@@ -184639,12 +184639,12 @@ function merge(definitions, space) {
   return new Schema(property, normal, space);
 }
 
-// node_modules/refractor/node_modules/property-information/lib/normalize.js
+// node_modules/hastscript/node_modules/property-information/lib/normalize.js
 function normalize(value) {
   return value.toLowerCase();
 }
 
-// node_modules/refractor/node_modules/property-information/lib/util/info.js
+// node_modules/hastscript/node_modules/property-information/lib/util/info.js
 class Info {
   constructor(property, attribute) {
     this.property = property;
@@ -184662,7 +184662,7 @@ Info.prototype.commaOrSpaceSeparated = false;
 Info.prototype.mustUseProperty = false;
 Info.prototype.defined = false;
 
-// node_modules/refractor/node_modules/property-information/lib/util/types.js
+// node_modules/hastscript/node_modules/property-information/lib/util/types.js
 var exports_types = {};
 __export(exports_types, {
   spaceSeparated: () => spaceSeparated,
@@ -184685,7 +184685,7 @@ function increment() {
   return 2 ** ++powers;
 }
 
-// node_modules/refractor/node_modules/property-information/lib/util/defined-info.js
+// node_modules/hastscript/node_modules/property-information/lib/util/defined-info.js
 var checks = Object.keys(exports_types);
 
 class DefinedInfo extends Info {
@@ -184708,7 +184708,7 @@ function mark(values, key, value) {
   }
 }
 
-// node_modules/refractor/node_modules/property-information/lib/util/create.js
+// node_modules/hastscript/node_modules/property-information/lib/util/create.js
 var own2 = {}.hasOwnProperty;
 function create(definition) {
   const property = {};
@@ -184729,7 +184729,7 @@ function create(definition) {
   return new Schema(property, normal, definition.space);
 }
 
-// node_modules/refractor/node_modules/property-information/lib/xlink.js
+// node_modules/hastscript/node_modules/property-information/lib/xlink.js
 var xlink = create({
   space: "xlink",
   transform(_, prop) {
@@ -184746,7 +184746,7 @@ var xlink = create({
   }
 });
 
-// node_modules/refractor/node_modules/property-information/lib/xml.js
+// node_modules/hastscript/node_modules/property-information/lib/xml.js
 var xml = create({
   space: "xml",
   transform(_, prop) {
@@ -184755,17 +184755,17 @@ var xml = create({
   properties: { xmlLang: null, xmlBase: null, xmlSpace: null }
 });
 
-// node_modules/refractor/node_modules/property-information/lib/util/case-sensitive-transform.js
+// node_modules/hastscript/node_modules/property-information/lib/util/case-sensitive-transform.js
 function caseSensitiveTransform(attributes, attribute) {
   return attribute in attributes ? attributes[attribute] : attribute;
 }
 
-// node_modules/refractor/node_modules/property-information/lib/util/case-insensitive-transform.js
+// node_modules/hastscript/node_modules/property-information/lib/util/case-insensitive-transform.js
 function caseInsensitiveTransform(attributes, property) {
   return caseSensitiveTransform(attributes, property.toLowerCase());
 }
 
-// node_modules/refractor/node_modules/property-information/lib/xmlns.js
+// node_modules/hastscript/node_modules/property-information/lib/xmlns.js
 var xmlns = create({
   space: "xmlns",
   attributes: { xmlnsxlink: "xmlns:xlink" },
@@ -184773,7 +184773,7 @@ var xmlns = create({
   properties: { xmlns: null, xmlnsXLink: null }
 });
 
-// node_modules/refractor/node_modules/property-information/lib/aria.js
+// node_modules/hastscript/node_modules/property-information/lib/aria.js
 var aria = create({
   transform(_, prop) {
     return prop === "role" ? prop : "aria-" + prop.slice(4).toLowerCase();
@@ -184831,7 +184831,7 @@ var aria = create({
   }
 });
 
-// node_modules/refractor/node_modules/property-information/lib/html.js
+// node_modules/hastscript/node_modules/property-information/lib/html.js
 var html = create({
   space: "html",
   attributes: {
@@ -185138,7 +185138,7 @@ var html = create({
   }
 });
 
-// node_modules/refractor/node_modules/property-information/lib/svg.js
+// node_modules/hastscript/node_modules/property-information/lib/svg.js
 var svg = create({
   space: "svg",
   attributes: {
@@ -185696,7 +185696,7 @@ var svg = create({
   }
 });
 
-// node_modules/refractor/node_modules/property-information/lib/find.js
+// node_modules/hastscript/node_modules/property-information/lib/find.js
 var valid = /^data[-\w.:]+$/i;
 var dash = /-[a-z]/g;
 var cap = /[A-Z]/g;
@@ -185731,11 +185731,11 @@ function kebab($0) {
 function camelcase($0) {
   return $0.charAt(1).toUpperCase();
 }
-// node_modules/refractor/node_modules/property-information/index.js
+// node_modules/hastscript/node_modules/property-information/index.js
 var html2 = merge([xml, xlink, xmlns, aria, html], "html");
 var svg2 = merge([xml, xlink, xmlns, aria, svg], "svg");
 
-// node_modules/refractor/node_modules/hast-util-parse-selector/lib/index.js
+// node_modules/hast-util-parse-selector/lib/index.js
 var search = /[#.]/g;
 function parseSelector(selector, defaultTagName) {
   const value = selector || "";
@@ -185807,7 +185807,7 @@ function stringify2(values, options) {
   return input.join((settings.padRight ? " " : "") + "," + (settings.padLeft === false ? "" : " ")).trim();
 }
 
-// node_modules/refractor/node_modules/hastscript/lib/core.js
+// node_modules/hastscript/lib/core.js
 var buttonTypes = new Set(["menu", "submit", "reset", "button"]);
 var own3 = {}.hasOwnProperty;
 function core(schema, defaultTagName, caseSensitive) {
@@ -185948,7 +185948,7 @@ function createAdjustMap(values) {
   return result;
 }
 
-// node_modules/refractor/node_modules/hastscript/lib/html.js
+// node_modules/hastscript/lib/html.js
 var h = core(html2, "div");
 // node_modules/character-entities-legacy/index.js
 var characterEntitiesLegacy = [
@@ -229422,10 +229422,13 @@ function proposalExportFilename(proposal) {
 // src/apps/dashboard-web/utils/date-display.ts
 var DATE_ONLY_REGEX = /^(\d{4})-(\d{2})-(\d{2})$/;
 var DATE_TIME_REGEX = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/;
+var ISO_FULL_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
 function parseIntStrict(value) {
   return Number.parseInt(value, 10);
 }
 function parseStoredUtcDate(dateStr) {
+  if (!dateStr)
+    return null;
   const normalized = dateStr.trim();
   if (!normalized)
     return null;
@@ -229465,13 +229468,21 @@ function parseStoredUtcDate(dateStr) {
     }
     return date;
   }
+  if (ISO_FULL_REGEX.test(normalized)) {
+    const d2 = new Date(normalized);
+    if (!isNaN(d2.getTime()))
+      return d2;
+  }
   return null;
 }
 function formatStoredUtcDateForDisplay(dateStr) {
+  if (!dateStr)
+    return "";
   const parsed = parseStoredUtcDate(dateStr);
   if (!parsed)
     return dateStr;
-  if (DATE_TIME_REGEX.test(dateStr.trim())) {
+  const normalized = dateStr.trim();
+  if (DATE_TIME_REGEX.test(normalized) || ISO_FULL_REGEX.test(normalized)) {
     return parsed.toLocaleString(undefined, {
       dateStyle: "medium",
       timeStyle: "short"
@@ -229480,6 +229491,8 @@ function formatStoredUtcDateForDisplay(dateStr) {
   return parsed.toLocaleDateString();
 }
 function formatStoredUtcDateForCompactDisplay(dateStr, now = new Date) {
+  if (!dateStr)
+    return "—";
   const normalized = dateStr.trim();
   if (!normalized)
     return "—";
@@ -230130,6 +230143,7 @@ var ProposalDetailsModal = ({
   isDraftMode
 }) => {
   const theme = getColorMode();
+  const [, navigate2] = useLocation();
   const isCreateMode = !proposal;
   const isFromOtherBranch = Boolean(proposal?.branch);
   const proposalId = proposal?.id ?? "";
@@ -230372,20 +230386,28 @@ var ProposalDetailsModal = ({
   ]);
   const lastActivity = import_react61.useMemo(() => {
     const candidates = [];
-    if (proposal?.updatedDate)
+    if (proposal?.updatedDate?.trim())
       candidates.push({ date: proposal.updatedDate, label: "proposal updated" });
-    if (proposal?.createdDate)
+    if (proposal?.createdDate?.trim())
       candidates.push({ date: proposal.createdDate, label: "created" });
     for (const d4 of discussions)
-      candidates.push({ date: d4.created_at, label: `discussion by ${d4.author_identity}` });
+      if (d4.created_at?.trim())
+        candidates.push({ date: d4.created_at, label: `discussion by ${d4.author_identity}` });
     for (const r3 of reviews)
-      candidates.push({ date: r3.reviewed_at, label: `review by ${r3.reviewer_identity}` });
+      if (r3.reviewed_at?.trim())
+        candidates.push({ date: r3.reviewed_at, label: `review by ${r3.reviewer_identity}` });
     for (const d4 of decisions)
-      candidates.push({ date: d4.decided_at, label: `decision by ${d4.authority}` });
+      if (d4.decided_at?.trim())
+        candidates.push({ date: d4.decided_at, label: `decision by ${d4.authority}` });
     if (candidates.length === 0)
       return null;
-    return candidates.reduce((max9, cur) => cur.date > max9.date ? cur : max9);
+    const toMs = (d4) => parseStoredUtcDate(d4)?.getTime() ?? 0;
+    return candidates.reduce((max9, cur) => toMs(cur.date) > toMs(max9.date) ? cur : max9);
   }, [proposal, discussions, reviews, decisions]);
+  const handleActivityClick = import_react61.useCallback(() => {
+    onClose();
+    navigate2(`/activity?proposal=${encodeURIComponent(proposalId)}`);
+  }, [navigate2, onClose, proposalId]);
   import_react61.useEffect(() => {
     if (proposalId && proposalRef.current?.id !== proposalId)
       return;
@@ -230432,6 +230454,8 @@ var ProposalDetailsModal = ({
       setDiscussions([]);
       return;
     }
+    if (!isOpen)
+      return;
     let cancelled = false;
     apiClient.fetchProposalDecisions(proposalId).then((nextDecisions) => {
       if (!cancelled)
@@ -230457,7 +230481,7 @@ var ProposalDetailsModal = ({
     return () => {
       cancelled = true;
     };
-  }, [proposalId]);
+  }, [proposalId, isOpen, proposal?.updatedDate]);
   const handleCancelEdit = import_react61.useCallback(() => {
     if (isDirty) {
       const confirmDiscard = window.confirm("Discard unsaved changes?");
@@ -231356,25 +231380,32 @@ var ProposalDetailsModal = ({
                       }, undefined, false, undefined, this)
                     ]
                   }, undefined, true, undefined, this),
-                  lastActivity && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
                     children: [
                       /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
                         className: "font-semibold text-gray-800 dark:text-gray-100",
                         children: "Last activity:"
                       }, undefined, false, undefined, this),
                       " ",
-                      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
-                        className: "text-gray-700 dark:text-gray-200",
-                        children: formatStoredUtcDateForDisplay(lastActivity.date)
-                      }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
-                        className: "ml-1 text-gray-400 dark:text-gray-500 italic",
+                      lastActivity ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("button", {
+                        type: "button",
+                        onClick: handleActivityClick,
+                        className: "text-gray-700 dark:text-gray-200 hover:underline cursor-pointer bg-transparent border-0 p-0 text-left",
                         children: [
-                          "(",
-                          lastActivity.label,
-                          ")"
+                          formatStoredUtcDateForDisplay(lastActivity.date),
+                          /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                            className: "ml-1 text-gray-400 dark:text-gray-500 italic",
+                            children: [
+                              "(",
+                              lastActivity.label,
+                              ")"
+                            ]
+                          }, undefined, true, undefined, this)
                         ]
-                      }, undefined, true, undefined, this)
+                      }, undefined, true, undefined, this) : /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                        className: "text-gray-400 dark:text-gray-500 italic",
+                        children: "No activity yet"
+                      }, undefined, false, undefined, this)
                     ]
                   }, undefined, true, undefined, this)
                 ]
@@ -233232,46 +233263,85 @@ function useWebSocket(url) {
 
 // src/apps/dashboard-web/hooks/useBoardStages.ts
 var import_react68 = __toESM(require_react(), 1);
-var FALLBACK_STATUSES = [
-  { id: "DRAFT", label: "DRAFT", order: 1, isTerminal: false },
-  { id: "REVIEW", label: "REVIEW", order: 2, isTerminal: false },
-  { id: "DEVELOP", label: "DEVELOP", order: 3, isTerminal: false },
-  { id: "MERGE", label: "MERGE", order: 4, isTerminal: false },
-  { id: "COMPLETE", label: "COMPLETE", order: 5, isTerminal: true }
+var FALLBACK_STAGES = [
+  { id: "DRAFT", stageName: "DRAFT", label: "Draft", displayLabel: "Draft", hexColor: null, order: 1, isTerminal: false },
+  { id: "REVIEW", stageName: "REVIEW", label: "Review", displayLabel: "Review", hexColor: null, order: 2, isTerminal: false },
+  { id: "DEVELOP", stageName: "DEVELOP", label: "Develop", displayLabel: "Develop", hexColor: null, order: 3, isTerminal: false },
+  { id: "MERGE", stageName: "MERGE", label: "Merge", displayLabel: "Merge", hexColor: null, order: 4, isTerminal: false },
+  { id: "COMPLETE", stageName: "COMPLETE", label: "Complete", displayLabel: "Complete", hexColor: null, order: 5, isTerminal: true }
 ];
 function useBoardStages(workflow = "Standard RFC") {
-  const [stages, setStages] = import_react68.useState(FALLBACK_STATUSES);
+  const [stages, setStages] = import_react68.useState(FALLBACK_STAGES);
   const [loading, setLoading] = import_react68.useState(true);
   const [error3, setError] = import_react68.useState(null);
   const [activeWorkflow, setActiveWorkflow] = import_react68.useState(workflow);
-  import_react68.useEffect(() => {
-    const fetchStages = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const url = new URL("/api/board/stages", window.location.origin);
-        url.searchParams.set("workflow", workflow);
-        const response = await fetch(url.toString());
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        const data5 = await response.json();
-        setStages(data5.stages);
-        setActiveWorkflow(data5.workflow);
-        if (data5.error) {
-          console.warn("Board stages API warning:", data5.error);
-        }
-      } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : "Failed to fetch board stages";
-        setError(errorMsg);
-        console.error("Error fetching board stages:", err);
-        setStages(FALLBACK_STATUSES);
-      } finally {
-        setLoading(false);
+  const workflowRef = import_react68.useRef(workflow);
+  workflowRef.current = workflow;
+  const fetchStages = import_react68.useCallback(async (wf) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const url = new URL("/api/board/stages", window.location.origin);
+      url.searchParams.set("workflow", wf);
+      const response = await fetch(url.toString());
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
+      const data5 = await response.json();
+      setStages(data5.stages);
+      setActiveWorkflow(data5.workflow);
+      if (data5.error) {
+        console.warn("Board stages API warning:", data5.error);
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Failed to fetch board stages";
+      setError(errorMsg);
+      console.error("Error fetching board stages:", err);
+      setStages(FALLBACK_STAGES);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  import_react68.useEffect(() => {
+    fetchStages(workflow);
+  }, [workflow, fetchStages]);
+  import_react68.useEffect(() => {
+    const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
+    let ws = null;
+    let reconnectTimer = null;
+    let closed = false;
+    const connect = () => {
+      if (closed)
+        return;
+      try {
+        ws = new WebSocket(wsUrl);
+        ws.onmessage = (event4) => {
+          try {
+            const msg = JSON.parse(event4.data);
+            if (msg?.type === "board_reload") {
+              fetchStages(workflowRef.current);
+            }
+          } catch {}
+        };
+        ws.onclose = () => {
+          if (!closed) {
+            reconnectTimer = setTimeout(connect, 5000);
+          }
+        };
+        ws.onerror = () => {
+          ws?.close();
+        };
+      } catch {}
     };
-    fetchStages();
-  }, [workflow]);
+    connect();
+    return () => {
+      closed = true;
+      if (reconnectTimer !== null)
+        clearTimeout(reconnectTimer);
+      ws?.close();
+    };
+  }, [fetchStages]);
   return { stages, loading, error: error3, workflow: activeWorkflow };
 }
 
@@ -233341,8 +233411,8 @@ function toSharedProposal(proposal) {
     title: proposal.title,
     status: proposal.status,
     assignee: [],
-    createdDate: proposal.createdAt,
-    updatedDate: proposal.updatedAt || proposal.createdAt,
+    createdDate: proposal.createdDate || proposal.createdAt,
+    updatedDate: proposal.updatedDate || proposal.updatedAt || proposal.createdDate || proposal.createdAt,
     labels,
     dependencies: proposal.parentId ? [proposal.parentId] : [],
     summary: proposal.summary ?? proposal.bodyMarkdown ?? undefined,
