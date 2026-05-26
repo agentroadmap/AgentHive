@@ -127,6 +127,24 @@ function defaultTrustTier(agentId: string, agentType: string): TrustTier {
 	return "restricted";
 }
 
+export function assertNoPublicKeyConflict(
+	agentId: string,
+	existingPublicKey: string | null | undefined,
+	providedPublicKey: string | null | undefined,
+): void {
+	if (
+		existingPublicKey !== undefined &&
+		existingPublicKey !== null &&
+		providedPublicKey !== undefined &&
+		providedPublicKey !== null &&
+		existingPublicKey !== providedPublicKey
+	) {
+		throw new Error(
+			`Key conflict for agent ${agentId}: registered public_key differs from provided key. Use rotateKeyPair() to explicitly rotate.`,
+		);
+	}
+}
+
 /** Map a DB row to AgentRegistration */
 function hydrate(row: AgentRegistryRow): AgentRegistration {
 	const skills = row.skills ?? {};
@@ -209,11 +227,7 @@ export async function registerAgent(
 			[instanceId],
 		);
 		const existingKey = existing[0]?.public_key;
-		if (existingKey !== undefined && existingKey !== null && existingKey !== publicKey) {
-			throw new Error(
-				`Key conflict for agent ${instanceId}: registered public_key differs from provided key. Use rotateKeyPair() to explicitly rotate.`,
-			);
-		}
+		assertNoPublicKeyConflict(instanceId, existingKey, publicKey);
 	}
 
 	const channel = request.channel || agentChannel(instanceId);
@@ -233,7 +247,14 @@ export async function registerAgent(
        trust_tier = COALESCE(NULLIF(agent_registry.trust_tier, 'authority'), EXCLUDED.trust_tier),
        public_key = COALESCE(agent_registry.public_key, EXCLUDED.public_key)
      RETURNING id`,
-		[instanceId, agentType, role ?? null, JSON.stringify(skills), trustTier, publicKey ?? null],
+		[
+			instanceId,
+			agentType,
+			role ?? null,
+			JSON.stringify(skills),
+			trustTier,
+			publicKey ?? null,
+		],
 	);
 
 	// P919 AC-12: Tier 2 display alias for worker slot-0 spawns. The slot
@@ -249,7 +270,12 @@ export async function registerAgent(
 	// abbr-shape input). Skip Tier 2 alias when agentProvider is absent.
 	if (slotChar && expertise && request.agentProvider) {
 		const host = request.host ?? process.env.AGENTHIVE_HOST ?? hostname();
-		const tier2 = assignDisplayAlias(request.agentProvider, host, expertise, slotChar);
+		const tier2 = assignDisplayAlias(
+			request.agentProvider,
+			host,
+			expertise,
+			slotChar,
+		);
 		const insertedId = insertResult.rows[0]?.id;
 		if (tier2 && insertedId !== undefined) {
 			const claim = await claimDisplayAlias(insertedId, tier2, { tier: 2 });
@@ -375,9 +401,15 @@ export async function resolveAgentByIdentityOrAlias(value: string): Promise<{
 		display_alias: string | null;
 		status: string;
 	}>(
+		// Identity match has no status filter (lookup by exact ID always works).
+		// Alias match is restricted to non-terminal rows so a retired agent's
+		// lingering alias cannot shadow the active holder.
+		// ORDER BY ensures identity match wins when a row satisfies both predicates.
 		`SELECT id, agent_identity, display_alias, status
 		 FROM roadmap_workforce.agent_registry
-		 WHERE agent_identity = $1 OR display_alias = $1
+		 WHERE agent_identity = $1
+		    OR (display_alias = $1 AND status NOT IN ('inactive', 'retired'))
+		 ORDER BY (CASE WHEN agent_identity = $1 THEN 0 ELSE 1 END)
 		 LIMIT 1`,
 		[value],
 	);
@@ -388,7 +420,9 @@ export async function resolveAgentByIdentityOrAlias(value: string): Promise<{
  * P159: Fetch the stored public_key for an agent from agent_registry.
  * Returns null when the agent row does not exist or has no key on record.
  */
-export async function getAgentPublicKey(agentId: string): Promise<string | null> {
+export async function getAgentPublicKey(
+	agentId: string,
+): Promise<string | null> {
 	const { rows } = await query<{ public_key: string | null }>(
 		`SELECT public_key FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
 		[agentId],

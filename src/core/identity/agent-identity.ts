@@ -79,6 +79,33 @@ export interface TokenVerification {
 	expired: boolean;
 }
 
+type RegisterIdentityFn = typeof registerAgent;
+type UpdatePublicKeyFn = typeof updateAgentPublicKey;
+type LookupPublicKeyFn = typeof getAgentPublicKey;
+
+type IdentityRegistryOptions = {
+	registerIdentity?: RegisterIdentityFn;
+};
+
+type RotationRegistryOptions = {
+	updatePublicKey?: UpdatePublicKeyFn;
+};
+
+async function syncIdentityToRegistry(
+	keyPair: AgentKeyPair,
+	registerIdentity: RegisterIdentityFn = registerAgent,
+): Promise<void> {
+	try {
+		await registerIdentity({
+			agentId: keyPair.agentId,
+			instanceId: keyPair.agentId,
+			publicKey: keyPair.publicKey,
+		});
+	} catch {
+		// DB unavailable or key conflict — file system remains authoritative
+	}
+}
+
 // ===================== Key Generation =====================
 
 /**
@@ -184,6 +211,7 @@ export async function listAgentIds(workspaceRoot: string): Promise<string[]> {
 export async function getOrCreateIdentity(
 	workspaceRoot: string,
 	agentName: string,
+	options: IdentityRegistryOptions = {},
 ): Promise<AgentKeyPair> {
 	// Derive deterministic agentId from name for consistent identity
 	const nameHash = createHash("sha256").update(agentName).digest("hex");
@@ -192,6 +220,7 @@ export async function getOrCreateIdentity(
 	// Check if key already exists
 	const existing = await loadKeyPair(workspaceRoot, tempAgentId);
 	if (existing) {
+		await syncIdentityToRegistry(existing, options.registerIdentity);
 		return existing;
 	}
 
@@ -199,12 +228,8 @@ export async function getOrCreateIdentity(
 	const keyPair = generateAgentKeyPair(tempAgentId);
 	await saveKeyPair(workspaceRoot, keyPair);
 
-	// Best-effort: register with DB so public_key is stored in agent_registry
-	try {
-		await registerAgent({ agentId: tempAgentId, publicKey: keyPair.publicKey });
-	} catch {
-		// DB unavailable or key conflict — file system remains authoritative
-	}
+	// Best-effort: register with DB so public_key is stored in agent_registry.
+	await syncIdentityToRegistry(keyPair, options.registerIdentity);
 
 	return keyPair;
 }
@@ -370,30 +395,21 @@ export function verifySignature(
 export async function rotateKeyPair(
 	workspaceRoot: string,
 	currentKeyPair: AgentKeyPair,
+	options: RotationRegistryOptions = {},
 ): Promise<{ newKeyPair: AgentKeyPair; previousPublicKey: string }> {
-	// Generate new key pair with same agentId
-	const newKeyPair: AgentKeyPair = {
-		agentId: currentKeyPair.agentId,
-		publicKey: generateKeyPairSync("ed25519", {
-			publicKeyEncoding: { type: "spki", format: "pem" },
-			privateKeyEncoding: { type: "pkcs8", format: "pem" },
-		}).publicKey,
-		privateKey: generateKeyPairSync("ed25519", {
-			publicKeyEncoding: { type: "spki", format: "pem" },
-			privateKeyEncoding: { type: "pkcs8", format: "pem" },
-		}).privateKey,
-		created: currentKeyPair.created,
-		rotated: new Date().toISOString(),
-		version: currentKeyPair.version + 1,
-	};
-
-	// Actually generate a single consistent keypair
 	const { publicKey, privateKey } = generateKeyPairSync("ed25519", {
 		publicKeyEncoding: { type: "spki", format: "pem" },
 		privateKeyEncoding: { type: "pkcs8", format: "pem" },
 	});
-	newKeyPair.publicKey = publicKey;
-	newKeyPair.privateKey = privateKey;
+
+	const newKeyPair: AgentKeyPair = {
+		agentId: currentKeyPair.agentId,
+		publicKey,
+		privateKey,
+		created: currentKeyPair.created,
+		rotated: new Date().toISOString(),
+		version: currentKeyPair.version + 1,
+	};
 
 	// Archive old key for verification transition period
 	const archivePath = join(
@@ -412,7 +428,10 @@ export async function rotateKeyPair(
 
 	// Best-effort: propagate new public_key to DB and stamp key_rotated_at
 	try {
-		await updateAgentPublicKey(currentKeyPair.agentId, newKeyPair.publicKey);
+		await (options.updatePublicKey ?? updateAgentPublicKey)(
+			currentKeyPair.agentId,
+			newKeyPair.publicKey,
+		);
 	} catch {
 		// DB unavailable — file system remains authoritative
 	}
@@ -546,11 +565,12 @@ export function verifyOperationAuthorization(
  */
 export async function verifyTokenWithDbLookup(
 	token: AuthToken,
+	lookupPublicKey: LookupPublicKeyFn = getAgentPublicKey,
 ): Promise<TokenVerification> {
 	let publicKey = token.publicKey;
 
 	try {
-		const dbKey = await getAgentPublicKey(token.agentId);
+		const dbKey = await lookupPublicKey(token.agentId);
 		if (dbKey) publicKey = dbKey;
 	} catch {
 		// DB unavailable — fall back to embedded token.publicKey
