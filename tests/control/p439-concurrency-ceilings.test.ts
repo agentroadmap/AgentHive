@@ -183,3 +183,103 @@ describe("P439: concurrency ceilings — agency cap=10 blocks the 11th concurren
 		);
 	});
 });
+
+// ─── Scenario: 3 concurrent claims on same proposal hitting cap=2 ─────────────
+//
+// Exercises the proposal-level ceiling path added to tryClaimDispatch.
+// Dispatches have agency_id=NULL so only the proposal ceiling fires.
+// fn_check_concurrency('proposal', ...) acquires FOR UPDATE on the proposal
+// concurrency_limit row, serializing the three concurrent transactions so the
+// count is accurate even with Promise.all.
+
+describe("P439: proposal-level ceiling blocks the 3rd concurrent claim on the same proposal", () => {
+	const PROPOSAL_ID = 999439; // test-only synthetic proposal id
+	const PROP_CAP = 2;
+	const propDispatchIds: string[] = [];
+
+	before(async () => {
+		await query(
+			`INSERT INTO roadmap_control.concurrency_limit
+			     (scope_type, scope_id, max_active_claims, max_active_workers)
+			 VALUES ('proposal', $1, $2, $2)
+			 ON CONFLICT (scope_type, scope_id) DO UPDATE
+			     SET max_active_claims  = EXCLUDED.max_active_claims,
+			         max_active_workers = EXCLUDED.max_active_workers`,
+			[PROPOSAL_ID.toString(), PROP_CAP],
+		);
+
+		for (let i = 0; i < PROP_CAP + 1; i++) {
+			const { rows } = await query<{ dispatch_id: string }>(
+				`INSERT INTO roadmap_control.dispatch
+				     (proposal_id, project_id, agency_id, worker_id,
+				      host, route, model, provider, agent_cli, budget_scope, status)
+				 VALUES ($1, 'p439-prop-test', NULL, $2,
+				         'hermes', 'hermes-3', 'hermes-3', 'nous', 'hermes', 'budget-p439', 'pending')
+				 RETURNING dispatch_id::text`,
+				[PROPOSAL_ID, `worker-prop-${i}-${TS}`],
+			);
+			propDispatchIds.push(rows[0]!.dispatch_id);
+		}
+	});
+
+	it(`${PROP_CAP} concurrent tryClaimDispatch calls win; the ${PROP_CAP + 1}th is rejected at proposal ceiling`, async () => {
+		const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+		const results = await Promise.all(
+			propDispatchIds.map((dId, i) =>
+				tryClaimDispatch(dId, `agent-prop-${i}-${TS}`, expiresAt).then((r) => ({ r, dId })),
+			),
+		);
+
+		const winners = results.filter(({ r }) => r.won);
+		const losers = results.filter(({ r }) => !r.won);
+
+		assert.strictEqual(winners.length, PROP_CAP, `exactly ${PROP_CAP} agents must win within proposal cap`);
+		assert.strictEqual(losers.length, 1, "exactly 1 agent must be rejected at proposal ceiling");
+
+		const loserReason = (losers[0]!.r as { won: false; reason: string }).reason;
+		assert.strictEqual(loserReason, "concurrency_ceiling_exceeded");
+	});
+
+	it("loser dispatch remains pending (never claimed)", async () => {
+		const loserDId = propDispatchIds.find((dId) => {
+			// The dispatch with no active claim is the loser.
+			return true; // resolved below via DB query
+		});
+		const { rows } = await query<{ dispatch_id: string }>(
+			`SELECT d.dispatch_id::text
+			   FROM roadmap_control.dispatch d
+			   LEFT JOIN roadmap_control.claim c ON c.dispatch_id = d.dispatch_id
+			                                    AND c.status = 'active'
+			  WHERE d.proposal_id = $1
+			    AND c.claim_id IS NULL`,
+			[PROPOSAL_ID],
+		);
+		assert.strictEqual(rows.length, 1, "exactly one dispatch must remain unclaimed");
+		assert.ok(propDispatchIds.includes(rows[0]!.dispatch_id));
+	});
+
+	it("v_concurrency_usage shows proposal at ceiling", async () => {
+		const { rows } = await query<{ current_active_claims: number; at_ceiling: boolean }>(
+			`SELECT current_active_claims, at_ceiling
+			   FROM roadmap_control.v_concurrency_usage
+			  WHERE scope_type = 'proposal'
+			    AND scope_id   = $1`,
+			[PROPOSAL_ID.toString()],
+		);
+		assert.ok(rows[0], "v_concurrency_usage must have a row for this proposal");
+		assert.strictEqual(rows[0]!.current_active_claims, PROP_CAP);
+		assert.strictEqual(rows[0]!.at_ceiling, true);
+	});
+
+	after(async () => {
+		for (const dId of propDispatchIds) {
+			await cleanupDispatch(dId);
+		}
+		await query(
+			`DELETE FROM roadmap_control.concurrency_limit
+			  WHERE scope_type = 'proposal' AND scope_id = $1`,
+			[PROPOSAL_ID.toString()],
+		);
+	});
+});
