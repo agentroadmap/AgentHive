@@ -53,11 +53,14 @@ export interface LiaisonBootHandle {
  */
 export function readAgencyConfig(): AgencyConfig {
   const agency_id = process.env.AGENCY_ID?.trim();
-  const provider = process.env.AGENCY_PROVIDER?.trim();
+  // AGENCY_PROVIDER is canonical; AGENTHIVE_AGENT_PROVIDER is legacy fallback
+  // for older per-instance env files that haven't been updated yet.
+  const provider =
+    (process.env.AGENCY_PROVIDER?.trim() || process.env.AGENTHIVE_AGENT_PROVIDER?.trim()) ?? "";
   const host_id = process.env.AGENCY_HOST_ID?.trim();
 
   if (!agency_id) throw new Error("AGENCY_ID env var is required");
-  if (!provider) throw new Error("AGENCY_PROVIDER env var is required");
+  if (!provider) throw new Error("AGENCY_PROVIDER (or AGENTHIVE_AGENT_PROVIDER fallback) env var is required");
   if (!host_id) throw new Error("AGENCY_HOST_ID env var is required");
 
   const display_name =
