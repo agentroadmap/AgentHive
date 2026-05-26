@@ -196,7 +196,29 @@ async function runSpawn(args: {
 	const claimToken = payload.claim_token as string;
 
 	// P465: capacity check before spawning — re-queue and throttle if quota exceeded
-	const capacityCheck = await checkCapacity(agencyId);
+	// P1379: wrap in try/catch to prevent unhandled errors from escaping
+	let capacityCheck;
+	try {
+		capacityCheck = await checkCapacity(agencyId);
+	} catch (capCheckErr) {
+		logger.error(
+			`[OfferDispatchHandler] ${agencyId}: capacity check threw for offer=${payload.offer_id}:`,
+			capCheckErr instanceof Error ? capCheckErr.message : capCheckErr,
+		);
+		try {
+			await exec(
+				`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, $4)`,
+				[dispatchId, agencyId, claimToken, "failed"],
+			);
+		} catch (completeErr) {
+			logger.error(
+				`[OfferDispatchHandler] ${agencyId}: fn_complete_work_offer (capacity-check-error) failed for offer=${payload.offer_id}:`,
+				completeErr instanceof Error ? completeErr.message : completeErr,
+			);
+		}
+		return;
+	}
+
 	if (!capacityCheck.allowed) {
 		logger.warn(
 			`[OfferDispatchHandler] ${agencyId}: capacity refused for offer=${payload.offer_id} — ${capacityCheck.refuse_reason}`,
