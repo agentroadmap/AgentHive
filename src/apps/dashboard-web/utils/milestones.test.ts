@@ -4,7 +4,7 @@ import {
 	buildDirectiveBuckets,
 	collectDirectiveIds,
 	validateDirectiveName,
-} from "./directives";
+} from "./directives.ts";
 import type {
 	Directive,
 	DirectiveBucket,

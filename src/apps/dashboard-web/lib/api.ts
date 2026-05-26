@@ -1,4 +1,4 @@
-import type { ProposalStatistics } from "../types/statistics";
+import type { ProposalStatistics } from "../types/statistics.ts";
 import { getStoredProjectId } from "./project-scope-storage";
 import type {
 	Agent,

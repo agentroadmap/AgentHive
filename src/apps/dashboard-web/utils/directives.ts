@@ -9,7 +9,7 @@ import type {
 	DirectiveBucket,
 	DirectiveSummary,
 	Proposal,
-} from "../../../shared/types";
+} from "../../../shared/types/index.ts";
 import {
 	isCompleteStatus,
 	isReady,
