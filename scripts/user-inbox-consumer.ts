@@ -6,7 +6,9 @@
  * Marks messages as read + forwards to state_feed_user_inbox for downstream display surfaces
  * (TUI live-feed, Discord bridge).
  *
- * Channel: a2a_msg_user/<operator> (P1103 unified msg_ prefix)
+ * Channel: derived via agentNotifyChannel('user/<operator>') — canonical msg_ prefix per P1103.
+ *          Never hard-code 'a2a_msg_' anywhere. The notify channel name is a
+ *          runtime computation, not a literal.
  * Operator: INBOX_OPERATOR env var, defaults to "gary"
  *
  * Boot-drain: on startup, fetches all messages to_agent='user/<operator>'
@@ -26,11 +28,25 @@ import { agentNotifyChannel } from "../src/infra/messaging/a2a-access-control.ts
 
 setPoolLifecycleMode("long-running");
 
+// When stdout is piped (systemd journal, tests, supervisors), Node defaults to
+// block-buffered mode and "Ready" / lifecycle messages never reach the consumer
+// in time. Force blocking mode so each console.log flushes immediately —
+// required for the integration test's waitForStdout pattern and for journalctl
+// visibility under tail -f.
+const stdoutHandle = (process.stdout as unknown as { _handle?: { setBlocking?: (b: boolean) => void } })._handle;
+if (stdoutHandle?.setBlocking) stdoutHandle.setBlocking(true);
+const stderrHandle = (process.stderr as unknown as { _handle?: { setBlocking?: (b: boolean) => void } })._handle;
+if (stderrHandle?.setBlocking) stderrHandle.setBlocking(true);
+
 const OPERATOR = process.env.INBOX_OPERATOR ?? "gary";
 const IDENTITY = `user/${OPERATOR}`;
 const DRAIN_WINDOW_HOURS = 24;
 const LOG = `[user-inbox/${OPERATOR}]`;
 const KEEPALIVE_INTERVAL_MS = 10_000;
+// P1126 AC-9: keepalive query must time out so a half-open TCP connection
+// doesn't leave the process alive-but-broken (event loop turning, no error
+// event, systemd happy). 5s is well under the interval.
+const KEEPALIVE_QUERY_TIMEOUT_MS = 5_000;
 
 let exiting = false;
 
@@ -257,12 +273,14 @@ async function main() {
 	// Dedicated LISTEN client — must bypass PgBouncer.
 	const listenClient = new Client({
 		host: process.env.PGHOST ?? process.env.PG_HOST ?? "127.0.0.1",
-		port: Number(
-			process.env.PGPORT_DIRECT ??
-				process.env.PGPORT ??
-				process.env.PG_PORT ??
-				"5432",
-		),
+		// AC-28 + 2026-05-25 hotfix: MUST bypass PgBouncer.
+		// PgBouncer's transaction-pool mode silently drops NOTIFYs to LISTEN
+		// clients. /etc/agenthive/env sets PGPORT=6432 (the bouncer); the old
+		// fall-through "PGPORT_DIRECT ?? PGPORT ?? PG_PORT ?? 5432" would land
+		// on 6432 and silently fail (the disabled agenthive-user-inbox@.service
+		// is the smoking gun). Only honor PGPORT_DIRECT; default direct-Postgres
+		// to 5432. Never read PGPORT here.
+		port: Number(process.env.PGPORT_DIRECT ?? "5432"),
 		user: process.env.PGUSER ?? process.env.PG_USER,
 		password: pgPassword,
 		database: process.env.PGDATABASE ?? process.env.PG_DATABASE ?? "agenthive",
@@ -323,8 +341,22 @@ async function main() {
 	);
 
 	keepaliveTimer = setInterval(async () => {
+		// AC-9: race the query against a timeout so a hung pg.Client.query
+		// (silent half-open TCP) goes down the exitOnDisconnect path instead
+		// of leaving the process superficially alive.
+		const timeoutPromise = new Promise<never>((_, reject) =>
+			setTimeout(
+				() =>
+					reject(
+						new Error(
+							`keepalive timed out after ${KEEPALIVE_QUERY_TIMEOUT_MS}ms`,
+						),
+					),
+				KEEPALIVE_QUERY_TIMEOUT_MS,
+			).unref(),
+		);
 		try {
-			await listenClient.query("SELECT 1");
+			await Promise.race([listenClient.query("SELECT 1"), timeoutPromise]);
 		} catch (err) {
 			exitOnDisconnect(`keepalive failed: ${(err as Error).message}`);
 		}

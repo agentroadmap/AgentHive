@@ -114,7 +114,11 @@ function sleep(ms: number): Promise<void> {
 // Unique operator name per test run to avoid collisions with production consumer.
 const TEST_OPERATOR = `test-resilience-${process.pid}`;
 const TEST_IDENTITY = `user/${TEST_OPERATOR}`;
-const CHANNEL = `a2a_msg_${TEST_IDENTITY}`;
+// Canonical channel naming per P1103 + P1120 AC-23: derive via the same helper
+// the consumer uses, NOT the legacy `a2a_msg_` literal. Hard-coding the legacy
+// prefix here was the silent test-failure cause until 2026-05-25 — consumer
+// wrote msg_<identity>, test queried a2a_msg_<identity>, 0 rows = assertion fail.
+const CHANNEL = `msg_${TEST_IDENTITY}`;
 
 let db: Client;
 
@@ -221,14 +225,14 @@ describe("user-inbox-consumer resilience", () => {
 			const ins1 = await db.query<{ id: number }>(
 				`INSERT INTO roadmap.message_ledger
 				    (from_agent, to_agent, message_type, message_content, created_at)
-				 VALUES ('system', $1, 'test_ping', 'msg-A', now())
+				 VALUES ('system', $1, 'notify', 'msg-A', now())
 				 RETURNING id`,
 				[TEST_IDENTITY],
 			);
 			const ins2 = await db.query<{ id: number }>(
 				`INSERT INTO roadmap.message_ledger
 				    (from_agent, to_agent, message_type, message_content, created_at)
-				 VALUES ('system', $1, 'test_ping', 'msg-B', now())
+				 VALUES ('system', $1, 'notify', 'msg-B', now())
 				 RETURNING id`,
 				[TEST_IDENTITY],
 			);
@@ -308,7 +312,7 @@ describe("user-inbox-consumer resilience", () => {
 			const { rows: ins } = await db.query<{ id: number }>(
 				`INSERT INTO roadmap.message_ledger
 				    (from_agent, to_agent, message_type, message_content, created_at)
-				 VALUES ('system', $1, 'test_ping', 'duplicate-guard', now())
+				 VALUES ('system', $1, 'notify', 'duplicate-guard', now())
 				 RETURNING id`,
 				[TEST_IDENTITY],
 			);
