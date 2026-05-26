@@ -26,13 +26,13 @@ import RoutesPage from "./components/RoutesPage";
 import SettingsPage from "./components/SettingsPage";
 import StatisticsPage from "./components/StatisticsPage";
 import TeamsPage from "./components/TeamsPage";
+import { useBoardColumns } from "./hooks/useBoardColumns";
 import {
 	useWebSocket,
 	type Agent as WebSocketAgent,
 	type Channel as WebSocketChannel,
 	type Proposal as WebSocketProposal,
 } from "./hooks/useWebSocket";
-import { useBoardStages } from "./hooks/useBoardStages";
 import {
 	buildProposalSelectionAliases,
 	mergeProposalDetailState,
@@ -52,8 +52,12 @@ function toSharedProposal(proposal: WebSocketProposal): Proposal {
 		title: proposal.title,
 		status: proposal.status,
 		assignee: [],
-		createdDate: proposal.createdDate || proposal.createdAt || '',
-		updatedDate: proposal.updatedDate || proposal.updatedAt || proposal.createdDate || proposal.createdAt,
+		createdDate: proposal.createdDate || proposal.createdAt || "",
+		updatedDate:
+			proposal.updatedDate ||
+			proposal.updatedAt ||
+			proposal.createdDate ||
+			proposal.createdAt,
 		labels,
 		dependencies: proposal.parentId ? [proposal.parentId] : [],
 		summary: proposal.summary ?? proposal.bodyMarkdown ?? undefined,
@@ -120,18 +124,14 @@ export default function App() {
 	const [activeWorkflow, setActiveWorkflow] = useState(() => {
 		if (typeof window !== "undefined") {
 			return (
-				window.localStorage.getItem("roadmap.board.workflow") ||
-				"Standard RFC"
+				window.localStorage.getItem("roadmap.board.workflow") || "Standard RFC"
 			);
 		}
 		return "Standard RFC";
 	});
 
-	// Load dynamic stages based on active workflow
-	const { stages: boardStages } = useBoardStages(activeWorkflow);
-
-	// Convert stage objects to status strings for backward compatibility
-	const statuses = boardStages.map((stage) => stage.id);
+	const { columns: boardColumns } = useBoardColumns(activeWorkflow, connected);
+	const statuses = boardColumns.map((column) => column.stage_name);
 
 	useEffect(() => {
 		if (typeof window !== "undefined") {
