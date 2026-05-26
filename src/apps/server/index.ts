@@ -1130,6 +1130,12 @@ export class RoadmapServer {
 				return await this.handleToggleRoute(req, pathname.split("/").at(-1)!);
 			if (pathname === "/api/dispatches" && method === "GET")
 				return await this.handleListDispatches(req);
+			if (
+				(pathname === "/api/board/columns" ||
+					pathname === "/api/board-columns") &&
+				method === "GET"
+			)
+				return await this.handleGetBoardColumns(req);
 			if (pathname === "/api/board/stages" && method === "GET")
 				return await this.handleGetBoardStages(req);
 
@@ -4135,8 +4141,8 @@ export class RoadmapServer {
 				        mr.priority,
 				        mr.api_spec,
 				        mr.base_url,
-				        mr.cost_per_1k_input * 1000 AS cost_per_million_input,
-				        mr.cost_per_1k_output * 1000 AS cost_per_million_output,
+				        mr.cost_per_million_input,
+				        mr.cost_per_million_output,
 				        mr.plan_type,
 				        mr.notes,
 				        mr.created_at,
@@ -4243,6 +4249,86 @@ export class RoadmapServer {
 				workflow: "Standard RFC",
 				error: error instanceof Error ? error.message : "Registry not loaded",
 			});
+		}
+	}
+
+	private async handleGetBoardColumns(req?: Request): Promise<Response> {
+		const url = new URL(
+			req?.url || "http://localhost/?workflowName=Standard RFC",
+		);
+		const workflowName =
+			url.searchParams.get("workflowName") ||
+			url.searchParams.get("workflow") ||
+			"Standard RFC";
+
+		try {
+			const { rows } = await query<{
+				stage_name: string;
+				stage_order: number;
+				display_label: string;
+				is_terminal: boolean;
+				maturity_gate: number | null;
+				avg_dwell_days: number | string | null;
+			}>(
+				`WITH selected_template AS (
+				   SELECT id, name
+				   FROM roadmap.workflow_templates
+				   WHERE lower(name) = lower($1)
+				      OR ($1 = 'RFC 5-Stage' AND lower(name) = 'standard rfc')
+				   ORDER BY CASE WHEN lower(name) = lower($1) THEN 0 ELSE 1 END
+				   LIMIT 1
+				 )
+				 SELECT
+				   ws.stage_name,
+				   ws.stage_order,
+				   COALESCE(wsd.display_label, initcap(replace(lower(ws.stage_name), '_', ' '))) AS display_label,
+				   COALESCE(wsd.is_terminal, ws.stage_name IN ('COMPLETE', 'MERGE')) AS is_terminal,
+				   ws.maturity_gate,
+				   d.avg_dwell_days
+				 FROM roadmap.workflow_stages ws
+				 JOIN selected_template wt ON wt.id = ws.template_id
+				 LEFT JOIN roadmap.workflow_stage_definition wsd
+				   ON wsd.stage_name = ws.stage_name
+				  AND wsd.is_active = true
+				 LEFT JOIN roadmap_proposal.v_stage_dwell_stats d
+				   ON d.stage_name = ws.stage_name
+				 WHERE ws.is_active = true
+				 ORDER BY ws.stage_order, ws.stage_name`,
+				[workflowName],
+			);
+
+			return Response.json(rows, {
+				headers: { "Cache-Control": "public, max-age=300" },
+			});
+		} catch (error) {
+			try {
+				const registry = getRegistry();
+				const view = registry.getView(
+					workflowName === "RFC 5-Stage" ? "Standard RFC" : workflowName,
+				);
+				const rows = view.stages.map((stage) => ({
+					stage_name: stage.name,
+					stage_order: stage.order,
+					display_label: stage.name,
+					is_terminal: stage.isTerminal,
+					maturity_gate: null,
+					avg_dwell_days: null,
+				}));
+				return Response.json(rows, {
+					headers: { "Cache-Control": "public, max-age=300" },
+				});
+			} catch {
+				console.error("Error loading board columns:", error);
+				return Response.json(
+					{
+						error:
+							error instanceof Error
+								? error.message
+								: "Failed to load board columns",
+					},
+					{ status: 500 },
+				);
+			}
 		}
 	}
 

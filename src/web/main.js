@@ -155390,7 +155390,7 @@ var init_sankey = __esm(() => {
   init_align();
 });
 
-// node_modules/d3-sankey/node_modules/d3-path/src/path.js
+// node_modules/d3-sankey/node_modules/d3-shape/node_modules/d3-path/src/path.js
 function Path2() {
   this._x0 = this._y0 = this._x1 = this._y1 = null;
   this._ = "";
@@ -155472,7 +155472,7 @@ var init_path3 = __esm(() => {
   path_default2 = path4;
 });
 
-// node_modules/d3-sankey/node_modules/d3-path/src/index.js
+// node_modules/d3-sankey/node_modules/d3-shape/node_modules/d3-path/src/index.js
 var init_src34 = __esm(() => {
   init_path3();
 });
@@ -160400,7 +160400,7 @@ var init_diagram_5BDNPKRD = __esm(() => {
   };
 });
 
-// node_modules/cytoscape-fcose/node_modules/layout-base/layout-base.js
+// node_modules/cytoscape-fcose/node_modules/cose-base/node_modules/layout-base/layout-base.js
 var require_layout_base2 = __commonJS((exports, module) => {
   (function webpackUniversalModuleDefinition(root10, factory2) {
     if (typeof exports === "object" && typeof module === "object")
@@ -183840,7 +183840,7 @@ function vbnet(Prism) {
   });
 }
 
-// node_modules/refractor/node_modules/property-information/lib/util/schema.js
+// node_modules/hastscript/node_modules/property-information/lib/util/schema.js
 class Schema {
   constructor(property, normal, space) {
     this.property = property;
@@ -183854,7 +183854,7 @@ Schema.prototype.property = {};
 Schema.prototype.normal = {};
 Schema.prototype.space = null;
 
-// node_modules/refractor/node_modules/property-information/lib/util/merge.js
+// node_modules/hastscript/node_modules/property-information/lib/util/merge.js
 function merge(definitions, space) {
   const property = {};
   const normal = {};
@@ -183866,12 +183866,12 @@ function merge(definitions, space) {
   return new Schema(property, normal, space);
 }
 
-// node_modules/refractor/node_modules/property-information/lib/normalize.js
+// node_modules/hastscript/node_modules/property-information/lib/normalize.js
 function normalize(value) {
   return value.toLowerCase();
 }
 
-// node_modules/refractor/node_modules/property-information/lib/util/info.js
+// node_modules/hastscript/node_modules/property-information/lib/util/info.js
 class Info {
   constructor(property, attribute) {
     this.property = property;
@@ -183889,7 +183889,7 @@ Info.prototype.commaOrSpaceSeparated = false;
 Info.prototype.mustUseProperty = false;
 Info.prototype.defined = false;
 
-// node_modules/refractor/node_modules/property-information/lib/util/types.js
+// node_modules/hastscript/node_modules/property-information/lib/util/types.js
 var exports_types = {};
 __export(exports_types, {
   spaceSeparated: () => spaceSeparated,
@@ -183912,7 +183912,7 @@ function increment() {
   return 2 ** ++powers;
 }
 
-// node_modules/refractor/node_modules/property-information/lib/util/defined-info.js
+// node_modules/hastscript/node_modules/property-information/lib/util/defined-info.js
 var checks = Object.keys(exports_types);
 
 class DefinedInfo extends Info {
@@ -183935,7 +183935,7 @@ function mark(values, key, value) {
   }
 }
 
-// node_modules/refractor/node_modules/property-information/lib/util/create.js
+// node_modules/hastscript/node_modules/property-information/lib/util/create.js
 var own2 = {}.hasOwnProperty;
 function create(definition) {
   const property = {};
@@ -183956,7 +183956,7 @@ function create(definition) {
   return new Schema(property, normal, definition.space);
 }
 
-// node_modules/refractor/node_modules/property-information/lib/xlink.js
+// node_modules/hastscript/node_modules/property-information/lib/xlink.js
 var xlink = create({
   space: "xlink",
   transform(_, prop) {
@@ -183973,7 +183973,7 @@ var xlink = create({
   }
 });
 
-// node_modules/refractor/node_modules/property-information/lib/xml.js
+// node_modules/hastscript/node_modules/property-information/lib/xml.js
 var xml = create({
   space: "xml",
   transform(_, prop) {
@@ -183982,17 +183982,17 @@ var xml = create({
   properties: { xmlLang: null, xmlBase: null, xmlSpace: null }
 });
 
-// node_modules/refractor/node_modules/property-information/lib/util/case-sensitive-transform.js
+// node_modules/hastscript/node_modules/property-information/lib/util/case-sensitive-transform.js
 function caseSensitiveTransform(attributes, attribute) {
   return attribute in attributes ? attributes[attribute] : attribute;
 }
 
-// node_modules/refractor/node_modules/property-information/lib/util/case-insensitive-transform.js
+// node_modules/hastscript/node_modules/property-information/lib/util/case-insensitive-transform.js
 function caseInsensitiveTransform(attributes, property) {
   return caseSensitiveTransform(attributes, property.toLowerCase());
 }
 
-// node_modules/refractor/node_modules/property-information/lib/xmlns.js
+// node_modules/hastscript/node_modules/property-information/lib/xmlns.js
 var xmlns = create({
   space: "xmlns",
   attributes: { xmlnsxlink: "xmlns:xlink" },
@@ -184000,7 +184000,7 @@ var xmlns = create({
   properties: { xmlns: null, xmlnsXLink: null }
 });
 
-// node_modules/refractor/node_modules/property-information/lib/aria.js
+// node_modules/hastscript/node_modules/property-information/lib/aria.js
 var aria = create({
   transform(_, prop) {
     return prop === "role" ? prop : "aria-" + prop.slice(4).toLowerCase();
@@ -184058,7 +184058,7 @@ var aria = create({
   }
 });
 
-// node_modules/refractor/node_modules/property-information/lib/html.js
+// node_modules/hastscript/node_modules/property-information/lib/html.js
 var html = create({
   space: "html",
   attributes: {
@@ -184365,7 +184365,7 @@ var html = create({
   }
 });
 
-// node_modules/refractor/node_modules/property-information/lib/svg.js
+// node_modules/hastscript/node_modules/property-information/lib/svg.js
 var svg = create({
   space: "svg",
   attributes: {
@@ -184923,7 +184923,7 @@ var svg = create({
   }
 });
 
-// node_modules/refractor/node_modules/property-information/lib/find.js
+// node_modules/hastscript/node_modules/property-information/lib/find.js
 var valid = /^data[-\w.:]+$/i;
 var dash = /-[a-z]/g;
 var cap = /[A-Z]/g;
@@ -184958,11 +184958,11 @@ function kebab($0) {
 function camelcase($0) {
   return $0.charAt(1).toUpperCase();
 }
-// node_modules/refractor/node_modules/property-information/index.js
+// node_modules/hastscript/node_modules/property-information/index.js
 var html2 = merge([xml, xlink, xmlns, aria, html], "html");
 var svg2 = merge([xml, xlink, xmlns, aria, svg], "svg");
 
-// node_modules/refractor/node_modules/hast-util-parse-selector/lib/index.js
+// node_modules/hast-util-parse-selector/lib/index.js
 var search = /[#.]/g;
 function parseSelector(selector, defaultTagName) {
   const value = selector || "";
@@ -185034,7 +185034,7 @@ function stringify2(values, options) {
   return input.join((settings.padRight ? " " : "") + "," + (settings.padLeft === false ? "" : " ")).trim();
 }
 
-// node_modules/refractor/node_modules/hastscript/lib/core.js
+// node_modules/hastscript/lib/core.js
 var buttonTypes = new Set(["menu", "submit", "reset", "button"]);
 var own3 = {}.hasOwnProperty;
 function core(schema, defaultTagName, caseSensitive) {
@@ -185175,7 +185175,7 @@ function createAdjustMap(values) {
   return result;
 }
 
-// node_modules/refractor/node_modules/hastscript/lib/html.js
+// node_modules/hastscript/lib/html.js
 var h = core(html2, "div");
 // node_modules/character-entities-legacy/index.js
 var characterEntitiesLegacy = [
@@ -205932,7 +205932,7 @@ var serialize = (value, { json: json2, lossy } = {}) => {
 // node_modules/@ungap/structured-clone/esm/index.js
 var esm_default = typeof structuredClone === "function" ? (any, options) => options && (("json" in options) || ("lossy" in options)) ? deserialize(serialize(any, options)) : structuredClone(any) : (any, options) => deserialize(serialize(any, options));
 
-// node_modules/hast-util-parse-selector/lib/index.js
+// node_modules/hast-util-from-parse5/node_modules/hastscript/node_modules/hast-util-parse-selector/lib/index.js
 var search2 = /[#.]/g;
 function parseSelector2(selector, defaultTagName) {
   const value = selector || "";
@@ -205968,7 +205968,7 @@ function parseSelector2(selector, defaultTagName) {
     children: []
   };
 }
-// node_modules/hastscript/lib/create-h.js
+// node_modules/hast-util-from-parse5/node_modules/hastscript/lib/create-h.js
 function createH(schema, defaultTagName, caseSensitive) {
   const adjust = caseSensitive ? createAdjustMap2(caseSensitive) : undefined;
   function h2(selector, properties2, ...children) {
@@ -206108,7 +206108,7 @@ function createAdjustMap2(values) {
   return result;
 }
 
-// node_modules/hastscript/lib/svg-case-sensitive-tag-names.js
+// node_modules/hast-util-from-parse5/node_modules/hastscript/lib/svg-case-sensitive-tag-names.js
 var svgCaseSensitiveTagNames = [
   "altGlyph",
   "altGlyphDef",
@@ -206151,7 +206151,7 @@ var svgCaseSensitiveTagNames = [
   "textPath"
 ];
 
-// node_modules/hastscript/lib/index.js
+// node_modules/hast-util-from-parse5/node_modules/hastscript/lib/index.js
 var h2 = createH(html4, "div");
 var s3 = createH(svg4, "g", svgCaseSensitiveTagNames);
 // node_modules/vfile-location/lib/index.js
@@ -229528,27 +229528,16 @@ function proposalExportFilename(proposal) {
   return slug2 ? `${id33}-${slug2}-${stamp}.md` : `${id33}-${stamp}.md`;
 }
 
-// src/apps/dashboard-web/lib/proposal-activity.ts
-var localActivityDateTimeFormatter = new Intl.DateTimeFormat(undefined, {
-  dateStyle: "medium",
-  timeStyle: "short"
-});
-function formatLocalActivityTimestamp(value2) {
-  if (!value2)
-    return "";
-  const date2 = new Date(value2);
-  if (Number.isNaN(date2.getTime()))
-    return value2;
-  return localActivityDateTimeFormatter.format(date2);
-}
-
 // src/apps/dashboard-web/utils/date-display.ts
 var DATE_ONLY_REGEX = /^(\d{4})-(\d{2})-(\d{2})$/;
 var DATE_TIME_REGEX = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/;
+var ISO_FULL_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
 function parseIntStrict(value2) {
   return Number.parseInt(value2, 10);
 }
 function parseStoredUtcDate(dateStr) {
+  if (!dateStr)
+    return null;
   const normalized = dateStr.trim();
   if (!normalized)
     return null;
@@ -229588,18 +229577,21 @@ function parseStoredUtcDate(dateStr) {
     }
     return date2;
   }
-  const fallback = new Date(normalized);
-  if (!Number.isNaN(fallback.getTime()))
-    return fallback;
+  if (ISO_FULL_REGEX.test(normalized)) {
+    const d4 = new Date(normalized);
+    if (!isNaN(d4.getTime()))
+      return d4;
+  }
   return null;
 }
-var HAS_TIME_REGEX = /T\d{2}:\d{2}/;
 function formatStoredUtcDateForDisplay(dateStr) {
+  if (!dateStr)
+    return "";
   const parsed = parseStoredUtcDate(dateStr);
   if (!parsed)
     return dateStr;
-  const hasTime = DATE_TIME_REGEX.test(dateStr.trim()) || HAS_TIME_REGEX.test(dateStr.trim());
-  if (hasTime) {
+  const normalized = dateStr.trim();
+  if (DATE_TIME_REGEX.test(normalized) || ISO_FULL_REGEX.test(normalized)) {
     return parsed.toLocaleString(undefined, {
       dateStyle: "medium",
       timeStyle: "short"
@@ -229608,6 +229600,8 @@ function formatStoredUtcDateForDisplay(dateStr) {
   return parsed.toLocaleDateString();
 }
 function formatStoredUtcDateForCompactDisplay(dateStr, now3 = new Date) {
+  if (!dateStr)
+    return "—";
   const normalized = dateStr.trim();
   if (!normalized)
     return "—";
@@ -230171,6 +230165,7 @@ var ProposalDetailsModal = ({
   const [decisions, setDecisions] = import_react61.useState([]);
   const [reviews, setReviews] = import_react61.useState([]);
   const [discussions, setDiscussions] = import_react61.useState([]);
+  const [activityRefreshKey, setActivityRefreshKey] = import_react61.useState(0);
   const resolveDirectiveToId = import_react61.useCallback((value2) => {
     const normalized = (value2 ?? "").trim();
     if (!normalized)
@@ -230388,20 +230383,28 @@ var ProposalDetailsModal = ({
   ]);
   const lastActivity = import_react61.useMemo(() => {
     const candidates = [];
-    if (proposal?.updatedDate)
+    if (proposal?.updatedDate?.trim())
       candidates.push({ date: proposal.updatedDate, label: "proposal updated" });
-    if (proposal?.createdDate)
+    if (proposal?.createdDate?.trim())
       candidates.push({ date: proposal.createdDate, label: "created" });
     for (const d4 of discussions)
-      candidates.push({ date: d4.created_at, label: `discussion by ${d4.author_identity}` });
+      if (d4.created_at?.trim())
+        candidates.push({ date: d4.created_at, label: `discussion by ${d4.author_identity}` });
     for (const r3 of reviews)
-      candidates.push({ date: r3.reviewed_at, label: `review by ${r3.reviewer_identity}` });
+      if (r3.reviewed_at?.trim())
+        candidates.push({ date: r3.reviewed_at, label: `review by ${r3.reviewer_identity}` });
     for (const d4 of decisions)
-      candidates.push({ date: d4.decided_at, label: `decision by ${d4.authority}` });
+      if (d4.decided_at?.trim())
+        candidates.push({ date: d4.decided_at, label: `decision by ${d4.authority}` });
     if (candidates.length === 0)
       return null;
-    return candidates.reduce((max9, cur) => cur.date > max9.date ? cur : max9);
+    const toMs = (d4) => parseStoredUtcDate(d4)?.getTime() ?? 0;
+    return candidates.reduce((max9, cur) => toMs(cur.date) > toMs(max9.date) ? cur : max9);
   }, [proposal, discussions, reviews, decisions]);
+  const handleActivityClick = import_react61.useCallback(() => {
+    onClose();
+    navigate2(`/activity?proposal=${encodeURIComponent(proposalId)}`);
+  }, [navigate2, onClose, proposalId]);
   import_react61.useEffect(() => {
     if (proposalId && proposalRef.current?.id !== proposalId)
       return;
@@ -230442,6 +230445,12 @@ var ProposalDetailsModal = ({
     };
   }, [isOpen]);
   import_react61.useEffect(() => {
+    if (!isOpen || !proposalId)
+      return;
+    const timer3 = setInterval(() => setActivityRefreshKey((k3) => k3 + 1), 30000);
+    return () => clearInterval(timer3);
+  }, [isOpen, proposalId]);
+  import_react61.useEffect(() => {
     if (!proposalId) {
       setDecisions([]);
       setReviews([]);
@@ -230478,7 +230487,7 @@ var ProposalDetailsModal = ({
     return () => {
       cancelled = true;
     };
-  }, [proposalId, isOpen]);
+  }, [proposalId, isOpen, activityRefreshKey, proposal?.updatedDate]);
   const handleCancelEdit = import_react61.useCallback(() => {
     if (isDirty) {
       const confirmDiscard = window.confirm("Discard unsaved changes?");
@@ -231378,24 +231387,18 @@ var ProposalDetailsModal = ({
                     ]
                   }, undefined, true, undefined, this),
                   /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
-                    className: "cursor-pointer hover:text-blue-600 dark:hover:text-blue-400",
-                    onClick: () => {
-                      onClose();
-                      navigate2(`/activity?proposal=${encodeURIComponent(proposalId)}`);
-                    },
-                    title: "View full activity feed",
                     children: [
                       /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
                         className: "font-semibold text-gray-800 dark:text-gray-100",
                         children: "Last activity:"
                       }, undefined, false, undefined, this),
                       " ",
-                      lastActivity ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(jsx_dev_runtime27.Fragment, {
+                      lastActivity ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("button", {
+                        type: "button",
+                        onClick: handleActivityClick,
+                        className: "text-gray-700 dark:text-gray-200 hover:underline cursor-pointer bg-transparent border-0 p-0 text-left",
                         children: [
-                          /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
-                            className: "text-gray-700 dark:text-gray-200",
-                            children: formatLocalActivityTimestamp(lastActivity.date)
-                          }, undefined, false, undefined, this),
+                          formatStoredUtcDateForDisplay(lastActivity.date),
                           /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
                             className: "ml-1 text-gray-400 dark:text-gray-500 italic",
                             children: [
@@ -233261,88 +233264,78 @@ function useWebSocket(url) {
   return { connected, proposals, agents, channels: channels2, messages: messages2, reconnect };
 }
 
-// src/apps/dashboard-web/hooks/useBoardStages.ts
+// src/apps/dashboard-web/hooks/useBoardColumns.ts
 var import_react68 = __toESM(require_react(), 1);
-var FALLBACK_STAGES = [
-  { id: "DRAFT", stageName: "DRAFT", label: "Draft", displayLabel: "Draft", hexColor: null, order: 1, isTerminal: false },
-  { id: "REVIEW", stageName: "REVIEW", label: "Review", displayLabel: "Review", hexColor: null, order: 2, isTerminal: false },
-  { id: "DEVELOP", stageName: "DEVELOP", label: "Develop", displayLabel: "Develop", hexColor: null, order: 3, isTerminal: false },
-  { id: "MERGE", stageName: "MERGE", label: "Merge", displayLabel: "Merge", hexColor: null, order: 4, isTerminal: false },
-  { id: "COMPLETE", stageName: "COMPLETE", label: "Complete", displayLabel: "Complete", hexColor: null, order: 5, isTerminal: true }
+var FALLBACK_COLUMNS = [
+  {
+    stage_name: "DRAFT",
+    stage_order: 1,
+    display_label: "Draft",
+    is_terminal: false,
+    maturity_gate: null
+  },
+  {
+    stage_name: "REVIEW",
+    stage_order: 2,
+    display_label: "Review",
+    is_terminal: false,
+    maturity_gate: null
+  },
+  {
+    stage_name: "DEVELOP",
+    stage_order: 3,
+    display_label: "Develop",
+    is_terminal: false,
+    maturity_gate: null
+  },
+  {
+    stage_name: "MERGE",
+    stage_order: 4,
+    display_label: "Merge",
+    is_terminal: false,
+    maturity_gate: null
+  },
+  {
+    stage_name: "COMPLETE",
+    stage_order: 5,
+    display_label: "Complete",
+    is_terminal: true,
+    maturity_gate: null
+  }
 ];
-function useBoardStages(workflow = "Standard RFC") {
-  const [stages, setStages] = import_react68.useState(FALLBACK_STAGES);
-  const [loading, setLoading] = import_react68.useState(true);
+function useBoardColumns(workflowName = "Standard RFC", connected = false) {
+  const [columns, setColumns] = import_react68.useState(FALLBACK_COLUMNS);
+  const [isLoading, setIsLoading] = import_react68.useState(true);
   const [error3, setError] = import_react68.useState(null);
-  const [activeWorkflow, setActiveWorkflow] = import_react68.useState(workflow);
-  const workflowRef = import_react68.useRef(workflow);
-  workflowRef.current = workflow;
-  const fetchStages = import_react68.useCallback(async (wf) => {
+  const fetchColumns = import_react68.useCallback(async () => {
     try {
-      setLoading(true);
+      setIsLoading(true);
       setError(null);
-      const url = new URL("/api/board/stages", window.location.origin);
-      url.searchParams.set("workflow", wf);
-      const response = await fetch(url.toString());
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      const url = new URL("/api/board/columns", window.location.origin);
+      url.searchParams.set("workflowName", workflowName);
+      const res = await fetch(url.toString());
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       }
-      const data5 = await response.json();
-      setStages(data5.stages);
-      setActiveWorkflow(data5.workflow);
-      if (data5.error) {
-        console.warn("Board stages API warning:", data5.error);
+      const data5 = await res.json();
+      if (Array.isArray(data5) && data5.length > 0) {
+        setColumns(data5);
+      } else {
+        setColumns(FALLBACK_COLUMNS);
       }
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Failed to fetch board stages";
-      setError(errorMsg);
-      console.error("Error fetching board stages:", err);
-      setStages(FALLBACK_STAGES);
+      const message = err instanceof Error ? err.message : "Failed to fetch board columns";
+      setError(message);
+      console.error("Error fetching board columns:", err);
+      setColumns(FALLBACK_COLUMNS);
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
-  }, []);
+  }, [workflowName]);
   import_react68.useEffect(() => {
-    fetchStages(workflow);
-  }, [workflow, fetchStages]);
-  import_react68.useEffect(() => {
-    const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
-    let ws = null;
-    let reconnectTimer = null;
-    let closed = false;
-    const connect = () => {
-      if (closed)
-        return;
-      try {
-        ws = new WebSocket(wsUrl);
-        ws.onmessage = (event4) => {
-          try {
-            const msg = JSON.parse(event4.data);
-            if (msg?.type === "board_reload") {
-              fetchStages(workflowRef.current);
-            }
-          } catch {}
-        };
-        ws.onclose = () => {
-          if (!closed) {
-            reconnectTimer = setTimeout(connect, 5000);
-          }
-        };
-        ws.onerror = () => {
-          ws?.close();
-        };
-      } catch {}
-    };
-    connect();
-    return () => {
-      closed = true;
-      if (reconnectTimer !== null)
-        clearTimeout(reconnectTimer);
-      ws?.close();
-    };
-  }, [fetchStages]);
-  return { stages, loading, error: error3, workflow: activeWorkflow };
+    fetchColumns();
+  }, [fetchColumns, connected]);
+  return { columns, isLoading, error: error3, refresh: fetchColumns };
 }
 
 // src/apps/dashboard-web/lib/proposal-detail-selection.ts
@@ -233411,8 +233404,8 @@ function toSharedProposal(proposal) {
     title: proposal.title,
     status: proposal.status,
     assignee: [],
-    createdDate: proposal.createdAt ?? "",
-    updatedDate: proposal.updatedAt || proposal.createdAt || undefined,
+    createdDate: proposal.createdDate || proposal.createdAt || "",
+    updatedDate: proposal.updatedDate || proposal.updatedAt || proposal.createdDate || proposal.createdAt,
     labels,
     dependencies: proposal.parentId ? [proposal.parentId] : [],
     summary: proposal.summary ?? proposal.bodyMarkdown ?? undefined,
@@ -233469,8 +233462,8 @@ function App() {
     }
     return "Standard RFC";
   });
-  const { stages: boardStages } = useBoardStages(activeWorkflow);
-  const statuses = boardStages.map((stage) => stage.id);
+  const { columns: boardColumns } = useBoardColumns(activeWorkflow, connected);
+  const statuses = boardColumns.map((column2) => column2.stage_name);
   import_react69.useEffect(() => {
     if (typeof window !== "undefined") {
       window.localStorage.setItem("roadmap.board.workflow", activeWorkflow);
