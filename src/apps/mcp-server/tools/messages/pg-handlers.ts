@@ -271,8 +271,26 @@ export class PgMessagingHandlers {
 		message_type?: string;
 		proposal_id?: string;
 		correlation_id?: string;
+		_signature?: string; // P159: optional hex-encoded Ed25519 signature
 	}): Promise<CallToolResult> {
 		try {
+			// P159 AC-5: Soft-fail identity verification for all agents (not just user/*)
+			// Signature and data are optional; unsigned requests are logged but allowed
+			const { verifyAgentIdentity } = await import("../../../core/identity/identity-verification.ts");
+			const verification = await verifyAgentIdentity(
+				args.from_agent,
+				args._signature as string | undefined,
+				args.message_content, // Sign over message content
+			);
+
+			// In hard-fail mode (AGENTHIVE_AUTH_REQUIRED=true), reject if verification.rejected
+			if (verification.rejected) {
+				const httpStatus = verification.reason === "public_key_not_found" ? 401 : 403;
+				return {
+					content: [{ type: "text", text: `⛔ [P159] Identity verification failed (${verification.reason}). HTTP ${httpStatus}.` }],
+				};
+			}
+
 			// P1105 AC-3: USER senders must carry a valid bearer token whose sub matches from_agent.
 			if (args.from_agent?.startsWith("user/")) {
 				const ctx = agentContextStorage.getStore();

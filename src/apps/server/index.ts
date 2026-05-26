@@ -25,6 +25,7 @@ import { RfcStates, getView, getRegistry } from "../../core/workflow/state-names
 import { loadStageRegistry } from "../../core/workflow/stage-registry.ts";
 import type {
 	Proposal,
+	ProposalMaturity,
 	ProposalUpdateInput,
 	SearchPriorityFilter,
 	SearchResultType,
@@ -1760,6 +1761,26 @@ export class RoadmapServer {
 
 		if ("status" in updates && typeof updates.status === "string") {
 			updateInput.status = updates.status;
+		}
+
+		if ("maturity" in updates && typeof updates.maturity === "string") {
+			// Live DB CHECK constraint on proposal.maturity accepts exactly 4 values.
+			// Reject anything else loudly rather than letting the UPDATE fail at SQL.
+			const ALLOWED_MATURITY = new Set([
+				"new",
+				"active",
+				"mature",
+				"obsolete",
+			]);
+			if (!ALLOWED_MATURITY.has(updates.maturity)) {
+				return new Response(
+					JSON.stringify({
+						error: `Invalid maturity '${updates.maturity}'. Allowed: ${Array.from(ALLOWED_MATURITY).join(", ")}`,
+					}),
+					{ status: 400, headers: { "content-type": "application/json" } },
+				);
+			}
+			updateInput.maturity = updates.maturity as ProposalMaturity;
 		}
 
 		if ("priority" in updates && typeof updates.priority === "string") {

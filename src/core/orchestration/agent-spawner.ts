@@ -106,6 +106,32 @@ export function liveChildCount(): number {
 	return liveChildren.size;
 }
 
+/**
+ * Role-aware default wall-clock budget for a spawn. Historical p95s from
+ * agent_runs (last 14d, claude completed):
+ *   developer ~33min, researcher/engineer ~33min, architect ~13min,
+ *   skeptic/documenter <5min. A flat 5-min default cuts off >50% of
+ *   build/research work mid-stride. Caller-supplied timeoutMs always wins.
+ *
+ * Mirrors legacy-dispatch.ts:roleTimeoutMs — when consolidating, move this
+ * file's copy upstream and import from a shared helper.
+ */
+export function defaultTimeoutMsForRole(role: string | undefined | null): number {
+	const r = (role ?? "").toLowerCase();
+	if (r.includes("developer")) return 3_600_000;            // 60 min
+	if (r.includes("e2e")) return 1_800_000;                  // 30 min
+	if (
+		r.includes("architect") ||
+		r.includes("researcher") ||
+		r.includes("engineer") ||
+		r.includes("enhancer") ||
+		r.includes("drafter") ||
+		r.includes("enrichment")
+	)
+		return 1_500_000;                                     // 25 min
+	return 600_000;                                           // 10 min — gates, reviews, default
+}
+
 export interface TerminateOptions {
 	/** Milliseconds to wait between SIGTERM and SIGKILL. Default 8000. */
 	graceMs?: number;
@@ -201,7 +227,7 @@ export interface SpawnRequest {
 	provider?: string;
 	/** Max tokens for this invocation */
 	maxTokens?: number;
-	/** Wall-clock timeout in milliseconds (default 300 000 = 5 min) */
+	/** Wall-clock timeout in milliseconds. Default is role-aware via {@link defaultTimeoutMsForRole} — gates ~10min, build/research 25–60min. */
 	timeoutMs?: number;
 	/** P300: Project-aware worktree root (defaults to WORKTREE_ROOT) */
 	worktreeRoot?: string;
@@ -1426,7 +1452,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		proposalId,
 		stage,
 		model: modelHint,
-		timeoutMs = 300_000,
+		timeoutMs = defaultTimeoutMsForRole(req.stage),
 		worktreeRoot = WORKTREE_ROOT,
 		provider: providerOverride,
 	} = req;

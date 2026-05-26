@@ -17,6 +17,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { closePool, getPool, query } from "../../src/infra/postgres/pool.ts";
 import {
+	parseLedgerNotifyPayload,
 	runLiaisonAgent,
 	type LiaisonAgentHandle,
 } from "../../src/infra/agency/liaison-agent.ts";
@@ -146,7 +147,7 @@ describe("liaison-agent", () => {
 		// agentNotifyChannel throws on bad identities and enforces 63-byte limit.
 		// We validate by reaching into the started listener via a safe identity.
 		const channel = agentNotifyChannel(LIAISON);
-		expect(channel).toBe(`a2a_msg_${LIAISON}`);
+		expect(channel).toBe(`msg_${LIAISON}`);
 
 		const registry = new CliInvocationRegistry();
 		const mockHandler: CliInvocationHandler = {
@@ -167,6 +168,24 @@ describe("liaison-agent", () => {
 		// session-level state here would be flaky. Instead, prove it's wired
 		// by sending a message and confirming the handler runs (next test).
 		expect(handle).toBeTruthy();
+	});
+
+	it("ignores UUID liaison_message notifications on the shared msg channel", () => {
+		expect(
+			parseLedgerNotifyPayload(
+				JSON.stringify({
+					message_id: "8d79a462-7306-42db-a965-46eda2fd76e4",
+					kind: "offer_dispatch",
+					sequence: "17",
+				}),
+			),
+		).toBeNull();
+
+		expect(
+			parseLedgerNotifyPayload(
+				JSON.stringify({ message_id: "123", from_agent: SENDER }),
+			),
+		).toEqual({ message_id: 123, from_agent: SENDER });
 	});
 
 	it("invalid identity throws before any DB work", async () => {

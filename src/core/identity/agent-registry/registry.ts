@@ -209,17 +209,36 @@ export async function registerAgent(
 	const skills = { agentId, capabilities, channel, lastSeen: now };
 	const trustTier = defaultTrustTier(instanceId, agentType);
 
+	// P159 AC-1: If public key provided, validate key conflicts and upsert public_key + key_rotated_at
+	if (request.publicKey) {
+		// Check for key conflicts: same agent_id with different public_key
+		const conflictCheck = await query<{ has_conflict: boolean }>(
+			`SELECT EXISTS(
+				SELECT 1 FROM roadmap_workforce.agent_registry
+				WHERE agent_identity = $1 AND public_key IS NOT NULL AND public_key != $2
+			) as has_conflict`,
+			[instanceId, request.publicKey],
+		);
+		if (conflictCheck.rows[0]?.has_conflict) {
+			throw new Error(
+				`[P159] Key conflict: agent ${instanceId} already has a different public_key. Rotation or replacement requires explicit operation.`,
+			);
+		}
+	}
+
 	const insertResult = await query<{ id: number }>(
-		`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, role, skills, status, trust_tier)
-     VALUES ($1, $2, $3, $4::jsonb, 'online', $5)
+		`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, role, skills, status, trust_tier, public_key, key_rotated_at)
+     VALUES ($1, $2, $3, $4::jsonb, 'online', $5, $6, CASE WHEN $6 IS NOT NULL THEN now() ELSE NULL END)
      ON CONFLICT (agent_identity) DO UPDATE SET
        agent_type = EXCLUDED.agent_type,
        role       = EXCLUDED.role,
        skills     = agent_registry.skills || EXCLUDED.skills,
        status     = 'online',
-       trust_tier = COALESCE(NULLIF(agent_registry.trust_tier, 'authority'), EXCLUDED.trust_tier)
+       trust_tier = COALESCE(NULLIF(agent_registry.trust_tier, 'authority'), EXCLUDED.trust_tier),
+       public_key = COALESCE(EXCLUDED.public_key, agent_registry.public_key),
+       key_rotated_at = CASE WHEN EXCLUDED.public_key IS NOT NULL THEN now() ELSE agent_registry.key_rotated_at END
      RETURNING id`,
-		[instanceId, agentType, role ?? null, JSON.stringify(skills), trustTier],
+		[instanceId, agentType, role ?? null, JSON.stringify(skills), trustTier, request.publicKey ?? null],
 	);
 
 	// P919 AC-12: Tier 2 display alias for worker slot-0 spawns. The slot
@@ -347,4 +366,49 @@ async function announcePresence(
 	} catch {
 		// MCP not available — non-fatal, Postgres is the source of truth
 	}
+}
+
+/**
+ * P159 AC-3: Retrieve public key from agent_registry for cryptographic verification.
+ * Soft-fail mode (default): returns null if key not found or verification disabled.
+ * Hard-fail mode (AGENTHIVE_AUTH_REQUIRED=true): callers decide whether to reject.
+ */
+export async function getAgentPublicKey(
+	agentId: string,
+): Promise<string | null> {
+	const { rows } = await query<{ public_key: string | null }>(
+		`SELECT public_key FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
+		[agentId],
+	);
+	return rows.length > 0 ? rows[0].public_key : null;
+}
+
+/**
+ * P159 AC-4: Update public_key and key_rotated_at after key rotation.
+ * Validates no conflicts with existing different keys.
+ */
+export async function rotateAgentPublicKey(
+	agentId: string,
+	newPublicKey: string,
+): Promise<void> {
+	// Check for key conflicts: same agent with different public_key
+	const conflictCheck = await query<{ has_conflict: boolean }>(
+		`SELECT EXISTS(
+			SELECT 1 FROM roadmap_workforce.agent_registry
+			WHERE agent_identity = $1 AND public_key IS NOT NULL AND public_key != $2
+		) as has_conflict`,
+		[agentId, newPublicKey],
+	);
+	if (conflictCheck.rows[0]?.has_conflict) {
+		throw new Error(
+			`[P159] Key conflict: agent ${agentId} already has a different public_key registered.`,
+		);
+	}
+
+	await query(
+		`UPDATE roadmap_workforce.agent_registry
+		 SET public_key = $1, key_rotated_at = now()
+		 WHERE agent_identity = $2`,
+		[newPublicKey, agentId],
+	);
 }

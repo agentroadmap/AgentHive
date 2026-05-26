@@ -25,14 +25,14 @@
  * squad_dispatch.offer_status, lease_expires_at.
  */
 import { hostname } from "node:os";
-import { query } from "../../infra/postgres/pool.ts";
-import { resolveAgency } from "./resolvers/agency-resolver.ts";
-import { briefingAssemble } from "../../infra/agency/spawn-briefing-service.ts";
 import { sendMessage } from "../../infra/agency/liaison-message-service.ts";
 import type { OfferDispatchPayload } from "../../infra/agency/liaison-message-types.ts";
-import { ObservabilityWriter } from "../observability/observability-writer.ts";
+import { briefingAssemble } from "../../infra/agency/spawn-briefing-service.ts";
+import { query } from "../../infra/postgres/pool.ts";
 import * as config from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
+import { ObservabilityWriter } from "../observability/observability-writer.ts";
+import { resolveAgency } from "./resolvers/agency-resolver.ts";
 
 const obs = new ObservabilityWriter("agency:offer-dispatch");
 
@@ -98,6 +98,21 @@ export interface OfferDispatcherOptions {
 	dispatch_sendMessage?: typeof sendMessage;
 	/** Override for test injection — resolves agencyId → agent_identity string. */
 	dispatch_queryAgentIdentity?: (agencyId: bigint) => Promise<string | null>;
+	/** Override for test injection — resolves agent_identity → agency provider. */
+	dispatch_queryAgencyProvider?: (
+		agencyIdentity: string,
+	) => Promise<string | null>;
+	/** Override for test injection of no-agency terminal state writes. */
+	dispatch_markOfferFailed?: (
+		claim: ClaimedOffer,
+		requiredCapabilities: string[],
+	) => Promise<void>;
+	/** Override for test injection of routed-offer metadata writes. */
+	dispatch_markOfferRouted?: (
+		claim: ClaimedOffer,
+		targetAgencyId: string,
+		routeHint: string,
+	) => Promise<void>;
 }
 
 /**
@@ -110,7 +125,21 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 	private readonly resolveAgencyFn: typeof resolveAgency;
 	private readonly briefingAssembleFn: typeof briefingAssemble;
 	private readonly sendMessageFn: typeof sendMessage;
-	private readonly queryAgentIdentityFn: (agencyId: bigint) => Promise<string | null>;
+	private readonly queryAgentIdentityFn: (
+		agencyId: bigint,
+	) => Promise<string | null>;
+	private readonly queryAgencyProviderFn: (
+		agencyIdentity: string,
+	) => Promise<string | null>;
+	private readonly markOfferFailedFn: (
+		claim: ClaimedOffer,
+		requiredCapabilities: string[],
+	) => Promise<void>;
+	private readonly markOfferRoutedFn: (
+		claim: ClaimedOffer,
+		targetAgencyId: string,
+		routeHint: string,
+	) => Promise<void>;
 
 	constructor(opts: OfferDispatcherOptions) {
 		this.orchestratorIdentity = opts.orchestratorIdentity;
@@ -128,39 +157,75 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 				);
 				return rows[0]?.agent_identity ?? null;
 			});
+		this.queryAgencyProviderFn =
+			opts.dispatch_queryAgencyProvider ??
+			(async (agencyIdentity) => {
+				const { rows } = await query<{ provider: string | null }>(
+					`SELECT provider FROM roadmap.agency WHERE agency_id = $1`,
+					[agencyIdentity],
+				);
+				return rows[0]?.provider ?? null;
+			});
+		this.markOfferFailedFn =
+			opts.dispatch_markOfferFailed ??
+			(async (claim, requiredCaps) => {
+				await query(
+					`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, 'failed')`,
+					[claim.dispatchId, this.orchestratorIdentity, claim.claimToken],
+				);
+				await query(
+					`UPDATE roadmap_workforce.squad_dispatch
+					    SET metadata = metadata || jsonb_build_object(
+					                     'failure_reason', 'no_eligible_agency',
+					                     'required_capabilities', $2::jsonb,
+					                     'failed_at', to_jsonb(now())
+					                   )
+					  WHERE id = $1`,
+					[claim.dispatchId, JSON.stringify(requiredCaps)],
+				);
+			});
+		this.markOfferRoutedFn =
+			opts.dispatch_markOfferRouted ??
+			(async (claim, targetAgencyId, routeHint) => {
+				await query(
+					`UPDATE roadmap_workforce.squad_dispatch
+					    SET metadata = metadata || jsonb_build_object(
+					                     'target_agency', $2::text,
+					                     'route_hint', $3::text,
+					                     'routed_at', to_jsonb(now())
+					                   )
+					  WHERE id = $1
+					    AND claim_token = $4::uuid
+					    AND offer_status IN ('claimed', 'active')`,
+					[claim.dispatchId, targetAgencyId, routeHint, claim.claimToken],
+				);
+			});
 	}
 
 	async dispatch(claim: ClaimedOffer): Promise<void> {
 		const targetAgencyId = await this.pickAgency(claim);
 		if (!targetAgencyId) {
-			const requiredCaps = ROLE_TO_REQUIRED_CAPABILITIES[claim.role.toLowerCase()] ?? ["develop"];
+			const requiredCaps = ROLE_TO_REQUIRED_CAPABILITIES[
+				claim.role.toLowerCase()
+			] ?? ["develop"];
 			this.logger.warn(
 				`[OfferDispatch] no eligible agency for offer ${claim.offerId} (role=${claim.role}, requiredCaps=${JSON.stringify(requiredCaps)}); marking offer failed with metadata`,
 			);
 			// P1289: record failure immediately so the dispatch-loop circuit breaker
 			// (post-work-offer.ts) can observe it without waiting for lease expiry.
-			await query(
-				`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, 'failed')`,
-				[claim.dispatchId, this.orchestratorIdentity, claim.claimToken],
-			);
-			await query(
-				`UPDATE roadmap_workforce.squad_dispatch
-				    SET metadata = metadata || jsonb_build_object(
-				                     'failure_reason', 'no_eligible_agency',
-				                     'required_capabilities', $2::jsonb,
-				                     'failed_at', to_jsonb(now())
-				                   )
-				  WHERE id = $1`,
-				[claim.dispatchId, JSON.stringify(requiredCaps)],
-			);
+			await this.markOfferFailedFn(claim, requiredCaps);
 
 			// P1291: increment failure counter and potentially activate pause.
 			// Compute backoff only if threshold is reached.
 			try {
-				const threshold = (await config.getOptional(FlagKeys.PAUSE_FAILURE_THRESHOLD)) ?? 2;
-				const baseBackoffMs = (await config.getOptional(FlagKeys.PAUSE_BASE_BACKOFF_MS)) ?? 1800000;
-				const multiplier = (await config.getOptional(FlagKeys.PAUSE_BACKOFF_MULTIPLIER)) ?? 2;
-				const maxBackoffMs = (await config.getOptional(FlagKeys.PAUSE_MAX_BACKOFF_MS)) ?? 86400000;
+				const threshold =
+					(await config.getOptional(FlagKeys.PAUSE_FAILURE_THRESHOLD)) ?? 2;
+				const baseBackoffMs =
+					(await config.getOptional(FlagKeys.PAUSE_BASE_BACKOFF_MS)) ?? 1800000;
+				const multiplier =
+					(await config.getOptional(FlagKeys.PAUSE_BACKOFF_MULTIPLIER)) ?? 2;
+				const maxBackoffMs =
+					(await config.getOptional(FlagKeys.PAUSE_MAX_BACKOFF_MS)) ?? 86400000;
 
 				await this.upsertPauseRow(
 					claim.proposalId,
@@ -183,12 +248,14 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 		}
 
 		const briefingId = await this.assembleBriefing(claim, targetAgencyId);
+		const routeHint = await this.routeHintForAgency(claim, targetAgencyId);
+		await this.markOfferRoutedFn(claim, targetAgencyId, routeHint);
 
 		const payload: OfferDispatchPayload = {
 			offer_id: this.toUuid(claim.offerId),
 			role: claim.role,
 			required_capabilities: extractCapabilities(claim.metadata),
-			route_hint: extractRouteHint(claim.metadata),
+			route_hint: routeHint,
 		};
 
 		// Augment with mechanical fields the liaison needs to renew + complete
@@ -225,7 +292,11 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 			const span = await obs.startSpan({
 				traceId,
 				operation: "offer_activated",
-				attributes: { dispatch_id: claim.dispatchId, proposal_id: claim.proposalId, agency_id: targetAgencyId },
+				attributes: {
+					dispatch_id: claim.dispatchId,
+					proposal_id: claim.proposalId,
+					agency_id: targetAgencyId,
+				},
 			});
 			void obs.closeSpan({ spanId: span.spanId });
 		}
@@ -256,12 +327,15 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 		// Require job capabilities matching the offer role so agencies without
 		// capabilities (auto-named ghost agents) are excluded. All named agencies
 		// have the full job list; unregistered or ghost agencies don't.
-		const requiredCaps = ROLE_TO_REQUIRED_CAPABILITIES[claim.role.toLowerCase()] ?? ["develop"];
+		const requiredCaps = ROLE_TO_REQUIRED_CAPABILITIES[
+			claim.role.toLowerCase()
+		] ?? ["develop"];
+		const preferredProvider = extractPreferredProvider(claim.metadata);
 
 		const candidate = await this.resolveAgencyFn(
 			projectId ?? "",
 			claim.role,
-			undefined,
+			preferredProvider,
 			requiredCaps,
 		);
 		if (!candidate) return null;
@@ -269,6 +343,23 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 		// agency-resolver returns the provider_registry row's agency_id (numeric);
 		// the liaison message bus keys on the agent_registry.agent_identity TEXT.
 		return this.queryAgentIdentityFn(candidate.agencyId);
+	}
+
+	private async routeHintForAgency(
+		claim: ClaimedOffer,
+		targetAgencyId: string,
+	): Promise<string> {
+		const explicit = extractPreferredProvider(claim.metadata);
+		if (explicit) return explicit;
+
+		try {
+			const provider = await this.queryAgencyProviderFn(targetAgencyId);
+			if (provider) return provider;
+		} catch {
+			/* fall through */
+		}
+
+		return "claude";
 	}
 
 	private async assembleBriefing(
@@ -343,13 +434,11 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 
 		const newFailureCount = row.new_failure_count;
 		const pauseCycle = row.pause_cycle;
-		const wasUpdate = row.paused; // true if ON CONFLICT branch executed
-
 		// If we hit the threshold, update expires_at to activate the pause.
 		if (newFailureCount >= threshold) {
 			// Compute expiry: BASE * 2^(cycle - 1), capped at MAX.
 			const expiryMs = Math.min(
-				baseBackoffMs * Math.pow(multiplier, pauseCycle - 1),
+				baseBackoffMs * multiplier ** (pauseCycle - 1),
 				maxBackoffMs,
 			);
 			const expiryInterval = `${expiryMs} milliseconds`;
@@ -389,14 +478,12 @@ function extractCapabilities(metadata: Record<string, unknown>): string[] {
 	return [];
 }
 
-function extractRouteHint(metadata: Record<string, unknown>): string {
+function extractPreferredProvider(
+	metadata: Record<string, unknown>,
+): string | null {
 	if (typeof metadata.route_hint === "string") return metadata.route_hint;
 	if (typeof metadata.provider === "string") return metadata.provider;
-	// Default must match a roadmap.model_routes.agent_provider value
-	// ('claude', 'codex', 'copilot', 'gemini'). 'claude-code' is the
-	// CLI name, not the provider name — using it raises P235 in
-	// agent-spawner ("No enabled route found in DB").
-	return "claude";
+	return null;
 }
 
 function extractProjectId(metadata: Record<string, unknown>): string | null {

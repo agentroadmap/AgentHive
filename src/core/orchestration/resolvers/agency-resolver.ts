@@ -61,6 +61,8 @@ export interface AgencyCandidate {
 export async function resolveAgency(
 	projectId: string,
 	_role?: string,
+	preferredProvider?: string | null,
+	requiredCapabilities: string[] = [],
 ): Promise<AgencyCandidate | null> {
 	// P914: exclude coordinator agents (the orchestrator itself) and
 	// test scaffolding identities. Coordinators claim offers and
@@ -77,17 +79,30 @@ export async function resolveAgency(
 		 FROM roadmap_workforce.provider_registry pr
 		 JOIN roadmap_workforce.agent_registry ar ON ar.id = pr.agency_id
 		 LEFT JOIN roadmap.agency a ON a.agency_id = ar.agent_identity
-		 LEFT JOIN roadmap_workforce.v_agency_in_flight inf
-		   ON inf.provider_registry_id = pr.id
+		 LEFT JOIN (
+		   SELECT sd.metadata->>'target_agency' AS agency_identity,
+		          count(*) AS in_flight_count
+		     FROM roadmap_workforce.squad_dispatch sd
+		    WHERE sd.completed_at IS NULL
+		      AND sd.offer_status IN ('claimed', 'active')
+		      AND (sd.claim_expires_at IS NULL OR sd.claim_expires_at > now())
+		      AND sd.metadata ? 'target_agency'
+		    GROUP BY sd.metadata->>'target_agency'
+		 ) inf ON inf.agency_identity = ar.agent_identity
 		 WHERE pr.status NOT IN ('offline', 'retired')
 		   AND (a.status IS NULL OR a.status <> 'retired')
 		   AND ar.agent_type <> 'coordinator'
 		   AND ar.agent_identity NOT LIKE 'test/%'
 		   AND (pr.project_id IS NULL OR pr.project_id = $1)
+		   AND ($2::text IS NULL OR a.provider = $2 OR ar.preferred_provider = $2)
+		   AND (
+		     cardinality($3::text[]) = 0
+		     OR COALESCE(pr.capabilities->'jobs', '[]'::jsonb) ?& $3::text[]
+		   )
 		   AND COALESCE(inf.in_flight_count, 0) < pr.max_in_flight
 		 ORDER BY pr.throttle_count ASC, pr.last_seen_at DESC NULLS LAST
 		 LIMIT 1`,
-		[projectId],
+		[projectId, preferredProvider ?? null, requiredCapabilities],
 	);
 
 	if (!rows.length) return null;

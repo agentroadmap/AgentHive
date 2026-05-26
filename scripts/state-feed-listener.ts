@@ -21,8 +21,16 @@ const WEBHOOK_URL =
 		);
 	})();
 
-// Subscribe to both the unified outbox and the legacy gate-ready channel.
-const CHANNELS = ["roadmap_events", "proposal_gate_ready", "control_feed"];
+// Subscribe to: roadmap event stream + gate-ready signals + control feed + user inbox.
+// P1120 AC-25: state_feed_user_inbox carries forwarded user/<operator> messages
+// from user-inbox-consumer.ts so they surface in the same Discord feed as
+// roadmap events instead of needing a separate webhook.
+const CHANNELS = [
+	"roadmap_events",
+	"proposal_gate_ready",
+	"control_feed",
+	"state_feed_user_inbox",
+];
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 
@@ -351,6 +359,25 @@ function renderReviewSubmitted(p: ProposalRow, ev: EventRow): string {
 	return `💬 **${reviewer}** posted review on **${p.display_id}|${stage}**${tag}`;
 }
 
+// migration 180: high-signal proposal_discussions inserts surface here.
+// Trigger filters to context_prefix IN ('concern:','feedback:','gate-decision:',
+// 'critical:','security:','ship-verification:'), so we only see signal.
+function renderDiscussionPosted(p: ProposalRow, ev: EventRow): string {
+	const author = normalizeAgent(String(ev.payload.author_identity ?? "agent"));
+	const ctxPrefix = String(ev.payload.context_prefix ?? "").replace(/:$/, "");
+	const emoji =
+		ctxPrefix === "gate-decision" ? "⚖️" :
+		ctxPrefix === "security" ? "🔒" :
+		ctxPrefix === "critical" ? "🚨" :
+		ctxPrefix === "ship-verification" ? "🚢" :
+		ctxPrefix === "concern" ? "⚠️" :
+		"📝";
+	const stage = p.status;
+	const preview = String(ev.payload.body_preview ?? "").slice(0, 160);
+	const tag = preview ? `\n> ${preview}${preview.length >= 160 ? "…" : ""}` : "";
+	return `${emoji} **${author}** [${ctxPrefix}] on **${p.display_id}|${stage}** — _${p.title}_${tag}`;
+}
+
 // ─── Dispatch ─────────────────────────────────────────────────────────────────
 
 async function handleProposalEvent(client: Client, eventId: number): Promise<string> {
@@ -374,10 +401,33 @@ async function handleProposalEvent(client: Client, eventId: number): Promise<str
 			return await renderDecisionMade(client, p, ev);
 		case "review_submitted":
 			return renderReviewSubmitted(p, ev);
+		case "discussion_posted":
+			return renderDiscussionPosted(p, ev);
 		default:
 			console.log(`[state-feed] ignoring unknown event_type=${ev.event_type}`);
 			return "";
 	}
+}
+
+// P1120 AC-25: render forwarded user-inbox envelopes from user-inbox-consumer.
+// Payload shape (from user-inbox-consumer.ts forward()):
+//   { id, from_agent, to_agent, message_type, message_content, correlation_id, metadata, created_at }
+function renderUserInbox(payload: string): string {
+	let env: Record<string, unknown> = {};
+	try {
+		env = JSON.parse(payload);
+	} catch {
+		return "";
+	}
+	const id = Number(env.id);
+	const fromAgent = String(env.from_agent ?? "unknown");
+	const toAgent = String(env.to_agent ?? "unknown");
+	const messageType = String(env.message_type ?? "message");
+	const content = String(env.message_content ?? "");
+	const dedupeKey = `user_inbox:${id}`;
+	if (Number.isFinite(id) && isDuplicate(dedupeKey)) return "";
+	const preview = content ? `\n> ${content.slice(0, 240)}${content.length > 240 ? "…" : ""}` : "";
+	return `📬 **${toAgent}** \`${messageType}\` from \`${fromAgent}\`${preview}`;
 }
 
 async function renderGateReady(client: Client, payload: string): Promise<string> {
@@ -431,6 +481,8 @@ async function handleNotification(
 		msg = await handleProposalEvent(client, eventId);
 	} else if (channel === "proposal_gate_ready") {
 		msg = await renderGateReady(client, payload);
+	} else if (channel === "state_feed_user_inbox") {
+		msg = renderUserInbox(payload);
 	} else if (channel === "control_feed") {
 		// P1123 Phase 3: forward pool_poisoned alerts to Discord operator channel.
 		try {

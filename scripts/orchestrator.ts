@@ -12,7 +12,7 @@
  */
 
 import { Orchestrator } from "../src/core/orchestration/orchestrator.ts";
-import { closePool, setPoolLifecycleMode } from "../src/infra/postgres/pool.ts";
+import { setPoolLifecycleMode } from "../src/infra/postgres/pool.ts";
 import { startPoolWatchdog } from "../src/infra/postgres/pool-watchdog.ts";
 
 // P1123: declare long-running mode so stray pool.end() calls cannot poison this
@@ -43,7 +43,7 @@ async function main() {
 	await orchestrator.stop();
 	await watchdog.stop();
 	setPoolLifecycleMode("one-shot");
-	await closePool();
+	await orchestrator.closePoolWithFallback();
 	console.log("[orchestrator-shim] stopped");
 }
 

@@ -20,6 +20,9 @@ import {
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
+// P159 AC-2: Import registry integration for public_key persistence
+import type { registerAgent as registerAgentFn, getAgentPublicKey, rotateAgentPublicKey as rotateAgentPublicKeyFn } from "./agent-registry/registry.ts";
+
 /** Key algorithm used for agent identities */
 const _KEY_ALGORITHM = "ed25519";
 
@@ -175,6 +178,7 @@ export async function listAgentIds(workspaceRoot: string): Promise<string[]> {
 /**
  * Get or create agent identity on first run
  * AC#1: Keys generated on first run, loaded from disk on subsequent runs
+ * P159 AC-2: Calls registerAgent() with generated public key for DB persistence
  */
 export async function getOrCreateIdentity(
 	workspaceRoot: string,
@@ -193,6 +197,19 @@ export async function getOrCreateIdentity(
 	// Generate new key pair
 	const keyPair = generateAgentKeyPair(tempAgentId);
 	await saveKeyPair(workspaceRoot, keyPair);
+
+	// P159 AC-2: Register public key in agent_registry (soft-fail if DB unavailable)
+	try {
+		const { registerAgent } = await import("./agent-registry/registry.ts");
+		await registerAgent({
+			agentId: tempAgentId,
+			publicKey: keyPair.publicKey,
+		});
+	} catch (err) {
+		// Soft-fail: key generation succeeds; DB registration is async and not load-bearing
+		console.warn(`[P159] Failed to register public_key for ${tempAgentId} in agent_registry:`, err instanceof Error ? err.message : String(err));
+	}
+
 	return keyPair;
 }
 
@@ -350,6 +367,7 @@ export function verifySignature(
 /**
  * Rotate agent keys without downtime
  * AC#5: Key rotation supported without downtime
+ * P159 AC-4: Updates agent_registry.public_key and key_rotated_at
  *
  * Creates a new key pair while preserving the agent ID.
  * Old keys can still verify signatures (they share the same agentId).
@@ -396,6 +414,15 @@ export async function rotateKeyPair(
 
 	// Save new key as current
 	await saveKeyPair(workspaceRoot, newKeyPair);
+
+	// P159 AC-4: Update agent_registry with new public key (soft-fail if DB unavailable)
+	try {
+		const { rotateAgentPublicKey } = await import("./agent-registry/registry.ts");
+		await rotateAgentPublicKey(currentKeyPair.agentId, newKeyPair.publicKey);
+	} catch (err) {
+		// Soft-fail: key rotation on disk succeeds; DB update is best-effort
+		console.warn(`[P159] Failed to rotate public_key in agent_registry for ${currentKeyPair.agentId}:`, err instanceof Error ? err.message : String(err));
+	}
 
 	return {
 		newKeyPair,

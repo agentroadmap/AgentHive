@@ -12,7 +12,7 @@ import type { LiaisonMessage, LiaisonMessageAckOutcome } from './liaison-message
 
 const MESSAGE_SEQUENCE_WINDOW = 100; // Buffer out-of-order messages up to this window
 const SIGNED_AT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-const LISTEN_CHANNEL_PREFIX = 'liaison_message_';
+const LISTEN_CHANNEL_PREFIX = 'msg_';
 
 // Signing key: shared secret from env, falls back to deterministic dev sentinel.
 // P208 RSA key-pair integration is separate; HMAC-SHA256 is the wire implementation.
@@ -555,7 +555,7 @@ export async function pollForPong(
  * external cancellation). This uses a dedicated client held outside the pool
  * so that the LISTEN subscription survives across multiple message arrivals.
  *
- * Channel: liaison_message_<agency_id>
+ * Channel: msg_<agency_id>
  * Notification payload: { message_id, direction, kind, sequence }
  */
 export function listenForMessages(

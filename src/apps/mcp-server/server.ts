@@ -778,7 +778,7 @@ export async function createMcpServer(
 		type ListSubscriptionsArgs = Parameters<typeof msg.listSubscriptions>[0];
 		server.addTool({
 			name: "msg_send",
-			description: "Send message via Postgres message_ledger",
+			description: "Send message via Postgres message_ledger. P159: Optional _signature for Ed25519 identity verification (soft-fail mode by default).",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -788,6 +788,7 @@ export async function createMcpServer(
 					message_content: { type: "string" },
 					message_type: { type: "string" },
 					proposal_id: { type: "string" },
+					_signature: { type: "string", description: "P159: Optional hex-encoded Ed25519 signature over message_content" },
 				},
 				required: ["from_agent", "message_content"],
 			},

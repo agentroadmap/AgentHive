@@ -1552,13 +1552,27 @@ const ProposalDetailsModalComponent: React.FC<Props> = ({
 											{proposal.proposalType}
 										</span>
 									) : null}
-									{proposal?.maturity ? (
-										<span
-											className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${maturityBadgeColors(proposal.maturity)}`}
-											title="Proposal maturity"
+									{proposal ? (
+										<select
+											className={`rounded-full px-2 py-0.5 text-[11px] font-medium border-0 outline-none cursor-pointer focus:ring-2 focus:ring-stone-500 ${maturityBadgeColors(proposal.maturity ?? "new")} ${isFromOtherBranch ? "opacity-60 cursor-not-allowed" : ""}`}
+											title="Change proposal maturity"
+											value={proposal.maturity ?? "new"}
+											disabled={isFromOtherBranch}
+											onChange={(e) => {
+												const next = e.target.value;
+												if (next === proposal.maturity) return;
+												void handleInlineMetaUpdate({
+													maturity:
+														next as NonNullable<Proposal["maturity"]>,
+												});
+											}}
+											onClick={(e) => e.stopPropagation()}
 										>
-											{proposal.maturity}
-										</span>
+											<option value="new">new</option>
+											<option value="active">active</option>
+											<option value="mature">mature</option>
+											<option value="obsolete">obsolete</option>
+										</select>
 									) : null}
 								</div>
 							}

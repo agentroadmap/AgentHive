@@ -75,17 +75,17 @@ export async function liaisonRegister(
 				client.query<T>(text, params as never)
 		: query;
 
-	const registered = await runQuery<{ agency_id: string }>(
+	const registered = (await runQuery<{ agency_id: string }>(
 		`SELECT agency_id FROM roadmap.agency WHERE agency_id = $1`,
 		[agency_id],
-	) as { rows: Array<{ agency_id: string }> };
+	)) as { rows: Array<{ agency_id: string }> };
 	if (registered.rows.length === 0) {
 		throw new Error(
 			`Agency ${agency_id} not registered. Register it first via: mcp_agent action='register' args={...}`,
 		);
 	}
 
-	const result = await runQuery(
+	const result = (await runQuery(
 		`
     WITH update_agency AS (
       UPDATE roadmap.agency
@@ -117,10 +117,49 @@ export async function liaisonRegister(
 			capabilities,
 			JSON.stringify({ ...metadata, capacity_envelope, public_key }),
 		],
-	) as { rows: Array<{ session_id: string; agency_id: string; status: string }> };
+	)) as {
+		rows: Array<{ session_id: string; agency_id: string; status: string }>;
+	};
 
 	if (result.rows.length === 0)
 		throw new Error(`Failed to register agency ${agency_id}`);
+
+	const jobCapabilities =
+		capabilities.length > 0 ? capabilities : ["develop", "review", "design"];
+	await runQuery(
+		`
+		INSERT INTO roadmap_workforce.provider_registry
+			(agency_id, agency_identity, project_id, squad_name, status, capabilities)
+		SELECT ar.id,
+		       ar.agent_identity,
+		       p.project_id,
+		       NULL,
+		       'active',
+		       jsonb_build_object(
+		         'provider', $2::text,
+		         'liaison', true,
+		         'jobs', to_jsonb($3::text[])
+		       )
+		  FROM roadmap_workforce.agent_registry ar
+		  CROSS JOIN roadmap.project p
+		 WHERE ar.agent_identity = $1
+		   AND p.status = 'active'
+		   AND p.archived_at IS NULL
+		ON CONFLICT (agency_id, project_id, squad_name)
+		DO UPDATE SET
+			status = 'active',
+			last_seen_at = now(),
+			updated_at = now(),
+			capabilities =
+				provider_registry.capabilities
+				|| jsonb_build_object(
+					'provider', $2::text,
+					'liaison', true,
+					'jobs', to_jsonb($3::text[])
+				)
+		`,
+		[agency_id, provider, jobCapabilities],
+	);
 
 	const row = result.rows[0];
 	return {
@@ -210,10 +249,15 @@ export async function liaisonHeartbeat(
 	// P1104: update presence_state via fn_pulse whenever a heartbeat lands
 	if (row.agency_id) {
 		const presenceState =
-			liaison_status === "throttled" ? "busy"
-			: liaison_status === "paused"   ? "away"
-			: "online";
-		await query("SELECT roadmap.fn_pulse($1, $2)", [row.agency_id, presenceState]).catch(() => {});
+			liaison_status === "throttled"
+				? "busy"
+				: liaison_status === "paused"
+					? "away"
+					: "online";
+		await query("SELECT roadmap.fn_pulse($1, $2)", [
+			row.agency_id,
+			presenceState,
+		]).catch(() => {});
 	}
 
 	return {
@@ -418,5 +462,7 @@ export async function listDispatchableAgencies(): Promise<
  * Best-effort — errors are silently swallowed so shutdown is never blocked.
  */
 export async function liaisonSetOffline(agency_id: string): Promise<void> {
-	await query("SELECT roadmap.fn_pulse($1, $2)", [agency_id, "offline"]).catch(() => {});
+	await query("SELECT roadmap.fn_pulse($1, $2)", [agency_id, "offline"]).catch(
+		() => {},
+	);
 }
