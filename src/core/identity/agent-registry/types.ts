@@ -54,7 +54,7 @@ export type AgentRegistration = {
 	role?: string; // e.g., 'git-researcher', 'CEO'
 	capabilities: string[];
 	channel: string;
-	status: "online" | "offline" | "busy" | "error";
+	status: "active" | "inactive" | "suspended";
 	registeredAt: string;
 	lastSeen: string;
 	currentTask?: string;
@@ -67,6 +67,8 @@ export type RegistrationRequest = {
 	role?: string;
 	capabilities?: string[];
 	channel?: string;
+	/** P159: Ed25519 public key (PEM) to store in agent_registry.public_key */
+	publicKey?: string;
 	/**
 	 * P852: route abbreviation token (e.g. "ccs45ant"). When provided together
 	 * with `host` and at least one capability, the registry assembles a
