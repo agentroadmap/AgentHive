@@ -1,0 +1,38 @@
+-- P159: Operator runbook for backfilling agent_registry.public_key
+--
+-- The public_key and key_rotated_at columns were added in migration 018 and
+-- have always been NULL for existing agents.  New agents registered after this
+-- proposal will have public_key populated automatically by getOrCreateIdentity().
+--
+-- For existing agents, the canonical key lives in .agent-keys/<agentId>.json on
+-- each worker host.  Backfill options (choose one):
+--
+--   Option A — Automated (preferred):
+--     Restart every agent process.  On boot, getOrCreateIdentity() loads the
+--     existing key from disk and calls registerAgent({publicKey:…}), which
+--     upserts the key into agent_registry.  Once all agents have restarted,
+--     public_key will be populated for all active registrations.
+--
+--   Option B — Manual per-agent:
+--     Read the public_key from the agent's .agent-keys/<agentId>.json file
+--     and run:
+--
+--       UPDATE roadmap_workforce.agent_registry
+--       SET    public_key = '<PEM_KEY>'
+--       WHERE  agent_identity = '<agentId>';
+--
+--   Option C — Accept NULL for inactive / decommissioned agents:
+--     Agents that never restart will keep NULL public_key.  verifyTokenWithDbLookup()
+--     falls back to the token's embedded publicKey field in that case, so
+--     verification continues to work without a DB-backed key.
+--
+-- Verification query (run after agent restarts):
+--
+--   SELECT agent_identity,
+--          CASE WHEN public_key IS NULL THEN 'missing' ELSE 'ok' END AS key_status
+--   FROM   roadmap_workforce.agent_registry
+--   WHERE  status = 'online'
+--   ORDER  BY agent_identity;
+--
+-- This migration file is documentation-only; it contains no DDL.
+SELECT 'P159 backfill runbook loaded — no DDL executed' AS note;

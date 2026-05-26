@@ -19,6 +19,11 @@ import {
 } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import {
+	getAgentPublicKey,
+	registerAgent,
+	updateAgentPublicKey,
+} from "./agent-registry/index.ts";
 
 /** Key algorithm used for agent identities */
 const _KEY_ALGORITHM = "ed25519";
@@ -193,6 +198,16 @@ export async function getOrCreateIdentity(
 	// Generate new key pair
 	const keyPair = generateAgentKeyPair(tempAgentId);
 	await saveKeyPair(workspaceRoot, keyPair);
+
+	// P159: Best-effort DB registration with public key. DB unavailable = OK,
+	// file system is authoritative. Key conflict = rethrow (explicit invariant).
+	try {
+		await registerAgent({ agentId: tempAgentId, instanceId: tempAgentId, publicKey: keyPair.publicKey });
+	} catch (err) {
+		if (err instanceof Error && err.message.startsWith("Key conflict")) throw err;
+		// DB connectivity failure — silently continue
+	}
+
 	return keyPair;
 }
 
@@ -397,6 +412,13 @@ export async function rotateKeyPair(
 	// Save new key as current
 	await saveKeyPair(workspaceRoot, newKeyPair);
 
+	// P159: Best-effort DB update for rotated key.
+	try {
+		await updateAgentPublicKey(currentKeyPair.agentId, newKeyPair.publicKey);
+	} catch {
+		// DB unavailable — file system already has the new key; rotation is safe.
+	}
+
 	return {
 		newKeyPair,
 		previousPublicKey: currentKeyPair.publicKey,
@@ -488,6 +510,34 @@ export function verifyAuditEvent(
 }
 
 // ===================== Identity Verification for Operations =====================
+
+/**
+ * P159: Verify a token using the DB-stored public key for the agent.
+ * Falls back to token.publicKey if the DB is unavailable or the row has no key.
+ * AC-5/AC-6: DB-backed lookup with graceful fallback.
+ *
+ * @param keyLookup - Optional override for the DB lookup (used in tests).
+ *   Defaults to getAgentPublicKey from the registry.
+ */
+export async function verifyTokenWithDbLookup(
+	token: AuthToken,
+	keyLookup: (agentId: string) => Promise<string | null> = getAgentPublicKey,
+): Promise<TokenVerification> {
+	let publicKeyToUse = token.publicKey;
+
+	try {
+		const dbKey = await keyLookup(token.agentId);
+		if (dbKey !== null) {
+			publicKeyToUse = dbKey;
+		}
+	} catch {
+		// DB unavailable — fall back to token's embedded public key
+	}
+
+	// Re-verify using the resolved public key (clone token to avoid mutation)
+	const resolvedToken: AuthToken = { ...token, publicKey: publicKeyToUse };
+	return verifyToken(resolvedToken);
+}
 
 /**
  * Verify that a token's agent is authorized to perform an operation

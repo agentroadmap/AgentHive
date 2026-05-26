@@ -6,10 +6,10 @@
  *
  * DB table: agent_registry
  *   agent_identity  — unique instance ID (PK via unique constraint)
- *   agent_type      — 'permanent' | 'contract'
+ *   agent_type      — 'agency' | 'llm' | 'tool' | 'hybrid' | ... (DB constraint)
  *   role            — agent role string
  *   skills          — JSONB: { agentId, capabilities, channel, lastSeen, currentTask }
- *   status          — 'online' | 'offline' | 'busy' | 'error'
+ *   status          — 'active' | 'inactive' | 'suspended' (DB constraint)
  *   created_at      — registration timestamp
  */
 
@@ -45,7 +45,7 @@ import type {
 
 type AgentRegistryRow = {
 	agent_identity: string;
-	agent_type: AgentRegistration["agentType"] | null;
+	agent_type: string | null;
 	role: string | null;
 	skills: {
 		agentId?: string;
@@ -54,9 +54,21 @@ type AgentRegistryRow = {
 		lastSeen?: string;
 		currentTask?: string;
 	} | null;
-	status: AgentRegistration["status"] | null;
+	status: string | null;
 	created_at: Date | string;
 };
+
+/** Map internal AgentType (permanent/contract) to DB-stored agent_type value. */
+function toDbAgentType(internalType: AgentRegistration["agentType"]): string {
+	return internalType === "permanent" ? "agency" : "llm";
+}
+
+/** Map DB agent_type back to internal AgentType. */
+function fromDbAgentType(dbType: string | null): AgentRegistration["agentType"] {
+	return dbType === "agency" || dbType === "coordinator" || dbType === "workforce"
+		? "permanent"
+		: "contract";
+}
 
 /** Generate unique suffix for contract agents */
 function uniqueSuffix(): string {
@@ -93,7 +105,7 @@ export async function resolveInstanceId(
 	for (const ch of slots) {
 		const candidate = `${base}-${ch}`;
 		const status = byId.get(candidate);
-		if (status === undefined || status !== "online") return candidate;
+		if (status === undefined || status !== "active") return candidate;
 	}
 	throw new Error(
 		`[P852] All slots exhausted for base "${base}" (liaison=${isLiaison})`,
@@ -135,11 +147,11 @@ function hydrate(row: AgentRegistryRow): AgentRegistration {
 	return {
 		agentId: skills.agentId ?? row.agent_identity,
 		instanceId: row.agent_identity,
-		agentType: row.agent_type === "permanent" ? "permanent" : "contract",
+		agentType: fromDbAgentType(row.agent_type),
 		role: row.role ?? undefined,
 		capabilities: skills.capabilities ?? [],
 		channel: skills.channel ?? agentChannel(row.agent_identity),
-		status: row.status ?? "offline",
+		status: (row.status as AgentRegistration["status"]) ?? "inactive",
 		registeredAt:
 			row.created_at instanceof Date
 				? row.created_at.toISOString()
@@ -208,18 +220,37 @@ export async function registerAgent(
 
 	const skills = { agentId, capabilities, channel, lastSeen: now };
 	const trustTier = defaultTrustTier(instanceId, agentType);
+	const publicKey = request.publicKey ?? null;
+
+	// AC-10: Key conflict detection — must run before upsert so callers know
+	// if a key mismatch exists (e.g. identity reuse across different key pairs).
+	if (publicKey !== null) {
+		const { rows: existing } = await query<{ public_key: string | null }>(
+			`SELECT public_key FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
+			[instanceId],
+		);
+		if (existing.length > 0) {
+			const storedKey = existing[0].public_key;
+			if (storedKey !== null && storedKey !== publicKey) {
+				throw new Error(
+					`Key conflict for agent ${instanceId}: registered public_key differs from provided key. Use rotateKeyPair() to explicitly rotate.`,
+				);
+			}
+		}
+	}
 
 	const insertResult = await query<{ id: number }>(
-		`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, role, skills, status, trust_tier)
-     VALUES ($1, $2, $3, $4::jsonb, 'online', $5)
+		`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, role, skills, status, trust_tier, public_key)
+     VALUES ($1, $2, $3, $4::jsonb, 'active', $5, $6)
      ON CONFLICT (agent_identity) DO UPDATE SET
-       agent_type = EXCLUDED.agent_type,
-       role       = EXCLUDED.role,
-       skills     = agent_registry.skills || EXCLUDED.skills,
-       status     = 'online',
-       trust_tier = COALESCE(NULLIF(agent_registry.trust_tier, 'authority'), EXCLUDED.trust_tier)
+       agent_type  = EXCLUDED.agent_type,
+       role        = EXCLUDED.role,
+       skills      = agent_registry.skills || EXCLUDED.skills,
+       status      = 'active',
+       trust_tier  = COALESCE(NULLIF(agent_registry.trust_tier, 'authority'), EXCLUDED.trust_tier),
+       public_key  = COALESCE(EXCLUDED.public_key, agent_registry.public_key)
      RETURNING id`,
-		[instanceId, agentType, role ?? null, JSON.stringify(skills), trustTier],
+		[instanceId, toDbAgentType(agentType), role ?? null, JSON.stringify(skills), trustTier, publicKey],
 	);
 
 	// P919 AC-12: Tier 2 display alias for worker slot-0 spawns. The slot
@@ -267,7 +298,7 @@ export async function deregisterAgent(
 	const { agentId, reason = "graceful shutdown" } = request;
 
 	await query(
-		`UPDATE agent_registry SET status = 'offline' WHERE agent_identity = $1`,
+		`UPDATE roadmap_workforce.agent_registry SET status = 'inactive' WHERE agent_identity = $1`,
 		[agentId],
 	);
 
@@ -322,6 +353,36 @@ export async function updateAgentStatus(
          skills = skills || $2::jsonb
      WHERE agent_identity = $3`,
 		[status, JSON.stringify(skillsPatch), agentId],
+	);
+}
+
+/**
+ * P159: Fetch the stored Ed25519 public key for an agent.
+ * Returns null when the agent row does not exist or public_key is unset.
+ */
+export async function getAgentPublicKey(
+	agentId: string,
+): Promise<string | null> {
+	const { rows } = await query<{ public_key: string | null }>(
+		`SELECT public_key FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
+		[agentId],
+	);
+	return rows[0]?.public_key ?? null;
+}
+
+/**
+ * P159: Persist a rotated Ed25519 public key for an agent.
+ * Sets key_rotated_at to NOW().
+ */
+export async function updateAgentPublicKey(
+	agentId: string,
+	publicKey: string,
+): Promise<void> {
+	await query(
+		`UPDATE roadmap_workforce.agent_registry
+		 SET public_key = $1, key_rotated_at = NOW()
+		 WHERE agent_identity = $2`,
+		[publicKey, agentId],
 	);
 }
 
