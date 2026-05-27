@@ -351,6 +351,9 @@ export async function postWorkOffer(
 	// this when the agent_run came back rate_limited — the handler's status
 	// union is delivered|failed, so without the marker the squad_dispatch row
 	// would falsely look like a loop failure.
+	// P1406: also exclude 'lease_expired' (reaper-stamped via migration 181
+	// when reissues exhaust without ever spawning an agent_run). That's
+	// capacity saturation, not a real loop — pool can't service the rate.
 	const { rows: loopRows } = await queryFn<{ recent_runs: number }>(
 		`SELECT (
 		   SELECT count(*)::int
@@ -371,7 +374,7 @@ export async function postWorkOffer(
 		      AND dispatch_role = $2
 		      AND dispatch_status = 'failed'
 		      AND completed_at > now() - interval '1 hour'
-		      AND COALESCE(metadata->>'failure_reason', '') <> 'rate_limited'
+		      AND COALESCE(metadata->>'failure_reason', '') NOT IN ('rate_limited', 'lease_expired')
 		 ) AS recent_runs`,
 		[input.proposalId, input.role],
 	);
