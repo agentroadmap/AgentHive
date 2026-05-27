@@ -273,6 +273,35 @@ async function runSpawn(args: {
 			? "delivered"
 			: "failed";
 
+	// P1393: if the agent_run for this dispatch came back rate_limited (route
+	// outage, not a real failure), stamp metadata.failure_reason='rate_limited'
+	// before fn_complete_work_offer collapses the row to dispatch_status='failed'.
+	// post-work-offer.ts's loop counter excludes rows with this marker so the
+	// circuit breaker doesn't fire on quota exhaustion. Best-effort — failure
+	// here must not block fn_complete_work_offer (lease cleanup is critical).
+	if (status === "failed") {
+		try {
+			await exec(
+				`UPDATE roadmap_workforce.squad_dispatch sd
+				    SET metadata = sd.metadata || jsonb_build_object('failure_reason', 'rate_limited')
+				  WHERE sd.id = $1
+				    AND EXISTS (
+				      SELECT 1 FROM roadmap_workforce.agent_runs ar
+				       WHERE ar.proposal_id = sd.proposal_id
+				         AND ar.agent_identity = $2
+				         AND ar.status = 'rate_limited'
+				         AND ar.started_at >= COALESCE(sd.claimed_at, sd.assigned_at)
+				    )`,
+				[dispatchId, agencyId],
+			);
+		} catch (stampErr) {
+			logger.warn(
+				`[OfferDispatchHandler] ${agencyId}: rate_limited marker stamp failed for offer ${payload.offer_id} (non-fatal):`,
+				stampErr instanceof Error ? stampErr.message : stampErr,
+			);
+		}
+	}
+
 	try {
 		await exec(
 			`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, $4)`,
