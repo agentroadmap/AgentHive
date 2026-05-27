@@ -106,6 +106,24 @@ export class PausedRoleError extends Error {
 	}
 }
 
+// P1393: postWorkOffer refused because the proposal carries
+// gate_scanner_paused=true (operator pause or circuit-breaker pause).
+// scanQueues / legacy-dispatch treat this as skip-and-continue, same shape
+// as PausedRoleError. Without this guard, scanQueues would dispatch into a
+// paused proposal every tick and the circuit breaker would re-fire alerts.
+export class ProposalPausedError extends Error {
+	constructor(
+		readonly proposalId: number,
+		readonly pausedBy: string | null,
+		readonly pausedAt: Date | null,
+	) {
+		super(
+			`postWorkOffer: P${proposalId} dispatch refused — gate_scanner_paused=true (by=${pausedBy ?? "unknown"}, since=${pausedAt?.toISOString() ?? "unknown"})`,
+		);
+		this.name = "ProposalPausedError";
+	}
+}
+
 export interface WorkOfferInput {
 	proposalId: number;
 	squadName: string;
@@ -270,8 +288,13 @@ export async function postWorkOffer(
 		project_id: number | null;
 		status: string | null;
 		maturity: string | null;
+		gate_scanner_paused: boolean;
+		gate_paused_by: string | null;
+		gate_paused_at: string | null;
 	}>(
-		`SELECT project_id, status, maturity
+		`SELECT project_id, status, maturity,
+		        gate_scanner_paused, gate_paused_by,
+		        gate_paused_at::text AS gate_paused_at
 		 FROM roadmap_proposal.proposal
 		 WHERE id = $1`,
 		[input.proposalId],
@@ -280,6 +303,20 @@ export async function postWorkOffer(
 	if (!ctx) {
 		throw new Error(
 			`postWorkOffer: proposal ${input.proposalId} not found`,
+		);
+	}
+
+	// P1393: refuse dispatch when the proposal is paused. The state-poll
+	// (orchestrator.ts:454) filters paused proposals, but scanQueues feeds
+	// from v_mature_queue (which doesn't filter — see migration 180) and
+	// legacy-dispatch's implicit-gate path also bypasses the flag. Without
+	// this guard, paused proposals dispatch every tick and the circuit
+	// breaker re-fires CRITICAL alerts on every cycle.
+	if (ctx.gate_scanner_paused) {
+		throw new ProposalPausedError(
+			input.proposalId,
+			ctx.gate_paused_by,
+			ctx.gate_paused_at ? new Date(ctx.gate_paused_at) : null,
 		);
 	}
 
@@ -309,6 +346,11 @@ export async function postWorkOffer(
 	// P721: exclude 'rate_limited' — those are route outages, not loops.
 	// P1289: also count squad_dispatch failures (dispatch-level loops) where
 	// no agent_run was ever created (e.g. no eligible agency found).
+	// P1393: also exclude squad_dispatch rows tagged with
+	// metadata.failure_reason='rate_limited'. offer-dispatch-handler.ts stamps
+	// this when the agent_run came back rate_limited — the handler's status
+	// union is delivered|failed, so without the marker the squad_dispatch row
+	// would falsely look like a loop failure.
 	const { rows: loopRows } = await queryFn<{ recent_runs: number }>(
 		`SELECT (
 		   SELECT count(*)::int
@@ -329,6 +371,7 @@ export async function postWorkOffer(
 		      AND dispatch_role = $2
 		      AND dispatch_status = 'failed'
 		      AND completed_at > now() - interval '1 hour'
+		      AND COALESCE(metadata->>'failure_reason', '') <> 'rate_limited'
 		 ) AS recent_runs`,
 		[input.proposalId, input.role],
 	);
