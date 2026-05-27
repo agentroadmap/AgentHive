@@ -191,7 +191,7 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					-- which CLI is running instead of a useless "agent" placeholder.
 					-- Permanent agents (andy, mimo, claude-mimo-a) keep their name.
 					CASE
-						WHEN ar.agent_identity ~ '^[a-z0-9]{6,10}-bot-[a-z]{3,6}-[a-z]$'
+						WHEN ar.agent_identity ~ '^[a-z0-9]{6,10}-bot-[a-z]{2,6}-[a-z]$'
 							THEN COALESCE(mr.agent_cli, mr.route_provider, 'agent')
 						ELSE ar.agent_identity
 					END AS agent_id,
@@ -203,7 +203,7 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					COALESCE(p.display_id || ' ', '') ||
 						'run-' || ar.id::text ||
 						CASE
-							WHEN COALESCE(ar_reg.display_label, ar.agent_identity) ~ '^[a-z0-9]{6,10}-bot-[a-z]{3,6}-[a-z]$'
+							WHEN COALESCE(ar_reg.display_label, ar.agent_identity) ~ '^[a-z0-9]{6,10}-bot-[a-z]{2,6}-[a-z]$'
 								THEN ''  -- legacy obfuscated identity, hide
 							ELSE ' ' || COALESCE(ar_reg.display_label, ar.agent_identity)
 						END ||
