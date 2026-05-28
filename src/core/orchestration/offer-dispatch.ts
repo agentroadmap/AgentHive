@@ -131,6 +131,14 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 	}
 
 	async dispatch(claim: ClaimedOffer): Promise<void> {
+		// P1386 Layer 1: skip spawn entirely when architect has no design work.
+		// Predicate is evaluated mechanically via SQL function and writes a
+		// synthetic agent_runs row + completes the offer with status='success'.
+		// Failure of the precondition query falls through to normal dispatch.
+		if (await this.tryArchitectEarlyExit(claim)) {
+			return;
+		}
+
 		const targetAgencyId = await this.pickAgency(claim);
 		if (!targetAgencyId) {
 			const requiredCaps = ROLE_TO_REQUIRED_CAPABILITIES[claim.role.toLowerCase()] ?? ["develop"];
@@ -233,6 +241,90 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 		this.logger.log(
 			`[OfferDispatch] offer=${claim.offerId} dispatched to agency=${targetAgencyId} (role=${claim.role}, briefing=${briefingId})`,
 		);
+	}
+
+	/**
+	 * P1386 AC-2 (Layer 1): pre-spawn early-exit for the architect role when
+	 * the proposal has no design work outstanding.
+	 *
+	 * Evaluates `roadmap_proposal.v_architect_early_exit(proposal_id)` (defined
+	 * in migration 140). If true, writes a synthetic agent_runs completion row
+	 * and completes the offer with status='success' — no agency dispatch, no
+	 * 5-min idle spawn, no SIGTERM, no pause-counter increment.
+	 *
+	 * Returns true when the dispatcher should NOT continue to pickAgency.
+	 *
+	 * Failure modes (all fail-open to normal dispatch):
+	 *   - predicate query errors (e.g. function not yet migrated) → false
+	 *   - agent_runs telemetry write errors → logged, offer still completed
+	 *
+	 * Telemetry: each early-exit writes one agent_runs row with
+	 * status='completed', activity='early-exit', output_summary='early-exit:
+	 * no design work', duration_ms=0. Operators can count savings via
+	 *   SELECT count(*) FROM agent_runs WHERE activity='early-exit'.
+	 */
+	private async tryArchitectEarlyExit(claim: ClaimedOffer): Promise<boolean> {
+		if (claim.role.toLowerCase() !== "architect") {
+			return false;
+		}
+
+		let earlyExitEligible = false;
+		try {
+			const { rows } = await query<{ ok: boolean }>(
+				`SELECT roadmap_proposal.v_architect_early_exit($1) AS ok`,
+				[claim.proposalId],
+			);
+			earlyExitEligible = rows[0]?.ok === true;
+		} catch (err) {
+			this.logger.warn(
+				`[OfferDispatch] P1386 precondition query failed for proposal=${claim.proposalId}, falling through to normal dispatch:`,
+				err instanceof Error ? err.message : err,
+			);
+			return false;
+		}
+
+		if (!earlyExitEligible) {
+			return false;
+		}
+
+		let agentRunId: string | null = null;
+		try {
+			const { rows } = await query<{ id: number }>(
+				`INSERT INTO agent_runs
+				   (proposal_id, display_id, agent_identity, stage, model_used,
+				    status, activity, started_at)
+				 VALUES ($1, 'early-exit', $2, $3, NULL,
+				    'running', 'early-exit', now())
+				 RETURNING id`,
+				[claim.proposalId, this.orchestratorIdentity, claim.role],
+			);
+			agentRunId = String(rows[0].id);
+			await query(
+				`UPDATE agent_runs
+				    SET status         = 'completed',
+				        duration_ms    = 0,
+				        output_summary = 'early-exit: no design work',
+				        completed_at   = now()
+				  WHERE id = $1`,
+				[agentRunId],
+			);
+		} catch (err) {
+			this.logger.error(
+				`[OfferDispatch] P1386 telemetry write failed for proposal=${claim.proposalId} (continuing with offer completion):`,
+				err instanceof Error ? err.message : err,
+			);
+		}
+
+		await query(
+			`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, 'success')`,
+			[claim.dispatchId, this.orchestratorIdentity, claim.claimToken],
+		);
+
+		this.logger.log(
+			`[OfferDispatch] P1386 early-exit: architect on proposal=${claim.proposalId} has no design work; offer=${claim.offerId} completed as no-op (agent_run=${agentRunId ?? "skipped"})`,
+		);
+
+		return true;
 	}
 
 	private async pickAgency(claim: ClaimedOffer): Promise<string | null> {
