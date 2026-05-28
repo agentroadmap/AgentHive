@@ -905,6 +905,8 @@ export async function submitReview(args: {
 	verdict: string;
 	findings?: Record<string, any>;
 	notes?: string;
+	comment?: string;
+	is_blocking?: boolean;
 	// Common aliases agents try when they don't recall the canonical name.
 	// Treated as fallbacks for `notes` so a misnamed arg doesn't strand a gate run.
 	review?: string;
@@ -951,12 +953,14 @@ export async function submitReview(args: {
 		if (existing.length) {
 			reviewId = existing[0].id;
 			await query(
-				`UPDATE roadmap_proposal.proposal_reviews SET verdict = $1, notes = $2, findings = $3, reviewed_at = NOW()
-         WHERE proposal_id = $4 AND reviewer_identity = $5`,
+				`UPDATE roadmap_proposal.proposal_reviews SET verdict = $1, notes = $2, findings = $3, comment = $4, is_blocking = $5, reviewed_at = NOW()
+         WHERE proposal_id = $6 AND reviewer_identity = $7`,
 				[
 					args.verdict,
 					args.notes || null,
 					args.findings ? JSON.stringify(args.findings) : null,
+					args.comment || null,
+					args.is_blocking ?? false,
 					proposalId,
 					args.reviewer,
 				],
@@ -970,14 +974,16 @@ export async function submitReview(args: {
 			}
 		} else {
 			const { rows: inserted } = await query(
-				`INSERT INTO roadmap_proposal.proposal_reviews (proposal_id, reviewer_identity, verdict, notes, findings)
-         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+				`INSERT INTO roadmap_proposal.proposal_reviews (proposal_id, reviewer_identity, verdict, notes, findings, comment, is_blocking)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
 				[
 					proposalId,
 					args.reviewer,
 					args.verdict,
 					args.notes || null,
 					args.findings ? JSON.stringify(args.findings) : null,
+					args.comment || null,
+					args.is_blocking ?? false,
 				],
 			);
 			reviewId = inserted[0].id;
@@ -1630,6 +1636,8 @@ export class RfcWorkflowHandlers {
 						enum: ["approve", "approve_with_changes", "request_changes", "send_back", "reject", "defer", "recuse"],
 					},
 					notes: { type: "string" },
+					comment: { type: "string", description: "Additional comment on the review" },
+					is_blocking: { type: "boolean", description: "Whether this review blocks proposal advancement" },
 					change_requirements: {
 						type: "array",
 						items: { type: "string" },
