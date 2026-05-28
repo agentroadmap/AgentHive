@@ -146,7 +146,7 @@ describe("liaison-agent", () => {
 		// agentNotifyChannel throws on bad identities and enforces 63-byte limit.
 		// We validate by reaching into the started listener via a safe identity.
 		const channel = agentNotifyChannel(LIAISON);
-		expect(channel).toBe(`a2a_msg_${LIAISON}`);
+		expect(channel).toBe(`msg_${LIAISON}`);
 
 		const registry = new CliInvocationRegistry();
 		const mockHandler: CliInvocationHandler = {
