@@ -890,14 +890,42 @@ export async function createMcpServer(
 		});
 		server.addTool({
 			name: "agent_register",
-			description: "Register or update an agent",
+			description:
+				"Register or update an agent. Idempotent UPSERT keyed on identity. " +
+				"COALESCE on UPDATE preserves existing values when fields are omitted. " +
+				"P1129 Phase A: accepts agency-shape fields (preferred_provider, agent_cli, host_affinity, display_alias, display_name).",
 			inputSchema: {
 				type: "object",
 				properties: {
-					identity: { type: "string" },
-					agent_type: { type: "string" },
-					role: { type: "string" },
-					skills: { type: "string" },
+					identity: { type: "string", description: "Agent identity (canonical key)" },
+					agent_type: { type: "string", description: "e.g. 'agency', 'llm', 'tool'" },
+					role: { type: "string", description: "e.g. 'liaison', 'developer'" },
+					skills: {
+						type: "string",
+						description: "JSON array or comma-separated string",
+					},
+					preferred_provider: {
+						type: "string",
+						description:
+							"Agent-provider vocabulary (claude/codex/gemini/copilot). NOT route_provider.",
+					},
+					agent_cli: {
+						type: "string",
+						description: "CLI command this agent uses (e.g. 'claude', 'gemini')",
+					},
+					host_affinity: {
+						type: "string",
+						description:
+							"Preferred host_name (must match host_model_policy.host_name when used by an agency)",
+					},
+					display_alias: {
+						type: "string",
+						description: "Short alias for display (must be unique)",
+					},
+					display_name: {
+						type: "string",
+						description: "Human-readable label",
+					},
 				},
 				required: ["identity"],
 			},

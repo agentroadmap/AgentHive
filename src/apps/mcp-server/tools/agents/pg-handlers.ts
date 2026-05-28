@@ -159,13 +159,16 @@ export class PgAgentHandlers {
 		identity: string;
 		agent_type?: string;
 		role?: string;
-		skills?: string;
+		skills?: string | string[];
+		preferred_provider?: string;
+		agent_cli?: string;
+		host_affinity?: string;
+		display_alias?: string;
+		display_name?: string;
 	}): Promise<CallToolResult> {
 		try {
-			// P462: Sanitize and validate agent identity
 			const normalizedIdentity = normalizeAgentId(args.identity);
 
-			// P462: Check for collisions with existing identities
 			const collision = await detectCollision(args.identity);
 			if (collision && collision !== args.identity) {
 				return errorResult(
@@ -174,11 +177,29 @@ export class PgAgentHandlers {
 				);
 			}
 
+			// P1129 Phase A: persist agency-shape fields with COALESCE on UPDATE so
+			// partial calls don't overwrite existing values with NULL.
+			// Note: preferred_model is deliberately omitted — composite FK
+			// (preferred_provider, preferred_model) → model_metadata is NULL-exempt
+			// only when preferred_model is NULL.
 			const { rows } = await query(
-				`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, role, skills)
-         VALUES ($1, $2, $3, $4::jsonb) ON CONFLICT (agent_identity)
-         DO UPDATE SET agent_type = EXCLUDED.agent_type, role = EXCLUDED.role, skills = EXCLUDED.skills
-         RETURNING agent_identity, role, status`,
+				`INSERT INTO roadmap_workforce.agent_registry (
+					agent_identity, agent_type, role, skills,
+					preferred_provider, agent_cli, host_affinity,
+					display_alias, display_name
+				)
+				VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9)
+				ON CONFLICT (agent_identity) DO UPDATE SET
+					agent_type         = COALESCE(EXCLUDED.agent_type,         roadmap_workforce.agent_registry.agent_type),
+					role               = COALESCE(EXCLUDED.role,               roadmap_workforce.agent_registry.role),
+					skills             = COALESCE(EXCLUDED.skills,             roadmap_workforce.agent_registry.skills),
+					preferred_provider = COALESCE(EXCLUDED.preferred_provider, roadmap_workforce.agent_registry.preferred_provider),
+					agent_cli          = COALESCE(EXCLUDED.agent_cli,          roadmap_workforce.agent_registry.agent_cli),
+					host_affinity      = COALESCE(EXCLUDED.host_affinity,      roadmap_workforce.agent_registry.host_affinity),
+					display_alias      = COALESCE(EXCLUDED.display_alias,      roadmap_workforce.agent_registry.display_alias),
+					display_name       = COALESCE(EXCLUDED.display_name,       roadmap_workforce.agent_registry.display_name),
+					updated_at         = NOW()
+				RETURNING agent_identity, role, status`,
 				[
 					normalizedIdentity,
 					args.agent_type || null,
@@ -190,6 +211,11 @@ export class PgAgentHandlers {
 								: JSON.stringify(args.skills.split(",").map((s) => s.trim()).filter(Boolean))
 							: JSON.stringify(args.skills)
 						: null,
+					args.preferred_provider?.trim() || null,
+					args.agent_cli?.trim() || null,
+					args.host_affinity?.trim() || null,
+					args.display_alias?.trim() || null,
+					args.display_name?.trim() || null,
 				],
 			);
 			return {
@@ -477,7 +503,7 @@ export class PgAgentHandlers {
 					content: [
 						{
 							type: "text",
-							text: `Error: Agency '${trimmedId}' not found in agent_registry. Prerequisite path: mcp_agent action='register' args={agent_identity: '${trimmedId}', agent_type: 'agency', ...}`,
+							text: `Error: Agency '${trimmedId}' not found in roadmap_workforce.agent_registry. Prerequisite path: mcp_agent action='register' args={agent_identity: '${trimmedId}', agent_type: 'agency', ...}`,
 						},
 					],
 					isError: true,
@@ -519,7 +545,7 @@ export class PgAgentHandlers {
 					content: [
 						{
 							type: "text",
-							text: `Error: provider cannot be determined. No provider specified in args, and agent_registry.preferred_provider is null/blank. Please supply provider in args.`,
+							text: `Error: provider cannot be determined. No provider specified in args, and roadmap_workforce.agent_registry.preferred_provider is null/blank. Please supply provider in args.`,
 						},
 					],
 					isError: true,
