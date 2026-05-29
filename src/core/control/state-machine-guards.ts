@@ -140,10 +140,12 @@ export async function tryClaimDispatch(
 		// (covers paused, throttled, dormant, retired — all non-claimable states).
 		const { rows } = await client.query<{
 			dispatch_id: string;
+			proposal_id: string | null;
 			agency_id: string | null;
 			agency_status: string | null;
 		}>(
 			`SELECT d.dispatch_id::text,
+			        d.proposal_id::text,
 			        d.agency_id,
 			        a.status AS agency_status
 			   FROM roadmap_control.dispatch d
@@ -187,22 +189,41 @@ export async function tryClaimDispatch(
 		} else if (agencyIsBlocked(rows[0]!.agency_status)) {
 			// Locked the row but agency is not claimable — reject.
 			rejectReason = "agency_suspended";
-		} else if (rows[0]!.agency_id) {
-			// Agency is claimable — check its concurrency ceiling.
-			// fn_check_concurrency materializes the per-agency row (INSERT ON CONFLICT)
-			// and acquires a FOR UPDATE lock held until this transaction commits.
-			// Serializes concurrent ceiling checks for the same agency_id.
-			const { rows: concRows } = await client.query<{
-				current_count: number;
-				max_count: number;
-				ok: boolean;
-			}>(
-				`SELECT current_count, max_count, ok
-				   FROM roadmap_control.fn_check_concurrency($1, $2)`,
-				["agency", rows[0]!.agency_id],
+		} else {
+			// Check concurrency ceilings in scope order: global → agency → proposal.
+			// Each fn_check_concurrency call acquires FOR UPDATE on its concurrency_limit
+			// row, held until this transaction commits. Lock order is always:
+			//   dispatch row → concurrency_limit row (consistent across callers)
+			// so circular waits are impossible.
+
+			// Global ceiling: uses the canonical '__default__' scope row.
+			const { rows: globalRows } = await client.query<{ ok: boolean }>(
+				`SELECT ok FROM roadmap_control.fn_check_concurrency('global', '__default__')`,
 			);
-			if (concRows[0] && !concRows[0].ok) {
+			if (globalRows[0] && !globalRows[0].ok) {
 				rejectReason = "concurrency_ceiling_exceeded";
+			}
+
+			// Agency ceiling — only when an agency is bound to this dispatch.
+			if (rejectReason === null && rows[0]!.agency_id) {
+				const { rows: agencyRows } = await client.query<{ ok: boolean }>(
+					`SELECT ok FROM roadmap_control.fn_check_concurrency('agency', $1)`,
+					[rows[0]!.agency_id],
+				);
+				if (agencyRows[0] && !agencyRows[0].ok) {
+					rejectReason = "concurrency_ceiling_exceeded";
+				}
+			}
+
+			// Proposal ceiling — only when a proposal is bound to this dispatch.
+			if (rejectReason === null && rows[0]!.proposal_id) {
+				const { rows: propRows } = await client.query<{ ok: boolean }>(
+					`SELECT ok FROM roadmap_control.fn_check_concurrency('proposal', $1)`,
+					[rows[0]!.proposal_id],
+				);
+				if (propRows[0] && !propRows[0].ok) {
+					rejectReason = "concurrency_ceiling_exceeded";
+				}
 			}
 		}
 
