@@ -61,6 +61,7 @@
     "node": ">=24.0.0"
   },
   "scripts": {
+    "hooks:install": "git config core.hooksPath .githooks",
     "test": "node --import jiti/register --test $(find tests -type f \\( -name '*.test.ts' -o -name '*.test.tsx' \\) | sort)",
     "format": "biome format --write .",
     "lint": "biome lint --write .",

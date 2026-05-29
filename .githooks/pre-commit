@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# P404: Reject commits that track tmp/ artifacts or ephemeral agent output.
+# Install: git config core.hooksPath .githooks
+# Or run: npm run hooks:install
+
+set -euo pipefail
+
+# Files staged for commit
+STAGED=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)
+
+if [ -z "$STAGED" ]; then
+  exit 0
+fi
+
+BLOCKED=()
+
+while IFS= read -r file; do
+  # Block tmp/ files at any depth
+  if [[ "$file" == tmp/* || "$file" == */tmp/* ]]; then
+    BLOCKED+=("$file")
+    continue
+  fi
+
+  # Block common ephemeral agent artifact extensions in docs/ or project root
+  case "$file" in
+    docs/*-report.md | docs/*-review.md | docs/arch-*.md | \
+    *-ship-report.md | *-gate-report.md | *-verification.md)
+      BLOCKED+=("$file")
+      ;;
+  esac
+done <<< "$STAGED"
+
+if [ ${#BLOCKED[@]} -gt 0 ]; then
+  echo "[pre-commit] Blocking commit: ephemeral agent artifacts must not be tracked." >&2
+  for f in "${BLOCKED[@]}"; do
+    echo "  blocked: $f" >&2
+  done
+  echo "  Use AGENT_SCRATCH_DIR for ephemeral output, or proposal_discussions for reports." >&2
+  exit 1
+fi
+
+exit 0

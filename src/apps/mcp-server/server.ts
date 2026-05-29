@@ -751,6 +751,33 @@ export async function createMcpServer(
 			// Non-fatal; delivery_id_log will grow until manually pruned
 		}
 
+		// P194: memory from durable proposal, dispatch, liaison, route, and gate events.
+		try {
+			const { registerMemoryEventConsumer } = await import(
+				"../../memory/memory-event-consumer.ts"
+			);
+			await registerMemoryEventConsumer();
+			if (options.debug) {
+				console.error("[MCP] Memory event consumer registered");
+			}
+		} catch (error) {
+			console.error("[MCP] Failed to register memory event consumer:", error);
+		}
+
+		// P404: reap scratch dirs left by any prior MCP server epoch (dry-run logs, then delete).
+		try {
+			const { reapOrphanScratch } = await import(
+				"../../core/orchestration/scratch.ts"
+			);
+			await reapOrphanScratch({ dryRun: true });
+			await reapOrphanScratch({ dryRun: false });
+			if (options.debug) {
+				console.error("[MCP] Boot scratch orphan reap complete");
+			}
+		} catch (error) {
+			console.error("[MCP] Boot scratch orphan reap failed (non-fatal):", error);
+		}
+
 		// V2 agentHive2 connectivity check (P826) — non-fatal, opt-in via env
 		if (process.env.AGENTHIVE_V2_DB_URL) {
 			const { verifyAgentHive2Connection } = await import(
@@ -1226,6 +1253,52 @@ export async function createMcpServer(
 				required: ["embedding"],
 			},
 			handler: (a) => memory.searchMemory(a as SearchMemoryArgs),
+		});
+
+		// P230: Team memory tools
+		type TeamMemSetArgs = Parameters<typeof memory.teamMemSet>[0];
+		type TeamMemGetArgs = Parameters<typeof memory.teamMemGet>[0];
+		type TeamMemListArgs = Parameters<typeof memory.teamMemList>[0];
+		server.addTool({
+			name: "team_mem_set",
+			description: "Set a team-scoped shared memory entry (squad decisions, durable knowledge)",
+			inputSchema: {
+				type: "object",
+				properties: {
+					team_name: { type: "string", description: "Team/squad identifier" },
+					key: { type: "string", description: "Memory key" },
+					value: { type: "string", description: "JSON-serializable value" },
+					created_by: { type: "string", description: "Agent identity writing this entry" },
+					expires_in_days: { type: "number", description: "TTL in days (omit for no expiry)" },
+				},
+				required: ["team_name", "key", "value"],
+			},
+			handler: (a) => memory.teamMemSet(a as TeamMemSetArgs),
+		});
+		server.addTool({
+			name: "team_mem_get",
+			description: "Get a single team-scoped memory entry by key",
+			inputSchema: {
+				type: "object",
+				properties: {
+					team_name: { type: "string", description: "Team/squad identifier" },
+					key: { type: "string", description: "Memory key to retrieve" },
+				},
+				required: ["team_name", "key"],
+			},
+			handler: (a) => memory.teamMemGet(a as TeamMemGetArgs),
+		});
+		server.addTool({
+			name: "team_mem_list",
+			description: "List all non-expired memory entries for a team",
+			inputSchema: {
+				type: "object",
+				properties: {
+					team_name: { type: "string", description: "Team/squad identifier" },
+				},
+				required: ["team_name"],
+			},
+			handler: (a) => memory.teamMemList(a as TeamMemListArgs),
 		});
 
 		// P078: Escalation Management tools

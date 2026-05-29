@@ -14,6 +14,7 @@
 import { Orchestrator } from "../src/core/orchestration/orchestrator.ts";
 import { closePool, setPoolLifecycleMode } from "../src/infra/postgres/pool.ts";
 import { startPoolWatchdog } from "../src/infra/postgres/pool-watchdog.ts";
+import { reapOrphanScratch } from "../src/core/orchestration/scratch.ts";
 
 // P1123: declare long-running mode so stray pool.end() calls cannot poison this
 // service. Graceful shutdown drops back to "one-shot" before the final closePool.
@@ -24,6 +25,15 @@ const orchestrator = new Orchestrator();
 
 async function main() {
 	console.log("[orchestrator-shim] starting");
+
+	// P404: reap scratch dirs left by any prior process epoch (dry-run logs first).
+	await reapOrphanScratch({ dryRun: true }).catch((e: unknown) =>
+		console.warn(`[scratch-reaper] dry-run scan failed: ${e instanceof Error ? e.message : e}`),
+	);
+	await reapOrphanScratch({ dryRun: false }).catch((e: unknown) =>
+		console.warn(`[scratch-reaper] boot reap failed: ${e instanceof Error ? e.message : e}`),
+	);
+
 	await orchestrator.start();
 	console.log("[orchestrator-shim] running");
 
