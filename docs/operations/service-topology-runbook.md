@@ -152,9 +152,9 @@ Triggers fire on:
 
 | Table | Trigger | Responsibility |
 |---|---|---|
-| roadmap.proposal | `trg_svc_own_proposal_status` (BEFORE UPDATE OF status) | state_machine_transition |
-| roadmap.proposal | `trg_svc_own_proposal_maturity` (BEFORE UPDATE OF maturity) | maturity_sync |
-| roadmap.transition_queue | `trg_svc_own_transition_queue` (BEFORE INSERT) | state_machine_transition |
+| roadmap_proposal.proposal | `trg_svc_own_proposal_status` (BEFORE UPDATE OF status) | state_machine_transition |
+| roadmap_proposal.proposal | `trg_svc_own_proposal_maturity` (BEFORE UPDATE OF maturity) | maturity_sync |
+| roadmap_proposal.transition_queue | `trg_svc_own_transition_queue` (BEFORE INSERT) | state_machine_transition |
 | roadmap.decision_queue | `trg_svc_own_decision_queue` (BEFORE INSERT OR UPDATE) | gate_evaluation |
 | roadmap_workforce.squad_dispatch | `trg_svc_own_squad_dispatch` (BEFORE INSERT OR UPDATE) | work_offer_claim |
 | control_runtime.service_lease | `trg_svc_own_service_lease` (BEFORE INSERT OR UPDATE) | service_lease_management |
@@ -169,9 +169,9 @@ To disable enforcement without dropping the schema:
 
 ```sql
 -- Drop all governing triggers (enforcement disabled; tables still exist)
-DROP TRIGGER IF EXISTS trg_svc_own_proposal_status ON roadmap.proposal;
-DROP TRIGGER IF EXISTS trg_svc_own_proposal_maturity ON roadmap.proposal;
-DROP TRIGGER IF EXISTS trg_svc_own_transition_queue ON roadmap.transition_queue;
+DROP TRIGGER IF EXISTS trg_svc_own_proposal_status ON roadmap_proposal.proposal;
+DROP TRIGGER IF EXISTS trg_svc_own_proposal_maturity ON roadmap_proposal.proposal;
+DROP TRIGGER IF EXISTS trg_svc_own_transition_queue ON roadmap_proposal.transition_queue;
 DROP TRIGGER IF EXISTS trg_svc_own_decision_queue ON roadmap.decision_queue;
 DROP TRIGGER IF EXISTS trg_svc_own_squad_dispatch ON roadmap_workforce.squad_dispatch;
 DROP TRIGGER IF EXISTS trg_svc_own_service_lease ON control_runtime.service_lease;
