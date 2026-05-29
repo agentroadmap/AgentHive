@@ -1200,6 +1200,9 @@ export class RoadmapServer {
 				if (method === "GET") return await this.handleGetProposalReviews(id);
 			}
 
+			if (pathname === "/api/arch-docs" && method === "GET")
+				return await this.handleGetArchDocs();
+
 			if (pathname === "/api/statuses" && method === "GET")
 				return await this.handleGetStatuses();
 
@@ -4118,6 +4121,53 @@ export class RoadmapServer {
 			return Response.json(
 				{ error: "Failed to send message" },
 				{ status: 500 },
+			);
+		}
+	}
+
+	private async handleGetArchDocs(): Promise<Response> {
+		const { generateArchitectureDocs, checkStale, getLatestArchDocs } =
+			await import("../../core/infrastructure/architecture-reconstructor.ts");
+		try {
+			if (process.env.ARCH_RECONSTRUCTOR_DISABLED === "true") {
+				return Response.json(
+					{ error: "arch_reconstructor_disabled" },
+					{ status: 503 },
+				);
+			}
+			const views = await generateArchitectureDocs({
+				projectRoot: process.cwd(),
+			});
+			const { staleSince } = await checkStale(views);
+			const headers: Record<string, string> = {
+				"X-Generated-At": views.generatedAt.toISOString(),
+			};
+			if (staleSince) {
+				headers["X-Arch-Stale"] = `true; since=${staleSince.toISOString()}`;
+			}
+			return Response.json(views, { headers });
+		} catch (error) {
+			console.error("[arch-docs] DB query failed:", error);
+			const fallback = getLatestArchDocs(process.cwd());
+			if (fallback) {
+				return Response.json(
+					{
+						error: "db_unavailable",
+						fallback: "last_generated",
+						...fallback,
+					},
+					{
+						status: 503,
+						headers: {
+							"X-Generated-At": fallback.generatedAt.toISOString(),
+							"X-Arch-Stale": `true; since=unknown`,
+						},
+					},
+				);
+			}
+			return Response.json(
+				{ error: "db_unavailable", fallback: "last_generated" },
+				{ status: 503 },
 			);
 		}
 	}
