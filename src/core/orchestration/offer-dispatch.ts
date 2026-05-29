@@ -65,8 +65,15 @@ export const ROLE_TO_REQUIRED_CAPABILITIES: Record<string, string[]> = {
 	"code-reviewer": ["review"],
 	"architecture-reviewer": ["review"],
 	enrichment_agent: ["develop"],
-	// Niche/legacy roles (orchestrator-liaison-investigator, etc.) fall through
-	// to the default ["develop"] in OrchestratorOfferDispatcher.pickAgency.
+	// Live dispatch roles added 2026-05-29 (P1290 AC-6): previously fell through
+	// to ["develop"] fallback — now explicitly mapped so coverage check catches
+	// agencies going offline.
+	"reviewer-d1": ["review"],
+	reviewer: ["review"],
+	gate_decision_agent: ["review"],
+	merge_decision_agent: ["review"],
+	integration: ["develop"],
+	qa: ["develop"],
 };
 
 export interface ClaimedOffer {
