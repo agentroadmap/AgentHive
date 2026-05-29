@@ -342,6 +342,8 @@ const opsRoutes: RouteMap = {
 	// P1129: agency lifecycle ops
 	agency_start: "agency_start",
 	agency_status: "agency_status",
+	// P081: SLA health check
+	health_check: "ops_health_check",
 };
 
 const projectRoutes: RouteMap = {

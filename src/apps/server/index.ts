@@ -1039,6 +1039,11 @@ export class RoadmapServer {
 			return await this.handleDirectMcp(req);
 		}
 
+		// P081: Prometheus metrics endpoint
+		if (method === "GET" && pathname === "/metrics") {
+			return await this.handlePrometheusMetrics();
+		}
+
 		// API Routes
 		if (pathname.startsWith("/api/")) {
 			if (pathname === "/api/proposals") {
@@ -1116,6 +1121,8 @@ export class RoadmapServer {
 				return await this.handleIssueOperatorToken(req);
 			if (pathname === "/api/operator/tokens" && method === "GET")
 				return await this.handleListOperatorTokens(req);
+			if (pathname === "/api/sla" && method === "GET")
+				return await this.handleSlaState();
 			if (pathname === "/api/pulse" && method === "GET")
 				return await this.handleListPulse(req);
 			if (pathname === "/api/channels" && method === "GET")
@@ -1283,6 +1290,8 @@ export class RoadmapServer {
 			if (pathname === "/api/proposals/cleanup/execute" && method === "POST")
 				return await this.handleCleanupExecute(req);
 
+			if (pathname === "/api/arch-docs" && method === "GET")
+				return await this.handleGetArchDocs();
 			if (pathname === "/api/version" && method === "GET")
 				return await this.handleGetVersion();
 			if (pathname === "/api/statistics" && method === "GET")
@@ -2571,6 +2580,39 @@ export class RoadmapServer {
 		} catch (error) {
 			const message = (error as Error)?.message || "Invalid request";
 			return Response.json({ error: message }, { status: 400 });
+		}
+	}
+
+	private async handleGetArchDocs(): Promise<Response> {
+		const {
+			isDisabled,
+			generateArchitectureDocs,
+			checkStale,
+		} = await import("../../core/infrastructure/architecture-reconstructor.ts");
+
+		if (isDisabled()) {
+			return Response.json(
+				{ error: "arch_reconstructor_disabled", fallback: "doc-generator" },
+				{ status: 503 },
+			);
+		}
+
+		try {
+			const views = await generateArchitectureDocs(process.cwd());
+			const staleResult = await checkStale(views);
+			const headers: Record<string, string> = {
+				"X-Generated-At": views.generatedAt.toISOString(),
+			};
+			if (staleResult.staleSince) {
+				headers["X-Arch-Stale"] = staleResult.staleSince.toISOString();
+			}
+			return Response.json(views, { headers });
+		} catch (error) {
+			console.error("[arch-docs] DB error:", error);
+			return Response.json(
+				{ error: "db_unavailable", fallback: "last_generated" },
+				{ status: 503 },
+			);
 		}
 	}
 
@@ -4027,6 +4069,55 @@ export class RoadmapServer {
 				{ error: "Failed to send agent message" },
 				{ status: 500 },
 			);
+		}
+	}
+
+	private async handleSlaState(): Promise<Response> {
+		try {
+			const { handleHealthCheck } = await import("../mcp-server/tools/ops/sla-handler.ts");
+			const result = await handleHealthCheck({});
+			const text = result.content[0]?.type === "text" ? result.content[0].text : "{}";
+			return new Response(text, { headers: { "Content-Type": "application/json" } });
+		} catch (err) {
+			return new Response(JSON.stringify({ error: String(err) }), {
+				status: 500,
+				headers: { "Content-Type": "application/json" },
+			});
+		}
+	}
+
+	private async handlePrometheusMetrics(): Promise<Response> {
+		try {
+			const { handleHealthCheck } = await import("../mcp-server/tools/ops/sla-handler.ts");
+			const result = await handleHealthCheck({});
+			const text = result.content[0]?.type === "text" ? result.content[0].text : "{}";
+			const m = JSON.parse(text) as Record<string, unknown>;
+			const availGauge = m.state === "Normal" ? 1 : m.state === "Degraded" ? 0.5 : 0;
+			const lines = [
+				"# HELP agenthive_platform_availability Platform availability gauge (1=Normal 0.5=Degraded 0=Down)",
+				"# TYPE agenthive_platform_availability gauge",
+				`agenthive_platform_availability ${availGauge}`,
+				"# HELP agenthive_active_agents Number of healthy agents",
+				"# TYPE agenthive_active_agents gauge",
+				`agenthive_active_agents ${m.healthy_agents ?? 0}`,
+				"# HELP agenthive_active_leases Number of active proposal leases",
+				"# TYPE agenthive_active_leases gauge",
+				`agenthive_active_leases ${m.active_leases ?? 0}`,
+				"# HELP agenthive_mcp_latency_p99_ms MCP tool call p99 latency milliseconds (5-min window)",
+				"# TYPE agenthive_mcp_latency_p99_ms gauge",
+				`agenthive_mcp_latency_p99_ms ${m.latency_p99_ms ?? "NaN"}`,
+				"# HELP agenthive_mcp_error_rate_pct MCP tool call error rate percent (30s window)",
+				"# TYPE agenthive_mcp_error_rate_pct gauge",
+				`agenthive_mcp_error_rate_pct ${m.error_rate_pct ?? "NaN"}`,
+			].join("\n") + "\n";
+			return new Response(lines, {
+				headers: { "Content-Type": "text/plain; version=0.0.4; charset=utf-8" },
+			});
+		} catch (err) {
+			return new Response(`# error: ${String(err)}\n`, {
+				status: 500,
+				headers: { "Content-Type": "text/plain" },
+			});
 		}
 	}
 

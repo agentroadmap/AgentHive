@@ -372,14 +372,29 @@ export class McpServer extends Core {
 		// P854: _auth envelope path sets verifiedPrincipal but has no transport context;
 		// wrap handler so getProjectDb() P844 gate sees the principal.
 		// AC-5/AC-26: per-call error boundary — isolates handler failures from transport/SSE clients.
+		const _sla_t0 = process.hrtime.bigint();
 		let result: CallToolResult;
+		let _sla_status: "ok" | "error" = "ok";
 		try {
 			result = verifiedPrincipal && !ctx
 				? await agentContextStorage.run({ verified: verifiedPrincipal }, () => tool.handler(args))
 				: await tool.handler(args);
+			if (result.isError) _sla_status = "error";
 		} catch (err) {
+			_sla_status = "error";
 			const message = err instanceof Error ? err.message : String(err);
 			return { isError: true, content: [{ type: "text", text: `Tool handler error: ${message}` }] };
+		}
+		// P081: write latency span to roadmap.trace_span (best-effort, never blocks response)
+		try {
+			const _sla_ms = Number(process.hrtime.bigint() - _sla_t0) / 1_000_000;
+			await query(
+				`INSERT INTO roadmap.trace_span (trace_id, operation, service_did, ended_at, attributes, status)
+				 VALUES (gen_random_uuid(), 'mcp_tool_call', 'operator:mcp-server', now(), $1::jsonb, $2)`,
+				[JSON.stringify({ tool_name: name, duration_ms: Math.round(_sla_ms) }), _sla_status],
+			);
+		} catch {
+			// Non-fatal.
 		}
 
 		// Log tool call to pulse
@@ -2280,6 +2295,19 @@ export async function createMcpServer(
 		inputSchema: { type: "object", properties: {} },
 		handler: () => pgbouncer.pgbouncerReload().then((r) => ({ content: [{ type: "text", text: JSON.stringify(r) }] })),
 	});
+
+	// P081: SLA health_check tool
+	const { handleHealthCheck } = await import("./tools/ops/sla-handler.ts");
+	server.addTool({
+		name: "ops_health_check",
+		description:
+			"P081: Return current platform SLA state (Normal/Degraded/Down) with live metrics: " +
+			"p99 MCP tool call latency, error rate, fleet health, active leases, and Postgres status. " +
+			"Thresholds are read from roadmap.sla_config.",
+		inputSchema: { type: "object", properties: {}, additionalProperties: false },
+		handler: (a) => handleHealthCheck(a),
+	});
+	console.error("[MCP] Registered 1 P081 SLA tool (ops_health_check)");
 
 	// Start background maintenance tasks
 	const MAINTENANCE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
