@@ -1288,7 +1288,15 @@ export class RoadmapServer {
 				return await this.handleGetSequences();
 			if (pathname === "/api/sequences/move" && method === "POST")
 				return await this.handleMoveSequence(req);
+
+			// P081: SLA contract endpoint
+			if (pathname === "/api/sla" && method === "GET")
+				return await this.handleGetSlaContract();
 		}
+
+		// P081: Prometheus metrics endpoint (outside /api/ prefix)
+		if (pathname === "/metrics" && method === "GET")
+			return await this.handleGetMetrics();
 
 		// Legacy/Duplicate routes
 		if (pathname === "/sequences" && method === "GET")
@@ -4223,6 +4231,102 @@ export class RoadmapServer {
 			console.log("[P846] Operator notify relay started");
 		} catch (err) {
 			console.error("[P846] Failed to start notify relay:", err);
+		}
+	}
+
+	// P081: Serve the machine-readable SLA contract
+	private async handleGetSlaContract(): Promise<Response> {
+		try {
+			const contractPath = join(this.projectRoot, "docs", "sla-contract.json");
+			if (!existsSync(contractPath)) {
+				return Response.json({ error: "SLA contract not found" }, { status: 404 });
+			}
+			const raw = readFileSync(contractPath, "utf-8");
+			const contract = JSON.parse(raw);
+			return Response.json(contract);
+		} catch (err) {
+			console.error("[P081] Failed to read sla-contract.json:", err);
+			return Response.json({ error: "Failed to read SLA contract" }, { status: 500 });
+		}
+	}
+
+	// P081: Prometheus metrics endpoint — queries trace_span and agent_health for live SLA metrics
+	private async handleGetMetrics(): Promise<Response> {
+		try {
+			const [latencyRow, errorRow, agentRow, configRows] = await Promise.all([
+				query<{ p99_ms: string | null; sample_count: string }>(
+					`SELECT
+					   percentile_cont(0.99) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (ended_at - started_at)) * 1000) AS p99_ms,
+					   count(*) AS sample_count
+					 FROM roadmap.trace_span
+					 WHERE operation = 'mcp_tool_call'
+					   AND ended_at IS NOT NULL
+					   AND started_at > NOW() - INTERVAL '5 minutes'`,
+					[],
+				),
+				query<{ total: string; errors: string }>(
+					`SELECT
+					   count(*) AS total,
+					   count(*) FILTER (WHERE status = 'error') AS errors
+					 FROM roadmap.trace_span
+					 WHERE operation = 'mcp_tool_call'
+					   AND started_at > NOW() - INTERVAL '30 seconds'`,
+					[],
+				),
+				query<{ stale_count: string; total_count: string }>(
+					`SELECT
+					   count(*) FILTER (WHERE status IN ('stale','offline','crashed')) AS stale_count,
+					   count(*) AS total_count
+					 FROM roadmap_workforce.agent_health`,
+					[],
+				),
+				query<{ key: string; value: string }>(
+					`SELECT key, value FROM roadmap.sla_config`,
+					[],
+				),
+			]);
+
+			const cfg: Record<string, string> = {};
+			for (const row of configRows.rows) cfg[row.key] = row.value;
+
+			const p99Ms = latencyRow.rows[0]?.p99_ms != null ? parseFloat(latencyRow.rows[0].p99_ms) : 0;
+			const total = parseInt(errorRow.rows[0]?.total ?? "0", 10);
+			const errors = parseInt(errorRow.rows[0]?.errors ?? "0", 10);
+			const errorRatePct = total > 0 ? (errors / total) * 100 : 0;
+			const staleCount = parseInt(agentRow.rows[0]?.stale_count ?? "0", 10);
+			const totalAgents = parseInt(agentRow.rows[0]?.total_count ?? "0", 10);
+			const stalePct = totalAgents > 0 ? (staleCount / totalAgents) * 100 : 0;
+
+			const latencyThreshold = parseFloat(cfg["latency_p99_ms_threshold"] ?? "500");
+			const errorThreshold = parseFloat(cfg["error_rate_pct_threshold"] ?? "10");
+			const staleThreshold = parseFloat(cfg["stale_agent_pct_threshold"] ?? "20");
+			const slaState = p99Ms > latencyThreshold || errorRatePct > errorThreshold || stalePct > staleThreshold ? 1 : 0;
+
+			const lines = [
+				"# HELP agenthive_mcp_p99_latency_ms Current p99 MCP tool call latency in milliseconds",
+				"# TYPE agenthive_mcp_p99_latency_ms gauge",
+				`agenthive_mcp_p99_latency_ms ${p99Ms.toFixed(3)}`,
+				"# HELP agenthive_mcp_error_rate_pct Current MCP error rate percentage over 30s window",
+				"# TYPE agenthive_mcp_error_rate_pct gauge",
+				`agenthive_mcp_error_rate_pct ${errorRatePct.toFixed(3)}`,
+				"# HELP agenthive_mcp_stale_agent_pct Current stale/offline/crashed agent percentage",
+				"# TYPE agenthive_mcp_stale_agent_pct gauge",
+				`agenthive_mcp_stale_agent_pct ${stalePct.toFixed(3)}`,
+				"# HELP agenthive_sla_state Current SLA state: 0=Normal, 1=Degraded, 2=Down",
+				"# TYPE agenthive_sla_state gauge",
+				`agenthive_sla_state ${slaState}`,
+				"",
+			];
+
+			return new Response(lines.join("\n"), {
+				headers: { "Content-Type": "text/plain; version=0.0.4; charset=utf-8" },
+			});
+		} catch (err) {
+			console.error("[P081] Failed to compute metrics:", err);
+			return new Response("# error computing metrics\n", {
+				status: 500,
+				headers: { "Content-Type": "text/plain; version=0.0.4; charset=utf-8" },
+			});
 		}
 	}
 }

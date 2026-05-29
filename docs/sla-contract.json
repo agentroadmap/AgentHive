@@ -1,0 +1,452 @@
+{
+  "version": "1.0.0",
+  "effective_date": "2026-05-29",
+  "platform": "AgentHive",
+  "scope": "MCP API, Postgres control plane, A2A message bus, proposal workflow",
+  "targets": [
+    {
+      "surface": "MCP API",
+      "metric": "p99_latency_ms",
+      "target_value": 500,
+      "target_unit": "ms",
+      "measurement_window": "5 min rolling",
+      "measurement_method": "percentile_cont(0.99) from roadmap.trace_span WHERE operation='mcp_tool_call' AND started_at > now() - interval '5 minutes'"
+    },
+    {
+      "surface": "MCP API",
+      "metric": "error_rate_pct",
+      "target_value": 10,
+      "target_unit": "percent",
+      "measurement_window": "30s rolling",
+      "measurement_method": "error count / total count from roadmap.trace_span WHERE operation='mcp_tool_call' AND started_at > now() - interval '30 seconds'"
+    },
+    {
+      "surface": "Platform",
+      "metric": "monthly_availability_pct",
+      "target_value": 99.5,
+      "target_unit": "percent",
+      "measurement_window": "calendar month UTC",
+      "measurement_method": "uptime minutes / total minutes"
+    },
+    {
+      "surface": "Postgres",
+      "metric": "rto_seconds",
+      "target_value": 300,
+      "target_unit": "seconds",
+      "measurement_window": "per-incident",
+      "measurement_method": "systemd watchdog restart timer"
+    },
+    {
+      "surface": "Proposal workflow",
+      "metric": "lease_ttl_minutes",
+      "target_value": 30,
+      "target_unit": "minutes",
+      "measurement_window": "per-lease",
+      "measurement_method": "lease expiry timer"
+    },
+    {
+      "surface": "Concurrent baseline",
+      "metric": "agent_count",
+      "target_value": 100,
+      "target_unit": "agents",
+      "measurement_window": "sustained load",
+      "measurement_method": "load test baseline"
+    }
+  ],
+  "availability": {
+    "monthly_pct": 99.5,
+    "formula": "((total_minutes - downtime_minutes) / total_minutes) * 100",
+    "downtime_definition": "minutes in Down state, excluding planned maintenance",
+    "degraded_weight": 0.5,
+    "planned_maintenance_exclusion": true,
+    "planned_maintenance_notice_hours": 24,
+    "planned_maintenance_max_hours_per_month": 4,
+    "error_budget_minutes_per_month": 216,
+    "measurement_timezone": "UTC"
+  },
+  "states": {
+    "Normal": {
+      "description": "All SLO thresholds met",
+      "criteria": [
+        "p99_ms < 500",
+        "error_rate_pct < 10",
+        "stale_agent_pct < 20",
+        "postgres_reachable = true",
+        "all thresholds sustained for >= 60 seconds"
+      ]
+    },
+    "Degraded": {
+      "description": "One or more SLO threshold breached for >= 30 consecutive seconds",
+      "criteria": [
+        "p99_ms >= 500 OR error_rate_pct >= 10 OR stale_agent_pct >= 20",
+        "sustained >= 30 seconds",
+        "MCP API and Postgres still reachable"
+      ]
+    },
+    "Down": {
+      "description": "MCP API or Postgres unreachable",
+      "criteria": [
+        "MCP process not responding for >= 30 seconds OR postgres connection refused for >= 30 seconds"
+      ]
+    }
+  },
+  "thresholds": {
+    "latency_p99_ms": 500,
+    "error_rate_pct": 10,
+    "error_window_seconds": 30,
+    "latency_window_seconds": 300,
+    "stale_agent_pct": 20,
+    "lease_ttl_minutes": 30,
+    "degraded_sustain_seconds": 30,
+    "normal_recovery_seconds": 60
+  },
+  "observability": {
+    "health_check_tool": "mcp_ops action=health_check",
+    "health_check_output_format": "{ state: Normal|Degraded|Down, sla_version: string, metrics: {...}, breached_slos: string[], since: ISO8601 }",
+    "metrics_endpoint": "/metrics",
+    "sla_contract_endpoint": "/api/sla",
+    "sla_events_table": "roadmap.sla_events",
+    "sla_config_table": "roadmap.sla_config",
+    "trace_source_table": "roadmap.trace_span",
+    "prometheus_metrics": [
+      {
+        "name": "agenthive_mcp_call_duration_seconds",
+        "type": "histogram",
+        "description": "MCP tool call latency histogram with buckets (0.1, 0.5, 1.0 seconds)"
+      },
+      {
+        "name": "agenthive_mcp_error_rate",
+        "type": "gauge",
+        "description": "Current MCP error rate percentage over 30s window"
+      },
+      {
+        "name": "agenthive_stale_agent_pct",
+        "type": "gauge",
+        "description": "Current stale/offline/crashed agent percentage from roadmap_workforce.agent_health"
+      },
+      {
+        "name": "agenthive_availability_ratio",
+        "type": "gauge",
+        "description": "Platform availability (30d rolling percentage)"
+      },
+      {
+        "name": "agenthive_sla_state",
+        "type": "gauge",
+        "description": "Current SLA state: 0=Normal, 1=Degraded, 2=Down"
+      }
+    ]
+  },
+  "failure_modes": [
+    {
+      "name": "mcp_process_crash",
+      "surface": "MCP API",
+      "rto_seconds": 30,
+      "rpo_seconds": null,
+      "recovery_mechanism": "systemd auto-restart with PID watchdog"
+    },
+    {
+      "name": "postgres_restart",
+      "surface": "All surfaces",
+      "rto_seconds": 300,
+      "rpo_seconds": 0,
+      "recovery_mechanism": "systemd watchdog, WAL ensures zero data loss"
+    },
+    {
+      "name": "network_partition",
+      "surface": "MCP API + A2A bus",
+      "rto_seconds": 30,
+      "rpo_seconds": null,
+      "recovery_mechanism": "circuit breaker, fail-fast on MCP client"
+    },
+    {
+      "name": "agent_registry_corruption",
+      "surface": "Agent routing",
+      "rto_seconds": 300,
+      "rpo_seconds": null,
+      "recovery_mechanism": "registry rebuild on agency startup"
+    },
+    {
+      "name": "proposal_lease_deadlock",
+      "surface": "Proposal workflow",
+      "rto_seconds": 30,
+      "rpo_seconds": null,
+      "recovery_mechanism": "timeout-cron sweep, automatic lease expiry"
+    },
+    {
+      "name": "connection_pool_saturation",
+      "surface": "MCP API",
+      "rto_seconds": 30,
+      "rpo_seconds": null,
+      "recovery_mechanism": "connection timeout + client retry backoff"
+    },
+    {
+      "name": "notify_message_drop",
+      "surface": "A2A message bus",
+      "rto_seconds": 60,
+      "rpo_seconds": null,
+      "recovery_mechanism": "message_ledger replay on reconnect"
+    },
+    {
+      "name": "liaison_session_orphan",
+      "surface": "Agency startup",
+      "rto_seconds": 30,
+      "rpo_seconds": null,
+      "recovery_mechanism": "self-healing session cleanup on next boot"
+    }
+  ],
+  "config_keys": [
+    {
+      "key": "SLA_P99_LATENCY_MS",
+      "type": "environment variable",
+      "default": "500",
+      "description": "p99 latency threshold (ms) triggering Degraded state"
+    },
+    {
+      "key": "SLA_ERROR_RATE_PCT_THRESHOLD",
+      "type": "environment variable",
+      "default": "10",
+      "description": "Error rate % threshold triggering Degraded state"
+    },
+    {
+      "key": "SLA_ERROR_WINDOW_SECONDS",
+      "type": "environment variable",
+      "default": "30",
+      "description": "Rolling window (s) for error rate measurement"
+    },
+    {
+      "key": "SLA_LATENCY_WINDOW_SECONDS",
+      "type": "environment variable",
+      "default": "300",
+      "description": "Rolling window (s) for latency p99 measurement"
+    },
+    {
+      "key": "SLA_DEGRADED_SUSTAIN_SECONDS",
+      "type": "environment variable",
+      "default": "30",
+      "description": "Breach must persist this many seconds before state changes"
+    },
+    {
+      "key": "SLA_STALE_AGENT_PCT_THRESHOLD",
+      "type": "environment variable",
+      "default": "20",
+      "description": "Stale/offline/crashed agent % threshold triggering Degraded"
+    },
+    {
+      "key": "SLA_LEASE_TTL_MINUTES",
+      "type": "environment variable",
+      "default": "30",
+      "description": "Default proposal lease TTL in minutes"
+    },
+    {
+      "key": "SLA_MIN_PEER_AVAILABILITY",
+      "type": "environment variable",
+      "default": "99.0",
+      "description": "Minimum peer availability % for federation SLA gate"
+    },
+    {
+      "key": "SLA_AVAILABILITY_TARGET",
+      "type": "environment variable",
+      "default": "99.5",
+      "description": "Monthly availability target percentage"
+    },
+    {
+      "key": "p99_latency_target_ms",
+      "type": "database override (roadmap.sla_config)",
+      "default": "500",
+      "description": "Runtime override for p99 latency target (takes precedence over env var)"
+    },
+    {
+      "key": "availability_target_percent",
+      "type": "database override (roadmap.sla_config)",
+      "default": "99.5",
+      "description": "Runtime override for availability target"
+    },
+    {
+      "key": "rto_minutes",
+      "type": "database override (roadmap.sla_config)",
+      "default": "5",
+      "description": "Recovery time objective in minutes"
+    },
+    {
+      "key": "lease_ttl_minutes",
+      "type": "database override (roadmap.sla_config)",
+      "default": "30",
+      "description": "Default proposal lease TTL in minutes"
+    },
+    {
+      "key": "degraded_error_window_seconds",
+      "type": "database override (roadmap.sla_config)",
+      "default": "30",
+      "description": "Rolling window for error rate measurement"
+    },
+    {
+      "key": "degraded_error_threshold_percent",
+      "type": "database override (roadmap.sla_config)",
+      "default": "10",
+      "description": "Error rate threshold triggering Degraded state"
+    },
+    {
+      "key": "degraded_sustain_seconds",
+      "type": "database override (roadmap.sla_config)",
+      "default": "30",
+      "description": "Threshold breach must persist this many seconds"
+    },
+    {
+      "key": "degraded_recovery_window_seconds",
+      "type": "database override (roadmap.sla_config)",
+      "default": "60",
+      "description": "All thresholds must be within target for this window to recover to Normal"
+    },
+    {
+      "key": "stale_agent_pct_threshold",
+      "type": "database override (roadmap.sla_config)",
+      "default": "20",
+      "description": "Stale agent % threshold triggering Degraded"
+    },
+    {
+      "key": "planned_maintenance_max_hours",
+      "type": "database override (roadmap.sla_config)",
+      "default": "4",
+      "description": "Maximum planned maintenance hours per month excluded from downtime"
+    },
+    {
+      "key": "min_peer_availability_percent",
+      "type": "database override (roadmap.sla_config)",
+      "default": "99.0",
+      "description": "Minimum peer availability for federation SLA compatibility gate"
+    },
+    {
+      "key": "alert_channel",
+      "type": "database override (roadmap.sla_config)",
+      "default": "platform.alerts",
+      "description": "NOTIFY channel for SLA breach alerts"
+    },
+    {
+      "key": "maintenance_channel",
+      "type": "database override (roadmap.sla_config)",
+      "default": "platform.maintenance",
+      "description": "NOTIFY channel for planned maintenance announcements"
+    }
+  ],
+  "escalation_procedures": {
+    "tier_0_self_healing": {
+      "trigger": "State transition detected via health_check",
+      "action": "Auto-log to roadmap.sla_events, fire NOTIFY to alert_channel",
+      "response_commitment": "Immediate (automated)"
+    },
+    "tier_1_operator_alert": {
+      "trigger": "Degraded state sustained > 5 minutes OR Down state entered",
+      "action": "Operator on-call paged via alert_channel",
+      "response_commitment": "Acknowledge within 5 minutes"
+    },
+    "tier_2_incident": {
+      "trigger": "Down > 10 minutes OR error budget > 50% consumed",
+      "action": "Formal incident log in roadmap.proposals; all active agents notified",
+      "response_commitment": "Incident lead assigned within 15 minutes"
+    },
+    "tier_3_emergency": {
+      "trigger": "Down > 30 minutes OR error budget 100% consumed",
+      "action": "Halt new lease grants; escalate to platform lead",
+      "response_commitment": "Platform lead engaged within 30 minutes"
+    }
+  },
+  "error_budget": {
+    "monthly_target_pct": 99.5,
+    "monthly_error_budget_minutes": 216,
+    "consumption_thresholds": {
+      "50_percent": "Freeze non-critical merges",
+      "100_percent": "Formal incident declared, review required"
+    },
+    "ownership": {
+      "mcp_api_latency": "MCP server maintainer (P065)",
+      "platform_availability": "Platform ops / orchestrator",
+      "lease_ttl_compliance": "Control plane (P081)",
+      "postgres_rto": "Infrastructure team"
+    }
+  },
+  "federation_sla_compatibility": {
+    "description": "When establishing a federation peer connection (P063), the local node validates peer SLA contract",
+    "validation_endpoint": "GET https://<peer>/api/sla",
+    "required_schema": "agenthive-sla/v1",
+    "minimum_availability": "SLA_MIN_PEER_AVAILABILITY (default 99.0%)",
+    "rejection_criteria": [
+      "schema !== 'agenthive-sla/v1'",
+      "availability.monthly_pct < SLA_MIN_PEER_AVAILABILITY"
+    ],
+    "rejection_response": { "error": "SLA_INCOMPATIBLE", "detail": "<reason>" },
+    "logging": "Logged to roadmap.sla_events on validation failure"
+  },
+  "review_cadence": {
+    "trigger_first_production_deployment": "30-day post-deploy review; replace Appendix A baseline with real traffic; version bump 1.0 → 1.1",
+    "trigger_quarterly": "Every 90 days; compare actual vs. target from sla_events; update targets if sustained > 20% divergence",
+    "trigger_error_budget_80_percent": "Ad-hoc review; root cause analysis; target reassessment",
+    "trigger_major_architectural_change": "Impact assessment; evaluate whether SLA targets remain valid",
+    "version_scheme": "semver; minor bump for target adjustments, major for structural changes",
+    "pr_commit_format": "feat(P081): SLA review YYYY-Qn"
+  },
+  "source_of_truth_hierarchy": [
+    {
+      "rank": 1,
+      "source": "docs/sla-contract.json",
+      "description": "Machine-readable, versioned, authoritative at runtime. /api/sla serves this file directly.",
+      "usage": "Runtime health_check output, federation peer validation, observability"
+    },
+    {
+      "rank": 2,
+      "source": "docs/sla-contract.md",
+      "description": "Human-readable narrative; must never contradict sla-contract.json. On divergence, JSON wins.",
+      "usage": "Operator reference, SLA review documentation, architectural guidance"
+    },
+    {
+      "rank": 3,
+      "source": "roadmap.sla_config table",
+      "description": "Runtime overrides only; shadows JSON defaults for the running instance.",
+      "usage": "Per-deployment configuration adjustments without code redeploy"
+    }
+  ],
+  "rollback_procedure": {
+    "description": "All new artifacts are additive; rollback has no FK cascade impact",
+    "steps": [
+      "Drop migration 061 (roadmap.sla_config, roadmap.sla_events tables)",
+      "Remove health_check action from opsRoutes in src/apps/mcp-server/tools/consolidated.ts",
+      "Remove /metrics and /api/sla HTTP routes from src/apps/server/index.ts",
+      "Remove latency timing from callTool() in src/apps/mcp-server/server.ts",
+      "Remove prom-client dependency (bun remove prom-client)",
+      "Revert P044 vision doc reference",
+      "Remove agenthive ops health CLI subcommand"
+    ]
+  },
+  "implementation_migration": {
+    "migration_number": 61,
+    "migration_path": "scripts/migrations/061-p081-sla-contract.sql",
+    "tables_created": [
+      {
+        "name": "roadmap.sla_config",
+        "purpose": "Runtime configuration overrides for SLA thresholds",
+        "schema": "key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ"
+      },
+      {
+        "name": "roadmap.sla_events",
+        "purpose": "Event log for SLA state transitions and threshold breaches",
+        "schema": "event_id BIGSERIAL PRIMARY KEY, event_type TEXT, state TEXT, metrics JSONB, occurred_at TIMESTAMPTZ, acknowledged_at TIMESTAMPTZ, escalation_tier INT"
+      }
+    ],
+    "tables_modified": [],
+    "tables_referenced": [
+      "roadmap.trace_span (pre-exists, migration 059)",
+      "roadmap_workforce.agent_health (pre-exists, pulse infrastructure)"
+    ]
+  },
+  "acceptance_criteria_mapping": {
+    "AC-1": "SLA targets defined: p99 < 500ms, 99.5% monthly availability, RTO < 5min, lease TTL 30min, degraded at >10% errors, 100 concurrent agents baseline",
+    "AC-2": "Platform states (Normal, Degraded, Down) documented with observable thresholds",
+    "AC-3": "health_check MCP tool returns current SLA state with metric values",
+    "AC-4": "Prometheus /metrics endpoint exposes latency histogram, error rate, availability gauge",
+    "AC-5": "Degraded state triggers notification to agents; thresholds configurable per deployment",
+    "AC-6": "Availability formula with planned maintenance and partial outage treatment explicitly defined",
+    "AC-7": "Baseline measurement data collected; p99 latency and error rates in Appendix A",
+    "AC-8": "Configuration mechanism specified (env vars + roadmap.sla_config DB table with tier precedence)",
+    "AC-9": "All failure modes enumerated with RTO/RPO targets",
+    "AC-10": "Dashboard and CLI visibility for SLA state"
+  }
+}

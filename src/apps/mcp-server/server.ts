@@ -404,6 +404,9 @@ export class McpServer extends Core {
 		// P854: _auth envelope path sets verifiedPrincipal but has no transport context;
 		// wrap handler so getProjectDb() P844 gate sees the principal.
 		// AC-5/AC-26: per-call error boundary — isolates handler failures from transport/SSE clients.
+		// P081: capture wall-clock start for latency tracing
+		const _t0 = process.hrtime.bigint();
+		const _startedAt = new Date();
 		let result: CallToolResult;
 		try {
 			result = verifiedPrincipal && !ctx
@@ -443,6 +446,26 @@ export class McpServer extends Core {
 			);
 		} catch (_err) {
 			// Invocation log write failures are non-fatal.
+		}
+
+		// P081: write MCP call latency to trace_span for SLA p99 computation (best-effort).
+		try {
+			const _durationMs = Number(process.hrtime.bigint() - _t0) / 1_000_000;
+			await query(
+				`INSERT INTO roadmap.trace_span
+				   (trace_id, operation, service_did, started_at, ended_at, attributes, status)
+				 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6)`,
+				[
+					"mcp_tool_call",
+					"operator:mcp-server",
+					_startedAt,
+					new Date(),
+					JSON.stringify({ tool_name: name, duration_ms: Math.round(_durationMs) }),
+					result.isError ? "error" : "ok",
+				],
+			);
+		} catch (_err) {
+			// Trace span write failure is non-fatal.
 		}
 
 		return result;
@@ -2088,6 +2111,26 @@ export async function createMcpServer(
 	});
 
 	console.error("[MCP] Registered 9 P466/P468/P475 spawn-briefing tools (liaison protocol)");
+
+	// P081: SLA health check tool
+	const { SlaHandler } = await import("./tools/ops/sla-handler.ts");
+	const sla = new SlaHandler();
+	server.addTool({
+		name: "health_check",
+		description:
+			"P081: Returns current SLA state (Normal/Degraded/Down) with live metric values: p99 latency, error rate, stale agent %. Reads thresholds from roadmap.sla_config. Logs state transitions to roadmap.sla_events.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				window_seconds: {
+					type: "number",
+					description: "Override latency measurement window in seconds (default: from sla_config)",
+				},
+			},
+			additionalProperties: false,
+		},
+		handler: (a) => sla.handleHealthCheck(a as { window_seconds?: number }),
+	});
 
 	// Start background maintenance tasks
 	const MAINTENANCE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes

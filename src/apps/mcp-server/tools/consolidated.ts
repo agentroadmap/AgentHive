@@ -294,6 +294,8 @@ const opsRoutes: RouteMap = {
 	ref_get_term: "ref_get_term",
 	// P498: Config audit tool
 	config_audit: "config_audit",
+	// P081: SLA health check
+	health_check: "health_check",
 };
 
 const projectRoutes: RouteMap = {
@@ -368,7 +370,7 @@ export function registerConsolidatedTools(server: McpServer): void {
 		createRouterTool(
 			server,
 			"mcp_ops",
-			"Consolidated operations interface for spending, models, escalation, tests, workflow loading, and federation.",
+			"Consolidated operations interface for spending, models, escalation, tests, workflow loading, federation, and SLA health check.",
 			opsRoutes,
 		),
 	);
