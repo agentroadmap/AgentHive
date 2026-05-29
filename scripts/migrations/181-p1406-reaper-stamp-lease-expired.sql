@@ -41,7 +41,7 @@ BEGIN
 
       UPDATE roadmap_proposal.proposal_lease
       SET released_at = now(),
-          release_reason = 'reaped_offer_expired'
+          release_reason = 'lease_expired'
       WHERE proposal_id = v_row.proposal_id
         AND agent_identity = v_row.agent_identity
         AND released_at IS NULL;
@@ -64,7 +64,7 @@ BEGIN
 
       UPDATE roadmap_proposal.proposal_lease
       SET released_at = now(),
-          release_reason = 'reaped_offer_exhausted'
+          release_reason = 'lease_expired'
       WHERE proposal_id = v_row.proposal_id
         AND agent_identity = v_row.agent_identity
         AND released_at IS NULL;
