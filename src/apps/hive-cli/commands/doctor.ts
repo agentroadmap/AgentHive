@@ -164,10 +164,132 @@ async function runChecks(ctx: HiveContext): Promise<DoctorCheck[]> {
   });
 
   // Check 14: A2A host topology — service liveness + agency attachment (P1135)
-  checks.push(await checkTopology(ctx));
+  const topologyResult = await checkTopology(ctx);
+  checks.push(topologyResult);
 
   return checks;
 }
+
+// P1135: Topology check implementation
+import { execSync } from "node:child_process";
+import { Client } from "pg";
+
+async function checkTopology(ctx: HiveContext): Promise<DoctorCheck> {
+  // 1. Critical units running
+  const criticalUnits = [
+    "agenthive-mcp.service",
+    "agenthive-a2a-host.service",
+    "agenthive-board.service",
+    "agenthive-state-feed.service",
+    "agenthive-notification-router.service"
+  ];
+  let inactiveUnits: string[] = [];
+  for (const unit of criticalUnits) {
+    try {
+      const status = execSync(`systemctl is-active ${unit}`).toString().trim();
+      if (status !== "active") inactiveUnits.push(unit);
+    } catch {
+      inactiveUnits.push(unit);
+    }
+  }
+  if (inactiveUnits.length > 0) {
+    return {
+      name: "topology",
+      severity: "error",
+      message: `Critical units not active: ${inactiveUnits.join(", ")}`,
+      remediation: "Run `sudo systemctl status <unit>` for details.",
+      details: { inactiveUnits }
+    };
+  }
+
+  // 2. Active agency coverage
+  let dbActiveAgencies: string[] = [];
+  let attachedAgencies: string[] = [];
+  let unattachedAgencies: string[] = [];
+  let agencyCount = 0;
+  let attachedCount = 0;
+  let host = ctx.host || process.env.AGENTHIVE_HOST || "bot";
+  try {
+    const client = new Client({
+      host: ctx.db_host,
+      port: ctx.db_port,
+      // user/password/database resolved from PGUSER/PGPASSWORD/PGDATABASE env vars
+    });
+    await client.connect();
+    // Get active agencies
+    const res = await client.query(`SELECT agency_id FROM roadmap.agency WHERE status = 'active'`);
+    dbActiveAgencies = res.rows.map(r => r.agency_id);
+    agencyCount = dbActiveAgencies.length;
+    // Try a2a-host attachment table first
+    let attachedRes;
+    try {
+      attachedRes = await client.query(`SELECT agency_id FROM roadmap_workforce.a2a_host_attachments WHERE host_affinity = $1`, [host]);
+      attachedAgencies = attachedRes.rows.map(r => r.agency_id);
+    } catch {
+      // Fallback: pg_stat_activity
+      const statRes = await client.query(`SELECT application_name FROM pg_stat_activity WHERE application_name LIKE 'agenthive-a2a-listen-%'`);
+      attachedAgencies = statRes.rows.map(r => r.application_name.replace("agenthive-a2a-listen-", ""));
+    }
+    attachedCount = attachedAgencies.length;
+    unattachedAgencies = dbActiveAgencies.filter(a => !attachedAgencies.includes(a));
+    await client.end();
+  } catch (e) {
+    return {
+      name: "topology",
+      severity: "error",
+      message: `Failed to query DB for agency attachment: ${e.message}`,
+      remediation: "Check DB connectivity and schema.",
+      details: { error: e.message }
+    };
+  }
+  if (unattachedAgencies.length > 0) {
+    return {
+      name: "topology",
+      severity: "warn",
+      message: `Some active agencies not attached: ${unattachedAgencies.join(", ")}`,
+      remediation: "Check a2a-host and agency LISTEN session status.",
+      details: { dbActiveAgencies, attachedAgencies, unattachedAgencies, agencyCount, attachedCount }
+    };
+  }
+
+  // 3. Legacy template retirement
+  let legacyUnits: string[] = [];
+  try {
+    const out = execSync('systemctl list-units --type=service --state=active "agenthive-agency@*.service" --no-legend').toString();
+    legacyUnits = out.split("\n").filter(Boolean).map(line => line.split(" ")[0]);
+  } catch {}
+  if (legacyUnits.length > 0) {
+    return {
+      name: "topology",
+      severity: "warn",
+      message: `Legacy agency template units still running: ${legacyUnits.join(", ")}`,
+      remediation: "P1132 should have retired per-agency template; investigate.",
+      details: { legacyUnits }
+    };
+  }
+
+  // 4. MCP port reachability
+  try {
+    const res = await fetch("http://127.0.0.1:6421/health", { method: "GET", signal: AbortSignal.timeout(1000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  } catch (e) {
+    return {
+      name: "topology",
+      severity: "error",
+      message: `MCP health endpoint not reachable: ${e.message}`,
+      remediation: "Check agenthive-mcp.service and network.",
+      details: { error: e.message }
+    };
+  }
+
+  return {
+    name: "topology",
+    severity: "ok",
+    message: "Topology check passed: all critical units active, agencies attached, legacy templates retired, MCP healthy.",
+    details: { agencyCount, attachedCount }
+  };
+}
+
 
 async function checkDbPort(host: string, port: number): Promise<boolean> {
   return new Promise((resolve) => {
