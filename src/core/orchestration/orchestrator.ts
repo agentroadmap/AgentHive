@@ -246,6 +246,22 @@ export class Orchestrator {
 		await this.bootMaintenance();
 		this.startMaintenance();
 
+		// P1290 AC-5: Health check that all capabilities in ROLE_TO_REQUIRED_CAPABILITIES
+		// have matching dispatchable agencies. Runs in warn-only mode so boot continues
+		// even if a capability is missing; operator can then investigate and remediate.
+		try {
+			const { execSync } = await import("node:child_process");
+			execSync("bun run scripts/orchestrator-capability-coverage-check.ts --warn-only", {
+				stdio: "inherit",
+				cwd: process.cwd(),
+			});
+		} catch (err) {
+			console.warn(
+				"[Orchestrator] Capability coverage check failed or not available:",
+				err instanceof Error ? err.message : String(err),
+			);
+		}
+
 		// Connect LISTEN client and register notification handler.
 		const pool = getPool();
 		this.listenClient = await pool.connect();
