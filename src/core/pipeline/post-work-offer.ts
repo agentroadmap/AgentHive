@@ -197,6 +197,15 @@ function computeIdempotencyKey(parts: {
 }
 
 /**
+ * Hotfix: serialize postWorkOffer calls in-process so MAX_GLOBAL_INFLIGHT_OFFERS
+ * is actually enforced. Without this, handleStateChange spawns N parallel
+ * dispatchAgent calls; each does its own SELECT count(*) before INSERT and all
+ * see the pre-INSERT inflight value, so cap=K admits N>K offers in one burst.
+ * Live evidence 2026-05-29 03:23 UTC: cap=1 admitted 11 offers in a single tick.
+ */
+let postSerializationChain: Promise<unknown> = Promise.resolve();
+
+/**
  * Insert a work offer into squad_dispatch and notify the work_offers channel.
  * Any registered OfferProvider listening on that channel will race to claim it.
  *
@@ -206,6 +215,23 @@ function computeIdempotencyKey(parts: {
  * canonical row in either case; `replay=true` flags the de-dup.
  */
 export async function postWorkOffer(
+	input: WorkOfferInput,
+	queryFn: QueryFn = defaultQuery,
+): Promise<WorkOfferResult> {
+	const prev = postSerializationChain;
+	let release: () => void = () => {};
+	postSerializationChain = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	try {
+		await prev.catch(() => {});
+		return await postWorkOfferImpl(input, queryFn);
+	} finally {
+		release();
+	}
+}
+
+async function postWorkOfferImpl(
 	input: WorkOfferInput,
 	queryFn: QueryFn = defaultQuery,
 ): Promise<WorkOfferResult> {
