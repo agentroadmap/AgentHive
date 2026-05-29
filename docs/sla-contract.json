@@ -1,0 +1,321 @@
+{
+  "version": "1.0.0",
+  "effective_date": "2026-05-29",
+  "title": "AgentHive Platform SLA Contract",
+  "description": "Service Level Agreement defining operational targets, failure modes, and recovery procedures for the AgentHive autonomous agent platform",
+  "targets": {
+    "mcp_api": {
+      "metric": "availability",
+      "target": 99.5,
+      "unit": "percent",
+      "window": "rolling_7_day",
+      "measurement_source": "synthetic_probe",
+      "description": "MCP server (port 6421/SSE) endpoint availability"
+    },
+    "postgres": {
+      "metric": "availability",
+      "target": 99.9,
+      "unit": "percent",
+      "window": "rolling_7_day",
+      "measurement_source": "connection_pool_health",
+      "description": "PostgreSQL database connectivity and query latency (agenthive + tenant DBs)"
+    },
+    "control_plane": {
+      "metric": "response_time",
+      "target": 500,
+      "unit": "milliseconds",
+      "percentile": "p99",
+      "window": "rolling_1_hour",
+      "measurement_source": "orchestrator_dispatch_log",
+      "description": "Proposal state transitions and orchestrator decision loop latency"
+    },
+    "proposal_workflow": {
+      "metric": "transition_success_rate",
+      "target": 99.0,
+      "unit": "percent",
+      "window": "rolling_24_hour",
+      "measurement_source": "proposal_audit_log",
+      "description": "Successful proposal state transitions (Draft → Review → Develop → Merge → Complete)"
+    },
+    "platform_availability": {
+      "metric": "concurrent_agent_capacity",
+      "target": 100,
+      "unit": "agents",
+      "window": "instantaneous",
+      "measurement_source": "agent_registry_liveness",
+      "description": "Baseline capacity for simultaneous agent dispatch and execution"
+    }
+  },
+  "states": {
+    "normal": {
+      "criteria": {
+        "mcp_api_availability_pct": { "min": 99.5 },
+        "postgres_availability_pct": { "min": 99.9 },
+        "control_plane_p99_latency_ms": { "max": 500 },
+        "error_rate_pct": { "max": 10 },
+        "orchestrator_stall_seconds": { "max": 60 },
+        "proposal_queue_age_minutes": { "max": 5 }
+      },
+      "description": "All systems nominal. Proposal lifecycle operating within SLA."
+    },
+    "degraded": {
+      "criteria": {
+        "mcp_api_availability_pct": { "min": 95.0, "max": 99.5 },
+        "postgres_availability_pct": { "min": 99.0, "max": 99.9 },
+        "control_plane_p99_latency_ms": { "max": 2000 },
+        "error_rate_pct": { "max": 30 },
+        "orchestrator_stall_seconds": { "max": 300 },
+        "proposal_queue_age_minutes": { "max": 30 }
+      },
+      "triggers": [
+        "Single worker agent unresponsive for >60 seconds",
+        "MCP server responders >10% latency increase",
+        "PostgreSQL query percentile crosses 1000ms p99",
+        "Orchestrator dispatch backlog exceeds 50 proposals",
+        "Lease timeout rate spike >5% over baseline",
+        "Pool saturation (pgbouncer waiting_clients >10)"
+      ],
+      "escalation_path": "Alert roadmap_notify channel; page on-call operator if >5 min sustained",
+      "description": "Partial degradation. Proposal lifecycle may experience delays; critical workflows proceeding."
+    },
+    "down": {
+      "criteria": {
+        "mcp_api_availability_pct": { "max": 95.0 },
+        "postgres_availability_pct": { "max": 99.0 },
+        "control_plane_p99_latency_ms": { "max": -1 },
+        "orchestrator_stall_seconds": { "min": 300 }
+      },
+      "triggers": [
+        "MCP server not responding for >5 minutes",
+        "PostgreSQL connection pool exhausted or down",
+        "Orchestrator process missing or crash-looping",
+        "Message bus (NOTIFY/LISTEN) inoperative",
+        "All worker agents unreachable or timed out"
+      ],
+      "rto_minutes": 5,
+      "escalation_path": "PagerDuty critical alert; invoke incident commander; attempt remediation checklist",
+      "remediation_checklist": [
+        "Verify service health: systemctl status agenthive-orchestrator agenthive-mcp",
+        "Check database: psql -c 'SELECT 1'",
+        "Review orchestrator logs for crash dumps or deadlock signatures",
+        "Inspect pgbouncer state: pgbouncer_admin.txt for pool saturation",
+        "If corrupted proposal state: use proposal_audit_log to rollback; file incident report",
+        "Restart services: sudo systemctl restart agenthive-orchestrator agenthive-mcp",
+        "Verify agency liaisons re-register with agent_registry",
+        "Smoke test: dispatch pilot proposal through full workflow"
+      ],
+      "description": "Critical service outage. Proposal lifecycle halted; recovery required."
+    }
+  },
+  "thresholds": {
+    "error_rate_pct": 10,
+    "window_seconds": 30,
+    "p99_latency_ms": 500,
+    "availability_pct": 99.5,
+    "rto_minutes": 5,
+    "rpo_minutes": 0,
+    "lease_ttl_minutes": 30,
+    "concurrent_agents_baseline": 100,
+    "pool_saturation_waiting_clients": 10,
+    "orchestrator_backlog_max_proposals": 50,
+    "dispatch_loop_stall_seconds": 60,
+    "proposal_queue_age_warn_minutes": 5,
+    "proposal_queue_age_critical_minutes": 30,
+    "agency_session_orphan_minutes": 15,
+    "message_ledger_lag_seconds": 10
+  },
+  "alerting": {
+    "channels": [
+      "roadmap_notify"
+    ],
+    "configurable": true,
+    "alert_rules": [
+      {
+        "name": "mcp_api_down",
+        "condition": "mcp_api_availability_pct < 95.0 for 300s",
+        "severity": "critical",
+        "notify": "roadmap_notify"
+      },
+      {
+        "name": "postgres_pool_saturation",
+        "condition": "pgbouncer.waiting_clients >= 10 for 60s",
+        "severity": "warning",
+        "notify": "roadmap_notify"
+      },
+      {
+        "name": "orchestrator_stall",
+        "condition": "orchestrator_last_dispatch_age > 60s",
+        "severity": "critical",
+        "notify": "roadmap_notify"
+      },
+      {
+        "name": "proposal_queue_age",
+        "condition": "proposal_queue_age > 30 minutes for 10 minutes",
+        "severity": "warning",
+        "notify": "roadmap_notify"
+      },
+      {
+        "name": "lease_expiry_spike",
+        "condition": "lease_timeout_rate > 5% of baseline for 120s",
+        "severity": "warning",
+        "notify": "roadmap_notify"
+      },
+      {
+        "name": "control_plane_latency",
+        "condition": "p99_latency_ms > 2000 for 300s",
+        "severity": "warning",
+        "notify": "roadmap_notify"
+      },
+      {
+        "name": "agency_session_orphan",
+        "condition": "agency_session.bootLiaison NULL and created_at > 15 minutes ago",
+        "severity": "info",
+        "notify": "roadmap_notify"
+      },
+      {
+        "name": "message_channel_mismatch",
+        "condition": "NOTIFY channel schema_a and LISTEN channel_b incompatible (detected via handler crash)",
+        "severity": "critical",
+        "notify": "roadmap_notify"
+      }
+    ]
+  },
+  "failure_modes": [
+    {
+      "component": "orchestrator",
+      "type": "crash_loop",
+      "rto_minutes": 5,
+      "rpo_minutes": 0,
+      "notes": "Process exits non-zero; systemd restarts every 10s. Check: UUID/bigint handler, implicit gate spawn, fresh-worktree CLI vs HEAD mismatch. P1386/P1408 root causes documented."
+    },
+    {
+      "component": "orchestrator",
+      "type": "stall_no_dispatch",
+      "rto_minutes": 10,
+      "rpo_minutes": 1,
+      "notes": "Process running but decision loop does not emit dispatch. Symptoms: proposal queue age climbing, no new agenda rows. Check: deadlock in PG, blocked on liaison-message LISTEN, or LLM hanging. Circuit-breaker: gate-paused respect (P1393) + lease_expired exclusion (P1406)."
+    },
+    {
+      "component": "postgres",
+      "type": "pool_saturation",
+      "rto_minutes": 3,
+      "rpo_minutes": 0,
+      "notes": "pgbouncer waiting_clients ≥ 10 or connection error. Typical cause: long-running query, FK scan, or trigger cascade. Kill slow queries; add index if needed. See a2a-host audit (2026-05-23) for schema drift + PGUSER interaction."
+    },
+    {
+      "component": "postgres",
+      "type": "data_corruption",
+      "rto_minutes": 15,
+      "rpo_minutes": 5,
+      "notes": "Constraint violation, orphaned row, or trigger side-effect gone wrong. Use proposal_audit_log and agent_activity_log to identify corrupted txn. Rollback via SQL; file incident. Example: proposal_lease.is_active generated column silent-drift on TTL change (feedback_generated_columns_silent_drift.md)."
+    },
+    {
+      "component": "mcp_api",
+      "type": "handler_not_found",
+      "rto_minutes": 2,
+      "rpo_minutes": 0,
+      "notes": "Tool registered in server.ts but not in tools/agents/index.ts (FS branch), or vice versa. Symptom: 'Tool not found' in client logs. Fix: grep action name in both locations; rebuild with 'npm run build:server'. See feedback_mcp_pg_vs_fs_tool_registration.md."
+    },
+    {
+      "component": "mcp_api",
+      "type": "channel_schema_mismatch",
+      "rto_minutes": 5,
+      "rpo_minutes": 0,
+      "notes": "Two NOTIFY triggers emit to same channel with incompatible payloads. Handler crashes silently; looks like pool saturation. Audit: grep NOTIFY in triggers; ensure listener can unmarshal all payloads. See channel_naming_convergence.md."
+    },
+    {
+      "component": "agency_liaison",
+      "type": "orphan_session",
+      "rto_minutes": 2,
+      "rpo_minutes": 0,
+      "notes": "bootLiaison NULL and created_at > 15 min: prior process died ungracefully. Fix: 2 SQL UPDATEs (release lease, set NULL→timestamp) + restart. Code-level: liaisonRegister should auto-heal orphans. See liaison_orphan_session_blocker.md."
+    },
+    {
+      "component": "proposal_workflow",
+      "type": "implicit_gate_spawn",
+      "rto_minutes": 8,
+      "rpo_minutes": 5,
+      "notes": "Orchestrator spawns gate agent directly instead of via dispatch loop, breaking state consistency. Symptom: proposal in REVIEW/mature but no dispatch_record. P1386 architect early-exit detects and skips; P903 consolidation scheduled. Manual fix: use release_lease() then let gate cron pick up."
+    },
+    {
+      "component": "proposal_workflow",
+      "type": "uuid_bigint_crash",
+      "rto_minutes": 5,
+      "rpo_minutes": 0,
+      "notes": "Handler receives UUID column name but code expects bigint; cast error. Symptom: silent NULL in agent_spawn. P1408 pending to standardize. Workaround: verify schema matches handler expectations before dispatch."
+    },
+    {
+      "component": "proposal_workflow",
+      "type": "ac_verification_missing_verified_by",
+      "rto_minutes": 3,
+      "rpo_minutes": 0,
+      "notes": "verify_ac RPC rejects calls without verified_by field. Not documented in MCP tool PARAM-NAME GOTCHAS. Fix: always pass verified_by=<agent_registry identity>. See feedback_mcp_verify_ac_requires_verified_by.md."
+    },
+    {
+      "component": "proposal_workflow",
+      "type": "phantom_proposal_id",
+      "rto_minutes": 10,
+      "rpo_minutes": 0,
+      "notes": "mcp_proposal create fails (e.g., invalid type) but still returns a phantom ID. Downstream queries silently hit NULL. Verify create result success before advancing. See feedback_proposal_type_workflow_config.md."
+    },
+    {
+      "component": "git_repo",
+      "type": "concurrent_add_race",
+      "rto_minutes": 5,
+      "rpo_minutes": 0,
+      "notes": "Two parallel agents both 'git add <file>'; one's commit includes the other's staged changes. Use 'git commit -m \"msg\" -- <file>' single-step instead. See feedback_concurrent_git_add.md."
+    },
+    {
+      "component": "web_dashboard",
+      "type": "stale_bundle",
+      "rto_minutes": 2,
+      "rpo_minutes": 0,
+      "notes": "Edits to src/apps/*.ts have no effect; bundle (scripts/cli.cjs.js) not rebuilt. Run 'npm run build:web' (or build:dist for CLI). Telltale: one trace fires, adjacent one doesn't. See feedback_roadmap_bundle.md."
+    },
+    {
+      "component": "worker_agent",
+      "type": "model_route_unavailable",
+      "rto_minutes": 15,
+      "rpo_minutes": 10,
+      "notes": "Spawn fails because model_routes entry missing, disabled, or cost/priority out of bounds. Resolver sorts by priority+cost; is_default flag ignored. Operator adds route or bumps priority; agents re-register on next boot. See route_resolver_is_default_gap.md and model_registration_agency_owned.md."
+    },
+    {
+      "component": "worker_agent",
+      "type": "capability_mismatch",
+      "rto_minutes": 20,
+      "rpo_minutes": 10,
+      "notes": "Proposal requires_capabilities mismatch with available agent_capability rows. Taxonomy too coarse (37 vs 15); no overlap. Operator manually assigns; P-track: hierarchical taxonomy with 100+ leaves. See project_capability_taxonomy_gap.md."
+    },
+    {
+      "component": "a2a_routing",
+      "type": "liaison_channel_mismatch",
+      "rto_minutes": 5,
+      "rpo_minutes": 0,
+      "notes": "msg_send emits to a2a_msg_<to>; agency LISTEN liaison_message_<to>. Canonical-vs-fully-qualified identity mismatch in ACL. See a2a_bus_two_channel_gap.md."
+    },
+    {
+      "component": "a2a_routing",
+      "type": "metadata_loss",
+      "rto_minutes": 2,
+      "rpo_minutes": 0,
+      "notes": "msg_send metadata (role override) dropped on INSERT. Fixed in commit f9b56ede; added metadata column to message_ledger. Verify: metadata persisted in DB before trusting role. See msg_send_metadata_fixed.md."
+    }
+  ],
+  "definitions": {
+    "rto": "Recovery Time Objective — maximum time to restore service after failure detection",
+    "rpo": "Recovery Point Objective — maximum data loss tolerance (0 = no data loss acceptable)",
+    "lease_ttl": "Proposal lease time-to-live; proposal marked stale if released_at timestamp exceeds TTL without renewal",
+    "concurrent_agents_baseline": "Standard capacity target; exceeding triggers scaling checks",
+    "p99_latency": "99th percentile response time; 99% of requests must complete within this threshold",
+    "availability_pct": "Uptime percentage over measurement window (7-day rolling by default)",
+    "window": "Time period over which metric is measured (rolling_Xday, rolling_Xhour, instantaneous)"
+  },
+  "revision_history": [
+    {
+      "version": "1.0.0",
+      "date": "2026-05-29",
+      "author": "operator",
+      "changes": "Initial SLA contract incorporating 6+ months operational incidents, root causes from P1393/P1406/P1408 hotfix arc, orchestrator storm (2026-05-27), pool saturation audit, and liaison orphan patterns."
+    }
+  ]
+}

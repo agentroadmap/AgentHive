@@ -1,8 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
 	CallToolRequestSchema,
 	GetPromptRequestSchema,
@@ -12,32 +12,49 @@ import {
 	ListToolsRequestSchema,
 	ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import {
+	type BoundBearerToken,
+	PrincipalIdentityStore,
+	verifyBoundBearer,
+} from "../../core/identity/principal-identity.ts";
+import {
+	type McpAuthEnvelope,
+	PrincipalVerifier,
+	type VerifiedPrincipal,
+} from "../../core/identity/principal-verifier.ts";
 // P754: PipelineCron import removed — gate-pipeline service decommissioned.
 import { Core } from "../../core/roadmap.ts";
-import * as pgPool from "../../postgres/pool.ts";
 import { loadStateNames } from "../../core/workflow/state-names.ts";
+import {
+	opsMatch,
+	parseEnvelopeFromEnv,
+	type ToolEnvelope,
+} from "../../infra/agency/tool-grant.ts";
+import { query } from "../../infra/postgres/pool.ts";
+import * as pgPool from "../../postgres/pool.ts";
+import {
+	type AgentContext,
+	agentContextStorage,
+} from "../../shared/identity/agent-context.ts";
 import { getPackageName } from "../../shared/utils/app-info.ts";
 import { getVersion } from "../../shared/utils/version.ts";
-import { parseEnvelopeFromEnv, opsMatch, type ToolEnvelope } from "../../infra/agency/tool-grant.ts";
-import { query } from "../../infra/postgres/pool.ts";
-import { agentContextStorage, type AgentContext } from "../../shared/identity/agent-context.ts";
-import { PrincipalVerifier, type McpAuthEnvelope, type VerifiedPrincipal } from "../../core/identity/principal-verifier.ts";
-import { PrincipalIdentityStore, verifyBoundBearer, type BoundBearerToken } from "../../core/identity/principal-identity.ts";
 import { registerInitRequiredResource } from "./resources/init-required/index.ts";
 import { registerWorkflowResources } from "./resources/workflow/index.ts";
 import { registerAgentTools } from "./tools/agents/index.ts";
+import { registerConsolidatedTools } from "./tools/consolidated.ts";
 import { registerCubicTools } from "./tools/cubic/index.ts";
+import { registerDependencyTools } from "./tools/dependencies/index.ts";
 import { registerDocumentTools } from "./tools/documents/index.ts";
 import { registerKnowledgeTools } from "./tools/knowledge/index.ts";
 import { registerMessageTools } from "./tools/messages/index.ts";
 import { registerMilestoneTools } from "./tools/milestones/index.ts";
 import { registerNoteTools } from "./tools/notes/index.ts";
+import { registerProjectTools } from "./tools/projects/index.ts";
 import { registerProposalTools as registerFilesystemProposalTools } from "./tools/proposals/index.ts";
 import { registerProtocolTools } from "./tools/protocol/index.ts";
 import { registerTeamTools } from "./tools/teams/index.ts";
 import { registerTestingTools } from "./tools/testing/index.ts";
 import { registerWorkflowTools } from "./tools/workflow/index.ts";
-import { registerDependencyTools } from "./tools/dependencies/index.ts";
 import { registerWorktreeMergeTools } from "./tools/worktree-merge/index.ts";
 import { registerProjectTools } from "./tools/projects/index.ts";
 import { registerConsolidatedTools } from "./tools/consolidated.ts";
@@ -155,7 +172,10 @@ export class McpServer extends Core {
 		const pool = pgPool.getPool();
 		this.principalIdentityStore = new PrincipalIdentityStore(pool);
 		const operatorHmacSecret = this._getOperatorHmacSecret();
-		this.principalVerifier = new PrincipalVerifier(this.principalIdentityStore, operatorHmacSecret);
+		this.principalVerifier = new PrincipalVerifier(
+			this.principalIdentityStore,
+			operatorHmacSecret,
+		);
 
 		this.setupHandlers();
 	}
@@ -324,10 +344,21 @@ export class McpServer extends Core {
 	protected async callTool(request: {
 		params: { name: string; arguments?: Record<string, unknown> };
 	}): Promise<CallToolResult> {
+		const _t0 = process.hrtime.bigint();
 		const { name, arguments: args = {} } = request.params;
 		const tool = this.tools.get(name);
 
 		if (!tool) {
+			const duration_ms = Number(process.hrtime.bigint() - _t0) / 1_000_000;
+			try {
+				await query(
+					`INSERT INTO roadmap.trace_span (operation_type, service_did, attributes, status, started_at, ended_at)
+					 VALUES ($1, $2, $3, $4, now() - interval '1 ms' * $5, now())`,
+					['mcp_tool_call', 'mcp-server', JSON.stringify({ tool_name: name, duration_ms }), 'error', duration_ms],
+				);
+			} catch (_err) {
+				// Trace span write failures are non-fatal
+			}
 			throw new Error(`Tool not found: ${name}`);
 		}
 
@@ -340,16 +371,38 @@ export class McpServer extends Core {
 		if (ctx) {
 			// Context set by HTTP transport handler (operator bearer token)
 			verifiedPrincipal = ctx.verified;
-			await writeAuthDecisionLog(verifiedPrincipal.principal_id, name, "allowed");
+			await writeAuthDecisionLog(
+				verifiedPrincipal.principal_id,
+				name,
+				"allowed",
+			);
 		} else if (envelope) {
 			// Inline _auth envelope (agency/agent flow, or stdio)
 			const authResult = await this.principalVerifier.verify(envelope);
 			if (authResult.ok && authResult.principal) {
 				verifiedPrincipal = authResult.principal;
-				await writeAuthDecisionLog(authResult.principal.principal_id, name, "allowed");
+				await writeAuthDecisionLog(
+					authResult.principal.principal_id,
+					name,
+					"allowed",
+				);
 			} else {
-				await writeAuthDecisionLog(envelope.principal_id ?? null, name, "denied");
+				await writeAuthDecisionLog(
+					envelope.principal_id ?? null,
+					name,
+					"denied",
+				);
 				if (P843_AUTH_ENFORCE_MCP) {
+					const duration_ms = Number(process.hrtime.bigint() - _t0) / 1_000_000;
+					try {
+						await query(
+							`INSERT INTO roadmap.trace_span (operation_type, service_did, attributes, status, started_at, ended_at)
+							 VALUES ($1, $2, $3, $4, now() - interval '1 ms' * $5, now())`,
+							['mcp_tool_call', 'mcp-server', JSON.stringify({ tool_name: name, duration_ms, reason: 'auth_denied' }), 'error', duration_ms],
+						);
+					} catch (_err) {
+						// Trace span write failures are non-fatal
+					}
 					throw new Error(`[P843] Auth denied: ${authResult.reason}`);
 				}
 			}
@@ -357,6 +410,16 @@ export class McpServer extends Core {
 			// No auth context or envelope
 			await writeAuthDecisionLog(null, name, "unauthenticated");
 			if (P843_AUTH_ENFORCE_MCP) {
+				const duration_ms = Number(process.hrtime.bigint() - _t0) / 1_000_000;
+				try {
+					await query(
+						`INSERT INTO roadmap.trace_span (operation_type, service_did, attributes, status, started_at, ended_at)
+						 VALUES ($1, $2, $3, $4, now() - interval '1 ms' * $5, now())`,
+						['mcp_tool_call', 'mcp-server', JSON.stringify({ tool_name: name, duration_ms, reason: 'no_auth_envelope' }), 'error', duration_ms],
+					);
+				} catch (_err) {
+					// Trace span write failures are non-fatal
+				}
 				throw new Error("[P843] No auth envelope");
 			}
 		}
@@ -396,6 +459,16 @@ export class McpServer extends Core {
 			// provide a specific op via args._op for finer-grained checks.
 			const requestedOp = (args._op as string | undefined) ?? `${name}:*`;
 			if (!opsMatch(granted, requestedOp)) {
+				const duration_ms = Number(process.hrtime.bigint() - _t0) / 1_000_000;
+				try {
+					await query(
+						`INSERT INTO roadmap.trace_span (operation_type, service_did, attributes, status, started_at, ended_at)
+						 VALUES ($1, $2, $3, $4, now() - interval '1 ms' * $5, now())`,
+						['mcp_tool_call', 'mcp-server', JSON.stringify({ tool_name: name, duration_ms, reason: 'grant_denied', requested_op: requestedOp }), 'error', duration_ms],
+					);
+				} catch (_err) {
+					// Trace span write failures are non-fatal
+				}
 				throw new Error(
 					`[P599] Tool "${name}" is not granted for this agent (op=${requestedOp}).`,
 				);
@@ -407,12 +480,28 @@ export class McpServer extends Core {
 		// AC-5/AC-26: per-call error boundary — isolates handler failures from transport/SSE clients.
 		let result: CallToolResult;
 		try {
-			result = verifiedPrincipal && !ctx
-				? await agentContextStorage.run({ verified: verifiedPrincipal }, () => tool.handler(args))
-				: await tool.handler(args);
+			result =
+				verifiedPrincipal && !ctx
+					? await agentContextStorage.run({ verified: verifiedPrincipal }, () =>
+							tool.handler(args),
+						)
+					: await tool.handler(args);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
-			return { isError: true, content: [{ type: "text", text: `Tool handler error: ${message}` }] };
+			const duration_ms = Number(process.hrtime.bigint() - _t0) / 1_000_000;
+			try {
+				await query(
+					`INSERT INTO roadmap.trace_span (operation_type, service_did, attributes, status, started_at, ended_at)
+					 VALUES ($1, $2, $3, $4, now() - interval '1 ms' * $5, now())`,
+					['mcp_tool_call', 'mcp-server', JSON.stringify({ tool_name: name, duration_ms, error_message: message }), 'error', duration_ms],
+				);
+			} catch (_err) {
+				// Trace span write failures are non-fatal
+			}
+			return {
+				isError: true,
+				content: [{ type: "text", text: `Tool handler error: ${message}` }],
+			};
 		}
 
 		// Log tool call to pulse
@@ -444,6 +533,18 @@ export class McpServer extends Core {
 			);
 		} catch (_err) {
 			// Invocation log write failures are non-fatal.
+		}
+
+		// Insert trace span for successful tool call (p99 latency instrumentation)
+		const duration_ms = Number(process.hrtime.bigint() - _t0) / 1_000_000;
+		try {
+			await query(
+				`INSERT INTO roadmap.trace_span (operation_type, service_did, attributes, status, started_at, ended_at)
+				 VALUES ($1, $2, $3, $4, now() - interval '1 ms' * $5, now())`,
+				['mcp_tool_call', 'mcp-server', JSON.stringify({ tool_name: name, duration_ms }), 'ok', duration_ms],
+			);
+		} catch (_err) {
+			// Trace span write failures are non-fatal
 		}
 
 		return result;
@@ -623,7 +724,10 @@ export class McpServer extends Core {
 	}
 
 	// P854: Run fn inside agentContextStorage if Authorization header carries a valid bearer token.
-	async runWithBearerContext<T>(authHeader: string | undefined, fn: () => Promise<T>): Promise<T> {
+	async runWithBearerContext<T>(
+		authHeader: string | undefined,
+		fn: () => Promise<T>,
+	): Promise<T> {
 		if (authHeader?.startsWith("Bearer ")) {
 			const token = authHeader.slice(7) as BoundBearerToken;
 			const res = verifyBoundBearer(token, this._getOperatorHmacSecret());
@@ -647,7 +751,7 @@ export class McpServer extends Core {
 				return Buffer.from(envSecret, "hex");
 			} catch {
 				console.warn(
-					"[P843] OPERATOR_HMAC_SECRET is not valid hex; generating random secret"
+					"[P843] OPERATOR_HMAC_SECRET is not valid hex; generating random secret",
 				);
 			}
 		}
@@ -829,7 +933,10 @@ export async function createMcpServer(
 				properties: {
 					agent: { type: "string", description: "Filter by agent identity" },
 					channel: { type: "string", description: "Filter by channel name" },
-					limit: { type: "number", description: "Max messages to return (default 50)" },
+					limit: {
+						type: "number",
+						description: "Max messages to return (default 50)",
+					},
 					wait_ms: {
 						type: "number",
 						description:
@@ -864,7 +971,8 @@ export async function createMcpServer(
 					},
 					subscribe: {
 						type: "boolean",
-						description: "True to subscribe, false to unsubscribe. Defaults to true.",
+						description:
+							"True to subscribe, false to unsubscribe. Defaults to true.",
 					},
 				},
 				required: ["agent_identity", "channel"],
@@ -1091,20 +1199,39 @@ export async function createMcpServer(
 		// P797: model_list with provider/tier/project_id filtering and route join
 		server.addTool({
 			name: "model_list",
-			description: "List registered models with optional capability, cost, provider, and tier filters. Results are joined with model_routes — only models with at least one enabled route are returned.",
+			description:
+				"List registered models with optional capability, cost, provider, and tier filters. Results are joined with model_routes — only models with at least one enabled route are returned.",
 			inputSchema: {
 				type: "object",
 				properties: {
-					capability: { type: "string", description: "Filter by capability, e.g. 'tool_use=true'" },
-					max_cost_per_million_input: { type: "string", description: "Max cost per million input tokens" },
-					active_only: { type: "boolean", description: "Only show active models (default: true)" },
-					provider: { type: "string", description: "Filter by route provider (e.g. 'anthropic', 'openai')" },
+					capability: {
+						type: "string",
+						description: "Filter by capability, e.g. 'tool_use=true'",
+					},
+					max_cost_per_1k_input: {
+						type: "string",
+						description: "Max cost per 1k input tokens",
+					},
+					active_only: {
+						type: "boolean",
+						description: "Only show active models (default: true)",
+					},
+					provider: {
+						type: "string",
+						description:
+							"Filter by route provider (e.g. 'anthropic', 'openai')",
+					},
 					tier: {
 						type: "string",
 						enum: ["frontier", "standard", "economy"],
-						description: "Filter by model tier: frontier, standard, or economy",
+						description:
+							"Filter by model tier: frontier, standard (maps to mid), economy (maps to lower)",
 					},
-					project_id: { type: "number", description: "Optional project context for future per-project route filtering" },
+					project_id: {
+						type: "number",
+						description:
+							"Optional project context for future per-project route filtering",
+					},
 				},
 			},
 			handler: (a) => models.listModels(a as ListModelsArgs),
@@ -1122,7 +1249,11 @@ export async function createMcpServer(
 					cost_per_1k_output: { type: "string" },
 					max_tokens: { type: "string" },
 					context_window: { type: "string" },
-					capabilities: { type: "string", description: "JSON object, e.g. '{\"tool_use\":true,\"vision\":true}'" },
+					capabilities: {
+						type: "string",
+						description:
+							'JSON object, e.g. \'{"tool_use":true,"vision":true}\'',
+					},
 					rating: { type: "string" },
 					is_active: { type: "string", description: "'true' or 'false' to activate/deactivate" },
 					tier: {
@@ -1212,8 +1343,14 @@ export async function createMcpServer(
 			inputSchema: {
 				type: "object",
 				properties: {
-					agent_identity: { type: "string", description: "Filter by agent identity (optional)" },
-					layer: { type: "string", description: "Filter by memory layer (optional)" },
+					agent_identity: {
+						type: "string",
+						description: "Filter by agent identity (optional)",
+					},
+					layer: {
+						type: "string",
+						description: "Filter by memory layer (optional)",
+					},
 				},
 			},
 			handler: (a) => memory.memorySummary(a as MemorySummaryArgs),
@@ -1302,11 +1439,15 @@ export async function createMcpServer(
 		});
 
 		// P078: Escalation Management tools
-		const { registerEscalationTools } = await import("./tools/escalation/index.ts");
+		const { registerEscalationTools } = await import(
+			"./tools/escalation/index.ts"
+		);
 		registerEscalationTools(server);
 
 		// P187: Reference Catalog tools
-		const { registerReferenceTools } = await import("./tools/reference/index.ts");
+		const { registerReferenceTools } = await import(
+			"./tools/reference/index.ts"
+		);
 		registerReferenceTools(server);
 
 		// Proposal CRUD tools via backend-switch (prop_list, prop_get, prop_create, prop_update, prop_transition, prop_delete)
@@ -1325,9 +1466,7 @@ export async function createMcpServer(
 		smdl.register();
 
 		// Cubic Orchestration tools (P058) — Postgres-backed
-		const { PgCubicHandlers } = await import(
-			"./tools/cubic/pg-handlers.ts"
-		);
+		const { PgCubicHandlers } = await import("./tools/cubic/pg-handlers.ts");
 		const cubic = new PgCubicHandlers(server);
 		type CreateCubicArgs = Parameters<typeof cubic.createCubic>[0];
 		type ListCubicsArgs = Parameters<typeof cubic.listCubics>[0];
@@ -1385,8 +1524,7 @@ export async function createMcpServer(
 					agent: { type: "string" },
 					limit: {
 						type: "number",
-						description:
-							"Max cubics returned (1..500, default 50).",
+						description: "Max cubics returned (1..500, default 50).",
 					},
 					include_metadata: {
 						type: "boolean",
@@ -1444,8 +1582,8 @@ export async function createMcpServer(
 				},
 				required: ["cubicId"],
 			},
-		handler: (a) => cubic.recycleCubic(a as RecycleCubicArgs),
-	});
+			handler: (a) => cubic.recycleCubic(a as RecycleCubicArgs),
+		});
 		server.addTool({
 			name: "cubic_acquire",
 			description:
@@ -1455,7 +1593,8 @@ export async function createMcpServer(
 				properties: {
 					agent_identity: {
 						type: "string",
-						description: "Agent identity (resolved from trust registry; format: provider/agency-name or role-name)",
+						description:
+							"Agent identity (resolved from trust registry; format: provider/agency-name or role-name)",
 					},
 					proposal_id: {
 						type: "number",
@@ -1463,7 +1602,8 @@ export async function createMcpServer(
 					},
 					phase: {
 						type: "string",
-						description: "Cubic phase (design, build, test, ship). Default: design",
+						description:
+							"Cubic phase (design, build, test, ship). Default: design",
 					},
 					budget_usd: {
 						type: "number",
@@ -1477,15 +1617,11 @@ export async function createMcpServer(
 				required: ["agent_identity", "proposal_id"],
 			},
 			handler: (a) =>
-				cubic.acquireCubic(
-					a as Parameters<typeof cubic.acquireCubic>[0],
-				),
+				cubic.acquireCubic(a as Parameters<typeof cubic.acquireCubic>[0]),
 		});
 
 		// Pulse Fleet Observability tools (P063) — Postgres-backed
-		const { PgPulseHandlers } = await import(
-			"./tools/pulse/pg-handlers.ts"
-		);
+		const { PgPulseHandlers } = await import("./tools/pulse/pg-handlers.ts");
 		const pulse = new PgPulseHandlers(server);
 		type RecordHeartbeatArgs = Parameters<typeof pulse.recordHeartbeat>[0];
 		type GetAgentHealthArgs = Parameters<typeof pulse.getAgentHealth>[0];
@@ -1542,8 +1678,7 @@ export async function createMcpServer(
 				},
 				required: ["agent_identity"],
 			},
-			handler: (a) =>
-				pulse.getHeartbeatHistory(a as GetHeartbeatHistoryArgs),
+			handler: (a) => pulse.getHeartbeatHistory(a as GetHeartbeatHistoryArgs),
 		});
 		server.addTool({
 			name: "pulse_refresh",
@@ -1646,8 +1781,7 @@ export async function createMcpServer(
 		});
 		server.addTool({
 			name: "federation_list_certificates",
-			description:
-				"List certificates for a host or expiring certificates",
+			description: "List certificates for a host or expiring certificates",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -1678,9 +1812,7 @@ export async function createMcpServer(
 		});
 
 		// Discord outbound tool (P233) — pg_notify('discord_send')
-		const { discordSend } = await import(
-			"../../infra/discord/notify.ts"
-		);
+		const { discordSend } = await import("../../infra/discord/notify.ts");
 		server.addTool({
 			name: "discord_send",
 			description:
@@ -1699,8 +1831,7 @@ export async function createMcpServer(
 					level: {
 						type: "string",
 						enum: ["info", "success", "warning", "error"],
-						description:
-							"Message level (determines icon in Discord)",
+						description: "Message level (determines icon in Discord)",
 					},
 				},
 				required: ["from", "message"],
@@ -1806,7 +1937,9 @@ export async function createMcpServer(
 	// P289: Workforce management tools (agency registration, provider registry, dispatches)
 	const workforce = await import("./tools/workforce/handlers.ts");
 	const workforceSchemas = await import("./tools/workforce/schemas.ts");
-	const smHandlers = await import("./tools/workforce/state-machine-handlers.ts");
+	const smHandlers = await import(
+		"./tools/workforce/state-machine-handlers.ts"
+	);
 	server.addTool({
 		name: "agency_register",
 		description:
@@ -1822,19 +1955,22 @@ export async function createMcpServer(
 	});
 	server.addTool({
 		name: "provider_register",
-		description: "Register an agency as a provider for a project/squad with capabilities. Agency must be registered first via agency_register.",
+		description:
+			"Register an agency as a provider for a project/squad with capabilities. Agency must be registered first via agency_register.",
 		inputSchema: workforceSchemas.providerRegisterSchema,
 		handler: (a) => workforce.providerRegisterHandler(a),
 	});
 	server.addTool({
 		name: "dispatch_list",
-		description: "List squad_dispatch offers with status filter. Shows agency, worker, offer status, and lease info.",
+		description:
+			"List squad_dispatch offers with status filter. Shows agency, worker, offer status, and lease info.",
 		inputSchema: workforceSchemas.dispatchListSchema,
 		handler: (a) => workforce.dispatchListHandler(a),
 	});
 	server.addTool({
 		name: "worker_register",
-		description: "Register an ephemeral worker agent under a parent agency. Called on spawn.",
+		description:
+			"Register an ephemeral worker agent under a parent agency. Called on spawn.",
 		inputSchema: workforceSchemas.workerRegisterSchema,
 		handler: (a) => workforce.workerRegisterHandler(a),
 	});
@@ -1924,25 +2060,42 @@ export async function createMcpServer(
 	server.addTool({
 		name: "state_machine_start",
 		description: "Start the orchestrator service",
-		inputSchema: { type: "object", properties: {}, additionalProperties: false },
+		inputSchema: {
+			type: "object",
+			properties: {},
+			additionalProperties: false,
+		},
 		handler: () => smHandlers.stateMachineStartHandler({}),
 	});
 	server.addTool({
 		name: "state_machine_stop",
 		description: "Stop the orchestrator service",
-		inputSchema: { type: "object", properties: {}, additionalProperties: false },
+		inputSchema: {
+			type: "object",
+			properties: {},
+			additionalProperties: false,
+		},
 		handler: () => smHandlers.stateMachineStopHandler({}),
 	});
 	server.addTool({
 		name: "state_machine_status",
-		description: "Show state machine status: services, agencies, offers, active dispatches",
-		inputSchema: { type: "object", properties: {}, additionalProperties: false },
+		description:
+			"Show state machine status: services, agencies, offers, active dispatches",
+		inputSchema: {
+			type: "object",
+			properties: {},
+			additionalProperties: false,
+		},
 		handler: () => smHandlers.stateMachineStatusHandler({}),
 	});
 	server.addTool({
 		name: "agencies_list",
 		description: "List registered agencies and their capabilities",
-		inputSchema: { type: "object", properties: {}, additionalProperties: false },
+		inputSchema: {
+			type: "object",
+			properties: {},
+			additionalProperties: false,
+		},
 		handler: () => smHandlers.agenciesListHandler({}),
 	});
 	server.addTool({
@@ -1951,7 +2104,10 @@ export async function createMcpServer(
 		inputSchema: {
 			type: "object",
 			properties: {
-				status: { type: "string", enum: ["open", "claimed", "active", "delivered", "failed", "expired"] },
+				status: {
+					type: "string",
+					enum: ["open", "claimed", "active", "delivered", "failed", "expired"],
+				},
 			},
 			additionalProperties: false,
 		},
@@ -1963,7 +2119,11 @@ export async function createMcpServer(
 	server.addTool({
 		name: "project_list",
 		description: "List all projects with agency counts",
-		inputSchema: { type: "object", properties: {}, additionalProperties: false },
+		inputSchema: {
+			type: "object",
+			properties: {},
+			additionalProperties: false,
+		},
 		handler: () => projectHandlers.projectListHandler({}),
 	});
 	server.addTool({
@@ -1973,7 +2133,10 @@ export async function createMcpServer(
 			type: "object",
 			properties: {
 				name: { type: "string", description: "Project name (unique)" },
-				description: { type: "string", description: "What this project is about" },
+				description: {
+					type: "string",
+					description: "What this project is about",
+				},
 				owner: { type: "string", description: "Who created it" },
 			},
 			required: ["name"],
@@ -1989,7 +2152,11 @@ export async function createMcpServer(
 			properties: {
 				agencyIdentity: { type: "string", description: "Agency identity" },
 				projectName: { type: "string", description: "Project to join" },
-				capabilities: { type: "array", items: { type: "string" }, description: "Caps for this project" },
+				capabilities: {
+					type: "array",
+					items: { type: "string" },
+					description: "Caps for this project",
+				},
 			},
 			required: ["agencyIdentity", "projectName"],
 			additionalProperties: false,
@@ -2024,8 +2191,13 @@ export async function createMcpServer(
 	});
 	server.addTool({
 		name: "project_overview",
-		description: "Full overview: all projects with their agencies and capabilities",
-		inputSchema: { type: "object", properties: {}, additionalProperties: false },
+		description:
+			"Full overview: all projects with their agencies and capabilities",
+		inputSchema: {
+			type: "object",
+			properties: {},
+			additionalProperties: false,
+		},
 		handler: () => projectHandlers.projectOverviewHandler({}),
 	});
 
@@ -2036,11 +2208,16 @@ export async function createMcpServer(
 	// in tools/agency/handlers.ts; this block exposes them over MCP and
 	// adapts their raw return shape to CallToolResult.
 	const agencyHandlers = await import("./tools/agency/handlers.ts");
-	const wrapJson = (fn: (a: any) => Promise<unknown>) =>
-		async (args: any): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
+	const wrapJson =
+		(fn: (a: any) => Promise<unknown>) =>
+		async (
+			args: any,
+		): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
 			try {
 				const result = await fn(args);
-				return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+				return {
+					content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+				};
 			} catch (err) {
 				return {
 					content: [
@@ -2066,7 +2243,10 @@ export async function createMcpServer(
 				task_id: { type: "string" },
 				mission: { type: "string" },
 				success_criteria: { type: "array", items: { type: "string" } },
-				done_signal: { type: "string", enum: ["ac-pass", "verdict", "pr-merged", "custom"] },
+				done_signal: {
+					type: "string",
+					enum: ["ac-pass", "verdict", "pr-merged", "custom"],
+				},
 				allowed_tools: { type: "array", items: { type: "string" } },
 				forbidden_tools: { type: "array", items: { type: "string" } },
 				budget: {
@@ -2127,7 +2307,10 @@ export async function createMcpServer(
 			type: "object",
 			properties: {
 				briefing_id: { type: "string" },
-				outcome: { type: "string", enum: ["success", "partial", "failure", "timeout", "escalated"] },
+				outcome: {
+					type: "string",
+					enum: ["success", "partial", "failure", "timeout", "escalated"],
+				},
 				summary: { type: "string" },
 				new_findings: {
 					type: "array",
@@ -2156,7 +2339,8 @@ export async function createMcpServer(
 
 	server.addTool({
 		name: "briefing_list",
-		description: "Operator/debug: list recent briefings (briefing_id, task_id, mission, briefed_by, briefed_at).",
+		description:
+			"Operator/debug: list recent briefings (briefing_id, task_id, mission, briefed_by, briefed_at).",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -2169,7 +2353,8 @@ export async function createMcpServer(
 
 	server.addTool({
 		name: "fallback_playbook_add",
-		description: "Add an error→action recovery pattern that future briefings will inherit.",
+		description:
+			"Add an error→action recovery pattern that future briefings will inherit.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -2188,16 +2373,23 @@ export async function createMcpServer(
 
 	server.addTool({
 		name: "mcp_quirks_register",
-		description: "Register/update canonical args + known gotchas for an MCP tool. Briefings inherit this catalog.",
+		description:
+			"Register/update canonical args + known gotchas for an MCP tool. Briefings inherit this catalog.",
 		inputSchema: {
 			type: "object",
 			properties: {
 				tool_name: { type: "string" },
 				mcp_server: { type: "string" },
-				canonical_args: { type: "object", additionalProperties: { type: "string" } },
+				canonical_args: {
+					type: "object",
+					additionalProperties: { type: "string" },
+				},
 				description: { type: "string" },
 				known_gotchas: { type: "array", items: { type: "object" } },
-				param_aliases: { type: "object", additionalProperties: { type: "string" } },
+				param_aliases: {
+					type: "object",
+					additionalProperties: { type: "string" },
+				},
 			},
 			required: ["tool_name", "canonical_args"],
 		},
@@ -2212,23 +2404,32 @@ export async function createMcpServer(
 		inputSchema: {
 			type: "object",
 			properties: {
-				briefing_id: { type: "string", description: "UUID of the current briefing" },
-				agency_id: { type: "string", description: "Agency handling this briefing" },
+				briefing_id: {
+					type: "string",
+					description: "UUID of the current briefing",
+				},
+				agency_id: {
+					type: "string",
+					description: "Agency handling this briefing",
+				},
 				reason: { type: "string", description: "Why more time is needed" },
 				proposal_id: {
 					type: "number",
-					description: "Optional proposal_id for direct lease lookup (faster than briefing lookup)",
+					description:
+						"Optional proposal_id for direct lease lookup (faster than briefing lookup)",
 				},
 			},
 			required: ["briefing_id", "agency_id", "reason"],
 		},
 		handler: wrapJson(async (a) => {
-			const { requestLeaseRenewal } = await import("../../infra/agency/liaison-lease.ts");
+			const { requestLeaseRenewal } = await import(
+				"../../infra/agency/liaison-lease.ts"
+			);
 			return requestLeaseRenewal(
 				a.briefing_id,
 				a.agency_id,
 				a.reason,
-				a.proposal_id != null ? BigInt(a.proposal_id) : undefined
+				a.proposal_id != null ? BigInt(a.proposal_id) : undefined,
 			);
 		}),
 	});
@@ -2241,12 +2442,19 @@ export async function createMcpServer(
 		inputSchema: {
 			type: "object",
 			properties: {
-				briefing_id: { type: "string", description: "UUID of the current briefing" },
-				summary: { type: "string", description: "What you accomplished since the last checkpoint" },
+				briefing_id: {
+					type: "string",
+					description: "UUID of the current briefing",
+				},
+				summary: {
+					type: "string",
+					description: "What you accomplished since the last checkpoint",
+				},
 				confidence: {
 					type: "string",
 					enum: ["low", "med", "high"],
-					description: "How confident you are that your current approach will succeed",
+					description:
+						"How confident you are that your current approach will succeed",
 				},
 				next_attempt: {
 					type: "string",
@@ -2256,7 +2464,9 @@ export async function createMcpServer(
 			required: ["briefing_id", "summary", "confidence"],
 		},
 		handler: wrapJson(async (a) => {
-			const { recordProgressCheckpoint } = await import("../../infra/agency/stuck-detection.ts");
+			const { recordProgressCheckpoint } = await import(
+				"../../infra/agency/stuck-detection.ts"
+			);
 			const accepted = await recordProgressCheckpoint({
 				briefing_id: a.briefing_id,
 				summary: a.summary,
@@ -2279,7 +2489,7 @@ export async function createMcpServer(
 							accepted,
 							ts: new Date().toISOString(),
 						}),
-					]
+					],
 				);
 			} catch {
 				// Best-effort; do not fail the checkpoint because the ledger insert failed
@@ -2386,21 +2596,46 @@ export async function createMcpServer(
 	const pgbouncer = new PgBouncerOpsHandler();
 	server.addTool({
 		name: "pgbouncer_stats",
-		description: "Query PgBouncer admin console: SHOW POOLS + SHOW STATS. Returns pool sizes, wait times, and per-database query statistics.",
+		description:
+			"Query PgBouncer admin console: SHOW POOLS + SHOW STATS. Returns pool sizes, wait times, and per-database query statistics.",
 		inputSchema: { type: "object", properties: {} },
-		handler: () => pgbouncer.pgbouncerStats().then((r) => ({ content: [{ type: "text", text: JSON.stringify(r, null, 2) }] })),
+		handler: () =>
+			pgbouncer.pgbouncerStats().then((r) => ({
+				content: [{ type: "text", text: JSON.stringify(r, null, 2) }],
+			})),
 	});
 	server.addTool({
 		name: "pgbouncer_ping",
-		description: "Ping the PgBouncer admin console. Returns { ok, latency_ms, host, port }.",
+		description:
+			"Ping the PgBouncer admin console. Returns { ok, latency_ms, host, port }.",
 		inputSchema: { type: "object", properties: {} },
-		handler: () => pgbouncer.pgbouncerPing().then((r) => ({ content: [{ type: "text", text: JSON.stringify(r) }] })),
+		handler: () =>
+			pgbouncer.pgbouncerPing().then((r) => ({
+				content: [{ type: "text", text: JSON.stringify(r) }],
+			})),
 	});
 	server.addTool({
 		name: "pgbouncer_reload",
-		description: "Send RELOAD to PgBouncer — picks up userlist.txt and pgbouncer.ini changes without dropping existing connections.",
+		description:
+			"Send RELOAD to PgBouncer — picks up userlist.txt and pgbouncer.ini changes without dropping existing connections.",
 		inputSchema: { type: "object", properties: {} },
-		handler: () => pgbouncer.pgbouncerReload().then((r) => ({ content: [{ type: "text", text: JSON.stringify(r) }] })),
+		handler: () =>
+			pgbouncer.pgbouncerReload().then((r) => ({
+				content: [{ type: "text", text: JSON.stringify(r) }],
+			})),
+	});
+
+	// P081: SLA health-check tool
+	const { slaHealthCheck } = await import("./tools/ops/sla-handler.ts");
+	server.addTool({
+		name: "health_check",
+		description:
+			"Execute SLA health check: query trace_span p99 latency + error rate, compare against roadmap.sla_config thresholds, return system state (normal/degraded/down) with live metrics.",
+		inputSchema: { type: "object", properties: {} },
+		handler: () =>
+			slaHealthCheck(pgPool.getPool()).then((r) => ({
+				content: [{ type: "text", text: JSON.stringify(r, null, 2) }],
+			})),
 	});
 
 	// P1359: Provider/model cooldown management tools
