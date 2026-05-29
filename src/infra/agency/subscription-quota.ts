@@ -160,50 +160,67 @@ export function computeWindowResetAt(
  */
 async function loadCapacityConfig(agencyId: string): Promise<CapacityConfig | null> {
   // Tier 1: per-agency config
-  const { rows } = await query<{
-    windows: unknown;
-    safety_margin: string;
-    refuse_below_slots: number;
-    default_cost_estimate_tokens: string;
-  }>(
-    `SELECT windows, safety_margin, refuse_below_slots, default_cost_estimate_tokens
-       FROM roadmap.agency_capacity_config
-      WHERE agency_id = $1`,
-    [agencyId],
-  );
-  if (rows.length > 0) {
-    const row = rows[0];
-    const rawWindows = Array.isArray(row.windows) ? (row.windows as WindowConfig[]) : [];
-    return {
-      windows: rawWindows,
-      safety_margin: parseFloat(row.safety_margin),
-      refuse_below_slots: row.refuse_below_slots,
-      default_cost_estimate_tokens: Number(row.default_cost_estimate_tokens ?? 50_000),
-    };
+  // P1379: wrap in try/catch to handle schema drift gracefully
+  try {
+    const { rows } = await query<{
+      windows: unknown;
+      safety_margin: string;
+      refuse_below_slots: number;
+      default_cost_estimate_tokens: string;
+    }>(
+      `SELECT windows, safety_margin, refuse_below_slots, default_cost_estimate_tokens
+         FROM roadmap.agency_capacity_config
+        WHERE agency_id = $1`,
+      [agencyId],
+    );
+    if (rows.length > 0) {
+      const row = rows[0];
+      const rawWindows = Array.isArray(row.windows) ? (row.windows as WindowConfig[]) : [];
+      return {
+        windows: rawWindows,
+        safety_margin: parseFloat(row.safety_margin),
+        refuse_below_slots: row.refuse_below_slots,
+        default_cost_estimate_tokens: Number(row.default_cost_estimate_tokens ?? 50_000),
+      };
+    }
+  } catch (err) {
+    // Schema drift — column missing or table not found. Fall through to tier 2.
+    console.warn(
+      `[loadCapacityConfig] Tier 1 query failed for agency=${agencyId}:`,
+      err instanceof Error ? err.message : err,
+    );
   }
 
   // Tier 2: provider-level defaults
-  const { rows: provRows } = await query<{
-    windows: unknown;
-    safety_margin: string;
-    refuse_below_slots: number;
-    default_cost_estimate_tokens: string;
-  }>(
-    `SELECT pcd.windows, pcd.safety_margin, pcd.refuse_below_slots, pcd.default_cost_estimate_tokens
-       FROM roadmap.provider_capacity_defaults pcd
-       JOIN roadmap.agency a ON a.provider = pcd.provider
-      WHERE a.agency_id = $1`,
-    [agencyId],
-  );
-  if (provRows.length > 0) {
-    const row = provRows[0];
-    const rawWindows = Array.isArray(row.windows) ? (row.windows as WindowConfig[]) : [];
-    return {
-      windows: rawWindows,
-      safety_margin: parseFloat(row.safety_margin),
-      refuse_below_slots: row.refuse_below_slots,
-      default_cost_estimate_tokens: Number(row.default_cost_estimate_tokens ?? 50_000),
-    };
+  try {
+    const { rows: provRows } = await query<{
+      windows: unknown;
+      safety_margin: string;
+      refuse_below_slots: number;
+      default_cost_estimate_tokens: string;
+    }>(
+      `SELECT pcd.windows, pcd.safety_margin, pcd.refuse_below_slots, pcd.default_cost_estimate_tokens
+         FROM roadmap.provider_capacity_defaults pcd
+         JOIN roadmap.agency a ON a.provider = pcd.provider
+        WHERE a.agency_id = $1`,
+      [agencyId],
+    );
+    if (provRows.length > 0) {
+      const row = provRows[0];
+      const rawWindows = Array.isArray(row.windows) ? (row.windows as WindowConfig[]) : [];
+      return {
+        windows: rawWindows,
+        safety_margin: parseFloat(row.safety_margin),
+        refuse_below_slots: row.refuse_below_slots,
+        default_cost_estimate_tokens: Number(row.default_cost_estimate_tokens ?? 50_000),
+      };
+    }
+  } catch (err) {
+    // Schema drift — provider_capacity_defaults missing or join broken. Fall through to tier 3.
+    console.warn(
+      `[loadCapacityConfig] Tier 2 query failed for agency=${agencyId}:`,
+      err instanceof Error ? err.message : err,
+    );
   }
 
   // Tier 3: no config registered — caller treats null as unconstrained
