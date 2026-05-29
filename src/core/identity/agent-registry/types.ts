@@ -1,5 +1,50 @@
 /** Agent registration types for S147.1 */
 
+/**
+ * P1355: Expertise role labels sourced from agency-agents division taxonomy.
+ * Used by orchestrator matchmaking and OpenClaw workspace export.
+ */
+export type ExpertiseRole =
+	| "architect"
+	| "reviewer"
+	| "coder"
+	| "debugger"
+	| "writer"
+	| "researcher"
+	| "tester"
+	| "devops"
+	| "designer";
+
+/**
+ * P1355: Personality profile stored in agent_registry.personality JSONB.
+ * Vocabulary sourced from agency-agents SOUL.md / frontmatter conventions.
+ * Schema migration tracked in P1356.
+ */
+export interface AgentPersonality {
+	/** ≤160-char punchy one-liner. Source: agency-agents frontmatter `vibe`. */
+	vibe: string;
+	/** Behavioral principles. Source: SOUL.md "Core Truths" bullets. */
+	core_truths: string[];
+	/** Hard limits / ethical guardrails. Source: SOUL.md "Boundaries" bullets. */
+	boundaries: string[];
+	/** Communication approach. Source: agent .md "Communication Style" section. */
+	communication_style: string;
+	/** Coarse expertise roles used by orchestrator for capability matching. */
+	expertise: ExpertiseRole[];
+}
+
+/**
+ * P1355: Display metadata stored in agent_registry.display_metadata JSONB.
+ * Maps to agency-agents frontmatter + OpenClaw IDENTITY.md fields.
+ */
+export interface AgentDisplayMetadata {
+	emoji?: string;
+	color?: string;
+	description?: string;
+	/** Origin — 'agency-agents' for catalog imports, 'operator' for hand-crafted. */
+	source?: string;
+}
+
 export type AgentType = "permanent" | "contract";
 
 export type AgentRegistration = {
