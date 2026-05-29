@@ -112,7 +112,7 @@ export class MemoryService {
       : null;
 
     const { rows: existing } = await query<{ id: number }>(
-      `SELECT id FROM agent_memory
+      `SELECT id FROM roadmap_efficiency.agent_memory
        WHERE agent_identity = $1 AND layer = $2 AND key = $3
        LIMIT 1`,
       [agentIdentity, layer, key],
@@ -120,14 +120,14 @@ export class MemoryService {
 
     if (existing[0]) {
       await query(
-        `UPDATE agent_memory
+        `UPDATE roadmap_efficiency.agent_memory
          SET value = $2, ttl_seconds = $3, expires_at = $4, updated_at = now()
          WHERE id = $1`,
         [existing[0].id, serialized, ttl, expiresAt],
       );
     } else {
       await query(
-        `INSERT INTO agent_memory (agent_identity, layer, key, value, ttl_seconds, expires_at)
+        `INSERT INTO roadmap_efficiency.agent_memory (agent_identity, layer, key, value, ttl_seconds, expires_at)
          VALUES ($1, $2, $3, $4, $5, $6)`,
         [agentIdentity, layer, key, serialized, ttl, expiresAt],
       );
@@ -144,7 +144,7 @@ export class MemoryService {
   ): Promise<Record<string, unknown>> {
     const { rows } = await query<{ key: string; value: string }>(
       `SELECT key, value
-       FROM v_active_memory
+       FROM roadmap.v_active_memory
        WHERE agent_identity = $1 AND layer = $2
        ORDER BY updated_at DESC`,
       [agentIdentity, layer],
@@ -170,7 +170,7 @@ export class MemoryService {
   ): Promise<Record<MemoryLayer, Record<string, unknown>>> {
     const { rows } = await query<{ key: string; layer: string; value: string }>(
       `SELECT layer, key, value
-       FROM v_active_memory
+       FROM roadmap.v_active_memory
        WHERE agent_identity = $1
        ORDER BY layer, updated_at DESC`,
       [agentIdentity],
@@ -202,7 +202,7 @@ export class MemoryService {
     layer: MemoryLayer,
     key?: string,
   ): Promise<number> {
-    let sql = `DELETE FROM agent_memory WHERE agent_identity = $1 AND layer = $2`;
+    let sql = `DELETE FROM roadmap_efficiency.agent_memory WHERE agent_identity = $1 AND layer = $2`;
     const params: unknown[] = [agentIdentity, layer];
     if (key !== undefined) {
       sql += ` AND key = $3`;
