@@ -268,6 +268,9 @@ async function runSpawn(args: {
 			capabilities,
 			provider: payload.route_hint as never,
 			briefingId: payload.briefing_id,
+			// V3-C4 (P1436): pass the claiming agency so the spawner can assert
+			// declared-provider vs resolved-route-provider and record provider truth.
+			agencyIdentity: agencyId,
 			// agentLabel intentionally omitted — agent-spawner derives the
 			// structured identity (P852) when this is undefined.
 		});
