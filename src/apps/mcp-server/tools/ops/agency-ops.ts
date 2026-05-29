@@ -7,7 +7,7 @@
  * Security model:
  *  - agency_start runs systemctl enable+start via sudo (sudoers must allow
  *    the mcp-server process user to manage agenthive-agency@.service).
- *  - agency_status is read-only (systemctl is-active + DB last_seen_at).
+ *  - agency_status is read-only (systemctl is-active + v_agency_status + liaison session).
  *  - Both verify the identity exists in agent_registry with agent_type='agency'
  *    before touching systemd.
  */
@@ -26,8 +26,12 @@ export interface AgencyStatusResult {
 	identity: string;
 	systemd_unit: string;
 	systemd_active: string;
-	last_seen_at: string | null;
-	registry_status: string | null;
+	// AC-6 required fields
+	status: string | null;
+	presence_state: string | null;
+	silence_seconds: number | null;
+	is_listening: boolean;
+	session_id: string | null;
 }
 
 export class AgencyOpsHandler {
@@ -93,8 +97,8 @@ export class AgencyOpsHandler {
 		const identity = args.identity.trim();
 		const unit = this.unitName(identity);
 
-		// Query systemd and DB in parallel
-		const [isActiveResult, regResult] = await Promise.all([
+		// Query systemd + DB in parallel (AC-6: return status/presence_state/silence_seconds/is_listening/session_id)
+		const [isActiveResult, vasResult, sessionResult] = await Promise.all([
 			Promise.resolve(
 				spawnSync("systemctl", ["is-active", unit], {
 					timeout: 5000,
@@ -102,20 +106,31 @@ export class AgencyOpsHandler {
 				}),
 			),
 			query(
-				`SELECT status, last_seen_at FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
+				`SELECT status, presence_state, silence_seconds FROM roadmap.v_agency_status WHERE agency_id = $1`,
+				[identity],
+			),
+			query(
+				`SELECT session_id FROM roadmap.agency_liaison_session
+				 WHERE agency_id = $1 AND ended_at IS NULL
+				 ORDER BY started_at DESC LIMIT 1`,
 				[identity],
 			),
 		]);
 
 		const systemdActive = ((isActiveResult.stdout as string) || "").trim() || "unknown";
-		const row = regResult.rows[0] ?? null;
+		const vas = vasResult.rows[0] ?? null;
+		const session = sessionResult.rows[0] ?? null;
+		const presenceState: string | null = vas?.presence_state ?? null;
 
 		return {
 			identity,
 			systemd_unit: unit,
 			systemd_active: systemdActive,
-			last_seen_at: row?.last_seen_at ?? null,
-			registry_status: row?.status ?? null,
+			status: vas?.status ?? null,
+			presence_state: presenceState,
+			silence_seconds: vas?.silence_seconds ?? null,
+			is_listening: presenceState !== null && presenceState !== "offline",
+			session_id: session?.session_id ?? null,
 		};
 	}
 }
