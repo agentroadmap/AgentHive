@@ -54,7 +54,7 @@ export interface OfferProviderDeps {
 	agentIdentity: string;
 	/** Capabilities to advertise when claiming — must satisfy required_capabilities */
 	capabilities?: string[];
-	/** Lease TTL in seconds sent to fn_claim_work_offer (default 30) */
+	/** Lease TTL in seconds sent to fn_claim_work_offer (default 1320; V3-C1 P1433) */
 	leaseTtlSeconds?: number;
 	/** How often to renew the lease while a spawn is running, ms (default 10_000) */
 	renewIntervalMs?: number;
@@ -125,7 +125,9 @@ export class OfferProvider {
 		this.capabilitiesJson = JSON.stringify(
 			deps.capabilities?.length ? deps.capabilities : [],
 		);
-		this.leaseTtlSeconds = deps.leaseTtlSeconds ?? 30;
+		// V3-C1 (P1433): align lease TTL floor with the spawn timeout (20min). Note:
+		// OfferProvider is RETIRED (P912 AC-7 / P299); kept consistent to avoid drift.
+		this.leaseTtlSeconds = deps.leaseTtlSeconds ?? 1320;
 		this.renewIntervalMs = deps.renewIntervalMs ?? 10_000;
 		this.pollIntervalMs = deps.pollIntervalMs ?? 15_000;
 		this.maxConcurrent = deps.maxConcurrent ?? 1;

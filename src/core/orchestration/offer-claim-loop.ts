@@ -28,7 +28,10 @@ function query(...args: Parameters<QueryFn>) { return _query(...args); }
 
 const WORK_OFFERS_CHANNEL = "work_offers";
 const DEFAULT_POLL_INTERVAL_MS = 30_000;
-const DEFAULT_LEASE_TTL_SECONDS = 60;
+// V3-C1 (P1433): lease TTL must exceed the spawn timeout (AGENTHIVE_SPAWN_TIMEOUT_MS,
+// default 1_200_000ms = 20min). At the old 60s, a 20-min worker renewing every TTL/3
+// was one network/renew hiccup from a false lease_expired reap. 1320s = 22min floor.
+const DEFAULT_LEASE_TTL_SECONDS = 1320;
 const DEFAULT_MAX_CONCURRENT = 8;
 
 const ORCHESTRATOR_HOST = process.env.AGENTHIVE_HOST ?? hostname();

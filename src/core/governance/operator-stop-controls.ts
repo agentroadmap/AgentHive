@@ -362,7 +362,7 @@ export async function claimWorkOffer(opts: ClaimWorkOfferOptions): Promise<Claim
       [
         opts.agentIdentity,
         JSON.stringify(opts.requiredCapabilities ?? {}),
-        opts.leaseTtlSeconds ?? 20,
+        opts.leaseTtlSeconds ?? 1320, // V3-C1 (P1433): lease floor >= spawn timeout (20min)
         opts.serviceHost ?? null,
       ],
     );
