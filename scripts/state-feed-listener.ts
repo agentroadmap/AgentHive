@@ -22,7 +22,16 @@ const WEBHOOK_URL =
 	})();
 
 // Subscribe to both the unified outbox and the legacy gate-ready channel.
-const CHANNELS = ["roadmap_events", "proposal_gate_ready", "control_feed"];
+// The legacy maturity/state channels still fire but `roadmap_events` carries
+// the same information with better fidelity, so we ignore the legacy ones to
+// avoid double-posting.
+const CHANNELS = [
+	"roadmap_events",
+	"agent_lifecycle_events",
+	"control_feed",
+	"proposal_gate_ready",
+	"state_feed_user_inbox",
+];
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 
@@ -351,6 +360,45 @@ function renderReviewSubmitted(p: ProposalRow, ev: EventRow): string {
 	return `💬 **${reviewer}** posted review on **${p.display_id}|${stage}**${tag}`;
 }
 
+// ─── Agent lifecycle renderer (P1123 AC-7) ───────────────────────────────────
+
+function renderAgentLifecycleEvent(payload: string): string {
+	let data: Record<string, unknown> = {};
+	try {
+		data = JSON.parse(payload);
+	} catch {
+		return "";
+	}
+
+	if (data.event_type === "pool_poisoned") {
+		const svc = String(data.service_name ?? data.service ?? "unknown-service");
+		const detail = data.detail ? ` — ${String(data.detail).slice(0, 120)}` : "";
+		return `🚨 **POOL POISONED** in \`${svc}\`${detail}\nIncident detected by P1123 watchdog. Service is degraded; restart \`${svc}.service\` to recover.`;
+	}
+
+	if (data.event_type !== "registry_reap") return "";
+
+	const count = Number(data.count ?? 0);
+	const retention = String(data.retention ?? "unknown retention");
+	return `**system/registry-reaper** pruned **${count}** inactive agent_registry row(s) older than ${retention}`;
+}
+
+// ─── User inbox renderer (AC-16 / P1120) ─────────────────────────────────────
+
+function renderUserInboxMessage(payload: string): string {
+	let data: Record<string, unknown> = {};
+	try {
+		data = JSON.parse(payload);
+	} catch {
+		return "";
+	}
+	const from = String(data.from_agent ?? "unknown");
+	const msgType = String(data.message_type ?? "message");
+	const raw = String(data.message_content ?? "").trim();
+	const content = raw ? `: ${raw.slice(0, 200)}` : "";
+	return `📬 **[inbox]** \`${from}\` → \`${msgType}\`${content}`;
+}
+
 // ─── Dispatch ─────────────────────────────────────────────────────────────────
 
 async function handleProposalEvent(client: Client, eventId: number): Promise<string> {
@@ -431,23 +479,10 @@ async function handleNotification(
 		msg = await handleProposalEvent(client, eventId);
 	} else if (channel === "proposal_gate_ready") {
 		msg = await renderGateReady(client, payload);
-	} else if (channel === "control_feed") {
-		// P1123 Phase 3: forward pool_poisoned alerts to Discord operator channel.
-		try {
-			const env = JSON.parse(payload) as {
-				event_type?: string;
-				service_name?: string;
-				detail?: string;
-				ts?: string;
-			};
-			if (env.event_type === "pool_poisoned") {
-				const svc = env.service_name || "(unknown service)";
-				const detail = env.detail ? ` — ${env.detail.slice(0, 120)}` : "";
-				msg = `🚨 **POOL POISONED** in \`${svc}\`${detail}\nIncident detected by P1123 watchdog. Service is degraded; restart \`${svc}.service\` to recover.`;
-			}
-		} catch {
-			console.log(`[state-feed] bad JSON on control_feed`);
-		}
+	} else if (channel === "agent_lifecycle_events" || channel === "control_feed") {
+		msg = renderAgentLifecycleEvent(payload);
+	} else if (channel === "state_feed_user_inbox") {
+		msg = renderUserInboxMessage(payload);
 	}
 	if (msg) {
 		console.log(`[state-feed] → Discord: ${msg.slice(0, 80)}`);

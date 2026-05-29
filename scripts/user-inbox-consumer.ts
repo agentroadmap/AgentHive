@@ -38,7 +38,7 @@ if (stdoutHandle?.setBlocking) stdoutHandle.setBlocking(true);
 const stderrHandle = (process.stderr as unknown as { _handle?: { setBlocking?: (b: boolean) => void } })._handle;
 if (stderrHandle?.setBlocking) stderrHandle.setBlocking(true);
 
-const OPERATOR = process.env.INBOX_OPERATOR ?? "gary";
+const OPERATOR = process.env.USER_INBOX_OPERATOR ?? "gary";
 const IDENTITY = `user/${OPERATOR}`;
 const DRAIN_WINDOW_HOURS = 24;
 const LOG = `[user-inbox/${OPERATOR}]`;
@@ -195,7 +195,8 @@ async function handleNotify(payload: string): Promise<void> {
 
 	const { rows } = await query<MessageRow>(
 		`SELECT id, from_agent, to_agent, message_type, message_content,
-		        correlation_id, COALESCE(metadata, '{}'::jsonb) AS metadata, created_at
+		        correlation_id, COALESCE(metadata, '{}'::jsonb) AS metadata,
+		        created_at, read_at
 		   FROM roadmap.message_ledger
 		  WHERE id = $1`,
 		[messageId],
@@ -261,14 +262,15 @@ async function main() {
 	const channel = agentNotifyChannel(IDENTITY);
 	const pgPassword = getPGPassword();
 
-	// Ensure user/gary exists in agent_registry (idempotent; migration 161 also seeds it).
-	await query(
-		`INSERT INTO roadmap_workforce.agent_registry
-		    (agent_identity, agent_type, trust_tier, status)
-		 VALUES ($1, 'human', 'authority', 'active')
-		 ON CONFLICT (agent_identity) DO UPDATE SET status = 'active'`,
+	// AC-3: verify agent_identity exists in agent_registry; exit if missing.
+	const { rows: regRows } = await query<{ agent_identity: string }>(
+		`SELECT agent_identity FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
 		[IDENTITY],
 	);
+	if (regRows.length === 0) {
+		console.error(`${LOG} agent_identity not found in agent_registry: ${IDENTITY}`);
+		process.exit(1);
+	}
 
 	// Dedicated LISTEN client — must bypass PgBouncer.
 	const listenClient = new Client({
@@ -298,9 +300,51 @@ async function main() {
 	// Drain unread messages that arrived while consumer was offline.
 	await bootDrain();
 
+	// AC-7: Polling fallback — catches messages whose notifications were lost
+	// during brief PG instability. Cursor advances so only new rows are scanned.
+	let lastProcessedId = 0;
+	{
+		const { rows } = await query<{ max_id: number | null }>(
+			`SELECT MAX(id) AS max_id FROM roadmap.message_ledger
+			  WHERE to_agent = $1 AND created_at > now() - make_interval(hours => $2)`,
+			[IDENTITY, DRAIN_WINDOW_HOURS],
+		);
+		lastProcessedId = rows[0]?.max_id ?? 0;
+	}
+
+	const pollInterval = setInterval(async () => {
+		try {
+			const { rows } = await query<MessageRow>(
+				`SELECT id, from_agent, to_agent, message_type, message_content,
+				        correlation_id, COALESCE(metadata, '{}'::jsonb) AS metadata, created_at
+				   FROM roadmap.message_ledger
+				  WHERE to_agent = $1
+				    AND read_at IS NULL
+				    AND id > $2
+				  ORDER BY id ASC
+				  LIMIT 50`,
+				[IDENTITY, lastProcessedId],
+			);
+			for (const msg of rows) {
+				try {
+					await markReadAndResolveTimeout(msg.id);
+					await forward(msg);
+					console.log(`${LOG} poll-recovered id=${msg.id} type=${msg.message_type}`);
+				} catch (err) {
+					console.error(`${LOG} poll-recover failed for id=${msg.id}:`, err);
+				}
+				if (msg.id > lastProcessedId) lastProcessedId = msg.id;
+			}
+		} catch (err) {
+			console.warn(`${LOG} Polling fallback error:`, err);
+		}
+	}, 60_000);
+	pollInterval.unref();
+
 	let keepaliveTimer: ReturnType<typeof setInterval> | undefined;
 
 	async function cleanup(): Promise<void> {
+		clearInterval(pollInterval);
 		if (keepaliveTimer !== undefined) {
 			clearInterval(keepaliveTimer);
 			keepaliveTimer = undefined;

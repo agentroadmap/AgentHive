@@ -236,13 +236,9 @@ The RFC workflow is the 8-stage path:
 
 ### Hotfix Workflow (hotfix)
 
-<<<<<<< HEAD
-Hotfix uses the lightweight 3-stage path:
+The hotfix workflow uses the lightweight 3-stage path, drawn from `roadmap.workflow_stages`:
 
 `DRAFT -> DEVELOP -> COMPLETE`
-=======
-The hotfix workflow uses the same 3-stage structure, drawn from `roadmap.workflow_stages`:
->>>>>>> codex-four
 
 | State | Phase | Description |
 | :--- | :--- | :--- |
@@ -252,24 +248,15 @@ The hotfix workflow uses the same 3-stage structure, drawn from `roadmap.workflo
 
 ### Unified Vocabulary Table
 
-<<<<<<< HEAD
-Both workflows share the same maturity axis. Workflow stages are rendered from `roadmap.workflow_stages` for the active workflow. No code path may hardcode a list of workflow stages.
-
-| Attribute | RFC value | Hotfix value | Source |
-| :--- | :--- | :--- | :--- |
-| Status values | DRAFT, REVIEW, DEVELOP, CODE_REVIEW, TEST_WRITING, TEST_EXECUTION, MERGE, COMPLETE | DRAFT, DEVELOP, COMPLETE | `roadmap.workflow_stages` |
-=======
 Both workflows share the same maturity axis and are stored in `roadmap.workflow_stages`. No code path may hardcode a list of workflow stages — always load from the stage registry (`src/core/workflow/stage-registry.ts`).
 
 | Attribute | RFC value | Hotfix value | Source |
 | :--- | :--- | :--- | :--- |
-| Status values | DRAFT, REVIEW, DEVELOP, MERGE, COMPLETE | TRIAGE, DEPLOY, CLOSED | `roadmap.workflow_stages` |
->>>>>>> codex-four
+| Status values | DRAFT, REVIEW, DEVELOP, MERGE, COMPLETE | DRAFT, DEVELOP, COMPLETE | `roadmap.workflow_stages` |
 | Maturity values | new, active, mature, obsolete | same | `roadmap_proposal.proposal.maturity` |
 | Terminal closure | COMPLETE with terminal-stage semantics from the active workflow | COMPLETE with terminal-stage semantics from the active workflow | `roadmap.workflow_stages` |
 | Obsolete reason | `obsoleted_reason TEXT` free-text | same | `roadmap_proposal.proposal.obsoleted_reason` |
 
-<<<<<<< HEAD
 ### Boards Are Workflow-Aware
 
 Boards render columns from `roadmap.workflow_stages` for the active workflow and ordered stage definitions in that table. A Workflow filter is required on every board surface and must be resolved before columns are rendered. No code path may hardcode a list of stage columns or infer them from proposal type without first resolving the active workflow.
@@ -282,26 +269,11 @@ Closing a proposal as terminal and closing a proposal as obsolete are different 
 - Obsolete closure uses `maturity='obsolete'`.
 - `obsoleted_reason` is free-text and must explain why the proposal became obsolete; it is not an enum and must not be treated as one in code or UI.
 
+`obsoleted_reason` must be populated whenever `maturity` is set to `obsolete`. Obsolete is not a terminal stage — it can apply in any state — but obsolete proposals are not dispatched and are filtered from active boards.
+
 ### Out Of Scope
 
 `Code Review Pipeline` is a separate workflow family and is out of scope for this vocabulary section. Do not use it to infer RFC or Hotfix stage names.
-=======
-### Terminal closure
-
-A proposal reaches terminal closure when it enters a terminal stage at `mature` maturity:
-
-| Workflow | Terminal state | Meaning |
-| :--- | :--- | :--- |
-| RFC | COMPLETE + mature | Delivered and stable. No further gate advances are queued. |
-| Hotfix | CLOSED + mature | Fix applied and verified in production. |
-| Hotfix escape | WONT_FIX, NON_ISSUE | Problem acknowledged but will not be fixed; case closed. |
-
-`obsoleted_reason` (TEXT, free-text) must be populated whenever `maturity` is set to `obsolete`. Obsolete is not a terminal stage — it can apply in any state — but obsolete proposals are not dispatched and are filtered from active boards.
-
-### Boards are workflow-aware
-
-Board columns are rendered from `roadmap.workflow_stages` for the active workflow. A workflow filter is always required. No code path may hardcode a list of stages — columns must derive from the stage registry at runtime.
->>>>>>> codex-four
 
 ### Architecture RFC Workflow (architecture)
 
@@ -1219,17 +1191,10 @@ The orchestrator handles the "how" of dispatch. Hermes handles the "what" and "w
 
 | Cubic Phase | Design Intent | Why | Cost Tier |
 | :--- | :--- | :--- | :--- |
-<<<<<<< HEAD
 | **Design** (DRAFT, REVIEW) | Deep reasoning model | Architecture, adversarial review | Premium |
-| **Build** (DEVELOP, CODE_REVIEW, TEST_WRITING) | Code generation model | Implementation, review prep, verification prep | Standard |
-| **Test** (TEST_EXECUTION, MERGE) | Balanced model | Acceptance execution, integration validation | Standard |
+| **Build** (DEVELOP) | Code generation model | Implementation, review prep, verification prep | Standard |
+| **Test** (MERGE) | Balanced model | Acceptance execution, integration validation | Standard |
 | **Ship** (COMPLETE) | Fast economy model | Documentation, finalization, low-cost | Economy |
-=======
-| **Design** (DRAFT, REVIEW, TRIAGE) | Deep reasoning model | Architecture, adversarial review | Premium |
-| **Build** (DEVELOP, DEPLOY) | Code generation model | Implementation, balanced cost | Standard |
-| **Test** (MERGE) | Balanced model | Integration testing, validation | Standard |
-| **Ship** (COMPLETE, CLOSED) | Fast economy model | Documentation, finalization, low-cost | Economy |
->>>>>>> codex-four
 
 **To see actual routed models:** Query `model_routes` in the DB or check `roadmap.yaml`. Do not hardcode model names from this table into code — the DB is the source of truth.
 
