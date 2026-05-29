@@ -237,6 +237,12 @@ const agentRoutes: RouteMap = {
 	agency_join_project: "agency_join_project",
 	agency_leave_project: "agency_leave_project",
 	agency_liaison_status: "agency_liaison_status",
+	// P1129: self-service agency registration + model registration + systemd lifecycle
+	pg_register: "agent_pg_register",
+	register_model: "agent_register_model",
+	agency_start: "agency_start",
+	agency_status: "agency_status",
+	resolve: "agent_resolve",
 };
 
 const memoryRoutes: RouteMap = {

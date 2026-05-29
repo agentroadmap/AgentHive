@@ -21,6 +21,8 @@ import {
 	agentGetSchema,
 	agentHeartbeatSchema,
 	agentListSchema,
+	agentPgRegisterSchema,
+	agentRegisterModelSchema,
 	agentRegisterSchema,
 	agentRetireSchema,
 	agentSpawnSchema,
@@ -33,7 +35,7 @@ import {
 export function registerAgentTools(server: McpServer): void {
 	const handlers = new AgentPoolHandlers(server);
 	const pgHandlers = new PgAgentHandlers();
-	type RegisterAgentArgs = Parameters<AgentPoolHandlers["registerAgent"]>[0];
+	type RegisterAgentArgs = Parameters<PgAgentHandlers["registerAgent"]>[0];
 	type GetAgentArgs = Parameters<AgentPoolHandlers["getAgent"]>[0];
 	type ListAgentsArgs = Parameters<AgentPoolHandlers["listAgents"]>[0];
 	type AssignWorkArgs = Parameters<AgentPoolHandlers["assignWork"]>[0];
@@ -45,17 +47,38 @@ export function registerAgentTools(server: McpServer): void {
 	type RevokePrivilegeArgs = Parameters<typeof revokePrivilege>[0];
 
 	// ── agent_register ──────────────────────────────────────────────────────
+	// P1129: switched to pgHandlers so agency-shape fields persist in agent_registry
 	const registerTool: McpToolHandler =
 		createSimpleValidatedTool<RegisterAgentArgs>(
 			{
 				name: "agent_register",
 				description:
-					"Register or update an agent profile in the dynamic multi-model pool. " +
-					"Supports Claude, GPT, Gemini, local models, and custom AI backends.",
+					"Register or update an agent in the Postgres-backed registry. " +
+					"Supports Claude, GPT, Gemini, local models, and custom AI backends. " +
+					"P1129: persists preferred_provider, agent_cli, host_affinity, display_alias.",
 				inputSchema: agentRegisterSchema,
 			},
 			agentRegisterSchema,
-			async (input) => handlers.registerAgent(input),
+			async (input) => {
+				// Map schema fields → pgHandlers signature
+				const mapped: RegisterAgentArgs = {
+					identity: (input as any).identity || (input as any).name,
+					agent_type: (input as any).template,
+					role: (input as any).role,
+					skills: (input as any).capabilities
+						? JSON.stringify((input as any).capabilities)
+						: undefined,
+					preferred_provider:
+						(input as any).preferred_provider || (input as any).provider,
+					agent_cli: (input as any).agent_cli,
+					host_affinity: (input as any).host_affinity,
+					display_alias: (input as any).display_alias,
+					display_name: (input as any).name !== (input as any).identity
+						? (input as any).name
+						: undefined,
+				};
+				return pgHandlers.registerAgent(mapped);
+			},
 		);
 
 	// ── agent_get ────────────────────────────────────────────────────────────
@@ -350,4 +373,74 @@ export function registerAgentTools(server: McpServer): void {
 	server.addTool(reportingTool);
 	server.addTool(grantTool);
 	server.addTool(revokeTool);
+
+	// ── agent_register_model ────────────────────────────────────────────────
+	// P1129: register a model into model_metadata + model_routes with CLI probe gate
+	type RegisterModelArgs = Parameters<PgAgentHandlers["registerModel"]>[0];
+	const registerModelTool = createSimpleValidatedTool<RegisterModelArgs>(
+		{
+			name: "agent_register_model",
+			description:
+				"P1129: Register a model into roadmap.model_metadata + model_routes with a live CLI probe. " +
+				"Requires agent_identity + model_name + route_provider + agent_provider. " +
+				"Set skip_probe=true only when caller has trust_tier='authority'.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					agent_identity: {
+						type: "string",
+						description: "Caller identity from agent_registry",
+					},
+					model_name: { type: "string", description: "Model identifier (e.g. claude-opus-4-7)" },
+					route_provider: { type: "string", description: "Provider in model_metadata (e.g. 'anthropic')" },
+					agent_provider: { type: "string", description: "LLM runtime (e.g. 'claude', 'codex')" },
+					agent_cli: { type: "string", description: "Override CLI path (falls back to agent_registry.agent_cli)" },
+					base_url: { type: "string", description: "Custom API base URL" },
+					api_spec: { type: "string", description: "API spec / variant (e.g. 'openai-compatible')" },
+					tier: {
+						type: "string",
+						enum: ["frontier", "mid", "lower", "tool"],
+						description: "Model tier (model_routes.tier)",
+					},
+					skip_probe: {
+						type: "boolean",
+						description: "Bypass CLI probe. Requires trust_tier='authority' in agent_registry.",
+					},
+				},
+				required: ["agent_identity", "model_name", "route_provider", "agent_provider"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				agent_identity: { type: "string" },
+				model_name: { type: "string" },
+				route_provider: { type: "string" },
+				agent_provider: { type: "string" },
+			},
+			required: ["agent_identity", "model_name", "route_provider", "agent_provider"],
+		},
+		async (input) => pgHandlers.registerModel(input),
+	);
+	server.addTool(registerModelTool);
+
+	// ── agent_pg_register ───────────────────────────────────────────────────
+	// P1129: Clean DB-backed registration with identity as the primary key.
+	// Unlike agent_register (legacy schema compatibility), this tool's schema
+	// maps 1-to-1 with agent_registry columns — use for new agency onboarding.
+	type PgRegisterArgs = Parameters<PgAgentHandlers["registerAgent"]>[0];
+	const pgRegisterTool = createSimpleValidatedTool<PgRegisterArgs>(
+		{
+			name: "agent_pg_register",
+			description:
+				"P1129: Self-service agency registration. Upserts a row in agent_registry with full " +
+				"agency-shape fields: identity (required), agent_type, role, skills, preferred_provider, " +
+				"agent_cli, host_affinity, display_alias, display_name. Uses COALESCE ON CONFLICT — " +
+				"omitted fields preserve existing values.",
+			inputSchema: agentPgRegisterSchema,
+		},
+		agentPgRegisterSchema,
+		async (input) => pgHandlers.registerAgent(input as PgRegisterArgs),
+	);
+	server.addTool(pgRegisterTool);
 }

@@ -4,8 +4,10 @@
  * Workforce management via the `agent_registry`, `team`, and `team_member` tables.
  * All handler methods catch errors and return MCP text responses instead of throwing.
  * P462: Added agent identity sanitization to prevent collisions and path traversal.
+ * P1129: Extended registerAgent with agency-shape fields; added registerModel with probe gate.
  */
 
+import { spawnSync } from "node:child_process";
 import { query } from "../../../../postgres/pool.ts";
 import {
 	normalizeAgentId,
@@ -177,11 +179,16 @@ export class PgAgentHandlers {
 				);
 			}
 
-			// P1129 Phase A: persist agency-shape fields with COALESCE on UPDATE so
-			// partial calls don't overwrite existing values with NULL.
-			// Note: preferred_model is deliberately omitted — composite FK
-			// (preferred_provider, preferred_model) → model_metadata is NULL-exempt
-			// only when preferred_model is NULL.
+			const skillsJson = args.skills
+				? typeof args.skills === "string"
+					? args.skills.trim().startsWith("[") || args.skills.trim().startsWith("{")
+						? args.skills
+						: JSON.stringify(args.skills.split(",").map((s) => s.trim()).filter(Boolean))
+					: JSON.stringify(args.skills)
+				: null;
+
+			// P1129: persist agency-shape fields with COALESCE on UPDATE so partial
+			// calls don't overwrite existing values with NULL.
 			const { rows } = await query(
 				`INSERT INTO roadmap_workforce.agent_registry (
 					agent_identity, agent_type, role, skills,
@@ -199,18 +206,12 @@ export class PgAgentHandlers {
 					display_alias      = COALESCE(EXCLUDED.display_alias,      roadmap_workforce.agent_registry.display_alias),
 					display_name       = COALESCE(EXCLUDED.display_name,       roadmap_workforce.agent_registry.display_name),
 					updated_at         = NOW()
-				RETURNING agent_identity, role, status`,
+				RETURNING agent_identity, role, status, preferred_provider`,
 				[
 					normalizedIdentity,
 					args.agent_type || null,
 					args.role || null,
-					args.skills
-						? typeof args.skills === "string"
-							? args.skills.trim().startsWith("[") || args.skills.trim().startsWith("{")
-								? args.skills
-								: JSON.stringify(args.skills.split(",").map((s) => s.trim()).filter(Boolean))
-							: JSON.stringify(args.skills)
-						: null,
+					skillsJson,
 					args.preferred_provider?.trim() || null,
 					args.agent_cli?.trim() || null,
 					args.host_affinity?.trim() || null,
@@ -218,11 +219,22 @@ export class PgAgentHandlers {
 					args.display_name?.trim() || null,
 				],
 			);
+
+			const r = rows[0];
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Agent registered: ${rows[0].agent_identity} (${rows[0].role})`,
+						text: JSON.stringify(
+							{
+								agent_identity: r.agent_identity,
+								role: r.role,
+								status: r.status,
+								preferred_provider: r.preferred_provider,
+							},
+							null,
+							2,
+						),
 					},
 				],
 			};
@@ -231,6 +243,185 @@ export class PgAgentHandlers {
 				return errorResult("Invalid agent identity", err);
 			}
 			return errorResult("Failed to register agent", err);
+		}
+	}
+
+	/**
+	 * P1129: Probe a CLI to verify a model name is accepted.
+	 * Returns { ok: true } if probe succeeds or CLI is unrecognised (permissive default).
+	 * Returns { ok: false, error } if the CLI explicitly rejects the model name.
+	 */
+	private probeModel(
+		agentProvider: string,
+		modelName: string,
+	): { ok: boolean; error?: string } {
+		type CliProbeSpec = { cli: string; args: string[]; rejectPattern: RegExp; rejectOnNonZero: boolean };
+		const specs: Record<string, CliProbeSpec> = {
+			claude: {
+				cli: "claude",
+				args: ["--model", modelName, "-p", "x"],
+				rejectPattern: /unknown model/i,
+				rejectOnNonZero: false,
+			},
+			codex: {
+				cli: "codex",
+				args: ["--model", modelName, "--no-git", "-q", "x"],
+				rejectPattern: /invalid model/i,
+				rejectOnNonZero: true,
+			},
+			gemini: {
+				cli: "gemini",
+				args: ["--model", modelName, "-p", "x"],
+				rejectPattern: /model not found/i,
+				rejectOnNonZero: false,
+			},
+			copilot: {
+				cli: "copilot",
+				args: ["--model", modelName, "-p", "x"],
+				rejectPattern: /model not found|invalid/i,
+				rejectOnNonZero: true,
+			},
+		};
+
+		const spec = specs[agentProvider];
+		if (!spec) {
+			return { ok: true };
+		}
+
+		try {
+			const result = spawnSync(spec.cli, spec.args, {
+				timeout: 5000,
+				encoding: "utf-8",
+			});
+			const output = ((result.stdout as string) || "") + ((result.stderr as string) || "");
+
+			if (spec.rejectPattern.test(output)) {
+				return { ok: false, error: output.slice(0, 500) };
+			}
+			if (spec.rejectOnNonZero && result.status !== 0 && result.status !== null) {
+				return { ok: false, error: output.slice(0, 500) };
+			}
+			return { ok: true };
+		} catch {
+			return { ok: true };
+		}
+	}
+
+	/**
+	 * P1129: Register a model into model_metadata + model_routes.
+	 * Performs a live CLI probe before persisting (bypass with skip_probe=true if authority).
+	 * Two-step FK-safe UPSERT: model_metadata first, then model_routes.
+	 */
+	async registerModel(args: {
+		agent_identity: string;
+		model_name: string;
+		route_provider: string;
+		agent_provider: string;
+		agent_cli?: string;
+		base_url?: string;
+		api_spec?: string;
+		tier?: string;
+		skip_probe?: boolean;
+	}): Promise<CallToolResult> {
+		try {
+			if (args.skip_probe) {
+				const trustCheck = await query(
+					`SELECT trust_tier FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
+					[args.agent_identity],
+				);
+				if (!trustCheck.rows.length || trustCheck.rows[0].trust_tier !== "authority") {
+					return errorResult(
+						"Permission denied",
+						"skip_probe=true requires trust_tier='authority'",
+					);
+				}
+			}
+
+			if (!args.skip_probe) {
+				const probe = this.probeModel(args.agent_provider, args.model_name);
+				if (!probe.ok) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify(
+									{
+										registered: false,
+										probe_failed: true,
+										probe_error: probe.error,
+										model_name: args.model_name,
+										agent_provider: args.agent_provider,
+									},
+									null,
+									2,
+								),
+							},
+						],
+					};
+				}
+			}
+
+			// Step 1: UPSERT model_metadata (FK source required before model_routes INSERT)
+			await query(
+				`INSERT INTO roadmap.model_metadata (model_name, provider, is_active)
+				 VALUES ($1, $2, true)
+				 ON CONFLICT (provider, model_name) DO UPDATE SET is_active = true`,
+				[args.model_name, args.route_provider],
+			);
+
+			// Resolve agent_cli from registry if not supplied
+			let agentCli = args.agent_cli || null;
+			if (!agentCli) {
+				const reg = await query(
+					`SELECT agent_cli FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
+					[args.agent_identity],
+				);
+				agentCli = (reg.rows[0]?.agent_cli as string) || null;
+			}
+
+			// Step 2: UPSERT model_routes
+			const { rows } = await query(
+				`INSERT INTO roadmap.model_routes
+				   (model_name, route_provider, agent_provider, agent_cli, base_url, api_spec, tier, is_enabled)
+				 VALUES ($1, $2, $3, $4, $5, $6, $7, true)
+				 ON CONFLICT (model_name, route_provider, agent_provider) DO UPDATE SET
+				   agent_cli  = COALESCE(EXCLUDED.agent_cli,  model_routes.agent_cli),
+				   base_url   = COALESCE(EXCLUDED.base_url,   model_routes.base_url),
+				   api_spec   = COALESCE(EXCLUDED.api_spec,   model_routes.api_spec),
+				   tier       = COALESCE(EXCLUDED.tier,       model_routes.tier),
+				   is_enabled = true
+				 RETURNING id`,
+				[
+					args.model_name,
+					args.route_provider,
+					args.agent_provider,
+					agentCli,
+					args.base_url || null,
+					args.api_spec || null,
+					args.tier || null,
+				],
+			);
+
+			return {
+				content: [
+					{
+						type: "text",
+						text: JSON.stringify(
+							{
+								registered: true,
+								route_id: rows[0].id,
+								model_name: args.model_name,
+								route_provider: args.route_provider,
+								agent_provider: args.agent_provider,
+							},
+							null,
+							2,
+						),
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to register model", err);
 		}
 	}
 

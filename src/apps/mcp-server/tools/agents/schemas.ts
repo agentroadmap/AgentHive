@@ -103,6 +103,23 @@ export const agentRegisterSchema: JsonSchema = {
 			additionalProperties: false,
 			description: "Model-specific configuration",
 		},
+		// P1129: agency-shape fields persisted in agent_registry
+		preferred_provider: {
+			type: "string",
+			description: "Preferred LLM provider (e.g. 'claude', 'codex', 'gemini'). Stored in agent_registry.preferred_provider.",
+		},
+		agent_cli: {
+			type: "string",
+			description: "Full path to the agency CLI binary (e.g. '/usr/local/bin/claude'). Stored in agent_registry.agent_cli.",
+		},
+		host_affinity: {
+			type: "string",
+			description: "Host segment the agency prefers to run on (e.g. 'bot', 'mac'). Stored in agent_registry.host_affinity.",
+		},
+		display_alias: {
+			type: "string",
+			description: "Short human-readable alias (e.g. 'Claude Alpha'). Must be unique in agent_registry.",
+		},
 	},
 	required: ["name", "model", "provider"],
 	additionalProperties: false,
@@ -309,5 +326,99 @@ export const agentForceReleaseAliasSchema: JsonSchema = {
 		},
 	},
 	required: ["identity"],
+	additionalProperties: false,
+};
+
+// P1129: DB-backed agency self-registration schema
+export const agentPgRegisterSchema: JsonSchema = {
+	type: "object",
+	properties: {
+		identity: {
+			type: "string",
+			minLength: 1,
+			maxLength: 200,
+			description: "Agent identity (email, URL, handle). PK in agent_registry.",
+		},
+		agent_type: {
+			type: "string",
+			enum: ["human", "llm", "tool", "hybrid", "agency", "workforce", "coordinator", "user"],
+			description: "Agent type. Use 'agency' for full agencies.",
+		},
+		role: {
+			type: "string",
+			description: "Role name (e.g. 'developer', 'reviewer', 'architect').",
+		},
+		skills: {
+			type: "string",
+			description: "Comma-separated list or JSON array of skill tags stored as JSONB.",
+		},
+		preferred_provider: {
+			type: "string",
+			description: "Preferred LLM provider key (e.g. 'claude', 'codex', 'gemini').",
+		},
+		agent_cli: {
+			type: "string",
+			description: "Full path to agency CLI binary (e.g. '/usr/local/bin/claude').",
+		},
+		host_affinity: {
+			type: "string",
+			description: "Host segment the agency prefers (e.g. 'bot', 'mac').",
+		},
+		display_alias: {
+			type: "string",
+			description: "Short human-readable alias. Must be unique in agent_registry.",
+		},
+		display_name: {
+			type: "string",
+			description: "Full display name stored in agent_registry.display_name.",
+		},
+	},
+	required: ["identity"],
+	additionalProperties: false,
+};
+
+// P1129: Model self-registration schema (model_metadata + model_routes UPSERT with probe gate)
+export const agentRegisterModelSchema: JsonSchema = {
+	type: "object",
+	properties: {
+		agent_identity: {
+			type: "string",
+			description: "Caller identity. Used to verify trust_tier when skip_probe=true.",
+		},
+		model_name: {
+			type: "string",
+			description: "Model name to register (e.g. 'claude-opus-4-7', 'gpt-4o').",
+		},
+		route_provider: {
+			type: "string",
+			description: "Route provider key — PK side of model_metadata (e.g. 'anthropic', 'openai').",
+		},
+		agent_provider: {
+			type: "string",
+			description: "CLI/agent-side provider key (e.g. 'claude', 'codex', 'gemini'). Determines probe spec.",
+		},
+		agent_cli: {
+			type: "string",
+			description: "Optional: path to CLI binary. Resolved from agent_registry if omitted.",
+		},
+		base_url: {
+			type: "string",
+			description: "Optional: custom API base URL for the route.",
+		},
+		api_spec: {
+			type: "string",
+			description: "Optional: API spec type (e.g. 'openai-compat').",
+		},
+		tier: {
+			type: "string",
+			enum: ["frontier", "mid", "lower", "tool"],
+			description: "Model tier stored in model_routes.",
+		},
+		skip_probe: {
+			type: "boolean",
+			description: "Skip CLI probe validation. Requires trust_tier='authority' in agent_registry.",
+		},
+	},
+	required: ["agent_identity", "model_name", "route_provider", "agent_provider"],
 	additionalProperties: false,
 };
