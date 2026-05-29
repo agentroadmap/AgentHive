@@ -1091,30 +1091,32 @@ Concrete instruction the enhancing agent can act on without further context.
 
 `advance` verdicts also write to `gate_decision_log` (via `prop_transition` which records the decision) and may omit the failures/remediation sections.
 
-#### AC verification standard (P378 / P707)
+#### §AC-Verification — Mandatory evidence standard (P707)
 
-Every `verify_ac` call with `status='pass'` MUST include a `verification_notes` field containing a JSON evidence object. **Null or empty `verification_notes` is a protocol violation — it is a phantom pass and will be treated as `status='fail'` by the D3 gate once P707 ships.**
+**Every `verify_ac` call with `status='pass'` MUST include a non-empty `details` object.**  
+Omitting `details` (or passing `{}`) returns `EVIDENCE_REQUIRED` (422). The MCP handler rejects it structurally — prompt-compliance alone is insufficient.
 
-**Evidence schema by AC category:**
+**Evidence schema by category** — pass `category` alongside `details` to enable key-level validation (returns `SCHEMA_MISMATCH` on missing required keys):
 
-| Category | Required JSON keys |
-|---|---|
-| `schema/migration` | `migration_file` (string), `tables` (string[]), `applied` (bool) |
-| `file/module` | `files` (string[]), `symbols` (string[]), `grep_evidence` (string snippet) |
-| `mcp_tool` | `tool_name`, `action`, `call_verified` (bool), `response_sample` (string) |
-| `behavioral/test` | `test_file`, `test_names` (string[]), `result` ("pass"\|"fail"), `output_snippet` |
+| Category | Required keys in `details` |
+| :--- | :--- |
+| `schema/migration` | `migration_file` (str), `tables` (array), `applied` (bool) |
+| `file/module` | `files` (array), `symbols` (array), `grep_evidence` (str) |
+| `mcp_tool` | `tool_name` (str), `action` (str), `call_verified` (bool), `response_sample` (str) |
+| `behavioral/test` | `test_file` (str), `test_names` (array), `result` ("pass"\|"fail"), `output_snippet` (str) |
 
-**Before calling `verify_ac` for any AC:**
+**Mandatory pre-check protocol for D3 gate agents:**
 
-1. Identify the AC category (schema, file, mcp_tool, or behavioral).
-2. Run the category-appropriate check — read the file, grep for the symbol, call the MCP action, or run the test.
-3. Paste actual output or path into `verification_notes` — do NOT infer from design text alone.
-4. Do not call `verify_ac` on more than 2 ACs within 5 seconds for the same proposal (bulk-advance guard, P707).
+Before calling `verify_ac` for any AC, the gate agent MUST:
+1. Identify the AC category (schema/migration, file/module, mcp_tool, or behavioral/test).
+2. Run the category-appropriate check:
+   - **schema/migration**: confirm migration file exists, list tables added, run `\d tablename` or `SELECT` to verify applied.
+   - **file/module**: `grep -n <symbol> <file>`, confirm file path exists, collect output snippet.
+   - **mcp_tool**: invoke the tool (or describe the call); capture response sample.
+   - **behavioral/test**: run the test, capture pass/fail + output snippet.
+3. Include actual output in `details` before calling `verify_ac`. Do NOT call `verify_ac` first and describe what you _would_ have found.
 
-**What is NOT valid evidence:**
-- "The design describes this behavior" — design text is not implementation evidence.
-- "The code was written per spec" — code review without grep/read is not evidence.
-- Null, empty string, or whitespace-only `verification_notes`.
+**Batch guard:** the handler tracks timestamps in-process. More than 2 `verify_ac` calls for the same proposal within any 5-second window returns `BATCH_GUARD_TRIGGERED` (429). This enforces sequential verification — run one check, call `verify_ac`, run the next check. *Added 2026-05-26 (P707).*
 
 #### Source-of-truth rule (DB > markdown)
 

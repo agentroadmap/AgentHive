@@ -172,13 +172,15 @@ class AutoEvaluator implements GateEvaluator {
 			}
 		}
 
-		// Check AC pass rate
+		// Check AC pass rate and evidence presence (P707)
 		const { rows: acRows } = await this.queryFn<{
 			total: string;
 			passed: string;
+			passed_without_evidence: string;
 		}>(
 			`SELECT COUNT(*) as total,
-			        SUM(CASE WHEN status = 'pass' THEN 1 ELSE 0 END) as passed
+			        SUM(CASE WHEN status = 'pass' THEN 1 ELSE 0 END) as passed,
+			        SUM(CASE WHEN status = 'pass' AND details IS NULL THEN 1 ELSE 0 END) as passed_without_evidence
 			 FROM roadmap_proposal.proposal_acceptance_criteria
 			 WHERE proposal_id = $1`,
 			[proposal.id],
@@ -186,11 +188,21 @@ class AutoEvaluator implements GateEvaluator {
 
 		const total = Number(acRows[0]?.total ?? 0);
 		const passed = Number(acRows[0]?.passed ?? 0);
+		const passedWithoutEvidence = Number(acRows[0]?.passed_without_evidence ?? 0);
 
 		if (total === 0) {
 			return {
 				verdict: "reject",
 				reason: "No acceptance criteria defined",
+			};
+		}
+
+		// P707: structural guard — ACs passed without evidence payload are phantom passes
+		if (passedWithoutEvidence > 0) {
+			return {
+				verdict: "reject",
+				reason: `${passedWithoutEvidence} AC(s) passed without evidence (details IS NULL) — phantom-pass guard triggered. Re-verify with structured evidence payload.`,
+				metadata: { passed_without_evidence: passedWithoutEvidence, passed, total },
 			};
 		}
 

@@ -21,6 +21,36 @@ import {
 import { RfcStates } from "../../../../core/workflow/state-names.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
+import {
+	validateAcEvidence,
+	AC_SCHEMA_VERSION,
+} from "../../schema/ac-evidence.ts";
+
+// Batch-advance guard: tracks recent verify_ac timestamps per proposal (P707).
+// More than 2 calls within a 5-second window returns 429 BATCH_GUARD_TRIGGERED.
+const _batchGuardMap = new Map<string, number[]>();
+const BATCH_WINDOW_MS = 5_000;
+const BATCH_LIMIT = 2;
+
+function checkBatchGuard(proposalId: string): { blocked: boolean; retryAfterMs?: number } {
+	const now = Date.now();
+	const cutoff = now - BATCH_WINDOW_MS;
+	const timestamps = (_batchGuardMap.get(proposalId) ?? []).filter((t) => t > cutoff);
+	if (timestamps.length >= BATCH_LIMIT) {
+		const oldestInWindow = timestamps[0];
+		const retryAfterMs = BATCH_WINDOW_MS - (now - oldestInWindow);
+		return { blocked: true, retryAfterMs: Math.max(0, retryAfterMs) };
+	}
+	timestamps.push(now);
+	_batchGuardMap.set(proposalId, timestamps);
+	// Evict stale entries after 30 s to bound memory
+	setTimeout(() => {
+		const remaining = (_batchGuardMap.get(proposalId) ?? []).filter((t) => Date.now() - t < 30_000);
+		if (remaining.length === 0) _batchGuardMap.delete(proposalId);
+		else _batchGuardMap.set(proposalId, remaining);
+	}, 30_000).unref?.();
+	return { blocked: false };
+}
 
 type ResolvedProposal = {
 	id: number;
@@ -502,6 +532,8 @@ export async function verifyAC(args: {
 	status: string;
 	verified_by: string;
 	verification_notes?: string;
+	details?: Record<string, unknown>;
+	category?: string;
 }): Promise<CallToolResult> {
 	try {
 		// P157 fix: validate required fields and provide clear error messages
@@ -511,6 +543,38 @@ export async function verifyAC(args: {
 					{
 						type: "text",
 						text: `❌ verify_ac requires: proposal_id, item_number, status, verified_by. Got: ${JSON.stringify(args)}`,
+					},
+				],
+			};
+		}
+
+		// P707: evidence guard — details required for 'pass' verdicts
+		if (args.status === "pass") {
+			const evidenceCheck = validateAcEvidence(args.details ?? null, args.category as any);
+			if (!evidenceCheck.valid) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `❌ [${evidenceCheck.code}] ${evidenceCheck.error}. ` +
+								`Pass a 'details' object with evidence (e.g. {"files": [...], "symbols": [...], "grep_evidence": "..."}) ` +
+								`before marking an AC as pass. See CONVENTIONS.md §AC-Verification.`,
+						},
+					],
+				};
+			}
+		}
+
+		// P707: batch-advance guard — breaks same-millisecond bulk-pass pattern
+		const guardResult = checkBatchGuard(args.proposal_id);
+		if (guardResult.blocked) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `❌ [BATCH_GUARD_TRIGGERED] Too many verify_ac calls for ${args.proposal_id} in 5 seconds. ` +
+							`Retry after ${Math.ceil((guardResult.retryAfterMs ?? 0) / 1000)}s. ` +
+							`Sequential verification required (P707).`,
 					},
 				],
 			};
@@ -551,15 +615,18 @@ export async function verifyAC(args: {
 		const ac = acRows[0];
 
 		await query(
-			`UPDATE roadmap_proposal.proposal_acceptance_criteria SET status = $1, verified_by = $2,
-               verification_notes = $3, verified_at = NOW()
-       WHERE proposal_id = $4 AND item_number = $5`,
+			`UPDATE roadmap_proposal.proposal_acceptance_criteria
+			    SET status = $1, verified_by = $2, verification_notes = $3, verified_at = NOW(),
+			        details = $6, details_schema_version = $7
+			  WHERE proposal_id = $4 AND item_number = $5`,
 			[
 				args.status,
 				args.verified_by,
 				args.verification_notes || null,
 				proposalId,
 				itemNum,
+				args.details ? JSON.stringify(args.details) : null,
+				args.details ? AC_SCHEMA_VERSION : null,
 			],
 		);
 
@@ -905,6 +972,7 @@ export async function submitReview(args: {
 	verdict: string;
 	findings?: Record<string, any>;
 	notes?: string;
+	is_blocking?: boolean;
 	// Common aliases agents try when they don't recall the canonical name.
 	// Treated as fallbacks for `notes` so a misnamed arg doesn't strand a gate run.
 	review?: string;
@@ -1505,9 +1573,10 @@ export class RfcWorkflowHandlers {
 				"this is explicitly called — verification is NOT inferred from " +
 				"tests passing, code merging, or proposal maturity advancing. " +
 				"Gating tools and dashboards read pac.status, not test output. " +
-				"After implementing a proposal, loop over each AC and call this " +
-				"with status='pass' + verification_notes citing the evidence " +
-				"(commit hash, test name, schema check, etc).",
+				"REQUIRED for status='pass': the 'details' field must be a non-empty " +
+				"JSON object with category-appropriate evidence keys — omitting it " +
+				"returns 422 EVIDENCE_REQUIRED. See CONVENTIONS.md §AC-Verification. " +
+				"Batch guard: max 2 calls per proposal per 5 s; third call returns 429.",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -1537,6 +1606,22 @@ export class RfcWorkflowHandlers {
 						description:
 							"Evidence the AC is satisfied: commit hash + line range, test name " +
 							"and result, schema query proof, or rejection reason for fail/blocked.",
+					},
+					details: {
+						type: "object",
+						description:
+							"Structured evidence payload (required for status='pass'). " +
+							"Use category-appropriate keys — schema/migration: {migration_file, tables, applied}; " +
+							"file/module: {files, symbols, grep_evidence}; " +
+							"mcp_tool: {tool_name, action, call_verified, response_sample}; " +
+							"behavioral/test: {test_file, test_names, result, output_snippet}.",
+					},
+					category: {
+						type: "string",
+						enum: ["schema/migration", "file/module", "mcp_tool", "behavioral/test"],
+						description:
+							"AC evidence category — when provided the handler validates that 'details' " +
+							"contains the required keys for that category (returns 422 SCHEMA_MISMATCH on violation).",
 					},
 				},
 				required: ["proposal_id", "item_number", "status", "verified_by"],
@@ -1627,16 +1712,21 @@ export class RfcWorkflowHandlers {
 			name: "submit_review",
 			description:
 				"Submit a review verdict for a proposal. " +
+				"PARAM NOTE: reviewer identity is passed as `reviewer` (NOT reviewer_identity / agent_identity / identity). " +
 				"Key params: proposal_id, reviewer (kebab-case identity), " +
 				"verdict (approve|approve_with_changes|request_changes|send_back|reject|defer|recuse), " +
 				"notes (review rationale — canonical name; do not pass as review/body/content, those aliases are stripped by MCP), " +
 				"change_requirements (string[], required when verdict=approve_with_changes), " +
-				"is_blocking (boolean — when true this review blocks gate advancement until the reviewer approves), comment (optional supplementary text distinct from notes).",
+				"is_blocking (boolean — when true this review blocks gate advancement; IS persisted, fixed in P1387), " +
+				"comment (optional supplementary text distinct from notes).",
 			inputSchema: {
 				type: "object",
 				properties: {
 					proposal_id: { type: "string" },
-					reviewer: { type: "string" },
+					reviewer: {
+						type: "string",
+						description: "Reviewer identity slug (e.g. 'claude-opus-4-7-on-mac'). Must be lowercase-hyphen format.",
+					},
 					verdict: {
 						type: "string",
 						enum: ["approve", "approve_with_changes", "request_changes", "send_back", "reject", "defer", "recuse"],
