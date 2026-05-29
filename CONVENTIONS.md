@@ -170,6 +170,7 @@ AgentHive work is proposal-driven. Participate through MCP, not through chat-onl
 | **feature** | Type B (Impl) | Standard RFC | Concrete capability to build |
 | **issue** | Type B (Impl) | Standard RFC | Problem in the product requiring code changes |
 | **hotfix** | Type C (Ops) | Hotfix | Localized operational fix to running instance |
+| **governance-amendment** | Type D (Governance) | Governance Amendment | Constitutional or governance rule change — 6 stages, 48h DELIBERATION, human MERGE approval. See P181. |
 
 See `docs/architecture/architecture-proposal-type.md` for full guidance on when to use `architecture` vs. other types, advisory mechanics, migration rules, and child proposal spawning.
 
@@ -197,6 +198,21 @@ The hotfix workflow uses the same 3-stage structure, drawn from `roadmap.workflo
 **Escape:** ESCALATE → creates a new issue proposal (Standard RFC)
 
 > **Legacy note:** Older data may reference FIX, DEPLOYED, ESCALATE, REJECTED, DISCARDED, REPLACED from pre-P774 hotfix vocabulary. These are migration artifacts; do not introduce them in new code.
+
+### Governance Amendment Workflow (governance-amendment)
+
+For constitutional or governance rule changes (P179 constitution, agent rights, workflow rules). File `type=governance-amendment` and cite the constitutional Article/Section in `proposal.summary`.
+
+| State | Gate | Requirements |
+| :--- | :--- | :--- |
+| **DRAFT** | D1 | Summary cites Article/Section; AC references sections being changed; doc-9 dependency link present |
+| **DELIBERATION** | D2 | Minimum 48h open window; no unresolved blocking concerns |
+| **REVIEW** | D3 | ≥2 distinct approvers including Skeptic; no blocking reviews |
+| **DEVELOP** | D4 | Migration + code/AC verification; CONVENTIONS.md updated |
+| **MERGE** | D5 | Human approval required (`agent_type=human`) — no auto-merge |
+| **COMPLETE** | — | doc-9 updated atomically; audit trail in `gate_decision_log` |
+
+**Rollback:** D2 blocked → return to DRAFT. D3 rejected → return to DELIBERATION. D5 rejected → return to REVIEW. doc-9 is only written at COMPLETE.
 
 ### Unified Vocabulary Table
 
