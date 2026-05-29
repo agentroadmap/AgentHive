@@ -321,6 +321,8 @@ const opsRoutes: RouteMap = {
 	pgbouncer_stats: "pgbouncer_stats",
 	pgbouncer_ping: "pgbouncer_ping",
 	pgbouncer_reload: "pgbouncer_reload",
+	// P1511: SLA monitoring and health check
+	health_check: "health_check",
 	// P1129: agency lifecycle management
 	agency_start: "agency_start",
 	agency_status: "agency_status",
@@ -359,9 +361,9 @@ export function registerConsolidatedTools(server: McpServer): void {
 				"`get`/`detail`/`add_acceptance_criteria`/`add_discussion`/`claim`/`release`/`verify_ac`/`list_ac` use `proposal_id` (string). " +
 				"`update`/`set_maturity`/`transition`/`delete` use `id` (string) — passing `proposal_id` returns 'Proposal undefined not found'. " +
 				"`add_dependency`/`remove_dependency` use camelCase `fromProposalId`/`toProposalId`/`dependencyType` (string ids, not int). " +
-				"SUBMIT_REVIEW: reviewer identity field is `reviewer` on input (NOT `reviewer_identity`, `agent_identity`, or `identity` — those produce a PG FK not-null error). " +
-				"ADD_DISCUSSION: stored MCP-side only — the board UI does NOT render discussion entries. Use `submit_review` for operator-visible findings. " +
-				"LIST (prop_list): free-text search is NOT supported here — use `proposal_search` action instead. Params `search`/`q`/`title_contains` are silently ignored. " +
+				"SUBMIT_REVIEW: reviewer identity field is `reviewer` on input (NOT `reviewer_identity`, `agent_identity`, or `identity` — those produce a PG FK not-null error). Response returns it as `reviewer_identity` (input/output field name asymmetry). `is_blocking: true` is persisted faithfully — pass it to mark the review as a hard blocker. " +
+				"ADD_DISCUSSION: visible in the board UI in preview mode via GET /api/proposals/{id}/notes — ProposalDetailsModal renders a Discussions section when entries exist. For formal gate verdicts with blocking flags and verdict enum, use `submit_review` instead. " +
+				"LIST (prop_list): free-text search is NOT supported here — use `proposal_search` action instead. Passing `search`/`q`/`title_contains` returns an explicit ❌ error naming the bad param. " +
 				"VERIFY_AC: each AC needs its own call (1-indexed item_number); ACs stay 'pending' until you explicitly call verify_ac with status='pass' — NOT inferred from tests passing or maturity advance. status enum is {pass, fail, blocked, waived}, NOT 'verified'. " +
 				"ADD_ACCEPTANCE_CRITERIA: pass `criteria: string[]` (array of full sentences), NOT individual title/description fields nor `acceptance_criteria` key. " +
 				"Use action=list_actions to enumerate every action name.",

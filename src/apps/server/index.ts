@@ -532,8 +532,8 @@ export class RoadmapServer {
 			repositoryPath: p.filePath || null,
 			budgetLimitUsd: p.budgetLimitUsd || 0,
 			tags: sanitizedLabels.length > 0 ? sanitizedLabels.join(",") : null,
-			createdAt: p.createdDate || p.createdAt || null,
-			updatedAt: p.updatedDate || p.updatedAt || null,
+			createdAt: (p.createdDate?.trim() || p.createdAt?.trim()) || null,
+			updatedAt: (p.updatedDate?.trim() || p.updatedAt?.trim()) || null,
 		};
 	}
 
@@ -1125,6 +1125,8 @@ export class RoadmapServer {
 				return await this.handleListDispatches(req);
 			if (pathname === "/api/board/stages" && method === "GET")
 				return await this.handleGetBoardStages(req);
+			if (pathname === "/api/board/columns" && method === "GET")
+				return await this.handleGetBoardColumns(req);
 
 			if (pathname === "/api/mcp/sse" && method === "GET") {
 				try {
@@ -1285,7 +1287,14 @@ export class RoadmapServer {
 				return await this.handleGetSequences();
 			if (pathname === "/api/sequences/move" && method === "POST")
 				return await this.handleMoveSequence(req);
+
+			if (pathname === "/api/sla" && method === "GET")
+				return await this.handleGetSla();
 		}
+
+		// Metrics endpoint (outside /api/ prefix for Prometheus scraping convention)
+		if (pathname === "/metrics" && method === "GET")
+			return await this.handleMetrics();
 
 		// Legacy/Duplicate routes
 		if (pathname === "/sequences" && method === "GET")
@@ -3759,6 +3768,73 @@ export class RoadmapServer {
 		}
 	}
 
+	// P248: /api/board/columns — array-shaped (not envelope) column definitions.
+	// Reuses the same SMDL registry + stage-definition table as /api/board/stages
+	// but returns the flat array expected by board column consumers.
+	// Cache-Control: public, max-age=300; ?bust=<ts> disables client cache.
+	private async handleGetBoardColumns(req?: Request): Promise<Response> {
+		const url = new URL(req?.url || "http://localhost/?workflowName=Standard+RFC");
+		const workflowName = url.searchParams.get("workflowName") || "Standard RFC";
+		const bust = url.searchParams.has("bust");
+
+		const cacheHeader = bust
+			? "no-cache"
+			: "public, max-age=300";
+
+		try {
+			const registry = getRegistry();
+			const view = registry.getView(workflowName);
+
+			let stageDefMap: Map<string, { displayLabel: string; isTerminal: boolean; gateId: string | null }> = new Map();
+			try {
+				const raw = await loadStageRegistry();
+				for (const [name, def] of raw) {
+					stageDefMap.set(name, {
+						displayLabel: def.displayLabel,
+						isTerminal: def.isTerminal,
+						gateId: def.gateId,
+					});
+				}
+			} catch {
+				// non-fatal — fall back to registry values
+			}
+
+			const columns = view.stages.map((stage) => {
+				const def = stageDefMap.get(stage.name);
+				return {
+					stage_name:    stage.name,
+					stage_order:   stage.order,
+					display_label: def?.displayLabel ?? stage.name,
+					is_terminal:   def?.isTerminal ?? stage.isTerminal,
+					maturity_gate: def?.gateId ?? null,
+				};
+			});
+
+			return new Response(JSON.stringify(columns), {
+				status: 200,
+				headers: {
+					"Content-Type": "application/json",
+					"Cache-Control": cacheHeader,
+				},
+			});
+		} catch {
+			const columns = [
+				{ stage_name: "DRAFT",    stage_order: 1, display_label: "Draft",    is_terminal: false, maturity_gate: null },
+				{ stage_name: "REVIEW",   stage_order: 2, display_label: "Review",   is_terminal: false, maturity_gate: null },
+				{ stage_name: "DEVELOP",  stage_order: 3, display_label: "Develop",  is_terminal: false, maturity_gate: null },
+				{ stage_name: "MERGE",    stage_order: 4, display_label: "Merge",    is_terminal: false, maturity_gate: null },
+				{ stage_name: "COMPLETE", stage_order: 5, display_label: "Complete", is_terminal: true,  maturity_gate: null },
+			];
+			return new Response(JSON.stringify(columns), {
+				status: 200,
+				headers: {
+					"Content-Type": "application/json",
+					"Cache-Control": cacheHeader,
+				},
+			});
+		}
+	}
+
 	// P477 AC-2: dispatches scoped to operator's selected project_id.
 	// squad_dispatch carries project_id directly so we filter there; an
 	// `?all=1` query bypass is preserved for control-plane debug views.
@@ -4173,6 +4249,80 @@ export class RoadmapServer {
 			console.log("[P846] Operator notify relay started");
 		} catch (err) {
 			console.error("[P846] Failed to start notify relay:", err);
+		}
+	}
+
+	private async handleGetSla(): Promise<Response> {
+		try {
+			const slaPath = join(
+				import.meta.dirname,
+				"../../../../docs/sla-contract.json",
+			);
+			const slaContent = readFileSync(slaPath, "utf-8");
+			const slaParsed = JSON.parse(slaContent);
+			return Response.json(slaParsed, {
+				headers: {
+					"Content-Type": "application/json",
+					"Cache-Control": "max-age=3600",
+				},
+			});
+		} catch (error) {
+			console.error("Error reading SLA contract:", error);
+			return Response.json(
+				{ error: "SLA contract not found" },
+				{ status: 404 },
+			);
+		}
+	}
+
+	private async handleMetrics(): Promise<Response> {
+		try {
+			const pool = getPool();
+
+			// Query trace_span for current state and tool call counts
+			let slaState = 0; // default to 0 (down)
+			let toolCallCount = 0;
+
+			try {
+				// Check if system is in normal state by counting recent spans
+				const spanResult = await pool.query(`
+					SELECT COUNT(*) as count
+					FROM roadmap.trace_span
+					WHERE created_at > NOW() - INTERVAL '5 minutes'
+				`);
+				toolCallCount = spanResult.rows[0]?.count || 0;
+
+				// Simple heuristic: if we have spans in last 5 min, state is normal
+				slaState = toolCallCount > 0 ? 1 : 0;
+			} catch (err) {
+				console.warn("Error querying trace_span:", err);
+				slaState = 0;
+			}
+
+			// Build Prometheus text format response
+			const metrics = `# HELP agenthive_sla_state Current SLA state (1=normal, 0=down)
+# TYPE agenthive_sla_state gauge
+agenthive_sla_state{state="normal"} ${slaState}
+
+# HELP agenthive_mcp_tool_calls_total Total MCP tool calls in last 5 minutes
+# TYPE agenthive_mcp_tool_calls_total counter
+agenthive_mcp_tool_calls_total ${toolCallCount}
+
+# Note: install prom-client for full histogram support
+`;
+
+			return new Response(metrics, {
+				headers: {
+					"Content-Type": "text/plain; version=0.0.4",
+					"Cache-Control": "no-cache, no-store, must-revalidate",
+				},
+			});
+		} catch (error) {
+			console.error("Error generating metrics:", error);
+			return new Response("# error generating metrics\n", {
+				status: 500,
+				headers: { "Content-Type": "text/plain" },
+			});
 		}
 	}
 }
