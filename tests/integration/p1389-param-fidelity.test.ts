@@ -146,6 +146,47 @@ describe("P1389 — param fidelity round-trip", () => {
 		});
 	});
 
+	describe("submit_review / list_reviews — comment field", () => {
+		it("persists comment and list_reviews shows (comment: ...)", async () => {
+			const reviewer = `${TEST_PREFIX}_reviewer`;
+
+			const submitResult = await submitReview({
+				proposal_id: testDisplayId,
+				reviewer,
+				verdict: "request_changes",
+				notes: "See comment field",
+				comment: "Supplementary detail for the reviewer",
+				is_blocking: false,
+			});
+			assert.ok(
+				textContent(submitResult).includes("Review submitted"),
+				`Expected submit success, got: ${textContent(submitResult)}`,
+			);
+
+			const listResult = await listReviews({ proposal_id: testDisplayId });
+			const text = textContent(listResult);
+			assert.ok(
+				text.includes("Supplementary detail for the reviewer"),
+				`Expected comment text in list_reviews output, got:\n${text}`,
+			);
+		});
+
+		it("omitting comment does not crash (defaults to null)", async () => {
+			const reviewer = `${TEST_PREFIX}_reviewer`;
+
+			const submitResult = await submitReview({
+				proposal_id: testDisplayId,
+				reviewer,
+				verdict: "approve",
+				notes: "LGTM",
+			});
+			assert.ok(
+				textContent(submitResult).includes("Review submitted"),
+				`Expected submit success, got: ${textContent(submitResult)}`,
+			);
+		});
+	});
+
 	describe("prop_list — search filter", () => {
 		it("returns only proposals whose title contains the search string", async () => {
 			const uniqueToken = `UNIQUE_${TEST_PREFIX}`;

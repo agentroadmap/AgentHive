@@ -912,6 +912,7 @@ export async function submitReview(args: {
 	content?: string;
 	change_requirements?: string[];
 	is_blocking?: boolean;
+	comment?: string;
 }): Promise<CallToolResult> {
 	if (!args.notes) {
 		args.notes = args.review ?? args.body ?? args.content;
@@ -952,13 +953,14 @@ export async function submitReview(args: {
 		if (existing.length) {
 			reviewId = existing[0].id;
 			await query(
-				`UPDATE roadmap_proposal.proposal_reviews SET verdict = $1, notes = $2, findings = $3, is_blocking = $4, reviewed_at = NOW()
-         WHERE proposal_id = $5 AND reviewer_identity = $6`,
+				`UPDATE roadmap_proposal.proposal_reviews SET verdict = $1, notes = $2, findings = $3, is_blocking = $4, comment = $5, reviewed_at = NOW()
+         WHERE proposal_id = $6 AND reviewer_identity = $7`,
 				[
 					args.verdict,
 					args.notes || null,
 					args.findings ? JSON.stringify(args.findings) : null,
 					args.is_blocking ?? false,
+					args.comment || null,
 					proposalId,
 					args.reviewer,
 				],
@@ -972,8 +974,8 @@ export async function submitReview(args: {
 			}
 		} else {
 			const { rows: inserted } = await query(
-				`INSERT INTO roadmap_proposal.proposal_reviews (proposal_id, reviewer_identity, verdict, notes, findings, is_blocking)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+				`INSERT INTO roadmap_proposal.proposal_reviews (proposal_id, reviewer_identity, verdict, notes, findings, is_blocking, comment)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
 				[
 					proposalId,
 					args.reviewer,
@@ -981,6 +983,7 @@ export async function submitReview(args: {
 					args.notes || null,
 					args.findings ? JSON.stringify(args.findings) : null,
 					args.is_blocking ?? false,
+					args.comment || null,
 				],
 			);
 			reviewId = inserted[0].id;
@@ -1041,7 +1044,7 @@ export async function listReviews(args: {
 		}
 
 		const { rows: reviewRows } = await query(
-			`SELECT reviewer_identity, verdict, notes, findings, is_blocking, reviewed_at
+			`SELECT reviewer_identity, verdict, notes, findings, is_blocking, comment, reviewed_at
        FROM roadmap_proposal.proposal_reviews WHERE proposal_id = $1
        ORDER BY reviewed_at DESC`,
 			[propId],
@@ -1060,7 +1063,7 @@ export async function listReviews(args: {
 		};
 		const lines = reviewRows.map(
 			(r) =>
-				`${verdictEmoji[r.verdict] || "?"} ${r.reviewer_identity}: ${r.verdict}${r.is_blocking ? " [BLOCKING]" : ""}${r.notes ? ` — ${r.notes}` : ""}`,
+				`${verdictEmoji[r.verdict] || "?"} ${r.reviewer_identity}: ${r.verdict}${r.is_blocking ? " [BLOCKING]" : ""}${r.notes ? ` — ${r.notes}` : ""}${r.comment ? ` (comment: ${r.comment})` : ""}`,
 		);
 		return {
 			content: [
@@ -1405,7 +1408,7 @@ export class RfcWorkflowHandlers {
 				"verdict (approve|approve_with_changes|request_changes|send_back|reject|defer|recuse), " +
 				"notes (review rationale — canonical name; do not pass as review/body/content, those aliases are stripped by MCP), " +
 				"change_requirements (string[], required when verdict=approve_with_changes), " +
-				"is_blocking (boolean — when true this review blocks gate advancement until the reviewer approves).",
+				"is_blocking (boolean — when true this review blocks gate advancement until the reviewer approves), comment (optional supplementary text distinct from notes).",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -1424,6 +1427,10 @@ export class RfcWorkflowHandlers {
 					is_blocking: {
 						type: "boolean",
 						description: "When true, this review blocks gate advancement until the reviewer approves. Persisted to proposal_reviews.is_blocking.",
+					},
+					comment: {
+						type: "string",
+						description: "Optional supplementary comment stored in proposal_reviews.comment (separate from notes).",
 					},
 				},
 				required: ["proposal_id", "reviewer", "verdict"],
