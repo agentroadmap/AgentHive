@@ -52,6 +52,11 @@ import {
 	rolePolicyFilterSql,
 } from "./resolvers/route-policy-filters.ts";
 import { ObservabilityWriter } from "../observability/observability-writer.ts";
+import { provisionScratch, reapScratch, SCRATCH_ROOT } from "./scratch.ts";
+import {
+	buildContextPackage,
+	type PackageType,
+} from "../../infra/agency/context_builder.ts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -1159,52 +1164,77 @@ async function getHostDefaultModel(): Promise<string | null> {
 	return hostDefaultModelPromise;
 }
 
+// Map task stage strings to context package types for P230 caching.
+const STAGE_TO_PACKAGE_TYPE: Record<string, PackageType> = {
+	REVIEW: "gate_review",
+	DEVELOP: "code_gen",
+	DRAFT: "research",
+	MERGE: "review",
+	TEST: "test_writing",
+};
+
 async function buildProposalContextPackage(input: {
 	proposalId: number;
 	taskType: string;
 	agentIdentity: string;
 	maxTokens: number;
 }): Promise<string> {
-	const { rows } = await query<{
-		display_id: string | null;
-		title: string;
-		status: string;
-		summary: string | null;
-		design: string | null;
-	}>(
-		`SELECT display_id, title, status, summary, design
-     FROM roadmap_proposal.proposal
-     WHERE id = $1
-     LIMIT 1`,
-		[input.proposalId],
-	);
-	const proposal = rows[0];
-	if (!proposal) {
-		return [
+	const packageType: PackageType =
+		STAGE_TO_PACKAGE_TYPE[input.taskType.toUpperCase()] ?? "research";
+
+	try {
+		const pkg = await buildContextPackage({
+			proposal_id: BigInt(input.proposalId),
+			package_type: packageType,
+			agent_identity: input.agentIdentity,
+		});
+		const maxChars = Math.max(1000, input.maxTokens * 4);
+		const text = pkg.context_text.length > maxChars
+			? `${pkg.context_text.slice(0, maxChars)}\n...`
+			: pkg.context_text;
+		return text;
+	} catch {
+		// Fallback to lightweight inline assembly if context_builder fails.
+		const { rows } = await query<{
+			display_id: string | null;
+			title: string;
+			status: string;
+			summary: string | null;
+			design: string | null;
+		}>(
+			`SELECT display_id, title, status, summary, design
+		     FROM roadmap_proposal.proposal
+		     WHERE id = $1
+		     LIMIT 1`,
+			[input.proposalId],
+		);
+		const proposal = rows[0];
+		if (!proposal) {
+			return [
+				"## Proposal Context",
+				`- Proposal: #${input.proposalId}`,
+				`- Task type: ${input.taskType}`,
+				`- Agent: ${input.agentIdentity}`,
+				"- Source: proposal not found",
+			].join("\n");
+		}
+		const context = [
 			"## Proposal Context",
-			`- Proposal: #${input.proposalId}`,
+			`- Proposal: ${proposal.display_id ?? `#${input.proposalId}`}`,
+			`- Title: ${proposal.title}`,
+			`- Status: ${proposal.status}`,
 			`- Task type: ${input.taskType}`,
 			`- Agent: ${input.agentIdentity}`,
-			"- Source: proposal not found",
-		].join("\n");
+			proposal.summary ? `\n### Summary\n${proposal.summary}` : "",
+			proposal.design ? `\n### Design\n${proposal.design}` : "",
+		]
+			.filter(Boolean)
+			.join("\n");
+		const maxChars = Math.max(1000, input.maxTokens * 4);
+		return context.length > maxChars
+			? `${context.slice(0, maxChars)}\n...`
+			: context;
 	}
-
-	const context = [
-		"## Proposal Context",
-		`- Proposal: ${proposal.display_id ?? `#${input.proposalId}`}`,
-		`- Title: ${proposal.title}`,
-		`- Status: ${proposal.status}`,
-		`- Task type: ${input.taskType}`,
-		`- Agent: ${input.agentIdentity}`,
-		proposal.summary ? `\n### Summary\n${proposal.summary}` : "",
-		proposal.design ? `\n### Design\n${proposal.design}` : "",
-	]
-		.filter(Boolean)
-		.join("\n");
-	const maxChars = Math.max(1000, input.maxTokens * 4);
-	return context.length > maxChars
-		? `${context.slice(0, maxChars)}\n...`
-		: context;
 }
 
 /**
@@ -1350,6 +1380,10 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		},
 	});
 
+	// P404: UUID is generated here so the path is known before env assembly.
+	const scratchUuid = randomUUID();
+	const scratchPath = `${SCRATCH_ROOT}/${scratchUuid}`;
+
 	// Assemble process environment (agent-scoped, not inheriting secrets from host)
 	const processEnv = buildSpawnProcessEnv({
 		worktree,
@@ -1369,6 +1403,8 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 			// can register itself under the same label that's already in agent_runs.
 			AGENTHIVE_AGENT_IDENTITY: agentIdentity,
 			AGENTHIVE_ROUTE_ABBR: routeAbbr,
+			// P404: isolated scratch directory for this agent run.
+			AGENT_SCRATCH_DIR: scratchPath,
 		},
 	});
 	try {
@@ -1401,6 +1437,15 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	);
 	const agentRunId = String(rows[0].id);
 
+	// P404: create the scratch directory and register it now that agentRunId is known.
+	await provisionScratch(scratchUuid, agentRunId, agentIdentity).catch(
+		(err: unknown) => {
+			console.error(
+				`[AgentSpawner] scratch provision failed (non-fatal): ${err instanceof Error ? err.message : err}`,
+			);
+		},
+	);
+
 	const startMs = Date.now();
 	const cwd = join(worktreeRoot, worktree);
 
@@ -1410,7 +1455,14 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		processEnv,
 		timeoutMs,
 		stdin,
-	);
+	).finally(() => {
+		// Best-effort immediate reap; the 15-min cron sweep covers SIGKILL/crash cases.
+		reapScratch(scratchUuid).catch((err: unknown) => {
+			console.error(
+				`[AgentSpawner] immediate reap failed for ${scratchUuid}: ${err instanceof Error ? err.message : err}`,
+			);
+		});
+	});
 	const durationMs = Date.now() - startMs;
 
 	const outputSummary = stdout.slice(-1000);

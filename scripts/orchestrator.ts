@@ -40,6 +40,7 @@ import {
 	runOfferReaper,
 	runPokeWatchdogTick,
 } from "../src/core/orchestration/maintenance.ts";
+import { reapOrphanScratch } from "../src/core/orchestration/scratch.ts";
 import { pulseHeartbeat } from "../src/infra/pulse/heartbeat.ts";
 import {
 	getRolesForQueue,
@@ -267,7 +268,7 @@ const AGENT_PROMPTS: Record<string, string> = {
 	"pillar-researcher":
 		"You are the Pillar Researcher. Research complementary components. Propose refinements.",
 	documenter:
-		"You are a Documenter. Write documentation for completed proposals.",
+		"You are a Documenter. Query the DB for proposal data using architecture-reconstructor.ts — never generate docs by reading filesystem files. Post ship verification reports to proposal_discussions (context_prefix: feedback:) instead of writing to docs/reviews/. Output goes to tmp/ (ephemeral) or /api/arch-docs — never commit to docs/.",
 	researcher:
 		"You are a Researcher. Gather context for proposals that need investigation.",
 	"triage-agent":
@@ -2531,6 +2532,14 @@ async function main() {
 
 	// Cancel orphaned poke attempts from any prior process epoch.
 	await bootCancelPokeAttempts(query, logger, "Orchestrator");
+
+	// P404: reap scratch dirs left by any prior process epoch (dry-run logs first).
+	await reapOrphanScratch({ dryRun: true }).catch((e: unknown) =>
+		logger.warn(`[scratch-reaper] dry-run scan failed: ${e instanceof Error ? e.message : e}`),
+	);
+	await reapOrphanScratch({ dryRun: false }).catch((e: unknown) =>
+		logger.warn(`[scratch-reaper] boot reap failed: ${e instanceof Error ? e.message : e}`),
+	);
 
 	const pgClient = await pool.connect();
 
