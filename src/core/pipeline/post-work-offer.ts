@@ -365,43 +365,30 @@ async function postWorkOfferImpl(
 		}
 	}
 
-	// P689 circuit breaker: bail before posting if (proposal, role) is in a
-	// completed-run loop. agent_runs.stage carries the role under several
-	// historical aliases (uppercase stage name, role string, "gate:STAGE"),
-	// so accept any match.
-	// P721: exclude 'rate_limited' — those are route outages, not loops.
-	// P1289: also count squad_dispatch failures (dispatch-level loops) where
-	// no agent_run was ever created (e.g. no eligible agency found).
-	// P1393: also exclude squad_dispatch rows tagged with
-	// metadata.failure_reason='rate_limited'. offer-dispatch-handler.ts stamps
-	// this when the agent_run came back rate_limited — the handler's status
-	// union is delivered|failed, so without the marker the squad_dispatch row
-	// would falsely look like a loop failure.
-	// P1406: also exclude 'lease_expired' (reaper-stamped via migration 181
-	// when reissues exhaust without ever spawning an agent_run). That's
-	// capacity saturation, not a real loop — pool can't service the rate.
+	// V3-C2 (P1434): cause-aware circuit breaker. squad_dispatch.failure_class is
+	// the CANONICAL signal — the offer/dispatch row is the unit of routing, retry,
+	// and failure policy; agent_runs is telemetry only and NEVER pauses a proposal
+	// (decided in P1434 disc #8675, codex). This replaces the old two-source sum
+	// (agent_runs + squad_dispatch) where auth-401 / spawn-SIGTERM agent_runs
+	// failures and capacity/route outages all counted as "loops" and falsely
+	// paused proposals (P238/P304/P194, 2026-05-27..29).
+	//
+	// Only genuine, unattributable post-delivery failures (failure_class='unknown',
+	// non-transient) count toward the loop threshold. Transient causes —
+	// auth_rejected, rate_limited, quota_exhausted, no_eligible_agency,
+	// lease_expired — are stamped at their failure sites (fn_complete_work_offer
+	// defaults 'unknown' but preserves a pre-stamped transient class;
+	// fn_reap_expired_offers stamps lease_expired; offer-dispatch-handler stamps
+	// auth/rate/quota) and are excluded here.
 	const { rows: loopRows } = await queryFn<{ recent_runs: number }>(
-		`SELECT (
-		   SELECT count(*)::int
-		     FROM roadmap_workforce.agent_runs
-		    WHERE proposal_id = $1
-		      AND status IN ('completed', 'failed')
-		      AND COALESCE(completed_at, started_at) > now() - interval '1 hour'
-		      AND (
-		        stage = $2
-		        OR stage = upper($2)
-		        OR stage = 'gate:' || $2
-		        OR agent_identity LIKE '%' || $2 || '%'
-		      )
-		 ) + (
-		   SELECT count(*)::int
-		     FROM roadmap_workforce.squad_dispatch
-		    WHERE proposal_id = $1
-		      AND dispatch_role = $2
-		      AND dispatch_status = 'failed'
-		      AND completed_at > now() - interval '1 hour'
-		      AND COALESCE(metadata->>'failure_reason', '') NOT IN ('rate_limited', 'lease_expired')
-		 ) AS recent_runs`,
+		`SELECT count(*)::int AS recent_runs
+		   FROM roadmap_workforce.squad_dispatch
+		  WHERE proposal_id = $1
+		    AND dispatch_role = $2
+		    AND dispatch_status = 'failed'
+		    AND completed_at > now() - interval '1 hour'
+		    AND failure_class = 'unknown'
+		    AND failure_is_transient IS NOT TRUE`,
 		[input.proposalId, input.role],
 	);
 	const recentRuns = loopRows[0]?.recent_runs ?? 0;
