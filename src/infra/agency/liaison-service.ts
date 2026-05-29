@@ -85,6 +85,21 @@ export async function liaisonRegister(
 		);
 	}
 
+	// V3-C5 (P1437) AC-2: self-heal orphan active sessions before inserting a new
+	// one. A hard-crashed prior liaison leaves a row with ended_at IS NULL, which
+	// the partial unique index idx_agency_session_one_active then collides with on
+	// the next INSERT — looping the unit on restart (codex-agency-bot looped 553x
+	// on 2026-05-29 before a manual UPDATE cleared it). Closing orphans in a
+	// separate statement first is deterministic, unlike racing modifying CTEs
+	// against the unique index inside one statement.
+	await runQuery(
+		`UPDATE roadmap.agency_liaison_session
+		    SET ended_at = now(),
+		        end_reason = COALESCE(end_reason, 'orphan-heal-on-register')
+		  WHERE agency_id = $1 AND ended_at IS NULL`,
+		[agency_id],
+	);
+
 	const result = await runQuery(
 		`
     WITH update_agency AS (
