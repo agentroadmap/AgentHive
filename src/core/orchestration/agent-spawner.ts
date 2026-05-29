@@ -1426,7 +1426,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		proposalId,
 		stage,
 		model: modelHint,
-		timeoutMs = 300_000,
+		timeoutMs = Number(process.env.AGENTHIVE_SPAWN_TIMEOUT_MS ?? 1_200_000),
 		worktreeRoot = WORKTREE_ROOT,
 		provider: providerOverride,
 	} = req;
