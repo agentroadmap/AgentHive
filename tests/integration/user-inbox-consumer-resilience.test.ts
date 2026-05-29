@@ -58,7 +58,7 @@ type ConsumerProcess = ReturnType<typeof spawn>;
 function spawnConsumer(operator: string): ConsumerProcess {
 	const env = {
 		...process.env,
-		INBOX_OPERATOR: operator,
+		USER_INBOX_OPERATOR: operator,
 	};
 	return spawn("bun", ["run", "scripts/user-inbox-consumer.ts"], {
 		cwd: "/data/code/AgentHive",

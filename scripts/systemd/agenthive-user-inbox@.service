@@ -12,7 +12,7 @@ EnvironmentFile=/etc/agenthive/env
 Environment=HOME=/home/agenthive
 Environment=NODE_ENV=production
 Environment=PATH=/home/agenthive/.local/bin:/usr/local/bin:/usr/bin:/bin
-Environment=INBOX_OPERATOR=%i
+Environment=USER_INBOX_OPERATOR=%i
 ExecStart=node --import jiti/register scripts/user-inbox-consumer.ts
 Restart=always
 RestartSec=10

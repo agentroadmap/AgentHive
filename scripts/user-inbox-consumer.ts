@@ -149,8 +149,7 @@ async function bootDrain(): Promise<void> {
 		  WHERE to_agent = $1
 		    AND read_at IS NULL
 		    AND created_at > now() - make_interval(hours => $2)
-		  ORDER BY id ASC
-		  FOR UPDATE SKIP LOCKED`,
+		  ORDER BY id ASC`,
 		[IDENTITY, DRAIN_WINDOW_HOURS],
 	);
 
@@ -382,6 +381,9 @@ async function main() {
 	);
 	listenClient.on("end", () =>
 		exitOnDisconnect("LISTEN client ended unexpectedly"),
+	);
+	listenClient.on("close", () =>
+		exitOnDisconnect("LISTEN client closed unexpectedly"),
 	);
 
 	keepaliveTimer = setInterval(async () => {
