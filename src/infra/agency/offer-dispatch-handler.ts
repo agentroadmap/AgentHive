@@ -326,7 +326,10 @@ async function runSpawn(args: {
 				              WHEN bool_or(ar.status = 'rate_limited') THEN 'rate_limited'
 				              WHEN bool_or(ar.output_summary ILIKE '%401%'
 				                        OR ar.output_summary ILIKE '%not logged in%'
-				                        OR ar.output_summary ILIKE '%invalid authentication%') THEN 'auth_rejected'
+				                        OR ar.output_summary ILIKE '%invalid authentication%'
+				                        OR ar.error_detail ILIKE '%401%'
+				                        OR ar.error_detail ILIKE '%not logged in%'
+				                        OR ar.error_detail ILIKE '%invalid authentication%') THEN 'auth_rejected'
 				              ELSE NULL
 				            END AS cls
 				       FROM roadmap_workforce.agent_runs ar

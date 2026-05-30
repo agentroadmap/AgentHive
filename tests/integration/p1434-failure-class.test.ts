@@ -97,3 +97,60 @@ test("P1434 AC-3: breaker counts only failure_class='unknown' non-transient", as
 		await c.end();
 	}
 });
+
+/**
+ * Codex blocker (P1434 #8679): the no-eligible-agency path calls
+ * fn_complete_work_offer(...,'failed') (which defaults failure_class='unknown',
+ * countable) THEN runs an UPDATE. The fix makes that UPDATE also set
+ * failure_class='no_eligible_agency'+transient, running AFTER fn_complete so it
+ * overrides the default. Reproduces that ordering; asserts breaker counts 0.
+ */
+test("P1434 no-eligible-agency ends NON-countable (fn_complete default overridden)", async () => {
+	const c = new Client({ connectionString: DB_URL });
+	await c.connect();
+	try {
+		await c.query("BEGIN");
+		await c.query(
+			`ALTER TABLE roadmap_workforce.squad_dispatch
+			   ADD COLUMN IF NOT EXISTS failure_class text,
+			   ADD COLUMN IF NOT EXISTS failure_is_transient boolean NOT NULL DEFAULT false`,
+		);
+		const { rows: ins } = await c.query<{ id: string }>(
+			`INSERT INTO roadmap_workforce.squad_dispatch
+			   (proposal_id, project_id, squad_name, dispatch_role,
+			    dispatch_status, offer_status, completed_at,
+			    required_capabilities, idempotency_key)
+			 VALUES ($1, 1, 'v3c2-noelig', $2, 'failed', 'failed', now(),
+			         '["develop"]'::jsonb, 'v3c2-noelig')
+			 RETURNING id`,
+			[FK_PROPOSAL_ID, ROLE],
+		);
+		const id = Number(ins[0].id);
+		await c.query(
+			`UPDATE roadmap_workforce.squad_dispatch
+			    SET failure_class = COALESCE(failure_class, 'unknown') WHERE id = $1`,
+			[id],
+		);
+		await c.query(
+			`UPDATE roadmap_workforce.squad_dispatch
+			    SET failure_class = 'no_eligible_agency', failure_is_transient = true
+			  WHERE id = $1`,
+			[id],
+		);
+		const { rows } = await c.query<{ fc: string; t: boolean }>(
+			`SELECT failure_class AS fc, failure_is_transient AS t
+			   FROM roadmap_workforce.squad_dispatch WHERE id = $1`,
+			[id],
+		);
+		assert.equal(rows[0].fc, "no_eligible_agency", "must end no_eligible_agency, not unknown");
+		assert.equal(rows[0].t, true, "must be transient (not counted)");
+		const { rows: cnt } = await c.query<{ recent_runs: number }>(BREAKER_COUNT_SQL, [
+			FK_PROPOSAL_ID,
+			ROLE,
+		]);
+		assert.equal(Number(cnt[0].recent_runs), 0, "no-eligible failure must not trip the breaker");
+	} finally {
+		await c.query("ROLLBACK").catch(() => {});
+		await c.end();
+	}
+});
