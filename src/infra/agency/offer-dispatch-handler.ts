@@ -65,7 +65,10 @@ interface OfferDispatchEnvelope {
 	worktree_hint?: string | null;
 }
 
-const DEFAULT_LEASE_TTL_SECONDS = 60;
+// V3-C1 (P1433): lease TTL must exceed the spawn timeout (AGENTHIVE_SPAWN_TIMEOUT_MS,
+// default 1_200_000ms = 20min). Renewal cadence stays leaseTtlSeconds/3 (~7min here).
+// At the old 60s a long worker was one renew-hiccup from a false lease_expired reap.
+const DEFAULT_LEASE_TTL_SECONDS = 1320;
 
 const defaultExec: SqlExec = (sql, params) =>
 	query(sql, params as unknown[]);
