@@ -160,7 +160,9 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 			);
 			await query(
 				`UPDATE roadmap_workforce.squad_dispatch
-				    SET metadata = metadata || jsonb_build_object(
+				    SET failure_class = 'no_eligible_agency',
+				        failure_is_transient = true,
+				        metadata = metadata || jsonb_build_object(
 				                     'failure_reason', 'no_eligible_agency',
 				                     'required_capabilities', $2::jsonb,
 				                     'failed_at', to_jsonb(now())
