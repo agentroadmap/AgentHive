@@ -85,6 +85,33 @@ export async function liaisonRegister(
 		);
 	}
 
+	// V3-C5 (P1437) AC-2: self-heal a STALE orphan active session before inserting
+	// a new one. A hard-crashed prior liaison leaves a row with ended_at IS NULL,
+	// which the partial unique index idx_agency_session_one_active collides with on
+	// restart — looping the unit (codex-agency-bot looped 553x on 2026-05-29).
+	//
+	// Codex review (P1437 #8683): heal ONLY when the prior liaison is provably
+	// dead, never a healthy concurrent one. Guard on the agency heartbeat: a live
+	// liaison pulses fn_pulse (~30s) keeping last_heartbeat_at fresh, so we heal
+	// only when it is NULL or older than the 90s dispatchable threshold. If a live
+	// liaison IS heartbeating, this is a no-op and the INSERT below correctly hits
+	// the unique index — rejecting the second liaison instead of split-braining.
+	// A separate statement (not a racing CTE) keeps the heal deterministic.
+	await runQuery(
+		`UPDATE roadmap.agency_liaison_session s
+		    SET ended_at = now(),
+		        end_reason = COALESCE(end_reason, 'orphan-heal-on-register')
+		  WHERE s.agency_id = $1
+		    AND s.ended_at IS NULL
+		    AND NOT EXISTS (
+		      SELECT 1 FROM roadmap.agency a
+		       WHERE a.agency_id = $1
+		         AND a.last_heartbeat_at IS NOT NULL
+		         AND a.last_heartbeat_at > now() - interval '90 seconds'
+		    )`,
+		[agency_id],
+	);
+
 	const result = await runQuery(
 		`
     WITH update_agency AS (
