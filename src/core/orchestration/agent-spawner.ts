@@ -1677,7 +1677,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	// worktree suffix, so it joins cleanly to agent_registry rows.
 	// P1436: also record provider-truth columns for spend/routing audit.
 	const { rows } = await query(
-		`INSERT INTO agent_runs
+		`INSERT INTO roadmap_workforce.agent_runs
        (proposal_id, display_id, agent_identity, stage, model_used, status, activity, started_at,
         claimed_provider, resolved_provider, agent_cli, route_id, agency_identity, provider_mismatch)
      VALUES ($1, $2, $3, $4, $5, 'running', $6, now(),
@@ -1744,7 +1744,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		exitClass.outcome === "rate_limited" ? "rate_limited" : exitClass.outcome;
 
 	await query(
-		`UPDATE agent_runs
+		`UPDATE roadmap_workforce.agent_runs
      SET status = $1,
          duration_ms = $2,
          output_summary = $3,
