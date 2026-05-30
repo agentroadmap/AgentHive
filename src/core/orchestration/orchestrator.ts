@@ -6,6 +6,7 @@ import { enqueueNotification } from "../notifications/enqueue.ts";
 import { getUnlockedGateQueue } from "../proposal/gate-scanner-v2.ts";
 import { spawnAgent, spawnWithRetry } from "./agent-spawner.ts";
 import { postWorkOffer } from "../pipeline/post-work-offer.ts";
+import { validateChannelRegistry } from "../../infra/messaging/channel-registry.ts";
 import { listDispatchableAgencies } from "../../infra/agency/liaison-service.ts";
 import {
 	storeMessage,
@@ -241,6 +242,12 @@ export class Orchestrator {
 		if (this.started) return;
 		this.started = true;
 		this.stopping = false;
+
+		// V3-C5 (P1437) AC-3: fail-fast at boot if any pg_notify channel pattern is
+		// registered by >1 producer with incompatible payload id-types (the P1408
+		// collision class). Pure static assertion — throws only on a code
+		// regression, never in steady state. (Codex review P1437 #8683/#8685.)
+		validateChannelRegistry();
 
 		await this.loadOrchestratorFlags();
 		await this.bootMaintenance();
