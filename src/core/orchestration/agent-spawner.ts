@@ -1630,13 +1630,58 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		throw err;
 	}
 
+	// V3-C4 (P1436): provider truth at spawn. The claiming agency's DECLARED
+	// provider (agent_registry.preferred_provider) must match the RESOLVED route
+	// provider (route.agentProvider) — same vocabulary (claude/codex/copilot/
+	// gemini/hermes), so a direct string compare. Phase-1 enforcement is
+	// warn+record (legacy divergence like cooper/george exists): we log the
+	// mismatch and stamp agent_runs so the v_provider_mismatch audit can prove
+	// the live divergence rate. Fail-closed (throw before launch) flips on once
+	// that rate hits zero — documented on P1436. No agencyIdentity (legacy/direct
+	// spawn) → nothing to assert; recorded as NULL claimed_provider.
+	let claimedProvider: string | null = null;
+	let agentCliDeclared: string | null = null;
+	let providerMismatch = false;
+	if (req.agencyIdentity) {
+		try {
+			const { rows: agRows } = await query<{
+				preferred_provider: string | null;
+				agent_cli: string | null;
+			}>(
+				`SELECT preferred_provider, agent_cli
+				   FROM roadmap_workforce.agent_registry
+				  WHERE agent_identity = $1 LIMIT 1`,
+				[req.agencyIdentity],
+			);
+			claimedProvider = agRows[0]?.preferred_provider ?? null;
+			agentCliDeclared = agRows[0]?.agent_cli ?? null;
+			if (claimedProvider && claimedProvider !== route.agentProvider) {
+				providerMismatch = true;
+				console.warn(
+					`[AgentSpawner][P1436] provider mismatch: agency '${req.agencyIdentity}' ` +
+						`declares provider='${claimedProvider}' but resolved route is ` +
+						`'${route.agentProvider}' (model=${route.modelName}, route_id=${route.routeId ?? "?"}). ` +
+						`Recording mismatch (phase-1 warn+record; not fail-closed).`,
+				);
+			}
+		} catch (lookupErr) {
+			console.warn(
+				`[AgentSpawner][P1436] provider-truth lookup failed for agency '${req.agencyIdentity}' (non-fatal):`,
+				lookupErr instanceof Error ? lookupErr.message : lookupErr,
+			);
+		}
+	}
+
 	// Insert agent_runs row (status = running)
 	// P852: agent_runs.agent_identity is the structured label without the
 	// worktree suffix, so it joins cleanly to agent_registry rows.
+	// P1436: also record provider-truth columns for spend/routing audit.
 	const { rows } = await query(
-		`INSERT INTO agent_runs
-       (proposal_id, display_id, agent_identity, stage, model_used, status, activity, started_at)
-     VALUES ($1, $2, $3, $4, $5, 'running', $6, now())
+		`INSERT INTO roadmap_workforce.agent_runs
+       (proposal_id, display_id, agent_identity, stage, model_used, status, activity, started_at,
+        claimed_provider, resolved_provider, agent_cli, route_id, agency_identity, provider_mismatch)
+     VALUES ($1, $2, $3, $4, $5, 'running', $6, now(),
+        $7, $8, $9, $10, $11, $12)
      RETURNING id`,
 		[
 			proposalId ?? null,
@@ -1645,6 +1690,12 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 			stage,
 			route.modelName,
 			req.activity ?? null,
+			claimedProvider,
+			route.agentProvider,
+			agentCliDeclared,
+			route.routeId ?? null,
+			req.agencyIdentity ?? null,
+			providerMismatch,
 		],
 	);
 	const agentRunId = String(rows[0].id);
@@ -1693,7 +1744,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		exitClass.outcome === "rate_limited" ? "rate_limited" : exitClass.outcome;
 
 	await query(
-		`UPDATE agent_runs
+		`UPDATE roadmap_workforce.agent_runs
      SET status = $1,
          duration_ms = $2,
          output_summary = $3,
