@@ -233,6 +233,18 @@ async function runSpawn(args: {
 				capacityCheck.refuse_reason ?? "quota_exceeded",
 			);
 		}
+		// V3-C2 (P1434): pre-stamp the transient class so the breaker doesn't
+		// count a quota refusal as a real loop. fn_complete preserves it (COALESCE).
+		try {
+			await exec(
+				`UPDATE roadmap_workforce.squad_dispatch
+				    SET failure_class = 'quota_exhausted', failure_is_transient = true
+				  WHERE id = $1 AND offer_status IN ('claimed','active')`,
+				[dispatchId],
+			);
+		} catch {
+			/* best-effort — must not block lease cleanup */
+		}
 		try {
 			await exec(
 				`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, $4)`,
@@ -298,30 +310,43 @@ async function runSpawn(args: {
 			? "delivered"
 			: "failed";
 
-	// P1393: if the agent_run for this dispatch came back rate_limited (route
-	// outage, not a real failure), stamp metadata.failure_reason='rate_limited'
-	// before fn_complete_work_offer collapses the row to dispatch_status='failed'.
-	// post-work-offer.ts's loop counter excludes rows with this marker so the
-	// circuit breaker doesn't fire on quota exhaustion. Best-effort — failure
-	// here must not block fn_complete_work_offer (lease cleanup is critical).
+	// V3-C2 (P1434): classify a failed spawn into squad_dispatch.failure_class so
+	// the cause-aware breaker (post-work-offer.ts) does not count provider outages
+	// as real loops. Uses agent_runs telemetry to attribute the cause, but only
+	// the squad_dispatch row carries the policy signal. fn_complete preserves the
+	// pre-stamp via COALESCE; an un-stamped failure defaults to 'unknown'
+	// (countable). Supersedes the P1393 metadata.failure_reason marker (kept too
+	// for any legacy reader). Best-effort — must not block lease cleanup below.
 	if (status === "failed") {
 		try {
 			await exec(
 				`UPDATE roadmap_workforce.squad_dispatch sd
-				    SET metadata = sd.metadata || jsonb_build_object('failure_reason', 'rate_limited')
+				    SET failure_class = c.cls,
+				        failure_is_transient = true,
+				        metadata = sd.metadata || jsonb_build_object('failure_reason', c.cls)
+				   FROM LATERAL (
+				     SELECT CASE
+				              WHEN bool_or(ar.status = 'rate_limited') THEN 'rate_limited'
+				              WHEN bool_or(ar.output_summary ILIKE '%401%'
+				                        OR ar.output_summary ILIKE '%not logged in%'
+				                        OR ar.output_summary ILIKE '%invalid authentication%'
+				                        OR ar.error_detail ILIKE '%401%'
+				                        OR ar.error_detail ILIKE '%not logged in%'
+				                        OR ar.error_detail ILIKE '%invalid authentication%') THEN 'auth_rejected'
+				              ELSE NULL
+				            END AS cls
+				       FROM roadmap_workforce.agent_runs ar
+				      WHERE ar.proposal_id = sd.proposal_id
+				        AND ar.agent_identity = $2
+				        AND ar.started_at >= COALESCE(sd.claimed_at, sd.assigned_at)
+				   ) c
 				  WHERE sd.id = $1
-				    AND EXISTS (
-				      SELECT 1 FROM roadmap_workforce.agent_runs ar
-				       WHERE ar.proposal_id = sd.proposal_id
-				         AND ar.agent_identity = $2
-				         AND ar.status = 'rate_limited'
-				         AND ar.started_at >= COALESCE(sd.claimed_at, sd.assigned_at)
-				    )`,
+				    AND c.cls IS NOT NULL`,
 				[dispatchId, agencyId],
 			);
 		} catch (stampErr) {
 			logger.warn(
-				`[OfferDispatchHandler] ${agencyId}: rate_limited marker stamp failed for offer ${payload.offer_id} (non-fatal):`,
+				`[OfferDispatchHandler] ${agencyId}: failure_class stamp failed for offer ${payload.offer_id} (non-fatal):`,
 				stampErr instanceof Error ? stampErr.message : stampErr,
 			);
 		}
