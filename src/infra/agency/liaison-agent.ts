@@ -145,9 +145,29 @@ export async function runLiaisonAgent(
 	let claimLoop: AgencyClaimLoop | null = null;
 	let claimLoopListenClient: ClaimLoopListenerClient | null = null;
 
-	const claimLoopEnabled = await runtimeConfig
+	const claimLoopFlag = await runtimeConfig
 		.get(FlagKeys.AGENCY_OFFER_CLAIM_ENABLED)
 		.catch(() => false);
+
+	// V3-C6 step-1 canary scoping: AGENCY_OFFER_CLAIM_ENABLED is a GLOBAL flag, so
+	// turning it on would enable self-claim for EVERY attached agency at once. The
+	// optional AGENTHIVE_SELF_CLAIM_AGENCIES allowlist (comma-separated identities,
+	// mirrors a2a-host's AGENTHIVE_AGENCY_FILTER) restricts self-claim to listed
+	// agencies even when the global flag is on — enabling a single-agency canary.
+	// Empty allowlist = all agencies (backward-compatible with the pre-allowlist
+	// behavior). Parsed per-call so it composes with the global flag.
+	const selfClaimAllowlist = (process.env.AGENTHIVE_SELF_CLAIM_AGENCIES ?? "")
+		.split(",")
+		.map((s) => s.trim())
+		.filter(Boolean);
+	const allowedByList =
+		selfClaimAllowlist.length === 0 || selfClaimAllowlist.includes(identity);
+	const claimLoopEnabled = claimLoopFlag && allowedByList;
+	if (claimLoopFlag && !allowedByList) {
+		console.log(
+			`${log} self-claim flag on but ${identity} not in AGENTHIVE_SELF_CLAIM_AGENCIES allowlist — staying on orchestrator-dispatch`,
+		);
+	}
 
 	if (claimLoopEnabled) {
 		try {

@@ -162,10 +162,21 @@ test("FLAG-GATING: claimLoop startup is guarded by AGENCY_OFFER_CLAIM_ENABLED fl
 		"utf-8",
 	);
 
-	// Verify the flag is read once at startup
+	// Verify the global flag is read once at startup
 	assert(
-		content.includes("const claimLoopEnabled = await runtimeConfig"),
+		content.includes("const claimLoopFlag = await runtimeConfig"),
 		"liaison-agent.ts must read the flag into a const at startup (not in a loop)",
+	);
+
+	// Verify the per-agency canary allowlist gates the global flag (C6 step-1 canary):
+	// self-claim activates only for listed agencies even when the global flag is on.
+	assert(
+		content.includes("AGENTHIVE_SELF_CLAIM_AGENCIES"),
+		"liaison-agent.ts must support the AGENTHIVE_SELF_CLAIM_AGENCIES per-agency allowlist",
+	);
+	assert(
+		content.includes("const claimLoopEnabled = claimLoopFlag && allowedByList"),
+		"claimLoopEnabled must compose the global flag with the allowlist (allowedByList)",
 	);
 
 	// Verify the claimLoop is constructed inside an if (claimLoopEnabled) block
