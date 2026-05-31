@@ -96,10 +96,10 @@ export async function handleAgencyJoinProject(
 			);
 		}
 
-		// 2. Resolve project_id from name
+		// 2. Resolve project_id from slug or name
 		const projectCheck = await query<{ id: string }>(
 			`SELECT id FROM roadmap_workforce.projects
-			 WHERE name = $1
+			 WHERE slug = $1 OR name = $1
 			 LIMIT 1`,
 			[input.project_slug],
 		);
