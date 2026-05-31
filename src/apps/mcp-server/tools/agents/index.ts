@@ -63,7 +63,7 @@ export function registerAgentTools(server: McpServer): void {
 				// Map schema fields → pgHandlers signature
 				const mapped: RegisterAgentArgs = {
 					identity: (input as any).identity || (input as any).name,
-					agent_type: (input as any).template,
+					agent_type: (input as any).template || (input as any).agent_type || "agency",
 					role: (input as any).role,
 					skills: (input as any).capabilities
 						? JSON.stringify((input as any).capabilities)
