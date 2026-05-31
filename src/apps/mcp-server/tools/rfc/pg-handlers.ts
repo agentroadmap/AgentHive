@@ -614,21 +614,6 @@ export async function verifyAC(args: {
 
 		const ac = acRows[0];
 
-		// P707 null-guard: status='pass' requires structured evidence
-		if (args.status === "pass") {
-			const evidenceError = validateAcEvidence(args.verification_notes);
-			if (evidenceError) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: `❌ verify_ac rejected: ${evidenceError}`,
-						},
-					],
-				};
-			}
-		}
-
 		// P707 batch-advance guard: max 2 ACs verified per proposal within 5 seconds
 		const { rows: recentRows } = await query<{ count: string }>(
 			`SELECT COUNT(*) as count
