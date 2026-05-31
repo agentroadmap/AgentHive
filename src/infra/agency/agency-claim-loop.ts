@@ -25,6 +25,11 @@
 
 import { hostname } from "node:os";
 import { query as defaultQuery } from "../postgres/pool.ts";
+import {
+	handleOfferDispatch,
+	type OfferDispatchHandlerDeps,
+} from "./offer-dispatch-handler.ts";
+import type { LiaisonMessage } from "./liaison-message-types.ts";
 
 export type QueryFn = typeof defaultQuery;
 
@@ -227,4 +232,61 @@ export class AgencyClaimLoop {
 			return null;
 		}
 	}
+}
+
+/**
+ * V3-C6 (P1438) adapter: execute a self-claimed offer through the EXISTING,
+ * battle-tested liaison spawn path (handleOfferDispatch) instead of duplicating
+ * its capacity-check / failure_class-stamp / renewal / completion logic.
+ *
+ * handleOfferDispatch consumes a LiaisonMessage whose payload is the
+ * OfferDispatchEnvelope the orchestrator's A2A path used to send. We synthesize
+ * that same envelope from the AgencyClaimedOffer — the offer is already CLAIMED
+ * (by this agency, via fn_claim_work_offer), so the handler just spawns + renews
+ * + completes. briefing_id / worktree_hint / route_hint are read from the offer
+ * metadata (briefing assembled at post-time per the C6 design).
+ *
+ * This is the onClaim callback the liaison hands to AgencyClaimLoop.
+ */
+export function makeAgencyClaimExecutor(
+	agencyId: string,
+	deps: OfferDispatchHandlerDeps = {},
+): (claim: AgencyClaimedOffer) => Promise<void> {
+	return async (claim: AgencyClaimedOffer): Promise<void> => {
+		const md = claim.metadata ?? {};
+		const briefingId =
+			typeof md.briefing_id === "string" ? md.briefing_id : undefined;
+		const worktreeHint =
+			typeof md.worktree_hint === "string" ? md.worktree_hint : undefined;
+		const routeHint =
+			typeof md.route_hint === "string" ? md.route_hint : "";
+		const requiredCaps = Array.isArray(md.required_capabilities)
+			? (md.required_capabilities as string[])
+			: [claim.role];
+
+		// handleOfferDispatch reads ONLY msg.payload (offer-dispatch-handler.ts:118),
+		// so we synthesize just the payload and cast — fabricating the full
+		// LiaisonMessage envelope (message_id/sequence/correlation_id/signed_at/
+		// signature) would be meaningless here since none of it is consumed.
+		const synthetic = {
+			agency_id: agencyId,
+			direction: "orchestrator->liaison" as const,
+			kind: "offer_dispatch" as const,
+			payload: {
+				offer_id: claim.offerId,
+				role: claim.role,
+				required_capabilities: requiredCaps,
+				route_hint: routeHint,
+				briefing_id: briefingId,
+				claim_token: claim.claimToken,
+				dispatch_id: claim.dispatchId,
+				proposal_id: claim.proposalId,
+				squad_name: claim.squadName,
+				lease_ttl_seconds: claim.leaseTtlSeconds,
+				worktree_hint: worktreeHint,
+			},
+		} as unknown as LiaisonMessage;
+
+		await handleOfferDispatch(agencyId, synthetic, deps);
+	};
 }
