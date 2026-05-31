@@ -52,7 +52,12 @@ export interface ListenerClient {
 		handler: (msg: { channel: string }) => void,
 	): unknown;
 	removeListener(event: "error", handler: (err: Error) => void): unknown;
+	/** PoolClient releases back to the pool. */
 	release?(): void;
+	/** Raw pg.Client closes its socket. connectListenClient returns a Client
+	 *  (no .release), so stop() MUST .end() it or the dedicated
+	 *  agenthive-a2a-listen-<id> connection leaks on every liaison restart. */
+	end?(): Promise<void>;
 }
 
 /** The claim handed to onClaim — same shape the spawn path needs. */
@@ -172,7 +177,15 @@ export class AgencyClaimLoop {
 		}
 		if (this.listenerClient) {
 			this.listenerClient.removeListener("notification", this.notificationHandler);
-			this.listenerClient.release?.();
+			// A raw pg.Client (connectListenClient) must be .end()ed to free its
+			// dedicated connection; a PoolClient is .release()d. Prefer end().
+			if (this.listenerClient.end) {
+				await this.listenerClient.end().catch(() => {
+					/* socket may already be closed */
+				});
+			} else {
+				this.listenerClient.release?.();
+			}
 			this.listenerClient = null;
 		}
 		this.started = false;
