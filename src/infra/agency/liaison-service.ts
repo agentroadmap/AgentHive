@@ -107,7 +107,7 @@ export async function liaisonRegister(
 		      SELECT 1 FROM roadmap.agency a
 		       WHERE a.agency_id = $1
 		         AND a.last_heartbeat_at IS NOT NULL
-		         AND a.last_heartbeat_at > now() - interval '90 seconds'
+		         AND a.last_heartbeat_at > now() - interval '60 seconds'
 		    )`,
 		[agency_id],
 	);
@@ -223,7 +223,7 @@ export async function liaisonHeartbeat(
         (SELECT status FROM update_agency) = 'active'
         AND now() - (SELECT last_heartbeat_at FROM roadmap.agency
                      WHERE agency_id = (SELECT agency_id FROM session_check))
-            < interval '90 seconds'
+            < interval '60 seconds'
       )                                       as dispatchable
     `,
 		[session_id, liaison_status, JSON.stringify(capacity_envelope ?? {})],
@@ -261,7 +261,7 @@ export async function checkAndMarkDormant(): Promise<number> {
     SET status = 'dormant', status_reason = 'No heartbeat > 90s'
     WHERE status IN ('active', 'throttled')
       AND last_heartbeat_at IS NOT NULL
-      AND (now() - last_heartbeat_at) > interval '90 seconds'
+      AND (now() - last_heartbeat_at) > interval '60 seconds'
     RETURNING agency_id
   `);
 	return result.rowCount ?? 0;

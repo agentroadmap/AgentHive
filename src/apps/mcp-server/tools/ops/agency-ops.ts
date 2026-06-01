@@ -106,7 +106,7 @@ export class AgencyOpsHandler {
 				}),
 			),
 			query(
-				`SELECT status, presence_state, silence_seconds FROM roadmap.v_agency_status WHERE agency_id = $1`,
+				`SELECT status, presence_state, silence_seconds, has_live_listener FROM roadmap.v_agency_status WHERE agency_id = $1`,
 				[identity],
 			),
 			query(
