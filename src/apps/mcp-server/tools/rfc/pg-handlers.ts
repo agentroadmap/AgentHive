@@ -905,16 +905,24 @@ export async function submitReview(args: {
 	verdict: string;
 	findings?: Record<string, any>;
 	notes?: string;
+	// `is_blocking=true` marks the review as a hard blocker (used by board
+	// rollups, gate-decision aggregation, and the maturity-redesign view).
+	// Default false matches the DB column default.
+	is_blocking?: boolean;
 	// Common aliases agents try when they don't recall the canonical name.
 	// Treated as fallbacks for `notes` so a misnamed arg doesn't strand a gate run.
 	review?: string;
 	body?: string;
 	content?: string;
 	change_requirements?: string[];
+	// P1409: accept `blocking` as an alias — the field is a common rename
+	// candidate and agents sometimes guess the shorter name.
+	blocking?: boolean;
 }): Promise<CallToolResult> {
 	if (!args.notes) {
 		args.notes = args.review ?? args.body ?? args.content;
 	}
+	const isBlocking = args.is_blocking ?? args.blocking ?? false;
 	try {
 		const proposalId = await resolveProposalId(args.proposal_id);
 		if (proposalId === null) {
@@ -951,12 +959,13 @@ export async function submitReview(args: {
 		if (existing.length) {
 			reviewId = existing[0].id;
 			await query(
-				`UPDATE roadmap_proposal.proposal_reviews SET verdict = $1, notes = $2, findings = $3, reviewed_at = NOW()
-         WHERE proposal_id = $4 AND reviewer_identity = $5`,
+				`UPDATE roadmap_proposal.proposal_reviews SET verdict = $1, notes = $2, findings = $3, is_blocking = $4, reviewed_at = NOW()
+         WHERE proposal_id = $5 AND reviewer_identity = $6`,
 				[
 					args.verdict,
 					args.notes || null,
 					args.findings ? JSON.stringify(args.findings) : null,
+					isBlocking,
 					proposalId,
 					args.reviewer,
 				],
@@ -970,14 +979,15 @@ export async function submitReview(args: {
 			}
 		} else {
 			const { rows: inserted } = await query(
-				`INSERT INTO roadmap_proposal.proposal_reviews (proposal_id, reviewer_identity, verdict, notes, findings)
-         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+				`INSERT INTO roadmap_proposal.proposal_reviews (proposal_id, reviewer_identity, verdict, notes, findings, is_blocking)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
 				[
 					proposalId,
 					args.reviewer,
 					args.verdict,
 					args.notes || null,
 					args.findings ? JSON.stringify(args.findings) : null,
+					isBlocking,
 				],
 			);
 			reviewId = inserted[0].id;
@@ -1003,6 +1013,7 @@ export async function submitReview(args: {
 				JSON.stringify({
 					reviewer: args.reviewer,
 					verdict: args.verdict,
+					is_blocking: isBlocking,
 					has_notes: !!args.notes,
 					has_findings: !!args.findings,
 					has_change_requirements: !!args.change_requirements?.length,
@@ -1015,7 +1026,7 @@ export async function submitReview(args: {
 			content: [
 				{
 					type: "text",
-					text: `✅ Review submitted for ${args.proposal_id}: ${args.verdict} (${args.reviewer})`,
+					text: `✅ Review submitted for ${args.proposal_id}: ${args.verdict}${isBlocking ? " [blocking]" : ""} (${args.reviewer})`,
 				},
 			],
 		};
@@ -1038,7 +1049,7 @@ export async function listReviews(args: {
 		}
 
 		const { rows: reviewRows } = await query(
-			`SELECT reviewer_identity, verdict, notes, findings, reviewed_at
+			`SELECT reviewer_identity, verdict, notes, findings, is_blocking, reviewed_at
        FROM roadmap_proposal.proposal_reviews WHERE proposal_id = $1
        ORDER BY reviewed_at DESC`,
 			[propId],
@@ -1057,7 +1068,7 @@ export async function listReviews(args: {
 		};
 		const lines = reviewRows.map(
 			(r) =>
-				`${verdictEmoji[r.verdict] || "?"} ${r.reviewer_identity}: ${r.verdict}${r.notes ? ` — ${r.notes}` : ""}`,
+				`${verdictEmoji[r.verdict] || "?"} ${r.reviewer_identity}: ${r.verdict}${r.is_blocking ? " [blocking]" : ""}${r.notes ? ` — ${r.notes}` : ""}`,
 		);
 		return {
 			content: [
@@ -1619,7 +1630,8 @@ export class RfcWorkflowHandlers {
 		// Reviews
 		this.server.addTool({
 			name: "submit_review",
-			description: "Submit a review for a proposal",
+			description:
+				"Submit a review for a proposal. Pass is_blocking=true to mark the review as a hard blocker (default false).",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -1630,6 +1642,11 @@ export class RfcWorkflowHandlers {
 						enum: ["approve", "approve_with_changes", "request_changes", "send_back", "reject", "defer", "recuse"],
 					},
 					notes: { type: "string" },
+					is_blocking: {
+						type: "boolean",
+						description:
+							"Mark this review as a hard blocker. Persisted on proposal_reviews.is_blocking; aggregated by board rollups and gate-decision views. Default false.",
+					},
 					change_requirements: {
 						type: "array",
 						items: { type: "string" },
