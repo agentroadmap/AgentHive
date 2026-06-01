@@ -1,5 +1,5 @@
 import assert from "node:assert";
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import { query } from "../../src/postgres/pool.ts";
 
 // Load the module dynamically
@@ -8,6 +8,16 @@ const { PgAgentHandlers } = await import("../../src/apps/mcp-server/tools/agents
 describe("P1129 AC-10: transaction boundary for Phase A registration", () => {
 	const handlers = new PgAgentHandlers();
 	const testId = `test-ac10-${Math.random().toString(36).slice(2)}`;
+
+	// Teardown: remove every scratch row this suite created (all identities share
+	// the unique `testId` suffix). The AC-10 test writes THREE tables, so clean
+	// children (provider_registry, agency) before the parent (agent_registry) to
+	// respect FK order. Without this, fixture agents leak into the live registry.
+	after(async () => {
+		await query(`DELETE FROM roadmap_workforce.provider_registry WHERE agency_identity LIKE $1`, [`%${testId}%`]);
+		await query(`DELETE FROM roadmap.agency WHERE agency_id LIKE $1`, [`%${testId}%`]);
+		await query(`DELETE FROM roadmap_workforce.agent_registry WHERE agent_identity LIKE $1`, [`%${testId}%`]);
+	});
 
 	it("should create agent_registry atomically in transaction", async () => {
 		const testIdentity = `agent-tx-${testId}`;

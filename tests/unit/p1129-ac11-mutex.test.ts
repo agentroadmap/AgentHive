@@ -1,5 +1,5 @@
 import assert from "node:assert";
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import { query } from "../../src/postgres/pool.ts";
 
 // Load the module dynamically
@@ -8,6 +8,16 @@ const { PgAgentHandlers } = await import("../../src/apps/mcp-server/tools/agents
 describe("P1129 AC-11: per-identity probe mutex", () => {
 	const handlers = new PgAgentHandlers();
 	const testId = `test-mutex-${Math.random().toString(36).slice(2)}`;
+
+	// Teardown: remove every scratch row this suite created (agent_registry
+	// fixtures + any model_routes/model_metadata rows registerModel wrote that
+	// survived the probe). All carry the unique `testId` suffix. model_routes is
+	// a child of model_metadata via FK, so delete routes before metadata.
+	after(async () => {
+		await query(`DELETE FROM roadmap.model_routes WHERE model_name LIKE $1`, [`%${testId}%`]);
+		await query(`DELETE FROM roadmap.model_metadata WHERE model_name LIKE $1`, [`%${testId}%`]);
+		await query(`DELETE FROM roadmap_workforce.agent_registry WHERE agent_identity LIKE $1`, [`%${testId}%`]);
+	});
 
 	it("should prevent concurrent probe/write for same identity (mutex enforced)", async () => {
 		// Register an agent first
