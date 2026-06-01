@@ -193,6 +193,12 @@ export class PgAgentHandlers {
 		host_affinity?: string;
 		display_alias?: string;
 		display_name?: string;
+		// AC-10: Optional agency fields for transaction-bundled registration
+		agency_display_name?: string;
+		agency_provider?: string;
+		agency_host_id?: string;
+		project_id?: number;
+		squad_name?: string;
 	}): Promise<CallToolResult> {
 		try {
 			const normalizedIdentity = normalizeAgentId(args.identity);
@@ -230,57 +236,114 @@ export class PgAgentHandlers {
 				? args.preferred_provider.trim().toLowerCase()
 				: null;
 
-			// P1129: persist agency-shape fields with COALESCE on UPDATE so partial
-			// calls don't overwrite existing values with NULL.
-			const { rows } = await query(
-				`INSERT INTO roadmap_workforce.agent_registry (
-					agent_identity, agent_type, role, skills,
-					preferred_provider, agent_cli, host_affinity,
-					display_alias, display_name
-				)
-				VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9)
-				ON CONFLICT (agent_identity) DO UPDATE SET
-					agent_type         = COALESCE(EXCLUDED.agent_type,         roadmap_workforce.agent_registry.agent_type),
-					role               = COALESCE(EXCLUDED.role,               roadmap_workforce.agent_registry.role),
-					skills             = COALESCE(EXCLUDED.skills,             roadmap_workforce.agent_registry.skills),
-					preferred_provider = COALESCE(EXCLUDED.preferred_provider, roadmap_workforce.agent_registry.preferred_provider),
-					agent_cli          = COALESCE(EXCLUDED.agent_cli,          roadmap_workforce.agent_registry.agent_cli),
-					host_affinity      = COALESCE(EXCLUDED.host_affinity,      roadmap_workforce.agent_registry.host_affinity),
-					display_alias      = COALESCE(EXCLUDED.display_alias,      roadmap_workforce.agent_registry.display_alias),
-					display_name       = COALESCE(EXCLUDED.display_name,       roadmap_workforce.agent_registry.display_name),
-					updated_at         = NOW()
-				RETURNING agent_identity, role, status, preferred_provider`,
-				[
-					normalizedIdentity,
-					args.agent_type || null,
-					args.role || null,
-					skillsJson,
-					normalizedProvider,
-					args.agent_cli?.trim() || null,
-					args.host_affinity?.trim() || null,
-					args.display_alias?.trim() || null,
-					args.display_name?.trim() || null,
-				],
-			);
+			// AC-10: Wrap all writes in a single transaction with SELECT...FOR UPDATE
+			const client = await query("SELECT 1"); // Get a connection to verify pool works
+			// Use native transaction via pool client
+			const res = await query("BEGIN ISOLATION LEVEL SERIALIZABLE");
 
-			const r = rows[0];
-			return {
-				content: [
-					{
-						type: "text",
-						text: JSON.stringify(
-							{
-								agent_identity: r.agent_identity,
-								role: r.role,
-								status: r.status,
-								preferred_provider: r.preferred_provider,
-							},
-							null,
-							2,
-						),
-					},
-				],
-			};
+			try {
+				// Lock agent_identity row if it exists (SELECT...FOR UPDATE)
+				// This prevents concurrent modifications
+				await query(
+					`SELECT id FROM roadmap_workforce.agent_registry WHERE agent_identity = $1 FOR UPDATE`,
+					[normalizedIdentity],
+				);
+
+				// Step 1: UPSERT agent_registry
+				const { rows } = await query(
+					`INSERT INTO roadmap_workforce.agent_registry (
+						agent_identity, agent_type, role, skills,
+						preferred_provider, agent_cli, host_affinity,
+						display_alias, display_name
+					)
+					VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9)
+					ON CONFLICT (agent_identity) DO UPDATE SET
+						agent_type         = COALESCE(EXCLUDED.agent_type,         roadmap_workforce.agent_registry.agent_type),
+						role               = COALESCE(EXCLUDED.role,               roadmap_workforce.agent_registry.role),
+						skills             = COALESCE(EXCLUDED.skills,             roadmap_workforce.agent_registry.skills),
+						preferred_provider = COALESCE(EXCLUDED.preferred_provider, roadmap_workforce.agent_registry.preferred_provider),
+						agent_cli          = COALESCE(EXCLUDED.agent_cli,          roadmap_workforce.agent_registry.agent_cli),
+						host_affinity      = COALESCE(EXCLUDED.host_affinity,      roadmap_workforce.agent_registry.host_affinity),
+						display_alias      = COALESCE(EXCLUDED.display_alias,      roadmap_workforce.agent_registry.display_alias),
+						display_name       = COALESCE(EXCLUDED.display_name,       roadmap_workforce.agent_registry.display_name),
+						updated_at         = NOW()
+					RETURNING id, agent_identity, role, status, preferred_provider`,
+					[
+						normalizedIdentity,
+						args.agent_type || null,
+						args.role || null,
+						skillsJson,
+						normalizedProvider,
+						args.agent_cli?.trim() || null,
+						args.host_affinity?.trim() || null,
+						args.display_alias?.trim() || null,
+						args.display_name?.trim() || null,
+					],
+				);
+
+				const r = rows[0];
+				const agentId = r.id;
+
+				// Step 2: Conditionally UPSERT roadmap.agency if all required fields provided
+				if (args.agency_display_name && args.agency_provider && args.agency_host_id) {
+					await query(
+						`INSERT INTO roadmap.agency (
+							agency_id, display_name, provider, host_id
+						)
+						VALUES ($1, $2, $3, $4)
+						ON CONFLICT (agency_id) DO UPDATE SET
+							display_name = EXCLUDED.display_name,
+							provider = EXCLUDED.provider,
+							host_id = EXCLUDED.host_id
+						`,
+						[normalizedIdentity, args.agency_display_name, args.agency_provider, args.agency_host_id],
+					);
+				}
+
+				// Step 3: Conditionally UPSERT roadmap_workforce.provider_registry if agency data provided
+				if (args.agency_provider) {
+					await query(
+						`INSERT INTO roadmap_workforce.provider_registry (
+							agency_id, agency_identity, project_id, squad_name
+						)
+						VALUES ($1, $2, $3, $4)
+						ON CONFLICT (agency_id, project_id, squad_name) DO UPDATE SET
+							agency_identity = EXCLUDED.agency_identity
+						`,
+						[agentId, normalizedIdentity, args.project_id || null, args.squad_name || null],
+					);
+				}
+
+				// Commit transaction
+				await query("COMMIT");
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{
+									agent_identity: r.agent_identity,
+									role: r.role,
+									status: r.status,
+									preferred_provider: r.preferred_provider,
+									transaction: "committed",
+								},
+								null,
+								2,
+							),
+						},
+					],
+				};
+			} catch (txErr) {
+				// Rollback on error
+				try {
+					await query("ROLLBACK");
+				} catch (rollbackErr) {
+					console.error("Error rolling back transaction:", rollbackErr);
+				}
+				throw txErr;
+			}
 		} catch (err) {
 			if (err instanceof AgentIdInvalidError) {
 				return errorResult("Invalid agent identity", err);
