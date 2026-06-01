@@ -2049,7 +2049,7 @@ export async function createMcpServer(
 		},
 		handler: (a) => liaisonHandlers.handleAgencyLiaisonStatus(a as any),
 	});
-	console.error("[MCP] Registered 4 P917 agency lifecycle tools (bootstrap / join_project / leave_project / liaison_status)");
+	console.error("[MCP] Registered 4 P917 agency lifecycle tools (v0.37.1-george)");
 
 	// P297: State machine management tools
 	server.addTool({

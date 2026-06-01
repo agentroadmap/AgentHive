@@ -97,8 +97,8 @@ export async function handleAgencyJoinProject(
 		}
 
 		// 2. Resolve project_id from slug or name
-		const projectCheck = await query<{ id: string }>(
-			`SELECT id FROM roadmap_workforce.projects
+		const projectCheck = await query<{ project_id: string }>(
+			`SELECT project_id FROM roadmap.project
 			 WHERE slug = $1 OR name = $1
 			 LIMIT 1`,
 			[input.project_slug],
@@ -110,7 +110,7 @@ export async function handleAgencyJoinProject(
 				`Project '${input.project_slug}' not found.`,
 			);
 		}
-		const projectId = BigInt(projectCheck.rows[0].id);
+		const projectId = projectCheck.rows[0].project_id;
 
 		// 3. Call fn_offer_provider_heartbeat — UPSERT-inserts provider_registry
 		const capabilitiesJsonb = JSON.stringify(

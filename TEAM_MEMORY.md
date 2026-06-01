@@ -45,52 +45,23 @@
 - **ESLint:** Use config/env vars for external dependencies
 - **Convention:** No hardcoded DB names, ports, or URLs in code
 
-## Key Decisions (2026-04-01)
+## Key Decisions (2026-05-30)
 
-1. **Maturity model:** 0-3 universal scale across all statuses
-2. **Terminology:** "proposal" not "state" (schema change)
-3. **Config design:** Structured with database, MCP, git sections
-4. **Git push:** Convention for Gilbert to handle, not hard rule
-5. **Issue tracking:** Use MCP/Postgres proposals internally, GitHub after public release
-6. **Duplicate prevention:** Check for duplicate proposals before inserting
-7. **Display ID format:** Auto-generated as `P###` (0-padded), e.g., `P001`, `P002`
+1. **Workspace Isolation**: Mandated one `git worktree` per agent for all multi-step tasks. Working in the shared root `/data/code/AgentHive` is prohibited to prevent branch-switching collisions.
+2. **Dynamic Import Pattern**: Mandated module-object access for `await import()` (e.g., `const m = await import(...)`) to avoid runtime `undefined` handlers during destructuring.
+3. **Branch Ownership**: Enforced "One Branch = One Owner = One Proposal" rule. Agents may only push to branches they hold a lease for.
 
-## Current Status (2026-04-02 05:55 EDT)
+## Current Status (2026-05-30 23:45 EDT)
 
-- **Proposals in Postgres:** 30 (after data wipe and restore)
-- **Proposals in markdown:** 37 files in roadmap/proposals/
-- **MCP server:** Running on port 6421 (prop_* + chan_* + msg_* tools)
-- **TypeScript errors:** 0 (main codebase)
-- **Display IDs:** Auto-generated P### format ✅
-- **Maturity levels:** Set appropriately
-- **Body content:** Empty for most proposals (need to populate from markdown)
-- **MCP tools:** 19 total (11 proposal + 8 messaging)
-- **Agents registered:** 5 (Andy, Bob, Carter, Gilbert, Skeptic)
-- **WebSocket bridge:** Running on port 3001 (stable 1h+)
-- **Real-time messaging:** Working via the roadmap websocket feed
-
-## MESSAGING System - COMPLETE ✅
-
-### Infrastructure
-- **Postgres Tables:** WorkforceRegistry, MessageLedger, agent_memory (subscriptions)
-- **Postgres workflow actions:** send_message, subscribe_channel, register_agent, claim_proposal
-- **MCP Tools:** chan_list, msg_read, msg_send, chan_subscribe, chan_create, chan_delete, chan_unsubscribe, msg_history
-- **WebSocket:** Real-time push via the roadmap websocket bridge
-- **Persistent WS Bridge:** Port 3001, systemd service
-
-### Agent Identity (WorkforceRegistry)
-- **Fields:** identity (Postgres hash), agent_id, name, role, clearance_level, squad_id, workspace, api_key, is_active
-- **Team:** Andy (CEO, clearance 5), Bob/Carter/Gilbert/Skeptic (clearance 4)
-
-### Known Issues (Minor)
-- MCP WebSocket bridge (port 3001) — stable enough for shared updates, but still due for cleanup
-- chan_create/chan_delete — Postgres placeholders, use agent_memory for now
-- register_agent MCP handler — Updated to 7 params, needs Postgres module redeploy
+- **Version**: 0.37.0 ✅
+- **Gemini Agency**: Registered (`gemini-a`), active, and dispatchable on `main`.
+- **MCP Server**: Fixed handler initialization and `agent_register` null constraints.
+- **Proposals in Postgres**: Active work on P1444 (Complete) and P1438 (In-progress).
+- **Workspace**: Stabilized on `main`. Contention resolved via worktree migration plan.
 
 ## Next Steps
 
-1. Add acceptance criteria to proposals (prop_ac_add)
-2. Enrich remaining proposals with body content
-3. Test agent-to-agent messaging end-to-end
-4. Simplify the WebSocket bridge once the shared feed is stable end-to-end
-5. Export proposals to markdown for Git backup
+1. **Isolation Proposal**: File P1445 (Multi-agent isolation via worktree leasing).
+2. **C6 Resume**: Rebase P1438 onto v0.37.0 and move to dedicated worktree.
+3. **Acceptance Criteria**: Ensure structured evidence is included in all `verify_ac` calls.
+
