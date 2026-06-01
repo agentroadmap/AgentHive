@@ -34,6 +34,32 @@ function errorResult(msg: string, err: unknown): CallToolResult {
 }
 
 export class PgAgentHandlers {
+	// AC-11: Per-identity probe mutex to serialize concurrent registerModel calls
+	private probePromises: Map<string, Promise<void>> = new Map();
+
+	// Helper to acquire per-identity lock
+	private async withIdentityLock<T>(identity: string, fn: () => Promise<T>): Promise<T> {
+		const existing = this.probePromises.get(identity);
+		if (existing) {
+			// Wait for existing probe to complete, then run this one
+			await existing;
+		}
+
+		// Create new promise for this call
+		let resolveProbe: () => void = () => {};
+		const probePromise = new Promise<void>((resolve) => {
+			resolveProbe = resolve;
+		});
+		this.probePromises.set(identity, probePromise);
+
+		try {
+			return await fn();
+		} finally {
+			resolveProbe();
+			this.probePromises.delete(identity);
+		}
+	}
+
 	async listAgents(args: {
 		status?: string;
 		limit?: number;
@@ -358,7 +384,9 @@ export class PgAgentHandlers {
 		route_tier?: string;
 		skip_probe?: boolean;
 	}): Promise<CallToolResult> {
-		try {
+		// AC-11: Serialize concurrent registerModel calls per identity
+		return await this.withIdentityLock(args.agent_identity, async () => {
+			try {
 			if (args.skip_probe) {
 				const trustCheck = await query(
 					`SELECT trust_tier FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
@@ -461,27 +489,28 @@ export class PgAgentHandlers {
 				],
 			);
 
-			return {
-				content: [
-					{
-						type: "text",
-						text: JSON.stringify(
-							{
-								registered: true,
-								route_id: rows[0].id,
-								model_name: args.model_name,
-								route_provider: args.route_provider,
-								agent_provider: args.agent_provider,
-							},
-							null,
-							2,
-						),
-					},
-				],
-			};
-		} catch (err) {
-			return errorResult("Failed to register model", err);
-		}
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{
+									registered: true,
+									route_id: rows[0].id,
+									model_name: args.model_name,
+									route_provider: args.route_provider,
+									agent_provider: args.agent_provider,
+								},
+								null,
+								2,
+							),
+						},
+					],
+				};
+			} catch (err) {
+				return errorResult("Failed to register model", err);
+			}
+		});
 	}
 
 	async listTeams(_args: Record<string, never>): Promise<CallToolResult> {
