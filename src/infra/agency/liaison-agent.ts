@@ -42,6 +42,9 @@ import {
 	CliInvocationRegistry,
 	type CliInvocationHandler,
 } from "../../core/runtime/cli-invocation.ts";
+import * as runtimeConfig from "../../shared/runtime/config.ts";
+import { FlagKeys } from "../../shared/runtime/config-keys.ts";
+import { AgencyClaimLoop, makeAgencyClaimExecutor, type ListenerClient as ClaimLoopListenerClient } from "./agency-claim-loop.ts";
 
 export interface IncomingMessage {
 	id: number;
@@ -69,6 +72,7 @@ export interface LiaisonAgentOptions {
 
 export interface LiaisonAgentHandle {
 	stop: () => Promise<void>;
+	claimLoop?: AgencyClaimLoop;
 }
 
 interface NotifyPayload {
@@ -134,6 +138,86 @@ export async function runLiaisonAgent(
 		: await connectListenClient(identity);
 	await listenClient.query(`LISTEN "${channel}"`);
 	console.log(`${log} LISTEN active on: ${channel}`);
+
+	// V3-C6 (P1438 step 3b): Conditionally start AgencyClaimLoop if flag enabled
+	// This loop allows the agency to self-claim work offers from the shared work_offers
+	// channel, avoiding the orchestrator bottleneck of claiming all offers and re-dispatching.
+	let claimLoop: AgencyClaimLoop | null = null;
+	let claimLoopListenClient: ClaimLoopListenerClient | null = null;
+
+	const claimLoopFlag = await runtimeConfig
+		.get(FlagKeys.AGENCY_OFFER_CLAIM_ENABLED)
+		.catch(() => false);
+
+	// V3-C6 step-1 canary scoping: AGENCY_OFFER_CLAIM_ENABLED is a GLOBAL flag, so
+	// turning it on would enable self-claim for EVERY attached agency at once. The
+	// optional AGENTHIVE_SELF_CLAIM_AGENCIES allowlist (comma-separated identities,
+	// mirrors a2a-host's AGENTHIVE_AGENCY_FILTER) restricts self-claim to listed
+	// agencies even when the global flag is on — enabling a single-agency canary.
+	// Empty allowlist = all agencies (backward-compatible with the pre-allowlist
+	// behavior). Parsed per-call so it composes with the global flag.
+	const selfClaimAllowlist = (process.env.AGENTHIVE_SELF_CLAIM_AGENCIES ?? "")
+		.split(",")
+		.map((s) => s.trim())
+		.filter(Boolean);
+	const allowedByList =
+		selfClaimAllowlist.length === 0 || selfClaimAllowlist.includes(identity);
+	const claimLoopEnabled = claimLoopFlag && allowedByList;
+	if (claimLoopFlag && !allowedByList) {
+		console.log(
+			`${log} self-claim flag on but ${identity} not in AGENTHIVE_SELF_CLAIM_AGENCIES allowlist — staying on orchestrator-dispatch`,
+		);
+	}
+
+	if (claimLoopEnabled) {
+		try {
+			// Load the agency's real capabilities from agent_registry
+			const { rows: capRows } = await query<{
+				skills: Record<string, boolean> | null;
+			}>(
+				`SELECT skills FROM roadmap_workforce.agent_registry
+				 WHERE agent_identity = $1`,
+				[identity],
+			);
+
+			// Extract capability keys from the skills jsonb object
+			// (shape: {"review": true, "testing": true, ...})
+			const skillsObj = capRows[0]?.skills ?? {};
+			const capabilities = Object.keys(skillsObj).filter((k) => skillsObj[k] === true);
+
+			// Create the executor that handles claimed offers via the existing
+			// offer-dispatch path (reuses handleOfferDispatch, not duplicating logic)
+			const executor = makeAgencyClaimExecutor(identity);
+
+			// Open a dedicated LISTEN client for the claim loop
+			claimLoopListenClient = await connectListenClient(`${identity}-claim`);
+
+			// Construct and start the claim loop
+			claimLoop = new AgencyClaimLoop({
+				agencyIdentity: identity,
+				capabilities, // Real agency capabilities for offer matching
+				onClaim: executor,
+				connectListener: async () => claimLoopListenClient!,
+				projectId: null, // Accept any project this agency is subscribed to
+				leaseTtlSeconds: 1320, // 22 minutes, must exceed spawn timeout
+				pollIntervalMs: 30_000,
+				maxConcurrent: 8,
+				logger: { log: console.log, warn: console.warn, error: console.error },
+			});
+
+			await claimLoop.start();
+			console.log(
+				`${log} AgencyClaimLoop started with capabilities: ${JSON.stringify(capabilities)}`,
+			);
+		} catch (err) {
+			console.error(
+				`${log} Failed to start AgencyClaimLoop:`,
+				err instanceof Error ? err.message : err,
+			);
+			// Continue liaison function even if claim loop startup fails — the liaison
+			// A2A path (explicit task dispatch) still works.
+		}
+	}
 
 	async function fetchMessage(messageId: number) {
 		const { rows } = await query(
@@ -310,6 +394,19 @@ export async function runLiaisonAgent(
 
 	return {
 		stop: async () => {
+			// Stop the claim loop first if it's running
+			if (claimLoop) {
+				try {
+					await claimLoop.stop();
+					console.log(`${log} AgencyClaimLoop stopped`);
+				} catch (err) {
+					console.error(
+						`${log} Error stopping AgencyClaimLoop:`,
+						err instanceof Error ? err.message : err,
+					);
+				}
+			}
+
 			try {
 				await listenClient.query(`UNLISTEN "${channel}"`);
 			} catch {
@@ -323,6 +420,7 @@ export async function runLiaisonAgent(
 				/* ignore */
 			}
 		},
+		claimLoop,
 	};
 }
 

@@ -962,6 +962,27 @@ export const FlagKeys = {
 		envOverride: false,
 	} satisfies ConfigKey<boolean>,
 
+	// V3-C6 (P1438): when true, each agency liaison runs its own AgencyClaimLoop
+	// (self-claim). Composes with ORCHESTRATOR_OFFER_CLAIM_ENABLED: cutover sets
+	// orchestrator's loop off + this on; rollback flips both back (no code revert).
+	AGENCY_OFFER_CLAIM_ENABLED: {
+		name: "AGENCY_OFFER_CLAIM_ENABLED",
+		class: "flag" as const,
+		parse: (v: string) => {
+			try {
+				return JSON.parse(v) === true;
+			} catch {
+				return v.toLowerCase() === "true" || v === "1";
+			}
+		},
+		required: false,
+		defaultValue: false,
+		description: "V3-C6: true makes each agency liaison self-claim work offers",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<boolean>,
+
 	// ─── P1291 per-(proposal, role) pause fuse tunables ──────────────────────
 	// Seeded by a P1291 migration. Operator changes via SQL UPDATE core.runtime_flag SET value_jsonb=...
 	// Live-reload via runtime_config_changed NOTIFY (no restart).
