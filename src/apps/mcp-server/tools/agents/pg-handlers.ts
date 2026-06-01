@@ -179,12 +179,29 @@ export class PgAgentHandlers {
 				);
 			}
 
+			// AC-9: Validate preferred_provider against canonical set
+			const canonicalProviders = ["claude", "codex", "gemini", "copilot"];
+			if (args.preferred_provider) {
+				const normalizedProvider = args.preferred_provider.trim().toLowerCase();
+				if (!canonicalProviders.includes(normalizedProvider)) {
+					return errorResult(
+						"Invalid preferred_provider",
+						`Value "${args.preferred_provider}" is not in canonical set: ${canonicalProviders.join(", ")}. NULL/undefined is allowed for unspecified.`,
+					);
+				}
+			}
+
 			const skillsJson = args.skills
 				? typeof args.skills === "string"
 					? args.skills.trim().startsWith("[") || args.skills.trim().startsWith("{")
 						? args.skills
 						: JSON.stringify(args.skills.split(",").map((s) => s.trim()).filter(Boolean))
 					: JSON.stringify(args.skills)
+				: null;
+
+			// Normalize preferred_provider to lowercase for storage (AC-9 already validated it's canonical or null)
+			const normalizedProvider = args.preferred_provider
+				? args.preferred_provider.trim().toLowerCase()
 				: null;
 
 			// P1129: persist agency-shape fields with COALESCE on UPDATE so partial
@@ -212,7 +229,7 @@ export class PgAgentHandlers {
 					args.agent_type || null,
 					args.role || null,
 					skillsJson,
-					args.preferred_provider?.trim() || null,
+					normalizedProvider,
 					args.agent_cli?.trim() || null,
 					args.host_affinity?.trim() || null,
 					args.display_alias?.trim() || null,
