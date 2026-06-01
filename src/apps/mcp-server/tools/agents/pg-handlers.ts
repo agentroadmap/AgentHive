@@ -290,7 +290,7 @@ export class PgAgentHandlers {
 
 		try {
 			const result = spawnSync(spec.cli, spec.args, {
-				timeout: 5000,
+				timeout: 10000,
 				encoding: "utf-8",
 			});
 			const output = ((result.stdout as string) || "") + ((result.stderr as string) || "");
