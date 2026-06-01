@@ -44,7 +44,24 @@ describe("P1409: submit_review is_blocking persistence", () => {
 	});
 
 	afterAll(async () => {
+		// Remove the scratch proposal AND the reviewer fixture identities this suite
+		// uses. submitReview auto-creates an agent_registry row per reviewer; without
+		// cleaning them, these p1409-rev-* rows leak into the live registry on every
+		// run (observed 2026-06-01). Delete reviews first (FK), then the agents.
+		const reviewers = [
+			reviewerInsertTrue,
+			reviewerInsertFalse,
+			reviewerOmitted,
+			reviewerUpdate,
+			reviewerAlias,
+			reviewerFindings,
+		];
+		await query("DELETE FROM roadmap_proposal.proposal_reviews WHERE proposal_id = $1", [testProposalId]);
 		await query("DELETE FROM roadmap_proposal.proposal WHERE id = $1", [testProposalId]);
+		await query(
+			"DELETE FROM roadmap_workforce.agent_registry WHERE agent_identity = ANY($1::text[])",
+			[reviewers],
+		);
 	});
 
 	async function readBlocking(reviewer: string): Promise<boolean | null> {
