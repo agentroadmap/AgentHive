@@ -264,6 +264,19 @@ export class PgAgentHandlers {
 	}
 
 	/**
+	 * AC-3: Map model_metadata tier values to model_routes tier values.
+	 * Mapping: frontier→frontier, standard→mid, economy→lower
+	 */
+	private mapMetadataTierToRouteTier(metadataTier: string): string {
+		const mapping: Record<string, string> = {
+			frontier: "frontier",
+			standard: "mid",
+			economy: "lower",
+		};
+		return mapping[metadataTier] || metadataTier;
+	}
+
+	/**
 	 * P1129: Probe a CLI to verify a model name is accepted.
 	 * Returns { ok: true } if probe succeeds or CLI is unrecognised (permissive default).
 	 * Returns { ok: false, error } if the CLI explicitly rejects the model name.
@@ -328,6 +341,10 @@ export class PgAgentHandlers {
 	 * P1129: Register a model into model_metadata + model_routes.
 	 * Performs a live CLI probe before persisting (bypass with skip_probe=true if authority).
 	 * Two-step FK-safe UPSERT: model_metadata first, then model_routes.
+	 *
+	 * AC-3: Tier mapping between tables:
+	 * - metadata_tier (frontier|standard|economy) → routes via mapMetadataTierToRouteTier
+	 * - Or specify route_tier directly for custom routing (e.g., 'tool' for special cases)
 	 */
 	async registerModel(args: {
 		agent_identity: string;
@@ -337,7 +354,8 @@ export class PgAgentHandlers {
 		agent_cli?: string;
 		base_url?: string;
 		api_spec?: string;
-		tier?: string;
+		metadata_tier?: string;
+		route_tier?: string;
 		skip_probe?: boolean;
 	}): Promise<CallToolResult> {
 		try {
@@ -378,13 +396,37 @@ export class PgAgentHandlers {
 				}
 			}
 
+			// AC-3: Resolve tier for each table
+			// metadata_tier: frontier|standard|economy
+			// route_tier: determined by metadata_tier mapping OR direct route_tier override
+			const metadataTier = args.metadata_tier || null;
+			const routeTier = args.route_tier ? args.route_tier : (metadataTier ? this.mapMetadataTierToRouteTier(metadataTier) : null);
+
 			// Step 1: UPSERT model_metadata (FK source required before model_routes INSERT)
-			await query(
-				`INSERT INTO roadmap.model_metadata (model_name, provider, is_active)
-				 VALUES ($1, $2, true)
-				 ON CONFLICT (provider, model_name) DO UPDATE SET is_active = true`,
-				[args.model_name, args.route_provider],
-			);
+			// Include tier if provided for metadata_tier
+			if (metadataTier) {
+				// Validate metadata_tier against allowed enum
+				const validMetadataTiers = ["frontier", "standard", "economy"];
+				if (!validMetadataTiers.includes(metadataTier)) {
+					return errorResult(
+						"Invalid metadata_tier",
+						`Value "${metadataTier}" is not in allowed set: ${validMetadataTiers.join(", ")}`,
+					);
+				}
+				await query(
+					`INSERT INTO roadmap.model_metadata (model_name, provider, is_active, tier)
+					 VALUES ($1, $2, true, $3)
+					 ON CONFLICT (provider, model_name) DO UPDATE SET is_active = true, tier = EXCLUDED.tier`,
+					[args.model_name, args.route_provider, metadataTier],
+				);
+			} else {
+				await query(
+					`INSERT INTO roadmap.model_metadata (model_name, provider, is_active)
+					 VALUES ($1, $2, true)
+					 ON CONFLICT (provider, model_name) DO UPDATE SET is_active = true`,
+					[args.model_name, args.route_provider],
+				);
+			}
 
 			// Resolve agent_cli from registry if not supplied
 			let agentCli = args.agent_cli || null;
@@ -415,7 +457,7 @@ export class PgAgentHandlers {
 					agentCli,
 					args.base_url || null,
 					args.api_spec || null,
-					args.tier || null,
+					routeTier,
 				],
 			);
 
