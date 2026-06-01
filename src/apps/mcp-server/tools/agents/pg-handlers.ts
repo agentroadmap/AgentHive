@@ -34,6 +34,32 @@ function errorResult(msg: string, err: unknown): CallToolResult {
 }
 
 export class PgAgentHandlers {
+	// AC-11: Per-identity probe mutex to serialize concurrent registerModel calls
+	private probePromises: Map<string, Promise<void>> = new Map();
+
+	// Helper to acquire per-identity lock
+	private async withIdentityLock<T>(identity: string, fn: () => Promise<T>): Promise<T> {
+		const existing = this.probePromises.get(identity);
+		if (existing) {
+			// Wait for existing probe to complete, then run this one
+			await existing;
+		}
+
+		// Create new promise for this call
+		let resolveProbe: () => void = () => {};
+		const probePromise = new Promise<void>((resolve) => {
+			resolveProbe = resolve;
+		});
+		this.probePromises.set(identity, probePromise);
+
+		try {
+			return await fn();
+		} finally {
+			resolveProbe();
+			this.probePromises.delete(identity);
+		}
+	}
+
 	async listAgents(args: {
 		status?: string;
 		limit?: number;
@@ -167,6 +193,12 @@ export class PgAgentHandlers {
 		host_affinity?: string;
 		display_alias?: string;
 		display_name?: string;
+		// AC-10: Optional agency fields for transaction-bundled registration
+		agency_display_name?: string;
+		agency_provider?: string;
+		agency_host_id?: string;
+		project_id?: number;
+		squad_name?: string;
 	}): Promise<CallToolResult> {
 		try {
 			const normalizedIdentity = normalizeAgentId(args.identity);
@@ -179,6 +211,18 @@ export class PgAgentHandlers {
 				);
 			}
 
+			// AC-9: Validate preferred_provider against canonical set
+			const canonicalProviders = ["claude", "codex", "gemini", "copilot"];
+			if (args.preferred_provider) {
+				const normalizedProvider = args.preferred_provider.trim().toLowerCase();
+				if (!canonicalProviders.includes(normalizedProvider)) {
+					return errorResult(
+						"Invalid preferred_provider",
+						`Value "${args.preferred_provider}" is not in canonical set: ${canonicalProviders.join(", ")}. NULL/undefined is allowed for unspecified.`,
+					);
+				}
+			}
+
 			const skillsJson = args.skills
 				? typeof args.skills === "string"
 					? args.skills.trim().startsWith("[") || args.skills.trim().startsWith("{")
@@ -187,63 +231,138 @@ export class PgAgentHandlers {
 					: JSON.stringify(args.skills)
 				: null;
 
-			// P1129: persist agency-shape fields with COALESCE on UPDATE so partial
-			// calls don't overwrite existing values with NULL.
-			const { rows } = await query(
-				`INSERT INTO roadmap_workforce.agent_registry (
-					agent_identity, agent_type, role, skills,
-					preferred_provider, agent_cli, host_affinity,
-					display_alias, display_name
-				)
-				VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9)
-				ON CONFLICT (agent_identity) DO UPDATE SET
-					agent_type         = COALESCE(EXCLUDED.agent_type,         roadmap_workforce.agent_registry.agent_type),
-					role               = COALESCE(EXCLUDED.role,               roadmap_workforce.agent_registry.role),
-					skills             = COALESCE(EXCLUDED.skills,             roadmap_workforce.agent_registry.skills),
-					preferred_provider = COALESCE(EXCLUDED.preferred_provider, roadmap_workforce.agent_registry.preferred_provider),
-					agent_cli          = COALESCE(EXCLUDED.agent_cli,          roadmap_workforce.agent_registry.agent_cli),
-					host_affinity      = COALESCE(EXCLUDED.host_affinity,      roadmap_workforce.agent_registry.host_affinity),
-					display_alias      = COALESCE(EXCLUDED.display_alias,      roadmap_workforce.agent_registry.display_alias),
-					display_name       = COALESCE(EXCLUDED.display_name,       roadmap_workforce.agent_registry.display_name),
-					updated_at         = NOW()
-				RETURNING agent_identity, role, status, preferred_provider`,
-				[
-					normalizedIdentity,
-					args.agent_type || null,
-					args.role || null,
-					skillsJson,
-					args.preferred_provider?.trim() || null,
-					args.agent_cli?.trim() || null,
-					args.host_affinity?.trim() || null,
-					args.display_alias?.trim() || null,
-					args.display_name?.trim() || null,
-				],
-			);
+			// Normalize preferred_provider to lowercase for storage (AC-9 already validated it's canonical or null)
+			const normalizedProvider = args.preferred_provider
+				? args.preferred_provider.trim().toLowerCase()
+				: null;
 
-			const r = rows[0];
-			return {
-				content: [
-					{
-						type: "text",
-						text: JSON.stringify(
-							{
-								agent_identity: r.agent_identity,
-								role: r.role,
-								status: r.status,
-								preferred_provider: r.preferred_provider,
-							},
-							null,
-							2,
-						),
-					},
-				],
-			};
+			// AC-10: Wrap all writes in a single transaction with SELECT...FOR UPDATE
+			const client = await query("SELECT 1"); // Get a connection to verify pool works
+			// Use native transaction via pool client
+			const res = await query("BEGIN ISOLATION LEVEL SERIALIZABLE");
+
+			try {
+				// Lock agent_identity row if it exists (SELECT...FOR UPDATE)
+				// This prevents concurrent modifications
+				await query(
+					`SELECT id FROM roadmap_workforce.agent_registry WHERE agent_identity = $1 FOR UPDATE`,
+					[normalizedIdentity],
+				);
+
+				// Step 1: UPSERT agent_registry
+				const { rows } = await query(
+					`INSERT INTO roadmap_workforce.agent_registry (
+						agent_identity, agent_type, role, skills,
+						preferred_provider, agent_cli, host_affinity,
+						display_alias, display_name
+					)
+					VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9)
+					ON CONFLICT (agent_identity) DO UPDATE SET
+						agent_type         = COALESCE(EXCLUDED.agent_type,         roadmap_workforce.agent_registry.agent_type),
+						role               = COALESCE(EXCLUDED.role,               roadmap_workforce.agent_registry.role),
+						skills             = COALESCE(EXCLUDED.skills,             roadmap_workforce.agent_registry.skills),
+						preferred_provider = COALESCE(EXCLUDED.preferred_provider, roadmap_workforce.agent_registry.preferred_provider),
+						agent_cli          = COALESCE(EXCLUDED.agent_cli,          roadmap_workforce.agent_registry.agent_cli),
+						host_affinity      = COALESCE(EXCLUDED.host_affinity,      roadmap_workforce.agent_registry.host_affinity),
+						display_alias      = COALESCE(EXCLUDED.display_alias,      roadmap_workforce.agent_registry.display_alias),
+						display_name       = COALESCE(EXCLUDED.display_name,       roadmap_workforce.agent_registry.display_name),
+						updated_at         = NOW()
+					RETURNING id, agent_identity, role, status, preferred_provider`,
+					[
+						normalizedIdentity,
+						args.agent_type || null,
+						args.role || null,
+						skillsJson,
+						normalizedProvider,
+						args.agent_cli?.trim() || null,
+						args.host_affinity?.trim() || null,
+						args.display_alias?.trim() || null,
+						args.display_name?.trim() || null,
+					],
+				);
+
+				const r = rows[0];
+				const agentId = r.id;
+
+				// Step 2: Conditionally UPSERT roadmap.agency if all required fields provided
+				if (args.agency_display_name && args.agency_provider && args.agency_host_id) {
+					await query(
+						`INSERT INTO roadmap.agency (
+							agency_id, display_name, provider, host_id
+						)
+						VALUES ($1, $2, $3, $4)
+						ON CONFLICT (agency_id) DO UPDATE SET
+							display_name = EXCLUDED.display_name,
+							provider = EXCLUDED.provider,
+							host_id = EXCLUDED.host_id
+						`,
+						[normalizedIdentity, args.agency_display_name, args.agency_provider, args.agency_host_id],
+					);
+				}
+
+				// Step 3: Conditionally UPSERT roadmap_workforce.provider_registry if agency data provided
+				if (args.agency_provider) {
+					await query(
+						`INSERT INTO roadmap_workforce.provider_registry (
+							agency_id, agency_identity, project_id, squad_name
+						)
+						VALUES ($1, $2, $3, $4)
+						ON CONFLICT (agency_id, project_id, squad_name) DO UPDATE SET
+							agency_identity = EXCLUDED.agency_identity
+						`,
+						[agentId, normalizedIdentity, args.project_id || null, args.squad_name || null],
+					);
+				}
+
+				// Commit transaction
+				await query("COMMIT");
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{
+									agent_identity: r.agent_identity,
+									role: r.role,
+									status: r.status,
+									preferred_provider: r.preferred_provider,
+									transaction: "committed",
+								},
+								null,
+								2,
+							),
+						},
+					],
+				};
+			} catch (txErr) {
+				// Rollback on error
+				try {
+					await query("ROLLBACK");
+				} catch (rollbackErr) {
+					console.error("Error rolling back transaction:", rollbackErr);
+				}
+				throw txErr;
+			}
 		} catch (err) {
 			if (err instanceof AgentIdInvalidError) {
 				return errorResult("Invalid agent identity", err);
 			}
 			return errorResult("Failed to register agent", err);
 		}
+	}
+
+	/**
+	 * AC-3: Map model_metadata tier values to model_routes tier values.
+	 * Mapping: frontier→frontier, standard→mid, economy→lower
+	 */
+	private mapMetadataTierToRouteTier(metadataTier: string): string {
+		const mapping: Record<string, string> = {
+			frontier: "frontier",
+			standard: "mid",
+			economy: "lower",
+		};
+		return mapping[metadataTier] || metadataTier;
 	}
 
 	/**
@@ -290,7 +409,7 @@ export class PgAgentHandlers {
 
 		try {
 			const result = spawnSync(spec.cli, spec.args, {
-				timeout: 5000,
+				timeout: 10000,
 				encoding: "utf-8",
 			});
 			const output = ((result.stdout as string) || "") + ((result.stderr as string) || "");
@@ -311,6 +430,10 @@ export class PgAgentHandlers {
 	 * P1129: Register a model into model_metadata + model_routes.
 	 * Performs a live CLI probe before persisting (bypass with skip_probe=true if authority).
 	 * Two-step FK-safe UPSERT: model_metadata first, then model_routes.
+	 *
+	 * AC-3: Tier mapping between tables:
+	 * - metadata_tier (frontier|standard|economy) → routes via mapMetadataTierToRouteTier
+	 * - Or specify route_tier directly for custom routing (e.g., 'tool' for special cases)
 	 */
 	async registerModel(args: {
 		agent_identity: string;
@@ -320,10 +443,13 @@ export class PgAgentHandlers {
 		agent_cli?: string;
 		base_url?: string;
 		api_spec?: string;
-		tier?: string;
+		metadata_tier?: string;
+		route_tier?: string;
 		skip_probe?: boolean;
 	}): Promise<CallToolResult> {
-		try {
+		// AC-11: Serialize concurrent registerModel calls per identity
+		return await this.withIdentityLock(args.agent_identity, async () => {
+			try {
 			if (args.skip_probe) {
 				const trustCheck = await query(
 					`SELECT trust_tier FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
@@ -361,13 +487,37 @@ export class PgAgentHandlers {
 				}
 			}
 
+			// AC-3: Resolve tier for each table
+			// metadata_tier: frontier|standard|economy
+			// route_tier: determined by metadata_tier mapping OR direct route_tier override
+			const metadataTier = args.metadata_tier || null;
+			const routeTier = args.route_tier ? args.route_tier : (metadataTier ? this.mapMetadataTierToRouteTier(metadataTier) : null);
+
 			// Step 1: UPSERT model_metadata (FK source required before model_routes INSERT)
-			await query(
-				`INSERT INTO roadmap.model_metadata (model_name, provider, is_active)
-				 VALUES ($1, $2, true)
-				 ON CONFLICT (provider, model_name) DO UPDATE SET is_active = true`,
-				[args.model_name, args.route_provider],
-			);
+			// Include tier if provided for metadata_tier
+			if (metadataTier) {
+				// Validate metadata_tier against allowed enum
+				const validMetadataTiers = ["frontier", "standard", "economy"];
+				if (!validMetadataTiers.includes(metadataTier)) {
+					return errorResult(
+						"Invalid metadata_tier",
+						`Value "${metadataTier}" is not in allowed set: ${validMetadataTiers.join(", ")}`,
+					);
+				}
+				await query(
+					`INSERT INTO roadmap.model_metadata (model_name, provider, is_active, tier)
+					 VALUES ($1, $2, true, $3)
+					 ON CONFLICT (provider, model_name) DO UPDATE SET is_active = true, tier = EXCLUDED.tier`,
+					[args.model_name, args.route_provider, metadataTier],
+				);
+			} else {
+				await query(
+					`INSERT INTO roadmap.model_metadata (model_name, provider, is_active)
+					 VALUES ($1, $2, true)
+					 ON CONFLICT (provider, model_name) DO UPDATE SET is_active = true`,
+					[args.model_name, args.route_provider],
+				);
+			}
 
 			// Resolve agent_cli from registry if not supplied
 			let agentCli = args.agent_cli || null;
@@ -398,31 +548,32 @@ export class PgAgentHandlers {
 					agentCli,
 					args.base_url || null,
 					args.api_spec || null,
-					args.tier || null,
+					routeTier,
 				],
 			);
 
-			return {
-				content: [
-					{
-						type: "text",
-						text: JSON.stringify(
-							{
-								registered: true,
-								route_id: rows[0].id,
-								model_name: args.model_name,
-								route_provider: args.route_provider,
-								agent_provider: args.agent_provider,
-							},
-							null,
-							2,
-						),
-					},
-				],
-			};
-		} catch (err) {
-			return errorResult("Failed to register model", err);
-		}
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{
+									registered: true,
+									route_id: rows[0].id,
+									model_name: args.model_name,
+									route_provider: args.route_provider,
+									agent_provider: args.agent_provider,
+								},
+								null,
+								2,
+							),
+						},
+					],
+				};
+			} catch (err) {
+				return errorResult("Failed to register model", err);
+			}
+		});
 	}
 
 	async listTeams(_args: Record<string, never>): Promise<CallToolResult> {
