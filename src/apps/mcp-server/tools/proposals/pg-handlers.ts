@@ -20,6 +20,11 @@ import {
 } from "../../../../infra/agency/liaison-service.ts";
 import { detectConflicts } from "./directive-conflict-detector.ts";
 import { calculateDispatchPriority } from "./directive-priority.ts";
+import {
+	stageEnforcer,
+	StageEnforcerError,
+} from "../../../../gate_pipeline/workflow_stages.ts";
+import { getProposalAuditPause } from "../../../../gate_pipeline/frontier_audit.ts";
 
 type ProjectionFormat = "yaml_md" | "json";
 
@@ -540,6 +545,43 @@ export class PgProposalHandlers {
 								},
 							],
 						};
+					}
+				}
+
+				// AC-4: Block if a frontier audit has paused this proposal
+				const auditPause = await getProposalAuditPause(id);
+				if (auditPause) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `🚫 Transition blocked: proposal ${args.id} is paused by frontier audit. Reason: ${auditPause}`,
+							},
+						],
+					};
+				}
+
+				// AC-5/AC-8: Enforce mandatory stage prerequisites before Merge
+				if (requestedStatus === RfcStates.MERGE) {
+					const stub = {
+						id,
+						display_id: current.display_id ?? args.id,
+						title: current.title ?? "",
+					};
+					try {
+						await stageEnforcer(stub, "Merge");
+					} catch (err) {
+						if (err instanceof StageEnforcerError) {
+							return {
+								content: [
+									{
+										type: "text",
+										text: `🚫 ${err.message}`,
+									},
+								],
+							};
+						}
+						throw err;
 					}
 				}
 			}
