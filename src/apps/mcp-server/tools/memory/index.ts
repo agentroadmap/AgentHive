@@ -161,4 +161,65 @@ export function registerMemoryTools(server: McpServer): void {
 					typeof args.token_budget === "number" ? args.token_budget : undefined,
 			}),
 	});
+
+	// P230: team_mem_set — write a shared squad decision/knowledge entry
+	server.addTool({
+		name: "team_mem_set",
+		description: "Write a shared squad-level memory entry (decisions, knowledge, conventions). Last-write-wins per (team_name, key).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				team_name: { type: "string", description: "Squad identifier (e.g. 'p230-squad')" },
+				key: { type: "string", description: "Memory key" },
+				value: { type: "string", description: "Value (JSON or plain text)" },
+				created_by: { type: "string", description: "Agent identity writing this entry" },
+				expires_in_days: { type: "number", description: "Optional TTL in days" },
+			},
+			required: ["team_name", "key", "value"],
+		},
+		handler: async (args: Record<string, unknown>) =>
+			await handlers.teamMemSet({
+				team_name: String(args.team_name),
+				key: String(args.key),
+				value: String(args.value),
+				created_by: typeof args.created_by === "string" ? args.created_by : undefined,
+				expires_in_days: typeof args.expires_in_days === "number" ? args.expires_in_days : undefined,
+			}),
+	});
+
+	// P230: team_mem_get — read a single squad memory entry
+	server.addTool({
+		name: "team_mem_get",
+		description: "Read a single squad-level memory entry by team and key.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				team_name: { type: "string" },
+				key: { type: "string" },
+			},
+			required: ["team_name", "key"],
+		},
+		handler: async (args: Record<string, unknown>) =>
+			await handlers.teamMemGet({
+				team_name: String(args.team_name),
+				key: String(args.key),
+			}),
+	});
+
+	// P230: team_mem_list — list all active squad memory entries
+	server.addTool({
+		name: "team_mem_list",
+		description: "List all active (non-expired) memory entries for a squad team.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				team_name: { type: "string" },
+			},
+			required: ["team_name"],
+		},
+		handler: async (args: Record<string, unknown>) =>
+			await handlers.teamMemList({
+				team_name: String(args.team_name),
+			}),
+	});
 }

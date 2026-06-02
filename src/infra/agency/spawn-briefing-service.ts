@@ -15,6 +15,7 @@ import { v4 as uuidv4 } from "uuid";
 import { query } from "../postgres/pool.js";
 import type { Pool } from "pg";
 import { MemoryService } from "../../memory/memory_service.ts";
+import { buildContextPackage } from "./context_builder.ts";
 
 export interface TaskContext {
   task_id: string;
@@ -37,6 +38,8 @@ export interface TaskContext {
   request_assistance_threshold?: number;
 
   topic_keywords?: string[]; // for memory search
+  proposal_id?: bigint; // P230: if set, inject cached context package into briefing
+  team_name?: string;   // P230: optional squad name for team memory injection
 }
 
 export interface SpawnBriefing {
@@ -159,6 +162,25 @@ export async function briefingAssemble(
   } catch {
     // Non-fatal: project_memory table may not exist yet (pre-migration).
     // Proceed without injecting project context.
+  }
+
+  // Step 5b: P230 — inject proposal context package when proposal_id is provided.
+  // Saves ~500 tokens vs dumping full CLAUDE.md; cache is invalidated on status/AC change.
+  if (task.proposal_id !== undefined) {
+    try {
+      const pkg = await buildContextPackage({
+        proposal_id: task.proposal_id,
+        package_type: "code_gen",
+        team_name: task.team_name,
+        agent_identity: briefed_by,
+      });
+      inherited_memory.push({
+        key: `proposal_context:${task.proposal_id}`,
+        body: pkg.context_text,
+      });
+    } catch {
+      // Non-fatal: context_packages table may not exist yet.
+    }
   }
 
   // Step 6: Record briefing
