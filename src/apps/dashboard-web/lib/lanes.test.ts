@@ -102,11 +102,11 @@ describe("groupProposalsByLaneAndStatus", () => {
 		const bugLane = grouped.get(laneKeyFromType("Bug"));
 
 		assert.deepEqual(
-			(featureLane?.get("Potential") ?? []).map((t) => t.id),
+			(featureLane?.get("POTENTIAL") ?? []).map((t) => t.id),
 			["proposal-1", "proposal-3"],
 		);
 		assert.deepEqual(
-			(bugLane?.get("Active") ?? []).map((t) => t.id),
+			(bugLane?.get("ACTIVE") ?? []).map((t) => t.id),
 			["proposal-2"],
 		);
 	});
@@ -122,8 +122,8 @@ describe("groupProposalsByLaneAndStatus", () => {
 		const defaultLaneProposals = grouped.get(DEFAULT_LANE_KEY);
 
 		assert.ok(defaultLaneProposals);
-		assert.equal(defaultLaneProposals.get("Potential")?.length, 2);
-		assert.equal(defaultLaneProposals.get("Active")?.length, 1);
+		assert.equal(defaultLaneProposals.get("POTENTIAL")?.length, 2);
+		assert.equal(defaultLaneProposals.get("ACTIVE")?.length, 1);
 	});
 
 	it("groups proposals by domain lanes", () => {
@@ -145,7 +145,7 @@ describe("groupProposalsByLaneAndStatus", () => {
 
 		const frontendLane = grouped.get(laneKeyFromDomain("frontend"));
 		assert.deepEqual(
-			(frontendLane?.get("Potential") ?? []).map((t) => t.id),
+			(frontendLane?.get("POTENTIAL") ?? []).map((t) => t.id),
 			["proposal-1"],
 		);
 	});
