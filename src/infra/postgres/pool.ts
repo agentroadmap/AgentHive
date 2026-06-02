@@ -28,10 +28,10 @@ import {
 	type QueryResultRow,
 } from "pg";
 export type { Pool, PoolConfig, QueryResult, QueryResultRow };
-import { agentContextStorage } from "../../shared/identity/agent-context";
-import { ConfigResolver } from "../../shared/runtime/config";
-import { StructuralKeys } from "../../shared/runtime/config-keys";
-import { AgentHiveConfigError } from "../../shared/runtime/endpoints";
+import { agentContextStorage } from "../../shared/identity/agent-context.ts";
+import { ConfigResolver } from "../../shared/runtime/config.ts";
+import { StructuralKeys } from "../../shared/runtime/config-keys.ts";
+import { AgentHiveConfigError } from "../../shared/runtime/endpoints.ts";
 
 let pool: Pool | null = null;
 let configuredSchema: string | null = null;
