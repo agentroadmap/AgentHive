@@ -151,7 +151,48 @@ Baseline collected 2026-05-29 from `roadmap.trace_span` (operation='mcp_tool_cal
 
 ---
 
-## 9. References
+## 9. SLA Review and Rollback Process (AC-9)
+
+### Scheduled Review
+- **Post-deployment (Day 30):** After first production deployment, review baseline measurements collected via `roadmap.trace_span`. If observed p99 latency deviates >50% from the 180ms estimate, revise targets in a new proposal version.
+- **Quarterly review:** File a `chore` proposal to re-evaluate SLA targets against trailing 90-day `trace_span` data.
+- **Trigger for ad-hoc review:** Three or more Degraded/Down events in a 7-day window triggers immediate target re-evaluation.
+
+### Rollback Procedure
+If a deployment causes SLA regression (e.g. p99 latency consistently > 500ms after upgrade):
+1. Check `roadmap.trace_span` for regression onset: `SELECT started_at, attributes FROM roadmap.trace_span WHERE operation='mcp_tool_call' AND status='error' ORDER BY started_at DESC LIMIT 50;`
+2. Revert via `git revert <commit>` and `sudo systemctl restart agenthive-mcp-server`
+3. Confirm state returns Normal via `mcp_ops action=health_check`
+4. File incident proposal in AgentHive referencing root commit
+
+### Target Update Process
+SLA targets in this document are versioned. To modify a target:
+1. File a proposal in AgentHive referencing this document
+2. Update both this doc and `roadmap.sla_config` defaults in the migration
+3. Announce change via `platform.maintenance` NOTIFY channel before deployment
+
+---
+
+## 10. Verification Plan (AC-24)
+
+### Operator-Visible Failure Behavior
+- `GET /api/sla` → JSON with `state: "Down"` when Postgres is unreachable
+- `GET /metrics` → `agenthive_platform_availability 0` when Down
+- `pg_notify('platform.alerts', ...)` fires on every state transition (observable via `LISTEN platform.alerts` in psql)
+- `roadmap.sla_events` receives an INSERT on every Normal↔Degraded↔Down transition
+
+### Regression Test Coverage
+- `sla-handler.ts handleHealthCheck()` returns correct state for each breach condition (unit-testable by mocking `query`)
+- Threshold overrides via `roadmap.sla_config` are read at call time (no caching)
+- State transition notification is best-effort and non-blocking (no throw on NOTIFY failure)
+
+### Rollback Notes
+- Migration 181 (`scripts/migrations/181-p081-sla-contract.sql`) is additive only — creates tables, seeds config. Safe to leave in place on rollback; new tables do not affect existing queries.
+- `callTool()` instrumentation in `server.ts` is wrapped in `void promise.catch()` — INSERT failure never propagates to the MCP caller.
+
+---
+
+## 11. References
 
 - P044: Platform vision document (references this SLA contract)
 - P063: Observability stack (Prometheus + trace_span foundation)
