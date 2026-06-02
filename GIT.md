@@ -1,10 +1,10 @@
 # GIT.md: Parallel-Agent Git Discipline
 
-**Version:** 1.0 | **Status:** Live (replaces CONVENTIONS.md §7) | **For:** All AI agents at AgentHive
+**Version:** 1.0 | **Status:** Live (replaces CONVENTIONS.md §7)
 
 ## STOP — Critical Rules (Never Violate These)
 
-1. **ISOLATION MANDATORY:** Work in `/data/code/worktree/<agent>-<topic>` only. Never in shared `/data/code/AgentHive`. Verify: `git worktree list`. **(Incident #1: claude@bot + gemini collision, git checkout swapped files under mid-edit)**
+1. **ISOLATION MANDATORY:** Do your *build* work in `/data/code/worktree/<agent>-<topic>` only — NEVER edit/commit build work in the shared root `/data/code/AgentHive`. Verify: `git worktree list`. The shared root is reserved for the gate agent's merge-to-main step (§7), single writer at a time. Persistent worktrees like `codex-one` are blessed exceptions ONLY for final gate-merge operations. No agent shall perform build work in the shared root. **(Incident #1: claude@bot + gemini collision, git checkout swapped files under mid-edit)**
 
 2. **ATOMIC COMMITS IN SHARED REPO:** Use `git commit -m "msg" -- file file` (one step). NEVER separate `git add` then `git commit`. **(Incident #8: concurrent agents swallow staged files)**
 
@@ -35,19 +35,18 @@ git push -u gitlab feat/p<ID>-<slug>  # Push to canonical remote
 
 **Open Merge Request (Author):**
 ```bash
-git push gitlab feat/p<ID>-<slug> -o merge_request.create  # DO NOT MERGE yourself.
+git push gitlab feat/p<ID>-<slug> -o merge_request.create  # DO NOT MERGE. Dispatch independent gate agent.
 roadmap proposal release <ID> <your-agent-id>   # positional args: <proposalId> <agent>
 roadmap proposal note-add <ID> <your-agent-id> --note "MR open, ready for independent review"
-# Hand to an independent gate: set maturity='mature' so the gate cron picks it up,
-# OR notify a gate agent via A2A:  roadmap agents msg "P<ID> ready for gate review" --to <gate-agent>
+# Hand to independent gate: set maturity='mature' (gate cron) OR roadmap agents msg "P<ID> ready for gate" --to <gate-agent>
 ```
 
 **Merge to Main (Gate Agent Only):**
 ```bash
 git checkout main && git fetch gitlab feat/p<ID>-<slug>
 git merge --no-ff FETCH_HEAD
-git push gitlab main && git push origin main  # Both remotes (gitlab canonical first)
-roadmap proposal promote <ID>   # advance to the next workflow state (gate-owned)
+git push gitlab main && git push origin main  # Both remotes
+roadmap proposal promote <ID>   # advance to next workflow state (gate-owned)
 ```
 
 **Pre-Destructive Safety Checks:**
@@ -58,11 +57,13 @@ git rev-parse --verify REBASE_HEAD 2>/dev/null && echo "REBASE IN PROGRESS; abor
 git log --oneline -5  # Verify expected history before proceeding
 ```
 
-**Force-Push Feature Branch (Rare):**
+**Force-Push Feature Branch (Rare — sole-owned branches only):**
 ```bash
-EXPECTED_SHA=$(git rev-parse feat/p<ID>-<slug>)
-git rebase main
-git push --force-with-lease=feat/p<ID>-<slug>:${EXPECTED_SHA} gitlab
+git fetch gitlab                                      # refresh remote-tracking refs FIRST
+REMOTE_SHA=$(git rev-parse gitlab/feat/p<ID>-<slug>)  # the REMOTE expected-old SHA (NOT your local)
+git rebase gitlab/main                                # rebase onto current main
+git push --force-with-lease=feat/p<ID>-<slug>:${REMOTE_SHA} gitlab   # lease = remote SHA you observed
+# Lease rejected? Someone else pushed — STOP, refetch, re-review. Never plain --force, never to main.
 ```
 
 **Pre-Merge Package.json Stash Dance:**
@@ -172,15 +173,13 @@ Small, atomic, coherent. One logical unit per commit. No concurrent-add race.
 ### Atomic Commit (Race-Safe in Shared Repo)
 
 ```bash
-# ✅ CORRECT: One atomic command
+# ✅ THE ONLY SAFE PATTERN: pathspec commit — names files directly, never touches the shared index
 git commit -m "P<ID> A<step>: message — files touched" -- src/file1.ts src/file2.ts
 
-# ✅ ALSO CORRECT: Subshell pipeline prevents interleaving
-(git add src/file1.ts && git commit -m "msg") || exit 1
-
-# ❌ WRONG: Two-step in separate invocations (concurrent agents swallow staged files)
-git add src/file1.ts
-git commit -m "msg"  # Another agent's staged files can sneak in during this gap
+# ❌ WRONG: any `git add` first — staging is shared repo state; a concurrent agent's add can be
+#    swept into your commit. Do NOT use `git add` then `git commit`, and do NOT use
+#    `(git add && git commit)` — the subshell still stages into the shared index.
+git add src/file1.ts && git commit -m "msg"   # ❌ races on the shared index
 ```
 
 ### Commit Message Format
@@ -255,10 +254,11 @@ git commit -m "P1438 A2: wire self-claim handler" -- src/orchestrator.ts src/db/
 ### Step 4: Handle Main Movement (Rebase Your Unpublished Work Only)
 
 ```bash
-git fetch gitlab main:main
-git rebase main
+git fetch gitlab                                  # refresh remote-tracking refs
+git rebase gitlab/main                            # rebase your branch onto current main
 # If conflicts: resolve manually, then git rebase --continue
-git push --force-with-lease gitlab feat/p1438-self-claim
+REMOTE_SHA=$(git rev-parse gitlab/feat/p1438-self-claim)   # explicit lease = the remote SHA you observed
+git push --force-with-lease=feat/p1438-self-claim:${REMOTE_SHA} gitlab   # never bare --force-with-lease
 ```
 
 ### Step 5: Push Feature Branch & Open MR
@@ -274,28 +274,40 @@ git push -u gitlab feat/p1438-self-claim
 git push gitlab feat/p1438-self-claim -o merge_request.create
 ```
 
-### Step 6: Release Lease & Dispatch Independent Gate Agent
+### Step 6: Release Lease & Hand to an Independent Gate
 
 ```bash
-roadmap proposal release --proposal_id p1438 --release_reason "MR open on gitlab, ready for independent review"
-
-# Dispatch independent gate agent (DIFFERENT type/provider than you)
-roadmap agent dispatch --agent_type gate-reviewer --proposal_id p1438 --cubic_id roadmap
+roadmap proposal release 1438 <your-agent-id>   # positional: <proposalId> <agent>
+roadmap proposal note-add 1438 <your-agent-id> --note "MR open on gitlab, ready for independent review"
+# Hand to an INDEPENDENT gate (different agent/provider). Two routes:
+#  (a) set maturity='mature' so the gate cron picks it up (CONVENTIONS.md §5/§6), or
+#  (b) notify a gate agent via A2A:
+roadmap agents msg "P1438 MR open, ready for gate review" --to <gate-agent-id>
 ```
 
-**DO NOT merge your own MR.** Gate agent merges after independent review.
+**DO NOT merge your own MR.** An independent gate agent merges after review. (There is no `roadmap agent dispatch` CLI — dispatch happens through the orchestrator/MCP, not a CLI subcommand.)
 
-### Step 7: Gate Agent Merges (Not You)
+### Step 7: Gate Agent Merges (Not You) — with MANDATORY pre-push checks
 
-Gate agent executes:
+The gate does NOT just merge+push. After the P1409 incident (a conflict resolution silently GUTTED a handler file and was pushed to main), these checks are mandatory BEFORE pushing main. (Canon: an INDEPENDENT gate agent merges — not the author, not the operator except for escalated high-risk classes: schema / main-infra / security.)
 
 ```bash
-git checkout main
-git fetch gitlab feat/p1438-self-claim
-git merge --no-ff FETCH_HEAD
-git push gitlab main && git push origin main  # Both remotes
-roadmap proposal transition --proposal_id p1438 --from-state DEVELOP --to-state MERGE
-roadmap proposal release --proposal_id p1438 --release_reason "Merged to main, MERGE state"
+git checkout main && git fetch gitlab
+git merge --no-ff gitlab/feat/p1438-self-claim   # resolve conflicts if any
+
+# ── MANDATORY PRE-PUSH CHECKS (all must pass before pushing main) ──
+git status --porcelain                            # 1. must be empty
+! git grep -nE '^(<<<<<<<|=======|>>>>>>>)' -- .  #    no stray conflict markers
+git diff --stat gitlab/main...HEAD                # 2. magnitudes sane (gutted file = -200/+0 = RED)
+git diff gitlab/main...HEAD                        #    read the intended diff
+# 3. targeted test (jiti, NOT tsc): NODE_PATH=/data/code/AgentHive/node_modules node --import jiti/register --test <touched tests>
+# 4. MCP-handler surface sanity (P1409 class): node --import jiti/register -e "import('./<touched-handler>.ts').then(m=>console.log(Object.keys(m)))"
+#    empty/missing expected exports = gutted file = ABORT
+
+# ── Only after ALL checks pass ──
+git push gitlab main && git push origin main      # gitlab canonical first, then mirror
+roadmap proposal promote 1438                     # advance workflow state (gate-owned)
+# If any check fails: git merge --abort (or reset --hard gitlab/main), report on proposal, send back to author.
 ```
 
 ### Step 8: Cleanup Worktree
@@ -461,54 +473,20 @@ beforeAll(async () => {
 
 ### Cleanup in FK Order (Children Before Parents)
 
+Real AgentHive tables (verified live 2026-06-01): `roadmap_workforce.agent_registry`, `roadmap.agency`, `roadmap_workforce.provider_registry`, `roadmap.model_metadata`, `roadmap.model_routes`. (There is NO `model_registry` or `provider_model` table.) Delete children before parents by the unique `testId` suffix — the pattern that fixed the P1129/P1409 leak (incident #7).
+
 ```typescript
 afterAll(async () => {
-  // DELETE in FK order (children before parents)
-  // 1. model_routes (references model_id)
-  const routed = await db.query(
-    'DELETE FROM model_routes WHERE model_id = $1 RETURNING id',
-    [fixtures.modelId]
-  );
-  console.log(`Cleaned model_routes: ${routed.rows.length} rows`);
-  
-  // 2. provider_model (references model_id + provider_id)
-  const pmodel = await db.query(
-    'DELETE FROM provider_model WHERE model_id = $1 OR provider_id = $1 RETURNING id',
-    [fixtures.modelId]
-  );
-  
-  // 3. model_registry (references agency_id)
-  const models = await db.query(
-    'DELETE FROM model_registry WHERE agency_id = $1 RETURNING id',
-    [fixtures.agencyId]
-  );
-  console.log(`Cleaned model_registry: ${models.rows.length} rows`);
-  
-  // 4. provider_registry (references agency_id)
-  const providers = await db.query(
-    'DELETE FROM provider_registry WHERE agency_id = $1 RETURNING id',
-    [fixtures.agencyId]
-  );
-  console.log(`Cleaned provider_registry: ${providers.rows.length} rows`);
-  
-  // 5. agency (root; no children after step 4)
-  const agencies = await db.query(
-    'DELETE FROM agency WHERE id = $1 RETURNING id',
-    [fixtures.agencyId]
-  );
-  console.log(`Cleaned agency: ${agencies.rows.length} rows`);
-  
-  // VERIFY zero litter
+  await db.query(`DELETE FROM roadmap.model_routes               WHERE model_name      LIKE $1`, [`%${testId}%`]);
+  await db.query(`DELETE FROM roadmap.model_metadata             WHERE model_name      LIKE $1`, [`%${testId}%`]);
+  await db.query(`DELETE FROM roadmap_workforce.provider_registry WHERE agency_identity LIKE $1`, [`%${testId}%`]);
+  await db.query(`DELETE FROM roadmap.agency                     WHERE agency_id       LIKE $1`, [`%${testId}%`]);
+  await db.query(`DELETE FROM roadmap_workforce.agent_registry    WHERE agent_identity  LIKE $1`, [`%${testId}%`]);
   const orphans = await db.query(
-    'SELECT COUNT(*) FROM agency WHERE id = $1',
-    [fixtures.agencyId]
-  );
-  
-  if (parseInt(orphans.rows[0].count) !== 0) {
-    throw new Error(
-      `CLEANUP FAILED: testId='${testId}' fixture leaked ${orphans.rows[0].count} rows. ` +
-      `Manual cleanup required: DELETE FROM agency WHERE agency_name LIKE '${testId}%'`
-    );
+    `SELECT count(*)::int AS n FROM roadmap_workforce.agent_registry WHERE agent_identity LIKE $1`, [`%${testId}%`]);
+  if (orphans.rows[0].n !== 0) {
+    throw new Error(`CLEANUP FAILED: testId='${testId}' leaked ${orphans.rows[0].n} rows. ` +
+      `Manual: DELETE FROM roadmap_workforce.agent_registry WHERE agent_identity LIKE '%${testId}%'`);
   }
 });
 ```
@@ -518,11 +496,15 @@ afterAll(async () => {
 Before writing tests, query live DB for FK structure:
 
 ```bash
-psql agenthive -c "
-  SELECT constraint_name, table_name, column_name, referenced_table_name, referenced_column_name
+# pg_constraint has no referenced_table_name column — resolve via pg_get_constraintdef + regclass.
+psql -U admin -d agenthive -c "
+  SELECT conrelid::regclass AS table, conname, pg_get_constraintdef(oid) AS definition
   FROM pg_constraint
-  WHERE table_name IN ('agency', 'provider_registry', 'model_registry', 'model_routes')
-  ORDER BY table_name, constraint_name
+  WHERE contype='f'
+    AND conrelid::regclass::text IN
+        ('roadmap.agency','roadmap_workforce.provider_registry',
+         'roadmap.model_metadata','roadmap.model_routes')
+  ORDER BY 1
 "
 
 # Output guides cleanup order (work backwards from constraints)
@@ -552,14 +534,17 @@ psql agenthive -c "
 " > /tmp/dry-run.log
 cat /tmp/dry-run.log  # Verify count is expected
 
-# Step 3: Identify all FK dependencies
-psql agenthive -c "
-  SELECT constraint_name, table_name, column_name 
+# Step 3: Identify all FK dependencies (what RESTRICT-blocks or CASCADEs on delete).
+# pg_constraint has NO referenced_table_name column — match by the referenced table's oid.
+psql -U admin -d agenthive -c "
+  SELECT conrelid::regclass AS referencing_table, conname,
+         confdeltype,  -- a=no action, r=restrict, c=cascade, n=set null
+         pg_get_constraintdef(oid) AS definition
   FROM pg_constraint
-  WHERE referenced_table_name = 'agency'
-  ORDER BY table_name
+  WHERE confrelid = 'roadmap.agency'::regclass AND contype='f'
+  ORDER BY 1
 " > /tmp/fk-deps.txt
-cat /tmp/fk-deps.txt  # Plan cleanup order based on FK hierarchy
+cat /tmp/fk-deps.txt  # Plan cleanup order: children (cascade/restrict) before parent
 
 # Step 4: Execute with exception skip (resilient to already-gone rows)
 # (adapt to your use case; example for bulk delete)
@@ -691,23 +676,23 @@ If you need to force-push your own unpublished feature branch (e.g., rebase onto
 ### Safe Force-Push Pattern
 
 ```bash
-# Step 1: Identify expected old SHA
-EXPECTED_OLD=$(git rev-parse feat/p1438-self-claim)
-echo "Expected old SHA: $EXPECTED_OLD"
+# Step 1: Refresh remote refs, capture the REMOTE expected-old SHA (the lease target).
+git fetch gitlab
+REMOTE_OLD=$(git rev-parse gitlab/feat/p1438-self-claim)
 
-# Step 2: Dry-run the rebase (safe; no side effects)
-git rebase --dry-run main
+# Step 2: Preview the replay (no --dry-run flag exists for rebase; use a range).
+git log --oneline gitlab/main..HEAD          # commits that will be replayed
 
-# Step 3: Execute rebase (no force yet)
-git rebase main
+# Step 3: Execute rebase onto current main (no force yet)
+git rebase gitlab/main
 # If conflicts: resolve, then git rebase --continue
 
-# Step 4: Force-push with lease (NEVER plain --force)
-git push --force-with-lease=feat/p1438-self-claim:${EXPECTED_OLD} gitlab
+# Step 4: Force-push with EXPLICIT lease (NEVER plain --force, NEVER bare --force-with-lease)
+git push --force-with-lease=feat/p1438-self-claim:${REMOTE_OLD} gitlab
+# Lease rejected? Someone pushed since your fetch — STOP, re-fetch, re-review.
 
 # Step 5: Verify
-git log --oneline gitlab/feat/p1438-self-claim | head -5
-# Should show rebased commits
+git fetch gitlab && git log --oneline gitlab/feat/p1438-self-claim | head -5
 ```
 
 ### Forbidden Patterns
@@ -775,7 +760,7 @@ This prevents the version-bump post-merge-hook from aborting merge and leaving m
 4. Develop & test: `npm test -- --testNamePattern='P<ID>'` (runtime validation)
 5. Commit atomically: `git commit -m "P<ID> A<step>: msg — files" -- src/file1.ts`
 6. Push & open MR: `git push -u gitlab feat/p<ID>-<slug> && git push gitlab -o merge_request.create`
-7. Release lease & dispatch gate: `roadmap proposal release --proposal_id p<ID> --release_reason ".."; roadmap agent dispatch --agent_type gate-reviewer --proposal_id p<ID> --cubic_id roadmap`
+7. Release lease & hand to gate: `roadmap proposal release <ID> <your-agent-id>` then set maturity='mature' (gate cron) or `roadmap agents msg "P<ID> ready for gate" --to <gate-agent>`. You do NOT merge your own work.
 8. Wait for gate to merge (you do NOT merge).
 
 ---
@@ -790,4 +775,4 @@ This prevents the version-bump post-merge-hook from aborting merge and leaving m
 
 ---
 
-**Maintainer:** Gary Qi (gary.qi@gmail.com) | **Last Updated:** 2026-06-01 | **Incidents Resolved:** 1–15 | **Status:** Live
+**Maintainer:** Gary Qi (gary.qi@gmail.com) | **Last Updated:** 2026-06-01 | **Incidents Resolved:** 1–15 | **Status:** DRAFT (pending shared-root/exception policy + in-repo gate landing)

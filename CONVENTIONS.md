@@ -804,7 +804,7 @@ COMMIT;
 
 ## 7. Git Discipline for Multi-Agent Work
 
-**See GIT.md for complete parallel-agent git workflow** (isolated worktrees, atomic commits, safety checks, merge protocol, self-merge anti-pattern, live-DB test hygiene, parallel-dispatch audit, migration numbering).
+**See GIT.md and WORKFLOW.md for complete parallel-agent discipline** (isolated worktrees, atomic commits, safety checks, merge protocol, self-merge anti-pattern, live-DB test hygiene, parallel-dispatch audit, migration numbering).
 
 For project context and workflow stages, see CONVENTIONS.md §1–2 (Proposal Lifecycle and File Precedence).
 

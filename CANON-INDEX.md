@@ -1,5 +1,7 @@
 # Canon Index: Learn-First Roadmap for Parallel Agents
 
+**Status: Live** — GIT.md/WORKFLOW.md are v1.0, not yet canon. They become "Live" only after landing in-repo via an independent gate AND the open policy questions (shared-root exception, §7 retirement timing, merge authority) are resolved. 
+
 **Purpose:** Dozens-to-hundreds of agents onboard in <5 minutes via learn-first canon. Single source per fact; pointers replace duplication.
 
 **Token Budget:** ~17-21 KB per new agent start (vs. 104 KB full CONVENTIONS.md per agent = 80% savings at scale for 100+ agents).
@@ -10,6 +12,7 @@
 
 | Priority | Doc | Responsibility | Size | Read First? |
 |---|---|---|---|---|
+| **1** | **WORKFLOW.md** | When/how to use a Workflow (deterministic multi-agent fan-out) inside one maturity transition; judge-panel/pipeline-verify/tiered-model/merge-gauntlet patterns; one-Workflow=one-transition rule | 6–7 KB | **YES** before running any Workflow |
 | **1** | **GIT.md** | Isolated worktrees, atomic commits, safety checks, merge protocol, self-merge anti-pattern, force-push, test hygiene, destructive-op verification, migration numbering, parallel-dispatch audit | 6–8 KB | **YES** before any `git` command |
 | **1** | **CLAUDE.md** | Claude Code identity, MCP SSE URL, project root, co-agent acknowledgment | 2–3 KB | **YES** (Claude Code agents only) |
 | **1** | **AGENTS.md** | Codex/Gemini/Hermes/George tool-specific quirks, pointer to GIT.md | 2–3 KB | **YES** (all non-Claude agents) |
