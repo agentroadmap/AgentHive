@@ -541,7 +541,7 @@ export const ProposalDetailsModal: React.FC<Props> = ({
 		return () => {
 			cancelled = true;
 		};
-	}, [proposalId, isOpen]);
+	}, [proposalId, isOpen, proposal?.updatedDate]);
 
 	const handleCancelEdit = useCallback(() => {
 		if (isDirty) {

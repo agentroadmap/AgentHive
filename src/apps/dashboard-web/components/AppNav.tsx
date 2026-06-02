@@ -21,7 +21,7 @@ const SECONDARY: NavItem[] = [
 	{ href: "/agents", label: "Agents" },
 	{ href: "/teams", label: "Teams" },
 	{ href: "/channels", label: "Channels" },
-	{ href: "/dispatch", label: "Dispatch" },
+	{ href: "/dispatches", label: "Dispatch" },
 	{ href: "/knowledge", label: "Knowledge" },
 	{ href: "/documents", label: "Documents" },
 	{ href: "/decisions", label: "Decisions" },

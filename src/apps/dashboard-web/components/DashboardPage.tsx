@@ -306,7 +306,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 						{[
 							["Board", "/board"],
 							["Agents", "/agents"],
-							["Dispatch", "/dispatch"],
+							["Dispatch", "/dispatches"],
 							["Channels", "/channels"],
 							["Routes", "/routes"],
 							["Settings", "/settings"],
