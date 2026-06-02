@@ -104,6 +104,34 @@ export const agentRegisterSchema: JsonSchema = {
 			additionalProperties: false,
 			description: "Model-specific configuration",
 		},
+		// P1129: agency-shape fields for self-service registration
+		preferred_provider: {
+			type: "string",
+			enum: ["claude", "codex", "gemini", "copilot", "hermes"],
+			description:
+				"P1129: Canonical provider token for this agency. Reconciles legacy openai→codex / google→gemini on write.",
+		},
+		agent_cli: {
+			type: "string",
+			minLength: 1,
+			maxLength: 64,
+			description:
+				"P1129: CLI executable name used to spawn child agents (e.g. 'claude', 'codex', 'gemini').",
+		},
+		host_affinity: {
+			type: "string",
+			minLength: 1,
+			maxLength: 128,
+			description:
+				"P1129: Preferred execution host for this agency (e.g. 'bot', 'codex-host'). Soft placement hint.",
+		},
+		display_name: {
+			type: "string",
+			minLength: 1,
+			maxLength: 128,
+			description:
+				"P1129: Human-friendly label for the agency (e.g. 'George Gemini Agency').",
+		},
 	},
 	required: ["name", "model", "provider"],
 	additionalProperties: false,
@@ -353,6 +381,117 @@ export const agentForceReleaseAliasSchema: JsonSchema = {
 			default: false,
 			description:
 				"If true, allows forcing release from active agents with stale heartbeat (>90s)",
+		},
+	},
+	required: ["identity"],
+	additionalProperties: false,
+};
+
+// P1129: register_model — agency declares a model it supports
+export const agentRegisterModelSchema: JsonSchema = {
+	type: "object",
+	properties: {
+		model_name: {
+			type: "string",
+			minLength: 1,
+			maxLength: 200,
+			description:
+				"Model identifier as it appears in roadmap.model_metadata (e.g. 'claude-sonnet-4-6', 'gemini-2.0-flash').",
+		},
+		route_provider: {
+			type: "string",
+			minLength: 1,
+			maxLength: 64,
+			description:
+				"Who serves this route (e.g. 'anthropic', 'google', 'openai', 'nous'). Maps to model_routes.route_provider.",
+		},
+		agent_provider: {
+			type: "string",
+			enum: ["claude", "codex", "gemini", "copilot", "hermes", "openclaw"],
+			description:
+				"AgentProvider token for this route — the CLI family that uses it.",
+		},
+		agent_cli: {
+			type: "string",
+			minLength: 1,
+			maxLength: 64,
+			description:
+				"CLI executable name (e.g. 'claude', 'codex', 'gemini'). Stored in model_routes.agent_cli.",
+		},
+		base_url: {
+			type: "string",
+			description:
+				"Optional API endpoint override (e.g. local Ollama or proxy). NULL = provider default.",
+		},
+		cost_per_1k_input: {
+			type: "number",
+			minimum: 0,
+			description: "USD cost per 1 000 input tokens. 0 for token-plan quota.",
+		},
+		cost_per_1k_output: {
+			type: "number",
+			minimum: 0,
+			description: "USD cost per 1 000 output tokens. 0 for token-plan quota.",
+		},
+		plan_type: {
+			type: "string",
+			enum: ["token_plan", "api_key", "free"],
+			description: "Billing plan type for this route.",
+		},
+		priority: {
+			type: "integer",
+			minimum: 1,
+			maximum: 100,
+			description:
+				"Route selection order — lower wins. 1 = token-plan (cheapest first), 10 = pay-as-you-go.",
+		},
+		probe: {
+			type: "boolean",
+			default: false,
+			description:
+				"When true, run a CLI liveness probe (`<agent_cli> --model <model_name> -p x`) before upserting. Rejects models that fail the probe.",
+		},
+	},
+	required: ["model_name", "route_provider", "agent_provider"],
+	additionalProperties: false,
+};
+
+// P1129: agency_start — launch the liaison process for an agency
+export const agencyStartSchema: JsonSchema = {
+	type: "object",
+	properties: {
+		identity: {
+			type: "string",
+			minLength: 1,
+			maxLength: 200,
+			description:
+				"Agency agent_identity string. Used as the systemd instance name: agenthive-agency@<identity>.service",
+		},
+		worktree: {
+			type: "string",
+			description:
+				"Optional worktree directory name (e.g. 'codex-three'). Written to the env file if provided.",
+		},
+		provider: {
+			type: "string",
+			enum: ["claude", "codex", "gemini", "copilot", "hermes"],
+			description:
+				"Optional provider override. Written to the env file as AGENTHIVE_PROVIDER.",
+		},
+	},
+	required: ["identity"],
+	additionalProperties: false,
+};
+
+// P1129: agency_status — per-agency runtime state
+export const agencyStatusSchema: JsonSchema = {
+	type: "object",
+	properties: {
+		identity: {
+			type: "string",
+			minLength: 1,
+			maxLength: 200,
+			description: "Agency agent_identity to query.",
 		},
 	},
 	required: ["identity"],

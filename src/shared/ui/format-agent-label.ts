@@ -53,3 +53,28 @@ export function formatAgentLabel(
 export function formatAgentLabelShort(row: AgentLabelRow): string {
 	return row.display_alias ?? row.agent_identity;
 }
+
+/**
+ * P933: Live-feed label with DB-driven host-strip.
+ *
+ * Rules (mirrors SQL CASE in v_agent_display_label):
+ * (a) NULL/absent alias → raw identity, no parens
+ * (b) 2-segment alias → "{alias} ({identity})"
+ * (c) 3-segment alias, middle matches hostIds (case-insensitive) → "{P1}-{P3} ({identity})"
+ * (d) 3-segment alias, middle unknown → "{alias} ({identity})" verbatim
+ *
+ * `hostIds` is caller-supplied (from DB query); this function does NOT query the DB.
+ */
+export function formatAgentLabelLive(row: AgentLabelRow, hostIds: string[]): string {
+	if (!row.display_alias) return row.agent_identity;
+
+	const parts = row.display_alias.split("-");
+	if (parts.length === 3) {
+		const middle = parts[1]!.toLowerCase();
+		if (hostIds.some((h) => h.toLowerCase() === middle)) {
+			return `${parts[0]}-${parts[2]} (${row.agent_identity})`;
+		}
+	}
+
+	return `${row.display_alias} (${row.agent_identity})`;
+}

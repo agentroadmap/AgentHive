@@ -17,11 +17,14 @@ import {
 import { PgAgentHandlers } from "./pg-handlers.ts";
 import {
 	agencyResumeSchema,
+	agencyStartSchema,
+	agencyStatusSchema,
 	agentAssignSchema,
 	agentForceReleaseAliasSchema,
 	agentGetSchema,
 	agentHeartbeatSchema,
 	agentListSchema,
+	agentRegisterModelSchema,
 	agentRegisterSchema,
 	agentRenameSchema,
 	agentRetireSchema,
@@ -226,6 +229,57 @@ export function registerAgentTools(server: McpServer): void {
 	server.addTool(zombieDetectTool);
 	server.addTool(poolStatsTool);
 	server.addTool(agencyResumeTool);
+
+	// ── agent_register_model ────────────────────────────────────────────────
+	type RegisterModelArgs = Parameters<PgAgentHandlers["registerModel"]>[0];
+	const registerModelTool: McpToolHandler =
+		createSimpleValidatedTool<RegisterModelArgs>(
+			{
+				name: "agent_register_model",
+				description:
+					"P1129 AC-2: Agency self-declares a model it supports. Upserts into " +
+					"roadmap.model_routes. Pass probe=true to run a CLI liveness check " +
+					"(`<agent_cli> --model <model_name> -p x`) before registering.",
+				inputSchema: agentRegisterModelSchema,
+			},
+			agentRegisterModelSchema,
+			async (input) => pgHandlers.registerModel(input),
+		);
+
+	// ── agency_start ────────────────────────────────────────────────────────
+	type AgencyStartArgs = Parameters<PgAgentHandlers["agencyStart"]>[0];
+	const agencyStartTool: McpToolHandler =
+		createSimpleValidatedTool<AgencyStartArgs>(
+			{
+				name: "agency_start",
+				description:
+					"P1129 AC-3: Start the liaison systemd service for an agency " +
+					"(agenthive-agency@<identity>.service). Optionally writes an env file " +
+					"with AGENTHIVE_PROVIDER / AGENTHIVE_WORKTREE before starting.",
+				inputSchema: agencyStartSchema,
+			},
+			agencyStartSchema,
+			async (input) => pgHandlers.agencyStart(input),
+		);
+
+	// ── agency_status ────────────────────────────────────────────────────────
+	type AgencyStatusArgs = Parameters<PgAgentHandlers["agencyStatus"]>[0];
+	const agencyStatusTool: McpToolHandler =
+		createSimpleValidatedTool<AgencyStatusArgs>(
+			{
+				name: "agency_status",
+				description:
+					"P1129 AC-4: Per-agency runtime state — DB row (status, last_heartbeat_at), " +
+					"open liaison session, and systemd ActiveState in one response.",
+				inputSchema: agencyStatusSchema,
+			},
+			agencyStatusSchema,
+			async (input) => pgHandlers.agencyStatus(input),
+		);
+
+	server.addTool(registerModelTool);
+	server.addTool(agencyStartTool);
+	server.addTool(agencyStatusTool);
 
 	// ── agent_update_reporting ──────────────────────────────────────────────
 	const reportingTool = createSimpleValidatedTool<UpdateReportingArgs>(

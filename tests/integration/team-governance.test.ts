@@ -13,8 +13,12 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { PgTeamGovernanceHandlers } from "../../src/apps/mcp-server/tools/teams/pg-governance-handlers.ts";
+import {
+	teamCharterCreateSchema,
+	teamDisputeLogSchema,
+} from "../../src/apps/mcp-server/tools/teams/schemas.ts";
 
 // Mock McpServer — governance handlers don't use server directly
 const mockServer = {} as any;
@@ -88,8 +92,6 @@ describe("P182: Team Governance Layer", () => {
 		});
 
 		it("teamDisputeLog rejects invalid escalation levels via schema", () => {
-			// Schema validation: escalationLevel must be L1-L4
-			const { teamDisputeLogSchema } = require("../../src/apps/mcp-server/tools/teams/schemas.ts");
 			const level = teamDisputeLogSchema.properties.escalationLevel;
 			assert.deepEqual(level.enum, ["L1", "L2", "L3", "L4"]);
 		});
@@ -99,7 +101,6 @@ describe("P182: Team Governance Layer", () => {
 
 	describe("AC-3: Three-tier dispute resolution ladder defined", () => {
 		it("dispute status enum covers all ladder states", () => {
-			const { teamDisputeLogSchema } = require("../../src/apps/mcp-server/tools/teams/schemas.ts");
 			const statuses = teamDisputeLogSchema.properties.status.enum;
 			assert.ok(statuses.includes("open"), "must have open");
 			assert.ok(statuses.includes("team_resolved"), "must have team_resolved (L3)");
@@ -109,7 +110,6 @@ describe("P182: Team Governance Layer", () => {
 		});
 
 		it("escalation levels cover all four tiers", () => {
-			const { teamDisputeLogSchema } = require("../../src/apps/mcp-server/tools/teams/schemas.ts");
 			const levels = teamDisputeLogSchema.properties.escalationLevel.enum;
 			assert.deepEqual(levels, ["L1", "L2", "L3", "L4"]);
 		});
@@ -119,7 +119,6 @@ describe("P182: Team Governance Layer", () => {
 
 	describe("AC-1, AC-6: Team charter at squad assembly", () => {
 		it("teamCharterCreate requires teamId, proposalIds, teamName, createdBy", () => {
-			const { teamCharterCreateSchema } = require("../../src/apps/mcp-server/tools/teams/schemas.ts");
 			assert.deepEqual(
 				teamCharterCreateSchema.required,
 				["teamId", "proposalIds", "teamName", "createdBy"],
@@ -166,7 +165,6 @@ describe("P182: Team Governance Layer", () => {
 		});
 
 		it("constitution doc covers all required sections", () => {
-			const { readFileSync } = require("node:fs");
 			const content = readFileSync(
 				"docs/governance/P179-team-governance-article-III-7a.md",
 				"utf8",
@@ -199,8 +197,7 @@ describe("P182: Team Governance Layer", () => {
 
 	describe("Default norms coverage (AC-2)", () => {
 		it("five default norm categories are defined", () => {
-			// Verify via source — the handler has DEFAULT_NORMS with 5 entries
-			const handlerSrc = require("node:fs").readFileSync(
+			const handlerSrc = readFileSync(
 				"src/apps/mcp-server/tools/teams/pg-governance-handlers.ts",
 				"utf8",
 			);
@@ -224,7 +221,6 @@ describe("P182: Team Governance Layer", () => {
 
 	describe("Database migration coverage (AC-5)", () => {
 		it("migration 058 adds team_norms table and team_resolved status", () => {
-			const { readFileSync } = require("node:fs");
 			const migration = readFileSync(
 				"database/migrations/058-team-governance-p182.sql",
 				"utf8",

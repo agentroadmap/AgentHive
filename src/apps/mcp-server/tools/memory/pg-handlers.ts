@@ -65,7 +65,7 @@ export class PgMemoryHandlers {
 				args.metadata === undefined ? undefined : JSON.parse(args.metadata);
 			const { rows: existing } = await query<{ id: number }>(
 				`SELECT id
-         FROM agent_memory
+         FROM workforce.agent_memory
          WHERE agent_identity = $1 AND layer = $2 AND key = $3
          ORDER BY updated_at DESC, id DESC
          LIMIT 1`,
@@ -103,7 +103,7 @@ export class PgMemoryHandlers {
 				}
 
 				await query(
-					`UPDATE agent_memory
+					`UPDATE workforce.agent_memory
            SET ${setClauses.join(", ")}
            WHERE id = $1`,
 					params,
@@ -146,7 +146,7 @@ export class PgMemoryHandlers {
 		key?: string;
 	}): Promise<CallToolResult> {
 		try {
-			let sql = `SELECT key, value, metadata, expires_at, updated_at FROM v_active_memory
+			let sql = `SELECT key, value, metadata, expires_at, updated_at FROM workforce.v_active_memory
                   WHERE agent_identity = $1 AND layer = $2`;
 			const params: any[] = [args.agent_identity, args.layer];
 
@@ -189,7 +189,7 @@ export class PgMemoryHandlers {
 		key?: string;
 	}): Promise<CallToolResult> {
 		try {
-			let sql = `DELETE FROM agent_memory WHERE agent_identity = $1 AND layer = $2`;
+			let sql = `DELETE FROM workforce.agent_memory WHERE agent_identity = $1 AND layer = $2`;
 			const params: any[] = [args.agent_identity, args.layer];
 
 			if (args.key) {
@@ -250,7 +250,7 @@ export class PgMemoryHandlers {
 			const { rows } = await query(
 				`SELECT id, agent_identity, layer, key, value,
                 1 - (body_vector <=> $${vecIdx}::vector(1536)) AS similarity
-         FROM v_active_memory
+         FROM workforce.v_active_memory
          WHERE ${where}
          ORDER BY similarity DESC
          LIMIT ${limit}`,
@@ -292,7 +292,7 @@ export class PgMemoryHandlers {
 	}): Promise<CallToolResult> {
 		try {
 			let sql =
-				"SELECT agent_identity, layer, key, value, created_at, expires_at FROM v_active_memory";
+				"SELECT agent_identity, layer, key, value, created_at, expires_at FROM workforce.v_active_memory";
 			const params: any[] = [];
 			const conditions: string[] = [];
 			let paramIdx = 1;
@@ -363,7 +363,7 @@ export class PgMemoryHandlers {
 				// AC#13: token-budget mode — fetch actual entries and compress to fit
 				const { rows } = await query(
 					`SELECT agent_identity, layer, key, value, updated_at
-           FROM v_active_memory ${where}
+           FROM workforce.v_active_memory ${where}
            ORDER BY agent_identity, layer, updated_at DESC`,
 					params,
 				);
@@ -398,7 +398,7 @@ export class PgMemoryHandlers {
 			// Default: count-only summary grouped by agent/layer
 			const { rows } = await query(
 				`SELECT agent_identity, layer, COUNT(*) as count, MAX(updated_at) as last_updated
-         FROM v_active_memory ${where}
+         FROM workforce.v_active_memory ${where}
          GROUP BY agent_identity, layer
          ORDER BY agent_identity, layer`,
 				params,

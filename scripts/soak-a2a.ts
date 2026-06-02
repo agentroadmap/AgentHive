@@ -19,7 +19,7 @@
  *                    so the timeout-cron must escalate them.
  * --kill-cron-at-min N  optionally invoke `pkill -9 timeout-cron` mid-soak
  *                       to validate G3 (poison-pill counter persistence).
- *                       Requires P889 (escalation_failure_count column).
+ *                       Requires P900 (escalation_failure_count column).
  *
  * Pass criteria (printed at end):
  *   1. p50 wake latency < 250ms  AND  p99 wake latency < 1000ms
@@ -32,6 +32,7 @@
  * notify path is dead and the script will fail at criterion 1.
  */
 
+import { execSync } from "node:child_process";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { Client as PgClient } from "pg";
@@ -41,6 +42,7 @@ interface SoakOpts {
 	minutes: number;
 	rate: number;
 	ackProb: number;
+	killCronAtMin?: number;
 }
 
 function parseArgs(): SoakOpts {
@@ -51,10 +53,17 @@ function parseArgs(): SoakOpts {
 		const v = Number(args[i + 1]);
 		return Number.isFinite(v) ? v : dflt;
 	};
+	const getOpt = (flag: string): number | undefined => {
+		const i = args.indexOf(flag);
+		if (i < 0 || i + 1 >= args.length) return undefined;
+		const v = Number(args[i + 1]);
+		return Number.isFinite(v) ? v : undefined;
+	};
 	return {
 		minutes: get("--minutes", 5),
 		rate: get("--rate", 1),
 		ackProb: get("--ack-prob", 0.7),
+		killCronAtMin: getOpt("--kill-cron-at-min"),
 	};
 }
 
@@ -175,7 +184,25 @@ async function main(): Promise<number> {
 	// Sender loop: 1/rate inserts per second, mixed types.
 	const startMs = Date.now();
 	let i = 0;
+	let cronKilled = false;
+	const killCronAtMs =
+		opts.killCronAtMin !== undefined ? opts.killCronAtMin * 60 * 1000 : undefined;
+
 	while (Date.now() - startMs < totalMs) {
+		// --kill-cron-at-min: kill timeout-cron once to validate G3 (poison-pill persistence).
+		if (killCronAtMs !== undefined && !cronKilled && Date.now() - startMs >= killCronAtMs) {
+			cronKilled = true;
+			try {
+				execSync("pkill -f timeout-cron", { stdio: "inherit" });
+				console.log(
+					`[Soak] Killed timeout-cron at ${((Date.now() - startMs) / 60000).toFixed(1)}min ` +
+						"(G3: poison-pill counter must survive restart)",
+				);
+			} catch {
+				// pkill exits non-zero if no process matched — not fatal.
+				console.warn("[Soak] pkill -f timeout-cron found no matching process");
+			}
+		}
 		const r = Math.random();
 		const type: SentRec["type"] = r < 0.5 ? "task" : r < 0.8 ? "event" : "query";
 		const expectAck = type === "task";

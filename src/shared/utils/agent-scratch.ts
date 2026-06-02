@@ -117,10 +117,14 @@ export async function reapScratch(
 	}
 
 	const sizeMb = existsSync(scratchPath)
-		? await getDirSizeMb(scratchPath) ?? 0
+		? (await getDirSizeMb(scratchPath)) ?? 0
 		: 0;
 
-	let reapError: string | null = null;
+	const maxSizeMb = Number(await getConfigValue("scratch.max_size_mb", "1024"));
+
+	let reapError: string | null =
+		sizeMb > maxSizeMb ? `size_exceeded:${sizeMb.toFixed(1)}MB` : null;
+
 	try {
 		if (existsSync(scratchPath)) {
 			await rm(scratchPath, { recursive: true, force: true });

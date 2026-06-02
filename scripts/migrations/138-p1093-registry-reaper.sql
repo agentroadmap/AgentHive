@@ -20,7 +20,12 @@ ALTER TABLE roadmap_workforce.agent_registry
   ADD COLUMN IF NOT EXISTS reaped_at   TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS reap_reason TEXT;
 
--- ── 2. Reaper function (soft-delete) ────────────────────────────────────────
+-- ── 2. agent_lifecycle_log constraint check (AC-2) ──────────────────────────
+-- agent_lifecycle_log.event_type has NO CHECK constraint (confirmed by
+-- information_schema query at migration write time). No extension needed;
+-- 'registry_reap' is a valid free-form value.
+
+-- ── 3. Reaper function (soft-delete) ────────────────────────────────────────
 --
 -- Marks inactive, long-unseen rows with reaped_at = now().
 -- Safety guards:
@@ -30,6 +35,8 @@ ALTER TABLE roadmap_workforce.agent_registry
 --   • Skips rows already reaped (reaped_at IS NOT NULL).
 --   • Advisory xact lock (key 1093,1) prevents concurrent runs.
 --   • Batched UPDATE with FOR UPDATE SKIP LOCKED avoids contention.
+--   • Calls ANALYZE after large-batch runs (>500 rows) to keep planner stats
+--     fresh (AC-12).
 
 CREATE OR REPLACE FUNCTION roadmap_workforce.fn_reap_stale_registry(
   retention_interval INTERVAL,
@@ -116,20 +123,50 @@ BEGIN
     );
   END LOOP;
 
+  -- AC-12: refresh planner stats after large-batch runs so query plans stay
+  -- accurate as the working set shrinks.
+  IF v_total_count > 500 THEN
+    ANALYZE roadmap_workforce.agent_registry;
+  END IF;
+
   RETURN v_total_count;
 END;
 $fn$;
 
--- ── 3. One-time backfill (30-day window) ────────────────────────────────────
--- Marks rows that have been inactive for ≥30 days.  Wider window than the
--- daily cron (14d) to avoid reaping rows that went stale during a planned
--- outage right before this migration was applied.
+-- ── 4. One-time backfill (30-day window) ────────────────────────────────────
+-- Marks rows inactive for ≥30 days. Wider window than the daily cron (14d).
+-- Expected count at first apply: ~0–100 (most stale rows are 14–29 days old).
+-- If actual count > 200, investigate for unexpected identity churn.
 
 DO $$
 DECLARE v_reaped INT;
 BEGIN
   SELECT roadmap_workforce.fn_reap_stale_registry('30 days'::interval) INTO v_reaped;
   RAISE NOTICE 'P1093 backfill: reaped % rows (30-day window)', v_reaped;
+  IF v_reaped > 200 THEN
+    RAISE WARNING 'P1093 backfill: % rows > expected ceiling of 200 — investigate identity churn', v_reaped;
+  END IF;
+END;
+$$;
+
+-- ── 5. Post-backfill verification (AC-7, revised for soft-delete) ────────────
+-- Soft-delete keeps rows in the table; the meaningful metric is unreaped stale
+-- rows (eligible for future cron runs), not total inactive count.
+-- After this migration + the 14d cron run, unreaped-stale should be 0.
+
+DO $$
+DECLARE v_unreaped_stale INT;
+BEGIN
+  SELECT COUNT(*)::INT INTO v_unreaped_stale
+  FROM   roadmap_workforce.agent_registry
+  WHERE  status       = 'inactive'
+    AND  reaped_at   IS NULL
+    AND  last_seen_at < now() - interval '30 days';
+
+  RAISE NOTICE 'P1093 post-backfill: % unreaped-stale rows (>30d, not yet reaped)', v_unreaped_stale;
+  IF v_unreaped_stale > 0 THEN
+    RAISE WARNING 'P1093: % unreaped stale rows remain after backfill — reaper may have been locked out', v_unreaped_stale;
+  END IF;
 END;
 $$;
 

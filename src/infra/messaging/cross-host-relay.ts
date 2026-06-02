@@ -10,13 +10,13 @@
  */
 
 import crypto from "crypto";
-import { Pool } from "pg";
-import {
-	validateCallbackUrl,
-	revalidateBeforeDelivery,
-} from "../security/callback-url-validator.ts";
-import { getAgentSecret } from "../security/agent-secret-store.ts";
+import type { Pool } from "pg";
 import { deriveSigningKey } from "../security/agent-crypto.ts";
+import { getAgentSecret } from "../security/agent-secret-store.ts";
+import {
+	revalidateBeforeDelivery,
+	validateCallbackUrl,
+} from "../security/callback-url-validator.ts";
 
 /**
  * Maximum number of delivery retry attempts (3 total: initial + 2 retries).
@@ -81,13 +81,7 @@ export async function postDeliveryWithAuth(
 
 		// Log as blocked
 		if (messageId) {
-			await logDeliveryAttempt(
-				pool,
-				messageId,
-				"blocked",
-				null,
-				errorMsg,
-			);
+			await logDeliveryAttempt(pool, messageId, "blocked", null, errorMsg);
 		}
 
 		throw new Error(`SSRF validation failed: ${errorMsg}`);
@@ -130,13 +124,7 @@ export async function postDeliveryWithAuth(
 			err instanceof Error ? err.message : "Failed to resolve signing secret";
 
 		if (messageId) {
-			await logDeliveryAttempt(
-				pool,
-				messageId,
-				"blocked",
-				null,
-				errorMsg,
-			);
+			await logDeliveryAttempt(pool, messageId, "blocked", null, errorMsg);
 		}
 
 		throw new Error(`Signing secret resolution failed: ${errorMsg}`);
@@ -152,8 +140,7 @@ export async function postDeliveryWithAuth(
 		? `\nX-AgentHive-Target-Host-Id: ${targetHostId}`
 		: "";
 
-	const signingInput =
-		`POST\n${pathAndSearch}\nX-AgentHive-Delivery-Id: ${deliveryId}\nX-AgentHive-Timestamp: ${timestamp}\nX-AgentHive-Agent-Id: ${sendingAgentId}${targetHostField}\n${bodyJson}`;
+	const signingInput = `POST\n${pathAndSearch}\nX-AgentHive-Delivery-Id: ${deliveryId}\nX-AgentHive-Timestamp: ${timestamp}\nX-AgentHive-Agent-Id: ${sendingAgentId}${targetHostField}\n${bodyJson}`;
 
 	// Step 6: HMAC-SHA256 signature
 	const signature = crypto
@@ -193,12 +180,7 @@ export async function postDeliveryWithAuth(
 			// Success (2xx)
 			if (finalStatus >= 200 && finalStatus < 300) {
 				if (messageId) {
-					await logDeliveryAttempt(
-						pool,
-						messageId,
-						"success",
-						finalStatus,
-					);
+					await logDeliveryAttempt(pool, messageId, "success", finalStatus);
 				}
 				return { status: finalStatus, body: finalBody };
 			}
@@ -206,12 +188,7 @@ export async function postDeliveryWithAuth(
 			// 4xx error — don't retry
 			if (finalStatus >= 400 && finalStatus < 500) {
 				if (messageId) {
-					await logDeliveryAttempt(
-						pool,
-						messageId,
-						"4xx",
-						finalStatus,
-					);
+					await logDeliveryAttempt(pool, messageId, "4xx", finalStatus);
 				}
 				return { status: finalStatus, body: finalBody };
 			}
@@ -223,25 +200,18 @@ export async function postDeliveryWithAuth(
 			} else {
 				// Other status code — treat as success to avoid loop
 				if (messageId) {
-					await logDeliveryAttempt(
-						pool,
-						messageId,
-						"success",
-						finalStatus,
-					);
+					await logDeliveryAttempt(pool, messageId, "success", finalStatus);
 				}
 				return { status: finalStatus, body: finalBody };
 			}
 		} catch (err) {
 			lastError =
-				err instanceof Error
-					? err
-					: new Error(`Network error: ${String(err)}`);
+				err instanceof Error ? err : new Error(`Network error: ${String(err)}`);
 		}
 
 		// Exponential backoff (1s, 2s, 4s)
 		if (attempt < MAX_DELIVERY_ATTEMPTS - 1) {
-			const backoffMs = Math.pow(2, attempt) * 1000;
+			const backoffMs = 2 ** attempt * 1000;
 			await new Promise((resolve) => setTimeout(resolve, backoffMs));
 		}
 	}
@@ -301,8 +271,7 @@ export async function verifyDeliverySignature(
 			normalizedHeaders[key.toLowerCase()] = value;
 		}
 
-		const signatureHeader =
-			normalizedHeaders["x-agenthive-signature"] || "";
+		const signatureHeader = normalizedHeaders["x-agenthive-signature"] || "";
 		const deliveryId = normalizedHeaders["x-agenthive-delivery-id"] || "";
 		const timestampStr = normalizedHeaders["x-agenthive-timestamp"] || "";
 		const agentId = normalizedHeaders["x-agenthive-agent-id"] || "";
@@ -341,8 +310,7 @@ export async function verifyDeliverySignature(
 			? `\nX-AgentHive-Target-Host-Id: ${targetHostId}`
 			: "";
 
-		const signingInput =
-			`POST\n${pathAndSearch}\nX-AgentHive-Delivery-Id: ${deliveryId}\nX-AgentHive-Timestamp: ${timestamp}\nX-AgentHive-Agent-Id: ${agentId}${targetHostField}\n${bodyStr}`;
+		const signingInput = `POST\n${pathAndSearch}\nX-AgentHive-Delivery-Id: ${deliveryId}\nX-AgentHive-Timestamp: ${timestamp}\nX-AgentHive-Agent-Id: ${agentId}${targetHostField}\n${bodyStr}`;
 
 		// Step 5: Verify signature using constant-time comparison
 		const expectedSignature = crypto
@@ -386,10 +354,7 @@ async function fetchWithTimeout(
 	},
 ): Promise<{ status: number; body: string }> {
 	const controller = new AbortController();
-	const timeoutId = setTimeout(
-		() => controller.abort(),
-		DELIVERY_TIMEOUT_MS,
-	);
+	const timeoutId = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
 
 	try {
 		const response = await fetch(url, {
@@ -546,20 +511,27 @@ export async function registerDeliveryIdLogCleanup(pool: Pool): Promise<void> {
 		 WHERE table_schema = 'roadmap' AND table_name = 'delivery_id_log'`,
 	);
 	if (Number(tableCheck.rows[0]?.count ?? 0) === 0) {
-		console.warn("[P836] delivery_id_log table not found — cleanup cron skipped");
+		console.warn(
+			"[P836] delivery_id_log table not found — cleanup cron skipped",
+		);
 		return;
 	}
 
-	const interval = setInterval(() => {
-		void cleanupDeliveryIdLog(pool).catch((err) => {
-			console.error(
-				`[P836] Unhandled error in delivery ID log cleanup: ${
-					err instanceof Error ? err.message : String(err)
-				}`,
-			);
-		});
-	}, 5 * 60 * 1000); // 5 minutes
+	const interval = setInterval(
+		() => {
+			void cleanupDeliveryIdLog(pool).catch((err) => {
+				console.error(
+					`[P836] Unhandled error in delivery ID log cleanup: ${
+						err instanceof Error ? err.message : String(err)
+					}`,
+				);
+			});
+		},
+		5 * 60 * 1000,
+	); // 5 minutes
 
 	(globalThis as Record<string, unknown>)[globalKey] = interval;
-	console.log("[P836] Delivery ID log cleanup cron registered (every 5 minutes, advisory-lock guarded)");
+	console.log(
+		"[P836] Delivery ID log cleanup cron registered (every 5 minutes, advisory-lock guarded)",
+	);
 }

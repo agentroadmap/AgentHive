@@ -18,8 +18,8 @@
 
 import crypto from "crypto";
 import type { Pool } from "pg";
-import { getAgentSecret } from "../security/agent-secret-store.ts";
 import { verifySignature } from "../security/agent-crypto.ts";
+import { getAgentSecret } from "../security/agent-secret-store.ts";
 
 const RECONCILE_INTERVAL_MS = 30_000;
 const STALE_THRESHOLD_SECONDS = 60;
@@ -75,7 +75,10 @@ export async function runSigReconcilePass(pool: Pool): Promise<number> {
 
 		return resolved;
 	} catch (err) {
-		console.error("[SigReconciler] Pass failed:", err instanceof Error ? err.message : err);
+		console.error(
+			"[SigReconciler] Pass failed:",
+			err instanceof Error ? err.message : err,
+		);
 		return 0;
 	} finally {
 		// Releasing the client releases the advisory lock automatically
@@ -93,15 +96,22 @@ async function resolveRow(row: PendingSigRow): Promise<"verified" | "failed"> {
 		// Fetch the sender's agent secret
 		const secret = await getAgentSecret(row.from_agent);
 		if (!secret) {
-			console.warn(`[SigReconciler] No secret for agent ${row.from_agent} — marking failed`);
+			console.warn(
+				`[SigReconciler] No secret for agent ${row.from_agent} — marking failed`,
+			);
 			return "failed";
 		}
 
 		// Reconstruct the payload hash from message_content
 		const payload = row.message_content ?? "";
-		const payloadSha256 = crypto.createHash("sha256").update(payload, "utf-8").digest();
+		const payloadSha256 = crypto
+			.createHash("sha256")
+			.update(payload, "utf-8")
+			.digest();
 
-		const createdAtEpoch = Math.floor(new Date(row.created_at).getTime() / 1000);
+		const createdAtEpoch = Math.floor(
+			new Date(row.created_at).getTime() / 1000,
+		);
 
 		const valid = verifySignature(
 			secret,
@@ -141,20 +151,26 @@ export async function registerSigReconciler(pool: Pool): Promise<void> {
 		 WHERE table_schema = 'roadmap' AND table_name = 'message_ledger'`,
 	);
 	if (Number(tableCheck.rows[0]?.count ?? 0) === 0) {
-		console.warn("[SigReconciler] message_ledger table not found — reconciler skipped");
+		console.warn(
+			"[SigReconciler] message_ledger table not found — reconciler skipped",
+		);
 		return;
 	}
 
 	const interval = setInterval(() => {
-		void runSigReconcilePass(pool).then((resolved) => {
-			if (resolved > 0) {
-				console.log(`[SigReconciler] Resolved ${resolved} stale-pending signatures`);
-			}
-		}).catch((err) => {
-			console.error(
-				`[SigReconciler] Unhandled error: ${err instanceof Error ? err.message : String(err)}`,
-			);
-		});
+		void runSigReconcilePass(pool)
+			.then((resolved) => {
+				if (resolved > 0) {
+					console.log(
+						`[SigReconciler] Resolved ${resolved} stale-pending signatures`,
+					);
+				}
+			})
+			.catch((err) => {
+				console.error(
+					`[SigReconciler] Unhandled error: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			});
 	}, RECONCILE_INTERVAL_MS);
 
 	(globalThis as Record<string, unknown>)[globalKey] = interval;

@@ -25,5 +25,8 @@ export const MESSAGE_TYPES = [
 export type MessageType = (typeof MESSAGE_TYPES)[number];
 
 export function isMessageType(value: unknown): value is MessageType {
-	return typeof value === "string" && (MESSAGE_TYPES as readonly string[]).includes(value);
+	return (
+		typeof value === "string" &&
+		(MESSAGE_TYPES as readonly string[]).includes(value)
+	);
 }

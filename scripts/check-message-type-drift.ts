@@ -6,8 +6,8 @@
  * Run in CI after any migration that touches message_type.
  */
 
-import { query } from "../src/infra/postgres/pool.ts";
 import { MESSAGE_TYPES } from "../src/infra/messaging/types.ts";
+import { query } from "../src/infra/postgres/pool.ts";
 
 async function main(): Promise<void> {
 	// Extract values from pg_constraint consrc for message_ledger_type_check.
@@ -28,7 +28,10 @@ async function main(): Promise<void> {
 
 	const consrc = result.rows[0].consrc;
 	// Extract quoted strings from ARRAY['a','b',...] pattern.
-	const dbValues = Array.from(consrc.matchAll(/'([^']+)'/g), (m) => m[1]).sort();
+	const dbValues = Array.from(
+		consrc.matchAll(/'([^']+)'/g),
+		(m) => m[1],
+	).sort();
 
 	const tsValues = [...MESSAGE_TYPES].sort();
 
@@ -42,7 +45,9 @@ async function main(): Promise<void> {
 		process.exit(0);
 	}
 
-	console.error("DRIFT DETECTED between DB constraint and TypeScript MessageType:");
+	console.error(
+		"DRIFT DETECTED between DB constraint and TypeScript MessageType:",
+	);
 	if (onlyInDb.length > 0)
 		console.error(`  In DB only:  ${onlyInDb.join(", ")}`);
 	if (onlyInTs.length > 0)

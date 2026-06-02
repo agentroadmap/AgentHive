@@ -167,7 +167,7 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					ar.agent_identity AS agent_id,
 					COALESCE(p.display_id || ' ', '') ||
 						'run-' || ar.id::text || ' ' ||
-						ar.agent_identity || ' ' ||
+						COALESCE(vdl_run.display_label, ar.agent_identity) || ' ' ||
 						COALESCE(ar.activity, ar.status) ||
 						' stage=' || ar.stage ||
 						CASE
@@ -181,6 +181,7 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 						END AS message
 				FROM roadmap_workforce.agent_runs ar
 				LEFT JOIN roadmap_proposal.proposal p ON p.id = ar.proposal_id
+				LEFT JOIN roadmap_workforce.v_agent_display_label vdl_run ON vdl_run.agent_identity = ar.agent_identity
 				LEFT JOIN LATERAL (
 					SELECT model_name, route_provider, agent_provider, agent_cli
 					FROM roadmap.model_routes
@@ -197,10 +198,11 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					EXTRACT(EPOCH FROM tl.created_at) * 1000 AS timestamp_ms,
 					p.display_id AS proposal_id,
 					tl.agent_identity AS agent_id,
-					COALESCE(p.display_id || ' ', '') || tl.agent_identity || ' tokens ' || tl.token_count::text ||
+					COALESCE(p.display_id || ' ', '') || COALESCE(vdl_tok.display_label, tl.agent_identity) || ' tokens ' || tl.token_count::text ||
 						' cost $' || to_char(tl.cost_usd, 'FM999999990.0000') AS message
 				FROM roadmap_efficiency.token_ledger tl
 				LEFT JOIN roadmap_proposal.proposal p ON p.id = tl.proposal_id
+				LEFT JOIN roadmap_workforce.v_agent_display_label vdl_tok ON vdl_tok.agent_identity = tl.agent_identity
 
 				UNION ALL
 
@@ -210,8 +212,9 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					EXTRACT(EPOCH FROM chl.hit_at) * 1000 AS timestamp_ms,
 					NULL AS proposal_id,
 					chl.agent_identity AS agent_id,
-					chl.agent_identity || ' cache hit saved $' || to_char(chl.cost_saved_usd, 'FM999999990.0000') AS message
+					COALESCE(vdl_chl.display_label, chl.agent_identity) || ' cache hit saved $' || to_char(chl.cost_saved_usd, 'FM999999990.0000') AS message
 				FROM roadmap_efficiency.cache_hit_log chl
+				LEFT JOIN roadmap_workforce.v_agent_display_label vdl_chl ON vdl_chl.agent_identity = chl.agent_identity
 			)
 			SELECT id, type, timestamp_ms, proposal_id, agent_id, message
 			FROM feed

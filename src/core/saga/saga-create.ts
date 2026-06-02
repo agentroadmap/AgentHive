@@ -16,6 +16,8 @@
  */
 
 import { randomBytes } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import type { Pool, PoolClient } from 'pg';
 import type { VaultAdapter } from '../../shared/vault/types';
 import { getVault } from '../../shared/vault/index';
@@ -28,6 +30,8 @@ import type {
   SagaSuccess,
   StepResult,
 } from './types';
+
+const execFileAsync = promisify(execFile);
 
 const RESERVED_SLUGS = new Set([
   'hivecontrol',
@@ -364,9 +368,30 @@ async function step6SchemaBootstrap(ctx: SagaContext): Promise<SagaResult> {
  */
 async function step7OpsBundle(ctx: SagaContext): Promise<SagaResult> {
   try {
-    // TODO: Invoke P509 ops bundle; on failure, project is still usable
-    // Placeholder for integration with P509.
-    console.log(`[STUB] Step 7: Ops bundle for ${ctx.slug}`);
+    const installer = new URL('../../../scripts/ops/install-tenant-ops.sh', import.meta.url);
+    const installEnabled = process.env.AGENTHIVE_ENABLE_TENANT_OPS_INSTALL === '1';
+
+    if (!installEnabled) {
+      console.log(
+        `[INFO] Step 7: tenant ops install skipped for ${ctx.slug} ` +
+        `(set AGENTHIVE_ENABLE_TENANT_OPS_INSTALL=1 to enable)`
+      );
+      await auditLog(ctx, 'ops_setup', 7, null);
+      return { ok: true, project_id: ctx.projectId!, dsn_validated: true };
+    }
+
+    await execFileAsync(
+      installer,
+      [ctx.slug, String(ctx.projectId ?? 0)],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          AGENTHIVE_PROJECT_ROOT: process.cwd(),
+        },
+      }
+    );
+    console.log(`[INFO] Step 7: tenant ops bundle installed for ${ctx.slug}`);
 
     // Ops bundle failures do not block project creation
     await auditLog(ctx, 'ops_setup', 7, null);

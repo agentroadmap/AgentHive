@@ -94,7 +94,11 @@ export async function dlqReplay(
 			`[DLQReplay] dlq=${dlqId}: original_message_id is null — skipping (cannot verify signature)`,
 		);
 		await markReplayOutcome(pool, dlqId, false);
-		return { dlqId, outcome: "skipped_no_msg", reason: "original_message_id is null" };
+		return {
+			dlqId,
+			outcome: "skipped_no_msg",
+			reason: "original_message_id is null",
+		};
 	}
 
 	const { rows: ledgerRows } = await pool.query<{ sig_verified: string }>(
@@ -108,7 +112,11 @@ export async function dlqReplay(
 			`[DLQReplay] dlq=${dlqId}: original message ${entry.original_message_id} not found in roadmap.message_ledger`,
 		);
 		await markReplayOutcome(pool, dlqId, false);
-		return { dlqId, outcome: "skipped_no_msg", reason: "original message not found" };
+		return {
+			dlqId,
+			outcome: "skipped_no_msg",
+			reason: "original message not found",
+		};
 	}
 
 	const { sig_verified } = ledgerRows[0];

@@ -13,17 +13,14 @@
 import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { access, readdir, stat } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import {
-	spawnAgent,
 	resolveActiveRouteProvider,
 	terminateLiveChildren,
 	liveChildCount,
 } from "./agent-spawner.ts";
-import { ObservabilityWriter } from "../observability/observability-writer.ts";
 import { postWorkOffer } from "../pipeline/post-work-offer.ts";
 import { reapStaleRows } from "../pipeline/reap-stale-rows.ts";
 import { briefingAssemble } from "../../infra/agency/spawn-briefing-service.ts";
@@ -52,9 +49,6 @@ const WORKTREE_ROOT =
 const DEFAULT_EXECUTOR_WORKTREE =
 	process.env.AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE;
 
-// When true, orchestrator posts work offers instead of direct-spawning.
-// Registered agency processes (e.g. copilot/agency-gary) claim and execute.
-const USE_OFFER_DISPATCH = process.env.AGENTHIVE_USE_OFFER_DISPATCH === "1";
 
 const logger = {
 	log: (...args: unknown[]) => console.log("[Orchestrator]", ...args),
@@ -1112,152 +1106,29 @@ async function dispatchAgent(
 			  `  mcp_agent  action="spawn_summary_emit"  briefing_id="${briefingId}"  outcome=<success|partial|failure|timeout|escalated>  emitted_by="${agent}"  summary="..."`
 			: `${task}\n\nUse the MCP tools to do your work. Connect to ${getMcpUrl()} for proposal management.`;
 
-		if (USE_OFFER_DISPATCH) {
-			// Post a work offer — any registered agency (e.g. copilot/agency-gary)
-			// will race to claim it and spawn the appropriate CLI. The orchestrator
-			// does not need to know the binary path or credentials.
-			const squadName = `P${proposalId}-${phase}`;
-			const { dispatchId } = await postWorkOffer({
-				proposalId: Number(proposalId),
-				squadName,
-				role: agentLabel ?? agent,
-				task: taskPrompt,
-				stage,
-				phase,
-				timeoutMs: roleTimeoutMs(agentLabel ?? agent),
-				// IMPORTANT: pass the *selected worktree directory name* — not the
-				// agent identity. The agency's offer-provider uses worktree_hint as
-				// the cwd basename under WORKTREE_ROOT (`/data/code/worktree/`). If
-				// we pass the agent identity (e.g. "researcher" or "sre@agenthive"),
-				// `spawn()` fails with ENOENT because no such worktree directory
-				// exists. selectedWorktree was already validated by scoreUsableWorktree.
-				worktreeHint: selectedWorktree,
-				briefingId,
-				requiredCapabilities:
-					requiredCapabilities.length > 0
-						? requiredCapabilities
-						: [agentLabel ?? agent],
-			});
-			logger.log(
-				`📬 Posted offer ${dispatchId} for ${agent} on P${proposalId} (${stage})`,
-			);
-
-			// P914: liaison-message emit was removed from this path. The orchestrator
-			// now runs OfferClaimLoop (in src/core/orchestration/orchestrator.ts) which
-			// LISTENs on the `work_offers` channel that postWorkOffer fires. On wake,
-			// the loop calls fn_claim_work_offer to obtain a claim_token, then routes
-			// through OrchestratorOfferDispatcher → liaison_message with all required
-			// fields populated (offer_id, claim_token, dispatch_id, route_hint,
-			// briefing_id, lease_ttl_seconds). The previous inline emit could not
-			// supply claim_token (the offer hadn't been claimed yet) and the agency's
-			// OfferDispatchHandler rejected it as "malformed payload, missing
-			// offer_id/role".
-			return cubicId;
-		}
-
-		// Direct spawn path (used when AGENTHIVE_USE_OFFER_DISPATCH is not set)
-		let worktree: string | null = selectedWorktree;
-		const tried = new Set<string>();
-		const { rows: selectedRuns } = await query<{ cnt: number }>(
-			`SELECT count(*)::int AS cnt FROM agent_runs
-		      WHERE display_id LIKE '%' || $1 || '%'
-		        AND status = 'running'`,
-			[selectedWorktree],
-		);
-		if (selectedRuns[0]?.cnt) {
-			logger.log(
-				`⏭ ${selectedWorktree} busy (${selectedRuns[0].cnt} running) — trying another`,
-			);
-			worktree = null;
-		}
-		for (let attempt = 0; attempt < 5; attempt++) {
-			if (worktree) break;
-			const candidate = await selectExecutorWorktree(null);
-			if (!candidate) break;
-			if (tried.has(candidate)) break;
-			tried.add(candidate);
-			const { rows } = await query<{ cnt: number }>(
-				`SELECT count(*)::int AS cnt FROM agent_runs
-			      WHERE display_id LIKE '%' || $1 || '%'
-			        AND status = 'running'`,
-				[candidate],
-			);
-			if (rows[0]?.cnt) {
-				logger.log(
-					`⏭ ${candidate} busy (${rows[0].cnt} running) — trying another`,
-				);
-				continue;
-			}
-			worktree = candidate;
-			break;
-		}
-		if (!worktree) {
-			logger.warn(
-				`No free worktree for ${agent} on P${proposalId} — skipping dispatch`,
-			);
-			return null;
-		}
-		// P405: resolve provider from model_routes, not worktree metadata
-		const activeProvider = await resolveActiveRouteProvider();
-
-		// P604: parent dispatch span
-		const traceId = randomUUID();
-		const orchWriter = new ObservabilityWriter("operator:orchestrator");
-		const { spanId: orchSpanId } = await orchWriter.startSpan({
-			traceId,
-			operation: "orch.dispatch",
-			attributes: {
-				proposal_id: Number(proposalId),
-				agent,
-				stage,
-				phase,
-			},
-		});
-
-		const result = await spawnAgent({
-			worktree,
-			task: taskPrompt,
+		// Post a work offer — any registered agency claims and spawns the CLI.
+		// The orchestrator does not know the binary path or credentials.
+		const squadName = `P${proposalId}-${phase}`;
+		const { dispatchId } = await postWorkOffer({
 			proposalId: Number(proposalId),
+			squadName,
+			role: agentLabel ?? agent,
+			task: taskPrompt,
 			stage,
+			phase,
 			timeoutMs: roleTimeoutMs(agentLabel ?? agent),
-			provider: activeProvider ?? undefined,
-			agentLabel: agentLabel ?? agent,
-			activity,
-			traceId,
-			parentSpanId: orchSpanId,
+			// Pass the selected worktree basename, not the agent identity.
+			// The agency uses worktree_hint as cwd under WORKTREE_ROOT.
+			worktreeHint: selectedWorktree,
+			briefingId,
+			requiredCapabilities:
+				requiredCapabilities.length > 0
+					? requiredCapabilities
+					: [agentLabel ?? agent],
 		});
-
-		await orchWriter.closeSpan({
-			spanId: orchSpanId,
-			status: result.exitCode === 0 ? "ok" : "error",
-		});
-
-		if (result.exitCode === 0) {
-			logger.log(
-				`✅ ${agent} completed (run=${result.agentRunId}) for P${proposalId}`,
-			);
-			// Record provider success — clears any cooldown
-			if (activeProvider) {
-				try {
-					await recordProviderSuccess(activeProvider);
-				} catch {}
-			}
-		} else {
-			logger.warn(
-				`⚠️ ${agent} exited ${result.exitCode} (run=${result.agentRunId}) for P${proposalId}`,
-			);
-			// Dynamic control: classify error, set cooldown
-			const fullError = [result.stderr, result.stdout]
-				.filter(Boolean)
-				.join("\n");
-			const classified = classifyProviderError(fullError);
-			if (classified && activeProvider) {
-				try {
-					await setProviderCooldown(activeProvider, classified.type as any, fullError);
-				} catch {}
-			}
-		}
-
+		logger.log(
+			`📬 Posted offer ${dispatchId} for ${agent} on P${proposalId} (${stage})`,
+		);
 		return cubicId;
 	} catch (err) {
 		logger.error(`Dispatch failed for ${agent} on P${proposalId}:`, err);
@@ -1459,6 +1330,13 @@ async function recordGateDecisionFromOrchestrator(input: {
 	agentStdout: string | null;
 	maturity: string;
 }): Promise<void> {
+	// P908-C shadow mode: gate agents now write directly via mcp_proposal
+	// action=gate_decision. Stdout-scraping violates the orchestrator-mechanical
+	// rule. This function has zero callers; kept for reference until P908 lands.
+	logger.warn(
+		`[orchestrator] recordGateDecisionFromOrchestrator called (shadow mode — no write). proposalId=${input.proposalId} gate=${input.gate} decision=${input.decision}`,
+	);
+	return;
 	const stdout = (input.agentStdout ?? "").trim();
 	const tail = stdout.length > 3500 ? stdout.slice(-3500) : stdout;
 	const rationale =
@@ -1646,7 +1524,7 @@ function buildImplicitGateTask(
 		"",
 		"Decision rules:",
 		`- advance: call prop_transition to ${gate.toStage} with reason=decision and concrete decision notes, then set maturity to new.`,
-		"- send_back/hold/reject: keep the workflow state, record concrete feedback through MCP discussion/message/event paths, and set maturity to new.",
+		"- send_back/hold/reject: keep the workflow state, set maturity to new, and record the hold rationale by calling `mcp_proposal action=add_discussion context_prefix=gate-decision: body=\"hold: <concise rationale>\"`. This discussion row is the signal the enhancer cycle reads — it will not trigger without it.",
 		"- obsolete: set maturity to obsolete and record the reason.",
 		"",
 		"Dependency rule:",
@@ -1740,29 +1618,11 @@ export async function dispatchImplicitGate(
 		return;
 	}
 
-	const worktree = await selectExecutorWorktree(null);
-
-	// Dynamic control: check if provider is in cooldown before dispatching
-	try {
-		const activeProvider = await resolveActiveRouteProvider();
-		if (activeProvider && (await isProviderInCooldown(activeProvider))) {
-			logger.log(
-				`⏸ Skipping ${proposal.display_id}: provider ${activeProvider} is in cooldown`,
-			);
-			return;
-		}
-	} catch {
-		// Provider resolution failed — let spawn handle the error
-	}
-
 	await ensureAgentIdentity("orchestrator", "State Machine Orchestrator");
-	await ensureAgentIdentity(worktree, "Gate Executor");
 
 	const role = gateRole(gate);
 
 	// P609 Phase 1 — shadow-mode: resolve DB profile alongside GATE_ROLES.
-	// GATE_ROLES is still authoritative; divergences are logged for ≥24h validation
-	// (AC-17). After zero-divergence window, GATE_ROLES lookup will be removed.
 	const pool = getPool();
 	const resolvedProfile = await resolveGateRole(
 		proposal.type ?? "feature",
@@ -1784,303 +1644,23 @@ export async function dispatchImplicitGate(
 			"gate_role divergence in shadow mode",
 		);
 	}
-	// Advisory tool_allow_list from resolver (AC-27 Phase 1).
 	if (resolvedProfile?.toolAllowList != null) {
 		deriveAllowedTools(role, resolvedProfile.toolAllowList);
 	}
-	const gateRoleSource = resolvedProfile?.source ?? "builtin-fallback";
 
-	// P437: deterministic idempotency key over the gate-dispatch tuple. Two
-	// concurrent claimImplicitGateReady poll cycles racing on the same
-	// proposal hit the partial UNIQUE INDEX and DO UPDATE the existing row
-	// instead of double-spawning the gate agent.
-	const gateIdempotencyKey = computeDispatchIdempotencyKey({
-		projectId: proposal.project_id ?? null,
+	const { dispatchId } = await postWorkOffer({
 		proposalId: proposal.id,
-		status: proposal.status,
-		maturity: proposal.maturity ?? "mature",
+		squadName: `gate-${proposal.display_id}-${gate.gate}`,
 		role,
+		task: buildImplicitGateTask(proposal, gate),
+		stage: `gate:${gate.toStage.toUpperCase()}`,
+		phase: "gate",
+		timeoutMs: 600_000,
+		requiredCapabilities: [role],
 	});
-
-	const { rows: dispatchRows } = await query<{
-		id: number;
-		attempt_count: number;
-		was_replay: boolean;
-	}>(
-		`INSERT INTO roadmap_workforce.squad_dispatch
-       (proposal_id, agent_identity, squad_name, dispatch_role, dispatch_status,
-        assigned_by, metadata, idempotency_key, attempt_count, required_capabilities)
-     VALUES ($1, $2, $3, $8, 'active', 'orchestrator',
-       jsonb_build_object(
-         'source', 'implicit_maturity_gating',
-         'reason', $4::text,
-         'gate', $5::text,
-         'from_stage', $6::text,
-         'to_stage', $7::text,
-         'stage', 'gate:' || $7::text,
-         'gateRoleSource', $9::text
-       ), $10, 1, $11::jsonb)
-     ON CONFLICT (idempotency_key)
-       WHERE dispatch_status IN ('open', 'assigned', 'active')
-     DO UPDATE SET
-       attempt_count = squad_dispatch.attempt_count + 1,
-       metadata = squad_dispatch.metadata
-                || jsonb_build_object(
-                     'last_replay_at', to_jsonb(now()),
-                     'replay_reason', 'idempotency_collision'
-                   )
-     RETURNING id, attempt_count, (xmax::text::int <> 0) AS was_replay`,
-		[
-			proposal.id,
-			worktree,
-			`gate-${proposal.display_id}-${gate.gate}`,
-			reason,
-			gate.gate,
-			proposal.status,
-			gate.toStage,
-			role,
-			gateRoleSource,
-			gateIdempotencyKey,
-			JSON.stringify([role]),
-		],
-	);
-	const dispatchId = dispatchRows[0]?.id;
-	if (dispatchRows[0]?.was_replay) {
-		logger.log(
-			`Implicit gate dispatch idempotency replay for ${proposal.display_id} (dispatch ${dispatchId}, attempt ${dispatchRows[0].attempt_count}) — skipping spawn`,
-		);
-		return;
-	}
 	logger.log(
-		`Implicit gate dispatch ${dispatchId} -> ${worktree} for ${proposal.display_id} (${proposal.status} -> ${gate.toStage}, ${gate.gate})`,
+		`📬 Posted gate offer ${dispatchId} for ${proposal.display_id} (${gate.gate} → ${gate.toStage})`,
 	);
-
-	// P604: gate observability span
-	const gateTraceId = randomUUID();
-	const gateWriter = new ObservabilityWriter("operator:orchestrator");
-	let gateSpanId: string | null = null;
-	try {
-		const { spanId } = await gateWriter.startSpan({
-			traceId: gateTraceId,
-			operation: "orch.gate",
-			attributes: {
-				proposal_id: proposal.id,
-				gate: gate.gate,
-				from_stage: proposal.status,
-				to_stage: gate.toStage,
-			},
-		});
-		gateSpanId = spanId;
-	} catch {}
-
-	let result: Awaited<ReturnType<typeof spawnAgent>>;
-	// P405: resolve provider from model_routes, not worktree metadata
-	const activeProvider = await resolveActiveRouteProvider();
-	try {
-		result = await spawnAgent({
-			worktree,
-			task: buildImplicitGateTask(proposal, gate),
-			proposalId: proposal.id,
-			stage: `gate:${gate.toStage.toUpperCase()}`,
-			timeoutMs: 600_000,
-			provider: activeProvider ?? undefined,
-			traceId: gateTraceId,
-			parentSpanId: gateSpanId,
-		});
-	} catch (spawnErr) {
-		const errMsg =
-			spawnErr instanceof Error ? spawnErr.message : String(spawnErr);
-		await query(
-			`UPDATE roadmap_workforce.squad_dispatch
-	        SET dispatch_status = 'blocked',
-	            completed_at = now(),
-	            metadata = COALESCE(metadata, '{}'::jsonb) ||
-	              jsonb_build_object('error', $2::text)
-	      WHERE id = $1`,
-			[dispatchId, errMsg],
-		);
-		// P934: free-text 'gate spawn failed: ...' replaced with canonical
-		// 'gate_spawn_failed'. The errMsg context is preserved in the
-		// squad_dispatch.metadata.error field above and the warn log line
-		// below — those are the right places for prose, not the canonical
-		// release_reason enum column.
-		await releaseDispatchLease(dispatchId, "gate_spawn_failed");
-		logger.warn(
-			`Implicit gate dispatch ${dispatchId} blocked (spawn threw): ${errMsg}`,
-		);
-		return;
-	}
-
-	const proposalState = await query<{ status: string; maturity: string }>(
-		`SELECT status, maturity
-       FROM roadmap_proposal.proposal
-      WHERE id = $1`,
-		[proposal.id],
-	);
-	const current = proposalState.rows[0];
-	const reachedTarget =
-		current && normalizeState(current.status) === normalizeState(gate.toStage);
-
-	if (result.exitCode === 0 && reachedTarget) {
-		await setProposalMaturity(
-			proposal.id,
-			"new",
-			worktree,
-			`gate ${gate.gate} advanced to ${gate.toStage}`,
-		);
-		await query(
-			`UPDATE roadmap_workforce.squad_dispatch
-          SET dispatch_status = 'completed',
-              completed_at = now(),
-              metadata = COALESCE(metadata, '{}'::jsonb) ||
-                jsonb_build_object('agent_run_id', $2::text, 'gate_decision', 'advance', 'proposal_status', $3::text, 'proposal_maturity', 'new')
-        WHERE id = $1`,
-			[dispatchId, result.agentRunId, gate.toStage],
-		);
-		// P934: gate review completed → canonical 'gate_review_complete'
-		// (work_complete bucket → maturity preserved as mature in trigger).
-		// The gate-name + toStage details live in the log line below.
-		await releaseDispatchLease(dispatchId, "gate_review_complete");
-		logger.log(
-			`Implicit gate dispatch ${dispatchId} advanced ${proposal.display_id} to ${gate.toStage}/new (gate=${gate.gate})`,
-		);
-		if (gateSpanId) {
-			await gateWriter.writeDecisionExplainability({
-				traceId: gateTraceId,
-				decisionKind: "gate_advance",
-				inputs: { proposal_id: proposal.id, gate: gate.gate, from_stage: proposal.status, to_stage: gate.toStage },
-				rulesEvaluated: { gate_rule: "maturity=mature AND exit_code=0 AND reached_target=true" },
-				outcome: { decision: "advance", to_stage: gate.toStage, agent_run_id: result.agentRunId },
-			});
-			await gateWriter.closeSpan({ spanId: gateSpanId, status: "ok" });
-		}
-		return;
-	}
-
-	if (result.exitCode === 0 && current) {
-		const finalMaturity =
-			normalizeState(current.maturity) === "OBSOLETE" ? "obsolete" : "new";
-		if (finalMaturity === "new") {
-			await setProposalMaturity(
-				proposal.id,
-				"new",
-				worktree,
-				`gate ${gate.gate} sent back or held`,
-			);
-		}
-		const decisionMessage = `gate decision completed without state transition: proposal is ${current.status}/${finalMaturity}`;
-		// Persist canonical decision to gate_decision_log first — that's the
-		// table the enhancing agent reads. MCP discussions/messages below are
-		// best-effort and may not reach the next cubic.
-		await recordGateDecisionFromOrchestrator({
-			proposalId: proposal.id,
-			fromState: proposal.status,
-			toState: gate.toStage,
-			gate: gate.gate,
-			decision: finalMaturity === "obsolete" ? "reject" : "hold",
-			authorityAgent: gateRole(gate),
-			agentRunId: result.agentRunId,
-			agentStdout: result.stdout,
-			maturity: "mature",
-		});
-		await recordGateCommunication({
-			proposalId: proposal.id,
-			author: worktree,
-			toAgent: "orchestrator",
-			channel: "direct",
-			contextPrefix: "feedback:",
-			body: [
-				`Gate ${gate.gate} held ${proposal.display_id}.`,
-				`Target transition: ${proposal.status} -> ${gate.toStage}`,
-				`Current proposal state: ${current.status}/${finalMaturity}`,
-				"",
-				"The gate agent made a non-transition decision. Read the latest gate_decision_log row (rationale + ac_verification.details) for the canonical findings, revise the proposal, then set maturity back to mature when it is ready for another gate attempt.",
-			].join("\n"),
-			metadata: {
-				gate: gate.gate,
-				gate_decision: finalMaturity === "obsolete" ? "obsolete" : "hold",
-				proposal_status: current.status,
-				proposal_maturity: finalMaturity,
-				agent_run_id: result.agentRunId,
-				source: "implicit_maturity_gating",
-			},
-		});
-		await query(
-			`UPDATE roadmap_workforce.squad_dispatch
-          SET dispatch_status = 'completed',
-              completed_at = now(),
-              metadata = COALESCE(metadata, '{}'::jsonb) ||
-                jsonb_build_object('agent_run_id', $2::text, 'gate_decision', $3::text, 'proposal_status', $4::text, 'proposal_maturity', $5::text)
-        WHERE id = $1`,
-			[
-				dispatchId,
-				result.agentRunId,
-				finalMaturity === "obsolete" ? "obsolete" : "hold",
-				current.status,
-				finalMaturity,
-			],
-		);
-		// P934: hold/obsolete decisions map to canonical reasons.
-		// finalMaturity='obsolete' → 'wont_pursue' (abandoned bucket); otherwise
-		// → 'gate_hold' (incomplete bucket → maturity='new'). The free-form
-		// decisionMessage is preserved in the log line.
-		const releaseReason =
-			finalMaturity === "obsolete" ? "wont_pursue" : "gate_hold";
-		await releaseDispatchLease(dispatchId, releaseReason);
-		logger.log(
-			`Implicit gate dispatch ${dispatchId} held ${proposal.display_id}: ${decisionMessage}`,
-		);
-		if (gateSpanId) {
-			await gateWriter.writeDecisionExplainability({
-				traceId: gateTraceId,
-				decisionKind: "gate_advance",
-				inputs: { proposal_id: proposal.id, gate: gate.gate, from_stage: proposal.status },
-				rulesEvaluated: { gate_rule: "maturity=mature AND exit_code=0 AND reached_target=false" },
-				outcome: { decision: finalMaturity === "obsolete" ? "obsolete" : "hold", proposal_status: current.status, agent_run_id: result.agentRunId },
-			});
-			await gateWriter.closeSpan({ spanId: gateSpanId, status: "ok" });
-		}
-		return;
-	}
-
-	const errorMessage =
-		result.exitCode === 0
-			? `gate agent completed but proposal state could not be read`
-			: `gate agent exited ${result.exitCode}: ${[result.stderr, result.stdout].filter(Boolean).join("\n").slice(0, 2000)}`;
-
-	// Dynamic control: classify error and set provider cooldown if needed
-	const fullError = [result.stderr, result.stdout].filter(Boolean).join("\n");
-	const classified = classifyProviderError(fullError);
-	if (classified && result.exitCode !== 0) {
-		try {
-			const provider = activeProvider ?? (await resolveActiveRouteProvider());
-			if (provider) {
-				await setProviderCooldown(provider, classified.type as any, fullError);
-			}
-		} catch {
-			// Provider resolution failed — skip cooldown
-		}
-	}
-
-	await query(
-		`UPDATE roadmap_workforce.squad_dispatch
-        SET dispatch_status = 'blocked',
-            completed_at = now(),
-            metadata = COALESCE(metadata, '{}'::jsonb) ||
-              jsonb_build_object('agent_run_id', $2::text, 'error', $3::text)
-      WHERE id = $1`,
-		[dispatchId, result.agentRunId, errorMessage],
-	);
-	// P934: free-text 'gate dispatch blocked: ...' replaced with canonical
-	// 'gate_dispatch_blocked'. errorMessage is in squad_dispatch.metadata.error
-	// and the warn log below.
-	await releaseDispatchLease(dispatchId, "gate_dispatch_blocked");
-	logger.warn(
-		`Implicit gate dispatch ${dispatchId} blocked ${proposal.display_id}: ${errorMessage}`,
-	);
-	if (gateSpanId) {
-		await gateWriter.closeSpan({ spanId: gateSpanId, status: "error", errorMessage: errorMessage.slice(0, 500) });
-	}
 }
 
 export async function drainImplicitGateReady(
@@ -2127,19 +1707,28 @@ async function claimEnhancementRevisionReady(
             p.maturity,
             p.title,
             p.summary,
-            gdl.id              AS hold_decision_id,
-            gdl.rationale       AS hold_rationale,
-            gdl.ac_verification AS hold_ac_verification,
-            gdl.created_at      AS hold_created_at,
+            COALESCE(gdl.id, 0)                                    AS hold_decision_id,
+            COALESCE(gdl.rationale, SUBSTRING(disc.body FROM 7))   AS hold_rationale,
+            gdl.ac_verification                                     AS hold_ac_verification,
+            COALESCE(gdl.created_at, disc.created_at)              AS hold_created_at,
             gdl.gate_level
        FROM roadmap_proposal.proposal p
-       JOIN LATERAL (
+       LEFT JOIN LATERAL (
          SELECT id, rationale, ac_verification, created_at, gate_level, decision
            FROM roadmap_proposal.gate_decision_log
           WHERE proposal_id = p.id
           ORDER BY created_at DESC
           LIMIT 1
        ) gdl ON true
+       LEFT JOIN LATERAL (
+         SELECT id, body, created_at
+           FROM roadmap_proposal.proposal_discussions
+          WHERE proposal_id = p.id
+            AND context_prefix = 'gate-decision:'
+            AND body LIKE 'hold:%'
+          ORDER BY created_at DESC
+          LIMIT 1
+       ) disc ON true
        LEFT JOIN LATERAL (
          SELECT 1
            FROM roadmap_workforce.squad_dispatch sd
@@ -2150,10 +1739,12 @@ async function claimEnhancementRevisionReady(
        ) active_enhancer ON true
       WHERE p.maturity = 'new'
         AND LOWER(p.status) IN ('draft', 'review', 'develop')
-        AND gdl.decision = 'hold'
-        AND gdl.created_at > now() - ($2 * interval '1 hour')
         AND active_enhancer IS NULL
-      ORDER BY gdl.created_at ASC
+        AND (
+          (gdl.decision = 'hold' AND gdl.created_at > now() - ($2 * interval '1 hour'))
+          OR (disc.id IS NOT NULL AND disc.created_at > now() - ($2 * interval '1 hour'))
+        )
+      ORDER BY COALESCE(gdl.created_at, disc.created_at) ASC
       LIMIT $1`,
 		[limit, ENHANCEMENT_HOLD_WINDOW_HOURS],
 	);
@@ -2301,14 +1892,16 @@ Without set_maturity=mature, the gate will not re-run and your work remains invi
 		const { dispatchId } = await postWorkOffer({
 			proposalId: target.id,
 			squadName: `P${target.id}-enhance`,
-			role: "enhancer",
+			role: "enhancer-revise",
 			task: taskPrompt,
 			stage: target.status,
 			phase: "enhance",
 			timeoutMs: roleTimeoutMs("enhancer"),
 			worktreeHint: selectedWorktree,
 			requiredCapabilities:
-				requiredCapabilities.length > 0 ? requiredCapabilities : ["enhancer"],
+				requiredCapabilities.length > 0
+					? requiredCapabilities
+					: ["enhancer-revise"],
 		});
 		logger.log(
 			`📬 Enhancer offer ${dispatchId} posted for ${target.display_id} (revising hold #${target.hold_decision_id}; reason=${reason})`,

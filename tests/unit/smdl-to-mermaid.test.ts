@@ -13,8 +13,42 @@ const sampleWorkflow: SMDLRoot = {
 		roles: [{ name: "developer" }, { name: "reviewer" }],
 		stages: [
 			{ name: "DRAFT", order: 1, description: "Shape the proposal" },
-			{ name: "REVIEW", order: 2, requires_ac: true },
-			{ name: "DEVELOP", order: 3, maturity_gate: 2 },
+			{
+				name: "REVIEW",
+				order: 2,
+				requires_ac: true,
+				quorum: {
+					required_count: 2,
+					required_roles: ["architect", "pm"],
+					veto_power: true,
+				},
+				decision_gate: {
+					evaluator: "ai",
+					trigger: "on_request",
+					priority: "score",
+				},
+				timeout: "24h",
+			},
+			{
+				name: "DEVELOP",
+				order: 3,
+				maturity_gate: 2,
+				weighted_scoring: {
+					mode: "weighted",
+					passing_score: 0.8,
+					criteria: [
+						{ key: "tests", weight: 0.5 },
+						{ key: "docs", weight: 0.3 },
+					],
+				},
+				coordination: {
+					mode: "parallel",
+					dispatch: [
+						{ role: "developer", count: 2, mode: "parallel" },
+						{ role: "reviewer", count: 1, join: "all" },
+					],
+				},
+			},
 			{ name: "COMPLETE", order: 4 },
 		],
 		transitions: [
@@ -43,12 +77,20 @@ describe("smdlToMermaid", () => {
 		assert.match(out, /^stateDiagram-v2/m);
 		assert.match(out, /title Standard RFC/);
 		assert.match(out, /\[\*\] --> DRAFT/);
+		assert.match(out, /click REVIEW href "#stage-review"/);
 		assert.match(out, /DRAFT --> REVIEW: mature \| roles: reviewer/);
 		assert.match(
 			out,
 			/REVIEW --> DEVELOP: advance \| roles: architect \| requires AC \| gate: quorum/,
 		);
+		assert.match(
+			out,
+			/note right of REVIEW: requires AC \| quorum 2 \| roles architect, pm \| veto enabled \| timeout 24h \| gate ai \| trigger on_request \| priority score/,
+		);
+		assert.match(out, /class REVIEW requiresAc,quorum,decisionGate;/);
+		assert.match(out, /class DEVELOP weighted,coordination;/);
 		assert.match(out, /COMPLETE --> \[\*\]/);
+		assert.match(out, /class COMPLETE terminal;/);
 	});
 
 	it("accepts YAML input", () => {

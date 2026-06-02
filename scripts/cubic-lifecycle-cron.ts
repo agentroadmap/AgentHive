@@ -16,6 +16,7 @@
 
 import { CubicIdleDetector } from "../src/core/orchestration/cubic-idle-detector.ts";
 import { CubicCleanupService } from "../src/core/orchestration/cubic-cleanup.ts";
+import { reapOrphanScratch } from "../src/shared/utils/agent-scratch.ts";
 
 const args = new Set(process.argv.slice(2));
 const dryRun = args.has("--dry-run");
@@ -60,6 +61,17 @@ async function main() {
 		if (oldExpired > 0) {
 			console.log(`[cubic-lifecycle] Expired ${oldExpired} old cubics (>60 min)`);
 		}
+	}
+
+	// P404: 15-minute backstop sweep for orphaned scratch directories
+	// (reap-stale-rows covers orchestrator boot; this catches crashes between boots)
+	try {
+		const reaped = await reapOrphanScratch();
+		if (reaped > 0) {
+			console.log(`[cubic-lifecycle] Reaped ${reaped} orphan scratch dir(s)`);
+		}
+	} catch (err) {
+		console.error(`[cubic-lifecycle] scratch reap failed: ${err instanceof Error ? err.message : String(err)}`);
 	}
 
 	// Report errors

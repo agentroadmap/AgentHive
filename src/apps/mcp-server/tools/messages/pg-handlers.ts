@@ -7,15 +7,15 @@
  * P149: Added channel subscriptions, pg_notify push notifications, and wait_ms blocking reads.
  */
 
-import { query, getPool } from "../../../../postgres/pool.ts";
-import type { McpServer } from "../../server.ts";
-import type { CallToolResult } from "../../types.ts";
 import {
 	agentNotifyChannel,
 	checkMessageACL,
 } from "../../../../infra/messaging/a2a-access-control.ts";
 import type { A2ANotification } from "../../../../infra/messaging/a2a-types.ts";
+import { getPool, query } from "../../../../postgres/pool.ts";
 import { agentContextStorage } from "../../../../shared/identity/agent-context.ts";
+import type { McpServer } from "../../server.ts";
+import type { CallToolResult } from "../../types.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
@@ -206,7 +206,9 @@ export class PgMessagingHandlers {
 	/**
 	 * List channel subscriptions, optionally filtered by agent.
 	 */
-	async listSubscriptions(args: { agent_identity?: string }): Promise<CallToolResult> {
+	async listSubscriptions(args: {
+		agent_identity?: string;
+	}): Promise<CallToolResult> {
 		try {
 			let whereClause = "";
 			const params: any[] = [];
@@ -237,7 +239,10 @@ export class PgMessagingHandlers {
 
 			return {
 				content: [
-					{ type: "text", text: `## Channel Subscriptions\n\n${lines.join("\n")}` },
+					{
+						type: "text",
+						text: `## Channel Subscriptions\n\n${lines.join("\n")}`,
+					},
 				],
 			};
 		} catch (err) {
@@ -265,13 +270,23 @@ export class PgMessagingHandlers {
 				const ctx = agentContextStorage.getStore();
 				if (!ctx) {
 					return {
-						content: [{ type: "text", text: "401 Unauthorized: bearer token required for user/* senders" }],
+						content: [
+							{
+								type: "text",
+								text: "401 Unauthorized: bearer token required for user/* senders",
+							},
+						],
 						isError: true,
 					};
 				}
 				if (ctx.verified.principal_id !== args.from_agent) {
 					return {
-						content: [{ type: "text", text: `403 Forbidden: token sub '${ctx.verified.principal_id}' does not match from_agent '${args.from_agent}'` }],
+						content: [
+							{
+								type: "text",
+								text: `403 Forbidden: token sub '${ctx.verified.principal_id}' does not match from_agent '${args.from_agent}'`,
+							},
+						],
 						isError: true,
 					};
 				}
@@ -487,13 +502,13 @@ export class PgMessagingHandlers {
 			const limit = Math.min(Math.max(args.limit ?? 50, 1), 500);
 			const includeMetadata = args.include_metadata === true;
 
-			let sql = `SELECT DISTINCT channel, COUNT(*) as msg_count${includeMetadata ? ", MAX(created_at) as last_message_at" : ""}
+			const sql = `SELECT DISTINCT channel, COUNT(*) as msg_count${includeMetadata ? ", MAX(created_at) as last_message_at" : ""}
 			       FROM message_ledger
 			       WHERE channel IS NOT NULL
 			       GROUP BY channel${includeMetadata ? "" : ""}
 			       ORDER BY channel ASC
 			       LIMIT $1`;
-			const params: (number)[] = [limit];
+			const params: number[] = [limit];
 
 			const [{ rows }, countResult] = await Promise.all([
 				query(sql, params),

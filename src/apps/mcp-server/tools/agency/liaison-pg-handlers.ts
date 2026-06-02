@@ -3,9 +3,12 @@
  * Four tools bridging roadmap.agency (liaison layer) to the consolidated router.
  */
 
-import type { CallToolResult } from "../../types.ts";
-import { liaisonRegister, getAgencyStatus } from "../../../../infra/agency/liaison-service.js";
+import {
+	getAgencyStatus,
+	liaisonRegister,
+} from "../../../../infra/agency/liaison-service.js";
 import { query } from "../../../../infra/postgres/pool.js";
+import type { CallToolResult } from "../../types.ts";
 
 export async function agencyBootstrapHandler(args: {
 	agency_id: string;
@@ -19,9 +22,13 @@ export async function agencyBootstrapHandler(args: {
 }): Promise<CallToolResult> {
 	try {
 		const result = await liaisonRegister(args);
-		return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+		return {
+			content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+		};
 	} catch (err) {
-		return { content: [{ type: "text", text: `❌ ${(err as Error).message}` }] };
+		return {
+			content: [{ type: "text", text: `❌ ${(err as Error).message}` }],
+		};
 	}
 }
 
@@ -40,7 +47,10 @@ export async function agencyJoinProjectHandler(args: {
 				content: [
 					{
 						type: "text",
-						text: JSON.stringify({ error: "project_not_found", project_name: args.project_name }),
+						text: JSON.stringify({
+							error: "project_not_found",
+							project_name: args.project_name,
+						}),
 					},
 				],
 			};
@@ -55,7 +65,11 @@ export async function agencyJoinProjectHandler(args: {
 			content: [
 				{
 					type: "text",
-					text: JSON.stringify({ ok: true, agency_id: args.agency_id, project_id: projectId }),
+					text: JSON.stringify({
+						ok: true,
+						agency_id: args.agency_id,
+						project_id: projectId,
+					}),
 				},
 			],
 		};
@@ -91,7 +105,12 @@ export async function agencyLeaveProjectHandler(args: {
 		);
 		if (proj.rows.length === 0) {
 			return {
-				content: [{ type: "text", text: JSON.stringify({ error: "project_not_found" }) }],
+				content: [
+					{
+						type: "text",
+						text: JSON.stringify({ error: "project_not_found" }),
+					},
+				],
 			};
 		}
 		const projectId = proj.rows[0].id;
@@ -119,7 +138,10 @@ export async function agencyLeaveProjectHandler(args: {
 		}
 		return {
 			content: [
-				{ type: "text", text: JSON.stringify({ ok: true, paused: result.rowCount }) },
+				{
+					type: "text",
+					text: JSON.stringify({ ok: true, paused: result.rowCount }),
+				},
 			],
 		};
 	} catch (err: any) {
@@ -137,12 +159,17 @@ export async function agencyLiaisonStatusHandler(args: {
 				content: [
 					{
 						type: "text",
-						text: JSON.stringify({ error: "not_found", agency_id: args.agency_id }),
+						text: JSON.stringify({
+							error: "not_found",
+							agency_id: args.agency_id,
+						}),
 					},
 				],
 			};
 		}
-		return { content: [{ type: "text", text: JSON.stringify(status, null, 2) }] };
+		return {
+			content: [{ type: "text", text: JSON.stringify(status, null, 2) }],
+		};
 	} catch (err: any) {
 		return { content: [{ type: "text", text: `❌ ${err.message}` }] };
 	}

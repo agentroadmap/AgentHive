@@ -1,28 +1,16 @@
 import type { PoolClient } from "pg";
+import {
+	getNextSequence,
+	storeMessage,
+} from "../../infra/agency/liaison-message-service.ts";
+import { createMessageEnvelope } from "../../infra/agency/liaison-message-types.ts";
+import { listDispatchableAgencies } from "../../infra/agency/liaison-service.ts";
 import { closePool, getPool, query } from "../../infra/postgres/pool.ts";
 import { pulseHeartbeat } from "../../infra/pulse/heartbeat.ts";
-import { reapStaleRows } from "../pipeline/reap-stale-rows.ts";
 import { enqueueNotification } from "../notifications/enqueue.ts";
+import { postWorkOffer } from "../pipeline/post-work-offer.ts";
+import { reapStaleRows } from "../pipeline/reap-stale-rows.ts";
 import { getUnlockedGateQueue } from "../proposal/gate-scanner-v2.ts";
-import { spawnAgent } from "./agent-spawner.ts";
-import {
-	bootCancelPokeAttempts,
-	runOfferReaper,
-	runPokeWatchdogTick,
-	type PokeWatchdogOptions,
-} from "./maintenance.ts";
-import {
-	scanAndAlertOfflineAgencies,
-	scanAndTransitionSilentAgencies,
-} from "./resolvers/agency-resolver.ts";
-import { OfferClaimLoop, type ListenerClient } from "./offer-claim-loop.ts";
-import { OrchestratorOfferDispatcher } from "./offer-dispatch.ts";
-import { resolveQueueContext } from "./queue-context-resolver.ts";
-import {
-	assessReadiness,
-	buildTaskPrompt,
-	fetchProposalDetail,
-} from "./readiness-resolver.ts";
 // P903 phase 3+4: legacy dispatch entry points live in legacy-dispatch.ts
 // (extracted from scripts/orchestrator.ts during phase 4 to break the cycle
 // between the shim and the class). P902-D will progressively pull these
@@ -35,6 +23,24 @@ import {
 	reconcileStaleDispatches,
 	reconcileStrandedAdvances,
 } from "./legacy-dispatch.ts";
+import {
+	bootCancelPokeAttempts,
+	type PokeWatchdogOptions,
+	runOfferReaper,
+	runPokeWatchdogTick,
+} from "./maintenance.ts";
+import { type ListenerClient, OfferClaimLoop } from "./offer-claim-loop.ts";
+import { OrchestratorOfferDispatcher } from "./offer-dispatch.ts";
+import { resolveQueueContext } from "./queue-context-resolver.ts";
+import {
+	assessReadiness,
+	buildTaskPrompt,
+	fetchProposalDetail,
+} from "./readiness-resolver.ts";
+import {
+	scanAndAlertOfflineAgencies,
+	scanAndTransitionSilentAgencies,
+} from "./resolvers/agency-resolver.ts";
 
 /**
  * Unified Agent Orchestrator
@@ -62,9 +68,7 @@ const STALL_THRESHOLD_HOURS = Number(
 );
 
 /** Maximum stalled proposals to escalate per checkStalls() call. */
-const STALL_BATCH_LIMIT = Number(
-	process.env.AGENTHIVE_STALL_BATCH_LIMIT ?? 5,
-);
+const STALL_BATCH_LIMIT = Number(process.env.AGENTHIVE_STALL_BATCH_LIMIT ?? 5);
 
 /**
  * If set, stall escalation Tier 1 spawns an AI liaison agent using this
@@ -177,8 +181,7 @@ export class Orchestrator {
 				config.pokeIdleThresholdMin ?? DEFAULT_POKE_IDLE_THRESHOLD_MIN,
 			stormCap: config.pokeStormCap ?? DEFAULT_POKE_STORM_CAP,
 		};
-		this.shutdownDrainMs =
-			config.shutdownDrainMs ?? DEFAULT_SHUTDOWN_DRAIN_MS;
+		this.shutdownDrainMs = config.shutdownDrainMs ?? DEFAULT_SHUTDOWN_DRAIN_MS;
 	}
 
 	// ─── Lifecycle (P902-A) ────────────────────────────────────────────────────
@@ -286,9 +289,8 @@ export class Orchestrator {
 		this.pollTimers.set(
 			"enhancer-revise",
 			setInterval(() => {
-				if (this.stopping) return;
 				void this.trackInFlight(
-					drainEnhancementRevisions("enhancer-revise-loop", 4).catch((err) =>
+					this.runEnhancerReviseTick().catch((err) =>
 						console.error("[Orchestrator] enhancer-revise failed:", err),
 					),
 				);
@@ -313,7 +315,10 @@ export class Orchestrator {
 				if (this.stopping) return;
 				void this.trackInFlight(
 					reconcileStaleDispatches(pool).catch((err) =>
-						console.error("[Orchestrator] stale-dispatch reconciler failed:", err),
+						console.error(
+							"[Orchestrator] stale-dispatch reconciler failed:",
+							err,
+						),
 					),
 				);
 			}, RECONCILER_INTERVAL_MS),
@@ -428,6 +433,18 @@ export class Orchestrator {
 		console.log(
 			`[Orchestrator] OfferClaimLoop started as ${ORCHESTRATOR_IDENTITY}`,
 		);
+	}
+
+	/**
+	 * P908-A: Drain the enhancer-revise queue.
+	 *
+	 * Wraps `drainEnhancementRevisions` as a class method so tests can stub it
+	 * without reaching into legacy-dispatch.ts, and so future evolution can
+	 * replace the legacy implementation entirely.
+	 */
+	async runEnhancerReviseTick(): Promise<void> {
+		if (this.stopping) return;
+		await drainEnhancementRevisions("enhancer-revise-loop", 4);
 	}
 
 	/**
@@ -681,7 +698,7 @@ export class Orchestrator {
 	 *   1. resolveQueueContext()  — enrich with workflowTemplateId + roleProfiles
 	 *   2. fetchProposalDetail()  — full RFC fields for readiness check
 	 *   3. assessReadiness()      — determines mode: gate | prep | skip
-	 *   4. spawnAgent()           — routes through 6-layer policy filter
+	 *   4. postWorkOffer()        — any registered agency claims and executes
 	 *
 	 * Returns the number of proposals that were dispatched (mode ≠ skip).
 	 */
@@ -712,20 +729,25 @@ export class Orchestrator {
 				const primaryProfile = ctx.roleProfiles[0] ?? null;
 				const task = buildTaskPrompt(detail, mode, reasons);
 
-				await spawnAgent({
-					worktree: this.defaultWorktree,
-					task,
+				const role =
+					primaryProfile?.role ??
+					(mode === "gate" ? "gate-evaluator" : "architect");
+				const { dispatchId } = await postWorkOffer({
 					proposalId: detail.id,
+					squadName: `scan-P${detail.id}-${mode}`,
+					role,
+					task,
 					stage: detail.status,
-					agentLabel: `${detail.displayId} (${mode})`,
-					activity: mode === "gate" ? "reviewing" : "preparing",
-					projectId: ctx.projectId ?? undefined,
-					// Pass the DB-backed profile id when present so P771 role-policy
-					// filters (allowed_route_providers, forbidden_route_providers)
-					// reach resolveModelRoute. Builtin-fallback rows have id=null
-					// and route resolution falls through to host/project policy.
-					roleProfileId: primaryProfile?.id ?? null,
+					phase: mode,
+					worktreeHint: this.defaultWorktree,
+					requiredCapabilities:
+						(primaryProfile?.requiredCapabilities ?? []).length > 0
+							? (primaryProfile?.requiredCapabilities ?? [])
+							: [role],
 				});
+				console.log(
+					`[Orchestrator] scanQueues: posted offer ${dispatchId} for ${detail.displayId} (${mode})`,
+				);
 
 				dispatched++;
 			} catch (err) {
@@ -808,16 +830,13 @@ export class Orchestrator {
 		status: string;
 		stallHours: number;
 	}): Promise<void> {
-		// Tier 1: AI liaison (conditional on env var)
+		// Tier 1: AI liaison offer (conditional on env var — any registered agency will claim)
 		if (ORCHESTRATOR_LIAISON_PROVIDER) {
 			try {
-				await spawnAgent({
-					worktree: this.defaultWorktree,
+				const { dispatchId } = await postWorkOffer({
 					proposalId: stall.id,
-					stage: stall.status,
-					provider: ORCHESTRATOR_LIAISON_PROVIDER,
-					agentLabel: `${stall.displayId} (liaison)`,
-					activity: "investigating stall",
+					squadName: `stall-liaison-P${stall.id}`,
+					role: "orchestrator-liaison-investigator",
 					task: [
 						`You are an AI liaison investigating a stalled proposal.`,
 						``,
@@ -832,11 +851,58 @@ export class Orchestrator {
 						``,
 						`If you cannot resolve the block, use mcp_ops escalation_add with severity CRITICAL.`,
 					].join("\n"),
+					stage: stall.status,
+					phase: "liaison",
+					requiredCapabilities: ["orchestrator-liaison-investigator"],
 				});
+				console.log(
+					`[Orchestrator] liaison offer ${dispatchId} posted for stalled ${stall.displayId}`,
+				);
+
+				try {
+					const agencies = await listDispatchableAgencies();
+					if (agencies.length > 0) {
+						const targetAgency = agencies[0];
+						const envelope = createMessageEnvelope({
+							agencyId: targetAgency.agency_id,
+							direction: "orchestrator->liaison",
+							kind: "offer_dispatch",
+							payload: {
+								offer_id: String(dispatchId),
+								dispatch_id: dispatchId,
+								proposal_id: stall.id,
+								squad_name: `stall-liaison-P${stall.id}`,
+								role: "orchestrator-liaison-investigator",
+								required_capabilities: ["orchestrator-liaison-investigator"],
+								route_hint: "anthropic",
+							},
+						});
+						const sequence = await getNextSequence(targetAgency.agency_id);
+						await storeMessage({
+							...(envelope as any),
+							sequence,
+							signature: "stub-orchestrator",
+						});
+						console.log(
+							`[Orchestrator] stall offer_dispatch sent to ${targetAgency.agency_id} for dispatch ${dispatchId}`,
+						);
+					} else {
+						console.warn(
+							`[Orchestrator] stall dispatch ${dispatchId}: no dispatchable agencies, offer queued only`,
+							{ reason: "no_dispatchable_agency" },
+						);
+					}
+				} catch (err) {
+					console.warn(
+						`[Orchestrator] failed to emit liaison message for stall dispatch ${dispatchId}:`,
+						err instanceof Error ? err.message : err,
+					);
+				}
+
 				return;
 			} catch (err) {
 				console.warn(
-					`[Orchestrator] liaison spawn failed for ${stall.displayId}, falling through to Tier 2:`,
+					`[Orchestrator] liaison offer failed for ${stall.displayId}, falling through to Tier 2:`,
 					err instanceof Error ? err.message : err,
 				);
 			}

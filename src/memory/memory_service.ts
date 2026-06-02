@@ -6,7 +6,7 @@
  *   - agent_memory    : per-agent episodic/semantic/working/procedural context with TTL
  *
  * project_memory lives in roadmap.project_memory.
- * agent_memory lives in roadmap_efficiency.agent_memory, exposed via roadmap.v_active_memory.
+ * agent_memory lives in roadmap_efficiency.agent_memory, read via roadmap.v_active_memory.
  */
 
 import { query } from "../infra/postgres/pool.ts";
@@ -148,7 +148,7 @@ export class MemoryService {
   ): Promise<Record<string, unknown>> {
     const { rows } = await query<{ key: string; value: string }>(
       `SELECT key, value
-       FROM v_active_memory
+       FROM roadmap.v_active_memory
        WHERE agent_identity = $1 AND layer = $2
        ORDER BY updated_at DESC`,
       [agentIdentity, layer],
@@ -174,7 +174,7 @@ export class MemoryService {
   ): Promise<Record<MemoryLayer, Record<string, unknown>>> {
     const { rows } = await query<{ key: string; layer: string; value: string }>(
       `SELECT layer, key, value
-       FROM v_active_memory
+       FROM roadmap.v_active_memory
        WHERE agent_identity = $1
        ORDER BY layer, updated_at DESC`,
       [agentIdentity],
@@ -206,7 +206,7 @@ export class MemoryService {
     layer: MemoryLayer,
     key?: string,
   ): Promise<number> {
-    let sql = `DELETE FROM agent_memory WHERE agent_identity = $1 AND layer = $2`;
+    let sql = `DELETE FROM roadmap_efficiency.agent_memory WHERE agent_identity = $1 AND layer = $2`;
     const params: unknown[] = [agentIdentity, layer];
     if (key !== undefined) {
       sql += ` AND key = $3`;

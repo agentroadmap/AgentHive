@@ -138,8 +138,14 @@ test("recordCheckIn AC-1: does NOT exclude offline from WHERE (only retired excl
 	const sql = queryCalls.at(-1)!.sql;
 	// The NOT IN exclusion must not include 'offline' — only 'retired'
 	const notInMatch = sql.match(/NOT IN\s*\(([^)]+)\)/i)?.[1] ?? "";
-	assert.ok(!notInMatch.includes("offline"), "offline must NOT be excluded by NOT IN");
-	assert.ok(notInMatch.includes("retired"), "retired must be excluded by NOT IN");
+	assert.ok(
+		!notInMatch.includes("offline"),
+		"offline must NOT be excluded by NOT IN",
+	);
+	assert.ok(
+		notInMatch.includes("retired"),
+		"retired must be excluded by NOT IN",
+	);
 });
 
 test("recordCheckIn AC-1: resets throttle_count when coming from offline (SQL check)", async () => {
@@ -150,7 +156,10 @@ test("recordCheckIn AC-1: resets throttle_count when coming from offline (SQL ch
 	// throttle_count reset CASE must include 'offline' alongside 'throttled'
 	const throttleIdx = sql.indexOf("throttle_count");
 	const throttleSection = sql.slice(throttleIdx, throttleIdx + 200);
-	assert.ok(throttleSection.includes("offline"), "throttle reset CASE must cover offline");
+	assert.ok(
+		throttleSection.includes("offline"),
+		"throttle reset CASE must cover offline",
+	);
 });
 
 // ─── P765 AC-2: resumeAgency operator short-circuit ──────────────────────
@@ -162,7 +171,10 @@ test("resumeAgency AC-2: sets status=active and resets counters (SQL check)", as
 	const sql = queryCalls.at(-1)!.sql;
 	assert.ok(sql.includes("active"), "SQL must set status to active");
 	assert.ok(sql.includes("throttle_count"), "SQL must reset throttle_count");
-	assert.ok(sql.includes("recent_failure_count"), "SQL must reset recent_failure_count");
+	assert.ok(
+		sql.includes("recent_failure_count"),
+		"SQL must reset recent_failure_count",
+	);
 	assert.ok(sql.includes("last_failure_at"), "SQL must clear last_failure_at");
 });
 
@@ -205,16 +217,28 @@ test("scanAndAlertOfflineAgencies AC-3: queries for offline agencies past thresh
 	await scanAndAlertOfflineAgencies(10);
 
 	// First SELECT: offline agencies with alert_sent_at IS NULL
-	const firstSelect = queryCalls.find((c) => c.sql.includes("offline_alert_sent_at IS NULL"));
+	const firstSelect = queryCalls.find((c) =>
+		c.sql.includes("offline_alert_sent_at IS NULL"),
+	);
 	assert.ok(firstSelect, "must query for agencies with no alert sent yet");
-	assert.ok(firstSelect.sql.includes("offline"), "must filter for offline status");
-	assert.equal(firstSelect.params[0], 10, "must pass threshold minutes as param");
+	assert.ok(
+		firstSelect.sql.includes("offline"),
+		"must filter for offline status",
+	);
+	assert.equal(
+		firstSelect.params[0],
+		10,
+		"must pass threshold minutes as param",
+	);
 
 	// Second SELECT: recovered agencies with alert_sent_at set
 	const recoverySelect = queryCalls.find((c) =>
 		c.sql.includes("offline_alert_sent_at IS NOT NULL"),
 	);
-	assert.ok(recoverySelect, "must query for recovered agencies with pending alert flag");
+	assert.ok(
+		recoverySelect,
+		"must query for recovered agencies with pending alert flag",
+	);
 
 	// Restore original mock
 	_setQueryForTest(async (sql: string, params: unknown[] = []) => {
@@ -264,7 +288,10 @@ test("scanAndAlertOfflineAgencies AC-4: clears alert flag on recovery (SQL check
 	let selectCount = 0;
 	_setQueryForTest(async (sql: string, params: unknown[] = []) => {
 		queryCalls.push({ sql, params });
-		if (sql.includes("offline_alert_sent_at IS NOT NULL") && selectCount++ === 0) {
+		if (
+			sql.includes("offline_alert_sent_at IS NOT NULL") &&
+			selectCount++ === 0
+		) {
 			// biome-ignore lint/suspicious/noExplicitAny: test mock
 			return { rows: [fakeRecovered], rowCount: 1 } as any;
 		}

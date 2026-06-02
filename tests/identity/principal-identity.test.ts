@@ -11,7 +11,7 @@
  */
 
 import assert from "node:assert/strict";
-import { createHash, generateKeyPairSync, randomBytes, createSign } from "node:crypto";
+import { createHash, generateKeyPairSync, randomBytes, sign as cryptoSign } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -43,9 +43,8 @@ function genKeyPair() {
 }
 
 function signMessage(privateKeyPem: string, message: Buffer): string {
-	const signer = createSign("SHA512");
-	signer.update(message);
-	return signer.sign({ key: privateKeyPem, format: "pem" }).toString("base64");
+	// Ed25519 requires null algorithm — algorithm is intrinsic to the key type
+	return cryptoSign(null, message, { key: privateKeyPem, format: "pem", type: "pkcs8" }).toString("base64");
 }
 
 function makeFakeStore(): PrincipalIdentityStore {

@@ -140,10 +140,15 @@ export async function briefingAssemble(
   const cache_control: { type: "ephemeral" } = { type: "ephemeral" };
 
   try {
-    const [architecture, workflow, conventions] = await Promise.all([
+    const agentMemoryPromise = task.liaison_agent
+      ? memoryService.getAgentMemory(task.liaison_agent, "semantic")
+      : Promise.resolve({} as Record<string, unknown>);
+
+    const [architecture, workflow, conventions, agentSemantic] = await Promise.all([
       memoryService.getProjectMemory("architecture"),
       memoryService.getProjectMemory("workflow_states"),
       memoryService.getProjectMemory("conventions"),
+      agentMemoryPromise,
     ]);
 
     project_context = {};
@@ -159,9 +164,17 @@ export async function briefingAssemble(
         body: JSON.stringify(pmContent),
       });
     }
+
+    // Surface agent semantic memory entries (per-agent durable knowledge).
+    for (const [smKey, smValue] of Object.entries(agentSemantic)) {
+      inherited_memory.push({
+        key: `agent_memory:semantic:${smKey}`,
+        body: typeof smValue === "string" ? smValue : JSON.stringify(smValue),
+      });
+    }
   } catch {
-    // Non-fatal: project_memory table may not exist yet (pre-migration).
-    // Proceed without injecting project context.
+    // Non-fatal: memory tables may not exist yet (pre-migration).
+    // Proceed without injecting memory context.
   }
 
   // Step 5b: P230 — inject proposal context package when proposal_id is provided.

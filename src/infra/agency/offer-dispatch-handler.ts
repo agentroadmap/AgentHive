@@ -24,6 +24,15 @@ import { query } from "../postgres/pool.ts";
 import { spawnAgent } from "../../core/orchestration/agent-spawner.ts";
 import type { SpawnResult } from "../../core/orchestration/agent-spawner.ts";
 import type { LiaisonMessage } from "./liaison-message-types.ts";
+import {
+	classifySpawnOutcome,
+	setProviderCooldown,
+	recordProviderSuccess,
+} from "../../core/orchestration/provider-cooldown.ts";
+import {
+	incrementSpawnFailure,
+	THROTTLE_THRESHOLD,
+} from "../../core/orchestration/resolvers/agency-resolver.ts";
 
 export type SqlExec = (sql: string, params?: unknown[]) => Promise<unknown>;
 
@@ -224,10 +233,39 @@ async function runSpawn(args: {
 
 	clearInterval(renewalTimer);
 
+	const spawnOutcome = classifySpawnOutcome(
+		result?.exitCode ?? null,
+		result?.stderr ?? spawnError?.message ?? "",
+	);
 	const status: "delivered" | "failed" =
-		spawnError === null && (result?.exitCode === 0 || result?.exitCode === null)
-			? "delivered"
-			: "failed";
+		spawnOutcome === "delivered" ? "delivered" : "failed";
+
+	// B1/B2: record provider health signal and write to squad_dispatch.
+	const provider = payload.route_hint;
+	if (provider) {
+		if (spawnOutcome === "rate_limited") {
+			void setProviderCooldown(
+				provider,
+				"rate_limit",
+				result?.stderr ?? spawnError?.message ?? "",
+				exec,
+			).catch((e) =>
+				logger.warn(
+					`[OfferDispatchHandler] setProviderCooldown failed: ${e instanceof Error ? e.message : e}`,
+				),
+			);
+		} else if (spawnOutcome === "delivered") {
+			void recordProviderSuccess(provider, exec).catch(() => {});
+		}
+		void exec(
+			`UPDATE roadmap_workforce.squad_dispatch SET provider_signal = $1 WHERE id = $2`,
+			[spawnOutcome !== "delivered" ? spawnOutcome : null, dispatchId],
+		).catch((e) =>
+			logger.warn(
+				`[OfferDispatchHandler] provider_signal update failed: ${e instanceof Error ? e.message : e}`,
+			),
+		);
+	}
 
 	try {
 		await exec(

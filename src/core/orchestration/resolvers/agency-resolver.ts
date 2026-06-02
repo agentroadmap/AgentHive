@@ -132,6 +132,46 @@ export async function recordSpawnFailure(
 }
 
 /**
+ * P1360 Change 1: Increment spawn failure counters by agency string identity.
+ * Resolves the provider_registry row via agent_registry.agent_identity, then
+ * bumps throttle_count/recent_failure_count and transitions to 'throttled'
+ * once the threshold is crossed.
+ *
+ * Used by OfferDispatchHandler which knows the string identity, not the bigint PK.
+ *
+ * @param agencyIdentity — roadmap.agency.agency_id TEXT (e.g. "ccs46ant-bot-dev-a")
+ * @param threshold — failure count before 'throttled'; defaults to THROTTLE_THRESHOLD
+ * @param errorClass — structured error class for status_reason signal
+ */
+export async function incrementSpawnFailure(
+	agencyIdentity: string,
+	threshold: number = THROTTLE_THRESHOLD,
+	errorClass: "auth" | "spawn" | "timeout" | "unknown" = "unknown",
+): Promise<void> {
+	await query(
+		`UPDATE roadmap_workforce.provider_registry pr
+		 SET throttle_count        = throttle_count + 1,
+		     recent_failure_count  = recent_failure_count + 1,
+		     last_failure_at       = now(),
+		     status = CASE
+		       WHEN throttle_count + 1 >= $2 AND pr.status = 'active' THEN 'throttled'
+		       ELSE pr.status
+		     END,
+		     status_reason = CASE
+		       WHEN throttle_count + 1 >= $2
+		         THEN $3
+		       ELSE pr.status_reason
+		     END,
+		     updated_at = now()
+		 FROM roadmap_workforce.agent_registry ar
+		 WHERE pr.agency_id = ar.id
+		   AND ar.agent_identity = $1
+		   AND pr.status NOT IN ('retired')`,
+		[agencyIdentity, threshold, `Spawn failure threshold exceeded (${errorClass})`],
+	);
+}
+
+/**
  * Record a successful check-in for an agency (P761 + P763).
  * Updates last_seen_at in provider_registry; resets status to active from
  * throttled/dormant; decays recent_failure_count on successful check-in.

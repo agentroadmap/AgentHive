@@ -80,7 +80,7 @@ export async function liaisonRegister(
 				client.query<T>(text, params as never)
 		: query;
 
-	const result = await runQuery(
+	const result = (await runQuery(
 		`
     WITH upsert_agency AS (
       INSERT INTO roadmap.agency (
@@ -113,7 +113,9 @@ export async function liaisonRegister(
 			capabilities,
 			JSON.stringify({ ...metadata, capacity_envelope, public_key }),
 		],
-	) as { rows: Array<{ session_id: string; agency_id: string; status: string }> };
+	)) as {
+		rows: Array<{ session_id: string; agency_id: string; status: string }>;
+	};
 
 	if (result.rows.length === 0)
 		throw new Error(`Failed to register agency ${agency_id}`);
@@ -343,6 +345,9 @@ export async function getAgencyStatus(agency_id: string): Promise<{
 
 /**
  * List all dispatchable agencies (active, within 90s heartbeat).
+ *
+ * @note Capacity envelope check is disabled (returns true) until P1018/P1022 land.
+ *   Current gate: status='active' AND last_heartbeat_at < 60s via v_agency_status.dispatchable.
  */
 export async function listDispatchableAgencies(): Promise<
 	Array<{

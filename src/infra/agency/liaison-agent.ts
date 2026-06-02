@@ -32,16 +32,20 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Client } from "pg";
-import { query } from "../postgres/pool.ts";
-import { agentNotifyChannel } from "../messaging/a2a-access-control.ts";
-import { sendMessage as sendLiaisonMessage } from "./liaison-message-service.ts";
-import { handleTypedTaskRequest, handleWorkerReport, type TaskDispatcherHelpers } from "./task-dispatcher.ts";
 import {
+	type CliInvocationHandler,
+	type CliInvocationRegistry,
 	globalCliInvocationRegistry,
 	invokeCliHandler,
-	CliInvocationRegistry,
-	type CliInvocationHandler,
 } from "../../core/runtime/cli-invocation.ts";
+import { agentNotifyChannel } from "../messaging/a2a-access-control.ts";
+import { query } from "../postgres/pool.ts";
+import { sendMessage as sendLiaisonMessage } from "./liaison-message-service.ts";
+import {
+	handleTypedTaskRequest,
+	handleWorkerReport,
+	type TaskDispatcherHelpers,
+} from "./task-dispatcher.ts";
 
 export interface IncomingMessage {
 	id: number;
@@ -634,7 +638,9 @@ export async function insertReply(args: {
 	return rows[0].id as number;
 }
 
-export async function markReadAndResolveTimeout(messageId: number): Promise<void> {
+export async function markReadAndResolveTimeout(
+	messageId: number,
+): Promise<void> {
 	await query(
 		`UPDATE roadmap.message_ledger
 		    SET read_at = now()
@@ -659,7 +665,12 @@ async function connectListenClient(identity?: string): Promise<Client> {
 		: null;
 	const client = new Client({
 		host: process.env.PGHOST ?? databaseUrl?.hostname ?? "127.0.0.1",
-		port: Number(process.env.PGPORT_DIRECT ?? databaseUrl?.port ?? process.env.PGPORT ?? 5432),
+		port: Number(
+			process.env.PGPORT_DIRECT ??
+				databaseUrl?.port ??
+				process.env.PGPORT ??
+				5432,
+		),
 		user: process.env.PGUSER ?? databaseUrl?.username,
 		password: process.env.PGPASSWORD ?? databaseUrl?.password,
 		database:

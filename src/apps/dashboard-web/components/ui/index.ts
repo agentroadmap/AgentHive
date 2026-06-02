@@ -21,3 +21,18 @@ export type { ToastItem, ToastType } from "./Toast";
 
 export { Table } from "./Table";
 export type { TableProps, TableColumn } from "./Table";
+
+export { Checkbox } from "./Checkbox";
+export type { CheckboxProps } from "./Checkbox";
+
+export { Select } from "./Select";
+export type { SelectProps, SelectOption } from "./Select";
+
+export { Tooltip } from "./Tooltip";
+export type { TooltipProps, TooltipPlacement } from "./Tooltip";
+
+export { Dropdown } from "./Dropdown";
+export type { DropdownProps, DropdownItem, DropdownSeparator, DropdownOption } from "./Dropdown";
+
+export { Tabs } from "./Tabs";
+export type { TabsProps, TabItem } from "./Tabs";

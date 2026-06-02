@@ -326,4 +326,47 @@ test("mcp_tool_schema: canonical params and gotchas", async (t) => {
   assert.match(row.known_gotchas[0].issue, /numeric string/);
 });
 
+test("P194 AC-8: briefingAssemble loads project_memory and agent semantic memory", async (t) => {
+  const agentIdentity = `test-agent-p194-${Date.now()}`;
+
+  // Pre-seed semantic memory for this agent
+  await query(
+    `INSERT INTO workforce.agent_memory (agent_identity, layer, key, value, ttl_seconds, expires_at)
+     VALUES ($1, 'semantic', 'p194_test_key', $2, NULL, NULL)
+     ON CONFLICT (agent_identity, layer, key) DO UPDATE SET value = EXCLUDED.value`,
+    [agentIdentity, JSON.stringify({ fact: "p194_test_value" })]
+  );
+
+  const taskContext: TaskContext = {
+    task_id: `P194-ac8-test-${Date.now()}`,
+    mission: "AC-8 test: verify project and agent memory are loaded",
+    success_criteria: ["inherited_memory contains project_memory:architecture", "inherited_memory contains agent_memory:semantic:p194_test_key"],
+    liaison_agent: agentIdentity,
+  };
+
+  const briefing = await briefingAssemble(taskContext, "test-orchestrator");
+
+  // AC-8: project_memory['architecture'] must be in inherited_memory
+  const archEntry = briefing.inherited_memory.find((m) => m.key === "project_memory:architecture");
+  assert.ok(archEntry, "inherited_memory must include project_memory:architecture");
+  const archContent = JSON.parse(archEntry!.body);
+  assert.ok(archContent.pillars, "architecture entry must have pillars key");
+
+  // AC-8: agent_memory['semantic'] entries must be in inherited_memory
+  const semanticEntry = briefing.inherited_memory.find((m) => m.key === "agent_memory:semantic:p194_test_key");
+  assert.ok(semanticEntry, "inherited_memory must include agent_memory:semantic:p194_test_key");
+  const semanticContent = JSON.parse(semanticEntry!.body);
+  assert.equal(semanticContent.fact, "p194_test_value");
+
+  // AC-8: cache_control must be present
+  assert.ok(briefing.cache_control, "cache_control must be present in briefing");
+  assert.equal(briefing.cache_control?.type, "ephemeral");
+
+  // Cleanup
+  await query(
+    `DELETE FROM workforce.agent_memory WHERE agent_identity = $1`,
+    [agentIdentity]
+  );
+});
+
 console.log("All P466 spawn briefing service tests passed");

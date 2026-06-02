@@ -26,13 +26,13 @@ import RoutesPage from "./components/RoutesPage";
 import SettingsPage from "./components/SettingsPage";
 import StatisticsPage from "./components/StatisticsPage";
 import TeamsPage from "./components/TeamsPage";
+import { useBoardColumns } from "./hooks/useBoardColumns";
 import {
 	useWebSocket,
 	type Agent as WebSocketAgent,
 	type Channel as WebSocketChannel,
 	type Proposal as WebSocketProposal,
 } from "./hooks/useWebSocket";
-import { useBoardStages } from "./hooks/useBoardStages";
 import {
 	buildProposalSelectionAliases,
 	mergeProposalDetailState,
@@ -52,8 +52,8 @@ function toSharedProposal(proposal: WebSocketProposal): Proposal {
 		title: proposal.title,
 		status: proposal.status,
 		assignee: [],
-		createdDate: proposal.createdAt ?? '',
-		updatedDate: proposal.updatedAt ?? proposal.createdAt ?? '',
+		createdDate: proposal.createdAt ?? "",
+		updatedDate: proposal.updatedAt ?? proposal.createdAt ?? "",
 		labels,
 		dependencies: proposal.parentId ? [proposal.parentId] : [],
 		summary: proposal.summary ?? proposal.bodyMarkdown ?? undefined,
@@ -120,18 +120,17 @@ export default function App() {
 	const [activeWorkflow, setActiveWorkflow] = useState(() => {
 		if (typeof window !== "undefined") {
 			return (
-				window.localStorage.getItem("roadmap.board.workflow") ||
-				"Standard RFC"
+				window.localStorage.getItem("roadmap.board.workflow") || "Standard RFC"
 			);
 		}
 		return "Standard RFC";
 	});
 
-	// Load dynamic stages based on active workflow
-	const { stages: boardStages } = useBoardStages(activeWorkflow);
+	// Load dynamic column definitions based on active workflow
+	const { columns: boardColumns } = useBoardColumns(activeWorkflow);
 
-	// Convert stage objects to status strings for backward compatibility
-	const statuses = boardStages.map((stage) => stage.id);
+	// Convert column objects to status strings for BoardPage/Board backward compat
+	const statuses = boardColumns.map((col) => col.stage_name);
 
 	useEffect(() => {
 		if (typeof window !== "undefined") {
