@@ -211,8 +211,8 @@ export class PgTeamGovernanceHandlers {
 			const existing = await query<{ id: number }>(
 				`SELECT id FROM roadmap_workforce.agent_conflicts
 				WHERE proposal_id = $1
-				  AND initiator_agent = $2
-				  AND respondent_agent = $3
+				  AND agent_a = $2
+				  AND agent_b = $3
 				  AND status = 'open'
 				LIMIT 1`,
 				[proposalIdNum, args.initiatorAgent, args.respondentAgent],
@@ -239,18 +239,22 @@ export class PgTeamGovernanceHandlers {
 					],
 				);
 			} else {
-				// Insert new dispute record
+				// Insert new dispute record.
+				// agent_a/agent_b = parties; topic = short subject; position_a/position_b = stances.
 				const result = await query<{ id: number }>(
 					`INSERT INTO roadmap_workforce.agent_conflicts
-						(proposal_id, initiator_agent, respondent_agent, description,
+						(proposal_id, agent_a, agent_b, topic,
+						 position_a, position_b,
 						 status, escalation_level, team_id, resolution_note)
-					VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+					VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 					RETURNING id`,
 					[
 						proposalIdNum,
 						args.initiatorAgent,
 						args.respondentAgent,
-						args.description,
+						args.description,          // topic = dispute subject
+						args.initiatorAgent,       // position_a = initiator's stance placeholder
+						args.respondentAgent,      // position_b = respondent's stance placeholder
 						status,
 						args.escalationLevel,
 						teamIdNum,
@@ -301,12 +305,7 @@ export class PgTeamGovernanceHandlers {
 				),
 				updated_at = now()
 				WHERE team_id = $1
-				  AND norm_key IN (
-				      SELECT norm_key FROM roadmap_workforce.team_norms
-				      WHERE team_id = $1
-				        AND (norm_key = 'team:charter'
-				             OR norm_key LIKE 'team:decision:%')
-				  )
+				  AND (norm_key = 'team:charter' OR norm_key LIKE 'team:decision:%')
 				RETURNING 1`,
 				[teamIdNum, args.archivedBy],
 			);
