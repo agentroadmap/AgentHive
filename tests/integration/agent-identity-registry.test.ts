@@ -24,9 +24,12 @@ import { query } from "../../src/infra/postgres/pool.ts";
 
 const TEST_PREFIX = "test-p159";
 let workspaceRoot: string;
+// Tracks derived hash-based agentIds (from getOrCreateIdentity) for cleanup.
+let derivedAgentIds: string[] = [];
 
 beforeEach(() => {
 	workspaceRoot = join(tmpdir(), `p159-${Math.random().toString(36).slice(2)}`);
+	derivedAgentIds = [];
 });
 
 afterEach(async () => {
@@ -34,6 +37,12 @@ afterEach(async () => {
 		`DELETE FROM roadmap_workforce.agent_registry WHERE agent_identity LIKE $1`,
 		[`${TEST_PREFIX}%`],
 	);
+	for (const id of derivedAgentIds) {
+		await query(
+			`DELETE FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
+			[id],
+		);
+	}
 });
 
 describe("P159 — registerAgent public_key wiring (AC-1)", () => {
@@ -88,6 +97,7 @@ describe("P159 — getOrCreateIdentity DB wiring (AC-2)", () => {
 	it("writes public_key to DB on first-run identity creation", async () => {
 		const agentName = `${TEST_PREFIX}-first-run`;
 		const kp = await getOrCreateIdentity(workspaceRoot, agentName);
+		derivedAgentIds.push(kp.agentId);
 
 		const dbKey = await getAgentPublicKey(kp.agentId);
 		expect(dbKey).toBe(kp.publicKey);
@@ -96,6 +106,7 @@ describe("P159 — getOrCreateIdentity DB wiring (AC-2)", () => {
 	it("does not re-register on subsequent calls (key already on disk)", async () => {
 		const agentName = `${TEST_PREFIX}-subsequent`;
 		const kp1 = await getOrCreateIdentity(workspaceRoot, agentName);
+		derivedAgentIds.push(kp1.agentId);
 		const kp2 = await getOrCreateIdentity(workspaceRoot, agentName);
 		// Same object returned from disk
 		expect(kp2.agentId).toBe(kp1.agentId);
@@ -123,6 +134,7 @@ describe("P159 — rotateKeyPair DB wiring (AC-4)", () => {
 	it("updates public_key in DB after rotation", async () => {
 		const agentName = `${TEST_PREFIX}-rotate`;
 		const kp = await getOrCreateIdentity(workspaceRoot, agentName);
+		derivedAgentIds.push(kp.agentId);
 		const originalKey = kp.publicKey;
 
 		const { newKeyPair } = await rotateKeyPair(workspaceRoot, kp);
