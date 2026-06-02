@@ -632,6 +632,25 @@ function inferGateForState(
 		}
 	}
 
+	// Governance amendment: 6-stage workflow with mandatory DELIBERATION between DRAFT and REVIEW.
+	// D1=DRAFT→DELIBERATION, D2=DELIBERATION→REVIEW, D3=REVIEW→DEVELOP, D4=DEVELOP→MERGE, D5=MERGE→COMPLETE.
+	if (t === "governance-amendment") {
+		switch (s) {
+			case "DRAFT":
+				return { gate: "D1", toStage: "DELIBERATION" as any };
+			case "DELIBERATION":
+				return { gate: "D2", toStage: "Review" };
+			case "REVIEW":
+				return { gate: "D3", toStage: "Develop" };
+			case "DEVELOP":
+				return { gate: "D4", toStage: "Merge" };
+			case "MERGE":
+				return { gate: "D5", toStage: "Complete" };
+			default:
+				return null;
+		}
+	}
+
 	// Standard RFC workflow: DRAFT → REVIEW → DEVELOP → MERGE → COMPLETE.
 	switch (s) {
 		case "DRAFT":
@@ -1684,7 +1703,7 @@ async function claimImplicitGateReady(
           LIMIT 1
        ) dispatch ON true
       WHERE p.maturity = 'mature'
-        AND LOWER(p.status) IN ('draft', 'review', 'develop', 'merge', 'triage', 'fix')
+        AND LOWER(p.status) IN ('draft', 'review', 'develop', 'merge', 'triage', 'fix', 'deliberation')
         AND dispatch.id IS NULL
         AND ($1::bigint IS NULL OR p.id = $1)
       ORDER BY p.modified_at ASC, p.id ASC

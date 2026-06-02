@@ -395,6 +395,7 @@ export async function validateRole(
 	}
 
 	const allowedRoles = rows[0].allowed_roles;
+	if (allowedRoles.includes("any")) return { valid: true };
 	const hasRole = agentRoles.some((role) => allowedRoles.includes(role));
 
 	if (!hasRole) {
