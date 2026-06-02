@@ -18,7 +18,8 @@ import {
 	isRegisteredAgency,
 	hasActiveLiaisonSession,
 } from "../../../../infra/agency/liaison-service.ts";
-import { detectConflicts } from "../../../../core/proposal/directive-conflict-detector.ts";
+import { detectConflicts } from "./directive-conflict-detector.ts";
+import { calculateDispatchPriority } from "./directive-priority.ts";
 
 type ProjectionFormat = "yaml_md" | "json";
 
