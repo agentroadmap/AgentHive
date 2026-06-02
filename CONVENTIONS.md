@@ -216,6 +216,7 @@ AgentHive work is proposal-driven. Participate through MCP, not through chat-onl
 | **feature** | Type B (Impl) | Standard RFC | Concrete capability to build |
 | **issue** | Type B (Impl) | Standard RFC | Problem in the product requiring code changes |
 | **hotfix** | Type C (Ops) | Hotfix | Localized operational fix to running instance |
+| **governance-amendment** | Type D (Governance) | Governance Amendment | Constitutional or governance rule change — 6 stages, 48h DELIBERATION, human MERGE approval. See P181. |
 
 See `docs/architecture/architecture-proposal-type.md` for full guidance on when to use `architecture` vs. other types, advisory mechanics, migration rules, and child proposal spawning.
 
@@ -251,6 +252,23 @@ The hotfix workflow uses the lightweight 3-stage path, drawn from `roadmap.workf
 | **DRAFT** | Confirm | Confirm the defect, constrain scope, and decide that this remains a localized hotfix. |
 | **DEVELOP** | Apply | Implement and verify the operational fix. |
 | **COMPLETE** | Terminal | Fix applied, verified, and closed. |
+
+### Governance Amendment Workflow (governance-amendment)
+
+For constitutional or governance rule changes (P179 constitution, agent rights, workflow rules). File `type=governance-amendment` and cite the constitutional Article/Section in `proposal.summary`.
+
+| State | Gate | Requirements |
+| :--- | :--- | :--- |
+| **DRAFT** | D1 | Summary cites Article/Section; AC references sections being changed; doc-9 dependency link present |
+| **DELIBERATION** | D2 | Minimum 48h open window; no unresolved blocking concerns |
+| **REVIEW** | D3 | ≥2 distinct approvers including Skeptic; no blocking reviews |
+| **DEVELOP** | D4 | Migration + code/AC verification; CONVENTIONS.md updated |
+| **MERGE** | D5 | Human approval required (`agent_type=human`) — no auto-merge |
+| **COMPLETE** | — | doc-9 updated atomically; audit trail in `gate_decision_log` |
+
+**Rollback:** D2 blocked → return to DRAFT. D3 rejected → return to DELIBERATION. D5 rejected → return to REVIEW. doc-9 is only written at COMPLETE.
+
+**Bootstrapping note:** P181 is the first governance-amendment; it used a transitional path since the machinery was not yet deployed. All subsequent governance proposals must use `type=governance-amendment`.
 
 ### Unified Vocabulary Table
 

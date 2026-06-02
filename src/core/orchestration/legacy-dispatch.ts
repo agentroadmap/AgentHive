@@ -516,8 +516,8 @@ async function matchAgentsForState(state: string): Promise<MatchedAgent[]> {
 // classifyProviderSignal are now imported from ./provider-cooldown.ts
 
 type GateDefinition = {
-	gate: "D1" | "D2" | "D3" | "D4";
-	toStage: "Review" | "Develop" | "Merge" | "Complete";
+	gate: "D1" | "D2" | "D3" | "D4" | "D5";
+	toStage: "DELIBERATION" | "Review" | "Develop" | "Merge" | "Complete";
 };
 
 type GateReadyProposal = {
@@ -573,6 +573,26 @@ function inferGateForState(
 ): GateDefinition | null {
 	const s = normalizeState(state);
 	const t = (type ?? "").toLowerCase();
+
+	// Governance-amendment: 6-stage workflow with DELIBERATION between DRAFT and REVIEW.
+	// D1: DRAFT→DELIBERATION, D2: DELIBERATION→REVIEW (48h gate), D3: REVIEW→DEVELOP,
+	// D4: DEVELOP→MERGE, D5: MERGE→COMPLETE (human-only gate).
+	if (t === "governance-amendment") {
+		switch (s) {
+			case "DRAFT":
+				return { gate: "D1", toStage: "DELIBERATION" };
+			case "DELIBERATION":
+				return { gate: "D2", toStage: "Review" };
+			case "REVIEW":
+				return { gate: "D3", toStage: "Develop" };
+			case "DEVELOP":
+				return { gate: "D4", toStage: "Merge" };
+			case "MERGE":
+				return { gate: "D5", toStage: "Complete" };
+			default:
+				return null;
+		}
+	}
 
 	// Hotfix is a 3-stage workflow: TRIAGE → FIX → DEPLOYED.
 	// REVIEW and MERGE are skipped — the design is "fix it fast, prove it works."
@@ -1837,7 +1857,7 @@ export async function dispatchImplicitGate(
 	const pool = getPool();
 	const resolvedProfile = await resolveGateRole(
 		proposal.type ?? "feature",
-		gate.gate as "D1" | "D2" | "D3" | "D4",
+		gate.gate as "D1" | "D2" | "D3" | "D4" | "D5",
 		pool,
 	).catch((err) => {
 		logger.warn(`gate_role resolver error for ${proposal.display_id}/${gate.gate}:`, err);
