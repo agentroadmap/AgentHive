@@ -809,6 +809,12 @@ COMMIT;
 For project context and workflow stages, see CONVENTIONS.md §1–2 (Proposal Lifecycle and File Precedence).
 
 For deep reference (DB schema, control-plane architecture, escalation matrix), see CONVENTIONS.md §3.0 onwards (link as-needed).
+## 8. Validation and Deployment Expectations
+
+- For code changes, run the relevant existing tests, build steps, or targeted checks already provided by the repo.
+- For DB changes, prefer validating against a clone of the live schema before touching production.
+- For MCP changes, verify through the live service when feasible, not only with unit-level reasoning.
+- Report the exact scope of what you verified:
   - code only
   - clone DB validation
   - live DB deployment
