@@ -15,6 +15,7 @@
 
 import { createHash } from "node:crypto";
 import { query as defaultQuery } from "../../infra/postgres/pool.ts";
+import { autoCharterIfNeeded } from "./auto-charter.ts";
 
 export type QueryFn = typeof defaultQuery;
 
@@ -275,6 +276,13 @@ export async function postWorkOffer(
 				role: input.role,
 			}),
 		]);
+		// P182 AC-9: auto-charter when 2+ alive dispatches exist for the same proposal.
+		await autoCharterIfNeeded(input.proposalId, queryFn).catch((err) => {
+			console.warn(
+				`[postWorkOffer] auto-charter failed for proposal ${input.proposalId}:`,
+				err instanceof Error ? err.message : err,
+			);
+		});
 	} else {
 		await queryFn(`SELECT pg_notify('work_offers', $1)`, [
 			JSON.stringify({
