@@ -7,7 +7,8 @@
  */
 
 import type { QueryResultRow } from "pg";
-import { detectConflicts } from "../../../../core/proposal/directive-conflict-detector.ts";
+import { detectConflicts } from "./directive-conflict-detector.ts";
+import { calculateDispatchPriority } from "./directive-priority.ts";
 import {
 	formatValidationError,
 	validateLease,
@@ -93,8 +94,28 @@ export class PgProposalHandlers {
 		limit?: number;
 		include_terminal?: boolean;
 		include_metadata?: boolean;
+		// Unsupported search params — callers sometimes pass these expecting filtering.
+		// Rejected loudly so they learn to use proposal_search instead.
+		search?: unknown;
+		q?: unknown;
+		title_contains?: unknown;
 	}): Promise<CallToolResult> {
 		try {
+			// P1387: reject unsupported free-text search params loudly so callers don't
+			// silently get unfiltered results and waste round-trips debugging.
+			const unsupportedSearchParam = ["search", "q", "title_contains"].find(
+				(k) => (args as Record<string, unknown>)[k] !== undefined,
+			);
+			if (unsupportedSearchParam) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `❌ prop_list does not support free-text search (param '${unsupportedSearchParam}' is not implemented). Use 'proposal_search' for keyword/title search instead.`,
+						},
+					],
+				};
+			}
 			const limit = Math.min(Math.max(args.limit ?? 50, 1), 500);
 			const includeTerminal = args.include_terminal === true;
 			const includeMetadata = args.include_metadata === true;
