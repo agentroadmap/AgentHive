@@ -107,31 +107,23 @@ export class MemoryService {
   ): Promise<void> {
     const serialized = JSON.stringify(value);
     const ttl = ttlSeconds ?? null;
-    const expiresAt = ttl !== null
-      ? new Date(Date.now() + ttl * 1000)
-      : null;
 
-    const { rows: existing } = await query<{ id: number }>(
-      `SELECT id FROM agent_memory
-       WHERE agent_identity = $1 AND layer = $2 AND key = $3
-       LIMIT 1`,
-      [agentIdentity, layer, key],
+    // Single UPSERT on the (agent_identity, key, layer) unique constraint.
+    // INSERT path: trg_set_memory_expires handles expires_at from ttl_seconds+created_at.
+    // UPDATE path: recompute expires_at explicitly since the INSERT trigger doesn't fire.
+    await query(
+      `INSERT INTO agent_memory (agent_identity, layer, key, value, ttl_seconds)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (agent_identity, key, layer) DO UPDATE SET
+         value       = EXCLUDED.value,
+         ttl_seconds = EXCLUDED.ttl_seconds,
+         expires_at  = CASE
+                         WHEN EXCLUDED.ttl_seconds IS NULL THEN NULL
+                         ELSE NOW() + (EXCLUDED.ttl_seconds * INTERVAL '1 second')
+                       END,
+         updated_at  = NOW()`,
+      [agentIdentity, layer, key, serialized, ttl],
     );
-
-    if (existing[0]) {
-      await query(
-        `UPDATE agent_memory
-         SET value = $2, ttl_seconds = $3, expires_at = $4, updated_at = now()
-         WHERE id = $1`,
-        [existing[0].id, serialized, ttl, expiresAt],
-      );
-    } else {
-      await query(
-        `INSERT INTO agent_memory (agent_identity, layer, key, value, ttl_seconds, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [agentIdentity, layer, key, serialized, ttl, expiresAt],
-      );
-    }
   }
 
   /**
