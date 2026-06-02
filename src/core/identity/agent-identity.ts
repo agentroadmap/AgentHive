@@ -388,29 +388,19 @@ export async function rotateKeyPair(
 	workspaceRoot: string,
 	currentKeyPair: AgentKeyPair,
 ): Promise<{ newKeyPair: AgentKeyPair; previousPublicKey: string }> {
-	// Generate new key pair with same agentId
-	const newKeyPair: AgentKeyPair = {
-		agentId: currentKeyPair.agentId,
-		publicKey: generateKeyPairSync("ed25519", {
-			publicKeyEncoding: { type: "spki", format: "pem" },
-			privateKeyEncoding: { type: "pkcs8", format: "pem" },
-		}).publicKey,
-		privateKey: generateKeyPairSync("ed25519", {
-			publicKeyEncoding: { type: "spki", format: "pem" },
-			privateKeyEncoding: { type: "pkcs8", format: "pem" },
-		}).privateKey,
-		created: currentKeyPair.created,
-		rotated: new Date().toISOString(),
-		version: currentKeyPair.version + 1,
-	};
-
-	// Actually generate a single consistent keypair
 	const { publicKey, privateKey } = generateKeyPairSync("ed25519", {
 		publicKeyEncoding: { type: "spki", format: "pem" },
 		privateKeyEncoding: { type: "pkcs8", format: "pem" },
 	});
-	newKeyPair.publicKey = publicKey;
-	newKeyPair.privateKey = privateKey;
+
+	const newKeyPair: AgentKeyPair = {
+		agentId: currentKeyPair.agentId,
+		publicKey,
+		privateKey,
+		created: currentKeyPair.created,
+		rotated: new Date().toISOString(),
+		version: currentKeyPair.version + 1,
+	};
 
 	// Archive old key for verification transition period
 	const archivePath = join(
