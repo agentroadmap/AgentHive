@@ -552,8 +552,8 @@ async function recordProviderSuccess(provider: string): Promise<void> {
 }
 
 type GateDefinition = {
-	gate: "D1" | "D2" | "D3" | "D4";
-	toStage: "Review" | "Develop" | "Merge" | "Complete";
+	gate: "D1" | "D2" | "D3" | "D4" | "D5";
+	toStage: "DELIBERATION" | "Review" | "Develop" | "Merge" | "Complete";
 };
 
 type GateReadyProposal = {
@@ -620,6 +620,25 @@ function inferGateForState(
 				return { gate: "D1", toStage: "FIX" as any };
 			case "FIX":
 				return { gate: "D3", toStage: "DEPLOYED" as any };
+			default:
+				return null;
+		}
+	}
+
+	// Governance amendment: 6-stage workflow with mandatory DELIBERATION between DRAFT and REVIEW.
+	// D1=DRAFT→DELIBERATION, D2=DELIBERATION→REVIEW, D3=REVIEW→DEVELOP, D4=DEVELOP→MERGE, D5=MERGE→COMPLETE.
+	if (t === "governance-amendment") {
+		switch (s) {
+			case "DRAFT":
+				return { gate: "D1", toStage: "DELIBERATION" };
+			case "DELIBERATION":
+				return { gate: "D2", toStage: "Review" };
+			case "REVIEW":
+				return { gate: "D3", toStage: "Develop" };
+			case "DEVELOP":
+				return { gate: "D4", toStage: "Merge" };
+			case "MERGE":
+				return { gate: "D5", toStage: "Complete" };
 			default:
 				return null;
 		}
@@ -1496,6 +1515,15 @@ const GATE_ROLES: Record<string, { role: string; framing: string }> = {
 			"Only advance if the integration is stable.\n\n" +
 			"OUTPUT CONTRACT: same as D1 — emit `## Failures` + `## Remediation` to stdout for non-advance verdicts.",
 	},
+	D5: {
+		role: "human",
+		framing:
+			"You are the Human Steward gating MERGE → COMPLETE for a governance-amendment. " +
+			"Only a registered human agent (agent_type=human) may approve at this gate. " +
+			"Review the full amendment: constitutional text change, gate_decision_log audit trail, deliberation thread. " +
+			"REJECT routes back to REVIEW.\n\n" +
+			"OUTPUT CONTRACT: approve|reject. No auto-merge of constitutional changes.",
+	},
 };
 
 function gateRole(gate: GateDefinition): string {
@@ -1571,7 +1599,7 @@ async function claimImplicitGateReady(
           LIMIT 1
        ) dispatch ON true
       WHERE p.maturity = 'mature'
-        AND LOWER(p.status) IN ('draft', 'review', 'develop', 'merge', 'triage', 'fix')
+        AND LOWER(p.status) IN ('draft', 'review', 'develop', 'merge', 'triage', 'fix', 'deliberation')
         AND dispatch.id IS NULL
         AND ($1::bigint IS NULL OR p.id = $1)
       ORDER BY p.modified_at ASC, p.id ASC
