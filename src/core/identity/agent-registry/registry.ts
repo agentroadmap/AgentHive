@@ -51,6 +51,8 @@ type AgentRegistryRow = {
 	} | null;
 	status: AgentRegistration["status"] | null;
 	created_at: Date | string;
+	public_key?: string | null;
+	key_rotated_at?: string | null;
 };
 
 /** Generate unique suffix for contract agents */
@@ -127,13 +129,23 @@ function defaultTrustTier(agentId: string, agentType: string): TrustTier {
 	return "restricted";
 }
 
+/**
+ * Map internal agentType ('permanent'|'contract') to valid DB agent_type.
+ * Live schema allows: human|llm|tool|hybrid|agency|workforce|coordinator|user|alias.
+ */
+function toDbAgentType(type: string): string {
+	if (type === "permanent") return "human";
+	if (type === "contract") return "llm";
+	return type; // pass through already-valid DB values
+}
+
 /** Map a DB row to AgentRegistration */
 function hydrate(row: AgentRegistryRow): AgentRegistration {
 	const skills = row.skills ?? {};
 	return {
 		agentId: skills.agentId ?? row.agent_identity,
 		instanceId: row.agent_identity,
-		agentType: row.agent_type === "permanent" ? "permanent" : "contract",
+		agentType: row.agent_type === "human" ? "permanent" : "contract",
 		role: row.role ?? undefined,
 		capabilities: skills.capabilities ?? [],
 		channel: skills.channel ?? agentChannel(row.agent_identity),
@@ -203,17 +215,45 @@ export async function registerAgent(
 	const skills = { agentId, capabilities, channel, lastSeen: now };
 	const trustTier = defaultTrustTier(instanceId, agentType);
 
+	// P159: key conflict check — if existing row has a different public_key, reject.
+	if (request.publicKey) {
+		const { rows: existing } = await query<{ public_key: string | null }>(
+			`SELECT public_key FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
+			[instanceId],
+		);
+		if (existing.length > 0 && existing[0].public_key !== null && existing[0].public_key !== request.publicKey) {
+			throw new Error(
+				`Key conflict for agent ${instanceId}: registered public_key differs from provided key. Use rotateKeyPair() to explicitly rotate.`,
+			);
+		}
+	}
+
+	const dbAgentType = toDbAgentType(agentType);
 	const insertResult = await query<{ id: number }>(
-		`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, role, skills, status, trust_tier)
-     VALUES ($1, $2, $3, $4::jsonb, 'online', $5)
-     ON CONFLICT (agent_identity) DO UPDATE SET
-       agent_type = EXCLUDED.agent_type,
-       role       = EXCLUDED.role,
-       skills     = agent_registry.skills || EXCLUDED.skills,
-       status     = 'online',
-       trust_tier = COALESCE(NULLIF(agent_registry.trust_tier, 'authority'), EXCLUDED.trust_tier)
-     RETURNING id`,
-		[instanceId, agentType, role ?? null, JSON.stringify(skills), trustTier],
+		request.publicKey
+			? `INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, role, skills, status, trust_tier, public_key, key_rotated_at)
+         VALUES ($1, $2, $3, $4::jsonb, 'active', $5, $6, NOW())
+         ON CONFLICT (agent_identity) DO UPDATE SET
+           agent_type     = EXCLUDED.agent_type,
+           role           = EXCLUDED.role,
+           skills         = agent_registry.skills || EXCLUDED.skills,
+           status         = 'active',
+           trust_tier     = COALESCE(NULLIF(agent_registry.trust_tier, 'authority'), EXCLUDED.trust_tier),
+           public_key     = COALESCE(EXCLUDED.public_key, agent_registry.public_key),
+           key_rotated_at = CASE WHEN EXCLUDED.public_key IS NOT NULL THEN NOW() ELSE agent_registry.key_rotated_at END
+         RETURNING id`
+			: `INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, role, skills, status, trust_tier)
+         VALUES ($1, $2, $3, $4::jsonb, 'active', $5)
+         ON CONFLICT (agent_identity) DO UPDATE SET
+           agent_type = EXCLUDED.agent_type,
+           role       = EXCLUDED.role,
+           skills     = agent_registry.skills || EXCLUDED.skills,
+           status     = 'active',
+           trust_tier = COALESCE(NULLIF(agent_registry.trust_tier, 'authority'), EXCLUDED.trust_tier)
+         RETURNING id`,
+		request.publicKey
+			? [instanceId, dbAgentType, role ?? null, JSON.stringify(skills), trustTier, request.publicKey]
+			: [instanceId, dbAgentType, role ?? null, JSON.stringify(skills), trustTier],
 	);
 
 	// P919 AC-12: Tier 2 display alias for worker slot-0 spawns. The slot
@@ -262,7 +302,7 @@ export async function deregisterAgent(
 	const { agentId, reason = "graceful shutdown" } = request;
 
 	await query(
-		`UPDATE agent_registry SET status = 'offline' WHERE agent_identity = $1`,
+		`UPDATE roadmap_workforce.agent_registry SET status = 'inactive' WHERE agent_identity = $1`,
 		[agentId],
 	);
 
@@ -279,7 +319,7 @@ export async function listAgents(filter?: {
 	const params = filter?.status ? [filter.status] : [];
 	const { rows } = await query(
 		`SELECT agent_identity, agent_type, role, skills, status, created_at
-     FROM agent_registry ${where} ORDER BY agent_identity`,
+     FROM roadmap_workforce.agent_registry ${where} ORDER BY agent_identity`,
 		params,
 	);
 	return rows.map(hydrate);
@@ -293,7 +333,7 @@ export async function getAgent(
 ): Promise<AgentRegistration | undefined> {
 	const { rows } = await query(
 		`SELECT agent_identity, agent_type, role, skills, status, created_at
-     FROM agent_registry WHERE agent_identity = $1`,
+     FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
 		[agentId],
 	);
 	return rows.length > 0 ? hydrate(rows[0]) : undefined;
@@ -312,12 +352,42 @@ export async function updateAgentStatus(
 	if (currentTask !== undefined) skillsPatch.currentTask = currentTask;
 
 	await query(
-		`UPDATE agent_registry
+		`UPDATE roadmap_workforce.agent_registry
      SET status = $1,
          skills = skills || $2::jsonb
      WHERE agent_identity = $3`,
 		[status, JSON.stringify(skillsPatch), agentId],
 	);
+}
+
+/**
+ * P159: Update public_key and key_rotated_at for an agent after key rotation.
+ * No-ops silently if the agent row does not exist (best-effort).
+ */
+export async function updateAgentPublicKey(
+	agentId: string,
+	newPublicKey: string,
+): Promise<void> {
+	await query(
+		`UPDATE roadmap_workforce.agent_registry
+     SET public_key = $1, key_rotated_at = NOW()
+     WHERE agent_identity = $2`,
+		[newPublicKey, agentId],
+	);
+}
+
+/**
+ * P159: Fetch the stored public_key for an agent from agent_registry.
+ * Returns null if the agent does not exist or has no key on record.
+ */
+export async function getAgentPublicKey(
+	agentId: string,
+): Promise<string | null> {
+	const { rows } = await query<{ public_key: string | null }>(
+		`SELECT public_key FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
+		[agentId],
+	);
+	return rows[0]?.public_key ?? null;
 }
 
 /** Send announcement via MCP (best-effort, non-blocking) */

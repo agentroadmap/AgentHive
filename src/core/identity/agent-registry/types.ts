@@ -32,6 +32,12 @@ export type RegistrationRequest = {
 	routeAbbr?: string;
 	/** P852: spawning host segment (e.g. "mac", "bot"). Defaults to AGENTHIVE_HOST env. */
 	host?: string;
+	/**
+	 * P159: Ed25519 public key (PEM-encoded SPKI). When provided, upserts
+	 * public_key and sets key_rotated_at=NOW() in agent_registry.
+	 * Conflicts (same agent, different key) throw — use rotateKeyPair() instead.
+	 */
+	publicKey?: string;
 };
 
 export type RegistrationResponse = {

@@ -19,6 +19,11 @@ import {
 } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import {
+	getAgentPublicKey,
+	registerAgent,
+	updateAgentPublicKey,
+} from "./agent-registry/index.ts";
 
 /** Key algorithm used for agent identities */
 const _KEY_ALGORITHM = "ed25519";
@@ -190,9 +195,23 @@ export async function getOrCreateIdentity(
 		return existing;
 	}
 
-	// Generate new key pair
+	// Generate new key pair and persist to disk
 	const keyPair = generateAgentKeyPair(tempAgentId);
 	await saveKeyPair(workspaceRoot, keyPair);
+
+	// P159: best-effort DB registration with public key.
+	// Pass instanceId explicitly so the key-derived ID is stored without a random suffix,
+	// making getAgentPublicKey(agentId) work as a stable lookup.
+	try {
+		await registerAgent({
+			agentId: tempAgentId,
+			instanceId: tempAgentId,
+			publicKey: keyPair.publicKey,
+		});
+	} catch {
+		// DB unavailable or key conflict — file system remains authoritative
+	}
+
 	return keyPair;
 }
 
@@ -316,6 +335,30 @@ export function verifyToken(token: AuthToken): TokenVerification {
 	}
 }
 
+/**
+ * P159: Verify a token using the public key stored in agent_registry.
+ * Falls back to token.publicKey if the DB is unavailable or has no key on record.
+ * AC#3: DB-backed identity verification.
+ */
+export async function verifyTokenWithDbLookup(
+	token: AuthToken,
+): Promise<TokenVerification> {
+	let publicKey = token.publicKey;
+
+	try {
+		const dbKey = await getAgentPublicKey(token.agentId);
+		if (dbKey !== null) {
+			publicKey = dbKey;
+		}
+	} catch {
+		// DB unavailable — fall back to token-embedded key
+	}
+
+	// Verify using the resolved key (db-authoritative when available)
+	const tokenWithResolvedKey: AuthToken = { ...token, publicKey };
+	return verifyToken(tokenWithResolvedKey);
+}
+
 // ===================== Signature Operations =====================
 
 /**
@@ -358,29 +401,19 @@ export async function rotateKeyPair(
 	workspaceRoot: string,
 	currentKeyPair: AgentKeyPair,
 ): Promise<{ newKeyPair: AgentKeyPair; previousPublicKey: string }> {
-	// Generate new key pair with same agentId
-	const newKeyPair: AgentKeyPair = {
-		agentId: currentKeyPair.agentId,
-		publicKey: generateKeyPairSync("ed25519", {
-			publicKeyEncoding: { type: "spki", format: "pem" },
-			privateKeyEncoding: { type: "pkcs8", format: "pem" },
-		}).publicKey,
-		privateKey: generateKeyPairSync("ed25519", {
-			publicKeyEncoding: { type: "spki", format: "pem" },
-			privateKeyEncoding: { type: "pkcs8", format: "pem" },
-		}).privateKey,
-		created: currentKeyPair.created,
-		rotated: new Date().toISOString(),
-		version: currentKeyPair.version + 1,
-	};
-
-	// Actually generate a single consistent keypair
+	// Generate a single consistent key pair with the same agentId
 	const { publicKey, privateKey } = generateKeyPairSync("ed25519", {
 		publicKeyEncoding: { type: "spki", format: "pem" },
 		privateKeyEncoding: { type: "pkcs8", format: "pem" },
 	});
-	newKeyPair.publicKey = publicKey;
-	newKeyPair.privateKey = privateKey;
+	const newKeyPair: AgentKeyPair = {
+		agentId: currentKeyPair.agentId,
+		publicKey,
+		privateKey,
+		created: currentKeyPair.created,
+		rotated: new Date().toISOString(),
+		version: currentKeyPair.version + 1,
+	};
 
 	// Archive old key for verification transition period
 	const archivePath = join(
@@ -396,6 +429,13 @@ export async function rotateKeyPair(
 
 	// Save new key as current
 	await saveKeyPair(workspaceRoot, newKeyPair);
+
+	// P159: best-effort DB update after rotation
+	try {
+		await updateAgentPublicKey(currentKeyPair.agentId, newKeyPair.publicKey);
+	} catch {
+		// DB unavailable — file system remains authoritative
+	}
 
 	return {
 		newKeyPair,
