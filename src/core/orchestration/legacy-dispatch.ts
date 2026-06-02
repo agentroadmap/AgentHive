@@ -1783,7 +1783,8 @@ async function claimImplicitGateReady(
           LIMIT 1
        ) dispatch ON true
       WHERE p.maturity = 'mature'
-        AND LOWER(p.status) IN ('draft', 'review', 'develop', 'merge', 'triage', 'fix')
+        AND (LOWER(p.status) IN ('draft', 'review', 'develop', 'merge', 'triage', 'fix')
+             OR (LOWER(p.status) = 'deliberation' AND p.type = 'governance-amendment'))
         AND p.gate_scanner_paused = false
         AND dispatch.id IS NULL
         AND ($1::bigint IS NULL OR p.id = $1)

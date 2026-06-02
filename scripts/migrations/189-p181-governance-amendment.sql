@@ -207,7 +207,7 @@ VALUES
    'rejection routes back to REVIEW for revision.',
    NULL, NULL, NULL, 'active')
 
-ON CONFLICT ON CONSTRAINT gate_role_active_unique DO NOTHING;
+ON CONFLICT (proposal_type, gate) WHERE lifecycle_status = 'active' DO NOTHING;
 
 -- ─── 9. Extend fn_guard_gate_advance for governance-amendment (AC-6) ─────────
 -- Adds a type-scoped block BEFORE the existing 4-gate RFC handler so existing
