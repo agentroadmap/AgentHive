@@ -15,6 +15,7 @@
 
 import { createHash } from "node:crypto";
 import { query as defaultQuery } from "../../infra/postgres/pool.ts";
+import { maybeCharterTeam } from "./team-charter-hook.ts";
 
 export type QueryFn = typeof defaultQuery;
 
@@ -287,10 +288,14 @@ export async function postWorkOffer(
 		]);
 	}
 
-	// AC-9 (P182): when a fresh dispatch brings the alive count for this
-	// proposal to 2+, ensure a team charter exists so team governance applies.
-	if (!row.was_replay) {
-		await autoCharterIfNeeded(input.proposalId, queryFn);
+	// AC-9 (P182): auto-charter when 2+ agents are dispatched to the same proposal.
+	try {
+		await maybeCharterTeam(input.proposalId, queryFn);
+	} catch (charterErr) {
+		console.warn(
+			`[postWorkOffer] team charter hook failed for P${input.proposalId}:`,
+			charterErr instanceof Error ? charterErr.message : charterErr,
+		);
 	}
 
 	return {
@@ -298,78 +303,4 @@ export async function postWorkOffer(
 		replay: row.was_replay,
 		attemptCount: row.attempt_count,
 	};
-}
-
-/**
- * P182 AC-9: Create a team charter in roadmap_workforce.team_norms when a
- * proposal has 2 or more alive squad_dispatch rows.  Idempotent — safe to
- * call on every fresh dispatch; does nothing when < 2 alive rows exist, and
- * the team:charter INSERT uses ON CONFLICT DO NOTHING.
- */
-async function autoCharterIfNeeded(
-	proposalId: number,
-	queryFn: QueryFn,
-): Promise<void> {
-	const { rows: countRows } = await queryFn<{ alive: number }>(
-		`SELECT count(*)::int AS alive
-		   FROM roadmap_workforce.squad_dispatch
-		  WHERE proposal_id = $1
-		    AND dispatch_status IN ('open', 'assigned', 'active')`,
-		[proposalId],
-	);
-	if ((countRows[0]?.alive ?? 0) < 2) return;
-
-	const teamName = `team:proposal:${proposalId}`;
-
-	// Upsert team row; ON CONFLICT touches metadata so RETURNING always fires.
-	const { rows: teamRows } = await queryFn<{ id: number }>(
-		`INSERT INTO roadmap_workforce.team
-		   (team_name, team_type, status, metadata)
-		 VALUES ($1, 'proposal', 'active', $2::jsonb)
-		 ON CONFLICT (team_name)
-		 DO UPDATE SET metadata = roadmap_workforce.team.metadata
-		 RETURNING id`,
-		[
-			teamName,
-			JSON.stringify({ auto_chartered: true, proposal_id: proposalId }),
-		],
-	);
-	const teamId = teamRows[0]?.id;
-	if (!teamId) return;
-
-	// Charter norm — idempotent, skip if already present.
-	await queryFn(
-		`INSERT INTO roadmap_workforce.team_norms
-		   (team_id, norm_key, norm_value, set_by)
-		 VALUES ($1, 'team:charter', $2::jsonb, 'orchestrator')
-		 ON CONFLICT (team_id, norm_key) DO NOTHING`,
-		[
-			teamId,
-			JSON.stringify({
-				team_name: teamName,
-				proposal_ids: [String(proposalId)],
-				created_by: "orchestrator",
-				governance_layer: "team",
-				auto_chartered: true,
-			}),
-		],
-	);
-
-	// Five default norms — idempotent.
-	const DEFAULT_NORMS: [string, Record<string, string>][] = [
-		["team:norm:handoff", { rule: "Leave context summary in team memory before releasing lease" }],
-		["team:norm:communication", { rule: "Use team: prefix in proposal_discussions for intra-team matters" }],
-		["team:norm:challenge", { rule: "Skeptic challenges go through team discussion before gate" }],
-		["team:norm:memory", { rule: "Design decisions in team memory; implementation notes in individual" }],
-		["team:norm:worktree", { rule: "Coordinate via proposal_discussions before merging branches" }],
-	];
-	for (const [normKey, normVal] of DEFAULT_NORMS) {
-		await queryFn(
-			`INSERT INTO roadmap_workforce.team_norms
-			   (team_id, norm_key, norm_value, set_by)
-			 VALUES ($1, $2, $3::jsonb, 'orchestrator')
-			 ON CONFLICT (team_id, norm_key) DO NOTHING`,
-			[teamId, normKey, JSON.stringify(normVal)],
-		);
-	}
 }

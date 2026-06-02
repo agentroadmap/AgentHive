@@ -32,7 +32,7 @@ describe("P182 AC-9: auto-charter on multi-agent dispatch", () => {
 			],
 		);
 		testProposalId = rows[0].id;
-		teamName = `team:proposal:${testProposalId}`;
+		teamName = `team-P${testProposalId}`;
 	});
 
 	afterEach(async () => {
