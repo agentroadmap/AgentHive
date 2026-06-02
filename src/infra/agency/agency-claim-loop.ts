@@ -29,6 +29,7 @@ import {
 	handleOfferDispatch,
 	type OfferDispatchHandlerDeps,
 } from "./offer-dispatch-handler.ts";
+import { isProviderAuthDown } from "../../core/orchestration/provider-auth.ts";
 import type { LiaisonMessage } from "./liaison-message-types.ts";
 
 export type QueryFn = typeof defaultQuery;
@@ -89,6 +90,8 @@ interface ClaimRow {
 export interface AgencyClaimLoopOptions {
 	/** This agency's identity — the claimer passed to fn_claim_work_offer. */
 	agencyIdentity: string;
+	/** This agency's provider (e.g., "anthropic", "openai"). Used for AC-5 auth readiness checks. */
+	provider: string;
 	/**
 	 * This agency's REAL capabilities (e.g. ["develop"] / ["review"]). Passed as
 	 * the p_required_capabilities arg so fn_claim_work_offer's capability gate
@@ -111,6 +114,7 @@ export interface AgencyClaimLoopOptions {
 
 export class AgencyClaimLoop {
 	private readonly agencyIdentity: string;
+	private readonly provider: string;
 	private readonly capabilitiesJson: string;
 	private readonly onClaim: (claim: AgencyClaimedOffer) => Promise<void>;
 	private readonly connectListener: () => Promise<ListenerClient>;
@@ -133,6 +137,7 @@ export class AgencyClaimLoop {
 
 	constructor(opts: AgencyClaimLoopOptions) {
 		this.agencyIdentity = opts.agencyIdentity;
+		this.provider = opts.provider;
 		// Default to NO capabilities-filter only if the caller explicitly passes
 		// an empty list; otherwise serialize the real caps as a jsonb array.
 		this.capabilitiesJson = JSON.stringify(opts.capabilities ?? []);
@@ -211,6 +216,15 @@ export class AgencyClaimLoop {
 
 	private async claimOne(): Promise<AgencyClaimedOffer | null> {
 		try {
+			// AC-5: Check auth readiness before attempting to claim
+			const authDown = await isProviderAuthDown(this.provider, this.query);
+			if (authDown) {
+				this.logger.warn(
+					`[AgencyClaim:${this.agencyIdentity}] Provider auth for '${this.provider}' is down; skipping claim until cleared`,
+				);
+				return null;
+			}
+
 			const { rows } = await this.query<ClaimRow>(
 				`SELECT dispatch_id, proposal_id, squad_name, dispatch_role,
 				        claim_token, claim_expires_at, offer_version, metadata
