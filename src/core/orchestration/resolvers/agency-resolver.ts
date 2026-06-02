@@ -50,6 +50,10 @@ export interface AgencyCandidate {
  * Filters by in-flight capacity (P764).
  * Ranks by throttle_count ASC, last_seen_at DESC.
  *
+ * V3-C8 (P1440): Supports capability matching — filters agencies by required_capabilities.
+ * If requiredCapabilities is provided, only returns agencies whose capabilities
+ * are a SUPERSET of the required set. On no match, emits an escalation with evidence.
+ *
  * TODO P1365-AC4/AC8: Integrate capacity filtering
  * - LEFT JOIN roadmap_workforce.agency_capacity on (provider, model, agency_id)
  * - WHERE throttle_action != 'hard' (hard-throttled agencies excluded)
@@ -61,6 +65,7 @@ export interface AgencyCandidate {
 export async function resolveAgency(
 	projectId: string,
 	_role?: string,
+	requiredCapabilities?: unknown,
 ): Promise<AgencyCandidate | null> {
 	// P914: exclude coordinator agents (the orchestrator itself) and
 	// test scaffolding identities. Coordinators claim offers and
@@ -73,6 +78,7 @@ export async function resolveAgency(
 	const { rows } = await query(
 		`SELECT pr.id, pr.agency_id, pr.project_id, pr.capabilities,
 		        pr.status, pr.throttle_count, pr.last_seen_at, pr.max_in_flight,
+		        pr.agency_identity,
 		        COALESCE(inf.in_flight_count, 0) AS in_flight_count
 		 FROM roadmap_workforce.provider_registry pr
 		 JOIN roadmap_workforce.agent_registry ar ON ar.id = pr.agency_id
@@ -93,6 +99,39 @@ export async function resolveAgency(
 	if (!rows.length) return null;
 
 	const row = rows[0];
+
+	// V3-C8 (P1440): Apply capability subset matching if required_capabilities are specified.
+	if (requiredCapabilities) {
+		const {
+			isCapabilitySubsetMatch,
+			describeMissingCapabilities,
+		} = await import("../capability-taxonomy.ts");
+
+		if (!isCapabilitySubsetMatch(row.capabilities, requiredCapabilities)) {
+			// Log escalation for operator visibility
+			const reason = describeMissingCapabilities(
+				row.capabilities,
+				requiredCapabilities,
+			);
+			try {
+				await query(
+					`INSERT INTO roadmap.escalation_log
+					 (obstacle_type, agent_identity, escalated_to, severity, resolution_note)
+					 VALUES ('CAPABILITY_MISMATCH', $1, 'orchestrator', 'medium', $2)`,
+					[row.agency_identity, reason],
+				);
+			} catch (err) {
+				// Non-blocking: escalation log failure does not block dispatch
+				console.warn(
+					`[agency-resolver] Failed to write CAPABILITY_MISMATCH escalation:`,
+					err,
+				);
+			}
+			// Agency does not meet capability requirements
+			return null;
+		}
+	}
+
 	return {
 		id: BigInt(row.id),
 		agencyId: BigInt(row.agency_id),
