@@ -801,48 +801,14 @@ COMMIT;
 - The NOTIFY trigger (`fn_gate_role_notify`) fires on both the UPDATE and the INSERT, invalidating the resolver's TTL cache automatically.
 - The audit trigger (`fn_gate_role_audit`) captures the `old_persona`, `old_output_contract`, and `old_lifecycle_status` into `gate_role_history` on every UPDATE. No manual audit insertion is required.
 
-## 7. Git and Worktree Best Practices
 
-AgentHive is multi-agent. Git discipline is part of system safety.
+## 7. Git Discipline for Multi-Agent Work
 
-### Branching and worktrees
+**See GIT.md for complete parallel-agent git workflow** (isolated worktrees, atomic commits, safety checks, merge protocol, self-merge anti-pattern, live-DB test hygiene, parallel-dispatch audit, migration numbering).
 
-- Use one worktree per active agent/task.
-- Use a branch name that identifies the agent and topic, for example `xiaomi/schema-rollout` or `codex/workflow-defaults`.
-- Do not work inside another agent's worktree unless explicitly coordinating.
+For project context and workflow stages, see CONVENTIONS.md §1–2 (Proposal Lifecycle and File Precedence).
 
-### Commits
-
-- Commit coherent units of work early.
-- Keep commit messages specific to the changed files or proposal.
-- Prefer multiple small commits over one mega-commit when the work naturally separates.
-- If you change behavior, update the related docs in the same branch.
-
-### Shared-history rules
-
-- Do not rewrite shared history.
-- Do not force-push a branch another agent may be using.
-- Do not amend someone else's commit.
-- Rebase only your own unpublished work.
-- If a branch has already been merged or consumed by another agent, fix forward with new commits.
-
-### Conflict handling
-
-- Read both sides before resolving conflicts.
-- Never delete unknown changes just to get a clean merge.
-- If the repo root contains local changes and the live service runs from that root, remember that a restart may pick up those changes immediately.
-
-### Safety
-
-- Do not use destructive Git commands to discard work you did not create.
-- If you encounter unexpected changes, assume they may be intentional until proven otherwise.
-
-## 8. Validation and Deployment Expectations
-
-- For code changes, run the relevant existing tests, build steps, or targeted checks already provided by the repo.
-- For DB changes, prefer validating against a clone of the live schema before touching production.
-- For MCP changes, verify through the live service when feasible, not only with unit-level reasoning.
-- Report the exact scope of what you verified:
+For deep reference (DB schema, control-plane architecture, escalation matrix), see CONVENTIONS.md §3.0 onwards (link as-needed).
   - code only
   - clone DB validation
   - live DB deployment
