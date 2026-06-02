@@ -19,7 +19,7 @@ export function registerProposalTools(
 		description:
 			"List AgentHive proposals from Postgres, including workflow stage, type, and maturity. " +
 			"Supports filtering by status, type, parent_id, and terminal inclusion. " +
-			"Does NOT support free-text search — params `search`, `q`, and `title_contains` are silently ignored. " +
+			"Does NOT support free-text search — params `search`, `q`, and `title_contains` are rejected with an explicit error pointing to `proposal_search`. " +
 			"For keyword/title search use `proposal_search` instead.",
 		inputSchema: {
 			type: "object",
