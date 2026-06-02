@@ -189,6 +189,7 @@ AgentHive work is proposal-driven. Participate through MCP, not through chat-onl
 | **feature** | Type B (Impl) | Standard RFC | Concrete capability to build |
 | **issue** | Type B (Impl) | Standard RFC | Problem in the product requiring code changes |
 | **hotfix** | Type C (Ops) | Hotfix | Localized operational fix to running instance |
+| **governance-amendment** | Type G (Governance) | Governance Amendment | Constitutional or governance rule change — elevated 6-stage workflow with mandatory 48h deliberation, Skeptic quorum, and human-only final approval. See P181. |
 
 See `docs/architecture/architecture-proposal-type.md` for full guidance on when to use `architecture` vs. other types, advisory mechanics, migration rules, and child proposal spawning.
 
@@ -216,6 +217,32 @@ The hotfix workflow uses the same 3-stage structure, drawn from `roadmap.workflo
 **Escape:** ESCALATE → creates a new issue proposal (Standard RFC)
 
 > **Legacy note:** Older data may reference FIX, DEPLOYED, ESCALATE, REJECTED, DISCARDED, REPLACED from pre-P774 hotfix vocabulary. These are migration artifacts; do not introduce them in new code.
+
+### Governance Amendment Workflow (governance-amendment)
+
+Use `governance-amendment` type to propose changes to the AgentHive Constitution (doc-9) or core governance rules. This type enforces elevated scrutiny: a mandatory deliberation window, Skeptic quorum, and human approval.
+
+| State | Gate | Key Requirements |
+| :--- | :--- | :--- |
+| **DRAFT** | D1 | Summary must cite constitutional Article/Section being modified; ACs reference sections; doc-9 dependency link present. |
+| **DELIBERATION** | D2 | Minimum 48-hour open comment window; any agent may raise concerns; no unresolved blocking concerns. |
+| **REVIEW** | D3 | ≥2 distinct reviewers must approve, including at least one Skeptic. |
+| **DEVELOP** | D4 | Migration files verified; ACs passing; CONVENTIONS.md updated. |
+| **MERGE** | D5 | Human agent (`agent_type='human'`) approval required — auto-merge blocked by trigger. |
+| **COMPLETE** | — | Constitutional document (doc-9) updated atomically. |
+
+**How to file a governance amendment:**
+1. `prop_create type=governance-amendment` — set `summary` to the Article/Section being modified.
+2. Add a `proposal_dependency` link pointing to doc-9 (or the relevant constitutional sub-document).
+3. After DRAFT gating passes (D1), the proposal enters DELIBERATION for ≥48 hours.
+4. Collect ≥2 approvals (Skeptic + 1 other) at REVIEW (D3).
+5. Implement schema/code changes at DEVELOP; get D4 code review.
+6. Gary (or a registered human agent) approves at MERGE (D5).
+7. At COMPLETE, doc-9 is updated to reflect the amendment.
+
+**Rollback:** constitutional document (doc-9) is only updated at COMPLETE. Any rejection before that point leaves doc-9 unchanged.
+
+**Bootstrapping note (P181):** P181 itself used a transitional path since the machinery did not yet exist. All subsequent governance proposals must use `governance-amendment` type.
 
 ### Unified Vocabulary Table
 
