@@ -32,25 +32,61 @@ interface SlaThresholds {
 	stale_agent_pct: number;
 	latency_window_s: number;
 	error_window_s: number;
+	alert_channel: string;
 }
 
 async function loadThresholds(): Promise<SlaThresholds> {
 	try {
 		const res = await query<{ key: string; value: string }>(
 			"SELECT key, value FROM roadmap.sla_config WHERE key = ANY($1)",
-			[["latency_p99_ms_threshold", "error_rate_pct_threshold", "stale_agent_pct_threshold", "latency_window_seconds", "error_window_seconds"]],
+			[["latency_p99_ms_threshold", "error_rate_pct_threshold", "stale_agent_pct_threshold", "latency_window_seconds", "error_window_seconds", "alert_channel"]],
 		);
-		const map: Record<string, number> = {};
-		for (const row of res.rows) map[row.key] = parseFloat(row.value);
+		const map: Record<string, string> = {};
+		for (const row of res.rows) map[row.key] = row.value;
 		return {
-			latency_p99_ms: map["latency_p99_ms_threshold"] ?? 500,
-			error_rate_pct: map["error_rate_pct_threshold"] ?? 10,
-			stale_agent_pct: map["stale_agent_pct_threshold"] ?? 20,
-			latency_window_s: map["latency_window_seconds"] ?? 300,
-			error_window_s: map["error_window_seconds"] ?? 30,
+			latency_p99_ms: parseFloat(map["latency_p99_ms_threshold"] ?? "500"),
+			error_rate_pct: parseFloat(map["error_rate_pct_threshold"] ?? "10"),
+			stale_agent_pct: parseFloat(map["stale_agent_pct_threshold"] ?? "20"),
+			latency_window_s: parseFloat(map["latency_window_seconds"] ?? "300"),
+			error_window_s: parseFloat(map["error_window_seconds"] ?? "30"),
+			alert_channel: map["alert_channel"] ?? "platform.alerts",
 		};
 	} catch {
-		return { latency_p99_ms: 500, error_rate_pct: 10, stale_agent_pct: 20, latency_window_s: 300, error_window_s: 30 };
+		return { latency_p99_ms: 500, error_rate_pct: 10, stale_agent_pct: 20, latency_window_s: 300, error_window_s: 30, alert_channel: "platform.alerts" };
+	}
+}
+
+/** AC-5: on state transition, insert sla_events row and pg_notify the alert channel. Best-effort only. */
+async function notifyStateTransitionIfNeeded(
+	newState: SlaState,
+	alertChannel: string,
+	trigger: string,
+	metricValue: number | null,
+	threshold: number | null,
+): Promise<void> {
+	try {
+		const lastRes = await query<{ state: string }>(
+			"SELECT state FROM roadmap.sla_events ORDER BY occurred_at DESC LIMIT 1",
+			[],
+		);
+		const prevState = (lastRes.rows[0]?.state ?? "Normal") as SlaState;
+		if (prevState === newState) return; // no transition — skip
+		await query(
+			`INSERT INTO roadmap.sla_events (state, prev_state, trigger, metric_value, threshold)
+			 VALUES ($1, $2, $3, $4, $5)`,
+			[newState, prevState, trigger, metricValue, threshold],
+		);
+		const payload = JSON.stringify({
+			state: newState,
+			prev_state: prevState,
+			trigger,
+			metric_value: metricValue,
+			threshold,
+			occurred_at: new Date().toISOString(),
+		});
+		await query("SELECT pg_notify($1, $2)", [alertChannel, payload]);
+	} catch {
+		// Non-fatal — alert channel may be unwatched, sla_events may not exist yet
 	}
 }
 
@@ -157,9 +193,28 @@ export async function handleHealthCheck(_args: Record<string, unknown>): Promise
 	const fleetBreach = totalAgents > 0 && staleAgentPct > t.stale_agent_pct;
 
 	let state: SlaState = "Normal";
-	if (latencyBreach || errorBreach || fleetBreach) {
+	let breachTrigger = "none";
+	let breachValue: number | null = null;
+	let breachThreshold: number | null = null;
+	if (latencyBreach) {
 		state = "Degraded";
+		breachTrigger = "latency_p99";
+		breachValue = latencyP99;
+		breachThreshold = t.latency_p99_ms;
+	} else if (errorBreach) {
+		state = "Degraded";
+		breachTrigger = "error_rate";
+		breachValue = errorRatePct;
+		breachThreshold = t.error_rate_pct;
+	} else if (fleetBreach) {
+		state = "Degraded";
+		breachTrigger = "fleet";
+		breachValue = staleAgentPct;
+		breachThreshold = t.stale_agent_pct;
 	}
+
+	// AC-5: notify on state transition (best-effort, non-blocking)
+	void notifyStateTransitionIfNeeded(state, t.alert_channel, breachTrigger, breachValue, breachThreshold);
 
 	const metrics: SlaMetrics = {
 		state,
