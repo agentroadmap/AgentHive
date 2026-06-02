@@ -251,6 +251,16 @@ export class CubicCleanupService {
 	}
 
 	/**
+	 * P196 AC-4/AC-5: Clean up a single cubic — archive state and remove worktree directory.
+	 * Wraps expireCubic() + removeWorktree() for callers that need the combined operation.
+	 * Returns true if the worktree directory was removed.
+	 */
+	async cleanupCubic(cubicId: string): Promise<boolean> {
+		await this.expireCubic(cubicId);
+		return this.removeWorktree(cubicId);
+	}
+
+	/**
 	 * Expire a single cubic: mark expired in cubics, ARCHIVED in cubic_state.
 	 */
 	async expireCubic(cubicId: string): Promise<void> {
