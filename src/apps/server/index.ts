@@ -3354,7 +3354,7 @@ export class RoadmapServer {
 				      ON a.agency_id = ar.agent_identity
 				    LEFT JOIN roadmap_workforce.v_agency_in_flight inf
 				      ON inf.provider_registry_id = pr.id
-				   WHERE (pr.project_id IS NULL OR pr.project_id = $1::text)
+				   WHERE (pr.project_id IS NULL OR pr.project_id = $1)
 				     AND pr.status NOT IN ('offline', 'retired')
 				     AND (a.status IS NULL OR a.status <> 'retired')
 				     AND ar.agent_type <> 'coordinator'
@@ -3413,8 +3413,8 @@ export class RoadmapServer {
 				                 ) AS dependency_blockers
 				            FROM roadmap_proposal.proposal_dependencies pd
 				            LEFT JOIN roadmap_proposal.proposal dep
-				              ON dep.id = pd.depends_on_id
-				           WHERE pd.proposal_id = p.id
+				              ON dep.id = pd.to_proposal_id
+				           WHERE pd.from_proposal_id = p.id
 				        ) dep ON true
 				        LEFT JOIN LATERAL (
 				          SELECT CASE
@@ -3605,7 +3605,7 @@ export class RoadmapServer {
 				           ORDER BY als.started_at DESC
 				           LIMIT 1
 				        ) sess ON true
-				       WHERE (pr.project_id IS NULL OR pr.project_id = $1::text)
+				       WHERE (pr.project_id IS NULL OR pr.project_id = $1)
 				       ORDER BY pr.last_seen_at DESC NULLS LAST, ar.agent_identity
 				       LIMIT 12
 				    ) la
@@ -3625,7 +3625,7 @@ export class RoadmapServer {
 				    LEFT JOIN roadmap.agency_liaison_session als
 				      ON als.agency_id = ar.agent_identity
 				     AND als.ended_at IS NULL
-				   WHERE (pr.project_id IS NULL OR pr.project_id = $1::text)
+				   WHERE (pr.project_id IS NULL OR pr.project_id = $1)
 				),
 				gate_decision_counts AS (
 				  SELECT jsonb_build_object(
@@ -3741,7 +3741,7 @@ export class RoadmapServer {
 				           'deny_compliance', COUNT(*) FILTER (WHERE decision = 'deny_compliance')
 				         ) AS counts
 				    FROM roadmap.dispatch_route_audit
-				   WHERE project_id IN ($1::text, $2::text)
+				   WHERE project_id = $1
 				     AND decided_at > now() - interval '24 hours'
 				)
 				SELECT jsonb_build_object(
