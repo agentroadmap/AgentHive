@@ -104,6 +104,13 @@ export function cooldownFilterSql(alias = "mr"): string {
 	return `(${alias}.cooldown_until IS NULL OR ${alias}.cooldown_until <= NOW())`;
 }
 
+/** P1435 Layer 6b: exclude routes with provider auth marked as down (401/403 failure).
+ * Distinct from cooldown_until (quota exhaustion). Auth-down requires operator
+ * intervention to re-establish credentials. */
+export function authDownFilterSql(alias = "mr"): string {
+	return `(${alias}.auth_down_until IS NULL OR ${alias}.auth_down_until <= NOW())`;
+}
+
 /**
  * P772/P773: Diagnostic query that classifies each non-winning enabled route by the
  * first policy layer that eliminated it. Used for the eliminated_routes JSONB in

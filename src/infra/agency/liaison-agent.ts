@@ -42,6 +42,7 @@ import {
 	CliInvocationRegistry,
 	type CliInvocationHandler,
 } from "../../core/runtime/cli-invocation.ts";
+import { setProviderAuthDown } from "../../core/orchestration/provider-auth.ts";
 import * as runtimeConfig from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 import { AgencyClaimLoop, makeAgencyClaimExecutor, type ListenerClient as ClaimLoopListenerClient } from "./agency-claim-loop.ts";
@@ -195,6 +196,7 @@ export async function runLiaisonAgent(
 			// Construct and start the claim loop
 			claimLoop = new AgencyClaimLoop({
 				agencyIdentity: identity,
+				provider, // AC-5: needed for auth readiness checks
 				capabilities, // Real agency capabilities for offer matching
 				onClaim: executor,
 				connectListener: async () => claimLoopListenClient!,
@@ -356,7 +358,23 @@ export async function runLiaisonAgent(
 				timeoutMs: 30000,
 			});
 		} catch (err) {
-			console.error(`${log} LLM handler failed:`, err);
+			const errMsg = err instanceof Error ? err.message : String(err);
+			console.error(`${log} LLM handler failed:`, errMsg);
+
+			// AC-2: Detect 401/403 auth errors and mark provider auth as down
+			if (errMsg.includes("401") || errMsg.includes("403") ||
+			    errMsg.includes("Unauthorized") || errMsg.includes("Forbidden") ||
+			    errMsg.includes("invalid api key") || errMsg.includes("authentication")) {
+				console.warn(`${log} Auth error detected; marking provider '${provider}' auth as down`);
+				try {
+					await setProviderAuthDown(identity, provider,
+						errMsg.includes("403") ? 403 : 401,
+						errMsg);
+				} catch (authErr) {
+					console.error(`${log} Failed to log auth failure:`, authErr);
+				}
+			}
+
 			replyContent = `[${identity}] Unable to process message ${msg.id} — handler failed.`;
 		}
 

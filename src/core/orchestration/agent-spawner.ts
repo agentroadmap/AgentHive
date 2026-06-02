@@ -57,6 +57,7 @@ import {
 	budgetFilterSql,
 	buildEliminationDiagnosticSql,
 	cooldownFilterSql,
+	authDownFilterSql,
 	hostPolicyFilterSql,
 	projectPolicyFilterSql,
 	rolePolicyFilterSql,
@@ -949,7 +950,7 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 		tierFilter = ` AND mr.tier = '${tierParamValue}'`;
 	}
 
-	// P771/P773: shared params for all route queries: $3=host, $4=projectId, $5=agencyIdentity, $6=roleProfileId
+	// P771/P773/P1435: shared params for all route queries: $3=host, $4=projectId, $5=agencyIdentity, $6=roleProfileId
 	const policyParams = [AGENTHIVE_HOST, projectId, agencyIdentity, roleProfileId] as const;
 	const policyFilters = `
           AND ${hostPolicyFilterSql(3, "mr")}
@@ -957,7 +958,8 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
           AND ${agencyPolicyFilterSql(5, "mr")}
           AND ${rolePolicyFilterSql(6, "mr")}
           AND ${budgetFilterSql(4, "mr")}
-          AND ${cooldownFilterSql("mr")}${tierFilter}`;
+          AND ${cooldownFilterSql("mr")}
+          AND ${authDownFilterSql("mr")}${tierFilter}`;
 
 	const fetchRoute = (modelName: string) => {
 		// P742+P771: $3=host, $4=projectId, $5=agencyIdentity, $6=roleProfileId
