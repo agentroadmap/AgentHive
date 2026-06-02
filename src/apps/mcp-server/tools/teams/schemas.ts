@@ -341,6 +341,14 @@ export const teamDisputeLogSchema = {
 			type: "string",
 			description: "Resolution note when resolving a dispute",
 		},
+		initiatorPosition: {
+			type: "string",
+			description: "Initiator's stated position or argument (defaults to description if omitted)",
+		},
+		respondentPosition: {
+			type: "string",
+			description: "Respondent's counter-position or argument (empty if not yet known)",
+		},
 	},
 	required: ["proposalId", "initiatorAgent", "respondentAgent", "description", "escalationLevel"],
 };

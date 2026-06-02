@@ -195,6 +195,8 @@ export class PgTeamGovernanceHandlers {
 		status?: "open" | "team_resolved" | "escalated" | "resolved" | "dismissed";
 		teamId?: string;
 		resolutionNote?: string;
+		initiatorPosition?: string;
+		respondentPosition?: string;
 	}): Promise<CallToolResult> {
 		try {
 			const proposalIdNum = parseInt(args.proposalId, 10);
@@ -251,8 +253,8 @@ export class PgTeamGovernanceHandlers {
 						args.initiatorAgent,
 						args.respondentAgent,
 						args.description,
-						args.initiatorAgent,   // position_a: initiator's stance (agent identity)
-						args.respondentAgent,  // position_b: respondent's stance (agent identity)
+						args.initiatorPosition ?? args.description,
+						args.respondentPosition ?? ""
 						status,
 						args.escalationLevel,
 						teamIdNum,
@@ -303,12 +305,7 @@ export class PgTeamGovernanceHandlers {
 				),
 				updated_at = now()
 				WHERE team_id = $1
-				  AND norm_key IN (
-				      SELECT norm_key FROM roadmap_workforce.team_norms
-				      WHERE team_id = $1
-				        AND (norm_key = 'team:charter'
-				             OR norm_key LIKE 'team:decision:%')
-				  )
+				  AND (norm_key = 'team:charter' OR norm_key LIKE 'team:decision:%')
 				RETURNING 1`,
 				[teamIdNum, args.archivedBy],
 			);

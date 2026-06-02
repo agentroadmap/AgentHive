@@ -263,3 +263,72 @@ const teamRosterTool: McpToolHandler = createSimpleValidatedTool(
 	server.addTool(teamDisputeLogTool);
 	server.addTool(teamGovernanceArchiveTool);
 }
+
+/**
+ * P182: Register only the governance tools (charter, norms, dispute, archive).
+ * Called from the Postgres path in server.ts — the basic team_list/create/add_member
+ * tools are registered inline there; only the P182 governance handlers were missing.
+ */
+export async function registerTeamGovernanceTools(
+	server: McpServer,
+): Promise<void> {
+	const govHandlers = new PgTeamGovernanceHandlers(server);
+
+	const teamCharterCreateTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "team_charter_create",
+			description:
+				"Create a team charter at squad assembly. Stores team:charter and default " +
+				"governance norms in team_norms. Idempotent — safe to call again. " +
+				"P182: Team Governance Layer (Ostrom Principle 8).",
+			inputSchema: teamCharterCreateSchema,
+		},
+		teamCharterCreateSchema,
+		async (input) => govHandlers.teamCharterCreate(input as any),
+	);
+
+	const teamNormsSetTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "team_norms_set",
+			description:
+				"Set or update a named governance norm for a team. " +
+				"Keys must start with 'team:' (e.g. team:norm:handoff, team:decision:X). " +
+				"P182: Team Governance Layer.",
+			inputSchema: teamNormsSetSchema,
+		},
+		teamNormsSetSchema,
+		async (input) => govHandlers.teamNormsSet(input as any),
+	);
+
+	const teamDisputeLogTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "team_dispute_log",
+			description:
+				"Log or update a dispute between agents on a proposal. " +
+				"Supports three-tier ladder: L1(self) → L2(peer) → L3(team) → L4(society). " +
+				"Use status=team_resolved for disputes settled at team level. " +
+				"P182: Team Governance Layer.",
+			inputSchema: teamDisputeLogSchema,
+		},
+		teamDisputeLogSchema,
+		async (input) => govHandlers.teamDisputeLog(input as any),
+	);
+
+	const teamGovernanceArchiveTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "team_governance_archive",
+			description:
+				"Archive team governance entries when a proposal completes. " +
+				"Marks team:charter and team:decision:* as archived; deletes transient norms. " +
+				"P182: Team Governance Layer (AC-7).",
+			inputSchema: teamGovernanceArchiveSchema,
+		},
+		teamGovernanceArchiveSchema,
+		async (input) => govHandlers.teamGovernanceArchive(input as any),
+	);
+
+	server.addTool(teamCharterCreateTool);
+	server.addTool(teamNormsSetTool);
+	server.addTool(teamDisputeLogTool);
+	server.addTool(teamGovernanceArchiveTool);
+}
