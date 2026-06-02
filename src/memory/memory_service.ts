@@ -104,12 +104,16 @@ export class MemoryService {
     key: string,
     value: unknown,
     ttlSeconds?: number,
+    importanceScore?: number,
   ): Promise<void> {
     const serialized = JSON.stringify(value);
     const ttl = ttlSeconds ?? null;
     const expiresAt = ttl !== null
       ? new Date(Date.now() + ttl * 1000)
       : null;
+    const score = importanceScore !== undefined
+      ? Math.min(10, Math.max(1, Math.round(importanceScore)))
+      : 5;
 
     const { rows: existing } = await query<{ id: number }>(
       `SELECT id FROM roadmap_efficiency.agent_memory
@@ -121,15 +125,15 @@ export class MemoryService {
     if (existing[0]) {
       await query(
         `UPDATE roadmap_efficiency.agent_memory
-         SET value = $2, ttl_seconds = $3, expires_at = $4, updated_at = now()
+         SET value = $2, ttl_seconds = $3, expires_at = $4, importance_score = $5, updated_at = now()
          WHERE id = $1`,
-        [existing[0].id, serialized, ttl, expiresAt],
+        [existing[0].id, serialized, ttl, expiresAt, score],
       );
     } else {
       await query(
-        `INSERT INTO roadmap_efficiency.agent_memory (agent_identity, layer, key, value, ttl_seconds, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [agentIdentity, layer, key, serialized, ttl, expiresAt],
+        `INSERT INTO roadmap_efficiency.agent_memory (agent_identity, layer, key, value, ttl_seconds, expires_at, importance_score)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [agentIdentity, layer, key, serialized, ttl, expiresAt, score],
       );
     }
   }
