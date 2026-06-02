@@ -21,6 +21,7 @@ export function registerMemoryTools(server: McpServer): void {
 				value: { type: "string" },
 				metadata: { type: "string" },
 				ttl_seconds: { type: "number" },
+				importance_score: { type: "number", description: "Decay priority 1 (evict first) … 10 (keep longest). Default 5." },
 			},
 			required: ["key", "value"],
 		},
@@ -33,6 +34,8 @@ export function registerMemoryTools(server: McpServer): void {
 				metadata: typeof args.metadata === "string" ? args.metadata : undefined,
 				ttl_seconds:
 					typeof args.ttl_seconds === "number" ? args.ttl_seconds : undefined,
+				importance_score:
+					typeof args.importance_score === "number" ? args.importance_score : undefined,
 			}),
 	});
 
