@@ -36,16 +36,18 @@ export interface ProviderCapacityCheckResult {
 export async function isProviderCapacitySufficient(
   routeId: bigint | number,
 ): Promise<ProviderCapacityCheckResult> {
+  // NOTE: model_routes has NO token/budget column (verified against live schema
+  // 2026-06-02). Provider "capacity/quota" state is represented by cooldown_until
+  // (P1359 quota cooldown) and auth_down_until (V3-C3). There is no per-route token
+  // ledger to consult here, so this pre-check uses exactly those two signals.
   const { rows } = await query<{
     auth_down_until: Date | null;
     cooldown_until: Date | null;
-    token_budget_remaining: number | null;
     route_provider: string;
   }>(
     `SELECT
       mr.auth_down_until,
       mr.cooldown_until,
-      COALESCE(mr.token_budget_remaining, mr.token_budget_hourly) AS token_budget_remaining,
       mr.route_provider
      FROM roadmap.model_routes mr
      WHERE mr.id = $1
@@ -80,23 +82,10 @@ export async function isProviderCapacitySufficient(
     };
   }
 
-  // Check token budget if tracked
-  if (
-    route.token_budget_remaining !== null &&
-    route.token_budget_remaining <= 0
-  ) {
-    return {
-      sufficient: false,
-      reason: `Token budget exhausted for provider ${route.route_provider}`,
-      tokenBudgetRemaining: route.token_budget_remaining,
-    };
-  }
-
   return {
     sufficient: true,
     authDownUntil: route.auth_down_until,
     cooldownUntil: route.cooldown_until,
-    tokenBudgetRemaining: route.token_budget_remaining,
   };
 }
 
