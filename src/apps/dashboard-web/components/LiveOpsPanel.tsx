@@ -71,6 +71,140 @@ type Overview = {
 		duration_ms: number | null;
 		cost_usd: number | string | null;
 	}>;
+	// P238: state-machine dashboard sections
+	queue_pools: Array<{
+		project_slug: string;
+		workflow_name: string;
+		stage: string;
+		maturity: string;
+		proposal_count: string | number;
+		oldest_created_at: string | null;
+		oldest_updated_at: string | null;
+	}>;
+	candidate_ranking: Array<{
+		display_id: string;
+		title: string;
+		workflow_name: string;
+		stage: string;
+		maturity: string;
+		priority: string;
+		dependency_blockers: string | number;
+		stale_lease_boost: string | number;
+		capacity_blocked: boolean;
+		active_dispatches: string | number;
+		last_transition_at: string | null;
+	}>;
+	dispatch_lifecycle: {
+		status_counts: {
+			posted: string | number;
+			claimed: string | number;
+			running: string | number;
+			completed: string | number;
+			failed: string | number;
+			throttled: string | number;
+			cancelled: string | number;
+			expired: string | number;
+		};
+		recent_dispatches: Array<{
+			id: number;
+			proposal_display_id: string | null;
+			proposal_title: string | null;
+			dispatch_role: string;
+			dispatch_status: string;
+			offer_status: string;
+			agent_identity: string | null;
+			worker_identity: string | null;
+			assigned_at: string | null;
+			claim_expires_at: string | null;
+		}>;
+	} | null;
+	lease_recovery: {
+		summary: {
+			active: string | number;
+			expired: string | number;
+			recovered_workspaces: string | number;
+		};
+		recent_expired: Array<{
+			display_id: string;
+			title: string;
+			agent_identity: string | null;
+			claimed_at: string | null;
+			expires_at: string | null;
+			release_reason: string | null;
+		}>;
+	} | null;
+	liaison_health: {
+		summary: {
+			active: string | number;
+			throttled: string | number;
+			dormant: string | number;
+			offline: string | number;
+			retired: string | number;
+			sessions: string | number;
+		};
+		agencies: Array<{
+			agency_identity: string;
+			status: string;
+			last_seen_at: string | null;
+			max_in_flight: string | number;
+			in_flight_count: string | number;
+			throttle_count: string | number;
+			recent_failure_count: string | number;
+			session_started_at: string | null;
+			liaison_host: string | null;
+			liaison_pid: number | null;
+		}>;
+	} | null;
+	gate_audit: {
+		decision_counts: {
+			advance: string | number;
+			hold: string | number;
+			reject: string | number;
+			waive: string | number;
+			escalate: string | number;
+		};
+		recent_decisions: Array<{
+			display_id: string;
+			title: string;
+			from_state: string;
+			to_state: string | null;
+			maturity: string | null;
+			decision: string;
+			decided_by: string;
+			created_at: string;
+		}>;
+		recent_transitions: Array<{
+			display_id: string;
+			title: string;
+			from_state: string;
+			to_state: string;
+			transition_reason: string | null;
+			transitioned_by: string;
+			transitioned_at: string;
+		}>;
+	} | null;
+	route_budget_audit: {
+		recent_route_decisions: Array<{
+			display_id: string | null;
+			role: string;
+			agency_identity: string;
+			chosen_route: string;
+			eliminated_count: string | number;
+			decided_at: string;
+		}>;
+		budget_counters: {
+			tracked_principals: string | number;
+			total_budget_cents: string | number;
+			total_spent_cents: string | number;
+			over_budget_principals: string | number;
+		};
+		budget_decisions: {
+			approved: string | number;
+			rejected: string | number;
+			deny_budget: string | number;
+			deny_compliance: string | number;
+		};
+	} | null;
 };
 
 interface LiveOpsPanelProps {
@@ -422,6 +556,286 @@ const LiveOpsPanel: React.FC<LiveOpsPanelProps> = ({ onAgentClick }) => {
 					</ul>
 				)}
 			</div>
+
+			{/* P238: Queue pools */}
+			{(data?.queue_pools?.length ?? 0) > 0 && (
+				<div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
+					<div className="flex items-baseline justify-between mb-2">
+						<h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+							Queue pools
+						</h3>
+						<span className="text-[11px] text-gray-500">
+							{data?.queue_pools.length} buckets
+						</span>
+					</div>
+					<div className="overflow-x-auto">
+						<table className="text-xs w-full">
+							<thead>
+								<tr className="text-[10px] uppercase text-gray-500 border-b border-gray-100 dark:border-gray-700">
+									<th className="text-left pb-1 pr-2">workflow</th>
+									<th className="text-left pb-1 pr-2">stage</th>
+									<th className="text-left pb-1 pr-2">maturity</th>
+									<th className="text-right pb-1 pr-2">count</th>
+									<th className="text-right pb-1">oldest</th>
+								</tr>
+							</thead>
+							<tbody>
+								{data?.queue_pools.map((qp, i) => (
+									<tr
+										key={i}
+										className="border-b border-gray-50 dark:border-gray-700/50 hover:bg-gray-50 dark:hover:bg-gray-700/30"
+									>
+										<td className="py-0.5 pr-2 truncate max-w-[8rem]">{qp.workflow_name}</td>
+										<td className="py-0.5 pr-2 font-medium">{qp.stage}</td>
+										<td className="py-0.5 pr-2 text-gray-500">{qp.maturity}</td>
+										<td className="py-0.5 pr-2 text-right font-mono">{num(qp.proposal_count)}</td>
+										<td className="py-0.5 text-right text-gray-500">{ago(qp.oldest_updated_at ?? qp.oldest_created_at)}</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					</div>
+				</div>
+			)}
+
+			{/* P238: Dispatch lifecycle */}
+			{data?.dispatch_lifecycle && (
+				<div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
+					<h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">
+						Dispatch lifecycle
+					</h3>
+					<div className="grid grid-cols-4 md:grid-cols-8 gap-2 text-center text-xs mb-3">
+						{(["posted","claimed","running","completed","failed","throttled","cancelled","expired"] as const).map((k) => {
+							const colors: Record<string, string> = {
+								posted: "text-blue-700 dark:text-blue-300",
+								claimed: "text-yellow-700 dark:text-yellow-300",
+								running: "text-emerald-700 dark:text-emerald-300",
+								completed: "text-gray-500",
+								failed: "text-red-700 dark:text-red-300",
+								throttled: "text-orange-700 dark:text-orange-300",
+								cancelled: "text-gray-400",
+								expired: "text-purple-700 dark:text-purple-300",
+							};
+							return (
+								<div key={k}>
+									<div className={`text-base font-semibold ${colors[k]}`}>
+										{num((data.dispatch_lifecycle?.status_counts as Record<string, string | number>)?.[k])}
+									</div>
+									<div className="text-[10px] uppercase text-gray-500">{k}</div>
+								</div>
+							);
+						})}
+					</div>
+					{(data.dispatch_lifecycle.recent_dispatches?.length ?? 0) > 0 && (
+						<ul className="text-xs space-y-0.5 max-h-40 overflow-y-auto">
+							{data.dispatch_lifecycle.recent_dispatches.map((d) => (
+								<li
+									key={d.id}
+									className="grid grid-cols-12 gap-1 py-0.5 border-b border-gray-50 dark:border-gray-700/50"
+								>
+									<span className="col-span-2 font-mono text-gray-500">#{d.id}</span>
+									<span className="col-span-2 truncate">{d.proposal_display_id ?? "—"}</span>
+									<span className="col-span-3 truncate text-gray-500">{d.dispatch_role}</span>
+									<span className="col-span-2 font-medium">{d.offer_status}</span>
+									<span className="col-span-3 truncate text-gray-500">{d.worker_identity ?? d.agent_identity ?? "—"}</span>
+								</li>
+							))}
+						</ul>
+					)}
+				</div>
+			)}
+
+			{/* P238: Lease recovery */}
+			{data?.lease_recovery && (
+				<div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
+					<h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">
+						Lease recovery
+					</h3>
+					<div className="grid grid-cols-3 gap-3 mb-3 text-center text-xs">
+						<div>
+							<div className="text-base font-semibold text-emerald-700 dark:text-emerald-300">
+								{num(data.lease_recovery.summary.active)}
+							</div>
+							<div className="text-[10px] uppercase text-gray-500">active</div>
+						</div>
+						<div>
+							<div className={`text-base font-semibold ${num(data.lease_recovery.summary.expired) > 0 ? "text-red-700 dark:text-red-300" : "text-gray-500"}`}>
+								{num(data.lease_recovery.summary.expired)}
+							</div>
+							<div className="text-[10px] uppercase text-gray-500">expired</div>
+						</div>
+						<div>
+							<div className={`text-base font-semibold ${num(data.lease_recovery.summary.recovered_workspaces) > 0 ? "text-amber-700 dark:text-amber-300" : "text-gray-500"}`}>
+								{num(data.lease_recovery.summary.recovered_workspaces)}
+							</div>
+							<div className="text-[10px] uppercase text-gray-500">recovered ws</div>
+						</div>
+					</div>
+					{(data.lease_recovery.recent_expired?.length ?? 0) > 0 && (
+						<ul className="text-xs space-y-0.5 max-h-32 overflow-y-auto">
+							{data.lease_recovery.recent_expired.map((le, i) => (
+								<li key={i} className="flex items-center gap-2 py-0.5 border-b border-gray-50 dark:border-gray-700/50">
+									<span className="font-mono text-gray-500 shrink-0">{le.display_id}</span>
+									<span className="truncate flex-1">{le.title}</span>
+									<span className="text-red-600 dark:text-red-400 shrink-0">{ago(le.expires_at)}</span>
+								</li>
+							))}
+						</ul>
+					)}
+				</div>
+			)}
+
+			{/* P238: Liaison / agency health */}
+			{data?.liaison_health && (
+				<div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
+					<h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">
+						Liaison / agency health
+					</h3>
+					<div className="grid grid-cols-3 md:grid-cols-6 gap-2 text-center text-xs mb-3">
+						{(["active","throttled","dormant","offline","retired","sessions"] as const).map((k) => {
+							const colors: Record<string, string> = {
+								active: "text-emerald-700 dark:text-emerald-300",
+								throttled: "text-orange-700 dark:text-orange-300",
+								dormant: "text-amber-700 dark:text-amber-300",
+								offline: "text-gray-500",
+								retired: "text-gray-400",
+								sessions: "text-blue-700 dark:text-blue-300",
+							};
+							return (
+								<div key={k}>
+									<div className={`text-base font-semibold ${colors[k]}`}>
+										{num((data.liaison_health?.summary as Record<string, string | number>)?.[k])}
+									</div>
+									<div className="text-[10px] uppercase text-gray-500">{k}</div>
+								</div>
+							);
+						})}
+					</div>
+					{(data.liaison_health.agencies?.length ?? 0) > 0 && (
+						<ul className="text-xs space-y-1 max-h-40 overflow-y-auto">
+							{data.liaison_health.agencies.map((ag) => (
+								<li key={ag.agency_identity} className="grid grid-cols-12 gap-1 py-0.5 border-b border-gray-50 dark:border-gray-700/50">
+									<span className="col-span-4 font-mono truncate">{ag.agency_identity}</span>
+									<span className={`col-span-2 font-medium ${ag.status === "active" ? "text-emerald-600" : "text-amber-600"}`}>{ag.status}</span>
+									<span className="col-span-2 text-right text-gray-500">{num(ag.in_flight_count)}/{num(ag.max_in_flight)} in-flight</span>
+									<span className={`col-span-2 text-right ${num(ag.recent_failure_count) > 0 ? "text-red-600 dark:text-red-400" : "text-gray-400"}`}>
+										{num(ag.recent_failure_count)} fail
+									</span>
+									<span className="col-span-2 text-right text-gray-400">{ago(ag.last_seen_at)}</span>
+								</li>
+							))}
+						</ul>
+					)}
+				</div>
+			)}
+
+			{/* P238: Gate / transition audit */}
+			{data?.gate_audit && (
+				<div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
+					<h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">
+						Gate / transition audit <span className="text-[10px] font-normal text-gray-400">(last 24 h)</span>
+					</h3>
+					<div className="grid grid-cols-5 gap-2 text-center text-xs mb-3">
+						{(["advance","hold","reject","waive","escalate"] as const).map((k) => {
+							const colors: Record<string, string> = {
+								advance: "text-emerald-700 dark:text-emerald-300",
+								hold: "text-amber-700 dark:text-amber-300",
+								reject: "text-red-700 dark:text-red-300",
+								waive: "text-blue-700 dark:text-blue-300",
+								escalate: "text-purple-700 dark:text-purple-300",
+							};
+							return (
+								<div key={k}>
+									<div className={`text-base font-semibold ${colors[k]}`}>
+										{num((data.gate_audit?.decision_counts as Record<string, string | number>)?.[k])}
+									</div>
+									<div className="text-[10px] uppercase text-gray-500">{k}</div>
+								</div>
+							);
+						})}
+					</div>
+					<div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+						{(data.gate_audit.recent_decisions?.length ?? 0) > 0 && (
+							<div>
+								<div className="text-[10px] uppercase text-gray-400 mb-1">recent gate decisions</div>
+								<ul className="text-xs space-y-0.5 max-h-28 overflow-y-auto">
+									{data.gate_audit.recent_decisions.map((gd, i) => (
+										<li key={i} className="flex items-center gap-2 py-0.5 border-b border-gray-50 dark:border-gray-700/50">
+											<span className="font-mono text-gray-500 shrink-0">{gd.display_id}</span>
+											<span className={`font-medium shrink-0 ${gd.decision === "advance" ? "text-emerald-600" : gd.decision === "reject" ? "text-red-600" : "text-amber-600"}`}>{gd.decision}</span>
+											<span className="truncate flex-1 text-gray-500">{gd.from_state}{gd.to_state ? ` → ${gd.to_state}` : ""}</span>
+											<span className="text-gray-400 shrink-0">{ago(gd.created_at)}</span>
+										</li>
+									))}
+								</ul>
+							</div>
+						)}
+						{(data.gate_audit.recent_transitions?.length ?? 0) > 0 && (
+							<div>
+								<div className="text-[10px] uppercase text-gray-400 mb-1">recent transitions</div>
+								<ul className="text-xs space-y-0.5 max-h-28 overflow-y-auto">
+									{data.gate_audit.recent_transitions.map((t, i) => (
+										<li key={i} className="flex items-center gap-2 py-0.5 border-b border-gray-50 dark:border-gray-700/50">
+											<span className="font-mono text-gray-500 shrink-0">{t.display_id}</span>
+											<span className="shrink-0 text-gray-700 dark:text-gray-300">{t.from_state} → {t.to_state}</span>
+											<span className="truncate flex-1 text-gray-400">{t.transitioned_by}</span>
+											<span className="text-gray-400 shrink-0">{ago(t.transitioned_at)}</span>
+										</li>
+									))}
+								</ul>
+							</div>
+						)}
+					</div>
+				</div>
+			)}
+
+			{/* P238: Route / budget audit */}
+			{data?.route_budget_audit && (
+				<div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
+					<h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">
+						Route / budget audit
+					</h3>
+					<div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+						<div>
+							<div className="text-[10px] uppercase text-gray-400 mb-1">budget counters</div>
+							<dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+								<dt className="text-gray-500">tracked principals</dt>
+								<dd className="font-mono text-right">{num(data.route_budget_audit.budget_counters.tracked_principals)}</dd>
+								<dt className="text-gray-500">total budget</dt>
+								<dd className="font-mono text-right">${(num(data.route_budget_audit.budget_counters.total_budget_cents) / 100).toFixed(2)}</dd>
+								<dt className="text-gray-500">spent</dt>
+								<dd className="font-mono text-right">${(num(data.route_budget_audit.budget_counters.total_spent_cents) / 100).toFixed(2)}</dd>
+								<dt className={`${num(data.route_budget_audit.budget_counters.over_budget_principals) > 0 ? "text-red-600 dark:text-red-400" : "text-gray-500"}`}>over budget</dt>
+								<dd className={`font-mono text-right ${num(data.route_budget_audit.budget_counters.over_budget_principals) > 0 ? "text-red-600 dark:text-red-400" : ""}`}>
+									{num(data.route_budget_audit.budget_counters.over_budget_principals)}
+								</dd>
+							</dl>
+							<div className="text-[10px] uppercase text-gray-400 mt-2 mb-1">budget decisions (24h)</div>
+							<dl className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs">
+								<dt className="text-gray-500">approved</dt><dd className="font-mono text-right text-emerald-600">{num(data.route_budget_audit.budget_decisions.approved)}</dd>
+								<dt className="text-gray-500">rejected</dt><dd className="font-mono text-right text-red-600">{num(data.route_budget_audit.budget_decisions.rejected)}</dd>
+								<dt className="text-gray-500">deny_budget</dt><dd className="font-mono text-right text-amber-600">{num(data.route_budget_audit.budget_decisions.deny_budget)}</dd>
+								<dt className="text-gray-500">deny_compliance</dt><dd className="font-mono text-right text-amber-600">{num(data.route_budget_audit.budget_decisions.deny_compliance)}</dd>
+							</dl>
+						</div>
+						{(data.route_budget_audit.recent_route_decisions?.length ?? 0) > 0 && (
+							<div>
+								<div className="text-[10px] uppercase text-gray-400 mb-1">recent route decisions</div>
+								<ul className="text-xs space-y-0.5 max-h-36 overflow-y-auto">
+									{data.route_budget_audit.recent_route_decisions.map((rd, i) => (
+										<li key={i} className="flex items-center gap-2 py-0.5 border-b border-gray-50 dark:border-gray-700/50">
+											<span className="font-mono text-gray-500 shrink-0">{rd.display_id ?? "—"}</span>
+											<span className="truncate flex-1">{rd.chosen_route}</span>
+											<span className="text-gray-400 shrink-0">{rd.eliminated_count > 0 ? `-${num(rd.eliminated_count)}` : ""}</span>
+											<span className="text-gray-400 shrink-0">{ago(rd.decided_at)}</span>
+										</li>
+									))}
+								</ul>
+							</div>
+						)}
+					</div>
+				</div>
+			)}
 		</section>
 	);
 };

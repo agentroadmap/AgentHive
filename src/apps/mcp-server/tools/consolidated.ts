@@ -344,6 +344,10 @@ const opsRoutes: RouteMap = {
 	agency_status: "agency_status",
 	// P081: SLA health check
 	health_check: "ops_health_check",
+	// P238: operational snapshot
+	snapshot: "ops_control_plane_snapshot",
+	ops_snapshot: "ops_control_plane_snapshot",
+	control_plane_snapshot: "ops_control_plane_snapshot",
 };
 
 const projectRoutes: RouteMap = {

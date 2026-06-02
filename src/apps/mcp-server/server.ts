@@ -2307,7 +2307,30 @@ export async function createMcpServer(
 		inputSchema: { type: "object", properties: {}, additionalProperties: false },
 		handler: (a) => handleHealthCheck(a),
 	});
-	console.error("[MCP] Registered 1 P081 SLA tool (ops_health_check)");
+
+	// P238 AC-7/AC-16: operational snapshot — compact YAML+Markdown projection for agents
+	const { handleOpsSnapshot } = await import("./tools/ops/snapshot-handler.ts");
+	server.addTool({
+		name: "ops_control_plane_snapshot",
+		description:
+			"P238: Return a compact YAML+Markdown operational snapshot scoped to a project. " +
+			"Includes queue pools, pending gate decisions, top develop candidates, active dispatches, " +
+			"lease status, liaison health, budget risk, and next allowed MCP actions. " +
+			"Designed for agent consumption — no table knowledge required. " +
+			"Args: project (string, default 'agenthive').",
+		inputSchema: {
+			type: "object",
+			properties: {
+				project: {
+					type: "string",
+					description: "Project slug to scope the snapshot (default: 'agenthive')",
+				},
+			},
+			additionalProperties: false,
+		},
+		handler: (a) => handleOpsSnapshot(a),
+	});
+	console.error("[MCP] Registered 2 ops tools (ops_health_check, ops_control_plane_snapshot)");
 
 	// Start background maintenance tasks
 	const MAINTENANCE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
