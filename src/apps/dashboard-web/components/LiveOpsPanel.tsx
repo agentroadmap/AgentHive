@@ -598,6 +598,43 @@ const LiveOpsPanel: React.FC<LiveOpsPanelProps> = ({ onAgentClick }) => {
 				</div>
 			)}
 
+			{/* P238: Candidate ranking */}
+			{(data?.candidate_ranking?.length ?? 0) > 0 && (
+				<div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
+					<div className="flex items-baseline justify-between mb-2">
+						<h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+							Develop candidates
+						</h3>
+						<span className="text-[11px] text-gray-500">
+							top {data?.candidate_ranking.length}
+						</span>
+					</div>
+					<ul className="text-xs space-y-1">
+						{data?.candidate_ranking.map((cr, i) => (
+							<li
+								key={i}
+								className="grid grid-cols-12 gap-1 py-0.5 border-b border-gray-50 dark:border-gray-700/50"
+							>
+								<span className="col-span-2 font-mono text-gray-500">{cr.display_id}</span>
+								<span className="col-span-4 truncate">{cr.title}</span>
+								<span className={`col-span-1 font-medium ${
+									cr.priority === "critical" ? "text-red-600 dark:text-red-400" :
+									cr.priority === "high" ? "text-orange-600 dark:text-orange-400" :
+									"text-gray-500"
+								}`}>{cr.priority}</span>
+								<span className="col-span-1 text-gray-500">{cr.maturity}</span>
+								<span className={`col-span-2 text-right ${num(cr.dependency_blockers) > 0 ? "text-red-600 dark:text-red-400" : "text-gray-400"}`}>
+									{num(cr.dependency_blockers) > 0 ? `${num(cr.dependency_blockers)} blocked` : ""}
+								</span>
+								<span className={`col-span-2 text-right ${cr.capacity_blocked ? "text-orange-600 dark:text-orange-400" : "text-gray-400"}`}>
+									{cr.capacity_blocked ? "cap. full" : num(cr.active_dispatches) > 0 ? `${num(cr.active_dispatches)} disp` : ""}
+								</span>
+							</li>
+						))}
+					</ul>
+				</div>
+			)}
+
 			{/* P238: Dispatch lifecycle */}
 			{data?.dispatch_lifecycle && (
 				<div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">

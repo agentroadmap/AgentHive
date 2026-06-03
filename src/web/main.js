@@ -178535,6 +178535,602 @@ var LiveOpsPanel = ({ onAgentClick }) => {
             }, `${r.model_name}-${r.route_provider}-${r.priority}`, true, undefined, this))
           }, undefined, false, undefined, this)
         ]
+      }, undefined, true, undefined, this),
+      (data?.queue_pools?.length ?? 0) > 0 && /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+        className: "rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+            className: "flex items-baseline justify-between mb-2",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("h3", {
+                className: "text-sm font-semibold text-gray-700 dark:text-gray-200",
+                children: "Queue pools"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                className: "text-[11px] text-gray-500",
+                children: [
+                  data?.queue_pools.length,
+                  " buckets"
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+            className: "overflow-x-auto",
+            children: /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("table", {
+              className: "text-xs w-full",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("thead", {
+                  children: /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("tr", {
+                    className: "text-[10px] uppercase text-gray-500 border-b border-gray-100 dark:border-gray-700",
+                    children: [
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("th", {
+                        className: "text-left pb-1 pr-2",
+                        children: "workflow"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("th", {
+                        className: "text-left pb-1 pr-2",
+                        children: "stage"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("th", {
+                        className: "text-left pb-1 pr-2",
+                        children: "maturity"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("th", {
+                        className: "text-right pb-1 pr-2",
+                        children: "count"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("th", {
+                        className: "text-right pb-1",
+                        children: "oldest"
+                      }, undefined, false, undefined, this)
+                    ]
+                  }, undefined, true, undefined, this)
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("tbody", {
+                  children: data?.queue_pools.map((qp, i) => /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("tr", {
+                    className: "border-b border-gray-50 dark:border-gray-700/50 hover:bg-gray-50 dark:hover:bg-gray-700/30",
+                    children: [
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("td", {
+                        className: "py-0.5 pr-2 truncate max-w-[8rem]",
+                        children: qp.workflow_name
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("td", {
+                        className: "py-0.5 pr-2 font-medium",
+                        children: qp.stage
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("td", {
+                        className: "py-0.5 pr-2 text-gray-500",
+                        children: qp.maturity
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("td", {
+                        className: "py-0.5 pr-2 text-right font-mono",
+                        children: num(qp.proposal_count)
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("td", {
+                        className: "py-0.5 text-right text-gray-500",
+                        children: ago(qp.oldest_updated_at ?? qp.oldest_created_at)
+                      }, undefined, false, undefined, this)
+                    ]
+                  }, i, true, undefined, this))
+                }, undefined, false, undefined, this)
+              ]
+            }, undefined, true, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      (data?.candidate_ranking?.length ?? 0) > 0 && /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+        className: "rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+            className: "flex items-baseline justify-between mb-2",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("h3", {
+                className: "text-sm font-semibold text-gray-700 dark:text-gray-200",
+                children: "Develop candidates"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                className: "text-[11px] text-gray-500",
+                children: [
+                  "top ",
+                  data?.candidate_ranking.length
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("ul", {
+            className: "text-xs space-y-1",
+            children: data?.candidate_ranking.map((cr, i) => /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("li", {
+              className: "grid grid-cols-12 gap-1 py-0.5 border-b border-gray-50 dark:border-gray-700/50",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  className: "col-span-2 font-mono text-gray-500",
+                  children: cr.display_id
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  className: "col-span-4 truncate",
+                  children: cr.title
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  className: `col-span-1 font-medium ${cr.priority === "critical" ? "text-red-600 dark:text-red-400" : cr.priority === "high" ? "text-orange-600 dark:text-orange-400" : "text-gray-500"}`,
+                  children: cr.priority
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  className: "col-span-1 text-gray-500",
+                  children: cr.maturity
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  className: `col-span-2 text-right ${num(cr.dependency_blockers) > 0 ? "text-red-600 dark:text-red-400" : "text-gray-400"}`,
+                  children: num(cr.dependency_blockers) > 0 ? `${num(cr.dependency_blockers)} blocked` : ""
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  className: `col-span-2 text-right ${cr.capacity_blocked ? "text-orange-600 dark:text-orange-400" : "text-gray-400"}`,
+                  children: cr.capacity_blocked ? "cap. full" : num(cr.active_dispatches) > 0 ? `${num(cr.active_dispatches)} disp` : ""
+                }, undefined, false, undefined, this)
+              ]
+            }, i, true, undefined, this))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      data?.dispatch_lifecycle && /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+        className: "rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("h3", {
+            className: "text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2",
+            children: "Dispatch lifecycle"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+            className: "grid grid-cols-4 md:grid-cols-8 gap-2 text-center text-xs mb-3",
+            children: ["posted", "claimed", "running", "completed", "failed", "throttled", "cancelled", "expired"].map((k) => {
+              const colors = {
+                posted: "text-blue-700 dark:text-blue-300",
+                claimed: "text-yellow-700 dark:text-yellow-300",
+                running: "text-emerald-700 dark:text-emerald-300",
+                completed: "text-gray-500",
+                failed: "text-red-700 dark:text-red-300",
+                throttled: "text-orange-700 dark:text-orange-300",
+                cancelled: "text-gray-400",
+                expired: "text-purple-700 dark:text-purple-300"
+              };
+              return /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                    className: `text-base font-semibold ${colors[k]}`,
+                    children: num(data.dispatch_lifecycle?.status_counts?.[k])
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                    className: "text-[10px] uppercase text-gray-500",
+                    children: k
+                  }, undefined, false, undefined, this)
+                ]
+              }, k, true, undefined, this);
+            })
+          }, undefined, false, undefined, this),
+          (data.dispatch_lifecycle.recent_dispatches?.length ?? 0) > 0 && /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("ul", {
+            className: "text-xs space-y-0.5 max-h-40 overflow-y-auto",
+            children: data.dispatch_lifecycle.recent_dispatches.map((d) => /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("li", {
+              className: "grid grid-cols-12 gap-1 py-0.5 border-b border-gray-50 dark:border-gray-700/50",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  className: "col-span-2 font-mono text-gray-500",
+                  children: [
+                    "#",
+                    d.id
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  className: "col-span-2 truncate",
+                  children: d.proposal_display_id ?? "—"
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  className: "col-span-3 truncate text-gray-500",
+                  children: d.dispatch_role
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  className: "col-span-2 font-medium",
+                  children: d.offer_status
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  className: "col-span-3 truncate text-gray-500",
+                  children: d.worker_identity ?? d.agent_identity ?? "—"
+                }, undefined, false, undefined, this)
+              ]
+            }, d.id, true, undefined, this))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      data?.lease_recovery && /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+        className: "rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("h3", {
+            className: "text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2",
+            children: "Lease recovery"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+            className: "grid grid-cols-3 gap-3 mb-3 text-center text-xs",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                    className: "text-base font-semibold text-emerald-700 dark:text-emerald-300",
+                    children: num(data.lease_recovery.summary.active)
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                    className: "text-[10px] uppercase text-gray-500",
+                    children: "active"
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                    className: `text-base font-semibold ${num(data.lease_recovery.summary.expired) > 0 ? "text-red-700 dark:text-red-300" : "text-gray-500"}`,
+                    children: num(data.lease_recovery.summary.expired)
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                    className: "text-[10px] uppercase text-gray-500",
+                    children: "expired"
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                    className: `text-base font-semibold ${num(data.lease_recovery.summary.recovered_workspaces) > 0 ? "text-amber-700 dark:text-amber-300" : "text-gray-500"}`,
+                    children: num(data.lease_recovery.summary.recovered_workspaces)
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                    className: "text-[10px] uppercase text-gray-500",
+                    children: "recovered ws"
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          (data.lease_recovery.recent_expired?.length ?? 0) > 0 && /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("ul", {
+            className: "text-xs space-y-0.5 max-h-32 overflow-y-auto",
+            children: data.lease_recovery.recent_expired.map((le, i) => /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("li", {
+              className: "flex items-center gap-2 py-0.5 border-b border-gray-50 dark:border-gray-700/50",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  className: "font-mono text-gray-500 shrink-0",
+                  children: le.display_id
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  className: "truncate flex-1",
+                  children: le.title
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  className: "text-red-600 dark:text-red-400 shrink-0",
+                  children: ago(le.expires_at)
+                }, undefined, false, undefined, this)
+              ]
+            }, i, true, undefined, this))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      data?.liaison_health && /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+        className: "rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("h3", {
+            className: "text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2",
+            children: "Liaison / agency health"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+            className: "grid grid-cols-3 md:grid-cols-6 gap-2 text-center text-xs mb-3",
+            children: ["active", "throttled", "dormant", "offline", "retired", "sessions"].map((k) => {
+              const colors = {
+                active: "text-emerald-700 dark:text-emerald-300",
+                throttled: "text-orange-700 dark:text-orange-300",
+                dormant: "text-amber-700 dark:text-amber-300",
+                offline: "text-gray-500",
+                retired: "text-gray-400",
+                sessions: "text-blue-700 dark:text-blue-300"
+              };
+              return /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                    className: `text-base font-semibold ${colors[k]}`,
+                    children: num(data.liaison_health?.summary?.[k])
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                    className: "text-[10px] uppercase text-gray-500",
+                    children: k
+                  }, undefined, false, undefined, this)
+                ]
+              }, k, true, undefined, this);
+            })
+          }, undefined, false, undefined, this),
+          (data.liaison_health.agencies?.length ?? 0) > 0 && /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("ul", {
+            className: "text-xs space-y-1 max-h-40 overflow-y-auto",
+            children: data.liaison_health.agencies.map((ag) => /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("li", {
+              className: "grid grid-cols-12 gap-1 py-0.5 border-b border-gray-50 dark:border-gray-700/50",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  className: "col-span-4 font-mono truncate",
+                  children: ag.agency_identity
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  className: `col-span-2 font-medium ${ag.status === "active" ? "text-emerald-600" : "text-amber-600"}`,
+                  children: ag.status
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  className: "col-span-2 text-right text-gray-500",
+                  children: [
+                    num(ag.in_flight_count),
+                    "/",
+                    num(ag.max_in_flight),
+                    " in-flight"
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  className: `col-span-2 text-right ${num(ag.recent_failure_count) > 0 ? "text-red-600 dark:text-red-400" : "text-gray-400"}`,
+                  children: [
+                    num(ag.recent_failure_count),
+                    " fail"
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  className: "col-span-2 text-right text-gray-400",
+                  children: ago(ag.last_seen_at)
+                }, undefined, false, undefined, this)
+              ]
+            }, ag.agency_identity, true, undefined, this))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      data?.gate_audit && /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+        className: "rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("h3", {
+            className: "text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2",
+            children: [
+              "Gate / transition audit ",
+              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                className: "text-[10px] font-normal text-gray-400",
+                children: "(last 24 h)"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+            className: "grid grid-cols-5 gap-2 text-center text-xs mb-3",
+            children: ["advance", "hold", "reject", "waive", "escalate"].map((k) => {
+              const colors = {
+                advance: "text-emerald-700 dark:text-emerald-300",
+                hold: "text-amber-700 dark:text-amber-300",
+                reject: "text-red-700 dark:text-red-300",
+                waive: "text-blue-700 dark:text-blue-300",
+                escalate: "text-purple-700 dark:text-purple-300"
+              };
+              return /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                    className: `text-base font-semibold ${colors[k]}`,
+                    children: num(data.gate_audit?.decision_counts?.[k])
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                    className: "text-[10px] uppercase text-gray-500",
+                    children: k
+                  }, undefined, false, undefined, this)
+                ]
+              }, k, true, undefined, this);
+            })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+            className: "grid grid-cols-1 lg:grid-cols-2 gap-2",
+            children: [
+              (data.gate_audit.recent_decisions?.length ?? 0) > 0 && /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                    className: "text-[10px] uppercase text-gray-400 mb-1",
+                    children: "recent gate decisions"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("ul", {
+                    className: "text-xs space-y-0.5 max-h-28 overflow-y-auto",
+                    children: data.gate_audit.recent_decisions.map((gd, i) => /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("li", {
+                      className: "flex items-center gap-2 py-0.5 border-b border-gray-50 dark:border-gray-700/50",
+                      children: [
+                        /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                          className: "font-mono text-gray-500 shrink-0",
+                          children: gd.display_id
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                          className: `font-medium shrink-0 ${gd.decision === "advance" ? "text-emerald-600" : gd.decision === "reject" ? "text-red-600" : "text-amber-600"}`,
+                          children: gd.decision
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                          className: "truncate flex-1 text-gray-500",
+                          children: [
+                            gd.from_state,
+                            gd.to_state ? ` → ${gd.to_state}` : ""
+                          ]
+                        }, undefined, true, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                          className: "text-gray-400 shrink-0",
+                          children: ago(gd.created_at)
+                        }, undefined, false, undefined, this)
+                      ]
+                    }, i, true, undefined, this))
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              (data.gate_audit.recent_transitions?.length ?? 0) > 0 && /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                    className: "text-[10px] uppercase text-gray-400 mb-1",
+                    children: "recent transitions"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("ul", {
+                    className: "text-xs space-y-0.5 max-h-28 overflow-y-auto",
+                    children: data.gate_audit.recent_transitions.map((t, i) => /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("li", {
+                      className: "flex items-center gap-2 py-0.5 border-b border-gray-50 dark:border-gray-700/50",
+                      children: [
+                        /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                          className: "font-mono text-gray-500 shrink-0",
+                          children: t.display_id
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                          className: "shrink-0 text-gray-700 dark:text-gray-300",
+                          children: [
+                            t.from_state,
+                            " → ",
+                            t.to_state
+                          ]
+                        }, undefined, true, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                          className: "truncate flex-1 text-gray-400",
+                          children: t.transitioned_by
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                          className: "text-gray-400 shrink-0",
+                          children: ago(t.transitioned_at)
+                        }, undefined, false, undefined, this)
+                      ]
+                    }, i, true, undefined, this))
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      data?.route_budget_audit && /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+        className: "rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("h3", {
+            className: "text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2",
+            children: "Route / budget audit"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+            className: "grid grid-cols-1 md:grid-cols-2 gap-3",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                    className: "text-[10px] uppercase text-gray-400 mb-1",
+                    children: "budget counters"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dl", {
+                    className: "grid grid-cols-2 gap-x-3 gap-y-1 text-xs",
+                    children: [
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dt", {
+                        className: "text-gray-500",
+                        children: "tracked principals"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dd", {
+                        className: "font-mono text-right",
+                        children: num(data.route_budget_audit.budget_counters.tracked_principals)
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dt", {
+                        className: "text-gray-500",
+                        children: "total budget"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dd", {
+                        className: "font-mono text-right",
+                        children: [
+                          "$",
+                          (num(data.route_budget_audit.budget_counters.total_budget_cents) / 100).toFixed(2)
+                        ]
+                      }, undefined, true, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dt", {
+                        className: "text-gray-500",
+                        children: "spent"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dd", {
+                        className: "font-mono text-right",
+                        children: [
+                          "$",
+                          (num(data.route_budget_audit.budget_counters.total_spent_cents) / 100).toFixed(2)
+                        ]
+                      }, undefined, true, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dt", {
+                        className: `${num(data.route_budget_audit.budget_counters.over_budget_principals) > 0 ? "text-red-600 dark:text-red-400" : "text-gray-500"}`,
+                        children: "over budget"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dd", {
+                        className: `font-mono text-right ${num(data.route_budget_audit.budget_counters.over_budget_principals) > 0 ? "text-red-600 dark:text-red-400" : ""}`,
+                        children: num(data.route_budget_audit.budget_counters.over_budget_principals)
+                      }, undefined, false, undefined, this)
+                    ]
+                  }, undefined, true, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                    className: "text-[10px] uppercase text-gray-400 mt-2 mb-1",
+                    children: "budget decisions (24h)"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dl", {
+                    className: "grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs",
+                    children: [
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dt", {
+                        className: "text-gray-500",
+                        children: "approved"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dd", {
+                        className: "font-mono text-right text-emerald-600",
+                        children: num(data.route_budget_audit.budget_decisions.approved)
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dt", {
+                        className: "text-gray-500",
+                        children: "rejected"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dd", {
+                        className: "font-mono text-right text-red-600",
+                        children: num(data.route_budget_audit.budget_decisions.rejected)
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dt", {
+                        className: "text-gray-500",
+                        children: "deny_budget"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dd", {
+                        className: "font-mono text-right text-amber-600",
+                        children: num(data.route_budget_audit.budget_decisions.deny_budget)
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dt", {
+                        className: "text-gray-500",
+                        children: "deny_compliance"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dd", {
+                        className: "font-mono text-right text-amber-600",
+                        children: num(data.route_budget_audit.budget_decisions.deny_compliance)
+                      }, undefined, false, undefined, this)
+                    ]
+                  }, undefined, true, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              (data.route_budget_audit.recent_route_decisions?.length ?? 0) > 0 && /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                    className: "text-[10px] uppercase text-gray-400 mb-1",
+                    children: "recent route decisions"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("ul", {
+                    className: "text-xs space-y-0.5 max-h-36 overflow-y-auto",
+                    children: data.route_budget_audit.recent_route_decisions.map((rd, i) => /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("li", {
+                      className: "flex items-center gap-2 py-0.5 border-b border-gray-50 dark:border-gray-700/50",
+                      children: [
+                        /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                          className: "font-mono text-gray-500 shrink-0",
+                          children: rd.display_id ?? "—"
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                          className: "truncate flex-1",
+                          children: rd.chosen_route
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                          className: "text-gray-400 shrink-0",
+                          children: rd.eliminated_count > 0 ? `-${num(rd.eliminated_count)}` : ""
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                          className: "text-gray-400 shrink-0",
+                          children: ago(rd.decided_at)
+                        }, undefined, false, undefined, this)
+                      ]
+                    }, i, true, undefined, this))
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
       }, undefined, true, undefined, this)
     ]
   }, undefined, true, undefined, this);
@@ -178978,7 +179574,7 @@ var DashboardPage = ({
               children: [
                 ["Board", "/board"],
                 ["Agents", "/agents"],
-                ["Dispatch", "/dispatch"],
+                ["Dispatch", "/dispatches"],
                 ["Channels", "/channels"],
                 ["Routes", "/routes"],
                 ["Settings", "/settings"]
@@ -233056,8 +233652,123 @@ var TeamsPage = () => {
 };
 var TeamsPage_default = TeamsPage;
 
-// src/apps/dashboard-web/hooks/useWebSocket.ts
+// src/apps/dashboard-web/hooks/useBoardColumns.ts
 var import_react67 = __toESM(require_react(), 1);
+var FALLBACK_COLUMNS = [
+  {
+    stage_name: "DRAFT",
+    stage_order: 1,
+    display_label: "Draft",
+    is_terminal: false,
+    maturity_gate: null
+  },
+  {
+    stage_name: "REVIEW",
+    stage_order: 2,
+    display_label: "Review",
+    is_terminal: false,
+    maturity_gate: null
+  },
+  {
+    stage_name: "DEVELOP",
+    stage_order: 3,
+    display_label: "Develop",
+    is_terminal: false,
+    maturity_gate: null
+  },
+  {
+    stage_name: "MERGE",
+    stage_order: 4,
+    display_label: "Merge",
+    is_terminal: false,
+    maturity_gate: null
+  },
+  {
+    stage_name: "COMPLETE",
+    stage_order: 5,
+    display_label: "Complete",
+    is_terminal: true,
+    maturity_gate: null
+  }
+];
+function useBoardColumns(workflowName = "Standard RFC", connected = false) {
+  const [columns, setColumns] = import_react67.useState(FALLBACK_COLUMNS);
+  const [isLoading, setIsLoading] = import_react67.useState(true);
+  const [error3, setError] = import_react67.useState(null);
+  const workflowRef = import_react67.useRef(workflowName);
+  workflowRef.current = workflowName;
+  const fetchColumns = import_react67.useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const url = new URL("/api/board/columns", window.location.origin);
+      url.searchParams.set("workflowName", workflowRef.current);
+      const res = await fetch(url.toString());
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      }
+      const data5 = await res.json();
+      if (Array.isArray(data5) && data5.length > 0) {
+        setColumns(data5);
+      } else {
+        setColumns(FALLBACK_COLUMNS);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to fetch board columns";
+      setError(message);
+      console.error("Error fetching board columns:", err);
+      setColumns(FALLBACK_COLUMNS);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+  import_react67.useEffect(() => {
+    fetchColumns();
+  }, [fetchColumns, workflowName, connected]);
+  import_react67.useEffect(() => {
+    const wsProtocol = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = typeof window !== "undefined" ? `${wsProtocol}//${window.location.host}/ws` : null;
+    if (!wsUrl)
+      return;
+    let ws = null;
+    let reconnectTimer = null;
+    let closed = false;
+    const connect = () => {
+      if (closed)
+        return;
+      try {
+        ws = new WebSocket(wsUrl);
+        ws.onmessage = (event4) => {
+          try {
+            const msg = JSON.parse(event4.data);
+            if (msg?.type === "board_reload") {
+              fetchColumns();
+            }
+          } catch {}
+        };
+        ws.onclose = () => {
+          if (!closed) {
+            reconnectTimer = setTimeout(connect, 5000);
+          }
+        };
+        ws.onerror = () => {
+          ws?.close();
+        };
+      } catch {}
+    };
+    connect();
+    return () => {
+      closed = true;
+      if (reconnectTimer !== null)
+        clearTimeout(reconnectTimer);
+      ws?.close();
+    };
+  }, [fetchColumns]);
+  return { columns, isLoading, error: error3, refresh: fetchColumns };
+}
+
+// src/apps/dashboard-web/hooks/useWebSocket.ts
+var import_react68 = __toESM(require_react(), 1);
 function isObject3(value2) {
   return typeof value2 === "object" && value2 !== null;
 }
@@ -233078,14 +233789,14 @@ function asArrayOf(value2, guard) {
 }
 function useWebSocket(url) {
   const wsUrl = url ?? (typeof window !== "undefined" ? `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}` : "ws://localhost:6420");
-  const [connected, setConnected] = import_react67.useState(false);
-  const [proposals, setProposals] = import_react67.useState([]);
-  const [agents, setAgents] = import_react67.useState([]);
-  const [channels2, setChannels] = import_react67.useState([]);
-  const [messages2, setMessages] = import_react67.useState([]);
-  const wsRef = import_react67.useRef(null);
-  const reconnectTimeoutRef = import_react67.useRef(undefined);
-  const connect = import_react67.useCallback(() => {
+  const [connected, setConnected] = import_react68.useState(false);
+  const [proposals, setProposals] = import_react68.useState([]);
+  const [agents, setAgents] = import_react68.useState([]);
+  const [channels2, setChannels] = import_react68.useState([]);
+  const [messages2, setMessages] = import_react68.useState([]);
+  const wsRef = import_react68.useRef(null);
+  const reconnectTimeoutRef = import_react68.useRef(undefined);
+  const connect = import_react68.useCallback(() => {
     if (wsRef.current) {
       const old = wsRef.current;
       old.onopen = null;
@@ -233224,7 +233935,7 @@ function useWebSocket(url) {
       ws.close();
     };
   }, [wsUrl]);
-  import_react67.useEffect(() => {
+  import_react68.useEffect(() => {
     connect();
     return () => {
       if (reconnectTimeoutRef.current) {
@@ -233235,7 +233946,7 @@ function useWebSocket(url) {
       }
     };
   }, [connect]);
-  import_react67.useEffect(() => {
+  import_react68.useEffect(() => {
     const off = onProjectScopeChange((id33) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN)
@@ -233255,87 +233966,13 @@ function useWebSocket(url) {
     });
     return off;
   }, []);
-  const reconnect = import_react67.useCallback(() => {
+  const reconnect = import_react68.useCallback(() => {
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
     }
     connect();
   }, [connect]);
   return { connected, proposals, agents, channels: channels2, messages: messages2, reconnect };
-}
-
-// src/apps/dashboard-web/hooks/useBoardColumns.ts
-var import_react68 = __toESM(require_react(), 1);
-var FALLBACK_COLUMNS = [
-  {
-    stage_name: "DRAFT",
-    stage_order: 1,
-    display_label: "Draft",
-    is_terminal: false,
-    maturity_gate: null
-  },
-  {
-    stage_name: "REVIEW",
-    stage_order: 2,
-    display_label: "Review",
-    is_terminal: false,
-    maturity_gate: null
-  },
-  {
-    stage_name: "DEVELOP",
-    stage_order: 3,
-    display_label: "Develop",
-    is_terminal: false,
-    maturity_gate: null
-  },
-  {
-    stage_name: "MERGE",
-    stage_order: 4,
-    display_label: "Merge",
-    is_terminal: false,
-    maturity_gate: null
-  },
-  {
-    stage_name: "COMPLETE",
-    stage_order: 5,
-    display_label: "Complete",
-    is_terminal: true,
-    maturity_gate: null
-  }
-];
-function useBoardColumns(workflowName = "Standard RFC", connected = false) {
-  const [columns, setColumns] = import_react68.useState(FALLBACK_COLUMNS);
-  const [isLoading, setIsLoading] = import_react68.useState(true);
-  const [error3, setError] = import_react68.useState(null);
-  const fetchColumns = import_react68.useCallback(async () => {
-    try {
-      setIsLoading(true);
-      setError(null);
-      const url = new URL("/api/board/columns", window.location.origin);
-      url.searchParams.set("workflowName", workflowName);
-      const res = await fetch(url.toString());
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-      }
-      const data5 = await res.json();
-      if (Array.isArray(data5) && data5.length > 0) {
-        setColumns(data5);
-      } else {
-        setColumns(FALLBACK_COLUMNS);
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to fetch board columns";
-      setError(message);
-      console.error("Error fetching board columns:", err);
-      setColumns(FALLBACK_COLUMNS);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [workflowName]);
-  import_react68.useEffect(() => {
-    fetchColumns();
-  }, [fetchColumns, connected]);
-  return { columns, isLoading, error: error3, refresh: fetchColumns };
 }
 
 // src/apps/dashboard-web/lib/proposal-detail-selection.ts
