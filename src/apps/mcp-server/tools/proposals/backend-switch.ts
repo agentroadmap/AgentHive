@@ -17,7 +17,9 @@ export function registerProposalTools(
 	server.addTool({
 		name: "prop_list",
 		description:
-			"List AgentHive proposals from Postgres, including workflow stage, type, and maturity",
+			"List AgentHive proposals from Postgres, including workflow stage, type, and maturity. " +
+			"Supports filtering by status, type, parent_id, include_terminal, and include_metadata. " +
+			"Free-text search (search, q, title_contains) is NOT supported here — use `proposal_search` for keyword/title search.",
 		inputSchema: {
 			type: "object",
 			properties: {
