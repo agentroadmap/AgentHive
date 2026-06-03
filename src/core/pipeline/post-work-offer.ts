@@ -16,6 +16,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { query as defaultQuery } from "../../infra/postgres/pool.ts";
 import { ObservabilityWriter } from "../observability/observability-writer.ts";
+import { autoCharterIfNeeded } from "./auto-charter.ts";
 
 const obs = new ObservabilityWriter("offer-pipeline");
 
@@ -197,8 +198,9 @@ export async function postWorkOffer(
 		project_id: number | null;
 		status: string | null;
 		maturity: string | null;
+		gate_scanner_paused: boolean;
 	}>(
-		`SELECT project_id, status, maturity
+		`SELECT project_id, status, maturity, gate_scanner_paused
 		 FROM roadmap_proposal.proposal
 		 WHERE id = $1`,
 		[input.proposalId],
@@ -207,6 +209,11 @@ export async function postWorkOffer(
 	if (!ctx) {
 		throw new Error(
 			`postWorkOffer: proposal ${input.proposalId} not found`,
+		);
+	}
+	if (ctx.gate_scanner_paused) {
+		throw new Error(
+			`postWorkOffer: proposal ${input.proposalId} is gate_scanner_paused; dispatch refused`,
 		);
 	}
 
@@ -356,6 +363,16 @@ export async function postWorkOffer(
 			attributes: { dispatch_id: dispatchId, proposal_id: input.proposalId, role: input.role },
 		});
 		await obs.closeSpan({ spanId: span.spanId });
+	}
+
+	// AC-9 (P182): auto-charter team governance when 2+ dispatches are alive
+	// for this proposal. Best-effort — chartering must never block dispatch.
+	if (!row.was_replay) {
+		try {
+			await autoCharterIfNeeded(input.proposalId, queryFn);
+		} catch {
+			// swallow — chartering is advisory, not load-bearing
+		}
 	}
 
 	return {
