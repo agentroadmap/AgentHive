@@ -133,7 +133,7 @@ export async function terminateLiveChildren(
 	let signalled = 0;
 	for (const child of snapshot) {
 		try {
-			if (!child.killed && child.exitCode === null) {
+			if (child.exitCode === null) {
 				child.kill("SIGTERM");
 				signalled++;
 			}
@@ -154,7 +154,7 @@ export async function terminateLiveChildren(
 	let killed = 0;
 	for (const child of Array.from(liveChildren)) {
 		try {
-			if (!child.killed && child.exitCode === null) {
+			if (child.exitCode === null) {
 				child.kill("SIGKILL");
 				killed++;
 			}
@@ -2030,12 +2030,19 @@ function runProcess(
 		// SIGTERM at deadline; SIGKILL escalation 10s later if the child ignores it.
 		// Without the escalation, claude --print mid-API-call traps SIGTERM and
 		// blows past the declared budget by 10–15 minutes.
+		// `exited` tracks REAL termination. child.killed only means "a signal was
+		// sent" (it is true immediately after the SIGTERM below), so it must NOT
+		// gate the SIGKILL escalation — claude --print traps SIGTERM mid-API-call
+		// and would otherwise run to its ~2h hard limit, wedging the dispatch slot
+		// indefinitely. Guarding the escalation on `exited` is what makes a
+		// livelocked spawn reliably free its slot at timeoutMs + 10s.
+		let exited = false;
 		let killTimer: NodeJS.Timeout | null = null;
 		const timer = setTimeout(() => {
 			child.kill("SIGTERM");
 			stderr += "\n[agent-spawner] SIGTERM after timeout";
 			killTimer = setTimeout(() => {
-				if (!child.killed && child.exitCode === null) {
+				if (!exited) {
 					try {
 						child.kill("SIGKILL");
 						stderr += "\n[agent-spawner] SIGKILL after grace";
@@ -2054,11 +2061,13 @@ function runProcess(
 		};
 
 		child.on("close", (code) => {
+			exited = true;
 			cleanup();
 			resolve({ stdout, stderr, exitCode: code });
 		});
 
 		child.on("error", (err) => {
+			exited = true;
 			cleanup();
 			resolve({
 				stdout,
