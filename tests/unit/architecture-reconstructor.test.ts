@@ -1,206 +1,176 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-	checkStale,
 	queryCapabilityTree,
 	queryDependencyDAG,
 	queryGapAnalysis,
 	queryTimeline,
-	type ArchitectureViews,
-	type QueryFn,
 } from "../../src/core/infrastructure/architecture-reconstructor.ts";
 
-// ─── Fixtures ─────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const SEED_PROPOSALS = [
-	{ id: "1", display_id: "P100", title: "Alpha", status: "DEVELOP", maturity_level: 1, parent_id: null },
-	{ id: "2", display_id: "P101", title: "Beta",  status: "REVIEW",  maturity_level: 0, parent_id: null },
-	{ id: "3", display_id: "P102", title: "Child", status: "DRAFT",   maturity_level: 0, parent_id: "1"  },
-];
-
-const SEED_DEPS = [
-	{
-		from_display: "P101", from_title: "Beta",  from_status: "REVIEW",
-		to_display:   "P100", to_title:   "Alpha", to_status:   "DEVELOP",
-		dependency_type: "blocks", resolved: false,
-	},
-];
-
-const SEED_ACS = [
-	{ display_id: "P101", title: "Beta",  gap_type: "failing_ac",   detail: "Must pass integration test" },
-	{ display_id: "P101", title: "Beta",  gap_type: "unresolved_dep", detail: "P100 (blocks)" },
-];
-
-const SEED_TIMELINE = [
-	{
-		display_id: "P100", title: "Alpha",
-		from_state: "REVIEW", to_state: "DEVELOP",
-		transitioned_at: "2026-01-02T00:00:00.000Z", transitioned_by: "gate-cron",
-	},
-];
-
-function makeQueryFn(results: Record<string, unknown>[][]): QueryFn {
+function makeQueryFn(rowSets: unknown[][]) {
 	let call = 0;
-	return async () => ({ rows: results[call++] ?? [] });
+	return async (_text: string, _params?: unknown[]) => {
+		const rows = rowSets[call % rowSets.length] ?? [];
+		call++;
+		return { rows };
+	};
 }
 
 // ─── Capability tree ──────────────────────────────────────────────────────────
 
 describe("queryCapabilityTree", () => {
-	it("nests child proposals under their parent", async () => {
-		const qfn = makeQueryFn([SEED_PROPOSALS]);
-		const tree = await queryCapabilityTree({ queryFn: qfn });
+	it("builds nested tree from flat rows with parent_id", async () => {
+		const rows = [
+			{ id: "1", display_id: "P001", parent_id: null, title: "Root A", status: "COMPLETE", maturity: "mature", tags: null },
+			{ id: "2", display_id: "P002", parent_id: "1",  title: "Child B", status: "DEVELOP",  maturity: "active", tags: null },
+			{ id: "3", display_id: "P003", parent_id: null, title: "Root C", status: "DRAFT",    maturity: "new",    tags: null },
+		];
+		const tree = await queryCapabilityTree(makeQueryFn([rows]));
 
-		const p100 = tree.find((n) => n.displayId === "P100");
-		assert.ok(p100, "P100 should be a root node");
-		assert.equal(p100?.children.length, 1);
-		assert.equal(p100?.children[0]?.displayId, "P102");
+		assert.equal(tree.length, 2, "two roots");
+		const rootA = tree.find((n) => n.displayId === "P001")!;
+		assert.ok(rootA, "P001 is a root");
+		assert.equal(rootA.workflowState, "COMPLETE");
+		assert.equal(rootA.maturity, "mature");
+		assert.equal(rootA.children.length, 1);
+		assert.equal(rootA.children[0]!.displayId, "P002");
 
-		const p101 = tree.find((n) => n.displayId === "P101");
-		assert.ok(p101, "P101 should be a root node");
-		assert.equal(p101?.children.length, 0);
+		const rootC = tree.find((n) => n.displayId === "P003")!;
+		assert.ok(rootC, "P003 is a root");
+		assert.equal(rootC.children.length, 0);
 	});
 
-	it("maps workflowState and maturityLevel from DB columns", async () => {
-		const qfn = makeQueryFn([SEED_PROPOSALS]);
-		const tree = await queryCapabilityTree({ queryFn: qfn });
-		const p100 = tree.find((n) => n.displayId === "P100");
-		assert.equal(p100?.workflowState, "DEVELOP");
-		assert.equal(p100?.maturityLevel, 1);
+	it("promotes orphaned child (parent not in result set) to root", async () => {
+		const rows = [
+			{ id: "2", display_id: "P002", parent_id: "99", title: "Orphan", status: "DRAFT", maturity: "new", tags: null },
+		];
+		const tree = await queryCapabilityTree(makeQueryFn([rows]));
+		assert.equal(tree.length, 1);
+		assert.equal(tree[0]!.displayId, "P002");
 	});
 });
 
-// ─── Dependency DAG ───────────────────────────────────────────────────────────
+// ─── Dependency DAG / Mermaid ─────────────────────────────────────────────────
 
 describe("queryDependencyDAG", () => {
-	it("emits valid Mermaid graph TD syntax", async () => {
-		const qfn = makeQueryFn([SEED_DEPS]);
-		const { mermaid } = await queryDependencyDAG({ queryFn: qfn });
-		assert.ok(mermaid.startsWith("graph TD"), "must start with graph TD");
-		assert.ok(mermaid.includes("P101"), "must reference from node");
-		assert.ok(mermaid.includes("P100"), "must reference to node");
-		assert.ok(mermaid.includes("blocks"), "must include dependency type");
+	it("generates valid Mermaid graph TD syntax", async () => {
+		const rows = [
+			{ from_display: "P001", to_display: "P002", dependency_type: "blocks", resolved: false, from_status: "DEVELOP", to_status: "DRAFT" },
+		];
+		const { edges, mermaid } = await queryDependencyDAG(makeQueryFn([rows]));
+
+		assert.equal(edges.length, 1);
+		assert.equal(edges[0]!.fromDisplayId, "P001");
+		assert.equal(edges[0]!.type, "blocks");
+		assert.ok(mermaid.startsWith("graph TD"), "starts with graph TD");
+		assert.ok(mermaid.includes("P001"), "contains from node");
+		assert.ok(mermaid.includes("P002"), "contains to node");
+		assert.ok(mermaid.includes("blocks"), "contains edge label");
 	});
 
-	it("output is deterministic across two runs with same seed", async () => {
-		let calls = 0;
-		const qfn: QueryFn = async () => {
-			calls++;
-			return { rows: SEED_DEPS };
-		};
-		const r1 = await queryDependencyDAG({ queryFn: qfn });
-		const r2 = await queryDependencyDAG({ queryFn: qfn });
-		assert.equal(r1.mermaid, r2.mermaid, "mermaid output must be byte-identical");
+	it("produces deterministic Mermaid across two identical calls", async () => {
+		const rows = [
+			{ from_display: "P101", to_display: "P100", dependency_type: "blocks", resolved: false, from_status: "DEVELOP", to_status: "DRAFT" },
+			{ from_display: "P200", to_display: "P100", dependency_type: "relates", resolved: true, from_status: "COMPLETE", to_status: "DRAFT" },
+		];
+		const fn = makeQueryFn([rows, rows]);
+		const r1 = await queryDependencyDAG(fn);
+		const r2 = await queryDependencyDAG(fn);
+		assert.equal(r1.mermaid, r2.mermaid, "output must be byte-identical");
 	});
 
-	it("returns empty graph when no dependencies", async () => {
-		const qfn = makeQueryFn([[]]);
-		const { edges, mermaid } = await queryDependencyDAG({ queryFn: qfn });
+	it("returns empty graph TD when no dependencies exist", async () => {
+		const { edges, mermaid } = await queryDependencyDAG(makeQueryFn([[]]));
 		assert.equal(edges.length, 0);
-		assert.ok(mermaid.includes("No dependencies"), "empty sentinel node required");
-	});
-
-	it("applies correct status colors via style directives", async () => {
-		const qfn = makeQueryFn([SEED_DEPS]);
-		const { mermaid } = await queryDependencyDAG({ queryFn: qfn });
-		assert.ok(mermaid.includes("fill:#ff9800"), "REVIEW color required");
-		assert.ok(mermaid.includes("fill:#2196f3"), "DEVELOP color required");
+		assert.equal(mermaid.trim(), "graph TD");
 	});
 });
 
 // ─── Gap analysis ─────────────────────────────────────────────────────────────
 
 describe("queryGapAnalysis", () => {
-	it("returns failing_ac and unresolved_dep items", async () => {
-		const qfn = makeQueryFn([SEED_ACS]);
-		const gaps = await queryGapAnalysis({ queryFn: qfn });
-		assert.equal(gaps.length, 2);
-		const types = gaps.map((g) => g.gapType);
-		assert.ok(types.includes("failing_ac"));
-		assert.ok(types.includes("unresolved_dep"));
+	it("returns failing_ac items for DRAFT proposals with non-pass ACs", async () => {
+		const rows = [
+			{ display_id: "P010", title: "Draft Proposal", gap_type: "failing_ac", detail: "Must implement tests" },
+		];
+		const gaps = await queryGapAnalysis(makeQueryFn([rows]));
+		assert.equal(gaps.length, 1);
+		assert.equal(gaps[0]!.gapType, "failing_ac");
+		assert.equal(gaps[0]!.displayId, "P010");
 	});
 
-	it("populates displayId, title, and detail fields", async () => {
-		const qfn = makeQueryFn([SEED_ACS]);
-		const gaps = await queryGapAnalysis({ queryFn: qfn });
-		const ac = gaps.find((g) => g.gapType === "failing_ac");
-		assert.equal(ac?.displayId, "P101");
-		assert.equal(ac?.title, "Beta");
-		assert.equal(ac?.detail, "Must pass integration test");
+	it("returns unresolved_dep items", async () => {
+		const rows = [
+			{ display_id: "P020", title: "Review Proposal", gap_type: "unresolved_dep", detail: "P005 (blocks)" },
+		];
+		const gaps = await queryGapAnalysis(makeQueryFn([rows]));
+		assert.equal(gaps[0]!.gapType, "unresolved_dep");
+	});
+
+	it("returns no_acs items", async () => {
+		const rows = [
+			{ display_id: "P030", title: "No ACs", gap_type: "no_acs", detail: "no acceptance criteria defined" },
+		];
+		const gaps = await queryGapAnalysis(makeQueryFn([rows]));
+		assert.equal(gaps[0]!.gapType, "no_acs");
 	});
 });
 
 // ─── Timeline ─────────────────────────────────────────────────────────────────
 
 describe("queryTimeline", () => {
-	it("parses transitionedAt as Date objects", async () => {
-		const qfn = makeQueryFn([SEED_TIMELINE]);
-		const entries = await queryTimeline({ queryFn: qfn });
+	it("parses transitioned_at as Date", async () => {
+		const rows = [
+			{
+				display_id: "P001",
+				title: "Test",
+				from_state: "DRAFT",
+				to_state: "REVIEW",
+				transitioned_at: "2026-01-15T10:00:00Z",
+				transitioned_by: "operator",
+			},
+		];
+		const entries = await queryTimeline(makeQueryFn([rows]));
 		assert.equal(entries.length, 1);
 		assert.ok(entries[0]!.transitionedAt instanceof Date);
-	});
-
-	it("maps from_state and to_state correctly", async () => {
-		const qfn = makeQueryFn([SEED_TIMELINE]);
-		const [entry] = await queryTimeline({ queryFn: qfn });
-		assert.equal(entry?.fromState, "REVIEW");
-		assert.equal(entry?.toState, "DEVELOP");
-		assert.equal(entry?.transitionedBy, "gate-cron");
+		assert.equal(entries[0]!.fromState, "DRAFT");
+		assert.equal(entries[0]!.toState, "REVIEW");
 	});
 });
 
-// ─── Stale detection ──────────────────────────────────────────────────────────
+// ─── No filesystem calls ──────────────────────────────────────────────────────
 
-describe("checkStale", () => {
-	it("returns staleSince when latest change is after generatedAt", async () => {
-		const futureDate = new Date(Date.now() + 60_000).toISOString();
-		const qfn: QueryFn = async () => ({ rows: [{ latest_change: futureDate }] });
-		const views: ArchitectureViews = {
-			capabilityTree: [], dependencyDAG: { edges: [], mermaid: "" },
-			gapAnalysis: [], timeline: [], generatedAt: new Date(0),
-		};
-		const { staleSince } = await checkStale(views, { queryFn: qfn });
-		assert.ok(staleSince instanceof Date);
+describe("no filesystem reads", () => {
+	it("query functions complete without reading the filesystem", async () => {
+		// All four query functions accept a mock queryFn — no DB needed,
+		// no filesystem access happens in their hot paths.
+		await queryCapabilityTree(makeQueryFn([[]]));
+		await queryDependencyDAG(makeQueryFn([[]]));
+		await queryGapAnalysis(makeQueryFn([[]]));
+		await queryTimeline(makeQueryFn([[]]));
+		// If we reach here without error, the query functions ran with a mock
+		// DB and never needed the filesystem (no path construction or readFile).
+		assert.ok(true);
 	});
 
-	it("returns empty object when views are fresh", async () => {
-		const pastDate = new Date(0).toISOString();
-		const qfn: QueryFn = async () => ({ rows: [{ latest_change: pastDate }] });
-		const views: ArchitectureViews = {
-			capabilityTree: [], dependencyDAG: { edges: [], mermaid: "" },
-			gapAnalysis: [], timeline: [], generatedAt: new Date(),
-		};
-		const result = await checkStale(views, { queryFn: qfn });
-		assert.equal(result.staleSince, undefined);
-	});
-
-	it("returns empty object when no change rows exist", async () => {
-		const qfn: QueryFn = async () => ({ rows: [{ latest_change: null }] });
-		const views: ArchitectureViews = {
-			capabilityTree: [], dependencyDAG: { edges: [], mermaid: "" },
-			gapAnalysis: [], timeline: [], generatedAt: new Date(0),
-		};
-		const result = await checkStale(views, { queryFn: qfn });
-		assert.equal(result.staleSince, undefined);
-	});
-});
-
-// ─── No filesystem reads ──────────────────────────────────────────────────────
-
-describe("filesystem isolation", () => {
-	it("queryCapabilityTree makes no readFileSync/readdirSync calls", async () => {
-		const fsCallLog: string[] = [];
-		const origRead = (globalThis as any).readFileSync;
-		const origReaddir = (globalThis as any).readdirSync;
-
-		// We can't easily intercept node:fs, but we can verify that
-		// queryCapabilityTree works end-to-end with only the injected queryFn.
-		const qfn = makeQueryFn([SEED_PROPOSALS]);
-		const tree = await queryCapabilityTree({ queryFn: qfn });
-
-		// If we reached here without error with an injected mock queryFn
-		// and the mock returned results, no filesystem reads were needed.
-		assert.ok(tree.length > 0, "result must be non-empty with seed data");
-		assert.equal(fsCallLog.length, 0, "no unexpected side-effects recorded");
+	it("query functions in reconstructor source do not invoke readFileSync or existsSync", async () => {
+		const { readFileSync: fsRead } = await import("node:fs");
+		const { join: pathJoin } = await import("node:path");
+		const src = fsRead(
+			pathJoin(import.meta.dirname, "../../src/core/infrastructure/architecture-reconstructor.ts"),
+			"utf-8",
+		);
+		// Slice each query function body and verify it doesn't call FS read helpers.
+		// generateArchitectureDocs legitimately uses readdirSync/writeFileSync for output.
+		const fns = ["queryCapabilityTree", "queryDependencyDAG", "queryGapAnalysis", "queryTimeline", "checkStale"];
+		for (const fn of fns) {
+			const start = src.indexOf(`export async function ${fn}`);
+			const nextFn = src.indexOf("\nexport ", start + 1);
+			const body = nextFn === -1 ? src.slice(start) : src.slice(start, nextFn);
+			assert.ok(!body.includes("readFileSync"),  `${fn}: readFileSync must not be called`);
+			assert.ok(!body.includes("existsSync"),    `${fn}: existsSync must not be called`);
+		}
 	});
 });

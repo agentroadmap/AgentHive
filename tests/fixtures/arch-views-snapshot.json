@@ -1,0 +1,59 @@
+{
+  "_comment": "Deterministic seed fixture for arch-reconstructor snapshot tests (AC-28). 3 proposals, 2 deps, 1 failing AC.",
+  "seed": {
+    "proposals": [
+      { "id": "901", "display_id": "P901", "parent_id": null,  "title": "Alpha Root",   "status": "DEVELOP",  "maturity": "active", "tags": null },
+      { "id": "902", "display_id": "P902", "parent_id": "901", "title": "Beta Child",   "status": "DRAFT",    "maturity": "new",    "tags": null },
+      { "id": "903", "display_id": "P903", "parent_id": null,  "title": "Gamma Sibling","status": "COMPLETE", "maturity": "mature", "tags": null }
+    ],
+    "dependencies": [
+      { "from_display": "P901", "to_display": "P903", "dependency_type": "blocks",  "resolved": false, "from_status": "DEVELOP", "to_status": "COMPLETE" },
+      { "from_display": "P902", "to_display": "P903", "dependency_type": "relates", "resolved": true,  "from_status": "DRAFT",   "to_status": "COMPLETE" }
+    ],
+    "gap_rows": [
+      { "display_id": "P902", "title": "Beta Child", "gap_type": "failing_ac", "detail": "Must write unit tests" }
+    ]
+  },
+  "expected": {
+    "capabilityTree": [
+      {
+        "displayId": "P901",
+        "title": "Alpha Root",
+        "workflowState": "DEVELOP",
+        "maturity": "active",
+        "parentId": null,
+        "tags": null,
+        "children": [
+          {
+            "displayId": "P902",
+            "title": "Beta Child",
+            "workflowState": "DRAFT",
+            "maturity": "new",
+            "parentId": "901",
+            "tags": null,
+            "children": []
+          }
+        ]
+      },
+      {
+        "displayId": "P903",
+        "title": "Gamma Sibling",
+        "workflowState": "COMPLETE",
+        "maturity": "mature",
+        "parentId": null,
+        "tags": null,
+        "children": []
+      }
+    ],
+    "dependencyDAG": {
+      "edges": [
+        { "fromDisplayId": "P901", "toDisplayId": "P903", "type": "blocks",  "resolved": false },
+        { "fromDisplayId": "P902", "toDisplayId": "P903", "type": "relates", "resolved": true  }
+      ],
+      "mermaid": "graph TD\n  P901[\"P901\"] -->|blocks| P903[\"P903\"]\n  P902[\"P902\"] -->|resolved relates| P903[\"P903\"]\n  style P901 fill:#2196f3\n  style P903 fill:#00c853\n  style P902 fill:#ffffff\n"
+    },
+    "gapAnalysis": [
+      { "displayId": "P902", "title": "Beta Child", "gapType": "failing_ac", "detail": "Must write unit tests" }
+    ]
+  }
+}

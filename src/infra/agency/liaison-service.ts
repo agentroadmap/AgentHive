@@ -263,30 +263,6 @@ export async function liaisonHeartbeat(
 }
 
 /**
- * Operator short-circuit: resume an agency to 'active' from any non-retired state.
- * Implements AC-2 (operator_resume signal).
- *
- * Clears offline_alert_sent_at so the next offline episode emits a fresh alert.
- */
-export async function liaisonResume(agency_id: string): Promise<void> {
-	if (!agency_id?.trim()) throw new Error("agency_id is required");
-
-	const result = await query(
-		`UPDATE roadmap.agency
-		 SET status               = 'active',
-		     status_reason        = 'Operator resume',
-		     offline_alert_sent_at = NULL
-		 WHERE agency_id = $1
-		   AND status NOT IN ('retired')
-		 RETURNING agency_id`,
-		[agency_id],
-	);
-
-	if (result.rowCount === 0)
-		throw new Error(`Agency ${agency_id} not found or already retired`);
-}
-
-/**
  * Mark dormant any agencies past the 90-second grace period.
  * Called by the liaison boot-process watchdog every 60s (AC-5).
  */
