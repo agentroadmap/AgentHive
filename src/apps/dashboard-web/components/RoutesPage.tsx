@@ -1,25 +1,6 @@
 import type React from "react";
 import { useCallback, useEffect, useState } from "react";
-import { apiClient } from "../lib/api";
-
-interface Route {
-	id: number;
-	model_name: string;
-	route_provider: string;
-	agent_provider: string;
-	agent_cli: string;
-	fallback_cli: string;
-	is_enabled: boolean;
-	priority: number;
-	api_spec: string;
-	base_url: string;
-	cost_per_million_input: number;
-	cost_per_million_output: number;
-	plan_type: string;
-	notes: string;
-	created_at: string;
-	has_host_policy_match: boolean;
-}
+import { apiClient, type RouteRow as Route } from "../lib/api";
 
 const RoutesPage: React.FC = () => {
 	const [routes, setRoutes] = useState<Route[]>([]);
@@ -37,7 +18,7 @@ const RoutesPage: React.FC = () => {
 			setError(null);
 			if (isRefresh) setRefreshing(true);
 			const data = await apiClient.fetchRoutes();
-			setRoutes(data as Route[]);
+			setRoutes(data);
 		} catch (err) {
 			console.error("Failed to fetch routes:", err);
 			setError("Failed to load routes");
@@ -213,6 +194,9 @@ const RoutesPage: React.FC = () => {
 								Spec
 							</th>
 							<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+								Base URL
+							</th>
+							<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
 								Cost $/M
 							</th>
 							<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
@@ -231,6 +215,7 @@ const RoutesPage: React.FC = () => {
 							return (
 								<tr
 									key={route.id}
+									title={route.notes || undefined}
 									className={
 										isOrphan
 											? "bg-yellow-50 dark:bg-yellow-900/10 hover:bg-yellow-100 dark:hover:bg-yellow-900/20"
@@ -278,6 +263,18 @@ const RoutesPage: React.FC = () => {
 									</td>
 									<td className="px-4 py-3 text-sm text-gray-500">
 										{route.api_spec}
+									</td>
+									<td className="px-4 py-3 text-sm text-gray-500 max-w-[160px]">
+										{route.base_url ? (
+											<span
+												title={route.base_url}
+												className="block truncate font-mono text-xs"
+											>
+												{route.base_url}
+											</span>
+										) : (
+											<span className="text-gray-300 dark:text-gray-600">—</span>
+										)}
 									</td>
 									<td className="px-4 py-3 text-sm tabular-nums">
 										{route.cost_per_million_input > 0 || route.cost_per_million_output > 0
