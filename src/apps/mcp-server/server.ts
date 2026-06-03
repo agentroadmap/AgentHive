@@ -1161,6 +1161,52 @@ export async function createMcpServer(
 			handler: (a) => memory.searchMemory(a as SearchMemoryArgs),
 		});
 
+		// P230: Team memory tools — shared squad decisions
+		type TeamMemSetArgs = Parameters<typeof memory.teamMemSet>[0];
+		type TeamMemGetArgs = Parameters<typeof memory.teamMemGet>[0];
+		type TeamMemListArgs = Parameters<typeof memory.teamMemList>[0];
+		server.addTool({
+			name: "team_mem_set",
+			description: "Store a shared decision or fact in team memory (all squad members can read)",
+			inputSchema: {
+				type: "object",
+				properties: {
+					team_name: { type: "string", description: "Squad/team identifier" },
+					key: { type: "string", description: "Memory key" },
+					value: { description: "Value to store (any JSON-serialisable type)" },
+					created_by: { type: "string", description: "Agent identity writing this entry" },
+					expires_in_days: { type: "number", description: "Optional TTL in days" },
+				},
+				required: ["team_name", "key", "value", "created_by"],
+			},
+			handler: (a) => memory.teamMemSet(a as TeamMemSetArgs),
+		});
+		server.addTool({
+			name: "team_mem_get",
+			description: "Read a shared memory entry for a team by key",
+			inputSchema: {
+				type: "object",
+				properties: {
+					team_name: { type: "string" },
+					key: { type: "string" },
+				},
+				required: ["team_name", "key"],
+			},
+			handler: (a) => memory.teamMemGet(a as TeamMemGetArgs),
+		});
+		server.addTool({
+			name: "team_mem_list",
+			description: "List all non-expired shared memory entries for a team",
+			inputSchema: {
+				type: "object",
+				properties: {
+					team_name: { type: "string" },
+				},
+				required: ["team_name"],
+			},
+			handler: (a) => memory.teamMemList(a as TeamMemListArgs),
+		});
+
 		// P078: Escalation Management tools
 		const { registerEscalationTools } = await import("./tools/escalation/index.ts");
 		registerEscalationTools(server);
