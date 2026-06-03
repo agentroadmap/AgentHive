@@ -132,6 +132,29 @@ export async function setModelCooldown(
 }
 
 /**
+ * P1682: Cool every route sharing an agent CLI (e.g. all `claude` CLI routes that
+ * share one OAuth/subscription account). A subscription usage-limit is account-wide,
+ * so per-(provider,model) cooldown is too narrow — it would leave sibling claude
+ * routes hot. GREATEST merge preserves any longer existing window. The route-policy
+ * cooldown filter then excludes these routes until cooldown_until passes, which is
+ * also the automatic wake: the resolver re-includes them on the next loop, no
+ * operator trigger and no in-process timer.
+ */
+export async function setCliFamilyCooldown(
+	agentCli: string,
+	cooldownMinutes: number,
+	reason: string,
+): Promise<void> {
+	await query(
+		`UPDATE roadmap.model_routes
+		     SET cooldown_until = GREATEST(COALESCE(cooldown_until, 'epoch'::timestamptz), NOW() + interval '${cooldownMinutes} minutes')
+		     WHERE agent_cli = $1`,
+		[agentCli],
+	);
+	void reason;
+}
+
+/**
  * P1359: Check if a specific model route is in active cooldown.
  */
 export async function isModelInCooldown(
