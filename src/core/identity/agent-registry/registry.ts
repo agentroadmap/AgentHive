@@ -231,7 +231,7 @@ export async function registerAgent(
 	const insertResult = await query<{ id: number }>(
 		`INSERT INTO roadmap_workforce.agent_registry
 		   (agent_identity, agent_type, role, skills, status, trust_tier, public_key, key_rotated_at)
-     VALUES ($1, $2, $3, $4::jsonb, 'active', $5, $6, CASE WHEN $6 IS NOT NULL THEN now() END)
+     VALUES ($1, $2, $3, $4::jsonb, 'active', $5, $6, CASE WHEN $6::text IS NOT NULL THEN now() END)
      ON CONFLICT (agent_identity) DO UPDATE SET
        agent_type     = EXCLUDED.agent_type,
        role           = EXCLUDED.role,
