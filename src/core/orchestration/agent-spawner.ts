@@ -1709,16 +1709,22 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 
 	// P404: provision scratch directory for this agent run
 	let scratchUuid: string | null = null;
+	const worktreePath = join(worktreeRoot, worktree);
 	try {
 		const scratch = await provisionScratch({ agentRunId, agentIdentity });
 		scratchUuid = scratch.scratchUuid;
 		processEnv.AGENT_SCRATCH_DIR = scratch.scratchPath;
+		// AC-1: stamp scratch_path on the cubic that owns this worktree (non-fatal)
+		query(
+			`UPDATE roadmap.cubics SET scratch_path = $1 WHERE worktree_path = $2 AND status = 'active'`,
+			[scratch.scratchPath, worktreePath],
+		).catch(() => {});
 	} catch {
 		// non-fatal — agent runs without scratch if provisioning fails
 	}
 
 	const startMs = Date.now();
-	const cwd = join(worktreeRoot, worktree);
+	const cwd = worktreePath;
 
 	const { stdout, stderr, exitCode } = await runProcess(
 		argv,
