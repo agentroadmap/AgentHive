@@ -36,6 +36,7 @@ import * as config from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 import {
 	setModelCooldown,
+	setCliFamilyCooldown,
 	isModelInCooldown,
 	setProviderCooldown,
 } from "./provider-cooldown.ts";
@@ -1370,7 +1371,14 @@ export async function spawnWithRetry(
 		const cooldownReason = lastResult.stderr?.slice(0, 500) || lastResult.stdout?.slice(0, 500) || "quota_exhausted";
 
 		try {
-			await setModelCooldown(provider, modelName, cooldownMinutes, cooldownReason);
+			if (exitClass.quotaErrorProvider === "claude") {
+				// P1682: claude CLI subscription limit is account-wide — cool the whole
+				// `claude` CLI route family (routes sharing one OAuth account), not just
+				// the single (provider,model) that happened to be picked this spawn.
+				await setCliFamilyCooldown("claude", cooldownMinutes, cooldownReason);
+			} else {
+				await setModelCooldown(provider, modelName, cooldownMinutes, cooldownReason);
+			}
 		} catch (err) {
 			console.error(`[P1359] Failed to set model cooldown for ${provider}/${modelName}:`, err);
 		}
@@ -1840,6 +1848,15 @@ const RATE_LIMIT_PATTERNS: RegExp[] = [
 	/usage.{0,20}cap/i,
 ];
 
+// P1682: claude-CLI subscription usage-limit fallback cooldown (minutes) when the
+// CLI emits no parseable reset time. Env-configurable, no config service (env.conf
+// pattern, like AGENTHIVE_SPAWN_TIMEOUT_MS). Default 30m = a short re-probe cadence
+// that self-corrects via GREATEST merge rather than over-waiting a possibly-shorter
+// window; an exact parsed reset (epoch/clock) always overrides this.
+const CLAUDE_LIMIT_FALLBACK_MIN = Number(
+	process.env.AGENTHIVE_CLAUDE_LIMIT_FALLBACK_MIN ?? 30,
+);
+
 interface ExitClassification {
 	outcome: "completed" | "failed" | "rate_limited" | "provider_exhausted";
 	resetAt?: Date | null;
@@ -1864,7 +1881,7 @@ function parseResetTime(text: string): Date | null {
  * P1359: Detect provider-specific quota signals with TTL parsing.
  * Returns (provider, model, resetAt) on match, null otherwise.
  */
-function detectProviderQuotaSignal(
+export function detectProviderQuotaSignal(
 	stdout: string,
 	stderr: string,
 ): { provider: string; model: string; resetAt: Date } | null {
@@ -1946,10 +1963,34 @@ function detectProviderQuotaSignal(
 		return { provider: "copilot", model: "unknown", resetAt };
 	}
 
+	// P1682: Claude CLI (Claude Code --print, OAuth/subscription) usage limit.
+	// The CLI prints human text "usage limit reached" (SPACE) — distinct from the
+	// Anthropic API "usage_limit" (UNDERSCORE) handled above, which is why the live
+	// claude limit fell through to outcome:"failed" with no cooldown. Formats seen:
+	//   "Claude AI usage limit reached|<unix-epoch>"  → exact reset
+	//   "... usage limit reached ... resets 3pm (TZ)" → clock reset
+	//   "5-hour limit reached"                         → window size only → fallback
+	// Returned provider="claude" so spawnWithRetry cools the whole `claude` CLI route
+	// family (account-wide limit), not a single (provider,model) pair.
+	if (/usage\s+limit\s+reached|\d+\s*-\s*hour\s+limit\s+reached/i.test(hay)) {
+		let resetAt = new Date(Date.now() + CLAUDE_LIMIT_FALLBACK_MIN * 60 * 1000);
+		const epochMatch = hay.match(/usage\s+limit\s+reached\s*\|\s*(\d{10,13})/i);
+		if (epochMatch) {
+			const num = parseInt(epochMatch[1], 10);
+			const ms = epochMatch[1].length >= 13 ? num : num * 1000;
+			const dt = new Date(ms);
+			if (!isNaN(dt.getTime()) && dt.getTime() > Date.now()) resetAt = dt;
+		} else {
+			const clock = parseResetTime(hay);
+			if (clock && clock.getTime() > Date.now()) resetAt = clock;
+		}
+		return { provider: "claude", model: "cli", resetAt };
+	}
+
 	return null;
 }
 
-function classifyExit(
+export function classifyExit(
 	stdout: string,
 	stderr: string,
 	exitCode: number | null,
