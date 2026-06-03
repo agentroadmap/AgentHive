@@ -832,6 +832,28 @@ export const FlagKeys = {
 		envOverride: false,
 	} satisfies ConfigKey<number>,
 
+	// Phase 1 (hot-configurable cap): global in-flight work-offer backpressure
+	// limit. Read per-postWorkOffer call via config (cached + cleared on
+	// runtime_flag_changed NOTIFY), so `UPDATE core.runtime_flag` takes effect on
+	// the next dispatch with NO orchestrator restart. Supersedes the legacy
+	// AGENTHIVE_MAX_INFLIGHT_OFFERS env const in post-work-offer.ts. Set to 0 to
+	// disable backpressure entirely.
+	ORCHESTRATOR_MAX_INFLIGHT_OFFERS: {
+		name: "ORCHESTRATOR_MAX_INFLIGHT_OFFERS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n)) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 20,
+		description: "Max global in-flight work offers (backpressure cap); 0=disabled",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
 	ORCHESTRATOR_SHUTDOWN_DRAIN_MS: {
 		name: "ORCHESTRATOR_SHUTDOWN_DRAIN_MS",
 		class: "flag" as const,
