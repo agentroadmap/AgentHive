@@ -1312,6 +1312,23 @@ export class RoadmapServer {
 				return await this.handleGetStatistics();
 			if (pathname === "/api/status" && method === "GET")
 				return await this.handleGetStatus();
+
+			// P081: SLA contract endpoint
+			if (pathname === "/api/sla" && method === "GET") {
+				try {
+					const { serveSlaContract } = await import("./sla-metrics.ts");
+					const contract = serveSlaContract();
+					return new Response(JSON.stringify(contract, null, 2), {
+						status: 200,
+						headers: { "Content-Type": "application/json" },
+					});
+				} catch (err) {
+					return new Response(JSON.stringify({ error: "SLA contract unavailable" }), {
+						status: 503,
+						headers: { "Content-Type": "application/json" },
+					});
+				}
+			}
 			if (pathname === "/api/init" && method === "POST")
 				return await this.handleInit(req);
 			if (pathname === "/api/search" && method === "GET")
@@ -1335,6 +1352,23 @@ export class RoadmapServer {
 			) {
 				const id = pathname.split("/")[3]!;
 				return await this.handleMarkKnowledgeHelpful(id);
+			}
+		}
+
+		// P081: Prometheus metrics endpoint
+		if (pathname === "/metrics" && method === "GET") {
+			try {
+				const { serveMetrics } = await import("./sla-metrics.ts");
+				const text = await serveMetrics();
+				return new Response(text, {
+					status: 200,
+					headers: { "Content-Type": "text/plain; version=0.0.4; charset=utf-8" },
+				});
+			} catch {
+				return new Response("# metrics unavailable\n", {
+					status: 503,
+					headers: { "Content-Type": "text/plain" },
+				});
 			}
 		}
 

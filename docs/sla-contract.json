@@ -1,0 +1,66 @@
+{
+  "schema": "agenthive-sla/v1",
+  "version": "1.0.0",
+  "effective_date": "2026-06-02",
+  "surfaces": {
+    "mcp_api": {
+      "p99_latency_ms": 500,
+      "error_rate_max": 0.10,
+      "concurrent_agent_baseline": 100,
+      "measurement_window": "rolling 5-minute histogram (roadmap.trace_span)"
+    },
+    "postgres": {
+      "rto_minutes": 5,
+      "rpo_minutes": 0,
+      "recovery_path": "systemd watchdog auto-restart + pool reconnect"
+    },
+    "scheduler": {
+      "lease_ttl_minutes": 30,
+      "expiry_gap_seconds": 30,
+      "measurement": "heartbeat interval"
+    },
+    "workflow": {
+      "transition_latency_ms": 2000,
+      "measurement": "roadmap.proposal_lifecycle_event p99"
+    }
+  },
+  "availability": {
+    "monthly_percent": 99.5,
+    "error_budget_minutes": 216,
+    "planned_maintenance_max_hours": 4,
+    "formula": "Availability = (M - D_unplanned) / M * 100%"
+  },
+  "states": ["Normal", "Degraded", "Down"],
+  "state_transitions": {
+    "Normal_to_Degraded": "any SLO breached > 30s window",
+    "Degraded_to_Normal": "all SLOs within target for 60s",
+    "Degraded_to_Down": "MCP or Postgres unreachable > 30s",
+    "Down_to_Normal": "MCP restored + Postgres connected + all SLOs within target"
+  },
+  "alerting": {
+    "channel": "#alerts",
+    "incident_channel": "#incidents",
+    "thresholds_configurable": true,
+    "config_table": "roadmap.sla_config",
+    "env_prefix": "SLA_"
+  },
+  "failure_modes": {
+    "mcp_process_crash": { "rto_minutes": 5, "rpo_minutes": 0 },
+    "postgres_restart": { "rto_minutes": 5, "rpo_minutes": 0 },
+    "network_partition": { "rto_minutes": 5, "rpo_minutes": 0 },
+    "agent_registry_stale": { "rto_minutes": 30, "rpo": "last heartbeat interval" },
+    "postgres_data_corruption": { "excluded": true, "roadmap": "HA + WAL archiving" },
+    "full_host_failure": { "excluded": true, "roadmap": "< 2 min with HA Postgres" }
+  },
+  "federation": {
+    "peer_min_availability_percent": 99.0,
+    "validation_endpoint": "/api/sla",
+    "schema_version_required": "agenthive-sla/v1"
+  },
+  "review_cycle": "After first production deployment, then quarterly",
+  "source_of_truth": {
+    "machine_readable": "docs/sla-contract.json",
+    "human_readable": "docs/sla-contract.md",
+    "runtime_overrides": "roadmap.sla_config"
+  }
+}
