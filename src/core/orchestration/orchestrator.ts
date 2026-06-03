@@ -28,6 +28,7 @@ import {
 	buildTaskPrompt,
 	fetchProposalDetail,
 } from "./readiness-resolver.ts";
+import { TIER_PREFERENCE, type TaskMetadata } from "../../orchestrator/model_router.ts";
 // P903 phase 3+4: legacy dispatch entry points live in legacy-dispatch.ts
 // (extracted from scripts/orchestrator.ts during phase 4 to break the cycle
 // between the shim and the class). P902-D will progressively pull these
@@ -757,6 +758,21 @@ export class Orchestrator {
 				const primaryProfile = ctx.roleProfiles[0] ?? null;
 				const task = buildTaskPrompt(detail, mode, reasons);
 
+				// P226: derive tier preference from proposal type + mode so the route
+				// resolver can prefer cheaper routes for routine work and frontier routes
+				// for gate/architecture reviews, without a hardcoded role-name check.
+				const taskType: string =
+					mode === "gate" ? "gate_review"
+					: detail.type === "architecture" ? "architecture_review"
+					: "code_gen";
+				const difficultyRow = TIER_PREFERENCE[taskType];
+				const difficulty: TaskMetadata["difficulty"] =
+					detail.maturity === "mature" ? "hard"
+					: detail.maturity === "active" ? "medium"
+					: "easy";
+				const preferredTierRow = difficultyRow?.[difficulty];
+				const requiredTier = preferredTierRow ?? null;
+
 				// P1359 D3 wire-up: spawnWithRetry writes per-(provider, model)
 				// cooldown to model_routes.cooldown_until on quota-class outcomes
 				// and re-resolves to the next-priority same-provider route via the
@@ -775,6 +791,8 @@ export class Orchestrator {
 					// reach resolveModelRoute. Builtin-fallback rows have id=null
 					// and route resolution falls through to host/project policy.
 					roleProfileId: primaryProfile?.id ?? null,
+					// P226: tier preference derived from task difficulty/type
+					requiredTier,
 				});
 
 				dispatched++;

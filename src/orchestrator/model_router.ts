@@ -61,7 +61,7 @@ export const TIER_PREFERENCE: Record<string, Record<Difficulty, ModelTier>> = {
 	research: { hard: "frontier", medium: "mid", easy: "lower" },
 };
 
-function preferredTierForTask(task: TaskMetadata): ModelTier {
+export function preferredTierForTask(task: TaskMetadata): ModelTier {
 	const row = TIER_PREFERENCE[task.task_type];
 	let tier: ModelTier = row ? row[task.difficulty] : task.difficulty === "easy" ? "lower" : "mid";
 

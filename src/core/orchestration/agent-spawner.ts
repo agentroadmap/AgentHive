@@ -236,6 +236,8 @@ export interface SpawnRequest {
 	agencyIdentity?: string | null;
 	/** P771 Layer 4: agent_role_profile row id for role-based route constraints. */
 	roleProfileId?: number | null;
+	/** P226: Tier preference derived from task difficulty — passed to resolveModelRoute Layer 7. */
+	requiredTier?: string | null;
 	/** P604: trace context — propagated from parent orchestrator span */
 	traceId?: string;
 	/** P604: parent span ID for child span linking */
@@ -1518,7 +1520,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	// P405: provider comes from model_routes via orchestrator, not hardcoded to worktree
 	const provider =
 		providerOverride ?? (await detectProvider(worktree, worktreeRoot));
-	// P235/M026/P771/P772: resolve full route applying all 5 policy layers; logs decision
+	// P235/M026/P771/P772/P226: resolve full route applying all policy layers; logs decision
 	const { eliminatedRoutes: _eliminatedRoutes, ...route } = await resolveModelRoute({
 		provider,
 		projectId: req.projectId ?? null,
@@ -1527,6 +1529,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		modelHint,
 		proposalId: req.proposalId ?? null,
 		role: req.stage,
+		requiredTier: req.requiredTier ?? null,
 	});
 	// P797: validate that the resolved model has at least one enabled route before spawning
 	const routeCheck = await validateModelForDispatch(
