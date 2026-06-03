@@ -15,6 +15,27 @@ const DB_URL =
 
 let pool: Pool;
 
+async function statusTransitionWithBypass(
+	proposalId: number,
+	newStatus: string,
+): Promise<void> {
+	const client = await pool.connect();
+	try {
+		await client.query("BEGIN");
+		await client.query("SET LOCAL app.gate_bypass = 'true'");
+		await client.query(
+			`UPDATE roadmap_proposal.proposal SET status = $1 WHERE id = $2`,
+			[newStatus, proposalId],
+		);
+		await client.query("COMMIT");
+	} catch (err) {
+		await client.query("ROLLBACK");
+		throw err;
+	} finally {
+		client.release();
+	}
+}
+
 async function insertTestProposal(
 	status: string,
 	title: string,
@@ -66,10 +87,9 @@ describe("P248 proposal_stage_dwell trigger", () => {
 	it("AC3b: status UPDATE closes old row and opens new one", async () => {
 		const id = await insertTestProposal("DRAFT", "P248 dwell UPDATE test");
 
-		await pool.query(
-			`UPDATE roadmap_proposal.proposal SET status = 'REVIEW' WHERE id = $1`,
-			[id],
-		);
+		// Use gate bypass (SET LOCAL inside a transaction) to allow a direct
+		// status transition without going through the full gate-review flow.
+		await statusTransitionWithBypass(id, "REVIEW");
 
 		const rows = await dwellRowsFor(id);
 		assert.equal(rows.length, 2, "expected two dwell rows after one transition");
@@ -101,10 +121,7 @@ describe("P248 proposal_stage_dwell trigger", () => {
 
 	it("AC4: v_stage_dwell_stats view returns rows for completed transitions", async () => {
 		const id = await insertTestProposal("DRAFT", "P248 dwell stats test");
-		await pool.query(
-			`UPDATE roadmap_proposal.proposal SET status = 'REVIEW' WHERE id = $1`,
-			[id],
-		);
+		await statusTransitionWithBypass(id, "REVIEW");
 
 		const { rows } = await pool.query<{ stage_name: string; proposal_count: string }>(
 			`SELECT stage_name, proposal_count

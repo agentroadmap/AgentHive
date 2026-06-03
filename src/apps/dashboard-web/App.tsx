@@ -126,8 +126,9 @@ export default function App() {
 		return "Standard RFC";
 	});
 
-	// Load dynamic column definitions based on active workflow
-	const { columns: boardColumns } = useBoardColumns(activeWorkflow);
+	// Load dynamic column definitions based on active workflow.
+	// Pass connected so columns re-fetch on WS reconnect.
+	const { columns: boardColumns } = useBoardColumns(activeWorkflow, connected);
 
 	// Convert column objects to status strings for BoardPage/Board backward compat
 	const statuses = boardColumns.map((col) => col.stage_name);
