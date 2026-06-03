@@ -157,7 +157,7 @@ export class ControlPlaneClient {
    * 1. Query roadmap.project for worktree_root prefix match
    * 2. Check for .hive/config.json in git root
    * 3. Check for roadmap.yaml in git root
-   * 4. Query roadmap.project for git_remote_url match
+   * 4. Query roadmap.project for git_repo_url match
    *
    * @param cwd - Current working directory (defaults to process.cwd())
    * @returns ProjectRow if found, null if not
@@ -255,8 +255,8 @@ export class ControlPlaneClient {
                      host, port, bootstrap_status, bootstrap_log, updated_at
                 FROM roadmap.project
                WHERE status = 'active'
-                 AND git_remote_url IS NOT NULL
-                 AND LOWER(git_remote_url) = $1
+                 AND git_repo_url IS NOT NULL
+                 AND LOWER(REGEXP_REPLACE(git_repo_url, '\\.git$', '')) = $1
                LIMIT 1
             `;
 

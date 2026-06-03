@@ -105,6 +105,34 @@ describe("proposal-integrity: ErrorCode types", () => {
 	});
 });
 
+describe("proposal-integrity: DRAFT_QUALITY_GATE", () => {
+	it("should format DRAFT_QUALITY_GATE error with pencil icon", () => {
+		const error: ValidationError = {
+			code: "DRAFT_QUALITY_GATE",
+			message: "Cannot advance DRAFT to REVIEW: missing required fields: design, motivation",
+			context: { proposalId: 42, missingFields: ["design", "motivation"] },
+		};
+		const formatted = formatValidationError(error);
+		assert.ok(formatted.includes("📝"));
+		assert.ok(formatted.includes("[DRAFT_QUALITY_GATE]"));
+		assert.ok(formatted.includes("design"));
+	});
+
+	it("should include DRAFT_QUALITY_GATE in ErrorCode union", () => {
+		const code: ErrorCode = "DRAFT_QUALITY_GATE";
+		assert.strictEqual(code, "DRAFT_QUALITY_GATE");
+	});
+
+	it("should carry missingFields list in context", () => {
+		const error: ValidationError = {
+			code: "DRAFT_QUALITY_GATE",
+			message: "missing: acceptance_criteria",
+			context: { proposalId: 7, missingFields: ["acceptance_criteria"] },
+		};
+		assert.deepStrictEqual(error.context?.missingFields, ["acceptance_criteria"]);
+	});
+});
+
 describe("proposal-integrity: ValidationError structure", () => {
 	it("should have code, message, and optional context", () => {
 		const error: ValidationError = {

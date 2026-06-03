@@ -101,8 +101,8 @@ Where `$1 = $CWD`.
   SELECT project_id, slug, name
     FROM roadmap.project
    WHERE status = 'active'
-     AND git_remote_url IS NOT NULL
-     AND LOWER(git_remote_url) = LOWER($1)
+     AND git_repo_url IS NOT NULL
+     AND LOWER(git_repo_url) = LOWER($1)
    LIMIT 1
   ```
   Where `$1 = <normalized URL>`.
@@ -201,12 +201,12 @@ If `$CWD` is inside a git repo that is **not** registered as a worktree (e.g., a
   - Return `ProjectRow` if found; `null` if not.
   - Map DB errors to `HiveError` with code `remote-failure` and exit code 5.
 
-- [ ] Validate that `ProjectRow` type includes: `project_id`, `slug`, `name`, `worktree_root`, `status`, `git_remote_url` (nullable).
+- [ ] Validate that `ProjectRow` type includes: `project_id`, `slug`, `name`, `worktree_root`, `status`, `git_repo_url` (nullable).
 
 - [ ] Write tests:
   - [ ] `resolveProjectFromCwd` with `$CWD` inside a registered worktree — returns correct project.
   - [ ] `resolveProjectFromCwd` with `$CWD` not in any worktree — returns null.
-  - [ ] Git fallback: `resolveProjectFromCwd` with git repo matching `git_remote_url` — returns correct project.
+  - [ ] Git fallback: `resolveProjectFromCwd` with git repo matching `git_repo_url` — returns correct project.
   - [ ] DB unreachable — maps to `HiveError` with code `remote-failure`, exit code 5.
 
 ---

@@ -117,3 +117,40 @@ test("postWorkOffer: in-flight count of zero proceeds to proposal lookup", async
 	assert.equal(calls.length, 2);
 	assert.match(calls[0].sql, /squad_dispatch[\s\S]*offer_status/);
 });
+
+test("postWorkOffer: gate_scanner_paused proposal is refused before dispatch insert", async () => {
+	const { calls, queue } = makeQuery([
+		[{ count: 0 }],
+		[
+			{
+				project_id: 1,
+				status: "DRAFT",
+				maturity: "new",
+				gate_scanner_paused: true,
+			},
+		],
+	]);
+
+	await assert.rejects(
+		() =>
+			postWorkOffer(
+				{
+					proposalId: 1411,
+					squadName: "P1411-test",
+					role: "developer",
+					task: "anything",
+				},
+				queue,
+			),
+		/gate_scanner_paused; dispatch refused/,
+	);
+
+	assert.equal(calls.length, 2);
+	assert.match(calls[1].sql, /gate_scanner_paused/);
+	assert.equal(
+		calls.some((call) =>
+			/INSERT INTO roadmap_workforce\.squad_dispatch/.test(call.sql),
+		),
+		false,
+	);
+});

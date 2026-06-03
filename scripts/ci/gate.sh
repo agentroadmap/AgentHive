@@ -154,6 +154,9 @@ step_run "typecheck (hive-cli, cubic-agents, gate)" \
 step_run "check:credential-env" \
     bash scripts/check-credential-env.sh
 
+step_run "audit:dispatch-selects (P1411)" \
+    node --import jiti/register scripts/ci/check-dispatch-proposal-selects.ts
+
 echo ""
 
 # ── INTEGRATION ───────────────────────────────────────────────────────────────

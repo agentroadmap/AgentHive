@@ -7,7 +7,7 @@ import type {
 } from "../../shared/types";
 import AchievementsView from "./components/AchievementsView";
 import ActivityFeed from "./components/ActivityFeed";
-// import AgenciesPage from "./components/AgenciesPage"; // TODO: Component not yet created
+import AgenciesPage from "./components/AgenciesPage";
 import AgentsPage from "./components/AgentsPage";
 import AppNav from "./components/AppNav";
 import BoardPage from "./components/BoardPage";
@@ -251,11 +251,9 @@ export default function App() {
 						<Route path="/routes">
 							<RoutesPage />
 						</Route>
-						{/* TODO: Uncomment when AgenciesPage component is created
 						<Route path="/agencies">
 							<AgenciesPage />
 						</Route>
-						*/}
 						<Route path="/achievements">
 							<AchievementsView />
 						</Route>

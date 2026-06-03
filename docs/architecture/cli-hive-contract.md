@@ -199,7 +199,7 @@ Every error returned in `error.code` must map to the exit code table above. This
    - If found, use `cubic.agency_id` to resolve agency; use `cubic.proposal_id` to resolve project (via roadmap_proposal join).
    - If not in a worktree, check for `.hive/config.json` in repo root (see `getProjectRoot()` from P448) with `project` and `agency` hints.
    - If no `.hive/config.json`, check `roadmap.yaml` in repo root (if it exists) for `project:` and `mcp.url:` hints.
-   - If in a git repo, consult `control_project.project_registry` table to match `git_remote_url` against `project.repo_url` to infer project.
+   - If in a git repo, consult `control_project.project_registry` table to match `git_repo_url` against `project.repo_url` to infer project.
 4. **Control-plane default:** Query `control_identity.human_user` for `default_project_id` and `default_agency_id`.
 5. **Fail-fast:** If no context can be resolved, exit code 2 (NOT_FOUND) with message: "Cannot resolve project/agency context. Set `--project`, `HIVE_PROJECT` env, or `$PWD/.hive/config.json`, or register default in control plane. See `hive help context`."
 

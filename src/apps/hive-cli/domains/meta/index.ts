@@ -308,15 +308,6 @@ export function register(program: Command): void {
       process.stdout.write(JSON.stringify(result, null, 2) + "\n");
     });
 
-  // Context
-  program
-    .command("context")
-    .description("Show resolved project/agency/host context")
-    .action(async (options) => {
-      const result = await handleContext(options);
-      process.stdout.write(JSON.stringify(result, null, 2) + "\n");
-    });
-
   // Completion
   program
     .command("completion [shell]")
@@ -324,16 +315,6 @@ export function register(program: Command): void {
     .action(async (shell: string | undefined, options) => {
       const result = await handleCompletion(shell, options);
       process.stdout.write(result + "\n");
-    });
-
-  // Doctor
-  program
-    .command("doctor")
-    .description("System readiness check")
-    .option("--remediate", "Show remediation suggestions")
-    .action(async (options) => {
-      const result = await handleDoctor(options);
-      process.stdout.write(JSON.stringify(result, null, 2) + "\n");
     });
 
   // Help

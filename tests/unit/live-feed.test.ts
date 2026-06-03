@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+	chooseFeedActor,
 	dedupeBoardLiveFeed,
 	timestampToMillis,
 } from "../../src/apps/ui/live-feed.ts";
@@ -48,5 +49,19 @@ describe("dedupeBoardLiveFeed", () => {
 	it("parses postgres numeric timestamps correctly", () => {
 		const millis = timestampToMillis("1744898052783.000");
 		assert.equal(millis, 1744898052783);
+	});
+});
+
+describe("chooseFeedActor", () => {
+	it("keeps explicit non-system actors", () => {
+		assert.equal(chooseFeedActor("gary", "claude"), "gary");
+	});
+
+	it("uses a correlated lease actor for system maturity transitions", () => {
+		assert.equal(chooseFeedActor("system", "claude"), "claude");
+	});
+
+	it("falls back to system when no better actor exists", () => {
+		assert.equal(chooseFeedActor("system", null), "system");
 	});
 });

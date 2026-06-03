@@ -699,6 +699,42 @@ export class ApiClient {
 		return result.dispatches;
 	}
 
+	async fetchAgencies(options?: {
+		proposal?: string;
+		agency?: string;
+		route?: string;
+		severity?: string;
+	}): Promise<Array<Record<string, unknown>>> {
+		const params = new URLSearchParams();
+		if (options?.proposal) params.set("proposal", options.proposal);
+		if (options?.agency) params.set("agency", options.agency);
+		if (options?.route) params.set("route", options.route);
+		if (options?.severity) params.set("severity", options.severity);
+		const qs = params.toString();
+		const result = await this.fetchJson<{ agencies: Array<Record<string, unknown>> }>(
+			`${API_BASE}/agencies${qs ? `?${qs}` : ""}`,
+		);
+		return result.agencies;
+	}
+
+	async sendAgencyAction(
+		agencyId: string,
+		body: {
+			action: "liaison_pause" | "liaison_resume" | "liaison_drain" | "claim_revoke" | "agency_retire";
+			claim_id?: string;
+			reason?: string;
+			until_iso?: string | null;
+		},
+	): Promise<Record<string, unknown>> {
+		return this.fetchJson<Record<string, unknown>>(
+			`${API_BASE}/agencies/${encodeURIComponent(agencyId)}/action`,
+			{
+				method: "POST",
+				body: JSON.stringify(body),
+			},
+		);
+	}
+
 	async fetchTeams(): Promise<any[]> {
 		return this.fetchJson<any[]>(`${API_BASE}/teams`);
 	}
