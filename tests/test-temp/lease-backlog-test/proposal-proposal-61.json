@@ -2,7 +2,7 @@
   "proposalId": "proposal-61",
   "title": "Test",
   "proposer": "agent-1",
-  "proposedAt": "2026-05-20T05:15:05.812Z",
+  "proposedAt": "2026-06-03T01:02:07.765Z",
   "status": "Approved",
   "reviews": [
     {
@@ -10,18 +10,18 @@
       "role": "pm",
       "decision": "approved",
       "comments": "OK",
-      "timestamp": "2026-05-20T05:15:05.813Z"
+      "timestamp": "2026-06-03T01:02:07.766Z"
     },
     {
       "reviewer": "arch-user",
       "role": "architect",
       "decision": "approved",
       "comments": "OK",
-      "timestamp": "2026-05-20T05:15:05.813Z"
+      "timestamp": "2026-06-03T01:02:07.766Z"
     }
   ],
   "notes": "Proposed by agent-1",
   "approvedBy": "arch-user",
-  "approvedAt": "2026-05-20T05:15:05.813Z",
-  "addedToBacklogAt": "2026-05-20T05:15:05.815Z"
+  "approvedAt": "2026-06-03T01:02:07.766Z",
+  "addedToBacklogAt": "2026-06-03T01:02:07.768Z"
 }

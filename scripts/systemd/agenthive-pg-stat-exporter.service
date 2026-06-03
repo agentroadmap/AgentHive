@@ -1,0 +1,23 @@
+[Unit]
+Description=AgentHive per-tenant pg_stat Prometheus Exporter (P509)
+Documentation=https://gitlab.local/agenthive/docs/p509-tenant-db-ops
+After=network.target postgresql.service
+Wants=network.target
+
+[Service]
+Type=simple
+User=agenthive
+Group=agenthive
+EnvironmentFile=-/etc/agenthive/env
+EnvironmentFile=-/etc/agenthive/tenant-dsns.env
+ExecStart=/usr/local/bin/agenthive-pg-stat-exporter.py
+Restart=always
+RestartSec=5
+StartLimitInterval=120
+StartLimitBurst=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agenthive-pg-stat-exporter
+
+[Install]
+WantedBy=multi-user.target
