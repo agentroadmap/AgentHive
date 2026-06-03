@@ -10,6 +10,8 @@
 | CLAUDE.md | Claude-specific memory + pointer to CONVENTIONS.md |
 | agentGuide.md | Retired. Content merged into CONVENTIONS.md. |
 
+> **Governance amendments**: To propose a constitutional change, use proposal type `governance-amendment` — see CONVENTIONS.md §Governance Amendment Workflow for the 6-stage process (48h deliberation, Skeptic quorum, human-only MERGE gate). P181 is the bootstrapping reference.
+
 ### Codex-Specific Notes
 
 - Work is proposal-driven. Check the current proposal, state, and dependencies before changing shared behavior.
