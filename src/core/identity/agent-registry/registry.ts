@@ -226,16 +226,20 @@ export async function registerAgent(
 		}
 	}
 
+	// P159 AC-1: when publicKey is provided, also set key_rotated_at to record when the key
+	// was established in the DB (NULL when no key supplied; COALESCE preserves on re-register).
 	const insertResult = await query<{ id: number }>(
-		`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, role, skills, status, trust_tier, public_key)
-     VALUES ($1, $2, $3, $4::jsonb, 'active', $5, $6)
+		`INSERT INTO roadmap_workforce.agent_registry
+		   (agent_identity, agent_type, role, skills, status, trust_tier, public_key, key_rotated_at)
+     VALUES ($1, $2, $3, $4::jsonb, 'active', $5, $6, CASE WHEN $6 IS NOT NULL THEN now() END)
      ON CONFLICT (agent_identity) DO UPDATE SET
-       agent_type = EXCLUDED.agent_type,
-       role       = EXCLUDED.role,
-       skills     = agent_registry.skills || EXCLUDED.skills,
-       status     = 'active',
-       trust_tier = COALESCE(NULLIF(agent_registry.trust_tier, 'authority'), EXCLUDED.trust_tier),
-       public_key = COALESCE(EXCLUDED.public_key, agent_registry.public_key)
+       agent_type     = EXCLUDED.agent_type,
+       role           = EXCLUDED.role,
+       skills         = agent_registry.skills || EXCLUDED.skills,
+       status         = 'active',
+       trust_tier     = COALESCE(NULLIF(agent_registry.trust_tier, 'authority'), EXCLUDED.trust_tier),
+       public_key     = COALESCE(EXCLUDED.public_key, agent_registry.public_key),
+       key_rotated_at = COALESCE(EXCLUDED.key_rotated_at, agent_registry.key_rotated_at)
      RETURNING id`,
 		[instanceId, dbAgentType, role ?? null, JSON.stringify(skills), trustTier, request.publicKey ?? null],
 	);
