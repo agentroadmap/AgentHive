@@ -1,13 +1,38 @@
-import { type Page, expect } from "@playwright/test";
+import { type Page, type Locator, expect } from "@playwright/test";
 
 /**
  * Wait for the dashboard React app to finish initial paint + first WS snapshot.
- * Heuristic: AppNav rendered AND no spinner with role=status visible.
+ * Looks for the AppNav <nav role="navigation"> AND the project switcher
+ * combobox (both reliable indicators that hydration completed).
  */
 export async function waitForDashboardReady(page: Page) {
-	await expect(page.getByRole("navigation").first()).toBeVisible({ timeout: 15_000 });
-	// Allow the React tree to settle and the first WS snapshot to land.
-	await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+	// Desktop (>=md/768px): <nav role="navigation"> is rendered inline.
+	// Mobile (<md): nav is collapsed into a closed drawer; only the hamburger button
+	//   <button aria-label="Open navigation menu"> is visible.
+	// Wait for whichever surfaces first.
+	const viewport = page.viewportSize();
+	const isMobile = viewport ? viewport.width < 768 : false;
+	if (isMobile) {
+		await expect(
+			page.getByRole("button", { name: /open navigation menu/i }),
+		).toBeVisible({ timeout: 30_000 });
+	} else {
+		await expect(page.getByRole("navigation").first()).toBeAttached({ timeout: 30_000 });
+		await expect(
+			page.getByRole("combobox", { name: /Active project/i }),
+		).toBeVisible({ timeout: 30_000 });
+	}
+}
+
+/**
+ * Wait for the board to finish loading its first WS snapshot.
+ * Detected via the "<N> proposals" status line in the header.
+ */
+export async function waitForBoardReady(page: Page) {
+	await waitForDashboardReady(page);
+	await expect(
+		page.getByText(/\d+\s+proposals/i).first(),
+	).toBeVisible({ timeout: 30_000 });
 }
 
 /**
@@ -48,16 +73,25 @@ export async function setTheme(page: Page, theme: "light" | "dark") {
 }
 
 /**
- * Find a proposal card on the board by its displayId (e.g. "P1409").
+ * Locate a column on the board by its title (e.g. "DRAFT").
+ * Note: ProposalColumn is <section aria-label="<title> proposal column"> in source,
+ * but the deployed dashboard's accessibility tree flattens the section. Anchor on
+ * the H3 heading instead, which is reliably the column title.
  */
-export function proposalCard(page: Page, displayId: string) {
-	return page.locator(`[data-testid="proposal-card"], .proposal-card`).filter({
-		hasText: displayId,
-	}).first();
+export function boardColumn(page: Page, title: string): Locator {
+	return page.getByRole("heading", { level: 3, name: new RegExp(`^${title}$`, "i") });
 }
 
 /**
- * Open the ProposalDetailsModal for the given displayId by clicking its card.
+ * Locate a proposal card on the board by its display id (e.g. "P1409").
+ * Cards are <button> elements whose accessible name starts with the display id.
+ */
+export function proposalCard(page: Page, displayId: string): Locator {
+	return page.getByRole("button", { name: new RegExp(`^${displayId}\\b`) }).first();
+}
+
+/**
+ * Click a card and wait for the details modal to open.
  */
 export async function openProposalModal(page: Page, displayId: string) {
 	await proposalCard(page, displayId).click();
@@ -79,4 +113,16 @@ export async function readActiveWorkflow(page: Page): Promise<string> {
 	return await page.evaluate(() => {
 		return window.localStorage.getItem("roadmap.board.workflow") ?? "Standard RFC";
 	});
+}
+
+/**
+ * AppNav exposes only the first 4-5 nav links inline; the rest live behind
+ * the "More ▾" overflow button. This helper opens the menu so any nav link
+ * is reachable.
+ */
+export async function openNavOverflow(page: Page) {
+	const more = page.getByRole("button", { name: /^More\b/i }).first();
+	if (await more.isVisible().catch(() => false)) {
+		await more.click();
+	}
 }
