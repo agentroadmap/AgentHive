@@ -254,7 +254,7 @@ export class PgTeamGovernanceHandlers {
 						args.respondentAgent,
 						args.description,
 						args.initiatorPosition ?? args.description,
-						args.respondentPosition ?? ""
+						args.respondentPosition ?? "" ,
 						status,
 						args.escalationLevel,
 						teamIdNum,

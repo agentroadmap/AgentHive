@@ -181,7 +181,8 @@ export class PgDocumentHandlers {
 			// Store previous version
 			await query(
 				`INSERT INTO roadmap.document_versions (document_id, version, title, content, author)
-				 VALUES ($1, $2, $3, $4, $5)`,
+				 VALUES ($1, $2, $3, $4, $5)
+				 ON CONFLICT (document_id, version) DO NOTHING`,
 				[docId, doc.version, doc.title, doc.content, doc.author],
 			);
 

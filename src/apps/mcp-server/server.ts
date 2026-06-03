@@ -52,7 +52,7 @@ import { registerNoteTools } from "./tools/notes/index.ts";
 import { registerProjectTools } from "./tools/projects/index.ts";
 import { registerProposalTools as registerFilesystemProposalTools } from "./tools/proposals/index.ts";
 import { registerProtocolTools } from "./tools/protocol/index.ts";
-import { registerTeamTools } from "./tools/teams/index.ts";
+import { registerTeamTools, registerTeamGovernanceTools } from "./tools/teams/index.ts";
 import { registerTestingTools } from "./tools/testing/index.ts";
 import { registerWorkflowTools } from "./tools/workflow/index.ts";
 import { registerWorktreeMergeTools } from "./tools/worktree-merge/index.ts";
@@ -1115,6 +1115,8 @@ export async function createMcpServer(
 			},
 			handler: (a) => agents.addTeamMember(a as AddTeamMemberArgs),
 		});
+		// P182: Team Governance Layer — charter, norms, dispute resolution, archive
+		await registerTeamGovernanceTools(server);
 
 		const { PgSpendingHandlers, PgModelHandlers } = await import(
 			"./tools/spending/pg-handlers.ts"
