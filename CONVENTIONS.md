@@ -803,6 +803,11 @@ AgentHive is multi-agent. Git discipline is part of system safety.
 - Prefer multiple small commits over one mega-commit when the work naturally separates.
 - If you change behavior, update the related docs in the same branch.
 
+### Git hooks
+
+- **Canonical hooks live in the version-controlled `.githooks/` directory**, activated via `core.hooksPath`. They self-install on `npm install` (the `prepare` script runs `git config core.hooksPath .githooks`); to install manually, run `npm run hooks:install`. Verify with `git config --get core.hooksPath` → must print `.githooks`.
+- **Never put a version bump (or any `git commit`/`git commit --amend`) in a `post-merge`/`post-checkout` hook.** A bump-on-merge hook rewrites the just-pulled upstream commit's hash on *every* puller's machine, guaranteeing divergence from origin and a spurious minor bump per pull — it silently violates the Shared-history rules below. Version bumps are a release-authority action only: use `npm run release:patch|minor|major`. A legacy `.git/hooks/post-merge` doing exactly this caused repeated merge pain; it is retired (2026-06-03). If `core.hooksPath` is unset on a checkout, git falls back to `.git/hooks/` and may re-run such legacy cruft — always confirm hooksPath points to `.githooks`.
+
 ### Shared-history rules
 
 - Do not rewrite shared history.
