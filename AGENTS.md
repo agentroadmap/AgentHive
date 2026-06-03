@@ -10,6 +10,14 @@
 | CLAUDE.md | Claude-specific memory + pointer to CONVENTIONS.md |
 | agentGuide.md | Retired. Content merged into CONVENTIONS.md. |
 
+### Governance Amendments
+
+> To propose a constitutional change (amendments to the AgentHive Constitution, doc-9),
+> use proposal type **`governance-amendment`** — NOT `feature`. The 6-stage workflow
+> (DRAFT → DELIBERATION → REVIEW → DEVELOP → MERGE → COMPLETE) enforces a 48-hour
+> deliberation window, Skeptic quorum, and human-only final approval.
+> See CONVENTIONS.md §Governance Amendment Workflow for the full step-by-step guide.
+
 ### Codex-Specific Notes
 
 - Work is proposal-driven. Check the current proposal, state, and dependencies before changing shared behavior.
