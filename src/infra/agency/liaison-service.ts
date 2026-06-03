@@ -117,7 +117,7 @@ export async function liaisonRegister(
 		[agency_id],
 	);
 
-	const result = await runQuery(
+	const result = (await runQuery(
 		`
     WITH update_agency AS (
       UPDATE roadmap.agency
