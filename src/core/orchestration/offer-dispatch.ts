@@ -242,6 +242,7 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 		claim: ClaimedOffer,
 		targetAgencyId: string,
 	): Promise<string> {
+		const role = extractRole(claim.metadata);
 		const briefing = await this.briefingAssembleFn(
 			{
 				task_id: `offer-${claim.dispatchId}`,
@@ -250,6 +251,12 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 				parent_agent: this.orchestratorIdentity,
 				liaison_agent: targetAgencyId,
 				topic_keywords: extractCapabilities(claim.metadata),
+				// P230: inject proposal-scoped context package
+				proposal_id: claim.proposalId,
+				context_package_type:
+					role === "gate_reviewer" || role === "skeptic"
+						? "gate_review"
+						: "code_gen",
 			},
 			this.orchestratorIdentity,
 		);
@@ -313,4 +320,9 @@ function extractWorktreeHint(metadata: Record<string, unknown>): string | null {
 function extractTraceId(metadata: Record<string, unknown>): string | null {
 	const v = metadata.trace_id;
 	return typeof v === "string" && v.length > 0 ? v : null;
+}
+
+function extractRole(metadata: Record<string, unknown>): string {
+	const v = metadata.dispatch_role ?? metadata.role;
+	return typeof v === "string" ? v : "";
 }

@@ -139,7 +139,12 @@ async function _buildContextPackage(
     );
   }
 
-  const context = parts.join("\n\n");
+  const MAX_CHARS = 8000; // ~2000 tokens @ 4 chars/token
+  const rawContext = parts.join("\n\n");
+  const context =
+    rawContext.length > MAX_CHARS
+      ? rawContext.slice(0, MAX_CHARS - 3) + "..."
+      : rawContext;
   const tokenCount = Math.ceil(context.length / 4);
 
   await query(

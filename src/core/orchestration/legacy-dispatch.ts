@@ -303,7 +303,7 @@ const AGENT_PROMPTS: Record<string, string> = {
 	"pillar-researcher":
 		"You are the Pillar Researcher. Research complementary components. Propose refinements.",
 	documenter:
-		"You are a Documenter. Write documentation for completed proposals.",
+		"You are a Documenter. Write documentation for completed proposals. Use the /api/arch-docs endpoint (architecture-reconstructor.ts) for capability tree, dependency DAG, and gap analysis — do NOT read filesystem proposal files or call the deprecated loadProposals()/buildArchitectureSection().",
 	researcher:
 		"You are a Researcher. Gather context for proposals that need investigation.",
 	"triage-agent":
@@ -582,6 +582,26 @@ function inferGateForState(
 				return { gate: "D1", toStage: "FIX" as any };
 			case "FIX":
 				return { gate: "D3", toStage: "DEPLOYED" as any };
+			default:
+				return null;
+		}
+	}
+
+	// Governance Amendment: 6-stage workflow with mandatory DELIBERATION stage.
+	// Gate-to-stage mapping follows stage_order (D1–D5). D2 enforces 48h timing
+	// and blocking-concern checks via the DB trigger (fn_guard_gate_advance).
+	if (t === "governance-amendment") {
+		switch (s) {
+			case "DRAFT":
+				return { gate: "D1", toStage: "DELIBERATION" as any };
+			case "DELIBERATION":
+				return { gate: "D2", toStage: "Review" };
+			case "REVIEW":
+				return { gate: "D3", toStage: "Develop" };
+			case "DEVELOP":
+				return { gate: "D4", toStage: "Merge" };
+			case "MERGE":
+				return { gate: "D5", toStage: "Complete" };
 			default:
 				return null;
 		}
@@ -990,6 +1010,13 @@ async function dispatchAgent(
 						proposalContext.type ?? "feature",
 						agentLabel ?? agent,
 					],
+					// P230: inject proposal-scoped context package into briefing
+					proposal_id: Number(proposalId),
+					context_package_type:
+						(agentLabel ?? agent).startsWith("skeptic") ||
+						stage.startsWith("gate")
+							? "gate_review"
+							: "code_gen",
 				},
 				"orchestrator",
 			);
