@@ -15,6 +15,8 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import { query as defaultQuery } from "../../infra/postgres/pool.ts";
+import * as runtimeConfig from "../../shared/runtime/config.ts";
+import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 import { ObservabilityWriter } from "../observability/observability-writer.ts";
 import { ROLE_TO_REQUIRED_CAPABILITIES } from "../orchestration/offer-dispatch.ts";
 
@@ -48,11 +50,28 @@ const DISPATCH_LOOP_THRESHOLD_PER_HOUR = Number(
  * queue is full, new posts are rejected until existing offers complete via
  * fn_complete_work_offer or fn_reap_expired_offers reissues stale leases.
  *
- * Override via AGENTHIVE_MAX_INFLIGHT_OFFERS env. Set to 0 to disable.
+ * Phase 1 (hot-configurable): the cap is read per call from the
+ * ORCHESTRATOR_MAX_INFLIGHT_OFFERS runtime flag via the config resolver, which
+ * caches the value and clears it on `runtime_flag_changed` NOTIFY. So
+ * `UPDATE core.runtime_flag SET value_jsonb='8' WHERE
+ *  flag_name='ORCHESTRATOR_MAX_INFLIGHT_OFFERS'` takes effect on the next
+ * dispatch with NO orchestrator restart. Set to 0 to disable backpressure.
+ *
+ * Legacy AGENTHIVE_MAX_INFLIGHT_OFFERS env is honored ONLY as a fallback when
+ * the flag row is absent, so existing deployments keep working until the
+ * migration seeds the flag.
  */
-const MAX_GLOBAL_INFLIGHT_OFFERS = Number(
-	process.env.AGENTHIVE_MAX_INFLIGHT_OFFERS ?? "20",
-);
+async function resolveMaxGlobalInflightOffers(): Promise<number> {
+	try {
+		return await runtimeConfig.get(FlagKeys.ORCHESTRATOR_MAX_INFLIGHT_OFFERS);
+	} catch {
+		// Config layer unavailable (e.g. unit tests with no DB) — fall back to the
+		// legacy env, then the historical default.
+		const env = process.env.AGENTHIVE_MAX_INFLIGHT_OFFERS;
+		const n = env !== undefined ? Number(env) : 20;
+		return Number.isFinite(n) ? n : 20;
+	}
+}
 
 export class DispatchLoopError extends Error {
 	constructor(
@@ -197,8 +216,9 @@ function computeIdempotencyKey(parts: {
 }
 
 /**
- * Hotfix: serialize postWorkOffer calls in-process so MAX_GLOBAL_INFLIGHT_OFFERS
- * is actually enforced. Without this, handleStateChange spawns N parallel
+ * Hotfix: serialize postWorkOffer calls in-process so the in-flight cap
+ * (ORCHESTRATOR_MAX_INFLIGHT_OFFERS) is actually enforced. Without this,
+ * handleStateChange spawns N parallel
  * dispatchAgent calls; each does its own SELECT count(*) before INSERT and all
  * see the pre-INSERT inflight value, so cap=K admits N>K offers in one burst.
  * Live evidence 2026-05-29 03:23 UTC: cap=1 admitted 11 offers in a single tick.
@@ -292,9 +312,11 @@ async function postWorkOfferImpl(
 	}
 
 	// Backpressure: refuse new offers when the global in-flight queue is full.
-	// Cheap pre-check — single COUNT against an indexed predicate. Skipped when
-	// AGENTHIVE_MAX_INFLIGHT_OFFERS=0 so ops can disable in emergencies.
-	if (MAX_GLOBAL_INFLIGHT_OFFERS > 0) {
+	// Cheap pre-check — single COUNT against an indexed predicate. The cap is read
+	// live (hot-reloadable) from ORCHESTRATOR_MAX_INFLIGHT_OFFERS; set to 0 so ops
+	// can disable in emergencies — all via SQL, no restart.
+	const maxGlobalInflightOffers = await resolveMaxGlobalInflightOffers();
+	if (maxGlobalInflightOffers > 0) {
 		const { rows: inflightRows } = await queryFn<{ count: number }>(
 			`SELECT count(*)::int AS count
 			   FROM roadmap_workforce.squad_dispatch
@@ -302,8 +324,8 @@ async function postWorkOfferImpl(
 			    AND completed_at IS NULL`,
 		);
 		const inflight = inflightRows[0]?.count ?? 0;
-		if (inflight >= MAX_GLOBAL_INFLIGHT_OFFERS) {
-			throw new BackpressureError(inflight, MAX_GLOBAL_INFLIGHT_OFFERS);
+		if (inflight >= maxGlobalInflightOffers) {
+			throw new BackpressureError(inflight, maxGlobalInflightOffers);
 		}
 	}
 
