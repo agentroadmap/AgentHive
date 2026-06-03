@@ -31,6 +31,11 @@ const DEFAULT_NORMS: Record<string, Record<string, string>> = {
 	},
 };
 
+export interface AutoCharterResult {
+	chartered: boolean;
+	teamId?: number;
+}
+
 /**
  * If 2+ alive squad_dispatch rows exist for proposalId, find-or-create a
  * team row and upsert team:charter + 5 default norms into team_norms.
@@ -39,7 +44,7 @@ const DEFAULT_NORMS: Record<string, Record<string, string>> = {
 export async function autoCharterIfNeeded(
 	proposalId: number,
 	queryFn: QueryFn,
-): Promise<void> {
+): Promise<AutoCharterResult> {
 	const { rows: countRows } = await queryFn<{ alive_count: number }>(
 		`SELECT count(*)::int AS alive_count
 		   FROM roadmap_workforce.squad_dispatch
@@ -50,7 +55,7 @@ export async function autoCharterIfNeeded(
 	);
 
 	const aliveCount = countRows[0]?.alive_count ?? 0;
-	if (aliveCount < 2) return;
+	if (aliveCount < 2) return { chartered: false };
 
 	const teamName = `P${proposalId}-squad`;
 	const metadata = JSON.stringify({
@@ -72,7 +77,7 @@ export async function autoCharterIfNeeded(
 	);
 
 	const teamId = teamRows[0]?.id;
-	if (!teamId) return;
+	if (!teamId) return { chartered: false };
 
 	const charterValue = JSON.stringify({
 		proposal_id: proposalId,
@@ -101,4 +106,6 @@ export async function autoCharterIfNeeded(
 			[teamId, normKey, JSON.stringify(normVal)],
 		);
 	}
+
+	return { chartered: true, teamId };
 }
