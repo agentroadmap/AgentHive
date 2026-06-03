@@ -1004,7 +1004,10 @@ export class RoadmapServer {
 			}
 		}
 
-		// Static routes returning indexHtml
+		// Static routes returning indexHtml.
+		// P1696 added /dispatches; the broader fix is the generic SPA fallback
+		// at the end of dispatchRequest so future App.tsx routes (e.g.
+		// /agencies, currently TODO) work via direct URL without touching this list.
 		if (
 			method === "GET" &&
 			(pathname === "/" ||
@@ -1028,6 +1031,7 @@ export class RoadmapServer {
 					"/routes",
 					"/achievements",
 					"/activity",
+					"/dispatches",
 				].some((p) => pathname === p || pathname.startsWith(`${p}/`)))
 		) {
 			return new Response(indexHtml, {
@@ -1332,6 +1336,23 @@ export class RoadmapServer {
 			return new Response("Asset not found", { status: 404 });
 		}
 
+		// P1696: generic SPA fallback. After all API and known-path handlers,
+		// any GET that looks like browser navigation (HTML accept, no file
+		// extension, no /api/ prefix) should serve the SPA shell so client-side
+		// React can route it. Prior behaviour 404'd unknown paths, making
+		// NotFoundPage unreachable via direct URL and breaking deep-links to
+		// new routes whenever the allow-list above wasn't updated.
+		if (
+			method === "GET" &&
+			!pathname.startsWith("/api/") &&
+			!pathname.includes(".") &&
+			(req.headers.get("accept") ?? "").includes("text/html")
+		) {
+			return new Response(indexHtml, {
+				headers: { "Content-Type": "text/html" },
+			});
+		}
+
 		return await this.handleRequest(req);
 	}
 
@@ -1417,6 +1438,16 @@ export class RoadmapServer {
 		const parent = url.searchParams.get("parent") || undefined;
 		const priorityParam = url.searchParams.get("priority") || undefined;
 		const crossBranch = url.searchParams.get("crossBranch") === "true";
+		// P1613: parse limit. Default 100, max 1000 — prior implementation silently
+		// dropped the param and always returned the full table (~11MB on prod).
+		const DEFAULT_LIMIT = 100;
+		const MAX_LIMIT = 1000;
+		const limitRaw = url.searchParams.get("limit");
+		const parsedLimit = limitRaw ? Number.parseInt(limitRaw, 10) : NaN;
+		const limit =
+			Number.isFinite(parsedLimit) && parsedLimit > 0
+				? Math.min(parsedLimit, MAX_LIMIT)
+				: DEFAULT_LIMIT;
 		const labelParams = [
 			...url.searchParams.getAll("label"),
 			...url.searchParams.getAll("labels"),
@@ -1476,9 +1507,12 @@ export class RoadmapServer {
 				labels: labels.length > 0 ? labels : undefined,
 			},
 			includeCrossBranch: crossBranch,
+			limit,
 		});
 
-		return Response.json(proposals);
+		// P1613 belt-and-suspenders: queryProposals' limit only applies to the
+		// search-query path; cap the result here so the list path also respects it.
+		return Response.json(proposals.slice(0, limit));
 	}
 
 	private async handleSearch(req: Request): Promise<Response> {
@@ -4040,9 +4074,38 @@ export class RoadmapServer {
 		try {
 			const url = new URL(req.url);
 			const limitParam = url.searchParams.get("limit");
-			const limit = limitParam ? Number.parseInt(limitParam, 10) : 100;
+			const parsed = limitParam ? Number.parseInt(limitParam, 10) : NaN;
+			const limit = Number.isFinite(parsed) && parsed > 0 && parsed <= 1000 ? parsed : 100;
 
-			const events = await this.core.listPulse(limit);
+			// Read heartbeats directly from roadmap_workforce.agent_heartbeat_log.
+			// Prior implementation delegated to this.core.listPulse() which doesn't
+			// exist on Core (only daemon-client has it, and that would have been a
+			// recursive HTTP call into this same endpoint).
+			const { rows } = await query(
+				`SELECT id,
+				        agent_identity,
+				        heartbeat_at,
+				        current_task,
+				        active_model,
+				        cpu_percent,
+				        memory_mb,
+				        metadata
+				   FROM roadmap_workforce.agent_heartbeat_log
+				  ORDER BY heartbeat_at DESC
+				  LIMIT $1`,
+				[limit],
+			);
+			const events = rows.map((r) => ({
+				type: "heartbeat" as const,
+				id: String(r.id),
+				title: r.current_task || r.active_model || "heartbeat",
+				agent: r.agent_identity,
+				timestamp:
+					r.heartbeat_at instanceof Date
+						? r.heartbeat_at.toISOString()
+						: String(r.heartbeat_at),
+				impact: undefined,
+			}));
 			return Response.json(events);
 		} catch (error) {
 			console.error("Error listing pulse events:", error);
@@ -4194,8 +4257,8 @@ export class RoadmapServer {
 				        mr.priority,
 				        mr.api_spec,
 				        mr.base_url,
-				        mr.cost_per_1k_input * 1000 AS cost_per_million_input,
-				        mr.cost_per_1k_output * 1000 AS cost_per_million_output,
+				        mr.cost_per_million_input,
+				        mr.cost_per_million_output,
 				        mr.plan_type,
 				        mr.notes,
 				        mr.created_at,
