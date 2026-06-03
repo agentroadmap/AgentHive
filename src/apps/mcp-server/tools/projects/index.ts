@@ -9,17 +9,22 @@
 
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult, McpToolHandler } from "../../types.ts";
-import { setProject, listProjects } from "./handlers.ts";
-import { projectCreate } from "./lifecycle-handlers.ts";
 import {
-	listRoutes,
+	addRoute,
 	listCapabilities,
 	listCaps,
-	addRoute,
+	listRoutes,
 	removeRoute,
-	setCapabilityScope,
 	setBudgetCap,
+	setCapabilityScope,
 } from "./allowlist-handlers.ts";
+import {
+	listProjects,
+	projectHealthCheck,
+	setProject,
+	updateProjectRegistry,
+} from "./handlers.ts";
+import { projectCreate } from "./lifecycle-handlers.ts";
 
 export function registerProjectTools(server: McpServer): void {
 	server.addTool({
@@ -95,7 +100,7 @@ export function registerProjectTools(server: McpServer): void {
 				worktree_root: {
 					type: "string",
 					description:
-						"(Optional) Custom worktree root path. If omitted, defaults to ${AGENTHIVE_WORKTREES_ROOT ?? /data/code}/${slug}/worktree.",
+						"(Optional) Custom worktree root path. If omitted, defaults to AGENTHIVE_WORKTREES_ROOT or /data/code plus /<slug>/worktree.",
 				},
 				default_workflow_template: {
 					type: "string",
@@ -110,7 +115,70 @@ export function registerProjectTools(server: McpServer): void {
 				slug: args.slug as string | undefined,
 				name: args.name as string | undefined,
 				worktree_root: args.worktree_root as string | undefined,
-				default_workflow_template: args.default_workflow_template as string | undefined,
+				default_workflow_template: args.default_workflow_template as
+					| string
+					| undefined,
+			});
+		},
+	} as McpToolHandler);
+
+	server.addTool({
+		name: "project_health_check",
+		description:
+			"P516: Validate project registry and tenant worktree sync. Returns ERROR_WORKTREE_NOT_FOUND when the configured worktree_root is absent.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				project_id: {
+					type: "number",
+					description: "Project ID from roadmap.project.",
+				},
+				project: {
+					type: "string",
+					description: "Project slug or numeric id.",
+				},
+			},
+		},
+		async handler(args: Record<string, unknown>): Promise<CallToolResult> {
+			return projectHealthCheck({
+				project_id: args.project_id as number | undefined,
+				project: args.project as string | undefined,
+			});
+		},
+	} as McpToolHandler);
+
+	server.addTool({
+		name: "project_update",
+		description:
+			"P516: Update tenant repository registry fields on roadmap.project. Supports git_repo_url, git_default_branch, and worktree_root.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				project: {
+					type: "string",
+					description: "Project slug or numeric project_id.",
+				},
+				git_repo_url: {
+					type: "string",
+					description: "Tenant git repository remote URL.",
+				},
+				git_default_branch: {
+					type: "string",
+					description: "Tenant repository default branch.",
+				},
+				worktree_root: {
+					type: "string",
+					description: "Tenant worktree root path.",
+				},
+			},
+			required: ["project"],
+		},
+		async handler(args: Record<string, unknown>): Promise<CallToolResult> {
+			return updateProjectRegistry({
+				project: args.project as string | undefined,
+				git_repo_url: args.git_repo_url as string | null | undefined,
+				git_default_branch: args.git_default_branch as string | undefined,
+				worktree_root: args.worktree_root as string | undefined,
 			});
 		},
 	} as McpToolHandler);
@@ -221,7 +289,8 @@ export function registerProjectTools(server: McpServer): void {
 				},
 				route_name: {
 					type: "string",
-					description: "Route name (e.g., 'claude-opus', 'gpt-4'). Case-sensitive.",
+					description:
+						"Route name (e.g., 'claude-opus', 'gpt-4'). Case-sensitive.",
 				},
 				max_calls_per_day: {
 					type: "number",
@@ -283,11 +352,13 @@ export function registerProjectTools(server: McpServer): void {
 				},
 				capability_name: {
 					type: "string",
-					description: "Capability name (e.g., 'web_search', 'knowledge_retrieve'). Case-sensitive.",
+					description:
+						"Capability name (e.g., 'web_search', 'knowledge_retrieve'). Case-sensitive.",
 				},
 				max_concurrency: {
 					type: "number",
-					description: "(Optional) Max concurrent instances of this capability.",
+					description:
+						"(Optional) Max concurrent instances of this capability.",
 				},
 			},
 			required: ["project_id", "capability_name"],
@@ -319,7 +390,8 @@ export function registerProjectTools(server: McpServer): void {
 				},
 				max_usd_cents: {
 					type: "number",
-					description: "Max USD cents allowed for this period (e.g., 5000 for $50).",
+					description:
+						"Max USD cents allowed for this period (e.g., 5000 for $50).",
 				},
 			},
 			required: ["project_id", "period", "max_usd_cents"],

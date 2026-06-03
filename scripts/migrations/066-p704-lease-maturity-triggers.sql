@@ -81,6 +81,8 @@ LANGUAGE plpgsql
 AS $$
 BEGIN
   IF NEW.released_at IS NULL THEN
+    PERFORM set_config('app.agent_identity', NEW.agent_identity, true);
+
     UPDATE roadmap_proposal.proposal
        SET maturity = 'active'
      WHERE id = NEW.proposal_id

@@ -30,7 +30,7 @@ export interface ProjectRow {
   bootstrap_status: string;
   bootstrap_log: Record<string, unknown> | null;
   updated_at: string;
-  git_remote_url?: string | null; // Optional; used for git-based project matching
+  git_repo_url?: string | null; // Optional; used for git-based project matching
 }
 
 /**

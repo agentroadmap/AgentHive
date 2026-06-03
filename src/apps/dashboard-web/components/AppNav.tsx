@@ -19,6 +19,7 @@ const PRIMARY: NavItem[] = [
 
 const SECONDARY: NavItem[] = [
 	{ href: "/agents", label: "Agents" },
+	{ href: "/agencies", label: "Agencies" },
 	{ href: "/teams", label: "Teams" },
 	{ href: "/channels", label: "Channels" },
 	{ href: "/dispatches", label: "Dispatches" },

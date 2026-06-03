@@ -87,7 +87,7 @@ describe("proposal-integrity: ValidationError formatting", () => {
 });
 
 describe("proposal-integrity: ErrorCode types", () => {
-	it("should have all 6 error codes defined", () => {
+	it("should have all 7 error codes defined", () => {
 		const validCodes: ErrorCode[] = [
 			"INVALID_TRANSITION",
 			"MATURITY_GATE_BLOCKED",
@@ -95,12 +95,41 @@ describe("proposal-integrity: ErrorCode types", () => {
 			"DAG_CYCLE_DETECTED",
 			"LEASE_CONFLICT",
 			"ROLE_VIOLATION",
+			"DRAFT_QUALITY_GATE",
 		];
 		// Type check — all codes should compile
 		for (const code of validCodes) {
 			assert.ok(typeof code === "string");
 			assert.ok(code.length > 0);
 		}
+	});
+});
+
+describe("proposal-integrity: DRAFT_QUALITY_GATE", () => {
+	it("should format DRAFT_QUALITY_GATE error with pencil icon", () => {
+		const error: ValidationError = {
+			code: "DRAFT_QUALITY_GATE",
+			message: "Cannot advance DRAFT to REVIEW: missing required fields: design, motivation",
+			context: { proposalId: 42, missingFields: ["design", "motivation"] },
+		};
+		const formatted = formatValidationError(error);
+		assert.ok(formatted.includes("📝"));
+		assert.ok(formatted.includes("[DRAFT_QUALITY_GATE]"));
+		assert.ok(formatted.includes("design"));
+	});
+
+	it("should include DRAFT_QUALITY_GATE in ErrorCode union", () => {
+		const code: ErrorCode = "DRAFT_QUALITY_GATE";
+		assert.strictEqual(code, "DRAFT_QUALITY_GATE");
+	});
+
+	it("should carry missingFields list in context", () => {
+		const error: ValidationError = {
+			code: "DRAFT_QUALITY_GATE",
+			message: "missing: acceptance_criteria",
+			context: { proposalId: 7, missingFields: ["acceptance_criteria"] },
+		};
+		assert.deepStrictEqual(error.context?.missingFields, ["acceptance_criteria"]);
 	});
 });
 

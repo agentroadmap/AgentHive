@@ -16,6 +16,18 @@ The live runtime is already systemd-managed. MCP is not embedded in the orchestr
 
 The live database and process views do not perfectly agree. On 2026-05-16 UTC, `roadmap.agency` showed `active=29`, `dormant=26`, `retired=2`; systemd showed nine running agency liaison units. Several `active` DB rows were test or legacy agency identities without a matching service instance, so liveness probes must treat systemd/listener state as authoritative for runtime presence.
 
+## P1132 Transition
+
+P1132 changes the agency runtime shape from one systemd daemon per agency to one local host daemon that owns many agency listeners.
+
+Before P1132, each agency that ran on the host had its own `agenthive-agency@<name>.service` instance. Each instance started `scripts/start-liaison.ts`, registered a liaison session, and opened the agency-specific Postgres LISTEN connections. That model is now historical reference for rollback and incident comparison; it is not the target steady state.
+
+After P1132, `agenthive-a2a-host.service` is the target daemon. It discovers the local host's expected attachment set from `roadmap_workforce.agent_registry.host_affinity`, starts the agency liaison runtime in-process, and maintains N `agenthive-a2a-listen-<agency_id>` sessions plus the related liaison-message listeners. Attached state is exposed through `roadmap.v_agency_status.presence_state`, where `online` and `busy` mean the local a2a-host considers the agency attached.
+
+During the migration window, the template file for `agenthive-agency@.service` may remain installed for rollback safety, but active `agenthive-agency@*.service` instances should trend to zero. Once P1132 reaches the final cleanup state, the per-agency template references in systemd documentation and `CONVENTIONS.md` should be removed or clearly marked historical.
+
+Operators should use `hive doctor --check topology --json` for the runtime invariant. The check verifies critical unit liveness, the host-scoped expected-vs-attached agency set, zero active legacy template instances, and `http://127.0.0.1:6421/health`.
+
 ## Process Tree
 
 ```mermaid

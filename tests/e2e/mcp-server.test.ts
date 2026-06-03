@@ -1,5 +1,6 @@
 import assert from "node:assert";
 import { afterEach, describe, it } from "node:test";
+import { handleDirectMcpRequest } from "../../src/apps/mcp-server/http-compat.ts";
 import {
 	MCP_STATE_CREATION_GUIDE,
 	MCP_STATE_EXECUTION_GUIDE,
@@ -17,7 +18,6 @@ import {
 	expect,
 	safeCleanup,
 } from "../support/test-utils.ts";
-import { handleDirectMcpRequest } from "../../src/apps/mcp-server/http-compat.ts";
 
 // Helpers to extract text from MCP responses (handles union types)
 const getText = (content: unknown[] | undefined, index = 0): string => {
@@ -317,8 +317,60 @@ describe("McpServer bootstrap", () => {
 		if (!("result" in response.body)) {
 			throw new Error("Expected JSON-RPC result");
 		}
-		const result = response.body.result as { content?: Array<{ text?: string }> };
+		const result = response.body.result as {
+			content?: Array<{ text?: string }>;
+		};
 		expect(result.content?.[0]?.text ?? "").toContain("Message sent");
+
+		await server.stop();
+	});
+
+	it("direct MCP JSON-RPC requests can list and read resources", async () => {
+		TEST_DIR = createUniqueTestDir("mcp-server-direct-mcp-resources");
+
+		const bootstrap = new McpServer(TEST_DIR, "Bootstrap instructions");
+		await bootstrap.filesystem.ensureRoadmapStructure();
+		execSync(`git init -b main`, { cwd: TEST_DIR });
+		execSync(`git config user.name "Test User"`, { cwd: TEST_DIR });
+		execSync(`git config user.email test@example.com`, { cwd: TEST_DIR });
+		await bootstrap.initializeProject("Direct MCP Resource Project");
+		await bootstrap.stop();
+
+		const server = await createMcpServer(TEST_DIR);
+		const listResponse = await handleDirectMcpRequest(server, {
+			jsonrpc: "2.0",
+			id: 1,
+			method: "resources/list",
+		});
+
+		expect(listResponse.status).toBe(200);
+		if (!("result" in listResponse.body)) {
+			throw new Error("Expected JSON-RPC result");
+		}
+		const listResult = listResponse.body.result as {
+			resources?: Array<{ uri?: string }>;
+		};
+		expect(listResult.resources?.map((r) => r.uri)).toContain(
+			"roadmap://workflow/overview",
+		);
+
+		const readResponse = await handleDirectMcpRequest(server, {
+			jsonrpc: "2.0",
+			id: 2,
+			method: "resources/read",
+			params: { uri: "roadmap://workflow/overview" },
+		});
+
+		expect(readResponse.status).toBe(200);
+		if (!("result" in readResponse.body)) {
+			throw new Error("Expected JSON-RPC result");
+		}
+		const readResult = readResponse.body.result as {
+			contents?: Array<{ text?: string }>;
+		};
+		expect(readResult.contents?.[0]?.text ?? "").toContain(
+			"AgentHive Overview",
+		);
 
 		await server.stop();
 	});

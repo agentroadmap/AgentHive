@@ -78,9 +78,11 @@ export const COMMAND_TREE: CommandDef[] = [
     description: "Run 12+ readiness checks: DB, MCP, schema, routes, budget, Git, Node version",
     flags: [
       ...COMMON_FLAGS,
+      { name: "--check", type: "string", description: "Run only checks whose name contains the given substring" },
       { name: "--fix", type: "boolean", description: "Attempt automated remediation" },
       { name: "--remediate", type: "boolean", description: "Alias for --fix" },
       { name: "--verbose", type: "boolean", description: "Show remediation detail per check" },
+      { name: "--json", type: "boolean", description: "Shorthand for --format json" },
     ],
     formats: ["text", "json", "jsonl", "yaml"],
     exit_codes: { "0": 0, "warnings_only": 1, "errors": 5 },

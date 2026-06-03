@@ -6,6 +6,7 @@ type JsonRpcRequest = {
 	method?: string;
 	params?: {
 		name?: string;
+		uri?: string;
 		arguments?: Record<string, unknown>;
 	};
 };
@@ -40,9 +41,8 @@ function errorResponse(
 /**
  * Handle the direct MCP HTTP POST used by internal callers and smoke tests.
  *
- * This accepts the small JSON-RPC surface needed to verify MCP health without
- * opening a streaming session: `initialize`, `tools/list`, `tools/call`, and
- * `notifications/initialized`. Full clients should continue using SSE or
+ * This accepts the compact JSON-RPC surface needed to verify MCP health without
+ * opening a streaming session. Full clients should continue using SSE or
  * StreamableHTTP.
  */
 export async function handleDirectMcpRequest(
@@ -116,6 +116,131 @@ export async function handleDirectMcpRequest(
 			return {
 				status: 500,
 				body: errorResponse(id, -32000, message),
+			};
+		}
+	}
+
+	if (request.method === "resources/list") {
+		try {
+			const result = await server.testInterface.listResources();
+			return {
+				status: 200,
+				body: {
+					jsonrpc: "2.0",
+					id,
+					result,
+				},
+			};
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			return {
+				status: 500,
+				body: errorResponse(id, -32000, message),
+			};
+		}
+	}
+
+	if (request.method === "resources/templates/list") {
+		try {
+			const result = await server.testInterface.listResourceTemplates();
+			return {
+				status: 200,
+				body: {
+					jsonrpc: "2.0",
+					id,
+					result,
+				},
+			};
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			return {
+				status: 500,
+				body: errorResponse(id, -32000, message),
+			};
+		}
+	}
+
+	if (request.method === "resources/read") {
+		const uri = request.params?.uri;
+		if (!uri || typeof uri !== "string") {
+			return {
+				status: 400,
+				body: errorResponse(id, -32602, "Resource URI is required"),
+			};
+		}
+
+		try {
+			const result = await server.testInterface.readResource({
+				params: { uri },
+			});
+			return {
+				status: 200,
+				body: {
+					jsonrpc: "2.0",
+					id,
+					result,
+				},
+			};
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			const code = message.startsWith("Resource not found") ? -32602 : -32000;
+			return {
+				status: code === -32602 ? 404 : 500,
+				body: errorResponse(id, code, message),
+			};
+		}
+	}
+
+	if (request.method === "prompts/list") {
+		try {
+			const result = await server.testInterface.listPrompts();
+			return {
+				status: 200,
+				body: {
+					jsonrpc: "2.0",
+					id,
+					result,
+				},
+			};
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			return {
+				status: 500,
+				body: errorResponse(id, -32000, message),
+			};
+		}
+	}
+
+	if (request.method === "prompts/get") {
+		const promptName = request.params?.name;
+		if (!promptName || typeof promptName !== "string") {
+			return {
+				status: 400,
+				body: errorResponse(id, -32602, "Prompt name is required"),
+			};
+		}
+
+		try {
+			const result = await server.testInterface.getPrompt({
+				params: {
+					name: promptName,
+					arguments: request.params?.arguments ?? {},
+				},
+			});
+			return {
+				status: 200,
+				body: {
+					jsonrpc: "2.0",
+					id,
+					result,
+				},
+			};
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			const code = message.startsWith("Prompt not found") ? -32602 : -32000;
+			return {
+				status: code === -32602 ? 404 : 500,
+				body: errorResponse(id, code, message),
 			};
 		}
 	}

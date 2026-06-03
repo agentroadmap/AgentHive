@@ -30,7 +30,8 @@ When the user requests non-trivial work:
 1. **Search first:** Use `proposal_search` or `proposal_list` and check whether work is already tracked
 2. **If found:** Work on the existing proposal and follow the relevant execution workflow
 3. **If not found:** Create proposal(s) based on scope and proposal type
-4. **Execute:** Follow state-execution guidelines
+4. **Claim:** Call `proposal_claim` (or `mcp_proposal action=claim`) to take a lease before you start writing. The lease prevents concurrent agents from picking up the same work; your activity shows up in `prop_leases`. Renew with `proposal_renew` if your work runs long; release with `proposal_release` when done.
+5. **Execute:** Follow state-execution guidelines
 
 Searching first avoids duplicate proposals and helps you understand existing context.
 

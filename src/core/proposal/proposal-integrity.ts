@@ -12,6 +12,7 @@
  *   DAG_CYCLE_DETECTED     — dependency would create a cycle
  *   LEASE_CONFLICT         — another agent holds an active lease
  *   ROLE_VIOLATION         — agent lacks the required role for this transition
+ *   DRAFT_QUALITY_GATE     — DRAFT→REVIEW blocked: design/motivation/AC missing
  */
 
 import { query } from "../../infra/postgres/pool.ts";
@@ -29,7 +30,8 @@ export type ErrorCode =
 	| "AC_GATE_FAILED"
 	| "DAG_CYCLE_DETECTED"
 	| "LEASE_CONFLICT"
-	| "ROLE_VIOLATION";
+	| "ROLE_VIOLATION"
+	| "DRAFT_QUALITY_GATE";
 
 // ─── Structured Error ────────────────────────────────────────────────
 
@@ -89,19 +91,23 @@ export async function validateTransition(
 	const ruleResult = await validateTransitionRule(proposalId, fromState, toState);
 	if (!ruleResult.valid) return ruleResult;
 
-	// 2. Check maturity gate
+	// 2. Check DRAFT quality gate (DRAFT→REVIEW only)
+	const draftQualityResult = await validateDraftQuality(proposalId, fromState, toState);
+	if (!draftQualityResult.valid) return draftQualityResult;
+
+	// 3. Check maturity gate
 	const maturityResult = await validateMaturityGate(proposalId, fromState);
 	if (!maturityResult.valid) return maturityResult;
 
-	// 3. Check AC gate (if requires_ac is set for this transition)
+	// 4. Check AC gate (if requires_ac is set for this transition)
 	const acResult = await validateACGate(proposalId, toState);
 	if (!acResult.valid) return acResult;
 
-	// 4. Check lease (if required)
+	// 5. Check lease (if required)
 	const leaseResult = await validateLease(proposalId, agentIdentity);
 	if (!leaseResult.valid) return leaseResult;
 
-	// 5. Check DAG cycle (for dependency-related transitions)
+	// 6. Check DAG cycle (for dependency-related transitions)
 	const dagResult = await validateNoCycles(proposalId, toState);
 	if (!dagResult.valid) return dagResult;
 
@@ -136,6 +142,53 @@ async function validateTransitionRule(
 				code: "INVALID_TRANSITION",
 				message: `Transition ${fromState} → ${toState} is not allowed for this proposal's workflow`,
 				context: { fromState, toState, proposalId },
+			},
+		};
+	}
+
+	return { valid: true };
+}
+
+/**
+ * P428: Block DRAFT→REVIEW if design, motivation, or at least one AC is missing.
+ * No-op for any other transition.
+ */
+async function validateDraftQuality(
+	proposalId: number,
+	fromState: string,
+	toState: string,
+): Promise<TransitionValidationResult> {
+	if (fromState.toLowerCase() !== "draft" || toState.toLowerCase() !== "review") {
+		return { valid: true };
+	}
+
+	const { rows: proposalRows } = await query<{ design: string | null; motivation: string | null }>(
+		`SELECT design, motivation FROM roadmap_proposal.proposal WHERE id = $1 LIMIT 1`,
+		[proposalId],
+	);
+
+	if (proposalRows.length === 0) {
+		return { valid: true }; // let validateMaturityGate handle missing proposal
+	}
+
+	const { rows: acRows } = await query<{ cnt: string }>(
+		`SELECT COUNT(*) AS cnt FROM roadmap_proposal.proposal_acceptance_criteria WHERE proposal_id = $1`,
+		[proposalId],
+	);
+
+	const missingFields: string[] = [];
+	const p = proposalRows[0];
+	if (!p.design?.trim()) missingFields.push("design");
+	if (!p.motivation?.trim()) missingFields.push("motivation");
+	if (parseInt(acRows[0]?.cnt ?? "0", 10) === 0) missingFields.push("acceptance_criteria");
+
+	if (missingFields.length > 0) {
+		return {
+			valid: false,
+			error: {
+				code: "DRAFT_QUALITY_GATE",
+				message: `Cannot advance DRAFT to REVIEW: missing required fields: ${missingFields.join(", ")}`,
+				context: { proposalId, missingFields },
 			},
 		};
 	}
@@ -432,7 +485,9 @@ export function formatValidationError(error: ValidationError): string {
 						? "🔄"
 						: error.code === "LEASE_CONFLICT"
 							? "🔒"
-							: "⛔";
+							: error.code === "DRAFT_QUALITY_GATE"
+								? "📝"
+								: "⛔";
 	return `${icon} [${error.code}] ${error.message}`;
 }
 

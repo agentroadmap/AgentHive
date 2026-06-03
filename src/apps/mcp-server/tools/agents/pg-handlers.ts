@@ -8,7 +8,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { query } from "../../../../postgres/pool.ts";
+import { query, getPool } from "../../../../postgres/pool.ts";
 import {
 	normalizeAgentId,
 	detectCollision,
@@ -187,36 +187,55 @@ export class PgAgentHandlers {
 					: JSON.stringify(args.skills)
 				: null;
 
-			const { rows } = await query(
-				`INSERT INTO roadmap_workforce.agent_registry
-				   (agent_identity, agent_type, role, skills,
-				    preferred_provider, agent_cli, host_affinity, display_alias, display_name)
-				 VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9)
-				 ON CONFLICT (agent_identity) DO UPDATE SET
-				   agent_type        = COALESCE(EXCLUDED.agent_type,        agent_registry.agent_type),
-				   role              = COALESCE(EXCLUDED.role,              agent_registry.role),
-				   skills            = COALESCE(EXCLUDED.skills,            agent_registry.skills),
-				   preferred_provider = COALESCE(EXCLUDED.preferred_provider, agent_registry.preferred_provider),
-				   agent_cli         = COALESCE(EXCLUDED.agent_cli,         agent_registry.agent_cli),
-				   host_affinity     = COALESCE(EXCLUDED.host_affinity,     agent_registry.host_affinity),
-				   display_alias     = COALESCE(EXCLUDED.display_alias,     agent_registry.display_alias),
-				   display_name      = COALESCE(EXCLUDED.display_name,      agent_registry.display_name),
-				   updated_at        = now()
-				 RETURNING agent_identity, role, status, preferred_provider`,
-				[
-					normalizedIdentity,
-					args.agent_type || null,
-					args.role || null,
-					skillsJson,
-					args.preferred_provider || null,
-					args.agent_cli || null,
-					args.host_affinity || null,
-					args.display_alias || null,
-					args.display_name || null,
-				],
-			);
+			// AC-10: wrap INSERT/UPDATE in a transaction with an advisory lock keyed on
+			// the normalized identity so concurrent same-identity callers serialize.
+			const pool = getPool();
+			const client = await pool.connect();
+			let r: Record<string, unknown>;
+			try {
+				await client.query("BEGIN");
+				// Advisory lock: serializes concurrent callers for the same identity.
+				await client.query(
+					`SELECT pg_advisory_xact_lock(hashtext('agentRegister:' || $1)::int4)`,
+					[normalizedIdentity],
+				);
+				const { rows } = await client.query(
+					`INSERT INTO roadmap_workforce.agent_registry
+					   (agent_identity, agent_type, role, skills,
+					    preferred_provider, agent_cli, host_affinity, display_alias, display_name)
+					 VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9)
+					 ON CONFLICT (agent_identity) DO UPDATE SET
+					   agent_type        = COALESCE(EXCLUDED.agent_type,        agent_registry.agent_type),
+					   role              = COALESCE(EXCLUDED.role,              agent_registry.role),
+					   skills            = COALESCE(EXCLUDED.skills,            agent_registry.skills),
+					   preferred_provider = COALESCE(EXCLUDED.preferred_provider, agent_registry.preferred_provider),
+					   agent_cli         = COALESCE(EXCLUDED.agent_cli,         agent_registry.agent_cli),
+					   host_affinity     = COALESCE(EXCLUDED.host_affinity,     agent_registry.host_affinity),
+					   display_alias     = COALESCE(EXCLUDED.display_alias,     agent_registry.display_alias),
+					   display_name      = COALESCE(EXCLUDED.display_name,      agent_registry.display_name),
+					   updated_at        = now()
+					 RETURNING agent_identity, role, status, preferred_provider`,
+					[
+						normalizedIdentity,
+						args.agent_type || null,
+						args.role || null,
+						skillsJson,
+						args.preferred_provider || null,
+						args.agent_cli || null,
+						args.host_affinity || null,
+						args.display_alias || null,
+						args.display_name || null,
+					],
+				);
+				await client.query("COMMIT");
+				r = rows[0];
+			} catch (txErr) {
+				await client.query("ROLLBACK").catch(() => {});
+				throw txErr;
+			} finally {
+				client.release();
+			}
 
-			const r = rows[0];
 			return {
 				content: [
 					{

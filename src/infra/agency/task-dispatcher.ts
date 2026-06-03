@@ -11,7 +11,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { query } from "../postgres/pool.ts";
+import { query, type Pool } from "../postgres/pool.ts";
 import { getMcpUrl } from "../../shared/runtime/endpoints.ts";
 import type { IncomingMessage } from "./liaison-agent.ts";
 
@@ -143,6 +143,43 @@ async function claimProposal(
 }
 
 /**
+ * Release a proposal lease via MCP HTTP endpoint.
+ * Best-effort: logs on failure but does not throw.
+ */
+async function releaseProposal(
+	proposalId: string,
+	identity: string,
+): Promise<void> {
+	const mcpUrl = getMcpUrl();
+	const url = new URL("/mcp", mcpUrl).toString();
+
+	const body = {
+		jsonrpc: "2.0",
+		id: `${proposalId}-release`,
+		method: "tools/call",
+		params: {
+			name: "release",
+			arguments: {
+				id: proposalId,
+				agent: identity,
+				release_reason: "tracker_insert_failed",
+			},
+		},
+	};
+
+	const res = await fetch(url, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(body),
+	});
+
+	if (!res.ok) {
+		const text = await res.text();
+		throw new Error(`MCP release failed: ${res.status} ${text}`);
+	}
+}
+
+/**
  * Adapt a task_request message to task bridge format.
  * Sets message_type='task' and metadata flags for bridgeTaskToOfferDispatch.
  */
@@ -228,6 +265,11 @@ export async function handleTypedTaskRequest(
 		);
 	} catch (err) {
 		console.warn(`${log} tracker INSERT failed:`, err);
+		try {
+			await releaseProposal(proposalId, identity);
+		} catch (releaseErr) {
+			console.warn(`${log} lease release after INSERT failure also failed:`, releaseErr);
+		}
 		await insertReply({
 			fromAgent: identity,
 			toAgent: msg.from_agent,
@@ -267,7 +309,7 @@ export async function handleTypedTaskRequest(
 		console.error(`${log} bridge failed:`, detail);
 		await query(
 			`UPDATE roadmap.liaison_task_tracker
-			  SET status = 'failed'
+			  SET status = 'failed', completed_at = now()
 			 WHERE correlation_id = $1`,
 			[correlationId],
 		);
@@ -492,35 +534,62 @@ export async function handleWorkerReport(
 
 /**
  * Detect and recover from stuck workers.
- * Scans for rows where last_status_at < now() - 5 minutes,
+ * Scans for rows where last_status_at < now() - 30 minutes,
  * status not in (complete, failed), and spawn_count < 2.
+ * Uses FOR UPDATE SKIP LOCKED to prevent concurrent liaisons double-processing the same row.
  * Increments spawn_count and marks failed if spawn_count >= 2.
- *
- * Phase 2 will wire this into a cron; for now just implement and export.
  */
 export async function detectStuckWorkers(): Promise<void> {
+	// Single transaction: lock candidate rows to avoid concurrent-liaison double-processing.
 	const { rows } = await query(
-		`SELECT task_id, spawn_count
+		`SELECT task_id, spawn_count, requestor_id, correlation_id
 		  FROM roadmap.liaison_task_tracker
 		 WHERE last_status_at < now() - interval '30 minutes'
 		   AND status NOT IN ('complete', 'failed')
-		   AND spawn_count < 2`,
+		   AND spawn_count < 2
+		 FOR UPDATE SKIP LOCKED`,
 	);
 
 	for (const row of rows) {
-		const { task_id, spawn_count } = row as any;
-		const newSpawnCount = spawn_count + 1;
+		const { task_id, spawn_count, requestor_id, correlation_id } = row as any;
+		const newSpawnCount = (spawn_count as number) + 1;
 
 		if (newSpawnCount >= 2) {
-			// Mark failed
 			await query(
 				`UPDATE roadmap.liaison_task_tracker
 				  SET status = 'failed', spawn_count = $1, last_status_at = now(), completed_at = now()
 				 WHERE task_id = $2`,
 				[newSpawnCount, task_id],
 			);
+			// Notify requestor so they know to retry
+			if (requestor_id) {
+				try {
+					const mcpUrl = getMcpUrl();
+					const url = new URL("/mcp", mcpUrl).toString();
+					await fetch(url, {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({
+							jsonrpc: "2.0",
+							id: `stuck-notify-${task_id}`,
+							method: "tools/call",
+							params: {
+								name: "msg_send",
+								arguments: {
+									from_agent: "system",
+									to_agent: requestor_id,
+									message_type: "task_error",
+									content: `Task auto-failed after stuck detection (spawn_count=${newSpawnCount}). correlation_id=${correlation_id}. Please retry.`,
+									correlation_id: correlation_id ?? undefined,
+								},
+							},
+						}),
+					});
+				} catch (notifyErr) {
+					console.warn(`[StuckTaskCron] Failed to notify requestor ${requestor_id}:`, notifyErr);
+				}
+			}
 		} else {
-			// Just increment
 			await query(
 				`UPDATE roadmap.liaison_task_tracker
 				  SET spawn_count = $1, last_status_at = now()
@@ -529,4 +598,27 @@ export async function detectStuckWorkers(): Promise<void> {
 			);
 		}
 	}
+}
+
+/**
+ * Register the stuck-task sweep cron to run every 5 minutes.
+ * Mirrors the registerTimeoutCron pattern in timeout-cron.ts.
+ */
+export async function registerStuckTaskCron(db: Pool): Promise<void> {
+	const { rows } = await db.query(
+		`SELECT 1 FROM information_schema.tables
+		  WHERE table_schema = 'roadmap' AND table_name = 'liaison_task_tracker'`,
+	);
+	if (!rows.length) {
+		console.warn("[StuckTaskCron] table not ready; skipping registration");
+		return;
+	}
+
+	setInterval(() => {
+		void detectStuckWorkers().catch((err) =>
+			console.error("[StuckTaskCron] sweep error:", err),
+		);
+	}, 5 * 60 * 1000);
+
+	console.info("[StuckTaskCron] registered (5-minute interval)");
 }

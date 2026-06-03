@@ -8,6 +8,7 @@
  * P462: Added agent identity sanitization to prevent path traversal and collisions.
  */
 
+import { existsSync, statSync } from "node:fs";
 import {
 	CubicCleanupService,
 	checkCubicCreateBudget,
@@ -47,13 +48,26 @@ export class PgCubicHandlers {
 		agents?: string[];
 		proposals?: string[];
 		phase?: string;
+		project_id?: number;
 	}): Promise<CallToolResult> {
 		try {
+			const project = await this.resolveCubicProject(args.project_id);
+			if (!project.ok) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(project.error, null, 2),
+						},
+					],
+				};
+			}
+
 			// P462: Sanitize cubic name to safe worktree path
-			const worktreePath = safeWorktreePath(WORKTREE_ROOT, args.name);
+			const worktreePath = safeWorktreePath(project.worktreeRoot, args.name);
 			const budget = await checkCubicCreateBudget({
 				query,
-				worktreeRoot: WORKTREE_ROOT,
+				worktreeRoot: project.worktreeRoot,
 			});
 			if (!budget.allowed) {
 				return {
@@ -203,6 +217,9 @@ export class PgCubicHandlers {
 				phase,
 				phaseGate: "G1",
 				host_name: budget.hostName,
+				project_id: project.projectId,
+				project_slug: project.projectSlug,
+				worktree_root: project.worktreeRoot,
 				...(adHocIdentity ? { ad_hoc_identity: adHocIdentity } : {}),
 			});
 
@@ -213,13 +230,19 @@ export class PgCubicHandlers {
 				cubic_id: string;
 				was_existing: boolean;
 			}>(
-				`INSERT INTO roadmap.cubics (worktree_path, phase, status, agent_identity, metadata)
-				 VALUES ($1, $2, 'idle', $3, $4)
+				`INSERT INTO roadmap.cubics (worktree_path, phase, status, agent_identity, metadata, project_id)
+				 VALUES ($1, $2, 'idle', $3, $4, $5)
 				 ON CONFLICT (agent_identity, phase, status)
 				     WHERE agent_identity IS NOT NULL
 				 DO UPDATE SET metadata = roadmap.cubics.metadata
 				 RETURNING cubic_id, (xmax <> 0) AS was_existing`,
-				[worktreePath, phase, registeredAgentIdentity, metadata],
+				[
+					worktreePath,
+					phase,
+					registeredAgentIdentity,
+					metadata,
+					project.projectId,
+				],
 			);
 			const { cubic_id: cubicId, was_existing: wasExisting } = rows[0];
 			return {
@@ -252,6 +275,82 @@ export class PgCubicHandlers {
 			}
 			return errorResult("Failed to create cubic", err);
 		}
+	}
+
+	private async resolveCubicProject(projectId?: number): Promise<
+		| {
+				ok: true;
+				projectId: number;
+				projectSlug: string | null;
+				worktreeRoot: string;
+		  }
+		| {
+				ok: false;
+				error: {
+					ok: false;
+					error: string;
+					project_id?: number;
+					worktree_root?: string;
+					message: string;
+				};
+		  }
+	> {
+		if (projectId === undefined || projectId === null) {
+			return {
+				ok: true,
+				projectId: 1,
+				projectSlug: "agenthive",
+				worktreeRoot: WORKTREE_ROOT,
+			};
+		}
+
+		const { rows } = await query<{
+			project_id: number;
+			slug: string;
+			worktree_root: string;
+		}>(
+			`SELECT project_id, slug, worktree_root
+			   FROM roadmap.project
+			  WHERE project_id = $1
+			    AND status = 'active'`,
+			[projectId],
+		);
+
+		if (!rows.length) {
+			return {
+				ok: false,
+				error: {
+					ok: false,
+					error: "ERROR_PROJECT_NOT_FOUND",
+					project_id: projectId,
+					message: `No active project found for project_id=${projectId}`,
+				},
+			};
+		}
+
+		const project = rows[0];
+		if (
+			!existsSync(project.worktree_root) ||
+			!statSync(project.worktree_root).isDirectory()
+		) {
+			return {
+				ok: false,
+				error: {
+					ok: false,
+					error: "ERROR_WORKTREE_NOT_FOUND",
+					project_id: project.project_id,
+					worktree_root: project.worktree_root,
+					message: `Worktree root does not exist for project '${project.slug}'. Run git worktree repair or reprovision the tenant checkout before spawning a cubic.`,
+				},
+			};
+		}
+
+		return {
+			ok: true,
+			projectId: project.project_id,
+			projectSlug: project.slug,
+			worktreeRoot: project.worktree_root,
+		};
 	}
 
 	async listCubics(args: {

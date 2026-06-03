@@ -10,6 +10,7 @@ type FeedRow = {
 	timestamp_ms: number | string | Date;
 	proposal_id: string | null;
 	agent_id: string | null;
+	fallback_agent_id: string | null;
 	message: string;
 };
 
@@ -41,6 +42,16 @@ export function timestampToMillis(value: FeedRow["timestamp_ms"]): number {
 	return Number.isFinite(fallback) ? fallback : Date.now();
 }
 
+export function chooseFeedActor(
+	agentId: string | null | undefined,
+	fallbackAgentId: string | null | undefined,
+): string | undefined {
+	const primary = agentId?.trim();
+	if (primary && primary !== "system") return primary;
+	const fallback = fallbackAgentId?.trim();
+	return fallback || primary || undefined;
+}
+
 export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 	try {
 		const { rows } = await query<FeedRow>(
@@ -52,6 +63,7 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					EXTRACT(EPOCH FROM pst.transitioned_at) * 1000 AS timestamp_ms,
 					p.display_id AS proposal_id,
 					pst.transitioned_by AS agent_id,
+					NULL::text AS fallback_agent_id,
 					p.display_id || ' state ' || upper(COALESCE(pst.from_state, '?')) || ' -> ' || upper(pst.to_state) AS message
 				FROM roadmap_proposal.proposal_state_transitions pst
 				LEFT JOIN roadmap_proposal.proposal p ON p.id = pst.proposal_id
@@ -64,6 +76,7 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					EXTRACT(EPOCH FROM pmt.created_at) * 1000 AS timestamp_ms,
 					p.display_id AS proposal_id,
 					pmt.transitioned_by AS agent_id,
+					lease_actor.agent_identity AS fallback_agent_id,
 					p.display_id || ' [' || upper(COALESCE(state_at.to_state, p.status, '?')) || '] maturity ' ||
 						COALESCE(pmt.from_maturity, '?') || ' -> ' || pmt.to_maturity AS message
 				FROM roadmap_proposal.proposal_maturity_transitions pmt
@@ -76,6 +89,14 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					ORDER BY pst2.transitioned_at DESC, pst2.id DESC
 					LIMIT 1
 				) state_at ON true
+				LEFT JOIN LATERAL (
+					SELECT pl.agent_identity
+					FROM roadmap_proposal.proposal_lease pl
+					WHERE pl.proposal_id = pmt.proposal_id
+					  AND abs(extract(epoch FROM (pl.claimed_at - pmt.created_at))) <= 2
+					ORDER BY abs(extract(epoch FROM (pl.claimed_at - pmt.created_at))), pl.id DESC
+					LIMIT 1
+				) lease_actor ON true
 
 				UNION ALL
 
@@ -85,6 +106,7 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					EXTRACT(EPOCH FROM pe.created_at) * 1000 AS timestamp_ms,
 					p.display_id AS proposal_id,
 					COALESCE(pe.payload->>'agent', pe.payload->>'agent_identity', pe.payload->>'reviewer', pe.payload->>'source') AS agent_id,
+					NULL::text AS fallback_agent_id,
 					CASE
 						WHEN pe.event_type = 'proposal_created' THEN
 							COALESCE(p.display_id || ' ', '') || 'created ' || COALESCE(p.title, '(untitled)')
@@ -148,6 +170,7 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					EXTRACT(EPOCH FROM ml.created_at) * 1000 AS timestamp_ms,
 					p.display_id AS proposal_id,
 					ml.from_agent AS agent_id,
+					NULL::text AS fallback_agent_id,
 					COALESCE(ml.from_agent, 'agent') || ' -> ' || COALESCE(ml.to_agent, ml.channel, 'broadcast') || ': ' ||
 						left(regexp_replace(COALESCE(ml.message_content, ''), E'[\\n\\r]+', ' ', 'g'), 120) AS message
 				FROM roadmap.message_ledger ml
@@ -170,6 +193,7 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					EXTRACT(EPOCH FROM COALESCE(ar.completed_at, ar.started_at)) * 1000 AS timestamp_ms,
 					p.display_id AS proposal_id,
 					ar.agent_identity AS agent_id,
+					NULL::text AS fallback_agent_id,
 					COALESCE(p.display_id || ' ', '') ||
 						'run-' || ar.id::text || ' ' ||
 						ar.agent_identity || ' ' ||
@@ -202,6 +226,7 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					EXTRACT(EPOCH FROM tl.created_at) * 1000 AS timestamp_ms,
 					p.display_id AS proposal_id,
 					tl.agent_identity AS agent_id,
+					NULL::text AS fallback_agent_id,
 					COALESCE(p.display_id || ' ', '') || tl.agent_identity || ' tokens ' || tl.token_count::text ||
 						' cost $' || to_char(tl.cost_usd, 'FM999999990.0000') AS message
 				FROM roadmap_efficiency.token_ledger tl
@@ -215,10 +240,11 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					EXTRACT(EPOCH FROM chl.hit_at) * 1000 AS timestamp_ms,
 					NULL AS proposal_id,
 					chl.agent_identity AS agent_id,
+					NULL::text AS fallback_agent_id,
 					chl.agent_identity || ' cache hit saved $' || to_char(chl.cost_saved_usd, 'FM999999990.0000') AS message
 				FROM roadmap_efficiency.cache_hit_log chl
 			)
-			SELECT id, type, timestamp_ms, proposal_id, agent_id, message
+			SELECT id, type, timestamp_ms, proposal_id, agent_id, fallback_agent_id, message
 			FROM feed
 			WHERE timestamp_ms IS NOT NULL
 			ORDER BY timestamp_ms DESC
@@ -232,7 +258,7 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 			type: row.type,
 			timestamp: timestampToMillis(row.timestamp_ms),
 			proposalId: row.proposal_id ?? undefined,
-			agentId: row.agent_id ?? undefined,
+			agentId: chooseFeedActor(row.agent_id, row.fallback_agent_id),
 			message: row.message,
 			metadata: {},
 		}));

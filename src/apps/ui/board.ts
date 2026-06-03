@@ -7,6 +7,7 @@ import {
 import type { StreamEvent } from "../../core/messaging/event-stream.ts";
 import { Core } from "../../core/roadmap.ts";
 import { RfcStates, getRegistry, getView } from "../../core/workflow/state-names.ts";
+import { query } from "../../infra/postgres/pool.ts";
 import type { Directive, Proposal } from "../../shared/types/index.ts";
 import { collectAvailableLabels } from "../../shared/utils/label-filter.ts";
 import {
@@ -73,6 +74,18 @@ type WorkflowViewDefinition = {
 	key: WorkflowViewKey;
 	label: string;
 	stages: { name: string }[];
+};
+
+type AgencyBoardRow = {
+	agency_id: string;
+	display_name: string | null;
+	status: string;
+	provider: string | null;
+	free_claim_slots: number | string | null;
+	in_flight_claims: number | string | null;
+	open_assistance: number | string | null;
+	oldest_open_assistance_at: string | null;
+	silence_seconds: number | string | null;
 };
 
 const RFC_STATUSES = [
@@ -537,7 +550,7 @@ function formatColumnLabel(status: string, count: number): string {
 }
 
 const DEFAULT_FOOTER_CONTENT =
-	" {cyan-fg}[W]{/} Workflow Menu | {cyan-fg}[Tab]{/} Switch View | {cyan-fg}[S]{/} Feed | {cyan-fg}[/]{/} Search | {cyan-fg}[P]{/} Priority | {cyan-fg}[F]{/} Labels | {cyan-fg}[~]{/} Hide Empty | {cyan-fg}[=]{/} Hide Archive | {cyan-fg}[←→]{/} Columns | {cyan-fg}[↑↓]{/} Proposals | {cyan-fg}[PgUp/PgDn]{/} Page | {cyan-fg}[Home/End]{/} First/Last | {cyan-fg}[Enter]{/} View | {cyan-fg}[X]{/} Export | {cyan-fg}[q/Esc]{/} Quit";
+	" {cyan-fg}[W]{/} Workflow Menu | {cyan-fg}[A]{/} Agencies | {cyan-fg}[Tab]{/} Switch View | {cyan-fg}[S]{/} Feed | {cyan-fg}[/]{/} Search | {cyan-fg}[P]{/} Priority | {cyan-fg}[F]{/} Labels | {cyan-fg}[~]{/} Hide Empty | {cyan-fg}[=]{/} Hide Archive | {cyan-fg}[←→]{/} Columns | {cyan-fg}[↑↓]{/} Proposals | {cyan-fg}[PgUp/PgDn]{/} Page | {cyan-fg}[Home/End]{/} First/Last | {cyan-fg}[Enter]{/} View | {cyan-fg}[X]{/} Export | {cyan-fg}[q/Esc]{/} Quit";
 
 function _arraysEqual(left: string[], right: string[]): boolean {
 	if (left.length !== right.length) return false;
@@ -784,6 +797,10 @@ export async function renderBoardTui(
 		let filterPopupOpen = false;
 		let pendingSearchWrap: "to-first" | "to-last" | null = null;
 		let feedOnlyMode = false;
+		let agencyViewMode = false;
+		let agencyRows: AgencyBoardRow[] = [];
+		let agencyBox: BoxInterface | null = null;
+		let agencyList: ListInterface | null = null;
 		let currentTypeFilter = "";
 		const sharedFilters = {
 			searchQuery: options?.filters?.searchQuery ?? "",
@@ -1000,6 +1017,14 @@ export async function renderBoardTui(
 			columns = [];
 		};
 
+		const clearAgencyView = () => {
+			if (agencyBox) {
+				agencyBox.destroy();
+				agencyBox = null;
+				agencyList = null;
+			}
+		};
+
 		const getBoardAreaWidth = () => {
 			const rawWidth =
 				typeof boardArea.width === "number"
@@ -1030,6 +1055,82 @@ export async function renderBoardTui(
 			return proposals.map((proposal) =>
 				formatProposalListItem(proposal, moveOp?.proposalId === proposal.id),
 			);
+		};
+
+		const formatAgencyAge = (date: string | null): string => {
+			if (!date) return "-";
+			const seconds = Math.max(0, Math.floor((Date.now() - new Date(date).getTime()) / 1000));
+			if (seconds < 60) return `${seconds}s`;
+			if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+			if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+			return `${Math.floor(seconds / 86400)}d`;
+		};
+
+		const n = (value: number | string | null | undefined): number => {
+			if (typeof value === "number") return value;
+			if (typeof value === "string") return Number(value) || 0;
+			return 0;
+		};
+
+		const formatAgencyLine = (row: AgencyBoardRow): string => {
+			const name = row.display_name || row.agency_id;
+			const slots = n(row.free_claim_slots);
+			const inFlight = n(row.in_flight_claims);
+			const assistance = n(row.open_assistance);
+			const silence = Math.floor(n(row.silence_seconds));
+			return `{bold}${name}{/bold} {gray-fg}${row.agency_id}{/}  ` +
+				`{cyan-fg}${row.status}{/}  slots:${slots}  in-flight:${inFlight}  ` +
+				`assist:${assistance} oldest:${formatAgencyAge(row.oldest_open_assistance_at)}  ` +
+				`silent:${silence}s  {gray-fg}${row.provider ?? ""}{/}`;
+		};
+
+		const loadAgencyRows = async (): Promise<AgencyBoardRow[]> => {
+			const { rows } = await query<AgencyBoardRow>(
+				`SELECT agency_id, display_name, status, provider, free_claim_slots,
+				        in_flight_claims, open_assistance, oldest_open_assistance_at,
+				        silence_seconds
+				   FROM roadmap.v_agency_dashboard
+				  ORDER BY status, agency_id`,
+			);
+			return rows;
+		};
+
+		const renderAgencyView = () => {
+			clearColumns();
+			clearAgencyView();
+			agencyBox = box({
+				parent: boardArea,
+				top: 0,
+				left: 0,
+				width: "100%",
+				height: "100%",
+				border: { type: "line" },
+				label: ` Agencies (${agencyRows.length}) `,
+				style: { border: { fg: "cyan" } },
+			});
+			agencyList = list({
+				parent: agencyBox,
+				top: 1,
+				left: 1,
+				width: "100%-4",
+				height: "100%-3",
+				keys: true,
+				mouse: true,
+				scrollable: true,
+				alwaysScroll: true,
+				tags: true,
+				vi: true,
+				style: { selected: { bg: "blue", fg: "white" } },
+			});
+			agencyList.setItems(
+				agencyRows.length > 0
+					? agencyRows.map(formatAgencyLine)
+					: ["{gray-fg}No active agencies found{/}"],
+			);
+			agencyList.focus();
+			screen.title = `Roadmap Board - Agencies - ${versionLabel}`;
+			updateFooter();
+			screen.render();
 		};
 
 		// Screen-level mouse handlers for kanban
@@ -1109,7 +1210,7 @@ export async function renderBoardTui(
 
 		// All mouse interaction via mousedown/mouseup (screen doesn't emit "click")
 		screen.on("mousedown", (data: any) => {
-			if (popupOpen || filterPopupOpen || feedOnlyMode) return;
+			if (popupOpen || filterPopupOpen || feedOnlyMode || agencyViewMode) return;
 			const colIdx = findColumnAt(data);
 			if (colIdx < 0) return;
 			// Track for drag
@@ -1128,7 +1229,7 @@ export async function renderBoardTui(
 		});
 
 		screen.on("mouseup", async (data: any) => {
-			if (popupOpen || filterPopupOpen || feedOnlyMode) return;
+			if (popupOpen || filterPopupOpen || feedOnlyMode || agencyViewMode) return;
 			const colIdx = findColumnAt(data);
 			if (colIdx < 0) {
 				dragProposalId = null;
@@ -1564,6 +1665,13 @@ export async function renderBoardTui(
 				syncBoardAreaLayout();
 				return;
 			}
+			if (agencyViewMode) {
+				setFooterContent(
+					` {magenta-fg}Agencies{/} | {cyan-fg}[↑/↓]{/} Select | {cyan-fg}[A]{/} Board | {cyan-fg}[F]{/} Feed | {cyan-fg}[Tab]{/} Switch View | {cyan-fg}[q/Esc]{/} Quit`,
+				);
+				syncBoardAreaLayout();
+				return;
+			}
 			if (moveOp) {
 				setFooterContent(
 					` {magenta-fg}${workflowLabel}{/} | {green-fg}MOVE MODE{/} | {cyan-fg}[←→]{/} Change Column | {cyan-fg}[↑↓]{/} Reorder | {cyan-fg}[Enter/M]{/} Confirm | {cyan-fg}[Esc]{/} Cancel`,
@@ -1603,6 +1711,11 @@ export async function renderBoardTui(
 		};
 
 		const renderView = () => {
+			if (agencyViewMode) {
+				renderAgencyView();
+				return;
+			}
+			clearAgencyView();
 			const visibleWorkflowProposals = getVisibleWorkflowProposals();
 			currentStatuses = resolveWorkflowStatuses(
 				visibleWorkflowProposals,
@@ -2386,11 +2499,24 @@ export async function renderBoardTui(
 		};
 
 		screen.key(["a", "A"], async () => {
-			const column = columns[currentCol];
-			if (!column) return;
-			const idx = column.list.selected ?? 0;
-			const proposal = column.proposals[idx];
-			if (proposal) await openQuickEdit(proposal, "labels");
+			if (popupOpen || filterPopupOpen || currentFocus === "filters" || moveOp)
+				return;
+			agencyViewMode = !agencyViewMode;
+			if (agencyViewMode) {
+				try {
+					agencyRows = await loadAgencyRows();
+					showTransientFooter(" {cyan-fg}Agency view enabled{/}");
+					renderView();
+				} catch (error) {
+					agencyViewMode = false;
+					showTransientFooter(
+						` {red-fg}Failed to load agency view: ${String(error).slice(0, 80)}{/}`,
+					);
+				}
+				return;
+			}
+			showTransientFooter(" {cyan-fg}Board view enabled{/}");
+			renderView();
 		});
 
 		screen.key(["x", "X"], async () => {

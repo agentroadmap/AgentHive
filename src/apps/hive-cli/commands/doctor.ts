@@ -10,6 +10,7 @@ import { buildOkEnvelope } from "../common/envelope.ts";
 import { printEnvelope, printText, type OutputFormat } from "../common/formatters.ts";
 import { EXIT } from "../common/exit-codes.ts";
 import { pingMcp } from "../common/mcp-client.ts";
+import { getPool } from "../../../infra/postgres/pool.ts";
 
 export type CheckSeverity = "ok" | "warn" | "error";
 
@@ -162,133 +163,11 @@ async function runChecks(ctx: HiveContext): Promise<DoctorCheck[]> {
       : "Set DELIVERY_SIGNING_SECRET to a ≥256-bit hex string. Generate with: `node -e \"console.log(require('crypto').randomBytes(32).toString('hex'));\"`",
   });
 
-  // Check 14: Topology check (P1135)
-  const topologyResult = await checkTopology(ctx);
-  checks.push(topologyResult);
+  // Check 14: A2A host topology — service liveness + agency attachment (P1135)
+  checks.push(await checkTopology(ctx));
 
   return checks;
 }
-
-// P1135: Topology check implementation
-import { execSync } from "node:child_process";
-import { Client } from "pg";
-
-async function checkTopology(ctx: HiveContext): Promise<DoctorCheck> {
-  // 1. Critical units running
-  const criticalUnits = [
-    "agenthive-mcp.service",
-    "agenthive-a2a-host.service",
-    "agenthive-board.service",
-    "agenthive-state-feed.service",
-    "agenthive-notification-router.service"
-  ];
-  let inactiveUnits: string[] = [];
-  for (const unit of criticalUnits) {
-    try {
-      const status = execSync(`systemctl is-active ${unit}`).toString().trim();
-      if (status !== "active") inactiveUnits.push(unit);
-    } catch {
-      inactiveUnits.push(unit);
-    }
-  }
-  if (inactiveUnits.length > 0) {
-    return {
-      name: "topology",
-      severity: "error",
-      message: `Critical units not active: ${inactiveUnits.join(", ")}`,
-      remediation: "Run `sudo systemctl status <unit>` for details.",
-      details: { inactiveUnits }
-    };
-  }
-
-  // 2. Active agency coverage
-  let dbActiveAgencies: string[] = [];
-  let attachedAgencies: string[] = [];
-  let unattachedAgencies: string[] = [];
-  let agencyCount = 0;
-  let attachedCount = 0;
-  let host = ctx.host || process.env.AGENTHIVE_HOST || "bot";
-  try {
-    const client = new Client({
-      host: ctx.db_host,
-      port: ctx.db_port,
-      // user/password/database resolved from PGUSER/PGPASSWORD/PGDATABASE env vars
-    });
-    await client.connect();
-    // Get active agencies
-    const res = await client.query(`SELECT agency_id FROM roadmap.agency WHERE status = 'active'`);
-    dbActiveAgencies = res.rows.map(r => r.agency_id);
-    agencyCount = dbActiveAgencies.length;
-    // Try a2a-host attachment table first
-    let attachedRes;
-    try {
-      attachedRes = await client.query(`SELECT agency_id FROM roadmap_workforce.a2a_host_attachments WHERE host_affinity = $1`, [host]);
-      attachedAgencies = attachedRes.rows.map(r => r.agency_id);
-    } catch {
-      // Fallback: pg_stat_activity
-      const statRes = await client.query(`SELECT application_name FROM pg_stat_activity WHERE application_name LIKE 'agenthive-a2a-listen-%'`);
-      attachedAgencies = statRes.rows.map(r => r.application_name.replace("agenthive-a2a-listen-", ""));
-    }
-    attachedCount = attachedAgencies.length;
-    unattachedAgencies = dbActiveAgencies.filter(a => !attachedAgencies.includes(a));
-    await client.end();
-  } catch (e) {
-    return {
-      name: "topology",
-      severity: "error",
-      message: `Failed to query DB for agency attachment: ${e.message}`,
-      remediation: "Check DB connectivity and schema.",
-      details: { error: e.message }
-    };
-  }
-  if (unattachedAgencies.length > 0) {
-    return {
-      name: "topology",
-      severity: "warn",
-      message: `Some active agencies not attached: ${unattachedAgencies.join(", ")}`,
-      remediation: "Check a2a-host and agency LISTEN session status.",
-      details: { dbActiveAgencies, attachedAgencies, unattachedAgencies, agencyCount, attachedCount }
-    };
-  }
-
-  // 3. Legacy template retirement
-  let legacyUnits: string[] = [];
-  try {
-    const out = execSync('systemctl list-units --type=service --state=active "agenthive-agency@*.service" --no-legend').toString();
-    legacyUnits = out.split("\n").filter(Boolean).map(line => line.split(" ")[0]);
-  } catch {}
-  if (legacyUnits.length > 0) {
-    return {
-      name: "topology",
-      severity: "warn",
-      message: `Legacy agency template units still running: ${legacyUnits.join(", ")}`,
-      remediation: "P1132 should have retired per-agency template; investigate.",
-      details: { legacyUnits }
-    };
-  }
-
-  // 4. MCP port reachability
-  try {
-    const res = await fetch("http://127.0.0.1:6421/health", { method: "GET", signal: AbortSignal.timeout(1000) });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  } catch (e) {
-    return {
-      name: "topology",
-      severity: "error",
-      message: `MCP health endpoint not reachable: ${e.message}`,
-      remediation: "Check agenthive-mcp.service and network.",
-      details: { error: e.message }
-    };
-  }
-
-  return {
-    name: "topology",
-    severity: "ok",
-    message: "Topology check passed: all critical units active, agencies attached, legacy templates retired, MCP healthy.",
-    details: { agencyCount, attachedCount }
-  };
-}
-
 
 async function checkDbPort(host: string, port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -317,22 +196,288 @@ function checkNodeVersion(version: string): boolean {
   return Number(match[1]) >= 24;
 }
 
+interface AttachmentRow {
+  agent_identity: string;
+  is_attached: boolean;
+}
+
+export interface TopologyDetails {
+  checked_host: string;
+  expected_source: "agent_registry.host_affinity";
+  expected_count: number;
+  attached_count: number;
+  unattached_ids: string[];
+  legacy_running_count: number;
+  mcp_health_latency_ms: number;
+  data_source_errors: string[];
+  critical_units?: Record<string, string>;
+  legacy_running_units?: string[];
+}
+
+export interface TopologyProbers {
+  systemctlIsActive?: (unit: string) => Promise<string>;
+  listLegacyAgencyUnits?: () => Promise<string[]>;
+  queryAttachments?: (host: string) => Promise<AttachmentRow[]>;
+  fetchMcpHealth?: () => Promise<{ ok: boolean; status: number; body?: unknown; error?: string; latencyMs: number }>;
+}
+
+async function defaultSystemctlIsActive(unit: string): Promise<string> {
+  const { execFileSync } = await import("node:child_process");
+  try {
+    return execFileSync("systemctl", ["is-active", unit], { encoding: "utf8", timeout: 1000 }).trim();
+  } catch (err) {
+    const stdout = (err as { stdout?: Buffer | string }).stdout;
+    const status = stdout?.toString().trim();
+    return status || "inactive";
+  }
+}
+
+async function defaultListLegacyAgencyUnits(): Promise<string[]> {
+  const { execFileSync } = await import("node:child_process");
+  try {
+    const out = execFileSync(
+      "systemctl",
+      ["list-units", "agenthive-agency@*.service", "--state=active", "--no-pager", "--no-legend"],
+      { encoding: "utf8", timeout: 1000 },
+    ).trim();
+    if (!out) return [];
+    return out.split("\n").map((line) => line.trim().split(/\s+/)[0]).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+async function defaultQueryAttachments(host: string): Promise<AttachmentRow[]> {
+  const { rows } = await getPool().query<AttachmentRow>(
+    `WITH expected AS (
+       SELECT agent_identity
+       FROM roadmap_workforce.agent_registry
+       WHERE host_affinity = $1
+         AND agent_type = 'agency'
+         AND status IN ('active', 'dormant')
+     ),
+     attached AS (
+       SELECT agency_id
+       FROM roadmap.v_agency_status
+       WHERE presence_state IN ('online', 'busy')
+     )
+     SELECT e.agent_identity, (a.agency_id IS NOT NULL) AS is_attached
+     FROM expected e
+     LEFT JOIN attached a ON a.agency_id = e.agent_identity
+     ORDER BY e.agent_identity`,
+    [host],
+  );
+  return rows;
+}
+
+async function defaultFetchMcpHealth(): Promise<{ ok: boolean; status: number; body?: unknown; error?: string; latencyMs: number }> {
+  const start = Date.now();
+  try {
+    const res = await fetch("http://127.0.0.1:6421/health", {
+      method: "GET",
+      signal: AbortSignal.timeout(1000),
+    });
+    const latencyMs = Date.now() - start;
+    let body: unknown;
+    try {
+      body = await res.json();
+    } catch {
+      return { ok: false, status: res.status, error: "health response was not JSON", latencyMs };
+    }
+    const statusOk = typeof body === "object" && body !== null && (body as { status?: unknown }).status === "ok";
+    return {
+      ok: res.status === 200 && statusOk,
+      status: res.status,
+      body,
+      error: res.status === 200 && statusOk ? undefined : "health response did not report status=ok",
+      latencyMs,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      error: (err as Error).message,
+      latencyMs: Date.now() - start,
+    };
+  }
+}
+
+export async function checkTopology(ctx: HiveContext, probers: TopologyProbers = {}): Promise<DoctorCheck> {
+  const criticalUnits = [
+    "agenthive-mcp.service",
+    "agenthive-a2a-host.service",
+    "agenthive-board.service",
+    "agenthive-state-feed.service",
+    "agenthive-notification-router.service"
+  ];
+  const dataSourceErrors: string[] = [];
+  const unitStatuses: Record<string, string> = {};
+  const checkedHost = ctx.host;
+
+  const systemctlIsActive = probers.systemctlIsActive ?? defaultSystemctlIsActive;
+  const listLegacyAgencyUnits = probers.listLegacyAgencyUnits ?? defaultListLegacyAgencyUnits;
+  const queryAttachments = probers.queryAttachments ?? defaultQueryAttachments;
+  const fetchMcpHealth = probers.fetchMcpHealth ?? defaultFetchMcpHealth;
+
+  for (const unit of criticalUnits) {
+    try {
+      unitStatuses[unit] = await systemctlIsActive(unit);
+    } catch (err) {
+      unitStatuses[unit] = "unknown";
+      dataSourceErrors.push(`systemctl ${unit}: ${(err as Error).message}`);
+    }
+  }
+
+  let attachmentRows: AttachmentRow[] = [];
+  try {
+    attachmentRows = await queryAttachments(checkedHost);
+  } catch (err) {
+    dataSourceErrors.push(`attachment query: ${(err as Error).message}`);
+  }
+
+  let legacyUnits: string[] = [];
+  try {
+    legacyUnits = await listLegacyAgencyUnits();
+  } catch (err) {
+    dataSourceErrors.push(`legacy unit query: ${(err as Error).message}`);
+  }
+
+  const health = await fetchMcpHealth();
+  if (!health.ok) {
+    dataSourceErrors.push(`mcp health: ${health.error ?? `HTTP ${health.status}`}`);
+  }
+
+  const unattached = attachmentRows
+    .filter((row) => !row.is_attached)
+    .map((row) => row.agent_identity);
+  const expectedCount = attachmentRows.length;
+  const attachedCount = expectedCount - unattached.length;
+  const inactiveUnits = criticalUnits.filter((unit) => unitStatuses[unit] !== "active");
+  const details: TopologyDetails = {
+    checked_host: checkedHost,
+    expected_source: "agent_registry.host_affinity",
+    expected_count: expectedCount,
+    attached_count: attachedCount,
+    unattached_ids: unattached.slice(0, 5),
+    legacy_running_count: legacyUnits.length,
+    mcp_health_latency_ms: health.latencyMs,
+    data_source_errors: dataSourceErrors,
+    critical_units: unitStatuses,
+    legacy_running_units: legacyUnits,
+  };
+
+  if (inactiveUnits.length > 0) {
+    return {
+      name: "topology",
+      severity: "error",
+      message: `Critical units not active: ${inactiveUnits.join(", ")}`,
+      remediation: "Run `sudo systemctl status <unit>` for details.",
+      details: details as unknown as Record<string, unknown>,
+    };
+  }
+
+  if (!health.ok) {
+    return {
+      name: "topology",
+      severity: "error",
+      message: `MCP health endpoint failed: ${health.error ?? `HTTP ${health.status}`}`,
+      remediation: "Check agenthive-mcp.service and http://127.0.0.1:6421/health.",
+      details: details as unknown as Record<string, unknown>,
+    };
+  }
+
+  if (dataSourceErrors.length > 0) {
+    return {
+      name: "topology",
+      severity: "warn",
+      message: `Topology check completed with data-source errors: ${dataSourceErrors.join("; ")}`,
+      remediation: "Check systemctl access and roadmap_workforce.agent_registry / roadmap.v_agency_status permissions.",
+      details: details as unknown as Record<string, unknown>,
+    };
+  }
+
+  if (unattached.length > 0) {
+    const transitional = unattached.length <= 2;
+    return {
+      name: "topology",
+      severity: "warn",
+      message: transitional
+        ? `${unattached.length}/${expectedCount} expected agencies are not attached on ${checkedHost}; transitional restart window or legacy identity likely`
+        : `${unattached.length}/${expectedCount} expected agencies are not attached on ${checkedHost}: ${unattached.slice(0, 5).join(", ")}${unattached.length > 5 ? ` +${unattached.length - 5} more` : ""}`,
+      remediation: "Check agenthive-a2a-host.service logs and agency presence updates.",
+      details: details as unknown as Record<string, unknown>,
+    };
+  }
+
+  if (legacyUnits.length > 0) {
+    return {
+      name: "topology",
+      severity: "warn",
+      message: `Legacy template instance(s) running — P1132 cutover incomplete or rollback in progress: ${legacyUnits.join(", ")}`,
+      remediation: "P1132 should have retired per-agency template; investigate.",
+      details: details as unknown as Record<string, unknown>,
+    };
+  }
+
+  return {
+    name: "topology",
+    severity: "ok",
+    message: `Topology check passed for ${checkedHost}: ${attachedCount}/${expectedCount} expected agencies attached, no legacy agency instances running, MCP healthy.`,
+    details: details as unknown as Record<string, unknown>,
+  };
+}
+
+async function checkA2aListenApplications(): Promise<string[]> {
+  const { rows } = await getPool().query<{ application_name: string }>(
+    `SELECT application_name
+     FROM pg_stat_activity
+     WHERE application_name LIKE 'agenthive-a2a-listen-%'
+     ORDER BY application_name`,
+  );
+  return rows.map((row) => row.application_name);
+}
+
+async function withA2aListenDetails(check: DoctorCheck): Promise<DoctorCheck> {
+  try {
+    return {
+      ...check,
+      details: {
+        ...(check.details ?? {}),
+        a2a_listen_applications: await checkA2aListenApplications(),
+      },
+    };
+  } catch (err) {
+    const details = check.details ?? {};
+    return {
+      ...check,
+      details: {
+        ...details,
+        data_source_errors: [
+          ...((details.data_source_errors as string[] | undefined) ?? []),
+          `a2a listen inventory: ${(err as Error).message}`,
+        ],
+      },
+    };
+  }
+}
+
 export function registerDoctor(program: Command, getContext: () => Promise<HiveContext>): void {
   program
     .command("doctor")
-    .description("Run system readiness checks (12+ checks, severity + remediation per check)")
+    .description("Run system readiness checks (14 checks, severity + remediation per check)")
     .option("--project <P>", "Project slug override")
-    .option("--check <NAME>", "Run single check by name (e.g., --check hmac for P1097 HMAC verification)")
+    .option("--check <NAME>", "Run only checks whose name contains NAME (substring match)")
     .option("--fix", "Attempt automated remediation where possible")
     .option("--verbose", "Show additional detail per check")
     .option("--remediate", "Alias for --fix")
+    .option("--json", "Shorthand for --format json")
     .option("-o, --format <FMT>", "Output format (text|json|jsonl|yaml)", "text")
     .option("-q, --quiet", "Suppress output; exit code signals health")
     .action(async (opts) => {
       const start = Date.now();
       const ctx = await getContext();
       if (opts.project) ctx.project = opts.project;
-      const fmt = opts.format as OutputFormat;
+      const fmt = (opts.json ? "json" : opts.format) as OutputFormat;
 
       let checks = await runChecks(ctx);
 
@@ -340,10 +485,10 @@ export function registerDoctor(program: Command, getContext: () => Promise<HiveC
       if (opts.check) {
         const checkName = opts.check.toLowerCase();
         checks = checks.filter((c) => c.name.toLowerCase().includes(checkName));
-        if (checks.length === 0) {
-          printText([`hive doctor: no check matching "${opts.check}" found`]);
-          process.exit(EXIT.INTERNAL_ERROR);
-        }
+      }
+
+      if (opts.verbose) {
+        checks = await Promise.all(checks.map((check) => check.name === "topology" ? withA2aListenDetails(check) : check));
       }
 
       const elapsed = Date.now() - start;
@@ -359,6 +504,9 @@ export function registerDoctor(program: Command, getContext: () => Promise<HiveC
             printText([`${badge.padEnd(7)} ${check.name}: ${check.message}`]);
             if (check.remediation && opts.verbose) {
               printText([`        ↳ ${check.remediation}`]);
+            }
+            if (check.details && opts.verbose) {
+              printText([`        ↳ ${JSON.stringify(check.details)}`]);
             }
           }
           printText([""]);

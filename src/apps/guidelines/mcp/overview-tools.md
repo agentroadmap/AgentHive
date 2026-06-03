@@ -37,7 +37,8 @@ Each tool returns the same content that resource-capable clients read via `roadm
 1. **Search first:** call `proposal_search`, `proposal_list`, or `prop_list` to find existing work
 2. **If found:** read details via `proposal_view` or `prop_get`; follow execution guidance from the retrieved markdown
 3. **If not found:** consult `get_state_creation_guide`, then create a proposal with `proposal_create` or `prop_create`
-4. **Execute & finalize:** manage workflow stage, maturity, plans, notes, and acceptance criteria through the proposal tools
+4. **Claim:** call `prop_claim` (or `mcp_proposal action=claim`) to take a lease before writing. Prevents races; shows in `prop_leases`. Renew with `prop_renew`; release with `prop_release` when done.
+5. **Execute & finalize:** manage workflow stage, maturity, plans, notes, and acceptance criteria through the proposal tools
 
 **Authoritative Workflow:** For AgentHive RFC-style work, the canonical flow is `Draft -> Review -> Develop -> Merge -> Complete`. Universal maturity is `New -> Active -> Mature -> Obsolete`. Proposal type determines which workflow template applies.
 
