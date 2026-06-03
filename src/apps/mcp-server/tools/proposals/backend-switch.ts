@@ -7,6 +7,16 @@
 import type { McpServer } from "../../server.ts";
 import { createAsyncValidatedTool } from "../../validation/tool-wrapper.ts";
 import { PgProposalHandlers } from "./pg-handlers.ts";
+import {
+	reevalList,
+	reevalClaim,
+	reevalRelease,
+	reevalDecide,
+	reevalProjection,
+	reevalBudgetCheck,
+	reevalFlagStale,
+	reevalFlagComplete,
+} from "./reeval-handlers.ts";
 
 export function registerProposalTools(
 	server: McpServer,
@@ -490,6 +500,122 @@ export function registerProposalTools(
 			"Return classification counts for the proposal migration map: total, reviewed, unreviewed, with/without evidence, with canonical.",
 		inputSchema: { type: "object", properties: {} },
 		handler: (args: any) => handlers.mapSummary(args),
+	});
+
+	// P242: Re-evaluation queue tools
+	server.addTool({
+		name: "reeval_list",
+		description:
+			"List open re-evaluation queue items (Loop A stale-DEVELOP and Loop B COMPLETE+mature). " +
+			"These are NOT D1-D4 gate queue items.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				reeval_type: {
+					type: "string",
+					enum: ["staleness", "optimization"],
+					description: "Filter by reeval type (optional)",
+				},
+				limit: { type: "number", description: "Max results (default 20, max 100)" },
+			},
+		},
+		handler: (args: any) => reevalList(args),
+	});
+	server.addTool({
+		name: "reeval_claim",
+		description:
+			"Claim a re-evaluation queue item with a lightweight lease. " +
+			"Does NOT change proposal.status or proposal.maturity.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				queue_id: { type: "string", description: "Reeval queue row id" },
+				agent_identity: { type: "string", description: "Agent claiming the item" },
+				expires_minutes: { type: "number", description: "Lease duration in minutes (5-120, default 30)" },
+			},
+			required: ["queue_id", "agent_identity"],
+		},
+		handler: (args: any) => reevalClaim(args),
+	});
+	server.addTool({
+		name: "reeval_release",
+		description: "Release an active re-evaluation lease without a decision.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				queue_id: { type: "string" },
+				agent_identity: { type: "string" },
+			},
+			required: ["queue_id", "agent_identity"],
+		},
+		handler: (args: any) => reevalRelease(args),
+	});
+	server.addTool({
+		name: "reeval_decide",
+		description:
+			"Submit a re-evaluation outcome. " +
+			"Loop A outcomes: keep, revise, obsolete. " +
+			"Loop B outcomes: keep, spawn_optimization, spawn_transformation. " +
+			"spawn_* requires spawned_proposal_id (create the derivative proposal first). " +
+			"The COMPLETE anchor proposal is never modified by Loop B.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				queue_id: { type: "string" },
+				outcome: {
+					type: "string",
+					enum: ["keep", "revise", "obsolete", "spawn_optimization", "spawn_transformation"],
+				},
+				decision_notes: { type: "string", description: "Required explanation for the decision" },
+				decided_by: { type: "string", description: "Agent identity submitting the decision" },
+				spawned_proposal_id: {
+					type: "string",
+					description: "Required for spawn_optimization / spawn_transformation outcomes",
+				},
+				exempt_until: {
+					type: "string",
+					description: "ISO-8601 date — sets reeval_exempt_until on the proposal",
+				},
+			},
+			required: ["queue_id", "outcome", "decision_notes", "decided_by"],
+		},
+		handler: (args: any) => reevalDecide(args),
+	});
+	server.addTool({
+		name: "reeval_projection",
+		description:
+			"Get an enriched re-evaluation projection for a proposal: last reviewed time, " +
+			"cost/token trends, open defects, related proposals, reeval history.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				proposal_id: { type: "string", description: "Proposal numeric id or display_id" },
+			},
+			required: ["proposal_id"],
+		},
+		handler: (args: any) => reevalProjection(args),
+	});
+	server.addTool({
+		name: "reeval_budget_check",
+		description: "Check remaining daily reeval budget (USD cap from roadmap.config).",
+		inputSchema: { type: "object", properties: {} },
+		handler: (args: any) => reevalBudgetCheck(args),
+	});
+	server.addTool({
+		name: "reeval_flag_stale",
+		description:
+			"Manually trigger Loop A stale-DEVELOP detection scan. " +
+			"Normally run by the MCP server setInterval (60s). Use for testing or on-demand backfill.",
+		inputSchema: { type: "object", properties: {} },
+		handler: (args: any) => reevalFlagStale(args),
+	});
+	server.addTool({
+		name: "reeval_flag_complete",
+		description:
+			"Manually trigger Loop B COMPLETE+mature optimization scan. " +
+			"Normally run by the MCP server setInterval (3600s). Use for testing or on-demand.",
+		inputSchema: { type: "object", properties: {} },
+		handler: (args: any) => reevalFlagComplete(args),
 	});
 
 	// prop_get_detail - comprehensive single-call proposal with ALL children

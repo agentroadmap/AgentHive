@@ -183,6 +183,15 @@ const proposalRoutes: RouteMap = {
 	child_boot_check: "child_boot_check",
 	spawn_summary_emit: "spawn_summary_emit",
 	briefing_list: "briefing_list",
+	// P242: Re-evaluation queue
+	reeval_list: "reeval_list",
+	reeval_claim: "reeval_claim",
+	reeval_release: "reeval_release",
+	reeval_decide: "reeval_decide",
+	reeval_projection: "reeval_projection",
+	reeval_budget_check: "reeval_budget_check",
+	reeval_flag_stale: "reeval_flag_stale",
+	reeval_flag_complete: "reeval_flag_complete",
 };
 
 const messageRoutes: RouteMap = {
