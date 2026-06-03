@@ -23,10 +23,10 @@ const UUID_RE =
 
 async function getConfigValue(key: string, defaultVal: string): Promise<string> {
 	const { rows } = await query(
-		`SELECT config_value FROM roadmap.app_config WHERE config_key = $1`,
+		`SELECT value FROM roadmap.config WHERE key = $1`,
 		[key],
 	);
-	return (rows[0]?.config_value as string | undefined) ?? defaultVal;
+	return (rows[0]?.value as string | undefined) ?? defaultVal;
 }
 
 async function getDirSizeMb(dir: string): Promise<number> {
