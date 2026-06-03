@@ -18,6 +18,25 @@ import type {
 
 const API_BASE = "/api";
 
+export interface RouteRow {
+	id: number;
+	model_name: string;
+	route_provider: string;
+	agent_provider: string;
+	agent_cli: string;
+	fallback_cli: string;
+	is_enabled: boolean;
+	priority: number;
+	api_spec: string;
+	base_url: string;
+	cost_per_million_input: number;
+	cost_per_million_output: number;
+	plan_type: string;
+	notes: string;
+	created_at: string;
+	has_host_policy_match: boolean;
+}
+
 export interface ReorderProposalPayload {
 	proposalId: string;
 	targetStatus: string;
@@ -663,8 +682,8 @@ export class ApiClient {
 		return this.fetchJson<Agent[]>(`${API_BASE}/agents`);
 	}
 
-	async fetchRoutes(): Promise<any[]> {
-		const result = await this.fetchJson<{ routes: any[] }>(`${API_BASE}/routes`);
+	async fetchRoutes(): Promise<RouteRow[]> {
+		const result = await this.fetchJson<{ routes: RouteRow[] }>(`${API_BASE}/routes`);
 		return result.routes;
 	}
 

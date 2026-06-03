@@ -1,25 +1,6 @@
 import type React from "react";
 import { useCallback, useEffect, useState } from "react";
-import { apiClient } from "../lib/api";
-
-interface Route {
-	id: number;
-	model_name: string;
-	route_provider: string;
-	agent_provider: string;
-	agent_cli: string;
-	fallback_cli: string;
-	is_enabled: boolean;
-	priority: number;
-	api_spec: string;
-	base_url: string;
-	cost_per_million_input: number;
-	cost_per_million_output: number;
-	plan_type: string;
-	notes: string;
-	created_at: string;
-	has_host_policy_match: boolean;
-}
+import { apiClient, type RouteRow as Route } from "../lib/api";
 
 const RoutesPage: React.FC = () => {
 	const [routes, setRoutes] = useState<Route[]>([]);
@@ -27,19 +8,23 @@ const RoutesPage: React.FC = () => {
 	const [error, setError] = useState<string | null>(null);
 	const [filterProvider, setFilterProvider] = useState<string>("");
 	const [showDisabled, setShowDisabled] = useState(false);
+	const [showOrphanedOnly, setShowOrphanedOnly] = useState(false);
+	const [refreshing, setRefreshing] = useState(false);
 	const [togglingIds, setTogglingIds] = useState<Set<number>>(new Set());
 	const [toggleErrors, setToggleErrors] = useState<Map<number, string>>(new Map());
 
-	const fetchData = useCallback(async () => {
+	const fetchData = useCallback(async (isRefresh = false) => {
 		try {
 			setError(null);
+			if (isRefresh) setRefreshing(true);
 			const data = await apiClient.fetchRoutes();
-			setRoutes(data as Route[]);
+			setRoutes(data);
 		} catch (err) {
 			console.error("Failed to fetch routes:", err);
 			setError("Failed to load routes");
 		} finally {
 			setLoading(false);
+			setRefreshing(false);
 		}
 	}, []);
 
@@ -89,6 +74,7 @@ const RoutesPage: React.FC = () => {
 	const filtered = routes.filter((r) => {
 		if (!showDisabled && !r.is_enabled) return false;
 		if (filterProvider && r.route_provider !== filterProvider) return false;
+		if (showOrphanedOnly && r.has_host_policy_match !== false) return false;
 		return true;
 	});
 
@@ -119,16 +105,16 @@ const RoutesPage: React.FC = () => {
 						</span>
 					)}
 				</div>
-				<div className="flex items-center gap-4">
+				<div className="flex items-center gap-4 flex-wrap">
 					<div className="flex items-center gap-2">
-						<label htmlFor="provider-filter" className="text-sm text-gray-600">
+						<label htmlFor="provider-filter" className="text-sm text-gray-600 dark:text-gray-400">
 							Provider:
 						</label>
 						<select
 							id="provider-filter"
 							value={filterProvider}
 							onChange={(e) => setFilterProvider(e.target.value)}
-							className="rounded border px-2 py-1 text-sm"
+							className="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-2 py-1 text-sm"
 						>
 							<option value="">All</option>
 							{providers.map((p) => (
@@ -138,7 +124,7 @@ const RoutesPage: React.FC = () => {
 							))}
 						</select>
 					</div>
-					<label className="flex items-center gap-2 text-sm text-gray-600">
+					<label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
 						<input
 							type="checkbox"
 							checked={showDisabled}
@@ -146,9 +132,42 @@ const RoutesPage: React.FC = () => {
 						/>
 						Show disabled
 					</label>
-					<span className="text-sm text-gray-500">
+					{orphanCount > 0 && (
+						<label className="flex items-center gap-2 text-sm text-yellow-700 dark:text-yellow-400">
+							<input
+								type="checkbox"
+								checked={showOrphanedOnly}
+								onChange={(e) => setShowOrphanedOnly(e.target.checked)}
+							/>
+							Orphaned only
+						</label>
+					)}
+					<span className="text-sm text-gray-500 dark:text-gray-400">
 						{filtered.length} routes
 					</span>
+					<button
+						type="button"
+						onClick={() => void fetchData(true)}
+						disabled={refreshing}
+						className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs text-gray-600 dark:text-gray-400 border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+						title="Refresh routes"
+					>
+						<svg
+							className={`w-3 h-3 ${refreshing ? "animate-spin" : ""}`}
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+							aria-hidden="true"
+						>
+							<path
+								strokeLinecap="round"
+								strokeLinejoin="round"
+								strokeWidth={2}
+								d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+							/>
+						</svg>
+						Refresh
+					</button>
 				</div>
 			</div>
 
@@ -175,10 +194,16 @@ const RoutesPage: React.FC = () => {
 								Spec
 							</th>
 							<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+								Base URL
+							</th>
+							<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
 								Cost $/M
 							</th>
 							<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
 								Priority
+							</th>
+							<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+								Plan
 							</th>
 						</tr>
 					</thead>
@@ -190,6 +215,7 @@ const RoutesPage: React.FC = () => {
 							return (
 								<tr
 									key={route.id}
+									title={route.notes || undefined}
 									className={
 										isOrphan
 											? "bg-yellow-50 dark:bg-yellow-900/10 hover:bg-yellow-100 dark:hover:bg-yellow-900/20"
@@ -238,6 +264,18 @@ const RoutesPage: React.FC = () => {
 									<td className="px-4 py-3 text-sm text-gray-500">
 										{route.api_spec}
 									</td>
+									<td className="px-4 py-3 text-sm text-gray-500 max-w-[160px]">
+										{route.base_url ? (
+											<span
+												title={route.base_url}
+												className="block truncate font-mono text-xs"
+											>
+												{route.base_url}
+											</span>
+										) : (
+											<span className="text-gray-300 dark:text-gray-600">—</span>
+										)}
+									</td>
 									<td className="px-4 py-3 text-sm tabular-nums">
 										{route.cost_per_million_input > 0 || route.cost_per_million_output > 0
 											? `$${route.cost_per_million_input}/$${route.cost_per_million_output}`
@@ -245,6 +283,9 @@ const RoutesPage: React.FC = () => {
 									</td>
 									<td className="px-4 py-3 text-sm tabular-nums">
 										{route.priority}
+									</td>
+									<td className="px-4 py-3 text-sm text-gray-500">
+										{route.plan_type || "—"}
 									</td>
 								</tr>
 							);

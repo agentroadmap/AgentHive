@@ -65,8 +65,8 @@ describe("buildDirectiveBuckets", () => {
 
 	it("marks directives completed when all proposals are done", () => {
 		const completedProposals = [
-			makeProposal({ id: "proposal-1", directive: "M1", status: "Reached" }),
-			makeProposal({ id: "proposal-2", directive: "M1", status: "Reached" }),
+			makeProposal({ id: "proposal-1", directive: "M1", status: "Complete" }),
+			makeProposal({ id: "proposal-2", directive: "M1", status: "Complete" }),
 		];
 		const directives: Directive[] = [
 			{ id: "M1", title: "M1", description: "", rawContent: "" },
@@ -148,14 +148,14 @@ describe("buildDirectiveBuckets", () => {
 			makeProposal({ id: "proposal-1", directive: "1", status: "Potential" }),
 		];
 		const directives: Directive[] = [
-			{ id: "m-1", title: "Release 1", description: "", rawContent: "" },
+			{ id: "d-1", title: "Release 1", description: "", rawContent: "" },
 		];
 		const buckets = buildDirectiveBuckets(proposals, directives, [
 			"Potential",
 			"Reached",
 		]);
 		const releaseBucket = buckets.find(
-			(bucket: DirectiveBucket) => bucket.directive === "m-1",
+			(bucket: DirectiveBucket) => bucket.directive === "d-1",
 		);
 		assert.ok(releaseBucket);
 		assert.deepEqual(
@@ -168,19 +168,19 @@ describe("buildDirectiveBuckets", () => {
 		const proposals = [
 			makeProposal({
 				id: "proposal-1",
-				directive: "m-01",
+				directive: "d-01",
 				status: "Potential",
 			}),
 		];
 		const directives: Directive[] = [
-			{ id: "m-1", title: "Release 1", description: "", rawContent: "" },
+			{ id: "d-1", title: "Release 1", description: "", rawContent: "" },
 		];
 		const buckets = buildDirectiveBuckets(proposals, directives, [
 			"Potential",
 			"Reached",
 		]);
 		const releaseBucket = buckets.find(
-			(bucket: DirectiveBucket) => bucket.directive === "m-1",
+			(bucket: DirectiveBucket) => bucket.directive === "d-1",
 		);
 		assert.ok(releaseBucket);
 		assert.deepEqual(
@@ -223,18 +223,18 @@ describe("buildDirectiveBuckets", () => {
 			makeProposal({ id: "proposal-1", directive: "1", status: "Potential" }),
 		];
 		const directives: Directive[] = [
-			{ id: "m-1", title: "Release 1", description: "", rawContent: "" },
-			{ id: "m-2", title: "1", description: "", rawContent: "" },
+			{ id: "d-1", title: "Release 1", description: "", rawContent: "" },
+			{ id: "d-2", title: "1", description: "", rawContent: "" },
 		];
 		const buckets = buildDirectiveBuckets(proposals, directives, [
 			"Potential",
 			"Reached",
 		]);
 		const idBucket = buckets.find(
-			(bucket: DirectiveBucket) => bucket.directive === "m-1",
+			(bucket: DirectiveBucket) => bucket.directive === "d-1",
 		);
 		const titleBucket = buckets.find(
-			(bucket: DirectiveBucket) => bucket.directive === "m-2",
+			(bucket: DirectiveBucket) => bucket.directive === "d-2",
 		);
 		assert.ok(idBucket);
 		assert.ok(titleBucket);

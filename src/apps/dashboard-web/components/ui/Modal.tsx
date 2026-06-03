@@ -1,5 +1,5 @@
 import type React from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import { cn } from "../../lib/cn";
 import { useFocusTrap } from "../../lib/a11y";
 
@@ -28,7 +28,8 @@ const Modal: React.FC<ModalProps> = ({
   className,
   stackLevel,
 }) => {
-  const titleId = useRef(`modal-title-${Math.random().toString(36).slice(2, 9)}`).current;
+  const generatedTitleId = useId();
+  const titleId = `modal-title-${generatedTitleId}`;
   const containerRef = useFocusTrap(isOpen);
   const zBase = stackLevel ?? 50;
 

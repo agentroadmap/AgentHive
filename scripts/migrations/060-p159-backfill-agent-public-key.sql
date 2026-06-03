@@ -1,0 +1,25 @@
+-- P159: Operator runbook — agent_registry public_key backfill
+--
+-- DDL (public_key TEXT NULL, key_rotated_at TIMESTAMPTZ NULL) was applied in
+-- migration 018 as part of the P080 baseline. No new columns are needed.
+--
+-- Agents that registered before P159 shipped will have public_key = NULL.
+-- Those agents will re-populate their key on next startup via
+-- getOrCreateIdentity() → registerAgent({ publicKey }).
+--
+-- To backfill manually (optional):
+--   For each live agent, load the .agent-keys/<agentId>.json file and run:
+--
+--   UPDATE roadmap_workforce.agent_registry
+--     SET public_key     = '<pem-encoded-spki-key>',
+--         key_rotated_at = NOW()
+--   WHERE agent_identity = '<agentId>'
+--     AND public_key IS NULL;
+--
+-- Verification:
+--   SELECT agent_identity, public_key IS NOT NULL AS has_key, key_rotated_at
+--   FROM roadmap_workforce.agent_registry
+--   ORDER BY has_key DESC, agent_identity;
+--
+-- Rollback (no-op — columns are nullable, setting NULL is safe):
+--   UPDATE roadmap_workforce.agent_registry SET public_key = NULL, key_rotated_at = NULL;

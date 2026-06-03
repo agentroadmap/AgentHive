@@ -123,3 +123,29 @@ export async function selectModelByTaskDifficulty(
 		`No enabled model found for task_type=${task.task_type} difficulty=${task.difficulty}`,
 	);
 }
+
+/**
+ * List all models for a given tier, ordered by cost ascending.
+ * Useful for dashboard and cost-planning queries.
+ */
+export async function listModelsByTier(
+	tier: ModelTier,
+	queryFn: QueryFn = defaultQuery,
+): Promise<ModelConfig[]> {
+	const { rows } = await queryFn<ModelConfig>(
+		`SELECT
+			id,
+			model_name,
+			tier,
+			route_provider,
+			agent_provider,
+			COALESCE(cost_per_million_input, 0) / 1000.0 AS cost_per_1k_input,
+			COALESCE(confidence_threshold, 0.70)::float8 AS confidence_threshold,
+			is_enabled
+		FROM roadmap.model_routes
+		WHERE tier = $1
+		ORDER BY COALESCE(cost_per_million_input, 0) ASC`,
+		[tier],
+	);
+	return rows;
+}

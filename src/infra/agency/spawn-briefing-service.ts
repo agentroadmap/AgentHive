@@ -214,6 +214,25 @@ export async function briefingAssemble(
     }
   }
 
+  // Step 5b: P230 — inject proposal context package when proposal_id is provided.
+  // Saves ~500 tokens vs dumping full CLAUDE.md; cache is invalidated on status/AC change.
+  if (task.proposal_id !== undefined) {
+    try {
+      const pkg = await buildContextPackage({
+        proposal_id: task.proposal_id,
+        package_type: "code_gen",
+        team_name: task.team_name,
+        agent_identity: briefed_by,
+      });
+      inherited_memory.push({
+        key: `proposal_context:${task.proposal_id}`,
+        body: pkg.context_text,
+      });
+    } catch {
+      // Non-fatal: context_packages table may not exist yet.
+    }
+  }
+
   // Step 6: Record briefing
   const briefing: SpawnBriefing = {
     briefing_id,

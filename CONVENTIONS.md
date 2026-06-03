@@ -58,16 +58,6 @@ Important live facts:
 - Do not drop compatibility columns or old views unless your task explicitly completes the runtime migration and verifies every dependent code path.
 - Live data may still contain legacy-cased stage values such as `REVIEW` and `DEVELOP`. Avoid brittle case-sensitive assumptions in SQL and code.
 
-**Process supervision topology (P1095 → P1132, mid-cutover):** MCP, orchestrator, state-feed, board, and agency liaisons are independent systemd units — peers, not parent/child; stopping the orchestrator does not stop MCP or liaisons. `agenthive-mcp.service` (`Restart=always`, `RestartSec=3`) owns the listener on `127.0.0.1:6421`; liveness check: `curl -fsS http://127.0.0.1:6421/health`.
-
-Agency liaisons have **two coexisting topologies** while the P1132 cutover completes — do not assume one:
-- **Canonical (P1132):** one per-host `agenthive-a2a-host.service` discovers all local agencies via `agent_registry.host_affinity` and holds their LISTEN sessions in-process. This is the only model with multi-tenant economics and is the target.
-- **Legacy (P1095):** per-agency `agenthive-agency@<id>.service` (`Restart=on-failure`, `RestartSec=15`, `Requires=agenthive-mcp.service`). `doctor.ts` flags running instances as legacy. **Still the live path** as of 2026-05-31 because a2a-host's cutover is incomplete (it excludes registered agencies and fails `bootLiaison: not registered` — see the V3 cutover tracker). Do NOT disable per-agency units until a2a-host is verified to boot a registered agency.
-
-Dispatchability is **heartbeat-derived** (`roadmap.v_agency_status.dispatchable` = active AND `last_heartbeat_at` < 60s; migration 186/P1104). `presence_state` and PG-listener existence are diagnostics only (`has_live_listener`), never sufficient — they go stale because the authoritative presence writer (a2a-host session lifecycle) lands with self-claim in P1438/C6. Full topology and failure-mode table: `docs/architecture/mcp-liaison-topology.md`; runbook `docs/operations/service-topology-runbook.md`; a2a-host troubleshooting `docs/operations/troubleshooting/a2a-host.md`.
-
-**Pool lifecycle invariant (P1123):** long-running services that use the shared Postgres singleton MUST call `setPoolLifecycleMode("long-running")` at startup. In long-running mode, accidental `getPool().end()` calls are ignored with an error-level stack trace; real shutdown must use `closePool()`, which bypasses the sentinel intentionally. If a service reports `pool_poisoned` on `control_feed` / `agent_lifecycle_events` or `Cannot use a pool after calling end`, follow `docs/operations/board-stale.md`.
-
 ### Workflow Vocabulary (quick reference)
 
 > Vocabulary canonicalized by P706. The table below is the authoritative quick-reference; §5 has full definitions, maturity semantics, MCP tools, and the Architecture RFC variant.
@@ -108,7 +98,7 @@ See §5 for the full workflow reference, maturity-level semantics, architecture 
 | `database/ddl/` | schema DDL and numbered rollout SQL | schema-qualified, idempotent, numbered files |
 | `database/dml/` | initialization data and seed-like artifacts | reference data, seeds |
 | `database/migrations/` | newer numbered migrations | one logical migration per file |
-| `docs/architecture/` | canonical architecture documents | durable design docs that survive multiple proposals (e.g., [`mcp-liaison-topology.md`](docs/architecture/mcp-liaison-topology.md) — P1095) |
+| `docs/architecture/` | canonical architecture documents | durable design docs that survive multiple proposals |
 | `docs/governance/` | constitution, decisions log, agent onboarding | durable governance |
 | `docs/pillars/` | pillar/proposal architecture docs | per-pillar canonical docs |
 | `docs/reference/` | reference material (schema migration, glossary, etc.) | durable reference |
@@ -136,23 +126,6 @@ See §5 for the full workflow reference, maturity-level semantics, architecture 
 - Never commit credentials, copied env files, or secrets from `.env`, `/etc/agenthive/env`, or local shell history.
 - Do not claim a deployment, migration, or verification step that you did not actually perform.
 - Gate cubic agents MUST call `prop_transition` (records gate_decision_log + flips status) and `set_maturity` after a verdict. The P611 reconciler is the safety net — omitting these is a protocol violation, not an acceptable shortcut.
-
-### Pool lifecycle invariant (P1123)
-
-Every long-running service (orchestrator, board, MCP server, notification-router, per-agency liaison) MUST call `setPoolLifecycleMode("long-running")` from `src/infra/postgres/pool.ts` at startup, **before any database access**. The default mode is `"one-shot"` for CLI subcommands and tests, which preserves the existing fast-exit behavior — `closePool()` and `pool.end()` on signature change both fire normally.
-
-In `"long-running"` mode:
-- `closePool()` is a no-op, logs the caller stack at warn.
-- `getPool()` with a changed signature keeps the existing pool, logs the caller stack at warn.
-
-Graceful shutdown handlers drop back to `"one-shot"` immediately before the final `closePool()` so the pool actually closes:
-
-```ts
-setPoolLifecycleMode("one-shot");
-await closePool();
-```
-
-Why this rule exists: shared CLI code (e.g., `agents send` subcommand exit, internal getPool signature-change path) can call `pool.end()` mid-process. In CLI mode that's fine — the process exits. In a long-running service it poisons every downstream consumer (broadcastSnapshot, LISTEN reconnect, TimeoutCron, ledger writes) for the remainder of the process. The 2026-05-15 agenthive-board.service outage (30 hours silent failure) is the canonical incident. See `docs/audit/p1123-pool-end-callers.md` for the full caller catalog and verdict matrix. A Phase 3 watchdog (`SELECT 1` probe + `pg_notify control_feed pool_poisoned`) provides defense in depth for any bypass path.
 
 ## 4a. Folder Discipline (mandatory for every cubic agent)
 
@@ -216,74 +189,34 @@ AgentHive work is proposal-driven. Participate through MCP, not through chat-onl
 | **feature** | Type B (Impl) | Standard RFC | Concrete capability to build |
 | **issue** | Type B (Impl) | Standard RFC | Problem in the product requiring code changes |
 | **hotfix** | Type C (Ops) | Hotfix | Localized operational fix to running instance |
-| **governance-amendment** | Type D (Governance) | Governance Amendment | Constitutional or governance rule change — 6 stages, 48h DELIBERATION, human MERGE approval. See P181. |
+| **governance-amendment** | Type G (Governance) | Governance Amendment | Constitutional or governance rule change — elevated 6-stage workflow with mandatory 48h deliberation, Skeptic quorum, and human-only final approval. See P181. |
 
 See `docs/architecture/architecture-proposal-type.md` for full guidance on when to use `architecture` vs. other types, advisory mechanics, migration rules, and child proposal spawning.
 
-### Workflow States (P706 unified vocabulary)
-
-P706 is the vocabulary authority for workflow stages. This section documents the unified 8-stage RFC vocabulary and 3-stage Hotfix vocabulary that boards, MCP surfaces, and agent-facing docs are expected to use. Treat older labels as migration artifacts only. See P706 for the design authority behind this vocabulary split.
-
 ### Standard RFC Workflow (product, component, feature, issue)
-
-The RFC workflow is the 8-stage path:
-
-`DRAFT -> REVIEW -> DEVELOP -> CODE_REVIEW -> TEST_WRITING -> TEST_EXECUTION -> MERGE -> COMPLETE`
 
 | State | Phase | Description |
 | :--- | :--- | :--- |
-| **DRAFT** | Formation | Initial proposal drafting, framing, and splitting if scope is still too broad. |
-| **REVIEW** | Gate | Feasibility, coherence, dependency, and architecture review before implementation starts. |
-| **DEVELOP** | Build | Main implementation work. |
-| **CODE_REVIEW** | Review | Peer review of the implementation delta. |
-| **TEST_WRITING** | Verify Prep | Add or update the acceptance tests and verification artifacts required for the change. |
-| **TEST_EXECUTION** | Verify | Run the acceptance checks and confirm the proposal is ready to integrate. |
-| **MERGE** | Integrate | Merge readiness, compatibility, rollout checks, and main-branch integration. |
-| **COMPLETE** | Terminal | Integrated and closed as the current shipped baseline. |
+| **DRAFT** | Architecture | Initial idea. If too broad or incoherent, **split it** into smaller proposals. |
+| **REVIEW** | Gating | Gating review for feasibility, coherence, and architectural fit. |
+| **DEVELOP** | Building | Building, coding and testing. |
+| **MERGE** | Integration | Merging branch to `main`. Focus on compatibility and stability. |
+| **COMPLETE** | Stable | Temporary stable state until the next evolution cycle begins. |
 
 ### Hotfix Workflow (hotfix)
 
-The hotfix workflow uses the lightweight 3-stage path, drawn from `roadmap.workflow_stages`:
-
-`DRAFT -> DEVELOP -> COMPLETE`
+The hotfix workflow uses the same 3-stage structure, drawn from `roadmap.workflow_stages`:
 
 | State | Phase | Description |
 | :--- | :--- | :--- |
-| **DRAFT** | Confirm | Confirm the defect, constrain scope, and decide that this remains a localized hotfix. |
-| **DEVELOP** | Apply | Implement and verify the operational fix. |
-| **COMPLETE** | Terminal | Fix applied, verified, and closed. |
+| **TRIAGE** | Confirm | Confirm the problem exists and is a localized operational fix |
+| **DEPLOY** | Apply | Specialist/ops claims and applies the fix (often higher privilege) |
+| **CLOSED** | Verified | Fix applied and verified working |
 
-### Governance Amendment Workflow (governance-amendment)
+**Terminal states:** CLOSED, WONT_FIX, NON_ISSUE  
+**Escape:** ESCALATE → creates a new issue proposal (Standard RFC)
 
-For constitutional or governance rule changes (P179 constitution, agent rights, workflow rules). File `type=governance-amendment` and cite the constitutional Article/Section in `proposal.summary`.
-
-| State | Gate | Requirements |
-| :--- | :--- | :--- |
-| **DRAFT** | D1 | Summary cites Article/Section; AC references sections being changed; doc-9 dependency link present |
-| **DELIBERATION** | D2 | Minimum 48h open window; no unresolved blocking concerns |
-| **REVIEW** | D3 | ≥2 distinct approvers including Skeptic; no blocking reviews |
-| **DEVELOP** | D4 | Migration + code/AC verification; CONVENTIONS.md updated |
-| **MERGE** | D5 | Human approval required (`agent_type=human`) — no auto-merge |
-| **COMPLETE** | — | doc-9 updated atomically; audit trail in `gate_decision_log` |
-
-**Rollback:** D2 blocked → return to DRAFT. D3 rejected → return to DELIBERATION. D5 rejected → return to REVIEW. doc-9 is only written at COMPLETE.
-
-**Bootstrapping note:** P181 is the first governance-amendment; it used a transitional path since the machinery was not yet deployed. All subsequent governance proposals must use `type=governance-amendment`.
-
-### Governance Amendment Workflow (governance-amendment)
-
-For constitutional or governance rule changes (P179 constitution, agent rights, workflow rules). File `type=governance-amendment` and cite the constitutional Article/Section in `proposal.summary`.
-
-| State | Gate | Requirements |
-| :--- | :--- | :--- |
-| **DRAFT** | D1 | Summary cites Article/Section; AC references sections being changed; doc-9 dependency link present |
-| **DELIBERATION** | D2 | Minimum 48h open window; no unresolved blocking concerns |
-| **REVIEW** | D3 | ≥2 distinct approvers including Skeptic; no blocking reviews |
-| **DEVELOP** | D4 | Migration + code/AC verification; CONVENTIONS.md updated |
-| **MERGE** | D5 | Human approval required (`agent_type=human`) — no auto-merge |
-| **COMPLETE** | — | doc-9 updated atomically; audit trail in `gate_decision_log` |
-
-**Rollback:** D2 blocked → return to DRAFT. D3 rejected → return to DELIBERATION. D5 rejected → return to REVIEW. doc-9 is only written at COMPLETE.
+> **Legacy note:** Older data may reference FIX, DEPLOYED, ESCALATE, REJECTED, DISCARDED, REPLACED from pre-P774 hotfix vocabulary. These are migration artifacts; do not introduce them in new code.
 
 ### Governance Amendment Workflow (governance-amendment)
 
@@ -317,28 +250,26 @@ Both workflows share the same maturity axis and are stored in `roadmap.workflow_
 
 | Attribute | RFC value | Hotfix value | Source |
 | :--- | :--- | :--- | :--- |
-| Status values | DRAFT, REVIEW, DEVELOP, MERGE, COMPLETE | DRAFT, DEVELOP, COMPLETE | `roadmap.workflow_stages` |
+| Status values | DRAFT, REVIEW, DEVELOP, MERGE, COMPLETE | TRIAGE, DEPLOY, CLOSED | `roadmap.workflow_stages` |
 | Maturity values | new, active, mature, obsolete | same | `roadmap_proposal.proposal.maturity` |
-| Terminal closure | COMPLETE with terminal-stage semantics from the active workflow | COMPLETE with terminal-stage semantics from the active workflow | `roadmap.workflow_stages` |
+| Terminal closure | COMPLETE/mature | CLOSED/mature | stage `is_terminal = true` |
 | Obsolete reason | `obsoleted_reason TEXT` free-text | same | `roadmap_proposal.proposal.obsoleted_reason` |
 
-### Boards Are Workflow-Aware
+### Terminal closure
 
-Boards render columns from `roadmap.workflow_stages` for the active workflow and ordered stage definitions in that table. A Workflow filter is required on every board surface and must be resolved before columns are rendered. No code path may hardcode a list of stage columns or infer them from proposal type without first resolving the active workflow.
+A proposal reaches terminal closure when it enters a terminal stage at `mature` maturity:
 
-### Terminal Closure
+| Workflow | Terminal state | Meaning |
+| :--- | :--- | :--- |
+| RFC | COMPLETE + mature | Delivered and stable. No further gate advances are queued. |
+| Hotfix | CLOSED + mature | Fix applied and verified in production. |
+| Hotfix escape | WONT_FIX, NON_ISSUE | Problem acknowledged but will not be fixed; case closed. |
 
-Closing a proposal as terminal and closing a proposal as obsolete are different actions:
+`obsoleted_reason` (TEXT, free-text) must be populated whenever `maturity` is set to `obsolete`. Obsolete is not a terminal stage — it can apply in any state — but obsolete proposals are not dispatched and are filtered from active boards.
 
-- Terminal closure follows the active workflow and lands on its terminal stage, typically `COMPLETE`.
-- Obsolete closure uses `maturity='obsolete'`.
-- `obsoleted_reason` is free-text and must explain why the proposal became obsolete; it is not an enum and must not be treated as one in code or UI.
+### Boards are workflow-aware
 
-`obsoleted_reason` must be populated whenever `maturity` is set to `obsolete`. Obsolete is not a terminal stage — it can apply in any state — but obsolete proposals are not dispatched and are filtered from active boards.
-
-### Out Of Scope
-
-`Code Review Pipeline` is a separate workflow family and is out of scope for this vocabulary section. Do not use it to infer RFC or Hotfix stage names.
+Board columns are rendered from `roadmap.workflow_stages` for the active workflow. A workflow filter is always required. No code path may hardcode a list of stages — columns must derive from the stage registry at runtime.
 
 ### Architecture RFC Workflow (architecture)
 
@@ -417,7 +348,7 @@ Do not wait for a human to ask twice if the need is clear. The proposal system, 
 
 Notes:
 
-- The default lifecycle is workflow-defined. Resolve the active workflow and read its ordered stages from `roadmap.workflow_stages` instead of assuming a fixed five-stage path.
+- The default lifecycle is `Draft -> Review -> Develop -> Merge -> Complete`.
 - Proposal type determines workflow selection. Do not invent ad-hoc types. Check existing usage or `roadmap.proposal_type_config` before creating new proposals.
 
 ### 5a-release. Lease release — reason taxonomy and lock ordering
@@ -495,7 +426,7 @@ The multi-tenancy program is sequenced into four phases tracked in `roadmap.prog
 SELECT p.display_id, p.title, p.status, p.maturity
 FROM roadmap.proposal p
 WHERE p.phase_id = <N>
-  AND p.status <> 'COMPLETE'
+  AND p.status NOT IN ('COMPLETE','DEPLOYED')
 ORDER BY p.id;
 
 -- Phase progress dashboard
@@ -569,71 +500,6 @@ Both are well below Postgres NOTIFY queue capacity (~10K–50K/sec). Per-subscri
 
 **Rule:** do not add a per-subscriber fan-out table or subscription registry without a new proposal and load evidence that 50× broadcast spike has actually been observed. Per-subscriber can be layered in as an optimization later; it is not the default.
 
-### 6.0d Permanent agent naming convention (P996)
-
-Permanent agents use provider-scoped first-name pools. First letter maps to provider:
-
-| Prefix | Provider | Male names (builder/default) | Female names (skeptic/review only) |
-| ------ | -------- | ----------------------------- | ---------------------------------- |
-| `a*`   | Claude / Anthropic | adam, alan, alex, andrew, andy | alice, ana |
-| `c*`   | Codex    | cooper, carter, calvin, clark, cory | chloe, cora |
-| `g*`   | Gemini   | george, glen, grant, graham | grace, gina, gwen |
-| `p*`   | Copilot  | peter, patrick, paul, preston, pete, pablo | paige, piper, petra |
-| `h*`   | Hermes   | henry, harry, harrison, hudson | hannah, hazel |
-
-**Gender-role rule:** male names = builder/developer/architect (active workers, default dispatch targets). Female names = skeptic/reviewer (seeded inactive; enabled only for review cycles). The first-boot agent for any provider MUST be a male name.
-
-**Expertise suffix:** append `.dev`, `.test`, `.review`, etc. as an operator-facing hint — e.g. `george.dev`, `pete.test`. The suffix does not affect provider routing.
-
-**Agency/liaison labels:** dotted labels distinguish roles on the shared `bot` host:
-- `.a` = combined agency+liaison process (e.g. `claude.a`, `gemini.a`)
-- `.l` = pure-relay liaison (reserved; not yet implemented)
-- `provider.<owner>.a` = provider agency scoped to an owner (e.g. `copilot.gary.a`)
-
-**Module:** `src/core/identity/agent-registry/permanent-agent-map.ts` — `resolvePermanentAgentMapping(input)` normalises any registered name (bare, qualified, with suffix, with @host) to `{ agentIdentity, provider, displayName, permanentRole, host }`. Wire this into every registration path; do not add new hardcoded name sets.
-
-**Supersedes:** P930's `provider-role` convention for permanent agents, agencies, and liaisons. P919 remains the parent display-alias architecture.
-
-**Cross-host labels (`@host`) are deferred** — A2A channel validation does not yet allow `@` in stored routing identities. See P996 for the deferred cross-host relay design.
-
-### 6.0e A2A thread_id and reply-semantics enforcement (P907)
-
-**thread_id column** (`roadmap.message_ledger.thread_id BIGINT NOT NULL`) groups all messages in a conversation tree by their root message id. Populated entirely by the DB:
-
-- **Trigger `trg_message_ledger_set_thread_id`** (`fn_message_ledger_set_thread_id`) fires BEFORE INSERT on every row.
-  - Root message (`reply_to IS NULL`): `NEW.thread_id := NEW.id` (pre-fetches nextval when caller omits id).
-  - Reply: inherits `thread_id` from parent row (single lookup); falls back to a recursive CTE walk if parent was inserted before the trigger existed.
-  - App may pre-compute `thread_id` and pass it to skip the walk entirely.
-- **Index** `idx_message_ledger_thread_id_created_at (thread_id, created_at)` covers thread-range queries.
-- **Migration**: `scripts/migrations/130-p907-message-ledger-thread-id.sql` (backfill + trigger + index).
-
-**Schema enforcement** (migration `131-p907-message-ledger-schema-enforcement.sql`):
-- `CHECK (reply_to IS NULL OR reply_to < id)` — prevents future-pointer DAG violations.
-- **Trigger `trg_message_ledger_inherit_correlation_id`** (`fn_message_ledger_inherit_correlation_id`) auto-copies `correlation_id` from the parent row when `NEW.correlation_id IS NULL AND NEW.reply_to IS NOT NULL`. Defensive safety net for forgetful INSERT paths.
-
-**App-side gaps catalogued by P907 AC3 audit** (24 INSERT sites; 2 correct, 20 inconsistent) are tracked in child proposals for incremental fix:
-- P907-A (P1): `msg_send` missing `correlation_id` param; `msg_reply` not setting `reply_to`.
-- P907-B (P2): escalation rows, `A2AMessenger.send`, liaison handlers, `cross-host-relay` NACK.
-
-Until those fixes land, the DB triggers provide a partial safety net but thread coherence is incomplete for reply chains.
-
-### 6.0f Role resolution — two-level rule (P609 × P748)
-
-Two role-resolver layers coexist by design. **Do not merge them.**
-
-| Layer | File | Key space | DB table | Cache invalidation |
-| :---- | :--- | :-------- | :------- | :----------------- |
-| **Queue-role resolver** (P748) | `src/core/orchestration/role-resolver.ts` | `(workflow_template_id, stage, maturity, project_id?)` | `roadmap.agent_role_profile` | Process-start only |
-| **Gate-role resolver** (P609) | `src/core/orchestration/gate-role-resolver.ts` | `(proposal_type, gate)` | `roadmap_proposal.gate_role` | NOTIFY `gate_role_changed` |
-
-**Queue-role resolver** is consumed by `scanQueues()` for queue-driven dispatch: "given this workflow template, stage, and maturity, which agent role handles it?"
-
-**Gate-role resolver** is consumed by gate evaluation: "given this proposal type and gate (D1–D4), which reviewer role and what persona should be used?" It stores complete agent personas (the D1–D4 behavioral checklists) that the queue-driven schema cannot express.
-
-**Why they cannot be merged:** the gate path requires `(proposal_type, gate)` tuple lookups with per-type persona overrides and a `gate_role_changed` NOTIFY subscription for live cache invalidation. The queue-driven path uses `(workflow_template_id, stage, maturity)` — a different key space with no D1–D4 gate enumeration concept.
-
-**Rule:** changes to gate reviewer personas belong in `roadmap_proposal.gate_role` (then `NOTIFY gate_role_changed`). Changes to queue dispatch roles belong in `roadmap.agent_role_profile`.
-
 ### 6.0 Database Topology (target architecture)
 
 AgentHive runs on a **two-tier Postgres topology**:
@@ -681,26 +547,6 @@ AgentHive runs on a **two-tier Postgres topology**:
 - Inside a tenant DB: project-chosen schemas (e.g., `audio.`, `song.`); never use `roadmap.` in a tenant DB.
 - Cross-DB joins are forbidden. If a handler needs both, it issues two queries and joins in code.
 
-### 6.0d Role resolution two-level rule (P909)
-
-Two role-resolver layers coexist by design — they are **not duplicates**:
-
-- **`src/core/orchestration/role-resolver.ts` (P748):** keyed by `(workflow_template_id, stage, maturity, project_id?)`. Used by `scanQueues()` for queue-driven dispatch. Returns an ordered list of `RoleProfile[]` (role name + capabilities + allowed providers).
-- **`src/core/orchestration/gate-role-resolver.ts` (P609):** keyed by `(proposal_type, gate)`. Used by gate-evaluator selection where the workflow context (`workflow_template_id`) is not available at decision time. Returns a `GateRoleProfile` with `persona`, `outputContract`, `modelPreference`, `toolAllowList` — fields not present in `RoleProfile`.
-
-**Do not merge these without a separate proposal** that proves the gate path can be expressed in the queue-driven schema. The key difference: gate resolution needs the proposal *type* (`feature`, `hotfix`, …) and the gate label (`D1`–`D4`), not the workflow template ID. At the time gate-evaluator selection runs in `scripts/orchestrator.ts`, the workflow template context may not be resolved yet.
-
-**`src/core/workflow/role-resolver.ts` (deleted, P748 alternate):** was a never-wired duplicate of `orchestration/role-resolver.ts`. Removed in P909.
-
-### 6.0e Boards render from workflow stages (P706)
-
-Boards are workflow-aware surfaces, not fixed RFC boards.
-
-- Render columns from `roadmap.workflow_stages` for the active workflow.
-- Require an explicit Workflow filter so column selection is unambiguous.
-- Do not hardcode stage lists in UI, API, TUI, or orchestration code.
-- When workflow metadata changes, boards must reflect the new ordered stages without a code edit.
-
 ### 6.1 DDL belongs in `database/ddl/`
 
 Use `database/ddl/` for schema structure:
@@ -715,11 +561,9 @@ Use `database/ddl/` for schema structure:
 
 Current canonical references:
 
-- `database/ddl/roadmap-baseline-2026-04-13.sql` — full schema baseline (snapshot applied 2026-04-13)
-- `database/ddl/v4/` — ordered delta migrations applied on top of the baseline (002–056+)
-- `database/ddl/hivecentral/` — hiveCentral control-plane DDL (000–015+)
-
-> **Note:** `roadmap-ddl-v2.sql` and `roadmap-ddl-v2-additions.sql` are retired filenames. Do not reference them. See [P305 schema-drift ship report](docs/features/P305-schema-drift-ship-report.md) for the full delta log.
+- `database/ddl/roadmap-ddl-v2.sql`
+- `database/ddl/roadmap-ddl-v2-additions.sql`
+- numbered rollout files such as `002-...sql`, `003-...sql`, `012-...sql`
 
 DDL rules:
 
@@ -860,14 +704,42 @@ COMMIT;
 - The NOTIFY trigger (`fn_gate_role_notify`) fires on both the UPDATE and the INSERT, invalidating the resolver's TTL cache automatically.
 - The audit trigger (`fn_gate_role_audit`) captures the `old_persona`, `old_output_contract`, and `old_lifecycle_status` into `gate_role_history` on every UPDATE. No manual audit insertion is required.
 
+## 7. Git and Worktree Best Practices
 
-## 7. Git Discipline for Multi-Agent Work
+AgentHive is multi-agent. Git discipline is part of system safety.
 
-**See GIT.md and WORKFLOW.md for complete parallel-agent discipline** (isolated worktrees, atomic commits, safety checks, merge protocol, self-merge anti-pattern, live-DB test hygiene, parallel-dispatch audit, migration numbering).
+### Branching and worktrees
 
-For project context and workflow stages, see CONVENTIONS.md §1–2 (Proposal Lifecycle and File Precedence).
+- Use one worktree per active agent/task.
+- Use a branch name that identifies the agent and topic, for example `xiaomi/schema-rollout` or `codex/workflow-defaults`.
+- Do not work inside another agent's worktree unless explicitly coordinating.
 
-For deep reference (DB schema, control-plane architecture, escalation matrix), see CONVENTIONS.md §3.0 onwards (link as-needed).
+### Commits
+
+- Commit coherent units of work early.
+- Keep commit messages specific to the changed files or proposal.
+- Prefer multiple small commits over one mega-commit when the work naturally separates.
+- If you change behavior, update the related docs in the same branch.
+
+### Shared-history rules
+
+- Do not rewrite shared history.
+- Do not force-push a branch another agent may be using.
+- Do not amend someone else's commit.
+- Rebase only your own unpublished work.
+- If a branch has already been merged or consumed by another agent, fix forward with new commits.
+
+### Conflict handling
+
+- Read both sides before resolving conflicts.
+- Never delete unknown changes just to get a clean merge.
+- If the repo root contains local changes and the live service runs from that root, remember that a restart may pick up those changes immediately.
+
+### Safety
+
+- Do not use destructive Git commands to discard work you did not create.
+- If you encounter unexpected changes, assume they may be intentional until proven otherwise.
+
 ## 8. Validation and Deployment Expectations
 
 - For code changes, run the relevant existing tests, build steps, or targeted checks already provided by the repo.
@@ -880,48 +752,6 @@ For deep reference (DB schema, control-plane architecture, escalation matrix), s
   - live MCP smoke test
 
 Precision matters more than confidence theater.
-
-### 8.1 Local CI gate (P417) — trigger conditions and tier selection
-
-**Source of truth:** `scripts/gate.sh` — all required checks are listed there. This section documents the trigger conditions and structural intent.
-
-**Required capabilities:** `ci`, `typescript` (as declared in proposal P417).
-
-Run `npm run ci` (or `bash scripts/gate.sh`) before any of the following:
-- Restarting a service or systemd unit
-- Merging to `main`
-- Changing an MCP tool or MCP server configuration
-- Applying a database migration
-
-**Two-tier structure:**
-
-| Tier | Command | When required | Time budget |
-|---|---|---|---|
-| **Tier 1 — fast preflight** | `npm run ci -- --preflight` | Before any commit on TypeScript sources | <10 s |
-| **Tier 2 — full gate** | `npm run ci` (default) | Before restart, MCP change, migration, or merge | <60 s |
-
-**Tier 1 checks (always blocking):**
-1. `biome check --changed --since=origin/main` — lint + format on git-changed files only (full-repo has 1000+ pre-existing violations; changed-file scope makes this enforceable)
-2. `tsc --noEmit -p tsconfig.check.json` — typecheck green zone (hive-cli + identity + workflow)
-3. `bash scripts/ci-env-check.sh` — no bare `process.env.PG*` reads outside config layer
-
-**Tier 2 checks (blocking unless explicitly deferred):**
-4. `bash scripts/ci/check-migration-drops.sh` — DROP/RENAME column with surviving codebase refs
-5. `node --import jiti/register scripts/check-migration-prefixes.ts` — sequential migration numbering, no gaps
-6. `bash scripts/check-hardcoded.sh` — no literal host paths, ports, or model names in source
-7. `node scripts/check-publish-hygiene.mjs` — only checked when `package.json` changed vs `origin/main`
-
-**Migration directory boundary:**
-- `scripts/migrations/` — **canonical active directory** (post-P753). All new migrations go here.
-- `database/migrations/` — **legacy directory** (pre-P753). Contains pre-existing duplicate prefixes from before P753 introduced the split; treat as read-only historical record. The migration prefix check runs against `scripts/migrations/` only.
-
-**Deferred (informational, continue-on-error):**
-- Migration prefix/sequence check — 21+ pre-existing duplicate prefix groups in `scripts/migrations/`; renumbering tracked under P417 child proposal
-- SQL column audit — requires `AUDIT_DATABASE_URL`; tracked under P677 allowlist work
-- Workflow-state literal guard — tracked under P453 canonical state-names module
-- Broader TypeScript scope (cli.ts, mcp-server/server.ts, server/index.ts, core/infrastructure/, infra/) — pre-existing errors tracked under P417 child proposals
-
-Exit codes: `0` = all required checks pass; `1` = one or more required checks failed; `2` = invocation error.
 
 ### 8d. Project scope (P477 AC-2)
 
@@ -1170,33 +1000,6 @@ Concrete instruction the enhancing agent can act on without further context.
 
 `advance` verdicts also write to `gate_decision_log` (via `prop_transition` which records the decision) and may omit the failures/remediation sections.
 
-#### §AC-Verification — Mandatory evidence standard (P707)
-
-**Every `verify_ac` call with `status='pass'` MUST include a non-empty `details` object.**  
-Omitting `details` (or passing `{}`) returns `EVIDENCE_REQUIRED` (422). The MCP handler rejects it structurally — prompt-compliance alone is insufficient.
-
-**Evidence schema by category** — pass `category` alongside `details` to enable key-level validation (returns `SCHEMA_MISMATCH` on missing required keys):
-
-| Category | Required keys in `details` |
-| :--- | :--- |
-| `schema/migration` | `migration_file` (str), `tables` (array), `applied` (bool) |
-| `file/module` | `files` (array), `symbols` (array), `grep_evidence` (str) |
-| `mcp_tool` | `tool_name` (str), `action` (str), `call_verified` (bool), `response_sample` (str) |
-| `behavioral/test` | `test_file` (str), `test_names` (array), `result` ("pass"\|"fail"), `output_snippet` (str) |
-
-**Mandatory pre-check protocol for D3 gate agents:**
-
-Before calling `verify_ac` for any AC, the gate agent MUST:
-1. Identify the AC category (schema/migration, file/module, mcp_tool, or behavioral/test).
-2. Run the category-appropriate check:
-   - **schema/migration**: confirm migration file exists, list tables added, run `\d tablename` or `SELECT` to verify applied.
-   - **file/module**: `grep -n <symbol> <file>`, confirm file path exists, collect output snippet.
-   - **mcp_tool**: invoke the tool (or describe the call); capture response sample.
-   - **behavioral/test**: run the test, capture pass/fail + output snippet.
-3. Include actual output in `details` before calling `verify_ac`. Do NOT call `verify_ac` first and describe what you _would_ have found.
-
-**Batch guard:** the handler tracks timestamps in-process. More than 2 `verify_ac` calls for the same proposal within any 5-second window returns `BATCH_GUARD_TRIGGERED` (429). This enforces sequential verification — run one check, call `verify_ac`, run the next check. *Added 2026-05-26 (P707).*
-
 #### Source-of-truth rule (DB > markdown)
 
 Product design content lives in DB proposal rows (`proposal.design`, `proposal.summary`, `proposal.motivation`) plus the relational tables (`proposal_acceptance_criteria`, `proposal_dependencies`, `proposal_reviews`, `proposal_discussions`, `gate_decision_log`). Markdown files under `docs/proposals/` are documentation surface; they are NOT authoritative. 
@@ -1272,10 +1075,10 @@ The orchestrator handles the "how" of dispatch. Hermes handles the "what" and "w
 
 | Cubic Phase | Design Intent | Why | Cost Tier |
 | :--- | :--- | :--- | :--- |
-| **Design** (DRAFT, REVIEW) | Deep reasoning model | Architecture, adversarial review | Premium |
-| **Build** (DEVELOP) | Code generation model | Implementation, review prep, verification prep | Standard |
-| **Test** (MERGE) | Balanced model | Acceptance execution, integration validation | Standard |
-| **Ship** (COMPLETE) | Fast economy model | Documentation, finalization, low-cost | Economy |
+| **Design** (DRAFT, REVIEW, TRIAGE) | Deep reasoning model | Architecture, adversarial review | Premium |
+| **Build** (DEVELOP, DEPLOY) | Code generation model | Implementation, balanced cost | Standard |
+| **Test** (MERGE) | Balanced model | Integration testing, validation | Standard |
+| **Ship** (COMPLETE, CLOSED) | Fast economy model | Documentation, finalization, low-cost | Economy |
 
 **To see actual routed models:** Query `model_routes` in the DB or check `roadmap.yaml`. Do not hardcode model names from this table into code — the DB is the source of truth.
 
@@ -1445,150 +1248,4 @@ All PostgreSQL connection parameters **must** be read through `ConfigResolver`, 
 - `StructuralKeys.PGUSER` has `defaultValue: "admin"` to avoid hardcoded fallbacks
 - `SecretKeys.PGPASSWORD` is `required: false` — pgpass/libpq are valid authentication paths
 
-## 20. Messaging, Presence, and Events (P1017)
-
-### 20.1 Messaging — Unified Message Bus
-
-**Canonical table:** `roadmap.message_ledger` — all inter-agent communication flows here.
-`liaison_message` is a legacy parallel bus and will be retired once all listeners migrate.
-
-**Message types** (enforced by CHECK constraint on `message_type`):
-
-Canonical source of truth: `src/infra/messaging/types.ts` (`MESSAGE_TYPES` const + `MessageType` type).
-Drift detected by `scripts/check-message-type-drift.ts` (exits 1 if TS ≠ DB). Run it after any migration that touches `message_type`.
-
-| Type | Usage |
-| :--- | :--- |
-| `text` | Human-readable content / chat |
-| `task` | Work assignment from orchestrator or agent |
-| `task_request` | Agent-initiated work request |
-| `task_ack` | Acknowledgement of a task receipt |
-| `task_status` | Progress update on an in-flight task |
-| `task_complete` | Task completed successfully |
-| `task_error` | Task failed with error details |
-| `notify` | Informational notification (no reply expected) |
-| `ack` | Explicit acknowledgement of a prior message |
-| `error` | Error report from agent |
-| `event` | Structured lifecycle event |
-| `liaison` | Legacy liaison-bus message type (deprecated) |
-| `protocol_ping` | Low-level liveness ping |
-| `protocol_pong` | Low-level liveness pong |
-
-**Routing rules:**
-- Direct agent messages: `to_agent` set, `channel` NULL
-- Channel broadcast: `channel` set (e.g. `team:dev`, `system:alerts`), `to_agent` NULL
-- System-origin messages: `from_agent = 'system'` or NULL — bypass ACL gates
-
-**Room ACL (AC-28):** `enforce_room_acl()` / `trig_room_acl` fires BEFORE INSERT on `message_ledger`. INSERTs to `team:*` or `system:*` channels are rejected (SQLSTATE 23514) unless `from_agent` appears in `roadmap.room_membership` with `revoked_at IS NULL`.
-
-**Idempotent ack (AC-22):** Use `roadmap.message_ack` for exactly-once delivery tracking. Insert with a client-generated `nonce uuid` — the `UNIQUE(nonce)` constraint returns 23505 on duplicates, making retries safe.
-
-**USER identity (AC-10):** `user/gary` (and any `user/*` identity) has `agent_type='user'` in `roadmap_workforce.agent_registry`. The `user` type is first-class alongside `human`, `llm`, `tool`, `hybrid`, `agency`, `workforce`, `coordinator`.
-
-**Bearer-token auth (AC-27):** `msg_send` calls where `from_agent` starts with `user/` require an `Authorization: Bearer <token>` header. The token's `sub` claim must match the `from_agent` identity. Missing token → 401. Sub mismatch → 403. Valid token → message accepted.
-
-### 20.2 Presence — Decoupled Presence State
-
-**Canonical function:** `roadmap.fn_pulse(p_agency_id text, p_state text)` — updates `roadmap.agency.presence_state` and fires `pg_notify('agency_presence_changed', json)` **only on state transitions**. Heartbeat rows no longer appear in `message_ledger` (AC-2: historical rows pruned).
-
-**NOTIFY payload** (from fn_pulse):
-```json
-{ "agency_id": "<identity>", "state": "<new-state>", "ts": "<iso-timestamp>" }
-```
-
-**Dispatchable threshold:** `v_agency_status` considers an agency dispatchable if `last_heartbeat_at > now() - interval '00:01:00'` (60 seconds). Do not change this threshold without updating both the view and the monitoring alert.
-
-**Presence states:** `active`, `idle`, `busy`, `offline`, `draining` — stored in `roadmap.agency.presence_state`.
-
-**Rule:** never write heartbeat events to `message_ledger`. Call `fn_pulse` directly from the heartbeat handler.
-
-### 20.3 Events — NOTIFY Channel Conventions
-
-All `pg_notify` channels follow a strict naming scheme:
-
-| Channel | Producer | Consumer | Purpose |
-| :--- | :--- | :--- | :--- |
-| `agency_presence_changed` | `fn_pulse` | Orchestrator, liaisons | Presence state transitions |
-| `a2a_msg_<identity>` | `fn_a2a_message_notify` / `fn_liaison_notify_new_message` | Agency liaison (LISTEN side) | All per-agent messages (DM + uplink) |
-| `gate_role_changed` | Operator / migration | Gate-role resolver cache | Persona refresh |
-| `new_proposal` | Proposal INSERT | Orchestrator scan | Proposal discovery |
-
-**Namespace rule (AC-25):** all per-agent channels use the fully-qualified identity as suffix (e.g. `a2a_msg_agent/copilot-one`). Canonical identity form is `<type>/<name>` — never use aliases or display names in NOTIFY channel names.
-
-**LISTEN subscription (AC-26):** agency liaisons subscribe to `a2a_msg_<own-identity>` on startup (unified channel after migration 144). Both `fn_a2a_message_notify` (on `message_ledger`) and `fn_liaison_notify_new_message` (on `liaison_message`) fire on this prefix. Do NOT use `liaison_message_<identity>` — that channel is retired.
-
-**Rule:** do not add NOTIFY calls outside schema functions or the sig-reconciler. Application code uses `pg_notify` only via `PgMessagingHandlers` or direct `fn_pulse` invocations — never raw SQL in request handlers.
-
 This is enforced automatically — violations will fail the CI check.
-
-## 20. Capability Vocabulary Mismatch Remediation — P1290 AC-7
-
-The orchestrator boot path runs `scripts/orchestrator-capability-coverage-check.ts` in `--warn-only` mode and logs a warning if any role in `ROLE_TO_REQUIRED_CAPABILITIES` (`src/core/orchestration/offer-dispatch.ts:54`) maps to a capability with zero matching dispatchable agencies.
-
-**Boot warning text** (look for this in `journalctl -u agenthive-orchestrator.service`):
-```
-[capability-coverage] WARN: capability "<cap>" required by roles [<role>, ...] has no matching dispatchable agency
-```
-
-When this warning fires, the operator has two remediation paths:
-
-**Path A — adjust the role map** (use when the missing capability is a vocabulary mistake, not a real capability gap):
-
-Edit `src/core/orchestration/offer-dispatch.ts` to re-map the affected role(s) to a capability that already has agency coverage, then redeploy. Example: re-map a niche role to the default `develop` capability.
-
-**Path B — seed the missing capability on an active agency** (use when the capability is real and an agency should advertise it):
-
-```sql
-UPDATE roadmap_workforce.provider_registry
-SET capabilities = jsonb_set(
-  capabilities,
-  '{jobs}',
-  COALESCE(capabilities->'jobs', '[]'::jsonb) || '"<cap>"'::jsonb
-)
-WHERE agency_identity = '<agency>'
-  AND status = 'active';
-
-NOTIFY capability_vocabulary_changed;
-```
-
-The NOTIFY clears any `proposal_role_pause` rows whose pause_reason is `no_eligible_agency` or `capability_mismatch` (P1291 auto-clear), letting dispatch retry immediately.
-
-Verify both paths with `bun run scripts/orchestrator-capability-coverage-check.ts` (no `--warn-only`); exit code 0 means coverage is complete. The same check runs in CI (see `.gitlab-ci.yml`) and will fail any PR that drifts.
-
-## §model-capability-scores — AC-10 (P1006)
-
-All entries in `roadmap_workforce.model_capability_profile` score each capability dimension on a 0–5 integer scale:
-
-| Score | Label | Meaning |
-| :---: | :--- | :--- |
-| **0** | incapable | Cannot perform the task reliably. Do not route this category here. |
-| **1** | toy | Handles trivial cases only; fails on structured/complex inputs. |
-| **2** | adequate / bounded | Functional for simple, well-scoped tasks. No complex reasoning expected. |
-| **3** | solid / structured-output | Reliable for standard work; handles structured outputs and moderate complexity. |
-| **4** | strong / general-purpose | Handles difficult tasks; strong instruction following and multi-step reasoning. |
-| **5** | best-in-class | Maximum capability in this dimension among currently active providers. |
-
-This rubric covers four scored dimensions: `reasoning_score`, `code_quality_score`, `instruction_following_score`, and (implicit) context throughput via `context_window_k`.
-
-**Rubric stability policy:** scores are only changed via a formal proposal. Ad-hoc DB edits are permitted for factual corrections (e.g. provider changes a model's context window) but require a `notes` update and `updated_at` refresh. Capability re-scoring that changes routing decisions must go through a proposal.
-
-## §task-categories — AC-16 (P1006)
-
-`roadmap.work_offer.task_category` classifies every dispatched offer into exactly one of eight categories. The resolver uses this to enforce spawn-eligibility and minimum reasoning requirements before matching agents.
-
-| Category | Spawn Required | Min Reasoning | Eligible Providers | Examples |
-| :--- | :---: | :---: | :--- | :--- |
-| `mechanical` | No | 0 | All | Linting, changelog, env audit, log tailing, boilerplate |
-| `workspace` | No | 0 | All incl. copilot/gemini | File management, branch cleanup, migration slot check |
-| `liaison` | No | 0 | All incl. copilot/gemini | Status pings, message routing, notification relay |
-| `testing` | **Yes** | 0 | anthropic, codex | Unit/integration test runs, coverage analysis |
-| `implementation` | **Yes** | 0 | anthropic, codex | Feature coding, bug fixes, migration authoring |
-| `analysis` | **Yes** | 0 | anthropic, codex | Data analysis, cost modelling, dependency mapping |
-| `architecture` | **Yes** | **5** | anthropic (opus only) | Design review, AC authorship, system decomposition |
-| `review` | **Yes** | **5** | anthropic (opus only) | Gate decisions, D1–D4 verdicts, spec coherence checks |
-
-**Spawn Required** means the provider must have `can_spawn_workers = true` in `model_capability_profile`. Copilot and Gemini are excluded for all spawn-required categories regardless of cost tier.
-
-**Min Reasoning = 5** means only models with `reasoning_score = 5` are eligible. In the current seed data this is `claude-opus-4-7` (anthropic) only.
-
-Default value for new offers: `'mechanical'` — safe for any provider.
