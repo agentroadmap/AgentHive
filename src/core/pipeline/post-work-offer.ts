@@ -16,6 +16,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { query as defaultQuery } from "../../infra/postgres/pool.ts";
 import { ObservabilityWriter } from "../observability/observability-writer.ts";
+import { autoCharterIfNeeded } from "./auto-charter.ts";
 
 const obs = new ObservabilityWriter("agency:offer-pipeline");
 
@@ -345,6 +346,16 @@ export async function postWorkOffer(
 				attempt_count: row.attempt_count,
 			}),
 		]);
+	}
+
+	// P182 AC-9: auto-charter the team when ≥2 alive offers exist for this proposal.
+	// Fail-safe — charter errors must never block the primary offer pipeline.
+	if (!row.was_replay) {
+		try {
+			await autoCharterIfNeeded(input.proposalId, queryFn);
+		} catch {
+			// swallow — charter failure is non-fatal
+		}
 	}
 
 	// P908-D: open+close offer_posted span so the trace records the dispatch event.
