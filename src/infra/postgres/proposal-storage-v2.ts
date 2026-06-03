@@ -5,6 +5,11 @@
  */
 import { getPool, query } from "./pool.ts";
 import { Maturity } from "../../core/workflow/state-names.ts";
+import {
+	stageEnforcer,
+	type StageName,
+} from "../../gate_pipeline/workflow_stages.ts";
+import { getProposalAuditPause } from "../../gate_pipeline/frontier_audit.ts";
 
 const PROPOSAL_COLUMNS = `
   id, display_id, parent_id, type, status, maturity, title,
@@ -517,6 +522,24 @@ export async function transitionProposal(
 				`record which agent or human made the gating decision`,
 			);
 		}
+	}
+
+	// Stage enforcement: block gated stage transitions that skip prerequisites.
+	// stageEnforcer() throws StageEnforcerError if required prior stages are missing.
+	const proposalForEnforcer = {
+		id: BigInt(proposalId),
+		display_id: `P${proposalId}`,
+		title: "",
+	};
+	await stageEnforcer(proposalForEnforcer, toState as StageName);
+
+	// Frontier audit pause: block advancement if a critical audit pause event exists.
+	const auditPause = await getProposalAuditPause(proposalId);
+	if (auditPause) {
+		throw new Error(
+			`Proposal ${proposalId} has an active frontier audit hold: ${auditPause.reason}. ` +
+				`Resolve the audit finding before advancing.`,
+		);
 	}
 
 	// Validate transition exists

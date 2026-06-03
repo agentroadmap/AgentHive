@@ -82,6 +82,47 @@ export function startFrontierAudit(opts: {
 	return { stop: () => clearInterval(timer) };
 }
 
+// ─── Audit pause helpers ──────────────────────────────────────────────────────
+
+/**
+ * Write a frontier_audit_pause event to block proposal advancement.
+ * Called when the audit loop finds a CRITICAL severity issue.
+ */
+export async function pauseProposalAdvancement(
+	proposalId: bigint,
+	reason: string,
+	queryFn: QueryFn = defaultQuery,
+): Promise<void> {
+	await queryFn(
+		`INSERT INTO roadmap_proposal.proposal_event (proposal_id, event_type, payload)
+		 VALUES ($1, 'frontier_audit_pause', $2::jsonb)`,
+		[proposalId, JSON.stringify({ reason })],
+	);
+}
+
+/**
+ * Return the most recent active audit pause for a proposal, or null if none.
+ * transitionProposal() calls this to block advancement when an audit pause exists.
+ */
+export async function getProposalAuditPause(
+	proposalId: number,
+	queryFn: QueryFn = defaultQuery,
+): Promise<{ reason: string } | null> {
+	const { rows } = await queryFn<{ payload: { reason: string } }>(
+		`SELECT payload
+		 FROM roadmap_proposal.proposal_event
+		 WHERE proposal_id = $1
+		   AND event_type = 'frontier_audit_pause'
+		 ORDER BY id DESC
+		 LIMIT 1`,
+		[proposalId],
+	);
+	if (rows.length === 0) return null;
+	return { reason: rows[0].payload?.reason ?? "Frontier audit hold" };
+}
+
+// ─── Internal tick ────────────────────────────────────────────────────────────
+
 async function runAuditTick(queryFn: QueryFn): Promise<void> {
 	const { rows } = await queryFn<{
 		id: bigint;
@@ -102,13 +143,34 @@ async function runAuditTick(queryFn: QueryFn): Promise<void> {
 	);
 
 	for (const row of rows) {
+		// Stub dispatcher: real implementation would call a frontier LLM agent.
+		// Until a real dispatcher is wired, record low-severity pass-through entries.
+		const issues: AuditIssue[] = [];
+		const severity = assessSeverity(issues);
+		const actionTaken = severity === "critical" ? "pause" : "none";
+
 		await queryFn(
 			`INSERT INTO roadmap_proposal.frontier_audit_log
 			   (proposal_id, decision_id, decision_maker, decision_tier,
 			    auditor, audit_severity, audit_notes, action_taken)
-			 VALUES ($1, $2, $3, $4, 'frontier-audit-loop', 'low',
-			         'Sampled — no issues detected', 'none')`,
-			[row.proposal_id, row.id, row.decision_maker, row.decision_tier],
+			 VALUES ($1, $2, $3, $4, 'frontier-audit-loop', $5,
+			         'Sampled — no issues detected', $6)`,
+			[
+				row.proposal_id,
+				row.id,
+				row.decision_maker,
+				row.decision_tier,
+				severity,
+				actionTaken,
+			],
 		);
+
+		if (actionTaken === "pause") {
+			await pauseProposalAdvancement(
+				row.proposal_id,
+				"Critical frontier audit finding",
+				queryFn,
+			);
+		}
 	}
 }

@@ -1,10 +1,10 @@
 /**
- * P226 AC#8: Unit tests for stageEnforcer()
+ * P226 AC#5 + AC#8: Unit tests for stageEnforcer()
  *
  * Verifies:
- *  - Non-Merge target stages pass without checking prerequisites
- *  - Merge target with all 3 prereqs complete → passes
- *  - Merge target missing any prereq → throws StageEnforcerError
+ *  - Non-gated target stages pass without checking prerequisites
+ *  - TestWriting requires CodeReview (AC#5)
+ *  - Merge requires CodeReview + TestWriting + TestExecution (AC#8)
  *  - StageEnforcerError.missingStages lists only the incomplete stages
  *  - STANDARD_RFC_STAGES defines the expected sequence
  */
@@ -104,20 +104,19 @@ describe("STANDARD_RFC_STAGES sequence", () => {
 	});
 });
 
-// ─── AC#8: Non-Merge targets bypass prereq check ─────────────────────────────
+// ─── Non-gated targets bypass prereq check ───────────────────────────────────
 
-describe("AC#8: Non-Merge target stages skip prerequisite check", () => {
-	const nonMergeStages: StageName[] = [
+describe("Non-gated target stages skip prerequisite check", () => {
+	const ungatedStages: StageName[] = [
 		"Draft",
 		"Review",
 		"Develop",
 		"CodeReview",
-		"TestWriting",
 		"TestExecution",
 		"Complete",
 	];
 
-	for (const stage of nonMergeStages) {
+	for (const stage of ungatedStages) {
 		it(`target=${stage} → no query issued, no throw`, async () => {
 			let queryCalled = false;
 			const qfn = async () => {
@@ -129,6 +128,31 @@ describe("AC#8: Non-Merge target stages skip prerequisite check", () => {
 			assert.equal(queryCalled, false, `Expected no DB query for target=${stage}`);
 		});
 	}
+});
+
+// ─── AC#5: TestWriting requires CodeReview ────────────────────────────────────
+
+describe("AC#5: TestWriting gate — requires CodeReview", () => {
+	it("CodeReview complete → TestWriting passes", async () => {
+		const qfn = mockStageQuery(["CodeReview"]);
+		await assert.doesNotReject(() =>
+			stageEnforcer(PROPOSAL, "TestWriting", qfn as any),
+		);
+	});
+
+	it("CodeReview missing → throws StageEnforcerError", async () => {
+		const qfn = mockStageQuery([]);
+		await assert.rejects(
+			() => stageEnforcer(PROPOSAL, "TestWriting", qfn as any),
+			(err: unknown) => {
+				assert.ok(err instanceof StageEnforcerError);
+				assert.deepEqual(err.missingStages, ["CodeReview"]);
+				assert.ok(err.message.includes("TestWriting"));
+				assert.ok(err.message.includes("P226"));
+				return true;
+			},
+		);
+	});
 });
 
 // ─── AC#8: All prerequisites complete → Merge allowed ────────────────────────

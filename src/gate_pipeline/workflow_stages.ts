@@ -106,12 +106,11 @@ export const STANDARD_RFC_STAGES: StageDefinition[] = [
 	},
 ];
 
-// Stages that MUST be completed before a proposal can enter Merge
-const MERGE_PREREQUISITES: StageName[] = [
-	"CodeReview",
-	"TestWriting",
-	"TestExecution",
-];
+// Stages that MUST be completed before a proposal can enter each gated stage
+const STAGE_PREREQUISITES: Partial<Record<StageName, StageName[]>> = {
+	TestWriting: ["CodeReview"],
+	Merge: ["CodeReview", "TestWriting", "TestExecution"],
+};
 
 // ─── Stage completion query ───────────────────────────────────────────────────
 
@@ -151,8 +150,8 @@ function stageToPrefix(stage: StageName): string {
 /**
  * Enforce mandatory stage prerequisites before allowing a proposal to advance.
  *
- * Throws an error with structured details if any required stage is incomplete.
- * Only enforces the Merge gate for now (the most critical gate).
+ * Gates: Develop→TestWriting requires CodeReview; Develop→Merge requires
+ * CodeReview + TestWriting + TestExecution.
  *
  * @param proposal    Proposal being transitioned
  * @param targetStage The stage the proposal is attempting to enter
@@ -163,18 +162,19 @@ export async function stageEnforcer(
 	targetStage: StageName,
 	queryFn: QueryFn = defaultQuery,
 ): Promise<void> {
-	if (targetStage !== "Merge") return; // Only enforce at the Merge gate
+	const prerequisites = STAGE_PREREQUISITES[targetStage];
+	if (!prerequisites || prerequisites.length === 0) return;
 
 	const missing: StageName[] = [];
 
-	for (const prereq of MERGE_PREREQUISITES) {
+	for (const prereq of prerequisites) {
 		const done = await isStageComplete(proposal.id, prereq, queryFn);
 		if (!done) missing.push(prereq);
 	}
 
 	if (missing.length > 0) {
 		throw new StageEnforcerError(
-			`Cannot advance ${proposal.display_id} to Merge: ` +
+			`Cannot advance ${proposal.display_id} to ${targetStage}: ` +
 				`incomplete mandatory stages: ${missing.join(", ")}`,
 			missing,
 		);
