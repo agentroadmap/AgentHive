@@ -231480,11 +231480,39 @@ var ProposalDetailsModal = ({
                           title: "Proposal type",
                           children: proposal.proposalType
                         }, undefined, false, undefined, this) : null,
-                        proposal?.maturity ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
-                          className: `inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${maturityBadgeColors(proposal.maturity)}`,
-                          title: "Proposal maturity",
-                          children: proposal.maturity
-                        }, undefined, false, undefined, this) : null
+                        proposal ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("select", {
+                          className: `rounded-full px-2 py-0.5 text-[11px] font-medium border-0 outline-none cursor-pointer focus:ring-2 focus:ring-stone-500 ${maturityBadgeColors(proposal.maturity ?? "new")} ${isFromOtherBranch ? "opacity-60 cursor-not-allowed" : ""}`,
+                          title: "Change proposal maturity",
+                          value: proposal.maturity ?? "new",
+                          disabled: isFromOtherBranch,
+                          onChange: (e3) => {
+                            const next4 = e3.target.value;
+                            if (next4 === proposal.maturity)
+                              return;
+                            handleInlineMetaUpdate({
+                              maturity: next4
+                            });
+                          },
+                          onClick: (e3) => e3.stopPropagation(),
+                          children: [
+                            /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("option", {
+                              value: "new",
+                              children: "new"
+                            }, undefined, false, undefined, this),
+                            /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("option", {
+                              value: "active",
+                              children: "active"
+                            }, undefined, false, undefined, this),
+                            /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("option", {
+                              value: "mature",
+                              children: "mature"
+                            }, undefined, false, undefined, this),
+                            /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("option", {
+                              value: "obsolete",
+                              children: "obsolete"
+                            }, undefined, false, undefined, this)
+                          ]
+                        }, undefined, true, undefined, this) : null
                       ]
                     }, undefined, true, undefined, this)
                   }, undefined, false, undefined, this),

@@ -2636,6 +2636,10 @@ export class Core {
 			await pg.updateProposal(proposalId, {
 				title: proposal.title,
 				type: await this.resolvePgProposalType(proposal.proposalType),
+				// 2026-05-25: was silently dropped — applyProposalUpdateInput
+				// already mutates proposal.maturity, but this whitelist didn't
+				// carry it to the SQL UPDATE, so web-board edits never persisted.
+				maturity: proposal.maturity ?? null,
 				parent_id: parentId,
 				summary: proposal.summary ?? proposal.description ?? null,
 				motivation: proposal.motivation ?? null,

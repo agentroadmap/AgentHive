@@ -5,11 +5,13 @@
  *   1. Ensures roadmap_workforce.agent_registry has a row for this identity
  *      (FK anchor for message_ledger.from_agent / to_agent).
  *   2. Opens a dedicated pg client (NOT pooled) and LISTENs on
- *      agentNotifyChannel(identity), which is the same `a2a_msg_<raw>`
- *      channel the trigger emits on (P888 migration 119). A pooled connection
- *      would carry LISTEN state back into the pool when released, causing
- *      stray notifications on whichever caller borrows it next; we own a
- *      dedicated client and end() it on stop().
+ *      agentNotifyChannel(identity), which is the unified `msg_<raw>` channel.
+ *      Both message_ledger DMs and liaison_message envelopes wake this channel;
+ *      this loop handles only numeric message_ledger ids and leaves UUID
+ *      liaison_message envelopes to LiaisonHub. A pooled connection would carry
+ *      LISTEN state back into the pool when released, causing stray
+ *      notifications on whichever caller borrows it next; we own a dedicated
+ *      client and end() it on stop().
  *   3. On each notification, fetches the row and either:
  *        - protocol_ping → protocol_pong fast-path (no LLM, P856), or
  *        - explicit spawn task → claimed squad_dispatch + offer_dispatch bridge, or
@@ -35,7 +37,11 @@ import { Client } from "pg";
 import { query } from "../postgres/pool.ts";
 import { agentNotifyChannel } from "../messaging/a2a-access-control.ts";
 import { sendMessage as sendLiaisonMessage } from "./liaison-message-service.ts";
-import { handleTypedTaskRequest, handleWorkerReport, type TaskDispatcherHelpers } from "./task-dispatcher.ts";
+import {
+	handleTypedTaskRequest,
+	handleWorkerReport,
+	type TaskDispatcherHelpers,
+} from "./task-dispatcher.ts";
 import {
 	type CliInvocationHandler,
 	type CliInvocationRegistry,
@@ -396,13 +402,14 @@ export async function runLiaisonAgent(
 
 	listenClient.on("notification", (n) => {
 		if (n.channel !== channel || !n.payload) return;
-		let parsed: NotifyPayload;
+		let parsed: NotifyPayload | null;
 		try {
-			parsed = JSON.parse(n.payload);
+			parsed = parseLedgerNotifyPayload(n.payload);
 		} catch {
 			console.warn(`${log} Bad notify payload:`, n.payload);
 			return;
 		}
+		if (!parsed) return;
 		handle(parsed).catch((err) => console.error(`${log} Handler error:`, err));
 	});
 
@@ -439,6 +446,34 @@ export async function runLiaisonAgent(
 			}
 		},
 		claimLoop,
+	};
+}
+
+export function parseLedgerNotifyPayload(
+	rawPayload: string,
+): NotifyPayload | null {
+	const payload = JSON.parse(rawPayload) as { message_id?: unknown } & Record<
+		string,
+		unknown
+	>;
+	const messageId = payload.message_id;
+	const numericId =
+		typeof messageId === "number"
+			? messageId
+			: typeof messageId === "string" && /^\d+$/.test(messageId)
+				? Number(messageId)
+				: null;
+
+	if (!Number.isSafeInteger(numericId) || numericId <= 0) return null;
+
+	return {
+		message_id: numericId,
+		correlation_id:
+			typeof payload.correlation_id === "string"
+				? payload.correlation_id
+				: undefined,
+		from_agent:
+			typeof payload.from_agent === "string" ? payload.from_agent : undefined,
 	};
 }
 
@@ -784,7 +819,12 @@ async function connectListenClient(identity?: string): Promise<Client> {
 		: null;
 	const client = new Client({
 		host: process.env.PGHOST ?? databaseUrl?.hostname ?? "127.0.0.1",
-		port: Number(process.env.PGPORT_DIRECT ?? databaseUrl?.port ?? process.env.PGPORT ?? 5432),
+		port: Number(
+			process.env.PGPORT_DIRECT ??
+				databaseUrl?.port ??
+				process.env.PGPORT ??
+				5432,
+		),
 		user: process.env.PGUSER ?? databaseUrl?.username,
 		password: process.env.PGPASSWORD ?? databaseUrl?.password,
 		database:

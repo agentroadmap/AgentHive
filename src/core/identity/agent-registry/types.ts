@@ -85,6 +85,12 @@ export type RegistrationRequest = {
 	 * Must NOT be a dense routeAbbr — assignDisplayAlias throws if it detects one.
 	 */
 	agentProvider?: string;
+	/**
+	 * P159 AC-1: Optional Ed25519 public key for cryptographic identity verification.
+	 * When provided, upserts into agent_registry.public_key and sets key_rotated_at=NOW().
+	 * If omitted, the agent registers with null public_key (backward compatible).
+	 */
+	publicKey?: string;
 };
 
 export type RegistrationResponse = {

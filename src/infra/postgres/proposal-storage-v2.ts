@@ -42,6 +42,7 @@ export type ProposalCreateInput = {
 	display_id?: string | null;
 	type: string;
 	status?: string | null;
+	maturity?: string | null;
 	title: string;
 	parent_id?: number | null;
 	summary?: string | null;
