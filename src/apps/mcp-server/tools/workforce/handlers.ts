@@ -6,8 +6,6 @@ import {
 import { claimDisplayAlias } from "../../../../core/identity/agent-registry/alias-manager.ts";
 import { query } from "../../../../infra/postgres/pool.ts";
 import { resolvePermanentAgentMapping } from "../../../../core/identity/agent-registry/permanent-agent-map.ts";
-import { assignDisplayAlias, pascalCaseHost } from "../../../../core/identity/agent-registry/agent-name.ts";
-import { claimDisplayAlias } from "../../../../core/identity/agent-registry/alias-manager.ts";
 import type { CallToolResult } from "../../types.ts";
 
 type ToolHandler = (args: Record<string, unknown>) => Promise<CallToolResult>;
