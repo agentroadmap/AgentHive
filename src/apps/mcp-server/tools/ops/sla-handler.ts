@@ -123,11 +123,11 @@ export async function handleHealthCheck(_args: Record<string, unknown>): Promise
 	try {
 		const latRes = await query<{ p99_ms: string | null }>(
 			`SELECT PERCENTILE_CONT(0.99) WITHIN GROUP (
-			     ORDER BY EXTRACT(EPOCH FROM (ended_at - started_at)) * 1000
+			     ORDER BY CAST(attributes->>'duration_ms' AS NUMERIC)
 			 ) AS p99_ms
 			 FROM roadmap.trace_span
 			 WHERE operation = 'mcp_tool_call'
-			   AND ended_at IS NOT NULL
+			   AND attributes ? 'duration_ms'
 			   AND started_at > now() - ($1 * interval '1 second')`,
 			[t.latency_window_s],
 		);
