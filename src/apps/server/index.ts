@@ -1125,6 +1125,8 @@ export class RoadmapServer {
 				return await this.handleListDispatches(req);
 			if (pathname === "/api/board/stages" && method === "GET")
 				return await this.handleGetBoardStages(req);
+			if (pathname === "/api/board/columns" && method === "GET")
+				return await this.handleGetBoardColumns(req);
 
 			if (pathname === "/api/mcp/sse" && method === "GET") {
 				try {
@@ -3813,6 +3815,66 @@ export class RoadmapServer {
 				stages,
 				workflow: "Standard RFC",
 				error: error instanceof Error ? error.message : "Registry not loaded",
+			});
+		}
+	}
+
+	// P248: /api/board/columns — stable contract shaped for board consumers.
+	// Returns an array (not an envelope) so consumers can cache and compare easily.
+	// Reuses the same SMDL registry path as handleGetBoardStages.
+	private async handleGetBoardColumns(req: Request): Promise<Response> {
+		try {
+			const url = new URL(req.url || "http://localhost/?workflowName=Standard RFC");
+			const workflowName = url.searchParams.get("workflowName") || "Standard RFC";
+			const bust = url.searchParams.get("bust");
+
+			const registry = getRegistry();
+			const view = registry.getView(workflowName);
+
+			let stageDefMap: Map<string, { displayLabel: string; isTerminal: boolean }> = new Map();
+			try {
+				const raw = await loadStageRegistry();
+				for (const [name, def] of raw) {
+					stageDefMap.set(name, { displayLabel: def.displayLabel, isTerminal: def.isTerminal });
+				}
+			} catch {
+				// non-fatal — fall back to registry view data
+			}
+
+			const columns = view.stages.map((stage, idx) => {
+				const def = stageDefMap.get(stage.name);
+				return {
+					stage_name: stage.name,
+					stage_order: stage.order ?? idx + 1,
+					display_label: def?.displayLabel ?? stage.name,
+					is_terminal: def?.isTerminal ?? stage.isTerminal ?? false,
+					maturity_gate: null as string | null,
+				};
+			});
+
+			const cacheHeader = bust ? "no-cache" : "public, max-age=300";
+			return new Response(JSON.stringify(columns), {
+				status: 200,
+				headers: {
+					"Content-Type": "application/json",
+					"Cache-Control": cacheHeader,
+				},
+			});
+		} catch (error) {
+			const fallback = [
+				{ stage_name: "DRAFT",    stage_order: 1, display_label: "Draft",    is_terminal: false, maturity_gate: null },
+				{ stage_name: "REVIEW",   stage_order: 2, display_label: "Review",   is_terminal: false, maturity_gate: null },
+				{ stage_name: "DEVELOP",  stage_order: 3, display_label: "Develop",  is_terminal: false, maturity_gate: null },
+				{ stage_name: "MERGE",    stage_order: 4, display_label: "Merge",    is_terminal: false, maturity_gate: null },
+				{ stage_name: "COMPLETE", stage_order: 5, display_label: "Complete", is_terminal: true,  maturity_gate: null },
+			];
+			return new Response(JSON.stringify(fallback), {
+				status: 200,
+				headers: {
+					"Content-Type": "application/json",
+					"Cache-Control": "no-cache",
+					"X-Fallback": error instanceof Error ? error.message : "Registry not loaded",
+				},
 			});
 		}
 	}
