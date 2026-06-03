@@ -125,6 +125,22 @@ await closePool();
 
 Why this rule exists: shared CLI code (e.g., `agents send` subcommand exit, internal getPool signature-change path) can call `pool.end()` mid-process. In CLI mode that's fine — the process exits. In a long-running service it poisons every downstream consumer (broadcastSnapshot, LISTEN reconnect, TimeoutCron, ledger writes) for the remainder of the process. The 2026-05-15 agenthive-board.service outage (30 hours silent failure) is the canonical incident. See `docs/audit/p1123-pool-end-callers.md` for the full caller catalog and verdict matrix. A Phase 3 watchdog (`SELECT 1` probe + `pg_notify control_feed pool_poisoned`) provides defense in depth for any bypass path.
 
+### Wrapper-enforced concerns invariant (P1859 / P1018 / P1022)
+
+**Cross-cutting mechanical concerns are enforced structurally in the deterministic liaison/wrapper layer — never "remembered" by an LLM agent or subagent.**
+
+Classify every "the agent should do X" before deciding where it lives:
+
+- **Mechanical / cross-cutting** — log every spawn's token usage, check remaining quota before claiming an offer, emit presence, record provider mismatch. These MUST be enforced in long-lived TypeScript at the chokepoints every claim and spawn already pass through. An LLM cannot be relied on to remember them, and must not be asked to:
+  - **Before claim:** the quota/cap/auth gate lives in `src/infra/agency/agency-claim-loop.ts:claimOne` (today it only checks `isProviderAuthDown`). The liaison process reads the meter and declines the claim; the worker LLM is never consulted.
+  - **After spawn:** token capture lives in the liaison's spawn-completion handler, parsing the CLI's own structured output (`claude --output-format stream-json` usage block, Codex sidecar, Gemini stderr). The subagent never self-reports.
+  - **Provider differences are an adapter registry, not memory.** An agency declares its provider; the wrapper dispatches to the right per-provider adapter (`UsageAdapter[provider].extractTokens(...)`, `QuotaProbe[provider].remaining(credential)`). Keep these declarations central (code + `provider_registry.capabilities` / `model_metadata`), keyed on provider, resolved at spawn time. Quota and usage meters are keyed per-**(OS-user, provider) credential**, not per-agency: co-resident agencies under one OS user share one quota bucket.
+- **Judgment / semantic** — how to do the actual task, project conventions, prior lessons, role playbook. *This* is what centralized memory is for (`roadmap.agent_memory`, `team_memory`, `knowledge_entries`, `fallback_playbook`, and the `mcp_memory` tool). Inject it into the spawn's context so the LLM reasons well.
+
+The trap to avoid: using Class-B tooling (memory) to solve a Class-A problem (mechanics). Don't make an agent *recall* that it should log tokens — make it structurally unable *not* to. Memory recall is best-effort and shapes reasoning; it is not an enforcement mechanism.
+
+Why this rule exists: AgentHive has repeatedly been burned by trusting LLM behavior for mechanical guarantees — codex agents marking ACs `pass` with no artifact, hallucinated completion summaries, token ledgers that stayed empty because the "agent should report usage" path was never deterministic (`agent_budget_ledger` 0 rows despite thousands of runs; `agent_usage_snapshot` 0 rows; `agent_runs.tokens_in` defaulting to 0). This is the same principle as **6.0a/6.0b "orchestrator is mechanical"** (lifecycle = DB state + structured fields, never interpreted LLM text), applied to the agency/worker layer. Implementing proposals: P1018 (token ledger writer), P1859 (usage probe), P1022 (quota-aware admission), P1698/P1699 (per-agency caps + dynamic controller).
+
 ## 4a. Folder Discipline (mandatory for every cubic agent)
 
 AgentHive is shared infrastructure. Multiple agencies, projects, and providers share this repo. Every file you write is a vote on what belongs in the repo forever. Be ruthless about where things go.
