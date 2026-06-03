@@ -27,10 +27,6 @@ import {
 } from "../../apps/mcp-server/tools/spending/pg-handlers.ts";
 import { query } from "../../infra/postgres/pool.ts";
 import {
-	provisionScratch,
-	reapScratch,
-} from "../../shared/utils/agent-scratch.ts";
-import {
 	getDaemonUrl,
 	getMcpUrl,
 	getMcpUrlAsync,
@@ -1609,10 +1605,6 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		},
 	});
 
-	// P404: UUID is generated here so the path is known before env assembly.
-	const scratchUuid = randomUUID();
-	const scratchPath = `${SCRATCH_ROOT}/${scratchUuid}`;
-
 	// Assemble process environment (agent-scoped, not inheriting secrets from host)
 	const processEnv = buildSpawnProcessEnv({
 		worktree,
@@ -1632,8 +1624,6 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 			// can register itself under the same label that's already in agent_runs.
 			AGENTHIVE_AGENT_IDENTITY: agentIdentity,
 			AGENTHIVE_ROUTE_ABBR: routeAbbr,
-			// P404: isolated scratch directory for this agent run.
-			AGENT_SCRATCH_DIR: scratchPath,
 		},
 	});
 	try {
