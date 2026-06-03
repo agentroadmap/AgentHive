@@ -1,0 +1,19 @@
+# /etc/agenthive/backup-policy.conf
+#
+# Per-tenant backup disk cap and retention policy.
+# Read by: agenthive-retention-prune.sh
+#
+# Format: KEY=value  (shell-compatible; no spaces around =)
+# Per-slug overrides: DISK_CAP_GB_<SLUG_UPPER>=<GB>
+#   (slug uppercased, hyphens replaced with underscores)
+#
+# Global defaults (apply to all tenants without a per-slug override):
+AGENTHIVE_BACKUP_DISK_CAP_GB=50
+RETENTION_DAILY_DAYS=14
+RETENTION_WEEKLY_COUNT=8
+RETENTION_MONTHLY_COUNT=12
+
+# Per-tenant overrides (example):
+# DISK_CAP_GB_TENANT_ALPHA=100
+# DISK_CAP_GB_MONKEYKING_AUDIO=25
+# DISK_CAP_GB_GEORGIA_SINGER=25

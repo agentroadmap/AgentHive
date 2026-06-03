@@ -12,13 +12,14 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { existsSync, readFileSync } from "node:fs";
 import { PgTeamGovernanceHandlers } from "../../src/apps/mcp-server/tools/teams/pg-governance-handlers.ts";
 import {
 	teamCharterCreateSchema,
 	teamDisputeLogSchema,
 } from "../../src/apps/mcp-server/tools/teams/schemas.ts";
+import { maybeCharterTeam } from "../../src/core/pipeline/team-charter-hook.ts";
 
 // Mock McpServer — governance handlers don't use server directly
 const mockServer = {} as any;
@@ -279,6 +280,189 @@ describe("P182: Team Governance Layer", () => {
 			assert.ok(
 				migration.includes("ON CONFLICT (team_id, norm_key) DO NOTHING"),
 				"Charter insert must be idempotent",
+			);
+		});
+	});
+
+	// ─── AC-9: Orchestrator auto-charter on multi-agent dispatch ─────────────
+
+	describe("AC-9: Auto-charter when 2+ agents dispatched to same proposal", () => {
+		let query: typeof import("../../src/infra/postgres/pool.ts").query;
+		let testProposalId = 0;
+		let dbAvailable = false;
+
+		beforeEach(async () => {
+			try {
+				const pool = await import("../../src/infra/postgres/pool.ts");
+				query = pool.query;
+				const { rows } = await query<{ id: number }>(
+					`INSERT INTO roadmap_proposal.proposal
+					   (display_id, title, summary, type, status, maturity, project_id, audit)
+					 VALUES ($1, $2, $3, 'feature', 'DEVELOP', 'active', 1, '[]'::jsonb)
+					 RETURNING id`,
+					[
+						`P_ac9_${Date.now()}`.slice(0, 16),
+						`P182 AC-9 auto-charter test`,
+						"Integration test fixture for AC-9",
+					],
+				);
+				testProposalId = rows[0].id;
+				dbAvailable = true;
+			} catch {
+				dbAvailable = false;
+			}
+		});
+
+		afterEach(async () => {
+			if (!dbAvailable || !testProposalId) return;
+			const { rows: teamRows } = await query<{ id: number }>(
+				`SELECT id FROM roadmap_workforce.team
+				  WHERE metadata->>'proposal_id' = $1`,
+				[String(testProposalId)],
+			);
+			for (const { id } of teamRows) {
+				await query(
+					`DELETE FROM roadmap_workforce.team_norms WHERE team_id = $1`,
+					[id],
+				);
+				await query(
+					`DELETE FROM roadmap_workforce.team WHERE id = $1`,
+					[id],
+				);
+			}
+			await query(
+				`DELETE FROM roadmap_workforce.squad_dispatch WHERE proposal_id = $1`,
+				[testProposalId],
+			);
+			await query(
+				`DELETE FROM roadmap_proposal.proposal WHERE id = $1`,
+				[testProposalId],
+			);
+			testProposalId = 0;
+		});
+
+		it("creates team:charter when 2 squad_dispatch rows exist for same proposal", async () => {
+			if (!dbAvailable) {
+				console.log("skip: no DB connection");
+				return;
+			}
+
+			// Seed 2 squad_dispatch rows simulating developer + skeptic dispatch
+			const keyDev = `ac9-${testProposalId}-dev`;
+			const keySkp = `ac9-${testProposalId}-skp`;
+			await query(
+				`INSERT INTO roadmap_workforce.squad_dispatch
+				   (proposal_id, squad_name, dispatch_role, dispatch_status, offer_status,
+				    required_capabilities, metadata, idempotency_key, dispatch_version, attempt_count)
+				 VALUES
+				   ($1, $2, 'developer', 'open', 'open', '["general"]'::jsonb,
+				    '{}'::jsonb, $4, 1, 1),
+				   ($1, $3, 'skeptic',   'open', 'open', '["general"]'::jsonb,
+				    '{}'::jsonb, $5, 1, 1)`,
+				[
+					testProposalId,
+					`sq-dev-${testProposalId}`,
+					`sq-skp-${testProposalId}`,
+					keyDev,
+					keySkp,
+				],
+			);
+
+			await maybeCharterTeam(testProposalId, query);
+
+			const { rows: charterRows } = await query<{ norm_key: string }>(
+				`SELECT tn.norm_key
+				   FROM roadmap_workforce.team_norms tn
+				   JOIN roadmap_workforce.team t ON t.id = tn.team_id
+				  WHERE t.metadata->>'proposal_id' = $1
+				    AND tn.norm_key = 'team:charter'`,
+				[String(testProposalId)],
+			);
+
+			assert.equal(
+				charterRows.length,
+				1,
+				"Expected exactly 1 team:charter norm after 2-agent dispatch",
+			);
+			assert.equal(charterRows[0].norm_key, "team:charter");
+		});
+
+		it("does not create charter when only 1 squad_dispatch row exists", async () => {
+			if (!dbAvailable) {
+				console.log("skip: no DB connection");
+				return;
+			}
+
+			// Only one dispatch row — threshold not met
+			await query(
+				`INSERT INTO roadmap_workforce.squad_dispatch
+				   (proposal_id, squad_name, dispatch_role, dispatch_status, offer_status,
+				    required_capabilities, metadata, idempotency_key, dispatch_version, attempt_count)
+				 VALUES
+				   ($1, $2, 'developer', 'open', 'open', '["general"]'::jsonb,
+				    '{}'::jsonb, $3, 1, 1)`,
+				[testProposalId, `sq-solo-${testProposalId}`, `ac9-${testProposalId}-solo`],
+			);
+
+			await maybeCharterTeam(testProposalId, query);
+
+			const { rows: charterRows } = await query<{ norm_key: string }>(
+				`SELECT tn.norm_key
+				   FROM roadmap_workforce.team_norms tn
+				   JOIN roadmap_workforce.team t ON t.id = tn.team_id
+				  WHERE t.metadata->>'proposal_id' = $1
+				    AND tn.norm_key = 'team:charter'`,
+				[String(testProposalId)],
+			);
+
+			assert.equal(
+				charterRows.length,
+				0,
+				"Single-dispatch proposal must not get a team charter",
+			);
+		});
+
+		it("maybeCharterTeam is idempotent — calling twice yields 1 charter row", async () => {
+			if (!dbAvailable) {
+				console.log("skip: no DB connection");
+				return;
+			}
+
+			await query(
+				`INSERT INTO roadmap_workforce.squad_dispatch
+				   (proposal_id, squad_name, dispatch_role, dispatch_status, offer_status,
+				    required_capabilities, metadata, idempotency_key, dispatch_version, attempt_count)
+				 VALUES
+				   ($1, $2, 'developer', 'open', 'open', '["general"]'::jsonb,
+				    '{}'::jsonb, $4, 1, 1),
+				   ($1, $3, 'skeptic',   'open', 'open', '["general"]'::jsonb,
+				    '{}'::jsonb, $5, 1, 1)`,
+				[
+					testProposalId,
+					`sq-dev2-${testProposalId}`,
+					`sq-skp2-${testProposalId}`,
+					`ac9-${testProposalId}-dev2`,
+					`ac9-${testProposalId}-skp2`,
+				],
+			);
+
+			// Call twice — second call must not duplicate the charter row
+			await maybeCharterTeam(testProposalId, query);
+			await maybeCharterTeam(testProposalId, query);
+
+			const { rows: charterRows } = await query<{ norm_key: string }>(
+				`SELECT tn.norm_key
+				   FROM roadmap_workforce.team_norms tn
+				   JOIN roadmap_workforce.team t ON t.id = tn.team_id
+				  WHERE t.metadata->>'proposal_id' = $1
+				    AND tn.norm_key = 'team:charter'`,
+				[String(testProposalId)],
+			);
+
+			assert.equal(
+				charterRows.length,
+				1,
+				"Idempotent: two calls must still yield exactly 1 team:charter row",
 			);
 		});
 	});

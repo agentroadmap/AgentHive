@@ -1,0 +1,86 @@
+---
+# P509 — AgentHive tenant backup alerting rules
+# Deploy to: /etc/prometheus/rules/agenthive-backups.yml
+# Reload: systemctl reload prometheus  (or POST /-/reload)
+
+groups:
+  - name: agenthive_backups
+    interval: 5m
+    rules:
+
+      # ── Backup disk capacity ────────────────────────────────────────────────
+
+      - alert: AgentHiveBackupDiskUsageHigh
+        expr: >
+          (
+            node_filesystem_avail_bytes{mountpoint="/var"}
+            / node_filesystem_size_bytes{mountpoint="/var"}
+          ) < 0.15
+        for: 10m
+        labels:
+          severity: warning
+          team: ops
+        annotations:
+          summary: "Backup disk on {{ $labels.instance }} is less than 15% free"
+          description: >
+            Available: {{ $value | humanizePercentage }} free on /var.
+            Check /var/backups/agenthive/*/; run agenthive-retention-prune.sh --dry-run
+            per tenant to estimate reclaimable space.
+
+      - alert: AgentHiveTenantBackupCapExceeded
+        expr: increase(agenthive_backup_disk_cap_exceeded_total[1h]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          team: ops
+        annotations:
+          summary: "Tenant {{ $labels.slug }} backup cap exceeded"
+          description: >
+            agenthive-retention-prune.sh exited non-zero after cap enforcement.
+            Review /var/log/agenthive/retention-{{ $labels.slug }}.log and
+            manually prune /var/backups/agenthive/{{ $labels.slug }}/.
+
+      # ── pg_stat scrape staleness ────────────────────────────────────────────
+
+      - alert: AgentHiveScrapeStaleWarn
+        expr: agenthive_scrape_staleness_seconds > 300
+        for: 2m
+        labels:
+          severity: warning
+          team: ops
+        annotations:
+          summary: "pg_stat scrape stale (warn) for tenant {{ $labels.slug }}"
+          description: >
+            Exporter has not successfully scraped {{ $labels.slug }} in
+            {{ $value | humanizeDuration }}. Check agenthive-pg-stat-exporter logs:
+            journalctl -u agenthive-pg-stat-exporter
+
+      - alert: AgentHiveScrapeStateCritical
+        expr: agenthive_scrape_staleness_seconds > 600
+        for: 2m
+        labels:
+          severity: critical
+          team: ops
+        annotations:
+          summary: "pg_stat scrape stale (critical) for tenant {{ $labels.slug }}"
+          description: >
+            Exporter has not successfully scraped {{ $labels.slug }} in
+            {{ $value | humanizeDuration }}. Verify tenant DB connectivity and
+            that AGENTHIVE_TENANT_{{ $labels.slug | upper }}_DSN is set correctly.
+
+      # ── Backup disk usage per tenant (node_exporter textfile collector) ─────
+
+      - alert: AgentHiveTenantBackupDiskHigh
+        expr: >
+          agenthive_backup_disk_usage_bytes
+            / (1024 * 1024 * 1024)
+            > (agenthive_backup_disk_cap_gb * 0.85)
+        for: 10m
+        labels:
+          severity: warning
+          team: ops
+        annotations:
+          summary: "Tenant {{ $labels.slug }} backup usage above 85% of cap"
+          description: >
+            Usage: {{ $value | humanize1024 }}B. Cap: {{ $labels.cap_gb }} GB.
+            Run: agenthive-retention-prune.sh {{ $labels.slug }}
