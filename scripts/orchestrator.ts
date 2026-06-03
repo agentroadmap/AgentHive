@@ -12,9 +12,10 @@
  */
 
 import { Orchestrator } from "../src/core/orchestration/orchestrator.ts";
-import { closePool, setPoolLifecycleMode } from "../src/infra/postgres/pool.ts";
+import { closePool, getPool, setPoolLifecycleMode } from "../src/infra/postgres/pool.ts";
 import { startPoolWatchdog } from "../src/infra/postgres/pool-watchdog.ts";
 import { reapOrphanScratch } from "../src/core/orchestration/scratch.ts";
+import { initConfig } from "../src/shared/runtime/config.ts";
 
 // P1123: declare long-running mode so stray pool.end() calls cannot poison this
 // service. Graceful shutdown drops back to "one-shot" before the final closePool.
@@ -33,6 +34,10 @@ async function main() {
 	await reapOrphanScratch({ dryRun: false }).catch((e: unknown) =>
 		console.warn(`[scratch-reaper] boot reap failed: ${e instanceof Error ? e.message : e}`),
 	);
+
+	// Initialize the global config resolver with the DB pool so runtime_flag
+	// hot-reload (ORCHESTRATOR_MAX_INFLIGHT_OFFERS etc.) works without restart.
+	await initConfig({ pool: getPool() });
 
 	await orchestrator.start();
 	console.log("[orchestrator-shim] running");
