@@ -99,6 +99,7 @@
     "check:hardcoded": "bash scripts/check-hardcoded.sh",
     "check:credential-env": "bash scripts/check-credential-env.sh",
     "check:migrations": "tsx scripts/check-migration-prefixes.ts",
+    "check:capability-coverage": "node --import jiti/register scripts/orchestrator-capability-coverage-check.ts",
     "scan": "node --import jiti/register scripts/scan-hardcoding.ts",
     "scan:workflow-states": "node --import jiti/register scripts/scan-hardcoding.ts --rule-tag workflow --fail-on high --baseline .workflow-states-baseline.jsonl",
     "scan:self-test": "node --import jiti/register scripts/scan-hardcoding.ts --self-test"

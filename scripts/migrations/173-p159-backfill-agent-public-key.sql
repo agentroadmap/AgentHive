@@ -1,0 +1,26 @@
+-- Migration 173: P159 — Backfill runbook for agent public_key (operator-run)
+-- Description: Documents the backfill approach for existing agents with NULL public_key.
+--
+-- Columns public_key and key_rotated_at already exist (added in migration 018).
+-- Rows created before P159 wiring have NULL public_key. This is intentional:
+--   - File-system keys are authoritative; DB is best-effort secondary.
+--   - Agents re-register on next boot and populate public_key automatically.
+--   - Verification falls back to token.publicKey when DB row is NULL.
+--
+-- Operator runbook (run manually if immediate backfill is required):
+--
+--   1. For each agent with a key file in .agent-keys/:
+--      a. Extract the public_key from the JSON file.
+--      b. Run the UPDATE below with the agent_identity and public key.
+--
+--   UPDATE roadmap_workforce.agent_registry
+--      SET public_key = '<pem-encoded-public-key>'
+--    WHERE agent_identity = '<agent-id>'
+--      AND public_key IS NULL;
+--
+--   2. Agents without key files have no cryptographic identity yet.
+--      They will generate keys on next startup and self-register.
+--
+-- No DDL changes in this migration — it is a documentation/runbook entry only.
+
+SELECT 1; -- no-op; ensures migration runner records this as applied

@@ -305,7 +305,7 @@ const AGENT_PROMPTS: Record<string, string> = {
 	"pillar-researcher":
 		"You are the Pillar Researcher. Research complementary components. Propose refinements.",
 	documenter:
-		"You are a Documenter. Write documentation for completed proposals.",
+		"You are a Documenter. Write documentation for completed proposals. Use the /api/arch-docs endpoint (architecture-reconstructor.ts) for capability tree, dependency DAG, and gap analysis — do NOT read filesystem proposal files or call the deprecated loadProposals()/buildArchitectureSection().",
 	researcher:
 		"You are a Researcher. Gather context for proposals that need investigation.",
 	"triage-agent":
@@ -604,6 +604,26 @@ function inferGateForState(
 				return { gate: "D1", toStage: "FIX" as any };
 			case "FIX":
 				return { gate: "D3", toStage: "DEPLOYED" as any };
+			default:
+				return null;
+		}
+	}
+
+	// Governance Amendment: 6-stage workflow with mandatory DELIBERATION stage.
+	// Gate-to-stage mapping follows stage_order (D1–D5). D2 enforces 48h timing
+	// and blocking-concern checks via the DB trigger (fn_guard_gate_advance).
+	if (t === "governance-amendment") {
+		switch (s) {
+			case "DRAFT":
+				return { gate: "D1", toStage: "DELIBERATION" as any };
+			case "DELIBERATION":
+				return { gate: "D2", toStage: "Review" };
+			case "REVIEW":
+				return { gate: "D3", toStage: "Develop" };
+			case "DEVELOP":
+				return { gate: "D4", toStage: "Merge" };
+			case "MERGE":
+				return { gate: "D5", toStage: "Complete" };
 			default:
 				return null;
 		}
@@ -1012,6 +1032,13 @@ async function dispatchAgent(
 						proposalContext.type ?? "feature",
 						agentLabel ?? agent,
 					],
+					// P230: inject proposal-scoped context package into briefing
+					proposal_id: Number(proposalId),
+					context_package_type:
+						(agentLabel ?? agent).startsWith("skeptic") ||
+						stage.startsWith("gate")
+							? "gate_review"
+							: "code_gen",
 				},
 				"orchestrator",
 			);
@@ -2207,8 +2234,25 @@ export async function drainEnhancementRevisions(
 	}
 }
 
-// Release cubics that are still locked for a proposal that moved on
-async function releaseStaleCubics(proposalId: string) {
+// P196: Audit context for cubic/lease/worker cleanup paths.
+// Carried through every cleanup action so proposal_event + message_ledger rows
+// capture the full dispatch/worker/liaison/route/host snapshot.
+interface CubicCleanupContext {
+	dispatchId?: number | string;
+	workerIdentity?: string;
+	liaisonIdentity?: string;
+	routeId?: number | string;
+	host?: string;
+	trigger?: string; // 'state_change' | 'lease_expiry' | 'orphan_sweep'
+}
+
+// Release cubics that are still locked for a proposal that moved on.
+// P196: writes proposal_event (cubic_released) + message_ledger feed on each
+// successful release. Does NOT mutate proposal maturity or state.
+async function releaseStaleCubics(
+	proposalId: string,
+	ctx: CubicCleanupContext = {},
+) {
 	const client = new Client({ name: "orchestrator-cleanup", version: "1.0.0" });
 	const transport = new SSEClientTransport(new URL(MCP_URL));
 	try {
@@ -2230,12 +2274,218 @@ async function releaseStaleCubics(proposalId: string) {
 				logger.log(
 					`🔓 Released ${cubic.name?.substring(0, 30)} (was locked for P${proposalId})`,
 				);
+				// P196: audit the release — no maturity/state mutation.
+				const payload = JSON.stringify({
+					proposal_id: proposalId,
+					cubic_id: cubic.id,
+					cubic_name: cubic.name,
+					dispatch_id: ctx.dispatchId ?? null,
+					worker_identity: ctx.workerIdentity ?? null,
+					liaison_identity: ctx.liaisonIdentity ?? null,
+					route_id: ctx.routeId ?? null,
+					host: ctx.host ?? AGENTHIVE_HOST,
+					trigger: ctx.trigger ?? "state_change",
+					source: "releaseStaleCubics",
+				});
+				try {
+					await query(
+						`INSERT INTO roadmap_proposal.proposal_event (proposal_id, event_type, payload)
+                         VALUES ($1, 'cubic_released', $2::jsonb)`,
+						[proposalId, payload],
+					);
+					await query(
+						`INSERT INTO roadmap.message_ledger
+                         (from_agent, to_agent, channel, message_type, message_content, proposal_id)
+                         VALUES ($1, $2, $3, 'event', $4, $5)`,
+						[
+							"orchestrator",
+							ctx.liaisonIdentity ?? "operator",
+							"lifecycle",
+							`Cubic released: P${proposalId} cubic=${cubic.id} (${cubic.name?.substring(0, 30)}) trigger=${ctx.trigger ?? "state_change"}`,
+							proposalId,
+						],
+					);
+				} catch (auditErr) {
+					logger.warn("Cubic release audit write failed:", auditErr);
+				}
 			}
 		}
 	} catch (err) {
 		logger.warn("Cleanup error:", err);
 	} finally {
 		await client.close();
+	}
+}
+
+// P196: Lease-expiry-driven cubic cleanup.
+// Queries expired leases, writes lease_expired audit + feed events, releases
+// any locked cubics, and marks workspaces for inspection via the feed.
+// Does NOT mutate proposal maturity or state directly.
+export async function cleanupExpiredLeaseCubics(
+	pool: ReturnType<typeof getPool>,
+): Promise<void> {
+	const { rows } = await pool.query<{
+		lease_id: number;
+		proposal_id: string;
+		dispatch_id: number | null;
+		agent_identity: string | null;
+		route_id: number | null;
+	}>(`
+		SELECT pl.id        AS lease_id,
+		       pl.proposal_id::text,
+		       sd.id        AS dispatch_id,
+		       sd.agent_identity,
+		       sd.route_id
+		  FROM roadmap_proposal.proposal_lease pl
+		  LEFT JOIN roadmap_workforce.squad_dispatch sd
+		         ON sd.lease_id = pl.id
+		 WHERE pl.released_at IS NULL
+		   AND pl.expires_at < now()
+		 ORDER BY pl.expires_at ASC
+	`);
+
+	if (rows.length === 0) return;
+	logger.log(`P196 lease-expiry sweep: ${rows.length} expired lease(s)`);
+
+	for (const row of rows) {
+		try {
+			await pool.query(
+				`UPDATE roadmap_proposal.proposal_lease
+                    SET released_at   = now(),
+                        release_reason = 'lease_expired'
+                  WHERE id = $1
+                    AND released_at IS NULL`,
+				[row.lease_id],
+			);
+			const payload = JSON.stringify({
+				lease_id: row.lease_id,
+				proposal_id: row.proposal_id,
+				dispatch_id: row.dispatch_id ?? null,
+				agent_identity: row.agent_identity ?? null,
+				route_id: row.route_id ?? null,
+				host: AGENTHIVE_HOST,
+				trigger: "lease_expiry",
+				source: "cleanupExpiredLeaseCubics",
+			});
+			await pool.query(
+				`INSERT INTO roadmap_proposal.proposal_event (proposal_id, event_type, payload)
+                 VALUES ($1, 'lease_expired', $2::jsonb)`,
+				[row.proposal_id, payload],
+			);
+			// Feed event marks the workspace for inspection by the liaison/operator.
+			await pool.query(
+				`INSERT INTO roadmap.message_ledger
+                 (from_agent, to_agent, channel, message_type, message_content, proposal_id)
+                 VALUES ($1, $2, $3, 'event', $4, $5)`,
+				[
+					"orchestrator",
+					row.agent_identity ?? "operator",
+					"lifecycle",
+					`Lease expired: P${row.proposal_id} lease=${row.lease_id} dispatch=${row.dispatch_id ?? "none"} — workspace marked for inspection`,
+					row.proposal_id,
+				],
+			);
+			await releaseStaleCubics(row.proposal_id, {
+				dispatchId: row.dispatch_id ?? undefined,
+				workerIdentity: row.agent_identity ?? undefined,
+				routeId: row.route_id ?? undefined,
+				host: AGENTHIVE_HOST,
+				trigger: "lease_expiry",
+			});
+		} catch (err) {
+			logger.warn(
+				`P196 lease-expiry cleanup failed for proposal=${row.proposal_id} lease=${row.lease_id}:`,
+				err,
+			);
+		}
+	}
+}
+
+// P196: Orphaned worker detection and retirement.
+// Finds agent_runs still 'running' for >10 minutes with no active dispatch,
+// cancels them, and writes worker_retired audit/feed events.
+export async function retireOrphanedWorkers(
+	pool: ReturnType<typeof getPool>,
+): Promise<void> {
+	const { rows } = await pool.query<{
+		run_id: number;
+		proposal_id: string | null;
+		agent_identity: string;
+		started_at: string;
+	}>(`
+		SELECT ar.id           AS run_id,
+		       ar.proposal_id::text,
+		       ar.agent_identity,
+		       ar.started_at::text
+		  FROM roadmap_workforce.agent_runs ar
+		 WHERE ar.status = 'running'
+		   AND ar.started_at < now() - interval '10 minutes'
+		   AND NOT EXISTS (
+		     SELECT 1
+		       FROM roadmap_workforce.squad_dispatch sd
+		      WHERE sd.proposal_id    = ar.proposal_id
+		        AND sd.agent_identity = ar.agent_identity
+		        AND sd.dispatch_status IN ('assigned', 'active')
+		   )
+		 ORDER BY ar.started_at ASC
+	`);
+
+	if (rows.length === 0) return;
+	logger.log(`P196 orphaned-worker sweep: ${rows.length} orphan(s)`);
+
+	for (const row of rows) {
+		try {
+			await pool.query(
+				`UPDATE roadmap_workforce.agent_runs
+                    SET status       = 'cancelled',
+                        completed_at = now(),
+                        metadata     = COALESCE(metadata, '{}'::jsonb)
+                                       || jsonb_build_object(
+                                            'retired_by', 'orphan-worker-sweep',
+                                            'retired_at', now()::text,
+                                            'reason',     'no active dispatch after 10 minutes'
+                                          )
+                  WHERE id     = $1
+                    AND status = 'running'`,
+				[row.run_id],
+			);
+			const payload = JSON.stringify({
+				run_id: row.run_id,
+				proposal_id: row.proposal_id,
+				agent_identity: row.agent_identity,
+				started_at: row.started_at,
+				host: AGENTHIVE_HOST,
+				trigger: "orphan_sweep",
+				source: "retireOrphanedWorkers",
+			});
+			if (row.proposal_id) {
+				await pool.query(
+					`INSERT INTO roadmap_proposal.proposal_event (proposal_id, event_type, payload)
+                     VALUES ($1, 'worker_retired', $2::jsonb)`,
+					[row.proposal_id, payload],
+				);
+			}
+			await pool.query(
+				`INSERT INTO roadmap.message_ledger
+                 (from_agent, to_agent, channel, message_type, message_content, proposal_id)
+                 VALUES ($1, $2, $3, 'event', $4, $5)`,
+				[
+					"orchestrator",
+					row.agent_identity,
+					"lifecycle",
+					`Orphaned worker retired: agent=${row.agent_identity} run=${row.run_id} proposal=${row.proposal_id ?? "none"} — no active dispatch after 10min`,
+					row.proposal_id ?? null,
+				],
+			);
+			logger.log(
+				`🧹 Retired orphaned worker: agent=${row.agent_identity} run=${row.run_id} proposal=${row.proposal_id ?? "none"}`,
+			);
+		} catch (err) {
+			logger.warn(
+				`P196 orphan-worker retirement failed for run=${row.run_id} agent=${row.agent_identity}:`,
+				err,
+			);
+		}
 	}
 }
 

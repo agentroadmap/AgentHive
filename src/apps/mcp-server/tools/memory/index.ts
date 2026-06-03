@@ -9,6 +9,66 @@ function textResult(text: string): CallToolResult {
 export function registerMemoryTools(server: McpServer): void {
 	const handlers = new PgMemoryHandlers(server);
 
+	// P230: team memory tools
+	server.addTool({
+		name: "team_mem_set",
+		description: "Store a shared decision or fact in team memory (all squad members can read)",
+		inputSchema: {
+			type: "object",
+			properties: {
+				team_name: { type: "string", description: "Squad/team identifier" },
+				key: { type: "string", description: "Memory key" },
+				value: { description: "Value to store (any JSON-serialisable type)" },
+				created_by: { type: "string", description: "Agent identity writing this entry" },
+				expires_in_days: { type: "number", description: "Optional TTL in days" },
+			},
+			required: ["team_name", "key", "value", "created_by"],
+		},
+		handler: async (args: Record<string, unknown>) =>
+			await handlers.teamMemSet({
+				team_name: String(args.team_name),
+				key: String(args.key),
+				value: args.value,
+				created_by: String(args.created_by),
+				expires_in_days:
+					typeof args.expires_in_days === "number" ? args.expires_in_days : undefined,
+			}),
+	});
+
+	server.addTool({
+		name: "team_mem_get",
+		description: "Read a shared memory entry for a team by key",
+		inputSchema: {
+			type: "object",
+			properties: {
+				team_name: { type: "string" },
+				key: { type: "string" },
+			},
+			required: ["team_name", "key"],
+		},
+		handler: async (args: Record<string, unknown>) =>
+			await handlers.teamMemGet({
+				team_name: String(args.team_name),
+				key: String(args.key),
+			}),
+	});
+
+	server.addTool({
+		name: "team_mem_list",
+		description: "List all non-expired shared memory entries for a team",
+		inputSchema: {
+			type: "object",
+			properties: {
+				team_name: { type: "string" },
+			},
+			required: ["team_name"],
+		},
+		handler: async (args: Record<string, unknown>) =>
+			await handlers.teamMemList({
+				team_name: String(args.team_name),
+			}),
+	});
+
 	server.addTool({
 		name: "memory_set",
 		description: "Store agent memory in the Postgres memory layer",
@@ -21,7 +81,10 @@ export function registerMemoryTools(server: McpServer): void {
 				value: { type: "string" },
 				metadata: { type: "string" },
 				ttl_seconds: { type: "number" },
-				importance_score: { type: "number", description: "Decay priority 1 (evict first) … 10 (keep longest). Default 5." },
+				importance_score: {
+					type: "number",
+					description: "Importance 1-10 (default 5). Low-importance entries (<5) decay after 14 days.",
+				},
 			},
 			required: ["key", "value"],
 		},
@@ -162,67 +225,6 @@ export function registerMemoryTools(server: McpServer): void {
 				layer: typeof args.layer === "string" ? args.layer : undefined,
 				token_budget:
 					typeof args.token_budget === "number" ? args.token_budget : undefined,
-			}),
-	});
-
-	// P230: team_mem_set — write a shared squad decision/knowledge entry
-	server.addTool({
-		name: "team_mem_set",
-		description: "Write a shared squad-level memory entry (decisions, knowledge, conventions). Last-write-wins per (team_name, key).",
-		inputSchema: {
-			type: "object",
-			properties: {
-				team_name: { type: "string", description: "Squad identifier (e.g. 'p230-squad')" },
-				key: { type: "string", description: "Memory key" },
-				value: { type: "string", description: "Value (JSON or plain text)" },
-				created_by: { type: "string", description: "Agent identity writing this entry" },
-				expires_in_days: { type: "number", description: "Optional TTL in days" },
-			},
-			required: ["team_name", "key", "value"],
-		},
-		handler: async (args: Record<string, unknown>) =>
-			await handlers.teamMemSet({
-				team_name: String(args.team_name),
-				key: String(args.key),
-				value: String(args.value),
-				created_by: typeof args.created_by === "string" ? args.created_by : undefined,
-				expires_in_days: typeof args.expires_in_days === "number" ? args.expires_in_days : undefined,
-			}),
-	});
-
-	// P230: team_mem_get — read a single squad memory entry
-	server.addTool({
-		name: "team_mem_get",
-		description: "Read a single squad-level memory entry by team and key.",
-		inputSchema: {
-			type: "object",
-			properties: {
-				team_name: { type: "string" },
-				key: { type: "string" },
-			},
-			required: ["team_name", "key"],
-		},
-		handler: async (args: Record<string, unknown>) =>
-			await handlers.teamMemGet({
-				team_name: String(args.team_name),
-				key: String(args.key),
-			}),
-	});
-
-	// P230: team_mem_list — list all active squad memory entries
-	server.addTool({
-		name: "team_mem_list",
-		description: "List all active (non-expired) memory entries for a squad team.",
-		inputSchema: {
-			type: "object",
-			properties: {
-				team_name: { type: "string" },
-			},
-			required: ["team_name"],
-		},
-		handler: async (args: Record<string, unknown>) =>
-			await handlers.teamMemList({
-				team_name: String(args.team_name),
 			}),
 	});
 }

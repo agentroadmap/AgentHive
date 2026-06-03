@@ -1,16 +1,17 @@
 /**
- * P182 AC-9: Auto-charter hook for team governance.
+ * P182 AC-9: autoCharterIfNeeded — automatic team charter creation on multi-agent dispatch.
  *
- * Called after each non-replay squad_dispatch INSERT. When 2+ alive dispatches
- * exist for the same proposal_id, finds-or-creates a team record and writes a
- * team:charter + default governance norms into team_norms. Safe to call on
- * every non-replay INSERT — the count guard and ON CONFLICT upserts make it
- * idempotent.
+ * Called by postWorkOffer after every non-replay INSERT into squad_dispatch.
+ * When 2+ alive offers exist for the same proposal_id, finds-or-creates a team
+ * row and upserts the charter + 5 default governance norms into team_norms.
+ *
+ * Idempotent: subsequent calls with an existing charter are cheap no-ops.
+ * Fail-safe: the caller (postWorkOffer) wraps this in try/catch so charter
+ * failures never block the primary offer pipeline.
  */
 
+import type { QueryFn } from "./post-work-offer.ts";
 import { query as defaultQuery } from "../../infra/postgres/pool.ts";
-
-type QueryFn = typeof defaultQuery;
 
 const DEFAULT_NORMS: Record<string, Record<string, string>> = {
 	"team:norm:handoff": {
@@ -35,63 +36,95 @@ const DEFAULT_NORMS: Record<string, Record<string, string>> = {
 	},
 };
 
+export interface AutoCharterResult {
+	/** True when a new charter was written this call. False = already existed or too few dispatches. */
+	chartered: boolean;
+	teamId?: number;
+}
+
 /**
- * Check if 2+ alive squad_dispatch rows exist for proposalId; if so, ensure
- * the proposal team has a team:charter entry in team_norms.
+ * If ≥ 2 alive squad_dispatch rows exist for proposalId, find-or-create a team
+ * and upsert the team:charter + 5 default norms. Returns whether a new charter
+ * was written.
  */
 export async function autoCharterIfNeeded(
 	proposalId: number,
 	queryFn: QueryFn = defaultQuery,
-): Promise<void> {
-	const { rows: countRows } = await queryFn<{ cnt: number }>(
-		`SELECT count(*)::int AS cnt
+): Promise<AutoCharterResult> {
+	const { rows: aliveRows } = await queryFn<{ count: number }>(
+		`SELECT count(*)::int AS count
 		   FROM roadmap_workforce.squad_dispatch
 		  WHERE proposal_id = $1
-		    AND dispatch_status IN ('open', 'assigned', 'active')`,
+		    AND offer_status IN ('open', 'claimed', 'active')
+		    AND completed_at IS NULL`,
 		[proposalId],
 	);
-	const aliveCount = countRows[0]?.cnt ?? 0;
-	if (aliveCount < 2) return;
 
-	const { rows: propRows } = await queryFn<{
-		display_id: string;
-		title: string;
-	}>(
-		`SELECT display_id, title FROM roadmap_proposal.proposal WHERE id = $1`,
-		[proposalId],
+	const aliveCount = aliveRows[0]?.count ?? 0;
+	if (aliveCount < 2) {
+		return { chartered: false };
+	}
+
+	// Find an existing active team for this proposal.
+	const { rows: existingTeamRows } = await queryFn<{ id: number }>(
+		`SELECT id
+		   FROM roadmap_workforce.team
+		  WHERE metadata->>'proposal_id' = $1::text
+		    AND status = 'active'
+		  LIMIT 1`,
+		[String(proposalId)],
 	);
-	if (propRows.length === 0) return;
-	const { display_id: displayId, title } = propRows[0];
 
-	const teamName = `team:${displayId}-dispatch-auto`;
+	let teamId: number;
 
-	const { rows: teamRows } = await queryFn<{ id: number }>(
-		`INSERT INTO roadmap_workforce.team
-		   (team_name, team_type, status, metadata)
-		 VALUES ($1, 'proposal', 'active', '{}')
-		 ON CONFLICT (team_name) DO UPDATE SET status = EXCLUDED.status
-		 RETURNING id`,
-		[teamName],
+	if (existingTeamRows.length > 0) {
+		teamId = existingTeamRows[0].id;
+	} else {
+		const { rows: newTeamRows } = await queryFn<{ id: number }>(
+			`INSERT INTO roadmap_workforce.team
+			   (team_name, team_type, status, metadata)
+			 VALUES ($1, 'proposal', 'active', $2::jsonb)
+			 RETURNING id`,
+			[
+				`P${proposalId}-team`,
+				JSON.stringify({ proposal_id: proposalId, auto_chartered: true }),
+			],
+		);
+		teamId = newTeamRows[0].id;
+	}
+
+	// No-op if charter already exists.
+	const { rows: existingCharterRows } = await queryFn<{ id: number }>(
+		`SELECT id
+		   FROM roadmap_workforce.team_norms
+		  WHERE team_id = $1
+		    AND norm_key = $2
+		  LIMIT 1`,
+		[teamId, "team:charter"],
 	);
-	const teamId = teamRows[0]?.id;
-	if (!teamId) return;
 
-	const charterValue = JSON.stringify({
-		team_name: teamName,
+	if (existingCharterRows.length > 0) {
+		return { chartered: false, teamId };
+	}
+
+	const charterValue = {
+		team_name: `P${proposalId}-team`,
 		proposal_ids: [String(proposalId)],
 		created_by: "orchestrator:auto-charter",
 		governance_layer: "team",
 		norms_applied: Object.keys(DEFAULT_NORMS),
-		title,
-	});
+		auto_chartered: true,
+	};
 
 	await queryFn(
 		`INSERT INTO roadmap_workforce.team_norms
 		   (team_id, norm_key, norm_value, set_by)
-		 VALUES ($1, 'team:charter', $2, 'orchestrator:auto-charter')
-		 ON CONFLICT (team_id, norm_key)
-		 DO UPDATE SET norm_value = EXCLUDED.norm_value, updated_at = now()`,
-		[teamId, charterValue],
+		 VALUES ($1, $2, $3, 'orchestrator:auto-charter')
+		 ON CONFLICT (team_id, norm_key) DO UPDATE
+		   SET norm_value = EXCLUDED.norm_value,
+		       set_by = EXCLUDED.set_by,
+		       updated_at = now()`,
+		[teamId, "team:charter", JSON.stringify(charterValue)],
 	);
 
 	for (const [normKey, normVal] of Object.entries(DEFAULT_NORMS)) {
@@ -103,4 +136,6 @@ export async function autoCharterIfNeeded(
 			[teamId, normKey, JSON.stringify(normVal)],
 		);
 	}
+
+	return { chartered: true, teamId };
 }

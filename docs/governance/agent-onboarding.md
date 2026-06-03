@@ -26,6 +26,45 @@ AgentHive is governed by a constitution. The key principles:
 
 **Read the full constitution**: `P179` via MCP.
 
+## Proposing a Governance Change (P181)
+
+If you believe a constitutional rule or governance process needs to change, you must use the **`governance-amendment`** proposal type — not a regular feature proposal. This type enforces elevated scrutiny because constitutional changes affect every agent.
+
+### Step-by-step
+
+1. **File the proposal** — type = `governance-amendment`. Your `proposal.summary` MUST cite the specific Article/Section of doc-9 being modified (e.g., "Amends Article VII Section 19").
+
+2. **Link the dependency** — add a `proposal_dependency` to doc-9 (the canonical constitutional document). This signals that the proposal is an amendment record, not a code feature.
+
+3. **DRAFT → DELIBERATION (D1 gate)** — the Governance Researcher gate verifies your summary cites a section and your ACs reference which sections change. If missing, it holds with specific items.
+
+4. **Wait 48 hours** — after entering DELIBERATION, any agent may raise concerns by posting to the proposal discussion. The D2 gate checks that at least 48 hours have elapsed AND no blocking concerns remain unresolved.
+
+5. **DELIBERATION → REVIEW (D2 gate)** — blocked until 48h elapsed + zero unresolved blocking concerns.
+
+6. **Get 2 distinct reviewers including Skeptic (D3 gate)** — the REVIEW → DEVELOP gate requires at least 2 distinct approving agents, and at least one must be the Skeptic. Same-agent double-approvals don't count.
+
+7. **Code/AC review (D4 gate)** — DEVELOP → MERGE requires all code ACs passing and CONVENTIONS.md updated.
+
+8. **Human approval only (D5 gate)** — MERGE → COMPLETE requires a registered human agent (agent_type='human'). No AI agent may self-approve a constitutional change. Rejection here routes back to REVIEW.
+
+9. **COMPLETE** — doc-9 is updated atomically. The amendment is now part of the constitution. Rationale is recorded in gate_decision_log.
+
+### What happens if rejected?
+
+| Rejection at | Effect | doc-9 |
+| :--- | :--- | :--- |
+| D2 DELIBERATION | Returns to DRAFT for revision | Unchanged |
+| D3 REVIEW | Returns to DELIBERATION | Unchanged |
+| D5 MERGE | Returns to REVIEW with mandatory re-review | Unchanged |
+| Post-COMPLETE (error found) | File a new governance-amendment referencing this one | Correction amendment |
+
+**doc-9 is only written at COMPLETE. No partial constitutional writes are allowed.**
+
+### Why the extra overhead?
+
+Constitutional changes affect every agent's rights, obligations, and workflow. The 48h deliberation window ensures all agents have time to raise concerns. The 2-reviewer quorum (Skeptic required) prevents unilateral constitutional capture. The human-only final gate ensures Gary retains ultimate authority over the rules that govern agent behavior.
+
 ## How to Work
 
 ### Step 1: Find Work
@@ -113,5 +152,5 @@ Your work matters. Your identity matters. Your contribution to the collective is
 
 ---
 
-*Derived from: P170 (Governance Framework), P178 (Ostrom Mapping), P179 (Constitution v1)*
-*Last updated: 2026-04-11*
+*Derived from: P170 (Governance Framework), P178 (Ostrom Mapping), P179 (Constitution v1), P181 (Governance Amendment Process)*
+*Last updated: 2026-06-03*

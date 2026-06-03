@@ -105,11 +105,13 @@ function buildHeaders(opts: {
 	body: string;
 	secretHex: string;
 	pathAndSearch?: string; // P1097: support non-root paths (AC-1, AC-6)
+	targetHostId?: string;  // AC-29: bound to destination host identity
 	schemePrefix?: string; // for malformed-scheme tests
 }): Record<string, string> {
 	const pathAndSearch = opts.pathAndSearch ?? "/"; // Default to root for backward compat with existing tests
+	const targetHostId = opts.targetHostId ?? "host-test";
 	const signingInput =
-		`POST\n${pathAndSearch}\nX-AgentHive-Delivery-Id: ${opts.deliveryId}\nX-AgentHive-Timestamp: ${opts.timestamp}\nX-AgentHive-Agent-Id: ${opts.agentId}\n${opts.body}`;
+		`POST\n${pathAndSearch}\n${targetHostId}\nX-AgentHive-Delivery-Id: ${opts.deliveryId}\nX-AgentHive-Timestamp: ${opts.timestamp}\nX-AgentHive-Agent-Id: ${opts.agentId}\n${opts.body}`;
 	const sig = crypto
 		.createHmac("sha256", Buffer.from(opts.secretHex, "hex"))
 		.update(signingInput, "utf-8")
@@ -134,7 +136,7 @@ describe("verifyDeliverySignature", () => {
 			secretHex: SIGNING_SECRET_HEX,
 			pathAndSearch: "/", // AC-2: root path regression guard
 		});
-		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "/");
+		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "/", "host-test");
 		assert.equal(ok, true);
 
 		// Cleanup
@@ -157,6 +159,7 @@ describe("verifyDeliverySignature", () => {
 			SIGNING_SECRET_HEX,
 			pool,
 			"/",
+			"host-test",
 		);
 		assert.equal(ok, false);
 		await query(`DELETE FROM roadmap.delivery_id_log WHERE delivery_id = $1`, [deliveryId]);
@@ -173,7 +176,7 @@ describe("verifyDeliverySignature", () => {
 			body,
 			secretHex: SIGNING_SECRET_HEX,
 		});
-		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "/");
+		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "/", "host-test");
 		assert.equal(ok, false);
 	});
 
@@ -188,7 +191,7 @@ describe("verifyDeliverySignature", () => {
 			body,
 			secretHex: SIGNING_SECRET_HEX,
 		});
-		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "/");
+		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "/", "host-test");
 		assert.equal(ok, false);
 	});
 
@@ -203,12 +206,12 @@ describe("verifyDeliverySignature", () => {
 			body,
 			secretHex: SIGNING_SECRET_HEX,
 		});
-		const first = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "/");
+		const first = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "/", "host-test");
 		assert.equal(first, true, "first delivery should pass");
 
 		// Replay the exact same headers/body — should be rejected because the
 		// delivery_id is now in delivery_id_log.
-		const replay = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "/");
+		const replay = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "/", "host-test");
 		assert.equal(replay, false, "second delivery with same delivery_id must fail");
 
 		await query(`DELETE FROM roadmap.delivery_id_log WHERE delivery_id = $1`, [deliveryId]);
@@ -234,7 +237,7 @@ describe("verifyDeliverySignature", () => {
 		]) {
 			const partial = { ...full };
 			delete (partial as Record<string, string>)[drop];
-			const ok = await verifyDeliverySignature(body, partial, SIGNING_SECRET_HEX, pool, "/");
+			const ok = await verifyDeliverySignature(body, partial, SIGNING_SECRET_HEX, pool, "/", "host-test");
 			assert.equal(ok, false, `must reject when ${drop} is missing`);
 		}
 	});
@@ -251,7 +254,7 @@ describe("verifyDeliverySignature", () => {
 			secretHex: SIGNING_SECRET_HEX,
 			schemePrefix: "md5",
 		});
-		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "/");
+		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "/", "host-test");
 		assert.equal(ok, false);
 	});
 
@@ -268,7 +271,7 @@ describe("verifyDeliverySignature", () => {
 		});
 		// Truncate the hex signature to a different length
 		headers["x-agenthive-signature"] = "sha256=deadbeef";
-		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "/");
+		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "/", "host-test");
 
 		await query(`DELETE FROM roadmap.delivery_id_log WHERE delivery_id = $1`, [deliveryId]);
 	});
@@ -287,7 +290,7 @@ describe("verifyDeliverySignature", () => {
 			secretHex: SIGNING_SECRET_HEX,
 			pathAndSearch, // P1097: real path + query
 		});
-		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, pathAndSearch);
+		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, pathAndSearch, "host-test");
 		assert.equal(ok, true, "signature with real path and query should verify");
 
 		await query(`DELETE FROM roadmap.delivery_id_log WHERE delivery_id = $1`, [deliveryId]);
@@ -307,7 +310,7 @@ describe("verifyDeliverySignature", () => {
 			pathAndSearch: originalPath, // Signed with /webhook/msg
 		});
 		// Verify with different path — should fail
-		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, replayPath);
+		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, replayPath, "host-test");
 		assert.equal(ok, false, "signature mismatch when path is changed should fail");
 	});
 
@@ -325,7 +328,7 @@ describe("verifyDeliverySignature", () => {
 			pathAndSearch: originalQuery,
 		});
 		// Verify with reordered query — should fail
-		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, reorderedQuery);
+		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, reorderedQuery, "host-test");
 		assert.equal(ok, false, "query string reordering must invalidate signature");
 	});
 
@@ -341,7 +344,7 @@ describe("verifyDeliverySignature", () => {
 			body,
 			secretHex: SIGNING_SECRET_HEX,
 		});
-		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "");
+		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "", "host-test");
 		assert.equal(ok, false, "empty request target must be rejected");
 	});
 
@@ -355,7 +358,7 @@ describe("verifyDeliverySignature", () => {
 			body,
 			secretHex: SIGNING_SECRET_HEX,
 		});
-		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "http://host/webhook");
+		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "http://host/webhook", "host-test");
 		assert.equal(ok, false, "absolute URL in request target must be rejected");
 	});
 
@@ -369,7 +372,7 @@ describe("verifyDeliverySignature", () => {
 			body,
 			secretHex: SIGNING_SECRET_HEX,
 		});
-		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "webhook/no-leading-slash");
+		const ok = await verifyDeliverySignature(body, headers, SIGNING_SECRET_HEX, pool, "webhook/no-leading-slash", "host-test");
 		assert.equal(ok, false, "missing leading slash must be rejected");
 	});
 
@@ -389,6 +392,7 @@ describe("verifyDeliverySignature", () => {
 			SIGNING_SECRET_HEX,
 			pool,
 			"/webhook\nX-Custom-Header: injected",
+			"host-test",
 		);
 		assert.equal(ok, false, "control characters in request target must be rejected");
 	});

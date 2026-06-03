@@ -938,3 +938,33 @@ export async function verifyAgentHive2Connection(schema?: string): Promise<void>
     await client.end().catch(() => {});
   }
 }
+
+/**
+ * AC-11 / P826 residual gap: verify connectivity to the agentHive2 (V2) DB.
+ * Called at MCP server startup when AGENTHIVE_V2_DB_URL is set. Non-fatal —
+ * the V2 path is opt-in and the call site uses `void`.
+ */
+export async function verifyAgentHive2Connection(
+  projectSchema = "agentHive",
+): Promise<void> {
+  const url = process.env.AGENTHIVE_V2_DB_URL;
+  if (!url) return;
+  const client = new Client({ connectionString: url });
+  try {
+    await client.connect();
+    await client.query(
+      `SELECT 1 FROM information_schema.schemata WHERE schema_name = $1`,
+      [projectSchema],
+    );
+    console.info(
+      `[pool-registry] agentHive2 connection verified (schema: ${projectSchema})`,
+    );
+  } catch (err) {
+    console.warn(
+      `[pool-registry] agentHive2 connection check failed (schema: ${projectSchema}):`,
+      (err as Error).message,
+    );
+  } finally {
+    await client.end().catch(() => {});
+  }
+}

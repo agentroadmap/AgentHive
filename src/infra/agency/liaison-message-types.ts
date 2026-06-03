@@ -46,6 +46,10 @@ export const OfferDispatchPayloadSchema = z.object({
     role: z.string(),
     required_capabilities: z.array(z.string()),
     route_hint: z.string(),
+    /** P1113: pre-resolved behavioral persona text (prepended to task by handler). */
+    persona: z.string().optional(),
+    /** P1113: full task string forwarded from squad_dispatch.metadata.task. */
+    task: z.string().optional(),
 });
 export type OfferDispatchPayload = z.infer<typeof OfferDispatchPayloadSchema>;
 

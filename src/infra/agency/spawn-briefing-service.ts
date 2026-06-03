@@ -15,7 +15,7 @@ import { v4 as uuidv4 } from "uuid";
 import { query } from "../postgres/pool.js";
 import type { Pool } from "pg";
 import { MemoryService } from "../../memory/memory_service.ts";
-import { buildContextPackage } from "./context_builder.ts";
+import { buildContextPackage, type PackageType } from "./context_builder.js";
 
 export interface TaskContext {
   task_id: string;
@@ -38,8 +38,11 @@ export interface TaskContext {
   request_assistance_threshold?: number;
 
   topic_keywords?: string[]; // for memory search
-  proposal_id?: bigint; // P230: if set, inject cached context package into briefing
-  team_name?: string;   // P230: optional squad name for team memory injection
+
+  // P230: proposal-scoped context injection
+  proposal_id?: bigint | number;
+  team_name?: string;
+  context_package_type?: PackageType;
 }
 
 export interface SpawnBriefing {
@@ -158,15 +161,10 @@ export async function briefingAssemble(
   const cache_control: { type: "ephemeral" } = { type: "ephemeral" };
 
   try {
-    const agentMemoryPromise = task.liaison_agent
-      ? memoryService.getAgentMemory(task.liaison_agent, "semantic")
-      : Promise.resolve({} as Record<string, unknown>);
-
-    const [architecture, workflow, conventions, agentSemantic] = await Promise.all([
+    const [architecture, workflow, conventions] = await Promise.all([
       memoryService.getProjectMemory("architecture"),
       memoryService.getProjectMemory("workflow_states"),
       memoryService.getProjectMemory("conventions"),
-      agentMemoryPromise,
     ]);
 
     project_context = {};
@@ -182,54 +180,28 @@ export async function briefingAssemble(
         body: JSON.stringify(pmContent),
       });
     }
-
-    // Surface agent semantic memory entries (per-agent durable knowledge).
-    for (const [smKey, smValue] of Object.entries(agentSemantic)) {
-      inherited_memory.push({
-        key: `agent_memory:semantic:${smKey}`,
-        body: typeof smValue === "string" ? smValue : JSON.stringify(smValue),
-      });
-    }
   } catch {
-    // Non-fatal: memory tables may not exist yet (pre-migration).
-    // Proceed without injecting memory context.
+    // Non-fatal: project_memory table may not exist yet (pre-migration).
+    // Proceed without injecting project context.
   }
 
-  // Step 5b: P230 — inject proposal context package when proposal_id is provided.
-  // Saves ~500 tokens vs dumping full CLAUDE.md; cache is invalidated on status/AC change.
-  if (task.proposal_id !== undefined) {
+  // P230 Step 5b: inject proposal-scoped context package when proposal_id is set.
+  if (task.proposal_id != null) {
     try {
-      const pkg = await buildContextPackage({
+      const proposalContext = await buildContextPackage({
         proposal_id: task.proposal_id,
-        package_type: "code_gen",
+        package_type: task.context_package_type ?? "code_gen",
+        agent_id: briefed_by,
         team_name: task.team_name,
-        agent_identity: briefed_by,
       });
-      inherited_memory.push({
-        key: `proposal_context:${task.proposal_id}`,
-        body: pkg.context_text,
-      });
+      if (proposalContext) {
+        inherited_memory.push({
+          key: "proposal_context",
+          body: proposalContext,
+        });
+      }
     } catch {
-      // Non-fatal: context_packages table may not exist yet.
-    }
-  }
-
-  // Step 5b: P230 — inject proposal context package when proposal_id is provided.
-  // Saves ~500 tokens vs dumping full CLAUDE.md; cache is invalidated on status/AC change.
-  if (task.proposal_id !== undefined) {
-    try {
-      const pkg = await buildContextPackage({
-        proposal_id: task.proposal_id,
-        package_type: "code_gen",
-        team_name: task.team_name,
-        agent_identity: briefed_by,
-      });
-      inherited_memory.push({
-        key: `proposal_context:${task.proposal_id}`,
-        body: pkg.context_text,
-      });
-    } catch {
-      // Non-fatal: context_packages table may not exist yet.
+      // Non-fatal: proceed without proposal context.
     }
   }
 

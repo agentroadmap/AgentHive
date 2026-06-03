@@ -1,443 +1,441 @@
-#!/usr/bin/env node
 /**
- * P1358: Agency-agents catalog import
+ * Import agency-agents catalog as inactive agent seeds.
  *
- * Parses 144+ agent definitions from the msitarzewski/agency-agents repository
- * and upserts them as inactive agent_registry rows with associated capabilities.
- * Also applies the P1355-A schema migration (personality + display_metadata columns)
- * if those columns don't yet exist.
+ * Reads all agent .md files from msitarzewski/agency-agents (local clone),
+ * parses frontmatter + section headings, and upserts rows into
+ * roadmap_workforce.agent_registry and roadmap_workforce.agent_capability.
  *
  * Usage:
- *   node --import jiti/register scripts/import-agency-agents-catalog.ts [options]
- *
- * Options:
- *   --local-path <dir>   Path to agency-agents repo (default: /data/code/agency-agents)
- *   --dry-run            Parse + report without writing to DB
- *   --division <name>    Only import one division
- *   --help
- *
- * Idempotent: ON CONFLICT (agent_identity) DO UPDATE — safe to re-run.
- * Imported rows are status='inactive'; the orchestrator ignores them until an
- * operator explicitly activates via mcp_agent action=activate_catalog_agent.
+ *   npx tsx scripts/import-agency-agents-catalog.ts [--local-path <dir>] [--dry-run]
  */
 
-import { readdirSync, readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
-import { parseArgs } from "node:util";
-import { closePool, query } from "../src/infra/postgres/pool.ts";
+import { readdir, readFile } from "node:fs/promises";
+import { join, basename, extname } from "node:path";
+import { getPool, closePool } from "../src/infra/postgres/pool.ts";
 
-// Division folder → ExpertiseRole mapping
-// NOTE: 'integrations' (platform sub-dirs) and 'strategy' (high-level docs) excluded — no agent .md files
-const DIVISION_ROLE: Record<string, string> = {
-	engineering: "coder",
-	design: "designer",
-	"paid-media": "researcher",
-	sales: "researcher",
-	marketing: "researcher",
-	product: "researcher",
-	"project-management": "coordinator",
-	testing: "tester",
-	support: "researcher",
-	"spatial-computing": "coder",
-	specialized: "researcher",
-	"game-development": "coder",
-	academic: "researcher",
+export interface ImportOptions {
+	localPath?: string;
+	dryRun?: boolean;
+}
+
+// Divisions to scan (top-level .md files only)
+const IMPORTABLE_DIVISIONS = [
+	"academic",
+	"design",
+	"engineering",
+	"game-development",
+	"marketing",
+	"paid-media",
+	"product",
+	"project-management",
+	"sales",
+	"spatial-computing",
+	"specialized",
+	"support",
+	"testing",
+] as const;
+
+type Division = (typeof IMPORTABLE_DIVISIONS)[number];
+
+// Division → expertise roles mapping
+const DIVISION_EXPERTISE: Record<Division, string[]> = {
+	engineering: ["architect", "coder", "reviewer"],
+	design: ["designer"],
+	testing: ["tester"],
+	support: ["writer"],
+	marketing: ["researcher", "writer"],
+	"paid-media": ["researcher", "writer"],
+	sales: ["researcher"],
+	product: ["researcher"],
+	"project-management": ["researcher"],
+	"game-development": ["designer", "coder"],
+	"spatial-computing": ["designer"],
+	specialized: [],
+	academic: ["researcher"],
 };
 
-// All known divisions (in deterministic order)
-const DIVISIONS = Object.keys(DIVISION_ROLE);
-
-interface AgentPersonality {
-	vibe: string;
-	core_truths: string[];
-	boundaries: string[];
-	communication_style: string;
-	expertise: string[];
-}
-
-interface AgentDisplayMetadata {
-	emoji: string;
-	color: string;
-	vibe: string;
-	description: string;
-	source: "agency-agents";
-	division: string;
-}
+const SPECIALIZED_KEYWORD_MAP: Record<string, string[]> = {
+	architect: ["architect"],
+	engineer: ["coder"],
+	developer: ["coder"],
+	coder: ["coder"],
+	auditor: ["reviewer"],
+	reviewer: ["reviewer"],
+	analyst: ["researcher"],
+	strategist: ["researcher"],
+	designer: ["designer"],
+	writer: ["writer"],
+	trainer: ["writer"],
+	coach: ["researcher"],
+	operator: ["coordinator"],
+	orchestrator: ["coordinator"],
+	manager: ["coordinator"],
+};
 
 interface AgentDef {
+	division: Division;
 	filePath: string;
-	division: string;
-	agentIdentity: string;
-	displayName: string;
-	role: string;
+	identity: string;
+	name: string;
 	description: string;
+	color: string;
+	emoji: string;
+	vibe: string;
+	expertise: string[];
 	capabilities: string[];
-	personality: AgentPersonality;
-	displayMetadata: AgentDisplayMetadata;
+	boundaries: string[];
 }
 
 function slugify(name: string): string {
 	return name
 		.toLowerCase()
-		.replace(/[^\w\s-]/g, "")
-		.replace(/[\s_]+/g, "-")
-		.replace(/^-+|-+$/g, "")
-		.replace(/-{2,}/g, "-");
+		.replace(/&/g, "and")
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "");
 }
 
-function parseFrontmatter(content: string): Record<string, string> {
-	const match = content.match(/^---\n([\s\S]*?)\n---/);
-	if (!match) return {};
-
+function parseFrontmatter(
+	content: string,
+): Record<string, string> | null {
+	const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+	if (!match) return null;
 	const result: Record<string, string> = {};
 	for (const line of match[1].split("\n")) {
-		const colonIdx = line.indexOf(":");
-		if (colonIdx === -1) continue;
-		const key = line.slice(0, colonIdx).trim();
-		let val = line.slice(colonIdx + 1).trim();
-		// Strip surrounding quotes
-		if (
-			(val.startsWith('"') && val.endsWith('"')) ||
-			(val.startsWith("'") && val.endsWith("'"))
-		) {
-			val = val.slice(1, -1);
-		}
-		result[key] = val;
+		const colon = line.indexOf(":");
+		if (colon === -1) continue;
+		const key = line.slice(0, colon).trim();
+		const val = line.slice(colon + 1).trim().replace(/^["']|["']$/g, "");
+		if (key) result[key] = val;
 	}
 	return result;
 }
 
-function extractCapabilities(content: string): string[] {
-	// Find the Core Mission section (stop at the next same-or-higher-level section)
-	const missionMatch = content.match(
-		/#{1,3}[^\n]*Core Mission[^\n]*\n([\s\S]*?)(?=\n#{1,2}[^#]|$)/i,
-	);
-	if (!missionMatch) return [];
+/**
+ * Extract H3 headings from the first occurrence of a section that matches
+ * any of the provided heading patterns. Stops at the next H2 or H1.
+ */
+function extractH3sUnderSection(
+	content: string,
+	sectionPatterns: RegExp[],
+): string[] {
+	const lines = content.split("\n");
+	let inSection = false;
+	const results: string[] = [];
 
-	const body = missionMatch[1];
-	let caps: string[] = [];
+	for (const line of lines) {
+		const trimmed = line.trim();
 
-	// Strategy 1: ### subsection headers (most common in longer agent files)
-	for (const m of body.matchAll(/^###\s+(.+)$/gm)) {
-		caps.push(slugify(m[1].trim()));
-	}
-	if (caps.length > 0) return caps.filter(Boolean).slice(0, 20);
+		// Check if we're entering a matching section
+		if (!inSection) {
+			for (const pat of sectionPatterns) {
+				if (pat.test(trimmed)) {
+					inSection = true;
+					break;
+				}
+			}
+			continue;
+		}
 
-	// Strategy 2: Numbered **Bold** items
-	for (const m of body.matchAll(/^\d+\.\s+\*\*([^*]+)\*\*/gm)) {
-		caps.push(slugify(m[1].trim()));
-	}
-	if (caps.length > 0) return caps.filter(Boolean).slice(0, 20);
+		// Stop if we hit another H1 or H2 (not H3)
+		if (/^#{1,2}\s/.test(trimmed) && !/^###\s/.test(trimmed)) {
+			break;
+		}
 
-	// Strategy 3: **Bold** text at start of bullet items
-	for (const m of body.matchAll(/^[-*]\s+\*\*([^*]+)\*\*/gm)) {
-		caps.push(slugify(m[1].trim()));
-	}
-
-	// Strategy 4: **Primary domains:** bullet list
-	const domainsMatch = body.match(/\*\*Primary domains[^:]*:\*\*([\s\S]*?)(?:\n\n|\n##|$)/i);
-	if (domainsMatch) {
-		for (const m of domainsMatch[1].matchAll(/^[-*]\s+(.+)$/gm)) {
-			caps.push(slugify(m[1].split("(")[0].trim()));
+		// Collect H3 headings
+		if (/^###\s+/.test(trimmed)) {
+			const heading = trimmed.replace(/^###\s+/, "").replace(/\*\*/g, "").trim();
+			results.push(heading);
 		}
 	}
 
-	return caps.filter(Boolean).slice(0, 20);
+	return results;
 }
 
-function extractBoundaries(content: string): string[] {
-	// Critical Rules section — extract rule names
-	const rulesMatch = content.match(
-		/#{1,3}[^\n]*Critical Rules[^\n]*\n([\s\S]*?)(?=\n#{1,2}[^#]|$)/i,
-	);
-	if (!rulesMatch) return [];
-
-	const body = rulesMatch[1];
-	const boundaries: string[] = [];
-
-	// Numbered bold items
-	for (const m of body.matchAll(/^\d+\.\s+\*\*([^*]+)\*\*/gm)) {
-		boundaries.push(m[1].trim());
+function inferSpecializedExpertise(name: string): string[] {
+	const lower = name.toLowerCase();
+	for (const [keyword, roles] of Object.entries(SPECIALIZED_KEYWORD_MAP)) {
+		if (lower.includes(keyword)) return roles;
 	}
-	if (boundaries.length > 0) return boundaries.slice(0, 8);
-
-	// ### subsection headers
-	for (const m of body.matchAll(/^###\s+(.+)$/gm)) {
-		boundaries.push(m[1].trim());
-	}
-
-	return boundaries.slice(0, 8);
+	return ["researcher"];
 }
 
-function extractCoreTruths(content: string): string[] {
-	// Identity & Memory section — extract personality/experience lines
-	const memMatch = content.match(
-		/#{1,3}[^\n]*(Identity|Memory)[^\n]*\n([\s\S]*?)(?=\n#{1,2}[^#]|$)/i,
-	);
-	if (!memMatch) return [];
-
-	const body = memMatch[2];
-	const truths: string[] = [];
-
-	for (const m of body.matchAll(/^\s*[-*]\s+\*\*([^*]+)\*\*[:\s]+(.+)$/gm)) {
-		const label = m[1].toLowerCase();
-		if (label.includes("personality") || label.includes("experience") || label.includes("role")) {
-			truths.push(m[2].trim());
-		}
-	}
-
-	return truths.slice(0, 5);
-}
-
-function parseAgentFile(filePath: string, division: string): AgentDef | null {
-	let content: string;
-	try {
-		content = readFileSync(filePath, "utf-8");
-	} catch {
-		return null;
-	}
-
+async function parseAgentFile(
+	filePath: string,
+	division: Division,
+): Promise<AgentDef | null> {
+	const content = await readFile(filePath, "utf-8");
 	const fm = parseFrontmatter(content);
-	if (!fm.name) return null;
+	if (!fm?.name) return null;
 
-	const capabilities = extractCapabilities(content);
-	const boundaries = extractBoundaries(content);
-	const coreTruths = extractCoreTruths(content);
-	const role = DIVISION_ROLE[division] ?? "researcher";
+	const capabilities = extractH3sUnderSection(content, [
+		/^##\s+🎯\s+Your Core Mission/,
+		/^#\s+Your Core Mission/,
+	]).map(slugify);
+
+	const boundaries = extractH3sUnderSection(content, [
+		/^##\s+🚨\s+Critical Rules/,
+		/^#\s+Critical Rules/,
+	]);
+
+	let expertise =
+		division === "specialized"
+			? inferSpecializedExpertise(fm.name)
+			: DIVISION_EXPERTISE[division];
+
+	const identity = `agency-agents/${slugify(fm.name)}`;
 
 	return {
-		filePath,
 		division,
-		agentIdentity: `agency-agents/${slugify(fm.name)}`,
-		displayName: fm.name,
-		role,
+		filePath,
+		identity,
+		name: fm.name,
 		description: fm.description ?? "",
+		color: fm.color ?? "blue",
+		emoji: fm.emoji ?? "",
+		vibe: fm.vibe ?? "",
+		expertise,
 		capabilities,
-		personality: {
-			vibe: fm.vibe ?? "",
-			core_truths: coreTruths,
-			boundaries,
-			communication_style: "",
-			expertise: [role],
-		},
-		displayMetadata: {
-			emoji: fm.emoji ?? "",
-			color: fm.color ?? "",
-			vibe: fm.vibe ?? "",
-			description: fm.description ?? "",
-			source: "agency-agents",
-			division,
-		},
+		boundaries,
 	};
 }
 
-async function ensureColumns(): Promise<void> {
-	// P1355-A migration: add personality + display_metadata columns if absent
-	await query(`
-		ALTER TABLE agent_registry
-			ADD COLUMN IF NOT EXISTS personality JSONB,
-			ADD COLUMN IF NOT EXISTS display_metadata JSONB
-	`);
+async function scanDivision(
+	baseDir: string,
+	division: Division,
+): Promise<AgentDef[]> {
+	const dir = join(baseDir, division);
+	let entries: string[];
+	try {
+		entries = await readdir(dir);
+	} catch {
+		return [];
+	}
+
+	const defs: AgentDef[] = [];
+	for (const entry of entries) {
+		if (extname(entry) !== ".md") continue;
+		// Skip documentation files that aren't agent definitions
+		if (/^(README|QUICKSTART|EXECUTIVE|NEXUS|CONTRIBUTING)/i.test(entry)) {
+			continue;
+		}
+		const filePath = join(dir, entry);
+		const def = await parseAgentFile(filePath, division);
+		if (def) defs.push(def);
+	}
+	return defs;
 }
 
-async function upsertAgent(def: AgentDef): Promise<{ isNew: boolean; capCount: number }> {
-	const result = await query<{ id: string; is_new: boolean }>(
-		`INSERT INTO agent_registry
-		   (agent_identity, agent_type, role, status, display_name, preferred_provider,
-		    personality, display_metadata)
-		 VALUES ($1, 'agency', $2, 'inactive', $3, NULL, $4, $5)
+async function preflightCheck(): Promise<void> {
+	const pool = getPool();
+	const client = await pool.connect();
+	try {
+		// Check personality + display_metadata columns exist
+		const colRes = await client.query<{ column_name: string }>(
+			`SELECT column_name
+			 FROM information_schema.columns
+			 WHERE table_schema = 'roadmap_workforce'
+			   AND table_name = 'agent_registry'
+			   AND column_name IN ('personality', 'display_metadata')`,
+		);
+		const cols = colRes.rows.map((r) => r.column_name);
+		if (!cols.includes("personality") || !cols.includes("display_metadata")) {
+			throw new Error(
+				"P1356 migration required: personality and/or display_metadata columns missing from roadmap_workforce.agent_registry",
+			);
+		}
+
+		// Check agent_type='agency' is accepted
+		const typeRes = await client.query<{ conbin: string }>(
+			`SELECT pg_get_constraintdef(oid) as conbin
+			 FROM pg_constraint
+			 WHERE conname = 'agent_registry_type_check'
+			   AND conrelid = 'roadmap_workforce.agent_registry'::regclass`,
+		);
+		if (typeRes.rows.length > 0 && !typeRes.rows[0].conbin.includes("'agency'")) {
+			console.warn(
+				"[preflight] agent_type check constraint does not include 'agency' — will use 'llm' as fallback",
+			);
+		}
+	} finally {
+		client.release();
+	}
+}
+
+async function upsertAgent(
+	client: Awaited<ReturnType<ReturnType<typeof getPool>["connect"]>>,
+	def: AgentDef,
+	agentType: "agency" | "llm",
+): Promise<number> {
+	const personality = {
+		vibe: def.vibe,
+		expertise: def.expertise,
+		boundaries: def.boundaries,
+		core_truths: [],
+		communication_style: "",
+	};
+
+	const display_metadata = {
+		emoji: def.emoji,
+		color: def.color,
+		vibe: def.vibe,
+		description: def.description,
+		source: "agency-agents",
+		division: def.division,
+	};
+
+	const res = await client.query<{ id: number }>(
+		`INSERT INTO roadmap_workforce.agent_registry
+		   (agent_identity, agent_type, status, preferred_provider, personality, display_metadata)
+		 VALUES ($1, $2, 'inactive', NULL, $3::jsonb, $4::jsonb)
 		 ON CONFLICT (agent_identity) DO UPDATE SET
-		   role             = EXCLUDED.role,
-		   display_name     = EXCLUDED.display_name,
+		   status           = 'inactive',
 		   personality      = EXCLUDED.personality,
 		   display_metadata = EXCLUDED.display_metadata,
 		   updated_at       = now()
-		 RETURNING id, (xmax = 0) AS is_new`,
+		 RETURNING id`,
 		[
-			def.agentIdentity,
-			def.role,
-			def.displayName,
-			JSON.stringify(def.personality),
-			JSON.stringify(def.displayMetadata),
+			def.identity,
+			agentType,
+			JSON.stringify(personality),
+			JSON.stringify(display_metadata),
 		],
 	);
-
-	const row = result.rows[0];
-	if (!row) throw new Error(`No RETURNING row for ${def.agentIdentity}`);
-
-	const agentId = BigInt(row.id);
-	let capCount = 0;
-
-	for (const cap of def.capabilities) {
-		if (!cap) continue;
-		await query(
-			`INSERT INTO agent_capability (agent_id, capability, proficiency)
-			 VALUES ($1, $2, 3)
-			 ON CONFLICT (agent_id, capability) DO NOTHING`,
-			[agentId, cap],
-		);
-		capCount++;
-	}
-
-	return { isNew: row.is_new, capCount };
+	return res.rows[0].id;
 }
 
-async function main(): Promise<void> {
-	const { values } = parseArgs({
-		args: process.argv.slice(2),
-		options: {
-			"local-path": { type: "string" },
-			"dry-run": { type: "boolean", default: false },
-			division: { type: "string" },
-			help: { type: "boolean", default: false },
-		},
-	});
+async function upsertCapabilities(
+	client: Awaited<ReturnType<ReturnType<typeof getPool>["connect"]>>,
+	agentId: number,
+	capabilities: string[],
+): Promise<void> {
+	if (capabilities.length === 0) return;
+	await client.query(
+		`INSERT INTO roadmap_workforce.agent_capability (agent_id, capability)
+		 SELECT $1, unnest($2::text[])
+		 ON CONFLICT (agent_id, capability) DO NOTHING`,
+		[agentId, capabilities],
+	);
+}
 
-	if (values.help) {
-		console.log(
-			`Usage: import-agency-agents-catalog [--local-path <dir>] [--dry-run] [--division <name>] [--help]`,
-		);
-		process.exit(0);
-	}
+export async function runImport(opts: ImportOptions = {}): Promise<void> {
+	const localPath = opts.localPath ?? "/data/code/agency-agents";
+	const dryRun = opts.dryRun ?? false;
 
-	const repoPath = (values["local-path"] as string | undefined) ?? "/data/code/agency-agents";
-	const dryRun = values["dry-run"] as boolean;
-	const divisionFilter = values.division as string | undefined;
-
-	if (!existsSync(repoPath)) {
-		console.error(`Error: agency-agents repo not found at ${repoPath}`);
-		console.error(
-			`Clone with: git clone https://github.com/msitarzewski/agency-agents ${repoPath}`,
-		);
-		process.exit(1);
-	}
-
-	const activeDivisions = DIVISIONS.filter((d) => !divisionFilter || d === divisionFilter);
-
-	// Parse all agent definition files
-	const agentDefs: AgentDef[] = [];
-	const skipped: string[] = [];
-
-	for (const division of activeDivisions) {
-		const divPath = join(repoPath, division);
-		if (!existsSync(divPath)) continue;
-
-		const files = readdirSync(divPath).filter(
-			(f) => f.endsWith(".md") && f !== "README.md" && !f.startsWith("."),
-		);
-
-		for (const file of files) {
-			const def = parseAgentFile(join(divPath, file), division);
-			if (def) {
-				agentDefs.push(def);
-			} else {
-				skipped.push(`${division}/${file}`);
-			}
-		}
-	}
-
-	// Summary header
-	console.log(`\n=== Agency-Agents Catalog Import ===`);
-	console.log(`Repo:      ${repoPath}`);
-	console.log(`Mode:      ${dryRun ? "DRY RUN (no writes)" : "LIVE"}`);
-	console.log(`Divisions: ${activeDivisions.join(", ")}`);
-	console.log(`Parsed:    ${agentDefs.length} agents`);
-	if (skipped.length) console.log(`Skipped:   ${skipped.length} files (missing frontmatter name)`);
-
-	// Division breakdown
-	const byDivision: Record<string, number> = {};
-	for (const def of agentDefs) {
-		byDivision[def.division] = (byDivision[def.division] ?? 0) + 1;
-	}
-	console.log(`\nBy division:`);
-	for (const [div, count] of Object.entries(byDivision)) {
-		console.log(`  ${div.padEnd(22)}: ${count}`);
-	}
-
-	// Capability extraction sample
-	const withCaps = agentDefs.filter((d) => d.capabilities.length > 0);
 	console.log(
-		`\nCapabilities extracted: ${agentDefs.reduce((s, d) => s + d.capabilities.length, 0)} total across ${withCaps.length}/${agentDefs.length} agents`,
+		`[import-catalog] source=${localPath} dry-run=${dryRun}`,
 	);
 
+	if (!dryRun) {
+		await preflightCheck();
+	}
+
+	// Scan all divisions
+	const allDefs: AgentDef[] = [];
+	for (const division of IMPORTABLE_DIVISIONS) {
+		const defs = await scanDivision(localPath, division);
+		allDefs.push(...defs);
+	}
+
+	console.log(`[import-catalog] found ${allDefs.length} agent definitions`);
+
 	if (dryRun) {
-		console.log(`\nSample (first 5):`);
-		for (const def of agentDefs.slice(0, 5)) {
+		const byDivision = new Map<string, number>();
+		for (const def of allDefs) {
+			byDivision.set(def.division, (byDivision.get(def.division) ?? 0) + 1);
 			console.log(
-				`  ${def.agentIdentity.padEnd(50)} role=${def.role.padEnd(12)} caps=${def.capabilities.length}`,
+				`  ${def.identity} | div=${def.division} caps=${def.capabilities.length} expertise=${def.expertise.join(",")}`,
 			);
-			if (def.capabilities.length) {
-				console.log(`    capabilities: ${def.capabilities.slice(0, 4).join(", ")}`);
-			}
 		}
-		console.log(`\nDry run complete — no DB writes.`);
+		console.log("\n[import-catalog] per-division counts:");
+		for (const [div, count] of [...byDivision.entries()].sort()) {
+			console.log(`  ${div.padEnd(20)} ${count}`);
+		}
+		console.log(`[import-catalog] total=${allDefs.length} dry-run complete — no writes performed`);
 		return;
 	}
 
-	// Apply schema migration
-	console.log(`\nApplying schema migration (personality + display_metadata columns)...`);
-	await ensureColumns();
-	console.log(`  done.`);
+	// Determine agent_type to use (agency or fallback to llm)
+	let agentType: "agency" | "llm" = "agency";
+	const pool = getPool();
+	{
+		const client = await pool.connect();
+		try {
+			const res = await client.query<{ conbin: string }>(
+				`SELECT pg_get_constraintdef(oid) as conbin
+				 FROM pg_constraint
+				 WHERE conname = 'agent_registry_type_check'
+				   AND conrelid = 'roadmap_workforce.agent_registry'::regclass`,
+			);
+			if (res.rows.length > 0 && !res.rows[0].conbin.includes("'agency'")) {
+				agentType = "llm";
+				console.warn("[import-catalog] falling back to agent_type='llm'");
+			}
+		} finally {
+			client.release();
+		}
+	}
 
-	// Upsert all agents
-	console.log(`\nImporting ${agentDefs.length} agents...`);
 	let inserted = 0;
 	let updated = 0;
-	let capTotal = 0;
-	const errors: Array<{ identity: string; err: string }> = [];
+	let capRows = 0;
+	let failed = 0;
 
-	for (const def of agentDefs) {
+	for (const def of allDefs) {
+		const client = await pool.connect();
 		try {
-			const r = await upsertAgent(def);
-			if (r.isNew) inserted++;
+			await client.query("BEGIN");
+
+			// Check if row exists to count insert vs update
+			const existing = await client.query<{ id: number }>(
+				`SELECT id FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
+				[def.identity],
+			);
+			const isNew = existing.rows.length === 0;
+
+			const agentId = await upsertAgent(client, def, agentType);
+			await upsertCapabilities(client, agentId, def.capabilities);
+
+			await client.query("COMMIT");
+
+			if (isNew) inserted++;
 			else updated++;
-			capTotal += r.capCount;
-			process.stdout.write(r.isNew ? "+" : ".");
+			capRows += def.capabilities.length;
+
+			console.log(
+				`  [${isNew ? "INSERT" : "UPDATE"}] ${def.identity} caps=${def.capabilities.length}`,
+			);
 		} catch (err) {
-			errors.push({
-				identity: def.agentIdentity,
-				err: err instanceof Error ? err.message : String(err),
-			});
-			process.stdout.write("E");
+			await client.query("ROLLBACK").catch(() => {});
+			console.error(`  [ERROR] ${def.identity}: ${(err as Error).message}`);
+			failed++;
+		} finally {
+			client.release();
 		}
 	}
 
-	// Results
-	console.log(`\n`);
-	console.log(`Results:`);
-	console.log(`  Inserted (new):      ${inserted}`);
-	console.log(`  Updated (existing):  ${updated}`);
-	console.log(`  Capabilities added:  ${capTotal}`);
-	console.log(`  Errors:              ${errors.length}`);
-
-	if (errors.length) {
-		console.log(`\nErrors:`);
-		for (const e of errors) {
-			console.log(`  ${e.identity}: ${e.err}`);
-		}
-	}
-
-	// DB verification
-	const { rows: countRows } = await query<{ total: string; caps: string }>(
-		`SELECT
-		   (SELECT COUNT(*)::text FROM agent_registry WHERE agent_identity LIKE 'agency-agents/%') AS total,
-		   (SELECT COUNT(*)::text FROM agent_capability ac
-		      JOIN agent_registry ar ON ar.id = ac.agent_id
-		      WHERE ar.agent_identity LIKE 'agency-agents/%') AS caps`,
+	console.log(
+		`[import-catalog] done — inserted=${inserted} updated=${updated} capability_rows=${capRows} failed=${failed}`,
 	);
-	const counts = countRows[0];
-	console.log(`\nDB verification:`);
-	console.log(`  agent_registry rows:    ${counts?.total ?? "?"}`);
-	console.log(`  agent_capability rows:  ${counts?.caps ?? "?"}`);
 
-	if (errors.length > 0) {
-		process.exit(1);
-	}
+	// Shutdown pool
+	await closePool();
 }
 
-main()
-	.catch((err) => {
-		console.error("Fatal:", err instanceof Error ? err.message : String(err));
+// Run directly if invoked as script
+const isMain =
+	process.argv[1] &&
+	(process.argv[1].endsWith("import-agency-agents-catalog.ts") ||
+		process.argv[1].endsWith("import-agency-agents-catalog.js"));
+
+if (isMain) {
+	const args = process.argv.slice(2);
+	const localPathIdx = args.indexOf("--local-path");
+	const localPath =
+		localPathIdx !== -1 ? args[localPathIdx + 1] : "/data/code/agency-agents";
+	const dryRun = args.includes("--dry-run");
+
+	runImport({ localPath, dryRun }).catch((err) => {
+		console.error("[import-catalog] fatal:", err);
 		process.exit(1);
-	})
-	.finally(() => closePool());
+	});
+}

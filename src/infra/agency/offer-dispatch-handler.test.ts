@@ -598,3 +598,177 @@ test("handleOfferDispatch: max_in_flight=2 allows two concurrent spawns, returns
 	}
 	for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
 });
+
+// ── P1113: Persona injection ──────────────────────────────────────────────────
+
+test("handleOfferDispatch: persona from payload is prepended to task string", async () => {
+	const spawnCalls: Array<Record<string, unknown>> = [];
+	const { exec } = recordingExec();
+
+	const fakeSpawn = async (req: Record<string, unknown>): Promise<SpawnResult> => {
+		spawnCalls.push(req);
+		return { agentRunId: "r1", worktree: req.worktree as string, exitCode: 0, stdout: "", stderr: "", durationMs: 1 };
+	};
+
+	const msg = makeMessage({
+		offer_id: "00000000-0000-0000-0000-000000001113",
+		role: "custom-reviewer",
+		required_capabilities: ["review"],
+		route_hint: "claude",
+		dispatch_id: 1113,
+		claim_token: "tok-persona",
+		lease_ttl_seconds: 60,
+		persona: "You are a CUSTOM REVIEWER with specific expertise.",
+		task: "Review proposal 42 acceptance criteria.",
+	});
+
+	await handleOfferDispatch("claude/agency-bot", msg, {
+		spawn: fakeSpawn as never,
+		exec,
+		logger: silentLogger(),
+		resolveWorktree: () => "wt",
+		renewalIntervalMs: 1_000_000,
+	});
+
+	for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+
+	assert.equal(spawnCalls.length, 1);
+	const task = spawnCalls[0].task as string;
+	assert.ok(
+		task.startsWith("You are a CUSTOM REVIEWER with specific expertise."),
+		`task must start with persona; got: ${task.slice(0, 80)}`,
+	);
+	assert.ok(
+		task.includes("Review proposal 42 acceptance criteria."),
+		"original task must appear after persona",
+	);
+	assert.ok(
+		task.includes("\n\n"),
+		"persona and task must be separated by double newline",
+	);
+});
+
+test("handleOfferDispatch: no persona in payload falls back to generic task (no DB in this mock)", async () => {
+	const spawnCalls: Array<Record<string, unknown>> = [];
+	const { exec } = recordingExec();
+
+	const fakeSpawn = async (req: Record<string, unknown>): Promise<SpawnResult> => {
+		spawnCalls.push(req);
+		return { agentRunId: "r2", worktree: req.worktree as string, exitCode: 0, stdout: "", stderr: "", durationMs: 1 };
+	};
+
+	const msg = makeMessage({
+		offer_id: "00000000-0000-0000-0000-000000001114",
+		role: "unknown-role-xyz",
+		required_capabilities: [],
+		route_hint: "claude",
+		dispatch_id: 1114,
+		claim_token: "tok-no-persona",
+		lease_ttl_seconds: 60,
+		// No persona field; role doesn't match any BUILTIN_FALLBACK
+	});
+
+	await handleOfferDispatch("claude/agency-bot", msg, {
+		spawn: fakeSpawn as never,
+		exec,
+		logger: silentLogger(),
+		resolveWorktree: () => "wt",
+		renewalIntervalMs: 1_000_000,
+	});
+
+	for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+
+	assert.equal(spawnCalls.length, 1);
+	const task = spawnCalls[0].task as string;
+	assert.ok(
+		task.includes("Execute offer") && task.includes("unknown-role-xyz"),
+		`generic fallback task expected; got: ${task}`,
+	);
+});
+
+test("handleOfferDispatch: built-in role 'skeptic-alpha' gets BUILTIN_FALLBACK persona even without payload persona", async () => {
+	const spawnCalls: Array<Record<string, unknown>> = [];
+	const { exec } = recordingExec();
+
+	const fakeSpawn = async (req: Record<string, unknown>): Promise<SpawnResult> => {
+		spawnCalls.push(req);
+		return { agentRunId: "r3", worktree: req.worktree as string, exitCode: 0, stdout: "", stderr: "", durationMs: 1 };
+	};
+
+	const msg = makeMessage({
+		offer_id: "00000000-0000-0000-0000-000000001115",
+		role: "skeptic-alpha",
+		required_capabilities: ["review"],
+		route_hint: "claude",
+		dispatch_id: 1115,
+		claim_token: "tok-builtin",
+		lease_ttl_seconds: 60,
+		task: "Gate this proposal.",
+		// persona field deliberately absent — handler must resolve from BUILTIN_FALLBACK
+	});
+
+	await handleOfferDispatch("claude/agency-bot", msg, {
+		spawn: fakeSpawn as never,
+		exec,
+		logger: silentLogger(),
+		resolveWorktree: () => "wt",
+		renewalIntervalMs: 1_000_000,
+	});
+
+	for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+
+	assert.equal(spawnCalls.length, 1);
+	const task = spawnCalls[0].task as string;
+	assert.ok(
+		task.includes("SKEPTIC ALPHA"),
+		`BUILTIN_FALLBACK D1 persona expected in task; got: ${task.slice(0, 120)}`,
+	);
+	assert.ok(
+		task.includes("Gate this proposal."),
+		"original task must appear after persona",
+	);
+});
+
+test("handleOfferDispatch: payload task overrides generic fallback even without persona", async () => {
+	const spawnCalls: Array<Record<string, unknown>> = [];
+	const { exec } = recordingExec();
+
+	const fakeSpawn = async (req: Record<string, unknown>): Promise<SpawnResult> => {
+		spawnCalls.push(req);
+		return { agentRunId: "r4", worktree: req.worktree as string, exitCode: 0, stdout: "", stderr: "", durationMs: 1 };
+	};
+
+	const specificTask = "Implement the acceptance criteria for P999.";
+	const msg = makeMessage({
+		offer_id: "00000000-0000-0000-0000-000000001116",
+		role: "developer",
+		required_capabilities: ["develop"],
+		route_hint: "claude",
+		dispatch_id: 1116,
+		claim_token: "tok-task-override",
+		lease_ttl_seconds: 60,
+		task: specificTask,
+		// No persona for 'developer' role in BUILTIN_FALLBACK
+	});
+
+	await handleOfferDispatch("claude/agency-bot", msg, {
+		spawn: fakeSpawn as never,
+		exec,
+		logger: silentLogger(),
+		resolveWorktree: () => "wt",
+		renewalIntervalMs: 1_000_000,
+	});
+
+	for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+
+	assert.equal(spawnCalls.length, 1);
+	const task = spawnCalls[0].task as string;
+	assert.ok(
+		task.includes(specificTask),
+		`payload task must be used; got: ${task}`,
+	);
+	assert.ok(
+		!task.includes("Execute offer"),
+		"generic fallback must NOT appear when payload.task is set",
+	);
+});

@@ -533,10 +533,98 @@ export class FederationServer {
 		});
 	}
 
+	// ─── P081 AC-11: Federation SLA compatibility gate ──────────────────
+
+	/**
+	 * Fetch and validate a peer node's SLA contract.
+	 * Returns ok:true if the peer exposes schema "agenthive-sla/v1" and
+	 * commits to >= minAvailabilityPct monthly availability.
+	 */
+	async validatePeerSla(
+		peerHostname: string,
+		peerPort: number,
+		minAvailabilityPct = 99.0,
+	): Promise<{ ok: boolean; reason?: string }> {
+		return new Promise((resolve) => {
+			const req = request(
+				{
+					hostname: peerHostname,
+					port: peerPort,
+					path: "/api/sla",
+					method: "GET",
+					headers: { Accept: "application/json" },
+				},
+				(res: any) => {
+					let data = "";
+					res.on("data", (chunk: Buffer) => { data += chunk; });
+					res.on("end", () => {
+						try {
+							const doc = JSON.parse(data) as Record<string, unknown>;
+							if (doc.schema !== "agenthive-sla/v1") {
+								resolve({ ok: false, reason: `incompatible schema: ${doc.schema ?? "missing"}` });
+								return;
+							}
+							const avail = (doc.availability as Record<string, unknown> | undefined)?.monthly_percent;
+							if (typeof avail !== "number" || avail < minAvailabilityPct) {
+								resolve({ ok: false, reason: `peer availability ${avail}% < required ${minAvailabilityPct}%` });
+								return;
+							}
+							resolve({ ok: true });
+						} catch (err) {
+							resolve({ ok: false, reason: `parse error: ${err instanceof Error ? err.message : String(err)}` });
+						}
+					});
+				},
+			);
+			req.setTimeout(5_000, () => {
+				req.destroy();
+				resolve({ ok: false, reason: "SLA endpoint timed out (5s)" });
+			});
+			req.on("error", (err: Error) => {
+				resolve({ ok: false, reason: `connection error: ${err.message}` });
+			});
+			req.end();
+		});
+	}
+
 	/**
 	 * Setup internal message handlers.
 	 */
 	private setupMessageHandlers(): void {
+		// P081 AC-11: Validate SLA compatibility on peer join
+		this.messageHandlers.set("agent_join", async (msg) => {
+			const hostname = msg.payload.hostname as string | undefined;
+			const port = msg.payload.port as number | undefined;
+			if (hostname && port) {
+				const check = await this.validatePeerSla(hostname, port);
+				if (!check.ok) {
+					return createMessage(
+						"error",
+						this.config.hostId,
+						{ error: "SLA_INCOMPATIBLE", detail: check.reason },
+						{ correlationId: msg.id, targetHostId: msg.sourceHostId },
+					);
+				}
+			}
+			// Register the joining agent
+			const agentId = (msg.payload.agentId as string | undefined) ?? msg.sourceHostId;
+			this.connectedAgents.set(agentId, {
+				agentId,
+				hostId: msg.sourceHostId,
+				connectionId: randomUUID(),
+				connectedAt: new Date().toISOString(),
+				lastHeartbeat: new Date().toISOString(),
+				status: "connected",
+				pendingChanges: 0,
+			});
+			return createMessage(
+				"heartbeat_ack",
+				this.config.hostId,
+				{ accepted: true, agentId },
+				{ correlationId: msg.id, targetHostId: msg.sourceHostId },
+			);
+		});
+
 		// AC#2: Handle proposal updates
 		this.messageHandlers.set("proposal_update", async (msg) => {
 			const payload = msg.payload as unknown as ProposalChangePayload;
