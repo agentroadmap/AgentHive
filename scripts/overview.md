@@ -27,10 +27,11 @@ Ask yourself: "Do I need to think about HOW to do this?"
 ### Typical Workflow
 
 When the user requests non-trivial work:
-1. **Search first:** Use `proposal_search` or `proposal_list` and check whether work is already tracked
+1. **Search first:** Use `proposal_search` (supports free-text search) or `prop_list` (filters by status/type/parent only) and check whether work is already tracked
 2. **If found:** Work on the existing proposal and follow the relevant execution workflow
 3. **If not found:** Create proposal(s) based on scope and proposal type
-4. **Execute:** Follow state-execution guidelines
+4. **Claim:** Call `mcp_proposal action="claim"` with your agent identity before writing anything. The lease prevents another agent from picking up the same work simultaneously and surfaces your activity in `prop_leases`. Renew with `action="renew"` if your work runs long; release with `action="release"` when done.
+5. **Execute:** Follow state-execution guidelines
 
 Searching first avoids duplicate proposals and helps you understand existing context.
 

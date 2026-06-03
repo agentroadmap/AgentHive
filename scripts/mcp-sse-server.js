@@ -147,10 +147,13 @@ if (HTTP_ENABLED) {
 		async (req, res) => {
 			try {
 				// SDK requires fresh Server per StreamableHTTP request (Protocol is
-				// one-to-one with transport). Pool leak is contained by state-names
-				// dispose-on-reload; see P522.
-				const server = await createMcpServer(projectRoot);
-				const transport = await server.createStreamableHttpTransport();
+				// P1123/P1399 HOTFIX: Reuse the singleton sharedServer instead of 
+				// calling createMcpServer per request. Creating a fresh server 
+				// on every HTTP hit creates a new DB connection pool and 
+				// installs a new NOTIFY listener, exhausting Postgres 
+				// connections and eventually poisoning the pool with 
+				// "Cannot use a pool after calling end".
+				const transport = await sharedServer.createStreamableHttpTransport();
 				await transport.handleRequest(req, res, req.body);
 			} catch (err) {
 				console.error("[MCP] StreamableHTTP request failed:", err.message);
