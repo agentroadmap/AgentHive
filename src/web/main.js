@@ -42690,11 +42690,11 @@ function locale_default(locale) {
   var group3 = locale.grouping === undefined || locale.thousands === undefined ? identity_default2 : formatGroup_default(map3.call(locale.grouping, Number), locale.thousands + ""), currencyPrefix = locale.currency === undefined ? "" : locale.currency[0] + "", currencySuffix = locale.currency === undefined ? "" : locale.currency[1] + "", decimal = locale.decimal === undefined ? "." : locale.decimal + "", numerals = locale.numerals === undefined ? identity_default2 : formatNumerals_default(map3.call(locale.numerals, String)), percent = locale.percent === undefined ? "%" : locale.percent + "", minus = locale.minus === undefined ? "−" : locale.minus + "", nan = locale.nan === undefined ? "NaN" : locale.nan + "";
   function newFormat(specifier, options) {
     specifier = formatSpecifier(specifier);
-    var { fill, align, sign, symbol, zero: zero3, width, comma, precision, trim: trim2, type: type2 } = specifier;
+    var { fill, align, sign, symbol, zero: zero3, width, comma, precision, trim, type: type2 } = specifier;
     if (type2 === "n")
       comma = true, type2 = "g";
     else if (!formatTypes_default[type2])
-      precision === undefined && (precision = 12), trim2 = true, type2 = "g";
+      precision === undefined && (precision = 12), trim = true, type2 = "g";
     if (zero3 || fill === "0" && align === "=")
       zero3 = true, fill = "0", align = "=";
     var prefix = (options && options.prefix !== undefined ? options.prefix : "") + (symbol === "$" ? currencyPrefix : symbol === "#" && /[boxX]/.test(type2) ? "0" + type2.toLowerCase() : ""), suffix = (symbol === "$" ? currencySuffix : /[%p]/.test(type2) ? percent : "") + (options && options.suffix !== undefined ? options.suffix : "");
@@ -42709,7 +42709,7 @@ function locale_default(locale) {
         value = +value;
         var valueNegative = value < 0 || 1 / value < 0;
         value = isNaN(value) ? nan : formatType(Math.abs(value), precision);
-        if (trim2)
+        if (trim)
           value = formatTrim_default(value);
         if (valueNegative && +value === 0 && sign !== "+")
           valueNegative = false;
@@ -75303,11 +75303,11 @@ var init_cytoscape_esm = __esm(() => {
           edgeNext[st2] = edge;
         }
         if (!directed) {
-          var ts2 = t4 * N3 + s5;
-          if (!directed && dist[ts2] > _weight) {
-            dist[ts2] = _weight;
-            next3[ts2] = s5;
-            edgeNext[ts2] = edge;
+          var ts = t4 * N3 + s5;
+          if (!directed && dist[ts] > _weight) {
+            dist[ts] = _weight;
+            next3[ts] = s5;
+            edgeNext[ts] = edge;
           }
         }
       }
@@ -100588,7 +100588,7 @@ var init_chunk_336JU56O = __esm(() => {
 var COMMENT = "comm", RULESET = "rule", DECLARATION = "decl", IMPORT = "@import", NAMESPACE = "@namespace", KEYFRAMES = "@keyframes", LAYER = "@layer";
 
 // node_modules/stylis/src/Utility.js
-function trim2(value) {
+function trim(value) {
   return value.trim();
 }
 function replace2(value, pattern, replacement) {
@@ -100685,7 +100685,7 @@ function dealloc(value) {
   return characters2 = "", value;
 }
 function delimit(type3) {
-  return trim2(slice3(position7 - 1, delimiter(type3 === 91 ? type3 + 2 : type3 === 40 ? type3 + 1 : type3)));
+  return trim(slice3(position7 - 1, delimiter(type3 === 91 ? type3 + 2 : type3 === 40 ? type3 + 1 : type3)));
 }
 function whitespace3(type3) {
   while (character = peek())
@@ -100871,7 +100871,7 @@ function ruleset(value, root10, parent5, index2, offset, rules, points, type3, p
   var size4 = sizeof(rule);
   for (var i5 = 0, j4 = 0, k3 = 0;i5 < index2; ++i5)
     for (var x5 = 0, y5 = substr(value, post + 1, post = abs2(j4 = points[i5])), z3 = value;x5 < size4; ++x5)
-      if (z3 = trim2(j4 > 0 ? rule[x5] + " " + y5 : replace2(y5, /&\f/g, rule[x5])))
+      if (z3 = trim(j4 > 0 ? rule[x5] + " " + y5 : replace2(y5, /&\f/g, rule[x5])))
         props[k3++] = z3;
   return node2(value, root10, parent5, offset === 0 ? RULESET : type3, props, children2, length2, siblings3);
 }
@@ -123912,13 +123912,13 @@ class DefaultConfigurationProvider {
     if (typeof change2.settings !== "object" || change2.settings === null) {
       return;
     }
-    Object.entries(change2.settings).forEach(([section2, configuration]) => {
-      this.updateSectionConfiguration(section2, configuration);
-      this.onConfigurationSectionUpdateEmitter.fire({ section: section2, configuration });
+    Object.entries(change2.settings).forEach(([section, configuration]) => {
+      this.updateSectionConfiguration(section, configuration);
+      this.onConfigurationSectionUpdateEmitter.fire({ section, configuration });
     });
   }
-  updateSectionConfiguration(section2, configuration) {
-    this.settings[section2] = configuration;
+  updateSectionConfiguration(section, configuration) {
+    this.settings[section] = configuration;
   }
   async getConfiguration(language, configuration) {
     await this.ready;
@@ -136806,8 +136806,8 @@ var init_pieDiagram_DEJITSTG = __esm(() => {
       themeVariables.pie12
     ];
     let sum = 0;
-    sections22.forEach((section2) => {
-      sum += section2;
+    sections22.forEach((section) => {
+      sum += section;
     });
     const filteredArcs = arcs.filter((datum2) => (datum2.data.value / sum * 100).toFixed(0) !== "0");
     const color3 = ordinal(myGeneratedColors).domain([
@@ -150820,19 +150820,19 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
     txtObject.x = txtObject.x + 0.5 * txtObject.labelMargin;
     drawText22(elem, txtObject);
   }, "drawLabel");
-  drawSection = /* @__PURE__ */ __name(function(elem, section2, conf22) {
+  drawSection = /* @__PURE__ */ __name(function(elem, section, conf22) {
     const g2 = elem.append("g");
     const rect2 = getNoteRect();
-    rect2.x = section2.x;
-    rect2.y = section2.y;
-    rect2.fill = section2.fill;
-    rect2.width = conf22.width * section2.taskCount + conf22.diagramMarginX * (section2.taskCount - 1);
+    rect2.x = section.x;
+    rect2.y = section.y;
+    rect2.fill = section.fill;
+    rect2.width = conf22.width * section.taskCount + conf22.diagramMarginX * (section.taskCount - 1);
     rect2.height = conf22.height;
-    rect2.class = "journey-section section-type-" + section2.num;
+    rect2.class = "journey-section section-type-" + section.num;
     rect2.rx = 3;
     rect2.ry = 3;
     drawRect24(g2, rect2);
-    _drawTextCandidateFunc3(conf22)(section2.text, g2, rect2.x, rect2.y, rect2.width, rect2.height, { class: "journey-section section-type-" + section2.num }, conf22, section2.colour);
+    _drawTextCandidateFunc3(conf22)(section.text, g2, rect2.x, rect2.y, rect2.width, rect2.height, { class: "journey-section section-type-" + section.num }, conf22, section.colour);
   }, "drawSection");
   drawTask = /* @__PURE__ */ __name(function(elem, task, conf22, diagramId2) {
     const center3 = task.x + conf22.width / 2;
@@ -151078,7 +151078,7 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
             break;
           }
         }
-        const section2 = {
+        const section = {
           x: i5 * conf22.taskMargin + i5 * conf22.width + leftMargin,
           y: 50,
           text: task.section,
@@ -151087,7 +151087,7 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
           colour,
           taskCount: taskInSectionCount
         };
-        svgDraw_default3.drawSection(diagram22, section2, conf22);
+        svgDraw_default3.drawSection(diagram22, section, conf22);
         lastSection = task.section;
         sectionNumber++;
       }
@@ -151915,19 +151915,19 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
     txtObject.x = txtObject.x + 0.5 * txtObject.labelMargin;
     drawText4(elem, txtObject);
   }, "drawLabel");
-  drawSection2 = /* @__PURE__ */ __name(function(elem, section2, conf5) {
+  drawSection2 = /* @__PURE__ */ __name(function(elem, section, conf5) {
     const g2 = elem.append("g");
     const rect2 = getNoteRect3();
-    rect2.x = section2.x;
-    rect2.y = section2.y;
-    rect2.fill = section2.fill;
+    rect2.x = section.x;
+    rect2.y = section.y;
+    rect2.fill = section.fill;
     rect2.width = conf5.width;
     rect2.height = conf5.height;
-    rect2.class = "journey-section section-type-" + section2.num;
+    rect2.class = "journey-section section-type-" + section.num;
     rect2.rx = 3;
     rect2.ry = 3;
     drawRect3(g2, rect2);
-    _drawTextCandidateFunc4(conf5)(section2.text, g2, rect2.x, rect2.y, rect2.width, rect2.height, { class: "journey-section section-type-" + section2.num }, conf5, section2.colour);
+    _drawTextCandidateFunc4(conf5)(section.text, g2, rect2.x, rect2.y, rect2.width, rect2.height, { class: "journey-section section-type-" + section.num }, conf5, section.colour);
   }, "drawSection");
   drawTask2 = /* @__PURE__ */ __name(function(elem, task, conf5, diagramId2) {
     const center3 = task.x + conf5.width / 2;
@@ -152036,10 +152036,10 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
     const { theme, look } = conf5;
     const isReduxTheme = theme?.includes("redux");
     const maxSections = conf5?.themeVariables?.THEME_COLOR_LIMIT ?? 12;
-    const section2 = fullSection % maxSections - 1;
+    const section = fullSection % maxSections - 1;
     const nodeElem = elem.append("g");
-    node3.section = section2;
-    nodeElem.attr("class", (node3.class ? node3.class + " " : "") + "timeline-node " + ("section-" + section2));
+    node3.section = section;
+    nodeElem.attr("class", (node3.class ? node3.class + " " : "") + "timeline-node " + ("section-" + section));
     const bkgElem = nodeElem.append("g");
     const textElem = nodeElem.append("g");
     const txt = textElem.append("text").text(node3.descr).attr("dy", "1em").attr("alignment-baseline", "middle").attr("dominant-baseline", "middle").attr("text-anchor", "middle").call(wrap4, node3.width);
@@ -152052,7 +152052,7 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
     if (isReduxTheme) {
       textElem.attr("transform", `translate(${node3.width / 2}, ${isEvent ? node3.padding / 2 + 3 : node3.padding})`);
     }
-    defaultBkg(bkgElem, node3, section2, diagramId2, conf5);
+    defaultBkg(bkgElem, node3, section, diagramId2, conf5);
     if (look === "neo") {
       nodeElem.attr("data-look", `neo`);
       if (isReduxTheme) {
@@ -152078,14 +152078,14 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
     textElem.remove();
     return bbox.height + fontSize * 1.1 * 0.5 + node3.padding;
   }, "getVirtualNodeHeight");
-  defaultBkg = /* @__PURE__ */ __name(function(elem, node3, section2, diagramId2, config4) {
+  defaultBkg = /* @__PURE__ */ __name(function(elem, node3, section, diagramId2, config4) {
     const { theme } = config4;
     const r3 = theme?.includes("redux") ? 0 : 5;
     const rd = 5;
     const d4 = r3 > 0 ? `M0 ${node3.height - rd} v${-node3.height + 2 * rd} q0,-${r3},${r3},-${r3} h${node3.width - 2 * rd} q${r3},0,${r3},${r3} v${node3.height - rd} H0 Z` : `M0 ${node3.height - rd} v${-(node3.height - rd)} h${node3.width} v${node3.height} H0 Z`;
     elem.append("path").attr("id", diagramId2 + "-node-" + nodeCount++).attr("class", "node-bkg node-" + node3.type).attr("d", d4);
     if (!theme?.includes("redux")) {
-      elem.append("line").attr("class", "node-line-" + section2).attr("x1", 0).attr("y1", node3.height).attr("x2", node3.width).attr("y2", node3.height);
+      elem.append("line").attr("class", "node-line-" + section).attr("x1", 0).attr("y1", node3.height).attr("x2", node3.width).attr("y2", node3.height);
     }
   }, "defaultBkg");
   svgDraw_default4 = {
@@ -152131,10 +152131,10 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
     sectionBeginY = 50;
     let sectionNumber = 0;
     let hasSections = true;
-    sections22.forEach(function(section2) {
+    sections22.forEach(function(section) {
       const sectionNode = {
         number: sectionNumber,
-        descr: section2,
+        descr: section,
         section: sectionNumber,
         width: 150,
         padding: 20,
@@ -152180,11 +152180,11 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
     log2.debug("maxSectionHeight before draw", maxSectionHeight);
     log2.debug("maxTaskHeight before draw", maxTaskHeight);
     if (sections22 && sections22.length > 0) {
-      sections22.forEach((section2) => {
-        const tasksForSection = tasks22.filter((task) => task.section === section2);
+      sections22.forEach((section) => {
+        const tasksForSection = tasks22.filter((task) => task.section === section);
         const sectionNode = {
           number: sectionNumber,
-          descr: section2,
+          descr: section,
           section: sectionNumber,
           width: 200 * Math.max(tasksForSection.length, 1) - 50,
           padding: 20,
@@ -152312,10 +152312,10 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
     const hasSections = sections22 && sections22.length > 0;
     const timelineX = hasSections ? axisX : masterX + leftWidth;
     const sectionWidth = Math.max(50, leftWidth + rightWidth - NODE_PADDING * 2);
-    sections22.forEach(function(section2) {
+    sections22.forEach(function(section) {
       const sectionNode = {
         number: sectionNumber,
-        descr: section2,
+        descr: section,
         section: sectionNumber,
         width: sectionWidth,
         padding: NODE_PADDING,
@@ -152361,11 +152361,11 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
     const taskBlockHeight = Math.max(maxTaskHeight, maxEventStackHeight);
     const taskSpacing = taskBlockHeight + TASK_VERTICAL_GAP;
     if (hasSections) {
-      sections22.forEach((section2) => {
-        const tasksForSection = tasks22.filter((task) => task.section === section2);
+      sections22.forEach((section) => {
+        const tasksForSection = tasks22.filter((task) => task.section === section);
         const sectionNode = {
           number: sectionNumber,
-          descr: section2,
+          descr: section,
           section: sectionNumber,
           width: sectionWidth,
           padding: NODE_PADDING,
@@ -154615,23 +154615,23 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
     const _nodes = [];
     const sections22 = getSections5();
     const conf5 = getConfig2();
-    for (const section2 of sections22) {
+    for (const section of sections22) {
       const node3 = {
-        id: section2.id,
-        label: sanitizeText(section2.label ?? "", conf5),
+        id: section.id,
+        label: sanitizeText(section.label ?? "", conf5),
         labelType: "markdown",
         isGroup: true,
-        ticket: section2.ticket,
+        ticket: section.ticket,
         shape: "kanbanSection",
-        level: section2.level,
+        level: section.level,
         look: conf5.look
       };
       _nodes.push(node3);
-      const children2 = nodes3.filter((n3) => n3.parentId === section2.id);
+      const children2 = nodes3.filter((n3) => n3.parentId === section.id);
       for (const item of children2) {
         const childNode = {
           id: item.id,
-          parentId: section2.id,
+          parentId: section.id,
           label: sanitizeText(item.label ?? "", conf5),
           labelType: "markdown",
           isGroup: false,
@@ -154701,9 +154701,9 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
         node3.priority = doc?.priority;
       }
     }
-    const section2 = getSection(level);
-    if (section2) {
-      node3.parentId = section2.id || "kbn" + cnt2++;
+    const section = getSection(level);
+    if (section) {
+      node3.parentId = section.id || "kbn" + cnt2++;
     } else {
       sections5.push(node3);
     }
@@ -154810,33 +154810,33 @@ Expecting ` + expected.join(", ") + ", got '" + (this.terminals_[symbol] || symb
     const padding = 10;
     const sectionObjects = [];
     let maxLabelHeight = 25;
-    for (const section2 of sections22) {
+    for (const section of sections22) {
       const WIDTH = conf5?.kanban?.sectionWidth || 200;
       cnt22 = cnt22 + 1;
-      section2.x = WIDTH * cnt22 + (cnt22 - 1) * padding / 2;
-      section2.width = WIDTH;
-      section2.y = 0;
-      section2.height = WIDTH * 3;
-      section2.rx = 5;
-      section2.ry = 5;
-      section2.cssClasses = section2.cssClasses + " section-" + cnt22;
-      const sectionObj = await insertCluster(sectionsElem, section2);
+      section.x = WIDTH * cnt22 + (cnt22 - 1) * padding / 2;
+      section.width = WIDTH;
+      section.y = 0;
+      section.height = WIDTH * 3;
+      section.rx = 5;
+      section.ry = 5;
+      section.cssClasses = section.cssClasses + " section-" + cnt22;
+      const sectionObj = await insertCluster(sectionsElem, section);
       maxLabelHeight = Math.max(maxLabelHeight, sectionObj?.labelBBox?.height);
       sectionObjects.push(sectionObj);
     }
     let i5 = 0;
-    for (const section2 of sections22) {
+    for (const section of sections22) {
       const sectionObj = sectionObjects[i5];
       i5 = i5 + 1;
       const WIDTH = conf5?.kanban?.sectionWidth || 200;
       const top2 = -WIDTH * 3 / 2 + maxLabelHeight;
       let y5 = top2;
-      const sectionItems = data4Layout.nodes.filter((node3) => node3.parentId === section2.id);
+      const sectionItems = data4Layout.nodes.filter((node3) => node3.parentId === section.id);
       for (const item of sectionItems) {
         if (item.isGroup) {
           throw new Error("Groups within groups are not allowed in Kanban diagrams");
         }
-        item.x = section2.x;
+        item.x = section.x;
         item.width = WIDTH - 1.5 * padding;
         const nodeEl = await insertNode(nodesElem, item, { config: conf5 });
         const bbox = nodeEl.node().getBBox();
@@ -155390,7 +155390,7 @@ var init_sankey = __esm(() => {
   init_align();
 });
 
-// node_modules/d3-sankey/node_modules/d3-path/src/path.js
+// node_modules/d3-sankey/node_modules/d3-shape/node_modules/d3-path/src/path.js
 function Path2() {
   this._x0 = this._y0 = this._x1 = this._y1 = null;
   this._ = "";
@@ -155472,7 +155472,7 @@ var init_path3 = __esm(() => {
   path_default2 = path4;
 });
 
-// node_modules/d3-sankey/node_modules/d3-path/src/index.js
+// node_modules/d3-sankey/node_modules/d3-shape/node_modules/d3-path/src/index.js
 var init_src34 = __esm(() => {
   init_path3();
 });
@@ -160400,7 +160400,7 @@ var init_diagram_5BDNPKRD = __esm(() => {
   };
 });
 
-// node_modules/cytoscape-fcose/node_modules/layout-base/layout-base.js
+// node_modules/cytoscape-fcose/node_modules/cose-base/node_modules/layout-base/layout-base.js
 var require_layout_base2 = __commonJS((exports, module) => {
   (function webpackUniversalModuleDefinition(root10, factory2) {
     if (typeof exports === "object" && typeof module === "object")
@@ -174926,11 +174926,11 @@ ${config5.themeCSS}`;
 });
 
 // src/apps/dashboard-web/main.tsx
-var import_react72 = __toESM(require_react(), 1);
+var import_react74 = __toESM(require_react(), 1);
 var import_client = __toESM(require_client(), 1);
 
 // src/apps/dashboard-web/App.tsx
-var import_react69 = __toESM(require_react(), 1);
+var import_react70 = __toESM(require_react(), 1);
 
 // node_modules/regexparam/dist/index.mjs
 function parse(input, loose) {
@@ -175629,6 +175629,41 @@ class ApiClient {
     const result = await this.fetchJson(`${API_BASE}/dispatches`);
     return result.dispatches;
   }
+  async fetchAgencies(options) {
+    const params = new URLSearchParams;
+    if (options?.proposal)
+      params.set("proposal", options.proposal);
+    if (options?.agency)
+      params.set("agency", options.agency);
+    if (options?.route)
+      params.set("route", options.route);
+    if (options?.severity)
+      params.set("severity", options.severity);
+    const qs = params.toString();
+    const result = await this.fetchJson(`${API_BASE}/agencies${qs ? `?${qs}` : ""}`);
+    return result.agencies;
+  }
+  async sendAgencyAction(agencyId, body) {
+    return this.fetchJson(`${API_BASE}/agencies/${encodeURIComponent(agencyId)}/action`, {
+      method: "POST",
+      body: JSON.stringify(body)
+    });
+  }
+  async fetchTeams() {
+    return this.fetchJson(`${API_BASE}/teams`);
+  }
+  async fetchKnowledge(options) {
+    const params = new URLSearchParams;
+    if (options?.query)
+      params.set("query", options.query);
+    if (options?.type)
+      params.set("type", options.type);
+    const qs = params.toString();
+    return this.fetchJson(`${API_BASE}/knowledge${qs ? `?${qs}` : ""}`);
+  }
+  async markKnowledgeHelpful(id) {
+    await this.fetchWithRetry(`${API_BASE}/knowledge/${id}/helpful`, { method: "POST" });
+  }
   async fetchPulse(limit) {
     const params = limit ? `?limit=${limit}` : "";
     return this.fetchJson(`${API_BASE}/pulse${params}`);
@@ -176081,14 +176116,539 @@ var ActivityFeed = () => {
 };
 var ActivityFeed_default = ActivityFeed;
 
+// src/apps/dashboard-web/components/AgenciesPage.tsx
+var import_react5 = __toESM(require_react(), 1);
+var jsx_dev_runtime4 = __toESM(require_jsx_dev_runtime(), 1);
+var STATUS_COLORS = {
+  active: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
+  throttled: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300",
+  paused: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300",
+  dormant: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
+  offline: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300"
+};
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+function asNumber(value) {
+  if (typeof value === "number")
+    return value;
+  if (typeof value === "string")
+    return Number(value) || 0;
+  return 0;
+}
+function ageLabel(date) {
+  if (!date)
+    return "none";
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(date).getTime()) / 1000));
+  if (seconds < 60)
+    return `${seconds}s`;
+  if (seconds < 3600)
+    return `${Math.floor(seconds / 60)}m`;
+  if (seconds < 86400)
+    return `${Math.floor(seconds / 3600)}h`;
+  return `${Math.floor(seconds / 86400)}d`;
+}
+function CapacityBars({ windows }) {
+  const items = asArray(windows).slice(0, 4);
+  if (items.length === 0) {
+    return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+      className: "text-xs text-gray-500",
+      children: "No capacity windows"
+    }, undefined, false, undefined, this);
+  }
+  return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+    className: "space-y-2",
+    children: items.map((window2, index) => {
+      const limit = asNumber(window2.limit) || 1;
+      const used = asNumber(window2.used ?? window2.consumed);
+      const label = String(window2.name ?? window2.window ?? `window ${index + 1}`);
+      const pct = Math.min(Math.max(used / limit * 100, 0), 100);
+      return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+            className: "mb-1 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                className: "truncate",
+                children: label
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                className: "tabular-nums",
+                children: [
+                  used,
+                  "/",
+                  limit
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+            className: "h-1.5 overflow-hidden rounded bg-gray-200 dark:bg-gray-700",
+            children: /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+              className: "h-full bg-sky-500",
+              style: { width: `${pct}%` }
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, `${label}-${JSON.stringify(window2)}`, true, undefined, this);
+    })
+  }, undefined, false, undefined, this);
+}
+var AgenciesPage = () => {
+  const [agencies, setAgencies] = import_react5.useState([]);
+  const [loading, setLoading] = import_react5.useState(true);
+  const [error, setError] = import_react5.useState(null);
+  const [filters, setFilters] = import_react5.useState({ proposal: "", agency: "", route: "", severity: "" });
+  const [expanded, setExpanded] = import_react5.useState(null);
+  const [actionError, setActionError] = import_react5.useState(null);
+  const fetchData = import_react5.useCallback(async () => {
+    try {
+      setError(null);
+      const data = await apiClient.fetchAgencies(filters);
+      setAgencies(data.map((row) => ({
+        ...row,
+        active_claims: asArray(row.active_claims),
+        assistance: asArray(row.assistance),
+        claim_timeline: asArray(row.claim_timeline),
+        route_providers: asArray(row.route_providers),
+        severities: asArray(row.severities)
+      })));
+    } catch (err) {
+      console.error("Failed to fetch agencies:", err);
+      setError("Failed to load agencies");
+    } finally {
+      setLoading(false);
+    }
+  }, [filters]);
+  import_react5.useEffect(() => {
+    fetchData();
+    const timer = setInterval(() => void fetchData(), 5000);
+    return () => clearInterval(timer);
+  }, [fetchData]);
+  const filterOptions = import_react5.useMemo(() => {
+    const routes = new Set;
+    const severities = new Set;
+    for (const agency of agencies) {
+      for (const route of agency.route_providers)
+        routes.add(route);
+      for (const severity of agency.severities)
+        severities.add(severity);
+    }
+    return {
+      routes: [...routes].sort(),
+      severities: [...severities].sort()
+    };
+  }, [agencies]);
+  const sendAction = async (agencyId, action, claimId) => {
+    try {
+      setActionError(null);
+      await apiClient.sendAgencyAction(agencyId, {
+        action,
+        claim_id: claimId == null ? undefined : String(claimId),
+        reason: "operator dashboard"
+      });
+      await fetchData();
+    } catch (err) {
+      console.error("Failed to send agency action:", err);
+      setActionError("Action failed or operator token is missing");
+    }
+  };
+  if (loading) {
+    return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+      className: "p-6 text-gray-500",
+      children: "Loading agencies..."
+    }, undefined, false, undefined, this);
+  }
+  if (error) {
+    return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+      className: "p-6 text-red-700 dark:text-red-300",
+      children: [
+        error,
+        /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("button", {
+          type: "button",
+          onClick: fetchData,
+          className: "ml-3 underline",
+          children: "Retry"
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  }
+  return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+    className: "mx-auto max-w-7xl px-4 py-6",
+    children: [
+      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+        className: "mb-5 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("h1", {
+                className: "text-2xl font-semibold text-gray-900 dark:text-gray-100",
+                children: "Agencies"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                className: "mt-1 text-sm text-gray-500 dark:text-gray-400",
+                children: [
+                  agencies.length,
+                  " visible agencies"
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+            className: "grid grid-cols-2 gap-2 lg:flex lg:items-center",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("input", {
+                placeholder: "Proposal",
+                value: filters.proposal,
+                onChange: (e) => setFilters((f) => ({ ...f, proposal: e.target.value })),
+                className: "rounded border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("input", {
+                placeholder: "Agency",
+                value: filters.agency,
+                onChange: (e) => setFilters((f) => ({ ...f, agency: e.target.value })),
+                className: "rounded border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("select", {
+                value: filters.route,
+                onChange: (e) => setFilters((f) => ({ ...f, route: e.target.value })),
+                className: "rounded border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900",
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("option", {
+                    value: "",
+                    children: "All routes"
+                  }, undefined, false, undefined, this),
+                  filterOptions.routes.map((route) => /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("option", {
+                    value: route,
+                    children: route
+                  }, route, false, undefined, this))
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("select", {
+                value: filters.severity,
+                onChange: (e) => setFilters((f) => ({ ...f, severity: e.target.value })),
+                className: "rounded border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900",
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("option", {
+                    value: "",
+                    children: "All severities"
+                  }, undefined, false, undefined, this),
+                  filterOptions.severities.map((severity) => /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("option", {
+                    value: severity,
+                    children: severity
+                  }, severity, false, undefined, this))
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      actionError && /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+        className: "mb-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700",
+        children: actionError
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+        className: "grid gap-4 xl:grid-cols-2",
+        children: agencies.map((agency) => {
+          const status = agency.status?.toLowerCase() || "dormant";
+          const oldestAge = ageLabel(agency.oldest_open_assistance_at);
+          const isExpanded = expanded === agency.agency_id;
+          return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("section", {
+            className: "rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                className: "flex items-start justify-between gap-3",
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                    className: "min-w-0",
+                    children: [
+                      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                        className: "flex items-center gap-2",
+                        children: [
+                          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("h2", {
+                            className: "truncate text-lg font-semibold text-gray-900 dark:text-gray-100",
+                            children: agency.display_name || agency.agency_id
+                          }, undefined, false, undefined, this),
+                          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                            className: `rounded px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[status] ?? STATUS_COLORS.dormant}`,
+                            children: status
+                          }, undefined, false, undefined, this)
+                        ]
+                      }, undefined, true, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                        className: "mt-1 truncate text-sm text-gray-500 dark:text-gray-400",
+                        children: [
+                          agency.agency_id,
+                          " · ",
+                          agency.provider ?? "unknown",
+                          " · ",
+                          agency.host_id ?? "no host"
+                        ]
+                      }, undefined, true, undefined, this)
+                    ]
+                  }, undefined, true, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("button", {
+                    type: "button",
+                    onClick: () => setExpanded(isExpanded ? null : agency.agency_id),
+                    className: "rounded border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700",
+                    children: isExpanded ? "Close" : "Details"
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                className: "mt-4 grid grid-cols-2 gap-3 md:grid-cols-4",
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Metric, {
+                    label: "free slots",
+                    value: asNumber(agency.free_claim_slots)
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Metric, {
+                    label: "in flight",
+                    value: asNumber(agency.in_flight_claims)
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Metric, {
+                    label: "assistance",
+                    value: asNumber(agency.open_assistance)
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Metric, {
+                    label: "oldest",
+                    value: oldestAge
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                className: "mt-4",
+                children: /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(CapacityBars, {
+                  windows: agency.capacity_windows
+                }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                className: "mt-4 flex flex-wrap gap-2",
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(ActionButton, {
+                    onClick: () => sendAction(agency.agency_id, "liaison_pause"),
+                    children: "pause"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(ActionButton, {
+                    onClick: () => sendAction(agency.agency_id, "liaison_resume"),
+                    children: "resume"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(ActionButton, {
+                    onClick: () => sendAction(agency.agency_id, "liaison_drain"),
+                    children: "drain"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(ActionButton, {
+                    danger: true,
+                    onClick: () => sendAction(agency.agency_id, "agency_retire"),
+                    children: "retire"
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              isExpanded && /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                className: "mt-5 space-y-5 border-t border-gray-200 pt-4 dark:border-gray-800",
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                    className: "grid grid-cols-3 gap-3 text-sm",
+                    children: [
+                      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Metric, {
+                        label: "rejects",
+                        value: asNumber(agency.recent_rejects)
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Metric, {
+                        label: "unacked old",
+                        value: asNumber(agency.unacked_old)
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Metric, {
+                        label: "sequence gaps",
+                        value: asNumber(agency.sequence_gap_count)
+                      }, undefined, false, undefined, this)
+                    ]
+                  }, undefined, true, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(ClaimList, {
+                    claims: agency.active_claims,
+                    onRevoke: (claimId) => sendAction(agency.agency_id, "claim_revoke", claimId)
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(AssistanceList, {
+                    requests: agency.assistance
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Timeline, {
+                    events: agency.claim_timeline
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, agency.agency_id, true, undefined, this);
+        })
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+};
+function Metric({ label, value }) {
+  return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+    className: "rounded border border-gray-200 p-3 dark:border-gray-800",
+    children: [
+      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+        className: "text-xs uppercase text-gray-500 dark:text-gray-400",
+        children: label
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+        className: "mt-1 text-lg font-semibold text-gray-900 dark:text-gray-100",
+        children: value
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function ActionButton({ children, danger, onClick }) {
+  return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("button", {
+    type: "button",
+    onClick,
+    className: `rounded px-3 py-1.5 text-sm font-medium ${danger ? "bg-red-600 text-white hover:bg-red-700" : "bg-gray-900 text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900"}`,
+    children
+  }, undefined, false, undefined, this);
+}
+function ClaimList({ claims, onRevoke }) {
+  return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+    children: [
+      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("h3", {
+        className: "mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100",
+        children: "In-flight claims"
+      }, undefined, false, undefined, this),
+      claims.length === 0 ? /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+        className: "text-sm text-gray-500",
+        children: "No in-flight claims"
+      }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+        className: "space-y-2",
+        children: claims.map((claim) => /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+          className: "rounded border border-gray-200 p-3 text-sm dark:border-gray-800",
+          children: /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+            className: "flex items-center justify-between gap-3",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                className: "min-w-0",
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                    className: "truncate font-medium text-gray-900 dark:text-gray-100",
+                    children: [
+                      claim.proposal_display_id ?? `P${claim.proposal_id ?? "?"}`,
+                      " · ",
+                      claim.role ?? "role"
+                    ]
+                  }, undefined, true, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                    className: "truncate text-gray-500 dark:text-gray-400",
+                    children: [
+                      claim.worker_identity ?? claim.agent_identity ?? "unassigned",
+                      " · ",
+                      claim.route_provider ?? "no route",
+                      " · ",
+                      claim.dispatch_status,
+                      "/",
+                      claim.offer_status
+                    ]
+                  }, undefined, true, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(ActionButton, {
+                danger: true,
+                onClick: () => onRevoke(claim.id),
+                children: "revoke"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        }, String(claim.id), false, undefined, this))
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function AssistanceList({ requests }) {
+  return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("details", {
+    className: "rounded border border-gray-200 p-3 dark:border-gray-800",
+    children: [
+      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("summary", {
+        className: "cursor-pointer text-sm font-semibold text-gray-900 dark:text-gray-100",
+        children: [
+          "Assistance requests (",
+          requests.length,
+          ")"
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+        className: "mt-3 space-y-2",
+        children: requests.length === 0 ? /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+          className: "text-sm text-gray-500",
+          children: "None open"
+        }, undefined, false, undefined, this) : requests.map((req) => /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+          className: "text-sm",
+          children: [
+            /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+              className: "font-medium",
+              children: req.severity ?? "unknown"
+            }, undefined, false, undefined, this),
+            " ",
+            /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+              className: "text-gray-500",
+              children: [
+                Math.floor(asNumber(req.age_minutes)),
+                "m · ",
+                req.agent_identity,
+                " · ",
+                req.error_signature ?? req.task_id
+              ]
+            }, undefined, true, undefined, this)
+          ]
+        }, String(req.id), true, undefined, this))
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function Timeline({ events: events2 }) {
+  return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+    children: [
+      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("h3", {
+        className: "mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100",
+        children: "Claim timeline"
+      }, undefined, false, undefined, this),
+      events2.length === 0 ? /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+        className: "text-sm text-gray-500",
+        children: "No progress_note or claim_status events in the last 24h"
+      }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+        className: "max-h-64 space-y-2 overflow-auto",
+        children: events2.map((event) => /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+          className: "rounded bg-gray-50 p-2 text-sm dark:bg-gray-800",
+          children: [
+            /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+              className: "flex items-center justify-between gap-2",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                  className: "font-medium",
+                  children: event.kind
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                  className: "text-xs text-gray-500",
+                  children: new Date(event.signed_at).toLocaleString()
+                }, undefined, false, undefined, this)
+              ]
+            }, undefined, true, undefined, this),
+            /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+              className: "mt-1 text-gray-600 dark:text-gray-300",
+              children: String(event.payload.summary ?? event.payload.status ?? event.payload.claim_id ?? "event")
+            }, undefined, false, undefined, this)
+          ]
+        }, event.message_id, true, undefined, this))
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+var AgenciesPage_default = AgenciesPage;
+
 // src/apps/dashboard-web/components/AgentsPage.tsx
-var import_react7 = __toESM(require_react(), 1);
+var import_react8 = __toESM(require_react(), 1);
 
 // src/apps/dashboard-web/components/AgentDetail.tsx
-var import_react6 = __toESM(require_react(), 1);
+var import_react7 = __toESM(require_react(), 1);
 
 // src/apps/dashboard-web/hooks/useProjectScope.ts
-var import_react5 = __toESM(require_react(), 1);
+var import_react6 = __toESM(require_react(), 1);
 var cached = null;
 var inflight = null;
 async function loadProjects() {
@@ -176110,16 +176670,16 @@ async function loadProjects() {
   return inflight;
 }
 function useProjectScope() {
-  const [projects, setProjects] = import_react5.useState([]);
-  const [defaultId, setDefaultId] = import_react5.useState(null);
-  const [storedId, setStoredId] = import_react5.useState(getStoredProjectId());
-  const [error, setError] = import_react5.useState(null);
-  const [loading, setLoading] = import_react5.useState(true);
-  import_react5.useEffect(() => {
+  const [projects, setProjects] = import_react6.useState([]);
+  const [defaultId, setDefaultId] = import_react6.useState(null);
+  const [storedId, setStoredId] = import_react6.useState(getStoredProjectId());
+  const [error, setError] = import_react6.useState(null);
+  const [loading, setLoading] = import_react6.useState(true);
+  import_react6.useEffect(() => {
     const off = onProjectScopeChange((id) => setStoredId(id));
     return off;
   }, []);
-  import_react5.useEffect(() => {
+  import_react6.useEffect(() => {
     let cancelled = false;
     loadProjects().then((res) => {
       if (cancelled)
@@ -176140,12 +176700,12 @@ function useProjectScope() {
       cancelled = true;
     };
   }, []);
-  const setProjectId = import_react5.useCallback((id) => {
+  const setProjectId = import_react6.useCallback((id) => {
     setStoredProjectId(id);
   }, []);
   const effectiveId = storedId ?? defaultId;
   const current = projects.find((p) => p.project_id === effectiveId) ?? projects[0] ?? null;
-  const scopedFetch = import_react5.useCallback((input, init) => {
+  const scopedFetch = import_react6.useCallback((input, init) => {
     const headers = new Headers(init?.headers ?? {});
     if (effectiveId != null && !headers.has("X-Project-Id")) {
       headers.set("X-Project-Id", String(effectiveId));
@@ -176163,7 +176723,7 @@ function useProjectScope() {
 }
 
 // src/apps/dashboard-web/components/AgentDetail.tsx
-var jsx_dev_runtime4 = __toESM(require_jsx_dev_runtime(), 1);
+var jsx_dev_runtime5 = __toESM(require_jsx_dev_runtime(), 1);
 var formatTimeAgo = (iso) => {
   if (!iso)
     return "—";
@@ -176212,16 +176772,16 @@ var runStatusColor = (status) => {
   }
 };
 var AgentDetail = ({ identity, onClose }) => {
-  const [data, setData] = import_react6.useState(null);
-  const [loading, setLoading] = import_react6.useState(true);
-  const [error, setError] = import_react6.useState(null);
-  const [draft, setDraft] = import_react6.useState("");
-  const [messageType, setMessageType] = import_react6.useState("reminder");
-  const [sending, setSending] = import_react6.useState(false);
-  const [sendError, setSendError] = import_react6.useState(null);
-  const [sendOk, setSendOk] = import_react6.useState(null);
+  const [data, setData] = import_react7.useState(null);
+  const [loading, setLoading] = import_react7.useState(true);
+  const [error, setError] = import_react7.useState(null);
+  const [draft, setDraft] = import_react7.useState("");
+  const [messageType, setMessageType] = import_react7.useState("reminder");
+  const [sending, setSending] = import_react7.useState(false);
+  const [sendError, setSendError] = import_react7.useState(null);
+  const [sendOk, setSendOk] = import_react7.useState(null);
   const scope = useProjectScope();
-  const load = import_react6.useCallback(async () => {
+  const load = import_react7.useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -176237,7 +176797,7 @@ var AgentDetail = ({ identity, onClose }) => {
       setLoading(false);
     }
   }, [identity, scope.scopedFetch]);
-  import_react6.useEffect(() => {
+  import_react7.useEffect(() => {
     load();
     const t = setInterval(() => void load(), 1e4);
     return () => clearInterval(t);
@@ -176271,43 +176831,43 @@ var AgentDetail = ({ identity, onClose }) => {
   const reg = data?.registry ?? {};
   const health = data?.health ?? null;
   const runningRun = data?.runs.find((r) => r.status === "running");
-  return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+  return /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
     className: "fixed inset-0 z-50 flex",
     children: [
-      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("button", {
+      /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("button", {
         type: "button",
         "aria-label": "Close panel",
         className: "flex-1 bg-black/40",
         onClick: onClose
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("aside", {
+      /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("aside", {
         className: "w-full max-w-2xl bg-white dark:bg-gray-900 shadow-xl border-l border-gray-200 dark:border-gray-800 flex flex-col",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("header", {
+          /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("header", {
             className: "flex items-start justify-between gap-3 p-4 border-b border-gray-200 dark:border-gray-800",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("h2", {
+                  /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("h2", {
                     className: "text-lg font-semibold text-gray-900 dark:text-gray-100 break-all",
                     children: identity
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                  /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
                     className: "mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400",
                     children: [
-                      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                      /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("span", {
                         className: `px-2 py-0.5 rounded font-medium ${healthBadge(health?.status)}`,
                         children: health?.status ?? "unknown"
                       }, undefined, false, undefined, this),
-                      typeof reg.role === "string" && /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                      typeof reg.role === "string" && /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("span", {
                         className: "font-mono",
                         children: reg.role
                       }, undefined, false, undefined, this),
-                      typeof reg.agent_type === "string" && /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                      typeof reg.agent_type === "string" && /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("span", {
                         className: "font-mono",
                         children: reg.agent_type
                       }, undefined, false, undefined, this),
-                      typeof reg.trust_tier === "string" && /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                      typeof reg.trust_tier === "string" && /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("span", {
                         children: [
                           "trust: ",
                           reg.trust_tier
@@ -176317,7 +176877,7 @@ var AgentDetail = ({ identity, onClose }) => {
                   }, undefined, true, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("button", {
+              /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("button", {
                 type: "button",
                 className: "text-gray-400 hover:text-gray-600 dark:hover:text-gray-200",
                 onClick: onClose,
@@ -176326,70 +176886,70 @@ var AgentDetail = ({ identity, onClose }) => {
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
             className: "flex-1 overflow-y-auto px-4 py-3 space-y-5",
             children: [
-              loading && !data && /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+              loading && !data && /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
                 className: "text-sm text-gray-500",
                 children: "Loading…"
               }, undefined, false, undefined, this),
-              error && /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+              error && /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
                 className: "text-sm text-red-600 dark:text-red-400",
                 children: error
               }, undefined, false, undefined, this),
-              data && /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(jsx_dev_runtime4.Fragment, {
+              data && /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(jsx_dev_runtime5.Fragment, {
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("section", {
+                  /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("section", {
                     children: [
-                      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("h3", {
+                      /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("h3", {
                         className: "text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2",
                         children: "Current state"
                       }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("dl", {
+                      /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("dl", {
                         className: "grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-700 dark:text-gray-300",
                         children: [
-                          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("dt", {
+                          /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("dt", {
                             className: "text-gray-500",
                             children: "last heartbeat"
                           }, undefined, false, undefined, this),
-                          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("dd", {
+                          /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("dd", {
                             children: formatTimeAgo(health?.last_heartbeat_at)
                           }, undefined, false, undefined, this),
-                          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("dt", {
+                          /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("dt", {
                             className: "text-gray-500",
                             children: "current task"
                           }, undefined, false, undefined, this),
-                          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("dd", {
+                          /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("dd", {
                             className: "font-mono break-all",
                             children: health?.current_task ?? "—"
                           }, undefined, false, undefined, this),
-                          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("dt", {
+                          /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("dt", {
                             className: "text-gray-500",
                             children: "proposal"
                           }, undefined, false, undefined, this),
-                          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("dd", {
+                          /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("dd", {
                             children: health?.current_proposal ?? "—"
                           }, undefined, false, undefined, this),
-                          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("dt", {
+                          /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("dt", {
                             className: "text-gray-500",
                             children: "cubic"
                           }, undefined, false, undefined, this),
-                          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("dd", {
+                          /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("dd", {
                             className: "font-mono break-all",
                             children: health?.current_cubic ?? "—"
                           }, undefined, false, undefined, this),
-                          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("dt", {
+                          /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("dt", {
                             className: "text-gray-500",
                             children: "model"
                           }, undefined, false, undefined, this),
-                          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("dd", {
+                          /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("dd", {
                             children: health?.active_model ?? "—"
                           }, undefined, false, undefined, this),
-                          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("dt", {
+                          /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("dt", {
                             className: "text-gray-500",
                             children: "cpu / mem"
                           }, undefined, false, undefined, this),
-                          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("dd", {
+                          /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("dd", {
                             children: [
                               health?.cpu_percent != null ? `${health.cpu_percent}%` : "—",
                               " / ",
@@ -176398,10 +176958,10 @@ var AgentDetail = ({ identity, onClose }) => {
                           }, undefined, true, undefined, this)
                         ]
                       }, undefined, true, undefined, this),
-                      runningRun && /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                      runningRun && /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
                         className: "mt-2 rounded border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 p-2 text-xs",
                         children: [
-                          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                          /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
                             className: "font-medium text-blue-800 dark:text-blue-200",
                             children: [
                               "Run #",
@@ -176411,7 +176971,7 @@ var AgentDetail = ({ identity, onClose }) => {
                               ")"
                             ]
                           }, undefined, true, undefined, this),
-                          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                          /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
                             className: "text-blue-700 dark:text-blue-300",
                             children: [
                               runningRun.proposal_display_id ?? "no proposal",
@@ -176429,24 +176989,24 @@ var AgentDetail = ({ identity, onClose }) => {
                       }, undefined, true, undefined, this)
                     ]
                   }, undefined, true, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("section", {
+                  /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("section", {
                     children: [
-                      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("h3", {
+                      /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("h3", {
                         className: "text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2",
                         children: "Recent runs"
                       }, undefined, false, undefined, this),
-                      data.runs.length === 0 ? /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                      data.runs.length === 0 ? /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
                         className: "text-xs text-gray-500",
                         children: "No runs yet."
-                      }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("ul", {
+                      }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("ul", {
                         className: "space-y-1.5",
-                        children: data.runs.slice(0, 12).map((r) => /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("li", {
+                        children: data.runs.slice(0, 12).map((r) => /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("li", {
                           className: "text-xs border border-gray-200 dark:border-gray-800 rounded p-2",
                           children: [
-                            /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                            /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
                               className: "flex justify-between items-baseline gap-2",
                               children: [
-                                /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                                /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("span", {
                                   className: `font-mono font-semibold ${runStatusColor(r.status)}`,
                                   children: [
                                     r.proposal_display_id ?? "(no proposal)",
@@ -176454,13 +177014,13 @@ var AgentDetail = ({ identity, onClose }) => {
                                     r.stage
                                   ]
                                 }, undefined, true, undefined, this),
-                                /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                                /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("span", {
                                   className: "text-gray-500",
                                   children: formatTimeAgo(r.started_at)
                                 }, undefined, false, undefined, this)
                               ]
                             }, undefined, true, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                            /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
                               className: "text-gray-600 dark:text-gray-400 mt-0.5",
                               children: [
                                 r.model_used,
@@ -176470,7 +177030,7 @@ var AgentDetail = ({ identity, onClose }) => {
                                 r.cost_usd != null ? ` · $${Number(r.cost_usd).toFixed(4)}` : ""
                               ]
                             }, undefined, true, undefined, this),
-                            (r.output_summary || r.error_detail) && /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                            (r.output_summary || r.error_detail) && /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
                               className: `mt-1 whitespace-pre-wrap break-words ${r.error_detail ? "text-red-700 dark:text-red-300" : "text-gray-700 dark:text-gray-300"}`,
                               children: (r.error_detail ?? r.output_summary ?? "").slice(0, 600)
                             }, undefined, false, undefined, this)
@@ -176479,24 +177039,24 @@ var AgentDetail = ({ identity, onClose }) => {
                       }, undefined, false, undefined, this)
                     ]
                   }, undefined, true, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("section", {
+                  /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("section", {
                     children: [
-                      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("h3", {
+                      /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("h3", {
                         className: "text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2",
                         children: "Recent messages"
                       }, undefined, false, undefined, this),
-                      data.messages.length === 0 ? /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                      data.messages.length === 0 ? /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
                         className: "text-xs text-gray-500",
                         children: "No messages."
-                      }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("ul", {
+                      }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("ul", {
                         className: "space-y-1.5 max-h-64 overflow-y-auto",
-                        children: data.messages.slice(0, 15).map((m) => /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("li", {
+                        children: data.messages.slice(0, 15).map((m) => /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("li", {
                           className: "text-xs border border-gray-200 dark:border-gray-800 rounded p-2",
                           children: [
-                            /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                            /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
                               className: "flex justify-between gap-2",
                               children: [
-                                /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                                /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("span", {
                                   className: "font-mono text-gray-500",
                                   children: [
                                     m.from_agent,
@@ -176504,13 +177064,13 @@ var AgentDetail = ({ identity, onClose }) => {
                                     m.to_agent ?? m.channel ?? "(broadcast)"
                                   ]
                                 }, undefined, true, undefined, this),
-                                /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                                /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("span", {
                                   className: "text-gray-500",
                                   children: formatTimeAgo(m.created_at)
                                 }, undefined, false, undefined, this)
                               ]
                             }, undefined, true, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                            /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
                               className: "mt-0.5 text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words",
                               children: m.message_content.slice(0, 600)
                             }, undefined, false, undefined, this)
@@ -176523,34 +177083,34 @@ var AgentDetail = ({ identity, onClose }) => {
               }, undefined, true, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("footer", {
+          /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("footer", {
             className: "border-t border-gray-200 dark:border-gray-800 p-3 space-y-2",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
                 className: "flex items-center justify-between",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("h3", {
+                  /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("h3", {
                     className: "text-sm font-semibold text-gray-700 dark:text-gray-200",
                     children: "Send reminder"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("select", {
+                  /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("select", {
                     value: messageType,
                     onChange: (e) => setMessageType(e.target.value),
                     className: "text-xs rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-1.5 py-0.5",
                     children: [
-                      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("option", {
+                      /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("option", {
                         value: "reminder",
                         children: "reminder"
                       }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("option", {
+                      /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("option", {
                         value: "nudge",
                         children: "nudge"
                       }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("option", {
+                      /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("option", {
                         value: "instruction",
                         children: "instruction"
                       }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("option", {
+                      /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("option", {
                         value: "text",
                         children: "text"
                       }, undefined, false, undefined, this)
@@ -176558,29 +177118,29 @@ var AgentDetail = ({ identity, onClose }) => {
                   }, undefined, true, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("textarea", {
+              /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("textarea", {
                 value: draft,
                 onChange: (e) => setDraft(e.target.value),
                 placeholder: `Message ${identity}…`,
                 className: "w-full text-sm rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 p-2 h-20 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
                 className: "flex items-center justify-between gap-2",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                  /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
                     className: "text-xs",
                     children: [
-                      sendError && /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                      sendError && /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("span", {
                         className: "text-red-600 dark:text-red-400",
                         children: sendError
                       }, undefined, false, undefined, this),
-                      sendOk && !sendError && /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                      sendOk && !sendError && /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("span", {
                         className: "text-emerald-600 dark:text-emerald-400",
                         children: sendOk
                       }, undefined, false, undefined, this)
                     ]
                   }, undefined, true, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("button", {
+                  /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("button", {
                     type: "button",
                     onClick: send,
                     disabled: !draft.trim() || sending,
@@ -176599,7 +177159,7 @@ var AgentDetail = ({ identity, onClose }) => {
 var AgentDetail_default = AgentDetail;
 
 // src/apps/dashboard-web/components/AgentsPage.tsx
-var jsx_dev_runtime5 = __toESM(require_jsx_dev_runtime(), 1);
+var jsx_dev_runtime6 = __toESM(require_jsx_dev_runtime(), 1);
 var statusColor = (status) => {
   switch (status) {
     case "active":
@@ -176628,12 +177188,12 @@ var formatTimeAgo2 = (dateStr) => {
   return `${Math.floor(hours / 24)}d ago`;
 };
 var AgentsPage = ({ agents: propAgents }) => {
-  const [agents, setAgents] = import_react7.useState(propAgents || []);
-  const [loading, setLoading] = import_react7.useState(!propAgents);
-  const [error, setError] = import_react7.useState(null);
-  const [sortBy, setSortBy] = import_react7.useState("name");
-  const [selectedIdentity, setSelectedIdentity] = import_react7.useState(null);
-  const fetchData = import_react7.useCallback(async () => {
+  const [agents, setAgents] = import_react8.useState(propAgents || []);
+  const [loading, setLoading] = import_react8.useState(!propAgents);
+  const [error, setError] = import_react8.useState(null);
+  const [sortBy, setSortBy] = import_react8.useState("name");
+  const [selectedIdentity, setSelectedIdentity] = import_react8.useState(null);
+  const fetchData = import_react8.useCallback(async () => {
     try {
       setError(null);
       const data = await apiClient.fetchAgents();
@@ -176645,7 +177205,7 @@ var AgentsPage = ({ agents: propAgents }) => {
       setLoading(false);
     }
   }, []);
-  import_react7.useEffect(() => {
+  import_react8.useEffect(() => {
     if (propAgents && propAgents.length > 0) {
       setAgents(propAgents);
       setLoading(false);
@@ -176668,14 +177228,14 @@ var AgentsPage = ({ agents: propAgents }) => {
     }
   });
   if (loading) {
-    return /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
+    return /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("div", {
       className: "flex flex-col justify-center items-center h-64 space-y-4",
       children: [
-        /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(LoadingSpinner_default, {
+        /* @__PURE__ */ jsx_dev_runtime6.jsxDEV(LoadingSpinner_default, {
           size: "lg",
           text: ""
         }, undefined, false, undefined, this),
-        /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("p", {
+        /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("p", {
           className: "text-lg font-medium text-gray-900 dark:text-gray-100",
           children: "Loading agents..."
         }, undefined, false, undefined, this)
@@ -176683,20 +177243,20 @@ var AgentsPage = ({ agents: propAgents }) => {
     }, undefined, true, undefined, this);
   }
   if (error) {
-    return /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
+    return /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("div", {
       className: "p-8 text-center",
-      children: /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
+      children: /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("div", {
         className: "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("p", {
+          /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("p", {
             className: "text-red-600 dark:text-red-400 font-medium",
             children: "Error"
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("p", {
+          /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("p", {
             className: "text-red-500 dark:text-red-300 text-sm mt-1",
             children: error
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("button", {
+          /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("button", {
             type: "button",
             onClick: fetchData,
             className: "mt-4 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded hover:bg-red-200 dark:hover:bg-red-900/50",
@@ -176706,13 +177266,13 @@ var AgentsPage = ({ agents: propAgents }) => {
       }, undefined, true, undefined, this)
     }, undefined, false, undefined, this);
   }
-  return /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
+  return /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("div", {
     className: "space-y-6",
     children: [
-      /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("div", {
         className: "flex items-center justify-between",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("h1", {
+          /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("h1", {
             className: "text-2xl font-bold text-gray-900 dark:text-gray-100",
             children: [
               "Agents (",
@@ -176720,33 +177280,33 @@ var AgentsPage = ({ agents: propAgents }) => {
               ")"
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("div", {
             className: "flex items-center gap-2",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("label", {
+              /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("label", {
                 htmlFor: "agent-sort",
                 className: "text-sm text-gray-500 dark:text-gray-400",
                 children: "Sort by:"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("select", {
+              /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("select", {
                 id: "agent-sort",
                 value: sortBy,
                 onChange: (e) => setSortBy(e.target.value),
                 className: "rounded border px-2 py-1 text-sm bg-white dark:bg-gray-800",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("option", {
+                  /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("option", {
                     value: "name",
                     children: "Name"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("option", {
+                  /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("option", {
                     value: "status",
                     children: "Status"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("option", {
+                  /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("option", {
                     value: "lastSeen",
                     children: "Last Seen"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("option", {
+                  /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("option", {
                     value: "trustScore",
                     children: "Trust Score"
                   }, undefined, false, undefined, this)
@@ -176756,39 +177316,39 @@ var AgentsPage = ({ agents: propAgents }) => {
           }, undefined, true, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("div", {
         className: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4",
-        children: sortedAgents.map((agent) => /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("button", {
+        children: sortedAgents.map((agent) => /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("button", {
           type: "button",
           onClick: () => setSelectedIdentity(agent.identity || agent.name || null),
           className: "text-left bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-3 hover:border-blue-400 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition",
           children: [
-            /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
+            /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("div", {
               className: "flex items-center justify-between",
               children: [
-                /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("h3", {
+                /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("h3", {
                   className: "font-semibold text-gray-900 dark:text-gray-100",
                   children: agent.name
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("span", {
+                /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("span", {
                   className: `px-2 py-0.5 rounded text-xs font-medium ${statusColor(agent.status)}`,
                   children: agent.status
                 }, undefined, false, undefined, this)
               ]
             }, undefined, true, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
+            /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("div", {
               className: "text-xs text-gray-500 dark:text-gray-400 space-y-1",
               children: [
-                /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
+                /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("div", {
                   className: "flex justify-between",
                   children: [
-                    /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("span", {
+                    /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("span", {
                       children: [
                         "Trust Score: ",
                         agent.trustScore
                       ]
                     }, undefined, true, undefined, this),
-                    agent.costClass && /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("span", {
+                    agent.costClass && /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("span", {
                       children: [
                         "Cost: ",
                         agent.costClass
@@ -176796,16 +177356,16 @@ var AgentsPage = ({ agents: propAgents }) => {
                     }, undefined, true, undefined, this)
                   ]
                 }, undefined, true, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
+                /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("div", {
                   className: "flex justify-between",
                   children: [
-                    /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("span", {
+                    /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("span", {
                       children: [
                         "Last seen: ",
                         formatTimeAgo2(agent.lastSeen)
                       ]
                     }, undefined, true, undefined, this),
-                    agent.identity && /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("span", {
+                    agent.identity && /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("span", {
                       className: "font-mono",
                       children: agent.identity
                     }, undefined, false, undefined, this)
@@ -176813,9 +177373,9 @@ var AgentsPage = ({ agents: propAgents }) => {
                 }, undefined, true, undefined, this)
               ]
             }, undefined, true, undefined, this),
-            agent.capabilities.length > 0 && /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
+            agent.capabilities.length > 0 && /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("div", {
               className: "flex flex-wrap gap-1",
-              children: agent.capabilities.map((cap) => /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("span", {
+              children: agent.capabilities.map((cap) => /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("span", {
                 className: "px-1.5 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded text-xs",
                 children: cap
               }, cap, false, undefined, this))
@@ -176823,11 +177383,11 @@ var AgentsPage = ({ agents: propAgents }) => {
           ]
         }, agent.name, true, undefined, this))
       }, undefined, false, undefined, this),
-      agents.length === 0 && /* @__PURE__ */ jsx_dev_runtime5.jsxDEV("div", {
+      agents.length === 0 && /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("div", {
         className: "text-center py-12 text-gray-500 dark:text-gray-400",
         children: "No agents registered"
       }, undefined, false, undefined, this),
-      selectedIdentity && /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(AgentDetail_default, {
+      selectedIdentity && /* @__PURE__ */ jsx_dev_runtime6.jsxDEV(AgentDetail_default, {
         identity: selectedIdentity,
         onClose: () => setSelectedIdentity(null)
       }, undefined, false, undefined, this)
@@ -176837,15 +177397,15 @@ var AgentsPage = ({ agents: propAgents }) => {
 var AgentsPage_default = AgentsPage;
 
 // src/apps/dashboard-web/components/AppNav.tsx
-var import_react9 = __toESM(require_react(), 1);
+var import_react10 = __toESM(require_react(), 1);
 var import_react_dom = __toESM(require_react_dom(), 1);
 
 // src/apps/dashboard-web/components/ProjectChip.tsx
-var jsx_dev_runtime6 = __toESM(require_jsx_dev_runtime(), 1);
+var jsx_dev_runtime7 = __toESM(require_jsx_dev_runtime(), 1);
 var ProjectChip = ({ serverEcho }) => {
   const scope = useProjectScope();
   if (scope.loading) {
-    return /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("span", {
+    return /* @__PURE__ */ jsx_dev_runtime7.jsxDEV("span", {
       className: "text-xs text-gray-400 dark:text-gray-500",
       children: "…"
     }, undefined, false, undefined, this);
@@ -176854,19 +177414,19 @@ var ProjectChip = ({ serverEcho }) => {
     return null;
   }
   const drift = serverEcho && scope.current && serverEcho.project_id !== scope.current.project_id;
-  return /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("label", {
+  return /* @__PURE__ */ jsx_dev_runtime7.jsxDEV("label", {
     className: "inline-flex items-center gap-1.5 text-xs min-w-0",
     children: [
-      /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("span", {
+      /* @__PURE__ */ jsx_dev_runtime7.jsxDEV("span", {
         className: "hidden sm:inline text-gray-500 dark:text-gray-400 uppercase tracking-wide",
         children: "project"
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("select", {
+      /* @__PURE__ */ jsx_dev_runtime7.jsxDEV("select", {
         value: scope.current?.project_id ?? "",
         onChange: (e) => scope.setProjectId(Number(e.target.value)),
         className: "rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-1.5 py-0.5 text-xs max-w-[10rem] sm:max-w-none truncate",
         "aria-label": "Active project",
-        children: scope.projects.map((p) => /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("option", {
+        children: scope.projects.map((p) => /* @__PURE__ */ jsx_dev_runtime7.jsxDEV("option", {
           value: p.project_id,
           children: [
             p.name,
@@ -176876,7 +177436,7 @@ var ProjectChip = ({ serverEcho }) => {
           ]
         }, p.project_id, true, undefined, this))
       }, undefined, false, undefined, this),
-      drift && /* @__PURE__ */ jsx_dev_runtime6.jsxDEV("span", {
+      drift && /* @__PURE__ */ jsx_dev_runtime7.jsxDEV("span", {
         className: "text-amber-700 dark:text-amber-300",
         title: "Server returned a different project than the chip suggests; refresh imminent.",
         children: "⟳"
@@ -176887,11 +177447,11 @@ var ProjectChip = ({ serverEcho }) => {
 var ProjectChip_default = ProjectChip;
 
 // src/apps/dashboard-web/contexts/ThemeContext.tsx
-var import_react8 = __toESM(require_react(), 1);
-var jsx_dev_runtime7 = __toESM(require_jsx_dev_runtime(), 1);
-var ThemeContext = import_react8.createContext(undefined);
+var import_react9 = __toESM(require_react(), 1);
+var jsx_dev_runtime8 = __toESM(require_jsx_dev_runtime(), 1);
+var ThemeContext = import_react9.createContext(undefined);
 var useTheme = () => {
-  const context = import_react8.useContext(ThemeContext);
+  const context = import_react9.useContext(ThemeContext);
   if (context === undefined) {
     throw new Error("useTheme must be used within a ThemeProvider");
   }
@@ -176901,7 +177461,7 @@ function getSystemDark() {
   return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
 }
 var ThemeProvider = ({ children }) => {
-  const [mode, setModeState] = import_react8.useState(() => {
+  const [mode, setModeState] = import_react9.useState(() => {
     const saved = localStorage.getItem("roadmap-theme-mode");
     if (saved === "light" || saved === "dark" || saved === "system")
       return saved;
@@ -176910,23 +177470,23 @@ var ThemeProvider = ({ children }) => {
       return legacy;
     return "system";
   });
-  const [contrast, setContrast] = import_react8.useState(() => {
+  const [contrast, setContrast] = import_react9.useState(() => {
     const saved = localStorage.getItem("roadmap-contrast");
     return saved === "high" ? "high" : "normal";
   });
-  const [systemDark, setSystemDark] = import_react8.useState(getSystemDark);
-  import_react8.useEffect(() => {
+  const [systemDark, setSystemDark] = import_react9.useState(getSystemDark);
+  import_react9.useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = (e) => setSystemDark(e.matches);
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
   }, []);
-  const resolvedMode = import_react8.useMemo(() => {
+  const resolvedMode = import_react9.useMemo(() => {
     if (mode === "system")
       return systemDark ? "dark" : "light";
     return mode;
   }, [mode, systemDark]);
-  import_react8.useEffect(() => {
+  import_react9.useEffect(() => {
     const root = document.documentElement;
     if (resolvedMode === "dark") {
       root.classList.add("dark");
@@ -176934,7 +177494,7 @@ var ThemeProvider = ({ children }) => {
       root.classList.remove("dark");
     }
   }, [resolvedMode]);
-  import_react8.useEffect(() => {
+  import_react9.useEffect(() => {
     const root = document.documentElement;
     if (contrast === "high") {
       root.classList.add("high-contrast");
@@ -176942,23 +177502,23 @@ var ThemeProvider = ({ children }) => {
       root.classList.remove("high-contrast");
     }
   }, [contrast]);
-  const setMode = import_react8.useCallback((newMode) => {
+  const setMode = import_react9.useCallback((newMode) => {
     setModeState(newMode);
     localStorage.setItem("roadmap-theme-mode", newMode);
     const resolved = newMode === "system" ? getSystemDark() ? "dark" : "light" : newMode;
     localStorage.setItem("roadmap-theme", resolved);
   }, []);
-  const toggleContrast = import_react8.useCallback(() => {
+  const toggleContrast = import_react9.useCallback(() => {
     setContrast((prev) => {
       const next2 = prev === "normal" ? "high" : "normal";
       localStorage.setItem("roadmap-contrast", next2);
       return next2;
     });
   }, []);
-  const toggleTheme = import_react8.useCallback(() => {
+  const toggleTheme = import_react9.useCallback(() => {
     setMode(resolvedMode === "light" ? "dark" : "light");
   }, [resolvedMode, setMode]);
-  const value = import_react8.useMemo(() => ({
+  const value = import_react9.useMemo(() => ({
     mode,
     contrast,
     resolvedMode,
@@ -176967,40 +177527,40 @@ var ThemeProvider = ({ children }) => {
     theme: resolvedMode,
     toggleTheme
   }), [mode, contrast, resolvedMode, setMode, toggleContrast, toggleTheme]);
-  return /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(ThemeContext.Provider, {
+  return /* @__PURE__ */ jsx_dev_runtime8.jsxDEV(ThemeContext.Provider, {
     value,
     children
   }, undefined, false, undefined, this);
 };
 
 // src/apps/dashboard-web/components/ThemeToggle.tsx
-var jsx_dev_runtime8 = __toESM(require_jsx_dev_runtime(), 1);
+var jsx_dev_runtime9 = __toESM(require_jsx_dev_runtime(), 1);
 var ThemeToggle = () => {
   const { theme, toggleTheme } = useTheme();
-  return /* @__PURE__ */ jsx_dev_runtime8.jsxDEV("button", {
+  return /* @__PURE__ */ jsx_dev_runtime9.jsxDEV("button", {
     type: "button",
     onClick: toggleTheme,
     className: "p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-stone-500 focus:ring-offset-2 dark:focus:ring-stone-400 dark:focus:ring-offset-gray-900",
     "aria-label": `Switch to ${theme === "light" ? "dark" : "light"} mode`,
     title: `Switch to ${theme === "light" ? "dark" : "light"} mode`,
-    children: theme === "light" ? /* @__PURE__ */ jsx_dev_runtime8.jsxDEV("svg", {
+    children: theme === "light" ? /* @__PURE__ */ jsx_dev_runtime9.jsxDEV("svg", {
       className: "w-5 h-5 text-gray-600 dark:text-gray-400",
       fill: "currentColor",
       viewBox: "0 0 24 24",
       xmlns: "http://www.w3.org/2000/svg",
       "aria-hidden": "true",
       focusable: "false",
-      children: /* @__PURE__ */ jsx_dev_runtime8.jsxDEV("path", {
+      children: /* @__PURE__ */ jsx_dev_runtime9.jsxDEV("path", {
         d: "M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"
       }, undefined, false, undefined, this)
-    }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime8.jsxDEV("svg", {
+    }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime9.jsxDEV("svg", {
       className: "w-5 h-5 text-gray-600 dark:text-gray-400",
       fill: "currentColor",
       viewBox: "0 0 24 24",
       xmlns: "http://www.w3.org/2000/svg",
       "aria-hidden": "true",
       focusable: "false",
-      children: /* @__PURE__ */ jsx_dev_runtime8.jsxDEV("path", {
+      children: /* @__PURE__ */ jsx_dev_runtime9.jsxDEV("path", {
         d: "M12 2.25a.75.75 0 01.75.75v2.25a.75.75 0 01-1.5 0V3a.75.75 0 01.75-.75zM7.5 12a4.5 4.5 0 119 0 4.5 4.5 0 01-9 0zM18.894 6.166a.75.75 0 00-1.06-1.06l-1.591 1.59a.75.75 0 101.06 1.061l1.591-1.59zM21.75 12a.75.75 0 01-.75.75h-2.25a.75.75 0 010-1.5H21a.75.75 0 01.75.75zM17.834 18.894a.75.75 0 001.06-1.06l-1.59-1.591a.75.75 0 10-1.061 1.06l1.59 1.591zM12 18a.75.75 0 01.75.75V21a.75.75 0 01-1.5 0v-2.25A.75.75 0 0112 18zM7.758 17.303a.75.75 0 00-1.061-1.06l-1.591 1.59a.75.75 0 001.06 1.061l1.591-1.59zM6 12a.75.75 0 01-.75.75H3a.75.75 0 010-1.5h2.25A.75.75 0 016 12zM6.697 7.757a.75.75 0 001.06-1.06l-1.59-1.591a.75.75 0 00-1.061 1.06l1.59 1.591z"
       }, undefined, false, undefined, this)
     }, undefined, false, undefined, this)
@@ -177009,7 +177569,7 @@ var ThemeToggle = () => {
 var ThemeToggle_default = ThemeToggle;
 
 // src/apps/dashboard-web/components/AppNav.tsx
-var jsx_dev_runtime9 = __toESM(require_jsx_dev_runtime(), 1);
+var jsx_dev_runtime10 = __toESM(require_jsx_dev_runtime(), 1);
 var PRIMARY = [
   { href: "/", label: "Dashboard" },
   { href: "/board", label: "Board" },
@@ -177018,6 +177578,7 @@ var PRIMARY = [
 ];
 var SECONDARY = [
   { href: "/agents", label: "Agents" },
+  { href: "/agencies", label: "Agencies" },
   { href: "/teams", label: "Teams" },
   { href: "/channels", label: "Channels" },
   { href: "/dispatches", label: "Dispatches" },
@@ -177037,14 +177598,14 @@ function isActive(current, href) {
 }
 var AppNav = () => {
   const [location2] = useLocation();
-  const [drawerOpen, setDrawerOpen] = import_react9.useState(false);
-  const [overflowOpen, setOverflowOpen] = import_react9.useState(false);
-  const overflowRef = import_react9.useRef(null);
-  import_react9.useEffect(() => {
+  const [drawerOpen, setDrawerOpen] = import_react10.useState(false);
+  const [overflowOpen, setOverflowOpen] = import_react10.useState(false);
+  const overflowRef = import_react10.useRef(null);
+  import_react10.useEffect(() => {
     setDrawerOpen(false);
     setOverflowOpen(false);
   }, [location2]);
-  import_react9.useEffect(() => {
+  import_react10.useEffect(() => {
     if (!overflowOpen)
       return;
     const handler = (e) => {
@@ -177055,7 +177616,7 @@ var AppNav = () => {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [overflowOpen]);
-  import_react9.useEffect(() => {
+  import_react10.useEffect(() => {
     if (!drawerOpen)
       return;
     const handler = (e) => {
@@ -177067,49 +177628,49 @@ var AppNav = () => {
   }, [drawerOpen]);
   const linkClass = (href) => `px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 ${isActive(location2, href) ? "bg-stone-100 text-stone-900 dark:bg-stone-700/40 dark:text-stone-100" : "text-gray-600 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-300 dark:hover:text-gray-100 dark:hover:bg-gray-800"}`;
   const drawerLinkClass = (href) => `flex items-center min-h-11 px-4 text-sm font-medium transition-colors duration-150 ${isActive(location2, href) ? "bg-stone-100 text-stone-900 dark:bg-stone-700/40 dark:text-stone-100" : "text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"}`;
-  return /* @__PURE__ */ jsx_dev_runtime9.jsxDEV(jsx_dev_runtime9.Fragment, {
+  return /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(jsx_dev_runtime10.Fragment, {
     children: [
-      /* @__PURE__ */ jsx_dev_runtime9.jsxDEV("header", {
+      /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("header", {
         className: "flex items-center gap-2 px-3 sm:px-4 h-12 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex-shrink-0",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime9.jsxDEV("button", {
+          /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("button", {
             type: "button",
             className: "md:hidden inline-flex items-center justify-center w-10 h-10 rounded-md text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800",
             "aria-label": "Open navigation menu",
             "aria-expanded": drawerOpen,
             onClick: () => setDrawerOpen(true),
-            children: /* @__PURE__ */ jsx_dev_runtime9.jsxDEV("svg", {
+            children: /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("svg", {
               className: "w-5 h-5",
               viewBox: "0 0 24 24",
               fill: "none",
               stroke: "currentColor",
               strokeWidth: "2",
               "aria-hidden": "true",
-              children: /* @__PURE__ */ jsx_dev_runtime9.jsxDEV("path", {
+              children: /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("path", {
                 strokeLinecap: "round",
                 strokeLinejoin: "round",
                 d: "M4 6h16M4 12h16M4 18h16"
               }, undefined, false, undefined, this)
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime9.jsxDEV(Link, {
+          /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Link, {
             href: "/",
             className: "font-semibold text-gray-900 dark:text-gray-100 text-base mr-2 truncate",
             children: "AgentHive"
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime9.jsxDEV("nav", {
+          /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("nav", {
             className: "hidden md:flex items-center gap-1 flex-1 min-w-0",
             children: [
-              PRIMARY.map((item) => /* @__PURE__ */ jsx_dev_runtime9.jsxDEV(Link, {
+              PRIMARY.map((item) => /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Link, {
                 href: item.href,
                 className: linkClass(item.href),
                 children: item.label
               }, item.href, false, undefined, this)),
-              /* @__PURE__ */ jsx_dev_runtime9.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
                 className: "relative",
                 ref: overflowRef,
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime9.jsxDEV("button", {
+                  /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("button", {
                     type: "button",
                     className: linkClass("__more__"),
                     onClick: () => setOverflowOpen((v) => !v),
@@ -177117,9 +177678,9 @@ var AppNav = () => {
                     "aria-expanded": overflowOpen,
                     children: "More ▾"
                   }, undefined, false, undefined, this),
-                  overflowOpen && /* @__PURE__ */ jsx_dev_runtime9.jsxDEV("div", {
+                  overflowOpen && /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
                     className: "absolute left-0 mt-1 w-48 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg z-50 py-1",
-                    children: SECONDARY.map((item) => /* @__PURE__ */ jsx_dev_runtime9.jsxDEV(Link, {
+                    children: SECONDARY.map((item) => /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Link, {
                       href: item.href,
                       className: `block px-3 py-2 text-sm ${isActive(location2, item.href) ? "bg-stone-100 text-stone-900 dark:bg-stone-700/40 dark:text-stone-100" : "text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"}`,
                       children: item.label
@@ -177129,50 +177690,50 @@ var AppNav = () => {
               }, undefined, true, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime9.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
             className: "ml-auto flex items-center gap-2 flex-shrink-0",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime9.jsxDEV(ProjectChip_default, {}, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime9.jsxDEV(ThemeToggle_default, {}, undefined, false, undefined, this)
+              /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(ProjectChip_default, {}, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(ThemeToggle_default, {}, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      drawerOpen && typeof document !== "undefined" && import_react_dom.createPortal(/* @__PURE__ */ jsx_dev_runtime9.jsxDEV("div", {
+      drawerOpen && typeof document !== "undefined" && import_react_dom.createPortal(/* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
         className: "md:hidden fixed inset-0 z-[100]",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime9.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
             "aria-hidden": "true",
             className: "absolute top-0 right-0 bottom-0 left-72 bg-black/40",
             onClick: () => setDrawerOpen(false),
             onTouchStart: () => setDrawerOpen(false)
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime9.jsxDEV("aside", {
+          /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("aside", {
             className: "absolute inset-y-0 left-0 w-72 max-w-[80vw] bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 shadow-xl flex flex-col",
             role: "dialog",
             "aria-modal": "true",
             "aria-label": "Navigation menu",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime9.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
                 className: "flex items-center justify-between h-12 px-4 border-b border-gray-200 dark:border-gray-800 flex-shrink-0",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime9.jsxDEV("span", {
+                  /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("span", {
                     className: "font-semibold text-gray-900 dark:text-gray-100",
                     children: "Menu"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime9.jsxDEV("button", {
+                  /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("button", {
                     type: "button",
                     "aria-label": "Close navigation menu",
                     className: "inline-flex items-center justify-center w-11 h-11 -mr-2 rounded-md text-gray-700 hover:bg-gray-100 active:bg-gray-200 dark:text-gray-200 dark:hover:bg-gray-800 dark:active:bg-gray-700",
                     onClick: () => setDrawerOpen(false),
-                    children: /* @__PURE__ */ jsx_dev_runtime9.jsxDEV("svg", {
+                    children: /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("svg", {
                       className: "w-6 h-6",
                       viewBox: "0 0 24 24",
                       fill: "none",
                       stroke: "currentColor",
                       strokeWidth: "2",
                       "aria-hidden": "true",
-                      children: /* @__PURE__ */ jsx_dev_runtime9.jsxDEV("path", {
+                      children: /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("path", {
                         strokeLinecap: "round",
                         strokeLinejoin: "round",
                         d: "M6 6l12 12M6 18L18 6"
@@ -177181,23 +177742,23 @@ var AppNav = () => {
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime9.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
                 className: "overflow-y-auto flex-1 py-2 bg-white dark:bg-gray-900",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime9.jsxDEV("div", {
+                  /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
                     className: "px-4 pt-2 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400",
                     children: "Primary"
                   }, undefined, false, undefined, this),
-                  PRIMARY.map((item) => /* @__PURE__ */ jsx_dev_runtime9.jsxDEV(Link, {
+                  PRIMARY.map((item) => /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Link, {
                     href: item.href,
                     className: drawerLinkClass(item.href),
                     children: item.label
                   }, item.href, false, undefined, this)),
-                  /* @__PURE__ */ jsx_dev_runtime9.jsxDEV("div", {
+                  /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
                     className: "px-4 pt-4 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400",
                     children: "More"
                   }, undefined, false, undefined, this),
-                  SECONDARY.map((item) => /* @__PURE__ */ jsx_dev_runtime9.jsxDEV(Link, {
+                  SECONDARY.map((item) => /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Link, {
                     href: item.href,
                     className: drawerLinkClass(item.href),
                     children: item.label
@@ -177214,10 +177775,10 @@ var AppNav = () => {
 var AppNav_default = AppNav;
 
 // src/apps/dashboard-web/components/BoardPage.tsx
-var import_react11 = __toESM(require_react(), 1);
+var import_react12 = __toESM(require_react(), 1);
 
 // src/apps/dashboard-web/components/Board.tsx
-var import_react10 = __toESM(require_react(), 1);
+var import_react11 = __toESM(require_react(), 1);
 
 // src/apps/dashboard-web/lib/lanes.ts
 var DEFAULT_LANE_KEY = "lane:none";
@@ -177353,7 +177914,7 @@ function maturityBadgeColors(maturity) {
 }
 
 // src/apps/dashboard-web/components/Board.tsx
-var jsx_dev_runtime10 = __toESM(require_jsx_dev_runtime(), 1);
+var jsx_dev_runtime11 = __toESM(require_jsx_dev_runtime(), 1);
 var Board = ({
   proposals,
   statuses,
@@ -177364,12 +177925,12 @@ var Board = ({
   domains,
   focusStatus
 }) => {
-  const [_collapsedLanes, setCollapsedLanes] = import_react10.useState({});
-  const [activeStatus, setActiveStatus] = import_react10.useState(null);
+  const [_collapsedLanes, setCollapsedLanes] = import_react11.useState({});
+  const [activeStatus, setActiveStatus] = import_react11.useState(null);
   const visibleProposals = proposals;
-  const lanes = import_react10.useMemo(() => buildLanes(laneMode, visibleProposals, proposalTypes, domains), [laneMode, visibleProposals, proposalTypes, domains]);
-  const proposalsByLane = import_react10.useMemo(() => groupProposalsByLaneAndStatus(laneMode, lanes, statuses, visibleProposals), [laneMode, lanes, statuses, visibleProposals]);
-  const visibleStatuses = import_react10.useMemo(() => focusStatus && statuses.includes(focusStatus) ? [focusStatus] : statuses, [statuses, focusStatus]);
+  const lanes = import_react11.useMemo(() => buildLanes(laneMode, visibleProposals, proposalTypes, domains), [laneMode, visibleProposals, proposalTypes, domains]);
+  const proposalsByLane = import_react11.useMemo(() => groupProposalsByLaneAndStatus(laneMode, lanes, statuses, visibleProposals), [laneMode, lanes, statuses, visibleProposals]);
+  const visibleStatuses = import_react11.useMemo(() => focusStatus && statuses.includes(focusStatus) ? [focusStatus] : statuses, [statuses, focusStatus]);
   const isFocused = visibleStatuses.length === 1 && !!focusStatus;
   const mobileActiveStatus = activeStatus && visibleStatuses.includes(activeStatus) ? activeStatus : visibleStatuses[0] ?? null;
   const _toggleLane = (laneKey) => {
@@ -177390,11 +177951,11 @@ var Board = ({
       count += list.length;
     return count;
   };
-  return /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
+  return /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
     children: [
-      /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
         className: "mb-4 flex flex-wrap items-center gap-x-4 gap-y-2",
-        children: /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
+        children: /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
           className: "text-sm text-gray-500 dark:text-gray-400 w-full md:w-auto",
           children: [
             visibleProposals.length,
@@ -177402,7 +177963,7 @@ var Board = ({
             lanes.length,
             " lane",
             lanes.length !== 1 ? "s" : "",
-            isFocused && /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("span", {
+            isFocused && /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("span", {
               className: "ml-2 text-xs px-2 py-0.5 rounded bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-200",
               children: [
                 "Focused on ",
@@ -177412,22 +177973,22 @@ var Board = ({
           ]
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
         className: "md:hidden mb-3 px-3 overflow-x-auto",
         style: { touchAction: "pan-x" },
-        children: /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
+        children: /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
           className: "inline-flex gap-2 pb-1",
           children: visibleStatuses.map((status) => {
             const count = visibleProposals.filter((p) => p.status === status).length;
             const isOn = status === mobileActiveStatus;
-            return /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("button", {
+            return /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("button", {
               type: "button",
               onClick: () => setActiveStatus(status),
               className: `flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${isOn ? "bg-stone-700 text-white border-stone-700 dark:bg-stone-200 dark:text-stone-900 dark:border-stone-200" : "bg-white text-gray-700 border-gray-300 dark:bg-gray-800 dark:text-gray-200 dark:border-gray-600"}`,
               children: [
                 status,
                 " ",
-                /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("span", {
+                /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("span", {
                   className: "opacity-70",
                   children: [
                     "(",
@@ -177440,62 +178001,62 @@ var Board = ({
           })
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
         className: "md:overflow-x-auto",
-        children: /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
+        children: /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
           className: "flex flex-col md:inline-flex md:flex-row gap-4 md:min-w-full",
-          children: visibleStatuses.map((status) => /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
+          children: visibleStatuses.map((status) => /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
             className: `flex-shrink-0 w-full ${isFocused ? "md:w-full md:max-w-3xl md:mx-auto" : "md:w-64"} ${status === mobileActiveStatus ? "" : "hidden md:block"}`,
             children: [
-              /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
                 className: "sticky top-0 z-10 bg-gray-100 rounded-t-lg px-3 py-2 border-b",
-                children: /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
+                children: /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
                   className: "flex items-center justify-between",
                   children: [
-                    /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("h3", {
+                    /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("h3", {
                       className: "font-semibold text-sm text-gray-700",
                       children: status
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("span", {
+                    /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("span", {
                       className: "text-xs text-gray-500 bg-white px-2 py-0.5 rounded-full",
                       children: visibleProposals.filter((p) => p.status === status).length
                     }, undefined, false, undefined, this)
                   ]
                 }, undefined, true, undefined, this)
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
                 className: "bg-gray-50 dark:bg-gray-800/40 rounded-b-lg px-0 py-1 md:p-2 min-h-[200px] space-y-2",
                 children: [
                   lanes.map((lane) => {
                     const cellProposals = getProposalsForCell(lane.key, status);
                     if (cellProposals.length === 0)
                       return null;
-                    return /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
+                    return /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
                       children: [
-                        laneMode !== "none" && /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
+                        laneMode !== "none" && /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
                           className: "text-xs font-medium text-gray-500 mb-1 px-1",
                           children: lane.label
                         }, undefined, false, undefined, this),
-                        cellProposals.map((proposal) => /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("button", {
+                        cellProposals.map((proposal) => /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("button", {
                           type: "button",
                           onClick: () => onProposalClick?.(proposal),
                           className: `w-full text-left bg-white dark:bg-gray-900 rounded-none md:rounded-lg p-3 border-y md:border md:shadow-sm cursor-pointer md:hover:shadow-md transition-shadow border-gray-200 dark:border-gray-700 ${proposal.id === highlightProposalId ? "ring-2 ring-blue-400" : ""}`,
                           children: [
-                            /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
+                            /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
                               className: `-mx-3 -mt-3 mb-2 px-3 py-1 rounded-t-lg flex items-center justify-between gap-2 ${maturityBarColors(proposal.maturity)}`,
                               children: [
-                                /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("span", {
+                                /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("span", {
                                   className: "text-xs font-mono opacity-80",
                                   children: proposal.displayId
                                 }, undefined, false, undefined, this),
-                                /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
+                                /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
                                   className: "flex items-center gap-1.5",
                                   children: [
-                                    proposal.maturity && /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("span", {
+                                    proposal.maturity && /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("span", {
                                       className: "text-[10px] uppercase tracking-wide font-semibold opacity-90",
                                       children: proposal.maturity
                                     }, undefined, false, undefined, this),
-                                    /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("span", {
+                                    /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("span", {
                                       className: `text-xs px-1.5 py-0.5 rounded ${getPriorityColor(proposal.priority)}`,
                                       children: proposal.priority
                                     }, undefined, false, undefined, this)
@@ -177503,28 +178064,28 @@ var Board = ({
                                 }, undefined, true, undefined, this)
                               ]
                             }, undefined, true, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("h4", {
+                            /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("h4", {
                               className: "text-sm font-medium line-clamp-2 text-gray-800 dark:text-gray-100",
                               children: proposal.title
                             }, undefined, false, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
+                            /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
                               className: "mt-2 flex items-center gap-2 text-xs text-gray-400",
                               children: [
-                                /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("span", {
+                                /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("span", {
                                   children: proposal.proposalType
                                 }, undefined, false, undefined, this),
-                                /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("span", {
+                                /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("span", {
                                   children: "•"
                                 }, undefined, false, undefined, this),
-                                /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("span", {
+                                /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("span", {
                                   children: proposal.domainId
                                 }, undefined, false, undefined, this),
-                                proposal.budgetLimitUsd > 0 && /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(jsx_dev_runtime10.Fragment, {
+                                proposal.budgetLimitUsd > 0 && /* @__PURE__ */ jsx_dev_runtime11.jsxDEV(jsx_dev_runtime11.Fragment, {
                                   children: [
-                                    /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("span", {
+                                    /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("span", {
                                       children: "•"
                                     }, undefined, false, undefined, this),
-                                    /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("span", {
+                                    /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("span", {
                                       children: [
                                         "$",
                                         proposal.budgetLimitUsd
@@ -177534,9 +178095,9 @@ var Board = ({
                                 }, undefined, true, undefined, this)
                               ]
                             }, undefined, true, undefined, this),
-                            proposal.tags && /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
+                            proposal.tags && /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
                               className: "mt-1.5 flex flex-wrap gap-1",
-                              children: proposal.tags.split(",").map((tag) => /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("span", {
+                              children: proposal.tags.split(",").map((tag) => /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("span", {
                                 className: "text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded",
                                 children: tag.trim()
                               }, tag.trim(), false, undefined, this))
@@ -177546,7 +178107,7 @@ var Board = ({
                       ]
                     }, lane.key, true, undefined, this);
                   }),
-                  lanes.every((lane) => getProposalsForCell(lane.key, status).length === 0) && /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
+                  lanes.every((lane) => getProposalsForCell(lane.key, status).length === 0) && /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
                     className: "text-center text-sm text-gray-400 py-8",
                     children: "No proposals"
                   }, undefined, false, undefined, this)
@@ -177576,7 +178137,7 @@ function getPriorityColor(priority) {
 var Board_default = Board;
 
 // src/apps/dashboard-web/components/BoardPage.tsx
-var jsx_dev_runtime11 = __toESM(require_jsx_dev_runtime(), 1);
+var jsx_dev_runtime12 = __toESM(require_jsx_dev_runtime(), 1);
 var MATURITY_OPTIONS = [
   { value: "non-obsolete", label: "All except obsolete" },
   { value: "all", label: "All including obsolete" },
@@ -177594,18 +178155,18 @@ function BoardPage({
   onProposalClick
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [highlightProposalId, setHighlightProposalId] = import_react11.useState(null);
-  const [laneMode, setLaneMode] = import_react11.useState("none");
-  const [typeFilter, setTypeFilter] = import_react11.useState(null);
-  const [domainFilter, setDomainFilter] = import_react11.useState(null);
-  const [statusFilter, setStatusFilter] = import_react11.useState(null);
-  const [maturityFilter, setMaturityFilter] = import_react11.useState("non-obsolete");
-  const [searchText, setSearchText] = import_react11.useState("");
-  const [localWorkflow, setLocalWorkflow] = import_react11.useState(activeWorkflow);
+  const [highlightProposalId, setHighlightProposalId] = import_react12.useState(null);
+  const [laneMode, setLaneMode] = import_react12.useState("none");
+  const [typeFilter, setTypeFilter] = import_react12.useState(null);
+  const [domainFilter, setDomainFilter] = import_react12.useState(null);
+  const [statusFilter, setStatusFilter] = import_react12.useState(null);
+  const [maturityFilter, setMaturityFilter] = import_react12.useState("non-obsolete");
+  const [searchText, setSearchText] = import_react12.useState("");
+  const [localWorkflow, setLocalWorkflow] = import_react12.useState(activeWorkflow);
   const laneStorageKey = "roadmap.board.lane";
   const maturityStorageKey = "roadmap.board.maturity";
   const workflowStorageKey = "roadmap.board.workflow";
-  import_react11.useEffect(() => {
+  import_react12.useEffect(() => {
     const storedLane = typeof window !== "undefined" ? window.localStorage.getItem(laneStorageKey) : null;
     const storedMaturity = typeof window !== "undefined" ? window.localStorage.getItem(maturityStorageKey) : null;
     const paramLane = searchParams.get("lane");
@@ -177630,7 +178191,7 @@ function BoardPage({
       window.localStorage.setItem(maturityStorageKey, nextMaturity);
     }
   }, [searchParams]);
-  import_react11.useEffect(() => {
+  import_react12.useEffect(() => {
     const highlight = searchParams.get("highlight");
     if (highlight) {
       setHighlightProposalId(highlight);
@@ -177721,28 +178282,28 @@ function BoardPage({
     onWorkflowChange?.(workflow);
   };
   const focusStatus = statusFilter && statuses.includes(statusFilter) ? statusFilter : null;
-  return /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
+  return /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("div", {
     className: "container mx-auto px-0 sm:px-4 py-3 sm:py-8 transition-colors duration-200",
     children: [
-      /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("div", {
         className: "mb-3 px-3 sm:px-0 flex items-center gap-2",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("label", {
+          /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("label", {
             htmlFor: "board-workflow-select",
             className: "text-sm font-medium text-gray-600 dark:text-gray-400",
             children: "Workflow:"
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("select", {
+          /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("select", {
             id: "board-workflow-select",
             value: localWorkflow,
             onChange: (e) => handleWorkflowSelect(e.target.value),
             className: "rounded border px-2 py-1 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-200",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("option", {
+              /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("option", {
                 value: "Standard RFC",
                 children: "Standard RFC"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("option", {
+              /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("option", {
                 value: "Hotfix",
                 children: "Hotfix"
               }, undefined, false, undefined, this)
@@ -177750,10 +178311,10 @@ function BoardPage({
           }, undefined, true, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("div", {
         className: "mb-4 px-3 sm:px-0 flex flex-wrap items-center gap-x-4 gap-y-2",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("input", {
+          /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("input", {
             id: "board-search",
             type: "text",
             placeholder: "Filter by # or title…",
@@ -177761,29 +178322,29 @@ function BoardPage({
             onChange: (e) => setSearchText(e.target.value),
             className: "rounded border px-3 py-1.5 text-sm w-full sm:w-64 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-200 dark:placeholder-gray-400"
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("div", {
             className: "flex items-center gap-2",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("label", {
+              /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("label", {
                 htmlFor: laneSelectId,
                 className: "text-sm font-medium text-gray-600",
                 children: "Lane:"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("select", {
+              /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("select", {
                 id: laneSelectId,
                 value: laneMode,
                 onChange: (e) => handleLaneChange(e.target.value),
                 className: "rounded border px-2 py-1 text-sm",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("option", {
+                  /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("option", {
                     value: "none",
                     children: "None"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("option", {
+                  /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("option", {
                     value: "type",
                     children: "By Type"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("option", {
+                  /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("option", {
                     value: "domain",
                     children: "By Domain"
                   }, undefined, false, undefined, this)
@@ -177791,25 +178352,25 @@ function BoardPage({
               }, undefined, true, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          laneMode === "type" && /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
+          laneMode === "type" && /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("div", {
             className: "flex items-center gap-2",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("label", {
+              /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("label", {
                 htmlFor: typeSelectId,
                 className: "text-sm font-medium text-gray-600",
                 children: "Type:"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("select", {
+              /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("select", {
                 id: typeSelectId,
                 value: typeFilter || "",
                 onChange: (e) => setTypeFilter(e.target.value || null),
                 className: "rounded border px-2 py-1 text-sm",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("option", {
+                  /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("option", {
                     value: "",
                     children: "All"
                   }, undefined, false, undefined, this),
-                  proposalTypes.map((t) => /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("option", {
+                  proposalTypes.map((t) => /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("option", {
                     value: t,
                     children: t
                   }, t, false, undefined, this))
@@ -177817,25 +178378,25 @@ function BoardPage({
               }, undefined, true, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          laneMode === "domain" && /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
+          laneMode === "domain" && /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("div", {
             className: "flex items-center gap-2",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("label", {
+              /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("label", {
                 htmlFor: domainSelectId,
                 className: "text-sm font-medium text-gray-600",
                 children: "Domain:"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("select", {
+              /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("select", {
                 id: domainSelectId,
                 value: domainFilter || "",
                 onChange: (e) => setDomainFilter(e.target.value || null),
                 className: "rounded border px-2 py-1 text-sm",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("option", {
+                  /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("option", {
                     value: "",
                     children: "All"
                   }, undefined, false, undefined, this),
-                  domains.map((d) => /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("option", {
+                  domains.map((d) => /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("option", {
                     value: d,
                     children: d
                   }, d, false, undefined, this))
@@ -177843,25 +178404,25 @@ function BoardPage({
               }, undefined, true, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("div", {
             className: "flex items-center gap-2",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("label", {
+              /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("label", {
                 htmlFor: statusSelectId,
                 className: "text-sm font-medium text-gray-600",
                 children: "Status:"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("select", {
+              /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("select", {
                 id: statusSelectId,
                 value: statusFilter ?? "",
                 onChange: (e) => handleStatusChange(e.target.value),
                 className: "rounded border px-2 py-1 text-sm",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("option", {
+                  /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("option", {
                     value: "",
                     children: "All states"
                   }, undefined, false, undefined, this),
-                  statuses.map((s) => /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("option", {
+                  statuses.map((s) => /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("option", {
                     value: s,
                     children: s
                   }, s, false, undefined, this))
@@ -177869,27 +178430,27 @@ function BoardPage({
               }, undefined, true, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("div", {
             className: "flex items-center gap-2",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("label", {
+              /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("label", {
                 htmlFor: maturitySelectId,
                 className: "text-sm font-medium text-gray-600",
                 children: "Maturity:"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("select", {
+              /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("select", {
                 id: maturitySelectId,
                 value: maturityFilter,
                 onChange: (e) => handleMaturityChange(e.target.value),
                 className: "rounded border px-2 py-1 text-sm",
-                children: MATURITY_OPTIONS.map((o) => /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("option", {
+                children: MATURITY_OPTIONS.map((o) => /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("option", {
                   value: o.value,
                   children: o.label
                 }, o.value, false, undefined, this))
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("div", {
             className: "sm:ml-auto text-sm text-gray-500 dark:text-gray-400",
             children: [
               filteredProposals.length,
@@ -177898,7 +178459,7 @@ function BoardPage({
           }, undefined, true, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Board_default, {
+      /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Board_default, {
         proposals: filteredProposals,
         statuses,
         onProposalClick,
@@ -177913,8 +178474,8 @@ function BoardPage({
 }
 
 // src/apps/dashboard-web/components/ChannelsPage.tsx
-var import_react12 = __toESM(require_react(), 1);
-var jsx_dev_runtime12 = __toESM(require_jsx_dev_runtime(), 1);
+var import_react13 = __toESM(require_react(), 1);
+var jsx_dev_runtime13 = __toESM(require_jsx_dev_runtime(), 1);
 var channelTypeColor = (type) => {
   switch (type) {
     case "public":
@@ -177942,11 +178503,11 @@ var channelTypeIcon = (type) => {
 var ChannelsPage = ({
   channels: propChannels
 }) => {
-  const [channels, setChannels] = import_react12.useState(propChannels || []);
-  const [loading, setLoading] = import_react12.useState(!propChannels);
-  const [error, _setError] = import_react12.useState(null);
-  const [filter, setFilter] = import_react12.useState("");
-  import_react12.useEffect(() => {
+  const [channels, setChannels] = import_react13.useState(propChannels || []);
+  const [loading, setLoading] = import_react13.useState(!propChannels);
+  const [error, _setError] = import_react13.useState(null);
+  const [filter, setFilter] = import_react13.useState("");
+  import_react13.useEffect(() => {
     if (propChannels) {
       setChannels(propChannels);
       setLoading(false);
@@ -177954,14 +178515,14 @@ var ChannelsPage = ({
   }, [propChannels]);
   const filteredChannels = channels.filter((ch) => !filter || ch.name.toLowerCase().includes(filter.toLowerCase()) || ch.type.toLowerCase().includes(filter.toLowerCase()));
   if (loading) {
-    return /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("div", {
+    return /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
       className: "flex flex-col justify-center items-center h-64 space-y-4",
       children: [
-        /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(LoadingSpinner_default, {
+        /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(LoadingSpinner_default, {
           size: "lg",
           text: ""
         }, undefined, false, undefined, this),
-        /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("p", {
+        /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("p", {
           className: "text-lg font-medium text-gray-900 dark:text-gray-100",
           children: "Loading channels..."
         }, undefined, false, undefined, this)
@@ -177969,16 +178530,16 @@ var ChannelsPage = ({
     }, undefined, true, undefined, this);
   }
   if (error) {
-    return /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("div", {
+    return /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
       className: "p-8 text-center",
-      children: /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("div", {
+      children: /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
         className: "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("p", {
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("p", {
             className: "text-red-600 dark:text-red-400 font-medium",
             children: "Error"
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("p", {
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("p", {
             className: "text-red-500 dark:text-red-300 text-sm mt-1",
             children: error
           }, undefined, false, undefined, this)
@@ -177986,13 +178547,13 @@ var ChannelsPage = ({
       }, undefined, true, undefined, this)
     }, undefined, false, undefined, this);
   }
-  return /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("div", {
+  return /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
     className: "space-y-6",
     children: [
-      /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
         className: "flex items-center justify-between",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("h1", {
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("h1", {
             className: "text-2xl font-bold text-gray-900 dark:text-gray-100",
             children: [
               "Channels (",
@@ -178000,7 +178561,7 @@ var ChannelsPage = ({
               ")"
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("input", {
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("input", {
             type: "text",
             placeholder: "Filter channels...",
             value: filter,
@@ -178009,32 +178570,32 @@ var ChannelsPage = ({
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
         className: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4",
-        children: filteredChannels.map((channel) => /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("div", {
+        children: filteredChannels.map((channel) => /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
           className: "bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-3",
           children: [
-            /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("div", {
+            /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
               className: "flex items-center gap-2",
               children: [
-                /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("span", {
+                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
                   className: "text-lg",
                   children: channelTypeIcon(channel.type)
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("h3", {
+                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("h3", {
                   className: "font-semibold text-gray-900 dark:text-gray-100",
                   children: channel.name
                 }, undefined, false, undefined, this)
               ]
             }, undefined, true, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("div", {
+            /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
               className: "flex items-center justify-between",
               children: [
-                /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("span", {
+                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
                   className: `px-2 py-0.5 rounded text-xs font-medium ${channelTypeColor(channel.type)}`,
                   children: channel.type
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("span", {
+                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
                   className: "text-xs text-gray-500 dark:text-gray-400 font-mono",
                   children: channel.fileName
                 }, undefined, false, undefined, this)
@@ -178043,7 +178604,7 @@ var ChannelsPage = ({
           ]
         }, channel.name, true, undefined, this))
       }, undefined, false, undefined, this),
-      filteredChannels.length === 0 && /* @__PURE__ */ jsx_dev_runtime12.jsxDEV("div", {
+      filteredChannels.length === 0 && /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
         className: "text-center py-12 text-gray-500 dark:text-gray-400",
         children: filter ? "No channels match your filter" : "No channels available"
       }, undefined, false, undefined, this)
@@ -178053,11 +178614,11 @@ var ChannelsPage = ({
 var ChannelsPage_default = ChannelsPage;
 
 // src/apps/dashboard-web/components/DashboardPage.tsx
-var import_react15 = __toESM(require_react(), 1);
+var import_react16 = __toESM(require_react(), 1);
 
 // src/apps/dashboard-web/components/LiveOpsPanel.tsx
-var import_react13 = __toESM(require_react(), 1);
-var jsx_dev_runtime13 = __toESM(require_jsx_dev_runtime(), 1);
+var import_react14 = __toESM(require_react(), 1);
+var jsx_dev_runtime14 = __toESM(require_jsx_dev_runtime(), 1);
 var num = (v) => {
   if (v == null)
     return 0;
@@ -178096,11 +178657,11 @@ var runStatusColor2 = (status) => ({
   cancelled: "text-gray-500 dark:text-gray-400"
 })[status] ?? "text-gray-700 dark:text-gray-300";
 var LiveOpsPanel = ({ onAgentClick }) => {
-  const [data, setData] = import_react13.useState(null);
-  const [error, setError] = import_react13.useState(null);
-  const [loadedAt, setLoadedAt] = import_react13.useState(null);
+  const [data, setData] = import_react14.useState(null);
+  const [error, setError] = import_react14.useState(null);
+  const [loadedAt, setLoadedAt] = import_react14.useState(null);
   const scope = useProjectScope();
-  const load = import_react13.useCallback(async () => {
+  const load = import_react14.useCallback(async () => {
     try {
       const res = await scope.scopedFetch("/api/control-plane/overview", {
         headers: { Accept: "application/json" }
@@ -178115,19 +178676,19 @@ var LiveOpsPanel = ({ onAgentClick }) => {
       setError(e.message);
     }
   }, [scope.scopedFetch]);
-  import_react13.useEffect(() => {
+  import_react14.useEffect(() => {
     load();
     const t = setInterval(() => void load(), 5000);
     return () => clearInterval(t);
   }, [load]);
   if (!data && !error) {
-    return /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+    return /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
       className: "text-sm text-gray-500 dark:text-gray-400 p-4",
       children: "Loading live operations…"
     }, undefined, false, undefined, this);
   }
   if (error && !data) {
-    return /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+    return /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
       className: "text-sm text-red-600 dark:text-red-400 p-4",
       children: [
         "Live ops unavailable: ",
@@ -178138,31 +178699,31 @@ var LiveOpsPanel = ({ onAgentClick }) => {
   const w = data?.workforce;
   const c2 = data?.cubics_summary;
   const m = data?.messages;
-  return /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("section", {
+  return /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("section", {
     className: "space-y-4",
     children: [
-      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
         className: "flex items-center justify-between gap-3 flex-wrap",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
             className: "flex items-center gap-3",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("h2", {
+              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("h2", {
                 className: "text-lg font-semibold text-gray-900 dark:text-gray-100",
                 children: "Live operations"
               }, undefined, false, undefined, this),
-              scope.current && /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+              scope.current && /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
                 className: "inline-flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
                     className: "uppercase tracking-wide",
                     children: "project"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
                     className: "text-gray-700 dark:text-gray-300",
                     children: scope.current.name
                   }, undefined, false, undefined, this),
-                  data?.project && data.project.project_id !== scope.current.project_id && /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  data?.project && data.project.project_id !== scope.current.project_id && /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
                     className: "text-amber-700 dark:text-amber-300",
                     title: "Server returned different project than the chip suggests; refresh imminent.",
                     children: "⟳"
@@ -178171,19 +178732,19 @@ var LiveOpsPanel = ({ onAgentClick }) => {
               }, undefined, true, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
             className: "text-xs text-gray-500 dark:text-gray-400",
             children: loadedAt ? `refreshed ${ago(new Date(loadedAt).toISOString())}` : ""
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
         className: "grid grid-cols-1 md:grid-cols-3 gap-3",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
             className: "rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
                 className: "text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2",
                 children: [
                   "Workforce (",
@@ -178191,16 +178752,16 @@ var LiveOpsPanel = ({ onAgentClick }) => {
                   ")"
                 ]
               }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
                 className: "grid grid-cols-4 gap-2 text-sm",
-                children: ["healthy", "stale", "offline", "crashed"].map((k) => /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                children: ["healthy", "stale", "offline", "crashed"].map((k) => /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
                   className: "text-center",
                   children: [
-                    /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                    /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
                       className: `text-lg font-semibold ${healthColor(k)}`,
                       children: num(w?.[k])
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                    /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
                       className: "text-[10px] uppercase text-gray-500 dark:text-gray-400",
                       children: k
                     }, undefined, false, undefined, this)
@@ -178209,10 +178770,10 @@ var LiveOpsPanel = ({ onAgentClick }) => {
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
             className: "rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
                 className: "text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2",
                 children: [
                   "Cubics (",
@@ -178220,16 +178781,16 @@ var LiveOpsPanel = ({ onAgentClick }) => {
                   ")"
                 ]
               }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
                 className: "grid grid-cols-4 gap-2 text-sm",
-                children: ["active", "idle", "expired", "complete"].map((k) => /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                children: ["active", "idle", "expired", "complete"].map((k) => /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
                   className: "text-center",
                   children: [
-                    /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                    /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
                       className: "text-lg font-semibold text-gray-900 dark:text-gray-100",
                       children: num(c2?.[k])
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                    /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
                       className: "text-[10px] uppercase text-gray-500 dark:text-gray-400",
                       children: k
                     }, undefined, false, undefined, this)
@@ -178238,61 +178799,61 @@ var LiveOpsPanel = ({ onAgentClick }) => {
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
             className: "rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
                 className: "text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2",
                 children: "Messaging"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dl", {
+              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dl", {
                 className: "grid grid-cols-2 gap-x-3 gap-y-1 text-xs",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dt", {
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dt", {
                     className: "text-gray-500",
                     children: "last 5m"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dd", {
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dd", {
                     className: "font-mono text-right",
                     children: num(m?.last_5m)
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dt", {
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dt", {
                     className: "text-gray-500",
                     children: "last 1h"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dd", {
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dd", {
                     className: "font-mono text-right",
                     children: num(m?.last_1h)
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dt", {
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dt", {
                     className: "text-gray-500",
                     children: "last 24h"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dd", {
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dd", {
                     className: "font-mono text-right",
                     children: num(m?.last_24h)
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dt", {
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dt", {
                     className: "text-gray-500",
                     children: "direct (1h)"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dd", {
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dd", {
                     className: "font-mono text-right",
                     children: num(m?.direct_1h)
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dt", {
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dt", {
                     className: "text-gray-500",
                     children: "team (1h)"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dd", {
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dd", {
                     className: "font-mono text-right",
                     children: num(m?.team_1h)
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dt", {
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dt", {
                     className: "text-gray-500",
                     children: "broadcast (1h)"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("dd", {
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dd", {
                     className: "font-mono text-right",
                     children: num(m?.broadcast_1h)
                   }, undefined, false, undefined, this)
@@ -178302,17 +178863,17 @@ var LiveOpsPanel = ({ onAgentClick }) => {
           }, undefined, true, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
         className: "rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
             className: "flex items-baseline justify-between mb-2",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("h3", {
+              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("h3", {
                 className: "text-sm font-semibold text-gray-700 dark:text-gray-200",
                 children: "Busy agents"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
                 className: "text-[11px] text-gray-500",
                 children: [
                   data?.busy_agents.length ?? 0,
@@ -178321,35 +178882,35 @@ var LiveOpsPanel = ({ onAgentClick }) => {
               }, undefined, true, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          (data?.busy_agents.length ?? 0) === 0 ? /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+          (data?.busy_agents.length ?? 0) === 0 ? /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
             className: "text-xs text-gray-500",
             children: "No active heartbeats."
-          }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("ul", {
+          }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("ul", {
             className: "divide-y divide-gray-100 dark:divide-gray-700",
-            children: data?.busy_agents.map((a) => /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("li", {
+            children: data?.busy_agents.map((a) => /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("li", {
               className: "py-1.5 text-xs",
-              children: /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("button", {
+              children: /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("button", {
                 type: "button",
                 onClick: () => onAgentClick?.(a.agent_identity),
                 className: "w-full text-left grid grid-cols-12 gap-2 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded px-1 py-0.5",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
                     className: "col-span-3 font-mono truncate",
                     children: a.agent_identity
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
                     className: `col-span-1 ${healthColor(a.status)} font-medium`,
                     children: a.status
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
                     className: "col-span-5 truncate text-gray-700 dark:text-gray-300",
                     children: a.current_task ?? "—"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
                     className: "col-span-2 truncate text-gray-500",
                     children: a.active_model ?? "—"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
                     className: "col-span-1 text-right text-gray-500",
                     children: ago(a.last_heartbeat_at)
                   }, undefined, false, undefined, this)
@@ -178359,28 +178920,28 @@ var LiveOpsPanel = ({ onAgentClick }) => {
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
         className: "grid grid-cols-1 lg:grid-cols-2 gap-3",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
             className: "rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("h3", {
+              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("h3", {
                 className: "text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2",
                 children: "Active cubics"
               }, undefined, false, undefined, this),
-              (data?.active_cubics.length ?? 0) === 0 ? /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+              (data?.active_cubics.length ?? 0) === 0 ? /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
                 className: "text-xs text-gray-500",
                 children: "No active cubics."
-              }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("ul", {
+              }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("ul", {
                 className: "text-xs space-y-1.5 max-h-80 overflow-y-auto",
-                children: data?.active_cubics.map((cu) => /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("li", {
+                children: data?.active_cubics.map((cu) => /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("li", {
                   className: "border border-gray-100 dark:border-gray-700 rounded p-1.5",
                   children: [
-                    /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                    /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
                       className: "flex justify-between gap-2",
                       children: [
-                        /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                        /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
                           className: "font-mono truncate",
                           title: cu.cubic_id,
                           children: [
@@ -178388,29 +178949,29 @@ var LiveOpsPanel = ({ onAgentClick }) => {
                             "…"
                           ]
                         }, undefined, true, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                        /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
                           className: "text-gray-500",
                           children: ago(cu.activated_at)
                         }, undefined, false, undefined, this)
                       ]
                     }, undefined, true, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                    /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
                       className: "flex justify-between text-gray-600 dark:text-gray-400 mt-0.5",
                       children: [
-                        /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                        /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
                           children: [
                             cu.phase,
                             " · ",
                             cu.status
                           ]
                         }, undefined, true, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                        /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
                           className: "font-mono",
                           children: cu.agent_identity ?? "—"
                         }, undefined, false, undefined, this)
                       ]
                     }, undefined, true, undefined, this),
-                    (cu.lock_holder || num(cu.budget_usd) > 0) && /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+                    (cu.lock_holder || num(cu.budget_usd) > 0) && /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
                       className: "text-[10px] text-gray-500 mt-0.5",
                       children: [
                         cu.lock_holder ? `lock: ${cu.lock_holder}` : "",
@@ -178423,40 +178984,40 @@ var LiveOpsPanel = ({ onAgentClick }) => {
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
             className: "rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("h3", {
+              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("h3", {
                 className: "text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2",
                 children: "Recent runs"
               }, undefined, false, undefined, this),
-              (data?.recent_runs.length ?? 0) === 0 ? /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+              (data?.recent_runs.length ?? 0) === 0 ? /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
                 className: "text-xs text-gray-500",
                 children: "No recent runs."
-              }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("ul", {
+              }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("ul", {
                 className: "text-xs space-y-1 max-h-80 overflow-y-auto",
-                children: data?.recent_runs.map((r) => /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("li", {
+                children: data?.recent_runs.map((r) => /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("li", {
                   className: "grid grid-cols-12 gap-2 py-0.5 border-b border-gray-50 dark:border-gray-700/50",
                   children: [
-                    /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("button", {
+                    /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("button", {
                       type: "button",
                       onClick: () => onAgentClick?.(r.agent_identity),
                       className: "col-span-3 font-mono truncate text-left hover:underline",
                       children: r.agent_identity
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                    /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
                       className: "col-span-2 truncate",
                       children: r.proposal_display_id ?? "—"
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                    /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
                       className: "col-span-2 truncate text-gray-500",
                       children: r.stage
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                    /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
                       className: `col-span-2 font-medium ${runStatusColor2(r.status)}`,
                       children: r.status
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                    /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
                       className: "col-span-3 text-right text-gray-500",
                       children: ago(r.started_at)
                     }, undefined, false, undefined, this)
@@ -178467,17 +179028,17 @@ var LiveOpsPanel = ({ onAgentClick }) => {
           }, undefined, true, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
         className: "rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
             className: "flex items-baseline justify-between mb-2",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("h3", {
+              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("h3", {
                 className: "text-sm font-semibold text-gray-700 dark:text-gray-200",
                 children: "Route health"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
                 className: "text-[11px] text-gray-500",
                 children: [
                   data?.routes.length ?? 0,
@@ -178486,27 +179047,27 @@ var LiveOpsPanel = ({ onAgentClick }) => {
               }, undefined, true, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          (data?.routes.length ?? 0) === 0 ? /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("div", {
+          (data?.routes.length ?? 0) === 0 ? /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
             className: "text-xs text-gray-500",
             children: "No routes configured."
-          }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("ul", {
+          }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("ul", {
             className: "text-xs grid grid-cols-1 md:grid-cols-2 gap-1",
-            children: data?.routes.map((r) => /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("li", {
+            children: data?.routes.map((r) => /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("li", {
               className: "flex justify-between items-center px-2 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700/40",
               children: [
-                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
                   className: "flex items-center gap-2 truncate",
                   children: [
-                    /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                    /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
                       className: r.is_enabled ? "h-1.5 w-1.5 rounded-full bg-emerald-500" : "h-1.5 w-1.5 rounded-full bg-gray-400"
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                    /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
                       className: "font-mono truncate",
                       children: r.model_name
                     }, undefined, false, undefined, this)
                   ]
                 }, undefined, true, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime13.jsxDEV("span", {
+                /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
                   className: "text-gray-500 truncate ml-2",
                   children: [
                     r.route_provider,
@@ -178520,6 +179081,602 @@ var LiveOpsPanel = ({ onAgentClick }) => {
             }, `${r.model_name}-${r.route_provider}-${r.priority}`, true, undefined, this))
           }, undefined, false, undefined, this)
         ]
+      }, undefined, true, undefined, this),
+      (data?.queue_pools?.length ?? 0) > 0 && /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+        className: "rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+            className: "flex items-baseline justify-between mb-2",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("h3", {
+                className: "text-sm font-semibold text-gray-700 dark:text-gray-200",
+                children: "Queue pools"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                className: "text-[11px] text-gray-500",
+                children: [
+                  data?.queue_pools.length,
+                  " buckets"
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+            className: "overflow-x-auto",
+            children: /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("table", {
+              className: "text-xs w-full",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("thead", {
+                  children: /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("tr", {
+                    className: "text-[10px] uppercase text-gray-500 border-b border-gray-100 dark:border-gray-700",
+                    children: [
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("th", {
+                        className: "text-left pb-1 pr-2",
+                        children: "workflow"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("th", {
+                        className: "text-left pb-1 pr-2",
+                        children: "stage"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("th", {
+                        className: "text-left pb-1 pr-2",
+                        children: "maturity"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("th", {
+                        className: "text-right pb-1 pr-2",
+                        children: "count"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("th", {
+                        className: "text-right pb-1",
+                        children: "oldest"
+                      }, undefined, false, undefined, this)
+                    ]
+                  }, undefined, true, undefined, this)
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("tbody", {
+                  children: data?.queue_pools.map((qp, i) => /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("tr", {
+                    className: "border-b border-gray-50 dark:border-gray-700/50 hover:bg-gray-50 dark:hover:bg-gray-700/30",
+                    children: [
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("td", {
+                        className: "py-0.5 pr-2 truncate max-w-[8rem]",
+                        children: qp.workflow_name
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("td", {
+                        className: "py-0.5 pr-2 font-medium",
+                        children: qp.stage
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("td", {
+                        className: "py-0.5 pr-2 text-gray-500",
+                        children: qp.maturity
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("td", {
+                        className: "py-0.5 pr-2 text-right font-mono",
+                        children: num(qp.proposal_count)
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("td", {
+                        className: "py-0.5 text-right text-gray-500",
+                        children: ago(qp.oldest_updated_at ?? qp.oldest_created_at)
+                      }, undefined, false, undefined, this)
+                    ]
+                  }, i, true, undefined, this))
+                }, undefined, false, undefined, this)
+              ]
+            }, undefined, true, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      (data?.candidate_ranking?.length ?? 0) > 0 && /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+        className: "rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+            className: "flex items-baseline justify-between mb-2",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("h3", {
+                className: "text-sm font-semibold text-gray-700 dark:text-gray-200",
+                children: "Develop candidates"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                className: "text-[11px] text-gray-500",
+                children: [
+                  "top ",
+                  data?.candidate_ranking.length
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("ul", {
+            className: "text-xs space-y-1",
+            children: data?.candidate_ranking.map((cr, i) => /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("li", {
+              className: "grid grid-cols-12 gap-1 py-0.5 border-b border-gray-50 dark:border-gray-700/50",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                  className: "col-span-2 font-mono text-gray-500",
+                  children: cr.display_id
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                  className: "col-span-4 truncate",
+                  children: cr.title
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                  className: `col-span-1 font-medium ${cr.priority === "critical" ? "text-red-600 dark:text-red-400" : cr.priority === "high" ? "text-orange-600 dark:text-orange-400" : "text-gray-500"}`,
+                  children: cr.priority
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                  className: "col-span-1 text-gray-500",
+                  children: cr.maturity
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                  className: `col-span-2 text-right ${num(cr.dependency_blockers) > 0 ? "text-red-600 dark:text-red-400" : "text-gray-400"}`,
+                  children: num(cr.dependency_blockers) > 0 ? `${num(cr.dependency_blockers)} blocked` : ""
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                  className: `col-span-2 text-right ${cr.capacity_blocked ? "text-orange-600 dark:text-orange-400" : "text-gray-400"}`,
+                  children: cr.capacity_blocked ? "cap. full" : num(cr.active_dispatches) > 0 ? `${num(cr.active_dispatches)} disp` : ""
+                }, undefined, false, undefined, this)
+              ]
+            }, i, true, undefined, this))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      data?.dispatch_lifecycle && /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+        className: "rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("h3", {
+            className: "text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2",
+            children: "Dispatch lifecycle"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+            className: "grid grid-cols-4 md:grid-cols-8 gap-2 text-center text-xs mb-3",
+            children: ["posted", "claimed", "running", "completed", "failed", "throttled", "cancelled", "expired"].map((k) => {
+              const colors = {
+                posted: "text-blue-700 dark:text-blue-300",
+                claimed: "text-yellow-700 dark:text-yellow-300",
+                running: "text-emerald-700 dark:text-emerald-300",
+                completed: "text-gray-500",
+                failed: "text-red-700 dark:text-red-300",
+                throttled: "text-orange-700 dark:text-orange-300",
+                cancelled: "text-gray-400",
+                expired: "text-purple-700 dark:text-purple-300"
+              };
+              return /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                    className: `text-base font-semibold ${colors[k]}`,
+                    children: num(data.dispatch_lifecycle?.status_counts?.[k])
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                    className: "text-[10px] uppercase text-gray-500",
+                    children: k
+                  }, undefined, false, undefined, this)
+                ]
+              }, k, true, undefined, this);
+            })
+          }, undefined, false, undefined, this),
+          (data.dispatch_lifecycle.recent_dispatches?.length ?? 0) > 0 && /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("ul", {
+            className: "text-xs space-y-0.5 max-h-40 overflow-y-auto",
+            children: data.dispatch_lifecycle.recent_dispatches.map((d) => /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("li", {
+              className: "grid grid-cols-12 gap-1 py-0.5 border-b border-gray-50 dark:border-gray-700/50",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                  className: "col-span-2 font-mono text-gray-500",
+                  children: [
+                    "#",
+                    d.id
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                  className: "col-span-2 truncate",
+                  children: d.proposal_display_id ?? "—"
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                  className: "col-span-3 truncate text-gray-500",
+                  children: d.dispatch_role
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                  className: "col-span-2 font-medium",
+                  children: d.offer_status
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                  className: "col-span-3 truncate text-gray-500",
+                  children: d.worker_identity ?? d.agent_identity ?? "—"
+                }, undefined, false, undefined, this)
+              ]
+            }, d.id, true, undefined, this))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      data?.lease_recovery && /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+        className: "rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("h3", {
+            className: "text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2",
+            children: "Lease recovery"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+            className: "grid grid-cols-3 gap-3 mb-3 text-center text-xs",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                    className: "text-base font-semibold text-emerald-700 dark:text-emerald-300",
+                    children: num(data.lease_recovery.summary.active)
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                    className: "text-[10px] uppercase text-gray-500",
+                    children: "active"
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                    className: `text-base font-semibold ${num(data.lease_recovery.summary.expired) > 0 ? "text-red-700 dark:text-red-300" : "text-gray-500"}`,
+                    children: num(data.lease_recovery.summary.expired)
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                    className: "text-[10px] uppercase text-gray-500",
+                    children: "expired"
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                    className: `text-base font-semibold ${num(data.lease_recovery.summary.recovered_workspaces) > 0 ? "text-amber-700 dark:text-amber-300" : "text-gray-500"}`,
+                    children: num(data.lease_recovery.summary.recovered_workspaces)
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                    className: "text-[10px] uppercase text-gray-500",
+                    children: "recovered ws"
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          (data.lease_recovery.recent_expired?.length ?? 0) > 0 && /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("ul", {
+            className: "text-xs space-y-0.5 max-h-32 overflow-y-auto",
+            children: data.lease_recovery.recent_expired.map((le, i) => /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("li", {
+              className: "flex items-center gap-2 py-0.5 border-b border-gray-50 dark:border-gray-700/50",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                  className: "font-mono text-gray-500 shrink-0",
+                  children: le.display_id
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                  className: "truncate flex-1",
+                  children: le.title
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                  className: "text-red-600 dark:text-red-400 shrink-0",
+                  children: ago(le.expires_at)
+                }, undefined, false, undefined, this)
+              ]
+            }, i, true, undefined, this))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      data?.liaison_health && /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+        className: "rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("h3", {
+            className: "text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2",
+            children: "Liaison / agency health"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+            className: "grid grid-cols-3 md:grid-cols-6 gap-2 text-center text-xs mb-3",
+            children: ["active", "throttled", "dormant", "offline", "retired", "sessions"].map((k) => {
+              const colors = {
+                active: "text-emerald-700 dark:text-emerald-300",
+                throttled: "text-orange-700 dark:text-orange-300",
+                dormant: "text-amber-700 dark:text-amber-300",
+                offline: "text-gray-500",
+                retired: "text-gray-400",
+                sessions: "text-blue-700 dark:text-blue-300"
+              };
+              return /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                    className: `text-base font-semibold ${colors[k]}`,
+                    children: num(data.liaison_health?.summary?.[k])
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                    className: "text-[10px] uppercase text-gray-500",
+                    children: k
+                  }, undefined, false, undefined, this)
+                ]
+              }, k, true, undefined, this);
+            })
+          }, undefined, false, undefined, this),
+          (data.liaison_health.agencies?.length ?? 0) > 0 && /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("ul", {
+            className: "text-xs space-y-1 max-h-40 overflow-y-auto",
+            children: data.liaison_health.agencies.map((ag) => /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("li", {
+              className: "grid grid-cols-12 gap-1 py-0.5 border-b border-gray-50 dark:border-gray-700/50",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                  className: "col-span-4 font-mono truncate",
+                  children: ag.agency_identity
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                  className: `col-span-2 font-medium ${ag.status === "active" ? "text-emerald-600" : "text-amber-600"}`,
+                  children: ag.status
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                  className: "col-span-2 text-right text-gray-500",
+                  children: [
+                    num(ag.in_flight_count),
+                    "/",
+                    num(ag.max_in_flight),
+                    " in-flight"
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                  className: `col-span-2 text-right ${num(ag.recent_failure_count) > 0 ? "text-red-600 dark:text-red-400" : "text-gray-400"}`,
+                  children: [
+                    num(ag.recent_failure_count),
+                    " fail"
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                  className: "col-span-2 text-right text-gray-400",
+                  children: ago(ag.last_seen_at)
+                }, undefined, false, undefined, this)
+              ]
+            }, ag.agency_identity, true, undefined, this))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      data?.gate_audit && /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+        className: "rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("h3", {
+            className: "text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2",
+            children: [
+              "Gate / transition audit ",
+              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                className: "text-[10px] font-normal text-gray-400",
+                children: "(last 24 h)"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+            className: "grid grid-cols-5 gap-2 text-center text-xs mb-3",
+            children: ["advance", "hold", "reject", "waive", "escalate"].map((k) => {
+              const colors = {
+                advance: "text-emerald-700 dark:text-emerald-300",
+                hold: "text-amber-700 dark:text-amber-300",
+                reject: "text-red-700 dark:text-red-300",
+                waive: "text-blue-700 dark:text-blue-300",
+                escalate: "text-purple-700 dark:text-purple-300"
+              };
+              return /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                    className: `text-base font-semibold ${colors[k]}`,
+                    children: num(data.gate_audit?.decision_counts?.[k])
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                    className: "text-[10px] uppercase text-gray-500",
+                    children: k
+                  }, undefined, false, undefined, this)
+                ]
+              }, k, true, undefined, this);
+            })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+            className: "grid grid-cols-1 lg:grid-cols-2 gap-2",
+            children: [
+              (data.gate_audit.recent_decisions?.length ?? 0) > 0 && /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                    className: "text-[10px] uppercase text-gray-400 mb-1",
+                    children: "recent gate decisions"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("ul", {
+                    className: "text-xs space-y-0.5 max-h-28 overflow-y-auto",
+                    children: data.gate_audit.recent_decisions.map((gd, i) => /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("li", {
+                      className: "flex items-center gap-2 py-0.5 border-b border-gray-50 dark:border-gray-700/50",
+                      children: [
+                        /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                          className: "font-mono text-gray-500 shrink-0",
+                          children: gd.display_id
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                          className: `font-medium shrink-0 ${gd.decision === "advance" ? "text-emerald-600" : gd.decision === "reject" ? "text-red-600" : "text-amber-600"}`,
+                          children: gd.decision
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                          className: "truncate flex-1 text-gray-500",
+                          children: [
+                            gd.from_state,
+                            gd.to_state ? ` → ${gd.to_state}` : ""
+                          ]
+                        }, undefined, true, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                          className: "text-gray-400 shrink-0",
+                          children: ago(gd.created_at)
+                        }, undefined, false, undefined, this)
+                      ]
+                    }, i, true, undefined, this))
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              (data.gate_audit.recent_transitions?.length ?? 0) > 0 && /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                    className: "text-[10px] uppercase text-gray-400 mb-1",
+                    children: "recent transitions"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("ul", {
+                    className: "text-xs space-y-0.5 max-h-28 overflow-y-auto",
+                    children: data.gate_audit.recent_transitions.map((t, i) => /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("li", {
+                      className: "flex items-center gap-2 py-0.5 border-b border-gray-50 dark:border-gray-700/50",
+                      children: [
+                        /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                          className: "font-mono text-gray-500 shrink-0",
+                          children: t.display_id
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                          className: "shrink-0 text-gray-700 dark:text-gray-300",
+                          children: [
+                            t.from_state,
+                            " → ",
+                            t.to_state
+                          ]
+                        }, undefined, true, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                          className: "truncate flex-1 text-gray-400",
+                          children: t.transitioned_by
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                          className: "text-gray-400 shrink-0",
+                          children: ago(t.transitioned_at)
+                        }, undefined, false, undefined, this)
+                      ]
+                    }, i, true, undefined, this))
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      data?.route_budget_audit && /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+        className: "rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("h3", {
+            className: "text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2",
+            children: "Route / budget audit"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+            className: "grid grid-cols-1 md:grid-cols-2 gap-3",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                    className: "text-[10px] uppercase text-gray-400 mb-1",
+                    children: "budget counters"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dl", {
+                    className: "grid grid-cols-2 gap-x-3 gap-y-1 text-xs",
+                    children: [
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dt", {
+                        className: "text-gray-500",
+                        children: "tracked principals"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dd", {
+                        className: "font-mono text-right",
+                        children: num(data.route_budget_audit.budget_counters.tracked_principals)
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dt", {
+                        className: "text-gray-500",
+                        children: "total budget"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dd", {
+                        className: "font-mono text-right",
+                        children: [
+                          "$",
+                          (num(data.route_budget_audit.budget_counters.total_budget_cents) / 100).toFixed(2)
+                        ]
+                      }, undefined, true, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dt", {
+                        className: "text-gray-500",
+                        children: "spent"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dd", {
+                        className: "font-mono text-right",
+                        children: [
+                          "$",
+                          (num(data.route_budget_audit.budget_counters.total_spent_cents) / 100).toFixed(2)
+                        ]
+                      }, undefined, true, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dt", {
+                        className: `${num(data.route_budget_audit.budget_counters.over_budget_principals) > 0 ? "text-red-600 dark:text-red-400" : "text-gray-500"}`,
+                        children: "over budget"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dd", {
+                        className: `font-mono text-right ${num(data.route_budget_audit.budget_counters.over_budget_principals) > 0 ? "text-red-600 dark:text-red-400" : ""}`,
+                        children: num(data.route_budget_audit.budget_counters.over_budget_principals)
+                      }, undefined, false, undefined, this)
+                    ]
+                  }, undefined, true, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                    className: "text-[10px] uppercase text-gray-400 mt-2 mb-1",
+                    children: "budget decisions (24h)"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dl", {
+                    className: "grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs",
+                    children: [
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dt", {
+                        className: "text-gray-500",
+                        children: "approved"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dd", {
+                        className: "font-mono text-right text-emerald-600",
+                        children: num(data.route_budget_audit.budget_decisions.approved)
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dt", {
+                        className: "text-gray-500",
+                        children: "rejected"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dd", {
+                        className: "font-mono text-right text-red-600",
+                        children: num(data.route_budget_audit.budget_decisions.rejected)
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dt", {
+                        className: "text-gray-500",
+                        children: "deny_budget"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dd", {
+                        className: "font-mono text-right text-amber-600",
+                        children: num(data.route_budget_audit.budget_decisions.deny_budget)
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dt", {
+                        className: "text-gray-500",
+                        children: "deny_compliance"
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("dd", {
+                        className: "font-mono text-right text-amber-600",
+                        children: num(data.route_budget_audit.budget_decisions.deny_compliance)
+                      }, undefined, false, undefined, this)
+                    ]
+                  }, undefined, true, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              (data.route_budget_audit.recent_route_decisions?.length ?? 0) > 0 && /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+                    className: "text-[10px] uppercase text-gray-400 mb-1",
+                    children: "recent route decisions"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("ul", {
+                    className: "text-xs space-y-0.5 max-h-36 overflow-y-auto",
+                    children: data.route_budget_audit.recent_route_decisions.map((rd, i) => /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("li", {
+                      className: "flex items-center gap-2 py-0.5 border-b border-gray-50 dark:border-gray-700/50",
+                      children: [
+                        /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                          className: "font-mono text-gray-500 shrink-0",
+                          children: rd.display_id ?? "—"
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                          className: "truncate flex-1",
+                          children: rd.chosen_route
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                          className: "text-gray-400 shrink-0",
+                          children: rd.eliminated_count > 0 ? `-${num(rd.eliminated_count)}` : ""
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                          className: "text-gray-400 shrink-0",
+                          children: ago(rd.decided_at)
+                        }, undefined, false, undefined, this)
+                      ]
+                    }, i, true, undefined, this))
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
       }, undefined, true, undefined, this)
     ]
   }, undefined, true, undefined, this);
@@ -178527,8 +179684,8 @@ var LiveOpsPanel = ({ onAgentClick }) => {
 var LiveOpsPanel_default = LiveOpsPanel;
 
 // src/apps/dashboard-web/components/MessageStream.tsx
-var import_react14 = __toESM(require_react(), 1);
-var jsx_dev_runtime14 = __toESM(require_jsx_dev_runtime(), 1);
+var import_react15 = __toESM(require_react(), 1);
+var jsx_dev_runtime15 = __toESM(require_jsx_dev_runtime(), 1);
 var formatTime2 = (timestamp) => {
   const diff = Date.now() - new Date(timestamp).getTime();
   const minutes = Math.floor(diff / 60000);
@@ -178542,18 +179699,18 @@ var formatTime2 = (timestamp) => {
   return `${Math.floor(hours / 24)}d ago`;
 };
 var MessageStream = () => {
-  const [channels, setChannels] = import_react14.useState([]);
-  const [selectedChannel, setSelectedChannel] = import_react14.useState("");
-  const [messages, setMessages] = import_react14.useState([]);
-  const [draft, setDraft] = import_react14.useState("");
-  const [sending, setSending] = import_react14.useState(false);
-  const [error, setError] = import_react14.useState(null);
-  const [loading, setLoading] = import_react14.useState(true);
-  const [wsConnected, setWsConnected] = import_react14.useState(false);
-  const wsRef = import_react14.useRef(null);
-  const subscribedRef = import_react14.useRef("");
-  const messagesEndRef = import_react14.useRef(null);
-  import_react14.useEffect(() => {
+  const [channels, setChannels] = import_react15.useState([]);
+  const [selectedChannel, setSelectedChannel] = import_react15.useState("");
+  const [messages, setMessages] = import_react15.useState([]);
+  const [draft, setDraft] = import_react15.useState("");
+  const [sending, setSending] = import_react15.useState(false);
+  const [error, setError] = import_react15.useState(null);
+  const [loading, setLoading] = import_react15.useState(true);
+  const [wsConnected, setWsConnected] = import_react15.useState(false);
+  const wsRef = import_react15.useRef(null);
+  const subscribedRef = import_react15.useRef("");
+  const messagesEndRef = import_react15.useRef(null);
+  import_react15.useEffect(() => {
     let cancelled = false;
     apiClient.fetchChannels().then((chs) => {
       if (!cancelled) {
@@ -178572,7 +179729,7 @@ var MessageStream = () => {
       cancelled = true;
     };
   }, []);
-  import_react14.useEffect(() => {
+  import_react15.useEffect(() => {
     if (!selectedChannel)
       return;
     let cancelled = false;
@@ -178586,7 +179743,7 @@ var MessageStream = () => {
       cancelled = true;
     };
   }, [selectedChannel]);
-  import_react14.useEffect(() => {
+  import_react15.useEffect(() => {
     if (!selectedChannel)
       return;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -178627,17 +179784,17 @@ var MessageStream = () => {
       ws.close();
     };
   }, [selectedChannel]);
-  import_react14.useEffect(() => {
+  import_react15.useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
-  const handleChannelChange = import_react14.useCallback((e) => {
+  const handleChannelChange = import_react15.useCallback((e) => {
     setSelectedChannel(e.target.value);
     setMessages([]);
     setError(null);
   }, []);
   const selectedChannelMeta = channels.find((channel) => channel.name === selectedChannel);
   const canSend = selectedChannelMeta?.type !== "private";
-  const handleSend = import_react14.useCallback(async () => {
+  const handleSend = import_react15.useCallback(async () => {
     if (!selectedChannel || !draft.trim() || !canSend)
       return;
     try {
@@ -178653,27 +179810,27 @@ var MessageStream = () => {
       setSending(false);
     }
   }, [canSend, draft, selectedChannel]);
-  return /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+  return /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
     className: "bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col h-full",
     children: [
-      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
         className: "px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("h2", {
+          /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("h2", {
             className: "text-lg font-semibold text-gray-900 dark:text-gray-100",
             children: "Messages"
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
             className: "flex items-center gap-2",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+              /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("span", {
                 className: `w-2 h-2 rounded-full ${wsConnected ? "bg-green-500" : "bg-gray-400"}`
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("select", {
+              /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("select", {
                 value: selectedChannel,
                 onChange: handleChannelChange,
                 className: "text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100",
-                children: channels.map((ch) => /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("option", {
+                children: channels.map((ch) => /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("option", {
                   value: ch.name,
                   children: ch.name
                 }, ch.name, false, undefined, this))
@@ -178682,64 +179839,64 @@ var MessageStream = () => {
           }, undefined, true, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      loading ? /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+      loading ? /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
         className: "p-4 text-sm text-gray-500 dark:text-gray-400",
         children: "Loading channels..."
-      }, undefined, false, undefined, this) : channels.length === 0 ? /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+      }, undefined, false, undefined, this) : channels.length === 0 ? /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
         className: "p-4 text-sm text-gray-500 dark:text-gray-400",
         children: "No channels available"
-      }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+      }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
         className: "flex min-h-0 flex-1 flex-col",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
             className: "divide-y divide-gray-100 dark:divide-gray-700 overflow-y-auto flex-1 p-4 space-y-3",
             children: [
-              messages.length === 0 ? /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("p", {
+              messages.length === 0 ? /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("p", {
                 className: "text-sm text-gray-500 dark:text-gray-400",
                 children: [
                   "No messages in #",
                   selectedChannel
                 ]
-              }, undefined, true, undefined, this) : messages.map((msg, i) => /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+              }, undefined, true, undefined, this) : messages.map((msg, i) => /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
                 className: "flex items-start gap-2",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                  /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("span", {
                     className: "text-sm font-medium text-blue-600 dark:text-blue-400 whitespace-nowrap",
                     children: msg.from
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                  /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("span", {
                     className: "text-sm text-gray-900 dark:text-gray-100 flex-1",
                     children: msg.text
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("span", {
+                  /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("span", {
                     className: "text-xs text-gray-400 whitespace-nowrap",
                     children: formatTime2(msg.timestamp)
                   }, undefined, false, undefined, this)
                 ]
               }, `${msg.timestamp}-${i}`, true, undefined, this)),
-              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
                 ref: messagesEndRef
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
             className: "border-t border-gray-200 p-3 dark:border-gray-700",
             children: [
-              error ? /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+              error ? /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
                 className: "mb-2 text-xs text-red-600 dark:text-red-400",
                 children: error
               }, undefined, false, undefined, this) : null,
-              /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
                 className: "flex gap-2",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("textarea", {
+                  /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("textarea", {
                     value: draft,
                     onChange: (event) => setDraft(event.target.value),
                     placeholder: canSend ? `Send to #${selectedChannel}` : "Private channel sending not wired yet",
                     disabled: !canSend || sending,
                     className: "min-h-[44px] flex-1 resize-none rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime14.jsxDEV("button", {
+                  /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("button", {
                     type: "button",
                     onClick: () => void handleSend(),
                     disabled: !canSend || sending || !draft.trim(),
@@ -178758,7 +179915,7 @@ var MessageStream = () => {
 var MessageStream_default = MessageStream;
 
 // src/apps/dashboard-web/components/DashboardPage.tsx
-var jsx_dev_runtime15 = __toESM(require_jsx_dev_runtime(), 1);
+var jsx_dev_runtime16 = __toESM(require_jsx_dev_runtime(), 1);
 var pulseTypeColor = {
   proposal_created: "text-blue-600 dark:text-blue-300",
   proposal_complete: "text-emerald-600 dark:text-emerald-300",
@@ -178789,20 +179946,6 @@ function heartbeatText(seconds) {
   if (seconds < 3600)
     return `${Math.floor(seconds / 60)}m`;
   return `${Math.floor(seconds / 3600)}h`;
-}
-function proposalMaturityClass(maturity) {
-  switch ((maturity ?? "").toLowerCase()) {
-    case "mature":
-      return "text-emerald-700 dark:text-emerald-300";
-    case "active":
-      return "text-blue-700 dark:text-blue-300";
-    case "obsolete":
-      return "text-gray-400 dark:text-gray-500";
-    case "new":
-      return "text-amber-700 dark:text-amber-300";
-    default:
-      return "text-gray-900 dark:text-gray-100";
-  }
 }
 function badgeClass(value) {
   switch (value.toLowerCase()) {
@@ -178835,13 +179978,13 @@ var DashboardPage = ({
   agents,
   channels
 }) => {
-  const [status, setStatus] = import_react15.useState(null);
-  const [routes, setRoutes] = import_react15.useState([]);
-  const [dispatches, setDispatches] = import_react15.useState([]);
-  const [pulse, setPulse] = import_react15.useState([]);
-  const [releasingProposalId, setReleasingProposalId] = import_react15.useState(null);
-  const [selectedAgentIdentity, setSelectedAgentIdentity] = import_react15.useState(null);
-  const fetchControlPlaneData = import_react15.useCallback(async () => {
+  const [status, setStatus] = import_react16.useState(null);
+  const [routes, setRoutes] = import_react16.useState([]);
+  const [dispatches, setDispatches] = import_react16.useState([]);
+  const [pulse, setPulse] = import_react16.useState([]);
+  const [releasingProposalId, setReleasingProposalId] = import_react16.useState(null);
+  const [selectedAgentIdentity, setSelectedAgentIdentity] = import_react16.useState(null);
+  const fetchControlPlaneData = import_react16.useCallback(async () => {
     const [statusData, routesData, dispatchData, pulseData] = await Promise.all([
       apiClient.checkStatus(),
       apiClient.fetchRoutes().catch(() => []),
@@ -178853,44 +179996,44 @@ var DashboardPage = ({
     setDispatches(dispatchData);
     setPulse(pulseData);
   }, []);
-  import_react15.useEffect(() => {
+  import_react16.useEffect(() => {
     fetchControlPlaneData();
     const timer = setInterval(() => {
       fetchControlPlaneData();
     }, 15000);
     return () => clearInterval(timer);
   }, [fetchControlPlaneData]);
-  const activeProposals = import_react15.useMemo(() => proposals.filter((proposal) => {
+  const activeProposals = import_react16.useMemo(() => proposals.filter((proposal) => {
     const statusKey = proposal.status.toLowerCase();
     return statusKey !== "complete" && statusKey !== "deployed";
   }), [proposals]);
-  const matureQueue = import_react15.useMemo(() => activeProposals.filter((proposal) => (proposal.maturity ?? "").toLowerCase() === "mature"), [activeProposals]);
-  const obsoleteCount = import_react15.useMemo(() => proposals.filter((proposal) => (proposal.maturity ?? "").toLowerCase() === "obsolete").length, [proposals]);
-  const blockedCount = import_react15.useMemo(() => activeProposals.filter((proposal) => {
+  const matureQueue = import_react16.useMemo(() => activeProposals.filter((proposal) => (proposal.maturity ?? "").toLowerCase() === "mature"), [activeProposals]);
+  const obsoleteCount = import_react16.useMemo(() => proposals.filter((proposal) => (proposal.maturity ?? "").toLowerCase() === "obsolete").length, [proposals]);
+  const blockedCount = import_react16.useMemo(() => activeProposals.filter((proposal) => {
     const dependencies = proposal.dependencies ?? [];
     return dependencies.some((dependencyId) => {
       const dependency = proposals.find((item) => item.id === dependencyId);
       return dependency && dependency.status.toLowerCase() !== "complete";
     });
   }).length, [activeProposals, proposals]);
-  const budgetTracked = import_react15.useMemo(() => proposals.filter((proposal) => Number(proposal.budgetLimitUsd ?? 0) > 0), [proposals]);
-  const totalBudget = import_react15.useMemo(() => budgetTracked.reduce((sum, proposal) => sum + Number(proposal.budgetLimitUsd ?? 0), 0), [budgetTracked]);
-  const enabledRoutes = import_react15.useMemo(() => routes.filter((route) => route.is_enabled), [routes]);
-  const activeDispatches = import_react15.useMemo(() => dispatches.filter((dispatch) => ["assigned", "active", "blocked"].includes(dispatch.dispatch_status.toLowerCase())), [dispatches]);
-  const activeAgents = import_react15.useMemo(() => agents.filter((agent) => agent.isActive), [agents]);
-  const hotProposals = import_react15.useMemo(() => [...activeProposals].sort((left, right) => {
+  const budgetTracked = import_react16.useMemo(() => proposals.filter((proposal) => Number(proposal.budgetLimitUsd ?? 0) > 0), [proposals]);
+  const totalBudget = import_react16.useMemo(() => budgetTracked.reduce((sum, proposal) => sum + Number(proposal.budgetLimitUsd ?? 0), 0), [budgetTracked]);
+  const enabledRoutes = import_react16.useMemo(() => routes.filter((route) => route.is_enabled), [routes]);
+  const activeDispatches = import_react16.useMemo(() => dispatches.filter((dispatch) => ["assigned", "active", "blocked"].includes(dispatch.dispatch_status.toLowerCase())), [dispatches]);
+  const activeAgents = import_react16.useMemo(() => agents.filter((agent) => agent.isActive), [agents]);
+  const hotProposals = import_react16.useMemo(() => [...activeProposals].sort((left, right) => {
     const leftHeartbeat = left.liveActivity?.heartbeatAgeSeconds ?? Number.MAX_SAFE_INTEGER;
     const rightHeartbeat = right.liveActivity?.heartbeatAgeSeconds ?? Number.MAX_SAFE_INTEGER;
     if (leftHeartbeat !== rightHeartbeat)
       return leftHeartbeat - rightHeartbeat;
     return (left.updatedDate ?? left.createdDate).localeCompare(right.updatedDate ?? right.createdDate);
   }).slice(0, 12), [activeProposals]);
-  const workforce = import_react15.useMemo(() => [...agents].sort((left, right) => {
+  const workforce = import_react16.useMemo(() => [...agents].sort((left, right) => {
     if (left.isActive !== right.isActive)
       return left.isActive ? -1 : 1;
     return left.identity.localeCompare(right.identity);
   }), [agents]);
-  const handleReleaseLease = import_react15.useCallback(async (proposalId) => {
+  const handleReleaseLease = import_react16.useCallback(async (proposalId) => {
     try {
       setReleasingProposalId(proposalId);
       await apiClient.releaseProposal(proposalId);
@@ -178898,31 +180041,31 @@ var DashboardPage = ({
       setReleasingProposalId(null);
     }
   }, []);
-  return /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+  return /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
     className: "space-y-8 px-4 py-6 md:px-6 xl:px-8",
     children: [
-      /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(LiveOpsPanel_default, {
+      /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(LiveOpsPanel_default, {
         onAgentClick: (id) => setSelectedAgentIdentity(id)
       }, undefined, false, undefined, this),
-      selectedAgentIdentity && /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(AgentDetail_default, {
+      selectedAgentIdentity && /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(AgentDetail_default, {
         identity: selectedAgentIdentity,
         onClose: () => setSelectedAgentIdentity(null)
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("section", {
+      /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("section", {
         className: "border-b border-gray-200 pb-6 dark:border-gray-800",
-        children: /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+        children: /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
           className: "flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between",
           children: [
-            /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+            /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
               className: "space-y-3",
               children: [
-                /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                   className: "flex flex-wrap items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400",
                   children: [
-                    /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("span", {
+                    /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("span", {
                       className: `inline-flex items-center gap-2 rounded-full px-2.5 py-1 tracking-normal ${connected ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300" : "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300"}`,
                       children: [
-                        /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("span", {
+                        /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("span", {
                           className: `h-2 w-2 rounded-full ${connected ? "bg-emerald-500" : "bg-red-500"}`
                         }, undefined, false, undefined, this),
                         connected ? "Live Websocket" : "Websocket Down"
@@ -178931,29 +180074,29 @@ var DashboardPage = ({
                     status?.initialized ? "Project Ready" : "Project Uninitialized"
                   ]
                 }, undefined, true, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                   children: [
-                    /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("h1", {
+                    /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("h1", {
                       className: "text-3xl font-semibold text-gray-950 dark:text-gray-50",
                       children: "AgentHive Control Plane"
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("p", {
+                    /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("p", {
                       className: "mt-2 max-w-3xl text-sm text-gray-600 dark:text-gray-300",
                       children: "Live workforce, proposal flow, dispatch pressure, channels, and model route posture in one place."
                     }, undefined, false, undefined, this)
                   ]
                 }, undefined, true, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                   className: "flex flex-wrap gap-3 text-sm text-gray-600 dark:text-gray-300",
                   children: [
-                    /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("span", {
+                    /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("span", {
                       className: "rounded-full bg-gray-100 px-3 py-1 dark:bg-gray-800",
                       children: [
                         "Project: ",
                         status?.projectPath ?? "loading"
                       ]
                     }, undefined, true, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("span", {
+                    /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("span", {
                       className: "rounded-full bg-gray-100 px-3 py-1 dark:bg-gray-800",
                       children: [
                         "Scope: ",
@@ -178961,7 +180104,7 @@ var DashboardPage = ({
                         " proposals"
                       ]
                     }, undefined, true, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("span", {
+                    /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("span", {
                       className: "rounded-full bg-gray-100 px-3 py-1 dark:bg-gray-800",
                       children: [
                         "Channels: ",
@@ -178972,7 +180115,7 @@ var DashboardPage = ({
                 }, undefined, true, undefined, this)
               ]
             }, undefined, true, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+            /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
               className: "grid grid-cols-2 gap-2 sm:grid-cols-3 xl:w-[420px]",
               children: [
                 ["Board", "/board"],
@@ -178981,7 +180124,7 @@ var DashboardPage = ({
                 ["Channels", "/channels"],
                 ["Routes", "/routes"],
                 ["Settings", "/settings"]
-              ].map(([label, href]) => /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("a", {
+              ].map(([label, href]) => /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("a", {
                 href,
                 className: "inline-flex items-center justify-center rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800",
                 children: label
@@ -178990,7 +180133,7 @@ var DashboardPage = ({
           ]
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("section", {
+      /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("section", {
         className: "grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8",
         children: [
           ["In Flight", activeProposals.length, "Active workflow surface"],
@@ -179009,99 +180152,99 @@ var DashboardPage = ({
             `$${totalBudget}`,
             `${budgetTracked.length} tracked proposals`
           ]
-        ].map(([label, value, detail]) => /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+        ].map(([label, value, detail]) => /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
           className: "border border-gray-200 bg-white px-4 py-4 dark:border-gray-800 dark:bg-gray-900",
           children: [
-            /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+            /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
               className: "text-[11px] font-medium uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400",
               children: label
             }, undefined, false, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+            /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
               className: "mt-3 text-2xl font-semibold text-gray-950 dark:text-gray-50",
               children: value
             }, undefined, false, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+            /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
               className: "mt-2 text-xs text-gray-500 dark:text-gray-400",
               children: detail
             }, undefined, false, undefined, this)
           ]
         }, label, true, undefined, this))
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("section", {
+      /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("section", {
         className: "grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(340px,0.9fr)]",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
             className: "space-y-6",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                 className: "border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                  /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                     className: "flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-800",
-                    children: /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                    children: /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                       children: [
-                        /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("h2", {
+                        /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("h2", {
                           className: "text-base font-semibold text-gray-950 dark:text-gray-50",
                           children: "Proposal Hotlist"
                         }, undefined, false, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("p", {
+                        /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("p", {
                           className: "text-sm text-gray-500 dark:text-gray-400",
                           children: "Current work surface with lease, cubic, model, and gate context."
                         }, undefined, false, undefined, this)
                       ]
                     }, undefined, true, undefined, this)
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                  /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                     className: "divide-y divide-gray-200 dark:divide-gray-800",
-                    children: hotProposals.map((proposal) => /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                    children: hotProposals.map((proposal) => /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                       className: "grid gap-3 px-4 py-4 md:grid-cols-[minmax(0,1fr)_180px_120px]",
                       children: [
-                        /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                        /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                           className: "min-w-0",
                           children: [
-                            /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                            /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                               className: "flex flex-wrap items-center gap-2",
                               children: [
-                                /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("span", {
+                                /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("span", {
                                   className: "font-mono text-xs text-gray-500 dark:text-gray-400",
                                   children: proposal.id
                                 }, undefined, false, undefined, this),
-                                /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("span", {
+                                /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("span", {
                                   className: `inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${badgeClass(proposal.status)}`,
                                   children: proposal.status
                                 }, undefined, false, undefined, this),
-                                proposal.maturity ? /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("span", {
-                                  className: `inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${badgeClass(proposal.maturity)}`,
+                                proposal.maturity ? /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("span", {
+                                  className: `inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${maturityBadgeColors(proposal.maturity)}`,
                                   children: proposal.maturity
                                 }, undefined, false, undefined, this) : null
                               ]
                             }, undefined, true, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
-                              className: `mt-2 text-sm font-medium ${proposalMaturityClass(proposal.maturity)}`,
+                            /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
+                              className: `mt-2 text-sm font-medium ${maturityBadgeColors(proposal.maturity)}`,
                               children: proposal.title
                             }, undefined, false, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                            /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                               className: "mt-2 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400",
                               children: [
-                                /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("span", {
+                                /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("span", {
                                   children: [
                                     "Lease: ",
                                     proposal.liveActivity?.leaseHolder ?? "—"
                                   ]
                                 }, undefined, true, undefined, this),
-                                /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("span", {
+                                /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("span", {
                                   children: [
                                     "Cubic: ",
                                     proposal.liveActivity?.activeCubic ?? "—"
                                   ]
                                 }, undefined, true, undefined, this),
-                                /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("span", {
+                                /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("span", {
                                   children: [
                                     "Model: ",
                                     proposal.liveActivity?.activeModel ?? "—"
                                   ]
                                 }, undefined, true, undefined, this),
-                                /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("span", {
+                                /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("span", {
                                   children: [
                                     "Heartbeat:",
                                     " ",
@@ -179112,24 +180255,24 @@ var DashboardPage = ({
                             }, undefined, true, undefined, this)
                           ]
                         }, undefined, true, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                        /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                           className: "text-xs text-gray-600 dark:text-gray-300",
                           children: [
-                            /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                            /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                               children: [
                                 "Updated",
                                 " ",
                                 timeAgo(proposal.updatedDate ?? proposal.createdDate)
                               ]
                             }, undefined, true, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                            /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                               className: "mt-1",
                               children: [
                                 "Last event: ",
                                 proposal.liveActivity?.lastEventType ?? "—"
                               ]
                             }, undefined, true, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                            /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                               className: "mt-1",
                               children: [
                                 "Gate: ",
@@ -179138,15 +180281,15 @@ var DashboardPage = ({
                             }, undefined, true, undefined, this)
                           ]
                         }, undefined, true, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                        /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                           className: "flex items-center justify-start md:justify-end",
-                          children: proposal.liveActivity?.leaseHolder ? /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("button", {
+                          children: proposal.liveActivity?.leaseHolder ? /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("button", {
                             type: "button",
                             onClick: () => void handleReleaseLease(proposal.id),
                             disabled: releasingProposalId === proposal.id,
                             className: "inline-flex items-center justify-center rounded-md border border-red-200 px-3 py-2 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/40",
                             children: releasingProposalId === proposal.id ? "Releasing..." : "Release Lease"
-                          }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("a", {
+                          }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("a", {
                             href: "/board",
                             className: "inline-flex items-center justify-center rounded-md border border-gray-200 px-3 py-2 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800",
                             children: "Open Board"
@@ -179157,46 +180300,46 @@ var DashboardPage = ({
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                 className: "grid grid-cols-1 gap-6 2xl:grid-cols-2",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                  /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                     className: "border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900",
                     children: [
-                      /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                      /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                         className: "border-b border-gray-200 px-4 py-3 dark:border-gray-800",
                         children: [
-                          /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("h2", {
+                          /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("h2", {
                             className: "text-base font-semibold text-gray-950 dark:text-gray-50",
                             children: "Workforce"
                           }, undefined, false, undefined, this),
-                          /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("p", {
+                          /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("p", {
                             className: "text-sm text-gray-500 dark:text-gray-400",
                             children: "Live presence, role, and recent heartbeat by agent identity."
                           }, undefined, false, undefined, this)
                         ]
                       }, undefined, true, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                      /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                         className: "divide-y divide-gray-200 dark:divide-gray-800",
-                        children: workforce.map((agent) => /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                        children: workforce.map((agent) => /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                           className: "grid gap-2 px-4 py-3 md:grid-cols-[minmax(0,1fr)_140px]",
                           children: [
-                            /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                            /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                               className: "min-w-0",
                               children: [
-                                /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                                /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                   className: "flex items-center gap-2",
                                   children: [
-                                    /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("span", {
+                                    /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("span", {
                                       className: `inline-flex h-2.5 w-2.5 rounded-full ${agent.isActive ? "bg-emerald-500" : "bg-gray-400"}`
                                     }, undefined, false, undefined, this),
-                                    /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("span", {
+                                    /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("span", {
                                       className: "truncate text-sm font-medium text-gray-950 dark:text-gray-50",
                                       children: agent.identity
                                     }, undefined, false, undefined, this)
                                   ]
                                 }, undefined, true, undefined, this),
-                                /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                                /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                   className: "mt-1 text-xs text-gray-500 dark:text-gray-400",
                                   children: [
                                     "Role: ",
@@ -179206,27 +180349,27 @@ var DashboardPage = ({
                                     agent.agentId || "—"
                                   ]
                                 }, undefined, true, undefined, this),
-                                agent.statusMessage ? /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                                agent.statusMessage ? /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                   className: "mt-1 truncate text-xs text-gray-600 dark:text-gray-300",
                                   children: agent.statusMessage
                                 }, undefined, false, undefined, this) : null
                               ]
                             }, undefined, true, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                            /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                               className: "text-xs text-gray-600 dark:text-gray-300 md:text-right",
                               children: [
-                                /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                                /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                   className: `inline-flex rounded-full px-2 py-0.5 font-medium ${badgeClass(agent.isActive ? "active" : "offline")}`,
                                   children: agent.isActive ? "active" : "offline"
                                 }, undefined, false, undefined, this),
-                                /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                                /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                   className: "mt-2",
                                   children: [
                                     "Seen ",
                                     timeAgo(agent.lastSeenAt)
                                   ]
                                 }, undefined, true, undefined, this),
-                                agent.activeProposalId ? /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                                agent.activeProposalId ? /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                   className: "mt-1 font-mono text-[11px] text-gray-500 dark:text-gray-400",
                                   children: agent.activeProposalId
                                 }, undefined, false, undefined, this) : null
@@ -179237,41 +180380,41 @@ var DashboardPage = ({
                       }, undefined, false, undefined, this)
                     ]
                   }, undefined, true, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                  /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                     className: "border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900",
                     children: [
-                      /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                      /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                         className: "border-b border-gray-200 px-4 py-3 dark:border-gray-800",
                         children: [
-                          /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("h2", {
+                          /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("h2", {
                             className: "text-base font-semibold text-gray-950 dark:text-gray-50",
                             children: "Dispatch and Route Pressure"
                           }, undefined, false, undefined, this),
-                          /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("p", {
+                          /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("p", {
                             className: "text-sm text-gray-500 dark:text-gray-400",
                             children: "Queue load, offer churn, and route availability."
                           }, undefined, false, undefined, this)
                         ]
                       }, undefined, true, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                      /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                         className: "space-y-5 px-4 py-4",
                         children: [
-                          /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                          /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                             children: [
-                              /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                              /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                 className: "mb-2 text-xs font-medium uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400",
                                 children: "Dispatches"
                               }, undefined, false, undefined, this),
-                              /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                              /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                 className: "space-y-2",
                                 children: [
-                                  activeDispatches.slice(0, 6).map((dispatch) => /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                                  activeDispatches.slice(0, 6).map((dispatch) => /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                     className: "flex items-start justify-between gap-3 border border-gray-200 px-3 py-2 dark:border-gray-800",
                                     children: [
-                                      /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                                      /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                         className: "min-w-0",
                                         children: [
-                                          /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                                          /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                             className: "truncate text-sm font-medium text-gray-950 dark:text-gray-50",
                                             children: [
                                               dispatch.proposal_display_id ?? `P${dispatch.proposal_id}`,
@@ -179281,7 +180424,7 @@ var DashboardPage = ({
                                               dispatch.proposal_title ?? dispatch.dispatch_role
                                             ]
                                           }, undefined, true, undefined, this),
-                                          /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                                          /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                             className: "mt-1 text-xs text-gray-500 dark:text-gray-400",
                                             children: [
                                               dispatch.agent_identity,
@@ -179295,14 +180438,14 @@ var DashboardPage = ({
                                           }, undefined, true, undefined, this)
                                         ]
                                       }, undefined, true, undefined, this),
-                                      /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                                      /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                         className: "text-right text-xs",
                                         children: [
-                                          /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                                          /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                             className: `inline-flex rounded-full px-2 py-0.5 font-medium ${badgeClass(dispatch.dispatch_status)}`,
                                             children: dispatch.dispatch_status
                                           }, undefined, false, undefined, this),
-                                          /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                                          /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                             className: "mt-1 text-gray-500 dark:text-gray-400",
                                             children: timeAgo(dispatch.assigned_at)
                                           }, undefined, false, undefined, this)
@@ -179310,7 +180453,7 @@ var DashboardPage = ({
                                       }, undefined, true, undefined, this)
                                     ]
                                   }, dispatch.id, true, undefined, this)),
-                                  activeDispatches.length === 0 ? /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                                  activeDispatches.length === 0 ? /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                     className: "text-sm text-gray-500 dark:text-gray-400",
                                     children: "No active dispatches."
                                   }, undefined, false, undefined, this) : null
@@ -179318,25 +180461,25 @@ var DashboardPage = ({
                               }, undefined, true, undefined, this)
                             ]
                           }, undefined, true, undefined, this),
-                          /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                          /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                             children: [
-                              /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                              /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                 className: "mb-2 text-xs font-medium uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400",
                                 children: "Utilities and Routes"
                               }, undefined, false, undefined, this),
-                              /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                              /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                 className: "space-y-2",
                                 children: [
-                                  enabledRoutes.slice(0, 6).map((route) => /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                                  enabledRoutes.slice(0, 6).map((route) => /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                     className: "flex items-center justify-between border border-gray-200 px-3 py-2 text-sm dark:border-gray-800",
                                     children: [
-                                      /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                                      /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                         children: [
-                                          /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                                          /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                             className: "font-medium text-gray-950 dark:text-gray-50",
                                             children: route.model_name
                                           }, undefined, false, undefined, this),
-                                          /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                                          /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                             className: "text-xs text-gray-500 dark:text-gray-400",
                                             children: [
                                               route.route_provider,
@@ -179346,10 +180489,10 @@ var DashboardPage = ({
                                           }, undefined, true, undefined, this)
                                         ]
                                       }, undefined, true, undefined, this),
-                                      /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                                      /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                         className: "text-right text-xs text-gray-500 dark:text-gray-400",
                                         children: [
-                                          /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                                          /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                             children: [
                                               "$",
                                               route.cost_per_million_input,
@@ -179357,7 +180500,7 @@ var DashboardPage = ({
                                               route.cost_per_million_output
                                             ]
                                           }, undefined, true, undefined, this),
-                                          /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                                          /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                             children: [
                                               "P",
                                               route.priority
@@ -179367,7 +180510,7 @@ var DashboardPage = ({
                                       }, undefined, true, undefined, this)
                                     ]
                                   }, route.id, true, undefined, this)),
-                                  enabledRoutes.length === 0 ? /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                                  enabledRoutes.length === 0 ? /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                     className: "text-sm text-gray-500 dark:text-gray-400",
                                     children: "Route registry unavailable."
                                   }, undefined, false, undefined, this) : null
@@ -179383,51 +180526,51 @@ var DashboardPage = ({
               }, undefined, true, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
             className: "space-y-6",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                 className: "border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                  /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                     className: "border-b border-gray-200 px-4 py-3 dark:border-gray-800",
                     children: [
-                      /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("h2", {
+                      /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("h2", {
                         className: "text-base font-semibold text-gray-950 dark:text-gray-50",
                         children: "Recent Activity"
                       }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("p", {
+                      /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("p", {
                         className: "text-sm text-gray-500 dark:text-gray-400",
                         children: "Latest pulse events across the project."
                       }, undefined, false, undefined, this)
                     ]
                   }, undefined, true, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                  /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                     className: "divide-y divide-gray-200 dark:divide-gray-800",
                     children: [
-                      pulse.map((event, index) => /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                      pulse.map((event, index) => /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                         className: "px-4 py-3",
-                        children: /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                        children: /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                           className: "flex items-center justify-between gap-3",
                           children: [
-                            /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                            /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                               className: "min-w-0",
                               children: [
-                                /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                                /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                   className: "text-sm text-gray-950 dark:text-gray-50",
                                   children: [
-                                    /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("span", {
+                                    /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("span", {
                                       className: "font-medium",
                                       children: event.agent
                                     }, undefined, false, undefined, this),
                                     " ",
-                                    /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("span", {
+                                    /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("span", {
                                       className: `text-xs ${pulseTypeColor[event.type] ?? "text-gray-500 dark:text-gray-400"}`,
                                       children: event.type
                                     }, undefined, false, undefined, this)
                                   ]
                                 }, undefined, true, undefined, this),
-                                /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                                /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                   className: "truncate text-sm text-gray-600 dark:text-gray-300",
                                   children: [
                                     event.id,
@@ -179435,20 +180578,20 @@ var DashboardPage = ({
                                     event.title
                                   ]
                                 }, undefined, true, undefined, this),
-                                event.impact ? /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                                event.impact ? /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                                   className: "mt-1 text-xs text-gray-500 dark:text-gray-400",
                                   children: event.impact
                                 }, undefined, false, undefined, this) : null
                               ]
                             }, undefined, true, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                            /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                               className: "text-xs text-gray-400",
                               children: timeAgo(event.timestamp)
                             }, undefined, false, undefined, this)
                           ]
                         }, undefined, true, undefined, this)
                       }, `${event.id}-${event.timestamp}-${index}`, false, undefined, this)),
-                      pulse.length === 0 ? /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                      pulse.length === 0 ? /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                         className: "px-4 py-6 text-sm text-gray-500 dark:text-gray-400",
                         children: "No recent pulse activity."
                       }, undefined, false, undefined, this) : null
@@ -179456,16 +180599,16 @@ var DashboardPage = ({
                   }, undefined, true, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                 className: "grid grid-cols-1 gap-6",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                  /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                     className: "h-[420px]",
-                    children: /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(ActivityFeed_default, {}, undefined, false, undefined, this)
+                    children: /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(ActivityFeed_default, {}, undefined, false, undefined, this)
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
+                  /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
                     className: "h-[420px]",
-                    children: /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(MessageStream_default, {}, undefined, false, undefined, this)
+                    children: /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(MessageStream_default, {}, undefined, false, undefined, this)
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this)
@@ -179479,8 +180622,8 @@ var DashboardPage = ({
 var DashboardPage_default = DashboardPage;
 
 // src/apps/dashboard-web/components/DecisionsPage.tsx
-var import_react16 = __toESM(require_react(), 1);
-var jsx_dev_runtime16 = __toESM(require_jsx_dev_runtime(), 1);
+var import_react17 = __toESM(require_react(), 1);
+var jsx_dev_runtime17 = __toESM(require_jsx_dev_runtime(), 1);
 var decisionStatusColor = (status) => {
   switch (status) {
     case "accepted":
@@ -179509,12 +180652,12 @@ var formatDate = (dateStr) => {
   }
 };
 var DecisionsPage = () => {
-  const [decisions, setDecisions] = import_react16.useState([]);
-  const [loading, setLoading] = import_react16.useState(true);
-  const [error, setError] = import_react16.useState(null);
-  const [statusFilter, setStatusFilter] = import_react16.useState("");
-  const [selectedDecision, setSelectedDecision] = import_react16.useState(null);
-  const fetchData = import_react16.useCallback(async () => {
+  const [decisions, setDecisions] = import_react17.useState([]);
+  const [loading, setLoading] = import_react17.useState(true);
+  const [error, setError] = import_react17.useState(null);
+  const [statusFilter, setStatusFilter] = import_react17.useState("");
+  const [selectedDecision, setSelectedDecision] = import_react17.useState(null);
+  const fetchData = import_react17.useCallback(async () => {
     try {
       setError(null);
       const data = await apiClient.fetchDecisions();
@@ -179526,7 +180669,7 @@ var DecisionsPage = () => {
       setLoading(false);
     }
   }, []);
-  import_react16.useEffect(() => {
+  import_react17.useEffect(() => {
     fetchData();
   }, [fetchData]);
   const filteredDecisions = decisions.filter((d) => {
@@ -179539,268 +180682,6 @@ var DecisionsPage = () => {
     return acc;
   }, {});
   if (loading) {
-    return /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
-      className: "flex flex-col justify-center items-center h-64 space-y-4",
-      children: [
-        /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(LoadingSpinner_default, {
-          size: "lg",
-          text: ""
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("p", {
-          className: "text-lg font-medium text-gray-900 dark:text-gray-100",
-          children: "Loading decisions..."
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this);
-  }
-  if (error) {
-    return /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
-      className: "p-8 text-center",
-      children: /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
-        className: "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6",
-        children: [
-          /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("p", {
-            className: "text-red-600 dark:text-red-400 font-medium",
-            children: "Error"
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("p", {
-            className: "text-red-500 dark:text-red-300 text-sm mt-1",
-            children: error
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("button", {
-            type: "button",
-            onClick: fetchData,
-            className: "mt-4 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded hover:bg-red-200 dark:hover:bg-red-900/50",
-            children: "Retry"
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this)
-    }, undefined, false, undefined, this);
-  }
-  if (selectedDecision) {
-    return /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
-      className: "space-y-4",
-      children: [
-        /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
-          className: "flex items-center gap-4",
-          children: /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("button", {
-            type: "button",
-            onClick: () => setSelectedDecision(null),
-            className: "text-sm text-blue-600 dark:text-blue-400 hover:underline",
-            children: "← Back to decisions"
-          }, undefined, false, undefined, this)
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
-          className: "bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6 space-y-4",
-          children: [
-            /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
-              className: "flex items-start justify-between",
-              children: [
-                /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("h1", {
-                  className: "text-xl font-bold text-gray-900 dark:text-gray-100",
-                  children: selectedDecision.title
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("span", {
-                  className: `px-2 py-0.5 rounded text-xs font-medium ${decisionStatusColor(selectedDecision.status)}`,
-                  children: selectedDecision.status
-                }, undefined, false, undefined, this)
-              ]
-            }, undefined, true, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
-              className: "text-xs text-gray-500 dark:text-gray-400",
-              children: formatDate(selectedDecision.date)
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
-              className: "space-y-4",
-              children: [
-                /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
-                  children: [
-                    /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("h3", {
-                      className: "text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider",
-                      children: "Context"
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("p", {
-                      className: "mt-1 text-sm text-gray-600 dark:text-gray-400",
-                      children: selectedDecision.context
-                    }, undefined, false, undefined, this)
-                  ]
-                }, undefined, true, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
-                  children: [
-                    /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("h3", {
-                      className: "text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider",
-                      children: "Decision"
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("p", {
-                      className: "mt-1 text-sm text-gray-600 dark:text-gray-400",
-                      children: selectedDecision.decision
-                    }, undefined, false, undefined, this)
-                  ]
-                }, undefined, true, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
-                  children: [
-                    /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("h3", {
-                      className: "text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider",
-                      children: "Consequences"
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("p", {
-                      className: "mt-1 text-sm text-gray-600 dark:text-gray-400",
-                      children: selectedDecision.consequences
-                    }, undefined, false, undefined, this)
-                  ]
-                }, undefined, true, undefined, this),
-                selectedDecision.alternatives && /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
-                  children: [
-                    /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("h3", {
-                      className: "text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider",
-                      children: "Alternatives Considered"
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("p", {
-                      className: "mt-1 text-sm text-gray-600 dark:text-gray-400",
-                      children: selectedDecision.alternatives
-                    }, undefined, false, undefined, this)
-                  ]
-                }, undefined, true, undefined, this)
-              ]
-            }, undefined, true, undefined, this)
-          ]
-        }, undefined, true, undefined, this)
-      ]
-    }, undefined, true, undefined, this);
-  }
-  return /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
-    className: "space-y-6",
-    children: [
-      /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
-        className: "flex items-center justify-between",
-        children: [
-          /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("h1", {
-            className: "text-2xl font-bold text-gray-900 dark:text-gray-100",
-            children: [
-              "Decisions (",
-              decisions.length,
-              ")"
-            ]
-          }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
-            className: "flex items-center gap-2",
-            children: /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("select", {
-              value: statusFilter,
-              onChange: (e) => setStatusFilter(e.target.value),
-              className: "rounded border px-2 py-1.5 text-sm bg-white dark:bg-gray-800",
-              children: [
-                /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("option", {
-                  value: "",
-                  children: "All statuses"
-                }, undefined, false, undefined, this),
-                Object.entries(statusCounts).map(([status, count]) => /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("option", {
-                  value: status,
-                  children: [
-                    status,
-                    " (",
-                    count,
-                    ")"
-                  ]
-                }, status, true, undefined, this))
-              ]
-            }, undefined, true, undefined, this)
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
-        className: "space-y-3",
-        children: filteredDecisions.map((decision) => /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("button", {
-          type: "button",
-          onClick: () => setSelectedDecision(decision),
-          className: "w-full text-left bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 hover:border-blue-300 dark:hover:border-blue-700 transition-colors",
-          children: /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
-            className: "flex items-start justify-between",
-            children: [
-              /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
-                className: "space-y-1",
-                children: [
-                  /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("h3", {
-                    className: "font-medium text-gray-900 dark:text-gray-100",
-                    children: decision.title
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("p", {
-                    className: "text-sm text-gray-600 dark:text-gray-400 line-clamp-2",
-                    children: decision.context
-                  }, undefined, false, undefined, this)
-                ]
-              }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
-                className: "flex items-center gap-2",
-                children: [
-                  /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("span", {
-                    className: `px-2 py-0.5 rounded text-xs font-medium ${decisionStatusColor(decision.status)}`,
-                    children: decision.status
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("span", {
-                    className: "text-xs text-gray-500 dark:text-gray-400",
-                    children: formatDate(decision.date)
-                  }, undefined, false, undefined, this)
-                ]
-              }, undefined, true, undefined, this)
-            ]
-          }, undefined, true, undefined, this)
-        }, decision.id, false, undefined, this))
-      }, undefined, false, undefined, this),
-      filteredDecisions.length === 0 && /* @__PURE__ */ jsx_dev_runtime16.jsxDEV("div", {
-        className: "text-center py-12 text-gray-500 dark:text-gray-400",
-        children: statusFilter ? "No decisions match your filter" : "No decisions found"
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-};
-var DecisionsPage_default = DecisionsPage;
-
-// src/apps/dashboard-web/components/DirectivesPage.tsx
-var import_react17 = __toESM(require_react(), 1);
-var jsx_dev_runtime17 = __toESM(require_jsx_dev_runtime(), 1);
-var DirectivesPage = ({
-  proposals = [],
-  directiveEntities
-}) => {
-  const [directives, setDirectives] = import_react17.useState(directiveEntities ?? []);
-  const [loading, setLoading] = import_react17.useState(!directiveEntities);
-  const [error, setError] = import_react17.useState(null);
-  const [_showArchived, _setShowArchived] = import_react17.useState(false);
-  const fetchData = import_react17.useCallback(async () => {
-    try {
-      setError(null);
-      const data = await apiClient.fetchDirectives();
-      setDirectives(data);
-    } catch (err) {
-      console.error("Failed to fetch directives:", err);
-      setError("Failed to load directives");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-  import_react17.useEffect(() => {
-    if (directiveEntities) {
-      setDirectives(directiveEntities);
-      setLoading(false);
-      return;
-    }
-    fetchData();
-  }, [directiveEntities, fetchData]);
-  const directiveStats = import_react17.useMemo(() => {
-    const stats = new Map;
-    for (const proposal of proposals) {
-      const dir = proposal.directive || "No Directive";
-      const s = stats.get(dir) || { total: 0, completed: 0, active: 0 };
-      s.total++;
-      if (proposal.status === "Complete")
-        s.completed++;
-      if (proposal.status === "Develop")
-        s.active++;
-      stats.set(dir, s);
-    }
-    return stats;
-  }, [proposals]);
-  if (loading) {
     return /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
       className: "flex flex-col justify-center items-center h-64 space-y-4",
       children: [
@@ -179810,7 +180691,7 @@ var DirectivesPage = ({
         }, undefined, false, undefined, this),
         /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("p", {
           className: "text-lg font-medium text-gray-900 dark:text-gray-100",
-          children: "Loading directives..."
+          children: "Loading decisions..."
         }, undefined, false, undefined, this)
       ]
     }, undefined, true, undefined, this);
@@ -179839,12 +180720,274 @@ var DirectivesPage = ({
       }, undefined, true, undefined, this)
     }, undefined, false, undefined, this);
   }
+  if (selectedDecision) {
+    return /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+      className: "space-y-4",
+      children: [
+        /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+          className: "flex items-center gap-4",
+          children: /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("button", {
+            type: "button",
+            onClick: () => setSelectedDecision(null),
+            className: "text-sm text-blue-600 dark:text-blue-400 hover:underline",
+            children: "← Back to decisions"
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+          className: "bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6 space-y-4",
+          children: [
+            /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+              className: "flex items-start justify-between",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("h1", {
+                  className: "text-xl font-bold text-gray-900 dark:text-gray-100",
+                  children: selectedDecision.title
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("span", {
+                  className: `px-2 py-0.5 rounded text-xs font-medium ${decisionStatusColor(selectedDecision.status)}`,
+                  children: selectedDecision.status
+                }, undefined, false, undefined, this)
+              ]
+            }, undefined, true, undefined, this),
+            /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+              className: "text-xs text-gray-500 dark:text-gray-400",
+              children: formatDate(selectedDecision.date)
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+              className: "space-y-4",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+                  children: [
+                    /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("h3", {
+                      className: "text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider",
+                      children: "Context"
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("p", {
+                      className: "mt-1 text-sm text-gray-600 dark:text-gray-400",
+                      children: selectedDecision.context
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+                  children: [
+                    /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("h3", {
+                      className: "text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider",
+                      children: "Decision"
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("p", {
+                      className: "mt-1 text-sm text-gray-600 dark:text-gray-400",
+                      children: selectedDecision.decision
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+                  children: [
+                    /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("h3", {
+                      className: "text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider",
+                      children: "Consequences"
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("p", {
+                      className: "mt-1 text-sm text-gray-600 dark:text-gray-400",
+                      children: selectedDecision.consequences
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this),
+                selectedDecision.alternatives && /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+                  children: [
+                    /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("h3", {
+                      className: "text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider",
+                      children: "Alternatives Considered"
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("p", {
+                      className: "mt-1 text-sm text-gray-600 dark:text-gray-400",
+                      children: selectedDecision.alternatives
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this)
+              ]
+            }, undefined, true, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  }
   return /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
     className: "space-y-6",
     children: [
       /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
         className: "flex items-center justify-between",
-        children: /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("h1", {
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("h1", {
+            className: "text-2xl font-bold text-gray-900 dark:text-gray-100",
+            children: [
+              "Decisions (",
+              decisions.length,
+              ")"
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+            className: "flex items-center gap-2",
+            children: /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("select", {
+              value: statusFilter,
+              onChange: (e) => setStatusFilter(e.target.value),
+              className: "rounded border px-2 py-1.5 text-sm bg-white dark:bg-gray-800",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("option", {
+                  value: "",
+                  children: "All statuses"
+                }, undefined, false, undefined, this),
+                Object.entries(statusCounts).map(([status, count]) => /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("option", {
+                  value: status,
+                  children: [
+                    status,
+                    " (",
+                    count,
+                    ")"
+                  ]
+                }, status, true, undefined, this))
+              ]
+            }, undefined, true, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+        className: "space-y-3",
+        children: filteredDecisions.map((decision) => /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("button", {
+          type: "button",
+          onClick: () => setSelectedDecision(decision),
+          className: "w-full text-left bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 hover:border-blue-300 dark:hover:border-blue-700 transition-colors",
+          children: /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+            className: "flex items-start justify-between",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+                className: "space-y-1",
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("h3", {
+                    className: "font-medium text-gray-900 dark:text-gray-100",
+                    children: decision.title
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("p", {
+                    className: "text-sm text-gray-600 dark:text-gray-400 line-clamp-2",
+                    children: decision.context
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+                className: "flex items-center gap-2",
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("span", {
+                    className: `px-2 py-0.5 rounded text-xs font-medium ${decisionStatusColor(decision.status)}`,
+                    children: decision.status
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("span", {
+                    className: "text-xs text-gray-500 dark:text-gray-400",
+                    children: formatDate(decision.date)
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        }, decision.id, false, undefined, this))
+      }, undefined, false, undefined, this),
+      filteredDecisions.length === 0 && /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+        className: "text-center py-12 text-gray-500 dark:text-gray-400",
+        children: statusFilter ? "No decisions match your filter" : "No decisions found"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+};
+var DecisionsPage_default = DecisionsPage;
+
+// src/apps/dashboard-web/components/DirectivesPage.tsx
+var import_react18 = __toESM(require_react(), 1);
+var jsx_dev_runtime18 = __toESM(require_jsx_dev_runtime(), 1);
+var DirectivesPage = ({
+  proposals = [],
+  directiveEntities
+}) => {
+  const [directives, setDirectives] = import_react18.useState(directiveEntities ?? []);
+  const [loading, setLoading] = import_react18.useState(!directiveEntities);
+  const [error, setError] = import_react18.useState(null);
+  const [_showArchived, _setShowArchived] = import_react18.useState(false);
+  const fetchData = import_react18.useCallback(async () => {
+    try {
+      setError(null);
+      const data = await apiClient.fetchDirectives();
+      setDirectives(data);
+    } catch (err) {
+      console.error("Failed to fetch directives:", err);
+      setError("Failed to load directives");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  import_react18.useEffect(() => {
+    if (directiveEntities) {
+      setDirectives(directiveEntities);
+      setLoading(false);
+      return;
+    }
+    fetchData();
+  }, [directiveEntities, fetchData]);
+  const directiveStats = import_react18.useMemo(() => {
+    const stats = new Map;
+    for (const proposal of proposals) {
+      const dir = proposal.directive || "No Directive";
+      const s = stats.get(dir) || { total: 0, completed: 0, active: 0 };
+      s.total++;
+      if (proposal.status === "Complete")
+        s.completed++;
+      if (proposal.status === "Develop")
+        s.active++;
+      stats.set(dir, s);
+    }
+    return stats;
+  }, [proposals]);
+  if (loading) {
+    return /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+      className: "flex flex-col justify-center items-center h-64 space-y-4",
+      children: [
+        /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(LoadingSpinner_default, {
+          size: "lg",
+          text: ""
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("p", {
+          className: "text-lg font-medium text-gray-900 dark:text-gray-100",
+          children: "Loading directives..."
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  }
+  if (error) {
+    return /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+      className: "p-8 text-center",
+      children: /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+        className: "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("p", {
+            className: "text-red-600 dark:text-red-400 font-medium",
+            children: "Error"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("p", {
+            className: "text-red-500 dark:text-red-300 text-sm mt-1",
+            children: error
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("button", {
+            type: "button",
+            onClick: fetchData,
+            className: "mt-4 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded hover:bg-red-200 dark:hover:bg-red-900/50",
+            children: "Retry"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    }, undefined, false, undefined, this);
+  }
+  return /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+    className: "space-y-6",
+    children: [
+      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+        className: "flex items-center justify-between",
+        children: /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("h1", {
           className: "text-2xl font-bold text-gray-900 dark:text-gray-100",
           children: [
             "Directives (",
@@ -179853,7 +180996,7 @@ var DirectivesPage = ({
           ]
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
         className: "space-y-4",
         children: directives.map((directive) => {
           const stats = directiveStats.get(directive.id) || {
@@ -179862,28 +181005,28 @@ var DirectivesPage = ({
             active: 0
           };
           const progress = stats.total > 0 ? Math.round(stats.completed / stats.total * 100) : 0;
-          return /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+          return /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
             className: "bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
                 className: "flex items-start justify-between",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+                  /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
                     className: "space-y-1",
                     children: [
-                      /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("h3", {
+                      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("h3", {
                         className: "font-semibold text-gray-900 dark:text-gray-100",
                         children: directive.title
                       }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("span", {
+                      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("span", {
                         className: "text-xs font-mono text-gray-500 dark:text-gray-400",
                         children: directive.id
                       }, undefined, false, undefined, this)
                     ]
                   }, undefined, true, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+                  /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
                     className: "text-right text-sm",
-                    children: /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("span", {
+                    children: /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("span", {
                       className: "text-gray-500 dark:text-gray-400",
                       children: [
                         stats.completed,
@@ -179895,23 +181038,23 @@ var DirectivesPage = ({
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              directive.description && /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("p", {
+              directive.description && /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("p", {
                 className: "mt-2 text-sm text-gray-600 dark:text-gray-400",
                 children: directive.description
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
                 className: "mt-3",
-                children: /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+                children: /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
                   className: "flex items-center gap-2",
                   children: [
-                    /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+                    /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
                       className: "flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2",
-                      children: /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+                      children: /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
                         className: "bg-green-500 h-2 rounded-full transition-all",
                         style: { width: `${progress}%` }
                       }, undefined, false, undefined, this)
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("span", {
+                    /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("span", {
                       className: "text-xs text-gray-500 dark:text-gray-400",
                       children: [
                         progress,
@@ -179921,9 +181064,9 @@ var DirectivesPage = ({
                   ]
                 }, undefined, true, undefined, this)
               }, undefined, false, undefined, this),
-              stats.active > 0 && /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+              stats.active > 0 && /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
                 className: "mt-2",
-                children: /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("span", {
+                children: /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("span", {
                   className: "px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded text-xs",
                   children: [
                     stats.active,
@@ -179935,7 +181078,7 @@ var DirectivesPage = ({
           }, directive.id, true, undefined, this);
         })
       }, undefined, false, undefined, this),
-      directives.length === 0 && /* @__PURE__ */ jsx_dev_runtime17.jsxDEV("div", {
+      directives.length === 0 && /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
         className: "text-center py-12 text-gray-500 dark:text-gray-400",
         children: "No directives found"
       }, undefined, false, undefined, this)
@@ -179945,9 +181088,9 @@ var DirectivesPage = ({
 var DirectivesPage_default = DirectivesPage;
 
 // src/apps/dashboard-web/components/DispatchPage.tsx
-var import_react18 = __toESM(require_react(), 1);
-var jsx_dev_runtime18 = __toESM(require_jsx_dev_runtime(), 1);
-var STATUS_COLORS = {
+var import_react19 = __toESM(require_react(), 1);
+var jsx_dev_runtime19 = __toESM(require_jsx_dev_runtime(), 1);
+var STATUS_COLORS2 = {
   assigned: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
   active: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
   blocked: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
@@ -179985,9 +181128,9 @@ function leaseCountdown(expiresAt, nowMs) {
 function ReissueBar({ count, max }) {
   const color = count === 0 ? "bg-green-500" : count >= max ? "bg-red-500" : "bg-yellow-500";
   const pct = max === 0 ? 0 : Math.min(count / max * 100, 100);
-  return /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+  return /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
     children: [
-      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("span", {
+      /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("span", {
         className: "text-sm tabular-nums",
         children: [
           count,
@@ -179995,9 +181138,9 @@ function ReissueBar({ count, max }) {
           max
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
         className: "mt-0.5 h-1 w-16 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden",
-        children: /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+        children: /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
           className: `h-full ${color} rounded-full`,
           style: { width: `${pct}%` }
         }, undefined, false, undefined, this)
@@ -180006,14 +181149,14 @@ function ReissueBar({ count, max }) {
   }, undefined, true, undefined, this);
 }
 var DispatchPage = () => {
-  const [dispatches, setDispatches] = import_react18.useState([]);
-  const [loading, setLoading] = import_react18.useState(true);
-  const [error, setError] = import_react18.useState(null);
-  const [filterStatus, setFilterStatus] = import_react18.useState("");
-  const [filterOffer, setFilterOffer] = import_react18.useState("");
-  const [showCompleted, setShowCompleted] = import_react18.useState(false);
-  const [nowMs, setNowMs] = import_react18.useState(() => Date.now());
-  const fetchData = import_react18.useCallback(async () => {
+  const [dispatches, setDispatches] = import_react19.useState([]);
+  const [loading, setLoading] = import_react19.useState(true);
+  const [error, setError] = import_react19.useState(null);
+  const [filterStatus, setFilterStatus] = import_react19.useState("");
+  const [filterOffer, setFilterOffer] = import_react19.useState("");
+  const [showCompleted, setShowCompleted] = import_react19.useState(false);
+  const [nowMs, setNowMs] = import_react19.useState(() => Date.now());
+  const fetchData = import_react19.useCallback(async () => {
     try {
       setError(null);
       const data = await apiClient.fetchDispatches();
@@ -180025,12 +181168,12 @@ var DispatchPage = () => {
       setLoading(false);
     }
   }, []);
-  import_react18.useEffect(() => {
+  import_react19.useEffect(() => {
     fetchData();
     const poll = setInterval(() => void fetchData(), 15000);
     return () => clearInterval(poll);
   }, [fetchData]);
-  import_react18.useEffect(() => {
+  import_react19.useEffect(() => {
     const tick = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(tick);
   }, []);
@@ -180052,20 +181195,20 @@ var DispatchPage = () => {
     byProposal.set(d.proposal_id, list);
   }
   if (loading) {
-    return /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+    return /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
       className: "flex items-center justify-center h-64",
-      children: /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+      children: /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
         className: "text-gray-500",
         children: "Loading dispatches..."
       }, undefined, false, undefined, this)
     }, undefined, false, undefined, this);
   }
   if (error) {
-    return /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+    return /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
       className: "p-4 text-red-600 bg-red-50 rounded flex items-center gap-3",
       children: [
         error,
-        /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("button", {
+        /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("button", {
           onClick: fetchData,
           className: "text-sm underline",
           children: "Retry"
@@ -180073,38 +181216,38 @@ var DispatchPage = () => {
       ]
     }, undefined, true, undefined, this);
   }
-  return /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+  return /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
     className: "container mx-auto px-4 py-8",
     children: [
-      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
         className: "flex items-center justify-between mb-6",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("h1", {
+          /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("h1", {
             className: "text-2xl font-bold",
             children: "Dispatches"
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
             className: "flex items-center gap-4",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
                 className: "flex items-center gap-2",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("label", {
+                  /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("label", {
                     htmlFor: "status-filter",
                     className: "text-sm text-gray-600",
                     children: "Status:"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("select", {
+                  /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("select", {
                     id: "status-filter",
                     value: filterStatus,
                     onChange: (e) => setFilterStatus(e.target.value),
                     className: "rounded border px-2 py-1 text-sm",
                     children: [
-                      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("option", {
+                      /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("option", {
                         value: "",
                         children: "All"
                       }, undefined, false, undefined, this),
-                      statuses.map((s) => /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("option", {
+                      statuses.map((s) => /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("option", {
                         value: s,
                         children: s
                       }, s, false, undefined, this))
@@ -180112,25 +181255,25 @@ var DispatchPage = () => {
                   }, undefined, true, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
                 className: "flex items-center gap-2",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("label", {
+                  /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("label", {
                     htmlFor: "offer-filter",
                     className: "text-sm text-gray-600",
                     children: "Offer:"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("select", {
+                  /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("select", {
                     id: "offer-filter",
                     value: filterOffer,
                     onChange: (e) => setFilterOffer(e.target.value),
                     className: "rounded border px-2 py-1 text-sm",
                     children: [
-                      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("option", {
+                      /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("option", {
                         value: "",
                         children: "All"
                       }, undefined, false, undefined, this),
-                      offerStatuses.map((s) => /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("option", {
+                      offerStatuses.map((s) => /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("option", {
                         value: s,
                         children: s
                       }, s, false, undefined, this))
@@ -180138,10 +181281,10 @@ var DispatchPage = () => {
                   }, undefined, true, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("label", {
+              /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("label", {
                 className: "flex items-center gap-2 text-sm text-gray-600",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("input", {
+                  /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("input", {
                     type: "checkbox",
                     checked: showCompleted,
                     onChange: (e) => setShowCompleted(e.target.checked)
@@ -180149,7 +181292,7 @@ var DispatchPage = () => {
                   "Show completed"
                 ]
               }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("span", {
+              /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("span", {
                 className: "text-sm text-gray-500",
                 children: [
                   filtered.length,
@@ -180160,25 +181303,25 @@ var DispatchPage = () => {
           }, undefined, true, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      filtered.length === 0 ? /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+      filtered.length === 0 ? /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
         className: "text-center py-8 text-gray-500",
         children: "No dispatches match the current filters."
-      }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+      }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
         className: "space-y-6",
-        children: [...byProposal.entries()].map(([proposalId, pDispatches]) => /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+        children: [...byProposal.entries()].map(([proposalId, pDispatches]) => /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
           className: "rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden",
           children: [
-            /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+            /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
               className: "bg-gray-50 dark:bg-gray-800 px-4 py-2 border-b border-gray-200 dark:border-gray-700",
               children: [
-                /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("span", {
+                /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("span", {
                   className: "font-semibold",
                   children: [
                     "P",
                     proposalId
                   ]
                 }, undefined, true, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("span", {
+                /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("span", {
                   className: "text-sm text-gray-500 ml-2",
                   children: [
                     pDispatches.length,
@@ -180188,101 +181331,101 @@ var DispatchPage = () => {
                 }, undefined, true, undefined, this)
               ]
             }, undefined, true, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("table", {
+            /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("table", {
               className: "min-w-full divide-y divide-gray-200 dark:divide-gray-700",
               children: [
-                /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("thead", {
+                /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("thead", {
                   className: "bg-gray-50 dark:bg-gray-800",
-                  children: /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("tr", {
+                  children: /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("tr", {
                     children: [
-                      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("th", {
+                      /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("th", {
                         className: "px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase",
                         children: "Agent"
                       }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("th", {
+                      /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("th", {
                         className: "px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase",
                         children: "Worker"
                       }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("th", {
+                      /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("th", {
                         className: "px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase",
                         children: "Role"
                       }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("th", {
+                      /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("th", {
                         className: "px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase",
                         children: "Squad"
                       }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("th", {
+                      /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("th", {
                         className: "px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase",
                         children: "Status"
                       }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("th", {
+                      /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("th", {
                         className: "px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase",
                         children: "Offer"
                       }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("th", {
+                      /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("th", {
                         className: "px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase",
                         children: "Age"
                       }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("th", {
+                      /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("th", {
                         className: "px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase",
                         children: "Reissues"
                       }, undefined, false, undefined, this)
                     ]
                   }, undefined, true, undefined, this)
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("tbody", {
+                /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("tbody", {
                   className: "bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700",
                   children: pDispatches.map((d) => {
                     const countdown = d.offer_status === "claimed" ? leaseCountdown(d.claim_expires_at, nowMs) : null;
-                    return /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("tr", {
+                    return /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("tr", {
                       className: "hover:bg-gray-50 dark:hover:bg-gray-800",
                       children: [
-                        /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("td", {
+                        /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("td", {
                           className: "px-4 py-2 font-mono text-sm",
                           children: d.agent_identity || "—"
                         }, undefined, false, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("td", {
+                        /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("td", {
                           className: "px-4 py-2 font-mono text-sm",
-                          children: d.worker_identity ? d.worker_identity : /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("span", {
+                          children: d.worker_identity ? d.worker_identity : /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("span", {
                             className: "text-gray-400 italic",
                             children: "empty"
                           }, undefined, false, undefined, this)
                         }, undefined, false, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("td", {
+                        /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("td", {
                           className: "px-4 py-2 text-sm",
                           children: d.dispatch_role
                         }, undefined, false, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("td", {
+                        /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("td", {
                           className: "px-4 py-2 text-sm text-gray-500",
                           children: d.squad_name
                         }, undefined, false, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("td", {
+                        /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("td", {
                           className: "px-4 py-2",
-                          children: /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("span", {
-                            className: `inline-block px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[d.dispatch_status] ?? "bg-gray-100 text-gray-800"}`,
+                          children: /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("span", {
+                            className: `inline-block px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS2[d.dispatch_status] ?? "bg-gray-100 text-gray-800"}`,
                             children: d.dispatch_status
                           }, undefined, false, undefined, this)
                         }, undefined, false, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("td", {
+                        /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("td", {
                           className: "px-4 py-2",
                           children: [
-                            /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("span", {
+                            /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("span", {
                               className: `inline-block px-2 py-0.5 rounded text-xs font-medium ${OFFER_COLORS[d.offer_status] ?? "bg-gray-100 text-gray-800"}`,
                               children: d.offer_status
                             }, undefined, false, undefined, this),
-                            countdown && /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("div", {
+                            countdown && /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
                               className: "text-xs text-gray-500 mt-0.5 tabular-nums",
                               children: countdown
                             }, undefined, false, undefined, this)
                           ]
                         }, undefined, true, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("td", {
+                        /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("td", {
                           className: "px-4 py-2 text-sm tabular-nums text-gray-500",
                           children: timeAgo2(d.assigned_at)
                         }, undefined, false, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime18.jsxDEV("td", {
+                        /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("td", {
                           className: "px-4 py-2",
-                          children: /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(ReissueBar, {
+                          children: /* @__PURE__ */ jsx_dev_runtime19.jsxDEV(ReissueBar, {
                             count: d.reissue_count,
                             max: d.max_reissues
                           }, undefined, false, undefined, this)
@@ -180302,781 +181445,7 @@ var DispatchPage = () => {
 var DispatchPage_default = DispatchPage;
 
 // src/apps/dashboard-web/components/DocumentsPage.tsx
-var import_react19 = __toESM(require_react(), 1);
-var jsx_dev_runtime19 = __toESM(require_jsx_dev_runtime(), 1);
-var docTypeColor = (type) => {
-  switch (type) {
-    case "specification":
-      return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400";
-    case "guide":
-      return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400";
-    case "readme":
-      return "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400";
-    default:
-      return "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400";
-  }
-};
-var formatDate2 = (dateStr) => {
-  if (!dateStr)
-    return "";
-  try {
-    return new Date(dateStr).toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric"
-    });
-  } catch {
-    return dateStr;
-  }
-};
-var DocumentsPage = () => {
-  const [documents, setDocuments] = import_react19.useState([]);
-  const [loading, setLoading] = import_react19.useState(true);
-  const [error, setError] = import_react19.useState(null);
-  const [filter, setFilter] = import_react19.useState("");
-  const [typeFilter, setTypeFilter] = import_react19.useState("");
-  const [selectedDoc, setSelectedDoc] = import_react19.useState(null);
-  const fetchData = import_react19.useCallback(async () => {
-    try {
-      setError(null);
-      const data = await apiClient.fetchDocs();
-      setDocuments(data);
-    } catch (err) {
-      console.error("Failed to fetch documents:", err);
-      setError("Failed to load documents");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-  import_react19.useEffect(() => {
-    fetchData();
-  }, [fetchData]);
-  const docTypes = [...new Set(documents.map((d) => d.type))].sort();
-  const filteredDocs = documents.filter((doc) => {
-    if (filter) {
-      const query = filter.toLowerCase();
-      const matchesTitle = doc.title?.toLowerCase().includes(query);
-      const matchesName = doc.name?.toLowerCase().includes(query);
-      const matchesPath = doc.path?.toLowerCase().includes(query);
-      if (!matchesTitle && !matchesName && !matchesPath)
-        return false;
-    }
-    if (typeFilter && doc.type !== typeFilter)
-      return false;
-    return true;
-  });
-  if (loading) {
-    return /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-      className: "flex flex-col justify-center items-center h-64 space-y-4",
-      children: [
-        /* @__PURE__ */ jsx_dev_runtime19.jsxDEV(LoadingSpinner_default, {
-          size: "lg",
-          text: ""
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("p", {
-          className: "text-lg font-medium text-gray-900 dark:text-gray-100",
-          children: "Loading documents..."
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this);
-  }
-  if (error) {
-    return /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-      className: "p-8 text-center",
-      children: /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-        className: "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6",
-        children: [
-          /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("p", {
-            className: "text-red-600 dark:text-red-400 font-medium",
-            children: "Error"
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("p", {
-            className: "text-red-500 dark:text-red-300 text-sm mt-1",
-            children: error
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("button", {
-            type: "button",
-            onClick: fetchData,
-            className: "mt-4 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded hover:bg-red-200 dark:hover:bg-red-900/50",
-            children: "Retry"
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this)
-    }, undefined, false, undefined, this);
-  }
-  if (selectedDoc) {
-    return /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-      className: "space-y-4",
-      children: [
-        /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-          className: "flex items-center gap-4",
-          children: /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("button", {
-            type: "button",
-            onClick: () => setSelectedDoc(null),
-            className: "text-sm text-blue-600 dark:text-blue-400 hover:underline",
-            children: "← Back to documents"
-          }, undefined, false, undefined, this)
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-          className: "bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6",
-          children: [
-            /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("h1", {
-              className: "text-xl font-bold text-gray-900 dark:text-gray-100",
-              children: selectedDoc.title || selectedDoc.name
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-              className: "flex items-center gap-3 mt-2",
-              children: [
-                /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("span", {
-                  className: `px-2 py-0.5 rounded text-xs font-medium ${docTypeColor(selectedDoc.type)}`,
-                  children: selectedDoc.type
-                }, undefined, false, undefined, this),
-                selectedDoc.lastModified && /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("span", {
-                  className: "text-xs text-gray-500 dark:text-gray-400",
-                  children: [
-                    "Modified: ",
-                    formatDate2(selectedDoc.lastModified)
-                  ]
-                }, undefined, true, undefined, this)
-              ]
-            }, undefined, true, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-              className: "mt-4 prose dark:prose-invert max-w-none",
-              children: /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("pre", {
-                className: "whitespace-pre-wrap text-sm bg-gray-50 dark:bg-gray-900 p-4 rounded-lg overflow-auto",
-                children: selectedDoc.rawContent
-              }, undefined, false, undefined, this)
-            }, undefined, false, undefined, this)
-          ]
-        }, undefined, true, undefined, this)
-      ]
-    }, undefined, true, undefined, this);
-  }
-  return /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-    className: "space-y-6",
-    children: [
-      /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-        className: "flex items-center justify-between",
-        children: [
-          /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("h1", {
-            className: "text-2xl font-bold text-gray-900 dark:text-gray-100",
-            children: [
-              "Documents (",
-              documents.length,
-              ")"
-            ]
-          }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-            className: "flex items-center gap-3",
-            children: [
-              /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("input", {
-                type: "text",
-                placeholder: "Search documents...",
-                value: filter,
-                onChange: (e) => setFilter(e.target.value),
-                className: "rounded border px-3 py-1.5 text-sm bg-white dark:bg-gray-800 w-48"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("select", {
-                value: typeFilter,
-                onChange: (e) => setTypeFilter(e.target.value),
-                className: "rounded border px-2 py-1.5 text-sm bg-white dark:bg-gray-800",
-                children: [
-                  /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("option", {
-                    value: "",
-                    children: "All types"
-                  }, undefined, false, undefined, this),
-                  docTypes.map((t) => /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("option", {
-                    value: t,
-                    children: t
-                  }, t, false, undefined, this))
-                ]
-              }, undefined, true, undefined, this)
-            ]
-          }, undefined, true, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-        className: "space-y-3",
-        children: filteredDocs.map((doc) => /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("button", {
-          type: "button",
-          onClick: () => setSelectedDoc(doc),
-          className: "w-full text-left bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 hover:border-blue-300 dark:hover:border-blue-700 transition-colors",
-          children: /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-            className: "flex items-start justify-between",
-            children: [
-              /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-                className: "space-y-1",
-                children: [
-                  /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("h3", {
-                    className: "font-medium text-gray-900 dark:text-gray-100",
-                    children: doc.title || doc.name
-                  }, undefined, false, undefined, this),
-                  doc.path && /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("p", {
-                    className: "text-xs font-mono text-gray-500 dark:text-gray-400",
-                    children: doc.path
-                  }, undefined, false, undefined, this)
-                ]
-              }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-                className: "flex items-center gap-2",
-                children: [
-                  /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("span", {
-                    className: `px-2 py-0.5 rounded text-xs font-medium ${docTypeColor(doc.type)}`,
-                    children: doc.type
-                  }, undefined, false, undefined, this),
-                  doc.lastModified && /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("span", {
-                    className: "text-xs text-gray-500 dark:text-gray-400",
-                    children: formatDate2(doc.lastModified)
-                  }, undefined, false, undefined, this)
-                ]
-              }, undefined, true, undefined, this)
-            ]
-          }, undefined, true, undefined, this)
-        }, doc.id || doc.name, false, undefined, this))
-      }, undefined, false, undefined, this),
-      filteredDocs.length === 0 && /* @__PURE__ */ jsx_dev_runtime19.jsxDEV("div", {
-        className: "text-center py-12 text-gray-500 dark:text-gray-400",
-        children: filter || typeFilter ? "No documents match your filters" : "No documents found"
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-};
-var DocumentsPage_default = DocumentsPage;
-
-// src/apps/dashboard-web/components/KnowledgePage.tsx
-var import_react20 = __toESM(require_react(), 1);
-var jsx_dev_runtime20 = __toESM(require_jsx_dev_runtime(), 1);
-var entryTypeColor = (type) => {
-  switch (type) {
-    case "solution":
-      return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400";
-    case "pattern":
-      return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400";
-    case "decision":
-      return "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400";
-    case "obstacle":
-      return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400";
-    case "lesson":
-      return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400";
-    default:
-      return "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400";
-  }
-};
-var KnowledgePage = () => {
-  const [entries, setEntries] = import_react20.useState([]);
-  const [loading, setLoading] = import_react20.useState(true);
-  const [error, setError] = import_react20.useState(null);
-  const [searchQuery, setSearchQuery] = import_react20.useState("");
-  const [typeFilter, setTypeFilter] = import_react20.useState("");
-  const fetchData = import_react20.useCallback(async () => {
-    try {
-      setError(null);
-      const params = new URLSearchParams;
-      if (searchQuery)
-        params.set("query", searchQuery);
-      if (typeFilter)
-        params.set("type", typeFilter);
-      const url = `/api/knowledge${params.toString() ? `?${params.toString()}` : ""}`;
-      const response = await fetch(url);
-      if (!response.ok)
-        throw new Error("Failed to fetch knowledge entries");
-      const data = await response.json();
-      setEntries(data);
-    } catch (err) {
-      console.error("Failed to fetch knowledge entries:", err);
-      setError("Failed to load knowledge entries");
-    } finally {
-      setLoading(false);
-    }
-  }, [searchQuery, typeFilter]);
-  import_react20.useEffect(() => {
-    const timer = setTimeout(fetchData, 300);
-    return () => clearTimeout(timer);
-  }, [fetchData]);
-  const handleMarkHelpful = async (id) => {
-    try {
-      await fetch(`/api/knowledge/${id}/helpful`, { method: "POST" });
-      setEntries((prev) => prev.map((e) => e.id === id ? { ...e, helpful_count: (e.helpful_count || 0) + 1 } : e));
-    } catch (err) {
-      console.error("Failed to mark as helpful:", err);
-    }
-  };
-  if (loading && entries.length === 0) {
-    return /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
-      className: "flex flex-col justify-center items-center h-64 space-y-4",
-      children: [
-        /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(LoadingSpinner_default, {
-          size: "lg",
-          text: ""
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("p", {
-          className: "text-lg font-medium text-gray-900 dark:text-gray-100",
-          children: "Loading knowledge base..."
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this);
-  }
-  return /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
-    className: "space-y-6",
-    children: [
-      /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
-        className: "flex items-center justify-between",
-        children: [
-          /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("h1", {
-            className: "text-2xl font-bold text-gray-900 dark:text-gray-100",
-            children: [
-              "Knowledge Base (",
-              entries.length,
-              ")"
-            ]
-          }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
-            className: "flex items-center gap-3",
-            children: [
-              /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("input", {
-                type: "text",
-                placeholder: "Search knowledge...",
-                value: searchQuery,
-                onChange: (e) => setSearchQuery(e.target.value),
-                className: "rounded border px-3 py-1.5 text-sm bg-white dark:bg-gray-800 w-48"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("select", {
-                value: typeFilter,
-                onChange: (e) => setTypeFilter(e.target.value),
-                className: "rounded border px-2 py-1.5 text-sm bg-white dark:bg-gray-800",
-                children: [
-                  /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("option", {
-                    value: "",
-                    children: "All types"
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("option", {
-                    value: "solution",
-                    children: "Solutions"
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("option", {
-                    value: "pattern",
-                    children: "Patterns"
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("option", {
-                    value: "decision",
-                    children: "Decisions"
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("option", {
-                    value: "obstacle",
-                    children: "Obstacles"
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("option", {
-                    value: "lesson",
-                    children: "Lessons"
-                  }, undefined, false, undefined, this)
-                ]
-              }, undefined, true, undefined, this)
-            ]
-          }, undefined, true, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      error && /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
-        className: "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4",
-        children: /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("p", {
-          className: "text-red-600 dark:text-red-400",
-          children: error
-        }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
-        className: "space-y-4",
-        children: entries.map((entry) => /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
-          className: "bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-3",
-          children: [
-            /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
-              className: "flex items-start justify-between",
-              children: [
-                /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("span", {
-                  className: `px-2 py-0.5 rounded text-xs font-medium ${entryTypeColor(entry.type)}`,
-                  children: entry.type
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
-                  className: "flex items-center gap-2",
-                  children: [
-                    entry.helpful_count !== undefined && /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("span", {
-                      className: "text-xs text-gray-500 dark:text-gray-400",
-                      children: [
-                        "\uD83D\uDC4D ",
-                        entry.helpful_count
-                      ]
-                    }, undefined, true, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("button", {
-                      type: "button",
-                      onClick: () => handleMarkHelpful(entry.id),
-                      className: "text-xs text-blue-600 dark:text-blue-400 hover:underline",
-                      children: "Helpful?"
-                    }, undefined, false, undefined, this)
-                  ]
-                }, undefined, true, undefined, this)
-              ]
-            }, undefined, true, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("p", {
-              className: "text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap",
-              children: entry.content
-            }, undefined, false, undefined, this),
-            entry.keywords.length > 0 && /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
-              className: "flex flex-wrap gap-1",
-              children: entry.keywords.map((kw) => /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("span", {
-                className: "px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded text-xs",
-                children: kw
-              }, kw, false, undefined, this))
-            }, undefined, false, undefined, this),
-            entry.source && /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("p", {
-              className: "text-xs text-gray-500 dark:text-gray-400",
-              children: [
-                "Source: ",
-                entry.source
-              ]
-            }, undefined, true, undefined, this)
-          ]
-        }, entry.id, true, undefined, this))
-      }, undefined, false, undefined, this),
-      !loading && entries.length === 0 && /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
-        className: "text-center py-12 text-gray-500 dark:text-gray-400",
-        children: searchQuery || typeFilter ? "No knowledge entries match your search" : "No knowledge entries yet"
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-};
-var KnowledgePage_default = KnowledgePage;
-
-// src/apps/dashboard-web/components/MapPage.tsx
-var import_react21 = __toESM(require_react(), 1);
-var jsx_dev_runtime21 = __toESM(require_jsx_dev_runtime(), 1);
-var statusColor2 = (status) => {
-  switch (status?.toLowerCase()) {
-    case "complete":
-      return "#10B981";
-    case "develop":
-      return "#3B82F6";
-    case "review":
-      return "#F59E0B";
-    case "merge":
-      return "#8B5CF6";
-    case "draft":
-      return "#9CA3AF";
-    default:
-      return "#6B7280";
-  }
-};
-var MapPage = () => {
-  const [nodes, setNodes] = import_react21.useState([]);
-  const [loading, setLoading] = import_react21.useState(true);
-  const [error, setError] = import_react21.useState(null);
-  const [selectedNode, setSelectedNode] = import_react21.useState(null);
-  import_react21.useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setError(null);
-        const response = await fetch("/api/proposals?crossBranch=true");
-        if (!response.ok)
-          throw new Error("Failed to fetch proposals");
-        const proposals = await response.json();
-        const mapNodes = proposals.map((p) => ({
-          id: p.id,
-          title: p.title,
-          status: p.status,
-          type: p.proposalType,
-          dependencies: p.dependencies || []
-        }));
-        setNodes(mapNodes);
-      } catch (err) {
-        console.error("Failed to fetch map data:", err);
-        setError("Failed to load dependency map");
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
-  }, []);
-  const adjacencyList = import_react21.useMemo(() => {
-    const adj = new Map;
-    for (const node of nodes) {
-      adj.set(node.id, []);
-    }
-    for (const node of nodes) {
-      for (const dep of node.dependencies) {
-        const list = adj.get(dep) || [];
-        list.push(node.id);
-        adj.set(dep, list);
-      }
-    }
-    return adj;
-  }, [nodes]);
-  const selectedNodeData = import_react21.useMemo(() => nodes.find((n) => n.id === selectedNode), [nodes, selectedNode]);
-  const dependents = import_react21.useMemo(() => selectedNode ? adjacencyList.get(selectedNode) || [] : [], [adjacencyList, selectedNode]);
-  const dependencies = import_react21.useMemo(() => selectedNodeData?.dependencies || [], [selectedNodeData]);
-  if (loading) {
-    return /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-      className: "flex flex-col justify-center items-center h-64 space-y-4",
-      children: [
-        /* @__PURE__ */ jsx_dev_runtime21.jsxDEV(LoadingSpinner_default, {
-          size: "lg",
-          text: ""
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("p", {
-          className: "text-lg font-medium text-gray-900 dark:text-gray-100",
-          children: "Loading dependency map..."
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this);
-  }
-  if (error) {
-    return /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-      className: "p-8 text-center",
-      children: /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-        className: "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6",
-        children: [
-          /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("p", {
-            className: "text-red-600 dark:text-red-400 font-medium",
-            children: "Error"
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("p", {
-            className: "text-red-500 dark:text-red-300 text-sm mt-1",
-            children: error
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this)
-    }, undefined, false, undefined, this);
-  }
-  return /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-    className: "space-y-6",
-    children: [
-      /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-        className: "flex items-center justify-between",
-        children: [
-          /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("h1", {
-            className: "text-2xl font-bold text-gray-900 dark:text-gray-100",
-            children: [
-              "Dependency Map (",
-              nodes.length,
-              " proposals)"
-            ]
-          }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-            className: "flex items-center gap-4 text-xs",
-            children: [
-              { label: "Draft", color: "#9CA3AF" },
-              { label: "Review", color: "#F59E0B" },
-              { label: "Develop", color: "#3B82F6" },
-              { label: "Merge", color: "#8B5CF6" },
-              { label: "Complete", color: "#10B981" }
-            ].map(({ label, color }) => /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-              className: "flex items-center gap-1",
-              children: [
-                /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                  className: "w-3 h-3 rounded-full",
-                  style: { backgroundColor: color }
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("span", {
-                  className: "text-gray-600 dark:text-gray-400",
-                  children: label
-                }, undefined, false, undefined, this)
-              ]
-            }, label, true, undefined, this))
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-        className: "grid grid-cols-1 lg:grid-cols-3 gap-6",
-        children: [
-          /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-            className: "bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 max-h-[600px] overflow-y-auto",
-            children: [
-              /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("h2", {
-                className: "text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3",
-                children: "Proposals"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                className: "space-y-1",
-                children: nodes.map((node) => /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("button", {
-                  type: "button",
-                  onClick: () => setSelectedNode(selectedNode === node.id ? null : node.id),
-                  className: `w-full text-left px-3 py-2 rounded text-sm transition-colors ${selectedNode === node.id ? "bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700" : "hover:bg-gray-50 dark:hover:bg-gray-700"}`,
-                  children: [
-                    /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                      className: "flex items-center gap-2",
-                      children: [
-                        /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                          className: "w-2 h-2 rounded-full flex-shrink-0",
-                          style: { backgroundColor: statusColor2(node.status) }
-                        }, undefined, false, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("span", {
-                          className: "font-mono text-xs text-gray-500 dark:text-gray-400",
-                          children: node.id
-                        }, undefined, false, undefined, this)
-                      ]
-                    }, undefined, true, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                      className: "text-gray-700 dark:text-gray-300 truncate mt-0.5 ml-4",
-                      children: node.title
-                    }, undefined, false, undefined, this)
-                  ]
-                }, node.id, true, undefined, this))
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-            className: "lg:col-span-2 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6",
-            children: selectedNodeData ? /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-              className: "space-y-6",
-              children: [
-                /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                  children: [
-                    /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                      className: "flex items-center gap-2 mb-2",
-                      children: [
-                        /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                          className: "w-3 h-3 rounded-full",
-                          style: {
-                            backgroundColor: statusColor2(selectedNodeData.status)
-                          }
-                        }, undefined, false, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("span", {
-                          className: "font-mono text-sm text-gray-500 dark:text-gray-400",
-                          children: selectedNodeData.id
-                        }, undefined, false, undefined, this)
-                      ]
-                    }, undefined, true, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("h2", {
-                      className: "text-xl font-bold text-gray-900 dark:text-gray-100",
-                      children: selectedNodeData.title
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                      className: "flex items-center gap-2 mt-2",
-                      children: [
-                        /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("span", {
-                          className: "px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded text-xs",
-                          children: selectedNodeData.status
-                        }, undefined, false, undefined, this),
-                        selectedNodeData.type && /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("span", {
-                          className: "px-2 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded text-xs",
-                          children: selectedNodeData.type
-                        }, undefined, false, undefined, this)
-                      ]
-                    }, undefined, true, undefined, this)
-                  ]
-                }, undefined, true, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                  className: "grid grid-cols-2 gap-6",
-                  children: [
-                    /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                      children: [
-                        /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("h3", {
-                          className: "text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-2",
-                          children: [
-                            "Depends On (",
-                            dependencies.length,
-                            ")"
-                          ]
-                        }, undefined, true, undefined, this),
-                        dependencies.length === 0 ? /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("p", {
-                          className: "text-sm text-gray-500 dark:text-gray-400",
-                          children: "No dependencies"
-                        }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                          className: "space-y-1",
-                          children: dependencies.map((depId) => {
-                            const depNode = nodes.find((n) => n.id === depId);
-                            return /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("button", {
-                              type: "button",
-                              onClick: () => setSelectedNode(depId),
-                              className: "w-full text-left px-2 py-1 rounded text-sm hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2",
-                              children: [
-                                depNode && /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                                  className: "w-2 h-2 rounded-full",
-                                  style: {
-                                    backgroundColor: statusColor2(depNode.status)
-                                  }
-                                }, undefined, false, undefined, this),
-                                /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("span", {
-                                  className: "font-mono text-xs",
-                                  children: depId
-                                }, undefined, false, undefined, this),
-                                depNode && /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("span", {
-                                  className: "text-gray-500 dark:text-gray-400 truncate",
-                                  children: [
-                                    "— ",
-                                    depNode.title
-                                  ]
-                                }, undefined, true, undefined, this)
-                              ]
-                            }, depId, true, undefined, this);
-                          })
-                        }, undefined, false, undefined, this)
-                      ]
-                    }, undefined, true, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                      children: [
-                        /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("h3", {
-                          className: "text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-2",
-                          children: [
-                            "Blocking (",
-                            dependents.length,
-                            ")"
-                          ]
-                        }, undefined, true, undefined, this),
-                        dependents.length === 0 ? /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("p", {
-                          className: "text-sm text-gray-500 dark:text-gray-400",
-                          children: "Not blocking anything"
-                        }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                          className: "space-y-1",
-                          children: dependents.map((depId) => {
-                            const depNode = nodes.find((n) => n.id === depId);
-                            return /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("button", {
-                              type: "button",
-                              onClick: () => setSelectedNode(depId),
-                              className: "w-full text-left px-2 py-1 rounded text-sm hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2",
-                              children: [
-                                depNode && /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-                                  className: "w-2 h-2 rounded-full",
-                                  style: {
-                                    backgroundColor: statusColor2(depNode.status)
-                                  }
-                                }, undefined, false, undefined, this),
-                                /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("span", {
-                                  className: "font-mono text-xs",
-                                  children: depId
-                                }, undefined, false, undefined, this),
-                                depNode && /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("span", {
-                                  className: "text-gray-500 dark:text-gray-400 truncate",
-                                  children: [
-                                    "— ",
-                                    depNode.title
-                                  ]
-                                }, undefined, true, undefined, this)
-                              ]
-                            }, depId, true, undefined, this);
-                          })
-                        }, undefined, false, undefined, this)
-                      ]
-                    }, undefined, true, undefined, this)
-                  ]
-                }, undefined, true, undefined, this)
-              ]
-            }, undefined, true, undefined, this) : /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-              className: "text-center py-16 text-gray-500 dark:text-gray-400",
-              children: "Select a proposal from the list to view its dependencies"
-            }, undefined, false, undefined, this)
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      nodes.length === 0 && /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
-        className: "text-center py-12 text-gray-500 dark:text-gray-400",
-        children: "No proposals to display"
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-};
-var MapPage_default = MapPage;
-
-// src/apps/dashboard-web/components/NotFoundPage.tsx
-function NotFoundPage(_props) {
-  return null;
-}
+var import_react55 = __toESM(require_react(), 1);
 
 // node_modules/@babel/runtime/helpers/esm/extends.js
 function _extends() {
@@ -181105,10 +181474,10 @@ function _objectWithoutPropertiesLoose(r, e) {
 }
 
 // node_modules/@uiw/react-md-editor/esm/Editor.js
-var import_react55 = __toESM(require_react(), 1);
+var import_react53 = __toESM(require_react(), 1);
 
 // node_modules/@uiw/react-markdown-preview/esm/index.js
-var import_react24 = __toESM(require_react(), 1);
+var import_react22 = __toESM(require_react(), 1);
 
 // node_modules/unist-util-is/lib/index.js
 var convert = function(test) {
@@ -184623,7 +184992,7 @@ function vbnet(Prism) {
   });
 }
 
-// node_modules/hastscript/node_modules/property-information/lib/util/schema.js
+// node_modules/refractor/node_modules/property-information/lib/util/schema.js
 class Schema {
   constructor(property, normal, space) {
     this.property = property;
@@ -184637,7 +185006,7 @@ Schema.prototype.property = {};
 Schema.prototype.normal = {};
 Schema.prototype.space = null;
 
-// node_modules/hastscript/node_modules/property-information/lib/util/merge.js
+// node_modules/refractor/node_modules/property-information/lib/util/merge.js
 function merge(definitions, space) {
   const property = {};
   const normal = {};
@@ -184649,12 +185018,12 @@ function merge(definitions, space) {
   return new Schema(property, normal, space);
 }
 
-// node_modules/hastscript/node_modules/property-information/lib/normalize.js
+// node_modules/refractor/node_modules/property-information/lib/normalize.js
 function normalize(value) {
   return value.toLowerCase();
 }
 
-// node_modules/hastscript/node_modules/property-information/lib/util/info.js
+// node_modules/refractor/node_modules/property-information/lib/util/info.js
 class Info {
   constructor(property, attribute) {
     this.property = property;
@@ -184672,7 +185041,7 @@ Info.prototype.commaOrSpaceSeparated = false;
 Info.prototype.mustUseProperty = false;
 Info.prototype.defined = false;
 
-// node_modules/hastscript/node_modules/property-information/lib/util/types.js
+// node_modules/refractor/node_modules/property-information/lib/util/types.js
 var exports_types = {};
 __export(exports_types, {
   spaceSeparated: () => spaceSeparated,
@@ -184695,7 +185064,7 @@ function increment() {
   return 2 ** ++powers;
 }
 
-// node_modules/hastscript/node_modules/property-information/lib/util/defined-info.js
+// node_modules/refractor/node_modules/property-information/lib/util/defined-info.js
 var checks = Object.keys(exports_types);
 
 class DefinedInfo extends Info {
@@ -184718,7 +185087,7 @@ function mark(values, key, value) {
   }
 }
 
-// node_modules/hastscript/node_modules/property-information/lib/util/create.js
+// node_modules/refractor/node_modules/property-information/lib/util/create.js
 var own2 = {}.hasOwnProperty;
 function create(definition) {
   const property = {};
@@ -184739,7 +185108,7 @@ function create(definition) {
   return new Schema(property, normal, definition.space);
 }
 
-// node_modules/hastscript/node_modules/property-information/lib/xlink.js
+// node_modules/refractor/node_modules/property-information/lib/xlink.js
 var xlink = create({
   space: "xlink",
   transform(_, prop) {
@@ -184756,7 +185125,7 @@ var xlink = create({
   }
 });
 
-// node_modules/hastscript/node_modules/property-information/lib/xml.js
+// node_modules/refractor/node_modules/property-information/lib/xml.js
 var xml = create({
   space: "xml",
   transform(_, prop) {
@@ -184765,17 +185134,17 @@ var xml = create({
   properties: { xmlLang: null, xmlBase: null, xmlSpace: null }
 });
 
-// node_modules/hastscript/node_modules/property-information/lib/util/case-sensitive-transform.js
+// node_modules/refractor/node_modules/property-information/lib/util/case-sensitive-transform.js
 function caseSensitiveTransform(attributes, attribute) {
   return attribute in attributes ? attributes[attribute] : attribute;
 }
 
-// node_modules/hastscript/node_modules/property-information/lib/util/case-insensitive-transform.js
+// node_modules/refractor/node_modules/property-information/lib/util/case-insensitive-transform.js
 function caseInsensitiveTransform(attributes, property) {
   return caseSensitiveTransform(attributes, property.toLowerCase());
 }
 
-// node_modules/hastscript/node_modules/property-information/lib/xmlns.js
+// node_modules/refractor/node_modules/property-information/lib/xmlns.js
 var xmlns = create({
   space: "xmlns",
   attributes: { xmlnsxlink: "xmlns:xlink" },
@@ -184783,7 +185152,7 @@ var xmlns = create({
   properties: { xmlns: null, xmlnsXLink: null }
 });
 
-// node_modules/hastscript/node_modules/property-information/lib/aria.js
+// node_modules/refractor/node_modules/property-information/lib/aria.js
 var aria = create({
   transform(_, prop) {
     return prop === "role" ? prop : "aria-" + prop.slice(4).toLowerCase();
@@ -184841,7 +185210,7 @@ var aria = create({
   }
 });
 
-// node_modules/hastscript/node_modules/property-information/lib/html.js
+// node_modules/refractor/node_modules/property-information/lib/html.js
 var html = create({
   space: "html",
   attributes: {
@@ -185148,7 +185517,7 @@ var html = create({
   }
 });
 
-// node_modules/hastscript/node_modules/property-information/lib/svg.js
+// node_modules/refractor/node_modules/property-information/lib/svg.js
 var svg = create({
   space: "svg",
   attributes: {
@@ -185706,7 +186075,7 @@ var svg = create({
   }
 });
 
-// node_modules/hastscript/node_modules/property-information/lib/find.js
+// node_modules/refractor/node_modules/property-information/lib/find.js
 var valid = /^data[-\w.:]+$/i;
 var dash = /-[a-z]/g;
 var cap = /[A-Z]/g;
@@ -185741,11 +186110,11 @@ function kebab($0) {
 function camelcase($0) {
   return $0.charAt(1).toUpperCase();
 }
-// node_modules/hastscript/node_modules/property-information/index.js
+// node_modules/refractor/node_modules/property-information/index.js
 var html2 = merge([xml, xlink, xmlns, aria, html], "html");
 var svg2 = merge([xml, xlink, xmlns, aria, svg], "svg");
 
-// node_modules/hast-util-parse-selector/lib/index.js
+// node_modules/refractor/node_modules/hast-util-parse-selector/lib/index.js
 var search = /[#.]/g;
 function parseSelector(selector, defaultTagName) {
   const value = selector || "";
@@ -185817,7 +186186,7 @@ function stringify2(values, options) {
   return input.join((settings.padRight ? " " : "") + "," + (settings.padLeft === false ? "" : " ")).trim();
 }
 
-// node_modules/hastscript/lib/core.js
+// node_modules/refractor/node_modules/hastscript/lib/core.js
 var buttonTypes = new Set(["menu", "submit", "reset", "button"]);
 var own3 = {}.hasOwnProperty;
 function core(schema, defaultTagName, caseSensitive) {
@@ -185958,7 +186327,7 @@ function createAdjustMap(values) {
   return result;
 }
 
-// node_modules/hastscript/lib/html.js
+// node_modules/refractor/node_modules/hastscript/lib/html.js
 var h = core(html2, "div");
 // node_modules/character-entities-legacy/index.js
 var characterEntitiesLegacy = [
@@ -206715,7 +207084,7 @@ var serialize = (value, { json: json2, lossy } = {}) => {
 // node_modules/@ungap/structured-clone/esm/index.js
 var esm_default = typeof structuredClone === "function" ? (any, options) => options && (("json" in options) || ("lossy" in options)) ? deserialize(serialize(any, options)) : structuredClone(any) : (any, options) => deserialize(serialize(any, options));
 
-// node_modules/hast-util-parse-selector/lib/index.js
+// node_modules/hast-util-from-parse5/node_modules/hastscript/node_modules/hast-util-parse-selector/lib/index.js
 var search2 = /[#.]/g;
 function parseSelector2(selector, defaultTagName) {
   const value = selector || "";
@@ -206751,7 +207120,7 @@ function parseSelector2(selector, defaultTagName) {
     children: []
   };
 }
-// node_modules/hastscript/lib/create-h.js
+// node_modules/hast-util-from-parse5/node_modules/hastscript/lib/create-h.js
 function createH(schema, defaultTagName, caseSensitive) {
   const adjust = caseSensitive ? createAdjustMap2(caseSensitive) : undefined;
   function h2(selector, properties2, ...children) {
@@ -206891,7 +207260,7 @@ function createAdjustMap2(values) {
   return result;
 }
 
-// node_modules/hastscript/lib/svg-case-sensitive-tag-names.js
+// node_modules/hast-util-from-parse5/node_modules/hastscript/lib/svg-case-sensitive-tag-names.js
 var svgCaseSensitiveTagNames = [
   "altGlyph",
   "altGlyphDef",
@@ -206934,7 +207303,7 @@ var svgCaseSensitiveTagNames = [
   "textPath"
 ];
 
-// node_modules/hastscript/lib/index.js
+// node_modules/hast-util-from-parse5/node_modules/hastscript/lib/index.js
 var h2 = createH(html4, "div");
 var s3 = createH(svg4, "g", svgCaseSensitiveTagNames);
 // node_modules/vfile-location/lib/index.js
@@ -215113,7 +215482,7 @@ function rehypeRaw(options) {
   };
 }
 // node_modules/@uiw/react-markdown-preview/esm/preview.js
-var import_react23 = __toESM(require_react(), 1);
+var import_react21 = __toESM(require_react(), 1);
 
 // node_modules/estree-util-is-identifier-name/lib/index.js
 var nameRe = /^[$_\p{ID_Start}][$_\u{200C}\u{200D}\p{ID_Continue}]*$/u;
@@ -215383,12 +215752,12 @@ function productionCreate(_2, jsx2, jsxs) {
     return key ? fn(type, props, key) : fn(type, props);
   }
 }
-function developmentCreate(filePath, jsxDEV22) {
+function developmentCreate(filePath, jsxDEV20) {
   return create3;
   function create3(node, type, props, key) {
     const isStaticChildren = Array.isArray(props.children);
     const point4 = pointStart(node);
-    return jsxDEV22(type, props, key, isStaticChildren, {
+    return jsxDEV20(type, props, key, isStaticChildren, {
       columnNumber: point4 ? point4.column - 1 : undefined,
       fileName: filePath,
       lineNumber: point4 ? point4.line : undefined
@@ -225225,7 +225594,7 @@ var pathData = {
 
 // node_modules/@uiw/react-markdown-preview/esm/plugins/useCopied.js
 var import_copy_to_clipboard = __toESM(require_copy_to_clipboard_umd(), 1);
-var import_react22 = __toESM(require_react(), 1);
+var import_react20 = __toESM(require_react(), 1);
 function getParentElement(target) {
   if (!target)
     return null;
@@ -225250,7 +225619,7 @@ function useCopied(container) {
       }, 2000);
     });
   };
-  import_react22.useEffect(() => {
+  import_react20.useEffect(() => {
     var _container$current, _container$current2;
     (_container$current = container.current) == null || _container$current.removeEventListener("click", handle2, false);
     (_container$current2 = container.current) == null || _container$current2.addEventListener("click", handle2, false);
@@ -225265,7 +225634,7 @@ function useCopied(container) {
 var import_jsx_runtime2 = __toESM(require_jsx_runtime(), 1);
 var _excluded = ["prefixCls", "className", "source", "style", "disableCopy", "skipHtml", "onScroll", "onMouseOver", "pluginsFilter", "rehypeRewrite", "wrapperElement", "warpperElement", "urlTransform"];
 var defaultUrlTransform2 = (url) => url;
-var preview_default = /* @__PURE__ */ import_react23.default.forwardRef((props, ref) => {
+var preview_default = /* @__PURE__ */ import_react21.default.forwardRef((props, ref) => {
   var {
     prefixCls = "wmde-markdown wmde-markdown-color",
     className: className2,
@@ -225280,8 +225649,8 @@ var preview_default = /* @__PURE__ */ import_react23.default.forwardRef((props, 
     warpperElement = {},
     urlTransform
   } = props, other = _objectWithoutPropertiesLoose(props, _excluded);
-  var mdp = import_react23.default.useRef(null);
-  import_react23.useImperativeHandle(ref, () => _extends({}, props, {
+  var mdp = import_react21.default.useRef(null);
+  import_react21.useImperativeHandle(ref, () => _extends({}, props, {
     mdp
   }), [mdp, props]);
   var cls = (prefixCls || "") + " " + (className2 || "");
@@ -225691,7 +226060,7 @@ var defaultRehypePlugins = [rehypeSlug, rehypeAutolinkHeadings, lib_default3];
 
 // node_modules/@uiw/react-markdown-preview/esm/index.js
 var import_jsx_runtime3 = __toESM(require_jsx_runtime(), 1);
-var esm_default2 = /* @__PURE__ */ import_react24.default.forwardRef((props, ref) => {
+var esm_default2 = /* @__PURE__ */ import_react22.default.forwardRef((props, ref) => {
   var _props$disableCopy;
   var rehypePlugins = [reservedMeta, rehypeRaw, retrieveMeta, ...defaultRehypePlugins, [lib_default, {
     rewrite: rehypeRewriteHandle((_props$disableCopy = props.disableCopy) != null ? _props$disableCopy : false, props.rehypeRewrite)
@@ -225707,19 +226076,19 @@ var esm_default2 = /* @__PURE__ */ import_react24.default.forwardRef((props, ref
 });
 
 // node_modules/@uiw/react-md-editor/esm/components/Toolbar/index.js
-var import_react27 = __toESM(require_react(), 1);
+var import_react25 = __toESM(require_react(), 1);
 
 // node_modules/@uiw/react-md-editor/esm/Context.js
-var import_react25 = __toESM(require_react(), 1);
+var import_react23 = __toESM(require_react(), 1);
 function reducer(state, action) {
   return _extends({}, state, action);
 }
-var EditorContext = /* @__PURE__ */ import_react25.default.createContext({
+var EditorContext = /* @__PURE__ */ import_react23.default.createContext({
   markdown: ""
 });
 
 // node_modules/@uiw/react-md-editor/esm/components/Toolbar/Child.js
-var import_react26 = __toESM(require_react(), 1);
+var import_react24 = __toESM(require_react(), 1);
 var import_jsx_runtime4 = __toESM(require_jsx_runtime(), 1);
 function Child(props) {
   var {
@@ -225730,8 +226099,8 @@ function Child(props) {
   } = props || {};
   var {
     barPopup = {}
-  } = import_react26.useContext(EditorContext);
-  return import_react26.useMemo(() => /* @__PURE__ */ import_jsx_runtime4.jsx("div", {
+  } = import_react24.useContext(EditorContext);
+  return import_react24.useMemo(() => /* @__PURE__ */ import_jsx_runtime4.jsx("div", {
     className: prefixCls + "-toolbar-child " + (groupName && barPopup[groupName] ? "active" : ""),
     onClick: (e) => e.stopPropagation(),
     children: Array.isArray(commands) ? /* @__PURE__ */ import_jsx_runtime4.jsx(Toolbar, _extends({
@@ -225756,8 +226125,8 @@ function ToolbarItems(props) {
     components,
     commandOrchestrator,
     dispatch
-  } = import_react27.useContext(EditorContext);
-  var originalOverflow = import_react27.useRef("");
+  } = import_react25.useContext(EditorContext);
+  var originalOverflow = import_react25.useRef("");
   function handleClick(command, name3) {
     if (!dispatch)
       return;
@@ -225788,7 +226157,7 @@ function ToolbarItems(props) {
     }
     commandOrchestrator && commandOrchestrator.executeCommand(command);
   }
-  import_react27.useEffect(() => {
+  import_react25.useEffect(() => {
     if (document && overflow) {
       if (fullscreen) {
         document.body.style.overflow = "hidden";
@@ -225808,7 +226177,7 @@ function ToolbarItems(props) {
         }), idx);
       }
       if (!item.keyCommand)
-        return /* @__PURE__ */ import_jsx_runtime5.jsx(import_react27.Fragment, {}, idx);
+        return /* @__PURE__ */ import_jsx_runtime5.jsx(import_react25.Fragment, {}, idx);
       var activeBtn = fullscreen && item.keyCommand === "fullscreen" || item.keyCommand === "preview" && preview === item.value;
       var childNode = item.children && typeof item.children === "function" ? item.children({
         getState: () => commandOrchestrator.getState(),
@@ -225824,7 +226193,7 @@ function ToolbarItems(props) {
       var com = render2 && typeof render2 === "function" ? render2(item, !!disabled2, handleClick, idx) : null;
       return /* @__PURE__ */ import_jsx_runtime5.jsxs("li", _extends({}, item.liProps, {
         className: activeBtn ? "active" : "",
-        children: [com && /* @__PURE__ */ import_react27.default.isValidElement(com) && com, !com && !item.buttonProps && item.icon, !com && item.buttonProps && /* @__PURE__ */ import_react27.default.createElement("button", _extends({
+        children: [com && /* @__PURE__ */ import_react25.default.isValidElement(com) && com, !com && !item.buttonProps && item.icon, !com && item.buttonProps && /* @__PURE__ */ import_react25.default.createElement("button", _extends({
           type: "button",
           key: idx,
           disabled: disabled2,
@@ -225857,7 +226226,7 @@ function Toolbar(props) {
   var {
     commands,
     extraCommands
-  } = import_react27.useContext(EditorContext);
+  } = import_react25.useContext(EditorContext);
   return /* @__PURE__ */ import_jsx_runtime5.jsxs("div", {
     className: prefixCls + "-toolbar " + className2,
     children: [/* @__PURE__ */ import_jsx_runtime5.jsx(ToolbarItems, _extends({}, props, {
@@ -225887,7 +226256,7 @@ function ToolbarVisibility(props) {
 }
 
 // node_modules/@uiw/react-md-editor/esm/components/TextArea/index.js
-var import_react53 = __toESM(require_react(), 1);
+var import_react51 = __toESM(require_react(), 1);
 
 // node_modules/@uiw/react-md-editor/esm/components/TextArea/shortcuts.js
 function getCommands(data, resulte) {
@@ -225960,7 +226329,7 @@ function _taggedTemplateLiteralLoose(e, t) {
 }
 
 // node_modules/@uiw/react-md-editor/esm/components/TextArea/Markdown.js
-var import_react28 = __toESM(require_react(), 1);
+var import_react26 = __toESM(require_react(), 1);
 
 // node_modules/hast-util-from-html/lib/errors.js
 var errors = {
@@ -227091,9 +227460,9 @@ function Markdown2(props) {
     markdown: markdown2 = "",
     highlightEnable,
     dispatch
-  } = import_react28.useContext(EditorContext);
-  var preRef = /* @__PURE__ */ import_react28.default.createRef();
-  import_react28.useEffect(() => {
+  } = import_react26.useContext(EditorContext);
+  var preRef = /* @__PURE__ */ import_react26.default.createRef();
+  import_react26.useEffect(() => {
     if (preRef.current && dispatch) {
       dispatch({
         textareaPre: preRef.current
@@ -227117,7 +227486,7 @@ function Markdown2(props) {
       }).processSync(mdStr).toString();
     } catch (error) {}
   }
-  return /* @__PURE__ */ import_react28.default.createElement("div", {
+  return /* @__PURE__ */ import_react26.default.createElement("div", {
     className: "wmde-markdown-color",
     dangerouslySetInnerHTML: {
       __html: mdStr || ""
@@ -227126,7 +227495,7 @@ function Markdown2(props) {
 }
 
 // node_modules/@uiw/react-md-editor/esm/components/TextArea/Textarea.js
-var import_react52 = __toESM(require_react(), 1);
+var import_react50 = __toESM(require_react(), 1);
 
 // node_modules/@uiw/react-md-editor/esm/utils/InsertTextAtPosition.js
 var browserSupportsTextareaTextNodes;
@@ -227203,7 +227572,7 @@ function insertTextAtPosition(input, text10) {
 }
 
 // node_modules/@uiw/react-md-editor/esm/commands/bold.js
-var import_react29 = __toESM(require_react(), 1);
+var import_react27 = __toESM(require_react(), 1);
 
 // node_modules/@uiw/react-md-editor/esm/utils/markdownUtils.js
 function selectWord(_ref) {
@@ -227403,7 +227772,7 @@ var bold = {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/code.js
-var import_react30 = __toESM(require_react(), 1);
+var import_react28 = __toESM(require_react(), 1);
 var import_jsx_runtime8 = __toESM(require_jsx_runtime(), 1);
 var codeBlock = {
   name: "codeBlock",
@@ -227504,7 +227873,7 @@ var code4 = {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/comment.js
-var import_react31 = __toESM(require_react(), 1);
+var import_react29 = __toESM(require_react(), 1);
 var import_jsx_runtime9 = __toESM(require_jsx_runtime(), 1);
 var comment4 = {
   name: "comment",
@@ -227564,7 +227933,7 @@ var divider = {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/fullscreen.js
-var import_react32 = __toESM(require_react(), 1);
+var import_react30 = __toESM(require_react(), 1);
 var import_jsx_runtime10 = __toESM(require_jsx_runtime(), 1);
 var fullscreen = {
   name: "fullscreen",
@@ -227601,7 +227970,7 @@ function _objectDestructuringEmpty(t) {
 }
 
 // node_modules/@uiw/react-md-editor/esm/commands/group.js
-var import_react33 = __toESM(require_react(), 1);
+var import_react31 = __toESM(require_react(), 1);
 var import_jsx_runtime11 = __toESM(require_jsx_runtime(), 1);
 var group = (arr, options) => {
   var data = _extends({
@@ -227630,7 +227999,7 @@ var group = (arr, options) => {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/hr.js
-var import_react34 = __toESM(require_react(), 1);
+var import_react32 = __toESM(require_react(), 1);
 var import_jsx_runtime12 = __toESM(require_jsx_runtime(), 1);
 var hr = {
   name: "hr",
@@ -227688,7 +228057,7 @@ var hr = {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/image.js
-var import_react35 = __toESM(require_react(), 1);
+var import_react33 = __toESM(require_react(), 1);
 var import_jsx_runtime13 = __toESM(require_jsx_runtime(), 1);
 var image3 = {
   name: "image",
@@ -227755,7 +228124,7 @@ var image3 = {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/italic.js
-var import_react36 = __toESM(require_react(), 1);
+var import_react34 = __toESM(require_react(), 1);
 var import_jsx_runtime14 = __toESM(require_jsx_runtime(), 1);
 var italic = {
   name: "italic",
@@ -227794,7 +228163,7 @@ var italic = {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/link.js
-var import_react37 = __toESM(require_react(), 1);
+var import_react35 = __toESM(require_react(), 1);
 var import_jsx_runtime15 = __toESM(require_jsx_runtime(), 1);
 var link3 = {
   name: "link",
@@ -227863,7 +228232,7 @@ var link3 = {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/list.js
-var import_react38 = __toESM(require_react(), 1);
+var import_react36 = __toESM(require_react(), 1);
 var import_jsx_runtime16 = __toESM(require_jsx_runtime(), 1);
 var makeList = (state, api, insertBefore) => {
   var newSelectionRange = selectWord({
@@ -227985,7 +228354,7 @@ var checkedListCommand = {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/preview.js
-var import_react39 = __toESM(require_react(), 1);
+var import_react37 = __toESM(require_react(), 1);
 var import_jsx_runtime17 = __toESM(require_jsx_runtime(), 1);
 var codePreview = {
   name: "preview",
@@ -228079,7 +228448,7 @@ var codeLive = {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/quote.js
-var import_react40 = __toESM(require_react(), 1);
+var import_react38 = __toESM(require_react(), 1);
 var import_jsx_runtime18 = __toESM(require_jsx_runtime(), 1);
 var quote = {
   name: "quote",
@@ -228124,7 +228493,7 @@ var quote = {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/strikeThrough.js
-var import_react41 = __toESM(require_react(), 1);
+var import_react39 = __toESM(require_react(), 1);
 var import_jsx_runtime19 = __toESM(require_jsx_runtime(), 1);
 var strikethrough2 = {
   name: "strikethrough",
@@ -228163,10 +228532,10 @@ var strikethrough2 = {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/title.js
-var import_react43 = __toESM(require_react(), 1);
+var import_react41 = __toESM(require_react(), 1);
 
 // node_modules/@uiw/react-md-editor/esm/commands/title1.js
-var import_react42 = __toESM(require_react(), 1);
+var import_react40 = __toESM(require_react(), 1);
 var import_jsx_runtime20 = __toESM(require_jsx_runtime(), 1);
 var heading1 = {
   name: "heading1",
@@ -228231,7 +228600,7 @@ var heading3 = _extends({}, heading1, {
 });
 
 // node_modules/@uiw/react-md-editor/esm/commands/title2.js
-var import_react44 = __toESM(require_react(), 1);
+var import_react42 = __toESM(require_react(), 1);
 var import_jsx_runtime22 = __toESM(require_jsx_runtime(), 1);
 var heading22 = {
   name: "heading2",
@@ -228262,7 +228631,7 @@ var heading22 = {
 var title2 = heading22;
 
 // node_modules/@uiw/react-md-editor/esm/commands/title3.js
-var import_react45 = __toESM(require_react(), 1);
+var import_react43 = __toESM(require_react(), 1);
 var import_jsx_runtime23 = __toESM(require_jsx_runtime(), 1);
 var heading32 = {
   name: "heading3",
@@ -228293,7 +228662,7 @@ var heading32 = {
 var title3 = heading32;
 
 // node_modules/@uiw/react-md-editor/esm/commands/title4.js
-var import_react46 = __toESM(require_react(), 1);
+var import_react44 = __toESM(require_react(), 1);
 var import_jsx_runtime24 = __toESM(require_jsx_runtime(), 1);
 var heading4 = {
   name: "heading4",
@@ -228324,7 +228693,7 @@ var heading4 = {
 var title4 = heading4;
 
 // node_modules/@uiw/react-md-editor/esm/commands/title5.js
-var import_react47 = __toESM(require_react(), 1);
+var import_react45 = __toESM(require_react(), 1);
 var import_jsx_runtime25 = __toESM(require_jsx_runtime(), 1);
 var heading5 = {
   name: "heading5",
@@ -228355,7 +228724,7 @@ var heading5 = {
 var title5 = heading5;
 
 // node_modules/@uiw/react-md-editor/esm/commands/title6.js
-var import_react48 = __toESM(require_react(), 1);
+var import_react46 = __toESM(require_react(), 1);
 var import_jsx_runtime26 = __toESM(require_jsx_runtime(), 1);
 var heading6 = {
   name: "heading6",
@@ -228386,7 +228755,7 @@ var heading6 = {
 var title6 = heading6;
 
 // node_modules/@uiw/react-md-editor/esm/commands/table.js
-var import_react49 = __toESM(require_react(), 1);
+var import_react47 = __toESM(require_react(), 1);
 var import_jsx_runtime27 = __toESM(require_jsx_runtime(), 1);
 var table2 = {
   name: "table",
@@ -228447,11 +228816,11 @@ var table2 = {
 };
 
 // node_modules/@uiw/react-md-editor/esm/commands/issue.js
-var import_react50 = __toESM(require_react(), 1);
+var import_react48 = __toESM(require_react(), 1);
 var import_jsx_runtime28 = __toESM(require_jsx_runtime(), 1);
 
 // node_modules/@uiw/react-md-editor/esm/commands/help.js
-var import_react51 = __toESM(require_react(), 1);
+var import_react49 = __toESM(require_react(), 1);
 var import_jsx_runtime29 = __toESM(require_jsx_runtime(), 1);
 var help = {
   name: "help",
@@ -228700,7 +229069,7 @@ function Textarea(props) {
     prefixCls,
     onChange: _onChange
   } = props, other = _objectWithoutPropertiesLoose(props, _excluded2);
-  var _useContext = import_react52.useContext(EditorContext), {
+  var _useContext = import_react50.useContext(EditorContext), {
     markdown: markdown2,
     commands,
     fullscreen: fullscreen2,
@@ -228713,20 +229082,20 @@ function Textarea(props) {
     textareaWarp,
     dispatch
   } = _useContext, otherStore = _objectWithoutPropertiesLoose(_useContext, _excluded22);
-  var textRef = import_react52.default.useRef(null);
-  var executeRef = import_react52.default.useRef();
-  var statesRef = import_react52.default.useRef({
+  var textRef = import_react50.default.useRef(null);
+  var executeRef = import_react50.default.useRef();
+  var statesRef = import_react50.default.useRef({
     fullscreen: fullscreen2,
     preview
   });
-  import_react52.useEffect(() => {
+  import_react50.useEffect(() => {
     statesRef.current = {
       fullscreen: fullscreen2,
       preview,
       highlightEnable
     };
   }, [fullscreen2, preview, highlightEnable]);
-  import_react52.useEffect(() => {
+  import_react50.useEffect(() => {
     if (textRef.current && dispatch) {
       var commandOrchestrator = new TextAreaCommandOrchestrator(textRef.current);
       executeRef.current = commandOrchestrator;
@@ -228736,7 +229105,7 @@ function Textarea(props) {
       });
     }
   }, []);
-  import_react52.useEffect(() => {
+  import_react50.useEffect(() => {
     if (autoFocusEnd && textRef.current && textareaWarp) {
       textRef.current.focus();
       var length = textRef.current.value.length;
@@ -228755,7 +229124,7 @@ function Textarea(props) {
     handleKeyDown(e, tabSize, defaultTabEnable);
     shortcutsHandle(e, [...commands || [], ...extraCommands || []], executeRef.current, dispatch, statesRef.current);
   };
-  import_react52.useEffect(() => {
+  import_react50.useEffect(() => {
     if (textRef.current) {
       textRef.current.addEventListener("keydown", onKeyDown);
     }
@@ -228801,11 +229170,11 @@ function TextArea(props) {
     highlightEnable,
     extraCommands,
     dispatch
-  } = import_react53.useContext(EditorContext);
-  var textRef = import_react53.default.useRef(null);
-  var executeRef = import_react53.default.useRef();
-  var warp = /* @__PURE__ */ import_react53.default.createRef();
-  import_react53.useEffect(() => {
+  } = import_react51.useContext(EditorContext);
+  var textRef = import_react51.default.useRef(null);
+  var executeRef = import_react51.default.useRef();
+  var warp = /* @__PURE__ */ import_react51.default.createRef();
+  import_react51.useEffect(() => {
     var state = {};
     if (warp.current) {
       state.textareaWarp = warp.current || undefined;
@@ -228815,7 +229184,7 @@ function TextArea(props) {
       dispatch(_extends({}, state));
     }
   }, []);
-  import_react53.useEffect(() => {
+  import_react51.useEffect(() => {
     if (textRef.current && dispatch) {
       var commandOrchestrator = new TextAreaCommandOrchestrator(textRef.current);
       executeRef.current = commandOrchestrator;
@@ -228838,7 +229207,7 @@ function TextArea(props) {
       style: {
         minHeight
       },
-      children: renderTextarea ? /* @__PURE__ */ import_react53.default.cloneElement(renderTextarea(_extends({}, otherProps, {
+      children: renderTextarea ? /* @__PURE__ */ import_react51.default.cloneElement(renderTextarea(_extends({}, otherProps, {
         value: markdown2,
         autoComplete: "off",
         autoCorrect: "off",
@@ -228860,7 +229229,7 @@ function TextArea(props) {
         }
       }), {
         ref: textRef
-      }) : /* @__PURE__ */ import_jsx_runtime31.jsxs(import_react53.Fragment, {
+      }) : /* @__PURE__ */ import_jsx_runtime31.jsxs(import_react51.Fragment, {
         children: [highlightEnable && /* @__PURE__ */ import_jsx_runtime31.jsx(Markdown2, {
           prefixCls
         }), /* @__PURE__ */ import_jsx_runtime31.jsx(Textarea, _extends({
@@ -228874,17 +229243,17 @@ function TextArea(props) {
 }
 
 // node_modules/@uiw/react-md-editor/esm/components/DragBar/index.js
-var import_react54 = __toESM(require_react(), 1);
+var import_react52 = __toESM(require_react(), 1);
 var import_jsx_runtime32 = __toESM(require_jsx_runtime(), 1);
 var DragBar = (props) => {
   var {
     prefixCls,
     onChange
   } = props || {};
-  var $dom = import_react54.useRef(null);
-  var dragRef = import_react54.useRef();
-  var heightRef = import_react54.useRef(props.height);
-  import_react54.useEffect(() => {
+  var $dom = import_react52.useRef(null);
+  var dragRef = import_react52.useRef();
+  var heightRef = import_react52.useRef(props.height);
+  import_react52.useEffect(() => {
     if (heightRef.current !== props.height) {
       heightRef.current = props.height;
     }
@@ -228924,7 +229293,7 @@ var DragBar = (props) => {
       passive: false
     });
   }
-  import_react54.useEffect(() => {
+  import_react52.useEffect(() => {
     if (document) {
       var _$dom$current5, _$dom$current6;
       (_$dom$current5 = $dom.current) == null || _$dom$current5.addEventListener("touchstart", handleMouseDown, {
@@ -228940,7 +229309,7 @@ var DragBar = (props) => {
       }
     };
   }, []);
-  var svg5 = import_react54.useMemo(() => /* @__PURE__ */ import_jsx_runtime32.jsx("svg", {
+  var svg5 = import_react52.useMemo(() => /* @__PURE__ */ import_jsx_runtime32.jsx("svg", {
     viewBox: "0 0 512 512",
     height: "100%",
     children: /* @__PURE__ */ import_jsx_runtime32.jsx("path", {
@@ -228968,7 +229337,7 @@ function setGroupPopFalse(data) {
   });
   return data;
 }
-var InternalMDEditor = /* @__PURE__ */ import_react55.default.forwardRef((props, ref) => {
+var InternalMDEditor = /* @__PURE__ */ import_react53.default.forwardRef((props, ref) => {
   var _ref = props || {}, {
     prefixCls = "w-md-editor",
     className: className2,
@@ -229002,7 +229371,7 @@ var InternalMDEditor = /* @__PURE__ */ import_react55.default.forwardRef((props,
   } = _ref, other = _objectWithoutPropertiesLoose(_ref, _excluded4);
   var cmds = commands.map((item) => commandsFilter ? commandsFilter(item, false) : item).filter(Boolean);
   var extraCmds = extraCommands.map((item) => commandsFilter ? commandsFilter(item, true) : item).filter(Boolean);
-  var [state, dispatch] = import_react55.useReducer(reducer, {
+  var [state, dispatch] = import_react53.useReducer(reducer, {
     markdown: propsValue,
     preview: previewType,
     components,
@@ -229018,15 +229387,15 @@ var InternalMDEditor = /* @__PURE__ */ import_react55.default.forwardRef((props,
     fullscreen: fullscreen2,
     barPopup: {}
   });
-  var container = import_react55.useRef(null);
-  var previewRef = import_react55.useRef(null);
-  var enableScrollRef = import_react55.useRef(enableScroll);
-  import_react55.useImperativeHandle(ref, () => _extends({}, state, {
+  var container = import_react53.useRef(null);
+  var previewRef = import_react53.useRef(null);
+  var enableScrollRef = import_react53.useRef(enableScroll);
+  import_react53.useImperativeHandle(ref, () => _extends({}, state, {
     container: container.current,
     dispatch
   }));
-  import_react55.useMemo(() => enableScrollRef.current = enableScroll, [enableScroll]);
-  import_react55.useEffect(() => {
+  import_react53.useMemo(() => enableScrollRef.current = enableScroll, [enableScroll]);
+  import_react53.useEffect(() => {
     var stateInit = {};
     if (container.current) {
       stateInit.container = container.current || undefined;
@@ -229038,41 +229407,41 @@ var InternalMDEditor = /* @__PURE__ */ import_react55.default.forwardRef((props,
     }
   }, []);
   var cls = [className2, "wmde-markdown-var", direction2 ? prefixCls + "-" + direction2 : null, prefixCls, state.preview ? prefixCls + "-show-" + state.preview : null, state.fullscreen ? prefixCls + "-fullscreen" : null].filter(Boolean).join(" ").trim();
-  import_react55.useMemo(() => propsValue !== state.markdown && dispatch({
+  import_react53.useMemo(() => propsValue !== state.markdown && dispatch({
     markdown: propsValue || ""
   }), [propsValue, state.markdown]);
-  import_react55.useMemo(() => previewType !== state.preview && dispatch({
+  import_react53.useMemo(() => previewType !== state.preview && dispatch({
     preview: previewType
   }), [previewType]);
-  import_react55.useMemo(() => tabSize !== state.tabSize && dispatch({
+  import_react53.useMemo(() => tabSize !== state.tabSize && dispatch({
     tabSize
   }), [tabSize]);
-  import_react55.useMemo(() => highlightEnable !== state.highlightEnable && dispatch({
+  import_react53.useMemo(() => highlightEnable !== state.highlightEnable && dispatch({
     highlightEnable
   }), [highlightEnable]);
-  import_react55.useMemo(() => autoFocus !== state.autoFocus && dispatch({
+  import_react53.useMemo(() => autoFocus !== state.autoFocus && dispatch({
     autoFocus
   }), [autoFocus]);
-  import_react55.useMemo(() => autoFocusEnd !== state.autoFocusEnd && dispatch({
+  import_react53.useMemo(() => autoFocusEnd !== state.autoFocusEnd && dispatch({
     autoFocusEnd
   }), [autoFocusEnd]);
-  import_react55.useMemo(() => fullscreen2 !== state.fullscreen && dispatch({
+  import_react53.useMemo(() => fullscreen2 !== state.fullscreen && dispatch({
     fullscreen: fullscreen2
   }), [fullscreen2]);
-  import_react55.useMemo(() => height !== state.height && dispatch({
+  import_react53.useMemo(() => height !== state.height && dispatch({
     height
   }), [height]);
-  import_react55.useMemo(() => height !== state.height && onHeightChange && onHeightChange(state.height, height, state), [height, onHeightChange, state]);
-  import_react55.useMemo(() => commands !== state.commands && dispatch({
+  import_react53.useMemo(() => height !== state.height && onHeightChange && onHeightChange(state.height, height, state), [height, onHeightChange, state]);
+  import_react53.useMemo(() => commands !== state.commands && dispatch({
     commands: cmds
   }), [props.commands]);
-  import_react55.useMemo(() => extraCommands !== state.extraCommands && dispatch({
+  import_react53.useMemo(() => extraCommands !== state.extraCommands && dispatch({
     extraCommands: extraCmds
   }), [props.extraCommands]);
-  var textareaDomRef = import_react55.useRef();
-  var active = import_react55.useRef("preview");
-  var initScroll = import_react55.useRef(false);
-  import_react55.useMemo(() => {
+  var textareaDomRef = import_react53.useRef();
+  var active = import_react53.useRef("preview");
+  var initScroll = import_react53.useRef(false);
+  import_react53.useMemo(() => {
     textareaDomRef.current = state.textareaWarp;
     if (state.textareaWarp) {
       state.textareaWarp.addEventListener("mouseover", () => {
@@ -229113,7 +229482,7 @@ var InternalMDEditor = /* @__PURE__ */ import_react55.default.forwardRef((props,
   };
   var previewClassName = prefixCls + "-preview " + (previewOptions.className || "");
   var handlePreviewScroll = (e) => handleScroll(e, "preview");
-  var mdPreview = import_react55.useMemo(() => /* @__PURE__ */ import_jsx_runtime33.jsx("div", {
+  var mdPreview = import_react53.useMemo(() => /* @__PURE__ */ import_jsx_runtime33.jsx("div", {
     ref: previewRef,
     className: previewClassName,
     children: /* @__PURE__ */ import_jsx_runtime33.jsx(esm_default2, _extends({}, previewOptions, {
@@ -229122,7 +229491,7 @@ var InternalMDEditor = /* @__PURE__ */ import_react55.default.forwardRef((props,
     }))
   }), [previewClassName, previewOptions, state.markdown]);
   var preview = (components == null ? undefined : components.preview) && (components == null ? undefined : components.preview(state.markdown || "", state, dispatch));
-  if (preview && /* @__PURE__ */ import_react55.default.isValidElement(preview)) {
+  if (preview && /* @__PURE__ */ import_react53.default.isValidElement(preview)) {
     mdPreview = /* @__PURE__ */ import_jsx_runtime33.jsx("div", {
       className: previewClassName,
       ref: previewRef,
@@ -229203,724 +229572,8 @@ var Editor_default = Editor;
 // node_modules/@uiw/react-md-editor/esm/index.js
 var esm_default3 = Editor_default;
 
-// src/apps/dashboard-web/components/ProposalDetailsModal.tsx
-var import_react61 = __toESM(require_react(), 1);
-
-// src/shared/proposal-markdown-export.ts
-function ts(value) {
-  if (!value)
-    return "";
-  if (value instanceof Date)
-    return value.toISOString();
-  if (typeof value === "string")
-    return value;
-  return String(value);
-}
-function trim(s4) {
-  return (s4 ?? "").trim();
-}
-function section(title7, body3) {
-  const trimmed = body3.trim();
-  if (!trimmed)
-    return [];
-  return [`## ${title7}`, "", trimmed, ""];
-}
-function arraySection(title7, items) {
-  const filtered = items.map((s4) => s4.trim()).filter(Boolean);
-  if (filtered.length === 0)
-    return [];
-  const lines = [`## ${title7}`, ""];
-  for (const item of filtered)
-    lines.push(`- ${item}`);
-  lines.push("");
-  return lines;
-}
-function frontmatter(p3) {
-  const lines = ["---"];
-  lines.push(`id: ${p3.id}`);
-  lines.push(`title: ${JSON.stringify(p3.title || "")}`);
-  if (p3.status)
-    lines.push(`status: ${p3.status}`);
-  if (p3.maturity)
-    lines.push(`maturity: ${p3.maturity}`);
-  if (p3.proposalType || p3.type)
-    lines.push(`type: ${p3.proposalType || p3.type}`);
-  if (p3.priority)
-    lines.push(`priority: ${p3.priority}`);
-  if (p3.assignee?.length)
-    lines.push(`assignee: [${p3.assignee.join(", ")}]`);
-  if (p3.reporter)
-    lines.push(`reporter: ${p3.reporter}`);
-  if (p3.createdDate)
-    lines.push(`createdDate: ${p3.createdDate}`);
-  if (p3.updatedDate)
-    lines.push(`updatedDate: ${p3.updatedDate}`);
-  if (p3.labels?.length)
-    lines.push(`labels: [${p3.labels.join(", ")}]`);
-  if (p3.directive)
-    lines.push(`directive: ${p3.directive}`);
-  if (p3.dependencies?.length)
-    lines.push(`dependencies: [${p3.dependencies.join(", ")}]`);
-  if (p3.references?.length)
-    lines.push(`references: [${p3.references.join(", ")}]`);
-  if (p3.parentProposalId)
-    lines.push(`parent: ${p3.parentProposalId}`);
-  if (p3.builder)
-    lines.push(`builder: ${p3.builder}`);
-  if (p3.auditor)
-    lines.push(`auditor: ${p3.auditor}`);
-  if (p3.branch)
-    lines.push(`branch: ${p3.branch}`);
-  lines.push("---", "");
-  return lines;
-}
-function criteriaBlock(criteria) {
-  if (!criteria || criteria.length === 0)
-    return [];
-  const lines = ["## Acceptance Criteria", ""];
-  const sorted = [...criteria].sort((a2, b) => (a2.index ?? 0) - (b.index ?? 0));
-  for (const c4 of sorted) {
-    const box = c4.checked ? "[x]" : "[ ]";
-    const meta = [];
-    if (c4.role)
-      meta.push(`role: ${c4.role}`);
-    if (c4.evidence)
-      meta.push(`evidence: ${c4.evidence}`);
-    const tail = meta.length ? `  _(${meta.join(" · ")})_` : "";
-    lines.push(`- ${box} ${c4.text}${tail}`);
-  }
-  lines.push("");
-  return lines;
-}
-function decisionsBlock(items) {
-  if (!items || items.length === 0)
-    return [];
-  const lines = ["## Decisions", ""];
-  for (const d2 of items) {
-    const when = ts(d2.decided_at);
-    const flag = d2.binding ? " (binding)" : "";
-    lines.push(`### ${trim(d2.decision) || "(decision)"}${flag}`);
-    const meta = [];
-    if (d2.authority)
-      meta.push(`**authority:** ${d2.authority}`);
-    if (when)
-      meta.push(`**at:** ${when}`);
-    if (meta.length)
-      lines.push(meta.join(" · "));
-    const rationale = trim(d2.rationale ?? "");
-    if (rationale) {
-      lines.push("");
-      lines.push(rationale);
-    }
-    lines.push("");
-  }
-  return lines;
-}
-function reviewsBlock(items) {
-  if (!items || items.length === 0)
-    return [];
-  const lines = ["## Reviews", ""];
-  for (const r2 of items) {
-    const when = ts(r2.reviewed_at);
-    const blocking = r2.is_blocking ? " (blocking)" : "";
-    const verdict = trim(r2.verdict ?? "") || "(no verdict)";
-    const reviewer = trim(r2.reviewer_identity ?? "") || "(unknown reviewer)";
-    lines.push(`### ${reviewer} — ${verdict}${blocking}`);
-    if (when)
-      lines.push(`**at:** ${when}`);
-    const notes = trim(r2.notes ?? "");
-    if (notes) {
-      lines.push("");
-      lines.push("**Notes:**");
-      lines.push("");
-      lines.push(notes);
-    }
-    const findings = trim(r2.findings ?? "");
-    if (findings) {
-      lines.push("");
-      lines.push("**Findings:**");
-      lines.push("");
-      lines.push(findings);
-    }
-    lines.push("");
-  }
-  return lines;
-}
-function discussionsBlock(items) {
-  if (!items || items.length === 0)
-    return [];
-  const lines = ["## Discussions", ""];
-  const sorted = [...items].sort((a2, b) => {
-    const ta = ts(a2.created_at);
-    const tb = ts(b.created_at);
-    return ta < tb ? -1 : ta > tb ? 1 : 0;
-  });
-  for (const d2 of sorted) {
-    const when = ts(d2.created_at);
-    const author = trim(d2.author_identity ?? "") || "(unknown)";
-    const ctx = trim(d2.context_prefix ?? "");
-    const head2 = ctx ? `${author} · ${ctx}` : author;
-    lines.push(`### ${head2}`);
-    if (when)
-      lines.push(`**at:** ${when}`);
-    const body3 = trim(d2.body ?? d2.body_markdown ?? "");
-    if (body3) {
-      lines.push("");
-      lines.push(body3);
-    }
-    lines.push("");
-  }
-  return lines;
-}
-function activityBlock(items) {
-  if (!items || items.length === 0)
-    return [];
-  const lines = ["## Activity", ""];
-  for (const e of items) {
-    const reason2 = e.reason ? ` — ${e.reason}` : "";
-    lines.push(`- \`${e.timestamp}\` **${e.actor}** ${e.action}${reason2}`);
-  }
-  lines.push("");
-  return lines;
-}
-function buildProposalMarkdown(bundle) {
-  const p3 = bundle.proposal;
-  const lines = [];
-  lines.push(...frontmatter(p3));
-  lines.push(`# ${p3.id} — ${p3.title || "(untitled)"}`, "");
-  const summary = trim(p3.summary ?? "");
-  const description = trim(p3.description ?? "");
-  if (summary)
-    lines.push(...section("Summary", summary));
-  else if (description)
-    lines.push(...section("Summary", description));
-  lines.push(...section("Motivation", p3.motivation ?? ""));
-  const design = trim(p3.design ?? p3.implementationPlan ?? "");
-  lines.push(...section("Design", design));
-  if (description && summary) {
-    lines.push(...section("Description", description));
-  }
-  lines.push(...section("Drawbacks", p3.drawbacks ?? ""));
-  lines.push(...section("Alternatives", p3.alternatives ?? ""));
-  lines.push(...section("Dependency Notes", p3.dependency_note ?? ""));
-  lines.push(...arraySection("Dependencies", (p3.dependencies ?? []).map((d2) => String(d2))));
-  lines.push(...arraySection("References", (p3.references ?? []).map((d2) => String(d2))));
-  lines.push(...arraySection("Required Capabilities", (p3.required_capabilities ?? p3.needs_capabilities ?? []).map((d2) => String(d2))));
-  lines.push(...arraySection("Unlocks", (p3.unlocks ?? []).map((d2) => String(d2))));
-  lines.push(...criteriaBlock(bundle.criteria ?? p3.acceptanceCriteriaItems));
-  lines.push(...section("Implementation Plan", p3.implementationPlan ?? ""));
-  lines.push(...section("Implementation Notes", p3.implementationNotes ?? ""));
-  lines.push(...section("Audit Notes", p3.auditNotes ?? ""));
-  lines.push(...section("Final Summary", p3.finalSummary ?? ""));
-  lines.push(...decisionsBlock(bundle.decisions));
-  lines.push(...reviewsBlock(bundle.reviews));
-  lines.push(...discussionsBlock(bundle.discussions));
-  lines.push(...activityBlock(bundle.activityLog ?? p3.activityLog));
-  lines.push("---", `_Exported ${new Date().toISOString()}_`, "");
-  return lines.join(`
-`).replace(/\n{3,}/g, `
-
-`);
-}
-function proposalExportFilename(proposal) {
-  const id2 = proposal.id || "proposal";
-  const slug2 = (proposal.title || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  return slug2 ? `${id2}-${slug2}-${stamp}.md` : `${id2}-${stamp}.md`;
-}
-
-// src/apps/dashboard-web/utils/date-display.ts
-var DATE_ONLY_REGEX = /^(\d{4})-(\d{2})-(\d{2})$/;
-var DATE_TIME_REGEX = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/;
-var ISO_FULL_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
-function parseIntStrict(value) {
-  return Number.parseInt(value, 10);
-}
-function parseStoredUtcDate(dateStr) {
-  if (!dateStr)
-    return null;
-  const normalized = dateStr.trim();
-  if (!normalized)
-    return null;
-  const dateTimeMatch = normalized.match(DATE_TIME_REGEX);
-  if (dateTimeMatch) {
-    const y = dateTimeMatch[1];
-    const m = dateTimeMatch[2];
-    const d2 = dateTimeMatch[3];
-    const hh = dateTimeMatch[4];
-    const mm = dateTimeMatch[5];
-    if (!y || !m || !d2 || !hh || !mm)
-      return null;
-    const year = parseIntStrict(y);
-    const month = parseIntStrict(m);
-    const day = parseIntStrict(d2);
-    const hours = parseIntStrict(hh);
-    const minutes = parseIntStrict(mm);
-    const date = new Date(Date.UTC(year, month - 1, day, hours, minutes, 0));
-    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day || date.getUTCHours() !== hours || date.getUTCMinutes() !== minutes) {
-      return null;
-    }
-    return date;
-  }
-  const dateOnlyMatch = normalized.match(DATE_ONLY_REGEX);
-  if (dateOnlyMatch) {
-    const y = dateOnlyMatch[1];
-    const m = dateOnlyMatch[2];
-    const d2 = dateOnlyMatch[3];
-    if (!y || !m || !d2)
-      return null;
-    const year = parseIntStrict(y);
-    const month = parseIntStrict(m);
-    const day = parseIntStrict(d2);
-    const date = new Date(Date.UTC(year, month - 1, day, 0, 0, 0));
-    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
-      return null;
-    }
-    return date;
-  }
-  if (ISO_FULL_REGEX.test(normalized)) {
-    const d2 = new Date(normalized);
-    if (!isNaN(d2.getTime()))
-      return d2;
-  }
-  return null;
-}
-function formatStoredUtcDateForDisplay(dateStr) {
-  if (!dateStr)
-    return "";
-  const parsed = parseStoredUtcDate(dateStr);
-  if (!parsed)
-    return dateStr;
-  const normalized = dateStr.trim();
-  if (DATE_TIME_REGEX.test(normalized) || ISO_FULL_REGEX.test(normalized)) {
-    return parsed.toLocaleString(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short"
-    });
-  }
-  return parsed.toLocaleDateString();
-}
-function formatStoredUtcDateForCompactDisplay(dateStr, now = new Date) {
-  if (!dateStr)
-    return "—";
-  const normalized = dateStr.trim();
-  if (!normalized)
-    return "—";
-  const parsed = parseStoredUtcDate(normalized);
-  if (!parsed)
-    return normalized;
-  const diffMs = now.getTime() - parsed.getTime();
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-  if (diffDays >= 0) {
-    if (diffDays === 0)
-      return "today";
-    if (diffDays === 1)
-      return "yesterday";
-    if (diffDays < 7)
-      return `${diffDays}d ago`;
-  }
-  return parsed.toLocaleDateString();
-}
-
-// src/apps/dashboard-web/components/AcceptanceCriteriaEditor.tsx
-var import_react56 = __toESM(require_react(), 1);
-var jsx_dev_runtime22 = __toESM(require_jsx_dev_runtime(), 1);
-var AcceptanceCriteriaEditor = ({
-  criteria: initial,
-  onChange,
-  label = "Acceptance Criteria",
-  preserveIndices = false,
-  disableToggle = false
-}) => {
-  const [criteria, setCriteria] = import_react56.useState(initial || []);
-  const [newCriterion, setNewCriterion] = import_react56.useState("");
-  const itemRefs = import_react56.useRef({});
-  const newRef = import_react56.useRef(null);
-  import_react56.useEffect(() => {
-    setCriteria(initial || []);
-  }, [initial]);
-  const autoResize = import_react56.useCallback((el) => {
-    if (!el)
-      return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
-  }, []);
-  import_react56.useEffect(() => {
-    Object.values(itemRefs.current).forEach((el) => {
-      autoResize(el);
-    });
-  }, [autoResize]);
-  import_react56.useEffect(() => {
-    autoResize(newRef.current);
-  }, [autoResize]);
-  const handleToggle = (index2, checked2) => {
-    if (disableToggle)
-      return;
-    const updated = criteria.map((c4) => c4.index === index2 ? { ...c4, checked: checked2 } : c4);
-    setCriteria(updated);
-    onChange(updated);
-  };
-  const handleTextChange = (index2, text10) => {
-    const updated = criteria.map((c4) => c4.index === index2 ? { ...c4, text: text10 } : c4);
-    setCriteria(updated);
-    onChange(updated);
-  };
-  const handleRemove = (index2) => {
-    const filtered = criteria.filter((c4) => c4.index !== index2);
-    const updated = preserveIndices ? filtered : filtered.map((c4, i) => ({ ...c4, index: i + 1 }));
-    setCriteria(updated);
-    onChange(updated);
-  };
-  const handleAdd = () => {
-    const text10 = newCriterion.trim();
-    if (!text10)
-      return;
-    const nextIndex = preserveIndices ? Math.max(0, ...criteria.map((item) => item.index)) + 1 : criteria.length + 1;
-    const updated = [...criteria, { checked: false, text: text10, index: nextIndex }];
-    setCriteria(updated);
-    setNewCriterion("");
-    onChange(updated);
-  };
-  return /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
-    className: "space-y-2",
-    children: [
-      /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
-        className: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 transition-colors duration-200",
-        children: label
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("ul", {
-        className: "space-y-2",
-        children: [
-          criteria.map((c4) => /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("li", {
-            className: "flex items-center gap-2",
-            children: [
-              /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("input", {
-                type: "checkbox",
-                className: "h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded",
-                checked: c4.checked,
-                onChange: (e) => handleToggle(c4.index, e.target.checked),
-                disabled: disableToggle
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("textarea", {
-                ref: (el) => {
-                  itemRefs.current[c4.index] = el;
-                },
-                rows: 1,
-                value: c4.text,
-                onChange: (e) => handleTextChange(c4.index, e.target.value),
-                onInput: (e) => autoResize(e.currentTarget),
-                className: "flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 focus:border-transparent transition-colors duration-200 resize-none overflow-hidden leading-5"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("button", {
-                type: "button",
-                onClick: () => handleRemove(c4.index),
-                className: "px-2 py-1 text-sm text-red-600 dark:text-red-400 hover:underline",
-                children: "Remove"
-              }, undefined, false, undefined, this)
-            ]
-          }, c4.index, true, undefined, this)),
-          /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("li", {
-            className: "flex items-center gap-2",
-            children: [
-              /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("textarea", {
-                ref: newRef,
-                rows: 1,
-                value: newCriterion,
-                onChange: (e) => setNewCriterion(e.target.value),
-                onInput: (e) => autoResize(e.currentTarget),
-                placeholder: "New criterion",
-                className: "flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 focus:border-transparent transition-colors duration-200 resize-none overflow-hidden leading-5"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("button", {
-                type: "button",
-                onClick: handleAdd,
-                className: "px-2 py-1 text-sm bg-blue-500 dark:bg-blue-600 text-white rounded-md hover:bg-blue-600 dark:hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 focus:ring-blue-400 dark:focus:ring-blue-500 transition-colors duration-200",
-                children: "Add"
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this)
-        ]
-      }, undefined, true, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-};
-var AcceptanceCriteriaEditor_default = AcceptanceCriteriaEditor;
-
-// src/apps/dashboard-web/components/ChipInput.tsx
-var import_react57 = __toESM(require_react(), 1);
-var jsx_dev_runtime23 = __toESM(require_jsx_dev_runtime(), 1);
-var ChipInput = ({
-  value,
-  onChange,
-  placeholder,
-  label,
-  name: name3,
-  disabled: disabled2
-}) => {
-  const [inputValue, setInputValue] = import_react57.useState("");
-  const inputId = `chip-input-${name3}`;
-  const handleKeyDown2 = (e) => {
-    if (disabled2)
-      return;
-    if ((e.key === "Enter" || e.key === ",") && inputValue.trim()) {
-      e.preventDefault();
-      const newValue = inputValue.trim();
-      if (!value.includes(newValue)) {
-        onChange([...value, newValue]);
-      }
-      setInputValue("");
-    } else if (e.key === "Backspace" && !inputValue && value.length > 0) {
-      onChange(value.slice(0, -1));
-    }
-  };
-  const handleInputChange = (e) => {
-    if (disabled2)
-      return;
-    const newValue = e.target.value;
-    if (newValue.endsWith(",")) {
-      const chipValue = newValue.slice(0, -1).trim();
-      if (chipValue && !value.includes(chipValue)) {
-        onChange([...value, chipValue]);
-        setInputValue("");
-      } else {
-        setInputValue("");
-      }
-    } else {
-      setInputValue(newValue);
-    }
-  };
-  const removeChip = (index2) => {
-    if (disabled2)
-      return;
-    onChange(value.filter((_2, i) => i !== index2));
-  };
-  return /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
-    className: "w-full",
-    children: [
-      /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("label", {
-        htmlFor: inputId,
-        className: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 transition-colors duration-200",
-        children: label
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
-        className: `relative w-full min-h-10 px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md focus-within:ring-2 focus-within:ring-blue-500 dark:focus-within:ring-blue-400 focus-within:border-transparent transition-colors duration-200 pr-2 ${disabled2 ? "opacity-60 cursor-not-allowed" : ""}`,
-        children: /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
-          className: "flex flex-wrap gap-2 items-center w-full",
-          children: [
-            value.map((item, index2) => /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("span", {
-              className: "inline-flex items-center gap-1 px-2 py-0.5 text-sm bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200 rounded-md flex-shrink-0 min-w-0 max-w-full transition-colors duration-200",
-              children: [
-                /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("span", {
-                  className: "truncate max-w-[16rem] sm:max-w-[20rem] md:max-w-[24rem]",
-                  children: item
-                }, undefined, false, undefined, this),
-                !disabled2 && /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("button", {
-                  type: "button",
-                  onClick: () => removeChip(index2),
-                  className: "hover:bg-blue-200 dark:hover:bg-blue-800 rounded-sm p-0.5 transition-colors duration-200",
-                  "aria-label": `Remove ${item}`,
-                  children: /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("svg", {
-                    className: "w-3 h-3",
-                    fill: "currentColor",
-                    viewBox: "0 0 20 20",
-                    "aria-hidden": "true",
-                    focusable: "false",
-                    children: /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("path", {
-                      fillRule: "evenodd",
-                      d: "M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z",
-                      clipRule: "evenodd"
-                    }, undefined, false, undefined, this)
-                  }, undefined, false, undefined, this)
-                }, undefined, false, undefined, this)
-              ]
-            }, item, true, undefined, this)),
-            /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("input", {
-              id: inputId,
-              type: "text",
-              value: inputValue,
-              onChange: handleInputChange,
-              onKeyDown: handleKeyDown2,
-              placeholder: value.length === 0 ? placeholder : "",
-              className: "flex-1 min-w-[2ch] outline-none text-sm bg-transparent text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400",
-              disabled: disabled2
-            }, undefined, false, undefined, this)
-          ]
-        }, undefined, true, undefined, this)
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-};
-var ChipInput_default = ChipInput;
-
-// src/apps/dashboard-web/components/DependencyInput.tsx
-var import_react58 = __toESM(require_react(), 1);
-var jsx_dev_runtime24 = __toESM(require_jsx_dev_runtime(), 1);
-var DependencyInput = ({
-  value,
-  onChange,
-  availableProposals,
-  currentProposalId,
-  label = "Dependencies",
-  disabled: disabled2
-}) => {
-  const [inputValue, setInputValue] = import_react58.useState("");
-  const [suggestions, setSuggestions] = import_react58.useState([]);
-  const [selectedIndex, setSelectedIndex] = import_react58.useState(0);
-  const textareaRef = import_react58.useRef(null);
-  const inputId = "dependency-input";
-  const getProposalDisplay = (proposalId) => {
-    const proposal = availableProposals.find((t) => t.id === proposalId);
-    return proposal ? `${proposal.id} - ${proposal.title}` : proposalId;
-  };
-  import_react58.useEffect(() => {
-    if (inputValue.trim()) {
-      const filtered = availableProposals.filter((proposal) => proposal.id !== currentProposalId && !value.includes(proposal.id) && (proposal.id.toLowerCase().includes(inputValue.toLowerCase()) || proposal.title.toLowerCase().includes(inputValue.toLowerCase())));
-      setSuggestions(filtered);
-      setSelectedIndex(0);
-    } else {
-      setSuggestions([]);
-    }
-  }, [inputValue, availableProposals, value, currentProposalId]);
-  import_react58.useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
-    }
-  }, []);
-  const addDependency = (proposalId) => {
-    if (disabled2)
-      return;
-    if (!value.includes(proposalId)) {
-      onChange([...value, proposalId]);
-      setInputValue("");
-      setSuggestions([]);
-      if (textareaRef.current) {
-        textareaRef.current.focus();
-      }
-    }
-  };
-  const removeDependency = (index2) => {
-    if (disabled2)
-      return;
-    onChange(value.filter((_2, i) => i !== index2));
-  };
-  const handleKeyDown2 = (e) => {
-    if (disabled2)
-      return;
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setSelectedIndex((prev) => (prev + 1) % suggestions.length);
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setSelectedIndex((prev) => (prev - 1 + suggestions.length) % suggestions.length);
-    } else if ((e.key === "Enter" || e.key === ",") && inputValue.trim()) {
-      e.preventDefault();
-      if (suggestions.length > 0 && suggestions[selectedIndex]) {
-        addDependency(suggestions[selectedIndex].id);
-      }
-    } else if (e.key === "Backspace" && !inputValue && value.length > 0) {
-      onChange(value.slice(0, -1));
-    } else if (e.key === "Escape") {
-      setSuggestions([]);
-      setInputValue("");
-    }
-  };
-  const handleInputChange = (e) => {
-    if (disabled2)
-      return;
-    const newValue = e.target.value;
-    if (newValue.endsWith(",")) {
-      const searchValue = newValue.slice(0, -1).trim();
-      if (searchValue && suggestions.length > 0 && suggestions[selectedIndex]) {
-        addDependency(suggestions[selectedIndex].id);
-      }
-    } else {
-      setInputValue(newValue);
-    }
-  };
-  return /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("div", {
-    children: [
-      label ? /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("label", {
-        htmlFor: inputId,
-        className: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 transition-colors duration-200",
-        children: label
-      }, undefined, false, undefined, this) : null,
-      /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("div", {
-        className: "relative w-full",
-        children: [
-          /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("div", {
-            className: `w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md focus-within:ring-2 focus-within:ring-blue-500 dark:focus-within:ring-blue-400 focus-within:border-transparent transition-colors duration-200 max-h-60 overflow-auto pr-2 ${disabled2 ? "opacity-60 cursor-not-allowed" : ""}`,
-            children: [
-              value.length > 0 && /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("div", {
-                className: "flex flex-wrap gap-2 mb-2",
-                children: value.map((proposalId, index2) => /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("span", {
-                  className: "inline-flex items-center gap-1 px-2 py-0.5 text-sm bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200 rounded-md transition-colors duration-200 min-w-0 max-w-full",
-                  children: [
-                    /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("span", {
-                      className: "truncate max-w-[16rem] sm:max-w-[20rem] md:max-w-[24rem]",
-                      children: getProposalDisplay(proposalId)
-                    }, undefined, false, undefined, this),
-                    !disabled2 && /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("button", {
-                      type: "button",
-                      onClick: () => removeDependency(index2),
-                      className: "hover:bg-blue-200 dark:hover:bg-blue-800 rounded-sm p-0.5 transition-colors duration-200",
-                      "aria-label": `Remove ${proposalId}`,
-                      children: /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("svg", {
-                        className: "w-3 h-3",
-                        fill: "currentColor",
-                        viewBox: "0 0 20 20",
-                        "aria-hidden": "true",
-                        focusable: "false",
-                        children: /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("path", {
-                          fillRule: "evenodd",
-                          d: "M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z",
-                          clipRule: "evenodd"
-                        }, undefined, false, undefined, this)
-                      }, undefined, false, undefined, this)
-                    }, undefined, false, undefined, this)
-                  ]
-                }, proposalId, true, undefined, this))
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("textarea", {
-                ref: textareaRef,
-                id: inputId,
-                value: inputValue,
-                onChange: handleInputChange,
-                onKeyDown: handleKeyDown2,
-                placeholder: value.length === 0 ? "Type proposal ID or title, then press Enter or comma" : "Add more dependencies...",
-                className: "w-full outline-none text-sm bg-transparent resize-none text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400",
-                rows: 1,
-                disabled: disabled2
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this),
-          suggestions.length > 0 && /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("div", {
-            className: "absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg max-h-64 overflow-auto overscroll-contain transition-colors duration-200",
-            children: suggestions.map((proposal, index2) => /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("button", {
-              type: "button",
-              onClick: () => addDependency(proposal.id),
-              className: `w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200 ${index2 === selectedIndex ? "bg-gray-100 dark:bg-gray-700" : ""}`,
-              children: [
-                /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("div", {
-                  className: "font-medium text-gray-900 dark:text-white",
-                  children: proposal.id
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("div", {
-                  className: "text-gray-600 dark:text-gray-300 break-words whitespace-normal",
-                  children: proposal.title
-                }, undefined, false, undefined, this)
-              ]
-            }, proposal.id, true, undefined, this))
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-};
-var DependencyInput_default = DependencyInput;
-
 // src/apps/dashboard-web/components/MermaidMarkdown.tsx
-var import_react59 = __toESM(require_react(), 1);
+var import_react54 = __toESM(require_react(), 1);
 
 // src/apps/dashboard-web/utils/mermaid.ts
 var mermaidModule = null;
@@ -229998,7 +229651,7 @@ async function renderMermaidIn(element10) {
 }
 
 // src/apps/dashboard-web/components/MermaidMarkdown.tsx
-var jsx_dev_runtime25 = __toESM(require_jsx_dev_runtime(), 1);
+var jsx_dev_runtime20 = __toESM(require_jsx_dev_runtime(), 1);
 var URI_AUTOLINK_PREFIX_REGEX = /^<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\s<>]*>/;
 var EMAIL_AUTOLINK_PREFIX_REGEX = /^<[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z0-9-]+>/;
 function sanitizeMarkdownSource(source) {
@@ -230011,9 +229664,9 @@ function sanitizeMarkdownSource(source) {
   });
 }
 function MermaidMarkdown({ source }) {
-  const ref = import_react59.useRef(null);
+  const ref = import_react54.useRef(null);
   const safeSource = sanitizeMarkdownSource(source);
-  import_react59.useEffect(() => {
+  import_react54.useEffect(() => {
     if (!ref.current)
       return;
     const frameId = requestAnimationFrame(() => {
@@ -230023,18 +229676,1503 @@ function MermaidMarkdown({ source }) {
     });
     return () => cancelAnimationFrame(frameId);
   }, []);
-  return /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("div", {
+  return /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("div", {
     ref,
     className: "wmde-markdown",
-    children: /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(esm_default3.Markdown, {
+    children: /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(esm_default3.Markdown, {
       source: safeSource
     }, undefined, false, undefined, this)
   }, undefined, false, undefined, this);
 }
 
-// src/apps/dashboard-web/components/Modal.tsx
+// src/apps/dashboard-web/components/DocumentsPage.tsx
+var jsx_dev_runtime21 = __toESM(require_jsx_dev_runtime(), 1);
+var docTypeColor = (type3) => {
+  switch (type3) {
+    case "specification":
+      return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400";
+    case "guide":
+      return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400";
+    case "readme":
+      return "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400";
+    default:
+      return "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400";
+  }
+};
+var formatDate2 = (dateStr) => {
+  if (!dateStr)
+    return "";
+  try {
+    return new Date(dateStr).toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric"
+    });
+  } catch {
+    return dateStr;
+  }
+};
+var DocumentsPage = () => {
+  const [documents2, setDocuments] = import_react55.useState([]);
+  const [loading, setLoading] = import_react55.useState(true);
+  const [error3, setError] = import_react55.useState(null);
+  const [filter7, setFilter] = import_react55.useState("");
+  const [typeFilter, setTypeFilter] = import_react55.useState("");
+  const [selectedDoc, setSelectedDoc] = import_react55.useState(null);
+  const fetchData = import_react55.useCallback(async () => {
+    try {
+      setError(null);
+      const data5 = await apiClient.fetchDocs();
+      setDocuments(data5);
+    } catch (err) {
+      console.error("Failed to fetch documents:", err);
+      setError("Failed to load documents");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  import_react55.useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+  const docTypes = [...new Set(documents2.map((d4) => d4.type))].sort();
+  const filteredDocs = documents2.filter((doc) => {
+    if (filter7) {
+      const query = filter7.toLowerCase();
+      const matchesTitle = doc.title?.toLowerCase().includes(query);
+      const matchesName = doc.name?.toLowerCase().includes(query);
+      const matchesPath = doc.path?.toLowerCase().includes(query);
+      if (!matchesTitle && !matchesName && !matchesPath)
+        return false;
+    }
+    if (typeFilter && doc.type !== typeFilter)
+      return false;
+    return true;
+  });
+  if (loading) {
+    return /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+      className: "flex flex-col justify-center items-center h-64 space-y-4",
+      children: [
+        /* @__PURE__ */ jsx_dev_runtime21.jsxDEV(LoadingSpinner_default, {
+          size: "lg",
+          text: ""
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("p", {
+          className: "text-lg font-medium text-gray-900 dark:text-gray-100",
+          children: "Loading documents..."
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  }
+  if (error3) {
+    return /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+      className: "p-8 text-center",
+      children: /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+        className: "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("p", {
+            className: "text-red-600 dark:text-red-400 font-medium",
+            children: "Error"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("p", {
+            className: "text-red-500 dark:text-red-300 text-sm mt-1",
+            children: error3
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("button", {
+            type: "button",
+            onClick: fetchData,
+            className: "mt-4 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded hover:bg-red-200 dark:hover:bg-red-900/50",
+            children: "Retry"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    }, undefined, false, undefined, this);
+  }
+  if (selectedDoc) {
+    return /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+      className: "space-y-4",
+      children: [
+        /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+          className: "flex items-center gap-4",
+          children: /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("button", {
+            type: "button",
+            onClick: () => setSelectedDoc(null),
+            className: "text-sm text-blue-600 dark:text-blue-400 hover:underline",
+            children: "← Back to documents"
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+          className: "bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6",
+          children: [
+            /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("h1", {
+              className: "text-xl font-bold text-gray-900 dark:text-gray-100",
+              children: selectedDoc.title || selectedDoc.name
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+              className: "flex items-center gap-3 mt-2",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("span", {
+                  className: `px-2 py-0.5 rounded text-xs font-medium ${docTypeColor(selectedDoc.type)}`,
+                  children: selectedDoc.type
+                }, undefined, false, undefined, this),
+                selectedDoc.lastModified && /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("span", {
+                  className: "text-xs text-gray-500 dark:text-gray-400",
+                  children: [
+                    "Modified: ",
+                    formatDate2(selectedDoc.lastModified)
+                  ]
+                }, undefined, true, undefined, this)
+              ]
+            }, undefined, true, undefined, this),
+            /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+              className: "mt-4 prose dark:prose-invert max-w-none",
+              children: /* @__PURE__ */ jsx_dev_runtime21.jsxDEV(MermaidMarkdown, {
+                source: selectedDoc.rawContent ?? ""
+              }, undefined, false, undefined, this)
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  }
+  return /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+    className: "space-y-6",
+    children: [
+      /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+        className: "flex items-center justify-between",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("h1", {
+            className: "text-2xl font-bold text-gray-900 dark:text-gray-100",
+            children: [
+              "Documents (",
+              documents2.length,
+              ")"
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+            className: "flex items-center gap-3",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("input", {
+                type: "text",
+                placeholder: "Search documents...",
+                value: filter7,
+                onChange: (e3) => setFilter(e3.target.value),
+                className: "rounded border px-3 py-1.5 text-sm bg-white dark:bg-gray-800 w-48"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("select", {
+                value: typeFilter,
+                onChange: (e3) => setTypeFilter(e3.target.value),
+                className: "rounded border px-2 py-1.5 text-sm bg-white dark:bg-gray-800",
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("option", {
+                    value: "",
+                    children: "All types"
+                  }, undefined, false, undefined, this),
+                  docTypes.map((t4) => /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("option", {
+                    value: t4,
+                    children: t4
+                  }, t4, false, undefined, this))
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+        className: "space-y-3",
+        children: filteredDocs.map((doc) => /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("button", {
+          type: "button",
+          onClick: () => setSelectedDoc(doc),
+          className: "w-full text-left bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 hover:border-blue-300 dark:hover:border-blue-700 transition-colors",
+          children: /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+            className: "flex items-start justify-between",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+                className: "space-y-1",
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("h3", {
+                    className: "font-medium text-gray-900 dark:text-gray-100",
+                    children: doc.title || doc.name
+                  }, undefined, false, undefined, this),
+                  doc.path && /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("p", {
+                    className: "text-xs font-mono text-gray-500 dark:text-gray-400",
+                    children: doc.path
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+                className: "flex items-center gap-2",
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("span", {
+                    className: `px-2 py-0.5 rounded text-xs font-medium ${docTypeColor(doc.type)}`,
+                    children: doc.type
+                  }, undefined, false, undefined, this),
+                  doc.lastModified && /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("span", {
+                    className: "text-xs text-gray-500 dark:text-gray-400",
+                    children: formatDate2(doc.lastModified)
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        }, doc.id || doc.name, false, undefined, this))
+      }, undefined, false, undefined, this),
+      filteredDocs.length === 0 && /* @__PURE__ */ jsx_dev_runtime21.jsxDEV("div", {
+        className: "text-center py-12 text-gray-500 dark:text-gray-400",
+        children: filter7 || typeFilter ? "No documents match your filters" : "No documents found"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+};
+var DocumentsPage_default = DocumentsPage;
+
+// src/apps/dashboard-web/components/KnowledgePage.tsx
+var import_react56 = __toESM(require_react(), 1);
+var jsx_dev_runtime22 = __toESM(require_jsx_dev_runtime(), 1);
+var entryTypeColor = (type3) => {
+  switch (type3) {
+    case "solution":
+      return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400";
+    case "pattern":
+      return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400";
+    case "decision":
+      return "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400";
+    case "obstacle":
+      return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400";
+    case "lesson":
+      return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400";
+    default:
+      return "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400";
+  }
+};
+var KnowledgePage = () => {
+  const [entries2, setEntries] = import_react56.useState([]);
+  const [loading, setLoading] = import_react56.useState(true);
+  const [error3, setError] = import_react56.useState(null);
+  const [searchQuery, setSearchQuery] = import_react56.useState("");
+  const [typeFilter, setTypeFilter] = import_react56.useState("");
+  const fetchData = import_react56.useCallback(async () => {
+    try {
+      setError(null);
+      const data5 = await apiClient.fetchKnowledge({
+        query: searchQuery || undefined,
+        type: typeFilter || undefined
+      });
+      setEntries(data5);
+    } catch (err) {
+      console.error("Failed to fetch knowledge entries:", err);
+      setError("Failed to load knowledge entries");
+    } finally {
+      setLoading(false);
+    }
+  }, [searchQuery, typeFilter]);
+  import_react56.useEffect(() => {
+    const timer3 = setTimeout(fetchData, 300);
+    return () => clearTimeout(timer3);
+  }, [fetchData]);
+  const handleMarkHelpful = async (id33) => {
+    try {
+      await apiClient.markKnowledgeHelpful(id33);
+      setEntries((prev2) => prev2.map((e3) => e3.id === id33 ? { ...e3, helpful_count: (e3.helpful_count || 0) + 1 } : e3));
+    } catch (err) {
+      console.error("Failed to mark as helpful:", err);
+    }
+  };
+  if (loading && entries2.length === 0) {
+    return /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+      className: "flex flex-col justify-center items-center h-64 space-y-4",
+      children: [
+        /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(LoadingSpinner_default, {
+          size: "lg",
+          text: ""
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("p", {
+          className: "text-lg font-medium text-gray-900 dark:text-gray-100",
+          children: "Loading knowledge base..."
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  }
+  return /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+    className: "space-y-6",
+    children: [
+      /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+        className: "flex items-center justify-between",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("h1", {
+            className: "text-2xl font-bold text-gray-900 dark:text-gray-100",
+            children: [
+              "Knowledge Base (",
+              entries2.length,
+              ")"
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+            className: "flex items-center gap-3",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("input", {
+                type: "text",
+                placeholder: "Search knowledge...",
+                value: searchQuery,
+                onChange: (e3) => setSearchQuery(e3.target.value),
+                className: "rounded border px-3 py-1.5 text-sm bg-white dark:bg-gray-800 w-48"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("select", {
+                value: typeFilter,
+                onChange: (e3) => setTypeFilter(e3.target.value),
+                className: "rounded border px-2 py-1.5 text-sm bg-white dark:bg-gray-800",
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("option", {
+                    value: "",
+                    children: "All types"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("option", {
+                    value: "solution",
+                    children: "Solutions"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("option", {
+                    value: "pattern",
+                    children: "Patterns"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("option", {
+                    value: "decision",
+                    children: "Decisions"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("option", {
+                    value: "obstacle",
+                    children: "Obstacles"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("option", {
+                    value: "lesson",
+                    children: "Lessons"
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      error3 && /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+        className: "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4",
+        children: /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("p", {
+          className: "text-red-600 dark:text-red-400",
+          children: error3
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+        className: "space-y-4",
+        children: entries2.map((entry) => /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+          className: "bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-3",
+          children: [
+            /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+              className: "flex items-start justify-between",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("span", {
+                  className: `px-2 py-0.5 rounded text-xs font-medium ${entryTypeColor(entry.type)}`,
+                  children: entry.type
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+                  className: "flex items-center gap-2",
+                  children: [
+                    entry.helpful_count !== undefined && /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("span", {
+                      className: "text-xs text-gray-500 dark:text-gray-400",
+                      children: [
+                        "\uD83D\uDC4D ",
+                        entry.helpful_count
+                      ]
+                    }, undefined, true, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("button", {
+                      type: "button",
+                      onClick: () => handleMarkHelpful(entry.id),
+                      className: "text-xs text-blue-600 dark:text-blue-400 hover:underline",
+                      children: "Helpful?"
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this)
+              ]
+            }, undefined, true, undefined, this),
+            /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("p", {
+              className: "text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap",
+              children: entry.content
+            }, undefined, false, undefined, this),
+            entry.keywords.length > 0 && /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+              className: "flex flex-wrap gap-1",
+              children: entry.keywords.map((kw) => /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("span", {
+                className: "px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded text-xs",
+                children: kw
+              }, kw, false, undefined, this))
+            }, undefined, false, undefined, this),
+            entry.source && /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("p", {
+              className: "text-xs text-gray-500 dark:text-gray-400",
+              children: [
+                "Source: ",
+                entry.source
+              ]
+            }, undefined, true, undefined, this)
+          ]
+        }, entry.id, true, undefined, this))
+      }, undefined, false, undefined, this),
+      !loading && entries2.length === 0 && /* @__PURE__ */ jsx_dev_runtime22.jsxDEV("div", {
+        className: "text-center py-12 text-gray-500 dark:text-gray-400",
+        children: searchQuery || typeFilter ? "No knowledge entries match your search" : "No knowledge entries yet"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+};
+var KnowledgePage_default = KnowledgePage;
+
+// src/apps/dashboard-web/components/MapPage.tsx
+var import_react57 = __toESM(require_react(), 1);
+var jsx_dev_runtime23 = __toESM(require_jsx_dev_runtime(), 1);
+var statusColor2 = (status) => {
+  switch (status?.toLowerCase()) {
+    case "complete":
+      return "#10B981";
+    case "develop":
+      return "#3B82F6";
+    case "review":
+      return "#F59E0B";
+    case "merge":
+      return "#8B5CF6";
+    case "draft":
+      return "#9CA3AF";
+    default:
+      return "#6B7280";
+  }
+};
+var MapPage = () => {
+  const [nodes5, setNodes] = import_react57.useState([]);
+  const [loading, setLoading] = import_react57.useState(true);
+  const [error3, setError] = import_react57.useState(null);
+  const [selectedNode, setSelectedNode] = import_react57.useState(null);
+  import_react57.useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setError(null);
+        const response = await fetch("/api/proposals?crossBranch=true");
+        if (!response.ok)
+          throw new Error("Failed to fetch proposals");
+        const proposals = await response.json();
+        const mapNodes = proposals.map((p5) => ({
+          id: p5.id,
+          title: p5.title,
+          status: p5.status,
+          type: p5.proposalType,
+          dependencies: p5.dependencies || []
+        }));
+        setNodes(mapNodes);
+      } catch (err) {
+        console.error("Failed to fetch map data:", err);
+        setError("Failed to load dependency map");
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
+  const adjacencyList = import_react57.useMemo(() => {
+    const adj = new Map;
+    for (const node3 of nodes5) {
+      adj.set(node3.id, []);
+    }
+    for (const node3 of nodes5) {
+      for (const dep of node3.dependencies) {
+        const list4 = adj.get(dep) || [];
+        list4.push(node3.id);
+        adj.set(dep, list4);
+      }
+    }
+    return adj;
+  }, [nodes5]);
+  const selectedNodeData = import_react57.useMemo(() => nodes5.find((n3) => n3.id === selectedNode), [nodes5, selectedNode]);
+  const dependents = import_react57.useMemo(() => selectedNode ? adjacencyList.get(selectedNode) || [] : [], [adjacencyList, selectedNode]);
+  const dependencies = import_react57.useMemo(() => selectedNodeData?.dependencies || [], [selectedNodeData]);
+  if (loading) {
+    return /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+      className: "flex flex-col justify-center items-center h-64 space-y-4",
+      children: [
+        /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(LoadingSpinner_default, {
+          size: "lg",
+          text: ""
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("p", {
+          className: "text-lg font-medium text-gray-900 dark:text-gray-100",
+          children: "Loading dependency map..."
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  }
+  if (error3) {
+    return /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+      className: "p-8 text-center",
+      children: /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+        className: "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("p", {
+            className: "text-red-600 dark:text-red-400 font-medium",
+            children: "Error"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("p", {
+            className: "text-red-500 dark:text-red-300 text-sm mt-1",
+            children: error3
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    }, undefined, false, undefined, this);
+  }
+  return /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+    className: "space-y-6",
+    children: [
+      /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+        className: "flex items-center justify-between",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("h1", {
+            className: "text-2xl font-bold text-gray-900 dark:text-gray-100",
+            children: [
+              "Dependency Map (",
+              nodes5.length,
+              " proposals)"
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+            className: "flex items-center gap-4 text-xs",
+            children: [
+              { label: "Draft", color: "#9CA3AF" },
+              { label: "Review", color: "#F59E0B" },
+              { label: "Develop", color: "#3B82F6" },
+              { label: "Merge", color: "#8B5CF6" },
+              { label: "Complete", color: "#10B981" }
+            ].map(({ label, color: color3 }) => /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+              className: "flex items-center gap-1",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+                  className: "w-3 h-3 rounded-full",
+                  style: { backgroundColor: color3 }
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("span", {
+                  className: "text-gray-600 dark:text-gray-400",
+                  children: label
+                }, undefined, false, undefined, this)
+              ]
+            }, label, true, undefined, this))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+        className: "grid grid-cols-1 lg:grid-cols-3 gap-6",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+            className: "bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 max-h-[600px] overflow-y-auto",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("h2", {
+                className: "text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3",
+                children: "Proposals"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+                className: "space-y-1",
+                children: nodes5.map((node3) => /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("button", {
+                  type: "button",
+                  onClick: () => setSelectedNode(selectedNode === node3.id ? null : node3.id),
+                  className: `w-full text-left px-3 py-2 rounded text-sm transition-colors ${selectedNode === node3.id ? "bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700" : "hover:bg-gray-50 dark:hover:bg-gray-700"}`,
+                  children: [
+                    /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+                      className: "flex items-center gap-2",
+                      children: [
+                        /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+                          className: "w-2 h-2 rounded-full flex-shrink-0",
+                          style: { backgroundColor: statusColor2(node3.status) }
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("span", {
+                          className: "font-mono text-xs text-gray-500 dark:text-gray-400",
+                          children: node3.id
+                        }, undefined, false, undefined, this)
+                      ]
+                    }, undefined, true, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+                      className: "text-gray-700 dark:text-gray-300 truncate mt-0.5 ml-4",
+                      children: node3.title
+                    }, undefined, false, undefined, this)
+                  ]
+                }, node3.id, true, undefined, this))
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+            className: "lg:col-span-2 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6",
+            children: selectedNodeData ? /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+              className: "space-y-6",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+                  children: [
+                    /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+                      className: "flex items-center gap-2 mb-2",
+                      children: [
+                        /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+                          className: "w-3 h-3 rounded-full",
+                          style: {
+                            backgroundColor: statusColor2(selectedNodeData.status)
+                          }
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("span", {
+                          className: "font-mono text-sm text-gray-500 dark:text-gray-400",
+                          children: selectedNodeData.id
+                        }, undefined, false, undefined, this)
+                      ]
+                    }, undefined, true, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("h2", {
+                      className: "text-xl font-bold text-gray-900 dark:text-gray-100",
+                      children: selectedNodeData.title
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+                      className: "flex items-center gap-2 mt-2",
+                      children: [
+                        /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("span", {
+                          className: "px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded text-xs",
+                          children: selectedNodeData.status
+                        }, undefined, false, undefined, this),
+                        selectedNodeData.type && /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("span", {
+                          className: "px-2 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded text-xs",
+                          children: selectedNodeData.type
+                        }, undefined, false, undefined, this)
+                      ]
+                    }, undefined, true, undefined, this)
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+                  className: "grid grid-cols-2 gap-6",
+                  children: [
+                    /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+                      children: [
+                        /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("h3", {
+                          className: "text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-2",
+                          children: [
+                            "Depends On (",
+                            dependencies.length,
+                            ")"
+                          ]
+                        }, undefined, true, undefined, this),
+                        dependencies.length === 0 ? /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("p", {
+                          className: "text-sm text-gray-500 dark:text-gray-400",
+                          children: "No dependencies"
+                        }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+                          className: "space-y-1",
+                          children: dependencies.map((depId) => {
+                            const depNode = nodes5.find((n3) => n3.id === depId);
+                            return /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("button", {
+                              type: "button",
+                              onClick: () => setSelectedNode(depId),
+                              className: "w-full text-left px-2 py-1 rounded text-sm hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2",
+                              children: [
+                                depNode && /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+                                  className: "w-2 h-2 rounded-full",
+                                  style: {
+                                    backgroundColor: statusColor2(depNode.status)
+                                  }
+                                }, undefined, false, undefined, this),
+                                /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("span", {
+                                  className: "font-mono text-xs",
+                                  children: depId
+                                }, undefined, false, undefined, this),
+                                depNode && /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("span", {
+                                  className: "text-gray-500 dark:text-gray-400 truncate",
+                                  children: [
+                                    "— ",
+                                    depNode.title
+                                  ]
+                                }, undefined, true, undefined, this)
+                              ]
+                            }, depId, true, undefined, this);
+                          })
+                        }, undefined, false, undefined, this)
+                      ]
+                    }, undefined, true, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+                      children: [
+                        /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("h3", {
+                          className: "text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-2",
+                          children: [
+                            "Blocking (",
+                            dependents.length,
+                            ")"
+                          ]
+                        }, undefined, true, undefined, this),
+                        dependents.length === 0 ? /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("p", {
+                          className: "text-sm text-gray-500 dark:text-gray-400",
+                          children: "Not blocking anything"
+                        }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+                          className: "space-y-1",
+                          children: dependents.map((depId) => {
+                            const depNode = nodes5.find((n3) => n3.id === depId);
+                            return /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("button", {
+                              type: "button",
+                              onClick: () => setSelectedNode(depId),
+                              className: "w-full text-left px-2 py-1 rounded text-sm hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2",
+                              children: [
+                                depNode && /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+                                  className: "w-2 h-2 rounded-full",
+                                  style: {
+                                    backgroundColor: statusColor2(depNode.status)
+                                  }
+                                }, undefined, false, undefined, this),
+                                /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("span", {
+                                  className: "font-mono text-xs",
+                                  children: depId
+                                }, undefined, false, undefined, this),
+                                depNode && /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("span", {
+                                  className: "text-gray-500 dark:text-gray-400 truncate",
+                                  children: [
+                                    "— ",
+                                    depNode.title
+                                  ]
+                                }, undefined, true, undefined, this)
+                              ]
+                            }, depId, true, undefined, this);
+                          })
+                        }, undefined, false, undefined, this)
+                      ]
+                    }, undefined, true, undefined, this)
+                  ]
+                }, undefined, true, undefined, this)
+              ]
+            }, undefined, true, undefined, this) : /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+              className: "text-center py-16 text-gray-500 dark:text-gray-400",
+              children: "Select a proposal from the list to view its dependencies"
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      nodes5.length === 0 && /* @__PURE__ */ jsx_dev_runtime23.jsxDEV("div", {
+        className: "text-center py-12 text-gray-500 dark:text-gray-400",
+        children: "No proposals to display"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+};
+var MapPage_default = MapPage;
+
+// src/apps/dashboard-web/components/NotFoundPage.tsx
+function NotFoundPage(_props) {
+  return null;
+}
+
+// src/apps/dashboard-web/components/ProposalDetailsModal.tsx
+var import_react62 = __toESM(require_react(), 1);
+
+// src/shared/proposal-markdown-export.ts
+function ts(value2) {
+  if (!value2)
+    return "";
+  if (value2 instanceof Date)
+    return value2.toISOString();
+  if (typeof value2 === "string")
+    return value2;
+  return String(value2);
+}
+function trim2(s5) {
+  return (s5 ?? "").trim();
+}
+function section(title8, body3) {
+  const trimmed = body3.trim();
+  if (!trimmed)
+    return [];
+  return [`## ${title8}`, "", trimmed, ""];
+}
+function arraySection(title8, items) {
+  const filtered = items.map((s5) => s5.trim()).filter(Boolean);
+  if (filtered.length === 0)
+    return [];
+  const lines = [`## ${title8}`, ""];
+  for (const item of filtered)
+    lines.push(`- ${item}`);
+  lines.push("");
+  return lines;
+}
+function frontmatter(p5) {
+  const lines = ["---"];
+  lines.push(`id: ${p5.id}`);
+  lines.push(`title: ${JSON.stringify(p5.title || "")}`);
+  if (p5.status)
+    lines.push(`status: ${p5.status}`);
+  if (p5.maturity)
+    lines.push(`maturity: ${p5.maturity}`);
+  if (p5.proposalType || p5.type)
+    lines.push(`type: ${p5.proposalType || p5.type}`);
+  if (p5.priority)
+    lines.push(`priority: ${p5.priority}`);
+  if (p5.assignee?.length)
+    lines.push(`assignee: [${p5.assignee.join(", ")}]`);
+  if (p5.reporter)
+    lines.push(`reporter: ${p5.reporter}`);
+  if (p5.createdDate)
+    lines.push(`createdDate: ${p5.createdDate}`);
+  if (p5.updatedDate)
+    lines.push(`updatedDate: ${p5.updatedDate}`);
+  if (p5.labels?.length)
+    lines.push(`labels: [${p5.labels.join(", ")}]`);
+  if (p5.directive)
+    lines.push(`directive: ${p5.directive}`);
+  if (p5.dependencies?.length)
+    lines.push(`dependencies: [${p5.dependencies.join(", ")}]`);
+  if (p5.references?.length)
+    lines.push(`references: [${p5.references.join(", ")}]`);
+  if (p5.parentProposalId)
+    lines.push(`parent: ${p5.parentProposalId}`);
+  if (p5.builder)
+    lines.push(`builder: ${p5.builder}`);
+  if (p5.auditor)
+    lines.push(`auditor: ${p5.auditor}`);
+  if (p5.branch)
+    lines.push(`branch: ${p5.branch}`);
+  lines.push("---", "");
+  return lines;
+}
+function criteriaBlock(criteria) {
+  if (!criteria || criteria.length === 0)
+    return [];
+  const lines = ["## Acceptance Criteria", ""];
+  const sorted = [...criteria].sort((a3, b3) => (a3.index ?? 0) - (b3.index ?? 0));
+  for (const c5 of sorted) {
+    const box = c5.checked ? "[x]" : "[ ]";
+    const meta3 = [];
+    if (c5.role)
+      meta3.push(`role: ${c5.role}`);
+    if (c5.evidence)
+      meta3.push(`evidence: ${c5.evidence}`);
+    const tail = meta3.length ? `  _(${meta3.join(" · ")})_` : "";
+    lines.push(`- ${box} ${c5.text}${tail}`);
+  }
+  lines.push("");
+  return lines;
+}
+function decisionsBlock(items) {
+  if (!items || items.length === 0)
+    return [];
+  const lines = ["## Decisions", ""];
+  for (const d4 of items) {
+    const when = ts(d4.decided_at);
+    const flag = d4.binding ? " (binding)" : "";
+    lines.push(`### ${trim2(d4.decision) || "(decision)"}${flag}`);
+    const meta3 = [];
+    if (d4.authority)
+      meta3.push(`**authority:** ${d4.authority}`);
+    if (when)
+      meta3.push(`**at:** ${when}`);
+    if (meta3.length)
+      lines.push(meta3.join(" · "));
+    const rationale = trim2(d4.rationale ?? "");
+    if (rationale) {
+      lines.push("");
+      lines.push(rationale);
+    }
+    lines.push("");
+  }
+  return lines;
+}
+function reviewsBlock(items) {
+  if (!items || items.length === 0)
+    return [];
+  const lines = ["## Reviews", ""];
+  for (const r3 of items) {
+    const when = ts(r3.reviewed_at);
+    const blocking = r3.is_blocking ? " (blocking)" : "";
+    const verdict = trim2(r3.verdict ?? "") || "(no verdict)";
+    const reviewer = trim2(r3.reviewer_identity ?? "") || "(unknown reviewer)";
+    lines.push(`### ${reviewer} — ${verdict}${blocking}`);
+    if (when)
+      lines.push(`**at:** ${when}`);
+    const notes = trim2(r3.notes ?? "");
+    if (notes) {
+      lines.push("");
+      lines.push("**Notes:**");
+      lines.push("");
+      lines.push(notes);
+    }
+    const findings = trim2(r3.findings ?? "");
+    if (findings) {
+      lines.push("");
+      lines.push("**Findings:**");
+      lines.push("");
+      lines.push(findings);
+    }
+    lines.push("");
+  }
+  return lines;
+}
+function discussionsBlock(items) {
+  if (!items || items.length === 0)
+    return [];
+  const lines = ["## Discussions", ""];
+  const sorted = [...items].sort((a3, b3) => {
+    const ta = ts(a3.created_at);
+    const tb = ts(b3.created_at);
+    return ta < tb ? -1 : ta > tb ? 1 : 0;
+  });
+  for (const d4 of sorted) {
+    const when = ts(d4.created_at);
+    const author = trim2(d4.author_identity ?? "") || "(unknown)";
+    const ctx = trim2(d4.context_prefix ?? "");
+    const head2 = ctx ? `${author} · ${ctx}` : author;
+    lines.push(`### ${head2}`);
+    if (when)
+      lines.push(`**at:** ${when}`);
+    const body3 = trim2(d4.body ?? d4.body_markdown ?? "");
+    if (body3) {
+      lines.push("");
+      lines.push(body3);
+    }
+    lines.push("");
+  }
+  return lines;
+}
+function activityBlock(items) {
+  if (!items || items.length === 0)
+    return [];
+  const lines = ["## Activity", ""];
+  for (const e3 of items) {
+    const reason2 = e3.reason ? ` — ${e3.reason}` : "";
+    lines.push(`- \`${e3.timestamp}\` **${e3.actor}** ${e3.action}${reason2}`);
+  }
+  lines.push("");
+  return lines;
+}
+function buildProposalMarkdown(bundle) {
+  const p5 = bundle.proposal;
+  const lines = [];
+  lines.push(...frontmatter(p5));
+  lines.push(`# ${p5.id} — ${p5.title || "(untitled)"}`, "");
+  const summary = trim2(p5.summary ?? "");
+  const description = trim2(p5.description ?? "");
+  if (summary)
+    lines.push(...section("Summary", summary));
+  else if (description)
+    lines.push(...section("Summary", description));
+  lines.push(...section("Motivation", p5.motivation ?? ""));
+  const design = trim2(p5.design ?? p5.implementationPlan ?? "");
+  lines.push(...section("Design", design));
+  if (description && summary) {
+    lines.push(...section("Description", description));
+  }
+  lines.push(...section("Drawbacks", p5.drawbacks ?? ""));
+  lines.push(...section("Alternatives", p5.alternatives ?? ""));
+  lines.push(...section("Dependency Notes", p5.dependency_note ?? ""));
+  lines.push(...arraySection("Dependencies", (p5.dependencies ?? []).map((d4) => String(d4))));
+  lines.push(...arraySection("References", (p5.references ?? []).map((d4) => String(d4))));
+  lines.push(...arraySection("Required Capabilities", (p5.required_capabilities ?? p5.needs_capabilities ?? []).map((d4) => String(d4))));
+  lines.push(...arraySection("Unlocks", (p5.unlocks ?? []).map((d4) => String(d4))));
+  lines.push(...criteriaBlock(bundle.criteria ?? p5.acceptanceCriteriaItems));
+  lines.push(...section("Implementation Plan", p5.implementationPlan ?? ""));
+  lines.push(...section("Implementation Notes", p5.implementationNotes ?? ""));
+  lines.push(...section("Audit Notes", p5.auditNotes ?? ""));
+  lines.push(...section("Final Summary", p5.finalSummary ?? ""));
+  lines.push(...decisionsBlock(bundle.decisions));
+  lines.push(...reviewsBlock(bundle.reviews));
+  lines.push(...discussionsBlock(bundle.discussions));
+  lines.push(...activityBlock(bundle.activityLog ?? p5.activityLog));
+  lines.push("---", `_Exported ${new Date().toISOString()}_`, "");
+  return lines.join(`
+`).replace(/\n{3,}/g, `
+
+`);
+}
+function proposalExportFilename(proposal) {
+  const id33 = proposal.id || "proposal";
+  const slug2 = (proposal.title || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  return slug2 ? `${id33}-${slug2}-${stamp}.md` : `${id33}-${stamp}.md`;
+}
+
+// src/apps/dashboard-web/utils/date-display.ts
+var DATE_ONLY_REGEX = /^(\d{4})-(\d{2})-(\d{2})$/;
+var DATE_TIME_REGEX = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/;
+var ISO_FULL_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+function parseIntStrict(value2) {
+  return Number.parseInt(value2, 10);
+}
+function parseStoredUtcDate(dateStr) {
+  if (!dateStr)
+    return null;
+  const normalized = dateStr.trim();
+  if (!normalized)
+    return null;
+  const dateTimeMatch = normalized.match(DATE_TIME_REGEX);
+  if (dateTimeMatch) {
+    const y6 = dateTimeMatch[1];
+    const m3 = dateTimeMatch[2];
+    const d4 = dateTimeMatch[3];
+    const hh = dateTimeMatch[4];
+    const mm = dateTimeMatch[5];
+    if (!y6 || !m3 || !d4 || !hh || !mm)
+      return null;
+    const year = parseIntStrict(y6);
+    const month = parseIntStrict(m3);
+    const day = parseIntStrict(d4);
+    const hours = parseIntStrict(hh);
+    const minutes = parseIntStrict(mm);
+    const date2 = new Date(Date.UTC(year, month - 1, day, hours, minutes, 0));
+    if (date2.getUTCFullYear() !== year || date2.getUTCMonth() !== month - 1 || date2.getUTCDate() !== day || date2.getUTCHours() !== hours || date2.getUTCMinutes() !== minutes) {
+      return null;
+    }
+    return date2;
+  }
+  const dateOnlyMatch = normalized.match(DATE_ONLY_REGEX);
+  if (dateOnlyMatch) {
+    const y6 = dateOnlyMatch[1];
+    const m3 = dateOnlyMatch[2];
+    const d4 = dateOnlyMatch[3];
+    if (!y6 || !m3 || !d4)
+      return null;
+    const year = parseIntStrict(y6);
+    const month = parseIntStrict(m3);
+    const day = parseIntStrict(d4);
+    const date2 = new Date(Date.UTC(year, month - 1, day, 0, 0, 0));
+    if (date2.getUTCFullYear() !== year || date2.getUTCMonth() !== month - 1 || date2.getUTCDate() !== day) {
+      return null;
+    }
+    return date2;
+  }
+  if (ISO_FULL_REGEX.test(normalized)) {
+    const d4 = new Date(normalized);
+    if (!isNaN(d4.getTime()))
+      return d4;
+  }
+  return null;
+}
+function formatStoredUtcDateForDisplay(dateStr) {
+  if (!dateStr)
+    return "";
+  const parsed = parseStoredUtcDate(dateStr);
+  if (!parsed)
+    return dateStr;
+  const normalized = dateStr.trim();
+  if (DATE_TIME_REGEX.test(normalized) || ISO_FULL_REGEX.test(normalized)) {
+    return parsed.toLocaleString(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short"
+    });
+  }
+  return parsed.toLocaleDateString();
+}
+function formatStoredUtcDateForCompactDisplay(dateStr, now3 = new Date) {
+  if (!dateStr)
+    return "—";
+  const normalized = dateStr.trim();
+  if (!normalized)
+    return "—";
+  const parsed = parseStoredUtcDate(normalized);
+  if (!parsed)
+    return normalized;
+  const diffMs = now3.getTime() - parsed.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  if (diffDays >= 0) {
+    if (diffDays === 0)
+      return "today";
+    if (diffDays === 1)
+      return "yesterday";
+    if (diffDays < 7)
+      return `${diffDays}d ago`;
+  }
+  return parsed.toLocaleDateString();
+}
+
+// src/apps/dashboard-web/components/AcceptanceCriteriaEditor.tsx
+var import_react58 = __toESM(require_react(), 1);
+var jsx_dev_runtime24 = __toESM(require_jsx_dev_runtime(), 1);
+var AcceptanceCriteriaEditor = ({
+  criteria: initial,
+  onChange,
+  label = "Acceptance Criteria",
+  preserveIndices = false,
+  disableToggle = false
+}) => {
+  const [criteria, setCriteria] = import_react58.useState(initial || []);
+  const [newCriterion, setNewCriterion] = import_react58.useState("");
+  const itemRefs = import_react58.useRef({});
+  const newRef = import_react58.useRef(null);
+  import_react58.useEffect(() => {
+    setCriteria(initial || []);
+  }, [initial]);
+  const autoResize = import_react58.useCallback((el) => {
+    if (!el)
+      return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, []);
+  import_react58.useEffect(() => {
+    Object.values(itemRefs.current).forEach((el) => {
+      autoResize(el);
+    });
+  }, [autoResize]);
+  import_react58.useEffect(() => {
+    autoResize(newRef.current);
+  }, [autoResize]);
+  const handleToggle = (index3, checked2) => {
+    if (disableToggle)
+      return;
+    const updated = criteria.map((c5) => c5.index === index3 ? { ...c5, checked: checked2 } : c5);
+    setCriteria(updated);
+    onChange(updated);
+  };
+  const handleTextChange = (index3, text13) => {
+    const updated = criteria.map((c5) => c5.index === index3 ? { ...c5, text: text13 } : c5);
+    setCriteria(updated);
+    onChange(updated);
+  };
+  const handleRemove = (index3) => {
+    const filtered = criteria.filter((c5) => c5.index !== index3);
+    const updated = preserveIndices ? filtered : filtered.map((c5, i5) => ({ ...c5, index: i5 + 1 }));
+    setCriteria(updated);
+    onChange(updated);
+  };
+  const handleAdd = () => {
+    const text13 = newCriterion.trim();
+    if (!text13)
+      return;
+    const nextIndex = preserveIndices ? Math.max(0, ...criteria.map((item) => item.index)) + 1 : criteria.length + 1;
+    const updated = [...criteria, { checked: false, text: text13, index: nextIndex }];
+    setCriteria(updated);
+    setNewCriterion("");
+    onChange(updated);
+  };
+  return /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("div", {
+    className: "space-y-2",
+    children: [
+      /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("div", {
+        className: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 transition-colors duration-200",
+        children: label
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("ul", {
+        className: "space-y-2",
+        children: [
+          criteria.map((c5) => /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("li", {
+            className: "flex items-center gap-2",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("input", {
+                type: "checkbox",
+                className: "h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded",
+                checked: c5.checked,
+                onChange: (e3) => handleToggle(c5.index, e3.target.checked),
+                disabled: disableToggle
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("textarea", {
+                ref: (el) => {
+                  itemRefs.current[c5.index] = el;
+                },
+                rows: 1,
+                value: c5.text,
+                onChange: (e3) => handleTextChange(c5.index, e3.target.value),
+                onInput: (e3) => autoResize(e3.currentTarget),
+                className: "flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 focus:border-transparent transition-colors duration-200 resize-none overflow-hidden leading-5"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("button", {
+                type: "button",
+                onClick: () => handleRemove(c5.index),
+                className: "px-2 py-1 text-sm text-red-600 dark:text-red-400 hover:underline",
+                children: "Remove"
+              }, undefined, false, undefined, this)
+            ]
+          }, c5.index, true, undefined, this)),
+          /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("li", {
+            className: "flex items-center gap-2",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("textarea", {
+                ref: newRef,
+                rows: 1,
+                value: newCriterion,
+                onChange: (e3) => setNewCriterion(e3.target.value),
+                onInput: (e3) => autoResize(e3.currentTarget),
+                placeholder: "New criterion",
+                className: "flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 focus:border-transparent transition-colors duration-200 resize-none overflow-hidden leading-5"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime24.jsxDEV("button", {
+                type: "button",
+                onClick: handleAdd,
+                className: "px-2 py-1 text-sm bg-blue-500 dark:bg-blue-600 text-white rounded-md hover:bg-blue-600 dark:hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 focus:ring-blue-400 dark:focus:ring-blue-500 transition-colors duration-200",
+                children: "Add"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+};
+var AcceptanceCriteriaEditor_default = AcceptanceCriteriaEditor;
+
+// src/apps/dashboard-web/components/ChipInput.tsx
+var import_react59 = __toESM(require_react(), 1);
+var jsx_dev_runtime25 = __toESM(require_jsx_dev_runtime(), 1);
+var ChipInput = ({
+  value: value2,
+  onChange,
+  placeholder,
+  label,
+  name: name3,
+  disabled: disabled2
+}) => {
+  const [inputValue, setInputValue] = import_react59.useState("");
+  const inputId = `chip-input-${name3}`;
+  const handleKeyDown2 = (e3) => {
+    if (disabled2)
+      return;
+    if ((e3.key === "Enter" || e3.key === ",") && inputValue.trim()) {
+      e3.preventDefault();
+      const newValue = inputValue.trim();
+      if (!value2.includes(newValue)) {
+        onChange([...value2, newValue]);
+      }
+      setInputValue("");
+    } else if (e3.key === "Backspace" && !inputValue && value2.length > 0) {
+      onChange(value2.slice(0, -1));
+    }
+  };
+  const handleInputChange = (e3) => {
+    if (disabled2)
+      return;
+    const newValue = e3.target.value;
+    if (newValue.endsWith(",")) {
+      const chipValue = newValue.slice(0, -1).trim();
+      if (chipValue && !value2.includes(chipValue)) {
+        onChange([...value2, chipValue]);
+        setInputValue("");
+      } else {
+        setInputValue("");
+      }
+    } else {
+      setInputValue(newValue);
+    }
+  };
+  const removeChip = (index3) => {
+    if (disabled2)
+      return;
+    onChange(value2.filter((_4, i5) => i5 !== index3));
+  };
+  return /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("div", {
+    className: "w-full",
+    children: [
+      /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("label", {
+        htmlFor: inputId,
+        className: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 transition-colors duration-200",
+        children: label
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("div", {
+        className: `relative w-full min-h-10 px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md focus-within:ring-2 focus-within:ring-blue-500 dark:focus-within:ring-blue-400 focus-within:border-transparent transition-colors duration-200 pr-2 ${disabled2 ? "opacity-60 cursor-not-allowed" : ""}`,
+        children: /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("div", {
+          className: "flex flex-wrap gap-2 items-center w-full",
+          children: [
+            value2.map((item, index3) => /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("span", {
+              className: "inline-flex items-center gap-1 px-2 py-0.5 text-sm bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200 rounded-md flex-shrink-0 min-w-0 max-w-full transition-colors duration-200",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("span", {
+                  className: "truncate max-w-[16rem] sm:max-w-[20rem] md:max-w-[24rem]",
+                  children: item
+                }, undefined, false, undefined, this),
+                !disabled2 && /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("button", {
+                  type: "button",
+                  onClick: () => removeChip(index3),
+                  className: "hover:bg-blue-200 dark:hover:bg-blue-800 rounded-sm p-0.5 transition-colors duration-200",
+                  "aria-label": `Remove ${item}`,
+                  children: /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("svg", {
+                    className: "w-3 h-3",
+                    fill: "currentColor",
+                    viewBox: "0 0 20 20",
+                    "aria-hidden": "true",
+                    focusable: "false",
+                    children: /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("path", {
+                      fillRule: "evenodd",
+                      d: "M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z",
+                      clipRule: "evenodd"
+                    }, undefined, false, undefined, this)
+                  }, undefined, false, undefined, this)
+                }, undefined, false, undefined, this)
+              ]
+            }, item, true, undefined, this)),
+            /* @__PURE__ */ jsx_dev_runtime25.jsxDEV("input", {
+              id: inputId,
+              type: "text",
+              value: inputValue,
+              onChange: handleInputChange,
+              onKeyDown: handleKeyDown2,
+              placeholder: value2.length === 0 ? placeholder : "",
+              className: "flex-1 min-w-[2ch] outline-none text-sm bg-transparent text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400",
+              disabled: disabled2
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+};
+var ChipInput_default = ChipInput;
+
+// src/apps/dashboard-web/components/DependencyInput.tsx
 var import_react60 = __toESM(require_react(), 1);
 var jsx_dev_runtime26 = __toESM(require_jsx_dev_runtime(), 1);
+var DependencyInput = ({
+  value: value2,
+  onChange,
+  availableProposals,
+  currentProposalId,
+  label = "Dependencies",
+  disabled: disabled2
+}) => {
+  const [inputValue, setInputValue] = import_react60.useState("");
+  const [suggestions, setSuggestions] = import_react60.useState([]);
+  const [selectedIndex, setSelectedIndex] = import_react60.useState(0);
+  const textareaRef = import_react60.useRef(null);
+  const inputId = "dependency-input";
+  const getProposalDisplay = (proposalId) => {
+    const proposal = availableProposals.find((t4) => t4.id === proposalId);
+    return proposal ? `${proposal.id} - ${proposal.title}` : proposalId;
+  };
+  import_react60.useEffect(() => {
+    if (inputValue.trim()) {
+      const filtered = availableProposals.filter((proposal) => proposal.id !== currentProposalId && !value2.includes(proposal.id) && (proposal.id.toLowerCase().includes(inputValue.toLowerCase()) || proposal.title.toLowerCase().includes(inputValue.toLowerCase())));
+      setSuggestions(filtered);
+      setSelectedIndex(0);
+    } else {
+      setSuggestions([]);
+    }
+  }, [inputValue, availableProposals, value2, currentProposalId]);
+  import_react60.useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+    }
+  }, []);
+  const addDependency = (proposalId) => {
+    if (disabled2)
+      return;
+    if (!value2.includes(proposalId)) {
+      onChange([...value2, proposalId]);
+      setInputValue("");
+      setSuggestions([]);
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+      }
+    }
+  };
+  const removeDependency = (index3) => {
+    if (disabled2)
+      return;
+    onChange(value2.filter((_4, i5) => i5 !== index3));
+  };
+  const handleKeyDown2 = (e3) => {
+    if (disabled2)
+      return;
+    if (e3.key === "ArrowDown") {
+      e3.preventDefault();
+      setSelectedIndex((prev2) => (prev2 + 1) % suggestions.length);
+    } else if (e3.key === "ArrowUp") {
+      e3.preventDefault();
+      setSelectedIndex((prev2) => (prev2 - 1 + suggestions.length) % suggestions.length);
+    } else if ((e3.key === "Enter" || e3.key === ",") && inputValue.trim()) {
+      e3.preventDefault();
+      if (suggestions.length > 0 && suggestions[selectedIndex]) {
+        addDependency(suggestions[selectedIndex].id);
+      }
+    } else if (e3.key === "Backspace" && !inputValue && value2.length > 0) {
+      onChange(value2.slice(0, -1));
+    } else if (e3.key === "Escape") {
+      setSuggestions([]);
+      setInputValue("");
+    }
+  };
+  const handleInputChange = (e3) => {
+    if (disabled2)
+      return;
+    const newValue = e3.target.value;
+    if (newValue.endsWith(",")) {
+      const searchValue = newValue.slice(0, -1).trim();
+      if (searchValue && suggestions.length > 0 && suggestions[selectedIndex]) {
+        addDependency(suggestions[selectedIndex].id);
+      }
+    } else {
+      setInputValue(newValue);
+    }
+  };
+  return /* @__PURE__ */ jsx_dev_runtime26.jsxDEV("div", {
+    children: [
+      label ? /* @__PURE__ */ jsx_dev_runtime26.jsxDEV("label", {
+        htmlFor: inputId,
+        className: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 transition-colors duration-200",
+        children: label
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ jsx_dev_runtime26.jsxDEV("div", {
+        className: "relative w-full",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime26.jsxDEV("div", {
+            className: `w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md focus-within:ring-2 focus-within:ring-blue-500 dark:focus-within:ring-blue-400 focus-within:border-transparent transition-colors duration-200 max-h-60 overflow-auto pr-2 ${disabled2 ? "opacity-60 cursor-not-allowed" : ""}`,
+            children: [
+              value2.length > 0 && /* @__PURE__ */ jsx_dev_runtime26.jsxDEV("div", {
+                className: "flex flex-wrap gap-2 mb-2",
+                children: value2.map((proposalId, index3) => /* @__PURE__ */ jsx_dev_runtime26.jsxDEV("span", {
+                  className: "inline-flex items-center gap-1 px-2 py-0.5 text-sm bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200 rounded-md transition-colors duration-200 min-w-0 max-w-full",
+                  children: [
+                    /* @__PURE__ */ jsx_dev_runtime26.jsxDEV("span", {
+                      className: "truncate max-w-[16rem] sm:max-w-[20rem] md:max-w-[24rem]",
+                      children: getProposalDisplay(proposalId)
+                    }, undefined, false, undefined, this),
+                    !disabled2 && /* @__PURE__ */ jsx_dev_runtime26.jsxDEV("button", {
+                      type: "button",
+                      onClick: () => removeDependency(index3),
+                      className: "hover:bg-blue-200 dark:hover:bg-blue-800 rounded-sm p-0.5 transition-colors duration-200",
+                      "aria-label": `Remove ${proposalId}`,
+                      children: /* @__PURE__ */ jsx_dev_runtime26.jsxDEV("svg", {
+                        className: "w-3 h-3",
+                        fill: "currentColor",
+                        viewBox: "0 0 20 20",
+                        "aria-hidden": "true",
+                        focusable: "false",
+                        children: /* @__PURE__ */ jsx_dev_runtime26.jsxDEV("path", {
+                          fillRule: "evenodd",
+                          d: "M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z",
+                          clipRule: "evenodd"
+                        }, undefined, false, undefined, this)
+                      }, undefined, false, undefined, this)
+                    }, undefined, false, undefined, this)
+                  ]
+                }, proposalId, true, undefined, this))
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime26.jsxDEV("textarea", {
+                ref: textareaRef,
+                id: inputId,
+                value: inputValue,
+                onChange: handleInputChange,
+                onKeyDown: handleKeyDown2,
+                placeholder: value2.length === 0 ? "Type proposal ID or title, then press Enter or comma" : "Add more dependencies...",
+                className: "w-full outline-none text-sm bg-transparent resize-none text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400",
+                rows: 1,
+                disabled: disabled2
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          suggestions.length > 0 && /* @__PURE__ */ jsx_dev_runtime26.jsxDEV("div", {
+            className: "absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg max-h-64 overflow-auto overscroll-contain transition-colors duration-200",
+            children: suggestions.map((proposal, index3) => /* @__PURE__ */ jsx_dev_runtime26.jsxDEV("button", {
+              type: "button",
+              onClick: () => addDependency(proposal.id),
+              className: `w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200 ${index3 === selectedIndex ? "bg-gray-100 dark:bg-gray-700" : ""}`,
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime26.jsxDEV("div", {
+                  className: "font-medium text-gray-900 dark:text-white",
+                  children: proposal.id
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime26.jsxDEV("div", {
+                  className: "text-gray-600 dark:text-gray-300 break-words whitespace-normal",
+                  children: proposal.title
+                }, undefined, false, undefined, this)
+              ]
+            }, proposal.id, true, undefined, this))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+};
+var DependencyInput_default = DependencyInput;
+
+// src/apps/dashboard-web/components/Modal.tsx
+var import_react61 = __toESM(require_react(), 1);
+var jsx_dev_runtime27 = __toESM(require_jsx_dev_runtime(), 1);
 var Modal = ({
   isOpen,
   onClose,
@@ -230044,7 +231182,7 @@ var Modal = ({
   disableEscapeClose,
   actions
 }) => {
-  import_react60.useEffect(() => {
+  import_react61.useEffect(() => {
     const handleEscape = (e3) => {
       if (e3.key === "Escape" && !disableEscapeClose) {
         onClose();
@@ -230065,7 +231203,7 @@ var Modal = ({
   }, [isOpen, onClose, disableEscapeClose]);
   if (!isOpen)
     return null;
-  return /* @__PURE__ */ jsx_dev_runtime26.jsxDEV("div", {
+  return /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
     className: "fixed inset-0 bg-black/40 dark:bg-black/60 flex items-start sm:items-center justify-center z-50 p-0 sm:p-4",
     style: {
       paddingTop: "max(0px, env(safe-area-inset-top))",
@@ -230076,7 +231214,7 @@ var Modal = ({
         onClose();
       }
     },
-    children: /* @__PURE__ */ jsx_dev_runtime26.jsxDEV("div", {
+    children: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
       className: `bg-white dark:bg-gray-800 sm:rounded-lg shadow-2xl ${maxWidthClass} w-full max-h-full sm:max-h-[94vh] overflow-y-auto transition-colors duration-200`,
       style: {
         touchAction: "pan-y",
@@ -230086,20 +231224,20 @@ var Modal = ({
       "aria-modal": "true",
       "aria-labelledby": "modal-title",
       children: [
-        /* @__PURE__ */ jsx_dev_runtime26.jsxDEV("div", {
+        /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
           className: "sticky top-0 z-10 flex items-center justify-between gap-2 px-3 sm:px-6 pt-3 sm:pt-4 pb-2 sm:pb-3 border-b border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-800/95 backdrop-blur supports-[backdrop-filter]:bg-white/75 supports-[backdrop-filter]:dark:bg-gray-800/75",
           children: [
-            /* @__PURE__ */ jsx_dev_runtime26.jsxDEV("h2", {
+            /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("h2", {
               id: "modal-title",
               className: "text-base font-semibold text-gray-900 dark:text-gray-100 min-w-0 flex-1 truncate",
               title: title8,
               children: title8
             }, undefined, false, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime26.jsxDEV("div", {
+            /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
               className: "flex items-center gap-2 flex-shrink-0",
               children: [
                 actions,
-                /* @__PURE__ */ jsx_dev_runtime26.jsxDEV("button", {
+                /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("button", {
                   type: "button",
                   onClick: onClose,
                   className: "text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded p-1 transition-colors duration-200 text-2xl leading-none w-8 h-8 flex items-center justify-center",
@@ -230110,7 +231248,7 @@ var Modal = ({
             }, undefined, true, undefined, this)
           ]
         }, undefined, true, undefined, this),
-        /* @__PURE__ */ jsx_dev_runtime26.jsxDEV("div", {
+        /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
           className: "px-3 sm:px-6 pt-3 sm:pt-4 pb-4 sm:pb-6",
           children: children2
         }, undefined, false, undefined, this)
@@ -230121,25 +231259,25 @@ var Modal = ({
 var Modal_default = Modal;
 
 // src/apps/dashboard-web/components/ProposalDetailsModal.tsx
-var jsx_dev_runtime27 = __toESM(require_jsx_dev_runtime(), 1);
+var jsx_dev_runtime28 = __toESM(require_jsx_dev_runtime(), 1);
 var SectionHeader = ({
   title: title8,
   right: right3
-}) => /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+}) => /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
   className: "flex items-center justify-between mb-3 pb-1.5 sm:pb-0 border-b sm:border-b-0 border-gray-200 dark:border-gray-700",
   children: [
-    /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("h3", {
+    /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("h3", {
       className: "text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-300 transition-colors duration-200",
       children: title8
     }, undefined, false, undefined, this),
-    right3 ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+    right3 ? /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
       className: "ml-2 text-xs text-gray-500 dark:text-gray-400 normal-case tracking-normal",
       children: right3
     }, undefined, false, undefined, this) : null
   ]
 }, undefined, true, undefined, this);
 var getColorMode = () => typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "dark" : "light";
-var ProposalDetailsModal = ({
+var ProposalDetailsModalComponent = ({
   proposal,
   isOpen,
   onClose,
@@ -230157,29 +231295,30 @@ var ProposalDetailsModal = ({
   const isCreateMode = !proposal;
   const isFromOtherBranch = Boolean(proposal?.branch);
   const proposalId = proposal?.id ?? "";
-  const proposalRef = import_react61.useRef(proposal);
-  const [mode, setMode] = import_react61.useState(isCreateMode ? "create" : "preview");
-  const modeRef = import_react61.useRef(mode);
-  const activeProposalIdRef = import_react61.useRef(proposalId);
-  const [saving, setSaving] = import_react61.useState(false);
-  const [error3, setError] = import_react61.useState(null);
-  const [title8, setTitle2] = import_react61.useState(proposal?.title || "");
-  const [summary, setSummary] = import_react61.useState(proposal?.summary || proposal?.description || "");
-  const [motivation, setMotivation] = import_react61.useState(proposal?.motivation || "");
-  const [design, setDesign] = import_react61.useState(proposal?.design || proposal?.implementationPlan || "");
-  const [drawbacks, setDrawbacks] = import_react61.useState(proposal?.drawbacks || "");
-  const [alternatives, setAlternatives] = import_react61.useState(proposal?.alternatives || "");
-  const [dependencyNote, setDependencyNote] = import_react61.useState(proposal?.dependency_note || "");
-  const [description, setDescription] = import_react61.useState(proposal?.description || "");
-  const [plan, setPlan] = import_react61.useState(proposal?.implementationPlan || "");
-  const [notes, setNotes] = import_react61.useState(proposal?.implementationNotes || "");
-  const [finalSummary, setFinalSummary] = import_react61.useState(proposal?.finalSummary || "");
-  const [criteria, setCriteria] = import_react61.useState(proposal?.acceptanceCriteriaItems || []);
-  const criteriaRef = import_react61.useRef(criteria);
-  const [decisions, setDecisions] = import_react61.useState([]);
-  const [reviews, setReviews] = import_react61.useState([]);
-  const [discussions, setDiscussions] = import_react61.useState([]);
-  const resolveDirectiveToId = import_react61.useCallback((value2) => {
+  const proposalRef = import_react62.useRef(proposal);
+  const [mode, setMode] = import_react62.useState(isCreateMode ? "create" : "preview");
+  const modeRef = import_react62.useRef(mode);
+  const activeProposalIdRef = import_react62.useRef(proposalId);
+  const [saving, setSaving] = import_react62.useState(false);
+  const [error3, setError] = import_react62.useState(null);
+  const [title8, setTitle2] = import_react62.useState(proposal?.title || "");
+  const [summary, setSummary] = import_react62.useState(proposal?.summary || proposal?.description || "");
+  const [motivation, setMotivation] = import_react62.useState(proposal?.motivation || "");
+  const [design, setDesign] = import_react62.useState(proposal?.design || proposal?.implementationPlan || "");
+  const [drawbacks, setDrawbacks] = import_react62.useState(proposal?.drawbacks || "");
+  const [alternatives, setAlternatives] = import_react62.useState(proposal?.alternatives || "");
+  const [dependencyNote, setDependencyNote] = import_react62.useState(proposal?.dependency_note || "");
+  const [description, setDescription] = import_react62.useState(proposal?.description || "");
+  const [plan, setPlan] = import_react62.useState(proposal?.implementationPlan || "");
+  const [notes, setNotes] = import_react62.useState(proposal?.implementationNotes || "");
+  const [finalSummary, setFinalSummary] = import_react62.useState(proposal?.finalSummary || "");
+  const [criteria, setCriteria] = import_react62.useState(proposal?.acceptanceCriteriaItems || []);
+  const criteriaRef = import_react62.useRef(criteria);
+  const [decisions, setDecisions] = import_react62.useState([]);
+  const [reviews, setReviews] = import_react62.useState([]);
+  const [discussions, setDiscussions] = import_react62.useState([]);
+  const [activityRefreshKey, setActivityRefreshKey] = import_react62.useState(0);
+  const resolveDirectiveToId = import_react62.useCallback((value2) => {
     const normalized = (value2 ?? "").trim();
     if (!normalized)
       return "";
@@ -230253,7 +231392,7 @@ var ProposalDetailsModal = ({
     }
     return normalized;
   }, [directiveEntities, archivedDirectiveEntities]);
-  const resolveDirectiveLabel = import_react61.useCallback((value2) => {
+  const resolveDirectiveLabel = import_react62.useCallback((value2) => {
     const normalized = (value2 ?? "").trim();
     if (!normalized)
       return "";
@@ -230308,27 +231447,27 @@ var ProposalDetailsModal = ({
     const titleMatches = allDirectives.filter((directive2) => directive2.title.trim().toLowerCase() === key2);
     return titleMatches.length === 1 ? titleMatches[0]?.title ?? normalized : normalized;
   }, [directiveEntities, archivedDirectiveEntities]);
-  const [status, setStatus] = import_react61.useState(proposal?.status || (isDraftMode ? "Draft" : availableStatuses?.[0] || "Draft"));
-  const [assignee, setAssignee] = import_react61.useState(proposal?.assignee || []);
-  const [labels, setLabels] = import_react61.useState(proposal?.labels || []);
-  const [priority3, setPriority] = import_react61.useState(proposal?.priority || "");
-  const [dependencies, setDependencies] = import_react61.useState(proposal?.dependencies || []);
-  const [references3, setReferences] = import_react61.useState(proposal?.references || []);
-  const [requiredCapabilities, setRequiredCapabilities] = import_react61.useState(proposal?.required_capabilities || proposal?.needs_capabilities || []);
-  const [directive, setDirective] = import_react61.useState(proposal?.directive || "");
-  const [availableProposals, setAvailableProposals] = import_react61.useState([]);
+  const [status, setStatus] = import_react62.useState(proposal?.status || (isDraftMode ? "Draft" : availableStatuses?.[0] || "Draft"));
+  const [assignee, setAssignee] = import_react62.useState(proposal?.assignee || []);
+  const [labels, setLabels] = import_react62.useState(proposal?.labels || []);
+  const [priority3, setPriority] = import_react62.useState(proposal?.priority || "");
+  const [dependencies, setDependencies] = import_react62.useState(proposal?.dependencies || []);
+  const [references3, setReferences] = import_react62.useState(proposal?.references || []);
+  const [requiredCapabilities, setRequiredCapabilities] = import_react62.useState(proposal?.required_capabilities || proposal?.needs_capabilities || []);
+  const [directive, setDirective] = import_react62.useState(proposal?.directive || "");
+  const [availableProposals, setAvailableProposals] = import_react62.useState([]);
   const directiveSelectionValue = resolveDirectiveToId(directive);
   const hasDirectiveSelection = (directiveEntities ?? []).some((directiveEntity) => directiveEntity.id === directiveSelectionValue);
-  import_react61.useEffect(() => {
+  import_react62.useEffect(() => {
     modeRef.current = mode;
   }, [mode]);
-  import_react61.useEffect(() => {
+  import_react62.useEffect(() => {
     proposalRef.current = proposal;
   }, [proposal]);
-  import_react61.useEffect(() => {
+  import_react62.useEffect(() => {
     criteriaRef.current = criteria;
   }, [criteria]);
-  const createSnapshot = import_react61.useCallback((source) => ({
+  const createSnapshot = import_react62.useCallback((source) => ({
     title: source?.title || "",
     summary: source?.summary || source?.description || "",
     motivation: source?.motivation || "",
@@ -230350,8 +231489,8 @@ var ProposalDetailsModal = ({
     requiredCapabilities: source?.required_capabilities || source?.needs_capabilities || [],
     directive: source?.directive || ""
   }), [availableStatuses, isDraftMode]);
-  const [baseline, setBaseline] = import_react61.useState(() => createSnapshot(proposal));
-  const applySnapshot = import_react61.useCallback((snapshot) => {
+  const [baseline, setBaseline] = import_react62.useState(() => createSnapshot(proposal));
+  const applySnapshot = import_react62.useCallback((snapshot) => {
     const preserveCurrentCriteria = activeProposalIdRef.current === proposalId && criteriaRef.current.length > 0 && snapshot.criteria.length === 0;
     const nextCriteria = preserveCurrentCriteria ? criteriaRef.current : snapshot.criteria;
     setTitle2(snapshot.title);
@@ -230377,7 +231516,7 @@ var ProposalDetailsModal = ({
     activeProposalIdRef.current = proposalId;
     return { ...snapshot, criteria: nextCriteria };
   }, [proposalId]);
-  const isDirty = import_react61.useMemo(() => {
+  const isDirty = import_react62.useMemo(() => {
     return title8 !== baseline.title || summary !== baseline.summary || motivation !== baseline.motivation || design !== baseline.design || drawbacks !== baseline.drawbacks || alternatives !== baseline.alternatives || dependencyNote !== baseline.dependencyNote || description !== baseline.description || plan !== baseline.plan || notes !== baseline.notes || finalSummary !== baseline.finalSummary || JSON.stringify(criteria) !== JSON.stringify(baseline.criteria);
   }, [
     title8,
@@ -230394,7 +231533,7 @@ var ProposalDetailsModal = ({
     criteria,
     baseline
   ]);
-  const lastActivity = import_react61.useMemo(() => {
+  const lastActivity = import_react62.useMemo(() => {
     const candidates = [];
     if (proposal?.updatedDate?.trim())
       candidates.push({ date: proposal.updatedDate, label: "proposal updated" });
@@ -230414,11 +231553,11 @@ var ProposalDetailsModal = ({
     const toMs = (d4) => parseStoredUtcDate(d4)?.getTime() ?? 0;
     return candidates.reduce((max9, cur) => toMs(cur.date) > toMs(max9.date) ? cur : max9);
   }, [proposal, discussions, reviews, decisions]);
-  const handleActivityClick = import_react61.useCallback(() => {
+  const handleActivityClick = import_react62.useCallback(() => {
     onClose();
     navigate2(`/activity?proposal=${encodeURIComponent(proposalId)}`);
   }, [navigate2, onClose, proposalId]);
-  import_react61.useEffect(() => {
+  import_react62.useEffect(() => {
     if (proposalId && proposalRef.current?.id !== proposalId)
       return;
     const snapshot = createSnapshot(proposalRef.current);
@@ -230427,7 +231566,7 @@ var ProposalDetailsModal = ({
     setMode(isCreateMode ? "create" : "preview");
     setError(null);
   }, [applySnapshot, createSnapshot, isCreateMode, proposalId]);
-  import_react61.useEffect(() => {
+  import_react62.useEffect(() => {
     if (!isOpen || !proposalId || isCreateMode)
       return;
     let cancelled = false;
@@ -230442,7 +231581,7 @@ var ProposalDetailsModal = ({
       cancelled = true;
     };
   }, [applySnapshot, createSnapshot, isCreateMode, isOpen, proposalId]);
-  import_react61.useEffect(() => {
+  import_react62.useEffect(() => {
     if (!isOpen)
       return;
     let cancelled = false;
@@ -230457,8 +231596,14 @@ var ProposalDetailsModal = ({
       cancelled = true;
     };
   }, [isOpen]);
-  import_react61.useEffect(() => {
-    if (!isOpen || !proposalId) {
+  import_react62.useEffect(() => {
+    if (!isOpen || !proposalId)
+      return;
+    const timer3 = setInterval(() => setActivityRefreshKey((k3) => k3 + 1), 30000);
+    return () => clearInterval(timer3);
+  }, [isOpen, proposalId]);
+  import_react62.useEffect(() => {
+    if (!proposalId) {
       setDecisions([]);
       setReviews([]);
       setDiscussions([]);
@@ -230470,29 +231615,32 @@ var ProposalDetailsModal = ({
     apiClient.fetchProposalDecisions(proposalId).then((nextDecisions) => {
       if (!cancelled)
         setDecisions(nextDecisions);
-    }).catch(() => {
+    }).catch((err) => {
+      console.warn("[P801] fetchProposalDecisions failed:", err);
       if (!cancelled)
         setDecisions([]);
     });
     apiClient.fetchProposalReviews(proposalId).then((nextReviews) => {
       if (!cancelled)
         setReviews(nextReviews);
-    }).catch(() => {
+    }).catch((err) => {
+      console.warn("[P801] fetchProposalReviews failed:", err);
       if (!cancelled)
         setReviews([]);
     });
     apiClient.fetchProposalDiscussions(proposalId).then((nextDiscussions) => {
       if (!cancelled)
         setDiscussions(nextDiscussions);
-    }).catch(() => {
+    }).catch((err) => {
+      console.warn("[P801] fetchProposalDiscussions failed:", err);
       if (!cancelled)
         setDiscussions([]);
     });
     return () => {
       cancelled = true;
     };
-  }, [proposalId, isOpen, proposal?.updatedDate]);
-  const handleCancelEdit = import_react61.useCallback(() => {
+  }, [proposalId, isOpen, activityRefreshKey, proposal?.updatedDate]);
+  const handleCancelEdit = import_react62.useCallback(() => {
     if (isDirty) {
       const confirmDiscard = window.confirm("Discard unsaved changes?");
       if (!confirmDiscard)
@@ -230508,7 +231656,7 @@ var ProposalDetailsModal = ({
   const _normalizeChecklistItems = (items) => {
     return items.map((item) => ({ ...item, text: item.text.trim() })).filter((item) => item.text.length > 0);
   };
-  const handleSave = import_react61.useCallback(async () => {
+  const handleSave = import_react62.useCallback(async () => {
     setSaving(true);
     setError(null);
     if (isCreateMode && !title8.trim()) {
@@ -230632,7 +231780,7 @@ var ProposalDetailsModal = ({
       }
     }
   };
-  const handleComplete = import_react61.useCallback(async () => {
+  const handleComplete = import_react62.useCallback(async () => {
     if (!proposal)
       return;
     if (!window.confirm("Complete this proposal? It will be moved to the completed folder."))
@@ -230646,7 +231794,7 @@ var ProposalDetailsModal = ({
       setError(err instanceof Error ? err.message : String(err));
     }
   }, [onClose, onSaved, proposal]);
-  const handleExportMarkdown = import_react61.useCallback(() => {
+  const handleExportMarkdown = import_react62.useCallback(() => {
     if (!proposal)
       return;
     try {
@@ -230668,9 +231816,7 @@ var ProposalDetailsModal = ({
       };
       const markdown2 = buildProposalMarkdown(bundle);
       const filename = proposalExportFilename(merged);
-      const blob = new Blob([markdown2], {
-        type: "text/markdown;charset=utf-8"
-      });
+      const blob = new Blob([markdown2], { type: "text/markdown;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const a3 = document.createElement("a");
       a3.href = url;
@@ -230706,7 +231852,7 @@ var ProposalDetailsModal = ({
   const checkedCount = (criteria || []).filter((c5) => c5.checked).length;
   const totalCount = (criteria || []).length;
   const isReachedStatus = (status || "").toLowerCase().includes("complete");
-  import_react61.useEffect(() => {
+  import_react62.useEffect(() => {
     const keydownListenerOptions = { capture: true };
     const onKey = (e3) => {
       if (mode === "edit" && e3.key === "Escape") {
@@ -230735,24 +231881,24 @@ var ProposalDetailsModal = ({
   }, [mode, handleCancelEdit, handleComplete, handleSave, isReachedStatus]);
   const displayId = proposalId;
   const documentation2 = proposal?.documentation ?? [];
-  const renderMarkdownField = (fieldTitle, value2, setValue, emptyText, height2 = 220) => /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+  const renderMarkdownField = (fieldTitle, value2, setValue, emptyText, height2 = 220) => /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
     className: "border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-4 pt-3 sm:pt-4 pb-3 sm:pb-4",
     children: [
-      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(SectionHeader, {
+      /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SectionHeader, {
         title: fieldTitle
       }, undefined, false, undefined, this),
-      mode === "preview" ? value2.trim().length > 0 ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+      mode === "preview" ? value2.trim().length > 0 ? /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
         className: "prose prose-sm !max-w-none wmde-markdown prose-headings:font-semibold prose-h1:text-base prose-h1:mt-3 prose-h1:mb-2 prose-h2:text-[15px] prose-h2:mt-3 prose-h2:mb-1.5 prose-h3:text-sm prose-h3:mt-2 prose-h3:mb-1 prose-h4:text-sm prose-h5:text-sm prose-h6:text-sm",
         "data-color-mode": theme,
-        children: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(MermaidMarkdown, {
+        children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(MermaidMarkdown, {
           source: value2
         }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+      }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
         className: "text-sm text-gray-500 dark:text-gray-400",
         children: emptyText
-      }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+      }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
         className: "border border-gray-200 dark:border-gray-700 rounded-md",
-        children: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(esm_default3, {
+        children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(esm_default3, {
           value: value2,
           onChange: (val) => setValue(val || ""),
           preview: "edit",
@@ -230762,7 +231908,7 @@ var ProposalDetailsModal = ({
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
-  return /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Modal_default, {
+  return /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Modal_default, {
     isOpen,
     onClose: () => {
       if (mode === "edit" && isDirty) {
@@ -230774,109 +231920,109 @@ var ProposalDetailsModal = ({
     title: isCreateMode ? isDraftMode ? "Create New Draft" : "Create New Proposal" : `${displayId} — ${proposal.title}`,
     maxWidthClass: "max-w-5xl",
     disableEscapeClose: mode === "edit" || mode === "create",
-    actions: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+    actions: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
       className: "flex items-center gap-2",
       children: [
-        isReachedStatus && mode === "preview" && !isCreateMode && !isFromOtherBranch && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("button", {
+        isReachedStatus && mode === "preview" && !isCreateMode && !isFromOtherBranch && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("button", {
           type: "button",
           onClick: handleComplete,
           "aria-label": "Mark as completed",
           className: "inline-flex items-center px-2 py-2 sm:px-4 rounded-lg text-sm font-medium text-white bg-emerald-600 dark:bg-emerald-700 hover:bg-emerald-700 dark:hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:focus:ring-emerald-400 focus:ring-offset-2 dark:focus:ring-offset-gray-900 transition-colors duration-200",
           title: "Move to completed folder (removes from board)",
           children: [
-            /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("svg", {
+            /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("svg", {
               className: "w-4 h-4 sm:mr-2",
               fill: "none",
               stroke: "currentColor",
               viewBox: "0 0 24 24",
               "aria-hidden": "true",
               focusable: "false",
-              children: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("path", {
+              children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("path", {
                 strokeLinecap: "round",
                 strokeLinejoin: "round",
                 strokeWidth: 2,
                 d: "M5 13l4 4L19 7"
               }, undefined, false, undefined, this)
             }, undefined, false, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+            /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
               className: "hidden sm:inline",
               children: "Mark as completed"
             }, undefined, false, undefined, this)
           ]
         }, undefined, true, undefined, this),
-        mode === "preview" && !isCreateMode && !isFromOtherBranch ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(jsx_dev_runtime27.Fragment, {
+        mode === "preview" && !isCreateMode && !isFromOtherBranch ? /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(jsx_dev_runtime28.Fragment, {
           children: [
-            /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("button", {
+            /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("button", {
               type: "button",
               onClick: handleExportMarkdown,
               "aria-label": "Export Markdown",
               className: "inline-flex items-center px-2 py-2 sm:px-4 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-offset-2 dark:focus:ring-offset-gray-900 transition-colors duration-200",
               title: "Export this proposal as a Markdown file (saved to your computer)",
               children: [
-                /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("svg", {
+                /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("svg", {
                   className: "w-4 h-4 sm:mr-2",
                   fill: "none",
                   stroke: "currentColor",
                   viewBox: "0 0 24 24",
                   "aria-hidden": "true",
                   focusable: "false",
-                  children: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("path", {
+                  children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("path", {
                     strokeLinecap: "round",
                     strokeLinejoin: "round",
                     strokeWidth: 2,
                     d: "M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3"
                   }, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
                   className: "hidden sm:inline",
                   children: "Export MD"
                 }, undefined, false, undefined, this)
               ]
             }, undefined, true, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("button", {
+            /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("button", {
               type: "button",
               onClick: () => setMode("edit"),
               "aria-label": "Edit",
               className: "inline-flex items-center px-2 py-2 sm:px-4 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-offset-2 dark:focus:ring-offset-gray-900 transition-colors duration-200",
               title: "Edit",
               children: [
-                /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("svg", {
+                /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("svg", {
                   className: "w-4 h-4 sm:mr-2",
                   fill: "none",
                   stroke: "currentColor",
                   viewBox: "0 0 24 24",
                   "aria-hidden": "true",
                   focusable: "false",
-                  children: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("path", {
+                  children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("path", {
                     strokeLinecap: "round",
                     strokeLinejoin: "round",
                     strokeWidth: 2,
                     d: "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
                   }, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
                   className: "hidden sm:inline",
                   children: "Edit"
                 }, undefined, false, undefined, this)
               ]
             }, undefined, true, undefined, this)
           ]
-        }, undefined, true, undefined, this) : mode === "edit" || mode === "create" ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+        }, undefined, true, undefined, this) : mode === "edit" || mode === "create" ? /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
           className: "flex items-center gap-2",
           children: [
-            /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("button", {
+            /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("button", {
               type: "button",
               onClick: handleCancelEdit,
               className: "inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-offset-2 dark:focus:ring-offset-gray-900 transition-colors duration-200",
               title: "Cancel",
               children: [
-                /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("svg", {
+                /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("svg", {
                   className: "w-4 h-4 mr-2",
                   fill: "none",
                   stroke: "currentColor",
                   viewBox: "0 0 24 24",
                   "aria-hidden": "true",
-                  children: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("path", {
+                  children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("path", {
                     strokeLinecap: "round",
                     strokeLinejoin: "round",
                     strokeWidth: 2,
@@ -230886,20 +232032,20 @@ var ProposalDetailsModal = ({
                 "Cancel"
               ]
             }, undefined, true, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("button", {
+            /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("button", {
               type: "button",
               onClick: () => void handleSave(),
               disabled: saving,
               className: "inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 dark:bg-blue-700 hover:bg-blue-700 dark:hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-offset-2 dark:focus:ring-offset-gray-900 transition-colors duration-200 disabled:opacity-50",
               title: "Save",
               children: [
-                /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("svg", {
+                /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("svg", {
                   className: "w-4 h-4 mr-2",
                   fill: "none",
                   stroke: "currentColor",
                   viewBox: "0 0 24 24",
                   "aria-hidden": "true",
-                  children: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("path", {
+                  children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("path", {
                     strokeLinecap: "round",
                     strokeLinejoin: "round",
                     strokeWidth: 2,
@@ -230914,36 +232060,36 @@ var ProposalDetailsModal = ({
       ]
     }, undefined, true, undefined, this),
     children: [
-      error3 && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+      error3 && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
         className: "mb-3 text-sm text-red-600 dark:text-red-400",
         children: error3
       }, undefined, false, undefined, this),
-      isFromOtherBranch && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+      isFromOtherBranch && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
         className: "mb-4 flex items-center gap-2 px-4 py-3 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-lg text-amber-800 dark:text-amber-200",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("svg", {
+          /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("svg", {
             className: "w-5 h-5 flex-shrink-0 text-amber-600 dark:text-amber-400",
             fill: "none",
             stroke: "currentColor",
             viewBox: "0 0 24 24",
             "aria-hidden": "true",
             focusable: "false",
-            children: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("path", {
+            children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("path", {
               strokeLinecap: "round",
               strokeLinejoin: "round",
               strokeWidth: 2,
               d: "M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
             className: "flex-1",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+              /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
                 className: "font-medium",
                 children: "Read-only:"
               }, undefined, false, undefined, this),
               " This proposal exists in the ",
-              /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+              /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
                 className: "font-semibold",
                 children: proposal?.branch
               }, undefined, false, undefined, this),
@@ -230953,19 +232099,19 @@ var ProposalDetailsModal = ({
           }, undefined, true, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
         className: "grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-6",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
             className: "md:col-span-2 space-y-0 sm:space-y-6",
             children: [
-              isCreateMode && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+              isCreateMode && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                 className: "border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-4 pt-3 sm:pt-4 pb-3 sm:pb-4",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(SectionHeader, {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SectionHeader, {
                     title: "Title"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("input", {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("input", {
                     type: "text",
                     value: title8,
                     onChange: (e3) => setTitle2(e3.target.value),
@@ -230980,35 +232126,35 @@ var ProposalDetailsModal = ({
               renderMarkdownField("Drawbacks", drawbacks, setDrawbacks, "No drawbacks"),
               renderMarkdownField("Alternatives", alternatives, setAlternatives, "No alternatives"),
               renderMarkdownField("Dependency Note", dependencyNote, setDependencyNote, "No dependency note"),
-              /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                 className: "border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-4 pt-3 sm:pt-4 pb-3 sm:pb-4",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(SectionHeader, {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SectionHeader, {
                     title: "References",
                     right: "Links and file paths"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                     className: "space-y-3",
                     children: [
-                      references3.length > 0 ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("ul", {
+                      references3.length > 0 ? /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("ul", {
                         className: "space-y-2",
-                        children: references3.map((ref, idx) => /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("li", {
+                        children: references3.map((ref, idx) => /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("li", {
                           className: "flex items-center gap-3 group",
                           children: [
-                            /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                            /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
                               className: "flex-1 min-w-0",
-                              children: ref.startsWith("http://") || ref.startsWith("https://") ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("a", {
+                              children: ref.startsWith("http://") || ref.startsWith("https://") ? /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("a", {
                                 href: ref,
                                 target: "_blank",
                                 rel: "noopener noreferrer",
                                 className: "text-sm text-blue-600 dark:text-blue-400 hover:underline break-all",
                                 children: ref
-                              }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("code", {
+                              }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("code", {
                                 className: "text-sm font-mono text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded break-all",
                                 children: ref
                               }, undefined, false, undefined, this)
                             }, undefined, false, undefined, this),
-                            !isFromOtherBranch && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("button", {
+                            !isFromOtherBranch && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("button", {
                               type: "button",
                               onClick: () => {
                                 const newRefs = references3.filter((_4, i5) => i5 !== idx);
@@ -231016,14 +232162,14 @@ var ProposalDetailsModal = ({
                               },
                               className: "opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-all flex-shrink-0",
                               title: "Remove reference",
-                              children: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("svg", {
+                              children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("svg", {
                                 className: "w-4 h-4",
                                 fill: "none",
                                 stroke: "currentColor",
                                 viewBox: "0 0 24 24",
                                 "aria-hidden": "true",
                                 focusable: "false",
-                                children: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("path", {
+                                children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("path", {
                                   strokeLinecap: "round",
                                   strokeLinejoin: "round",
                                   strokeWidth: 2,
@@ -231033,11 +232179,11 @@ var ProposalDetailsModal = ({
                             }, undefined, false, undefined, this)
                           ]
                         }, `reference:${ref}`, true, undefined, this))
-                      }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("p", {
+                      }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("p", {
                         className: "text-sm text-gray-500 dark:text-gray-400",
                         children: "No references"
                       }, undefined, false, undefined, this),
-                      !isFromOtherBranch && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("form", {
+                      !isFromOtherBranch && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("form", {
                         onSubmit: (e3) => {
                           e3.preventDefault();
                           const input = e3.currentTarget.elements.namedItem("newRef");
@@ -231051,13 +232197,13 @@ var ProposalDetailsModal = ({
                         },
                         className: "flex gap-2",
                         children: [
-                          /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("input", {
+                          /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("input", {
                             name: "newRef",
                             type: "text",
                             placeholder: "URL or file path...",
                             className: "flex-1 text-sm px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
                           }, undefined, false, undefined, this),
-                          /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("button", {
+                          /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("button", {
                             type: "submit",
                             className: "px-4 py-2 text-sm font-medium bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors",
                             children: "Add"
@@ -231068,27 +232214,27 @@ var ProposalDetailsModal = ({
                   }, undefined, true, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              documentation2.length > 0 && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+              documentation2.length > 0 && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                 className: "border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-4 pt-3 sm:pt-4 pb-3 sm:pb-4",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(SectionHeader, {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SectionHeader, {
                     title: "Documentation"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                     className: "space-y-2",
-                    children: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("ul", {
+                    children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("ul", {
                       className: "space-y-2",
-                      children: documentation2.map((doc) => /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("li", {
+                      children: documentation2.map((doc) => /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("li", {
                         className: "flex items-center gap-3",
-                        children: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                        children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
                           className: "flex-1 min-w-0",
-                          children: doc.startsWith("http://") || doc.startsWith("https://") ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("a", {
+                          children: doc.startsWith("http://") || doc.startsWith("https://") ? /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("a", {
                             href: doc,
                             target: "_blank",
                             rel: "noopener noreferrer",
                             className: "text-sm text-blue-600 dark:text-blue-400 hover:underline break-all",
                             children: doc
-                          }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("code", {
+                          }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("code", {
                             className: "text-sm font-mono text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded break-all",
                             children: doc
                           }, undefined, false, undefined, this)
@@ -231098,62 +232244,62 @@ var ProposalDetailsModal = ({
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                 className: "border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-4 pt-3 sm:pt-4 pb-3 sm:pb-4",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(SectionHeader, {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SectionHeader, {
                     title: `Acceptance Criteria ${totalCount ? `(${checkedCount}/${totalCount})` : ""}`,
-                    right: mode === "preview" ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                    right: mode === "preview" ? /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
                       children: "Toggle to update"
                     }, undefined, false, undefined, this) : null
                   }, undefined, false, undefined, this),
-                  mode === "preview" ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("ul", {
+                  mode === "preview" ? /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("ul", {
                     className: "space-y-2",
                     children: [
-                      (criteria || []).map((c5) => /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("li", {
+                      (criteria || []).map((c5) => /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("li", {
                         className: "flex items-start gap-2 rounded-md px-2 py-1",
                         children: [
-                          /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("input", {
+                          /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("input", {
                             type: "checkbox",
                             checked: c5.checked,
                             onChange: (e3) => void handleToggleCriterion(c5.index, e3.target.checked),
                             className: "mt-0.5 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                           }, undefined, false, undefined, this),
-                          /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                          /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                             className: "text-sm text-gray-800 dark:text-gray-100",
                             children: c5.text
                           }, undefined, false, undefined, this)
                         ]
                       }, c5.index, true, undefined, this)),
-                      totalCount === 0 && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("li", {
+                      totalCount === 0 && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("li", {
                         className: "text-sm text-gray-500 dark:text-gray-400",
                         children: "No acceptance criteria"
                       }, undefined, false, undefined, this)
                     ]
-                  }, undefined, true, undefined, this) : /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(AcceptanceCriteriaEditor_default, {
+                  }, undefined, true, undefined, this) : /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(AcceptanceCriteriaEditor_default, {
                     criteria,
                     onChange: setCriteria
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                 className: "border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-4 pt-3 sm:pt-4 pb-3 sm:pb-4",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(SectionHeader, {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SectionHeader, {
                     title: "Implementation Plan"
                   }, undefined, false, undefined, this),
-                  mode === "preview" ? plan ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                  mode === "preview" ? plan ? /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                     className: "prose prose-sm !max-w-none wmde-markdown prose-headings:font-semibold prose-h1:text-base prose-h1:mt-3 prose-h1:mb-2 prose-h2:text-[15px] prose-h2:mt-3 prose-h2:mb-1.5 prose-h3:text-sm prose-h3:mt-2 prose-h3:mb-1 prose-h4:text-sm prose-h5:text-sm prose-h6:text-sm",
                     "data-color-mode": theme,
-                    children: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(MermaidMarkdown, {
+                    children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(MermaidMarkdown, {
                       source: plan
                     }, undefined, false, undefined, this)
-                  }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                  }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                     className: "text-sm text-gray-500 dark:text-gray-400",
                     children: "No plan"
-                  }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                  }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                     className: "border border-gray-200 dark:border-gray-700 rounded-md",
-                    children: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(esm_default3, {
+                    children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(esm_default3, {
                       value: plan,
                       onChange: (val) => setPlan(val || ""),
                       preview: "edit",
@@ -231163,24 +232309,24 @@ var ProposalDetailsModal = ({
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                 className: "border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-4 pt-3 sm:pt-4 pb-3 sm:pb-4",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(SectionHeader, {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SectionHeader, {
                     title: "Implementation Notes"
                   }, undefined, false, undefined, this),
-                  mode === "preview" ? notes ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                  mode === "preview" ? notes ? /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                     className: "prose prose-sm !max-w-none wmde-markdown prose-headings:font-semibold prose-h1:text-base prose-h1:mt-3 prose-h1:mb-2 prose-h2:text-[15px] prose-h2:mt-3 prose-h2:mb-1.5 prose-h3:text-sm prose-h3:mt-2 prose-h3:mb-1 prose-h4:text-sm prose-h5:text-sm prose-h6:text-sm",
                     "data-color-mode": theme,
-                    children: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(MermaidMarkdown, {
+                    children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(MermaidMarkdown, {
                       source: notes
                     }, undefined, false, undefined, this)
-                  }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                  }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                     className: "text-sm text-gray-500 dark:text-gray-400",
                     children: "No notes"
-                  }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                  }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                     className: "border border-gray-200 dark:border-gray-700 rounded-md",
-                    children: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(esm_default3, {
+                    children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(esm_default3, {
                       value: notes,
                       onChange: (val) => setNotes(val || ""),
                       preview: "edit",
@@ -231190,22 +232336,22 @@ var ProposalDetailsModal = ({
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              (mode !== "preview" || finalSummary.trim().length > 0) && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+              (mode !== "preview" || finalSummary.trim().length > 0) && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                 className: "border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-4 pt-3 sm:pt-4 pb-3 sm:pb-4",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(SectionHeader, {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SectionHeader, {
                     title: "Final Summary",
                     right: "Completion summary"
                   }, undefined, false, undefined, this),
-                  mode === "preview" ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                  mode === "preview" ? /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                     className: "prose prose-sm !max-w-none wmde-markdown prose-headings:font-semibold prose-h1:text-base prose-h1:mt-3 prose-h1:mb-2 prose-h2:text-[15px] prose-h2:mt-3 prose-h2:mb-1.5 prose-h3:text-sm prose-h3:mt-2 prose-h3:mb-1 prose-h4:text-sm prose-h5:text-sm prose-h6:text-sm",
                     "data-color-mode": theme,
-                    children: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(MermaidMarkdown, {
+                    children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(MermaidMarkdown, {
                       source: finalSummary
                     }, undefined, false, undefined, this)
-                  }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                  }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                     className: "border border-gray-200 dark:border-gray-700 rounded-md",
-                    children: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(esm_default3, {
+                    children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(esm_default3, {
                       value: finalSummary,
                       onChange: (val) => setFinalSummary(val || ""),
                       preview: "edit",
@@ -231218,43 +232364,43 @@ var ProposalDetailsModal = ({
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              mode === "preview" && decisions.length > 0 && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+              mode === "preview" && decisions.length > 0 && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                 className: "border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-4 pt-3 sm:pt-4 pb-3 sm:pb-4",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(SectionHeader, {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SectionHeader, {
                     title: "Decisions",
                     right: `${decisions.length} recorded`
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                     className: "space-y-3",
-                    children: decisions.map((d4) => /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                    children: decisions.map((d4) => /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                       className: "border-l-2 border-blue-400 dark:border-blue-500 pl-3",
                       children: [
-                        /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                        /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                           className: "flex items-center gap-2 text-sm",
                           children: [
-                            /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                            /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
                               className: `inline-block px-1.5 py-0.5 rounded text-xs font-medium ${d4.binding ? "bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300" : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400"}`,
                               children: d4.binding ? "binding" : "non-binding"
                             }, undefined, false, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                            /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
                               className: "text-gray-500 dark:text-gray-400",
                               children: [
                                 "by ",
                                 d4.authority
                               ]
                             }, undefined, true, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                            /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
                               className: "text-gray-400 dark:text-gray-500 text-xs",
                               children: formatStoredUtcDateForDisplay(d4.decided_at)
                             }, undefined, false, undefined, this)
                           ]
                         }, undefined, true, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                        /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                           className: "text-sm text-gray-800 dark:text-gray-200 mt-1",
                           children: d4.decision
                         }, undefined, false, undefined, this),
-                        d4.rationale && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                        d4.rationale && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                           className: "text-xs text-gray-500 dark:text-gray-400 mt-1",
                           children: [
                             "Rationale: ",
@@ -231266,43 +232412,43 @@ var ProposalDetailsModal = ({
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              mode === "preview" && reviews.length > 0 && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+              mode === "preview" && reviews.length > 0 && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                 className: "border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-4 pt-3 sm:pt-4 pb-3 sm:pb-4",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(SectionHeader, {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SectionHeader, {
                     title: "Reviews",
                     right: `${reviews.length} recorded`
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                     className: "space-y-3",
-                    children: reviews.map((r3) => /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                    children: reviews.map((r3) => /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                       className: `border-l-2 pl-3 ${r3.verdict === "approve" ? "border-green-400 dark:border-green-500" : r3.verdict === "request_changes" ? "border-yellow-400 dark:border-yellow-500" : "border-red-400 dark:border-red-500"}`,
                       children: [
-                        /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                        /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                           className: "flex items-center gap-2 text-sm",
                           children: [
-                            /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                            /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
                               className: `inline-block px-1.5 py-0.5 rounded text-xs font-medium ${r3.verdict === "approve" ? "bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300" : r3.verdict === "request_changes" ? "bg-yellow-100 dark:bg-yellow-900 text-yellow-700 dark:text-yellow-300" : "bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300"}`,
                               children: r3.verdict
                             }, undefined, false, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                            /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
                               className: "text-gray-500 dark:text-gray-400",
                               children: [
                                 "by ",
                                 r3.reviewer_identity
                               ]
                             }, undefined, true, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                            /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
                               className: "text-gray-400 dark:text-gray-500 text-xs",
                               children: formatStoredUtcDateForDisplay(r3.reviewed_at)
                             }, undefined, false, undefined, this)
                           ]
                         }, undefined, true, undefined, this),
-                        r3.notes && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                        r3.notes && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                           className: "text-sm text-gray-700 dark:text-gray-300 mt-1",
                           children: r3.notes
                         }, undefined, false, undefined, this),
-                        r3.findings && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                        r3.findings && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                           className: "text-xs text-gray-500 dark:text-gray-400 mt-1 font-mono bg-gray-50 dark:bg-gray-900 rounded p-1.5 overflow-x-auto",
                           children: (() => {
                             try {
@@ -231320,36 +232466,36 @@ var ProposalDetailsModal = ({
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              mode === "preview" && discussions.length > 0 && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+              mode === "preview" && discussions.length > 0 && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                 className: "border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-4 pt-3 sm:pt-4 pb-3 sm:pb-4",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(SectionHeader, {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SectionHeader, {
                     title: "Discussions",
                     right: `${discussions.length} entries`
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                     className: "space-y-2 max-h-96 overflow-y-auto",
-                    children: discussions.map((d4) => /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                    children: discussions.map((d4) => /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                       className: "border-l-2 border-purple-400 dark:border-purple-500 pl-3 py-1",
                       children: [
-                        /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                        /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                           className: "flex items-center gap-2 text-xs",
                           children: [
-                            d4.context_prefix && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                            d4.context_prefix && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
                               className: "inline-block px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300",
                               children: d4.context_prefix
                             }, undefined, false, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                            /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
                               className: "text-gray-600 dark:text-gray-400 font-medium",
                               children: d4.author_identity
                             }, undefined, false, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                            /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
                               className: "text-gray-400 dark:text-gray-500",
                               children: formatStoredUtcDateForDisplay(d4.created_at)
                             }, undefined, false, undefined, this)
                           ]
                         }, undefined, true, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                        /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                           className: "text-sm text-gray-700 dark:text-gray-300 mt-1 whitespace-pre-wrap break-words",
                           children: d4.body_markdown.length > 500 ? `${d4.body_markdown.slice(0, 500)}...` : d4.body_markdown
                         }, undefined, false, undefined, this)
@@ -231360,52 +232506,52 @@ var ProposalDetailsModal = ({
               }, undefined, true, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
             className: "md:col-span-1 space-y-0 sm:space-y-4",
             children: [
-              proposal && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+              proposal && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                 className: "border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-3 pt-3 sm:pt-3 pb-3 sm:pb-3 text-xs text-gray-600 dark:text-gray-300 space-y-1",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                     children: [
-                      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                      /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
                         className: "font-semibold text-gray-800 dark:text-gray-100",
                         children: "Created:"
                       }, undefined, false, undefined, this),
                       " ",
-                      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                      /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
                         className: "text-gray-700 dark:text-gray-200",
                         children: formatStoredUtcDateForDisplay(proposal.createdDate)
                       }, undefined, false, undefined, this)
                     ]
                   }, undefined, true, undefined, this),
-                  proposal.updatedDate && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                  proposal.updatedDate && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                     children: [
-                      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                      /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
                         className: "font-semibold text-gray-800 dark:text-gray-100",
                         children: "Updated:"
                       }, undefined, false, undefined, this),
                       " ",
-                      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                      /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
                         className: "text-gray-700 dark:text-gray-200",
                         children: formatStoredUtcDateForDisplay(proposal.updatedDate)
                       }, undefined, false, undefined, this)
                     ]
                   }, undefined, true, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                     children: [
-                      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                      /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
                         className: "font-semibold text-gray-800 dark:text-gray-100",
                         children: "Last activity:"
                       }, undefined, false, undefined, this),
                       " ",
-                      lastActivity ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("button", {
+                      lastActivity ? /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("button", {
                         type: "button",
                         onClick: handleActivityClick,
                         className: "text-gray-700 dark:text-gray-200 hover:underline cursor-pointer bg-transparent border-0 p-0 text-left",
                         children: [
                           formatStoredUtcDateForDisplay(lastActivity.date),
-                          /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                          /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
                             className: "ml-1 text-gray-400 dark:text-gray-500 italic",
                             children: [
                               "(",
@@ -231414,25 +232560,7 @@ var ProposalDetailsModal = ({
                             ]
                           }, undefined, true, undefined, this)
                         ]
-                      }, undefined, true, undefined, this) : /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
-                        className: "text-gray-400 dark:text-gray-500 italic",
-                        children: "No activity yet"
-                      }, undefined, false, undefined, this)
-                    ]
-                  }, undefined, true, undefined, this) : /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
-                    className: "cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors",
-                    onClick: () => {
-                      onClose();
-                      setLocation(`/activity?proposal=${encodeURIComponent(proposalId)}`);
-                    },
-                    title: "Open activity feed for this proposal",
-                    children: [
-                      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
-                        className: "font-semibold text-gray-800 dark:text-gray-100",
-                        children: "Last activity:"
-                      }, undefined, false, undefined, this),
-                      " ",
-                      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                      }, undefined, true, undefined, this) : /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
                         className: "text-gray-400 dark:text-gray-500 italic",
                         children: "No activity yet"
                       }, undefined, false, undefined, this)
@@ -231440,13 +232568,13 @@ var ProposalDetailsModal = ({
                   }, undefined, true, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              proposal && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+              proposal && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                 className: "border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-3 pt-3 sm:pt-3 pb-3 sm:pb-3",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(SectionHeader, {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SectionHeader, {
                     title: "Title"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("input", {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("input", {
                     type: "text",
                     value: title8,
                     onChange: (e3) => {
@@ -231467,20 +232595,20 @@ var ProposalDetailsModal = ({
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                 className: "border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-3 pt-3 sm:pt-3 pb-3 sm:pb-3",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(SectionHeader, {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SectionHeader, {
                     title: "Status",
-                    right: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                    right: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                       className: "flex items-center gap-1.5",
                       children: [
-                        proposal?.proposalType ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                        proposal?.proposalType ? /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
                           className: "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300",
                           title: "Proposal type",
                           children: proposal.proposalType
                         }, undefined, false, undefined, this) : null,
-                        proposal ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("select", {
+                        proposal ? /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("select", {
                           className: `rounded-full px-2 py-0.5 text-[11px] font-medium border-0 outline-none cursor-pointer focus:ring-2 focus:ring-stone-500 ${maturityBadgeColors(proposal.maturity ?? "new")} ${isFromOtherBranch ? "opacity-60 cursor-not-allowed" : ""}`,
                           title: "Change proposal maturity",
                           value: proposal.maturity ?? "new",
@@ -231495,19 +232623,19 @@ var ProposalDetailsModal = ({
                           },
                           onClick: (e3) => e3.stopPropagation(),
                           children: [
-                            /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("option", {
+                            /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("option", {
                               value: "new",
                               children: "new"
                             }, undefined, false, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("option", {
+                            /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("option", {
                               value: "active",
                               children: "active"
                             }, undefined, false, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("option", {
+                            /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("option", {
                               value: "mature",
                               children: "mature"
                             }, undefined, false, undefined, this),
-                            /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("option", {
+                            /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("option", {
                               value: "obsolete",
                               children: "obsolete"
                             }, undefined, false, undefined, this)
@@ -231516,32 +232644,32 @@ var ProposalDetailsModal = ({
                       ]
                     }, undefined, true, undefined, this)
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(StatusSelect, {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(StatusSelect, {
                     current: status,
                     onChange: (val) => handleInlineMetaUpdate({ status: val }),
                     disabled: isFromOtherBranch
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              proposal?.maturity === "obsolete" && proposal?.obsoleted_reason && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+              proposal?.maturity === "obsolete" && proposal?.obsoleted_reason && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                 className: "border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-3 pt-3 sm:pt-3 pb-3 sm:pb-3",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(SectionHeader, {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SectionHeader, {
                     title: "Closure"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                     className: "text-sm text-gray-700 dark:text-gray-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded px-3 py-2",
                     children: proposal.obsoleted_reason
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                 className: "border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-3 pt-3 sm:pt-3 pb-3 sm:pb-3",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(SectionHeader, {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SectionHeader, {
                     title: "Assignee"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(ChipInput_default, {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(ChipInput_default, {
                     name: "assignee",
                     label: "",
                     value: assignee,
@@ -231551,13 +232679,13 @@ var ProposalDetailsModal = ({
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                 className: "border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-3 pt-3 sm:pt-3 pb-3 sm:pb-3",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(SectionHeader, {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SectionHeader, {
                     title: "Labels"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(ChipInput_default, {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(ChipInput_default, {
                     name: "labels",
                     label: "",
                     value: labels,
@@ -231567,13 +232695,13 @@ var ProposalDetailsModal = ({
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                 className: "border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-3 pt-3 sm:pt-3 pb-3 sm:pb-3",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(SectionHeader, {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SectionHeader, {
                     title: "Priority"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("select", {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("select", {
                     className: `w-full h-10 px-3 pr-10 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 focus:border-transparent transition-colors duration-200 ${isFromOtherBranch ? "opacity-60 cursor-not-allowed" : ""}`,
                     value: priority3,
                     onChange: (e3) => {
@@ -231584,19 +232712,19 @@ var ProposalDetailsModal = ({
                     },
                     disabled: isFromOtherBranch,
                     children: [
-                      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("option", {
+                      /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("option", {
                         value: "",
                         children: "No Priority"
                       }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("option", {
+                      /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("option", {
                         value: "low",
                         children: "Low"
                       }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("option", {
+                      /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("option", {
                         value: "medium",
                         children: "Medium"
                       }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("option", {
+                      /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("option", {
                         value: "high",
                         children: "High"
                       }, undefined, false, undefined, this)
@@ -231604,14 +232732,14 @@ var ProposalDetailsModal = ({
                   }, undefined, true, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                 className: "border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-3 pt-3 sm:pt-3 pb-3 sm:pb-3",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(SectionHeader, {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SectionHeader, {
                     title: "Directive",
                     right: "Owning initiative"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("select", {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("select", {
                     className: `w-full h-10 px-3 pr-10 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 focus:border-transparent transition-colors duration-200 ${isFromOtherBranch ? "opacity-60 cursor-not-allowed" : ""}`,
                     value: directiveSelectionValue,
                     onChange: (e3) => {
@@ -231623,15 +232751,15 @@ var ProposalDetailsModal = ({
                     },
                     disabled: isFromOtherBranch,
                     children: [
-                      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("option", {
+                      /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("option", {
                         value: "",
                         children: "No directive"
                       }, undefined, false, undefined, this),
-                      !hasDirectiveSelection && directiveSelectionValue ? /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("option", {
+                      !hasDirectiveSelection && directiveSelectionValue ? /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("option", {
                         value: directiveSelectionValue,
                         children: resolveDirectiveLabel(directiveSelectionValue)
                       }, undefined, false, undefined, this) : null,
-                      (directiveEntities ?? []).map((m3) => /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("option", {
+                      (directiveEntities ?? []).map((m3) => /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("option", {
                         value: m3.id,
                         children: m3.title
                       }, m3.id, false, undefined, this))
@@ -231639,14 +232767,14 @@ var ProposalDetailsModal = ({
                   }, undefined, true, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                 className: "border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-3 pt-3 sm:pt-3 pb-3 sm:pb-3",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(SectionHeader, {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SectionHeader, {
                     title: "Dependencies",
                     right: "Type to search proposals"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(DependencyInput_default, {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(DependencyInput_default, {
                     value: dependencies,
                     onChange: (value2) => handleInlineMetaUpdate({ dependencies: value2 }),
                     availableProposals,
@@ -231656,13 +232784,13 @@ var ProposalDetailsModal = ({
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                 className: "border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-3 pt-3 sm:pt-3 pb-3 sm:pb-3",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(SectionHeader, {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SectionHeader, {
                     title: "Required Capabilities"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(ChipInput_default, {
+                  /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(ChipInput_default, {
                     name: "required-capabilities",
                     label: "",
                     value: requiredCapabilities,
@@ -231678,21 +232806,21 @@ var ProposalDetailsModal = ({
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              proposal && onArchive && !isFromOtherBranch && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+              proposal && onArchive && !isFromOtherBranch && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
                 className: "border-t-2 sm:border sm:border-t border-gray-300 dark:border-gray-600 sm:border-gray-200 sm:dark:border-gray-700 bg-transparent sm:bg-white sm:dark:bg-gray-800 sm:rounded-lg px-0 sm:px-3 pt-3 sm:pt-3 pb-3 sm:pb-3",
-                children: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("button", {
+                children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("button", {
                   type: "button",
                   onClick: handleArchive,
                   className: "w-full inline-flex items-center justify-center px-4 py-2 bg-red-500 dark:bg-red-600 text-white text-sm font-medium rounded-md hover:bg-red-600 dark:hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 focus:ring-red-400 dark:focus:ring-red-500 transition-colors duration-200",
                   children: [
-                    /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("svg", {
+                    /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("svg", {
                       className: "w-4 h-4 mr-2",
                       fill: "none",
                       stroke: "currentColor",
                       viewBox: "0 0 24 24",
                       "aria-hidden": "true",
                       focusable: "false",
-                      children: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("path", {
+                      children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("path", {
                         strokeLinecap: "round",
                         strokeLinejoin: "round",
                         strokeWidth: 2,
@@ -231710,17 +232838,18 @@ var ProposalDetailsModal = ({
     ]
   }, undefined, true, undefined, this);
 };
+var ProposalDetailsModal = import_react62.default.memo(ProposalDetailsModalComponent);
 var StatusSelect = ({ current, onChange, disabled: disabled2 }) => {
-  const [statuses, setStatuses] = import_react61.useState([]);
-  import_react61.useEffect(() => {
+  const [statuses, setStatuses] = import_react62.useState([]);
+  import_react62.useEffect(() => {
     apiClient.fetchStatuses().then(setStatuses).catch(() => setStatuses(["Draft", "Review", "Develop", "Merge", "Complete"]));
   }, []);
-  return /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("select", {
+  return /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("select", {
     className: `w-full h-10 px-3 pr-10 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 focus:border-transparent transition-colors duration-200 ${disabled2 ? "opacity-60 cursor-not-allowed" : ""}`,
     value: current,
     onChange: (e3) => onChange(e3.target.value),
     disabled: disabled2,
-    children: statuses.map((s5) => /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("option", {
+    children: statuses.map((s5) => /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("option", {
       value: s5,
       children: s5
     }, s5, false, undefined, this))
@@ -231729,8 +232858,8 @@ var StatusSelect = ({ current, onChange, disabled: disabled2 }) => {
 var ProposalDetailsModal_default = ProposalDetailsModal;
 
 // src/apps/dashboard-web/components/ProposalsPage.tsx
-var import_react62 = __toESM(require_react(), 1);
-var jsx_dev_runtime28 = __toESM(require_jsx_dev_runtime(), 1);
+var import_react63 = __toESM(require_react(), 1);
+var jsx_dev_runtime29 = __toESM(require_jsx_dev_runtime(), 1);
 var statusColor3 = (status) => {
   switch (status?.toLowerCase()) {
     case "complete":
@@ -231770,19 +232899,21 @@ var ProposalsPage = ({
   proposals: propProposals,
   onProposalClick
 }) => {
-  const [proposals, setProposals] = import_react62.useState(propProposals || []);
-  const [filter7, setFilter] = import_react62.useState("");
-  const [statusFilter, setStatusFilter] = import_react62.useState("");
-  const [priorityFilter, setPriorityFilter] = import_react62.useState("");
-  const [typeFilter, setTypeFilter] = import_react62.useState("");
-  const [sortColumn, setSortColumn] = import_react62.useState("id");
-  const [sortDirection, setSortDirection] = import_react62.useState("desc");
-  import_react62.useEffect(() => {
+  const [proposals, setProposals] = import_react63.useState(propProposals || []);
+  const [filter7, setFilter] = import_react63.useState("");
+  const [statusFilter, setStatusFilter] = import_react63.useState("");
+  const [priorityFilter, setPriorityFilter] = import_react63.useState("");
+  const [typeFilter, setTypeFilter] = import_react63.useState("");
+  const [sortColumn, setSortColumn] = import_react63.useState("id");
+  const [sortDirection, setSortDirection] = import_react63.useState("desc");
+  const [currentPage, setCurrentPage] = import_react63.useState(1);
+  const ITEMS_PER_PAGE = 25;
+  import_react63.useEffect(() => {
     if (propProposals) {
       setProposals(propProposals);
     }
   }, [propProposals]);
-  const statuses = import_react62.useMemo(() => {
+  const statuses = import_react63.useMemo(() => {
     const seen = [...new Set(proposals.map((p5) => p5.status))].filter(Boolean).filter((s5) => !HIDDEN_STATUSES.has(s5));
     return seen.sort((a3, b3) => {
       const ai = STATUS_ORDER.indexOf(a3);
@@ -231796,10 +232927,10 @@ var ProposalsPage = ({
       return ai - bi;
     });
   }, [proposals]);
-  const types2 = import_react62.useMemo(() => [
+  const types2 = import_react63.useMemo(() => [
     ...new Set(proposals.map((p5) => p5.proposalType).filter(Boolean))
   ], [proposals]).sort();
-  const filteredProposals = import_react62.useMemo(() => {
+  const filteredProposals = import_react63.useMemo(() => {
     let result = proposals;
     if (filter7) {
       const query = filter7.toLowerCase();
@@ -231857,23 +232988,29 @@ var ProposalsPage = ({
       setSortColumn(column2);
       setSortDirection("asc");
     }
+    setCurrentPage(1);
   };
+  const totalPages = Math.ceil(filteredProposals.length / ITEMS_PER_PAGE);
+  const paginatedProposals = import_react63.useMemo(() => {
+    const start4 = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredProposals.slice(start4, start4 + ITEMS_PER_PAGE);
+  }, [filteredProposals, currentPage]);
   const SortIcon = ({ column: column2 }) => {
     if (sortColumn !== column2)
-      return /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
+      return /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("span", {
         className: "text-gray-300 dark:text-gray-600",
         children: "↕"
       }, undefined, false, undefined, this);
-    return /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
+    return /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("span", {
       children: sortDirection === "asc" ? "↑" : "↓"
     }, undefined, false, undefined, this);
   };
-  return /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
+  return /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
     className: "space-y-4",
     children: [
-      /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
         className: "flex items-center justify-between",
-        children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("h1", {
+        children: /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("h1", {
           className: "text-2xl font-bold text-gray-900 dark:text-gray-100",
           children: [
             "Proposals (",
@@ -231882,70 +233019,70 @@ var ProposalsPage = ({
           ]
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
         className: "flex flex-wrap items-center gap-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("input", {
+          /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("input", {
             type: "text",
             placeholder: "Search proposals...",
             value: filter7,
             onChange: (e3) => setFilter(e3.target.value),
             className: "rounded border px-3 py-1.5 text-sm bg-white dark:bg-gray-700 w-48"
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("select", {
+          /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("select", {
             value: statusFilter,
             onChange: (e3) => setStatusFilter(e3.target.value),
             className: "rounded border px-2 py-1.5 text-sm bg-white dark:bg-gray-700",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("option", {
+              /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("option", {
                 value: "",
                 children: "All statuses"
               }, undefined, false, undefined, this),
-              statuses.map((s5) => /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("option", {
+              statuses.map((s5) => /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("option", {
                 value: s5,
                 children: s5
               }, s5, false, undefined, this))
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("select", {
+          /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("select", {
             value: priorityFilter,
             onChange: (e3) => setPriorityFilter(e3.target.value),
             className: "rounded border px-2 py-1.5 text-sm bg-white dark:bg-gray-700",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("option", {
+              /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("option", {
                 value: "",
                 children: "All priorities"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("option", {
+              /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("option", {
                 value: "high",
                 children: "High"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("option", {
+              /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("option", {
                 value: "medium",
                 children: "Medium"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("option", {
+              /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("option", {
                 value: "low",
                 children: "Low"
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          types2.length > 0 && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("select", {
+          types2.length > 0 && /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("select", {
             value: typeFilter,
             onChange: (e3) => setTypeFilter(e3.target.value),
             className: "rounded border px-2 py-1.5 text-sm bg-white dark:bg-gray-700",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("option", {
+              /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("option", {
                 value: "",
                 children: "All types"
               }, undefined, false, undefined, this),
-              types2.map((t4) => /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("option", {
+              types2.map((t4) => /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("option", {
                 value: t4,
                 children: t4
               }, t4, false, undefined, this))
             ]
           }, undefined, true, undefined, this),
-          (filter7 || statusFilter || priorityFilter || typeFilter) && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("button", {
+          (filter7 || statusFilter || priorityFilter || typeFilter) && /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("button", {
             type: "button",
             onClick: () => {
               setFilter("");
@@ -231958,46 +233095,46 @@ var ProposalsPage = ({
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
         className: "md:hidden space-y-2",
-        children: filteredProposals.map((proposal) => /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("button", {
+        children: paginatedProposals.map((proposal) => /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("button", {
           type: "button",
           onClick: () => onProposalClick?.(proposal),
           className: "w-full text-left bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3 hover:border-blue-400 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500",
           children: [
-            /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
+            /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
               className: "flex items-baseline justify-between gap-2",
               children: [
-                /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
+                /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("span", {
                   className: "font-mono text-xs text-gray-500 dark:text-gray-400 flex-shrink-0",
                   children: proposal.id
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
+                /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("span", {
                   className: `flex-shrink-0 px-2 py-0.5 rounded text-xs font-medium ${statusColor3(proposal.status)}`,
                   children: proposal.status
                 }, undefined, false, undefined, this)
               ]
             }, undefined, true, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
+            /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
               className: "mt-1 text-sm font-medium text-gray-900 dark:text-gray-100 line-clamp-2",
               children: proposal.title
             }, undefined, false, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
+            /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
               className: "mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs",
               children: [
-                /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
+                /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("span", {
                   className: `font-medium ${priorityColor(proposal.priority)}`,
                   children: proposal.priority || "—"
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
+                /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("span", {
                   className: "text-gray-500 dark:text-gray-400",
                   children: proposal.maturity || "—"
                 }, undefined, false, undefined, this),
-                proposal.proposalType && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
+                proposal.proposalType && /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("span", {
                   className: "text-gray-500 dark:text-gray-400",
                   children: proposal.proposalType
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
+                /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("span", {
                   className: "ml-auto text-gray-400 dark:text-gray-500",
                   children: formatStoredUtcDateForCompactDisplay(proposal.createdDate)
                 }, undefined, false, undefined, this)
@@ -232006,77 +233143,77 @@ var ProposalsPage = ({
           ]
         }, proposal.id, true, undefined, this))
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
         className: "hidden md:block bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden",
-        children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
+        children: /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
           className: "overflow-x-auto",
-          children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("table", {
+          children: /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("table", {
             className: "w-full text-sm",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("thead", {
+              /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("thead", {
                 className: "bg-gray-50 dark:bg-gray-900 text-left",
-                children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("tr", {
+                children: /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("tr", {
                   children: [
-                    /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("th", {
+                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("th", {
                       className: "px-4 py-3 font-medium text-gray-500 dark:text-gray-400 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800",
                       onClick: () => handleSort("id"),
                       children: [
                         "ID ",
-                        /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SortIcon, {
+                        /* @__PURE__ */ jsx_dev_runtime29.jsxDEV(SortIcon, {
                           column: "id"
                         }, undefined, false, undefined, this)
                       ]
                     }, undefined, true, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("th", {
+                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("th", {
                       className: "px-4 py-3 font-medium text-gray-500 dark:text-gray-400 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800",
                       onClick: () => handleSort("title"),
                       children: [
                         "Title ",
-                        /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SortIcon, {
+                        /* @__PURE__ */ jsx_dev_runtime29.jsxDEV(SortIcon, {
                           column: "title"
                         }, undefined, false, undefined, this)
                       ]
                     }, undefined, true, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("th", {
+                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("th", {
                       className: "px-4 py-3 font-medium text-gray-500 dark:text-gray-400 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800",
                       onClick: () => handleSort("status"),
                       children: [
                         "Status ",
-                        /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SortIcon, {
+                        /* @__PURE__ */ jsx_dev_runtime29.jsxDEV(SortIcon, {
                           column: "status"
                         }, undefined, false, undefined, this)
                       ]
                     }, undefined, true, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("th", {
+                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("th", {
                       className: "px-4 py-3 font-medium text-gray-500 dark:text-gray-400 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800",
                       onClick: () => handleSort("priority"),
                       children: [
                         "Priority ",
-                        /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SortIcon, {
+                        /* @__PURE__ */ jsx_dev_runtime29.jsxDEV(SortIcon, {
                           column: "priority"
                         }, undefined, false, undefined, this)
                       ]
                     }, undefined, true, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("th", {
+                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("th", {
                       className: "px-4 py-3 font-medium text-gray-500 dark:text-gray-400 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800",
                       onClick: () => handleSort("maturity"),
                       children: [
                         "Maturity ",
-                        /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SortIcon, {
+                        /* @__PURE__ */ jsx_dev_runtime29.jsxDEV(SortIcon, {
                           column: "maturity"
                         }, undefined, false, undefined, this)
                       ]
                     }, undefined, true, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("th", {
+                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("th", {
                       className: "px-4 py-3 font-medium text-gray-500 dark:text-gray-400",
                       children: "Type"
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("th", {
+                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("th", {
                       className: "px-4 py-3 font-medium text-gray-500 dark:text-gray-400 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800",
                       onClick: () => handleSort("created"),
                       children: [
                         "Created ",
-                        /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(SortIcon, {
+                        /* @__PURE__ */ jsx_dev_runtime29.jsxDEV(SortIcon, {
                           column: "created"
                         }, undefined, false, undefined, this)
                       ]
@@ -232084,43 +233221,43 @@ var ProposalsPage = ({
                   ]
                 }, undefined, true, undefined, this)
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("tbody", {
+              /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("tbody", {
                 className: "divide-y divide-gray-200 dark:divide-gray-700",
-                children: filteredProposals.map((proposal) => /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("tr", {
+                children: paginatedProposals.map((proposal) => /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("tr", {
                   onClick: () => onProposalClick?.(proposal),
                   className: `transition-colors ${onProposalClick ? "cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20" : "hover:bg-gray-50 dark:hover:bg-gray-700/20"}`,
                   children: [
-                    /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("td", {
+                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
                       className: "px-4 py-3 font-mono text-xs text-gray-600 dark:text-gray-400",
                       children: proposal.id
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("td", {
+                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
                       className: "px-4 py-3 text-gray-900 dark:text-gray-100 max-w-xs truncate",
                       children: proposal.title
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("td", {
+                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
                       className: "px-4 py-3",
-                      children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
+                      children: /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("span", {
                         className: `px-2 py-0.5 rounded text-xs font-medium ${statusColor3(proposal.status)}`,
                         children: proposal.status
                       }, undefined, false, undefined, this)
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("td", {
+                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
                       className: "px-4 py-3",
-                      children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("span", {
+                      children: /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("span", {
                         className: `text-xs font-medium ${priorityColor(proposal.priority)}`,
                         children: proposal.priority || "—"
                       }, undefined, false, undefined, this)
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("td", {
+                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
                       className: "px-4 py-3 text-xs text-gray-500 dark:text-gray-400",
                       children: proposal.maturity || "—"
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("td", {
+                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
                       className: "px-4 py-3 text-xs text-gray-500 dark:text-gray-400",
                       children: proposal.proposalType || "—"
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("td", {
+                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
                       className: "px-4 py-3 text-xs text-gray-500 dark:text-gray-400",
                       children: formatStoredUtcDateForCompactDisplay(proposal.createdDate)
                     }, undefined, false, undefined, this)
@@ -232131,29 +233268,80 @@ var ProposalsPage = ({
           }, undefined, true, undefined, this)
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
-      filteredProposals.length === 0 && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
+      filteredProposals.length === 0 && /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
         className: "text-center py-12 text-gray-500 dark:text-gray-400",
         children: filter7 || statusFilter || priorityFilter || typeFilter ? "No proposals match your filters" : "No proposals found"
-      }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      filteredProposals.length > 0 && /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+        className: "flex items-center justify-between bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+            className: "text-sm text-gray-600 dark:text-gray-400",
+            children: [
+              "Showing ",
+              (currentPage - 1) * ITEMS_PER_PAGE + 1,
+              " to",
+              " ",
+              Math.min(currentPage * ITEMS_PER_PAGE, filteredProposals.length),
+              " of",
+              " ",
+              filteredProposals.length,
+              " proposals"
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+            className: "flex gap-2",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("button", {
+                type: "button",
+                disabled: currentPage === 1,
+                onClick: () => setCurrentPage(currentPage - 1),
+                className: "px-3 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors",
+                children: "Previous"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+                className: "flex items-center gap-1",
+                children: Array.from({ length: totalPages }, (_4, i5) => i5 + 1).map((page) => /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("button", {
+                  type: "button",
+                  onClick: () => setCurrentPage(page),
+                  className: `px-2.5 py-1.5 text-sm rounded transition-colors ${currentPage === page ? "bg-blue-600 text-white" : "border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"}`,
+                  children: page
+                }, page, false, undefined, this))
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("button", {
+                type: "button",
+                disabled: currentPage === totalPages,
+                onClick: () => setCurrentPage(currentPage + 1),
+                className: "px-3 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors",
+                children: "Next"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
     ]
   }, undefined, true, undefined, this);
 };
 var ProposalsPage_default = ProposalsPage;
 
 // src/apps/dashboard-web/components/RoutesPage.tsx
-var import_react63 = __toESM(require_react(), 1);
-var jsx_dev_runtime29 = __toESM(require_jsx_dev_runtime(), 1);
+var import_react64 = __toESM(require_react(), 1);
+var jsx_dev_runtime30 = __toESM(require_jsx_dev_runtime(), 1);
 var RoutesPage = () => {
-  const [routes, setRoutes] = import_react63.useState([]);
-  const [loading, setLoading] = import_react63.useState(true);
-  const [error3, setError] = import_react63.useState(null);
-  const [filterProvider, setFilterProvider] = import_react63.useState("");
-  const [showDisabled, setShowDisabled] = import_react63.useState(false);
-  const [togglingIds, setTogglingIds] = import_react63.useState(new Set);
-  const [toggleErrors, setToggleErrors] = import_react63.useState(new Map);
-  const fetchData = import_react63.useCallback(async () => {
+  const [routes, setRoutes] = import_react64.useState([]);
+  const [loading, setLoading] = import_react64.useState(true);
+  const [error3, setError] = import_react64.useState(null);
+  const [filterProvider, setFilterProvider] = import_react64.useState("");
+  const [showDisabled, setShowDisabled] = import_react64.useState(false);
+  const [showOrphanedOnly, setShowOrphanedOnly] = import_react64.useState(false);
+  const [refreshing, setRefreshing] = import_react64.useState(false);
+  const [togglingIds, setTogglingIds] = import_react64.useState(new Set);
+  const [toggleErrors, setToggleErrors] = import_react64.useState(new Map);
+  const fetchData = import_react64.useCallback(async (isRefresh = false) => {
     try {
       setError(null);
+      if (isRefresh)
+        setRefreshing(true);
       const data5 = await apiClient.fetchRoutes();
       setRoutes(data5);
     } catch (err) {
@@ -232161,12 +233349,13 @@ var RoutesPage = () => {
       setError("Failed to load routes");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
-  import_react63.useEffect(() => {
+  import_react64.useEffect(() => {
     fetchData();
   }, [fetchData]);
-  const handleToggle = import_react63.useCallback(async (route) => {
+  const handleToggle = import_react64.useCallback(async (route) => {
     if (togglingIds.has(route.id))
       return;
     const newEnabled = !route.is_enabled;
@@ -232200,38 +233389,40 @@ var RoutesPage = () => {
       return false;
     if (filterProvider && r3.route_provider !== filterProvider)
       return false;
+    if (showOrphanedOnly && r3.has_host_policy_match !== false)
+      return false;
     return true;
   });
   const orphanCount = routes.filter((r3) => r3.has_host_policy_match === false).length;
   if (loading) {
-    return /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+    return /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
       className: "flex items-center justify-center h-64",
-      children: /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+      children: /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
         className: "text-gray-500",
         children: "Loading routes..."
       }, undefined, false, undefined, this)
     }, undefined, false, undefined, this);
   }
   if (error3) {
-    return /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+    return /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
       className: "p-4 text-red-600 bg-red-50 rounded",
       children: error3
     }, undefined, false, undefined, this);
   }
-  return /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+  return /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
     className: "container mx-auto px-4 py-8",
     children: [
-      /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
         className: "flex items-center justify-between mb-6",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
             className: "flex items-center gap-3",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("h1", {
+              /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("h1", {
                 className: "text-2xl font-bold",
                 children: "Model Routes"
               }, undefined, false, undefined, this),
-              orphanCount > 0 && /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("span", {
+              orphanCount > 0 && /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("span", {
                 className: "inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800",
                 children: [
                   "⚠ ",
@@ -232241,28 +233432,28 @@ var RoutesPage = () => {
               }, undefined, true, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
-            className: "flex items-center gap-4",
+          /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
+            className: "flex items-center gap-4 flex-wrap",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
                 className: "flex items-center gap-2",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("label", {
+                  /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("label", {
                     htmlFor: "provider-filter",
-                    className: "text-sm text-gray-600",
+                    className: "text-sm text-gray-600 dark:text-gray-400",
                     children: "Provider:"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("select", {
+                  /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("select", {
                     id: "provider-filter",
                     value: filterProvider,
                     onChange: (e3) => setFilterProvider(e3.target.value),
-                    className: "rounded border px-2 py-1 text-sm",
+                    className: "rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-2 py-1 text-sm",
                     children: [
-                      /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("option", {
+                      /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("option", {
                         value: "",
                         children: "All"
                       }, undefined, false, undefined, this),
-                      providers.map((p5) => /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("option", {
+                      providers.map((p5) => /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("option", {
                         value: p5,
                         children: p5
                       }, p5, false, undefined, this))
@@ -232270,10 +233461,10 @@ var RoutesPage = () => {
                   }, undefined, true, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("label", {
-                className: "flex items-center gap-2 text-sm text-gray-600",
+              /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("label", {
+                className: "flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("input", {
+                  /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("input", {
                     type: "checkbox",
                     checked: showDisabled,
                     onChange: (e3) => setShowDisabled(e3.target.checked)
@@ -232281,98 +233472,141 @@ var RoutesPage = () => {
                   "Show disabled"
                 ]
               }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("span", {
-                className: "text-sm text-gray-500",
+              orphanCount > 0 && /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("label", {
+                className: "flex items-center gap-2 text-sm text-yellow-700 dark:text-yellow-400",
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("input", {
+                    type: "checkbox",
+                    checked: showOrphanedOnly,
+                    onChange: (e3) => setShowOrphanedOnly(e3.target.checked)
+                  }, undefined, false, undefined, this),
+                  "Orphaned only"
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("span", {
+                className: "text-sm text-gray-500 dark:text-gray-400",
                 children: [
                   filtered.length,
                   " routes"
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("button", {
+                type: "button",
+                onClick: () => void fetchData(true),
+                disabled: refreshing,
+                className: "inline-flex items-center gap-1 px-2 py-1 rounded text-xs text-gray-600 dark:text-gray-400 border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50",
+                title: "Refresh routes",
+                children: [
+                  /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("svg", {
+                    className: `w-3 h-3 ${refreshing ? "animate-spin" : ""}`,
+                    fill: "none",
+                    stroke: "currentColor",
+                    viewBox: "0 0 24 24",
+                    "aria-hidden": "true",
+                    children: /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("path", {
+                      strokeLinecap: "round",
+                      strokeLinejoin: "round",
+                      strokeWidth: 2,
+                      d: "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                    }, undefined, false, undefined, this)
+                  }, undefined, false, undefined, this),
+                  "Refresh"
                 ]
               }, undefined, true, undefined, this)
             ]
           }, undefined, true, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
         className: "overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700",
-        children: /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("table", {
+        children: /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("table", {
           className: "min-w-full divide-y divide-gray-200 dark:divide-gray-700",
           children: [
-            /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("thead", {
+            /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("thead", {
               className: "bg-gray-50 dark:bg-gray-800",
-              children: /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("tr", {
+              children: /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("tr", {
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("th", {
+                  /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("th", {
                     className: "px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase",
                     children: "Status"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("th", {
+                  /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("th", {
                     className: "px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase",
                     children: "Model"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("th", {
+                  /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("th", {
                     className: "px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase",
                     children: "Provider"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("th", {
+                  /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("th", {
                     className: "px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase",
                     children: "Agent"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("th", {
+                  /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("th", {
                     className: "px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase",
                     children: "CLI"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("th", {
+                  /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("th", {
                     className: "px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase",
                     children: "Spec"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("th", {
+                  /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("th", {
+                    className: "px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase",
+                    children: "Base URL"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("th", {
                     className: "px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase",
                     children: "Cost $/M"
                   }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("th", {
+                  /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("th", {
                     className: "px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase",
                     children: "Priority"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("th", {
+                    className: "px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase",
+                    children: "Plan"
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this)
             }, undefined, false, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("tbody", {
+            /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("tbody", {
               className: "bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700",
               children: filtered.map((route) => {
                 const isOrphan2 = route.has_host_policy_match === false;
                 const isToggling = togglingIds.has(route.id);
                 const toggleError = toggleErrors.get(route.id);
-                return /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("tr", {
+                return /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("tr", {
+                  title: route.notes || undefined,
                   className: isOrphan2 ? "bg-yellow-50 dark:bg-yellow-900/10 hover:bg-yellow-100 dark:hover:bg-yellow-900/20" : "hover:bg-gray-50 dark:hover:bg-gray-800",
                   children: [
-                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
+                    /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("td", {
                       className: "px-4 py-3",
-                      children: /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+                      children: /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
                         className: "flex flex-col gap-1",
                         children: [
-                          /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("button", {
+                          /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("button", {
                             type: "button",
                             onClick: () => void handleToggle(route),
                             disabled: isToggling,
                             className: `inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium cursor-pointer disabled:opacity-60 ${route.is_enabled ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 hover:bg-green-200" : "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400 hover:bg-red-200"}`,
                             children: [
-                              isToggling ? /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("span", {
+                              isToggling ? /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("span", {
                                 className: "inline-block w-3 h-3 border border-current border-t-transparent rounded-full animate-spin"
                               }, undefined, false, undefined, this) : null,
                               route.is_enabled ? "ON" : "OFF"
                             ]
                           }, undefined, true, undefined, this),
-                          toggleError && /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("span", {
+                          toggleError && /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("span", {
                             className: "text-xs text-red-600",
                             children: toggleError
                           }, undefined, false, undefined, this)
                         ]
                       }, undefined, true, undefined, this)
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
+                    /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("td", {
                       className: "px-4 py-3 font-mono text-sm",
                       children: [
-                        isOrphan2 && /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("span", {
+                        isOrphan2 && /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("span", {
                           className: "mr-1 text-yellow-600",
                           title: "No host policy match",
                           children: "⚠"
@@ -232380,29 +233614,44 @@ var RoutesPage = () => {
                         route.model_name
                       ]
                     }, undefined, true, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
+                    /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("td", {
                       className: "px-4 py-3 text-sm",
                       children: route.route_provider
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
+                    /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("td", {
                       className: "px-4 py-3 text-sm",
                       children: route.agent_provider
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
+                    /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("td", {
                       className: "px-4 py-3 font-mono text-sm text-gray-500",
                       children: route.agent_cli
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
+                    /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("td", {
                       className: "px-4 py-3 text-sm text-gray-500",
                       children: route.api_spec
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
+                    /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("td", {
+                      className: "px-4 py-3 text-sm text-gray-500 max-w-[160px]",
+                      children: route.base_url ? /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("span", {
+                        title: route.base_url,
+                        className: "block truncate font-mono text-xs",
+                        children: route.base_url
+                      }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("span", {
+                        className: "text-gray-300 dark:text-gray-600",
+                        children: "—"
+                      }, undefined, false, undefined, this)
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("td", {
                       className: "px-4 py-3 text-sm tabular-nums",
                       children: route.cost_per_million_input > 0 || route.cost_per_million_output > 0 ? `$${route.cost_per_million_input}/$${route.cost_per_million_output}` : "free"
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("td", {
+                    /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("td", {
                       className: "px-4 py-3 text-sm tabular-nums",
                       children: route.priority
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("td", {
+                      className: "px-4 py-3 text-sm text-gray-500",
+                      children: route.plan_type || "—"
                     }, undefined, false, undefined, this)
                   ]
                 }, route.id, true, undefined, this);
@@ -232411,7 +233660,7 @@ var RoutesPage = () => {
           ]
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this),
-      filtered.length === 0 && /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+      filtered.length === 0 && /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
         className: "text-center py-8 text-gray-500",
         children: "No routes match the current filters."
       }, undefined, false, undefined, this)
@@ -232421,15 +233670,15 @@ var RoutesPage = () => {
 var RoutesPage_default = RoutesPage;
 
 // src/apps/dashboard-web/components/SettingsPage.tsx
-var import_react64 = __toESM(require_react(), 1);
-var jsx_dev_runtime30 = __toESM(require_jsx_dev_runtime(), 1);
+var import_react65 = __toESM(require_react(), 1);
+var jsx_dev_runtime31 = __toESM(require_jsx_dev_runtime(), 1);
 var SettingsPage = () => {
-  const [config5, setConfig3] = import_react64.useState(null);
-  const [loading, setLoading] = import_react64.useState(true);
-  const [saving, setSaving] = import_react64.useState(false);
-  const [error3, setError] = import_react64.useState(null);
-  const [success, setSuccess] = import_react64.useState(null);
-  const fetchData = import_react64.useCallback(async () => {
+  const [config5, setConfig3] = import_react65.useState(null);
+  const [loading, setLoading] = import_react65.useState(true);
+  const [saving, setSaving] = import_react65.useState(false);
+  const [error3, setError] = import_react65.useState(null);
+  const [success, setSuccess] = import_react65.useState(null);
+  const fetchData = import_react65.useCallback(async () => {
     try {
       setError(null);
       const data5 = await apiClient.fetchConfig();
@@ -232441,7 +233690,7 @@ var SettingsPage = () => {
       setLoading(false);
     }
   }, []);
-  import_react64.useEffect(() => {
+  import_react65.useEffect(() => {
     fetchData();
   }, [fetchData]);
   const handleSave = async () => {
@@ -232461,14 +233710,14 @@ var SettingsPage = () => {
     }
   };
   if (loading) {
-    return /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
+    return /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
       className: "flex flex-col justify-center items-center h-64 space-y-4",
       children: [
-        /* @__PURE__ */ jsx_dev_runtime30.jsxDEV(LoadingSpinner_default, {
+        /* @__PURE__ */ jsx_dev_runtime31.jsxDEV(LoadingSpinner_default, {
           size: "lg",
           text: ""
         }, undefined, false, undefined, this),
-        /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("p", {
+        /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("p", {
           className: "text-lg font-medium text-gray-900 dark:text-gray-100",
           children: "Loading settings..."
         }, undefined, false, undefined, this)
@@ -232476,20 +233725,20 @@ var SettingsPage = () => {
     }, undefined, true, undefined, this);
   }
   if (error3 && !config5) {
-    return /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
+    return /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
       className: "p-8 text-center",
-      children: /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
+      children: /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
         className: "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("p", {
+          /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("p", {
             className: "text-red-600 dark:text-red-400 font-medium",
             children: "Error"
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("p", {
+          /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("p", {
             className: "text-red-500 dark:text-red-300 text-sm mt-1",
             children: error3
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("button", {
+          /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("button", {
             type: "button",
             onClick: fetchData,
             className: "mt-4 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded hover:bg-red-200 dark:hover:bg-red-900/50",
@@ -232501,38 +233750,38 @@ var SettingsPage = () => {
   }
   if (!config5)
     return null;
-  return /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
+  return /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
     className: "space-y-6 max-w-2xl",
     children: [
-      /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("h1", {
+      /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("h1", {
         className: "text-2xl font-bold text-gray-900 dark:text-gray-100",
         children: "Settings"
       }, undefined, false, undefined, this),
-      error3 && /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
+      error3 && /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
         className: "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4",
-        children: /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("p", {
+        children: /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("p", {
           className: "text-red-600 dark:text-red-400",
           children: error3
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
-      success && /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
+      success && /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
         className: "bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4",
-        children: /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("p", {
+        children: /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("p", {
           className: "text-green-600 dark:text-green-400",
           children: success
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
         className: "bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6 space-y-6",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
             children: [
-              /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("label", {
+              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("label", {
                 htmlFor: "project-name",
                 className: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1",
                 children: "Project Name"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("input", {
+              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("input", {
                 id: "project-name",
                 type: "text",
                 value: config5.projectName || "",
@@ -232541,14 +233790,14 @@ var SettingsPage = () => {
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
             children: [
-              /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("label", {
+              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("label", {
                 htmlFor: "default-assignee",
                 className: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1",
                 children: "Default Assignee"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("input", {
+              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("input", {
                 id: "default-assignee",
                 type: "text",
                 value: config5.defaultAssignee || "",
@@ -232557,14 +233806,14 @@ var SettingsPage = () => {
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
             children: [
-              /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("label", {
+              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("label", {
                 htmlFor: "default-port",
                 className: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1",
                 children: "Default Port"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("input", {
+              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("input", {
                 id: "default-port",
                 type: "number",
                 value: config5.defaultPort || 3000,
@@ -232576,48 +233825,48 @@ var SettingsPage = () => {
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
             className: "flex items-center gap-2",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("input", {
+              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("input", {
                 id: "auto-commit",
                 type: "checkbox",
                 checked: config5.autoCommit || false,
                 onChange: (e3) => setConfig3({ ...config5, autoCommit: e3.target.checked }),
                 className: "rounded"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("label", {
+              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("label", {
                 htmlFor: "auto-commit",
                 className: "text-sm text-gray-700 dark:text-gray-300",
                 children: "Auto-commit changes"
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
             className: "flex items-center gap-2",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("input", {
+              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("input", {
                 id: "auto-open-browser",
                 type: "checkbox",
                 checked: config5.autoOpenBrowser || false,
                 onChange: (e3) => setConfig3({ ...config5, autoOpenBrowser: e3.target.checked }),
                 className: "rounded"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("label", {
+              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("label", {
                 htmlFor: "auto-open-browser",
                 className: "text-sm text-gray-700 dark:text-gray-300",
                 children: "Auto-open browser on start"
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
             children: [
-              /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("label", {
+              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("label", {
                 htmlFor: "statuses",
                 className: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1",
                 children: "Statuses (comma-separated)"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("input", {
+              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("input", {
                 id: "statuses",
                 type: "text",
                 value: (config5.statuses || []).join(", "),
@@ -232629,14 +233878,14 @@ var SettingsPage = () => {
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
             children: [
-              /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("label", {
+              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("label", {
                 htmlFor: "labels",
                 className: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1",
                 children: "Labels (comma-separated)"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("input", {
+              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("input", {
                 id: "labels",
                 type: "text",
                 value: (config5.labels || []).join(", "),
@@ -232648,9 +233897,9 @@ var SettingsPage = () => {
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
             className: "pt-4",
-            children: /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("button", {
+            children: /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("button", {
               type: "button",
               onClick: handleSave,
               disabled: saving,
@@ -232666,8 +233915,8 @@ var SettingsPage = () => {
 var SettingsPage_default = SettingsPage;
 
 // src/apps/dashboard-web/components/StatisticsPage.tsx
-var import_react65 = __toESM(require_react(), 1);
-var jsx_dev_runtime31 = __toESM(require_jsx_dev_runtime(), 1);
+var import_react66 = __toESM(require_react(), 1);
+var jsx_dev_runtime32 = __toESM(require_jsx_dev_runtime(), 1);
 var statusColors = {
   Draft: "#9CA3AF",
   Review: "#F59E0B",
@@ -232676,7 +233925,7 @@ var statusColors = {
   Complete: "#10B981"
 };
 var StatisticsPage = ({ proposals = [] }) => {
-  const stats = import_react65.useMemo(() => {
+  const stats = import_react66.useMemo(() => {
     const total = proposals.length;
     const statusMap = new Map;
     const typeMap = new Map;
@@ -232730,89 +233979,89 @@ var StatisticsPage = ({ proposals = [] }) => {
       completionRate: total > 0 ? Math.round(completedCount / total * 100) : 0
     };
   }, [proposals]);
-  return /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+  return /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
     className: "space-y-6",
     children: [
-      /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("h1", {
+      /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("h1", {
         className: "text-2xl font-bold text-gray-900 dark:text-gray-100",
         children: "Statistics"
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
         className: "grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
             className: "bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 shadow-sm",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("p", {
+              /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("p", {
                 className: "text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider",
                 children: "Total Proposals"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("p", {
+              /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("p", {
                 className: "text-3xl font-bold text-gray-900 dark:text-gray-100 mt-1",
                 children: stats.total
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
             className: "bg-white dark:bg-gray-800 rounded-lg border border-green-200 dark:border-green-800/50 p-4 shadow-sm",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("p", {
+              /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("p", {
                 className: "text-xs font-semibold text-green-600 dark:text-green-400 uppercase tracking-wider",
                 children: "Completed"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("p", {
+              /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("p", {
                 className: "text-3xl font-bold text-green-700 dark:text-green-300 mt-1",
                 children: stats.completedCount
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
             className: "bg-white dark:bg-gray-800 rounded-lg border border-blue-200 dark:border-blue-800/50 p-4 shadow-sm",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("p", {
+              /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("p", {
                 className: "text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider",
                 children: "In Development"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("p", {
+              /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("p", {
                 className: "text-3xl font-bold text-blue-700 dark:text-blue-300 mt-1",
                 children: stats.activeCount
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
             className: "bg-white dark:bg-gray-800 rounded-lg border border-yellow-200 dark:border-yellow-800/50 p-4 shadow-sm",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("p", {
+              /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("p", {
                 className: "text-xs font-semibold text-yellow-600 dark:text-yellow-400 uppercase tracking-wider",
                 children: "In Review"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("p", {
+              /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("p", {
                 className: "text-3xl font-bold text-yellow-700 dark:text-yellow-300 mt-1",
                 children: stats.reviewCount
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
             className: "bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 shadow-sm",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("p", {
+              /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("p", {
                 className: "text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider",
                 children: "Drafts"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("p", {
+              /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("p", {
                 className: "text-3xl font-bold text-gray-900 dark:text-gray-100 mt-1",
                 children: stats.draftCount
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
             className: "bg-white dark:bg-gray-800 rounded-lg border border-purple-200 dark:border-purple-800/50 p-4 shadow-sm",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("p", {
+              /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("p", {
                 className: "text-xs font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wider",
                 children: "Completion Rate"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("p", {
+              /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("p", {
                 className: "text-3xl font-bold text-purple-700 dark:text-purple-300 mt-1",
                 children: [
                   stats.completionRate,
@@ -232823,28 +234072,28 @@ var StatisticsPage = ({ proposals = [] }) => {
           }, undefined, true, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
         className: "grid grid-cols-1 lg:grid-cols-2 gap-6",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
             className: "bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("h2", {
+              /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("h2", {
                 className: "text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4",
                 children: "Status Distribution"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
                 className: "space-y-3",
-                children: stats.statusStats.map((stat) => /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+                children: stats.statusStats.map((stat) => /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
                   className: "flex items-center gap-3",
                   children: [
-                    /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("span", {
+                    /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("span", {
                       className: "w-20 text-sm text-gray-700 dark:text-gray-300",
                       children: stat.status
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+                    /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
                       className: "flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-4",
-                      children: /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+                      children: /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
                         className: "h-4 rounded-full transition-all",
                         style: {
                           width: `${stat.percentage}%`,
@@ -232852,7 +234101,7 @@ var StatisticsPage = ({ proposals = [] }) => {
                         }
                       }, undefined, false, undefined, this)
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("span", {
+                    /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("span", {
                       className: "w-16 text-right text-sm text-gray-600 dark:text-gray-400",
                       children: [
                         stat.count,
@@ -232866,30 +234115,30 @@ var StatisticsPage = ({ proposals = [] }) => {
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
             className: "bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("h2", {
+              /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("h2", {
                 className: "text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4",
                 children: "Proposal Types"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
                 className: "space-y-3",
-                children: stats.typeStats.map((stat) => /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+                children: stats.typeStats.map((stat) => /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
                   className: "flex items-center justify-between",
                   children: [
-                    /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("span", {
+                    /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("span", {
                       className: "text-sm text-gray-700 dark:text-gray-300",
                       children: stat.type
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+                    /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
                       className: "flex items-center gap-2",
                       children: [
-                        /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("span", {
+                        /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("span", {
                           className: "text-sm font-medium text-gray-900 dark:text-gray-100",
                           children: stat.count
                         }, undefined, false, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("span", {
+                        /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("span", {
                           className: "text-xs text-gray-500 dark:text-gray-400",
                           children: [
                             "(",
@@ -232904,30 +234153,30 @@ var StatisticsPage = ({ proposals = [] }) => {
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
             className: "bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("h2", {
+              /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("h2", {
                 className: "text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4",
                 children: "Maturity Levels"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
                 className: "space-y-3",
-                children: stats.maturityStats.map((stat) => /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+                children: stats.maturityStats.map((stat) => /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
                   className: "flex items-center justify-between",
                   children: [
-                    /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("span", {
+                    /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("span", {
                       className: "text-sm text-gray-700 dark:text-gray-300",
                       children: stat.maturity
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+                    /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
                       className: "flex items-center gap-2",
                       children: [
-                        /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("span", {
+                        /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("span", {
                           className: "text-sm font-medium text-gray-900 dark:text-gray-100",
                           children: stat.count
                         }, undefined, false, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("span", {
+                        /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("span", {
                           className: "text-xs text-gray-500 dark:text-gray-400",
                           children: [
                             "(",
@@ -232942,30 +234191,30 @@ var StatisticsPage = ({ proposals = [] }) => {
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+          /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
             className: "bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("h2", {
+              /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("h2", {
                 className: "text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4",
                 children: "Directives"
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+              /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
                 className: "space-y-3",
-                children: stats.directiveStats.slice(0, 10).map((stat) => /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+                children: stats.directiveStats.slice(0, 10).map((stat) => /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
                   className: "flex items-center justify-between",
                   children: [
-                    /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("span", {
+                    /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("span", {
                       className: "text-sm text-gray-700 dark:text-gray-300 truncate max-w-[200px]",
                       children: stat.directive
                     }, undefined, false, undefined, this),
-                    /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+                    /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
                       className: "flex items-center gap-2",
                       children: [
-                        /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("span", {
+                        /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("span", {
                           className: "text-sm font-medium text-gray-900 dark:text-gray-100",
                           children: stat.count
                         }, undefined, false, undefined, this),
-                        /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("span", {
+                        /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("span", {
                           className: "text-xs text-gray-500 dark:text-gray-400",
                           children: [
                             "(",
@@ -232982,7 +234231,7 @@ var StatisticsPage = ({ proposals = [] }) => {
           }, undefined, true, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      stats.total === 0 && /* @__PURE__ */ jsx_dev_runtime31.jsxDEV("div", {
+      stats.total === 0 && /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
         className: "text-center py-12 text-gray-500 dark:text-gray-400",
         children: "No proposals to analyze"
       }, undefined, false, undefined, this)
@@ -232992,19 +234241,16 @@ var StatisticsPage = ({ proposals = [] }) => {
 var StatisticsPage_default = StatisticsPage;
 
 // src/apps/dashboard-web/components/TeamsPage.tsx
-var import_react66 = __toESM(require_react(), 1);
-var jsx_dev_runtime32 = __toESM(require_jsx_dev_runtime(), 1);
+var import_react67 = __toESM(require_react(), 1);
+var jsx_dev_runtime33 = __toESM(require_jsx_dev_runtime(), 1);
 var TeamsPage = () => {
-  const [teams, setTeams] = import_react66.useState([]);
-  const [loading, setLoading] = import_react66.useState(true);
-  const [error3, setError] = import_react66.useState(null);
-  const fetchData = import_react66.useCallback(async () => {
+  const [teams, setTeams] = import_react67.useState([]);
+  const [loading, setLoading] = import_react67.useState(true);
+  const [error3, setError] = import_react67.useState(null);
+  const fetchData = import_react67.useCallback(async () => {
     try {
       setError(null);
-      const response = await fetch("/api/teams");
-      if (!response.ok)
-        throw new Error("Failed to fetch teams");
-      const data5 = await response.json();
+      const data5 = await apiClient.fetchTeams();
       setTeams(data5);
     } catch (err) {
       console.error("Failed to fetch teams:", err);
@@ -233013,18 +234259,18 @@ var TeamsPage = () => {
       setLoading(false);
     }
   }, []);
-  import_react66.useEffect(() => {
+  import_react67.useEffect(() => {
     fetchData();
   }, [fetchData]);
   if (loading) {
-    return /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
+    return /* @__PURE__ */ jsx_dev_runtime33.jsxDEV("div", {
       className: "flex flex-col justify-center items-center h-64 space-y-4",
       children: [
-        /* @__PURE__ */ jsx_dev_runtime32.jsxDEV(LoadingSpinner_default, {
+        /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(LoadingSpinner_default, {
           size: "lg",
           text: ""
         }, undefined, false, undefined, this),
-        /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("p", {
+        /* @__PURE__ */ jsx_dev_runtime33.jsxDEV("p", {
           className: "text-lg font-medium text-gray-900 dark:text-gray-100",
           children: "Loading teams..."
         }, undefined, false, undefined, this)
@@ -233032,20 +234278,20 @@ var TeamsPage = () => {
     }, undefined, true, undefined, this);
   }
   if (error3) {
-    return /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
+    return /* @__PURE__ */ jsx_dev_runtime33.jsxDEV("div", {
       className: "p-8 text-center",
-      children: /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
+      children: /* @__PURE__ */ jsx_dev_runtime33.jsxDEV("div", {
         className: "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("p", {
+          /* @__PURE__ */ jsx_dev_runtime33.jsxDEV("p", {
             className: "text-red-600 dark:text-red-400 font-medium",
             children: "Error"
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("p", {
+          /* @__PURE__ */ jsx_dev_runtime33.jsxDEV("p", {
             className: "text-red-500 dark:text-red-300 text-sm mt-1",
             children: error3
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("button", {
+          /* @__PURE__ */ jsx_dev_runtime33.jsxDEV("button", {
             type: "button",
             onClick: fetchData,
             className: "mt-4 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded hover:bg-red-200 dark:hover:bg-red-900/50",
@@ -233055,10 +234301,10 @@ var TeamsPage = () => {
       }, undefined, true, undefined, this)
     }, undefined, false, undefined, this);
   }
-  return /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
+  return /* @__PURE__ */ jsx_dev_runtime33.jsxDEV("div", {
     className: "space-y-6",
     children: [
-      /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("h1", {
+      /* @__PURE__ */ jsx_dev_runtime33.jsxDEV("h1", {
         className: "text-2xl font-bold text-gray-900 dark:text-gray-100",
         children: [
           "Teams (",
@@ -233066,23 +234312,23 @@ var TeamsPage = () => {
           ")"
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
+      /* @__PURE__ */ jsx_dev_runtime33.jsxDEV("div", {
         className: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4",
-        children: teams.map((team) => /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
+        children: teams.map((team) => /* @__PURE__ */ jsx_dev_runtime33.jsxDEV("div", {
           className: "bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-3",
           children: [
-            /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("h3", {
+            /* @__PURE__ */ jsx_dev_runtime33.jsxDEV("h3", {
               className: "font-semibold text-gray-900 dark:text-gray-100",
               children: team.name
             }, undefined, false, undefined, this),
-            team.description && /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("p", {
+            team.description && /* @__PURE__ */ jsx_dev_runtime33.jsxDEV("p", {
               className: "text-sm text-gray-600 dark:text-gray-400",
               children: team.description
             }, undefined, false, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
+            /* @__PURE__ */ jsx_dev_runtime33.jsxDEV("div", {
               className: "space-y-1",
               children: [
-                /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("p", {
+                /* @__PURE__ */ jsx_dev_runtime33.jsxDEV("p", {
                   className: "text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider",
                   children: [
                     "Members (",
@@ -233090,9 +234336,9 @@ var TeamsPage = () => {
                     ")"
                   ]
                 }, undefined, true, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
+                /* @__PURE__ */ jsx_dev_runtime33.jsxDEV("div", {
                   className: "flex flex-wrap gap-1",
-                  children: team.members.map((member) => /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("span", {
+                  children: team.members.map((member) => /* @__PURE__ */ jsx_dev_runtime33.jsxDEV("span", {
                     className: "px-2 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded text-xs",
                     children: member
                   }, member, false, undefined, this))
@@ -233102,7 +234348,7 @@ var TeamsPage = () => {
           ]
         }, team.name, true, undefined, this))
       }, undefined, false, undefined, this),
-      teams.length === 0 && /* @__PURE__ */ jsx_dev_runtime32.jsxDEV("div", {
+      teams.length === 0 && /* @__PURE__ */ jsx_dev_runtime33.jsxDEV("div", {
         className: "text-center py-12 text-gray-500 dark:text-gray-400",
         children: "No teams registered"
       }, undefined, false, undefined, this)
@@ -233111,53 +234357,84 @@ var TeamsPage = () => {
 };
 var TeamsPage_default = TeamsPage;
 
-// src/apps/dashboard-web/hooks/useBoardStages.ts
-var import_react67 = __toESM(require_react(), 1);
-var FALLBACK_STAGES = [
-  { id: "DRAFT", stageName: "DRAFT", label: "Draft", displayLabel: "Draft", hexColor: null, order: 1, isTerminal: false },
-  { id: "REVIEW", stageName: "REVIEW", label: "Review", displayLabel: "Review", hexColor: null, order: 2, isTerminal: false },
-  { id: "DEVELOP", stageName: "DEVELOP", label: "Develop", displayLabel: "Develop", hexColor: null, order: 3, isTerminal: false },
-  { id: "MERGE", stageName: "MERGE", label: "Merge", displayLabel: "Merge", hexColor: null, order: 4, isTerminal: false },
-  { id: "COMPLETE", stageName: "COMPLETE", label: "Complete", displayLabel: "Complete", hexColor: null, order: 5, isTerminal: true }
+// src/apps/dashboard-web/hooks/useBoardColumns.ts
+var import_react68 = __toESM(require_react(), 1);
+var FALLBACK_COLUMNS = [
+  {
+    stage_name: "DRAFT",
+    stage_order: 1,
+    display_label: "Draft",
+    is_terminal: false,
+    maturity_gate: null
+  },
+  {
+    stage_name: "REVIEW",
+    stage_order: 2,
+    display_label: "Review",
+    is_terminal: false,
+    maturity_gate: null
+  },
+  {
+    stage_name: "DEVELOP",
+    stage_order: 3,
+    display_label: "Develop",
+    is_terminal: false,
+    maturity_gate: null
+  },
+  {
+    stage_name: "MERGE",
+    stage_order: 4,
+    display_label: "Merge",
+    is_terminal: false,
+    maturity_gate: null
+  },
+  {
+    stage_name: "COMPLETE",
+    stage_order: 5,
+    display_label: "Complete",
+    is_terminal: true,
+    maturity_gate: null
+  }
 ];
-function useBoardStages(workflow = "Standard RFC") {
-  const [stages, setStages] = import_react67.useState(FALLBACK_STAGES);
-  const [loading, setLoading] = import_react67.useState(true);
-  const [error3, setError] = import_react67.useState(null);
-  const [activeWorkflow, setActiveWorkflow] = import_react67.useState(workflow);
-  const workflowRef = import_react67.useRef(workflow);
-  workflowRef.current = workflow;
-  const fetchStages = import_react67.useCallback(async (wf) => {
+function useBoardColumns(workflowName = "Standard RFC", connected = false) {
+  const [columns, setColumns] = import_react68.useState(FALLBACK_COLUMNS);
+  const [isLoading, setIsLoading] = import_react68.useState(true);
+  const [error3, setError] = import_react68.useState(null);
+  const workflowRef = import_react68.useRef(workflowName);
+  workflowRef.current = workflowName;
+  const fetchColumns = import_react68.useCallback(async () => {
     try {
-      setLoading(true);
+      setIsLoading(true);
       setError(null);
-      const url = new URL("/api/board/stages", window.location.origin);
-      url.searchParams.set("workflow", wf);
-      const response = await fetch(url.toString());
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      const url = new URL("/api/board/columns", window.location.origin);
+      url.searchParams.set("workflowName", workflowRef.current);
+      const res = await fetch(url.toString());
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       }
-      const data5 = await response.json();
-      setStages(data5.stages);
-      setActiveWorkflow(data5.workflow);
-      if (data5.error) {
-        console.warn("Board stages API warning:", data5.error);
+      const data5 = await res.json();
+      if (Array.isArray(data5) && data5.length > 0) {
+        setColumns(data5);
+      } else {
+        setColumns(FALLBACK_COLUMNS);
       }
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Failed to fetch board stages";
-      setError(errorMsg);
-      console.error("Error fetching board stages:", err);
-      setStages(FALLBACK_STAGES);
+      const message = err instanceof Error ? err.message : "Failed to fetch board columns";
+      setError(message);
+      console.error("Error fetching board columns:", err);
+      setColumns(FALLBACK_COLUMNS);
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   }, []);
-  import_react67.useEffect(() => {
-    fetchStages(workflow);
-  }, [workflow, fetchStages]);
-  import_react67.useEffect(() => {
-    const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
+  import_react68.useEffect(() => {
+    fetchColumns();
+  }, [fetchColumns, workflowName, connected]);
+  import_react68.useEffect(() => {
+    const wsProtocol = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = typeof window !== "undefined" ? `${wsProtocol}//${window.location.host}/ws` : null;
+    if (!wsUrl)
+      return;
     let ws = null;
     let reconnectTimer = null;
     let closed = false;
@@ -233170,7 +234447,7 @@ function useBoardStages(workflow = "Standard RFC") {
           try {
             const msg = JSON.parse(event4.data);
             if (msg?.type === "board_reload") {
-              fetchStages(workflowRef.current);
+              fetchColumns();
             }
           } catch {}
         };
@@ -233191,12 +234468,12 @@ function useBoardStages(workflow = "Standard RFC") {
         clearTimeout(reconnectTimer);
       ws?.close();
     };
-  }, [fetchStages]);
-  return { stages, loading, error: error3, workflow: activeWorkflow };
+  }, [fetchColumns]);
+  return { columns, isLoading, error: error3, refresh: fetchColumns };
 }
 
 // src/apps/dashboard-web/hooks/useWebSocket.ts
-var import_react68 = __toESM(require_react(), 1);
+var import_react69 = __toESM(require_react(), 1);
 function isObject3(value2) {
   return typeof value2 === "object" && value2 !== null;
 }
@@ -233217,14 +234494,14 @@ function asArrayOf(value2, guard) {
 }
 function useWebSocket(url) {
   const wsUrl = url ?? (typeof window !== "undefined" ? `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}` : "ws://localhost:6420");
-  const [connected, setConnected] = import_react68.useState(false);
-  const [proposals, setProposals] = import_react68.useState([]);
-  const [agents, setAgents] = import_react68.useState([]);
-  const [channels2, setChannels] = import_react68.useState([]);
-  const [messages2, setMessages] = import_react68.useState([]);
-  const wsRef = import_react68.useRef(null);
-  const reconnectTimeoutRef = import_react68.useRef(undefined);
-  const connect = import_react68.useCallback(() => {
+  const [connected, setConnected] = import_react69.useState(false);
+  const [proposals, setProposals] = import_react69.useState([]);
+  const [agents, setAgents] = import_react69.useState([]);
+  const [channels2, setChannels] = import_react69.useState([]);
+  const [messages2, setMessages] = import_react69.useState([]);
+  const wsRef = import_react69.useRef(null);
+  const reconnectTimeoutRef = import_react69.useRef(undefined);
+  const connect = import_react69.useCallback(() => {
     if (wsRef.current) {
       const old = wsRef.current;
       old.onopen = null;
@@ -233363,7 +234640,7 @@ function useWebSocket(url) {
       ws.close();
     };
   }, [wsUrl]);
-  import_react68.useEffect(() => {
+  import_react69.useEffect(() => {
     connect();
     return () => {
       if (reconnectTimeoutRef.current) {
@@ -233374,7 +234651,7 @@ function useWebSocket(url) {
       }
     };
   }, [connect]);
-  import_react68.useEffect(() => {
+  import_react69.useEffect(() => {
     const off = onProjectScopeChange((id33) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN)
@@ -233394,97 +234671,13 @@ function useWebSocket(url) {
     });
     return off;
   }, []);
-  const reconnect = import_react68.useCallback(() => {
+  const reconnect = import_react69.useCallback(() => {
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
     }
     connect();
   }, [connect]);
   return { connected, proposals, agents, channels: channels2, messages: messages2, reconnect };
-}
-
-// src/apps/dashboard-web/hooks/useBoardStages.ts
-var import_react68 = __toESM(require_react(), 1);
-var FALLBACK_STAGES = [
-  { id: "DRAFT", stageName: "DRAFT", label: "Draft", displayLabel: "Draft", hexColor: null, order: 1, isTerminal: false },
-  { id: "REVIEW", stageName: "REVIEW", label: "Review", displayLabel: "Review", hexColor: null, order: 2, isTerminal: false },
-  { id: "DEVELOP", stageName: "DEVELOP", label: "Develop", displayLabel: "Develop", hexColor: null, order: 3, isTerminal: false },
-  { id: "MERGE", stageName: "MERGE", label: "Merge", displayLabel: "Merge", hexColor: null, order: 4, isTerminal: false },
-  { id: "COMPLETE", stageName: "COMPLETE", label: "Complete", displayLabel: "Complete", hexColor: null, order: 5, isTerminal: true }
-];
-function useBoardStages(workflow = "Standard RFC") {
-  const [stages, setStages] = import_react68.useState(FALLBACK_STAGES);
-  const [loading, setLoading] = import_react68.useState(true);
-  const [error3, setError] = import_react68.useState(null);
-  const [activeWorkflow, setActiveWorkflow] = import_react68.useState(workflow);
-  const workflowRef = import_react68.useRef(workflow);
-  workflowRef.current = workflow;
-  const fetchStages = import_react68.useCallback(async (wf) => {
-    try {
-      setLoading(true);
-      setError(null);
-      const url = new URL("/api/board/stages", window.location.origin);
-      url.searchParams.set("workflow", wf);
-      const response = await fetch(url.toString());
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      const data5 = await response.json();
-      setStages(data5.stages);
-      setActiveWorkflow(data5.workflow);
-      if (data5.error) {
-        console.warn("Board stages API warning:", data5.error);
-      }
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Failed to fetch board stages";
-      setError(errorMsg);
-      console.error("Error fetching board stages:", err);
-      setStages(FALLBACK_STAGES);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-  import_react68.useEffect(() => {
-    fetchStages(workflow);
-  }, [workflow, fetchStages]);
-  import_react68.useEffect(() => {
-    const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
-    let ws = null;
-    let reconnectTimer = null;
-    let closed = false;
-    const connect = () => {
-      if (closed)
-        return;
-      try {
-        ws = new WebSocket(wsUrl);
-        ws.onmessage = (event4) => {
-          try {
-            const msg = JSON.parse(event4.data);
-            if (msg?.type === "board_reload") {
-              fetchStages(workflowRef.current);
-            }
-          } catch {}
-        };
-        ws.onclose = () => {
-          if (!closed) {
-            reconnectTimer = setTimeout(connect, 5000);
-          }
-        };
-        ws.onerror = () => {
-          ws?.close();
-        };
-      } catch {}
-    };
-    connect();
-    return () => {
-      closed = true;
-      if (reconnectTimer !== null)
-        clearTimeout(reconnectTimer);
-      ws?.close();
-    };
-  }, [fetchStages]);
-  return { stages, loading, error: error3, workflow: activeWorkflow };
 }
 
 // src/apps/dashboard-web/lib/proposal-detail-selection.ts
@@ -233545,7 +234738,7 @@ function mergeProposalDetailState(current, next4) {
 }
 
 // src/apps/dashboard-web/App.tsx
-var jsx_dev_runtime33 = __toESM(require_jsx_dev_runtime(), 1);
+var jsx_dev_runtime34 = __toESM(require_jsx_dev_runtime(), 1);
 function toSharedProposal(proposal) {
   const labels = proposal.tags ? proposal.tags.split(",").map((label) => label.trim()).filter((label) => label.length > 0 && label !== "[object Object]") : [];
   return {
@@ -233605,24 +234798,24 @@ function toSharedChannel(channel2) {
 }
 function App() {
   const { connected, proposals, agents, channels: channels2 } = useWebSocket();
-  const [activeWorkflow, setActiveWorkflow] = import_react69.useState(() => {
+  const [activeWorkflow, setActiveWorkflow] = import_react70.useState(() => {
     if (typeof window !== "undefined") {
       return window.localStorage.getItem("roadmap.board.workflow") || "Standard RFC";
     }
     return "Standard RFC";
   });
-  const { stages: boardStages } = useBoardStages(activeWorkflow);
-  const statuses = boardStages.map((stage) => stage.id);
-  import_react69.useEffect(() => {
+  const { columns: boardColumns } = useBoardColumns(activeWorkflow);
+  const statuses = boardColumns.map((col) => col.stage_name);
+  import_react70.useEffect(() => {
     if (typeof window !== "undefined") {
       window.localStorage.setItem("roadmap.board.workflow", activeWorkflow);
     }
   }, [activeWorkflow]);
-  const sharedProposals = import_react69.useMemo(() => proposals.map(toSharedProposal), [proposals]);
-  const sharedAgents = import_react69.useMemo(() => agents.map(toSharedAgent), [agents]);
-  const sharedChannels = import_react69.useMemo(() => channels2.map(toSharedChannel), [channels2]);
-  const [activeProposal, setActiveProposal] = import_react69.useState(null);
-  const resolvedActiveProposal = import_react69.useMemo(() => {
+  const sharedProposals = import_react70.useMemo(() => proposals.map(toSharedProposal), [proposals]);
+  const sharedAgents = import_react70.useMemo(() => agents.map(toSharedAgent), [agents]);
+  const sharedChannels = import_react70.useMemo(() => channels2.map(toSharedChannel), [channels2]);
+  const [activeProposal, setActiveProposal] = import_react70.useState(null);
+  const resolvedActiveProposal = import_react70.useMemo(() => {
     if (!activeProposal)
       return null;
     const match2 = sharedProposals.find((proposal) => proposalMatchesSelection(proposal, activeProposal));
@@ -233634,29 +234827,29 @@ function App() {
   const handleWorkflowChange = (workflow) => {
     setActiveWorkflow(workflow);
   };
-  return /* @__PURE__ */ jsx_dev_runtime33.jsxDEV("div", {
+  return /* @__PURE__ */ jsx_dev_runtime34.jsxDEV("div", {
     className: "h-screen bg-gray-50 dark:bg-gray-900 flex overflow-hidden transition-colors duration-200",
-    children: /* @__PURE__ */ jsx_dev_runtime33.jsxDEV("div", {
+    children: /* @__PURE__ */ jsx_dev_runtime34.jsxDEV("div", {
       className: "flex-1 flex flex-col min-h-0 min-w-0",
       children: [
-        /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(AppNav_default, {}, undefined, false, undefined, this),
-        /* @__PURE__ */ jsx_dev_runtime33.jsxDEV("main", {
+        /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(AppNav_default, {}, undefined, false, undefined, this),
+        /* @__PURE__ */ jsx_dev_runtime34.jsxDEV("main", {
           className: "flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden",
           children: [
-            /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(Switch, {
+            /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(Switch, {
               children: [
-                /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(Route, {
+                /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(Route, {
                   path: "/",
-                  children: /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(DashboardPage_default, {
+                  children: /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(DashboardPage_default, {
                     connected,
                     proposals: sharedProposals,
                     agents,
                     channels: channels2
                   }, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(Route, {
+                /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(Route, {
                   path: "/board",
-                  children: /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(BoardPage, {
+                  children: /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(BoardPage, {
                     proposals,
                     statuses,
                     activeWorkflow,
@@ -233664,96 +234857,100 @@ function App() {
                     onProposalClick: (p5) => handleProposalClick(p5)
                   }, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(Route, {
+                /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(Route, {
                   path: "/proposals",
-                  children: /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(ProposalsPage_default, {
+                  children: /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(ProposalsPage_default, {
                     proposals: sharedProposals,
                     onProposalClick: (p5) => handleProposalClick(p5)
                   }, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(Route, {
+                /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(Route, {
                   path: "/directives",
-                  children: /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(DirectivesPage_default, {
+                  children: /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(DirectivesPage_default, {
                     proposals: sharedProposals
                   }, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(Route, {
+                /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(Route, {
                   path: "/agents",
-                  children: /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(AgentsPage_default, {
+                  children: /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(AgentsPage_default, {
                     agents: sharedAgents
                   }, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(Route, {
+                /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(Route, {
                   path: "/teams",
-                  children: /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(TeamsPage_default, {}, undefined, false, undefined, this)
+                  children: /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(TeamsPage_default, {}, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(Route, {
+                /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(Route, {
                   path: "/channels",
-                  children: /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(ChannelsPage_default, {
+                  children: /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(ChannelsPage_default, {
                     channels: sharedChannels
                   }, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(Route, {
+                /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(Route, {
                   path: "/statistics",
-                  children: /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(StatisticsPage_default, {
+                  children: /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(StatisticsPage_default, {
                     proposals: sharedProposals
                   }, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(Route, {
+                /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(Route, {
                   path: "/agent-dashboard",
-                  children: /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(DashboardPage_default, {
+                  children: /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(DashboardPage_default, {
                     connected,
                     proposals: sharedProposals,
                     agents,
                     channels: channels2
                   }, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(Route, {
+                /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(Route, {
                   path: "/activity",
-                  children: /* @__PURE__ */ jsx_dev_runtime33.jsxDEV("div", {
+                  children: /* @__PURE__ */ jsx_dev_runtime34.jsxDEV("div", {
                     className: "h-full p-4 sm:p-6",
-                    children: /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(ActivityFeed_default, {}, undefined, false, undefined, this)
+                    children: /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(ActivityFeed_default, {}, undefined, false, undefined, this)
                   }, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(Route, {
+                /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(Route, {
                   path: "/dispatches",
-                  children: /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(DispatchPage_default, {}, undefined, false, undefined, this)
+                  children: /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(DispatchPage_default, {}, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(Route, {
+                /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(Route, {
                   path: "/knowledge",
-                  children: /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(KnowledgePage_default, {}, undefined, false, undefined, this)
+                  children: /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(KnowledgePage_default, {}, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(Route, {
+                /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(Route, {
                   path: "/documents",
-                  children: /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(DocumentsPage_default, {}, undefined, false, undefined, this)
+                  children: /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(DocumentsPage_default, {}, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(Route, {
+                /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(Route, {
                   path: "/decisions",
-                  children: /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(DecisionsPage_default, {}, undefined, false, undefined, this)
+                  children: /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(DecisionsPage_default, {}, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(Route, {
+                /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(Route, {
                   path: "/map",
-                  children: /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(MapPage_default, {}, undefined, false, undefined, this)
+                  children: /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(MapPage_default, {}, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(Route, {
+                /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(Route, {
                   path: "/routes",
-                  children: /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(RoutesPage_default, {}, undefined, false, undefined, this)
+                  children: /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(RoutesPage_default, {}, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(Route, {
+                /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(Route, {
+                  path: "/agencies",
+                  children: /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(AgenciesPage_default, {}, undefined, false, undefined, this)
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(Route, {
                   path: "/achievements",
-                  children: /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(AchievementsView_default, {}, undefined, false, undefined, this)
+                  children: /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(AchievementsView_default, {}, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(Route, {
+                /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(Route, {
                   path: "/settings",
-                  children: /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(SettingsPage_default, {}, undefined, false, undefined, this)
+                  children: /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(SettingsPage_default, {}, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(Route, {
+                /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(Route, {
                   path: "*",
-                  children: /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(NotFoundPage, {}, undefined, false, undefined, this)
+                  children: /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(NotFoundPage, {}, undefined, false, undefined, this)
                 }, undefined, false, undefined, this)
               ]
             }, undefined, true, undefined, this),
-            resolvedActiveProposal && /* @__PURE__ */ jsx_dev_runtime33.jsxDEV(ProposalDetailsModal_default, {
+            resolvedActiveProposal && /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(ProposalDetailsModal_default, {
               proposal: resolvedActiveProposal,
               isOpen: true,
               onClose: () => setActiveProposal(null)
@@ -233765,19 +234962,1945 @@ function App() {
   }, undefined, false, undefined, this);
 }
 
-// src/apps/dashboard-web/contexts/HealthCheckContext.tsx
+// src/apps/dashboard-web/components/ui/Toast.tsx
 var import_react71 = __toESM(require_react(), 1);
 
+// node_modules/clsx/dist/clsx.mjs
+function r3(e3) {
+  var t4, f3, n3 = "";
+  if (typeof e3 == "string" || typeof e3 == "number")
+    n3 += e3;
+  else if (typeof e3 == "object")
+    if (Array.isArray(e3)) {
+      var o2 = e3.length;
+      for (t4 = 0;t4 < o2; t4++)
+        e3[t4] && (f3 = r3(e3[t4])) && (n3 && (n3 += " "), n3 += f3);
+    } else
+      for (f3 in e3)
+        e3[f3] && (n3 && (n3 += " "), n3 += f3);
+  return n3;
+}
+function clsx() {
+  for (var e3, t4, f3 = 0, n3 = "", o2 = arguments.length;f3 < o2; f3++)
+    (e3 = arguments[f3]) && (t4 = r3(e3)) && (n3 && (n3 += " "), n3 += t4);
+  return n3;
+}
+
+// node_modules/tailwind-merge/dist/bundle-mjs.mjs
+var concatArrays = (array1, array22) => {
+  const combinedArray = new Array(array1.length + array22.length);
+  for (let i5 = 0;i5 < array1.length; i5++) {
+    combinedArray[i5] = array1[i5];
+  }
+  for (let i5 = 0;i5 < array22.length; i5++) {
+    combinedArray[array1.length + i5] = array22[i5];
+  }
+  return combinedArray;
+};
+var createClassValidatorObject = (classGroupId, validator) => ({
+  classGroupId,
+  validator
+});
+var createClassPartObject = (nextPart = new Map, validators = null, classGroupId) => ({
+  nextPart,
+  validators,
+  classGroupId
+});
+var CLASS_PART_SEPARATOR = "-";
+var EMPTY_CONFLICTS = [];
+var ARBITRARY_PROPERTY_PREFIX = "arbitrary..";
+var createClassGroupUtils = (config5) => {
+  const classMap = createClassMap(config5);
+  const {
+    conflictingClassGroups,
+    conflictingClassGroupModifiers
+  } = config5;
+  const getClassGroupId = (className2) => {
+    if (className2.startsWith("[") && className2.endsWith("]")) {
+      return getGroupIdForArbitraryProperty(className2);
+    }
+    const classParts = className2.split(CLASS_PART_SEPARATOR);
+    const startIndex = classParts[0] === "" && classParts.length > 1 ? 1 : 0;
+    return getGroupRecursive(classParts, startIndex, classMap);
+  };
+  const getConflictingClassGroupIds = (classGroupId, hasPostfixModifier) => {
+    if (hasPostfixModifier) {
+      const modifierConflicts = conflictingClassGroupModifiers[classGroupId];
+      const baseConflicts = conflictingClassGroups[classGroupId];
+      if (modifierConflicts) {
+        if (baseConflicts) {
+          return concatArrays(baseConflicts, modifierConflicts);
+        }
+        return modifierConflicts;
+      }
+      return baseConflicts || EMPTY_CONFLICTS;
+    }
+    return conflictingClassGroups[classGroupId] || EMPTY_CONFLICTS;
+  };
+  return {
+    getClassGroupId,
+    getConflictingClassGroupIds
+  };
+};
+var getGroupRecursive = (classParts, startIndex, classPartObject) => {
+  const classPathsLength = classParts.length - startIndex;
+  if (classPathsLength === 0) {
+    return classPartObject.classGroupId;
+  }
+  const currentClassPart = classParts[startIndex];
+  const nextClassPartObject = classPartObject.nextPart.get(currentClassPart);
+  if (nextClassPartObject) {
+    const result = getGroupRecursive(classParts, startIndex + 1, nextClassPartObject);
+    if (result)
+      return result;
+  }
+  const validators = classPartObject.validators;
+  if (validators === null) {
+    return;
+  }
+  const classRest = startIndex === 0 ? classParts.join(CLASS_PART_SEPARATOR) : classParts.slice(startIndex).join(CLASS_PART_SEPARATOR);
+  const validatorsLength = validators.length;
+  for (let i5 = 0;i5 < validatorsLength; i5++) {
+    const validatorObj = validators[i5];
+    if (validatorObj.validator(classRest)) {
+      return validatorObj.classGroupId;
+    }
+  }
+  return;
+};
+var getGroupIdForArbitraryProperty = (className2) => className2.slice(1, -1).indexOf(":") === -1 ? undefined : (() => {
+  const content3 = className2.slice(1, -1);
+  const colonIndex = content3.indexOf(":");
+  const property2 = content3.slice(0, colonIndex);
+  return property2 ? ARBITRARY_PROPERTY_PREFIX + property2 : undefined;
+})();
+var createClassMap = (config5) => {
+  const {
+    theme,
+    classGroups
+  } = config5;
+  return processClassGroups(classGroups, theme);
+};
+var processClassGroups = (classGroups, theme) => {
+  const classMap = createClassPartObject();
+  for (const classGroupId in classGroups) {
+    const group4 = classGroups[classGroupId];
+    processClassesRecursively(group4, classMap, classGroupId, theme);
+  }
+  return classMap;
+};
+var processClassesRecursively = (classGroup, classPartObject, classGroupId, theme) => {
+  const len = classGroup.length;
+  for (let i5 = 0;i5 < len; i5++) {
+    const classDefinition = classGroup[i5];
+    processClassDefinition(classDefinition, classPartObject, classGroupId, theme);
+  }
+};
+var processClassDefinition = (classDefinition, classPartObject, classGroupId, theme) => {
+  if (typeof classDefinition === "string") {
+    processStringDefinition(classDefinition, classPartObject, classGroupId);
+    return;
+  }
+  if (typeof classDefinition === "function") {
+    processFunctionDefinition(classDefinition, classPartObject, classGroupId, theme);
+    return;
+  }
+  processObjectDefinition(classDefinition, classPartObject, classGroupId, theme);
+};
+var processStringDefinition = (classDefinition, classPartObject, classGroupId) => {
+  const classPartObjectToEdit = classDefinition === "" ? classPartObject : getPart(classPartObject, classDefinition);
+  classPartObjectToEdit.classGroupId = classGroupId;
+};
+var processFunctionDefinition = (classDefinition, classPartObject, classGroupId, theme) => {
+  if (isThemeGetter(classDefinition)) {
+    processClassesRecursively(classDefinition(theme), classPartObject, classGroupId, theme);
+    return;
+  }
+  if (classPartObject.validators === null) {
+    classPartObject.validators = [];
+  }
+  classPartObject.validators.push(createClassValidatorObject(classGroupId, classDefinition));
+};
+var processObjectDefinition = (classDefinition, classPartObject, classGroupId, theme) => {
+  const entries2 = Object.entries(classDefinition);
+  const len = entries2.length;
+  for (let i5 = 0;i5 < len; i5++) {
+    const [key2, value2] = entries2[i5];
+    processClassesRecursively(value2, getPart(classPartObject, key2), classGroupId, theme);
+  }
+};
+var getPart = (classPartObject, path5) => {
+  let current = classPartObject;
+  const parts = path5.split(CLASS_PART_SEPARATOR);
+  const len = parts.length;
+  for (let i5 = 0;i5 < len; i5++) {
+    const part = parts[i5];
+    let next4 = current.nextPart.get(part);
+    if (!next4) {
+      next4 = createClassPartObject();
+      current.nextPart.set(part, next4);
+    }
+    current = next4;
+  }
+  return current;
+};
+var isThemeGetter = (func) => ("isThemeGetter" in func) && func.isThemeGetter === true;
+var createLruCache = (maxCacheSize) => {
+  if (maxCacheSize < 1) {
+    return {
+      get: () => {
+        return;
+      },
+      set: () => {}
+    };
+  }
+  let cacheSize = 0;
+  let cache3 = Object.create(null);
+  let previousCache = Object.create(null);
+  const update2 = (key2, value2) => {
+    cache3[key2] = value2;
+    cacheSize++;
+    if (cacheSize > maxCacheSize) {
+      cacheSize = 0;
+      previousCache = cache3;
+      cache3 = Object.create(null);
+    }
+  };
+  return {
+    get(key2) {
+      let value2 = cache3[key2];
+      if (value2 !== undefined) {
+        return value2;
+      }
+      if ((value2 = previousCache[key2]) !== undefined) {
+        update2(key2, value2);
+        return value2;
+      }
+    },
+    set(key2, value2) {
+      if (key2 in cache3) {
+        cache3[key2] = value2;
+      } else {
+        update2(key2, value2);
+      }
+    }
+  };
+};
+var IMPORTANT_MODIFIER = "!";
+var MODIFIER_SEPARATOR = ":";
+var EMPTY_MODIFIERS = [];
+var createResultObject = (modifiers, hasImportantModifier, baseClassName, maybePostfixModifierPosition, isExternal) => ({
+  modifiers,
+  hasImportantModifier,
+  baseClassName,
+  maybePostfixModifierPosition,
+  isExternal
+});
+var createParseClassName = (config5) => {
+  const {
+    prefix,
+    experimentalParseClassName
+  } = config5;
+  let parseClassName = (className2) => {
+    const modifiers = [];
+    let bracketDepth = 0;
+    let parenDepth = 0;
+    let modifierStart = 0;
+    let postfixModifierPosition;
+    const len = className2.length;
+    for (let index3 = 0;index3 < len; index3++) {
+      const currentCharacter = className2[index3];
+      if (bracketDepth === 0 && parenDepth === 0) {
+        if (currentCharacter === MODIFIER_SEPARATOR) {
+          modifiers.push(className2.slice(modifierStart, index3));
+          modifierStart = index3 + 1;
+          continue;
+        }
+        if (currentCharacter === "/") {
+          postfixModifierPosition = index3;
+          continue;
+        }
+      }
+      if (currentCharacter === "[")
+        bracketDepth++;
+      else if (currentCharacter === "]")
+        bracketDepth--;
+      else if (currentCharacter === "(")
+        parenDepth++;
+      else if (currentCharacter === ")")
+        parenDepth--;
+    }
+    const baseClassNameWithImportantModifier = modifiers.length === 0 ? className2 : className2.slice(modifierStart);
+    let baseClassName = baseClassNameWithImportantModifier;
+    let hasImportantModifier = false;
+    if (baseClassNameWithImportantModifier.endsWith(IMPORTANT_MODIFIER)) {
+      baseClassName = baseClassNameWithImportantModifier.slice(0, -1);
+      hasImportantModifier = true;
+    } else if (baseClassNameWithImportantModifier.startsWith(IMPORTANT_MODIFIER)) {
+      baseClassName = baseClassNameWithImportantModifier.slice(1);
+      hasImportantModifier = true;
+    }
+    const maybePostfixModifierPosition = postfixModifierPosition && postfixModifierPosition > modifierStart ? postfixModifierPosition - modifierStart : undefined;
+    return createResultObject(modifiers, hasImportantModifier, baseClassName, maybePostfixModifierPosition);
+  };
+  if (prefix) {
+    const fullPrefix = prefix + MODIFIER_SEPARATOR;
+    const parseClassNameOriginal = parseClassName;
+    parseClassName = (className2) => className2.startsWith(fullPrefix) ? parseClassNameOriginal(className2.slice(fullPrefix.length)) : createResultObject(EMPTY_MODIFIERS, false, className2, undefined, true);
+  }
+  if (experimentalParseClassName) {
+    const parseClassNameOriginal = parseClassName;
+    parseClassName = (className2) => experimentalParseClassName({
+      className: className2,
+      parseClassName: parseClassNameOriginal
+    });
+  }
+  return parseClassName;
+};
+var createSortModifiers = (config5) => {
+  const modifierWeights = new Map;
+  config5.orderSensitiveModifiers.forEach((mod, index3) => {
+    modifierWeights.set(mod, 1e6 + index3);
+  });
+  return (modifiers) => {
+    const result = [];
+    let currentSegment = [];
+    for (let i5 = 0;i5 < modifiers.length; i5++) {
+      const modifier = modifiers[i5];
+      const isArbitrary = modifier[0] === "[";
+      const isOrderSensitive = modifierWeights.has(modifier);
+      if (isArbitrary || isOrderSensitive) {
+        if (currentSegment.length > 0) {
+          currentSegment.sort();
+          result.push(...currentSegment);
+          currentSegment = [];
+        }
+        result.push(modifier);
+      } else {
+        currentSegment.push(modifier);
+      }
+    }
+    if (currentSegment.length > 0) {
+      currentSegment.sort();
+      result.push(...currentSegment);
+    }
+    return result;
+  };
+};
+var createConfigUtils = (config5) => ({
+  cache: createLruCache(config5.cacheSize),
+  parseClassName: createParseClassName(config5),
+  sortModifiers: createSortModifiers(config5),
+  postfixLookupClassGroupIds: createPostfixLookupClassGroupIds(config5),
+  ...createClassGroupUtils(config5)
+});
+var createPostfixLookupClassGroupIds = (config5) => {
+  const lookup3 = Object.create(null);
+  const classGroupIds = config5.postfixLookupClassGroups;
+  if (classGroupIds) {
+    for (let i5 = 0;i5 < classGroupIds.length; i5++) {
+      lookup3[classGroupIds[i5]] = true;
+    }
+  }
+  return lookup3;
+};
+var SPLIT_CLASSES_REGEX = /\s+/;
+var mergeClassList = (classList2, configUtils) => {
+  const {
+    parseClassName,
+    getClassGroupId,
+    getConflictingClassGroupIds,
+    sortModifiers,
+    postfixLookupClassGroupIds
+  } = configUtils;
+  const classGroupsInConflict = [];
+  const classNames = classList2.trim().split(SPLIT_CLASSES_REGEX);
+  let result = "";
+  for (let index3 = classNames.length - 1;index3 >= 0; index3 -= 1) {
+    const originalClassName = classNames[index3];
+    const {
+      isExternal,
+      modifiers,
+      hasImportantModifier,
+      baseClassName,
+      maybePostfixModifierPosition
+    } = parseClassName(originalClassName);
+    if (isExternal) {
+      result = originalClassName + (result.length > 0 ? " " + result : result);
+      continue;
+    }
+    let hasPostfixModifier = !!maybePostfixModifierPosition;
+    let classGroupId;
+    if (hasPostfixModifier) {
+      const baseClassNameWithoutPostfix = baseClassName.substring(0, maybePostfixModifierPosition);
+      classGroupId = getClassGroupId(baseClassNameWithoutPostfix);
+      const classGroupIdWithPostfix = classGroupId && postfixLookupClassGroupIds[classGroupId] ? getClassGroupId(baseClassName) : undefined;
+      if (classGroupIdWithPostfix && classGroupIdWithPostfix !== classGroupId) {
+        classGroupId = classGroupIdWithPostfix;
+        hasPostfixModifier = false;
+      }
+    } else {
+      classGroupId = getClassGroupId(baseClassName);
+    }
+    if (!classGroupId) {
+      if (!hasPostfixModifier) {
+        result = originalClassName + (result.length > 0 ? " " + result : result);
+        continue;
+      }
+      classGroupId = getClassGroupId(baseClassName);
+      if (!classGroupId) {
+        result = originalClassName + (result.length > 0 ? " " + result : result);
+        continue;
+      }
+      hasPostfixModifier = false;
+    }
+    const variantModifier = modifiers.length === 0 ? "" : modifiers.length === 1 ? modifiers[0] : sortModifiers(modifiers).join(":");
+    const modifierId = hasImportantModifier ? variantModifier + IMPORTANT_MODIFIER : variantModifier;
+    const classId = modifierId + classGroupId;
+    if (classGroupsInConflict.indexOf(classId) > -1) {
+      continue;
+    }
+    classGroupsInConflict.push(classId);
+    const conflictGroups = getConflictingClassGroupIds(classGroupId, hasPostfixModifier);
+    for (let i5 = 0;i5 < conflictGroups.length; ++i5) {
+      const group4 = conflictGroups[i5];
+      classGroupsInConflict.push(modifierId + group4);
+    }
+    result = originalClassName + (result.length > 0 ? " " + result : result);
+  }
+  return result;
+};
+var twJoin = (...classLists) => {
+  let index3 = 0;
+  let argument;
+  let resolvedValue;
+  let string5 = "";
+  while (index3 < classLists.length) {
+    if (argument = classLists[index3++]) {
+      if (resolvedValue = toValue(argument)) {
+        string5 && (string5 += " ");
+        string5 += resolvedValue;
+      }
+    }
+  }
+  return string5;
+};
+var toValue = (mix2) => {
+  if (typeof mix2 === "string") {
+    return mix2;
+  }
+  let resolvedValue;
+  let string5 = "";
+  for (let k3 = 0;k3 < mix2.length; k3++) {
+    if (mix2[k3]) {
+      if (resolvedValue = toValue(mix2[k3])) {
+        string5 && (string5 += " ");
+        string5 += resolvedValue;
+      }
+    }
+  }
+  return string5;
+};
+var createTailwindMerge = (createConfigFirst, ...createConfigRest) => {
+  let configUtils;
+  let cacheGet;
+  let cacheSet;
+  let functionToCall;
+  const initTailwindMerge = (classList2) => {
+    const config5 = createConfigRest.reduce((previousConfig, createConfigCurrent) => createConfigCurrent(previousConfig), createConfigFirst());
+    configUtils = createConfigUtils(config5);
+    cacheGet = configUtils.cache.get;
+    cacheSet = configUtils.cache.set;
+    functionToCall = tailwindMerge;
+    return tailwindMerge(classList2);
+  };
+  const tailwindMerge = (classList2) => {
+    const cachedResult = cacheGet(classList2);
+    if (cachedResult) {
+      return cachedResult;
+    }
+    const result = mergeClassList(classList2, configUtils);
+    cacheSet(classList2, result);
+    return result;
+  };
+  functionToCall = initTailwindMerge;
+  return (...args) => functionToCall(twJoin(...args));
+};
+var fallbackThemeArr = [];
+var fromTheme = (key2) => {
+  const themeGetter = (theme) => theme[key2] || fallbackThemeArr;
+  themeGetter.isThemeGetter = true;
+  return themeGetter;
+};
+var arbitraryValueRegex = /^\[(?:(\w[\w-]*):)?(.+)\]$/i;
+var arbitraryVariableRegex = /^\((?:(\w[\w-]*):)?(.+)\)$/i;
+var fractionRegex = /^\d+(?:\.\d+)?\/\d+(?:\.\d+)?$/;
+var tshirtUnitRegex = /^(\d+(\.\d+)?)?(xs|sm|md|lg|xl)$/;
+var lengthUnitRegex = /\d+(%|px|r?em|[sdl]?v([hwib]|min|max)|pt|pc|in|cm|mm|cap|ch|ex|r?lh|cq(w|h|i|b|min|max))|\b(calc|min|max|clamp)\(.+\)|^0$/;
+var colorFunctionRegex = /^(rgba?|hsla?|hwb|(ok)?(lab|lch)|color-mix)\(.+\)$/;
+var shadowRegex = /^(inset_)?-?((\d+)?\.?(\d+)[a-z]+|0)_-?((\d+)?\.?(\d+)[a-z]+|0)/;
+var imageRegex = /^(url|image|image-set|cross-fade|element|(repeating-)?(linear|radial|conic)-gradient)\(.+\)$/;
+var isFraction = (value2) => fractionRegex.test(value2);
+var isNumber2 = (value2) => !!value2 && !Number.isNaN(Number(value2));
+var isInteger2 = (value2) => !!value2 && Number.isInteger(Number(value2));
+var isPercent = (value2) => value2.endsWith("%") && isNumber2(value2.slice(0, -1));
+var isTshirtSize = (value2) => tshirtUnitRegex.test(value2);
+var isAny = () => true;
+var isLengthOnly = (value2) => lengthUnitRegex.test(value2) && !colorFunctionRegex.test(value2);
+var isNever = () => false;
+var isShadow = (value2) => shadowRegex.test(value2);
+var isImage = (value2) => imageRegex.test(value2);
+var isAnyNonArbitrary = (value2) => !isArbitraryValue(value2) && !isArbitraryVariable(value2);
+var isNamedContainerQuery = (value2) => value2.startsWith("@container") && (value2[10] === "/" && value2[11] !== undefined || value2[11] === "s" && value2[16] !== undefined && value2.startsWith("-size/", 10) || value2[11] === "n" && value2[18] !== undefined && value2.startsWith("-normal/", 10));
+var isArbitrarySize = (value2) => getIsArbitraryValue(value2, isLabelSize, isNever);
+var isArbitraryValue = (value2) => arbitraryValueRegex.test(value2);
+var isArbitraryLength = (value2) => getIsArbitraryValue(value2, isLabelLength, isLengthOnly);
+var isArbitraryNumber = (value2) => getIsArbitraryValue(value2, isLabelNumber, isNumber2);
+var isArbitraryWeight = (value2) => getIsArbitraryValue(value2, isLabelWeight, isAny);
+var isArbitraryFamilyName = (value2) => getIsArbitraryValue(value2, isLabelFamilyName, isNever);
+var isArbitraryPosition = (value2) => getIsArbitraryValue(value2, isLabelPosition, isNever);
+var isArbitraryImage = (value2) => getIsArbitraryValue(value2, isLabelImage, isImage);
+var isArbitraryShadow = (value2) => getIsArbitraryValue(value2, isLabelShadow, isShadow);
+var isArbitraryVariable = (value2) => arbitraryVariableRegex.test(value2);
+var isArbitraryVariableLength = (value2) => getIsArbitraryVariable(value2, isLabelLength);
+var isArbitraryVariableFamilyName = (value2) => getIsArbitraryVariable(value2, isLabelFamilyName);
+var isArbitraryVariablePosition = (value2) => getIsArbitraryVariable(value2, isLabelPosition);
+var isArbitraryVariableSize = (value2) => getIsArbitraryVariable(value2, isLabelSize);
+var isArbitraryVariableImage = (value2) => getIsArbitraryVariable(value2, isLabelImage);
+var isArbitraryVariableShadow = (value2) => getIsArbitraryVariable(value2, isLabelShadow, true);
+var isArbitraryVariableWeight = (value2) => getIsArbitraryVariable(value2, isLabelWeight, true);
+var getIsArbitraryValue = (value2, testLabel, testValue) => {
+  const result = arbitraryValueRegex.exec(value2);
+  if (result) {
+    if (result[1]) {
+      return testLabel(result[1]);
+    }
+    return testValue(result[2]);
+  }
+  return false;
+};
+var getIsArbitraryVariable = (value2, testLabel, shouldMatchNoLabel = false) => {
+  const result = arbitraryVariableRegex.exec(value2);
+  if (result) {
+    if (result[1]) {
+      return testLabel(result[1]);
+    }
+    return shouldMatchNoLabel;
+  }
+  return false;
+};
+var isLabelPosition = (label) => label === "position" || label === "percentage";
+var isLabelImage = (label) => label === "image" || label === "url";
+var isLabelSize = (label) => label === "length" || label === "size" || label === "bg-size";
+var isLabelLength = (label) => label === "length";
+var isLabelNumber = (label) => label === "number";
+var isLabelFamilyName = (label) => label === "family-name";
+var isLabelWeight = (label) => label === "number" || label === "weight";
+var isLabelShadow = (label) => label === "shadow";
+var getDefaultConfig = () => {
+  const themeColor = fromTheme("color");
+  const themeFont = fromTheme("font");
+  const themeText = fromTheme("text");
+  const themeFontWeight = fromTheme("font-weight");
+  const themeTracking = fromTheme("tracking");
+  const themeLeading = fromTheme("leading");
+  const themeBreakpoint = fromTheme("breakpoint");
+  const themeContainer = fromTheme("container");
+  const themeSpacing = fromTheme("spacing");
+  const themeRadius = fromTheme("radius");
+  const themeShadow = fromTheme("shadow");
+  const themeInsetShadow = fromTheme("inset-shadow");
+  const themeTextShadow = fromTheme("text-shadow");
+  const themeDropShadow = fromTheme("drop-shadow");
+  const themeBlur = fromTheme("blur");
+  const themePerspective = fromTheme("perspective");
+  const themeAspect = fromTheme("aspect");
+  const themeEase = fromTheme("ease");
+  const themeAnimate = fromTheme("animate");
+  const scaleBreak = () => ["auto", "avoid", "all", "avoid-page", "page", "left", "right", "column"];
+  const scalePosition = () => [
+    "center",
+    "top",
+    "bottom",
+    "left",
+    "right",
+    "top-left",
+    "left-top",
+    "top-right",
+    "right-top",
+    "bottom-right",
+    "right-bottom",
+    "bottom-left",
+    "left-bottom"
+  ];
+  const scalePositionWithArbitrary = () => [...scalePosition(), isArbitraryVariable, isArbitraryValue];
+  const scaleOverflow = () => ["auto", "hidden", "clip", "visible", "scroll"];
+  const scaleOverscroll = () => ["auto", "contain", "none"];
+  const scaleUnambiguousSpacing = () => [isArbitraryVariable, isArbitraryValue, themeSpacing];
+  const scaleInset = () => [isFraction, "full", "auto", ...scaleUnambiguousSpacing()];
+  const scaleGridTemplateColsRows = () => [isInteger2, "none", "subgrid", isArbitraryVariable, isArbitraryValue];
+  const scaleGridColRowStartAndEnd = () => ["auto", {
+    span: ["full", isInteger2, isArbitraryVariable, isArbitraryValue]
+  }, isInteger2, isArbitraryVariable, isArbitraryValue];
+  const scaleGridColRowStartOrEnd = () => [isInteger2, "auto", isArbitraryVariable, isArbitraryValue];
+  const scaleGridAutoColsRows = () => ["auto", "min", "max", "fr", isArbitraryVariable, isArbitraryValue];
+  const scaleAlignPrimaryAxis = () => ["start", "end", "center", "between", "around", "evenly", "stretch", "baseline", "center-safe", "end-safe"];
+  const scaleAlignSecondaryAxis = () => ["start", "end", "center", "stretch", "center-safe", "end-safe"];
+  const scaleMargin = () => ["auto", ...scaleUnambiguousSpacing()];
+  const scaleSizing = () => [isFraction, "auto", "full", "dvw", "dvh", "lvw", "lvh", "svw", "svh", "min", "max", "fit", ...scaleUnambiguousSpacing()];
+  const scaleSizingInline = () => [isFraction, "screen", "full", "dvw", "lvw", "svw", "min", "max", "fit", ...scaleUnambiguousSpacing()];
+  const scaleSizingBlock = () => [isFraction, "screen", "full", "lh", "dvh", "lvh", "svh", "min", "max", "fit", ...scaleUnambiguousSpacing()];
+  const scaleColor = () => [themeColor, isArbitraryVariable, isArbitraryValue];
+  const scaleBgPosition = () => [...scalePosition(), isArbitraryVariablePosition, isArbitraryPosition, {
+    position: [isArbitraryVariable, isArbitraryValue]
+  }];
+  const scaleBgRepeat = () => ["no-repeat", {
+    repeat: ["", "x", "y", "space", "round"]
+  }];
+  const scaleBgSize = () => ["auto", "cover", "contain", isArbitraryVariableSize, isArbitrarySize, {
+    size: [isArbitraryVariable, isArbitraryValue]
+  }];
+  const scaleGradientStopPosition = () => [isPercent, isArbitraryVariableLength, isArbitraryLength];
+  const scaleRadius = () => [
+    "",
+    "none",
+    "full",
+    themeRadius,
+    isArbitraryVariable,
+    isArbitraryValue
+  ];
+  const scaleBorderWidth = () => ["", isNumber2, isArbitraryVariableLength, isArbitraryLength];
+  const scaleLineStyle = () => ["solid", "dashed", "dotted", "double"];
+  const scaleBlendMode = () => ["normal", "multiply", "screen", "overlay", "darken", "lighten", "color-dodge", "color-burn", "hard-light", "soft-light", "difference", "exclusion", "hue", "saturation", "color", "luminosity"];
+  const scaleMaskImagePosition = () => [isNumber2, isPercent, isArbitraryVariablePosition, isArbitraryPosition];
+  const scaleBlur = () => [
+    "",
+    "none",
+    themeBlur,
+    isArbitraryVariable,
+    isArbitraryValue
+  ];
+  const scaleRotate = () => ["none", isNumber2, isArbitraryVariable, isArbitraryValue];
+  const scaleScale = () => ["none", isNumber2, isArbitraryVariable, isArbitraryValue];
+  const scaleSkew = () => [isNumber2, isArbitraryVariable, isArbitraryValue];
+  const scaleTranslate = () => [isFraction, "full", ...scaleUnambiguousSpacing()];
+  return {
+    cacheSize: 500,
+    theme: {
+      animate: ["spin", "ping", "pulse", "bounce"],
+      aspect: ["video"],
+      blur: [isTshirtSize],
+      breakpoint: [isTshirtSize],
+      color: [isAny],
+      container: [isTshirtSize],
+      "drop-shadow": [isTshirtSize],
+      ease: ["in", "out", "in-out"],
+      font: [isAnyNonArbitrary],
+      "font-weight": ["thin", "extralight", "light", "normal", "medium", "semibold", "bold", "extrabold", "black"],
+      "inset-shadow": [isTshirtSize],
+      leading: ["none", "tight", "snug", "normal", "relaxed", "loose"],
+      perspective: ["dramatic", "near", "normal", "midrange", "distant", "none"],
+      radius: [isTshirtSize],
+      shadow: [isTshirtSize],
+      spacing: ["px", isNumber2],
+      text: [isTshirtSize],
+      "text-shadow": [isTshirtSize],
+      tracking: ["tighter", "tight", "normal", "wide", "wider", "widest"]
+    },
+    classGroups: {
+      aspect: [{
+        aspect: ["auto", "square", isFraction, isArbitraryValue, isArbitraryVariable, themeAspect]
+      }],
+      container: ["container"],
+      "container-type": [{
+        "@container": ["", "normal", "size", isArbitraryVariable, isArbitraryValue]
+      }],
+      "container-named": [isNamedContainerQuery],
+      columns: [{
+        columns: [isNumber2, isArbitraryValue, isArbitraryVariable, themeContainer]
+      }],
+      "break-after": [{
+        "break-after": scaleBreak()
+      }],
+      "break-before": [{
+        "break-before": scaleBreak()
+      }],
+      "break-inside": [{
+        "break-inside": ["auto", "avoid", "avoid-page", "avoid-column"]
+      }],
+      "box-decoration": [{
+        "box-decoration": ["slice", "clone"]
+      }],
+      box: [{
+        box: ["border", "content"]
+      }],
+      display: ["block", "inline-block", "inline", "flex", "inline-flex", "table", "inline-table", "table-caption", "table-cell", "table-column", "table-column-group", "table-footer-group", "table-header-group", "table-row-group", "table-row", "flow-root", "grid", "inline-grid", "contents", "list-item", "hidden"],
+      sr: ["sr-only", "not-sr-only"],
+      float: [{
+        float: ["right", "left", "none", "start", "end"]
+      }],
+      clear: [{
+        clear: ["left", "right", "both", "none", "start", "end"]
+      }],
+      isolation: ["isolate", "isolation-auto"],
+      "object-fit": [{
+        object: ["contain", "cover", "fill", "none", "scale-down"]
+      }],
+      "object-position": [{
+        object: scalePositionWithArbitrary()
+      }],
+      overflow: [{
+        overflow: scaleOverflow()
+      }],
+      "overflow-x": [{
+        "overflow-x": scaleOverflow()
+      }],
+      "overflow-y": [{
+        "overflow-y": scaleOverflow()
+      }],
+      overscroll: [{
+        overscroll: scaleOverscroll()
+      }],
+      "overscroll-x": [{
+        "overscroll-x": scaleOverscroll()
+      }],
+      "overscroll-y": [{
+        "overscroll-y": scaleOverscroll()
+      }],
+      position: ["static", "fixed", "absolute", "relative", "sticky"],
+      inset: [{
+        inset: scaleInset()
+      }],
+      "inset-x": [{
+        "inset-x": scaleInset()
+      }],
+      "inset-y": [{
+        "inset-y": scaleInset()
+      }],
+      start: [{
+        "inset-s": scaleInset(),
+        start: scaleInset()
+      }],
+      end: [{
+        "inset-e": scaleInset(),
+        end: scaleInset()
+      }],
+      "inset-bs": [{
+        "inset-bs": scaleInset()
+      }],
+      "inset-be": [{
+        "inset-be": scaleInset()
+      }],
+      top: [{
+        top: scaleInset()
+      }],
+      right: [{
+        right: scaleInset()
+      }],
+      bottom: [{
+        bottom: scaleInset()
+      }],
+      left: [{
+        left: scaleInset()
+      }],
+      visibility: ["visible", "invisible", "collapse"],
+      z: [{
+        z: [isInteger2, "auto", isArbitraryVariable, isArbitraryValue]
+      }],
+      basis: [{
+        basis: [isFraction, "full", "auto", themeContainer, ...scaleUnambiguousSpacing()]
+      }],
+      "flex-direction": [{
+        flex: ["row", "row-reverse", "col", "col-reverse"]
+      }],
+      "flex-wrap": [{
+        flex: ["nowrap", "wrap", "wrap-reverse"]
+      }],
+      flex: [{
+        flex: [isNumber2, isFraction, "auto", "initial", "none", isArbitraryValue]
+      }],
+      grow: [{
+        grow: ["", isNumber2, isArbitraryVariable, isArbitraryValue]
+      }],
+      shrink: [{
+        shrink: ["", isNumber2, isArbitraryVariable, isArbitraryValue]
+      }],
+      order: [{
+        order: [isInteger2, "first", "last", "none", isArbitraryVariable, isArbitraryValue]
+      }],
+      "grid-cols": [{
+        "grid-cols": scaleGridTemplateColsRows()
+      }],
+      "col-start-end": [{
+        col: scaleGridColRowStartAndEnd()
+      }],
+      "col-start": [{
+        "col-start": scaleGridColRowStartOrEnd()
+      }],
+      "col-end": [{
+        "col-end": scaleGridColRowStartOrEnd()
+      }],
+      "grid-rows": [{
+        "grid-rows": scaleGridTemplateColsRows()
+      }],
+      "row-start-end": [{
+        row: scaleGridColRowStartAndEnd()
+      }],
+      "row-start": [{
+        "row-start": scaleGridColRowStartOrEnd()
+      }],
+      "row-end": [{
+        "row-end": scaleGridColRowStartOrEnd()
+      }],
+      "grid-flow": [{
+        "grid-flow": ["row", "col", "dense", "row-dense", "col-dense"]
+      }],
+      "auto-cols": [{
+        "auto-cols": scaleGridAutoColsRows()
+      }],
+      "auto-rows": [{
+        "auto-rows": scaleGridAutoColsRows()
+      }],
+      gap: [{
+        gap: scaleUnambiguousSpacing()
+      }],
+      "gap-x": [{
+        "gap-x": scaleUnambiguousSpacing()
+      }],
+      "gap-y": [{
+        "gap-y": scaleUnambiguousSpacing()
+      }],
+      "justify-content": [{
+        justify: [...scaleAlignPrimaryAxis(), "normal"]
+      }],
+      "justify-items": [{
+        "justify-items": [...scaleAlignSecondaryAxis(), "normal"]
+      }],
+      "justify-self": [{
+        "justify-self": ["auto", ...scaleAlignSecondaryAxis()]
+      }],
+      "align-content": [{
+        content: ["normal", ...scaleAlignPrimaryAxis()]
+      }],
+      "align-items": [{
+        items: [...scaleAlignSecondaryAxis(), {
+          baseline: ["", "last"]
+        }]
+      }],
+      "align-self": [{
+        self: ["auto", ...scaleAlignSecondaryAxis(), {
+          baseline: ["", "last"]
+        }]
+      }],
+      "place-content": [{
+        "place-content": scaleAlignPrimaryAxis()
+      }],
+      "place-items": [{
+        "place-items": [...scaleAlignSecondaryAxis(), "baseline"]
+      }],
+      "place-self": [{
+        "place-self": ["auto", ...scaleAlignSecondaryAxis()]
+      }],
+      p: [{
+        p: scaleUnambiguousSpacing()
+      }],
+      px: [{
+        px: scaleUnambiguousSpacing()
+      }],
+      py: [{
+        py: scaleUnambiguousSpacing()
+      }],
+      ps: [{
+        ps: scaleUnambiguousSpacing()
+      }],
+      pe: [{
+        pe: scaleUnambiguousSpacing()
+      }],
+      pbs: [{
+        pbs: scaleUnambiguousSpacing()
+      }],
+      pbe: [{
+        pbe: scaleUnambiguousSpacing()
+      }],
+      pt: [{
+        pt: scaleUnambiguousSpacing()
+      }],
+      pr: [{
+        pr: scaleUnambiguousSpacing()
+      }],
+      pb: [{
+        pb: scaleUnambiguousSpacing()
+      }],
+      pl: [{
+        pl: scaleUnambiguousSpacing()
+      }],
+      m: [{
+        m: scaleMargin()
+      }],
+      mx: [{
+        mx: scaleMargin()
+      }],
+      my: [{
+        my: scaleMargin()
+      }],
+      ms: [{
+        ms: scaleMargin()
+      }],
+      me: [{
+        me: scaleMargin()
+      }],
+      mbs: [{
+        mbs: scaleMargin()
+      }],
+      mbe: [{
+        mbe: scaleMargin()
+      }],
+      mt: [{
+        mt: scaleMargin()
+      }],
+      mr: [{
+        mr: scaleMargin()
+      }],
+      mb: [{
+        mb: scaleMargin()
+      }],
+      ml: [{
+        ml: scaleMargin()
+      }],
+      "space-x": [{
+        "space-x": scaleUnambiguousSpacing()
+      }],
+      "space-x-reverse": ["space-x-reverse"],
+      "space-y": [{
+        "space-y": scaleUnambiguousSpacing()
+      }],
+      "space-y-reverse": ["space-y-reverse"],
+      size: [{
+        size: scaleSizing()
+      }],
+      "inline-size": [{
+        inline: ["auto", ...scaleSizingInline()]
+      }],
+      "min-inline-size": [{
+        "min-inline": ["auto", ...scaleSizingInline()]
+      }],
+      "max-inline-size": [{
+        "max-inline": ["none", ...scaleSizingInline()]
+      }],
+      "block-size": [{
+        block: ["auto", ...scaleSizingBlock()]
+      }],
+      "min-block-size": [{
+        "min-block": ["auto", ...scaleSizingBlock()]
+      }],
+      "max-block-size": [{
+        "max-block": ["none", ...scaleSizingBlock()]
+      }],
+      w: [{
+        w: [themeContainer, "screen", ...scaleSizing()]
+      }],
+      "min-w": [{
+        "min-w": [
+          themeContainer,
+          "screen",
+          "none",
+          ...scaleSizing()
+        ]
+      }],
+      "max-w": [{
+        "max-w": [
+          themeContainer,
+          "screen",
+          "none",
+          "prose",
+          {
+            screen: [themeBreakpoint]
+          },
+          ...scaleSizing()
+        ]
+      }],
+      h: [{
+        h: ["screen", "lh", ...scaleSizing()]
+      }],
+      "min-h": [{
+        "min-h": ["screen", "lh", "none", ...scaleSizing()]
+      }],
+      "max-h": [{
+        "max-h": ["screen", "lh", ...scaleSizing()]
+      }],
+      "font-size": [{
+        text: ["base", themeText, isArbitraryVariableLength, isArbitraryLength]
+      }],
+      "font-smoothing": ["antialiased", "subpixel-antialiased"],
+      "font-style": ["italic", "not-italic"],
+      "font-weight": [{
+        font: [themeFontWeight, isArbitraryVariableWeight, isArbitraryWeight]
+      }],
+      "font-stretch": [{
+        "font-stretch": ["ultra-condensed", "extra-condensed", "condensed", "semi-condensed", "normal", "semi-expanded", "expanded", "extra-expanded", "ultra-expanded", isPercent, isArbitraryValue]
+      }],
+      "font-family": [{
+        font: [isArbitraryVariableFamilyName, isArbitraryFamilyName, themeFont]
+      }],
+      "font-features": [{
+        "font-features": [isArbitraryValue]
+      }],
+      "fvn-normal": ["normal-nums"],
+      "fvn-ordinal": ["ordinal"],
+      "fvn-slashed-zero": ["slashed-zero"],
+      "fvn-figure": ["lining-nums", "oldstyle-nums"],
+      "fvn-spacing": ["proportional-nums", "tabular-nums"],
+      "fvn-fraction": ["diagonal-fractions", "stacked-fractions"],
+      tracking: [{
+        tracking: [themeTracking, isArbitraryVariable, isArbitraryValue]
+      }],
+      "line-clamp": [{
+        "line-clamp": [isNumber2, "none", isArbitraryVariable, isArbitraryNumber]
+      }],
+      leading: [{
+        leading: [
+          themeLeading,
+          ...scaleUnambiguousSpacing()
+        ]
+      }],
+      "list-image": [{
+        "list-image": ["none", isArbitraryVariable, isArbitraryValue]
+      }],
+      "list-style-position": [{
+        list: ["inside", "outside"]
+      }],
+      "list-style-type": [{
+        list: ["disc", "decimal", "none", isArbitraryVariable, isArbitraryValue]
+      }],
+      "text-alignment": [{
+        text: ["left", "center", "right", "justify", "start", "end"]
+      }],
+      "placeholder-color": [{
+        placeholder: scaleColor()
+      }],
+      "text-color": [{
+        text: scaleColor()
+      }],
+      "text-decoration": ["underline", "overline", "line-through", "no-underline"],
+      "text-decoration-style": [{
+        decoration: [...scaleLineStyle(), "wavy"]
+      }],
+      "text-decoration-thickness": [{
+        decoration: [isNumber2, "from-font", "auto", isArbitraryVariable, isArbitraryLength]
+      }],
+      "text-decoration-color": [{
+        decoration: scaleColor()
+      }],
+      "underline-offset": [{
+        "underline-offset": [isNumber2, "auto", isArbitraryVariable, isArbitraryValue]
+      }],
+      "text-transform": ["uppercase", "lowercase", "capitalize", "normal-case"],
+      "text-overflow": ["truncate", "text-ellipsis", "text-clip"],
+      "text-wrap": [{
+        text: ["wrap", "nowrap", "balance", "pretty"]
+      }],
+      indent: [{
+        indent: scaleUnambiguousSpacing()
+      }],
+      "tab-size": [{
+        tab: [isInteger2, isArbitraryVariable, isArbitraryValue]
+      }],
+      "vertical-align": [{
+        align: ["baseline", "top", "middle", "bottom", "text-top", "text-bottom", "sub", "super", isArbitraryVariable, isArbitraryValue]
+      }],
+      whitespace: [{
+        whitespace: ["normal", "nowrap", "pre", "pre-line", "pre-wrap", "break-spaces"]
+      }],
+      break: [{
+        break: ["normal", "words", "all", "keep"]
+      }],
+      wrap: [{
+        wrap: ["break-word", "anywhere", "normal"]
+      }],
+      hyphens: [{
+        hyphens: ["none", "manual", "auto"]
+      }],
+      content: [{
+        content: ["none", isArbitraryVariable, isArbitraryValue]
+      }],
+      "bg-attachment": [{
+        bg: ["fixed", "local", "scroll"]
+      }],
+      "bg-clip": [{
+        "bg-clip": ["border", "padding", "content", "text"]
+      }],
+      "bg-origin": [{
+        "bg-origin": ["border", "padding", "content"]
+      }],
+      "bg-position": [{
+        bg: scaleBgPosition()
+      }],
+      "bg-repeat": [{
+        bg: scaleBgRepeat()
+      }],
+      "bg-size": [{
+        bg: scaleBgSize()
+      }],
+      "bg-image": [{
+        bg: ["none", {
+          linear: [{
+            to: ["t", "tr", "r", "br", "b", "bl", "l", "tl"]
+          }, isInteger2, isArbitraryVariable, isArbitraryValue],
+          radial: ["", isArbitraryVariable, isArbitraryValue],
+          conic: [isInteger2, isArbitraryVariable, isArbitraryValue]
+        }, isArbitraryVariableImage, isArbitraryImage]
+      }],
+      "bg-color": [{
+        bg: scaleColor()
+      }],
+      "gradient-from-pos": [{
+        from: scaleGradientStopPosition()
+      }],
+      "gradient-via-pos": [{
+        via: scaleGradientStopPosition()
+      }],
+      "gradient-to-pos": [{
+        to: scaleGradientStopPosition()
+      }],
+      "gradient-from": [{
+        from: scaleColor()
+      }],
+      "gradient-via": [{
+        via: scaleColor()
+      }],
+      "gradient-to": [{
+        to: scaleColor()
+      }],
+      rounded: [{
+        rounded: scaleRadius()
+      }],
+      "rounded-s": [{
+        "rounded-s": scaleRadius()
+      }],
+      "rounded-e": [{
+        "rounded-e": scaleRadius()
+      }],
+      "rounded-t": [{
+        "rounded-t": scaleRadius()
+      }],
+      "rounded-r": [{
+        "rounded-r": scaleRadius()
+      }],
+      "rounded-b": [{
+        "rounded-b": scaleRadius()
+      }],
+      "rounded-l": [{
+        "rounded-l": scaleRadius()
+      }],
+      "rounded-ss": [{
+        "rounded-ss": scaleRadius()
+      }],
+      "rounded-se": [{
+        "rounded-se": scaleRadius()
+      }],
+      "rounded-ee": [{
+        "rounded-ee": scaleRadius()
+      }],
+      "rounded-es": [{
+        "rounded-es": scaleRadius()
+      }],
+      "rounded-tl": [{
+        "rounded-tl": scaleRadius()
+      }],
+      "rounded-tr": [{
+        "rounded-tr": scaleRadius()
+      }],
+      "rounded-br": [{
+        "rounded-br": scaleRadius()
+      }],
+      "rounded-bl": [{
+        "rounded-bl": scaleRadius()
+      }],
+      "border-w": [{
+        border: scaleBorderWidth()
+      }],
+      "border-w-x": [{
+        "border-x": scaleBorderWidth()
+      }],
+      "border-w-y": [{
+        "border-y": scaleBorderWidth()
+      }],
+      "border-w-s": [{
+        "border-s": scaleBorderWidth()
+      }],
+      "border-w-e": [{
+        "border-e": scaleBorderWidth()
+      }],
+      "border-w-bs": [{
+        "border-bs": scaleBorderWidth()
+      }],
+      "border-w-be": [{
+        "border-be": scaleBorderWidth()
+      }],
+      "border-w-t": [{
+        "border-t": scaleBorderWidth()
+      }],
+      "border-w-r": [{
+        "border-r": scaleBorderWidth()
+      }],
+      "border-w-b": [{
+        "border-b": scaleBorderWidth()
+      }],
+      "border-w-l": [{
+        "border-l": scaleBorderWidth()
+      }],
+      "divide-x": [{
+        "divide-x": scaleBorderWidth()
+      }],
+      "divide-x-reverse": ["divide-x-reverse"],
+      "divide-y": [{
+        "divide-y": scaleBorderWidth()
+      }],
+      "divide-y-reverse": ["divide-y-reverse"],
+      "border-style": [{
+        border: [...scaleLineStyle(), "hidden", "none"]
+      }],
+      "divide-style": [{
+        divide: [...scaleLineStyle(), "hidden", "none"]
+      }],
+      "border-color": [{
+        border: scaleColor()
+      }],
+      "border-color-x": [{
+        "border-x": scaleColor()
+      }],
+      "border-color-y": [{
+        "border-y": scaleColor()
+      }],
+      "border-color-s": [{
+        "border-s": scaleColor()
+      }],
+      "border-color-e": [{
+        "border-e": scaleColor()
+      }],
+      "border-color-bs": [{
+        "border-bs": scaleColor()
+      }],
+      "border-color-be": [{
+        "border-be": scaleColor()
+      }],
+      "border-color-t": [{
+        "border-t": scaleColor()
+      }],
+      "border-color-r": [{
+        "border-r": scaleColor()
+      }],
+      "border-color-b": [{
+        "border-b": scaleColor()
+      }],
+      "border-color-l": [{
+        "border-l": scaleColor()
+      }],
+      "divide-color": [{
+        divide: scaleColor()
+      }],
+      "outline-style": [{
+        outline: [...scaleLineStyle(), "none", "hidden"]
+      }],
+      "outline-offset": [{
+        "outline-offset": [isNumber2, isArbitraryVariable, isArbitraryValue]
+      }],
+      "outline-w": [{
+        outline: ["", isNumber2, isArbitraryVariableLength, isArbitraryLength]
+      }],
+      "outline-color": [{
+        outline: scaleColor()
+      }],
+      shadow: [{
+        shadow: [
+          "",
+          "none",
+          themeShadow,
+          isArbitraryVariableShadow,
+          isArbitraryShadow
+        ]
+      }],
+      "shadow-color": [{
+        shadow: scaleColor()
+      }],
+      "inset-shadow": [{
+        "inset-shadow": ["none", themeInsetShadow, isArbitraryVariableShadow, isArbitraryShadow]
+      }],
+      "inset-shadow-color": [{
+        "inset-shadow": scaleColor()
+      }],
+      "ring-w": [{
+        ring: scaleBorderWidth()
+      }],
+      "ring-w-inset": ["ring-inset"],
+      "ring-color": [{
+        ring: scaleColor()
+      }],
+      "ring-offset-w": [{
+        "ring-offset": [isNumber2, isArbitraryLength]
+      }],
+      "ring-offset-color": [{
+        "ring-offset": scaleColor()
+      }],
+      "inset-ring-w": [{
+        "inset-ring": scaleBorderWidth()
+      }],
+      "inset-ring-color": [{
+        "inset-ring": scaleColor()
+      }],
+      "text-shadow": [{
+        "text-shadow": ["none", themeTextShadow, isArbitraryVariableShadow, isArbitraryShadow]
+      }],
+      "text-shadow-color": [{
+        "text-shadow": scaleColor()
+      }],
+      opacity: [{
+        opacity: [isNumber2, isArbitraryVariable, isArbitraryValue]
+      }],
+      "mix-blend": [{
+        "mix-blend": [...scaleBlendMode(), "plus-darker", "plus-lighter"]
+      }],
+      "bg-blend": [{
+        "bg-blend": scaleBlendMode()
+      }],
+      "mask-clip": [{
+        "mask-clip": ["border", "padding", "content", "fill", "stroke", "view"]
+      }, "mask-no-clip"],
+      "mask-composite": [{
+        mask: ["add", "subtract", "intersect", "exclude"]
+      }],
+      "mask-image-linear-pos": [{
+        "mask-linear": [isNumber2]
+      }],
+      "mask-image-linear-from-pos": [{
+        "mask-linear-from": scaleMaskImagePosition()
+      }],
+      "mask-image-linear-to-pos": [{
+        "mask-linear-to": scaleMaskImagePosition()
+      }],
+      "mask-image-linear-from-color": [{
+        "mask-linear-from": scaleColor()
+      }],
+      "mask-image-linear-to-color": [{
+        "mask-linear-to": scaleColor()
+      }],
+      "mask-image-t-from-pos": [{
+        "mask-t-from": scaleMaskImagePosition()
+      }],
+      "mask-image-t-to-pos": [{
+        "mask-t-to": scaleMaskImagePosition()
+      }],
+      "mask-image-t-from-color": [{
+        "mask-t-from": scaleColor()
+      }],
+      "mask-image-t-to-color": [{
+        "mask-t-to": scaleColor()
+      }],
+      "mask-image-r-from-pos": [{
+        "mask-r-from": scaleMaskImagePosition()
+      }],
+      "mask-image-r-to-pos": [{
+        "mask-r-to": scaleMaskImagePosition()
+      }],
+      "mask-image-r-from-color": [{
+        "mask-r-from": scaleColor()
+      }],
+      "mask-image-r-to-color": [{
+        "mask-r-to": scaleColor()
+      }],
+      "mask-image-b-from-pos": [{
+        "mask-b-from": scaleMaskImagePosition()
+      }],
+      "mask-image-b-to-pos": [{
+        "mask-b-to": scaleMaskImagePosition()
+      }],
+      "mask-image-b-from-color": [{
+        "mask-b-from": scaleColor()
+      }],
+      "mask-image-b-to-color": [{
+        "mask-b-to": scaleColor()
+      }],
+      "mask-image-l-from-pos": [{
+        "mask-l-from": scaleMaskImagePosition()
+      }],
+      "mask-image-l-to-pos": [{
+        "mask-l-to": scaleMaskImagePosition()
+      }],
+      "mask-image-l-from-color": [{
+        "mask-l-from": scaleColor()
+      }],
+      "mask-image-l-to-color": [{
+        "mask-l-to": scaleColor()
+      }],
+      "mask-image-x-from-pos": [{
+        "mask-x-from": scaleMaskImagePosition()
+      }],
+      "mask-image-x-to-pos": [{
+        "mask-x-to": scaleMaskImagePosition()
+      }],
+      "mask-image-x-from-color": [{
+        "mask-x-from": scaleColor()
+      }],
+      "mask-image-x-to-color": [{
+        "mask-x-to": scaleColor()
+      }],
+      "mask-image-y-from-pos": [{
+        "mask-y-from": scaleMaskImagePosition()
+      }],
+      "mask-image-y-to-pos": [{
+        "mask-y-to": scaleMaskImagePosition()
+      }],
+      "mask-image-y-from-color": [{
+        "mask-y-from": scaleColor()
+      }],
+      "mask-image-y-to-color": [{
+        "mask-y-to": scaleColor()
+      }],
+      "mask-image-radial": [{
+        "mask-radial": [isArbitraryVariable, isArbitraryValue]
+      }],
+      "mask-image-radial-from-pos": [{
+        "mask-radial-from": scaleMaskImagePosition()
+      }],
+      "mask-image-radial-to-pos": [{
+        "mask-radial-to": scaleMaskImagePosition()
+      }],
+      "mask-image-radial-from-color": [{
+        "mask-radial-from": scaleColor()
+      }],
+      "mask-image-radial-to-color": [{
+        "mask-radial-to": scaleColor()
+      }],
+      "mask-image-radial-shape": [{
+        "mask-radial": ["circle", "ellipse"]
+      }],
+      "mask-image-radial-size": [{
+        "mask-radial": [{
+          closest: ["side", "corner"],
+          farthest: ["side", "corner"]
+        }]
+      }],
+      "mask-image-radial-pos": [{
+        "mask-radial-at": scalePosition()
+      }],
+      "mask-image-conic-pos": [{
+        "mask-conic": [isNumber2]
+      }],
+      "mask-image-conic-from-pos": [{
+        "mask-conic-from": scaleMaskImagePosition()
+      }],
+      "mask-image-conic-to-pos": [{
+        "mask-conic-to": scaleMaskImagePosition()
+      }],
+      "mask-image-conic-from-color": [{
+        "mask-conic-from": scaleColor()
+      }],
+      "mask-image-conic-to-color": [{
+        "mask-conic-to": scaleColor()
+      }],
+      "mask-mode": [{
+        mask: ["alpha", "luminance", "match"]
+      }],
+      "mask-origin": [{
+        "mask-origin": ["border", "padding", "content", "fill", "stroke", "view"]
+      }],
+      "mask-position": [{
+        mask: scaleBgPosition()
+      }],
+      "mask-repeat": [{
+        mask: scaleBgRepeat()
+      }],
+      "mask-size": [{
+        mask: scaleBgSize()
+      }],
+      "mask-type": [{
+        "mask-type": ["alpha", "luminance"]
+      }],
+      "mask-image": [{
+        mask: ["none", isArbitraryVariable, isArbitraryValue]
+      }],
+      filter: [{
+        filter: [
+          "",
+          "none",
+          isArbitraryVariable,
+          isArbitraryValue
+        ]
+      }],
+      blur: [{
+        blur: scaleBlur()
+      }],
+      brightness: [{
+        brightness: [isNumber2, isArbitraryVariable, isArbitraryValue]
+      }],
+      contrast: [{
+        contrast: [isNumber2, isArbitraryVariable, isArbitraryValue]
+      }],
+      "drop-shadow": [{
+        "drop-shadow": [
+          "",
+          "none",
+          themeDropShadow,
+          isArbitraryVariableShadow,
+          isArbitraryShadow
+        ]
+      }],
+      "drop-shadow-color": [{
+        "drop-shadow": scaleColor()
+      }],
+      grayscale: [{
+        grayscale: ["", isNumber2, isArbitraryVariable, isArbitraryValue]
+      }],
+      "hue-rotate": [{
+        "hue-rotate": [isNumber2, isArbitraryVariable, isArbitraryValue]
+      }],
+      invert: [{
+        invert: ["", isNumber2, isArbitraryVariable, isArbitraryValue]
+      }],
+      saturate: [{
+        saturate: [isNumber2, isArbitraryVariable, isArbitraryValue]
+      }],
+      sepia: [{
+        sepia: ["", isNumber2, isArbitraryVariable, isArbitraryValue]
+      }],
+      "backdrop-filter": [{
+        "backdrop-filter": [
+          "",
+          "none",
+          isArbitraryVariable,
+          isArbitraryValue
+        ]
+      }],
+      "backdrop-blur": [{
+        "backdrop-blur": scaleBlur()
+      }],
+      "backdrop-brightness": [{
+        "backdrop-brightness": [isNumber2, isArbitraryVariable, isArbitraryValue]
+      }],
+      "backdrop-contrast": [{
+        "backdrop-contrast": [isNumber2, isArbitraryVariable, isArbitraryValue]
+      }],
+      "backdrop-grayscale": [{
+        "backdrop-grayscale": ["", isNumber2, isArbitraryVariable, isArbitraryValue]
+      }],
+      "backdrop-hue-rotate": [{
+        "backdrop-hue-rotate": [isNumber2, isArbitraryVariable, isArbitraryValue]
+      }],
+      "backdrop-invert": [{
+        "backdrop-invert": ["", isNumber2, isArbitraryVariable, isArbitraryValue]
+      }],
+      "backdrop-opacity": [{
+        "backdrop-opacity": [isNumber2, isArbitraryVariable, isArbitraryValue]
+      }],
+      "backdrop-saturate": [{
+        "backdrop-saturate": [isNumber2, isArbitraryVariable, isArbitraryValue]
+      }],
+      "backdrop-sepia": [{
+        "backdrop-sepia": ["", isNumber2, isArbitraryVariable, isArbitraryValue]
+      }],
+      "border-collapse": [{
+        border: ["collapse", "separate"]
+      }],
+      "border-spacing": [{
+        "border-spacing": scaleUnambiguousSpacing()
+      }],
+      "border-spacing-x": [{
+        "border-spacing-x": scaleUnambiguousSpacing()
+      }],
+      "border-spacing-y": [{
+        "border-spacing-y": scaleUnambiguousSpacing()
+      }],
+      "table-layout": [{
+        table: ["auto", "fixed"]
+      }],
+      caption: [{
+        caption: ["top", "bottom"]
+      }],
+      transition: [{
+        transition: ["", "all", "colors", "opacity", "shadow", "transform", "none", isArbitraryVariable, isArbitraryValue]
+      }],
+      "transition-behavior": [{
+        transition: ["normal", "discrete"]
+      }],
+      duration: [{
+        duration: [isNumber2, "initial", isArbitraryVariable, isArbitraryValue]
+      }],
+      ease: [{
+        ease: ["linear", "initial", themeEase, isArbitraryVariable, isArbitraryValue]
+      }],
+      delay: [{
+        delay: [isNumber2, isArbitraryVariable, isArbitraryValue]
+      }],
+      animate: [{
+        animate: ["none", themeAnimate, isArbitraryVariable, isArbitraryValue]
+      }],
+      backface: [{
+        backface: ["hidden", "visible"]
+      }],
+      perspective: [{
+        perspective: [themePerspective, isArbitraryVariable, isArbitraryValue]
+      }],
+      "perspective-origin": [{
+        "perspective-origin": scalePositionWithArbitrary()
+      }],
+      rotate: [{
+        rotate: scaleRotate()
+      }],
+      "rotate-x": [{
+        "rotate-x": scaleRotate()
+      }],
+      "rotate-y": [{
+        "rotate-y": scaleRotate()
+      }],
+      "rotate-z": [{
+        "rotate-z": scaleRotate()
+      }],
+      scale: [{
+        scale: scaleScale()
+      }],
+      "scale-x": [{
+        "scale-x": scaleScale()
+      }],
+      "scale-y": [{
+        "scale-y": scaleScale()
+      }],
+      "scale-z": [{
+        "scale-z": scaleScale()
+      }],
+      "scale-3d": ["scale-3d"],
+      skew: [{
+        skew: scaleSkew()
+      }],
+      "skew-x": [{
+        "skew-x": scaleSkew()
+      }],
+      "skew-y": [{
+        "skew-y": scaleSkew()
+      }],
+      transform: [{
+        transform: [isArbitraryVariable, isArbitraryValue, "", "none", "gpu", "cpu"]
+      }],
+      "transform-origin": [{
+        origin: scalePositionWithArbitrary()
+      }],
+      "transform-style": [{
+        transform: ["3d", "flat"]
+      }],
+      translate: [{
+        translate: scaleTranslate()
+      }],
+      "translate-x": [{
+        "translate-x": scaleTranslate()
+      }],
+      "translate-y": [{
+        "translate-y": scaleTranslate()
+      }],
+      "translate-z": [{
+        "translate-z": scaleTranslate()
+      }],
+      "translate-none": ["translate-none"],
+      zoom: [{
+        zoom: [isInteger2, isArbitraryVariable, isArbitraryValue]
+      }],
+      accent: [{
+        accent: scaleColor()
+      }],
+      appearance: [{
+        appearance: ["none", "auto"]
+      }],
+      "caret-color": [{
+        caret: scaleColor()
+      }],
+      "color-scheme": [{
+        scheme: ["normal", "dark", "light", "light-dark", "only-dark", "only-light"]
+      }],
+      cursor: [{
+        cursor: ["auto", "default", "pointer", "wait", "text", "move", "help", "not-allowed", "none", "context-menu", "progress", "cell", "crosshair", "vertical-text", "alias", "copy", "no-drop", "grab", "grabbing", "all-scroll", "col-resize", "row-resize", "n-resize", "e-resize", "s-resize", "w-resize", "ne-resize", "nw-resize", "se-resize", "sw-resize", "ew-resize", "ns-resize", "nesw-resize", "nwse-resize", "zoom-in", "zoom-out", isArbitraryVariable, isArbitraryValue]
+      }],
+      "field-sizing": [{
+        "field-sizing": ["fixed", "content"]
+      }],
+      "pointer-events": [{
+        "pointer-events": ["auto", "none"]
+      }],
+      resize: [{
+        resize: ["none", "", "y", "x"]
+      }],
+      "scroll-behavior": [{
+        scroll: ["auto", "smooth"]
+      }],
+      "scrollbar-thumb-color": [{
+        "scrollbar-thumb": scaleColor()
+      }],
+      "scrollbar-track-color": [{
+        "scrollbar-track": scaleColor()
+      }],
+      "scrollbar-gutter": [{
+        "scrollbar-gutter": ["auto", "stable", "both"]
+      }],
+      "scrollbar-w": [{
+        scrollbar: ["auto", "thin", "none"]
+      }],
+      "scroll-m": [{
+        "scroll-m": scaleUnambiguousSpacing()
+      }],
+      "scroll-mx": [{
+        "scroll-mx": scaleUnambiguousSpacing()
+      }],
+      "scroll-my": [{
+        "scroll-my": scaleUnambiguousSpacing()
+      }],
+      "scroll-ms": [{
+        "scroll-ms": scaleUnambiguousSpacing()
+      }],
+      "scroll-me": [{
+        "scroll-me": scaleUnambiguousSpacing()
+      }],
+      "scroll-mbs": [{
+        "scroll-mbs": scaleUnambiguousSpacing()
+      }],
+      "scroll-mbe": [{
+        "scroll-mbe": scaleUnambiguousSpacing()
+      }],
+      "scroll-mt": [{
+        "scroll-mt": scaleUnambiguousSpacing()
+      }],
+      "scroll-mr": [{
+        "scroll-mr": scaleUnambiguousSpacing()
+      }],
+      "scroll-mb": [{
+        "scroll-mb": scaleUnambiguousSpacing()
+      }],
+      "scroll-ml": [{
+        "scroll-ml": scaleUnambiguousSpacing()
+      }],
+      "scroll-p": [{
+        "scroll-p": scaleUnambiguousSpacing()
+      }],
+      "scroll-px": [{
+        "scroll-px": scaleUnambiguousSpacing()
+      }],
+      "scroll-py": [{
+        "scroll-py": scaleUnambiguousSpacing()
+      }],
+      "scroll-ps": [{
+        "scroll-ps": scaleUnambiguousSpacing()
+      }],
+      "scroll-pe": [{
+        "scroll-pe": scaleUnambiguousSpacing()
+      }],
+      "scroll-pbs": [{
+        "scroll-pbs": scaleUnambiguousSpacing()
+      }],
+      "scroll-pbe": [{
+        "scroll-pbe": scaleUnambiguousSpacing()
+      }],
+      "scroll-pt": [{
+        "scroll-pt": scaleUnambiguousSpacing()
+      }],
+      "scroll-pr": [{
+        "scroll-pr": scaleUnambiguousSpacing()
+      }],
+      "scroll-pb": [{
+        "scroll-pb": scaleUnambiguousSpacing()
+      }],
+      "scroll-pl": [{
+        "scroll-pl": scaleUnambiguousSpacing()
+      }],
+      "snap-align": [{
+        snap: ["start", "end", "center", "align-none"]
+      }],
+      "snap-stop": [{
+        snap: ["normal", "always"]
+      }],
+      "snap-type": [{
+        snap: ["none", "x", "y", "both"]
+      }],
+      "snap-strictness": [{
+        snap: ["mandatory", "proximity"]
+      }],
+      touch: [{
+        touch: ["auto", "none", "manipulation"]
+      }],
+      "touch-x": [{
+        "touch-pan": ["x", "left", "right"]
+      }],
+      "touch-y": [{
+        "touch-pan": ["y", "up", "down"]
+      }],
+      "touch-pz": ["touch-pinch-zoom"],
+      select: [{
+        select: ["none", "text", "all", "auto"]
+      }],
+      "will-change": [{
+        "will-change": ["auto", "scroll", "contents", "transform", isArbitraryVariable, isArbitraryValue]
+      }],
+      fill: [{
+        fill: ["none", ...scaleColor()]
+      }],
+      "stroke-w": [{
+        stroke: [isNumber2, isArbitraryVariableLength, isArbitraryLength, isArbitraryNumber]
+      }],
+      stroke: [{
+        stroke: ["none", ...scaleColor()]
+      }],
+      "forced-color-adjust": [{
+        "forced-color-adjust": ["auto", "none"]
+      }]
+    },
+    conflictingClassGroups: {
+      "container-named": ["container-type"],
+      overflow: ["overflow-x", "overflow-y"],
+      overscroll: ["overscroll-x", "overscroll-y"],
+      inset: ["inset-x", "inset-y", "inset-bs", "inset-be", "start", "end", "top", "right", "bottom", "left"],
+      "inset-x": ["right", "left"],
+      "inset-y": ["top", "bottom"],
+      flex: ["basis", "grow", "shrink"],
+      gap: ["gap-x", "gap-y"],
+      p: ["px", "py", "ps", "pe", "pbs", "pbe", "pt", "pr", "pb", "pl"],
+      px: ["pr", "pl"],
+      py: ["pt", "pb"],
+      m: ["mx", "my", "ms", "me", "mbs", "mbe", "mt", "mr", "mb", "ml"],
+      mx: ["mr", "ml"],
+      my: ["mt", "mb"],
+      size: ["w", "h"],
+      "font-size": ["leading"],
+      "fvn-normal": ["fvn-ordinal", "fvn-slashed-zero", "fvn-figure", "fvn-spacing", "fvn-fraction"],
+      "fvn-ordinal": ["fvn-normal"],
+      "fvn-slashed-zero": ["fvn-normal"],
+      "fvn-figure": ["fvn-normal"],
+      "fvn-spacing": ["fvn-normal"],
+      "fvn-fraction": ["fvn-normal"],
+      "line-clamp": ["display", "overflow"],
+      rounded: ["rounded-s", "rounded-e", "rounded-t", "rounded-r", "rounded-b", "rounded-l", "rounded-ss", "rounded-se", "rounded-ee", "rounded-es", "rounded-tl", "rounded-tr", "rounded-br", "rounded-bl"],
+      "rounded-s": ["rounded-ss", "rounded-es"],
+      "rounded-e": ["rounded-se", "rounded-ee"],
+      "rounded-t": ["rounded-tl", "rounded-tr"],
+      "rounded-r": ["rounded-tr", "rounded-br"],
+      "rounded-b": ["rounded-br", "rounded-bl"],
+      "rounded-l": ["rounded-tl", "rounded-bl"],
+      "border-spacing": ["border-spacing-x", "border-spacing-y"],
+      "border-w": ["border-w-x", "border-w-y", "border-w-s", "border-w-e", "border-w-bs", "border-w-be", "border-w-t", "border-w-r", "border-w-b", "border-w-l"],
+      "border-w-x": ["border-w-r", "border-w-l"],
+      "border-w-y": ["border-w-t", "border-w-b"],
+      "border-color": ["border-color-x", "border-color-y", "border-color-s", "border-color-e", "border-color-bs", "border-color-be", "border-color-t", "border-color-r", "border-color-b", "border-color-l"],
+      "border-color-x": ["border-color-r", "border-color-l"],
+      "border-color-y": ["border-color-t", "border-color-b"],
+      translate: ["translate-x", "translate-y", "translate-none"],
+      "translate-none": ["translate", "translate-x", "translate-y", "translate-z"],
+      "scroll-m": ["scroll-mx", "scroll-my", "scroll-ms", "scroll-me", "scroll-mbs", "scroll-mbe", "scroll-mt", "scroll-mr", "scroll-mb", "scroll-ml"],
+      "scroll-mx": ["scroll-mr", "scroll-ml"],
+      "scroll-my": ["scroll-mt", "scroll-mb"],
+      "scroll-p": ["scroll-px", "scroll-py", "scroll-ps", "scroll-pe", "scroll-pbs", "scroll-pbe", "scroll-pt", "scroll-pr", "scroll-pb", "scroll-pl"],
+      "scroll-px": ["scroll-pr", "scroll-pl"],
+      "scroll-py": ["scroll-pt", "scroll-pb"],
+      touch: ["touch-x", "touch-y", "touch-pz"],
+      "touch-x": ["touch"],
+      "touch-y": ["touch"],
+      "touch-pz": ["touch"]
+    },
+    conflictingClassGroupModifiers: {
+      "font-size": ["leading"]
+    },
+    postfixLookupClassGroups: ["container-type"],
+    orderSensitiveModifiers: ["*", "**", "after", "backdrop", "before", "details-content", "file", "first-letter", "first-line", "marker", "placeholder", "selection"]
+  };
+};
+var twMerge = /* @__PURE__ */ createTailwindMerge(getDefaultConfig);
+
+// src/apps/dashboard-web/lib/cn.ts
+function cn(...inputs) {
+  return twMerge(clsx(inputs));
+}
+
+// src/apps/dashboard-web/components/ui/Toast.tsx
+var jsx_dev_runtime35 = __toESM(require_jsx_dev_runtime(), 1);
+var ToastContext = import_react71.createContext(undefined);
+var toastIdCounter = 0;
+var typeStyles = {
+  success: "bg-[var(--color-success-bg)] text-[var(--color-success-fg)] border-[var(--color-success)]",
+  error: "bg-[var(--color-error-bg)] text-[var(--color-error-fg)] border-[var(--color-error)]",
+  warning: "bg-[var(--color-warning-bg)] text-[var(--color-warning-fg)] border-[var(--color-warning)]",
+  info: "bg-[var(--color-info-bg)] text-[var(--color-info-fg)] border-[var(--color-info)]"
+};
+var typeIcons = {
+  success: "✓",
+  error: "✕",
+  warning: "⚠",
+  info: "ℹ"
+};
+function SingleToast({ item, onDismiss }) {
+  const timerRef = import_react71.useRef(null);
+  import_react71.useEffect(() => {
+    const dur = item.duration ?? 5000;
+    timerRef.current = setTimeout(() => onDismiss(item.id), dur);
+    return () => {
+      if (timerRef.current)
+        clearTimeout(timerRef.current);
+    };
+  }, [item.id, item.duration, onDismiss]);
+  return /* @__PURE__ */ jsx_dev_runtime35.jsxDEV("div", {
+    role: "alert",
+    className: cn("flex items-start gap-3 px-4 py-3 rounded-[var(--radius-md)] border", "shadow-[var(--shadow-md)] min-w-64 max-w-sm", "animate-slide-in-right", typeStyles[item.type]),
+    children: [
+      /* @__PURE__ */ jsx_dev_runtime35.jsxDEV("span", {
+        className: "shrink-0 font-bold text-base leading-5",
+        "aria-hidden": "true",
+        children: typeIcons[item.type]
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime35.jsxDEV("p", {
+        className: "flex-1 text-sm font-medium",
+        children: item.message
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime35.jsxDEV("button", {
+        type: "button",
+        onClick: () => onDismiss(item.id),
+        "aria-label": "Dismiss notification",
+        className: cn("shrink-0 w-5 h-5 flex items-center justify-center rounded", "opacity-70 hover:opacity-100 transition-opacity duration-[var(--transition-fast)]", "focus-visible:outline-[3px] focus-visible:outline-[var(--color-focus-ring)]"),
+        children: "×"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+var ToastProvider = ({ children: children2 }) => {
+  const [toasts, setToasts] = import_react71.useState([]);
+  const dismiss = import_react71.useCallback((id33) => {
+    setToasts((prev2) => prev2.filter((t4) => t4.id !== id33));
+  }, []);
+  const toast = import_react71.useCallback((message, type3 = "info", duration) => {
+    const id33 = `toast-${++toastIdCounter}`;
+    setToasts((prev2) => [...prev2, { id: id33, type: type3, message, duration }]);
+  }, []);
+  return /* @__PURE__ */ jsx_dev_runtime35.jsxDEV(ToastContext.Provider, {
+    value: { toasts, toast, dismiss },
+    children: [
+      children2,
+      /* @__PURE__ */ jsx_dev_runtime35.jsxDEV("div", {
+        "aria-live": "polite",
+        "aria-atomic": "false",
+        className: "fixed top-4 right-4 z-[100] flex flex-col gap-2",
+        children: toasts.map((item) => /* @__PURE__ */ jsx_dev_runtime35.jsxDEV(SingleToast, {
+          item,
+          onDismiss: dismiss
+        }, item.id, false, undefined, this))
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+};
+
+// src/apps/dashboard-web/contexts/HealthCheckContext.tsx
+var import_react73 = __toESM(require_react(), 1);
+
 // src/apps/dashboard-web/hooks/useHealthCheck.tsx
-var import_react70 = __toESM(require_react(), 1);
+var import_react72 = __toESM(require_react(), 1);
 var RECONNECT_DELAY = 5000;
 function useHealthCheck() {
-  const [isOnline, setIsOnline] = import_react70.useState(true);
-  const [wasDisconnected, setWasDisconnected] = import_react70.useState(false);
-  const wsRef = import_react70.useRef(null);
-  const reconnectTimeoutRef = import_react70.useRef(null);
-  const isMountedRef = import_react70.useRef(true);
-  const connectWebSocket = import_react70.useCallback(() => {
+  const [isOnline, setIsOnline] = import_react72.useState(true);
+  const [wasDisconnected, setWasDisconnected] = import_react72.useState(false);
+  const wsRef = import_react72.useRef(null);
+  const reconnectTimeoutRef = import_react72.useRef(null);
+  const isMountedRef = import_react72.useRef(true);
+  const connectWebSocket = import_react72.useCallback(() => {
     if (!isMountedRef.current) {
       return;
     }
@@ -233814,13 +236937,13 @@ function useHealthCheck() {
       setWasDisconnected(true);
     }
   }, []);
-  const retry = import_react70.useCallback(() => {
+  const retry = import_react72.useCallback(() => {
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
     }
     connectWebSocket();
   }, [connectWebSocket]);
-  import_react70.useEffect(() => {
+  import_react72.useEffect(() => {
     isMountedRef.current = true;
     const connectTimer = setTimeout(() => {
       connectWebSocket();
@@ -233846,23 +236969,25 @@ function useHealthCheck() {
 }
 
 // src/apps/dashboard-web/contexts/HealthCheckContext.tsx
-var jsx_dev_runtime34 = __toESM(require_jsx_dev_runtime(), 1);
-var HealthCheckContext = import_react71.createContext(undefined);
+var jsx_dev_runtime36 = __toESM(require_jsx_dev_runtime(), 1);
+var HealthCheckContext = import_react73.createContext(undefined);
 function HealthCheckProvider({ children: children2 }) {
   const healthCheck = useHealthCheck();
-  return /* @__PURE__ */ jsx_dev_runtime34.jsxDEV(HealthCheckContext.Provider, {
+  return /* @__PURE__ */ jsx_dev_runtime36.jsxDEV(HealthCheckContext.Provider, {
     value: healthCheck,
     children: children2
   }, undefined, false, undefined, this);
 }
 
 // src/apps/dashboard-web/main.tsx
-var jsx_dev_runtime35 = __toESM(require_jsx_dev_runtime(), 1);
+var jsx_dev_runtime37 = __toESM(require_jsx_dev_runtime(), 1);
 var root10 = import_client.default.createRoot(document.getElementById("root"));
-root10.render(/* @__PURE__ */ jsx_dev_runtime35.jsxDEV(import_react72.default.StrictMode, {
-  children: /* @__PURE__ */ jsx_dev_runtime35.jsxDEV(ThemeProvider, {
-    children: /* @__PURE__ */ jsx_dev_runtime35.jsxDEV(HealthCheckProvider, {
-      children: /* @__PURE__ */ jsx_dev_runtime35.jsxDEV(App, {}, undefined, false, undefined, this)
+root10.render(/* @__PURE__ */ jsx_dev_runtime37.jsxDEV(import_react74.default.StrictMode, {
+  children: /* @__PURE__ */ jsx_dev_runtime37.jsxDEV(ThemeProvider, {
+    children: /* @__PURE__ */ jsx_dev_runtime37.jsxDEV(ToastProvider, {
+      children: /* @__PURE__ */ jsx_dev_runtime37.jsxDEV(HealthCheckProvider, {
+        children: /* @__PURE__ */ jsx_dev_runtime37.jsxDEV(App, {}, undefined, false, undefined, this)
+      }, undefined, false, undefined, this)
     }, undefined, false, undefined, this)
   }, undefined, false, undefined, this)
 }, undefined, false, undefined, this));
