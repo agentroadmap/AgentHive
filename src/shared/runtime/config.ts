@@ -27,7 +27,6 @@
 
 import { Client } from "pg";
 import type { Pool, PoolClient } from "pg";
-import { Client } from "pg";
 
 export type ConfigClass =
 	| "secret"

@@ -1791,7 +1791,7 @@ async function claimImplicitGateReady(
             p.type,
             lease.agent_identity AS leased_by,
             dispatch.id AS active_dispatch_id
-       FROM roadmap_proposal.proposal p
+       FROM roadmap_proposal.v_dispatchable_proposal p
        LEFT JOIN LATERAL (
          SELECT pl.agent_identity
            FROM roadmap_proposal.proposal_lease pl
@@ -1812,7 +1812,6 @@ async function claimImplicitGateReady(
       WHERE p.maturity = 'mature'
         AND (LOWER(p.status) IN ('draft', 'review', 'develop', 'merge', 'triage', 'fix')
              OR (LOWER(p.status) = 'deliberation' AND p.type = 'governance-amendment'))
-        AND p.gate_scanner_paused = false
         AND dispatch.id IS NULL
         AND ($1::bigint IS NULL OR p.id = $1)
       ORDER BY p.modified_at ASC, p.id ASC
@@ -1991,7 +1990,7 @@ export async function claimEnhancementRevisionReady(
             gdl.ac_verification AS hold_ac_verification,
             gdl.created_at      AS hold_created_at,
             gdl.gate_level
-       FROM roadmap_proposal.proposal p
+       FROM roadmap_proposal.v_dispatchable_proposal p
        JOIN LATERAL (
          SELECT id, rationale, ac_verification, created_at, gate_level, decision
            FROM roadmap_proposal.gate_decision_log

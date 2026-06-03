@@ -26,9 +26,10 @@ export function registerSla(
 				const raw = await mcp.callTool("mcp_ops", {
 					action: "sla_health_check",
 				});
+				const rawObj = raw as { content?: Array<{ text?: string }> };
 				const text =
-					Array.isArray(raw?.content) && raw.content[0]?.text
-						? raw.content[0].text
+					Array.isArray(rawObj?.content) && rawObj.content[0]?.text
+						? rawObj.content[0].text
 						: JSON.stringify(raw);
 				result = JSON.parse(text);
 			} catch (err) {

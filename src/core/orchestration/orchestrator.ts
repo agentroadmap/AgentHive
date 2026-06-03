@@ -567,10 +567,9 @@ export class Orchestrator {
 			}>(
 				`SELECT w.id, w.proposal_id, w.current_stage
 				   FROM roadmap.workflows w
-				   JOIN roadmap_proposal.proposal p ON p.id = w.proposal_id
+				   JOIN roadmap_proposal.v_dispatchable_proposal p ON p.id = w.proposal_id
 				  WHERE w.completed_at IS NULL
 				    AND p.maturity IN ('new', 'active')
-				    AND p.gate_scanner_paused = false
 				    AND EXISTS (
 				      SELECT 1 FROM roadmap.workflow_transitions wt
 				       WHERE wt.template_id = w.template_id
@@ -945,7 +944,7 @@ export class Orchestrator {
 			    p.title,
 			    p.status,
 			    ROUND(EXTRACT(EPOCH FROM (NOW() - p.updated_at)) / 3600.0, 1)::float AS stall_hours
-			 FROM roadmap_proposal.proposal p
+			 FROM roadmap_proposal.v_dispatchable_proposal p
 			 WHERE p.maturity = 'mature'
 			   AND p.updated_at < NOW() - ($1 * INTERVAL '1 hour')
 			   AND NOT EXISTS (
