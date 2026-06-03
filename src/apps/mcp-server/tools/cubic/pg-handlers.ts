@@ -618,6 +618,55 @@ export class PgCubicHandlers {
 		}
 	}
 
+	async getStats(): Promise<CallToolResult> {
+		try {
+			const stats = await this.detector.getStats();
+			return {
+				content: [
+					{
+						type: "text",
+						text: JSON.stringify({ stats }, null, 2),
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to get cubic stats", err);
+		}
+	}
+
+	async runCleanup(args: {
+		dryRun?: boolean;
+		removeWorktrees?: boolean;
+	}): Promise<CallToolResult> {
+		try {
+			const report = await this.cleanup.cleanupStaleCubics({
+				dryRun: args.dryRun ?? false,
+				removeWorktrees: args.removeWorktrees ?? true,
+			});
+			return {
+				content: [
+					{
+						type: "text",
+						text: JSON.stringify(
+							{
+								success: true,
+								dry_run: args.dryRun ?? false,
+								total_stale: report.total_stale,
+								expired: report.expired,
+								worktrees_removed: report.worktrees_removed,
+								errors: report.errors,
+							},
+							null,
+							2,
+						),
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to run cubic cleanup", err);
+		}
+	}
+
 	async forceReapCubic(args: {
 		cubicId: string;
 		reason: string;

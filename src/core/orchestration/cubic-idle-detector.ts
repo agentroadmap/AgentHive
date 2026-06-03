@@ -8,7 +8,8 @@
  * - STALE_TIMEOUT: 30 minutes in IDLE/COMPLETED → eligible for cleanup
  */
 
-import { query } from "../../infra/postgres/pool.ts";
+import { query as defaultQuery } from "../../infra/postgres/pool.ts";
+import type { QueryRunner } from "./cubic-cleanup.ts";
 
 export interface IdleCubic {
 	cubic_id: string;
@@ -28,6 +29,12 @@ export class CubicIdleDetector {
 	static readonly IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 	static readonly STALE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
+	private readonly query: QueryRunner;
+
+	constructor(options?: { query?: QueryRunner }) {
+		this.query = options?.query ?? defaultQuery;
+	}
+
 	/**
 	 * Find cubics that should be marked IDLE (active but no recent activity).
 	 */
@@ -36,7 +43,7 @@ export class CubicIdleDetector {
 			Date.now() - CubicIdleDetector.IDLE_TIMEOUT_MS,
 		);
 
-		const { rows } = await query<IdleCubic>(
+		const { rows } = await this.query<IdleCubic>(
 			`SELECT cs.cubic_id, cs.lifecycle_status, cs.last_activity_at, cs.idle_since
 			 FROM roadmap.cubic_state cs
 			 WHERE cs.lifecycle_status = 'ACTIVE'
@@ -56,7 +63,7 @@ export class CubicIdleDetector {
 			Date.now() - CubicIdleDetector.STALE_TIMEOUT_MS,
 		);
 
-		const { rows } = await query<IdleCubic>(
+		const { rows } = await this.query<IdleCubic>(
 			`SELECT cs.cubic_id, cs.lifecycle_status, cs.last_activity_at, cs.idle_since
 			 FROM roadmap.cubic_state cs
 			 WHERE cs.lifecycle_status IN ('IDLE', 'COMPLETED')
@@ -71,7 +78,7 @@ export class CubicIdleDetector {
 	 * Mark a cubic as IDLE with idle_since timestamp.
 	 */
 	async markIdle(cubicId: string): Promise<void> {
-		await query(
+		await this.query(
 			`UPDATE roadmap.cubic_state
 			 SET lifecycle_status = 'IDLE',
 			     idle_since = COALESCE(idle_since, NOW()),
@@ -85,7 +92,7 @@ export class CubicIdleDetector {
 	 * Mark a cubic as COMPLETED.
 	 */
 	async markCompleted(cubicId: string): Promise<void> {
-		await query(
+		await this.query(
 			`UPDATE roadmap.cubic_state
 			 SET lifecycle_status = 'COMPLETED',
 			     phase = 'COMPLETED'
@@ -98,7 +105,7 @@ export class CubicIdleDetector {
 	 * Mark a cubic as ARCHIVED (terminal state).
 	 */
 	async markArchived(cubicId: string): Promise<void> {
-		await query(
+		await this.query(
 			`UPDATE roadmap.cubic_state
 			 SET lifecycle_status = 'ARCHIVED'
 			 WHERE cubic_id = $1`,
@@ -107,16 +114,16 @@ export class CubicIdleDetector {
 	}
 
 	/**
-	 * Update activity timestamp — resets idle tracking.
+	 * Update activity timestamp — resets idle/stale tracking without touching phase.
 	 * Called on cubic focus, acquire, or any agent action.
+	 * NOTE: does NOT update phase — callers own phase transitions.
 	 */
 	async updateActivity(cubicId: string): Promise<void> {
-		await query(
+		await this.query(
 			`UPDATE roadmap.cubic_state
 			 SET last_activity_at = NOW(),
 			     lifecycle_status = 'ACTIVE',
-			     idle_since = NULL,
-			     phase = 'RUNNING'
+			     idle_since = NULL
 			 WHERE cubic_id = $1`,
 			[cubicId],
 		);
@@ -126,7 +133,7 @@ export class CubicIdleDetector {
 	 * Get lifecycle stats grouped by status.
 	 */
 	async getStats(): Promise<CubicLifecycleStats[]> {
-		const { rows } = await query<CubicLifecycleStats>(
+		const { rows } = await this.query<CubicLifecycleStats>(
 			`SELECT
 				lifecycle_status,
 				COUNT(*)::int as count,
@@ -152,7 +159,7 @@ export class CubicIdleDetector {
 	 * Fixes drift between the two tables.
 	 */
 	async syncFromCubics(): Promise<number> {
-		const { rows } = await query<{ cnt: number }>(
+		const { rows } = await this.query<{ cnt: number }>(
 			`UPDATE roadmap.cubic_state cs
 			 SET lifecycle_status = CASE
 				WHEN c.status = 'active' THEN 'ACTIVE'

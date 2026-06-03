@@ -1450,6 +1450,35 @@ export async function createMcpServer(
 					a as Parameters<typeof cubic.acquireCubic>[0],
 				),
 		});
+		server.addTool({
+			name: "cubic_stats",
+			description:
+				"Get lifecycle stats for all cubics grouped by status (ACTIVE/IDLE/COMPLETED/STALE/ARCHIVED). " +
+				"Returns count, oldest_activity, newest_activity per bucket.",
+			inputSchema: { type: "object", properties: {} },
+			handler: () => cubic.getStats(),
+		});
+		server.addTool({
+			name: "cubic_cleanup",
+			description:
+				"Run stale cubic cleanup: expire IDLE/COMPLETED cubics inactive for 30+ min, " +
+				"optionally remove their worktree directories. Pass dryRun=true to preview without mutation.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					dryRun: {
+						type: "boolean",
+						description: "Preview cleanup without mutating anything (default: false)",
+					},
+					removeWorktrees: {
+						type: "boolean",
+						description: "Also remove worktree directories (default: true)",
+					},
+				},
+			},
+			handler: (a) =>
+				cubic.runCleanup(a as Parameters<typeof cubic.runCleanup>[0]),
+		});
 
 		// Pulse Fleet Observability tools (P063) — Postgres-backed
 		const { PgPulseHandlers } = await import(
