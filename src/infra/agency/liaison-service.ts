@@ -206,17 +206,13 @@ export async function liaisonHeartbeat(
           ELSE status
         END,
         offline_alert_sent_at = CASE
-          WHEN status = 'offline' THEN NULL               -- clear debounce on recovery start
+          WHEN status = 'offline' THEN NULL
           ELSE offline_alert_sent_at
         END,
         status_reason = CASE
           WHEN status = 'offline' THEN 'Auto-recovery: first heartbeat received'
           WHEN status = 'dormant' THEN 'Reactivated by heartbeat'
           ELSE status_reason
-        END,
-        offline_alert_sent_at = CASE
-          WHEN status = 'offline' THEN NULL   -- clear episode flag on recovery (P765 AC-4)
-          ELSE offline_alert_sent_at
         END,
         metadata = jsonb_set(metadata, '{capacity_envelope}', $3::jsonb)
       WHERE agency_id = (SELECT agency_id FROM session_check)

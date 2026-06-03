@@ -184,6 +184,21 @@ async function dispatchMessage(msg: LiaisonMessage, agencyId: string): Promise<v
 // ─── Hub lifecycle ───────────────────────────────────────────────────────────
 
 /**
+ * Broadcast a heartbeat event to hiveCentral so orchestrators and monitors
+ * can observe agency liveness without polling v_agency_status.
+ */
+export async function propagateHeartbeat(
+  agencyId: string,
+  agencyStatus: string,
+  dispatchable: boolean,
+): Promise<void> {
+  await broadcastToHiveCentral(agencyId, "agency_heartbeat", {
+    status: agencyStatus,
+    dispatchable,
+  }).catch(() => undefined);
+}
+
+/**
  * Start the liaison message dispatch loop for an agency.
  *
  * Listens on pg_notify channel 'msg_<agencyId>' (fired by
