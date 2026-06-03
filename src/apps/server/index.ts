@@ -4465,14 +4465,29 @@ export class RoadmapServer {
 				// non-fatal — proceed with name-only labels
 			}
 
+			// Best-effort dwell stats — omit the field if the view isn't ready yet.
+			let dwellMap = new Map<string, number | null>();
+			try {
+				const { rows } = await query<{ stage_name: string; avg_dwell_days: string | null }>(
+					`SELECT stage_name, avg_dwell_days FROM roadmap_proposal.v_stage_dwell_stats`,
+				);
+				for (const row of rows) {
+					dwellMap.set(row.stage_name, row.avg_dwell_days !== null ? parseFloat(row.avg_dwell_days) : null);
+				}
+			} catch {
+				// non-fatal — view may not exist yet on first boot
+			}
+
 			const columns = view.stages.map((stage, idx) => {
 				const def = stageDefMap.get(stage.name);
+				const avgDwell = dwellMap.get(stage.name) ?? null;
 				return {
-					stage_name:    stage.name,
-					stage_order:   stage.order ?? idx + 1,
-					display_label: def?.displayLabel ?? stage.name,
-					is_terminal:   stage.isTerminal ?? false,
-					maturity_gate: def?.maturityGate ?? null,
+					stage_name:     stage.name,
+					stage_order:    stage.order ?? idx + 1,
+					display_label:  def?.displayLabel ?? stage.name,
+					is_terminal:    stage.isTerminal ?? false,
+					maturity_gate:  def?.maturityGate ?? null,
+					avg_dwell_days: avgDwell,
 				};
 			});
 
@@ -4484,11 +4499,11 @@ export class RoadmapServer {
 			return new Response(JSON.stringify(columns), { status: 200, headers });
 		} catch (error) {
 			const fallback = [
-				{ stage_name: "DRAFT",    stage_order: 1, display_label: "Draft",    is_terminal: false, maturity_gate: null },
-				{ stage_name: "REVIEW",   stage_order: 2, display_label: "Review",   is_terminal: false, maturity_gate: null },
-				{ stage_name: "DEVELOP",  stage_order: 3, display_label: "Develop",  is_terminal: false, maturity_gate: null },
-				{ stage_name: "MERGE",    stage_order: 4, display_label: "Merge",    is_terminal: false, maturity_gate: null },
-				{ stage_name: "COMPLETE", stage_order: 5, display_label: "Complete", is_terminal: true,  maturity_gate: null },
+				{ stage_name: "DRAFT",    stage_order: 1, display_label: "Draft",    is_terminal: false, maturity_gate: null, avg_dwell_days: null },
+				{ stage_name: "REVIEW",   stage_order: 2, display_label: "Review",   is_terminal: false, maturity_gate: null, avg_dwell_days: null },
+				{ stage_name: "DEVELOP",  stage_order: 3, display_label: "Develop",  is_terminal: false, maturity_gate: null, avg_dwell_days: null },
+				{ stage_name: "MERGE",    stage_order: 4, display_label: "Merge",    is_terminal: false, maturity_gate: null, avg_dwell_days: null },
+				{ stage_name: "COMPLETE", stage_order: 5, display_label: "Complete", is_terminal: true,  maturity_gate: null, avg_dwell_days: null },
 			];
 			return new Response(JSON.stringify(fallback), {
 				status: 200,

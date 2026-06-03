@@ -116,7 +116,7 @@ function toSharedChannel(channel: WebSocketChannel): SharedChannel {
 }
 
 export default function App() {
-	const { connected, proposals, agents, channels } = useWebSocket();
+	const { connected, proposals, agents, channels, boardReloadSignal } = useWebSocket();
 	const [activeWorkflow, setActiveWorkflow] = useState(() => {
 		if (typeof window !== "undefined") {
 			return (
@@ -127,8 +127,9 @@ export default function App() {
 	});
 
 	// Load dynamic column definitions based on active workflow.
-	// Pass connected so columns re-fetch on WS reconnect.
-	const { columns: boardColumns } = useBoardColumns(activeWorkflow, connected);
+	// Pass connected for reconnect-driven re-fetch and boardReloadSignal for
+	// server-side workflow/stage changes — both routed through the shared WS.
+	const { columns: boardColumns } = useBoardColumns(activeWorkflow, connected, boardReloadSignal);
 
 	// Convert column objects to status strings for BoardPage/Board backward compat
 	const statuses = boardColumns.map((col) => col.stage_name);

@@ -50,6 +50,7 @@ const FALLBACK_COLUMNS: BoardColumn[] = [
 export function useBoardColumns(
 	workflowName = "Standard RFC",
 	connected = false,
+	boardReloadSignal = 0,
 ): {
 	columns: BoardColumn[];
 	isLoading: boolean;
@@ -91,64 +92,12 @@ export function useBoardColumns(
 		}
 	}, []);
 
-	// Re-fetch when workflowName or connected state changes.
+	// Re-fetch when workflowName, connected state, or a board_reload signal changes.
+	// board_reload events are routed through the shared useWebSocket hook so no
+	// second WebSocket connection is needed here.
 	useEffect(() => {
 		void fetchColumns();
-	}, [fetchColumns, workflowName, connected]);
-
-	// Listen for board_reload WebSocket events so column definitions refresh
-	// when the workflow or stage definitions change server-side. A single WS
-	// connection is maintained here; App.tsx's useWebSocket covers data events.
-	useEffect(() => {
-		const wsProtocol =
-			typeof window !== "undefined" && window.location.protocol === "https:"
-				? "wss:"
-				: "ws:";
-		const wsUrl =
-			typeof window !== "undefined"
-				? `${wsProtocol}//${window.location.host}/ws`
-				: null;
-		if (!wsUrl) return;
-
-		let ws: WebSocket | null = null;
-		let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-		let closed = false;
-
-		const connect = () => {
-			if (closed) return;
-			try {
-				ws = new WebSocket(wsUrl);
-				ws.onmessage = (event) => {
-					try {
-						const msg = JSON.parse(event.data as string) as { type?: string };
-						if (msg?.type === "board_reload") {
-							void fetchColumns();
-						}
-					} catch {
-						// ignore malformed frames
-					}
-				};
-				ws.onclose = () => {
-					if (!closed) {
-						reconnectTimer = setTimeout(connect, 5000);
-					}
-				};
-				ws.onerror = () => {
-					ws?.close();
-				};
-			} catch {
-				// WebSocket not available (SSR / test) — skip
-			}
-		};
-
-		connect();
-
-		return () => {
-			closed = true;
-			if (reconnectTimer !== null) clearTimeout(reconnectTimer);
-			ws?.close();
-		};
-	}, [fetchColumns]);
+	}, [fetchColumns, workflowName, connected, boardReloadSignal]);
 
 	return { columns, isLoading, error, refresh: fetchColumns };
 }
