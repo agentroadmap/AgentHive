@@ -14,6 +14,10 @@
 
 import type { Client, Pool } from "pg";
 
+import type { NotificationChannel, OutboundMessage } from "../messaging/gateway/adapter.ts";
+import { moveToDlq } from "../messaging/gateway/dlq.ts";
+import { TransportWakeTimeoutError } from "../messaging/gateway/errors.ts";
+import type { TransportRegistry } from "../messaging/gateway/registry.ts";
 import { resolveTransport } from "./transport-registry.ts";
 import {
 	type NotificationEnvelope,
@@ -35,6 +39,8 @@ export interface RouterDeps {
 	log?: (msg: string) => void;
 	warn?: (msg: string) => void;
 	error?: (msg: string) => void;
+	/** P304: optional transport registry for wake-up and DLQ integration. */
+	transportRegistry?: TransportRegistry;
 }
 
 interface QueueRow {
@@ -187,6 +193,37 @@ export class NotificationRouter {
 			return;
 		}
 
+		// P304: wake-up check — if the registry knows this channel's adapter
+		// and it's offline, attempt to bring it online before dispatching.
+		if (this.deps.transportRegistry) {
+			const effectiveChannel = row.channel ?? transportNameToChannel(routes[0]?.transport ?? "");
+			if (effectiveChannel) {
+				const adapter = this.deps.transportRegistry.tryGetAdapterByChannel(effectiveChannel);
+				if (adapter) {
+					const available = await adapter.isAvailable();
+					if (!available) {
+						try {
+							await adapter.wakeUp();
+						} catch (err) {
+							if (err instanceof TransportWakeTimeoutError) {
+								const newAttempts = row.dispatch_attempts + 1;
+								if (newAttempts >= MAX_ATTEMPTS) {
+									await this.markFailed(envelope.queueId, newAttempts, err.message);
+									await this.moveToDlqRow(envelope, newAttempts, effectiveChannel, "WAKE_TIMEOUT");
+									return;
+								}
+								const delay = BACKOFF_MS[Math.min(newAttempts - 1, BACKOFF_MS.length - 1)];
+								await this.recordAttempt(envelope.queueId, newAttempts, err.message, delay);
+								setTimeout(() => void this.scheduleDrain(), delay).unref?.();
+								return;
+							}
+							throw err;
+						}
+					}
+				}
+			}
+		}
+
 		const errors: string[] = [];
 		for (const route of routes) {
 			const transport = resolveTransport(route.transport);
@@ -215,13 +252,45 @@ export class NotificationRouter {
 
 		if (newAttempts >= MAX_ATTEMPTS) {
 			await this.markFailed(envelope.queueId, newAttempts, lastError);
-			await this.escalateDispatchFailure(envelope, lastError);
+			const effectiveChannel = row.channel
+				?? transportNameToChannel(routes[0]?.transport ?? "")
+				?? routes[0]?.transport
+				?? "unknown";
+			await this.moveToDlqRow(envelope, newAttempts, effectiveChannel, lastError);
 			return;
 		}
 
 		const delay = BACKOFF_MS[Math.min(newAttempts - 1, BACKOFF_MS.length - 1)];
 		await this.recordAttempt(envelope.queueId, newAttempts, lastError, delay);
 		setTimeout(() => void this.scheduleDrain(), delay).unref?.();
+	}
+
+	private async moveToDlqRow(
+		envelope: NotificationEnvelope,
+		attemptCount: number,
+		channel: string,
+		errorCode: string,
+	): Promise<void> {
+		const msg: OutboundMessage = {
+			notificationId: BigInt(envelope.queueId),
+			channel: channel as NotificationChannel,
+			title: envelope.title,
+			body: envelope.body,
+			metadata: envelope.payload,
+		};
+		try {
+			await moveToDlq(this.deps.pool, msg, attemptCount, errorCode);
+		} catch (dlqErr) {
+			// Fall back to escalation if DLQ write fails.
+			this.errorLog(
+				`[notification-router] DLQ write failed for queue_id=${envelope.queueId}: ${(dlqErr as Error).message}; falling back to escalation`,
+			);
+			await this.escalateDispatchFailure(envelope, errorCode);
+			return;
+		}
+		this.errorLog(
+			`[notification-router] moved queue_id=${envelope.queueId} kind=${envelope.kind} to DLQ after ${attemptCount} attempts`,
+		);
 	}
 
 	private async resolveRoutes(
@@ -384,4 +453,16 @@ function toEnvelope(row: QueueRow): NotificationEnvelope {
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Maps a static transport name to the channel name used in transport_registry. */
+function transportNameToChannel(transportName: string): string | null {
+	const MAP: Record<string, string> = {
+		discord_webhook: 'discord',
+		email: 'email',
+		sms: 'sms',
+		push: 'push',
+		digest: 'digest',
+	};
+	return MAP[transportName] ?? null;
 }
