@@ -1,0 +1,31 @@
+{
+  "schema": "agenthive-sla/v1",
+  "version": "1.0.0",
+  "effective_date": "2026-05-29",
+  "surfaces": {
+    "mcp_api": {
+      "p99_latency_ms": 500,
+      "error_rate_max_pct": 10,
+      "measurement_window_seconds": 300
+    },
+    "postgres": {
+      "rto_minutes": 5
+    },
+    "scheduler": {
+      "lease_ttl_minutes": 30
+    },
+    "workflow": {
+      "transition_latency_ms": 2000
+    }
+  },
+  "availability": {
+    "monthly_percent": 99.5,
+    "error_budget_minutes": 216,
+    "planned_maintenance_max_hours": 4
+  },
+  "states": ["Normal", "Degraded", "Down"],
+  "baseline_agents": 100,
+  "review_cycle": "After first production deployment, then quarterly",
+  "config_table": "roadmap.sla_config",
+  "events_table": "roadmap.sla_events"
+}

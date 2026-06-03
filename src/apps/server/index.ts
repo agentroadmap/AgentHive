@@ -4077,7 +4077,14 @@ export class RoadmapServer {
 			const { handleHealthCheck } = await import("../mcp-server/tools/ops/sla-handler.ts");
 			const result = await handleHealthCheck({});
 			const text = result.content[0]?.type === "text" ? result.content[0].text : "{}";
-			return new Response(text, { headers: { "Content-Type": "application/json" } });
+			const liveState = JSON.parse(text) as Record<string, unknown>;
+			// P081 AC-11/AC-14: embed contract metadata so federation peers can validate
+			// schema version and availability commitment from a single /api/sla call.
+			const contractPath = join(import.meta.dirname, "../../../docs/sla-contract.json");
+			let contract: Record<string, unknown> = {};
+			try { contract = JSON.parse(readFileSync(contractPath, "utf-8")) as Record<string, unknown>; } catch { /* contract file optional */ }
+			const merged = { ...contract, live: liveState };
+			return new Response(JSON.stringify(merged), { headers: { "Content-Type": "application/json" } });
 		} catch (err) {
 			return new Response(JSON.stringify({ error: String(err) }), {
 				status: 500,
