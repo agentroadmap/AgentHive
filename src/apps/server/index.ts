@@ -4358,6 +4358,8 @@ export class RoadmapServer {
 			url.searchParams.get("workflowName") ||
 			url.searchParams.get("workflow") ||
 			"Standard RFC";
+		const bust = url.searchParams.get("bust");
+		const cacheHeader = bust ? "no-cache, no-store" : "public, max-age=300";
 
 		try {
 			const { rows } = await query<{
@@ -4396,7 +4398,7 @@ export class RoadmapServer {
 			);
 
 			return Response.json(rows, {
-				headers: { "Cache-Control": "public, max-age=300" },
+				headers: { "Cache-Control": cacheHeader },
 			});
 		} catch (error) {
 			try {
@@ -4413,7 +4415,7 @@ export class RoadmapServer {
 					avg_dwell_days: null,
 				}));
 				return Response.json(rows, {
-					headers: { "Cache-Control": "public, max-age=300" },
+					headers: { "Cache-Control": cacheHeader },
 				});
 			} catch {
 				console.error("Error loading board columns:", error);

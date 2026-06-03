@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface BoardColumn {
 	stage_name: string;
@@ -59,13 +59,15 @@ export function useBoardColumns(
 	const [columns, setColumns] = useState<BoardColumn[]>(FALLBACK_COLUMNS);
 	const [isLoading, setIsLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+	const workflowRef = useRef(workflowName);
+	workflowRef.current = workflowName;
 
 	const fetchColumns = useCallback(async () => {
 		try {
 			setIsLoading(true);
 			setError(null);
 			const url = new URL("/api/board/columns", window.location.origin);
-			url.searchParams.set("workflowName", workflowName);
+			url.searchParams.set("workflowName", workflowRef.current);
 
 			const res = await fetch(url.toString());
 			if (!res.ok) {
@@ -87,15 +89,66 @@ export function useBoardColumns(
 		} finally {
 			setIsLoading(false);
 		}
-	}, [workflowName]);
+	}, []);
 
+	// Re-fetch when workflowName or connected state changes.
 	useEffect(() => {
-		if (connected) {
-			void fetchColumns();
-			return;
-		}
 		void fetchColumns();
-	}, [fetchColumns, connected]);
+	}, [fetchColumns, workflowName, connected]);
+
+	// Listen for board_reload WebSocket events so column definitions refresh
+	// when the workflow or stage definitions change server-side. A single WS
+	// connection is maintained here; App.tsx's useWebSocket covers data events.
+	useEffect(() => {
+		const wsProtocol =
+			typeof window !== "undefined" && window.location.protocol === "https:"
+				? "wss:"
+				: "ws:";
+		const wsUrl =
+			typeof window !== "undefined"
+				? `${wsProtocol}//${window.location.host}/ws`
+				: null;
+		if (!wsUrl) return;
+
+		let ws: WebSocket | null = null;
+		let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+		let closed = false;
+
+		const connect = () => {
+			if (closed) return;
+			try {
+				ws = new WebSocket(wsUrl);
+				ws.onmessage = (event) => {
+					try {
+						const msg = JSON.parse(event.data as string) as { type?: string };
+						if (msg?.type === "board_reload") {
+							void fetchColumns();
+						}
+					} catch {
+						// ignore malformed frames
+					}
+				};
+				ws.onclose = () => {
+					if (!closed) {
+						reconnectTimer = setTimeout(connect, 5000);
+					}
+				};
+				ws.onerror = () => {
+					ws?.close();
+				};
+			} catch {
+				// WebSocket not available (SSR / test) — skip
+			}
+		};
+
+		connect();
+
+		return () => {
+			closed = true;
+			if (reconnectTimer !== null) clearTimeout(reconnectTimer);
+			ws?.close();
+		};
+	}, [fetchColumns]);
 
 	return { columns, isLoading, error, refresh: fetchColumns };
 }
