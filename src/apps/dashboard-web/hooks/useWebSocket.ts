@@ -101,6 +101,7 @@ export interface UseWebSocketReturn {
 	channels: Channel[];
 	messages: Message[];
 	reconnect: () => void;
+	boardReloadSignal: number;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -143,6 +144,7 @@ export function useWebSocket(url?: string): UseWebSocketReturn {
 	const [agents, setAgents] = useState<Agent[]>([]);
 	const [channels, setChannels] = useState<Channel[]>([]);
 	const [messages, setMessages] = useState<Message[]>([]);
+	const [boardReloadSignal, setBoardReloadSignal] = useState(0);
 	const wsRef = useRef<WebSocket | null>(null);
 	const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(
 		undefined,
@@ -275,6 +277,10 @@ export function useWebSocket(url?: string): UseWebSocketReturn {
 						}
 						break;
 
+					case "board_reload":
+						setBoardReloadSignal((n) => n + 1);
+						break;
+
 					case "sync":
 						// Refresh snapshot after a bridge sync event
 						ws.send(
@@ -368,5 +374,5 @@ export function useWebSocket(url?: string): UseWebSocketReturn {
 		connect();
 	}, [connect]);
 
-	return { connected, proposals, agents, channels, messages, reconnect };
+	return { connected, proposals, agents, channels, messages, reconnect, boardReloadSignal };
 }
