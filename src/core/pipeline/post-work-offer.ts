@@ -19,6 +19,7 @@ import * as runtimeConfig from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 import { ObservabilityWriter } from "../observability/observability-writer.ts";
 import { ROLE_TO_REQUIRED_CAPABILITIES } from "../orchestration/offer-dispatch.ts";
+import { autoCharterIfNeeded } from "./auto-charter.ts";
 
 const obs = new ObservabilityWriter("agency:offer-pipeline");
 
@@ -353,6 +354,11 @@ async function postWorkOfferImpl(
 			`postWorkOffer: proposal ${input.proposalId} not found`,
 		);
 	}
+	if (ctx.gate_scanner_paused) {
+		throw new Error(
+			`postWorkOffer: proposal ${input.proposalId} is gate_scanner_paused; dispatch refused`,
+		);
+	}
 
 	// P1393: refuse dispatch when the proposal is paused. The state-poll
 	// (orchestrator.ts:454) filters paused proposals, but scanQueues feeds
@@ -559,6 +565,16 @@ async function postWorkOfferImpl(
 			attributes: { dispatch_id: dispatchId, proposal_id: input.proposalId, role: input.role },
 		});
 		await obs.closeSpan({ spanId: span.spanId });
+	}
+
+	// AC-9 (P182): auto-charter team governance when 2+ dispatches are alive
+	// for this proposal. Best-effort — chartering must never block dispatch.
+	if (!row.was_replay) {
+		try {
+			await autoCharterIfNeeded(input.proposalId, queryFn);
+		} catch {
+			// swallow — chartering is advisory, not load-bearing
+		}
 	}
 
 	return {

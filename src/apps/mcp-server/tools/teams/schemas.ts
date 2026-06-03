@@ -337,6 +337,14 @@ export const teamDisputeLogSchema = {
 			type: "string",
 			description: "Team ID handling this dispute (for L3+ disputes)",
 		},
+		positionA: {
+			type: "string",
+			description: "Initiating agent's stated position (stored in position_a). Defaults to 'initiating dispute'.",
+		},
+		positionB: {
+			type: "string",
+			description: "Responding agent's stated position (stored in position_b). Defaults to 'responding agent'.",
+		},
 		resolutionNote: {
 			type: "string",
 			description: "Resolution note when resolving a dispute",
@@ -351,6 +359,21 @@ export const teamDisputeLogSchema = {
 		},
 	},
 	required: ["proposalId", "initiatorAgent", "respondentAgent", "description", "escalationLevel"],
+};
+
+export const teamGovernanceArchiveSchema = {
+	type: "object",
+	properties: {
+		teamId: {
+			type: "string",
+			description: "Team ID whose governance entries to archive on proposal COMPLETE",
+		},
+		archivedBy: {
+			type: "string",
+			description: "Agent identity performing the archival",
+		},
+	},
+	required: ["teamId", "archivedBy"],
 };
 
 export const teamCharterCreateSchema = {

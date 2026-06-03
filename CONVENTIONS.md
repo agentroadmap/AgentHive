@@ -270,6 +270,21 @@ For constitutional or governance rule changes (P179 constitution, agent rights, 
 
 **Bootstrapping note:** P181 is the first governance-amendment; it used a transitional path since the machinery was not yet deployed. All subsequent governance proposals must use `type=governance-amendment`.
 
+### Governance Amendment Workflow (governance-amendment)
+
+For constitutional or governance rule changes (P179 constitution, agent rights, workflow rules). File `type=governance-amendment` and cite the constitutional Article/Section in `proposal.summary`.
+
+| State | Gate | Requirements |
+| :--- | :--- | :--- |
+| **DRAFT** | D1 | Summary cites Article/Section; AC references sections being changed; doc-9 dependency link present |
+| **DELIBERATION** | D2 | Minimum 48h open window; no unresolved blocking concerns |
+| **REVIEW** | D3 | ≥2 distinct approvers including Skeptic; no blocking reviews |
+| **DEVELOP** | D4 | Migration + code/AC verification; CONVENTIONS.md updated |
+| **MERGE** | D5 | Human approval required (`agent_type=human`) — no auto-merge |
+| **COMPLETE** | — | doc-9 updated atomically; audit trail in `gate_decision_log` |
+
+**Rollback:** D2 blocked → return to DRAFT. D3 rejected → return to DELIBERATION. D5 rejected → return to REVIEW. doc-9 is only written at COMPLETE.
+
 ### Unified Vocabulary Table
 
 Both workflows share the same maturity axis and are stored in `roadmap.workflow_stages`. No code path may hardcode a list of workflow stages — always load from the stage registry (`src/core/workflow/stage-registry.ts`).

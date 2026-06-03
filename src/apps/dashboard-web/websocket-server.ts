@@ -109,7 +109,9 @@ type BoardMessage =
 	| { type: "messages" | "message_snapshot"; data: unknown[]; channel?: string }
 	| { type: "proposal"; data: unknown | null }
 	| { type: "connected" | "subscribed"; message?: string; channel?: string }
-	| { type: "error"; message: string; code?: string };
+	| { type: "error"; message: string; code?: string }
+	// P081: SLA state change push
+	| { type: "sla_state"; state: string; prev_state: string | null; trigger: string; timestamp: string };
 
 type ClientMessage = {
 	type?: unknown;
@@ -323,7 +325,29 @@ export function startWebSocketServer(port = 3001): void {
 			await pgClient.query("LISTEN proposal_state_changed");
 			await pgClient.query("LISTEN proposal_gate_ready");
 			await pgClient.query("LISTEN proposal_maturity_changed");
-			pgClient.on("notification", () => {
+			// P081: SLA state change notifications
+			await pgClient.query("LISTEN sla_state_change");
+			pgClient.on("notification", (msg) => {
+				if (msg.channel === "sla_state_change" && msg.payload) {
+					try {
+						const payload = JSON.parse(msg.payload) as {
+							state: string;
+							prev_state: string | null;
+							trigger: string;
+							timestamp: string;
+						};
+						broadcast({
+							type: "sla_state",
+							state: payload.state,
+							prev_state: payload.prev_state,
+							trigger: payload.trigger,
+							timestamp: payload.timestamp,
+						});
+					} catch {
+						// Ignore malformed SLA payloads
+					}
+					return;
+				}
 				void broadcastSnapshot().catch((error) => {
 					console.error("[WS] pg_notify snapshot failed:", error);
 				});

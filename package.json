@@ -70,6 +70,7 @@
     "typecheck": "node node_modules/typescript/bin/tsc -p tsconfig.check.json --noEmit",
     "check:publish": "node scripts/check-publish-hygiene.mjs",
     "audit:sql": "node --import jiti/register scripts/ci/audit-sql-columns.ts",
+    "audit:dispatch-selects": "node --import jiti/register scripts/ci/check-dispatch-proposal-selects.ts",
     "audit:migrations": "bash scripts/ci/check-migration-drops.sh",
     "build:css": "node ./node_modules/@tailwindcss/cli/dist/index.mjs -i src/apps/dashboard-web/styles/source.css -o src/apps/dashboard-web/styles/style.css --minify",
     "build:web": "node scripts/build-web.cjs",
@@ -137,6 +138,7 @@
     "jiti": "^2.6.1",
     "js-yaml": "^4.1.1",
     "pg": "^8.20.0",
+    "prom-client": "^15.1.3",
     "wouter": "^3.9.0",
     "ws": "^8.20.0"
   }

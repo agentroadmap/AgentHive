@@ -37,6 +37,8 @@ import {
 	setPoolLifecycleMode,
 	startPoolPoisonWatchdog,
 } from "../../infra/postgres/pool.ts";
+import { sendMessage as sendLiaisonMessage } from "../../infra/agency/liaison-message-service.ts";
+import { discordSend } from "../../infra/discord/notify.ts";
 import type { PoolClient, Client as PgClient } from "pg";
 import { hashOperatorToken, requireOperator } from "./operator-auth.ts";
 import { agentContextStorage, type VerifiedPrincipal } from "../../shared/identity/agent-context.ts";
@@ -168,6 +170,7 @@ export class RoadmapServer {
 	private _operatorNotifyClient: PgClient | null = null;
 	private _operatorHeartbeatInterval: ReturnType<typeof setInterval> | null = null;
 	private _operatorSessionId: string | null = null;
+	private agencyAlertInterval: ReturnType<typeof setInterval> | null = null;
 
 	constructor(projectPath: string) {
 		this.core = new Core(projectPath, { enableWatchers: true });
@@ -772,6 +775,12 @@ export class RoadmapServer {
 			// Start polling for external DB changes (cron, MCP, direct SQL)
 			this.startChangePolling();
 			void this.startRoadmapEventsListener();
+			void this.scanAgencyObservabilityAlerts();
+			this.agencyAlertInterval = setInterval(
+				() => void this.scanAgencyObservabilityAlerts(),
+				60_000,
+			);
+			this.agencyAlertInterval.unref?.();
 		} catch (error) {
 			// Handle port already in use error
 			const errorCode = (error as { code?: string })?.code;
@@ -844,6 +853,10 @@ export class RoadmapServer {
 			try {
 				client.release();
 			} catch {}
+		}
+		if (this.agencyAlertInterval) {
+			clearInterval(this.agencyAlertInterval);
+			this.agencyAlertInterval = null;
 		}
 
 		// Proactively close WebSocket connections
@@ -1128,6 +1141,20 @@ export class RoadmapServer {
 				return await this.handleListRoutes();
 			if (pathname.startsWith("/api/routes/") && method === "PATCH")
 				return await this.handleToggleRoute(req, pathname.split("/").at(-1)!);
+			if (pathname === "/api/agencies" && method === "GET")
+				return await this.handleListAgencies(req);
+			if (pathname.startsWith("/api/agencies/")) {
+				const parts = pathname.split("/").filter(Boolean);
+				const agencyId = parts[2] ? decodeURIComponent(parts[2]) : "";
+				if (
+					parts.length === 4 &&
+					parts[3] === "action" &&
+					method === "POST" &&
+					agencyId
+				) {
+					return await this.handleAgencyAction(agencyId, req);
+				}
+			}
 			if (pathname === "/api/dispatches" && method === "GET")
 				return await this.handleListDispatches(req);
 			if (pathname === "/api/board/stages" && method === "GET")
@@ -1288,6 +1315,23 @@ export class RoadmapServer {
 				return await this.handleGetStatistics();
 			if (pathname === "/api/status" && method === "GET")
 				return await this.handleGetStatus();
+
+			// P081: SLA contract endpoint
+			if (pathname === "/api/sla" && method === "GET") {
+				try {
+					const { serveSlaContract } = await import("./sla-metrics.ts");
+					const contract = serveSlaContract();
+					return new Response(JSON.stringify(contract, null, 2), {
+						status: 200,
+						headers: { "Content-Type": "application/json" },
+					});
+				} catch (err) {
+					return new Response(JSON.stringify({ error: "SLA contract unavailable" }), {
+						status: 503,
+						headers: { "Content-Type": "application/json" },
+					});
+				}
+			}
 			if (pathname === "/api/init" && method === "POST")
 				return await this.handleInit(req);
 			if (pathname === "/api/search" && method === "GET")
@@ -4305,70 +4349,126 @@ export class RoadmapServer {
 		}
 	}
 
-	// P248: /api/board/columns — array-shaped (not envelope) column definitions.
-	// Reuses the same SMDL registry + stage-definition table as /api/board/stages
-	// but returns the flat array expected by board column consumers.
-	// Cache-Control: public, max-age=300; ?bust=<ts> disables client cache.
 	private async handleGetBoardColumns(req?: Request): Promise<Response> {
-		const url = new URL(req?.url || "http://localhost/?workflowName=Standard+RFC");
-		const workflowName = url.searchParams.get("workflowName") || "Standard RFC";
-		const bust = url.searchParams.has("bust");
-
-		const cacheHeader = bust
-			? "no-cache"
-			: "public, max-age=300";
-
 		try {
+			const url = new URL(req?.url || "http://localhost/?workflowName=Standard+RFC");
+
+			// ?bust=<ts> bypasses cache
+			const bust = url.searchParams.get("bust");
+			const workflowName = url.searchParams.get("workflowName") || "Standard RFC";
+
 			const registry = getRegistry();
 			const view = registry.getView(workflowName);
 
-			let stageDefMap: Map<string, { displayLabel: string; isTerminal: boolean; gateId: string | null }> = new Map();
+			let stageDefMap: Map<string, { displayLabel: string; hexColor: string | null; isTerminal: boolean; maturityGate: number | null }> = new Map();
 			try {
 				const raw = await loadStageRegistry();
 				for (const [name, def] of raw) {
 					stageDefMap.set(name, {
 						displayLabel: def.displayLabel,
+						hexColor: def.hexColor,
 						isTerminal: def.isTerminal,
-						gateId: def.gateId,
+						maturityGate: null,
 					});
 				}
 			} catch {
-				// non-fatal — fall back to registry values
+				// non-fatal — proceed with name-only labels
 			}
 
-			const columns = view.stages.map((stage) => {
+			const columns = view.stages.map((stage, idx) => {
 				const def = stageDefMap.get(stage.name);
 				return {
 					stage_name:    stage.name,
-					stage_order:   stage.order,
+					stage_order:   stage.order ?? idx + 1,
 					display_label: def?.displayLabel ?? stage.name,
-					is_terminal:   def?.isTerminal ?? stage.isTerminal,
-					maturity_gate: def?.gateId ?? null,
+					is_terminal:   stage.isTerminal ?? false,
+					maturity_gate: def?.maturityGate ?? null,
 				};
 			});
 
-			return new Response(JSON.stringify(columns), {
-				status: 200,
-				headers: {
-					"Content-Type": "application/json",
-					"Cache-Control": cacheHeader,
-				},
-			});
-		} catch {
-			const columns = [
+			const headers: Record<string, string> = {
+				"Content-Type": "application/json",
+				"Cache-Control": bust ? "no-cache" : "public, max-age=300",
+			};
+
+			return new Response(JSON.stringify(columns), { status: 200, headers });
+		} catch (error) {
+			const fallback = [
 				{ stage_name: "DRAFT",    stage_order: 1, display_label: "Draft",    is_terminal: false, maturity_gate: null },
 				{ stage_name: "REVIEW",   stage_order: 2, display_label: "Review",   is_terminal: false, maturity_gate: null },
 				{ stage_name: "DEVELOP",  stage_order: 3, display_label: "Develop",  is_terminal: false, maturity_gate: null },
 				{ stage_name: "MERGE",    stage_order: 4, display_label: "Merge",    is_terminal: false, maturity_gate: null },
 				{ stage_name: "COMPLETE", stage_order: 5, display_label: "Complete", is_terminal: true,  maturity_gate: null },
 			];
-			return new Response(JSON.stringify(columns), {
+			return new Response(JSON.stringify(fallback), {
 				status: 200,
-				headers: {
-					"Content-Type": "application/json",
-					"Cache-Control": cacheHeader,
-				},
+				headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=300" },
 			});
+		}
+	}
+
+	private async scanAgencyObservabilityAlerts(): Promise<void> {
+		try {
+			const { rows } = await query<{
+				agency_id: string;
+				display_name: string;
+				silence_seconds: number | string | null;
+				oldest_open_assistance_at: string | null;
+				open_assistance: number | string;
+			}>(
+				`SELECT agency_id, display_name, silence_seconds,
+				        oldest_open_assistance_at, open_assistance
+				   FROM roadmap.v_agency_dashboard
+				  WHERE (oldest_open_assistance_at IS NOT NULL
+				         AND oldest_open_assistance_at < now() - interval '10 minutes')
+				     OR (silence_seconds IS NOT NULL AND silence_seconds > 600)`,
+			);
+
+			for (const row of rows) {
+				const alerts: Array<{ type: string; message: string; metadata: Record<string, unknown> }> = [];
+				const silenceSeconds = Number(row.silence_seconds ?? 0);
+				if (silenceSeconds > 600) {
+					alerts.push({
+						type: "agency_silent",
+						message: `Agency ${row.display_name} (${row.agency_id}) has been silent for ${Math.round(silenceSeconds / 60)} minutes.`,
+						metadata: { silence_seconds: silenceSeconds },
+					});
+				}
+				if (row.oldest_open_assistance_at) {
+					alerts.push({
+						type: "assistance_stale",
+						message: `Agency ${row.display_name} (${row.agency_id}) has ${row.open_assistance} open assistance request(s); oldest opened at ${row.oldest_open_assistance_at}.`,
+						metadata: {
+							open_assistance: Number(row.open_assistance ?? 0),
+							oldest_open_assistance_at: row.oldest_open_assistance_at,
+						},
+					});
+				}
+
+				for (const alert of alerts) {
+					const alertKey = `${alert.type}:${row.agency_id}`;
+					const { rows: stateRows } = await query<{ should_send: boolean }>(
+						`INSERT INTO roadmap.agency_observability_alert_state
+						   (alert_key, agency_id, alert_type, last_fired_at, metadata)
+						 VALUES ($1, $2, $3, now(), $4::jsonb)
+						 ON CONFLICT (alert_key) DO UPDATE
+						   SET last_fired_at = CASE
+						       WHEN roadmap.agency_observability_alert_state.last_fired_at < now() - interval '10 minutes'
+						       THEN now()
+						       ELSE roadmap.agency_observability_alert_state.last_fired_at
+						     END,
+						     cleared_at = NULL,
+						     metadata = EXCLUDED.metadata
+						 RETURNING last_fired_at >= now() - interval '5 seconds' AS should_send`,
+						[alertKey, row.agency_id, alert.type, JSON.stringify(alert.metadata)],
+					);
+					if (stateRows[0]?.should_send) {
+						await discordSend("agency-observability", alert.message, "warning");
+					}
+				}
+			}
+		} catch (error) {
+			console.error("[agency-observability] alert scan failed:", (error as Error).message);
 		}
 	}
 
@@ -4428,6 +4528,223 @@ export class RoadmapServer {
 				{ error: "Failed to list dispatches" },
 				{ status: 500 },
 			);
+		}
+	}
+
+	private async handleListAgencies(req: Request): Promise<Response> {
+		try {
+			const url = new URL(req.url);
+			const proposal = url.searchParams.get("proposal")?.trim().replace(/^P/i, "");
+			const agency = url.searchParams.get("agency")?.trim();
+			const route = url.searchParams.get("route")?.trim();
+			const severity = url.searchParams.get("severity")?.trim();
+
+			const { rows } = await query<Record<string, unknown>>(
+				`SELECT d.*,
+				        COALESCE(to_jsonb(h) - 'agency_id', '{}'::jsonb) AS protocol_health
+				   FROM roadmap.v_agency_dashboard d
+				   LEFT JOIN roadmap.v_liaison_protocol_health h
+				     ON h.agency_id = d.agency_id
+				  WHERE ($1::text IS NULL OR d.agency_id = $1 OR d.provider = $1)
+				    AND ($2::text IS NULL OR $2 = ANY(d.route_providers))
+				    AND ($3::text IS NULL OR $3 = ANY(d.severities))
+				  ORDER BY d.status, d.open_assistance DESC, d.agency_id`,
+				[agency || null, route || null, severity || null],
+			);
+			const { rows: assistanceRows } = await query<Record<string, unknown>>(
+				`SELECT *
+				   FROM roadmap.v_assistance_open
+				  WHERE ($1::text IS NULL OR agency_id = $1)
+				    AND ($2::text IS NULL OR route_provider = $2)
+				    AND ($3::text IS NULL OR severity = $3)
+				  ORDER BY opened_at`,
+				[agency || null, route || null, severity || null],
+			);
+
+			const matchesProposal = (value: unknown): boolean => {
+				if (!proposal) return true;
+				if (value == null) return false;
+				const wanted = String(proposal);
+				if (typeof value === "number") return String(value) === wanted;
+				if (typeof value === "string") return value.replace(/^P/i, "") === wanted;
+				if (Array.isArray(value)) return value.some(matchesProposal);
+				if (typeof value === "object") {
+					return Object.values(value as Record<string, unknown>).some(matchesProposal);
+				}
+				return false;
+			};
+
+			const filteredRows = proposal
+				? rows.filter((row) =>
+						matchesProposal(row.active_claims) ||
+						matchesProposal(row.assistance_requests) ||
+						matchesProposal(row.recent_messages),
+					)
+				: rows;
+
+			const agencyIds = filteredRows.map((r) => String(r.agency_id));
+			const timelines = new Map<string, unknown[]>();
+			if (agencyIds.length > 0) {
+				const timelineRows = await query<{ agency_id: string; timeline: unknown[] }>(
+					`SELECT agency_id,
+					        jsonb_agg(
+					          jsonb_build_object(
+					            'message_id', message_id,
+					            'kind', kind,
+					            'sequence', sequence,
+					            'signed_at', signed_at,
+					            'ack_outcome', ack_outcome,
+					            'payload', payload
+					          )
+					          ORDER BY signed_at DESC
+					        ) AS timeline
+					   FROM roadmap.liaison_message
+					  WHERE agency_id = ANY($1::text[])
+					    AND kind IN ('progress_note', 'claim_status')
+					    AND signed_at > now() - interval '24 hours'
+					  GROUP BY agency_id`,
+					[agencyIds],
+				);
+				for (const row of timelineRows.rows) {
+					timelines.set(row.agency_id, row.timeline ?? []);
+				}
+			}
+
+			const normalizedAgencies = filteredRows.map((row) => {
+				const protocolHealth =
+					typeof row.protocol_health === "object" && row.protocol_health !== null
+						? (row.protocol_health as Record<string, unknown>)
+						: {};
+				const recentMessages = Array.isArray(row.recent_messages)
+					? row.recent_messages
+					: [];
+				const agencyId = String(row.agency_id);
+				return {
+					...row,
+					assistance: row.assistance_requests ?? [],
+					claim_timeline:
+						timelines.get(agencyId) ??
+						recentMessages.filter((message) => {
+							const kind = (message as Record<string, unknown>).kind;
+							return kind === "progress_note" || kind === "claim_status";
+						}),
+					unacked_old: protocolHealth.unacked_old ?? 0,
+					recent_rejects: protocolHealth.recent_rejects ?? 0,
+					recent_refusals: protocolHealth.recent_rejects ?? 0,
+					sequence_gap_count: protocolHealth.sequence_gaps ?? 0,
+					last_ping_rtt: protocolHealth.last_ping_rtt ?? null,
+				};
+			});
+
+			return Response.json({
+				agencies: normalizedAgencies,
+				assistance: proposal
+					? assistanceRows.filter((row) => matchesProposal(row.proposal_id) || matchesProposal(row.payload))
+					: assistanceRows,
+				filters: {
+					agency: agency || null,
+					route: route || null,
+					severity: severity || null,
+					proposal: proposal ? `P${proposal}` : null,
+				},
+			});
+		} catch (error) {
+			console.error("Error listing agencies:", error);
+			return Response.json({ error: "Failed to list agencies" }, { status: 500 });
+		}
+	}
+
+	private async handleAgencyAction(
+		agencyId: string,
+		req: Request,
+	): Promise<Response> {
+		let body: Record<string, unknown> = {};
+		try {
+			body = await req.json();
+		} catch {
+			body = {};
+		}
+
+		const action = typeof body.action === "string" ? body.action : "";
+		const allowed = new Set([
+			"liaison_pause",
+			"liaison_resume",
+			"liaison_drain",
+			"claim_revoke",
+			"agency_retire",
+		]);
+		if (!allowed.has(action)) {
+			return Response.json({ error: "Unsupported agency action" }, { status: 400 });
+		}
+		if (action === "claim_revoke" && typeof body.claim_id !== "string") {
+			return Response.json({ error: "claim_id is required" }, { status: 400 });
+		}
+
+		const auth = await requireOperator(req, {
+			action: `agency.${action}`,
+			targetKind: "agency",
+			targetIdentity: agencyId,
+			requestSummary: { action, claim_id: body.claim_id ?? null },
+		});
+		if (auth.rejected) return auth.rejected;
+
+		try {
+			const payload =
+				action === "claim_revoke"
+					? {
+							claim_id: body.claim_id,
+							reason: typeof body.reason === "string" ? body.reason : "operator",
+						}
+					: action === "liaison_pause"
+						? {
+								until_iso:
+									typeof body.until_iso === "string" && body.until_iso.length > 0
+										? body.until_iso
+										: null,
+							}
+						: action === "liaison_resume"
+							? {}
+							: {
+									reason:
+										typeof body.reason === "string" && body.reason.length > 0
+											? body.reason
+											: "operator",
+								};
+
+			const message = await sendLiaisonMessage({
+				agency_id: agencyId,
+				direction: "orchestrator->liaison",
+				kind: action,
+				payload,
+			});
+
+			await query(
+				`INSERT INTO roadmap.audit_log
+				    (entity_type, entity_id, action, changed_by, after_json)
+				 VALUES ('agency', $1, $2, $3, $4::jsonb)`,
+				[
+					agencyId,
+					action,
+					auth.outcome.operatorName ?? "operator",
+					JSON.stringify({
+						message_id: message.message_id,
+						sequence: String(message.sequence),
+						payload,
+					}),
+				],
+			);
+
+			return Response.json({
+				success: true,
+				agency_id: agencyId,
+				action,
+				message_id: message.message_id,
+				sequence: String(message.sequence),
+				operator: auth.outcome.operatorName,
+			});
+		} catch (error) {
+			console.error("Error sending agency action:", error);
+			return Response.json({ error: "Failed to send agency action" }, { status: 500 });
 		}
 	}
 

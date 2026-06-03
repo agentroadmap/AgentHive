@@ -185,6 +185,13 @@ export class PgTeamGovernanceHandlers {
 	/**
 	 * AC-3, AC-4, AC-5: Log or update a dispute in agent_conflicts.
 	 * Supports three-tier ladder: L1(self) → L2(peer) → L3(team) → L4(society).
+	 *
+	 * Column mapping (actual DB schema):
+	 *   initiatorAgent → agent_a
+	 *   respondentAgent → agent_b
+	 *   description → topic
+	 *   positionA → position_a  (initiator's stated position)
+	 *   positionB → position_b  (respondent's stated position)
 	 */
 	async teamDisputeLog(args: {
 		proposalId: string;
@@ -192,6 +199,8 @@ export class PgTeamGovernanceHandlers {
 		respondentAgent: string;
 		description: string;
 		escalationLevel: "L1" | "L2" | "L3" | "L4";
+		positionA?: string;
+		positionB?: string;
 		status?: "open" | "team_resolved" | "escalated" | "resolved" | "dismissed";
 		teamId?: string;
 		resolutionNote?: string;
@@ -208,6 +217,8 @@ export class PgTeamGovernanceHandlers {
 				args.teamId != null ? parseInt(args.teamId, 10) : null;
 
 			const status = args.status ?? "open";
+			const positionA = args.positionA ?? "initiating dispute";
+			const positionB = args.positionB ?? "responding agent";
 
 			// Check if an open dispute between these agents on this proposal exists
 			const existing = await query<{ id: number }>(
@@ -230,7 +241,9 @@ export class PgTeamGovernanceHandlers {
 					SET status = $1,
 					    escalation_level = $2,
 					    team_id = $3,
-					    resolution_note = $4
+					    resolution_note = $4,
+					    resolved_at = CASE WHEN $1 IN ('resolved','team_resolved','dismissed')
+					                       THEN now() ELSE resolved_at END
 					WHERE id = $5`,
 					[
 						status,
@@ -253,8 +266,8 @@ export class PgTeamGovernanceHandlers {
 						args.initiatorAgent,
 						args.respondentAgent,
 						args.description,
-						args.initiatorPosition ?? args.description,
-						args.respondentPosition ?? "" ,
+						positionA,
+						positionB,
 						status,
 						args.escalationLevel,
 						teamIdNum,

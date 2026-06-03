@@ -87,6 +87,7 @@ The following MCP tools implement the team governance protocol:
 | `team_charter_create` | Create charter + default norms at squad assembly | — | AC-1, AC-6 |
 | `team_norms_set` | Set or update a named norm | — | AC-2 |
 | `team_dispute_log` | Log or resolve a dispute; set escalation level | `open`, `team_resolved`, `escalated`, `resolved`, `dismissed` | AC-3, AC-5 |
+| `team_governance_archive` | Archive charter+decisions, remove transient norms, dissolve team on COMPLETE | — | AC-7 |
 
 Use `status=team_resolved` in `team_dispute_log` to mark disputes settled at team level (L3). This is distinct from `resolved` (society-level) and `escalated` (pending L4 review).
 

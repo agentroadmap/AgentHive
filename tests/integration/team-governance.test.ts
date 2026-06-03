@@ -218,4 +218,68 @@ describe("P182: Team Governance Layer", () => {
 			assert.ok(migration.includes("metadata"), "Migration must add metadata column to team table");
 		});
 	});
+
+	// ─── AC-9: Orchestrator auto-charter hook ─────────────────────────────────
+
+	describe("AC-9: Auto-charter trigger on squad_dispatch", () => {
+		it("migration 178 defines fn_auto_charter_team and trg_auto_charter_on_dispatch", () => {
+			const { readFileSync } = require("node:fs");
+			const migration = readFileSync(
+				"scripts/migrations/178-p182-auto-charter-trigger.sql",
+				"utf8",
+			);
+			assert.ok(
+				migration.includes("fn_auto_charter_team"),
+				"Migration must define fn_auto_charter_team trigger function",
+			);
+			assert.ok(
+				migration.includes("trg_auto_charter_on_dispatch"),
+				"Migration must create trg_auto_charter_on_dispatch trigger",
+			);
+			assert.ok(
+				migration.includes("squad_dispatch"),
+				"Trigger must fire on squad_dispatch table",
+			);
+			assert.ok(
+				migration.includes("team:charter"),
+				"Trigger function must insert team:charter norm",
+			);
+			assert.ok(
+				migration.includes("team:norm:"),
+				"Trigger function must insert default governance norms",
+			);
+		});
+
+		it("migration 178 uses SECURITY DEFINER and non-terminal dispatch filter", () => {
+			const { readFileSync } = require("node:fs");
+			const migration = readFileSync(
+				"scripts/migrations/178-p182-auto-charter-trigger.sql",
+				"utf8",
+			);
+			assert.ok(
+				migration.includes("SECURITY DEFINER"),
+				"Trigger function must use SECURITY DEFINER for cross-schema writes",
+			);
+			assert.ok(
+				migration.includes("cancelled") && migration.includes("failed") && migration.includes("completed"),
+				"Trigger function must skip terminal dispatch_status values",
+			);
+		});
+
+		it("trigger function body requires count >= 2 before firing charter", () => {
+			const { readFileSync } = require("node:fs");
+			const migration = readFileSync(
+				"scripts/migrations/178-p182-auto-charter-trigger.sql",
+				"utf8",
+			);
+			assert.ok(
+				migration.includes("v_count < 2"),
+				"Trigger must only create charter when 2+ dispatches exist for same proposal",
+			);
+			assert.ok(
+				migration.includes("ON CONFLICT (team_id, norm_key) DO NOTHING"),
+				"Charter insert must be idempotent",
+			);
+		});
+	});
 });

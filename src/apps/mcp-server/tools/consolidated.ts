@@ -184,6 +184,15 @@ const proposalRoutes: RouteMap = {
 	child_boot_check: "child_boot_check",
 	spawn_summary_emit: "spawn_summary_emit",
 	briefing_list: "briefing_list",
+	// P242: Re-evaluation queue
+	reeval_list: "reeval_list",
+	reeval_claim: "reeval_claim",
+	reeval_release: "reeval_release",
+	reeval_decide: "reeval_decide",
+	reeval_projection: "reeval_projection",
+	reeval_budget_check: "reeval_budget_check",
+	reeval_flag_stale: "reeval_flag_stale",
+	reeval_flag_complete: "reeval_flag_complete",
 };
 
 const messageRoutes: RouteMap = {
@@ -320,9 +329,13 @@ const opsRoutes: RouteMap = {
 	set_project: "project_set",
 	list_projects: "project_registry_list",
 	create_project: "project_create_v2",
+	update_project: "project_update",
 	project_route_list: "project_route_list",
 	project_capability_list: "project_capability_list",
 	project_cap_list: "project_cap_list",
+	health_check: "project_health_check",
+	// P081: SLA health check — returns Normal/Degraded/Down with live metrics
+	sla_health_check: "sla_health_check",
 	// P187: Reference Catalog
 	ref_list_domains: "ref_list_domains",
 	ref_list_terms: "ref_list_terms",
@@ -390,6 +403,9 @@ export function registerConsolidatedTools(server: McpServer): void {
 				"LIST (prop_list): free-text search is NOT supported here — use `proposal_search` action instead. Passing `search`/`q`/`title_contains` returns an explicit ❌ error naming the bad param. " +
 				"VERIFY_AC: each AC needs its own call (1-indexed item_number); ACs stay 'pending' until you explicitly call verify_ac with status='pass' — NOT inferred from tests passing or maturity advance. status enum is {pass, fail, blocked, waived}, NOT 'verified'. " +
 				"ADD_ACCEPTANCE_CRITERIA: pass `criteria: string[]` (array of full sentences), NOT individual title/description fields nor `acceptance_criteria` key. " +
+				"SUBMIT_REVIEW: reviewer identity field is `reviewer` on input (NOT reviewer_identity / agent_identity / identity). Response returns it as `reviewer_identity`. Pass `is_blocking: true` to mark a blocking review (now persisted correctly). " +
+				"ADD_DISCUSSION: entries persist in storage and are readable via MCP projections, but the board UI does NOT render discussion entries — use `submit_review` for findings that need to be visible to operators. " +
+				"PROP_LIST/LIST: free-text search params (search, q, title_contains) are NOT supported — use `proposal_search` for keyword search. " +
 				"Use action=list_actions to enumerate every action name.",
 			proposalRoutes,
 		),

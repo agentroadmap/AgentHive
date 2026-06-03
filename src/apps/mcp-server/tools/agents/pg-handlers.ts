@@ -199,30 +199,6 @@ export class PgAgentHandlers {
 		agency_host_id?: string;
 		project_id?: number;
 		squad_name?: string;
-	}): Promise<CallToolResult> {
-		try {
-			const normalizedIdentity = normalizeAgentId(args.identity);
-
-			const collision = await detectCollision(args.identity);
-			if (collision && collision !== args.identity) {
-				return errorResult(
-					"Agent identity collision",
-					`"${args.identity}" normalizes to same as "${collision}"`,
-				);
-			}
-
-			// AC-9: Validate preferred_provider against canonical set
-			const canonicalProviders = ["claude", "codex", "gemini", "copilot"];
-			if (args.preferred_provider) {
-				const normalizedProvider = args.preferred_provider.trim().toLowerCase();
-				if (!canonicalProviders.includes(normalizedProvider)) {
-					return errorResult(
-						"Invalid preferred_provider",
-						`Value "${args.preferred_provider}" is not in canonical set: ${canonicalProviders.join(", ")}. NULL/undefined is allowed for unspecified.`,
-					);
-				}
-			}
-
 			const skillsJson = args.skills
 				? typeof args.skills === "string"
 					? args.skills.trim().startsWith("[") || args.skills.trim().startsWith("{")
@@ -366,50 +342,6 @@ export class PgAgentHandlers {
 	}
 
 	/**
-	 * P1129: Probe a CLI to verify a model name is accepted.
-	 * Returns { ok: true } if probe succeeds or CLI is unrecognised (permissive default).
-	 * Returns { ok: false, error } if the CLI explicitly rejects the model name.
-	 */
-	private probeModel(
-		agentProvider: string,
-		modelName: string,
-	): { ok: boolean; error?: string } {
-		type CliProbeSpec = { cli: string; args: string[]; rejectPattern: RegExp; rejectOnNonZero: boolean };
-		const specs: Record<string, CliProbeSpec> = {
-			claude: {
-				cli: "claude",
-				args: ["--model", modelName, "-p", "x"],
-				rejectPattern: /unknown model/i,
-				rejectOnNonZero: false,
-			},
-			codex: {
-				cli: "codex",
-				args: ["--model", modelName, "--no-git", "-q", "x"],
-				rejectPattern: /invalid model/i,
-				rejectOnNonZero: true,
-			},
-			gemini: {
-				cli: "gemini",
-				args: ["--model", modelName, "-p", "x"],
-				rejectPattern: /model not found/i,
-				rejectOnNonZero: false,
-			},
-			copilot: {
-				cli: "copilot",
-				args: ["--model", modelName, "-p", "x"],
-				rejectPattern: /model not found|invalid/i,
-				rejectOnNonZero: true,
-			},
-		};
-
-		const spec = specs[agentProvider];
-		if (!spec) {
-			return { ok: true };
-		}
-
-		try {
-			const result = spawnSync(spec.cli, spec.args, {
-				timeout: 10000,
 				encoding: "utf-8",
 			});
 			const output = ((result.stdout as string) || "") + ((result.stderr as string) || "");
@@ -434,22 +366,6 @@ export class PgAgentHandlers {
 	 * AC-3: Tier mapping between tables:
 	 * - metadata_tier (frontier|standard|economy) → routes via mapMetadataTierToRouteTier
 	 * - Or specify route_tier directly for custom routing (e.g., 'tool' for special cases)
-	 */
-	async registerModel(args: {
-		agent_identity: string;
-		model_name: string;
-		route_provider: string;
-		agent_provider: string;
-		agent_cli?: string;
-		base_url?: string;
-		api_spec?: string;
-		metadata_tier?: string;
-		route_tier?: string;
-		skip_probe?: boolean;
-	}): Promise<CallToolResult> {
-		// AC-11: Serialize concurrent registerModel calls per identity
-		return await this.withIdentityLock(args.agent_identity, async () => {
-			try {
 			if (args.skip_probe) {
 				const trustCheck = await query(
 					`SELECT trust_tier FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,

@@ -476,7 +476,9 @@ export class McpServer extends Core {
 		// P854: _auth envelope path sets verifiedPrincipal but has no transport context;
 		// wrap handler so getProjectDb() P844 gate sees the principal.
 		// AC-5/AC-26: per-call error boundary — isolates handler failures from transport/SSE clients.
+		const t0 = process.hrtime.bigint();
 		let result: CallToolResult;
+		let handlerError = false;
 		try {
 			result =
 				verifiedPrincipal && !ctx
@@ -485,22 +487,26 @@ export class McpServer extends Core {
 						)
 					: await tool.handler(args);
 		} catch (err) {
+			handlerError = true;
 			const message = err instanceof Error ? err.message : String(err);
-			const duration_ms = Number(process.hrtime.bigint() - _t0) / 1_000_000;
-			try {
-				await query(
-					`INSERT INTO roadmap.trace_span (operation_type, service_did, attributes, status, started_at, ended_at)
-					 VALUES ($1, $2, $3, $4, now() - interval '1 ms' * $5, now())`,
-					['mcp_tool_call', 'mcp-server', JSON.stringify({ tool_name: name, duration_ms, error_message: message }), 'error', duration_ms],
-				);
-			} catch (_err) {
-				// Trace span write failures are non-fatal
-			}
-			return {
-				isError: true,
-				content: [{ type: "text", text: `Tool handler error: ${message}` }],
-			};
+			result = { isError: true, content: [{ type: "text", text: `Tool handler error: ${message}` }] };
 		}
+		// P081: latency instrumentation — write to trace_span best-effort
+		try {
+			const durationMs = Number(process.hrtime.bigint() - t0) / 1_000_000;
+			void query(
+				`INSERT INTO roadmap.trace_span
+				   (trace_id, operation, service_did, attributes, status, ended_at)
+				 VALUES (gen_random_uuid(), 'mcp_tool_call', 'operator:mcp-server', $1, $2, now())`,
+				[
+					JSON.stringify({ tool_name: name, duration_ms: Math.round(durationMs * 10) / 10 }),
+					handlerError || result.isError ? "error" : "ok",
+				],
+			);
+		} catch {
+			// Latency logging is non-fatal
+		}
+		if (handlerError) return result;
 
 		// Log tool call to pulse
 		try {
@@ -836,6 +842,21 @@ export async function createMcpServer(
 		} catch (error) {
 			console.error("[MCP] Failed to register timeout cron:", error);
 			// Non-fatal; continue without timeout reliability (messages won't escalate/remind)
+		}
+
+		// Register stuck-task sweep cron (P1110) — every 5 min, clears stuck liaison_task_tracker rows
+		try {
+			const { registerStuckTaskCron } = await import(
+				"../../infra/agency/task-dispatcher.ts"
+			);
+			const stuckPool = pgPool.getPool();
+			await registerStuckTaskCron(stuckPool);
+			if (options.debug) {
+				console.error("[MCP] Stuck-task sweep cron registered");
+			}
+		} catch (error) {
+			console.error("[MCP] Failed to register stuck-task sweep cron:", error);
+			// Non-fatal; stuck tracker rows will persist until next restart
 		}
 
 		// Register delivery_id_log cleanup cron (P836) — every 5 min, advisory-lock guarded
@@ -1499,6 +1520,11 @@ export async function createMcpServer(
 					phase: {
 						type: "string",
 						description: "Phase (design/build/test/ship, default: design)",
+					},
+					project_id: {
+						type: "number",
+						description:
+							"Optional tenant project_id. When provided, cubic worktree is created under roadmap.project.worktree_root and that root must exist.",
 					},
 				},
 				required: ["name"],
@@ -2502,6 +2528,24 @@ export async function createMcpServer(
 
 	console.error("[MCP] Registered 9 P466/P468/P475 spawn-briefing tools (liaison protocol)");
 
+	// P081: SLA health check tool
+	const { SlaHandler } = await import("./tools/ops/sla-handler.ts");
+	const slaHandler = new SlaHandler();
+	server.addTool({
+		name: "sla_health_check",
+		description: "P081: Return current platform SLA state (Normal/Degraded/Down) with p99 latency, error rate, and active agent count. State transitions fire pg_notify sla_state_change.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				detail: { type: "boolean", description: "Include raw metric values (default true)" },
+			},
+		},
+		handler: async (args: Record<string, unknown>) => {
+			const result = await slaHandler.healthCheck(args);
+			return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+		},
+	});
+
 	// P499: PgBouncer operator tools
 	const { PgBouncerOpsHandler } = await import("./tools/ops/pgbouncer-ops.ts");
 	const pgbouncer = new PgBouncerOpsHandler();
@@ -2671,6 +2715,49 @@ export async function createMcpServer(
 				content: [{ type: "text", text: JSON.stringify(r, null, 2) }],
 			}));
 		},
+	});
+
+	// P1129: Agency lifecycle tools — agency_start / agency_status
+	const { AgencyOpsHandler } = await import("./tools/ops/agency-ops.ts");
+	const agencyOps = new AgencyOpsHandler();
+	server.addTool({
+		name: "agency_start",
+		description:
+			"P1129: Enable and start an agency's liaison systemd service. " +
+			"Verifies agent_type='agency' in agent_registry before touching systemd. " +
+			"Requires the mcp-server process user to have sudoers access to agenthive-agency@.service.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				identity: {
+					type: "string",
+					description: "Agency identity (agent_identity in agent_registry, e.g. 'george')",
+				},
+			},
+			required: ["identity"],
+		},
+		handler: async (args: Record<string, unknown>) =>
+			agencyOps.agencyStart({ identity: String(args.identity) })
+				.then((r) => ({ content: [{ type: "text", text: JSON.stringify(r, null, 2) }] })),
+	});
+	server.addTool({
+		name: "agency_status",
+		description:
+			"P1129: Query live status of an agency — combines systemd is-active state with " +
+			"agent_registry.last_seen_at and status. Read-only operation.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				identity: {
+					type: "string",
+					description: "Agency identity (agent_identity in agent_registry)",
+				},
+			},
+			required: ["identity"],
+		},
+		handler: async (args: Record<string, unknown>) =>
+			agencyOps.agencyStatus({ identity: String(args.identity) })
+				.then((r) => ({ content: [{ type: "text", text: JSON.stringify(r, null, 2) }] })),
 	});
 
 	// P1129: Agency lifecycle tools — agency_start / agency_status
