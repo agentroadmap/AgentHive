@@ -15,6 +15,7 @@ import { v4 as uuidv4 } from "uuid";
 import { query } from "../postgres/pool.js";
 import type { Pool } from "pg";
 import { MemoryService } from "../../memory/memory_service.ts";
+import { buildContextPackage, type PackageType } from "./context_builder.js";
 
 export interface TaskContext {
   task_id: string;
@@ -37,6 +38,11 @@ export interface TaskContext {
   request_assistance_threshold?: number;
 
   topic_keywords?: string[]; // for memory search
+
+  // P230: proposal-scoped context injection
+  proposal_id?: bigint | number;
+  team_name?: string;
+  context_package_type?: PackageType;
 }
 
 export interface SpawnBriefing {
@@ -177,6 +183,26 @@ export async function briefingAssemble(
   } catch {
     // Non-fatal: project_memory table may not exist yet (pre-migration).
     // Proceed without injecting project context.
+  }
+
+  // P230 Step 5b: inject proposal-scoped context package when proposal_id is set.
+  if (task.proposal_id != null) {
+    try {
+      const proposalContext = await buildContextPackage({
+        proposal_id: task.proposal_id,
+        package_type: task.context_package_type ?? "code_gen",
+        agent_id: briefed_by,
+        team_name: task.team_name,
+      });
+      if (proposalContext) {
+        inherited_memory.push({
+          key: "proposal_context",
+          body: proposalContext,
+        });
+      }
+    } catch {
+      // Non-fatal: proceed without proposal context.
+    }
   }
 
   // Step 6: Record briefing

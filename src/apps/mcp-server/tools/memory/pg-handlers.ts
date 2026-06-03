@@ -38,6 +38,144 @@ function errorResult(msg: string, err: unknown): CallToolResult {
 export class PgMemoryHandlers {
 	constructor(private readonly server: McpServer) {}
 
+	// ── Team Memory ──────────────────────────────────────────────────────────────
+
+	async teamMemSet(args: {
+		team_name: string;
+		key: string;
+		value: unknown;
+		created_by: string;
+		expires_in_days?: number;
+	}): Promise<CallToolResult> {
+		try {
+			const expiresAt =
+				args.expires_in_days != null
+					? new Date(Date.now() + args.expires_in_days * 86400_000).toISOString()
+					: null;
+			await query(
+				`INSERT INTO roadmap_efficiency.team_memory
+           (team_name, memory_key, memory_value, created_by, expires_at)
+         VALUES ($1, $2, $3::jsonb, $4, $5)
+         ON CONFLICT (team_name, memory_key)
+         DO UPDATE SET
+           memory_value = EXCLUDED.memory_value,
+           updated_at   = now(),
+           created_by   = EXCLUDED.created_by,
+           expires_at   = EXCLUDED.expires_at`,
+				[
+					args.team_name,
+					args.key,
+					JSON.stringify(args.value),
+					args.created_by,
+					expiresAt,
+				],
+			);
+			return {
+				content: [
+					{
+						type: "text",
+						text: `✅ team_memory set: ${args.team_name}/${args.key}`,
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to set team memory", err);
+		}
+	}
+
+	async teamMemGet(args: {
+		team_name: string;
+		key: string;
+	}): Promise<CallToolResult> {
+		try {
+			const { rows } = await query<{
+				memory_key: string;
+				memory_value: unknown;
+				updated_at: Date;
+				expires_at: Date | null;
+			}>(
+				`SELECT memory_key, memory_value, updated_at, expires_at
+         FROM roadmap_efficiency.team_memory
+         WHERE team_name = $1
+           AND memory_key = $2
+           AND (expires_at IS NULL OR expires_at > now())`,
+				[args.team_name, args.key],
+			);
+			if (!rows.length) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `No team memory found for ${args.team_name}/${args.key}`,
+						},
+					],
+				};
+			}
+			const r = rows[0];
+			await query(
+				`UPDATE roadmap_efficiency.team_memory
+         SET access_count = access_count + 1
+         WHERE team_name = $1 AND memory_key = $2`,
+				[args.team_name, args.key],
+			);
+			return {
+				content: [
+					{
+						type: "text",
+						text: `**${r.memory_key}**: ${JSON.stringify(r.memory_value)}${r.expires_at ? ` _(expires: ${new Date(r.expires_at).toISOString()})_` : ""}`,
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to get team memory", err);
+		}
+	}
+
+	async teamMemList(args: { team_name: string }): Promise<CallToolResult> {
+		try {
+			const { rows } = await query<{
+				memory_key: string;
+				memory_value: unknown;
+				created_by: string;
+				updated_at: Date;
+				expires_at: Date | null;
+			}>(
+				`SELECT memory_key, memory_value, created_by, updated_at, expires_at
+         FROM roadmap_efficiency.team_memory
+         WHERE team_name = $1
+           AND (expires_at IS NULL OR expires_at > now())
+         ORDER BY updated_at DESC`,
+				[args.team_name],
+			);
+			if (!rows.length) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `No team memory found for team: ${args.team_name}`,
+						},
+					],
+				};
+			}
+			const lines = rows.map(
+				(r) =>
+					`**${r.memory_key}** (by ${r.created_by}): ${JSON.stringify(r.memory_value)}${r.expires_at ? ` _(expires: ${new Date(r.expires_at).toISOString()})_` : ""}`,
+			);
+			return {
+				content: [
+					{
+						type: "text",
+						text: `### Team: ${args.team_name}\n${lines.join("\n")}`,
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to list team memory", err);
+		}
+	}
+
+	// ── Agent Memory ─────────────────────────────────────────────────────────────
+
 	async setMemory(args: {
 		agent_identity: string;
 		layer: string;
@@ -45,6 +183,7 @@ export class PgMemoryHandlers {
 		value: string;
 		metadata?: string;
 		ttl_seconds?: number;
+		importance_score?: number;
 	}): Promise<CallToolResult> {
 		try {
 			if (
@@ -94,6 +233,12 @@ export class PgMemoryHandlers {
 					nextParam += 1;
 				}
 
+				if (args.importance_score !== undefined) {
+					setClauses.push(`importance_score = $${nextParam}`);
+					params.push(Math.min(10, Math.max(1, Math.round(args.importance_score))));
+					nextParam += 1;
+				}
+
 				await query(
 					`UPDATE agent_memory
            SET ${setClauses.join(", ")}
@@ -102,8 +247,8 @@ export class PgMemoryHandlers {
 				);
 			} else {
 				await query(
-					`INSERT INTO agent_memory (agent_identity, layer, key, value, metadata, ttl_seconds)
-           VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,
+					`INSERT INTO agent_memory (agent_identity, layer, key, value, metadata, ttl_seconds, importance_score)
+           VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)`,
 					[
 						args.agent_identity,
 						args.layer,
@@ -111,6 +256,9 @@ export class PgMemoryHandlers {
 						args.value,
 						metadata === undefined ? null : JSON.stringify(metadata),
 						args.ttl_seconds ?? null,
+						args.importance_score != null
+							? Math.min(10, Math.max(1, Math.round(args.importance_score)))
+							: 5,
 					],
 				);
 			}

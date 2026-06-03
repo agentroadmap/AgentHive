@@ -9,6 +9,66 @@ function textResult(text: string): CallToolResult {
 export function registerMemoryTools(server: McpServer): void {
 	const handlers = new PgMemoryHandlers(server);
 
+	// P230: team memory tools
+	server.addTool({
+		name: "team_mem_set",
+		description: "Store a shared decision or fact in team memory (all squad members can read)",
+		inputSchema: {
+			type: "object",
+			properties: {
+				team_name: { type: "string", description: "Squad/team identifier" },
+				key: { type: "string", description: "Memory key" },
+				value: { description: "Value to store (any JSON-serialisable type)" },
+				created_by: { type: "string", description: "Agent identity writing this entry" },
+				expires_in_days: { type: "number", description: "Optional TTL in days" },
+			},
+			required: ["team_name", "key", "value", "created_by"],
+		},
+		handler: async (args: Record<string, unknown>) =>
+			await handlers.teamMemSet({
+				team_name: String(args.team_name),
+				key: String(args.key),
+				value: args.value,
+				created_by: String(args.created_by),
+				expires_in_days:
+					typeof args.expires_in_days === "number" ? args.expires_in_days : undefined,
+			}),
+	});
+
+	server.addTool({
+		name: "team_mem_get",
+		description: "Read a shared memory entry for a team by key",
+		inputSchema: {
+			type: "object",
+			properties: {
+				team_name: { type: "string" },
+				key: { type: "string" },
+			},
+			required: ["team_name", "key"],
+		},
+		handler: async (args: Record<string, unknown>) =>
+			await handlers.teamMemGet({
+				team_name: String(args.team_name),
+				key: String(args.key),
+			}),
+	});
+
+	server.addTool({
+		name: "team_mem_list",
+		description: "List all non-expired shared memory entries for a team",
+		inputSchema: {
+			type: "object",
+			properties: {
+				team_name: { type: "string" },
+			},
+			required: ["team_name"],
+		},
+		handler: async (args: Record<string, unknown>) =>
+			await handlers.teamMemList({
+				team_name: String(args.team_name),
+			}),
+	});
+
 	server.addTool({
 		name: "memory_set",
 		description: "Store agent memory in the Postgres memory layer",
@@ -21,6 +81,10 @@ export function registerMemoryTools(server: McpServer): void {
 				value: { type: "string" },
 				metadata: { type: "string" },
 				ttl_seconds: { type: "number" },
+				importance_score: {
+					type: "number",
+					description: "Importance 1-10 (default 5). Low-importance entries (<5) decay after 14 days.",
+				},
 			},
 			required: ["key", "value"],
 		},
@@ -33,6 +97,8 @@ export function registerMemoryTools(server: McpServer): void {
 				metadata: typeof args.metadata === "string" ? args.metadata : undefined,
 				ttl_seconds:
 					typeof args.ttl_seconds === "number" ? args.ttl_seconds : undefined,
+				importance_score:
+					typeof args.importance_score === "number" ? args.importance_score : undefined,
 			}),
 	});
 
