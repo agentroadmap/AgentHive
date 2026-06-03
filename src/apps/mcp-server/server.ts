@@ -344,9 +344,9 @@ export class McpServer extends Core {
 			const duration_ms = Number(process.hrtime.bigint() - _t0) / 1_000_000;
 			try {
 				await query(
-					`INSERT INTO roadmap.trace_span (operation_type, service_did, attributes, status, started_at, ended_at)
-					 VALUES ($1, $2, $3, $4, now() - interval '1 ms' * $5, now())`,
-					['mcp_tool_call', 'mcp-server', JSON.stringify({ tool_name: name, duration_ms }), 'error', duration_ms],
+					`INSERT INTO roadmap.trace_span (trace_id, operation, service_did, attributes, status, started_at, ended_at)
+					 VALUES (gen_random_uuid(), $1, $2, $3, $4, now() - $5 * interval '1 ms', now())`,
+					['mcp_tool_call', 'operator:mcp-server', JSON.stringify({ tool_name: name, duration_ms }), 'error', duration_ms],
 				);
 			} catch (_err) {
 				// Trace span write failures are non-fatal
@@ -388,9 +388,9 @@ export class McpServer extends Core {
 					const duration_ms = Number(process.hrtime.bigint() - _t0) / 1_000_000;
 					try {
 						await query(
-							`INSERT INTO roadmap.trace_span (operation_type, service_did, attributes, status, started_at, ended_at)
-							 VALUES ($1, $2, $3, $4, now() - interval '1 ms' * $5, now())`,
-							['mcp_tool_call', 'mcp-server', JSON.stringify({ tool_name: name, duration_ms, reason: 'auth_denied' }), 'error', duration_ms],
+							`INSERT INTO roadmap.trace_span (trace_id, operation, service_did, attributes, status, started_at, ended_at)
+							 VALUES (gen_random_uuid(), $1, $2, $3, $4, now() - $5 * interval '1 ms', now())`,
+							['mcp_tool_call', 'operator:mcp-server', JSON.stringify({ tool_name: name, duration_ms, reason: 'auth_denied' }), 'error', duration_ms],
 						);
 					} catch (_err) {
 						// Trace span write failures are non-fatal
@@ -405,9 +405,9 @@ export class McpServer extends Core {
 				const duration_ms = Number(process.hrtime.bigint() - _t0) / 1_000_000;
 				try {
 					await query(
-						`INSERT INTO roadmap.trace_span (operation_type, service_did, attributes, status, started_at, ended_at)
-						 VALUES ($1, $2, $3, $4, now() - interval '1 ms' * $5, now())`,
-						['mcp_tool_call', 'mcp-server', JSON.stringify({ tool_name: name, duration_ms, reason: 'no_auth_envelope' }), 'error', duration_ms],
+						`INSERT INTO roadmap.trace_span (trace_id, operation, service_did, attributes, status, started_at, ended_at)
+						 VALUES (gen_random_uuid(), $1, $2, $3, $4, now() - $5 * interval '1 ms', now())`,
+						['mcp_tool_call', 'operator:mcp-server', JSON.stringify({ tool_name: name, duration_ms, reason: 'no_auth_envelope' }), 'error', duration_ms],
 					);
 				} catch (_err) {
 					// Trace span write failures are non-fatal
@@ -426,9 +426,9 @@ export class McpServer extends Core {
 				const duration_ms = Number(process.hrtime.bigint() - _t0) / 1_000_000;
 				try {
 					await query(
-						`INSERT INTO roadmap.trace_span (operation_type, service_did, attributes, status, started_at, ended_at)
-						 VALUES ($1, $2, $3, $4, now() - interval '1 ms' * $5, now())`,
-						['mcp_tool_call', 'mcp-server', JSON.stringify({ tool_name: name, duration_ms, reason: 'grant_denied', requested_op: requestedOp }), 'error', duration_ms],
+						`INSERT INTO roadmap.trace_span (trace_id, operation, service_did, attributes, status, started_at, ended_at)
+						 VALUES (gen_random_uuid(), $1, $2, $3, $4, now() - $5 * interval '1 ms', now())`,
+						['mcp_tool_call', 'operator:mcp-server', JSON.stringify({ tool_name: name, duration_ms, reason: 'grant_denied', requested_op: requestedOp }), 'error', duration_ms],
 					);
 				} catch (_err) {
 					// Trace span write failures are non-fatal
@@ -455,9 +455,9 @@ export class McpServer extends Core {
 			const duration_ms = Number(process.hrtime.bigint() - _t0) / 1_000_000;
 			try {
 				await query(
-					`INSERT INTO roadmap.trace_span (operation_type, service_did, attributes, status, started_at, ended_at)
-					 VALUES ($1, $2, $3, $4, now() - interval '1 ms' * $5, now())`,
-					['mcp_tool_call', 'mcp-server', JSON.stringify({ tool_name: name, duration_ms, error_message: message }), 'error', duration_ms],
+					`INSERT INTO roadmap.trace_span (trace_id, operation, service_did, attributes, status, started_at, ended_at)
+					 VALUES (gen_random_uuid(), $1, $2, $3, $4, now() - $5 * interval '1 ms', now())`,
+					['mcp_tool_call', 'operator:mcp-server', JSON.stringify({ tool_name: name, duration_ms, error_message: message }), 'error', duration_ms],
 				);
 			} catch (_err) {
 				// Trace span write failures are non-fatal
@@ -503,9 +503,9 @@ export class McpServer extends Core {
 		const duration_ms = Number(process.hrtime.bigint() - _t0) / 1_000_000;
 		try {
 			await query(
-				`INSERT INTO roadmap.trace_span (operation_type, service_did, attributes, status, started_at, ended_at)
-				 VALUES ($1, $2, $3, $4, now() - interval '1 ms' * $5, now())`,
-				['mcp_tool_call', 'mcp-server', JSON.stringify({ tool_name: name, duration_ms }), 'ok', duration_ms],
+				`INSERT INTO roadmap.trace_span (trace_id, operation, service_did, attributes, status, started_at, ended_at)
+				 VALUES (gen_random_uuid(), $1, $2, $3, $4, now() - $5 * interval '1 ms', now())`,
+				['mcp_tool_call', 'operator:mcp-server', JSON.stringify({ tool_name: name, duration_ms }), 'ok', duration_ms],
 			);
 		} catch (_err) {
 			// Trace span write failures are non-fatal

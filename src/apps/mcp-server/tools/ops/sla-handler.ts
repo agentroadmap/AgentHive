@@ -1,15 +1,23 @@
 /**
- * P1511: SLA monitoring and health check operator tools
+ * P081: SLA monitoring and health check operator tools
  * Queries roadmap.trace_span and roadmap.sla_config to expose system health metrics via mcp_ops.
  * Monitors p99 latency, error rates, and compares against configured thresholds.
+ *
+ * Live DB schema (as of migration 182):
+ *   roadmap.sla_config: key (PK), value, description, updated_at
+ *     keys: latency_p99_ms_threshold, error_rate_pct_threshold, error_window_seconds, ...
+ *   roadmap.sla_events: id, occurred_at, state, prev_state, trigger, metric_value, threshold, resolved_at
+ *     state/prev_state CHECK: 'Normal' | 'Degraded' | 'Down' (capitalized)
+ *   roadmap.trace_span: span_id, trace_id, operation, service_did, started_at, ended_at, attributes, status
+ *     service_did CHECK: ^(agent|agency|operator):
  */
 
-import { Pool, type QueryResult, type QueryResultRow } from "pg";
+import { Pool } from "pg";
 
 export interface SlaThresholds {
-	p99_latency_ms: number;
-	error_rate_threshold_pct: number;
-	error_rate_window_seconds: number;
+	latency_p99_ms: number;
+	error_rate_pct: number;
+	error_window_seconds: number;
 }
 
 export interface SlaMetrics {
@@ -19,8 +27,10 @@ export interface SlaMetrics {
 	error_rate_pct: number;
 }
 
+export type SlaState = "Normal" | "Degraded" | "Down";
+
 export interface HealthCheckResult {
-	state: "normal" | "degraded" | "down";
+	state: SlaState;
 	metrics: SlaMetrics;
 	thresholds: SlaThresholds;
 	measured_at: string;
@@ -28,95 +38,68 @@ export interface HealthCheckResult {
 }
 
 export interface SlaHealthResult {
-	state: "normal" | "degraded" | "down";
+	state: SlaState;
 	metrics: SlaMetrics;
 	thresholds: SlaThresholds;
 	measured_at: string;
 	details: string;
 	state_changed: boolean;
-	previous_state?: "normal" | "degraded" | "down" | null;
+	previous_state: SlaState | null;
 }
 
-export interface SlaConfigRow {
-	id: number;
-	p99_latency_ms: number;
-	error_rate_threshold_pct: number;
-	error_rate_window_seconds: number;
-	created_at: string;
-	updated_at: string;
+interface SlaConfigKv {
+	key: string;
+	value: string;
 }
 
-export interface TraceSpanAggregateRow {
-	p99_ms: number | null;
-	error_count: number;
-	total_count: number;
+interface TraceSpanAggregateRow {
+	p99_ms: string | null;
+	error_count: string;
+	total_count: string;
 }
 
-export interface SlaEventRow {
-	id: number;
-	state: "normal" | "degraded" | "down";
-	previous_state: "normal" | "degraded" | "down" | null;
-	trigger_metric: string | null;
-	trigger_value: string | null;
-	details: string | null;
-	created_at: string;
+interface SlaEventRow {
+	state: SlaState;
+	prev_state: SlaState | null;
+	occurred_at: string;
 }
 
 export class SlaHandler {
 	constructor(private pool: Pool) {}
 
 	/**
-	 * Query SLA configuration thresholds from observability schema.
-	 * Returns the most recently updated config row.
-	 * Falls back to sensible defaults if no config exists.
+	 * Query SLA configuration thresholds from key-value store.
+	 * Falls back to sensible defaults if config rows are absent.
 	 */
 	private async getSlaConfig(): Promise<SlaThresholds> {
 		try {
-			const result = await this.pool.query<SlaConfigRow>(
-				`SELECT
-					id,
-					p99_latency_ms,
-					error_rate_threshold_pct,
-					error_rate_window_seconds,
-					created_at,
-					updated_at
-				FROM roadmap.sla_config
-				ORDER BY updated_at DESC
-				LIMIT 1`,
+			const result = await this.pool.query<SlaConfigKv>(
+				`SELECT key, value FROM roadmap.sla_config
+				 WHERE key IN ('latency_p99_ms_threshold', 'error_rate_pct_threshold', 'error_window_seconds')`,
 			);
 
-			if (result.rows.length > 0) {
-				const row = result.rows[0];
-				return {
-					p99_latency_ms: row.p99_latency_ms,
-					error_rate_threshold_pct: row.error_rate_threshold_pct,
-					error_rate_window_seconds: row.error_rate_window_seconds,
-				};
+			const cfg: Record<string, number> = {};
+			for (const row of result.rows) {
+				cfg[row.key] = Number(row.value);
 			}
+
+			return {
+				latency_p99_ms: cfg['latency_p99_ms_threshold'] ?? 500,
+				error_rate_pct: cfg['error_rate_pct_threshold'] ?? 10,
+				error_window_seconds: cfg['error_window_seconds'] ?? 30,
+			};
 		} catch (err) {
-			// Table or schema doesn't exist; fall through to defaults
-			if (
-				err instanceof Error &&
-				err.message.includes("does not exist")
-			) {
-				// Silently fall through to defaults
-			} else {
-				// Log unexpected errors but continue with defaults
+			if (!(err instanceof Error && err.message.includes("does not exist"))) {
 				console.error("[SLA] Unexpected error fetching sla_config:", err);
 			}
 		}
 
-		// Default thresholds (sensible production values)
-		return {
-			p99_latency_ms: 1000, // 1 second
-			error_rate_threshold_pct: 5.0, // 5%
-			error_rate_window_seconds: 300, // 5 minutes
-		};
+		return { latency_p99_ms: 500, error_rate_pct: 10, error_window_seconds: 30 };
 	}
 
 	/**
 	 * Query roadmap.trace_span for mcp_tool_call operations in the last 5 minutes.
-	 * Compute p99 latency, error count, and total count.
+	 * Computes p99 latency, error count, and total count.
 	 */
 	private async getTraceMetrics(): Promise<SlaMetrics> {
 		try {
@@ -127,219 +110,152 @@ export class SlaHandler {
 					COUNT(*) AS total_count
 				FROM roadmap.trace_span
 				WHERE operation = 'mcp_tool_call'
-					AND created_at > now() - interval '5 minutes'`,
+					AND started_at > now() - interval '5 minutes'`,
 			);
 
 			if (result.rows.length > 0) {
 				const row = result.rows[0];
 				const errorCount = Number(row.error_count) || 0;
 				const totalCount = Number(row.total_count) || 0;
-				const errorRatePct =
-					totalCount > 0 ? (errorCount / totalCount) * 100 : 0;
+				const errorRatePct = totalCount > 0 ? (errorCount / totalCount) * 100 : 0;
 
 				return {
-					p99_ms: row.p99_ms ? Number(row.p99_ms) : null,
+					p99_ms: row.p99_ms != null ? Number(row.p99_ms) : null,
 					error_count: errorCount,
 					total_count: totalCount,
 					error_rate_pct: Math.round(errorRatePct * 100) / 100,
 				};
 			}
 		} catch (err) {
-			// Table or schema doesn't exist; return zero metrics
-			if (
-				err instanceof Error &&
-				err.message.includes("does not exist")
-			) {
-				// Silently continue with zero metrics
-			} else {
+			if (!(err instanceof Error && err.message.includes("does not exist"))) {
 				console.error("[SLA] Unexpected error querying trace_span:", err);
 			}
 		}
 
-		// No data available
-		return {
-			p99_ms: null,
-			error_count: 0,
-			total_count: 0,
-			error_rate_pct: 0,
-		};
+		return { p99_ms: null, error_count: 0, total_count: 0, error_rate_pct: 0 };
 	}
 
 	/**
-	 * Determine system health state based on metrics vs thresholds.
-	 * State transition logic:
-	 * - 'down': p99_ms is null (no data) OR total_count=0
-	 * - 'degraded': p99_ms >= threshold OR error_rate_pct >= error_rate_threshold_pct
-	 * - 'normal': otherwise
+	 * Determine system health state.
+	 * - Down: no data (p99_ms null or total_count=0)
+	 * - Degraded: latency or error rate breaches threshold
+	 * - Normal: all checks pass
 	 */
-	private computeState(
-		metrics: SlaMetrics,
-		thresholds: SlaThresholds,
-	): "normal" | "degraded" | "down" {
-		// No data → down
-		if (
-			metrics.p99_ms === null ||
-			metrics.total_count === 0
-		) {
-			return "down";
+	private computeState(metrics: SlaMetrics, thresholds: SlaThresholds): SlaState {
+		if (metrics.p99_ms === null || metrics.total_count === 0) {
+			return "Down";
 		}
-
-		// Latency breach → degraded
-		if (metrics.p99_ms >= thresholds.p99_latency_ms) {
-			return "degraded";
+		if (metrics.p99_ms >= thresholds.latency_p99_ms) {
+			return "Degraded";
 		}
-
-		// Error rate breach → degraded
-		if (metrics.error_rate_pct >= thresholds.error_rate_threshold_pct) {
-			return "degraded";
+		if (metrics.error_rate_pct >= thresholds.error_rate_pct) {
+			return "Degraded";
 		}
-
-		// All checks passed → normal
-		return "normal";
+		return "Normal";
 	}
 
-	/**
-	 * Generate human-readable details about the health state.
-	 */
 	private generateDetails(
-		state: "normal" | "degraded" | "down",
+		state: SlaState,
 		metrics: SlaMetrics,
 		thresholds: SlaThresholds,
 	): string {
-		if (state === "down") {
-			if (metrics.total_count === 0) {
-				return "No trace data available in the last 5 minutes.";
-			}
-			return "System is down — no metrics collected.";
+		if (state === "Down") {
+			return metrics.total_count === 0
+				? "No trace data available in the last 5 minutes."
+				: "System is down — no metrics collected.";
 		}
 
-		if (state === "degraded") {
+		if (state === "Degraded") {
 			const issues: string[] = [];
-
-			if (metrics.p99_ms !== null && metrics.p99_ms >= thresholds.p99_latency_ms) {
-				issues.push(
-					`p99 latency ${metrics.p99_ms}ms exceeds threshold ${thresholds.p99_latency_ms}ms`,
-				);
+			if (metrics.p99_ms !== null && metrics.p99_ms >= thresholds.latency_p99_ms) {
+				issues.push(`p99 latency ${metrics.p99_ms}ms exceeds threshold ${thresholds.latency_p99_ms}ms`);
 			}
-
-			if (metrics.error_rate_pct >= thresholds.error_rate_threshold_pct) {
-				issues.push(
-					`error rate ${metrics.error_rate_pct.toFixed(2)}% exceeds threshold ${thresholds.error_rate_threshold_pct}%`,
-				);
+			if (metrics.error_rate_pct >= thresholds.error_rate_pct) {
+				issues.push(`error rate ${metrics.error_rate_pct.toFixed(2)}% exceeds threshold ${thresholds.error_rate_pct}%`);
 			}
-
 			return `System degraded: ${issues.join("; ")}`;
 		}
 
-		return `System healthy. p99=${metrics.p99_ms}ms (threshold ${thresholds.p99_latency_ms}ms), error_rate=${metrics.error_rate_pct.toFixed(2)}% (threshold ${thresholds.error_rate_threshold_pct}%)`;
+		return `System healthy. p99=${metrics.p99_ms}ms (threshold ${thresholds.latency_p99_ms}ms), error_rate=${metrics.error_rate_pct.toFixed(2)}% (threshold ${thresholds.error_rate_pct}%)`;
 	}
 
-	/**
-	 * Fetch the most recent SLA event state from roadmap.sla_events.
-	 * Returns null if no events exist or if the table doesn't exist.
-	 */
-	private async getPreviousState(): Promise<("normal" | "degraded" | "down") | null> {
+	/** Fetch the most recent SLA event state from roadmap.sla_events. */
+	private async getPreviousState(): Promise<SlaState | null> {
 		try {
 			const result = await this.pool.query<SlaEventRow>(
-				`SELECT state, previous_state, created_at
-				FROM roadmap.sla_events
-				ORDER BY created_at DESC
-				LIMIT 1`,
+				`SELECT state, prev_state, occurred_at
+				 FROM roadmap.sla_events
+				 ORDER BY occurred_at DESC
+				 LIMIT 1`,
 			);
-
 			if (result.rows.length > 0) {
 				return result.rows[0].state;
 			}
 		} catch (err) {
-			if (
-				err instanceof Error &&
-				err.message.includes("does not exist")
-			) {
-				// Table doesn't exist yet; return null
-			} else {
+			if (!(err instanceof Error && err.message.includes("does not exist"))) {
 				console.error("[SLA] Unexpected error fetching previous state:", err);
 			}
 		}
-
 		return null;
 	}
 
 	/**
-	 * Determine trigger metric and value based on what caused the state change.
-	 */
-	private determineTriggerMetric(
-		newState: "normal" | "degraded" | "down",
-		metrics: SlaMetrics,
-		thresholds: SlaThresholds,
-	): { metric: string | null; value: string | null } {
-		if (newState === "down") {
-			if (metrics.total_count === 0) {
-				return { metric: "total_count", value: "0" };
-			}
-			if (metrics.p99_ms === null) {
-				return { metric: "p99_ms", value: null };
-			}
-			return { metric: "unknown", value: null };
-		}
-
-		if (newState === "degraded") {
-			if (metrics.p99_ms !== null && metrics.p99_ms >= thresholds.p99_latency_ms) {
-				return { metric: "p99_latency_ms", value: String(metrics.p99_ms) };
-			}
-			if (metrics.error_rate_pct >= thresholds.error_rate_threshold_pct) {
-				return { metric: "error_rate_pct", value: String(metrics.error_rate_pct) };
-			}
-		}
-
-		return { metric: null, value: null };
-	}
-
-	/**
-	 * Record state transition in roadmap.sla_events and emit NOTIFY.
+	 * Record a state transition in roadmap.sla_events and emit pg_notify on platform.alerts.
+	 * sla_events columns: state, prev_state, trigger, metric_value, threshold
 	 */
 	private async recordStateTransition(
-		newState: "normal" | "degraded" | "down",
-		previousState: ("normal" | "degraded" | "down") | null,
+		newState: SlaState,
+		previousState: SlaState | null,
 		metrics: SlaMetrics,
 		thresholds: SlaThresholds,
 		details: string,
 	): Promise<void> {
 		try {
-			const { metric: triggerMetric, value: triggerValue } =
-				this.determineTriggerMetric(newState, metrics, thresholds);
+			let trigger = "state_change";
+			let metricValue: number | null = null;
+			let threshold: number | null = null;
 
-			// INSERT into roadmap.sla_events
+			if (newState === "Down" && metrics.total_count === 0) {
+				trigger = "no_trace_data";
+			} else if (newState === "Degraded") {
+				if (metrics.p99_ms !== null && metrics.p99_ms >= thresholds.latency_p99_ms) {
+					trigger = "latency_breach";
+					metricValue = metrics.p99_ms;
+					threshold = thresholds.latency_p99_ms;
+				} else {
+					trigger = "error_rate_breach";
+					metricValue = metrics.error_rate_pct;
+					threshold = thresholds.error_rate_pct;
+				}
+			} else if (newState === "Normal") {
+				trigger = "recovery";
+			}
+
 			await this.pool.query(
-				`INSERT INTO roadmap.sla_events
-					(state, previous_state, trigger_metric, trigger_value, details)
-				VALUES ($1, $2, $3, $4, $5)`,
-				[newState, previousState, triggerMetric, triggerValue, details],
+				`INSERT INTO roadmap.sla_events (state, prev_state, trigger, metric_value, threshold)
+				 VALUES ($1, $2, $3, $4, $5)`,
+				[newState, previousState, trigger, metricValue, threshold],
 			);
 
-			// Emit NOTIFY with state change payload
-			const notifyPayload = {
+			// Notify agents via the configured alert channel
+			const notifyPayload = JSON.stringify({
 				type: "sla_state_change",
 				state: newState,
 				previous_state: previousState,
+				trigger,
 				metrics: {
 					p99_ms: metrics.p99_ms,
 					error_count: metrics.error_count,
 					total_count: metrics.total_count,
 					error_rate_pct: metrics.error_rate_pct,
 				},
-				triggered_at: new Date().toISOString(),
-			};
+				details,
+				occurred_at: new Date().toISOString(),
+			});
 
-			await this.pool.query(
-				`SELECT pg_notify('roadmap_notify', $1)`,
-				[JSON.stringify(notifyPayload)],
-			);
+			await this.pool.query(`SELECT pg_notify('platform.alerts', $1)`, [notifyPayload]);
 		} catch (err) {
-			if (
-				err instanceof Error &&
-				err.message.includes("does not exist")
-			) {
-				// Table doesn't exist yet; silently skip
+			if (err instanceof Error && err.message.includes("does not exist")) {
 				console.warn("[SLA] roadmap.sla_events table does not exist yet");
 			} else {
 				console.error("[SLA] Error recording state transition:", err);
@@ -347,10 +263,7 @@ export class SlaHandler {
 		}
 	}
 
-	/**
-	 * Execute health check: fetch metrics and thresholds, compute state, return result.
-	 * Also tracks state transitions and emits notifications.
-	 */
+	/** Execute health check: fetch metrics, compute state, record transitions, return result. */
 	async healthCheck(): Promise<SlaHealthResult> {
 		const [metrics, thresholds, previousState] = await Promise.all([
 			this.getTraceMetrics(),
@@ -361,19 +274,10 @@ export class SlaHandler {
 		const state = this.computeState(metrics, thresholds);
 		const details = this.generateDetails(state, metrics, thresholds);
 		const measured_at = new Date().toISOString();
-
-		// Check if state changed
 		const stateChanged = state !== previousState;
 
-		// If state changed, record the transition and notify
 		if (stateChanged) {
-			await this.recordStateTransition(
-				state,
-				previousState,
-				metrics,
-				thresholds,
-				details,
-			);
+			await this.recordStateTransition(state, previousState, metrics, thresholds, details);
 		}
 
 		return {
@@ -388,11 +292,7 @@ export class SlaHandler {
 	}
 }
 
-/**
- * Exported entry point for MCP ops tools.
- * Instantiates SlaHandler with the provided pool and executes a health check.
- */
+/** Entry point for mcp_ops health_check action. */
 export async function slaHealthCheck(pool: Pool): Promise<SlaHealthResult> {
-	const handler = new SlaHandler(pool);
-	return handler.healthCheck();
+	return new SlaHandler(pool).healthCheck();
 }
