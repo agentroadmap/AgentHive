@@ -7,7 +7,7 @@
  */
 
 import type { QueryResultRow } from "pg";
-import { detectConflicts } from "./directive-conflict-detector.ts";
+import { detectConflicts } from "../../../../core/proposal/directive-conflict-detector.ts";
 import { calculateDispatchPriority } from "./directive-priority.ts";
 import {
 	formatValidationError,
@@ -335,16 +335,6 @@ export class PgProposalHandlers {
 				? String(calculateDispatchPriority(basePriority))
 				: args.priority || null;
 
-			// AC-5 + AC-7: Conflict detection and escalation for directives
-			let conflictNote = "";
-			let detectedConflicts: Awaited<ReturnType<typeof detectConflicts>> = [];
-			if (isDirective) {
-				detectedConflicts = await detectConflicts(args.title, summary);
-				if (detectedConflicts.length > 0) {
-					conflictNote = `\n⚠️ Conflicts detected (${detectedConflicts.length}): ${detectedConflicts.map((c) => c.displayId).join(", ")}`;
-				}
-			}
-
 			const created = await pg.createProposal(
 				{
 					display_id: args.display_id || null,
@@ -366,8 +356,21 @@ export class PgProposalHandlers {
 
 			const displayRef = created.display_id ?? String(created.id);
 
+			// AC-5 + AC-7 + AC-8: post-creation conflict scan, audit trail, and escalation
+			let conflictNote = "";
 			if (isDirective) {
-				// AC-8: Write audit trail entry for directive creation
+				// AC-5: cosine-similarity scan against non-directive proposals
+				const conflictReport = await detectConflicts(
+					String(created.id),
+					args.title,
+					summary,
+				);
+				const conflicts = conflictReport.conflicts;
+				if (conflicts.length > 0) {
+					conflictNote = `\n⚠️ Conflicts detected (${conflicts.length}): ${conflicts.map((c) => c.display_id ?? c.proposal_id).join(", ")}`;
+				}
+
+				// AC-8: audit trail — includes resolved conflicts for traceability
 				await query(
 					`INSERT INTO roadmap.audit_log (entity_type, entity_id, action, changed_by, before_json, after_json)
 					 VALUES ($1, $2, 'insert', $3, NULL, $4::jsonb)`,
@@ -381,12 +384,17 @@ export class PgProposalHandlers {
 							issuer: author,
 							rationale: summary,
 							priority: resolvedPriority,
+							conflicts: conflicts.map((c) => ({
+								id: c.proposal_id,
+								display_id: c.display_id,
+								score: c.similarity_score,
+							})),
 						}),
 					],
 				);
 
-				// AC-7: Escalate to D2 gate if conflicts were detected
-				if (detectedConflicts.length > 0) {
+				// AC-7: escalate to skeptic_d2 when genuine conflicts found
+				if (conflicts.length > 0) {
 					await query(
 						`INSERT INTO roadmap.escalation_log (obstacle_type, proposal_id, agent_identity, escalated_to, severity)
 						 VALUES ('DEPENDENCY_UNRESOLVED', $1, $2, 'skeptic_d2', 'high')`,
