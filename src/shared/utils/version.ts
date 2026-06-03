@@ -13,8 +13,22 @@ export interface VersionInfo {
 }
 
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
-const PACKAGE_ROOT = join(MODULE_DIR, "..", "..");
+// Repo root is three levels up from src/shared/utils/. Old code went two levels
+// and pointed at src/package.json (does not exist) which made every fallback hit
+// "0.0.0" — see P1614.
+const PACKAGE_ROOT = join(MODULE_DIR, "..", "..", "..");
 const PACKAGE_JSON_PATH = join(PACKAGE_ROOT, "package.json");
+
+async function readVersionFrom(path: string): Promise<string | null> {
+	try {
+		const content = await readFile(path, "utf-8");
+		const packageJson = JSON.parse(content);
+		const v = packageJson?.version;
+		return typeof v === "string" && v.length > 0 ? v : null;
+	} catch {
+		return null;
+	}
+}
 
 /**
  * Get the version from package.json or embedded version
@@ -26,14 +40,16 @@ export async function getVersion(): Promise<string> {
 		return String(__EMBEDDED_VERSION__);
 	}
 
-	// In development, read from package.json
-	try {
-		const content = await readFile(PACKAGE_JSON_PATH, "utf-8");
-		const packageJson = JSON.parse(content);
-		return packageJson.version || "0.0.0";
-	} catch {
-		return "0.0.0";
-	}
+	// Try the dev-time path (three levels up from src/shared/utils).
+	const dev = await readVersionFrom(PACKAGE_JSON_PATH);
+	if (dev) return dev;
+
+	// Fallback to CWD-relative — covers builds running from a directory that
+	// contains a package.json (e.g. the deployed server on bot at /data/code/AgentHive).
+	const cwd = await readVersionFrom(join(process.cwd(), "package.json"));
+	if (cwd) return cwd;
+
+	return "0.0.0";
 }
 
 /**
