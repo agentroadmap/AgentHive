@@ -79,6 +79,33 @@ export interface TokenVerification {
 	expired: boolean;
 }
 
+type RegisterIdentityFn = typeof registerAgent;
+type UpdatePublicKeyFn = typeof updateAgentPublicKey;
+type LookupPublicKeyFn = typeof getAgentPublicKey;
+
+type IdentityRegistryOptions = {
+	registerIdentity?: RegisterIdentityFn;
+};
+
+type RotationRegistryOptions = {
+	updatePublicKey?: UpdatePublicKeyFn;
+};
+
+async function syncIdentityToRegistry(
+	keyPair: AgentKeyPair,
+	registerIdentity: RegisterIdentityFn = registerAgent,
+): Promise<void> {
+	try {
+		await registerIdentity({
+			agentId: keyPair.agentId,
+			instanceId: keyPair.agentId,
+			publicKey: keyPair.publicKey,
+		});
+	} catch {
+		// DB unavailable or key conflict — file system remains authoritative
+	}
+}
+
 // ===================== Key Generation =====================
 
 /**
@@ -184,6 +211,7 @@ export async function listAgentIds(workspaceRoot: string): Promise<string[]> {
 export async function getOrCreateIdentity(
 	workspaceRoot: string,
 	agentName: string,
+	options: IdentityRegistryOptions = {},
 ): Promise<AgentKeyPair> {
 	// Derive deterministic agentId from name for consistent identity
 	const nameHash = createHash("sha256").update(agentName).digest("hex");
@@ -192,6 +220,7 @@ export async function getOrCreateIdentity(
 	// Check if key already exists
 	const existing = await loadKeyPair(workspaceRoot, tempAgentId);
 	if (existing) {
+		await syncIdentityToRegistry(existing, options.registerIdentity);
 		return existing;
 	}
 
@@ -372,30 +401,21 @@ export function verifySignature(
 export async function rotateKeyPair(
 	workspaceRoot: string,
 	currentKeyPair: AgentKeyPair,
+	options: RotationRegistryOptions = {},
 ): Promise<{ newKeyPair: AgentKeyPair; previousPublicKey: string }> {
-	// Generate new key pair with same agentId
-	const newKeyPair: AgentKeyPair = {
-		agentId: currentKeyPair.agentId,
-		publicKey: generateKeyPairSync("ed25519", {
-			publicKeyEncoding: { type: "spki", format: "pem" },
-			privateKeyEncoding: { type: "pkcs8", format: "pem" },
-		}).publicKey,
-		privateKey: generateKeyPairSync("ed25519", {
-			publicKeyEncoding: { type: "spki", format: "pem" },
-			privateKeyEncoding: { type: "pkcs8", format: "pem" },
-		}).privateKey,
-		created: currentKeyPair.created,
-		rotated: new Date().toISOString(),
-		version: currentKeyPair.version + 1,
-	};
-
-	// Actually generate a single consistent keypair
 	const { publicKey, privateKey } = generateKeyPairSync("ed25519", {
 		publicKeyEncoding: { type: "spki", format: "pem" },
 		privateKeyEncoding: { type: "pkcs8", format: "pem" },
 	});
-	newKeyPair.publicKey = publicKey;
-	newKeyPair.privateKey = privateKey;
+
+	const newKeyPair: AgentKeyPair = {
+		agentId: currentKeyPair.agentId,
+		publicKey,
+		privateKey,
+		created: currentKeyPair.created,
+		rotated: new Date().toISOString(),
+		version: currentKeyPair.version + 1,
+	};
 
 	// Archive old key for verification transition period
 	const archivePath = join(
@@ -564,4 +584,30 @@ export function verifyOperationAuthorization(
 	}
 
 	return tokenResult;
+}
+
+/**
+ * Verify an auth token using the public key stored in agent_registry.
+ *
+ * Fetches the agent's public_key from the DB; falls back to token.publicKey
+ * when the DB is unavailable or the agent has no recorded key.
+ *
+ * AC#3: Provides DB-backed verification path for MCP and orchestrator use.
+ */
+export async function verifyTokenWithDbLookup(
+	token: AuthToken,
+	lookupPublicKey: LookupPublicKeyFn = getAgentPublicKey,
+): Promise<TokenVerification> {
+	let publicKey = token.publicKey;
+
+	try {
+		const dbKey = await lookupPublicKey(token.agentId);
+		if (dbKey) publicKey = dbKey;
+	} catch {
+		// DB unavailable — fall back to embedded token.publicKey
+	}
+
+	// Re-verify using the resolved public key
+	const tokenWithKey: AuthToken = { ...token, publicKey };
+	return verifyToken(tokenWithKey);
 }

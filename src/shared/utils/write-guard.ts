@@ -1,57 +1,44 @@
 /**
- * P404: WriteGuard — prevents agents from writing to protected directories.
+ * P404: WriteGuard — advisory utility that rejects writes to source-controlled
+ * directories from within an agent scratch context.
  *
- * Protected by default: src/, docs/, scripts/, tests/ relative to project root.
- * Agents must write to AGENT_SCRATCH_DIR or an explicitly opted-in path.
- *
- * Usage:
- *   import { assertWriteAllowed } from "./write-guard.ts";
- *   assertWriteAllowed("/tmp/agenthive/abc-123/report.md"); // OK
- *   assertWriteAllowed("/data/code/AgentHive/docs/foo.md"); // throws
+ * Agents working in /tmp/agenthive/<uuid>/ must call assertScratchWrite before
+ * writing to any path. Writes to src/, docs/, scripts/, tests/ are rejected
+ * unless the caller opts in explicitly (for build tools that know what they're doing).
  */
 
 import { resolve } from "node:path";
 
-const PROTECTED_DIRS = ["src", "docs", "scripts", "tests"] as const;
+const PROTECTED_PREFIXES: string[] = [
+	resolve("src"),
+	resolve("docs"),
+	resolve("scripts"),
+	resolve("tests"),
+];
 
 export interface WriteGuardOptions {
-	/** Project root used to resolve protected dir prefixes. Defaults to CWD. */
-	projectRoot?: string;
-	/** Additional paths (absolute or relative to projectRoot) that are allowed. */
-	allowedPaths?: string[];
+	/** Bypass the guard for callers that explicitly acknowledge the risk. */
+	optIn?: boolean;
 }
 
 /**
- * Throws if writing to `targetPath` is not allowed.
- * Pass `{ allowedPaths: ["reports"] }` to permit writing to a known output dir.
+ * Throw if targetPath falls inside a protected source-controlled directory.
+ *
+ * @param targetPath - absolute or relative path the caller intends to write
+ * @param opts.optIn - set true to bypass (use sparingly)
  */
-export function assertWriteAllowed(
+export function assertScratchWrite(
 	targetPath: string,
 	opts: WriteGuardOptions = {},
 ): void {
-	const root = resolve(opts.projectRoot ?? process.cwd());
+	if (opts.optIn) return;
+
 	const abs = resolve(targetPath);
-
-	// AGENT_SCRATCH_DIR is always allowed.
-	const scratchDir = process.env.AGENT_SCRATCH_DIR;
-	if (scratchDir && abs.startsWith(resolve(scratchDir) + "/")) return;
-	if (scratchDir && abs === resolve(scratchDir)) return;
-
-	// Explicitly opted-in paths are allowed.
-	if (opts.allowedPaths) {
-		for (const allowed of opts.allowedPaths) {
-			const absAllowed = resolve(root, allowed);
-			if (abs.startsWith(absAllowed + "/") || abs === absAllowed) return;
-		}
-	}
-
-	// Block writes into protected directories.
-	for (const dir of PROTECTED_DIRS) {
-		const absDir = resolve(root, dir);
-		if (abs.startsWith(absDir + "/") || abs === absDir) {
+	for (const prefix of PROTECTED_PREFIXES) {
+		if (abs === prefix || abs.startsWith(prefix + "/")) {
 			throw new Error(
-				`[WriteGuard] Write to protected path rejected: ${targetPath}\n` +
-					`Use AGENT_SCRATCH_DIR for ephemeral agent output.`,
+				`WriteGuard: write to "${abs}" is blocked — path is inside protected dir "${prefix}". ` +
+					`Use { optIn: true } if this write is intentional.`,
 			);
 		}
 	}

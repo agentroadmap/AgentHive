@@ -1,12 +1,14 @@
 /**
- * P919: Agent Name Display Alias Tests
+ * P919 / P931: Agent Name Display Alias Tests
  *
  * AC-8: Identity immutability — P852 identity never overwritten
- * Tests for assignDisplayAlias() Tier 1 & Tier 2 alias assignment
+ * Tests for assignDisplayAlias() Tier 1 & Tier 2 alias assignment.
+ * P931 adds regression coverage for algorithmic Title-Case + provider guard.
  */
 
 import { describe, it, expect } from "vitest";
 import { assignDisplayAlias, titleCaseExpertise, ALL_CAPS_TOKENS } from "../agent-name";
+import { assignDisplayAlias, pascalCaseHost } from "../agent-name";
 
 describe("assignDisplayAlias — P919 Tiered Naming", () => {
 	describe("Tier 1: Liaison (0..9, no expertise)", () => {
@@ -296,5 +298,48 @@ describe("ALL_CAPS_TOKENS — exported constant (AC-6)", () => {
 		for (const token of ["qa", "ai", "ml", "sre", "ux", "ui", "api"]) {
 			expect(ALL_CAPS_TOKENS).toContain(token);
 		}
+describe("pascalCaseHost — P932 host normalisation", () => {
+	it("bare lowercase → capitalised", () => {
+		expect(pascalCaseHost("bot")).toBe("Bot");
+		expect(pascalCaseHost("hermes")).toBe("Hermes");
+		expect(pascalCaseHost("mac")).toBe("Mac");
+	});
+
+	it("hyphenated host → joined PascalCase", () => {
+		expect(pascalCaseHost("hermes-srv")).toBe("HermesSrv");
+		expect(pascalCaseHost("agency-bot")).toBe("AgencyBot");
+	});
+
+	it("underscore-delimited host → joined PascalCase", () => {
+		expect(pascalCaseHost("my_host")).toBe("MyHost");
+	});
+
+	it("already-PascalCase input is idempotent (lower-then-cap)", () => {
+		// Idempotent on single-segment hosts
+		expect(pascalCaseHost("Bot")).toBe("Bot");
+	});
+
+	it("all-uppercase input → lowercased then capitalized", () => {
+		expect(pascalCaseHost("BOT")).toBe("Bot");
+	});
+
+	it("combined with assignDisplayAlias to form Tier 2 alias", () => {
+		const alias = assignDisplayAlias(
+			"Claude",
+			pascalCaseHost("bot"),
+			"documenter",
+			"a",
+		);
+		expect(alias).toBe("Claude-Bot-Documenter");
+	});
+
+	it("multi-segment combined with assignDisplayAlias", () => {
+		const alias = assignDisplayAlias(
+			"Codex",
+			pascalCaseHost("hermes-srv"),
+			"architecture",
+			"a",
+		);
+		expect(alias).toBe("Codex-HermesSrv-Architecture");
 	});
 });

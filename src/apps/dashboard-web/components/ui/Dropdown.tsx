@@ -3,52 +3,74 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "../../lib/cn";
 
 export interface DropdownItem {
-  label: string;
-  onClick: () => void;
+  key: string;
+  label: React.ReactNode;
   icon?: React.ReactNode;
   disabled?: boolean;
   danger?: boolean;
-  dividerAfter?: boolean;
+  separator?: never;
 }
+
+export interface DropdownSeparator {
+  separator: true;
+  key: string;
+  label?: never;
+  icon?: never;
+  disabled?: never;
+  danger?: never;
+}
+
+export type DropdownOption = DropdownItem | DropdownSeparator;
 
 export interface DropdownProps {
   trigger: React.ReactElement;
-  items: DropdownItem[];
-  align?: "left" | "right";
+  items: DropdownOption[];
+  onSelect: (key: string) => void;
+  placement?: "bottom-start" | "bottom-end" | "top-start" | "top-end";
   className?: string;
+  menuClassName?: string;
 }
+
+const placementClasses: Record<NonNullable<DropdownProps["placement"]>, string> = {
+  "bottom-start": "top-full left-0 mt-1",
+  "bottom-end": "top-full right-0 mt-1",
+  "top-start": "bottom-full left-0 mb-1",
+  "top-end": "bottom-full right-0 mb-1",
+};
 
 export const Dropdown: React.FC<DropdownProps> = ({
   trigger,
   items,
-  align = "left",
+  onSelect,
+  placement = "bottom-start",
   className,
+  menuClassName,
 }) => {
   const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const menuRef = useRef<HTMLUListElement>(null);
-  const menuId = useRef(`dropdown-${Math.random().toString(36).slice(2, 9)}`).current;
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLUListElement | null>(null);
 
   const close = useCallback(() => setOpen(false), []);
 
-  // Close on outside click or Escape
   useEffect(() => {
     if (!open) return;
-    const handleClick = (e: MouseEvent) => {
-      if (!containerRef.current?.contains(e.target as Node)) close();
+    const handleOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        close();
+      }
     };
-    const handleKey = (e: KeyboardEvent) => {
+    const handleEscape = (e: KeyboardEvent) => {
       if (e.key === "Escape") close();
     };
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
+    document.addEventListener("mousedown", handleOutside);
+    document.addEventListener("keydown", handleEscape);
     return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
+      document.removeEventListener("mousedown", handleOutside);
+      document.removeEventListener("keydown", handleEscape);
     };
   }, [open, close]);
 
-  // Arrow key navigation within menu
+  // Arrow key navigation
   useEffect(() => {
     if (!open || !menuRef.current) return;
     const items = Array.from(
@@ -56,7 +78,7 @@ export const Dropdown: React.FC<DropdownProps> = ({
     );
     if (items.length > 0) items[0].focus();
 
-    const handleKey = (e: KeyboardEvent) => {
+    const handleKeyDown = (e: KeyboardEvent) => {
       const focused = document.activeElement as HTMLButtonElement;
       const idx = items.indexOf(focused);
       if (e.key === "ArrowDown") {
@@ -73,60 +95,77 @@ export const Dropdown: React.FC<DropdownProps> = ({
         items[items.length - 1]?.focus();
       }
     };
-    menuRef.current?.addEventListener("keydown", handleKey);
-    return () => menuRef.current?.removeEventListener("keydown", handleKey);
+    menuRef.current.addEventListener("keydown", handleKeyDown);
+    return () => menuRef.current?.removeEventListener("keydown", handleKeyDown);
   }, [open]);
 
   const triggerEl = React.cloneElement(trigger, {
-    onClick: () => setOpen((v) => !v),
-    "aria-haspopup": "true",
+    "aria-haspopup": "menu",
     "aria-expanded": open,
-    "aria-controls": menuId,
+    onClick: (e: React.MouseEvent) => {
+      setOpen((prev) => !prev);
+      trigger.props.onClick?.(e);
+    },
   });
 
   return (
-    <div ref={containerRef} className="relative inline-flex">
+    <div ref={containerRef} className={cn("relative inline-block", className)}>
       {triggerEl}
       {open && (
         <ul
           ref={menuRef}
-          id={menuId}
           role="menu"
           className={cn(
-            "absolute z-50 mt-1 min-w-[10rem] rounded-[var(--radius-md)]",
+            "absolute z-50 min-w-[10rem] py-1",
             "bg-[var(--color-surface)] border border-[var(--color-border)]",
-            "shadow-[var(--shadow-lg)] py-1 focus:outline-none",
-            align === "right" ? "right-0" : "left-0",
-            "top-full",
-            className
+            "rounded-[var(--radius-md)] shadow-[var(--shadow-md)]",
+            "focus:outline-none",
+            placementClasses[placement],
+            menuClassName
           )}
         >
-          {items.map((item, i) => (
-            <li key={i} role="none" className={item.dividerAfter ? "border-b border-[var(--color-border)] pb-1 mb-1" : undefined}>
-              <button
-                type="button"
-                role="menuitem"
-                disabled={item.disabled}
-                onClick={() => {
-                  item.onClick();
-                  close();
-                }}
-                className={cn(
-                  "flex w-full items-center gap-2 px-3 py-1.5 text-sm text-left",
-                  "transition-colors duration-[var(--transition-fast)]",
-                  "focus:outline-none focus:bg-[var(--color-surface-hover)]",
-                  "hover:bg-[var(--color-surface-hover)]",
-                  item.danger
-                    ? "text-[var(--color-danger)]"
-                    : "text-[var(--color-text)]",
-                  item.disabled && "opacity-50 cursor-not-allowed"
-                )}
-              >
-                {item.icon && <span className="shrink-0 w-4 h-4">{item.icon}</span>}
-                {item.label}
-              </button>
-            </li>
-          ))}
+          {items.map((item) => {
+            if ("separator" in item && item.separator) {
+              return (
+                <li
+                  key={item.key}
+                  role="separator"
+                  className="my-1 border-t border-[var(--color-border)]"
+                />
+              );
+            }
+            const { key, label, icon, disabled, danger } = item as DropdownItem;
+            return (
+              <li key={key} role="none">
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={disabled}
+                  onClick={() => {
+                    onSelect(key);
+                    close();
+                  }}
+                  className={cn(
+                    "w-full flex items-center gap-2 px-3 py-2",
+                    "text-sm text-left",
+                    "transition-colors duration-[var(--transition-fast)]",
+                    "focus-visible:outline-[3px] focus-visible:outline-[var(--color-focus-ring)]",
+                    danger
+                      ? "text-[var(--color-danger)] hover:bg-[var(--color-error-bg)]"
+                      : "text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]",
+                    disabled && "opacity-40 cursor-not-allowed pointer-events-none"
+                  )}
+                >
+                  {icon && (
+                    <span className="shrink-0 text-[var(--color-text-muted)]" aria-hidden="true">
+                      {icon}
+                    </span>
+                  )}
+                  {label}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

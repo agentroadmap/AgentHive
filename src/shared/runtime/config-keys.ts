@@ -91,8 +91,7 @@ export const StructuralKeys = {
 		class: "structural" as const,
 		parse: (v: string) => v,
 		required: true,
-		description:
-			"PostgreSQL username",
+		description: "PostgreSQL username",
 		yamlPath: "database.user",
 		envOverride: true,
 		// P448: no defaultValue — PGUSER is deployment-specific, must be explicit
@@ -429,7 +428,8 @@ export const StructuralKeys = {
 			return n;
 		},
 		required: false,
-		description: "Direct Postgres port, bypassing PgBouncer (used for LISTEN connections when P499 is deployed). Defaults to PGPORT when not set.",
+		description:
+			"Direct Postgres port, bypassing PgBouncer (used for LISTEN connections when P499 is deployed). Defaults to PGPORT when not set.",
 		envOverride: true,
 	} satisfies ConfigKey<number | undefined>,
 };

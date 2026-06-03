@@ -1,8 +1,15 @@
 import type { PoolClient } from "pg";
+import {
+	getNextSequence,
+	storeMessage,
+} from "../../infra/agency/liaison-message-service.ts";
+import { createMessageEnvelope } from "../../infra/agency/liaison-message-types.ts";
+import { listDispatchableAgencies } from "../../infra/agency/liaison-service.ts";
 import { closePool, getPool, query } from "../../infra/postgres/pool.ts";
 import { pulseHeartbeat } from "../../infra/pulse/heartbeat.ts";
-import { reapStaleRows } from "../pipeline/reap-stale-rows.ts";
 import { enqueueNotification } from "../notifications/enqueue.ts";
+import { postWorkOffer } from "../pipeline/post-work-offer.ts";
+import { reapStaleRows } from "../pipeline/reap-stale-rows.ts";
 import { getUnlockedGateQueue } from "../proposal/gate-scanner-v2.ts";
 import { spawnAgent, spawnWithRetry } from "./agent-spawner.ts";
 import { postWorkOffer } from "../pipeline/post-work-offer.ts";
@@ -43,6 +50,24 @@ import {
 } from "./legacy-dispatch.ts";
 import * as runtimeConfig from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
+import {
+	bootCancelPokeAttempts,
+	type PokeWatchdogOptions,
+	runOfferReaper,
+	runPokeWatchdogTick,
+} from "./maintenance.ts";
+import { type ListenerClient, OfferClaimLoop } from "./offer-claim-loop.ts";
+import { OrchestratorOfferDispatcher } from "./offer-dispatch.ts";
+import { resolveQueueContext } from "./queue-context-resolver.ts";
+import {
+	assessReadiness,
+	buildTaskPrompt,
+	fetchProposalDetail,
+} from "./readiness-resolver.ts";
+import {
+	scanAndAlertOfflineAgencies,
+	scanAndTransitionSilentAgencies,
+} from "./resolvers/agency-resolver.ts";
 
 /**
  * Unified Agent Orchestrator
@@ -57,6 +82,20 @@ import { FlagKeys } from "../../shared/runtime/config-keys.ts";
  */
 
 // ─── Configuration ────────────────────────────────────────────────────────────
+
+/** Maximum proposals processed per scanQueues() call. */
+const SCAN_BATCH_LIMIT = Number(process.env.AGENTHIVE_SCAN_BATCH_LIMIT ?? 20);
+
+/**
+ * Hours a proposal must sit mature with no dispatch before stall escalation
+ * is triggered.
+ */
+const STALL_THRESHOLD_HOURS = Number(
+	process.env.AGENTHIVE_STALL_THRESHOLD_HOURS ?? 4,
+);
+
+/** Maximum stalled proposals to escalate per checkStalls() call. */
+const STALL_BATCH_LIMIT = Number(process.env.AGENTHIVE_STALL_BATCH_LIMIT ?? 5);
 
 /**
  * If set, stall escalation Tier 1 spawns an AI liaison agent using this
@@ -85,6 +124,32 @@ const ENABLE_POLLING = process.env.AGENTHIVE_ORCHESTRATOR_POLL === "1";
 const ORCHESTRATOR_IDENTITY =
 	process.env.AGENTHIVE_ORCHESTRATOR_IDENTITY ??
 	"agenthive/agency-orchestrator";
+
+/**
+ * Escape hatch: set AGENTHIVE_OFFER_CLAIM_LOOP=0 to disable the
+ * orchestrator-side claim loop (e.g. emergency rollback). Default on.
+ */
+const ENABLE_OFFER_CLAIM_LOOP =
+	(process.env.AGENTHIVE_OFFER_CLAIM_LOOP ?? "1") !== "0";
+
+/** Implicit gate poll interval in ms (set 0 to disable). */
+const IMPLICIT_GATE_POLL_INTERVAL_MS = Number(
+	process.env.AGENTHIVE_IMPLICIT_GATE_POLL_MS ?? 30_000,
+);
+
+/** Enhancer-revise autonomous loop interval (90 s legacy default). */
+const ENHANCER_REVISE_INTERVAL_MS = 90_000;
+
+/** P611 stranded-advance reconciler interval (30 s legacy default). */
+const RECONCILER_INTERVAL_MS = 30_000;
+
+/** Observability heartbeat interval (60 s legacy default). */
+const HEARTBEAT_INTERVAL_MS = 60_000;
+
+/** P765: agency liveness scanner interval (silent → dormant/offline + alert). */
+const AGENCY_LIVENESS_SCAN_INTERVAL_MS = Number(
+	process.env.AGENTHIVE_AGENCY_LIVENESS_SCAN_MS ?? 60_000,
+);
 
 export interface OrchestratorConfig {
 	/** Worktree used for liaison agent spawns (Tier 1 stall escalation). */
@@ -151,7 +216,7 @@ export class Orchestrator {
 			idleThresholdMin: config.pokeIdleThresholdMin ?? 5,
 			stormCap: config.pokeStormCap ?? 10,
 		};
-		this.shutdownDrainMs = config.shutdownDrainMs ?? 240_000;
+		this.shutdownDrainMs = config.shutdownDrainMs ?? DEFAULT_SHUTDOWN_DRAIN_MS;
 	}
 
 	// ─── Lifecycle (P902-A) ────────────────────────────────────────────────────
@@ -327,9 +392,8 @@ export class Orchestrator {
 		this.pollTimers.set(
 			"enhancer-revise",
 			setInterval(() => {
-				if (this.stopping) return;
 				void this.trackInFlight(
-					drainEnhancementRevisions("enhancer-revise-loop", 4).catch((err) =>
+					this.runEnhancerReviseTick().catch((err) =>
 						console.error("[Orchestrator] enhancer-revise failed:", err),
 					),
 				);
@@ -354,7 +418,10 @@ export class Orchestrator {
 				if (this.stopping) return;
 				void this.trackInFlight(
 					reconcileStaleDispatches(pool).catch((err) =>
-						console.error("[Orchestrator] stale-dispatch reconciler failed:", err),
+						console.error(
+							"[Orchestrator] stale-dispatch reconciler failed:",
+							err,
+						),
 					),
 				);
 			}, this.reconcilerMs),
@@ -370,6 +437,22 @@ export class Orchestrator {
 					console.error("[Orchestrator] heartbeat failed:", err),
 				);
 			}, this.heartbeatMs),
+		);
+
+		// P765: agency liveness scanner — transitions silent agencies through
+		// dormant/offline states and emits / resolves offline alerts.
+		this.pollTimers.set(
+			"agency-liveness",
+			setInterval(() => {
+				if (this.stopping) return;
+				void this.trackInFlight(
+					scanAndTransitionSilentAgencies()
+						.then(() => scanAndAlertOfflineAgencies())
+						.catch((err) =>
+							console.error("[Orchestrator] agency-liveness scan failed:", err),
+						),
+				);
+			}, AGENCY_LIVENESS_SCAN_INTERVAL_MS),
 		);
 
 		// P914 / P904: start the offer-claim loop. The loop LISTENs on
@@ -453,6 +536,18 @@ export class Orchestrator {
 		console.log(
 			`[Orchestrator] OfferClaimLoop started as ${ORCHESTRATOR_IDENTITY}`,
 		);
+	}
+
+	/**
+	 * P908-A: Drain the enhancer-revise queue.
+	 *
+	 * Wraps `drainEnhancementRevisions` as a class method so tests can stub it
+	 * without reaching into legacy-dispatch.ts, and so future evolution can
+	 * replace the legacy implementation entirely.
+	 */
+	async runEnhancerReviseTick(): Promise<void> {
+		if (this.stopping) return;
+		await drainEnhancementRevisions("enhancer-revise-loop", 4);
 	}
 
 	/**
@@ -727,7 +822,7 @@ export class Orchestrator {
 	 *   1. resolveQueueContext()  — enrich with workflowTemplateId + roleProfiles
 	 *   2. fetchProposalDetail()  — full RFC fields for readiness check
 	 *   3. assessReadiness()      — determines mode: gate | prep | skip
-	 *   4. spawnAgent()           — routes through 6-layer policy filter
+	 *   4. postWorkOffer()        — any registered agency claims and executes
 	 *
 	 * Returns the number of proposals that were dispatched (mode ≠ skip).
 	 */
@@ -782,6 +877,9 @@ export class Orchestrator {
 					worktree: this.defaultWorktree,
 					task,
 					proposalId: detail.id,
+					squadName: `scan-P${detail.id}-${mode}`,
+					role,
+					task,
 					stage: detail.status,
 					agentLabel: `${detail.displayId} (${mode})`,
 					activity: mode === "gate" ? "reviewing" : "preparing",
@@ -793,7 +891,16 @@ export class Orchestrator {
 					roleProfileId: primaryProfile?.id ?? null,
 					// P226: tier preference derived from task difficulty/type
 					requiredTier,
+					phase: mode,
+					worktreeHint: this.defaultWorktree,
+					requiredCapabilities:
+						(primaryProfile?.requiredCapabilities ?? []).length > 0
+							? (primaryProfile?.requiredCapabilities ?? [])
+							: [role],
 				});
+				console.log(
+					`[Orchestrator] scanQueues: posted offer ${dispatchId} for ${detail.displayId} (${mode})`,
+				);
 
 				dispatched++;
 			} catch (err) {

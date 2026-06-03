@@ -75,7 +75,7 @@ export async function buildContextPackage(
     design: string | null;
   }>(
     `SELECT title, status, summary, design
-     FROM roadmap.proposal
+     FROM roadmap_proposal.proposal
      WHERE id = $1`,
     [req.proposal_id],
   );
@@ -95,7 +95,7 @@ export async function buildContextPackage(
     status: string;
   }>(
     `SELECT item_number, criterion_text, status
-     FROM roadmap.proposal_acceptance_criteria
+     FROM roadmap_proposal.proposal_acceptance_criteria
      WHERE proposal_id = $1
        AND status NOT IN ('pass', 'waived')
      ORDER BY item_number`,

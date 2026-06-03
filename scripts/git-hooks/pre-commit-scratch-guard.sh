@@ -12,6 +12,12 @@ SCRATCH_PATTERNS=(
   "gate-decisions-"
   "P[0-9]*-ship-"
   "-handoff-"
+  "scratch-"
+  "-scratch\."
+  "agent-scratch-"
+  "\.scratch\."
+  "reap-log-"
+  "-reap\."
 )
 
 PROTECTED_DIRS=(

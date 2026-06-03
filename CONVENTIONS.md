@@ -285,6 +285,32 @@ For constitutional or governance rule changes (P179 constitution, agent rights, 
 
 **Rollback:** D2 blocked → return to DRAFT. D3 rejected → return to DELIBERATION. D5 rejected → return to REVIEW. doc-9 is only written at COMPLETE.
 
+### Governance Amendment Workflow (governance-amendment)
+
+Use `governance-amendment` type to propose changes to the AgentHive Constitution (doc-9) or core governance rules. This type enforces elevated scrutiny: a mandatory deliberation window, Skeptic quorum, and human approval.
+
+| State | Gate | Key Requirements |
+| :--- | :--- | :--- |
+| **DRAFT** | D1 | Summary must cite constitutional Article/Section being modified; ACs reference sections; doc-9 dependency link present. |
+| **DELIBERATION** | D2 | Minimum 48-hour open comment window; any agent may raise concerns; no unresolved blocking concerns. |
+| **REVIEW** | D3 | ≥2 distinct reviewers must approve, including at least one Skeptic. |
+| **DEVELOP** | D4 | Migration files verified; ACs passing; CONVENTIONS.md updated. |
+| **MERGE** | D5 | Human agent (`agent_type='human'`) approval required — auto-merge blocked by trigger. |
+| **COMPLETE** | — | Constitutional document (doc-9) updated atomically. |
+
+**How to file a governance amendment:**
+1. `prop_create type=governance-amendment` — set `summary` to the Article/Section being modified.
+2. Add a `proposal_dependency` link pointing to doc-9 (or the relevant constitutional sub-document).
+3. After DRAFT gating passes (D1), the proposal enters DELIBERATION for ≥48 hours.
+4. Collect ≥2 approvals (Skeptic + 1 other) at REVIEW (D3).
+5. Implement schema/code changes at DEVELOP; get D4 code review.
+6. Gary (or a registered human agent) approves at MERGE (D5).
+7. At COMPLETE, doc-9 is updated to reflect the amendment.
+
+**Rollback:** constitutional document (doc-9) is only updated at COMPLETE. Any rejection before that point leaves doc-9 unchanged.
+
+**Bootstrapping note (P181):** P181 itself used a transitional path since the machinery did not yet exist. All subsequent governance proposals must use `governance-amendment` type.
+
 ### Unified Vocabulary Table
 
 Both workflows share the same maturity axis and are stored in `roadmap.workflow_stages`. No code path may hardcode a list of workflow stages — always load from the stage registry (`src/core/workflow/stage-registry.ts`).
@@ -855,6 +881,48 @@ For deep reference (DB schema, control-plane architecture, escalation matrix), s
 
 Precision matters more than confidence theater.
 
+### 8.1 Local CI gate (P417) — trigger conditions and tier selection
+
+**Source of truth:** `scripts/gate.sh` — all required checks are listed there. This section documents the trigger conditions and structural intent.
+
+**Required capabilities:** `ci`, `typescript` (as declared in proposal P417).
+
+Run `npm run ci` (or `bash scripts/gate.sh`) before any of the following:
+- Restarting a service or systemd unit
+- Merging to `main`
+- Changing an MCP tool or MCP server configuration
+- Applying a database migration
+
+**Two-tier structure:**
+
+| Tier | Command | When required | Time budget |
+|---|---|---|---|
+| **Tier 1 — fast preflight** | `npm run ci -- --preflight` | Before any commit on TypeScript sources | <10 s |
+| **Tier 2 — full gate** | `npm run ci` (default) | Before restart, MCP change, migration, or merge | <60 s |
+
+**Tier 1 checks (always blocking):**
+1. `biome check --changed --since=origin/main` — lint + format on git-changed files only (full-repo has 1000+ pre-existing violations; changed-file scope makes this enforceable)
+2. `tsc --noEmit -p tsconfig.check.json` — typecheck green zone (hive-cli + identity + workflow)
+3. `bash scripts/ci-env-check.sh` — no bare `process.env.PG*` reads outside config layer
+
+**Tier 2 checks (blocking unless explicitly deferred):**
+4. `bash scripts/ci/check-migration-drops.sh` — DROP/RENAME column with surviving codebase refs
+5. `node --import jiti/register scripts/check-migration-prefixes.ts` — sequential migration numbering, no gaps
+6. `bash scripts/check-hardcoded.sh` — no literal host paths, ports, or model names in source
+7. `node scripts/check-publish-hygiene.mjs` — only checked when `package.json` changed vs `origin/main`
+
+**Migration directory boundary:**
+- `scripts/migrations/` — **canonical active directory** (post-P753). All new migrations go here.
+- `database/migrations/` — **legacy directory** (pre-P753). Contains pre-existing duplicate prefixes from before P753 introduced the split; treat as read-only historical record. The migration prefix check runs against `scripts/migrations/` only.
+
+**Deferred (informational, continue-on-error):**
+- Migration prefix/sequence check — 21+ pre-existing duplicate prefix groups in `scripts/migrations/`; renumbering tracked under P417 child proposal
+- SQL column audit — requires `AUDIT_DATABASE_URL`; tracked under P677 allowlist work
+- Workflow-state literal guard — tracked under P453 canonical state-names module
+- Broader TypeScript scope (cli.ts, mcp-server/server.ts, server/index.ts, core/infrastructure/, infra/) — pre-existing errors tracked under P417 child proposals
+
+Exit codes: `0` = all required checks pass; `1` = one or more required checks failed; `2` = invocation error.
+
 ### 8d. Project scope (P477 AC-2)
 
 The web control plane is multi-project: every operator action belongs to one of the rows in `roadmap.project`. Scope flows through one HTTP header.
@@ -1376,6 +1444,80 @@ All PostgreSQL connection parameters **must** be read through `ConfigResolver`, 
 - `ConfigResolver.resolvePasswordSync()` — synchronous password resolution at startup (pgpass → env → undefined)
 - `StructuralKeys.PGUSER` has `defaultValue: "admin"` to avoid hardcoded fallbacks
 - `SecretKeys.PGPASSWORD` is `required: false` — pgpass/libpq are valid authentication paths
+
+## 20. Messaging, Presence, and Events (P1017)
+
+### 20.1 Messaging — Unified Message Bus
+
+**Canonical table:** `roadmap.message_ledger` — all inter-agent communication flows here.
+`liaison_message` is a legacy parallel bus and will be retired once all listeners migrate.
+
+**Message types** (enforced by CHECK constraint on `message_type`):
+
+Canonical source of truth: `src/infra/messaging/types.ts` (`MESSAGE_TYPES` const + `MessageType` type).
+Drift detected by `scripts/check-message-type-drift.ts` (exits 1 if TS ≠ DB). Run it after any migration that touches `message_type`.
+
+| Type | Usage |
+| :--- | :--- |
+| `text` | Human-readable content / chat |
+| `task` | Work assignment from orchestrator or agent |
+| `task_request` | Agent-initiated work request |
+| `task_ack` | Acknowledgement of a task receipt |
+| `task_status` | Progress update on an in-flight task |
+| `task_complete` | Task completed successfully |
+| `task_error` | Task failed with error details |
+| `notify` | Informational notification (no reply expected) |
+| `ack` | Explicit acknowledgement of a prior message |
+| `error` | Error report from agent |
+| `event` | Structured lifecycle event |
+| `liaison` | Legacy liaison-bus message type (deprecated) |
+| `protocol_ping` | Low-level liveness ping |
+| `protocol_pong` | Low-level liveness pong |
+
+**Routing rules:**
+- Direct agent messages: `to_agent` set, `channel` NULL
+- Channel broadcast: `channel` set (e.g. `team:dev`, `system:alerts`), `to_agent` NULL
+- System-origin messages: `from_agent = 'system'` or NULL — bypass ACL gates
+
+**Room ACL (AC-28):** `enforce_room_acl()` / `trig_room_acl` fires BEFORE INSERT on `message_ledger`. INSERTs to `team:*` or `system:*` channels are rejected (SQLSTATE 23514) unless `from_agent` appears in `roadmap.room_membership` with `revoked_at IS NULL`.
+
+**Idempotent ack (AC-22):** Use `roadmap.message_ack` for exactly-once delivery tracking. Insert with a client-generated `nonce uuid` — the `UNIQUE(nonce)` constraint returns 23505 on duplicates, making retries safe.
+
+**USER identity (AC-10):** `user/gary` (and any `user/*` identity) has `agent_type='user'` in `roadmap_workforce.agent_registry`. The `user` type is first-class alongside `human`, `llm`, `tool`, `hybrid`, `agency`, `workforce`, `coordinator`.
+
+**Bearer-token auth (AC-27):** `msg_send` calls where `from_agent` starts with `user/` require an `Authorization: Bearer <token>` header. The token's `sub` claim must match the `from_agent` identity. Missing token → 401. Sub mismatch → 403. Valid token → message accepted.
+
+### 20.2 Presence — Decoupled Presence State
+
+**Canonical function:** `roadmap.fn_pulse(p_agency_id text, p_state text)` — updates `roadmap.agency.presence_state` and fires `pg_notify('agency_presence_changed', json)` **only on state transitions**. Heartbeat rows no longer appear in `message_ledger` (AC-2: historical rows pruned).
+
+**NOTIFY payload** (from fn_pulse):
+```json
+{ "agency_id": "<identity>", "state": "<new-state>", "ts": "<iso-timestamp>" }
+```
+
+**Dispatchable threshold:** `v_agency_status` considers an agency dispatchable if `last_heartbeat_at > now() - interval '00:01:00'` (60 seconds). Do not change this threshold without updating both the view and the monitoring alert.
+
+**Presence states:** `active`, `idle`, `busy`, `offline`, `draining` — stored in `roadmap.agency.presence_state`.
+
+**Rule:** never write heartbeat events to `message_ledger`. Call `fn_pulse` directly from the heartbeat handler.
+
+### 20.3 Events — NOTIFY Channel Conventions
+
+All `pg_notify` channels follow a strict naming scheme:
+
+| Channel | Producer | Consumer | Purpose |
+| :--- | :--- | :--- | :--- |
+| `agency_presence_changed` | `fn_pulse` | Orchestrator, liaisons | Presence state transitions |
+| `a2a_msg_<identity>` | `fn_a2a_message_notify` / `fn_liaison_notify_new_message` | Agency liaison (LISTEN side) | All per-agent messages (DM + uplink) |
+| `gate_role_changed` | Operator / migration | Gate-role resolver cache | Persona refresh |
+| `new_proposal` | Proposal INSERT | Orchestrator scan | Proposal discovery |
+
+**Namespace rule (AC-25):** all per-agent channels use the fully-qualified identity as suffix (e.g. `a2a_msg_agent/copilot-one`). Canonical identity form is `<type>/<name>` — never use aliases or display names in NOTIFY channel names.
+
+**LISTEN subscription (AC-26):** agency liaisons subscribe to `a2a_msg_<own-identity>` on startup (unified channel after migration 144). Both `fn_a2a_message_notify` (on `message_ledger`) and `fn_liaison_notify_new_message` (on `liaison_message`) fire on this prefix. Do NOT use `liaison_message_<identity>` — that channel is retired.
+
+**Rule:** do not add NOTIFY calls outside schema functions or the sig-reconciler. Application code uses `pg_notify` only via `PgMessagingHandlers` or direct `fn_pulse` invocations — never raw SQL in request handlers.
 
 This is enforced automatically — violations will fail the CI check.
 

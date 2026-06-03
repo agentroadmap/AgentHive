@@ -18,17 +18,20 @@
  *   - Broadcast/system → logged and queued for next orchestrator cycle
  */
 
-import { getPool, query } from "../src/infra/postgres/pool.ts";
 import { trustGate } from "../src/infra/messaging/a2a-trust-gate.ts";
 import { registerSigReconciler } from "../src/infra/messaging/sig-reconciler.ts";
+import { getPool, query } from "../src/infra/postgres/pool.ts";
 
 const POLL_INTERVAL_MS = 10_000; // fallback poll every 10s
-const DISPATCH_BATCH = 20;       // max messages per cycle
+const DISPATCH_BATCH = 20; // max messages per cycle
 
 const logger = {
-	log: (...args: unknown[]) => console.log("[A2A]", new Date().toISOString(), ...args),
-	warn: (...args: unknown[]) => console.warn("[A2A]", new Date().toISOString(), ...args),
-	error: (...args: unknown[]) => console.error("[A2A]", new Date().toISOString(), ...args),
+	log: (...args: unknown[]) =>
+		console.log("[A2A]", new Date().toISOString(), ...args),
+	warn: (...args: unknown[]) =>
+		console.warn("[A2A]", new Date().toISOString(), ...args),
+	error: (...args: unknown[]) =>
+		console.error("[A2A]", new Date().toISOString(), ...args),
 };
 
 // Trust gate is sourced from src/infra/messaging/a2a-trust-gate.ts so it can be
@@ -41,7 +44,13 @@ const logger = {
 const WORKTREE_ROOT = "/data/code/worktree";
 
 /** Known worktrees (provider prefix recognized by agent-spawner). */
-const KNOWN_PROVIDERS = new Set(["claude", "gemini", "copilot", "openclaw", "codex"]);
+const KNOWN_PROVIDERS = new Set([
+	"claude",
+	"gemini",
+	"copilot",
+	"openclaw",
+	"codex",
+]);
 
 const TERMINAL_TRANSITION_STATUSES = new Set(["done", "failed", "cancelled"]);
 const ACTIONABLE_VIRTUAL_MESSAGE_TYPES = new Set(["task", "command", "gate"]);
@@ -63,6 +72,7 @@ function identityToWorktree(identity: string): string | null {
 
 /** Returns true if the worktree directory and .env.agent both exist. */
 import { existsSync } from "node:fs";
+
 function worktreeExists(worktree: string): boolean {
 	return (
 		existsSync(`${WORKTREE_ROOT}/${worktree}`) &&
@@ -173,7 +183,9 @@ async function deliverToAgent(
 				`[deliver] virtual agent ${recipient} (proposal_id=${msg.proposal_id}) — message logged; orchestrator owns dispatch (P753)`,
 			);
 		} else {
-			logger.log(`[deliver] virtual agent ${recipient} — no proposal_id, message logged only`);
+			logger.log(
+				`[deliver] virtual agent ${recipient} — no proposal_id, message logged only`,
+			);
 		}
 	}
 }
@@ -198,7 +210,9 @@ async function processMessage(msg: PendingMessage): Promise<void> {
 	}
 
 	if (recipients.length === 0) {
-		logger.log(`[msg:${msg.id}] no recipients for channel=${msg.channel} to_agent=${msg.to_agent}`);
+		logger.log(
+			`[msg:${msg.id}] no recipients for channel=${msg.channel} to_agent=${msg.to_agent}`,
+		);
 	}
 
 	for (const recipient of recipients) {
@@ -240,9 +254,32 @@ async function dispatchPendingMessages(): Promise<number> {
 		try {
 			await processMessage(msg);
 		} catch (err) {
-			const detail = err instanceof Error ? err.message : String(err);
+			const reason = err instanceof Error ? err.message : String(err);
 			logger.error(`Failed to process message ${msg.id}:`, err);
-			await writeToDlq(msg, detail);
+			// F4 (P1106): Route unrecoverable delivery failures to roadmap.dead_letter_queue
+			try {
+				await query(
+					`INSERT INTO roadmap.dead_letter_queue
+					 (original_message_id, from_agent, to_agent, channel, payload, failure_reason, retry_budget_used)
+					 VALUES ($1, $2, $3, $4, $5, $6, 0)`,
+					[
+						msg.id,
+						msg.from_agent,
+						msg.to_agent,
+						msg.channel,
+						msg.message_content,
+						reason.slice(0, 500),
+					],
+				);
+				logger.log(
+					`[msg:${msg.id}] routed to dead_letter_queue (reason: ${reason.slice(0, 80)})`,
+				);
+			} catch (dlqErr) {
+				logger.error(
+					`[msg:${msg.id}] Failed to write DLQ entry:`,
+					dlqErr instanceof Error ? dlqErr.message : dlqErr,
+				);
+			}
 		}
 	}
 	return rows.length;
@@ -390,9 +427,7 @@ async function dlqReplay(): Promise<number> {
 let stopping = false;
 let currentDispatch: Promise<number> | null = null;
 let pollTimer: NodeJS.Timeout | null = null;
-const SHUTDOWN_DRAIN_MS = Number(
-	process.env.AGENTHIVE_A2A_DRAIN_MS ?? 90_000,
-);
+const SHUTDOWN_DRAIN_MS = Number(process.env.AGENTHIVE_A2A_DRAIN_MS ?? 90_000);
 
 function trackedDispatch(): Promise<number> {
 	if (stopping) return Promise.resolve(0);
@@ -406,6 +441,9 @@ function trackedDispatch(): Promise<number> {
 
 async function main() {
 	logger.log("A2A Message Dispatcher starting...");
+
+	// F2 (P1106): Register background signature reconciler
+	await registerSigReconciler(getPool());
 
 	// Drain any messages that arrived before this process started
 	const backlog = await dispatchPendingMessages();
@@ -445,7 +483,9 @@ async function shutdown(signal: string): Promise<void> {
 	if (currentDispatch) {
 		const drainStart = Date.now();
 		const winner = await Promise.race([
-			currentDispatch.then(() => "drained" as const).catch(() => "drained" as const),
+			currentDispatch
+				.then(() => "drained" as const)
+				.catch(() => "drained" as const),
 			new Promise<"timeout">((resolve) =>
 				setTimeout(() => resolve("timeout"), SHUTDOWN_DRAIN_MS),
 			),

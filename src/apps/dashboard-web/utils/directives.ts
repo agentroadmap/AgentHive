@@ -9,7 +9,7 @@ import type {
 	DirectiveBucket,
 	DirectiveSummary,
 	Proposal,
-} from "../../../shared/types";
+} from "../../../shared/types/index.ts";
 import {
 	isCompleteStatus,
 	isReady,
@@ -117,8 +117,8 @@ function buildDirectiveAliasMap(
 		const existingKey = existing.toLowerCase();
 		const nextKey = normalizedId.toLowerCase();
 		const preferredRawId = /^\d+$/.test(aliasKey)
-			? `d-${aliasKey}`
-			: /^d-\d+$/.test(aliasKey)
+			? null
+			: /^[a-z]+-\d+$/i.test(aliasKey)
 				? aliasKey
 				: null;
 		if (preferredRawId) {
@@ -221,11 +221,7 @@ function canonicalizeDirectiveValue(
 	}
 	if (/^\d+$/.test(normalized)) {
 		const numericAlias = String(Number.parseInt(normalized, 10));
-		return (
-			aliasMap.get(`d-${numericAlias}`) ??
-			aliasMap.get(numericAlias) ??
-			normalized
-		);
+		return aliasMap.get(numericAlias) ?? normalized;
 	}
 	return normalized;
 }
@@ -321,7 +317,8 @@ function createBucket(
 	}
 
 	const doneCount = bucketProposals.filter((t) =>
-		isCompleteStatus(t.status),
+		isCompleteStatus(t.status) ||
+		(t.status ?? "").toLowerCase().includes("reached"),
 	).length;
 	const progress =
 		bucketProposals.length > 0

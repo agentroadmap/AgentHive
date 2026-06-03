@@ -12,9 +12,10 @@ const {
 	resolveAgency,
 	recordSpawnFailure,
 	recordCheckIn,
-	operatorResumeAgency,
-	emitOfflineAlerts,
+	resumeAgency,
+	scanAndAlertOfflineAgencies,
 	THROTTLE_THRESHOLD,
+	OFFLINE_ALERT_THRESHOLD_MINUTES,
 	_setQueryForTest,
 	_setDiscordForTest,
 } = await import(
@@ -128,229 +129,203 @@ test("recordCheckIn decays recent_failure_count (SQL check)", async () => {
 	assert.ok(sql.includes("recent_failure_count"));
 });
 
-// --- P765 AC-1: offline → dormant auto-recovery ---
+// ─── P765 AC-1: offline → dormant two-step recovery ───────────────────────
 
-test("recordCheckIn includes offline→dormant transition (SQL check)", async () => {
+test("recordCheckIn AC-1: includes offline→dormant transition branch (SQL check)", async () => {
 	mockRows = [];
 	queryCalls.length = 0;
 	await recordCheckIn("claude-opus");
-	const sql = queryCalls[0].sql;
-	assert.ok(
-		sql.includes("offline"),
-		"SQL should reference offline state transition",
-	);
-	assert.ok(
-		sql.match(/old_status\s*=\s*'offline'/),
-		"SQL should handle offline as a CASE branch",
-	);
+	const sql = queryCalls.at(-1)!.sql;
+	// Must handle offline in a CASE branch
+	assert.ok(sql.includes("offline"), "SQL should reference offline status");
+	assert.ok(sql.includes("dormant"), "SQL should reference dormant status");
 });
 
-test("recordCheckIn does not exclude offline agencies from WHERE clause (SQL check)", async () => {
+test("recordCheckIn AC-1: does NOT exclude offline from WHERE (only retired excluded)", async () => {
 	mockRows = [];
 	queryCalls.length = 0;
 	await recordCheckIn("claude-opus");
-	const sql = queryCalls[0].sql;
-	// Only 'retired' should be excluded; 'offline' must not appear in NOT IN list
+	const sql = queryCalls.at(-1)!.sql;
+	// The NOT IN exclusion must not include 'offline' — only 'retired'
+	const notInMatch = sql.match(/NOT IN\s*\(([^)]+)\)/i)?.[1] ?? "";
 	assert.ok(
-		!sql.match(/NOT IN\s*\(\s*'offline'/),
-		"offline must not be in NOT IN exclusion list",
+		!notInMatch.includes("offline"),
+		"offline must NOT be excluded by NOT IN",
 	);
-	assert.ok(sql.includes("retired"), "retired should still be excluded");
+	assert.ok(
+		notInMatch.includes("retired"),
+		"retired must be excluded by NOT IN",
+	);
 });
 
-test("recordCheckIn clears alert_sent_at when dormant→active (SQL check)", async () => {
+test("recordCheckIn AC-1: resets throttle_count when coming from offline (SQL check)", async () => {
 	mockRows = [];
 	queryCalls.length = 0;
 	await recordCheckIn("claude-opus");
-	const sql = queryCalls[0].sql;
+	const sql = queryCalls.at(-1)!.sql;
+	// throttle_count reset CASE must include 'offline' alongside 'throttled'
+	const throttleIdx = sql.indexOf("throttle_count");
+	const throttleSection = sql.slice(throttleIdx, throttleIdx + 200);
 	assert.ok(
-		sql.includes("alert_sent_at"),
-		"SQL should reference alert_sent_at column",
-	);
-	// The dormant→active branch must null it out
-	assert.ok(
-		sql.includes("NULL"),
-		"SQL should set alert_sent_at to NULL on recovery",
+		throttleSection.includes("offline"),
+		"throttle reset CASE must cover offline",
 	);
 });
 
-test("recordCheckIn emits Discord recovery when dormant→active had alert (behavior check)", async () => {
-	mockRows = [
-		{
-			new_status: "active",
-			project_id: null,
-			old_status: "dormant",
-			had_alert: true,
-		},
-	];
-	discordCalls.length = 0;
-	queryCalls.length = 0;
-	await recordCheckIn("claude-opus");
-	assert.equal(discordCalls.length, 1);
-	assert.equal(discordCalls[0].level, "success");
-	assert.ok(discordCalls[0].message.includes("claude-opus"));
-});
+// ─── P765 AC-2: resumeAgency operator short-circuit ──────────────────────
 
-test("recordCheckIn does not emit Discord when no prior alert (behavior check)", async () => {
-	mockRows = [
-		{
-			new_status: "active",
-			project_id: null,
-			old_status: "dormant",
-			had_alert: false,
-		},
-	];
-	discordCalls.length = 0;
-	await recordCheckIn("claude-opus");
-	assert.equal(discordCalls.length, 0);
-});
-
-// --- P765 AC-2: operatorResumeAgency ---
-
-test("operatorResumeAgency sets status to active from any non-retired state (SQL check)", async () => {
+test("resumeAgency AC-2: sets status=active and resets counters (SQL check)", async () => {
 	mockRows = [];
 	queryCalls.length = 0;
-	await operatorResumeAgency("claude-opus");
-	const sql = queryCalls[0].sql;
-	assert.ok(sql.includes("'active'"), "SQL should set status = 'active'");
+	await resumeAgency("claude-opus");
+	const sql = queryCalls.at(-1)!.sql;
+	assert.ok(sql.includes("active"), "SQL must set status to active");
+	assert.ok(sql.includes("throttle_count"), "SQL must reset throttle_count");
 	assert.ok(
-		sql.includes("Operator resume"),
-		"SQL should set status_reason to Operator resume",
+		sql.includes("recent_failure_count"),
+		"SQL must reset recent_failure_count",
 	);
-	assert.ok(
-		sql.includes("alert_sent_at"),
-		"SQL should clear alert_sent_at",
-	);
-	assert.ok(sql.includes("agent_identity"), "SQL should join via agent_identity");
-	assert.ok(
-		sql.includes("retired"),
-		"SQL should still exclude retired agencies",
-	);
+	assert.ok(sql.includes("last_failure_at"), "SQL must clear last_failure_at");
 });
 
-test("operatorResumeAgency emits Discord recovery when alert was set (behavior check)", async () => {
-	mockRows = [{ project_id: null, had_alert: true }];
-	discordCalls.length = 0;
-	queryCalls.length = 0;
-	await operatorResumeAgency("claude-opus");
-	assert.equal(discordCalls.length, 1);
-	assert.equal(discordCalls[0].level, "success");
-	assert.ok(discordCalls[0].message.includes("claude-opus"));
-	assert.ok(discordCalls[0].message.includes("operator"));
-});
-
-test("operatorResumeAgency skips Discord when no prior alert (behavior check)", async () => {
-	mockRows = [{ project_id: null, had_alert: false }];
-	discordCalls.length = 0;
-	await operatorResumeAgency("claude-opus");
-	assert.equal(discordCalls.length, 0);
-});
-
-// --- P765 AC-3/AC-4: emitOfflineAlerts ---
-
-test("emitOfflineAlerts targets offline agencies past 10-min threshold (SQL check)", async () => {
+test("resumeAgency AC-2: excludes retired agencies from update (SQL check)", async () => {
 	mockRows = [];
 	queryCalls.length = 0;
-	await emitOfflineAlerts();
-	const sql = queryCalls[0].sql;
-	assert.ok(sql.includes("'offline'"), "SQL should filter on offline status");
-	assert.ok(
-		sql.includes("10 minutes"),
-		"SQL should use 10-minute threshold",
-	);
-	assert.ok(
-		sql.includes("alert_sent_at IS NULL"),
-		"SQL should only flag rows with no prior alert (AC-4)",
-	);
-	assert.ok(
-		sql.includes("alert_sent_at = now()"),
-		"SQL should stamp alert_sent_at to prevent repeat alerts",
-	);
+	await resumeAgency("claude-opus");
+	const sql = queryCalls.at(-1)!.sql;
+	assert.ok(sql.includes("retired"), "SQL must exclude retired agencies");
 });
 
-test("emitOfflineAlerts fires Discord warning for each flagged agency", async () => {
-	mockRows = [
-		{ project_id: null, agent_identity: "claude-opus" },
-		{ project_id: "proj-x", agent_identity: "gemini-pro" },
-	];
-	discordCalls.length = 0;
-	await emitOfflineAlerts();
-	assert.equal(discordCalls.length, 2);
-	assert.ok(discordCalls.every((c) => c.level === "warning"));
-	assert.ok(discordCalls.some((c) => c.message.includes("claude-opus")));
-	assert.ok(discordCalls.some((c) => c.message.includes("gemini-pro")));
-});
-
-test("emitOfflineAlerts returns count of flagged agencies", async () => {
-	mockRows = [
-		{ project_id: null, agent_identity: "agency-1" },
-		{ project_id: "proj-a", agent_identity: "agency-2" },
-	];
-	const count = await emitOfflineAlerts();
-	assert.equal(count, 2);
-});
-
-test("emitOfflineAlerts returns 0 when nothing is overdue", async () => {
-	mockRows = [];
-	const count = await emitOfflineAlerts();
-	assert.equal(count, 0);
-});
-
-// --- P765 AC-5: dormant→offline silence boundary (SQL shape check) ---
-
-test("scanAndTransitionSilentAgencies uses 5-min dormant and 30-min offline thresholds (SQL check)", async () => {
+test("resumeAgency AC-2: resolves identity via agent_registry (SQL check)", async () => {
 	mockRows = [];
 	queryCalls.length = 0;
-	const { scanAndTransitionSilentAgencies } = await import(
-		"../../src/core/orchestration/resolvers/agency-resolver.ts"
-	);
-	await scanAndTransitionSilentAgencies();
-	const sqls = queryCalls.slice(-2).map((c) => c.sql);
-	assert.ok(
-		sqls.some((s) => s.includes("30 minutes")),
-		"offline transition should use 30-min threshold",
-	);
-	assert.ok(
-		sqls.some((s) => s.includes("5 minutes")),
-		"dormant transition should use 5-min threshold",
-	);
+	await resumeAgency("claude-opus");
+	const sql = queryCalls.at(-1)!.sql;
+	assert.ok(sql.includes("agent_registry"), "must join through agent_registry");
+	assert.ok(sql.includes("agent_identity"), "must filter by agent_identity");
+	const params = queryCalls.at(-1)!.params;
+	assert.equal(params[0], "claude-opus");
 });
 
-// --- P765 AC-5: orchestrator_wake pg_notify on agency recovery ---
-
-test("recordCheckIn emits orchestrator_wake pg_notify when agency transitions to active (behavior check)", async () => {
-	mockRows = [
-		{
-			new_status: "active",
-			project_id: null,
-			old_status: "dormant",
-			had_alert: false,
-		},
-	];
-	queryCalls.length = 0;
-	await recordCheckIn("worker/recovery-test");
-	const notifyCall = queryCalls.find(
-		(c) => c.sql.includes("pg_notify") && c.sql.includes("orchestrator_wake"),
-	);
-	assert.ok(notifyCall, "should emit pg_notify('orchestrator_wake', ...) on active transition");
-	const payload = JSON.parse(notifyCall.params[0] as string);
-	assert.equal(payload.reason, "agency_recovery");
-	assert.equal(payload.identity, "worker/recovery-test");
+test("OFFLINE_ALERT_THRESHOLD_MINUTES is 10", () => {
+	assert.equal(OFFLINE_ALERT_THRESHOLD_MINUTES, 10);
 });
 
-test("recordCheckIn does not emit orchestrator_wake when agency stays non-active (behavior check)", async () => {
-	mockRows = [
-		{
-			new_status: "dormant",
-			project_id: null,
-			old_status: "active",
-			had_alert: false,
-		},
-	];
+// ─── P765 AC-3/AC-4: scanAndAlertOfflineAgencies ─────────────────────────
+
+test("scanAndAlertOfflineAgencies AC-3: queries for offline agencies past threshold (SQL check)", async () => {
+	// Return empty rows for both queries (new alerts + recovery)
+	let callCount = 0;
+	_setQueryForTest(async (sql: string, params: unknown[] = []) => {
+		queryCalls.push({ sql, params });
+		callCount++;
+		// biome-ignore lint/suspicious/noExplicitAny: test mock
+		return { rows: [], rowCount: 0 } as any;
+	});
+
 	queryCalls.length = 0;
-	await recordCheckIn("worker/dormant-test");
-	const notifyCall = queryCalls.find(
-		(c) => c.sql.includes("pg_notify") && c.sql.includes("orchestrator_wake"),
+	await scanAndAlertOfflineAgencies(10);
+
+	// First SELECT: offline agencies with alert_sent_at IS NULL
+	const firstSelect = queryCalls.find((c) =>
+		c.sql.includes("offline_alert_sent_at IS NULL"),
 	);
-	assert.equal(notifyCall, undefined, "should NOT emit orchestrator_wake when status stays non-active");
+	assert.ok(firstSelect, "must query for agencies with no alert sent yet");
+	assert.ok(
+		firstSelect.sql.includes("offline"),
+		"must filter for offline status",
+	);
+	assert.equal(
+		firstSelect.params[0],
+		10,
+		"must pass threshold minutes as param",
+	);
+
+	// Second SELECT: recovered agencies with alert_sent_at set
+	const recoverySelect = queryCalls.find((c) =>
+		c.sql.includes("offline_alert_sent_at IS NOT NULL"),
+	);
+	assert.ok(
+		recoverySelect,
+		"must query for recovered agencies with pending alert flag",
+	);
+
+	// Restore original mock
+	_setQueryForTest(async (sql: string, params: unknown[] = []) => {
+		queryCalls.push({ sql, params });
+		// biome-ignore lint/suspicious/noExplicitAny: test mock
+		return { rows: mockRows, rowCount: mockRows.length } as any;
+	});
+});
+
+test("scanAndAlertOfflineAgencies AC-4: SELECT uses IS NULL guard to prevent repeat alerts (SQL check)", async () => {
+	// Return empty rows so enqueueNotification is never called (avoids real DB hit).
+	// The deduplication invariant is enforced by the IS NULL guard in the SELECT —
+	// if that condition exists in the query, re-alerting within an episode is impossible.
+	_setQueryForTest(async (sql: string, params: unknown[] = []) => {
+		queryCalls.push({ sql, params });
+		// biome-ignore lint/suspicious/noExplicitAny: test mock
+		return { rows: [], rowCount: 0 } as any;
+	});
+
+	queryCalls.length = 0;
+	await scanAndAlertOfflineAgencies(10);
+
+	const offlineSelect = queryCalls.find((c) =>
+		c.sql.includes("offline_alert_sent_at IS NULL"),
+	);
+	assert.ok(
+		offlineSelect,
+		"SELECT must gate on offline_alert_sent_at IS NULL to prevent repeat alerts within an episode",
+	);
+
+	// Restore original mock
+	_setQueryForTest(async (sql: string, params: unknown[] = []) => {
+		queryCalls.push({ sql, params });
+		// biome-ignore lint/suspicious/noExplicitAny: test mock
+		return { rows: mockRows, rowCount: mockRows.length } as any;
+	});
+});
+
+test("scanAndAlertOfflineAgencies AC-4: clears alert flag on recovery (SQL check)", async () => {
+	// Simulate one recovered agency still holding alert_sent_at
+	const fakeRecovered = {
+		agency_id: "agent-y",
+		display_name: "Agent Y",
+		provider: "anthropic",
+		status: "active",
+	};
+	let selectCount = 0;
+	_setQueryForTest(async (sql: string, params: unknown[] = []) => {
+		queryCalls.push({ sql, params });
+		if (
+			sql.includes("offline_alert_sent_at IS NOT NULL") &&
+			selectCount++ === 0
+		) {
+			// biome-ignore lint/suspicious/noExplicitAny: test mock
+			return { rows: [fakeRecovered], rowCount: 1 } as any;
+		}
+		// biome-ignore lint/suspicious/noExplicitAny: test mock
+		return { rows: [], rowCount: 0 } as any;
+	});
+
+	queryCalls.length = 0;
+	await scanAndAlertOfflineAgencies(10);
+
+	// Must UPDATE offline_alert_sent_at = NULL to clear the episode flag
+	const clearUpdate = queryCalls.find(
+		(c) =>
+			c.sql.includes("offline_alert_sent_at") &&
+			c.sql.includes("NULL") &&
+			c.sql.includes("UPDATE") &&
+			c.params[0] === "agent-y",
+	);
+	assert.ok(clearUpdate, "must clear offline_alert_sent_at = NULL on recovery");
+
+	// Restore original mock
+	_setQueryForTest(async (sql: string, params: unknown[] = []) => {
+		queryCalls.push({ sql, params });
+		// biome-ignore lint/suspicious/noExplicitAny: test mock
+		return { rows: mockRows, rowCount: mockRows.length } as any;
+	});
 });

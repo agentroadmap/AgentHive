@@ -141,6 +141,24 @@ function defaultTrustTier(agentId: string, agentType: string): TrustTier {
 	return "restricted";
 }
 
+export function assertNoPublicKeyConflict(
+	agentId: string,
+	existingPublicKey: string | null | undefined,
+	providedPublicKey: string | null | undefined,
+): void {
+	if (
+		existingPublicKey !== undefined &&
+		existingPublicKey !== null &&
+		providedPublicKey !== undefined &&
+		providedPublicKey !== null &&
+		existingPublicKey !== providedPublicKey
+	) {
+		throw new Error(
+			`Key conflict for agent ${agentId}: registered public_key differs from provided key. Use rotateKeyPair() to explicitly rotate.`,
+		);
+	}
+}
+
 /** Map a DB row to AgentRegistration */
 function hydrate(row: AgentRegistryRow): AgentRegistration {
 	const skills = row.skills ?? {};
@@ -196,6 +214,11 @@ async function resolveRegistrationInstanceId(
 /**
  * Register agent on startup.
  * Creates or updates the agent record in Postgres.
+ *
+ * P159: When `request.publicKey` is provided, performs a conflict check before
+ * upserting — throws if the existing row already has a different non-null
+ * public_key (caller must use rotateKeyPair to explicitly rotate). Idempotent
+ * for matching or null existing keys.
  */
 export async function registerAgent(
 	request: RegistrationRequest,
@@ -214,6 +237,16 @@ export async function registerAgent(
 		agentType,
 		capabilities,
 	);
+
+	// P159 AC-10: pre-check for key conflict before upsert
+	if (publicKey) {
+		const { rows: existing } = await query<{ public_key: string | null }>(
+			`SELECT public_key FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
+			[instanceId],
+		);
+		const existingKey = existing[0]?.public_key;
+		assertNoPublicKeyConflict(instanceId, existingKey, publicKey);
+	}
 
 	const channel = request.channel || agentChannel(instanceId);
 	const now = new Date().toISOString();

@@ -16,7 +16,7 @@
 
 import { CubicIdleDetector } from "../src/core/orchestration/cubic-idle-detector.ts";
 import { CubicCleanupService } from "../src/core/orchestration/cubic-cleanup.ts";
-import { reapOrphanScratch } from "../src/core/orchestration/scratch.ts";
+import { reapOrphanScratch } from "../src/shared/utils/agent-scratch.ts";
 
 const args = new Set(process.argv.slice(2));
 const dryRun = args.has("--dry-run");

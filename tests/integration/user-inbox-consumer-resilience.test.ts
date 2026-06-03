@@ -15,6 +15,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { describe, it, before, after } from "node:test";
 import { Client } from "pg";
+import { agentNotifyChannel } from "../../src/infra/messaging/a2a-access-control.ts";
 
 // ─── DB helpers ───────────────────────────────────────────────────────────────
 
@@ -58,7 +59,7 @@ type ConsumerProcess = ReturnType<typeof spawn>;
 function spawnConsumer(operator: string): ConsumerProcess {
 	const env = {
 		...process.env,
-		USER_INBOX_OPERATOR: operator,
+		INBOX_OPERATOR: operator,
 	};
 	return spawn("bun", ["run", "scripts/user-inbox-consumer.ts"], {
 		cwd: "/data/code/AgentHive",
@@ -114,11 +115,8 @@ function sleep(ms: number): Promise<void> {
 // Unique operator name per test run to avoid collisions with production consumer.
 const TEST_OPERATOR = `test-resilience-${process.pid}`;
 const TEST_IDENTITY = `user/${TEST_OPERATOR}`;
-// Canonical channel naming per P1103 + P1120 AC-23: derive via the same helper
-// the consumer uses, NOT the legacy `a2a_msg_` literal. Hard-coding the legacy
-// prefix here was the silent test-failure cause until 2026-05-25 — consumer
-// wrote msg_<identity>, test queried a2a_msg_<identity>, 0 rows = assertion fail.
-const CHANNEL = `msg_${TEST_IDENTITY}`;
+// Use agentNotifyChannel to get the canonical channel name (returns "msg_" + identity).
+const CHANNEL = agentNotifyChannel(TEST_IDENTITY);
 
 let db: Client;
 
@@ -225,14 +223,14 @@ describe("user-inbox-consumer resilience", () => {
 			const ins1 = await db.query<{ id: number }>(
 				`INSERT INTO roadmap.message_ledger
 				    (from_agent, to_agent, message_type, message_content, created_at)
-				 VALUES ('system', $1, 'notify', 'msg-A', now())
+				 VALUES ('system', $1, 'test_ping', 'msg-A', now())
 				 RETURNING id`,
 				[TEST_IDENTITY],
 			);
 			const ins2 = await db.query<{ id: number }>(
 				`INSERT INTO roadmap.message_ledger
 				    (from_agent, to_agent, message_type, message_content, created_at)
-				 VALUES ('system', $1, 'notify', 'msg-B', now())
+				 VALUES ('system', $1, 'test_ping', 'msg-B', now())
 				 RETURNING id`,
 				[TEST_IDENTITY],
 			);
@@ -312,7 +310,7 @@ describe("user-inbox-consumer resilience", () => {
 			const { rows: ins } = await db.query<{ id: number }>(
 				`INSERT INTO roadmap.message_ledger
 				    (from_agent, to_agent, message_type, message_content, created_at)
-				 VALUES ('system', $1, 'notify', 'duplicate-guard', now())
+				 VALUES ('system', $1, 'test_ping', 'duplicate-guard', now())
 				 RETURNING id`,
 				[TEST_IDENTITY],
 			);

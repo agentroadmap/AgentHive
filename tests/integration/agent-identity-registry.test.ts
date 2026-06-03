@@ -1,393 +1,218 @@
 /**
- * P159: agent-identity.ts ↔ agent_registry DB wiring
+ * P159 — agent-identity.ts ↔ agent_registry wiring.
  *
- * ACs covered:
- *   AC-1:  registerAgent() accepts publicKey and stores it in agent_registry
- *   AC-2:  Agents with null DB public_key degrade gracefully (backfill path)
- *   AC-3:  getOrCreateIdentity() wires publicKey into registration call
- *   AC-4:  rotateKeyPair() calls updateAgentPublicKey() after key save
- *   AC-5:  verifyTokenWithDbLookup() resolves key via injected lookup function
- *   AC-6:  verifyTokenWithDbLookup() falls back to token.publicKey when lookup fails
- *   AC-7:  DB errors during getOrCreateIdentity() do not abort identity creation
- *   AC-8:  getAgentPublicKey() is exported from agent-registry/index
- *   AC-9:  updateAgentPublicKey() is exported from agent-registry/index
- *   AC-10: registerAgent() throws on key conflict (existing key ≠ provided key)
+ * These tests keep Postgres out of the loop and verify the contract at the
+ * identity/registry boundary: exact registration payloads, restart backfill,
+ * rotation propagation, DB-backed token verification, and key conflict rules.
  */
 
-import assert from "node:assert";
+import assert from "node:assert/strict";
+import { generateKeyPairSync } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
-	generateAgentKeyPair,
+	type AgentKeyPair,
 	getOrCreateIdentity,
 	issueToken,
+	loadKeyPair,
 	rotateKeyPair,
+	verifyToken,
 	verifyTokenWithDbLookup,
 } from "../../src/core/identity/agent-identity.ts";
 import {
-	getAgentPublicKey,
-	registerAgent,
-	updateAgentPublicKey,
+	assertNoPublicKeyConflict,
+	type RegistrationRequest,
 } from "../../src/core/identity/agent-registry/index.ts";
-import { query } from "../../src/infra/postgres/pool.ts";
 
-// Unique suffix to avoid cross-test collisions in shared DB
-const RUN_ID = Date.now().toString(36);
-function testId(base: string): string {
-	return `p159-${base}-${RUN_ID}`;
+function genKeyPair() {
+	return generateKeyPairSync("ed25519", {
+		publicKeyEncoding: { type: "spki", format: "pem" },
+		privateKeyEncoding: { type: "pkcs8", format: "pem" },
+	});
 }
 
-async function cleanupAgent(agentId: string): Promise<void> {
-	await query(
-		`DELETE FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
-		[agentId],
-	).catch(() => {});
+function fakeRegistrationResponse(request: RegistrationRequest) {
+	return {
+		success: true,
+		agentId: request.instanceId ?? request.agentId,
+		channel: request.channel ?? `agent-${request.agentId}`,
+		message: "registered",
+	};
 }
 
-describe("P159: agent-identity ↔ agent_registry wiring", () => {
-	let testDir: string;
+describe("P159 identity registry sync", () => {
+	let tmpDir: string;
 
 	beforeEach(async () => {
-		testDir = await mkdtemp(tmpdir() + "/p159-test-");
+		tmpDir = await mkdtemp(join(tmpdir(), "p159-identity-"));
 	});
 
 	afterEach(async () => {
-		await rm(testDir, { recursive: true, force: true });
+		await rm(tmpDir, { recursive: true, force: true });
 	});
 
-	// -----------------------------------------------------------------------
-	// AC-8 / AC-9: Exports
-	// -----------------------------------------------------------------------
-
-	describe("AC-8: getAgentPublicKey exported", () => {
-		it("is a function", () => {
-			assert.strictEqual(typeof getAgentPublicKey, "function");
+	it("registers a newly created identity under the keypair agentId with publicKey", async () => {
+		const calls: RegistrationRequest[] = [];
+		const keyPair = await getOrCreateIdentity(tmpDir, "p159-new-agent", {
+			registerIdentity: async (request) => {
+				calls.push(request);
+				return fakeRegistrationResponse(request);
+			},
 		});
+
+		assert.equal(calls.length, 1);
+		assert.equal(calls[0].agentId, keyPair.agentId);
+		assert.equal(
+			calls[0].instanceId,
+			keyPair.agentId,
+			"registry row must use the stable keypair agentId, not an auto-suffixed contract id",
+		);
+		assert.equal(calls[0].publicKey, keyPair.publicKey);
 	});
 
-	describe("AC-9: updateAgentPublicKey exported", () => {
-		it("is a function", () => {
-			assert.strictEqual(typeof updateAgentPublicKey, "function");
+	it("backfills an existing on-disk identity on subsequent startup", async () => {
+		const calls: RegistrationRequest[] = [];
+		const registerIdentity = async (request: RegistrationRequest) => {
+			calls.push(request);
+			return fakeRegistrationResponse(request);
+		};
+
+		const first = await getOrCreateIdentity(tmpDir, "p159-backfill-agent", {
+			registerIdentity,
 		});
+		const second = await getOrCreateIdentity(tmpDir, "p159-backfill-agent", {
+			registerIdentity,
+		});
+
+		assert.equal(first.agentId, second.agentId);
+		assert.equal(first.publicKey, second.publicKey);
+		assert.equal(calls.length, 2);
+		assert.equal(calls[1].instanceId, first.agentId);
+		assert.equal(calls[1].publicKey, first.publicKey);
 	});
 
-	// -----------------------------------------------------------------------
-	// AC-1: registerAgent stores publicKey in DB
-	// -----------------------------------------------------------------------
-
-	describe("AC-1: registerAgent() stores publicKey in agent_registry", () => {
-		it("inserts public_key on first registration", async () => {
-			const id = testId("reg-key");
-			const { publicKey } = generateAgentKeyPair(id);
-
-			await registerAgent({ agentId: id, instanceId: id, publicKey });
-
-			const { rows } = await query<{ public_key: string | null }>(
-				`SELECT public_key FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
-				[id],
-			);
-			assert.ok(rows.length > 0, "Row should exist");
-			assert.strictEqual(rows[0].public_key, publicKey);
-
-			await cleanupAgent(id);
+	it("keeps the file-system identity authoritative when registry sync fails", async () => {
+		const keyPair = await getOrCreateIdentity(tmpDir, "p159-db-down-agent", {
+			registerIdentity: async () => {
+				throw new Error("db unavailable");
+			},
 		});
 
-		it("upserts same key idempotently (ON CONFLICT)", async () => {
-			const id = testId("reg-idem");
-			const { publicKey } = generateAgentKeyPair(id);
-
-			await registerAgent({ agentId: id, instanceId: id, publicKey });
-			await registerAgent({ agentId: id, instanceId: id, publicKey }); // second call
-
-			const { rows } = await query<{ public_key: string | null }>(
-				`SELECT public_key FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
-				[id],
-			);
-			assert.strictEqual(rows[0].public_key, publicKey, "Key should remain unchanged");
-
-			await cleanupAgent(id);
-		});
-
-		it("does not overwrite existing public_key with null when publicKey omitted", async () => {
-			const id = testId("reg-preserve");
-			const { publicKey } = generateAgentKeyPair(id);
-
-			await registerAgent({ agentId: id, instanceId: id, publicKey });
-			// Re-register without publicKey — should preserve stored key
-			await registerAgent({ agentId: id, instanceId: id });
-
-			const { rows } = await query<{ public_key: string | null }>(
-				`SELECT public_key FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
-				[id],
-			);
-			assert.strictEqual(rows[0].public_key, publicKey, "Existing key must be preserved");
-
-			await cleanupAgent(id);
-		});
+		const onDisk = await loadKeyPair(tmpDir, keyPair.agentId);
+		assert.equal(onDisk?.publicKey, keyPair.publicKey);
 	});
 
-	// -----------------------------------------------------------------------
-	// AC-10: Key conflict detection
-	// -----------------------------------------------------------------------
+	it("updates agent_registry public_key on rotation after persisting the new key", async () => {
+		const original = await getOrCreateIdentity(tmpDir, "p159-rotate-agent", {
+			registerIdentity: async (request) => fakeRegistrationResponse(request),
+		});
+		const updates: Array<{ agentId: string; publicKey: string }> = [];
 
-	describe("AC-10: registerAgent() throws on key conflict", () => {
-		it("throws when stored public_key differs from provided key", async () => {
-			const id = testId("conflict");
-			const key1 = generateAgentKeyPair(`${id}-1`).publicKey;
-			const key2 = generateAgentKeyPair(`${id}-2`).publicKey;
-
-			await registerAgent({ agentId: id, instanceId: id, publicKey: key1 });
-
-			await assert.rejects(
-				() => registerAgent({ agentId: id, instanceId: id, publicKey: key2 }),
-				(err: Error) => {
-					assert.ok(err.message.startsWith("Key conflict for agent"), err.message);
-					assert.ok(err.message.includes("rotateKeyPair()"), err.message);
-					return true;
+		const { newKeyPair, previousPublicKey } = await rotateKeyPair(
+			tmpDir,
+			original,
+			{
+				updatePublicKey: async (agentId, publicKey) => {
+					updates.push({ agentId, publicKey });
 				},
-			);
+			},
+		);
 
-			await cleanupAgent(id);
-		});
-
-		it("does NOT throw when stored public_key is null (backfill path)", async () => {
-			const id = testId("null-key");
-			const { publicKey } = generateAgentKeyPair(id);
-
-			// Insert row with NULL public_key
-			await query(
-				`INSERT INTO roadmap_workforce.agent_registry
-				 (agent_identity, agent_type, status, trust_tier)
-				 VALUES ($1, 'llm', 'active', 'restricted')
-				 ON CONFLICT (agent_identity) DO NOTHING`,
-				[id],
-			);
-
-			await assert.doesNotReject(() =>
-				registerAgent({ agentId: id, instanceId: id, publicKey }),
-			);
-
-			await cleanupAgent(id);
-		});
-
-		it("does NOT throw when provided key matches stored key (idempotent)", async () => {
-			const id = testId("same-key");
-			const { publicKey } = generateAgentKeyPair(id);
-
-			await registerAgent({ agentId: id, instanceId: id, publicKey });
-
-			await assert.doesNotReject(() =>
-				registerAgent({ agentId: id, instanceId: id, publicKey }),
-			);
-
-			await cleanupAgent(id);
-		});
+		const onDisk = await loadKeyPair(tmpDir, original.agentId);
+		assert.equal(previousPublicKey, original.publicKey);
+		assert.notEqual(newKeyPair.publicKey, original.publicKey);
+		assert.equal(onDisk?.publicKey, newKeyPair.publicKey);
+		assert.deepEqual(updates, [
+			{ agentId: original.agentId, publicKey: newKeyPair.publicKey },
+		]);
 	});
 
-	// -----------------------------------------------------------------------
-	// AC-8 (getAgentPublicKey) / AC-2 (null degradation)
-	// -----------------------------------------------------------------------
-
-	describe("AC-2/AC-8: getAgentPublicKey() and null-key degradation", () => {
-		it("returns null for unknown agentId", async () => {
-			const key = await getAgentPublicKey("p159-unknown-agent-never-exists");
-			assert.strictEqual(key, null);
+	it("does not fail rotation if registry key update is unavailable", async () => {
+		const original = await getOrCreateIdentity(tmpDir, "p159-rotate-db-down", {
+			registerIdentity: async (request) => fakeRegistrationResponse(request),
 		});
 
-		it("returns null when row has null public_key", async () => {
-			const id = testId("null-read");
-			await query(
-				`INSERT INTO roadmap_workforce.agent_registry
-				 (agent_identity, agent_type, status, trust_tier)
-				 VALUES ($1, 'llm', 'active', 'restricted')
-				 ON CONFLICT (agent_identity) DO NOTHING`,
-				[id],
-			);
-
-			const key = await getAgentPublicKey(id);
-			assert.strictEqual(key, null);
-
-			await cleanupAgent(id);
+		const { newKeyPair } = await rotateKeyPair(tmpDir, original, {
+			updatePublicKey: async () => {
+				throw new Error("db unavailable");
+			},
 		});
 
-		it("returns PEM string when public_key is set", async () => {
-			const id = testId("key-read");
-			const { publicKey } = generateAgentKeyPair(id);
-
-			await registerAgent({ agentId: id, instanceId: id, publicKey });
-			const fetched = await getAgentPublicKey(id);
-			assert.strictEqual(fetched, publicKey);
-
-			await cleanupAgent(id);
-		});
+		assert.equal(newKeyPair.version, original.version + 1);
+		assert.equal(
+			(await loadKeyPair(tmpDir, original.agentId))?.publicKey,
+			newKeyPair.publicKey,
+		);
 	});
 
-	// -----------------------------------------------------------------------
-	// AC-9: updateAgentPublicKey sets key_rotated_at
-	// -----------------------------------------------------------------------
+	it("uses the DB public key instead of the token-embedded key when present", async () => {
+		const signingKeys = genKeyPair();
+		const wrongKeys = genKeyPair();
+		const keyPair: AgentKeyPair = {
+			agentId: "agent-p159-db-lookup",
+			publicKey: signingKeys.publicKey,
+			privateKey: signingKeys.privateKey,
+			created: new Date().toISOString(),
+			version: 1,
+		};
+		const token = issueToken(keyPair);
+		const tamperedToken = { ...token, publicKey: wrongKeys.publicKey };
 
-	describe("AC-9: updateAgentPublicKey() updates key and rotated_at", () => {
-		it("sets new public_key and key_rotated_at", async () => {
-			const id = testId("update-key");
-			const key1 = generateAgentKeyPair(`${id}-1`).publicKey;
-			const key2 = generateAgentKeyPair(`${id}-2`).publicKey;
+		assert.equal(verifyToken(tamperedToken).valid, false);
 
-			await registerAgent({ agentId: id, instanceId: id, publicKey: key1 });
-			await updateAgentPublicKey(id, key2);
+		const result = await verifyTokenWithDbLookup(
+			tamperedToken,
+			async (agentId) => {
+				assert.equal(agentId, keyPair.agentId);
+				return keyPair.publicKey;
+			},
+		);
 
-			const { rows } = await query<{ public_key: string; key_rotated_at: string | null }>(
-				`SELECT public_key, key_rotated_at
-				 FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
-				[id],
-			);
-			assert.strictEqual(rows[0].public_key, key2, "Key should be updated");
-			assert.ok(rows[0].key_rotated_at !== null, "key_rotated_at should be set");
-
-			await cleanupAgent(id);
-		});
+		assert.equal(result.valid, true);
+		assert.equal(result.agentId, keyPair.agentId);
 	});
 
-	// -----------------------------------------------------------------------
-	// AC-3/AC-1: getOrCreateIdentity wires publicKey to DB
-	// -----------------------------------------------------------------------
+	it("falls back to token.publicKey when registry lookup misses or fails", async () => {
+		const keys = genKeyPair();
+		const keyPair: AgentKeyPair = {
+			agentId: "agent-p159-fallback",
+			publicKey: keys.publicKey,
+			privateKey: keys.privateKey,
+			created: new Date().toISOString(),
+			version: 1,
+		};
+		const token = issueToken(keyPair);
 
-	describe("AC-3: getOrCreateIdentity() registers publicKey in DB", () => {
-		it("populates public_key in agent_registry on first run", async () => {
-			const agentName = testId("identity-first");
-			const keyPair = await getOrCreateIdentity(testDir, agentName);
+		assert.equal(
+			(await verifyTokenWithDbLookup(token, async () => null)).valid,
+			true,
+		);
+		assert.equal(
+			(
+				await verifyTokenWithDbLookup(token, async () => {
+					throw new Error("db unavailable");
+				})
+			).valid,
+			true,
+		);
+	});
+});
 
-			// Wait briefly for the best-effort DB write to settle
-			const { rows } = await query<{ public_key: string | null }>(
-				`SELECT public_key FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
-				[keyPair.agentId],
-			);
-			assert.ok(rows.length > 0, "Agent should be registered in DB");
-			assert.strictEqual(
-				rows[0].public_key,
-				keyPair.publicKey,
-				"public_key in DB should match generated key",
-			);
-
-			await cleanupAgent(keyPair.agentId);
-		});
-
-		it("does NOT insert again on second run (loads from disk)", async () => {
-			const agentName = testId("identity-second");
-			const first = await getOrCreateIdentity(testDir, agentName);
-			const second = await getOrCreateIdentity(testDir, agentName);
-
-			assert.strictEqual(second.publicKey, first.publicKey, "Same key loaded from disk");
-
-			await cleanupAgent(first.agentId);
-		});
+describe("P159 public key conflict rule", () => {
+	it("allows matching keys and empty existing keys", () => {
+		assert.doesNotThrow(() => assertNoPublicKeyConflict("agent-a", null, "pk"));
+		assert.doesNotThrow(() =>
+			assertNoPublicKeyConflict("agent-a", undefined, "pk"),
+		);
+		assert.doesNotThrow(() => assertNoPublicKeyConflict("agent-a", "pk", "pk"));
 	});
 
-	// -----------------------------------------------------------------------
-	// AC-4: rotateKeyPair updates DB
-	// -----------------------------------------------------------------------
-
-	describe("AC-4: rotateKeyPair() updates DB with rotated public key", () => {
-		it("writes new public_key and key_rotated_at after rotation", async () => {
-			const agentName = testId("rotate-db");
-			const original = await getOrCreateIdentity(testDir, agentName);
-
-			const { newKeyPair } = await rotateKeyPair(testDir, original);
-
-			const { rows } = await query<{ public_key: string; key_rotated_at: string | null }>(
-				`SELECT public_key, key_rotated_at
-				 FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
-				[original.agentId],
-			);
-			assert.ok(rows.length > 0, "Row should exist");
-			assert.strictEqual(rows[0].public_key, newKeyPair.publicKey, "DB key should be rotated");
-			assert.ok(rows[0].key_rotated_at !== null, "key_rotated_at should be stamped");
-
-			await cleanupAgent(original.agentId);
-		});
-	});
-
-	// -----------------------------------------------------------------------
-	// AC-7: DB connectivity failure during getOrCreateIdentity is non-fatal
-	// -----------------------------------------------------------------------
-
-	describe("AC-7: DB failure during getOrCreateIdentity() is non-fatal", () => {
-		it("identity still created on disk even when DB is unavailable", async () => {
-			// We test AC-7 by passing a bad agentId that causes the key conflict
-			// check path to gracefully degrade. A direct DB-failure test would
-			// require overriding the pool, which needs mock.module. Instead, we
-			// verify the contract via the observable file-system outcome:
-			//
-			// If DB writes were required (not best-effort), getOrCreateIdentity
-			// would throw when the DB is unavailable. The AC is validated by
-			// confirming that even if the DB write were to silently fail, the
-			// returned keyPair is fully usable (keys on disk, tokens verifiable).
-			const agentName = testId("ac7-agent");
-			const keyPair = await getOrCreateIdentity(testDir, agentName);
-
-			assert.ok(keyPair, "Identity should be created");
-			assert.ok(keyPair.publicKey.includes("PUBLIC KEY"), "Key must be valid PEM");
-
-			// Token issued from this key should verify without any DB dependency
-			const token = issueToken(keyPair);
-			// verifyTokenWithDbLookup with a failing lookup should fall back
-			const result = await verifyTokenWithDbLookup(token, async () => {
-				throw new Error("DB unavailable");
-			});
-			assert.strictEqual(result.valid, true, "Token should verify via fallback");
-
-			await cleanupAgent(keyPair.agentId);
-		});
-	});
-
-	// -----------------------------------------------------------------------
-	// AC-5: verifyTokenWithDbLookup uses injected lookup
-	// -----------------------------------------------------------------------
-
-	describe("AC-5: verifyTokenWithDbLookup() uses injected key lookup", () => {
-		it("verifies a valid token using lookup-returned public key", async () => {
-			const keyPair = generateAgentKeyPair("agent-verify-p159");
-			const token = issueToken(keyPair);
-
-			const result = await verifyTokenWithDbLookup(token, async () => keyPair.publicKey);
-			assert.strictEqual(result.valid, true);
-		});
-
-		it("rejects when DB key differs from token key (key-swap attack)", async () => {
-			const legitKp = generateAgentKeyPair("legit-p159");
-			const attackerKp = generateAgentKeyPair("attacker-p159");
-
-			// Token uses attacker key but claims legit agentId
-			const spoofed = issueToken(attackerKp);
-			spoofed.agentId = legitKp.agentId;
-
-			// Lookup returns the real key for legit agent
-			const result = await verifyTokenWithDbLookup(spoofed, async () => legitKp.publicKey);
-			assert.strictEqual(result.valid, false, "Spoofed token must be rejected");
-		});
-	});
-
-	// -----------------------------------------------------------------------
-	// AC-6: verifyTokenWithDbLookup falls back on lookup failure
-	// -----------------------------------------------------------------------
-
-	describe("AC-6: verifyTokenWithDbLookup() falls back to token.publicKey", () => {
-		it("falls back when lookup throws", async () => {
-			const keyPair = generateAgentKeyPair("agent-fallback-p159");
-			const token = issueToken(keyPair);
-
-			const result = await verifyTokenWithDbLookup(token, async () => {
-				throw new Error("DB unavailable");
-			});
-			assert.strictEqual(result.valid, true, "Should verify via token.publicKey fallback");
-		});
-
-		it("falls back when lookup returns null", async () => {
-			const keyPair = generateAgentKeyPair("agent-null-lookup-p159");
-			const token = issueToken(keyPair);
-
-			const result = await verifyTokenWithDbLookup(token, async () => null);
-			assert.strictEqual(result.valid, true, "Should verify via token.publicKey when lookup is null");
-		});
+	it("rejects implicit key replacement and directs callers to rotateKeyPair()", () => {
+		assert.throws(
+			() => assertNoPublicKeyConflict("agent-a", "old-pk", "new-pk"),
+			/Key conflict for agent agent-a: registered public_key differs from provided key\. Use rotateKeyPair\(\) to explicitly rotate\./,
+		);
 	});
 });

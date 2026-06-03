@@ -122,12 +122,14 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 	>(null);
 
 	const fetchControlPlaneData = useCallback(async () => {
-		const [statusData, routesData, dispatchData, pulseData] = await Promise.all([
-			apiClient.checkStatus(),
-			apiClient.fetchRoutes().catch(() => []),
-			apiClient.fetchDispatches().catch(() => []),
-			apiClient.fetchPulse(40).catch(() => []),
-		]);
+		const [statusData, routesData, dispatchData, pulseData] = await Promise.all(
+			[
+				apiClient.checkStatus(),
+				apiClient.fetchRoutes().catch(() => []),
+				apiClient.fetchDispatches().catch(() => []),
+				apiClient.fetchPulse(40).catch(() => []),
+			],
+		);
 		setStatus(statusData);
 		setRoutes(routesData as RouteSummary[]);
 		setDispatches(dispatchData as DispatchSummary[]);
@@ -177,9 +179,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 	);
 	const budgetTracked = useMemo(
 		() =>
-			proposals.filter(
-				(proposal) => Number(proposal.budgetLimitUsd ?? 0) > 0,
-			),
+			proposals.filter((proposal) => Number(proposal.budgetLimitUsd ?? 0) > 0),
 		[proposals],
 	);
 	const totalBudget = useMemo(
@@ -215,7 +215,8 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 						left.liveActivity?.heartbeatAgeSeconds ?? Number.MAX_SAFE_INTEGER;
 					const rightHeartbeat =
 						right.liveActivity?.heartbeatAgeSeconds ?? Number.MAX_SAFE_INTEGER;
-					if (leftHeartbeat !== rightHeartbeat) return leftHeartbeat - rightHeartbeat;
+					if (leftHeartbeat !== rightHeartbeat)
+						return leftHeartbeat - rightHeartbeat;
 					return (left.updatedDate ?? left.createdDate).localeCompare(
 						right.updatedDate ?? right.createdDate,
 					);
@@ -292,7 +293,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 						{[
 							["Board", "/board"],
 							["Agents", "/agents"],
-							["Dispatch", "/dispatch"],
+							["Dispatches", "/dispatches"],
 							["Channels", "/channels"],
 							["Routes", "/routes"],
 							["Settings", "/settings"],
@@ -312,13 +313,21 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 			<section className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
 				{[
 					["In Flight", activeProposals.length, "Active workflow surface"],
-					["Gate Ready", matureQueue.length, "Mature proposals awaiting advance"],
+					[
+						"Gate Ready",
+						matureQueue.length,
+						"Mature proposals awaiting advance",
+					],
 					["Blocked", blockedCount, "Dependencies not yet complete"],
 					["Obsolete", obsoleteCount, "Hidden by default on board"],
 					["Live Agents", activeAgents.length, "Websocket workforce presence"],
 					["Dispatches", activeDispatches.length, "Assigned, active, blocked"],
 					["Routes", enabledRoutes.length, "Enabled model routes"],
-					["Budget", `$${totalBudget}`, `${budgetTracked.length} tracked proposals`],
+					[
+						"Budget",
+						`$${totalBudget}`,
+						`${budgetTracked.length} tracked proposals`,
+					],
 				].map(([label, value, detail]) => (
 					<div
 						key={label}
@@ -346,7 +355,8 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 									Proposal Hotlist
 								</h2>
 								<p className="text-sm text-gray-500 dark:text-gray-400">
-									Current work surface with lease, cubic, model, and gate context.
+									Current work surface with lease, cubic, model, and gate
+									context.
 								</p>
 							</div>
 						</div>
@@ -391,12 +401,17 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 											</span>
 											<span>
 												Heartbeat:{" "}
-												{heartbeatText(proposal.liveActivity?.heartbeatAgeSeconds)}
+												{heartbeatText(
+													proposal.liveActivity?.heartbeatAgeSeconds,
+												)}
 											</span>
 										</div>
 									</div>
 									<div className="text-xs text-gray-600 dark:text-gray-300">
-										<div>Updated {timeAgo(proposal.updatedDate ?? proposal.createdDate)}</div>
+										<div>
+											Updated{" "}
+											{timeAgo(proposal.updatedDate ?? proposal.createdDate)}
+										</div>
 										<div className="mt-1">
 											Last event: {proposal.liveActivity?.lastEventType ?? "—"}
 										</div>
@@ -471,7 +486,9 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 											>
 												{agent.isActive ? "active" : "offline"}
 											</div>
-											<div className="mt-2">Seen {timeAgo(agent.lastSeenAt)}</div>
+											<div className="mt-2">
+												Seen {timeAgo(agent.lastSeenAt)}
+											</div>
 											{agent.activeProposalId ? (
 												<div className="mt-1 font-mono text-[11px] text-gray-500 dark:text-gray-400">
 													{agent.activeProposalId}
@@ -505,7 +522,9 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 											>
 												<div className="min-w-0">
 													<div className="truncate text-sm font-medium text-gray-950 dark:text-gray-50">
-														{dispatch.proposal_display_id ?? `P${dispatch.proposal_id}`} ·{" "}
+														{dispatch.proposal_display_id ??
+															`P${dispatch.proposal_id}`}{" "}
+														·{" "}
 														{dispatch.proposal_title ?? dispatch.dispatch_role}
 													</div>
 													<div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -584,7 +603,10 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 						</div>
 						<div className="divide-y divide-gray-200 dark:divide-gray-800">
 							{pulse.map((event, index) => (
-								<div key={`${event.id}-${event.timestamp}-${index}`} className="px-4 py-3">
+								<div
+									key={`${event.id}-${event.timestamp}-${index}`}
+									className="px-4 py-3"
+								>
 									<div className="flex items-center justify-between gap-3">
 										<div className="min-w-0">
 											<div className="text-sm text-gray-950 dark:text-gray-50">
@@ -604,7 +626,9 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 												</div>
 											) : null}
 										</div>
-										<div className="text-xs text-gray-400">{timeAgo(event.timestamp)}</div>
+										<div className="text-xs text-gray-400">
+											{timeAgo(event.timestamp)}
+										</div>
 									</div>
 								</div>
 							))}

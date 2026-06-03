@@ -89,6 +89,7 @@ SELECT
   CASE WHEN ar.duration_ms IS NOT NULL THEN ' duration=' || ar.duration_ms::text || 'ms' ELSE '' END
 FROM roadmap_workforce.agent_runs ar
 LEFT JOIN roadmap_proposal.proposal p ON p.id = ar.proposal_id
+LEFT JOIN roadmap_workforce.v_agent_display_label vdl ON vdl.agent_identity = ar.agent_identity
 LEFT JOIN route ON route.model_name = ar.model_used
 LEFT JOIN roadmap_workforce.v_agent_display_label ar_reg ON ar_reg.agent_identity = ar.agent_identity
 WHERE COALESCE(ar.completed_at, ar.started_at) > '$LAST_CHECK'::timestamptz
@@ -97,6 +98,7 @@ LIMIT 20;
 " 2>/dev/null)
 
 # --- Open / active work offers ---
+# sd.agent_identity refers to the agency/worker handling the dispatch; JOIN is feasible.
 DISPATCHES=$($PG -F'|' -c "
 WITH hosts AS (
   SELECT lower(host_id) AS host_id

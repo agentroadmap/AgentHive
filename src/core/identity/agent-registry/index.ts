@@ -5,6 +5,7 @@
  */
 
 export {
+	assertNoPublicKeyConflict,
 	deregisterAgent,
 	getAgent,
 	getAgentPublicKey,

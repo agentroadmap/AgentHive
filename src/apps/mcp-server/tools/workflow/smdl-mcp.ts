@@ -9,7 +9,7 @@
  */
 
 import yaml from "js-yaml";
-import { smdlToMermaid } from "../../../../core/workflow/smdl-to-mermaid.ts";
+import { smdlToVisualization } from "../../../../core/workflow/smdl-to-mermaid.ts";
 import { query } from "../../../../postgres/pool.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
@@ -236,6 +236,7 @@ async function listWorkflows(): Promise<CallToolResult> {
 
 async function workflowVisualize(args: {
 	yaml?: string;
+	format?: "mermaid" | "summary";
 }): Promise<CallToolResult> {
 	try {
 		if (!args.yaml) {
@@ -249,14 +250,49 @@ async function workflowVisualize(args: {
 			};
 		}
 
-		const mermaid = smdlToMermaid(args.yaml);
+		const visualization = smdlToVisualization(args.yaml);
+		const stageLines = visualization.stages.map(
+			(stage) =>
+				`- <a id="stage-${stage.anchor.replace(/^#stage-/, "")}"></a> **${stage.name}**${
+					stage.tags.length ? ` [${stage.tags.join(", ")}]` : ""
+				}${stage.details.length ? ` — ${stage.details.join(" | ")}` : ""}`,
+		);
+		const transitionLines = visualization.transitions.map(
+			(transition) =>
+				`- ${transition.from} -> ${transition.to}${
+					transition.label ? ` — ${transition.label}` : ""
+				}`,
+		);
+		const text =
+			args.format === "summary"
+				? [
+						"### Workflow Visualization Summary",
+						"",
+						"#### Stages",
+						...stageLines,
+						"",
+						"#### Transitions",
+						...transitionLines,
+					].join("\n")
+				: [
+						"```mermaid",
+						visualization.mermaid.trimEnd(),
+						"```",
+						"",
+						"### Stage Details",
+						...stageLines,
+						"",
+						"### Transitions",
+						...transitionLines,
+					].join("\n");
 		return {
 			content: [
 				{
 					type: "text",
-					text: `\`\`\`mermaid\n${mermaid}\`\`\``,
+					text,
 				},
 			],
+			structuredContent: visualization,
 		};
 	} catch (err) {
 		return errorResult("Failed to visualize SMDL workflow", err);
@@ -309,10 +345,19 @@ export class SMDLWorkflowHandlers {
 						type: "string",
 						description: "SMDL YAML workflow definition",
 					},
+					format: {
+						type: "string",
+						enum: ["mermaid", "summary"],
+						description:
+							"Output format: Mermaid diagram with metadata, or metadata summary only",
+					},
 				},
 				required: ["yaml"],
 			},
-			handler: (args: unknown) => workflowVisualize(args as { yaml?: string }),
+			handler: (args: unknown) =>
+				workflowVisualize(
+					args as { yaml?: string; format?: "mermaid" | "summary" },
+				),
 		});
 
 		// eslint-disable-next-line no-console

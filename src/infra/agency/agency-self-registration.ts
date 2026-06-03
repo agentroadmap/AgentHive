@@ -31,7 +31,10 @@
 
 import { hostname } from "node:os";
 import type { PoolClient } from "pg";
-import { assignDisplayAlias } from "../../core/identity/agent-registry/agent-name.ts";
+import {
+	assignDisplayAlias,
+	pascalCaseHost,
+} from "../../core/identity/agent-registry/agent-name.ts";
 import { claimDisplayAlias } from "../../core/identity/agent-registry/alias-manager.ts";
 import { getPool, query } from "../postgres/pool.ts";
 import { pulseHeartbeat } from "../pulse/heartbeat.ts";
@@ -401,16 +404,4 @@ export async function selfRegisterAgency(
 	return { sessionId, agentRegistryId, displayAlias: resolvedAlias, stop };
 }
 
-/**
- * P919 AC-12: Convert a host token into PascalCase for the Tier 1 alias.
- *   "bot" → "Bot"
- *   "hermes-srv" → "HermesSrv"
- *   "agency-bot" → "AgencyBot" (rare; AGENTHIVE_HOST is normally a bare host)
- */
-function pascalCaseHost(host: string): string {
-	return host
-		.split(/[-_]+/)
-		.filter(Boolean)
-		.map((seg) => seg.charAt(0).toUpperCase() + seg.slice(1).toLowerCase())
-		.join("");
-}
+

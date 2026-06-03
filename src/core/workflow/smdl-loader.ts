@@ -68,6 +68,34 @@ export interface SMDLDecisionGate {
 	escalate_to_user?: SMDLEscalateToUser;
 }
 
+export interface SMDLWeightedCriterion {
+	key: string;
+	label?: string;
+	weight: number;
+	min_score?: number;
+	max_score?: number;
+	required?: boolean;
+}
+
+export interface SMDLWeightedScoring {
+	mode: "weighted";
+	passing_score: number;
+	criteria: SMDLWeightedCriterion[];
+}
+
+export interface SMDLAgentDispatch {
+	role: string;
+	count?: number;
+	capabilities?: string[];
+	mode?: "parallel" | "sequential" | "quorum";
+	join?: "all" | "any" | "weighted";
+}
+
+export interface SMDLCoordination {
+	mode?: "single" | "parallel" | "squad";
+	dispatch?: SMDLAgentDispatch[];
+}
+
 export interface SMDLStage {
 	name: string;
 	order: number;
@@ -78,6 +106,8 @@ export interface SMDLStage {
 	timeout?: string;
 	auto_transitions?: SMDLAutoTransitions;
 	decision_gate?: SMDLDecisionGate;
+	weighted_scoring?: SMDLWeightedScoring;
+	coordination?: SMDLCoordination;
 }
 
 export interface SMDLGating {

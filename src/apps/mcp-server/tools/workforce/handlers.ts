@@ -1,4 +1,9 @@
 import { hostname } from "node:os";
+import {
+	assignDisplayAlias,
+	pascalCaseHost,
+} from "../../../../core/identity/agent-registry/agent-name.ts";
+import { claimDisplayAlias } from "../../../../core/identity/agent-registry/alias-manager.ts";
 import { query } from "../../../../infra/postgres/pool.ts";
 import { resolvePermanentAgentMapping } from "../../../../core/identity/agent-registry/permanent-agent-map.ts";
 import { assignDisplayAlias, pascalCaseHost } from "../../../../core/identity/agent-registry/agent-name.ts";
@@ -8,7 +13,13 @@ import type { CallToolResult } from "../../types.ts";
 type ToolHandler = (args: Record<string, unknown>) => Promise<CallToolResult>;
 
 export const agencyRegisterHandler: ToolHandler = async (args) => {
-	const { identity, agentType = "agency", provider, model, skills } = args as {
+	const {
+		identity,
+		agentType = "agency",
+		provider,
+		model,
+		skills,
+	} = args as {
 		identity: string;
 		agentType?: string;
 		provider?: string;

@@ -5,7 +5,7 @@ export interface BoardColumn {
 	stage_order: number;
 	display_label: string;
 	is_terminal: boolean;
-	maturity_gate: number | null;
+	maturity_gate: string | null;
 }
 
 const FALLBACK_COLUMNS: BoardColumn[] = [
@@ -17,20 +17,21 @@ const FALLBACK_COLUMNS: BoardColumn[] = [
 ];
 
 /**
- * Fetches workflow columns from /api/board/columns.
- * Refreshes on mount, workflowName change, and board_reload WebSocket events.
- * Falls back to FALLBACK_COLUMNS on error.
+ * Fetches board column definitions from /api/board/columns.
+ * Re-fetches when the workflow changes or when a board_reload WebSocket event
+ * arrives (fired after workflow_stage_changed pg_notify).
+ * Falls back to FALLBACK_COLUMNS if the fetch fails.
  */
 export function useBoardColumns(workflowName: string = "Standard RFC"): {
 	columns: BoardColumn[];
 	loading: boolean;
 	error: string | null;
 } {
-	const [columns, setColumns]   = useState<BoardColumn[]>(FALLBACK_COLUMNS);
-	const [loading, setLoading]   = useState(true);
-	const [error, setError]       = useState<string | null>(null);
-	const workflowRef             = useRef(workflowName);
-	workflowRef.current           = workflowName;
+	const [columns, setColumns] = useState<BoardColumn[]>(FALLBACK_COLUMNS);
+	const [loading, setLoading] = useState(true);
+	const [error, setError] = useState<string | null>(null);
+	const workflowRef = useRef(workflowName);
+	workflowRef.current = workflowName;
 
 	const fetchColumns = useCallback(async (wf: string) => {
 		try {
@@ -46,10 +47,13 @@ export function useBoardColumns(workflowName: string = "Standard RFC"): {
 			}
 
 			const data = (await response.json()) as BoardColumn[];
-			setColumns(Array.isArray(data) && data.length > 0 ? data : FALLBACK_COLUMNS);
+			if (Array.isArray(data) && data.length > 0) {
+				setColumns(data);
+			}
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : "Failed to fetch board columns";
 			setError(msg);
+			console.error("Error fetching board columns:", err);
 			setColumns(FALLBACK_COLUMNS);
 		} finally {
 			setLoading(false);
@@ -60,10 +64,11 @@ export function useBoardColumns(workflowName: string = "Standard RFC"): {
 		fetchColumns(workflowName);
 	}, [workflowName, fetchColumns]);
 
-	// Reuse the existing board_reload WebSocket signal — no second connection.
+	// Reuse the board_reload WebSocket event to trigger a re-fetch on reconnect
+	// or workflow_stage_changed — no second persistent connection needed.
 	useEffect(() => {
 		const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-		const wsUrl      = `${wsProtocol}//${window.location.host}/ws`;
+		const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
 		let ws: WebSocket | null = null;
 		let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 		let closed = false;
@@ -72,6 +77,10 @@ export function useBoardColumns(workflowName: string = "Standard RFC"): {
 			if (closed) return;
 			try {
 				ws = new WebSocket(wsUrl);
+				ws.onopen = () => {
+					// Re-fetch on reconnect so columns stay in sync after a disconnect
+					fetchColumns(workflowRef.current);
+				};
 				ws.onmessage = (event) => {
 					try {
 						const msg = JSON.parse(event.data as string);
@@ -83,11 +92,15 @@ export function useBoardColumns(workflowName: string = "Standard RFC"): {
 					}
 				};
 				ws.onclose = () => {
-					if (!closed) reconnectTimer = setTimeout(connect, 5000);
+					if (!closed) {
+						reconnectTimer = setTimeout(connect, 5000);
+					}
 				};
-				ws.onerror = () => { ws?.close(); };
+				ws.onerror = () => {
+					ws?.close();
+				};
 			} catch {
-				// WebSocket unavailable (SSR/test) — skip
+				// WebSocket not available (SSR / test) — skip
 			}
 		};
 

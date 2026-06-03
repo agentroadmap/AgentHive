@@ -44,7 +44,8 @@ export const agentRegisterSchema: JsonSchema = {
 		},
 		provider: {
 			type: "string",
-			description: "AI model provider (must match a route_provider in model_routes)",
+			description:
+				"AI model provider (must match a route_provider in model_routes)",
 		},
 		identity: {
 			type: "string",
@@ -103,22 +104,33 @@ export const agentRegisterSchema: JsonSchema = {
 			additionalProperties: false,
 			description: "Model-specific configuration",
 		},
-		// P1129: agency-shape fields persisted in agent_registry
+		// P1129: agency-shape fields for self-service registration
 		preferred_provider: {
 			type: "string",
-			description: "Preferred LLM provider (e.g. 'claude', 'codex', 'gemini'). Stored in agent_registry.preferred_provider.",
+			enum: ["claude", "codex", "gemini", "copilot", "hermes"],
+			description:
+				"P1129: Canonical provider token for this agency. Reconciles legacy openai→codex / google→gemini on write.",
 		},
 		agent_cli: {
 			type: "string",
-			description: "Full path to the agency CLI binary (e.g. '/usr/local/bin/claude'). Stored in agent_registry.agent_cli.",
+			minLength: 1,
+			maxLength: 64,
+			description:
+				"P1129: CLI executable name used to spawn child agents (e.g. 'claude', 'codex', 'gemini').",
 		},
 		host_affinity: {
 			type: "string",
-			description: "Host segment the agency prefers to run on (e.g. 'bot', 'mac'). Stored in agent_registry.host_affinity.",
+			minLength: 1,
+			maxLength: 128,
+			description:
+				"P1129: Preferred execution host for this agency (e.g. 'bot', 'codex-host'). Soft placement hint.",
 		},
-		display_alias: {
+		display_name: {
 			type: "string",
-			description: "Short human-readable alias (e.g. 'Claude Alpha'). Must be unique in agent_registry.",
+			minLength: 1,
+			maxLength: 128,
+			description:
+				"P1129: Human-friendly label for the agency (e.g. 'George Gemini Agency').",
 		},
 	},
 	required: ["name", "model", "provider"],
@@ -160,8 +172,7 @@ export const agentListSchema: JsonSchema = {
 		},
 		limit: {
 			type: "number",
-			description:
-				"Maximum results to return (default 50, max 500)",
+			description: "Maximum results to return (default 50, max 500)",
 		},
 		include_terminal: {
 			type: "boolean",
@@ -170,8 +181,7 @@ export const agentListSchema: JsonSchema = {
 		},
 		include_metadata: {
 			type: "boolean",
-			description:
-				"Include metadata fields (skills, metadata). Default false.",
+			description: "Include metadata fields (skills, metadata). Default false.",
 		},
 	},
 	additionalProperties: false,
@@ -261,7 +271,8 @@ export const agentSpawnSchema: JsonSchema = {
 		},
 		provider: {
 			type: "string",
-			description: "AI model route provider (route_provider from model_routes). Used to resolve default model and worktree if model is omitted.",
+			description:
+				"AI model route provider (route_provider from model_routes). Used to resolve default model and worktree if model is omitted.",
 		},
 		capabilities: {
 			type: "array",
@@ -278,7 +289,8 @@ export const agentSpawnSchema: JsonSchema = {
 		},
 		worktree: {
 			type: "string",
-			description: "Optional: target worktree directory name. If omitted, auto-selected from model_routes agent_provider.",
+			description:
+				"Optional: target worktree directory name. If omitted, auto-selected from model_routes agent_provider.",
 		},
 		timeoutMs: {
 			type: "integer",
@@ -312,17 +324,174 @@ export const agentRetireSchema: JsonSchema = {
 	additionalProperties: false,
 };
 
+export const agentRenameSchema: JsonSchema = {
+	type: "object",
+	properties: {
+		identity: {
+			type: "string",
+			description:
+				"Target agent_identity OR existing display_alias (resolver matches either)",
+		},
+		alias: {
+			type: "string",
+			description:
+				"New display_alias — must match ^[A-Z][A-Za-z0-9-]{2,63}$ (PascalCase start, 3-64 chars)",
+		},
+		force: {
+			type: "boolean",
+			default: false,
+			description:
+				"When true, bypass alias-collision check by releasing it from an inactive/stale-heartbeat prior owner",
+		},
+		operator: {
+			type: "string",
+			description:
+				"Identity of the operator performing the rename; recorded in the audit trail as the 'by' field",
+		},
+	},
+	required: ["identity", "alias"],
+	additionalProperties: false,
+};
+
+export const agencyResumeSchema: JsonSchema = {
+	type: "object",
+	properties: {
+		agency_id: {
+			type: "string",
+			minLength: 1,
+			maxLength: 200,
+			description:
+				"Agency identity string (roadmap.agency.agency_id) to resume",
+		},
+	},
+	required: ["agency_id"],
+	additionalProperties: false,
+};
+
 export const agentForceReleaseAliasSchema: JsonSchema = {
 	type: "object",
 	properties: {
 		identity: {
 			type: "string",
-			description: "Agent identity (agent_identity from agent_registry) to release alias from",
+			description:
+				"Agent identity (agent_identity from agent_registry) to release alias from",
 		},
 		force: {
 			type: "boolean",
 			default: false,
-			description: "If true, allows forcing release from active agents with stale heartbeat (>90s)",
+			description:
+				"If true, allows forcing release from active agents with stale heartbeat (>90s)",
+		},
+	},
+	required: ["identity"],
+	additionalProperties: false,
+};
+
+// P1129: register_model — agency declares a model it supports
+export const agentRegisterModelSchema: JsonSchema = {
+	type: "object",
+	properties: {
+		model_name: {
+			type: "string",
+			minLength: 1,
+			maxLength: 200,
+			description:
+				"Model identifier as it appears in roadmap.model_metadata (e.g. 'claude-sonnet-4-6', 'gemini-2.0-flash').",
+		},
+		route_provider: {
+			type: "string",
+			minLength: 1,
+			maxLength: 64,
+			description:
+				"Who serves this route (e.g. 'anthropic', 'google', 'openai', 'nous'). Maps to model_routes.route_provider.",
+		},
+		agent_provider: {
+			type: "string",
+			enum: ["claude", "codex", "gemini", "copilot", "hermes", "openclaw"],
+			description:
+				"AgentProvider token for this route — the CLI family that uses it.",
+		},
+		agent_cli: {
+			type: "string",
+			minLength: 1,
+			maxLength: 64,
+			description:
+				"CLI executable name (e.g. 'claude', 'codex', 'gemini'). Stored in model_routes.agent_cli.",
+		},
+		base_url: {
+			type: "string",
+			description:
+				"Optional API endpoint override (e.g. local Ollama or proxy). NULL = provider default.",
+		},
+		cost_per_1k_input: {
+			type: "number",
+			minimum: 0,
+			description: "USD cost per 1 000 input tokens. 0 for token-plan quota.",
+		},
+		cost_per_1k_output: {
+			type: "number",
+			minimum: 0,
+			description: "USD cost per 1 000 output tokens. 0 for token-plan quota.",
+		},
+		plan_type: {
+			type: "string",
+			enum: ["token_plan", "api_key", "free"],
+			description: "Billing plan type for this route.",
+		},
+		priority: {
+			type: "integer",
+			minimum: 1,
+			maximum: 100,
+			description:
+				"Route selection order — lower wins. 1 = token-plan (cheapest first), 10 = pay-as-you-go.",
+		},
+		probe: {
+			type: "boolean",
+			default: false,
+			description:
+				"When true, run a CLI liveness probe (`<agent_cli> --model <model_name> -p x`) before upserting. Rejects models that fail the probe.",
+		},
+	},
+	required: ["model_name", "route_provider", "agent_provider"],
+	additionalProperties: false,
+};
+
+// P1129: agency_start — launch the liaison process for an agency
+export const agencyStartSchema: JsonSchema = {
+	type: "object",
+	properties: {
+		identity: {
+			type: "string",
+			minLength: 1,
+			maxLength: 200,
+			description:
+				"Agency agent_identity string. Used as the systemd instance name: agenthive-agency@<identity>.service",
+		},
+		worktree: {
+			type: "string",
+			description:
+				"Optional worktree directory name (e.g. 'codex-three'). Written to the env file if provided.",
+		},
+		provider: {
+			type: "string",
+			enum: ["claude", "codex", "gemini", "copilot", "hermes"],
+			description:
+				"Optional provider override. Written to the env file as AGENTHIVE_PROVIDER.",
+		},
+	},
+	required: ["identity"],
+	additionalProperties: false,
+};
+
+// P1129: agency_status — per-agency runtime state
+export const agencyStatusSchema: JsonSchema = {
+	type: "object",
+	properties: {
+		identity: {
+			type: "string",
+			minLength: 1,
+			maxLength: 200,
+			description: "Agency agent_identity to query.",
 		},
 	},
 	required: ["identity"],

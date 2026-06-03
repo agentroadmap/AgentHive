@@ -17,6 +17,7 @@ import {
 	createVerify,
 	randomBytes,
 	timingSafeEqual,
+	verify as cryptoVerify,
 	type KeyObject,
 	createPublicKey,
 } from "node:crypto";
@@ -474,10 +475,9 @@ function _verifyEd25519OrThrow(
 	} catch {
 		throw new Error(`${label}: cannot parse public key PEM`);
 	}
-	const verify = createVerify("SHA512"); // Ed25519 ignores digest but createVerify requires one
-	verify.update(message);
 	const sigBuf = Buffer.from(signatureB64, "base64");
-	const valid = verify.verify(keyObj, sigBuf);
+	// Ed25519 uses null algorithm — algorithm is intrinsic to the key type
+	const valid = cryptoVerify(null, message, keyObj, sigBuf);
 	if (!valid) throw new Error(`${label}: signature verification failed (AC#100)`);
 }
 

@@ -1,5 +1,5 @@
 import type React from "react";
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { cn } from "../../lib/cn";
 
 export interface TabItem {
@@ -10,128 +10,125 @@ export interface TabItem {
 }
 
 export interface TabsProps {
-  tabs: TabItem[];
+  items: TabItem[];
   defaultTab?: string;
-  activeTab?: string;
+  value?: string;
   onChange?: (key: string) => void;
   className?: string;
   tabListClassName?: string;
+  panelClassName?: string;
 }
 
 export const Tabs: React.FC<TabsProps> = ({
-  tabs,
+  items,
   defaultTab,
-  activeTab: controlledTab,
+  value,
   onChange,
   className,
   tabListClassName,
+  panelClassName,
 }) => {
   const [internalActive, setInternalActive] = useState(
-    defaultTab ?? tabs.find((t) => !t.disabled)?.key ?? ""
+    defaultTab ?? items[0]?.key ?? ""
   );
-  const tabListRef = useRef<HTMLDivElement>(null);
-  const panelId = useRef(`tabs-panel-${Math.random().toString(36).slice(2, 9)}`).current;
+  const active = value ?? internalActive;
+  const tabListRef = useRef<HTMLDivElement | null>(null);
 
-  const active = controlledTab ?? internalActive;
-  const setActive = (key: string) => {
-    setInternalActive(key);
-    onChange?.(key);
-  };
+  const activate = useCallback(
+    (key: string) => {
+      setInternalActive(key);
+      onChange?.(key);
+    },
+    [onChange]
+  );
 
-  const handleKeyDown = (e: React.KeyboardEvent, currentIdx: number) => {
-    const enabledTabs = tabs.filter((t) => !t.disabled);
-    const enabledIdx = enabledTabs.findIndex((t) => tabs[currentIdx].key === t.key);
+  // Arrow key navigation per WAI-ARIA tabs pattern
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLButtonElement>, currentKey: string) => {
+      const enabled = items.filter((i) => !i.disabled);
+      const idx = enabled.findIndex((i) => i.key === currentKey);
+      if (idx === -1) return;
 
-    if (e.key === "ArrowRight") {
-      e.preventDefault();
-      const next = enabledTabs[(enabledIdx + 1) % enabledTabs.length];
-      if (next) {
-        setActive(next.key);
-        tabListRef.current
-          ?.querySelector<HTMLButtonElement>(`[data-tabkey="${next.key}"]`)
-          ?.focus();
+      let next = idx;
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        next = (idx + 1) % enabled.length;
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        next = (idx - 1 + enabled.length) % enabled.length;
+      } else if (e.key === "Home") {
+        e.preventDefault();
+        next = 0;
+      } else if (e.key === "End") {
+        e.preventDefault();
+        next = enabled.length - 1;
+      } else {
+        return;
       }
-    } else if (e.key === "ArrowLeft") {
-      e.preventDefault();
-      const prev = enabledTabs[(enabledIdx - 1 + enabledTabs.length) % enabledTabs.length];
-      if (prev) {
-        setActive(prev.key);
-        tabListRef.current
-          ?.querySelector<HTMLButtonElement>(`[data-tabkey="${prev.key}"]`)
-          ?.focus();
-      }
-    } else if (e.key === "Home") {
-      e.preventDefault();
-      const first = enabledTabs[0];
-      if (first) {
-        setActive(first.key);
-        tabListRef.current
-          ?.querySelector<HTMLButtonElement>(`[data-tabkey="${first.key}"]`)
-          ?.focus();
-      }
-    } else if (e.key === "End") {
-      e.preventDefault();
-      const last = enabledTabs[enabledTabs.length - 1];
-      if (last) {
-        setActive(last.key);
-        tabListRef.current
-          ?.querySelector<HTMLButtonElement>(`[data-tabkey="${last.key}"]`)
-          ?.focus();
-      }
-    }
-  };
 
-  const activePanel = tabs.find((t) => t.key === active);
+      const nextKey = enabled[next].key;
+      activate(nextKey);
+      // Move DOM focus to the activated tab button
+      const btn = tabListRef.current?.querySelector<HTMLButtonElement>(
+        `[data-tab-key="${nextKey}"]`
+      );
+      btn?.focus();
+    },
+    [items, activate]
+  );
+
+  const activeItem = items.find((i) => i.key === active);
 
   return (
     <div className={cn("flex flex-col", className)}>
       <div
         ref={tabListRef}
         role="tablist"
+        aria-orientation="horizontal"
         className={cn(
-          "flex border-b border-[var(--color-border)] gap-0",
+          "flex border-b border-[var(--color-border)]",
           tabListClassName
         )}
       >
-        {tabs.map((tab, idx) => {
-          const isActive = tab.key === active;
+        {items.map((item) => {
+          const isActive = item.key === active;
           return (
             <button
-              key={tab.key}
+              key={item.key}
               type="button"
               role="tab"
-              data-tabkey={tab.key}
+              data-tab-key={item.key}
               aria-selected={isActive}
-              aria-controls={`${panelId}-${tab.key}`}
-              id={`${panelId}-tab-${tab.key}`}
-              disabled={tab.disabled}
+              aria-controls={`tabpanel-${item.key}`}
+              id={`tab-${item.key}`}
               tabIndex={isActive ? 0 : -1}
-              onClick={() => !tab.disabled && setActive(tab.key)}
-              onKeyDown={(e) => handleKeyDown(e, idx)}
+              disabled={item.disabled}
+              onClick={() => !item.disabled && activate(item.key)}
+              onKeyDown={(e) => handleKeyDown(e, item.key)}
               className={cn(
-                "px-4 py-2 text-sm font-medium border-b-2 -mb-px",
+                "px-4 py-2.5 text-sm font-medium -mb-px border-b-2",
                 "transition-colors duration-[var(--transition-fast)]",
                 "focus-visible:outline-[3px] focus-visible:outline-[var(--color-focus-ring)] focus-visible:outline-offset-2",
-                "disabled:opacity-50 disabled:cursor-not-allowed",
                 isActive
                   ? "border-[var(--color-primary)] text-[var(--color-primary)]"
-                  : "border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-border-strong)]"
+                  : "border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-border-strong)]",
+                item.disabled && "opacity-40 cursor-not-allowed"
               )}
             >
-              {tab.label}
+              {item.label}
             </button>
           );
         })}
       </div>
-      {activePanel && (
+
+      {activeItem && (
         <div
-          id={`${panelId}-${activePanel.key}`}
           role="tabpanel"
-          aria-labelledby={`${panelId}-tab-${activePanel.key}`}
-          tabIndex={0}
-          className="flex-1 focus:outline-none"
+          id={`tabpanel-${activeItem.key}`}
+          aria-labelledby={`tab-${activeItem.key}`}
+          className={cn("py-4", panelClassName)}
         >
-          {activePanel.content}
+          {activeItem.content}
         </div>
       )}
     </div>

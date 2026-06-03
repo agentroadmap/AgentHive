@@ -1,0 +1,28 @@
+-- Migration 148: P159 — backfill operator runbook for agent_registry public_key
+--
+-- The public_key and key_rotated_at columns were added in migration 018.
+-- This runbook documents the backfill strategy for agents that registered
+-- before P159 went live (i.e. rows with public_key IS NULL).
+--
+-- AUTOMATIC PATH (recommended):
+--   Restart each agency service.  On startup, agent-identity.ts calls
+--   getOrCreateIdentity(), which loads the existing key from disk and
+--   calls registerAgent({ publicKey }) with a COALESCE upsert.  The DB
+--   row is populated with no operator intervention.
+--
+-- MANUAL VERIFICATION (run after agencies have restarted):
+--   SELECT agent_identity, public_key IS NOT NULL AS has_key, key_rotated_at
+--   FROM   roadmap_workforce.agent_registry
+--   ORDER  BY agent_identity;
+--
+-- MANUAL BACKFILL (for tombstoned / never-restarted agents):
+--   For agents that will never restart, public_key will remain NULL.
+--   This is safe — verifyTokenWithDbLookup() falls back to the embedded
+--   token.publicKey when the DB row has no key on record.  No data is lost.
+--
+-- NO DDL CHANGES — columns already exist:
+--   public_key     TEXT        NULL   (added migration 018)
+--   key_rotated_at TIMESTAMPTZ NULL   (added migration 018)
+
+-- This migration intentionally contains no DDL.
+SELECT 'P159 backfill runbook migration applied — see comments for operator steps' AS note;

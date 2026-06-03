@@ -290,9 +290,9 @@ function resolvePoolConfig(config?: AgentHivePoolConfig): ResolvedPoolConfig {
 		config?.database ??
 		process.env.PGDATABASE ??
 		databaseUrlConfig.database ??
-		(StructuralKeys.PGDATABASE.defaultValue ?? "agenthive");
-	const user =
-		config?.user ?? process.env.PGUSER ?? databaseUrlConfig.user;
+		StructuralKeys.PGDATABASE.defaultValue ??
+		"agenthive";
+	const user = config?.user ?? process.env.PGUSER ?? databaseUrlConfig.user;
 
 	const configuredPassword =
 		typeof config?.password === "function" ? undefined : config?.password;
@@ -318,7 +318,7 @@ function resolvePoolConfig(config?: AgentHivePoolConfig): ResolvedPoolConfig {
 		port,
 		user: requirePgUser(user),
 		password: resolvedPassword,
-		database: database ?? (StructuralKeys.PGDATABASE.defaultValue ?? "agenthive"),
+		database: database ?? StructuralKeys.PGDATABASE.defaultValue ?? "agenthive",
 		options: buildSearchPathOptions(
 			config?.options ?? process.env.PG_OPTIONS,
 			schema,
@@ -531,7 +531,12 @@ export async function query<T extends QueryResultRow = any>(
 
 	// Agent principals are denied all access to the control plane
 	if (ctx?.verified?.principal_kind === "agent") {
-		await writePoolAudit(ctx.verified.principal_id, "hiveCentral", "denied", "query");
+		await writePoolAudit(
+			ctx.verified.principal_id,
+			"hiveCentral",
+			"denied",
+			"query",
+		);
 		throw new PoolAccessDenied(ctx.verified.principal_id, "hiveCentral");
 	}
 
@@ -581,9 +586,9 @@ export interface ProjectConfig {
 	is_active: boolean;
 }
 
-const DEFAULT_PROJECT_MAX = 3;    // connections per project pool
-const MAX_PROJECT_POOLS = 10;     // max concurrent project pools
-const IDLE_REAP_MS = 5 * 60_000;  // 5 min idle reaping
+const DEFAULT_PROJECT_MAX = 3; // connections per project pool
+const MAX_PROJECT_POOLS = 10; // max concurrent project pools
+const IDLE_REAP_MS = 5 * 60_000; // 5 min idle reaping
 
 /**
  * PoolManager — multi-project connection pool orchestrator.
@@ -627,7 +632,7 @@ export class PoolManager {
 			        db_host, db_port, db_user, is_active
 			   FROM roadmap_workforce.projects
 			  WHERE is_active = true
-			  ORDER BY id`
+			  ORDER BY id`,
 		);
 		this.projectConfigs.clear();
 		for (const row of rows) {
@@ -655,15 +660,15 @@ export class PoolManager {
 		if (!config) {
 			throw new Error(
 				`[PoolManager] Unknown project_id=${projectId}. ` +
-				`Known: ${[...this.projectConfigs.keys()].join(", ") || "none"}. ` +
-				`Run loadProjects() first or check roadmap_workforce.projects.`
+					`Known: ${[...this.projectConfigs.keys()].join(", ") || "none"}. ` +
+					`Run loadProjects() first or check roadmap_workforce.projects.`,
 			);
 		}
 
 		if (this.projectPools.size >= MAX_PROJECT_POOLS) {
 			throw new Error(
 				`[PoolManager] Max project pools (${MAX_PROJECT_POOLS}) reached. ` +
-				`Cannot create pool for project_id=${projectId}.`
+					`Cannot create pool for project_id=${projectId}.`,
 			);
 		}
 
@@ -684,7 +689,10 @@ export class PoolManager {
 		});
 
 		newPool.on("error", (err) => {
-			console.error(`[PoolManager] Pool error for project ${projectId}:`, err.message);
+			console.error(
+				`[PoolManager] Pool error for project ${projectId}:`,
+				err.message,
+			);
 		});
 
 		this.projectPools.set(projectId, newPool);
@@ -692,7 +700,7 @@ export class PoolManager {
 		if (process.env.DEBUG_PG) {
 			console.error(
 				`[PoolManager] Created pool for project ${projectId} ` +
-				`(${config.db_user}@${config.db_host}:${config.db_port}/${config.db_name})`
+					`(${config.db_user}@${config.db_host}:${config.db_port}/${config.db_name})`,
 			);
 		}
 
@@ -719,7 +727,7 @@ export class PoolManager {
 	async queryProject<T extends QueryResultRow = any>(
 		projectId: number,
 		text: string,
-		params?: any[]
+		params?: any[],
 	): Promise<QueryResult<T>> {
 		const p = this.getPool(projectId);
 		return p.query<T>(text, params);
@@ -730,7 +738,7 @@ export class PoolManager {
 	 */
 	async queryMeta<T extends QueryResultRow = any>(
 		text: string,
-		params?: any[]
+		params?: any[],
 	): Promise<QueryResult<T>> {
 		return this._metaPool.query<T>(text, params);
 	}

@@ -16,8 +16,8 @@ import { describe, it } from "node:test";
 import { existsSync, readFileSync } from "node:fs";
 import { PgTeamGovernanceHandlers } from "../../src/apps/mcp-server/tools/teams/pg-governance-handlers.ts";
 import {
-	teamDisputeLogSchema,
 	teamCharterCreateSchema,
+	teamDisputeLogSchema,
 } from "../../src/apps/mcp-server/tools/teams/schemas.ts";
 
 // Mock McpServer — governance handlers don't use server directly

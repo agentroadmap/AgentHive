@@ -1,91 +1,64 @@
-#!/usr/bin/env node
-
 /**
- * P1103: Message type taxonomy drift detection
+ * P1017 AC-24: Detect drift between the DB CHECK constraint on
+ * message_ledger.message_type and the TypeScript MessageType enum.
  *
- * Compares the TypeScript enum (src/infra/messaging/message-types.ts)
- * against the database CHECK constraint on roadmap.message_ledger.message_type.
- *
- * Exits 0 if aligned, 1 if drift detected. Used by pre-commit and CI/CD.
+ * Exits 0 when in sync, 1 with a diff when out of sync.
+ * Run in CI after any migration that touches message_type.
  */
 
-import { execSync } from 'child_process';
-import { MESSAGE_TYPES } from '../src/infra/messaging/message-types.js';
+import { MESSAGE_TYPES } from "../src/infra/messaging/types.ts";
+import { query } from "../src/infra/postgres/pool.ts";
 
-const DB_HOST = process.env.DB_HOST || '127.0.0.1';
-const DB_PORT = process.env.DB_PORT || '5432';
-const DB_USER = process.env.DB_USER || 'admin';
-const DB_NAME = process.env.DB_NAME || 'agenthive';
+async function main(): Promise<void> {
+	// Extract values from pg_constraint consrc for message_ledger_type_check.
+	// The consrc looks like: ((message_type = ANY (ARRAY['text','task',...]))
+	const result = await query<{ consrc: string }>(`
+    SELECT pg_get_constraintdef(oid) AS consrc
+    FROM pg_constraint
+    WHERE conrelid = 'roadmap.message_ledger'::regclass
+      AND conname = 'message_ledger_type_check'
+  `);
 
-async function main() {
-  try {
-    // Query the database for the CHECK constraint definition
-    const query = `
-      SELECT pg_get_constraintdef(oid) as definition
-      FROM pg_constraint
-      WHERE conrelid = 'roadmap.message_ledger'::regclass
-        AND conname = 'message_ledger_type_check';
-    `;
+	if (result.rows.length === 0) {
+		console.error(
+			"ERROR: constraint message_ledger_type_check not found on roadmap.message_ledger",
+		);
+		process.exit(1);
+	}
 
-    let pgOutput: string;
-    try {
-      pgOutput = execSync(
-        `psql -h ${DB_HOST} -U ${DB_USER} -d ${DB_NAME} -t -c "${query}"`,
-        { encoding: 'utf8' }
-      );
-    } catch (e) {
-      console.error('❌ Failed to query database. Ensure agenthive is running.');
-      console.error(`   DB: ${DB_HOST}:${DB_PORT}/${DB_NAME}, user: ${DB_USER}`);
-      process.exit(1);
-    }
+	const consrc = result.rows[0].consrc;
+	// Extract quoted strings from ARRAY['a','b',...] pattern.
+	const dbValues = Array.from(
+		consrc.matchAll(/'([^']+)'/g),
+		(m) => m[1],
+	).sort();
 
-    // Extract the value list from the CHECK definition
-    // Pattern: CHECK ((message_type = ANY (ARRAY['text'::text, 'task'::text, ...])))
-    const match = pgOutput.match(/ARRAY\[(.*?)\]\)/);
-    if (!match) {
-      console.error('❌ Could not parse CHECK constraint definition.');
-      console.error(`   Got: ${pgOutput}`);
-      process.exit(1);
-    }
+	const tsValues = [...MESSAGE_TYPES].sort();
 
-    // Parse the array values: split on '::' and extract the quoted value
-    const dbValues = match[1]
-      .split(',')
-      .map((s) => {
-        const m = s.match(/'([^']+)'/);
-        return m ? m[1] : s.trim();
-      })
-      .filter((v) => v)
-      .sort();
+	const onlyInDb = dbValues.filter((v) => !tsValues.includes(v as never));
+	const onlyInTs = tsValues.filter((v) => !dbValues.includes(v));
 
-    const tsValues = [...MESSAGE_TYPES].sort();
+	if (onlyInDb.length === 0 && onlyInTs.length === 0) {
+		console.log(
+			`OK: message_type enum in sync (${dbValues.length} values): ${dbValues.join(", ")}`,
+		);
+		process.exit(0);
+	}
 
-    // Compare
-    if (JSON.stringify(dbValues) === JSON.stringify(tsValues)) {
-      console.log('✅ Message type taxonomy aligned.');
-      console.log(`   DB: ${dbValues.join(', ')}`);
-      process.exit(0);
-    } else {
-      console.error('❌ Message type drift detected.');
-      console.error(`   TypeScript (${tsValues.length}): ${tsValues.join(', ')}`);
-      console.error(`   Database (${dbValues.length}):   ${dbValues.join(', ')}`);
-
-      const inTs = tsValues.filter((v) => !dbValues.includes(v));
-      const inDb = dbValues.filter((v) => !tsValues.includes(v));
-
-      if (inTs.length > 0) {
-        console.error(`   + In TS enum only: ${inTs.join(', ')}`);
-      }
-      if (inDb.length > 0) {
-        console.error(`   + In DB constraint only: ${inDb.join(', ')}`);
-      }
-
-      process.exit(1);
-    }
-  } catch (e) {
-    console.error('❌ Unexpected error:', (e as Error).message);
-    process.exit(1);
-  }
+	console.error(
+		"DRIFT DETECTED between DB constraint and TypeScript MessageType:",
+	);
+	if (onlyInDb.length > 0)
+		console.error(`  In DB only:  ${onlyInDb.join(", ")}`);
+	if (onlyInTs.length > 0)
+		console.error(`  In TS only:  ${onlyInTs.join(", ")}`);
+	console.error(
+		"\nFix: update src/infra/messaging/types.ts MESSAGE_TYPES to match the DB constraint.",
+	);
+	process.exit(1);
 }
 
-main();
+main().catch((err) => {
+	console.error("check-message-type-drift: unexpected error:", err);
+	process.exit(1);
+});

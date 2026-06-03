@@ -48,8 +48,10 @@ interface DLQCandidate {
 /**
  * Escalation pass: uses two-CTE atomic bulk pattern to fetch candidates and update.
  * For each escalated message, sends an escalation notice to the escalation recipient.
+ * Failure counts are persisted in escalation_failure_count (P900) so the poison-pill
+ * threshold survives process restarts and multi-pod deploys.
  */
-async function runEscalationPass(db: Pool): Promise<void> {
+export async function runEscalationPass(db: Pool): Promise<void> {
 	const logger = console;
 
 	try {
@@ -134,7 +136,7 @@ async function runEscalationPass(db: Pool): Promise<void> {
 				const failureCount = failRows[0]?.escalation_failure_count ?? 1;
 
 				logger.error(
-					`[TimeoutCron] Escalation failed for message ${candidate.message_id} (attempt ${failureCount}): ${message}`,
+					`[TimeoutCron] Escalation notice failed for message ${candidate.message_id}: ${message}`,
 				);
 
 				// After ESCALATION_RETRY_LIMIT consecutive failures, quarantine as poison pill;
@@ -151,45 +153,72 @@ async function runEscalationPass(db: Pool): Promise<void> {
 							`[TimeoutCron] Message ${candidate.message_id} marked as poison pill after ${failureCount} failures`,
 						);
 
-						// Check if escalation_recipient is missing from agent_registry
-						if (!candidate.escalation_recipient) {
-							logger.error(
-								`[TimeoutCron] CRITICAL: message ${candidate.message_id} has no escalation_recipient`,
+					logger.error(
+						`[TimeoutCron] Message ${candidate.message_id} escalation failure count: ${failureCount}`,
+					);
+
+					if (failureCount >= ESCALATION_RETRY_LIMIT) {
+						// Poison pill: mark permanently and keep escalated_at set so the CTE
+						// never picks this row up again.
+						try {
+							await db.query(
+								`UPDATE roadmap.message_timeout_tracking
+								 SET escalation_recipient = $1
+								 WHERE message_id = $2`,
+								[POISON_PILL_DEAD_LETTER, candidate.message_id],
 							);
-							// Call OPERATOR_WEBHOOK_URL if set
-							const webhookUrl = process.env.OPERATOR_WEBHOOK_URL;
-							if (webhookUrl) {
-								try {
-									const response = await fetch(webhookUrl, {
-										method: "POST",
-										headers: { "Content-Type": "application/json" },
-										body: JSON.stringify({
-											severity: "CRITICAL",
-											event: "escalation_recipient_missing",
-											message_id: candidate.message_id,
-											from_agent: candidate.from_agent,
-											timestamp: new Date().toISOString(),
-										}),
-									});
-									if (!response.ok) {
+							logger.error(
+								`[TimeoutCron] Message ${candidate.message_id} marked as poison pill after ${failureCount} failures`,
+							);
+
+							// Check if escalation_recipient is missing from agent_registry
+							if (!candidate.escalation_recipient) {
+								logger.error(
+									`[TimeoutCron] CRITICAL: message ${candidate.message_id} has no escalation_recipient`,
+								);
+								// Call OPERATOR_WEBHOOK_URL if set
+								const webhookUrl = process.env.OPERATOR_WEBHOOK_URL;
+								if (webhookUrl) {
+									try {
+										const response = await fetch(webhookUrl, {
+											method: "POST",
+											headers: { "Content-Type": "application/json" },
+											body: JSON.stringify({
+												severity: "CRITICAL",
+												event: "escalation_recipient_missing",
+												message_id: candidate.message_id,
+												from_agent: candidate.from_agent,
+												timestamp: new Date().toISOString(),
+											}),
+										});
+										if (!response.ok) {
+											logger.error(
+												`[TimeoutCron] Webhook call failed: ${response.status} ${response.statusText}`,
+											);
+										}
+									} catch (webhookErr) {
 										logger.error(
-											`[TimeoutCron] Webhook call failed: ${response.status} ${response.statusText}`,
+											`[TimeoutCron] Failed to call operator webhook: ${
+												webhookErr instanceof Error ? webhookErr.message : String(webhookErr)
+											}`,
 										);
 									}
-								} catch (webhookErr) {
-									logger.error(
-										`[TimeoutCron] Failed to call operator webhook: ${
-											webhookErr instanceof Error ? webhookErr.message : String(webhookErr)
-										}`,
-									);
 								}
 							}
+						} catch (poisonErr) {
+							logger.error(
+								`[TimeoutCron] Failed to mark poison pill: ${
+									poisonErr instanceof Error ? poisonErr.message : String(poisonErr)
+								}`,
+							);
 						}
-					} catch (poisonErr) {
-						logger.error(
-							`[TimeoutCron] Failed to mark poison pill: ${
-								poisonErr instanceof Error ? poisonErr.message : String(poisonErr)
-							}`,
+					} else {
+						// Below threshold: reset escalated_at so the row is retried next tick
+						await db.query(
+							`UPDATE roadmap.message_timeout_tracking
+							 SET escalated_at = NULL
+							 WHERE message_id = $1`,
+							[candidate.message_id],
 						);
 					}
 				} else {

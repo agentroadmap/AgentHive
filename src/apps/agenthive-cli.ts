@@ -14,9 +14,8 @@
  * Project-level commands live in `roadmap`.
  */
 import { execSync, spawn } from "node:child_process";
+import { constants, readFileSync } from "node:fs";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
-import { readFileSync } from "node:fs";
-import { constants } from "node:fs";
 import { userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,9 +32,13 @@ function resolveProjectRoot(): string {
 		let dir = resolve(start);
 		while (dir !== "/") {
 			try {
-				const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf-8"));
+				const pkg = JSON.parse(
+					readFileSync(join(dir, "package.json"), "utf-8"),
+				);
 				if (pkg.name === "agentRoadmap") return dir;
-			} catch { /* not found here */ }
+			} catch {
+				/* not found here */
+			}
 			const parent = dirname(dir);
 			if (parent === dir) break;
 			dir = parent;
@@ -63,7 +66,10 @@ function die(msg: string): never {
 	process.exit(1);
 }
 
-function run(cmd: string[], opts?: { cwd?: string; env?: NodeJS.ProcessEnv }): string {
+function run(
+	cmd: string[],
+	opts?: { cwd?: string; env?: NodeJS.ProcessEnv },
+): string {
 	try {
 		return execSync(cmd.join(" "), {
 			encoding: "utf-8",
@@ -121,12 +127,15 @@ async function cmdInit() {
 
 	const hasSudo = checkSudo();
 	if (!hasSudo) {
-		clack.log.warn("Passwordless sudo not detected. You will be prompted for your password.");
+		clack.log.warn(
+			"Passwordless sudo not detected. You will be prompted for your password.",
+		);
 	}
 
 	/* --- Confirm ---------------------------------------------------- */
 	const confirmed = await clack.confirm({
-		message: "This will create the agenthive system user, install systemd services, and configure the host. Continue?",
+		message:
+			"This will create the agenthive system user, install systemd services, and configure the host. Continue?",
 		initialValue: true,
 	});
 	if (clack.isCancel(confirmed) || !confirmed) {
@@ -165,7 +174,9 @@ async function cmdInit() {
 	s.start("Configuring group memberships...");
 	try {
 		sudo(["usermod", "-aG", "dev", AGENTHIVE_USER]);
-	} catch { /* may already be in group */ }
+	} catch {
+		/* may already be in group */
+	}
 	s.stop("Group memberships configured.");
 
 	/* --- 3. Install hermes for agenthive -------------------------- */
@@ -298,22 +309,25 @@ WantedBy=multi-user.target
 	/* --- 8. Prompt for DB setup ----------------------------------- */
 	clack.log.info("The orchestrator requires a PostgreSQL database.");
 	const setupDb = await clack.confirm({
-		message: "Have you initialized the AgentHive database? (run psql -f database/migrations/*.sql)",
+		message:
+			"Have you initialized the AgentHive database? (run psql -f database/migrations/*.sql)",
 		initialValue: false,
 	});
 	if (clack.isCancel(setupDb) || !setupDb) {
-		clack.log.warn("Remember to run the migration files in database/migrations/ before starting the service.");
+		clack.log.warn(
+			"Remember to run the migration files in database/migrations/ before starting the service.",
+		);
 	}
 
 	/* --- Done ----------------------------------------------------- */
 	clack.note(
 		`Service: ${SYSTEMD_SERVICE_NAME}\n` +
-		`User:    ${AGENTHIVE_USER}\n` +
-		`Home:    ${AGENTHIVE_HOME}\n` +
-		`Env:     ${ENV_FILE_PATH}\n` +
-		`\nStart with:  sudo systemctl start ${SYSTEMD_SERVICE_NAME}\n` +
-		`Status:      sudo systemctl status ${SYSTEMD_SERVICE_NAME}\n` +
-		`Logs:        sudo journalctl -u ${SYSTEMD_SERVICE_NAME} -f`,
+			`User:    ${AGENTHIVE_USER}\n` +
+			`Home:    ${AGENTHIVE_HOME}\n` +
+			`Env:     ${ENV_FILE_PATH}\n` +
+			`\nStart with:  sudo systemctl start ${SYSTEMD_SERVICE_NAME}\n` +
+			`Status:      sudo systemctl status ${SYSTEMD_SERVICE_NAME}\n` +
+			`Logs:        sudo journalctl -u ${SYSTEMD_SERVICE_NAME} -f`,
 		"Next steps",
 	);
 	clack.outro("AgentHive system initialized.");
@@ -325,7 +339,12 @@ WantedBy=multi-user.target
 
 async function cmdStatus() {
 	try {
-		const out = run(["systemctl", "status", SYSTEMD_SERVICE_NAME, "--no-pager"]);
+		const out = run([
+			"systemctl",
+			"status",
+			SYSTEMD_SERVICE_NAME,
+			"--no-pager",
+		]);
 		console.log(out);
 	} catch (e: any) {
 		console.log(pc.yellow("Service is not running or not installed."));
@@ -367,7 +386,91 @@ async function cmdRestart() {
 }
 
 async function cmdLogs() {
-	await sudoSpawn(["journalctl", "-u", SYSTEMD_SERVICE_NAME, "-f", "--no-pager"]);
+	await sudoSpawn([
+		"journalctl",
+		"-u",
+		SYSTEMD_SERVICE_NAME,
+		"-f",
+		"--no-pager",
+	]);
+}
+
+/* ------------------------------------------------------------------ */
+/*  db ping command                                                   */
+/* ------------------------------------------------------------------ */
+
+async function cmdDbPing(target: string) {
+	const targets = target === "all" ? ["postgres", "pgbouncer"] : [target];
+
+	for (const t of targets) {
+		if (t === "pgbouncer") {
+			const host = process.env.PGBOUNCER_HOST ?? "127.0.0.1";
+			const port = Number(
+				process.env.PGBOUNCER_PORT ?? process.env.PGPORT ?? 6432,
+			);
+			const user =
+				process.env.PGBOUNCER_ADMIN_USER ?? process.env.PGUSER ?? "agenthive";
+			clack.log.info(`Pinging PgBouncer at ${host}:${port} (user: ${user})…`);
+			const start = Date.now();
+			try {
+				// Auth via ~/.pgpass — never PGPASSWORD
+				const out = run([
+					"psql",
+					`-h`,
+					host,
+					`-p`,
+					String(port),
+					`-U`,
+					user,
+					`pgbouncer`,
+					`-c`,
+					`SHOW VERSION`,
+					`-t`,
+					`-A`,
+				]);
+				const ms = Date.now() - start;
+				clack.log.success(`PgBouncer OK — ${out.trim()} (${ms}ms)`);
+			} catch (e: any) {
+				clack.log.error(
+					`PgBouncer UNREACHABLE at ${host}:${port} — ${e.message}`,
+				);
+				process.exitCode = 1;
+			}
+		} else if (t === "postgres") {
+			const host = process.env.PGHOST ?? "127.0.0.1";
+			const port = Number(
+				process.env.PGPORT_DIRECT ?? process.env.PGPORT ?? 5432,
+			);
+			const user = process.env.PGUSER ?? "agenthive";
+			clack.log.info(`Pinging PostgreSQL at ${host}:${port} (user: ${user})…`);
+			const start = Date.now();
+			try {
+				run([
+					"psql",
+					`-h`,
+					host,
+					`-p`,
+					String(port),
+					`-U`,
+					user,
+					`-c`,
+					`SELECT 1`,
+					`-t`,
+					`-A`,
+				]);
+				const ms = Date.now() - start;
+				clack.log.success(`PostgreSQL OK (${ms}ms)`);
+			} catch (e: any) {
+				clack.log.error(
+					`PostgreSQL UNREACHABLE at ${host}:${port} — ${e.message}`,
+				);
+				process.exitCode = 1;
+			}
+		} else {
+			clack.log.error(`Unknown target '${t}'. Use: postgres | pgbouncer | all`);
+			process.exitCode = 1;
+		}
+	}
 }
 
 /* ------------------------------------------------------------------ */
@@ -462,10 +565,13 @@ program
 	.description("Restart the orchestrator service")
 	.action(cmdRestart);
 
+program.command("logs").description("Tail orchestrator logs").action(cmdLogs);
+
 program
-	.command("logs")
-	.description("Tail orchestrator logs")
-	.action(cmdLogs);
+	.command("db-ping")
+	.description("Ping a database endpoint: postgres | pgbouncer | all")
+	.argument("[target]", "postgres | pgbouncer | all", "all")
+	.action(cmdDbPing);
 
 program
 	.command("db-ping")

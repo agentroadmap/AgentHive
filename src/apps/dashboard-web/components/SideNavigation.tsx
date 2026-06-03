@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import { Tooltip } from "react-tooltip";
+import { Tooltip } from "./ui/Tooltip";
 import type {
 	Decision,
 	DecisionSearchResult,

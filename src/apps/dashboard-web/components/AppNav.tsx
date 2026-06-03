@@ -43,6 +43,7 @@ const AppNav: React.FC = () => {
 	const [overflowOpen, setOverflowOpen] = useState(false);
 	const overflowRef = useRef<HTMLDivElement | null>(null);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: location is the intentional trigger to close drawers on navigation — stable setters need no listing
 	useEffect(() => {
 		setDrawerOpen(false);
 		setOverflowOpen(false);
@@ -120,7 +121,11 @@ const AppNav: React.FC = () => {
 
 				<nav className="hidden md:flex items-center gap-1 flex-1 min-w-0">
 					{PRIMARY.map((item) => (
-						<Link key={item.href} href={item.href} className={linkClass(item.href)}>
+						<Link
+							key={item.href}
+							href={item.href}
+							className={linkClass(item.href)}
+						>
 							{item.label}
 						</Link>
 					))}

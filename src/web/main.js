@@ -155390,7 +155390,7 @@ var init_sankey = __esm(() => {
   init_align();
 });
 
-// node_modules/d3-sankey/node_modules/d3-shape/node_modules/d3-path/src/path.js
+// node_modules/d3-sankey/node_modules/d3-path/src/path.js
 function Path2() {
   this._x0 = this._y0 = this._x1 = this._y1 = null;
   this._ = "";
@@ -155472,7 +155472,7 @@ var init_path3 = __esm(() => {
   path_default2 = path4;
 });
 
-// node_modules/d3-sankey/node_modules/d3-shape/node_modules/d3-path/src/index.js
+// node_modules/d3-sankey/node_modules/d3-path/src/index.js
 var init_src34 = __esm(() => {
   init_path3();
 });
@@ -160400,7 +160400,7 @@ var init_diagram_5BDNPKRD = __esm(() => {
   };
 });
 
-// node_modules/cytoscape-fcose/node_modules/cose-base/node_modules/layout-base/layout-base.js
+// node_modules/cytoscape-fcose/node_modules/layout-base/layout-base.js
 var require_layout_base2 = __commonJS((exports, module) => {
   (function webpackUniversalModuleDefinition(root10, factory2) {
     if (typeof exports === "object" && typeof module === "object")
@@ -177020,7 +177020,7 @@ var SECONDARY = [
   { href: "/agents", label: "Agents" },
   { href: "/teams", label: "Teams" },
   { href: "/channels", label: "Channels" },
-  { href: "/dispatch", label: "Dispatch" },
+  { href: "/dispatches", label: "Dispatches" },
   { href: "/knowledge", label: "Knowledge" },
   { href: "/documents", label: "Documents" },
   { href: "/decisions", label: "Decisions" },
@@ -178977,7 +178977,7 @@ var DashboardPage = ({
               children: [
                 ["Board", "/board"],
                 ["Agents", "/agents"],
-                ["Dispatch", "/dispatch"],
+                ["Dispatches", "/dispatches"],
                 ["Channels", "/channels"],
                 ["Routes", "/routes"],
                 ["Settings", "/settings"]
@@ -178994,13 +178994,21 @@ var DashboardPage = ({
         className: "grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8",
         children: [
           ["In Flight", activeProposals.length, "Active workflow surface"],
-          ["Gate Ready", matureQueue.length, "Mature proposals awaiting advance"],
+          [
+            "Gate Ready",
+            matureQueue.length,
+            "Mature proposals awaiting advance"
+          ],
           ["Blocked", blockedCount, "Dependencies not yet complete"],
           ["Obsolete", obsoleteCount, "Hidden by default on board"],
           ["Live Agents", activeAgents.length, "Websocket workforce presence"],
           ["Dispatches", activeDispatches.length, "Assigned, active, blocked"],
           ["Routes", enabledRoutes.length, "Enabled model routes"],
-          ["Budget", `$${totalBudget}`, `${budgetTracked.length} tracked proposals`]
+          [
+            "Budget",
+            `$${totalBudget}`,
+            `${budgetTracked.length} tracked proposals`
+          ]
         ].map(([label, value, detail]) => /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
           className: "border border-gray-200 bg-white px-4 py-4 dark:border-gray-800 dark:bg-gray-900",
           children: [
@@ -179109,7 +179117,8 @@ var DashboardPage = ({
                           children: [
                             /* @__PURE__ */ jsx_dev_runtime15.jsxDEV("div", {
                               children: [
-                                "Updated ",
+                                "Updated",
+                                " ",
                                 timeAgo(proposal.updatedDate ?? proposal.createdDate)
                               ]
                             }, undefined, true, undefined, this),
@@ -179266,7 +179275,8 @@ var DashboardPage = ({
                                             className: "truncate text-sm font-medium text-gray-950 dark:text-gray-50",
                                             children: [
                                               dispatch.proposal_display_id ?? `P${dispatch.proposal_id}`,
-                                              " ·",
+                                              " ",
+                                              "·",
                                               " ",
                                               dispatch.proposal_title ?? dispatch.dispatch_role
                                             ]
@@ -206705,7 +206715,7 @@ var serialize = (value, { json: json2, lossy } = {}) => {
 // node_modules/@ungap/structured-clone/esm/index.js
 var esm_default = typeof structuredClone === "function" ? (any, options) => options && (("json" in options) || ("lossy" in options)) ? deserialize(serialize(any, options)) : structuredClone(any) : (any, options) => deserialize(serialize(any, options));
 
-// node_modules/hast-util-from-parse5/node_modules/hastscript/node_modules/hast-util-parse-selector/lib/index.js
+// node_modules/hast-util-parse-selector/lib/index.js
 var search2 = /[#.]/g;
 function parseSelector2(selector, defaultTagName) {
   const value = selector || "";
@@ -206741,7 +206751,7 @@ function parseSelector2(selector, defaultTagName) {
     children: []
   };
 }
-// node_modules/hast-util-from-parse5/node_modules/hastscript/lib/create-h.js
+// node_modules/hastscript/lib/create-h.js
 function createH(schema, defaultTagName, caseSensitive) {
   const adjust = caseSensitive ? createAdjustMap2(caseSensitive) : undefined;
   function h2(selector, properties2, ...children) {
@@ -206881,7 +206891,7 @@ function createAdjustMap2(values) {
   return result;
 }
 
-// node_modules/hast-util-from-parse5/node_modules/hastscript/lib/svg-case-sensitive-tag-names.js
+// node_modules/hastscript/lib/svg-case-sensitive-tag-names.js
 var svgCaseSensitiveTagNames = [
   "altGlyph",
   "altGlyphDef",
@@ -206924,7 +206934,7 @@ var svgCaseSensitiveTagNames = [
   "textPath"
 ];
 
-// node_modules/hast-util-from-parse5/node_modules/hastscript/lib/index.js
+// node_modules/hastscript/lib/index.js
 var h2 = createH(html4, "div");
 var s3 = createH(svg4, "g", svgCaseSensitiveTagNames);
 // node_modules/vfile-location/lib/index.js
@@ -230448,7 +230458,7 @@ var ProposalDetailsModal = ({
     };
   }, [isOpen]);
   import_react61.useEffect(() => {
-    if (!proposalId) {
+    if (!isOpen || !proposalId) {
       setDecisions([]);
       setReviews([]);
       setDiscussions([]);
@@ -230658,7 +230668,9 @@ var ProposalDetailsModal = ({
       };
       const markdown2 = buildProposalMarkdown(bundle);
       const filename = proposalExportFilename(merged);
-      const blob = new Blob([markdown2], { type: "text/markdown;charset=utf-8" });
+      const blob = new Blob([markdown2], {
+        type: "text/markdown;charset=utf-8"
+      });
       const url = URL.createObjectURL(blob);
       const a3 = document.createElement("a");
       a3.href = url;
@@ -231403,6 +231415,24 @@ var ProposalDetailsModal = ({
                           }, undefined, true, undefined, this)
                         ]
                       }, undefined, true, undefined, this) : /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                        className: "text-gray-400 dark:text-gray-500 italic",
+                        children: "No activity yet"
+                      }, undefined, false, undefined, this)
+                    ]
+                  }, undefined, true, undefined, this) : /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("div", {
+                    className: "cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors",
+                    onClick: () => {
+                      onClose();
+                      setLocation(`/activity?proposal=${encodeURIComponent(proposalId)}`);
+                    },
+                    title: "Open activity feed for this proposal",
+                    children: [
+                      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
+                        className: "font-semibold text-gray-800 dark:text-gray-100",
+                        children: "Last activity:"
+                      }, undefined, false, undefined, this),
+                      " ",
+                      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV("span", {
                         className: "text-gray-400 dark:text-gray-500 italic",
                         children: "No activity yet"
                       }, undefined, false, undefined, this)
@@ -233053,8 +233083,92 @@ var TeamsPage = () => {
 };
 var TeamsPage_default = TeamsPage;
 
-// src/apps/dashboard-web/hooks/useWebSocket.ts
+// src/apps/dashboard-web/hooks/useBoardStages.ts
 var import_react67 = __toESM(require_react(), 1);
+var FALLBACK_STAGES = [
+  { id: "DRAFT", stageName: "DRAFT", label: "Draft", displayLabel: "Draft", hexColor: null, order: 1, isTerminal: false },
+  { id: "REVIEW", stageName: "REVIEW", label: "Review", displayLabel: "Review", hexColor: null, order: 2, isTerminal: false },
+  { id: "DEVELOP", stageName: "DEVELOP", label: "Develop", displayLabel: "Develop", hexColor: null, order: 3, isTerminal: false },
+  { id: "MERGE", stageName: "MERGE", label: "Merge", displayLabel: "Merge", hexColor: null, order: 4, isTerminal: false },
+  { id: "COMPLETE", stageName: "COMPLETE", label: "Complete", displayLabel: "Complete", hexColor: null, order: 5, isTerminal: true }
+];
+function useBoardStages(workflow = "Standard RFC") {
+  const [stages, setStages] = import_react67.useState(FALLBACK_STAGES);
+  const [loading, setLoading] = import_react67.useState(true);
+  const [error3, setError] = import_react67.useState(null);
+  const [activeWorkflow, setActiveWorkflow] = import_react67.useState(workflow);
+  const workflowRef = import_react67.useRef(workflow);
+  workflowRef.current = workflow;
+  const fetchStages = import_react67.useCallback(async (wf) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const url = new URL("/api/board/stages", window.location.origin);
+      url.searchParams.set("workflow", wf);
+      const response = await fetch(url.toString());
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      const data5 = await response.json();
+      setStages(data5.stages);
+      setActiveWorkflow(data5.workflow);
+      if (data5.error) {
+        console.warn("Board stages API warning:", data5.error);
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Failed to fetch board stages";
+      setError(errorMsg);
+      console.error("Error fetching board stages:", err);
+      setStages(FALLBACK_STAGES);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  import_react67.useEffect(() => {
+    fetchStages(workflow);
+  }, [workflow, fetchStages]);
+  import_react67.useEffect(() => {
+    const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
+    let ws = null;
+    let reconnectTimer = null;
+    let closed = false;
+    const connect = () => {
+      if (closed)
+        return;
+      try {
+        ws = new WebSocket(wsUrl);
+        ws.onmessage = (event4) => {
+          try {
+            const msg = JSON.parse(event4.data);
+            if (msg?.type === "board_reload") {
+              fetchStages(workflowRef.current);
+            }
+          } catch {}
+        };
+        ws.onclose = () => {
+          if (!closed) {
+            reconnectTimer = setTimeout(connect, 5000);
+          }
+        };
+        ws.onerror = () => {
+          ws?.close();
+        };
+      } catch {}
+    };
+    connect();
+    return () => {
+      closed = true;
+      if (reconnectTimer !== null)
+        clearTimeout(reconnectTimer);
+      ws?.close();
+    };
+  }, [fetchStages]);
+  return { stages, loading, error: error3, workflow: activeWorkflow };
+}
+
+// src/apps/dashboard-web/hooks/useWebSocket.ts
+var import_react68 = __toESM(require_react(), 1);
 function isObject3(value2) {
   return typeof value2 === "object" && value2 !== null;
 }
@@ -233075,14 +233189,14 @@ function asArrayOf(value2, guard) {
 }
 function useWebSocket(url) {
   const wsUrl = url ?? (typeof window !== "undefined" ? `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}` : "ws://localhost:6420");
-  const [connected, setConnected] = import_react67.useState(false);
-  const [proposals, setProposals] = import_react67.useState([]);
-  const [agents, setAgents] = import_react67.useState([]);
-  const [channels2, setChannels] = import_react67.useState([]);
-  const [messages2, setMessages] = import_react67.useState([]);
-  const wsRef = import_react67.useRef(null);
-  const reconnectTimeoutRef = import_react67.useRef(undefined);
-  const connect = import_react67.useCallback(() => {
+  const [connected, setConnected] = import_react68.useState(false);
+  const [proposals, setProposals] = import_react68.useState([]);
+  const [agents, setAgents] = import_react68.useState([]);
+  const [channels2, setChannels] = import_react68.useState([]);
+  const [messages2, setMessages] = import_react68.useState([]);
+  const wsRef = import_react68.useRef(null);
+  const reconnectTimeoutRef = import_react68.useRef(undefined);
+  const connect = import_react68.useCallback(() => {
     if (wsRef.current) {
       const old = wsRef.current;
       old.onopen = null;
@@ -233221,7 +233335,7 @@ function useWebSocket(url) {
       ws.close();
     };
   }, [wsUrl]);
-  import_react67.useEffect(() => {
+  import_react68.useEffect(() => {
     connect();
     return () => {
       if (reconnectTimeoutRef.current) {
@@ -233232,7 +233346,7 @@ function useWebSocket(url) {
       }
     };
   }, [connect]);
-  import_react67.useEffect(() => {
+  import_react68.useEffect(() => {
     const off = onProjectScopeChange((id33) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN)
@@ -233252,7 +233366,7 @@ function useWebSocket(url) {
     });
     return off;
   }, []);
-  const reconnect = import_react67.useCallback(() => {
+  const reconnect = import_react68.useCallback(() => {
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
     }

@@ -17,24 +17,24 @@
  */
 
 const AGENCY_MAP: Record<string, string> = {
-	"claude": "cc",
+	claude: "cc",
 	"claude-code": "cc",
-	"hermes": "hm",
-	"openclaw": "oc",
-	"codex": "cd",
-	"copilot": "cp",
+	hermes: "hm",
+	openclaw: "oc",
+	codex: "cd",
+	copilot: "cp",
 	"gemini-cli": "gm",
-	"gemini": "gm",
+	gemini: "gm",
 };
 
 const PROVIDER_MAP: Record<string, string> = {
-	"anthropic": "ant",
-	"openai": "oai",
-	"azure": "az",
-	"google": "ggl",
-	"aws": "bdr",
-	"bedrock": "bdr",
-	"github": "gh",
+	anthropic: "ant",
+	openai: "oai",
+	azure: "az",
+	google: "ggl",
+	aws: "bdr",
+	bedrock: "bdr",
+	github: "gh",
 };
 
 export const EXPERTISE: Record<string, string> = {
@@ -206,6 +206,36 @@ export function isLiaisonHint(
 export const LIAISON_SLOTS = "0123456789";
 export const EXPERT_SLOTS = "abcdefghijklmnopqrstuvwxyz";
 
+const ALL_CAPS_TOKENS = new Set(["qa", "ai", "ml", "sre", "ux", "ui", "api"]);
+
+/**
+ * Convert a raw expertise hint to a PascalCase display label.
+ * Hyphen-delimited tokens are each capitalized; ALL_CAPS_TOKENS tokens are
+ * fully uppercased.
+ *
+ * "documenter"   → "Documenter"
+ * "gate-review"  → "GateReview"
+ * "qa"           → "QA"
+ * "ai-architect" → "AIArchitect"
+ */
+function titleCaseExpertise(raw: string): string {
+	return raw
+		.split("-")
+		.map((part) => {
+			const lower = part.toLowerCase();
+			if (ALL_CAPS_TOKENS.has(lower)) return lower.toUpperCase();
+			return lower.charAt(0).toUpperCase() + lower.slice(1);
+		})
+		.join("");
+}
+
+/**
+ * Dense route-abbr shape: all lowercase+digits, at least one digit, no
+ * spaces or hyphens. Matches "ccs46ant", "hms45ant". Does NOT match
+ * "Claude", "claude", or "claude code".
+ */
+const ABBR_SHAPE = /^[a-z][a-z0-9]*\d[a-z0-9]*$/;
+
 /**
  * P932: Normalize host string to Title-Case.
  * "bot" → "Bot", "hermes" → "Hermes", "mac" → "Mac"
@@ -221,8 +251,9 @@ export function pascalCaseHost(host: string): string {
  * Tier 2 (Expert slot-0): "{Provider}-{Host}-{Expertise}" (e.g., "Claude-Bot-Architect")
  * Tier 3+: No alias (rotated slots return empty/null)
  *
- * @param agentIdentity - The immutable P852 identity (e.g., "ccs45ant-bot-ts-a")
- * @param agencyName - Provider/agency name (e.g., "Claude", "Codex")
+ * @param agencyName - Human-friendly provider name from model_routes.agent_provider
+ *                     (e.g. "Claude", "Codex"). Must NOT be the dense P852 routeAbbr
+ *                     ("ccs46ant") — this function throws on abbr-shape input.
  * @param hostId - Spawning host (e.g., "bot", "hermes", "mac")
  * @param expertise - Optional expertise hint (e.g., "architecture", "typescript")
  * @param slotChar - The slot character assigned (0..9 for liaison, a..z for expert)
@@ -264,4 +295,19 @@ export function assignDisplayAlias(
 
 	// Tier 3+: Rotated slots (b, c, ...) → no alias
 	return null;
+}
+
+/**
+ * P932: Normalise a host token into PascalCase for display aliases.
+ *   "bot" → "Bot"
+ *   "hermes-srv" → "HermesSrv"
+ *   "agency-bot" → "AgencyBot"
+ * Idempotent on already-PascalCase input ("Bot" → "Bot").
+ */
+export function pascalCaseHost(host: string): string {
+	return host
+		.split(/[-_]+/)
+		.filter(Boolean)
+		.map((seg) => seg.charAt(0).toUpperCase() + seg.slice(1).toLowerCase())
+		.join("");
 }

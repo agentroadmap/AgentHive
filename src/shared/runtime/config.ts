@@ -27,8 +27,14 @@
 
 import { Client } from "pg";
 import type { Pool, PoolClient } from "pg";
+import { Client } from "pg";
 
-export type ConfigClass = "secret" | "structural" | "registry" | "flag" | "tenant_dsn";
+export type ConfigClass =
+	| "secret"
+	| "structural"
+	| "registry"
+	| "flag"
+	| "tenant_dsn";
 
 export interface ConfigKey<T> {
 	name: string;
@@ -90,8 +96,8 @@ export class RuntimeConfigInvalidSource extends Error {
 	) {
 		super(
 			message ??
-			`[RuntimeConfig] Key "${keyName}" cannot be read from ${attemptedSource}. ` +
-			`Allowed sources: ${allowedSources.join(", ")}`,
+				`[RuntimeConfig] Key "${keyName}" cannot be read from ${attemptedSource}. ` +
+					`Allowed sources: ${allowedSources.join(", ")}`,
 		);
 		this.name = "RuntimeConfigInvalidSource";
 		Object.setPrototypeOf(this, RuntimeConfigInvalidSource.prototype);
@@ -214,9 +220,9 @@ class ConfigResolver {
 				const trimmed = line.trim();
 				if (!trimmed || trimmed.startsWith("#")) continue;
 				const parts = trimmed
-					.replace(/\\:/g, "\x00")
+					.replace(/\\:/g, "\uF000")
 					.split(":")
-					.map((p: string) => p.replace(/\x00/g, ":"));
+					.map((p: string) => p.replace(/\uF000/g, ":"));
 				if (parts.length < 5) continue;
 				const [h, p, d, u, ...rest] = parts;
 				const pw = rest.join(":");
@@ -225,7 +231,9 @@ class ConfigResolver {
 					return pw;
 				}
 			}
-		} catch { /* unreadable */ }
+		} catch {
+			/* unreadable */
+		}
 		return undefined;
 	}
 
@@ -238,9 +246,16 @@ class ConfigResolver {
 		pgpassPath?: string;
 	}): string | undefined {
 		if (process.env.PGPASSWORD) return process.env.PGPASSWORD;
-		const pgpassPath = opts.pgpassPath ??
+		const pgpassPath =
+			opts.pgpassPath ??
 			(process.env.PGPASSFILE || `${process.env.HOME || ""}/.pgpass`);
-		return ConfigResolver.parsePgpassFile(pgpassPath, opts.host, opts.port, opts.database, opts.user);
+		return ConfigResolver.parsePgpassFile(
+			pgpassPath,
+			opts.host,
+			opts.port,
+			opts.database,
+			opts.user,
+		);
 	}
 
 	/**
@@ -802,8 +817,12 @@ export async function getOptional<T>(
  * Throws ProjectNotRegistered, RegistryUnavailable, TenantDbUnreachable,
  * TenantSecretUnavailable, or DsnFormatInvalid — all from pool-registry.
  */
-export async function getProjectDb(slugOrId: string | number): Promise<import("pg").Pool> {
-	const { getProjectDb: registryGetProjectDb } = await import("../../postgres/pool-registry.js");
+export async function getProjectDb(
+	slugOrId: string | number,
+): Promise<import("pg").Pool> {
+	const { getProjectDb: registryGetProjectDb } = await import(
+		"../../postgres/pool-registry.js"
+	);
 	const slug = String(slugOrId);
 	const pool = await registryGetProjectDb(slugOrId);
 	if (globalResolver) {

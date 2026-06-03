@@ -172,7 +172,26 @@ class AutoEvaluator implements GateEvaluator {
 			}
 		}
 
-		// Check AC pass rate and evidence presence (P707)
+		// P707 null-details guard: reject if any 'pass' AC lacks verification_notes.
+		// Phantom passes are ACs marked pass without structured evidence.
+		const { rows: phantomRows } = await this.queryFn<{ phantom_count: string }>(
+			`SELECT COUNT(*) as phantom_count
+			 FROM roadmap_proposal.proposal_acceptance_criteria
+			 WHERE proposal_id = $1
+			   AND status = 'pass'
+			   AND (verification_notes IS NULL OR trim(verification_notes) = '')`,
+			[proposal.id],
+		);
+		const phantomCount = Number(phantomRows[0]?.phantom_count ?? 0);
+		if (phantomCount > 0) {
+			return {
+				verdict: "reject",
+				reason: `Phantom pass detected: ${phantomCount} AC(s) passed without verification_notes — fix with verifyAC before gate can approve (P707 §AC-Verification)`,
+				metadata: { phantom_count: phantomCount },
+			};
+		}
+
+		// Check AC pass rate
 		const { rows: acRows } = await this.queryFn<{
 			total: string;
 			passed: string;

@@ -123,13 +123,14 @@ export class VaultKeyStorage implements KeyStorage {
 // The ciphertext is stored in a JSON file; the private key bytes NEVER appear
 // in plaintext at rest.
 
-const ENCRYPTED_KEY_DIR =
-	process.env.AGENTHIVE_KEY_DIR ?? join(process.cwd(), ".agenthive-keys");
+function _encryptedKeyDir(): string {
+	return process.env.AGENTHIVE_KEY_DIR ?? join(process.cwd(), ".agenthive-keys");
+}
 
 export class EncryptedFileStorage implements KeyStorage {
 	async store(handle: string, privateKeyPem: string): Promise<void> {
 		const { mkdir, writeFile } = await import("node:fs/promises");
-		await mkdir(ENCRYPTED_KEY_DIR, { recursive: true, mode: 0o700 });
+		await mkdir(_encryptedKeyDir(), { recursive: true, mode: 0o700 });
 		const encKey = _getEncryptionKey();
 		const iv = randomBytes(12);
 		const cipher = createCipheriv("aes-256-gcm", encKey, iv);
@@ -308,7 +309,7 @@ function _getEncryptionKey(): Buffer {
 function _keyFilePath(handle: string): string {
 	// Sanitise handle to prevent path traversal
 	const safe = handle.replace(/[^a-zA-Z0-9_\-.:]/g, "_");
-	return join(ENCRYPTED_KEY_DIR, `${safe}.enc`);
+	return join(_encryptedKeyDir(), `${safe}.enc`);
 }
 
 function _vaultPath(handle: string): string {

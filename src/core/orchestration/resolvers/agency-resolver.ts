@@ -1,5 +1,5 @@
 /**
- * Agency Resolver — P761 C1 / P763 C3 / P764 C4
+ * Agency Resolver — P761 C1 / P763 C3 / P764 C4 / P765 C5
  *
  * Selects the best available agency for a given project + role,
  * respecting the 5-state liveness state machine and in-flight capacity.
@@ -17,10 +17,12 @@
  */
 
 import { query as _pgQuery } from "../../../infra/postgres/pool.ts";
+import { enqueueNotification } from "../../notifications/enqueue.ts";
 
 export const THROTTLE_THRESHOLD = 3; // failures before throttled
 export const DORMANT_SILENCE_MINUTES = 5;
 export const OFFLINE_SILENCE_MINUTES = 30;
+export const OFFLINE_ALERT_THRESHOLD_MINUTES = 10;
 
 // Allows tests to inject a mock query function without module-level mocking.
 type QueryFn = typeof _pgQuery;
@@ -176,6 +178,46 @@ export async function recordSpawnFailure(
 }
 
 /**
+ * P1360 Change 1: Increment spawn failure counters by agency string identity.
+ * Resolves the provider_registry row via agent_registry.agent_identity, then
+ * bumps throttle_count/recent_failure_count and transitions to 'throttled'
+ * once the threshold is crossed.
+ *
+ * Used by OfferDispatchHandler which knows the string identity, not the bigint PK.
+ *
+ * @param agencyIdentity — roadmap.agency.agency_id TEXT (e.g. "ccs46ant-bot-dev-a")
+ * @param threshold — failure count before 'throttled'; defaults to THROTTLE_THRESHOLD
+ * @param errorClass — structured error class for status_reason signal
+ */
+export async function incrementSpawnFailure(
+	agencyIdentity: string,
+	threshold: number = THROTTLE_THRESHOLD,
+	errorClass: "auth" | "spawn" | "timeout" | "unknown" = "unknown",
+): Promise<void> {
+	await query(
+		`UPDATE roadmap_workforce.provider_registry pr
+		 SET throttle_count        = throttle_count + 1,
+		     recent_failure_count  = recent_failure_count + 1,
+		     last_failure_at       = now(),
+		     status = CASE
+		       WHEN throttle_count + 1 >= $2 AND pr.status = 'active' THEN 'throttled'
+		       ELSE pr.status
+		     END,
+		     status_reason = CASE
+		       WHEN throttle_count + 1 >= $2
+		         THEN $3
+		       ELSE pr.status_reason
+		     END,
+		     updated_at = now()
+		 FROM roadmap_workforce.agent_registry ar
+		 WHERE pr.agency_id = ar.id
+		   AND ar.agent_identity = $1
+		   AND pr.status NOT IN ('retired')`,
+		[agencyIdentity, threshold, `Spawn failure threshold exceeded (${errorClass})`],
+	);
+}
+
+/**
  * Record a successful check-in for an agency (P761 + P763).
  * Updates last_seen_at in provider_registry; resets status to active from
  * throttled/dormant; decays recent_failure_count on successful check-in.
@@ -185,26 +227,32 @@ export async function recordSpawnFailure(
  */
 export async function recordCheckIn(agencyIdentity: string): Promise<void> {
 	await query(
+		// P765 AC-1: offline → dormant on first check-in (two-step recovery).
+		// Previously excluded 'offline'; now allows it but only steps to 'dormant',
+		// not directly to 'active'. The second check-in (dormant → active) is handled
+		// by the existing WHEN dormant THEN active branch.
 		`UPDATE roadmap_workforce.provider_registry pr
 		 SET last_seen_at          = now(),
 		     status = CASE
+		       WHEN pr.status = 'offline'                THEN 'dormant'
 		       WHEN pr.status IN ('throttled', 'dormant') THEN 'active'
 		       WHEN pr.status = 'offline'                 THEN 'dormant'  -- P765 AC-1: step 1 of auto-recovery
 		       ELSE pr.status
 		     END,
 		     throttle_count = CASE
-		       WHEN pr.status = 'throttled' THEN 0
+		       WHEN pr.status IN ('throttled', 'offline') THEN 0
 		       ELSE pr.throttle_count
 		     END,
 		     recent_failure_count = CASE
-		       WHEN pr.status = 'throttled' THEN 0
+		       WHEN pr.status IN ('throttled', 'offline') THEN 0
 		       ELSE GREATEST(0, pr.recent_failure_count - 1)
 		     END,
 		     last_failure_at = CASE
-		       WHEN pr.status = 'throttled' THEN NULL
+		       WHEN pr.status IN ('throttled', 'offline') THEN NULL
 		       ELSE pr.last_failure_at
 		     END,
 		     status_reason = CASE
+		       WHEN pr.status = 'offline'               THEN 'Recovering: offline→dormant'
 		       WHEN pr.status IN ('throttled', 'dormant') THEN 'Recovered on check-in'
 		       WHEN pr.status = 'offline'                 THEN 'Auto-recovery started: first check-in'
 		       ELSE pr.status_reason
@@ -245,4 +293,140 @@ export async function scanAndTransitionSilentAgencies(): Promise<void> {
 		   AND last_seen_at IS NOT NULL
 		   AND now() - last_seen_at > interval '5 minutes'`,
 	);
+}
+
+/**
+ * Operator short-circuit: force an agency to 'active' from any non-retired state
+ * via an operator_resume signal (P765 AC-2).
+ *
+ * @param agencyIdentity — roadmap.agency.agency_id TEXT identity string
+ */
+export async function resumeAgency(agencyIdentity: string): Promise<void> {
+	await query(
+		`UPDATE roadmap_workforce.provider_registry pr
+		 SET status        = 'active',
+		     status_reason = 'Operator resume',
+		     throttle_count        = 0,
+		     recent_failure_count  = 0,
+		     last_failure_at       = NULL,
+		     updated_at            = now()
+		 FROM roadmap_workforce.agent_registry ar
+		 WHERE pr.agency_id = ar.id
+		   AND ar.agent_identity = $1
+		   AND pr.status NOT IN ('retired')`,
+		[agencyIdentity],
+	);
+}
+
+export interface OfflineAlertRow {
+	agencyId: string;
+	displayName: string;
+	provider: string;
+	hostId: string;
+	offlineMinutes: number;
+	projectId: string | null;
+	isRecovered: boolean;
+}
+
+/**
+ * Scan for offline-alert conditions and emit notifications (P765 AC-3/AC-4).
+ *
+ * Two cases are handled per call:
+ *   1. New offline episodes: status='offline', threshold exceeded, alert_sent_at IS NULL
+ *      → emit agency_offline notification, set offline_alert_sent_at = now()
+ *   2. Resolved episodes: status≠'offline', offline_alert_sent_at IS NOT NULL
+ *      → emit agency_offline_resolved notification, clear offline_alert_sent_at
+ *
+ * Alert deduplication (AC-4): offline_alert_sent_at prevents repeated alerts
+ * within a single offline episode. Cleared on recovery so the next episode
+ * gets a fresh alert.
+ */
+export async function scanAndAlertOfflineAgencies(
+	thresholdMinutes = OFFLINE_ALERT_THRESHOLD_MINUTES,
+): Promise<void> {
+	// Case 1: agencies that need a new offline alert
+	const { rows: newOffline } = await query<{
+		agency_id: string;
+		display_name: string;
+		provider: string;
+		host_id: string;
+		offline_minutes: number;
+		project_id: string | null;
+	}>(
+		`SELECT a.agency_id, a.display_name, a.provider, a.host_id,
+		        EXTRACT(EPOCH FROM (now() - a.last_heartbeat_at)) / 60 AS offline_minutes,
+		        pr.project_id
+		 FROM roadmap.agency a
+		 LEFT JOIN roadmap_workforce.agent_registry ar ON ar.agent_identity = a.agency_id
+		 LEFT JOIN roadmap_workforce.provider_registry pr ON pr.agency_id = ar.id
+		 WHERE a.status = 'offline'
+		   AND a.last_heartbeat_at IS NOT NULL
+		   AND now() - a.last_heartbeat_at > make_interval(mins => $1)
+		   AND a.offline_alert_sent_at IS NULL
+		 ORDER BY a.last_heartbeat_at ASC`,
+		[thresholdMinutes],
+	);
+
+	for (const row of newOffline) {
+		const mins = Math.round(row.offline_minutes);
+		const scope = row.project_id ? `project ${row.project_id}` : "platform";
+		await enqueueNotification({
+			severity: "HIGH",
+			kind: "agency_offline",
+			title: `Agency offline: ${row.display_name}`,
+			body: `Agency ${row.agency_id} (${row.provider}/${row.host_id}) has been offline for ${mins} minutes. Scope: ${scope}.`,
+			payload: {
+				agencyId: row.agency_id,
+				displayName: row.display_name,
+				provider: row.provider,
+				hostId: row.host_id,
+				offlineMinutes: mins,
+				projectId: row.project_id,
+			},
+		});
+
+		// Mark alert as sent for this offline episode
+		await query(
+			`UPDATE roadmap.agency
+			 SET offline_alert_sent_at = now()
+			 WHERE agency_id = $1 AND status = 'offline'`,
+			[row.agency_id],
+		);
+	}
+
+	// Case 2: agencies that recovered — alert_sent_at still set but no longer offline
+	const { rows: recovered } = await query<{
+		agency_id: string;
+		display_name: string;
+		provider: string;
+		status: string;
+	}>(
+		`SELECT agency_id, display_name, provider, status
+		 FROM roadmap.agency
+		 WHERE status NOT IN ('offline', 'retired')
+		   AND offline_alert_sent_at IS NOT NULL`,
+	);
+
+	for (const row of recovered) {
+		await enqueueNotification({
+			severity: "INFO",
+			kind: "agency_offline_resolved",
+			title: `Agency recovered: ${row.display_name}`,
+			body: `Agency ${row.agency_id} (${row.provider}) has recovered. Current status: ${row.status}.`,
+			payload: {
+				agencyId: row.agency_id,
+				displayName: row.display_name,
+				provider: row.provider,
+				recoveredStatus: row.status,
+			},
+		});
+
+		// Clear episode flag so the next offline episode gets a fresh alert
+		await query(
+			`UPDATE roadmap.agency
+			 SET offline_alert_sent_at = NULL
+			 WHERE agency_id = $1`,
+			[row.agency_id],
+		);
+	}
 }
