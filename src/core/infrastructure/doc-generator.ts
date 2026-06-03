@@ -176,7 +176,8 @@ export function parseFrontmatter(content: string): Record<string, unknown> {
 }
 
 /**
- * Parse a proposal file and extract proposal information
+ * @deprecated P405 — use architecture-reconstructor.ts queryCapabilityTree() instead.
+ * This function reads from the filesystem; the DB is now the canonical source.
  */
 export function parseProposalFile(filePath: string): Proposal | null {
 	try {
@@ -214,7 +215,8 @@ export function parseProposalFile(filePath: string): Proposal | null {
 }
 
 /**
- * Load all proposals from the roadmap
+ * @deprecated P405 — use architecture-reconstructor.ts generateArchitectureDocs() instead.
+ * This function reads from the filesystem; the DB is now the canonical source.
  */
 export function loadProposals(proposalsDir: string): Proposal[] {
 	const proposals: Proposal[] = [];
@@ -288,7 +290,8 @@ export function buildDagNodes(proposals: Proposal[]): DagNode[] {
 }
 
 /**
- * Generate PlantUML DAG diagram
+ * @deprecated P405 — use architecture-reconstructor.ts queryDependencyDAG() instead.
+ * Generates PlantUML; queryDependencyDAG() generates Mermaid from live DB data.
  */
 export function buildArchitectureSection(proposals: Proposal[]): string {
 	const nodes = buildDagNodes(proposals);

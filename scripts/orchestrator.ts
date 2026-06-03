@@ -208,7 +208,7 @@ const JOB_ROLES: Record<string, RoleSlot[]> = {
 			requiredCapabilities: ["docs"],
 			minProficiency: 2,
 			prompt:
-				"You are a Documenter. Write documentation for completed proposals.",
+				"You are a Documenter. For each completed proposal: (1) query the DB via the MCP mcp_proposal action='get' to retrieve full proposal context including acceptance criteria, discussions, and design; (2) synthesize a structured documentation entry covering motivation, design decisions, and outcome; (3) post the result as a proposal discussion entry using mcp_proposal action='add_discussion' with context_prefix='feedback:' so the record is queryable for architecture reconstruction.",
 			count: 1,
 			activity: "documenting",
 		},

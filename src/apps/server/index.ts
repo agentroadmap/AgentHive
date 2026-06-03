@@ -36,6 +36,10 @@ import type { PoolClient, Client as PgClient } from "pg";
 import { hashOperatorToken, requireOperator } from "./operator-auth.ts";
 import { agentContextStorage, type VerifiedPrincipal } from "../../shared/identity/agent-context.ts";
 import { verifyBoundBearer } from "../../core/identity/principal-identity.ts";
+import {
+	generateArchitectureDocs,
+	checkStale,
+} from "../../core/infrastructure/architecture-reconstructor.ts";
 
 // Regex pattern to match any prefix (letters followed by dash)
 const PREFIX_PATTERN = /^[a-zA-Z]+-/i;
@@ -1127,6 +1131,8 @@ export class RoadmapServer {
 				return await this.handleGetBoardStages(req);
 			if (pathname === "/api/board/columns" && method === "GET")
 				return await this.handleGetBoardColumns(req);
+			if (pathname === "/api/arch-docs" && method === "GET")
+				return await this.handleGetArchDocs();
 
 			if (pathname === "/api/mcp/sse" && method === "GET") {
 				try {
@@ -4324,5 +4330,46 @@ agenthive_mcp_tool_calls_total ${toolCallCount}
 				headers: { "Content-Type": "text/plain" },
 			});
 		}
+	}
+
+	private async handleGetArchDocs(): Promise<Response> {
+		if (process.env.ARCH_RECONSTRUCTOR_DISABLED === "true") {
+			return Response.json(
+				{ error: "arch_reconstructor_disabled", fallback: "env_var_set" },
+				{ status: 503 },
+			);
+		}
+		let views;
+		try {
+			views = await generateArchitectureDocs();
+		} catch (err) {
+			console.error("[arch-docs] DB query failed:", err);
+			return Response.json(
+				{ error: "db_unavailable", fallback: "last_generated" },
+				{ status: 503 },
+			);
+		}
+		const staleResult = await checkStale(views).catch(() => ({}));
+		const staleSince = (staleResult as { staleSince?: Date }).staleSince;
+
+		const headers: Record<string, string> = {
+			"Content-Type": "application/json",
+			"X-Generated-At": views.generatedAt.toISOString(),
+		};
+		if (staleSince) {
+			headers["X-Arch-Stale"] = `true; since=${staleSince.toISOString()}`;
+		}
+
+		return new Response(
+			JSON.stringify({
+				...views,
+				generatedAt: views.generatedAt.toISOString(),
+				timeline: views.timeline.map((e) => ({
+					...e,
+					transitionedAt: e.transitionedAt.toISOString(),
+				})),
+			}),
+			{ status: 200, headers },
+		);
 	}
 }
