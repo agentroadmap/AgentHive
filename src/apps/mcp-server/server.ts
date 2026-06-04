@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -56,6 +56,7 @@ import { registerTeamTools, registerTeamGovernanceTools } from "./tools/teams/in
 import { registerTestingTools } from "./tools/testing/index.ts";
 import { registerWorkflowTools } from "./tools/workflow/index.ts";
 import { registerWorktreeMergeTools } from "./tools/worktree-merge/index.ts";
+import { handleMcpError } from "./errors/mcp-errors.ts";
 import {
 	verifyUserBearer,
 	logBearerRejection,
@@ -476,6 +477,8 @@ export class McpServer extends Core {
 		// P854: _auth envelope path sets verifiedPrincipal but has no transport context;
 		// wrap handler so getProjectDb() P844 gate sees the principal.
 		// AC-5/AC-26: per-call error boundary — isolates handler failures from transport/SSE clients.
+		// P446: generate a request_id for structured error envelopes.
+		const requestId = randomUUID();
 		const t0 = process.hrtime.bigint();
 		let result: CallToolResult;
 		let handlerError = false;
@@ -488,8 +491,9 @@ export class McpServer extends Core {
 					: await tool.handler(args);
 		} catch (err) {
 			handlerError = true;
-			const message = err instanceof Error ? err.message : String(err);
-			result = { isError: true, content: [{ type: "text", text: `Tool handler error: ${message}` }] };
+			// P446: Structured error envelope — never closes transport on handler exception.
+			// Uses McpError subclass codes when available; falls back to internal_error.
+			result = handleMcpError(err, requestId);
 		}
 		// P081: latency instrumentation — write to trace_span best-effort
 		try {
@@ -2719,7 +2723,8 @@ export async function createMcpServer(
 	});
 
 	// P1129: Agency lifecycle tools — agency_start / agency_status
-	const { handleAgencyStart, handleAgencyStatus } = await import("./tools/ops/agency-ops.ts");
+	const { AgencyOpsHandler } = await import("./tools/ops/agency-ops.ts");
+	const agencyOps = new AgencyOpsHandler();
 	server.addTool({
 		name: "agency_start",
 		description:
@@ -2737,7 +2742,8 @@ export async function createMcpServer(
 			required: ["identity"],
 		},
 		handler: async (args: Record<string, unknown>) =>
-			handleAgencyStart({ agency_id: String(args.identity) }),
+			agencyOps.agencyStart({ identity: String(args.identity) })
+				.then((r) => ({ content: [{ type: "text", text: JSON.stringify(r, null, 2) }] })),
 	});
 	server.addTool({
 		name: "agency_status",
@@ -2755,7 +2761,51 @@ export async function createMcpServer(
 			required: ["identity"],
 		},
 		handler: async (args: Record<string, unknown>) =>
-			handleAgencyStatus({ agency_id: String(args.identity) }),
+			agencyOps.agencyStatus({ identity: String(args.identity) })
+				.then((r) => ({ content: [{ type: "text", text: JSON.stringify(r, null, 2) }] })),
+	});
+
+	// P1129: Agency lifecycle tools — agency_start / agency_status
+	const { AgencyOpsHandler } = await import("./tools/ops/agency-ops.ts");
+	const agencyOps = new AgencyOpsHandler();
+	server.addTool({
+		name: "agency_start",
+		description:
+			"P1129: Enable and start an agency's liaison systemd service. " +
+			"Verifies agent_type='agency' in agent_registry before touching systemd. " +
+			"Requires the mcp-server process user to have sudoers access to agenthive-agency@.service.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				identity: {
+					type: "string",
+					description: "Agency identity (agent_identity in agent_registry, e.g. 'george')",
+				},
+			},
+			required: ["identity"],
+		},
+		handler: async (args: Record<string, unknown>) =>
+			agencyOps.agencyStart({ identity: String(args.identity) })
+				.then((r) => ({ content: [{ type: "text", text: JSON.stringify(r, null, 2) }] })),
+	});
+	server.addTool({
+		name: "agency_status",
+		description:
+			"P1129: Query live status of an agency — combines systemd is-active state with " +
+			"agent_registry.last_seen_at and status. Read-only operation.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				identity: {
+					type: "string",
+					description: "Agency identity (agent_identity in agent_registry)",
+				},
+			},
+			required: ["identity"],
+		},
+		handler: async (args: Record<string, unknown>) =>
+			agencyOps.agencyStatus({ identity: String(args.identity) })
+				.then((r) => ({ content: [{ type: "text", text: JSON.stringify(r, null, 2) }] })),
 	});
 
 	// Start background maintenance tasks

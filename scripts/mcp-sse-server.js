@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
@@ -21,6 +22,8 @@ if (typeof setPoolLifecycleMode !== "function") {
 	process.exit(1);
 }
 setPoolLifecycleMode("long-running");
+// Extract query function for health checks (same jiti fallback pattern)
+const queryFn = poolModule.query || poolModule.default?.query;
 
 // P1123 Phase 3: start the pool watchdog. Same jiti-named-export fallback
 // pattern as setPoolLifecycleMode above.
@@ -64,6 +67,7 @@ const HTTP_ENABLED = MCP_TRANSPORT === "http" || MCP_TRANSPORT === "both";
 const port = process.env.MCP_PORT || 6421;
 const host = process.env.MCP_HOST || "127.0.0.1";
 const APP_VERSION = getVersion ? await getVersion() : "unknown";
+const SERVER_STARTED_AT = new Date().toISOString();
 
 const app = express();
 
@@ -119,6 +123,98 @@ app.get("/health", async (_req, res) => {
 		},
 		timestamp: new Date().toISOString(),
 	});
+});
+
+// P446: Structured health endpoint.
+// Returns DB reachability and schema version separately from service health,
+// so operators can distinguish version mismatch from transport errors.
+// Never exposes DB credentials — only host, name, schema.
+app.get("/healthz", async (_req, res) => {
+	const health = {
+		service: "ok",
+		db: "ok",
+		schema_version: null,
+		git_revision: "unknown",
+		project_root: projectRoot,
+		db_host: process.env.PGHOST || "127.0.0.1",
+		db_name: process.env.PGDATABASE || "agenthive",
+		schema: process.env.PGSCHEMA || "roadmap",
+		started_at: SERVER_STARTED_AT,
+		mcp_protocol_version: "2024-11-05",
+	};
+
+	// DB health: query schema_info for the most recent schema version.
+	// 3s timeout prevents /healthz from hanging when DB is unreachable.
+	if (typeof queryFn === "function") {
+		try {
+			const dbResult = await Promise.race([
+				queryFn(
+					"SELECT schema_version FROM roadmap.schema_info ORDER BY id DESC LIMIT 1",
+					[],
+				),
+				new Promise((_, reject) =>
+					setTimeout(() => reject(new Error("db_timeout")), 3000),
+				),
+			]);
+			health.schema_version = dbResult.rows[0]?.schema_version ?? null;
+		} catch {
+			health.db = "error";
+		}
+	} else {
+		health.db = "error";
+	}
+
+	// Git revision — stale is fine; the field helps distinguish version mismatch
+	// from transport failures. Never fatal if the working tree lacks git.
+	try {
+		health.git_revision = execSync("git rev-parse --short HEAD", {
+			cwd: projectRoot,
+			encoding: "utf-8",
+			timeout: 3000,
+		}).trim();
+	} catch {
+		// non-fatal; leave as "unknown"
+	}
+
+	res.status(200).json(health);
+});
+
+// P446: Smoke-test endpoint.
+// Runs initialize → tools/list → a known-safe tools/call and returns per-step
+// timings. Use this to verify MCP handler health before agents depend on it.
+app.post("/smoke", express.json({ limit: "1mb" }), async (_req, res) => {
+	const t0 = Date.now();
+	const steps = [];
+
+	async function runStep(name, payload) {
+		const tStep = Date.now();
+		let result = "ok";
+		let error = null;
+		try {
+			const r = await handleDirectMcpRequest(sharedServer, payload);
+			// tools/call result may carry isError inside the MCP result body
+			const isToolError =
+				name === "tools/call:mcp_ops" && r.body?.result?.isError === true;
+			result = r.status === 200 && !isToolError ? "ok" : "error";
+		} catch (err) {
+			result = "error";
+			error = err.message;
+		}
+		const step = { name, elapsed_ms: Date.now() - tStep, result };
+		if (error) step.error = error;
+		steps.push(step);
+	}
+
+	await runStep("initialize", { jsonrpc: "2.0", id: 1, method: "initialize" });
+	await runStep("tools/list", { jsonrpc: "2.0", id: 2, method: "tools/list" });
+	await runStep("tools/call:mcp_ops", {
+		jsonrpc: "2.0",
+		id: 3,
+		method: "tools/call",
+		params: { name: "mcp_ops", arguments: { action: "list_actions" } },
+	});
+
+	res.json({ steps, total_ms: Date.now() - t0 });
 });
 
 const jsonBodyParser = express.json({ limit: "4mb" });
