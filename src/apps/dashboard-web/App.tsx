@@ -15,6 +15,7 @@ import ChannelsPage from "./components/ChannelsPage";
 import DashboardPage from "./components/DashboardPage";
 import DecisionsPage from "./components/DecisionsPage";
 import DirectivesPage from "./components/DirectivesPage";
+import ControlPage from "./components/ControlPage";
 import DispatchPage from "./components/DispatchPage";
 import DocumentsPage from "./components/DocumentsPage";
 import KnowledgePage from "./components/KnowledgePage";
@@ -246,6 +247,9 @@ export default function App() {
 						</Route>
 						<Route path="/dispatches">
 							<DispatchPage />
+						</Route>
+						<Route path="/control">
+							<ControlPage />
 						</Route>
 						<Route path="/knowledge">
 							<KnowledgePage />
