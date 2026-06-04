@@ -157,12 +157,25 @@ transaction — the FOR UPDATE is held until COMMIT/ROLLBACK, making the
 count-and-claim sequence atomic. Returns (current_count, max_count, ok):
 ok=false means the ceiling is reached and the caller must reject the claim.';
 
--- ─── 4. Update fn_claim_work_offer with proposal-level concurrency check ──────
+-- ─── 4. Update fn_claim_work_offer with concurrency ceiling checks ────────────
 --
--- After locking the chosen squad_dispatch row (SKIP LOCKED), we call
--- fn_check_concurrency for the proposal scope. If the ceiling is reached,
--- we return an empty row set so the caller can retry or back off.
--- The function is unchanged in signature — only the body is extended.
+-- P439 adds three ceiling checks (global → agency → proposal) after locking the
+-- chosen squad_dispatch row (SKIP LOCKED).
+--
+-- IMPORTANT — count source:
+--   fn_check_concurrency counts roadmap_control.claim (the TypeScript
+--   tryClaimDispatch path). That table is NEVER written by fn_claim_work_offer,
+--   so delegating to fn_check_concurrency here would always return current=0.
+--   Instead, we count directly from roadmap_workforce.squad_dispatch
+--   (offer_status='claimed'), which is exactly what this function writes.
+--
+-- Lock order (no deadlock possible):
+--   squad_dispatch row (SKIP LOCKED, non-blocking)
+--   → concurrency_limit row (global __default__, then agency, then proposal)
+--   All concurrent callers take locks in the same direction.
+--
+-- The function signature is UNCHANGED (4 params, 9 return columns including
+-- route_provider added by a previous migration).  Only the body is extended.
 
 CREATE OR REPLACE FUNCTION roadmap_workforce.fn_claim_work_offer(
     p_agent_identity        text,
@@ -178,17 +191,24 @@ RETURNS TABLE (
     claim_token      uuid,
     claim_expires_at timestamptz,
     offer_version    int,
-    metadata         jsonb
+    metadata         jsonb,
+    route_provider   text
 )
 LANGUAGE plpgsql AS
 $function$
 DECLARE
-    v_picked_id          bigint;
-    v_picked_proposal_id bigint;
-    v_new_token          uuid        := gen_random_uuid();
-    v_expires            timestamptz := now() + make_interval(secs => p_lease_ttl_seconds);
-    v_agency_id          bigint;
-    v_ceiling_ok         boolean;
+    v_picked_id           bigint;
+    v_picked_proposal_id  bigint;
+    v_new_token           uuid        := gen_random_uuid();
+    v_expires             timestamptz := now() + make_interval(secs => p_lease_ttl_seconds);
+    v_agency_id           bigint;
+    v_route_provider      text;
+    v_allowed_providers   text[];
+    v_forbidden_providers text[];
+    v_dispatch_project    bigint;
+    -- ceiling check locals (reused across global/agency/proposal checks)
+    v_ceil_max            integer;
+    v_ceil_current        integer;
 BEGIN
     -- Verify caller is a registered agent.
     IF NOT EXISTS (
@@ -245,39 +265,152 @@ BEGIN
         FOR UPDATE OF sd SKIP LOCKED
         LIMIT 1
     )
-    SELECT id, proposal_id INTO v_picked_id, v_picked_proposal_id FROM candidate;
+    -- Qualify with candidate.* to avoid OUT-param column-name collision (SQLSTATE 42702).
+    SELECT candidate.id, candidate.proposal_id
+      INTO v_picked_id, v_picked_proposal_id
+      FROM candidate;
 
     IF v_picked_id IS NULL THEN
         RETURN;
     END IF;
 
-    -- Check proposal-level concurrency ceiling before claiming.
-    -- fn_check_concurrency serializes concurrent checks for the same proposal_id
-    -- via FOR UPDATE on the per-proposal concurrency_limit row.
-    IF v_picked_proposal_id IS NOT NULL THEN
-        SELECT ok INTO v_ceiling_ok
-        FROM   roadmap_control.fn_check_concurrency('proposal', v_picked_proposal_id::text);
+    -- ── Concurrency ceiling checks (global → agency → proposal) ──────────────
+    --
+    -- We count directly from squad_dispatch (offer_status='claimed') because
+    -- that is the table this function writes to on success.
+    -- fn_check_concurrency counts roadmap_control.claim and is only correct for
+    -- the tryClaimDispatch TypeScript path — never call it from this function.
+    --
+    -- For each scope we:
+    --   1. Materialize the per-scope row from the __default__ if absent.
+    --   2. Lock that row with FOR UPDATE (held until COMMIT/ROLLBACK), serializing
+    --      concurrent ceiling checks for the same scope.
+    --   3. Count active claims from squad_dispatch for that scope.
+    --   4. Return empty if count >= max.
 
-        IF NOT v_ceiling_ok THEN
-            -- Ceiling reached — return empty result set.
-            -- The picked dispatch row lock (SKIP LOCKED) is released on ROLLBACK/COMMIT.
+    -- 1. Global ceiling
+    INSERT INTO roadmap_control.concurrency_limit
+        (scope_type, scope_id, max_active_claims, max_active_workers)
+    SELECT 'global', '__default__', max_active_claims, max_active_workers
+    FROM   roadmap_control.concurrency_limit
+    WHERE  scope_type = 'global' AND scope_id = '__default__'
+    ON CONFLICT (scope_type, scope_id) DO NOTHING;
+
+    SELECT max_active_claims INTO v_ceil_max
+    FROM   roadmap_control.concurrency_limit
+    WHERE  scope_type = 'global' AND scope_id = '__default__'
+    FOR UPDATE;
+
+    IF v_ceil_max IS NOT NULL THEN
+        SELECT COUNT(*)::integer INTO v_ceil_current
+        FROM   roadmap_workforce.squad_dispatch
+        WHERE  offer_status = 'claimed';
+
+        IF v_ceil_current >= v_ceil_max THEN
             RETURN;
         END IF;
     END IF;
 
+    -- 2. Agency ceiling (when caller is a registered agent with an agency row)
+    IF v_agency_id IS NOT NULL THEN
+        INSERT INTO roadmap_control.concurrency_limit
+            (scope_type, scope_id, max_active_claims, max_active_workers)
+        SELECT 'agency', p_agent_identity, max_active_claims, max_active_workers
+        FROM   roadmap_control.concurrency_limit
+        WHERE  scope_type = 'agency' AND scope_id = '__default__'
+        ON CONFLICT (scope_type, scope_id) DO NOTHING;
+
+        SELECT max_active_claims INTO v_ceil_max
+        FROM   roadmap_control.concurrency_limit
+        WHERE  scope_type = 'agency' AND scope_id = p_agent_identity
+        FOR UPDATE;
+
+        IF v_ceil_max IS NOT NULL THEN
+            SELECT COUNT(*)::integer INTO v_ceil_current
+            FROM   roadmap_workforce.squad_dispatch
+            WHERE  offer_status   = 'claimed'
+              AND  agent_identity = p_agent_identity;
+
+            IF v_ceil_current >= v_ceil_max THEN
+                RETURN;
+            END IF;
+        END IF;
+    END IF;
+
+    -- 3. Proposal ceiling (when offer is bound to a proposal)
+    IF v_picked_proposal_id IS NOT NULL THEN
+        INSERT INTO roadmap_control.concurrency_limit
+            (scope_type, scope_id, max_active_claims, max_active_workers)
+        SELECT 'proposal', v_picked_proposal_id::text, max_active_claims, max_active_workers
+        FROM   roadmap_control.concurrency_limit
+        WHERE  scope_type = 'proposal' AND scope_id = '__default__'
+        ON CONFLICT (scope_type, scope_id) DO NOTHING;
+
+        SELECT max_active_claims INTO v_ceil_max
+        FROM   roadmap_control.concurrency_limit
+        WHERE  scope_type = 'proposal' AND scope_id = v_picked_proposal_id::text
+        FOR UPDATE;
+
+        IF v_ceil_max IS NOT NULL THEN
+            SELECT COUNT(*)::integer INTO v_ceil_current
+            FROM   roadmap_workforce.squad_dispatch
+            WHERE  offer_status = 'claimed'
+              AND  proposal_id  = v_picked_proposal_id;
+
+            IF v_ceil_current >= v_ceil_max THEN
+                RETURN;
+            END IF;
+        END IF;
+    END IF;
+
+    -- ── Resolve route_provider via project policy ─────────────────────────────
+
+    SELECT sd.project_id INTO v_dispatch_project
+    FROM   roadmap_workforce.squad_dispatch sd
+    WHERE  sd.id = v_picked_id;
+
+    SELECT rp.allowed_route_providers, rp.forbidden_route_providers
+      INTO v_allowed_providers, v_forbidden_providers
+    FROM   roadmap.project_route_policy rp
+    WHERE  rp.project_id = v_dispatch_project;
+
+    IF NOT FOUND THEN
+        v_allowed_providers   := '{}'::text[];
+        v_forbidden_providers := '{}'::text[];
+    END IF;
+
+    SELECT mr.route_provider INTO v_route_provider
+    FROM   roadmap.model_routes mr
+    WHERE  mr.is_enabled = true
+      AND  (cardinality(v_forbidden_providers) = 0
+            OR mr.route_provider <> ALL(v_forbidden_providers))
+      AND  (cardinality(v_allowed_providers)   = 0
+            OR mr.route_provider = ANY(v_allowed_providers))
+    ORDER BY mr.priority DESC, mr.id ASC
+    LIMIT 1;
+
+    -- If policy is constraining and no valid route survives, decline the claim.
+    IF v_route_provider IS NULL
+       AND (cardinality(v_allowed_providers) > 0 OR cardinality(v_forbidden_providers) > 0)
+    THEN
+        RETURN;
+    END IF;
+
     UPDATE roadmap_workforce.squad_dispatch sd
-    SET    offer_status    = 'claimed',
-           agent_identity  = p_agent_identity,
-           claim_token     = v_new_token,
+    SET    offer_status     = 'claimed',
+           agent_identity   = p_agent_identity,
+           claim_token      = v_new_token,
            claim_expires_at = v_expires,
-           claimed_at      = now(),
-           last_renewed_at = now(),
-           offer_version   = sd.offer_version + 1
+           claimed_at       = now(),
+           last_renewed_at  = now(),
+           offer_version    = sd.offer_version + 1,
+           route_provider   = v_route_provider
     WHERE  sd.id = v_picked_id;
 
     RETURN QUERY
     SELECT sd.id, sd.proposal_id, sd.squad_name, sd.dispatch_role,
-           sd.claim_token, sd.claim_expires_at, sd.offer_version, sd.metadata
+           sd.claim_token, sd.claim_expires_at, sd.offer_version, sd.metadata,
+           sd.route_provider
     FROM   roadmap_workforce.squad_dispatch sd
     WHERE  sd.id = v_picked_id;
 END;
@@ -286,7 +419,11 @@ $function$;
 -- ─── 5. v_concurrency_usage view ─────────────────────────────────────────────
 --
 -- Operator-visible snapshot of current active-claim counts vs ceilings.
--- Includes all materialized rows (seeded defaults + on-demand per-entity rows).
+-- Counts active claims from BOTH claim paths:
+--   • roadmap_control.claim  (status='active')   — TypeScript tryClaimDispatch path
+--   • roadmap_workforce.squad_dispatch             — SQL fn_claim_work_offer path
+--     (offer_status='claimed')
+-- The two tables track independent claims (never double-counted).
 -- For __default__ rows in non-global scopes, current_active_claims = 0
 -- (no dispatch entity has scope_id='__default__').
 
@@ -298,9 +435,11 @@ SELECT
     cl.max_active_workers,
     CASE
         WHEN cl.scope_type = 'global' THEN
-            (SELECT COUNT(*)::integer
-               FROM roadmap_control.claim
-              WHERE status = 'active')
+            -- control path
+            (SELECT COUNT(*)::integer FROM roadmap_control.claim WHERE status = 'active')
+            +
+            -- workforce path
+            (SELECT COUNT(*)::integer FROM roadmap_workforce.squad_dispatch WHERE offer_status = 'claimed')
         WHEN cl.scope_id = '__default__' THEN
             0  -- default rows have no real entity to count against
         WHEN cl.scope_type = 'agency' THEN
@@ -309,12 +448,22 @@ SELECT
                JOIN roadmap_control.dispatch d ON d.dispatch_id = c.dispatch_id
               WHERE c.status    = 'active'
                 AND d.agency_id = cl.scope_id)
+            +
+            (SELECT COUNT(*)::integer
+               FROM roadmap_workforce.squad_dispatch
+              WHERE offer_status   = 'claimed'
+                AND agent_identity = cl.scope_id)
         WHEN cl.scope_type = 'project' THEN
             (SELECT COUNT(*)::integer
                FROM roadmap_control.claim  c
                JOIN roadmap_control.dispatch d ON d.dispatch_id = c.dispatch_id
               WHERE c.status     = 'active'
                 AND d.project_id = cl.scope_id)
+            +
+            (SELECT COUNT(*)::integer
+               FROM roadmap_workforce.squad_dispatch
+              WHERE offer_status = 'claimed'
+                AND project_id::text = cl.scope_id)
         WHEN cl.scope_type = 'host' THEN
             (SELECT COUNT(*)::integer
                FROM roadmap_control.claim  c
@@ -327,26 +476,43 @@ SELECT
                JOIN roadmap_control.dispatch d ON d.dispatch_id = c.dispatch_id
               WHERE c.status      = 'active'
                 AND d.proposal_id = cl.scope_id::integer)
+            +
+            (SELECT COUNT(*)::integer
+               FROM roadmap_workforce.squad_dispatch
+              WHERE offer_status = 'claimed'
+                AND proposal_id  = cl.scope_id::bigint)
         ELSE 0
     END                                                        AS current_active_claims,
     CASE
         WHEN cl.scope_type = 'global' THEN
-            (SELECT COUNT(*)::integer
-               FROM roadmap_control.claim
-              WHERE status = 'active') >= cl.max_active_claims
+            (
+                (SELECT COUNT(*)::integer FROM roadmap_control.claim WHERE status = 'active')
+                +
+                (SELECT COUNT(*)::integer FROM roadmap_workforce.squad_dispatch WHERE offer_status = 'claimed')
+            ) >= cl.max_active_claims
         WHEN cl.scope_id = '__default__' THEN
             false
         WHEN cl.scope_type = 'agency' THEN
-            (SELECT COUNT(*)::integer
-               FROM roadmap_control.claim  c
-               JOIN roadmap_control.dispatch d ON d.dispatch_id = c.dispatch_id
-              WHERE c.status = 'active' AND d.agency_id = cl.scope_id
+            (
+                (SELECT COUNT(*)::integer
+                   FROM roadmap_control.claim c
+                   JOIN roadmap_control.dispatch d ON d.dispatch_id = c.dispatch_id
+                  WHERE c.status = 'active' AND d.agency_id = cl.scope_id)
+                +
+                (SELECT COUNT(*)::integer
+                   FROM roadmap_workforce.squad_dispatch
+                  WHERE offer_status = 'claimed' AND agent_identity = cl.scope_id)
             ) >= cl.max_active_claims
         WHEN cl.scope_type = 'project' THEN
-            (SELECT COUNT(*)::integer
-               FROM roadmap_control.claim  c
-               JOIN roadmap_control.dispatch d ON d.dispatch_id = c.dispatch_id
-              WHERE c.status = 'active' AND d.project_id = cl.scope_id
+            (
+                (SELECT COUNT(*)::integer
+                   FROM roadmap_control.claim c
+                   JOIN roadmap_control.dispatch d ON d.dispatch_id = c.dispatch_id
+                  WHERE c.status = 'active' AND d.project_id = cl.scope_id)
+                +
+                (SELECT COUNT(*)::integer
+                   FROM roadmap_workforce.squad_dispatch
+                  WHERE offer_status = 'claimed' AND project_id::text = cl.scope_id)
             ) >= cl.max_active_claims
         WHEN cl.scope_type = 'host' THEN
             (SELECT COUNT(*)::integer
@@ -355,10 +521,15 @@ SELECT
               WHERE c.status = 'active' AND d.host = cl.scope_id
             ) >= cl.max_active_claims
         WHEN cl.scope_type = 'proposal' THEN
-            (SELECT COUNT(*)::integer
-               FROM roadmap_control.claim  c
-               JOIN roadmap_control.dispatch d ON d.dispatch_id = c.dispatch_id
-              WHERE c.status = 'active' AND d.proposal_id = cl.scope_id::integer
+            (
+                (SELECT COUNT(*)::integer
+                   FROM roadmap_control.claim c
+                   JOIN roadmap_control.dispatch d ON d.dispatch_id = c.dispatch_id
+                  WHERE c.status = 'active' AND d.proposal_id = cl.scope_id::integer)
+                +
+                (SELECT COUNT(*)::integer
+                   FROM roadmap_workforce.squad_dispatch
+                  WHERE offer_status = 'claimed' AND proposal_id = cl.scope_id::bigint)
             ) >= cl.max_active_claims
         ELSE false
     END                                                        AS at_ceiling
@@ -366,7 +537,9 @@ FROM roadmap_control.concurrency_limit cl;
 
 COMMENT ON VIEW roadmap_control.v_concurrency_usage IS
 'Operator snapshot: active claim counts vs ceilings per scope.
-Includes __default__ rows (shows ceiling but current=0 for non-global scopes)
-and all materialized per-entity rows created by fn_check_concurrency.';
+Aggregates claims from both paths:
+  roadmap_control.claim (status=active) — TypeScript tryClaimDispatch path
+  roadmap_workforce.squad_dispatch (offer_status=claimed) — SQL fn_claim_work_offer path
+Includes __default__ rows (current=0) and per-entity rows from fn_check_concurrency.';
 
 COMMIT;
