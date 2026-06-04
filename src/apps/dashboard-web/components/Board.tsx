@@ -23,6 +23,7 @@ interface BoardProps {
 	proposalTypes: string[];
 	domains: string[];
 	focusStatus?: string | null;
+	columnDwell?: Record<string, number | null>;
 }
 
 const Board: React.FC<BoardProps> = ({
@@ -34,6 +35,7 @@ const Board: React.FC<BoardProps> = ({
 	proposalTypes,
 	domains,
 	focusStatus,
+	columnDwell,
 }) => {
 	const [_collapsedLanes, setCollapsedLanes] = useState<
 		Record<string, boolean>
@@ -157,6 +159,14 @@ const Board: React.FC<BoardProps> = ({
 										}
 									</span>
 								</div>
+								{columnDwell && columnDwell[status] != null && (
+									<div
+										className="text-xs text-gray-400 mt-0.5"
+										title={`Average dwell: ${columnDwell[status]} days`}
+									>
+										avg {columnDwell[status]}d
+									</div>
+								)}
 							</div>
 
 							{/* Cards */}

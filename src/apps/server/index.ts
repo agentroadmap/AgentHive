@@ -48,6 +48,26 @@ import {
 	generateArchitectureDocs,
 	checkStale,
 } from "../../core/infrastructure/architecture-reconstructor.ts";
+import {
+	listActiveDispatches,
+	listAgencies as listAgenciesControl,
+	listWorkers,
+	stop as operatorStop,
+	getFeedEvents,
+	replayChain,
+	type ScopeType,
+	type EventClass,
+} from "../../core/governance/control-feed.ts";
+import {
+	cancelDispatch,
+	suspendAgency,
+	resumeAgency,
+	drainHost,
+	resumeHost,
+	terminateWorker,
+	suspendProviderRoute,
+	resumeProviderRoute,
+} from "../../core/governance/operator-stop-controls.ts";
 
 // Regex pattern to match any prefix (letters followed by dash)
 const PREFIX_PATTERN = /^[a-zA-Z]+-/i;
@@ -1050,6 +1070,7 @@ export class RoadmapServer {
 					"/achievements",
 					"/activity",
 					"/dispatches",
+					"/control",
 				].some((p) => pathname === p || pathname.startsWith(`${p}/`)))
 		) {
 			return new Response(indexHtml, {
@@ -1138,6 +1159,29 @@ export class RoadmapServer {
 				return await this.handleIssueOperatorToken(req);
 			if (pathname === "/api/operator/tokens" && method === "GET")
 				return await this.handleListOperatorTokens(req);
+			// P435: Operator Control API
+			if (pathname === "/api/operator/control/dispatches" && method === "GET")
+				return await this.handleControlListDispatches(req);
+			if (pathname === "/api/operator/control/agencies" && method === "GET")
+				return await this.handleControlListAgencies(req);
+			if (pathname === "/api/operator/control/workers" && method === "GET")
+				return await this.handleControlListWorkers(req);
+			if (pathname === "/api/operator/control/stop" && method === "POST")
+				return await this.handleControlStop(req);
+			if (pathname === "/api/operator/control/suspend-agency" && method === "POST")
+				return await this.handleControlSuspendAgency(req);
+			if (pathname === "/api/operator/control/drain-host" && method === "POST")
+				return await this.handleControlDrainHost(req);
+			if (pathname === "/api/operator/control/cancel-dispatch" && method === "POST")
+				return await this.handleControlCancelDispatch(req);
+			if (pathname === "/api/operator/control/terminate-worker" && method === "POST")
+				return await this.handleControlTerminateWorker(req);
+			if (pathname === "/api/operator/control/feed" && method === "GET")
+				return await this.handleControlFeed(req);
+			if (pathname.startsWith("/api/operator/control/replay/") && method === "GET") {
+				const dispatchId = pathname.split("/").at(-1)!;
+				return await this.handleControlReplay(req, dispatchId);
+			}
 			if (pathname === "/api/pulse" && method === "GET")
 				return await this.handleListPulse(req);
 			if (pathname === "/api/channels" && method === "GET")
@@ -5407,5 +5451,252 @@ agenthive_mcp_tool_calls_total ${toolCallCount}
 			}),
 			{ status: 200, headers },
 		);
+	}
+
+	// ── P435: Operator Control API handlers ──────────────────────────────────────
+
+	/** GET /api/operator/control/dispatches?project_id=<n> */
+	private async handleControlListDispatches(req: Request): Promise<Response> {
+		const auth = await requireOperator(req, { action: "control.read" });
+		if (auth.rejected) return auth.rejected;
+		try {
+			const url = new URL(req.url);
+			const projectId = url.searchParams.get("project_id");
+			const dispatches = await listActiveDispatches(
+				projectId ? Number(projectId) : undefined,
+			);
+			return Response.json({ dispatches });
+		} catch (err) {
+			console.error("[p435] list_active_dispatches failed:", (err as Error).message);
+			return Response.json({ error: "list_active_dispatches failed" }, { status: 500 });
+		}
+	}
+
+	/** GET /api/operator/control/agencies?status=<s> */
+	private async handleControlListAgencies(req: Request): Promise<Response> {
+		const auth = await requireOperator(req, { action: "control.read" });
+		if (auth.rejected) return auth.rejected;
+		try {
+			const url = new URL(req.url);
+			const status = url.searchParams.get("status") ?? undefined;
+			const agencies = await listAgenciesControl(status);
+			return Response.json({ agencies });
+		} catch (err) {
+			console.error("[p435] list_agencies failed:", (err as Error).message);
+			return Response.json({ error: "list_agencies failed" }, { status: 500 });
+		}
+	}
+
+	/** GET /api/operator/control/workers?agency_id=<s>&dispatch_id=<n> */
+	private async handleControlListWorkers(req: Request): Promise<Response> {
+		const auth = await requireOperator(req, { action: "control.read" });
+		if (auth.rejected) return auth.rejected;
+		try {
+			const url = new URL(req.url);
+			const agencyId = url.searchParams.get("agency_id") ?? undefined;
+			const dispatchIdRaw = url.searchParams.get("dispatch_id");
+			const workers = await listWorkers({
+				agencyId,
+				dispatchId: dispatchIdRaw ? Number(dispatchIdRaw) : undefined,
+			});
+			return Response.json({ workers });
+		} catch (err) {
+			console.error("[p435] list_workers failed:", (err as Error).message);
+			return Response.json({ error: "list_workers failed" }, { status: 500 });
+		}
+	}
+
+	/**
+	 * POST /api/operator/control/stop
+	 * Body: { scope_type, scope_id, reason }
+	 * Unified stop verb — delegates to appropriate operator-stop-controls function.
+	 * AC-2: writes to control_audit.operator_action_log.
+	 */
+	private async handleControlStop(req: Request): Promise<Response> {
+		const auth = await requireOperator(req, { action: "control.stop" });
+		if (auth.rejected) return auth.rejected;
+		try {
+			const body = await req.json() as Record<string, unknown>;
+			const scopeType = body.scope_type as ScopeType | undefined;
+			const scopeId = typeof body.scope_id === "string" ? body.scope_id
+				: String(body.scope_id ?? "");
+			const reason = typeof body.reason === "string" ? body.reason : undefined;
+
+			const VALID_SCOPES: ScopeType[] = [
+				"dispatch", "proposal", "agency", "host", "worker", "provider_route",
+			];
+			if (!scopeType || !VALID_SCOPES.includes(scopeType)) {
+				return Response.json(
+					{ error: "scope_type must be one of: dispatch, proposal, agency, host, worker, provider_route" },
+					{ status: 400 },
+				);
+			}
+			if (!scopeId) {
+				return Response.json({ error: "scope_id is required" }, { status: 400 });
+			}
+
+			const actor = auth.outcome.operatorName ?? "operator";
+			const result = await operatorStop({ scopeType, scopeId, reason, actor });
+			return Response.json({ result, scope_type: scopeType, scope_id: scopeId });
+		} catch (err) {
+			console.error("[p435] stop failed:", (err as Error).message);
+			return Response.json({ error: "stop failed" }, { status: 500 });
+		}
+	}
+
+	/**
+	 * POST /api/operator/control/suspend-agency
+	 * Body: { agency_id, reason }
+	 */
+	private async handleControlSuspendAgency(req: Request): Promise<Response> {
+		const auth = await requireOperator(req, { action: "control.stop" });
+		if (auth.rejected) return auth.rejected;
+		try {
+			const body = await req.json() as Record<string, unknown>;
+			const agencyId = typeof body.agency_id === "string" ? body.agency_id : "";
+			const reason = typeof body.reason === "string" ? body.reason : undefined;
+			if (!agencyId) {
+				return Response.json({ error: "agency_id is required" }, { status: 400 });
+			}
+			const actor = auth.outcome.operatorName ?? "operator";
+			const result = await suspendAgency({ agencyIdentity: agencyId, actor, reason });
+			return Response.json({ result, agency_id: agencyId });
+		} catch (err) {
+			console.error("[p435] suspend_agency failed:", (err as Error).message);
+			return Response.json({ error: "suspend_agency failed" }, { status: 500 });
+		}
+	}
+
+	/**
+	 * POST /api/operator/control/drain-host
+	 * Body: { host_id, grace_seconds?, reason }
+	 */
+	private async handleControlDrainHost(req: Request): Promise<Response> {
+		const auth = await requireOperator(req, { action: "control.stop" });
+		if (auth.rejected) return auth.rejected;
+		try {
+			const body = await req.json() as Record<string, unknown>;
+			const host = typeof body.host_id === "string" ? body.host_id : "";
+			const graceSeconds = typeof body.grace_seconds === "number" ? body.grace_seconds : 0;
+			const reason = typeof body.reason === "string" ? body.reason : undefined;
+			if (!host) {
+				return Response.json({ error: "host_id is required" }, { status: 400 });
+			}
+			const actor = auth.outcome.operatorName ?? "operator";
+			const result = await drainHost({
+				host,
+				allowGraceSeconds: graceSeconds,
+				actor,
+				reason,
+			});
+			return Response.json({ result, host });
+		} catch (err) {
+			console.error("[p435] drain_host failed:", (err as Error).message);
+			return Response.json({ error: "drain_host failed" }, { status: 500 });
+		}
+	}
+
+	/**
+	 * POST /api/operator/control/cancel-dispatch
+	 * Body: { dispatch_id, reason }
+	 */
+	private async handleControlCancelDispatch(req: Request): Promise<Response> {
+		const auth = await requireOperator(req, { action: "control.stop" });
+		if (auth.rejected) return auth.rejected;
+		try {
+			const body = await req.json() as Record<string, unknown>;
+			const dispatchId = Number(body.dispatch_id);
+			const reason = typeof body.reason === "string" ? body.reason : undefined;
+			if (!dispatchId || Number.isNaN(dispatchId)) {
+				return Response.json({ error: "dispatch_id is required" }, { status: 400 });
+			}
+			const actor = auth.outcome.operatorName ?? "operator";
+			const result = await cancelDispatch({ dispatchId, actor, reason });
+			return Response.json({ result, dispatch_id: dispatchId });
+		} catch (err) {
+			console.error("[p435] cancel_dispatch failed:", (err as Error).message);
+			return Response.json({ error: "cancel_dispatch failed" }, { status: 500 });
+		}
+	}
+
+	/**
+	 * POST /api/operator/control/terminate-worker
+	 * Body: { worker_id, signal?, reason }
+	 */
+	private async handleControlTerminateWorker(req: Request): Promise<Response> {
+		const auth = await requireOperator(req, { action: "control.stop" });
+		if (auth.rejected) return auth.rejected;
+		try {
+			const body = await req.json() as Record<string, unknown>;
+			const workerIdentity = typeof body.worker_id === "string" ? body.worker_id : "";
+			const signal = typeof body.signal === "string" ? body.signal : "SIGTERM";
+			const reason = typeof body.reason === "string" ? body.reason : undefined;
+			if (!workerIdentity) {
+				return Response.json({ error: "worker_id is required" }, { status: 400 });
+			}
+			const actor = auth.outcome.operatorName ?? "operator";
+			const result = await terminateWorker({ workerIdentity, signal, actor, reason });
+			return Response.json({ result, worker_id: workerIdentity });
+		} catch (err) {
+			console.error("[p435] terminate_worker failed:", (err as Error).message);
+			return Response.json({ error: "terminate_worker failed" }, { status: 500 });
+		}
+	}
+
+	/**
+	 * GET /api/operator/control/feed
+	 * Query params: project_id, proposal_id, dispatch_id, event_class, since, limit
+	 */
+	private async handleControlFeed(req: Request): Promise<Response> {
+		const auth = await requireOperator(req, { action: "control.read" });
+		if (auth.rejected) return auth.rejected;
+		try {
+			const url = new URL(req.url);
+			const events = await getFeedEvents({
+				projectId: url.searchParams.get("project_id")
+					? Number(url.searchParams.get("project_id"))
+					: undefined,
+				proposalId: url.searchParams.get("proposal_id")
+					? Number(url.searchParams.get("proposal_id"))
+					: undefined,
+				dispatchId: url.searchParams.get("dispatch_id")
+					? Number(url.searchParams.get("dispatch_id"))
+					: undefined,
+				eventClass: url.searchParams.get("event_class") as EventClass | undefined ?? undefined,
+				since: url.searchParams.get("since")
+					? new Date(url.searchParams.get("since")!)
+					: undefined,
+				limit: url.searchParams.get("limit")
+					? Number(url.searchParams.get("limit"))
+					: 200,
+			});
+			return Response.json({ events });
+		} catch (err) {
+			console.error("[p435] feed failed:", (err as Error).message);
+			return Response.json({ error: "feed query failed" }, { status: 500 });
+		}
+	}
+
+	/**
+	 * GET /api/operator/control/replay/:dispatch_id
+	 * Returns full causal chain for a dispatch (AC-6).
+	 */
+	private async handleControlReplay(
+		_req: Request,
+		dispatchIdStr: string,
+	): Promise<Response> {
+		const auth = await requireOperator(_req, { action: "control.read" });
+		if (auth.rejected) return auth.rejected;
+		try {
+			const dispatchId = Number(dispatchIdStr);
+			if (!dispatchId || Number.isNaN(dispatchId)) {
+				return Response.json({ error: "dispatch_id must be a number" }, { status: 400 });
+			}
+			const rows = await replayChain(dispatchId);
+			return Response.json({ dispatch_id: dispatchId, events: rows, count: rows.length });
+		} catch (err) {
+			console.error("[p435] replay failed:", (err as Error).message);
+			return Response.json({ error: "replay query failed" }, { status: 500 });
+		}
 	}
 }

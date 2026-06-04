@@ -15,6 +15,7 @@ import ChannelsPage from "./components/ChannelsPage";
 import DashboardPage from "./components/DashboardPage";
 import DecisionsPage from "./components/DecisionsPage";
 import DirectivesPage from "./components/DirectivesPage";
+import ControlPage from "./components/ControlPage";
 import DispatchPage from "./components/DispatchPage";
 import DocumentsPage from "./components/DocumentsPage";
 import KnowledgePage from "./components/KnowledgePage";
@@ -134,6 +135,14 @@ export default function App() {
 	// Convert column objects to status strings for BoardPage/Board backward compat
 	const statuses = boardColumns.map((col) => col.stage_name);
 
+	// Build dwell map for column header indicators (avg days per stage)
+	const columnDwell = Object.fromEntries(
+		boardColumns.map((col) => [
+			col.stage_name,
+			col.avg_dwell_days != null ? Number(col.avg_dwell_days) : null,
+		]),
+	);
+
 	useEffect(() => {
 		if (typeof window !== "undefined") {
 			window.localStorage.setItem("roadmap.board.workflow", activeWorkflow);
@@ -199,6 +208,7 @@ export default function App() {
 								onProposalClick={(p) =>
 									handleProposalClick(p as unknown as Proposal)
 								}
+								columnDwell={columnDwell}
 							/>
 						</Route>
 						<Route path="/proposals">
@@ -237,6 +247,9 @@ export default function App() {
 						</Route>
 						<Route path="/dispatches">
 							<DispatchPage />
+						</Route>
+						<Route path="/control">
+							<ControlPage />
 						</Route>
 						<Route path="/knowledge">
 							<KnowledgePage />

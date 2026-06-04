@@ -776,6 +776,106 @@ export class ApiClient {
 			body: JSON.stringify({ channel, text, from }),
 		});
 	}
+
+	// ── P435: Operator Control API ────────────────────────────────────────────
+
+	async fetchControlDispatches(projectId?: number): Promise<any[]> {
+		const params = projectId != null ? `?project_id=${projectId}` : "";
+		const result = await this.fetchJson<{ dispatches: any[] }>(
+			`${API_BASE}/operator/control/dispatches${params}`,
+		);
+		return result.dispatches ?? [];
+	}
+
+	async fetchControlAgencies(status?: string): Promise<any[]> {
+		const params = status ? `?status=${encodeURIComponent(status)}` : "";
+		const result = await this.fetchJson<{ agencies: any[] }>(
+			`${API_BASE}/operator/control/agencies${params}`,
+		);
+		return result.agencies ?? [];
+	}
+
+	async fetchControlWorkers(opts?: { agencyId?: string; dispatchId?: number }): Promise<any[]> {
+		const params = new URLSearchParams();
+		if (opts?.agencyId) params.set("agency_id", opts.agencyId);
+		if (opts?.dispatchId != null) params.set("dispatch_id", String(opts.dispatchId));
+		const qs = params.toString();
+		const result = await this.fetchJson<{ workers: any[] }>(
+			`${API_BASE}/operator/control/workers${qs ? `?${qs}` : ""}`,
+		);
+		return result.workers ?? [];
+	}
+
+	async operatorStop(body: {
+		scope_type: string;
+		scope_id: string;
+		reason?: string;
+	}): Promise<{ result: string }> {
+		return this.fetchJson<{ result: string }>(`${API_BASE}/operator/control/stop`, {
+			method: "POST",
+			body: JSON.stringify(body),
+		});
+	}
+
+	async suspendAgency(agencyId: string, reason?: string): Promise<{ result: string }> {
+		return this.fetchJson<{ result: string }>(
+			`${API_BASE}/operator/control/suspend-agency`,
+			{ method: "POST", body: JSON.stringify({ agency_id: agencyId, reason }) },
+		);
+	}
+
+	async drainHost(hostId: string, graceSeconds?: number, reason?: string): Promise<{ result: string }> {
+		return this.fetchJson<{ result: string }>(
+			`${API_BASE}/operator/control/drain-host`,
+			{
+				method: "POST",
+				body: JSON.stringify({ host_id: hostId, grace_seconds: graceSeconds ?? 0, reason }),
+			},
+		);
+	}
+
+	async cancelDispatch(dispatchId: number, reason?: string): Promise<{ result: string }> {
+		return this.fetchJson<{ result: string }>(
+			`${API_BASE}/operator/control/cancel-dispatch`,
+			{ method: "POST", body: JSON.stringify({ dispatch_id: dispatchId, reason }) },
+		);
+	}
+
+	async terminateWorker(workerId: string, signal?: string, reason?: string): Promise<{ result: string }> {
+		return this.fetchJson<{ result: string }>(
+			`${API_BASE}/operator/control/terminate-worker`,
+			{ method: "POST", body: JSON.stringify({ worker_id: workerId, signal, reason }) },
+		);
+	}
+
+	async fetchControlFeed(opts?: {
+		projectId?: number;
+		proposalId?: number;
+		dispatchId?: number;
+		eventClass?: string;
+		since?: string;
+		limit?: number;
+	}): Promise<any[]> {
+		const params = new URLSearchParams();
+		if (opts?.projectId != null) params.set("project_id", String(opts.projectId));
+		if (opts?.proposalId != null) params.set("proposal_id", String(opts.proposalId));
+		if (opts?.dispatchId != null) params.set("dispatch_id", String(opts.dispatchId));
+		if (opts?.eventClass) params.set("event_class", opts.eventClass);
+		if (opts?.since) params.set("since", opts.since);
+		if (opts?.limit != null) params.set("limit", String(opts.limit));
+		const qs = params.toString();
+		const result = await this.fetchJson<{ events: any[] }>(
+			`${API_BASE}/operator/control/feed${qs ? `?${qs}` : ""}`,
+		);
+		return result.events ?? [];
+	}
+
+	async fetchControlReplay(dispatchId: number): Promise<any[]> {
+		const result = await this.fetchJson<{ events: any[] }>(
+			`${API_BASE}/operator/control/replay/${dispatchId}`,
+		);
+		return result.events ?? [];
+	}
 }
 
 export const apiClient = new ApiClient();

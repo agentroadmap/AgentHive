@@ -69,14 +69,18 @@ export interface ScopeContext {
  * RuntimeConfigMissing: thrown when a required config key cannot be resolved.
  */
 export class RuntimeConfigMissing extends Error {
+	public keyName: string;
+	public keyClass: ConfigClass;
 	constructor(
-		public keyName: string,
-		public keyClass: ConfigClass,
+		keyName: string,
+		keyClass: ConfigClass,
 		details: string,
 	) {
 		super(
 			`[RuntimeConfig] Required ${keyClass} key not found: ${keyName}\n${details}`,
 		);
+		this.keyName = keyName;
+		this.keyClass = keyClass;
 		this.name = "RuntimeConfigMissing";
 		Object.setPrototypeOf(this, RuntimeConfigMissing.prototype);
 	}
@@ -87,10 +91,13 @@ export class RuntimeConfigMissing extends Error {
  * Used for: secret keys read from yaml/DB, tenant_dsn keys read via get().
  */
 export class RuntimeConfigInvalidSource extends Error {
+	public keyName: string;
+	public attemptedSource: string;
+	public allowedSources: string[];
 	constructor(
-		public keyName: string,
-		public attemptedSource: string,
-		public allowedSources: string[],
+		keyName: string,
+		attemptedSource: string,
+		allowedSources: string[],
 		message?: string,
 	) {
 		super(
@@ -98,6 +105,9 @@ export class RuntimeConfigInvalidSource extends Error {
 				`[RuntimeConfig] Key "${keyName}" cannot be read from ${attemptedSource}. ` +
 					`Allowed sources: ${allowedSources.join(", ")}`,
 		);
+		this.keyName = keyName;
+		this.attemptedSource = attemptedSource;
+		this.allowedSources = allowedSources;
 		this.name = "RuntimeConfigInvalidSource";
 		Object.setPrototypeOf(this, RuntimeConfigInvalidSource.prototype);
 	}
@@ -108,10 +118,12 @@ export class RuntimeConfigInvalidSource extends Error {
  * key (name starts with PROJECT_) is resolved without a projectSlug in scopeContext.
  */
 export class ProjectIdMissing extends Error {
-	constructor(public keyName: string) {
+	public keyName: string;
+	constructor(keyName: string) {
 		super(
 			`[RuntimeConfig] Key "${keyName}" requires project scope but no projectSlug was provided to ConfigResolver.init(). Pass scopeContext.projectSlug.`,
 		);
+		this.keyName = keyName;
 		this.name = "ProjectIdMissing";
 		Object.setPrototypeOf(this, ProjectIdMissing.prototype);
 	}
