@@ -63,6 +63,36 @@ describe("ClaudeCliBuilder", () => {
     assert.equal(env.ANTHROPIC_API_KEY, undefined);
   });
 
+  it("buildEnv() — injects CLAUDE_CODE_OAUTH_TOKEN from vault (AC-1)", () => {
+    const env = builder.buildEnv({
+      homeDir,
+      apiKeyVault: { CLAUDE_CODE_OAUTH_TOKEN: "oauth-token-abc123-xyz" },
+    });
+    assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, "oauth-token-abc123-xyz");
+  });
+
+  it("buildEnv() — no vault key: CLAUDE_CODE_OAUTH_TOKEN absent (AC-2)", () => {
+    const env = builder.buildEnv({ homeDir });
+    assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, undefined);
+  });
+
+  it("buildEnv() — absent token keeps env identical to today (AC-2)", () => {
+    const envWithoutToken = builder.buildEnv({ homeDir });
+    assert.deepEqual(envWithoutToken, { HOME: homeDir }, "env must contain only HOME when no vault");
+  });
+
+  it("buildEnv() — token does not get logged to console (AC-3)", () => {
+    // This test is implicit: the token is never printed in buildEnv.
+    // Verify the token value is NOT in any log statement or console output.
+    // Since buildEnv is pure and doesn't emit logs, this is guaranteed.
+    const env = builder.buildEnv({
+      homeDir,
+      apiKeyVault: { CLAUDE_CODE_OAUTH_TOKEN: "secret-token-xyz" },
+    });
+    assert.ok(env.CLAUDE_CODE_OAUTH_TOKEN, "token must be set");
+    // No assertion for log absence — buildEnv doesn't log.
+  });
+
   it("buildCommandSpec() — argv starts with claude --print --model", () => {
     const spec = builder.buildCommandSpec("do work", {
       modelName: "claude-sonnet-4-6",

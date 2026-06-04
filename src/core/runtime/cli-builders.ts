@@ -111,6 +111,9 @@ export class ClaudeCliBuilder implements CliBuilder {
 		if (options.apiKeyVault?.ANTHROPIC_API_KEY) {
 			env.ANTHROPIC_API_KEY = options.apiKeyVault.ANTHROPIC_API_KEY;
 		}
+		if (options.apiKeyVault?.CLAUDE_CODE_OAUTH_TOKEN) {
+			env.CLAUDE_CODE_OAUTH_TOKEN = options.apiKeyVault.CLAUDE_CODE_OAUTH_TOKEN;
+		}
 		return env;
 	}
 
