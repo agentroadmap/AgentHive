@@ -10,6 +10,7 @@ interface BoardPageProps {
 	activeWorkflow?: string;
 	onWorkflowChange?: (workflow: string) => void;
 	onProposalClick: (proposal: Proposal) => void;
+	columnDwell?: Record<string, number | null>;
 }
 
 const MATURITY_OPTIONS = [
@@ -32,6 +33,7 @@ export default function BoardPage({
 	activeWorkflow = "Standard RFC",
 	onWorkflowChange,
 	onProposalClick,
+	columnDwell,
 }: BoardPageProps) {
 	const [searchParams, setSearchParams] = useSearchParams();
 	const [highlightProposalId, setHighlightProposalId] = useState<string | null>(
@@ -356,6 +358,7 @@ export default function BoardPage({
 				proposalTypes={proposalTypes}
 				domains={domains}
 				focusStatus={focusStatus}
+				columnDwell={columnDwell}
 			/>
 		</div>
 	);

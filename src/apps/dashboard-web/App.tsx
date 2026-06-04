@@ -134,6 +134,14 @@ export default function App() {
 	// Convert column objects to status strings for BoardPage/Board backward compat
 	const statuses = boardColumns.map((col) => col.stage_name);
 
+	// Build dwell map for column header indicators (avg days per stage)
+	const columnDwell = Object.fromEntries(
+		boardColumns.map((col) => [
+			col.stage_name,
+			col.avg_dwell_days != null ? Number(col.avg_dwell_days) : null,
+		]),
+	);
+
 	useEffect(() => {
 		if (typeof window !== "undefined") {
 			window.localStorage.setItem("roadmap.board.workflow", activeWorkflow);
@@ -199,6 +207,7 @@ export default function App() {
 								onProposalClick={(p) =>
 									handleProposalClick(p as unknown as Proposal)
 								}
+								columnDwell={columnDwell}
 							/>
 						</Route>
 						<Route path="/proposals">
