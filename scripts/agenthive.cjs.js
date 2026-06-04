@@ -2256,9 +2256,8 @@ var require_commander = __commonJS((exports) => {
 
 // src/apps/agenthive-cli.ts
 import { execSync, spawn } from "node:child_process";
+import { constants, readFileSync } from "node:fs";
 import { access, writeFile } from "node:fs/promises";
-import { readFileSync } from "node:fs";
-import { constants } from "node:fs";
 import { userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -3413,7 +3412,12 @@ Start with:  sudo systemctl start ${SYSTEMD_SERVICE_NAME}
 }
 async function cmdStatus() {
   try {
-    const out = run(["systemctl", "status", SYSTEMD_SERVICE_NAME, "--no-pager"]);
+    const out = run([
+      "systemctl",
+      "status",
+      SYSTEMD_SERVICE_NAME,
+      "--no-pager"
+    ]);
     console.log(out);
   } catch (e2) {
     console.log(import_picocolors3.default.yellow("Service is not running or not installed."));
@@ -3451,7 +3455,13 @@ async function cmdRestart() {
   }
 }
 async function cmdLogs() {
-  await sudoSpawn(["journalctl", "-u", SYSTEMD_SERVICE_NAME, "-f", "--no-pager"]);
+  await sudoSpawn([
+    "journalctl",
+    "-u",
+    SYSTEMD_SERVICE_NAME,
+    "-f",
+    "--no-pager"
+  ]);
 }
 async function cmdDbPing(target) {
   const targets = target === "all" ? ["postgres", "pgbouncer"] : [target];
@@ -3522,5 +3532,6 @@ program2.command("start").description("Start the orchestrator service").action(c
 program2.command("stop").description("Stop the orchestrator service").action(cmdStop);
 program2.command("restart").description("Restart the orchestrator service").action(cmdRestart);
 program2.command("logs").description("Tail orchestrator logs").action(cmdLogs);
+program2.command("db-ping").description("Ping a database endpoint: postgres | pgbouncer | all").argument("[target]", "postgres | pgbouncer | all", "all").action(cmdDbPing);
 program2.command("db-ping").description("Ping a database endpoint: postgres | pgbouncer | all").argument("[target]", "postgres | pgbouncer | all", "all").action(cmdDbPing);
 program2.parse();

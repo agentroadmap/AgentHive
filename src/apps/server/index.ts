@@ -1042,42 +1042,6 @@ export class RoadmapServer {
 			}
 		}
 
-		// Static routes returning indexHtml.
-		// P1696 added /dispatches; the broader fix is the generic SPA fallback
-		// at the end of dispatchRequest so future App.tsx routes (e.g.
-		// /agencies, currently TODO) work via direct URL without touching this list.
-		if (
-			method === "GET" &&
-			(pathname === "/" ||
-				[
-					"/board",
-					"/proposals",
-					"/directives",
-					"/drafts",
-					"/documentation",
-					"/decisions",
-					"/statistics",
-					"/settings",
-					"/dashboard",
-					"/agents",
-					"/teams",
-					"/channels",
-					"/agent-dashboard",
-					"/knowledge",
-					"/documents",
-					"/map",
-					"/routes",
-					"/achievements",
-					"/activity",
-					"/dispatches",
-					"/control",
-				].some((p) => pathname === p || pathname.startsWith(`${p}/`)))
-		) {
-			return new Response(indexHtml, {
-				headers: { "Content-Type": "text/html" },
-			});
-		}
-
 		if (method === "POST" && (pathname === "/mcp" || pathname === "/api/mcp")) {
 			return await this.handleDirectMcp(req);
 		}
@@ -1431,17 +1395,13 @@ export class RoadmapServer {
 			return new Response("Asset not found", { status: 404 });
 		}
 
-		// P1696: generic SPA fallback. After all API and known-path handlers,
-		// any GET that looks like browser navigation (HTML accept, no file
-		// extension, no /api/ prefix) should serve the SPA shell so client-side
-		// React can route it. Prior behaviour 404'd unknown paths, making
-		// NotFoundPage unreachable via direct URL and breaking deep-links to
-		// new routes whenever the allow-list above wasn't updated.
+		// P1696: generic SPA fallback. Any GET with no file extension and no
+		// /api/ prefix is treated as a navigation request — serve the SPA shell
+		// so React routes it. Removes the need for a server-side path allow-list.
 		if (
 			method === "GET" &&
 			!pathname.startsWith("/api/") &&
-			!pathname.includes(".") &&
-			(req.headers.get("accept") ?? "").includes("text/html")
+			!pathname.includes(".")
 		) {
 			return new Response(indexHtml, {
 				headers: { "Content-Type": "text/html" },

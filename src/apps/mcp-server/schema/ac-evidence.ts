@@ -9,6 +9,8 @@
  * JSON string matching one of these schemas.  Null or empty notes = phantom pass.
  */
 
+export const AC_SCHEMA_VERSION = "v1";
+
 export type AcCategory =
 	| "schema/migration"
 	| "file/module"

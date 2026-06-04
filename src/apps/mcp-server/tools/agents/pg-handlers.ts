@@ -199,6 +199,30 @@ export class PgAgentHandlers {
 		agency_host_id?: string;
 		project_id?: number;
 		squad_name?: string;
+	}): Promise<CallToolResult> {
+		try {
+			const normalizedIdentity = normalizeAgentId(args.identity);
+
+			const collision = await detectCollision(args.identity);
+			if (collision && collision !== args.identity) {
+				return errorResult(
+					"Agent identity collision",
+					`"${args.identity}" normalizes to same as "${collision}"`,
+				);
+			}
+
+			// AC-9: Validate preferred_provider against canonical set
+			const canonicalProviders = ["claude", "codex", "gemini", "copilot"];
+			if (args.preferred_provider) {
+				const normalizedProvider = args.preferred_provider.trim().toLowerCase();
+				if (!canonicalProviders.includes(normalizedProvider)) {
+					return errorResult(
+						"Invalid preferred_provider",
+						`Value "${args.preferred_provider}" is not in canonical set: ${canonicalProviders.join(", ")}. NULL/undefined is allowed for unspecified.`,
+					);
+				}
+			}
+
 			const skillsJson = args.skills
 				? typeof args.skills === "string"
 					? args.skills.trim().startsWith("[") || args.skills.trim().startsWith("{")

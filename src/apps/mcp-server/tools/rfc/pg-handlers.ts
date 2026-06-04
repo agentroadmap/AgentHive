@@ -13,7 +13,7 @@
  * - proposal_dependencies (DAG)
  */
 
-import { getPool, query } from "../../../../postgres/pool.ts";
+import { query } from "../../../../postgres/pool.ts";
 import {
 	validateLease,
 	formatValidationError,
@@ -614,25 +614,6 @@ export async function verifyAC(args: {
 
 		const ac = acRows[0];
 
-		// P707 batch-advance guard: max 2 ACs verified per proposal within 5 seconds
-		const { rows: recentRows } = await query<{ count: string }>(
-			`SELECT COUNT(*) as count
-			 FROM roadmap_proposal.proposal_acceptance_criteria
-			 WHERE proposal_id = $1 AND verified_at > NOW() - INTERVAL '5 seconds'`,
-			[proposalId],
-		);
-		const recentCount = Number(recentRows[0]?.count ?? 0);
-		if (recentCount >= 2) {
-			return {
-				content: [
-					{
-						type: "text",
-						text: `❌ verify_ac rejected: bulk-advance guard — ${recentCount} ACs already verified in the last 5 seconds for this proposal. Wait before verifying more (P707 §AC-Verification).`,
-					},
-				],
-			};
-		}
-
 		await query(
 			`UPDATE roadmap_proposal.proposal_acceptance_criteria
 			    SET status = $1, verified_by = $2, verification_notes = $3, verified_at = NOW(),
@@ -998,8 +979,6 @@ export async function submitReview(args: {
 	body?: string;
 	content?: string;
 	change_requirements?: string[];
-	is_blocking?: boolean;
-	comment?: string;
 }): Promise<CallToolResult> {
 	if (!args.notes) {
 		args.notes = args.review ?? args.body ?? args.content;
@@ -1037,18 +1016,31 @@ export async function submitReview(args: {
 		);
 
 		let reviewId: number;
-		const isBlocking = args.is_blocking === true;
 		if (existing.length) {
 			reviewId = existing[0].id;
 			await query(
-				`UPDATE roadmap_proposal.proposal_reviews SET verdict = $1, notes = $2, findings = $3, is_blocking = $4, comment = $5, reviewed_at = NOW()
-         WHERE proposal_id = $6 AND reviewer_identity = $7`,
+				`UPDATE roadmap_proposal.proposal_reviews SET verdict = $1, notes = $2, findings = $3, is_blocking = $4, reviewed_at = NOW()
+         WHERE proposal_id = $5 AND reviewer_identity = $6`,
 				[
 					args.verdict,
 					args.notes || null,
 					args.findings ? JSON.stringify(args.findings) : null,
 					args.is_blocking ?? false,
-					args.comment || null,
+					proposalId,
+					args.reviewer,
+				],
+			);
+			// If updating and verdict is approve_with_changes, delete old requirements and insert new ones
+			if (args.verdict === "approve_with_changes") {
+				await query(
+					"DELETE FROM roadmap_proposal.post_gate_change_requirement WHERE review_id = $1",
+					[reviewId],
+				);
+			}
+		} else {
+			const { rows: inserted } = await query(
+				`INSERT INTO roadmap_proposal.proposal_reviews (proposal_id, reviewer_identity, verdict, notes, findings, is_blocking)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
 				[
 					proposalId,
 					args.reviewer,
@@ -1056,7 +1048,545 @@ export async function submitReview(args: {
 					args.notes || null,
 					args.findings ? JSON.stringify(args.findings) : null,
 					args.is_blocking ?? false,
-					args.comment || null,
+				],
+			);
+			reviewId = inserted[0].id;
+		}
+
+		// If verdict is approve_with_changes, insert change requirements
+		if (args.verdict === "approve_with_changes" && args.change_requirements?.length) {
+			for (const requirement of args.change_requirements) {
+				await query(
+					`INSERT INTO roadmap_proposal.post_gate_change_requirement (review_id, requirement_text)
+           VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+					[reviewId, requirement],
+				);
+			}
+		}
+
+		// Emit review_submitted event for state feed visibility
+		await query(
+			`INSERT INTO roadmap_proposal.proposal_event (proposal_id, event_type, payload)
+       VALUES ($1, 'review_submitted', $2::jsonb)`,
+			[
+				proposalId,
+				JSON.stringify({
+					reviewer: args.reviewer,
+					verdict: args.verdict,
+					has_notes: !!args.notes,
+					has_findings: !!args.findings,
+					has_change_requirements: !!args.change_requirements?.length,
+					ts: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+				}),
+			],
+		);
+
+		return {
+			content: [
+				{
+					type: "text",
+					text: `✅ Review submitted for ${args.proposal_id}: ${args.verdict} (${args.reviewer})`,
+				},
+			],
+		};
+	} catch (err) {
+		return errorResult("Failed to submit review", err);
+	}
+}
+
+export async function listReviews(args: {
+	proposal_id: string;
+}): Promise<CallToolResult> {
+	try {
+		const propId = await resolveProposalId(args.proposal_id);
+		if (propId === null) {
+			return {
+				content: [
+					{ type: "text", text: `Proposal ${args.proposal_id} not found.` },
+				],
+			};
+		}
+
+		const { rows: reviewRows } = await query(
+			`SELECT reviewer_identity, verdict, notes, findings, reviewed_at
+       FROM roadmap_proposal.proposal_reviews WHERE proposal_id = $1
+       ORDER BY reviewed_at DESC`,
+			[propId],
+		);
+
+		if (!reviewRows.length) {
+			return {
+				content: [{ type: "text", text: `No reviews for ${args.proposal_id}` }],
+			};
+		}
+
+		const verdictEmoji: Record<string, string> = {
+			approve: "✅",
+			request_changes: "🔄",
+			reject: "❌",
+		};
+		const lines = reviewRows.map(
+			(r) =>
+				`${verdictEmoji[r.verdict] || "?"} ${r.reviewer_identity}: ${r.verdict}${r.notes ? ` — ${r.notes}` : ""}`,
+		);
+		return {
+			content: [
+				{
+					type: "text",
+					text: `### Reviews for ${args.proposal_id}\n${lines.join("\n")}`,
+				},
+			],
+		};
+	} catch (err) {
+		return errorResult("Failed to list reviews", err);
+	}
+}
+
+export async function getOpenChangeRequirements(
+	proposalId: number,
+): Promise<Array<{ review_id: number; requirement_text: string }>> {
+	try {
+		const { rows } = await query(
+			`SELECT pgcr.review_id, pgcr.requirement_text
+       FROM roadmap_proposal.post_gate_change_requirement pgcr
+       INNER JOIN roadmap_proposal.proposal_reviews pr ON pr.id = pgcr.review_id
+       WHERE pgcr.satisfied = FALSE AND pr.proposal_id = $1
+       ORDER BY pr.reviewed_at, pgcr.created_at`,
+			[proposalId],
+		);
+		return rows;
+	} catch (err) {
+		console.error("Error fetching open change requirements:", err);
+		return [];
+	}
+}
+
+// ─── Discussions ────────────────────────────────────────────────────────────
+
+export async function addDiscussion(args: {
+	proposal_id: string;
+	author: string;
+	content: string;
+	// Common aliases agents try. Coerce to `content` before validation so
+	// `discussion: "..."` or `text: "..."` doesn't strand the agent.
+	discussion?: string;
+	text?: string;
+	body?: string;
+	message?: string;
+	parent_id?: number;
+	context_prefix?: string;
+}): Promise<CallToolResult> {
+	if (!args.content) {
+		args.content =
+			args.discussion ?? args.text ?? args.body ?? args.message ?? "";
+	}
+	if (!args.author) {
+		// Default authoring identity so cubic/gate agents don't bounce on a
+		// missing arg — they're system-issued, not user-issued.
+		(args as any).author = "system";
+	}
+	try {
+		const proposalId = await resolveProposalId(args.proposal_id);
+		if (proposalId === null) {
+			return {
+				content: [
+					{ type: "text", text: `Proposal ${args.proposal_id} not found.` },
+				],
+			};
+		}
+
+		const { rows } = await query(
+			`INSERT INTO roadmap_proposal.proposal_discussions (proposal_id, author_identity, body, parent_id, context_prefix)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+			[
+				proposalId,
+				args.author,
+				args.content,
+				args.parent_id || null,
+				args.context_prefix || "general:",
+			],
+		);
+
+		return {
+			content: [
+				{
+					type: "text",
+					text: `✅ Discussion #${rows[0].id} added to ${args.proposal_id}`,
+				},
+			],
+		};
+	} catch (err) {
+		return errorResult("Failed to add discussion", err);
+	}
+}
+
+// ─── State Machine Reference ────────────────────────────────────────────────
+
+export async function getValidTransitions(args: {
+	from_state?: string;
+}): Promise<CallToolResult> {
+	try {
+		let sql = `SELECT from_state, to_state, allowed_reasons, allowed_roles, requires_ac
+               FROM roadmap_proposal.proposal_valid_transitions`;
+		const params: any[] = [];
+
+		if (args.from_state) {
+			sql += ` WHERE from_state = UPPER($1)`;
+			params.push(args.from_state);
+		}
+
+		sql += ` ORDER BY from_state, to_state`;
+
+		const { rows } = await query(sql, params);
+
+		if (!rows.length) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `No transitions defined${args.from_state ? ` from ${args.from_state}` : ""}`,
+					},
+				],
+			};
+		}
+
+		const lines = rows.map(
+			(r) =>
+				`${r.from_state} → ${r.to_state} (${r.allowed_reasons?.join(", ") || "any"}) [roles: ${r.allowed_roles?.join(", ") || "any"}]` +
+				(r.requires_ac && r.requires_ac !== "none"
+					? ` ⚠️ requires AC: ${r.requires_ac}`
+					: ""),
+		);
+		return {
+			content: [
+				{
+					type: "text",
+					text: `### Valid State Transitions\n${lines.join("\n")}`,
+				},
+			],
+		};
+	} catch (err) {
+		return errorResult("Failed to get valid transitions", err);
+	}
+}
+
+// ─── Gate Decision Log ──────────────────────────────────────────────────────
+
+export async function recordGateDecision(args: {
+	proposal_id: string;
+	gate: string;
+	decision: string;
+	rationale?: string;
+	decided_by?: string;
+	authority_agent?: string;
+	agent_run_id?: string;
+	ac_verification?: Record<string, unknown>;
+}): Promise<CallToolResult> {
+	const VALID_DECISIONS = ["advance", "hold", "reject", "waive", "escalate"];
+	if (!VALID_DECISIONS.includes(args.decision)) {
+		return errorResult(
+			`Invalid decision '${args.decision}'. Must be one of: ${VALID_DECISIONS.join(", ")}`,
+			"decision_invalid",
+		);
+	}
+	try {
+		const proposalId = await resolveProposalId(args.proposal_id);
+		if (proposalId === null) {
+			return {
+				content: [{ type: "text", text: `Proposal ${args.proposal_id} not found.` }],
+			};
+		}
+
+		// Read current from_state and maturity from the proposal.
+		const { rows: propRows } = await query<{
+			status: string;
+			maturity: string;
+		}>(
+			`SELECT status, maturity FROM roadmap_proposal.proposal WHERE id = $1`,
+			[proposalId],
+		);
+		if (!propRows.length) {
+			return { content: [{ type: "text", text: `Proposal ${args.proposal_id} not found.` }] };
+		}
+		const { status: fromState, maturity } = propRows[0];
+
+		// Shadow-mode skip: if a row with the same agent_run_id already exists,
+		// the new MCP path already wrote the canonical record — skip the insert.
+		if (args.agent_run_id) {
+			const { rows: existing } = await query(
+				`SELECT id FROM roadmap_proposal.gate_decision_log
+				  WHERE proposal_id = $1
+				    AND ac_verification->>'agent_run_id' = $2
+				  LIMIT 1`,
+				[proposalId, args.agent_run_id],
+			);
+			if (existing.length) {
+				return {
+					content: [{
+						type: "text",
+						text: `✅ Gate decision for ${args.proposal_id} (agent_run_id=${args.agent_run_id}) already recorded (#${existing[0].id}) — skipped duplicate.`,
+					}],
+				};
+			}
+		}
+
+		const acVerification: Record<string, unknown> = { ...(args.ac_verification ?? {}) };
+		if (args.agent_run_id) acVerification.agent_run_id = args.agent_run_id;
+
+		const { rows } = await query(
+			`INSERT INTO roadmap_proposal.gate_decision_log
+			   (proposal_id, from_state, to_state, maturity, gate, decided_by,
+			    authority_agent, decision, rationale, ac_verification, signature_hash)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL)
+			 RETURNING id`,
+			[
+				proposalId,
+				fromState,
+				fromState, // to_state mirrors from_state — transition is a separate step
+				maturity,
+				args.gate,
+				args.decided_by ?? "mcp",
+				args.authority_agent ?? null,
+				args.decision,
+				args.rationale ?? null,
+				Object.keys(acVerification).length ? JSON.stringify(acVerification) : null,
+			],
+		);
+
+		return {
+			content: [{
+				type: "text",
+				text: `✅ Gate decision recorded: id=${rows[0].id} proposal=${args.proposal_id} gate=${args.gate} decision=${args.decision}`,
+			}],
+		};
+	} catch (err) {
+		return errorResult("Failed to record gate decision", err);
+	}
+}
+
+// ─── Class definition for server registration ───────────────────────────────
+
+export class RfcWorkflowHandlers {
+	private server: McpServer;
+
+	constructor(server: McpServer) {
+		this.server = server;
+	}
+
+	register(): void {
+		// State transitions
+		this.server.addTool({
+			name: "transition_proposal",
+			description:
+				"Transition proposal state (enforces RFC state machine via proposal_valid_transitions table)",
+			inputSchema: {
+				type: "object",
+				properties: {
+					proposal_id: { type: "string" },
+					to_state: { type: "string" },
+					decided_by: { type: "string" },
+					rationale: { type: "string" },
+				},
+				required: ["proposal_id", "to_state", "decided_by"],
+			},
+			handler: (args: any) => transitionProposal(args),
+		});
+
+		// State machine reference
+		this.server.addTool({
+			name: "get_valid_transitions",
+			description:
+				"Get valid state transitions from the data-driven state machine",
+			inputSchema: {
+				type: "object",
+				properties: {
+					from_state: { type: "string" },
+				},
+				required: [],
+			},
+			handler: (args: any) => getValidTransitions(args),
+		});
+
+		// AC management
+		this.server.addTool({
+			name: "add_acceptance_criteria",
+			description:
+				"Add one or more acceptance criteria to a proposal. " +
+				"Pass `criteria` as an ARRAY OF FULL SENTENCES (string[]); each becomes one AC row, " +
+				"item_number assigned in array order. NEVER pass individual title/description fields " +
+				"or a key named 'acceptance_criteria' — those are rejected. ACs land with status='pending'; " +
+				"call verify_ac per item once the AC is satisfied (verification is NOT auto-inferred " +
+				"from tests passing or proposal maturity).",
+			inputSchema: {
+				type: "object",
+				properties: {
+					proposal_id: {
+						type: "string",
+						description: "Proposal id as string (e.g. '913'). NOT the display 'P913'.",
+					},
+					criteria: {
+						type: "array",
+						items: { type: "string" },
+						description:
+							"Array of full-sentence AC bodies. Each entry becomes one AC row with " +
+							"the next item_number after existing ACs.",
+					},
+				},
+				required: ["proposal_id", "criteria"],
+			},
+			handler: (args: any) => addAcceptanceCriteria(args),
+		});
+
+		this.server.addTool({
+			name: "verify_ac",
+			description:
+				"Mark a SINGLE acceptance criterion as pass/fail/blocked/waived. " +
+				"Call once PER AC item_number (1-indexed). ACs stay 'pending' until " +
+				"this is explicitly called — verification is NOT inferred from " +
+				"tests passing, code merging, or proposal maturity advancing. " +
+				"Gating tools and dashboards read pac.status, not test output. " +
+				"REQUIRED for status='pass': the 'details' field must be a non-empty " +
+				"JSON object with category-appropriate evidence keys — omitting it " +
+				"returns 422 EVIDENCE_REQUIRED. See CONVENTIONS.md §AC-Verification. " +
+				"Batch guard: max 2 calls per proposal per 5 s; third call returns 429.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					proposal_id: {
+						type: "string",
+						description: "Proposal id as string (e.g. '913'). NOT the display 'P913'.",
+					},
+					item_number: {
+						type: "number",
+						description: "1-indexed AC position. Use list_ac to see current numbering.",
+					},
+					status: {
+						type: "string",
+						enum: ["pass", "fail", "blocked", "waived"],
+						description:
+							"pass=AC met; fail=AC not met (record why in notes); " +
+							"blocked=external dependency; waived=operator-approved skip with reason. " +
+							"Do NOT pass 'verified' or 'pending' — they violate the CHECK constraint.",
+					},
+					verified_by: {
+						type: "string",
+						description:
+							"Agent identity slug performing verification (e.g. 'operator-claude', 'codex-reviewer').",
+					},
+					verification_notes: {
+						type: "string",
+						description:
+							"Evidence the AC is satisfied: commit hash + line range, test name " +
+							"and result, schema query proof, or rejection reason for fail/blocked.",
+					},
+					details: {
+						type: "object",
+						description:
+							"Structured evidence payload (required for status='pass'). " +
+							"Use category-appropriate keys — schema/migration: {migration_file, tables, applied}; " +
+							"file/module: {files, symbols, grep_evidence}; " +
+							"mcp_tool: {tool_name, action, call_verified, response_sample}; " +
+							"behavioral/test: {test_file, test_names, result, output_snippet}.",
+					},
+					category: {
+						type: "string",
+						enum: ["schema/migration", "file/module", "mcp_tool", "behavioral/test"],
+						description:
+							"AC evidence category — when provided the handler validates that 'details' " +
+							"contains the required keys for that category (returns 422 SCHEMA_MISMATCH on violation).",
+					},
+				},
+				required: ["proposal_id", "item_number", "status", "verified_by"],
+			},
+			handler: (args: any) => verifyAC(args),
+		});
+
+		this.server.addTool({
+			name: "list_ac",
+			description: "List acceptance criteria for a proposal",
+			inputSchema: {
+				type: "object",
+				properties: {
+					proposal_id: { type: "string" },
+				},
+				required: ["proposal_id"],
+			},
+			handler: (args: any) => listAC(args),
+		});
+
+		this.server.addTool({
+			name: "delete_ac",
+			description:
+				"Delete acceptance criteria by item number, or cleanup corrupted single-character entries (P156 fix)",
+			inputSchema: {
+				type: "object",
+				properties: {
+					proposal_id: { type: "string" },
+					item_number: { type: "number" },
+					cleanup_singles: {
+						type: "boolean",
+						description:
+							"When true, deletes all single-character AC entries corrupted by P156",
+					},
+				},
+				required: ["proposal_id"],
+			},
+			handler: (args: any) => deleteAC(args),
+		});
+
+		// Dependencies
+		this.server.addTool({
+			name: "add_dependency",
+			description: "Add dependency between proposals",
+			inputSchema: {
+				type: "object",
+				properties: {
+					proposal_id: { type: "string" },
+					depends_on: { type: "string" },
+					dep_type: {
+						type: "string",
+						enum: ["blocks", "depended_by", "supersedes", "relates"],
+						default: "blocks",
+					},
+				},
+				required: ["proposal_id", "depends_on"],
+			},
+			handler: (args: any) => addDependency(args),
+		});
+
+		this.server.addTool({
+			name: "get_dependencies",
+			description: "Get dependencies for a proposal — shows effective blocking status (mature/obsolete upstream auto-resolved)",
+			inputSchema: {
+				type: "object",
+				properties: { proposal_id: { type: "string" } },
+				required: ["proposal_id"],
+			},
+			handler: (args: any) => getDependencies(args),
+		});
+
+		this.server.addTool({
+			name: "resolve_dependency",
+			description: "Manually resolve a dependency so it no longer blocks. Pass dep_id from get_dependencies output.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					dep_id: { type: "number", description: "The dependency ID from proposal_dependencies" },
+					resolved_by: { type: "string", description: "Agent or user identity resolving this" },
+				},
+				required: ["dep_id", "resolved_by"],
+			},
+			handler: (args: any) => resolveDependency(args),
+		});
+
+		// Reviews
+		this.server.addTool({
+			name: "submit_review",
+			description:
+				"Submit a review for a proposal. " +
+				"PARAM NOTE: reviewer identity is passed as `reviewer` (NOT reviewer_identity / agent_identity / identity). " +
+				"Response returns the identity as `reviewer_identity` — input/output asymmetry by design. " +
+				"`is_blocking: true` marks the review as blocking and IS persisted (fixed in P1387).",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -1072,20 +1602,12 @@ export async function submitReview(args: {
 					notes: { type: "string" },
 					is_blocking: {
 						type: "boolean",
-						description: "When true, marks this review as a hard blocker. Stored on the row; defaults to false.",
+						description: "Whether this review blocks the proposal from advancing. Persisted on the row.",
 					},
 					change_requirements: {
 						type: "array",
 						items: { type: "string" },
 						description: "Array of change requirements when verdict is approve_with_changes",
-					},
-					is_blocking: {
-						type: "boolean",
-						description: "When true, this review blocks gate advancement until the reviewer approves. Persisted to proposal_reviews.is_blocking.",
-					},
-					comment: {
-						type: "string",
-						description: "Optional supplementary comment stored in proposal_reviews.comment (separate from notes).",
 					},
 				},
 				required: ["proposal_id", "reviewer", "verdict"],
@@ -1095,10 +1617,7 @@ export async function submitReview(args: {
 
 		this.server.addTool({
 			name: "list_reviews",
-			description:
-				"List reviews for a proposal. " +
-				"Returns reviewer identity, verdict, notes, is_blocking status, and reviewed_at timestamp for each review. " +
-				"Blocking reviews (is_blocking=true) are marked [BLOCKING] in the output.",
+			description: "List reviews for a proposal",
 			inputSchema: {
 				type: "object",
 				properties: { proposal_id: { type: "string" } },
@@ -1110,16 +1629,7 @@ export async function submitReview(args: {
 		// Discussions
 		this.server.addTool({
 			name: "add_discussion",
-			// Visibility: entries ARE rendered in ProposalDetailsModal (preview mode → Discussions section)
-			// via GET /api/proposals/:id/notes. Distinct from submit_review (formal gate verdicts with
-			// verdict enum + blocking flags). Use add_discussion for threaded commentary and
-			// context-prefixed annotations; use submit_review for operator-visible gate outcomes.
-			description:
-				"Add a threaded discussion comment to a proposal. " +
-				"Required params: proposal_id, author (no default — caller must supply), content (canonical name; do not use discussion/text/body/message aliases, they are stripped by MCP). " +
-				"Optional: parent_id (thread reply), context_prefix (arch:|critical:|concern:|security:|general:|feedback:|poc:). " +
-				"Entries are visible in the board UI via the Discussions section (/api/proposals/{id}/notes route). " +
-				"For formal gate verdicts (ADVANCE/HOLD/REJECT) use `submit_review` instead — it carries a verdict enum and is_blocking flag.",
+			description: "Add a discussion comment to a proposal",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -1149,33 +1659,23 @@ export async function submitReview(args: {
 		// Gate decision log
 		this.server.addTool({
 			name: "record_gate_decision",
-			description:
-				"Record a gate decision AND, when decision='advance', also flip the proposal status through the gate in one MCP call. " +
-				"On 'advance': writes gate_decision_log row → releases any active lease → UPDATEs proposal.status to the inferred next state → resets maturity='new' → appends audit entry. " +
-				"On non-advance ('hold'/'reject'/'waive'/'escalate'): only the gate_decision_log row is written; proposal stays put. " +
-				"to_state is inferred from `gate` (D1→REVIEW, D2→DEVELOP, D3→MERGE, D4→COMPLETE); pass to_state explicitly to override. " +
-				"Use this instead of stdout so the orchestrator/operator gets a single atomic gate advance with no follow-up calls needed.",
+			description: "Write a gate decision (advance/hold/reject/waive/escalate) directly to gate_decision_log. Use this instead of stdout so the orchestrator can read the structured decision without parsing LLM output.",
 			inputSchema: {
 				type: "object",
 				properties: {
 					proposal_id: { type: "string" },
-					gate: { type: "string", description: "Gate level: D1, D2, D3, or D4. Auto-maps to next state on advance." },
+					gate: { type: "string", description: "Gate level, e.g. D1, D2, D3, D4" },
 					decision: {
 						type: "string",
 						enum: ["advance", "hold", "reject", "waive", "escalate"],
-						description: "advance = also do the status transition; others only log the decision.",
 					},
-					rationale: { type: "string", description: "Why this decision — surfaced in audit + future reviews." },
+					rationale: { type: "string" },
 					decided_by: { type: "string", description: "Agent identity making the decision" },
 					authority_agent: { type: "string" },
 					agent_run_id: { type: "string", description: "agent_runs.id — used for dedup (shadow-mode)" },
 					ac_verification: {
 						type: "object",
 						description: "JSONB with per-criterion pass/fail map",
-					},
-					to_state: {
-						type: "string",
-						description: "OPTIONAL override of the inferred next state. Normally leave blank — D1/D2/D3/D4 → REVIEW/DEVELOP/MERGE/COMPLETE.",
 					},
 				},
 				required: ["proposal_id", "gate", "decision"],

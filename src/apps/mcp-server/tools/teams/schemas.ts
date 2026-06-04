@@ -405,21 +405,6 @@ export const teamCharterCreateSchema = {
 	required: ["teamId", "proposalIds", "teamName", "createdBy"],
 };
 
-export const teamGovernanceArchiveSchema = {
-	type: "object",
-	properties: {
-		teamId: {
-			type: "string",
-			description: "Team ID to archive governance entries for",
-		},
-		archivedBy: {
-			type: "string",
-			description: "Agent identity performing the archive",
-		},
-	},
-	required: ["teamId", "archivedBy"],
-};
-
 export const federationSyncSchema = {
 	type: "object",
 	properties: {
