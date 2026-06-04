@@ -74,11 +74,13 @@ export class NotificationRouter {
 	private stopped = false;
 	private wakePending = false;
 
+	private readonly deps: RouterDeps;
 	private readonly log: (m: string) => void;
 	private readonly warn: (m: string) => void;
 	private readonly errorLog: (m: string) => void;
 
-	constructor(private readonly deps: RouterDeps) {
+	constructor(deps: RouterDeps) {
+		this.deps = deps;
 		this.log = deps.log ?? ((m) => console.log(m));
 		this.warn = deps.warn ?? ((m) => console.warn(m));
 		this.errorLog = deps.error ?? ((m) => console.error(m));
