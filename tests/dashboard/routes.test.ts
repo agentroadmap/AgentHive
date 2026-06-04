@@ -219,8 +219,14 @@ describe("PATCH /api/routes/:id input validation", () => {
 // ─── fetchRoutes empty result ─────────────────────────────────────────────────
 
 describe("fetchRoutes edge cases", () => {
+	let savedFetch: typeof globalThis.fetch;
+
+	before(() => {
+		savedFetch = globalThis.fetch;
+	});
+
 	after(() => {
-		globalThis.fetch = (globalThis as any).__origFetch ?? globalThis.fetch;
+		globalThis.fetch = savedFetch;
 	});
 
 	it("returns empty array when server returns routes: []", async () => {
@@ -265,5 +271,76 @@ describe("fetchRoutes edge cases", () => {
 		const routes = await client.fetchRoutes();
 		assert.equal(routes.length, 1);
 		assert.deepEqual(routes[0], fixture);
+	});
+});
+
+// ─── fetchRoutes error handling ───────────────────────────────────────────────
+
+describe("fetchRoutes error handling", () => {
+	const originalFetch = globalThis.fetch;
+
+	after(() => {
+		globalThis.fetch = originalFetch;
+	});
+
+	it("throws on server 500 response", async () => {
+		(globalThis as any).fetch = async () =>
+			new Response(JSON.stringify({ error: "db unavailable" }), {
+				status: 500,
+				headers: { "Content-Type": "application/json" },
+			});
+		const { ApiClient } = await import("../../src/apps/dashboard-web/lib/api.ts");
+		const client = new ApiClient({ retries: 0 });
+		await assert.rejects(
+			() => client.fetchRoutes(),
+			(err: unknown) => {
+				assert.ok(err instanceof Error);
+				assert.match((err as Error).message, /500/);
+				return true;
+			},
+		);
+	});
+});
+
+// ─── toggleRoute error handling ───────────────────────────────────────────────
+
+describe("toggleRoute error handling", () => {
+	const originalFetch = globalThis.fetch;
+
+	after(() => {
+		globalThis.fetch = originalFetch;
+	});
+
+	it("throws ApiError on 404 (unknown route id)", async () => {
+		(globalThis as any).fetch = async () =>
+			new Response(JSON.stringify({ error: "Route not found" }), {
+				status: 404,
+				headers: { "Content-Type": "application/json" },
+			});
+		const { ApiClient } = await import("../../src/apps/dashboard-web/lib/api.ts");
+		const client = new ApiClient({ retries: 0 });
+		await assert.rejects(
+			() => client.toggleRoute(9999, true),
+			(err: unknown) => {
+				assert.ok(err instanceof Error);
+				assert.match((err as Error).message, /404/);
+				return true;
+			},
+		);
+	});
+
+	it("does not retry on 400 validation error", async () => {
+		let callCount = 0;
+		(globalThis as any).fetch = async () => {
+			callCount++;
+			return new Response(JSON.stringify({ error: "is_enabled (boolean) required" }), {
+				status: 400,
+				headers: { "Content-Type": "application/json" },
+			});
+		};
+		const { ApiClient } = await import("../../src/apps/dashboard-web/lib/api.ts");
+		const client = new ApiClient({ retries: 2 });
+		await assert.rejects(() => client.toggleRoute(1, false));
+		assert.equal(callCount, 1, "must not retry 4xx errors");
 	});
 });
