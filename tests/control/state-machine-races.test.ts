@@ -482,15 +482,23 @@ describe("P445(f): host policy gate — fn_check_spawn_policy enforced before sp
 
 describe("P445(g): paused agency blocks all claim attempts with agency_suspended reason", () => {
 	const AGENCY_ID = `agency-p445-paused-${TS}`;
+	const HOST_G = `p445-host-g-${TS}`;
 	let dispatchId: string;
 
 	before(async () => {
-		// Insert a paused agency. host_id must FK to an existing host_model_policy row.
+		// Ensure a host_model_policy row exists so the agency FK is satisfied.
+		await query(
+			`INSERT INTO roadmap.host_model_policy (host_name, allowed_providers, forbidden_providers)
+			 VALUES ($1, ARRAY[]::text[], ARRAY[]::text[])
+			 ON CONFLICT (host_name) DO NOTHING`,
+			[HOST_G],
+		);
+		// Insert a paused agency against the test host.
 		await query(
 			`INSERT INTO roadmap.agency (agency_id, display_name, provider, host_id, status)
-			 VALUES ($1, 'P445 Paused Test Agency', 'nous', 'hermes', 'paused')
+			 VALUES ($1, 'P445 Paused Test Agency', 'nous', $2, 'paused')
 			 ON CONFLICT (agency_id) DO UPDATE SET status = 'paused'`,
-			[AGENCY_ID],
+			[AGENCY_ID, HOST_G],
 		);
 		dispatchId = await insertDispatch({ agencyId: AGENCY_ID });
 	});
@@ -498,6 +506,7 @@ describe("P445(g): paused agency blocks all claim attempts with agency_suspended
 	after(async () => {
 		await cleanupDispatch(dispatchId);
 		await query(`DELETE FROM roadmap.agency WHERE agency_id = $1`, [AGENCY_ID]);
+		await query(`DELETE FROM roadmap.host_model_policy WHERE host_name = $1`, [HOST_G]);
 	});
 
 	it("claim attempt on dispatch with paused agency returns won=false", async () => {
