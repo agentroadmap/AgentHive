@@ -215,3 +215,55 @@ describe("PATCH /api/routes/:id input validation", () => {
 		assert.equal(validateToggleBody({ is_enabled: false }), null);
 	});
 });
+
+// ─── fetchRoutes empty result ─────────────────────────────────────────────────
+
+describe("fetchRoutes edge cases", () => {
+	after(() => {
+		globalThis.fetch = (globalThis as any).__origFetch ?? globalThis.fetch;
+	});
+
+	it("returns empty array when server returns routes: []", async () => {
+		(globalThis as any).fetch = async () =>
+			new Response(JSON.stringify({ routes: [] }), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			});
+		const { ApiClient } = await import("../../src/apps/dashboard-web/lib/api.ts");
+		const client = new ApiClient();
+		const routes = await client.fetchRoutes();
+		assert.ok(Array.isArray(routes), "routes must be an array");
+		assert.equal(routes.length, 0);
+	});
+
+	it("preserves all RouteRow fields from the server payload", async () => {
+		const fixture = {
+			id: 7,
+			model_name: "gemini-2.5-pro",
+			route_provider: "google",
+			agent_provider: "google",
+			agent_cli: "gemini",
+			fallback_cli: "",
+			is_enabled: false,
+			priority: 20,
+			api_spec: "openai",
+			base_url: "https://generativelanguage.googleapis.com",
+			cost_per_million_input: 1.25,
+			cost_per_million_output: 5,
+			plan_type: "pro",
+			notes: "gemini test route",
+			created_at: "2025-06-01T00:00:00Z",
+			has_host_policy_match: true,
+		};
+		(globalThis as any).fetch = async () =>
+			new Response(JSON.stringify({ routes: [fixture] }), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			});
+		const { ApiClient } = await import("../../src/apps/dashboard-web/lib/api.ts");
+		const client = new ApiClient();
+		const routes = await client.fetchRoutes();
+		assert.equal(routes.length, 1);
+		assert.deepEqual(routes[0], fixture);
+	});
+});
