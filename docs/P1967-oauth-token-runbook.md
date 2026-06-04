@@ -148,13 +148,19 @@ If CLAUDE_CODE_OAUTH_TOKEN is absent, spawns fall back to host-inherited auth:
 2. Verify permissions: `ls -l /etc/agenthive/env` (should be 600)
 3. Check orchestrator logs: `journalctl -u agenthive-orchestrator -n 50`
 
-## Architecture
+## Architecture (corrected 2026-06-04)
 
-- **Token injection**: `src/core/runtime/cli-builders.ts` — ClaudeCliBuilder.buildEnv()
-- **Monitoring**: `src/core/runtime/oauth-token-monitor.ts` — computeExpiryDays(), checkOAuthTokenExpiry()
-- **Rotation signals**: `src/core/runtime/oauth-token-monitor.ts` — emitOAuthRotateSignal()
+The token reaches spawn workers through the **DB route config + the live spawn-env builder**, NOT through `cli-builders.ts` (`ClaudeCliBuilder` has zero live callers and its env-injection was removed):
 
-The token sits above `~/.claude/.credentials.json` in Claude Code's auth precedence, eliminating the daemon-refresh-gap issue for long-running spawns.
+- **Live injection**: `src/core/orchestration/agent-spawner.ts` → `buildSpawnProcessEnv()` resolves the worker auth var generically from each `roadmap.model_routes` row's `cli_api_key_env` / `api_key_env` (read from `process.env`), then passes the env to `spawn()`.
+- **Required route config**: the enabled claude routes must set `cli_api_key_env = api_key_env = 'CLAUDE_CODE_OAUTH_TOKEN'`:
+  `UPDATE roadmap.model_routes SET api_key_env='CLAUDE_CODE_OAUTH_TOKEN', cli_api_key_env='CLAUDE_CODE_OAUTH_TOKEN' WHERE agent_provider='claude' AND is_enabled=true;`
+  (Absent token in `process.env` → falls back to host_inherit `~/.claude` OAuth — no regression.)
+- **Token storage (gary-scoped, not world-readable `/etc`)**: put `CLAUDE_CODE_OAUTH_TOKEN=<token>` in `/home/gary/.config/agenthive/secrets.env` (`chmod 600 gary:gary`), loaded via a systemd drop-in `agenthive-orchestrator.service.d/zz-gary-secrets.conf` containing `[Service]\nEnvironmentFile=-/home/gary/.config/agenthive/secrets.env`. The `zz-` prefix is REQUIRED so it sorts after `env.conf` (which does `EnvironmentFile=` to reset the list); digit-prefixed names sort before it and get wiped. Verify with `systemctl show agenthive-orchestrator -p EnvironmentFiles` (must list both files).
+- **Provisioning**: run `claude setup-token` in a REAL interactive terminal (not the harness `!` / piped) and paste back only the code; then restart the orchestrator (graceful drain is ~240s then SIGKILL — normal).
+- **Monitoring** (merged, not yet wired to a live caller): `src/core/runtime/oauth-token-monitor.ts` — `computeExpiryDays()`, `checkOAuthTokenExpiry()` (WARN `OAUTH_TOKEN_EXPIRING`), `emitOAuthRotateSignal()` (`OAUTH_TOKEN_ROTATE` on 401).
+
+The token sits above `~/.claude/.credentials.json` in Claude Code's auth precedence, eliminating the daemon-refresh-gap that caused the 2026-06-04 401 storm.
 
 ## References
 
