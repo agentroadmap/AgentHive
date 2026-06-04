@@ -503,11 +503,11 @@ async function postWorkOfferImpl(
 		was_replay: boolean;
 	}>(
 		`INSERT INTO roadmap_workforce.squad_dispatch
-		   (proposal_id, squad_name, dispatch_role, dispatch_status,
+		   (proposal_id, project_id, squad_name, dispatch_role, dispatch_status,
 		    offer_status, agent_identity, required_capabilities, metadata,
-		    idempotency_key, dispatch_version, attempt_count)
-		 VALUES ($1, $2, $3, 'open', 'open', NULL, $4::jsonb, $5::jsonb,
-		         $6, $7, 1)
+		    workflow_state, idempotency_key, dispatch_version, attempt_count)
+		 VALUES ($1, $2, $3, $4, 'open', 'open', NULL, $5::jsonb, $6::jsonb,
+		         $7, $8, $9, 1)
 		 ON CONFLICT (idempotency_key)
 		   WHERE dispatch_status IN ('open', 'assigned', 'active')
 		 DO UPDATE SET
@@ -522,10 +522,12 @@ async function postWorkOfferImpl(
 		           (xmax::text::int <> 0) AS was_replay`,
 		[
 			input.proposalId,
+			ctx.project_id ?? null,
 			input.squadName,
 			input.role,
 			caps,
 			JSON.stringify(metadata),
+			ctx.status ?? null,
 			idempotencyKey,
 			dispatchVersion,
 		],
