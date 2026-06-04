@@ -7,33 +7,27 @@
  */
 
 import assert from "node:assert/strict";
-import { after, before, describe, it } from "node:test";
-import { Pool } from "pg";
+import { after, afterEach, before, beforeEach, describe, it } from "node:test";
+import { Pool, type PoolClient } from "pg";
 
 const DB_URL =
 	process.env.DATABASE_URL ?? "postgresql://admin@127.0.0.1:5432/agenthive";
 
 let pool: Pool;
+// Per-test transaction client (opened in beforeEach, rolled back in afterEach).
+let tx: PoolClient;
 
 async function statusTransitionWithBypass(
 	proposalId: number,
 	newStatus: string,
 ): Promise<void> {
-	const client = await pool.connect();
-	try {
-		await client.query("BEGIN");
-		await client.query("SET LOCAL app.gate_bypass = 'true'");
-		await client.query(
-			`UPDATE roadmap_proposal.proposal SET status = $1 WHERE id = $2`,
-			[newStatus, proposalId],
-		);
-		await client.query("COMMIT");
-	} catch (err) {
-		await client.query("ROLLBACK");
-		throw err;
-	} finally {
-		client.release();
-	}
+	// SET LOCAL is scoped to the per-test transaction, so the gate bypass applies
+	// to this UPDATE and is discarded on ROLLBACK along with the fixture rows.
+	await tx.query("SET LOCAL app.gate_bypass = 'true'");
+	await tx.query(
+		`UPDATE roadmap_proposal.proposal SET status = $1 WHERE id = $2`,
+		[newStatus, proposalId],
+	);
 }
 
 async function insertTestProposal(
@@ -41,7 +35,7 @@ async function insertTestProposal(
 	title: string,
 ): Promise<number> {
 	const displayId = `P248-test-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-	const { rows } = await pool.query<{ id: number }>(
+	const { rows } = await tx.query<{ id: number }>(
 		`INSERT INTO roadmap_proposal.proposal
 		     (display_id, title, status, maturity, type, project_id, audit)
 		 VALUES ($1, $2, $3, 'active', 'feature', 1,
@@ -53,7 +47,7 @@ async function insertTestProposal(
 }
 
 async function dwellRowsFor(proposalId: number) {
-	const { rows } = await pool.query(
+	const { rows } = await tx.query(
 		`SELECT stage_name, entered_at, exited_at, dwell_seconds
 		   FROM roadmap_proposal.proposal_stage_dwell
 		  WHERE proposal_id = $1
@@ -74,6 +68,20 @@ after(async () => {
 // ── Dwell trigger ─────────────────────────────────────────────────────────────
 
 describe("P248 proposal_stage_dwell trigger", () => {
+	// Each test runs in its own transaction that ROLLS BACK in afterEach, so the
+	// proposal/dwell fixtures created here never persist to the DB. The dwell
+	// trigger fires inside the transaction; reads use `tx` (same connection) to
+	// observe its effects, and ROLLBACK discards everything on completion.
+	beforeEach(async () => {
+		tx = await pool.connect();
+		await tx.query("BEGIN");
+	});
+
+	afterEach(async () => {
+		await tx.query("ROLLBACK");
+		tx.release();
+	});
+
 	it("AC3a: INSERT seeds an open dwell row for the initial stage", async () => {
 		const id = await insertTestProposal("DRAFT", "P248 dwell INSERT test");
 		const rows = await dwellRowsFor(id);
@@ -109,7 +117,7 @@ describe("P248 proposal_stage_dwell trigger", () => {
 		const id = await insertTestProposal("DRAFT", "P248 dwell no-op test");
 		const before = await dwellRowsFor(id);
 
-		await pool.query(
+		await tx.query(
 			`UPDATE roadmap_proposal.proposal SET status = 'DRAFT' WHERE id = $1`,
 			[id],
 		);
@@ -123,7 +131,7 @@ describe("P248 proposal_stage_dwell trigger", () => {
 		const id = await insertTestProposal("DRAFT", "P248 dwell stats test");
 		await statusTransitionWithBypass(id, "REVIEW");
 
-		const { rows } = await pool.query<{ stage_name: string; proposal_count: string }>(
+		const { rows } = await tx.query<{ stage_name: string; proposal_count: string }>(
 			`SELECT stage_name, proposal_count
 			   FROM roadmap_proposal.v_stage_dwell_stats
 			  WHERE stage_name = 'DRAFT'`,
