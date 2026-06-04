@@ -27,8 +27,8 @@ const TAG = `p435-replay-${TS}`;
 
 async function insertProposal(): Promise<number> {
 	const { rows } = await query<{ id: number }>(
-		`INSERT INTO roadmap_proposal.proposal (display_id, title, status, maturity)
-		 VALUES ($1, $2, 'develop', 'active')
+		`INSERT INTO roadmap_proposal.proposal (display_id, title, type, status, maturity, audit)
+		 VALUES ($1, $2, 'feature', 'DEVELOP', 'active', '{}')
 		 RETURNING id`,
 		[`P435R-${TAG}`, `P435 replay test ${TAG}`],
 	);
@@ -38,14 +38,14 @@ async function insertProposal(): Promise<number> {
 async function insertAgency(tag: string): Promise<string> {
 	const agencyIdentity = `agency-replay-${tag}`;
 	await query(
-		`INSERT INTO roadmap.agency (agency_id, status)
-		 VALUES ($1, 'active')
+		`INSERT INTO roadmap.agency (agency_id, display_name, provider, host_id, status)
+		 VALUES ($1, $1, 'claude', 'bot', 'active')
 		 ON CONFLICT (agency_id) DO UPDATE SET status = 'active'`,
 		[agencyIdentity],
 	);
 	await query(
-		`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agency_identity, project_id, status)
-		 VALUES ($1, $1, NULL, 'active')
+		`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, project_id, status)
+		 VALUES ($1, 'llm', 1, 'active')
 		 ON CONFLICT (agent_identity) DO UPDATE SET status = 'active'`,
 		[agencyIdentity],
 	);
@@ -56,8 +56,8 @@ async function insertDispatch(proposalId: number, agencyIdentity: string): Promi
 	const { rows } = await query<{ id: number }>(
 		`INSERT INTO roadmap_workforce.squad_dispatch
 		   (proposal_id, agent_identity, agency_identity, squad_name,
-		    dispatch_role, dispatch_status, offer_status, metadata)
-		 VALUES ($1, $2, $2, 'replay-squad', 'developer', 'active', 'claimed',
+		    dispatch_role, dispatch_status, offer_status, required_capabilities, metadata)
+		 VALUES ($1, $2, $2, 'replay-squad', 'developer', 'active', 'claimed', '["develop"]',
 		         '{"route_name":"anthropic-claude","model_name":"claude-sonnet-4-6","budget_scope":"project"}'::jsonb)
 		 RETURNING id`,
 		[proposalId, agencyIdentity],
@@ -126,6 +126,10 @@ before(async () => {
 
 after(async () => {
 	if (SKIP_DB_TESTS) return;
+	// IMPORTANT: delete squad_dispatch BEFORE proposal_lease.
+	// Deleting proposal_lease first triggers ON DELETE SET NULL on squad_dispatch.lease_id,
+	// which fires trg_claim_dispatch_lease (BEFORE UPDATE), which recreates the lease for
+	// any dispatch still in 'active' status — defeating the cleanup.
 	await query(
 		`DELETE FROM control_audit.feed_event WHERE dispatch_id = $1`,
 		[dispatchId],
@@ -137,6 +141,11 @@ after(async () => {
 	await query(
 		`DELETE FROM roadmap_workforce.squad_dispatch WHERE id = $1`,
 		[dispatchId],
+	);
+	// Now safe to delete proposal_lease — no squad_dispatch rows left to trigger re-creation
+	await query(
+		`DELETE FROM roadmap_proposal.proposal_lease WHERE proposal_id = $1 OR agent_identity = $2`,
+		[proposalId, agencyIdentity],
 	);
 	await query(
 		`DELETE FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
@@ -165,13 +174,13 @@ describe("P435 AC-6: replay correlates 5+ sources per row", () => {
 		const rows = await replayChain(dispatchId);
 		for (const row of rows) {
 			assert.strictEqual(
-				Number(row.dispatch_id),
-				dispatchId,
+				String(row.dispatch_id),
+				String(dispatchId),
 				"dispatch_id must match",
 			);
 			assert.strictEqual(
-				Number(row.proposal_id),
-				proposalId,
+				String(row.proposal_id),
+				String(proposalId),
 				"proposal_id must match",
 			);
 			assert.ok(row.agency_id, "agency_id must be present");

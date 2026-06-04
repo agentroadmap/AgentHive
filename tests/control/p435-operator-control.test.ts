@@ -27,14 +27,14 @@ const TAG = `p435-${TS}`;
 async function insertAgency(tag: string) {
 	const agencyIdentity = `agency-${tag}`;
 	await query(
-		`INSERT INTO roadmap.agency (agency_id, status)
-		 VALUES ($1, 'active')
+		`INSERT INTO roadmap.agency (agency_id, display_name, provider, host_id, status)
+		 VALUES ($1, $1, 'claude', 'bot', 'active')
 		 ON CONFLICT (agency_id) DO UPDATE SET status = 'active'`,
 		[agencyIdentity],
 	);
 	await query(
-		`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agency_identity, project_id, status)
-		 VALUES ($1, $1, NULL, 'active')
+		`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, project_id, status)
+		 VALUES ($1, 'llm', 1, 'active')
 		 ON CONFLICT (agent_identity) DO UPDATE SET status = 'active'`,
 		[agencyIdentity],
 	);
@@ -49,8 +49,8 @@ async function insertDispatch(
 	const { rows } = await query<{ id: number }>(
 		`INSERT INTO roadmap_workforce.squad_dispatch
 		   (proposal_id, agent_identity, agency_identity, worker_identity,
-		    squad_name, dispatch_role, dispatch_status, offer_status)
-		 VALUES ($1, $2, $2, $3, 'test-squad', 'developer', 'active', 'claimed')
+		    squad_name, dispatch_role, dispatch_status, offer_status, required_capabilities)
+		 VALUES ($1, $2, $2, $3, 'test-squad', 'developer', 'active', 'claimed', '["develop"]')
 		 RETURNING id`,
 		[proposalId, agencyIdentity, workerIdentity],
 	);
@@ -85,8 +85,8 @@ before(async () => {
 	// Insert a minimal proposal to satisfy FK
 	const { rows: pRows } = await query<{ id: number }>(
 		`INSERT INTO roadmap_proposal.proposal
-		   (display_id, title, status, maturity)
-		 VALUES ($1, $2, 'develop', 'active')
+		   (display_id, title, type, status, maturity, audit)
+		 VALUES ($1, $2, 'feature', 'DEVELOP', 'active', '{}')
 		 RETURNING id`,
 		[`P435-${TAG}`, `P435 control test ${TAG}`],
 	);
@@ -96,11 +96,25 @@ before(async () => {
 
 after(async () => {
 	if (SKIP_DB_TESTS) return;
-	// Clean up test data
-	await query(`DELETE FROM control_audit.feed_event WHERE detail->>'tag' = $1`, [TAG]);
+	// Clean up test data — delete squad_dispatch BEFORE proposal_lease to prevent
+	// trg_claim_dispatch_lease from recreating leases via ON DELETE SET NULL cascade.
+	await query(`DELETE FROM control_audit.feed_event WHERE dispatch_id IN (
+		SELECT id FROM roadmap_workforce.squad_dispatch WHERE agent_identity = $1 OR worker_identity LIKE 'worker-p435-%'
+	)`, [agencyId]);
+	// Delete all dispatches first (removes lease_id FK to proposal_lease)
 	await query(
-		`DELETE FROM roadmap_workforce.squad_dispatch WHERE agent_identity = $1`,
+		`DELETE FROM roadmap_workforce.squad_dispatch WHERE agent_identity = $1 OR worker_identity LIKE 'worker-p435-%'`,
 		[agencyId],
+	);
+	// Now safe to delete proposal leases
+	await query(
+		`DELETE FROM roadmap_proposal.proposal_lease WHERE proposal_id = $1`,
+		[proposalId],
+	);
+	// Clean up the worker identity registered in the "stop worker" test
+	await query(
+		`DELETE FROM roadmap_workforce.agent_registry WHERE agent_identity LIKE 'worker-p435-%'`,
+		[],
 	);
 	await query(
 		`DELETE FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
@@ -177,12 +191,12 @@ describe("P435 AC-5: stop(dispatch) terminates dispatch + workers, writes one fe
 		assert.ok(result === "ok" || result === "noop", `Expected ok|noop, got: ${result}`);
 
 		const { rows } = await query<{ status: string }>(
-			`SELECT status FROM roadmap.agency WHERE agency_id = $1`,
+			`SELECT status FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
 			[agencyId],
 		);
 		assert.ok(
 			rows[0]?.status === "suspended" || result === "noop",
-			`Expected agency suspended, got: ${rows[0]?.status}`,
+			`Expected agent_registry suspended, got: ${rows[0]?.status}`,
 		);
 	});
 
@@ -200,6 +214,13 @@ describe("P435 AC-5: stop(dispatch) terminates dispatch + workers, writes one fe
 		);
 
 		const workerIdentity = `worker-${TAG}`;
+		// Register worker identity so the FK constraint is satisfied
+		await query(
+			`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, project_id, status)
+			 VALUES ($1, 'llm', 1, 'active')
+			 ON CONFLICT (agent_identity) DO UPDATE SET status = 'active'`,
+			[workerIdentity],
+		);
 		const dId = await insertDispatch(proposalId, agencyId, workerIdentity);
 		const result = await stop({
 			scopeType: "worker",
@@ -241,8 +262,8 @@ describe("P435: getFeedEvents filters by dispatch_id", () => {
 		assert.ok(events.length > 0, "Expected at least one feed event for this dispatch");
 		for (const e of events) {
 			assert.strictEqual(
-				Number(e.dispatch_id),
-				dId,
+				String(e.dispatch_id),
+				String(dId),
 				`All events should have dispatch_id=${dId}`,
 			);
 		}
