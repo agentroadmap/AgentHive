@@ -12,14 +12,7 @@ import { postWorkOffer } from "../pipeline/post-work-offer.ts";
 import { reapStaleRows } from "../pipeline/reap-stale-rows.ts";
 import { getUnlockedGateQueue } from "../proposal/gate-scanner-v2.ts";
 import { spawnAgent, spawnWithRetry } from "./agent-spawner.ts";
-import { postWorkOffer } from "../pipeline/post-work-offer.ts";
 import { validateChannelRegistry } from "../../infra/messaging/channel-registry.ts";
-import { listDispatchableAgencies } from "../../infra/agency/liaison-service.ts";
-import {
-	storeMessage,
-	getNextSequence,
-} from "../../infra/agency/liaison-message-service.ts";
-import { createMessageEnvelope } from "../../infra/agency/liaison-message-types.ts";
 import {
 	bootCancelPokeAttempts,
 	runOfferReaper,
@@ -50,20 +43,6 @@ import {
 } from "./legacy-dispatch.ts";
 import * as runtimeConfig from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
-import {
-	bootCancelPokeAttempts,
-	type PokeWatchdogOptions,
-	runOfferReaper,
-	runPokeWatchdogTick,
-} from "./maintenance.ts";
-import { type ListenerClient, OfferClaimLoop } from "./offer-claim-loop.ts";
-import { OrchestratorOfferDispatcher } from "./offer-dispatch.ts";
-import { resolveQueueContext } from "./queue-context-resolver.ts";
-import {
-	assessReadiness,
-	buildTaskPrompt,
-	fetchProposalDetail,
-} from "./readiness-resolver.ts";
 import {
 	scanAndAlertOfflineAgencies,
 	scanAndTransitionSilentAgencies,
@@ -107,6 +86,9 @@ const ORCHESTRATOR_LIAISON_PROVIDER =
 const DEFAULT_POKE_WATCHDOG_INTERVAL_MS = 60_000;
 const DEFAULT_LIVENESS_ALERT_INTERVAL_MS = Number(
 	process.env.AGENTHIVE_LIVENESS_ALERT_INTERVAL_MS ?? 60_000,
+);
+const DEFAULT_SHUTDOWN_DRAIN_MS = Number(
+	process.env.AGENTHIVE_SHUTDOWN_DRAIN_MS ?? 240_000,
 );
 
 /** Notify channels the orchestrator listens on for dispatch wake-ups. */
