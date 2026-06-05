@@ -586,28 +586,6 @@ export function verifyOperationAuthorization(
 	return tokenResult;
 }
 
-/**
- * Verify an auth token using the public key stored in agent_registry.
- *
- * Fetches the agent's public_key from the DB; falls back to token.publicKey
- * when the DB is unavailable or the agent has no recorded key.
- *
- * AC#3: Provides DB-backed verification path for MCP and orchestrator use.
- */
-export async function verifyTokenWithDbLookup(
-	token: AuthToken,
-	lookupPublicKey: LookupPublicKeyFn = getAgentPublicKey,
-): Promise<TokenVerification> {
-	let publicKey = token.publicKey;
-
-	try {
-		const dbKey = await lookupPublicKey(token.agentId);
-		if (dbKey) publicKey = dbKey;
-	} catch {
-		// DB unavailable — fall back to embedded token.publicKey
-	}
-
-	// Re-verify using the resolved public key
-	const tokenWithKey: AuthToken = { ...token, publicKey };
-	return verifyToken(tokenWithKey);
-}
+// P159 NOTE: a duplicate verifyTokenWithDbLookup (codex-three × P159 merge
+// collision, f0ae2f98) was removed here — the canonical definition above is
+// the single source of truth. See CONVENTIONS.md §7 (merge corruption).
