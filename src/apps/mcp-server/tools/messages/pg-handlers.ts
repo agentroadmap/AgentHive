@@ -14,7 +14,6 @@ import {
 import type { A2ANotification } from "../../../../infra/messaging/a2a-types.ts";
 import { agentContextStorage } from "../../../../shared/identity/agent-context.ts";
 import { getPool, query } from "../../../../postgres/pool.ts";
-import { agentContextStorage } from "../../../../shared/identity/agent-context.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
 
@@ -282,7 +281,7 @@ export class PgMessagingHandlers {
 		try {
 			// P159 AC-5: Soft-fail identity verification for all agents (not just user/*)
 			// Signature and data are optional; unsigned requests are logged but allowed
-			const { verifyAgentIdentity } = await import("../../../core/identity/identity-verification.ts");
+			const { verifyAgentIdentity } = await import("../../../../core/identity/identity-verification.ts");
 			const verification = await verifyAgentIdentity(
 				args.from_agent,
 				args._signature as string | undefined,
