@@ -141,6 +141,18 @@ The trap to avoid: using Class-B tooling (memory) to solve a Class-A problem (me
 
 Why this rule exists: AgentHive has repeatedly been burned by trusting LLM behavior for mechanical guarantees — codex agents marking ACs `pass` with no artifact, hallucinated completion summaries, token ledgers that stayed empty because the "agent should report usage" path was never deterministic (`agent_budget_ledger` 0 rows despite thousands of runs; `agent_usage_snapshot` 0 rows; `agent_runs.tokens_in` defaulting to 0). This is the same principle as **6.0a/6.0b "orchestrator is mechanical"** (lifecycle = DB state + structured fields, never interpreted LLM text), applied to the agency/worker layer. Implementing proposals: P1018 (token ledger writer), P1859 (usage probe), P1022 (quota-aware admission), P1698/P1699 (per-agency caps + dynamic controller).
 
+### Registration is DB-only; the liaison is an agent role, not a self-installed process
+
+**A provider joins the fleet by writing DB rows, and nothing else.** Voluntary agency registration means exactly two writes — a `roadmap.agent_registry` row and a `roadmap.agency` row (via `mcp_agent` `action=register`). That is the entire surface an agent is allowed to touch to make itself dispatchable. Declaring "I exist, here are my capabilities" is a DB statement, not a host operation.
+
+**An agent must never provision host process lifecycle.** Do not write to `/etc/systemd/system/...`, do not `systemctl enable`/`start` an `agenthive-agency@<name>` unit, do not create `/etc/agenthive/agency-<name>.env`, do not edit routes or env on the host. Those are **host-policy-governed** concerns resolved from `roadmap.host_model_policy` and executed by the operator/host (sudo), not improvised by an LLM. An agent that registers itself in the DB *and then* enables its own systemd unit has crossed the boundary — that is drift, and it is the exact failure that produced the `carter` crash-loop zombie (a stale statically-enabled unit force-registering on every boot) and the duplicate self-enabled `gemini` agency.
+
+**The "liaison" is an agent role, not a process you install.** A liaison is the standing agent that listens on the A2A bus and *voluntarily* claims work for its provider. "Start my liaison" means "this agent begins listening/claiming," **not** "enable a host service." Process bringup — discovering a registered agency and attaching its listener — is owned by the host layer (`agenthive-a2a-host`, gated by host policy). Conflating the two re-creates the per-agency-unit duality that causes boot races (two bodies booting the same agency, colliding on `idx_agency_session_one_active`).
+
+**One canonical identity per provider.** Reuse the existing agency identity (e.g. `gemini-agency-bot`); do not spin up parallel rows (`gemini`, `gemini-a`, …) that heartbeat `online` and compete for the same routes. Duplicates pollute the resolver and split claims — retire them, fold capabilities into the canonical row.
+
+This is the same "mechanical vs judgment" split as above: *who runs, on which host, with which routes and env* is mechanical/host-governed; *what an agent declares about its capabilities* is a DB registration. Keep them separate.
+
 ## 4a. Folder Discipline (mandatory for every cubic agent)
 
 AgentHive is shared infrastructure. Multiple agencies, projects, and providers share this repo. Every file you write is a vote on what belongs in the repo forever. Be ruthless about where things go.
