@@ -184,6 +184,98 @@ describe("P439: concurrency ceilings — agency cap=10 blocks the 11th concurren
 	});
 });
 
+// ─── Scenario: global ceiling blocks the (cap+1)th claim ─────────────────────
+//
+// Sets global max = (current_active_count + EXTRA) so exactly EXTRA more
+// claims can succeed.  Uses dispatches without agency_id so only the global
+// ceiling fires (agency and proposal ceilings don't apply).
+//
+// NOTE: this test adjusts the global cap while holding no schema-level lock, so
+// parallel integration test runs against the same DB may interfere.  Run tests
+// sequentially (--concurrency=1) if you see flaky global-ceiling failures.
+
+describe("P439: global ceiling blocks the (cap+1)th claim", () => {
+	const EXTRA = 3;
+	const globalIds: string[] = [];
+	let savedMax = 200;
+
+	before(async () => {
+		// Snapshot current active count so we know how much headroom exists.
+		const { rows: countRows } = await query<{ cnt: string }>(
+			`SELECT COUNT(*) AS cnt FROM roadmap_control.claim WHERE status = 'active'`,
+		);
+		const currentActive = Number(countRows[0]?.cnt ?? 0);
+
+		// Snapshot the existing global cap.
+		const { rows: capRows } = await query<{ max_active_claims: number }>(
+			`SELECT max_active_claims
+			   FROM roadmap_control.concurrency_limit
+			  WHERE scope_type = 'global' AND scope_id = '__default__'`,
+		);
+		savedMax = capRows[0]?.max_active_claims ?? 200;
+
+		// Set cap = currentActive + EXTRA so exactly EXTRA more claims can win.
+		await query(
+			`UPDATE roadmap_control.concurrency_limit
+			    SET max_active_claims = $1, max_active_workers = $1
+			  WHERE scope_type = 'global' AND scope_id = '__default__'`,
+			[currentActive + EXTRA],
+		);
+
+		// Create EXTRA+1 dispatches without agency_id so only global ceiling fires.
+		for (let i = 0; i < EXTRA + 1; i++) {
+			const { rows } = await query<{ dispatch_id: string }>(
+				`INSERT INTO roadmap_control.dispatch
+				     (proposal_id, project_id, agency_id, worker_id,
+				      host, route, model, provider, agent_cli, budget_scope, status)
+				 VALUES (NULL, 'p439-global-test', NULL, $1,
+				         'hermes', 'hermes-3', 'hermes-3', 'nous', 'hermes', 'budget-p439', 'pending')
+				 RETURNING dispatch_id::text`,
+				[`worker-global-${i}-${TS}`],
+			);
+			globalIds.push(rows[0]!.dispatch_id);
+		}
+	});
+
+	it(`${EXTRA} concurrent tryClaimDispatch calls win; the ${EXTRA + 1}th is rejected at global ceiling`, async () => {
+		const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+		const results = await Promise.all(
+			globalIds.map((dId, i) =>
+				tryClaimDispatch(dId, `agent-glb-${i}-${TS}`, expiresAt).then((r) => ({ r, dId })),
+			),
+		);
+		const winners = results.filter(({ r }) => r.won);
+		const losers = results.filter(({ r }) => !r.won);
+		assert.strictEqual(winners.length, EXTRA, `exactly ${EXTRA} agents must win`);
+		assert.strictEqual(losers.length, 1, "exactly 1 agent must be rejected at global ceiling");
+		const loserReason = (losers[0]!.r as { won: false; reason: string }).reason;
+		assert.strictEqual(loserReason, "concurrency_ceiling_exceeded");
+	});
+
+	it("global ceiling reflected in v_concurrency_usage", async () => {
+		const { rows } = await query<{ at_ceiling: boolean }>(
+			`SELECT at_ceiling
+			   FROM roadmap_control.v_concurrency_usage
+			  WHERE scope_type = 'global' AND scope_id = '__default__'`,
+		);
+		assert.ok(rows[0], "v_concurrency_usage must have a global __default__ row");
+		assert.strictEqual(rows[0]!.at_ceiling, true, "global scope must be at ceiling");
+	});
+
+	after(async () => {
+		for (const dId of globalIds) {
+			await cleanupDispatch(dId);
+		}
+		// Restore the original global cap.
+		await query(
+			`UPDATE roadmap_control.concurrency_limit
+			    SET max_active_claims = $1, max_active_workers = $1
+			  WHERE scope_type = 'global' AND scope_id = '__default__'`,
+			[savedMax],
+		);
+	});
+});
+
 // ─── Scenario: 3 concurrent claims on same proposal hitting cap=2 ─────────────
 //
 // Exercises the proposal-level ceiling path added to tryClaimDispatch.
