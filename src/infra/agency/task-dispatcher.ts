@@ -193,6 +193,128 @@ function adaptMessageForBridge(msg: IncomingMessage): IncomingMessage {
 }
 
 /**
+ * P2324: ad-hoc (no-proposal) task_request support.
+ *
+ * When AGENTHIVE_ADHOC_PROPOSAL_ID is set, a task_request that arrives WITHOUT a
+ * proposal_id spawns an ephemeral worker instead of being rejected. The worker's
+ * brief comes from squad_dispatch.metadata.task (the message content); the sentinel
+ * proposal id only satisfies squad_dispatch.proposal_id's NOT-NULL FK (+ a project_id
+ * lookup). Unset → strict reject behavior is preserved. Read at call time so tests and
+ * live config changes take effect without a module reload. See P2326 (sentinel) + P2324.
+ */
+function adHocProposalId(): number | null {
+	const raw = process.env.AGENTHIVE_ADHOC_PROPOSAL_ID;
+	if (typeof raw !== "string" || raw.trim() === "") return null;
+	const n = Number(raw);
+	return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/**
+ * Adapt a no-proposal task_request for the offer-dispatch bridge, injecting the
+ * sentinel proposal id (column + metadata, both read by bridgeTaskToOfferDispatch).
+ */
+function adaptMessageForAdHocBridge(
+	msg: IncomingMessage,
+	proposalId: number,
+): IncomingMessage {
+	return {
+		...msg,
+		message_type: "task",
+		proposal_id: proposalId,
+		metadata: {
+			...msg.metadata,
+			spawn_agent: true,
+			task_action: "develop",
+			proposal_id: proposalId,
+			adhoc: true,
+		},
+	};
+}
+
+/**
+ * P2324: spawn an ephemeral worker for a task_request that carries no proposal_id.
+ * Mirrors the proposal-scoped spawn/ack/monitor but skips claimProposal and the
+ * liaison_task_tracker row — the task is ephemeral and untracked, bucketed under the
+ * sentinel proposal solely for the FK.
+ */
+async function handleAdHocTaskRequest(
+	msg: IncomingMessage,
+	identity: string,
+	provider: string,
+	helpers: TaskDispatcherHelpers,
+	sentinelProposalId: number,
+): Promise<void> {
+	const {
+		insertReply,
+		markReadAndResolveTimeout,
+		bridgeTaskToOfferDispatch,
+		monitorTaskDispatch,
+	} = helpers;
+	const log = `[P2324AdHocTask id=${msg.id}]`;
+	const correlationId = msg.correlation_id ?? randomUUID();
+
+	let dispatchId: number;
+	let statusPollMs: number;
+	let statusTimeoutMs: number;
+	try {
+		const adapted = adaptMessageForAdHocBridge(msg, sentinelProposalId);
+		const result = await bridgeTaskToOfferDispatch({
+			msg: adapted,
+			identity,
+			provider,
+		});
+		dispatchId = result.dispatchId;
+		statusPollMs = result.statusPollMs;
+		statusTimeoutMs = result.statusTimeoutMs;
+	} catch (err) {
+		const detail = err instanceof Error ? err.message : String(err);
+		console.error(`${log} ad-hoc bridge failed:`, detail);
+		await insertReply({
+			fromAgent: identity,
+			toAgent: msg.from_agent,
+			content: `Ad-hoc task dispatch failed: ${detail}`,
+			messageType: "task_error",
+			correlationId,
+			replyTo: msg.id,
+		});
+		await markReadAndResolveTimeout(msg.id);
+		return;
+	}
+
+	try {
+		await insertReply({
+			fromAgent: identity,
+			toAgent: msg.from_agent,
+			content: `Ad-hoc task accepted; spawning via dispatch ${dispatchId}`,
+			messageType: "task_ack",
+			correlationId,
+			replyTo: msg.id,
+			metadata: {
+				adhoc: true,
+				worker_identity: identity,
+				dispatch_id: dispatchId,
+				sentinel_proposal_id: sentinelProposalId,
+			},
+		});
+	} catch (err) {
+		console.warn(`${log} task_ack INSERT failed:`, err);
+	}
+
+	await markReadAndResolveTimeout(msg.id);
+
+	void monitorTaskDispatch({
+		identity,
+		requestor: msg.from_agent,
+		originalMessageId: msg.id,
+		correlationId,
+		dispatchId,
+		pollMs: statusPollMs,
+		timeoutMs: statusTimeoutMs,
+		log,
+	});
+}
+
+/**
  * Handle incoming task_request message.
  * - Extract and validate proposal_id
  * - Claim proposal via MCP
@@ -213,6 +335,17 @@ export async function handleTypedTaskRequest(
 	// 1. Extract proposal_id
 	const proposalId = extractProposalId(msg);
 	if (!proposalId) {
+		// P2324: a task_request without a proposal_id is an ad-hoc delegation.
+		// If a sentinel bucket is configured, spawn an ephemeral worker instead
+		// of rejecting (the old behavior silently no-op'd ~30% of task_requests).
+		const sentinel = adHocProposalId();
+		if (sentinel) {
+			console.log(
+				`${log} no proposal_id → ad-hoc spawn under sentinel proposal ${sentinel}`,
+			);
+			await handleAdHocTaskRequest(msg, identity, provider, helpers, sentinel);
+			return;
+		}
 		console.warn(`${log} missing proposal_id in metadata`);
 		await insertReply({
 			fromAgent: identity,
