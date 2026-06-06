@@ -571,14 +571,33 @@ export class PgProposalHandlers {
 				const allowedTargets = gateTransitions[currentStatus];
 				if (allowedTargets?.includes(requestedStatus)) {
 					if (!args.notes || args.notes.trim().length === 0) {
+						// State ALL gate prerequisites at once instead of revealing them one
+						// error at a time (notes → reason → actor), which forces agents into
+						// a whack-a-mole retry loop and strands the decision.
 						return {
 							content: [
 								{
 									type: "text",
-									text: `Gate transition ${currentStatus} → ${requestedStatus} requires decision notes. Please provide notes with your reasoning.`,
+									text:
+										`Gate transition ${currentStatus} → ${requestedStatus} is a gating decision and needs:\n` +
+										`  • notes: the decision record — what was decided and why (required for D* auditability)\n` +
+										`  • reason='decision': auto-applied for gate transitions when notes are present, so you do NOT need to pass it\n` +
+										`  • an active lease held by the deciding actor (validated above)\n` +
+										`Recommended flow: record the verdict with the 'gate_decision' action ` +
+										`(decision=advance|hold|reject|waive|escalate) and notes, THEN call transition with notes.\n` +
+										`If you are a single reviewer (not the gate), use 'submit_review' with verdict='approve' instead — ` +
+										`advancing the stage is a gate role, not part of a review.`,
 								},
 							],
 						};
+					}
+					// reason='decision' is the ONLY value the storage gate accepts for a
+					// gated transition. Requiring the agent to echo this magic string adds
+					// no information and is a frequent first-try failure — apply it
+					// automatically once a decision record (notes) is present. Auditability
+					// is preserved by the notes record itself.
+					if (args.reason !== "decision") {
+						args.reason = "decision";
 					}
 				}
 			}

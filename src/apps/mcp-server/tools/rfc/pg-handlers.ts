@@ -966,6 +966,71 @@ export async function resolveDependency(args: {
 
 // ─── Reviews ────────────────────────────────────────────────────────────────
 
+const CANONICAL_VERDICTS = [
+	"approve",
+	"approve_with_changes",
+	"request_changes",
+	"send_back",
+	"reject",
+	"defer",
+	"recuse",
+] as const;
+
+// Agents routinely guess a verdict word outside the CHECK-constraint vocabulary
+// (e.g. "advance", "approved", "lgtm", "block"). Left raw, these reach the DB and
+// trip an opaque `proposal_reviews_verdict_check` violation with no hint of the
+// legal set — which is how a reviewer's verdict gets stranded (see Gemini/P1456).
+// Map the common, unambiguous synonyms onto canonical verdicts; anything still
+// unknown returns a listing error so the agent can self-correct on the next call.
+const VERDICT_SYNONYMS: Record<string, (typeof CANONICAL_VERDICTS)[number]> = {
+	approved: "approve",
+	advance: "approve",
+	advanced: "approve",
+	accept: "approve",
+	accepted: "approve",
+	lgtm: "approve",
+	pass: "approve",
+	passed: "approve",
+	ok: "approve",
+	approve_with_change: "approve_with_changes",
+	approve_with_comments: "approve_with_changes",
+	request_change: "request_changes",
+	changes_requested: "request_changes",
+	needs_changes: "request_changes",
+	needs_change: "request_changes",
+	needs_work: "request_changes",
+	revise: "request_changes",
+	rework: "request_changes",
+	block: "request_changes",
+	blocked: "request_changes",
+	sendback: "send_back",
+	return: "send_back",
+	returned: "send_back",
+	rejected: "reject",
+	deny: "reject",
+	denied: "reject",
+	hold: "defer",
+	held: "defer",
+	postpone: "defer",
+	table: "defer",
+	tabled: "defer",
+	recused: "recuse",
+	abstain: "recuse",
+};
+
+function normalizeVerdict(
+	raw: string,
+): (typeof CANONICAL_VERDICTS)[number] | null {
+	const v = String(raw ?? "")
+		.trim()
+		.toLowerCase()
+		.replace(/[\s-]+/g, "_");
+	if ((CANONICAL_VERDICTS as readonly string[]).includes(v)) {
+		return v as (typeof CANONICAL_VERDICTS)[number];
+	}
+	return VERDICT_SYNONYMS[v] ?? null;
+}
+
 export async function submitReview(args: {
 	proposal_id: string;
 	reviewer: string;
@@ -978,11 +1043,28 @@ export async function submitReview(args: {
 	review?: string;
 	body?: string;
 	content?: string;
+	comment?: string;
+	summary?: string;
 	change_requirements?: string[];
 }): Promise<CallToolResult> {
 	if (!args.notes) {
-		args.notes = args.review ?? args.body ?? args.content;
+		args.notes =
+			args.review ?? args.body ?? args.content ?? args.comment ?? args.summary;
 	}
+
+	// Normalize/validate the verdict BEFORE touching the DB so an out-of-vocab
+	// guess returns the legal set instead of an opaque CHECK-constraint error.
+	const verdict = normalizeVerdict(args.verdict);
+	if (!verdict) {
+		return errorResult(
+			`Invalid verdict '${args.verdict}'. Allowed values: ${CANONICAL_VERDICTS.join(", ")}. ` +
+				`To approve/advance a proposal as a reviewer, use verdict='approve' — advancing the ` +
+				`stage itself is a separate gate step (record_gate_decision + transition), not part of submit_review.`,
+			"verdict_invalid",
+		);
+	}
+	args.verdict = verdict;
+
 	try {
 		const proposalId = await resolveProposalId(args.proposal_id);
 		if (proposalId === null) {
@@ -1586,7 +1668,11 @@ export class RfcWorkflowHandlers {
 				"Submit a review for a proposal. " +
 				"PARAM NOTE: reviewer identity is passed as `reviewer` (NOT reviewer_identity / agent_identity / identity). " +
 				"Response returns the identity as `reviewer_identity` — input/output asymmetry by design. " +
-				"`is_blocking: true` marks the review as blocking and IS persisted (fixed in P1387).",
+				"`is_blocking: true` marks the review as blocking and IS persisted (fixed in P1387). " +
+					"VERDICT must be one of approve, approve_with_changes, request_changes, send_back, reject, defer, recuse. " +
+					"Common synonyms (advance/approved/lgtm -> approve, block/needs_work -> request_changes, etc.) are coerced; anything else returns the legal set. " +
+					"To APPROVE/ADVANCE as a reviewer use verdict='approve' — moving the stage forward is a separate gate step (gate_decision + transition), NOT part of submit_review. " +
+					"Review text may be passed as `notes` (canonical) or any of review/body/content/comment/summary.",
 			inputSchema: {
 				type: "object",
 				properties: {
