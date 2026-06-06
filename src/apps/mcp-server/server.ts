@@ -2723,8 +2723,7 @@ export async function createMcpServer(
 	});
 
 	// P1129: Agency lifecycle tools — agency_start / agency_status
-	const { AgencyOpsHandler } = await import("./tools/ops/agency-ops.ts");
-	const agencyOps = new AgencyOpsHandler();
+	const { handleAgencyStart, handleAgencyStatus } = await import("./tools/ops/agency-ops.ts");
 	server.addTool({
 		name: "agency_start",
 		description:
@@ -2742,8 +2741,7 @@ export async function createMcpServer(
 			required: ["identity"],
 		},
 		handler: async (args: Record<string, unknown>) =>
-			agencyOps.agencyStart({ identity: String(args.identity) })
-				.then((r) => ({ content: [{ type: "text", text: JSON.stringify(r, null, 2) }] })),
+			handleAgencyStart({ agency_id: String(args.identity) }),
 	});
 	server.addTool({
 		name: "agency_status",
@@ -2761,8 +2759,7 @@ export async function createMcpServer(
 			required: ["identity"],
 		},
 		handler: async (args: Record<string, unknown>) =>
-			agencyOps.agencyStatus({ identity: String(args.identity) })
-				.then((r) => ({ content: [{ type: "text", text: JSON.stringify(r, null, 2) }] })),
+			handleAgencyStatus({ agency_id: String(args.identity) }),
 	});
 
 	// Start background maintenance tasks
