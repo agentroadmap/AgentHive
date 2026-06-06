@@ -39,4 +39,14 @@ if [ ${#BLOCKED[@]} -gt 0 ]; then
   exit 1
 fi
 
+# MCP bundle integrity gate: src/apps/mcp-server is NOT covered by tsconfig.check,
+# so dup-declaration merge corruption otherwise reaches main and crash-loops
+# agenthive-mcp. Run the fast esbuild gate whenever a src TS file is staged.
+if echo "$STAGED" | grep -qE '^src/.*\.tsx?$'; then
+  if ! node scripts/check-mcp-bundle.mjs >&2; then
+    echo "[pre-commit] Blocking commit: MCP import graph has duplicate-declaration corruption (see above)." >&2
+    exit 1
+  fi
+fi
+
 exit 0

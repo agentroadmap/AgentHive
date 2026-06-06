@@ -70,6 +70,7 @@
     "check:types": "node node_modules/typescript/bin/tsc --noEmit",
     "typecheck": "node node_modules/typescript/bin/tsc -p tsconfig.check.json --noEmit",
     "check:publish": "node scripts/check-publish-hygiene.mjs",
+    "check:mcp": "node scripts/check-mcp-bundle.mjs",
     "audit:sql": "node --import jiti/register scripts/ci/audit-sql-columns.ts",
     "audit:dispatch-selects": "node --import jiti/register scripts/ci/check-dispatch-proposal-selects.ts",
     "audit:migrations": "bash scripts/ci/check-migration-drops.sh",
