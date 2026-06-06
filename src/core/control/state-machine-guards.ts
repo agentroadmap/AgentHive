@@ -141,11 +141,15 @@ export async function tryClaimDispatch(
 		const { rows } = await client.query<{
 			dispatch_id: string;
 			proposal_id: string | null;
+			project_id: string | null;
+			host: string | null;
 			agency_id: string | null;
 			agency_status: string | null;
 		}>(
 			`SELECT d.dispatch_id::text,
 			        d.proposal_id::text,
+			        d.project_id,
+			        d.host,
 			        d.agency_id,
 			        a.status AS agency_status
 			   FROM roadmap_control.dispatch d
@@ -196,12 +200,40 @@ export async function tryClaimDispatch(
 			//   dispatch row → concurrency_limit row (consistent across callers)
 			// so circular waits are impossible.
 
-			// Global ceiling: uses the canonical '__default__' scope row.
+			// Ceiling checks follow the scope hierarchy: global → project → host → agency → proposal.
+			// Each fn_check_concurrency call acquires FOR UPDATE on its concurrency_limit row,
+			// held until COMMIT — serializing concurrent ceiling checks for the same scope_id.
+			// Lock order is always: dispatch row → concurrency_limit row (consistent direction,
+			// no circular waits possible).
+
+			// Global ceiling.
 			const { rows: globalRows } = await client.query<{ ok: boolean }>(
 				`SELECT ok FROM roadmap_control.fn_check_concurrency('global', '__default__')`,
 			);
 			if (globalRows[0] && !globalRows[0].ok) {
 				rejectReason = "concurrency_ceiling_exceeded";
+			}
+
+			// Project ceiling — only when a project is bound to this dispatch.
+			if (rejectReason === null && rows[0]!.project_id) {
+				const { rows: projectRows } = await client.query<{ ok: boolean }>(
+					`SELECT ok FROM roadmap_control.fn_check_concurrency('project', $1)`,
+					[rows[0]!.project_id],
+				);
+				if (projectRows[0] && !projectRows[0].ok) {
+					rejectReason = "concurrency_ceiling_exceeded";
+				}
+			}
+
+			// Host ceiling — only when a host is bound to this dispatch.
+			if (rejectReason === null && rows[0]!.host) {
+				const { rows: hostRows } = await client.query<{ ok: boolean }>(
+					`SELECT ok FROM roadmap_control.fn_check_concurrency('host', $1)`,
+					[rows[0]!.host],
+				);
+				if (hostRows[0] && !hostRows[0].ok) {
+					rejectReason = "concurrency_ceiling_exceeded";
+				}
 			}
 
 			// Agency ceiling — only when an agency is bound to this dispatch.

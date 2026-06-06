@@ -283,3 +283,190 @@ describe("P439: proposal-level ceiling blocks the 3rd concurrent claim on the sa
 		);
 	});
 });
+
+// ─── Scenario: project-level ceiling blocks a 3rd concurrent claim ────────────
+//
+// Exercises the project ceiling path added to tryClaimDispatch (P439 enhance).
+// Dispatches share a project_id; agency_id=NULL so only the project ceiling fires.
+// fn_check_concurrency('project', ...) serializes concurrent checks FOR UPDATE.
+
+describe("P439: project-level ceiling blocks the 3rd concurrent claim on the same project", () => {
+	const PROJECT_ID = `proj-p439-${Date.now()}`;
+	const PROJ_CAP = 2;
+	const projDispatchIds: string[] = [];
+
+	before(async () => {
+		await query(
+			`INSERT INTO roadmap_control.concurrency_limit
+			     (scope_type, scope_id, max_active_claims, max_active_workers)
+			 VALUES ('project', $1, $2, $2)
+			 ON CONFLICT (scope_type, scope_id) DO UPDATE
+			     SET max_active_claims  = EXCLUDED.max_active_claims,
+			         max_active_workers = EXCLUDED.max_active_workers`,
+			[PROJECT_ID, PROJ_CAP],
+		);
+
+		for (let i = 0; i < PROJ_CAP + 1; i++) {
+			const { rows } = await query<{ dispatch_id: string }>(
+				`INSERT INTO roadmap_control.dispatch
+				     (proposal_id, project_id, agency_id, worker_id,
+				      host, route, model, provider, agent_cli, budget_scope, status)
+				 VALUES (NULL, $1, NULL, $2,
+				         'hermes', 'hermes-3', 'hermes-3', 'nous', 'hermes', 'budget-p439', 'pending')
+				 RETURNING dispatch_id::text`,
+				[PROJECT_ID, `worker-proj-${i}-${TS}`],
+			);
+			projDispatchIds.push(rows[0]!.dispatch_id);
+		}
+	});
+
+	it(`${PROJ_CAP} concurrent tryClaimDispatch calls win; the ${PROJ_CAP + 1}th is rejected at project ceiling`, async () => {
+		const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+		const results = await Promise.all(
+			projDispatchIds.map((dId, i) =>
+				tryClaimDispatch(dId, `agent-proj-${i}-${TS}`, expiresAt).then((r) => ({ r, dId })),
+			),
+		);
+
+		const winners = results.filter(({ r }) => r.won);
+		const losers = results.filter(({ r }) => !r.won);
+
+		assert.strictEqual(winners.length, PROJ_CAP, `exactly ${PROJ_CAP} agents must win within project cap`);
+		assert.strictEqual(losers.length, 1, "exactly 1 agent must be rejected at project ceiling");
+
+		const loserReason = (losers[0]!.r as { won: false; reason: string }).reason;
+		assert.strictEqual(loserReason, "concurrency_ceiling_exceeded");
+	});
+
+	it("loser dispatch remains pending (never claimed)", async () => {
+		const { rows } = await query<{ dispatch_id: string }>(
+			`SELECT d.dispatch_id::text
+			   FROM roadmap_control.dispatch d
+			   LEFT JOIN roadmap_control.claim c ON c.dispatch_id = d.dispatch_id
+			                                    AND c.status = 'active'
+			  WHERE d.project_id = $1
+			    AND c.claim_id IS NULL`,
+			[PROJECT_ID],
+		);
+		assert.strictEqual(rows.length, 1, "exactly one dispatch must remain unclaimed");
+		assert.ok(projDispatchIds.includes(rows[0]!.dispatch_id));
+	});
+
+	it("v_concurrency_usage shows project at ceiling", async () => {
+		const { rows } = await query<{ current_active_claims: number; at_ceiling: boolean }>(
+			`SELECT current_active_claims, at_ceiling
+			   FROM roadmap_control.v_concurrency_usage
+			  WHERE scope_type = 'project'
+			    AND scope_id   = $1`,
+			[PROJECT_ID],
+		);
+		assert.ok(rows[0], "v_concurrency_usage must have a row for this project");
+		assert.strictEqual(rows[0]!.current_active_claims, PROJ_CAP);
+		assert.strictEqual(rows[0]!.at_ceiling, true);
+	});
+
+	after(async () => {
+		for (const dId of projDispatchIds) {
+			await cleanupDispatch(dId);
+		}
+		await query(
+			`DELETE FROM roadmap_control.concurrency_limit
+			  WHERE scope_type = 'project' AND scope_id = $1`,
+			[PROJECT_ID],
+		);
+	});
+});
+
+// ─── Scenario: host-level ceiling blocks a 3rd concurrent claim ───────────────
+//
+// Exercises the host ceiling path added to tryClaimDispatch (P439 enhance).
+// Dispatches share a host value; agency_id=NULL so only the host ceiling fires.
+
+describe("P439: host-level ceiling blocks the 3rd concurrent claim on the same host", () => {
+	const HOST_ID = `host-p439-${Date.now()}`;
+	const HOST_CAP = 2;
+	const hostDispatchIds: string[] = [];
+
+	before(async () => {
+		await query(
+			`INSERT INTO roadmap_control.concurrency_limit
+			     (scope_type, scope_id, max_active_claims, max_active_workers)
+			 VALUES ('host', $1, $2, $2)
+			 ON CONFLICT (scope_type, scope_id) DO UPDATE
+			     SET max_active_claims  = EXCLUDED.max_active_claims,
+			         max_active_workers = EXCLUDED.max_active_workers`,
+			[HOST_ID, HOST_CAP],
+		);
+
+		for (let i = 0; i < HOST_CAP + 1; i++) {
+			const { rows } = await query<{ dispatch_id: string }>(
+				`INSERT INTO roadmap_control.dispatch
+				     (proposal_id, project_id, agency_id, worker_id,
+				      host, route, model, provider, agent_cli, budget_scope, status)
+				 VALUES (NULL, 'p439-host-test', NULL, $1,
+				         $2, 'hermes-3', 'hermes-3', 'nous', 'hermes', 'budget-p439', 'pending')
+				 RETURNING dispatch_id::text`,
+				[`worker-host-${i}-${TS}`, HOST_ID],
+			);
+			hostDispatchIds.push(rows[0]!.dispatch_id);
+		}
+	});
+
+	it(`${HOST_CAP} concurrent tryClaimDispatch calls win; the ${HOST_CAP + 1}th is rejected at host ceiling`, async () => {
+		const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+		const results = await Promise.all(
+			hostDispatchIds.map((dId, i) =>
+				tryClaimDispatch(dId, `agent-host-${i}-${TS}`, expiresAt).then((r) => ({ r, dId })),
+			),
+		);
+
+		const winners = results.filter(({ r }) => r.won);
+		const losers = results.filter(({ r }) => !r.won);
+
+		assert.strictEqual(winners.length, HOST_CAP, `exactly ${HOST_CAP} agents must win within host cap`);
+		assert.strictEqual(losers.length, 1, "exactly 1 agent must be rejected at host ceiling");
+
+		const loserReason = (losers[0]!.r as { won: false; reason: string }).reason;
+		assert.strictEqual(loserReason, "concurrency_ceiling_exceeded");
+	});
+
+	it("loser dispatch remains pending (never claimed)", async () => {
+		const { rows } = await query<{ dispatch_id: string }>(
+			`SELECT d.dispatch_id::text
+			   FROM roadmap_control.dispatch d
+			   LEFT JOIN roadmap_control.claim c ON c.dispatch_id = d.dispatch_id
+			                                    AND c.status = 'active'
+			  WHERE d.host    = $1
+			    AND c.claim_id IS NULL`,
+			[HOST_ID],
+		);
+		assert.strictEqual(rows.length, 1, "exactly one dispatch must remain unclaimed");
+		assert.ok(hostDispatchIds.includes(rows[0]!.dispatch_id));
+	});
+
+	it("v_concurrency_usage shows host at ceiling", async () => {
+		const { rows } = await query<{ current_active_claims: number; at_ceiling: boolean }>(
+			`SELECT current_active_claims, at_ceiling
+			   FROM roadmap_control.v_concurrency_usage
+			  WHERE scope_type = 'host'
+			    AND scope_id   = $1`,
+			[HOST_ID],
+		);
+		assert.ok(rows[0], "v_concurrency_usage must have a row for this host");
+		assert.strictEqual(rows[0]!.current_active_claims, HOST_CAP);
+		assert.strictEqual(rows[0]!.at_ceiling, true);
+	});
+
+	after(async () => {
+		for (const dId of hostDispatchIds) {
+			await cleanupDispatch(dId);
+		}
+		await query(
+			`DELETE FROM roadmap_control.concurrency_limit
+			  WHERE scope_type = 'host' AND scope_id = $1`,
+			[HOST_ID],
+		);
+	});
+});
