@@ -3,7 +3,7 @@
  *
  * P833 Phase 2: Reply waiter with pg_notify + fallback polling
  * - Looks up correlation_id for the given message_id
- * - Subscribes to pg_notify channel a2a_msg_${agent}, filters by correlation_id
+ * - Subscribes to pg_notify channel msg_${agent} (via agentNotifyChannel), filters by correlation_id
  * - Poll fallback every 5s: SELECT id FROM message_ledger WHERE correlation_id = $cid AND acked_at IS NOT NULL
  * - On timeout_ms exceeded: INSERT into message_timeout_tracking (idempotent via UNIQUE on message_id)
  * - Returns { replied: boolean, reply_message_id?: number, timed_out: boolean }
@@ -14,6 +14,7 @@
 import { query, getPool } from "../../../../postgres/pool.ts";
 import type { CallToolResult } from "../../types.ts";
 import { verifyUserBearer } from "../../../../infra/messaging/bearer-auth.ts";
+import { agentNotifyChannel } from "../../../../infra/messaging/a2a-access-control.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
@@ -35,7 +36,7 @@ const REPLY_QUERY = `
 	LIMIT 1`;
 
 /**
- * Wait for a reply notification on a2a_msg_{agent} channel.
+ * Wait for a reply notification on the canonical msg_{agent} channel.
  * On each pg_notify, queries DB for matching replied correlation_id.
  * Falls back to 5s interval polling if notify is missed.
  */
@@ -46,7 +47,9 @@ async function waitForReplyViaNotify(
 ): Promise<{ replied: boolean; replyMessageId?: number }> {
 	const pool = getPool();
 	const client = await pool.connect();
-	const pgChannel = `a2a_msg_${agent}`;
+	// P1103 AC-2: use canonical msg_<identity> channel (agentNotifyChannel),
+	// matching fn_a2a_message_notify (migration 169). Old a2a_msg_ prefix silently missed.
+	const pgChannel = agentNotifyChannel(agent);
 
 	try {
 		await client.query(`LISTEN "${pgChannel}"`);
