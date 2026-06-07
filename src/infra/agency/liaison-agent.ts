@@ -178,45 +178,38 @@ export async function runLiaisonAgent(
 
 	if (claimLoopEnabled) {
 		try {
-			// Load the agency's real capabilities from agent_registry
-			const { rows: capRows } = await query<{
-				skills: Record<string, boolean> | null;
-			}>(
-				`SELECT skills FROM roadmap_workforce.agent_registry
-				 WHERE agent_identity = $1`,
-				[identity],
-			);
+			const capabilities = await loadAgencyClaimCapabilities(identity);
+			if (capabilities.length === 0) {
+				console.warn(
+					`${log} self-claim enabled but no claim capabilities were found; AgencyClaimLoop not started`,
+				);
+			} else {
+				// Create the executor that handles claimed offers via the existing
+				// offer-dispatch path (reuses handleOfferDispatch, not duplicating logic)
+				const executor = makeAgencyClaimExecutor(identity);
 
-			// Extract capability keys from the skills jsonb object
-			// (shape: {"review": true, "testing": true, ...})
-			const skillsObj = capRows[0]?.skills ?? {};
-			const capabilities = Object.keys(skillsObj).filter((k) => skillsObj[k] === true);
+				// Open a dedicated LISTEN client for the claim loop
+				claimLoopListenClient = await connectListenClient(`${identity}-claim`);
 
-			// Create the executor that handles claimed offers via the existing
-			// offer-dispatch path (reuses handleOfferDispatch, not duplicating logic)
-			const executor = makeAgencyClaimExecutor(identity);
+				// Construct and start the claim loop
+				claimLoop = new AgencyClaimLoop({
+					agencyIdentity: identity,
+					provider, // AC-5: needed for auth readiness checks
+					capabilities, // Real agency capabilities for offer matching
+					onClaim: executor,
+					connectListener: async () => claimLoopListenClient!,
+					projectId: null, // Accept any project this agency is subscribed to
+					leaseTtlSeconds: 1320, // 22 minutes, must exceed spawn timeout
+					pollIntervalMs: 30_000,
+					maxConcurrent: 8,
+					logger: { log: console.log, warn: console.warn, error: console.error },
+				});
 
-			// Open a dedicated LISTEN client for the claim loop
-			claimLoopListenClient = await connectListenClient(`${identity}-claim`);
-
-			// Construct and start the claim loop
-			claimLoop = new AgencyClaimLoop({
-				agencyIdentity: identity,
-				provider, // AC-5: needed for auth readiness checks
-				capabilities, // Real agency capabilities for offer matching
-				onClaim: executor,
-				connectListener: async () => claimLoopListenClient!,
-				projectId: null, // Accept any project this agency is subscribed to
-				leaseTtlSeconds: 1320, // 22 minutes, must exceed spawn timeout
-				pollIntervalMs: 30_000,
-				maxConcurrent: 8,
-				logger: { log: console.log, warn: console.warn, error: console.error },
-			});
-
-			await claimLoop.start();
-			console.log(
-				`${log} AgencyClaimLoop started with capabilities: ${JSON.stringify(capabilities)}`,
-			);
+				await claimLoop.start();
+				console.log(
+					`${log} AgencyClaimLoop started with capabilities: ${JSON.stringify(capabilities)}`,
+				);
+			}
 		} catch (err) {
 			console.error(
 				`${log} Failed to start AgencyClaimLoop:`,
@@ -747,6 +740,95 @@ function numberFrom(value: unknown): number | null {
 function stringArrayFrom(value: unknown): string[] {
 	if (!Array.isArray(value)) return [];
 	return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+function stringArrayFromJsonish(value: unknown): string[] {
+	if (Array.isArray(value)) {
+		return stringArrayFrom(value)
+			.map((entry) => entry.trim())
+			.filter(Boolean);
+	}
+	if (typeof value !== "string") return [];
+
+	const trimmed = value.trim();
+	if (!trimmed) return [];
+	try {
+		return stringArrayFromJsonish(JSON.parse(trimmed));
+	} catch {
+		return [trimmed];
+	}
+}
+
+function capabilitiesFromSkills(value: unknown): string[] {
+	if (Array.isArray(value)) return stringArrayFromJsonish(value);
+	if (!value || typeof value !== "object") return [];
+
+	const capabilities: string[] = [];
+	for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+		if (raw === true) {
+			capabilities.push(key);
+			continue;
+		}
+		if (["all", "capabilities", "jobs"].includes(key)) {
+			capabilities.push(...stringArrayFromJsonish(raw));
+		}
+	}
+	return capabilities;
+}
+
+function uniqueSortedCapabilities(values: string[]): string[] {
+	return Array.from(
+		new Set(
+			values
+				.map((value) => value.trim())
+				.filter((value) => value.length > 0),
+		),
+	).sort((a, b) => a.localeCompare(b));
+}
+
+export async function loadAgencyClaimCapabilities(
+	identity: string,
+): Promise<string[]> {
+	const { rows } = await query<{
+		skills: unknown;
+		provider_jobs: unknown;
+		agent_caps: string[] | null;
+	}>(
+		`SELECT
+		    ar.skills,
+		    COALESCE(
+		      jsonb_agg(DISTINCT job.capability)
+		        FILTER (WHERE job.capability IS NOT NULL),
+		      '[]'::jsonb
+		    ) AS provider_jobs,
+		    COALESCE(
+		      array_agg(DISTINCT ac.capability)
+		        FILTER (WHERE ac.capability IS NOT NULL),
+		      ARRAY[]::text[]
+		    ) AS agent_caps
+		   FROM roadmap_workforce.agent_registry ar
+		   LEFT JOIN roadmap_workforce.provider_registry pr
+		     ON pr.agency_id = ar.id
+		    AND pr.is_active = true
+		    AND pr.status NOT IN ('offline', 'retired')
+		   LEFT JOIN LATERAL jsonb_array_elements_text(
+		     COALESCE(pr.capabilities->'jobs', '[]'::jsonb)
+		   ) AS job(capability)
+		     ON true
+		   LEFT JOIN roadmap_workforce.agent_capability ac
+		     ON ac.agent_id = ar.id
+		  WHERE ar.agent_identity = $1
+		  GROUP BY ar.id, ar.skills`,
+		[identity],
+	);
+
+	const row = rows[0];
+	if (!row) return [];
+	return uniqueSortedCapabilities([
+		...stringArrayFromJsonish(row.provider_jobs),
+		...(row.agent_caps ?? []),
+		...capabilitiesFromSkills(row.skills),
+	]);
 }
 
 function sleep(ms: number): Promise<void> {
