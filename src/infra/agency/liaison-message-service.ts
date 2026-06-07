@@ -114,6 +114,18 @@ export async function storeMessage(
 		throw new Error(`Failed to store message for agency ${message.agency_id}`);
 	}
 
+	// Keep liaison_sequence in sync so getNextSequence() returns MAX(sequence)+1
+	// even when messages are stored with explicit sequences (replay, migration, tests).
+	await query(
+		`INSERT INTO roadmap.liaison_sequence (agency_id, last_seq, updated_at)
+		 VALUES ($1, $2, now())
+		 ON CONFLICT (agency_id) DO UPDATE
+		     SET last_seq    = GREATEST(roadmap.liaison_sequence.last_seq, EXCLUDED.last_seq),
+		         updated_at  = now()
+		 WHERE roadmap.liaison_sequence.last_seq < EXCLUDED.last_seq`,
+		[message.agency_id, message.sequence],
+	);
+
 	return parseMessageRow(result.rows[0]);
 }
 
