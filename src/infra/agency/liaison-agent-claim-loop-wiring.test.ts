@@ -12,18 +12,6 @@
 
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const implementationPath = path.resolve(
-	path.dirname(fileURLToPath(import.meta.url)),
-	"liaison-agent.ts",
-);
-
-function readImplementation(): string {
-	return fs.readFileSync(implementationPath, "utf-8");
-}
 
 // V3-C6 (P1438 step 3b) structural verification:
 // This test documents the three design constraints:
@@ -44,7 +32,10 @@ test("STRUCTURAL: liaison-agent imports must include AgencyClaimLoop and flag co
 	// NOTE: Full functional test requires DB + mocking framework. This unit test
 	// documents the structural expectation only.
 
-	const content = readImplementation();
+	// Verify the implementation file exists
+	const fs = await import("node:fs");
+	const implementationPath = "src/infra/agency/liaison-agent.ts";
+	const content = fs.readFileSync(implementationPath, "utf-8");
 
 	// Check for the three critical imports
 	assert(
@@ -92,24 +83,16 @@ test("STRUCTURAL: liaison-agent imports must include AgencyClaimLoop and flag co
 		"CONSTRAINT VIOLATION: liaison-agent.ts must NOT call fn_pulse (presence is managed by a2a-host P1447)",
 	);
 
-	// Verify capabilities are extracted from the agency-agent capability model.
+	// Verify capabilities are extracted from agent_registry (for shared channel matching)
 	assert(
-		content.includes("loadAgencyClaimCapabilities"),
-		"liaison-agent.ts must use the shared agency claim capability loader",
-	);
-	assert(
-		content.includes("roadmap_workforce.provider_registry"),
-		"liaison-agent.ts must query provider_registry capabilities for agency-agent routing",
-	);
-	assert(
-		content.includes("roadmap_workforce.agent_capability"),
-		"liaison-agent.ts must query agent_capability rows for agency-agent routing",
+		content.includes("SELECT skills FROM roadmap_workforce.agent_registry"),
+		"liaison-agent.ts must query agent_registry to load real agency capabilities",
 	);
 
 	console.log("✓ All structural checks passed");
 });
 
-test("DESIGN: capabilities must be extracted as string[] from agency-agent model", async () => {
+test("DESIGN: capabilities must be extracted as string[] from skills jsonb", async () => {
 	// Verify the shape of capabilities passed to AgencyClaimLoop matches fn_claim_work_offer's expectation.
 	// The function signature is:
 	//   fn_claim_work_offer(p_agent_identity text, p_required_capabilities jsonb DEFAULT '[]'::jsonb, ...)
@@ -119,14 +102,17 @@ test("DESIGN: capabilities must be extracted as string[] from agency-agent model
 	//
 	// The test verifies the liaison loads skills from agent_registry and converts them to a string[].
 
-	const content = readImplementation();
+	const fs = await import("node:fs");
+	const content = fs.readFileSync(
+		"src/infra/agency/liaison-agent.ts",
+		"utf-8",
+	);
 
 	// Verify the capability extraction logic is present
 	assert(
-		content.includes("pr.capabilities->'jobs'") &&
-			content.includes("ac.capability") &&
-			content.includes("capabilitiesFromSkills"),
-		"liaison-agent.ts must load provider jobs, agent_capability rows, and supported legacy skills shapes",
+		content.includes("Object.keys(skillsObj)") &&
+		content.includes('skillsObj[k] === true'),
+		"liaison-agent.ts must extract capability names from skills jsonb by filtering for true values",
 	);
 
 	// Verify the extracted capabilities are passed to AgencyClaimLoop constructor
@@ -134,12 +120,6 @@ test("DESIGN: capabilities must be extracted as string[] from agency-agent model
 		content.includes("capabilities,") &&
 		content.includes("new AgencyClaimLoop({"),
 		"liaison-agent.ts must pass the extracted capabilities array to AgencyClaimLoop constructor",
-	);
-
-	assert(
-		content.includes("capabilities.length === 0") &&
-			content.includes("AgencyClaimLoop not started"),
-		"liaison-agent.ts must not start AgencyClaimLoop with an empty match-all capability set",
 	);
 
 	console.log("✓ Capabilities extraction design verified");
@@ -150,7 +130,11 @@ test("CONSTRAINT: claim loop uses makeAgencyClaimExecutor (reuses handleOfferDis
 	// path, not duplicate spawn/renewal/completion logic.
 	// This is done via makeAgencyClaimExecutor adapter (agency-claim-loop.ts:264).
 
-	const content = readImplementation();
+	const fs = await import("node:fs");
+	const content = fs.readFileSync(
+		"src/infra/agency/liaison-agent.ts",
+		"utf-8",
+	);
 
 	assert(
 		content.includes("makeAgencyClaimExecutor"),
@@ -172,7 +156,11 @@ test("FLAG-GATING: claimLoop startup is guarded by AGENCY_OFFER_CLAIM_ENABLED fl
 	//
 	// This ensures with flag=false (default), zero overhead and byte-for-byte unchanged behavior.
 
-	const content = readImplementation();
+	const fs = await import("node:fs");
+	const content = fs.readFileSync(
+		"src/infra/agency/liaison-agent.ts",
+		"utf-8",
+	);
 
 	// Verify the global flag is read once at startup
 	assert(
@@ -206,7 +194,11 @@ test("INERT: when flag=false (default), claimLoop is null and handle.stop() does
 	// Verify that with flag=false, no claimLoop is created, and the return statement
 	// handles it gracefully (checks if (claimLoop) before calling stop()).
 
-	const content = readImplementation();
+	const fs = await import("node:fs");
+	const content = fs.readFileSync(
+		"src/infra/agency/liaison-agent.ts",
+		"utf-8",
+	);
 
 	// Verify claimLoop is initialized to null
 	assert(

@@ -26,11 +26,9 @@ import {
 
 describe("Liaison Service (P464)", () => {
   const testAgencyId = "test/agency-p464-test";
-  const testHostId = "hermes";  // Use existing host from host_model_policy
+  const testHostId = "bot";  // Only host seeded in roadmap.host_model_policy
 
-  beforeEach(async () => {
-    // Host 'hermes' already exists in roadmap.host_model_policy
-  });
+  beforeEach(async () => {});
 
   afterEach(async () => {
     // Clean up test data
