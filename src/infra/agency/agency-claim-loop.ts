@@ -31,6 +31,10 @@ import {
 } from "./offer-dispatch-handler.ts";
 import { isProviderAuthDown } from "../../core/orchestration/provider-auth.ts";
 import type { LiaisonMessage } from "./liaison-message-types.ts";
+import {
+	evaluateSubscriptionPolicy,
+	declareThrottle,
+} from "./subscription-policy.ts";
 
 export type QueryFn = typeof defaultQuery;
 
@@ -222,6 +226,33 @@ export class AgencyClaimLoop {
 				this.logger.warn(
 					`[AgencyClaim:${this.agencyIdentity}] Provider auth for '${this.provider}' is down; skipping claim until cleared`,
 				);
+				return null;
+			}
+
+			// P465: subscription-aware claim policy — refuse new claims that would
+			// breach the safety margin. On refusal, self-declare throttled so the
+			// orchestrator re-routes any pending offers to an unthrottled agency.
+			const sqlExec = (sql: string, params?: unknown[]) => this.query(sql, params);
+			const policyResult = await evaluateSubscriptionPolicy(
+				this.agencyIdentity,
+				sqlExec,
+				this.logger,
+			);
+			if (!policyResult.allowed) {
+				this.logger.warn(
+					`[AgencyClaim:${this.agencyIdentity}] subscription policy refused claim: ${policyResult.reason}`,
+				);
+				await declareThrottle(
+					this.agencyIdentity,
+					policyResult.resets_at,
+					policyResult.reason ?? "subscription_quota_exceeded",
+					sqlExec,
+				).catch((err) => {
+					this.logger.error(
+						`[AgencyClaim:${this.agencyIdentity}] declareThrottle failed:`,
+						err instanceof Error ? err.message : err,
+					);
+				});
 				return null;
 			}
 

@@ -36,6 +36,10 @@ import {
 	recordProviderSuccess,
 } from "../../core/orchestration/provider-cooldown.ts";
 import { ObservabilityWriter } from "../../core/observability/observability-writer.ts";
+import {
+	evaluateSubscriptionPolicy,
+	declareThrottle,
+} from "./subscription-policy.ts";
 
 const obs = new ObservabilityWriter("agency:offer-dispatch-handler");
 
@@ -238,6 +242,42 @@ export async function handleOfferDispatch(
 		).catch((err) => {
 			logger.error(
 				`[OfferDispatchHandler] ${agencyId}: fn_complete_work_offer failed on paused-decline:`,
+				err instanceof Error ? err.message : err,
+			);
+		});
+		return;
+	}
+
+	// P465: subscription-aware claim policy — refuse new claims that would breach
+	// the safety margin. Return the offer (no failure penalty) so another agency
+	// can pick it up, then self-declare throttled until the tightest window resets.
+	const policyResult = await evaluateSubscriptionPolicy(agencyId, exec, logger);
+	if (!policyResult.allowed) {
+		logger.warn(
+			`[OfferDispatchHandler] ${agencyId}: subscription policy refused offer=${payload.offer_id}: ${policyResult.reason}`,
+		);
+		await exec(
+			`SELECT roadmap_workforce.fn_return_work_offer($1, $2, $3, $4)`,
+			[
+				payload.dispatch_id,
+				agencyId,
+				payload.claim_token,
+				`subscription_quota_refused:${policyResult.reason}`,
+			],
+		).catch((err) => {
+			logger.error(
+				`[OfferDispatchHandler] ${agencyId}: fn_return_work_offer failed on subscription-refuse:`,
+				err instanceof Error ? err.message : err,
+			);
+		});
+		await declareThrottle(
+			agencyId,
+			policyResult.resets_at,
+			policyResult.reason ?? "subscription_quota_exceeded",
+			exec,
+		).catch((err) => {
+			logger.error(
+				`[OfferDispatchHandler] ${agencyId}: declareThrottle failed:`,
 				err instanceof Error ? err.message : err,
 			);
 		});
