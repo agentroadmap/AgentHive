@@ -4340,8 +4340,8 @@ export class RoadmapServer {
 				        COALESCE(
 				          (SELECT bool_or(
 				                    NOT (mr.route_provider = ANY(hmp.forbidden_providers))
-				                    AND (hmp.allowed_providers = '{}'
-				                         OR mr.route_provider = ANY(hmp.allowed_providers))
+				                    AND (hmp.allowed_route_providers = '{}'
+				                         OR mr.route_provider = ANY(hmp.allowed_route_providers))
 				                  )
 				             FROM roadmap.host_model_policy hmp
 				          ),
