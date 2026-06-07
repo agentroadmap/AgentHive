@@ -23,8 +23,9 @@ import {
 	runLiaisonAgent,
 	type LiaisonAgentHandle,
 } from "../src/infra/agency/liaison-agent.ts";
-import { closePool, setPoolLifecycleMode } from "../src/infra/postgres/pool.ts";
+import { closePool, getPool, setPoolLifecycleMode } from "../src/infra/postgres/pool.ts";
 import { startPoolWatchdog } from "../src/infra/postgres/pool-watchdog.ts";
+import { initConfig } from "../src/shared/runtime/config.ts";
 
 // P1123: protect the shared pool from stray pool.end() in shared CLI code.
 setPoolLifecycleMode("long-running");
@@ -41,6 +42,19 @@ let agentHandle: LiaisonAgentHandle | undefined;
 
 async function main() {
 	console.log(`[liaison:${agencyId}] starting`);
+
+	// V3-C6 fix: the liaison process must initialize the runtime-config resolver
+	// with a DB pool, otherwise runtimeConfig.get() throws "Resolver not
+	// initialized" and every flag read (e.g. AGENCY_OFFER_CLAIM_ENABLED, gated by
+	// `.catch(() => false)`) silently resolves to its default — leaving the
+	// AgencyClaimLoop permanently off. Mirrors scripts/orchestrator.ts:40.
+	await initConfig({
+		pool: getPool(),
+		scopeContext: {
+			agencyId,
+			hostId: process.env.AGENCY_HOST_ID?.trim() || undefined,
+		},
+	});
 
 	handle = await bootLiaison();
 
