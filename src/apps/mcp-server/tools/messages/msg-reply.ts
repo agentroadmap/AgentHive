@@ -14,7 +14,6 @@
 import { query, getPool } from "../../../../postgres/pool.ts";
 import type { CallToolResult } from "../../types.ts";
 import { verifyUserBearer } from "../../../../infra/messaging/bearer-auth.ts";
-import { agentNotifyChannel } from "../../../../infra/messaging/a2a-access-control.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
@@ -100,10 +99,8 @@ export async function handleMsgReply(
 			[original.id],
 		);
 
-		// pg_notify the recipient on canonical msg_<identity> channel (P1103 AC-2).
-		// The INSERT trigger (fn_a2a_message_notify) already fires this; this secondary
-		// notify is a belt-and-suspenders wake for edge cases where the trigger fires
-		// before the listener client's LISTEN is established.
+		// pg_notify the recipient on channel a2a_msg_${recipientAgent}
+		// Build JSON in JS to avoid json_build_object anyelement type-inference failure
 		const notifyPayload = JSON.stringify({
 			message_id: replyId,
 			from_agent: args.from_agent,
@@ -115,7 +112,7 @@ export async function handleMsgReply(
 		try {
 			await client.query(
 				`SELECT pg_notify($1, $2)`,
-				[agentNotifyChannel(recipientAgent), notifyPayload],
+				[`a2a_msg_${recipientAgent}`, notifyPayload],
 			);
 		} finally {
 			client.release();

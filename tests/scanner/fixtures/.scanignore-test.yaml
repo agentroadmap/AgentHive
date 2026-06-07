@@ -1,0 +1,3 @@
+- path: tests/scanner/fixtures/test-suppress.ts
+  rules: "*"
+  reason: test fixture — all findings suppressed intentionally

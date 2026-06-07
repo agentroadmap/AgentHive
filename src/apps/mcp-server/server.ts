@@ -56,6 +56,7 @@ import { registerTeamTools, registerTeamGovernanceTools } from "./tools/teams/in
 import { registerTestingTools } from "./tools/testing/index.ts";
 import { registerWorkflowTools } from "./tools/workflow/index.ts";
 import { registerWorktreeMergeTools } from "./tools/worktree-merge/index.ts";
+import { registerScanTools } from "./tools/scan/index.ts";
 import { handleMcpError } from "./errors/mcp-errors.ts";
 import {
 	verifyUserBearer,
@@ -1955,6 +1956,7 @@ export async function createMcpServer(
 		console.error("[MCP] Using legacy filesystem proposal tools");
 	}
 	registerTestingTools(server);
+	registerScanTools(server, projectRoot);
 	registerDependencyTools(server);
 	if (usePostgres) {
 		registerConsolidatedTools(server);
@@ -2727,7 +2729,8 @@ export async function createMcpServer(
 	});
 
 	// P1129: Agency lifecycle tools — agency_start / agency_status
-	const { handleAgencyStart, handleAgencyStatus } = await import("./tools/ops/agency-ops.ts");
+	const { AgencyOpsHandler } = await import("./tools/ops/agency-ops.ts");
+	const agencyOps = new AgencyOpsHandler();
 	server.addTool({
 		name: "agency_start",
 		description:
@@ -2745,7 +2748,8 @@ export async function createMcpServer(
 			required: ["identity"],
 		},
 		handler: async (args: Record<string, unknown>) =>
-			handleAgencyStart({ agency_id: String(args.identity) }),
+			agencyOps.agencyStart({ identity: String(args.identity) })
+				.then((r) => ({ content: [{ type: "text", text: JSON.stringify(r, null, 2) }] })),
 	});
 	server.addTool({
 		name: "agency_status",
@@ -2763,7 +2767,51 @@ export async function createMcpServer(
 			required: ["identity"],
 		},
 		handler: async (args: Record<string, unknown>) =>
-			handleAgencyStatus({ agency_id: String(args.identity) }),
+			agencyOps.agencyStatus({ identity: String(args.identity) })
+				.then((r) => ({ content: [{ type: "text", text: JSON.stringify(r, null, 2) }] })),
+	});
+
+	// P1129: Agency lifecycle tools — agency_start / agency_status
+	const { AgencyOpsHandler } = await import("./tools/ops/agency-ops.ts");
+	const agencyOps = new AgencyOpsHandler();
+	server.addTool({
+		name: "agency_start",
+		description:
+			"P1129: Enable and start an agency's liaison systemd service. " +
+			"Verifies agent_type='agency' in agent_registry before touching systemd. " +
+			"Requires the mcp-server process user to have sudoers access to agenthive-agency@.service.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				identity: {
+					type: "string",
+					description: "Agency identity (agent_identity in agent_registry, e.g. 'george')",
+				},
+			},
+			required: ["identity"],
+		},
+		handler: async (args: Record<string, unknown>) =>
+			agencyOps.agencyStart({ identity: String(args.identity) })
+				.then((r) => ({ content: [{ type: "text", text: JSON.stringify(r, null, 2) }] })),
+	});
+	server.addTool({
+		name: "agency_status",
+		description:
+			"P1129: Query live status of an agency — combines systemd is-active state with " +
+			"agent_registry.last_seen_at and status. Read-only operation.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				identity: {
+					type: "string",
+					description: "Agency identity (agent_identity in agent_registry)",
+				},
+			},
+			required: ["identity"],
+		},
+		handler: async (args: Record<string, unknown>) =>
+			agencyOps.agencyStatus({ identity: String(args.identity) })
+				.then((r) => ({ content: [{ type: "text", text: JSON.stringify(r, null, 2) }] })),
 	});
 
 	// Start background maintenance tasks
