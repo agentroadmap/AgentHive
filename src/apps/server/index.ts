@@ -190,6 +190,9 @@ export class RoadmapServer {
 	private roadmapEventsReconnectTimer: ReturnType<typeof setTimeout> | null =
 		null;
 
+	// P446: track server start time for /healthz
+	private readonly _startedAt = new Date();
+
 	// P846: Operator agency registration and A2A relay
 	private readonly _operatorSseSessions = new Map<string, ServerResponse>();
 	private _operatorNotifyClient: PgClient | null = null;
@@ -1042,8 +1045,52 @@ export class RoadmapServer {
 			}
 		}
 
+		// Static routes returning indexHtml.
+		// P1696 added /dispatches; the broader fix is the generic SPA fallback
+		// at the end of dispatchRequest so future App.tsx routes (e.g.
+		// /agencies, currently TODO) work via direct URL without touching this list.
+		if (
+			method === "GET" &&
+			(pathname === "/" ||
+				[
+					"/board",
+					"/proposals",
+					"/directives",
+					"/drafts",
+					"/documentation",
+					"/decisions",
+					"/statistics",
+					"/settings",
+					"/dashboard",
+					"/agents",
+					"/teams",
+					"/channels",
+					"/agent-dashboard",
+					"/knowledge",
+					"/documents",
+					"/map",
+					"/routes",
+					"/achievements",
+					"/activity",
+					"/dispatches",
+					"/control",
+				].some((p) => pathname === p || pathname.startsWith(`${p}/`)))
+		) {
+			return new Response(indexHtml, {
+				headers: { "Content-Type": "text/html" },
+			});
+		}
+
 		if (method === "POST" && (pathname === "/mcp" || pathname === "/api/mcp")) {
 			return await this.handleDirectMcp(req);
+		}
+
+		// P446: Health and smoke endpoints (HTTP-layer, not MCP tool handlers)
+		if (method === "GET" && pathname === "/healthz") {
+			return await this.handleHealthz();
+		}
+		if (method === "POST" && pathname === "/smoke") {
+			return await this.handleSmoke();
 		}
 
 		// API Routes
@@ -1395,13 +1442,17 @@ export class RoadmapServer {
 			return new Response("Asset not found", { status: 404 });
 		}
 
-		// P1696: generic SPA fallback. Any GET with no file extension and no
-		// /api/ prefix is treated as a navigation request — serve the SPA shell
-		// so React routes it. Removes the need for a server-side path allow-list.
+		// P1696: generic SPA fallback. After all API and known-path handlers,
+		// any GET that looks like browser navigation (HTML accept, no file
+		// extension, no /api/ prefix) should serve the SPA shell so client-side
+		// React can route it. Prior behaviour 404'd unknown paths, making
+		// NotFoundPage unreachable via direct URL and breaking deep-links to
+		// new routes whenever the allow-list above wasn't updated.
 		if (
 			method === "GET" &&
 			!pathname.startsWith("/api/") &&
-			!pathname.includes(".")
+			!pathname.includes(".") &&
+			(req.headers.get("accept") ?? "").includes("text/html")
 		) {
 			return new Response(indexHtml, {
 				headers: { "Content-Type": "text/html" },
@@ -1467,6 +1518,84 @@ export class RoadmapServer {
 				{ status: 400 },
 			);
 		}
+	}
+
+	// P446 AC-4: GET /healthz
+	private async handleHealthz(): Promise<Response> {
+		let dbStatus: "ok" | "error" = "error";
+		let schemaVersion: string | null = null;
+		try {
+			const pool = getPool();
+			const [pingResult, migResult] = await Promise.all([
+				pool.query("SELECT 1"),
+				pool.query<{ filename: string }>(
+					"SELECT filename FROM roadmap.migration_history WHERE status = 'applied' ORDER BY applied_at DESC LIMIT 1",
+				).catch(() => null),
+			]);
+			if (pingResult.rowCount && pingResult.rowCount > 0) dbStatus = "ok";
+			if (migResult && migResult.rows.length > 0) {
+				schemaVersion = migResult.rows[0].filename;
+			}
+		} catch {
+			// dbStatus stays "error"
+		}
+
+		const { revision } = await getVersionInfo();
+		const dbHost = process.env.PGHOST ?? "127.0.0.1";
+		const dbName = process.env.PGDATABASE ?? "agenthive";
+		const schema = process.env.PG_SCHEMA ?? "roadmap";
+
+		const body = {
+			service: "ok",
+			db: dbStatus,
+			schema_version: schemaVersion,
+			git_revision: revision,
+			project_root: this.core.filesystem.rootDir,
+			db_host: dbHost,
+			db_name: dbName,
+			schema,
+			started_at: this._startedAt.toISOString(),
+			mcp_protocol_version: "2024-11-05",
+		};
+
+		const status = dbStatus === "ok" ? 200 : 503;
+		return Response.json(body, { status });
+	}
+
+	// P446 AC-5: POST /smoke
+	private async handleSmoke(): Promise<Response> {
+		if (!this.mcpServer) {
+			return Response.json(
+				{ error: "MCP server not available" },
+				{ status: 503 },
+			);
+		}
+
+		const smokeServer = this.mcpServer as McpServer;
+		const t0 = Date.now();
+		const steps: Array<{ name: string; elapsed_ms: number; result: "ok" | "error"; detail?: string }> = [];
+
+		const step = async (name: string, payload: unknown) => {
+			const stepStart = Date.now();
+			try {
+				const res = await handleDirectMcpRequest(smokeServer, payload);
+				const elapsed_ms = Date.now() - stepStart;
+				const isError = res.status >= 400 || ("error" in (res.body as object));
+				steps.push({ name, elapsed_ms, result: isError ? "error" : "ok" });
+			} catch (err) {
+				const elapsed_ms = Date.now() - stepStart;
+				const detail = err instanceof Error ? err.message : String(err);
+				steps.push({ name, elapsed_ms, result: "error", detail });
+			}
+		};
+
+		await step("initialize", { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "smoke", version: "0" } } });
+		await step("tools/list", { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
+		await step("tools/call mcp_project list_actions", { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "mcp_project", arguments: { action: "list_actions" } } });
+
+		const total_ms = Date.now() - t0;
+		const allOk = steps.every((s) => s.result === "ok");
+		return Response.json({ steps, total_ms }, { status: allOk ? 200 : 207 });
 	}
 
 	private async handleRequest(req: Request): Promise<Response> {
@@ -4340,8 +4469,8 @@ export class RoadmapServer {
 				        COALESCE(
 				          (SELECT bool_or(
 				                    NOT (mr.route_provider = ANY(hmp.forbidden_providers))
-				                    AND (hmp.allowed_route_providers = '{}'
-				                         OR mr.route_provider = ANY(hmp.allowed_route_providers))
+				                    AND (hmp.allowed_providers = '{}'
+				                         OR mr.route_provider = ANY(hmp.allowed_providers))
 				                  )
 				             FROM roadmap.host_model_policy hmp
 				          ),
