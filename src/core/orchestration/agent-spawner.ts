@@ -782,8 +782,8 @@ export async function resolveActiveRouteProvider(): Promise<AgentProvider | null
 		      hp.host_name IS NULL  -- no policy row → allow any (legacy)
 		      OR (
 		        (
-		          coalesce(array_length(hp.allowed_route_providers, 1), 0) = 0
-		          OR mr.route_provider = ANY(hp.allowed_route_providers)
+		          coalesce(array_length(hp.allowed_providers, 1), 0) = 0
+		          OR mr.route_provider = ANY(hp.allowed_providers)
 		        )
 		        AND NOT (mr.route_provider = ANY(hp.forbidden_providers))
 		      )

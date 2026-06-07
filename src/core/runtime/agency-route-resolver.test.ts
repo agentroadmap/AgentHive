@@ -105,10 +105,10 @@ async function insertHostPolicy(props: {
 
 	await q(
 		`INSERT INTO roadmap.host_model_policy
-		   (host_name, allowed_route_providers, forbidden_providers)
+		   (host_name, allowed_providers, forbidden_providers)
 		 VALUES ($1, $2, $3)
 		 ON CONFLICT (host_name) DO UPDATE SET
-		   allowed_route_providers = EXCLUDED.allowed_route_providers,
+		   allowed_providers = EXCLUDED.allowed_providers,
 		   forbidden_providers = EXCLUDED.forbidden_providers`,
 		[hostName, allowedProviders, forbiddenProviders],
 	);

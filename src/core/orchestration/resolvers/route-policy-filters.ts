@@ -11,8 +11,8 @@ export function hostPolicyFilterSql(hostParamIdx: number, alias = "mr"): string 
 			SELECT 1 FROM roadmap.host_model_policy hp
 			 WHERE hp.host_name = $${hostParamIdx}::text
 			   AND (
-			     coalesce(array_length(hp.allowed_route_providers, 1), 0) = 0
-			     OR ${alias}.route_provider = ANY(hp.allowed_route_providers)
+			     coalesce(array_length(hp.allowed_providers, 1), 0) = 0
+			     OR ${alias}.route_provider = ANY(hp.allowed_providers)
 			   )
 			   AND NOT (${alias}.route_provider = ANY(hp.forbidden_providers))
 		)
