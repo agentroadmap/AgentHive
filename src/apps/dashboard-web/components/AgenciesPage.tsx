@@ -1,6 +1,10 @@
 import type React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiClient } from "../lib/api";
+import {
+	getStoredOperatorToken,
+	setStoredOperatorToken,
+} from "../lib/operator-token-storage";
 
 type NamedAgent = {
 	identity: string;
@@ -149,6 +153,8 @@ const AgenciesPage: React.FC = () => {
 	const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
 	const [showInactive, setShowInactive] = useState(false);
 	const [actionError, setActionError] = useState<string | null>(null);
+	const [tokenSet, setTokenSet] = useState<boolean>(() => getStoredOperatorToken() != null);
+	const [tokenInput, setTokenInput] = useState("");
 
 	const fetchData = useCallback(async () => {
 		try {
@@ -262,7 +268,58 @@ const AgenciesPage: React.FC = () => {
 				</div>
 			</div>
 
-			{actionError && <div className="mb-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{actionError}</div>}
+			{/* Operator bearer token — required for pause/resume/drain/retire.
+			    Issue one with: npm run operator:issue -- --name=<you> --allowed='*' */}
+			<div className="mb-4 flex flex-wrap items-center gap-2 rounded border border-gray-200 bg-gray-50 p-2 text-sm dark:border-gray-800 dark:bg-gray-900/40">
+				<span className="text-gray-500 dark:text-gray-400">operator token</span>
+				{tokenSet ? (
+					<>
+						<span className="rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-300">
+							set ✓
+						</span>
+						<button
+							type="button"
+							onClick={() => {
+								setStoredOperatorToken(null);
+								setTokenSet(false);
+							}}
+							className="rounded border border-gray-300 px-2 py-0.5 text-xs dark:border-gray-700"
+						>
+							clear
+						</button>
+					</>
+				) : (
+					<>
+						<input
+							type="password"
+							placeholder="paste Bearer token to enable actions"
+							value={tokenInput}
+							onChange={(e) => setTokenInput(e.target.value)}
+							className="min-w-[16rem] flex-1 rounded border border-gray-300 bg-white px-2 py-1 text-xs dark:border-gray-700 dark:bg-gray-900"
+						/>
+						<button
+							type="button"
+							onClick={() => {
+								if (tokenInput.trim().length === 0) return;
+								setStoredOperatorToken(tokenInput.trim());
+								setTokenInput("");
+								setTokenSet(true);
+								setActionError(null);
+							}}
+							className="rounded bg-gray-900 px-2 py-1 text-xs font-medium text-white dark:bg-gray-100 dark:text-gray-900"
+						>
+							save
+						</button>
+					</>
+				)}
+			</div>
+
+			{actionError && (
+				<div className="mb-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+					{actionError}
+					{!tokenSet && " — set an operator token above (npm run operator:issue) to enable actions."}
+				</div>
+			)}
 
 			<div className="space-y-4">
 				{liaisonAgencies.length === 0 && (

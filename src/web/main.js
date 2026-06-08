@@ -175183,13 +175183,33 @@ var Switch = ({ children, location: location2 }) => {
 // src/apps/dashboard-web/components/AchievementsView.tsx
 var import_react3 = __toESM(require_react(), 1);
 
-// src/apps/dashboard-web/lib/project-scope-storage.ts
-var STORAGE_KEY = "roadmap.project_scope.v1";
-var CHANGE_EVENT = "roadmap:project-scope-changed";
-function getStoredProjectId() {
+// src/apps/dashboard-web/lib/operator-token-storage.ts
+var STORAGE_KEY = "operator.token";
+var CHANGE_EVENT = "roadmap:operator-token-changed";
+function getStoredOperatorToken() {
   if (typeof window === "undefined")
     return null;
   const raw = window.localStorage.getItem(STORAGE_KEY);
+  return raw && raw.trim().length > 0 ? raw.trim() : null;
+}
+function setStoredOperatorToken(token) {
+  if (typeof window === "undefined")
+    return;
+  if (token == null || token.trim().length === 0) {
+    window.localStorage.removeItem(STORAGE_KEY);
+  } else {
+    window.localStorage.setItem(STORAGE_KEY, token.trim());
+  }
+  window.dispatchEvent(new CustomEvent(CHANGE_EVENT, { detail: { hasToken: token != null } }));
+}
+
+// src/apps/dashboard-web/lib/project-scope-storage.ts
+var STORAGE_KEY2 = "roadmap.project_scope.v1";
+var CHANGE_EVENT2 = "roadmap:project-scope-changed";
+function getStoredProjectId() {
+  if (typeof window === "undefined")
+    return null;
+  const raw = window.localStorage.getItem(STORAGE_KEY2);
   if (!raw)
     return null;
   const n = Number(raw);
@@ -175199,10 +175219,10 @@ function setStoredProjectId(id) {
   if (typeof window === "undefined")
     return;
   if (id == null)
-    window.localStorage.removeItem(STORAGE_KEY);
+    window.localStorage.removeItem(STORAGE_KEY2);
   else
-    window.localStorage.setItem(STORAGE_KEY, String(id));
-  window.dispatchEvent(new CustomEvent(CHANGE_EVENT, { detail: { projectId: id } }));
+    window.localStorage.setItem(STORAGE_KEY2, String(id));
+  window.dispatchEvent(new CustomEvent(CHANGE_EVENT2, { detail: { projectId: id } }));
 }
 function onProjectScopeChange(handler) {
   if (typeof window === "undefined")
@@ -175211,15 +175231,15 @@ function onProjectScopeChange(handler) {
     const detail = ev.detail;
     handler(detail?.projectId ?? null);
   };
-  window.addEventListener(CHANGE_EVENT, listener);
+  window.addEventListener(CHANGE_EVENT2, listener);
   const storageListener = (ev) => {
-    if (ev.key === STORAGE_KEY) {
+    if (ev.key === STORAGE_KEY2) {
       handler(ev.newValue ? Number(ev.newValue) : null);
     }
   };
   window.addEventListener("storage", storageListener);
   return () => {
-    window.removeEventListener(CHANGE_EVENT, listener);
+    window.removeEventListener(CHANGE_EVENT2, listener);
     window.removeEventListener("storage", storageListener);
   };
 }
@@ -175275,6 +175295,10 @@ class ApiClient {
         };
         if (projectId != null && !mergedHeaders["X-Project-Id"]) {
           mergedHeaders["X-Project-Id"] = String(projectId);
+        }
+        const operatorToken = getStoredOperatorToken();
+        if (operatorToken && !mergedHeaders.Authorization) {
+          mergedHeaders.Authorization = `Bearer ${operatorToken}`;
         }
         const response = await fetch(url, {
           ...options,
@@ -176243,6 +176267,8 @@ var AgenciesPage = () => {
   const [expandedAgent, setExpandedAgent] = import_react5.useState(null);
   const [showInactive, setShowInactive] = import_react5.useState(false);
   const [actionError, setActionError] = import_react5.useState(null);
+  const [tokenSet, setTokenSet] = import_react5.useState(() => getStoredOperatorToken() != null);
+  const [tokenInput, setTokenInput] = import_react5.useState("");
   const fetchData = import_react5.useCallback(async () => {
     try {
       setError(null);
@@ -176380,10 +176406,62 @@ var AgenciesPage = () => {
           }, undefined, true, undefined, this)
         ]
       }, undefined, true, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+        className: "mb-4 flex flex-wrap items-center gap-2 rounded border border-gray-200 bg-gray-50 p-2 text-sm dark:border-gray-800 dark:bg-gray-900/40",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+            className: "text-gray-500 dark:text-gray-400",
+            children: "operator token"
+          }, undefined, false, undefined, this),
+          tokenSet ? /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(jsx_dev_runtime4.Fragment, {
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                className: "rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-300",
+                children: "set ✓"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("button", {
+                type: "button",
+                onClick: () => {
+                  setStoredOperatorToken(null);
+                  setTokenSet(false);
+                },
+                className: "rounded border border-gray-300 px-2 py-0.5 text-xs dark:border-gray-700",
+                children: "clear"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this) : /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(jsx_dev_runtime4.Fragment, {
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("input", {
+                type: "password",
+                placeholder: "paste Bearer token to enable actions",
+                value: tokenInput,
+                onChange: (e) => setTokenInput(e.target.value),
+                className: "min-w-[16rem] flex-1 rounded border border-gray-300 bg-white px-2 py-1 text-xs dark:border-gray-700 dark:bg-gray-900"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("button", {
+                type: "button",
+                onClick: () => {
+                  if (tokenInput.trim().length === 0)
+                    return;
+                  setStoredOperatorToken(tokenInput.trim());
+                  setTokenInput("");
+                  setTokenSet(true);
+                  setActionError(null);
+                },
+                className: "rounded bg-gray-900 px-2 py-1 text-xs font-medium text-white dark:bg-gray-100 dark:text-gray-900",
+                children: "save"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
       actionError && /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
         className: "mb-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700",
-        children: actionError
-      }, undefined, false, undefined, this),
+        children: [
+          actionError,
+          !tokenSet && " — set an operator token above (npm run operator:issue) to enable actions."
+        ]
+      }, undefined, true, undefined, this),
       /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
         className: "space-y-4",
         children: [

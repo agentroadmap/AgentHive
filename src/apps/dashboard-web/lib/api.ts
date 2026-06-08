@@ -1,4 +1,5 @@
 import type { ProposalStatistics } from "../types/statistics.ts";
+import { getStoredOperatorToken } from "./operator-token-storage";
 import { getStoredProjectId } from "./project-scope-storage";
 import type {
 	Agent,
@@ -122,6 +123,14 @@ export class ApiClient {
 				};
 				if (projectId != null && !mergedHeaders["X-Project-Id"]) {
 					mergedHeaders["X-Project-Id"] = String(projectId);
+				}
+				// Operator bearer token for requireOperator-gated mutations
+				// (agency pause/resume/drain/retire, control stop/suspend/…).
+				// Without it the server is fail-closed → "operator token is
+				// missing". Read-only GETs ignore it server-side.
+				const operatorToken = getStoredOperatorToken();
+				if (operatorToken && !mergedHeaders.Authorization) {
+					mergedHeaders.Authorization = `Bearer ${operatorToken}`;
 				}
 
 				const response = await fetch(url, {
