@@ -1,22 +1,41 @@
-# Operator Guide — Antigravity Agency (`antigravity-bot-gary.a`)
+# Operator Guide / TODO — Antigravity Agency (`antigravity-bot-gary.a`)
 
-Status: agency **registered + verified live** (DB rows active, 8 model_routes, token budget seeded, curl/psql operating path built). No root env edits are required.
+Status: agency **registered + verified live** (DB rows active, 8 model_routes, token budget seeded, curl/psql operating path built). Spawner adapter is now built and verified.
 
-## Operation Model: Path ② (Smart Cold-Wake Liaison)
+---
 
-Antigravity operates strictly as a **smart cold-wake liaison** (similar to `claude-bot-gary.a`):
-- It periodically wakes and scans for open offers.
-- It claims offers via `psql` (`fn_claim_work_offer`).
-- It reads and writes AgentHive state via MCP using the `bin/agenthive-mcp.sh` curl wrapper.
-- It dispatches its own worker processes directly via `bin/spawn-agy-worker.sh`.
+## Optional: Enroll in the Deterministic Self-Claim Floor (Path ①)
 
-### ⚠️ Do NOT add to `/etc/agenthive/env`
+> [!IMPORTANT]
+> **Enrollment Gate**: Do NOT perform these steps until **AC-4** has passed in a non-production/staging environment to verify that spawning does not result in wedged claims.
 
-Do **not** add `antigravity-bot-gary.a` to `AGENTHIVE_SELF_CLAIM_AGENCIES` in `/etc/agenthive/env`. 
+Once gated verification passes, you can enroll `antigravity-bot-gary.a` in the automated deterministic self-claim floor (the same event-driven loop that handles `claude-bot-gary.a`).
 
-The `AGENTHIVE_SELF_CLAIM_AGENCIES` list is for the deterministic system-level OS floor service (`agenthive-a2a-host` or Path ①). The OS-level spawner lacks the `agy` CLI argument builders (`cli-argv-builders.ts`), so enabling it in Path ① would result in claims that fail to spawn correctly.
+This requires editing `/etc/agenthive/env` (which requires root).
 
-Antigravity is fully operational and self-contained on Path ② without any modifications to system environment files.
+### 1. Edit `/etc/agenthive/env`
+Edit `/etc/agenthive/env` as root and append `antigravity-bot-gary.a` to the self-claim allowlist.
+
+**Before:**
+```env
+AGENTHIVE_SELF_CLAIM_AGENCIES=claude-bot-gary.a
+```
+
+**After:**
+```env
+AGENTHIVE_SELF_CLAIM_AGENCIES=claude-bot-gary.a,antigravity-bot-gary.a
+```
+
+> [!CAUTION]
+> Make sure to preserve the file's existing owner (`root:agenthive`) and permissions (`640`). Do not run chmod/chown on it.
+
+### 2. Restart the orchestrator service
+Restart the floor daemon to load the new environment configuration:
+```bash
+sudo systemctl restart agenthive-orchestrator
+```
+
+---
 
 ## Reference / Operations Cheat Sheet
 - **MCP state queries**: `bin/agenthive-mcp.sh <tool> '<json-args>'` (e.g. `bin/agenthive-mcp.sh mcp_proposal '{"action":"list"}'`)

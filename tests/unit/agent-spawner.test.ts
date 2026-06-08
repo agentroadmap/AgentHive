@@ -6,6 +6,7 @@ import type { ChildProcess } from "node:child_process";
 import {
 	assertResolvedRouteMetadata,
 	buildSpawnProcessEnv,
+	buildArgsBySpec,
 	liveChildCount,
 	renderClosingHint,
 	terminateLiveChildren,
@@ -293,3 +294,62 @@ describe("P738 HF-B: closing hint forbids worker-side set_maturity", () => {
 		assert.ok(out.includes("## Task\nImplement AC-1 through AC-3."));
 	});
 });
+
+describe("buildArgsBySpec for agy", () => {
+	it("routes agy route spec to buildAntigravityArgs with correct parameters", () => {
+		const req = {
+			task: "run lint check",
+			worktree: "/data/code/worktree/antigravity",
+		} as any;
+
+		const route = {
+			agentCli: "agy",
+			cliPath: "/home/gary/.local/bin/agy",
+			modelName: "Gemini 3.5 Flash (Medium)",
+			routeProvider: "google",
+		} as any;
+
+		const spec = buildArgsBySpec(req, route);
+
+		assert.ok(spec.argv[0].endsWith("/agy"), `bin path must end in /agy, got: ${spec.argv[0]}`);
+		assert.ok(spec.argv.includes("--model"), "argv must include --model");
+		assert.ok(spec.argv.includes("Gemini 3.5 Flash (Medium)"), "argv must include the exact model name");
+		assert.ok(spec.argv.includes("run lint check"), "argv must include task");
+		assert.ok(spec.argv.includes("/data/code/worktree/antigravity"), "argv must include worktree path");
+	});
+});
+
+describe("assertResolvedRouteMetadata unknown-cli guard", () => {
+	it("rejects unknown agent_cli values", () => {
+		const route = {
+			modelName: "custom-model",
+			routeProvider: "google",
+			agentProvider: "google",
+			agentCli: "unknown-cli-name",
+			cliPath: "/bin/custom",
+			apiSpec: "google",
+			baseUrl: "https://generativelanguage.googleapis.com",
+		} as any;
+
+		assert.throws(() => {
+			assertResolvedRouteMetadata("google", route);
+		}, /unknown agent_cli/);
+	});
+
+	it("rejects missing agent_cli values", () => {
+		const route = {
+			modelName: "custom-model",
+			routeProvider: "google",
+			agentProvider: "google",
+			agentCli: "",
+			cliPath: "/bin/custom",
+			apiSpec: "google",
+			baseUrl: "https://generativelanguage.googleapis.com",
+		} as any;
+
+		assert.throws(() => {
+			assertResolvedRouteMetadata("google", route);
+		}, /missing agent_cli/);
+	});
+});
+

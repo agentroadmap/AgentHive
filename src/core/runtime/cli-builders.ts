@@ -15,7 +15,7 @@ import { emitCliBuilderFallback, getRouteForBuilder } from "./cli-builder-route-
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
-export type CliName = "claude" | "codex" | "hermes" | "gemini" | "copilot";
+export type CliName = "claude" | "codex" | "hermes" | "gemini" | "copilot" | "agy";
 
 export interface BuildArgvOptions {
 	/** The task/prompt content */
@@ -328,6 +328,58 @@ export class CopilotCliBuilder implements CliBuilder {
 	}
 }
 
+// ─── Antigravity (agy) CLI ───────────────────────────────────────────────
+
+export class AgyCliBuilder implements CliBuilder {
+	readonly name: CliName = "agy";
+
+	executableName(): string {
+		return "agy";
+	}
+
+	defaultModel(): string {
+		return "Gemini 3.5 Flash (Medium)";
+	}
+
+	buildArgv(options: BuildArgvOptions): string[] {
+		const addDir = (options.flags?.["add-dir"] as string) || process.cwd();
+		const model = options.modelOverride || this.defaultModel();
+		return [
+			"agy",
+			"-p",
+			options.task,
+			"--model",
+			model,
+			"--dangerously-skip-permissions",
+			"--add-dir",
+			addDir,
+		];
+	}
+
+	buildEnv(options: BuildEnvOptions): Record<string, string> {
+		return {
+			HOME: options.homeDir,
+		};
+	}
+
+	buildCommandSpec(
+		task: string,
+		route: { modelName: string; baseUrl: string; routeProvider: string },
+	): CommandSpec {
+		const argv = [
+			"agy",
+			"-p",
+			task,
+			"--model",
+			route.modelName,
+			"--dangerously-skip-permissions",
+			"--add-dir",
+			process.cwd(),
+		];
+		return { argv, env: {} };
+	}
+}
+
 // ─── Registry ─────────────────────────────────────────────────────────────
 
 const BUILDERS: Record<string, CliBuilder> = {
@@ -336,6 +388,7 @@ const BUILDERS: Record<string, CliBuilder> = {
 	hermes: new HermesCliBuilder(),
 	gemini: new GeminiCliBuilder(),
 	copilot: new CopilotCliBuilder(),
+	agy: new AgyCliBuilder(),
 };
 
 /**

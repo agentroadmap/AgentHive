@@ -134,6 +134,10 @@ describe("buildModelFlag()", () => {
     assert.deepEqual(buildModelFlag("copilot", "gpt-4"), ["--model", "gpt-4"]);
   });
 
+  it("agy CLI: returns ['--model', modelName]", () => {
+    assert.deepEqual(buildModelFlag("agy", "Gemini 3.5 Flash (Medium)"), ["--model", "Gemini 3.5 Flash (Medium)"]);
+  });
+
   it("unknown CLI falls back to ['--model', modelName]", () => {
     assert.deepEqual(buildModelFlag("unknown-cli", "some-model"), ["--model", "some-model"]);
   });

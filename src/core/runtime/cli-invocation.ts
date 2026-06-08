@@ -20,6 +20,7 @@ import {
 	buildHermesArgs,
 	buildGeminiArgs,
 	buildOpenAICompatArgs,
+	buildAntigravityArgs,
 } from "./cli-argv-builders.ts";
 import { spawn } from "node:child_process";
 
@@ -60,8 +61,9 @@ export class CliInvocationRegistry {
 
 		// Load from DB
 		const { rows } = await query(
-			`SELECT agent_provider, cli_path FROM roadmap.model_routes
+			`SELECT agent_provider, cli_path, model_name FROM roadmap.model_routes
 			  WHERE agent_provider = $1
+			  ORDER BY is_enabled DESC, priority DESC
 			  LIMIT 1`,
 			[provider],
 		);
@@ -71,14 +73,14 @@ export class CliInvocationRegistry {
 			return null;
 		}
 
-		const route = rows[0] as { agent_provider: string; cli_path?: string };
+		const route = rows[0] as { agent_provider: string; cli_path?: string; model_name?: string };
 		const bin =
 			route.cli_path ||
 			this.envFallback(provider) ||
 			this.defaultBinFor(provider);
 
 		const brand = defaultBrandFor(provider);
-		const buildArgs = this.buildArgsForProvider(provider);
+		const buildArgs = this.buildArgsForProvider(provider, route.model_name);
 
 		if (!buildArgs) {
 			return null;
@@ -129,6 +131,7 @@ export class CliInvocationRegistry {
 
 	private buildArgsForProvider(
 		provider: string,
+		modelName?: string,
 	): ((prompt: string) => string[]) | null {
 		switch (provider) {
 			case "claude":
@@ -141,6 +144,12 @@ export class CliInvocationRegistry {
 				return buildHermesArgs;
 			case "gemini":
 				return buildGeminiArgs;
+			case "antigravity":
+				return (prompt: string) => {
+					const model = modelName || "Gemini 3.5 Flash (Medium)";
+					const addDir = process.cwd();
+					return buildAntigravityArgs(prompt, model, addDir);
+				};
 			default:
 				return buildOpenAICompatArgs;
 		}

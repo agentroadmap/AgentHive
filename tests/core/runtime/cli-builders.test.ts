@@ -13,6 +13,7 @@ import {
   HermesCliBuilder,
   GeminiCliBuilder,
   CopilotCliBuilder,
+  AgyCliBuilder,
   getCliBuilder,
   isKnownCli,
   listCliNames,
@@ -305,6 +306,62 @@ describe("CopilotCliBuilder", () => {
   });
 });
 
+// ─── AgyCliBuilder ───────────────────────────────────────────────────────────
+
+describe("AgyCliBuilder", () => {
+  const builder = new AgyCliBuilder();
+
+  it("name is 'agy'", () => {
+    assert.equal(builder.name, "agy");
+  });
+
+  it("executableName() returns 'agy'", () => {
+    assert.equal(builder.executableName(), "agy");
+  });
+
+  it("defaultModel() returns Gemini 3.5 Flash (Medium)", () => {
+    assert.equal(builder.defaultModel(), "Gemini 3.5 Flash (Medium)");
+  });
+
+  it("buildArgv() — basic task", () => {
+    const argv = builder.buildArgv({ task: "run diagnostics" });
+    assert.equal(argv[0], "agy");
+    assert.ok(argv.includes("-p"), "must include -p");
+    assert.ok(argv.includes("run diagnostics"), "must include task");
+    assert.ok(argv.includes("--dangerously-skip-permissions"), "must skip permissions");
+    assert.ok(argv.includes("--add-dir"), "must include add-dir");
+  });
+
+  it("buildArgv() — with modelOverride and flags", () => {
+    const argv = builder.buildArgv({
+      task: "task",
+      modelOverride: "Claude Sonnet 4.6 (Thinking)",
+      flags: { "add-dir": "/tmp/worktree" }
+    });
+    assert.ok(argv.includes("--model"), "must include --model");
+    assert.ok(argv.includes("Claude Sonnet 4.6 (Thinking)"), "must include custom model");
+    assert.ok(argv.includes("/tmp/worktree"), "must include custom add-dir");
+  });
+
+  it("buildEnv() — sets HOME", () => {
+    const env = builder.buildEnv({ homeDir: "/home/user" });
+    assert.equal(env.HOME, "/home/user");
+  });
+
+  it("buildCommandSpec() — argv structure", () => {
+    const spec = builder.buildCommandSpec("review code", {
+      modelName: "Claude Sonnet 4.6 (Thinking)",
+      baseUrl: "http://127.0.0.1:6421/mcp-streamable",
+      routeProvider: "anthropic",
+    });
+    assert.equal(spec.argv[0], "agy");
+    assert.ok(spec.argv.includes("-p"), "must include -p");
+    assert.ok(spec.argv.includes("--model"), "must include --model");
+    assert.ok(spec.argv.includes("Claude Sonnet 4.6 (Thinking)"), "must include model");
+    assert.ok(spec.argv.includes("--add-dir"), "must include --add-dir");
+  });
+});
+
 // ─── Registry ─────────────────────────────────────────────────────────────────
 
 describe("CLI builder registry", () => {
@@ -328,12 +385,16 @@ describe("CLI builder registry", () => {
     assert.equal(getCliBuilder("copilot").name, "copilot");
   });
 
+  it("getCliBuilder('agy') returns AgyCliBuilder", () => {
+    assert.equal(getCliBuilder("agy").name, "agy");
+  });
+
   it("getCliBuilder('unknown') falls back to hermes", () => {
     assert.equal(getCliBuilder("unknown-cli").name, "hermes");
   });
 
-  it("isKnownCli() returns true for all five CLIs", () => {
-    for (const name of ["claude", "codex", "hermes", "gemini", "copilot"]) {
+  it("isKnownCli() returns true for all six CLIs", () => {
+    for (const name of ["claude", "codex", "hermes", "gemini", "copilot", "agy"]) {
       assert.ok(isKnownCli(name), `${name} must be a known CLI`);
     }
   });
@@ -342,11 +403,11 @@ describe("CLI builder registry", () => {
     assert.equal(isKnownCli("opencode"), false);
   });
 
-  it("listCliNames() contains all five CLIs", () => {
+  it("listCliNames() contains all six CLIs", () => {
     const names = listCliNames();
-    for (const name of ["claude", "codex", "hermes", "gemini", "copilot"]) {
+    for (const name of ["claude", "codex", "hermes", "gemini", "copilot", "agy"]) {
       assert.ok(names.includes(name as never), `${name} must be in listCliNames()`);
     }
-    assert.equal(names.length, 5);
+    assert.equal(names.length, 6);
   });
 });
