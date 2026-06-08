@@ -11,7 +11,7 @@ BEGIN;
 
 -- ── Config table ──────────────────────────────────────────────────────────────
 
-CREATE TABLE roadmap.agency_capacity_config (
+CREATE TABLE IF NOT EXISTS roadmap.agency_capacity_config (
   agency_id         text          NOT NULL PRIMARY KEY
                                   REFERENCES roadmap.agency(agency_id) ON DELETE CASCADE,
   windows           jsonb         NOT NULL DEFAULT '[]'::jsonb,
@@ -32,7 +32,7 @@ COMMENT ON COLUMN roadmap.agency_capacity_config.windows IS
 
 -- ── Usage meter ───────────────────────────────────────────────────────────────
 
-CREATE TABLE roadmap.agency_usage_meter (
+CREATE TABLE IF NOT EXISTS roadmap.agency_usage_meter (
   id              bigserial   PRIMARY KEY,
   agency_id       text        NOT NULL REFERENCES roadmap.agency(agency_id) ON DELETE CASCADE,
   window_kind     text        NOT NULL
