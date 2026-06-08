@@ -81,7 +81,7 @@ function makeFakeStore(): PrincipalIdentityStore {
 				});
 				return { rowCount: 1, rows: [] };
 			}
-			if (sql.includes("UPDATE roadmap.principal_identity") && sql.includes("revoked_at")) {
+			if (sql.includes("UPDATE roadmap.principal_identity") && sql.includes("SET revoked_at")) {
 				const [id, reason] = params as string[];
 				const row = rows.get(id);
 				if (row && !row.revoked_at) {

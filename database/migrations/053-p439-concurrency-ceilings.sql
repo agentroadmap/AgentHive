@@ -159,8 +159,8 @@ ok=false means the ceiling is reached and the caller must reject the claim.';
 
 -- ─── 4. Update fn_claim_work_offer with concurrency ceiling checks ────────────
 --
--- P439 adds three ceiling checks (global → agency → proposal) after locking the
--- chosen squad_dispatch row (SKIP LOCKED).
+-- P439 adds four ceiling checks (global → project → agency → proposal) after
+-- locking the chosen squad_dispatch row (SKIP LOCKED).
 --
 -- IMPORTANT — count source:
 --   fn_check_concurrency counts roadmap_control.claim (the TypeScript
@@ -171,8 +171,19 @@ ok=false means the ceiling is reached and the caller must reject the claim.';
 --
 -- Lock order (no deadlock possible):
 --   squad_dispatch row (SKIP LOCKED, non-blocking)
---   → concurrency_limit row (global __default__, then agency, then proposal)
+--   → concurrency_limit row (global, then project, then agency, then proposal)
 --   All concurrent callers take locks in the same direction.
+--
+-- Host scope not checked here: squad_dispatch has no host column.  The host
+-- ceiling (for TypeScript tryClaimDispatch path) is tracked via
+-- roadmap_control.claim/dispatch.  A follow-on proposal should add a host
+-- column to squad_dispatch to close this gap for the workforce path.
+--
+-- Agency scope_id note: this function uses p_agent_identity as scope_id for
+-- the agency ceiling (matching squad_dispatch.agent_identity). The TypeScript
+-- tryClaimDispatch path uses dispatch.agency_id as scope_id.  These are
+-- different namespaces: rows materialized by one path are not shared with the
+-- other.  See v_concurrency_usage for how the view aggregates both.
 --
 -- The function signature is UNCHANGED (4 params, 9 return columns including
 -- route_provider added by a previous migration).  Only the body is extended.
@@ -224,6 +235,8 @@ BEGIN
     WHERE  ar.agent_identity = p_agent_identity;
 
     -- Pick one open offer with SKIP LOCKED (non-blocking concurrent race).
+    -- project_id is included in the SELECT so we can enforce the project ceiling
+    -- without a second round-trip and also reuse it for route resolution.
     WITH agent_caps AS (
         SELECT ac.capability
         FROM   roadmap_workforce.agent_capability ac
@@ -244,7 +257,7 @@ BEGIN
           )
     ),
     candidate AS (
-        SELECT sd.id, sd.proposal_id
+        SELECT sd.id, sd.proposal_id, sd.project_id
         FROM   roadmap_workforce.squad_dispatch sd
         WHERE  sd.offer_status = 'open'
           AND (
@@ -266,15 +279,15 @@ BEGIN
         LIMIT 1
     )
     -- Qualify with candidate.* to avoid OUT-param column-name collision (SQLSTATE 42702).
-    SELECT candidate.id, candidate.proposal_id
-      INTO v_picked_id, v_picked_proposal_id
+    SELECT candidate.id, candidate.proposal_id, candidate.project_id
+      INTO v_picked_id, v_picked_proposal_id, v_dispatch_project
       FROM candidate;
 
     IF v_picked_id IS NULL THEN
         RETURN;
     END IF;
 
-    -- ── Concurrency ceiling checks (global → agency → proposal) ──────────────
+    -- ── Concurrency ceiling checks (global → project → agency → proposal) ───────
     --
     -- We count directly from squad_dispatch (offer_status='claimed') because
     -- that is the table this function writes to on success.
@@ -311,7 +324,33 @@ BEGIN
         END IF;
     END IF;
 
-    -- 2. Agency ceiling (when caller is a registered agent with an agency row)
+    -- 2. Project ceiling (when offer is bound to a project)
+    IF v_dispatch_project IS NOT NULL THEN
+        INSERT INTO roadmap_control.concurrency_limit
+            (scope_type, scope_id, max_active_claims, max_active_workers)
+        SELECT 'project', v_dispatch_project::text, max_active_claims, max_active_workers
+        FROM   roadmap_control.concurrency_limit
+        WHERE  scope_type = 'project' AND scope_id = '__default__'
+        ON CONFLICT (scope_type, scope_id) DO NOTHING;
+
+        SELECT max_active_claims INTO v_ceil_max
+        FROM   roadmap_control.concurrency_limit
+        WHERE  scope_type = 'project' AND scope_id = v_dispatch_project::text
+        FOR UPDATE;
+
+        IF v_ceil_max IS NOT NULL THEN
+            SELECT COUNT(*)::integer INTO v_ceil_current
+            FROM   roadmap_workforce.squad_dispatch
+            WHERE  offer_status = 'claimed'
+              AND  project_id   = v_dispatch_project;
+
+            IF v_ceil_current >= v_ceil_max THEN
+                RETURN;
+            END IF;
+        END IF;
+    END IF;
+
+    -- 3. Agency ceiling (when caller is a registered agent with an agency row)
     IF v_agency_id IS NOT NULL THEN
         INSERT INTO roadmap_control.concurrency_limit
             (scope_type, scope_id, max_active_claims, max_active_workers)
@@ -364,10 +403,7 @@ BEGIN
     END IF;
 
     -- ── Resolve route_provider via project policy ─────────────────────────────
-
-    SELECT sd.project_id INTO v_dispatch_project
-    FROM   roadmap_workforce.squad_dispatch sd
-    WHERE  sd.id = v_picked_id;
+    -- v_dispatch_project is already set from the candidate CTE above.
 
     SELECT rp.allowed_route_providers, rp.forbidden_route_providers
       INTO v_allowed_providers, v_forbidden_providers
@@ -426,6 +462,17 @@ $function$;
 -- The two tables track independent claims (never double-counted).
 -- For __default__ rows in non-global scopes, current_active_claims = 0
 -- (no dispatch entity has scope_id='__default__').
+--
+-- Agency scope_id note: concurrency_limit rows for the 'agency' scope use two
+-- different scope_id namespaces depending on which path materialized the row:
+--   • TypeScript path: scope_id = dispatch.agency_id  (the agency entity ID)
+--   • SQL path:        scope_id = agent_identity       (the agent identity string)
+-- The view aggregates them independently — rows from different namespaces are
+-- not combined.  A follow-on proposal should align the two paths on a single
+-- agency identifier (dispatch.agency_id) to enable accurate cross-path totals.
+--
+-- Host scope: only counted for the TypeScript claim path because squad_dispatch
+-- has no host column.  The workforce path host count is always 0 in this view.
 
 CREATE OR REPLACE VIEW roadmap_control.v_concurrency_usage AS
 SELECT
@@ -454,17 +501,20 @@ SELECT
               WHERE offer_status   = 'claimed'
                 AND agent_identity = cl.scope_id)
         WHEN cl.scope_type = 'project' THEN
+            -- control path (dispatch.project_id is text)
             (SELECT COUNT(*)::integer
                FROM roadmap_control.claim  c
                JOIN roadmap_control.dispatch d ON d.dispatch_id = c.dispatch_id
               WHERE c.status     = 'active'
                 AND d.project_id = cl.scope_id)
             +
+            -- workforce path (squad_dispatch.project_id is bigint)
             (SELECT COUNT(*)::integer
                FROM roadmap_workforce.squad_dispatch
               WHERE offer_status = 'claimed'
                 AND project_id::text = cl.scope_id)
         WHEN cl.scope_type = 'host' THEN
+            -- only control path: squad_dispatch has no host column
             (SELECT COUNT(*)::integer
                FROM roadmap_control.claim  c
                JOIN roadmap_control.dispatch d ON d.dispatch_id = c.dispatch_id

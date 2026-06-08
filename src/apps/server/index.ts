@@ -1525,7 +1525,6 @@ export class RoadmapServer {
 	private async handleHealthz(): Promise<Response> {
 		let dbStatus: "ok" | "error" = "error";
 		let schemaVersion: string | null = null;
-		let dbErrorMessage: string | undefined;
 		try {
 			const pool = getPool();
 			const [pingResult, migResult] = await Promise.all([
@@ -1538,21 +1537,20 @@ export class RoadmapServer {
 			if (migResult && migResult.rows.length > 0) {
 				schemaVersion = migResult.rows[0].filename;
 			}
-		} catch (err) {
-			dbErrorMessage = err instanceof Error ? err.message : String(err);
+		} catch {
+			// dbStatus stays "error"
 		}
 
-		const { version, revision } = await getVersionInfo();
+		const { revision } = await getVersionInfo();
 		const dbHost = process.env.PGHOST ?? "127.0.0.1";
 		const dbName = process.env.PGDATABASE ?? "agenthive";
 		const schema = process.env.PG_SCHEMA ?? "roadmap";
 
-		const body: Record<string, unknown> = {
+		const body = {
 			service: "ok",
 			db: dbStatus,
 			schema_version: schemaVersion,
 			git_revision: revision,
-			app_version: version,
 			project_root: this.core.filesystem.rootDir,
 			db_host: dbHost,
 			db_name: dbName,
@@ -1560,11 +1558,9 @@ export class RoadmapServer {
 			started_at: this._startedAt.toISOString(),
 			mcp_protocol_version: "2024-11-05",
 		};
-		if (dbErrorMessage !== undefined) {
-			body.db_error = dbErrorMessage;
-		}
 
-		return Response.json(body, { status: 200 });
+		const status = dbStatus === "ok" ? 200 : 503;
+		return Response.json(body, { status });
 	}
 
 	// P446 AC-5: POST /smoke
@@ -1596,7 +1592,7 @@ export class RoadmapServer {
 
 		await step("initialize", { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "smoke", version: "0" } } });
 		await step("tools/list", { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
-		await step("tools/call", { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "mcp_project", arguments: { action: "list_actions" } } });
+		await step("tools/call mcp_project list_actions", { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "mcp_project", arguments: { action: "list_actions" } } });
 
 		const total_ms = Date.now() - t0;
 		const allOk = steps.every((s) => s.result === "ok");
@@ -4904,8 +4900,21 @@ export class RoadmapServer {
 				payload,
 			});
 
-			// requireOperator() above already audits to roadmap.operator_audit_log;
-			// no additional audit insert needed here.
+			await query(
+				`INSERT INTO roadmap.audit_log
+				    (entity_type, entity_id, action, changed_by, after_json)
+				 VALUES ('agency', $1, $2, $3, $4::jsonb)`,
+				[
+					agencyId,
+					action,
+					auth.outcome.operatorName ?? "operator",
+					JSON.stringify({
+						message_id: message.message_id,
+						sequence: String(message.sequence),
+						payload,
+					}),
+				],
+			);
 
 			return Response.json({
 				success: true,

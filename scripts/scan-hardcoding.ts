@@ -6,7 +6,6 @@ import { writeOutput, shouldFail } from "../src/tools/scanner/output.ts";
 import { createAllowlistTemplate } from "../src/tools/scanner/allowlist.ts";
 import fs from "fs/promises";
 import path from "path";
-import { cpus } from "os";
 
 const program = new Command();
 
@@ -31,7 +30,7 @@ program
   .option("--list-rules", "Print all loaded rules and exit")
   .option("--baseline <file>", "Compare against baseline JSONL; exit 0 if no NEW findings")
   .option("--emit-baseline <file>", "Write current findings to baseline file")
-  .option("--concurrency <n>", "File-walk parallelism", String(cpus().length))
+  .option("--concurrency <n>", "File-walk parallelism", String(require("os").cpus().length))
   .option("--include-binary", "Don't skip binary files", false)
   .option("--git-staged", "Scan only git staged files", false)
   .option("--git-changed", "Scan only files changed since main", false)

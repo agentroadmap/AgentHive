@@ -102,22 +102,28 @@ COMMENT ON FUNCTION roadmap.fn_liaison_next_sequence(TEXT) IS
     'Safe under concurrent writers — pg_advisory_xact_lock serialises increments.';
 
 -- ─── Ack function (idempotent) ───────────────────────────────────────────────
+-- NOTE: Returns TABLE so callers can use SELECT * and check rows.length > 0
+-- to confirm the target row exists. acked_at uses COALESCE for first-write-wins.
 
-CREATE OR REPLACE FUNCTION roadmap.fn_liaison_ack_message(
+DROP FUNCTION IF EXISTS roadmap.fn_liaison_ack_message(UUID, TEXT, TEXT);
+
+CREATE FUNCTION roadmap.fn_liaison_ack_message(
     p_message_id  UUID,
     p_outcome     TEXT,
     p_error       TEXT DEFAULT NULL
 )
-RETURNS VOID
-LANGUAGE plpgsql
+RETURNS TABLE(acked_at TIMESTAMPTZ, ack_outcome TEXT, ack_error TEXT)
+LANGUAGE sql
 AS $$
-BEGIN
     UPDATE roadmap.liaison_message
        SET acked_at    = COALESCE(acked_at, NOW()),
            ack_outcome = p_outcome,
            ack_error   = p_error
-     WHERE message_id = p_message_id;
-END;
+     WHERE message_id = p_message_id
+     RETURNING
+           roadmap.liaison_message.acked_at,
+           roadmap.liaison_message.ack_outcome,
+           roadmap.liaison_message.ack_error;
 $$;
 
 COMMENT ON FUNCTION roadmap.fn_liaison_ack_message(UUID, TEXT, TEXT) IS
